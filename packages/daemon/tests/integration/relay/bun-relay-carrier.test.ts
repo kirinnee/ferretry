@@ -997,6 +997,49 @@ describe('a carrier that survives a dropped rendezvous', () => {
     carrier.stop();
   });
 
+  it('should back off for minutes on a hosted connection ceiling, never redialling it within a minute', async () => {
+    // Arrange — the bottom of the jitter range, so every capacity wait is half its window.
+    const { carrier, clock, lines, socketAt, claimOn } = redialingCarrier({}, 0);
+    carrier.start();
+    socketAt(0).onopen?.(undefined);
+    socketAt(0).onmessage?.({
+      data: controlFrame({ t: 'error', code: 4432, reason: 'hosted relay per-daemon connection ceiling is reached' }),
+    });
+
+    // Act — the Worker explains and closes; the close itself carries no code, only the in-band words do.
+    socketAt(0).onclose?.({ code: 1006, reason: '' });
+
+    // Assert — minutes, not the immediate redial a dropped path gets, and a status that says what it is.
+    should(clock.delays.at(-1)).equal(60_000);
+    should(lines.at(-1)).match(
+      /refused: the relay's per-daemon or account connection ceiling is full .* redial attempt 1 in 60\.0s/u,
+    );
+    should(carrier.status().detail).match(/refused this daemon a connection slot/u);
+
+    // Act — a refusal by close code doubles the window; a path drop between refusals restarts the run.
+    clock.advance(60_000);
+    socketAt(1).onclose?.({ code: 4432, reason: 'hosted relay per-daemon connection ceiling is reached' });
+    should(clock.delays.at(-1)).equal(120_000);
+    clock.advance(120_000);
+    socketAt(2).onclose?.({ code: 1006, reason: '' });
+    clock.advance(clock.delays.at(-1) ?? 0);
+    socketAt(3).onclose?.({ code: 4432, reason: 'hosted relay per-daemon connection ceiling is reached' });
+    should(clock.delays.at(-1)).equal(60_000);
+    // One line per refusal, each a minute or more after the last: never the per-attempt flood.
+    should(lines.filter(line => line.includes('refused:'))).have.length(3);
+
+    // Act — a second refusal in the run, then the ceiling clears; the next refusal starts over.
+    clock.advance(60_000);
+    socketAt(4).onclose?.({ code: 4432, reason: 'hosted relay per-daemon connection ceiling is reached' });
+    should(clock.delays.at(-1)).equal(120_000);
+    clock.advance(120_000);
+    socketAt(5).onopen?.(undefined);
+    await claimOn(socketAt(5));
+    socketAt(5).onclose?.({ code: 4432, reason: 'hosted relay per-daemon connection ceiling is reached' });
+    should(clock.delays.at(-1)).equal(60_000);
+    carrier.stop();
+  });
+
   it('should report a transport error as a disconnect too', () => {
     // Arrange
     const { carrier, clock, lines, socketAt } = redialingCarrier();

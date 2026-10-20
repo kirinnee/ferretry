@@ -2,13 +2,16 @@ import { describe, it } from 'bun:test';
 import {
   admitHostedRelayConnection,
   advertiseHostedRelay,
+  auditHostedRelayReservations,
   configureHostedRelay,
   DEFAULT_HOSTED_RELAY_LIMITS,
   forgetHostedRelayDaemons,
   HOSTED_RELAY_CONFIG_VERSION,
+  HOSTED_RELAY_DAEMON_CEILING_REASON,
   HOSTED_RELAY_DAY_MILLISECONDS,
   HOSTED_RELAY_MINUTE_MILLISECONDS,
-  hostedRelayDayStart,
+  HOSTED_RELAY_RESERVATION_HANDOFF_GRACE_MILLISECONDS,
+  HOSTED_RELAY_RESERVATION_LEASE_MILLISECONDS,
   HostedRelayAdvertisementSchema,
   type HostedRelayConfiguration,
   HostedRelayConfigurationSchema,
@@ -19,8 +22,10 @@ import {
   HostedRelayGlobalMetricsSchema,
   type HostedRelayLimits,
   HostedRelayLimitsSchema,
+  type HostedRelayReservation,
   HostedRelayReservationSchema,
   hostedRelayConnection,
+  hostedRelayDayStart,
   initialHostedRelayConfiguration,
   initialHostedRelayDaemonMetrics,
   initialHostedRelayGlobalMetrics,
@@ -29,6 +34,7 @@ import {
   meterHostedRelayRequest,
   RELAY_CLOSE_CODES,
   reclaimableHostedRelayDaemon,
+  recountHostedRelayConnections,
   releaseHostedRelayConnection,
 } from '@ferretry/relay';
 import should from 'should';
@@ -548,5 +554,91 @@ describe('hosted relay live reservation checks', () => {
       ),
     ).deepEqual({ ok: true });
     should(inspectHostedRelayCapacity(config, base.global, base.daemon, at + 2)).deepEqual({ ok: true });
+  });
+});
+
+describe('hosted relay reservation audit', () => {
+  const reservation = (reservationId: string, owner: string, openedAt: number, confirmedAt?: number) =>
+    HostedRelayReservationSchema.parse({
+      reservationId,
+      daemonId: owner,
+      openedAt,
+      ...(confirmedAt === undefined ? {} : { confirmedAt }),
+    }) as HostedRelayReservation;
+  const old = at - HOSTED_RELAY_RESERVATION_LEASE_MILLISECONDS;
+  const young = at - HOSTED_RELAY_RESERVATION_HANDOFF_GRACE_MILLISECONDS + 1;
+
+  it('should reclaim every reservation whose lease nobody renewed, the 2026-10-19 lockout', () => {
+    const stuck = Array.from({ length: 16 }, (_, index) => reservation(`stuck_reservation_${index}`, daemonId, old));
+    const audit = auditHostedRelayReservations(stuck, null, at);
+    should(audit.reclaimed).have.length(16);
+    should(audit.heldGlobal).equal(0);
+    should(audit.heldByDaemon.get(daemonId)).equal(0);
+    should(audit.renewed).deepEqual([]);
+  });
+
+  it('should keep a reservation inside its lease when no rendezvous gave evidence', () => {
+    const renewedRecently = reservation('renewed_reservation_', daemonId, old, at - 1);
+    const fresh = reservation('fresh_reservation_01', otherDaemonId, at - 1);
+    const audit = auditHostedRelayReservations([renewedRecently, fresh], null, at);
+    should(audit.reclaimed).deepEqual([]);
+    should(audit.heldGlobal).equal(2);
+    should([...audit.heldByDaemon]).deepEqual([
+      [daemonId, 1],
+      [otherDaemonId, 1],
+    ]);
+  });
+
+  it('should trust the rendezvous for its own daemon and the lease for everyone else', () => {
+    const audit = auditHostedRelayReservations(
+      [
+        reservation('live_reservation_001', daemonId, old),
+        reservation('lost_reservation_001', daemonId, at - HOSTED_RELAY_RESERVATION_HANDOFF_GRACE_MILLISECONDS),
+        reservation('handoff_reservation1', daemonId, young),
+        reservation('other_live_reserv01', otherDaemonId, old, at - 1),
+        reservation('other_stale_reserv1', otherDaemonId, old),
+      ],
+      { daemonId, live: new Set(['live_reservation_001', 'other_live_reserv01']) },
+      at,
+    );
+    // The lost one is past the handoff grace and no socket carries it; the handoff one is still
+    // travelling from the Worker; another daemon's row is judged only on its own lease.
+    should(audit.reclaimed).deepEqual(['lost_reservation_001', 'other_stale_reserv1']);
+    should(audit.renewed.map(row => [row.reservationId, row.confirmedAt])).deepEqual([['live_reservation_001', at]]);
+    should(audit.heldGlobal).equal(3);
+    should(audit.heldByDaemon.get(daemonId)).equal(2);
+    should(audit.heldByDaemon.get(otherDaemonId)).equal(1);
+  });
+
+  it('should name a daemon with no rows at all as holding none, and never reclaim on a clock that stepped back', () => {
+    const empty = auditHostedRelayReservations([], { daemonId, live: new Set() }, at);
+    should(empty.heldByDaemon.get(daemonId)).equal(0);
+    const future = reservation('future_reservation01', otherDaemonId, at + 5_000, at + 5_000);
+    const audit = auditHostedRelayReservations(
+      [future],
+      { daemonId: otherDaemonId, live: new Set([future.reservationId]) },
+      at,
+    );
+    should(audit.reclaimed).deepEqual([]);
+    should(audit.renewed[0]?.confirmedAt).equal(at + 5_000);
+  });
+
+  it('should recount a counter without touching history, and leave an exact one identical', () => {
+    const base = admitted();
+    should(recountHostedRelayConnections(base.daemon, 1)).equal(base.daemon);
+    const healed = recountHostedRelayConnections({ ...base.daemon, concurrentConnections: 16 }, 0);
+    should(healed).match({ concurrentConnections: 0, peakConcurrentConnections: 1, acceptedConnections: 1 });
+  });
+
+  it('should refuse a full daemon with the reason callers recognise', () => {
+    const full = admitted(configuration({ maxConcurrentConnectionsPerDaemon: 1 }));
+    const refused = admitHostedRelayConnection(
+      configuration({ maxConcurrentConnectionsPerDaemon: 1 }),
+      full.global,
+      full.daemon,
+      daemonId,
+      at + 2,
+    );
+    should(refused.decision).match({ ok: false, reason: HOSTED_RELAY_DAEMON_CEILING_REASON });
   });
 });

@@ -13,7 +13,10 @@ import { z } from 'zod';
 import {
   admitHostedRelayConnection,
   advertiseHostedRelay,
+  auditHostedRelayReservations,
   configureHostedRelay,
+  forgetHostedRelayDaemons,
+  HOSTED_RELAY_DAY_MILLISECONDS,
   type HostedRelayConfiguration,
   HostedRelayConfigurationInputSchema,
   HostedRelayConfigurationSchema,
@@ -23,10 +26,9 @@ import {
   HostedRelayDecisionSchema,
   type HostedRelayGlobalMetrics,
   HostedRelayGlobalMetricsSchema,
+  type HostedRelayLiveEvidence,
   type HostedRelayReservation,
   HostedRelayReservationSchema,
-  forgetHostedRelayDaemons,
-  HOSTED_RELAY_DAY_MILLISECONDS,
   hostedRelayDayStart,
   initialHostedRelayConfiguration,
   initialHostedRelayGlobalMetrics,
@@ -34,6 +36,7 @@ import {
   meterHostedRelayRequest,
   RELAY_CLOSE_CODES,
   reclaimableHostedRelayDaemon,
+  recountHostedRelayConnections,
   releaseHostedRelayConnection,
 } from '../lib/index.ts';
 
@@ -46,6 +49,7 @@ const INTERNAL_RESERVE_PATH = '/internal/reserve';
 const INTERNAL_METER_PATH = '/internal/meter';
 const INTERNAL_RELEASE_PATH = '/internal/release';
 const INTERNAL_INSPECT_PATH = '/internal/inspect';
+const INTERNAL_RECONCILE_PATH = '/internal/reconcile';
 const CONFIGURATION_KEY = 'control:configuration';
 const GLOBAL_METRICS_KEY = 'metrics:global';
 const DAEMON_METRICS_PREFIX = 'metrics:daemon:';
@@ -103,6 +107,18 @@ const MeterRequestSchema = z.strictObject({
 });
 const ReleaseRequestSchema = z.strictObject({ reservationId: HostedRelayReservationSchema.shape.reservationId });
 const InspectRequestSchema = z.strictObject({ daemonId: DaemonIdSchema });
+/**
+ * What one rendezvous can see: the reservations its live sockets carry. Bounded well above any per-daemon
+ * ceiling the configuration can hold, so an honest report always fits and a hostile one cannot grow.
+ */
+const ReconcileRequestSchema = z.strictObject({
+  daemonId: DaemonIdSchema,
+  live: z.array(HostedRelayReservationSchema.shape.reservationId).max(1_024),
+});
+const ReconcileAnswerSchema = z.strictObject({
+  reclaimed: z.number().int().nonnegative(),
+  corrected: z.number().int().nonnegative(),
+});
 
 export interface HostedRelayControlStorageRead {
   get<T>(key: string): Promise<T | undefined>;
@@ -200,6 +216,44 @@ export async function releaseHostedRelayReservation(
   return false;
 }
 
+/**
+ * Tell the control object which reservations this rendezvous's live sockets carry, so it can renew
+ * those leases and reclaim this daemon's reservations no socket holds. Best effort: the answer, or
+ * null when the control object could not be asked. A lost report costs a renewal, never a slot — the
+ * lease outlasts many of them.
+ */
+export async function reconcileHostedRelayReservations(
+  namespace: HostedRelayControlNamespace,
+  daemonId: string,
+  live: readonly string[],
+): Promise<z.infer<typeof ReconcileAnswerSchema> | null> {
+  try {
+    const response = await hostedRelayControlStub(namespace).fetch(
+      new Request(`https://relay-control.invalid${INTERNAL_RECONCILE_PATH}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ daemonId, live }),
+      }),
+    );
+    if (!response.ok) return null;
+    const parsed = ReconcileAnswerSchema.safeParse(await response.json());
+    return parsed.success ? parsed.data : null;
+  } catch {
+    return null;
+  }
+}
+
+type Healed =
+  | {
+      readonly ok: true;
+      readonly value: {
+        readonly global: HostedRelayGlobalMetrics;
+        readonly reclaimed: number;
+        readonly corrected: number;
+      };
+    }
+  | { readonly ok: false; readonly reason: string };
+
 export class HostedRelayControlDurableObject {
   constructor(
     private readonly objectState: HostedRelayControlObjectState,
@@ -220,6 +274,7 @@ export class HostedRelayControlDurableObject {
     if (path === INTERNAL_METER_PATH) return this.meter(request);
     if (path === INTERNAL_RELEASE_PATH) return this.release(request);
     if (path === INTERNAL_INSPECT_PATH) return this.inspect(request);
+    if (path === INTERNAL_RECONCILE_PATH) return this.reconcile(request);
     return textResponse('not found', 404);
   }
 
@@ -290,12 +345,38 @@ export class HostedRelayControlDurableObject {
               value: { decision: internalDecision('relay reservation belongs to another daemon') },
             };
       }
-      const daemonResult = await this.daemonMetrics(transaction, input.daemonId);
+      let daemonResult = await this.daemonMetrics(transaction, input.daemonId);
       if (!daemonResult.ok) return daemonResult;
+      let global = loaded.value.global;
+
+      /**
+       * A CONNECTION CEILING IS ONLY REFUSED ON COUNTERS THE RESERVATIONS STILL PROVE.
+       *
+       * The counters are a cache of the reservation rows, and a cache that drifted — a socket the
+       * runtime lost without a close callback, a Worker that died between admission and handoff — read
+       * "full" for ever and locked a daemon out of the hosted relay for good (2026-10-19, `4432` on every
+       * dial). So before saying no, recount from the rows and reclaim any whose lease expired. This costs
+       * one listing, and only on an admission that was about to be refused.
+       */
+      const limits = loaded.value.configuration.limits;
+      if (
+        loaded.value.configuration.relayUrl !== null &&
+        ((daemonResult.value?.concurrentConnections ?? 0) >= limits.maxConcurrentConnectionsPerDaemon ||
+          global.concurrentConnections >= limits.maxConcurrentConnectionsGlobal)
+      ) {
+        const healed = await this.heal(transaction, global, null, input.daemonId, now);
+        if (healed.ok) {
+          global = healed.value.global;
+          daemonResult = await this.daemonMetrics(transaction, input.daemonId);
+          if (!daemonResult.ok) return daemonResult;
+        } else {
+          // Healing is a repair, never a gate: evidence it cannot read leaves the refusal standing.
+          console.error(`relay reservation audit failed: ${healed.reason}`);
+        }
+      }
 
       // A first-time daemon meeting a full row census gets one attempt to reclaim rows that finished
       // their accounting day, so the ceiling stays a ceiling instead of becoming permanent.
-      let global = loaded.value.global;
       if (daemonResult.value === null && global.trackedDaemons >= loaded.value.configuration.limits.maxTrackedDaemons) {
         const today = hostedRelayDayStart(now);
         const barren = await readReclaimBarren(transaction);
@@ -405,10 +486,20 @@ export class HostedRelayControlDurableObject {
       if (!parsedReservation.success) return { ok: false as const, reason: 'relay reservation state is damaged' };
       const daemonResult = await this.daemonMetrics(transaction, parsedReservation.data.daemonId);
       if (!daemonResult.ok) return daemonResult;
-      if (daemonResult.value === null) return { ok: false as const, reason: 'daemon metrics are lost' };
-      const transition = releaseHostedRelayConnection(loaded.value.global, daemonResult.value, now);
-      if (!transition.decision.ok) {
-        return { ok: false as const, reason: transition.decision.reason };
+      const transition =
+        daemonResult.value === null ? null : releaseHostedRelayConnection(loaded.value.global, daemonResult.value, now);
+      if (transition === null || !transition.decision.ok) {
+        /**
+         * The row says this socket held a slot and the counters disagree, or have no row to disagree in.
+         * Refusing here used to keep the reservation for ever — every retry refused the same way — so the
+         * one piece of evidence that could free the slot became the thing holding it. Delete it and
+         * recount instead: the reservations are the truth and the counters only a cache of them.
+         */
+        console.warn('relay release found counters that disagree with its reservation; recounting');
+        await transaction.delete(reservationKey);
+        const healed = await this.heal(transaction, loaded.value.global, null, parsedReservation.data.daemonId, now);
+        if (!healed.ok) return healed;
+        return { ok: true as const, value: { decision: { ok: true as const } } };
       }
       await transaction.put(GLOBAL_METRICS_KEY, transition.global);
       if (transition.daemon !== null) {
@@ -419,6 +510,82 @@ export class HostedRelayControlDurableObject {
     });
     if (!result.ok) return unavailable(result.reason);
     return jsonResponse(result.value.decision);
+  }
+
+  /** A rendezvous reporting the reservations its live sockets carry. See {@link auditHostedRelayReservations}. */
+  private async reconcile(request: Request): Promise<Response> {
+    const input = await parsedBody(request, ReconcileRequestSchema);
+    if (input === null) return jsonResponse({ error: 'invalid relay reconciliation' }, 400);
+    const now = this.runtime.now();
+    const result = await this.objectState.storage.transaction(async transaction => {
+      const loaded = await this.load(transaction);
+      if (!loaded.ok) return loaded;
+      if (!loaded.value.configured) return { ok: true as const, value: { reclaimed: 0, corrected: 0 } };
+      const evidence: HostedRelayLiveEvidence = { daemonId: input.daemonId, live: new Set(input.live) };
+      const healed = await this.heal(transaction, loaded.value.global, evidence, input.daemonId, now);
+      if (!healed.ok) return healed;
+      return { ok: true as const, value: { reclaimed: healed.value.reclaimed, corrected: healed.value.corrected } };
+    });
+    if (!result.ok) return unavailable(result.reason);
+    return jsonResponse(result.value);
+  }
+
+  /**
+   * Make the counters say what the reservation rows prove, reclaiming rows that belong to no socket.
+   *
+   * Every reservation is read — the global count is only exact if every row is counted — and one that
+   * will not parse stops the audit rather than being deleted, because deleting evidence nobody can read
+   * is how a live socket loses its slot. `focus` is always recounted even when it holds no rows, which
+   * is what repairs a counter that drifted with nothing left to reclaim. Each daemon row that holds a
+   * reservation is recounted too; a row whose counter drifted with no reservation at all is repaired
+   * the next time it is the focus, which is the next time anyone asks it for a connection.
+   */
+  private async heal(
+    transaction: HostedRelayControlStorageTransaction,
+    global: HostedRelayGlobalMetrics,
+    evidence: HostedRelayLiveEvidence | null,
+    focus: string,
+    now: number,
+  ): Promise<Healed> {
+    const reservations: HostedRelayReservation[] = [];
+    for (const [key, raw] of await listAll(transaction, RESERVATION_PREFIX)) {
+      const parsed = HostedRelayReservationSchema.safeParse(raw);
+      if (!parsed.success || key !== `${RESERVATION_PREFIX}${parsed.data.reservationId}`) {
+        return { ok: false, reason: 'relay reservation state is damaged' };
+      }
+      reservations.push(parsed.data);
+    }
+    const audit = auditHostedRelayReservations(reservations, evidence, now);
+    for (const reservationId of audit.reclaimed) await transaction.delete(`${RESERVATION_PREFIX}${reservationId}`);
+    for (const reservation of audit.renewed) {
+      await transaction.put(`${RESERVATION_PREFIX}${reservation.reservationId}`, reservation);
+    }
+
+    let corrected = 0;
+    const held = new Map(audit.heldByDaemon);
+    if (!held.has(focus)) held.set(focus, 0);
+    for (const [daemonId, count] of held) {
+      const row = await this.daemonMetrics(transaction, daemonId);
+      if (!row.ok) return row;
+      if (row.value === null) continue;
+      const recounted = recountHostedRelayConnections(row.value, count);
+      if (recounted === row.value) continue;
+      await transaction.put(daemonKey(daemonId), recounted);
+      corrected += 1;
+    }
+    const recountedGlobal = recountHostedRelayConnections(global, audit.heldGlobal);
+    if (recountedGlobal !== global) {
+      await transaction.put(GLOBAL_METRICS_KEY, recountedGlobal);
+      corrected += 1;
+    }
+    if (audit.reclaimed.length !== 0 || corrected !== 0) {
+      // Said out loud: a heal that changed anything means a release was lost somewhere, and an operator
+      // should be able to see how often. Counts only — the fingerprint is not this log's business.
+      console.warn(
+        `relay reservations healed: reclaimed ${audit.reclaimed.length} unheld reservation(s), corrected ${corrected} counter(s)`,
+      );
+    }
+    return { ok: true, value: { global: recountedGlobal, reclaimed: audit.reclaimed.length, corrected } };
   }
 
   private async operatorMetrics(): Promise<Response> {

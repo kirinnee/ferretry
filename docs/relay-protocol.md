@@ -774,13 +774,50 @@ relay. The meter receives a daemon fingerprint and a number of bytes — never a
 handshake, device credential, command or result.
 
 Reservation identifiers make both admission and release idempotent, and each operation retries once
-when its answer is missing or unusable. There is deliberately no clock-only reservation reaper: the
-control object cannot prove that an old reservation no longer belongs to a hibernating live socket,
-so expiring one would make the cap undercount real traffic. That leaves a narrow distributed-systems
-residual. If the stateless Worker terminates after admission commits but before the rendezvous owns
-the socket, or if both reserve replies and both compensating release attempts fail to arrive, one
-slot can remain stranded. It relays no bytes but reduces available connection capacity. This design
-discloses that residual rather than claiming exact recovery or inventing an unsafe expiry rule.
+when its answer is missing or unusable.
+
+#### Reservations are leases, and the counters are derived from them
+
+**The concurrency counters are a cache of the reservation rows, never the other way round.** A counter
+that only moved on admit and release drifted for good the first time a release was lost, and on
+2026-10-19 that locked a daemon out of the hosted relay permanently: Cloudflare reset the rendezvous
+object, its sockets went with it (`1006`, no close frame), no `webSocketClose` was ever delivered for
+them, and their reservations stayed held. After a few such resets the daemon's row read 16 of 16, and
+every dial for the rest of the day — about fourteen thousand, across daemon restarts — was refused
+`4432` before it reached a rendezvous that could have said nothing was there. So:
+
+- **The rendezvous's socket list is the evidence.** The runtime lists every socket a rendezvous
+  accepted, hibernating ones included, and drops the ones it lost; each socket carries its reservation
+  in its attachment. On its heartbeat sweep, at most once every **60 seconds**, a hosted rendezvous
+  reports the reservations its live sockets carry (`/internal/reconcile`). The control object stamps
+  those `confirmedAt` — a **renewal** — and reclaims at once any of that daemon's reservations no socket
+  carries, except one younger than the **30-second handoff grace**: the Worker reserves before the
+  rendezvous accepts, so a fresh reservation may not be in any report yet. A lost report costs a
+  renewal, never a slot.
+- **An unrenewed reservation expires.** A reservation whose last renewal (or, before any, its opening)
+  is **10 minutes** old is reclaimed without anyone's word. That is ten renewal intervals and five
+  control-outage graces, so neither a missed report nor a tolerated outage can expire a reservation a
+  live socket holds, and it covers the case with nobody left to report: the rendezvous lost every
+  socket and has no alarm, or the stateless Worker died between admission and handoff — the residual
+  this section used to disclose as unrecoverable.
+- **Recount before refusing.** An admission that a connection ceiling would refuse first audits every
+  reservation: expired ones are reclaimed, then the daemon's counter and the global one are SET to the
+  number of reservations that remain. It costs one listing, only on an admission that was about to be
+  refused. A report from a rendezvous recounts the same way. A release whose counters disagree with
+  its reservation — zero, or a daemon row that is gone — deletes the reservation and recounts, instead
+  of refusing and keeping the reservation for ever, which made the one piece of evidence that could
+  free the slot the thing that held it.
+- **It fails closed on evidence it cannot read.** A reservation that will not parse stops the audit
+  and nothing is deleted; the refusal it would have repaired stands. Audits change only
+  `concurrentConnections`; peaks and cumulative totals are history and are never rewritten. Any audit
+  that reclaimed or corrected something logs the counts (never a fingerprint), because it means a
+  release was lost somewhere.
+
+A stored lockout clears itself on the first admission after this rule deploys: the stranded rows are
+older than the lease, so that admission reclaims them, recounts, and is served. The daemon, for its
+part, treats `4432` as an answer rather than a dead path: it waits one to two minutes before redialling, and the window
+doubles to ten minutes over a run of refusals (equal jitter, so never less than a minute) instead of
+redialling every few seconds, saying so in one line per attempt.
 
 Initial limits are deliberately configuration, not protocol constants:
 
@@ -871,10 +908,11 @@ squeeze into a permanent lockout, which is why release-on-every-close and recove
 treated as correctness, not tidiness.
 
 The normal socket lifecycle does release every close, error, refusal and sweep even when a peer
-effect throws, and a partial kill-switch sweep attempts every socket before reporting failure. The
-commit-to-handoff residual described above remains the exception: it can strand capacity without a
-live attacker socket, which is why this section does not promise that every possible distributed
-failure is transient.
+effect throws, and a partial kill-switch sweep attempts every socket before reporting failure. A slot
+stranded anyway — a socket the runtime lost without a close, a Worker that died between admission and
+handoff — is reclaimed by the rule in "Reservations are leases" above: at once when the rendezvous
+reports no socket holds it, and within ten minutes when nothing is left to report. That bound is what
+keeps every such failure transient, and it is the rule that was missing on 2026-10-19.
 
 What cannot be done about it is the point: **the relay cannot tell abuse from use.** Distinguishing
 them means reading what is being carried, and it structurally cannot. Enrolment, quotas per identity

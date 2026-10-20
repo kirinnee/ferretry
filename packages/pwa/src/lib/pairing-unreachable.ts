@@ -68,8 +68,15 @@ const relaySentence = (leg: PairingLegFailure): string => {
       return `Ferretry's relay (${host}) answered, but the machine is not connected to it right now. Check that Ferretry is running on the machine and that it is online.`;
     case RELAY_CLOSE_CODES.hostedDisabled:
       return `Ferretry's relay (${host}) is switched off right now, so there was nothing to fall back to.`;
-    case RELAY_CLOSE_CODES.rendezvousBusy:
     case RELAY_CLOSE_CODES.hostedCapacity:
+      // Not "busy": a full connection count is the relay's own bookkeeping, and on 2026-10-19 it was a
+      // count that leaked and never came down, so "wait a minute" sent the owner round in circles.
+      return (
+        `Ferretry's relay (${host}) refused the connection because its connection limit for this machine, or for the relay as a whole, is full. ` +
+        "That is a count the relay keeps, not the machine being busy. If this machine does not have many devices connected, the relay's count is wrong; " +
+        'it repairs that by itself within about ten minutes, and the machine reconnects by itself too, so try again then.'
+      );
+    case RELAY_CLOSE_CODES.rendezvousBusy:
     case RELAY_CLOSE_CODES.hostedBandwidth:
       return `Ferretry's relay (${host}) is busy right now. Wait a minute and try again.`;
     case RELAY_CLOSE_CODES.heartbeatTimeout:
