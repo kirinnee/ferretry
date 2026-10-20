@@ -72,7 +72,8 @@
         "tests/integration/fixtures/sessions-list-scene.tsx",
         "scripts/fy-render-shell/bootstrap.ts",
         "scripts/fy-render-shell/mermaid-entry.ts",
-        "scripts/fy-render-shell/lottie-entry.ts"
+        "scripts/fy-render-shell/lottie-entry.ts",
+        "scripts/fy-render-shell/html-bootstrap.ts"
       ],
       "project": [
         "src/**/*.{ts,tsx}",

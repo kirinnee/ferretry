@@ -4,6 +4,7 @@ import type { ReactTestInstance, ReactTestRenderer } from 'react-test-renderer';
 import should from 'should';
 import { FyRenderBlock } from '../../src/components/fy-render-block.tsx';
 import { FyRenderFragment } from '../../src/components/fy-render-fragment.tsx';
+import { type FyRenderHtmlPaint, FyRenderHtmlFrame } from '../../src/components/fy-render-html-frame.tsx';
 import { FyRenderMedia } from '../../src/components/fy-render-media.tsx';
 import { FyRenderSandbox, type FyRenderSandboxFailure } from '../../src/components/fy-render-sandbox.tsx';
 import {
@@ -153,6 +154,18 @@ const sandboxProps = (tree: ReactTestRenderer) =>
     readonly onRendered: () => void;
   };
 
+const htmlProps = (tree: ReactTestRenderer) =>
+  tree.root.findByType(FyRenderHtmlFrame).props as {
+    readonly fullscreen: boolean;
+    readonly paint: FyRenderHtmlPaint;
+    readonly ready: boolean;
+    readonly title: string;
+    readonly onEscape: () => void;
+    readonly onFailed: (failure: FyRenderSandboxFailure) => void;
+    readonly onHeight?: (height: number) => void;
+    readonly onRendered: () => void;
+  };
+
 const fragmentProps = (tree: ReactTestRenderer) =>
   tree.root.findByType(FyRenderFragment).props as {
     readonly source: string;
@@ -258,12 +271,9 @@ describe('FyRenderBlock execution surface', () => {
     }
   });
 
-  test('should render an HTML payload as a static fragment, never a frame, and never as a script here', () => {
-    // Arrange — a payload that would be unmistakable if it were ever live here.
-    const tree = render(<FyRenderBlock block={htmlBlock('<script>globalThis.pwned = true</script>')} />);
-
-    // Act — open the source.
-    run(() => tool(tree, 'HTML source').props.onClick());
+  test('should render a script-free HTML payload as a static fragment, never a frame', () => {
+    // Arrange
+    const tree = render(<FyRenderBlock block={htmlBlock('<table><tr><td>a</td></tr></table>')} />);
 
     // Assert — no frame at all, and no sink in the tree React renders: the fragment is sanitized
     // into a closed shadow root by `FyRenderFragment` (proven in its own file).
@@ -271,7 +281,21 @@ describe('FyRenderBlock execution surface', () => {
     for (const forbidden of ['iframe', 'script', 'object', 'embed', 'canvas'] as const)
       should(count(tree, forbidden)).equal(0);
     should(tree.root.findAll(node => node.props?.dangerouslySetInnerHTML !== undefined).length).equal(0);
-    // The payload reaches this document's React tree only as escaped text in the source panel.
+  });
+
+  test('should run a scripted HTML payload only inside its sandboxed frame, never in this document', () => {
+    // Arrange — a payload that would be unmistakable if it were ever live here.
+    const tree = render(<FyRenderBlock block={htmlBlock('<script>globalThis.pwned = true</script>')} />);
+
+    // Act — open the source.
+    run(() => tool(tree, 'HTML source').props.onClick());
+
+    // Assert — the ONLY frame is the opaque-origin one, and no other sink exists.
+    should(count(tree, 'iframe')).equal(1);
+    should(tree.root.findByType('iframe').props.sandbox).equal('allow-scripts');
+    for (const forbidden of ['script', 'object', 'embed', 'canvas'] as const) should(count(tree, forbidden)).equal(0);
+    should(tree.root.findAll(node => node.props?.dangerouslySetInnerHTML !== undefined).length).equal(0);
+    // The payload reaches this document only as escaped text in the source panel.
     should(textOf(tree.root)).containEql('<script>globalThis.pwned = true</script>');
   });
 
@@ -787,6 +811,180 @@ describe('FyRenderBlock corner tools', () => {
     await wait(500);
     run(() => figure().props.onPointerUp());
     should(attribute(tree, 'data-fy-render-tools')).equal('hover');
+  });
+});
+
+describe('FyRenderBlock interactive html', () => {
+  const COUNTER = '<button id="b">0</button><script>b.onclick = () => b.textContent++</script>';
+
+  /** The iframe's half of a ref, enough for the frame's mount effect to run against. */
+  const frameNode = () => ({
+    addEventListener: (): void => {},
+    contentWindow: { postMessage: (): void => {} },
+    removeEventListener: (): void => {},
+    set src(_value: string) {},
+  });
+
+  const observed = (element: ReactElement, host: unknown = hostNode()): ReactTestRenderer => {
+    const tree = mountTree(element, { createNodeMock: node => (node.type === 'iframe' ? frameNode() : host) });
+    mounted.push(tree);
+    return tree;
+  };
+
+  test('should run a scripted page at once, marked, named, painted and revealed once drawn', () => {
+    // Act
+    const tree = render(<FyRenderBlock block={htmlBlock(COUNTER)} />);
+
+    // Assert — the frame, not a fragment, with a quiet marker saying it runs.
+    should(count(tree, FyRenderFragment)).equal(0);
+    should(marked(tree, { 'data-fy-render-marker': 'true' })).equal(1);
+    should(textOf(tree.root)).containEql('interactive');
+    const frame = htmlProps(tree);
+    should(frame.title).equal('Interactive illustration: A counter widget');
+    should(frame.ready).be.false();
+    should(frame.paint.scheme).equal('dark');
+    should(tools(tree)).eql(['HTML source', 'Fullscreen']);
+
+    // Act — the page reports its first draw.
+    run(() => frame.onRendered());
+
+    // Assert
+    should(htmlProps(tree).ready).be.true();
+  });
+
+  test('should unload a page scrolled far away, hold its place at its last height, and start it again on return', () => {
+    // Arrange
+    const tree = observed(<FyRenderBlock block={htmlBlock(COUNTER)} />);
+    viewport(true);
+    run(() => htmlProps(tree).onHeight?.(320));
+    run(() => htmlProps(tree).onRendered());
+
+    // Act — scrolled well away.
+    viewport(false);
+
+    // Assert — no frame, a plane of the same height.
+    should(count(tree, 'iframe')).equal(0);
+    const parked = tree.root.findByProps({ 'data-fy-render-parked': 'true' });
+    should(parked.props.style).eql({ height: '320px' });
+
+    // Act — back on screen.
+    viewport(true);
+
+    // Assert — a fresh frame, not yet drawn.
+    should(count(tree, 'iframe')).equal(1);
+    should(htmlProps(tree).ready).be.false();
+  });
+
+  test('should hold a parked page’s plane at the default before it ever reported a height', () => {
+    // Arrange
+    const tree = observed(<FyRenderBlock block={htmlBlock(COUNTER)} />);
+    viewport(true);
+
+    // Act
+    viewport(false);
+
+    // Assert
+    should(tree.root.findByProps({ 'data-fy-render-parked': 'true' }).props.style).be.undefined();
+  });
+
+  test('should keep a page running in fullscreen even when its row is off screen, and close it on Escape from inside', () => {
+    // Arrange
+    const tree = observed(<FyRenderBlock block={htmlBlock(COUNTER)} />);
+    viewport(true);
+    run(() => tool(tree, 'Fullscreen').props.onClick());
+
+    // Act
+    viewport(false);
+
+    // Assert
+    should(count(tree, 'iframe')).equal(1);
+    should(htmlProps(tree).fullscreen).be.true();
+
+    // Act — Escape inside the frame, forwarded by the shell.
+    run(() => htmlProps(tree).onEscape());
+
+    // Assert — out of fullscreen, and off screen, so parked.
+    should(marked(tree, { role: 'dialog' })).equal(0);
+    should(count(tree, 'iframe')).equal(0);
+  });
+
+  for (const [kind, sentence] of [
+    ['unresponsive', 'This interactive illustration stopped because it stopped responding.'],
+    ['lifetime', 'This interactive illustration stopped after ten minutes.'],
+  ] as const)
+    test(`should keep a page stopped as ${kind} in its place with one muted line, and run it again`, () => {
+      // Arrange
+      const tree = render(<FyRenderBlock block={htmlBlock(COUNTER)} />);
+
+      // Act
+      run(() => htmlProps(tree).onFailed({ detail: null, kind }));
+
+      // Assert — not a failure: no code block, no tools, no frame.
+      should(textOf(tree.root)).containEql(sentence);
+      should(count(tree, 'pre')).equal(0);
+      should(count(tree, 'iframe')).equal(0);
+      should(textOf(quietAction(tree))).containEql('Run again');
+
+      // Act
+      run(() => quietAction(tree).props.onClick());
+
+      // Assert
+      should(count(tree, 'iframe')).equal(1);
+    });
+
+  test('should fall back to the code block when the page navigates away', () => {
+    // Arrange
+    const tree = render(<FyRenderBlock block={htmlBlock(COUNTER)} />);
+
+    // Act
+    run(() => htmlProps(tree).onFailed({ detail: null, kind: 'navigation' }));
+
+    // Assert
+    should(attribute(tree, 'data-fy-render-failure')).equal('navigation');
+    should(count(tree, 'iframe')).equal(0);
+  });
+
+  test('should paint a page with the first painted background and the column colour and font, and follow the theme', async () => {
+    // Arrange — the message column sits on a painted surface; the block's own host is unpainted.
+    const surface = document.createElement('div');
+    surface.style.backgroundColor = 'rgb(1, 2, 3)';
+    const host = document.createElement('div');
+    host.style.color = 'rgb(4, 5, 6)';
+    host.style.fontFamily = 'Inter';
+    surface.appendChild(host);
+    document.body.appendChild(surface);
+    const tree = observed(<FyRenderBlock block={htmlBlock(COUNTER)} />, host);
+
+    // Act
+    viewport(true);
+
+    // Assert
+    should(htmlProps(tree).paint).eql({
+      background: 'rgb(1, 2, 3)',
+      color: 'rgb(4, 5, 6)',
+      font: 'Inter',
+      scheme: 'dark',
+    });
+
+    // Act — the reader switches to a light theme while the page runs.
+    run(() => document.documentElement.setAttribute('data-theme', 'studio-light'));
+    await wait();
+
+    // Assert — repainted, not remounted.
+    should(htmlProps(tree).paint.scheme).equal('light');
+    should(count(tree, 'iframe')).equal(1);
+    surface.remove();
+  });
+
+  test('should hand the frame no paint for a node it cannot measure', () => {
+    // Arrange
+    const tree = observed(<FyRenderBlock block={htmlBlock(COUNTER)} />);
+
+    // Act
+    viewport(true);
+
+    // Assert
+    should(htmlProps(tree).paint).eql({ background: '', color: '', font: '', scheme: 'dark' });
   });
 });
 

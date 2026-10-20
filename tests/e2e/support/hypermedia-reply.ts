@@ -4,8 +4,9 @@
  * agent would make them and dropped where the fake harness copies them into the session's media
  * folder (`scripts/test/fake-claude-tui.sh`).
  *
- * The `html` fragment also carries payloads that would set `window.__fyPwned` if anything in it ever
- * ran; the journey asserts it never does.
+ * The static `html` fragment carries no script, so it stays a fragment in the page. The INTERACTIVE one
+ * — a slider and a toggle — runs in its own opaque frame, and also tries to reach the app
+ * (`parent.__fyPwned`); the journey asserts the app's window never hears of it.
  */
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -14,15 +15,43 @@ const F = '```';
 const fence = (type: string, alt: string, body: string, src?: string): string =>
   `${F}fy-render\ntype: ${type}\nalt: ${alt}\n${src === undefined ? '' : `src: ${src}\n`}---\n${body}\n${F}`;
 
-/** The forms, in the order they appear, with the selector that proves each one rendered. */
+/**
+ * The forms, in the order they appear: the block that holds each one, and the selector that proves it
+ * rendered. Two are `html` — a static fragment and an interactive page — told apart by presentation.
+ */
 export const HYPERMEDIA_FORMS = [
-  { form: 'mermaid', rendered: 'img[data-fy-render-diagram="true"]' },
-  { form: 'svg', rendered: '[data-fy-render-type="svg"] img' },
-  { form: 'html', rendered: '[data-fy-render-fragment="true"]' },
-  { form: 'image', rendered: '[data-fy-render-type="image"] img[src^="blob:"]' },
-  { form: 'video', rendered: '[data-fy-render-type="video"] video[src^="blob:"]' },
-  { form: 'audio', rendered: '[data-fy-render-type="audio"] audio[src^="blob:"]' },
-  { form: 'pdf', rendered: '[data-fy-render-type="pdf"] [data-fy-render-row="true"]' },
+  { block: '[data-fy-render-type="mermaid"]', form: 'mermaid', rendered: 'img[data-fy-render-diagram="true"]' },
+  { block: '[data-fy-render-type="svg"]', form: 'svg', rendered: '[data-fy-render-type="svg"] img' },
+  {
+    block: '[data-fy-render-presentation="fragment"]',
+    form: 'html',
+    rendered: '[data-fy-render-fragment="true"]',
+  },
+  {
+    block: '[data-fy-render-presentation="interactive"]',
+    form: 'interactive',
+    rendered: '[data-fy-render-presentation="interactive"] iframe[data-fy-render-ready="true"]',
+  },
+  {
+    block: '[data-fy-render-type="image"]',
+    form: 'image',
+    rendered: '[data-fy-render-type="image"] img[src^="blob:"]',
+  },
+  {
+    block: '[data-fy-render-type="video"]',
+    form: 'video',
+    rendered: '[data-fy-render-type="video"] video[src^="blob:"]',
+  },
+  {
+    block: '[data-fy-render-type="audio"]',
+    form: 'audio',
+    rendered: '[data-fy-render-type="audio"] audio[src^="blob:"]',
+  },
+  {
+    block: '[data-fy-render-type="pdf"]',
+    form: 'pdf',
+    rendered: '[data-fy-render-type="pdf"] [data-fy-render-row="true"]',
+  },
 ] as const;
 
 const REPLY = [
@@ -57,8 +86,25 @@ const REPLY = [
       '<tbody><tr><td>Mermaid, Lottie</td><td>sandbox frame, shown inline</td></tr>',
       '<tr><td>HTML</td><td>static fragment, no script</td></tr></tbody></table>',
       '<details><summary>Why no script?</summary><p>A fragment is an explanation, not an app.</p></details>',
-      '<img src="x" onerror="window.__fyPwned = \'onerror\'" alt="">',
-      "<script>window.__fyPwned = 'script'</script>",
+    ].join(''),
+  ),
+  '',
+  'Drag it to see how wall time changes:',
+  '',
+  fence(
+    'html',
+    'An interactive estimate of wall time against parallel agents',
+    [
+      '<style>body{margin:0}.row{display:flex;gap:12px;align-items:center;flex-wrap:wrap}input[type=range]{flex:1 1 180px}.bar{height:12px;border-radius:6px;background:#2a9d8f}.track{flex:1 1 100%;background:rgba(127,127,127,.2);border-radius:6px}</style>',
+      '<div class="row"><label for="n">Parallel agents</label><input id="n" type="range" min="1" max="16" value="6"><output id="o">6</output>',
+      '<label><input id="c" type="checkbox"> include review</label>',
+      '<div class="track"><div id="bar" class="bar" style="width:37%"></div></div><p id="t" style="margin:0">Estimated wall time: 18 min</p></div>',
+      '<script>',
+      'const n = document.getElementById("n"), c = document.getElementById("c"), o = document.getElementById("o"), bar = document.getElementById("bar"), t = document.getElementById("t");',
+      'const draw = () => { const v = +n.value; o.textContent = v; bar.style.width = (v / 16 * 100) + "%"; t.textContent = "Estimated wall time: " + Math.round(90 / Math.sqrt(v) * 0.8 + (c.checked ? 6 : 0)) + " min"; };',
+      'n.oninput = draw; c.onchange = draw; draw();',
+      "try { parent.__fyPwned = 'parent'; } catch (e) {}",
+      '</script>',
     ].join(''),
   ),
   '',

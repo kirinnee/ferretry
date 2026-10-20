@@ -8,7 +8,8 @@
  * three things are measured rather than assumed:
  *
  *   - NOTHING RUNS: no payload in the corpus sets `window.__fyPwned`, before or after a reader clicks
- *     the links and the submit button.
+ *     the links and the submit button. (The corpus carries no `<script>` and no `on…` handler: either
+ *     one routes a block to the interactive frame, proven in `fy-render-html.security.test.ts`.)
  *   - NOTHING LOADS: the server's ledger sees no `/beacon?…` request — not from an image, a style,
  *     an import, an object, a frame, a refresh, a form, a link or a click.
  *   - NOTHING ESCAPES: the fragment's own `body`/`#outside` rules leave the host page's styles alone,

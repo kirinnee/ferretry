@@ -184,16 +184,21 @@ export const isFyRenderMediaBlock = (block: FyRenderBlock): block is FyRenderMed
  * `visual` blocks reach an `<img>` directly. `sandbox` blocks are interpreted by
  * a trusted library inside the opaque sandbox frame — Mermaid compiles to an SVG
  * that then reaches the same `<img>` sink, Lottie plays live inside the frame.
- * `fragment` is `html`: static markup, sanitized and rendered in a closed shadow
- * root, where nothing an author wrote runs. `media` is any block with a `src:` —
- * its bytes are read or fetched once the block is near.
+ * `fragment` is `html` WITHOUT script: static markup, sanitized and rendered in
+ * a closed shadow root, where nothing an author wrote runs. `interactive` is `html`
+ * WITH script — any `<script>` or `on…=` handler, found before anything is
+ * sanitized — and runs in its own opaque-origin frame on its own static shell
+ * (`fy-render-html-frame.tsx`). `media` is any block with a `src:` — its bytes
+ * are read or fetched once the block is near.
  *
  * Decided by the BLOCK rather than the type, because `image` is two things: an
  * inline base64 payload that is admitted at parse time, and a `src:` whose
  * bytes do not exist yet. The switch is exhaustive on purpose: a new type is a
  * compile error here rather than a silent fallthrough into the last branch.
  */
-export function fyRenderPresentation(block: FyRenderBlock): 'visual' | 'sandbox' | 'fragment' | 'media' {
+export function fyRenderPresentation(
+  block: FyRenderBlock,
+): 'visual' | 'sandbox' | 'fragment' | 'interactive' | 'media' {
   if (isFyRenderMediaBlock(block)) return 'media';
   switch (block.type) {
     case 'svg':
@@ -203,9 +208,24 @@ export function fyRenderPresentation(block: FyRenderBlock): 'visual' | 'sandbox'
     case 'lottie':
       return 'sandbox';
     case 'html':
-      return 'fragment';
+      return fyRenderHtmlRunsScript(block.payload) ? 'interactive' : 'fragment';
   }
 }
+
+/** An element with an `on…` attribute: `<b onclick=…>`, `<svg/onload=…>`, in any case. */
+const HANDLER_ATTRIBUTE = /<[a-z][^>]*[\s/]on[a-z]+\s*=/iu;
+
+/**
+ * WHETHER AN `html` BLOCK ASKS TO RUN, decided on the raw bytes before any sanitizer sees them.
+ *
+ * This is a ROUTE, not a gate: both answers are safe. A fragment that only looks static is still
+ * sanitized and every handler stripped; one that only looks scripted runs in the opaque frame, which
+ * is where author code is allowed to run anyway. So the test errs towards "runs" — a `<script` or a
+ * handler-shaped attribute anywhere, comments and attribute values included — and never needs to
+ * parse HTML to be right about safety.
+ */
+export const fyRenderHtmlRunsScript = (payload: string): boolean =>
+  /<script[\s>/]/iu.test(payload) || HANDLER_ATTRIBUTE.test(payload);
 
 const UTF8 = new TextEncoder();
 const HEADER_LINE = /^([a-z]+): (.*)$/u;
@@ -1354,7 +1374,23 @@ export type FyRenderSandboxMessage =
   | { readonly kind: 'mermaid-svg'; readonly svg: string; readonly theme: FyRenderSandboxTheme }
   | { readonly kind: 'rendered'; readonly width: number; readonly height: number }
   | { readonly kind: 'playing'; readonly playing: boolean }
-  | { readonly kind: 'error'; readonly message: string; readonly class: FyRenderSandboxErrorClass };
+  | { readonly kind: 'error'; readonly message: string; readonly class: FyRenderSandboxErrorClass }
+  /**
+   * The `html` shell's two messages. `height` is the page's own scroll height,
+   * which the parent clamps — author code can make it say anything within the
+   * dimension bound, so it is a layout hint and never a decision. `escape` is a
+   * keydown forwarded from inside the frame, because a separate document's keys
+   * never reach the app's Escape listener and a reader in fullscreen must be
+   * able to leave.
+   */
+  | { readonly kind: 'height'; readonly height: number }
+  | { readonly kind: 'escape' }
+  /**
+   * The `html` shell's heartbeat, once a second from the bootstrap's own timer. A page that holds the
+   * thread stops it, and the parent then stops the page — a guard against a runaway loop, not a CPU
+   * quota: author code shares the realm and could keep beating while it does something expensive.
+   */
+  | { readonly kind: 'beat' };
 
 /** Which way the shell was told to paint, echoed back on the compiled diagram. */
 export type FyRenderSandboxTheme = 'dark' | 'light';
@@ -1425,6 +1461,15 @@ export function parseFyRenderSandboxMessage(value: unknown): FyRenderSandboxMess
       if (width === null || height === null) return null;
       return { height, kind: 'rendered', width };
     }
+    case 'height': {
+      if (!hasExactKeys(message, ['kind', 'height'])) return null;
+      const height = boundedDimension(message.height);
+      return height === null ? null : { height, kind: 'height' };
+    }
+    case 'escape':
+      return hasExactKeys(message, ['kind']) ? { kind: 'escape' } : null;
+    case 'beat':
+      return hasExactKeys(message, ['kind']) ? { kind: 'beat' } : null;
     case 'playing': {
       if (!hasExactKeys(message, ['kind', 'playing'])) return null;
       if (typeof message.playing !== 'boolean') return null;

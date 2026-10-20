@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { afterEach, describe, expect, test } from 'bun:test';
 import { Composer } from '../../src/components/composer.tsx';
 import { Transcript, withAgentName } from '../../src/components/transcript.tsx';
 import { continueList, insideCodeBlock, toggleWrap } from '../../src/lib/composer-editing.ts';
@@ -8,7 +8,20 @@ import { LiveMarkdownEditor } from '../../src/components/live-markdown-editor.ts
 import { writeMdComposePref } from '../../src/lib/md-compose.ts';
 import { hiddenFromTranscript, type TranscriptEntry } from '../../src/lib/session-screens.ts';
 import '../support/dom.ts';
-import { render, run, runAsync } from '../support/react.ts';
+import { render as mountTree, run, runAsync } from '../support/react.ts';
+
+// Every tree this file mounts is unmounted after its test. A Transcript left mounted keeps the shared
+// transcript-hold gate subscribed, so a later file's unreleased pointerdown latches it and freezes every
+// Transcript that file renders.
+const mounted: ReturnType<typeof mountTree>[] = [];
+const render = (...args: Parameters<typeof mountTree>): ReturnType<typeof mountTree> => {
+  const view = mountTree(...args);
+  mounted.push(view);
+  return view;
+};
+afterEach(() => {
+  for (const view of mounted.splice(0)) run(() => view.unmount());
+});
 
 describe('continueList', () => {
   test('continues bullets, numbers and checklists, keeping the indent', () => {

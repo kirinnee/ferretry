@@ -414,7 +414,14 @@ const withStubBuilder = async (
 ): Promise<void> => {
   const directory = await mkdtemp(join(tmpdir(), 'fy-render-stub-'));
   const stub = join(directory, 'stub-builder.ts');
-  const names = ['fy-render-sandbox.html', 'fy-render-mermaid.js', 'fy-render-lottie.js', 'app.css', 'app.js'];
+  const names = [
+    'fy-render-sandbox.html',
+    'fy-render-mermaid.js',
+    'fy-render-lottie.js',
+    'fy-render-html.html',
+    'app.css',
+    'app.js',
+  ];
   await writeFile(
     stub,
     `import { writeFile } from 'node:fs/promises';
@@ -446,6 +453,7 @@ const GOOD_MANIFEST = JSON.stringify({
   appCss: `${OUT}/app.css`,
   appJs: `${OUT}/app.js`,
   directory: OUT,
+  html: `${OUT}/fy-render-html.html`,
   lottie: `${OUT}/fy-render-lottie.js`,
   mermaid: `${OUT}/fy-render-mermaid.js`,
   shell: `${OUT}/fy-render-sandbox.html`,

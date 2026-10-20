@@ -221,6 +221,19 @@
   opacity: 1;
 }
 
+/* THE "INTERACTIVE" MARKER: one muted line above a page that runs, so a reader can tell it from a
+   picture. In the flow rather than over the page, because over it would sit on the page's own
+   controls. The app's smallest type, the softest ink. */
+.fy-render-marker {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 2px;
+  color: var(--fg-soft);
+  font-size: var(--text-xs, 11px);
+  letter-spacing: 0.02em;
+}
+
 /* A `src:` block's players take the column's measure and keep their own controls. */
 .fy-render-video {
   display: block;

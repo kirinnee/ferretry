@@ -772,9 +772,9 @@ async function coreJourney(product: Product, journey: string): Promise<CoreOutco
  * reader scrolls, and a scripted scroll is not a reader — so a wheel turn is sent first, which is
  * what a person scrolling up does, and the transcript stops pulling the page back down.
  */
-const showBlock = (form: string): string =>
+const showBlock = (selector: string): string =>
   `(async () => {
-    const block = document.querySelector('[data-fy-render-type="${form}"]');
+    const block = document.querySelector(${JSON.stringify(selector)});
     if (block === null) return 'absent';
     let scroller = block.parentElement;
     while (scroller !== null && !(scroller.scrollHeight > scroller.clientHeight && /auto|scroll/.test(getComputedStyle(scroller).overflowY)))
@@ -803,26 +803,26 @@ async function hypermediaJourney(page: ProductPage, environment: E2eEnvironment,
       `document.querySelectorAll('[data-fy-render-type]').length >= ${String(HYPERMEDIA_FORMS.length)}`,
       120_000,
     );
-    for (const { form, rendered } of HYPERMEDIA_FORMS) {
+    for (const { block: selector, form, rendered } of HYPERMEDIA_FORMS) {
       // Rendering is lazy — near the viewport — so each block is brought on screen before it is asked about.
-      await page.evaluate(showBlock(form));
+      await page.evaluate(showBlock(selector));
       await waitUntil(page, `document.querySelector(${JSON.stringify(rendered)}) !== null`, 40_000).catch(
         async (error: unknown) => {
           const block = await page.evaluate<string>(
-            `document.querySelector('[data-fy-render-type="${form}"]')?.outerHTML.slice(0, 600) ?? 'absent'`,
+            `document.querySelector(${JSON.stringify(selector)})?.outerHTML.slice(0, 600) ?? 'absent'`,
           );
           throw new Error(`${form} did not render: ${String((error as Error).message)}. Block: ${block}`);
         },
       );
     }
     const pwned = await page.evaluate<string | null>('window.__fyPwned ?? null');
-    if (pwned !== null) throw new Error(`a payload in the html fragment ran: ${pwned}`);
+    if (pwned !== null) throw new Error(`a payload reached the app's window: ${pwned}`);
     return {
       value: undefined,
-      evidence: `all ${String(HYPERMEDIA_FORMS.length)} forms rendered inline; no fragment payload ran`,
+      evidence: `all ${String(HYPERMEDIA_FORMS.length)} forms rendered inline; the interactive page ran in its frame and never reached the app`,
     };
   });
-  for (const { form } of HYPERMEDIA_FORMS)
+  for (const { block: selector, form } of HYPERMEDIA_FORMS)
     for (const [label, size] of [
       ['1440', { height: 900, width: 1_440 }],
       ['390', { height: 844, width: 390 }],
@@ -830,7 +830,7 @@ async function hypermediaJourney(page: ProductPage, environment: E2eEnvironment,
       for (const scheme of ['light', 'dark'] as const) {
         await page.setViewportSize(size);
         await page.emulateMedia({ colorScheme: scheme });
-        await page.evaluate(showBlock(form));
+        await page.evaluate(showBlock(selector));
         await page.screenshot({ path: join(EVIDENCE_ROOT, journey, `10-hypermedia-${form}-${label}-${scheme}.png`) });
       }
   // Back to the journey's own browser, or the steps after this one meet a phone layout.

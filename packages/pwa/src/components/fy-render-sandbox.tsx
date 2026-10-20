@@ -110,7 +110,14 @@ const FY_RENDER_SHELL_URL = '/fy-render-sandbox.html';
  * sentence per class and folds this away underneath it, because author-derived
  * text wearing the app's error styling reads as the app talking.
  */
-export type FyRenderSandboxFailureKind = 'startup' | 'library' | 'render' | 'deadline' | 'lifetime' | 'navigation';
+export type FyRenderSandboxFailureKind =
+  | 'startup'
+  | 'library'
+  | 'render'
+  | 'deadline'
+  | 'lifetime'
+  | 'navigation'
+  | 'unresponsive';
 
 export interface FyRenderSandboxFailure {
   readonly kind: FyRenderSandboxFailureKind;

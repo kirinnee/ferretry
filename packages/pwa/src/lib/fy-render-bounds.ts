@@ -74,6 +74,24 @@ export const FY_RENDER_SANDBOX_LIMITS = {
    * compute, never how hard — see the declared gap in `docs/fy-render.md`.
    */
   lottieLifetimeMs: 120_000,
+  /**
+   * An interactive `html` page's total life. Longer than Lottie's because a
+   * reader may be working through an explanation rather than watching a loop,
+   * and like Lottie's it bounds how LONG author code may run, never how hard.
+   */
+  htmlLifetimeMs: 600_000,
+  /**
+   * The tallest an `html` frame may grow INLINE, whatever height the page
+   * reports. A transcript row is not the place for a 6000px document; the page
+   * scrolls inside its frame past this, and fullscreen gives it the plane.
+   */
+  htmlInlineMaxHeightPx: 640,
+  /**
+   * How long an interactive page may go without its heartbeat, while the tab is visible, before it is
+   * stopped as unresponsive. Five beats missed: long enough that one slow frame never trips it, short
+   * enough that a page stuck in a loop does not keep the reader's machine busy for long.
+   */
+  htmlStallMs: 5_000,
   /** Every string the frame puts on the wire is cut to this. */
   messageCharacters: 300,
   /** The compiled diagram the frame hands back, which is generated, not authored. */

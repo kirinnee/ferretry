@@ -147,11 +147,32 @@ describe('fy-render sandbox message parsing', () => {
     should(parseFyRenderSandboxMessage({ height: 10, kind: 'rendered', width: FY_RENDER_LIMITS.maxDimension })).be.ok();
   });
 
-  test('should refuse the removed html shell messages', () => {
-    // Assert — the html shell is gone (an `html` block is a static fragment now), so a
-    // frame claiming to report a height or forward a key is not one of ours.
-    should(parseFyRenderSandboxMessage({ height: 10, kind: 'height' })).be.null();
-    should(parseFyRenderSandboxMessage({ kind: 'escape' })).be.null();
+  test('should accept the html shell height report as a bounded whole number', () => {
+    // Assert — the page's own scroll height, which the parent clamps further. It
+    // is a layout hint from author code, so it is held to the same dimension
+    // bound as a rendered size and to exactly its two keys.
+    should(parseFyRenderSandboxMessage({ height: 1, kind: 'height' })).eql({ height: 1, kind: 'height' });
+    should(parseFyRenderSandboxMessage({ height: FY_RENDER_LIMITS.maxDimension, kind: 'height' })).eql({
+      height: FY_RENDER_LIMITS.maxDimension,
+      kind: 'height',
+    });
+    for (const bad of [0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY, FY_RENDER_LIMITS.maxDimension + 1, '10', null])
+      should(parseFyRenderSandboxMessage({ height: bad, kind: 'height' })).be.null();
+    should(parseFyRenderSandboxMessage({ kind: 'height' })).be.null();
+    should(parseFyRenderSandboxMessage({ height: 10, kind: 'height', width: 10 })).be.null();
+  });
+
+  test('should accept the html shell forwarded Escape only as a bare kind', () => {
+    // Assert — the frame forwards a keypress, nothing about it. A key, a code or
+    // any other field is a sender that is not the shell.
+    should(parseFyRenderSandboxMessage({ kind: 'escape' })).eql({ kind: 'escape' });
+    should(parseFyRenderSandboxMessage({ key: 'Escape', kind: 'escape' })).be.null();
+    should(parseFyRenderSandboxMessage({ kind: 'escape', shift: false })).be.null();
+  });
+
+  test('should accept the html shell heartbeat only as a bare kind', () => {
+    should(parseFyRenderSandboxMessage({ kind: 'beat' })).eql({ kind: 'beat' });
+    should(parseFyRenderSandboxMessage({ at: 1, kind: 'beat' })).be.null();
   });
 
   test('should refuse anything that is not a plain message object', () => {

@@ -64,12 +64,7 @@ refuse_in_block() {
 # EACH SHELL NEEDS TWO RULES. Pages' pretty URLs redirect `/<name>.html` to `/<name>`, and
 # `_headers` matches the REQUESTED path, so the document itself is served under the extensionless
 # rule. Shipping only the `.html` rule framed the shell with `frame-ancestors 'none'` in production.
-# (The `html` shell is gone: an `html` block is now a static fragment rendered in the page.)
-[[ "$(block_of '/fy-render-html.html')" == "" && "$(block_of '/fy-render-html')" == "" ]] || {
-  echo "❌ ${headers}: a rule still serves the removed fy-render html shell" >&2
-  exit 1
-}
-for shell in /fy-render-sandbox.html /fy-render-sandbox; do
+for shell in /fy-render-sandbox.html /fy-render-sandbox /fy-render-html.html /fy-render-html; do
   require_in_block "${shell}" '^  ! Content-Security-Policy$'
   require_in_block "${shell}" "^  Content-Security-Policy: frame-ancestors 'self'; sandbox allow-scripts$"
   require_in_block "${shell}" '^  X-Content-Type-Options: nosniff$'
