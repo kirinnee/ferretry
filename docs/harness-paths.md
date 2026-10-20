@@ -73,7 +73,9 @@ failure names the key to correct and says what the absence breaks.
 
 **Nothing is ever launched to find out.** Every step is a lookup or a stat. Running an
 operator-named binary as a side effect of a health check is not something this daemon does, and a
-`--version` that hung would hang the boot.
+`--version` that hung would hang the boot. The one exception is a person LOOKING: Settings › Agent CLIs and `fy harness status`
+run the located file's `--version`, isolated and bounded, to show which version it is
+([updating.md](updating.md) › "Updating Claude Code and Codex"). No report the daemon makes on its own does.
 
 **A declaration is read once per boot; the lookup is not.** Declarations are configuration and
 change when the daemon is restarted, exactly like every other value in that document. Whether a

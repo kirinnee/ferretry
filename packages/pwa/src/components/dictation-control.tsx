@@ -70,6 +70,8 @@ export interface DictationControlProps {
   readonly sessionId?: string;
   /** This daemon's own client, for that vocabulary read. */
   readonly api?: Pick<IFyApiClient, 'history'>;
+  /** The conversation this page already shows, oldest first; read instead of fetching history when given. */
+  readonly readConversation?: () => readonly string[];
   /**
    * The live draft. Passed straight to the hook, which reads it at INSERT time
    * so text typed during the flow is preserved and the transcript lands at the
@@ -239,6 +241,7 @@ export function useDictationBundle(props: DictationControlProps): DictationBundl
     daemon: props.daemon,
     ...(props.sessionId === undefined ? {} : { sessionId: props.sessionId }),
     ...(props.api === undefined ? {} : { api: props.api }),
+    ...(props.readConversation === undefined ? {} : { readConversation: props.readConversation }),
     draft,
     ...(props.selectionRef === undefined ? {} : { selectionRef: props.selectionRef }),
     settings,

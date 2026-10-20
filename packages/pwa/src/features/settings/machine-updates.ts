@@ -7,7 +7,7 @@
  * asked at all, because a background read there would queue behind its passkey prompt for nothing.
  */
 
-import { DaemonUpdateViewSchema } from '@ferretry/protocol';
+import { DaemonUpdateViewSchema, HarnessUpdateViewSchema } from '@ferretry/protocol';
 import { useEffect, useRef, useState } from 'react';
 import type { DaemonConnectionRecord } from '../../lib/connections.ts';
 import type { DaemonId } from '../../lib/daemon-connection.ts';
@@ -16,13 +16,16 @@ import type { FleetClientFactory } from '../fleet/fleet-client.ts';
 /** The route the dot reads; the same one Settings › Machine › About reads in full. */
 export const DAEMON_UPDATE_PATH = '/v1/daemon/update';
 
+/** The agent CLIs' view, read on the same visit: opening Settings is when npm is asked, never a timer. */
+export const HARNESS_UPDATE_PATH = '/v1/harnesses/update';
+
 export interface MachineUpdatesOptions {
   readonly connections: readonly DaemonConnectionRecord[];
   readonly createClient?: FleetClientFactory | undefined;
   readonly locked?: readonly DaemonId[];
 }
 
-/** The machines whose answer said a newer release exists. */
+/** The machines whose answer said a newer release of the daemon, or of an agent CLI it runs, exists. */
 export function useMachineUpdates({
   connections,
   createClient,
@@ -43,11 +46,21 @@ export function useMachineUpdates({
     const lockedNow = new Set(skipped.current);
     for (const connection of latest.current) {
       if (lockedNow.has(connection.daemonId)) continue;
-      void createClient(connection)
-        .then(async client => await client.request(DAEMON_UPDATE_PATH, DaemonUpdateViewSchema))
+      const mark = (): void => {
+        if (current) setAvailable(previous => new Set(previous).add(connection.daemonId));
+      };
+      const client = createClient(connection);
+      void client
+        .then(async active => await active.request(DAEMON_UPDATE_PATH, DaemonUpdateViewSchema))
         .then(view => {
-          if (!current || !view.available) return;
-          setAvailable(previous => new Set(previous).add(connection.daemonId));
+          if (view.available) mark();
+        })
+        .catch(() => undefined);
+      // Separately, so a machine too old for this route (`404`) still shows its daemon's dot.
+      void client
+        .then(async active => await active.request(HARNESS_UPDATE_PATH, HarnessUpdateViewSchema))
+        .then(view => {
+          if (view.harnesses.some(harness => harness.available)) mark();
         })
         .catch(() => undefined);
     }

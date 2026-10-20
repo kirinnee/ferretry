@@ -40,13 +40,56 @@ export interface InstallFactsSeams {
   readonly readLink?: (path: string) => Promise<string | undefined>;
 }
 
-async function runBounded(argv: readonly string[], timeoutMs: number): Promise<FactCommandResult | undefined> {
+export async function runBounded(argv: readonly string[], timeoutMs: number): Promise<FactCommandResult | undefined> {
   try {
     const child = Bun.spawn([...argv], { stdin: 'ignore', stdout: 'pipe', stderr: 'ignore', timeout: timeoutMs });
     const [stdout, code] = await Promise.all([new Response(child.stdout).text(), child.exited]);
     return { code, stdout };
   } catch {
     return undefined;
+  }
+}
+
+/** The link-chain and nix profile facts of one executable: what a store path's install is decided by. */
+export type ExecutableNixFacts = Pick<InstallFacts, 'nixProfileElement' | 'homeManagerProfile' | 'viaHomeManagerPath'>;
+
+/** The commands and filesystem reads {@link executableNixFacts} needs. */
+export interface ExecutableNixSeams {
+  readonly run: (argv: readonly string[], timeoutMs: number) => Promise<FactCommandResult | undefined>;
+  readonly readLink: (path: string) => Promise<string | undefined>;
+}
+
+/**
+ * Walk the launched path's links and ask the nix profile which element holds it.
+ *
+ * SHARED by the daemon's facts about itself and the harness update's facts about `claude` and `codex`
+ * (`harness-facts.ts`): the same file read the same way can never be classified two ways.
+ */
+export async function executableNixFacts(
+  launchedPath: string,
+  resolvedPath: string,
+  seams: ExecutableNixSeams,
+): Promise<ExecutableNixFacts> {
+  const hops = await symlinkHops(launchedPath, seams.readLink);
+  const profile = await nixProfile([resolvedPath, ...storePathHops(hops)], seams.run);
+  return {
+    nixProfileElement: profile.element,
+    homeManagerProfile: profile.homeManager,
+    viaHomeManagerPath: passesThroughHomeManagerPath(hops),
+  };
+}
+
+async function nixProfile(
+  candidates: readonly string[],
+  run: ExecutableNixSeams['run'],
+): Promise<{ element?: string | undefined; homeManager: boolean }> {
+  if (!candidates[0]?.startsWith('/nix/store/')) return { homeManager: false };
+  const listed = await run(['nix', 'profile', 'list', '--json'], FACT_COMMAND_TIMEOUT_MS);
+  if (listed === undefined || listed.code !== 0) return { homeManager: false };
+  try {
+    return parseNixProfileList(JSON.parse(listed.stdout), candidates);
+  } catch {
+    return { homeManager: false };
   }
 }
 
@@ -74,9 +117,8 @@ export class HostInstallFacts implements InstallFactsSource {
   async facts(): Promise<InstallFacts> {
     const launchedPath = this.launchedPath();
     const resolvedPath = await this.resolveLink(this.seams.execPath).catch(() => this.seams.execPath);
-    const hops = await symlinkHops(launchedPath, this.readLink);
-    const [profile, systemPackage] = await Promise.all([
-      this.nixProfile([resolvedPath, ...storePathHops(hops)]),
+    const [nix, systemPackage] = await Promise.all([
+      executableNixFacts(launchedPath, resolvedPath, { run: this.run, readLink: this.readLink }),
       this.systemPackage(resolvedPath),
     ]);
     return {
@@ -86,9 +128,7 @@ export class HostInstallFacts implements InstallFactsSource {
       resolvedPath,
       homeDirectory: this.seams.homeDirectory,
       platform: this.seams.platform,
-      nixProfileElement: profile.element,
-      homeManagerProfile: profile.homeManager,
-      viaHomeManagerPath: passesThroughHomeManagerPath(hops),
+      ...nix,
       systemPackage,
     };
   }
@@ -98,19 +138,6 @@ export class HostInstallFacts implements InstallFactsSource {
     if (isAbsolute(argv0)) return argv0;
     if (argv0.includes('/')) return resolve(this.seams.workingDirectory, argv0);
     return this.seams.which(argv0) ?? this.seams.execPath;
-  }
-
-  private async nixProfile(
-    candidates: readonly string[],
-  ): Promise<{ element?: string | undefined; homeManager: boolean }> {
-    if (!candidates[0]?.startsWith('/nix/store/')) return { homeManager: false };
-    const listed = await this.run(['nix', 'profile', 'list', '--json'], FACT_COMMAND_TIMEOUT_MS);
-    if (listed === undefined || listed.code !== 0) return { homeManager: false };
-    try {
-      return parseNixProfileList(JSON.parse(listed.stdout), candidates);
-    } catch {
-      return { homeManager: false };
-    }
   }
 
   private async systemPackage(resolvedPath: string): Promise<SystemPackageManager | undefined> {

@@ -24,6 +24,7 @@ export type SettingId =
   | 'dictation'
   | 'notifications'
   | 'install-app'
+  | 'speedup-keys'
   | 'sessions-list';
 
 export type SettingsSectionId = 'appearance' | 'behaviour' | 'device' | 'machines';
@@ -242,6 +243,30 @@ export const SETTINGS_DEFINITIONS: readonly SettingDefinition[] = [
     ],
   },
   {
+    id: 'speedup-keys',
+    label: 'Speed-up keys',
+    description:
+      'A Groq or Cerebras key kept in this browser only, so dictation clean-up calls the provider directly instead of going through a machine. Encrypted here, never synced, never sent to any machine or agent.',
+    keywords: [
+      'groq',
+      'cerebras',
+      'api key',
+      'key',
+      'keys',
+      'speed',
+      'speed-up',
+      'speedups',
+      'faster',
+      'clean-up',
+      'cleanup',
+      'dictation',
+      'voice',
+      'enhancement',
+      'browser',
+      'device',
+    ],
+  },
+  {
     id: 'sessions-list',
     label: 'Sessions list',
     description:
@@ -314,8 +339,8 @@ export const SETTINGS_SECTIONS: readonly SettingsSectionDefinition[] = [
   {
     id: 'device',
     label: 'This device',
-    description: 'Ferretry as an app on this device.',
-    settingIds: ['install-app'],
+    description: 'Ferretry as an app on this device, and the provider keys only this device holds.',
+    settingIds: ['install-app', 'speedup-keys'],
   },
   {
     /**
@@ -637,6 +662,28 @@ export const SETTINGS_LINKS: readonly SettingsLinkDefinition[] = [
       'apt',
       'install',
       'auto-update',
+    ],
+  },
+  {
+    // The harnesses' and their package managers' own names: "codex", "claude code" or "npm" is what somebody types.
+    id: 'agent-clis',
+    label: 'Agent CLIs',
+    description:
+      'The Claude Code and Codex this machine runs, how each was installed, whether Ferretry has verified that version, and updating it. On this machine — opens its Machine tab.',
+    href: daemon => `${daemonSettingsPath(daemon)}#agent-clis`,
+    keywords: [
+      'agent cli',
+      'claude',
+      'claude code',
+      'codex',
+      'harness',
+      'update claude',
+      'update codex',
+      'npm',
+      'brew',
+      'nix',
+      'verified',
+      'version',
     ],
   },
 ] as const;
