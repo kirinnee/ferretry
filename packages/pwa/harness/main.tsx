@@ -299,6 +299,7 @@ import { machineSetupAnswer } from './machine-setup-fixture.ts';
 import { HARNESS_MACHINE_TABS } from './machine-tabs.tsx';
 import { McpSignInFrameHarness, mcpSignInFrame } from './mcp-sign-in.tsx';
 import { isPairFromMenuPage, PairFromMenuHarness } from './pair-from-menu.tsx';
+import { isSessionContextMenuPage, SessionContextMenuHarness } from './session-context-menu.tsx';
 import {
   WARDEN_FIXTURE_ATTENTION,
   WARDEN_FIXTURE_CONFIG,
@@ -8410,6 +8411,7 @@ if (host) {
   const appChromeHarness = new URLSearchParams(window.location.search).get('app-chrome');
   const mcpFrame = mcpSignInFrame(window.location.search);
   const pairFromMenu = isPairFromMenuPage(window.location.search);
+  const sessionContextMenu = isSessionContextMenuPage(window.location.search);
   createRoot(host).render(
     // The harness answers its daemon inside the page, on the plain network, so every surface is handed
     // a client over it; the app itself only ever has the store's session-routed pool.
@@ -8417,6 +8419,8 @@ if (host) {
       <SessionSearchProvider connection={daemon} focusSignal={0} scope={scope}>
         {mcpFrame !== undefined ? (
           <McpSignInFrameHarness frame={mcpFrame} />
+        ) : sessionContextMenu ? (
+          <SessionContextMenuHarness />
         ) : pairFromMenu ? (
           <PairFromMenuHarness />
         ) : appChromeHarness !== null ? (

@@ -19,13 +19,17 @@
  * The thresholds and both predicates live in `agent-sidebar-model.ts` so they
  * can be asserted without a pointer; this file is only the wiring.
  *
+ * KEYBOARD: the Menu key and Shift+F10 open it at the row, because a row is focusable and a menu only a
+ * pointer can open is a feature the keyboard never gets. `onPress` tells the row a dwell is under way
+ * (and when it ended) so it can show the press taking hold.
+ *
  * Returns `undefined` when there is nothing to open — a read-only connection
  * offers no actions, and a menu with no items must leave the browser's own
  * context menu completely alone rather than swallow it.
  */
 
 import type { SessionView } from '@ferretry/protocol';
-import { type MouseEvent, type PointerEvent, useCallback, useEffect, useRef } from 'react';
+import { type KeyboardEvent, type MouseEvent, type PointerEvent, useCallback, useEffect, useRef } from 'react';
 import { cancelsRowLongPress, LONG_PRESS_MS, suppressesRowClick } from './agent-sidebar-model.ts';
 
 /** Asks the sidebar's single hosted menu to open for `view`, at viewport coordinates. */
@@ -38,13 +42,21 @@ export interface RowContextGesture {
   readonly onPointerUp: () => void;
   readonly onPointerCancel: () => void;
   readonly onClickCapture: (event: MouseEvent<HTMLElement>) => void;
+  readonly onKeyDown: (event: KeyboardEvent<HTMLElement>) => void;
 }
+
+/** Menu key, or Shift+F10: the two keys every platform's own context menu opens on. */
+export const opensContextMenuKey = (event: { readonly key: string; readonly shiftKey: boolean }): boolean =>
+  event.key === 'ContextMenu' || (event.key === 'F10' && event.shiftKey);
 
 /** Generic over what was pressed: a session row here, a workspace tab chip on the phone. */
 export function useRowContextGesture<Subject = SessionView>(
   open: ((subject: Subject, x: number, y: number, trigger: HTMLElement) => void) | undefined,
   view: Subject,
+  onPress?: (pressing: boolean) => void,
 ): RowContextGesture | undefined {
+  const pressRef = useRef(onPress);
+  pressRef.current = onPress;
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const startAt = useRef<{ x: number; y: number } | null>(null);
   const triggerEl = useRef<HTMLElement | null>(null);
@@ -56,6 +68,7 @@ export function useRowContextGesture<Subject = SessionView>(
       timer.current = null;
     }
     startAt.current = null;
+    pressRef.current?.(false);
   }, []);
 
   // A pending dwell timer that outlives the row would fire against an unmounted
@@ -70,6 +83,12 @@ export function useRowContextGesture<Subject = SessionView>(
   };
 
   return {
+    onKeyDown: (event: KeyboardEvent<HTMLElement>) => {
+      if (!opensContextMenuKey(event)) return;
+      event.preventDefault();
+      const rect = event.currentTarget.getBoundingClientRect();
+      fire(rect.left + Math.min(32, rect.width / 2), rect.bottom, event.currentTarget);
+    },
     // Right-click (mouse) and Android's long-press both arrive here.
     onContextMenu: (event: MouseEvent<HTMLElement>) => {
       event.preventDefault();
@@ -88,8 +107,10 @@ export function useRowContextGesture<Subject = SessionView>(
       cancel();
       startAt.current = { x: px, y: py };
       triggerEl.current = trigger;
+      pressRef.current?.(true);
       timer.current = setTimeout(() => {
         timer.current = null;
+        pressRef.current?.(false);
         if (startAt.current && triggerEl.current) fire(px, py, triggerEl.current);
       }, LONG_PRESS_MS);
     },

@@ -18,26 +18,17 @@
  */
 
 import { ChevronDown, LoaderCircle } from 'lucide-react';
-import {
-  type KeyboardEvent as ReactKeyboardEvent,
-  type ReactNode,
-  useCallback,
-  useEffect,
-  useId,
-  useLayoutEffect,
-  useRef,
-  useState,
-} from 'react';
-import { isTopEscapeLayer, pushEscapeLayer, useDialogFocus } from '../../hooks/use-dialog-focus.ts';
+import { type ReactNode, useCallback, useId, useRef, useState } from 'react';
+import { useDialogFocus } from '../../hooks/use-dialog-focus.ts';
 import { cn } from '../../lib/class-names.ts';
 import { BottomSheet } from '../../shell/bottom-sheet.tsx';
-import { DetailedFailure } from './session-operations.ts';
 import {
   findSessionAction,
   type SessionActionEntry,
   type SessionActionFormHost,
   type SessionActionSection,
 } from './registry.ts';
+import { useActionMenu } from './use-action-menu.ts';
 
 export interface ActionsMenuProps {
   readonly sections: readonly SessionActionSection[];
@@ -69,24 +60,27 @@ const placementUnder = (button: HTMLElement | null): Placement => {
   };
 };
 
-const failureSentence = (reason: unknown): string => (reason instanceof Error ? reason.message : String(reason));
-
 export function ActionsMenu({ sections, compact, name, form, onFormChange, onFailure, onNotice }: ActionsMenuProps) {
   const menuId = useId();
   const buttonRef = useRef<HTMLButtonElement | null>(null);
-  const menuRef = useRef<HTMLDivElement | null>(null);
   const [open, setOpen] = useState(false);
-  const [confirming, setConfirming] = useState<string | null>(null);
-  const confirmingRef = useRef<string | null>(null);
-  confirmingRef.current = confirming;
-  const [pending, setPending] = useState<string | null>(null);
   const [placement, setPlacement] = useState<Placement>({ top: 0, right: 8 });
 
   const close = useCallback((restoreFocus: boolean): void => {
     setOpen(false);
-    setConfirming(null);
     if (restoreFocus) buttonRef.current?.focus();
   }, []);
+  const { menuRef, confirming, setConfirming, pending, choose, confirmRun, onMenuKey } = useActionMenu({
+    open,
+    close,
+    insideRef: buttonRef,
+    onFailure,
+    openForm: id => {
+      close(false);
+      setPlacement(placementUnder(buttonRef.current));
+      onFormChange(id);
+    },
+  });
 
   const toggle = (): void => {
     if (open) {
@@ -96,109 +90,6 @@ export function ActionsMenu({ sections, compact, name, form, onFormChange, onFai
     setPlacement(placementUnder(buttonRef.current));
     setConfirming(null);
     setOpen(true);
-  };
-
-  // Focus the first row when the menu opens, and the confirm's first button when a confirm opens.
-  useLayoutEffect(() => {
-    if (!open) return;
-    const target =
-      confirming === null
-        ? menuRef.current?.querySelector<HTMLElement>('[data-menu-row]:not([aria-disabled="true"])')
-        : menuRef.current?.querySelector<HTMLElement>('[data-menu-confirm-yes]');
-    target?.focus();
-  }, [open, confirming]);
-
-  // Escape is a stack: a confirm takes the first Escape, the menu the second.
-  useEffect(() => {
-    if (!open) return;
-    const token = {};
-    const release = pushEscapeLayer(token);
-    const onKey = (event: KeyboardEvent): void => {
-      if (event.key !== 'Escape' || !isTopEscapeLayer(token)) return;
-      event.stopPropagation();
-      if (confirmingRef.current !== null) setConfirming(null);
-      else close(true);
-    };
-    const onPointer = (event: PointerEvent): void => {
-      const target = event.target as Node | null;
-      if (menuRef.current?.contains(target) || buttonRef.current?.contains(target)) return;
-      close(false);
-    };
-    const onResize = (): void => close(false);
-    document.addEventListener('keydown', onKey);
-    document.addEventListener('pointerdown', onPointer, true);
-    window.addEventListener('resize', onResize);
-    return () => {
-      document.removeEventListener('keydown', onKey);
-      document.removeEventListener('pointerdown', onPointer, true);
-      window.removeEventListener('resize', onResize);
-      release();
-    };
-  }, [open, close]);
-
-  const runSafely = async (entry: SessionActionEntry, work: () => Promise<void> | void): Promise<void> => {
-    setPending(entry.id);
-    try {
-      await work();
-    } catch (reason) {
-      const sentence = `${entry.label.replace(/…$/u, '')} failed: ${failureSentence(reason)}`;
-      if (reason instanceof DetailedFailure) onFailure?.(sentence, reason.detail);
-      else onFailure?.(sentence);
-    } finally {
-      setPending(null);
-    }
-  };
-
-  const choose = (entry: SessionActionEntry): void => {
-    if (entry.unavailable !== undefined || pending !== null) return;
-    if (entry.kind === 'form') {
-      close(false);
-      setPlacement(placementUnder(buttonRef.current));
-      onFormChange(entry.id);
-      return;
-    }
-    if (entry.kind === 'confirm') {
-      setConfirming(entry.id);
-      return;
-    }
-    if (entry.kind === 'toggle') {
-      void runSafely(entry, () => entry.onToggle(!entry.checked));
-      return;
-    }
-    close(true);
-    void runSafely(entry, entry.run);
-  };
-
-  const confirmRun = (entry: Extract<SessionActionEntry, { kind: 'confirm' }>): void => {
-    close(true);
-    void runSafely(entry, entry.run);
-  };
-
-  const onMenuKey = (event: ReactKeyboardEvent<HTMLDivElement>): void => {
-    if (event.key === 'Tab') {
-      close(false);
-      return;
-    }
-    const rows = [
-      ...(menuRef.current?.querySelectorAll<HTMLElement>(
-        '[data-menu-row]:not([aria-disabled="true"]), [data-menu-confirm] button',
-      ) ?? []),
-    ];
-    if (rows.length === 0) return;
-    const index = rows.indexOf(document.activeElement as HTMLElement);
-    const next =
-      event.key === 'ArrowDown'
-        ? rows[(index + 1) % rows.length]
-        : event.key === 'ArrowUp'
-          ? rows[(index - 1 + rows.length) % rows.length]
-          : event.key === 'Home'
-            ? rows[0]
-            : event.key === 'End'
-              ? rows[rows.length - 1]
-              : undefined;
-    if (next === undefined) return;
-    event.preventDefault();
-    next.focus();
   };
 
   const formEntry = form === null ? undefined : findSessionAction(sections, form);
@@ -238,33 +129,14 @@ export function ActionsMenu({ sections, compact, name, form, onFormChange, onFai
           role="menu"
           style={{ top: placement.top, right: placement.right }}
         >
-          {sections.map(section => (
-            <div className="fy-actions-menu__section" key={section.group} role="none">
-              <div aria-hidden="true" className="fy-actions-menu__group">
-                {section.label}
-              </div>
-              {/* biome-ignore lint/a11y/useSemanticElements: the WAI-ARIA menu pattern groups menu items with role=group; a fieldset is a form grouping and would be announced as one */}
-              <div aria-label={section.label} role="group">
-                {section.entries.map(entry =>
-                  entry.kind === 'confirm' && confirming === entry.id ? (
-                    <ConfirmRow
-                      entry={entry}
-                      key={entry.id}
-                      onCancel={() => setConfirming(null)}
-                      onConfirm={() => confirmRun(entry)}
-                    />
-                  ) : (
-                    <MenuRow
-                      entry={entry}
-                      key={entry.id}
-                      onChoose={() => choose(entry)}
-                      pending={pending === entry.id}
-                    />
-                  ),
-                )}
-              </div>
-            </div>
-          ))}
+          <ActionSections
+            confirming={confirming}
+            onCancel={() => setConfirming(null)}
+            onChoose={choose}
+            onConfirm={confirmRun}
+            pending={pending}
+            sections={sections}
+          />
         </div>
       ) : null}
       {shownForm === undefined ? null : compact ? (
@@ -289,7 +161,46 @@ export function ActionsMenu({ sections, compact, name, form, onFormChange, onFai
   );
 }
 
-function MenuRow({
+/** The menu's groups, rows and inline confirms — drawn identically by every surface that shows them. */
+export function ActionSections({
+  sections,
+  confirming,
+  pending,
+  onChoose,
+  onConfirm,
+  onCancel,
+}: {
+  readonly sections: readonly SessionActionSection[];
+  readonly confirming: string | null;
+  readonly pending: string | null;
+  readonly onChoose: (entry: SessionActionEntry) => void;
+  readonly onConfirm: (entry: Extract<SessionActionEntry, { kind: 'confirm' }>) => void;
+  readonly onCancel: () => void;
+}) {
+  return (
+    <>
+      {sections.map(section => (
+        <div className="fy-actions-menu__section" key={section.group} role="none">
+          <div aria-hidden="true" className="fy-actions-menu__group">
+            {section.label}
+          </div>
+          {/* biome-ignore lint/a11y/useSemanticElements: the WAI-ARIA menu pattern groups menu items with role=group; a fieldset is a form grouping and would be announced as one */}
+          <div aria-label={section.label} role="group">
+            {section.entries.map(entry =>
+              entry.kind === 'confirm' && confirming === entry.id ? (
+                <ConfirmRow entry={entry} key={entry.id} onCancel={onCancel} onConfirm={() => onConfirm(entry)} />
+              ) : (
+                <MenuRow entry={entry} key={entry.id} onChoose={() => onChoose(entry)} pending={pending === entry.id} />
+              ),
+            )}
+          </div>
+        </div>
+      ))}
+    </>
+  );
+}
+
+export function MenuRow({
   entry,
   onChoose,
   pending,
@@ -332,7 +243,7 @@ function MenuRow({
   );
 }
 
-function ConfirmRow({
+export function ConfirmRow({
   entry,
   onConfirm,
   onCancel,
@@ -367,7 +278,7 @@ function ConfirmRow({
   );
 }
 
-function ActionForm({
+export function ActionForm({
   entry,
   host,
 }: {
@@ -383,7 +294,7 @@ function ActionForm({
 }
 
 /** The desktop form frame: hangs under Actions, takes focus, closes on Escape — never on a stray click. */
-function ActionPopover({
+export function ActionPopover({
   title,
   placement,
   onClose,
