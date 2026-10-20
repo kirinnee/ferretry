@@ -113,7 +113,7 @@ function NeedRow({
       <span className="shrink-0 text-muted" aria-hidden="true">
         {need.kind === 'sign-in' ? <KeyRound size={14} /> : <Lock size={14} />}
       </span>
-      <span className="flex min-w-0 flex-1 flex-col">
+      <span className="flex min-w-0 flex-[1_1_10rem] flex-col">
         <span className="[overflow-wrap:anywhere] font-mono text-ui text-fg">needs {need.name}</span>
         <span className="[overflow-wrap:anywhere] text-meta text-muted">for {need.why}</span>
       </span>
