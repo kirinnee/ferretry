@@ -216,7 +216,7 @@
 }
 
 .kt-fs-stale[data-tone='err'] {
-  border-inline-start: 2px solid var(--err);
+  border-inline-start: var(--stroke-heavy) solid var(--err);
   background: var(--err-bg);
   color: var(--err);
 }
@@ -251,7 +251,7 @@
 }
 
 .kt-fs-tab[data-active='true'] {
-  box-shadow: inset 0 -2px 0 var(--accent);
+  box-shadow: inset 0 calc(-1 * var(--stroke-heavy)) 0 var(--accent);
   background: var(--surface-2);
 }
 
@@ -507,7 +507,7 @@
 }
 
 .kt-fs-tree-note[data-tone='err'] {
-  border-inline-start: 2px solid var(--err);
+  border-inline-start: var(--stroke-heavy) solid var(--err);
   background: var(--err-bg);
   color: var(--err);
 }
@@ -586,7 +586,7 @@ button.kt-fs-row:active {
 .kt-fs-change-dot {
   width: 6px;
   height: 6px;
-  border-radius: 999px;
+  border-radius: var(--radius-dot);
   background: var(--accent);
 }
 
@@ -659,13 +659,13 @@ button.kt-fs-row:active {
 }
 
 .kt-fs-note[data-tone='err'] {
-  border-inline-start: 2px solid var(--err);
+  border-inline-start: var(--stroke-heavy) solid var(--err);
   background: var(--err-bg);
   color: var(--err);
 }
 
 .kt-fs-note[data-tone='warn'] {
-  border-inline-start: 2px solid var(--warn);
+  border-inline-start: var(--stroke-heavy) solid var(--warn);
   background: var(--warn-bg);
   color: var(--warn);
 }
@@ -700,7 +700,7 @@ button.kt-fs-row:active {
   flex: 0 0 auto;
   padding: var(--gap-xs) var(--pad-cell-x);
   border-block-end: var(--stroke) solid var(--accent-border);
-  border-inline-start: 2px solid var(--accent);
+  border-inline-start: var(--stroke-heavy) solid var(--accent);
   background: var(--accent-soft);
   color: var(--accent);
   font-family: var(--font-mono);
@@ -723,7 +723,7 @@ button.kt-fs-row:active {
   display: flex;
   min-width: 100%;
   align-items: baseline;
-  border-inline-start: 2px solid transparent;
+  border-inline-start: var(--stroke-heavy) solid transparent;
   background: var(--code-bg);
   color: var(--code-fg);
 }
@@ -776,7 +776,7 @@ button.kt-fs-row:active {
   display: flex;
   min-width: 100%;
   align-items: baseline;
-  border-inline-start: 2px solid transparent;
+  border-inline-start: var(--stroke-heavy) solid transparent;
   background: var(--code-bg);
   color: var(--code-fg);
   white-space: pre;

@@ -243,6 +243,31 @@
   --bubble-radius: var(--radius-panel);
   --bubble-shadow: var(--shadow-sm);
 
+  /* ---- transcript card roles ----
+     Everything the transcript draws as a card of its own rather than as prose — a peer message, a
+     "Sent to", a sub-ferret start, a question, a harness dialog, compaction, the dictation review —
+     wears the SAME stroke and shadow as the human bubble, so a Neo transcript is inked and offset
+     throughout and a Studio one stays hairlined and soft. The radius is the panel's, with a smaller
+     `--card-tail-radius` on the corner nearest the speaker; `--card-edge` is the accent rail some
+     cards carry on their leading side. Families restate the bubble/radius/stroke ramp these read
+     from, never these names, so a new family inherits cards that already match it.
+     Declared on :root/[data-swatch] alongside the values they read, so each resolves per theme. */
+  --card-bg: var(--surface);
+  --card-border: var(--border);
+  --card-stroke: var(--bubble-stroke);
+  --card-radius: var(--radius-panel);
+  --card-tail-radius: var(--radius-xs);
+  --card-shadow: var(--bubble-shadow);
+  --card-edge: var(--stroke-heavy);
+
+  /* ---- icon-only ghost controls (the composer's attach and mic) ----
+     Quiet by default: no fill, no edge, no shadow. A family whose every control is an inked block
+     (Neo) or must never be invisible (High Contrast) restates these, so a bare icon is never the one
+     unstyled control in a row of themed ones. */
+  --ghost-bg: transparent;
+  --ghost-edge: transparent;
+  --ghost-shadow: none;
+
   /* ---- code / mono surfaces ---- */
   --code-bg: #f5f5f7;
   --code-border: #e7e7ec;
@@ -850,6 +875,10 @@
 [data-swatch^='neo-'] {
   /* ═══ structural token layer ═══ */
 
+  --ghost-bg: var(--surface);
+  --ghost-edge: var(--border);
+  --ghost-shadow: var(--shadow-control);
+
   --chrome-fg: var(--faint);
   --weight-normal: 500;
   --weight-medium: 700;
@@ -1124,6 +1153,7 @@
    ============================================================================ */
 :root[data-theme^='contrast-'],
 [data-swatch^='contrast-'] {
+  --ghost-edge: var(--border-strong);
   /* ═══ structural token layer ═══ */
 
   /* An UNDECORATED instrument, not monochrome Neo: no offset shadows, no display

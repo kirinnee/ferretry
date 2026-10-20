@@ -99,6 +99,8 @@ import { RecommendController } from '../src/lib/fleet/recommend';
 import { registerGrantCommands } from '../src/lib/grants/commands';
 import { GrantController } from '../src/lib/grants/controller';
 import { ProtocolGrantGateway } from '../src/lib/grants/gateway';
+import { registerHarnessCommands } from '../src/lib/harness/commands';
+import { HarnessController } from '../src/lib/harness/controller';
 import { registerHistoryCommands } from '../src/lib/history/commands';
 import { HistoryController } from '../src/lib/history/controller';
 import {
@@ -339,6 +341,8 @@ type SharedDaemonClient = Pick<
   | 'conversionPreview'
   | 'scratchPlan'
   | 'scratchSweep'
+  | 'harnessUpdate'
+  | 'startHarnessUpdate'
   | 'snapshot'
   | 'logs'
   | 'events'
@@ -355,6 +359,8 @@ function lazyDaemonClient(client: () => Promise<IFyApiClient>): SharedDaemonClie
       return timeoutMs === undefined ? ready.request(path, schema, init) : ready.request(path, schema, init, timeoutMs);
     },
     analytics: async (query?: string): Promise<AnalyticsResponse> => (await client()).analytics(query),
+    harnessUpdate: async () => (await client()).harnessUpdate(),
+    startHarnessUpdate: async request => (await client()).startHarnessUpdate(request),
     list: async (): Promise<SessionView[]> => (await client()).list(),
     get: async (id: string, signal?: AbortSignal): Promise<SessionView> => (await client()).get(id, signal),
     stop: async (id: string, reason?: string): Promise<SessionView> => (await client()).stop(id, reason),
@@ -757,6 +763,18 @@ const DOMAIN_REGISTRARS: ReadonlyArray<(wiring: DomainWiring) => void> = [
       new MigrationController(client, new SessionPresenter(world.io, new SystemClock())),
     ),
   ({ program, world, client }) => registerScratchCommands(program, new ScratchController(client, world.io)),
+  ({ program, world, client }) =>
+    registerHarnessCommands(
+      program,
+      new HarnessController({
+        gateway: client,
+        out: world.io,
+        prompt: world.prompt,
+        interactive: world.interactive,
+        wait: async milliseconds => await Bun.sleep(milliseconds),
+        binaryName: BINARY_NAME,
+      }),
+    ),
   ({ program, world, ownSessionId }) => registerSessionCommands(program, sessionCommands(world, ownSessionId)),
   ({ program, world, client, ownSessionId }) =>
     registerTaskCommands(program, {

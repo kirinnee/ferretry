@@ -85,6 +85,8 @@ export const AUDITED_ROUTES: readonly AuditedRouteRule[] = [
   // Updating this machine runs new code on it, and turning on automatic updates lets it do so unasked:
   // both are kept as changes to the machine's security, like its settings.
   { method: 'POST', path: '/v1/daemon/update', event: 'security.changed', fixedSubject: 'daemon-update' },
+  // Updating an agent CLI puts new code on the machine that every new ferret then runs as.
+  { method: 'POST', path: '/v1/harnesses/update', event: 'security.changed', fixedSubject: 'harness-update' },
   {
     method: 'PATCH',
     path: '/v1/daemon/update/settings',
@@ -258,6 +260,24 @@ export const AUDITED_ROUTES: readonly AuditedRouteRule[] = [
     event: 'secrets.changed',
     subject: 'name',
     detail: { action: 'delete' },
+  },
+  // Copying secrets to another machine: both ends name the SAME import id as the subject, so the source's
+  // record and the target's can be matched up by eye. Names only — the bundle is never read here.
+  {
+    method: 'POST',
+    path: '/v1/secrets/exports/:importId',
+    event: 'secrets.used',
+    subject: 'importId',
+    responseNames: 'names',
+    detail: { action: 'clone-export' },
+  },
+  {
+    method: 'POST',
+    path: '/v1/secrets/imports/:importId',
+    event: 'secrets.changed',
+    subject: 'importId',
+    responseNames: 'imported',
+    detail: { action: 'clone-import' },
   },
   { method: 'POST', path: '/v1/worktrees/remove', event: 'worktree.removed' },
   { method: 'POST', path: '/v1/browser/login', event: 'browser.opened', detail: { action: 'sign-in-window' } },

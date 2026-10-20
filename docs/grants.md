@@ -100,6 +100,8 @@ which can never step up, can never quiet its own supervision or anyone else's.
 **Updating the daemon is `fleet`.** Reading `GET /v1/daemon/update` is `use`; starting an update and
 changing automatic install are `configure`, and a governed device also gives a passkey step-up for that
 act alone (turning automatic install off never needs one). See [updating.md](updating.md).
+Updating an agent CLI is the same act and the same gate: `GET /v1/harnesses/update` is `use`, `POST
+/v1/harnesses/update` is `configure` plus the step-up, and a ferret may never start one.
 
 **The Console is a terminal.** `POST /v1/sessions/:sessionId/console/input` types into the agent's own
 Claude / Codex pane and is declared `terminal` / `use` like every terminal route, so it is governed
@@ -141,7 +143,8 @@ closed would make a fresh remote session useless until somebody walked to the ma
 **The primary security layer is locality.** A remote caller can never turn a capability on. The passkey
 **unlock** is the **second layer**: a governed caller does nothing until its device unlocks the machine,
 and the unlock then stands in for the step-up over every `configure` and the `use` of `terminal`,
-`browser`, `pairing` and `secrets` — except minting a code, widening a device, or turning "what agents
+`browser`, `pairing` and `secrets` — except minting a code, widening a device, sealing secrets for
+another machine ([secrets.md](secrets.md#copying-secrets-to-another-machine)), or turning "what agents
 may control" back ON (terminals/browsers/files) from a remote device, which always want a passkey for
 that act ([design/zero-trust.md](design/zero-trust.md) B1). Turning one of those three OFF never asks
 for more than the ordinary `fleet.configure` step-up — only the ON half of a write does, so a single

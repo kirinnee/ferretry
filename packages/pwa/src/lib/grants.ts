@@ -107,6 +107,7 @@ const ACCESS_ACTS: Readonly<Record<NonNullable<StepUpDemand['act']>, string>> = 
   'widen-device': 'give another device more access',
   'enable-agent-control': 'let agents control that again',
   'loosen-config': 'put a configuration change into effect',
+  'clone-secrets': 'copy secrets to another machine',
 };
 
 /**

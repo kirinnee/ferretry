@@ -621,7 +621,7 @@
   overflow: hidden;
   padding: 0 6px;
   border: var(--stroke-control) solid var(--border);
-  border-radius: 999px;
+  border-radius: var(--radius-badge);
   background: var(--surface-2);
   color: var(--fg-soft);
   font-family: var(--font-mono);
@@ -635,8 +635,8 @@
   flex: none;
   width: 8px;
   height: 8px;
-  border: 1.5px solid var(--faint, var(--muted));
-  border-radius: 999px;
+  border: var(--stroke-control) solid var(--faint);
+  border-radius: var(--radius-dot);
 }
 .fy-machine-dot[data-reach='online'] {
   border-color: var(--ok);
@@ -764,4 +764,52 @@
 }
 .fy-session-bar__started-by:hover {
   color: var(--fg);
+}
+
+/* ── REORDERING MACHINES ─────────────────────────────────────────────────────────────────────────
+   The grip and the "⋯" sit at the heading's edges. Nothing here changes a heading's box while a drag
+   is under way: the drop line is an inset shadow on the target group and the dragged group only
+   dims, so the list never jumps under the pointer. The grip is the one place a drag may start, and
+   `touch-action: none` there lets a held finger drag instead of scroll. */
+.fy-sbar__machine-group {
+  position: relative;
+}
+.fy-sbar__machine-grip {
+  width: 20px;
+  height: 24px;
+  cursor: grab;
+  touch-action: none;
+}
+.fy-sbar__machine-more {
+  width: 24px;
+  height: 24px;
+  margin-left: 2px;
+}
+.fy-sbar__machine-grip:focus-visible,
+.fy-sbar__machine-more:focus-visible {
+  outline: var(--focus-ring-width, 2px) solid var(--focus-ring, var(--accent));
+  outline-offset: 1px;
+}
+.fy-sbar__machine-grip[aria-pressed='true'] {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.fy-sbar__machine-group[data-dragging] {
+  opacity: 0.5;
+}
+.fy-sbar__machine-group[data-dragging] .fy-sbar__machine-grip {
+  cursor: grabbing;
+}
+.fy-sbar__machine-group[data-drop-edge='before'] {
+  box-shadow: inset 0 var(--stroke-heavy) 0 var(--accent);
+}
+.fy-sbar__machine-group[data-drop-edge='after'] {
+  box-shadow: inset 0 calc(-1 * var(--stroke-heavy)) 0 var(--accent);
+}
+@media (pointer: coarse) {
+  .fy-sbar__machine-grip,
+  .fy-sbar__machine-more {
+    width: 32px;
+    height: 32px;
+  }
 }

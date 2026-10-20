@@ -139,7 +139,7 @@ export function AnalyticsCostChart({ days }: { readonly days: readonly Analytics
                   {warn && <span className="mb-px block h-[3px] w-full" style={{ background: HATCH }} />}
                   {bucket.costMicros > 0 ? (
                     <span
-                      className={`block w-full rounded-t-[3px] bg-accent ${focus?.day === bucket.day ? '' : 'opacity-75'}`}
+                      className={`block w-full rounded-t-xs bg-accent ${focus?.day === bucket.day ? '' : 'opacity-75'}`}
                       style={{ height: `${height}%` }}
                     />
                   ) : (

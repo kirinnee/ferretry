@@ -5,6 +5,7 @@ import type { ConfigChangeFrame } from './config-changes.ts';
 import type { DaemonUpdateSettingsPatch, DaemonUpdateStartRequest, DaemonUpdateView } from './daemon-update.ts';
 import type { ForeignHistoryListing, ImportedConversationDetail } from './foreign-history.ts';
 import type { SessionHandoverReceipt, SessionHandoverRequestInput } from './handover.ts';
+import type { HarnessUpdateStartRequest, HarnessUpdateView } from './harness-update.ts';
 import type {
   AttachmentView,
   CgroupConfigPatch,
@@ -103,6 +104,10 @@ export interface IFyApiClient {
   /** Start, or schedule for idle, the update to `request.target`; the daemon restarts after answering. */
   startDaemonUpdate(request: DaemonUpdateStartRequest): Promise<DaemonUpdateView>;
   updateDaemonUpdateSettings(patch: DaemonUpdateSettingsPatch): Promise<DaemonUpdateView>;
+  /** How this machine's `claude` and `codex` were installed, whether Ferretry verified them, and updating them. Asks npm. */
+  harnessUpdate(): Promise<HarnessUpdateView>;
+  /** Start one harness's update; it runs in the daemon, and the view's `job` says how it ended. */
+  startHarnessUpdate(request: HarnessUpdateStartRequest): Promise<HarnessUpdateView>;
   pwaConfig(): Promise<PwaConfigView>;
   updatePwaConfig(patch: PwaConfigPatch): Promise<PwaConfigView>;
   usage(): Promise<UsageFeedView>;

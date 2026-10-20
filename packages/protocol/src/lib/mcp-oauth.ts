@@ -153,6 +153,18 @@ export function mcpOAuthSecretNames(component: string, serverUrl: string): McpOA
 }
 
 /**
+ * Whether a secret's name is one a sign-in filed itself: an MCP server's OAuth access token.
+ *
+ * It is the SHAPE {@link mcpOAuthSecretNames} writes (`MCP_<stem>_<16 hex>_ACCESS`), so it answers for
+ * every name that function can produce and for no name a person would choose. A secret copy refuses
+ * these: the token is half of a sign-in whose refresh half cannot travel, and a copy would be a
+ * login that is dead on the other machine within the hour (docs/secrets.md).
+ */
+export function isSignInSecretName(name: string): boolean {
+  return /^MCP_(?:[A-Z0-9_]+_)?[0-9A-F]{16}_ACCESS$/u.test(name);
+}
+
+/**
  * One authorization server's own callback path (OAuth Security BCP §4.4.2, the per-AS redirect mix-up
  * defence): a code one provider sends back can only ever arrive at the path of a flow with THAT provider.
  */

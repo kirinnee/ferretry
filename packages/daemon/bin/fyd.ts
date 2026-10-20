@@ -166,6 +166,8 @@ import {
   GitHubLatestRelease,
   HostedModelCatalog,
   HostedRelayDirectory,
+  HostHarnessFacts,
+  HostHarnessProbe,
   HostInstallFacts,
   HttpUsageSource,
   hostCgroupFacts,
@@ -180,6 +182,7 @@ import {
   NodeForeignHistoryFiles,
   NodePairingCryptography,
   NodeSessionBrowserLauncher,
+  NpmHarnessLatest,
   type OpenedDaemonStorage,
   PaneProcessInventory,
   PerformanceStopwatch,
@@ -535,6 +538,7 @@ import {
   type HarnessPreflight,
   HarnessQuirkService,
   type HarnessVersionPort,
+  HarnessUpdateService,
   HOSTED_APP_ORIGIN,
   handoffFolders,
   handoffPointerPaths,
@@ -658,7 +662,10 @@ import {
   runtimeQuarantineState,
   type ScratchReclamation,
   SESSION_TRANSCRIPT_MESSAGE_TOKEN_SELECTION_DOMAIN,
+  type SecretCloneIdentitySource,
   SecretDirectory,
+  SecretExportService,
+  SecretImportService,
   SecretRedactor,
   type SecretSubsystem,
   SecretUseService,
@@ -6076,8 +6083,19 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
   // guard and the Speed-ups Test all spend keys through it; none of them is ever handed a value.
   const outboundAuthorizer = new OutboundProviderAuthorizer(secretVault, new FetchEnhancementTransport());
   const speedupStopwatch = new PerformanceStopwatch();
+  const secretDirectory = new SecretDirectory(secretDocuments, secretCipher, clock);
+  // Copying secrets to another machine signs and checks offers with THIS daemon's identity — the key its
+  // daemon id fingerprints — read per clone, so a daemon whose identity cannot be read refuses the copy
+  // and serves everything else.
+  const secretCloneIdentity: SecretCloneIdentitySource = {
+    load: async () => {
+      const read = await readDaemonRelayIdentity(stateFiles, paths.daemonIdentity, new WebCryptoRelayIdentityKeys());
+      return read.ok ? read.identity : undefined;
+    },
+  };
+  const secretCloneCrypto = new WebCryptoRelayCrypto();
   const secrets: SecretSubsystem = {
-    directory: new SecretDirectory(secretDocuments, secretCipher, clock),
+    directory: secretDirectory,
     // TWO places name secrets now: the operator's own recipes, and the fleet accounts a profile
     // authenticates. Both are listed, so an account whose credential is missing from the store is a
     // line on a screen before it is a session that dies at start.
@@ -6089,6 +6107,20 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       new FleetSecretReferences(async () => await readDeclaredAccountModel(configFiles, configLocations)),
     ),
     uses: new SecretUseService(secretVault, new BunSecretChildRunner(), secretRecipes),
+    imports: new SecretImportService({
+      crypto: secretCloneCrypto,
+      identity: secretCloneIdentity,
+      directory: secretDirectory,
+      clock,
+    }),
+    // THE SIXTH HOLDER of the vault (see `docs/secrets.md`): it seals chosen values to another machine's
+    // one-time key and answers only that ciphertext, which no caller of this daemon can open.
+    exports: new SecretExportService({
+      crypto: secretCloneCrypto,
+      identity: secretCloneIdentity,
+      vault: secretVault,
+      clock,
+    }),
   };
   // Everything an operator reads back is scrubbed of every value this daemon holds, so a secret a
   // child printed is a mask by the time anybody sees it. Read `lib/secrets/redaction.ts` for what
@@ -8693,6 +8725,22 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
             },
           );
         })(),
+        // Updating this machine's `claude` and `codex` (docs/updating.md › "Updating Claude Code and Codex"):
+        // the file a runtime launches comes from the ONE harness resolution rule, its install facts are read
+        // exactly as this daemon's own are, and npm is asked for the newest only when somebody looks.
+        harnessUpdate: new HarnessUpdateService({
+          product: productName,
+          homeDirectory: userHome,
+          locate: kind => locateHarnessCommand(kind, harnessDiscovery, executables),
+          facts: new HostHarnessFacts({ homeDirectory: userHome, platform: process.platform }),
+          probe: new HostHarnessProbe(runPackageInstall, process.env),
+          latest: new NpmHarnessLatest({ userAgent: `${DAEMON_NAME}/${daemonVersion}` }),
+          executables,
+          run: runPackageInstall,
+          environment: process.env,
+          clock: millisecondClock,
+          checks: process.env.FY_UPDATE_CHECK !== 'off',
+        }),
         // Constructed here rather than injected: the pinner opens nothing until a request arrives, and
         // the Git reader is the same hardened runner the worktree gateway already uses. Both are
         // stateless, so one instance serves every session.

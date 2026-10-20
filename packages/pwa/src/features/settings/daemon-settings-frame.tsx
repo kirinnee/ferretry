@@ -27,6 +27,7 @@ import {
   ShieldCheck,
   SlidersHorizontal,
   Smartphone,
+  SquareTerminal,
   Stethoscope,
   Zap,
 } from 'lucide-react';
@@ -40,7 +41,7 @@ import { ActiveCarrierCard } from '../carrier/active-carrier-card.tsx';
 import { type SecretClientFactory, SecretsSurface } from '../secrets/secrets-surface.tsx';
 import { type WardenClientFactory, WardenConfigSurface } from '../warden/warden-config-card.tsx';
 import { AddDeviceSurface, type PairingClientFactory } from './add-device-settings.tsx';
-import { DaemonHostChecks, type DaemonReachabilityProbe } from './daemon-settings.tsx';
+import { DaemonHostChecks, type DaemonReachabilityProbe, daemonDisplayName } from './daemon-settings.tsx';
 import { type GrantClientFactory, GrantsSurface } from './grants-settings.tsx';
 import { type PasskeyClientFactory, SecuritySurface } from './security-settings.tsx';
 
@@ -102,6 +103,8 @@ const PANEL_ICONS: Readonly<Record<string, ReactNode>> = {
   speedups: <Zap size={16} aria-hidden="true" />,
   // A circled arrow up: the version this machine runs, and moving it to a newer one.
   about: <CircleArrowUp size={16} aria-hidden="true" />,
+  // A terminal prompt: the command-line agents (Claude Code, Codex) this machine's ferrets run.
+  'agent-clis': <SquareTerminal size={16} aria-hidden="true" />,
 };
 
 /**
@@ -131,6 +134,9 @@ function WardenSettingsTab({
   return <WardenConfigSurface connection={connection} createClient={createWardenClient} unavailable="message" />;
 }
 
+/** No other machine: stable, so the tab table is not rebuilt on every render. */
+const NO_OTHER_MACHINES: readonly DaemonConnectionRecord[] = [];
+
 export interface DaemonSettingsFrameProps {
   readonly connection: DaemonConnection;
   /** The browser's persisted pairing record; only Host checks needs its local metadata. */
@@ -142,6 +148,8 @@ export interface DaemonSettingsFrameProps {
   readonly createWardenClient?: WardenClientFactory;
   /** The same seam for the secret store. */
   readonly createSecretClient?: SecretClientFactory;
+  /** The other machines this browser is paired with, so secrets can be copied to one. */
+  readonly otherMachines?: readonly DaemonConnectionRecord[];
   /** And for the grant surface, so no test or harness opens a socket to read a limit. */
   readonly createGrantClient?: GrantClientFactory;
   /** And for pairing, so no harness screenshot can ever contain a real minted code. */
@@ -177,6 +185,7 @@ export function DaemonSettingsFrame({
   name,
   createWardenClient,
   createSecretClient,
+  otherMachines = NO_OTHER_MACHINES,
   createGrantClient,
   createPairingClient,
   createPasskeyClient,
@@ -209,6 +218,8 @@ export function DaemonSettingsFrame({
           <SecretsSurface
             connection={activeConnection}
             {...(createSecretClient ? { createClient: createSecretClient } : {})}
+            others={otherMachines}
+            machineName={daemonDisplayName}
           />
         ),
       },
@@ -318,6 +329,7 @@ export function DaemonSettingsFrame({
       name,
       onRemoveDaemon,
       onRenameDaemon,
+      otherMachines,
       probeDaemon,
       relayAdvertised,
     ],

@@ -180,9 +180,12 @@ login's one key is found in whichever half carries it.
 ## Clone
 
 Clone ([account-model.md](account-model.md)) copies an environment login as its file: plain values,
-secret NAMES, its preset, its references, its Codex provider and its halves. The preview lists what the
-target still needs — "needs: ZAI_API_KEY", "uses your AWS profile acme on work-linux" — and a signed-in
-login still becomes an empty slot that needs sign-in. A runtime keeps the CLI it names.
+secret NAMES, its preset, its references, its Codex provider and its halves. The keys it names follow in ONE
+sealed copy the source confirms with a passkey, so the cloned runtime works on arrival; the preview lists them
+("Copy 1 API key with the logins: ZAI*API_KEY") and what the target still needs ("uses your AWS profile acme
+on work-linux"). A signed-in login is **not** copied — owner decision 2026-10-20, "don't copy sign-in, copy env
+var credentials only" ([secrets.md](secrets.md#sign-ins-are-not-copied-api-keys-are)) — and becomes an empty slot
+marked "Sign in on \_machine*". A runtime keeps the CLI it names.
 
 ## The catalogue, verified 2026-10-16
 

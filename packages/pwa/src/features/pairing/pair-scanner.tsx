@@ -82,7 +82,7 @@ export function PairScanner({ host, label, onText, onFailed }: PairScannerProps)
           {/* The reticle IS the instruction — "put the code in here" — and it is
               the only instruction that survives a glance. */}
           <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-            <div className="h-[62%] w-[62%] rounded-panel border-2 border-accent" />
+            <div className="h-[62%] w-[62%] rounded-panel border-heavy border-accent" />
           </div>
         </div>
         {/* Below the frame rather than over it: a caption laid on live camera

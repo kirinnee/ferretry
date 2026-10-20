@@ -3,11 +3,14 @@ import { type FyEvent, peerEnvelopePreamble, turnFileInstruction } from '@ferret
 import type { ReactElement } from 'react';
 import {
   CONTEXT_FETCH_LIMIT,
+  conversationFromTranscript,
   type DictationDraftResult,
   type DictationHandle,
   enhancementErrorFrom,
   extractContextMessages,
+  extractHeldMessages,
   hasUsableContext,
+  noCleanupKeyMessage,
   type UseDictationOptions,
   useDictation,
   withinContextFetchBudget,
@@ -20,6 +23,7 @@ import type { CaptureMonitor, MicMeter, MicMeterPort } from '../../src/lib/stt/l
 import type { ParakeetSessionOptions } from '../../src/lib/stt/parakeet-session.ts';
 import type { ParakeetVoice } from '../../src/lib/stt/parakeet-voice.ts';
 import { RemoteEnhancementError } from '../../src/lib/stt/remote-enhancement.ts';
+import { DeviceSpeedupKeys } from '../../src/lib/stt/speedup-keys.ts';
 import { DEFAULT_STT_SETTINGS, type SttSettings } from '../../src/lib/stt/stt-settings.ts';
 import {
   type FakeRecognitionProvider,
@@ -1186,6 +1190,185 @@ describe('useDictation — the input meter', () => {
     await interact(() => view.handle().cancel());
     await interact(() => options.onMonitor?.(monitor));
     expect(view.handle().inputMonitor).toBeNull();
+    await view.unmount();
+  });
+});
+
+/**
+ * Hosted clean-up with a key THIS device holds goes straight to the provider; without one it asks the
+ * daemon, and when neither has a key the words are kept with a sentence saying where to add one.
+ */
+describe('useDictation — clean-up with a key this device holds', () => {
+  /** Real WebCrypto opens the key, which takes more than a microtask: wait for the take to settle. */
+  const settled = async (view: Harness, provider: FakeRecognitionProvider): Promise<void> => {
+    await finishTake(view, provider);
+    for (let tries = 0; tries < 100 && view.handle().phase === 'transcribing'; tries += 1) {
+      await interact(() => new Promise(resolve => setTimeout(resolve, 2)));
+    }
+  };
+  const landed = async (view: Harness, provider: FakeRecognitionProvider): Promise<void> => {
+    await settled(view, provider);
+    const review = view.handle().review;
+    if (review !== null) await interact(() => view.handle().insert(review.cleaned));
+  };
+  const deviceKeys = async (answer: () => Response, saved = true) => {
+    const records = new Map<string, unknown>();
+    const calls: { url: string; body: Record<string, unknown> }[] = [];
+    const keys = new DeviceSpeedupKeys(
+      {
+        get: async slot => records.get(slot),
+        put: async (slot, value) => void records.set(slot, value),
+        delete: async slot => void records.delete(slot),
+      },
+      crypto.subtle,
+      async (url, init) => {
+        calls.push({ url: String(url), body: JSON.parse(String(init?.body)) as Record<string, unknown> });
+        return answer();
+      },
+    );
+    if (saved) await keys.save('groq', 'gsk_test_0123456789abcdef');
+    return { keys, calls };
+  };
+  const completion = (content: string) => () => Response.json({ choices: [{ message: { content } }] });
+
+  it('cleans up straight from the browser and never asks the daemon', async () => {
+    const provider = fakeRecognitionProvider();
+    const { keys, calls } = await deviceKeys(completion('Raw words.'));
+    let daemonCalls = 0;
+    const view = await harness({
+      recognition: provider,
+      settings: settingsWith({ enhancementProvider: 'groq' }),
+      speedupKeys: keys,
+      enhancementFetch: async () => {
+        daemonCalls += 1;
+        return Response.json({ text: 'from the daemon' });
+      },
+    });
+    await record(view, provider);
+    await interact(() => provider.speak('raw words'));
+    await landed(view, provider);
+    expect(view.drafts[0]?.text).toBe('Raw words.');
+    expect(calls[0]?.url).toBe('https://api.groq.com/openai/v1/chat/completions');
+    expect(daemonCalls).toBe(0);
+    await view.unmount();
+  });
+
+  it('reads the conversation the page already holds instead of fetching history', async () => {
+    const provider = fakeRecognitionProvider();
+    const { keys, calls } = await deviceKeys(completion('Raw words.'));
+    let history = 0;
+    const view = await harness({
+      recognition: provider,
+      sessionId: 'session-1',
+      api: {
+        history: async () => {
+          history += 1;
+          return [];
+        },
+      },
+      readConversation: () => ['', 'the message the page is showing right now'],
+      settings: settingsWith({ enhancementProvider: 'groq' }),
+      voiceCleanup: { style: 'fix', prompts: {}, useConversation: true, conversationMessages: 8 },
+      speedupKeys: keys,
+    });
+    await record(view, provider);
+    await interact(() => provider.speak('raw words'));
+    await landed(view, provider);
+    const messages = calls[0]?.body.messages as { content: string }[];
+    expect(messages[1]?.content).toContain('<reference>\nthe message the page is showing right now\n</reference>');
+    expect(history).toBe(0);
+    await view.unmount();
+  });
+
+  it('says why when the provider refuses this device’s key, and keeps the words', async () => {
+    const provider = fakeRecognitionProvider();
+    const { keys } = await deviceKeys(() => new Response('{}', { status: 401 }));
+    const view = await harness({
+      recognition: provider,
+      settings: settingsWith({ enhancementProvider: 'groq' }),
+      speedupKeys: keys,
+    });
+    await record(view, provider);
+    await interact(() => provider.speak('raw words'));
+    await settled(view, provider);
+    expect(view.handle().review?.cleaned).toBe('raw words');
+    expect(view.handle().review?.enhancementError?.code).toBe('enhancement-provider-auth');
+    await view.unmount();
+  });
+
+  it('asks the daemon when this device holds no key', async () => {
+    const provider = fakeRecognitionProvider();
+    const { keys, calls } = await deviceKeys(completion('unused'), false);
+    const view = await harness({
+      recognition: provider,
+      settings: settingsWith({ enhancementProvider: 'groq' }),
+      speedupKeys: keys,
+      enhancementFetch: async () => Response.json({ text: 'From the daemon.' }),
+    });
+    await record(view, provider);
+    await interact(() => provider.speak('raw words'));
+    await landed(view, provider);
+    expect(view.drafts[0]?.text).toBe('From the daemon.');
+    expect(calls).toHaveLength(0);
+    await view.unmount();
+  });
+
+  it('says where to add a key when neither this device nor the daemon has one', async () => {
+    const provider = fakeRecognitionProvider();
+    const view = await harness({
+      recognition: provider,
+      settings: settingsWith({ enhancementProvider: 'groq' }),
+      speedupKeys: null,
+      enhancementFetch: async () =>
+        Response.json({ code: 'secret_missing', error: 'enhancement provider is not configured' }, { status: 503 }),
+    });
+    await record(view, provider);
+    await interact(() => provider.speak('raw words'));
+    await settled(view, provider);
+    expect(view.handle().review?.cleaned).toBe('raw words');
+    expect(view.handle().review?.enhancementError).toEqual({
+      code: 'enhancement-not-configured',
+      message: noCleanupKeyMessage('Groq'),
+    });
+    expect(noCleanupKeyMessage('Groq')).toContain('add a Groq key in Settings › This device');
+    await view.unmount();
+  });
+});
+
+describe('the conversation a page holds', () => {
+  it('keeps what was said and drops tool rows, notices and hand-off pointers', () => {
+    expect(
+      conversationFromTranscript([
+        { kind: 'user', text: 'first' },
+        { kind: 'tool', text: 'rm -rf' },
+        { kind: 'user', text: 'see the turn file', handoff: { path: '/x' } },
+        { kind: 'notice', text: 'delivered' },
+        { kind: 'assistant', text: 'second' },
+      ]),
+    ).toEqual(['first', 'second']);
+  });
+
+  it('keeps the newest ten non-empty messages', () => {
+    const many = Array.from({ length: 14 }, (_, index) => `message ${index + 1}`);
+    expect(extractHeldMessages(['  ', ...many])).toEqual(many.slice(-10));
+  });
+
+  it('asks for enough of it before on-device correction treats it as evidence', async () => {
+    const provider = fakeRecognitionProvider();
+    let reads = 0;
+    const view = await harness({
+      recognition: provider,
+      readConversation: () => {
+        reads += 1;
+        return ['only one message'];
+      },
+      settings: settingsWith({ enhancementProvider: 'local' }),
+    });
+    await record(view, provider);
+    await interact(() => provider.speak('raw words'));
+    await landTake(view, provider);
+    expect(reads).toBe(1);
+    expect(view.drafts[0]?.text).toBe('raw words');
     await view.unmount();
   });
 });

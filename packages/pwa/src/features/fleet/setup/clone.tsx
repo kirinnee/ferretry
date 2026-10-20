@@ -17,9 +17,13 @@
  *   loosens spend or authority until the owner confirms it; Done offers Confirm on those.
  * - **Agent controls and default runtime** — the source's machine settings, as one reviewed change.
  *
- * SECRETS AND LOGIN TOKENS NEVER TRAVEL. The Preview lists every secret and sign-in the copied settings
- * need here, with a field to add each secret now; a login arrives as an empty slot that needs sign-in,
- * and Done offers **Sign in once for n runtimes** on the busiest one (E31).
+ * API-KEY LOGINS COPY WITH THEIR KEYS; SIGN-INS DO NOT (owner decision 2026-10-20, docs/secrets.md). The
+ * Preview splits the logins: an environment login travels as variables and secret NAMES, and the keys the
+ * copied setup needs follow in ONE sealed copy the source confirms with a passkey, so the cloned runtime
+ * works on arrival. A Claude Code or Codex sign-in is marked "Sign in on <machine>" and arrives as an empty
+ * slot; Done offers a Sign in button for each, and **Sign in once for n runtimes** on the busiest (E31).
+ * The Preview still lists every secret and sign-in the copied settings need, with a field to add a secret
+ * now, and **Copy secrets from <source>…** for anything else, picked by name.
  */
 
 import type { CloneRunnable, FleetCloneBundle, FleetCredentialView, SpeedupsView } from '@ferretry/protocol';
@@ -34,6 +38,9 @@ import {
   readConfigFile,
   writeConfigFile,
 } from '../../config-files/config-files-api.ts';
+import { copySecrets as sealSecretsAcross } from '../../secrets/secret-clone-api.ts';
+import { copyRefusalSentence } from '../../secrets/secret-clone-model.ts';
+import { SecretCopyLauncher } from '../../secrets/secret-copy-panel.tsx';
 import { listSecrets, putSecret } from '../../secrets/secrets-api.ts';
 import { daemonDisplayName } from '../../settings/daemon-settings.tsx';
 import { readSpeedups } from '../../speedups/speedups-api.ts';
@@ -60,17 +67,21 @@ import {
   existingSentence,
   runnableTitle,
 } from './clone-model.ts';
-import { CloneItemsChoices, CloneNeedsList, CloneOutcomes } from './clone-settings.tsx';
+import { CloneItemsChoices, CloneLoginsSection, CloneNeedsList, CloneOutcomes } from './clone-settings.tsx';
 import {
   ALL_CLONE_ITEMS,
   CLONE_ITEMS,
+  CLONE_KEYS_ITEM,
   CLONE_SETTINGS_FILES,
   type CloneItem,
   type CloneItemId,
   type CloneItemOutcome,
   type CloneNeed,
+  type CloneOutcomeItem,
+  cloneLogins,
   cloneNeeds,
   controlsChange,
+  keysToCopy,
   type SourceSettingsFile,
   sourceItemSummary,
 } from './clone-settings-model.ts';
@@ -97,7 +108,7 @@ interface CloneResult {
   readonly summary: string | null;
   readonly preview: ClonePreview | null;
   readonly slots: readonly FleetCredentialView[];
-  readonly outcomes: readonly { readonly item: CloneItem; readonly outcome: CloneItemOutcome }[];
+  readonly outcomes: readonly { readonly item: CloneOutcomeItem; readonly outcome: CloneItemOutcome }[];
 }
 
 function Foot({ children }: { readonly children: ReactNode }) {
@@ -140,6 +151,9 @@ export function CloneMachine(props: CloneMachineProps) {
   const [files, setFiles] = useState<ReadonlyMap<string, SourceSettingsFile>>(new Map());
   const [speedups, setSpeedups] = useState<SpeedupsView | null>(null);
   const [held, setHeld] = useState<readonly string[]>([]);
+  // The names the SOURCE holds (never values), so only a key it really has is asked for; `null` when unread.
+  const [sourceSecrets, setSourceSecrets] = useState<readonly string[] | null>(null);
+  const [copyKeys, setCopyKeys] = useState(true);
   const [chosen, setChosen] = useState<readonly CloneItemId[]>(ALL_CLONE_ITEMS);
   const [sourceIssue, setSourceIssue] = useState<string | null>(null);
   const [reading, setReading] = useState(false);
@@ -229,8 +243,18 @@ export function CloneMachine(props: CloneMachineProps) {
         if (file.kind === 'done')
           read.set(item.file, { path: item.file, exists: file.value.exists, text: file.value.text });
       }
-      const [view] = await Promise.all([target.read(client => readSpeedups(client)), readHeld()]);
+      const [view, sourceList] = await Promise.all([
+        target.read(client => readSpeedups(client)),
+        source.read(client => listSecrets(client)),
+        readHeld(),
+      ]);
       setSpeedups(view.kind === 'done' ? view.value : null);
+      setSourceSecrets(
+        sourceList.kind === 'done' && sourceList.value.health === 'ready'
+          ? sourceList.value.secrets.map(secret => secret.name)
+          : null,
+      );
+      setCopyKeys(true);
       setFiles(read);
       setBundle(exported.value);
       // A fresh read is a fresh review: nothing it lists has been left out yet, and every item it can copy is ticked.
@@ -255,12 +279,23 @@ export function CloneMachine(props: CloneMachineProps) {
     }
   };
 
+  /** The sealed copy of the keys: the source asks for the passkey, this browser carries ciphertext. */
+  const sealKeys = async (names: readonly string[]): Promise<CloneItemOutcome> => {
+    if (pickedRecord === undefined) return { kind: 'refused', reason: 'No source machine is picked.' };
+    try {
+      await sealSecretsAcross(await createClient(pickedRecord), await createClient(connection), names);
+      return { kind: 'copied' };
+    } catch (error) {
+      return { kind: 'refused', reason: `${copyRefusalSentence(error)} Copy them from the list below.` };
+    }
+  };
+
   const copy = (): void => {
     if (bundle === null || preview === null || pickedRecord === undefined) return;
     setCopying(true);
     void (async () => {
       let summary: string | null = null;
-      const outcomes: { item: CloneItem; outcome: CloneItemOutcome }[] = [];
+      const outcomes: { item: CloneOutcomeItem; outcome: CloneItemOutcome }[] = [];
       const item = (id: CloneItemId): CloneItem => CLONE_ITEMS.find(candidate => candidate.id === id) as CloneItem;
       if (copiesFleet) {
         const applied = await changes.apply({
@@ -291,6 +326,12 @@ export function CloneMachine(props: CloneMachineProps) {
           outcome: applied.kind === 'refused' ? { kind: 'refused', reason: applied.sentence } : { kind: 'copied' },
         });
       }
+      // The keys the copied setup needs follow, sealed, for ONE passkey on the source. After the fleet, so a
+      // refused copy has not already moved a key; before the credentials are read, so a login shows ready.
+      if (keyNames.length > 0) {
+        outcomes.push({ item: CLONE_KEYS_ITEM, outcome: await sealKeys(keyNames) });
+        await readHeld();
+      }
       const credentials = copiesFleet ? await target.read(client => readFleetCredentials(client)) : null;
       setResult({
         source: bundle.machine,
@@ -316,6 +357,25 @@ export function CloneMachine(props: CloneMachineProps) {
   };
 
   const needs: readonly CloneNeed[] = cloneNeeds(chosen, bundle, files, speedups, held);
+  const keyNames = copyKeys ? keysToCopy(needs, sourceSecrets) : [];
+  // Secrets come only when a person picks them, by name, and the source asks for a passkey (docs/secrets.md).
+  // The ones the copied settings need here start ticked.
+  const neededSecrets = needs
+    .filter(need => need.kind === 'secret' && !need.held && need.secretName !== undefined)
+    .map(need => need.secretName as string);
+  const copySecrets =
+    pickedRecord === undefined ? undefined : (
+      <SecretCopyLauncher
+        label={`Copy secrets from ${daemonDisplayName(pickedRecord)}…`}
+        direction="from"
+        here={connection}
+        others={[pickedRecord]}
+        createClient={createClient}
+        machineName={daemonDisplayName}
+        preselect={neededSecrets}
+        onCopied={() => void readHeld()}
+      />
+    );
 
   const copyPanel = (label: string, variant: 'primary' | 'danger' = 'primary') => (
     <div className="mt-4">
@@ -412,6 +472,7 @@ export function CloneMachine(props: CloneMachineProps) {
           onDone={onDone}
           onAdd={addSecret}
           onConfirm={confirm}
+          copy={copySecrets}
         />
       );
     if (bundle === null || preview === null) return null;
@@ -472,7 +533,15 @@ export function CloneMachine(props: CloneMachineProps) {
               )}
             </>
           ) : null}
-          <CloneNeedsList needs={needs} machineName={machineName} onAdd={addSecret} />
+          <CloneLoginsSection
+            logins={cloneLogins(copiesFleet ? bundle : null, held)}
+            machineName={machineName}
+            sourceName={bundle.machine}
+            keys={keysToCopy(needs, sourceSecrets)}
+            copyKeys={copyKeys}
+            onCopyKeys={setCopyKeys}
+          />
+          <CloneNeedsList needs={needs} machineName={machineName} onAdd={addSecret} copy={copySecrets} />
           <SetupSection title="Doesn’t copy" name="not-copied">
             {copiesFleet && preview.skipped > 0 ? (
               <SetupRow
@@ -486,15 +555,15 @@ export function CloneMachine(props: CloneMachineProps) {
               <SetupRow
                 status="needs_sign_in"
                 statusLabel="Doesn’t copy"
-                title={countWords(preview.logins, 'login token')}
-                detail={`Each signed-in login becomes an empty slot on ${machineName} that needs sign-in. Runtimes keep pointing at their slot.`}
+                title={countWords(preview.signIns, 'sign-in')}
+                detail={`Claude Code and Codex sign-ins never copy: a refresh token on two machines would sign one of them out. Each becomes an empty slot on ${machineName}; sign in there. Runtimes keep pointing at their slot.`}
               />
             ) : null}
             <SetupRow
               status="needs_sign_in"
               statusLabel="Doesn’t copy"
-              title="Secret values"
-              detail="No route returns one. The copied settings name them; add each here."
+              title="Other secret values"
+              detail="Only the keys these logins and settings need are copied, sealed. Any other secret, copy by name from Settings › Secrets."
             />
             <SetupRow
               status="needs_sign_in"
@@ -709,6 +778,7 @@ function DoneStep({
   onDone,
   onAdd,
   onConfirm,
+  copy,
 }: {
   readonly result: CloneResult | null;
   readonly machineName: string;
@@ -717,6 +787,7 @@ function DoneStep({
   readonly onDone: () => void;
   readonly onAdd: (name: string, value: string) => Promise<string | null>;
   readonly onConfirm: (path: string, etag: string) => Promise<string | null>;
+  readonly copy?: ReactNode;
 }) {
   if (result === null) return null;
   const busiest = result.slots[0];
@@ -732,6 +803,7 @@ function DoneStep({
         needs={needs}
         machineName={machineName}
         onAdd={onAdd}
+        copy={copy}
         signIn={need => {
           const slot = slotFor(need);
           return slot === undefined ? null : (
@@ -767,11 +839,15 @@ function DoneStep({
                     : ''}
                 </span>
               </span>
-              <ChevronRight size={16} aria-hidden="true" className="shrink-0 text-muted" />
+              <span className="inline-flex shrink-0 items-center gap-1 font-semibold text-accent">
+                Sign in
+                <ChevronRight size={16} aria-hidden="true" />
+              </span>
             </a>
           ))}
           <p className="m-0 text-meta text-muted">
-            Sign in once per slot. Every runtime that uses it is fixed together.
+            A sign-in never copies, so each login is signed in on {machineName}. Sign in once per login: every runtime
+            that uses it is fixed together.
           </p>
         </SetupSection>
       )}

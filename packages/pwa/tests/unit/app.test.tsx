@@ -3400,13 +3400,15 @@ describe('the settings route composition', () => {
     // sidebar can show each one's status, and a machine's tabs read its setup (`/v1/fleet/...`). Those are
     // the account model's reads, proved in their own suites; this test is about the health probe. The
     // shell also asks the machine on screen whether it may offer "Pair a phone" (`/v1/grants`), and the
-    // machine list asks each machine once whether it has an update, for its dot (`/v1/daemon/update`).
+    // machine list asks each machine once whether it — or an agent CLI it runs — has an update, for its dot
+    // (`/v1/daemon/update`, `/v1/harnesses/update`).
     const probes = () =>
       healthReads.filter(
         read =>
           read.path !== '/v1/pair/devices' &&
           read.path !== '/v1/grants' &&
           read.path !== '/v1/daemon/update' &&
+          read.path !== '/v1/harnesses/update' &&
           !read.path.startsWith('/v1/fleet/'),
       );
 
@@ -4029,6 +4031,47 @@ describe('the sessions bar', () => {
       await interact(() => store.controls.setDeviceControls({ sessionsList: 'current' }));
       expect(view.container.querySelector('[data-sbar-machine-group]')).toBeNull();
       expect(view.container.querySelectorAll('[data-sessions-bar="column"] [data-sbar-session="one"]')).toHaveLength(1);
+    } finally {
+      await view.unmount();
+    }
+  });
+
+  it('reorders the machines on this device from a heading menu, and the switcher and the list follow', async () => {
+    const { view, store } = await renderShell(`/d/${ALPHA}/settings`, [alpha.daemonId, beta.daemonId], {
+      sessions: ['one'],
+    });
+    try {
+      await settle();
+      const column = must(view.container.querySelector('[data-sessions-bar="column"]'), 'the sessions column');
+      const groups = () =>
+        [...column.querySelectorAll('[data-sbar-machine-group]')].map(node =>
+          node.getAttribute('data-sbar-machine-group'),
+        );
+      expect(groups()).toEqual([ALPHA, BETA]);
+      await interact(() =>
+        must(
+          column.querySelector<HTMLElement>(`[data-sbar-machine-group="${BETA}"] .fy-sbar__machine-more`),
+          'the menu on the second machine',
+        ).click(),
+      );
+      await interact(() =>
+        must(
+          [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(item => item.textContent === 'Move up'),
+          'Move up',
+        ).click(),
+      );
+      await settle();
+      expect(groups()).toEqual([BETA, ALPHA]);
+      expect(store.controls.snapshot().device.machineOrder).toEqual([BETA, ALPHA]);
+      // The pairing record did not change: the order is this browser's preference alone.
+      expect(store.connections.getSnapshot().connections.map(record => record.daemonId)).toContain(alpha.daemonId);
+      await interact(() =>
+        must(column.querySelector<HTMLElement>('[data-sbar-machine]'), 'the machine switcher').click(),
+      );
+      const items = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].map(item => item.textContent);
+      expect(items.indexOf(items.find(text => text?.includes('beta')) ?? '')).toBeLessThan(
+        items.indexOf(items.find(text => text?.includes('alpha')) ?? ''),
+      );
     } finally {
       await view.unmount();
     }

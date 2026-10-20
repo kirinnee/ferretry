@@ -77,7 +77,7 @@ as an internal name for a runtime's materialised config directory (§8).
 | **Fixed layer**       | For **agent runtimes only**: a locked layer Ferretry applies **last**. It always wins and is shown read-only.                                                                                       |
 | **Agent permissions** | A machine setting: **Auto mode** or **Skip all permission checks**, mapped per harness. Applies to new sessions.                                                                                    |
 | **History**           | One pool per harness, shared by every runtime of that harness.                                                                                                                                      |
-| **Clone machine**     | A **one-time** copy of components, model sets, profiles and runtimes from one machine to another. Credentials and history are not copied.                                                           |
+| **Clone machine**     | A **one-time** copy of components, model sets, profiles and runtimes from one machine to another. Sign-ins and history are not copied; an API-key login's keys follow, sealed.                      |
 
 A beginner who only imports never sees the word **Component**: the first run talks about "your
 instructions", "settings", "MCP servers" and "skills" (§4.3).
@@ -397,9 +397,11 @@ Settings → Setup → **Clone from another machine**. **Source** → **Preview*
 (only when the target already has profiles or runtimes) → **Done**.
 
 - **Source**: other machines; offline or not-set-up ones are disabled with the reason (E27).
-- **Preview**: **Copies** (_n_ components, _n_ model sets, _n_ profiles, _n_ runtimes); **Doesn't
-  copy** (_n_ logins — "Each becomes an empty slot on _target_ that needs sign-in. Runtimes keep
-  pointing at their slot." — and History); **Check after copying** (paths, E30); a note when a
+- **Preview**: **Copies** (_n_ components, _n_ model sets, _n_ profiles, _n_ runtimes); **Logins and
+  keys** (each API-key login "Copies with its key", each sign-in "Sign in on _target_", and one ticked box
+  "Copy _n_ API keys with the logins" — sealed, one passkey on the source; owner decision 2026-10-20);
+  **Doesn't copy** (_n_ sign-ins — "A refresh token on two machines would sign one of them out. Each
+  becomes an empty slot on _target_; sign in there. Runtimes keep pointing at their slot." — and History); **Check after copying** (paths, E30); a note when a
   harness is missing on the target (E29).
 - **Existing setup**: Add alongside / Replace (E28). Replace is a danger button "Replace and copy".
 - **Done**: what was copied, how many names got `-2`, **Sign in to use them** (each slot with "used
@@ -907,8 +909,8 @@ admin rights fails and hands the person the command (E2).
 ### 9.7 Import and clone never move a secret value
 
 The first-run import moves secret-looking setting values into the secret store and leaves a
-`${secret:NAME}` reference (E7); the scan route returns key **names** only. Clone copies references,
-never values (L7). No route, command or log line returns a credential value. `host` credentials are
+`${secret:NAME}` reference (E7); the scan route returns key **names** only. Clone copies references; the keys
+of API-key logins follow only in a sealed copy no caller can read, and a sign-in never moves (L7, secrets.md). No route, command or log line returns a credential value. `host` credentials are
 shown as "Shared with claude in your terminal" so a person knows where the login lives. A pairing
 code, QR or token never appears in any wireframe, prototype or capture.
 

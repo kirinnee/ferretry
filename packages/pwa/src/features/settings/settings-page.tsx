@@ -18,6 +18,7 @@ import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState, useS
 import { DENSITY_OPTIONS, useDensity } from '../../hooks/use-density.ts';
 import { type ThemeState, useTheme } from '../../hooks/use-theme.ts';
 import type { WardenStatusReader } from '../../hooks/use-warden-status.ts';
+import { machineDisplayOrder } from '../../lib/all-machines.ts';
 import { cn } from '../../lib/class-names.ts';
 import type { ConnectionHealthState } from '../../lib/connection-health.ts';
 import type { DaemonConnectionRecord } from '../../lib/connections.ts';
@@ -62,6 +63,7 @@ import {
   settingsSectionForSetting,
 } from './settings-catalog.ts';
 import { SettingsHome, type SettingsMachineEntry, SettingsSidebar } from './settings-navigation.tsx';
+import { SpeedupKeysSettings } from './speedup-keys-settings.tsx';
 
 export const TEXT_SCALE_OPTIONS = [
   { id: 'default', label: 'Default', description: 'Use the interface’s designed size.' },
@@ -96,6 +98,8 @@ const LEGACY_PANEL_ANCHORS: ReadonlySet<string> = new Set([
   'export',
   // Settings › Machine › About, named by the palette's Updates link.
   'about',
+  // Settings › Machine › Agent CLIs, named by the palette's Agent CLIs link.
+  'agent-clis',
 ]);
 
 const hashWord = (): string => (typeof window === 'undefined' ? '' : window.location.hash.replace(/^#/, ''));
@@ -349,6 +353,14 @@ export function SettingsPage({
   const focusFrame = useRef<number | undefined>(undefined);
   const selectedRecord = connections.find(candidate => candidate.daemonId === daemonId);
   const selectedName = selectedRecord === undefined ? undefined : daemonDisplayName(selectedRecord);
+  // The machines secrets can be copied to, kept as ONE array while they read the same: `connections` is a
+  // fresh array on every render, and a fresh list here would rebuild every machine tab with it.
+  const otherList = connections.filter(other => other.daemonId !== daemonId);
+  const otherKey = otherList.map(other => `${other.daemonId} ${daemonDisplayName(other)}`).join('\n');
+  const latestOthers = useRef(otherList);
+  latestOthers.current = otherList;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `otherKey` IS the list's identity; see above.
+  const otherMachines = useMemo(() => latestOthers.current, [otherKey]);
 
   const followHash = useCallback((): void => {
     if (followedHash.current === window.location.hash) return;
@@ -471,6 +483,7 @@ export function SettingsPage({
       ),
       theme: <ThemeSettings theme={theme} />,
       'install-app': <InstallAppSetting />,
+      'speedup-keys': <SpeedupKeysSettings />,
       dictation: (
         <DictationSettings {...dictation} {...(selectedRecord === undefined ? {} : { daemon: selectedRecord })} />
       ),
@@ -552,12 +565,14 @@ export function SettingsPage({
     createClient: createUpdateClient,
     ...(lockedMachines === undefined ? {} : { locked: lockedMachines }),
   });
-  const machines: readonly SettingsMachineEntry[] = connections.map(connection => ({
-    daemonId: connection.daemonId,
-    name: distinctDaemonName(connection, connections),
-    reach: reach.reachOf(connection.daemonId),
-    updateAvailable: updates.has(connection.daemonId),
-  }));
+  const machines: readonly SettingsMachineEntry[] = machineDisplayOrder(connections, device.machineOrder).map(
+    connection => ({
+      daemonId: connection.daemonId,
+      name: distinctDaemonName(connection, connections),
+      reach: reach.reachOf(connection.daemonId),
+      updateAvailable: updates.has(connection.daemonId),
+    }),
+  );
 
   const daemonPanels = useMemo<DaemonPanelsRenderer | undefined>(
     () =>
@@ -575,6 +590,7 @@ export function SettingsPage({
               {...(createPairingClient ? { createPairingClient } : {})}
               {...(createPasskeyClient ? { createPasskeyClient } : {})}
               {...(createSecretClient ? { createSecretClient } : {})}
+              otherMachines={otherMachines}
               panel={panel}
               onOpenPanel={onOpenPanel}
               additionalTabs={daemonSettingsTabs}
@@ -598,6 +614,7 @@ export function SettingsPage({
       daemonSettingsTabs,
       onRemoveDaemon,
       onRenameDaemon,
+      otherMachines,
       probeDaemon,
       readWardenStatus,
       relayAdvertised,

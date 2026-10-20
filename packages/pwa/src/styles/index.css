@@ -123,7 +123,7 @@ textarea {
 input:focus,
 textarea:focus {
   border-color: var(--accent);
-  box-shadow: 0 0 0 3px var(--ring);
+  box-shadow: 0 0 0 var(--focus-width) var(--ring);
 }
 
 /* Every theme keeps a visible focus ring — at least 2px, 3px in High Contrast. */
@@ -180,19 +180,23 @@ pre,
 }
 .scroll-thin::-webkit-scrollbar-thumb {
   background: color-mix(in srgb, var(--muted) 32%, transparent);
+  /* theme-literal-ok: a transparent inset that insets the thumb inside the track; not a drawn stroke */
   border: 3px solid transparent;
   background-clip: padding-box;
-  border-radius: 9999px;
+  border-radius: var(--radius-dot);
 }
 .scroll-thin::-webkit-scrollbar-thumb:hover {
   background: color-mix(in srgb, var(--muted) 52%, transparent);
   background-clip: padding-box;
+  /* theme-literal-ok: a transparent inset that insets the thumb inside the track; not a drawn stroke */
   border: 3px solid transparent;
 }
 
 /* ---- scroll-fade: soft top/bottom edge fades on the transcript ----------- */
 .scroll-fade-y {
+  /* theme-literal-ok: an alpha mask — only the opacity of #000 matters, never its hue */
   -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 14px, #000 calc(100% - 14px), transparent 100%);
+  /* theme-literal-ok: an alpha mask — only the opacity of #000 matters, never its hue */
   mask-image: linear-gradient(to bottom, transparent 0, #000 14px, #000 calc(100% - 14px), transparent 100%);
 }
 
@@ -543,7 +547,7 @@ pre,
 .md blockquote {
   margin: 0.7em 0;
   padding: 0.1em 0 0.1em 0.95em;
-  border-left: 2.5px solid var(--border);
+  border-left: var(--stroke-heavy) solid var(--border);
   color: var(--fg-soft);
 }
 /* inline code */
@@ -672,7 +676,7 @@ pre,
     gap: 4px;
     height: 24px;
     padding: 0 8px;
-    border: 1px solid transparent;
+    border: var(--stroke-control) solid transparent;
     border-radius: var(--radius-control, 6px);
     background: transparent;
     color: var(--muted);
@@ -706,7 +710,7 @@ pre,
     width: 100%;
   }
   [data-md-table-view='cards'] table {
-    border: 1px solid var(--border);
+    border: var(--stroke) solid var(--border);
     border-radius: var(--radius-sm);
     overflow: hidden;
   }
@@ -724,7 +728,7 @@ pre,
   }
   [data-md-table-view='cards'] tr {
     padding: var(--flow-1, 4px) 0;
-    border-top: 1px solid var(--border-soft, var(--border));
+    border-top: var(--divider-width) solid var(--divider-color);
   }
   [data-md-table-view='cards'] tr:first-child {
     border-top: 0;
@@ -780,17 +784,17 @@ pre,
     overflow-wrap: normal;
     word-break: normal;
     hyphens: manual;
-    border-width: 0 1px 1px 0;
+    border-width: 0 var(--divider-width) var(--divider-width) 0;
     border-color: var(--border-soft, var(--border));
   }
   [data-md-table-view='table'] tr > :first-child {
-    border-left-width: 1px;
+    border-left-width: var(--divider-width);
   }
   [data-md-table-view='table'] thead th {
     position: sticky;
     top: 0;
     z-index: 2;
-    border-top-width: 1px;
+    border-top-width: var(--divider-width);
   }
   [data-md-table-view='table'] tr > :first-child {
     position: sticky;
@@ -1460,7 +1464,7 @@ body {
   padding-block: var(--pad-row-y);
   padding-inline: var(--gap-xs);
   border: 0;
-  border-bottom: 2px solid transparent;
+  border-bottom: var(--stroke-heavy) solid transparent;
   border-radius: 0;
   background: transparent;
   box-shadow: none;
@@ -1557,7 +1561,7 @@ body {
 .kt-findbox kbd {
   margin-inline-start: auto;
   padding: 0 4px;
-  border: 1px solid var(--border-strong);
+  border: var(--stroke) solid var(--border-strong);
   border-radius: var(--radius-xs);
   font-family: var(--font-mono);
   font-size: var(--text-2xs);
@@ -1712,6 +1716,7 @@ body {
   scrollbar-width: none;
   --fade-start: 0px;
   --fade-end: 0px;
+  /* theme-literal-ok: an alpha mask — only the opacity of #000 matters, never its hue */
   mask-image: linear-gradient(
     to right,
     transparent 0,
@@ -1811,8 +1816,8 @@ body {
   place-items: center;
   width: 28px;
   height: 28px;
-  border: 2px solid var(--step-todo-edge, var(--border-strong));
-  border-radius: 9999px;
+  border: var(--stroke-heavy) solid var(--step-todo-edge, var(--border-strong));
+  border-radius: var(--radius-dot);
   background: var(--surface);
   color: var(--step-todo-fg, var(--muted));
   font-family: var(--font-ui);
@@ -1885,7 +1890,7 @@ body {
 .kt-stepsegs > span {
   flex: 1;
   height: 6px;
-  border-radius: 3px;
+  border-radius: var(--radius-xs);
   background: var(--step-seg, var(--border-strong));
 }
 .kt-stepsegs > span[data-state='done'] {
@@ -1982,7 +1987,7 @@ body {
 .kt-composer:focus-within {
   border-color: var(--accent);
   box-shadow:
-    0 0 0 3px var(--ring),
+    0 0 0 var(--focus-width) var(--ring),
     var(--focus-shadow);
 }
 
@@ -2196,7 +2201,7 @@ body {
 .kt-msg[data-role='user'] {
   padding: var(--pad-row-y) var(--pad-panel);
   background: var(--user-bg);
-  box-shadow: inset 2px 0 0 var(--user-border);
+  box-shadow: inset var(--stroke-heavy) 0 0 0 var(--user-border);
 }
 /* Ember reads the transcript in a serif at a book measure — the single change
    that makes it a different TOOL rather than a warm recolour. Applies to prose
@@ -2245,7 +2250,7 @@ body {
      with a glyph + aria-label. Squaring it in Neo would destroy the
      shape-carries-meaning contract. */
   border-radius: var(--radius-dot);
-  border: 1px solid var(--border-strong);
+  border: var(--stroke) solid var(--border-strong);
 }
 .kt-meter {
   display: flex;
@@ -2308,7 +2313,7 @@ body {
    border, so row geometry (and the 44px targets) never shifts and the list's
    dividers stay flush. Echoes the `--rail-active` family signature. */
 .kt-task-rail {
-  box-shadow: inset 3px 0 0 var(--task-tone);
+  box-shadow: inset var(--stroke-heavy) 0 0 0 var(--task-tone);
 }
 
 /* Kanban lane identity: a filled dot beside the lane label. Round on purpose —
@@ -2318,7 +2323,7 @@ body {
   width: 8px;
   height: 8px;
   border-radius: var(--radius-dot);
-  border: 1px solid var(--task-tone-border);
+  border: var(--stroke) solid var(--task-tone-border);
   background: var(--task-tone);
 }
 
@@ -2339,7 +2344,7 @@ body {
    state tone instead of a fixed accent, so blocked reads urgent and done reads
    settled before a word is parsed. */
 .kt-task-summary {
-  border: 1px solid var(--task-tone-border);
+  border: var(--stroke) solid var(--task-tone-border);
   border-radius: var(--radius-control);
   background: var(--task-tone-bg);
 }
@@ -2371,14 +2376,14 @@ body {
 :root[data-theme^='mission-'] .kt-panel[data-hud]::before {
   top: -1px;
   left: -1px;
-  border-top: 2px solid var(--accent);
-  border-left: 2px solid var(--accent);
+  border-top: var(--stroke-heavy) solid var(--accent);
+  border-left: var(--stroke-heavy) solid var(--accent);
 }
 :root[data-theme^='mission-'] .kt-panel[data-hud]::after {
   right: -1px;
   bottom: -1px;
-  border-right: 2px solid var(--accent);
-  border-bottom: 2px solid var(--accent);
+  border-right: var(--stroke-heavy) solid var(--accent);
+  border-bottom: var(--stroke-heavy) solid var(--accent);
 }
 
 /* ---- High Contrast: nothing may be invisible --------------------------
@@ -2418,8 +2423,8 @@ body {
   text-align: center;
   overflow: auto;
   overscroll-behavior: contain;
-  background: var(--surface, #111);
-  color: var(--fg, #f5f5f5);
+  background: var(--surface);
+  color: var(--fg);
 }
 
 .fy-portrait-gate__icon {
