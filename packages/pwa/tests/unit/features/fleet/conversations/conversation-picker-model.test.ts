@@ -2,6 +2,7 @@ import { describe, expect, it } from 'bun:test';
 import { CONVERSATION_IMPORT_PATH } from '@ferretry/protocol';
 import {
   adoptRequest,
+  conversationHeadline,
   EMPTY_FILTER,
   EMPTY_SELECTION,
   folderLabel,
@@ -23,6 +24,42 @@ import {
 import { runtime } from '../account-support.ts';
 import { conversation, NOW } from './conversation-support.ts';
 
+describe('the headline of a row', () => {
+  it('is the name, with the first message under it', () => {
+    expect(conversationHeadline(conversation('a', { name: 'Cart bugfix', preview: 'Fix the cart' }))).toEqual({
+      headline: 'Cart bugfix',
+      secondary: 'Fix the cart',
+      named: true,
+    });
+  });
+
+  it('is the first message only when there is no name, and a placeholder when there is none', () => {
+    expect(conversationHeadline(conversation('a', { preview: 'Fix the cart' }))).toEqual({
+      headline: 'Fix the cart',
+      named: false,
+    });
+    expect(conversationHeadline(conversation('a', { preview: '  ' })).headline).toBe('No message preview');
+  });
+
+  it('is the ferret when it is one, with the conversation name under it, or else the first message', () => {
+    expect(conversationHeadline(conversation('a', { name: 'Cart bugfix' }), 'Mika')).toMatchObject({
+      headline: 'Mika',
+      secondary: 'Cart bugfix',
+    });
+    expect(conversationHeadline(conversation('a', { name: 'Mika', preview: 'Fix the cart' }), 'Mika')).toMatchObject({
+      secondary: 'Fix the cart',
+    });
+    expect(conversationHeadline(conversation('a', { preview: 'Fix the cart' }), 'Mika')).toMatchObject({
+      headline: 'Mika',
+      secondary: 'Fix the cart',
+    });
+    expect(conversationHeadline(conversation('a', { preview: ' ' }), 'Mika')).toEqual({
+      headline: 'Mika',
+      named: true,
+    });
+  });
+});
+
 describe('search and date filters', () => {
   it('matches every word, in any case, across the first message, the latest one and the folder', () => {
     const row = conversation('a', { preview: 'Fix the Checkout', latest: 'now the tests', project: '/work/shop' });
@@ -31,6 +68,12 @@ describe('search and date filters', () => {
     expect(matchesSearch(row, 'tests')).toBe(true);
     expect(matchesSearch(row, 'checkout notes')).toBe(false);
     expect(matchesSearch(conversation('b'), 'tests')).toBe(false);
+  });
+
+  it('matches a word in the conversation name too', () => {
+    const row = conversation('a', { name: 'Cart total bugfix' });
+    expect(matchesSearch(row, 'BUGFIX cart')).toBe(true);
+    expect(matchesSearch(row, 'refund')).toBe(false);
   });
 
   it('keeps rows active within the window, and every row for any time', () => {

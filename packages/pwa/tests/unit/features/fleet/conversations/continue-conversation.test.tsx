@@ -150,6 +150,13 @@ const action = (key: string): string => `[data-continue-action="${key}"]`;
 const SHOP = 'conversation:claude:shop-cart';
 
 describe('ContinueConversation over all conversations', () => {
+  it('heads a named conversation by its name and finds it by that name', async () => {
+    await open({ list: () => listing([conversation('shop-cart', { name: 'Cart total bugfix', latest: 'ship it' })]) });
+    const row = '[data-continue-row="shop-cart"]';
+    expect(text(`${row} [data-conversation-name]`)).toBe('Cart total bugfix');
+    expect(text(`${row} [data-conversation-first]`)).toBe('Fix the shop-cart page');
+  });
+
   it('lists Ferretry’s own conversations: first message and age, the latest message, then where', async () => {
     const sent: Sent[] = [];
     await open({ sent });
@@ -372,6 +379,19 @@ describe('ContinueConversation continuing', () => {
 });
 
 describe('ContinueConversation over Ferretry sessions', () => {
+  it('heads a ferret by its own name, with the name of its conversation under it', async () => {
+    await open({
+      sessions: SESSIONS,
+      list: () =>
+        listing([
+          conversation('notes-kept', { project: '/work/notes', adoptedBy: 'notes-ferret', name: 'Notes cleanup' }),
+        ]),
+    });
+    const row = '[data-continue-session="notes-ferret"]';
+    expect(text(`${row} [data-conversation-name]`)).toBe('Mika');
+    expect(text(`${row} [data-conversation-first]`)).toBe('Notes cleanup');
+  });
+
   it('starts on the stopped ferrets, newest first, each said by the conversation it keeps', async () => {
     const sent: Sent[] = [];
     await open({ sent, sessions: SESSIONS });
@@ -382,8 +402,7 @@ describe('ContinueConversation over Ferretry sessions', () => {
     expect(text('[data-continue-count]')).toBe('2 stopped ferrets');
     const rows = [...(view?.container.querySelectorAll('[data-continue-session]') ?? [])];
     expect(rows.map(row => row.getAttribute('data-continue-session'))).toEqual(['notes-ferret', 'api-ferret']);
-    expect(text('[data-continue-session="notes-ferret"]')).toContain('Fix the notes-kept page2h ago');
-    expect(text('[data-continue-session="notes-ferret"]')).toContain('Mika ·');
+    expect(text('[data-continue-session="notes-ferret"]')).toContain('Mika2h agoFix the notes-kept page');
     expect(text('[data-continue-session="api-ferret"]')).toContain('api1d ago');
     expect(text('[data-continue-session="api-ferret"]')).toContain('work/api· Codex · failed');
   });

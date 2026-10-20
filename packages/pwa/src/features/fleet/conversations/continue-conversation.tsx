@@ -306,7 +306,7 @@ export function ContinueConversation({
               <ConversationLines
                 row={{ ...row.conversation, lastActivityAt: row.lastActivityAt }}
                 now={at}
-                lead={row.name}
+                title={row.name}
               />
             )
           }
