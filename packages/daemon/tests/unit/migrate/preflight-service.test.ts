@@ -80,9 +80,17 @@ describe('MigrationPreflight', () => {
     should(preflight.gate(report)).deepEqual({
       proceed: false,
       forced: false,
-      reason: 'refused: in-flight work is destructive_to_interrupt',
+      reason: 'refused: The agent is in the middle of a Bash call that changes things — git push origin main',
     });
     should(preflight.gate(report, { force: true }).forced).be.true();
+    should(preflight.describe(report)).match({
+      status: 'tool_running',
+      blockedBy: 'destructive',
+      items: [
+        { kind: 'tool', blocks: true, detail: 'git push origin main' },
+        { kind: 'process', blocks: false },
+      ],
+    });
   });
 
   it('should count the codex pane footer only for a codex session', async () => {
@@ -120,7 +128,8 @@ describe('MigrationPreflight', () => {
     should(preflight.gate(report)).deepEqual({
       proceed: false,
       forced: false,
-      reason: 'refused: the codex pane footer could not be read: no server running',
+      reason:
+        'refused: Ferretry couldn’t check what the agent is running — the codex pane footer could not be read: no server running',
     });
   });
 

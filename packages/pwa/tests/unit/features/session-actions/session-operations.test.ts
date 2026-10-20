@@ -11,6 +11,8 @@ import {
   DetailedFailure,
   forkThroughLatest,
   NothingToForkError,
+  RestartRefused,
+  restartRefusedSentence,
   restartWithResume,
 } from '../../../../src/features/session-actions/session-operations.ts';
 import { sessionView } from '../../../support/sessions.ts';
@@ -57,6 +59,8 @@ interface Scripted {
   pages: SessionTranscriptPage[];
   outcome: ForkSessionOutcome | Error;
   renamed: SessionView;
+  /** A refusal the first, unforced migrate throws. */
+  refuse?: Error;
 }
 
 const scripted = (overrides: Partial<Scripted> = {}): Scripted => ({
@@ -91,8 +95,10 @@ const client = (state: Scripted) => {
       model: string | undefined,
       allowContextDowngrade: boolean | undefined,
       requestId: string | undefined,
+      forceInflight: boolean | undefined,
     ) => {
-      state.calls.push({ name: 'migrate', args: [id, agent, model, allowContextDowngrade, requestId] });
+      state.calls.push({ name: 'migrate', args: [id, agent, model, allowContextDowngrade, requestId, forceInflight] });
+      if (state.refuse !== undefined && forceInflight !== true) throw state.refuse;
       return state.renamed;
     },
   };
@@ -191,7 +197,7 @@ describe('restartWithResume', () => {
     const fake = client(state);
     const result = await restartWithResume(fake, view, 'req-2');
     expect(result).toEqual(state.renamed);
-    expect(state.calls).toEqual([{ name: 'migrate', args: ['a1', 'nero', undefined, false, 'req-2'] }]);
+    expect(state.calls).toEqual([{ name: 'migrate', args: ['a1', 'nero', undefined, false, 'req-2', undefined] }]);
   });
 });
 
@@ -220,5 +226,63 @@ describe('restartWithResume — a refusal because ps failed', () => {
     const plain = new Error('socket closed');
     for (const error of [inflight, other, plain])
       expect(await restartWithResume(failing(error), view, 'req-4').catch((reason: unknown) => reason)).toBe(error);
+  });
+});
+
+describe('restartWithResume — a refusal that names what is running', () => {
+  const body = (blockedBy: 'unknown' | 'destructive' | 'unreadable', blocks = true) => ({
+    error: 'refused: raw daemon words',
+    code: 'migration_refused',
+    inflight: {
+      status: 'running',
+      turn: 13,
+      blockedBy,
+      restartsWithCli: 1,
+      items: [
+        { kind: 'process', verdict: 'unknown', title: 'A program Ferretry doesn’t recognise is running', blocks },
+      ],
+    },
+  });
+  const paused = (payload: unknown) => new FyHttpError('refused: raw daemon words', 409, 'migration_refused', payload);
+
+  it('throws RestartRefused carrying the refusal, in a sentence that says nothing was restarted', async () => {
+    const state = scripted({ refuse: paused(body('unknown')) });
+    const thrown = await restartWithResume(client(state), view, 'req-5').catch((reason: unknown) => reason);
+    expect(thrown).toBeInstanceOf(RestartRefused);
+    expect((thrown as RestartRefused).refusal.blockedBy).toBe('unknown');
+    expect((thrown as RestartRefused).message).toBe(
+      'Restart paused — Ferretry can’t tell if what the agent is running is safe to stop. Nothing was restarted.',
+    );
+    expect(state.calls).toHaveLength(1);
+  });
+
+  it('says each cause in its own plain words', () => {
+    const refusal = (blockedBy: 'unknown' | 'destructive' | 'unreadable') =>
+      restartRefusedSentence({ status: 'running', turn: 1, blockedBy, items: [], restartsWithCli: 0 });
+    expect(refusal('destructive')).toContain('could be left half-done if it is stopped');
+    expect(refusal('unreadable')).toContain('couldn’t check what the agent is running');
+  });
+
+  it('restarts anyway by asking again with forceInflight, under a fresh request id', async () => {
+    const state = scripted({ refuse: paused(body('destructive')) });
+    const thrown = (await restartWithResume(client(state), view, 'req-6').catch(
+      (reason: unknown) => reason,
+    )) as RestartRefused;
+    const result = await thrown.restartAnyway();
+    expect(result).toEqual(state.renamed);
+    const [first, second] = state.calls;
+    expect(first?.args.at(-1)).toBeUndefined();
+    expect(second?.args.at(-1)).toBe(true);
+    expect(String(second?.args[4])).toStartWith('req-6-anyway-');
+    expect(second?.args[4]).not.toBe(first?.args[4]);
+  });
+
+  it('keeps the older paths for a refusal with nothing to point at', async () => {
+    const noBlockers = paused(body('unknown', false));
+    const noInflight = paused({ error: 'refused: raw daemon words', code: 'migration_refused' });
+    for (const error of [noBlockers, noInflight]) {
+      const state = scripted({ refuse: error });
+      expect(await restartWithResume(client(state), view, 'req-7').catch((reason: unknown) => reason)).toBe(error);
+    }
   });
 });

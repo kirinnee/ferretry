@@ -59,6 +59,7 @@ import { ForkForm } from '../../features/session-actions/fork-form.tsx';
 import { type SessionActionContribution, sessionActionSections } from '../../features/session-actions/registry.ts';
 import { RenameForm } from '../../features/session-actions/rename-form.tsx';
 import { addSessionMcp, previewSessionMcp, readSessionMcp } from '../../features/session-actions/session-mcp-api.ts';
+import { useRestartRefusal } from '../../features/session-actions/restart-refusal.tsx';
 import { forkThroughLatest, restartWithResume } from '../../features/session-actions/session-operations.ts';
 import type { InfoTab } from '../../features/session-info/info-model.ts';
 import { readRelaunchSettings } from '../../features/session-info/relaunch-settings-api.ts';
@@ -607,6 +608,7 @@ export function SessionChatPage({
     },
     [connection, onRefresh, onSessionChange, session.config.id],
   );
+  const restartRefusal = useRestartRefusal(publish, session.config.id);
   const questionApi = useMemo<QuestionAnswerApi>(
     () => ({
       answer: async (daemon, sessionId, toolUseId, labels, other, responses, answers, requestId) => {
@@ -885,12 +887,22 @@ export function SessionChatPage({
       await restartWithResume(daemon, session, `restart-${session.config.id}-${session.state.turn}-${Date.now()}`),
     );
   }, [connection, publish, routedClient, session]);
+  // For callers that report their own failure (Info, the transcript notice, Add MCP): the refusal still
+  // reaches the page's confirm, and is rethrown so none of them claims a restart that did not happen.
+  const restartSurfacingRefusal = useCallback(async (): Promise<void> => {
+    try {
+      await restart();
+    } catch (reason) {
+      restartRefusal.capture(reason);
+      throw reason;
+    }
+  }, [restart, restartRefusal]);
   const mcpPorts = useMemo<AddMcpPorts>(
     () => ({
       listing: signal => readSessionMcp(connection, scope, referenceFetch, signal),
       preview: (mcpScope, request) => previewSessionMcp(connection, scope, mcpScope, request, referenceFetch),
       add: (mcpScope, request) => addSessionMcp(connection, scope, mcpScope, request, referenceFetch),
-      reload: restart,
+      reload: restartSurfacingRefusal,
       ...(daemonSessions === undefined
         ? {}
         : {
@@ -920,7 +932,7 @@ export function SessionChatPage({
       connection,
       scope,
       referenceFetch,
-      restart,
+      restartSurfacingRefusal,
       daemonSessions,
       routedClient,
       session.config.id,
@@ -978,7 +990,10 @@ export function SessionChatPage({
       compact={compact}
       form={actionForm}
       name={agentName}
-      onFailure={(sentence, detail) => setActionFailure(detail === undefined ? { sentence } : { sentence, detail })}
+      onFailure={(sentence, detail, reason) => {
+        if (restartRefusal.capture(reason)) setActionFailure(null);
+        else setActionFailure(detail === undefined ? { sentence } : { sentence, detail });
+      }}
       onNotice={setActionNotice}
       onFormChange={setActionForm}
       sections={actionSections}
@@ -1129,7 +1144,9 @@ export function SessionChatPage({
                 : { onOpenSession: (id: string) => onNavigate(daemonSessionPath(connection.daemonId, id)) })}
               {...(infoControls === undefined ? {} : { runtimeControls: infoControls })}
               {...(infoLearning === undefined ? {} : { learning: infoLearning })}
-              {...(canControl && !TERMINAL_STATUSES.has(session.state.status) ? { onRestart: restart } : {})}
+              {...(canControl && !TERMINAL_STATUSES.has(session.state.status)
+                ? { onRestart: restartSurfacingRefusal }
+                : {})}
             />
           ),
         };
@@ -1182,11 +1199,15 @@ export function SessionChatPage({
         have made the two disagree. Rendered only when there is something to
         render, precisely because it announces nothing. */}
       {reconnecting ? null : transcriptUnbound ? (
-        <TranscriptUnboundNotice onCheckAgain={() => onRefresh?.()} {...(canControl ? { onRestart: restart } : {})} />
+        <TranscriptUnboundNotice
+          onCheckAgain={() => onRefresh?.()}
+          {...(canControl ? { onRestart: restartSurfacingRefusal } : {})}
+        />
       ) : refreshError === null ? null : (
         <CompactIssue sentence={refreshError} />
       )}
       {actionAlert}
+      {restartRefusal.panel}
     </>
   );
   // The text column and the composer share one measure (`.kt-chat-surface`, styles/index.css); the

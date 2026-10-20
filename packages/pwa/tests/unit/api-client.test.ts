@@ -149,10 +149,12 @@ describe('daemon API client', () => {
       agent: 'codex-auto-atomi',
       model: 'gpt-5.6-terra',
       allowContextDowngrade: true,
+      forceInflight: false,
     });
     should(JSON.parse(String(secondCall?.init.body))).eql({
       agent: 'claude-auto-loge5',
       allowContextDowngrade: false,
+      forceInflight: false,
     });
   });
 });

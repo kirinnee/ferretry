@@ -474,7 +474,7 @@ async function run(route: ApiRoute, context: RouteContext): Promise<ApiResponse>
   } catch (error) {
     response =
       error instanceof ApiError
-        ? errorResponse(error.status, error.message, error.code)
+        ? errorResponse(error.status, error.message, error.code, error.extra)
         : errorResponse(500, 'the daemon failed to handle this request', 'internal_error');
   }
   return route.noStore === true ? noStore(response) : response;

@@ -1471,7 +1471,15 @@ export class FakeSessionSend implements SessionSendSubsystem {
 export class FakeSessionMigrate implements SessionMigrateSubsystem {
   /** Every migration that reached the subsystem, as the session and the request it carried. */
   readonly migrations: Array<
-    readonly [string, { readonly agent: string; readonly model?: string; readonly allowContextDowngrade: boolean }]
+    readonly [
+      string,
+      {
+        readonly agent: string;
+        readonly model?: string;
+        readonly allowContextDowngrade: boolean;
+        readonly forceInflight: boolean;
+      },
+    ]
   > = [];
 
   constructor(
@@ -1483,7 +1491,12 @@ export class FakeSessionMigrate implements SessionMigrateSubsystem {
 
   async migrate(
     sessionId: string,
-    request: { readonly agent: string; readonly model?: string; readonly allowContextDowngrade: boolean },
+    request: {
+      readonly agent: string;
+      readonly model?: string;
+      readonly allowContextDowngrade: boolean;
+      readonly forceInflight: boolean;
+    },
   ): Promise<SessionView> {
     this.migrations.push([sessionId, request]);
     const refusal = this.refusals[sessionId];

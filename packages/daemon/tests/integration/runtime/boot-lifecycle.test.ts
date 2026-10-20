@@ -34,6 +34,7 @@ import {
   SessionStateSchema,
   SessionTranscriptPageSchema,
   type SessionView,
+  MigrationRefusedBodySchema,
   SessionViewSchema,
   type SttEnhancementResult,
   TerminalListViewSchema,
@@ -3123,6 +3124,36 @@ describe('daemon boot lifecycle', () => {
     const movedBack = await migrate({ agent: WRAPPER }, 'req-migrate-back');
     const turnsAfterSecond = (await readdir(join(home, 'state', 'sessions', id, 'turns'))).sort();
     const secondReport = await readFile(reportFile, 'utf8');
+    // RESTART ANYWAY. The session is back on its original account and rate-limited again, and a
+    // process the gate cannot classify is in the pane. Without the flag the refusal says so as data;
+    // with it, a person who confirmed gets the move — journalled, and marked FORCED in the report.
+    await writeFile(
+      stateFile,
+      JSON.stringify({ ...(JSON.parse(await readFile(stateFile, 'utf8')) as object), status: 'rate_limited' }),
+      { mode: 0o600 },
+    );
+    inventory.observation = {
+      kind: 'observed',
+      processes: [
+        { pid: 5151, argv: 'some-vendor-tool --watch', startedSecondsAgo: 86_400, verdict: 'unknown' },
+        {
+          pid: 5152,
+          argv: 'fy mcp serve',
+          startedSecondsAgo: 86_400,
+          verdict: 'safe_to_kill',
+          known: { kind: 'ferretry-tools', label: 'The Ferretry tools server' },
+        },
+      ],
+    };
+    const unforced = await migrate({ agent: TARGET_WRAPPER, allowContextDowngrade: true }, 'req-migrate-anyway-1');
+    const unforcedBody: unknown = await unforced.json();
+    const forced = await migrate(
+      { agent: TARGET_WRAPPER, allowContextDowngrade: true, forceInflight: true },
+      'req-migrate-anyway-2',
+    );
+    const forcedRaw: unknown = await forced.json();
+    const forcedReport = await readFile(reportFile, 'utf8');
+    const forcedJournal = await readFile(join(home, 'state', 'sessions', id, 'events.jsonl'), 'utf8');
     // THE OTHER DIRECTION, which is a different session rather than a different request: a codex
     // session asked to move onto a claude account. Both crossings were permitted before, and they fail
     // differently — a claude transcript is unreadable to codex and a codex rollout is unreadable to
@@ -3220,10 +3251,11 @@ describe('daemon boot lifecycle', () => {
     // A new incarnation, because a different program is answering the next turn.
     should(afterMove).have.property('runtimeGeneration', 2);
     should(afterMove).have.property('incarnation', `${id}-2`);
-    // THE LIVE PANE WAS REPLACED, not typed into — for BOTH moves. Without that the old account
-    // would still be serving the session while its own record named the new one.
-    should(reviver.snapshots).deepEqual([id, id]);
-    should(reviver.relaunched).deepEqual([id, id]);
+    // THE LIVE PANE WAS REPLACED, not typed into — for ALL THREE moves (the clean one, the way back and
+    // the forced restart). Without that the old account would still be serving the session while its own
+    // record named the new one.
+    should(reviver.snapshots).deepEqual([id, id, id]);
+    should(reviver.relaunched).deepEqual([id, id, id]);
     // The replacement agent is pointed at the report, through the same turn document a revive writes.
     should(reviver.delivered[0]).containEql('turns/turn-002.md');
     should(turnTwo).containEql('migration-inflight.md');
@@ -3245,6 +3277,23 @@ describe('daemon boot lifecycle', () => {
     // file, and this one describes the move that just happened.
     should(secondReport.split('# Migration in-flight report')).have.length(2);
     should(secondReport).containEql(`onto \`${WRAPPER}\``);
+    // The unforced refusal carries the inventory as data: the unknown program is the one blocker, and
+    // the agent's own tools server is counted as restarting with the CLI rather than listed.
+    should(unforced.status).equal(409);
+    const unforcedRefusal = MigrationRefusedBodySchema.parse(unforcedBody);
+    should(unforcedRefusal.inflight).match({ blockedBy: 'unknown', restartsWithCli: 1 });
+    should(unforcedRefusal.inflight?.items.map(item => [item.title, item.detail])).deepEqual([
+      ['A program Ferretry doesn’t recognise is running', 'some-vendor-tool --watch'],
+    ]);
+    should(unforcedRefusal.error).not.containEql('in-flight work is unknown');
+    // Forced, the same request goes through, says so in the report, and leaves a journal entry that
+    // names what it went past.
+    if (forced.status !== 200) throw new Error(`the forced restart was refused: ${JSON.stringify(forcedRaw)}`);
+    should(SessionViewSchema.parse(forcedRaw).config.agent).equal(TARGET_WRAPPER);
+    should(forcedReport).containEql('FORCED past a destructive/unknown refusal');
+    should(forcedJournal).containEql('"session.migrate_forced"');
+    should(forcedJournal).containEql('some-vendor-tool --watch');
+    should(forcedJournal).not.containEql('fy mcp serve');
     // An agent the fleet does not publish is a fact about the agent, not about the session.
     should(unknownAgent.status).equal(404);
     should((await unknownAgent.json()) as { code: string }).have.property('code', 'unknown_agent');

@@ -1,6 +1,8 @@
-import { readlink } from 'node:fs/promises';
-import { isAbsolute } from 'node:path';
+import { isAbsolute, join } from 'node:path';
+import { readFile, readlink } from 'node:fs/promises';
 import type { ProcessObservation } from '../../lib/migrate/inflight-report.ts';
+import { configuredServersOf, type ConfiguredServersPort } from '../../lib/migrate/configured-servers.ts';
+import { identifyKnownProcesses } from '../../lib/migrate/harness-provenance.ts';
 import type {
   ProcessInventoryPort,
   ProcessProbePort,
@@ -64,6 +66,7 @@ export class PaneProcessInventory implements ProcessInventoryPort {
   constructor(
     private readonly tmux: TmuxCommandPort,
     private readonly probe: ProcessProbePort,
+    private readonly provenance: { readonly binaryName: string; readonly servers: ConfiguredServersPort },
   ) {}
 
   async collect(tmuxSession: string): Promise<ProcessObservation> {
@@ -87,7 +90,16 @@ export class PaneProcessInventory implements ProcessInventoryPort {
       const rows = descendantsOf(panePid, parseProcessTable(table.stdout));
       const cwdByPid = new Map<number, string | undefined>();
       for (const row of rows) cwdByPid.set(row.pid, await this.probe.workingDirectory(row.pid));
-      return { kind: 'observed', processes: inventoryProcesses(rows, cwdByPid) };
+      // The project's own server list is read from the directory the pane runs in; where that is not
+      // readable (no /proc) the servers stay unexplained and therefore unclassified, never assumed.
+      const paneDirectory = await this.probe.workingDirectory(panePid);
+      const configuredServers = paneDirectory === undefined ? [] : await this.provenance.servers.read(paneDirectory);
+      const known = identifyKnownProcesses(rows, {
+        rootPid: panePid,
+        binaryName: this.provenance.binaryName,
+        configuredServers,
+      });
+      return { kind: 'observed', processes: inventoryProcesses(rows, cwdByPid, known) };
     } catch (error) {
       return unobservable(`the pane could not be inspected: ${detail(error)}`);
     }
@@ -132,5 +144,17 @@ export class TmuxPaneSnapshot implements PaneSnapshotPort {
     if (result.code === 0) return result.stdout;
     if (await paneConfirmedAbsent(this.tmux, tmuxSession)) return undefined;
     throw new Error(`tmux could not capture the pane: ${result.stderr.trim() || `exited ${result.code}`}`);
+  }
+}
+
+/** Reads `<directory>/.mcp.json`. A missing, unreadable or malformed file explains no process. */
+export class ProjectMcpServers implements ConfiguredServersPort {
+  async read(directory: string) {
+    try {
+      return configuredServersOf(await readFile(join(directory, '.mcp.json'), 'utf8'));
+    } catch {
+      // No file, or one this daemon may not read: nothing is configured as far as the inventory can tell.
+      return [];
+    }
   }
 }

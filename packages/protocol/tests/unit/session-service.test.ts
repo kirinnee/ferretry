@@ -241,7 +241,29 @@ const sessionCases: SchemaCase[] = [
   {
     name: 'migrate request',
     schema: session.MigrateSessionRequestSchema,
-    value: { agent: 'next', allowContextDowngrade: false },
+    value: { agent: 'next', allowContextDowngrade: false, forceInflight: true },
+  },
+  {
+    name: 'in-flight item',
+    schema: session.InflightItemSchema,
+    value: {
+      kind: 'process',
+      verdict: 'unknown',
+      title: 'A program Ferretry doesn’t recognise is running',
+      detail: 'some-vendor-tool --watch',
+      age: '2m',
+      blocks: true,
+    },
+  },
+  {
+    name: 'migration refusal',
+    schema: session.MigrationRefusalSchema,
+    value: { status: 'running', turn: 13, blockedBy: 'unreadable', restartsWithCli: 1, items: [] },
+  },
+  {
+    name: 'migration refused body',
+    schema: session.MigrationRefusedBodySchema,
+    value: { error: 'refused: nothing', code: 'migration_refused' },
   },
   { name: 'rename request', schema: session.RenameSessionRequestSchema, value: { name: 'New Name' } },
   { name: 'agent rename', schema: session.RenameSessionRequestSchema, value: { teammate: 'Mary-Jane2' } },

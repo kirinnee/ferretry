@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { DAEMON_CAPABILITIES, type GrantsView, type SessionView } from '@ferretry/protocol';
+import { FyHttpError } from '@ferretry/protocol/client';
 import {
   SessionRowActionsHost,
   sessionRowMenuRenderer,
@@ -67,7 +68,7 @@ interface Calls {
   readonly fetches: string[];
 }
 
-const setup = (options: { warden?: boolean; known?: boolean } = {}) => {
+const setup = (options: { warden?: boolean; known?: boolean; pausedRestart?: boolean } = {}) => {
   const calls: Calls = { stop: [], resume: [], migrate: [], rename: [], fork: [], fetches: [] };
   const record = { ...alpha, pairedAt: 1, lastSelectedAt: 1 };
   const client = {
@@ -82,6 +83,26 @@ const setup = (options: { warden?: boolean; known?: boolean } = {}) => {
     },
     migrate: async (...args: unknown[]) => {
       calls.migrate.push(args);
+      if (options.pausedRestart === true && args[5] !== true)
+        throw new FyHttpError('refused', 409, 'migration_refused', {
+          error: 'refused',
+          code: 'migration_refused',
+          inflight: {
+            status: 'running',
+            turn: 2,
+            blockedBy: 'unknown',
+            restartsWithCli: 1,
+            items: [
+              {
+                kind: 'process',
+                verdict: 'unknown',
+                title: 'A program Ferretry doesn’t recognise is running',
+                detail: 'fy-helper --watch',
+                blocks: true,
+              },
+            ],
+          },
+        });
       return RUNNING;
     },
     rename: async (...args: unknown[]) => {
@@ -135,6 +156,7 @@ const show = async (
     daemonId?: string;
     warden?: boolean;
     known?: boolean;
+    pausedRestart?: boolean;
   } = {},
 ) => {
   const { calls, store } = setup(options);
@@ -274,6 +296,22 @@ describe('the sessions bar row actions', () => {
     expect(calls.migrate).toHaveLength(1);
     expect(calls.migrate[0]?.[0]).toBe('s-run');
     expect(calls.migrate[0]?.[1]).toBe('nero');
+  });
+
+  it('holds a restart the daemon pauses for a confirm, and Restart anyway forces it under a fresh id', async () => {
+    const { root, calls, seen } = await show({ pausedRestart: true });
+    await choose(root, 'restart');
+    await confirmYes(root);
+    expect(root.textContent).toContain('Restart paused');
+    expect(root.querySelector('[data-action-toast] p')?.textContent ?? '').not.toContain('failed');
+    expect(calls.migrate).toHaveLength(1);
+    await interact(() => must(root.querySelector<HTMLElement>('[data-restart-refusal-anyway]'), 'anyway').click());
+    await settle();
+    expect(calls.migrate).toHaveLength(2);
+    expect(calls.migrate[1]?.[5]).toBe(true);
+    expect(calls.migrate[1]?.[4]).not.toBe(calls.migrate[0]?.[4]);
+    expect(root.querySelector('[data-restart-refusal]')).toBeNull();
+    expect(seen.closes.length).toBeGreaterThan(0);
   });
 
   it('resumes a stopped ferret', async () => {

@@ -34,6 +34,7 @@ import { CORE_SESSION_ACTIONS, type CoreActionContext } from './core-actions.ts'
 import { ForkForm } from './fork-form.tsx';
 import { type SessionActionContribution, sessionActionSections } from './registry.ts';
 import { RenameForm } from './rename-form.tsx';
+import { useRestartRefusal } from './restart-refusal.tsx';
 import { forkThroughLatest, restartWithResume } from './session-operations.ts';
 
 const ROW_ACTION_IDS = { open: 'open', copyName: 'copy-name' } as const;
@@ -121,6 +122,7 @@ function RowActions({
   const publish = (next: SessionView): void => {
     store.fleet.upsertSession(daemonId, next);
   };
+  const restartRefusal = useRestartRefusal(publish, sessionId);
   const copy = useCallback((text: string, what: string): void => {
     setNotice(null);
     copyToClipboard(text).catch((reason: unknown) => setNotice(`could not copy the ${what}: ${failureText(reason)}`));
@@ -218,7 +220,9 @@ function RowActions({
           anchor={anchor}
           name={name}
           onClose={onClose}
-          onFailure={sentence => setNotice(sentence)}
+          onFailure={(sentence, _detail, reason) => {
+            if (!restartRefusal.capture(reason)) setNotice(sentence);
+          }}
           onNotice={setNotice}
           sections={sections}
           touch={touch}
@@ -228,6 +232,7 @@ function RowActions({
       {hypermedia.host}
       {pack.host}
       <ActionToast notice={notice} onDismiss={dismissNotice} />
+      {restartRefusal.panel}
       <MigrateSheet
         accountPicker={store.accountPicker}
         canMutate

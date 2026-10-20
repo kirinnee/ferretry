@@ -1,0 +1,10 @@
+ 66600       1  1-02:23:51 tmux -u -S /home/user/.ferretry/tmux.sock new-session -d -s fy-example-001 -c /home/user/work
+ 66601   66600  1-02:23:50 claude --model claude-opus-5-5 --permission-mode auto --disallowed-tools=AskUserQuestion --mcp-config={"mcpServers":{"ferretry":{"type":"stdio","command":"fy","args":["mcp","serve"],"env":{"FY_TOKEN":""}}}} --append-system-prompt=Ferretry tools: you can open and drive terminals
+ 66728   66601  1-02:23:49 fy mcp serve
+ 66734   66601  1-02:23:48 /home/user/.nix-profile/bin/typescript-language-server --stdio
+ 66740   66734  1-02:23:47 /nix/store/abc123-nodejs-24.0.0/bin/node /nix/store/def456-typescript/lib/node_modules/typescript/lib/tsserver.js --useInferredProjectPerProjectRoot
+ 66901   66601       05:12 /usr/bin/zsh -c source /home/user/.claude/shell-snapshots/snapshot.sh 2>/dev/null || true && eval 'sleep 600'
+ 66902   66901       05:12 sleep 600
+ 67011   66601       00:42 /usr/bin/zsh -c source /home/user/.claude/shell-snapshots/snapshot.sh 2>/dev/null || true && eval 'fy mcp serve'
+ 67012   67011       00:42 fy mcp serve
+ 90001       1    3-00:00:00 /usr/bin/unrelated-daemon --not-in-this-pane

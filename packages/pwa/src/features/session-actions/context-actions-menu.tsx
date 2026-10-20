@@ -34,7 +34,7 @@ export interface ContextActionsMenuProps {
   readonly touch: boolean;
   /** Closes the menu; `restoreFocus` hands focus back to the row that opened it. */
   readonly onClose: (restoreFocus: boolean) => void;
-  readonly onFailure?: (sentence: string, detail?: string) => void;
+  readonly onFailure?: (sentence: string, detail?: string, reason?: unknown) => void;
   readonly onNotice?: (sentence: string) => void;
 }
 

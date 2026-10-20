@@ -3164,6 +3164,44 @@ globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     sessionRoute.rest === 'runtime-models'
   )
     return harnessJson(NEW_SESSION_RUNTIME_MODELS.claude);
+  // `?restart-unknown-proc`: Restart CLI paused because a program the inventory cannot classify is
+  // running. Cancel leaves it be; "Restart anyway" resends with `forceInflight` and gets the session.
+  if (
+    method === 'POST' &&
+    sessionRoute?.rest === 'migrate' &&
+    new URLSearchParams(window.location.search).has('restart-unknown-proc')
+  ) {
+    const asked = JSON.parse(String(init?.body ?? '{}')) as { forceInflight?: boolean };
+    if (asked.forceInflight === true)
+      return harnessJson({
+        ...WORKSPACE_SESSION,
+        config: { ...HARNESS_WIRE_CONFIG, ...WORKSPACE_SESSION.config, teammate: 'hadi' },
+      });
+    return new Response(
+      JSON.stringify({
+        error:
+          'refused: A program Ferretry doesn’t recognise is running — fy-helper --watch ./src\nin-flight inventory — status running, turn 13, worst: UNKNOWN',
+        code: 'migration_refused',
+        inflight: {
+          status: 'running',
+          turn: 13,
+          blockedBy: 'unknown',
+          restartsWithCli: 2,
+          items: [
+            {
+              kind: 'process',
+              verdict: 'unknown',
+              title: 'A program Ferretry doesn’t recognise is running',
+              detail: 'fy-helper --watch ./src --poll 250 --log /tmp/fy-helper-26965.log',
+              age: '24h',
+              blocks: true,
+            },
+          ],
+        },
+      }),
+      { status: 409, headers: { 'content-type': 'application/json' } },
+    );
+  }
   // `?restart-ps-fails`: Restart CLI refused because the host's ps would not list the process table.
   if (
     method === 'POST' &&

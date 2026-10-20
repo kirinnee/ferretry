@@ -1,5 +1,6 @@
 import { classifyCommand } from './command-classifier.ts';
 import type { ProcessInfo } from './inflight-report.ts';
+import type { KnownProcess } from './harness-provenance.ts';
 
 export interface ProcRow {
   readonly pid: number;
@@ -56,16 +57,24 @@ export function descendantsOf(rootPid: number, rows: readonly ProcRow[]): readon
   return output;
 }
 
-/** Maps observable process rows into migration inventory entries. */
+/**
+ * Maps observable process rows into migration inventory entries. A row {@link identifyKnownProcesses}
+ * recognised as the agent's own is safe to stop: the restart relaunches it with the CLI.
+ */
 export function inventoryProcesses(
   rows: readonly ProcRow[],
   cwdByPid: ReadonlyMap<number, string | undefined>,
+  known: ReadonlyMap<number, KnownProcess> = new Map(),
 ): readonly ProcessInfo[] {
-  return rows.map(row => ({
-    pid: row.pid,
-    argv: row.argv,
-    startedSecondsAgo: row.startedSecondsAgo,
-    cwd: cwdByPid.get(row.pid),
-    verdict: classifyCommand(row.argv),
-  }));
+  return rows.map(row => {
+    const own = known.get(row.pid);
+    return {
+      pid: row.pid,
+      argv: row.argv,
+      startedSecondsAgo: row.startedSecondsAgo,
+      cwd: cwdByPid.get(row.pid),
+      verdict: own === undefined ? classifyCommand(row.argv) : 'safe_to_kill',
+      ...(own === undefined ? {} : { known: own }),
+    };
+  });
 }

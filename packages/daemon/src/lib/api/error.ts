@@ -17,6 +17,8 @@ export class ApiError extends Error {
     message: string,
     readonly code?: string,
     readonly validationIssues?: readonly ApiValidationIssue[],
+    /** Fields merged into the error envelope beside `error` and `code`, for a refusal that carries data. */
+    readonly extra?: Readonly<Record<string, unknown>>,
   ) {
     super(message);
     this.name = 'ApiError';

@@ -26,7 +26,7 @@ export interface ActionMenuOptions {
   readonly close: (restoreFocus: boolean) => void;
   /** A "…" row was chosen: the surface closes itself and shows the form. */
   readonly openForm: (actionId: string) => void;
-  readonly onFailure?: ((sentence: string, detail?: string) => void) | undefined;
+  readonly onFailure?: ((sentence: string, detail?: string, reason?: unknown) => void) | undefined;
   /** A press inside this element is not "outside" (the trigger button). */
   readonly insideRef?: RefObject<HTMLElement | null>;
   /** Presses outside and resizes dismiss a floating menu; a modal sheet dismisses itself. */
@@ -99,8 +99,7 @@ export function useActionMenu({
       await work();
     } catch (reason) {
       const sentence = `${entry.label.replace(/…$/u, '')} failed: ${failureSentence(reason)}`;
-      if (reason instanceof DetailedFailure) onFailure?.(sentence, reason.detail);
-      else onFailure?.(sentence);
+      onFailure?.(sentence, reason instanceof DetailedFailure ? reason.detail : undefined, reason);
     } finally {
       setPending(null);
     }

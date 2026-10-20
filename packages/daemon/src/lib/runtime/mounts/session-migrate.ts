@@ -1,6 +1,7 @@
 import {
   FY_REQUEST_ID_HEADER,
   MigrateSessionRequestSchema,
+  type MigrationRefusal,
   type SessionRelaunchSettings,
   type SessionView,
 } from '@ferretry/protocol';
@@ -30,11 +31,13 @@ import type { ApiRoute, RouteContext } from '../../api/route.ts';
  * old pane is snapshotted and killed, the configuration document is restamped, and the replacement
  * agent is handed a turn document pointing at the forensic report of what the kill interrupted.
  *
- * THE GATE CANNOT BE FORCED THROUGH THIS ROUTE, and that is deliberate rather than an oversight.
- * `MigrateSessionRequest` carries `agent`, `model` and `allowContextDowngrade` and no force flag, so
- * a `destructive_to_interrupt` or `unknown` verdict is a 409 with the inventory in it. The renderer
- * still has its `forced` branch because kteam's CLI had `--force-inflight`; adding one here is a WIRE
- * change, and a route that quietly forced past a refusal would make the whole preflight decorative.
+ * THE GATE IS FORCED ONLY BY AN EXPLICIT `forceInflight: true`, and the default is the refusal. A
+ * `destructive_to_interrupt` or `unknown` verdict is a 409 `migration_refused` carrying the inventory
+ * as data (`inflight`) so a person can read what is running; the PWA's "Restart anyway" resends the
+ * request with the flag after an explicit confirm. A forced move is journalled
+ * (`session.migrate_forced`) with the inventory it went past, and the forensic report says FORCED.
+ * The unattended callers — the warden's failover and the quota loop — send `false` and cannot
+ * choose otherwise: a loop with no human watching may not decide that work is expendable.
  *
  * A MIGRATION IS SAME-KIND, and `harness_mismatch` is the refusal that makes that true. The CLI has
  * always described this operation as continuing a session on another same-kind account while the
@@ -86,6 +89,8 @@ export class SessionMigrateError extends Error {
   constructor(
     readonly failure: SessionMigrateFailure,
     message: string,
+    /** What the inventory saw, on a `refused` — the data behind the sentence. */
+    readonly inflight?: MigrationRefusal,
   ) {
     super(message);
     this.name = 'SessionMigrateError';
@@ -103,7 +108,12 @@ export class SessionMigrateError extends Error {
 export interface SessionMigrateSubsystem {
   migrate(
     sessionId: string,
-    request: { readonly agent: string; readonly model?: string; readonly allowContextDowngrade: boolean },
+    request: {
+      readonly agent: string;
+      readonly model?: string;
+      readonly allowContextDowngrade: boolean;
+      readonly forceInflight: boolean;
+    },
   ): Promise<SessionView>;
   /**
    * Whether the session's process runs on the settings a Restart would relaunch it with — the
@@ -137,7 +147,13 @@ const REFUSALS: Readonly<Record<SessionMigrateFailure, { readonly status: number
 function refuse(error: unknown): never {
   if (error instanceof SessionMigrateError) {
     const refusal = REFUSALS[error.failure];
-    throw new ApiError(refusal.status, error.message, refusal.code);
+    throw new ApiError(
+      refusal.status,
+      error.message,
+      refusal.code,
+      undefined,
+      error.inflight === undefined ? undefined : { inflight: error.inflight },
+    );
   }
   // 409: the id is usable, but it already names a different migration, and the caller has to decide
   // which one it meant. Not 400 — the request itself is well formed.
@@ -214,11 +230,17 @@ async function migrate(
     agent: request.agent,
     ...(request.model === undefined ? {} : { model: request.model }),
     allowContextDowngrade: request.allowContextDowngrade,
+    forceInflight: request.forceInflight,
   };
   // The fingerprint is the PARSED target, not the raw bytes: the start's digest has to hash the bytes
   // because a third party presents it later as proof, whereas this only ever compares two requests
   // the daemon parsed itself — and two spellings of one target are the same migration.
-  const fingerprint = JSON.stringify([target.agent, target.model ?? null, target.allowContextDowngrade]);
+  const fingerprint = JSON.stringify([
+    target.agent,
+    target.model ?? null,
+    target.allowContextDowngrade,
+    target.forceInflight,
+  ]);
   const view = await guard
     .run({ sessionId, requestId: id }, fingerprint, async () => await subsystem.migrate(sessionId, target))
     .catch(refuse);

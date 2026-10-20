@@ -298,15 +298,28 @@ const contextDependencies = (): NonNullable<ComponentProps<typeof SessionChatPag
  * The carrier-routed typed client the page reaches for rename, fork, migrate, worktrees and the
  * Warden's verdicts — recording each call in a line a test can read. Any other route refuses.
  */
-const fakeDaemon = (options: { readonly migrate?: Error } = {}) => {
+const fakeDaemon = (options: { readonly migrate?: Error | readonly (Error | undefined)[] } = {}) => {
   const calls: string[] = [];
+  /** Every migrate request: its id and whether it forced past the in-flight check. */
+  const requests: { readonly requestId: string; readonly forceInflight: unknown }[] = [];
+  let migrations = 0;
   const api = {
     rename: async (id: string, name?: string, teammate?: string, clearParent?: boolean) => {
       calls.push(`rename:${id}:${name}:${teammate}:${clearParent}`);
       return sessionView(id, { config: { label: name ?? 'renamed' } });
     },
-    migrate: async (id: string, agent: string, account: unknown, force: unknown, requestId: string) => {
-      if (options.migrate !== undefined) throw options.migrate;
+    migrate: async (
+      id: string,
+      agent: string,
+      account: unknown,
+      force: unknown,
+      requestId: string,
+      forceInflight?: unknown,
+    ) => {
+      requests.push({ requestId, forceInflight });
+      const scripted = Array.isArray(options.migrate) ? options.migrate[migrations] : options.migrate;
+      migrations += 1;
+      if (scripted !== undefined) throw scripted;
       calls.push(
         `migrate:${id}:${agent}:${String(account)}:${String(force)}:${requestId.startsWith(`restart-${id}-`)}`,
       );
@@ -331,7 +344,7 @@ const fakeDaemon = (options: { readonly migrate?: Error } = {}) => {
       return [];
     },
   };
-  return { calls, factory: async () => api as unknown as FyApiClient };
+  return { calls, requests, factory: async () => api as unknown as FyApiClient };
 };
 
 describe('SessionChatPage', () => {
@@ -2851,6 +2864,107 @@ describe('SessionChatPage Info and Actions', () => {
       );
       expect(alert).toContain('Details');
       expect(alert).toContain('ps: etimes: keyword not found');
+    } finally {
+      run(() => page.unmount());
+    }
+  });
+
+  const pausedRestart = (blockedBy: 'unknown' | 'destructive' | 'unreadable' = 'unknown') =>
+    new FyHttpError('refused: raw daemon words', 409, 'migration_refused', {
+      error: 'refused: raw daemon words',
+      code: 'migration_refused',
+      inflight: {
+        status: 'running',
+        turn: 13,
+        blockedBy,
+        restartsWithCli: 2,
+        items: [
+          {
+            kind: 'process',
+            verdict: 'unknown',
+            title: 'A program Ferretry doesn’t recognise is running',
+            detail: 'fy-helper --watch ./src',
+            age: '24h',
+            blocks: true,
+          },
+        ],
+      },
+    });
+  const refusalPanel = (root: ReactTestInstance): ReactTestInstance | undefined =>
+    root.findAll(node => node.type === 'section' && node.props['data-restart-refusal'] !== undefined)[0];
+  const startRestart = async (page: ReturnType<typeof renderSessionChatPage>): Promise<void> => {
+    chooseAction(page.root, 'restart');
+    await runAsync(async () => {
+      page.root.findByProps({ 'data-menu-confirm-yes': '' }).props.onClick();
+      await Promise.resolve();
+    });
+    await flush();
+  };
+  const press = async (page: ReturnType<typeof renderSessionChatPage>, marker: string): Promise<void> => {
+    await runAsync(async () => {
+      page.root.findByProps({ [marker]: '' }).props.onClick();
+      await Promise.resolve();
+    });
+    await flush();
+  };
+
+  test('a Restart CLI the daemon pauses says what is running and waits, instead of failing', async () => {
+    const daemon = fakeDaemon({ migrate: pausedRestart() });
+    const page = renderSessionChatPage(chatPage(), daemon.factory);
+    try {
+      await startRestart(page);
+      const panel = refusalPanel(page.root);
+      const text = textOf(must(panel));
+      expect(text).toContain('Restart paused — Ferretry can’t tell if what the agent is running is safe to stop.');
+      expect(text).toContain('Nothing was restarted.');
+      expect(text).toContain('A program Ferretry doesn’t recognise is running');
+      expect(text).toContain('fy-helper --watch ./src');
+      expect(text).toContain('2 helper processes belong to the agent and restart with it.');
+      const rendered = JSON.stringify(page.toJSON());
+      expect(rendered).not.toContain('Session action failed');
+      expect(rendered).not.toContain('raw daemon words');
+      expect(daemon.requests).toHaveLength(1);
+
+      // Cancel is the safe answer: the panel goes and nothing is asked again.
+      await press(page, 'data-restart-refusal-cancel');
+      expect(refusalPanel(page.root)).toBeUndefined();
+      expect(daemon.requests).toHaveLength(1);
+    } finally {
+      run(() => page.unmount());
+    }
+  });
+
+  test('Restart anyway asks again with forceInflight under a fresh request id, and publishes the view', async () => {
+    const daemon = fakeDaemon({ migrate: [pausedRestart(), undefined] });
+    const published: SessionView[] = [];
+    const page = renderSessionChatPage(chatPage({ onSessionChange: view => published.push(view) }), daemon.factory);
+    try {
+      await startRestart(page);
+      await press(page, 'data-restart-refusal-anyway');
+      expect(daemon.requests.map(request => request.forceInflight)).toEqual([undefined, true]);
+      expect(daemon.requests[1]?.requestId).not.toBe(daemon.requests[0]?.requestId);
+      expect(refusalPanel(page.root)).toBeUndefined();
+      expect(published.at(-1)?.config.id).toBe('shared');
+    } finally {
+      run(() => page.unmount());
+    }
+  });
+
+  test('a restart that reaches the page through Add MCP is also held for the same confirm', async () => {
+    const daemon = fakeDaemon({ migrate: pausedRestart('destructive') });
+    const page = renderSessionChatPage(chatPage(), daemon.factory);
+    try {
+      chooseAction(page.root, 'add-mcp');
+      const reload = page.root.findByType(AddMcpForm).props.ports.reload as () => Promise<void>;
+      let thrown: unknown;
+      await runAsync(async () => {
+        thrown = await reload().catch((reason: unknown) => reason);
+      });
+      await flush();
+      expect((thrown as Error).message).toBe(
+        'Restart paused — the agent is running something that could be left half-done if it is stopped. Nothing was restarted.',
+      );
+      expect(refusalPanel(page.root)).toBeDefined();
     } finally {
       run(() => page.unmount());
     }

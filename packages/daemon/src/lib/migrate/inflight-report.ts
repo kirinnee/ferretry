@@ -1,4 +1,6 @@
 import type { SessionStatus } from '@ferretry/protocol';
+import { refusalSentence } from './inflight-describe.ts';
+import type { KnownProcess } from './harness-provenance.ts';
 import { verdictBlocksMigration, worstVerdict, type InflightVerdict } from './verdict.ts';
 
 export interface OpenToolInfo {
@@ -14,6 +16,8 @@ export interface ProcessInfo {
   readonly argv: string;
   readonly startedSecondsAgo?: number;
   readonly cwd?: string;
+  /** Set when the process is the agent's own and is relaunched with the CLI. */
+  readonly known?: KnownProcess;
   readonly verdict: InflightVerdict;
 }
 
@@ -116,7 +120,7 @@ export function gateInflight(report: InflightReport, options: { readonly force?:
   if (report.empty) return { proceed: true, forced: false, reason: 'no in-flight work' };
   if (!verdictBlocksMigration(report.worstVerdict))
     return { proceed: true, forced: false, reason: `in-flight work is ${report.worstVerdict}` };
-  const cause = report.blindSpots[0] ?? `in-flight work is ${report.worstVerdict}`;
+  const cause = refusalSentence(report);
   if (options.force) return { proceed: true, forced: true, reason: `forced past ${cause}` };
   return { proceed: false, forced: false, reason: `refused: ${cause}` };
 }

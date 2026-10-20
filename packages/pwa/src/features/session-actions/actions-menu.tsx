@@ -40,7 +40,7 @@ export interface ActionsMenuProps {
   readonly form: string | null;
   readonly onFormChange: (actionId: string | null) => void;
   /** A failed action, said by the page's one alert line. */
-  readonly onFailure?: (sentence: string, detail?: string) => void;
+  readonly onFailure?: (sentence: string, detail?: string, reason?: unknown) => void;
   /** What a form settled, said by the page's toast. */
   readonly onNotice?: (sentence: string) => void;
 }
