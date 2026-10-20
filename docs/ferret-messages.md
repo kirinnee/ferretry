@@ -87,3 +87,18 @@ send stays an ordinary tool call. The parsing lives in `packages/pwa/src/lib/pee
 - **The hand-off wire is unchanged.** `GET /v1/sessions/:id/handoffs/:name` still returns the document's
   text, banner included, because its schema is strict and a new field would break an older app reading
   a newer daemon; the app lifts the sender off the banner itself.
+
+## Notices from Ferretry itself
+
+A message Ferretry types into a session on its own account opens with `[ferretry] ` (written and parsed
+in `packages/protocol/src/lib/agent-messages.ts`). Both Chats draw it as a compact **system row**, never
+as the owner's bubble. Its first paragraph is the headline; anything after the first blank line is
+addressed to the agent and sits behind a **details** control.
+
+A **restart or same-harness migrate** resumes the same conversation, so it sends a notice only when the
+session was mid-turn AND the in-flight inventory held something not classified safe (re-armable,
+destructive or unknown, or a blind spot). Otherwise it sends nothing. An auto session is the exception: its resume would otherwise type the default "continue the assigned task" prompt, so it is told `Restarted — nothing was interrupted.` instead. When sent it reads
+`Restarted mid-turn — 1 command was interrupted · details`, and the agent is told it came from Ferretry,
+not the owner, and where `migration-inflight.md` is (`packages/daemon/src/lib/migrate/restart-notice.ts`).
+A notice that travelled as a turn file is recognised by the document it holds, so it is a system row once
+that file has been read.

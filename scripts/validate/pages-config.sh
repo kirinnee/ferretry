@@ -18,7 +18,22 @@ jq -e '
 ' "${config}" >/dev/null
 
 rg -q '^/\*$' "${headers}"
-rg -q "^  Content-Security-Policy: .*connect-src 'self' https: wss: http://localhost:\* http://127.0.0.1:\* ws://localhost:\* ws://127.0.0.1:\*;" "${headers}"
+rg -q "^  Content-Security-Policy: .*connect-src 'self' https: wss: https://api.groq.com https://api.cerebras.ai http://localhost:\* http://127.0.0.1:\* ws://localhost:\* ws://127.0.0.1:\*;" "${headers}"
+# Dictation clean-up calls Groq and Cerebras straight from the browser with a key this device holds
+# (docs/secrets.md, "Device-held speed-up keys"). `connect-src` names exactly the hosts the shared
+# provider table sends a key to, so the two must agree: a provider added to the table without its
+# host here, or a host left here after its provider is gone, fails.
+cleanup_source="packages/protocol/src/lib/stt-cleanup.ts"
+table_hosts="$(rg --only-matching --no-filename --replace '$1' "^    host: '([a-z0-9.-]+)',$" "${cleanup_source}" | sort -u)"
+[ -n "${table_hosts}" ] || {
+  echo "❌ ${cleanup_source} names no provider host; this check would pass vacuously" >&2
+  exit 1
+}
+csp_hosts="$(rg --only-matching --no-filename "connect-src [^;]*" "${headers}" | tr ' ' '\n' | rg --replace '$1' '^https://([a-z0-9.-]+)$' | sort -u)"
+[ "${table_hosts}" = "${csp_hosts}" ] || {
+  echo "❌ ${headers} connect-src names https hosts {${csp_hosts//$'\n'/, }} but ${cleanup_source} sends keys to {${table_hosts//$'\n'/, }}" >&2
+  exit 1
+}
 # The pairing scanner needs the camera on this origin and nowhere else. Pinned
 # because `camera=()` silently disables `getUserMedia` for the whole site, and
 # the symptom is a scan button that does nothing rather than a build failure.

@@ -406,7 +406,7 @@ export function RemoteBrowserPane({
       )}
       <div
         ref={screenRef}
-        className="relative flex min-h-[240px] min-w-0 flex-1 flex-col bg-[#09090b] [&>.fy-remote-browser]:flex-1 [&>.fy-remote-browser]:rounded-none [&>.fy-remote-browser]:border-0 [&_.fy-remote-browser-canvas]:bg-[#09090b]"
+        className="relative flex min-h-[240px] min-w-0 flex-1 flex-col bg-code-bg [&>.fy-remote-browser]:flex-1 [&>.fy-remote-browser]:rounded-none [&>.fy-remote-browser]:border-0 [&_.fy-remote-browser-canvas]:bg-code-bg"
       >
         <RemoteBrowserViewer
           ref={viewerRef}
@@ -434,7 +434,7 @@ export function RemoteBrowserPane({
           </div>
         )}
         {!running && (
-          <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-[#09090b] px-panel text-center">
+          <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-code-bg px-panel text-center">
             <div className="max-w-xs">
               <Monitor
                 size={30}

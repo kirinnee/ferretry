@@ -94,7 +94,7 @@
   color: var(--nav-sel-fg, var(--accent));
 }
 .fy-actions-menu__row:focus-visible {
-  box-shadow: inset 0 0 0 2px var(--focus-color, var(--accent));
+  box-shadow: inset 0 0 0 var(--focus-width) var(--focus-color, var(--accent));
 }
 .fy-actions-menu__row[data-danger] {
   color: var(--err);
@@ -127,7 +127,7 @@
   display: inline-block;
   width: 26px;
   height: 14px;
-  border-radius: 9999px;
+  border-radius: var(--radius-control);
   background: var(--border-strong);
 }
 .fy-actions-switch::after {
@@ -136,7 +136,7 @@
   left: 2px;
   width: 10px;
   height: 10px;
-  border-radius: 9999px;
+  border-radius: var(--radius-control);
   background: var(--surface);
   content: '';
 }

@@ -24,6 +24,8 @@ import type {
   DoctorReport,
   GrantRefusal,
   GrantsView,
+  HarnessUpdateStartRequest,
+  HarnessUpdateView,
   PairedDevicesView,
   PairingCodeMintResponse,
   PasskeysView,
@@ -44,6 +46,7 @@ import type {
 import {
   DAEMON_CAPABILITIES,
   DAEMON_UPDATE_CODES,
+  HARNESS_UPDATE_CODES,
   matchesSessionSearchQuery,
   SECRET_SCHEMA_VERSION,
   SESSION_FILE_INDEX_VERSION,
@@ -163,6 +166,7 @@ import {
   AddDeviceSurface,
   type PairingClientFactory,
 } from '../src/features/settings/add-device-settings.tsx';
+import { AgentClisSurface } from '../src/features/settings/agent-clis.tsx';
 import { CapabilityList } from '../src/features/settings/capability-list.tsx';
 import { CgroupConfigSurface } from '../src/features/settings/cgroup-settings.tsx';
 import type { DaemonSettingsTabDefinition } from '../src/features/settings/daemon-settings-frame.tsx';
@@ -912,6 +916,14 @@ const HARNESS_DAEMON_SETTINGS_TABS: readonly DaemonSettingsTabDefinition[] = [
       <AboutMachineSurface connection={connection} createClient={harnessAboutClient} />
     ),
   },
+  {
+    id: 'agent-clis',
+    label: 'Agent CLIs',
+    description: 'The Claude Code and Codex this machine runs, whether Ferretry verified them, and updating them.',
+    Surface: ({ connection }: { readonly connection: DaemonConnection }) => (
+      <AgentClisSurface connection={connection} createClient={harnessAgentClisClient} />
+    ),
+  },
 ];
 
 /** Minutes before this page loaded, so the relative times in a capture read as a real recent history. */
@@ -985,6 +997,232 @@ const harnessAboutClient = async (connection: DaemonConnection) => {
     },
     updateDaemonUpdateSettings: async (patch: DaemonUpdateSettingsPatch) => {
       view = { ...view, autoInstall: patch.autoInstall };
+      return view;
+    },
+  };
+};
+
+/**
+ * SETTINGS › MACHINE › AGENT CLIs, answered in the page (`docs/updating.md`). `?agent-clis=<state>` picks
+ * which install methods the harness daemon reports, so every method can be captured:
+ *
+ * - `npm` (default): Claude Code from an nvm npm global (verified + newest buttons), Codex from a Homebrew cask;
+ * - `nix`: Claude Code from home-manager inside nix-darwin (the flake steps), Codex from a nix profile element;
+ * - `native`: Claude Code from its own installer after a finished update, Codex a standalone binary past the
+ *   verified version.
+ *
+ * Every Update past the verified version answers `409 harness_update_unverified` unless confirmed, so the
+ * second question is reachable by clicking; a confirmed one starts a running job.
+ */
+const HARNESS_CLIS_STATE = new URLSearchParams(window.location.search).get('agent-clis') ?? 'npm';
+const HARNESS_CLI_VERIFIED_URL =
+  'https://github.com/kirinnee/ferretry/blob/main/packages/fleet/tests/contract/README.md';
+const HARNESS_CLAUDE_CHANGELOG = 'https://github.com/anthropics/claude-code/blob/main/CHANGELOG.md';
+const harnessCliCheck = (version: string, url: string) =>
+  ({ state: 'ok', checkedAt: harnessMinutesAgo(0), latest: { version, url } }) as const;
+const HARNESS_CLAUDE_LATEST = harnessCliCheck('2.1.230', HARNESS_CLAUDE_CHANGELOG);
+const HARNESS_CODEX_LATEST = harnessCliCheck('0.163.0', 'https://github.com/openai/codex/releases/tag/rust-v0.163.0');
+const HARNESS_CLIS_VIEWS: Readonly<Record<string, HarnessUpdateView>> = {
+  npm: {
+    harnesses: [
+      {
+        harness: 'claude',
+        location: {
+          state: 'located',
+          path: '/home/kirin/.nvm/versions/node/v22.11.0/bin/claude',
+          rule: 'inherited environment',
+          declaredBy: 'PATH',
+        },
+        installed: { state: 'ok', version: '2.1.200' },
+        method: {
+          kind: 'npm-global',
+          tool: 'npm',
+          package: '@anthropic-ai/claude-code',
+          prefix: '/home/kirin/.nvm/versions/node/v22.11.0',
+          nodeManager: 'nvm',
+        },
+        plan: {
+          kind: 'self',
+          steps: [
+            {
+              command:
+                'npm install -g --prefix /home/kirin/.nvm/versions/node/v22.11.0 @anthropic-ai/claude-code@latest',
+            },
+          ],
+          rollback: 'automatic',
+          pinsVersion: true,
+        },
+        check: HARNESS_CLAUDE_LATEST,
+        verified: { version: '2.1.220', url: HARNESS_CLI_VERIFIED_URL },
+        verification: 'older',
+        available: true,
+        job: null,
+      },
+      {
+        harness: 'codex',
+        location: {
+          state: 'located',
+          path: '/opt/homebrew/bin/codex',
+          rule: 'explicit override',
+          declaredBy: 'FY_CODEX_BIN',
+        },
+        installed: { state: 'ok', version: '0.145.0' },
+        method: { kind: 'homebrew', type: 'cask', package: 'codex' },
+        plan: {
+          kind: 'self',
+          steps: [{ command: 'brew update' }, { command: 'brew upgrade --cask codex' }],
+          rollback: 'none',
+          pinsVersion: false,
+        },
+        check: HARNESS_CODEX_LATEST,
+        verified: { version: '0.145.0', url: HARNESS_CLI_VERIFIED_URL },
+        verification: 'verified',
+        available: true,
+        job: null,
+      },
+    ],
+  },
+  nix: {
+    harnesses: [
+      {
+        harness: 'claude',
+        location: {
+          state: 'located',
+          path: '/etc/profiles/per-user/kirin/bin/claude',
+          rule: 'extra search path',
+          declaredBy: 'harness.searchPaths',
+        },
+        installed: { state: 'ok', version: '2.1.220' },
+        method: { kind: 'nix-module', manager: 'home-manager', via: 'nix-darwin' },
+        plan: {
+          kind: 'manual',
+          explanation:
+            'Claude Code comes from your home-manager configuration, which nix-darwin applies, which pins the version in its flake. Bump the input there, then switch.',
+          steps: [
+            {
+              command: 'nix flake update nixpkgs',
+              note: 'in the flake that holds your home-manager configuration; the input that provides claude-code is usually nixpkgs, or an overlay that packages it',
+            },
+            {
+              command: 'darwin-rebuild switch --flake .',
+              note: 'home-manager is applied by this nix-darwin rebuild; there is no separate home-manager switch',
+            },
+          ],
+        },
+        check: HARNESS_CLAUDE_LATEST,
+        verified: { version: '2.1.220', url: HARNESS_CLI_VERIFIED_URL },
+        verification: 'verified',
+        available: true,
+        job: null,
+      },
+      {
+        harness: 'codex',
+        location: {
+          state: 'located',
+          path: '/home/kirin/.nix-profile/bin/codex',
+          rule: 'inherited environment',
+          declaredBy: 'PATH',
+        },
+        installed: { state: 'ok', version: '0.140.0' },
+        method: { kind: 'nix-profile', element: 'codex' },
+        plan: {
+          kind: 'self',
+          steps: [{ command: 'nix profile upgrade --refresh codex' }],
+          rollback: 'automatic',
+          pinsVersion: false,
+        },
+        check: HARNESS_CODEX_LATEST,
+        verified: { version: '0.145.0', url: HARNESS_CLI_VERIFIED_URL },
+        verification: 'older',
+        available: true,
+        job: null,
+      },
+    ],
+  },
+  native: {
+    harnesses: [
+      {
+        harness: 'claude',
+        location: {
+          state: 'located',
+          path: '/home/kirin/.local/bin/claude',
+          rule: 'inherited environment',
+          declaredBy: 'PATH',
+        },
+        installed: { state: 'ok', version: '2.1.220' },
+        method: { kind: 'native-installer', directory: '/home/kirin/.local/share/claude' },
+        plan: { kind: 'self', steps: [{ command: 'claude update' }], rollback: 'automatic', pinsVersion: true },
+        check: HARNESS_CLAUDE_LATEST,
+        verified: { version: '2.1.220', url: HARNESS_CLI_VERIFIED_URL },
+        verification: 'verified',
+        available: true,
+        job: {
+          state: 'finished',
+          report: {
+            from: '2.1.200',
+            to: '2.1.220',
+            target: '2.1.220',
+            outcome: 'succeeded',
+            message:
+              'Updated Claude Code 2.1.200 → 2.1.220. Running ferrets keep the version they started with until they are restarted; new ones start on this one.',
+            finishedAt: harnessMinutesAgo(3),
+          },
+        },
+      },
+      {
+        harness: 'codex',
+        location: { state: 'located', path: '/usr/local/bin/codex', rule: 'inherited environment', declaredBy: 'PATH' },
+        installed: { state: 'ok', version: '0.163.0' },
+        method: { kind: 'standalone', directory: '/usr/local/bin' },
+        plan: {
+          kind: 'manual',
+          explanation:
+            'Codex here is a file in /usr/local/bin that no package manager Ferretry knows owns — usually a binary from its GitHub releases. Replace it with the new release, or reinstall with npm so later updates are one click.',
+          steps: [
+            {
+              command: 'npm install -g @openai/codex',
+              note: 'or download the new release from https://github.com/openai/codex/releases/latest',
+            },
+          ],
+        },
+        check: HARNESS_CODEX_LATEST,
+        verified: { version: '0.145.0', url: HARNESS_CLI_VERIFIED_URL },
+        verification: 'unverified',
+        available: false,
+        job: null,
+      },
+    ],
+  },
+};
+const harnessAgentClisClient = async (connection: DaemonConnection) => {
+  if (connection.daemonId === unreachableDaemon.daemonId) throw new Error('offline harness daemon');
+  let view = HARNESS_CLIS_VIEWS[HARNESS_CLIS_STATE] ?? (HARNESS_CLIS_VIEWS.npm as HarnessUpdateView);
+  return {
+    harnessUpdate: async () => view,
+    startHarnessUpdate: async (request: HarnessUpdateStartRequest): Promise<HarnessUpdateView> => {
+      const entry = view.harnesses.find(harness => harness.harness === request.harness);
+      const verified = entry?.verified.version ?? '0.0.0';
+      if (request.confirmUnverified !== true && (request.target === undefined || request.target !== verified))
+        throw new FyHttpError('not yet verified by Ferretry', 409, HARNESS_UPDATE_CODES.unverified, {
+          error: 'not yet verified by Ferretry',
+          code: HARNESS_UPDATE_CODES.unverified,
+          ...(request.target === undefined ? {} : { target: request.target }),
+          verified,
+        });
+      view = {
+        harnesses: view.harnesses.map(harness =>
+          harness.harness === request.harness
+            ? {
+                ...harness,
+                job: {
+                  state: 'running',
+                  startedAt: new Date().toISOString(),
+                  command: harness.plan?.steps[0]?.command ?? 'update',
+                },
+              }
+            : harness,
+        ),
+      };
       return view;
     },
   };

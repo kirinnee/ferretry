@@ -1,60 +1,41 @@
 import {
-  DEFAULT_VOICE_CLEANUP_PROMPTS,
+  buildCleanupBody,
+  type ChatCompletionBody,
+  CLEANUP_PROVIDERS,
+  type CleanupRequest,
+  DEFAULT_CLEANUP_TIMEOUT_MS,
+  prepareCleanup,
+  readCleanupReply,
   type SecretName,
   type SttEnhancementErrorCode,
   type SttEnhancementErrorView,
   type SttEnhancementProvider,
-  type SttEnhancementRequest,
   SttEnhancementRequestSchema,
   type SttEnhancementResult,
   type VoiceConfig,
 } from '@ferretry/protocol';
-import { CEREBRAS_HOST, GROQ_HOST, SPEEDUP_CATALOG } from '../speedups/catalog.ts';
+import { SPEEDUP_CATALOG } from '../speedups/catalog.ts';
 import type { AuthorizedOutcome } from '../speedups/ports.ts';
-import {
-  buildCleanupSystemPrompt,
-  CLEANUP_VIOLATION_REASONS,
-  cleanupViolation,
-  neutralizeCleanupTags,
-} from './cleanup-guard.ts';
-import { conversationReference, estimateTokens } from './context.ts';
 import { SttEnhancementError } from './errors.ts';
 
 /**
- * Post-dictation enhancement: after the local recognizer returns raw text, a
- * hosted chat model repairs recognition mistakes without rewriting the speaker.
+ * Post-dictation enhancement through the daemon: after the browser's recognizer returns raw text, a
+ * hosted chat model repairs recognition mistakes without rewriting the speaker, spending the key
+ * from this machine's secret store.
  *
- * Everything in this module is a decision. The network call and the clock live
- * behind ports and the credential stays with the outbound holder; what they
- * observe comes back here to be classified. The invariants this file is responsible for:
+ * What the request holds and how a reply is judged are `@ferretry/protocol`'s `stt-cleanup` — the
+ * SAME decisions a browser makes when it spends a key it holds itself. What is left here is the
+ * daemon's own part: the wire request, the error vocabulary, and the key's holder. The invariants
+ * this file is responsible for:
  *
  * - The provider credential is never part of a request, a result, or an error.
- * - Text, context, dictionary and model id are bounded before a request is built.
  * - Each failure mode maps to one stable code and one fixed message; no message
  *   ever embeds the transcript, the provider body, or the credential.
- * - There is no fallback to another provider. A reply that fails the cleanup guard (see
- *   `cleanup-guard.ts`) is not an error: the transcript comes back untouched, marked `kept: 'raw'`.
+ * - There is no fallback to another provider. A reply that fails the cleanup guard is not an error:
+ *   the transcript comes back untouched, marked `kept: 'raw'`.
  */
 
-/**
- * Character caps applied before any request body is built.
- *
- * `maxTextChars` restates the transcript cap the wire schema enforces, so the
- * daemon documents its own limit; a unit test pins the two together and fails if
- * the schema ever moves without this constant.
- */
-export const ENHANCEMENT_LIMITS = {
-  maxTextChars: 8_000,
-  maxUserContextChars: 2_000,
-  maxDictionaryChars: 4_000,
-  maxModelIdChars: 128,
-  /** Hard byte ceiling for a provider reply: the output cap in worst-case UTF-8 plus a JSON envelope. */
-  maxResponseBytes: 16_000 * 4 + 4_096,
-  /** Guards against a runaway provider reply; not a promise of shape. */
-  maxOutputChars: 16_000,
-} as const;
-
-export const DEFAULT_ENHANCEMENT_TIMEOUT_MS = 4_000;
+export const DEFAULT_ENHANCEMENT_TIMEOUT_MS = DEFAULT_CLEANUP_TIMEOUT_MS;
 
 const ENHANCEMENT_ERROR_STATUS: Readonly<Record<SttEnhancementErrorCode, number>> = {
   bad_request: 400,
@@ -113,21 +94,21 @@ export type EnhancementProviderTable = Readonly<Record<string, EnhancementProvid
 export const DEFAULT_ENHANCEMENT_PROVIDERS: EnhancementProviderTable = Object.freeze({
   groq: Object.freeze({
     id: 'groq',
-    label: 'Groq',
+    label: CLEANUP_PROVIDERS.groq.label,
     secretName: SPEEDUP_CATALOG.groq.secretName,
     hosts: SPEEDUP_CATALOG.groq.hosts,
-    endpoint: `https://${GROQ_HOST}/openai/v1/chat/completions`,
-    defaultModel: 'openai/gpt-oss-120b',
-    hideReasoning: Object.freeze({ include_reasoning: false }),
+    endpoint: CLEANUP_PROVIDERS.groq.endpoint,
+    defaultModel: CLEANUP_PROVIDERS.groq.defaultModel,
+    hideReasoning: CLEANUP_PROVIDERS.groq.hideReasoning,
   }),
   cerebras: Object.freeze({
     id: 'cerebras',
-    label: 'Cerebras',
+    label: CLEANUP_PROVIDERS.cerebras.label,
     secretName: SPEEDUP_CATALOG.cerebras.secretName,
     hosts: SPEEDUP_CATALOG.cerebras.hosts,
-    endpoint: `https://${CEREBRAS_HOST}/v1/chat/completions`,
-    defaultModel: 'gpt-oss-120b',
-    hideReasoning: Object.freeze({}),
+    endpoint: CLEANUP_PROVIDERS.cerebras.endpoint,
+    defaultModel: CLEANUP_PROVIDERS.cerebras.defaultModel,
+    hideReasoning: CLEANUP_PROVIDERS.cerebras.hideReasoning,
   }),
 });
 
@@ -157,53 +138,20 @@ export function findEnhancementProvider(
   return definition;
 }
 
-const MODEL_ID = /^[A-Za-z0-9._:/-]+$/u;
-
-/** Every request the enhancer will act on, bounded and stripped of empties. */
-export interface NormalizedEnhancement {
+/** Every request the enhancer will act on: the shared cleanup request, and the provider that runs it. */
+export interface NormalizedEnhancement extends CleanupRequest {
   readonly provider: EnhancementProviderDefinition;
-  readonly model: string;
-  readonly text: string;
-  readonly context: readonly string[];
-  readonly userContext?: string;
-  readonly dictionary: readonly string[];
-  readonly style: 'fix' | 'polish';
-  /** The style prompt: the person's own wording, or the shipped default. Always wrapped by the guard. */
-  readonly instruction: string;
 }
 
-/**
- * Keep the tail of an over-long block instead of rejecting the request: the
- * most recent context is the most useful, and a caller cannot know the daemon's
- * cap in advance.
- */
-function boundedTail(value: string, maxChars: number): string {
-  return value.length <= maxChars ? value : value.slice(value.length - maxChars);
-}
-
-function normalizedDictionary(dictionary: SttEnhancementRequest['dictionary']): readonly string[] {
-  const lines: string[] = [];
-  let used = 0;
-  for (const entry of dictionary ?? []) {
-    const aliases = (entry.aliases ?? []).map(alias => alias.trim()).filter(alias => alias.length > 0);
-    const line = aliases.length === 0 ? entry.term.trim() : `${aliases.join(', ')} -> ${entry.term.trim()}`;
-    if (used + line.length > ENHANCEMENT_LIMITS.maxDictionaryChars) break;
-    used += line.length + 1;
-    lines.push(line);
-  }
-  return lines;
-}
-
-function normalizedModel(provider: EnhancementProviderDefinition, model: string | undefined): string {
-  if (model === undefined) return provider.defaultModel;
-  const invalid = model.length > ENHANCEMENT_LIMITS.maxModelIdChars || !MODEL_ID.test(model);
-  if (invalid) throw new SttEnhancementError('bad_model', 'model id is invalid');
-  return model;
-}
+const REFUSALS = {
+  empty: () => new SttEnhancementError('bad_request', 'transcript is required'),
+  off: () => new SttEnhancementError('bad_request', 'cleanup is switched off on this machine'),
+  bad_model: () => new SttEnhancementError('bad_model', 'model id is invalid'),
+} as const;
 
 /**
  * Parse an untrusted request body against the wire schema, then apply the
- * daemon's own caps. Schema failures become the code the route can forward
+ * shared cleanup caps. Schema failures become the code the route can forward
  * as-is rather than a generic 400.
  */
 export function parseEnhancementRequest(
@@ -216,25 +164,18 @@ export function parseEnhancementRequest(
   const request = parsed.data;
 
   const provider = findEnhancementProvider(table, request.provider);
-  const text = request.text.trim();
-  if (text.length === 0) throw new SttEnhancementError('bad_request', 'transcript is required');
-
-  if (cleanup.style === 'off') throw new SttEnhancementError('bad_request', 'cleanup is switched off on this machine');
-  const style = cleanup.style;
   // The machine decides whether the conversation is shared and how much of it: a device cannot widen it.
-  const context = cleanup.useConversation ? conversationReference(request.context, cleanup.conversationMessages) : [];
-
-  const userContext = request.userContext?.trim();
-  return {
-    provider,
-    model: normalizedModel(provider, request.model),
-    text,
-    context,
-    ...(userContext !== undefined && userContext.length > 0 ? { userContext } : {}),
-    dictionary: normalizedDictionary(request.dictionary),
-    style,
-    instruction: cleanup.prompts[style] ?? DEFAULT_VOICE_CLEANUP_PROMPTS[style],
-  };
+  const prepared = prepareCleanup({
+    text: request.text,
+    model: request.model,
+    defaultModel: provider.defaultModel,
+    context: request.context,
+    userContext: request.userContext,
+    dictionary: request.dictionary,
+    settings: cleanup,
+  });
+  if ('refused' in prepared) throw REFUSALS[prepared.refused]();
+  return { ...prepared, provider };
 }
 
 interface SchemaIssue {
@@ -256,57 +197,8 @@ function schemaFailure(issues: readonly SchemaIssue[]): SttEnhancementError {
   return new SttEnhancementError('bad_request', 'enhancement request is not valid');
 }
 
-const block = (tag: string, body: string): string => `<${tag}>\n${neutralizeCleanupTags(body)}\n</${tag}>`;
-
-/**
- * The user message: read-only references first, the dictation last, each in its own tagged block the
- * guard names. Anything inside a block has the wrapper's tags removed, so it cannot close its block.
- */
-export function buildEnhancementUserMessage(request: NormalizedEnhancement): string {
-  const sections: string[] = [];
-  if (request.dictionary.length > 0) sections.push(block('dictionary', request.dictionary.join('\n')));
-  if (request.context.length > 0) sections.push(block('reference', request.context.join('\n')));
-  if (request.userContext !== undefined) {
-    sections.push(block('hints', boundedTail(request.userContext, ENHANCEMENT_LIMITS.maxUserContextChars)));
-  }
-  sections.push(block('dictation', request.text));
-  return sections.join('\n\n');
-}
-
-export interface ChatCompletionBody {
-  readonly model: string;
-  readonly messages: readonly { readonly role: 'system' | 'user'; readonly content: string }[];
-  readonly temperature: 0;
-  readonly stream: false;
-  readonly max_completion_tokens: number;
-  readonly reasoning_effort?: 'low';
-  readonly include_reasoning?: boolean;
-}
-
-/** gpt-oss models think before they answer; dictation cleanup wants the least thinking and none of it back. */
-const REASONING_MODEL = /gpt-oss/iu;
-
-/**
- * The reply cap. It counts a reasoning model's thinking too, so it is the dictation's own size twice
- * over plus room to think: enough that a long dictation is never cut off, small enough that a model
- * which will not stop cannot hold the request for minutes.
- */
-export function completionBudget(request: NormalizedEnhancement): number {
-  return Math.min(4_096, Math.max(1_024, estimateTokens(request.text) * 2 + 768));
-}
-
 export function buildEnhancementBody(request: NormalizedEnhancement): ChatCompletionBody {
-  return {
-    model: request.model,
-    messages: [
-      { role: 'system', content: buildCleanupSystemPrompt(request.instruction) },
-      { role: 'user', content: buildEnhancementUserMessage(request) },
-    ],
-    temperature: 0,
-    stream: false,
-    max_completion_tokens: completionBudget(request),
-    ...(REASONING_MODEL.test(request.model) ? { reasoning_effort: 'low', ...request.provider.hideReasoning } : {}),
-  };
+  return buildCleanupBody(request, { hideReasoning: request.provider.hideReasoning ?? {} });
 }
 
 /** The request headers. There is no credential among them: the outbound holder adds it. */
@@ -314,57 +206,6 @@ export const ENHANCEMENT_HEADERS: Readonly<Record<string, string>> = Object.free
   'content-type': 'application/json',
   accept: 'application/json',
 });
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-const CLOSED_THINKING = /<think(?:ing)?>[\s\S]*?<\/think(?:ing)?>/giu;
-const OPEN_THINKING = /<think(?:ing)?>[\s\S]*$/iu;
-const STRAY_CLOSE = /^[\s\S]*<\/think(?:ing)?>/iu;
-/** gpt-oss's own channel markup, which some gateways leave in `content` instead of splitting out. */
-const FINAL_CHANNEL = /^[\s\S]*(?:<\|channel\|>\s*final\s*<\|message\|>|assistantfinal)/u;
-const CHANNEL_TOKENS = /<\|[a-z_]+\|>/gu;
-
-/**
- * The reply with every trace of the model's thinking removed: a closed `<think>` block, one that was
- * cut off before it closed (everything after it is thinking), a closing tag with no opener (the
- * thinking sits before it), and gpt-oss channel markup, where the answer is whatever follows the
- * final-channel marker.
- */
-export function withoutReasoning(content: string): string {
-  return content
-    .replace(CLOSED_THINKING, '')
-    .replace(OPEN_THINKING, '')
-    .replace(STRAY_CLOSE, '')
-    .replace(FINAL_CHANNEL, '')
-    .replace(CHANNEL_TOKENS, '');
-}
-
-function firstChoice(payload: unknown): Record<string, unknown> | undefined {
-  if (!isRecord(payload)) return undefined;
-  const choices = payload.choices;
-  if (!Array.isArray(choices) || choices.length === 0) return undefined;
-  const first: unknown = choices[0];
-  return isRecord(first) ? first : undefined;
-}
-
-/** Extract assistant text from an OpenAI-compatible chat completion payload. */
-export function parseChatCompletion(payload: unknown): string | undefined {
-  const message = firstChoice(payload)?.message;
-  if (!isRecord(message)) return undefined;
-  const content = message.content;
-  // Reasoning travels in its own field and is never read; a model that inlines it is stripped here.
-  return typeof content === 'string' ? withoutReasoning(content) : undefined;
-}
-
-const OUT_OF_TOKENS = 'enhancement model used its whole reply budget thinking and returned no text';
-const EMPTY_REPLY = 'enhancement model returned an empty reply';
-
-/** Whether the model stopped because it hit the reply cap rather than because it finished. */
-function ranOutOfTokens(payload: unknown): boolean {
-  return firstChoice(payload)?.finish_reason === 'length';
-}
 
 /** A non-2xx status maps to a distinct, body-free error that names the status and the next step. */
 export function enhancementErrorForStatus(status: number, retryAfterSeconds?: number): SttEnhancementError {
@@ -458,33 +299,17 @@ export function classifyEnhancementOutcome(
   }
   if (outcome.kind === 'status') throw enhancementErrorForStatus(outcome.status, outcome.retryAfterSeconds);
 
-  const content = parseChatCompletion(outcome.payload);
-  if (content === undefined) {
-    throw new SttEnhancementError('malformed_response', 'enhancement provider returned an unexpected response');
-  }
-  const text = content.trim();
-  if (text.length === 0) {
-    const reason = ranOutOfTokens(outcome.payload) ? OUT_OF_TOKENS : EMPTY_REPLY;
-    throw new SttEnhancementError('malformed_response', reason);
-  }
-  if (text.length > ENHANCEMENT_LIMITS.maxOutputChars) {
-    throw new SttEnhancementError('malformed_response', 'enhancement model returned an over-long reply');
-  }
-  const violation = cleanupViolation({
-    raw: request.text,
-    output: text,
-    style: request.style,
-    reference: request.context,
-  });
-  if (violation !== undefined) {
+  const reply = readCleanupReply(outcome.payload, request);
+  if (reply.kind === 'unusable') throw new SttEnhancementError('malformed_response', reply.reason);
+  if (reply.kind === 'kept_raw') {
     return {
       text: request.text,
       provider: request.provider.id,
       model: request.model,
       latencyMs,
       kept: 'raw',
-      keptReason: CLEANUP_VIOLATION_REASONS[violation],
+      keptReason: reply.reason,
     };
   }
-  return { text, provider: request.provider.id, model: request.model, latencyMs };
+  return { text: reply.text, provider: request.provider.id, model: request.model, latencyMs };
 }

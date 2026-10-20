@@ -121,15 +121,12 @@ export function HandoffView({
   pointerText,
   reading,
   source,
-  explain = true,
 }: {
   readonly pointer: HandoffPointer;
   /** The line the agent was typed, shown faded only when the document cannot be read. */
   readonly pointerText: string;
   readonly reading: HandoffReading;
   readonly source: HandoffSource | null;
-  /** Say why it travelled as a file. A ferret's message does not: the reader did not send it. */
-  readonly explain?: boolean;
 }) {
   return (
     <div className="fy-handoff" data-handoff={pointer.name} data-handoff-state={reading.state}>
@@ -142,7 +139,7 @@ export function HandoffView({
       ) : (
         <p className="fy-handoff-pointer">{pointerText}</p>
       )}
-      {explain || reading.state === 'gone' ? <HandoffNote gone={reading.state === 'gone'} /> : null}
+      {reading.state === 'gone' ? <HandoffGoneNote /> : null}
     </div>
   );
 }
@@ -184,40 +181,42 @@ export function HandoffBody({ handoff, source }: { readonly handoff: SessionHand
   );
 }
 
+/** When the file is gone the line is simply shown, because then it is the only thing explaining the faded pointer above it. */
+function HandoffGoneNote() {
+  return (
+    <p className="fy-handoff-note" data-handoff-note="gone">
+      <Info aria-hidden="true" size={12} />
+      <span>The file this message was handed over in can no longer be read. {TURN_FILE_EXPLANATION}</span>
+    </p>
+  );
+}
+
 /**
  * "via turn file": a hover tooltip on a desktop, a tap that reads the line out on a phone (which has no
- * hover) — the same contract the message foot's time follows. When the file is gone the line is simply
- * shown, because then it is the only thing explaining the faded pointer above it.
+ * hover) — the same contract the message foot's time follows. It is NOT drawn by the hand-off itself: the
+ * bubble hands it to its foot (`MessageFooter`'s `lead`) so it shares the line the time and ticks are on.
  */
-function HandoffNote({ gone }: { readonly gone: boolean }) {
-  const [open, setOpen] = useState(false);
-  if (gone)
-    return (
-      <p className="fy-handoff-note" data-handoff-note="gone">
-        <Info aria-hidden="true" size={12} />
-        <span>The file this message was handed over in can no longer be read. {TURN_FILE_EXPLANATION}</span>
-      </p>
-    );
+export function HandoffVia({ open, onToggle }: { readonly open: boolean; readonly onToggle: () => void }) {
   return (
-    <>
-      <div className="fy-handoff-via">
-        <button
-          aria-expanded={open}
-          aria-label={`Sent via turn file. ${TURN_FILE_EXPLANATION}`}
-          className="fy-handoff-via-button"
-          onClick={() => setOpen(current => !current)}
-          title={TURN_FILE_EXPLANATION}
-          type="button"
-        >
-          <Info aria-hidden="true" size={12} />
-          <span aria-hidden="true">via turn file</span>
-        </button>
-      </div>
-      {open ? (
-        <p className="fy-handoff-note" data-handoff-note="explained">
-          {TURN_FILE_EXPLANATION}
-        </p>
-      ) : null}
-    </>
+    <button
+      aria-expanded={open}
+      aria-label={`Sent via turn file. ${TURN_FILE_EXPLANATION}`}
+      className="fy-handoff-via-button"
+      onClick={onToggle}
+      title={TURN_FILE_EXPLANATION}
+      type="button"
+    >
+      <Info aria-hidden="true" size={12} />
+      <span aria-hidden="true">via turn file</span>
+    </button>
+  );
+}
+
+/** What "via turn file" says when it is opened, drawn under the foot. */
+export function HandoffViaDetail() {
+  return (
+    <p className="fy-receipt-detail" data-handoff-note="explained" data-side="own">
+      {TURN_FILE_EXPLANATION}
+    </p>
   );
 }

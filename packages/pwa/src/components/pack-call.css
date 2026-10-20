@@ -1,14 +1,15 @@
 /* PACK MODE IN THE PARENT'S VIEW (docs/pack-mode.md): the chat cards a ferret's `new`, `wait` and
    `recommend` become (`pack-call.tsx`), and the sub-ferret rows the session bar's indicator and Info list
-   (`sub-ferrets.tsx`). Every colour is a theme token, so light and dark come from the theme. */
+   (`sub-ferrets.tsx`). Every colour, stroke, corner and shadow is a theme role (the card roles in `themes.css`), so a Neo transcript draws these square and inked and a Studio one soft. */
 
 /* A SUB-FERRET START: the assistant's side, in a card of its own like "Sent to", with the accent edge a
    peer message wears — a ferret was made, which is more than a shell command ran. */
 .fy-message-pack {
-  background: var(--fy-surface);
-  border: 1px solid var(--fy-border);
-  border-left: 3px solid var(--fy-accent);
-  border-radius: 12px 12px 12px 3px;
+  background: var(--card-bg);
+  border: var(--card-stroke) solid var(--card-border);
+  border-left: var(--card-edge) solid var(--fy-accent);
+  border-radius: var(--card-radius) var(--card-radius) var(--card-radius) var(--card-tail-radius);
+  box-shadow: var(--card-shadow);
   margin-right: auto;
   max-width: min(85%, 640px);
   min-width: 0;
@@ -16,7 +17,7 @@
 }
 .fy-message-pack[data-pack-state='refused'],
 .fy-message-pack[data-pack-state='failed'] {
-  border-left-color: var(--err, #b42318);
+  border-left-color: var(--err);
 }
 .fy-message-pack[data-pack-kind='recommend'],
 .fy-message-pack[data-pack-kind='wait'] {
@@ -35,25 +36,26 @@
   overflow-wrap: anywhere;
 }
 .fy-pack-mono {
-  font-family: var(--font-mono, monospace);
-  font-size: 12px;
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
 }
 .fy-pack-muted {
   color: var(--fy-muted);
   font-size: 12px;
 }
 .fy-pack-error {
-  color: var(--err, #b42318);
+  color: var(--err);
   font-size: 13.5px;
   font-weight: 600;
 }
 .fy-pack-code {
-  background: var(--err-bg, var(--fy-surface-2));
-  border: 1px solid var(--err-border, var(--fy-border));
-  border-radius: 999px;
-  color: var(--err, var(--fy-fg));
-  font-size: 11px;
-  padding: 0 8px;
+  background: var(--err-bg);
+  border: var(--stroke) solid var(--err-border);
+  border-radius: var(--radius-badge);
+  color: var(--err);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  padding: 0 var(--pad-badge-x);
 }
 .fy-pack-retried {
   color: var(--fy-accent);
@@ -65,9 +67,11 @@
 }
 .fy-pack-section-title {
   color: var(--fy-muted);
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.02em;
+  font-family: var(--font-display);
+  font-size: var(--label-size);
+  font-weight: var(--label-weight);
+  letter-spacing: var(--tracking-label);
+  text-transform: var(--label-transform);
   margin: 8px 0 0;
 }
 .fy-pack-attempts,
@@ -86,11 +90,11 @@
   color: var(--fy-muted);
 }
 li[data-pack-attempt='started'] .fy-pack-attempt-outcome {
-  color: var(--ok, var(--fy-accent));
+  color: var(--ok);
   font-weight: 600;
 }
 li[data-pack-attempt='refused'] .fy-pack-attempt-outcome {
-  color: var(--err, #b42318);
+  color: var(--err);
   font-weight: 600;
 }
 .fy-pack-refusal {
@@ -105,15 +109,18 @@ li[data-pack-attempt='refused'] .fy-pack-attempt-outcome {
 }
 .fy-pack-ready,
 .fy-pack-cannot {
-  border: 1px solid var(--fy-border);
-  border-radius: 999px;
-  font-size: 10.5px;
-  padding: 0 6px;
+  border: var(--stroke) solid var(--fy-border);
+  border-radius: var(--radius-badge);
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-strong);
+  letter-spacing: var(--tracking-label);
+  padding: 0 var(--pad-badge-x);
+  text-transform: var(--label-transform);
 }
 .fy-pack-ready {
-  background: var(--ok-bg, var(--fy-surface-2));
-  border-color: var(--ok-border, var(--fy-border));
-  color: var(--ok, var(--fy-fg));
+  background: var(--ok-bg);
+  border-color: var(--ok-border);
+  color: var(--ok);
 }
 .fy-pack-cannot {
   color: var(--fy-muted);
@@ -151,17 +158,17 @@ li[data-pack-attempt='refused'] .fy-pack-attempt-outcome {
   display: none;
 }
 .fy-pack-fold-body {
-  border-left: 2px solid var(--fy-border);
+  border-left: var(--stroke-heavy) solid var(--fy-border);
   margin-top: 4px;
   padding-left: 10px;
 }
 .fy-pack-result {
-  border-top: 1px solid var(--fy-border);
+  border-top: var(--divider-width) solid var(--divider-color);
   margin-top: 8px;
   padding-top: 4px;
 }
 .fy-pack-result[data-pack-collected='done'] .fy-pack-section-title {
-  color: var(--ok, var(--fy-accent));
+  color: var(--ok);
 }
 .fy-pack-result-body {
   margin-top: 4px;
@@ -170,7 +177,7 @@ li[data-pack-attempt='refused'] .fy-pack-attempt-outcome {
 /* HOW A SUB-FERRET IS DOING: a dot and a word, the dot's colour the state's. */
 .fy-sub-ferret-state {
   align-items: baseline;
-  color: var(--fy-muted, var(--muted));
+  color: var(--fy-muted);
   display: inline-flex;
   flex-wrap: wrap;
   font-size: 12px;
@@ -179,8 +186,8 @@ li[data-pack-attempt='refused'] .fy-pack-attempt-outcome {
 }
 .fy-sub-ferret-dot {
   align-self: center;
-  background: var(--fy-muted, var(--muted));
-  border-radius: 50%;
+  background: var(--fy-muted);
+  border-radius: var(--radius-dot);
   flex: 0 0 auto;
   height: 7px;
   width: 7px;
@@ -247,8 +254,8 @@ li[data-pack-attempt='refused'] .fy-pack-attempt-outcome {
 }
 .fy-sub-ferret-model {
   color: var(--muted);
-  font-family: var(--font-mono, monospace);
-  font-size: 11px;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
 }
 
 /* THE SESSION BAR'S INDICATOR: a quiet chip that opens the list under it. */
@@ -260,26 +267,27 @@ li[data-pack-attempt='refused'] .fy-pack-attempt-outcome {
 .fy-sub-ferret-toggle {
   align-items: center;
   background: var(--surface-2);
-  border: 1px solid var(--border);
-  border-radius: 999px;
+  border: var(--stroke-control) solid var(--border-strong);
+  border-radius: var(--radius-control);
+  box-shadow: var(--shadow-control);
   color: var(--muted);
   cursor: pointer;
   display: inline-flex;
-  font-size: var(--text-sm, 12px);
+  font-size: var(--text-sm);
   gap: 4px;
   padding: 1px 8px;
   white-space: nowrap;
 }
 .fy-sub-ferret-toggle:hover,
 .fy-sub-ferret-toggle[aria-expanded='true'] {
-  border-color: var(--border-strong, var(--border));
+  border-color: var(--accent);
   color: var(--fg);
 }
 .fy-sub-ferret-popover {
   background: var(--surface);
-  border: 1px solid var(--border-strong, var(--border));
-  border-radius: 10px;
-  box-shadow: 0 8px 24px rgb(0 0 0 / 18%);
+  border: var(--stroke-panel) solid var(--border-strong);
+  border-radius: var(--radius-panel);
+  box-shadow: var(--shadow-popover);
   left: 0;
   max-height: min(60vh, 420px);
   max-width: calc(100vw - 32px);

@@ -486,7 +486,7 @@ function PairingFocus({ stage, onPair, onCancel, paired, embedded, deviceName, o
       <PairingFrame embedded={embedded} stage="paired">
         <div className="flex flex-col items-center gap-3 py-8 text-center">
           <span
-            className="flex h-16 w-16 items-center justify-center rounded-full border-2 border-ok bg-ok-bg text-ok"
+            className="flex h-16 w-16 items-center justify-center rounded-full border-heavy border-ok bg-ok-bg text-ok"
             aria-hidden="true"
           >
             <Check size={34} strokeWidth={3} />

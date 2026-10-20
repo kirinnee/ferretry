@@ -35,6 +35,7 @@
  *   bun harness/screenshot.ts --pair-from-menu-only [--light]   # Pair a phone from the machine menu
  *   bun harness/screenshot.ts --session-context-menu-only [--light]   # right-click menu / long-press sheet on a session row
  *   bun harness/screenshot.ts --about-only [--light]   # Settings › Machine › About and its update states
+ *   bun harness/screenshot.ts --agent-clis-only [--light]   # Settings › Machine › Agent CLIs, every install method
  *   bun harness/screenshot.ts --session-layout-only [--light]   # the session page's layout checks, with frames
  *   bun harness/screenshot.ts --settings-only [--light]   # what CI runs
  */
@@ -98,6 +99,8 @@ const PAIR_FROM_MENU_ONLY = process.argv.includes('--pair-from-menu-only');
 const SESSION_CONTEXT_MENU_ONLY = process.argv.includes('--session-context-menu-only');
 /** Settings › Machine › About: an update available, the mid-turn choice, and a deb's manual steps. */
 const ABOUT_ONLY = process.argv.includes('--about-only');
+/** Settings › Machine › Agent CLIs: each install method, the verified/newest buttons and the unverified confirm. */
+const AGENT_CLIS_ONLY = process.argv.includes('--agent-clis-only');
 
 /**
  * The Projects hub states, each on a page of its own.
@@ -139,6 +142,7 @@ const WALKS_SETTINGS = !(
   PAIR_FROM_MENU_ONLY ||
   SESSION_CONTEXT_MENU_ONLY ||
   ABOUT_ONLY ||
+  AGENT_CLIS_ONLY ||
   SESSION_LAYOUT_ONLY
 );
 
@@ -164,7 +168,7 @@ const WALKS_SETTINGS = !(
  * and the not-set-up Runtimes card it leaves to). Each of these is also a Machines geometry check, below.
  *
  * The rest, seventeen at both viewports plus the open device-capabilities disclosure, the unlock screen and the Files editor's refused save at both: three Settings sections (Appearance, Behaviour, Daemons), the
- * healthy daemon's Warden and its eleven other panels (Security, the passkey panel, Security log, Files and About & updates among them), the unreachable daemon's Warden and Carrier, and the
+ * healthy daemon's Warden and its twelve other panels (Security, the passkey panel, Security log, Files, About & updates and Agent CLIs among them), the unreachable daemon's Warden and Carrier, and the
  * one-daemon route. (The old Fleet and Accounts panels, their eight-step new-account sequence and the
  * Environment panel went with the old account system in U21.) Plus THREE MOBILE-ONLY open bottom
  * sheets, which have no desktop equivalent because a desktop reads a real tablist instead. The asymmetry
@@ -184,7 +188,7 @@ const WALKS_SETTINGS = !(
  * chose over committed golden images: one integer per intentional change, versus a re-baselined
  * directory of PNGs whose diff nobody can review.
  */
-const SETTINGS_SIDEWAYS_CHECKS = 173;
+const SETTINGS_SIDEWAYS_CHECKS = 175;
 
 /**
  * HOW MANY MACHINES GEOMETRY CHECKS A RUN THAT WALKS SETTINGS OWES (`assertMachinesGeometry`): one per
@@ -613,6 +617,51 @@ const captureAbout = async (page: Page, viewportName: string): Promise<void> => 
       await choice.waitFor({ state: 'visible' });
       await choice.scrollIntoViewIfNeeded();
       await shot('mid-turn');
+    }
+  }
+};
+
+/**
+ * SETTINGS › MACHINE › AGENT CLIs, for every install method (`docs/updating.md`): the harness daemon
+ * answers `?agent-clis=npm|nix|native` in the page (`harness/main.tsx`). Each harness card is captured
+ * in view, and in the npm state Codex's Update is pressed so the "not yet verified" question is on screen.
+ *
+ * A narrow mode, so it owes no Settings tally; its own sideways check runs on every frame instead, and
+ * the panel's geometry in the gated walk is the `agent-clis` row of the daemon-panel loop.
+ */
+const captureAgentClis = async (page: Page, viewportName: string): Promise<void> => {
+  const shot = async (name: string): Promise<void> => {
+    const wide = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+    if (wide > 1) fail(`agent CLIs ${name} scrolls sideways by ${wide}px at ${viewportName}`);
+    const target = join(outDir, `agent-clis-${name}-${SCHEME}-${viewportName}.png`);
+    await page.screenshot({ path: target, animations: 'disabled' });
+    process.stdout.write(`📸 agent CLIs ${name} ${SCHEME} ${viewportName} -> ${target}\n`);
+  };
+  for (const state of ['npm', 'nix', 'native'] as const) {
+    const url = new URL(server.url);
+    url.searchParams.set('settings-harness', '1');
+    url.searchParams.set('agent-clis', state);
+    await page.goto(url.toString());
+    const settings = page.getByLabel('Settings page preview', { exact: true });
+    const navigation = settings.locator(viewportName === 'mobile' ? '[data-settings-home]' : '[data-settings-sidebar]');
+    await navigation.locator('[data-settings-machine="harness-daemon"]').click();
+    const surface = settings.locator('[data-machines-surface="harness-daemon"]');
+    await surface.locator('[data-machine-tab="machine"]').click();
+    const frame = settings.locator('[data-daemon-settings-frame="harness-daemon"]');
+    await frame.locator('[data-daemon-panel="agent-clis"]').click();
+    await frame.locator('#agent-clis-heading').waitFor({ state: 'visible' });
+    for (const harness of ['claude', 'codex'] as const) {
+      const card = frame.locator(`[data-agent-cli="${harness}"]`);
+      await card.scrollIntoViewIfNeeded();
+      await settleTransitions(page);
+      await shot(`${state}-${harness}`);
+    }
+    if (state === 'npm') {
+      await frame.locator('[data-agent-cli-update="codex:newest"]').click();
+      const confirm = frame.locator('[data-agent-cli-confirm="codex"]');
+      await confirm.waitFor({ state: 'visible' });
+      await confirm.scrollIntoViewIfNeeded();
+      await shot('npm-unverified-confirm');
     }
   }
 };
@@ -2090,6 +2139,10 @@ try {
             await captureAbout(page, viewport.name);
             continue;
           }
+          if (AGENT_CLIS_ONLY) {
+            await captureAgentClis(page, viewport.name);
+            continue;
+          }
           if (TASK_BOARD_ONLY) {
             const target = join(outDir, `task-board-${viewport.name}.png`);
             const taskBoard = page.locator('#harness-task-board');
@@ -2496,8 +2549,8 @@ try {
           // The fixture is only evidence about the real frame if it carries the panels the composition
           // root supplies: every app panel but Model pricing, Speed-ups and Learning, which it has never mounted.
           const daemonPanels = await wardenFrame.locator('[data-daemon-panel]').count();
-          if (daemonPanels !== 12)
-            fail(`settings fixture listed ${daemonPanels} connection and security panels instead of the 12 it mounts`);
+          if (daemonPanels !== 13)
+            fail(`settings fixture listed ${daemonPanels} connection and security panels instead of the 13 it mounts`);
           await wardenFrame.scrollIntoViewIfNeeded();
           // Ten rows with a sentence each is the longest list in Settings; if one row widens a phone, it is here.
           await assertNoSidewaysScroll(page, `the connection and security list at ${viewport.name}`);
@@ -2532,6 +2585,8 @@ try {
             ['Files', 'files', '[data-config-files-panel]'],
             // About & updates: the version pair, the install method, the Update button and its changelog.
             ['About & updates', 'about', '#about-machine-heading'],
+            // Agent CLIs: each harness's path, install method, verification badge and Update buttons.
+            ['Agent CLIs', 'agent-clis', '#agent-clis-heading'],
             ['Carrier', 'carrier', '[data-active-carrier]'],
             ['Host checks', 'host-checks', '[data-daemon-host-checks="harness-daemon"]'],
           ] as const) {

@@ -567,6 +567,14 @@ const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
     },
     arm: () => () => undefined,
   },
+  harnessUpdate: {
+    view: async () => {
+      throw new Error('not exercised by the surface inventory');
+    },
+    start: async () => {
+      throw new Error('not exercised by the surface inventory');
+    },
+  },
   sessionFilesystem: new SessionFilesystem(new FakeRootPinner(), new FakeSessionGit()),
   scratchGc: scratchGc ?? { plan: async () => [], sweep: async () => ({ sessions: 0, bytes: 0, failures: 0 }) },
   secrets: secretSubsystem(),
@@ -666,6 +674,7 @@ describe('the mounted daemon surface', () => {
       6 + // a person's agent tools: terminal and browser tool calls, their control changes, and each kind's control read
       2 + // the speed-up keys: their status read and one provider's Test
       3 + // updating this daemon: the view, starting an update, and the automatic-install setting (docs/updating.md)
+      2 + // updating the agent CLIs: their view (which is when npm is asked) and starting one update
       4 + // the configuration files: status, one file, an edit and a confirmation (the agent's door is `none`)
       1 + // an owner's request for a Warden investigation (the "who needs you" feed is `authenticated`, like the status)
       1 + // the owner leaving a ferret alone for longer than the Warden would
@@ -946,6 +955,9 @@ describe('the mounted daemon surface', () => {
       'GET /v1/daemon/update',
       'POST /v1/daemon/update',
       'PATCH /v1/daemon/update/settings',
+      // Updating the agent CLIs: the view, and starting one harness's update.
+      'GET /v1/harnesses/update',
+      'POST /v1/harnesses/update',
       // The working-tree read. Its four deeper paths come before the one-segment `fs`, which is what
       // keeps `fs/file` reachable at all: the router matches in registration order.
       'GET /v1/sessions/:sessionId/fs/file',

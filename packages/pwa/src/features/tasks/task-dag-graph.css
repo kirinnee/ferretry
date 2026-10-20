@@ -32,7 +32,7 @@
   align-items: center;
   justify-content: center;
   gap: 0.3rem;
-  border: 1px solid var(--border-strong);
+  border: var(--stroke-control) solid var(--border-strong);
   border-radius: var(--radius-control);
   background: var(--surface);
   color: var(--fg);
@@ -49,7 +49,7 @@
   height: clamp(420px, 64vh, 700px);
   min-width: 0;
   overflow: hidden;
-  border: 1px solid var(--border-strong);
+  border: var(--stroke-panel) solid var(--border-strong);
   border-radius: var(--radius-control);
   background:
     radial-gradient(circle at 1px 1px, color-mix(in srgb, var(--accent) 16%, transparent) 1px, transparent 0) 0 0 / 22px

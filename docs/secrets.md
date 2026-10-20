@@ -152,7 +152,46 @@ from another machine** offers **Copy secrets from <machine>…**; on any machine
 Copy to another machine…** does the same from the other end. Either way a person picks the secrets by
 name — each row says where that machine's configuration uses it, and whether the receiving machine
 already holds one (it is replaced) — and the sending machine asks for a **passkey for that copy**.
-Secrets still never travel as a side effect of copying configuration: only the names a person ticked.
+Secrets never travel as a side effect of copying configuration. The one exception is the keys of the **API-key
+logins** being cloned, which are named in the preview and follow in the same sealed copy — see
+[Sign-ins are not copied; API keys are](#sign-ins-are-not-copied-api-keys-are).
+
+### Sign-ins are not copied; API keys are
+
+**Owner decision, 2026-10-20: "don't copy sign-in, copy env var credentials only".** Cloning a machine
+brings across everything that makes a runtime work by key, and nothing that makes it work by a signed-in
+account.
+
+| What                                                                                                  | Clone does                                                                                                         |
+| ----------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| An **API-key (environment) login** — GLM, DeepSeek, MiniMax, OpenRouter, a Bedrock key, a LiteLLM key | The login copies as its file (plain variables, `${secret:NAME}` names) and its **keys follow, sealed**, below.     |
+| A key a copied setting spends — the Warden's Jev key, the Groq or Cerebras clean-up key               | The same sealed copy: the preview lists it under the keys that travel.                                             |
+| A **sign-in** — Claude Code's login, Codex's ChatGPT login, a keychain item, `auth.json`              | **Never.** It arrives as an empty slot marked **Sign in on _machine_**, with a Sign in button for each login.      |
+| An MCP server's OAuth access token (`MCP_…_ACCESS`), the one sign-in the vault itself holds           | **Never.** The copy panel lists it and does not let it be ticked; sign in to that server again on the new machine. |
+
+**Why a sign-in is excluded.** A sign-in is a refresh token, and a provider that rotates refresh tokens
+(Anthropic and OpenAI both do) invalidates the old one the first time the new one is used. A login copied to
+a second machine would therefore sign the _first_ machine out the next time either one refreshed — a copy that
+looks like it worked and breaks the original. An API key has no such state: the same key is valid on both
+machines, which is also why a key being on two machines is an ordinary thing to do and is the owner's call.
+
+**It is a type, not a check.** A secret copy is built from `CloneableSecretName`
+(`packages/protocol/src/lib/secret-clone.ts`), a branded name that cannot be made from an MCP sign-in token's
+name. The export request, the bundle's authenticated names, its sealed plaintext and the target's filing are
+all typed to it, so no code path can put a sign-in in a bundle by forgetting a check. Claude Code and Codex
+logins are files in a credential store, not vault entries, so there is no name to put in a bundle at all.
+A bundle that arrives carrying a sign-in token's name anyway — from a daemon that was modified — is refused
+whole by the receiving machine (`bundle_invalid`), and nothing is filed.
+
+**What the person sees.** The Clone preview (Settings › a machine › Setup, and New machine setup's _Start
+from_ step) has a **Logins and keys** section: each API-key login reads _Copies with its key_; each sign-in
+reads _Sign in on *machine*_ with the reason; one box, ticked, reads _Copy *n* API keys with the logins_. Pressing
+Copy applies the clone and then runs ONE sealed copy for those keys — **one passkey on the sending machine for
+all of them** — so the cloned runtime works on arrival. Unticking the box copies the login without its key; the
+preview's needs list still offers a field for each. If the passkey is declined the clone is kept, the Done page
+says the keys were not copied, and the _Copy secrets from…_ list offers them again. Only keys the sending machine
+actually holds and the receiving one does not are asked for; a key already on the receiving machine is never
+replaced by Clone.
 
 ### How it works
 
@@ -244,6 +283,47 @@ the vault. Both routes are governed as `secrets.use`, and a Test is in the secur
 What it does NOT protect against: the provider. A key you hand Groq is a key Groq can bill, and the text
 the daemon sends (a transcript, or the Warden's redacted snapshot) is text that provider receives — the
 Speed-ups screen says what leaves the machine for each one.
+
+## Device-held speed-up keys
+
+Settings › This device › **Speed-up keys** takes a Groq and/or a Cerebras key that lives in **one
+browser** and is spent **by that browser**. With one saved, dictation clean-up goes straight from the
+page to `api.groq.com` or `api.cerebras.ai` — no daemon on the path, because one more round trip
+through a machine made clean-up slow (owner decision). **This is not the secret store above, and it
+does not reach it.**
+
+- **It never reaches a daemon or an agent.** The key is not sent to any machine, not synced, not copied
+  by Copy settings, and not in any request a daemon sees. Agents run on daemons, so no agent can name
+  it, `use` it or read it — `${secret:…}` and `fy secret use` know nothing about it.
+- **Write-only in the page, too.** `lib/stt/speedup-keys.ts` has no getter: after Save the screen can
+  say only "saved · ends with ••ab". The one place the value is decrypted is `send`, which puts it on
+  ONE request whose URL the vault picks from the shared provider table
+  (`@ferretry/protocol` `stt-cleanup.ts`), so a Groq key can only ever go to `api.groq.com`. That
+  request carries no cookie, no referrer and no cache entry, and nothing logs it.
+- **Encrypted at rest.** Each key is AES-GCM ciphertext under a wrapping key minted **non-extractable**
+  and kept in IndexedDB as a `CryptoKey` object (like the [pairing key](pairing.md)). A copy of the
+  profile's files, a backup, or the database restored into another browser yields ciphertext and a key
+  reference nothing can open. The provider id is bound in as additional data, so a record moved into
+  the other provider's slot fails to open.
+- **The page's policy names the two hosts.** `connect-src` in `packages/pwa/public/_headers` lists
+  exactly `https://api.groq.com` and `https://api.cerebras.ai`, and `scripts/validate/pages-config.sh`
+  fails if that list and the provider table disagree.
+- **The same decisions as the daemon.** The prompt, its fixed guard, how much conversation goes along
+  (the machine's `voice.yaml` still decides), reasoning stripping and the kept-raw check are the
+  shared `stt-cleanup` code both paths run ([voice.md](voice.md)).
+- **Without one**, clean-up asks the daemon, which spends its own [speed-up key](#speed-up-keys-the-fifth-holder)
+  if it has one; with neither, the raw words are kept and the review box says where to add a key.
+
+What it does NOT protect against:
+
+- **Code running in this page.** An XSS or a malicious deploy can spend the key while the tab is open
+  — it cannot carry the wrapping key away, but it can call `send`. Same limit as the pairing key.
+- **Anyone using this browser profile.** Whoever can open Ferretry in it can dictate on your key. A
+  device you hand to somebody else should have its keys removed first (Remove on each card).
+- **The provider.** As with the daemon's keys: Groq or Cerebras receives the recognised text, your word
+  list and the conversation `voice.yaml` allows, and can bill the key. Never audio.
+- **A browser that clears site data.** Clearing it deletes the key; the screen then says it is not
+  saved, and you paste it again.
 
 ## Secrets the daemon files itself
 

@@ -8,8 +8,9 @@
   gap: 8px;
   margin-bottom: 8px;
   padding: 10px 12px;
-  border: var(--stroke-panel, 1px) solid var(--accent);
+  border: var(--stroke-panel) solid var(--accent);
   border-radius: var(--radius-panel);
+  box-shadow: var(--shadow-panel);
   background: var(--surface);
   color: var(--fg);
   font-family: var(--font-ui);

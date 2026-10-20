@@ -36,8 +36,11 @@ const CONFIGURE = { capability: 'fleet', axis: 'configure' } as const;
 const isAgentCaller = (context: RouteContext): boolean =>
   context.credential !== undefined && context.credential.tokenClass !== 'device' && !isHumanAdminActor(context.actor);
 
-/** The refusal for a governed caller with no fresh passkey proof, or `undefined` when it may go on. */
-function ownerOnly(context: RouteContext, act: string): ApiResponse | undefined {
+/**
+ * The refusal for a governed caller with no fresh passkey proof, or `undefined` when it may go on. Shared
+ * with the harness update (`harness-update.ts`): putting new code on the machine is the same act.
+ */
+export function ownerOnly(context: RouteContext, act: string): ApiResponse | undefined {
   if (isAgentCaller(context)) throw new ApiError(403, `a ferret cannot ${act}; the owner does`, 'forbidden');
   if (context.governance?.governed !== true || context.presentation?.freshStepUp === true) return undefined;
   return jsonResponse(

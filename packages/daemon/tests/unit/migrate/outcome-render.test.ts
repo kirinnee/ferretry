@@ -1,10 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import {
-  handoffMessage,
-  renderMigrationOutcome,
-  type MigrationOutcome,
-} from '../../../src/lib/migrate/outcome-render.ts';
+import { renderMigrationOutcome, type MigrationOutcome } from '../../../src/lib/migrate/outcome-render.ts';
 
 const attempt: MigrationOutcome = {
   ok: false,
@@ -90,14 +86,5 @@ describe('renderMigrationOutcome', () => {
     should(staged).containEql('- Status now: **UNKNOWN**');
     should(elsewhere).containEql('neither the original `claude-loge` nor the requested `codex-terra`.');
     should(nowhere).containEql('- Session now on: **UNKNOWN** — the daemon reported no wrapper for this session.');
-  });
-});
-
-describe('handoffMessage', () => {
-  it('should point the migrated agent at the report before it retries anything', () => {
-    // Act + Assert
-    should(handoffMessage('/state/sessions/session-1/migration-inflight.md')).equal(
-      'You were migrated mid-turn. Read /state/sessions/session-1/migration-inflight.md — it lists what was running and what to check before re-running anything.',
-    );
   });
 });

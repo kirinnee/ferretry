@@ -10,7 +10,7 @@ import { daemonId as toDaemonId } from '../lib/daemon-connection.ts';
 import type { PaneActivity } from '../lib/pane-activity.ts';
 import { quoteSelectionIntoComposer } from '../lib/quote.ts';
 import type { ChatScrollSlot } from '../lib/scroll-memory.ts';
-import { type TranscriptEntry, transcriptItems } from '../lib/session-screens.ts';
+import { agentRuns, type TranscriptEntry, transcriptItems } from '../lib/session-screens.ts';
 import { newTailRows, prependedAbove, prependRestoreTarget } from '../lib/transcript-follow.ts';
 import { ContextMenu, type ContextMenuItem } from '../shell/context-menu.tsx';
 import { CompactionCard, CompactionStrip } from './compaction-card.tsx';
@@ -126,6 +126,7 @@ export function Transcript({
   const hold = useTranscriptHold();
   const shown = useHeldStill({ entries, busy, activity, activityFallback, turnStartedAt, live }, hold);
   const items = transcriptItems(shown.entries);
+  const runs = agentRuns(items);
   const compaction = shown.live?.compaction;
   const stripAt =
     compaction?.phase === 'done'
@@ -249,6 +250,7 @@ export function Transcript({
                 onRetry={onRetry}
                 onSubmit={onSubmit}
                 previous={item.previous}
+                run={runs[index]}
               />
             </Fragment>
           ))}

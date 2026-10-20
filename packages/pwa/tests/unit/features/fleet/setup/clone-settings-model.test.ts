@@ -1,13 +1,15 @@
 import { describe, expect, it } from 'bun:test';
-import { type FleetCloneBundle, type SpeedupsView, secretReference } from '@ferretry/protocol';
+import { type FleetCloneBundle, mcpOAuthSecretNames, type SpeedupsView, secretReference } from '@ferretry/protocol';
 import {
   ALL_CLONE_ITEMS,
   CLONE_ITEMS,
   type CloneItem,
   type CloneItemId,
   type CloneNeed,
+  cloneLogins,
   cloneNeeds,
   controlsChange,
+  keysToCopy,
   needsSentence,
   outcomeSentence,
   providersNeededBy,
@@ -304,6 +306,21 @@ describe('cloneNeeds', () => {
     ]);
   });
 
+  it('reads the key of a login that drives both CLIs from either half, not only from env', () => {
+    const copied = ENV_BUNDLE({
+      credentials: [
+        {
+          id: 'glm-both',
+          harness: 'claude',
+          store: 'environment',
+          claude: { env: { ANTHROPIC_AUTH_TOKEN: secretReference('ZAI_API_KEY') } },
+          codex: { env: { ZAI_API_KEY: secretReference('ZAI_API_KEY') } },
+        },
+      ],
+    });
+    expect(cloneNeeds(['fleet'], copied, filesOf(), null, []).map(need => need.name)).toEqual(['ZAI_API_KEY']);
+  });
+
   it('reads an environment login with no env as needing nothing', () => {
     const copied = ENV_BUNDLE({ credentials: [{ id: 'bare-env', harness: 'codex', store: 'environment' }] });
     expect(cloneNeeds(['fleet'], copied, filesOf(), null, [])).toEqual([]);
@@ -364,6 +381,76 @@ describe('cloneNeeds', () => {
   it('needs nothing from the fleet when it is not chosen or has no bundle', () => {
     expect(cloneNeeds(['warden'], bundle(), filesOf(), null, [])).toEqual([]);
     expect(cloneNeeds(['fleet'], null, filesOf(), null, [])).toEqual([]);
+  });
+});
+
+describe('cloneLogins', () => {
+  const LOGINS = ENV_BUNDLE({
+    credentials: [
+      { id: 'claude-work', harness: 'claude', email: 'me@work.example' },
+      {
+        id: 'glm-env',
+        harness: 'claude',
+        label: 'GLM',
+        store: 'environment',
+        env: { ANTHROPIC_AUTH_TOKEN: secretReference('ZAI_API_KEY') },
+      },
+      { id: 'codex-work', harness: 'codex', label: 'Work' },
+      { id: 'cloud-env', harness: 'claude', store: 'environment', cloudCredential: 'aws-profile:dev' },
+    ],
+  });
+
+  it('puts API-key logins first, then sign-ins, each with what it needs here', () => {
+    expect(cloneLogins(LOGINS, ['ZAI_API_KEY'])).toEqual([
+      { kind: 'api-key', id: 'glm-env', harness: 'claude', name: 'GLM', keys: [{ name: 'ZAI_API_KEY', held: true }] },
+      { kind: 'api-key', id: 'cloud-env', harness: 'claude', name: 'cloud-env', keys: [] },
+      { kind: 'sign-in', id: 'claude-work', harness: 'claude', name: 'me@work.example' },
+      { kind: 'sign-in', id: 'codex-work', harness: 'codex', name: 'Work' },
+    ]);
+  });
+
+  it('marks a key this machine lacks as not held, and lists nothing without a bundle', () => {
+    expect(cloneLogins(LOGINS, [])[0]).toMatchObject({ keys: [{ name: 'ZAI_API_KEY', held: false }] });
+    expect(cloneLogins(null, [])).toEqual([]);
+  });
+});
+
+describe('keysToCopy', () => {
+  const need = (name: string, over: Partial<CloneNeed> = {}): CloneNeed => ({
+    key: `secret:${name}`,
+    kind: 'secret',
+    name,
+    secretName: name,
+    why: 'login glm-env',
+    held: false,
+    ...over,
+  });
+
+  it('seals the keys this machine lacks and the source holds, in the order they are needed', () => {
+    const needs = [need('ZAI_API_KEY'), need('GROQ_API_KEY', { held: true }), need('JEV_API_KEY')];
+    expect(keysToCopy(needs, ['JEV_API_KEY', 'ZAI_API_KEY', 'GROQ_API_KEY'])).toEqual(['ZAI_API_KEY', 'JEV_API_KEY']);
+  });
+
+  it('never asks the source for a key it does not hold', () => {
+    expect(keysToCopy([need('ZAI_API_KEY'), need('OTHER_KEY')], ['ZAI_API_KEY'])).toEqual(['ZAI_API_KEY']);
+  });
+
+  it('sends nothing when the source list could not be read, rather than guessing', () => {
+    expect(keysToCopy([need('ZAI_API_KEY')], null)).toEqual([]);
+  });
+
+  it('never sends a sign-in, a need with no secret name, or a sign-in token by any route', () => {
+    const token = mcpOAuthSecretNames('linear', 'https://mcp.example.com/mcp').access;
+    const signIn: CloneNeed = {
+      key: 'sign-in:claude-work',
+      kind: 'sign-in',
+      name: 'Claude Code login (claude-work)',
+      credentialId: 'claude-work',
+      why: 'me@work.example',
+      held: false,
+    };
+    const { secretName: _omitted, ...nameless } = need('JEV key');
+    expect(keysToCopy([signIn, nameless, need(token)], ['JEV key', token, 'claude-work'])).toEqual([]);
   });
 });
 

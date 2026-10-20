@@ -35,7 +35,7 @@ export function ImportedHistoryPage({ connection, readHistory, readConversation 
   return (
     <section aria-labelledby="imported-history-heading" className="mx-auto w-full max-w-5xl px-4 py-8 sm:px-8">
       <p className="fy-eyebrow [overflow-wrap:anywhere]">Archive · {connection.daemonId}</p>
-      <div className="mt-2 border-l-4 border-accent pl-5">
+      <div className="mt-2 border-l-heavy border-accent pl-5">
         <h1 id="imported-history-heading" className="font-display text-3xl font-bold tracking-display">
           Imported history
         </h1>
@@ -95,7 +95,7 @@ export function ImportedHistoryPage({ connection, readHistory, readConversation 
           )}
           {selected !== undefined && (
             <section
-              className="mt-8 border-t-2 border-accent pt-6"
+              className="mt-8 border-t-heavy border-accent pt-6"
               aria-label={`Imported conversation: ${selected.conversation.title}`}
             >
               <p className="fy-eyebrow">Read-only transcript</p>

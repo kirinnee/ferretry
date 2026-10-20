@@ -125,40 +125,66 @@ const userProfileRoots = (home: string): readonly string[] => {
 };
 
 /**
+ * The facts a Nix store path's install is decided by: the subset of {@link InstallFacts} that the
+ * daemon and the harness CLIs (`harness-update.ts`) share, so both read a store path with ONE rule.
+ */
+export type NixPathFacts = Pick<
+  InstallFacts,
+  | 'launchedPath'
+  | 'resolvedPath'
+  | 'homeDirectory'
+  | 'platform'
+  | 'nixProfileElement'
+  | 'homeManagerProfile'
+  | 'viaHomeManagerPath'
+>;
+
+/** What a store path can be: a profile element, a temporary shell, a module, or unrecognised. */
+export type NixInstallMethod = Extract<InstallMethod, { kind: 'nix-profile' | 'nix-shell' | 'nix-module' | 'unknown' }>;
+
+/** Whether a resolved executable lives in the Nix store, which {@link classifyNixStorePath} then decides. */
+export const isNixStoreFile = (resolvedPath: string): boolean => resolvedPath.startsWith(STORE_PREFIX);
+
+/**
+ * How an executable in the Nix store was installed — decided by HOW it was reached: launched as the
+ * store path itself is an ephemeral `nix shell`; reached through a system profile is a module; reached
+ * through the user's profile is that profile's element, or home-manager's generation.
+ */
+export function classifyNixStorePath(facts: NixPathFacts): NixInstallMethod {
+  const launched = facts.launchedPath;
+  if (isStorePath(launched)) {
+    const storePath = launched.slice(0, launched.indexOf('/', STORE_PREFIX.length));
+    return { kind: 'nix-shell', storePath };
+  }
+  const systemManager: NixSystemManager = facts.platform === 'darwin' ? 'nix-darwin' : 'nixos';
+  if (launched.startsWith('/etc/profiles/per-user/') && facts.viaHomeManagerPath === true) {
+    return { kind: 'nix-module', manager: 'home-manager', via: systemManager };
+  }
+  if (launched.startsWith('/run/current-system/') || launched.startsWith('/etc/profiles/per-user/')) {
+    return { kind: 'nix-module', manager: systemManager };
+  }
+  if (userProfileRoots(facts.homeDirectory).some(root => launched.startsWith(root))) {
+    if (facts.nixProfileElement !== undefined) return { kind: 'nix-profile', element: facts.nixProfileElement };
+    if (facts.homeManagerProfile === true || facts.viaHomeManagerPath === true) {
+      return { kind: 'nix-module', manager: 'home-manager' };
+    }
+    return { kind: 'unknown', reason: 'this nix profile has no element for it; it may have come from nix-env' };
+  }
+  return { kind: 'unknown', reason: `${launched} leads into the Nix store by a path Ferretry does not recognise` };
+}
+
+/**
  * Decide how the daemon was installed, from facts alone.
  *
  * ORDER MATTERS, and it is the order of how sure each rule is. A Homebrew Caskroom or a package
- * manager's ownership is unambiguous. A store path is then decided by HOW it was reached: launched as
- * the store path itself is an ephemeral `nix shell`; reached through a system profile is a module;
- * reached through the user's profile is that profile's element, or home-manager's generation.
+ * manager's ownership is unambiguous; a store path is then decided by {@link classifyNixStorePath}.
  */
 export function classifyInstallMethod(facts: InstallFacts): InstallMethod {
   if (!facts.compiled) return { kind: 'unknown', reason: 'this is a development build run from source' };
   const resolved = facts.resolvedPath;
   if (resolved.includes(`/Caskroom/${facts.product}/`)) return { kind: 'homebrew', cask: facts.product };
   if (facts.systemPackage !== undefined) return { kind: 'system-package', manager: facts.systemPackage };
-  if (resolved.startsWith(STORE_PREFIX)) {
-    const launched = facts.launchedPath;
-    if (isStorePath(launched)) {
-      const storePath = launched.slice(0, launched.indexOf('/', STORE_PREFIX.length));
-      return { kind: 'nix-shell', storePath };
-    }
-    const systemManager: NixSystemManager = facts.platform === 'darwin' ? 'nix-darwin' : 'nixos';
-    if (launched.startsWith('/etc/profiles/per-user/') && facts.viaHomeManagerPath === true) {
-      return { kind: 'nix-module', manager: 'home-manager', via: systemManager };
-    }
-    if (launched.startsWith('/run/current-system/') || launched.startsWith('/etc/profiles/per-user/')) {
-      return { kind: 'nix-module', manager: systemManager };
-    }
-    if (userProfileRoots(facts.homeDirectory).some(root => launched.startsWith(root))) {
-      if (facts.nixProfileElement !== undefined) return { kind: 'nix-profile', element: facts.nixProfileElement };
-      if (facts.homeManagerProfile === true || facts.viaHomeManagerPath === true) {
-        return { kind: 'nix-module', manager: 'home-manager' };
-      }
-      return { kind: 'unknown', reason: 'this nix profile has no element for it; it may have come from nix-env' };
-    }
-    return { kind: 'unknown', reason: `${launched} leads into the Nix store by a path Ferretry does not recognise` };
-  }
+  if (isNixStoreFile(resolved)) return classifyNixStorePath(facts);
   return { kind: 'standalone', directory: parentDirectory(resolved) };
 }
 
@@ -224,6 +250,60 @@ export const UpdatePlanSchema = z.discriminatedUnion('kind', [
 ]);
 export type UpdatePlan = z.infer<typeof UpdatePlanSchema>;
 
+/** What {@link nixModuleUpdate} words a module's steps with. */
+export interface NixModuleUpdateContext {
+  /** The sentence's subject: "This daemon", "Claude Code". */
+  readonly subject: string;
+  /** The flake input that is bumped: the product for the daemon, `nixpkgs` for a harness. */
+  readonly input: string;
+  /** Where that input is, when the default "the input may have another name" does not say enough. */
+  readonly inputNote?: string;
+}
+
+/**
+ * The manual steps for anything a home-manager, nix-darwin or NixOS module installed: bump the flake
+ * input, then the ONE switch command for that flavour. Shared by the daemon and the harness CLIs, so the
+ * "home-manager inside nix-darwin has no separate switch" rule is written once.
+ */
+export function nixModuleUpdate(
+  method: Extract<InstallMethod, { kind: 'nix-module' }>,
+  context: NixModuleUpdateContext,
+): { readonly explanation: string; readonly steps: readonly UpdateStep[] } {
+  const switcher = method.via ?? method.manager;
+  const switchCommand =
+    switcher === 'home-manager'
+      ? 'home-manager switch --flake .'
+      : switcher === 'nix-darwin'
+        ? 'darwin-rebuild switch --flake .'
+        : 'sudo nixos-rebuild switch --flake .';
+  const inside =
+    method.via === undefined
+      ? 'your home-manager configuration'
+      : `your home-manager configuration, which ${method.via} applies`;
+  const inputNote = context.inputNote ?? 'the input may have another name';
+  return {
+    explanation:
+      method.manager === 'home-manager'
+        ? `${context.subject} comes from ${inside}, which pins the version in its flake. Bump the input there, then switch.`
+        : `${context.subject} comes from your ${method.manager} configuration, which pins the version in its flake. Bump the input there, then switch.`,
+    steps: [
+      {
+        command: `nix flake update ${context.input}`,
+        note:
+          method.via === undefined
+            ? `in your configuration flake; ${inputNote}`
+            : `in the flake that holds your home-manager configuration; ${inputNote}`,
+      },
+      method.via === undefined
+        ? { command: switchCommand }
+        : {
+            command: switchCommand,
+            note: `home-manager is applied by this ${method.via} rebuild; there is no separate home-manager switch`,
+          },
+    ],
+  };
+}
+
 /** What `planUpdate` needs beyond the method. */
 export interface UpdatePlanContext {
   readonly product: string;
@@ -265,40 +345,8 @@ export function planUpdate(method: InstallMethod, context: UpdatePlanContext): U
         ],
       };
     case 'nix-module': {
-      const switcher = method.via ?? method.manager;
-      const switchCommand =
-        switcher === 'home-manager'
-          ? 'home-manager switch --flake .'
-          : switcher === 'nix-darwin'
-            ? 'darwin-rebuild switch --flake .'
-            : 'sudo nixos-rebuild switch --flake .';
-      const inside =
-        method.via === undefined
-          ? 'your home-manager configuration'
-          : `your home-manager configuration, which ${method.via} applies`;
-      return {
-        kind: 'manual',
-        explanation:
-          method.manager === 'home-manager'
-            ? `This daemon comes from ${inside}, which pins the version in its flake. Bump the input there, then switch.`
-            : `This daemon comes from your ${method.manager} configuration, which pins the version in its flake. Bump the input there, then switch.`,
-        steps: [
-          {
-            command: `nix flake update ${context.product}`,
-            note:
-              method.via === undefined
-                ? 'in your configuration flake; the input may have another name'
-                : 'in the flake that holds your home-manager configuration; the input may have another name',
-          },
-          method.via === undefined
-            ? { command: switchCommand }
-            : {
-                command: switchCommand,
-                note: `home-manager is applied by this ${method.via} rebuild; there is no separate home-manager switch`,
-              },
-          restart,
-        ],
-      };
+      const update = nixModuleUpdate(method, { subject: 'This daemon', input: context.product });
+      return { kind: 'manual', explanation: update.explanation, steps: [...update.steps, restart] };
     }
     case 'system-package':
       return {

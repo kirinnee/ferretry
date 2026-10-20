@@ -91,6 +91,7 @@ import {
   type ParakeetGlobalLike,
   type ParakeetVoice,
 } from './stt/parakeet-voice.ts';
+import { DeviceSpeedupKeys, IndexedDbSpeedupKeyRecords } from './stt/speedup-keys.ts';
 import { SttSettingsStore } from './stt/stt-settings.ts';
 import { DaemonUsageStore, daemonUsagePort } from './usage-store.ts';
 import { WorkspaceLayoutStore } from './workspace-layout-store.ts';
@@ -373,6 +374,8 @@ export interface AppStore {
    * per document, like the dictation settings, because the model belongs to the device.
    */
   readonly voice: ParakeetVoice;
+  /** Groq/Cerebras keys THIS device holds for direct dictation clean-up; never synced, never sent to a daemon. */
+  readonly speedupKeys: DeviceSpeedupKeys;
   /** Every agent's remembered split workspace, forgotten with the machine it belongs to. */
   readonly workspaceLayouts: WorkspaceLayoutStore;
   readonly notificationPreferences: DaemonNotificationPreferences;
@@ -438,6 +441,8 @@ export interface CreateAppStoreOptions {
   readonly speechAssets?: ParakeetAssets | null;
   /** A ready-made on-device voice service. Injected by suites; built from `speechAssets` otherwise. */
   readonly voice?: ParakeetVoice;
+  /** Provider keys this device holds. Injected by suites; this browser's IndexedDB otherwise. */
+  readonly speedupKeys?: DeviceSpeedupKeys;
   readonly repository?: DaemonConnectionRepository;
   readonly fetcher?: DaemonFetch;
   readonly connectClient?: ConnectDaemonClient;
@@ -640,6 +645,9 @@ export async function createAppStore(options: CreateAppStoreOptions = {}): Promi
   }));
   const browserStorage = browserControlsStorage() ?? null;
   const stt = new SttSettingsStore(browserStorage);
+  const speedupKeys =
+    options.speedupKeys ??
+    new DeviceSpeedupKeys(new IndexedDbSpeedupKeyRecords(globalThis.indexedDB), globalThis.crypto.subtle, fetcher);
   const voice =
     options.voice ?? browserParakeetVoice(globalThis as unknown as ParakeetGlobalLike, options.speechAssets ?? null);
   // Reads what is already installed; it never downloads.
@@ -731,6 +739,7 @@ export async function createAppStore(options: CreateAppStoreOptions = {}): Promi
     browserLogin,
     stt,
     voice,
+    speedupKeys,
     workspaceLayouts,
     notificationPreferences,
     notificationFilter,
@@ -1044,6 +1053,11 @@ export function useLockedMachines(gate: StepUpGate): readonly DaemonId[] {
  * Outside a provider — a component rendered on its own by a test — there is no router to route
  * through, and the answer is the plain network.
  */
+/** This device's provider keys, or `null` outside a store (a component rendered on its own). */
+export function useSpeedupKeys(): DeviceSpeedupKeys | null {
+  return useContext(StoreContext)?.speedupKeys ?? null;
+}
+
 /**
  * This device's Parakeet service, or `null` outside a store (a static render, a component suite).
  * Dictation and Settings read it from here so the composer never has to carry it.

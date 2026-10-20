@@ -74,8 +74,8 @@ import {
   sessionHypermediaEnabled,
   type TaskBoardChildAccess,
   TERMINAL_MAX_GLOBAL,
-  type TranscriptProvenance,
   TERMINAL_MAX_PER_SESSION,
+  type TranscriptProvenance,
   type WardenGuardConfig,
 } from '@ferretry/protocol';
 // One WebCrypto binding of the relay's crypto port serves the daemon, the browser and the Worker that
@@ -163,6 +163,8 @@ import {
   GitHubLatestRelease,
   HostedModelCatalog,
   HostedRelayDirectory,
+  HostHarnessFacts,
+  HostHarnessProbe,
   HostInstallFacts,
   HttpUsageSource,
   hostCgroupFacts,
@@ -177,6 +179,7 @@ import {
   NodeForeignHistoryFiles,
   NodePairingCryptography,
   NodeSessionBrowserLauncher,
+  NpmHarnessLatest,
   type OpenedDaemonStorage,
   PaneProcessInventory,
   PerformanceStopwatch,
@@ -450,6 +453,7 @@ import {
   CodexRuntimeCatalogCache,
   CodexTranscriptParser,
   type ConversationAdopter,
+  type ConversationFilesPort,
   ConversationImportService,
   type ConversationLinker,
   CredentialAgentIdentities,
@@ -520,6 +524,7 @@ import {
   type HarnessDiscoveryPolicy,
   type HarnessPreflight,
   HarnessQuirkService,
+  HarnessUpdateService,
   HOSTED_APP_ORIGIN,
   handoffFolders,
   handoffView,
@@ -527,10 +532,6 @@ import {
   harnessDiscoveryPolicy,
   harnessLocationSummary,
   harnessMigrationRefusal,
-  planConversationCarry,
-  previousConversation,
-  type ConversationFilesPort,
-  transcriptLaunchArguments,
   harnessOverrideFailures,
   harnessPreflightSummary,
   harnessQuirks,
@@ -593,8 +594,10 @@ import {
   parseSessionId,
   parseWardenConfigPatch,
   passkeyVerifier,
+  planConversationCarry,
   planInitialAttachments,
   portCandidates,
+  previousConversation,
   projectObservedRuntime,
   projectStructuredQuestion,
   publishableDirectCarrier,
@@ -759,6 +762,7 @@ import {
   taskBoardTaskActionAuthorizer,
   temporaryFilePath,
   transcriptKey,
+  transcriptLaunchArguments,
   tryParseSessionId,
   UnknownPeerRefused,
   type UsageFeedPort,
@@ -4264,7 +4268,7 @@ function createSessionMigrateSubsystem(parts: SessionMigrateParts): SessionMigra
         // Neither an expected status nor the dedupe heuristic: an operator asked for THIS session by
         // id, and the preflight above is the guard a migration has.
         policy: { automatic: false, dedupeSharedRecoveryScope: false, replaceLiveTerminal: true },
-        message: parts.preflight.handoff(reportPath),
+        message: parts.preflight.handoff(report, reportPath, config.mode),
       })
       .catch(async (error: unknown) => {
         await settle(false, error instanceof Error ? error.message : String(error));
@@ -8411,6 +8415,22 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
             },
           );
         })(),
+        // Updating this machine's `claude` and `codex` (docs/updating.md › "Updating Claude Code and Codex"):
+        // the file a runtime launches comes from the ONE harness resolution rule, its install facts are read
+        // exactly as this daemon's own are, and npm is asked for the newest only when somebody looks.
+        harnessUpdate: new HarnessUpdateService({
+          product: productName,
+          homeDirectory: userHome,
+          locate: kind => locateHarnessCommand(kind, harnessDiscovery, executables),
+          facts: new HostHarnessFacts({ homeDirectory: userHome, platform: process.platform }),
+          probe: new HostHarnessProbe(runPackageInstall, process.env),
+          latest: new NpmHarnessLatest({ userAgent: `${DAEMON_NAME}/${daemonVersion}` }),
+          executables,
+          run: runPackageInstall,
+          environment: process.env,
+          clock: millisecondClock,
+          checks: process.env.FY_UPDATE_CHECK !== 'off',
+        }),
         // Constructed here rather than injected: the pinner opens nothing until a request arrives, and
         // the Git reader is the same hardened runner the worktree gateway already uses. Both are
         // stateless, so one instance serves every session.

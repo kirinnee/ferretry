@@ -1,4 +1,4 @@
-import type { SecretName, SpeedupProvider } from '@ferretry/protocol';
+import { CLEANUP_PROVIDERS, type SecretName, type SpeedupProvider } from '@ferretry/protocol';
 
 /**
  * The three speed-up providers, as data.
@@ -44,13 +44,14 @@ export const JEV_HOST = 'api.typesafe.ai';
 export const JEV_DEFAULT_ENDPOINT = `https://${JEV_HOST}/v1/systemone`;
 export const JEV_DEFAULT_MODEL = 'jev-latest';
 
-export const GROQ_HOST = 'api.groq.com';
+/** The clean-up hosts are the shared provider table's, so the daemon and the browser send a key to the same one. */
+const GROQ_HOST = CLEANUP_PROVIDERS.groq.host;
 /**
  * Groq's key page lives on its developer-console host. Spelled with an escaped dot because the src/lib
  * IO gate greps for that word followed by a full stop, and this is an address, not a logger.
  */
 const GROQ_KEYS_URL = 'https://console\u002egroq.com/keys';
-export const CEREBRAS_HOST = 'api.cerebras.ai';
+const CEREBRAS_HOST = CLEANUP_PROVIDERS.cerebras.host;
 
 export const SPEEDUP_CATALOG: Readonly<Record<SpeedupProvider, SpeedupCatalogEntry>> = Object.freeze({
   jev: Object.freeze({
@@ -79,7 +80,7 @@ export const SPEEDUP_CATALOG: Readonly<Record<SpeedupProvider, SpeedupCatalogEnt
       'The recognised text, your word list and a little recent context are sent to Groq. Groq never receives audio.',
     keyUrl: GROQ_KEYS_URL,
     testNote: 'Test lists the models your key can use. It is free and runs no model.',
-    probe: Object.freeze({ kind: 'model-list', url: `https://${GROQ_HOST}/openai/v1/models` }),
+    probe: Object.freeze({ kind: 'model-list', url: CLEANUP_PROVIDERS.groq.modelsUrl }),
   }),
   cerebras: Object.freeze({
     id: 'cerebras',
@@ -92,7 +93,7 @@ export const SPEEDUP_CATALOG: Readonly<Record<SpeedupProvider, SpeedupCatalogEnt
       'The recognised text, your word list and a little recent context are sent to Cerebras. Cerebras never receives audio.',
     keyUrl: 'https://cloud.cerebras.ai',
     testNote: 'Test lists the models your key can use. It is free and runs no model.',
-    probe: Object.freeze({ kind: 'model-list', url: `https://${CEREBRAS_HOST}/v1/models` }),
+    probe: Object.freeze({ kind: 'model-list', url: CLEANUP_PROVIDERS.cerebras.modelsUrl }),
   }),
 });
 
