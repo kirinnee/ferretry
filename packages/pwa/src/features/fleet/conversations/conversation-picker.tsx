@@ -13,21 +13,19 @@ import { ChevronLeft } from 'lucide-react';
 import { useCallback, useEffect, useId, useState } from 'react';
 import { cn } from '../../../lib/class-names.ts';
 import type { DaemonConnection } from '../../../lib/daemon-connection.ts';
-import { relativeTime, sessionStatusLabel } from '../../../lib/session-screens.ts';
+import { sessionStatusLabel } from '../../../lib/session-screens.ts';
 import { Button } from '../../../shell/primitives.tsx';
-import { HARNESS_SHORT } from '../credentials/credentials-model.ts';
 import type { FleetClientFactory } from '../fleet-client.ts';
 import { useSetupAccess } from '../setup/setup-access.ts';
 import { SetupNote } from '../setup/setup-ui.tsx';
 import { SETUP_HARNESS_NAMES } from '../setup/setup-words.ts';
+import { ConversationLines } from './conversation-card.tsx';
 import {
   adoptRequest,
-  conversationHeadline,
   DATE_FILTERS,
   type DateFilter,
   EMPTY_FILTER,
   EMPTY_SELECTION,
-  folderLabel,
   foundLine,
   keepButtonLabel,
   type PickerFilter,
@@ -87,64 +85,6 @@ export function Segmented<T extends string>({
         </button>
       ))}
     </div>
-  );
-}
-
-/**
- * A conversation in at most three short lines, shared by the picker and Continue. First: its NAME (the
- * CLI's title, or the ferret's own when `title` is given) and how long ago it last moved. Second: the
- * first thing the owner said, or the conversation's name under a ferret's. A conversation that was never
- * named is headed by its first message instead and, when it moved on since, shows the latest thing the
- * owner said so two rows that began alike still read apart. Third, faint: its folder (the last two
- * segments, which give way first), the CLI, the turns and the model.
- */
-export function ConversationLines({
-  row,
-  now,
-  title,
-}: {
-  readonly row: ImportableConversation;
-  readonly now: number;
-  /** Heads the row in place of the conversation's name: the ferret's name, on a row that is a ferret. */
-  readonly title?: string;
-}) {
-  const turns = `${row.turns} ${row.turns === 1 ? 'turn' : 'turns'}`;
-  const { headline, secondary, named } = conversationHeadline(row, title);
-  return (
-    <>
-      <span className="flex min-w-0 items-baseline gap-sm">
-        <span
-          className={cn('min-w-0 flex-1 truncate text-row', named ? 'font-medium text-fg' : 'text-fg')}
-          title={headline}
-          data-conversation-name={named ? '' : undefined}
-        >
-          {headline}
-        </span>
-        <span className="mono shrink-0 text-meta text-faint" data-conversation-age="">
-          {relativeTime(row.lastActivityAt, now)}
-        </span>
-      </span>
-      {secondary === undefined ? null : (
-        <span className="min-w-0 truncate text-meta text-muted" title={secondary} data-conversation-first="">
-          {secondary}
-        </span>
-      )}
-      {named || row.latest === undefined ? null : (
-        <span className="min-w-0 truncate text-meta text-muted" title={row.latest} data-conversation-latest="">
-          <span className="sr-only">Latest: </span>
-          {row.latest}
-        </span>
-      )}
-      <span className="flex min-w-0 items-baseline gap-1 overflow-hidden text-meta text-faint">
-        <span className="max-w-[45%] shrink-0 truncate font-mono" title={row.project}>
-          {folderLabel(row.project)}
-        </span>
-        <span className="shrink-0 whitespace-nowrap">
-          · {HARNESS_SHORT[row.harness]} · {turns}
-        </span>
-        {row.model === undefined ? null : <span className="min-w-0 truncate">· {row.model}</span>}
-      </span>
-    </>
   );
 }
 
@@ -385,18 +325,19 @@ function ConversationRow({
   const id = useId();
   return (
     <li
-      className={cn('fy-convo-item fy-convo-pick', kept && 'bg-accent-soft', adopted && 'opacity-70')}
+      className="fy-convo-item fy-convo-pick"
+      data-selected={kept ? '' : undefined}
       data-conversation-row={row.id}
+      data-conversation-adopted={row.adoptedBy}
     >
       <label htmlFor={id} className="fy-convo-main cursor-pointer">
-        <ConversationLines row={row} now={now} />
+        <ConversationLines
+          row={row}
+          now={now}
+          {...(row.adoptedBy === undefined ? {} : { ferret: { id: row.adoptedBy, name: row.adoptedBy } })}
+        />
       </label>
       <div className="fy-convo-controls">
-        {adopted ? (
-          <span className="[overflow-wrap:anywhere] text-meta text-muted" data-conversation-adopted={row.adoptedBy}>
-            Kept as <span className="font-mono">{row.adoptedBy}</span>
-          </span>
-        ) : null}
         {kept ? (
           <button
             type="button"

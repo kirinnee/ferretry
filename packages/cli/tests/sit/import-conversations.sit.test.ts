@@ -150,10 +150,10 @@ describe(`import conversations (SIT, ${useInProcess ? 'in-process' : 'compiled b
 
     // Assert
     should(listed.code).equal(0, listed.err);
-    should(listed.out).containEql('/work/app:');
-    should(listed.out).containEql('/work/other:');
+    should(listed.out).containEql('app  /work/app:');
+    should(listed.out).containEql('other  /work/other:');
     should(listed.out).containEql(FRESH_CLAUDE);
-    should(listed.out).containEql('kept as s-existing');
+    should(listed.out).containEql('[ferret s-existing]');
   });
 
   it('should narrow by --since on the daemon, excluding the stale conversation', async () => {

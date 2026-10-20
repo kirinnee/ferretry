@@ -35,8 +35,20 @@ const records = function* (text: string): Generator<Record<string, unknown>> {
   }
 };
 
+/** The names a transcript records, by who gave them: the owner (`chosen`), or the CLI (`generated`). */
+export interface TranscriptNames {
+  readonly chosen?: string;
+  readonly generated?: string;
+}
+
 /** What the transcript calls itself: the owner's name, else the CLI's, the latest of each. */
 export function transcriptName(harness: Harness, text: string): string | undefined {
+  const { chosen, generated } = transcriptNames(harness, text);
+  return chosen ?? generated;
+}
+
+/** Each kind of name a transcript records, the latest of each. */
+export function transcriptNames(harness: Harness, text: string): TranscriptNames {
   let chosen: string | undefined;
   let generated: string | undefined;
   for (const record of records(text)) {
@@ -56,7 +68,7 @@ export function transcriptName(harness: Harness, text: string): string | undefin
     else if (record.type === 'ai-title') generated = cleaned(record.aiTitle) ?? generated;
     else if (record.type === 'summary') generated = cleaned(record.summary) ?? generated;
   }
-  return chosen ?? generated;
+  return { ...(chosen === undefined ? {} : { chosen }), ...(generated === undefined ? {} : { generated }) };
 }
 
 /** Codex's `session_index.jsonl`: each line `{id, thread_name, updated_at}`; the latest line per id wins. */
