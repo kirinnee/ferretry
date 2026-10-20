@@ -34,6 +34,8 @@ export interface ContextWindowEvidence {
   readonly reportedWindow?: number;
   /** Real windows for models whose id says nothing about their size, matched by substring. */
   readonly overrides?: Readonly<Record<string, number>>;
+  /** The window the account's model catalog declares for this model. Below the selector, above the default. */
+  readonly declaredWindow?: number;
 }
 
 /**
@@ -57,6 +59,7 @@ export interface SessionContextWindowEvidence {
   /** A context window the harness reports about the running session. */
   readonly reportedWindow?: number;
   readonly overrides?: Readonly<Record<string, number>>;
+  readonly declaredWindow?: number;
 }
 
 /**
@@ -84,7 +87,8 @@ export function contextWindowFor(evidence: ContextWindowEvidence): number {
   }
 
   const extended = configured?.includes(EXTENDED_MARKER) === true || served?.includes(EXTENDED_MARKER) === true;
-  return extended ? EXTENDED_CONTEXT_WINDOW : DEFAULT_CONTEXT_WINDOW;
+  if (extended) return EXTENDED_CONTEXT_WINDOW;
+  return positive(evidence.declaredWindow) ?? DEFAULT_CONTEXT_WINDOW;
 }
 
 /**
@@ -102,6 +106,7 @@ export function contextWindowForSession(evidence: SessionContextWindowEvidence):
     servedModel: evidence.observedModel,
     ...(evidence.reportedWindow === undefined ? {} : { reportedWindow: evidence.reportedWindow }),
     ...(evidence.overrides === undefined ? {} : { overrides: evidence.overrides }),
+    ...(evidence.declaredWindow === undefined ? {} : { declaredWindow: evidence.declaredWindow }),
   });
 }
 

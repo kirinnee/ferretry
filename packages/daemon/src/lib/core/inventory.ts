@@ -130,7 +130,22 @@ export function servableModels(account: CoreAccount): readonly CoreAccountModel[
   return account.available ? account.models.filter(model => model.available) : [];
 }
 
+/** A `[1m]`-style selector, which the harness is handed with a model but the catalog never lists. */
+const SELECTOR = /\[[^\]]*\]$/u;
+
+/**
+ * The catalog entry a model id names, with or without the selector a session records it with. A
+ * session on `claude-opus-5-5[1m]` is ON `claude-opus-5-5`: matching the id literally made a Restart
+ * ask the account for a model it "does not serve", fall back to the default without the selector,
+ * and plan the 200k window for a conversation that is running in 1M.
+ */
+export function declaredModel(account: CoreAccount, model: string): CoreAccountModel | undefined {
+  const bare = model.replace(SELECTOR, '');
+  return account.models.find(entry => entry.id === model) ?? account.models.find(entry => entry.id === bare);
+}
+
 /** Whether this account can serve the named model. An unavailable model is not servable. */
 export function canServeModel(account: CoreAccount, model: string): boolean {
-  return servableModels(account).some(entry => entry.id === model);
+  const entry = declaredModel(account, model);
+  return account.available && entry !== undefined && entry.available;
 }

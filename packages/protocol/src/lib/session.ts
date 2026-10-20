@@ -959,6 +959,21 @@ export const MigrationRefusedBodySchema = ApiErrorResponseSchema.extend({
 });
 export type MigrationRefusedBody = z.infer<typeof MigrationRefusedBodySchema>;
 
+/** A smaller window the target would give the conversation, as the numbers rather than a sentence. */
+export const ContextDowngradeSchema = z.strictObject({
+  model: z.string().min(1),
+  targetWindow: PositiveIntegerSchema,
+  currentWindow: PositiveIntegerSchema,
+});
+export type ContextDowngrade = z.infer<typeof ContextDowngradeSchema>;
+
+/** The `409 context_downgrade_refused` body. `downgrade` is absent from a daemon that predates it. */
+export const ContextDowngradeRefusedBodySchema = ApiErrorResponseSchema.extend({
+  code: z.literal('context_downgrade_refused'),
+  downgrade: ContextDowngradeSchema.optional(),
+});
+export type ContextDowngradeRefusedBody = z.infer<typeof ContextDowngradeRefusedBodySchema>;
+
 /**
  * An agent's first name as a caller may type it: `Hadi`, `marin`, `mary-jane`.
  *

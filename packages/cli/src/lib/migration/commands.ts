@@ -13,6 +13,10 @@ export function registerMigrationCommands(program: Command, controller: Migratio
       '--allow-context-downgrade',
       'accept a target context window smaller than the current one (the daemon otherwise refuses)',
     )
+    .option(
+      '--force-inflight',
+      'go ahead even though the daemon could not show that what the agent is running is safe to stop (the daemon otherwise refuses; the move is journalled)',
+    )
     .option('--request-id <id>', 'stable idempotency key for an explicit retry of this migration')
     .option('--json', 'print the migrated session as JSON')
     .action(async (id: string, options: MigrationCommandOptions) => {

@@ -260,3 +260,24 @@ describe('contextPercent', () => {
     should(contextPercent(used, window)).equal(expected);
   });
 });
+
+describe('contextWindowFor, with a window the catalog declares', () => {
+  it('should read the declared window below the harness, an override and the selector, above the default', () => {
+    // Act
+    const declared = contextWindowFor({ configuredModel: 'claude-opus-5-5', declaredWindow: 1_000_000 });
+    const reported = contextWindowFor({ configuredModel: 'x', declaredWindow: 1_000_000, reportedWindow: 400_000 });
+    const overridden = contextWindowFor({
+      servedModel: 'glm-5.2',
+      declaredWindow: 1_000_000,
+      overrides: { 'glm-5.2': 128_000 },
+    });
+    const marked = contextWindowFor({ configuredModel: 'x[1m]', declaredWindow: 300_000 });
+    const nonsense = contextWindowFor({ configuredModel: 'x', declaredWindow: -5 });
+    const session = contextWindowForSession({ configuredModel: 'claude-opus-5-5', declaredWindow: 1_000_000 });
+
+    // Assert
+    should([declared, reported, overridden, marked, nonsense, session]).deepEqual([
+      1_000_000, 400_000, 128_000, 1_000_000, 200_000, 1_000_000,
+    ]);
+  });
+});
