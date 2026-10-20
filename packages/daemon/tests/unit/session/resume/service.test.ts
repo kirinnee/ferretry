@@ -1,4 +1,5 @@
 import { describe, it } from 'bun:test';
+import type { SessionLaunchInstructions } from '@ferretry/protocol';
 import should from 'should';
 import { KeyedSerialExecutor } from '../../../../src/adapters/system/keyed-serial-executor.ts';
 import {
@@ -119,9 +120,13 @@ class FakeLauncher implements ResumeLauncher {
     if (this.cleanupFails) throw new Error('pane is already gone');
   }
 
-  async relaunch(): Promise<void> {
+  /** What the replacement pane was told, as a launcher able to say answers it. */
+  launched: SessionLaunchInstructions | undefined;
+
+  async relaunch(): Promise<SessionLaunchInstructions | undefined> {
     this.calls.push('relaunch');
     if (this.relaunchError) throw this.relaunchError;
+    return this.launched;
   }
 
   async deliver(_id: SessionId, instruction: string): Promise<void> {
@@ -254,6 +259,24 @@ describe('session resume service', () => {
     should(world.turns.written).deepEqual([{ turn: 4, document: `carry on\n\n${SETTINGS.turnProtocolReminder}\n` }]);
     should(world.launcher.calls).deepEqual(['relaunch', 'deliver']);
     should(world.repository.events).deepEqual(['session.resuming', 'session.resumed']);
+  });
+
+  it('should record what the replacement pane was told on the resumed transition', async () => {
+    // Arrange
+    const world = build(target(), NO_PANE);
+    const launched: SessionLaunchInstructions = {
+      sections: [{ id: 'tools', chars: 600 }],
+      mode: 'interactive',
+      questions: true,
+    };
+    world.launcher.launched = launched;
+
+    // Act
+    await world.service.resume({ id: ID, message: 'carry on', actor: 'admin-cli' });
+
+    // Assert
+    const resumed = world.repository.transitions.find(change => change.event === 'session.resumed');
+    should(resumed?.launchInstructions).deepEqual(launched);
   });
 
   it('should disarm the old monitor before it destroys the pane, and start a new one after unlocking', async () => {

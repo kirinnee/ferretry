@@ -2,6 +2,7 @@ import { afterEach, describe, it } from 'bun:test';
 import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import type { SessionLaunchInstructions } from '@ferretry/protocol';
 import should from 'should';
 import {
   BunSqliteIndexFactory,
@@ -269,6 +270,34 @@ describe('storage resume repository', () => {
     await opened.storage.close();
   });
 
+  it('should replace the launch record on a relaunch and keep it through a transition that launched nothing', async () => {
+    // Arrange
+    const { opened } = await openStorage();
+    await opened.storage.writeConfig(ID, config());
+    const before = { sections: [{ id: 'tools', chars: 10 }], mode: 'auto', questions: false };
+    const after: SessionLaunchInstructions = {
+      sections: [
+        { id: 'tools', chars: 10 },
+        { id: 'pack', chars: 20 },
+      ],
+      mode: 'auto',
+      questions: false,
+    };
+    await opened.storage.writeState(ID, { id: 'session-1', status: 'stopped', launchInstructions: before });
+    const repository = new StorageResumeRepository(opened.storage);
+
+    // Act
+    await repository.transition(ID, { event: 'session.resuming', status: 'starting' });
+    const kept = (await opened.storage.readState(ID)) as Record<string, unknown>;
+    await repository.transition(ID, { event: 'session.resumed', status: 'running', launchInstructions: after });
+    const replaced = (await opened.storage.readState(ID)) as Record<string, unknown>;
+
+    // Assert
+    should(kept.launchInstructions).deepEqual(before);
+    should(replaced.launchInstructions).deepEqual(after);
+    await opened.storage.close();
+  });
+
   it('should clear a pending question on the transition that abandons it', async () => {
     // Arrange
     const { opened } = await openStorage();
@@ -434,6 +463,42 @@ describe('tmux resume launcher', () => {
     should(launches[0]).containDeep(['-e', 'FY_HYPERMEDIA=1']);
     should(launches[1]).containDeep(['-e', 'FY_HYPERMEDIA=0']);
     should(launches[2]).containDeep(['-e', 'FY_HYPERMEDIA=1']);
+  });
+
+  it('should answer what the replacement pane was told when it knows the binary name, and nothing otherwise', async () => {
+    // Arrange
+    const port = new RecordingTmuxPort();
+    const controller = new TmuxController(port);
+    const named = new TmuxResumeLauncher(
+      controller,
+      async () => ({
+        tmuxSession: 'fy-session-1',
+        cwd: '/workspace/project',
+        command: ['/opt/fleet/bin/agent'],
+        env: { FY_SESSION_MODE: 'interactive', FY_LEARNING_PASSIVE: '1' },
+        mode: 'interactive',
+      }),
+      new TmuxPaneDelivery(controller, async () => {}),
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      'zz',
+    );
+
+    // Act
+    port.alive = false;
+    const told = await named.relaunch(ID);
+    const untold = await launcher(port).relaunch(ID);
+
+    // Assert
+    should(told?.sections.map(section => section.id)).deepEqual(['tools', 'settings', 'hypermedia', 'learning']);
+    should(told?.mode).equal('interactive');
+    should(told?.questions).be.true();
+    should(untold).be.undefined();
   });
 
   it('should relaunch with the argv built at launch rather than the one recorded', async () => {

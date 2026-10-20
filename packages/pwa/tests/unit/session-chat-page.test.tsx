@@ -7,6 +7,7 @@ import {
   type SessionView,
   sessionSearchTaskHaystack,
 } from '@ferretry/protocol';
+import { type FyApiClient, FyHttpError } from '@ferretry/protocol/client';
 import { Copy } from 'lucide-react';
 import { type ComponentProps, cloneElement, type ReactElement } from 'react';
 import type { ReactTestInstance } from 'react-test-renderer';
@@ -22,12 +23,11 @@ import { ReferenceSurfaceProvider } from '../../src/components/reference-surface
 import type { RuntimeModelControls } from '../../src/components/runtime-controls.tsx';
 import { SessionTopBar, sessionDisplayName } from '../../src/components/session-top-bar.tsx';
 import { Transcript } from '../../src/components/transcript.tsx';
-import { TOUCH_SELECTION_RELEASE_SETTLE_MS } from '../../src/hooks/use-live-clock.ts';
 import { SessionAnalyticsSurface } from '../../src/features/analytics/session-analytics-surface.tsx';
 import { AttentionActionModal } from '../../src/features/attention/attention-action-modal.tsx';
 import { ContextRailBody } from '../../src/features/context-rail/context-rail-body.tsx';
-import { ApprovalCard } from '../../src/features/permission-request/approval-card.tsx';
 import { DialogCard } from '../../src/features/harness-dialog/dialog-card.tsx';
+import { ApprovalCard } from '../../src/features/permission-request/approval-card.tsx';
 import { ActionToast } from '../../src/features/session-actions/action-toast.tsx';
 import { ActionsMenu } from '../../src/features/session-actions/actions-menu.tsx';
 import { AddMcpForm } from '../../src/features/session-actions/add-mcp-form.tsx';
@@ -39,28 +39,28 @@ import { SessionInfo } from '../../src/features/session-info/session-info.tsx';
 import { SessionSearchProvider, SessionTasksSearchSurface } from '../../src/features/session-search/session-search.tsx';
 import { SessionWorkspace } from '../../src/features/workspace/session-workspace.tsx';
 import { WorkspaceView } from '../../src/features/workspace/workspace-view.tsx';
-import { DaemonAttentionClient } from '../../src/lib/attention-client.ts';
+import { TOUCH_SELECTION_RELEASE_SETTLE_MS } from '../../src/hooks/use-live-clock.ts';
 import { DaemonAccountPickerStore } from '../../src/lib/account-picker-store.ts';
+import { DaemonAttentionClient } from '../../src/lib/attention-client.ts';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
 import { daemonSessionScope } from '../../src/lib/daemon-scope.ts';
 import { createLiveActivityHub, type LiveActivityFeed } from '../../src/lib/live-activity-feed.ts';
+import { daemonSessionPath } from '../../src/lib/pages/routes.ts';
 import {
   type SessionAttentionModel,
   type SessionChatClient,
   SessionChatPage,
 } from '../../src/lib/pages/session-chat-page.tsx';
+import { DaemonClientProvider } from '../../src/lib/store.tsx';
 import { DEFAULT_STT_SETTINGS } from '../../src/lib/stt/stt-settings.ts';
+import { createSurfaceEventHub } from '../../src/lib/surface-control.ts';
 import { DaemonUsageStore } from '../../src/lib/usage-store.ts';
 import { WorkspaceLayoutStore } from '../../src/lib/workspace-layout-store.ts';
 import { WorkspaceRailPreferenceStore } from '../../src/lib/workspace-rail-preferences.ts';
-import { createSurfaceEventHub } from '../../src/lib/surface-control.ts';
-import { DaemonClientProvider } from '../../src/lib/store.tsx';
-import { daemonSessionPath } from '../../src/lib/pages/routes.ts';
-import { FyHttpError, type FyApiClient } from '@ferretry/protocol/client';
 import { BottomSheet } from '../../src/shell/bottom-sheet.tsx';
+import { resetSidePaneTabsStates } from '../../src/shell/side-pane-tab-model.ts';
 import { fakeDeck, terminalListing, terminalView } from '../support/terminal-deck.ts';
 import { factoryFor } from './features/fleet/mcp-sign-in-support.ts';
-import { resetSidePaneTabsStates } from '../../src/shell/side-pane-tab-model.ts';
 import '../support/dom.ts';
 import { render, run, runAsync } from '../support/react.ts';
 import { sessionView } from '../support/sessions.ts';
@@ -1082,6 +1082,58 @@ describe('SessionChatPage', () => {
     const narrowed = surface('pane', 'readable');
     expect(narrowed.node.props['data-chat-width']).toBe('readable');
     run(() => narrowed.page.unmount());
+  });
+
+  test.each([
+    { subject: 'a cached copy', input: true, expected: 1 },
+    { subject: 'the live copy', input: false, expected: 0 },
+  ])('says "Updating…" over the transcript only for $subject', ({ input, expected }) => {
+    // Arrange
+    const page = renderSessionChatPage(
+      <SessionChatPage
+        client={client([], sessionView('shared'))}
+        connection={alpha}
+        entries={[]}
+        onSessionChange={() => undefined}
+        session={sessionView('shared')}
+        presentation="pane"
+        updating={input}
+      />,
+    );
+
+    // Act
+    const actual = page.root.findAllByProps({ 'data-cache-updating': '' });
+
+    // Assert
+    expect(actual).toHaveLength(expected);
+    run(() => page.unmount());
+  });
+
+  test('hands the transcript the reading position it was given, and none when there is none', () => {
+    // Arrange
+    const readingPosition = { read: () => null, write: () => undefined };
+    const surface = (position?: typeof readingPosition) =>
+      renderSessionChatPage(
+        <SessionChatPage
+          client={client([], sessionView('shared'))}
+          connection={alpha}
+          entries={[]}
+          onSessionChange={() => undefined}
+          session={sessionView('shared')}
+          presentation="pane"
+          {...(position === undefined ? {} : { readingPosition: position })}
+        />,
+      );
+
+    // Act
+    const given = surface(readingPosition);
+    const absent = surface();
+
+    // Assert
+    expect(given.root.findByType(Transcript).props.readingPosition).toBe(readingPosition);
+    expect(absent.root.findByType(Transcript).props.readingPosition).toBeUndefined();
+    run(() => given.unmount());
+    run(() => absent.unmount());
   });
 
   test('hands the composer its presentation so the phone gets the phone growth ceiling', () => {

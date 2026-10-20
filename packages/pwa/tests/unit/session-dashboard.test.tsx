@@ -177,4 +177,21 @@ describe('SessionDashboard', () => {
     expect(view.root.findAllByType('table')).toHaveLength(0);
     expect(view.root.findByProps({ href: '/d/dashboard-daemon/session/zelda' })).toBeDefined();
   });
+
+  it.each([
+    { subject: 'rows read and cached', input: { updating: true, sessions: rows }, expected: 1 },
+    { subject: 'rows read, live copy', input: { updating: false, sessions: rows }, expected: 0 },
+    { subject: 'default prop', input: {}, expected: 0 },
+    { subject: 'nothing read yet', input: { updating: true, groups: [], sessions: null }, expected: 0 },
+  ])('says "Updating…" only when the cached rows are on screen ($subject)', ({ input, expected }) => {
+    // Arrange
+    const view = render(<SessionDashboard {...props(input)} />);
+
+    // Act
+    const actual = view.root.findAllByProps({ 'data-cache-updating': '' });
+
+    // Assert
+    expect(actual).toHaveLength(expected);
+    run(() => view.unmount());
+  });
 });

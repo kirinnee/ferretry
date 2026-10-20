@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { Transcript } from '../../src/components/transcript.tsx';
+import type { ChatScrollSlot } from '../../src/lib/scroll-memory.ts';
 import { type TranscriptEntry, transcriptItems } from '../../src/lib/session-screens.ts';
 import {
   followPinBlocked,
@@ -176,7 +177,10 @@ afterEach(async () => {
 });
 
 /** Mounts, sizes the scroller, then re-renders once so the open pin sees the stated height. */
-const open = async (entries: readonly TranscriptEntry[], props: { busy?: boolean; pinSignal?: number } = {}) => {
+const open = async (
+  entries: readonly TranscriptEntry[],
+  props: { busy?: boolean; pinSignal?: number; readingPosition?: ChatScrollSlot } = {},
+) => {
   const view = await mount(<Transcript daemonId="d" entries={entries} sessionId="s" {...props} />);
   mounted = view;
   const element = scroller(view);
@@ -327,5 +331,55 @@ describe('Transcript follow', () => {
     } finally {
       globalThis.ResizeObserver = original;
     }
+  });
+});
+
+describe('Transcript reading position', () => {
+  const slot = (saved: { top: number; atLatest: boolean } | null) => {
+    const written: { top: number; atLatest: boolean }[] = [];
+    return {
+      written,
+      memory: { read: () => saved, write: (position: { top: number; atLatest: boolean }) => written.push(position) },
+    };
+  };
+
+  test('a session left scrolled up opens at that spot, detached, with Jump to latest on offer', async () => {
+    // Arrange
+    const { memory } = slot({ top: 600, atLatest: false });
+
+    // Act
+    const { view, element } = await open(rows(4), { readingPosition: memory });
+
+    // Assert
+    expect(element.scrollTop).toBe(600);
+    expect(must(pill(view), 'the pill').textContent).toBe('Jump to latest');
+  });
+
+  test.each([
+    { subject: 'left at the latest', input: { top: 600, atLatest: true } },
+    { subject: 'never opened', input: null },
+  ])('a session $subject opens at the latest with no pill', async ({ input }) => {
+    // Arrange
+    const { memory } = slot(input);
+
+    // Act
+    const { view, element } = await open(rows(4), { readingPosition: memory });
+
+    // Assert
+    expect(element.scrollTop).toBe(2_000);
+    expect(pill(view)).toBeNull();
+  });
+
+  test('records where the reader settles', async () => {
+    // Arrange
+    const { memory, written } = slot(null);
+    const { element } = await open(rows(4), { readingPosition: memory });
+
+    // Act
+    await readerScroll(element, 600);
+    await interact(() => wait(200));
+
+    // Assert
+    expect(written.at(-1)).toEqual({ top: 600, atLatest: false });
   });
 });

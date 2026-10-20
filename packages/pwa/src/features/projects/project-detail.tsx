@@ -47,7 +47,7 @@ function ProjectDetailView({
   readonly fleetError: string | null;
   readonly onLaunch: (request: StartSessionRequest) => Promise<void>;
 }) {
-  const { navigate } = useRouter();
+  const { navigate, back } = useRouter();
   /**
    * THREE READINGS OF THE SESSION LIST, NEVER TWO — the same rule the projects
    * hub states for the registry, applied to every panel on this screen rather
@@ -74,7 +74,7 @@ function ProjectDetailView({
           <button
             className="w-fit text-meta text-muted hover:text-fg"
             type="button"
-            onClick={() => navigate(daemonProjectsPath(connection.daemonId))}
+            onClick={() => back(daemonProjectsPath(connection.daemonId))}
           >
             <ArrowLeft size={14} aria-hidden="true" /> Back to Projects
           </button>

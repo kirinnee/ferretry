@@ -33,6 +33,7 @@ import type { SessionQuotaResolver } from '../lib/usage.ts';
 import { type NewSessionMachine, NewSessionMenu } from '../shell/new-session-menu.tsx';
 import { RouteLink } from '../shell/route-link.tsx';
 import { ViewTabs } from '../shell/view-tabs.tsx';
+import { CacheUpdating } from './cache-updating.tsx';
 import { FullDensityGroups, LeanDensityGroups } from './session-dashboard-groups.tsx';
 import { AllMachinesGroups } from './session-dashboard-machines.tsx';
 import {
@@ -58,6 +59,8 @@ export interface SessionDashboardProps {
   readonly scopeName: string;
   readonly scopeRecovered: boolean;
   readonly error: string | null;
+  /** The rows are this device's cached copy and the live read has not answered: say "Updating…". */
+  readonly updating?: boolean;
   readonly dashboardView: DashboardView | null;
   readonly density: Density;
   /**
@@ -128,6 +131,7 @@ export function SessionDashboard({
   onFocusMachine,
   newSessionMachines,
   machineAccounts,
+  updating = false,
 }: SessionDashboardProps) {
   const headingId = useId();
   const viewportNarrow = useDashboardNarrow();
@@ -259,6 +263,12 @@ export function SessionDashboard({
         </p>
       ) : null}
 
+      {/* A zero-height row, so the pill overlays the list's top edge without moving a row of it. */}
+      {updating && read ? (
+        <div className="relative h-0">
+          <CacheUpdating className="absolute left-1/2 top-1 z-10 -translate-x-1/2" />
+        </div>
+      ) : null}
       <div
         {...pullMarker}
         className="min-h-0 flex-1 overflow-y-auto overscroll-contain scroll-thin"

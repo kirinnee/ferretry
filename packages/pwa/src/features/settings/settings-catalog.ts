@@ -24,6 +24,7 @@ export type SettingId =
   | 'dictation'
   | 'notifications'
   | 'install-app'
+  | 'clear-cached-data'
   | 'speedup-keys'
   | 'sessions-list';
 
@@ -243,6 +244,13 @@ export const SETTINGS_DEFINITIONS: readonly SettingDefinition[] = [
     ],
   },
   {
+    id: 'clear-cached-data',
+    label: 'Cached data',
+    description:
+      'Sessions and recent messages this device keeps so screens open at once. Clearing removes only this device’s copy.',
+    keywords: ['cache', 'cached', 'clear', 'offline', 'storage', 'privacy', 'forget', 'data', 'delete'],
+  },
+  {
     id: 'speedup-keys',
     label: 'Speed-up keys',
     description:
@@ -339,8 +347,8 @@ export const SETTINGS_SECTIONS: readonly SettingsSectionDefinition[] = [
   {
     id: 'device',
     label: 'This device',
-    description: 'Ferretry as an app on this device, and the provider keys only this device holds.',
-    settingIds: ['install-app', 'speedup-keys'],
+    description: 'Ferretry as an app on this device, the provider keys only this device holds, and what it keeps here.',
+    settingIds: ['install-app', 'speedup-keys', 'clear-cached-data'],
   },
   {
     /**

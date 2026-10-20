@@ -2,6 +2,7 @@ import type { AttentionId, AttentionItem, AttentionSnapshot, IFyApiClient, Sessi
 import { WorktreeListResponseSchema } from '@ferretry/protocol';
 import { Pause, Play } from 'lucide-react';
 import { type ReactNode, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
+import { CacheUpdating } from '../../components/cache-updating.tsx';
 import { CompactionChip } from '../../components/compaction-card.tsx';
 import { Composer } from '../../components/composer.tsx';
 import type { ComposerSuggestionSwitches } from '../../components/composer-autocomplete.ts';
@@ -59,8 +60,8 @@ import {
 import { ForkForm } from '../../features/session-actions/fork-form.tsx';
 import { type SessionActionContribution, sessionActionSections } from '../../features/session-actions/registry.ts';
 import { RenameForm } from '../../features/session-actions/rename-form.tsx';
-import { addSessionMcp, previewSessionMcp, readSessionMcp } from '../../features/session-actions/session-mcp-api.ts';
 import { useRestartRefusal } from '../../features/session-actions/restart-refusal.tsx';
+import { addSessionMcp, previewSessionMcp, readSessionMcp } from '../../features/session-actions/session-mcp-api.ts';
 import { useConvertAction } from '../../features/session-actions/use-convert-action.tsx';
 import {
   forkThroughLatest,
@@ -108,6 +109,7 @@ import { answerPermissionRequest } from '../permission-requests.ts';
 import type { DaemonPinClient } from '../pin-client.ts';
 import type { DaemonFetch } from '../runtime-models.ts';
 import { DaemonRuntimeModelCatalogStore } from '../runtime-models.ts';
+import type { ChatScrollSlot } from '../scroll-memory.ts';
 import { sessionTurn } from '../session-activity.ts';
 import type { TranscriptEntry } from '../session-screens.ts';
 import { useDaemonClient, useDaemonFetch } from '../store.tsx';
@@ -172,6 +174,13 @@ export interface SessionChatPageProps {
    * remedies in place of the one-line issue, because waiting never fixes it and re-sending makes it worse.
    */
   readonly transcriptUnbound?: boolean;
+  /**
+   * The transcript on screen is this device's cached copy and the first live read has not answered:
+   * the page says "Updating…" over it until it does.
+   */
+  readonly updating?: boolean;
+  /** Where this session's reading position is kept, so Back and a reload return to it. */
+  readonly readingPosition?: ChatScrollSlot;
   /**
    * This machine's connection health, from the shell. While it is `reconnecting` the page says nothing
    * about the outage itself — the shell's connection notice says it once — and keeps what it last showed.
@@ -373,6 +382,8 @@ export function SessionChatPage({
   canControl = true,
   refreshError = null,
   transcriptUnbound = false,
+  updating = false,
+  readingPosition,
   connectionState,
   chatWidth = 'readable',
   composerEnterKey,
@@ -1266,6 +1277,12 @@ export function SessionChatPage({
   // composer's row reserves the transcript scrollbar's width so both centre on one axis.
   const chat = (
     <div className="kt-chat-surface flex min-h-0 min-w-0 flex-1 flex-col" data-chat-width={chatWidth} ref={chatSurface}>
+      {/* A zero-height row, so the pill overlays the top of the transcript without moving a line of it. */}
+      {updating ? (
+        <div className="relative h-0">
+          <CacheUpdating className="absolute left-1/2 top-2 z-10 -translate-x-1/2" />
+        </div>
+      ) : null}
       <div className="fy-chat-log">
         <Transcript
           activity={pane.activity}
@@ -1280,6 +1297,7 @@ export function SessionChatPage({
           {...(onCancel === undefined ? {} : { onCancel })}
           {...(onSubmit === undefined ? {} : { onSubmit })}
           pinSignal={pinSignal}
+          {...(readingPosition === undefined ? {} : { readingPosition })}
           sessionId={session.config.id}
         />
       </div>

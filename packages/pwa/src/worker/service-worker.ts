@@ -38,6 +38,7 @@
 import { isLoopbackHost, PushNotificationPayloadSchema } from '@ferretry/protocol';
 import { shouldShowNotification } from '../lib/notification-filter.ts';
 import { readMirroredNotificationFilter } from '../lib/notification-filter-mirror.ts';
+import { openInWindow } from '../lib/notification-open.ts';
 import { showGroupedNotification } from '../lib/notify.ts';
 import {
   filteredPushNotification,
@@ -78,6 +79,7 @@ interface WindowClientLike {
   readonly url: string;
   focus(): Promise<unknown>;
   navigate(url: string): Promise<unknown>;
+  postMessage(message: unknown, transfer: Transferable[]): void;
 }
 interface WorkerScope {
   readonly location: { readonly origin: string; readonly hostname: string; readonly href: string };
@@ -223,8 +225,9 @@ worker.addEventListener('notificationclick', event => {
     worker.clients.matchAll({ type: 'window' }).then(async windows => {
       const open = windows[0];
       if (open === undefined) return await worker.clients.openWindow(url);
-      await open.navigate(url);
-      return await open.focus();
+      // Routed by the page itself when it answers (`lib/notification-open.ts`): a navigate here would
+      // reload the whole app and make Back cross a document boundary.
+      return await openInWindow(open, url);
     }),
   );
 });

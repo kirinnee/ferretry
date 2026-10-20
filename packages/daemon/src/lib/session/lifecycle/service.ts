@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { SESSION_MODE_ENV } from '@ferretry/fleet';
+import type { SessionLaunchInstructions } from '@ferretry/protocol';
 import type { ClockPort, SerialExecutor } from '../../ports.ts';
 import type { SessionId } from '../../session-id.ts';
 import type { SessionConversationLeases } from '../conversation-lease.ts';
@@ -15,6 +16,7 @@ import {
   firstTurnInstruction,
   lifecycleSessionId,
   transitionSessionRecord,
+  withLaunchInstructions,
 } from './policy.ts';
 import type { SessionLifecycleSettings } from './settings.ts';
 import {
@@ -144,7 +146,7 @@ export class SessionLifecycleService {
       }
       // A record already `starting` is a launch a crash interrupted, not an illegal call: resume it
       // instead of wedging the session on a self-transition it can never make.
-      const starting =
+      let starting =
         current.state.status === 'starting'
           ? current
           : await this.persist(transitionSessionRecord(current, 'starting', this.ports.clock.now()));
@@ -156,7 +158,9 @@ export class SessionLifecycleService {
         } catch (error) {
           throw await this.recordFailure(starting, error);
         }
-        await this.launch(starting);
+        // Carried from here on, so the `running` write — or a failure after the pane exists — records
+        // what THIS pane was told rather than what the previous one was.
+        starting = withLaunchInstructions(starting, await this.launch(starting));
       }
       if (beforeFirstTurn !== undefined) {
         try {
@@ -213,11 +217,10 @@ export class SessionLifecycleService {
    * failure is someone else's: retrying would either fail forever or fight a live agent, so the
    * failure is recorded instead.
    */
-  private async launch(record: SessionLifecycleRecord): Promise<void> {
+  private async launch(record: SessionLifecycleRecord): Promise<SessionLaunchInstructions | undefined> {
     for (let attempt = 1; ; attempt += 1) {
       try {
-        await this.ports.launcher.launch(record);
-        return;
+        return await this.ports.launcher.launch(record);
       } catch (error) {
         if (attempt >= this.settings.launchAttempts || (await this.ports.launcher.alive(record)))
           throw await this.recordFailure(record, error);

@@ -199,7 +199,7 @@ describe('SessionInfo — Runtime’s MCP list', () => {
     const root = await show({ ports });
     await interact(() => placement?.setTab('runtime'));
     await settle();
-    expect(must(root.querySelector('[data-info-row="Instructions"]'), 'instructions').textContent).toContain(
+    expect(must(root.querySelector('[data-info-row="Instruction files"]'), 'instructions').textContent).toContain(
       'fs denied',
     );
     expect(root.textContent).toContain('3 available');

@@ -183,6 +183,20 @@ describe('NewSessionPage', () => {
 
     expect(navigated).toEqual(['/d/daemon%2Fa', '/d/daemon%2Fa']);
   });
+
+  it('sends "← Sessions" through onBack when the host gives one, and Cancel through onNavigate', () => {
+    // Arrange
+    const backed: string[] = [];
+    const { navigated, view } = page({ onBack: path => backed.push(path) });
+
+    // Act
+    run(() => button(view, '← Sessions').props.onClick());
+    run(() => button(view, 'Cancel').props.onClick());
+
+    // Assert
+    expect(backed).toEqual(['/d/daemon%2Fa']);
+    expect(navigated).toEqual(['/d/daemon%2Fa']);
+  });
 });
 
 // ─── the connected pickers ───────────────────────────────────────────────────
@@ -1158,6 +1172,39 @@ describe('NewSessionPage › Continue a conversation', () => {
     expect(root().querySelector('[data-continue-conversation]')).toBeNull();
     expect(box('fy-new-session-agent').closest('[hidden]')).toBeNull();
     expect(box('fy-new-session-agent').value).toBe('claude-default');
+  });
+
+  it('lets the host own which choice is open: the switch reports it and the page shows what the host says', async () => {
+    // Arrange
+    const reported: boolean[] = [];
+    const client = {
+      request: async <T,>(path: string, schema: { parse: (value: unknown) => T }): Promise<T> => {
+        if (path.startsWith('/v1/imports/conversations'))
+          return schema.parse({ conversations: [], matched: 0, skipped: 0 });
+        throw new Error(`no route ${path}`);
+      },
+    };
+    const kind = (id: string): HTMLElement =>
+      must(root().querySelector<HTMLElement>(`[data-segmented="new-session-kind"] [data-segment="${id}"]`), id);
+    const wired = (continuing: boolean) => ({
+      connection,
+      startSession: async () => ({ config: { id: 'x' } }),
+      onNavigate: () => undefined,
+      createFleetClient: async () => client as never,
+      continuing,
+      onContinuingChange: (next: boolean) => reported.push(next),
+    });
+
+    // Act
+    await show(wired(true));
+    const opensOnContinue = root().querySelector('[data-continue-conversation]') !== null;
+    await interact(() => kind('new').click());
+    const stillContinue = root().querySelector('[data-continue-conversation]') !== null;
+
+    // Assert
+    expect(opensOnContinue).toBe(true);
+    expect(reported).toEqual([false]);
+    expect(stillContinue).toBe(true);
   });
 
   it('lists the machine’s stopped ferrets first, and resumes one in place through the typed client', async () => {

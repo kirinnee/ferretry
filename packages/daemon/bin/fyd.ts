@@ -6817,6 +6817,8 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       // revive that restored the pane and not the session.
       accountLaunchRenewal,
       sessionMedia,
+      // The binary the wrappers' instructions name, so a revive records what its pane was told.
+      CLIENT_NAME,
     );
   };
   /**
@@ -6987,6 +6989,8 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         accountLaunchRenewal,
         // The pane's own media folder, `FY_MEDIA_DIR` (docs/hypermedia.md).
         sessionMedia,
+        // The binary the wrappers' instructions name, so each launch records what its pane was told.
+        CLIENT_NAME,
       ),
       codexAppServers,
       { text: async record => (await launchTmux.state(record.config.tmuxSession)).visible },

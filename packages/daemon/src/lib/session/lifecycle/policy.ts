@@ -1,6 +1,10 @@
 import { basename } from 'node:path';
 import { HARNESS_LABEL, HYPERMEDIA_ENV } from '@ferretry/fleet';
-import { assignedTaskDocument as protocolAssignedTaskDocument, turnFileInstruction } from '@ferretry/protocol';
+import {
+  assignedTaskDocument as protocolAssignedTaskDocument,
+  type SessionLaunchInstructions,
+  turnFileInstruction,
+} from '@ferretry/protocol';
 import type { CoreAccount } from '../../core/inventory.ts';
 import { formatSessionTitle } from '../../names/policy.ts';
 import { parseSessionId, type SessionId } from '../../session-id.ts';
@@ -212,6 +216,19 @@ export function createSessionRecord(
     state: { id: context.id, status: 'created' },
   });
   return { record, event: event('session.created', { agent, mode: request.mode, cwd: context.cwd }) };
+}
+
+/**
+ * The record with the launch fact its new pane answered, or unchanged when the launcher could not say —
+ * a pane the launcher did not describe keeps the description of the last one that was.
+ */
+export function withLaunchInstructions(
+  record: SessionLifecycleRecord,
+  instructions: SessionLaunchInstructions | undefined,
+): SessionLifecycleRecord {
+  return instructions === undefined
+    ? record
+    : { ...record, state: { ...record.state, launchInstructions: instructions } };
 }
 
 /**
