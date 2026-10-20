@@ -118,30 +118,51 @@ function plainScreen(raw: string): string {
  */
 export async function screenOf(
   command: readonly string[],
-  options: { env: Record<string, string>; cwd: string; settled: readonly RegExp[]; timeoutMs?: number },
+  options: {
+    env: Record<string, string>;
+    cwd: string;
+    settled: readonly RegExp[];
+    timeoutMs?: number;
+    cols?: number;
+    /** Typed once the screen settles — a slash command, say — and then waited for in turn. */
+    afterwards?: { readonly type: string; readonly settled: readonly RegExp[] };
+  },
 ): Promise<string> {
   let raw = '';
   const child = Bun.spawn([...command], {
     cwd: options.cwd,
     env: options.env,
     terminal: {
-      cols: 120,
+      cols: options.cols ?? 120,
       rows: 40,
       data(_terminal, bytes) {
         raw += new TextDecoder().decode(bytes);
       },
     },
   });
-  const deadline = Date.now() + (options.timeoutMs ?? 30_000);
   let exited = false;
   void child.exited.then(() => {
     exited = true;
   });
-  while (Date.now() < deadline && !exited && !options.settled.some(pattern => pattern.test(plainScreen(raw)))) {
-    await Bun.sleep(200);
+  const settle = async (settled: readonly RegExp[]) => {
+    const deadline = Date.now() + (options.timeoutMs ?? 30_000);
+    while (Date.now() < deadline && !exited && !settled.some(pattern => pattern.test(plainScreen(raw)))) {
+      await Bun.sleep(200);
+    }
+    // A frame often arrives in pieces; one more beat lets the rest of the settled screen land.
+    await Bun.sleep(750);
+  };
+  await settle(options.settled);
+  if (options.afterwards !== undefined && !exited) {
+    // One key at a time, as a person types: a TUI reading a burst as a paste would not open its menu.
+    for (const key of options.afterwards.type) {
+      child.terminal?.write(key);
+      await Bun.sleep(60);
+    }
+    await Bun.sleep(500);
+    child.terminal?.write('\r');
+    await settle(options.afterwards.settled);
   }
-  // A frame often arrives in pieces; one more beat lets the rest of the settled screen land.
-  await Bun.sleep(750);
   child.kill('SIGKILL');
   await child.exited;
   child.terminal?.close();

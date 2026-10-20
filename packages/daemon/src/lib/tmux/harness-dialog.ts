@@ -6,8 +6,8 @@ import { parsePermissionPrompt, promptDigest } from './permission-prompt.ts';
  *
  * Apart from tool permissions (`./permission-prompt.ts`), both harnesses stop on screens of their own
  * and wait: Codex's "Hooks need review", "Update available" and sign-in screen, Claude's "New MCP
- * server found in this project" and "Settings Error". Read off real panes of Codex 0.145.0 and 0.156.1
- * and Claude Code 2.1.220 and 2.1.281 (`tests/fixtures/harness-dialogs/`), they share one shape:
+ * server found in this project" and "Settings Error". Read off real panes of Codex 0.145.0, 0.156.1 and
+ * 0.163.0 and Claude Code 2.1.220 and 2.1.281 (`tests/fixtures/harness-dialogs/`), they share one shape:
  *
  *   a header block (title, then what it says) · a list of rows with a cursor on one · a key-hint footer
  *   ("enter confirm · esc skip", "Press enter to continue", "Enter to confirm · Esc to cancel")
@@ -177,9 +177,11 @@ const KINDS: readonly { readonly kind: HarnessDialogKind; readonly marker: RegEx
   { kind: 'sign-in', marker: /^welcome to codex\b/iu },
   { kind: 'mcp-servers', marker: /^new mcp servers? found\b/iu },
   { kind: 'settings-error', marker: /^settings error$/iu },
+  // Codex from 0.156 titles its folder screens "Folder access": the trust question, and the restricted
+  // opening of a folder its config marks untrusted.
   {
     kind: 'directory-trust',
-    marker: /do you trust the contents of this directory|quick safety check|do you trust the files/iu,
+    marker: /do you trust the contents of this directory|quick safety check|do you trust the files|^folder access$/iu,
   },
 ];
 
@@ -187,7 +189,7 @@ const KINDS: readonly { readonly kind: HarnessDialogKind; readonly marker: RegEx
 function grantsTrust(kind: HarnessDialogKind, label: string): boolean {
   const lower = label.toLowerCase().replaceAll('’', "'");
   if (kind === 'mcp-servers') return lower.startsWith('use this');
-  if (kind === 'directory-trust') return /^yes\b/u.test(lower);
+  if (kind === 'directory-trust') return /^(?:yes|trust and continue)\b/u.test(lower);
   // Every other dialog: a row that says it trusts, unless it says it does not.
   return /\btrust/u.test(lower) && !/\bwithout\b|\bnot\b|n't\b|^no\b/u.test(lower);
 }

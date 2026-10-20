@@ -69,21 +69,37 @@ export function selectCodexRollout(
  * `environment_context` and each `turn_context.workspace_roots` in 0.145 (both measured against the
  * real binaries; the fixtures under `tests/fixtures/transcript/codex-rollouts/` are those runs).
  *
- * WHY A PATH THAT DOES NOT EXIST. `--add-dir` also declares the folder writable. Naming one nobody
- * creates grants nothing — Codex records it and does not create it, measured on all three versions —
- * so the proof costs no access the session did not already have.
+ * WHY A PATH WHOSE PARENT DOES NOT EXIST. `--add-dir` also declares the folder writable, and Codex
+ * records it without creating it (measured on 0.145.0 and 0.163.0, and earlier on 0.156.1). Not existing is not
+ * enough on its own: Linux's bubblewrap skips a missing writable root, but macOS Seatbelt turns it into
+ * `(subpath <root>)`, which lets a sandboxed command `mkdir` the root and write inside it (read off
+ * `codex-rs/sandboxing/src/seatbelt.rs` at `rust-v0.145.0` and `rust-v0.163.0`). So the declared root
+ * is one level below {@link CODEX_CORRELATION_ROOT}, which nobody creates either: making the root
+ * would need a write to its parent, and the parent is outside every writable root. The proof costs
+ * no access the session did not already have.
  */
 export const CODEX_CORRELATION_ROOT = 'codex-correlation';
+
+/** The declared root's own name, under {@link CODEX_CORRELATION_ROOT}. */
+const CODEX_CORRELATION_LEAF = 'unreachable';
 
 /** The Codex flag that declares an extra workspace root. */
 const CODEX_ADD_DIR = '--add-dir';
 
 /** The launch arguments that make a Codex rollout carry `correlationToken` from its first record. */
 export function codexCorrelationArguments(correlationToken: string): readonly string[] {
-  return [CODEX_ADD_DIR, `${correlationToken}/${CODEX_CORRELATION_ROOT}`];
+  return [CODEX_ADD_DIR, `${correlationToken}/${CODEX_CORRELATION_ROOT}/${CODEX_CORRELATION_LEAF}`];
 }
 
-/** Whether `flag value` is the pair {@link codexCorrelationArguments} produces, for any session. */
+/**
+ * Whether `flag value` is the pair {@link codexCorrelationArguments} produces, for any session — or
+ * the one-level spelling sessions launched before the root moved down still have recorded.
+ */
 export function isCodexCorrelationPair(flag: string, value: string | undefined): boolean {
-  return flag === CODEX_ADD_DIR && value?.endsWith(`/${CODEX_CORRELATION_ROOT}`) === true;
+  return (
+    flag === CODEX_ADD_DIR &&
+    value !== undefined &&
+    (value.endsWith(`/${CODEX_CORRELATION_ROOT}/${CODEX_CORRELATION_LEAF}`) ||
+      value.endsWith(`/${CODEX_CORRELATION_ROOT}`))
+  );
 }

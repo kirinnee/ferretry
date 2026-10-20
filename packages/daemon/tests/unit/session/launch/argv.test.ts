@@ -230,7 +230,7 @@ describe('transcriptLaunchArguments, for a Codex session proven by correlation',
     const argv = transcriptLaunchArguments('codex', provenance, ['/fleet/bin/codex-auto']);
 
     // Assert
-    should(argv).eql(['--add-dir', `${TOKEN}/codex-correlation`]);
+    should(argv).eql(['--add-dir', `${TOKEN}/codex-correlation/unreachable`]);
   });
 
   it('should resume an adopted conversation and still declare the root after the subcommand', () => {
@@ -247,7 +247,7 @@ describe('transcriptLaunchArguments, for a Codex session proven by correlation',
     const argv = transcriptLaunchArguments('codex', provenance, ['/fleet/bin/codex-auto']);
 
     // Assert
-    should(argv).eql(['resume', HARNESS_SESSION, '--add-dir', `${TOKEN}/codex-correlation`]);
+    should(argv).eql(['resume', HARNESS_SESSION, '--add-dir', `${TOKEN}/codex-correlation/unreachable`]);
   });
 });
 
@@ -300,12 +300,15 @@ describe('settingsArguments', () => {
     should(kept).eql([WRAPPER, '--settings', '/fleet/own-overlay.json', '--settings', '{"theme":"dark"}']);
   });
 
-  it('should drop the Codex correlation root and keep an owner’s own --add-dir', () => {
-    // Arrange: a session started before launches declared the root must not read as stale.
+  it('should drop the Codex correlation root, in both spellings, and keep an owner’s own --add-dir', () => {
+    // Arrange: a session started before launches declared the root, or before it moved one level down,
+    // must not read as stale.
     const argv = [
       WRAPPER,
       '--add-dir',
-      '/state/sessions/s1/codex-correlation',
+      '/state/sessions/s1/codex-correlation/unreachable',
+      '--add-dir',
+      '/state/sessions/s0/codex-correlation',
       '--add-dir',
       '/work/shared',
       '--add-dir',

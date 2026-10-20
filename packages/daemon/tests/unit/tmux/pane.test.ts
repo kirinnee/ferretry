@@ -75,6 +75,8 @@ describe('pane readiness', () => {
     // Arrange — each modal, with a prompt-shaped line under it exactly as the TUI draws it.
     const modals = [
       'Do you trust the contents of this directory?\n❯ 1. Yes, proceed\n  2. No, exit\n> ',
+      'Trust this folder? Codex can read, edit, and run files here\n> ',
+      'Skills still load. Opening will not change saved trust.\n> ',
       'Do you trust the files in this folder?\n> ',
       'Quick safety check: is this a project you created or one you trust?\n> ',
       'Yes, I trust this folder\n> ',
@@ -190,6 +192,8 @@ describe('paneBlockingPrompt', () => {
       'Try the new fullscreen renderer?\n  Yes, try it   Not now',
       'Quick safety check: is this a project you created or one you trust?\n❯ 1. Yes, I trust this folder',
       'Do you trust the contents of this directory?\n› 1. Yes, continue',
+      'Trust this folder? Codex can read, edit, and run files here\n› 1. Trust and continue',
+      'Opening will not change saved trust.\n› 1. Open restricted',
       'Choose the text style that looks best with your terminal',
       'Detected a custom API key\nDo you want to use this API key?',
       '❯ 1. Resume from summary (recommended)\n  2. Resume full session as-is',
@@ -201,6 +205,8 @@ describe('paneBlockingPrompt', () => {
       'Try the new fullscreen renderer?',
       'Do you trust this folder?',
       'Do you trust this folder?',
+      'Do you trust this folder?',
+      'Open this untrusted folder restricted?',
       'Choose a text style (first-run setup)',
       'Use the custom API key it detected?',
       'Resume from a summary, or the full session?',

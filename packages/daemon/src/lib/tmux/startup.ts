@@ -134,9 +134,17 @@ export function codexUpdateAction(pane: string): StartupDialogAction | undefined
   return { kind: 'codex-update', keys: [...Array.from({ length: Math.abs(distance) }, () => move), 'Enter'] };
 }
 
+/**
+ * Codex's note on a trust screen raised in a subdirectory of a Git repository (0.145.0 and 0.163.0
+ * alike): saying yes there trusts the whole repository, not the launch folder the fixed layer trusts.
+ */
+const CODEX_TRUSTS_REPOSITORY_ROOT = 'trusting will apply to the repository root';
+
 /** Which of the recognised trust/confirmation dialogs the frame is showing, if any. */
 function dialogKind(lower: string): StartupDialogAction['kind'] | undefined {
-  if (lower.includes('do you trust the contents of this directory')) return 'codex-trust';
+  if (lower.includes('do you trust the contents of this directory') || lower.includes('trust this folder? codex can'))
+    // A yes that would trust more than the launch folder is a new decision, so a person makes it.
+    return lower.includes(CODEX_TRUSTS_REPOSITORY_ROOT) ? undefined : 'codex-trust';
   if (
     (lower.includes('quick safety check') && lower.includes('yes, i trust this folder')) ||
     lower.includes('do you trust the files')

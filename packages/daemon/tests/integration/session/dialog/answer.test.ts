@@ -151,7 +151,7 @@ const fixtures = (await readdir(FIXTURES))
 
 describe('answering a harness dialog through its real pane', () => {
   it('should cover every dialog captured from both harnesses', () => {
-    should(fixtures.length).equal(12);
+    should(fixtures.length).equal(15);
   });
 
   for (const fixture of fixtures)

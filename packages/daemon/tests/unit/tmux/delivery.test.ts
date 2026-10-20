@@ -145,6 +145,49 @@ describe('startup dialogs', () => {
   });
 });
 
+describe('codex folder trust screen (0.156+)', () => {
+  const frame = (name: string): string =>
+    readFileSync(join(import.meta.dir, '../../fixtures/harness-dialogs', `${name}.txt`), 'utf8');
+
+  it('should trust the launch folder the fixed layer already trusts, with the cursor on its row', () => {
+    // Act
+    const actual = startupDialogAction(frame('codex-0.163.0-directory-trust'));
+
+    // Assert
+    should(actual).deepEqual({ kind: 'codex-trust', keys: ['Enter'] });
+  });
+
+  it('should leave a yes that would trust the whole repository to a person, on either screen', () => {
+    // Arrange — the same note on the 0.145.0 question.
+    const older = [
+      '> You are in /home/dev/project/sub',
+      '',
+      '  Note: You’re in a subdirectory of a Git project. Trusting will apply to the repository root:',
+      '  /home/dev/project',
+      '',
+      '  Do you trust the contents of this directory?',
+      '',
+      '› 1. Yes, continue',
+      '  2. No, quit',
+      '',
+      '  Press enter to continue',
+    ].join('\n');
+
+    // Act
+    const actual = [
+      startupDialogAction(frame('codex-0.163.0-directory-trust-subdirectory')),
+      startupDialogAction(older),
+    ];
+
+    // Assert
+    should(actual).deepEqual([undefined, undefined]);
+  });
+
+  it('should not open an untrusted folder restricted on anybody’s behalf', () => {
+    should(startupDialogAction(frame('codex-0.163.0-directory-restricted'))).be.undefined();
+  });
+});
+
 describe('codex update prompt', () => {
   const frame = (name: string): string =>
     readFileSync(join(import.meta.dir, '../../fixtures/harness-dialogs', `${name}.txt`), 'utf8');

@@ -41,7 +41,7 @@ the dialog is shown to them as a card instead. Not used, on purpose:
 
 ## What is recognised
 
-Read off real panes captured from Codex 0.145.0 and 0.156.1 and Claude Code 2.1.220 and 2.1.281 in throwaway
+Read off real panes captured from Codex 0.145.0, 0.156.1 and 0.163.0 and Claude Code 2.1.220 and 2.1.281 in throwaway
 homes with no network. The captures are the fixtures in `packages/daemon/tests/fixtures/harness-dialogs/`.
 
 | Harness | Dialog                               | `kind`            | Options that grant trust                |
@@ -53,6 +53,8 @@ homes with no network. The captures are the fixtures in `packages/daemon/tests/f
 | Claude  | New MCP server found in this project | `mcp-servers`     | Use this MCP server, Use this and all … |
 | Claude  | Settings Error                       | `settings-error`  | —                                       |
 | Either  | Do you trust this folder?            | `directory-trust` | the "Yes" rows                          |
+| Codex   | Folder access: Trust this folder?    | `directory-trust` | Trust and continue                      |
+| Codex   | Folder access: Open restricted       | `directory-trust` | — (opening changes no saved trust)      |
 
 Any other screen of the same shape — a header, a list with a cursor on one row, and a key-hint footer that
 names Enter or Esc ("enter confirm · esc skip", "Press enter to continue", "Enter to confirm · Esc to
@@ -104,7 +106,12 @@ Nothing that grants trust is ever answered by the daemon. The dialogs a launch c
   (answered No, which keeps the owner's mode), the large-session resume menu, the custom-API-key
   confirmation the wrapper's own key raises, and the launch-folder trust dialogs — the folder the fixed
   layer already trusts (`projects.<cwd>`), so the answer repeats a decision Ferretry's design made, never a
-  new one.
+  new one. Codex 0.156+ asks it on a "Folder access" screen ("Trust this folder?" · "Trust and continue"),
+  answered the same way.
+- **Not** Codex's trust question in a subdirectory of a Git repository. Its note ("Trusting will apply to the
+  repository root") means yes trusts the whole repository, which is more than the launch folder the fixed
+  layer trusts, so it waits for a person on 0.145.0 and 0.163.0 alike. Nor the restricted opening of a
+  folder its config marks untrusted.
 
 The rest — hooks, MCP servers, sign-in, settings errors, anything unrecognised — wait for a person.
 
