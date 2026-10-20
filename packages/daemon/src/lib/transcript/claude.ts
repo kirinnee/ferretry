@@ -104,6 +104,17 @@ function harnessWritten(record: Record<string, unknown>): boolean {
   return kind !== undefined && kind !== '' && kind !== 'human';
 }
 
+/**
+ * Whether Claude Code wrote this ASSISTANT record itself instead of taking it from the model.
+ *
+ * It names such a record's model `<synthetic>`: the "No response requested." it answers a background
+ * notification with, an API error, a usage-limit notice. No request was made and no model spoke, so
+ * the record is the harness's, exactly as a harness-written user record is.
+ */
+function synthetic(message: Record<string, unknown>): boolean {
+  return message.model === '<synthetic>';
+}
+
 function isClaudeAttachmentType(type: string): boolean {
   return type === 'image' || type === 'document' || type === 'file' || type === 'attachment';
 }
@@ -284,7 +295,10 @@ export class ClaudeTranscriptParser implements TranscriptParser {
 
     const content = message.content ?? record.content;
     const blocks = Array.isArray(content) ? content : content === undefined ? [] : [content];
-    const source = role === 'user' && harnessWritten(record) ? ({ inputSource: 'harness' } as const) : {};
+    const source =
+      (role === 'user' && harnessWritten(record)) || (role === 'assistant' && synthetic(message))
+        ? ({ inputSource: 'harness' } as const)
+        : {};
     for (let blockIndex = 0; blockIndex < blocks.length; blockIndex += 1) {
       const value = blocks[blockIndex];
       const blockMetadata = metadata(role, blockIndex);

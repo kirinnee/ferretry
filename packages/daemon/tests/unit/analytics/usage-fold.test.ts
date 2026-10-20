@@ -1,7 +1,7 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
 import { type AnalyticsTranscriptEvidence, foldAnalyticsSessionUsage } from '../../../src/lib/analytics/usage-fold.ts';
-import { ClaudeTranscriptParser, parseTranscriptJsonl } from '../../../src/lib/transcript/index.ts';
+import { ClaudeTranscriptParser, CodexTranscriptParser, parseTranscriptJsonl } from '../../../src/lib/transcript/index.ts';
 import type { TranscriptEvent, TranscriptHarness } from '../../../src/lib/transcript/types.ts';
 
 type UsageFigures = NonNullable<Extract<TranscriptEvent, { kind: 'usage' }>>['usage'];
@@ -406,5 +406,37 @@ describe('analytics session usage fold, on Claude multi-block messages', () => {
         reasoningTokens: null,
       },
     });
+  });
+});
+
+describe('analytics session usage fold, on Codex repeated token counts', () => {
+  it('should not count a token_count whose session running total did not move', () => {
+    // Arrange — the third record restates the second: same running total, its per-request figures
+    // still attached. Codex's own total is 1 000 + 2 000 input.
+    const count = (input: number, total: number) =>
+      JSON.stringify({
+        timestamp: '2026-10-20T09:00:00.000Z',
+        type: 'event_msg',
+        payload: {
+          type: 'token_count',
+          info: {
+            last_token_usage: { input_tokens: input, cached_input_tokens: 0, output_tokens: 10, reasoning_output_tokens: 0 },
+            total_token_usage: { total_tokens: total },
+          },
+        },
+      });
+    const text = [
+      JSON.stringify({ timestamp: '2026-10-20T09:00:00.000Z', type: 'turn_context', payload: { model: 'gpt-6-astra' } }),
+      count(1_000, 1_010),
+      count(2_000, 3_020),
+      count(2_000, 3_020),
+    ].join('\n');
+    const parsed = parseTranscriptJsonl(new CodexTranscriptParser(), { text: `${text}\n` });
+
+    // Act
+    const actual = foldAnalyticsSessionUsage(read(parsed.events, { harness: 'codex' }));
+
+    // Assert
+    should(actual.kind === 'usage' && [actual.usage.inputTokens, actual.usage.outputTokens]).deepEqual([3_000, 20]);
   });
 });

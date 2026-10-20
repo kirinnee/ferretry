@@ -382,3 +382,120 @@ describe('analytics session activity fold, on the records real transcripts carry
     should(actual).deepEqual({ activeDurationMs: 5_000, turns: 1 });
   });
 });
+
+describe('analytics session activity fold, on records Claude Code writes for itself', () => {
+  const record = (type: 'user' | 'assistant', uuid: string, time: string, message: object, extra: object = {}) => ({
+    type,
+    uuid,
+    timestamp: at(time),
+    message,
+    ...extra,
+  });
+
+  it('should never let a <synthetic> assistant record stretch an open turn across idle hours', () => {
+    // Arrange — the real shape: a turn that ends on a tool result (no end_turn, so it stays open),
+    // then hours later Claude Code's own "No response requested." just before the next prompt.
+    const transcript = [
+      record('user', 'u1', '10:00:00', { role: 'user', content: 'Run the suite' }),
+      record('assistant', 'a1', '10:00:05', {
+        id: 'msg_a1',
+        role: 'assistant',
+        model: 'claude-opus-5-5',
+        content: [{ type: 'tool_use', id: 't1', name: 'Bash', input: { command: 'bun test' } }],
+        stop_reason: 'tool_use',
+      }),
+      record('user', 'r1', '10:00:30', {
+        role: 'user',
+        content: [{ type: 'tool_result', tool_use_id: 't1', content: 'ok' }],
+      }),
+      record('assistant', 's1', '20:54:00', {
+        id: 'msg_s1',
+        role: 'assistant',
+        model: '<synthetic>',
+        content: [{ type: 'text', text: 'No response requested.' }],
+        stop_reason: 'stop_sequence',
+        usage: { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 },
+      }),
+      record('user', 'u2', '20:55:00', { role: 'user', content: 'Next' }),
+      record('assistant', 'a2', '20:55:10', {
+        id: 'msg_a2',
+        role: 'assistant',
+        model: 'claude-opus-5-5',
+        content: [{ type: 'text', text: 'Done.' }],
+        stop_reason: 'end_turn',
+      }),
+    ];
+
+    // Act
+    const evidence = claude(transcript);
+    const actual = foldAnalyticsSessionActivity(evidence);
+    const synthetic = evidence.kind === 'read' ? evidence.events.find(event => event.recordId === 's1') : undefined;
+
+    // Assert — 30 s and 10 s; never the ten hours before the synthetic record
+    should(actual).deepEqual({ activeDurationMs: 40_000, turns: 2 });
+    should(synthetic?.inputSource).equal('harness');
+  });
+
+  it('should start a turn at a prompt-type slash command, and none at a local built-in', () => {
+    // Arrange — /review expands into an isMeta prompt; /model answers locally
+    const transcript = [
+      record('user', 'c1', '10:00:00', {
+        role: 'user',
+        content: '<command-message>review</command-message>\n<command-name>/review</command-name>\n<command-args>parser</command-args>',
+      }),
+      record('user', 'm1', '10:00:00', { role: 'user', content: [{ type: 'text', text: 'Review the parser…' }] }, {
+        isMeta: true,
+      }),
+      record('assistant', 'a1', '10:00:40', {
+        id: 'msg_a1',
+        role: 'assistant',
+        model: 'claude-opus-5-5',
+        content: [{ type: 'text', text: 'Reviewed.' }],
+        stop_reason: 'end_turn',
+      }),
+      record('user', 'c2', '10:05:00', {
+        role: 'user',
+        content: '<command-name>/model</command-name>\n<command-message>model</command-message>',
+      }),
+      record('user', 'o2', '10:05:00', {
+        role: 'user',
+        content: '<local-command-stdout>Set model to opus</local-command-stdout>',
+      }),
+      record('user', 'c3', '10:06:00', { role: 'user', content: '<command-name>/exit</command-name>' }),
+    ];
+
+    // Act
+    const actual = foldAnalyticsSessionActivity(claude(transcript));
+
+    // Assert — /review is the one turn (40 s); /model is local; a trailing command with no answer is a
+    // prompt the model never answered, a zero-length turn
+    should(actual).deepEqual({ activeDurationMs: 40_000, turns: 2 });
+  });
+
+  it('should read a prompt split by an image block as one prompt', () => {
+    // Arrange — text, image, text: three blocks of one record
+    const transcript = [
+      record('user', 'u1', '10:00:00', {
+        role: 'user',
+        content: [
+          { type: 'text', text: 'Look at this' },
+          { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'iVBORw0KGgo=' } },
+          { type: 'text', text: 'and fix it' },
+        ],
+      }),
+      record('assistant', 'a1', '10:00:20', {
+        id: 'msg_a1',
+        role: 'assistant',
+        model: 'claude-opus-5-5',
+        content: [{ type: 'text', text: 'Fixed.' }],
+        stop_reason: 'end_turn',
+      }),
+    ];
+
+    // Act
+    const actual = foldAnalyticsSessionActivity(claude(transcript));
+
+    // Assert
+    should(actual).deepEqual({ activeDurationMs: 20_000, turns: 1 });
+  });
+});

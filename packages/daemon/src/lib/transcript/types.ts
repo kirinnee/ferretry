@@ -153,6 +153,12 @@ export interface TranscriptUsageEvent extends TranscriptEventMetadata {
     readonly contextTokens?: number;
     readonly contextWindow?: number;
     readonly model?: string;
+    /**
+     * The harness's own running total for the whole session at this record, when it states one (Codex
+     * `total_token_usage.total_tokens`). A record whose running total did not move reports no new
+     * request, whatever its per-request figures say, so a reader summing usage skips it.
+     */
+    readonly sessionTotalTokens?: number;
   };
 }
 

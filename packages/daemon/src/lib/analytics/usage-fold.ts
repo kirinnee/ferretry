@@ -142,7 +142,7 @@ function reasoningIsBilledApart(harness: TranscriptHarness): boolean {
  * repeats its message's `message.id` and full `usage`. Summing them charged one API response two or
  * three times. A message id names exactly one API response, so it is the key; the LAST line wins
  * because it is the one written after the response finished, when the output figure is final.
- * Only Claude is keyed: Codex reports usage per request in its own records, with nothing repeated.
+ * Only Claude is keyed by message. Codex repeats differently — see `repeatsTheLastTotal`.
  */
 function lastUsagePerMessage(events: readonly TranscriptEvent[]): ReadonlyMap<string, number> {
   const last = new Map<string, number>();
@@ -152,6 +152,17 @@ function lastUsagePerMessage(events: readonly TranscriptEvent[]): ReadonlyMap<st
     }
   });
   return last;
+}
+
+/**
+ * Whether a usage record restates the request before it rather than reporting a new one.
+ *
+ * Codex sometimes writes a `token_count` again with the SAME session running total and the previous
+ * request's per-request figures still attached; summing it charged that request twice (+1.4% input on
+ * a real rollout against Codex's own total). A running total that did not move is no new request.
+ */
+function repeatsTheLastTotal(total: number | undefined, previous: number | undefined): boolean {
+  return total !== undefined && total === previous;
 }
 
 function isCountable(value: number | undefined): value is number {
@@ -197,6 +208,7 @@ export function foldAnalyticsSessionUsage(
   let sawMissingReasoning = false;
 
   const speaksForMessage = lastUsagePerMessage(evidence.events);
+  let runningTotal: number | undefined;
   for (const [index, event] of evidence.events.entries()) {
     if (event.kind === 'settings') {
       // A turn-context record states the model the turn that FOLLOWS it ran under. Codex records
@@ -214,6 +226,8 @@ export function foldAnalyticsSessionUsage(
     }
 
     const { usage } = event;
+    if (repeatsTheLastTotal(usage.sessionTotalTokens, runningTotal)) continue;
+    runningTotal = usage.sessionTotalTokens ?? runningTotal;
     const input = usage.inputTokens ?? 0;
     const output = usage.outputTokens ?? 0;
     const cachedRead = usage.cachedInputTokens ?? 0;
@@ -306,21 +320,58 @@ function recordKey(event: TranscriptEvent): string | undefined {
  *
  * - Codex opens every rollout with the workspace's instructions (`# AGENTS.md instructions` then
  *   `<INSTRUCTIONS>`, older builds `<user_instructions>`) and the environment (`<environment_context>`).
- * - Claude Code records a slash command (`<command-name>`, `<command-message>`), its local output
- *   (`<local-command-stdout>` / `<local-command-stderr>`) and an interrupt
- *   (`[Request interrupted by user`, with or without `for tool use]`) as user records.
+ * - Claude Code records a built-in command's local output (`<local-command-stdout>` /
+ *   `<local-command-stderr>`) and an interrupt (`[Request interrupted by user`, with or without
+ *   `for tool use]`) as user records. A slash command itself is decided apart: see `COMMAND_PREFIXES`.
  */
 const INJECTED_PREFIXES: { readonly [H in TranscriptHarness]: readonly string[] } = {
   codex: ['# AGENTS.md instructions', '<INSTRUCTIONS>', '<user_instructions>', '<environment_context>'],
-  claude: [
-    '<command-name>',
-    '<command-message>',
-    '<command-args>',
-    '<local-command-stdout>',
-    '<local-command-stderr>',
-    '[Request interrupted by user',
-  ],
+  claude: ['<local-command-stdout>', '<local-command-stderr>', '[Request interrupted by user'],
 };
+
+/**
+ * How Claude Code records a slash command the owner typed. Whether it is a PROMPT depends on what it
+ * does: a prompt-type command or skill (`/review`, `/kteam …`) expands into a prompt (an `isMeta`
+ * record after it) and starts a turn like typed text; a built-in that runs locally (`/model`, `/clear`,
+ * `/exit`) answers with `<local-command-stdout>` / `<local-command-stderr>` and asks the model nothing.
+ */
+const COMMAND_PREFIXES = ['<command-name>', '<command-message>', '<command-args>'];
+const LOCAL_OUTPUT_PREFIXES = ['<local-command-stdout>', '<local-command-stderr>'];
+
+const startsWithAny = (text: string, prefixes: readonly string[]): boolean => {
+  const trimmed = text.trimStart();
+  return prefixes.some(prefix => trimmed.startsWith(prefix));
+};
+
+/**
+ * Where each user-channel RECORD begins, and which of them are local built-in commands.
+ *
+ * One record can normalise to several events — a text block, an image, another text block — and only
+ * its first message event speaks for it; a record is identified by its key however many other events
+ * sit between its blocks. A command record is local when the next user record is its local output.
+ */
+function userRecordStarts(events: readonly TranscriptEvent[]): {
+  readonly firsts: ReadonlySet<number>;
+  readonly localCommands: ReadonlySet<number>;
+} {
+  const starts: { readonly index: number; readonly text: string }[] = [];
+  let current: string | undefined;
+  events.forEach((event, index) => {
+    if (event.kind !== 'message' || event.role !== 'user') return;
+    const key = recordKey(event);
+    if (key !== undefined && key === current) return;
+    current = key;
+    starts.push({ index, text: event.text });
+  });
+  const localCommands = new Set<number>();
+  starts.forEach((start, position) => {
+    const next = starts[position + 1];
+    if (next !== undefined && startsWithAny(start.text, COMMAND_PREFIXES) && startsWithAny(next.text, LOCAL_OUTPUT_PREFIXES)) {
+      localCommands.add(start.index);
+    }
+  });
+  return { firsts: new Set(starts.map(start => start.index)), localCommands };
+}
 
 /** How one event bears on active time. */
 type ActivityRole =
@@ -335,15 +386,15 @@ type ActivityRole =
   /** Bookkeeping — settings, turn starts, compaction, system context — which never moves a turn. */
   | 'none';
 
-function activityRole(event: TranscriptEvent): ActivityRole {
+function activityRole(event: TranscriptEvent, localCommand: boolean): ActivityRole {
   if (event.kind === 'message' && event.role === 'user') {
-    if (!isOwnerMessage(event)) return 'input';
-    const text = event.text.trimStart();
-    return INJECTED_PREFIXES[event.harness].some(prefix => text.startsWith(prefix)) ? 'input' : 'prompt';
+    if (!isOwnerMessage(event) || localCommand) return 'input';
+    return startsWithAny(event.text, INJECTED_PREFIXES[event.harness]) ? 'input' : 'prompt';
   }
   switch (event.kind) {
     case 'message':
-      return event.role === 'assistant' ? 'work' : 'none';
+      // A `<synthetic>` assistant record (claude.ts) is the harness talking, not the model working.
+      return event.role === 'assistant' && event.inputSource !== 'harness' ? 'work' : 'none';
     case 'reasoning':
     case 'tool-call':
     case 'tool-result':
@@ -375,7 +426,8 @@ function eventInstant(event: TranscriptEvent): number | null {
  *
  * Not every user-channel message is a prompt: a tool result is not a message at all; a record the
  * harness wrote itself (`isOwnerMessage` is false: a task notification, a compact summary) and the
- * context or commands listed in `INJECTED_PREFIXES` are INPUT. Input closes the open turn and opens an
+ * context listed in `INJECTED_PREFIXES`, and a built-in command that ran locally, are INPUT; a
+ * prompt-type slash command or skill IS a prompt. Input closes the open turn and opens an
  * UNCOUNTED segment — the work it provokes (a reply to a notification) is active time, but no turn. A
  * record whose first block is injected is injected as a whole: Codex sends its instructions and its
  * environment as two blocks of one message.
@@ -402,8 +454,7 @@ export function foldAnalyticsSessionActivity(evidence: AnalyticsTranscriptEviden
   let open = null as { start: number; end: number } | null;
   /** Where the last segment ended: no later segment may start before it. */
   let floor = Number.NEGATIVE_INFINITY;
-  /** The user-channel record whose blocks are being read. */
-  let userRecord: string | undefined;
+  const records = userRecordStarts(evidence.events);
 
   const close = () => {
     if (open === null) return;
@@ -416,14 +467,11 @@ export function foldAnalyticsSessionActivity(evidence: AnalyticsTranscriptEviden
     open = at === null ? null : { start: Math.max(at, floor), end: Math.max(at, floor) };
   };
 
-  for (const event of evidence.events) {
+  for (const [index, event] of evidence.events.entries()) {
     const at = eventInstant(event);
-    // A later block of the user record just read is that record's: one prompt, one injection.
-    const key = recordKey(event);
-    const userMessage = event.kind === 'message' && event.role === 'user';
-    const continuing = userMessage && key !== undefined && key === userRecord;
-    userRecord = userMessage ? key : undefined;
-    const role = continuing ? 'none' : activityRole(event);
+    // A later block of a user record is that record's: one prompt, one injection.
+    const continuing = event.kind === 'message' && event.role === 'user' && !records.firsts.has(index);
+    const role = continuing ? 'none' : activityRole(event, records.localCommands.has(index));
 
     if (role === 'prompt') {
       turns += 1;

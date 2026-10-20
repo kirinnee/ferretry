@@ -195,7 +195,10 @@ transcript.
 
 **Work** is an assistant message, reasoning, a tool call or tool result, a usage record or an error.
 Nothing else moves a turn's end: not a settings record (`turn_context`), not a turn-started marker
-(`task_started`), not developer or system context. Codex writes `task_started` and `turn_context`
+(`task_started`), not developer or system context, and not an assistant record Claude Code wrote
+itself (`model: "<synthetic>"`: the "No response requested." it answers a notification with, an API
+error, a usage-limit notice). A turn that ends on a tool result stays open, and a synthetic record can
+arrive hours later, just before the next prompt. Codex writes `task_started` and `turn_context`
 just before each new prompt, sometimes hours after the last turn ended, so letting them extend the turn
 would count that idle time as active.
 
@@ -210,13 +213,16 @@ prompts:
 - the context Codex injects as user messages: `# AGENTS.md instructions` / `<INSTRUCTIONS>` (current
   builds, two blocks of one message, so the whole message is injected), `<user_instructions>` and
   `<environment_context>`.
-- what Claude Code records for a slash command (`<command-name>`, `<command-message>`,
-  `<command-args>`), its local output (`<local-command-stdout>`, `<local-command-stderr>`), and an
-  interrupt (`[Request interrupted by user…]`).
+- a built-in slash command that runs locally (`/model`, `/clear`, `/exit`): its `<command-name>`
+  record is followed by `<local-command-stdout>` or `<local-command-stderr>`, and both are input. A
+  prompt-type command or skill (`/review …`) is followed by its `isMeta` expansion instead, and it **is**
+  a prompt: it starts a counted turn like typed text.
+- an interrupt (`[Request interrupted by user…]`).
 
 These are **input**. Input closes the open turn and opens an **uncounted segment**: the work it provokes,
 such as the model replying to a task notification or continuing after a compaction, is active time, but
-it is not a turn. One prompt record split into several content blocks is one prompt. Claude records are
+it is not a turn. One prompt record split into several content blocks (text, an image, more text) is
+one prompt. Claude records are
 `user` lines with text, and Codex records are `response_item` messages with role `user`. Both parsers
 normalise to the same events, so one definition holds for both.
 
@@ -282,6 +288,15 @@ sessions whose active time is unknown.
 - **One Claude API response is counted once, by `message.id`.** Claude Code writes a line per content
   block, each repeating the response's usage, and the fold keeps the last line for each id. A
   transcript that reused one id across two responses would under-count.
+- **A Codex token count is counted once, by its running total.** Codex sometimes writes `token_count`
+  again with the same `total_token_usage` and the previous request's figures still attached. A record
+  whose running total did not move is skipped. A rollout with no running total is summed as written.
+- **Two machines with one host name are one `machine` value.** The Query page keeps each daemon's own
+  `machine` value, because that is what a `{machine=…}` matcher is compared with on that machine. So
+  two paired machines whose daemons report the same host name merge into one row of `by (machine)` on
+  the Query page, and a `{machine=…}` filter selects both. The Overview's "By machine" split groups by
+  pairing and names machines as the sessions bar does, so it keeps them apart. Session links on both
+  pages go to the machine each row came from.
 
 - **Only finished sessions are indexed.** A session is ingested at a durable terminal state, so a
   running session is in no query. A revived session leaves the index until it ends again.

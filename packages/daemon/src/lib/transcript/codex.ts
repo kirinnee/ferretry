@@ -14,10 +14,10 @@ import type {
   TranscriptRole,
 } from './types.ts';
 import {
+  normalizeTranscriptQuestions,
   transcriptJsonValue,
   transcriptNumber,
   transcriptObject,
-  normalizeTranscriptQuestions,
   transcriptRecordIssue,
   transcriptString,
   transcriptText,
@@ -344,6 +344,7 @@ export class CodexTranscriptParser implements TranscriptParser {
     if (recordType === 'event_msg' && itemType === 'token_count') {
       const info = transcriptObject(payload.info) ?? {};
       const last = transcriptObject(info.last_token_usage) ?? {};
+      const sessionTotalTokens = transcriptNumber(transcriptObject(info.total_token_usage)?.total_tokens);
       const inputTokens = transcriptNumber(last.input_tokens);
       const outputTokens = transcriptNumber(last.output_tokens);
       const cachedInputTokens = transcriptNumber(last.cached_input_tokens);
@@ -374,6 +375,7 @@ export class CodexTranscriptParser implements TranscriptParser {
           reasoningTokens,
           contextTokens,
           contextWindow,
+          ...(sessionTotalTokens === undefined ? {} : { sessionTotalTokens }),
         },
       });
       return { events, issues, recognized: true };
