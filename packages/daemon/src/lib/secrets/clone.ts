@@ -25,6 +25,8 @@
  */
 
 import {
+  type CloneableSecretName,
+  CloneableSecretNameSchema,
   type DaemonId,
   MAX_SECRETS_PER_DAEMON,
   SECRET_CLONE_SCHEMA_VERSION,
@@ -36,8 +38,6 @@ import {
   type SecretImportId,
   type SecretImportOffer,
   type SecretImportResult,
-  type SecretName,
-  SecretNameSchema,
   SecretValueSchema,
 } from '@ferretry/protocol';
 import {
@@ -106,15 +106,17 @@ export interface SecretCloneIdentitySource {
 /**
  * What a sealed bundle opens to. Values exist only between `seal` and `open`, never on a wire in clear.
  *
- * EXTENSION POINT — LOGIN TOKENS ARE DELIBERATELY NOT HERE. Copying a Claude or Codex sign-in would put a
- * refresh token on two machines, and a provider that rotates refresh tokens would sign one of them out
- * the first time the other refreshes. The owner has not decided (docs/secrets.md, "Copying secrets to
- * another machine"). If they do, a login travels as its own field beside `entries`, under a new
- * `SECRET_CLONE_SCHEMA_VERSION`, so a receiving daemon that predates it refuses rather than drops it.
+ * SIGN-INS ARE NOT HERE, AND THE TYPE CANNOT HOLD ONE. Owner decision 2026-10-20: "don't copy sign-in,
+ * copy env var credentials only". A copied refresh token would live on two machines, and a provider that
+ * rotates refresh tokens signs one of them out the first time the other refreshes. A Claude or Codex
+ * login is a file in a credential store, not a vault entry, so it has no name to put here; the one
+ * sign-in token the vault does hold (an MCP server's access token) is refused by
+ * {@link CloneableSecretNameSchema}, which is what every name below is. A login does not travel as an
+ * `entries` row, or any other field: the person signs in on the receiving machine (docs/secrets.md).
  */
 const BundlePlaintextSchema = z.strictObject({
   entries: z
-    .array(z.tuple([SecretNameSchema, SecretValueSchema]))
+    .array(z.tuple([CloneableSecretNameSchema, SecretValueSchema]))
     .min(1)
     .max(MAX_SECRETS_PER_DAEMON),
 });
@@ -254,7 +256,7 @@ export class SecretImportService {
     return await this.#file(importId, bundle.sourceDaemonId, entries);
   }
 
-  async #openBundle(open: OpenImport, bundle: SealedSecretBundle): Promise<readonly [SecretName, string][]> {
+  async #openBundle(open: OpenImport, bundle: SealedSecretBundle): Promise<readonly [CloneableSecretName, string][]> {
     const { offer } = open;
     if (
       bundle.importId !== offer.importId ||
@@ -290,7 +292,7 @@ export class SecretImportService {
   async #file(
     importId: SecretImportId,
     sourceDaemonId: DaemonId,
-    entries: readonly [SecretName, string][],
+    entries: readonly [CloneableSecretName, string][],
   ): Promise<SecretImportResult> {
     const held = new Set((await this.deps.directory.list()).map(secret => secret.name));
     const added = entries.filter(([name]) => !held.has(name)).length;

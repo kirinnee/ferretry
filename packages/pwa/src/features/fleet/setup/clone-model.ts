@@ -6,8 +6,9 @@
  * to the target as the data of ONE reviewed change, `clone.import`. No machine talks to another.
  *
  * The preview is counted here from the export itself, so it says exactly what will travel: the
- * components, model sets, profiles and runtimes copy; each login becomes an empty slot that needs
- * sign-in; history stays behind; a path under `/Users/` or `/home/` is flagged to check (E30); and a
+ * components, model sets, profiles and runtimes copy; an API-key login copies with its key (sealed, one
+ * passkey) while each Claude Code or Codex SIGN-IN becomes an empty slot to sign in to on the target
+ * (docs/secrets.md, owner decision 2026-10-20); history stays behind; a path under `/Users/` or `/home/` is flagged to check (E30); and a
  * runtime whose tool is missing on the target is copied and waits (E29). The daemon describes the
  * same copy again when it is staged, and that description is what the apply runs.
  *
@@ -48,7 +49,7 @@ export const cloneSteps = (targetHasSetup: boolean): StepperStep[] => [
  * everything that is copied INTO it (docs/cross-daemon.md §3d).
  */
 export const cloneSharesSentence = (target: string): string =>
-  `${target} receives a copy of the instructions, skills, settings and hooks of the machine you pick, so only pick one whose setup you’re happy for ${target} to see. Logins and secret values never leave it.`;
+  `${target} receives a copy of the instructions, skills, settings and hooks of the machine you pick, so only pick one whose setup you’re happy for ${target} to see. A sign-in never leaves it; an API key does only sealed, with your passkey.`;
 
 export type CloneSourceState =
   | { readonly kind: 'checking' }
@@ -82,8 +83,12 @@ export interface ClonePreview {
   readonly modelSets: number;
   readonly profiles: number;
   readonly runtimes: number;
-  /** Logins the copied runtimes use: each becomes an empty slot. */
+  /** Every login in the bundle. */
   readonly logins: number;
+  /** The sign-ins among them: each becomes an empty slot that needs sign-in on the target. */
+  readonly signIns: number;
+  /** The API-key (environment) logins: they copy, and their keys follow sealed. */
+  readonly apiKeyLogins: number;
   readonly checkPaths: readonly ClonePath[];
   /** Tools the copied runtimes need that the target does not have (E29). */
   readonly missingTools: readonly SetupHarness[];
@@ -155,6 +160,8 @@ export const clonePreview = (
     profiles: Object.keys(bundle.profiles).length,
     runtimes: runtimes.length,
     logins: bundle.credentials.length,
+    signIns: bundle.credentials.filter(credential => credential.store !== 'environment').length,
+    apiKeyLogins: bundle.credentials.filter(credential => credential.store === 'environment').length,
     checkPaths,
     missingTools: SETUP_HARNESSES.filter(harness => neededTools.has(harness) && !installed.has(harness)),
     notCopied: bundle.notCopied,
