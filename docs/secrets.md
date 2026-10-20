@@ -37,12 +37,14 @@ comes back, scrubbed. There is nothing in the agent's own process to echo into i
 
 **There is no route, command or API that returns a secret value.** Not to an agent, not to `fy`, not
 to the browser, not to a debug endpoint. This is enforced by the types rather than by a check: the
-route table is handed a `SecretDirectory`, which has no method that opens ciphertext. Only five
+route table is handed a `SecretDirectory`, which has no method that opens ciphertext. Only six
 things hold a `SecretVault` — the redactor, the use executor, the fleet launch environment that
 resolves a runtime's credential and profile into the pane being started, the [MCP sign-in](mcp-oauth.md)
 service, which opens an access token only to revoke it at sign-out (and alone holds a second vault over
-its own sealed document of refresh tokens and client secrets), and the
-[outbound provider authorizer](#speed-up-keys-the-fifth-holder) — and none of them returns what it read.
+its own sealed document of refresh tokens and client secrets), the
+[outbound provider authorizer](#speed-up-keys-the-fifth-holder), and the
+[secret export](#copying-secrets-to-another-machine), which answers only ciphertext that another machine
+alone can open — and none of them returns what it read.
 A getter added "just for testing" would delete the whole property.
 
 ## Redaction
@@ -135,14 +137,78 @@ still there.
 
 ## What is not built yet
 
-- **Copying secrets between paired daemons — GAP.** The owner wants secrets to travel, and the
-  pairing channel is end-to-end encrypted, so it is safe in transit. The seam agreed with the
-  portability unit is: secrets are copyable **explicitly and per-secret**, never as a side effect of
-  copying configuration, and the diff preview must show which. Nothing here copies anything today.
+- **`fy secret clone --from <machine>` — GAP.** Copying is browser-only for now. The command line
+  holds one credential, this host's admin token, and has no way to reach a second daemon; giving it one
+  is a design of its own (it would need to be paired, like a browser). Copy from the PWA.
 - **Per-session scoping — GAP.** Every secret is available to any caller holding the daemon's admin
   token, which is every agent it runs. Scoping _which_ session may use _which_ secret is a design in
   its own right: it needs a durable grant per session, a way to issue one at start, and a surface to
   review them. Named here so its absence is a decision rather than an oversight.
+
+## Copying secrets to another machine
+
+Setting up a new machine no longer means pasting every key again. On the new machine, **Copy settings
+from another machine** offers **Copy secrets from <machine>…**; on any machine, **Settings → Secrets →
+Copy to another machine…** does the same from the other end. Either way a person picks the secrets by
+name — each row says where that machine's configuration uses it, and whether the receiving machine
+already holds one (it is replaced) — and the sending machine asks for a **passkey for that copy**.
+Secrets still never travel as a side effect of copying configuration: only the names a person ticked.
+
+### How it works
+
+The browser holds a session to both machines, so it carries messages between them — and it is
+structurally unable to read what it carries.
+
+1. **The receiving machine opens an import** (`POST /v1/secrets/imports`): a one-time X25519 key pair,
+   an id and a five-minute expiry. It signs the public half with its own **daemon identity** — the
+   Ed25519 key whose fingerprint IS its daemon id, the one every paired browser pins. The private half
+   stays in that daemon's memory and nowhere else; a restart forgets it.
+2. **The sending machine seals the chosen values** (`POST /v1/secrets/exports/:importId`). It checks the
+   offer's signature, that the key hashes to the daemon id the offer names, the expiry, and that it is
+   not being asked to copy to itself. Then X25519 with a one-time key of its own → HKDF-SHA256 (salted
+   with the import id) → AES-256-GCM, with both daemon ids, the import id, the expiry and the names as
+   authenticated data. It answers that bundle and nothing else.
+3. **The receiving machine opens it once** (`POST /v1/secrets/imports/:importId`) and files the values in
+   its own store. The import is spent by the first attempt, success or not, so a replayed, tampered,
+   re-pointed or late bundle is refused and no bundle can be tried twice against the same key. It checks
+   that every value fits before writing any: a half-copied set is worse than none.
+
+Both ends write the **same import id** to their security log — `secrets.used` (`clone-export`) on the
+sending machine and `secrets.changed` (`clone-import`) on the receiving one — with the names, never a
+value. The three wire shapes are `packages/protocol/src/lib/secret-clone.ts`; the two halves are
+`SecretImportService` and `SecretExportService` in `packages/daemon/src/lib/secrets/clone.ts`.
+
+**The export is the sixth vault holder**, and it keeps the rule the other five keep: it returns nothing
+a caller of that daemon can open. A sealed bundle is not a secret value in this document's sense — no
+route, command or API still returns one, and `SecretDirectory` still has no getter.
+
+### Who may do it
+
+All three routes are `secrets` / `configure` ([grants.md](grants.md)), so a device switched off on that
+axis can do none of them. On top of that, **sealing for another machine wants a passkey proved for that
+act alone, every time** — an unlocked device is asked again, whatever `stepUpOnActions` says, exactly
+like adding a device (`clone-secrets` in `STEP_UP_ACTS`; owner decision 2026-10-20: "require the passkey
+again"). The owner at the machine — `fy` with the host's admin token — is not asked, as everywhere.
+
+### What it protects against, and what it does not
+
+- **A value in the browser, a relay, a log or a screen.** The browser carries ciphertext under a key it
+  never sees; a relay in the path sees less than that.
+- **A bundle used twice, used late, or used somewhere else.** Single use, five minutes, and bound to one
+  import on one machine.
+- **A copy nobody meant.** A passkey on the sending machine for each copy, and a record on both ends.
+
+It does NOT protect against:
+
+- **A compromised sending daemon.** It holds the values; it can send them anywhere. That was already
+  game over.
+- **A device that may confirm the copy, choosing where it goes.** The sending machine proves only that
+  whoever holds the identity key the offer's daemon id fingerprints asked for these values — not that
+  the identity is a machine **you** own. A device that can pass this passkey could hand the sender an
+  offer from an identity of its own. That device already holds `secrets` on the sending machine and could
+  run `fy secret use --with KEY -- sh -c 'echo $KEY'`, so this opens no new door; the receiving daemon id is in
+  the bundle and the import id in both security logs.
+- **The receiving machine.** Once copied, a secret is that machine's, under that machine's threat model.
 
 ## Speed-up keys: the fifth holder
 

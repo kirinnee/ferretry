@@ -219,6 +219,7 @@ describe('the passkey step-up wire', () => {
     // Assert
     should(acts).containEql('loosen-config');
     should(stepUp.STEP_UP_ACTS.loosenConfig).equal('loosen-config');
+    should(stepUp.STEP_UP_ACTS.cloneSecrets).equal('clone-secrets');
     should(actual).deepEqual(acts.map(() => true));
     should(
       stepUp.StepUpDemandSchema.safeParse({ capability: 'fleet', axis: 'configure', act: 'loosen-everything' }).success,

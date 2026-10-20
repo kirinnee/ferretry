@@ -171,6 +171,7 @@ export function CloneNeedsList({
   machineName,
   signIn,
   onAdd,
+  copy,
 }: {
   readonly needs: readonly CloneNeed[];
   readonly machineName: string;
@@ -178,10 +179,13 @@ export function CloneNeedsList({
   readonly signIn?: (need: CloneNeed) => ReactNode;
   /** Store one value on this machine. Resolves to a sentence on failure, `null` when stored. */
   readonly onAdd: (name: string, value: string) => Promise<string | null>;
+  /** Copying secrets from the source, explicitly and by name (docs/secrets.md); absent offers none. */
+  readonly copy?: ReactNode;
 }) {
   const sentence = needsSentence(needs);
   return (
     <SetupSection title="Never copied: secrets and login tokens" name="clone-needs">
+      {copy}
       {needs.length === 0 ? (
         <p className="m-0 text-cell text-muted" data-clone-needs-none="">
           The copied settings need no secret and no sign-in.

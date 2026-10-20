@@ -1,24 +1,38 @@
 import {
   PutSecretRequestSchema,
-  SecretNameSchema,
-  SecretUseRequestSchema,
+  type SecretCloneRefusal,
+  SecretExportRequestSchema,
+  SecretExportResponseSchema,
+  SecretImportCompleteRequestSchema,
+  type SecretImportId,
+  SecretImportIdSchema,
+  SecretImportOfferSchema,
+  SecretImportResultSchema,
   type SecretName,
+  SecretNameSchema,
   type SecretSummary,
+  SecretUseRequestSchema,
+  STEP_UP_ACTS,
+  STEP_UP_REQUIRED_CODE,
+  type StepUpRequiredBody,
 } from '@ferretry/protocol';
 import { parseBody } from '../../api/body.ts';
 import type { CapabilityDemand } from '../../api/capability.ts';
 import { ApiError } from '../../api/error.ts';
-import { decodeParameter, type ApiResponse } from '../../api/http.ts';
+import { type ApiResponse, decodeParameter } from '../../api/http.ts';
 import { jsonResponse } from '../../api/responses.ts';
 import type { ApiRoute, RouteContext } from '../../api/route.ts';
 import {
+  SecretCloneError,
+  type SecretDirectory,
+  type SecretExportService,
+  type SecretImportService,
+  type SecretReferenceSource,
   SecretStoreError,
   SecretUseError,
-  UnknownSecretError,
-  secretListView,
-  type SecretDirectory,
-  type SecretReferenceSource,
   type SecretUseService,
+  secretListView,
+  UnknownSecretError,
 } from '../../secrets/index.ts';
 
 /**
@@ -63,11 +77,23 @@ const USE_STATUS: Readonly<Record<SecretUseError['refusal'], number>> = {
   unknown_secret: 404,
 };
 
+/** How each clone refusal answers. An unreadable identity is this daemon's fault, so it is a 503. */
+const CLONE_STATUS: Readonly<Record<SecretCloneRefusal, number>> = {
+  identity_unavailable: 503,
+  offer_invalid: 400,
+  offer_expired: 410,
+  same_machine: 400,
+  import_unknown: 404,
+  import_spent: 409,
+  bundle_invalid: 400,
+};
+
 /** Re-raises a domain failure as its HTTP answer, and anything else as itself so a genuine bug is
  *  still a 500 rather than being reported as the caller's fault. */
 function reraise(error: unknown): never {
   if (error instanceof UnknownSecretError)
     throw new ApiError(404, `this daemon holds no secret named ${error.names.join(', ')}`, 'unknown_secret');
+  if (error instanceof SecretCloneError) throw new ApiError(CLONE_STATUS[error.refusal], error.message, error.refusal);
   if (error instanceof SecretUseError) throw new ApiError(USE_STATUS[error.refusal], error.message, error.refusal);
   if (error instanceof SecretStoreError) throw new ApiError(STORE_STATUS[error.failure], error.message, error.failure);
   throw error;
@@ -117,6 +143,62 @@ async function use(uses: SecretUseService, context: RouteContext): Promise<ApiRe
   }
 }
 
+/** The import id in the path, validated as one this daemon could ever have minted. */
+function pathImportId(context: RouteContext): SecretImportId {
+  const parsed = SecretImportIdSchema.safeParse(decodeParameter(context.params.get('importId') ?? '') ?? '');
+  if (!parsed.success) throw new ApiError(404, 'no such secret import', 'import_unknown');
+  return parsed.data;
+}
+
+async function openImport(imports: SecretImportService): Promise<ApiResponse> {
+  try {
+    return jsonResponse(SecretImportOfferSchema.parse(await imports.open()), 201);
+  } catch (error) {
+    return reraise(error);
+  }
+}
+
+async function completeImport(imports: SecretImportService, context: RouteContext): Promise<ApiResponse> {
+  const importId = pathImportId(context);
+  const { bundle } = await parseBody(context.request, SecretImportCompleteRequestSchema);
+  try {
+    return jsonResponse(SecretImportResultSchema.parse(await imports.complete(importId, bundle)));
+  } catch (error) {
+    return reraise(error);
+  }
+}
+
+/**
+ * Sealing secrets for another machine.
+ *
+ * THE VALUES LEAVE THIS DAEMON, so a governed caller proves a passkey for THIS ACT, every time — even an
+ * unlocked device, whatever `stepUpOnActions` says, exactly like adding a device (owner decision
+ * 2026-10-20: "require the passkey again"). The owner at the machine is asked for nothing: it already has
+ * the machine (B4). The governance is the boundary's, never re-derived here; its absence refuses.
+ */
+async function exportSecrets(exports: SecretExportService, context: RouteContext): Promise<ApiResponse> {
+  if (context.governance === undefined)
+    throw new ApiError(500, 'this daemon cannot say who is asking, so it is refusing', 'internal_error');
+  const importId = pathImportId(context);
+  const request = await parseBody(context.request, SecretExportRequestSchema);
+  if (context.governance.governed && context.presentation?.freshStepUp !== true)
+    return jsonResponse(
+      {
+        error: 'copying secrets to another machine needs a passkey confirmation for it, from this device',
+        code: STEP_UP_REQUIRED_CODE,
+        demand: { ...SECRETS_CONFIGURE, act: STEP_UP_ACTS.cloneSecrets },
+      } satisfies StepUpRequiredBody,
+      403,
+    );
+  try {
+    const sealed = SecretExportResponseSchema.parse(await exports.seal(importId, request));
+    context.spendFreshStepUp?.();
+    return jsonResponse(sealed);
+  } catch (error) {
+    return reraise(error);
+  }
+}
+
 const SECRETS_USE: CapabilityDemand = { capability: 'secrets', axis: 'use' };
 const SECRETS_CONFIGURE: CapabilityDemand = { capability: 'secrets', axis: 'configure' };
 
@@ -128,6 +210,10 @@ export interface SecretSubsystem {
   readonly references: SecretReferenceSource;
   /** Use-without-read. Holds the vault; returns only a child's scrubbed output. */
   readonly uses: SecretUseService;
+  /** The TARGET's half of copying secrets between machines. Write-only, like `directory`. */
+  readonly imports: SecretImportService;
+  /** The SOURCE's half: holds the vault, answers only ciphertext sealed to another machine. */
+  readonly exports: SecretExportService;
 }
 
 /**
@@ -177,6 +263,33 @@ export function secretRoutes(subsystem: SecretSubsystem): readonly ApiRoute[] {
       capability: SECRETS_CONFIGURE,
       noStore: true,
       handle: async context => await remove(subsystem.directory, context),
+    },
+    // COPYING TO ANOTHER MACHINE (docs/secrets.md). Three routes over two daemons, all `configure`: the
+    // target opens an import and later files a bundle into its store; the source seals chosen values to
+    // that import. None of them answers a value — the export answers ciphertext only the target opens.
+    {
+      method: 'POST',
+      path: '/v1/secrets/imports',
+      minimum: 'operator',
+      capability: SECRETS_CONFIGURE,
+      noStore: true,
+      handle: async () => await openImport(subsystem.imports),
+    },
+    {
+      method: 'POST',
+      path: '/v1/secrets/imports/:importId',
+      minimum: 'operator',
+      capability: SECRETS_CONFIGURE,
+      noStore: true,
+      handle: async context => await completeImport(subsystem.imports, context),
+    },
+    {
+      method: 'POST',
+      path: '/v1/secrets/exports/:importId',
+      minimum: 'operator',
+      capability: SECRETS_CONFIGURE,
+      noStore: true,
+      handle: async context => await exportSecrets(subsystem.exports, context),
     },
   ];
 }
