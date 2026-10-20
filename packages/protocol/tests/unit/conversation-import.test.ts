@@ -167,3 +167,30 @@ describe('conversation import windows', () => {
     should(imports.adoptionBatches([])).eql([]);
   });
 });
+
+describe('a conversation’s folder as a row names it', () => {
+  it('is the folder’s own name, never a path', () => {
+    should(imports.conversationFolder('/work/api/services/billing')).eql({ name: 'billing', scratch: false });
+    should(imports.conversationFolder('/shop/')).eql({ name: 'shop', scratch: false });
+    should(imports.conversationFolder('C:\\work\\shop')).eql({ name: 'shop', scratch: false });
+    should(imports.conversationFolder('/')).eql({ name: '/', scratch: false });
+    should(imports.conversationFolder('')).eql({ name: undefined, scratch: false });
+  });
+
+  it('marks a temp or scratch folder scratch, naming it only by a name a person chose', () => {
+    should(
+      imports.conversationFolder(
+        '/tmp/claude-1000/-home-owner-work-shop/d711c5af-2c1e-4b7a-9d3e-0f6a1b2c3d4e/scratchpad',
+      ),
+    ).eql({ name: undefined, scratch: true });
+    should(imports.conversationFolder('/tmp/claude-1000/wt-cart')).eql({ name: 'wt-cart', scratch: true });
+    should(imports.conversationFolder('/private/var/folders/x1/T/0123456789abcdef')).eql({
+      name: undefined,
+      scratch: true,
+    });
+    should(imports.conversationFolder('/tmp')).eql({ name: 'tmp', scratch: true });
+    should(imports.conversationFolder('/home/owner/notes/scratch')).eql({ name: undefined, scratch: true });
+    should(imports.conversationFolder('/home/owner/Scratch/ideas')).eql({ name: 'ideas', scratch: true });
+    should(imports.conversationFolder('/home/owner/tmpfiles')).eql({ name: 'tmpfiles', scratch: false });
+  });
+});

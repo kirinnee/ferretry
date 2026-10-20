@@ -157,21 +157,27 @@ describe('ContinueConversation over all conversations', () => {
     expect(text(`${row} [data-conversation-first]`)).toBe('Fix the shop-cart page');
   });
 
-  it('lists Ferretry’s own conversations: first message and age, the latest message, then where', async () => {
+  it('lists Ferretry’s own conversations: first message and age, the latest message, then its marks', async () => {
     const sent: Sent[] = [];
     await open({ sent });
-    expect(listed(sent)).toEqual([ALL]);
-    expect(view?.container.querySelector('[data-segmented="continue-source"]')).toBeNull();
-    expect(text('[data-continue-count]')).toBe('3 matches');
-    const row = text('[data-continue-row="shop-cart"]');
-    expect(row).toContain('Fix the shop-cart page1d ago');
-    expect(text('[data-continue-row="shop-cart"] [data-conversation-latest]')).toBe('Latest: and now the tests');
-    expect(row).toContain('work/shop· Claude · 4 turns· Sonnet 5.5');
-    expect(find('[data-continue-row="shop-cart"]').getAttribute('aria-expanded')).toBe('false');
+    expect(listed(sent)).toEqual([ALL, KEPT]);
+    expect(find('[data-segmented="source"] [data-segment="all"]').getAttribute('aria-pressed')).toBe('true');
+    expect(text('[data-continue-count]')).toBe('3 conversations');
+    const row = '[data-continue-row="shop-cart"]';
+    expect(text(`${row} [data-conversation-age]`)).toBe('1d ago');
+    expect(text(`${row} .fy-convo-title`)).toBe('Fix the shop-cart page');
+    expect(text(`${row} [data-conversation-latest]`)).toBe('Latest: and now the tests');
+    expect(text(`${row} [data-conversation-harness="claude"]`)).toBe('Claude');
+    expect(text(`${row} [data-conversation-folder]`)).toBe('shop');
+    expect(text(row)).toContain('4 turns · Sonnet 5.5');
+    expect(find(row).getAttribute('aria-expanded')).toBe('false');
     expect(view?.container.querySelectorAll('[data-continue-row]')).toHaveLength(3);
     expect(view?.container.querySelector('[data-continue-row="api-codex"] [data-conversation-latest]')).toBeNull();
-    expect(text('[data-continue-row="api-codex"]')).toContain('· Codex ·');
+    expect(text('[data-continue-row="api-codex"] [data-conversation-harness="codex"]')).toBe('Codex');
     expect(text('[data-continue-row="api-codex"]')).not.toContain('Sonnet');
+    expect(text('[data-continue-row="notes-kept"] [data-conversation-ferret="notes-ferret"]')).toBe(
+      'Ferret notes-ferret',
+    );
   });
 
   it('searches on the daemon with the words, the CLI and the date', async () => {
@@ -179,7 +185,7 @@ describe('ContinueConversation over all conversations', () => {
     await open({ sent });
     await type(find<HTMLInputElement>('[data-continue-search]'), ' shop tests ');
     await settle();
-    await click('[data-segmented="harness"] [data-segment="codex"]');
+    await click('[data-segmented="source"] [data-segment="codex"]');
     await click('[data-segmented="date"] [data-segment="30d"]');
     expect(listed(sent).at(-1)).toBe(
       `${CONVERSATION_IMPORT_PATH}?source=ferretry&harness=codex&q=shop+tests&since=2026-09-13T08%3A00%3A00.000Z&limit=50`,
@@ -187,20 +193,22 @@ describe('ContinueConversation over all conversations', () => {
   });
 
   it('says it is searching, and when nothing matches', async () => {
-    let answer: (value: unknown) => void = () => undefined;
-    await open({ list: () => new Promise(resolve => (answer = resolve)) });
+    const answers: ((value: unknown) => void)[] = [];
+    await open({ list: () => new Promise(resolve => answers.push(resolve)) });
     expect(text('[data-continue-reading]')).toBe('Searching…');
-    await interact(() => answer(listing([])));
+    await interact(() => {
+      for (const answer of answers) answer(listing([]));
+    });
     await settle();
     expect(text('[data-continue-empty]')).toBe('No conversation matches.');
   });
 
-  it('says how many matched when the limit cut the list, and one match in the singular', async () => {
+  it('says how many matched when the limit cut the list, and one in the singular', async () => {
     await open({ list: () => listing([ROWS[0] as ImportableConversation], 120) });
-    expect(text('[data-continue-count]')).toBe('1 most recent of 120 matches');
+    expect(text('[data-continue-count]')).toBe('1 conversation · newest 1 of 120');
     await view?.unmount();
     await open({ list: () => listing([ROWS[0] as ImportableConversation]) });
-    expect(text('[data-continue-count]')).toBe('1 match');
+    expect(text('[data-continue-count]')).toBe('1 conversation');
   });
 
   it('shows a refused search’s sentence', async () => {
@@ -226,7 +234,7 @@ describe('ContinueConversation over all conversations', () => {
 
   it('works on the real clock', async () => {
     await open({ now: false });
-    expect(text('[data-continue-count]')).toBe('3 matches');
+    expect(text('[data-continue-count]')).toBe('3 conversations');
   });
 });
 
@@ -287,7 +295,6 @@ describe('ContinueConversation continuing', () => {
     const navigated: string[] = [];
     const resumed: string[] = [];
     await open({ navigated, resumed, sessions: SESSIONS });
-    await click('[data-segmented="continue-source"] [data-segment="conversations"]');
     await click('[data-continue-row="notes-kept"]');
     expect(text(action('conversation:claude:notes-kept'))).toBe('Resume ferret');
     await click(action('conversation:claude:notes-kept'));
@@ -378,8 +385,8 @@ describe('ContinueConversation continuing', () => {
   });
 });
 
-describe('ContinueConversation over Ferretry sessions', () => {
-  it('heads a ferret by its own name, with the name of its conversation under it', async () => {
+describe('ContinueConversation marks and the Ferretry filter', () => {
+  it('marks a conversation a ferret keeps with the ferret, its state and its CLI, under the conversation’s name', async () => {
     await open({
       sessions: SESSIONS,
       list: () =>
@@ -387,61 +394,64 @@ describe('ContinueConversation over Ferretry sessions', () => {
           conversation('notes-kept', { project: '/work/notes', adoptedBy: 'notes-ferret', name: 'Notes cleanup' }),
         ]),
     });
-    const row = '[data-continue-session="notes-ferret"]';
-    expect(text(`${row} [data-conversation-name]`)).toBe('Mika');
-    expect(text(`${row} [data-conversation-first]`)).toBe('Notes cleanup');
+    const row = '[data-continue-row="notes-kept"]';
+    expect(text(`${row} [data-conversation-name]`)).toBe('Notes cleanup');
+    expect(text(`${row} [data-conversation-first]`)).toBe('Fix the notes-kept page');
+    expect(text(`${row} [data-conversation-ferret="notes-ferret"]`)).toBe('Ferret Mika · stopped');
+    expect(text(`${row} [data-conversation-harness="claude"]`)).toBe('Claude');
+    expect(find(`${row} .fy-convo-avatar__dot`).getAttribute('data-state')).toBe('stopped');
+    expect(text(`${row} .fy-convo-avatar__initial`)).toBe('M');
   });
 
-  it('starts on the stopped ferrets, newest first, each said by the conversation it keeps', async () => {
+  it('lists the stopped ferrets the listing does not describe in every source that fits', async () => {
+    await open({ sessions: SESSIONS });
+    expect(text('[data-continue-count]')).toBe('4 conversations');
+    const bare = '[data-continue-session="api-ferret"]';
+    expect(text(`${bare} .fy-convo-title`)).toBe('api');
+    expect(text(`${bare} [data-conversation-age]`)).toBe('1d ago');
+    expect(text(`${bare} [data-conversation-ferret="api-ferret"]`)).toBe('Ferret api · failed');
+    expect(text(`${bare} [data-conversation-harness="codex"]`)).toBe('Codex');
+    expect(find(`${bare} .fy-convo-avatar__dot`).getAttribute('data-state')).toBe('failed');
+    await click('[data-segmented="source"] [data-segment="claude"]');
+    expect(view?.container.querySelector(bare)).toBeNull();
+  });
+
+  it('narrows Ferretry to what ferrets keep and the stopped ferrets, searching the ferret’s name too', async () => {
     const sent: Sent[] = [];
     await open({ sent, sessions: SESSIONS });
-    expect(find('[data-segmented="continue-source"] [data-segment="sessions"]').getAttribute('aria-pressed')).toBe(
-      'true',
+    await click('[data-segmented="source"] [data-segment="ferretry"]');
+    expect(listed(sent)).toEqual([ALL, KEPT]);
+    expect(text('[data-continue-count]')).toBe('2 conversations');
+    const rows = [...(view?.container.querySelectorAll('[data-continue-row], [data-continue-session]') ?? [])];
+    expect(rows.map(row => row.getAttribute('data-continue-row') ?? row.getAttribute('data-continue-session'))).toEqual(
+      ['notes-kept', 'api-ferret'],
     );
-    expect(listed(sent)).toEqual([KEPT]);
-    expect(text('[data-continue-count]')).toBe('2 stopped ferrets');
-    const rows = [...(view?.container.querySelectorAll('[data-continue-session]') ?? [])];
-    expect(rows.map(row => row.getAttribute('data-continue-session'))).toEqual(['notes-ferret', 'api-ferret']);
-    expect(text('[data-continue-session="notes-ferret"]')).toContain('Mika2h agoFix the notes-kept page');
-    expect(text('[data-continue-session="api-ferret"]')).toContain('api1d ago');
-    expect(text('[data-continue-session="api-ferret"]')).toContain('work/api· Codex · failed');
+    await type(find<HTMLInputElement>('[data-continue-search]'), 'mika');
+    await settle();
+    expect(text('[data-continue-count]')).toBe('1 conversation');
+    await type(find<HTMLInputElement>('[data-continue-search]'), 'nothing like it');
+    await settle();
+    expect(text('[data-continue-empty]')).toBe('No conversation matches.');
   });
 
-  it('resumes a stopped ferret in place, with its preview first', async () => {
+  it('resumes a bare stopped ferret in place, saying it has no preview and why a resume failed', async () => {
     const navigated: string[] = [];
     const resumed: string[] = [];
-    const sent: Sent[] = [];
+    const failures = [new Error('The pane would not open.'), new Error('')];
     let release: () => void = () => undefined;
     const gate = new Promise<void>(resolve => (release = resolve));
     await open({
       navigated,
-      sent,
       sessions: SESSIONS,
       resume: async id => {
+        const failure = failures.shift();
+        if (failure !== undefined) throw failure;
         await gate;
         resumed.push(id);
       },
     });
-    await click('[data-continue-session="notes-ferret"]');
-    expect(sent.at(-1)?.path).toBe(`${CONVERSATION_IMPORT_PATH}/claude/notes-kept/preview`);
-    expect(text('[data-continue-preview="session:notes-ferret"]')).toContain('Fix the cart total');
-    await click(action('session:notes-ferret'));
-    expect(text(action('session:notes-ferret'))).toBe('Resuming…');
-    await interact(() => release());
-    await settle();
-    expect(resumed).toEqual(['notes-ferret']);
-    expect(navigated).toEqual(['/d/studio/session/notes-ferret']);
-  });
-
-  it('says when there is no preview, and when a resume fails', async () => {
-    const failures = [new Error('The pane would not open.'), new Error('')];
-    await open({
-      sessions: SESSIONS,
-      resume: async () => {
-        throw failures.shift();
-      },
-    });
     await click('[data-continue-session="api-ferret"]');
+    expect(find('[data-continue-session="api-ferret"]').closest('li')?.hasAttribute('data-open')).toBe(true);
     expect(text('[data-continue-preview="session:api-ferret"]')).toContain(
       'No preview of this ferret’s conversation is available.',
     );
@@ -449,45 +459,49 @@ describe('ContinueConversation over Ferretry sessions', () => {
     expect(text('[data-continue-issue="session:api-ferret"]')).toBe('The pane would not open.');
     await click(action('session:api-ferret'));
     expect(text('[data-continue-issue="session:api-ferret"]')).toBe('The ferret could not resume.');
+    await click(action('session:api-ferret'));
+    expect(text(action('session:api-ferret'))).toBe('Resuming…');
+    await interact(() => release());
+    await settle();
+    expect(resumed).toEqual(['api-ferret']);
+    expect(navigated).toEqual(['/d/studio/session/api-ferret']);
   });
 
-  it('searches the ferrets here by name, words, CLI and date', async () => {
-    await open({ sessions: SESSIONS });
-    await type(find<HTMLInputElement>('[data-continue-search]'), 'mika');
-    await settle();
-    expect([...(view?.container.querySelectorAll('[data-continue-session]') ?? [])]).toHaveLength(1);
-    await type(find<HTMLInputElement>('[data-continue-search]'), '');
-    await settle();
-    await click('[data-segmented="harness"] [data-segment="codex"]');
-    expect(text('[data-continue-count]')).toBe('1 stopped ferret');
-    await click('[data-segmented="harness"] [data-segment="claude"]');
-    await click('[data-segmented="date"] [data-segment="7d"]');
-    expect(text('[data-continue-count]')).toBe('1 stopped ferret');
-    await type(find<HTMLInputElement>('[data-continue-search]'), 'nothing like it');
-    await settle();
-    expect(text('[data-continue-empty]')).toBe('No stopped ferret matches.');
-  });
-
-  it('waits for the ferrets, lists them undescribed when the listing is refused, and says when none is stopped', async () => {
+  it('waits for the ferrets, lists them bare when the kept listing is refused, and says when Ferretry has none', async () => {
     await open({ sessions: null });
     expect(text('[data-continue-reading]')).toBe('Searching…');
     await view?.unmount();
     await open({ sessions: SESSIONS, list: () => new FyHttpError('no', 403, 'forbidden') });
+    await click('[data-segmented="source"] [data-segment="ferretry"]');
     expect(text('[data-continue-session="notes-ferret"]')).toContain('Mika');
     await view?.unmount();
-    await open({ sessions: [SESSIONS[2] as SessionView] });
-    expect(text('[data-continue-empty]')).toBe('No ferret on this machine is stopped. A running one is in Sessions.');
+    await open({ sessions: [SESSIONS[2] as SessionView], list: () => listing([]) });
+    await click('[data-segmented="source"] [data-segment="ferretry"]');
+    expect(text('[data-continue-empty]')).toBe('No ferret keeps a conversation yet, and none is stopped.');
   });
 
-  it('switches to all conversations and back, closing the open row', async () => {
-    const sent: Sent[] = [];
-    await open({ sent, sessions: SESSIONS });
-    await click('[data-continue-session="notes-ferret"]');
-    await click('[data-segmented="continue-source"] [data-segment="conversations"]');
-    expect(listed(sent)).toEqual([KEPT, ALL]);
+  it('names a folder by its own name and marks a throwaway one scratch, never a hash path', async () => {
+    await open({
+      list: () =>
+        listing([
+          conversation('scratch-run', {
+            project: '/tmp/claude-1000/-work-shop/d711c5af-2c1e-4b7a-9d3e-0f6a1b2c3d4e/scratchpad',
+          }),
+          conversation('worktree', { project: '/tmp/claude-1000/wt-cart', daysAgo: 2 }),
+        ]),
+    });
+    const scratch = find('[data-continue-row="scratch-run"] [data-conversation-folder]');
+    expect(scratch.getAttribute('data-conversation-folder')).toBe('scratch');
+    expect(scratch.textContent).toBe('scratch');
+    expect(scratch.getAttribute('title')).toContain('/scratchpad');
+    expect(text('[data-continue-row="worktree"] [data-conversation-folder="scratch"]')).toBe('scratchwt-cart');
+  });
+
+  it('closes the open row when the source changes', async () => {
+    await open({ sessions: SESSIONS });
+    await click('[data-continue-row="shop-cart"]');
+    expect(view?.container.querySelector('[data-continue-preview]')).not.toBeNull();
+    await click('[data-segmented="source"] [data-segment="claude"]');
     expect(view?.container.querySelector('[data-continue-preview]')).toBeNull();
-    expect(find<HTMLInputElement>('[data-continue-search]').placeholder).toBe('Name, words or folder');
-    await click('[data-segmented="continue-source"] [data-segment="sessions"]');
-    expect(find<HTMLInputElement>('[data-continue-search]').placeholder).toBe('Name, words or folder');
   });
 });

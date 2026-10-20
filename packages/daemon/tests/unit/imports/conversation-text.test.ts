@@ -10,11 +10,14 @@ import {
   handoffPointerPath,
   handoffPointers,
   isReadableHandoff,
+  isWrapperTitle,
   recentExchanges,
   spokenMessages,
   spokenText,
+  titleWords,
   truncateText,
   withoutDeliveryWrappers,
+  wrapperOnlyWords,
 } from '../../../src/lib/imports/conversation-text.ts';
 import type { TranscriptEvent } from '../../../src/lib/transcript/index.ts';
 
@@ -197,5 +200,92 @@ describe('the last exchanges', () => {
     should(message?.text.endsWith('…')).be.true();
     should(truncateText('short', 10)).equal('short');
     should(truncateText('abcdefghij', 5)).equal('abcd…');
+  });
+});
+
+describe('a title generated from a wrapper', () => {
+  const documents = new Map([[COORDINATOR_TURN, COORDINATOR_DOCUMENT]]);
+
+  it('should compare titles on lower-case words, dropping short words and a plural s', () => {
+    // Act & Assert
+    should(titleWords('Turn-001.md instructions for a Ferretry file')).deepEqual([
+      'turn',
+      '001',
+      'instruction',
+      'for',
+      'ferretry',
+      'file',
+    ]);
+    should(titleWords('')).deepEqual([]);
+  });
+
+  it('should collect the words only a pointer, its path and its document’s contract used', () => {
+    // Act
+    const words = wrapperOnlyWords(
+      [user(pointer(COORDINATOR_TURN)), user('Fix the cart'), assistant('turn')],
+      documents,
+    );
+
+    // Assert
+    should([...words]).containDeep([
+      'read',
+      'file',
+      'coordinator',
+      'turn',
+      '001',
+      'instruction',
+      'automode',
+      'contract',
+    ]);
+    should(words.has('fix')).be.false();
+    should(words.has('flaky')).be.false();
+    should(wrapperOnlyWords([user('Fix the turn instructions file')]).size).equal(0);
+  });
+
+  it('should count an unread pointer and a harness block as wrappers too', () => {
+    // Act
+    const words = wrapperOnlyWords([
+      user(pointer(FERRETRY_TURN)),
+      user('# AGENTS.md instructions for /work/api\n\n<INSTRUCTIONS>\n- Use direnv\n</INSTRUCTIONS>'),
+      user('Ship it'),
+    ]);
+
+    // Assert
+    should([...words]).containDeep(['ferretry', 'session', 'turn', '001', 'agent', 'direnv']);
+    should(words.has('ship')).be.false();
+  });
+
+  it('should call a title the wrapper’s only when most of its words are the wrapper’s', () => {
+    // Arrange
+    const words = wrapperOnlyWords([user(pointer(FERRETRY_TURN)), user('Fix the flaky upload test')]);
+
+    // Act & Assert
+    should(isWrapperTitle('Ferretry session turn-001 file', words)).be.true();
+    should(isWrapperTitle('Turn-001.md instructions', words)).be.true();
+    should(isWrapperTitle('Flaky upload test fix', words)).be.false();
+    should(isWrapperTitle('Upload test: turn file', words)).be.false();
+    should(isWrapperTitle('Ferretry session turn-001 file', new Set())).be.false();
+    should(isWrapperTitle('', words)).be.false();
+  });
+});
+
+describe('a harness’s injected blocks', () => {
+  it('should drop Codex’s AGENTS.md and environment blocks and Claude Code’s command wrappers, closed ones only', () => {
+    // Act & Assert
+    should(
+      withoutDeliveryWrappers(
+        '# AGENTS.md instructions for /work/api\n\n<INSTRUCTIONS>\n- Use direnv\n</INSTRUCTIONS>\n\n<environment_context>\n  <cwd>/work/api</cwd>\n</environment_context>\n\nAdd retries',
+      ),
+    ).equal('Add retries');
+    should(spokenText('<user_instructions>\nBe terse.\n</user_instructions>')).be.undefined();
+    should(
+      spokenText(
+        '<command-name>/model</command-name>\n<command-message>model</command-message>\n<command-args></command-args>',
+      ),
+    ).be.undefined();
+    should(spokenText('<local-command-stdout>Set model to Opus</local-command-stdout>')).be.undefined();
+    should(spokenText('# AGENTS.md instructions for my repo: what should they say?')).equal(
+      '# AGENTS.md instructions for my repo: what should they say?',
+    );
   });
 });

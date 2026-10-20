@@ -130,11 +130,11 @@ describe('ConversationPicker rows', () => {
     ]);
     expect(all('input[type="checkbox"]:checked')).toHaveLength(0);
     expect(find<HTMLInputElement>('[data-conversation-keep="notes-kept"]').disabled).toBe(true);
-    expect(text('[data-conversation-adopted="notes-ferret"]')).toBe('Kept as notes-ferret');
+    expect(text('[data-conversation-adopted="notes-ferret"] [data-conversation-ferret]')).toBe('Ferret notes-ferret');
     expect(text('[data-conversation-row="shop-cart"]')).toContain(
-      'Fix the shop-cart page1d agoLatest: and the testswork/shop· Claude · 4 turns· Sonnet 5.5',
+      'Fix the shop-cart page1d agoLatest: and the testsClaudeshop4 turns · Sonnet 5.5',
     );
-    expect(text('[data-conversation-row="shop-old"]')).toContain('· 1 turn');
+    expect(text('[data-conversation-row="shop-old"]')).toContain('1 turn ·');
     expect(text('[data-conversation-row="notes-day"]')).not.toContain('Haiku');
     expect(find<HTMLButtonElement>('[data-conversations-keep]').disabled).toBe(true);
     expect(text('[data-conversations-keep]')).toBe('Keep 0 as ferrets');

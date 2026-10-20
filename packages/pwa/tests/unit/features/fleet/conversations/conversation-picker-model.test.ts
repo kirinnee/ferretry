@@ -5,7 +5,7 @@ import {
   conversationHeadline,
   EMPTY_FILTER,
   EMPTY_SELECTION,
-  folderLabel,
+  ferretState,
   foundLine,
   keepButtonLabel,
   listingPath,
@@ -41,22 +41,22 @@ describe('the headline of a row', () => {
     expect(conversationHeadline(conversation('a', { preview: '  ' })).headline).toBe('No message preview');
   });
 
-  it('is the ferret when it is one, with the conversation name under it, or else the first message', () => {
-    expect(conversationHeadline(conversation('a', { name: 'Cart bugfix' }), 'Mika')).toMatchObject({
-      headline: 'Mika',
-      secondary: 'Cart bugfix',
-    });
-    expect(conversationHeadline(conversation('a', { name: 'Mika', preview: 'Fix the cart' }), 'Mika')).toMatchObject({
-      secondary: 'Fix the cart',
-    });
-    expect(conversationHeadline(conversation('a', { preview: 'Fix the cart' }), 'Mika')).toMatchObject({
-      headline: 'Mika',
-      secondary: 'Fix the cart',
-    });
-    expect(conversationHeadline(conversation('a', { preview: ' ' }), 'Mika')).toEqual({
-      headline: 'Mika',
+  it('never lets a ferret stand in for what the conversation is about', () => {
+    expect(conversationHeadline(conversation('a', { name: 'Cart bugfix', preview: ' ' }))).toEqual({
+      headline: 'Cart bugfix',
       named: true,
     });
+  });
+});
+
+describe('a ferret’s state dot', () => {
+  it('is live while it runs, stopped once it ends, failed when it failed, and absent when unread', () => {
+    expect(ferretState('running')).toBe('live');
+    expect(ferretState('thinking')).toBe('live');
+    expect(ferretState('stopped')).toBe('stopped');
+    expect(ferretState('completed')).toBe('stopped');
+    expect(ferretState('failed')).toBe('failed');
+    expect(ferretState(undefined)).toBeUndefined();
   });
 });
 
@@ -103,14 +103,6 @@ describe('visible rows and groups', () => {
   it('applies the search and the date together', () => {
     const shown = visibleConversations(many, { text: 'c2', date: '7d', showAll: false }, NOW);
     expect(shown.rows.map(row => row.id)).toEqual(['c24', 'c23', 'c22', 'c21', 'c20']);
-  });
-
-  it('names a folder by its last two segments', () => {
-    expect(folderLabel('/work/api/services/billing')).toBe('services/billing');
-    expect(folderLabel('/work/shop')).toBe('work/shop');
-    expect(folderLabel('/shop/')).toBe('shop');
-    expect(folderLabel('C:\\work\\shop')).toBe('work/shop');
-    expect(folderLabel('/')).toBe('/');
   });
 
   it('says how many it found and how many are already kept', () => {

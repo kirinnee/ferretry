@@ -15,16 +15,18 @@ import {
   type SessionStatus,
 } from '@ferretry/protocol';
 import type { TranscriptEvent, TranscriptParser } from '../transcript/index.ts';
-import { codexIndexNames, transcriptName } from './conversation-name.ts';
+import { codexIndexNames, transcriptNames } from './conversation-name.ts';
 import {
   HANDOFF_READ_MAX_BYTES,
   type HandoffDocuments,
   type HandoffScope,
   handoffPointers,
   isReadableHandoff,
+  isWrapperTitle,
   NO_HANDOFF_SCOPE,
   recentExchanges,
   spokenMessages,
+  wrapperOnlyWords,
 } from './conversation-text.ts';
 
 /**
@@ -155,7 +157,9 @@ export function conversationHead(
 
 /**
  * The listing row a transcript describes, or why it describes none. Its preview and latest message are
- * what the owner said (`conversation-text.ts`), with each hand-off pointer read from `documents`.
+ * what the owner said (`conversation-text.ts`), with each hand-off pointer read from `documents`. Its
+ * name is the owner's, else the CLI's generated one unless that title describes the wrapper it was
+ * generated from (a turn-file pointer, an AGENTS.md block) — then the first real message heads it.
  */
 export function describeConversation(
   candidate: { readonly harness: Harness; readonly nameId: string | undefined },
@@ -172,7 +176,12 @@ export function describeConversation(
   const spoken = spokenMessages(events, documents);
   const first = spoken[0];
   if (first === undefined) return undefined;
-  const name = transcriptName(candidate.harness, text);
+  const names = transcriptNames(candidate.harness, text);
+  const generated =
+    names.generated === undefined || isWrapperTitle(names.generated, wrapperOnlyWords(events, documents))
+      ? undefined
+      : names.generated;
+  const name = names.chosen ?? generated;
   const latest = spoken.at(-1);
   let model: string | undefined;
   let last: string | undefined;
