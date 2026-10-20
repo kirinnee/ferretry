@@ -382,6 +382,33 @@ describe('SendMessageController --wait', () => {
     should(unsureIo.io.err.join('\n')).match(/unconfirmed \(timeout\) — it may still have landed/);
   });
 
+  it('should fail a wait on a send a person cancelled, saying what the cancel did', async () => {
+    // Arrange
+    const api = new RecordingApi({
+      send: tracked(),
+      sendStatus: [row('cancelled', { cancelEffect: 'left_in_queue' })],
+    });
+
+    // Act
+    const failure = await new SendMessageController(
+      api,
+      new FakeFiles(),
+      capturedPresenter().presenter,
+      HERE,
+      WAIT_CLOCK,
+    )
+      .execute('ses-1', { message: 'hi', wait: true })
+      .then(
+        () => undefined,
+        (error: unknown) => error,
+      );
+
+    // Assert
+    should((failure as Error).message).match(/^cancelled by a person — the agent was already holding it/);
+    should(describeFate(row('cancelled'))).match(/it never reached the agent/);
+    should(describeFate(row('accepted', { typedNotSent: true }))).match(/typed into the agent’s composer and not sent/);
+  });
+
   it('should stop waiting after five minutes, and cannot wait on a daemon that names no send', async () => {
     // Arrange
     const slow = new RecordingApi({ send: tracked(), sendStatus: [row('queued')] });

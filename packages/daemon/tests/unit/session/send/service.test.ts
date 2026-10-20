@@ -2,12 +2,16 @@ import { describe, it } from 'bun:test';
 import should from 'should';
 import { type ClockPort, parseSessionId, type SerialExecutor, type SessionId } from '../../../../src/lib/index.ts';
 import {
+  type ComposerClearOutcome,
+  type ComposerSubmitOutcome,
   defaultSessionSendSettings,
   type InboundMessage,
   type OutboundMessage,
   type PeerWaitEnder,
   ReviveRefusedForSend,
   type SendChannel,
+  SendComposerOccupied,
+  type SendHeldAt,
   type SendLaunchGate,
   type SendLedger,
   type SendPaneObservation,
@@ -164,19 +168,41 @@ class FakeTerminal implements SendTerminal {
   }
 
   async deliver(_id: SessionId, text: string): Promise<void> {
+    if (this.occupied !== undefined) throw new SendComposerOccupied(this.occupied);
     this.calls.push('deliver');
     this.typed.push(text);
     if (this.deliverFailure !== undefined) throw this.deliverFailure;
   }
 
   async queue(_id: SessionId, text: string): Promise<SendQueueOutcome> {
+    if (this.occupied !== undefined) throw new SendComposerOccupied(this.occupied);
     this.calls.push('queue');
     this.typed.push(text);
     return this.queueOutcome;
   }
 
-  async holds(): Promise<boolean> {
-    return false;
+  /** Where the pane holds a payload, keyed by its text. */
+  readonly held = new Map<string, SendHeldAt>();
+  heldFailure: Error | undefined;
+  clearOutcome: ComposerClearOutcome = 'cleared';
+  submitOutcome: ComposerSubmitOutcome = 'submitted';
+  /** Thrown by a transport before any key, as the terminal does at an occupied composer. */
+  occupied: string | undefined;
+
+  async heldAt(_id: SessionId, text: string): Promise<SendHeldAt | undefined> {
+    this.calls.push('heldAt');
+    if (this.heldFailure !== undefined) throw this.heldFailure;
+    return this.held.get(text);
+  }
+
+  async clearComposer(): Promise<ComposerClearOutcome> {
+    this.calls.push('clearComposer');
+    return this.clearOutcome;
+  }
+
+  async submitComposer(): Promise<ComposerSubmitOutcome> {
+    this.calls.push('submitComposer');
+    return this.submitOutcome;
   }
 
   async stopActiveTurn(): Promise<SendPaneObservation> {
@@ -870,6 +896,240 @@ describe('re-attempting a send under its original id', () => {
     should((deadRefusal as Error).message).match(/no live agent/);
     should((lostRefusal as Error).message).match(/could not be re-attempted/);
     should([...held.terminal.typed, ...dead.terminal.typed, ...lost.terminal.typed]).be.empty();
+  });
+});
+
+describe('a composer that already holds unsent text', () => {
+  it('refuses a send before accepting anything, quoting the draft and the remedy', async () => {
+    const { service, ledger, terminal } = parts(target(), [pane({ promptReady: false, draft: 'hi' })]);
+
+    const refused = await service.send(request({ message: 'hello' })).catch((error: unknown) => error);
+
+    should(refused).be.instanceof(SendRefused);
+    should((refused as Error).message).match(
+      /already holds unsent text \("hi"\).*Press Enter on it or cancel it first/u,
+    );
+    should(ledger.records.size).equal(0);
+    should(terminal.typed).be.empty();
+  });
+
+  it('refuses on the second look too, after a busy pane stopped being busy, and clips a long draft', async () => {
+    const long = 'x'.repeat(60);
+    const { service } = parts(target(), [pane({ activeWork: true }), pane({ draft: long })]);
+
+    const refused = await service.send(request()).catch((error: unknown) => error);
+
+    should((refused as Error).message).containEql(`"${'x'.repeat(40)}…"`);
+  });
+
+  it('withdraws a fresh send the terminal refused before typing, on both transports', async () => {
+    const idle = parts(target(), [pane({ promptReady: true })]);
+    idle.terminal.occupied = 'hi';
+    const busy = parts(target(), [pane({ activeWork: true })]);
+    busy.terminal.occupied = 'hi';
+
+    const idleRefusal = await idle.service.send(request()).catch((error: unknown) => error);
+    const busyRefusal = await busy.service.send(request()).catch((error: unknown) => error);
+
+    should(idleRefusal).be.instanceof(SendRefused);
+    should(busyRefusal).be.instanceof(SendRefused);
+    should([...idle.ledger.withdrawn, ...busy.ledger.withdrawn]).eql(['send-1', 'send-1']);
+  });
+
+  it('passes a transport failure that is not a refusal straight through', async () => {
+    const built = parts(target(), [pane({ promptReady: true })]);
+    built.terminal.deliverFailure = new Error('tmux went away');
+
+    should((await built.service.send(request()).catch((error: unknown) => error)) as Error).match({
+      message: 'tmux went away',
+    });
+    should(built.ledger.withdrawn).be.empty();
+  });
+});
+
+describe('cancelling a send', () => {
+  async function sent(fate: SendRecord['fate'], extra: Partial<SendRecord> = {}) {
+    const built = parts(target(), [pane({ promptReady: true })]);
+    await built.service.send(request());
+    built.ledger.records.set('send-1', { ...built.ledger.only(), fate, ...extra });
+    return built;
+  }
+
+  it('erases a message typed in the composer and settles it cancelled, journalled with its effect', async () => {
+    const { service, terminal, repository } = await sent('accepted', { typedNotSent: true });
+    terminal.held.set('ship it', 'composer');
+
+    const record = await service.cancel(ID, 'send-1');
+
+    should(record).match({ fate: 'cancelled', fateAt: NOW, cancelEffect: 'cleared' });
+    should(record.typedNotSent).be.undefined();
+    should(terminal.calls).containEql('clearComposer');
+    should(repository.journal_.at(-1)).match({
+      event: 'control.send_cancelled',
+      data: { sendId: 'send-1', from: 'accepted', effect: 'cleared' },
+    });
+  });
+
+  it('leaves the composer alone when it holds more than the message, and says so', async () => {
+    const { service, terminal } = await sent('accepted');
+    terminal.held.set('ship it', 'composer');
+    terminal.clearOutcome = 'foreign';
+
+    should(await service.cancel(ID, 'send-1')).match({ cancelEffect: 'left_in_composer' });
+  });
+
+  it('says a queued message is left with the agent, and one in neither place never reached it', async () => {
+    const queued = await sent('queued');
+    queued.terminal.held.set('ship it', 'queue');
+    const gone = await sent('timed_out');
+    const unreadable = await sent('unaccounted');
+    unreadable.terminal.heldFailure = new Error('no pane');
+    const forRevive = await sent('accepted', { held: true });
+
+    should(await queued.service.cancel(ID, 'send-1')).match({ cancelEffect: 'left_in_queue' });
+    should(await gone.service.cancel(ID, 'send-1')).match({ cancelEffect: 'not_in_pane' });
+    should(await unreadable.service.cancel(ID, 'send-1')).match({ cancelEffect: 'not_in_pane' });
+    should(await forRevive.service.cancel(ID, 'send-1')).match({ cancelEffect: 'not_in_pane' });
+    should(forRevive.terminal.calls).not.containEql('heldAt');
+  });
+
+  it('is idempotent, refuses a delivered or unknown send, and reports a ledger that would not move', async () => {
+    const cancelled = await sent('cancelled', { cancelEffect: 'cleared' });
+    const delivered = await sent('delivered');
+    const withdrawn = await sent('withdrawn');
+    const stuck = await sent('accepted');
+    stuck.ledger.settleRefuses = true;
+
+    should(await cancelled.service.cancel(ID, 'send-1')).match({ fate: 'cancelled', cancelEffect: 'cleared' });
+    should(((await delivered.service.cancel(ID, 'send-1').catch((error: unknown) => error)) as Error).message).match(
+      /already delivered/u,
+    );
+    should(((await withdrawn.service.cancel(ID, 'send-1').catch((error: unknown) => error)) as Error).message).match(
+      /has no send send-1/u,
+    );
+    should(((await stuck.service.cancel(ID, 'send-1').catch((error: unknown) => error)) as Error).message).match(
+      /could not be cancelled/u,
+    );
+  });
+});
+
+describe('pressing Enter for a message typed and not sent', () => {
+  async function typed(extra: Partial<SendRecord> = {}) {
+    const built = parts(target(), [pane({ promptReady: true })]);
+    await built.service.send(request());
+    built.ledger.records.set('send-1', { ...built.ledger.only(), fate: 'accepted', typedNotSent: true, ...extra });
+    built.tracked.length = 0;
+    return built;
+  }
+
+  it('presses once, clears the typed flag, journals it, and asks the tracker to look', async () => {
+    const { service, terminal, repository, tracked } = await typed();
+
+    const record = await service.submit(ID, 'send-1');
+
+    should(record.typedNotSent).be.undefined();
+    should(terminal.calls.filter(call => call === 'submitComposer')).have.length(1);
+    should(repository.journal_.at(-1)).match({ event: 'control.send_submitted', data: { outcome: 'submitted' } });
+    should(tracked).eql([ID]);
+  });
+
+  it('keeps the flag when the message stayed, and refuses when it is not in the composer', async () => {
+    const holding = await typed();
+    holding.terminal.submitOutcome = 'holding';
+    const absent = await typed();
+    absent.terminal.submitOutcome = 'absent';
+    const lost = await typed();
+    lost.ledger.settleRefuses = true;
+
+    should(await holding.service.submit(ID, 'send-1')).match({ typedNotSent: true });
+    should(((await absent.service.submit(ID, 'send-1').catch((error: unknown) => error)) as Error).message).match(
+      /not sitting in the agent's composer/u,
+    );
+    should(await lost.service.submit(ID, 'send-1')).match({ typedNotSent: true });
+  });
+
+  it('refuses a send that is finished or unknown', async () => {
+    const cancelled = await typed({ fate: 'cancelled' });
+    const withdrawn = await typed({ fate: 'withdrawn' });
+
+    should(((await cancelled.service.submit(ID, 'send-1').catch((error: unknown) => error)) as Error).message).match(
+      /is cancelled; there is nothing to submit/u,
+    );
+    should(((await withdrawn.service.submit(ID, 'send-9').catch((error: unknown) => error)) as Error).message).match(
+      /has no send send-9/u,
+    );
+    should(((await withdrawn.service.submit(ID, 'send-1').catch((error: unknown) => error)) as Error).message).match(
+      /has no send send-1/u,
+    );
+  });
+});
+
+describe('a person retrying a send that is still open', () => {
+  async function open(fate: SendRecord['fate']) {
+    const built = parts(target(), [pane({ promptReady: true })]);
+    await built.service.send(request());
+    built.ledger.records.set('send-1', { ...built.ledger.only(), fate, attempt: 1 });
+    built.terminal.typed.length = 0;
+    return built;
+  }
+
+  it('retypes a forced open send the pane does not hold', async () => {
+    const { service, terminal } = await open('queued');
+
+    should(await service.reattempt(ID, 'send-1', { by: 'person', force: true })).match({
+      fate: 'accepted',
+      attempt: 2,
+    });
+    should(terminal.typed).eql(['ship it']);
+  });
+
+  it('refuses one still typed in the composer or held in the queue, typing nothing', async () => {
+    const composer = await open('accepted');
+    composer.terminal.held.set('ship it', 'composer');
+    const queue = await open('queued');
+    queue.terminal.held.set('ship it', 'queue');
+    const unreadable = await open('accepted');
+    unreadable.terminal.heldFailure = new Error('no pane');
+
+    const typed = await composer.service
+      .reattempt(ID, 'send-1', { by: 'person', force: true })
+      .catch((e: unknown) => e);
+    const held = await queue.service.reattempt(ID, 'send-1', { by: 'person', force: true }).catch((e: unknown) => e);
+
+    should((typed as Error).message).match(/typed in the agent's composer and not sent; press Enter instead/u);
+    should((held as Error).message).match(/held in the agent's own queue/u);
+    should(await unreadable.service.reattempt(ID, 'send-1', { by: 'person', force: true })).match({ attempt: 2 });
+    should([...composer.terminal.typed, ...queue.terminal.typed]).be.empty();
+  });
+
+  it('refuses at an occupied composer, before or during the retype, and puts the record back', async () => {
+    const before = await open('timed_out');
+    before.ledger.records.set('send-1', { ...before.ledger.only(), retryable: true });
+    (before.terminal as unknown as { frames: SendPaneObservation[] }).frames.splice(0, 1, pane({ draft: 'hi' }));
+    const during = await open('queued');
+    during.terminal.occupied = 'hi';
+    const busy = parts(target(), [pane({ promptReady: true })]);
+    await busy.service.send(request());
+    busy.ledger.records.set('send-1', { ...busy.ledger.only(), fate: 'queued', attempt: 1 });
+    (busy.terminal as unknown as { frames: SendPaneObservation[] }).frames.splice(0, 1, pane({ activeWork: true }));
+    busy.terminal.occupied = 'hi';
+
+    const refusedBefore = await before.service.reattempt(ID, 'send-1', { by: 'person' }).catch((e: unknown) => e);
+    const refusedDuring = await during.service
+      .reattempt(ID, 'send-1', { by: 'person', force: true })
+      .catch((e: unknown) => e);
+    const refusedBusy = await busy.service.reattempt(ID, 'send-1', { by: 'daemon' }).catch((e: unknown) => e);
+    const failing = await open('queued');
+    failing.terminal.deliverFailure = new Error('tmux went away');
+    const failed = await failing.service.reattempt(ID, 'send-1', { by: 'daemon' }).catch((e: unknown) => e);
+
+    should((refusedBefore as Error).message).match(/already holds unsent text/u);
+    should(before.ledger.only()).match({ fate: 'timed_out', attempt: 1 });
+    should((refusedDuring as Error).message).match(/already holds unsent text/u);
+    should(during.ledger.only()).match({ fate: 'queued', attempt: 1 });
+    should((refusedBusy as Error).message).match(/already holds unsent text/u);
+    should(busy.ledger.only()).match({ fate: 'queued', attempt: 1 });
+    should((failed as Error).message).equal('tmux went away');
   });
 });
 

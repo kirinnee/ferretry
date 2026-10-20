@@ -24,6 +24,7 @@ import {
   hostCodexHome,
   InMemoryCredentialStatusStore,
   manifestRuntimes,
+  PACK_ENV,
   PASSIVE_LEARNING_ENV,
   resolveDefaultRuntime,
   runtimeIdsPath,
@@ -67,10 +68,10 @@ import {
   SessionConfigSchema,
   type SessionHandoff,
   SessionStateSchema,
-  sessionHypermediaEnabled,
   type SessionView,
   type SignalSessionRequest,
   type StartSessionRequest,
+  sessionHypermediaEnabled,
   type TaskBoardChildAccess,
   TERMINAL_MAX_GLOBAL,
   TERMINAL_MAX_PER_SESSION,
@@ -208,7 +209,6 @@ import {
   type WorkerClientOptions,
   XvfbDisplay,
 } from '../src/adapters/index.ts';
-import { bunProbeSpawn, CliPackProbe, FilePackSpendLedger, readSessionResult } from '../src/adapters/pack/index.ts';
 import {
   CatalogPrices,
   ConfigFileLearningSettings,
@@ -229,6 +229,7 @@ import {
 import { FileMigrationReportStore } from '../src/adapters/migrate/file-migration-report.ts';
 import { FileNameClaimStore } from '../src/adapters/names/index.ts';
 import { FileNotificationDeliveryLedger } from '../src/adapters/notifications/index.ts';
+import { bunProbeSpawn, CliPackProbe, FilePackSpendLedger, readSessionResult } from '../src/adapters/pack/index.ts';
 import { FilePinRepository, FilePinSessionDirectory } from '../src/adapters/pins/index.ts';
 import { HostCodexAppServerProcesses } from '../src/adapters/process/codex-app-server-stopper.ts';
 import { runPackageInstall } from '../src/adapters/process/package-install.ts';
@@ -432,9 +433,8 @@ import {
   type BrowserViewerHost,
   BrowserViewerStream,
   type BrowserWorkerProgram,
+  backgroundTerminalCount,
   buildLaunchArgv,
-  FixedSettingsUnreadableError,
-  fastStartRefusal,
   CapabilityGrantService,
   type CatalogSubsystem,
   CgroupLaunchPlanner,
@@ -494,6 +494,7 @@ import {
   doneMarkerCertifiesTurn,
   type ExecutableResolverPort,
   exactWorkerAssignee,
+  FixedSettingsUnreadableError,
   FleetEventStreamService,
   FleetLaunchEnvironment,
   FleetLaunchRenewal,
@@ -502,6 +503,7 @@ import {
   FleetSecretReferences,
   ForeignHistoryImporter,
   type FoundationPaths,
+  fastStartRefusal,
   firstWriteReleasedAnswerAttention,
   fleetManifestRefusal,
   foreignAdvertisementNotice,
@@ -531,6 +533,7 @@ import {
   type LearningSubsystem,
   LessonsService,
   LiveDeviceConnections,
+  LocalModelsService,
   type LogLevel,
   launchGuardActive,
   launchReasoningEffort,
@@ -542,7 +545,6 @@ import {
   MigrationPreflight,
   type MigrationReportStore,
   type MillisecondClockPort,
-  LocalModelsService,
   ModelCatalogService,
   type MountedSubsystems,
   mayTrustDirectLoopback,
@@ -568,12 +570,12 @@ import {
   PinService,
   type PlannedAttachmentFile,
   type PlannedInitialAttachments,
+  type ProcessInventoryPort,
   ProvedPaneCapture,
   ProviderPresetService,
   ProviderProbeService,
   ProviderQuotaService,
   PublishedModelCatalogService,
-  suggestedOllamaModel,
   PushNewDeviceAlert,
   PushService,
   packageRole,
@@ -625,6 +627,7 @@ import {
   renderDoctorReport,
   renderHarnessPreflight,
   renderInitialAttachmentSection,
+  resolveResumePolicy,
   resolveStateHome,
   retireOperatorPassword,
   runtimeQuarantineState,
@@ -669,7 +672,6 @@ import {
   type SessionMigrateFailure,
   type SessionMigrateSubsystem,
   SessionMonitorService,
-  resolveResumePolicy,
   SessionPermissionService,
   SessionPlanner,
   SessionProvenanceRecorder,
@@ -717,6 +719,7 @@ import {
   sessionNameClaim,
   sessionScopedAttachments,
   structuredQuestionStatePatch,
+  suggestedOllamaModel,
   supersededCarrierKeys,
   type TaskAssigneeCandidate,
   type TaskBoardSubsystem,
@@ -753,17 +756,15 @@ import {
   verifySessionTranscriptMessageToken,
   WARDEN_LABEL,
   type WardenFleetSession,
+  WardenLivenessMonitor,
   type WardenSubsystem,
   WardenSweepLoop,
   WardenSweepService,
-  WardenLivenessMonitor,
-  withLivenessLedger,
-  backgroundTerminalCount,
-  type ProcessInventoryPort,
   WatchedUsageFeed,
   type WorkingDirectoryResolver,
   wardenEventTrigger,
   wardenTriggerEnabled,
+  withLivenessLedger,
 } from '../src/lib/index.ts';
 import {
   admitChild,
@@ -774,12 +775,10 @@ import {
   type PackParent,
   PackService,
   PackStartRefused,
-  packInstructed,
   ProbeCache,
+  packInstructed,
 } from '../src/lib/pack/index.ts';
-import { SessionPackService } from '../src/lib/session/pack/index.ts';
 import type { PackSubsystem } from '../src/lib/runtime/mounts/pack.ts';
-import { PACK_ENV } from '@ferretry/fleet';
 import type { SessionForkSubsystem } from '../src/lib/runtime/mounts/session-fork.ts';
 import { createSessionMcpSubsystem } from '../src/lib/runtime/mounts/session-mcp.ts';
 import {
@@ -788,6 +787,7 @@ import {
   LeaseReleasingSessionExits,
 } from '../src/lib/session/conversation-lease.ts';
 import { sessionTmuxName } from '../src/lib/session/lifecycle/policy.ts';
+import { SessionPackService } from '../src/lib/session/pack/index.ts';
 import { knownProjectRoots } from '../src/lib/session-mcp/service.ts';
 import {
   AttachmentFacetContributor,
@@ -2681,6 +2681,16 @@ function createSessionSendSubsystem(
       const record = await service
         .reattempt(id, sendId, { by: 'person', force })
         .catch((error: unknown) => sendRefusal(error));
+      return sendRecordView(record);
+    },
+    cancel: async (reference, sendId) => {
+      const id = require(reference);
+      const record = await service.cancel(id, sendId).catch((error: unknown) => sendRefusal(error));
+      return sendRecordView(record);
+    },
+    submit: async (reference, sendId) => {
+      const id = require(reference);
+      const record = await service.submit(id, sendId).catch((error: unknown) => sendRefusal(error));
       return sendRecordView(record);
     },
     handoff: async (reference, name) => {
@@ -6961,6 +6971,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           SessionLifecycleConfigSchema.parse(lifecycleConfigDocument(await storage.readConfig(id))).tmuxSession,
         new TmuxPaneDelivery(launchTmux, milliseconds => Bun.sleep(milliseconds)),
         new TmuxPaneQueue(launchTmux, milliseconds => Bun.sleep(milliseconds)),
+        milliseconds => Bun.sleep(milliseconds),
       );
       const sendTranscripts = createTranscriptReader(storage);
       /**

@@ -67,6 +67,14 @@ describe('a send record on the wire', () => {
     should(JSON.stringify(view)).not.match(/queued-send-1/);
   });
 
+  it('carries what the pane showed and what a cancel did, so the row can say it', () => {
+    const typed = sendRecordView(record({ typedNotSent: true }));
+    const cancelled = sendRecordView(record({ fate: 'cancelled', cancelEffect: 'left_in_queue' }));
+
+    should(SendRecordSchema.parse(typed)).match({ fate: 'accepted', typedNotSent: true });
+    should(SendRecordSchema.parse(cancelled)).match({ fate: 'cancelled', cancelEffect: 'left_in_queue' });
+  });
+
   it('serves a withdrawn send as a tombstone rather than dropping it', () => {
     const view = sendRecordView(record({ fate: 'withdrawn' }));
     should(view).match({ fate: 'accepted', withdrawn: true, attachmentIds: [] });

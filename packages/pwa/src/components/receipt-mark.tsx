@@ -41,8 +41,10 @@ const DRAWINGS: Readonly<Record<SendReceiptKind, Drawing>> = {
     width: 17.5,
     paths: [CHECK, `M${2 + SECOND_OFFSET} 8.5 ${5.5 + SECOND_OFFSET} 12 ${12 + SECOND_OFFSET} 4.5`],
   },
+  typed: { width: 16, paths: ['M10.6 3.4 12.6 5.4 6 12l-2.8.8L4 10Z', 'M9.2 4.8l2 2'] },
   unconfirmed: { width: 16, paths: ['M5.6 5.6a2.6 2.6 0 1 1 3.8 2.3c-.9.5-1.4 1-1.4 2', 'M8 13h.01'] },
   failed: { width: 16, paths: ['M8 2.5v7.5', 'M8 13h.01'] },
+  cancelled: { width: 16, paths: ['M8 2a6 6 0 1 0 0 12A6 6 0 0 0 8 2Z', 'M3.8 12.2 12.2 3.8'] },
 };
 
 export function ReceiptMark({ kind, className }: { readonly kind: SendReceiptKind; readonly className?: string }) {

@@ -9,7 +9,7 @@ import { FastToggle } from '../../components/composer-fast.tsx';
 import { ComposerRuntime } from '../../components/composer-runtime.tsx';
 import { FilesTab } from '../../components/files-tab.tsx';
 import { HandoffSourceProvider } from '../../components/handoff-message.tsx';
-import type { SendRetry } from '../../components/ledger-message.tsx';
+import type { SendCancel, SendRetry, SendSubmit } from '../../components/ledger-message.tsx';
 import { type PaneFrameReader, usePaneActivity } from '../../components/live-activity.tsx';
 import { LiveStreamIndicator, type LiveStreamIndicatorProps } from '../../components/live-stream-indicator.tsx';
 import { MigrateSheet } from '../../components/migrate-sheet.tsx';
@@ -192,6 +192,10 @@ export interface SessionChatPageProps {
   readonly onRefresh?: () => void;
   /** Re-sends a send under its original id from its row in the transcript. */
   readonly onRetry?: SendRetry;
+  /** Takes a send back from its row in the transcript. */
+  readonly onCancel?: SendCancel;
+  /** Presses Enter once for a send typed in the agent's composer, from its row. */
+  readonly onSubmit?: SendSubmit;
   /** Test seam for the Console's live capture of the agent's pane. */
   readonly readSnapshot?: PaneSnapshotReader;
   /** Test seam for typing into the Console; absent, it types through the daemon's own route. */
@@ -363,6 +367,8 @@ export function SessionChatPage({
   onSessionChange,
   onRefresh,
   onRetry,
+  onCancel,
+  onSubmit,
   readSnapshot,
   typeIntoConsole,
   deck,
@@ -1198,6 +1204,8 @@ export function SessionChatPage({
           daemonId={connection.daemonId}
           entries={entries}
           {...(onRetry === undefined ? {} : { onRetry })}
+          {...(onCancel === undefined ? {} : { onCancel })}
+          {...(onSubmit === undefined ? {} : { onSubmit })}
           pinSignal={pinSignal}
           sessionId={session.config.id}
         />

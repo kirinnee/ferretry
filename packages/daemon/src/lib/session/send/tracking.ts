@@ -136,27 +136,84 @@ export function judgeSends(
     const holding = last?.proof === 'native-queue-hold';
     if (entered !== undefined) taken.add(entered.proofKey);
     verdicts.set(record.sendId, {
-      ...(entered === undefined
-        ? {}
-        : {
-            delivered: {
-              key: entered.proofKey,
-              harness: entered.harness,
-              kind: kindOf(entered),
-              proof: entered.proof as SendEvidence['proof'],
-              observedAt: entered.observedAt,
-              ...(entered.originatedAt === undefined ? {} : { originatedAt: entered.originatedAt }),
-              shapeVersion: entered.shapeVersion,
-              matchedTurn: record.turn ?? record.acceptedTurn,
-              tier: tierOf(record),
-            },
-          }),
+      ...(entered === undefined ? {} : { delivered: evidenceOf(entered, record, tierOf(record)) }),
       ...(firstHold === undefined ? {} : { queuedAt: firstHold.observedAt }),
       holding,
       released: firstHold !== undefined && !holding,
     });
   }
+  judgeMerged(ordered, verdicts, taken, inputs, slackMs);
   return verdicts;
+}
+
+function evidenceOf(entered: ObservedHumanInput, record: SendRecord, tier: SendEvidence['tier']): SendEvidence {
+  return {
+    key: entered.proofKey,
+    harness: entered.harness,
+    kind: kindOf(entered),
+    proof: entered.proof as SendEvidence['proof'],
+    observedAt: entered.observedAt,
+    ...(entered.originatedAt === undefined ? {} : { originatedAt: entered.originatedAt }),
+    shapeVersion: entered.shapeVersion,
+    matchedTurn: record.turn ?? record.acceptedTurn,
+    tier,
+  };
+}
+
+function squeezed(text: string): string {
+  return text.normalize('NFC').replace(/\s+/gu, '');
+}
+
+/**
+ * Proves sends that reached the conversation JOINED into one user record.
+ *
+ * A TUI submits whatever its composer holds, so a message typed onto one left sitting there unsent is
+ * submitted with it as a single message — `hi` and `hello` arrived as `hihello`. No per-send match
+ * can find either, and both rows then waited for proof that already existed. A record is offered here
+ * only when it is EXACTLY two or more still-unproven sends, consecutive in acceptance order, written
+ * after the first of them was accepted — never a looser containment, which would let one message
+ * prove another.
+ */
+function judgeMerged(
+  ordered: readonly SendRecord[],
+  verdicts: Map<string, SendVerdict>,
+  taken: Set<string>,
+  inputs: readonly ObservedHumanInput[],
+  slackMs: number,
+): void {
+  const pending = ordered.filter(record => verdicts.get(record.sendId)?.delivered === undefined);
+  for (const input of inputs) {
+    if (!ENTERED.has(input.proof) || taken.has(input.proofKey)) continue;
+    const target = squeezed(input.text);
+    const run = mergedRun(pending, target, Date.parse(input.observedAt), slackMs);
+    if (run === undefined) continue;
+    taken.add(input.proofKey);
+    for (const record of run) {
+      const verdict = verdicts.get(record.sendId) as SendVerdict;
+      verdicts.set(record.sendId, { ...verdict, delivered: evidenceOf(input, record, 'merged-text') });
+      pending.splice(pending.indexOf(record), 1);
+    }
+  }
+}
+
+function mergedRun(
+  pending: readonly SendRecord[],
+  target: string,
+  observedAt: number,
+  slackMs: number,
+): readonly SendRecord[] | undefined {
+  for (let start = 0; start < pending.length; start += 1) {
+    let joined = '';
+    for (let end = start; end < pending.length; end += 1) {
+      const record = pending[end] as SendRecord;
+      // Every part must have been accepted before the record that carries it was written.
+      if (observedAt < Date.parse(record.acceptedAt) - slackMs) break;
+      joined += squeezed(record.matchText ?? record.message);
+      if (!target.startsWith(joined)) break;
+      if (joined === target && end > start) return pending.slice(start, end + 1);
+    }
+  }
+  return undefined;
 }
 
 /**

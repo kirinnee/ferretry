@@ -293,6 +293,22 @@ export const AUDITED_ROUTES: readonly AuditedRouteRule[] = [
     subject: 'sessionId',
     detail: { action: 'send-retry' },
   },
+  // Taking a send back can erase it from the agent's composer, and Enter submits it: both change what
+  // the agent is told, so both are recorded as prompting it — never with the text.
+  {
+    method: 'POST',
+    path: '/v1/sessions/:sessionId/sends/:sendId/cancel',
+    event: 'agent.prompted',
+    subject: 'sessionId',
+    detail: { action: 'send-cancel' },
+  },
+  {
+    method: 'POST',
+    path: '/v1/sessions/:sessionId/sends/:sendId/enter',
+    event: 'agent.prompted',
+    subject: 'sessionId',
+    detail: { action: 'send-enter' },
+  },
   {
     method: 'POST',
     path: '/v1/sessions/:sessionId/answer',

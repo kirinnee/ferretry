@@ -4,6 +4,7 @@ import { type ClockPort, parseSessionId, type SerialExecutor, type SessionId } f
 import {
   defaultSendTrackerSettings,
   type SendEvidenceReading,
+  type SendHeldAt,
   type SendPaneObservation,
   type SendRecord,
   type SendSettlement,
@@ -108,7 +109,7 @@ class World {
   readFails = false;
   target: SendTarget | undefined = { id: ID, status: 'running', mode: 'auto', turn: 4 };
   pane: SendPaneObservation | undefined = pane();
-  inPane: boolean | undefined = false;
+  inPane: SendHeldAt | false | undefined = false;
   retypeFails = false;
   cancelled = 0;
   nowMs = T0;
@@ -146,9 +147,9 @@ class World {
             if (this.pane === undefined) throw new Error('no pane');
             return this.pane;
           },
-          holds: async () => {
+          heldAt: async () => {
             if (this.inPane === undefined) throw new Error('capture failed');
-            return this.inPane;
+            return this.inPane === false ? undefined : this.inPane;
           },
         },
         repository: {
@@ -301,7 +302,7 @@ describe('a send past its deadline', () => {
   it('waits while a Codex pane still shows the message held in its queue', async () => {
     const world = new World(record({ path: 'native-inline', fate: 'queued', queueProof: 'pane' }));
     world.pane = pane({ activeWork: true, promptReady: false });
-    world.inPane = true;
+    world.inPane = 'queue';
     world.evidence(new CodexObservedInputObserver(), []);
 
     await world.checkAt(61_000);
@@ -311,7 +312,7 @@ describe('a send past its deadline', () => {
 
   it('reports a message held past the ceiling as unconfirmed, never as lost', async () => {
     const world = new World(record({ fate: 'queued', deadlineAt: at(7_200_000) }));
-    world.inPane = true;
+    world.inPane = 'queue';
 
     await world.checkAt(7_200_000);
 
@@ -509,5 +510,72 @@ describe('the tracker as the daemon runs it', () => {
     await world.checkAt(60_000);
     should(world.only.fate).equal('timed_out');
     should(world.journal).be.empty();
+  });
+});
+
+describe('what the pane shows, on every look', () => {
+  it('says a message left typed in the composer within one look, and keeps waiting rather than retyping', async () => {
+    const world = new World(record({ message: 'hi', matchText: 'hi' }));
+    world.inPane = 'composer';
+    world.evidence(new CodexObservedInputObserver(), []);
+
+    await world.checkAt(2_000);
+    const early = world.only;
+    await world.checkAt(61_000);
+
+    should(early).match({ fate: 'accepted', typedNotSent: true });
+    should(world.only).match({ fate: 'accepted', typedNotSent: true, deadlineAt: at(121_000) });
+    should(world.retyped).be.empty();
+    should(world.events.filter(event => event === 'control.send_typed_not_sent')).have.length(1);
+  });
+
+  it('drops the typed flag once the composer no longer holds it, and ignores a pane it cannot read', async () => {
+    const world = new World(record({ typedNotSent: true }));
+    world.inPane = undefined;
+    world.evidence(new CodexObservedInputObserver(), []);
+
+    await world.checkAt(2_000);
+    const unread = world.only;
+    world.inPane = false;
+    await world.checkAt(3_000);
+
+    should(unread.typedNotSent).be.true();
+    should(world.only.typedNotSent).be.undefined();
+  });
+
+  it('calls a send queued when the pane shows it in the harness queue, with the pane as proof', async () => {
+    const world = new World(record({ path: 'native-inline' }));
+    world.inPane = 'queue';
+    world.evidence(new CodexObservedInputObserver(), []);
+
+    await world.checkAt(2_000);
+
+    should(world.only).match({ fate: 'queued', queueProof: 'pane', queuedAt: at(2_000) });
+  });
+});
+
+describe('a message the harness received joined to its neighbour', () => {
+  it('proves each half of `hihello` by the one record, in order, and never a part on its own', async () => {
+    const hi = record({ sendId: 'send-1', message: 'hi', matchText: 'hi' });
+    const hello = record({ sendId: 'send-2', message: 'hello', matchText: 'hello', acceptedAt: at(1_000) });
+    const world = new World(hi, hello);
+    world.evidence(new CodexObservedInputObserver(), [codex.user('hihello', 1_500)]);
+
+    await world.checkAt(2_000);
+
+    should(world.records.get('send-1')).match({ fate: 'delivered', evidence: { tier: 'merged-text' } });
+    should(world.records.get('send-2')).match({ fate: 'delivered', evidence: { tier: 'merged-text' } });
+  });
+
+  it('refuses a join that is not exactly consecutive sends, or that predates one of them', async () => {
+    const hi = record({ sendId: 'send-1', message: 'hi', matchText: 'hi' });
+    const hello = record({ sendId: 'send-2', message: 'hello', matchText: 'hello', acceptedAt: at(60_000) });
+    const world = new World(hi, hello);
+    world.evidence(new CodexObservedInputObserver(), [codex.user('hihello', 1_000), codex.user('hixyz', 1_200)]);
+
+    await world.checkAt(2_000);
+
+    should(world.records.get('send-1')?.fate).equal('accepted');
+    should(world.records.get('send-2')?.fate).equal('accepted');
   });
 });

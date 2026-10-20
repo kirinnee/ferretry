@@ -1,4 +1,4 @@
-import type { SendDisposition } from '@ferretry/protocol';
+import type { SendCancelEffect, SendDisposition } from '@ferretry/protocol';
 import type { ClockPort, SerialExecutor } from '../../ports.ts';
 import type { SessionId } from '../../session-id.ts';
 import {
@@ -21,6 +21,7 @@ import {
   type PeerWaitEnder,
   ReviveRefusedForSend,
   type SendChannel,
+  SendComposerOccupied,
   type SendLaunchGate,
   type SendLedger,
   type SendPath,
@@ -30,6 +31,7 @@ import {
   SendRefused,
   type SendRepository,
   type SendReviver,
+  type SendSettlement,
   type SendTarget,
   type SendTerminal,
   type SendTracking,
@@ -96,8 +98,28 @@ export interface SendOutcome {
 export interface ReattemptOptions {
   /** A person or the daemon asked, which decides what the journal says. */
   readonly by: 'person' | 'daemon';
-  /** Re-send an `unaccounted` message, whose original may have landed. */
+  /**
+   * Re-send a message whose original may have landed: an `unaccounted` one, or — by a person — one
+   * still open whose transport stalled. Never one the pane shows held, which would become a copy.
+   */
   readonly force?: boolean | undefined;
+}
+
+/** The longest stretch of a draft quoted back in a refusal: enough to recognise, not a transcript. */
+const DRAFT_QUOTE_CHARS = 40;
+
+/**
+ * Why nothing was typed when the composer already held text.
+ *
+ * Quoted so a person can recognise it — it is usually their own earlier message that was typed and
+ * never submitted — and the remedy named, because the obvious one (send again) is what made it worse.
+ */
+export function composerOccupiedRefusal(id: SessionId, draft: string): SendRefused {
+  const quoted = draft.length > DRAFT_QUOTE_CHARS ? `${draft.slice(0, DRAFT_QUOTE_CHARS)}…` : draft;
+  return new SendRefused(
+    `the composer in session ${id} already holds unsent text ("${quoted}"); a message typed now would be ` +
+      'sent joined to it. Press Enter on it or cancel it first',
+  );
 }
 
 /** What the locked section decided, before anything that must happen outside the lock. */
@@ -145,6 +167,21 @@ const OPEN_FATES: ReadonlySet<SendRecord['fate']> = new Set(['accepted', 'queued
  * is ending; clearing it earlier would leave the previous turn's `done` free to certify the one that
  * is just starting.
  */
+/** The fields a re-attempt overwrites, as they stood before it, so a refused one can put them back. */
+function restorable(record: SendRecord): SendSettlement {
+  return {
+    fate: record.fate,
+    attempt: record.attempt,
+    attemptAt: record.attemptAt,
+    fateAt: record.fateAt,
+    deadlineAt: record.deadlineAt,
+    unaccountedReason: record.unaccountedReason,
+    retryable: record.retryable,
+    queuedAt: record.queuedAt,
+    queueProof: record.queueProof,
+  };
+}
+
 export class SessionSendService {
   constructor(
     private readonly ports: SessionSendPorts,
@@ -195,7 +232,7 @@ export class SessionSendService {
       const permitted =
         (current.fate === 'timed_out' && current.retryable === true) ||
         (options.by === 'daemon' && OPEN_FATES.has(current.fate)) ||
-        (options.force === true && current.fate === 'unaccounted');
+        (options.force === true && (current.fate === 'unaccounted' || OPEN_FATES.has(current.fate)));
       if (!permitted)
         throw new SendRefused(
           current.fate === 'unaccounted'
@@ -210,6 +247,17 @@ export class SessionSendService {
       const routing = routeSend(target, pane);
       if (routing === 'revive')
         throw new SendRefused(`session ${id} has no live agent to retype ${sendId} into; revive it first`);
+      const text = current.matchText ?? current.message;
+      // A person's retry is checked against the pane as well as the ledger: a message still typed in
+      // the composer, or held in the harness's queue, is not lost, and retyping it would be the copy.
+      if (options.by === 'person') {
+        const where = await this.ports.terminal.heldAt(id, text).catch(() => undefined);
+        if (where === 'composer')
+          throw new SendRefused(`send ${sendId} is typed in the agent's composer and not sent; press Enter instead`);
+        if (where === 'queue')
+          throw new SendRefused(`send ${sendId} is held in the agent's own queue and will be read at its next turn`);
+      }
+      if (pane.draft !== undefined) throw composerOccupiedRefusal(id, pane.draft);
       const attempt = (current.attempt ?? 1) + 1;
       const next = await this.ports.ledger.settle(id, sendId, {
         fate: 'accepted',
@@ -224,12 +272,18 @@ export class SessionSendService {
       });
       if (next === undefined) throw new SendRefused(`send ${sendId} could not be re-attempted`);
       await this.ports.repository.journal(id, 'control.send_retried', { sendId, attempt, by: options.by });
-      const text = current.matchText ?? current.message;
-      if (routing === 'idle') {
-        await this.ports.terminal.deliver(id, text);
-        return next;
+      try {
+        if (routing === 'idle') {
+          await this.ports.terminal.deliver(id, text);
+          return next;
+        }
+        return (await this.queued(id, next, await this.ports.terminal.queue(id, text))) ?? next;
+      } catch (error) {
+        if (!(error instanceof SendComposerOccupied)) throw error;
+        // Nothing was typed, so the record goes back to exactly what it said before this attempt.
+        await this.ports.ledger.settle(id, sendId, restorable(current));
+        throw composerOccupiedRefusal(id, error.draft);
       }
-      return (await this.queued(id, next, await this.ports.terminal.queue(id, text))) ?? next;
     });
     this.ports.tracking.track(id);
     return record;
@@ -335,6 +389,7 @@ export class SessionSendService {
     const first = await this.ports.terminal.observe(request.id);
     const routing = routeSend(target, first);
     if (routing === 'revive') return { kind: 'revive' };
+    if (first.draft !== undefined) throw composerOccupiedRefusal(request.id, first.draft);
     if (routing === 'idle') return await this.deliver(target, request, payload, sender);
     // Busy, as of a frame captured before the lock was held. `--now` ends the active turn with the
     // same safe key the interrupt uses; either way the pane is read again, and a pane that has since
@@ -345,6 +400,7 @@ export class SessionSendService {
         : await this.ports.terminal.observe(request.id);
     const settled = routeSend(target, second);
     if (settled === 'revive') return { kind: 'revive' };
+    if (second.draft !== undefined) throw composerOccupiedRefusal(request.id, second.draft);
     if (settled === 'idle') return await this.deliver(target, request, payload, sender);
     return await this.queue(target, request, payload, sender);
   }
@@ -379,8 +435,14 @@ export class SessionSendService {
     });
     if (!accepted.created) return this.settledAs(accepted.record, false);
     // May throw after the keys landed or the Enter was consumed. That is an UNCERTAIN fate, never a
-    // withdrawal: the record stays accepted so a human can see a message that may have arrived.
-    await this.ports.terminal.deliver(target.id, text);
+    // withdrawal: the record stays accepted so a human can see a message that may have arrived. The
+    // one exception is a refusal BEFORE any keystroke, which `untyped` turns back into a refusal.
+    await this.untyped(
+      target.id,
+      accepted.record,
+      release,
+      async () => await this.ports.terminal.deliver(target.id, text),
+    );
     await this.ports.channel.recordInbound(target.id, {
       at: this.ports.clock.now(),
       message: payload,
@@ -440,7 +502,12 @@ export class SessionSendService {
       ...(payloadFile === undefined ? {} : { payloadFile }),
     });
     if (!accepted.created) return this.settledAs(accepted.record, accepted.record.fate === 'queued');
-    const outcome = await this.ports.terminal.queue(target.id, text);
+    const outcome = await this.untyped(
+      target.id,
+      accepted.record,
+      release,
+      async () => await this.ports.terminal.queue(target.id, text),
+    );
     const record = (await this.queued(target.id, accepted.record, outcome)) ?? accepted.record;
     await this.ports.channel.recordInbound(target.id, {
       at: this.ports.clock.now(),
@@ -458,6 +525,99 @@ export class SessionSendService {
       ...this.attribution(sender),
     });
     return { kind: 'settled', path, applied: true, record, held: outcome === 'held' };
+  }
+
+  /**
+   * Runs a transport, and undoes the record when the terminal refused before typing anything.
+   *
+   * A composer that already held text is refused by the terminal before its first keystroke, so the
+   * acceptance is the one thing to take back: a fresh send is withdrawn (its id may honestly start
+   * over) and a released held message goes back to being held.
+   */
+  private async untyped<T>(
+    id: SessionId,
+    record: SendRecord,
+    release: HeldRelease | undefined,
+    transport: () => Promise<T>,
+  ): Promise<T> {
+    try {
+      return await transport();
+    } catch (error) {
+      if (!(error instanceof SendComposerOccupied)) throw error;
+      if (release === undefined) await this.ports.ledger.withdraw(id, record.sendId, 'the composer held unsent text');
+      else await this.ports.ledger.settle(id, record.sendId, { held: true });
+      throw composerOccupiedRefusal(id, error.draft);
+    }
+  }
+
+  /**
+   * Takes back one send that was not proven delivered.
+   *
+   * WHAT THIS CAN UNDO is only what is still on Ferretry's side of the glass. A message sitting typed in
+   * the composer is erased from it — and only when the composer holds exactly that message, so a
+   * person's draft is never wiped. A message the harness already took into its own queue cannot be
+   * edited from here and is said to be left there. The record moves to `cancelled` either way, so the
+   * daemon stops retyping it and the row stops waiting, and the journal names the effect.
+   */
+  async cancel(id: SessionId, sendId: string): Promise<SendRecord> {
+    return await this.ports.serial.run(id, async () => {
+      const current = (await this.ports.ledger.list(id)).find(entry => entry.sendId === sendId);
+      if (current === undefined || current.fate === 'withdrawn')
+        throw new SendRefused(`session ${id} has no send ${sendId}`);
+      if (current.fate === 'cancelled') return current;
+      if (current.fate === 'delivered')
+        throw new SendRefused(`send ${sendId} is already delivered; the agent has read it and it cannot be taken back`);
+      const effect = await this.cancelEffect(id, current);
+      const next = await this.ports.ledger.settle(id, sendId, {
+        fate: 'cancelled',
+        fateAt: this.ports.clock.now(),
+        cancelEffect: effect,
+        typedNotSent: undefined,
+        deadlineAt: undefined,
+        retryable: undefined,
+      });
+      if (next === undefined) throw new SendRefused(`send ${sendId} could not be cancelled`);
+      await this.ports.repository.journal(id, 'control.send_cancelled', { sendId, from: current.fate, effect });
+      return next;
+    });
+  }
+
+  private async cancelEffect(id: SessionId, record: SendRecord): Promise<SendCancelEffect> {
+    // A message held for a revive was never typed anywhere.
+    if (record.held === true) return 'not_in_pane';
+    const text = record.matchText ?? record.message;
+    const where = await this.ports.terminal.heldAt(id, text).catch(() => undefined);
+    if (where === 'queue') return 'left_in_queue';
+    if (where !== 'composer') return 'not_in_pane';
+    const cleared = await this.ports.terminal.clearComposer(id, text).catch(() => 'stuck' as const);
+    return cleared === 'cleared' || cleared === 'absent' ? 'cleared' : 'left_in_composer';
+  }
+
+  /**
+   * Presses Enter ONCE for a send sitting typed, and not sent, in the agent's composer.
+   *
+   * The terminal refuses unless the composer holds exactly this message, so it cannot submit somebody
+   * else's draft; and it is one key per request, so a double tap is two requests the second of which
+   * finds the composer empty. Where the message went is then the tracker's to prove, as for any send.
+   */
+  async submit(id: SessionId, sendId: string): Promise<SendRecord> {
+    const record = await this.ports.serial.run(id, async () => {
+      const current = (await this.ports.ledger.list(id)).find(entry => entry.sendId === sendId);
+      if (current === undefined || current.fate === 'withdrawn')
+        throw new SendRefused(`session ${id} has no send ${sendId}`);
+      if (current.fate === 'delivered' || current.fate === 'cancelled')
+        throw new SendRefused(`send ${sendId} is ${current.fate}; there is nothing to submit`);
+      const outcome = await this.ports.terminal.submitComposer(id, current.matchText ?? current.message);
+      if (outcome === 'absent')
+        throw new SendRefused(`send ${sendId} is not sitting in the agent's composer, so Enter was not pressed`);
+      await this.ports.repository.journal(id, 'control.send_submitted', { sendId, outcome });
+      if (outcome === 'holding') return current;
+      return (
+        (await this.ports.ledger.settle(id, sendId, { typedNotSent: undefined, deadlineAt: undefined })) ?? current
+      );
+    });
+    this.ports.tracking.track(id);
+    return record;
   }
 
   /** Records the pane's proof that the harness is holding a send, when it gave one. */

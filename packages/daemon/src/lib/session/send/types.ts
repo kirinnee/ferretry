@@ -1,4 +1,5 @@
 import type {
+  SendCancelEffect,
   SendDisposition,
   SendEvidence,
   SendQueueProof,
@@ -64,8 +65,9 @@ export type SendPath =
  *     harness, not in the composer. Only this fate may be re-attempted under the same id freely.
  *   * `unaccounted` — it could be proven neither way. It may have landed.
  *   * `withdrawn` — nothing was ever typed; the id may honestly start over.
+ *   * `cancelled` — a person took it back; `cancelEffect` says what that did on the agent's screen.
  */
-export type SendFate = 'accepted' | 'queued' | 'delivered' | 'unaccounted' | 'timed_out' | 'withdrawn';
+export type SendFate = 'accepted' | 'queued' | 'delivered' | 'unaccounted' | 'timed_out' | 'withdrawn' | 'cancelled';
 
 /** Who asked for a send, which decides who may retry it: a person by hand, the daemon for an agent. */
 export type SendSenderKind = 'human' | 'agent' | 'daemon';
@@ -136,6 +138,10 @@ export interface SendRecord {
   readonly deadlineAt?: string | undefined;
   /** True only on a `timed_out` send the daemon proved absent and a re-attempt could reach. */
   readonly retryable?: boolean | undefined;
+  /** The pane shows it typed in the composer and not submitted, as of the last look. */
+  readonly typedNotSent?: boolean | undefined;
+  /** What a `cancelled` fate did to the agent's screen. */
+  readonly cancelEffect?: SendCancelEffect | undefined;
 }
 
 /** The fields the tracker and a re-attempt may move on an existing record. */
@@ -152,6 +158,8 @@ export type SendSettlement = Partial<
     | 'attemptAt'
     | 'deadlineAt'
     | 'retryable'
+    | 'typedNotSent'
+    | 'cancelEffect'
     | 'held'
     | 'path'
     | 'matchText'
@@ -172,6 +180,11 @@ export interface SendPaneObservation {
   readonly activeWork: boolean;
   /** A harness dialog the pane is parked on, in the words a person is shown for it. */
   readonly blockingPrompt?: string | undefined;
+  /**
+   * Input already typed in the composer and not submitted. Anything typed now would be submitted
+   * joined to it, so a send refuses rather than type.
+   */
+  readonly draft?: string | undefined;
 }
 
 /** One session, as everything in this slice reads it. */
@@ -273,13 +286,28 @@ export interface SendLedger {
   list(id: SessionId): Promise<readonly SendRecord[]>;
   /**
    * Appends a new snapshot of an existing send with `patch` applied — a proven fate, a re-attempt, an
-   * extended deadline. A field set to `undefined` is cleared. A withdrawn send is never settled.
+   * extended deadline. A field set to `undefined` is cleared. A withdrawn or cancelled send is never
+   * settled.
    */
   settle(id: SessionId, sendId: string, patch: SendSettlement): Promise<SendRecord | undefined>;
 }
 
 /** What a busy-pane transport proved: the harness is HOLDING the text, or the keys merely went in. */
 export type SendQueueOutcome = 'held' | 'unproven';
+
+/** Where the pane shows a payload being held: typed in the composer, or in the harness's own queue. */
+export type SendHeldAt = 'composer' | 'queue';
+
+/**
+ * What erasing a payload from the composer did.
+ *
+ * `foreign` means the composer holds something other than exactly this payload — a person's draft, or
+ * the payload joined to other text — and was deliberately left untouched.
+ */
+export type ComposerClearOutcome = 'cleared' | 'absent' | 'foreign' | 'stuck';
+
+/** What one Enter for a stranded payload did: it left the composer, stayed, or was not there to send. */
+export type ComposerSubmitOutcome = 'submitted' | 'holding' | 'absent';
 
 /** The terminal side of a send. Every address goes through the daemon's own isolated tmux socket. */
 export interface SendTerminal {
@@ -293,10 +321,18 @@ export interface SendTerminal {
   /** Sends the safe stop key once, with no readiness wait. Exactly one keystroke per call. */
   pressStopKey(id: SessionId): Promise<void>;
   /**
-   * Whether the pane still shows `text` held — in the composer or the harness's visible queue.
+   * Where the pane still shows `text` held — typed in the composer, or in the harness's visible queue —
+   * read from those places only, never from the payload's words appearing elsewhere on screen.
    * Throws when the pane cannot be read: an unread pane proves nothing either way.
    */
-  holds(id: SessionId, text: string): Promise<boolean>;
+  heldAt(id: SessionId, text: string): Promise<SendHeldAt | undefined>;
+  /**
+   * Erases `text` from the composer, ONLY when the composer holds exactly that and nothing else.
+   * Bounded, and verified by reading the composer after each key.
+   */
+  clearComposer(id: SessionId, text: string): Promise<ComposerClearOutcome>;
+  /** Presses Enter once, ONLY when the composer holds exactly `text`, and reports where it went. */
+  submitComposer(id: SessionId, text: string): Promise<ComposerSubmitOutcome>;
 }
 
 /** Where a send's fate is decided, told each time a transport finishes so it can look. */
@@ -388,6 +424,20 @@ export class SendRefused extends Error {
   constructor(message: string) {
     super(message);
     this.name = 'SendRefused';
+  }
+}
+
+/**
+ * The agent's composer already held unsent text, so nothing was typed — the new message would have
+ * been submitted joined to it. Thrown by the terminal BEFORE any keystroke.
+ */
+export class SendComposerOccupied extends Error {
+  constructor(
+    /** What the composer held, so the refusal can quote it back to the person who will recognise it. */
+    readonly draft: string,
+  ) {
+    super('the composer already holds unsent text; nothing was typed');
+    this.name = 'SendComposerOccupied';
   }
 }
 

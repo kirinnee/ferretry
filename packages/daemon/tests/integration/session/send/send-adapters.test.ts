@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import should from 'should';
 import {
   BunSqliteIndexFactory,
+  ComposerOccupiedError,
   DaemonStorageFactory,
   FileResumeTurnStore,
   FileSendChannel,
@@ -27,6 +28,7 @@ import {
   type ResumeTarget,
   ReviveDedupeConflict,
   ReviveRefusedForSend,
+  SendComposerOccupied,
   type SendRecord,
   type SessionId,
   TmuxController,
@@ -547,6 +549,7 @@ describe('the tmux send terminal', () => {
       async () => 'fy-session-1',
       { deliver: async () => undefined, waitReady: async () => undefined } as never,
       { queue: async () => undefined } as never,
+      async () => undefined,
     );
   }
 
@@ -639,6 +642,7 @@ describe('the tmux send terminal', () => {
       async (id: SessionId) => `fy-${id}`,
       { deliver: async (_session: string, text: string) => void typed.push(text) } as never,
       { queue: async (_session: string, text: string) => void queued.push(text) } as never,
+      async () => undefined,
     );
 
     // Act
@@ -690,34 +694,164 @@ describe('the file send ledger, as the tracker moves it', () => {
 });
 
 describe('the tmux send terminal, as the tracker reads it', () => {
+  /**
+   * A pane whose frame advances on each erase (`C-u`) or submit (`Enter`) key, with the cursor tmux
+   * reports beside it; the last frame repeats. Every key sent
+   * is recorded, so a test can prove which keys a composer action pressed, and that none were pressed
+   * at a composer it did not match.
+   */
   class FrameTmux {
-    constructor(private readonly frame: string) {}
+    readonly keys: string[] = [];
+
+    constructor(
+      private readonly frames: readonly (readonly [string, string])[],
+      private index = 0,
+    ) {}
 
     async execute(arguments_: readonly string[]): Promise<{ code: number; stdout: string; stderr: string }> {
       const verb = arguments_[0] ?? '';
-      if (verb === 'display-message') return { code: 0, stdout: '0|0|1|80|24|', stderr: '' };
-      if (verb === 'capture-pane') return { code: 0, stdout: this.frame, stderr: '' };
+      const [frame, cursor] = this.frames[Math.min(this.index, this.frames.length - 1)] as readonly [string, string];
+      if (verb === 'display-message') return { code: 0, stdout: `0||${cursor}|24|80`, stderr: '' };
+      if (verb === 'capture-pane') return { code: 0, stdout: frame, stderr: '' };
+      if (verb === 'send-keys') {
+        const key = arguments_.at(-1) as string;
+        this.keys.push(key);
+        if ((key === 'C-u' || key === 'Enter') && this.index < this.frames.length - 1) this.index += 1;
+      }
       return { code: 0, stdout: '', stderr: '' };
     }
   }
 
-  const subject = (frame: string, queued: 'held' | 'working' = 'held') =>
+  const subject = (
+    frames: readonly (readonly [string, string])[],
+    queued: 'held' | 'typed' | 'left' = 'held',
+    tmux = new FrameTmux(frames),
+  ) =>
     new TmuxSendTerminal(
-      new TmuxController(new FrameTmux(frame)),
+      new TmuxController(tmux),
       async () => 'fy-session-1',
-      {} as never,
+      {
+        deliver: async () => {
+          throw new ComposerOccupiedError('occupied', 'hi');
+        },
+      } as never,
       { queue: async () => queued } as never,
+      async () => undefined,
     );
 
-  it('should say whether the pane still shows the payload, a collapsed paste included', async () => {
-    should(await subject('❯ ship it please').holds(ID, 'ship it please')).be.true();
-    should(await subject('❯ [Pasted text #1 +40 lines]').holds(ID, 'a very long message')).be.true();
-    should(await subject('❯ ').holds(ID, 'ship it please')).be.false();
+  const PLACEHOLDER = ['› Ask Codex to do anything\n\n  gpt-5 default', '2|0'] as const;
+  const typed = (text: string) => [`› ${text}\n\n  gpt-5 default`, `${2 + text.length}|0`] as const;
+
+  it('should find the payload in the composer or the pending queue, and nowhere else on screen', async () => {
+    const pending = [
+      '› hihello',
+      '• Messages to be submitted after next tool call',
+      '  ↳ hello',
+      '',
+      '› Ask Codex to do anything',
+    ].join('\n');
+
+    should(await subject([typed('ship it please')]).heldAt(ID, 'ship it please')).equal('composer');
+    should(await subject([[pending, '2|4']]).heldAt(ID, 'hello')).equal('queue');
+    // `hi` is inside `anything` and inside `› hihello` — neither is the composer.
+    should(await subject([[pending, '2|4']]).heldAt(ID, 'hi')).be.undefined();
+    should(await subject([['› [Pasted Content 900 chars]', '28|0']]).heldAt(ID, 'p'.repeat(900))).equal('composer');
+  });
+
+  it("should report a typed draft, and only a cursor-proven one, as the pane's draft", async () => {
+    should((await subject([typed('hi')]).observe(ID)).draft).equal('hi');
+    should(Object.hasOwn(await subject([PLACEHOLDER]).observe(ID), 'draft')).be.false();
   });
 
   it('should call a busy-pane transport held only when the pane proved it', async () => {
-    should(await subject('❯ ').queue(ID, 'x')).equal('held');
-    should(await subject('❯ ', 'working').queue(ID, 'x')).equal('unproven');
+    should(await subject([PLACEHOLDER]).queue(ID, 'x')).equal('held');
+    should(await subject([PLACEHOLDER], 'typed').queue(ID, 'x')).equal('unproven');
+    should(await subject([PLACEHOLDER], 'left').queue(ID, 'x')).equal('unproven');
+  });
+
+  it("should turn a refusal-before-typing into the send domain's own error, and pass others through", async () => {
+    const occupied = await subject([PLACEHOLDER])
+      .deliver(ID, 'x')
+      .catch((error: unknown) => error);
+    const broken = await new TmuxSendTerminal(
+      new TmuxController(new FrameTmux([PLACEHOLDER])),
+      async () => 'fy-session-1',
+      {
+        deliver: async () => {
+          throw new Error('tmux went away');
+        },
+      } as never,
+      {} as never,
+      async () => undefined,
+    )
+      .deliver(ID, 'x')
+      .catch((error: unknown) => error);
+
+    should(occupied).be.instanceof(SendComposerOccupied);
+    should((occupied as SendComposerOccupied).draft).equal('hi');
+    should((broken as Error).message).equal('tmux went away');
+  });
+
+  it('should erase a stranded payload one C-u at a time, verifying before each key', async () => {
+    // Arrange — the draft a swallowed Enter leaves (text, then an empty second line): Codex's first
+    // C-u joins the empty line back, the second erases the text.
+    const tmux = new FrameTmux([['› hi\n\n\n  gpt-5 default', '2|1'], typed('hi'), PLACEHOLDER]);
+
+    // Act
+    const actual = await subject([], 'held', tmux).clearComposer(ID, 'hi');
+
+    // Assert
+    should(actual).equal('cleared');
+    should(tmux.keys).deepEqual(['C-u', 'C-u']);
+  });
+
+  it('should erase a multi-line draft line by line, as long as what remains is the start of it', async () => {
+    const text = 'line1\nline2';
+    const tmux = new FrameTmux([
+      ['› line1\n  line2\n\n  gpt-5 default', '7|1'],
+      ['› line1\n\n\n  gpt-5 default', '2|1'],
+      ['› line1\n\n  gpt-5 default', '7|0'],
+      PLACEHOLDER,
+    ]);
+
+    should(await subject([], 'held', tmux).clearComposer(ID, text)).equal('cleared');
+    should(tmux.keys).deepEqual(['C-u', 'C-u', 'C-u']);
+  });
+
+  it('should never touch a composer holding anything but exactly the payload', async () => {
+    const draft = new FrameTmux([typed('hi and my own words')]);
+    const empty = new FrameTmux([PLACEHOLDER]);
+    const unreadable = new FrameTmux([['booting…', '0|0']]);
+
+    should(await subject([], 'held', draft).clearComposer(ID, 'hi')).equal('foreign');
+    should(await subject([], 'held', empty).clearComposer(ID, 'hi')).equal('absent');
+    should(await subject([], 'held', unreadable).clearComposer(ID, 'hi')).equal('stuck');
+    should([...draft.keys, ...empty.keys, ...unreadable.keys]).deepEqual([]);
+  });
+
+  it('should give up, bounded, on a composer the erase keys do not change', async () => {
+    const tmux = new FrameTmux([typed('hi')]);
+
+    should(await subject([], 'held', tmux).clearComposer(ID, 'hi')).equal('stuck');
+    // Two keys per line of the payload, plus the margin.
+    should(tmux.keys.length).equal(4);
+  });
+
+  it('should stop clearing when the composer turns into something else part-way', async () => {
+    const tmux = new FrameTmux([typed('hi'), typed('hi there')]);
+
+    should(await subject([], 'held', tmux).clearComposer(ID, 'hi')).equal('stuck');
+  });
+
+  it('should press Enter once for the payload and say where it went', async () => {
+    const sent = new FrameTmux([typed('hi'), PLACEHOLDER]);
+    const stuck = new FrameTmux([typed('hi')]);
+    const absent = new FrameTmux([PLACEHOLDER]);
+
+    should(await subject([], 'held', sent).submitComposer(ID, 'hi')).equal('submitted');
+    should(await subject([], 'held', stuck).submitComposer(ID, 'hi')).equal('holding');
+    should(await subject([], 'held', absent).submitComposer(ID, 'hi')).equal('absent');
+    should([sent.keys, stuck.keys, absent.keys]).deepEqual([['Enter'], ['Enter'], []]);
   });
 });
 

@@ -11,9 +11,10 @@
  * did pressing Enter actually deliver it?
  */
 
-import type { LandingEvidence } from './composer.ts';
 import { paneShowsOpenPicker } from '../session/harness/picker-screen.ts';
+import type { LandingEvidence } from './composer.ts';
 import { composerHolds } from './composer.ts';
+import { readComposer, showsPayload } from './composer-screen.ts';
 import { paneShowsActiveWork } from './pane.ts';
 import type { StartupDialogAction, StartupDialogOptions } from './startup.ts';
 import { startupDialogAction } from './startup.ts';
@@ -25,6 +26,9 @@ export interface DeliveryFrame {
   readonly promptReady: boolean;
   readonly visible: string;
   readonly exitCode?: number;
+  /** Where tmux put the cursor, which is what tells a composer's placeholder from typed input. */
+  readonly cursorX?: number | undefined;
+  readonly cursorY?: number | undefined;
 }
 
 /**
@@ -125,7 +129,55 @@ export function classifySubmit(frame: DeliveryFrame, text: string, evidence: Lan
   if (frame.promptReady) return { kind: 'delivered', outcome: 'handled-local' };
   // The payload left the composer and the pane is not idle: a turn beginning, a selector, or some
   // other local result. It was consumed whichever it is.
-  return composerHolds(frame.visible, text, evidence)
-    ? { kind: 'holding' }
-    : { kind: 'delivered', outcome: 'turn-started' };
+  return stillComposed(frame, text, evidence) ? { kind: 'holding' } : { kind: 'delivered', outcome: 'turn-started' };
+}
+
+/**
+ * Whether the composer itself still holds the payload.
+ *
+ * Read from the composer line and the cursor, not by finding the payload's words anywhere on screen:
+ * once submitted, a message is echoed into the conversation above, so a whole-frame search keeps
+ * answering "still there" for a payload that is long gone. A frame with no readable composer falls
+ * back to that older search, which errs towards pressing Enter again — safe only because this is
+ * asked solely while the payload has not yet been seen to leave.
+ */
+function stillComposed(frame: DeliveryFrame, text: string, evidence: LandingEvidence): boolean {
+  const composer = readComposer(frame.visible, { x: frame.cursorX, y: frame.cursorY });
+  if (composer === undefined || composer.placeholder === undefined) return composerHolds(frame.visible, text, evidence);
+  if (composer.placeholder) return false;
+  return evidence === 'placeholder' ? composer.pasted : showsPayload(composer.text, text);
+}
+
+/**
+ * The input a composer already holds before anything is typed, or `undefined` when it is empty.
+ *
+ * Typing onto it is never right. It is a person's half-written draft, or an earlier message that was
+ * typed and never submitted, and a new payload appended to either is submitted as ONE message — the
+ * real failure behind a `hi` and a `hello` reaching Codex as `hihello`, with neither send able to
+ * prove its own delivery afterwards. Only a cursor-proven input counts: a placeholder, or a frame
+ * whose cursor tmux did not report, is not a draft.
+ */
+export function occupiedComposer(frame: DeliveryFrame): string | undefined {
+  const composer = readComposer(frame.visible, { x: frame.cursorX, y: frame.cursorY });
+  return composer?.placeholder === false && composer.text !== '' ? composer.text : undefined;
+}
+
+/**
+ * What the composer itself proves about a payload just typed into an EMPTY composer.
+ *
+ * `unreadable` when the frame has no composer line or no cursor on it: the caller then falls back to
+ * comparing character counts across frames, which is weaker but not wrong. Because typing only ever
+ * starts from an empty composer, the composer showing exactly the payload is proof that THIS copy
+ * landed.
+ */
+export function composerLanding(
+  frame: DeliveryFrame,
+  text: string,
+  paste: boolean,
+): LandingEvidence | 'unreadable' | undefined {
+  const composer = readComposer(frame.visible, { x: frame.cursorX, y: frame.cursorY });
+  if (composer === undefined || composer.placeholder === undefined) return 'unreadable';
+  if (composer.placeholder) return undefined;
+  if (showsPayload(composer.text, text)) return 'chars';
+  return paste && composer.pasted ? 'placeholder' : undefined;
 }

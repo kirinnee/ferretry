@@ -33,6 +33,16 @@ export class FakeTmuxServer implements TmuxCommandPort {
   composer = '';
   /** Local-command mode: Enter consumes the payload without starting a turn. */
   localCommand = false;
+  /**
+   * What an EMPTY composer draws, with the cursor parked at its start — Codex's rotating
+   * `Ask Codex to do anything`, whose words a short message can be made of.
+   */
+  placeholder = '';
+  /**
+   * Enters to treat as a NEWLINE instead of a submit: what Codex does with an Enter that arrives
+   * inside its paste-burst window, measured on 0.156.1.
+   */
+  swallowEnters = 0;
 
   private captures = 0;
   private pasteCount = 0;
@@ -90,10 +100,16 @@ export class FakeTmuxServer implements TmuxCommandPort {
       }
       return result('');
     }
-    if (key === 'C-u') this.composer = '';
+    if (key === 'C-u') this.composer = this.composer.slice(0, this.composer.lastIndexOf('\n') + 1);
+    if (key === 'BSpace') this.composer = this.composer.slice(0, -1);
+    if (key === 'Enter' && this.composer.length > 0 && this.swallowEnters > 0) {
+      this.swallowEnters -= 1;
+      this.composer += '\n';
+      return result('');
+    }
     if (key === 'Enter' && this.composer.length > 0) {
       // What the pane RECEIVED, which for a collapsed paste is the payload rather than its placeholder.
-      this.submitted.push(this.pastedPayloads.get(this.composer) ?? this.composer);
+      this.submitted.push(this.pastedPayloads.get(this.composer) ?? this.composer.trim());
       this.composer = '';
       this.working = !this.localCommand;
     }
@@ -120,7 +136,7 @@ export class FakeTmuxServer implements TmuxCommandPort {
     const rendered = [...this.transcript.split('\n')];
     if (this.modal !== undefined) rendered.push(...this.modal.split('\n'));
     if (this.working) rendered.push('✻ Lollygagging… (34s · ⚒ 2.1k tokens)');
-    return [...rendered, `> ${this.composer}`];
+    return [...rendered, `> ${this.composer === '' ? this.placeholder : this.composer}`];
   }
 
   private frame(): string {
@@ -133,7 +149,8 @@ export class FakeTmuxServer implements TmuxCommandPort {
   private metadata(): string {
     // The cursor sits after whatever the composer holds, which is exactly what keeps a pane with
     // text still in it from reading as an idle prompt.
-    return `${this.dead ? 1 : 0}|${this.exitCode}|${2 + this.composer.length}|${this.lines().length - 1}|24|80\n`;
+    const row = this.lines().join('\n').split('\n').length - 1;
+    return `${this.dead ? 1 : 0}|${this.exitCode}|${2 + (this.composer.split('\n').at(-1) ?? '').length}|${row}|24|80\n`;
   }
 }
 

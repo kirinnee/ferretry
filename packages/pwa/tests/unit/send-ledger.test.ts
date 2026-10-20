@@ -277,3 +277,61 @@ describe('send ledger read model', () => {
     expect(RECORD_CLOCK_SLACK_MS).toBe(5_000);
   });
 });
+
+describe('a cancelled send, and one typed but never submitted', () => {
+  it('reads the cancel effect, the typed flag and the merged-text citation, and drops what it does not know', () => {
+    const parsed = parseLedgerSendRecord({
+      sendId: 's',
+      acceptedAt: at(0),
+      fate: 'cancelled',
+      cancelEffect: 'left_in_queue',
+      typedNotSent: true,
+      evidence: { key: 'k', tier: 'merged-text' },
+    });
+    expect(parsed).toMatchObject({
+      fate: 'cancelled',
+      cancelEffect: 'left_in_queue',
+      typedNotSent: true,
+      evidence: { key: 'k', tier: 'merged-text' },
+    });
+    for (const effect of ['cleared', 'not_in_pane', 'left_in_composer'] as const)
+      expect(parseLedgerSendRecord({ sendId: 's', acceptedAt: at(0), cancelEffect: effect })?.cancelEffect).toBe(
+        effect,
+      );
+    const unknown = parseLedgerSendRecord({
+      sendId: 's',
+      acceptedAt: at(0),
+      cancelEffect: 'teleported',
+      typedNotSent: 'yes',
+    });
+    expect(unknown).not.toHaveProperty('cancelEffect');
+    expect(unknown).not.toHaveProperty('typedNotSent');
+  });
+
+  it('refreshes on the daemon events that move a send in or out of the composer', () => {
+    for (const type of ['control.send_typed_not_sent', 'control.send_cancelled', 'control.send_submitted'])
+      expect(isSendLedgerEvent({ type })).toBe(true);
+  });
+
+  it('never re-badges a cancelled row unconfirmed, expires it, or schedules a wake-up for it', () => {
+    const cancelled = record({
+      fate: 'cancelled',
+      unaccountedDeadline: at(-10_000),
+      hardDeadline: at(-5_000),
+    });
+    expect(isLedgerUnconfirmed(cancelled, NOW)).toBe(false);
+    expect(hasLedgerHardExpired(cancelled, NOW)).toBe(false);
+    expect(nextLedgerViewDeadline([{ ...cancelled, hardDeadline: at(60_000) }], NOW)).toBeUndefined();
+  });
+
+  it('lets a cancel supersede anything unproven in the same attempt, but never a delivered proof', () => {
+    const sent = record({ fate: 'queued' });
+    const cancelled = record({ fate: 'cancelled', cancelEffect: 'cleared' });
+    const delivered = record({ fate: 'delivered' });
+    expect(foldLedgerSendRecords([sent], [cancelled])[0]?.fate).toBe('cancelled');
+    // A snapshot taken before the cancel, landing after it, cannot bring the row back.
+    expect(foldLedgerSendRecords([cancelled], [sent])[0]?.fate).toBe('cancelled');
+    expect(foldLedgerSendRecords([delivered], [cancelled])[0]?.fate).toBe('delivered');
+    expect(foldLedgerSendRecords([cancelled], [delivered])[0]?.fate).toBe('delivered');
+  });
+});
