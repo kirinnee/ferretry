@@ -221,6 +221,7 @@ describe('the sessions bar row actions', () => {
       'passive-learning',
       'scan-ferret',
       'restart',
+      'earlier-conversation',
       'stop',
     ]);
     expect(item(root, 'move-machine').getAttribute('aria-disabled')).toBe('true');
@@ -287,6 +288,15 @@ describe('the sessions bar row actions', () => {
         .daemons.get(ALPHA as DaemonId)
         ?.byId.get('s-run')?.state.status,
     ).toBe('completed');
+  });
+
+  it('goes back to the earlier conversation through a same-login migration that asks for it', async () => {
+    const { root, calls } = await show();
+    await choose(root, 'earlier-conversation');
+    await confirmYes(root);
+    expect(calls.migrate).toHaveLength(1);
+    expect(calls.migrate[0]?.[0]).toBe('s-run');
+    expect(calls.migrate[0]?.[6]).toBe('previous');
   });
 
   it('restarts the CLI through a same-login migration', async () => {

@@ -39,6 +39,7 @@ describe('SESSION_ACTION_IDS', () => {
       'move-machine',
       'add-mcp',
       'restart',
+      'earlier-conversation',
       'resume',
       'stop',
     ]);
@@ -70,6 +71,27 @@ describe('CORE_SESSION_ACTIONS — a controlled, running ferret', () => {
   it('offers Add MCP server only when the host can render it', () => {
     expect(idsFor(context('running'))).not.toContain(SESSION_ACTION_IDS.addMcp);
     expect(idsFor(context('running', { renderAddMcp: () => null }))).toContain(SESSION_ACTION_IDS.addMcp);
+  });
+
+  it('offers Go back to the earlier conversation only where the host can, as a confirm after Restart', async () => {
+    let asked = 0;
+    const offered = context('running', {
+      restartOnEarlierConversation: async () => {
+        asked += 1;
+      },
+    });
+    const ids = idsFor(offered);
+    expect(idsFor(context('running'))).not.toContain(SESSION_ACTION_IDS.earlierConversation);
+    expect(ids.indexOf(SESSION_ACTION_IDS.earlierConversation)).toBe(ids.indexOf(SESSION_ACTION_IDS.restart) + 1);
+    expect(idsFor({ ...offered, view: sessionView('a1', { state: { status: 'stopped' } }) })).not.toContain(
+      SESSION_ACTION_IDS.earlierConversation,
+    );
+    const entry = sessionActionSections(CORE_SESSION_ACTIONS, offered)
+      .flatMap(section => section.entries)
+      .find(found => found.id === SESSION_ACTION_IDS.earlierConversation);
+    expect(entry?.label).toBe('Go back to the earlier conversation…');
+    if (entry?.kind === 'confirm') await entry.run();
+    expect(asked).toBe(1);
   });
 
   it('move to another machine exists but is always unavailable', () => {

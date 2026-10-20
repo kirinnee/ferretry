@@ -17,6 +17,10 @@ export function registerMigrationCommands(program: Command, controller: Migratio
       '--force-inflight',
       'go ahead even though the daemon could not show that what the agent is running is safe to stop (the daemon otherwise refuses; the move is journalled)',
     )
+    .option(
+      '--conversation <choice>',
+      'resume (default) continues the conversation the session is on; fresh starts a new one; previous goes back to the one an earlier Restart left behind',
+    )
     .option('--request-id <id>', 'stable idempotency key for an explicit retry of this migration')
     .option('--json', 'print the migrated session as JSON')
     .action(async (id: string, options: MigrationCommandOptions) => {

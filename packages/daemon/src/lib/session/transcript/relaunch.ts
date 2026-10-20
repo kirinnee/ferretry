@@ -14,9 +14,10 @@
  * WHY EXISTENCE OF THE TRANSCRIPT IS THE CONDITION, rather than a turn counter. The question this
  * has to answer is "has the harness already created this session?", and the transcript file IS the
  * harness's own record of having done so. A counter is a second source of truth that can disagree:
- * a migration relaunch is the FIRST launch of a freshly minted harness session on turn five, and a
- * start whose harness died before writing anything is the first launch of one on turn one. Both are
- * answered correctly by looking at whether the file exists.
+ * a migration the person chose to start fresh is the FIRST launch of a freshly minted harness session
+ * on turn five, while a Restart carries the conversation it has and resumes it; and a start whose
+ * harness died before writing anything is the first launch of one on turn one. All are answered
+ * correctly by looking at whether the file exists.
  */
 
 /** The Claude flag a start uses to name the session it is creating. */

@@ -8,6 +8,7 @@ import {
   type ForkSessionOutcome,
   type IFyApiClient,
   type ContextDowngrade,
+  type MigrationConversation,
   MigrationRefusedBodySchema,
   type MigrationRefusal,
   type SessionView,
@@ -120,13 +121,29 @@ export class RestartDowngradeRefused extends Error {
   }
 }
 
+/**
+ * The daemon refused a Restart because the conversation could not go with it — it never silently
+ * opens a new one. Nothing was restarted. `reason` is the daemon's plain sentence;
+ * {@link RestartUnresumable.restartAnyway} starts FRESH, which only the person may choose.
+ */
+export class RestartUnresumable extends Error {
+  constructor(
+    readonly reason: string,
+    readonly restartAnyway: () => Promise<SessionView>,
+  ) {
+    super(reason);
+  }
+}
+
 /** What a Restart the daemon paused was paused for. */
-export type PausedRestart = RestartRefused | RestartDowngradeRefused;
+export type PausedRestart = RestartRefused | RestartDowngradeRefused | RestartUnresumable;
 
 /** Which refusals the person has already confirmed, so a chain of two never asks the first again. */
 interface RestartConsent {
   readonly forceInflight?: boolean;
   readonly allowContextDowngrade?: boolean;
+  /** Absent, the daemon resumes the conversation or refuses; see `MigrationConversation`. */
+  readonly conversation?: MigrationConversation;
 }
 
 /**
@@ -155,9 +172,12 @@ export const restartWithResume = async (
       consent.allowContextDowngrade === true,
       requestId,
       consent.forceInflight,
+      ...(consent.conversation === undefined ? [] : [consent.conversation]),
     );
   } catch (reason) {
     if (!(reason instanceof FyHttpError)) throw reason;
+    if (reason.code === 'conversation_unresumable')
+      throw new RestartUnresumable(reason.message, async () => await again({ conversation: 'fresh' }));
     if (reason.code === 'context_downgrade_refused')
       throw new RestartDowngradeRefused(downgradeOf(reason), async () => await again({ allowContextDowngrade: true }));
     if (reason.code !== 'migration_refused') throw reason;
@@ -167,3 +187,14 @@ export const restartWithResume = async (
     throw reason;
   }
 };
+
+/**
+ * The repair for a ferret an earlier Restart moved onto a new, empty conversation: restart it on the
+ * conversation it had before — the newest other one on its login that names this ferret. Refusals are
+ * the Restart's own, so the same panel answers them.
+ */
+export const restartOnEarlierConversation = async (
+  client: Pick<IFyApiClient, 'migrate'>,
+  view: SessionView,
+  requestId: string,
+): Promise<SessionView> => await restartWithResume(client, view, requestId, { conversation: 'previous' });

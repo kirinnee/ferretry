@@ -1,4 +1,4 @@
-import type { SessionView } from '@ferretry/protocol';
+import type { MigrationConversation, SessionView } from '@ferretry/protocol';
 import type { IMigrationGateway } from '../../../src/lib/migration/ports.ts';
 import { capturedPresenter } from '../session/controller-doubles.ts';
 import { sessionView } from '../session/session-fixtures.ts';
@@ -10,6 +10,7 @@ interface MigrationCall {
   readonly allowContextDowngrade?: boolean;
   readonly forceInflight?: boolean;
   readonly requestId?: string;
+  readonly conversation?: MigrationConversation;
 }
 
 class RecordingMigrationGateway implements IMigrationGateway {
@@ -30,6 +31,7 @@ class RecordingMigrationGateway implements IMigrationGateway {
     allowContextDowngrade?: boolean,
     requestId?: string,
     forceInflight?: boolean,
+    conversation?: MigrationConversation,
   ): Promise<SessionView> {
     this.calls.push({
       id,
@@ -38,6 +40,7 @@ class RecordingMigrationGateway implements IMigrationGateway {
       ...(allowContextDowngrade === undefined ? {} : { allowContextDowngrade }),
       ...(requestId === undefined ? {} : { requestId }),
       ...(forceInflight === undefined ? {} : { forceInflight }),
+      ...(conversation === undefined ? {} : { conversation }),
     });
     return Promise.resolve(this.response);
   }
