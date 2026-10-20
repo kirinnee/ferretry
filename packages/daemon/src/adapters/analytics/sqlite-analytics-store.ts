@@ -198,6 +198,10 @@ interface StoredPricingProvenance {
  * build multiplies, would flow onward as a valid price and be totalled in front of an operator. The
  * protocol owns what each of these values may be, so the same schemas decide it here.
  *
+ * A `model_catalog` row keeps the catalog id in the provider column (a catalog id, not a maker — the
+ * column predates the third provenance, and a schema migration for one label was not worth it) and its
+ * pricing page in the address column; it never synced, exactly as a manual row never did.
+ *
  * A `provider_sync` row missing its provider or its address is likewise NOT a manual entry: it is a
  * row nobody can explain, and reading it as manual would quietly relabel where a price came from.
  * Every failure returns null, which is the path already taken for unreadable pricing evidence — the
@@ -217,7 +221,9 @@ function pricingProvenanceFromRow(row: SessionRow): StoredPricingProvenance | nu
   const source = AnalyticsPricingSourceSchema.safeParse(
     row.pricing_source_kind === 'provider_sync'
       ? { kind: 'provider_sync', provider: row.pricing_source_provider, sourceUrl: row.pricing_source_url }
-      : { kind: row.pricing_source_kind },
+      : row.pricing_source_kind === 'model_catalog'
+        ? { kind: 'model_catalog', catalog: row.pricing_source_provider, sourceUrl: row.pricing_source_url }
+        : { kind: row.pricing_source_kind },
   );
   // NARROWER THAN THE PROTOCOL'S OWN UNION, on purpose. `image` and `tool_call` are valid rate units
   // in the catalog, but a stored SNAPSHOT only ever holds slots this build multiplies by a token
@@ -232,7 +238,7 @@ function pricingProvenanceFromRow(row: SessionRow): StoredPricingProvenance | nu
   // is PARSED too — "not null" is not the same as "a time anyone can read".
   const syncedAt = row.pricing_last_synced_at === null ? null : InstantSchema.safeParse(row.pricing_last_synced_at);
   if (syncedAt !== null && !syncedAt.success) return null;
-  if (source.data.kind === 'manual' && syncedAt !== null) return null;
+  if (source.data.kind !== 'provider_sync' && syncedAt !== null) return null;
   if (source.data.kind === 'provider_sync' && (syncedAt === null || source.data.provider !== provider.data)) {
     return null;
   }
@@ -410,8 +416,8 @@ function values(session: AnalyticsStoredSession): readonly (string | number | nu
     priced?.rate.currency ?? null,
     priced?.rate.rateUnit ?? null,
     source?.kind ?? null,
-    source?.kind === 'provider_sync' ? source.provider : null,
-    source?.kind === 'provider_sync' ? source.sourceUrl : null,
+    source?.kind === 'provider_sync' ? source.provider : source?.kind === 'model_catalog' ? source.catalog : null,
+    source?.kind === 'provider_sync' || source?.kind === 'model_catalog' ? source.sourceUrl : null,
     priced?.rate.lastSyncedAt ?? null,
     priced?.rate.verifiedAt ?? null,
     priced?.rate.validFrom ?? null,

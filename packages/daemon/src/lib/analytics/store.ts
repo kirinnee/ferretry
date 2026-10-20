@@ -189,7 +189,8 @@ export function analyticsPricingCatalogFingerprint(catalog: readonly AnalyticsPr
         // fingerprint, and a hand-written field list is exactly how one would silently stop doing so.
         ...ANALYTICS_PRICING_RATE_SLOTS.map(slot => rate.rates[slot]),
         rate.source.kind,
-        rate.source.kind === 'provider_sync' ? rate.source.sourceUrl : null,
+        rate.source.kind === 'manual' ? null : rate.source.sourceUrl,
+        rate.source.kind === 'model_catalog' ? rate.source.catalog : null,
         rate.verifiedAt,
         rate.validFrom,
         rate.validThrough,

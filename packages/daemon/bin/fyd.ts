@@ -4719,9 +4719,12 @@ function createAnalyticsIngestion(
   });
 }
 
-/** The analytics read, over the rows ingestion materialised. */
-function createAnalyticsSubsystem(ingestion: AnalyticsIngestionService): AnalyticsSubsystem {
-  return { index: () => ingestion.read() };
+/** The analytics read, over the rows ingestion materialised, stamped with this machine's name. */
+function createAnalyticsSubsystem(
+  ingestion: AnalyticsIngestionService,
+  machine: () => string | null,
+): AnalyticsSubsystem {
+  return { index: () => ingestion.read(), machine };
 }
 
 /**
@@ -5635,6 +5638,8 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
   // this composition root so the attachment store can key state by daemon
   // without widening the public pairing route interface.
   let attachmentDaemonId: string | undefined;
+  // The name pairing gave this machine, stamped on analytics rows as the `machine` label.
+  let analyticsMachineName: string | undefined;
   const clock = new SystemClock();
   const millisecondClock = { now: () => Date.now() };
   const environment = new RuntimeEnvironment(process.env, () => userHome);
@@ -6765,6 +6770,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       const repository = new StatePairingRepository(paths, stateFiles, cryptography);
       const state = await repository.open(hostname());
       attachmentDaemonId = state.daemonId;
+      analyticsMachineName = state.daemonName;
       const credentials = new PairingDeviceRegistry(state.daemonId, state.devices);
       // Read BEFORE pairing is built: the idle period and the step-up window are both asked of it.
       let pairingService: PairingService | undefined;
@@ -8317,7 +8323,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         }),
         tasks: createTaskSubsystem(paths, storage, clock, taskBoards, taskBoardTaskActionAuthorizer(boards)),
         taskBoards: boards,
-        analytics: createAnalyticsSubsystem(analyticsIngestion),
+        analytics: createAnalyticsSubsystem(analyticsIngestion, () => analyticsMachineName ?? hostname()),
         analyticsPricing,
         analyticsIngest: analyticsIngestion,
         terminals: terminalSubsystem,
