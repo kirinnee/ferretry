@@ -71,16 +71,7 @@ describe('the session migrate mount', () => {
     should(view.config.id).equal('s1');
     should(view.config.agent).equal('codex-auto');
     should(migrator.migrations).deepEqual([
-      [
-        's1',
-        {
-          agent: 'codex-auto',
-          model: 'gpt-5.6-terra',
-          allowContextDowngrade: false,
-          forceInflight: false,
-          conversation: 'resume',
-        },
-      ],
+      ['s1', { agent: 'codex-auto', model: 'gpt-5.6-terra', allowContextDowngrade: false, forceInflight: false }],
     ]);
   });
 

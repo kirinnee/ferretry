@@ -237,7 +237,7 @@ async function migrate(
     ...(request.model === undefined ? {} : { model: request.model }),
     allowContextDowngrade: request.allowContextDowngrade,
     forceInflight: request.forceInflight,
-    conversation: request.conversation,
+    ...(request.conversation === undefined ? {} : { conversation: request.conversation }),
   };
   // The fingerprint is the PARSED target, not the raw bytes: the start's digest has to hash the bytes
   // because a third party presents it later as proof, whereas this only ever compares two requests
@@ -247,7 +247,7 @@ async function migrate(
     target.model ?? null,
     target.allowContextDowngrade,
     target.forceInflight,
-    target.conversation,
+    target.conversation ?? 'resume',
   ]);
   const view = await guard
     .run({ sessionId, requestId: id }, fingerprint, async () => await subsystem.migrate(sessionId, target))

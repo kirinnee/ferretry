@@ -933,8 +933,12 @@ export const MigrateSessionRequestSchema = z.strictObject({
   allowContextDowngrade: z.boolean().default(false),
   /** Proceed past a refusal the in-flight inventory raised. Only an explicit, human-confirmed Restart anyway sets it. */
   forceInflight: z.boolean().default(false),
-  /** What happens to the conversation the session is bound to. See {@link MigrationConversationSchema}. */
-  conversation: MigrationConversationSchema.default('resume'),
+  /**
+   * What happens to the conversation the session is bound to; omitted means `resume`. See
+   * {@link MigrationConversationSchema}. Optional rather than defaulted so a client never sends it
+   * unasked: a daemon that predates the field refuses an unknown key, and Restart must keep working there.
+   */
+  conversation: MigrationConversationSchema.optional(),
 });
 export type MigrateSessionRequest = z.infer<typeof MigrateSessionRequestSchema>;
 export type MigrateSessionRequestInput = z.input<typeof MigrateSessionRequestSchema>;

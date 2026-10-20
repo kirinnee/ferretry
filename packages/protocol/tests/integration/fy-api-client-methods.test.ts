@@ -584,6 +584,16 @@ const CASES: readonly MethodCase[] = [
     expected: sessionView,
   },
   {
+    name: 'migrate onto the earlier conversation only when it is asked for',
+    invoke: client =>
+      client.migrate(SESSION_ID, 'claude-auto-loge', undefined, false, 'req-earlier', false, 'previous'),
+    verb: 'POST',
+    path: '/v1/sessions/session-1/migrate',
+    body: { agent: 'claude-auto-loge', allowContextDowngrade: false, forceInflight: false, conversation: 'previous' },
+    response: sessionResponse,
+    expected: sessionView,
+  },
+  {
     name: 'rename with a name',
     invoke: client => client.rename(SESSION_ID, 'Cover Typed Methods'),
     verb: 'POST',
