@@ -121,6 +121,12 @@ export interface DeviceControls {
   /** Every paired machine's sessions in the list, or only the machine on screen's. */
   readonly sessionsList: SessionsListScope;
   /**
+   * The daemon ids in the order the reader dragged their machines into on THIS device. A preference
+   * over the pairing order, reconciled against who is paired now (`lib/machine-order.ts`), so it may
+   * name an unpaired machine and omit a new one. Empty = the pairing order.
+   */
+  readonly machineOrder: readonly string[];
+  /**
    * Which keys open the composer's reference menu: the `@` ladder, the direct
    * symbols, or both (`SuggestionKeys`).
    *
@@ -163,6 +169,7 @@ export const DEFAULT_DEVICE_CONTROLS: DeviceControls = Object.freeze({
   motion: 'system',
   sidebarCollapsed: false,
   sessionsList: 'all',
+  machineOrder: Object.freeze([]),
   suggestionKeys: DEFAULT_SUGGESTION_KEYS,
   skillSuggestions: true,
   composerVimMode: false,
@@ -232,6 +239,12 @@ const readProjectScope = (value: unknown): string | null =>
 /** A persisted flag, or that field's own default — never another field's. */
 const readFlag = (value: unknown, fallback: boolean): boolean => (typeof value === 'boolean' ? value : fallback);
 
+/** A stored machine order: its non-blank, distinct string ids; anything else is the empty default. */
+const readMachineOrder = (value: unknown): readonly string[] =>
+  Array.isArray(value)
+    ? [...new Set(value.filter((id): id is string => typeof id === 'string' && id.trim() !== ''))]
+    : DEFAULT_DEVICE_CONTROLS.machineOrder;
+
 const readDeviceControls = (value: unknown): DeviceControls => {
   const fields = (value && typeof value === 'object' ? value : {}) as Record<string, unknown>;
   return {
@@ -253,6 +266,7 @@ const readDeviceControls = (value: unknown): DeviceControls => {
       fields.composerEnterKey === 'send' || fields.composerEnterKey === 'newline' ? fields.composerEnterKey : null,
     sidebarCollapsed: readFlag(fields.sidebarCollapsed, DEFAULT_DEVICE_CONTROLS.sidebarCollapsed),
     sessionsList: fields.sessionsList === 'current' ? 'current' : DEFAULT_DEVICE_CONTROLS.sessionsList,
+    machineOrder: readMachineOrder(fields.machineOrder),
     // The two switches this choice replaced (`mentionSuggestions`, `directReferenceSuggestions`) may
     // still sit in a stored record; they are left unread rather than translated, because the new
     // default is a deliberate change of offer and an old "all on" is not a choice of keys.

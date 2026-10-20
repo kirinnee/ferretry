@@ -4034,6 +4034,47 @@ describe('the sessions bar', () => {
     }
   });
 
+  it('reorders the machines on this device from a heading menu, and the switcher and the list follow', async () => {
+    const { view, store } = await renderShell(`/d/${ALPHA}/settings`, [alpha.daemonId, beta.daemonId], {
+      sessions: ['one'],
+    });
+    try {
+      await settle();
+      const column = must(view.container.querySelector('[data-sessions-bar="column"]'), 'the sessions column');
+      const groups = () =>
+        [...column.querySelectorAll('[data-sbar-machine-group]')].map(node =>
+          node.getAttribute('data-sbar-machine-group'),
+        );
+      expect(groups()).toEqual([ALPHA, BETA]);
+      await interact(() =>
+        must(
+          column.querySelector<HTMLElement>(`[data-sbar-machine-group="${BETA}"] .fy-sbar__machine-more`),
+          'the menu on the second machine',
+        ).click(),
+      );
+      await interact(() =>
+        must(
+          [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(item => item.textContent === 'Move up'),
+          'Move up',
+        ).click(),
+      );
+      await settle();
+      expect(groups()).toEqual([BETA, ALPHA]);
+      expect(store.controls.snapshot().device.machineOrder).toEqual([BETA, ALPHA]);
+      // The pairing record did not change: the order is this browser's preference alone.
+      expect(store.connections.getSnapshot().connections.map(record => record.daemonId)).toContain(alpha.daemonId);
+      await interact(() =>
+        must(column.querySelector<HTMLElement>('[data-sbar-machine]'), 'the machine switcher').click(),
+      );
+      const items = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].map(item => item.textContent);
+      expect(items.indexOf(items.find(text => text?.includes('beta')) ?? '')).toBeLessThan(
+        items.indexOf(items.find(text => text?.includes('alpha')) ?? ''),
+      );
+    } finally {
+      await view.unmount();
+    }
+  });
+
   it('opens another machine’s row as THAT machine, holds the list still, and marks every machine’s learners', async () => {
     // Both machines run a session called "one" and one called "two"; each machine says a different one learns.
     const { view, store } = await renderShell(`/d/${ALPHA}/settings`, [alpha.daemonId, beta.daemonId], {
