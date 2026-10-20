@@ -353,3 +353,52 @@
   transform: translate(-50%, -50%);
   content: '';
 }
+
+/* A ferret's switch marks (`switch-marks.tsx`): Learning, Hypermedia and Pack mode, each only while on.
+   Accent ink like the graduation cap they sit beside; the open row's accent is its fill, so there the
+   marks take the row's own ink. */
+.fy-switch-marks {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 4px;
+}
+.fy-switch-mark {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  color: var(--accent);
+}
+.fy-switch-mark--button {
+  position: relative;
+  justify-content: center;
+  min-width: 22px;
+  min-height: 22px;
+  padding: 0;
+  border: var(--stroke-control) solid transparent;
+  border-radius: var(--radius-control);
+  background: transparent;
+  cursor: pointer;
+}
+.fy-switch-mark--button:hover {
+  border-color: var(--accent-border);
+  background: var(--accent-soft);
+}
+.fy-switch-mark--button:focus-visible {
+  outline: var(--stroke-focus, 2px) solid var(--focus, var(--accent));
+  outline-offset: 1px;
+}
+/* Under a finger the target is the full floor tall and wide, laid invisibly over the 22px mark so the
+   header keeps its weight — the trade the drawer's filter chips make. */
+.fy-switch-mark--button::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: max(100%, var(--target-floor));
+  height: max(100%, var(--target-floor));
+  transform: translate(-50%, -50%);
+}
+.fy-sbar__session[aria-current='page'] .fy-switch-mark {
+  color: var(--nav-sel-fg, var(--accent));
+}

@@ -97,4 +97,45 @@ describe('FileConversationFiles', () => {
     // Assert
     should(found).deepEqual([{ id: 'thread-a', file: rollout, modifiedMs: 1_800_000_000_000, mentionsSession: true }]);
   });
+
+  it('should read a whole file, and nothing at all when it is missing, a folder or over the limit', async () => {
+    // Arrange
+    const home = await tempDirectory('conversation-read');
+    const file = join(home, 'a.jsonl');
+    await put(file, 'twelve bytes', 1_800_000_000);
+    const subject = new FileConversationFiles(new NodeCodexRolloutIndex());
+
+    // Act
+    const whole = await subject.read(file, 12);
+    const over = await subject.read(file, 11);
+    const missing = await subject.read(join(home, 'gone.jsonl'), 100);
+    const folder = await subject.read(home, 1_000_000);
+
+    // Assert
+    should(whole).equal('twelve bytes');
+    should(over).be.undefined();
+    should(missing).be.undefined();
+    should(folder).be.undefined();
+  });
+
+  it('should write a converted file privately and whole, and leave no temporary when it cannot', async () => {
+    // Arrange
+    const home = await tempDirectory('conversation-write');
+    const file = join(home, 'codex', 'sessions', '2026', '10', '20', 'rollout.jsonl');
+    const blocked = join(home, 'blocked');
+    await mkdir(join(blocked, 'occupied'), { recursive: true });
+    const subject = new FileConversationFiles(new NodeCodexRolloutIndex(), () => 'fixed');
+
+    // Act
+    await subject.write(file, 'converted\n');
+    await subject.write(join(home, 'image.png'), new Uint8Array([1, 2, 3]));
+    const refused = subject.write(blocked, 'cannot replace a folder');
+
+    // Assert
+    should(await readFile(file, 'utf8')).equal('converted\n');
+    should((await stat(file)).mode & 0o777).equal(0o600);
+    should([...(await readFile(join(home, 'image.png')))]).deepEqual([1, 2, 3]);
+    await should(refused).be.rejected();
+    should(await readdir(home)).not.containEql('.blocked.fixed.tmp');
+  });
 });

@@ -18,6 +18,7 @@ import type {
   UsageFeedView,
 } from './service.ts';
 import type {
+  ConversionPreview,
   FyEvent,
   FyEventStreamIdle,
   MigrationConversation,
@@ -179,6 +180,11 @@ export interface IFyApiClient {
     /** Omitted, the daemon resumes the bound conversation or refuses; see `MigrationConversation`. */
     conversation?: MigrationConversation,
   ): Promise<SessionView>;
+  /**
+   * What a cross-harness move onto `agent` (`conversation: 'convert'`) would carry, or why it cannot be
+   * made. A read: nothing is written and no request id is needed.
+   */
+  conversionPreview(id: string, agent: string, model?: string): Promise<ConversionPreview>;
   /**
    * Start a cross-harness handover of a top-level session. Returns the durable receipt at its current
    * phase (HTTP 202); poll it with `handoverReceipt`. `requestId` is the LOGICAL identity of one handover

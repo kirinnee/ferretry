@@ -255,6 +255,7 @@ export class PackService {
           wrapper: choice.runtime.wrapper,
           harness: choice.runtime.harness,
           model,
+          ...(choice.effort === undefined ? {} : { effort: choice.effort }),
           cwd,
           timeoutMs: config.probe.timeoutSeconds * 1_000,
         },

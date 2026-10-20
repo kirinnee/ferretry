@@ -4,14 +4,16 @@
  *
  * Right-click, long-press, the Menu key and Shift+F10 open the bar's one row menu (`SessionMenuContext`).
  *
- * The mark on the right is the row's one exception: "needs you", else the graduation-cap mark of a ferret that learns — or,
+ * The mark on the right is the row's one exception: "needs you", else the switch marks — the graduation cap of a ferret
+ * that learns, then Hypermedia and Pack mode while each is on (`switch-marks.tsx`) — or,
  * inside the all-machines Needs you group, the machine's name, because every row there needs you and
  * nothing else on the line says where it runs.
  */
 
 import type { SessionView } from '@ferretry/protocol';
 import { type ReactNode, useContext, useState } from 'react';
-import { PassiveLearningMark } from '../features/learning/passive-learning.tsx';
+import { hypermediaOn, packOn } from '../features/session-info/info-model.ts';
+import { SwitchMarks } from '../features/session-info/switch-marks.tsx';
 import { displayCallsign } from '../lib/callsign.ts';
 import type { DaemonId } from '../lib/daemon-connection.ts';
 import { daemonSessionPath } from '../lib/pages/routes.ts';
@@ -78,9 +80,9 @@ export function SessionsBarRow({
           <span className="fy-sbar__badge" data-sbar-needs-you="">
             needs you
           </span>
-        ) : learningPassive ? (
-          <PassiveLearningMark />
-        ) : null}
+        ) : (
+          <SwitchMarks hypermedia={hypermediaOn(view)} learning={learningPassive} pack={packOn(view)} />
+        )}
         {question === undefined ? null : (
           <span className="fy-sbar__question" data-sbar-question="">
             {question}

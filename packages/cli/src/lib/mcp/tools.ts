@@ -253,3 +253,15 @@ export const MCP_LESSON_TOOLS: readonly (McpToolDefinition & { readonly lessonTo
     ),
   },
 ];
+
+/**
+ * The `instructions` tool: which of its own system-prompt sections this ferret launched with, and how the
+ * owner turns each on — the `fy instructions` report. Answered by the server from the launch environment
+ * it inherited, the one the wrapper composed the prompt from, so nothing goes to the daemon.
+ */
+export const MCP_INSTRUCTIONS_TOOL: McpToolDefinition = {
+  name: 'instructions',
+  description:
+    'Which Ferretry sections of your system prompt you launched with (hypermedia, Pack mode, lessons) and how the owner turns each on. Check this before telling the owner a section is missing.',
+  inputSchema: object({}),
+};

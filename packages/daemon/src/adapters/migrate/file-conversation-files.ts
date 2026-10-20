@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { chmod, copyFile, mkdir, readdir, rename, rm, stat } from 'node:fs/promises';
+import { chmod, copyFile, mkdir, open, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
 import type { Harness } from '@ferretry/protocol';
 import type { ConversationFilesPort, PriorConversation } from '../../lib/migrate/conversation-carry.ts';
@@ -42,6 +42,40 @@ export class FileConversationFiles implements ConversationFilesPort {
       await copyFile(from, temporary);
       await chmod(temporary, 0o600);
       await rename(temporary, to);
+    } catch (failure) {
+      await rm(temporary, { force: true });
+      throw failure;
+    }
+  }
+
+  /**
+   * The whole file, or `undefined` when it is missing, unreadable or larger than `maxBytes`. Never a
+   * prefix: a transcript cut short would be converted without its newest turns, which are the ones
+   * that matter most.
+   */
+  async read(file: string, maxBytes: number): Promise<string | undefined> {
+    const handle = await open(file, 'r').catch(() => undefined);
+    if (handle === undefined) return undefined;
+    try {
+      const { size } = await handle.stat();
+      if (size > maxBytes) return undefined;
+      const buffer = new Uint8Array(size);
+      const { bytesRead } = await handle.read(buffer, 0, size, 0);
+      return new TextDecoder().decode(buffer.subarray(0, bytesRead));
+    } catch {
+      return undefined;
+    } finally {
+      await handle.close();
+    }
+  }
+
+  /** Atomic like {@link copy}: the harness about to resume this file must never see half of it. */
+  async write(file: string, data: string | Uint8Array): Promise<void> {
+    await mkdir(dirname(file), { recursive: true, mode: 0o700 });
+    const temporary = join(dirname(file), `.${basename(file)}.${this.uniqueId()}.tmp`);
+    try {
+      await writeFile(temporary, data, { mode: 0o600 });
+      await rename(temporary, file);
     } catch (failure) {
       await rm(temporary, { force: true });
       throw failure;

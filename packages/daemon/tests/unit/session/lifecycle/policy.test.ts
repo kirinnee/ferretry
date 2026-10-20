@@ -324,11 +324,11 @@ describe('session lifecycle policy', () => {
     const id = parseSessionId('session-1');
 
     // Act
-    const withNothingStored = sessionPaneEnvironment(id, {});
-    const beside = sessionPaneEnvironment(id, { FY_SESSION_BOARD_CAPABILITY: 'secret', TASK_BOARD: 'board-7' });
+    const withNothingStored = sessionPaneEnvironment(id, {}, 'auto');
+    const beside = sessionPaneEnvironment(id, { FY_SESSION_BOARD_CAPABILITY: 'secret', TASK_BOARD: 'board-7' }, 'auto');
     // A stored document is read-modify-written by the task-board delivery, so it CAN come back
     // carrying this name. The record wins: a merge must not be able to rename a live session.
-    const contradicted = sessionPaneEnvironment(id, { FY_SESSION_ID: 'somebody-else' });
+    const contradicted = sessionPaneEnvironment(id, { FY_SESSION_ID: 'somebody-else' }, 'auto');
 
     // Assert
     should(withNothingStored).deepEqual({ FY_HYPERMEDIA: '0', FY_SESSION_ID: 'session-1' });
@@ -344,7 +344,7 @@ describe('session lifecycle policy', () => {
     should(sessionPaneEnvironment(id, {}, 'auto')).have.property('FY_HYPERMEDIA', '0');
     should(sessionPaneEnvironment(id, { FY_HYPERMEDIA: '1' }, 'auto')).have.property('FY_HYPERMEDIA', '1');
     should(sessionPaneEnvironment(id, { FY_HYPERMEDIA: '0' }, 'interactive')).have.property('FY_HYPERMEDIA', '0');
-    should(sessionPaneEnvironment(id, { FY_HYPERMEDIA: '0' })).deepEqual({
+    should(sessionPaneEnvironment(id, { FY_HYPERMEDIA: '0' }, 'interactive')).deepEqual({
       FY_HYPERMEDIA: '0',
       FY_SESSION_ID: 'session-1',
     });

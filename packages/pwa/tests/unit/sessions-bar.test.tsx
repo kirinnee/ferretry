@@ -120,6 +120,23 @@ describe('SessionsBar as a column', () => {
     expect(chip('nameless')).toBeNull();
   });
 
+  test('marks Hypermedia and Pack mode beside the cap, only while each is on', async () => {
+    const told = sessionView('told-1', { config: { teammate: 'ora', mode: 'interactive', cwd: '/work/ferretry' } });
+    const untold = sessionView('untold-1', {
+      config: { teammate: 'pim', mode: 'interactive', hypermedia: false, pack: false, cwd: '/work/ferretry' },
+    });
+    const { element } = bar({ sessions: [told, untold], learningPassive: new Set(['told-1']) });
+    view = await mount(element);
+    const marks = (id: string) =>
+      [...(view?.container.querySelectorAll(`[data-sbar-session="${id}"] [data-switch-marks] > *`) ?? [])].map(
+        node => node.getAttribute('data-switch-mark') ?? 'learning',
+      );
+    expect(marks('told-1')).toEqual(['learning', 'hypermedia', 'pack']);
+    expect(marks('untold-1')).toEqual([]);
+    // A row is a link, so its marks are pictures with words, never controls of their own.
+    expect(view.container.querySelector('[data-sbar-session="told-1"] button')).toBeNull();
+  });
+
   test('hides stopped sessions until "Show stopped" is ticked, and says how many it is hiding', async () => {
     const stopped = sessionView('old-1', {
       config: { teammate: 'ora', label: 'Finished work', cwd: '/work/ferretry' },

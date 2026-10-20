@@ -2,6 +2,7 @@ import {
   createSessionPaths,
   type FileSystemPort,
   type FoundationPaths,
+  harnessExitReason,
   hasSafeTerminalPaneIdentity,
   parseSessionId,
   type SessionId,
@@ -76,7 +77,14 @@ export class DurableTerminalPaneRegistrar {
     const identity = await this.tmux.paneIdentity(tmuxSession);
     if (identity === undefined) throw new Error('tmux did not prove the launched pane identity');
     const ticks = await this.incarnation.startOf(identity.pid);
-    if (ticks === undefined) throw new Error('the launched pane process has no stable incarnation identity');
+    if (ticks === undefined) {
+      // Almost always the harness having already exited: tmux keeps a dead pane — and its pid — on
+      // screen, while the process the pid named is gone. Saying so, with what it printed, is the
+      // reason a reader can act on; "no stable incarnation identity" described the symptom.
+      const pane = await this.tmux.state(tmuxSession);
+      if (!pane.alive || pane.dead) throw new Error(harnessExitReason(pane));
+      throw new Error('the launched pane process has no stable incarnation identity');
+    }
     const registration: RegisteredTerminalPane = {
       daemonId: this.daemonId,
       sessionId,

@@ -9,6 +9,7 @@ import {
   composerHolds,
   composerTransport,
   type DeliveryFrame,
+  harnessExitReason,
   landingEvidence,
   MAX_STARTUP_DIALOG_ATTEMPTS,
   nextReadinessStep,
@@ -443,14 +444,67 @@ describe('readiness steps', () => {
   it('should report an exited pane before reasoning about anything it is showing', () => {
     // Act
     const actual = [
-      nextReadinessStep({ ...IDLE, alive: false }, noAttempts),
-      nextReadinessStep({ ...IDLE, dead: true, exitCode: 137 }, noAttempts),
+      nextReadinessStep({ ...IDLE, alive: false, visible: '' }, noAttempts),
+      nextReadinessStep({ ...IDLE, dead: true, exitCode: 137, visible: '' }, noAttempts),
     ];
 
     // Assert
     should(actual).deepEqual([
       { kind: 'exited', reason: 'the interactive harness exited; tmux reported no exit code' },
       { kind: 'exited', reason: 'the interactive harness exited (137)' },
+    ]);
+  });
+});
+
+describe('harness exit reason', () => {
+  it('should quote the last lines a dead pane printed, so the card says why it exited', () => {
+    // Arrange
+    const frame: DeliveryFrame = {
+      ...IDLE,
+      dead: true,
+      exitCode: 2,
+      visible: [
+        'booting',
+        '',
+        'ferretry: ANTHROPIC_AUTH_TOKEN is not set — run: fy secret set DEEPSEEK_KEY',
+        '\u001b[31merror:\u001b[0m unknown option',
+        '',
+        'Pane is dead (status 2, Tue Oct 20 10:15:03 2026)',
+        '',
+      ].join('\n'),
+    };
+
+    // Act
+    const actual = nextReadinessStep(frame, noAttempts);
+
+    // Assert
+    should(actual).deepEqual({
+      kind: 'exited',
+      reason:
+        'the interactive harness exited (2): its last output was "booting / ferretry: ANTHROPIC_AUTH_TOKEN is not set — run: fy secret set DEEPSEEK_KEY / error: unknown option"',
+    });
+  });
+
+  it('should keep only the end of a runaway line and say nothing when the pane printed nothing', () => {
+    // Act
+    const actual = [
+      harnessExitReason({ exitCode: 1, visible: `${'a'.repeat(400)}b` }),
+      harnessExitReason({ visible: '\n  \n' }),
+      // tmux redraws a dead pane's screen; what the process printed last survives in the scrollback.
+      harnessExitReason({
+        exitCode: 2,
+        visible: 'Pane is dead (status 2)',
+        history: 'err-line\nPane is dead (status 2)',
+      }),
+      harnessExitReason({ exitCode: 2, visible: 'on screen', history: ' \n' }),
+    ];
+
+    // Assert
+    should(actual).deepEqual([
+      `the interactive harness exited (1): its last output was "…${'a'.repeat(299)}b"`,
+      'the interactive harness exited; tmux reported no exit code',
+      'the interactive harness exited (2): its last output was "err-line"',
+      'the interactive harness exited (2): its last output was "on screen"',
     ]);
   });
 });
