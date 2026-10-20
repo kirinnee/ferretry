@@ -3,6 +3,7 @@ import type {
   AnalyticsIndexStatus,
   AnalyticsLabel,
   AnalyticsMeasure,
+  AnalyticsMeasureKey,
   AnalyticsRawSession,
   AnalyticsResponse,
   ParsedAnalyticsQuery,
@@ -17,13 +18,6 @@ export interface AnalyticsQueryRecordsOptions {
 
 const DEFAULT_RAW_LIMIT = 100;
 const DEFAULT_GROUP_LIMIT = 100;
-
-/** Every field of an aggregate result that is a measure, so the table below cannot miss one. */
-type AnalyticsMeasureKey = {
-  [K in keyof AnalyticsAggregateResult]-?: NonNullable<AnalyticsAggregateResult[K]> extends AnalyticsMeasure
-    ? K
-    : never;
-}[keyof AnalyticsAggregateResult];
 
 /**
  * Which stored column answers each measure.
@@ -45,6 +39,7 @@ const metrics = {
   equivalentApiCostUsdMicros: 'equivalentApiCostUsdMicros',
   turns: 'turns',
   durationMs: 'durationMs',
+  activeDurationMs: 'activeDurationMs',
   timeToFirstOutputMs: 'timeToFirstOutputMs',
   contextEndPercent: 'contextEndPercent',
 } as const satisfies { readonly [K in AnalyticsMeasureKey]: keyof AnalyticsRawSession };
@@ -69,6 +64,10 @@ function labelValues(record: AnalyticsRawSession): LabelValues {
     day: record.day,
     week: record.week,
     token_data: record.tokens === null ? 'unknown' : 'known',
+    runtime: record.agent,
+    project: record.cwd,
+    session: record.id,
+    machine: record.machine,
   };
 }
 

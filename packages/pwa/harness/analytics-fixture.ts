@@ -56,6 +56,8 @@ const row = (index: number, day: string, overrides: Partial<AnalyticsRawSession>
     reasoningTokens: null,
     turns: 10 + (index % 40),
     durationMs: 600_000,
+    activeDurationMs: 420_000,
+    machine: null,
     timeToFirstOutputMs: 1_200,
     contextEndPercent: 30 + (index % 60),
     stalled: false,

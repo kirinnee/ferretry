@@ -24,8 +24,54 @@ export const AnalyticsLabelSchema = z.enum([
   'day',
   'week',
   'token_data',
+  // The v2 vocabulary. Each is a NAME for a fact the row already carries, chosen so a query reads the
+  // way the Insights page talks: `runtime` is the session's `agent`, `project` is `repo`, `session`
+  // is `id`. `machine` is new evidence — the daemon that answered — and is stamped at query time.
+  'runtime',
+  'project',
+  'session',
+  'machine',
 ]);
 export type AnalyticsLabel = z.infer<typeof AnalyticsLabelSchema>;
+
+/**
+ * The quantity a query is about. Exactly one measure of the aggregate result answers each, through
+ * `ANALYTICS_METRIC_MEASURES`; the unit is the metric's own (USD, seconds, a count), never the
+ * measure's storage unit. Definitions: docs/insights-query.md.
+ */
+export const AnalyticsMetricSchema = z.enum([
+  'tokens',
+  'tokens_input',
+  'tokens_output',
+  'tokens_cache_read',
+  'tokens_cache_write',
+  'tokens_reasoning',
+  'cost_usd',
+  'turns',
+  'sessions',
+  'duration_active_seconds',
+  'duration_wall_seconds',
+]);
+export type AnalyticsMetric = z.infer<typeof AnalyticsMetricSchema>;
+
+/**
+ * Which sessions a query reads, by creation instant.
+ *
+ * RELATIVE is a rolling window ending when the daemon answers (`[7d]` = the last 7 × 24 h). ABSOLUTE
+ * is half-open, `from` inclusive and `to` exclusive, so two adjacent ranges never count a session
+ * twice; the date spelling `[2026-10-01..2026-10-20]` includes the whole of its last day.
+ */
+export const AnalyticsRangeSchema = z
+  .discriminatedUnion('kind', [
+    z.object({ kind: z.literal('relative'), seconds: PositiveIntegerSchema }),
+    z.object({ kind: z.literal('absolute'), from: InstantSchema, to: InstantSchema }),
+  ])
+  .superRefine((value, context) => {
+    if (value.kind === 'absolute' && !(Date.parse(value.from) < Date.parse(value.to))) {
+      context.addIssue({ code: 'custom', message: 'range must end after it starts', path: ['to'] });
+    }
+  });
+export type AnalyticsRange = z.infer<typeof AnalyticsRangeSchema>;
 
 export const AnalyticsMatcherSchema = z.object({
   label: AnalyticsLabelSchema,
@@ -39,8 +85,10 @@ export const ParsedAnalyticsQuerySchema = z.object({
   source: z.string(),
   canonical: z.string(),
   aggregation: AnalyticsAggregationSchema.optional(),
+  metric: AnalyticsMetricSchema.optional(),
   groupBy: z.array(AnalyticsLabelSchema),
   matchers: z.array(AnalyticsMatcherSchema),
+  range: AnalyticsRangeSchema.optional(),
 });
 export type ParsedAnalyticsQuery = z.infer<typeof ParsedAnalyticsQuerySchema>;
 
@@ -87,7 +135,15 @@ export const AnalyticsAggregateResultSchema = z.object({
   reasoningTokens: AnalyticsMeasureSchema,
   equivalentApiCostUsdMicros: AnalyticsMeasureSchema,
   turns: AnalyticsMeasureSchema,
+  /** Wall time: session finish − session start, in milliseconds. */
   durationMs: AnalyticsMeasureSchema,
+  /**
+   * Active time: Σ over the session's turns of (last record − prompt), in milliseconds, from the
+   * transcript's own timestamps. DEFAULTED on read, not required: a daemon older than this field
+   * answers without it, and a merged fleet view must still parse that machine's answer — as a measure
+   * with no evidence (`known: 0, total: 0`), never as a zero.
+   */
+  activeDurationMs: AnalyticsMeasureSchema.default({ value: null, known: 0, total: 0 }),
   timeToFirstOutputMs: AnalyticsMeasureSchema,
   contextEndPercent: AnalyticsMeasureSchema,
 });
@@ -127,6 +183,10 @@ export const AnalyticsRawSessionSchema = z.object({
   reasoningTokens: z.number().finite().nonnegative().nullable(),
   turns: z.number().finite().nonnegative().nullable(),
   durationMs: z.number().finite().nonnegative().nullable(),
+  /** See the aggregate measure. Defaulted on read for the same older-daemon reason. */
+  activeDurationMs: z.number().finite().nonnegative().nullable().default(null),
+  /** The daemon that answered for this row, stamped when the query ran. Defaulted for older daemons. */
+  machine: z.string().nullable().default(null),
   timeToFirstOutputMs: z.number().finite().nonnegative().nullable(),
   contextEndPercent: z.number().finite().min(0).max(100).nullable(),
   stalled: z.boolean(),
@@ -153,13 +213,20 @@ const AnalyticsResponseBaseShape = {
   query: z.string(),
   parsed: z.object({
     aggregation: AnalyticsAggregationSchema.optional(),
+    metric: AnalyticsMetricSchema.optional(),
     groupBy: z.array(AnalyticsLabelSchema),
     matchers: z.array(AnalyticsMatcherSchema),
+    range: AnalyticsRangeSchema.optional(),
   }),
   scope: z.object({
     allSessions: z.literal(true),
     indexed: NonNegativeIntegerSchema,
     matched: NonNegativeIntegerSchema,
+    /**
+     * The instants a range resolved to when the daemon answered, half-open. Present exactly when the
+     * query carried a range, so a relative `[7d]` can be drawn on an axis without guessing the clock.
+     */
+    window: z.object({ from: InstantSchema, to: InstantSchema }).optional(),
   }),
   index: AnalyticsIndexStatusSchema,
 };
@@ -192,3 +259,63 @@ export const AnalyticsResponseSchema = z
     }
   });
 export type AnalyticsResponse = z.infer<typeof AnalyticsResponseSchema>;
+
+/** Every aggregate measure field, derived from the schema so a new measure cannot be missed. */
+export type AnalyticsMeasureKey = {
+  [K in keyof AnalyticsAggregateResult]-?: NonNullable<AnalyticsAggregateResult[K]> extends AnalyticsMeasure
+    ? K
+    : never;
+}[keyof AnalyticsAggregateResult];
+
+/**
+ * Which result field answers each metric, and the factor that turns its stored unit into the metric's.
+ *
+ * `sessions` is the group's session count rather than a measure, so it has no measure key. A MAPPED
+ * TYPE over the metric enum: a metric the grammar grows without an answer here is a compile error.
+ */
+export const ANALYTICS_METRIC_MEASURES: {
+  readonly [M in AnalyticsMetric]: { readonly measure: AnalyticsMeasureKey | 'sessions'; readonly scale: number };
+} = {
+  tokens: { measure: 'tokens', scale: 1 },
+  tokens_input: { measure: 'inputTokens', scale: 1 },
+  tokens_output: { measure: 'outputTokens', scale: 1 },
+  tokens_cache_read: { measure: 'cachedInputTokens', scale: 1 },
+  tokens_cache_write: { measure: 'cacheWriteInputTokens', scale: 1 },
+  tokens_reasoning: { measure: 'reasoningTokens', scale: 1 },
+  cost_usd: { measure: 'equivalentApiCostUsdMicros', scale: 1e-6 },
+  turns: { measure: 'turns', scale: 1 },
+  sessions: { measure: 'sessions', scale: 1 },
+  duration_active_seconds: { measure: 'activeDurationMs', scale: 1e-3 },
+  duration_wall_seconds: { measure: 'durationMs', scale: 1e-3 },
+};
+
+/** One aggregate row's value for a metric, in the metric's unit, or `null` when it is not known. */
+export function analyticsMetricValue(result: AnalyticsAggregateResult, metric: AnalyticsMetric): number | null {
+  const { measure, scale } = ANALYTICS_METRIC_MEASURES[metric];
+  if (measure === 'sessions') return result.sessions;
+  const value = result[measure].value;
+  return value === null ? null : value * scale;
+}
+
+/** The raw-row field that answers each metric, in its stored unit; `sessions` is one per row. */
+const RAW_METRIC_FIELDS = {
+  tokens: 'tokens',
+  tokens_input: 'inputTokens',
+  tokens_output: 'outputTokens',
+  tokens_cache_read: 'cachedInputTokens',
+  tokens_cache_write: 'cacheWriteInputTokens',
+  tokens_reasoning: 'reasoningTokens',
+  cost_usd: 'equivalentApiCostUsdMicros',
+  turns: 'turns',
+  sessions: null,
+  duration_active_seconds: 'activeDurationMs',
+  duration_wall_seconds: 'durationMs',
+} as const satisfies { readonly [M in AnalyticsMetric]: keyof AnalyticsRawSession | null };
+
+/** One session row's value for a metric, in the metric's unit, or `null` when it is not known. */
+export function analyticsRawMetricValue(row: AnalyticsRawSession, metric: AnalyticsMetric): number | null {
+  const field = RAW_METRIC_FIELDS[metric];
+  if (field === null) return 1;
+  const value = row[field] ?? null;
+  return value === null ? null : value * ANALYTICS_METRIC_MEASURES[metric].scale;
+}

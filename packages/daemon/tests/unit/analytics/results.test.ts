@@ -1,6 +1,6 @@
 import { describe, it } from 'bun:test';
+import { type AnalyticsIndexStatus, type AnalyticsRawSession, compareProtocolVersions } from '@ferretry/protocol';
 import should from 'should';
-import { compareProtocolVersions, type AnalyticsIndexStatus, type AnalyticsRawSession } from '@ferretry/protocol';
 import { queryAnalyticsRecords } from '../../../src/lib/analytics/results.ts';
 
 const index: AnalyticsIndexStatus = {
@@ -42,6 +42,8 @@ function record(id: string, patch: Partial<AnalyticsRawSession> = {}): Analytics
     reasoningTokens: 12,
     turns: 2,
     durationMs: 1_000,
+    activeDurationMs: 500,
+    machine: null,
     timeToFirstOutputMs: 100,
     contextEndPercent: 40,
     stalled: false,

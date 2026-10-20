@@ -19,8 +19,12 @@ import type { AnalyticsUsageRefusal } from './usage-fold.ts';
  * the session's own durable documents, and `decideAnalyticsIndexSchema` already drops an index whose
  * version it does not recognise and rebuilds it. A migration here would be a second, hand-maintained
  * definition of a shape that one re-ingestion pass reproduces exactly.
+ *
+ * It is `4` because the row gained ACTIVE time (`active_duration_ms`), folded from transcript record
+ * timestamps. Every stored row must be re-folded to answer it, which is exactly what the version-driven
+ * drop-and-rebuild does; the version is also in every ingest signature, so no stale row survives.
  */
-export const ANALYTICS_INDEX_SCHEMA_VERSION = 3;
+export const ANALYTICS_INDEX_SCHEMA_VERSION = 4;
 
 /**
  * One session as the analytics index holds it.

@@ -179,6 +179,9 @@ export function deriveAnalyticsSessionRecord(
       ...tokens,
       turns: nonNegativeInteger(session.turns),
       durationMs: elapsed(durationStart, finishedAt),
+      activeDurationMs: null,
+      // Stamped by the query, never stored: the index is this daemon's alone, and its name can change.
+      machine: null,
       timeToFirstOutputMs: elapsed(durationStart, session.firstOutputAt),
       contextEndPercent: percentage(session.contextEndPercent),
       stalled: session.stalled,

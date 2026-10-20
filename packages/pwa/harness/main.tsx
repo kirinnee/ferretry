@@ -3997,6 +3997,8 @@ const ANALYTICS_RAW: AnalyticsResponse = {
       reasoningTokens: null,
       turns: 4,
       durationMs: null,
+      activeDurationMs: null,
+      machine: null,
       timeToFirstOutputMs: null,
       contextEndPercent: 22,
       stalled: false,

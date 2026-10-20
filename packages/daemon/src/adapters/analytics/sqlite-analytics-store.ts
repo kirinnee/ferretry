@@ -71,6 +71,7 @@ interface SessionRow {
   readonly reasoning_tokens: number | null;
   readonly turns: number | null;
   readonly duration_ms: number | null;
+  readonly active_duration_ms: number | null;
   readonly time_to_first_output_ms: number | null;
   readonly context_end_percent: number | null;
   readonly stalled: number;
@@ -135,6 +136,7 @@ const COLUMNS = [
   'reasoning_tokens',
   'turns',
   'duration_ms',
+  'active_duration_ms',
   'time_to_first_output_ms',
   'context_end_percent',
   'stalled',
@@ -338,6 +340,8 @@ function storedFromRow(row: SessionRow): AnalyticsStoredSession {
       reasoningTokens: row.reasoning_tokens,
       turns: row.turns,
       durationMs: row.duration_ms,
+      activeDurationMs: row.active_duration_ms,
+      machine: null,
       timeToFirstOutputMs: row.time_to_first_output_ms,
       contextEndPercent: row.context_end_percent,
       stalled: boolean(row.stalled),
@@ -386,6 +390,7 @@ function values(session: AnalyticsStoredSession): readonly (string | number | nu
     raw.reasoningTokens ?? null,
     raw.turns,
     raw.durationMs,
+    raw.activeDurationMs,
     raw.timeToFirstOutputMs,
     raw.contextEndPercent,
     Number(raw.stalled),
@@ -581,6 +586,7 @@ function configure(database: Database, home: string): void {
       reasoning_tokens INTEGER,
       turns INTEGER,
       duration_ms INTEGER,
+      active_duration_ms INTEGER,
       time_to_first_output_ms INTEGER,
       context_end_percent REAL,
       stalled INTEGER NOT NULL CHECK (stalled IN (0, 1)),
