@@ -17,6 +17,10 @@ This page is the contract. The wire shapes are `packages/protocol/src/lib/pack.t
 | One ferret's    | `config.pack` on its session document (absent = on); `PATCH …/pack` | on      |
 | What it is told | `FY_PACK=1` or `0` in its launch environment, written at its start  | —       |
 
+A ferret whose environment holds no `FY_PACK` — one started before Pack mode existed, or whose start could
+not write it — is given what its record says at every launch (the same rule, from `config.pack`, the
+machine's switch and its depth) rather than nothing; a stored value still wins.
+
 - A new ferret gets `FY_PACK=1` when the machine's switch is on **and** it sits shallow enough to start a
   sub-ferret of its own. A ferret at the deepest level is never told about a door it cannot open. A
   learning miner or a warden is never told; an adopted conversation (`fy new --continue`, Import) is a
@@ -46,13 +50,13 @@ Stop sub-ferrets you no longer need (`fy stop children <your id> --yes`).
 
 Built-in subagents are **discouraged, not blocked**: nothing is taken away from the harness.
 
-**Size.** Every Ferretry instruction together is about 3.5 KB (≈ 870 tokens) with every section on:
+**Size.** Every Ferretry instruction together is about 4.0 KB (≈ 1,000 tokens) with every section on:
 
 | Section                                  | Characters | ≈ tokens | When                        |
 | ---------------------------------------- | ---------- | -------- | --------------------------- |
 | Tools (terminals, browser pages)         | 620        | 155      | every agent runtime         |
 | Ferretry settings (short "Set up" skill) | 478        | 120      | every agent runtime         |
-| Hypermedia                               | 1,062      | 266      | `FY_HYPERMEDIA=1`           |
+| Hypermedia                               | 1,597      | 399      | `FY_HYPERMEDIA=1`           |
 | Pack mode                                | 890        | 223      | `FY_PACK=1`                 |
 | Lessons                                  | 413        | 104      | `FY_LEARNING_PASSIVE=1`     |
 | The tools server's MCP instructions      | 112        | 28       | always — one line, no rules |
@@ -146,13 +150,17 @@ fy new --auto "<complete brief>"            # the decision mode picks
    candidates in the guide's order, or **Jev's** order when Jev decides.
 3. **Probe — always, in both modes.** Each candidate in turn is asked to "Reply with exactly: OK" through its
    own wrapper — resolved exactly as the start resolves it, the published absolute launcher in
-   `$FY_HOME/fleet/bin` and never a name looked up on `PATH`, with the same login environment — in its CLI's one-shot mode (`claude -p`, `codex exec` at `low` effort), bounded by
+   `$FY_HOME/fleet/bin` and never a name looked up on `PATH`, with the same login environment — in its CLI's one-shot mode (`claude -p` with the start's own `--model` and `--effort`, `codex exec` at `low`
+   effort), bounded by
    `probe.timeoutSeconds` (45 s). A probe spends a token or two, and only when a ferret asked for a start —
-   never on a timer. Its answer is kept per runtime and model for `probe.cacheSeconds` (60 s) and probes
+   never on a timer. Its answer is kept per runtime, model and effort for `probe.cacheSeconds` (60 s) and probes
    already running are shared, so twenty sub-ferrets started at once probe once. A failed probe refuses that
    candidate `probe_failed` and the next is tried; nothing is launched for it.
 4. **Start**: the same session start every surface uses (callsign, launch, audit), with `parent` recorded and
-   the brief followed by a footer telling the sub-ferret to finish with `fy signal done "<result>"`.
+   the brief followed by a footer telling the sub-ferret to finish with `fy signal done "<result>"`. A
+   harness that exits before it is ready fails the start with its exit status **and its last output lines**
+   (`the interactive harness exited (2): its last output was "…"`), so the card says why — the wrapper's
+   refusal naming a missing secret, or the harness rejecting an argument the one-shot probe does not pass.
 
 The answer is never an HTTP error for a refusal: it is `{outcome: 'refused', refusal: {code, message,
 remedy}, attempts}`, every attempt listed, so a ferret falls back on the code. `fy new` exits **2** on a
@@ -220,8 +228,9 @@ through the configuration-file routes, so a loosening is held exactly as an edit
 
 ## Declared gaps
 
-- **A Claude probe runs at the runtime's own effort.** Claude Code takes its effort from settings only; the
-  probe passes no settings overlay of its own beside the wrapper's.
+- **The probe is one-shot, the start is interactive.** The probe carries the start's model and effort, but
+  not its `--session-id`, hand-off `Read(...)` rules, fast-mode overlay or remote-control arguments, so a
+  harness that refuses only one of those passes the probe and fails the start — with its own words on the card.
 - **A probe leaves a one-line conversation** in the runtime's history, as any one-shot run of the CLI does.
 - **Quota is what the fleet last read.** `recommend` and `new` do not ask a provider for fresh quota; an
   environment login whose quota nobody has watched reads as not exhausted, and the probe is what catches it.

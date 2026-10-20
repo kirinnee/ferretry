@@ -17,6 +17,7 @@ import { FileInstanceSurface } from '../../src/components/file-instance-surface.
 import { FilesTab } from '../../src/components/files-tab.tsx';
 import { HandoffSourceProvider } from '../../src/components/handoff-message.tsx';
 import { MigrateSheet } from '../../src/components/migrate-sheet.tsx';
+import { ConvertSheet } from '../../src/features/session-actions/convert-sheet.tsx';
 import { QuestionForm } from '../../src/components/question-form.tsx';
 import { ReferenceSurfaceProvider } from '../../src/components/reference-surface.tsx';
 import type { RuntimeModelControls } from '../../src/components/runtime-controls.tsx';
@@ -2879,6 +2880,51 @@ describe('SessionChatPage Info and Actions', () => {
     }
   });
 
+  test('offers Move to Codex… only where the machine has a Codex account, and publishes the moved view', async () => {
+    const codex = {
+      id: 'codex-a',
+      wrapper: 'codex-a',
+      displayName: 'Codex A',
+      kind: 'codex',
+      agent: true,
+      credentialId: 'login-a',
+      defaultModel: null,
+      models: [],
+      available: true,
+      unavailableReason: null,
+    };
+    const picker = (accounts: unknown[]) =>
+      new DaemonAccountPickerStore({
+        catalog: async () => ({ accounts }) as never,
+        health: async () => ({ health: new Map(), error: null }),
+        checkHealth: async () => ({ health: new Map(), error: null }),
+      });
+    const none = renderSessionChatPage(chatPage({ accountPicker: picker([]) }));
+    try {
+      await flush();
+      expect(actionLabels(none.root)).not.toContain('Move to Codex…');
+      expect(none.root.findAllByType(ConvertSheet)).toHaveLength(0);
+    } finally {
+      run(() => none.unmount());
+    }
+    const published: SessionView[] = [];
+    const page = renderSessionChatPage(
+      chatPage({ accountPicker: picker([codex]), onSessionChange: view => published.push(view) }),
+    );
+    try {
+      await flush();
+      expect(actionLabels(page.root)).toContain('Move to Codex…');
+      chooseAction(page.root, 'move-harness');
+      expect(page.root.findByType(ConvertSheet).props.open).toBe(true);
+      run(() => page.root.findByType(ConvertSheet).props.onMoved(sessionView('shared'), 'Moved to Codex (Codex A).'));
+      expect(published.at(-1)?.config.id).toBe('shared');
+      run(() => page.root.findByType(ConvertSheet).props.onClose());
+      expect(page.root.findByType(ConvertSheet).props.open).toBe(false);
+    } finally {
+      run(() => page.unmount());
+    }
+  });
+
   test('Go back to the earlier conversation asks inline, then restarts on it and publishes the view', async () => {
     const daemon = fakeDaemon();
     const published: SessionView[] = [];
@@ -3236,6 +3282,32 @@ describe('SessionChatPage Info and Actions', () => {
       } finally {
         run(() => page.unmount());
       }
+    }
+  });
+
+  test('the header’s switch marks carry the host’s answers, and a tap only for a reader who may control it', async () => {
+    const taps: string[] = [];
+    const switches = { hypermedia: true, pack: false, onToggle: (section: string) => taps.push(section) };
+    for (const canControl of [true, false]) {
+      const page = renderSessionChatPage(chatPage({ infoLearning: true, switches, canControl }), fakeDaemon().factory);
+      try {
+        await flush();
+        const marks = page.root.findByType(SessionTopBar).props.switches;
+        expect(marks).toMatchObject({ learning: true, hypermedia: true, pack: false });
+        expect(marks.onToggle === undefined).toBe(!canControl);
+        marks.onToggle?.('hypermedia', false);
+      } finally {
+        run(() => page.unmount());
+      }
+    }
+    expect(taps).toEqual(['hypermedia']);
+    // A host that hands none leaves the bar to read the record itself.
+    const bare = renderSessionChatPage(chatPage({}), fakeDaemon().factory);
+    try {
+      await flush();
+      expect(bare.root.findByType(SessionTopBar).props.switches).toBeUndefined();
+    } finally {
+      run(() => bare.unmount());
     }
   });
 

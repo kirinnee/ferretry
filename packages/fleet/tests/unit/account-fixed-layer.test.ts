@@ -585,7 +585,15 @@ describe('hypermedia teaching', () => {
     for (const form of forms) should(lines.some(line => line.startsWith(`- ${form}:`))).be.true();
     should(lines).containDeepOrdered(['```fy-render', 'type: mermaid', '---', '```']);
     should(HYPERMEDIA_INSTRUCTION).containEql('Do not overdo it');
-    should(HYPERMEDIA_INSTRUCTION.length).be.below(1200);
+    // The owner's three asks: reach for it when teaching, keep it inline, and tell it interactively.
+    should(HYPERMEDIA_INSTRUCTION).startWith('Hypermedia: when you teach, explain, compare or walk through');
+    should(HYPERMEDIA_INSTRUCTION).containEql(
+      'never publish an artifact, page, gist or link to explain something unless the owner asks',
+    );
+    should(HYPERMEDIA_INSTRUCTION).containEql('step-through Next buttons');
+    should(HYPERMEDIA_INSTRUCTION).containEql('prefers-reduced-motion');
+    // In every prompt, so it is capped; raised from 1,200 for the three asks above.
+    should(HYPERMEDIA_INSTRUCTION.length).be.below(1600);
   });
 });
 

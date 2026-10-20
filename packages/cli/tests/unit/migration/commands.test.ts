@@ -61,4 +61,26 @@ describe('migration command surface', () => {
     should(forced.gateway.calls[0]).have.property('forceInflight', true);
     should(plain.gateway.calls[0]).have.property('forceInflight', false);
   });
+
+  it('should send --convert as the convert conversation, and --preview as a read that moves nothing', async () => {
+    // Arrange + Act
+    const moved = run(['migrate', 'Fable', '--agent', 'codex-secondary', '--convert']);
+    await moved.parsed;
+    const previewed = run(['migrate', 'Fable', '--agent', 'codex-secondary', '--convert', '--preview']);
+    await previewed.parsed;
+
+    // Assert
+    should(moved.gateway.calls).deepEqual([
+      {
+        id: 'Fable',
+        agent: 'codex-secondary',
+        allowContextDowngrade: false,
+        forceInflight: false,
+        conversation: 'convert',
+      },
+    ]);
+    should(previewed.gateway.calls).be.empty();
+    should(previewed.gateway.previews).deepEqual([{ id: 'Fable', agent: 'codex-secondary' }]);
+    should(previewed.io.out.join('\n')).containEql('12 of 40 turns will move');
+  });
 });

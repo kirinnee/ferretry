@@ -16,6 +16,11 @@ export interface PackProbeRequest {
   readonly harness: 'claude' | 'codex';
   /** Absent: the runtime's own default model. */
   readonly model?: string | undefined;
+  /**
+   * The effort the start will launch at. A Claude probe passes it as the start does, so a flag the start
+   * would carry cannot be refused only once the pane exists; a Codex probe runs `low` regardless.
+   */
+  readonly effort?: string | undefined;
   readonly cwd: string;
   readonly timeoutMs: number;
 }
@@ -54,7 +59,7 @@ export class ProbeCache {
   ) {}
 
   async probe(request: PackProbeRequest, ttlMs: number): Promise<CachedProbe> {
-    const key = `${request.wrapper}\u0000${request.model ?? ''}`;
+    const key = `${request.wrapper}\u0000${request.model ?? ''}\u0000${request.effort ?? ''}`;
     const kept = this.answers.get(key);
     if (kept !== undefined && this.nowMs() - kept.at < ttlMs) return { outcome: kept.outcome, cached: true };
     const shared = this.running.get(key);

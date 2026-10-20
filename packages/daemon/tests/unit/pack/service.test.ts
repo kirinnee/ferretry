@@ -320,7 +320,14 @@ describe('PackService.newChild with a named runtime', () => {
     // Assert
     should(probes).deepEqual([
       [
-        { wrapper: 'claude-main-wrapper', harness: 'claude', model: 'opus', cwd: '/work/parent', timeoutMs: 45_000 },
+        {
+          wrapper: 'claude-main-wrapper',
+          harness: 'claude',
+          model: 'opus',
+          effort: 'high',
+          cwd: '/work/parent',
+          timeoutMs: 45_000,
+        },
         60_000,
       ],
     ]);

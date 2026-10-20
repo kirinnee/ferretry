@@ -23,6 +23,7 @@ describe('FyApiClient construction and generic requests', () => {
       'cancelSend',
       'cgroupConfig',
       'configChanges',
+      'conversionPreview',
       'daemonUpdate',
       'events',
       'foreignHistory',

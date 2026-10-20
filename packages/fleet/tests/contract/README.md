@@ -23,6 +23,12 @@ scheduled `harness-contract-latest.yaml` runs `latest` daily and gates nothing.
 | `codex-credential-link.test.ts`   | a refresh rewrites `auth.json` through the link; a second home reads the rotated token; `cli_auth_credentials_store = "file"` never touches the keyring (Linux); `codex logout` removes only its link                                                                                                                                                                                                                                                                                                                                                                  |
 | `codex-launch.test.ts`            | a Git project is asked about on every version, a folder with no project marker only before 0.160; `-c 'projects={"<cwd>"={trust_level="trusted"}}'` skips the prompt (a Git subdirectory's included) and merges with `config.toml`; the fixed layer's `approval_policy`/`sandbox_mode` survive 0.160's projectless defaults (read off `/status`); the `--add-dir` correlation root is declared and never created; on macOS Seatbelt lets a command create a missing writable root but not one whose parent is missing; `skills/<item>` (including a symlink) is listed |
 
+One suite lives in the daemon, because it measures daemon code against the CLIs, and `run.sh` runs it
+with these: `packages/daemon/tests/contract/conversion-acceptance.test.ts` — a cross-harness
+conversion (`docs/migration-cross-harness.md`) of every recorded transcript of the other harness is
+resumed by the real CLI against a loopback model and read back in order; a damaged one is refused. A
+version outside the converter's gate fails it on purpose.
+
 Every positive claim sits beside the control that shows what it suppresses. A claim that changed at a
 release is gated on the version the harness reports (`harnessVersion`), so `pinned` and `latest` each
 assert the behaviour of the version they measure.

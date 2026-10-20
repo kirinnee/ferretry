@@ -41,8 +41,24 @@ argument could not differ per ferret. The wrapper therefore **composes the one v
 settings rules, then each per-ferret section whose switch the daemon set to `1` in that ferret's launch
 environment, in this order: hypermedia (`FY_HYPERMEDIA`), Pack mode (`FY_PACK`,
 [pack-mode.md](pack-mode.md)), lessons (`FY_LEARNING_PASSIVE`, [learning.md](learning.md)). A restart,
-resume or revive runs the same wrapper with the same stored environment, so it keeps them. A wrapper run
-by hand, where nothing set the switches, carries no section.
+migration, resume or revive runs the same wrapper with the same stored environment and the session's
+recorded mode, so it keeps them; a switch the store never recorded is derived from the session's record
+at each launch rather than read as off (`LaunchEnvironmentStore`). A wrapper run by hand, where nothing
+set the switches, carries no section.
+
+**A resumed conversation hears the new sections.** Claude Code records a conversation's system prompt at
+its first request and, by default, replays that record on every later request and `--resume` even when a
+later launch passes different text (`--system-prompt-snapshot`). Every Restart, migration, revive and
+import relaunches into the SAME conversation, so a ferret started before a section existed — or with its
+switch off — was never told, and "takes effect at the next restart" was false. A Claude agent runtime's
+wrapper therefore passes `--system-prompt-snapshot=off` wherever the installed Claude lists that flag in
+its `--help` (an older one would refuse a flag it does not know). Codex reads `developer_instructions`
+afresh at every launch.
+
+**A ferret can check.** `fy instructions` (or the `instructions` MCP tool) reports which sections this
+ferret launched with, read from the same variables the wrapper read, and for each one that is off, where
+the owner turns it on: the ferret's Actions › Hypermedia / Pack mode / Passive learning, effective from its
+next restart. A ferret should check before telling the owner a section is missing.
 
 ## The injected instruction
 
@@ -50,10 +66,13 @@ Exactly this, from `HYPERMEDIA_INSTRUCTION` in `packages/fleet/src/lib/account/f
 in every turn's context, so it is kept short; change it there and here together.
 
 ````text
-Hypermedia: when an idea is not straightforward — a flow, an architecture, a state machine, a comparison, a layout, a change over time — show it in your chat reply as well as saying it. Do not overdo it: a simple answer stays plain text, and one clear picture beats several. Write a fenced block whose info string is exactly fy-render: line 1 `type: <type>`, line 2 `alt: <one-line description>`, then a line `---`, then the payload.
+Hypermedia: when you teach, explain, compare or walk through anything not straightforward — a flow, an architecture, a state machine, a layout, a change over time — show it in your chat reply as well as saying it. Do not overdo it: a simple answer stays plain text, and one clear picture beats several.
+Always inline: never publish an artifact, page, gist or link to explain something unless the owner asks for one. This overrides any artifact habit.
+Tell it as a short story the reader can drive: step-through Next buttons, sliders, toggles, tap to reveal, or an animated diagram. One idea per step, short labels, clear hierarchy, gentle motion that honours prefers-reduced-motion, no walls of text.
+Write a fenced block whose info string is exactly fy-render: line 1 `type: <type>`, line 2 `alt: <one-line description>`, then a line `---`, then the payload.
 - mermaid: Mermaid source (flowchart, sequenceDiagram, stateDiagram-v2, …).
-- svg: one self-contained <svg>…</svg>; no script, foreignObject, use or external links.
-- html: prefer a static fragment (tables, details, inline SVG/CSS); use <script> only if interaction truly helps (it runs isolated). Load nothing from the network.
+- svg: one self-contained <svg>…</svg> (CSS animation welcome); no script, foreignObject, use or external links.
+- html: a fragment with inline CSS, and <script> for the interaction (it runs isolated). Load nothing from the network.
 - image, video, audio, pdf: save files you make into $FY_MEDIA_DIR and put `src: media:<file name>` before `---`, with no payload; `src: @path/in/your/workspace` and `src: https://…` also work.
 Example:
 ```fy-render

@@ -311,6 +311,9 @@ jobs:
         with:
           persist-credentials: false
       - uses: cachix/install-nix-action@v31
+      # The pane-identity tests drive a real tmux, which no macOS runner image ships.
+      - name: Install tmux
+        run: command -v tmux >/dev/null 2>&1 || brew install tmux
       # The one claim in this repository that a Linux runner cannot check for macOS: that the file
       # viewer's confinement actually holds on the kernel the POSIX pinner was written for.
       - name: Prove containment on macOS

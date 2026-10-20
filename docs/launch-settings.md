@@ -53,7 +53,9 @@ ferret is bound to — as if only the process had restarted:
   harness home that names the ferret's own directory — every turn Ferretry hands an agent does — and
   resumes that one.
 
-Moving between harnesses is not a restart and stays refused (`harness_mismatch`).
+Moving between harnesses is not a restart: a plain move stays refused (`harness_mismatch`). It is done by
+**converting** the conversation (Move to Codex…/Move to Claude…, `--convert`) — see
+[migration-cross-harness.md](migration-cross-harness.md).
 
 **Info › Runtime › Settings** says whether a restart would change anything: "Running with older settings —
 Restart to apply", with the reason, and a one-tap Restart. It compares two things

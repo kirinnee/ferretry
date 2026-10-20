@@ -42,8 +42,11 @@ export interface ResumeLaunchSpec {
    * is what every session that binds no secret gets anyway.
    */
   readonly agent?: string;
-  /** The session's mode, which sets the hypermedia default a replacement pane is launched with. */
-  readonly mode?: 'auto' | 'interactive';
+  /**
+   * The session's mode, from its record, which sets the hypermedia default a replacement pane is launched with.
+   * Required: a revive that could not name it would bring an interactive ferret back with hypermedia off.
+   */
+  readonly mode: 'auto' | 'interactive';
 }
 
 /** Rewrites the durable pane identity after a revive replaces the process incarnation. */

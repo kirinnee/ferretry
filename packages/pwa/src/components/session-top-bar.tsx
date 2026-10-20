@@ -25,8 +25,8 @@
 import type { SessionView } from '@ferretry/protocol';
 import { Info, Menu } from 'lucide-react';
 import type { ReactNode } from 'react';
-import { HypermediaMark } from '../features/hypermedia/hypermedia-session-actions.tsx';
-import { hypermediaOn } from '../features/session-info/info-model.ts';
+import { hypermediaOn, packOn } from '../features/session-info/info-model.ts';
+import { type SwitchMarksProps, SwitchMarks } from '../features/session-info/switch-marks.tsx';
 import { displayCallsign } from '../lib/callsign.ts';
 import { harnessWord } from '../lib/harness-dialogs.ts';
 import { permissionPhrase } from '../lib/permission-requests.ts';
@@ -78,6 +78,11 @@ export interface SessionTopBarProps {
   readonly startedBy?: { readonly name: string; readonly onOpen: () => void };
   /** The sub-ferrets this ferret started, as the compact indicator that lists them (`sub-ferrets.tsx`). */
   readonly subFerrets?: ReactNode;
+  /**
+   * The ferret's switch marks beside its name, with the switches' latest answers and, for a reader who may
+   * control it, the tap that switches one. Absent: read from the session's own record, marks only.
+   */
+  readonly switches?: SwitchMarksProps;
 }
 
 export function SessionTopBar({
@@ -93,6 +98,7 @@ export function SessionTopBar({
   onOpenSessions,
   startedBy,
   subFerrets,
+  switches,
 }: SessionTopBarProps) {
   const name = sessionDisplayName(session);
   const task = session.config.label ?? session.config.name;
@@ -123,7 +129,7 @@ export function SessionTopBar({
       )}
       <div className="fy-session-bar__who" title={task === undefined ? name : `${name} — ${task}`}>
         <h1 className="fy-session-bar__name">{name}</h1>
-        {hypermediaOn(session) ? <HypermediaMark /> : null}
+        <SwitchMarks {...(switches ?? { learning: false, hypermedia: hypermediaOn(session), pack: packOn(session) })} />
         {project === null || compact ? null : <span className="fy-session-bar__project">{project}</span>}
         {startedBy === undefined || compact ? null : (
           <button

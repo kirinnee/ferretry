@@ -10,7 +10,9 @@ set -euo pipefail
 #
 # Deliberately NOT the whole integration suite: the rest of it drives tmux, sockets and a daemon that
 # this repository does not otherwise support on macOS, and a job that fails for those reasons would say
-# nothing about containment.
+# nothing about containment. The one tmux-driven file here is the pane registration, because a session
+# start on macOS reads its process identity through this kernel's `ps`, and only a Mac can say whether a
+# harness that dies at once is reported as the exit it was.
 
 root_dir="$(git rev-parse --show-toplevel)"
 cd "${root_dir}"
@@ -21,4 +23,8 @@ echo "🧪 Proving descriptor containment on $(uname -sm)..."
 bun test --config=bunfig.int.toml packages/daemon/tests/integration/session/filesystem/
 echo "🧪 Proving the process inventory reads this kernel's ps..."
 bun test --config=bunfig.int.toml packages/daemon/tests/integration/migrate/real-ps-inventory.test.ts
-echo "✅ Containment and the process inventory hold on $(uname -sm)"
+echo "🧪 Proving a pane's process identity reads this kernel's ps, and a dead harness says why..."
+bun test --config=bunfig.int.toml \
+  packages/daemon/tests/integration/session/lifecycle/process-incarnation.test.ts \
+  packages/daemon/tests/integration/session/lifecycle/durable-terminal-pane-reap.test.ts
+echo "✅ Containment, the process inventory and pane identity hold on $(uname -sm)"

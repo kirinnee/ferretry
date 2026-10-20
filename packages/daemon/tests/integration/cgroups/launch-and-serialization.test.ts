@@ -420,7 +420,7 @@ function resumeHarness(input: {
   // is part of what these tests are about, and a fake one would prove a policy nothing runs.
   const resume = new TmuxResumeLauncher(
     new TmuxController(tmux),
-    async () => ({ tmuxSession: `fy-${input.id}`, cwd: '/canonical', command: [...HARNESS_COMMAND] }),
+    async () => ({ tmuxSession: `fy-${input.id}`, mode: 'auto', cwd: '/canonical', command: [...HARNESS_COMMAND] }),
     NO_DELIVERY,
     undefined,
     planner,
