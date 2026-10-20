@@ -4,9 +4,8 @@
  */
 
 import { type AnalyticsMetric, analyticsMetricValue } from '@ferretry/protocol';
-
-import { durationAxisTicks, formatAxisDuration } from './analytics-overview.ts';
 import { AnalyticsMetricChart, type MetricChartPoint } from './analytics-metric-chart.tsx';
+import { durationAxisTicks, formatAxisDuration } from './analytics-overview.ts';
 import {
   ANALYTICS_METRIC_LABELS,
   type AnalyticsAggregateResponse,
@@ -62,7 +61,7 @@ export function AnalyticsQueryChart({ response }: { readonly response: Analytics
   const metric = queryChartMetric(response);
   const points = queryChartPoints(response, metric);
   if (points.length === 0) return null;
-  const isDuration = metric === 'duration_active_seconds' || metric === 'duration_wall_seconds';
+  const isDuration = metric.startsWith('duration_');
   const format = (value: number) => formatMetricMeasure(metric, { value, known: 1, total: 1 });
   return (
     <AnalyticsMetricChart

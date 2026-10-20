@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+import { AnalyticsMetricSchema } from '@ferretry/protocol';
 
 import {
   ANALYTICS_METRIC_LABELS,
@@ -47,7 +48,7 @@ describe('metric formatting', () => {
   });
 
   it('labels every metric', () => {
-    expect(Object.keys(ANALYTICS_METRIC_LABELS)).toHaveLength(11);
+    expect(Object.keys(ANALYTICS_METRIC_LABELS)).toEqual([...AnalyticsMetricSchema.options]);
   });
 
   it('reads a group in the metric unit', () => {
@@ -114,5 +115,13 @@ describe('AnalyticsResultTable with a metric', () => {
     );
     const renderer = render(<AnalyticsResultTable response={counted} metric="sessions" />);
     expect(renderer.root.findAllByType('th').map(node => textOf(node))).toEqual(['Model', 'Sessions', 'a']);
+  });
+});
+
+describe('active time per turn', () => {
+  it('divides the group sums and shows a duration', () => {
+    const row = group({ model: 'a' }, { turns: measure(50, 5, 5), activeDurationMs: measure(3_000_000, 5, 5) });
+    expect(analyticsMetricMeasure(row, 'duration_active_seconds_per_turn').value).toBeCloseTo(60);
+    expect(formatMetricMeasure('duration_active_seconds_per_turn', measure(60, 5, 5))).toBe('1m 00s');
   });
 });

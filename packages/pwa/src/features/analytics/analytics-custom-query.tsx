@@ -8,6 +8,7 @@
  */
 
 import {
+  ANALYTICS_RATIO_METRICS,
   type AnalyticsAggregation,
   AnalyticsAggregationSchema,
   type AnalyticsLabel,
@@ -68,6 +69,7 @@ export function AnalyticsQueryEditor({ value, onValueChange, onRun, querying, lo
   const parsed = read.ok ? read.parsed : undefined;
   const showError = !read.ok && value.trim() !== '';
   const range = activeRangeSource(value, ANALYTICS_RANGE_PRESETS);
+  const ratio = parsed?.metric !== undefined && ANALYTICS_RATIO_METRICS.has(parsed.metric);
 
   return (
     <div className="grid min-w-0 gap-3" data-analytics-query-editor="">
@@ -105,13 +107,14 @@ export function AnalyticsQueryEditor({ value, onValueChange, onRun, querying, lo
         <p
           role="alert"
           data-analytics-parse-error=""
-          className="m-0 rounded-control border border-err/40 bg-err/10 px-3 py-2 text-cell text-err"
+          className="m-0 rounded-control border border-err-border bg-err-bg px-3 py-2 text-cell text-err"
         >
           {read.ok ? '' : read.error}
         </p>
       )}
 
-      <div className="grid min-w-0 grid-cols-1 gap-2 sm:grid-cols-2" aria-label="Query helpers" role="group">
+      <fieldset className="m-0 grid min-w-0 grid-cols-1 gap-2 border-0 p-0 sm:grid-cols-2">
+        <legend className="sr-only">Query helpers</legend>
         <label className="grid min-w-0 gap-xs text-meta text-muted">
           Metric
           <select
@@ -141,13 +144,17 @@ export function AnalyticsQueryEditor({ value, onValueChange, onRun, querying, lo
           >
             {!parsed?.aggregation && <option value="">Raw sessions</option>}
             {AnalyticsAggregationSchema.options.map(aggregation => (
-              <option key={aggregation} value={aggregation}>
+              <option
+                key={aggregation}
+                value={aggregation}
+                disabled={ratio && aggregation !== 'sum' && aggregation !== 'avg'}
+              >
                 {aggregation}
               </option>
             ))}
           </select>
         </label>
-      </div>
+      </fieldset>
 
       <ChipRow label="Range">
         {ANALYTICS_RANGE_PRESETS.map(preset => (

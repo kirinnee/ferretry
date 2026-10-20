@@ -52,3 +52,11 @@ describe('analytics query text editing', () => {
     expect(activeRangeSource('sum(cost_usd)', ['7d'])).toBeUndefined();
   });
 });
+
+describe('a per-turn ratio metric', () => {
+  it('refuses an aggregation the grammar does not allow, leaving the text alone', () => {
+    const text = 'sum(duration_active_seconds_per_turn) by (model)';
+    expect(withAggregation(text, 'max')).toBe(text);
+    expect(withAggregation(text, 'avg')).toBe('avg(duration_active_seconds_per_turn) by (model)');
+  });
+});

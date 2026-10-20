@@ -42,6 +42,12 @@ export const ANALYTICS_QUERY_EXAMPLES: readonly AnalyticsQueryExample[] = [
     hint: 'Mean active seconds per session for each model.',
   },
   {
+    id: 'active-per-turn-by-model',
+    title: 'Active seconds per turn, by model',
+    query: 'sum(duration_active_seconds_per_turn) by (model) [14d]',
+    hint: 'Total active time divided by total turns, so a long session does not outweigh a short one.',
+  },
+  {
     id: 'turns-by-machine',
     title: 'Turns by machine',
     query: 'sum(turns) by (machine) [7d]',

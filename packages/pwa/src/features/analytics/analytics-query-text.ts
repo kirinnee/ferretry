@@ -32,7 +32,13 @@ const edit = (text: string, change: (parsed: ParsedAnalyticsQuery) => Partial<Pa
   const read = readAnalyticsQuery(text);
   if (!read.ok) return text;
   const { aggregation, metric, groupBy, matchers, range } = { ...read.parsed, ...change(read.parsed) };
-  return formatAnalyticsQuery({ aggregation, metric, groupBy, matchers, range });
+  try {
+    return formatAnalyticsQuery({ aggregation, metric, groupBy, matchers, range });
+  } catch (error) {
+    // A combination the grammar refuses (a per-turn ratio under max) leaves the text as it was.
+    if (error instanceof AnalyticsQueryError) return text;
+    throw error;
+  }
 };
 
 export const withAggregation = (text: string, aggregation: AnalyticsAggregation): string =>

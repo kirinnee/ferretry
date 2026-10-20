@@ -6,10 +6,12 @@
 
 import {
   ANALYTICS_METRIC_MEASURES,
+  ANALYTICS_RATIO_METRICS,
   type AnalyticsAggregateResult,
   type AnalyticsMeasure,
   type AnalyticsMetric,
   type AnalyticsResponse,
+  analyticsMetricValue,
 } from '@ferretry/protocol';
 import { ArrowDown, ArrowDownUp, ArrowUp } from 'lucide-react';
 import { useMemo, useState } from 'react';
@@ -99,14 +101,15 @@ export const ANALYTICS_METRIC_LABELS: { readonly [M in AnalyticsMetric]: string 
   sessions: 'Sessions',
   duration_active_seconds: 'Active time',
   duration_wall_seconds: 'Wall time',
+  duration_active_seconds_per_turn: 'Active time per turn',
 };
 
 /** One group's value for a metric, in the metric's unit, with how many sessions it is known for. */
 export const analyticsMetricMeasure = (result: AnalyticsAggregateResult, metric: AnalyticsMetric): AnalyticsMeasure => {
-  const { measure, scale } = ANALYTICS_METRIC_MEASURES[metric];
+  const { measure } = ANALYTICS_METRIC_MEASURES[metric];
   if (measure === 'sessions') return { value: result.sessions, known: result.sessions, total: result.sessions };
-  const source = result[measure];
-  return { ...source, value: source.value === null ? null : source.value * scale };
+  // The protocol owns the arithmetic: the unit scale, and the division of a per-turn ratio.
+  return { ...result[measure], value: analyticsMetricValue(result, metric) };
 };
 
 /** Flattens a daemon response without inventing a value for missing pricing. */
@@ -259,7 +262,7 @@ export const formatMetricMeasure = (metric: AnalyticsMetric, measure: AnalyticsM
   if (measure.value === null) return metric === 'cost_usd' ? 'Unpriced' : 'Unknown';
   const bound = lowerBound(measure);
   if (metric === 'cost_usd') return `${bound}${formatUsdMicros(BigInt(Math.round(measure.value * 1_000_000)))}`;
-  if (metric === 'duration_active_seconds' || metric === 'duration_wall_seconds')
+  if (metric.startsWith('duration_'))
     return `${bound}${formatDurationSeconds(measure.value)}`;
   return `${bound}${NUMBER_FORMAT.format(measure.value)}`;
 };
@@ -440,7 +443,11 @@ export function AnalyticsResultTable({
     () => sortAnalyticsRows(rows, activeSort.key, activeSort.direction),
     [activeSort.direction, activeSort.key, rows],
   );
-  const total = response.aggregation === 'sum' && rows.length > 1 ? analyticsTotalRow(rows) : null;
+  // A ratio of sums does not add across groups, so a per-turn result has no total row.
+  const total =
+    response.aggregation === 'sum' && rows.length > 1 && !(metric !== undefined && ANALYTICS_RATIO_METRICS.has(metric))
+      ? analyticsTotalRow(rows)
+      : null;
 
   if (rows.length === 0)
     return (

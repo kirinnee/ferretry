@@ -118,6 +118,7 @@ const metricDetail: Record<(typeof metrics)[number], string> = {
   sessions: 'number of sessions',
   duration_active_seconds: 'time spent working a turn',
   duration_wall_seconds: 'session start to finish',
+  duration_active_seconds_per_turn: 'active time per turn (sum or avg)',
 };
 
 const aggregationDetail: Record<(typeof aggregations)[number], string> = {

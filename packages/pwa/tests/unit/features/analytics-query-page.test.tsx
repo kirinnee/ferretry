@@ -313,3 +313,20 @@ describe('AnalyticsQueryPage', () => {
     }
   });
 });
+
+describe('AnalyticsQueryPage ratio metric', () => {
+  it('offers only sum and avg for a per-turn ratio', () => {
+    const renderer = mount(
+      <AnalyticsQueryPage connection={daemonA} requestAnalytics={fleet([])} initialQuery={null} />,
+    );
+    run(() => input(renderer).props.onChange({ currentTarget: { value: 'sum(duration_active_seconds_per_turn)', selectionStart: 5 } }));
+    const options = renderer.root.findAllByType('select')[1]!.findAllByType('option');
+    expect(options.map(option => [option.props.value, option.props.disabled])).toEqual([
+      ['sum', false],
+      ['avg', false],
+      ['min', true],
+      ['max', true],
+      ['count', true],
+    ]);
+  });
+});
