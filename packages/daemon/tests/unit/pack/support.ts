@@ -126,7 +126,7 @@ export const tool = (harness: 'claude' | 'codex', installed: boolean): FleetMach
 });
 
 export function facts(parts: Partial<PackFleetFacts> = {}): PackFleetFacts {
-  return { runtimes: [], credentials: [], tools: [], ...parts };
+  return { runtimes: [], credentials: [], tools: [], unlaunchable: {}, ...parts };
 }
 
 export function packConfig(

@@ -3,7 +3,8 @@
  * its candidates resolved to a runtime on this machine, and why any that cannot run cannot.
  *
  * "Usable now" is the fleet's own facts, read — never guessed: the runtime is an agent runtime, its
- * CLI is installed, its login is signed in with every secret it names, and its quota is not used up.
+ * CLI is installed, its launcher is one a start can run, its login is signed in with every secret it
+ * names, and its quota is not used up.
  * A candidate nobody here offers is still listed, last, with the reason, so a ferret (or its owner)
  * can see what the guide wanted.
  *
@@ -26,6 +27,11 @@ export interface PackFleetFacts {
   readonly runtimes: readonly FleetRuntimeView[];
   readonly credentials: readonly FleetCredentialView[];
   readonly tools: readonly FleetMachineTool[];
+  /**
+   * Why a start would refuse to launch a runtime, by its wrapper name — the start's OWN resolution of
+   * the published launcher, so "ready" here is a runtime `fy new` can actually launch. Absent: launchable.
+   */
+  readonly unlaunchable: Readonly<Record<string, string>>;
 }
 
 /** A use case chosen for a task, and how. */
@@ -98,6 +104,9 @@ export function runtimeRefusal(
       `${tool.label} is not installed on this machine, so ${name} cannot start.`,
       `Install ${tool.label}, or pick another runtime.`,
     );
+  const unlaunchable = facts.unlaunchable[runtime.wrapper];
+  if (unlaunchable !== undefined)
+    return refusal('cli_missing', `${name} cannot be launched: ${unlaunchable}`, 'Pick another runtime.');
   const credential = facts.credentials.find(candidate => candidate.id === runtime.credential.id);
   const missing = credential?.environment?.missingSecrets ?? [];
   if (missing.length > 0)
