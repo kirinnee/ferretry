@@ -7,7 +7,13 @@
  * that claim is only ever made by a real deployment, and the protocol document says so plainly.
  */
 
-import type { RelayObjectState, RelayRuntime, RelaySocket, RelayStorage } from '../../src/adapters/index.ts';
+import type {
+  RelayObjectState,
+  RelayRuntime,
+  RelaySocket,
+  RelayStorage,
+  RelayStoragePutOptions,
+} from '../../src/adapters/index.ts';
 import { decodeFrame, type RelayFrame } from '../../src/lib/index.ts';
 import { relayCrypto } from './identities.ts';
 
@@ -56,12 +62,15 @@ export class FakeSocket implements RelaySocket {
 class FakeStorage implements RelayStorage {
   readonly values = new Map<string, unknown>();
   readonly alarms: number[] = [];
+  /** Every write, and whether it let outgoing messages leave before it was confirmed. */
+  readonly writes: { readonly key: string; readonly unconfirmed: boolean }[] = [];
 
   async get<T>(key: string): Promise<T | undefined> {
     return this.values.get(key) as T | undefined;
   }
 
-  async put<T>(key: string, value: T): Promise<void> {
+  async put<T>(key: string, value: T, options?: RelayStoragePutOptions): Promise<void> {
+    this.writes.push({ key, unconfirmed: options?.allowUnconfirmed === true });
     this.values.set(key, value);
   }
 

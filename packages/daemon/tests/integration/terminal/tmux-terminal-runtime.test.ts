@@ -1,8 +1,8 @@
 import { describe, it } from 'bun:test';
-import should from 'should';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import should from 'should';
 import { BunTmuxProcess, TmuxTerminalRuntime } from '../../../src/adapters/index.ts';
 import type { TmuxCommandPort, TmuxCommandResult } from '../../../src/lib/index.ts';
 
@@ -184,7 +184,7 @@ describe('TmuxTerminalRuntime', () => {
 
   it('should create, update, write, redraw, and close a terminal through the injected tmux port', async () => {
     // Arrange
-    const fake = new FakeTmux([ok(), ok(), ok(), ok(), ok('hello\n'), ok('2|3\n'), ok()]);
+    const fake = new FakeTmux([ok(), ok(), ok(), ok(), ok('history\nhello\n2|1|100|1|1\n'), ok()]);
     const subject = new TmuxTerminalRuntime(fake, () => 1_000);
 
     // Act
@@ -198,22 +198,44 @@ describe('TmuxTerminalRuntime', () => {
     await subject.rename(created, 'renamed');
     await subject.resize(created, { cols: 120, rows: 40 });
     await subject.write(created, new Uint8Array([3, 13]));
-    const frame = await subject.capture(created);
+    const captured = await subject.capture(created, 2_000);
     await subject.kill(created);
 
     // Assert
     should(created).match({ id: terminal.id, ownerId: terminal.ownerId, root: terminal.root, createdAtMs: 1_000 });
-    should(new TextDecoder().decode(frame)).equal('\u001b[3J\u001b[2J\u001b[Hhello\u001b[4;3H');
+    should(captured).deepEqual({
+      lines: ['history', 'hello'],
+      cursorX: 2,
+      cursorY: 1,
+      cols: 100,
+      rows: 1,
+      historySize: 1,
+    });
     should(fake.received.map(command => command[0])).deepEqual([
       'new-session',
       'set-option',
       'resize-window',
       'send-keys',
       'capture-pane',
-      'display-message',
       'kill-session',
     ]);
     should(fake.received[3]).deepEqual(['send-keys', '-H', '-t', `${created.tmuxSession}:0.0`, '03', '0d']);
+    // ONE process for the rows and the geometry: tmux runs both commands in the same server turn.
+    should(fake.received[4]).deepEqual([
+      'capture-pane',
+      '-p',
+      '-e',
+      '-S',
+      '-2000',
+      '-t',
+      `${created.tmuxSession}:0.0`,
+      ';',
+      'display-message',
+      '-p',
+      '-t',
+      `${created.tmuxSession}:0.0`,
+      '#{cursor_x}|#{cursor_y}|#{pane_width}|#{pane_height}|#{history_size}',
+    ]);
   });
 
   it('should clean up a partial create and surface mutation or capture failures', async () => {
@@ -225,8 +247,8 @@ describe('TmuxTerminalRuntime', () => {
         { code: 1, stdout: '', stderr: 'gone' },
         { code: 1, stdout: '', stderr: 'gone' },
         { code: 1, stdout: '', stderr: 'gone' },
-        ok(),
         { code: 1, stdout: '', stderr: 'gone' },
+        ok(),
       ]),
     );
 
@@ -244,7 +266,7 @@ describe('TmuxTerminalRuntime', () => {
     await should(failed.rename(terminal, 'next')).be.rejectedWith(/terminal no longer exists/u);
     await should(failed.resize(terminal, terminal)).be.rejectedWith(/terminal no longer exists/u);
     await should(failed.write(terminal, Uint8Array.of(1))).be.rejectedWith(/terminal no longer exists/u);
-    await should(failed.capture(terminal)).be.rejectedWith(/terminal no longer exists/u);
+    await should(failed.capture(terminal, 200)).be.rejectedWith(/terminal no longer exists/u);
     await should(failed.kill(terminal)).be.fulfilled();
   });
 
@@ -293,6 +315,52 @@ describe('TmuxTerminalRuntime', () => {
     // Act + Assert
     await should(subject.kill(terminal)).be.fulfilled();
     await should(subject.kill(terminal)).be.rejectedWith(/could not close terminal/u);
+  });
+});
+
+describe('TmuxTerminalRuntime against the real tmux', () => {
+  it("should read a live pane's coloured rows, its cursor and its size in one combined capture", async () => {
+    // Arrange — no fake: the combined `capture-pane ; display-message` is parsed as this tmux prints it.
+    const executable = Bun.which('tmux');
+    if (executable === null) throw new Error('tmux is required for terminal integration coverage');
+    const home = await mkdtemp(join(tmpdir(), 'fy-term-capture-'));
+    const tmux = new BunTmuxProcess(executable, join(home, 'tmux.sock'));
+    const subject = new TmuxTerminalRuntime(tmux);
+    try {
+      const created = await subject.create({
+        ownerId: terminal.ownerId,
+        id: terminal.id,
+        title: terminal.title,
+        cwd: home,
+        size: { cols: 60, rows: 8 },
+      });
+      await subject.write(created, new TextEncoder().encode("PS1='$ '; printf '\\033[31mred\\033[0m\\n'\r"));
+
+      // Act — the shell needs a moment to run the line it was given.
+      let captured = await subject.capture(created, 200);
+      for (
+        let attempt = 0;
+        attempt < 100 && !captured.lines.some(line => line.endsWith('red\u001b[39m'));
+        attempt += 1
+      ) {
+        await Bun.sleep(20);
+        captured = await subject.capture(created, 200);
+      }
+
+      // Assert
+      should(captured.cols).equal(60);
+      should(captured.rows).equal(8);
+      should(captured.lines.length).equal(8);
+      should(captured.historySize).equal(0);
+      // Each row carries its own colour codes and resets them at its end — which is what lets one row be
+      // repainted alone.
+      should(captured.lines.some(line => line.endsWith('\u001b[31mred\u001b[39m'))).be.true();
+      should(captured.cursorY).be.within(0, 7);
+      should(captured.lines[captured.cursorY]).startWith('$');
+    } finally {
+      await tmux.execute(['kill-server']).catch(() => undefined);
+      await rm(home, { recursive: true, force: true });
+    }
   });
 });
 

@@ -61,6 +61,20 @@
  *
  * It prints one line of JSON (`{"ready":true,"port":n,"origin":"…"}`) on stdout when listening, and
  * exits on SIGTERM/SIGINT with every socket closed.
+ *
+ * ── TWO FLAGS FOR THE LATENCY BENCHMARK, and only for it ──────────────────────────────────────
+ *
+ * `packages/pwa/harness/relay-terminal-bench.ts` spawns this same process to time a terminal through
+ * the real rendezvous, and two of this file's defaults would distort what it measures:
+ *
+ *   - `--timing-only` records each frame's size and a sub-millisecond wall-clock instant instead of
+ *     its base64 bytes. Encoding and appending every frame synchronously is a cost the hosted relay
+ *     does not pay, and the benchmark needs the instant a frame passed, not what it said.
+ *   - `--output-gate-ms <n>` MODELS the Workers runtime's output gate, which this process otherwise
+ *     substitutes away: on Cloudflare, a message an object sends after a storage write is held until
+ *     that write is confirmed durable, unless the write was made with `allowUnconfirmed`. Here a write
+ *     without that option holds every later send for `<n>` ms. It is a model with a chosen number, not
+ *     a measurement of Cloudflare, and the benchmark reports it as one.
  */
 
 import { appendFileSync } from 'node:fs';
@@ -125,7 +139,7 @@ interface SocketData {
 
 function usage(message: string): never {
   process.stderr.write(
-    `${message}\nusage: bun rendezvous-process.ts --observations <path> [--port <n>] [--allow <ids>]\n`,
+    `${message}\nusage: bun rendezvous-process.ts --observations <path> [--port <n>] [--allow <ids>] [--timing-only] [--output-gate-ms <n>]\n`,
   );
   process.exit(2);
 }
@@ -134,10 +148,14 @@ function parseArguments(argv: readonly string[]): {
   readonly observations: string;
   readonly port: number;
   readonly allow: string;
+  readonly timingOnly: boolean;
+  readonly outputGateMs: number;
 } {
   let observations: string | undefined;
   let port = 0;
   let allow = '';
+  let timingOnly = false;
+  let outputGateMs = 0;
   for (let index = 0; index < argv.length; index += 1) {
     const flag = argv[index];
     const value = argv[index + 1];
@@ -154,19 +172,88 @@ function parseArguments(argv: readonly string[]): {
       if (value === undefined) usage('--allow needs a fingerprint list');
       allow = value;
       index += 1;
+    } else if (flag === '--timing-only') {
+      timingOnly = true;
+    } else if (flag === '--output-gate-ms') {
+      if (value === undefined) usage('--output-gate-ms needs a number');
+      outputGateMs = Number(value);
+      if (!Number.isFinite(outputGateMs) || outputGateMs < 0) usage('--output-gate-ms must be a duration');
+      index += 1;
     } else {
       usage(`unknown argument: ${String(flag)}`);
     }
   }
   if (observations === undefined) usage('--observations is required');
-  return { observations, port, allow };
+  return { observations, port, allow, timingOnly, outputGateMs };
 }
 
 const options = parseArguments(process.argv.slice(2));
 
-function record(frame: ObservedFrame): void {
+/** A wall-clock instant with sub-millisecond resolution, comparable across the benchmark's processes. */
+function preciseNow(): number {
+  return performance.timeOrigin + performance.now();
+}
+
+function observe(
+  direction: ObservedFrame['direction'],
+  role: ObservedFrame['role'],
+  data: ArrayBuffer | ArrayBufferView | string,
+): void {
+  const frame: ObservedFrame = {
+    at: options.timingOnly ? preciseNow() : Date.now(),
+    direction,
+    role,
+    kind: typeof data === 'string' ? 'text' : 'binary',
+    bytes: byteLengthOf(data),
+    base64: options.timingOnly ? '' : base64Of(data),
+  };
   appendFileSync(options.observations, `${JSON.stringify(frame)}\n`, 'utf8');
 }
+
+/**
+ * The output gate `--output-gate-ms` models. Closed by a confirmed write, it holds every send made
+ * while it is closed, in order, and releases them together when it opens — which is what the Workers
+ * runtime does with a Durable Object's outgoing messages until its storage write is durable.
+ */
+class OutputGate {
+  #opensAt = 0;
+  #held: (() => void)[] = [];
+  #timer: ReturnType<typeof setTimeout> | undefined;
+
+  closeFor(milliseconds: number): void {
+    if (milliseconds <= 0) return;
+    this.#opensAt = Math.max(this.#opensAt, preciseNow() + milliseconds);
+  }
+
+  /** Run `send` now, or once the gate opens; never ahead of a send already being held. */
+  pass(send: () => void): void {
+    if (this.#held.length === 0 && preciseNow() >= this.#opensAt) {
+      send();
+      return;
+    }
+    this.#held.push(send);
+    this.#arm();
+  }
+
+  #arm(): void {
+    if (this.#timer !== undefined) return;
+    this.#timer = setTimeout(
+      () => {
+        this.#timer = undefined;
+        if (preciseNow() < this.#opensAt) {
+          this.#arm();
+          return;
+        }
+        const held = this.#held;
+        this.#held = [];
+        for (const send of held) send();
+      },
+      Math.max(0, this.#opensAt - preciseNow()),
+    );
+  }
+}
+
+const outputGate = new OutputGate();
 
 function base64Of(data: ArrayBuffer | ArrayBufferView | string): string {
   if (typeof data === 'string') return Buffer.from(data, 'utf8').toString('base64');
@@ -197,23 +284,24 @@ class BunRelaySocket implements RelaySocket {
   #attachment: unknown = null;
 
   send(data: ArrayBuffer | string): void {
-    record({
-      at: Date.now(),
-      direction: 'from-rendezvous',
-      role: this.role,
-      kind: typeof data === 'string' ? 'text' : 'binary',
-      bytes: byteLengthOf(data),
-      base64: base64Of(data),
+    // Through the modelled output gate (a no-op unless `--output-gate-ms` is set), and observed as it
+    // LEAVES, so a held frame's wait is counted as the relay's own time rather than the network's.
+    outputGate.pass(() => {
+      observe('from-rendezvous', this.role, data);
+      const live = this.#live;
+      if (live === undefined) {
+        this.#buffered.push(data);
+        return;
+      }
+      live.send(typeof data === 'string' ? data : new Uint8Array(data));
     });
-    const live = this.#live;
-    if (live === undefined) {
-      this.#buffered.push(data);
-      return;
-    }
-    live.send(typeof data === 'string' ? data : new Uint8Array(data));
   }
 
   close(code?: number, reason?: string): void {
+    outputGate.pass(() => this.#close(code, reason));
+  }
+
+  #close(code?: number, reason?: string): void {
     const live = this.#live;
     if (live === undefined) {
       this.#closing ??= { code, reason };
@@ -251,8 +339,9 @@ class MemoryStorage implements RelayStorage {
     return this.#values.get(key) as T | undefined;
   }
 
-  async put<T>(key: string, value: T): Promise<void> {
+  async put<T>(key: string, value: T, putOptions?: { readonly allowUnconfirmed?: boolean }): Promise<void> {
     this.#values.set(key, value);
+    if (putOptions?.allowUnconfirmed !== true) outputGate.closeFor(options.outputGateMs);
   }
 
   async setAlarm(scheduledTime: number): Promise<void> {
@@ -447,14 +536,7 @@ const server = Bun.serve({
     },
     message: (live: ServerWebSocket<SocketData>, message: string | Buffer) => {
       if (typeof message === 'string' && heartbeatAnswered(live, message)) return;
-      record({
-        at: Date.now(),
-        direction: 'to-rendezvous',
-        role: live.data.role,
-        kind: typeof message === 'string' ? 'text' : 'binary',
-        bytes: byteLengthOf(message),
-        base64: base64Of(message),
-      });
+      observe('to-rendezvous', live.data.role, message);
       const payload: ArrayBuffer | string =
         typeof message === 'string'
           ? message

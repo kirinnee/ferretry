@@ -1,10 +1,19 @@
 import {
+  planTerminalRedraw,
+  type TerminalCapture,
+  type TerminalViewerSize,
+  terminalFullRedraw,
+} from '../../lib/terminal/redraw.ts';
+import { TERMINAL_REATTACH_LINES } from '../../lib/terminal/runtime-policy.ts';
+import {
   admitTerminalFrame,
   decideTerminalSend,
   parseTerminalFrame,
   releaseTerminalFrame,
-  TERMINAL_INPUT_REDRAW_MS,
+  TERMINAL_INPUT_REDRAW_LADDER_MS,
   TERMINAL_MAX_BUFFERED_OUTPUT_BYTES,
+  TERMINAL_MAX_REDRAW_BYTES,
+  TERMINAL_POLL_HISTORY_LINES,
   TERMINAL_REDRAW_POLL_MS,
   TERMINAL_STREAM_CLOSES,
   type TerminalStreamFrame,
@@ -13,7 +22,8 @@ import {
 export interface TerminalStreamService {
   write(sessionId: string, terminalId: string, bytes: Uint8Array): Promise<void>;
   resize(sessionId: string, terminalId: string, cols: number, rows: number): Promise<unknown>;
-  capture(sessionId: string, terminalId: string): Promise<Uint8Array>;
+  /** The pane with its newest `historyLines` of history: a window for a poll, the whole limit for a full redraw. */
+  capture(sessionId: string, terminalId: string, historyLines: number): Promise<TerminalCapture>;
 }
 
 export interface TerminalStreamDownstream {
@@ -36,9 +46,11 @@ export interface TerminalStreamScheduler {
 /**
  * WebSocket-shaped adapter that applies pure stream policy to the terminal lifecycle port.
  *
- * Output is a POLL, not a subscription: tmux offers a pane capture, not a delta feed, so every frame
- * this stream sends is a complete redraw. That is what makes the backpressure answer cheap — see
- * `redraw`.
+ * Output is a POLL, not a subscription: tmux offers a pane capture, not a delta feed. What this
+ * stream SENDS is the smallest frame that turns the viewer's screen into the latest capture — the rows
+ * that changed, or the lines that scrolled plus the screen — and a complete redraw only when there is
+ * nothing it may safely be a delta against (`lib/terminal/redraw.ts` owns that decision). That is what
+ * keeps the backpressure answer cheap — see `redraw`.
  */
 export class TerminalStreamBridge {
   private closed = false;
@@ -46,18 +58,27 @@ export class TerminalStreamBridge {
   private serial = Promise.resolve();
   private poll?: TerminalStreamTimer;
   /**
-   * The last redraw the transport ACCEPTED, so an unchanged pane is not sent again.
+   * The capture of the last frame the transport ACCEPTED: what the viewer's screen shows now.
    *
-   * The poll runs ten times a second whether or not anything changed, and every frame is a complete
-   * redraw — so an idle terminal was ten identical frames a second, forever, for as long as a viewer
-   * watched. Over a relay each one is a sealed record, a credit and a metered frame. A redraw equal to
-   * the one the viewer already has carries nothing, so it is skipped. Only a frame the transport took
-   * counts: one it DROPPED (`send` answering `0`) never reached the viewer, so the next poll sends the
-   * same picture again. A resize forgets it, because the viewer's emulator has just reflowed.
+   * Every frame is computed against it, so an unchanged pane sends nothing at all — an idle terminal
+   * polled ten times a second used to cost ten identical full redraws a second, and over a relay each
+   * one is a sealed record, a credit and a metered frame — and a changed one sends only the change.
+   * Only a frame the transport took counts: one it DROPPED (`send` answering `0`) never reached the
+   * viewer, so this is forgotten and the next poll sends a complete redraw. A resize forgets it too,
+   * because the viewer's emulator has just reflowed.
    */
-  private lastSent?: Uint8Array;
-  /** The next poll should come soon rather than on the ordinary tick: a keystroke wants its echo. */
-  private soon = false;
+  private lastSent?: TerminalCapture;
+  /**
+   * The size this viewer last said its emulator is. A delta paints rows by position, which is only
+   * right for an emulator the pane's own size; a viewer that never said, or whose size another viewer's
+   * resize has since overridden, is sent complete redraws.
+   */
+  private viewer?: TerminalViewerSize;
+  /**
+   * Which rung of {@link TERMINAL_INPUT_REDRAW_LADDER_MS} the next poll uses. Past the last rung the
+   * ordinary tick applies; a keystroke puts it back to the first.
+   */
+  private rung = TERMINAL_INPUT_REDRAW_LADDER_MS.length;
 
   constructor(
     private readonly service: TerminalStreamService,
@@ -93,6 +114,7 @@ export class TerminalStreamBridge {
         } else {
           this.lastSent = undefined;
           const { cols, rows } = parsed.charged.operation.size;
+          this.viewer = { cols, rows };
           await this.service.resize(this.sessionId, this.terminalId, cols, rows);
         }
       })
@@ -114,8 +136,8 @@ export class TerminalStreamBridge {
 
   private schedule(): void {
     if (this.closed || this.poll) return;
-    const delay = this.soon ? TERMINAL_INPUT_REDRAW_MS : TERMINAL_REDRAW_POLL_MS;
-    this.soon = false;
+    const delay = TERMINAL_INPUT_REDRAW_LADDER_MS[this.rung] ?? TERMINAL_REDRAW_POLL_MS;
+    this.rung = Math.min(this.rung + 1, TERMINAL_INPUT_REDRAW_LADDER_MS.length);
     this.poll = this.scheduler.schedule(() => {
       this.poll = undefined;
       void this.redraw().finally(() => this.schedule());
@@ -123,11 +145,11 @@ export class TerminalStreamBridge {
   }
 
   /**
-   * Pull the next capture forward. An armed poll is re-armed short; one already capturing picks the
-   * short delay up when it re-arms, so there is still never more than one capture in flight.
+   * Pull the next captures forward. An armed poll is re-armed on the first rung; one already capturing
+   * picks the first rung up when it re-arms, so there is still never more than one capture in flight.
    */
   private hurry(): void {
-    this.soon = true;
+    this.rung = 0;
     if (this.poll === undefined) return;
     this.poll.cancel();
     this.poll = undefined;
@@ -135,20 +157,23 @@ export class TerminalStreamBridge {
   }
 
   /**
-   * Sends one full pane snapshot, unless the viewer is already behind.
+   * Sends the frame that brings the viewer up to the pane, unless the viewer is already behind.
    *
    * BACKPRESSURE POLICY: DROP, never queue and never close. A viewer whose socket still holds more
    * than {@link TERMINAL_MAX_BUFFERED_OUTPUT_BYTES} is handed nothing — and is not even captured for,
    * so a stalled reader costs no tmux work either — and the next poll supersedes what was skipped.
-   * Because every frame is a COMPLETE redraw, a dropped one loses nothing but latency: the viewer
-   * catches up to the present state rather than replaying a backlog. Queueing instead would grow
-   * daemon memory without bound, and closing would end a stream over a reader that is merely slow.
+   * A dropped frame loses nothing but latency, because the next one is computed from what the viewer
+   * was last ACCEPTED to have, never from what it was merely sent: the viewer catches up to the present
+   * state rather than replaying a backlog. Queueing instead would grow daemon memory without bound, and
+   * closing would end a stream over a reader that is merely slow.
    */
   private async redraw(): Promise<void> {
     if (this.closed) return;
     if ((this.downstream.bufferedBytes?.() ?? 0) > TERMINAL_MAX_BUFFERED_OUTPUT_BYTES) return;
     try {
-      const snapshot = await this.service.capture(this.sessionId, this.terminalId);
+      // A poll reads a window of history; with no picture to be a delta against, the whole limit at once.
+      const depth = this.lastSent === undefined ? TERMINAL_REATTACH_LINES : TERMINAL_POLL_HISTORY_LINES;
+      let capture = await this.service.capture(this.sessionId, this.terminalId, depth);
       // CHECKED AGAIN, BECAUSE THE CAPTURE ABOVE IS AN AWAIT. The check at the top of this method was
       // the only one, so a capture in flight when `close()` landed still called `downstream.send`
       // afterwards — a bridge that had been told it was over, writing to a transport that was over
@@ -157,14 +182,22 @@ export class TerminalStreamBridge {
       // closing the DAEMON'S SOCKET, taking every other relayed session with it. The link now refuses
       // that frame on its own side as well; this is the half that belongs to whoever produced it.
       if (this.closed) return;
-      if (this.lastSent !== undefined && sameBytes(this.lastSent, snapshot)) return;
-      const sent = this.downstream.send(snapshot);
+      const plan = planTerminalRedraw(this.lastSent, capture, this.viewer, TERMINAL_MAX_REDRAW_BYTES);
+      if (plan.kind === 'unchanged') return;
+      if (plan.kind === 'full' && depth !== TERMINAL_REATTACH_LINES) {
+        // A complete redraw is worth the whole history the limit allows, not the poll's window. The
+        // pane may have moved on in between; this second capture is simply the newer picture.
+        capture = await this.service.capture(this.sessionId, this.terminalId, TERMINAL_REATTACH_LINES);
+        if (this.closed) return;
+      }
+      const frame = plan.kind === 'delta' ? plan.frame : terminalFullRedraw(capture, TERMINAL_MAX_REDRAW_BYTES);
+      const sent = this.downstream.send(new TextEncoder().encode(frame));
       const result = decideTerminalSend(sent);
       if (result.outcome === 'rejected') {
         this.finish(result.close.code, result.close.reason);
         return;
       }
-      this.lastSent = sent === 0 ? undefined : snapshot;
+      this.lastSent = sent === 0 ? undefined : capture;
     } catch {
       this.finish(TERMINAL_STREAM_CLOSES.redrawFailed.code, TERMINAL_STREAM_CLOSES.redrawFailed.reason);
     }
@@ -177,10 +210,4 @@ export class TerminalStreamBridge {
     this.poll = undefined;
     if (closeDownstream) this.downstream.close(code, reason);
   }
-}
-
-function sameBytes(left: Uint8Array, right: Uint8Array): boolean {
-  if (left.byteLength !== right.byteLength) return false;
-  for (let index = 0; index < left.byteLength; index += 1) if (left[index] !== right[index]) return false;
-  return true;
 }

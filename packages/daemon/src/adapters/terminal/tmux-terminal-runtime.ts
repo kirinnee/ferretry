@@ -1,12 +1,8 @@
 import type { TerminalSize } from '@ferretry/protocol';
 import type { TerminalRecord, TerminalRuntimePort } from '../../lib/terminal/contracts.ts';
 import { decodeTerminalOpener, encodeTerminalOpener } from '../../lib/terminal/ownership.ts';
-import {
-  hexInputChunks,
-  terminalPaneTarget,
-  terminalSnapshotFrame,
-  terminalTmuxSessionName,
-} from '../../lib/terminal/runtime-policy.ts';
+import { parseTerminalCapture, type TerminalCapture } from '../../lib/terminal/redraw.ts';
+import { hexInputChunks, terminalPaneTarget, terminalTmuxSessionName } from '../../lib/terminal/runtime-policy.ts';
 import type { TmuxCommandPort } from '../../lib/tmux/contracts.ts';
 import { isTmuxServerAbsent } from '../../lib/tmux/server-absent.ts';
 
@@ -232,14 +228,31 @@ export class TmuxTerminalRuntime implements TerminalRuntimePort {
     }
   }
 
-  async capture(record: TerminalRecord): Promise<Uint8Array> {
-    const [capture, cursor] = await Promise.all([
-      this.tmux.execute(['capture-pane', '-p', '-e', '-S', '-2000', '-t', terminalPaneTarget(record)]),
-      this.tmux.execute(['display-message', '-p', '-t', terminalPaneTarget(record), '#{cursor_x}|#{cursor_y}']),
+  /**
+   * The pane and its geometry in ONE tmux invocation: `capture-pane` then `display-message`, joined by
+   * tmux's own `;`, so the rows and the cursor are read in the same server turn and cost one process
+   * rather than two. A capture is taken after every keystroke and on every poll, so the spawn it saves
+   * is on the path of every echo.
+   */
+  async capture(record: TerminalRecord, historyLines: number): Promise<TerminalCapture> {
+    const target = terminalPaneTarget(record);
+    const result = await this.tmux.execute([
+      'capture-pane',
+      '-p',
+      '-e',
+      '-S',
+      `-${String(Math.max(0, Math.trunc(historyLines)))}`,
+      '-t',
+      target,
+      ';',
+      'display-message',
+      '-p',
+      '-t',
+      target,
+      '#{cursor_x}|#{cursor_y}|#{pane_width}|#{pane_height}|#{history_size}',
     ]);
-    if (capture.code !== 0 || cursor.code !== 0) throw new TerminalRuntimeError('terminal no longer exists');
-    const [x = '0', y = '0'] = cursor.stdout.trim().split('|');
-    return new TextEncoder().encode(terminalSnapshotFrame(capture.stdout, number(x, 0), number(y, 0)));
+    if (result.code !== 0) throw new TerminalRuntimeError('terminal no longer exists');
+    return parseTerminalCapture(result.stdout);
   }
 
   /**

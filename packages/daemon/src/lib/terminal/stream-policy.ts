@@ -1,4 +1,5 @@
 import { TerminalResizeFrameSchema, type TerminalSize } from '@ferretry/protocol';
+import { MAX_TUNNEL_DATA_BYTES } from '../relay/tunnel.ts';
 
 /**
  * Pure policy for one attached terminal stream.
@@ -30,14 +31,38 @@ export const TERMINAL_MAX_BUFFERED_OUTPUT_BYTES = 1024 * 1024;
 export const TERMINAL_REDRAW_POLL_MS = 100;
 
 /**
- * How soon after a keystroke reaches the pane its echo is captured.
+ * How soon after a keystroke reaches the pane its echo is captured: one delay per capture, in order,
+ * after which the ordinary {@link TERMINAL_REDRAW_POLL_MS} tick resumes.
  *
  * The poll alone made every keystroke wait for the next tick — about 100 ms, on any carrier, before
- * the network was even involved. Input is the one moment a redraw is known to be wanted, so the next
- * capture is pulled forward to just after the write; a shell that has not echoed yet is caught by the
- * ordinary poll after it.
+ * the network was even involved — and a single capture pulled forward to 15 ms still spent those 15 ms
+ * waiting for an echo that a shell writes within a millisecond of its input. Input is the one moment a
+ * redraw is known to be wanted, so the first capture follows the write at once, and a program slower
+ * than a shell (an editor repainting, a completion menu) is caught by the next rungs rather than by the
+ * ordinary tick. Measured by `packages/pwa/harness/relay-terminal-bench.ts`; see
+ * `docs/relay-protocol.md` §14, "What a keystroke costs".
  */
-export const TERMINAL_INPUT_REDRAW_MS = 15;
+export const TERMINAL_INPUT_REDRAW_LADDER_MS: readonly number[] = [0, 5, 15, 40];
+
+/**
+ * How much history a poll reads: enough to recognise what scrolled since the last frame, and no more.
+ *
+ * A poll used to read the pane's whole capture limit — two thousand lines — ten times a second, and
+ * after every keystroke, to find the one row that changed: on a used terminal that was most of the
+ * time between a keystroke and its echo. A delta needs only the newest lines it shares with the last
+ * frame, so a poll reads this many; output that scrolls further than this between two polls is
+ * redrawn completely, from a second capture of the whole limit (`TERMINAL_REATTACH_LINES`).
+ */
+export const TERMINAL_POLL_HISTORY_LINES = 200;
+
+/**
+ * The most bytes one redraw may be, so that one record can carry it.
+ *
+ * It is the §14 record budget itself, imported from the tunnel that owns it rather than restated: a
+ * redraw over it is one no carrier can deliver, and a carrier drops it — so a full redraw trims its
+ * history to fit instead (see `redraw.ts`).
+ */
+export const TERMINAL_MAX_REDRAW_BYTES = MAX_TUNNEL_DATA_BYTES;
 
 /** WebSocket close reasons this stream can produce, paired with their close codes. */
 export const TERMINAL_STREAM_CLOSES = {

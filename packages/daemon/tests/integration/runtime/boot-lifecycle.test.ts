@@ -89,6 +89,7 @@ import {
   type SessionLifecycleLauncher,
   type SessionLifecycleRecord,
   sessionPaneEnvironment,
+  type TerminalCapture,
   type TerminalRecord,
   type TerminalRuntimePort,
   verifySessionTranscriptMessageToken,
@@ -383,8 +384,8 @@ class RecordingTerminalRuntime implements TerminalRuntimePort {
     this.written.push(new TextDecoder().decode(bytes));
   }
 
-  async capture(): Promise<Uint8Array> {
-    return new TextEncoder().encode(this.screen);
+  async capture(): Promise<TerminalCapture> {
+    return { lines: [this.screen], cols: 100, rows: 1, cursorX: this.screen.length, cursorY: 0, historySize: 0 };
   }
 
   /** The screen, followed by everything typed into it — enough for an agent's read to see its own input. */
@@ -4693,8 +4694,9 @@ describe('daemon boot lifecycle', () => {
     // Assert
     should(code).equal(0);
     // The upgrade was authenticated by the query-parameter token alone, which is all a browser
-    // `WebSocket` can carry, and the first frame is the pane as tmux would draw it.
-    should(frames[0]).equal('ready $ ');
+    // `WebSocket` can carry, and the first frame is the pane as tmux would draw it: a complete redraw,
+    // because nothing has been sent before it to be a delta against.
+    should(frames[0]).equal('\u001b[3J\u001b[2J\u001b[Hready $ \u001b[1;9H');
     // The keystrokes reached the real pane through the lifecycle service.
     should(runtime.written).deepEqual(['echo hi\r']);
     // The resize control frame was parsed with the protocol's own schema and applied to the pane, so

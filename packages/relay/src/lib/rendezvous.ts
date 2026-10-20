@@ -179,6 +179,13 @@ export type RendezvousEffect =
 export interface RendezvousStep {
   readonly state: RendezvousState;
   readonly effects: readonly RendezvousEffect[];
+  /**
+   * Set when the only thing this step changed is one session's credit window, because a frame or a
+   * credit grant moved across it. Every relayed frame is such a step, so it is the one that decides
+   * what forwarding costs: the adapter persists it without waiting for the write to be confirmed (see
+   * `applyStep` in `worker.ts`). Absent on every step that admits, ends or reshapes anything.
+   */
+  readonly windowOnly?: true;
 }
 
 // ─── effect helpers ───────────────────────────────────────────────────────────────────────────
@@ -491,12 +498,14 @@ function forward(
     return {
       state: replaceSession(state, direction.withCredits(session, credited)),
       effects: [{ kind: 'send', socketId: direction.toSocketId, frame }],
+      windowOnly: true,
     };
   }
   if (!maySend(direction.send)) return endWithViolation('sender exceeded its credit window');
   return {
     state: replaceSession(state, direction.withSend(session, recordSent(direction.send))),
     effects: [{ kind: 'send', socketId: direction.toSocketId, frame }],
+    windowOnly: true,
   };
 }
 

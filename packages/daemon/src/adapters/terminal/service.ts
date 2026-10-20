@@ -1,12 +1,5 @@
 import { isAbsolute, resolve } from 'node:path';
 import type { SurfaceOpener, TerminalListView, TerminalSize, TerminalView } from '@ferretry/protocol';
-import {
-  DEFAULT_TERMINAL_SIZE,
-  idleDeadline,
-  nextTerminalTitle,
-  normalizeTerminalSize,
-  normalizeTerminalTitle,
-} from '../../lib/terminal/policy.ts';
 import type {
   TerminalClock,
   TerminalIdSource,
@@ -15,6 +8,14 @@ import type {
   TerminalSession,
   TerminalSessionResolver,
 } from '../../lib/terminal/contracts.ts';
+import {
+  DEFAULT_TERMINAL_SIZE,
+  idleDeadline,
+  nextTerminalTitle,
+  normalizeTerminalSize,
+  normalizeTerminalTitle,
+} from '../../lib/terminal/policy.ts';
+import type { TerminalCapture } from '../../lib/terminal/redraw.ts';
 
 export class TerminalServiceError extends Error {
   constructor(
@@ -102,6 +103,22 @@ export class ManagedTerminalService {
     const record = this.records.get(key(session.id, terminalId));
     if (!record) throw new TerminalServiceError('not_found', 'terminal not found');
     return record;
+  }
+
+  /**
+   * The record a live stream's write or capture acts on, WITHOUT re-listing tmux when it is known.
+   *
+   * `record` lists every tmux session before it answers, which is right for a route a person calls
+   * once and wrong for a stream that calls it on every keystroke and every poll: it was a whole extra
+   * `tmux` process in front of each echo. A terminal this service closed is gone from the map and
+   * falls through to `record`, which refreshes and refuses it — so a stream still cannot outlive the
+   * lifecycle — and one that died behind the service's back fails its tmux command instead, which ends
+   * the stream the same way. The session is still resolved every time: that is where a deleted session
+   * stops its terminals.
+   */
+  private async liveRecord(sessionReference: string, terminalId: string): Promise<TerminalRecord> {
+    const session = await this.session(sessionReference);
+    return this.records.get(key(session.id, terminalId)) ?? (await this.record(sessionReference, terminalId));
   }
 
   async list(sessionReference: string): Promise<TerminalListView> {
@@ -219,13 +236,13 @@ export class ManagedTerminalService {
   }
 
   async write(sessionReference: string, terminalId: string, bytes: Uint8Array): Promise<void> {
-    const record = await this.record(sessionReference, terminalId);
+    const record = await this.liveRecord(sessionReference, terminalId);
     await this.runtime.write(record, bytes);
     this.records.set(key(record.ownerId, record.id), { ...record, lastActivityAtMs: this.clock.now() });
   }
 
-  async capture(sessionReference: string, terminalId: string): Promise<Uint8Array> {
-    return await this.runtime.capture(await this.record(sessionReference, terminalId));
+  async capture(sessionReference: string, terminalId: string, historyLines: number): Promise<TerminalCapture> {
+    return await this.runtime.capture(await this.liveRecord(sessionReference, terminalId), historyLines);
   }
 
   async text(sessionReference: string, terminalId: string, lines: number): Promise<string> {

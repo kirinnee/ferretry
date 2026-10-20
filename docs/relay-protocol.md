@@ -527,6 +527,21 @@ the two disagree. Before every arrival, frame and sweep the reference rendezvous
 - any other socket carrying a claim is refused `4410`, so its daemon claims again rather than waiting
   on a socket nobody can reach it through.
 
+**Forwarding does not wait for the write.** Every forwarded frame moves its session's credit window
+(§8), the window is part of the rendezvous's stored state, and so the reference rendezvous writes that
+state on every frame. On Cloudflare a Durable Object's outgoing messages are held until its storage
+writes are confirmed durable — the runtime's _output gate_ — so every relayed keystroke and every
+redraw used to leave the rendezvous only after a durable write. A step that changed nothing but a
+window is therefore written with `allowUnconfirmed`: the frame leaves at once and the counter is
+persisted behind it. A step that changed nothing at all — a claim probe's `held` — is not written,
+and every step that admits, ends or reshapes a session is still written and confirmed before anything
+it sends. What that gives up is bounded and stated: should the runtime fail to confirm such a write it
+resets the object, and a session that outlives the reset holding counters older than its traffic is
+ended (`4430`) by the first frame its restored window disagrees with, after at most the frames
+forwarded since the last confirmed write. Nothing about the end-to-end channel depends on the
+counters. How long Cloudflare takes to confirm a write is not measurable from this repository; the
+local benchmark models it (§14, "What a keystroke costs").
+
 **Reconnection is normal, and it is not resumption.** A session is bound to its sockets. When either
 socket drops, the session ends and both sides are told. Frames in flight are lost — and _known_ to be
 lost, because the sequence discipline in §7 turns a gap into a torn-down session rather than a quiet
@@ -595,7 +610,10 @@ worse than disclosing it.
   cover traffic in this version, so an observer can tell a burst of typing from a screenshot. For a
   relayed **terminal stream** that deserves its own sentence rather than a clause: frame timing is
   keystroke timing, which is a stronger disclosure than the request/response case — an observer who
-  cannot read a single keystroke can still watch the rhythm of somebody typing.
+  cannot read a single keystroke can still watch the rhythm of somebody typing. And because a
+  terminal's daemon-to-browser frames carry only what changed (§14, "What a keystroke costs"), their
+  sizes track how much of the screen changed — one repainted row for a typed character, the scrolled
+  lines for output — rather than how much is on it.
 - **How many clients** are connected to a daemon, and when each arrived and left.
 - **That a first pairing happened, and — from one record's size — how it ended**, when the exchange
   crosses a relay (§14): a pre-auth session opened for fingerprint X at time T from IP Y and ended
@@ -929,7 +947,8 @@ and when, from which IP — never the code, the key or the device name, and neve
 anything readable, but the outcome IS inferable from the size of the one sealed answer, because
 `paired` carries a whole redemption response and `pair-refused` carries one word (§10).
 When a terminal stream crosses it, frame timing is keystroke timing, and — because an unchanged redraw
-is not sent again (§14) — the timing of daemon-to-browser frames is when the screen changed. The same
+is not sent again and a changed one carries only the change (§14) — the timing of daemon-to-browser
+frames is when the screen changed, and their size is how much of it changed. The same
 is true of a remote-browser view, whose frame sizes also track how much of the page is changing. The operator meter persists the
 counts, sizes and timing fields described above. Neither party can observe frame payloads, device
 tokens, pairing codes, session content, stream content, commands, output, daemon names or device
@@ -1728,10 +1747,16 @@ envelope does. What happens when a producer's frame exceeds it is decided by wha
 
 - **terminal input** (client → daemon) is a byte stream, so a client splits an oversized write —
   a 64 KiB paste — into ordered `bytes` records and nothing is lost or delayed;
-- **terminal output** (daemon → client) arrives from the pane as complete redraws, each superseded
-  by the next, so a redraw that exceeds the budget is **dropped** exactly as a backpressured one is
-  (below). The residual is disclosed rather than hidden: a pane whose every redraw exceeds the
-  budget stays stale for a relayed viewer until it draws something smaller;
+- **terminal output** (daemon → client) is a picture of the pane rather than a byte stream from it —
+  tmux offers a capture, not a delta feed — so the daemon sends the smallest frame that turns the
+  viewer's screen into the latest capture: the rows that changed, or the lines that scrolled followed
+  by the screen, and a **complete redraw** only when there is nothing it may safely be a delta against
+  ("What a keystroke costs", below). A complete redraw keeps the newest history that fits the budget
+  and leaves the oldest out, so it fits one record unless the visible screen alone does not; such a
+  screen is **dropped** exactly as a backpressured redraw is (below). Before that cap, every redraw
+  carried the capture limit's two thousand lines of history and was dropped whenever they were over
+  the budget, so a terminal holding a few hundred lines of history was never painted again — over
+  either carrier, since both carry the same session;
 - a **browser frame** (daemon → client) is one JPEG with its page id in front, routinely larger than
   the budget, so the browser stream is a byte stream with its own framing: each frame is cut into
   self-delimiting `FYBC` chunks no larger than the budget — magic, version `1`, frame serial, whole
@@ -1756,12 +1781,13 @@ it must be reported honestly, because a stream layer that answered `0` would mak
 backpressure policy vacuous over a relay. What a full buffer means is the stream's own contract, and
 the two that exist differ on purpose:
 
-- a **terminal** frame is a complete redraw that the next one supersedes, so an overflowing frame is
-  **dropped**, never queued without bound and never fatal. A redraw identical to the last one the
-  stream accepted is not sent at all — an idle pane polled ten times a second used to cost ten
-  identical records a second for as long as anyone watched — while one the stream dropped is sent again
-  on the next poll, because the viewer never had it. A stream reports a drop to its producer as
-  `0` ("not taken"), the transport convention every producer in the daemon reads;
+- a **terminal** frame is a complete redraw or a delta against the picture the stream last
+  **accepted**, and the next one supersedes it either way, so an overflowing frame is **dropped**, never
+  queued without bound and never fatal. A pane unchanged since the last accepted frame sends nothing at
+  all — an idle pane polled ten times a second used to cost ten identical records a second for as long
+  as anyone watched — and a frame the stream dropped is followed by a complete redraw, because a delta
+  is only ever computed against what the viewer was accepted to have. A stream reports a drop to its
+  producer as `0` ("not taken"), the transport convention every producer in the daemon reads;
 - a **browser** frame follows the same two rules — one identical to the last frame every chunk of
   which the stream accepted is not sent, and one with a dropped chunk is resent whole — and adds a
   third: a new frame starts only when the session has **no un-credited backlog at all**, so frames are
@@ -1812,6 +1838,93 @@ A stream dies with its session, and §9's rule is unchanged: reconnection is a *
 a resumption. Re-opening is the route's own repair — the event stream's `after` cursor picks up a
 session-scoped feed where it left off, a fresh terminal attach paints the current screen — and a
 client re-requests rather than assuming, exactly as it must after a direct socket drops.
+
+#### What a keystroke costs
+
+A keystroke is one `bytes` record each way: the browser seals the key, the daemon writes it into the
+pane, captures the pane and seals the change. Nothing here batches — the browser sends every key the
+moment xterm hands it over and writes every arriving frame at once — so what a keystroke costs is the
+carrier's round trip plus what the daemon spends between the two records. That second part is the
+daemon's, and it is measured rather than estimated by `packages/pwa/harness/relay-terminal-bench.ts`:
+the real `TerminalStreamBridge`, `ManagedTerminalService` and `TmuxTerminalRuntime` over a real tmux,
+the real `BunRelayCarrier` and `DirectSession`, the real rendezvous (`scripts/test/rendezvous-process.ts`)
+and the PWA's own `openRelaySession` and xterm.js in a real Chrome, timed from the key to the frame
+that painted its echo. The network between them is a shaping proxy, and the numbers it is given are
+printed with every result.
+
+**What the daemon does with a keystroke.**
+
+- **The echo is captured at once, not on a tick.** After the write reaches the pane the next captures
+  follow at 0, 5, 15 and 40 ms, then the ordinary 100 ms poll resumes; a shell echoes within a
+  millisecond, and a slower program (an editor repainting, a completion menu) is caught by a later
+  rung. A single capture pulled forward to 15 ms used to spend those 15 ms waiting.
+- **One tmux process per capture, and none per lookup.** A capture is `capture-pane` and
+  `display-message` in ONE tmux invocation, and a stream's write and capture act on the terminal the
+  service already knows instead of listing every tmux session first. Each of those was a process.
+- **A poll reads 200 lines of history, not 2000.** Two hundred are enough to recognise what scrolled
+  since the last frame; the whole capture limit is read only when a complete redraw is due.
+- **Only the change is sent.** Against the last frame the stream ACCEPTED, the daemon sends the rows
+  that changed — a typed character repaints one row, about 45 bytes — or, when output scrolled, the
+  newly scrolled lines followed by the screen. A complete redraw is sent only when there is nothing to
+  be a delta against: a fresh attach, a dropped frame, a resize, a viewer whose emulator is not the
+  pane's size (another viewer resized it), or a history that was cleared or rewritten rather than
+  grown. Each row tmux captures sets its own colours and resets them at its end, which is what makes
+  repainting one row alone correct. A delta's newly scrolled lines are trimmed to the record budget
+  from the oldest, so the visible screen is always right and only the viewer's scrollback can show a
+  gap where a burst of output scrolled further than one record holds.
+
+**The rendezvous does not hold a frame behind a write** (§9, "Forwarding does not wait for the write").
+
+**Measured,** on one machine, `bun harness/relay-terminal-bench.ts` from `packages/pwa`, 30 keystrokes
+per case, p50 / p95 in milliseconds, before (`main` at `191a5634b`) and after this change. _WAN_ is
+a phone away from home reaching a home daemon: a 60 ms round trip on both paths — direct is one 30 ms
+leg, the relay a 20 ms leg (phone↔edge) and a 10 ms leg (edge↔home) — with a 10 Mbit/s home uplink.
+_History_ is lines of about 125 bytes with their colours, the size of a log or a build's output.
+_Gate_ is the modelled output gate: `--output-gate-ms 10` holds every send behind an ordinary write
+for 10 ms; that number is a choice, not a measurement of Cloudflare.
+
+| case                               |                             before |       after |
+| ---------------------------------- | ---------------------------------: | ----------: |
+| direct · loopback · fresh          |                        31.3 / 33.8 |  9.5 / 12.1 |
+| direct · WAN · fresh               |                        92.9 / 96.0 | 72.2 / 75.0 |
+| direct · WAN · 300 lines           |                      146.3 / 156.8 | 75.8 / 78.3 |
+| relay · loopback · fresh · gate 10 |                        54.0 / 56.8 | 10.0 / 12.1 |
+| relay · WAN · fresh · gate 0       |                       95.7 / 100.1 | 75.7 / 78.8 |
+| relay · WAN · fresh · gate 10      |                      118.2 / 123.7 | 76.0 / 80.4 |
+| relay · WAN · 300 lines · gate 10  |                      179.1 / 197.6 | 77.1 / 93.2 |
+| relay · WAN · 1500 lines · gate 10 |                      never painted | 77.0 / 93.3 |
+| bytes in one echo frame            | 103 B fresh, 36 949 B at 300 lines |     44–46 B |
+
+So a relayed keystroke now comes back in the path's round trip plus about 16 ms, of which the
+daemon's own part is under 10 ms (write 2.5, the first capture rung 1.1, the capture 2.3–4.0) and the
+rest is two shaping proxies and the browser's paint. Before, a used terminal paid a whole history per
+character — 37 KB at 300 lines, and at 1500 lines a redraw no record could carry, so nothing ever
+reached the viewer, direct or relayed. The modelled 10 ms gate used to add 11 ms in each direction of
+the relay hop; it now adds nothing measurable (the rendezvous's own forwarding is 0.2 ms each way).
+
+**What was looked at and is not a cost:** per-keystroke round trips (input is one stream record, never
+a request); Nagle-style buffering (no endpoint batches, and the loopback down-leg is 1 ms); the credit
+window (one echo is one frame of thirty-two, and `seq 1 20000` paints its last line in two or three
+frames); AES-GCM per record and the JSON-and-base64url envelope (both inside the 1–2 ms the loopback
+up-leg measures, and the envelope's four-thirds is nothing on a 45-byte delta); heartbeat and claim
+probes (one ping and one probe every 20 s); and duplicated subscriptions (the deck attaches only the
+active terminal, as "What a stream session costs" says).
+
+**What is not done, and why.**
+
+- **No compression.** The relay sees every record's size, and compressing a terminal's output before
+  sealing it would make those sizes depend on what is ON the screen — the compress-then-encrypt length
+  side channel. Deltas get most of the byte saving without giving an observer that oracle.
+- **The capture is still a poll, and each write and capture is still a tmux process** (about 2.3 ms
+  each, most of the daemon's remaining time). tmux's control mode would report output as it happens
+  and take commands over one long-lived connection; it also attaches a client that takes part in the
+  window's size, which is why it is a separate change rather than part of this one. — GAP.
+- **Cloudflare itself is not measured here.** The Workers runtime is substituted (`rendezvous-process.ts`
+  says how), so how long Cloudflare takes to confirm a write, what a Durable Object waking from
+  hibernation costs the first keystroke after a pause, and how far the object sits from both ends are
+  not in these numbers. The object is placed where it was first created, which is near the daemon
+  that claims it; a phone far from both pays that distance on every keystroke, and no code here can
+  shorten it. — GAP.
 
 #### What a stream session costs
 

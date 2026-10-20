@@ -453,6 +453,23 @@ describe('rendezvous: forwarding', () => {
     should(closures(overflowing.effects)[0]?.code).equal(RELAY_CLOSE_CODES.flowViolation);
     should(messagesTo(overflowing.effects, 'daemon')[0]).match({ code: RELAY_CLOSE_CODES.flowViolation });
     should(overflowing.state.sessions).deepEqual([]);
+    // Ending a session reshapes the rendezvous, so it is never written the cheap way.
+    should(overflowing.windowOnly).be.undefined();
+  });
+
+  it('should mark a forwarded frame as a step that moved nothing but a credit window', () => {
+    // The adapter persists exactly these steps without waiting for the write to be confirmed, so the
+    // mark must be on every forward and on nothing that admits, ends or reshapes anything.
+    const opened = withClient();
+    const forward = reduceRendezvous(opened.state, {
+      kind: 'frame',
+      socketId: 'phone',
+      frame: record(sessionId(1), 1),
+      at: 3_000,
+    });
+    should(forward.windowOnly).be.true();
+    should(forwarded(forward.effects)).have.length(1);
+    should(opened.windowOnly).be.undefined();
   });
 
   it('should forward a credit grant that does something and refuse one that does not', () => {
@@ -472,6 +489,7 @@ describe('rendezvous: forwarding', () => {
     });
     should(forwarded(granting.effects)[0]?.socketId).equal('daemon');
     should(granting.state.sessions[0]?.fromDaemon.allowed).equal(CREDIT_WINDOW_FRAMES + 1);
+    should(granting.windowOnly).be.true();
 
     const pointless = reduceRendezvous(granting.state, {
       kind: 'frame',

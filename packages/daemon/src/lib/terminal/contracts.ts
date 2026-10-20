@@ -1,4 +1,5 @@
 import type { SurfaceOpener, TerminalSize } from '@ferretry/protocol';
+import type { TerminalCapture } from './redraw.ts';
 
 export interface TerminalRecord extends TerminalSize {
   readonly id: string;
@@ -42,7 +43,11 @@ export interface TerminalRuntimePort {
   rename(record: TerminalRecord, title: string): Promise<void>;
   resize(record: TerminalRecord, size: TerminalSize): Promise<void>;
   write(record: TerminalRecord, bytes: Uint8Array): Promise<void>;
-  capture(record: TerminalRecord): Promise<Uint8Array>;
+  /**
+   * The pane's newest `historyLines` of history and its screen, with their colours, and its cursor and
+   * size, in ONE consistent read.
+   */
+  capture(record: TerminalRecord, historyLines: number): Promise<TerminalCapture>;
   /** The last `lines` lines as plain text. */
   text(record: TerminalRecord, lines: number): Promise<string>;
   /** The foreground program's name. */

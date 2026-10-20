@@ -25,6 +25,7 @@ export {
   type RelayRuntime,
   type RelaySocket,
   type RelayStorage,
+  type RelayStoragePutOptions,
   RendezvousDurableObject,
   type RendezvousNamespace,
   relayFetch,
