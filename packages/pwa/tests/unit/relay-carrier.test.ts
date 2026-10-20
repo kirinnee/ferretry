@@ -27,8 +27,8 @@ import {
   type DaemonCarrierRouterOptions,
   DaemonOutdatedError,
   DEVICE_NOT_ACCEPTED_SENTENCE,
-  DIRECT_SESSION_DEADLINE_MS,
   DeviceNotAcceptedError,
+  DIRECT_SESSION_DEADLINE_MS,
   KEEPALIVE_INTERVAL_MS,
   openRelaySession,
   relayResponse,
@@ -834,6 +834,67 @@ describe('the carrier router', () => {
     await should(router.send(daemon, `${DAEMON_URL}/v1/sessions`, mutation)).be.rejected();
     should(carriers.hosts()).eql([DIRECT_HOST, 'relay.example', 'relay.example', DIRECT_HOST, 'relay.example']);
     await settle(5);
+  });
+
+  it('should give up on a relayed request at its deadline and carry the next one on a fresh session', async () => {
+    // Arrange — a relay whose daemon end has gone quiet: its first request is never answered, while the
+    // rendezvous keeps the socket open. This is how a phone's send and ledger reads hung for good.
+    let asked = 0;
+    const { router, daemon, carriers } = await routerFor({
+      relay: RELAY,
+      reach: relayOnly,
+      answer: {
+        respond: () => {
+          asked += 1;
+          return asked === 1 ? new Promise<never>(() => undefined) : { status: 200, body: 'fresh' };
+        },
+      },
+    });
+
+    // Act
+    const reason = await router
+      .send(daemon, `${DAEMON_URL}/v1/sessions/one/sends`, { signal: AbortSignal.timeout(30) })
+      .then(
+        () => undefined,
+        (thrown: unknown) => thrown,
+      );
+    const next = await router.send(daemon, `${DAEMON_URL}/v1/sessions/one/sends`);
+
+    // Assert
+    should((reason as Error).name).equal('TimeoutError');
+    should(await next.text()).equal('fresh');
+    // The silent session was retired, so the next request walked the set again and opened a new one.
+    should(carriers.hosts()).eql([DIRECT_HOST, 'relay.example', DIRECT_HOST, 'relay.example']);
+  });
+
+  it('should keep the session when its caller cancels a request rather than running out of time', async () => {
+    // Arrange
+    let asked = 0;
+    const { router, daemon, carriers } = await routerFor({
+      relay: RELAY,
+      reach: relayOnly,
+      answer: {
+        respond: () => {
+          asked += 1;
+          return asked === 1 ? { status: 200, body: 'first' } : { status: 200, body: 'later' };
+        },
+      },
+    });
+    should((await router.send(daemon, `${DAEMON_URL}/v1/a`)).status).equal(200);
+    const controller = new AbortController();
+    controller.abort(new DOMException('the reader left', 'AbortError'));
+
+    // Act
+    const reason = await router.send(daemon, `${DAEMON_URL}/v1/b`, { signal: controller.signal }).then(
+      () => undefined,
+      (thrown: unknown) => thrown,
+    );
+    const next = await router.send(daemon, `${DAEMON_URL}/v1/c`);
+
+    // Assert
+    should((reason as Error).name).equal('AbortError');
+    should(await next.text()).equal('later');
+    should(carriers.hosts()).eql([DIRECT_HOST, 'relay.example']);
   });
 
   it('should keep the live session and its winner when a refresh republishes the winning carrier', async () => {

@@ -21,7 +21,15 @@
 // ledger — the reader would see no trace of a message that exists. So unknown
 // values degrade field by field, and the row survives.
 
-import type { SendCancelEffect, SendFate, SendPath, SendSenderKind, SendUnaccountedReason } from '@ferretry/protocol';
+import type {
+  IFyApiClient,
+  SendCancelEffect,
+  SendFate,
+  SendPath,
+  SendSenderKind,
+  SendUnaccountedReason,
+} from '@ferretry/protocol';
+import { z } from 'zod';
 
 /**
  * Slack when joining a durable row to the optimistic row that caused it. The
@@ -87,7 +95,98 @@ export interface LedgerSendRecord {
   readonly typedNotSent?: true;
   /** What a `cancelled` fate did to the agent’s screen. */
   readonly cancelEffect?: SendCancelEffect;
+  /**
+   * THIS BROWSER COULD NOT READ THE LEDGER, so the fate above is the last one it saw rather than the
+   * daemon's current word. Never on the wire: {@link markLedgerUnread} sets it on open rows only.
+   */
+  readonly unread?: LedgerUnread;
 }
+
+/** Since when the ledger could not be read, and why, in the failure's own words. */
+export interface LedgerUnread {
+  readonly since: string;
+  readonly reason: string;
+}
+
+/**
+ * How long the ledger may go unread before an open row stops claiming to know where its message is.
+ * A few polls' worth, so one dropped read during a reconnect does not flicker every row.
+ */
+export const LEDGER_UNREAD_GRACE_MS = 15_000;
+
+/**
+ * Says, on every row still open, that its fate is no longer being read.
+ *
+ * WHY THIS EXISTS. A phone on the relay showed a message as "Sending" for as long as anyone looked,
+ * because the only thing that moves a row is a successful read of `/sends`, and every way that read
+ * could fail — a carrier that stopped answering, a refusal, a page this bundle could not parse — was
+ * silently dropped ("the sends are an overlay"). The row then kept the last fate it had seen, and
+ * "the daemon has it and is checking" stayed on screen long after the daemon had settled it. A
+ * settled row is left alone: delivered, cancelled, unconfirmed and failed are already final words.
+ */
+export const markLedgerUnread = (
+  records: readonly LedgerSendRecord[],
+  problem: { readonly reason: string; readonly lastReadAt: number; readonly nowMs: number },
+): LedgerSendRecord[] => {
+  if (problem.nowMs - problem.lastReadAt < LEDGER_UNREAD_GRACE_MS) return [...records];
+  const unread: LedgerUnread = { since: new Date(problem.lastReadAt).toISOString(), reason: problem.reason };
+  return records.map(record =>
+    record.fate === 'accepted' || record.fate === 'queued' ? { ...record, unread } : record,
+  );
+};
+
+/** How a page holds its rows: a value, or an update of the rows it already has (React's `setState`). */
+export type LedgerRowsSetter = (
+  next: readonly LedgerSendRecord[] | ((rows: readonly LedgerSendRecord[]) => readonly LedgerSendRecord[]),
+) => void;
+
+/**
+ * One workspace's ledger feed: every read's rows, and every failed read said on the rows it left.
+ * "Since" counts from the feed's own start, so a workspace that never managed a read says so after
+ * the grace rather than inheriting another workspace's last success.
+ */
+export const ledgerFeed = (
+  setRows: LedgerRowsSetter,
+  now: () => number = Date.now,
+): {
+  readonly onSends: (rows: readonly LedgerSendRecord[]) => void;
+  readonly onSendsFailed: (reason: string) => void;
+} => {
+  let lastReadAt = now();
+  return {
+    onSends: rows => {
+      lastReadAt = now();
+      setRows(rows);
+    },
+    onSendsFailed: reason => setRows(rows => markLedgerUnread(rows, { reason, lastReadAt, nowMs: now() })),
+  };
+};
+
+/**
+ * How long one ledger read may take. Shorter than the client's default, because every poll waits for
+ * it: a read that hangs holds the transcript and the ledger still with it.
+ */
+export const LEDGER_READ_TIMEOUT_MS = 20_000;
+
+/**
+ * One read of a session's ledger, as the rows the daemon sent: parsed by THIS app rather than the typed client.
+ *
+ * `IFyApiClient.sends` validates the page with `SendRecordSchema`, whose enums are closed, so a row
+ * carrying one value this bundle has never heard of — a daemon a release ahead, a new evidence tier —
+ * rejected the WHOLE page, and the tolerant parser below never saw it. That is exactly the failure its
+ * header says it exists to prevent: a reader on an older bundle watched a delivered message read
+ * "Sending" forever. The request is the same route; only the reading changed.
+ *
+ * The rows come back UNPARSED, because the session cache keeps them as the daemon sent them — a row
+ * this bundle cannot read may be one the next bundle can. `parseLedgerSendsResponse` reads them.
+ */
+export const readLedgerSends = async (
+  api: Pick<IFyApiClient, 'request'>,
+  sessionId: string,
+): Promise<readonly unknown[]> =>
+  ledgerRows(
+    await api.request(`/v1/sessions/${encodeURIComponent(sessionId)}/sends`, z.unknown(), {}, LEDGER_READ_TIMEOUT_MS),
+  );
 
 /**
  * A row no deadline can retire: withdrawn, deliberately held, delivered, or taken back by a person.
@@ -303,19 +402,22 @@ export const parseLedgerSendRecord = (raw: unknown): LedgerSendRecord | null => 
   };
 };
 
+/** The rows of the endpoint envelope, or of a bare array (an older or hand-rolled daemon). */
+const ledgerRows = (raw: unknown): readonly unknown[] =>
+  Array.isArray(raw)
+    ? raw
+    : raw !== null && typeof raw === 'object' && Array.isArray((raw as { sends?: unknown }).sends)
+      ? (raw as { sends: unknown[] }).sends
+      : [];
+
 /**
  * Parses the endpoint envelope. Tolerates a bare array (an older or hand-rolled
  * daemon) and drops unusable rows individually, so one malformed row cannot
  * blank the whole ledger.
  */
 export const parseLedgerSendsResponse = (raw: unknown): LedgerSendRecord[] => {
-  const rows = Array.isArray(raw)
-    ? raw
-    : raw !== null && typeof raw === 'object' && Array.isArray((raw as { sends?: unknown }).sends)
-      ? (raw as { sends: unknown[] }).sends
-      : [];
   const parsed: LedgerSendRecord[] = [];
-  for (const row of rows) {
+  for (const row of ledgerRows(raw)) {
     const record = parseLedgerSendRecord(row);
     if (record !== null) parsed.push(record);
   }

@@ -408,7 +408,7 @@ interface ShellOptions {
   readonly scrollMemoryStorage?: ScrollMemoryStorage;
   /** Holds every `logs` read open until it resolves, so a cached transcript can be seen before the live one. */
   readonly transcriptGate?: () => Promise<void>;
-  /** Send-ledger rows `sends` answers with; without it the client has no `sends`, as before. */
+  /** Send-ledger rows the ledger read answers with; without it the ledger read fails, as before. */
   readonly sends?: readonly unknown[];
 }
 
@@ -569,7 +569,6 @@ const appStore = async (
             ? options.transcript(connection.daemonId, sessionId)
             : (options.transcript ?? '');
         },
-        ...(options.sends === undefined ? {} : { sends: async () => options.sends }),
         interrupt: async (sessionId: string) => sessionView(sessionId),
         start: async () => sessionView('started'),
         // The configuration stream the shell keeps open for the machine on screen: like the live feed
@@ -647,6 +646,12 @@ const appStore = async (
         }),
         request: async (path: string, schema: unknown, _init: RequestInit, timeout?: number) => {
           healthReads.push({ daemonId: connection.daemonId, path, schema, timeout });
+          // The ledger is read here and parsed by the app (`readLedgerSends`), never by the strictly
+          // validating `sends`; without `options.sends` it fails, as a client with no ledger did.
+          if (/^\/v1\/sessions\/[^/]+\/sends$/u.test(path)) {
+            if (options.sends === undefined) throw new Error('no send ledger in this fixture');
+            return { sends: options.sends };
+          }
           if (path === '/v1/fleet/runtimes' && options.accounts !== undefined)
             return { format: 'version-2', runtimes: options.accounts };
           if (options.fleet?.[path] !== undefined) return options.fleet[path];

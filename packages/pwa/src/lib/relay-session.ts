@@ -570,6 +570,11 @@ export class RelayClientSession {
   readonly #partial = new Map<number, PartialAnswer>();
   #failure: RelaySessionError | undefined;
   readonly #pending = new Map<number, PendingRequest>();
+  /**
+   * Requests their caller gave up on (`request`'s signal), whose answer may still arrive. Kept so a late
+   * answer is dropped as the stale answer it is, rather than read as one this browser never asked for.
+   */
+  readonly #abandoned = new Set<number>();
   /** Records waiting for the peer to return credit. Bounded by one window. */
   readonly #waiting: Uint8Array[] = [];
   /** Serialises everything that assigns a sequence number: a record's nonce IS its sequence, and
@@ -764,8 +769,10 @@ export class RelayClientSession {
    */
   async request(
     message: Omit<Extract<RelayTunnelClientMessage, { t: 'req' }>, 't' | 'id'>,
+    signal?: AbortSignal,
   ): Promise<RelayTunnelAnswer> {
     if (this.#failure !== undefined) throw this.#failure;
+    signal?.throwIfAborted();
     if (this.#phase !== 'serving') {
       throw new RelaySessionError('this relay session is not serving requests', RELAY_CLOSE_CODES.protocolError);
     }
@@ -784,8 +791,30 @@ export class RelayClientSession {
     }
     const id = this.#nextRequestId;
     this.#nextRequestId += 1;
+    // THE CALLER'S DEADLINE IS HONOURED HERE, because nothing else on this path can. A daemon that never
+    // answers — a handler that hangs, a Mac asleep behind a relay whose edge still answers the keepalive —
+    // used to leave this promise pending for good, and one pending read froze every poll that coalesces
+    // behind it: a phone's message sat at "Sending" while the daemon had long since settled it. An
+    // abandoned request may still have been applied, so its caller is told it gave up, never "not sent".
     const answer = new Promise<RelayTunnelAnswer>((resolve, reject) => {
-      this.#pending.set(id, { resolve, reject });
+      const abandon = (): void => {
+        if (!this.#pending.delete(id)) return;
+        this.#partial.delete(id);
+        this.#abandoned.add(id);
+        reject(signal?.reason instanceof Error ? signal.reason : new Error('the request was abandoned'));
+      };
+      const settled = (): void => signal?.removeEventListener('abort', abandon);
+      this.#pending.set(id, {
+        resolve: value => {
+          settled();
+          resolve(value);
+        },
+        reject: reason => {
+          settled();
+          reject(reason);
+        },
+      });
+      signal?.addEventListener('abort', abandon, { once: true });
     });
     // A body that fits rides on the request itself; a larger one is cut into ordered parts by the
     // protocol package's own rule, which is the one the daemon reassembles by.
@@ -1274,6 +1303,11 @@ export class RelayClientSession {
       return;
     }
     const waiting = this.#pending.get(message.id);
+    if (waiting === undefined && this.#abandoned.has(message.id)) {
+      // The answer to a request its caller already gave up on: read to its end and dropped.
+      if (message.more !== true) this.#abandoned.delete(message.id);
+      return;
+    }
     if (waiting === undefined) {
       // An answer to a request this side never sent means the carrier and the
       // daemon disagree about what is outstanding. There is no benign reading.

@@ -704,3 +704,94 @@ describe('a relay session carrying a body larger than one record', () => {
     should((await answer).message).match(/cannot read/u);
   });
 });
+
+describe('a relay request its caller gives up on', () => {
+  // The phone's message sat at "Sending" because a relayed request that the daemon never answered
+  // stayed pending for good: the client's deadline was never handed to the session.
+  it('should refuse a request whose signal has already fired, before sending anything', async () => {
+    // Arrange
+    const { session, socket } = await serving();
+    const sent = socket.sent.length;
+    const controller = new AbortController();
+    controller.abort(new DOMException('gave up', 'TimeoutError'));
+
+    // Act
+    const reason = await session.request({ method: 'GET', path: '/v1/sessions' }, controller.signal).then(
+      () => undefined,
+      (thrown: unknown) => thrown,
+    );
+
+    // Assert
+    should((reason as Error).name).equal('TimeoutError');
+    should(socket.sent.length).equal(sent);
+  });
+
+  it('should reject with the caller’s own reason, drop the late answer, and keep serving', async () => {
+    // Arrange
+    const { session, daemon } = await serving();
+    const controller = new AbortController();
+    const abandoned = session.request({ method: 'GET', path: '/v1/sessions/one/sends' }, controller.signal).then(
+      () => undefined,
+      (thrown: unknown) => thrown,
+    );
+    await settle();
+
+    // Act
+    controller.abort(new DOMException('the deadline passed', 'TimeoutError'));
+    const reason = await abandoned;
+    await session.receiveBinary(await daemon.record({ t: 'res', id: 1, status: 200, body: 'la', more: true }));
+    await session.receiveBinary(await daemon.record({ t: 'res-more', id: 1, body: 'te' }));
+    const next = session.request({ method: 'GET', path: '/v1/sessions' });
+    await session.receiveBinary(await daemon.record({ t: 'res', id: 2, status: 200, body: 'fresh' }));
+
+    // Assert
+    should((reason as Error).name).equal('TimeoutError');
+    should(await next).eql({ kind: 'response', status: 200, headers: {}, body: 'fresh' });
+    should(session.live()).be.true();
+  });
+
+  it('should still read an abort with no reason of its own as an abandoned request', async () => {
+    // Arrange
+    const { session } = await serving();
+    const signal = {
+      aborted: false,
+      reason: 'not an error',
+      throwIfAborted: () => undefined,
+    } as unknown as AbortSignal;
+    let abort: (() => void) | undefined;
+    Object.assign(signal, {
+      addEventListener: (_type: string, listener: () => void) => {
+        abort = listener;
+      },
+      removeEventListener: () => undefined,
+    });
+    const pending = session.request({ method: 'GET', path: '/x' }, signal).then(
+      () => undefined,
+      (thrown: unknown) => thrown,
+    );
+    await settle();
+
+    // Act
+    abort?.();
+    abort?.();
+
+    // Assert
+    should(((await pending) as Error).message).equal('the request was abandoned');
+  });
+
+  it('should forget its deadline once the answer arrives', async () => {
+    // Arrange
+    const { session, daemon } = await serving();
+    const controller = new AbortController();
+    const answered = session.request({ method: 'GET', path: '/x' }, controller.signal);
+    await session.receiveBinary(await daemon.record({ t: 'res', id: 1, status: 204 }));
+
+    // Act
+    const answer = await answered;
+    controller.abort();
+
+    // Assert
+    should(answer).eql({ kind: 'response', status: 204, headers: {}, body: '' });
+    should(session.live()).be.true();
+  });
+});

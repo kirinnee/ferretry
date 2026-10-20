@@ -3,6 +3,8 @@ import should from 'should';
 import { type ClockPort, parseSessionId, type SerialExecutor, type SessionId } from '../../../../src/lib/index.ts';
 import {
   defaultSendTrackerSettings,
+  lookBeforeReading,
+  SEND_READ_LOOK_BUDGET_MS,
   type SendEvidenceReading,
   type SendHeldAt,
   type SendPaneObservation,
@@ -111,6 +113,7 @@ class World {
   pane: SendPaneObservation | undefined = pane();
   inPane: SendHeldAt | false | undefined = false;
   retypeFails = false;
+  targetFails = false;
   cancelled = 0;
   nowMs = T0;
   readonly tracker: SendTracker;
@@ -153,7 +156,10 @@ class World {
           },
         },
         repository: {
-          read: async () => this.target,
+          read: async () => {
+            if (this.targetFails) throw new Error('session file unreadable');
+            return this.target;
+          },
           journal: async (_id, event, data) => void this.journal.push({ event, data }),
         },
         attempts: {
@@ -577,5 +583,90 @@ describe('a message the harness received joined to its neighbour', () => {
 
     should(world.records.get('send-1')?.fate).equal('accepted');
     should(world.records.get('send-2')?.fate).equal('accepted');
+  });
+});
+
+describe('a look that fails', () => {
+  it('still schedules the next look, so an open send is never left with nobody coming back to it', async () => {
+    // Arrange — the deadline has passed and the session file cannot be read.
+    const world = new World(record());
+    world.targetFails = true;
+
+    // Act
+    const failed = await world.checkAt(61_000).then(
+      () => undefined,
+      (thrown: unknown) => thrown,
+    );
+    const retry = world.scheduled.at(-1);
+    world.targetFails = false;
+    world.target = undefined;
+    retry?.run();
+    await new Promise(resolve => setTimeout(resolve, 0));
+
+    // Assert
+    should((failed as Error).message).equal('session file unreadable');
+    should(retry?.delayMs).equal(defaultSendTrackerSettings.busyExtensionMs);
+    should(world.only.fate).equal('timed_out');
+    should(world.only.unaccountedReason).equal('session_ended');
+  });
+});
+
+describe('a ledger read that asks for a look first', () => {
+  const tracker = (watching: boolean, look: () => Promise<void>) => {
+    const looked: string[] = [];
+    return {
+      looked,
+      port: {
+        watching: async () => watching,
+        check: async (id: SessionId) => {
+          looked.push(id);
+          await look();
+        },
+      },
+    };
+  };
+
+  it('looks first and waits for a look that finishes inside the budget', async () => {
+    // Arrange
+    let settled = false;
+    const { port, looked } = tracker(true, async () => {
+      settled = true;
+    });
+
+    // Act
+    await lookBeforeReading(port, ID, () => new Promise(() => undefined));
+
+    // Assert
+    should(looked).eql([ID]);
+    should(settled).be.true();
+  });
+
+  it('answers once the budget is spent, leaving a slow look to finish by itself', async () => {
+    // Arrange
+    const waited: number[] = [];
+    const { port } = tracker(true, () => new Promise(() => undefined));
+
+    // Act
+    await lookBeforeReading(port, ID, async milliseconds => void waited.push(milliseconds));
+
+    // Assert
+    should(waited).eql([SEND_READ_LOOK_BUDGET_MS]);
+  });
+
+  it('answers at once for a look that throws, and takes none when nothing is open', async () => {
+    // Arrange
+    const failing = tracker(true, async () => {
+      throw new Error('pane gone');
+    });
+    const idle = tracker(false, async () => undefined);
+    const never = () => new Promise<void>(() => undefined);
+
+    // Act
+    await lookBeforeReading(failing.port, ID, never, 10);
+    await lookBeforeReading(idle.port, ID, never);
+
+    // Assert
+    should(failing.looked).eql([ID]);
+    should(idle.looked).eql([]);
   });
 });

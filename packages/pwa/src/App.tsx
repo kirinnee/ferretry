@@ -70,13 +70,13 @@ import {
 import { setupHandoffFromHref } from './features/onboarding/setup-handoff.ts';
 import type { SetupSharePort } from './features/onboarding/setup-handoff-panel.tsx';
 import { usePackSessionActions } from './features/pack/pack-session-actions.tsx';
-import { switchTapper } from './features/session-info/switch-marks.tsx';
 import { PACK_SETTINGS_TAB } from './features/pack/pack-settings.tsx';
 import { DeviceRefusedNotice } from './features/pairing/device-refused-notice.tsx';
 import { PairingScreen } from './features/pairing/pairing-screen.tsx';
 import { ProjectDetailPage } from './features/projects/project-detail.tsx';
 import { ProjectsPage } from './features/projects/projects-page.tsx';
 import { sessionRowMenuRenderer } from './features/session-actions/row-actions-host.tsx';
+import { switchTapper } from './features/session-info/switch-marks.tsx';
 import { SessionSearchControl, SessionSearchProvider } from './features/session-search/session-search.tsx';
 import { aboutSettingsTab } from './features/settings/about-machine.tsx';
 import { agentClisSettingsTab } from './features/settings/agent-clis.tsx';
@@ -185,7 +185,7 @@ import { isCarrierOutage } from './lib/relay-carrier.ts';
 import { RELEASE_WORKER_RELEASE } from './lib/release-manifest.ts';
 import { RouterProvider, useRouter } from './lib/router.tsx';
 import { chatScrollSlot } from './lib/scroll-memory.ts';
-import { type LedgerSendRecord, parseLedgerSendsResponse } from './lib/send-ledger.ts';
+import { type LedgerSendRecord, ledgerFeed, parseLedgerSendsResponse, readLedgerSends } from './lib/send-ledger.ts';
 import type { CachedTranscript } from './lib/session-cache.ts';
 import {
   createAppStore,
@@ -1141,6 +1141,7 @@ function SessionRoute({ connection, scope }: SessionChatPageProps) {
         if (!current) return;
         setClient(api);
         const attentionScope = daemonSessionScope(connection, sessionId);
+        const ledger = ledgerFeed(setSends);
         control = startSessionWorkspaceRefresh({
           api: {
             // Attention shares the workspace's one visibility-aware refresh
@@ -1151,7 +1152,7 @@ function SessionRoute({ connection, scope }: SessionChatPageProps) {
               return await api.logs(id);
             },
             get: async id => await store.fleet.fetchSession(connection, { daemonId, sessionId: id }),
-            sends: async id => await api.sends(id),
+            sends: async id => await readLedgerSends(api, id),
           },
           sessionId,
           environment: browserWorkspaceRefreshEnvironment,
@@ -1163,8 +1164,9 @@ function SessionRoute({ connection, scope }: SessionChatPageProps) {
           onLog: log => store.sessionCache.saveTranscript(cacheScope, { log }, generation),
           onSends: rows => {
             store.sessionCache.saveTranscript(cacheScope, { sends: rows }, generation);
-            setSends(parseLedgerSendsResponse(rows));
+            ledger.onSends(parseLedgerSendsResponse(rows));
           },
+          onSendsFailed: ledger.onSendsFailed,
           // fetchSession publishes the same proved view into the daemon-scoped
           // fleet cache; publishing it again here would force two shell renders.
           onSession: () => undefined,

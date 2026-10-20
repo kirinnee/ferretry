@@ -39,6 +39,10 @@ const CANCEL_EFFECTS: Readonly<Record<SendCancelEffect, string>> = {
 const reasonOf = (record: LedgerSendRecord): string =>
   record.unaccountedReason === undefined ? 'arrival could not be checked' : REASONS[record.unaccountedReason];
 
+/** The clock time a ledger read last succeeded, in this reader's own locale. */
+const readAt = (since: string): string =>
+  new Date(since).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+
 const attempts = (record: LedgerSendRecord): string => {
   const count = record.attempt ?? 1;
   return count === 1 ? '1 attempt' : `${count} attempts`;
@@ -85,6 +89,15 @@ export const sendBadge = (record: LedgerSendRecord): SendBadge => {
       label: 'unconfirmed',
       tone: QUIET_TONE,
       detail: `unconfirmed — ${reasonOf(record)}; it may still have landed`,
+    };
+  // AN OPEN ROW THIS BROWSER CAN NO LONGER READ says that, and why, instead of the last fate it saw:
+  // "the daemon has it and is checking" was the sentence a phone kept showing after the daemon had
+  // long since settled the message. Quiet, never red — it may well have arrived.
+  if (record.unread !== undefined)
+    return {
+      label: 'status unknown',
+      tone: QUIET_TONE,
+      detail: `Ferretry has not been able to read where this message went since ${readAt(record.unread.since)} (${record.unread.reason}); it may still have arrived`,
     };
   if (record.typedNotSent === true)
     return {

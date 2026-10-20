@@ -114,9 +114,26 @@ export class SendTracker implements SendTracking, SendTrackingLoop {
     return () => this.ports.scheduler.cancelAll();
   }
 
-  /** Looks once at one session's sends, settles what it can prove, and schedules the next look. */
+  /**
+   * Looks once at one session's sends, settles what it can prove, and schedules the next look.
+   *
+   * A LOOK THAT THROWS STILL SCHEDULES ONE. The next look used to be scheduled only by a look that
+   * finished, and every caller drops the error, so one failed read — a ledger write, a session file —
+   * left every open send `accepted` with nothing ever coming back to it: the person's message read
+   * "Sending" for good. The retry waits as long as a busy agent's would; the error still reaches the
+   * caller.
+   */
   async check(id: SessionId): Promise<void> {
-    await this.ports.serial.run(id, async () => await this.checkLocked(id));
+    try {
+      await this.ports.serial.run(id, async () => await this.checkLocked(id));
+    } catch (error) {
+      this.ports.scheduler.schedule(
+        id,
+        this.settings.busyExtensionMs,
+        () => void this.check(id).catch(() => undefined),
+      );
+      throw error;
+    }
   }
 
   /** Whether a look at this session could change anything, so a reader knows one is worth taking. */
@@ -315,4 +332,28 @@ export class SendTracker implements SendTracking, SendTrackingLoop {
       await this.ports.notifier.notify(record.from, id, next).catch(() => undefined);
     return next;
   }
+}
+
+/**
+ * How long a ledger read waits for the look it asks for before answering with the ledger as it is.
+ * Most looks settle in well under a second; this is the ceiling, not the expectation.
+ */
+export const SEND_READ_LOOK_BUDGET_MS = 3_000;
+
+/**
+ * A READ IS A LOOK — BOUNDED. Asking where a send went is when a fresh answer matters, so a ledger
+ * read asks the tracker to look first. It used to WAIT for that look however long it took, and a look
+ * reads the whole transcript and the pane behind a per-session queue: a slow one held every reader of
+ * the ledger with it, and the phone that polls it showed its message as "Sending" for as long as the
+ * look took. Past the budget the look carries on by itself and the reader gets the ledger now; the
+ * look's own result reaches the next read, and its journal event the live feed.
+ */
+export async function lookBeforeReading(
+  tracker: Pick<SendTracker, 'watching' | 'check'>,
+  id: SessionId,
+  wait: (milliseconds: number) => Promise<void>,
+  budgetMs: number = SEND_READ_LOOK_BUDGET_MS,
+): Promise<void> {
+  if (!(await tracker.watching(id))) return;
+  await Promise.race([tracker.check(id).catch(() => undefined), wait(budgetMs)]);
 }

@@ -102,6 +102,24 @@ describe('sendReceipt', () => {
     expect(sendReceipt(record({ fate: 'unaccounted' }), true).kind).toBe('unconfirmed');
     expect(sendReceipt(record({ fate: 'delivered' }), true).detail).toContain('the agent has replied since');
   });
+
+  test('an open send whose ledger cannot be read says its status is unknown and why, never "Sending"', () => {
+    // Arrange
+    const unread = { since: '2026-07-31T10:01:00.000Z', reason: 'fyd did not answer within 20s' };
+
+    // Act
+    const sending = sendReceipt(record({ unread }));
+    const typed = sendReceipt(record({ fate: 'queued', typedNotSent: true, unread }));
+
+    // Assert
+    for (const receipt of [sending, typed]) {
+      expect(receipt.kind).toBe('unconfirmed');
+      expect(receipt.name).toBe('Status unknown');
+      expect(receipt.chip).toBe('status unknown');
+      expect(receipt.detail).toContain('has not been able to read where this message went since');
+      expect(receipt.detail).toContain('(fyd did not answer within 20s); it may still have arrived');
+    }
+  });
 });
 
 describe('the legend', () => {

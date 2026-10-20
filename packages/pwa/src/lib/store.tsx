@@ -466,6 +466,9 @@ export interface CreateAppStoreOptions {
   readonly connectionSignals?: ConnectionSignalEnvironment;
 }
 
+/** How long one reconnect probe may wait for its answer before the attempt counts as failed. */
+const CONNECTION_PROBE_TIMEOUT_MS = 15_000;
+
 /** Builds the document-lifetime stores and registers every daemon cache together. */
 export async function createAppStore(options: CreateAppStoreOptions = {}): Promise<AppStore> {
   const fetcher = options.fetcher ?? browserFetch;
@@ -544,7 +547,12 @@ export async function createAppStore(options: CreateAppStoreOptions = {}): Promi
     async daemonId => {
       const daemon = connections.list().find(record => record.daemonId === daemonId);
       if (daemon === undefined) return;
-      const request = daemonRequest(daemon, '/v1/carriers', { cache: 'no-store' });
+      // A DEADLINE, because the next attempt is scheduled only once this one settles: a probe that never
+      // came back used to leave the machine "reconnecting" for good, with every read deferred behind it.
+      const request = daemonRequest(daemon, '/v1/carriers', {
+        cache: 'no-store',
+        signal: AbortSignal.timeout(CONNECTION_PROBE_TIMEOUT_MS),
+      });
       await carrier.probe(daemon, request.url, request.init);
     },
   );
