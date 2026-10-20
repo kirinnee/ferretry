@@ -1,4 +1,9 @@
-import type { SttEnhancementErrorCode, SttEnhancementResult } from '@ferretry/protocol';
+import {
+  CLEANUP_LIMITS,
+  isContextSizedStatus,
+  type SttEnhancementErrorCode,
+  type SttEnhancementResult,
+} from '@ferretry/protocol';
 import {
   buildEnhancementBody,
   type CleanupSettings,
@@ -7,7 +12,6 @@ import {
   DEFAULT_ENHANCEMENT_PROVIDERS,
   DEFAULT_ENHANCEMENT_TIMEOUT_MS,
   ENHANCEMENT_HEADERS,
-  ENHANCEMENT_LIMITS,
   type EnhancementProviderTable,
   type EnhancementProviderView,
   enhancementProviderViews,
@@ -36,8 +40,7 @@ export interface EnhancementReport {
 }
 
 /** A failure that more reference text caused and less can cure: the provider says the request is too big or invalid. */
-const isContextSized = (error: SttEnhancementError): boolean =>
-  error.providerStatus === 413 || error.providerStatus === 400;
+const isContextSized = (error: SttEnhancementError): boolean => isContextSizedStatus(error.providerStatus);
 
 export interface SttEnhancementServiceOptions {
   /** Told once per call how it ended, for the daemon's log. */
@@ -140,7 +143,7 @@ export class SttEnhancementService {
       headers: ENHANCEMENT_HEADERS,
       body: JSON.stringify(buildEnhancementBody(request)),
       timeoutMs: this.timeoutMs,
-      maxResponseBytes: ENHANCEMENT_LIMITS.maxResponseBytes,
+      maxResponseBytes: CLEANUP_LIMITS.maxResponseBytes,
     });
     return classifyEnhancementOutcome(outcome, request, 0);
   }

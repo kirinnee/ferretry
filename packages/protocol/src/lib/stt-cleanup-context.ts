@@ -1,4 +1,5 @@
-import { parseFerretryNotice, parseHandoffPointer, parsePeerEnvelope } from '@ferretry/protocol';
+import { parseFerretryNotice, parsePeerEnvelope } from './agent-messages.ts';
+import { parseHandoffPointer } from './turn-handoff.ts';
 
 /**
  * The conversation a cleanup model may read, reduced to plain prose.
