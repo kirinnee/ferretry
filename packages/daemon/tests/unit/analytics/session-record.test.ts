@@ -3,9 +3,9 @@ import should from 'should';
 import type { AnalyticsPricingRate } from '../../../src/lib/analytics/pricing.ts';
 import {
   deriveAnalyticsSessionRecord,
-  rebuildAnalyticsSessionIndex,
   type FinishedAnalyticsSession,
   type FinishedAnalyticsSessionSource,
+  rebuildAnalyticsSessionIndex,
 } from '../../../src/lib/analytics/session-record.ts';
 
 const catalog: readonly AnalyticsPricingRate[] = [
@@ -210,5 +210,30 @@ describe('deriveAnalyticsSessionRecord', () => {
     should(actual.raw.outputTokens).be.null();
     should(actual.raw.cachedInputTokens).be.null();
     should(actual.raw.cacheWriteInputTokens).be.null();
+  });
+});
+
+describe('active time against wall time', () => {
+  it('should bound active time by the wall time of the run it belongs to', () => {
+    // Act — the fixture's wall time is 60 s
+    const over = deriveAnalyticsSessionRecord(
+      { ...finished, activity: { activeDurationMs: 90_000, turns: 2 } },
+      catalog,
+    );
+    const under = deriveAnalyticsSessionRecord(
+      { ...finished, activity: { activeDurationMs: 45_000, turns: 2 } },
+      catalog,
+    );
+    const unbounded = deriveAnalyticsSessionRecord(
+      { ...finished, finishedAt: 'not an instant', activity: { activeDurationMs: 90_000, turns: 2 } },
+      catalog,
+    );
+
+    // Assert
+    should(over.raw.durationMs).equal(60_000);
+    should(over.raw.activeDurationMs).equal(60_000);
+    should(under.raw.activeDurationMs).equal(45_000);
+    should(unbounded.raw.durationMs).be.null();
+    should(unbounded.raw.activeDurationMs).equal(90_000);
   });
 });

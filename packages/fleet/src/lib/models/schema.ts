@@ -15,6 +15,7 @@
  *
  * Pure.
  */
+import { AnalyticsPricingProviderSchema, AnalyticsPricingSourceUrlSchema } from '@ferretry/protocol';
 import { z } from 'zod';
 import type { HarnessKind } from '../manifest.ts';
 
@@ -43,6 +44,75 @@ export const MODEL_TIERS: readonly ModelTier[] = ModelTierSchema.options;
 /** A reasoning effort a CLI accepts (`/effort high`, `model_reasoning_effort = "high"`). */
 const EffortSchema = z.string().regex(/^[a-z]{2,12}$/u);
 
+/**
+ * US dollars per million tokens, to the micro-dollar: the denomination every provider's pricing page
+ * uses, and the precision analytics stores a rate at (integer micros), so nothing is lost converting.
+ */
+const UsdPerMillionSchema = z
+  .number()
+  .nonnegative()
+  .max(10_000)
+  .refine(value => Math.abs(value * 1_000_000 - Math.round(value * 1_000_000)) < 1e-6, {
+    message: 'a price is dollars per million tokens to at most six decimal places',
+  });
+
+/**
+ * What a model costs, as its provider publishes it (docs/model-catalog.md § Prices): USD per million
+ * tokens, the page it was read on and the day it was read. It prices an "equivalent API cost" in
+ * analytics — what a session would have cost at list price — never a bill, and a subscription login
+ * reads it as exactly that.
+ *
+ * `provider` is whose billing RULES the price follows (`@ferretry/protocol` analytics pricing): an
+ * `anthropic` price charges a cache write by how long it is kept, so it states `cacheWrite5m` and
+ * `cacheWrite1h`; every other maker charges one `cacheWrite`. `reasoning` is stated only where it
+ * differs from `output`: every maker these catalogs price bills reasoning (thinking) tokens as output.
+ */
+export const CatalogPriceSchema = z
+  .strictObject({
+    provider: AnalyticsPricingProviderSchema,
+    input: UsdPerMillionSchema,
+    output: UsdPerMillionSchema,
+    cacheRead: UsdPerMillionSchema,
+    cacheWrite: UsdPerMillionSchema.optional(),
+    cacheWrite5m: UsdPerMillionSchema.optional(),
+    cacheWrite1h: UsdPerMillionSchema.optional(),
+    reasoning: UsdPerMillionSchema.optional(),
+    /** The provider's own pricing page, where these numbers were read: https, no credential, no fragment. */
+    source: AnalyticsPricingSourceUrlSchema,
+    /** When they were read there. */
+    verified: z.string().regex(YYYY_MM_DD, { message: 'write the date as YYYY-MM-DD' }),
+  })
+  .check(ctx => {
+    const price = ctx.value;
+    const split = price.cacheWrite5m !== undefined || price.cacheWrite1h !== undefined;
+    if (price.provider === 'anthropic' && (price.cacheWrite5m === undefined || price.cacheWrite1h === undefined)) {
+      ctx.issues.push({
+        code: 'custom',
+        message:
+          'an anthropic price states both cacheWrite5m and cacheWrite1h: Anthropic bills a cache write by its lifetime',
+        input: price,
+        path: ['cacheWrite5m'],
+      });
+    }
+    if (price.provider !== 'anthropic' && split) {
+      ctx.issues.push({
+        code: 'custom',
+        message: `a ${price.provider} price states one cacheWrite; only Anthropic splits cache writes by lifetime`,
+        input: price,
+        path: ['cacheWrite5m'],
+      });
+    }
+    if (price.provider === 'anthropic' && price.cacheWrite !== undefined) {
+      ctx.issues.push({
+        code: 'custom',
+        message: 'an anthropic price states cacheWrite5m and cacheWrite1h, not one cacheWrite',
+        input: price.cacheWrite,
+        path: ['cacheWrite'],
+      });
+    }
+  });
+export type CatalogPrice = z.infer<typeof CatalogPriceSchema>;
+
 /** One model. `efforts` is empty for a model whose reasoning cannot be adjusted — no effort is offered. */
 export const CatalogModelSchema = z
   .strictObject({
@@ -69,6 +139,8 @@ export const CatalogModelSchema = z
     default: z.boolean().default(false),
     /** One sentence a picker shows under the label. */
     note: Text.optional(),
+    /** What it costs at list price, when the provider publishes one (`CatalogPriceSchema`). */
+    price: CatalogPriceSchema.optional(),
   })
   .check(ctx => {
     const model = ctx.value;

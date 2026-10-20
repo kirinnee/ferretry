@@ -8,7 +8,7 @@ import { type DaemonConnection, daemonConnection } from '../../../src/lib/daemon
 import type { FleetProject } from '../../../src/lib/fleet-grouping.ts';
 import { type DaemonFleetPort, DaemonFleetStore } from '../../../src/lib/fleet-store.ts';
 import { type DaemonProjectsPort, DaemonProjectsStore } from '../../../src/lib/projects-store.ts';
-import { RouterProvider } from '../../../src/lib/router.tsx';
+import { RouterProvider, useRouter } from '../../../src/lib/router.tsx';
 import { type AppStore, DaemonApiPool, StoreProvider } from '../../../src/lib/store.tsx';
 import { interact, type Mounted, mount, must } from '../../support/dom.ts';
 import { sessionView } from '../../support/sessions.ts';
@@ -406,6 +406,45 @@ describe('ProjectDetailPage', () => {
 
     // Assert
     expect(window.location.pathname).toBe('/d/workstation/projects');
+  });
+
+  it('steps back through history when the entry before this one is the projects page', async () => {
+    // Arrange
+    answerFs();
+    setPath('/d/workstation/projects');
+    let go: (to: string) => void = () => undefined;
+    const Driver = (): null => {
+      go = useRouter().navigate;
+      return null;
+    };
+    let steps = 0;
+    const originalBack = window.history.back;
+    window.history.back = () => {
+      steps += 1;
+    };
+    try {
+      open = await mount(
+        <StoreProvider store={storeFor()}>
+          <RouterProvider trailStorage={null}>
+            <Driver />
+            <SessionSearchProvider connection={daemon} focusSignal={0} scope={null}>
+              <ProjectDetailPage connection={daemon} projectId={PROJECT_ID} />
+            </SessionSearchProvider>
+          </RouterProvider>
+        </StoreProvider>,
+      );
+      await interact(() => go(detailPath));
+      await settle();
+
+      // Act
+      await press(buttonSaying(open, 'Back to Projects'));
+
+      // Assert
+      expect(steps).toBe(1);
+      expect(window.location.pathname).toBe(detailPath);
+    } finally {
+      window.history.back = originalBack;
+    }
   });
 
   it('starts an interactive agent in the project folder and lands on the session it created', async () => {

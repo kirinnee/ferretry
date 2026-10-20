@@ -7,6 +7,7 @@
  * through unchanged; every other launcher call is delegated untouched.
  */
 import { describe, it } from 'bun:test';
+import type { SessionLaunchInstructions } from '@ferretry/protocol';
 import should from 'should';
 import {
   type PaneScreenReader,
@@ -23,6 +24,9 @@ const RECORD = {
 } as unknown as SessionLifecycleRecord;
 const OFFLINE = 'Error: account/read failed: workspace routing discovery failed (code -32603)';
 
+/** What the inner launcher says its pane was told; the decorator must hand it back untouched. */
+const LAUNCHED: SessionLaunchInstructions = { sections: [{ id: 'tools', chars: 1 }], mode: 'auto', questions: false };
+
 class RecordingLauncher implements SessionLifecycleLauncher {
   readonly calls: string[] = [];
   failure: Error | undefined;
@@ -31,8 +35,9 @@ class RecordingLauncher implements SessionLifecycleLauncher {
     this.calls.push('alive');
     return true;
   }
-  async launch(): Promise<void> {
+  async launch(): Promise<SessionLaunchInstructions> {
     this.calls.push('launch');
+    return LAUNCHED;
   }
   async ready(): Promise<void> {
     this.calls.push('ready');
@@ -79,7 +84,7 @@ describe('RuntimeSupervisedLauncher', () => {
 
     // Act
     should(await subject.alive(RECORD)).be.true();
-    await subject.launch(RECORD);
+    const launched = await subject.launch(RECORD);
     await subject.ready(RECORD);
     await subject.deliver(RECORD, 'go');
     await subject.snapshot(RECORD);
@@ -87,6 +92,7 @@ describe('RuntimeSupervisedLauncher', () => {
 
     // Assert
     should(inner.calls).deepEqual(['alive', 'launch', 'ready', 'deliver go', 'snapshot', 'stop', `ended ${WRAPPER}`]);
+    should(launched).equal(LAUNCHED);
   });
 
   it('should explain a Codex that could not reach the network while starting', async () => {

@@ -18,7 +18,7 @@ import { useEffect, useMemo, useState } from 'react';
 
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
 import type { DaemonSessionScope } from '../../lib/daemon-scope.ts';
-import { daemonAnalyticsPath } from '../../lib/pages/routes.ts';
+import { daemonAnalyticsQueryPath } from '../../lib/pages/routes.ts';
 import { useOptionalRouter } from '../../lib/router.tsx';
 import { useDaemonFetch } from '../../lib/store.tsx';
 import { RouteLink } from '../../shell/route-link.tsx';
@@ -132,7 +132,7 @@ function SessionCostBody({
   }, [connection, daemonId, requestAnalytics, requestFleet, sessionId]);
 
   const linkSession = state.status === 'ready' ? state.cost.session : { id: sessionId, tree: null };
-  const link = `${daemonAnalyticsPath(daemonId)}?q=${encodeURIComponent(sessionAnalyticsLinkQuery(linkSession))}`;
+  const link = daemonAnalyticsQueryPath(daemonId, sessionAnalyticsLinkQuery(linkSession));
 
   return (
     <section aria-label="Session cost" className="grid min-w-0 gap-md" data-session-cost={state.status}>

@@ -1,12 +1,12 @@
-import { NO_GOVERNED_ROUTES_GUARD } from '../../../../src/lib/api/capability.ts';
 import { describe, it } from 'bun:test';
-import { AnalyticsResponseSchema, type AnalyticsAggregateResult, type AnalyticsResponse } from '@ferretry/protocol';
+import { type AnalyticsAggregateResult, type AnalyticsResponse, AnalyticsResponseSchema } from '@ferretry/protocol';
 import should from 'should';
 import type { AnalyticsPricingRate } from '../../../../src/lib/analytics/pricing.ts';
+import type { FinishedAnalyticsSession } from '../../../../src/lib/analytics/session-record.ts';
+import { NO_GOVERNED_ROUTES_GUARD } from '../../../../src/lib/api/capability.ts';
 import { ApiDispatcher } from '../../../../src/lib/api/dispatcher.ts';
 import { ApiRouter } from '../../../../src/lib/api/router.ts';
 import { analyticsRoutes } from '../../../../src/lib/runtime/mounts/analytics.ts';
-import type { FinishedAnalyticsSession } from '../../../../src/lib/analytics/session-record.ts';
 import { jsonBody, request } from '../../api/support.ts';
 import { analyticsSubsystem, CREDENTIALS, finishedSession, human } from './support.ts';
 
@@ -113,7 +113,7 @@ describe('the analytics mount', () => {
 
       // Assert
       should(response.index).deepEqual({
-        schemaVersion: 3,
+        schemaVersion: 4,
         sessions: 1,
         tokenSessions: 0,
         transcriptSources: 1,

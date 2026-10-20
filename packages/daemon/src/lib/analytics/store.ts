@@ -19,8 +19,12 @@ import type { AnalyticsUsageRefusal } from './usage-fold.ts';
  * the session's own durable documents, and `decideAnalyticsIndexSchema` already drops an index whose
  * version it does not recognise and rebuilds it. A migration here would be a second, hand-maintained
  * definition of a shape that one re-ingestion pass reproduces exactly.
+ *
+ * It is `4` because the row gained ACTIVE time (`active_duration_ms`), folded from transcript record
+ * timestamps. Every stored row must be re-folded to answer it, which is exactly what the version-driven
+ * drop-and-rebuild does; the version is also in every ingest signature, so no stale row survives.
  */
-export const ANALYTICS_INDEX_SCHEMA_VERSION = 3;
+export const ANALYTICS_INDEX_SCHEMA_VERSION = 4;
 
 /**
  * One session as the analytics index holds it.
@@ -185,7 +189,8 @@ export function analyticsPricingCatalogFingerprint(catalog: readonly AnalyticsPr
         // fingerprint, and a hand-written field list is exactly how one would silently stop doing so.
         ...ANALYTICS_PRICING_RATE_SLOTS.map(slot => rate.rates[slot]),
         rate.source.kind,
-        rate.source.kind === 'provider_sync' ? rate.source.sourceUrl : null,
+        rate.source.kind === 'manual' ? null : rate.source.sourceUrl,
+        rate.source.kind === 'model_catalog' ? rate.source.catalog : null,
         rate.verifiedAt,
         rate.validFrom,
         rate.validThrough,

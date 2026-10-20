@@ -4,6 +4,9 @@
  * for `docs/launch-settings.md`; nothing compares the PNGs.
  *
  *   bun harness/relaunch-settings-screenshot.tsx      # writes harness/out/relaunch-settings-*.png
+ *   bun harness/relaunch-settings-screenshot.tsx --instructions [--out <dir>]
+ *                                                     # writes info-instructions-*.png: the Instructions
+ *                                                     # row (docs/launch-settings.md), fake launch data
  *
  * It renders the REAL `InfoPanel` on its Runtime tab with the REAL `InfoRuntime` inside it, so the row
  * is shown among the rows a reader meets it with. Like `screenshot.ts` it drives the system Chrome
@@ -17,6 +20,10 @@ import { chromium } from 'playwright-core';
 const harnessDir = import.meta.dir;
 const packageDir = resolve(harnessDir, '..');
 const outDir = join(harnessDir, 'out');
+/** `--instructions` captures the Instructions row instead of the Settings row. */
+const instructionsMode = process.argv.includes('--instructions');
+const outFlag = process.argv.indexOf('--out');
+const shotsDir = outFlag === -1 ? outDir : resolve(process.argv[outFlag + 1] ?? outDir);
 
 const fail = (message: string): never => {
   process.stderr.write(`❌ ${message}\n`);
@@ -45,10 +52,24 @@ const view = {
   state: {
     id: 'session-a', status: 'running', turn: 4, lastActivityAt: '2026-10-19T09:00:00.000Z',
     observedModel: 'claude-sonnet-5', observedReasoningEffort: 'high',
+    ...(state === 'instructions'
+      ? {
+          launchInstructions: {
+            sections: [
+              { id: 'tools', chars: 642 },
+              { id: 'settings', chars: 468 },
+              { id: 'pack', chars: 1034 },
+              { id: 'learning', chars: 401 },
+            ],
+            mode: 'auto',
+            questions: false,
+          },
+        }
+      : {}),
   },
   directory: '/work/ferretry',
 } as unknown as SessionView;
-const relaunch: InfoRelaunchRead = state === 'current'
+const relaunch: InfoRelaunchRead = state !== 'stale'
   ? { kind: 'ready', settings: { current: true, reasons: [] } }
   : { kind: 'ready', settings: { current: false, reasons: ['arguments', 'settings'] } };
 const root = document.getElementById('root');
@@ -90,6 +111,7 @@ const html = (theme: string) => `<!doctype html>
 </html>`;
 
 mkdirSync(outDir, { recursive: true });
+mkdirSync(shotsDir, { recursive: true });
 await Bun.write(join(outDir, 'relaunch-settings-entry.tsx'), PAGE_ENTRY);
 run('bun', ['build', join(outDir, 'relaunch-settings-entry.tsx'), '--outdir', outDir, '--target', 'browser']);
 run('./node_modules/.bin/tailwindcss', [
@@ -137,6 +159,18 @@ try {
           return await route.continue();
         });
         const page = await context.newPage();
+        if (instructionsMode) {
+          await page.goto(`${server.url}?theme=studio-${scheme}&state=instructions`);
+          const row = page.locator('[data-info-row="Instructions"]');
+          await row.waitFor({ state: 'visible' });
+          await row.scrollIntoViewIfNeeded();
+          const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+          if (overflow > 0) fail(`instructions at ${viewport.name}/${scheme} scrolls sideways by ${overflow}px`);
+          const target = join(shotsDir, `info-instructions-${viewport.name}-${scheme}.png`);
+          await page.screenshot({ path: target });
+          process.stdout.write(`📸 ${target}\n`);
+          continue;
+        }
         for (const state of ['stale', 'current'] as const) {
           await page.goto(`${server.url}?theme=studio-${scheme}&state=${state}`);
           await page.locator(`[data-info-settings="${state}"]`).waitFor({ state: 'visible' });

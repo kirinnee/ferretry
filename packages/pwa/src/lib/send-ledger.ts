@@ -169,19 +169,22 @@ export const ledgerFeed = (
 export const LEDGER_READ_TIMEOUT_MS = 20_000;
 
 /**
- * One read of a session's ledger, parsed HERE rather than by the typed client.
+ * One read of a session's ledger, as the rows the daemon sent: parsed by THIS app rather than the typed client.
  *
  * `IFyApiClient.sends` validates the page with `SendRecordSchema`, whose enums are closed, so a row
  * carrying one value this bundle has never heard of — a daemon a release ahead, a new evidence tier —
  * rejected the WHOLE page, and the tolerant parser below never saw it. That is exactly the failure its
  * header says it exists to prevent: a reader on an older bundle watched a delivered message read
  * "Sending" forever. The request is the same route; only the reading changed.
+ *
+ * The rows come back UNPARSED, because the session cache keeps them as the daemon sent them — a row
+ * this bundle cannot read may be one the next bundle can. `parseLedgerSendsResponse` reads them.
  */
 export const readLedgerSends = async (
   api: Pick<IFyApiClient, 'request'>,
   sessionId: string,
-): Promise<LedgerSendRecord[]> =>
-  parseLedgerSendsResponse(
+): Promise<readonly unknown[]> =>
+  ledgerRows(
     await api.request(`/v1/sessions/${encodeURIComponent(sessionId)}/sends`, z.unknown(), {}, LEDGER_READ_TIMEOUT_MS),
   );
 
@@ -399,19 +402,22 @@ export const parseLedgerSendRecord = (raw: unknown): LedgerSendRecord | null => 
   };
 };
 
+/** The rows of the endpoint envelope, or of a bare array (an older or hand-rolled daemon). */
+const ledgerRows = (raw: unknown): readonly unknown[] =>
+  Array.isArray(raw)
+    ? raw
+    : raw !== null && typeof raw === 'object' && Array.isArray((raw as { sends?: unknown }).sends)
+      ? (raw as { sends: unknown[] }).sends
+      : [];
+
 /**
  * Parses the endpoint envelope. Tolerates a bare array (an older or hand-rolled
  * daemon) and drops unusable rows individually, so one malformed row cannot
  * blank the whole ledger.
  */
 export const parseLedgerSendsResponse = (raw: unknown): LedgerSendRecord[] => {
-  const rows = Array.isArray(raw)
-    ? raw
-    : raw !== null && typeof raw === 'object' && Array.isArray((raw as { sends?: unknown }).sends)
-      ? (raw as { sends: unknown[] }).sends
-      : [];
   const parsed: LedgerSendRecord[] = [];
-  for (const row of rows) {
+  for (const row of ledgerRows(raw)) {
     const record = parseLedgerSendRecord(row);
     if (record !== null) parsed.push(record);
   }

@@ -11,6 +11,7 @@ import { useUsage } from '../hooks/use-usage.ts';
 import type { DaemonAccountPickerStore } from '../lib/account-picker-store.ts';
 import { cn } from '../lib/class-names.ts';
 import { type DaemonConnection, sameDaemonConnection } from '../lib/daemon-connection.ts';
+import { FAST_COST_NOTE } from '../lib/fast-mode.ts';
 import type { DaemonFleetStore } from '../lib/fleet-store.ts';
 import {
   canSubmitNewSession,
@@ -24,7 +25,6 @@ import type { DaemonUsageSlice, DaemonUsageStore } from '../lib/usage-store.ts';
 import { Button, Card, PanelBody, Textarea } from '../shell/primitives.tsx';
 import type { AccountPickerOption, AccountUsageRow } from './daemon-picker-model.ts';
 import { projectPickerOptions } from './daemon-picker-model.ts';
-import { FAST_COST_NOTE } from '../lib/fast-mode.ts';
 import { DaemonProjectPicker } from './daemon-pickers.tsx';
 import { FastSwitch } from './fast-switch.tsx';
 import { ModelSelect } from './model-select.tsx';
@@ -63,6 +63,18 @@ export interface NewSessionPageProps {
   ) => Promise<{ readonly config: { readonly id: string } }>;
   /** Receives canonical daemon-scoped paths for both cancel and successful creation. */
   readonly onNavigate: (path: string) => void;
+  /**
+   * "← Sessions": a step back through history when that is where the reader came from (the router's
+   * `back`), so the list returns as it was left. Absent, it is an ordinary `onNavigate`.
+   */
+  readonly onBack?: (path: string) => void;
+  /**
+   * Whether Continue is the open choice, owned by the host so it survives Back and a reload — the list
+   * the reader scrolled is only there to return to if Continue is still chosen. Absent, the page keeps
+   * the choice itself and every visit opens on New.
+   */
+  readonly continuing?: boolean;
+  readonly onContinuingChange?: (continuing: boolean) => void;
   /**
    * Resumes a stopped ferret in place, through the same typed client as `startSession`. With `fleet`, it
    * adds "Ferretry sessions" to Continue: every stopped ferret on this machine, resumed with its
@@ -264,6 +276,9 @@ export function NewSessionPage({
   startSession,
   resumeSession,
   onNavigate,
+  onBack = onNavigate,
+  continuing: hostContinuing,
+  onContinuingChange,
   accounts,
   usage,
   projects,
@@ -276,7 +291,12 @@ export function NewSessionPage({
   const [error, setError] = useState<string | null>(null);
   const [chosenRuntime, setChosenRuntime] = useState<ChosenRuntime | null>(null);
   const [noRunnableAccount, setNoRunnableAccount] = useState(false);
-  const [continuing, setContinuing] = useState(false);
+  const [ownContinuing, setOwnContinuing] = useState(false);
+  const continuing = hostContinuing ?? ownContinuing;
+  const setContinuing = (next: boolean): void => {
+    setOwnContinuing(next);
+    onContinuingChange?.(next);
+  };
 
   const update = (field: TextDraftField, value: string): void => setDraft(current => ({ ...current, [field]: value }));
   const canSubmit = canSubmitNewSession(draft, connection, submitting);
@@ -318,7 +338,7 @@ export function NewSessionPage({
       className="mx-auto flex h-full min-h-0 w-full max-w-[720px] flex-1 flex-col overflow-y-auto px-3 pb-3 sm:px-0"
     >
       <div className="mb-3 mt-3 flex items-center gap-2.5">
-        <button className="text-meta text-muted hover:text-fg" onClick={() => onNavigate(sessionsPath)} type="button">
+        <button className="text-meta text-muted hover:text-fg" onClick={() => onBack(sessionsPath)} type="button">
           ← Sessions
         </button>
         <h1 className="m-0 text-title font-semibold tracking-tight" id="new-session-heading">

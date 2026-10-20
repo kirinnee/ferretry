@@ -293,6 +293,33 @@ const environment = (initiallyVisible = true) => {
 };
 
 describe('startSessionWorkspaceRefresh', () => {
+  test('hands the raw log text to onLog on a good read, and nothing when the read fails', async () => {
+    const browser = environment();
+    const logs: string[] = [];
+    let fail = false;
+    const control = startSessionWorkspaceRefresh({
+      api: {
+        logs: async () => {
+          if (fail) throw new Error('offline');
+          return 'assistant/message: hello';
+        },
+        get: async () => sessionView('s-1'),
+      },
+      sessionId: 's-1',
+      environment: browser.env,
+      onTranscript: () => undefined,
+      onLog: text => logs.push(text),
+      onSession: () => undefined,
+      onError: () => undefined,
+    });
+
+    await control.initial;
+    fail = true;
+    await control.refresh();
+    control.stop();
+
+    expect(logs).toEqual(['assistant/message: hello']);
+  });
   test('reads the send ledger beside the transcript, keeping the last rows when that read fails', async () => {
     const browser = environment();
     const sends: unknown[] = [];

@@ -27,11 +27,6 @@ import { DaemonAccountPickerStore } from './account-picker-store.ts';
 import { DaemonHttpTransport, daemonApiClient } from './api-client.ts';
 import { DaemonAttentionClient } from './attention-client.ts';
 import { browserLoginPort, DaemonBrowserLoginStore } from './browser-login.ts';
-import {
-  type DaemonConnectionRepository,
-  DaemonConnectionStore,
-  type DaemonConnectionsSnapshot,
-} from './connections.ts';
 import { DaemonConfigChangeStore } from './config-changes.ts';
 import {
   browserConnectionHealthEnvironment,
@@ -44,6 +39,11 @@ import {
   type ConnectionSignalEnvironment,
   watchConnectionSignals,
 } from './connection-signals.ts';
+import {
+  type DaemonConnectionRepository,
+  DaemonConnectionStore,
+  type DaemonConnectionsSnapshot,
+} from './connections.ts';
 import { browserControlsStorage, DaemonControlsStore } from './controls.ts';
 import { type DaemonConnection, type DaemonId, sameDaemonConnection } from './daemon-connection.ts';
 import { daemonRequest } from './daemon-transport.ts';
@@ -73,7 +73,10 @@ import {
 import { PairingOutcomeUnknownError, pairingCandidates, redeemPairingInSession } from './relay-pairing.ts';
 import { RelayPairingRefusedError, RelaySessionError } from './relay-session.ts';
 import { browserFetch, type DaemonFetch } from './runtime-models.ts';
+import { browserScrollMemoryStorage, ScrollMemory, type ScrollMemoryStorage } from './scroll-memory.ts';
 import { fetchSecuritySettings, UNLOCK_STAYS_FALLBACK, unlockStaysSentence } from './security-settings-client.ts';
+import { SessionCache, type SessionCacheBackend, seedFleetFromCache } from './session-cache.ts';
+import { browserSessionCacheBackend } from './session-cache-storage.ts';
 import {
   browserCredentials,
   describeStepUpFailure,
@@ -420,9 +423,17 @@ export interface AppStore {
    * network back for one read. Never throws — "could not find out" is a state.
    */
   readonly readDefaultRelay: () => Promise<HostedRelayFallback>;
+  /** What this device last saw of each machine's sessions, drawn before the network answers. */
+  readonly sessionCache: SessionCache;
+  /** Where each page and chat was scrolled, for Back, Forward and a reload of this tab. */
+  readonly scrollMemory: ScrollMemory;
 }
 
 export interface CreateAppStoreOptions {
+  /** IndexedDB by default; `null` keeps the session cache in memory only. Injected by suites. */
+  readonly sessionCacheBackend?: SessionCacheBackend | null;
+  /** This tab's `sessionStorage` by default; `null` remembers no scroll position. Injected by suites. */
+  readonly scrollMemoryStorage?: ScrollMemoryStorage | null;
   /**
    * Where the build put the speech worker and its runtime (bound in `src/main.tsx`), handed in
    * by `main.tsx` because only the bundler knows. Without it Parakeet reports itself unavailable.
@@ -604,8 +615,21 @@ export async function createAppStore(options: CreateAppStoreOptions = {}): Promi
           ),
         })),
   );
+  const sessionCache = new SessionCache(
+    options.sessionCacheBackend === undefined ? browserSessionCacheBackend() : options.sessionCacheBackend,
+  );
+  const scrollMemory = new ScrollMemory(
+    options.scrollMemoryStorage === undefined ? browserScrollMemoryStorage() : options.scrollMemoryStorage,
+  );
   const fleetPort: DaemonFleetPort = {
-    list: async daemon => await (await clients.client(daemon)).list(),
+    // Every good list read is kept for the next open, under the generation it was issued in: an answer
+    // that lands after the machine was unpaired is not written back.
+    list: async daemon => {
+      const generation = sessionCache.generation(daemon.daemonId);
+      const sessions = await (await clients.client(daemon)).list();
+      sessionCache.saveSessions(daemon.daemonId, sessions, generation);
+      return sessions;
+    },
     get: async (daemon, sessionId) => await (await clients.client(daemon)).get(sessionId),
   };
   const fleet = new DaemonFleetStore(fleetPort);
@@ -665,6 +689,7 @@ export async function createAppStore(options: CreateAppStoreOptions = {}): Promi
       workspaceLayouts,
       carrier,
       connectionHealth,
+      sessionCache,
     ],
     // The key goes with the pairing it proved, and only when the pairing goes for good — a re-pair in
     // place has already saved the new key under the same daemon id.
@@ -674,6 +699,8 @@ export async function createAppStore(options: CreateAppStoreOptions = {}): Promi
   // request keeps going to a daemon somebody has unpaired. It routes by the daemon a request was
   // built for, never by address: two machines paired over the relay share one loopback origin.
   carrier.resolvePaired(() => connections.list());
+  // Every paired machine's last list, drawn while its first live read is still on the way.
+  for (const daemon of connections.list()) void seedFleetFromCache(fleet, sessionCache, daemon);
   const landingMarkerStorage = options.landingMarkerStorage ?? browserLandingMarkerStorage();
   const syncLandingPage = (): void =>
     syncLandingMarker(landingMarkerStorage, connections.getSnapshot().connections.length);
@@ -727,6 +754,8 @@ export async function createAppStore(options: CreateAppStoreOptions = {}): Promi
     pushDevices,
     pushService,
     readDefaultRelay,
+    sessionCache,
+    scrollMemory,
     pair: async (seed, deviceName) => {
       const connection = await exchangePairing(seed, {
         ...(deviceName === undefined ? {} : { deviceName }),

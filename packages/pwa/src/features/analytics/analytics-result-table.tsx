@@ -4,10 +4,19 @@
  * the surrounding pane scroll sideways on a phone.
  */
 
-import type { AnalyticsAggregateResult, AnalyticsMeasure, AnalyticsResponse } from '@ferretry/protocol';
+import {
+  ANALYTICS_METRIC_MEASURES,
+  ANALYTICS_RATIO_METRICS,
+  type AnalyticsAggregateResult,
+  type AnalyticsMeasure,
+  type AnalyticsMetric,
+  type AnalyticsResponse,
+  analyticsMetricValue,
+} from '@ferretry/protocol';
 import { ArrowDown, ArrowDownUp, ArrowUp } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { cn } from '../../lib/class-names.ts';
+import { formatDollars } from './analytics-overview.ts';
 
 export type AnalyticsSortKey =
   | 'group'
@@ -17,7 +26,8 @@ export type AnalyticsSortKey =
   | 'cacheRead'
   | 'cacheWrite'
   | 'total'
-  | 'cost';
+  | 'cost'
+  | 'metric';
 export type AnalyticsSortDirection = 'asc' | 'desc';
 export type AnalyticsAggregateResponse = Extract<AnalyticsResponse, { readonly kind: 'aggregate' }>;
 
@@ -31,6 +41,8 @@ export interface AnalyticsTableRow {
   readonly cacheWrite: AnalyticsMeasure;
   readonly total: AnalyticsMeasure;
   readonly cost: AnalyticsMeasure;
+  /** The selected metric in its own unit (dollars, seconds, a count); unknown when none is selected. */
+  readonly metric: AnalyticsMeasure;
 }
 
 interface Column {
@@ -77,8 +89,35 @@ export const analyticsGroupHeader = (response: AnalyticsAggregateResponse): stri
 
 const TIME_LABELS: ReadonlySet<string> = new Set(['day', 'week']);
 
+/** What each metric is called as a column header; a mapped type, so a new metric cannot be missed. */
+export const ANALYTICS_METRIC_LABELS: { readonly [M in AnalyticsMetric]: string } = {
+  tokens: 'Tokens',
+  tokens_input: 'Input tokens',
+  tokens_output: 'Output tokens',
+  tokens_cache_read: 'Cache read tokens',
+  tokens_cache_write: 'Cache write tokens',
+  tokens_reasoning: 'Reasoning tokens',
+  cost_usd: 'Equivalent API cost',
+  turns: 'Turns',
+  sessions: 'Sessions',
+  duration_active_seconds: 'Active time',
+  duration_wall_seconds: 'Wall time',
+  duration_active_seconds_per_turn: 'Active time per turn',
+};
+
+/** One group's value for a metric, in the metric's unit, with how many sessions it is known for. */
+export const analyticsMetricMeasure = (result: AnalyticsAggregateResult, metric: AnalyticsMetric): AnalyticsMeasure => {
+  const { measure } = ANALYTICS_METRIC_MEASURES[metric];
+  if (measure === 'sessions') return { value: result.sessions, known: result.sessions, total: result.sessions };
+  // The protocol owns the arithmetic: the unit scale, and the division of a per-turn ratio.
+  return { ...result[measure], value: analyticsMetricValue(result, metric) };
+};
+
 /** Flattens a daemon response without inventing a value for missing pricing. */
-export const analyticsTableRows = (response: AnalyticsAggregateResponse): AnalyticsTableRow[] =>
+export const analyticsTableRows = (
+  response: AnalyticsAggregateResponse,
+  metric?: AnalyticsMetric,
+): AnalyticsTableRow[] =>
   response.results.map((result, index) => ({
     key: `${index}:${groupName(result)}`,
     group: groupName(result),
@@ -89,6 +128,7 @@ export const analyticsTableRows = (response: AnalyticsAggregateResponse): Analyt
     cacheWrite: result.cacheWriteInputTokens,
     total: result.tokens,
     cost: result.equivalentApiCostUsdMicros,
+    metric: metric ? analyticsMetricMeasure(result, metric) : UNKNOWN_MEASURE,
   }));
 
 const measureFor = (row: AnalyticsTableRow, key: AnalyticsSortKey): AnalyticsMeasure | undefined =>
@@ -139,6 +179,7 @@ export const analyticsTotalRow = (rows: readonly AnalyticsTableRow[]): Analytics
   cacheWrite: sumMeasures(rows.map(row => row.cacheWrite)),
   total: sumMeasures(rows.map(row => row.total)),
   cost: sumMeasures(rows.map(row => row.cost)),
+  metric: sumMeasures(rows.map(row => row.metric)),
 });
 
 const lowerBound = (measure: AnalyticsMeasure): string => (measure.known < measure.total ? '≥ ' : '');
@@ -167,10 +208,22 @@ export const coverageNote = (measure: AnalyticsMeasure | undefined): string | un
   return resolved.known < resolved.total ? `${resolved.known}/${resolved.total}` : undefined;
 };
 
-export const analyticsColumnsFor = (aggregation: AnalyticsAggregateResponse['aggregation']): readonly Column[] =>
-  aggregation === 'count'
-    ? ANALYTICS_TABLE_COLUMNS.filter(column => column.key === 'group' || column.key === 'sessions')
-    : ANALYTICS_TABLE_COLUMNS;
+const METRIC_COLUMN: Column = { key: 'metric', header: 'Value', numeric: true };
+
+/** The metric answers the question, so it is the first value column; without one, the whole ledger. */
+export const analyticsColumnsFor = (
+  aggregation: AnalyticsAggregateResponse['aggregation'],
+  metric?: AnalyticsMetric,
+): readonly Column[] => {
+  if (aggregation === 'count')
+    return ANALYTICS_TABLE_COLUMNS.filter(column => column.key === 'group' || column.key === 'sessions');
+  if (metric === undefined) return ANALYTICS_TABLE_COLUMNS;
+  return [
+    ANALYTICS_TABLE_COLUMNS[0]!,
+    { ...METRIC_COLUMN, header: ANALYTICS_METRIC_LABELS[metric] },
+    ANALYTICS_TABLE_COLUMNS[1]!,
+  ];
+};
 
 /**
  * A ledger over time reads in time order; any other grouping reads biggest first — sessions for a
@@ -178,14 +231,64 @@ export const analyticsColumnsFor = (aggregation: AnalyticsAggregateResponse['agg
  */
 export const defaultAnalyticsSort = (
   response: AnalyticsAggregateResponse,
+  metric?: AnalyticsMetric,
 ): { readonly key: AnalyticsSortKey; readonly direction: AnalyticsSortDirection } => {
   const labels = Object.keys(response.results[0]?.labels ?? {});
   if (labels.length > 0 && labels.every(label => TIME_LABELS.has(label))) return { key: 'group', direction: 'asc' };
-  return response.aggregation === 'count' ? { key: 'sessions', direction: 'desc' } : { key: 'cost', direction: 'desc' };
+  if (response.aggregation === 'count') return { key: 'sessions', direction: 'desc' };
+  return { key: metric === undefined ? 'cost' : 'metric', direction: 'desc' };
 };
 
 const nextDirection = (column: AnalyticsSortKey, current: AnalyticsSortKey, direction: AnalyticsSortDirection) =>
   column !== current ? (column === 'group' ? 'asc' : 'desc') : direction === 'desc' ? 'asc' : 'desc';
+
+const DURATION_UNITS: readonly (readonly [string, number])[] = [
+  ['h', 3600],
+  ['m', 60],
+  ['s', 1],
+];
+
+/** Seconds as the two largest non-zero units: 4h 05m, 12m 08s, 38s. */
+export const formatDurationSeconds = (seconds: number): string => {
+  let rest = Math.round(seconds);
+  if (rest <= 0) return '0s';
+  const parts: string[] = [];
+  for (const [unit, size] of DURATION_UNITS) {
+    const count = Math.floor(rest / size);
+    rest -= count * size;
+    if (count > 0 || parts.length > 0)
+      parts.push(`${parts.length > 0 ? String(count).padStart(2, '0') : count}${unit}`);
+  }
+  return parts.slice(0, 2).join(' ');
+};
+
+/** A metric's value in its own unit; the gap is worded per metric, never a zero. */
+export const formatMetricMeasure = (metric: AnalyticsMetric, measure: AnalyticsMeasure): string => {
+  if (measure.value === null) return metric === 'cost_usd' ? 'Unpriced' : 'Unknown';
+  const bound = lowerBound(measure);
+  // The metric column is read, not audited: to the cent, as every other cost on the page.
+  if (metric === 'cost_usd') return `${bound}${formatDollars(measure.value)}`;
+  if (metric.startsWith('duration_')) return `${bound}${formatDurationSeconds(measure.value)}`;
+  return `${bound}${NUMBER_FORMAT.format(measure.value)}`;
+};
+
+/** The gap said in words: "priced 3 of 5". Present only when some sessions are missing. */
+export const metricCoverageNote = (metric: AnalyticsMetric, measure: AnalyticsMeasure): string | undefined =>
+  measure.known < measure.total
+    ? `${metric === 'cost_usd' ? 'priced' : 'known'} ${measure.known} of ${measure.total}`
+    : undefined;
+
+function MetricCell({ metric, measure }: { readonly metric: AnalyticsMetric; readonly measure: AnalyticsMeasure }) {
+  const note = metricCoverageNote(metric, measure);
+  return (
+    <td className="whitespace-nowrap px-cell-x py-row-y text-right font-mono tabular-nums text-fg">
+      <span className={measure.value === null ? 'text-muted' : 'font-semibold'}>
+        {formatMetricMeasure(metric, measure)}
+      </span>
+      {note && <span className="ml-1 text-2xs text-faint">{note}</span>}
+    </td>
+  );
+}
 
 function MeasureCell({ measure, cost = false }: { readonly measure: AnalyticsMeasure; readonly cost?: boolean }) {
   const coverage = coverageNote(measure);
@@ -206,10 +309,12 @@ function MeasureCell({ measure, cost = false }: { readonly measure: AnalyticsMea
 function Row({
   row,
   columns,
+  metric,
   emphasis = false,
 }: {
   readonly row: AnalyticsTableRow;
   readonly columns: readonly Column[];
+  readonly metric?: AnalyticsMetric;
   readonly emphasis?: boolean;
 }) {
   return (
@@ -235,6 +340,8 @@ function Row({
               {NUMBER_FORMAT.format(row.sessions)}
             </td>
           );
+        if (column.key === 'metric' && metric)
+          return <MetricCell key={column.key} metric={metric} measure={row.metric} />;
         return <MeasureCell key={column.key} measure={row[column.key]} cost={column.key === 'cost'} />;
       })}
     </tr>
@@ -245,7 +352,41 @@ function Row({
  * THE PHONE LEDGER: one row per group with the cost on the right, where the eight-column table would
  * have put it off screen. Sessions and total tokens go on the line under the group name.
  */
-function AnalyticsResultList({ rows, cost }: { readonly rows: readonly AnalyticsTableRow[]; readonly cost: boolean }) {
+function AnalyticsResultList({
+  rows,
+  cost,
+  metric,
+}: {
+  readonly rows: readonly AnalyticsTableRow[];
+  readonly cost: boolean;
+  readonly metric?: AnalyticsMetric;
+}) {
+  if (metric)
+    return (
+      <ul className="kt-panel m-0 grid list-none p-0 sm:hidden" data-analytics-result-list="">
+        {rows.map(row => {
+          const note = metricCoverageNote(metric, row.metric);
+          return (
+            <li
+              key={row.key}
+              className={cn(
+                'grid grid-cols-[minmax(0,1fr)_auto] gap-x-md px-cell-x py-row-y text-cell',
+                row.key === 'total'
+                  ? 'border-t border-border font-semibold'
+                  : 'border-t border-border-soft first:border-t-0',
+              )}
+            >
+              <span className="min-w-0 break-words text-fg">{row.group}</span>
+              <span className="mono text-right tabular-nums text-fg">{formatMetricMeasure(metric, row.metric)}</span>
+              <span className="text-2xs text-muted">
+                {NUMBER_FORMAT.format(row.sessions)} session{row.sessions === 1 ? '' : 's'}
+              </span>
+              <span className="text-right text-2xs text-faint">{note}</span>
+            </li>
+          );
+        })}
+      </ul>
+    );
   return (
     <ul className="kt-panel m-0 grid list-none p-0 sm:hidden" data-analytics-result-list="">
       {rows.map(row => {
@@ -285,21 +426,33 @@ function AnalyticsResultList({ rows, cost }: { readonly rows: readonly Analytics
 export interface AnalyticsResultTableProps {
   readonly response: AnalyticsAggregateResponse;
   readonly caption?: string;
+  /** The selected metric: its column comes first and carries the sort. */
+  readonly metric?: AnalyticsMetric;
 }
 
 /** A responsive, sortable aggregate ledger from one daemon-bound response. */
-export function AnalyticsResultTable({ response, caption = 'Analytics aggregate result' }: AnalyticsResultTableProps) {
+export function AnalyticsResultTable({
+  response,
+  caption = 'Analytics aggregate result',
+  metric,
+}: AnalyticsResultTableProps) {
   const [sort, setSort] = useState<{ key: AnalyticsSortKey; direction: AnalyticsSortDirection } | null>(null);
-  const columns = analyticsColumnsFor(response.aggregation);
-  const activeSort = sort && columns.some(column => column.key === sort.key) ? sort : defaultAnalyticsSort(response);
+  const columns = analyticsColumnsFor(response.aggregation, metric);
+  const shownMetric = columns.some(column => column.key === 'metric') ? metric : undefined;
+  const activeSort =
+    sort && columns.some(column => column.key === sort.key) ? sort : defaultAnalyticsSort(response, metric);
   const groupHeader = analyticsGroupHeader(response);
   const headerOf = (column: Column): string => (column.key === 'group' ? groupHeader : column.header);
-  const rows = useMemo(() => analyticsTableRows(response), [response]);
+  const rows = useMemo(() => analyticsTableRows(response, metric), [response, metric]);
   const sorted = useMemo(
     () => sortAnalyticsRows(rows, activeSort.key, activeSort.direction),
     [activeSort.direction, activeSort.key, rows],
   );
-  const total = response.aggregation === 'sum' && rows.length > 1 ? analyticsTotalRow(rows) : null;
+  // A ratio of sums does not add across groups, so a per-turn result has no total row.
+  const total =
+    response.aggregation === 'sum' && rows.length > 1 && !(metric !== undefined && ANALYTICS_RATIO_METRICS.has(metric))
+      ? analyticsTotalRow(rows)
+      : null;
 
   if (rows.length === 0)
     return (
@@ -313,6 +466,7 @@ export function AnalyticsResultTable({ response, caption = 'Analytics aggregate 
       <AnalyticsResultList
         rows={total ? [...sorted, total] : sorted}
         cost={columns.some(column => column.key === 'cost')}
+        metric={shownMetric}
       />
       <div className="kt-panel hidden min-w-0 max-w-full overflow-x-auto overscroll-x-contain scroll-thin sm:block">
         <table className="w-full min-w-[44rem] border-collapse text-cell">
@@ -364,12 +518,12 @@ export function AnalyticsResultTable({ response, caption = 'Analytics aggregate 
           </thead>
           <tbody>
             {sorted.map(row => (
-              <Row key={row.key} row={row} columns={columns} />
+              <Row key={row.key} row={row} columns={columns} metric={shownMetric} />
             ))}
           </tbody>
           {total && (
             <tfoot>
-              <Row row={total} columns={columns} emphasis />
+              <Row row={total} columns={columns} metric={shownMetric} emphasis />
             </tfoot>
           )}
         </table>

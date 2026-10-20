@@ -9,7 +9,11 @@ import {
   analyticsIngestSignature,
   analyticsPricingCatalogFingerprint,
 } from './store.ts';
-import { type AnalyticsTranscriptEvidenceSource, foldAnalyticsSessionUsage } from './usage-fold.ts';
+import {
+  type AnalyticsTranscriptEvidenceSource,
+  foldAnalyticsSessionActivity,
+  foldAnalyticsSessionUsage,
+} from './usage-fold.ts';
 
 /**
  * One session as its durable documents describe it, BEFORE anything has judged whether it ended.
@@ -106,6 +110,8 @@ export interface AnalyticsIngestSummary {
 export interface AnalyticsIndexRead {
   readonly rows: readonly AnalyticsRawSession[];
   readonly status: AnalyticsIndexStatus;
+  /** When this read was taken, by the ingestion clock: the instant a relative range ends at. */
+  readonly now: string;
 }
 
 interface AdmittedCandidate {
@@ -202,6 +208,7 @@ export class AnalyticsIngestionService implements AnalyticsIngestionLoop {
   read(): AnalyticsIndexRead {
     const status = this.parts.store.status();
     return {
+      now: this.parts.clock.now(),
       rows: this.parts.store.rows().map(row => row.raw),
       status: {
         schemaVersion: status.schemaVersion,
@@ -316,9 +323,14 @@ export class AnalyticsIngestionService implements AnalyticsIngestionLoop {
     // The catalog's alias groups have to reach the FOLD, not just the pricing step after it: the fold
     // is where two spellings become one identity or a mixed-model refusal, and a refusal decided
     // without them is one nothing downstream can reverse.
-    const fold = foldAnalyticsSessionUsage(evidence ?? { kind: 'unreadable' }, analyticsCatalogAliasGroups(catalog));
+    const read = evidence ?? { kind: 'unreadable' as const };
+    const fold = foldAnalyticsSessionUsage(read, analyticsCatalogAliasGroups(catalog));
     const derived = deriveAnalyticsSessionRecord(
-      { ...entry.session, usage: fold.kind === 'usage' ? fold.usage : null },
+      {
+        ...entry.session,
+        usage: fold.kind === 'usage' ? fold.usage : null,
+        activity: foldAnalyticsSessionActivity(read),
+      },
       catalog,
     );
     return {

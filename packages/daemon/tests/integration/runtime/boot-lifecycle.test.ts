@@ -425,7 +425,7 @@ class RecordingSessionLauncher implements SessionLifecycleLauncher {
     return this.live.has(record.config.tmuxSession);
   }
 
-  async launch(record: SessionLifecycleRecord): Promise<void> {
+  async launch(record: SessionLifecycleRecord): Promise<undefined> {
     this.launched.push({ command: [...record.config.command], cwd: record.config.cwd });
     this.live.add(record.config.tmuxSession);
   }
@@ -495,7 +495,7 @@ class RecordingResumeLauncher implements ResumeLauncher {
     this.killed.push(id);
   }
 
-  async relaunch(id: string): Promise<void> {
+  async relaunch(id: string): Promise<undefined> {
     this.relaunched.push(id);
     if (this.argvFor !== undefined) this.argv.push(await this.argvFor(parseSessionId(id)));
   }
@@ -4370,7 +4370,7 @@ describe('daemon boot lifecycle', () => {
     // The rows came out of a real materialisation in this daemon's own state home, not a per-request
     // derivation: the file the boot pass wrote is on disk under the index directory.
     should(await Bun.file(join(home, 'state', 'index', 'analytics.sqlite')).exists()).be.true();
-    should(groupedBody.index.schemaVersion).equal(3);
+    should(groupedBody.index.schemaVersion).equal(4);
     // A malformed query is the caller's mistake, not a 500 from the daemon.
     should(refused.status).equal(400);
     should((await refused.json()) as { code: string }).have.property('code', 'invalid_query');

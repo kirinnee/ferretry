@@ -7,19 +7,43 @@ import {
   analyticsMonthGlobs,
   analyticsOverview,
   analyticsRangeDays,
-  analyticsTopSessions,
+  durationAxisTicks,
+  formatAxisDuration,
   formatAxisUsd,
+  formatCount,
   formatDay,
+  formatDollars,
+  formatDuration,
+  formatMetric,
   formatTokens,
   formatUsd,
+  formatWeek,
+  metricReading,
+  type OverviewMachine,
+  overviewGroups,
+  overviewRow,
+  overviewTotals,
+  overviewWeeks,
   projectName,
+  rankTopSessions,
+  tokenTotal,
+  topSessionValue,
   utcDay,
+  weekStart,
 } from '../../../src/features/analytics/analytics-overview.ts';
-import { analyticsDayQuery, readAnalyticsWindow } from '../../../src/features/analytics/analytics-overview-load.ts';
+import {
+  analyticsDayQuery,
+  readAnalyticsWindow,
+  readMachineWindow,
+} from '../../../src/features/analytics/analytics-overview-load.ts';
 import { sessionCost, sessionDescendants, sessionTreeMatcher } from '../../../src/features/analytics/session-cost.ts';
 import { dayAggregate, rawResponse, rawRow } from '../../support/analytics-rows.ts';
 
 const NOW = new Date('2026-10-16T23:30:00Z');
+const HERE: OverviewMachine = { daemonId: 'daemon-a', name: 'studio-mac' };
+const THERE: OverviewMachine = { daemonId: 'daemon-b', name: 'kirin-box' };
+const row = (overrides: Parameters<typeof rawRow>[0], machine: OverviewMachine = HERE) =>
+  overviewRow(rawRow(overrides), machine);
 
 describe('the analytics window', () => {
   it('ends on the UTC day of now and runs oldest first', () => {
@@ -35,104 +59,228 @@ describe('the analytics window', () => {
     expect(analyticsMonthGlobs(analyticsRangeDays(7, NOW))).toEqual(['2026-10-*']);
     expect(analyticsMonthGlobs(analyticsRangeDays(30, NOW))).toEqual(['2026-09-*', '2026-10-*']);
   });
-});
 
-describe('analyticsOverview', () => {
-  const days = ['2026-10-12', '2026-10-13', '2026-10-14'];
-
-  it('keeps the known total when a session is unpriced and counts the gap beside it', () => {
-    const overview = analyticsOverview(days, [
-      rawRow({ id: 'a', day: '2026-10-12', equivalentApiCostUsdMicros: 2_000_000 }),
-      rawRow({ id: 'b', day: '2026-10-12', equivalentApiCostUsdMicros: null, model: 'mystery' }),
-      rawRow({ id: 'c', day: '2026-10-14', equivalentApiCostUsdMicros: 4_000_000, model: 'claude-sonnet-5-5' }),
-      rawRow({ id: 'outside', day: '2026-09-01' }),
-      rawRow({ id: 'undated', day: null }),
-    ]);
-    expect(overview.costMicros).toBe(6_000_000);
-    expect(overview.unpriced).toBe(1);
-    expect(overview.sessions).toBe(3);
-    expect(overview.pricedSessions).toBe(2);
-    expect(overview.averageMicros).toBe(3_000_000);
-    expect(overview.busiest?.day).toBe('2026-10-12');
-    expect(overview.partialDays).toBe(0);
-    expect(overview.models.map(share => share.model)).toEqual(['claude-sonnet-5-5', 'claude-opus-5-5']);
-  });
-
-  it('draws a day with no sessions as a known zero, not a gap', () => {
-    const overview = analyticsOverview(days, [rawRow({ id: 'a', day: '2026-10-12' })]);
-    expect(overview.days.map(day => [day.day, day.sessions, day.costMicros])).toEqual([
-      ['2026-10-12', 1, 1_000_000],
-      ['2026-10-13', 0, 0],
-      ['2026-10-14', 0, 0],
-    ]);
-  });
-
-  it('counts a partly listed day from the daemon and marks it', () => {
-    const overview = analyticsOverview(
-      days,
-      [rawRow({ id: 'a', day: '2026-10-13' })],
-      [{ day: '2026-10-13', sessions: 140, unpriced: 3 }],
-    );
-    const busy = overview.days[1]!;
-    expect(busy).toEqual({ day: '2026-10-13', sessions: 140, costMicros: 1_000_000, unpriced: 3, partial: true });
-    expect(overview.partialDays).toBe(1);
-    expect(overview.unpriced).toBe(3);
-  });
-
-  it('sums tokens, cache share and unknown token counts from the rows that have them', () => {
-    const overview = analyticsOverview(days, [
-      rawRow({ id: 'a', inputTokens: 1_000, cachedInputTokens: 250, tokens: 1_200 }),
-      rawRow({ id: 'b', tokens: null, inputTokens: null, cachedInputTokens: null }),
-    ]);
-    expect(overview.tokens).toBe(1_200);
-    expect(overview.tokensUnknown).toBe(1);
-    expect(overview.cacheReadPercent).toBe(25);
-  });
-
-  it('has no average, busiest day or cache share for an empty window', () => {
-    const overview = analyticsOverview(days, []);
-    expect(overview.averageMicros).toBeNull();
-    expect(overview.busiest).toBeNull();
-    expect(overview.cacheReadPercent).toBeNull();
-    expect(overview.topSessions).toEqual([]);
-  });
-
-  it('dedupes a session listed by two reads', () => {
-    const row = rawRow({ id: 'a' });
-    expect(analyticsOverview(days, [row, row]).sessions).toBe(1);
+  it('starts a week on its Monday', () => {
+    expect(weekStart('2026-10-16')).toBe('2026-10-12');
+    expect(weekStart('2026-10-12')).toBe('2026-10-12');
+    expect(weekStart('2026-10-11')).toBe('2026-10-05');
   });
 });
 
-describe('model shares and top sessions', () => {
-  it('splits priced cost by model, naming a missing model', () => {
-    expect(
-      analyticsModelShares([
-        rawRow({ id: 'a', model: null, equivalentApiCostUsdMicros: 5 }),
-        rawRow({ id: 'b', model: 'x', equivalentApiCostUsdMicros: 5 }),
-        rawRow({ id: 'c', model: 'x', equivalentApiCostUsdMicros: null }),
-      ]),
-    ).toEqual([
-      { model: 'unknown model', costMicros: 5, sessions: 1 },
-      { model: 'x', costMicros: 5, sessions: 1 },
-    ]);
+describe('overviewRow', () => {
+  it('names the machine as the app does, splits tokens by kind and reads both durations', () => {
+    const read = row({
+      id: 'a',
+      agent: 'claude-auto-loge',
+      machine: 'hostname-the-daemon-stamped',
+      cwd: '/home/kirin/Workspace/ferretry/',
+      inputTokens: 1_000,
+      cachedInputTokens: 600,
+      cacheWriteInputTokens: 100,
+      outputTokens: 50,
+      activeDurationMs: 4_000,
+      durationMs: 9_000,
+    });
+    expect(read).toMatchObject({
+      daemonId: 'daemon-a',
+      machine: 'studio-mac',
+      runtime: 'claude-auto-loge',
+      project: 'ferretry',
+      tree: 'a',
+      tokens: { input: 300, output: 50, cacheRead: 600, cacheWrite: 100 },
+      activeMs: 4_000,
+      wallMs: 9_000,
+    });
+    expect(tokenTotal(read.tokens!)).toBe(1_050);
   });
 
-  it('groups a tree under its root with its children counted and ranks trees by cost', () => {
-    const top = analyticsTopSessions([
-      rawRow({ id: 'root', tree: 'root', agent: 'Marin', cwd: '/w/ferretry/', equivalentApiCostUsdMicros: 10 }),
-      rawRow({ id: 'kid', tree: 'root', parent: 'root', agent: 'Kid', equivalentApiCostUsdMicros: null }),
-      rawRow({ id: 'solo', agent: 'Hadi', cwd: null, equivalentApiCostUsdMicros: 30 }),
-      rawRow({ id: 'orphan', tree: 'gone', agent: 'Wren', equivalentApiCostUsdMicros: 30 }),
-    ]);
-    expect(top.map(session => session.id)).toEqual(['gone', 'solo', 'root']);
-    expect(top[0]).toMatchObject({ agent: 'Wren', children: 1 });
-    expect(top[1]).toMatchObject({ agent: 'Hadi', project: null, children: 0 });
-    expect(top[2]).toMatchObject({ agent: 'Marin', project: 'ferretry', children: 1, unpriced: 1, costMicros: 10 });
+  it('has no token split when any kind is missing, and never a negative uncached input', () => {
+    expect(row({ id: 'a', cacheWriteInputTokens: null }).tokens).toBeNull();
+    expect(row({ id: 'b', inputTokens: 10, cachedInputTokens: 20 }).tokens?.input).toBe(0);
+    expect(row({ id: 'c', tree: 'root' }).tree).toBe('root');
   });
 
   it('names a project by its last path segment', () => {
+    expect(projectName('/home/kirin/Workspace/ferretry/')).toBe('ferretry');
     expect(projectName('C:\\work\\atomi')).toBe('atomi');
     expect(projectName('/')).toBeNull();
+    expect(projectName(null)).toBeNull();
+  });
+});
+
+describe('overviewTotals', () => {
+  it('sums each figure over the sessions that have it and counts the rest beside it', () => {
+    const totals = overviewTotals([
+      row({ id: 'a', equivalentApiCostUsdMicros: 2_000_000, turns: 4, activeDurationMs: 8_000, durationMs: 10_000 }),
+      row({
+        id: 'b',
+        equivalentApiCostUsdMicros: null,
+        tokens: null,
+        inputTokens: null,
+        turns: null,
+        activeDurationMs: null,
+        durationMs: null,
+      }),
+    ]);
+    expect(totals).toMatchObject({
+      sessions: 2,
+      costMicros: 2_000_000,
+      unpriced: 1,
+      tokensUnknown: 1,
+      turns: 4,
+      turnsUnknown: 1,
+      activeMs: 8_000,
+      activeUnknown: 1,
+      activeTurns: 4,
+      wallMs: 10_000,
+      wallUnknown: 1,
+    });
+    expect(metricReading(totals, 'cost')).toEqual({ value: 2, unknown: 1 });
+    expect(metricReading(totals, 'tokens')).toEqual({ value: 1_000, unknown: 1 });
+    expect(metricReading(totals, 'turns')).toEqual({ value: 4, unknown: 1 });
+    expect(metricReading(totals, 'active')).toEqual({ value: 8, unknown: 1 });
+  });
+
+  it('counts active turns as zero for a timed session whose turns are unknown', () => {
+    expect(overviewTotals([row({ id: 'a', turns: null })]).activeTurns).toBe(0);
+  });
+});
+
+describe('analyticsOverview', () => {
+  const days = analyticsRangeDays(3, NOW);
+
+  it('draws a day with no sessions as a known zero and ignores rows outside the window', () => {
+    const overview = analyticsOverview(days, [
+      row({ id: 'a', day: '2026-10-14' }),
+      row({ id: 'old', day: '2026-09-01' }),
+      row({ id: 'none', day: null }),
+    ]);
+    expect(overview.days.map(bucket => [bucket.key, bucket.totals.sessions, bucket.countedSessions])).toEqual([
+      ['2026-10-14', 1, 1],
+      ['2026-10-15', 0, 0],
+      ['2026-10-16', 0, 0],
+    ]);
+    expect(overview.totals.sessions).toBe(1);
+    expect(overview.partialDays).toBe(0);
+  });
+
+  it('keeps one session per machine and id, so two machines never merge two sessions', () => {
+    const overview = analyticsOverview(days, [
+      row({ id: 'same', day: '2026-10-15' }),
+      row({ id: 'same', day: '2026-10-15' }),
+      row({ id: 'same', day: '2026-10-15' }, THERE),
+    ]);
+    expect(overview.rows).toHaveLength(2);
+    expect(overview.topSessions.map(session => session.machine)).toEqual(['studio-mac', 'kirin-box']);
+  });
+
+  it('counts a partly listed day from each machine’s own count and marks it', () => {
+    const overview = analyticsOverview(
+      days,
+      [row({ id: 'a', day: '2026-10-15' }), row({ id: 'b', day: '2026-10-15' }, THERE)],
+      [
+        { day: '2026-10-15', daemonId: 'daemon-a', sessions: 40, unpriced: 2 },
+        { day: '2026-10-15', daemonId: 'daemon-b', sessions: 0, unpriced: 0 },
+      ],
+    );
+    expect(overview.days[1]).toMatchObject({ partial: true, countedSessions: 41 });
+    expect(overview.partialDays).toBe(1);
+    // A count with no machine stands for the whole day.
+    const whole = analyticsOverview(
+      days,
+      [row({ id: 'a', day: '2026-10-16' })],
+      [{ day: '2026-10-16', sessions: 5, unpriced: 0 }],
+    );
+    expect(whole.days[2]!.countedSessions).toBe(5);
+  });
+
+  it('folds days into Monday weeks, keeping only the window’s days', () => {
+    const week = analyticsRangeDays(7, NOW);
+    const overview = analyticsOverview(
+      week,
+      [row({ id: 'a', day: '2026-10-11' }), row({ id: 'b', day: '2026-10-12' }), row({ id: 'c', day: '2026-10-16' })],
+      [{ day: '2026-10-16', sessions: 4, unpriced: 0 }],
+    );
+    const weeks = overviewWeeks(overview.days, overview.rows);
+    expect(weeks.map(bucket => [bucket.key, bucket.totals.sessions, bucket.countedSessions, bucket.partial])).toEqual([
+      ['2026-10-05', 1, 1, false],
+      ['2026-10-12', 2, 5, true],
+    ]);
+  });
+});
+
+describe('splits and top sessions', () => {
+  const rows = [
+    row({ id: 'a', model: 'opus', equivalentApiCostUsdMicros: 5_000_000, agent: null }),
+    row({ id: 'b', model: 'opus', equivalentApiCostUsdMicros: 1_000_000 }),
+    row({ id: 'c', model: 'astra', equivalentApiCostUsdMicros: null, cwd: null }),
+    row({ id: 'd', model: null, equivalentApiCostUsdMicros: 500_000 }, THERE),
+  ];
+
+  it('groups by each label, largest first, an unknown group named and a fully unknown one last', () => {
+    expect(overviewGroups(rows, 'model', 'cost').map(group => group.key)).toEqual(['opus', 'unknown model', 'astra']);
+    expect(overviewGroups(rows, 'runtime', 'cost').map(group => group.key)).toEqual(['unknown runtime', 'Marin']);
+    expect(overviewGroups(rows, 'machine', 'turns').map(group => group.key)).toEqual(['studio-mac', 'kirin-box']);
+    expect(overviewGroups(rows, 'project', 'cost').map(group => group.key)).toEqual(['ferretry', 'no project']);
+    // Equal values with equal gaps fall back to the name.
+    expect(
+      overviewGroups([row({ id: 'y', model: 'b' }), row({ id: 'z', model: 'a' })], 'model', 'cost').map(
+        group => group.key,
+      ),
+    ).toEqual(['a', 'b']);
+  });
+
+  it('ranks trees by tokens, duration or cost, with an unknown value last and never as zero', () => {
+    const trees = analyticsOverview(
+      ['2026-10-13'],
+      [
+        row({ id: 'root', tree: 'root', tokens: 10, inputTokens: 5, outputTokens: 5, cachedInputTokens: 0 }),
+        row({ id: 'kid', tree: 'root', parent: 'root', equivalentApiCostUsdMicros: null }),
+        row({ id: 'big', equivalentApiCostUsdMicros: 9_000_000, activeDurationMs: 60_000 }),
+        row({
+          id: 'blank',
+          equivalentApiCostUsdMicros: null,
+          inputTokens: null,
+          activeDurationMs: null,
+        }),
+        row({ id: 'orphan', tree: 'gone', parent: 'gone' }),
+      ],
+    ).topSessions;
+    const root = trees.find(session => session.id === 'root')!;
+    expect(root.children).toBe(1);
+    expect(trees.find(session => session.id === 'gone')!.label).toBe('Flaky test fix');
+    expect(rankTopSessions(trees, 'cost').map(session => session.id)).toEqual(['big', 'gone', 'root', 'blank']);
+    expect(
+      rankTopSessions(trees, 'duration')
+        .map(session => session.id)
+        .at(-1),
+    ).toBe('blank');
+    expect(rankTopSessions(trees, 'tokens').map(session => session.id)).toEqual(['root', 'big', 'gone', 'blank']);
+    const blank = trees.find(session => session.id === 'blank')!;
+    expect([
+      topSessionValue(blank, 'tokens'),
+      topSessionValue(blank, 'duration'),
+      topSessionValue(blank, 'cost'),
+    ]).toEqual([null, null, null]);
+    expect(topSessionValue(root, 'cost')).toBe(1);
+    expect(rankTopSessions([blank, { ...blank, id: 'another' }], 'cost').map(session => session.id)).toEqual([
+      'another',
+      'blank',
+    ]);
+  });
+
+  it('keeps the session pane’s priced split per model', () => {
+    expect(
+      analyticsModelShares([
+        rawRow({ id: 'a', model: null, equivalentApiCostUsdMicros: 2 }),
+        rawRow({ id: 'b', equivalentApiCostUsdMicros: 3 }),
+        rawRow({ id: 'c', equivalentApiCostUsdMicros: 1 }),
+        rawRow({ id: 'd', equivalentApiCostUsdMicros: null }),
+      ]),
+    ).toEqual([
+      { model: 'claude-opus-5-5', costMicros: 4, sessions: 2 },
+      { model: 'unknown model', costMicros: 2, sessions: 1 },
+    ]);
   });
 });
 
@@ -145,18 +293,34 @@ describe('axis and formatting', () => {
     expect(analyticsAxisTicks(0)).toEqual([0, 1]);
   });
 
-  it('formats dollars, tokens and days for people', () => {
+  it('picks duration ticks of whole hours, minutes or seconds', () => {
+    expect(durationAxisTicks(5 * 3600)).toEqual([0, 7_200, 14_400, 21_600]);
+    expect(durationAxisTicks(600)).toEqual([0, 300, 600]);
+    expect(durationAxisTicks(30)).toEqual([0, 10, 20, 30]);
+    expect([0, 7_200, 300, 45].map(formatAxisDuration)).toEqual(['0', '2h', '5m', '45s']);
+  });
+
+  it('formats dollars, tokens, counts, durations and days for people', () => {
     expect(formatUsd(614_800_000)).toBe('$614.80');
     expect(formatUsd(0)).toBe('$0.00');
     expect(formatUsd(1_000)).toBe('<$0.01');
+    expect(formatDollars(12.5)).toBe('$12.50');
     expect(formatAxisUsd(50)).toBe('$50');
     expect(formatAxisUsd(0.25)).toBe('$0.25');
     expect(formatTokens(144_000_000)).toBe('144M');
+    expect(formatCount(1_284)).toBe('1,284');
+    expect([42, 425, 11_520, 190_800, -3].map(formatDuration)).toEqual(['42s', '7m 05s', '3h 12m', '2d 5h', '0s']);
     expect(formatDay('2026-10-02')).toBe('2 Oct');
     expect(formatDay('2026-13-02')).toBe('2 13');
+    expect(formatWeek('2026-10-12')).toBe('wk 12 Oct');
+    expect(['cost', 'tokens', 'turns', 'active'].map(metric => formatMetric(metric as never, 1_500))).toEqual([
+      '$1,500.00',
+      '1.5K',
+      '1,500',
+      '25m 00s',
+    ]);
   });
 });
-
 describe('readAnalyticsWindow', () => {
   const days = analyticsRangeDays(3, NOW);
 
@@ -237,5 +401,22 @@ describe('sessionCost', () => {
   it('matches the tree exactly, falling back to the session for a tree-less row', () => {
     expect(sessionTreeMatcher(root)).toBe('{tree=="root"}');
     expect(sessionTreeMatcher(rawRow({ id: 'a*b' }))).toBe('{tree=="a*b"}');
+  });
+});
+
+describe('readMachineWindow', () => {
+  it('tags every row and partial day with the machine it came from', async () => {
+    const read = await readMachineWindow(
+      async query =>
+        query === '{day="2026-10-*"}'
+          ? rawResponse([], query, true)
+          : query.startsWith('sum')
+            ? dayAggregate('2026-10-16', 9, 9)
+            : rawResponse([rawRow({ id: 'a', day: '2026-10-16' })], query, true),
+      ['2026-10-16'],
+      THERE,
+    );
+    expect(read.rows.map(entry => [entry.id, entry.machine])).toEqual([['a', 'kirin-box']]);
+    expect(read.partial).toEqual([{ day: '2026-10-16', daemonId: 'daemon-b', sessions: 9, unpriced: 0 }]);
   });
 });

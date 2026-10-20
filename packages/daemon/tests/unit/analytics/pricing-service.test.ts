@@ -134,7 +134,11 @@ interface Harness {
 function harness(
   catalog: AnalyticsPricingCatalog = [],
   sources: readonly ConfiguredAnalyticsPricingSource[] = [source],
-  options: { readonly previewLimit?: number; readonly previewTtlMs?: number } = {},
+  options: {
+    readonly previewLimit?: number;
+    readonly previewTtlMs?: number;
+    readonly modelCatalogRates?: () => Promise<readonly AnalyticsPricingRate[]>;
+  } = {},
 ): Harness {
   const document = new MemoryPricingDocument({ catalog, sources });
   let feed:
@@ -207,6 +211,25 @@ describe('AnalyticsPricingService view and manual patch', () => {
       sourcesFingerprint: analyticsPricingSourcesFingerprint([source]),
       rateApplicability: ANALYTICS_PRICING_RATE_APPLICABILITY,
     });
+  });
+
+  it('should report the model catalog rates no operator rate claims, read-only beside the catalog', async () => {
+    // Arrange
+    const fromCatalog = (modelId: string): AnalyticsPricingRate => ({
+      ...manualRate(`model-catalog:openai:${modelId}`, modelId),
+      source: { kind: 'model_catalog', catalog: 'openai', sourceUrl: 'https://developers.openai.com/api/docs/pricing' },
+    });
+    const catalog = [manualRate('manual', 'gpt-6-astra', ['gpt-6-luna'])];
+    const derived = [fromCatalog('gpt-6-astra'), fromCatalog('gpt-6-luna'), fromCatalog('gpt-6.1-sol')];
+    const subject = harness(catalog, [source], { modelCatalogRates: async () => derived });
+
+    // Act
+    const actual = await subject.service.view();
+
+    // Assert
+    expect(actual.catalog).toEqual(catalog);
+    expect(actual.modelCatalogRates).toEqual([fromCatalog('gpt-6.1-sol')]);
+    expect(actual.catalogFingerprint).toBe(analyticsPricingFingerprint(catalog));
   });
 
   it('should apply only structured manual operations and report their exact touched keys', async () => {

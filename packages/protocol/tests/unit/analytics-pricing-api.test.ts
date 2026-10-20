@@ -14,6 +14,7 @@ import {
   AnalyticsPricingSyncPreviewSchema,
   AnalyticsPricingViewSchema,
   ManualAnalyticsPricingRateSchema,
+  ModelCatalogAnalyticsPricingRateSchema,
   type AnalyticsPricingRates,
 } from '../../src/lib/index.ts';
 import { INSTANT } from '../fixtures.ts';
@@ -58,8 +59,17 @@ const syncedRate = {
   lastSyncedAt: INSTANT,
 } as const;
 
+/** A price the daemon read out of a model catalog, as the view reports it beside the operator's. */
+const catalogRate = {
+  ...rate,
+  pricingKey: 'model-catalog:openai:gpt-6-luna',
+  modelId: 'gpt-6-luna',
+  source: { kind: 'model_catalog', catalog: 'openai', sourceUrl: 'https://developers.openai.com/api/docs/pricing' },
+} as const;
+
 const view = {
   catalog: [rate],
+  modelCatalogRates: [catalogRate],
   catalogFingerprint: BASE,
   sources: [{ id: 'openai-public', provider: 'openai', url: FEED_URL, enabled: true }],
   sourcesFingerprint: 'sources-fingerprint',
@@ -105,6 +115,7 @@ const cases: readonly SchemaCase[] = [
   { name: 'preview id', schema: AnalyticsPricingPreviewIdSchema, value: 'preview-1' },
   { name: 'view', schema: AnalyticsPricingViewSchema, value: view },
   { name: 'manual rate', schema: ManualAnalyticsPricingRateSchema, value: rate },
+  { name: 'model catalog rate', schema: ModelCatalogAnalyticsPricingRateSchema, value: catalogRate },
   { name: 'patch operation', schema: AnalyticsPricingPatchOperationSchema, value: { op: 'upsert', rate } },
   { name: 'patch', schema: AnalyticsPricingPatchSchema, value: patch },
   {
@@ -126,6 +137,21 @@ describe('analytics pricing API contract', () => {
     // Act + Assert
     assertRoundTrips(cases);
     assertCoversEverySchema(pricingApi, cases);
+  });
+
+  it('should read an older daemon that reports no catalog prices, and refuse a typed row posing as one', () => {
+    // Arrange
+    const { modelCatalogRates: _rates, ...older } = view;
+
+    // Act
+    const read = AnalyticsPricingViewSchema.parse(older);
+    const posing = AnalyticsPricingViewSchema.safeParse({ ...view, modelCatalogRates: [rate] });
+    const submitted = ManualAnalyticsPricingRateSchema.safeParse(catalogRate);
+
+    // Assert
+    should(read.modelCatalogRates).be.undefined();
+    should(posing.success).be.false();
+    should(submitted.success).be.false();
   });
 
   it('should make a manual edit say what it meant rather than replacing the table', () => {

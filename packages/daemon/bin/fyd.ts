@@ -30,6 +30,7 @@ import {
   runtimeIdsPath,
   sanitizeHarnessEnv,
   sharedHistoryPoolDirectory,
+  type ModelCatalog,
   wrapperNameOf,
 } from '@ferretry/fleet';
 import {
@@ -569,10 +570,12 @@ import {
   type ManagedWorktreeRegistry,
   ManagedWorktreeService,
   McpOAuthService,
+  effectiveAnalyticsPricing,
   MigrationPreflight,
   type MigrationReportStore,
   type MillisecondClockPort,
   ModelCatalogService,
+  modelCatalogPricingRates,
   type MountedSubsystems,
   mayTrustDirectLoopback,
   messageWithAttachments,
@@ -5011,16 +5014,18 @@ function createAnalyticsCandidateSource(storage: DaemonStorage): AnalyticsIngest
  * was built for; a copied or restored index naming another home is discarded on open rather than
  * served, because one daemon's spend reported as another's is a wrong answer, not a stale one.
  *
- * THE PRICING CATALOG comes from this daemon's validated operator configuration and is read per pass,
- * so an operator's edit takes effect on the next ingestion. It is never shared between state homes, and
- * an empty catalog makes every cost `unpriced` with a reason — the honest answer. A hardcoded table
- * would price historical runs off numbers nobody in this deployment agreed to; a zero would read as
- * free.
+ * THE PRICING CATALOG is this daemon's validated operator rates laid over the list prices the model
+ * catalogs in effect carry (docs/model-catalog.md § Prices), read per pass, so an operator's edit or a
+ * newer published catalog takes effect on the next ingestion — and, because the catalog's fingerprint
+ * is part of every row's ingest signature, re-prices the rows it changes. An operator rate wins for its
+ * whole model. A model neither prices stays `unpriced` with a reason — the honest answer; a zero would
+ * read as free.
  */
 function createAnalyticsIngestion(
   storage: DaemonStorage,
   opened: OpenedAnalyticsIndexStore,
   pricingConfiguration: AnalyticsPricingConfigurationPort,
+  modelCatalogs: () => Promise<Readonly<Record<string, ModelCatalog>>>,
   evidence: AnalyticsTranscriptEvidenceSource,
   clock: ClockPort,
 ): AnalyticsIngestionService {
@@ -5031,7 +5036,7 @@ function createAnalyticsIngestion(
     pricing: async () => {
       const read = await pricingConfiguration.readPricing();
       if (read.kind === 'unavailable') throw new Error(`analytics ingestion refused because ${read.message}`);
-      return read.configuration.catalog;
+      return effectiveAnalyticsPricing(read.configuration.catalog, await modelCatalogs());
     },
     clock,
     concurrency: ANALYTICS_FOLD_CONCURRENCY,
@@ -5039,9 +5044,12 @@ function createAnalyticsIngestion(
   });
 }
 
-/** The analytics read, over the rows ingestion materialised. */
-function createAnalyticsSubsystem(ingestion: AnalyticsIngestionService): AnalyticsSubsystem {
-  return { index: () => ingestion.read() };
+/** The analytics read, over the rows ingestion materialised, stamped with this machine's name. */
+function createAnalyticsSubsystem(
+  ingestion: AnalyticsIngestionService,
+  machine: () => string | null,
+): AnalyticsSubsystem {
+  return { index: () => ingestion.read(), machine };
 }
 
 /**
@@ -5955,6 +5963,8 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
   // this composition root so the attachment store can key state by daemon
   // without widening the public pairing route interface.
   let attachmentDaemonId: string | undefined;
+  // The name pairing gave this machine, stamped on analytics rows as the `machine` label.
+  let analyticsMachineName: string | undefined;
   const clock = new SystemClock();
   const millisecondClock = { now: () => Date.now() };
   const environment = new RuntimeEnvironment(process.env, () => userHome);
@@ -6807,6 +6817,8 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       // revive that restored the pane and not the session.
       accountLaunchRenewal,
       sessionMedia,
+      // The binary the wrappers' instructions name, so a revive records what its pane was told.
+      CLIENT_NAME,
     );
   };
   /**
@@ -6977,6 +6989,8 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         accountLaunchRenewal,
         // The pane's own media folder, `FY_MEDIA_DIR` (docs/hypermedia.md).
         sessionMedia,
+        // The binary the wrappers' instructions name, so each launch records what its pane was told.
+        CLIENT_NAME,
       ),
       codexAppServers,
       { text: async record => (await launchTmux.state(record.config.tmuxSession)).visible },
@@ -7093,6 +7107,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       const repository = new StatePairingRepository(paths, stateFiles, cryptography);
       const state = await repository.open(hostname());
       attachmentDaemonId = state.daemonId;
+      analyticsMachineName = state.daemonName;
       const credentials = new PairingDeviceRegistry(state.daemonId, state.devices);
       // Read BEFORE pairing is built: the idle period and the step-up window are both asked of it.
       let pairingService: PairingService | undefined;
@@ -7812,10 +7827,14 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       // ONE ingestion service for this opened store, shared by the loop that writes rows and the route
       // that reads them. Two would each hold their own account of whether a pass is in flight, and the
       // read would report `refreshing: false` while the loop was mid-pass.
+      // The model catalogs in effect, for their list prices. Read lazily: the catalog service is built
+      // below, and nothing prices a session before the subsystems mount.
+      const pricedModelCatalogs = async () => await modelCatalogService.catalogs();
       const analyticsIngestion = createAnalyticsIngestion(
         storage,
         analyticsStore,
         daemonConfigStore,
+        pricedModelCatalogs,
         createAnalyticsTranscriptEvidence(storage),
         clock,
       );
@@ -7825,6 +7844,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         daemonConfigMutations,
         clock,
         { next: () => crypto.randomUUID() },
+        { modelCatalogRates: async () => modelCatalogPricingRates(await pricedModelCatalogs()) },
       );
       // Hoisted, because the quota-failover loop below moves sessions THROUGH this exact subsystem
       // rather than through a second, ungated path of its own.
@@ -8224,7 +8244,10 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         userHome,
         pricing: async () => {
           const read = await daemonConfigStore.readPricing();
-          return read.kind === 'unavailable' ? [] : read.configuration.catalog;
+          return effectiveAnalyticsPricing(
+            read.kind === 'unavailable' ? [] : read.configuration.catalog,
+            await modelCatalogService.catalogs(),
+          );
         },
       });
       adoptLearning = async id => {
@@ -8647,7 +8670,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         }),
         tasks: createTaskSubsystem(paths, storage, clock, taskBoards, taskBoardTaskActionAuthorizer(boards)),
         taskBoards: boards,
-        analytics: createAnalyticsSubsystem(analyticsIngestion),
+        analytics: createAnalyticsSubsystem(analyticsIngestion, () => analyticsMachineName ?? hostname()),
         analyticsPricing,
         analyticsIngest: analyticsIngestion,
         terminals: terminalSubsystem,

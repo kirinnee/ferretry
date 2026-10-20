@@ -17,7 +17,13 @@
 
 import type { AnalyticsRawSession, AnalyticsResponse } from '@ferretry/protocol';
 
-import { type AnalyticsPartialDay, analyticsMonthGlobs } from './analytics-overview.ts';
+import {
+  type AnalyticsPartialDay,
+  analyticsMonthGlobs,
+  type OverviewMachine,
+  type OverviewRow,
+  overviewRow,
+} from './analytics-overview.ts';
 
 export type AnalyticsQueryRead = (query: string) => Promise<AnalyticsResponse>;
 
@@ -70,4 +76,22 @@ export const readAnalyticsWindow = async (
   );
   const reads = parts.flat();
   return { rows: reads.flatMap(part => part.rows), partial: reads.flatMap(part => part.partial) };
+};
+
+export interface MachineWindowRead {
+  readonly rows: readonly OverviewRow[];
+  readonly partial: readonly AnalyticsPartialDay[];
+}
+
+/** One machine's window, every row and partial day tagged with the machine it came from. */
+export const readMachineWindow = async (
+  read: AnalyticsQueryRead,
+  days: readonly string[],
+  machine: OverviewMachine,
+): Promise<MachineWindowRead> => {
+  const window = await readAnalyticsWindow(read, days);
+  return {
+    rows: window.rows.map(row => overviewRow(row, machine)),
+    partial: window.partial.map(day => ({ ...day, daemonId: machine.daemonId })),
+  };
 };

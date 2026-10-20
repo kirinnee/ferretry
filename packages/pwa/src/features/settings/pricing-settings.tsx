@@ -1,5 +1,7 @@
 import {
+  ANALYTICS_PRICING_PROVIDERS,
   ANALYTICS_PRICING_RATE_SLOTS,
+  type AnalyticsPricingProvider,
   type AnalyticsPricingRate,
   type AnalyticsPricingRateSlot,
   type AnalyticsPricingRates,
@@ -46,7 +48,7 @@ interface PricingDraft {
   readonly pricingKey: string;
   readonly modelId: string;
   readonly aliases: string;
-  readonly provider: 'openai' | 'anthropic';
+  readonly provider: AnalyticsPricingProvider;
   readonly validFrom: string;
   readonly validThrough: string;
   readonly verifiedAt: string;
@@ -54,6 +56,17 @@ interface PricingDraft {
 }
 
 type PricingFieldErrors = Readonly<Record<string, string>>;
+
+/** Each maker as a person reads it; a maker the protocol adds without a label here does not compile. */
+const PROVIDER_LABELS = {
+  openai: 'OpenAI',
+  anthropic: 'Anthropic',
+  deepseek: 'DeepSeek',
+  moonshot: 'Moonshot (Kimi)',
+  zai: 'Z.ai (GLM)',
+  minimax: 'MiniMax',
+  alibaba: 'Alibaba (Qwen)',
+} as const satisfies Readonly<Record<AnalyticsPricingProvider, string>>;
 
 const RATE_LABELS = {
   input: 'Input',
@@ -242,6 +255,22 @@ function Provenance({ rate }: { readonly rate: AnalyticsPricingRate }) {
         <p className="mb-0 mt-1 text-meta leading-base text-muted">Entered or overridden by an operator.</p>
       </div>
     );
+  if (rate.source.kind === 'model_catalog')
+    return (
+      <div>
+        <span className="inline-flex rounded-control border border-border-strong bg-surface-2 px-2 py-0.5 text-meta font-semibold text-fg">
+          Model catalog · {rate.source.catalog}
+        </span>
+        <PanelPath
+          value={rate.source.sourceUrl}
+          className="mb-0 mt-1 block text-meta leading-base text-muted"
+          label="Source"
+        />
+        <p className="mb-0 mt-1 text-meta text-faint">
+          Verified: <DateValue value={rate.verifiedAt} />
+        </p>
+      </div>
+    );
   return (
     <div>
       <span className="inline-flex rounded-control border border-ok-border bg-ok-bg px-2 py-0.5 text-meta font-semibold text-ok">
@@ -357,8 +386,68 @@ function RateActions({
   );
 }
 
+/**
+ * The prices the model catalogs give the models no operator rate claims (docs/model-catalog.md
+ * § Prices): what analytics charges a session at when nobody configured one. Read-only — they change
+ * with the catalog — and Override starts a manual rate from one, which then wins for that model.
+ */
+function ModelCatalogRates({
+  rates,
+  busy,
+  onOverride,
+}: {
+  readonly rates: readonly AnalyticsPricingRate[];
+  readonly busy: boolean;
+  readonly onOverride: (rate: AnalyticsPricingRate) => void;
+}) {
+  if (rates.length === 0) return null;
+  return (
+    <section className="min-w-0" aria-labelledby="pricing-model-catalog-heading" data-pricing-model-catalog="">
+      <div className="mb-2 px-1">
+        <h4 id="pricing-model-catalog-heading" className="m-0 text-row font-semibold text-fg">
+          From the model catalog
+        </h4>
+        <p className="mb-0 mt-1 text-meta leading-base text-muted">
+          {rates.length} list price{rates.length === 1 ? '' : 's'} from the providers' pricing pages, used for any model
+          above has no rate for. They follow the model catalog; a rate you add for a model replaces its catalog price.
+        </p>
+      </div>
+      <div className="grid min-w-0 grid-cols-1 gap-3 xl:grid-cols-2">
+        {rates.map(rate => (
+          <article
+            key={rate.pricingKey}
+            className="kt-panel min-w-0 p-panel"
+            data-pricing-catalog-rate={rate.pricingKey}
+          >
+            <div className="flex min-w-0 items-start justify-between gap-2">
+              <div className="min-w-0">
+                <p className="m-0 break-words font-mono text-ui font-semibold text-fg">{rate.modelId}</p>
+                <p className="mb-0 mt-1 text-meta text-muted">{PROVIDER_LABELS[rate.provider]}</p>
+              </div>
+              <button
+                type="button"
+                className="kt-btn min-h-[44px] shrink-0"
+                disabled={busy}
+                data-pricing-override={rate.pricingKey}
+                onClick={() => onOverride(rate)}
+              >
+                Override
+              </button>
+            </div>
+            <div className="my-3 border-t border-border-soft" />
+            <RateAmounts rates={rate.rates} />
+            <div className="my-3 border-t border-border-soft" />
+            <Provenance rate={rate} />
+          </article>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 function CatalogLedger({
   rates,
+  catalogPriced,
   busy,
   confirmingKey,
   onEdit,
@@ -367,6 +456,8 @@ function CatalogLedger({
   onRemove,
 }: {
   readonly rates: readonly AnalyticsPricingRate[];
+  /** Whether the model catalogs price models this table does not, so nothing is unpriced by default. */
+  readonly catalogPriced: boolean;
   readonly busy: boolean;
   readonly confirmingKey: string | null;
   readonly onEdit: (rate: AnalyticsPricingRate) => void;
@@ -379,7 +470,9 @@ function CatalogLedger({
       <section className="kt-panel p-panel" data-pricing-empty="">
         <h4 className="m-0 text-ui font-semibold text-fg">No model rates configured</h4>
         <p className="mb-0 mt-1 text-meta leading-base text-muted">
-          Usage stays explicitly unpriced until an operator adds a rate or applies selected provider changes.
+          {catalogPriced
+            ? 'Sessions are priced from the model catalog below. Add a rate to set your own price for a model.'
+            : 'Usage stays explicitly unpriced until an operator adds a rate or applies selected provider changes.'}
         </p>
       </section>
     );
@@ -623,8 +716,11 @@ function PricingEditor({
             data-pricing-field="provider"
             onChange={event => onChange({ ...draft, provider: event.currentTarget.value as PricingDraft['provider'] })}
           >
-            <option value="openai">OpenAI</option>
-            <option value="anthropic">Anthropic</option>
+            {ANALYTICS_PRICING_PROVIDERS.map(provider => (
+              <option key={provider} value={provider}>
+                {PROVIDER_LABELS[provider]}
+              </option>
+            ))}
           </select>
         </Field>
         <Field
@@ -1135,6 +1231,14 @@ export function PricingSettings({
     setConfirmingKey(null);
   };
 
+  const openOverride = (rate: AnalyticsPricingRate): void => {
+    setEditing(null);
+    setDraft({ ...rateDraft(rate), pricingKey: `operator:${rate.modelId}` });
+    setFieldErrors({});
+    setMutationFailure(null);
+    setConfirmingKey(null);
+  };
+
   const openEdit = (rate: AnalyticsPricingRate): void => {
     setEditing(rate);
     setDraft(rateDraft(rate));
@@ -1386,6 +1490,7 @@ export function PricingSettings({
             </div>
             <CatalogLedger
               rates={state.view.catalog}
+              catalogPriced={(state.view.modelCatalogRates ?? []).length > 0}
               busy={mutationBusy}
               confirmingKey={confirmingKey}
               onEdit={openEdit}
@@ -1397,6 +1502,7 @@ export function PricingSettings({
               onRemove={pricingKey => void removeRate(pricingKey)}
             />
           </section>
+          <ModelCatalogRates rates={state.view.modelCatalogRates ?? []} busy={mutationBusy} onOverride={openOverride} />
           <Sources
             sources={state.view.sources}
             selectedSourceId={sourceId}

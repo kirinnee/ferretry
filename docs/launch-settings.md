@@ -66,6 +66,15 @@ Restart to apply", with the reason, and a one-tap Restart. It compares two thing
 - **settings** — a digest of the login's wrapper and fixed settings file differs from the one recorded when
   the process was launched (a permission-mode, profile or fixed-layer change since).
 
+**Info › Runtime › Instructions** says what the running process was told: which Ferretry sections of its
+appended system prompt it carries (the tools, the settings rules, and each of Hypermedia, Pack mode and
+Learning whose switch was on) with each one's size, its mode, and whether it may ask the owner a question.
+It reads `state.launchInstructions` (`SessionLaunchInstructionsSchema`), which the daemon records from the
+environment each pane is launched with — at every start, restart and revive — so a switch flipped since
+shows in its own row and here only after the next launch. It holds section names and sizes, never the
+prompt text. A ferret last launched before the field existed has none, and the row says "Recorded from the
+next launch".
+
 ## Only new ferrets
 
 | Setting                                                                                                                 | Decided                                |

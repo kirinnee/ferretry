@@ -122,14 +122,14 @@ describe('InfoRuntime — Other MCP and Instructions', () => {
 
   it('lists instruction files, with its own empty copy', async () => {
     const empty = await show({ instructions: list({ kind: 'ready', items: [] }) });
-    expect(must(empty.querySelector('[data-info-row="Instructions"]'), 'row').textContent).toContain(
+    expect(must(empty.querySelector('[data-info-row="Instruction files"]'), 'row').textContent).toContain(
       'None at the folder’s root',
     );
 
     await mounted?.unmount();
     mounted = undefined;
     const ready = await show({ instructions: list({ kind: 'ready', items: ['CLAUDE.md', 'AGENTS.md'] }) });
-    expect(must(ready.querySelector('[data-info-row="Instructions"]'), 'row').textContent).toContain(
+    expect(must(ready.querySelector('[data-info-row="Instruction files"]'), 'row').textContent).toContain(
       'CLAUDE.md, AGENTS.md',
     );
   });
@@ -205,5 +205,41 @@ describe('InfoRuntime — Pack mode', () => {
   it('says it works alone when the owner switched it off', async () => {
     const root = await show({ view: sessionView('session-a', { config: { pack: false } }) });
     expect(root.querySelector('[data-info-pack="off"]')?.textContent).toBe('Off · works alone');
+  });
+});
+
+describe('InfoRuntime — Instructions', () => {
+  it('lists each launch section with its size, the mode and whether it may ask questions', async () => {
+    const root = await show({
+      view: sessionView('session-a', {
+        state: {
+          launchInstructions: {
+            sections: [
+              { id: 'tools', chars: 640 },
+              { id: 'settings', chars: 470 },
+              { id: 'pack', chars: 1010 },
+            ],
+            mode: 'interactive',
+            questions: true,
+          },
+        },
+      }),
+    });
+    const row = must(root.querySelector('[data-info-row="Instructions"]'), 'instructions row');
+    expect([...row.querySelectorAll('[data-info-launch-section]')].map(chip => chip.textContent)).toEqual([
+      'Ferretry tools · 640 chars',
+      'Settings rules · 470 chars',
+      'Pack mode · 1k chars',
+    ]);
+    expect(row.querySelector('[data-info-launch-mode]')?.textContent).toBe('ModeInteractive');
+    expect(row.querySelector('[data-info-launch-questions]')?.textContent).toBe('Can ask questionsYes');
+    expect(row.querySelector('[data-info-launch-unrecorded]')).toBeNull();
+  });
+
+  it('says it is recorded from the next launch for a ferret launched before the record existed', async () => {
+    const root = await show();
+    const row = must(root.querySelector('[data-info-row="Instructions"]'), 'instructions row');
+    expect(row.querySelector('[data-info-launch-unrecorded]')?.textContent).toBe('Recorded from the next launch');
+    expect(row.querySelector('[data-info-launch-sections]')).toBeNull();
   });
 });

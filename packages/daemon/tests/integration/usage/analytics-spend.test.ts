@@ -15,7 +15,7 @@ describe('AnalyticsTranscriptSpend', () => {
     const index = {
       read: (): AnalyticsIndexRead => {
         reads += 1;
-        return { rows: [...rows], status: {} as AnalyticsIndexRead['status'] };
+        return { rows: [...rows], status: {} as AnalyticsIndexRead['status'], now: '2026-10-20T00:00:00.000Z' };
       },
     };
     const spend = new AnalyticsTranscriptSpend(index);

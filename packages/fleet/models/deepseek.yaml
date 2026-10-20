@@ -2,6 +2,9 @@
 label: DeepSeek
 docs: https://api-docs.deepseek.com/quick_start/agent_integrations/claude_code
 verified: '2026-10-18'
+unverified:
+  - 'DeepSeek charges half price off-peak; the prices are its peak (full) ones.'
+  - 'DeepSeek lists no cache-write price; a written token is a cache miss, charged as input.'
 claude:
   tiers:
     opus: deepseek-flash[1m]
@@ -10,6 +13,14 @@ claude:
     subagent: deepseek-flash
   models:
     - id: deepseek-v4-pro
+      price:
+        provider: deepseek
+        input: 1.32
+        output: 3.96
+        cacheRead: 0.044
+        cacheWrite: 1.32
+        source: https://api-docs.deepseek.com/quick_start/pricing
+        verified: '2026-10-20'
       suffix: '[1m]'
       label: DeepSeek V4 Pro
       tier: best
@@ -17,6 +28,14 @@ claude:
       efforts: [low, high, max]
       defaultEffort: high
     - id: deepseek-flash
+      price:
+        provider: deepseek
+        input: 0.3
+        output: 1.2
+        cacheRead: 0.006
+        cacheWrite: 0.3
+        source: https://api-docs.deepseek.com/quick_start/pricing
+        verified: '2026-10-20'
       suffix: '[1m]'
       label: DeepSeek Flash
       tier: fast
@@ -28,12 +47,28 @@ codex:
   docs: https://api-docs.deepseek.com/quick_start/agent_integrations/codex
   models:
     - id: deepseek-v4-pro
+      price:
+        provider: deepseek
+        input: 1.32
+        output: 3.96
+        cacheRead: 0.044
+        cacheWrite: 1.32
+        source: https://api-docs.deepseek.com/quick_start/pricing
+        verified: '2026-10-20'
       label: DeepSeek V4 Pro
       tier: best
       context: 1000000
       efforts: [low, high, max]
       defaultEffort: high
     - id: deepseek-flash
+      price:
+        provider: deepseek
+        input: 0.3
+        output: 1.2
+        cacheRead: 0.006
+        cacheWrite: 0.3
+        source: https://api-docs.deepseek.com/quick_start/pricing
+        verified: '2026-10-20'
       label: DeepSeek Flash
       tier: fast
       context: 1000000

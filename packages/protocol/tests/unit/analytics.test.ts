@@ -56,6 +56,7 @@ const aggregateResult = {
   equivalentApiCostUsdMicros: measure,
   turns: measure,
   durationMs: measure,
+  activeDurationMs: measure,
   timeToFirstOutputMs: unknownMeasure,
   contextEndPercent: { value: 74.5, known: 4, total: 4 },
 } satisfies AnalyticsAggregateResult;
@@ -87,6 +88,8 @@ const rawSession = {
   reasoningTokens: 4_096,
   turns: 12,
   durationMs: 900_000,
+  activeDurationMs: 600_000,
+  machine: 'kirin-box',
   timeToFirstOutputMs: 1_500,
   contextEndPercent: 74.5,
   stalled: false,
@@ -121,6 +124,8 @@ const unindexedRawSession = {
   cacheWrite1hInputTokens: null,
   turns: null,
   durationMs: null,
+  activeDurationMs: null,
+  machine: null,
   timeToFirstOutputMs: null,
   contextEndPercent: null,
 } satisfies AnalyticsRawSession;
@@ -153,6 +158,8 @@ const analyticsCases: SchemaCase[] = [
   { name: 'rates', schema: analytics.AnalyticsRatesSchema, value: rates },
   { name: 'aggregate result', schema: analytics.AnalyticsAggregateResultSchema, value: aggregateResult },
   { name: 'raw session', schema: analytics.AnalyticsRawSessionSchema, value: rawSession },
+  { name: 'metric', schema: analytics.AnalyticsMetricSchema, value: 'cost_usd' },
+  { name: 'relative range', schema: analytics.AnalyticsRangeSchema, value: { kind: 'relative', seconds: 604_800 } },
   { name: 'index status', schema: analytics.AnalyticsIndexStatusSchema, value: indexStatus },
   { name: 'response', schema: analytics.AnalyticsResponseSchema, value: rawResponse },
 ];
@@ -187,6 +194,10 @@ describe('analytics schemas', () => {
       'day',
       'week',
       'token_data',
+      'runtime',
+      'project',
+      'session',
+      'machine',
     ];
 
     // Act
@@ -418,5 +429,120 @@ describe('analytics schemas', () => {
 
     // Act + Assert
     assertRejects(cases);
+  });
+});
+
+describe('analytics metrics', () => {
+  it('should answer every metric from its measure in the metric unit', () => {
+    // Arrange
+    const result = analytics.AnalyticsAggregateResultSchema.parse({
+      ...aggregateResult,
+      equivalentApiCostUsdMicros: { value: 2_500_000, known: 1, total: 1 },
+      durationMs: { value: 90_000, known: 1, total: 1 },
+      activeDurationMs: { value: 30_000, known: 1, total: 1 },
+      reasoningTokens: { value: null, known: 0, total: 1 },
+    });
+
+    // Act
+    const values = Object.fromEntries(
+      analytics.AnalyticsMetricSchema.options.map(metric => [metric, analytics.analyticsMetricValue(result, metric)]),
+    );
+
+    // Assert
+    should(values.cost_usd).equal(2.5);
+    should(values.duration_wall_seconds).equal(90);
+    should(values.duration_active_seconds).equal(30);
+    should(values.sessions).equal(result.sessions);
+    should(values.tokens_reasoning).be.null();
+    should(values.tokens).equal(result.tokens.value);
+  });
+
+  it('should answer every metric from one raw session row', () => {
+    // Arrange
+    const row = analytics.AnalyticsRawSessionSchema.parse({ ...rawSession, equivalentApiCostUsdMicros: 1_000_000 });
+
+    // Act
+    const values = Object.fromEntries(
+      analytics.AnalyticsMetricSchema.options.map(metric => [metric, analytics.analyticsRawMetricValue(row, metric)]),
+    );
+
+    // Assert
+    should(values.sessions).equal(1);
+    should(values.cost_usd).equal(1);
+    should(values.duration_active_seconds).equal(600);
+    should(analytics.analyticsRawMetricValue({ ...row, activeDurationMs: null }, 'duration_active_seconds')).be.null();
+  });
+
+  it('should default the v2 fields an older daemon does not send', () => {
+    // Arrange
+    const { activeDurationMs: _measure, ...olderAggregate } = aggregateResult;
+    const { activeDurationMs: _active, machine: _machine, ...olderRow } = rawSession;
+
+    // Act
+    const aggregate = analytics.AnalyticsAggregateResultSchema.parse(olderAggregate);
+    const row = analytics.AnalyticsRawSessionSchema.parse(olderRow);
+
+    // Assert
+    should(aggregate.activeDurationMs).deepEqual({ value: null, known: 0, total: 0 });
+    should(row.activeDurationMs).be.null();
+    should(row.machine).be.null();
+  });
+
+  it('should refuse an absolute range that does not end after it starts', () => {
+    // Arrange
+    const instant = '2026-10-01T00:00:00.000Z';
+
+    // Act
+    const empty = analytics.AnalyticsRangeSchema.safeParse({ kind: 'absolute', from: instant, to: instant });
+    const ordered = analytics.AnalyticsRangeSchema.safeParse({
+      kind: 'absolute',
+      from: instant,
+      to: '2026-10-02T00:00:00.000Z',
+    });
+
+    // Assert
+    should(empty.success).be.false();
+    should(ordered.success).be.true();
+  });
+});
+
+describe('the per-turn active time metric', () => {
+  it('should divide summed active time by summed turns, and say nothing it cannot divide', () => {
+    // Arrange
+    const result = analytics.AnalyticsAggregateResultSchema.parse({
+      ...aggregateResult,
+      activeDurationMs: { value: 120_000, known: 2, total: 2 },
+      turns: { value: 8, known: 2, total: 2 },
+    });
+
+    // Act
+    const perTurn = analytics.analyticsMetricValue(result, 'duration_active_seconds_per_turn');
+    const noTurns = analytics.analyticsMetricValue(
+      { ...result, turns: { value: 0, known: 2, total: 2 } },
+      'duration_active_seconds_per_turn',
+    );
+    const partial = analytics.analyticsMetricValue(
+      { ...result, activeDurationMs: { value: null, known: 1, total: 2 } },
+      'duration_active_seconds_per_turn',
+    );
+
+    // Assert
+    should(perTurn).equal(15);
+    should(noTurns).be.null();
+    should(partial).be.null();
+    should(analytics.ANALYTICS_RATIO_METRICS.has('duration_active_seconds_per_turn')).be.true();
+  });
+
+  it('should answer one session row from its own active time and turns', () => {
+    // Arrange
+    const row = analytics.AnalyticsRawSessionSchema.parse({ ...rawSession, activeDurationMs: 90_000, turns: 3 });
+
+    // Act
+    const perTurn = analytics.analyticsRawMetricValue(row, 'duration_active_seconds_per_turn');
+    const unknown = analytics.analyticsRawMetricValue({ ...row, turns: null }, 'duration_active_seconds_per_turn');
+
+    // Assert
+    should(perTurn).equal(30);
+    should(unknown).be.null();
   });
 });

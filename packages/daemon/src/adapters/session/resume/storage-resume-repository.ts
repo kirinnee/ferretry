@@ -59,6 +59,8 @@ export class StorageResumeRepository implements ResumeRepository {
         ...(change.turn === undefined ? {} : { turn: change.turn }),
         ...(change.retryAttempt === undefined ? {} : { retryAttempt: change.retryAttempt }),
         ...(change.reason === undefined ? {} : { reason: change.reason }),
+        // A relaunch's launch fact replaces the old pane's; a transition that launched nothing keeps it.
+        ...(change.launchInstructions === undefined ? {} : { launchInstructions: change.launchInstructions }),
       };
       // CLEARED MEANS ABSENT, NOT `null`, and the difference is not cosmetic. This repository writes
       // the same state document `SessionStateSchema` governs, and that schema declares

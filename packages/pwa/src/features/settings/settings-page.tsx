@@ -41,6 +41,7 @@ import { InstallAppSetting } from '../install/install-app.tsx';
 import type { SecretClientFactory } from '../secrets/secrets-surface.tsx';
 import type { WardenClientFactory } from '../warden/warden-config-card.tsx';
 import type { PairingClientFactory } from './add-device-settings.tsx';
+import { ClearCachedDataSetting } from './clear-cached-data.tsx';
 import { ComposerEnterKeySettings } from './composer-enter-key-settings.tsx';
 import { ComposerSuggestionsSettings } from './composer-suggestions-settings.tsx';
 import { MotionSetting, SessionsListSetting } from './conversation-settings.tsx';
@@ -298,6 +299,8 @@ export interface SettingsPageProps {
   readonly connectionHealth?: ConnectionHealthState | undefined;
   /** How the page commits an in-app navigation; without one it assigns the address. */
   readonly onNavigate?: (to: string) => void;
+  /** Empties this device's cached sessions and messages (This device › Cached data). */
+  readonly onClearCachedData?: () => Promise<void>;
   readonly className?: string;
 }
 
@@ -333,6 +336,7 @@ export function SettingsPage({
   relayAdvertised = false,
   connectionHealth,
   onNavigate,
+  onClearCachedData,
   className,
 }: SettingsPageProps) {
   const record = useSyncExternalStore(
@@ -483,6 +487,9 @@ export function SettingsPage({
       ),
       theme: <ThemeSettings theme={theme} />,
       'install-app': <InstallAppSetting />,
+      'clear-cached-data': (
+        <ClearCachedDataSetting {...(onClearCachedData === undefined ? {} : { onClear: onClearCachedData })} />
+      ),
       'speedup-keys': <SpeedupKeysSettings />,
       dictation: (
         <DictationSettings {...dictation} {...(selectedRecord === undefined ? {} : { daemon: selectedRecord })} />
@@ -506,6 +513,7 @@ export function SettingsPage({
       device,
       dictation,
       notifications,
+      onClearCachedData,
       selectedRecord,
       theme,
     ],

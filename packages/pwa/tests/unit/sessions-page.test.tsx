@@ -644,6 +644,29 @@ describe('SessionsPage', () => {
     });
     expect(reads).toBe(1);
   });
+
+  it('says "Updating…" over the cached rows until the live read answers, then stops', async () => {
+    // Arrange
+    const gate = deferred<readonly SessionView[]>();
+    const fleet = new DaemonFleetStore({ list: () => gate.promise, get: () => Promise.reject(new Error('not used')) });
+    fleet.seed(alpha, sessions('alpha'), now());
+    const page = await mount(<SessionsPage {...pageProps({ fleet })} />);
+    try {
+      // Act
+      const cached = page.container.querySelectorAll('[data-cache-updating]').length;
+      const cachedRows = page.container.textContent;
+      await interact(async () => gate.resolve(sessions('alpha')));
+      await settle();
+
+      // Assert
+      expect(cached).toBe(1);
+      expect(cachedRows).toContain('Alpha-Team');
+      expect(page.container.querySelectorAll('[data-cache-updating]')).toHaveLength(0);
+      expect(page.container.textContent).toContain('Alpha-Team');
+    } finally {
+      await page.unmount();
+    }
+  });
 });
 
 describe('SessionsPage across every machine', () => {

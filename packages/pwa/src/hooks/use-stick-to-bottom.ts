@@ -19,6 +19,7 @@
  */
 
 import { type MutableRefObject, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { type ChatScroll, type ChatScrollSlot, restorableTop } from '../lib/scroll-memory.ts';
 import {
   followPinBlocked,
   gapFromBottom,
@@ -35,7 +36,19 @@ export interface StickToBottomOptions {
   readonly contentKeys: readonly unknown[];
   /** Called whenever follow (re-)engages, so a host can clear its "N new" count. */
   readonly onFollow?: () => void;
+  /**
+   * Where this view's reading position is kept (`lib/scroll-memory.ts`). Read once, when the view
+   * opens: a reader who left it scrolled up comes back to that spot, detached, with "jump to latest"
+   * on offer; one who left it at the latest lands there as before. Written as the reader moves. A
+   * deliberate return (`resetKey` changing after the open, e.g. a send) still lands at the latest.
+   */
+  readonly memory?: ChatScrollSlot;
 }
+
+/** How long a saved position waits for the content to grow tall enough before settling for the nearest. */
+export const READING_RESTORE_PATIENCE_MS = 4_000;
+/** How long the reader's position settles before it is written: a fling is one write, not hundreds. */
+export const READING_WRITE_SETTLE_MS = 150;
 
 export interface StickToBottom {
   readonly viewportRef: MutableRefObject<HTMLDivElement | null>;
@@ -57,11 +70,22 @@ export interface StickToBottom {
 const pinBlockedNow = (element: HTMLElement, pointerHeld: boolean): boolean =>
   followPinBlocked(pointerHeld, globalThis.window?.getSelection() ?? null, node => element.contains(node));
 
-export function useStickToBottom({ resetKey, contentKeys, onFollow }: StickToBottomOptions): StickToBottom {
+export function useStickToBottom({ resetKey, contentKeys, onFollow, memory }: StickToBottomOptions): StickToBottom {
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const contentRef = useRef<HTMLDivElement | null>(null);
-  const following = useRef(true);
-  const [detached, setDetached] = useState(false);
+  /**
+   * The saved reading position, read ONCE at the first render and kept only when it was not at the
+   * latest — so the very first layout pass already knows not to pin over it.
+   */
+  const opening = useRef<ChatScroll | null | undefined>(undefined);
+  if (opening.current === undefined) {
+    const saved = memory?.read() ?? null;
+    opening.current = saved !== null && !saved.atLatest ? saved : null;
+  }
+  /** The reset key the view opened under: only that open restores; every later key is a return. */
+  const openKey = useRef(resetKey);
+  const following = useRef(opening.current === null);
+  const [detached, setDetached] = useState(opening.current !== null);
   /** scrollTop last OBSERVED or SET, so this end's own pins are never read as the reader moving. */
   const lastScrollTop = useRef(0);
   const prevScrollHeight = useRef(0);
@@ -74,6 +98,21 @@ export function useStickToBottom({ resetKey, contentKeys, onFollow }: StickToBot
   const repinTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const onFollowRef = useRef(onFollow);
   onFollowRef.current = onFollow;
+  const memoryRef = useRef(memory);
+  memoryRef.current = memory;
+  /** A saved reading position still waiting for content tall enough to hold it. */
+  const pendingRestore = useRef<number | null>(opening.current?.top ?? null);
+  const writeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  /** Writes where the reader is, once the movement settles. */
+  const record = useCallback((element: HTMLElement) => {
+    if (memoryRef.current === undefined) return;
+    if (writeTimer.current !== null) clearTimeout(writeTimer.current);
+    writeTimer.current = setTimeout(() => {
+      writeTimer.current = null;
+      memoryRef.current?.write({ top: element.scrollTop, atLatest: following.current });
+    }, READING_WRITE_SETTLE_MS);
+  }, []);
 
   const remember = useCallback((element: HTMLElement) => {
     lastScrollTop.current = element.scrollTop;
@@ -90,29 +129,78 @@ export function useStickToBottom({ resetKey, contentKeys, onFollow }: StickToBot
 
   const follow = useCallback(() => {
     following.current = true;
+    pendingRestore.current = null;
     setDetached(false);
     onFollowRef.current?.();
     pin();
-  }, [pin]);
+    const element = viewportRef.current;
+    if (element !== null) record(element);
+  }, [pin, record]);
+
+  /**
+   * Puts a saved reading position back once the content can hold it. `final` takes the nearest offset
+   * instead: the content has had its chance to arrive.
+   */
+  const restore = useCallback(
+    (final: boolean): void => {
+      const element = viewportRef.current;
+      const saved = pendingRestore.current;
+      if (element === null || saved === null) return;
+      const target = restorableTop(saved, element, final);
+      if (target === undefined) return;
+      pendingRestore.current = null;
+      element.scrollTop = target;
+      remember(element);
+      gap.current = gapFromBottom(element);
+    },
+    [remember],
+  );
 
   // ---- OPEN / RETURN: land at the latest and follow ------------------------------------------------
   // Now, then next frame, which covers layout that settles within the same tick; slower layout is the
   // resize observer's job. A stale intent stamp must not survive into the new view's first frames, or
   // its settling layout could be read as the reader scrolling.
+  //
+  // THE OPEN MAY RESTORE INSTEAD. The reset the view opened under puts back the position read at the
+  // first render (now if the content is there, else as it arrives, else the
+  // nearest offset after a patient wait) and the view opens detached. Every later reset is a return.
   // biome-ignore lint/correctness/useExhaustiveDependencies: resetKey is the deliberate trigger
   useEffect(() => {
     intentAt.current = Number.NEGATIVE_INFINITY;
+    const saved = resetKey === openKey.current ? opening.current : null;
+    if (saved !== null && saved !== undefined) {
+      following.current = false;
+      setDetached(true);
+      pendingRestore.current = saved.top;
+      restore(false);
+      const deadline = setTimeout(() => restore(true), READING_RESTORE_PATIENCE_MS);
+      return () => clearTimeout(deadline);
+    }
     follow();
     const frame = globalThis.requestAnimationFrame?.(pin);
     return () => {
       if (frame !== undefined) globalThis.cancelAnimationFrame(frame);
     };
-  }, [resetKey, follow, pin]);
+  }, [resetKey, follow, pin, restore]);
 
   // ---- FOLLOWING: re-pin in the same commit that added content --------------------------------------
+  // A restore still waiting for content tries again in the same commit, before paint.
   useLayoutEffect(() => {
     if (following.current) pin();
-  }, [pin, ...contentKeys]);
+    else restore(false);
+  }, [pin, restore, ...contentKeys]);
+
+  // ---- THE LAST POSITION IS WRITTEN ON THE WAY OUT --------------------------------------------------
+  useEffect(
+    () => () => {
+      if (writeTimer.current === null) return;
+      clearTimeout(writeTimer.current);
+      writeTimer.current = null;
+      // The scroller has already left the document here, so its last OBSERVED offset is what is written.
+      memoryRef.current?.write({ top: lastScrollTop.current, atLatest: following.current });
+    },
+    [],
+  );
 
   // ---- INTENT: the only thing allowed to break follow -----------------------------------------------
   // Every device that scrolls a region announces itself before its scroll lands, and nothing layout
@@ -188,14 +276,17 @@ export function useStickToBottom({ resetKey, contentKeys, onFollow }: StickToBot
     if (element === null || typeof ResizeObserver === 'undefined') return;
     const observer = new ResizeObserver(() => {
       if (following.current) pin();
-      else gap.current = gapFromBottom(element);
+      else {
+        restore(false);
+        gap.current = gapFromBottom(element);
+      }
       prevScrollHeight.current = element.scrollHeight;
       prevClientHeight.current = element.clientHeight;
     });
     observer.observe(element);
     if (contentRef.current !== null) observer.observe(contentRef.current);
     return () => observer.disconnect();
-  }, [pin]);
+  }, [pin, restore]);
 
   const onScroll = useCallback((): void => {
     const element = viewportRef.current;
@@ -221,7 +312,8 @@ export function useStickToBottom({ resetKey, contentKeys, onFollow }: StickToBot
     }
     remember(element);
     gap.current = gapFromBottom(element);
-  }, [follow, remember]);
+    record(element);
+  }, [follow, record, remember]);
 
   const scrollTo = useCallback((top: number): void => {
     const element = viewportRef.current;

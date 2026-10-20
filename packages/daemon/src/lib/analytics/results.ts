@@ -1,29 +1,32 @@
-import type {
-  AnalyticsAggregateResult,
-  AnalyticsIndexStatus,
-  AnalyticsLabel,
-  AnalyticsMeasure,
-  AnalyticsRawSession,
-  AnalyticsResponse,
-  ParsedAnalyticsQuery,
+import {
+  type AnalyticsAggregateResult,
+  type AnalyticsIndexStatus,
+  type AnalyticsLabel,
+  type AnalyticsMeasure,
+  type AnalyticsMeasureKey,
+  type AnalyticsRawSession,
+  type AnalyticsResponse,
+  analyticsGroupSortKey,
+  compareAnalyticsRawSessions,
+  type ParsedAnalyticsQuery,
 } from '@ferretry/protocol';
 import { parseAnalyticsQuery } from './query.ts';
 
 export interface AnalyticsQueryRecordsOptions {
   readonly index: AnalyticsIndexStatus;
+  /**
+   * The instant the daemon answers at, which a RELATIVE range (`[7d]`) ends at. Required only by such a
+   * query: one without it is refused rather than measured against a clock this function does not own.
+   */
+  readonly now?: string;
+  /** This daemon's machine name, stamped on every row so a fleet view can tell machines apart. */
+  readonly machine?: string | null;
   readonly rawLimit?: number;
   readonly groupLimit?: number;
 }
 
 const DEFAULT_RAW_LIMIT = 100;
 const DEFAULT_GROUP_LIMIT = 100;
-
-/** Every field of an aggregate result that is a measure, so the table below cannot miss one. */
-type AnalyticsMeasureKey = {
-  [K in keyof AnalyticsAggregateResult]-?: NonNullable<AnalyticsAggregateResult[K]> extends AnalyticsMeasure
-    ? K
-    : never;
-}[keyof AnalyticsAggregateResult];
 
 /**
  * Which stored column answers each measure.
@@ -45,6 +48,7 @@ const metrics = {
   equivalentApiCostUsdMicros: 'equivalentApiCostUsdMicros',
   turns: 'turns',
   durationMs: 'durationMs',
+  activeDurationMs: 'activeDurationMs',
   timeToFirstOutputMs: 'timeToFirstOutputMs',
   contextEndPercent: 'contextEndPercent',
 } as const satisfies { readonly [K in AnalyticsMeasureKey]: keyof AnalyticsRawSession };
@@ -69,6 +73,10 @@ function labelValues(record: AnalyticsRawSession): LabelValues {
     day: record.day,
     week: record.week,
     token_data: record.tokens === null ? 'unknown' : 'known',
+    runtime: record.agent,
+    project: record.cwd,
+    session: record.id,
+    machine: record.machine,
   };
 }
 
@@ -111,10 +119,6 @@ function measure(
   return { value, known: known.length, total: values.length };
 }
 
-function labelSortKey(labels: Record<string, string | null>, groupBy: readonly AnalyticsLabel[]): string {
-  return groupBy.map(label => `${labels[label] === null ? '1' : '0'}${labels[label] ?? ''}`).join('\u0000');
-}
-
 function aggregate(
   records: readonly AnalyticsRawSession[],
   parsed: ParsedAnalyticsQuery,
@@ -130,7 +134,9 @@ function aggregate(
     else group.rows.push(record);
   }
   const groups = [...grouped.values()].sort((left, right) =>
-    labelSortKey(left.labels, parsed.groupBy).localeCompare(labelSortKey(right.labels, parsed.groupBy)),
+    analyticsGroupSortKey(left.labels, parsed.groupBy).localeCompare(
+      analyticsGroupSortKey(right.labels, parsed.groupBy),
+    ),
   );
   if (groups.length > groupLimit)
     throw new Error(`analytics query produces more than ${groupLimit} groups; add a matcher`);
@@ -160,6 +166,19 @@ function aggregate(
   });
 }
 
+/**
+ * The half-open window a range selects, in epoch milliseconds, or `undefined` when it selects everything.
+ * A relative range ends when the daemon answers; an absolute one is exactly what it names.
+ */
+function rangeWindow(parsed: ParsedAnalyticsQuery, now: string | undefined): { from: number; to: number } | undefined {
+  const { range } = parsed;
+  if (range === undefined) return undefined;
+  if (range.kind === 'absolute') return { from: Date.parse(range.from), to: Date.parse(range.to) };
+  const end = now === undefined ? Number.NaN : Date.parse(now);
+  if (!Number.isFinite(end)) throw new Error('a relative analytics range needs the instant the daemon answers at');
+  return { from: end - range.seconds * 1_000, to: end };
+}
+
 /** Query already-derived records without coupling analytics decisions to a store implementation. */
 export function queryAnalyticsRecords(
   records: readonly AnalyticsRawSession[],
@@ -167,19 +186,39 @@ export function queryAnalyticsRecords(
   options: AnalyticsQueryRecordsOptions,
 ): AnalyticsResponse {
   const parsed = parseAnalyticsQuery(source);
-  const matched = records.filter(record => matches(record, parsed));
+  const window = rangeWindow(parsed, options.now);
+  const stamped =
+    options.machine === undefined ? records : records.map(record => ({ ...record, machine: options.machine ?? null }));
+  const matched = stamped.filter(record => {
+    if (window !== undefined) {
+      // A session with no creation instant has no place in any window, so a range never counts it.
+      const created = record.createdAt === null ? Number.NaN : Date.parse(record.createdAt);
+      if (!(created >= window.from && created < window.to)) return false;
+    }
+    return matches(record, parsed);
+  });
   const responseBase = {
     query: parsed.canonical,
-    parsed: { aggregation: parsed.aggregation, groupBy: parsed.groupBy, matchers: parsed.matchers },
-    scope: { allSessions: true as const, indexed: options.index.sessions, matched: matched.length },
+    parsed: {
+      aggregation: parsed.aggregation,
+      ...(parsed.metric === undefined ? {} : { metric: parsed.metric }),
+      groupBy: parsed.groupBy,
+      matchers: parsed.matchers,
+      ...(parsed.range === undefined ? {} : { range: parsed.range }),
+    },
+    scope: {
+      allSessions: true as const,
+      indexed: options.index.sessions,
+      matched: matched.length,
+      ...(window === undefined
+        ? {}
+        : { window: { from: new Date(window.from).toISOString(), to: new Date(window.to).toISOString() } }),
+    },
     index: options.index,
   };
   if (parsed.aggregation === undefined) {
     const limit = options.rawLimit ?? DEFAULT_RAW_LIMIT;
-    const ordered = [...matched].sort(
-      (left, right) =>
-        Date.parse(right.createdAt ?? '') - Date.parse(left.createdAt ?? '') || left.id.localeCompare(right.id),
-    );
+    const ordered = [...matched].sort(compareAnalyticsRawSessions(parsed.metric));
     return {
       ...responseBase,
       kind: 'raw',

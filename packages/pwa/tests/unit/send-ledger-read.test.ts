@@ -7,6 +7,7 @@ import {
   type LedgerSendRecord,
   ledgerFeed,
   markLedgerUnread,
+  parseLedgerSendsResponse,
   readLedgerSends,
 } from '../../src/lib/send-ledger.ts';
 
@@ -96,7 +97,7 @@ describe('reading a session ledger', () => {
       () => 'parsed',
       () => 'rejected',
     );
-    const rows = await readLedgerSends(client, 'fy_s_one');
+    const rows = parseLedgerSendsResponse(await readLedgerSends(client, 'fy_s_one'));
 
     // Assert
     expect(strict).toBe('rejected');
@@ -129,8 +130,8 @@ describe('reading a session ledger', () => {
     // Act
     const rows = await readLedgerSends(api, 'fy s/1');
 
-    // Assert
-    expect(rows.map(row => row.sendId)).toEqual(['a']);
+    // Assert — unparsed, so the session cache keeps exactly what the daemon sent.
+    expect(rows).toEqual([{ sendId: 'a', acceptedAt: at(0) }]);
     expect(calls[0]?.[0]).toBe('/v1/sessions/fy%20s%2F1/sends');
     expect(calls[0]?.[3]).toBe(LEDGER_READ_TIMEOUT_MS);
   });
