@@ -202,7 +202,7 @@ export const enhancementErrorFrom = (failure: unknown): DictationError => {
 
 /** Said when neither this device nor the daemon holds a key for the chosen provider. */
 export const noCleanupKeyMessage = (provider: string): string =>
-  `No ${provider} key, so your words were kept as you said them: add a ${provider} key in ${DEVICE_KEYS_PLACE}.`;
+  `Neither this device nor this machine has a ${provider} key: add a ${provider} key in ${DEVICE_KEYS_PLACE}.`;
 
 export interface UseDictationOptions {
   /** Used only by optional context/Groq enhancement. Audio never reaches it. */

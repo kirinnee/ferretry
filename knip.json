@@ -33,6 +33,7 @@
         "harness/screenshot.ts",
         "harness/secret-copy-screenshot.tsx",
         "harness/cleanup-kept-screenshot.tsx",
+        "harness/device-cleanup-screenshot.tsx",
         "harness/connection-status-screenshot.tsx",
         "harness/release-notice-screenshot.tsx",
         "harness/relaunch-settings-screenshot.tsx",
