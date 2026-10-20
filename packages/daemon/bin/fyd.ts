@@ -4264,7 +4264,7 @@ function createSessionMigrateSubsystem(parts: SessionMigrateParts): SessionMigra
         // Neither an expected status nor the dedupe heuristic: an operator asked for THIS session by
         // id, and the preflight above is the guard a migration has.
         policy: { automatic: false, dedupeSharedRecoveryScope: false, replaceLiveTerminal: true },
-        message: parts.preflight.handoff(report, reportPath),
+        message: parts.preflight.handoff(report, reportPath, config.mode),
       })
       .catch(async (error: unknown) => {
         await settle(false, error instanceof Error ? error.message : String(error));

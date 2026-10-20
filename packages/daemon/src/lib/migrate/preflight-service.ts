@@ -107,7 +107,7 @@ export class MigrationPreflight {
   }
 
   /** What the restarted agent is told, or nothing: see {@link restartNotice}. */
-  handoff(report: InflightReport, reportPath: string): string | undefined {
-    return restartNotice(report, reportPath);
+  handoff(report: InflightReport, reportPath: string, mode: 'auto' | 'interactive'): string | undefined {
+    return restartNotice(report, reportPath, mode);
   }
 }

@@ -40,7 +40,7 @@ describe('restartNotice', () => {
     });
 
     // Act + Assert
-    should(restartNotice(idle, REPORT)).be.undefined();
+    should(restartNotice(idle, REPORT, 'interactive')).be.undefined();
   });
 
   it('should say nothing when the session was busy but everything it ran is known safe', () => {
@@ -51,7 +51,22 @@ describe('restartNotice', () => {
     });
 
     // Act + Assert
-    should(restartNotice(safe, REPORT)).be.undefined();
+    should(restartNotice(safe, REPORT, 'interactive')).be.undefined();
+  });
+
+  it('should still tell an auto session, whose resume would otherwise type "continue the assigned task"', () => {
+    // Arrange
+    const idle = report({ status: 'waiting' });
+
+    // Act
+    const notice = parseFerretryNotice(restartNotice(idle, REPORT, 'auto') ?? '');
+
+    // Assert
+    should(notice).startWith('Restarted — nothing was interrupted.\n\n');
+    should(notice).containEql('not from the owner');
+    should(
+      parseFerretryNotice(restartNotice(report({ openTools: [tool('unknown')] }), REPORT, 'auto') ?? ''),
+    ).startWith('Restarted mid-turn');
   });
 
   it('should send a Ferretry notice naming the one interrupted command', () => {
@@ -62,7 +77,7 @@ describe('restartNotice', () => {
     });
 
     // Act
-    const notice = parseFerretryNotice(restartNotice(busy, REPORT) ?? '');
+    const notice = parseFerretryNotice(restartNotice(busy, REPORT, 'interactive') ?? '');
 
     // Assert
     should(notice).startWith('Restarted mid-turn — 1 command was interrupted.\n\n');
@@ -80,7 +95,7 @@ describe('restartNotice', () => {
 
     // Act + Assert
     should(interruptedCount(busy)).equal(3);
-    should(parseFerretryNotice(restartNotice(busy, REPORT) ?? '')).startWith(
+    should(parseFerretryNotice(restartNotice(busy, REPORT, 'interactive') ?? '')).startWith(
       'Restarted mid-turn — 3 commands were interrupted.',
     );
   });
@@ -93,7 +108,7 @@ describe('restartNotice', () => {
 
     // Act + Assert
     should(interruptedCount(blind)).equal(0);
-    should(parseFerretryNotice(restartNotice(blind, REPORT) ?? '')).startWith(
+    should(parseFerretryNotice(restartNotice(blind, REPORT, 'interactive') ?? '')).startWith(
       'Restarted mid-turn — what was running could not be checked.',
     );
   });

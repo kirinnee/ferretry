@@ -12,6 +12,14 @@ export function interruptedCount(report: InflightReport): number {
   return Math.max(tools, processes) + report.codexBackgroundTerminals;
 }
 
+function quietNotice(): string {
+  return ferretryNotice(
+    'Restarted — nothing was interrupted.\n\n' +
+      'This notice is from Ferretry, not from the owner. Your conversation was resumed as it was; ' +
+      'there is nothing to re-run.',
+  );
+}
+
 function headline(interrupted: number): string {
   if (interrupted === 0) return 'Restarted mid-turn — what was running could not be checked.';
   return `Restarted mid-turn — ${interrupted} ${interrupted === 1 ? 'command was' : 'commands were'} interrupted.`;
@@ -25,11 +33,19 @@ function headline(interrupted: number): string {
  * known safe to lose — a blind spot counts, because "could not look" is not "nothing there". It is
  * a Ferretry notice, so the transcript draws it as a system row and the agent reads that it did not
  * come from the owner.
+ *
+ * AN AUTO SESSION IS THE ONE EXCEPTION to "send nothing": a resume with no message makes the resume
+ * domain type its default "continue the assigned task" prompt, which would restart work an idle
+ * session had finished. It is sent a one-line notice that nothing was interrupted instead.
  */
-export function restartNotice(report: InflightReport, reportPath: string): string | undefined {
-  if (!isBusyStatus(report.status)) return undefined;
+export function restartNotice(
+  report: InflightReport,
+  reportPath: string,
+  mode: 'auto' | 'interactive',
+): string | undefined {
   const interrupted = interruptedCount(report);
-  if (interrupted === 0 && report.blindSpots.length === 0) return undefined;
+  if (!isBusyStatus(report.status) || (interrupted === 0 && report.blindSpots.length === 0))
+    return mode === 'auto' ? quietNotice() : undefined;
   return ferretryNotice(
     `${headline(interrupted)}\n\n` +
       `This notice is from Ferretry, not from the owner. Before re-running anything, read ${reportPath}: ` +
