@@ -133,7 +133,7 @@
   width: 16px;
   height: 16px;
   border: var(--stroke) solid var(--border-strong);
-  border-radius: 9999px;
+  border-radius: var(--radius-dot);
   background: transparent;
   color: var(--muted);
   font-size: 10px;
@@ -237,13 +237,13 @@
   flex: 1;
   height: 8px;
   overflow: hidden;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   background: var(--surface-3, var(--surface-2));
 }
 .fy-info-meter > span {
   display: block;
   height: 100%;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   background: var(--accent);
 }
 .fy-info-meter[data-high] > span {

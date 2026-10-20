@@ -244,7 +244,7 @@ export function LessonRow({
             <ul className="m-0 flex list-none flex-col gap-1.5 p-0">
               {proposal.evidence.map(evidence => (
                 <li key={evidence.observationId}>
-                  <blockquote className="m-0 border-l-2 border-accent-border pl-3">
+                  <blockquote className="m-0 border-l-heavy border-accent-border pl-3">
                     <p className="m-0 break-words text-ui text-fg-soft">“{evidence.quote}”</p>
                     <footer className="flex flex-wrap items-center gap-x-1.5 text-meta text-faint">
                       <RouteLink

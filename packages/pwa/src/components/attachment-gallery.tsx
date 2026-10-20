@@ -389,7 +389,7 @@ const AttachmentThumbnail = ({ daemon, image }: AttachmentThumbnailProps) => {
           tabIndex={-1}
           aria-modal="true"
           onKeyDown={dialogFocus.onKeyDown}
-          className="fixed inset-0 z-50 m-auto max-h-[96dvh] max-w-[96vw] overflow-auto rounded-panel border border-border bg-surface p-2 text-fg shadow-2xl backdrop:bg-black/70"
+          className="fixed inset-0 z-50 m-auto max-h-[96dvh] max-w-[96vw] overflow-auto rounded-panel border border-border bg-surface p-2 text-fg shadow-popover backdrop:bg-scrim"
           aria-label={`Expanded image: ${alt}`}
           onCancel={event => {
             event.preventDefault();
