@@ -76,6 +76,8 @@ export interface SessionTopBarProps {
   readonly onOpenSessions?: () => void;
   /** The ferret that started this one, as a link to it. Absent for a ferret a person started. */
   readonly startedBy?: { readonly name: string; readonly onOpen: () => void };
+  /** The sub-ferrets this ferret started, as the compact indicator that lists them (`sub-ferrets.tsx`). */
+  readonly subFerrets?: ReactNode;
 }
 
 export function SessionTopBar({
@@ -90,6 +92,7 @@ export function SessionTopBar({
   menu,
   onOpenSessions,
   startedBy,
+  subFerrets,
 }: SessionTopBarProps) {
   const name = sessionDisplayName(session);
   const task = session.config.label ?? session.config.name;
@@ -133,6 +136,7 @@ export function SessionTopBar({
             Started by {startedBy.name}
           </button>
         )}
+        {subFerrets}
         <span
           className="fy-session-bar__status"
           data-session-activity={turn ?? undefined}

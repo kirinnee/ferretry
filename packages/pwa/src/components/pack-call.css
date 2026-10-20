@@ -1,0 +1,336 @@
+/* PACK MODE IN THE PARENT'S VIEW (docs/pack-mode.md): the chat cards a ferret's `new`, `wait` and
+   `recommend` become (`pack-call.tsx`), and the sub-ferret rows the session bar's indicator and Info list
+   (`sub-ferrets.tsx`). Every colour is a theme token, so light and dark come from the theme. */
+
+/* A SUB-FERRET START: the assistant's side, in a card of its own like "Sent to", with the accent edge a
+   peer message wears — a ferret was made, which is more than a shell command ran. */
+.fy-message-pack {
+  background: var(--fy-surface);
+  border: 1px solid var(--fy-border);
+  border-left: 3px solid var(--fy-accent);
+  border-radius: 12px 12px 12px 3px;
+  margin-right: auto;
+  max-width: min(85%, 640px);
+  min-width: 0;
+  padding: 8px 12px 8px;
+}
+.fy-message-pack[data-pack-state='refused'],
+.fy-message-pack[data-pack-state='failed'] {
+  border-left-color: var(--err, #b42318);
+}
+.fy-message-pack[data-pack-kind='recommend'],
+.fy-message-pack[data-pack-kind='wait'] {
+  border-left-color: var(--fy-border);
+  border-style: dashed;
+  border-left-style: solid;
+}
+.fy-message-pack header {
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 8px;
+  justify-content: flex-start;
+}
+.fy-pack-line {
+  margin: 4px 0 0;
+  overflow-wrap: anywhere;
+}
+.fy-pack-mono {
+  font-family: var(--font-mono, monospace);
+  font-size: 12px;
+}
+.fy-pack-muted {
+  color: var(--fy-muted);
+  font-size: 12px;
+}
+.fy-pack-error {
+  color: var(--err, #b42318);
+  font-size: 13.5px;
+  font-weight: 600;
+}
+.fy-pack-code {
+  background: var(--err-bg, var(--fy-surface-2));
+  border: 1px solid var(--err-border, var(--fy-border));
+  border-radius: 999px;
+  color: var(--err, var(--fy-fg));
+  font-size: 11px;
+  padding: 0 8px;
+}
+.fy-pack-retried {
+  color: var(--fy-accent);
+  font-size: 12px;
+}
+.fy-pack-task {
+  font-size: 13.5px;
+  font-style: italic;
+}
+.fy-pack-section-title {
+  color: var(--fy-muted);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  margin: 8px 0 0;
+}
+.fy-pack-attempts,
+.fy-pack-options {
+  display: grid;
+  gap: 4px;
+  margin: 4px 0 0;
+  padding-left: 20px;
+}
+.fy-pack-attempts li,
+.fy-pack-options li {
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.fy-pack-attempt-outcome {
+  color: var(--fy-muted);
+}
+li[data-pack-attempt='started'] .fy-pack-attempt-outcome {
+  color: var(--ok, var(--fy-accent));
+  font-weight: 600;
+}
+li[data-pack-attempt='refused'] .fy-pack-attempt-outcome {
+  color: var(--err, #b42318);
+  font-weight: 600;
+}
+.fy-pack-refusal {
+  color: var(--fy-muted);
+  display: block;
+}
+.fy-pack-option-head {
+  align-items: baseline;
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.fy-pack-ready,
+.fy-pack-cannot {
+  border: 1px solid var(--fy-border);
+  border-radius: 999px;
+  font-size: 10.5px;
+  padding: 0 6px;
+}
+.fy-pack-ready {
+  background: var(--ok-bg, var(--fy-surface-2));
+  border-color: var(--ok-border, var(--fy-border));
+  color: var(--ok, var(--fy-fg));
+}
+.fy-pack-cannot {
+  color: var(--fy-muted);
+}
+.fy-pack-option-why {
+  color: var(--fy-muted);
+  display: block;
+}
+.fy-pack-fold {
+  margin-top: 6px;
+}
+.fy-pack-fold summary {
+  align-items: baseline;
+  cursor: pointer;
+  display: flex;
+  gap: 8px;
+  min-width: 0;
+}
+.fy-pack-fold-label {
+  color: var(--fy-muted);
+  flex: 0 0 auto;
+  font-size: 11.5px;
+  font-weight: 600;
+}
+.fy-pack-fold-preview {
+  color: var(--fy-muted);
+  flex: 1 1 auto;
+  font-size: 12px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fy-pack-fold[open] .fy-pack-fold-preview {
+  display: none;
+}
+.fy-pack-fold-body {
+  border-left: 2px solid var(--fy-border);
+  margin-top: 4px;
+  padding-left: 10px;
+}
+.fy-pack-result {
+  border-top: 1px solid var(--fy-border);
+  margin-top: 8px;
+  padding-top: 4px;
+}
+.fy-pack-result[data-pack-collected='done'] .fy-pack-section-title {
+  color: var(--ok, var(--fy-accent));
+}
+.fy-pack-result-body {
+  margin-top: 4px;
+}
+
+/* HOW A SUB-FERRET IS DOING: a dot and a word, the dot's colour the state's. */
+.fy-sub-ferret-state {
+  align-items: baseline;
+  color: var(--fy-muted, var(--muted));
+  display: inline-flex;
+  flex-wrap: wrap;
+  font-size: 12px;
+  gap: 0 5px;
+  min-width: 0;
+}
+.fy-sub-ferret-dot {
+  align-self: center;
+  background: var(--fy-muted, var(--muted));
+  border-radius: 50%;
+  flex: 0 0 auto;
+  height: 7px;
+  width: 7px;
+}
+[data-sub-ferret-state='working'] .fy-sub-ferret-dot,
+[data-sub-ferret-state='starting'] .fy-sub-ferret-dot {
+  background: var(--accent);
+}
+[data-sub-ferret-state='needs-you'] .fy-sub-ferret-dot {
+  background: var(--warn);
+}
+[data-sub-ferret-state='needs-you'] {
+  color: var(--warn);
+  font-weight: 600;
+}
+[data-sub-ferret-state='done'] .fy-sub-ferret-dot {
+  background: var(--ok);
+}
+[data-sub-ferret-state='failed'] .fy-sub-ferret-dot {
+  background: var(--err);
+}
+[data-sub-ferret-state='failed'] {
+  color: var(--err);
+}
+.fy-sub-ferret-reason {
+  font-weight: 400;
+  overflow-wrap: anywhere;
+}
+
+.fy-sub-ferret-list {
+  display: grid;
+  gap: 6px;
+  list-style: none;
+  margin: 0;
+  min-width: 0;
+  padding: 0;
+}
+.fy-sub-ferret-row {
+  align-items: baseline;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 8px;
+  min-width: 0;
+}
+.fy-sub-ferret-name {
+  color: var(--fg);
+  font-weight: 600;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.fy-sub-ferret-link {
+  background: transparent;
+  border: 0;
+  color: var(--accent);
+  cursor: pointer;
+  font: inherit;
+  font-weight: 600;
+  padding: 0;
+  text-align: left;
+}
+.fy-sub-ferret-link:hover,
+.fy-sub-ferret-link:focus-visible {
+  text-decoration: underline;
+}
+.fy-sub-ferret-model {
+  color: var(--muted);
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+}
+
+/* THE SESSION BAR'S INDICATOR: a quiet chip that opens the list under it. */
+.fy-sub-ferret-indicator {
+  align-self: center;
+  flex: 0 0 auto;
+  position: relative;
+}
+.fy-sub-ferret-toggle {
+  align-items: center;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--muted);
+  cursor: pointer;
+  display: inline-flex;
+  font-size: var(--text-sm, 12px);
+  gap: 4px;
+  padding: 1px 8px;
+  white-space: nowrap;
+}
+.fy-sub-ferret-toggle:hover,
+.fy-sub-ferret-toggle[aria-expanded='true'] {
+  border-color: var(--border-strong, var(--border));
+  color: var(--fg);
+}
+.fy-sub-ferret-popover {
+  background: var(--surface);
+  border: 1px solid var(--border-strong, var(--border));
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgb(0 0 0 / 18%);
+  left: 0;
+  max-height: min(60vh, 420px);
+  max-width: calc(100vw - 32px);
+  overflow: auto;
+  padding: 10px 12px;
+  position: absolute;
+  top: calc(100% + 6px);
+  width: 320px;
+  z-index: 40;
+}
+.fy-sub-ferret-popover-title {
+  color: var(--muted);
+  font-size: 11.5px;
+  font-weight: 600;
+  margin: 0 0 8px;
+}
+
+/* On a phone the list spans the bar, 16px in from each edge, instead of hanging off the chip (which sits
+   wherever the name ends, so a chip-anchored list ran off the left of a 390px screen). */
+.fy-session-bar[data-compact] {
+  position: relative;
+}
+[data-compact] .fy-sub-ferret-indicator {
+  position: static;
+}
+[data-compact] .fy-sub-ferret-popover {
+  left: 16px;
+  right: 16px;
+  top: calc(100% - 4px);
+  width: auto;
+}
+
+/* The small controls keep their size on a touch screen and get an invisible, centred 44px hit area, as
+   the transcript's and Info's do. */
+@media (pointer: coarse) {
+  :root button.fy-sub-ferret-toggle,
+  :root button.fy-sub-ferret-link,
+  :root .fy-pack-fold summary {
+    min-height: 0;
+    min-width: 0;
+    position: relative;
+  }
+  :root button.fy-sub-ferret-toggle::after,
+  :root button.fy-sub-ferret-link::after,
+  :root .fy-pack-fold summary::after {
+    content: '';
+    height: var(--target-floor);
+    left: 50%;
+    position: absolute;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    width: max(100%, var(--target-floor));
+  }
+}

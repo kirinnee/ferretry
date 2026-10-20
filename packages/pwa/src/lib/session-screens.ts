@@ -1,7 +1,8 @@
 import type { HandoffPointer, SessionStatus } from '@ferretry/protocol';
 import type { LedgerBlockPlacement } from './ledger-placement.ts';
-import type { PeerFrom } from './peer-message.ts';
+import type { PackCall } from './pack-calls.ts';
 import type { SentMessage } from './peer-delivery.ts';
+import type { PeerFrom } from './peer-message.ts';
 import type { LedgerSendRecord } from './send-ledger.ts';
 import type { SlashCommand } from './slash-commands.ts';
 import type { ToolResultData, ToolUseData } from './tool-extract.ts';
@@ -51,6 +52,9 @@ export interface TranscriptEntry {
   readonly handoff?: HandoffPointer;
   /** The message a ferret SENT, when this row is the `send` it ran rather than an ordinary tool group. */
   readonly sent?: SentMessage;
+  /** The Pack command (`new`, `wait`, `recommend`) a ferret ran, when this row is that rather than an ordinary
+   *  tool group (`pack-calls.ts`). */
+  readonly pack?: PackCall;
   /** A failure the reader must see. A notice without it is daemon bookkeeping and is never shown. */
   readonly alert?: boolean;
 }

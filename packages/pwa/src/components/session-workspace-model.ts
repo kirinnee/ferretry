@@ -1,10 +1,10 @@
 import type { IFyApiClient, SendRecord, SessionView } from '@ferretry/protocol';
-
+import { projectPackCalls } from '../lib/pack-calls.ts';
+import { projectDeliveries } from '../lib/peer-delivery.ts';
 import type { TranscriptEntry } from '../lib/session-screens.ts';
 import { parseSlashCommandText, type SlashCommand, withCommandOutput } from '../lib/slash-commands.ts';
-import { projectDeliveries } from '../lib/peer-delivery.ts';
-import { readUserMessage } from '../lib/user-message.ts';
 import type { ToolResultData, ToolUseData } from '../lib/tool-extract.ts';
+import { readUserMessage } from '../lib/user-message.ts';
 import { fieldHash } from './session-chat-model.ts';
 
 const LOG_HEADER = /^(?:\[(\d{2}:\d{2}:\d{2})\] )?(user|assistant|developer|system|tool)\/([a-z-]+):(?: (.*))?$/u;
@@ -267,7 +267,7 @@ export const transcriptEntriesFromLog = (
   }
   flush();
 
-  return projectDeliveries(projectRecords(records, now), clientName);
+  return projectPackCalls(projectDeliveries(projectRecords(records, now), clientName), clientName);
 };
 
 type SessionWorkspaceReadApi = Pick<IFyApiClient, 'get' | 'logs'> & {
