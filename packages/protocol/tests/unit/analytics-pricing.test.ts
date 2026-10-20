@@ -6,6 +6,7 @@ import {
   ANALYTICS_PRICING_RATE_SLOTS,
   ANALYTICS_PRICING_RATE_UNITS,
   ANALYTICS_PRICING_TOKEN_SLOTS,
+  AnalyticsPricingCatalogIdSchema,
   AnalyticsPricingCatalogSchema,
   AnalyticsPricingCurrencySchema,
   AnalyticsPricingFeedEntrySchema,
@@ -65,6 +66,15 @@ const syncedRate = {
   lastSyncedAt: LATER,
 } as const;
 
+const catalogRate = {
+  ...manualRate,
+  pricingKey: 'model-catalog:deepseek:deepseek-flash',
+  modelId: 'deepseek-flash',
+  aliases: [],
+  provider: 'deepseek',
+  source: { kind: 'model_catalog', catalog: 'deepseek', sourceUrl: 'https://api-docs.deepseek.com/quick_start/pricing' },
+} as const;
+
 /** The spelling an operator already has on disk: per-million rates, and instants `Date.parse` took. */
 const legacyRate = {
   pricingKey: 'operator:model-b:2026-07',
@@ -108,6 +118,7 @@ const cases: readonly SchemaCase[] = [
   { name: 'rates', schema: AnalyticsPricingRatesSchema, value: rates },
   { name: 'source url', schema: AnalyticsPricingSourceUrlSchema, value: FEED_URL },
   { name: 'manual source', schema: AnalyticsPricingSourceSchema, value: { kind: 'manual' } },
+  { name: 'catalog id', schema: AnalyticsPricingCatalogIdSchema, value: 'amazon-bedrock' },
   { name: 'rate', schema: AnalyticsPricingRateSchema, value: manualRate },
   { name: 'catalog', schema: AnalyticsPricingCatalogSchema, value: [manualRate, syncedRate] },
   { name: 'configured source', schema: ConfiguredAnalyticsPricingSourceSchema, value: configuredSource },
@@ -228,6 +239,36 @@ describe('analytics pricing contract', () => {
     should(manual.lastSyncedAt).be.null();
     should(mismatched.success).be.false();
     should(manualButSynced.success).be.false();
+  });
+
+  it('should record a model catalog price as its own provenance, never synced and never an operator row', () => {
+    // Act
+    const read = AnalyticsPricingRateSchema.parse(catalogRate);
+    const synced = AnalyticsPricingRateSchema.safeParse({ ...catalogRate, lastSyncedAt: INSTANT });
+    const unnamed = AnalyticsPricingSourceSchema.safeParse({ kind: 'model_catalog', sourceUrl: FEED_URL });
+    const inOperatorCatalog = AnalyticsPricingCatalogSchema.safeParse([manualRate, catalogRate]);
+
+    // Assert
+    should(read.source).deepEqual(catalogRate.source);
+    should(read.provider).equal('deepseek');
+    should(synced.success).be.false();
+    should(synced.error?.issues.map(issue => issue.path)).containDeep([['lastSyncedAt']]);
+    should(unnamed.success).be.false();
+    should(inOperatorCatalog.success).be.false();
+    should(inOperatorCatalog.error?.issues.map(issue => issue.path)).containDeep([[1, 'source', 'kind']]);
+  });
+
+  it('should name every maker the fleet catalogs price, so none is filed under another', () => {
+    // Act + Assert
+    should(AnalyticsPricingProviderSchema.options).deepEqual([
+      'openai',
+      'anthropic',
+      'deepseek',
+      'moonshot',
+      'zai',
+      'minimax',
+      'alibaba',
+    ]);
   });
 
   it('should refuse a synced rate that will not say when it was synced', () => {

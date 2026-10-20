@@ -28,9 +28,27 @@ export const AnalyticsPricingFingerprintSchema = NonEmptyStringSchema.max(128);
 /** An opaque handle naming one previously computed preview. */
 export const AnalyticsPricingPreviewIdSchema = NonEmptyStringSchema.max(128);
 
+/**
+ * A rate the daemon derived from a price in the model catalog in effect — never one a person typed or
+ * a feed supplied, and never one a write can name.
+ */
+export const ModelCatalogAnalyticsPricingRateSchema = AnalyticsPricingRateSchema.refine(
+  rate => rate.source.kind === 'model_catalog',
+  { path: ['source', 'kind'], error: 'a derived rate names the model catalog it was read from' },
+);
+export type ModelCatalogAnalyticsPricingRate = z.infer<typeof ModelCatalogAnalyticsPricingRateSchema>;
+
 /** Everything the pricing surface renders: the catalog, the feeds it may sync from, and their identities. */
 export const AnalyticsPricingViewSchema = z.strictObject({
   catalog: AnalyticsPricingCatalogSchema,
+  /**
+   * The rates the model catalogs price (docs/model-catalog.md § Prices), each for a model the
+   * operator's `catalog` does not price — an operator row WINS for its whole model, so a row here is
+   * exactly what analytics charges a session at when nobody configured a price. Read-only: no patch
+   * or apply addresses them, and they are outside `catalogFingerprint`, which guards operator edits.
+   * Absent from a daemon older than the field, which priced nothing from a catalog.
+   */
+  modelCatalogRates: z.array(ModelCatalogAnalyticsPricingRateSchema).max(512).readonly().optional(),
   catalogFingerprint: AnalyticsPricingFingerprintSchema,
   sources: ConfiguredAnalyticsPricingSourcesSchema,
   sourcesFingerprint: AnalyticsPricingFingerprintSchema,
