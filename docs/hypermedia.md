@@ -53,7 +53,7 @@ in every turn's context, so it is kept short; change it there and here together.
 Hypermedia: when an idea is not straightforward — a flow, an architecture, a state machine, a comparison, a layout, a change over time — show it in your chat reply as well as saying it. Do not overdo it: a simple answer stays plain text, and one clear picture beats several. Write a fenced block whose info string is exactly fy-render: line 1 `type: <type>`, line 2 `alt: <one-line description>`, then a line `---`, then the payload.
 - mermaid: Mermaid source (flowchart, sequenceDiagram, stateDiagram-v2, …).
 - svg: one self-contained <svg>…</svg>; no script, foreignObject, use or external links.
-- html: prefer a static HTML fragment (tables, lists, details, inline SVG, inline CSS). Add a <script> only when interaction genuinely helps (a slider, a toggle, stepping through states); it then runs in an isolated frame. Never load anything from the network.
+- html: prefer a static fragment (tables, details, inline SVG/CSS); use <script> only if interaction truly helps (it runs isolated). Load nothing from the network.
 - image, video, audio, pdf: save files you make into $FY_MEDIA_DIR and put `src: media:<file name>` before `---`, with no payload; `src: @path/in/your/workspace` and `src: https://…` also work.
 Example:
 ```fy-render
