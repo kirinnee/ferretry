@@ -53,7 +53,7 @@ its own at boot and dials it, and the PWA carries requests, the live event feed 
 it. **Pairing works over the relay too**, so a phone that can never reach your machine's address can
 still scan `fy pair`'s QR code, pair, and then reconnect as an ordinary signed-in device. The relay
 never sees the pairing code, your device key or anything you send; it does see connection
-metadata such as timing and sizes. the Carrier panel on the machine’s Machine tab in Settings names the connection a live session is
+metadata such as timing and sizes. the Connection panel on the machine’s Machine tab in Settings names the connection a live session is
 actually using.
 
 Still missing, as [docs/relay-protocol.md](docs/relay-protocol.md) §13 lists in full:

@@ -230,7 +230,7 @@ export const HOSTED_RELAY_ROW_NOTE =
  * setup screen cannot report a measurement that has not been taken yet.
  */
 export const activeCarrierStatus = (): string =>
-  'Not measured yet — the daemon is tried directly first, then the hosted relay. Its Carrier panel in Settings ' +
+  'Not measured yet — the daemon is tried directly first, then the hosted relay. Its Connection panel in Settings ' +
   '(the machine’s Machine tab) names the carrier in use, and why, once this daemon is asked for anything.';
 
 /**

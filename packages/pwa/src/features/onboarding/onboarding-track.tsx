@@ -85,7 +85,7 @@ export function OnboardingTrack({ path, current, furthest, onJump }: OnboardingT
               instead ("Daemo/n") is not better. So the RAIL wraps rather than the
               word: `basis` gives each item a floor wide enough for its label, and a
               seven-step journey becomes two rows on a phone and stays one on
-              anything wider. The eleven-step self-hosted journey gains the most.
+              anything wider.
             */}
             <span className={`w-full text-center text-2xs leading-tight ${LABEL_TONE[status]}`}>{step.short}</span>
             <span className="sr-only">{STATUS_WORD[status]}</span>

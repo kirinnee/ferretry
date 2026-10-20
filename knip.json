@@ -31,6 +31,7 @@
         "vite.config.ts",
         "tests/**/*.test.{ts,tsx}",
         "harness/screenshot.ts",
+        "harness/connection-status-screenshot.tsx",
         "harness/release-notice-screenshot.tsx",
         "harness/relaunch-settings-screenshot.tsx",
         "harness/approval-card-screenshot.tsx",

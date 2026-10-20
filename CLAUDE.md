@@ -87,7 +87,8 @@ Running your own relay stays supported as an **expert opt-in path** with its own
 [docs/cloudflare-relay-self-hosting.md](docs/cloudflare-relay-self-hosting.md), and its fingerprint
 allowlist remains independent of the hosted deployment. First-run onboarding asks no carrier
 question: the three-way chooser and the self-hosting steps are gone, and the daemon step only says
-how other devices reach it. **Both carriers are sessions**: direct is a WebSocket session on the
+how other devices reach it. The machine's **Connection** panel is read-only — direct, via relay
+(which, and why) or reconnecting — and links the runbook instead of offering a relay setting. **Both carriers are sessions**: direct is a WebSocket session on the
 daemon's own listener (`/v1/rendezvous/<daemonId>/client`), byte-for-byte the protocol a relay carries,
 so the LAN is encrypted end to end too, and there are no socket tickets — every stream is its own
 session. **First contact is no longer direct-only.** A session commits to one of three modes with its

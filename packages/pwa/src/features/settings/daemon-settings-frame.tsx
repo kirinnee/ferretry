@@ -32,6 +32,7 @@ import {
 } from 'lucide-react';
 import { type ComponentType, type ReactNode, useMemo } from 'react';
 import type { WardenStatusReader } from '../../hooks/use-warden-status.ts';
+import type { ConnectionHealthState } from '../../lib/connection-health.ts';
 import type { DaemonConnectionRecord } from '../../lib/connections.ts';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
 import { Button } from '../../shell/primitives.tsx';
@@ -158,6 +159,8 @@ export interface DaemonSettingsFrameProps {
   /** Measured for this exact daemon connection, never inferred from a preference. */
   readonly carrier?: ConnectionChoice | undefined;
   readonly relayAdvertised?: boolean;
+  /** The reconnect loop's state for this daemon, so the Connection tab can say "reconnecting". */
+  readonly connectionHealth?: ConnectionHealthState | undefined;
   readonly probeDaemon?: DaemonReachabilityProbe;
   readonly onRenameDaemon?: (daemonId: DaemonConnection['daemonId'], label?: string) => void;
   readonly onRemoveDaemon?: (daemonId: DaemonConnection['daemonId']) => void;
@@ -183,6 +186,7 @@ export function DaemonSettingsFrame({
   additionalTabs = NO_ADDITIONAL_TABS,
   carrier,
   relayAdvertised = false,
+  connectionHealth,
   probeDaemon,
   onRenameDaemon,
   onRemoveDaemon,
@@ -263,9 +267,16 @@ export function DaemonSettingsFrame({
       ...additionalTabs,
       {
         id: 'carrier',
-        label: 'Carrier',
-        description: 'The measured path this daemon is using right now.',
-        Surface: () => <ActiveCarrierCard choice={carrier} relayAdvertised={relayAdvertised} />,
+        label: 'Connection',
+        description: 'How this device reaches the daemon right now: direct, via a relay, or reconnecting.',
+        Surface: () => (
+          <ActiveCarrierCard
+            choice={carrier}
+            relayAdvertised={relayAdvertised}
+            {...(connectionHealth === undefined ? {} : { health: connectionHealth })}
+            machine={name}
+          />
+        ),
       },
       {
         id: 'host-checks',
@@ -297,6 +308,7 @@ export function DaemonSettingsFrame({
     [
       additionalTabs,
       carrier,
+      connectionHealth,
       connectionRecord,
       createGrantClient,
       createPairingClient,

@@ -355,7 +355,8 @@ You configure **the daemon only**. A paired browser learns where its daemon can 
 daemon itself — the `carriers` set on the pairing response and on `GET /v1/carriers`
 ([relay-protocol.md](relay-protocol.md) §13, _The carrier set a daemon publishes_) — so there is no
 browser setting, and the relay address the browser dials is the exact string the daemon's claim
-signature covers.
+signature covers. The app's Connection panel links back to this runbook for exactly that reason: it
+reports which carrier is live and never offers a relay setting of its own.
 
 **1. Add your relay to the daemon's carrier list.** Edit `${FY_HOME:-~/.ferretry}/config/daemon.json`
 (there is no `fy` command for this list yet):
@@ -398,15 +399,17 @@ that only listens on loopback and lists only your relay, `fy pair` draws no QR a
 nothing off that machine could redeem it.
 
 **4. Use it from anywhere.** Once paired, the device holds the daemon's published set and walks it:
-every direct address first, then every relay, in the daemon's order. the Carrier panel on the machine’s Machine tab in Settings names the
-carrier the live session is actually on and why the others were passed over.
+every direct address first, then every relay, in the daemon's order. The Connection panel on the
+machine’s Machine tab in Settings leads with direct, via relay (naming which relay and its host) or
+reconnecting, then names the carrier the live session is actually on and why the others were passed
+over.
 
 ### End-to-end verification
 
 1. Pair the device as in step 3 above.
 2. Move the device to a network where the daemon's address is genuinely unreachable — a different
    network, no VPN. Testing on one LAN proves nothing, because direct would win.
-3. Open the app. **Confirm the Carrier panel on the machine’s Machine tab in Settings names the relay as the carrier** and says why direct was
+3. Open the app. **Confirm the Connection panel on the machine’s Machine tab in Settings reads "Via relay" and names your relay as the carrier** and says why direct was
    passed over. A session that connects without naming its carrier is the failure mode this design
    guards against — report it rather than accepting it.
 4. On the host, `cd packages/relay && wrangler tail` should show the two socket arrivals (`/daemon`
