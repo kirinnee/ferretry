@@ -171,6 +171,22 @@ secret is present; `scripts/ci/sign-daemon-release.sh` refuses a key whose publi
   that can self-update.
 - **One update at a time.** A second request while one is running answers `409 update_in_progress`.
 
+## Updating from an agent
+
+An agent (Claude Code, Codex) never runs the update itself. Claude Code's auto-mode safety checks
+block `brew update`, `brew upgrade`, package installs and service changes, and Codex's sandbox has
+no network and no write access outside the project — both on purpose, and Ferretry does not try to get
+around either. The agent hands the person the command instead:
+
+- **Claude Code**: type `! fy daemon update` in the chat. A `!` command runs as you, not as the
+  agent, so nothing blocks it, and its output lands in the conversation for the agent to read.
+- **Codex**: run `fy daemon update` in your own terminal.
+- **Either**: press **Update** in the app.
+
+`fy setup` and `fy setup --check --json` report an available update (`update.available`,
+`update.command`) but never apply one: an update restarts the daemon, which is its own decision. The
+[Get started](https://ferretry.pages.dev/get-started) prompt tells the agent all of this.
+
 ## The app
 
 - Settings › Machines › _machine_ › Machine › **About**: this machine's version, how it was installed,
@@ -189,6 +205,7 @@ secret is present; `scripts/ci/sign-daemon-release.sh` refuses a key whose publi
 | `fy daemon status`                     | adds the install method and, when known, the update line |
 | `fy daemon update [--check] [--yes] …` | check, or apply the update for this install method       |
 | `fy daemon install`                    | on a `nix-shell` daemon, offers the nix profile install  |
+| `fy setup [--check] [--json]`          | reports the update and its command; never applies it     |
 | `GET /v1/daemon/update`                | the `DaemonUpdateView`                                   |
 | `POST /v1/daemon/update`               | start an update (`now` / `when-idle`)                    |
 | `PATCH /v1/daemon/update/settings`     | turn automatic install on or off                         |

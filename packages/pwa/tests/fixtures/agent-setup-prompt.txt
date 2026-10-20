@@ -1,0 +1,52 @@
+Help me set up Ferretry on this computer. Follow these rules exactly.
+
+How to talk to me
+- Whenever I need to do something, reply in exactly this shape, then stop and wait:
+  **Run this**
+  ```bash
+  <the exact command(s), nothing else>
+  ```
+  **Why:** <one short line>
+  **What you'll see:** <one short line>
+- One action at a time. No paragraphs, no repeated caveats.
+- Report what you find in 3 to 5 short lines, then your recommendation.
+
+What you may run
+- Only read-only checks and the fy commands named below. I run every install, update, sudo or service command myself.
+- Claude Code: tell me to type the command after a ! in this chat. Codex: tell me to run it in my own terminal, and hand me any check your sandbox blocks.
+- Anything that needs sudo goes in my own terminal.
+- If a command is blocked or fails, tell me the error in one line and stop. Never retry it or look for a way around it.
+- Never print, save or ask for a token, a secret or a pairing code.
+
+1. Look around (read-only; an error just means "not there"):
+   uname -sm
+   command -v brew nix fy home-manager darwin-rebuild
+   fy setup --check --json
+   If that says "ready": true, go to step 3. Otherwise recommend ONE way to install with a one-line reason, list the others one line each, and let me choose:
+   - Homebrew, if brew is there: easiest updates.
+   - Home Manager or nix-darwin, if I use one: it lives in my config.
+   - nix profile, if nix is there: one command, no config.
+   - Installer, otherwise: one line, nothing else needed.
+
+2. Hand me ONE "Run this" for my choice.
+   Homebrew:
+     brew tap kirinnee/ferretry https://github.com/kirinnee/ferretry
+     brew install --cask ferretry
+     fy setup --yes
+   nix profile:
+     nix profile install github:kirinnee/ferretry
+     fy setup --yes
+   Home Manager or nix-darwin: first show me where these two lines go in my flake.
+   Then hand me the rebuild (home-manager switch --flake . or darwin-rebuild switch --flake .) and fy setup --yes:
+     inputs.ferretry.url = "github:kirinnee/ferretry";
+     home.packages = [ inputs.ferretry.packages.${pkgs.stdenv.hostPlatform.system}.default ];
+   Installer:
+     curl -fsSL --connect-timeout 30 --max-time 600 https://github.com/kirinnee/ferretry/releases/latest/download/install.sh | bash
+     PATH="$HOME/.local/bin:$PATH" fy setup --yes
+
+3. Check: run fy setup --check --json. Until "ready" is true, hand me the first entry of "next" as a "Run this". Then tell me it is done in one line.
+
+4. Pair my phone: hand me fy pair as a "Run this" for my own terminal, not this chat, so the code never reaches you. What I'll see: a QR code to scan with my phone's camera within two minutes.
+
+5. Stop. Afterwards, only when I ask: fy daemon status, fy credentials, fy runtimes, fy import conversations, and fy daemon setup (it asks questions, so I run it in my own terminal).
+   To update later: fy daemon update, or the Update button in the app.
