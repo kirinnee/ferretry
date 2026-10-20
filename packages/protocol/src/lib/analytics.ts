@@ -51,6 +51,17 @@ export const AnalyticsMetricSchema = z.enum([
   'sessions',
   'duration_active_seconds',
   'duration_wall_seconds',
+  // A RATIO OF SUMS — Σ active time ÷ Σ turns over the group — never an average of per-session
+  // ratios, which would weigh a one-turn session the same as a hundred-turn one.
+  'duration_active_seconds_per_turn',
+]);
+
+/**
+ * Metrics that are a ratio of two measures. Only `sum` and `avg` answer them, and both give the same
+ * number: avg(a) ÷ avg(b) and sum(a) ÷ sum(b) agree whenever both are known for every session.
+ */
+export const ANALYTICS_RATIO_METRICS: ReadonlySet<AnalyticsMetric> = new Set<AnalyticsMetric>([
+  'duration_active_seconds_per_turn',
 ]);
 export type AnalyticsMetric = z.infer<typeof AnalyticsMetricSchema>;
 
@@ -270,11 +281,16 @@ export type AnalyticsMeasureKey = {
 /**
  * Which result field answers each metric, and the factor that turns its stored unit into the metric's.
  *
- * `sessions` is the group's session count rather than a measure, so it has no measure key. A MAPPED
- * TYPE over the metric enum: a metric the grammar grows without an answer here is a compile error.
+ * `sessions` is the group's session count rather than a measure, so it has no measure key. A ratio
+ * metric names its denominator in `per`. A MAPPED TYPE over the metric enum: a metric the grammar
+ * grows without an answer here is a compile error.
  */
 export const ANALYTICS_METRIC_MEASURES: {
-  readonly [M in AnalyticsMetric]: { readonly measure: AnalyticsMeasureKey | 'sessions'; readonly scale: number };
+  readonly [M in AnalyticsMetric]: {
+    readonly measure: AnalyticsMeasureKey | 'sessions';
+    readonly per?: AnalyticsMeasureKey;
+    readonly scale: number;
+  };
 } = {
   tokens: { measure: 'tokens', scale: 1 },
   tokens_input: { measure: 'inputTokens', scale: 1 },
@@ -287,12 +303,19 @@ export const ANALYTICS_METRIC_MEASURES: {
   sessions: { measure: 'sessions', scale: 1 },
   duration_active_seconds: { measure: 'activeDurationMs', scale: 1e-3 },
   duration_wall_seconds: { measure: 'durationMs', scale: 1e-3 },
+  duration_active_seconds_per_turn: { measure: 'activeDurationMs', per: 'turns', scale: 1e-3 },
 };
+
+/** `numerator ÷ denominator × scale`, or null when either is unknown or there is nothing to divide by. */
+function ratio(numerator: number | null, denominator: number | null, scale: number): number | null {
+  return numerator === null || denominator === null || denominator === 0 ? null : (numerator / denominator) * scale;
+}
 
 /** One aggregate row's value for a metric, in the metric's unit, or `null` when it is not known. */
 export function analyticsMetricValue(result: AnalyticsAggregateResult, metric: AnalyticsMetric): number | null {
-  const { measure, scale } = ANALYTICS_METRIC_MEASURES[metric];
+  const { measure, per, scale } = ANALYTICS_METRIC_MEASURES[metric];
   if (measure === 'sessions') return result.sessions;
+  if (per !== undefined) return ratio(result[measure].value, result[per].value, scale);
   const value = result[measure].value;
   return value === null ? null : value * scale;
 }
@@ -310,6 +333,7 @@ const RAW_METRIC_FIELDS = {
   sessions: null,
   duration_active_seconds: 'activeDurationMs',
   duration_wall_seconds: 'durationMs',
+  duration_active_seconds_per_turn: 'activeDurationMs',
 } as const satisfies { readonly [M in AnalyticsMetric]: keyof AnalyticsRawSession | null };
 
 /** One session row's value for a metric, in the metric's unit, or `null` when it is not known. */
@@ -317,5 +341,6 @@ export function analyticsRawMetricValue(row: AnalyticsRawSession, metric: Analyt
   const field = RAW_METRIC_FIELDS[metric];
   if (field === null) return 1;
   const value = row[field] ?? null;
+  if (ANALYTICS_RATIO_METRICS.has(metric)) return ratio(value, row.turns, ANALYTICS_METRIC_MEASURES[metric].scale);
   return value === null ? null : value * ANALYTICS_METRIC_MEASURES[metric].scale;
 }

@@ -1,4 +1,5 @@
 import {
+  ANALYTICS_RATIO_METRICS,
   type AnalyticsAggregation,
   AnalyticsAggregationSchema,
   type AnalyticsLabel,
@@ -437,6 +438,9 @@ export function parseAnalyticsQuery(input?: string): ParsedAnalyticsQuery {
     if (cursor.at('by')) {
       if (groupBy.length > 0) throw new AnalyticsQueryError('by (...) may be given once');
       groupBy = readGroupBy(cursor);
+    }
+    if (metric !== undefined && ANALYTICS_RATIO_METRICS.has(metric) && aggregation !== 'sum' && aggregation !== 'avg') {
+      throw new AnalyticsQueryError(`${metric} is a ratio of sums: use sum(${metric}) or avg(${metric})`);
     }
     if (aggregation === 'count' && metric !== undefined && metric !== 'sessions') {
       throw new AnalyticsQueryError('count counts sessions: write count or count(sessions)');

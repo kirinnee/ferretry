@@ -119,7 +119,7 @@ class Gen {
       shape === 0 ? undefined : this.pick(AnalyticsAggregationSchema.options);
     let metric: AnalyticsMetric | undefined =
       shape === 2 || (shape === 0 && this.bool()) ? this.pick(AnalyticsMetricSchema.options) : undefined;
-    if (aggregation === 'count' && metric !== undefined) metric = 'sessions';
+    if (aggregation === 'count' && metric !== undefined) metric = 'sessions';    if (metric === 'duration_active_seconds_per_turn' && aggregation !== undefined && aggregation !== 'sum' && aggregation !== 'avg') {      metric = 'duration_active_seconds';    }
     const groupBy: AnalyticsLabel[] = [];
     if (aggregation !== undefined) {
       const wanted = this.int(MAX_ANALYTICS_GROUP_LABELS + 1);
@@ -294,6 +294,7 @@ describe('analytics query grammar v2', () => {
       { source: 'sum(cost_usd', message: 'expected ) after sum(cost_usd' },
       { source: 'sum by (model) (cost_usd) by (day)', message: 'by (...) may be given once' },
       { source: 'count(cost_usd)', message: 'count counts sessions' },
+      { source: 'max(duration_active_seconds_per_turn)', message: 'is a ratio of sums: use sum(duration_active_seconds_per_turn)' },
       { source: 'cost_usd by (model)', message: 'requires an aggregation' },
       { source: 'planet {model=x}', message: 'unknown analytics aggregation or metric "planet"' },
       { source: 'sum(cost_usd{model=x}) {model=y}', message: 'filters may be given once' },

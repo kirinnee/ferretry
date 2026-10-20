@@ -505,3 +505,44 @@ describe('analytics metrics', () => {
     should(ordered.success).be.true();
   });
 });
+
+describe('the per-turn active time metric', () => {
+  it('should divide summed active time by summed turns, and say nothing it cannot divide', () => {
+    // Arrange
+    const result = analytics.AnalyticsAggregateResultSchema.parse({
+      ...aggregateResult,
+      activeDurationMs: { value: 120_000, known: 2, total: 2 },
+      turns: { value: 8, known: 2, total: 2 },
+    });
+
+    // Act
+    const perTurn = analytics.analyticsMetricValue(result, 'duration_active_seconds_per_turn');
+    const noTurns = analytics.analyticsMetricValue(
+      { ...result, turns: { value: 0, known: 2, total: 2 } },
+      'duration_active_seconds_per_turn',
+    );
+    const partial = analytics.analyticsMetricValue(
+      { ...result, activeDurationMs: { value: null, known: 1, total: 2 } },
+      'duration_active_seconds_per_turn',
+    );
+
+    // Assert
+    should(perTurn).equal(15);
+    should(noTurns).be.null();
+    should(partial).be.null();
+    should(analytics.ANALYTICS_RATIO_METRICS.has('duration_active_seconds_per_turn')).be.true();
+  });
+
+  it('should answer one session row from its own active time and turns', () => {
+    // Arrange
+    const row = analytics.AnalyticsRawSessionSchema.parse({ ...rawSession, activeDurationMs: 90_000, turns: 3 });
+
+    // Act
+    const perTurn = analytics.analyticsRawMetricValue(row, 'duration_active_seconds_per_turn');
+    const unknown = analytics.analyticsRawMetricValue({ ...row, turns: null }, 'duration_active_seconds_per_turn');
+
+    // Assert
+    should(perTurn).equal(30);
+    should(unknown).be.null();
+  });
+});
