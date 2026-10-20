@@ -63,6 +63,7 @@ describe('fy-render opt-in', () => {
     // only because its header comment names the component it is mounted from.
     should(files).eql([
       'src/components/fy-render-block.tsx',
+      'src/components/fy-render-html-frame.tsx',
       'src/components/fy-render-media.tsx',
       'src/components/fy-render-sandbox.tsx',
       'src/components/markdown.tsx',
@@ -87,17 +88,24 @@ describe('fy-render opt-in', () => {
     // paragraph, so a source-level absence check would fail on its own comment.
     // The honest form is against the rendered tree, in
     // `fy-render-sandbox.test.tsx`.
+    // `fy-render-html-frame.tsx` is on it for a type reason only: it imports `FyRenderSandboxFailure` so
+    // both frames report failures in one vocabulary. It mounts no sandbox frame.
     should(files).eql([
       'src/components/fy-render-block.tsx',
+      'src/components/fy-render-html-frame.tsx',
       'src/components/fy-render-sandbox.tsx',
       'src/lib/fy-render.ts',
     ]);
   });
 
-  test('should have no executing html frame at all', () => {
-    // Assert — an `html` block is a static fragment now (the owner's decision); a mention of the
-    // old frame anywhere is a second place author code could run.
-    should(mentioning('FyRenderHtmlFrame')).eql([]);
+  test('should reach the executing html frame from exactly one component', () => {
+    // Assert — this is the frame where AUTHOR CODE RUNS (an `html` block with script), so its mount
+    // sites are the execution surface. `fy-render-html-frame.tsx` declares it; `fy-render-block.tsx` is
+    // the one component that mounts it. A third entry is a new place author code can run.
+    should(mentioning('FyRenderHtmlFrame')).eql([
+      'src/components/fy-render-block.tsx',
+      'src/components/fy-render-html-frame.tsx',
+    ]);
   });
 
   test('should render an html fragment from exactly one component, through one parsing policy', () => {

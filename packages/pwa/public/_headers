@@ -35,6 +35,24 @@
   X-Content-Type-Options: nosniff
   Cache-Control: no-cache
 
+# The `fy-render` html shell, where an `html` block WITH script runs (one without stays a static
+# fragment in the page). The same two lines as the library shell above, for the same reasons: its
+# content policy is a meta tag inside the document (it runs author code, so it carries
+# `script-src 'unsafe-inline'` and nothing that reaches the network), the `!` line keeps `/*`'s
+# `frame-ancestors 'none'` off it, and `sandbox allow-scripts` makes a direct visit opaque. Both the
+# `.html` path and the extensionless one Pages' pretty URLs redirect it to, as above.
+/fy-render-html.html
+  ! Content-Security-Policy
+  Content-Security-Policy: frame-ancestors 'self'; sandbox allow-scripts
+  X-Content-Type-Options: nosniff
+  Cache-Control: no-cache
+
+/fy-render-html
+  ! Content-Security-Policy
+  Content-Security-Policy: frame-ancestors 'self'; sandbox allow-scripts
+  X-Content-Type-Options: nosniff
+  Cache-Control: no-cache
+
 # The two trusted library bundles the PARENT fetches and transfers over the
 # capability port; the frame never requests them itself.
 #

@@ -23,16 +23,16 @@ Use it in **one** place: a message you are writing into a chat, right where the 
 Every type renders **by itself, inline in the message**, as soon as it scrolls near the screen — no
 button, no card, no caption:
 
-| `type:`   | Today                                                                   |
-| --------- | ----------------------------------------------------------------------- |
-| `svg`     | renders as a picture                                                    |
-| `image`   | renders as a picture (raster only) — inline base64, or from `src:`      |
-| `mermaid` | renders as a diagram — drawn in a sandbox, shown as a picture           |
-| `lottie`  | plays as an animation, with Pause and Play                              |
-| `html`    | a **static** fragment drawn in the message — markup and CSS, no scripts |
-| `video`   | plays in the browser's own player, from `src:`                          |
-| `audio`   | plays in the browser's own player, from `src:`                          |
-| `pdf`     | a workspace PDF opens in a new tab or downloads; an https PDF is a link |
+| `type:`   | Today                                                                                     |
+| --------- | ----------------------------------------------------------------------------------------- |
+| `svg`     | renders as a picture                                                                      |
+| `image`   | renders as a picture (raster only) — inline base64, or from `src:`                        |
+| `mermaid` | renders as a diagram — drawn in a sandbox, shown as a picture                             |
+| `lottie`  | plays as an animation, with Pause and Play                                                |
+| `html`    | a **static** fragment in the message; with a `<script>`, a live page in an isolated frame |
+| `video`   | plays in the browser's own player, from `src:`                                            |
+| `audio`   | plays in the browser's own player, from `src:`                                            |
+| `pdf`     | a workspace PDF opens in a new tab or downloads; an https PDF is a link                   |
 
 So write `mermaid` when a flowchart, sequence or state diagram is what you mean; you no longer have
 to hand-draw it as `svg`. Reach for `svg` when you want exact control over the drawing, `lottie` when
@@ -40,13 +40,14 @@ motion genuinely helps, and `html` for a table, a comparison or a small styled l
 
 ### Writing `html` that works
 
-An `html` block is a **static fragment**: it is sanitized and drawn straight into the message, and
-**nothing in it runs**. Design for exactly that:
+An `html` block WITHOUT script is a **static fragment**: it is sanitized and drawn straight into the
+message, and **nothing in it runs**. Design for exactly that:
 
 - **Markup and CSS only.** Tables, lists, headings, `<details>`/`<summary>`, `<code>`/`<pre>`, inline
-  `<svg>` and `style` attributes or a `<style>` element all work. `<script>`, every `on…` handler,
-  `<iframe>`, `<object>`, `<embed>`, forms and their controls, `<meta>`, `<link>`, `<base>` and SVG
-  `<use>`/`<foreignObject>`/animation are removed before anything is shown.
+  `<svg>` and `style` attributes or a `<style>` element all work. `<iframe>`, `<object>`, `<embed>`,
+  forms and their controls, `<meta>`, `<link>`, `<base>` and SVG `<use>`/`<foreignObject>`/animation
+  are removed before anything is shown. (A `<script>` or `on…` handler makes the block interactive
+  instead — see below.)
 - **Your styles stay yours.** The fragment lives in its own shadow root: your `<style>` cannot touch
   the app and the app's styles do not touch your markup, except the conversation's text colour and
   font, which you inherit. Theme tokens such as `var(--fg)`, `var(--border-strong)` and
@@ -58,6 +59,26 @@ An `html` block is a **static fragment**: it is sanitized and drawn straight int
   fullscreen.
 - **Not for drawings.** A diagram is `mermaid` and a drawing is `svg`. Reach for `html` for a table, a
   comparison, a checklist or a small styled layout — the things prose and a picture both do badly.
+
+### When — and only when — to add a `<script>`
+
+**Prefer static HTML.** Add a `<script>` (or an `on…` handler) only when the reader genuinely needs to
+**do** something — drag a slider, flip a toggle, step through states. The moment a block contains one,
+it is no longer a fragment: it runs as an **interactive illustration** in an isolated frame, inline,
+marked "interactive". Design for that frame:
+
+- **One self-contained page.** Inline `<style>` and inline `<script>` (classic or `type="module"`) run in
+  order after your markup is in place; `DOMContentLoaded` and `load` are dispatched for you.
+- **Never load anything.** `fetch`, XHR, WebSocket, external scripts, stylesheets, fonts and remote
+  images are all refused. There is no CDN: no React, no D3 — write plain DOM or `<canvas>`.
+- **No storage, no cookies, no `eval`, no forms, no popups, no `alert`, and never navigate** — setting
+  `location` or following a link inside the frame stops the page and shows your source instead.
+- **Leave the background unset.** The page is painted with the conversation's own background, text
+  colour and font; if you set a background, set a text colour too.
+- **Keep it small and idle.** It grows to its own height up to 640px, then scrolls. It stops when it is
+  scrolled far away (and restarts when it comes back), if it stops responding for five seconds, and
+  after ten minutes — so do not build a long-running loop, and yield to the browser
+  (`requestAnimationFrame`, events) rather than spinning.
 
 ### Showing a file or a link with `src:`
 

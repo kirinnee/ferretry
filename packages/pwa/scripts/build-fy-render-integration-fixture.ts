@@ -62,6 +62,7 @@ export interface FyRenderFixtureManifest {
   readonly shell: string;
   readonly mermaid: string;
   readonly lottie: string;
+  readonly html: string;
   readonly appCss: string;
   readonly appJs: string;
 }
@@ -117,6 +118,7 @@ export const buildFyRenderIntegrationFixture = async (directory: string): Promis
     appCss: appCssPath,
     appJs: appJsPath,
     directory,
+    html: artifacts.html,
     lottie: artifacts.lottie,
     mermaid: artifacts.mermaid,
     shell: artifacts.shell,

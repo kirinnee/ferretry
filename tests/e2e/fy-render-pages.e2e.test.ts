@@ -106,7 +106,7 @@ interface Drive {
 }
 
 describe('fy-render shells on Cloudflare Pages', () => {
-  it('should frame the sandbox shell and allow the fragment policy, from the production bundle under production headers', () =>
+  it('should frame both shells, run an interactive page and allow the fragment policy, from the production bundle under production headers', () =>
     retryOnLostBrowser('fy-render-pages', async () => {
       const teardown = harnessTeardown();
       try {
@@ -115,8 +115,8 @@ describe('fy-render shells on Cloudflare Pages', () => {
           const root = environment.paths.root;
           const dist = await viteBuild(join(root, 'vite'), DEAD_DIRECTORY);
           const shells = await shellPathsInBundle(dist);
-          // One shell: an `html` block is a static fragment now, so the html shell is gone.
-          should(shells).deepEqual(['/fy-render-sandbox.html']);
+          // Two shells: the library sandbox (Mermaid, Lottie) and the html shell an `html` block WITH script runs in.
+          should(shells).deepEqual(['/fy-render-html.html', '/fy-render-sandbox.html']);
           const { origin } = await startPagesDev(dist, join(root, 'wrangler'), teardown);
 
           // Assert — the document each shell URL finally resolves to may be framed by this origin.
@@ -156,6 +156,19 @@ describe('fy-render shells on Cloudflare Pages', () => {
               '/fy-render-mermaid.js',
             ),
           )) as Drive;
+          const interactive = (await page.evaluate(
+            drive(
+              '/fy-render-html.html',
+              {
+                kind: 'render-html',
+                paint: null,
+                source:
+                  '<button id="b">0</button><script>document.getElementById("b").click(); document.getElementById("b").textContent = "ran";</script>',
+                theme: 'dark',
+              },
+              null,
+            ),
+          )) as Drive;
           const policies = await page.evaluate<{ fragment: string; stranger: string; raw: string }>(`(() => {
             const attempt = name => { try { trustedTypes.createPolicy(name, { createHTML: s => s }); return 'created'; } catch (e) { return 'refused'; } };
             let raw = 'assigned';
@@ -166,6 +179,9 @@ describe('fy-render shells on Cloudflare Pages', () => {
           // Assert — the shell announced itself and compiled; the production policy names the one
           // fragment policy, refuses any other name, and still refuses a raw string at a sink.
           should(mermaid.ready).be.true();
+          // An interactive page announced itself and ran its script, framed under the real Pages headers.
+          should(interactive.ready).be.true();
+          should(interactive.replies.some(reply => reply.kind === 'rendered')).be.true();
           should(mermaid.replies.find(reply => reply.kind === 'mermaid-svg')?.svg ?? '').match(/^<svg/u);
           should(policies).deepEqual({ fragment: 'created', raw: 'refused', stranger: 'refused' });
           should(refusals.filter(line => !/fy-stranger|TrustedHTML/u.test(line))).deepEqual([]);
