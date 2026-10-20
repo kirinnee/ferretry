@@ -2530,3 +2530,24 @@ html[data-keyboard='open'] .fy-composer[data-composer-layout='phone'] .fy-compos
 .fy-convo-exchange[data-role='user'] .fy-convo-exchange__text {
   color: var(--fy-fg);
 }
+/* A RUN OF AGENT OUTPUT names the agent once (`agentRuns`): a continuation sits close under what it
+   continues, and the time of every text but the run's last appears only while the message is hovered or
+   has focus, so the foot stays reachable by pointer, tap and keyboard without repeating down the page. */
+.fy-transcript-content > [data-transcript-run='continue'] {
+  margin-top: var(--flow-chrome-after);
+}
+.fy-run-time .fy-receipt-line {
+  height: 1px;
+  margin: -1px;
+  overflow: hidden;
+  position: absolute;
+  width: 1px;
+}
+.fy-message:hover .fy-run-time .fy-receipt-line,
+.fy-run-time:focus-within .fy-receipt-line {
+  height: auto;
+  margin: 2px 0 0;
+  overflow: visible;
+  position: static;
+  width: auto;
+}

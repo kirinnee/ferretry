@@ -1,7 +1,7 @@
 import { type HandoffPointer, parsePeerEnvelope } from '@ferretry/protocol';
 import type { ReactNode } from 'react';
 import { clockOfInstant } from '../lib/message-clock.ts';
-import type { TranscriptEntry } from '../lib/session-screens.ts';
+import type { AgentRunMark, TranscriptEntry } from '../lib/session-screens.ts';
 import { PeerMessageRow, SystemNoticeRow } from './agent-message-rows.tsx';
 import { CommandRow } from './command-row.tsx';
 import { HandoffBody, HandoffView, useHandoffReading } from './handoff-message.tsx';
@@ -30,6 +30,8 @@ export interface TranscriptRowProps {
   /** Offered on a ledger row, and only a message typed in the composer uses it. */
   readonly onSubmit?: SendSubmit;
   /** An assistant row follows this one, so a delivered send on it reads as `read`. */
+  /** Where an assistant text sits in its run of agent output; only the first names the agent. */
+  readonly run?: AgentRunMark | undefined;
   readonly answered?: boolean;
 }
 
@@ -49,6 +51,7 @@ export function TranscriptRow({
   onCancel,
   onSubmit,
   answered = false,
+  run,
 }: TranscriptRowProps) {
   const rhythm = transcriptRhythm(entry, previous);
   if (entry.sent !== undefined)
@@ -90,7 +93,7 @@ export function TranscriptRow({
     return <HarnessEventRow event={entry.event} rhythm={rhythm} />;
   if (entry.kind === 'system') return <SystemNoticeRow entry={entry} rhythm={rhythm} />;
   if (entry.kind === 'user') return <OwnMessageRow answered={answered} entry={entry} rhythm={rhythm} />;
-  return <TranscriptTextRow entry={entry} rhythm={rhythm} />;
+  return <TranscriptTextRow entry={entry} rhythm={rhythm} run={run} />;
 }
 
 /**
@@ -175,24 +178,30 @@ function OwnMessageRow({
 function TranscriptTextRow({
   entry,
   rhythm,
+  run,
 }: {
   readonly entry: TranscriptEntry;
   readonly rhythm: Record<string, string | undefined>;
+  readonly run?: AgentRunMark | undefined;
 }) {
   const label = entry.label ?? defaultLabel(entry.kind);
   const chrome = entry.kind === 'tool' || entry.kind === 'command' || entry.kind === 'notice';
 
+  // Only the first text of a run names the agent; a continuation keeps the name for a screen reader.
+  const continued = run?.role === 'continue';
+  const footer = <MessageFooter clock={clockOfInstant(entry.at)} side="other" />;
   return (
     <article
       className={`fy-message fy-message-${entry.kind}${chrome ? ' fy-message-chrome' : ''}`}
       data-transcript-kind={entry.kind}
+      data-transcript-run={run?.role}
       {...rhythm}
     >
-      <header>
+      <header className={continued ? 'sr-only' : undefined}>
         <span>{label}</span>
       </header>
       {entry.kind === 'assistant' ? <AssistantProse text={entry.text} /> : <p>{entry.text}</p>}
-      <MessageFooter clock={clockOfInstant(entry.at)} side="other" />
+      {run === undefined || run.end ? footer : <div className="fy-run-time">{footer}</div>}
     </article>
   );
 }
