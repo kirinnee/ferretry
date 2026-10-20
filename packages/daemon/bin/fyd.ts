@@ -9,7 +9,7 @@ import {
   statSync,
   writeSync,
 } from 'node:fs';
-import { mkdir } from 'node:fs/promises';
+import { mkdir, realpath } from 'node:fs/promises';
 import { hostname, tmpdir, userInfo } from 'node:os';
 import { dirname, isAbsolute, join } from 'node:path';
 import {
@@ -3997,7 +3997,9 @@ async function planConversion(
     targetAgent: subject.targetAgent,
     targetModel: subject.targetModel,
     targetWindow: subject.targetWindow,
-    cwd: config.cwd,
+    // Resolved: the CLI derives where a conversation lives from its resolved working directory, so a
+    // converted Claude file written under a symlinked spelling (macOS `/tmp`, `/var`) is never found.
+    cwd: await realpath(config.cwd).catch(() => config.cwd),
     sessionDirectory,
     conversationId: parts.conversationId(),
     at: parts.clock.now(),

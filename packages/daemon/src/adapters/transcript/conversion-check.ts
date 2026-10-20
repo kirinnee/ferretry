@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { delimiter, dirname, join } from 'node:path';
 import type { Harness } from '@ferretry/protocol';
@@ -122,7 +122,10 @@ export class CliConversionCheck implements ConversionCheckPort {
     readonly model?: string;
     readonly render: (place: ConversionPlace) => ConversionResult;
   }): Promise<ConversionCheck> {
-    const root = await mkdtemp(join(this.temporaryRoot, 'fy-convert-check-'));
+    // Resolved, because the CLI resolves its working directory before deriving where a conversation
+    // lives: on macOS the temporary folder is `/var/…`, a link to `/private/var/…`, and a file written
+    // under the unresolved spelling is one Claude never finds.
+    const root = await realpath(await mkdtemp(join(this.temporaryRoot, 'fy-convert-check-')));
     const model = new LoopbackModel();
     try {
       const home = join(root, 'home');
