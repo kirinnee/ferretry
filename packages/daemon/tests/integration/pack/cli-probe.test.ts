@@ -1,5 +1,6 @@
 import { describe, it } from 'bun:test';
-import { chmod, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { accessSync, constants as fsConstants, statSync } from 'node:fs';
+import { chmod, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import should from 'should';
@@ -7,13 +8,17 @@ import {
   bunProbeSpawn,
   CliPackProbe,
   type ProbeEnvironment,
+  type ProbeLauncher,
   type ProbeSpawn,
   probeCommand,
 } from '../../../src/adapters/pack/cli-probe.ts';
+import type { ExecutableResolverPort } from '../../../src/lib/core/harness-readiness.ts';
+import type { CoreAccount } from '../../../src/lib/core/inventory.ts';
+import { resolveStartAccount } from '../../../src/lib/fleet/start-resolution.ts';
 import { type PackProbeRequest, PROBE_PROMPT } from '../../../src/lib/pack/probe.ts';
 
 const request = (overrides: Partial<PackProbeRequest> = {}): PackProbeRequest => ({
-  wrapper: '/bin/claude-work',
+  wrapper: 'claude-work',
   harness: 'claude',
   cwd: '/work',
   timeoutMs: 45_000,
@@ -23,29 +28,35 @@ const request = (overrides: Partial<PackProbeRequest> = {}): PackProbeRequest =>
 describe('probeCommand', () => {
   it('should run a Claude wrapper one-shot, on the model asked for', () => {
     // Arrange + Act + Assert
-    should(probeCommand(request({ model: 'opus' }))).eql(['/bin/claude-work', '-p', PROBE_PROMPT, '--model', 'opus']);
+    should(probeCommand(request({ model: 'opus' }), '/bin/claude-work')).eql([
+      '/bin/claude-work',
+      '-p',
+      PROBE_PROMPT,
+      '--model',
+      'opus',
+    ]);
   });
 
   it('should run a Claude wrapper on its own default model when none is named', () => {
-    should(probeCommand(request())).eql(['/bin/claude-work', '-p', PROBE_PROMPT]);
+    should(probeCommand(request(), '/bin/claude-work')).eql(['/bin/claude-work', '-p', PROBE_PROMPT]);
   });
 
   it('should run a Codex wrapper at low effort, on the model asked for', () => {
     // Arrange + Act + Assert
-    should(probeCommand(request({ harness: 'codex', wrapper: '/bin/codex-work', model: 'gpt-x' }))).eql([
+    should(probeCommand(request({ harness: 'codex', wrapper: 'codex-work', model: 'gpt-x' }), '/bin/codex-work')).eql([
       '/bin/codex-work',
       'exec',
       '--skip-git-repo-check',
       '-c',
       'model_reasoning_effort="low"',
-      '-m',
+      '--model',
       'gpt-x',
       PROBE_PROMPT,
     ]);
   });
 
   it('should run a Codex wrapper on its default model when none is named', () => {
-    should(probeCommand(request({ harness: 'codex', wrapper: '/bin/codex-work' }))).eql([
+    should(probeCommand(request({ harness: 'codex', wrapper: 'codex-work' }), '/bin/codex-work')).eql([
       '/bin/codex-work',
       'exec',
       '--skip-git-repo-check',
@@ -58,6 +69,7 @@ describe('probeCommand', () => {
 
 function build(options: {
   spawn: ProbeSpawn;
+  launcher?: ProbeLauncher['resolve'];
   environment?: ProbeEnvironment['forWrapper'];
   base?: Record<string, string>;
   clock?: number[];
@@ -65,7 +77,8 @@ function build(options: {
   const ticks = [...(options.clock ?? [0, 250])];
   let last = 0;
   const environment: ProbeEnvironment = { forWrapper: options.environment ?? (async () => ({})) };
-  return new CliPackProbe(environment, options.spawn, options.base ?? {}, () => {
+  const launcher: ProbeLauncher = { resolve: options.launcher ?? (async wrapper => `/bin/${wrapper}`) };
+  return new CliPackProbe(launcher, environment, options.spawn, options.base ?? {}, () => {
     last = ticks.shift() ?? last;
     return last;
   });
@@ -73,12 +86,12 @@ function build(options: {
 
 describe('CliPackProbe', () => {
   it('should pass when the CLI answers OK, timing the run and merging the login over the base environment', async () => {
-    // Arrange
+    // Arrange — the login is looked up by the ABSOLUTE launcher, as a pane's is, and never sets HOME.
     const spawned: Array<Parameters<ProbeSpawn>[0]> = [];
     const probe = build({
-      base: { PATH: '/usr/bin', TOKEN: 'base' },
+      base: { PATH: '/usr/bin', TOKEN: 'base', HOME: '/home/owner' },
       environment: async (wrapper): Promise<Record<string, string>> =>
-        wrapper === '/bin/claude-work' ? { TOKEN: 'login' } : {},
+        wrapper === '/bin/claude-work' ? { TOKEN: 'login', HOME: '/elsewhere' } : {},
       spawn: async input => {
         spawned.push(input);
         return { kind: 'exited', code: 0, stdout: 'OK\n' };
@@ -94,7 +107,7 @@ describe('CliPackProbe', () => {
       {
         cmd: ['/bin/claude-work', '-p', PROBE_PROMPT, '--model', 'opus'],
         cwd: '/work',
-        env: { PATH: '/usr/bin', TOKEN: 'login' },
+        env: { PATH: '/usr/bin', TOKEN: 'login', HOME: '/home/owner' },
         timeoutMs: 45_000,
       },
     ]);
@@ -152,6 +165,42 @@ describe('CliPackProbe', () => {
       ms: 250,
       reason: 'it could not be started (plain string)',
     });
+  });
+
+  it("should fail with the start's own refusal when its launcher cannot be resolved, never spawning", async () => {
+    // Arrange
+    let spawned = false;
+    const probe = build({
+      launcher: async () => {
+        throw new Error(
+          'the fleet publishes claude-work at /fy/fleet/bin/claude-work, but this host cannot run that file',
+        );
+      },
+      spawn: async () => {
+        spawned = true;
+        return { kind: 'timeout' };
+      },
+    });
+    const opaque = build({
+      launcher: async () => {
+        throw 42;
+      },
+      spawn: async () => ({ kind: 'timeout' }),
+    });
+
+    // Act + Assert
+    should(await probe.probe(request())).eql({
+      ok: false,
+      ms: 250,
+      reason:
+        'it cannot be launched: the fleet publishes claude-work at /fy/fleet/bin/claude-work, but this host cannot run that file',
+    });
+    should(await opaque.probe(request())).eql({
+      ok: false,
+      ms: 250,
+      reason: 'it cannot be launched: its launcher is unknown',
+    });
+    should(spawned).be.false();
   });
 
   it('should fail with the reason when its login cannot be read, never spawning', async () => {
@@ -261,15 +310,132 @@ describe('bunProbeSpawn', () => {
     // Arrange
     const fake = await script('echo OK');
     try {
-      const probe = new CliPackProbe({ forWrapper: async () => ({}) }, bunProbeSpawn, {}, () => performance.now());
+      const probe = new CliPackProbe(
+        { resolve: async () => fake.path },
+        { forWrapper: async () => ({}) },
+        bunProbeSpawn,
+        {},
+        () => performance.now(),
+      );
 
       // Act
-      const outcome = await probe.probe({ wrapper: fake.path, harness: 'claude', cwd: fake.dir, timeoutMs: 10_000 });
+      const outcome = await probe.probe({ wrapper: 'cli.sh', harness: 'claude', cwd: fake.dir, timeoutMs: 10_000 });
 
       // Assert
       should(outcome.ok).be.true();
     } finally {
       await rm(fake.dir, { recursive: true, force: true });
+    }
+  });
+});
+
+/**
+ * The bug this guards: a runtime's launcher lives in `$FY_HOME/fleet/bin`, which is NOT on a service
+ * daemon's `PATH`. A probe that spawned the bare runtime name failed every candidate with "Executable not
+ * found in $PATH" while the start it guarded — which runs the published absolute path — would have worked.
+ */
+describe("CliPackProbe through the start's own launcher resolution", () => {
+  /** This host's runnable check, as the daemon's resolver answers it. */
+  const host: ExecutableResolverPort = {
+    resolve: () => undefined,
+    runnable: path => {
+      try {
+        accessSync(path, fsConstants.X_OK);
+        return statSync(path).isFile();
+      } catch {
+        return false;
+      }
+    },
+  };
+
+  async function fleet(): Promise<{ readonly home: string; readonly launcher: string; readonly account: CoreAccount }> {
+    const home = await mkdtemp(join(tmpdir(), 'ferretry-pack-launcher-'));
+    const bin = join(home, 'fleet', 'bin');
+    await mkdir(bin, { recursive: true });
+    const launcher = join(bin, 'claude-default');
+    const account: CoreAccount = {
+      secretEnv: {},
+      id: 'account-default',
+      agent: 'claude-default',
+      wrapper: launcher,
+      home: join(home, 'fleet', 'homes', 'claude-default'),
+      kind: 'claude',
+      mode: 'auto',
+      displayName: 'Claude default',
+      defaultModel: null,
+      models: [],
+      available: true,
+      unavailableReason: null,
+    };
+    return { home, launcher, account };
+  }
+
+  function probeOver(
+    account: CoreAccount,
+    environment: ProbeEnvironment['forWrapper'] = async () => ({}),
+  ): CliPackProbe {
+    return new CliPackProbe(
+      {
+        resolve: async wrapper =>
+          (await resolveStartAccount({ accounts: async () => [account] }, wrapper, host, 'fy')).executable,
+      },
+      { forWrapper: environment },
+      bunProbeSpawn,
+      // A daemon's PATH: system directories only, never the fleet's bin.
+      { PATH: '/usr/bin:/bin' },
+      () => performance.now(),
+    );
+  }
+
+  it('should run a launcher that is in the fleet bin directory but not on PATH, with its login and model', async () => {
+    // Arrange
+    const { home, launcher, account } = await fleet();
+    await writeFile(launcher, '#!/bin/sh\necho "$@" > "$0.argv"\necho "$PROBE_LOGIN" > "$0.env"\necho OK\n');
+    await chmod(launcher, 0o755);
+    const looked: string[] = [];
+    try {
+      const probe = probeOver(account, async wrapper => {
+        looked.push(wrapper);
+        return { PROBE_LOGIN: 'from-profile' };
+      });
+
+      // Act
+      const outcome = await probe.probe({
+        wrapper: 'claude-default',
+        harness: 'claude',
+        model: 'claude-sonnet-5-5',
+        cwd: home,
+        timeoutMs: 10_000,
+      });
+
+      // Assert
+      should(outcome.ok).be.true();
+      should(looked).eql([launcher]);
+      should((await Bun.file(`${launcher}.argv`).text()).trim()).equal(`-p ${PROBE_PROMPT} --model claude-sonnet-5-5`);
+      should((await Bun.file(`${launcher}.env`).text()).trim()).equal('from-profile');
+    } finally {
+      await rm(home, { recursive: true, force: true });
+    }
+  });
+
+  it("should refuse a launcher that is truly absent with the start's refusal, naming the path", async () => {
+    // Arrange — the manifest publishes the runtime, but nothing is at its launcher's path.
+    const { home, launcher, account } = await fleet();
+    try {
+      const probe = probeOver(account);
+
+      // Act
+      const outcome = await probe.probe({ wrapper: 'claude-default', harness: 'claude', cwd: home, timeoutMs: 10_000 });
+
+      // Assert
+      should(outcome.ok).be.false();
+      if (!outcome.ok) {
+        should(outcome.reason).startWith('it cannot be launched: ');
+        should(outcome.reason).containEql(launcher);
+        should(outcome.reason).not.containEql('$PATH');
+      }
+    } finally {
+      await rm(home, { recursive: true, force: true });
     }
   });
 });

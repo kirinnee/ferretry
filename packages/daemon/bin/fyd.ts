@@ -7893,7 +7893,9 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       /**
        * Pack mode (docs/pack-mode.md): over the same runtimes, logins and catalogs every picker reads, and
        * the same session start every surface uses — so its limits, its callsigns and its launch are the
-       * ones a plain start gets. Probes run the runtime's own wrapper with its login's launch environment.
+       * ones a plain start gets. Probes run the runtime's own wrapper with its login's launch environment,
+       * found by the start's own resolution — the published absolute launcher, never a name on `PATH` — so
+       * a probe that passes is a start that can launch.
        */
       const packService = new PackService({
         settings: async () => {
@@ -7916,7 +7918,28 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
             fleetCredentials.list(),
             fleetCatalog.machine(undefined),
           ]);
-          return { runtimes: runtimes.runtimes, credentials: credentials.credentials, tools: machine.tools };
+          // The start's own launcher resolution, per agent runtime: a runtime it would refuse is not ready.
+          const unlaunchable = Object.fromEntries(
+            (
+              await Promise.all(
+                runtimes.runtimes
+                  .filter(runtime => runtime.agent)
+                  .map(
+                    async runtime =>
+                      await resolveStartAccount(accounts, runtime.wrapper, executables, CLIENT_NAME).then(
+                        () => [],
+                        (error: unknown) => [[runtime.wrapper, error instanceof Error ? error.message : String(error)]],
+                      ),
+                  ),
+              )
+            ).flat(),
+          );
+          return {
+            runtimes: runtimes.runtimes,
+            credentials: credentials.credentials,
+            tools: machine.tools,
+            unlaunchable,
+          };
         },
         parent: async id => await packTree.parent(id),
         // A named folder is judged where it really is: `/tmp` is `/private/tmp` on macOS, and a link into a
@@ -7935,10 +7958,16 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         probe: (() => {
           const cache = new ProbeCache(
             new CliPackProbe(
+              {
+                resolve: async wrapper =>
+                  (await resolveStartAccount(accounts, wrapper, executables, CLIENT_NAME)).executable,
+              },
               accountLaunchEnvironment,
               bunProbeSpawn,
               Object.fromEntries(
-                Object.entries(process.env).filter((entry): entry is [string, string] => entry[1] !== undefined),
+                Object.entries(sanitizeHarnessEnv(process.env)).filter(
+                  (entry): entry is [string, string] => entry[1] !== undefined,
+                ),
               ),
               () => performance.now(),
             ),
