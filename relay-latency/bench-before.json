@@ -1,0 +1,590 @@
+{
+  "label": "baseline",
+  "at": "2026-10-20T16:15:44.611Z",
+  "keys": 30,
+  "seqLines": 20000,
+  "results": [
+    {
+      "name": "direct · loopback · fresh",
+      "carrier": "direct",
+      "network": "loopback",
+      "networkDescription": "no shaping: software cost only",
+      "scrollback": 0,
+      "outputGateMs": 0,
+      "pathRttMs": 0,
+      "keys": 30,
+      "echo": {
+        "p50": 31.300048828125,
+        "p95": 33.7998046875,
+        "overRttP50": 31.300048828125
+      },
+      "hopsP50": {
+        "up": 1.406494140625,
+        "tmuxWrite": 5.03564453125,
+        "untilCapture": 17.212890625,
+        "capture": 5.41259765625,
+        "encode": 0.04443359375,
+        "down": 0.944091796875,
+        "render": 1.199951171875
+      },
+      "echoBytesP50": 103,
+      "received": {
+        "bytes": 3329,
+        "frames": 33
+      }
+    },
+    {
+      "name": "direct · loopback · 300 lines of history",
+      "carrier": "direct",
+      "network": "loopback",
+      "networkDescription": "no shaping: software cost only",
+      "scrollback": 300,
+      "outputGateMs": 0,
+      "pathRttMs": 0,
+      "keys": 30,
+      "echo": {
+        "p50": 45.800048828125,
+        "p95": 58,
+        "overRttP50": 45.800048828125
+      },
+      "hopsP50": {
+        "up": 1.422607421875,
+        "tmuxWrite": 5.336181640625,
+        "untilCapture": 17.11962890625,
+        "capture": 7.084716796875,
+        "encode": 0.790283203125,
+        "down": 2.347900390625,
+        "render": 10.7998046875
+      },
+      "echoBytesP50": 36949,
+      "received": {
+        "bytes": 1219247,
+        "frames": 33
+      }
+    },
+    {
+      "name": "direct · loopback · 1500 lines of history",
+      "carrier": "direct",
+      "network": "loopback",
+      "networkDescription": "no shaping: software cost only",
+      "scrollback": 1500,
+      "outputGateMs": 0,
+      "pathRttMs": 0,
+      "keys": 0,
+      "echo": {
+        "p50": null,
+        "p95": null,
+        "overRttP50": null
+      },
+      "hopsP50": {
+        "up": null,
+        "tmuxWrite": null,
+        "untilCapture": null,
+        "capture": null,
+        "encode": null,
+        "down": null,
+        "render": null
+      },
+      "echoBytesP50": null,
+      "error": "timed out waiting for the first prompt; cursor line is \"\"",
+      "received": {
+        "bytes": 0,
+        "frames": 0
+      }
+    },
+    {
+      "name": "direct · wan · fresh",
+      "carrier": "direct",
+      "network": "wan",
+      "networkDescription": "60 ms RTT on both paths; daemon uplink 10 Mbit/s, phone 10 up / 50 down",
+      "scrollback": 0,
+      "outputGateMs": 0,
+      "pathRttMs": 60,
+      "keys": 30,
+      "echo": {
+        "p50": 92.900146484375,
+        "p95": 96,
+        "overRttP50": 32.900146484375
+      },
+      "hopsP50": {
+        "up": 32.438720703125,
+        "tmuxWrite": 4.874267578125,
+        "untilCapture": 16.429443359375,
+        "capture": 4.955322265625,
+        "encode": 0.039794921875,
+        "down": 32.302734375,
+        "render": 1.300048828125
+      },
+      "echoBytesP50": 103,
+      "throughput": {
+        "ms": 127.2001953125,
+        "bytes": 14031,
+        "frames": 1
+      },
+      "received": {
+        "bytes": 17360,
+        "frames": 34
+      }
+    },
+    {
+      "name": "direct · wan · 300 lines of history",
+      "carrier": "direct",
+      "network": "wan",
+      "networkDescription": "60 ms RTT on both paths; daemon uplink 10 Mbit/s, phone 10 up / 50 down",
+      "scrollback": 300,
+      "outputGateMs": 0,
+      "pathRttMs": 60,
+      "keys": 30,
+      "echo": {
+        "p50": 146.300048828125,
+        "p95": 156.800048828125,
+        "overRttP50": 86.300048828125
+      },
+      "hopsP50": {
+        "up": 33.426025390625,
+        "tmuxWrite": 5.231201171875,
+        "untilCapture": 16.579833984375,
+        "capture": 7.0546875,
+        "encode": 0.782958984375,
+        "down": 72.73046875,
+        "render": 9.800048828125
+      },
+      "echoBytesP50": 36949,
+      "throughput": {
+        "ms": 117.599853515625,
+        "bytes": 13331,
+        "frames": 1
+      },
+      "received": {
+        "bytes": 1232578,
+        "frames": 34
+      }
+    },
+    {
+      "name": "direct · wan · 1500 lines of history",
+      "carrier": "direct",
+      "network": "wan",
+      "networkDescription": "60 ms RTT on both paths; daemon uplink 10 Mbit/s, phone 10 up / 50 down",
+      "scrollback": 1500,
+      "outputGateMs": 0,
+      "pathRttMs": 60,
+      "keys": 0,
+      "echo": {
+        "p50": null,
+        "p95": null,
+        "overRttP50": null
+      },
+      "hopsP50": {
+        "up": null,
+        "tmuxWrite": null,
+        "untilCapture": null,
+        "capture": null,
+        "encode": null,
+        "down": null,
+        "render": null
+      },
+      "echoBytesP50": null,
+      "error": "timed out waiting for the first prompt; cursor line is \"\"",
+      "received": {
+        "bytes": 0,
+        "frames": 0
+      }
+    },
+    {
+      "name": "relay(gate 0ms) · loopback · fresh",
+      "carrier": "relay",
+      "network": "loopback",
+      "networkDescription": "no shaping: software cost only",
+      "scrollback": 0,
+      "outputGateMs": 0,
+      "pathRttMs": 0,
+      "keys": 30,
+      "echo": {
+        "p50": 31.400146484375,
+        "p95": 33.60009765625,
+        "overRttP50": 31.400146484375
+      },
+      "hopsP50": {
+        "up": 2.03515625,
+        "tmuxWrite": 4.908935546875,
+        "untilCapture": 16.773681640625,
+        "capture": 5.03564453125,
+        "encode": 0.035400390625,
+        "down": 1.33642578125,
+        "render": 1.10009765625,
+        "relayUp": 0.26123046875,
+        "relayDown": 0.25732421875
+      },
+      "echoBytesP50": 103,
+      "received": {
+        "bytes": 3329,
+        "frames": 33
+      }
+    },
+    {
+      "name": "relay(gate 0ms) · loopback · 300 lines of history",
+      "carrier": "relay",
+      "network": "loopback",
+      "networkDescription": "no shaping: software cost only",
+      "scrollback": 300,
+      "outputGateMs": 0,
+      "pathRttMs": 0,
+      "keys": 30,
+      "echo": {
+        "p50": 44.89990234375,
+        "p95": 58,
+        "overRttP50": 44.89990234375
+      },
+      "hopsP50": {
+        "up": 2.040283203125,
+        "tmuxWrite": 5.21826171875,
+        "untilCapture": 16.967529296875,
+        "capture": 7.06640625,
+        "encode": 0.754150390625,
+        "down": 2.944580078125,
+        "render": 10.39990234375,
+        "relayUp": 0.2705078125,
+        "relayDown": 0.273681640625
+      },
+      "echoBytesP50": 36949,
+      "received": {
+        "bytes": 1219247,
+        "frames": 33
+      }
+    },
+    {
+      "name": "relay(gate 0ms) · loopback · 1500 lines of history",
+      "carrier": "relay",
+      "network": "loopback",
+      "networkDescription": "no shaping: software cost only",
+      "scrollback": 1500,
+      "outputGateMs": 0,
+      "pathRttMs": 0,
+      "keys": 0,
+      "echo": {
+        "p50": null,
+        "p95": null,
+        "overRttP50": null
+      },
+      "hopsP50": {
+        "up": null,
+        "tmuxWrite": null,
+        "untilCapture": null,
+        "capture": null,
+        "encode": null,
+        "down": null,
+        "render": null,
+        "relayUp": null,
+        "relayDown": null
+      },
+      "echoBytesP50": null,
+      "error": "timed out waiting for the first prompt; cursor line is \"\"",
+      "received": {
+        "bytes": 0,
+        "frames": 0
+      }
+    },
+    {
+      "name": "relay(gate 0ms) · wan · fresh",
+      "carrier": "relay",
+      "network": "wan",
+      "networkDescription": "60 ms RTT on both paths; daemon uplink 10 Mbit/s, phone 10 up / 50 down",
+      "scrollback": 0,
+      "outputGateMs": 0,
+      "pathRttMs": 60,
+      "keys": 30,
+      "echo": {
+        "p50": 95.699951171875,
+        "p95": 100.10009765625,
+        "overRttP50": 35.699951171875
+      },
+      "hopsP50": {
+        "up": 34.671630859375,
+        "tmuxWrite": 4.27392578125,
+        "untilCapture": 16.25732421875,
+        "capture": 4.930419921875,
+        "encode": 0.03662109375,
+        "down": 34.085205078125,
+        "render": 1.60009765625,
+        "relayUp": 0.240966796875,
+        "relayDown": 0.209716796875
+      },
+      "echoBytesP50": 103,
+      "throughput": {
+        "ms": 130.2998046875,
+        "bytes": 14031,
+        "frames": 1
+      },
+      "received": {
+        "bytes": 17360,
+        "frames": 34
+      }
+    },
+    {
+      "name": "relay(gate 0ms) · wan · 300 lines of history",
+      "carrier": "relay",
+      "network": "wan",
+      "networkDescription": "60 ms RTT on both paths; daemon uplink 10 Mbit/s, phone 10 up / 50 down",
+      "scrollback": 300,
+      "outputGateMs": 0,
+      "pathRttMs": 60,
+      "keys": 30,
+      "echo": {
+        "p50": 158.199951171875,
+        "p95": 168,
+        "overRttP50": 98.199951171875
+      },
+      "hopsP50": {
+        "up": 34.919189453125,
+        "tmuxWrite": 5.254150390625,
+        "untilCapture": 16.517333984375,
+        "capture": 6.964599609375,
+        "encode": 0.790771484375,
+        "down": 82.679931640625,
+        "render": 9.89990234375,
+        "relayUp": 0.267578125,
+        "relayDown": 0.3232421875
+      },
+      "echoBytesP50": 36949,
+      "throughput": {
+        "ms": 125,
+        "bytes": 13331,
+        "frames": 1
+      },
+      "received": {
+        "bytes": 1232578,
+        "frames": 34
+      }
+    },
+    {
+      "name": "relay(gate 0ms) · wan · 1500 lines of history",
+      "carrier": "relay",
+      "network": "wan",
+      "networkDescription": "60 ms RTT on both paths; daemon uplink 10 Mbit/s, phone 10 up / 50 down",
+      "scrollback": 1500,
+      "outputGateMs": 0,
+      "pathRttMs": 60,
+      "keys": 0,
+      "echo": {
+        "p50": null,
+        "p95": null,
+        "overRttP50": null
+      },
+      "hopsP50": {
+        "up": null,
+        "tmuxWrite": null,
+        "untilCapture": null,
+        "capture": null,
+        "encode": null,
+        "down": null,
+        "render": null,
+        "relayUp": null,
+        "relayDown": null
+      },
+      "echoBytesP50": null,
+      "error": "timed out waiting for the first prompt; cursor line is \"\"",
+      "received": {
+        "bytes": 0,
+        "frames": 0
+      }
+    },
+    {
+      "name": "relay(gate 10ms) · loopback · fresh",
+      "carrier": "relay",
+      "network": "loopback",
+      "networkDescription": "no shaping: software cost only",
+      "scrollback": 0,
+      "outputGateMs": 10,
+      "pathRttMs": 0,
+      "keys": 30,
+      "echo": {
+        "p50": 54,
+        "p95": 56.800048828125,
+        "overRttP50": 54
+      },
+      "hopsP50": {
+        "up": 12.5400390625,
+        "tmuxWrite": 5.480712890625,
+        "untilCapture": 16.397705078125,
+        "capture": 4.96337890625,
+        "encode": 0.037841796875,
+        "down": 12.48779296875,
+        "render": 1.400146484375,
+        "relayUp": 10.7431640625,
+        "relayDown": 11.0185546875
+      },
+      "echoBytesP50": 103,
+      "received": {
+        "bytes": 3329,
+        "frames": 33
+      }
+    },
+    {
+      "name": "relay(gate 10ms) · loopback · 300 lines of history",
+      "carrier": "relay",
+      "network": "loopback",
+      "networkDescription": "no shaping: software cost only",
+      "scrollback": 300,
+      "outputGateMs": 10,
+      "pathRttMs": 0,
+      "keys": 30,
+      "echo": {
+        "p50": 67,
+        "p95": 79.5,
+        "overRttP50": 67
+      },
+      "hopsP50": {
+        "up": 13.3359375,
+        "tmuxWrite": 5.695556640625,
+        "untilCapture": 16.518798828125,
+        "capture": 7.098388671875,
+        "encode": 0.80078125,
+        "down": 14.044189453125,
+        "render": 9.800048828125,
+        "relayUp": 11.388916015625,
+        "relayDown": 11.21630859375
+      },
+      "echoBytesP50": 36949,
+      "received": {
+        "bytes": 1219247,
+        "frames": 33
+      }
+    },
+    {
+      "name": "relay(gate 10ms) · loopback · 1500 lines of history",
+      "carrier": "relay",
+      "network": "loopback",
+      "networkDescription": "no shaping: software cost only",
+      "scrollback": 1500,
+      "outputGateMs": 10,
+      "pathRttMs": 0,
+      "keys": 0,
+      "echo": {
+        "p50": null,
+        "p95": null,
+        "overRttP50": null
+      },
+      "hopsP50": {
+        "up": null,
+        "tmuxWrite": null,
+        "untilCapture": null,
+        "capture": null,
+        "encode": null,
+        "down": null,
+        "render": null,
+        "relayUp": null,
+        "relayDown": null
+      },
+      "echoBytesP50": null,
+      "error": "timed out waiting for the first prompt; cursor line is \"\"",
+      "received": {
+        "bytes": 0,
+        "frames": 0
+      }
+    },
+    {
+      "name": "relay(gate 10ms) · wan · fresh",
+      "carrier": "relay",
+      "network": "wan",
+      "networkDescription": "60 ms RTT on both paths; daemon uplink 10 Mbit/s, phone 10 up / 50 down",
+      "scrollback": 0,
+      "outputGateMs": 10,
+      "pathRttMs": 60,
+      "keys": 30,
+      "echo": {
+        "p50": 118.199951171875,
+        "p95": 123.699951171875,
+        "overRttP50": 58.199951171875
+      },
+      "hopsP50": {
+        "up": 45.155029296875,
+        "tmuxWrite": 5.161865234375,
+        "untilCapture": 16.37744140625,
+        "capture": 5.164794921875,
+        "encode": 0.0361328125,
+        "down": 45.46923828125,
+        "render": 1.5,
+        "relayUp": 10.861083984375,
+        "relayDown": 11.164306640625
+      },
+      "echoBytesP50": 103,
+      "throughput": {
+        "ms": 150.199951171875,
+        "bytes": 14031,
+        "frames": 1
+      },
+      "received": {
+        "bytes": 17360,
+        "frames": 34
+      }
+    },
+    {
+      "name": "relay(gate 10ms) · wan · 300 lines of history",
+      "carrier": "relay",
+      "network": "wan",
+      "networkDescription": "60 ms RTT on both paths; daemon uplink 10 Mbit/s, phone 10 up / 50 down",
+      "scrollback": 300,
+      "outputGateMs": 10,
+      "pathRttMs": 60,
+      "keys": 30,
+      "echo": {
+        "p50": 179.099853515625,
+        "p95": 197.60009765625,
+        "overRttP50": 119.099853515625
+      },
+      "hopsP50": {
+        "up": 45.998046875,
+        "tmuxWrite": 5.380859375,
+        "untilCapture": 16.810546875,
+        "capture": 6.8564453125,
+        "encode": 0.7822265625,
+        "down": 93.4951171875,
+        "render": 9.800048828125,
+        "relayUp": 11.192626953125,
+        "relayDown": 11.271728515625
+      },
+      "echoBytesP50": 36949,
+      "throughput": {
+        "ms": 149.400146484375,
+        "bytes": 13331,
+        "frames": 1
+      },
+      "received": {
+        "bytes": 1232578,
+        "frames": 34
+      }
+    },
+    {
+      "name": "relay(gate 10ms) · wan · 1500 lines of history",
+      "carrier": "relay",
+      "network": "wan",
+      "networkDescription": "60 ms RTT on both paths; daemon uplink 10 Mbit/s, phone 10 up / 50 down",
+      "scrollback": 1500,
+      "outputGateMs": 10,
+      "pathRttMs": 60,
+      "keys": 0,
+      "echo": {
+        "p50": null,
+        "p95": null,
+        "overRttP50": null
+      },
+      "hopsP50": {
+        "up": null,
+        "tmuxWrite": null,
+        "untilCapture": null,
+        "capture": null,
+        "encode": null,
+        "down": null,
+        "render": null,
+        "relayUp": null,
+        "relayDown": null
+      },
+      "echoBytesP50": null,
+      "error": "timed out waiting for the first prompt; cursor line is \"\"",
+      "received": {
+        "bytes": 0,
+        "frames": 0
+      }
+    }
+  ]
+}

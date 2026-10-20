@@ -1,0 +1,59 @@
+direct · loopback · fresh                                  echo p50   31.3 ms  p95   33.8 ms  (path RTT 0 ms)  echo frame 103 B
+direct · loopback · 300 lines of history                   echo p50   45.8 ms  p95   58.0 ms  (path RTT 0 ms)  echo frame 36949 B
+direct · loopback · 1500 lines of history                  FAILED after 0 frames / 0 B: timed out waiting for the first prompt; cursor line is ""
+direct · wan · fresh                                       echo p50   92.9 ms  p95   96.0 ms  (path RTT 60 ms)  echo frame 103 B  seq 20000: 127 ms, 14 KiB in 1 frames
+direct · wan · 300 lines of history                        echo p50  146.3 ms  p95  156.8 ms  (path RTT 60 ms)  echo frame 36949 B  seq 20000: 118 ms, 13 KiB in 1 frames
+direct · wan · 1500 lines of history                       FAILED after 0 frames / 0 B: timed out waiting for the first prompt; cursor line is ""
+relay(gate 0ms) · loopback · fresh                         echo p50   31.4 ms  p95   33.6 ms  (path RTT 0 ms)  echo frame 103 B
+relay(gate 0ms) · loopback · 300 lines of history          echo p50   44.9 ms  p95   58.0 ms  (path RTT 0 ms)  echo frame 36949 B
+relay(gate 0ms) · loopback · 1500 lines of history         FAILED after 0 frames / 0 B: timed out waiting for the first prompt; cursor line is ""
+relay(gate 0ms) · wan · fresh                              echo p50   95.7 ms  p95  100.1 ms  (path RTT 60 ms)  echo frame 103 B  seq 20000: 130 ms, 14 KiB in 1 frames
+relay(gate 0ms) · wan · 300 lines of history               echo p50  158.2 ms  p95  168.0 ms  (path RTT 60 ms)  echo frame 36949 B  seq 20000: 125 ms, 13 KiB in 1 frames
+relay(gate 0ms) · wan · 1500 lines of history              FAILED after 0 frames / 0 B: timed out waiting for the first prompt; cursor line is ""
+relay(gate 10ms) · loopback · fresh                        echo p50   54.0 ms  p95   56.8 ms  (path RTT 0 ms)  echo frame 103 B
+relay(gate 10ms) · loopback · 300 lines of history         echo p50   67.0 ms  p95   79.5 ms  (path RTT 0 ms)  echo frame 36949 B
+relay(gate 10ms) · loopback · 1500 lines of history        FAILED after 0 frames / 0 B: timed out waiting for the first prompt; cursor line is ""
+relay(gate 10ms) · wan · fresh                             echo p50  118.2 ms  p95  123.7 ms  (path RTT 60 ms)  echo frame 103 B  seq 20000: 150 ms, 14 KiB in 1 frames
+relay(gate 10ms) · wan · 300 lines of history              echo p50  179.1 ms  p95  197.6 ms  (path RTT 60 ms)  echo frame 36949 B  seq 20000: 149 ms, 13 KiB in 1 frames
+relay(gate 10ms) · wan · 1500 lines of history             FAILED after 0 frames / 0 B: timed out waiting for the first prompt; cursor line is ""
+
+per-hop medians (ms):
+  direct · loopback · fresh
+    up 1.4 · tmuxWrite 5.0 · untilCapture 17.2 · capture 5.4 · encode 0.0 · down 0.9 · render 1.2
+  direct · loopback · 300 lines of history
+    up 1.4 · tmuxWrite 5.3 · untilCapture 17.1 · capture 7.1 · encode 0.8 · down 2.3 · render 10.8
+  direct · loopback · 1500 lines of history
+    up – · tmuxWrite – · untilCapture – · capture – · encode – · down – · render –
+  direct · wan · fresh
+    up 32.4 · tmuxWrite 4.9 · untilCapture 16.4 · capture 5.0 · encode 0.0 · down 32.3 · render 1.3
+  direct · wan · 300 lines of history
+    up 33.4 · tmuxWrite 5.2 · untilCapture 16.6 · capture 7.1 · encode 0.8 · down 72.7 · render 9.8
+  direct · wan · 1500 lines of history
+    up – · tmuxWrite – · untilCapture – · capture – · encode – · down – · render –
+  relay(gate 0ms) · loopback · fresh
+    up 2.0 · tmuxWrite 4.9 · untilCapture 16.8 · capture 5.0 · encode 0.0 · down 1.3 · render 1.1 · relayUp 0.3 · relayDown 0.3
+  relay(gate 0ms) · loopback · 300 lines of history
+    up 2.0 · tmuxWrite 5.2 · untilCapture 17.0 · capture 7.1 · encode 0.8 · down 2.9 · render 10.4 · relayUp 0.3 · relayDown 0.3
+  relay(gate 0ms) · loopback · 1500 lines of history
+    up – · tmuxWrite – · untilCapture – · capture – · encode – · down – · render – · relayUp – · relayDown –
+  relay(gate 0ms) · wan · fresh
+    up 34.7 · tmuxWrite 4.3 · untilCapture 16.3 · capture 4.9 · encode 0.0 · down 34.1 · render 1.6 · relayUp 0.2 · relayDown 0.2
+  relay(gate 0ms) · wan · 300 lines of history
+    up 34.9 · tmuxWrite 5.3 · untilCapture 16.5 · capture 7.0 · encode 0.8 · down 82.7 · render 9.9 · relayUp 0.3 · relayDown 0.3
+  relay(gate 0ms) · wan · 1500 lines of history
+    up – · tmuxWrite – · untilCapture – · capture – · encode – · down – · render – · relayUp – · relayDown –
+  relay(gate 10ms) · loopback · fresh
+    up 12.5 · tmuxWrite 5.5 · untilCapture 16.4 · capture 5.0 · encode 0.0 · down 12.5 · render 1.4 · relayUp 10.7 · relayDown 11.0
+  relay(gate 10ms) · loopback · 300 lines of history
+    up 13.3 · tmuxWrite 5.7 · untilCapture 16.5 · capture 7.1 · encode 0.8 · down 14.0 · render 9.8 · relayUp 11.4 · relayDown 11.2
+  relay(gate 10ms) · loopback · 1500 lines of history
+    up – · tmuxWrite – · untilCapture – · capture – · encode – · down – · render – · relayUp – · relayDown –
+  relay(gate 10ms) · wan · fresh
+    up 45.2 · tmuxWrite 5.2 · untilCapture 16.4 · capture 5.2 · encode 0.0 · down 45.5 · render 1.5 · relayUp 10.9 · relayDown 11.2
+  relay(gate 10ms) · wan · 300 lines of history
+    up 46.0 · tmuxWrite 5.4 · untilCapture 16.8 · capture 6.9 · encode 0.8 · down 93.5 · render 9.8 · relayUp 11.2 · relayDown 11.3
+  relay(gate 10ms) · wan · 1500 lines of history
+    up – · tmuxWrite – · untilCapture – · capture – · encode – · down – · render – · relayUp – · relayDown –
+
+wrote /tmp/claude-1000/bench-baseline.json
+exit=0

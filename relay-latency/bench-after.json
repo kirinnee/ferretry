@@ -1,0 +1,599 @@
+{
+  "label": "after",
+  "at": "2026-10-20T16:17:16.168Z",
+  "keys": 30,
+  "seqLines": 20000,
+  "results": [
+    {
+      "name": "direct · loopback · fresh",
+      "carrier": "direct",
+      "network": "loopback",
+      "networkDescription": "no shaping: software cost only",
+      "scrollback": 0,
+      "outputGateMs": 0,
+      "pathRttMs": 0,
+      "keys": 30,
+      "echo": {
+        "p50": 9.5,
+        "p95": 12.10009765625,
+        "overRttP50": 9.5
+      },
+      "hopsP50": {
+        "up": 1.132080078125,
+        "tmuxWrite": 2.2763671875,
+        "untilCapture": 1.110595703125,
+        "capture": 2.2724609375,
+        "encode": 0.053955078125,
+        "down": 1.004638671875,
+        "render": 1.39990234375
+      },
+      "echoBytesP50": 44,
+      "received": {
+        "bytes": 1500,
+        "frames": 33
+      }
+    },
+    {
+      "name": "direct · loopback · 300 lines of history",
+      "carrier": "direct",
+      "network": "loopback",
+      "networkDescription": "no shaping: software cost only",
+      "scrollback": 300,
+      "outputGateMs": 0,
+      "pathRttMs": 0,
+      "keys": 30,
+      "echo": {
+        "p50": 12.199951171875,
+        "p95": 26.60009765625,
+        "overRttP50": 12.199951171875
+      },
+      "hopsP50": {
+        "up": 1.27587890625,
+        "tmuxWrite": 2.373291015625,
+        "untilCapture": 1.08251953125,
+        "capture": 3.96044921875,
+        "encode": 0.0654296875,
+        "down": 0.940185546875,
+        "render": 1.39990234375
+      },
+      "echoBytesP50": 46,
+      "received": {
+        "bytes": 75254,
+        "frames": 33
+      }
+    },
+    {
+      "name": "direct · loopback · 1500 lines of history",
+      "carrier": "direct",
+      "network": "loopback",
+      "networkDescription": "no shaping: software cost only",
+      "scrollback": 1500,
+      "outputGateMs": 0,
+      "pathRttMs": 0,
+      "keys": 30,
+      "echo": {
+        "p50": 12.599853515625,
+        "p95": 26.7001953125,
+        "overRttP50": 12.599853515625
+      },
+      "hopsP50": {
+        "up": 1.13671875,
+        "tmuxWrite": 2.313232421875,
+        "untilCapture": 1.08447265625,
+        "capture": 3.826171875,
+        "encode": 0.06591796875,
+        "down": 1.032470703125,
+        "render": 1.39990234375
+      },
+      "echoBytesP50": 46,
+      "received": {
+        "bytes": 99594,
+        "frames": 33
+      }
+    },
+    {
+      "name": "direct · wan · fresh",
+      "carrier": "direct",
+      "network": "wan",
+      "networkDescription": "60 ms RTT on both paths; daemon uplink 10 Mbit/s, phone 10 up / 50 down",
+      "scrollback": 0,
+      "outputGateMs": 0,
+      "pathRttMs": 60,
+      "keys": 30,
+      "echo": {
+        "p50": 72.199951171875,
+        "p95": 75,
+        "overRttP50": 12.199951171875
+      },
+      "hopsP50": {
+        "up": 33.002685546875,
+        "tmuxWrite": 2.654541015625,
+        "untilCapture": 1.0810546875,
+        "capture": 2.295166015625,
+        "encode": 0.05712890625,
+        "down": 31.572998046875,
+        "render": 1.300048828125
+      },
+      "echoBytesP50": 44,
+      "throughput": {
+        "ms": 131.199951171875,
+        "bytes": 30350,
+        "frames": 3
+      },
+      "received": {
+        "bytes": 31850,
+        "frames": 36
+      }
+    },
+    {
+      "name": "direct · wan · 300 lines of history",
+      "carrier": "direct",
+      "network": "wan",
+      "networkDescription": "60 ms RTT on both paths; daemon uplink 10 Mbit/s, phone 10 up / 50 down",
+      "scrollback": 300,
+      "outputGateMs": 0,
+      "pathRttMs": 60,
+      "keys": 30,
+      "echo": {
+        "p50": 75.800048828125,
+        "p95": 78.300048828125,
+        "overRttP50": 15.800048828125
+      },
+      "hopsP50": {
+        "up": 33.734375,
+        "tmuxWrite": 2.6396484375,
+        "untilCapture": 1.099365234375,
+        "capture": 3.969970703125,
+        "encode": 0.07763671875,
+        "down": 31.822509765625,
+        "render": 1.300048828125
+      },
+      "echoBytesP50": 46,
+      "throughput": {
+        "ms": 118.400146484375,
+        "bytes": 27223,
+        "frames": 2
+      },
+      "received": {
+        "bytes": 102477,
+        "frames": 35
+      }
+    },
+    {
+      "name": "direct · wan · 1500 lines of history",
+      "carrier": "direct",
+      "network": "wan",
+      "networkDescription": "60 ms RTT on both paths; daemon uplink 10 Mbit/s, phone 10 up / 50 down",
+      "scrollback": 1500,
+      "outputGateMs": 0,
+      "pathRttMs": 60,
+      "keys": 30,
+      "echo": {
+        "p50": 75.599853515625,
+        "p95": 77,
+        "overRttP50": 15.599853515625
+      },
+      "hopsP50": {
+        "up": 33.551025390625,
+        "tmuxWrite": 2.521728515625,
+        "untilCapture": 1.081298828125,
+        "capture": 3.91552734375,
+        "encode": 0.05908203125,
+        "down": 31.92333984375,
+        "render": 1.300048828125
+      },
+      "echoBytesP50": 46,
+      "throughput": {
+        "ms": 122.10009765625,
+        "bytes": 26432,
+        "frames": 2
+      },
+      "received": {
+        "bytes": 126026,
+        "frames": 35
+      }
+    },
+    {
+      "name": "relay(gate 0ms) · loopback · fresh",
+      "carrier": "relay",
+      "network": "loopback",
+      "networkDescription": "no shaping: software cost only",
+      "scrollback": 0,
+      "outputGateMs": 0,
+      "pathRttMs": 0,
+      "keys": 30,
+      "echo": {
+        "p50": 10.5,
+        "p95": 12.199951171875,
+        "overRttP50": 10.5
+      },
+      "hopsP50": {
+        "up": 1.62060546875,
+        "tmuxWrite": 2.317138671875,
+        "untilCapture": 1.07958984375,
+        "capture": 2.24951171875,
+        "encode": 0.04248046875,
+        "down": 1.197021484375,
+        "render": 1.300048828125,
+        "relayUp": 0.27197265625,
+        "relayDown": 0.165283203125
+      },
+      "echoBytesP50": 44,
+      "received": {
+        "bytes": 1500,
+        "frames": 33
+      }
+    },
+    {
+      "name": "relay(gate 0ms) · loopback · 300 lines of history",
+      "carrier": "relay",
+      "network": "loopback",
+      "networkDescription": "no shaping: software cost only",
+      "scrollback": 300,
+      "outputGateMs": 0,
+      "pathRttMs": 0,
+      "keys": 30,
+      "echo": {
+        "p50": 13.199951171875,
+        "p95": 26.7001953125,
+        "overRttP50": 13.199951171875
+      },
+      "hopsP50": {
+        "up": 1.573486328125,
+        "tmuxWrite": 2.314208984375,
+        "untilCapture": 1.076171875,
+        "capture": 3.826904296875,
+        "encode": 0.054931640625,
+        "down": 1.20361328125,
+        "render": 1.199951171875,
+        "relayUp": 0.240478515625,
+        "relayDown": 0.13671875
+      },
+      "echoBytesP50": 46,
+      "received": {
+        "bytes": 75254,
+        "frames": 33
+      }
+    },
+    {
+      "name": "relay(gate 0ms) · loopback · 1500 lines of history",
+      "carrier": "relay",
+      "network": "loopback",
+      "networkDescription": "no shaping: software cost only",
+      "scrollback": 1500,
+      "outputGateMs": 0,
+      "pathRttMs": 0,
+      "keys": 30,
+      "echo": {
+        "p50": 13.900146484375,
+        "p95": 26.800048828125,
+        "overRttP50": 13.900146484375
+      },
+      "hopsP50": {
+        "up": 1.52685546875,
+        "tmuxWrite": 2.394287109375,
+        "untilCapture": 1.09326171875,
+        "capture": 3.865966796875,
+        "encode": 0.058837890625,
+        "down": 1.285888671875,
+        "render": 2,
+        "relayUp": 0.22998046875,
+        "relayDown": 0.125
+      },
+      "echoBytesP50": 46,
+      "received": {
+        "bytes": 99594,
+        "frames": 33
+      }
+    },
+    {
+      "name": "relay(gate 0ms) · wan · fresh",
+      "carrier": "relay",
+      "network": "wan",
+      "networkDescription": "60 ms RTT on both paths; daemon uplink 10 Mbit/s, phone 10 up / 50 down",
+      "scrollback": 0,
+      "outputGateMs": 0,
+      "pathRttMs": 60,
+      "keys": 30,
+      "echo": {
+        "p50": 75.7001953125,
+        "p95": 78.800048828125,
+        "overRttP50": 15.7001953125
+      },
+      "hopsP50": {
+        "up": 34.8408203125,
+        "tmuxWrite": 2.611572265625,
+        "untilCapture": 1.08056640625,
+        "capture": 2.318359375,
+        "encode": 0.048828125,
+        "down": 33.3544921875,
+        "render": 1.300048828125,
+        "relayUp": 0.23486328125,
+        "relayDown": 0.17578125
+      },
+      "echoBytesP50": 44,
+      "throughput": {
+        "ms": 125.60009765625,
+        "bytes": 17287,
+        "frames": 2
+      },
+      "received": {
+        "bytes": 18787,
+        "frames": 35
+      }
+    },
+    {
+      "name": "relay(gate 0ms) · wan · 300 lines of history",
+      "carrier": "relay",
+      "network": "wan",
+      "networkDescription": "60 ms RTT on both paths; daemon uplink 10 Mbit/s, phone 10 up / 50 down",
+      "scrollback": 300,
+      "outputGateMs": 0,
+      "pathRttMs": 60,
+      "keys": 30,
+      "echo": {
+        "p50": 76.60009765625,
+        "p95": 93.300048828125,
+        "overRttP50": 16.60009765625
+      },
+      "hopsP50": {
+        "up": 34.78173828125,
+        "tmuxWrite": 2.64453125,
+        "untilCapture": 1.112548828125,
+        "capture": 3.923828125,
+        "encode": 0.057373046875,
+        "down": 32.811767578125,
+        "render": 1.10009765625,
+        "relayUp": 0.245361328125,
+        "relayDown": 0.19287109375
+      },
+      "echoBytesP50": 46,
+      "throughput": {
+        "ms": 120.300048828125,
+        "bytes": 24831,
+        "frames": 2
+      },
+      "received": {
+        "bytes": 100085,
+        "frames": 35
+      }
+    },
+    {
+      "name": "relay(gate 0ms) · wan · 1500 lines of history",
+      "carrier": "relay",
+      "network": "wan",
+      "networkDescription": "60 ms RTT on both paths; daemon uplink 10 Mbit/s, phone 10 up / 50 down",
+      "scrollback": 1500,
+      "outputGateMs": 0,
+      "pathRttMs": 60,
+      "keys": 30,
+      "echo": {
+        "p50": 78.099853515625,
+        "p95": 93,
+        "overRttP50": 18.099853515625
+      },
+      "hopsP50": {
+        "up": 35.901611328125,
+        "tmuxWrite": 2.599853515625,
+        "untilCapture": 1.10009765625,
+        "capture": 3.9658203125,
+        "encode": 0.053955078125,
+        "down": 32.843505859375,
+        "render": 1.300048828125,
+        "relayUp": 0.24365234375,
+        "relayDown": 0.1796875
+      },
+      "echoBytesP50": 46,
+      "throughput": {
+        "ms": 130.89990234375,
+        "bytes": 27157,
+        "frames": 2
+      },
+      "received": {
+        "bytes": 126751,
+        "frames": 35
+      }
+    },
+    {
+      "name": "relay(gate 10ms) · loopback · fresh",
+      "carrier": "relay",
+      "network": "loopback",
+      "networkDescription": "no shaping: software cost only",
+      "scrollback": 0,
+      "outputGateMs": 10,
+      "pathRttMs": 0,
+      "keys": 30,
+      "echo": {
+        "p50": 10,
+        "p95": 12.099853515625,
+        "overRttP50": 10
+      },
+      "hopsP50": {
+        "up": 1.516357421875,
+        "tmuxWrite": 2.20166015625,
+        "untilCapture": 1.07568359375,
+        "capture": 2.20947265625,
+        "encode": 0.03369140625,
+        "down": 1.308837890625,
+        "render": 1.199951171875,
+        "relayUp": 0.261474609375,
+        "relayDown": 0.156494140625
+      },
+      "echoBytesP50": 44,
+      "received": {
+        "bytes": 1500,
+        "frames": 33
+      }
+    },
+    {
+      "name": "relay(gate 10ms) · loopback · 300 lines of history",
+      "carrier": "relay",
+      "network": "loopback",
+      "networkDescription": "no shaping: software cost only",
+      "scrollback": 300,
+      "outputGateMs": 10,
+      "pathRttMs": 0,
+      "keys": 30,
+      "echo": {
+        "p50": 14.300048828125,
+        "p95": 26.60009765625,
+        "overRttP50": 14.300048828125
+      },
+      "hopsP50": {
+        "up": 1.606689453125,
+        "tmuxWrite": 2.32568359375,
+        "untilCapture": 1.0751953125,
+        "capture": 3.754150390625,
+        "encode": 0.04638671875,
+        "down": 1.419921875,
+        "render": 2.099853515625,
+        "relayUp": 0.24462890625,
+        "relayDown": 0.138916015625
+      },
+      "echoBytesP50": 46,
+      "received": {
+        "bytes": 75254,
+        "frames": 33
+      }
+    },
+    {
+      "name": "relay(gate 10ms) · loopback · 1500 lines of history",
+      "carrier": "relay",
+      "network": "loopback",
+      "networkDescription": "no shaping: software cost only",
+      "scrollback": 1500,
+      "outputGateMs": 10,
+      "pathRttMs": 0,
+      "keys": 30,
+      "echo": {
+        "p50": 13.10009765625,
+        "p95": 26.89990234375,
+        "overRttP50": 13.10009765625
+      },
+      "hopsP50": {
+        "up": 1.525634765625,
+        "tmuxWrite": 2.367919921875,
+        "untilCapture": 1.080810546875,
+        "capture": 3.86376953125,
+        "encode": 0.049560546875,
+        "down": 1.263916015625,
+        "render": 1.39990234375,
+        "relayUp": 0.219482421875,
+        "relayDown": 0.111328125
+      },
+      "echoBytesP50": 46,
+      "received": {
+        "bytes": 99594,
+        "frames": 33
+      }
+    },
+    {
+      "name": "relay(gate 10ms) · wan · fresh",
+      "carrier": "relay",
+      "network": "wan",
+      "networkDescription": "60 ms RTT on both paths; daemon uplink 10 Mbit/s, phone 10 up / 50 down",
+      "scrollback": 0,
+      "outputGateMs": 10,
+      "pathRttMs": 60,
+      "keys": 30,
+      "echo": {
+        "p50": 76,
+        "p95": 80.400146484375,
+        "overRttP50": 16
+      },
+      "hopsP50": {
+        "up": 34.98681640625,
+        "tmuxWrite": 2.493896484375,
+        "untilCapture": 1.082275390625,
+        "capture": 2.319091796875,
+        "encode": 0.039794921875,
+        "down": 33.562744140625,
+        "render": 1.300048828125,
+        "relayUp": 0.232421875,
+        "relayDown": 0.176513671875
+      },
+      "echoBytesP50": 44,
+      "throughput": {
+        "ms": 119.5,
+        "bytes": 17286,
+        "frames": 2
+      },
+      "received": {
+        "bytes": 18786,
+        "frames": 35
+      }
+    },
+    {
+      "name": "relay(gate 10ms) · wan · 300 lines of history",
+      "carrier": "relay",
+      "network": "wan",
+      "networkDescription": "60 ms RTT on both paths; daemon uplink 10 Mbit/s, phone 10 up / 50 down",
+      "scrollback": 300,
+      "outputGateMs": 10,
+      "pathRttMs": 60,
+      "keys": 30,
+      "echo": {
+        "p50": 77.10009765625,
+        "p95": 93.199951171875,
+        "overRttP50": 17.10009765625
+      },
+      "hopsP50": {
+        "up": 35.078857421875,
+        "tmuxWrite": 2.695556640625,
+        "untilCapture": 1.081298828125,
+        "capture": 3.977783203125,
+        "encode": 0.063720703125,
+        "down": 32.83837890625,
+        "render": 1.300048828125,
+        "relayUp": 0.251220703125,
+        "relayDown": 0.192626953125
+      },
+      "echoBytesP50": 46,
+      "throughput": {
+        "ms": 138.5,
+        "bytes": 25057,
+        "frames": 2
+      },
+      "received": {
+        "bytes": 100311,
+        "frames": 35
+      }
+    },
+    {
+      "name": "relay(gate 10ms) · wan · 1500 lines of history",
+      "carrier": "relay",
+      "network": "wan",
+      "networkDescription": "60 ms RTT on both paths; daemon uplink 10 Mbit/s, phone 10 up / 50 down",
+      "scrollback": 1500,
+      "outputGateMs": 10,
+      "pathRttMs": 60,
+      "keys": 30,
+      "echo": {
+        "p50": 77,
+        "p95": 93.2998046875,
+        "overRttP50": 17
+      },
+      "hopsP50": {
+        "up": 35.05078125,
+        "tmuxWrite": 2.47802734375,
+        "untilCapture": 1.0810546875,
+        "capture": 3.893798828125,
+        "encode": 0.0576171875,
+        "down": 32.896484375,
+        "render": 1.39990234375,
+        "relayUp": 0.229248046875,
+        "relayDown": 0.171630859375
+      },
+      "echoBytesP50": 46,
+      "throughput": {
+        "ms": 127.599853515625,
+        "bytes": 24987,
+        "frames": 2
+      },
+      "received": {
+        "bytes": 124581,
+        "frames": 35
+      }
+    }
+  ]
+}
