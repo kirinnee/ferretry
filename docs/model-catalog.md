@@ -163,8 +163,8 @@ paired daemon follows them.
 `pwa-pages.yaml` on every push to `main`) writes two files beside the app:
 
 - `https://ferretry.pages.dev/catalog/version.json` — `{ "version": N }`;
-- `https://ferretry.pages.dev/catalog/models.json` — `{ "version": N, "catalogs": { … } }`, every
-  `packages/fleet/models/*.yaml` as JSON.
+- `https://ferretry.pages.dev/catalog/models.json` — `{ "version": N, "catalogs": { … }, "prices": { … } }`,
+  every `packages/fleet/models/*.yaml` as JSON, with each model's price moved into `prices` (§ Prices).
 
 `N` is the number of commits that changed `packages/fleet/models/`, so it moves exactly when a catalog
 does (the Pages build checks out the full history for it, and fails rather than publish from a shallow
@@ -206,6 +206,94 @@ preloaded by each `bunfig.*.toml`), and refuses any in-process fetch to a Ferret
 3. Merge to `main`. The Pages deploy publishes the new version within minutes; each daemon takes it at
    its next check (at most six hours, or now with `fy models refresh`). The next release also builds it
    in.
+
+## Prices
+
+Every catalog model may carry its **list price**, and analytics prices a session from it — the
+"equivalent API cost" Insights shows: what the session's tokens would have cost at the provider's
+published API price. It is never a bill. A subscription login (a Claude or ChatGPT sign-in) reads it as
+exactly that, and a negotiated discount, a batch discount or a free tier is not in it.
+
+```yaml
+- id: claude-opus-5-5
+  label: Opus 5.5
+  price:
+    provider: anthropic # whose billing rules apply: anthropic | openai | deepseek | moonshot | zai | minimax | alibaba
+    input: 4 # USD per million tokens, to six decimals
+    output: 20
+    cacheRead: 0.2
+    cacheWrite5m: 5 # Anthropic bills a cache write by how long it is kept …
+    cacheWrite1h: 8 # … so an anthropic price states both; every other maker states one cacheWrite
+    # reasoning: 20   (only when it differs from output; every maker here bills thinking as output)
+    source: https://platform.claude.com/docs/en/about-claude/pricing # https, no credential, no fragment
+    verified: '2026-10-20' # the day it was read there
+```
+
+**Every shipped model is priced**, or its catalog's `unverified:` says why not (`gpt-oss` on Ollama runs
+locally and has no per-token price; MiniMax-M2.7 is not on MiniMax's pricing page) —
+`packages/fleet/tests/unit/models-prices.test.ts` refuses a model that is neither. Every assumption a
+price makes is in `unverified:` too: a long-prompt tier priced at its lower rate, a cache write charged as
+input where a provider lists no cache-write price, a regional premium.
+
+### Why every session read "Unpriced" before this
+
+Analytics priced a session ONLY from the operator rates in `config/daemon.json`
+(`analyticsPricing`), which default to empty — so on every machine nobody had typed rates into, every
+session was `unknown_pricing_model`. With rates in place, four spellings and billing shapes decide
+whether a session can be priced; the first was already handled, the other three were not:
+
+- **`claude-opus-5-5[1m]`** — the selector's context suffix. Already removed by the shared model-identity
+  rule (`packages/protocol/src/lib/analytics-model-identity.ts`), as is a dated revision
+  (`claude-opus-5-5-20261001`, `…@20261001`).
+- **Bedrock's `-v1:0`** — a Bedrock model version. It is now read as a revision too, so
+  `us.anthropic.claude-opus-5-5-20261001-v1:0` is the identity `us.anthropic.claude-opus-5-5`. The
+  region prefix (`us.`, `eu.`) is deliberately KEPT: a regional endpoint costs 10% more, and the
+  `amazon-bedrock` catalog prices its `us.` ids at that rate.
+- **Codex's reasoning tokens** (`gpt-6-astra`) — Codex reports them, and a rate with no reasoning price
+  refuses such a session (`missing_reasoning_rate`). A catalog rate prices reasoning at `reasoning`, or
+  at `output` when none is stated, because OpenAI bills reasoning as output.
+- **Cache writes on a non-Anthropic maker** — an `anthropic` rate needs a session's 5-minute/1-hour cache
+  write split, which a DeepSeek or Kimi endpoint behind Claude Code may not report. Naming every maker
+  (`provider:`) instead of filing it under `anthropic` or `openai` charges those one `cacheWrite` price.
+
+`packages/daemon/tests/unit/models/pricing.test.ts` prices a session for every priced fleet model under
+each of those spellings.
+
+### How a price reaches analytics
+
+How a priced session is then queried — metrics, labels, ranges and the merge across machines — is
+[the Insights query language](insights-query.md).
+
+- **The same three sources, the same precedence.** A price lives in its catalog, so it follows the catalog:
+  `config/models/<id>.yaml` > the published catalog > the built-in one, per catalog id. A machine's own
+  copy of a catalog prices its models with whatever it says — including nothing. A published catalog
+  that leaves a model unpriced (one published before prices existed, still held by a daemon, or a
+  rollback to one) takes this build's built-in price for that same catalog and model; a published price
+  still wins over it.
+- **Published beside the catalogs, not in them.** `catalog/models.json` keeps `catalogs` in the shape it
+  always had, with no `price` key, because a daemon older than prices reads every model strictly and would
+  refuse the whole catalog. The prices travel in a top-level `prices` map
+  (`{ "<catalog>": { "claude": { "<model id>": <price> }, "codex": … } }`) that those daemons never read
+  and this one puts back on each model. A price that does not check is left off its model, never taking
+  the catalog with it. Same version, same signature, same check schedule — no second fetch and no timer.
+- **Operator rates win, per model.** The daemon's analytics pricing is the operator's rates ∪ one rate per
+  priced catalog model, and a model any operator rate names — by id or alias — takes none of the catalog's,
+  over any window. A model several catalogs list (Anthropic's ids are also the gateway's and Vertex AI's)
+  takes its maker's catalog's price, else the first catalog's by id.
+- **Provenance.** A catalog rate's source is `{ kind: 'model_catalog', catalog, sourceUrl }`, its
+  `verifiedAt` the price's `verified` day, and it applies from the epoch with no end. An operator's
+  `config/daemon.json` cannot hold one: only a daemon reading a catalog states that provenance.
+- **Re-pricing.** The pricing catalog is read on every ingestion pass and its fingerprint is in each stored
+  session's ingest signature, so a newer published price re-prices the sessions it changes on the next
+  pass.
+- **Settings › Pricing** lists the catalog prices no operator rate claims, read-only, with their source and
+  verified day; **Override** starts a manual rate from one.
+
+### How to update a price
+
+Read the provider's pricing page, change the numbers, set `verified:` to today, and say in
+`unverified:` anything the page did not confirm. `bun test packages/fleet/tests/unit/models-prices.test.ts`.
+Merging publishes it like any other catalog change.
 
 ## Local models
 
@@ -262,5 +350,16 @@ changes nothing.
 - **A release-key rotation pauses updates.** A daemon trusts the key it was built with. After the hosted
   app rotates its release key, an older daemon refuses newer catalogs (and keeps the one it holds) until
   it is upgraded.
+- **A list price is not per request.** Analytics prices a session's totals, so a price that rises with a
+  request's prompt length (Haiku 5.5 over 100K tokens, GPT-6 over 272K, Qwen, MiniMax-M3) is charged at
+  its lower tier, and DeepSeek at its peak rate; each catalog's `unverified:` names its case.
+- **Kimi's 1-hour cache write is priced as its 5-minute one.** Only Anthropic's billing splits cache writes
+  in analytics.
+- **A gateway's resolved spelling is not priced.** OpenRouter may record `anthropic/claude-opus-5.5`
+  rather than the `~anthropic/claude-opus-latest` alias it was given, and a Foundry transcript names your
+  deployment rather than `opus`; such a session stays unpriced unless an operator rate's alias names it.
+- **Mantle, Vertex regional and Azure Data Zone premiums** are not in the prices (`unverified:` says which).
+- **A browser tab older than this daemon cannot read its pricing view.** The view is strict and now carries
+  `modelCatalogRates`; the hosted app deploys before any release does, so this is a stale tab — reload it.
 - **Bedrock ids are the US inference profiles** (`us.anthropic.…`). A login whose `AWS_REGION` is outside
   the US needs the `eu.`, `au.`, `jp.` or `global.` ids, in `config/models/amazon-bedrock.yaml`.

@@ -35,6 +35,12 @@ interface ParsedModelSpelling {
 
 const SELECTOR_VARIANT = /\s*\[([0-9]+(?:\.[0-9]+)?)m\]\s*$/i;
 const MODEL_REVISION = /(?:-|@)([0-9]{8}|[0-9]{4}-[0-9]{2}-[0-9]{2})$/;
+/**
+ * Amazon Bedrock's model version (`anthropic.claude-opus-4-5-20251101-v1:0`). It versions the same
+ * model the way a dated suffix does, so it is a revision too — kept as evidence, out of the identity —
+ * or a Bedrock transcript could never match the price of the model it ran.
+ */
+const BEDROCK_VERSION = /-(v[0-9]+(?::[0-9]+)?)$/;
 
 function parseModelSpelling(value: string): ParsedModelSpelling {
   const folded = value.trim().toLowerCase();
@@ -49,13 +55,16 @@ function parseModelSpelling(value: string): ParsedModelSpelling {
       ? derivedContextWindow
       : null;
   const withoutVariant = variantMatch === null ? folded : folded.slice(0, variantMatch.index).trimEnd();
-  const revisionMatch = withoutVariant.match(MODEL_REVISION);
+  const versionMatch = withoutVariant.match(BEDROCK_VERSION);
+  const withoutVersion = versionMatch === null ? withoutVariant : withoutVariant.slice(0, versionMatch.index);
+  const revisionMatch = withoutVersion.match(MODEL_REVISION);
+  const revision = [revisionMatch?.[1], versionMatch?.[1]].filter(part => part !== undefined).join('-');
 
   return {
-    base: revisionMatch === null ? withoutVariant : withoutVariant.slice(0, revisionMatch.index),
+    base: revisionMatch === null ? withoutVersion : withoutVersion.slice(0, revisionMatch.index),
     variant,
     contextWindow,
-    revision: revisionMatch?.[1] ?? null,
+    revision: revision === '' ? null : revision,
   };
 }
 

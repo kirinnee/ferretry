@@ -5,6 +5,7 @@ export * from './agent-messages.ts';
 export * from './agent-tools.ts';
 export * from './agent-tools-lessons.ts';
 export * from './analytics.ts';
+export * from './analytics-merge.ts';
 export * from './analytics-model-identity.ts';
 export * from './analytics-pricing.ts';
 export * from './analytics-pricing-api.ts';

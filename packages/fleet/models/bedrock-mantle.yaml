@@ -4,6 +4,8 @@ docs: https://code.claude.com/docs/en/amazon-bedrock
 verified: '2026-10-18'
 unverified:
   - AWS lists the 5.5 models on Mantle in very few regions (Opus 5.5 in us-east-1); a region without one answers that the model is not found.
+  - 'Haiku 5.5 costs five times as much for a request whose prompt is over 100,000 tokens; analytics prices whole sessions, so its price is the lower one and a long-prompt session is under-counted.'
+  - "AWS does not say whether Mantle bills at Bedrock's global or regional (10% higher) rate; the global one is used."
 customIds: true
 claude:
   tiers:
@@ -12,6 +14,15 @@ claude:
     haiku: anthropic.claude-haiku-5-5
   models:
     - id: anthropic.claude-opus-5-5
+      price:
+        provider: anthropic
+        input: 4
+        output: 20
+        cacheRead: 0.2
+        cacheWrite5m: 5
+        cacheWrite1h: 8
+        source: https://aws.amazon.com/bedrock/pricing/
+        verified: '2026-10-20'
       label: Opus 5.5
       tier: best
       context: 1000000
@@ -19,12 +30,30 @@ claude:
       defaultEffort: medium
       default: true
     - id: anthropic.claude-sonnet-5-5
+      price:
+        provider: anthropic
+        input: 2
+        output: 10
+        cacheRead: 0.1
+        cacheWrite5m: 2.5
+        cacheWrite1h: 4
+        source: https://aws.amazon.com/bedrock/pricing/
+        verified: '2026-10-20'
       label: Sonnet 5.5
       tier: balanced
       context: 1000000
       efforts: [low, medium, high, xhigh, max]
       defaultEffort: high
     - id: anthropic.claude-haiku-5-5
+      price:
+        provider: anthropic
+        input: 0.1
+        output: 0.5
+        cacheRead: 0.01
+        cacheWrite5m: 0.125
+        cacheWrite1h: 0.2
+        source: https://aws.amazon.com/bedrock/pricing/
+        verified: '2026-10-20'
       label: Haiku 5.5
       tier: fast
       context: 1000000

@@ -282,6 +282,39 @@ describe('PricingSettings', () => {
     expect(text(renderer)).not.toContain('https://attacker');
   });
 
+  it('lists the model catalog prices read-only, and starts a manual override from one', async () => {
+    const fromCatalog = manualRate({
+      pricingKey: 'model-catalog:deepseek:deepseek-flash',
+      modelId: 'deepseek-flash',
+      aliases: [],
+      provider: 'deepseek',
+      validFrom: '1970-01-01T00:00:00.000Z',
+      verifiedAt: '2026-10-20T00:00:00.000Z',
+      source: {
+        kind: 'model_catalog',
+        catalog: 'deepseek',
+        sourceUrl: 'https://api-docs.deepseek.com/quick_start/pricing',
+      },
+    });
+    const api = pricingApi(pricingView({ catalog: [], modelCatalogRates: [fromCatalog] }));
+    const renderer = await renderPricing(api);
+    const rendered = text(renderer);
+
+    expect(marked(renderer, 'data-pricing-catalog-rate', fromCatalog.pricingKey)).toHaveLength(1);
+    expect(rendered).toContain('From the model catalog');
+    expect(rendered).toContain('Model catalog · ');
+    expect(rendered).toContain('https://api-docs.deepseek.com/quick_start/pricing');
+    expect(rendered).toContain('Sessions are priced from the model catalog below');
+    expect(marked(renderer, 'data-pricing-remove', fromCatalog.pricingKey)).toHaveLength(0);
+
+    press(renderer, 'data-pricing-override', fromCatalog.pricingKey);
+
+    expect(marked(renderer, 'data-pricing-field', 'pricingKey')[0]?.props.value).toBe('operator:deepseek-flash');
+    expect(marked(renderer, 'data-pricing-field', 'modelId')[0]?.props.value).toBe('deepseek-flash');
+    expect(marked(renderer, 'data-pricing-field', 'provider')[0]?.props.value).toBe('deepseek');
+    expect(marked(renderer, 'data-pricing-rate-field', 'input')[0]?.props.value).toBe('1.25');
+  });
+
   it('shows an initial error and retries only when the operator asks', async () => {
     const api = pricingApi(new Error('daemon offline'), pricingView({ catalog: [] }));
     const renderer = await renderPricing(api);

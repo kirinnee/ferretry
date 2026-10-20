@@ -4370,7 +4370,7 @@ describe('daemon boot lifecycle', () => {
     // The rows came out of a real materialisation in this daemon's own state home, not a per-request
     // derivation: the file the boot pass wrote is on disk under the index directory.
     should(await Bun.file(join(home, 'state', 'index', 'analytics.sqlite')).exists()).be.true();
-    should(groupedBody.index.schemaVersion).equal(3);
+    should(groupedBody.index.schemaVersion).equal(4);
     // A malformed query is the caller's mistake, not a 500 from the daemon.
     should(refused.status).equal(400);
     should((await refused.json()) as { code: string }).have.property('code', 'invalid_query');

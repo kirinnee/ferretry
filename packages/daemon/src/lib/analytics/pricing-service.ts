@@ -3,6 +3,7 @@ import {
   type AnalyticsPricingCatalog,
   type AnalyticsPricingFeed,
   type AnalyticsPricingPatch,
+  type AnalyticsPricingRate,
   type AnalyticsPricingSyncApply,
   type AnalyticsPricingSyncPreview,
   type AnalyticsPricingSyncPreviewRequest,
@@ -10,6 +11,7 @@ import {
   type ConfiguredAnalyticsPricingSource,
   type ConfiguredAnalyticsPricingSources,
 } from '@ferretry/protocol';
+import { unclaimedModelCatalogRates } from '../models/pricing.ts';
 import type { ClockPort, SerialExecutor } from '../ports.ts';
 import {
   type AnalyticsPricingCatalogDiff,
@@ -119,6 +121,11 @@ interface HeldAnalyticsPricingPreview {
 export interface AnalyticsPricingServiceOptions {
   readonly previewTtlMs?: number;
   readonly previewLimit?: number;
+  /**
+   * The rates the model catalogs in effect price (`../models/pricing.ts`), shown beside the operator's
+   * and never editable here. Absent, the view reports none.
+   */
+  readonly modelCatalogRates?: () => Promise<readonly AnalyticsPricingRate[]>;
 }
 
 /**
@@ -134,6 +141,7 @@ export class AnalyticsPricingService {
   private readonly previews = new Map<string, HeldAnalyticsPricingPreview>();
   private readonly previewTtlMs: number;
   private readonly previewLimit: number;
+  private readonly modelCatalogRates: (() => Promise<readonly AnalyticsPricingRate[]>) | undefined;
 
   constructor(
     private readonly document: AnalyticsPricingConfigurationPort,
@@ -145,10 +153,11 @@ export class AnalyticsPricingService {
   ) {
     this.previewTtlMs = options.previewTtlMs ?? ANALYTICS_PRICING_PREVIEW_TTL_MS;
     this.previewLimit = options.previewLimit ?? ANALYTICS_PRICING_PREVIEW_LIMIT;
+    this.modelCatalogRates = options.modelCatalogRates;
   }
 
   async view(): Promise<AnalyticsPricingView> {
-    return this.viewOf(await this.readConfiguration());
+    return await this.viewOf(await this.readConfiguration());
   }
 
   async patch(patch: AnalyticsPricingPatch): Promise<AnalyticsPricingView> {
@@ -175,7 +184,7 @@ export class AnalyticsPricingService {
       } catch {
         throw new AnalyticsPricingError('invalid_catalog', 'the requested edits do not form a valid pricing catalog');
       }
-      return this.viewOf(
+      return await this.viewOf(
         await this.writeConfiguration({
           catalog,
           expectedCatalogFingerprint: patch.expectedCatalogFingerprint,
@@ -314,7 +323,7 @@ export class AnalyticsPricingService {
         syncedSource: { sourceId: held.preview.sourceId, lastSyncedAt: held.preview.fetchedAt },
       });
       this.previews.delete(request.previewId);
-      return this.viewOf(written);
+      return await this.viewOf(written);
     });
   }
 
@@ -375,9 +384,13 @@ export class AnalyticsPricingService {
     }
   }
 
-  private viewOf(configuration: AnalyticsPricingConfiguration): AnalyticsPricingView {
+  private async viewOf(configuration: AnalyticsPricingConfiguration): Promise<AnalyticsPricingView> {
+    const derived = this.modelCatalogRates === undefined ? undefined : await this.modelCatalogRates();
     return {
       catalog: configuration.catalog,
+      ...(derived === undefined
+        ? {}
+        : { modelCatalogRates: unclaimedModelCatalogRates(configuration.catalog, derived) }),
       catalogFingerprint: analyticsPricingFingerprint(configuration.catalog),
       sources: configuration.sources,
       sourcesFingerprint: analyticsPricingSourcesFingerprint(configuration.sources),

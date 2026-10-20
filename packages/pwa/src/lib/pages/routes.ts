@@ -70,9 +70,14 @@ export interface DaemonWardenRoute {
   readonly daemonId: DaemonId;
 }
 
+/** Analytics' two pages: the Overview of a period, and the Query page. */
+export type AnalyticsView = 'overview' | 'query';
+
 export interface DaemonAnalyticsRoute {
   readonly kind: 'analytics';
   readonly daemonId: DaemonId;
+  /** Absent means the Overview, so every older `{ kind: 'analytics' }` still names it. */
+  readonly view?: AnalyticsView;
 }
 
 export interface DaemonLearningRoute {
@@ -186,6 +191,13 @@ export const daemonWardenPath = (id: DaemonId): string => `${daemonSessionsPath(
 /** Builds the canonical analytics pathname for one daemon. */
 export const daemonAnalyticsPath = (id: DaemonId): string => `${daemonSessionsPath(id)}/analytics`;
 
+/**
+ * Builds the Analytics › Query pathname for one daemon, with the query as `?q=` when there is one. The
+ * query text is the page's source of truth, so a link carries it whole.
+ */
+export const daemonAnalyticsQueryPath = (id: DaemonId, query?: string | null): string =>
+  `${daemonAnalyticsPath(id)}/query${query?.trim() ? `?q=${encodeURIComponent(query.trim())}` : ''}`;
+
 /** Builds the canonical learning pathname for one daemon. */
 export const daemonLearningPath = (id: DaemonId): string => `${daemonSessionsPath(id)}/learning`;
 
@@ -215,6 +227,9 @@ export const parseRoute = (pathname: string): Route => {
     if (destination === 'setup') return { kind: 'machine-setup', daemonId: id };
     if (destination === 'tasks') return { kind: 'legacy-tasks-redirect', to: { kind: 'sessions', daemonId: id } };
   }
+
+  if (destination === 'analytics' && sessionSegment === 'query' && remainder.length === 0)
+    return { kind: 'analytics', daemonId: id, view: 'query' };
 
   if (destination === 'projects' && sessionSegment !== undefined && remainder.length === 0) {
     const candidate = decodeRouteSegment(sessionSegment);
@@ -257,7 +272,7 @@ export const routePath = (route: Route): string => {
     case 'warden':
       return daemonWardenPath(route.daemonId);
     case 'analytics':
-      return daemonAnalyticsPath(route.daemonId);
+      return route.view === 'query' ? daemonAnalyticsQueryPath(route.daemonId) : daemonAnalyticsPath(route.daemonId);
     case 'learning':
       return daemonLearningPath(route.daemonId);
     case 'imported-history':
@@ -277,6 +292,8 @@ export const routePageKey = (route: Route): string => {
   if (route.kind === 'legacy-tasks-redirect') return routePageKey(route.to);
   if (route.kind === 'connection-picker' || route.kind === 'setup') return route.kind;
   if (route.kind === 'session') return `session:${daemonSessionKey(daemonSessionScope(route, route.sessionId))}`;
+  // The two Analytics pages are kept apart, so each keeps its own state while the other is on screen.
+  if (route.kind === 'analytics' && route.view === 'query') return `analytics-query:${JSON.stringify(route.daemonId)}`;
   if (route.kind === 'project-detail') return `project-detail:${JSON.stringify([route.daemonId, route.projectId])}`;
   return `${route.kind}:${JSON.stringify(route.daemonId)}`;
 };

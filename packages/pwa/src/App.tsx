@@ -1637,11 +1637,28 @@ function WardenRoute({ connection }: DaemonPageProps) {
   );
 }
 
+/** Analytics reads every paired machine, in the order and by the names the sessions bar shows them. */
 function AnalyticsRoute({ connection }: DaemonPageProps) {
-  const { navigate } = useRouter();
+  const { route, navigate } = useRouter();
+  const store = useAppStore();
+  const { connections } = useConnectionSnapshot();
+  const savedOrder = useMachineOrder(store.controls).saved;
+  const machines = useMemo(
+    () =>
+      machineDisplayOrder(connections, savedOrder).map(record => ({
+        connection: record,
+        name: distinctDaemonName(record, connections),
+      })),
+    [connections, savedOrder],
+  );
   return (
     <InsightsFrame current="analytics" daemonId={connection.daemonId} onNavigate={navigate}>
-      <GlobalAnalyticsPage connection={connection} />
+      <GlobalAnalyticsPage
+        connection={connection}
+        machines={machines}
+        view={route.kind === 'analytics' && route.view === 'query' ? 'query' : 'overview'}
+        onNavigate={navigate}
+      />
     </InsightsFrame>
   );
 }

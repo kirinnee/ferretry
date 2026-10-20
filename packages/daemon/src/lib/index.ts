@@ -50,6 +50,7 @@ export * from './migrate/report-render.ts';
 export * from './migrate/report-store.ts';
 export * from './migrate/tool-inventory.ts';
 export * from './migrate/verdict.ts';
+export * from './models/pricing.ts';
 export * from './models/published.ts';
 export * from './models/service.ts';
 export * from './models/view.ts';

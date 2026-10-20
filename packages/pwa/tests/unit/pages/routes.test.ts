@@ -4,9 +4,10 @@ import { daemonId } from '../../../src/lib/daemon-connection.ts';
 import {
   connectionPickerPath,
   daemonAnalyticsPath,
+  daemonAnalyticsQueryPath,
   daemonImportedHistoryPath,
-  daemonMachineSetupPath,
   daemonLearningPath,
+  daemonMachineSetupPath,
   daemonNewSessionPath,
   daemonProjectPath,
   daemonProjectsPath,
@@ -253,6 +254,7 @@ describe('route identity', () => {
       parseRoute('/d/daemon-b/settings'),
       parseRoute('/d/daemon-b/warden'),
       parseRoute('/d/daemon-b/analytics'),
+      parseRoute('/d/daemon-b/analytics/query'),
       parseRoute('/d/daemon-b/learning'),
       parseRoute('/d/daemon-b/history'),
       parseRoute('/d/daemon-b/setup'),
@@ -276,10 +278,27 @@ describe('route identity', () => {
       ['/d/daemon-b/settings', 'settings:"daemon-b"'],
       ['/d/daemon-b/warden', 'warden:"daemon-b"'],
       ['/d/daemon-b/analytics', 'analytics:"daemon-b"'],
+      ['/d/daemon-b/analytics/query', 'analytics-query:"daemon-b"'],
       ['/d/daemon-b/learning', 'learning:"daemon-b"'],
       ['/d/daemon-b/history', 'imported-history:"daemon-b"'],
       ['/d/daemon-b/setup', 'machine-setup:"daemon-b"'],
     ]);
     should(routePageKey(daemonBSession)).not.equal(routePageKey(daemonASession));
+  });
+});
+
+describe('the Analytics Query address', () => {
+  it('parses as the Query view of Analytics and carries its query whole', () => {
+    should(parseRoute('/d/daemon-b/analytics/query')).deepEqual({
+      kind: 'analytics',
+      daemonId: daemonId('daemon-b'),
+      view: 'query',
+    });
+    should(parseRoute('/d/daemon-b/analytics/elsewhere').kind).equal('sessions');
+    should(daemonAnalyticsQueryPath(daemonId('daemon-b'))).equal('/d/daemon-b/analytics/query');
+    should(daemonAnalyticsQueryPath(daemonId('daemon-b'), '  ')).equal('/d/daemon-b/analytics/query');
+    should(daemonAnalyticsQueryPath(daemonId('daemon-b'), ' sum(cost_usd) by (model) [7d] ')).equal(
+      '/d/daemon-b/analytics/query?q=sum(cost_usd)%20by%20(model)%20%5B7d%5D',
+    );
   });
 });

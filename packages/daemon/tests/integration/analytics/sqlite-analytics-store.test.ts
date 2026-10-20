@@ -8,12 +8,12 @@ import { BunSqliteAnalyticsStoreFactory } from '../../../src/adapters/analytics/
 import { StateFileSystem } from '../../../src/adapters/index.ts';
 import {
   ANALYTICS_INDEX_SCHEMA_VERSION,
-  analyticsIndexFiles,
-  createFoundationPaths,
-  resolveStateHome,
   type AnalyticsIndexStore,
   type AnalyticsStoredSession,
+  analyticsIndexFiles,
+  createFoundationPaths,
   type FoundationPaths,
+  resolveStateHome,
 } from '../../../src/lib/index.ts';
 
 /**
@@ -76,6 +76,8 @@ function storedSession(overrides: Partial<AnalyticsStoredSession> = {}): Analyti
       reasoningTokens: null,
       turns: 3,
       durationMs: 3_600_000,
+      activeDurationMs: 1_200_000,
+      machine: null,
       timeToFirstOutputMs: null,
       contextEndPercent: 40,
       stalled: false,

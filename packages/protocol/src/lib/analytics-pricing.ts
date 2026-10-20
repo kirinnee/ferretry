@@ -17,7 +17,22 @@ import { InstantSchema, NonEmptyStringSchema } from './common.ts';
  * "$0.00" is a lie that reconciles.
  */
 
-export const ANALYTICS_PRICING_PROVIDERS = ['openai', 'anthropic'] as const;
+/**
+ * WHOSE BILLING RULES a price follows: the model's maker. It decides arithmetic, not trust — an
+ * `anthropic` rate prices a cache write by how long it is kept (5 minutes or an hour), every other
+ * maker charges a cache write one price. The non-OpenAI, non-Anthropic makers are here because the
+ * fleet model catalogs price their models (docs/model-catalog.md § Prices); naming a DeepSeek model
+ * `openai` to fit a two-value list would have been the dishonest alternative.
+ */
+export const ANALYTICS_PRICING_PROVIDERS = [
+  'openai',
+  'anthropic',
+  'deepseek',
+  'moonshot',
+  'zai',
+  'minimax',
+  'alibaba',
+] as const;
 export const AnalyticsPricingProviderSchema = z.enum(ANALYTICS_PRICING_PROVIDERS);
 export type AnalyticsPricingProvider = z.infer<typeof AnalyticsPricingProviderSchema>;
 
@@ -178,18 +193,31 @@ export const AnalyticsPricingSourceUrlSchema = z
     }
   });
 
+/** A model catalog's id, as the fleet names one (`anthropic`, `amazon-bedrock`). */
+export const AnalyticsPricingCatalogIdSchema = z.string().regex(/^[a-z0-9][a-z0-9-]{0,63}$/u);
+
 /**
  * Where an entry's numbers came from, in a shape a reader cannot mistake.
  *
  * MANUAL AND SYNCED ARE MECHANICALLY DIFFERENT, not a boolean beside an optional URL: a provider
  * sync carries the provider and the address it was read from, and a manual override carries neither,
  * so "who last decided this price" is answered by the discriminant rather than by inference.
+ *
+ * `model_catalog` is the third answer: the daemon DERIVED the row from a price in the model catalog
+ * in effect (docs/model-catalog.md § Prices) — which catalog, and the provider page that price was
+ * read from. It is never a row an operator's file holds: the operator catalog refuses it, so the only
+ * way to state it is for a daemon to have read it out of a catalog.
  */
 export const AnalyticsPricingSourceSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('manual') }),
   z.strictObject({
     kind: z.literal('provider_sync'),
     provider: AnalyticsPricingProviderSchema,
+    sourceUrl: AnalyticsPricingSourceUrlSchema,
+  }),
+  z.strictObject({
+    kind: z.literal('model_catalog'),
+    catalog: AnalyticsPricingCatalogIdSchema,
     sourceUrl: AnalyticsPricingSourceUrlSchema,
   }),
 ]);
@@ -315,6 +343,13 @@ export const AnalyticsPricingRateSchema = z
         message: 'a manually entered rate was never synced from a provider',
       });
     }
+    if (rate.source.kind === 'model_catalog' && rate.lastSyncedAt !== null) {
+      context.addIssue({
+        code: 'custom',
+        path: ['lastSyncedAt'],
+        message: 'a rate read from a model catalog was never synced from a provider feed',
+      });
+    }
     if (rate.source.kind === 'provider_sync' && rate.lastSyncedAt === null) {
       context.addIssue({
         code: 'custom',
@@ -353,6 +388,15 @@ export const AnalyticsPricingCatalogSchema = z
     const aliases = new Map<string, string>();
 
     for (const [index, rate] of catalog.entries()) {
+      // The operator's catalog holds what a person typed and what a configured feed supplied. A row
+      // claiming a model catalog priced it is the daemon's own derivation, never a document's.
+      if (rate.source.kind === 'model_catalog') {
+        context.addIssue({
+          code: 'custom',
+          path: [index, 'source', 'kind'],
+          message: 'a model catalog price is derived by the daemon; an operator catalog cannot hold one',
+        });
+      }
       if (pricingKeys.has(rate.pricingKey)) {
         context.addIssue({ code: 'custom', path: [index, 'pricingKey'], message: 'must be unique' });
       }

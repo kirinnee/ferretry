@@ -209,9 +209,14 @@ function storedRates(rates: AnalyticsPricingRates): EffectiveAnalyticsPricingRat
  * prevent. Rebuilt per branch rather than spread, so a member the union grows must be handled here.
  */
 function storedSource(source: AnalyticsPricingSource): AnalyticsPricingSource {
-  return source.kind === 'manual'
-    ? { kind: 'manual' }
-    : { kind: 'provider_sync', provider: source.provider, sourceUrl: source.sourceUrl };
+  switch (source.kind) {
+    case 'manual':
+      return { kind: 'manual' };
+    case 'provider_sync':
+      return { kind: 'provider_sync', provider: source.provider, sourceUrl: source.sourceUrl };
+    case 'model_catalog':
+      return { kind: 'model_catalog', catalog: source.catalog, sourceUrl: source.sourceUrl };
+  }
 }
 
 function matchingRate(

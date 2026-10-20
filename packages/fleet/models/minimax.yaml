@@ -4,6 +4,10 @@ docs: https://platform.minimax.io/docs/coding-plan/claude-code
 verified: '2026-10-18'
 unverified:
   - MiniMax maps every Claude Code slot to MiniMax-M3.1-Flash-Preview; MiniMax-M3's reasoning controls are not documented on that page.
+  - 'MiniMax lists no cache-write price; a written token is charged as input.'
+  - 'MiniMax-M3 costs twice as much over 512K input tokens; the price is the lower one.'
+  - "MiniMax's pricing page lists MiniMax-M3.1-Flash, without -Preview; its price is used for the preview id."
+  - "MiniMax-M2.7 is not on MiniMax's pricing page, so it has no price."
 claude:
   tiers:
     opus: MiniMax-M3.1-Flash-Preview[1m]
@@ -11,10 +15,26 @@ claude:
     haiku: MiniMax-M3.1-Flash-Preview[1m]
   models:
     - id: MiniMax-M3
+      price:
+        provider: minimax
+        input: 0.3
+        output: 1.2
+        cacheRead: 0.06
+        cacheWrite: 0.3
+        source: https://platform.minimax.io/docs/guides/pricing-paygo
+        verified: '2026-10-20'
       label: MiniMax M3
       tier: best
       context: 1000000
     - id: MiniMax-M3.1-Flash-Preview
+      price:
+        provider: minimax
+        input: 0.15
+        output: 0.6
+        cacheRead: 0.015
+        cacheWrite: 0.15
+        source: https://platform.minimax.io/docs/guides/pricing-paygo
+        verified: '2026-10-20'
       suffix: '[1m]'
       label: MiniMax M3.1 Flash (preview)
       tier: fast
@@ -29,12 +49,28 @@ codex:
   docs: https://platform.minimax.io/docs/token-plan/codex.md
   models:
     - id: MiniMax-M3.1-Flash-Preview
+      price:
+        provider: minimax
+        input: 0.15
+        output: 0.6
+        cacheRead: 0.015
+        cacheWrite: 0.15
+        source: https://platform.minimax.io/docs/guides/pricing-paygo
+        verified: '2026-10-20'
       label: MiniMax M3.1 Flash (preview)
       tier: fast
       context: 1000000
       reasoning: true
       default: true
     - id: MiniMax-M3
+      price:
+        provider: minimax
+        input: 0.3
+        output: 1.2
+        cacheRead: 0.06
+        cacheWrite: 0.3
+        source: https://platform.minimax.io/docs/guides/pricing-paygo
+        verified: '2026-10-20'
       label: MiniMax M3
       tier: best
       context: 1000000
