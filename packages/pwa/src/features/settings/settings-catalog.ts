@@ -619,7 +619,7 @@ export const SETTINGS_LINKS: readonly SettingsLinkDefinition[] = [
     id: 'copy-settings',
     label: 'Copy settings from another machine',
     description:
-      'Copy the Warden, learning, voice, agent controls, profiles and runtimes from a machine you are paired with. Secrets and logins never travel. On this machine — opens its Machine tab.',
+      'Copy the Warden, learning, voice, agent controls, profiles and runtimes from a machine you are paired with. Secrets come only when you pick them; logins never travel. On this machine — opens its Machine tab.',
     href: daemon => `${daemonSettingsPath(daemon)}#clone`,
     keywords: ['clone', 'copy', 'import', 'another machine', 'migrate', 'transfer', 'same settings'],
   },

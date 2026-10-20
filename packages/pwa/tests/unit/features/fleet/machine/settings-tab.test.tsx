@@ -401,7 +401,7 @@ describe('MachineSettingsTab', () => {
         'Copy settings from another machine…',
       );
       expect(setup.querySelector('[data-settings-action="clone"]')?.textContent).toContain(
-        'Secrets and logins never travel.',
+        'Secrets come only when you pick them; logins never travel.',
       );
       expect(setup.querySelector('[data-settings-action="export"]')?.textContent).toContain('Export settings');
       await click(setup.querySelector('[data-settings-action="clone"]'), 'clone');

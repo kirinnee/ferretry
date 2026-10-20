@@ -2,6 +2,7 @@ import {
   FY_REQUEST_ID_HEADER,
   MigrateSessionRequestSchema,
   type ContextDowngrade,
+  type MigrationConversation,
   type MigrationRefusal,
   type SessionRelaunchSettings,
   type SessionView,
@@ -82,6 +83,11 @@ export type SessionMigrateFailure =
   | 'harness_mismatch'
   /** The target's context window is smaller and the caller did not accept the truncation. */
   | 'context_downgrade'
+  /**
+   * The conversation the session is bound to cannot go with it, and the caller did not choose to
+   * start a fresh one. A Restart that silently opened a new conversation is the defect this names.
+   */
+  | 'unresumable'
   /** The relaunch under the new account was attempted and failed. The session records why. */
   | 'failed';
 
@@ -114,6 +120,8 @@ export interface SessionMigrateSubsystem {
       readonly model?: string;
       readonly allowContextDowngrade: boolean;
       readonly forceInflight: boolean;
+      /** Omitted, the bound conversation is resumed or the migration refused. */
+      readonly conversation?: MigrationConversation;
     },
   ): Promise<SessionView>;
   /**
@@ -141,6 +149,9 @@ const REFUSALS: Readonly<Record<SessionMigrateFailure, { readonly status: number
   // account of the same family, which is a different request, not a different spelling of this one.
   harness_mismatch: { status: 409, code: 'harness_mismatch' },
   context_downgrade: { status: 409, code: 'context_downgrade_refused' },
+  // 409 like the refusals above it: the session's own condition, answerable by a different request —
+  // `conversation: 'fresh'` — that only the person may make.
+  unresumable: { status: 409, code: 'conversation_unresumable' },
   failed: { status: 500, code: 'session_migrate_failed' },
 };
 
@@ -173,7 +184,7 @@ function refuse(error: unknown): never {
  * decided before anything is touched: `invalid` and `not_found` never reach the session, `unusable`
  * is refused precisely because nothing can be restamped safely, `unknown_agent`, `unavailable` and
  * `harness_mismatch` reject the target before the session is read for anything, and
- * `refused`/`context_downgrade` are the two gates that exist to stop the destruction happening. Those
+ * `refused`/`context_downgrade`/`unresumable` are the gates that exist to stop the destruction happening. Those
  * must stay retryable so the sheet's "Retry safety check" re-evaluates.
  *
  * An error outside the taxonomy — a bug, an I/O fault mid-relaunch — is retained. It cannot be
@@ -226,6 +237,7 @@ async function migrate(
     ...(request.model === undefined ? {} : { model: request.model }),
     allowContextDowngrade: request.allowContextDowngrade,
     forceInflight: request.forceInflight,
+    ...(request.conversation === undefined ? {} : { conversation: request.conversation }),
   };
   // The fingerprint is the PARSED target, not the raw bytes: the start's digest has to hash the bytes
   // because a third party presents it later as proof, whereas this only ever compares two requests
@@ -235,6 +247,7 @@ async function migrate(
     target.model ?? null,
     target.allowContextDowngrade,
     target.forceInflight,
+    target.conversation ?? 'resume',
   ]);
   const view = await guard
     .run({ sessionId, requestId: id }, fingerprint, async () => await subsystem.migrate(sessionId, target))

@@ -4,6 +4,7 @@ import { useRestartRefusal } from '../../../../src/features/session-actions/rest
 import {
   RestartDowngradeRefused,
   RestartRefused,
+  RestartUnresumable,
 } from '../../../../src/features/session-actions/session-operations.ts';
 import { interact, type Mounted, mount, must } from '../../../support/dom.ts';
 import { sessionView } from '../../../support/sessions.ts';
@@ -226,5 +227,46 @@ describe('useRestartRefusal — a smaller context window', () => {
     expect(root.querySelector('[data-restart-downgrade]')).toBeNull();
     expect(root.querySelector('[data-restart-refusal]')).not.toBeNull();
     expect(text(root)).not.toContain('failed');
+  });
+});
+
+describe('useRestartRefusal — a conversation that cannot be resumed', () => {
+  const REASON = 'This session has no recorded conversation, so there is nothing Ferretry can resume.';
+  const holdUnresumable = async (startFresh: () => Promise<SessionView>) => {
+    let answer = false;
+    await interact(() => {
+      answer = must(held, 'capture')(new RestartUnresumable(REASON, startFresh));
+    });
+    return answer;
+  };
+
+  it('says why in plain words, with Cancel focused and Start fresh as the separate, deliberate press', async () => {
+    const root = await show();
+    expect(await holdUnresumable(async () => sessionView('a'))).toBe(true);
+    expect(text(root)).toContain('Restart paused — the conversation can’t be resumed.');
+    expect(text(root)).toContain(REASON);
+    expect(text(root)).toContain('The old one stays on disk.');
+    expect(root.querySelector('[data-restart-refusal-anyway]')?.textContent).toBe('Start fresh');
+    expect(document.activeElement).toBe(root.querySelector('[data-restart-refusal-cancel]'));
+  });
+
+  it('starts fresh only when pressed, publishes and closes — and names a failure by what was pressed', async () => {
+    const published: string[] = [];
+    const root = await show(view => published.push(view.config.id));
+    await holdUnresumable(async () => sessionView('a'));
+    await press(root, 'data-restart-refusal-cancel');
+    expect(root.querySelector('[data-restart-unresumable]')).toBeNull();
+    expect(published).toEqual([]);
+    await holdUnresumable(async () => sessionView('a'));
+    await press(root, 'data-restart-refusal-anyway');
+    await interact(() => Promise.resolve());
+    expect(published).toEqual(['a']);
+    expect(root.querySelector('[data-restart-unresumable]')).toBeNull();
+    await holdUnresumable(async () => {
+      throw new Error('the machine did not answer');
+    });
+    await press(root, 'data-restart-refusal-anyway');
+    await interact(() => Promise.resolve());
+    expect(text(root)).toContain('Start fresh failed: the machine did not answer');
   });
 });

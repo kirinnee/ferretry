@@ -5,10 +5,24 @@ import {
   PROBE_PROMPT,
   probeAnswered,
 } from '../../lib/pack/probe.ts';
+import { launchEnvironment } from '../../lib/fleet/launch-environment.ts';
+import { effortLaunchArguments } from '../../lib/session/launch/argv.ts';
 
 /** The launch environment a runtime's wrapper needs: its login's secrets, as a pane is given them. */
 export interface ProbeEnvironment {
+  /** Keyed by the ABSOLUTE launcher, as a session record carries it. */
   forWrapper(wrapper: string): Promise<Readonly<Record<string, string>>>;
+}
+
+/**
+ * Where a runtime's launcher is, decided exactly as a start decides it: the published account's absolute
+ * wrapper (`$FY_HOME/fleet/bin/<runtime>`), checked runnable on this host. NEVER a name looked up on
+ * `PATH` — a daemon under a service manager has no fleet bin directory on its `PATH`, so a probe that ran
+ * the bare name failed every candidate while the start it guarded would have worked.
+ */
+export interface ProbeLauncher {
+  /** The absolute launcher; throws, saying why a start would be refused, when there is none. */
+  resolve(wrapper: string): Promise<string>;
 }
 
 /** Starts one process and hands back its output, or `timeout`; kills it when the time is up. */
@@ -22,28 +36,24 @@ export type ProbeSpawn = (input: {
 >;
 
 /**
- * The argv of one probe: the runtime's own wrapper — so the probe runs exactly the login, profile and
- * fixed layer a start would — in its CLI's one-shot mode, on the model asked for, at the lowest effort
- * the CLI lets a flag set. Claude Code takes its effort from settings only, so a Claude probe runs at
- * the runtime's own; Codex is told `low`.
+ * The argv of one probe: the runtime's own launcher, at the absolute path a start runs — so the probe runs
+ * exactly the login, profile and fixed layer a start would — in its CLI's one-shot mode, on the model
+ * asked for, at the lowest effort the CLI lets a flag set. Claude Code takes its effort from settings
+ * only, so a Claude probe runs at the runtime's own; Codex is told `low` through the start's own effort
+ * argument.
  */
-export function probeCommand(request: PackProbeRequest): readonly string[] {
-  if (request.harness === 'claude')
-    return [request.wrapper, '-p', PROBE_PROMPT, ...(request.model === undefined ? [] : ['--model', request.model])];
-  return [
-    request.wrapper,
-    'exec',
-    '--skip-git-repo-check',
-    '-c',
-    'model_reasoning_effort="low"',
-    ...(request.model === undefined ? [] : ['-m', request.model]),
-    PROBE_PROMPT,
-  ];
+export function probeCommand(request: PackProbeRequest, launcher: string): readonly string[] {
+  const model = request.model === undefined ? [] : ['--model', request.model];
+  if (request.harness === 'claude') return [launcher, '-p', PROBE_PROMPT, ...model];
+  return [launcher, 'exec', '--skip-git-repo-check', ...effortLaunchArguments('codex', 'low'), ...model, PROBE_PROMPT];
 }
+
+const reasonOf = (error: unknown, fallback: string): string => (error instanceof Error ? error.message : fallback);
 
 /** The probe behind {@link PackProbePort}: one real, bounded run of the runtime's CLI. */
 export class CliPackProbe implements PackProbePort {
   constructor(
+    private readonly launcher: ProbeLauncher,
     private readonly environment: ProbeEnvironment,
     private readonly spawn: ProbeSpawn,
     private readonly base: Readonly<Record<string, string>>,
@@ -53,18 +63,25 @@ export class CliPackProbe implements PackProbePort {
   async probe(request: PackProbeRequest): Promise<PackProbeOutcome> {
     const started = this.monotonicMs();
     const elapsed = (): number => Math.max(0, Math.round(this.monotonicMs() - started));
-    let env: Readonly<Record<string, string>>;
+    let launcher: string;
     try {
-      env = { ...this.base, ...(await this.environment.forWrapper(request.wrapper)) };
+      launcher = await this.launcher.resolve(request.wrapper);
     } catch (error) {
       return {
         ok: false,
         ms: elapsed(),
-        reason: error instanceof Error ? error.message : 'its login could not be read',
+        reason: `it cannot be launched: ${reasonOf(error, 'its launcher is unknown')}`,
       };
     }
+    // The pane's precedence: the login's profile over the daemon's sanitized environment, never its HOME.
+    let env: Readonly<Record<string, string>>;
+    try {
+      env = { ...this.base, ...launchEnvironment(await this.environment.forWrapper(launcher), {}) };
+    } catch (error) {
+      return { ok: false, ms: elapsed(), reason: reasonOf(error, 'its login could not be read') };
+    }
     const outcome = await this.spawn({
-      cmd: probeCommand(request),
+      cmd: probeCommand(request, launcher),
       cwd: request.cwd,
       env,
       timeoutMs: request.timeoutMs,

@@ -11,7 +11,7 @@
 
 /** What one probe asks. */
 export interface PackProbeRequest {
-  /** The runtime's command (its wrapper), as a start would launch it. */
+  /** The runtime's wrapper NAME, as a start is asked for it; the probe resolves its launcher the way a start does. */
   readonly wrapper: string;
   readonly harness: 'claude' | 'codex';
   /** Absent: the runtime's own default model. */

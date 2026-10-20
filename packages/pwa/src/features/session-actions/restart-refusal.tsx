@@ -4,7 +4,8 @@
  * The daemon refuses to restart a CLI when something the agent is running could not be shown to be
  * safe to stop. The refusal is the default and stays the default: the panel opens with Cancel focused,
  * says in plain words what is running, and offers "Restart anyway" as a separate, deliberate press.
- * That press asks the daemon again with `forceInflight`, which the daemon journals.
+ * That press asks the daemon again with `forceInflight`, which the daemon journals. A Restart whose
+ * conversation cannot go with it is paused the same way, and "Start fresh" is its deliberate press.
  *
  * `useRestartRefusal` is shared by every surface that can restart a ferret — the header's Actions
  * menu, the sessions bar, and the transcript notice — so they cannot disagree about what a paused
@@ -19,8 +20,21 @@ import {
   type PausedRestart,
   RestartDowngradeRefused,
   RestartRefused,
+  RestartUnresumable,
   restartRefusedSentence,
 } from './session-operations.ts';
+
+/** Whether a restart threw a pause this panel can hold. */
+const isPaused = (reason: unknown): reason is PausedRestart =>
+  reason instanceof RestartRefused || reason instanceof RestartDowngradeRefused || reason instanceof RestartUnresumable;
+
+/** The words of the deliberate press for each pause, also used to report it failing. */
+const anywayLabel = (held: PausedRestart): string =>
+  held instanceof RestartDowngradeRefused
+    ? 'Restart with the smaller window'
+    : held instanceof RestartUnresumable
+      ? 'Start fresh'
+      : 'Restart anyway';
 
 export function RestartRefusalPanel({
   refusal,
@@ -112,6 +126,42 @@ export function RestartDowngradePanel({
   );
 }
 
+/** The same pause, when the conversation cannot be resumed and only a new one could be started. */
+export function RestartUnresumablePanel({
+  reason,
+  busy,
+  failure,
+  onCancel,
+  onRestartAnyway,
+}: {
+  readonly reason: string;
+  readonly busy: boolean;
+  readonly failure: string | null;
+  readonly onCancel: () => void;
+  readonly onRestartAnyway: () => void;
+}) {
+  const cancel = useRef<HTMLButtonElement | null>(null);
+  useEffect(() => cancel.current?.focus(), []);
+  return (
+    <section aria-label="Restart paused" className="fy-restart-refusal" data-restart-unresumable="" role="alert">
+      <p className="fy-restart-refusal__lead">Restart paused — the conversation can’t be resumed.</p>
+      <p className="fy-restart-refusal__note">{reason}</p>
+      <p className="fy-restart-refusal__note">
+        Starting fresh relaunches the CLI with a new, empty conversation. The old one stays on disk.
+      </p>
+      {failure === null ? null : <p className="fy-restart-refusal__failure">{failure}</p>}
+      <div className="fy-restart-refusal__foot">
+        <Button data-restart-refusal-cancel="" disabled={busy} onClick={onCancel} ref={cancel} type="button">
+          Cancel
+        </Button>
+        <Button data-restart-refusal-anyway="" disabled={busy} onClick={onRestartAnyway} type="button" variant="danger">
+          {busy ? 'Restarting…' : 'Start fresh'}
+        </Button>
+      </div>
+    </section>
+  );
+}
+
 /**
  * Holds one paused restart. `capture` takes whatever a restart threw: a refusal that names what is
  * running is held and answers true, so the caller treats the restart as handled and shows `panel`;
@@ -135,7 +185,7 @@ export function useRestartRefusal(
     setFailure(null);
   }, [scope]);
   const capture = useCallback((reason: unknown): boolean => {
-    if (!(reason instanceof RestartRefused || reason instanceof RestartDowngradeRefused)) return false;
+    if (!isPaused(reason)) return false;
     setHeld(reason);
     setFailure(null);
     return true;
@@ -153,16 +203,21 @@ export function useRestartRefusal(
       .catch((reason: unknown) => {
         // Confirming one refusal can meet the other: the panel then asks the second question, with the
         // first answer already kept, rather than reporting a failure.
-        if (reason instanceof RestartRefused || reason instanceof RestartDowngradeRefused) setHeld(reason);
-        else
-          setFailure(
-            `${held instanceof RestartDowngradeRefused ? 'Restart with the smaller window' : 'Restart anyway'} failed: ${reason instanceof Error ? reason.message : String(reason)}`,
-          );
+        if (isPaused(reason)) setHeld(reason);
+        else setFailure(`${anywayLabel(held)} failed: ${reason instanceof Error ? reason.message : String(reason)}`);
       })
       .finally(() => setBusy(false));
   };
   const panel =
-    held === null ? null : held instanceof RestartDowngradeRefused ? (
+    held === null ? null : held instanceof RestartUnresumable ? (
+      <RestartUnresumablePanel
+        busy={busy}
+        failure={failure}
+        onCancel={() => setHeld(null)}
+        onRestartAnyway={restartAnyway}
+        reason={held.reason}
+      />
+    ) : held instanceof RestartDowngradeRefused ? (
       <RestartDowngradePanel
         busy={busy}
         downgrade={held.downgrade}

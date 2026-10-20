@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, it } from 'bun:test';
 import { createHash } from 'node:crypto';
-import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
-import { basename, join } from 'node:path';
+import { mkdir, readdir, readFile, utimes, writeFile } from 'node:fs/promises';
+import { basename, dirname, join } from 'node:path';
 import { buildFleetManifest, RETIRED_FLEET_CONFIG_SENTENCE } from '@ferretry/fleet';
 import {
   AnalyticsPricingViewSchema,
@@ -35,6 +35,7 @@ import {
   SessionTranscriptPageSchema,
   type SessionView,
   ContextDowngradeRefusedBodySchema,
+  ConversationUnresumableBodySchema,
   MigrationRefusedBodySchema,
   SessionViewSchema,
   type SttEnhancementResult,
@@ -580,8 +581,7 @@ async function seedFleet(home: string): Promise<string> {
   await mkdir(binary, { recursive: true });
   const executable = join(binary, WRAPPER);
   // The wrapper DECLARES its harness home, which is how a real fleet wrapper is written and the only
-  // evidence the daemon has for where this account's transcripts land. `seedMigrationFleet` below
-  // deliberately does not, so the no-provenance path stays covered too.
+  // evidence the daemon has for where this account's transcripts land.
   await writeFile(executable, `#!/bin/sh\nexport CLAUDE_CONFIG_DIR="${join(home, 'harness')}"\nexit 0\n`, {
     mode: 0o755,
   });
@@ -614,8 +614,21 @@ async function seedFleet(home: string): Promise<string> {
 async function seedMigrationFleet(home: string): Promise<void> {
   const binary = join(home, 'bin');
   await mkdir(binary, { recursive: true });
-  for (const wrapper of [WRAPPER, TARGET_WRAPPER, CROSS_FAMILY_WRAPPER])
-    await writeFile(join(binary, wrapper), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+  // The two claude logins DECLARE their homes, as real fleet wrappers do: a migration carries the
+  // conversation into the target's home, and a login that declares none is refused rather than moved
+  // onto an empty conversation.
+  const homes: Readonly<Record<string, string>> = {
+    [WRAPPER]: join(home, 'homes', 'origin'),
+    [TARGET_WRAPPER]: join(home, 'homes', 'target'),
+  };
+  for (const wrapper of [WRAPPER, TARGET_WRAPPER, CROSS_FAMILY_WRAPPER]) {
+    const declared = homes[wrapper];
+    await writeFile(
+      join(binary, wrapper),
+      declared === undefined ? '#!/bin/sh\nexit 0\n' : `#!/bin/sh\nexport CLAUDE_CONFIG_DIR="${declared}"\nexit 0\n`,
+      { mode: 0o755 },
+    );
+  }
   await publishManifest(home, [
     {
       id: ORIGIN_ACCOUNT,
@@ -3106,6 +3119,11 @@ describe('daemon boot lifecycle', () => {
     if (moved.status !== 200) throw new Error(`the cleared migration was refused: ${JSON.stringify(movedRaw)}`);
     const movedBody = SessionViewSchema.parse(movedRaw);
     const afterMove = await storedConfig();
+    const seededTranscript = await readFile(transcriptFile, 'utf8');
+    const carriedTranscript = await readFile(
+      String((afterMove.transcript as { file?: string } | undefined)?.file),
+      'utf8',
+    );
     const report = await readFile(reportFile, 'utf8');
     const turnTwo = await readFile(join(home, 'state', 'sessions', id, 'turns', 'turn-002.md'), 'utf8');
     // The replacement runs out of quota too. Seeded the same way and for the same reason: a migrated
@@ -3270,9 +3288,22 @@ describe('daemon boot lifecycle', () => {
     should(movedBody.config.harness).equal('claude');
     // The argv the NEXT relaunch will run is the target's executable, not the account it left.
     should((afterMove.command as readonly string[])[0]).equal(join(home, 'bin', TARGET_WRAPPER));
-    // The transcript record went with the account. The target wrapper declares no harness home, so
-    // the honest answer is NO transcript — never the departed account's file read as the new one's.
-    should(afterMove).not.have.property('transcript');
+    // THE CONVERSATION WENT WITH THE SESSION: the same harness session, copied into the target login's
+    // home at the path Claude resumes it from — never a freshly minted, empty one.
+    const carriedFile = join(
+      home,
+      'homes',
+      'target',
+      'projects',
+      home.replaceAll(/[^a-zA-Z0-9]/gu, '-'),
+      'seeded-harness-session.jsonl',
+    );
+    should(afterMove.transcript).match({
+      home: join(home, 'homes', 'target'),
+      harnessSessionId: 'seeded-harness-session',
+      file: carriedFile,
+    });
+    should(carriedTranscript).equal(seededTranscript);
     // The stamp analytics reads to call a session migrated, with both ends of the move in it.
     should(afterMove.migration).have.properties({ from: WRAPPER, to: TARGET_WRAPPER });
     // A new incarnation, because a different program is answering the next turn.
@@ -3454,6 +3485,11 @@ describe('daemon boot lifecycle', () => {
     // that names no model. A session answering at its prompt is one the gate lets through.
     await permissionMode('acceptEdits');
     const beforeRestart = await settings();
+    // The revived CLI has talked since: its transcript is on disk, so there IS a conversation, and a
+    // Restart must continue it rather than open a new one (the owner's "no memory after Restart").
+    const boundFile = String((revivedConfig.transcript as { file?: string } | undefined)?.file);
+    await mkdir(dirname(boundFile), { recursive: true });
+    await writeFile(boundFile, `${JSON.stringify({ type: 'user', sessionId: harnessSession })}\n`, { mode: 0o600 });
     await patch(stateFile, { status: 'rate_limited' });
     reviver.pane = { alive: true, dead: false, promptReady: true };
     const restarted = await fetch(`${sessions}/${id}/migrate`, {
@@ -3462,6 +3498,7 @@ describe('daemon boot lifecycle', () => {
       body: JSON.stringify({ agent: WRAPPER }),
     });
     const restartedRaw: unknown = await restarted.json();
+    const restartedConfig = await document(configFile);
     const afterRestart = await settings();
     const absent = await fetch(`${sessions}/no-such-session/relaunch-settings`, { headers: cli });
     release();
@@ -3496,8 +3533,262 @@ describe('daemon boot lifecycle', () => {
     should(restartArgv).containDeep(readRules);
     should(restartArgv).containDeep(['--model', 'claude-sonnet-5']);
     should(restartArgv).not.containEql('claude-opus-5');
+    // THE SAME CONVERSATION: resumed by the id it was bound to, and the record still names it.
+    should(restartArgv).containDeep(['--resume', harnessSession]);
+    should(restartArgv).not.containEql('--session-id');
+    should(restartedConfig.transcript).match({ harnessSessionId: harnessSession, file: boundFile });
     should(afterRestart).deepEqual({ current: true, reasons: [] });
     should(absent.status).equal(404);
+  });
+
+  /**
+   * RESTART CONTINUES THE CONVERSATION — the owner's "as if nothing changed except the process restarted".
+   *
+   * The defect: a migration re-captured the target's transcript the way a start does, and for Claude a
+   * capture mints a NEW harness session id. So Restart CLI (a migration onto the same login) relaunched
+   * with `--session-id <new id>` and the agent came back with no memory, while the conversation it had
+   * sat on disk with nothing pointing at it. The same happened moving between two logins of one harness.
+   *
+   * Driven through the production composition root; only the pane is recorded, and what each relaunch
+   * WOULD have run comes from the production rebuild. The order is the argument:
+   *
+   *   * THE BROKEN STATE, as an earlier Restart left it: bound to a new conversation, with the real one
+   *     older beside it in the same folder. Restart keeps the binding; the repair (`previous`) rebinds
+   *     to the real one and resumes it.
+   *   * ANOTHER LOGIN of the same harness: the transcript is copied into its home and resumed by the
+   *     same id.
+   *   * NOTHING TO RESUME: refused, nothing written — and Start fresh is the person's explicit choice.
+   *   * CODEX: a thread proven by correlation is resumed with `resume <thread>`, not reopened empty.
+   */
+  it('should resume the bound conversation on Restart and migrate, and repair one a Restart lost', async () => {
+    // Arrange
+    const home = await tempDirectory('fyd-restart-resume');
+    const port = await freeLoopbackPort();
+    const cleanups: Array<() => void | Promise<void>> = [];
+    const launcher = new RecordingSessionLauncher();
+    const reviver = new RecordingResumeLauncher();
+    let release = (): void => {};
+    const world = {
+      ...(await worldAt(home, port, async () => {
+        await new Promise<void>(resolve => {
+          release = resolve;
+        });
+      })),
+      sessionLauncher: launcher,
+      createResumeLauncher: (
+        _storage: unknown,
+        relaunch: (id: SessionId) => Promise<readonly string[] | undefined>,
+      ) => {
+        reviver.argvFor = relaunch;
+        return reviver;
+      },
+    };
+    const binary = join(home, 'bin');
+    await mkdir(binary, { recursive: true });
+    const login = (name: string): string => join(home, 'homes', name);
+    const wrappers = [
+      {
+        wrapper: WRAPPER,
+        kind: 'claude' as const,
+        id: ORIGIN_ACCOUNT,
+        variable: 'CLAUDE_CONFIG_DIR',
+        model: 'claude-opus-5',
+      },
+      {
+        wrapper: TARGET_WRAPPER,
+        kind: 'claude' as const,
+        id: TARGET_ACCOUNT,
+        variable: 'CLAUDE_CONFIG_DIR',
+        model: 'claude-opus-5',
+      },
+      {
+        wrapper: CROSS_FAMILY_WRAPPER,
+        kind: 'codex' as const,
+        id: CROSS_FAMILY_ACCOUNT,
+        variable: 'CODEX_HOME',
+        model: 'gpt-5.6-terra',
+      },
+    ];
+    for (const entry of wrappers)
+      await writeFile(
+        join(binary, entry.wrapper),
+        `#!/bin/sh\nexport ${entry.variable}="${login(entry.wrapper)}"\nexit 0\n`,
+        {
+          mode: 0o755,
+        },
+      );
+    await publishManifest(
+      home,
+      wrappers.map(entry => ({
+        id: entry.id,
+        kind: entry.kind,
+        mode: 'auto' as const,
+        wrapper: join(binary, entry.wrapper),
+        home: login(entry.wrapper),
+        displayName: entry.wrapper,
+        defaultModel: entry.model,
+        models: [{ id: entry.model, available: true }],
+        available: true,
+        unavailableReason: null,
+      })),
+    );
+    const exit = start(world, cleanups);
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined)) !== undefined) break;
+      await Bun.sleep(50);
+    }
+    const token = (await readFile(join(home, 'api-token'), 'utf8')).trim();
+    const cli = { authorization: `Bearer ${token}`, 'content-type': 'application/json', 'x-ferretry-client': 'cli' };
+    const sessions = `http://127.0.0.1:${port}/v1/sessions`;
+    const startSession = async (agent: string, requestId: string): Promise<SessionId> => {
+      const response = await fetch(sessions, {
+        method: 'POST',
+        headers: { ...cli, 'x-fy-request-id': requestId },
+        body: JSON.stringify({ agent, mode: 'auto', prompt: 'remember this', cwd: home }),
+      });
+      const raw: unknown = await response.json();
+      if (response.status !== 201) throw new Error(`the fixture start failed: ${JSON.stringify(raw)}`);
+      return parseSessionId(SessionViewSchema.parse(raw).config.id);
+    };
+    const documentOf = async (id: SessionId, name: string): Promise<Record<string, unknown>> =>
+      JSON.parse(await readFile(join(home, 'state', 'sessions', id, name), 'utf8')) as Record<string, unknown>;
+    const patch = async (id: SessionId, name: string, fields: Record<string, unknown>): Promise<void> =>
+      await writeFile(
+        join(home, 'state', 'sessions', id, name),
+        JSON.stringify({ ...(await documentOf(id, name)), ...fields }),
+        { mode: 0o600 },
+      );
+    let asked = 0;
+    // Each move is asked of a session at its prompt, with nothing in flight, so only the conversation decides.
+    const migrate = async (id: SessionId, body: Record<string, unknown>): Promise<Response> => {
+      await patch(id, 'state.json', { status: 'rate_limited', openTools: [] });
+      reviver.pane = { alive: true, dead: false, promptReady: true };
+      asked += 1;
+      return await fetch(`${sessions}/${id}/migrate`, {
+        method: 'POST',
+        headers: { ...cli, 'x-fy-request-id': `req-restart-resume-${asked}` },
+        body: JSON.stringify({ allowContextDowngrade: true, ...body }),
+      });
+    };
+    const transcriptOf = async (id: SessionId): Promise<Record<string, unknown>> =>
+      (await documentOf(id, 'config.json')).transcript as Record<string, unknown>;
+    const lastArgv = (): readonly string[] => reviver.argv.at(-1) ?? [];
+    const writeTranscript = async (file: string, body: string, modifiedSeconds: number): Promise<void> => {
+      await mkdir(dirname(file), { recursive: true });
+      await writeFile(file, body, { mode: 0o600 });
+      await utimes(file, modifiedSeconds, modifiedSeconds);
+    };
+
+    // Act
+    // THE BROKEN STATE. The start bound conversation REAL; an earlier Restart then minted NEW and
+    // rebound the session to it. Both name the session's directory, because every turn file does.
+    const claudeId = await startSession(WRAPPER, 'req-restart-resume-start');
+    const sessionDirectory = join(home, 'state', 'sessions', claudeId);
+    const started = await transcriptOf(claudeId);
+    const realId = String(started.harnessSessionId);
+    const realFile = String(started.file);
+    const realBody = `${JSON.stringify({ type: 'user', message: { content: `read ${sessionDirectory}/turns/turn-001.md` } })}\n`;
+    await writeTranscript(realFile, realBody, 1_800_000_000);
+    const newId = '62c20739-0000-4000-8000-000000000001';
+    const newFile = join(dirname(realFile), `${newId}.jsonl`);
+    await writeTranscript(
+      newFile,
+      `${JSON.stringify({ type: 'user', message: { content: `${sessionDirectory}/state.json` } })}\n`,
+      1_800_000_600,
+    );
+    // An unrelated conversation in the same folder, newer still, that never names this session.
+    await writeTranscript(join(dirname(realFile), 'ffffffff-0000-4000-8000-000000000009.jsonl'), '{}\n', 1_800_001_200);
+    await patch(claudeId, 'config.json', {
+      transcript: { ...started, harnessSessionId: newId, file: newFile, identity: 'minted' },
+    });
+    const restartBroken = await migrate(claudeId, { agent: WRAPPER });
+    const restartBrokenArgv = lastArgv();
+    const repaired = await migrate(claudeId, { agent: WRAPPER, conversation: 'previous' });
+    const repairedRaw: unknown = await repaired.json();
+    const repairedArgv = lastArgv();
+    const afterRepair = await transcriptOf(claudeId);
+    // ANOTHER LOGIN of the same harness.
+    const moved = await migrate(claudeId, { agent: TARGET_WRAPPER });
+    const movedArgv = lastArgv();
+    const afterMove = await transcriptOf(claudeId);
+    const carried = await readFile(String(afterMove.file), 'utf8');
+    // NOTHING RECORDS A CONVERSATION: refused and untouched, until the person chooses a fresh one.
+    const { transcript: _dropped, ...unbound } = await documentOf(claudeId, 'config.json');
+    await writeFile(join(sessionDirectory, 'config.json'), JSON.stringify(unbound), { mode: 0o600 });
+    const relaunchesBeforeRefusal = reviver.relaunched.length;
+    const refused = await migrate(claudeId, { agent: TARGET_WRAPPER });
+    const refusedBody = ConversationUnresumableBodySchema.parse(await refused.json());
+    const afterRefusal = await documentOf(claudeId, 'config.json');
+    const relaunchesAfterRefusal = reviver.relaunched.length;
+    const fresh = await migrate(claudeId, { agent: TARGET_WRAPPER, conversation: 'fresh' });
+    const freshArgv = lastArgv();
+    // CODEX, with a thread the daemon proved by correlation.
+    const codexId = await startSession(CROSS_FAMILY_WRAPPER, 'req-restart-resume-codex');
+    const codexStarted = await transcriptOf(codexId);
+    const thread = '019a0000-0000-7000-8000-00000000c0de';
+    const rollout = join(
+      login(CROSS_FAMILY_WRAPPER),
+      'sessions',
+      '2026',
+      '10',
+      '20',
+      `rollout-2026-10-20T06-00-00-${thread}.jsonl`,
+    );
+    await writeTranscript(
+      rollout,
+      `${JSON.stringify({ type: 'session_meta', payload: { id: thread } })}\n`,
+      1_800_000_000,
+    );
+    await patch(codexId, 'config.json', {
+      transcript: {
+        ...codexStarted,
+        harnessSessionId: thread,
+        identity: 'correlated',
+        file: rollout,
+        resolvedAt: '2026-10-20T06:00:00.000Z',
+      },
+    });
+    const codexRestart = await migrate(codexId, { agent: CROSS_FAMILY_WRAPPER });
+    const codexArgv = lastArgv();
+    const journal = await readFile(join(sessionDirectory, 'events.jsonl'), 'utf8');
+    release();
+    const code = await exit;
+    await runCleanups(cleanups);
+
+    // Assert
+    should(code).equal(0);
+    // Restart on the broken state keeps the binding it has — the conversation that is there now.
+    should(restartBroken.status).equal(200);
+    should(restartBrokenArgv).containDeep(['--resume', newId]);
+    // The repair goes back to the REAL conversation: the newest OTHER one that names this session,
+    // never the newer stranger, and resumes it.
+    if (repaired.status !== 200) throw new Error(`the repair was refused: ${JSON.stringify(repairedRaw)}`);
+    should(repairedArgv).containDeep(['--resume', realId]);
+    should(repairedArgv).not.containEql('--session-id');
+    should(afterRepair).match({ harnessSessionId: realId, file: realFile });
+    // Onto another login: the same conversation, copied into its home and resumed by the same id.
+    should(moved.status).equal(200);
+    should(movedArgv[0]).equal(join(binary, TARGET_WRAPPER));
+    should(movedArgv).containDeep(['--resume', realId]);
+    should(afterMove).match({ home: login(TARGET_WRAPPER), harnessSessionId: realId });
+    should(String(afterMove.file).startsWith(login(TARGET_WRAPPER))).be.true();
+    should(carried).equal(realBody);
+    // Nothing to resume: a plain refusal naming the way past, and nothing restarted or rewritten.
+    should(refused.status).equal(409);
+    should(refusedBody.error).containEql('no recorded conversation');
+    should(refusedBody.error).containEql('Start fresh');
+    should(relaunchesAfterRefusal).equal(relaunchesBeforeRefusal);
+    should(afterRefusal).not.have.property('transcript');
+    should(afterRefusal).have.property('runtimeGeneration', unbound.runtimeGeneration);
+    // Start fresh is honoured when it is asked for — a new conversation, said so in the journal.
+    should(fresh.status).equal(200);
+    should(freshArgv).containEql('--session-id');
+    should(freshArgv).not.containEql(realId);
+    should(journal).containEql('"conversation":"fresh"');
+    should(journal).containEql('"conversation":"resumed"');
+    // Codex resumes its proven thread rather than opening a new rollout.
+    should(codexRestart.status).equal(200);
+    should(codexArgv.slice(1, 3)).deepEqual(['resume', thread]);
   });
 
   /**

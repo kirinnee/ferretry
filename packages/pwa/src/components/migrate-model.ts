@@ -27,6 +27,7 @@ export interface MigrationContextDecision {
 export type MigrationFailureKind =
   | 'context-downgrade'
   | 'preflight-refused'
+  | 'conversation-unresumable'
   | 'unknown-agent'
   | 'unavailable'
   | 'unusable'
@@ -130,6 +131,10 @@ const FAILURE_COPY: Readonly<Record<MigrationFailureKind, readonly [title: strin
     'The daemon refused this migration',
     'Nothing changed. Let the work finish or stop the session deliberately, then run the safety check again.',
   ],
+  'conversation-unresumable': [
+    'The conversation can’t go with it',
+    'Nothing changed. Choose a login that keeps its conversations where Ferretry can find them, or restart this ferret and choose Start fresh.',
+  ],
   'unknown-agent': ['Unknown target account', 'Check the account name against this daemon’s fleet configuration.'],
   unavailable: [
     'Target account unavailable',
@@ -149,6 +154,8 @@ const kindForCode = (code: string | undefined): MigrationFailureKind => {
       return 'context-downgrade';
     case 'migration_refused':
       return 'preflight-refused';
+    case 'conversation_unresumable':
+      return 'conversation-unresumable';
     case 'unknown_agent':
       return 'unknown-agent';
     case 'agent_unavailable':

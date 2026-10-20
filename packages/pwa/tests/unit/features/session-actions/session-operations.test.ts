@@ -13,6 +13,8 @@ import {
   NothingToForkError,
   RestartDowngradeRefused,
   RestartRefused,
+  RestartUnresumable,
+  restartOnEarlierConversation,
   restartRefusedSentence,
   restartWithResume,
 } from '../../../../src/features/session-actions/session-operations.ts';
@@ -384,5 +386,44 @@ describe('restartWithResume — a refusal because the window would shrink', () =
     expect(without.message).toBe(
       'Restart paused — Restarting would give this conversation a smaller window, so part of it would be cut off. Nothing was restarted.',
     );
+  });
+});
+
+describe('restartWithResume — a refusal because the conversation cannot be resumed', () => {
+  const unresumable = new FyHttpError(
+    'This session has no recorded conversation, so there is nothing Ferretry can resume. Nothing was restarted.',
+    409,
+    'conversation_unresumable',
+    { error: 'x', code: 'conversation_unresumable' },
+  );
+  const sequence = (...outcomes: Array<Error | 'ok'>) => {
+    const asked: Array<readonly unknown[]> = [];
+    const migrate = async (...args: unknown[]) => {
+      asked.push(args);
+      const next = outcomes[asked.length - 1];
+      if (next instanceof Error) throw next;
+      return sessionView('done');
+    };
+    return { asked, client: { migrate } as unknown as Pick<IFyApiClient, 'migrate'> };
+  };
+
+  it('never starts fresh on its own: it pauses with the daemon’s reason, and Start fresh asks again', async () => {
+    const { asked, client: fake } = sequence(unresumable, 'ok');
+    const thrown = (await restartWithResume(fake, view, 'req-20').catch(
+      (reason: unknown) => reason,
+    )) as RestartUnresumable;
+    expect(thrown).toBeInstanceOf(RestartUnresumable);
+    expect(thrown.reason).toContain('nothing Ferretry can resume');
+    expect(asked[0]).toHaveLength(6);
+    expect((await thrown.restartAnyway()).config.id).toBe('done');
+    expect(asked[1]?.[6]).toBe('fresh');
+    expect(String(asked[1]?.[4])).toStartWith('req-20-anyway-');
+  });
+
+  it('goes back to the earlier conversation by asking for it explicitly', async () => {
+    const { asked, client: fake } = sequence('ok');
+    const result = await restartOnEarlierConversation(fake, view, 'req-21');
+    expect(result.config.id).toBe('done');
+    expect(asked).toEqual([['a1', 'nero', undefined, false, 'req-21', undefined, 'previous']]);
   });
 });

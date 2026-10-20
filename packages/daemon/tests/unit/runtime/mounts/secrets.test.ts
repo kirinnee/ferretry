@@ -2,7 +2,7 @@ import { describe, it } from 'bun:test';
 import should from 'should';
 import { ApiDispatcher } from '../../../../src/lib/api/dispatcher.ts';
 import { ApiRouter } from '../../../../src/lib/api/router.ts';
-import { secretRoutes, type SecretSubsystem } from '../../../../src/lib/runtime/mounts/secrets.ts';
+import { type SecretSubsystem, secretRoutes } from '../../../../src/lib/runtime/mounts/secrets.ts';
 import { SecretStoreError } from '../../../../src/lib/secrets/index.ts';
 import { jsonBody, request } from '../../api/support.ts';
 import {
@@ -40,12 +40,16 @@ describe('the secret routes', () => {
     // Arrange / Act
     const paths = secretRoutes(secretSubsystem()).map(route => `${route.method} ${route.path}`);
 
-    // Assert — the absence IS the feature. A `GET /v1/secrets/:name` here would be the hole.
+    // Assert — the absence IS the feature. A `GET /v1/secrets/:name` here would be the hole. The three
+    // clone routes answer an offer, ciphertext only another machine opens, and names (`secret-clone.test.ts`).
     should(paths).deepEqual([
       'GET /v1/secrets',
       'POST /v1/secrets/use',
       'POST /v1/secrets',
       'DELETE /v1/secrets/:name',
+      'POST /v1/secrets/imports',
+      'POST /v1/secrets/imports/:importId',
+      'POST /v1/secrets/exports/:importId',
     ]);
   });
 

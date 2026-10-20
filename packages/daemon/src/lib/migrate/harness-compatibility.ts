@@ -12,9 +12,10 @@ import { HarnessSchema } from '@ferretry/protocol';
  * WHY IT IS A CORRECTNESS BUG rather than a documentation one. The session keeps its id, its
  * directory, its journal and its whole conversation — that is what a migration is for — and it keeps
  * them across a harness that cannot read them. The transcript is the clearest case: the migrator
- * re-captures provenance for the target precisely because a Codex parser must not be pointed at a
- * Claude record, and the honest result of crossing families is a session whose entire history is
- * unreadable by the harness now answering for it. The turn counter, the open-tool ids the preflight
+ * carries the conversation into the target's home and resumes it by the same id, which only works
+ * when the same harness reads it — a Codex parser must not be pointed at a Claude record, and the
+ * honest result of crossing families is a session whose entire history is unreadable by the harness
+ * now answering for it. The turn counter, the open-tool ids the preflight
  * gates on, the resume arguments, the composer quirks and the pane matchers are all per-harness too.
  * Nothing about that is recoverable by trying again, which is why it must be refused before the pane
  * is destroyed rather than reported afterwards.

@@ -233,6 +233,24 @@ describe('transcriptLaunchArguments, for a Codex session proven by correlation',
     should(argv).eql(['--add-dir', `${TOKEN}/codex-correlation/unreachable`]);
   });
 
+  it('should resume a thread it proved by correlation, so a revive or Restart keeps the conversation', () => {
+    // Arrange: the rollout is known; relaunching without `resume` opened a new, empty one.
+    const provenance = {
+      v: 1 as const,
+      home: '/fleet/homes/codex',
+      harnessSessionId: HARNESS_SESSION,
+      identity: 'correlated' as const,
+      file: `/fleet/homes/codex/sessions/rollout-${HARNESS_SESSION}.jsonl`,
+      correlationToken: TOKEN,
+    };
+
+    // Act
+    const argv = transcriptLaunchArguments('codex', provenance, ['/fleet/bin/codex-auto']);
+
+    // Assert
+    should(argv).eql(['resume', HARNESS_SESSION, '--add-dir', `${TOKEN}/codex-correlation/unreachable`]);
+  });
+
   it('should resume an adopted conversation and still declare the root after the subcommand', () => {
     // Arrange
     const provenance = {

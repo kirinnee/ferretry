@@ -1,3 +1,4 @@
+import { type MigrationConversation, MigrationConversationSchema } from '@ferretry/protocol';
 import type { SessionPresenter } from '../session/presenter.ts';
 import type { IMigrationGateway } from './ports.ts';
 
@@ -7,6 +8,8 @@ export interface MigrationCommandOptions {
   readonly model?: string;
   readonly allowContextDowngrade?: boolean;
   readonly forceInflight?: boolean;
+  /** `resume` (the daemon's default), `fresh` or `previous`; see `MigrationConversation`. */
+  readonly conversation?: string;
   readonly requestId?: string;
   readonly json?: boolean;
 }
@@ -26,6 +29,7 @@ export class MigrationController {
     const model = optionalText(options.model);
     const requestId = optionalText(options.requestId);
     if (options.requestId !== undefined && requestId === undefined) throw new Error('--request-id must not be blank');
+    const conversation = conversationChoice(options.conversation);
 
     const view = await this.gateway.migrate(
       id,
@@ -34,9 +38,19 @@ export class MigrationController {
       options.allowContextDowngrade === true,
       requestId,
       options.forceInflight === true,
+      ...(conversation === undefined ? [] : [conversation]),
     );
     this.presenter.view(view, options.json === true);
   }
+}
+
+/** The `--conversation` choice, refused before the destructive call when it is not one the daemon knows. */
+function conversationChoice(value: string | undefined): MigrationConversation | undefined {
+  if (value === undefined) return undefined;
+  const parsed = MigrationConversationSchema.safeParse(value.trim());
+  if (!parsed.success)
+    throw new Error(`--conversation must be one of ${MigrationConversationSchema.options.join(', ')}`);
+  return parsed.data;
 }
 
 /** Trims an optional CLI value, treating blank optional text as absent. */

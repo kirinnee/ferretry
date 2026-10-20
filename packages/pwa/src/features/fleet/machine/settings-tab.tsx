@@ -463,7 +463,7 @@ export function MachineSettingsTab(props: MachineSettingsTabProps) {
         <NavRow
           name="clone"
           title="Copy settings from another machine…"
-          detail="Warden, learning, voice, agent controls, profiles and runtimes, copied once. Secrets and logins never travel."
+          detail="Warden, learning, voice, agent controls, profiles and runtimes, copied once. Secrets come only when you pick them; logins never travel."
           onClick={() => route.open('clone')}
         />
         <NavRow

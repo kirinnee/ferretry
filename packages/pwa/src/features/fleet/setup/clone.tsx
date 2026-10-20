@@ -17,9 +17,11 @@
  *   loosens spend or authority until the owner confirms it; Done offers Confirm on those.
  * - **Agent controls and default runtime** — the source's machine settings, as one reviewed change.
  *
- * SECRETS AND LOGIN TOKENS NEVER TRAVEL. The Preview lists every secret and sign-in the copied settings
- * need here, with a field to add each secret now; a login arrives as an empty slot that needs sign-in,
- * and Done offers **Sign in once for n runtimes** on the busiest one (E31).
+ * SECRETS AND LOGIN TOKENS NEVER TRAVEL WITH THE SETTINGS. The Preview lists every secret and sign-in the
+ * copied settings need here, with a field to add each secret now, and **Copy secrets from <source>…** —
+ * a separate, per-name copy the source confirms with a passkey (docs/secrets.md), the needed ones ticked.
+ * A login arrives as an empty slot that needs sign-in, and Done offers **Sign in once for n runtimes** on
+ * the busiest one (E31).
  */
 
 import type { CloneRunnable, FleetCloneBundle, FleetCredentialView, SpeedupsView } from '@ferretry/protocol';
@@ -34,6 +36,7 @@ import {
   readConfigFile,
   writeConfigFile,
 } from '../../config-files/config-files-api.ts';
+import { SecretCopyLauncher } from '../../secrets/secret-copy-panel.tsx';
 import { listSecrets, putSecret } from '../../secrets/secrets-api.ts';
 import { daemonDisplayName } from '../../settings/daemon-settings.tsx';
 import { readSpeedups } from '../../speedups/speedups-api.ts';
@@ -316,6 +319,24 @@ export function CloneMachine(props: CloneMachineProps) {
   };
 
   const needs: readonly CloneNeed[] = cloneNeeds(chosen, bundle, files, speedups, held);
+  // Secrets come only when a person picks them, by name, and the source asks for a passkey (docs/secrets.md).
+  // The ones the copied settings need here start ticked.
+  const neededSecrets = needs
+    .filter(need => need.kind === 'secret' && !need.held && need.secretName !== undefined)
+    .map(need => need.secretName as string);
+  const copySecrets =
+    pickedRecord === undefined ? undefined : (
+      <SecretCopyLauncher
+        label={`Copy secrets from ${daemonDisplayName(pickedRecord)}…`}
+        direction="from"
+        here={connection}
+        others={[pickedRecord]}
+        createClient={createClient}
+        machineName={daemonDisplayName}
+        preselect={neededSecrets}
+        onCopied={() => void readHeld()}
+      />
+    );
 
   const copyPanel = (label: string, variant: 'primary' | 'danger' = 'primary') => (
     <div className="mt-4">
@@ -412,6 +433,7 @@ export function CloneMachine(props: CloneMachineProps) {
           onDone={onDone}
           onAdd={addSecret}
           onConfirm={confirm}
+          copy={copySecrets}
         />
       );
     if (bundle === null || preview === null) return null;
@@ -472,7 +494,7 @@ export function CloneMachine(props: CloneMachineProps) {
               )}
             </>
           ) : null}
-          <CloneNeedsList needs={needs} machineName={machineName} onAdd={addSecret} />
+          <CloneNeedsList needs={needs} machineName={machineName} onAdd={addSecret} copy={copySecrets} />
           <SetupSection title="Doesn’t copy" name="not-copied">
             {copiesFleet && preview.skipped > 0 ? (
               <SetupRow
@@ -709,6 +731,7 @@ function DoneStep({
   onDone,
   onAdd,
   onConfirm,
+  copy,
 }: {
   readonly result: CloneResult | null;
   readonly machineName: string;
@@ -717,6 +740,7 @@ function DoneStep({
   readonly onDone: () => void;
   readonly onAdd: (name: string, value: string) => Promise<string | null>;
   readonly onConfirm: (path: string, etag: string) => Promise<string | null>;
+  readonly copy?: ReactNode;
 }) {
   if (result === null) return null;
   const busiest = result.slots[0];
@@ -732,6 +756,7 @@ function DoneStep({
         needs={needs}
         machineName={machineName}
         onAdd={onAdd}
+        copy={copy}
         signIn={need => {
           const slot = slotFor(need);
           return slot === undefined ? null : (

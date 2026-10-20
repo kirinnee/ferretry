@@ -60,7 +60,11 @@ import { type SessionActionContribution, sessionActionSections } from '../../fea
 import { RenameForm } from '../../features/session-actions/rename-form.tsx';
 import { addSessionMcp, previewSessionMcp, readSessionMcp } from '../../features/session-actions/session-mcp-api.ts';
 import { useRestartRefusal } from '../../features/session-actions/restart-refusal.tsx';
-import { forkThroughLatest, restartWithResume } from '../../features/session-actions/session-operations.ts';
+import {
+  forkThroughLatest,
+  restartOnEarlierConversation,
+  restartWithResume,
+} from '../../features/session-actions/session-operations.ts';
 import type { InfoTab } from '../../features/session-info/info-model.ts';
 import { readRelaunchSettings } from '../../features/session-info/relaunch-settings-api.ts';
 import { SessionInfo, type SessionInfoPorts } from '../../features/session-info/session-info.tsx';
@@ -952,6 +956,15 @@ export function SessionChatPage({
     copyId: copySessionId,
     openMigrate: () => setMigrateOpen(true),
     restart,
+    restartOnEarlierConversation: async () => {
+      publish(
+        await restartOnEarlierConversation(
+          await routedClient(connection),
+          session,
+          `earlier-${session.config.id}-${session.state.turn}-${Date.now()}`,
+        ),
+      );
+    },
     stop: async () => {
       publish(await client.stop(session.config.id, 'stopped from the PWA session workspace'));
     },

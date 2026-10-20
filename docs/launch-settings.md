@@ -34,6 +34,27 @@ another login all apply them, because all four build the launch the same way:
 A restart **keeps the conversation, the model, the effort and fast mode** the ferret is on — including a model the
 owner switched to with `/model` — unless the person restarting it picks another.
 
+### The conversation
+
+Restart CLI, and a move onto another login of the **same harness**, relaunch the CLI into the conversation the
+ferret is bound to — as if only the process had restarted:
+
+- Claude relaunches with `--resume <the same id>`; Codex with `resume <the same thread>`.
+- Moving to another login copies the transcript into that login's harness home first, at the path its CLI
+  resumes from (`projects/<folder>/<id>.jsonl` for Claude, the same `sessions/…` path for Codex). It is a copy,
+  never a link, so the login left behind keeps only what it had.
+- When the conversation **cannot** go with it — nothing records one, Codex has not yet proved which rollout
+  is this ferret's, or the target login declares no harness home — the daemon refuses with
+  `409 conversation_unresumable` and changes nothing. It never quietly starts a new conversation.
+  **Start fresh** (`conversation: "fresh"`, `fy migrate … --conversation fresh`) is the person's explicit way
+  past.
+- **Go back to the earlier conversation** (Actions, or `--conversation previous`) repairs a ferret an earlier
+  Restart moved onto a new, empty conversation: it rebinds to the newest other transcript in the same
+  harness home that names the ferret's own directory — every turn Ferretry hands an agent does — and
+  resumes that one.
+
+Moving between harnesses is not a restart and stays refused (`harness_mismatch`).
+
 **Info › Runtime › Settings** says whether a restart would change anything: "Running with older settings —
 Restart to apply", with the reason, and a one-tap Restart. It compares two things
 (`GET /v1/sessions/:id/relaunch-settings`):
@@ -55,7 +76,8 @@ Restart to apply", with the reason, and a one-tap Restart. It compares two thing
 
 One builder (`buildLaunchArgv`, `packages/daemon/src/lib/session/launch/`) makes every launch argv, in this
 order: the login's wrapper; the remote-control arguments if the ferret has that surface; the arguments that
-name its conversation (`--session-id`, turned into `--resume` once the CLI has written it); the `Read(...)`
+name its conversation (Claude `--session-id`, turned into `--resume` once the CLI has written it; Codex
+`resume <thread>` once its rollout is known); the `Read(...)`
 rules for its hand-off folders; `--model` and the effort; the owner's harness flags last, so an explicit
 flag still wins.
 
@@ -77,5 +99,10 @@ otherwise the recorded decision. A model the login has stopped serving falls bac
   change until its first restart; its arguments are still compared.
 - A ferret whose documents do not parse, or whose login the fleet no longer publishes, is relaunched from its
   recorded argv as before, and its Settings row claims nothing.
+- Going back to the earlier conversation searches only the harness home the ferret is bound to now. A ferret
+  that a broken Restart also moved to another login has its earlier conversation in the old login's home;
+  move it back first, then go back.
+- Only the transcript file is carried between logins. Claude's per-conversation side folders (file history,
+  todos) stay in the home that wrote them.
 - The digest covers the wrapper and the fixed settings file. An MCP server, skill or instruction file
   changed inside the harness home or the project is not detected; restart the ferret to load it.

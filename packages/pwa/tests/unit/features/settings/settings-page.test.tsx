@@ -527,6 +527,21 @@ describe('SettingsPage machine navigation', () => {
     await view.unmount();
   });
 
+  it('lists the machines in this device\u2019s saved order, a machine it has never seen last', async () => {
+    const controls = new DaemonControlsStore(memoryStorage());
+    controls.setDeviceControls({ machineOrder: ['daemon-beta', 'daemon-gone'] });
+    const gamma = daemon('daemon-gamma', 'https://gamma.example.test', 'gamma-secret', 'Gamma');
+    const view = await mount(page({ connections: [alpha, gamma, beta], controls, createMachineClient: answering }));
+    await settle();
+    const rows = [...sidebar(view.container).querySelectorAll('[data-settings-machine]')];
+    expect(rows.map(row => row.getAttribute('data-settings-machine'))).toEqual([
+      'daemon-beta',
+      'daemon-alpha',
+      'daemon-gamma',
+    ]);
+    await view.unmount();
+  });
+
   it('says under each machine whether it answers, read once for the whole page', async () => {
     const asked: string[] = [];
     const reach: FleetClientFactory = async connection => {
