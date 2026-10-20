@@ -243,6 +243,17 @@ const sessionCases: SchemaCase[] = [
     schema: session.MigrateSessionRequestSchema,
     value: { agent: 'next', allowContextDowngrade: false, forceInflight: true },
   },
+  { name: 'migration conversation', schema: session.MigrationConversationSchema, value: 'previous' },
+  {
+    name: 'migrate request starting fresh',
+    schema: session.MigrateSessionRequestSchema,
+    value: { agent: 'next', allowContextDowngrade: false, forceInflight: false, conversation: 'fresh' },
+  },
+  {
+    name: 'conversation unresumable body',
+    schema: session.ConversationUnresumableBodySchema,
+    value: { error: 'nothing to resume', code: 'conversation_unresumable' },
+  },
   {
     name: 'in-flight item',
     schema: session.InflightItemSchema,
@@ -482,6 +493,11 @@ describe('session schemas', () => {
   it('should reject impossible or untrusted session requests', () => {
     // Arrange
     const cases: SchemaCase[] = [
+      {
+        name: 'migrate request with an unknown conversation choice',
+        schema: session.MigrateSessionRequestSchema,
+        value: { agent: 'next', conversation: 'guess' },
+      },
       {
         name: 'auto without prompt',
         schema: session.StartSessionRequestSchema,

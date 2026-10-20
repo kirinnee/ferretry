@@ -57,7 +57,7 @@ import {
   FY_DEFAULT_DAEMON_PORT,
   type LearningConfig,
   localOnlyNotice,
-  type MigrateSessionRequest,
+  type MigrationConversation,
   type PackConfig,
   type PackRefusal,
   type RegisterProjectRequest,
@@ -74,6 +74,7 @@ import {
   sessionHypermediaEnabled,
   type TaskBoardChildAccess,
   TERMINAL_MAX_GLOBAL,
+  type TranscriptProvenance,
   TERMINAL_MAX_PER_SESSION,
   type WardenGuardConfig,
 } from '@ferretry/protocol';
@@ -227,6 +228,7 @@ import {
   FileMcpOAuthStateStore,
   webCryptoMcpOAuth,
 } from '../src/adapters/mcp-oauth/index.ts';
+import { FileConversationFiles } from '../src/adapters/migrate/file-conversation-files.ts';
 import { FileMigrationReportStore } from '../src/adapters/migrate/file-migration-report.ts';
 import { FileNameClaimStore } from '../src/adapters/names/index.ts';
 import { FileNotificationDeliveryLedger } from '../src/adapters/notifications/index.ts';
@@ -525,6 +527,10 @@ import {
   harnessDiscoveryPolicy,
   harnessLocationSummary,
   harnessMigrationRefusal,
+  planConversationCarry,
+  previousConversation,
+  type ConversationFilesPort,
+  transcriptLaunchArguments,
   harnessOverrideFailures,
   harnessPreflightSummary,
   harnessQuirks,
@@ -3802,6 +3808,8 @@ interface SessionMigrateParts {
   readonly transcripts: SessionTranscriptReader;
   /** The target account's own transcript evidence, taken before the relaunch argv is authorized. */
   readonly transcriptProvenance: TranscriptProvenanceCapture;
+  /** The transcripts a migration reads and carries into the target login's home. */
+  readonly conversationFiles: ConversationFilesPort;
   /** The session's own private directory, which is what a Codex rollout is correlated by. */
   readonly sessionDirectory: (id: SessionId) => string;
   /** The folders the agent is pointed into to read what it was sent (`handoffFolders`). */
@@ -3855,6 +3863,86 @@ function currentContextWindow(
     reportedWindow: state.contextWindow,
     ...(declaredWindow === undefined ? {} : { declaredWindow }),
   });
+}
+
+/** What a migration's relaunch is bound to: a carried conversation, a fresh one, or a refusal. */
+type RelaunchConversation =
+  | {
+      readonly kind: 'carry';
+      readonly provenance: TranscriptProvenance;
+      readonly copy?: { readonly from: string; readonly to: string };
+      readonly launchArguments: readonly string[];
+    }
+  | {
+      readonly kind: 'fresh';
+      readonly provenance?: TranscriptProvenance;
+      readonly copy?: undefined;
+      readonly launchArguments: readonly string[];
+    }
+  | {
+      readonly kind: 'unresumable';
+      readonly reason: string;
+      readonly provenance?: undefined;
+      readonly copy?: undefined;
+    };
+
+/**
+ * The conversation a migration relaunches into, decided from reads alone.
+ *
+ * `fresh` is the person's explicit choice and captures the target's evidence as a start would.
+ * `resume` carries the bound conversation ({@link planConversationCarry}); `previous` first rebinds
+ * to the newest other transcript in the session's home that names its directory
+ * ({@link previousConversation}) — the repair for a session an earlier Restart moved onto an empty one.
+ */
+async function decideRelaunchConversation(
+  parts: SessionMigrateParts,
+  subject: {
+    readonly id: SessionId;
+    readonly config: z.infer<typeof SessionConfigSchema>;
+    readonly harness: HarnessKind;
+    readonly executable: string;
+    readonly targetAgent: string;
+    readonly conversation: MigrationConversation;
+  },
+): Promise<RelaunchConversation> {
+  const { id, config, harness, executable } = subject;
+  const at = parts.clock.now();
+  if (subject.conversation === 'fresh') {
+    const captured = await parts.transcriptProvenance.capture({
+      harness,
+      executable,
+      cwd: config.cwd,
+      correlationToken: parts.sessionDirectory(id),
+      at,
+    });
+    return {
+      kind: 'fresh',
+      ...(captured.provenance === undefined ? {} : { provenance: captured.provenance }),
+      launchArguments: captured.launchArguments,
+    };
+  }
+  let source = config.transcript;
+  if (subject.conversation === 'previous' && source !== undefined) {
+    const rebound = previousConversation({
+      harness,
+      current: source,
+      home: source.home,
+      candidates: await parts.conversationFiles.prior(harness, source.home, config.cwd, parts.sessionDirectory(id)),
+      at,
+    });
+    if (rebound.kind === 'unresumable') return rebound;
+    source = rebound.provenance;
+  }
+  const planned = planConversationCarry({
+    harness,
+    source,
+    sourceWritten: source?.file !== undefined && (await parts.conversationFiles.written(source.file)),
+    targetHome: await parts.transcriptProvenance.home(harness, executable),
+    targetAgent: subject.targetAgent,
+    cwd: config.cwd,
+  });
+  if (planned.kind === 'unresumable') return planned;
+  return { ...planned, launchArguments: transcriptLaunchArguments(harness, planned.provenance, []) };
 }
 
 /**
@@ -3927,7 +4015,10 @@ function createSessionMigrateSubsystem(parts: SessionMigrateParts): SessionMigra
     };
   };
 
-  const migrate = async (id: SessionId, request: MigrateSessionRequest): Promise<SessionView> => {
+  const migrate = async (
+    id: SessionId,
+    request: Parameters<SessionMigrateSubsystem['migrate']>[1],
+  ): Promise<SessionView> => {
     const { config, state, tmuxSession } = await subject(id);
     const { account, executable } = await resolveStartAccount(
       parts.accounts,
@@ -3991,17 +4082,19 @@ function createSessionMigrateSubsystem(parts: SessionMigrateParts): SessionMigra
     // below, so without this check a fleet manifest publishing something that is not an auto wrapper
     // would be launchable by a migrate and refused by a start.
     //
-    // THE TRANSCRIPT IS RE-CAPTURED FOR THE TARGET, for the same reason the flags are rebuilt: the
-    // record the session carries describes the account it is LEAVING. Keeping it would point a
-    // codex session at a claude transcript — parsed by the wrong parser, attributed to the wrong
-    // harness — so it is replaced by the target's own evidence, or by nothing when the target
-    // declares no resolvable home.
-    const relaunchTranscript = await parts.transcriptProvenance.capture({
+    // THE CONVERSATION GOES WITH THE SESSION. A Restart, or a move onto another login of the same
+    // harness, relaunches the CLI into the conversation it is bound to — the transcript carried into
+    // the target's home and resumed by its own id — rather than into a fresh one: re-capturing here
+    // used to mint a new Claude id, so every Restart opened an empty conversation. Decided now, from
+    // reads only; a conversation that cannot be carried is refused below, once the in-flight gate has
+    // had its say, and before anything is written.
+    const relaunchConversation = await decideRelaunchConversation(parts, {
+      id,
+      config,
       harness: account.kind,
       executable,
-      cwd: config.cwd,
-      correlationToken: parts.sessionDirectory(id),
-      at: parts.clock.now(),
+      targetAgent: account.agent,
+      conversation: request.conversation ?? 'resume',
     });
     const command = ((): readonly string[] => {
       try {
@@ -4011,7 +4104,7 @@ function createSessionMigrateSubsystem(parts: SessionMigrateParts): SessionMigra
             harness: account.kind,
             executable,
             remoteControl: config.remoteControl ? plan.extraArgs : [],
-            transcript: relaunchTranscript.launchArguments,
+            transcript: relaunchConversation.kind === 'unresumable' ? [] : relaunchConversation.launchArguments,
             readableFolders: parts.readableHandoffs(id),
             model: plan.model,
             ...(effort === undefined ? {} : { effort }),
@@ -4065,6 +4158,10 @@ function createSessionMigrateSubsystem(parts: SessionMigrateParts): SessionMigra
       throw new SessionMigrateError('refused', `${decision.reason}\n${parts.preflight.summarize(report)}`, {
         inflight: parts.preflight.describe(report),
       });
+    // NEVER A SILENT NEW CONVERSATION. Still before the first write, so a refusal leaves the session
+    // exactly as it was and the person can choose to start fresh.
+    if (relaunchConversation.kind === 'unresumable')
+      throw new SessionMigrateError('unresumable', relaunchConversation.reason);
     const at = parts.clock.now();
     if (decision.forced)
       await parts.storage.append(id, 'session.migrate_forced', {
@@ -4089,7 +4186,17 @@ function createSessionMigrateSubsystem(parts: SessionMigrateParts): SessionMigra
     const generation = config.runtimeGeneration + 1;
     // The level the session is on carries over; with none known, the target's own settings decide.
     const launchEffort =
-      effort ?? (await readPersistedReasoningEffort(account.kind, relaunchTranscript.provenance?.home));
+      effort ?? (await readPersistedReasoningEffort(account.kind, relaunchConversation.provenance?.home));
+    // The target login's copy of the conversation, written before the record that points at it.
+    const carried = relaunchConversation.copy;
+    if (carried !== undefined)
+      await parts.conversationFiles.copy(carried.from, carried.to).catch((error: unknown) => {
+        throw new SessionMigrateError(
+          'failed',
+          `the conversation could not be copied into ${account.agent}'s home (${carried.to}): ` +
+            (error instanceof Error ? error.message : String(error)),
+        );
+      });
     await parts.storage.updateConfig(id, current => {
       // The previous account's transcript record is REMOVED rather than merged over: a target that
       // declares no resolvable home must leave the session with no transcript, and a merge would
@@ -4113,7 +4220,7 @@ function createSessionMigrateSubsystem(parts: SessionMigrateParts): SessionMigra
         incarnation: `${id}-${generation}`,
         runtimeGeneration: generation,
         migration: { from, to: account.agent, at },
-        ...(relaunchTranscript.provenance === undefined ? {} : { transcript: relaunchTranscript.provenance }),
+        ...(relaunchConversation.provenance === undefined ? {} : { transcript: relaunchConversation.provenance }),
         updatedAt: at,
       };
     });
@@ -4121,6 +4228,10 @@ function createSessionMigrateSubsystem(parts: SessionMigrateParts): SessionMigra
       from,
       to: account.agent,
       model: plan.model,
+      conversation: relaunchConversation.kind === 'fresh' ? 'fresh' : 'resumed',
+      ...(relaunchConversation.provenance?.harnessSessionId === undefined
+        ? {}
+        : { harnessSessionId: relaunchConversation.provenance.harnessSessionId }),
       report: reportPath,
       verdict: report.worstVerdict,
     });
@@ -7367,6 +7478,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         clock,
         transcripts: createTranscriptReader(storage),
         transcriptProvenance,
+        conversationFiles: new FileConversationFiles(codexRollouts),
         sessionDirectory: id => createSessionPaths(paths, id).directory,
         readableHandoffs: id => handoffFolders(createSessionPaths(paths, id).directory, attachmentOriginals(id)),
         // Its own queue: a migration holds its lock across a pane kill and a relaunch, and must not

@@ -65,6 +65,7 @@ import {
   type FyEventStreamIdle,
   InterruptSessionRequestSchema,
   MigrateSessionRequestSchema,
+  type MigrationConversation,
   NameSuggestionsSchema,
   RenameSessionRequestSchema,
   ResumeSessionRequestSchema,
@@ -748,12 +749,13 @@ export class FyApiClient implements IFyApiClient {
     allowContextDowngrade = false,
     requestId?: string,
     forceInflight = false,
+    conversation?: MigrationConversation,
   ): Promise<SessionView> {
     return this.#post(
       id,
       'migrate',
       MigrateSessionRequestSchema,
-      { agent, model, allowContextDowngrade, forceInflight },
+      { agent, model, allowContextDowngrade, forceInflight, ...(conversation === undefined ? {} : { conversation }) },
       SessionViewSchema,
       NonEmptyValueSchema.parse(requestId ?? this.#requestId()),
     );

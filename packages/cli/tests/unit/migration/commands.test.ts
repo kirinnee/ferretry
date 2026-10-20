@@ -24,6 +24,8 @@ describe('migration command surface', () => {
       '--model',
       'gpt-5.6-sol',
       '--allow-context-downgrade',
+      '--conversation',
+      'fresh',
       '--request-id',
       'move-1',
       '--json',
@@ -38,6 +40,7 @@ describe('migration command surface', () => {
       allowContextDowngrade: true,
       requestId: 'move-1',
       forceInflight: false,
+      conversation: 'fresh',
     });
     should(JSON.parse(io.out[0] ?? '')).have.property('config');
   });

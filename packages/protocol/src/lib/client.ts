@@ -19,6 +19,7 @@ import type {
 import type {
   FyEvent,
   FyEventStreamIdle,
+  MigrationConversation,
   RuntimeControlRequest,
   SendRecord,
   SendRequest,
@@ -170,6 +171,8 @@ export interface IFyApiClient {
     allowContextDowngrade?: boolean,
     requestId?: string,
     forceInflight?: boolean,
+    /** Omitted, the daemon resumes the bound conversation or refuses; see `MigrationConversation`. */
+    conversation?: MigrationConversation,
   ): Promise<SessionView>;
   /**
    * Start a cross-harness handover of a top-level session. Returns the durable receipt at its current

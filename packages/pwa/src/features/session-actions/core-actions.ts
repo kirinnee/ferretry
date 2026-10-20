@@ -11,7 +11,7 @@
  */
 
 import type { SessionView } from '@ferretry/protocol';
-import { Copy, GitFork, KeyRound, Pencil, Play, Plug, RotateCw, Server, Square } from 'lucide-react';
+import { Copy, GitFork, History, KeyRound, Pencil, Play, Plug, RotateCw, Server, Square } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { TERMINAL_STATUSES } from '../../shell/status-mark.tsx';
 import type { SessionActionContribution, SessionActionFormHost } from './registry.ts';
@@ -25,6 +25,11 @@ export interface CoreActionContext {
   readonly copyId: () => void;
   readonly openMigrate: () => void;
   readonly restart: () => Promise<void>;
+  /**
+   * Restart on the conversation an earlier Restart left behind. Absent where a host offers no repair;
+   * the menu then has no such row.
+   */
+  readonly restartOnEarlierConversation?: () => Promise<void>;
   readonly stop: () => Promise<void>;
   readonly resume: () => Promise<void>;
   readonly renderRename: (host: SessionActionFormHost) => ReactNode;
@@ -42,6 +47,7 @@ export const SESSION_ACTION_IDS = {
   machine: 'move-machine',
   addMcp: 'add-mcp',
   restart: 'restart',
+  earlierConversation: 'earlier-conversation',
   resume: 'resume',
   stop: 'stop',
 } as const;
@@ -150,6 +156,24 @@ export const CORE_SESSION_ACTIONS: readonly SessionActionContribution<CoreAction
             consequence: 'It relaunches on the same login and resumes the conversation.',
             confirmLabel: 'Restart',
             run: context.restart,
+          }
+        : null,
+  },
+  {
+    group: 'danger',
+    order: 15,
+    build: context =>
+      context.canControl && !terminal(context.view) && context.restartOnEarlierConversation !== undefined
+        ? {
+            kind: 'confirm',
+            id: SESSION_ACTION_IDS.earlierConversation,
+            label: 'Go back to the earlier conversation…',
+            icon: History,
+            question: `Restart ${context.name} on its earlier conversation?`,
+            consequence:
+              'For a ferret that came back from a Restart with no memory: it relaunches on the conversation it had before.',
+            confirmLabel: 'Go back',
+            run: context.restartOnEarlierConversation,
           }
         : null,
   },

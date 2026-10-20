@@ -45,6 +45,28 @@ describe('session migration', () => {
     ]);
   });
 
+  it('should pass a conversation choice through and refuse one the daemon does not know', async () => {
+    // Arrange
+    const { gateway, presenter } = migrationHarness();
+    const subject = new MigrationController(gateway, presenter);
+
+    // Act
+    await subject.execute('ses-1', { agent: 'claude-default', conversation: ' previous ' });
+    const refused = subject.execute('ses-1', { agent: 'claude-default', conversation: 'guess' });
+
+    // Assert
+    await should(refused).be.rejectedWith('--conversation must be one of resume, fresh, previous');
+    should(gateway.calls).deepEqual([
+      {
+        id: 'ses-1',
+        agent: 'claude-default',
+        allowContextDowngrade: false,
+        forceInflight: false,
+        conversation: 'previous',
+      },
+    ]);
+  });
+
   it('should print the schema-parsed session under --json', async () => {
     // Arrange
     const { gateway, io, presenter } = migrationHarness();
