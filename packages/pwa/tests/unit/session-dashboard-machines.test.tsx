@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { SessionDashboard, type SessionDashboardProps } from '../../src/components/session-dashboard.tsx';
+import type { PickerAccount } from '../../src/lib/account-picker-catalog.ts';
 import { allMachinesView, type MachineSource } from '../../src/lib/all-machines.ts';
 import { type DaemonId, daemonConnection } from '../../src/lib/daemon-connection.ts';
 import '../support/dom.ts';
@@ -130,6 +131,45 @@ describe('the Sessions page across every machine', () => {
     expect(view.container.querySelector('.fy-machine-section__empty')?.textContent).toBe(
       'No sessions on this machine.',
     );
+  });
+
+  test('full rows on every machine name the account from THAT machine’s roster, and never borrow another’s', async () => {
+    const account = (displayName: string): PickerAccount => ({
+      id: '11111111-1111-4111-8111-111111111111',
+      kind: 'claude',
+      agent: true,
+      credentialId: `login-${displayName}`,
+      wrapper: 'claude',
+      displayName,
+      defaultModel: 'opus',
+      models: [{ id: 'opus', available: true }],
+      available: true,
+      unavailableReason: null,
+    });
+    const both = allMachinesView([
+      source(studio.daemonId, 'studio', [row('ivo', '/work/ferretry')], 'online'),
+      source(LAPTOP, 'laptop', [row('rue', '/work/ferretry')], 'online'),
+    ]);
+    const accountOn = (machine: string) =>
+      view?.container.querySelector(`[data-machine-section="${machine}"] [data-account]`)?.textContent ?? null;
+    view = await mount(
+      dashboard({
+        allMachines: both,
+        density: 'full',
+        accounts: [account('Studio Max')],
+        machineAccounts: new Map([
+          [studio.daemonId, [account('Studio Max')]],
+          [LAPTOP, [account('Laptop Pro')]],
+        ]),
+      }).element,
+    );
+    expect([accountOn('studio'), accountOn('laptop')]).toEqual(['Studio Max', 'Laptop Pro']);
+    // The laptop's roster is not read yet: its row names no account rather than the studio's.
+    await view.render(
+      dashboard({ allMachines: both, density: 'full', accounts: [account('Studio Max')], machineAccounts: new Map() })
+        .element,
+    );
+    expect([accountOn('studio'), accountOn('laptop')]).toEqual(['Studio Max', null]);
   });
 
   test('a skeleton until any machine answers; one machine to start on keeps the plain link', async () => {

@@ -55,7 +55,7 @@ import { InstallBannerSlot } from './features/install/install-app.tsx';
 import { LearningPage } from './features/learning/learning-page.tsx';
 import { useLearningSessionActions } from './features/learning/learning-session-actions.tsx';
 import { LEARNING_SETTINGS_TAB, LearningSettingsSurface } from './features/learning/learning-settings.tsx';
-import { usePassiveLearning } from './features/learning/passive-learning.tsx';
+import { useMachinesPassiveLearning } from './features/learning/passive-learning.tsx';
 import { browserClipboardWriter } from './features/onboarding/copy-button.tsx';
 import { detectDeviceKind } from './features/onboarding/device-kind.ts';
 import { firstRunEntry } from './features/onboarding/first-run-entry.ts';
@@ -663,7 +663,11 @@ function SessionsRoute({ connection }: DaemonPageProps) {
       onNavigate={navigate}
       {...(allMachines === undefined
         ? {}
-        : { machineSources: allMachines.sources, newSessionMachines: allMachines.machines })}
+        : {
+            machineSources: allMachines.sources,
+            newSessionMachines: allMachines.machines,
+            machineConnections: allMachines.connections,
+          })}
     />
   );
 }
@@ -711,9 +715,14 @@ const SessionsDrawerContext = createContext<(() => void) | null>(null);
 interface AllMachinesList {
   readonly sources: readonly MachineSource[];
   readonly machines: readonly { readonly daemonId: DaemonId; readonly name: string }[];
+  /** The same machines' pairings, in the same order: every per-machine read goes through its own. */
+  readonly connections: readonly DaemonConnection[];
 }
 
 const AllMachinesContext = createContext<AllMachinesList | undefined>(undefined);
+
+/** Nobody learns, until a machine says otherwise. */
+const NO_LEARNERS: ReadonlySet<string> = new Set();
 
 /** The sidebar's "last seen" clock: a minute is its smallest step, so a 30s tick is plenty. */
 const MACHINE_CLOCK_MS = 30_000;
@@ -780,8 +789,10 @@ function ShellSessionsBar({
   const projects = useProjects(store.projects, connection);
   const clientFor = useDaemonClient();
   const needsRuntime = useNeedsRuntime(connection, clientFor);
-  // Which ferrets are instructed to learn, for their "Learning: passive" chip.
-  const learning = usePassiveLearning(connection, useDaemonFetch());
+  // Which ferrets are instructed to learn, for their "Learning: passive" chip — on EVERY machine the bar
+  // lists, each read through its own pairing, so a learner on the second machine is marked too.
+  const learnersOn = useMemo(() => allMachines?.connections ?? [connection], [allMachines, connection]);
+  const machineLearners = useMachinesPassiveLearning(learnersOn, useDaemonFetch());
   // The machine menu's update dot: each paired machine asked once, through the app's client pool.
   const updates = useMachineUpdates({
     connections,
@@ -804,7 +815,7 @@ function ShellSessionsBar({
       {...(needsRuntime
         ? { createRuntimeHref: `${daemonSettingsPath(connection.daemonId)}${machineHash(machineName, 'runtimes')}` }
         : {})}
-      machines={connections.map(candidate => ({
+      machines={machineDisplayOrder(connections).map(candidate => ({
         daemonId: candidate.daemonId,
         name: distinctDaemonName(candidate, connections),
         updateAvailable: updates.has(candidate.daemonId),
@@ -816,7 +827,8 @@ function ShellSessionsBar({
       onOpenPalette={onOpenPalette}
       presentation={shape}
       renderSessionMenu={rowMenuRenderer}
-      learningPassive={learning.passive}
+      learningPassive={machineLearners.get(connection.daemonId) ?? NO_LEARNERS}
+      {...(allMachines === undefined ? {} : { machineLearners })}
       projects={projects}
       sessions={fleet.daemons.get(connection.daemonId)?.sessions ?? null}
       {...(allMachines === undefined ? {} : { machineSources: allMachines.sources, now })}
@@ -1706,7 +1718,7 @@ export function AppShell() {
     () =>
       connection === undefined || !everyMachine
         ? []
-        : machineDisplayOrder(connectionSnapshot.connections, connection.daemonId).map(record => ({
+        : machineDisplayOrder(connectionSnapshot.connections).map(record => ({
             connection: record,
             name: distinctDaemonName(record, connectionSnapshot.connections),
           })),
@@ -1730,6 +1742,7 @@ export function AppShell() {
         ? {
             sources: machineSources,
             machines: listedMachines.map(machine => ({ daemonId: machine.connection.daemonId, name: machine.name })),
+            connections: listedMachines.map(machine => machine.connection),
           }
         : undefined,
     [everyMachine, listedMachines, machineSources],
@@ -1747,6 +1760,16 @@ export function AppShell() {
     store.stepUp.focus(onScreen);
     store.unlockGate.focus(onScreen);
   }, [onScreen, store]);
+  /*
+   * THE MACHINE ON SCREEN IS THE SELECTED ONE. Opening a row on another machine — from the sessions bar,
+   * the finder, a notification or a link — makes that machine this browser's choice, so the next visit to
+   * `/` lands on it and nothing that falls back to "the selected machine" still means the one before.
+   */
+  const routedDaemonId = connection?.daemonId;
+  useEffect(() => {
+    if (routedDaemonId !== undefined && store.connections.get(routedDaemonId) !== undefined)
+      store.connections.select(routedDaemonId);
+  }, [routedDaemonId, store]);
   const [permission, setPermission] = useState<NotificationPermissionState>(notificationPermission);
   /*
    * THE SETUP JOURNEY IS DECIDED AT ENTRY, AND HELD ONLY WHILE IT LASTS.

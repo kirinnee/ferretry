@@ -56,7 +56,8 @@ export const browserFleetPollEnvironment: FleetPollEnvironment = {
   },
 };
 
-const pairingKey = (machines: readonly DaemonConnection[]): string =>
+/** The pairings' own facts, joined: the key a per-machine read restarts on, never a connection object. */
+export const pairingKey = (machines: readonly DaemonConnection[]): string =>
   machines.map(machine => `${machine.daemonId}\u0000${machine.baseUrl}\u0000${machine.deviceId}`).join('\u0001');
 
 export function useMachinesPoll(

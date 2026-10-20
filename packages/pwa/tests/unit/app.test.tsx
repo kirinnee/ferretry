@@ -397,6 +397,8 @@ interface ShellOptions {
   readonly projects?: readonly ProjectInfo[];
   /** The runtimes `GET /v1/fleet/runtimes` answers with. */
   readonly accounts?: readonly unknown[];
+  /** Which sessions each daemon (by host) says are instructed to learn, on `GET /v1/learning/sessions`. */
+  readonly learners?: Readonly<Record<string, readonly string[]>>;
 }
 
 interface HealthRead {
@@ -490,6 +492,15 @@ const appStore = async (
     // own failure path is what the projects-route test asserts on.
     if (options.projects !== undefined && new URL(url).pathname === '/v1/projects')
       return Response.json(options.projects);
+    if (options.learners !== undefined && new URL(url).pathname === '/v1/learning/sessions')
+      return Response.json(
+        (options.learners[new URL(url).host] ?? []).map(sessionId => ({
+          sessionId,
+          passive: true,
+          since: '2026-10-20T00:00:00.000Z',
+          setBy: 'owner',
+        })),
+      );
     // Tasks search and its file index travel the carrier now, so they are answered here too.
     return sessionSearchFixture(new URL(url)) ?? Response.json({});
   };
@@ -719,9 +730,12 @@ const renderShell = async (
   // every other test in this file keeps the raw router.
   const store: AppStore =
     options.carrierSeam === undefined ? built : { ...built, carrier: options.carrierSeam.wrap(built.carrier) };
-  for (const daemon of paired) {
-    if (typeof daemon !== 'string') store.connections.add(daemon);
-    else store.connections.add(daemon === alpha.daemonId ? alpha : beta);
+  // Paired one millisecond apart, in the order listed: the all-machines list shows them in pairing order.
+  const pairedFrom = Date.now();
+  for (const [index, daemon] of paired.entries()) {
+    const options = { pairedAt: pairedFrom + index };
+    if (typeof daemon !== 'string') store.connections.add(daemon, options);
+    else store.connections.add(daemon === alpha.daemonId ? alpha : beta, options);
   }
   setPath(path);
   const view = await mountShell(
@@ -4000,7 +4014,7 @@ describe('the sessions bar', () => {
     try {
       await settle();
       const column = must(view.container.querySelector('[data-sessions-bar="column"]'), 'the sessions column');
-      // The machine on screen first; the same session id on both is two rows, each linking to its own machine.
+      // In the order they were paired; the same session id on both is two rows, each linking to its own machine.
       expect(
         [...column.querySelectorAll('[data-sbar-machine-group]')].map(node =>
           node.getAttribute('data-sbar-machine-group'),
@@ -4015,6 +4029,54 @@ describe('the sessions bar', () => {
       await interact(() => store.controls.setDeviceControls({ sessionsList: 'current' }));
       expect(view.container.querySelector('[data-sbar-machine-group]')).toBeNull();
       expect(view.container.querySelectorAll('[data-sessions-bar="column"] [data-sbar-session="one"]')).toHaveLength(1);
+    } finally {
+      await view.unmount();
+    }
+  });
+
+  it('opens another machine’s row as THAT machine, holds the list still, and marks every machine’s learners', async () => {
+    // Both machines run a session called "one" and one called "two"; each machine says a different one learns.
+    const { view, store } = await renderShell(`/d/${ALPHA}/settings`, [alpha.daemonId, beta.daemonId], {
+      sessions: ['one', 'two'],
+      learners: { 'alpha.example.test': ['one'], 'beta.example.test': ['two'] },
+    });
+    try {
+      await settle();
+      const column = must(view.container.querySelector('[data-sessions-bar="column"]'), 'the sessions column');
+      const groups = () =>
+        [...column.querySelectorAll('[data-sbar-machine-group]')].map(node =>
+          node.getAttribute('data-sbar-machine-group'),
+        );
+      const row = (daemon: string, id: string) =>
+        must(
+          column.querySelector<HTMLElement>(`[data-sbar-machine-group="${daemon}"] [data-sbar-session="${id}"]`),
+          `${id} on ${daemon}`,
+        );
+      const learns = (daemon: string, id: string) => row(daemon, id).querySelector('[data-learning-passive]') !== null;
+      const switcher = () => column.querySelector('[data-sbar-machine] .fy-sbar__machine-name')?.textContent;
+      const betaName = column.querySelector(`[data-sbar-machine-group="${BETA}"] .fy-sbar__machine-label`)?.textContent;
+      expect(groups()).toEqual([ALPHA, BETA]);
+      // The machine on screen is the selected one, though beta was paired last.
+      expect(store.connections.getSnapshot().selectedDaemonId).toBe(alpha.daemonId);
+      // Each machine's rows carry ITS learners — never the machine on screen's, by a colliding id.
+      expect([learns(ALPHA, 'one'), learns(ALPHA, 'two'), learns(BETA, 'one'), learns(BETA, 'two')]).toEqual([
+        true,
+        false,
+        false,
+        true,
+      ]);
+
+      await interact(() => row(BETA, 'one').click());
+      await settle();
+
+      expect(window.location.pathname).toBe(`/d/${encodeURIComponent(BETA)}/session/one`);
+      // The list did not move under the pointer: the machine just opened is not hoisted to the top.
+      expect(groups()).toEqual([ALPHA, BETA]);
+      expect(row(BETA, 'one').getAttribute('aria-current')).toBe('page');
+      expect(row(ALPHA, 'one').getAttribute('aria-current')).toBeNull();
+      expect(switcher()).toBe(betaName);
+      expect(store.connections.getSnapshot().selectedDaemonId).toBe(beta.daemonId);
+      expect([learns(ALPHA, 'one'), learns(BETA, 'two')]).toEqual([true, true]);
     } finally {
       await view.unmount();
     }

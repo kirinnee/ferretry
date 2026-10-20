@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import type { SessionView, UsageFeedView } from '@ferretry/protocol';
 
-import { useSessionQuota, useUsage, useUsageSlice } from '../../src/hooks/use-usage.ts';
+import { useMachinesUsage, useSessionQuota, useUsage, useUsageSlice } from '../../src/hooks/use-usage.ts';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
 import { type DaemonUsagePort, DaemonUsageStore } from '../../src/lib/usage-store.ts';
 import { interact, mount } from '../support/dom.ts';
@@ -141,6 +141,33 @@ describe('useSessionQuota', () => {
       await new Promise(resolve => setTimeout(resolve, 0));
     });
     expect(container.textContent).toBe('5h 42%');
+    await unmount();
+  });
+});
+
+describe('useMachinesUsage', () => {
+  function Machines({ store, machines }: { readonly store: DaemonUsageStore; readonly machines: (typeof laptop)[] }) {
+    useMachinesUsage(store, machines);
+    return (
+      <output>
+        {machines.map(machine => store.usage(machine.daemonId).feed?.accounts[0]?.fiveHourPercent ?? '—').join(' ')}
+      </output>
+    );
+  }
+
+  it('joins every listed machine’s feed through its own pairing, and leaves each when it goes', async () => {
+    const reads: string[] = [];
+    const store = new DaemonUsageStore(port(reads), { pollMs: 60_000, isHidden: () => true });
+    const { container, render, unmount } = await mount(<Machines machines={[laptop, workstation]} store={store} />);
+    await interact(async () => {
+      for (let turn = 0; turn < 10; turn += 1) await Promise.resolve();
+    });
+    // Each machine's own quota, never the other's.
+    expect(container.textContent).toBe('42 91');
+    expect([...reads].sort()).toEqual([laptop.daemonId, workstation.daemonId].sort());
+
+    await render(<Machines machines={[laptop]} store={store} />);
+    expect(container.textContent).toBe('42');
     await unmount();
   });
 });

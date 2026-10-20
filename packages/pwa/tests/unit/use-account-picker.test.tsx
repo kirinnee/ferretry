@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { useAccountPickerSlice } from '../../src/hooks/use-account-picker.ts';
+import { useAccountPickerSlice, useMachineRosters } from '../../src/hooks/use-account-picker.ts';
 import type { AccountPickerCatalog, AccountPickerHealthCatalog } from '../../src/lib/account-picker-catalog.ts';
 import { DaemonAccountPickerStore } from '../../src/lib/account-picker-store.ts';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
@@ -168,6 +168,38 @@ describe('useAccountPickerSlice', () => {
     await harness.move(['credentials']);
     await settle();
     expect(reads).toBe(3);
+    await mounted.unmount();
+  });
+});
+
+describe('useMachineRosters', () => {
+  function Rosters({
+    store,
+    machines,
+  }: {
+    readonly store: DaemonAccountPickerStore;
+    readonly machines: (typeof laptop)[];
+  }) {
+    const rosters = useMachineRosters(store, machines);
+    return <output>{machines.map(machine => rosters.get(machine.daemonId)?.[0]?.wrapper ?? '—').join(' ')}</output>;
+  }
+
+  it('reads every listed machine’s roster through its own pairing and keeps each under its own id', async () => {
+    const reads: string[] = [];
+    const store = new DaemonAccountPickerStore({
+      catalog: async daemon => {
+        reads.push(daemon.daemonId);
+        if (daemon.daemonId === workstation.daemonId) throw new Error('no roster here');
+        return catalog(daemon.daemonId);
+      },
+      health: async () => noHealth,
+      checkHealth: async () => noHealth,
+    });
+    const mounted = await mount(<Rosters machines={[laptop, workstation]} store={store} />);
+    await settle();
+    // The workstation's roster is unread, so its rows name no account — never the laptop's.
+    expect(mounted.container.textContent).toBe('daemon/laptop —');
+    expect([...reads].sort()).toEqual([laptop.daemonId, workstation.daemonId].sort());
     await mounted.unmount();
   });
 });

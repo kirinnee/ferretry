@@ -197,12 +197,20 @@ describe('labels and order', () => {
     expect(machineReachLabel({ reach: 'offline', readAt: 0 }, 300_000)).toBe('offline · last seen 5m');
   });
 
-  test('the machine on screen first, the rest in registry order', () => {
-    const list = [{ daemonId: LAPTOP }, { daemonId: 'third' as DaemonId }, { daemonId: STUDIO }];
-    expect(machineDisplayOrder(list, STUDIO).map(entry => String(entry.daemonId))).toEqual([
-      'studio',
+  test('in the order they were paired, whichever machine is on screen or was chosen last', () => {
+    // The registry lists the most recently chosen first; the list must not follow it, or a click moves it.
+    const list = [
+      { daemonId: STUDIO, pairedAt: 30 },
+      { daemonId: 'third' as DaemonId, pairedAt: 20 },
+      { daemonId: LAPTOP, pairedAt: 10 },
+      { daemonId: 'twin' as DaemonId, pairedAt: 20 },
+    ];
+    expect(machineDisplayOrder(list).map(entry => String(entry.daemonId))).toEqual([
       'laptop',
       'third',
+      'twin',
+      'studio',
     ]);
+    expect(machineDisplayOrder([...list].reverse())).toEqual(machineDisplayOrder(list));
   });
 });

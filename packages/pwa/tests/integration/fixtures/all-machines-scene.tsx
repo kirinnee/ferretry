@@ -11,8 +11,9 @@
  * device and nothing else. Navigation is recorded rather than followed (`…navigations`).
  *
  * Built by `scripts/build-composer-integration-fixture.ts --entry` in a child process, never inside the
- * test runner (see that script). `?scene=bar|page` picks the desktop column or the phone page;
- * `?theme=<family>-<mode>` the theme. Every name and session in it is fake.
+ * test runner (see that script). `?scene=bar|page|drawer` picks the desktop column, the phone page or
+ * the phone's sessions drawer; `?open=laptop` opens the laptop's session instead of the studio's (and
+ * keeps the laptop answering); `?theme=<family>-<mode>` the theme. Every name and session in it is fake.
  */
 
 import type { SessionView } from '@ferretry/protocol';
@@ -134,6 +135,12 @@ const STILL: FleetPollEnvironment = {
   onVisibility: () => () => undefined,
 };
 
+/** Each machine's own learners. `s-ivo` is on both machines, and only the LAPTOP's learns. */
+const LEARNERS: ReadonlyMap<DaemonConnection['daemonId'], ReadonlySet<string>> = new Map([
+  [STUDIO.daemonId, new Set(['s-noa'])],
+  [LAPTOP.daemonId, new Set(['s-ivo'])],
+]);
+
 const MACHINES: readonly ListedMachine[] = [
   { connection: STUDIO, name: 'studio' },
   { connection: LAPTOP, name: 'laptop' },
@@ -143,14 +150,15 @@ const navigate = (to: string): void => {
   evidence.navigations.push(to);
 };
 
-function Scene({ scene }: { readonly scene: 'bar' | 'page' }) {
+function Scene({ scene, open }: { readonly scene: 'bar' | 'page' | 'drawer'; readonly open: DaemonConnection }) {
   useMachinesPoll(
     fleet,
     MACHINES.map(machine => machine.connection),
-    STUDIO.daemonId,
-    scene === 'page',
+    open.daemonId,
+    scene !== 'bar',
     STILL,
   );
+  const openName = open.daemonId === LAPTOP.daemonId ? 'laptop' : 'studio';
   const sources = useMachineSources({ fleet, projects, connectionHealth: health }, MACHINES);
   if (scene === 'page')
     return (
@@ -160,6 +168,7 @@ function Scene({ scene }: { readonly scene: 'bar' | 'page' }) {
           connection={STUDIO}
           controls={controls}
           fleet={fleet}
+          machineConnections={MACHINES.map(machine => machine.connection)}
           machineSources={sources}
           narrow
           newSessionMachines={NEW_SESSION_MACHINES}
@@ -172,25 +181,28 @@ function Scene({ scene }: { readonly scene: 'bar' | 'page' }) {
       </div>
     );
   return (
-    <div className="kt-shell flex flex-row overflow-hidden" data-scene="bar">
+    <div className={`kt-shell flex overflow-hidden ${scene === 'drawer' ? 'flex-col' : 'flex-row'}`} data-scene={scene}>
       <SessionsBar
         active={null}
         activeSessionId="s-ivo"
-        daemonId={STUDIO.daemonId}
-        machineName="studio"
+        daemonId={open.daemonId}
+        learningPassive={LEARNERS.get(open.daemonId) ?? new Set()}
+        machineLearners={LEARNERS}
+        machineName={openName}
         machineSources={sources}
         machines={NEW_SESSION_MACHINES}
         now={NOW}
         onAddMachine={() => undefined}
+        onClose={() => undefined}
         onNavigate={navigate}
         onOpenPalette={() => undefined}
-        presentation="column"
-        projects={projects.projects(STUDIO.daemonId)}
-        sessions={sources[0]?.slice.sessions ?? null}
+        presentation={scene === 'drawer' ? 'drawer' : 'column'}
+        projects={projects.projects(open.daemonId)}
+        sessions={sources.find(source => source.daemonId === open.daemonId)?.slice.sessions ?? null}
       />
       <main className="flex min-w-0 flex-1 flex-col gap-2 p-panel text-ui text-fg">
-        <p className="m-0 font-semibold">ivo · ferretry</p>
-        <p className="m-0 text-muted">The open session's transcript, composer and Info all target studio.</p>
+        <p className="m-0 font-semibold">s-ivo · {openName}</p>
+        <p className="m-0 text-muted">The open session's transcript, composer and Info all target {openName}.</p>
       </main>
     </div>
   );
@@ -198,23 +210,27 @@ function Scene({ scene }: { readonly scene: 'bar' | 'page' }) {
 
 const params = new URLSearchParams(window.location.search);
 document.documentElement.dataset.theme = params.get('theme') ?? 'studio-light';
-const scene = params.get('scene') === 'page' ? 'page' : 'bar';
+const scene = params.get('scene') === 'page' ? 'page' : params.get('scene') === 'drawer' ? 'drawer' : 'bar';
+const open = params.get('open') === 'laptop' ? LAPTOP : STUDIO;
 
-// The laptop answered once, five minutes ago, then stopped: its rows are its last word.
+// The laptop answered once, five minutes ago, then stopped: its rows are its last word — unless the
+// scene opens a laptop session, which needs the laptop answering.
 await fleet.hydrate(LAPTOP);
 clock = NOW;
-laptopUp = false;
-health.outage(LAPTOP.daemonId, {
-  failures: [{ label: 'Direct', detail: 'laptop.example.test did not answer' }],
-  daemonAbsent: false,
-  relaysNeverOpened: false,
-});
+if (open === STUDIO) {
+  laptopUp = false;
+  health.outage(LAPTOP.daemonId, {
+    failures: [{ label: 'Direct', detail: 'laptop.example.test did not answer' }],
+    daemonAbsent: false,
+    relaysNeverOpened: false,
+  });
+} else health.answered(LAPTOP.daemonId);
 health.answered(STUDIO.daemonId);
 
 const root = document.getElementById('root');
 if (root !== null)
   createRoot(root).render(
     <StrictMode>
-      <Scene scene={scene} />
+      <Scene open={open} scene={scene} />
     </StrictMode>,
   );
