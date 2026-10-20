@@ -4,19 +4,20 @@ import { z } from 'zod';
 import {
   applyMinerOutput,
   extractSession,
-  parseJsonl,
-  parseMinerOutput,
   type InboxSendLike,
   type LearningStorePort,
   type NormalizedRecordLike,
+  parseJsonl,
+  parseMinerOutput,
   type RawSessionInput,
   type SessionDigest,
 } from '../../lib/learning/index.ts';
 import type { FoundationPaths } from '../../lib/paths.ts';
 import type { FileSystemPort } from '../../lib/ports.ts';
-import type { SessionDirectorySubsystem } from '../../lib/runtime/mounts/sessions.ts';
 import type { SessionControlSubsystem } from '../../lib/runtime/mounts/session-control.ts';
+import type { SessionDirectorySubsystem } from '../../lib/runtime/mounts/sessions.ts';
 import type { SessionTranscriptReader } from '../../lib/session/transcript/reader.ts';
+import { isOwnerMessage } from '../../lib/transcript/owner.ts';
 import type { TranscriptEvent } from '../../lib/transcript/types.ts';
 
 /**
@@ -26,8 +27,7 @@ import type { TranscriptEvent } from '../../lib/transcript/types.ts';
  */
 export function normalizedRecord(event: TranscriptEvent): NormalizedRecordLike {
   const timestamp = event.timestamp === undefined ? {} : { timestamp: event.timestamp };
-  if (event.kind === 'message' && event.role === 'user')
-    return { type: 'chat.user', ...timestamp, data: { text: event.text } };
+  if (isOwnerMessage(event)) return { type: 'chat.user', ...timestamp, data: { text: event.text } };
   if (event.kind === 'tool-result')
     return { type: 'tool.result', ...timestamp, data: { isError: event.result.isError } };
   return { type: event.kind, ...timestamp };

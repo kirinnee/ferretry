@@ -5,6 +5,7 @@ import type { SentMessage } from './peer-delivery.ts';
 import type { PeerFrom } from './peer-message.ts';
 import type { LedgerSendRecord } from './send-ledger.ts';
 import type { SlashCommand } from './slash-commands.ts';
+import type { SystemBlockInfo } from './system-blocks.ts';
 import type { ToolResultData, ToolUseData } from './tool-extract.ts';
 
 /**
@@ -27,8 +28,8 @@ export interface ToolCall {
 /** A browser-safe, display-only transcript row. Content remains daemon-owned. */
 export interface TranscriptEntry {
   readonly id: string;
-  /** `system` is Ferretry speaking INTO the session (a send that did not arrive); `notice` is daemon
-   *  bookkeeping, shown only as an alert. */
+  /** `system` is Ferretry speaking INTO the session (a send that did not arrive), or — with `event` — the
+   *  harness's own event typed into the user channel; `notice` is daemon bookkeeping, shown only as an alert. */
   readonly kind: 'user' | 'assistant' | 'tool' | 'command' | 'notice' | 'system' | 'ledger';
   readonly text: string;
   readonly at?: number;
@@ -55,6 +56,9 @@ export interface TranscriptEntry {
   /** The Pack command (`new`, `wait`, `recommend`) a ferret ran, when this row is that rather than an ordinary
    *  tool group (`pack-calls.ts`). */
   readonly pack?: PackCall;
+  /** The harness event a `system` row stands for: a background task finishing, an interrupt, a reminder.
+   *  It arrived as a user record, but nobody typed it, so it is never the reader's own message. */
+  readonly event?: SystemBlockInfo;
   /** A failure the reader must see. A notice without it is daemon bookkeeping and is never shown. */
   readonly alert?: boolean;
 }

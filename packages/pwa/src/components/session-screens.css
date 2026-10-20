@@ -907,6 +907,108 @@ button.fy-receipt {
 .fy-command-body {
   margin: 2px 0 4px 6px;
 }
+/* THE HARNESS'S OWN EVENT — a background task finishing, an interrupt, a reminder — typed into the user
+   channel: the command row's quiet tier, one line per task, never the reader's bubble. The subject gives
+   way first; the exit chip never does. */
+.fy-message-system.fy-message-harness {
+  display: block;
+  max-width: 100%;
+}
+.fy-harness-event {
+  font-size: var(--chrome-font-size, 11px);
+  line-height: 1.4;
+  min-width: 0;
+}
+.fy-harness-event-line {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-control, 6px);
+  color: var(--chrome-fg, var(--fy-muted));
+  display: flex;
+  font: inherit;
+  gap: 6px;
+  min-height: 0;
+  min-width: 0;
+  padding: 1px 6px;
+  text-align: left;
+  width: 100%;
+}
+.fy-harness-event-toggle {
+  cursor: pointer;
+}
+.fy-harness-event-toggle:hover,
+.fy-harness-event-toggle:focus-visible {
+  background: var(--fy-surface-2);
+  color: var(--fg-soft, var(--fy-fg));
+}
+.fy-harness-event-title {
+  color: var(--fg-soft, var(--fy-fg));
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fy-harness-event[data-event-tone='err'] .fy-harness-event-title {
+  color: var(--err, #a14040);
+}
+.fy-harness-event[data-event-tone='warn'] .fy-harness-event-title {
+  color: var(--warn);
+}
+.fy-harness-event-subject {
+  flex: 1 1 auto;
+  min-width: 8ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fy-harness-event-subject.mono {
+  font-family: var(--font-mono, ui-monospace, monospace);
+}
+.fy-harness-event-chip {
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  flex: 0 0 auto;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  padding: 0 6px;
+}
+.fy-harness-event[data-event-tone='ok'] .fy-harness-event-chip {
+  color: var(--ok);
+}
+.fy-harness-event[data-event-tone='err'] .fy-harness-event-chip {
+  color: var(--err, #a14040);
+}
+.fy-harness-event-chevron {
+  margin-left: auto;
+}
+.fy-harness-event-body {
+  display: grid;
+  gap: 4px;
+  margin: 2px 0 4px 6px;
+  min-width: 0;
+}
+.fy-harness-event-file {
+  color: var(--fy-muted);
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+/* A phone has no room for a title AND a subject on one line, and squeezing both cuts each to a stub: the
+   subject drops to its own line under the title, still one line, still truncated. */
+@media (max-width: 30rem) {
+  .fy-harness-event-line {
+    flex-wrap: wrap;
+    row-gap: 0;
+  }
+  .fy-harness-event-title {
+    flex: 1 1 0;
+  }
+  .fy-harness-event-subject {
+    flex-basis: 100%;
+    order: 1;
+    padding-left: 17px;
+  }
+}
 /* THE GROUND THE CHAT SITS ON, for anything that has to fade into it. A desktop pane is the surface
    (workspace.css `.fy-ws-pane`); a phone's workspace is the page ground. The jump pill's strip used to
    fade to the surface everywhere, so on a phone it drew a pale band over the text that read as broken. */

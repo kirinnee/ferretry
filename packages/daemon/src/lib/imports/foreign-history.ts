@@ -1,6 +1,12 @@
 import { createHash } from 'node:crypto';
 import { basename, join } from 'node:path';
-import type { TranscriptEvent, TranscriptHarness, TranscriptParser } from '../transcript/index.ts';
+import {
+  isOwnerMessage,
+  type TranscriptEvent,
+  type TranscriptHarness,
+  type TranscriptParser,
+} from '../transcript/index.ts';
+import { spokenText } from './conversation-text.ts';
 
 /** A filesystem entry deliberately narrowed to what read-only discovery needs. */
 export interface ForeignHistoryEntry {
@@ -58,10 +64,14 @@ function idFor(harness: TranscriptHarness, source: string): string {
   return createHash('sha256').update(`${harness}\u0000${source}`, 'utf8').digest('base64url');
 }
 
+/**
+ * A conversation's title: the first thing the owner said in it. A harness's own events, its tagged
+ * blocks and an unread hand-off pointer say nothing about the conversation, so the first message that
+ * survives `spokenText` names it.
+ */
 function titleFrom(events: readonly TranscriptEvent[], fallback: string): string {
-  const first = events.find(event => event.kind === 'message' && event.role === 'user');
-  const text = first?.kind === 'message' ? first.text.trim().replace(/\s+/gu, ' ') : '';
-  return text.length === 0 ? fallback : text.slice(0, 120);
+  const text = events.flatMap(event => (isOwnerMessage(event) ? [spokenText(event.text)] : [])).find(Boolean);
+  return text === undefined ? fallback : text.slice(0, 120);
 }
 
 function startedAt(events: readonly TranscriptEvent[]): string | undefined {

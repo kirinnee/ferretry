@@ -25,6 +25,7 @@ import { effectiveGuide, fleetModels } from './guide.ts';
 import type { PackJevPort } from './jev.ts';
 import { type CachedProbe, type PackProbeRequest } from './probe.ts';
 import { type PackFleetFacts, recommend, runtimeRefusal } from './recommend.ts';
+import { SCRATCH_REMEDY, scratchMessage } from './scratch.ts';
 
 /** The settings in effect, read fresh for every request. */
 export interface PackSettings {
@@ -55,6 +56,8 @@ export interface PackPorts {
   facts(): Promise<PackFleetFacts>;
   /** `undefined` when there is no such session. */
   parent(id: string): Promise<PackParent | undefined>;
+  /** Whether a folder a caller NAMED is a temporary or scratch one (`./scratch.ts`). */
+  scratch(cwd: string): Promise<boolean>;
   probe(request: PackProbeRequest, ttlMs: number): Promise<CachedProbe>;
   /** Starts the sub-ferret; throws {@link PackStartRefused} when admission refuses it. */
   start(request: StartSessionRequest): Promise<SessionView>;
@@ -141,12 +144,16 @@ export class PackService {
       );
     const admission = parent === undefined ? undefined : admitChild(parent, config.limits);
     if (admission !== undefined) return refused(admission, []);
+    // A sub-ferret runs in its PARENT'S folder, so it lands in the parent's project; only a named folder can
+    // move it, and a named temporary one is refused unless the caller says it means it.
     const cwd = request.cwd ?? parent?.cwd;
     if (cwd === undefined)
       return refused(
         { code: 'unknown_runtime', message: 'A sub-ferret with no parent must name its working folder (--cwd).' },
         [],
       );
+    if (request.cwd !== undefined && request.allowScratch !== true && (await this.ports.scratch(request.cwd)))
+      return refused({ code: 'scratch_cwd', message: scratchMessage(request.cwd), remedy: SCRATCH_REMEDY }, []);
 
     const facts = await this.ports.facts();
     const ordered = request.auto === true ? await this.automatic(request, settings, facts) : this.named(request, facts);

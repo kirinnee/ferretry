@@ -10,8 +10,9 @@ function build(options: { parent?: string; gateway?: IPackGateway; files?: Recor
   const controller = new PackController({
     gateway,
     out,
-    parent: options.parent,
+    parent: async () => options.parent,
     cwd: '/here',
+    absolute: path => (path.startsWith('/') ? path : `/here/${path}`),
     readFile: async path => options.files?.[path] ?? '',
     binaryName: 'foo',
   });
@@ -100,6 +101,19 @@ describe('PackController.newChild', () => {
         name: 'Do It',
         mode: 'interactive',
       },
+    ]);
+  });
+
+  it('should make a relative --cwd absolute against where it was run, and pass --allow-scratch on', async () => {
+    // Arrange
+    const { controller, gateway } = build({ parent: 'parent-1' });
+
+    // Act
+    await controller.newChild(['x'], { runtime: 'r', cwd: 'sub/dir', allowScratch: true });
+
+    // Assert
+    should(gateway.newCalls).eql([
+      { task: 'x', parent: 'parent-1', runtime: 'r', cwd: '/here/sub/dir', allowScratch: true },
     ]);
   });
 

@@ -267,6 +267,21 @@ describe('DirectoryLessonSessions', () => {
     should(transcripts.calls).deepEqual([{ sessionId: 'session-1', harness: 'claude', limit: 1_200 }]);
   });
 
+  it("should skip the harness's own events: neither the last owner message nor a turn", async () => {
+    // Arrange — a background task finished after the owner spoke; Claude Code wrote it as a user record.
+    const notification: TranscriptEvent = {
+      ...user('<task-notification>\n<status>completed</status>\n</task-notification>', '2026-10-01T03:00:00.000Z'),
+      inputSource: 'harness',
+    };
+    const { port } = lessonSessions([session()], [user('First.', '2026-10-01T01:00:00.000Z'), notification]);
+
+    // Act
+    const message = await port.latestOwnerMessage('session-1');
+
+    // Assert
+    should(message).deepEqual({ text: 'First.', at: '2026-10-01T01:00:00.000Z', turn: 1 });
+  });
+
   it('should fall back to the session update time and read a codex transcript as codex', async () => {
     // Arrange
     const { port, transcripts } = lessonSessions([session({ harness: 'codex' })], [user('Untimed.')]);

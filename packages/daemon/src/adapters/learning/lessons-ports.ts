@@ -17,7 +17,7 @@ import {
 } from '../../lib/learning/index.ts';
 import type { SessionDirectorySubsystem } from '../../lib/runtime/mounts/sessions.ts';
 import type { SessionTranscriptReader } from '../../lib/session/transcript/reader.ts';
-import type { TranscriptMessageEvent } from '../../lib/transcript/types.ts';
+import { isOwnerMessage } from '../../lib/transcript/owner.ts';
 
 /**
  * The lessons domain's ports over the daemon's real world: its sessions and their transcripts, the
@@ -72,9 +72,7 @@ export class DirectoryLessonSessions implements LessonSessionsPort {
       { sessionId, harness: session.config.harness === 'codex' ? 'codex' : 'claude' },
       OWNER_MESSAGE_WINDOW,
     );
-    const turns = events.filter(
-      (event): event is TranscriptMessageEvent => event.kind === 'message' && event.role === 'user',
-    );
+    const turns = events.filter(isOwnerMessage);
     const last = turns.at(-1);
     if (last === undefined || last.text.trim() === '') return undefined;
     return { text: last.text, at: last.timestamp ?? session.config.updatedAt, turn: turns.length };
