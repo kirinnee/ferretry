@@ -1,17 +1,20 @@
 import type { AttentionId, AttentionItem, AttentionSnapshot, IFyApiClient, SessionView } from '@ferretry/protocol';
+import { WorktreeListResponseSchema } from '@ferretry/protocol';
 import { Pause, Play } from 'lucide-react';
 import { type ReactNode, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
+import { CompactionChip } from '../../components/compaction-card.tsx';
 import { Composer } from '../../components/composer.tsx';
 import type { ComposerSuggestionSwitches } from '../../components/composer-autocomplete.ts';
 import { FastToggle } from '../../components/composer-fast.tsx';
 import { ComposerRuntime } from '../../components/composer-runtime.tsx';
+import { FilesTab } from '../../components/files-tab.tsx';
+import { HandoffSourceProvider } from '../../components/handoff-message.tsx';
 import type { SendRetry } from '../../components/ledger-message.tsx';
 import { type PaneFrameReader, usePaneActivity } from '../../components/live-activity.tsx';
-import { CompactionChip } from '../../components/compaction-card.tsx';
 import { LiveStreamIndicator, type LiveStreamIndicatorProps } from '../../components/live-stream-indicator.tsx';
 import { MigrateSheet } from '../../components/migrate-sheet.tsx';
+import { PackSessionsProvider } from '../../components/pack-call.tsx';
 import { type QuestionAnswerApi, QuestionForm } from '../../components/question-form.tsx';
-import { HandoffSourceProvider } from '../../components/handoff-message.tsx';
 import { ReferenceSurfaceProvider, sessionReferenceSurface } from '../../components/reference-surface.tsx';
 import {
   isPromptKnownBusy,
@@ -22,22 +25,26 @@ import {
 } from '../../components/runtime-controls.tsx';
 import type { TerminalDeckDependencies } from '../../components/session-terminal-deck.tsx';
 import { SessionTopBar, sessionDisplayName } from '../../components/session-top-bar.tsx';
+import { SubFerretIndicator } from '../../components/sub-ferrets.tsx';
 import type { PaneSnapshotReader } from '../../components/terminal-snapshot.tsx';
 import { readPaneSnapshot } from '../../components/terminal-snapshot-model.ts';
 import { Transcript } from '../../components/transcript.tsx';
 import { TranscriptUnboundNotice } from '../../components/transcript-unbound-notice.tsx';
+import { fetchSessionAnalytics } from '../../features/analytics/analytics-api.ts';
+import { analyticsIdQuery } from '../../features/analytics/session-analytics-query.ts';
 import { SessionAnalyticsSurface } from '../../features/analytics/session-analytics-surface.tsx';
 import { type AttentionActionClient, AttentionActionModal } from '../../features/attention/attention-action-modal.tsx';
+import { browserPageLabel } from '../../features/browser/browser-surface-list.tsx';
 import type { UnifiedBrowserDependencies } from '../../features/browser/unified-browser-surface.tsx';
+import { browserPageForKey, useSessionBrowser } from '../../features/browser/use-session-browser.ts';
+import { scopedMcpServers } from '../../features/context-rail/context-rail-model.ts';
 import {
   attentionSignalsPort,
   fleetMcpLoader,
   instructionDocsLoader,
   sessionSkillsLoader,
 } from '../../features/context-rail/context-rail-ports.ts';
-import { scopedMcpServers } from '../../features/context-rail/context-rail-model.ts';
 import type { FleetClientFactory } from '../../features/fleet/fleet-client.ts';
-import { FilesTab } from '../../components/files-tab.tsx';
 import { DialogCard, type HarnessDialogAnswerApi } from '../../features/harness-dialog/dialog-card.tsx';
 import { ApprovalCard, type PermissionAnswerApi } from '../../features/permission-request/approval-card.tsx';
 import { ActionToast } from '../../features/session-actions/action-toast.tsx';
@@ -53,24 +60,18 @@ import { type SessionActionContribution, sessionActionSections } from '../../fea
 import { RenameForm } from '../../features/session-actions/rename-form.tsx';
 import { addSessionMcp, previewSessionMcp, readSessionMcp } from '../../features/session-actions/session-mcp-api.ts';
 import { forkThroughLatest, restartWithResume } from '../../features/session-actions/session-operations.ts';
+import type { InfoTab } from '../../features/session-info/info-model.ts';
 import { readRelaunchSettings } from '../../features/session-info/relaunch-settings-api.ts';
 import { SessionInfo, type SessionInfoPorts } from '../../features/session-info/session-info.tsx';
 import { useInfoPlacement } from '../../features/session-info/use-info-placement.ts';
-import type { InfoTab } from '../../features/session-info/info-model.ts';
-import { fetchSessionAnalytics } from '../../features/analytics/analytics-api.ts';
-import { analyticsIdQuery } from '../../features/analytics/session-analytics-query.ts';
-import { daemonSessionPath } from './routes.ts';
-import { WorktreeListResponseSchema } from '@ferretry/protocol';
 import { SessionTasksSearchSurface, useSessionSearch } from '../../features/session-search/session-search.tsx';
 import { useSessionSkills } from '../../features/skills/session-skills-store.ts';
 import { addSkillInvocationToComposer } from '../../features/skills/skills-composer.ts';
-import type { WorkspaceFormFactor } from '../../features/workspace/phone/phone-tab.ts';
 import type { ConsoleTyper } from '../../features/workspace/console-surface.tsx';
+import type { WorkspaceFormFactor } from '../../features/workspace/phone/phone-tab.ts';
 import { type SessionInfoSlot, SessionWorkspace } from '../../features/workspace/session-workspace.tsx';
 import { useSessionWorkspace } from '../../features/workspace/use-session-workspace.ts';
 import { type SurfaceEventFeed, useSurfaceDriving } from '../../features/workspace/use-surface-driving.ts';
-import { browserPageForKey, useSessionBrowser } from '../../features/browser/use-session-browser.ts';
-import { browserPageLabel } from '../../features/browser/browser-surface-list.tsx';
 import { useSessionTerminals, useWorkspaceFormFactor } from '../../features/workspace/use-workspace-environment.ts';
 import { useChatScrollbarGutter } from '../../hooks/use-chat-scrollbar-gutter.ts';
 import { useLiveActivity } from '../../hooks/use-live-counter.ts';
@@ -87,26 +88,28 @@ import type { AttentionLoadStatus } from '../attention-store.ts';
 import type { DaemonBrowserLoginStore } from '../browser-login.ts';
 import type { ComposerEnterKeyPreference } from '../composer-keybinding.ts';
 import { useComposerReferenceCatalogs } from '../composer-reference-catalogs.ts';
+import type { ConnectionHealthState } from '../connection-health.ts';
 import type { ChatWidthPreference } from '../controls.ts';
 import type { DaemonConnection } from '../daemon-connection.ts';
 import { sameDaemonConnection } from '../daemon-connection.ts';
 import { type DaemonSessionScope, daemonSessionScope } from '../daemon-scope.ts';
-import type { LiveActivityFeed } from '../live-activity-feed.ts';
 import { answerHarnessDialog } from '../harness-dialogs.ts';
+import { lineageLabel } from '../lineage.ts';
+import type { LiveActivityFeed } from '../live-activity-feed.ts';
 import { answerPermissionRequest } from '../permission-requests.ts';
 import type { DaemonPinClient } from '../pin-client.ts';
 import type { DaemonFetch } from '../runtime-models.ts';
 import { DaemonRuntimeModelCatalogStore } from '../runtime-models.ts';
 import { sessionTurn } from '../session-activity.ts';
-import { lineageLabel } from '../lineage.ts';
 import type { TranscriptEntry } from '../session-screens.ts';
 import { useDaemonClient, useDaemonFetch } from '../store.tsx';
-import type { ConnectionHealthState } from '../connection-health.ts';
-import { terminalIdForSurfaceKey } from '../surface-references.ts';
 import type { SttSettings } from '../stt/stt-settings.ts';
+import { subFerretsOf } from '../sub-ferret-state.ts';
+import { terminalIdForSurfaceKey } from '../surface-references.ts';
 import type { DaemonUsageStore } from '../usage-store.ts';
 import { WorkspaceLayoutStore } from '../workspace-layout-store.ts';
 import { type WorkspaceRailPreferenceStore, workspaceRailPreferences } from '../workspace-rail-preferences.ts';
+import { daemonSessionPath } from './routes.ts';
 
 /** Only daemon operations this workspace can truthfully invoke. */
 export type SessionChatClient = Pick<IFyApiClient, 'answer' | 'interrupt' | 'resume' | 'send' | 'stop'> &
@@ -1157,6 +1160,15 @@ export function SessionChatPage({
         {...(infoSlot === undefined ? {} : { onToggleInfo: info.toggle })}
         {...(onOpenSessions === undefined ? {} : { onOpenSessions })}
         {...(startedBy === undefined ? {} : { startedBy })}
+        subFerrets={
+          <SubFerretIndicator
+            compact={compact}
+            sessions={subFerretsOf(session.config.id, daemonSessions ?? [])}
+            {...(onNavigate === undefined
+              ? {}
+              : { onOpenSession: (id: string) => onNavigate(daemonSessionPath(connection.daemonId, id)) })}
+          />
+        }
       />
       {/* NOT a live region. App.tsx owns the single announcement for a refresh
         failure and hands down a finished sentence; a second `role=status`
@@ -1280,78 +1292,81 @@ export function SessionChatPage({
     // Every Markdown reader inside the conversation — transcript prose, notices, file previews in the
     // workspace and whatever a later item renders here — reads references through this one surface.
     <ReferenceSurfaceProvider surface={references}>
-      {/* A message handed to the agent through a file is read back through the same daemon client, so the
+      {/* The cards a ferret's Pack commands become say how each sub-ferret is doing NOW, from this list. */}
+      <PackSessionsProvider sessions={daemonSessions}>
+        {/* A message handed to the agent through a file is read back through the same daemon client, so the
           transcript shows what the person sent rather than the pointer the agent was typed. */}
-      <HandoffSourceProvider source={handoffs}>
-        <SessionSearchWorkspaceActions openFile={openFile} openTasks={openTasks} scope={scope} />
-        {/* `overflow-clip`, not `-hidden`: a hidden box is still a scroll container, so focusing the
+        <HandoffSourceProvider source={handoffs}>
+          <SessionSearchWorkspaceActions openFile={openFile} openTasks={openTasks} scope={scope} />
+          {/* `overflow-clip`, not `-hidden`: a hidden box is still a scroll container, so focusing the
           composer could scroll the whole session sideways and leave the header off the left edge. */}
-        <main
-          className="flex h-full min-h-0 min-w-0 flex-col overflow-clip"
-          data-daemon={connection.daemonId}
-          data-session={session.config.id}
-        >
-          <SessionWorkspace
-            chat={chat}
-            connection={connection}
-            driving={driving}
-            formFactor={formFactor}
-            references={references}
-            renderHeader={header}
-            rails={workspaceRails}
-            session={session}
-            workspace={workspace}
-            {...(infoSlot === undefined ? {} : { info: infoSlot })}
-            {...(deck === undefined ? {} : { deck })}
-            {...(readSnapshot === undefined ? {} : { readSnapshot })}
-            {...(typeIntoConsole === undefined ? {} : { typeIntoConsole })}
-            {...(browser === undefined ? {} : { browser })}
-            browserPages={browserPages}
-          />
-          <ActionToast notice={actionNotice} onDismiss={dismissActionNotice} />
-          <BottomSheet
-            ariaLabel={utility === null ? 'Session tool' : UTILITY_LABEL[utility]}
-            closeLabel="Close"
-            id={utilityId}
-            onClose={() => setUtility(null)}
-            open={utility !== null}
-            panelClassName="bg-surface"
+          <main
+            className="flex h-full min-h-0 min-w-0 flex-col overflow-clip"
+            data-daemon={connection.daemonId}
+            data-session={session.config.id}
           >
-            <div className="flex min-h-0 flex-1 flex-col overflow-y-auto" data-session-utility={utility ?? ''}>
-              {utility === 'tasks' ? <SessionTasksSearchSurface /> : null}
-              {utility === 'analytics' ? <SessionAnalyticsSurface connection={connection} scope={scope} /> : null}
-            </div>
-          </BottomSheet>
-          {/* Inside the reference provider, so Attention prose reads the SAME
+            <SessionWorkspace
+              chat={chat}
+              connection={connection}
+              driving={driving}
+              formFactor={formFactor}
+              references={references}
+              renderHeader={header}
+              rails={workspaceRails}
+              session={session}
+              workspace={workspace}
+              {...(infoSlot === undefined ? {} : { info: infoSlot })}
+              {...(deck === undefined ? {} : { deck })}
+              {...(readSnapshot === undefined ? {} : { readSnapshot })}
+              {...(typeIntoConsole === undefined ? {} : { typeIntoConsole })}
+              {...(browser === undefined ? {} : { browser })}
+              browserPages={browserPages}
+            />
+            <ActionToast notice={actionNotice} onDismiss={dismissActionNotice} />
+            <BottomSheet
+              ariaLabel={utility === null ? 'Session tool' : UTILITY_LABEL[utility]}
+              closeLabel="Close"
+              id={utilityId}
+              onClose={() => setUtility(null)}
+              open={utility !== null}
+              panelClassName="bg-surface"
+            >
+              <div className="flex min-h-0 flex-1 flex-col overflow-y-auto" data-session-utility={utility ?? ''}>
+                {utility === 'tasks' ? <SessionTasksSearchSurface /> : null}
+                {utility === 'analytics' ? <SessionAnalyticsSurface connection={connection} scope={scope} /> : null}
+              </div>
+            </BottomSheet>
+            {/* Inside the reference provider, so Attention prose reads the SAME
             grammar the transcript does — including a `!A3` that re-targets
             this very sheet. */}
-          {attention === undefined ? null : (
-            <AttentionActionModal
-              client={attention.client}
+            {attention === undefined ? null : (
+              <AttentionActionModal
+                client={attention.client}
+                connection={connection}
+                id={attentionId}
+                onClose={closeAttention}
+                open={attentionOpen}
+                scope={scope}
+                snapshot={attention.snapshot}
+                status={attention.status}
+                swipeEnabled={compact}
+                targetId={attentionTarget}
+              />
+            )}
+            <MigrateSheet
+              {...(accountPicker === undefined ? {} : { accountPicker })}
+              canMutate={canControl}
               connection={connection}
-              id={attentionId}
-              onClose={closeAttention}
-              open={attentionOpen}
+              onClose={() => setMigrateOpen(false)}
+              onMigrated={(_daemon, _scope, view) => publish(view)}
+              open={migrateOpen}
               scope={scope}
-              snapshot={attention.snapshot}
-              status={attention.status}
-              swipeEnabled={compact}
-              targetId={attentionTarget}
+              {...(usage === undefined ? {} : { usage })}
+              view={session}
             />
-          )}
-          <MigrateSheet
-            {...(accountPicker === undefined ? {} : { accountPicker })}
-            canMutate={canControl}
-            connection={connection}
-            onClose={() => setMigrateOpen(false)}
-            onMigrated={(_daemon, _scope, view) => publish(view)}
-            open={migrateOpen}
-            scope={scope}
-            {...(usage === undefined ? {} : { usage })}
-            view={session}
-          />
-        </main>
-      </HandoffSourceProvider>
+          </main>
+        </HandoffSourceProvider>
+      </PackSessionsProvider>
     </ReferenceSurfaceProvider>
   );
 }

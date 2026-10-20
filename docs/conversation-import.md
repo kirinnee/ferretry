@@ -28,6 +28,13 @@ The wire contract is `packages/protocol/src/lib/conversation-import.ts`; the dae
   `CODEX_HOME` or `~/.codex`; `source=computer`). A listing with no `source` reads both.
   Claude: `projects/<folder>/<id>.jsonl` (a conversation's sub-agent files are not listed). Codex:
   `sessions/YYYY/MM/DD/rollout-*.jsonl`. Links are never followed.
+- **Name:** every row leads with its NAME when the CLI gave one (`name`, 120 characters); the first
+  message is then the secondary line, and an unnamed conversation is headed by the first message. Claude
+  Code: the transcript's `custom-title` / `agent-name` records (what `/rename` writes) outrank its
+  generated `ai-title` / `summary` records, the latest of each winning. Codex: the thread name from
+  `<home>/session_index.jsonl` (its last 1 MiB, the latest line per id), else the rollout's
+  `thread_name_updated` event. A Ferretry session's row is headed by the ferret's own name, with the
+  conversation's name under it. Search matches names too (`lib/imports/conversation-name.ts`).
 - **What:** metadata only, through the same parsers managed sessions use: the project folder, the first
   and latest thing the owner typed (each cut to 120 characters), the last activity, the turn count, the
   model, and which session already keeps it. A message is what the owner SAID: a turn-file pointer

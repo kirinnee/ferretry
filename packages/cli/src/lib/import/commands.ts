@@ -1,7 +1,7 @@
 import { type Command, InvalidArgumentError, Option } from 'commander';
+import type { PackNewOptions } from '../pack/controller.ts';
 import type { ContinueSessionController, ImportController } from './controller.ts';
 import { parseSinceDuration } from './controller.ts';
-import type { PackNewOptions } from '../pack/controller.ts';
 
 /** Both commands share one `--since` grammar: validated here, converted to an instant in the controller. */
 function sinceArgument(value: string): string {
@@ -34,7 +34,7 @@ export function registerImportCommands(
     .description(
       'list conversations on this machine, adopt chosen ones, or import a window with --all or --since <1d|3d|7d|14d|30d> --runtime <name>',
     )
-    .argument('[query...]', 'search words; each must appear in the preview, latest message or project folder')
+    .argument('[query...]', 'search words; each must appear in the name, first or latest message or project folder')
     .addOption(harnessOption('only this harness'))
     .option('--since <duration>', SINCE_HELP, sinceArgument)
     .option('--select <id...>', 'adopt these conversation ids instead of listing')
@@ -116,8 +116,9 @@ export function registerNewCommand(
     .option('--effort <level>', 'the reasoning effort')
     .option('--auto', 'let Ferretry choose from the models guide (or Jev, when Jev decides)')
     .option('--use-case <id>', 'with --auto: the models-guide use case to choose from')
-    .option('--cwd <dir>', "its folder (defaults to its parent's, or here)")
+    .option('--cwd <dir>', "its folder (defaults to its parent ferret's; a person's start runs here)")
     .option('--name <title>', 'its task title')
+    .option('--allow-scratch', 'run it in a temporary or scratch folder anyway (refused otherwise)')
     .addOption(new Option('--mode <mode>', 'auto (default) or interactive').choices(['auto', 'interactive']))
     .option('--prompt-file <file>', 'read the brief from a file')
     .option('--json', 'print the outcome as JSON')

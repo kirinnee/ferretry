@@ -5,8 +5,10 @@ import type { TranscriptEntry } from '../lib/session-screens.ts';
 import { PeerMessageRow, SystemNoticeRow } from './agent-message-rows.tsx';
 import { CommandRow } from './command-row.tsx';
 import { HandoffBody, HandoffView, useHandoffReading } from './handoff-message.tsx';
+import { HarnessEventRow } from './harness-event-row.tsx';
 import { LedgerMessage, type SendRetry } from './ledger-message.tsx';
 import { Markdown } from './markdown.tsx';
+import { PackCallRow } from './pack-call.tsx';
 import { useReferenceSurface } from './reference-surface.tsx';
 import { MessageFooter } from './send-receipt.tsx';
 import { SentMessageRow } from './sent-message.tsx';
@@ -45,6 +47,8 @@ export function TranscriptRow({
   const rhythm = transcriptRhythm(entry, previous);
   if (entry.sent !== undefined)
     return <SentMessageRow entry={entry} isLast={isLast} live={live} rhythm={rhythm} sent={entry.sent} />;
+  if (entry.pack !== undefined)
+    return <PackCallRow entry={entry} isLast={isLast} live={live} pack={entry.pack} rhythm={rhythm} />;
   if (entry.kind === 'ledger' && entry.ledger !== undefined) {
     return (
       <div className="fy-message fy-message-ledger" data-transcript-kind="ledger" {...rhythm}>
@@ -70,6 +74,8 @@ export function TranscriptRow({
     return <PeerMessageRow entry={entry} peer={entry.peer} rhythm={rhythm} />;
   if (entry.kind === 'user' && entry.handoff !== undefined)
     return <HandoffRow answered={answered} entry={entry} handoff={entry.handoff} rhythm={rhythm} />;
+  if (entry.kind === 'system' && entry.event !== undefined)
+    return <HarnessEventRow event={entry.event} rhythm={rhythm} />;
   if (entry.kind === 'system') return <SystemNoticeRow entry={entry} rhythm={rhythm} />;
   if (entry.kind === 'user') return <OwnMessageRow answered={answered} entry={entry} rhythm={rhythm} />;
   return <TranscriptTextRow entry={entry} rhythm={rhythm} />;
@@ -199,13 +205,13 @@ function transcriptRhythm(
 }
 
 function densityOf(entry: TranscriptEntry): 'message' | 'chrome' {
-  // A message this ferret sent is a message, though a tool call carried it.
-  if (entry.sent !== undefined) return 'message';
+  // A message this ferret sent, or a sub-ferret it started, is a message, though a tool call carried it.
+  if (entry.sent !== undefined || entry.pack !== undefined) return 'message';
   return entry.kind === 'user' || entry.kind === 'assistant' || entry.kind === 'ledger' ? 'message' : 'chrome';
 }
 
 function speakerOf(entry: TranscriptEntry): string | undefined {
-  if (entry.sent !== undefined) return 'assistant';
+  if (entry.sent !== undefined || entry.pack !== undefined) return 'assistant';
   // Another agent is its own speaker, so a peer message after yours reads as a change of turn.
   if (entry.kind === 'user' && entry.peer !== undefined) return `peer:${entry.peer.name}`;
   if (entry.kind === 'user' || entry.kind === 'ledger') return 'user';

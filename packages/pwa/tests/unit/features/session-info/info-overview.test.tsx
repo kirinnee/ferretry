@@ -142,13 +142,17 @@ describe('InfoOverview', () => {
     await interact(() => parentLink.click());
     expect(opened).toEqual(['parent-a']);
 
-    const childLink = must(root.querySelector('[data-info-session-link="kid-a"]'), 'the child link');
+    const childLink = must(root.querySelector<HTMLButtonElement>('[data-sub-ferret-open="kid-a"]'), 'the child link');
     expect(childLink.textContent).toBe('Kid one');
+    await interact(() => childLink.click());
+    expect(opened).toEqual(['parent-a', 'kid-a']);
 
     await mounted?.unmount();
     mounted = undefined;
     const plain = await show({ view: child, sessions: [parent, child, kid] });
     expect(plain.root.querySelector('[data-info-session-link]')).toBeNull();
+    expect(plain.root.querySelector('[data-sub-ferret-open]')).toBeNull();
+    expect(plain.root.querySelector('[data-sub-ferret="kid-a"] .fy-sub-ferret-name')?.textContent).toBe('Kid one');
     expect(plain.root.textContent).toContain('Parent one');
   });
 
@@ -160,6 +164,32 @@ describe('InfoOverview', () => {
     ];
     const { root } = await show({ view: parent, sessions: [parent, ...kids] });
     expect(root.querySelector('[data-info-row="Sub-ferrets (2)"]')).not.toBeNull();
+  });
+
+  it('lists each sub-ferret with how it is doing now, why, and the model it runs on', async () => {
+    const parent = sessionView('parent-a');
+    const kids = [
+      sessionView('k1', {
+        config: {
+          parent: 'parent-a',
+          teammate: 'nadia',
+          model: 'claude-opus-5-5',
+          createdAt: '2026-10-20T02:00:00.000Z',
+        },
+        state: { status: 'running', turnState: 'needs-input', turnPrompt: 'Trust this folder?' },
+      }),
+      sessionView('k2', {
+        config: { parent: 'parent-a', label: 'Sweep imports', createdAt: '2026-10-20T01:00:00.000Z' },
+        state: { status: 'failed', reason: 'out of quota' },
+      }),
+    ];
+    const { root } = await show({ view: parent, sessions: [parent, ...kids], onOpenSession: () => undefined });
+    const rows = [...root.querySelectorAll<HTMLElement>('[data-sub-ferret]')];
+    expect(rows.map(row => row.dataset['subFerret'])).toEqual(['k1', 'k2']);
+    expect(rows[0]?.querySelector('[data-sub-ferret-state]')?.textContent).toBe('Needs you — Trust this folder?');
+    expect(rows[0]?.querySelector('.fy-sub-ferret-model')?.textContent).toBe('claude-opus-5-5');
+    expect(rows[1]?.querySelector('[data-sub-ferret-state="failed"]')?.textContent).toBe('Failed — out of quota');
+    expect(rows[1]?.querySelector('.fy-sub-ferret-model')).toBeNull();
   });
 
   it('says None when a ferret has started no children', async () => {

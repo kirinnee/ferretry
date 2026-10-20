@@ -1,10 +1,11 @@
 import type { IFyApiClient, SendRecord, SessionView } from '@ferretry/protocol';
-
+import { projectPackCalls } from '../lib/pack-calls.ts';
+import { projectDeliveries } from '../lib/peer-delivery.ts';
 import type { TranscriptEntry } from '../lib/session-screens.ts';
 import { parseSlashCommandText, type SlashCommand, withCommandOutput } from '../lib/slash-commands.ts';
-import { projectDeliveries } from '../lib/peer-delivery.ts';
-import { readUserMessage } from '../lib/user-message.ts';
+import { classifySystemText } from '../lib/system-blocks.ts';
 import type { ToolResultData, ToolUseData } from '../lib/tool-extract.ts';
+import { readUserMessage } from '../lib/user-message.ts';
 import { fieldHash } from './session-chat-model.ts';
 
 const LOG_HEADER = /^(?:\[(\d{2}:\d{2}:\d{2})\] )?(user|assistant|developer|system|tool)\/([a-z-]+):(?: (.*))?$/u;
@@ -79,9 +80,16 @@ const entryFor = (record: LogRecord, index: number, at: number | undefined): Tra
 const userEntryFor = (record: LogRecord, index: number, at: number | undefined): TranscriptEntry => {
   const entry = entryFor(record, index, at);
   const message = readUserMessage(entry.text);
-  if (message.kind === 'human') return { ...entry, text: message.text };
-  if (message.kind === 'handoff') return { ...entry, text: message.text, handoff: message.pointer };
   const instant = at === undefined ? {} : { at };
+  if (message.kind === 'human') {
+    // Text the harness typed into the user channel — a background task finishing, an interrupt, a
+    // reminder — is a quiet system row: never the reader's bubble, never a turn the reader opened.
+    const event = classifySystemText(message.text);
+    return event === null
+      ? { ...entry, text: message.text }
+      : { id: entry.id, kind: 'system', text: event.summary ?? event.label, event, ...instant };
+  }
+  if (message.kind === 'handoff') return { ...entry, text: message.text, handoff: message.pointer };
   return message.kind === 'notice'
     ? { id: entry.id, kind: 'system', text: message.text, ...instant }
     : { id: entry.id, kind: 'user', text: message.body, peer: message.from, ...instant };
@@ -267,7 +275,7 @@ export const transcriptEntriesFromLog = (
   }
   flush();
 
-  return projectDeliveries(projectRecords(records, now), clientName);
+  return projectPackCalls(projectDeliveries(projectRecords(records, now), clientName), clientName);
 };
 
 type SessionWorkspaceReadApi = Pick<IFyApiClient, 'get' | 'logs'> & {

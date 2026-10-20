@@ -4,3 +4,4 @@ export * from './jev.ts';
 export * from './probe.ts';
 export * from './recommend.ts';
 export * from './service.ts';
+export * from './scratch.ts';

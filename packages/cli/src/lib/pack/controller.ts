@@ -28,13 +28,20 @@ export interface PackNewOptions {
   readonly mode?: 'auto' | 'interactive';
   readonly promptFile?: string;
   readonly json?: boolean;
+  /** Run in a temporary or scratch folder anyway; the daemon refuses one `scratch_cwd` otherwise. */
+  readonly allowScratch?: boolean;
 }
 
 export interface PackControllerDeps {
   readonly gateway: IPackGateway;
   readonly out: IPackIo;
-  /** The ferret this runs inside (`FY_SESSION_ID`), which becomes the parent; absent for a person's shell. */
-  readonly parent: string | undefined;
+  /**
+   * The ferret this runs inside (`FY_SESSION_ID`, or its tmux session's copy — `./ambient.ts`), which becomes
+   * the parent; `undefined` for a person's shell. Read only when a start is made.
+   */
+  readonly parent: () => Promise<string | undefined>;
+  /** A folder the caller typed, made absolute against where `fy` was run. */
+  readonly absolute: (path: string) => string;
   /** Where `fy` was run, the folder a top-level start runs in. */
   readonly cwd: string;
   readonly readFile: (path: string) => Promise<string>;
@@ -64,20 +71,23 @@ export class PackController {
     const task = options.promptFile === undefined ? typed : (await this.deps.readFile(options.promptFile)).trim();
     if (task === '')
       throw new Error(`give the brief: ${this.deps.binaryName} new --runtime <runtime> "<complete brief>"`);
+    const parent = await this.deps.parent();
     const request: PackNewRequest = PackNewRequestSchema.parse({
       task,
-      ...(this.deps.parent === undefined ? {} : { parent: this.deps.parent }),
+      ...(parent === undefined ? {} : { parent }),
       ...(options.runtime === undefined ? {} : { runtime: options.runtime }),
       ...(options.model === undefined ? {} : { model: options.model }),
       ...(options.effort === undefined ? {} : { effort: options.effort }),
       ...(options.auto === true ? { auto: true } : {}),
       ...(options.useCase === undefined ? {} : { useCase: options.useCase }),
-      // A sub-ferret runs in its parent's folder unless told otherwise; a person's start runs here.
+      // A sub-ferret runs in its PARENT'S folder — never where the agent's shell happens to be — unless told
+      // otherwise; a person's start runs here. The daemon refuses a named temporary folder (`--allow-scratch`).
       ...(options.cwd !== undefined
-        ? { cwd: options.cwd }
-        : this.deps.parent === undefined
+        ? { cwd: this.deps.absolute(options.cwd) }
+        : parent === undefined
           ? { cwd: this.deps.cwd }
           : {}),
+      ...(options.allowScratch === true ? { allowScratch: true } : {}),
       ...(options.name === undefined ? {} : { name: options.name }),
       ...(options.mode === undefined ? {} : { mode: options.mode }),
     });

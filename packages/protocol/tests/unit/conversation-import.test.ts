@@ -22,7 +22,11 @@ const request = { harness: 'claude', runtime: 'claude-default', conversations: [
 
 const cases: SchemaCase[] = [
   { name: 'ImportConversationIdSchema', schema: imports.ImportConversationIdSchema, value: ID },
-  { name: 'ImportableConversationSchema', schema: imports.ImportableConversationSchema, value: row },
+  {
+    name: 'ImportableConversationSchema',
+    schema: imports.ImportableConversationSchema,
+    value: { ...row, name: 'Login page fix' },
+  },
   {
     name: 'ConversationImportListingSchema',
     schema: imports.ConversationImportListingSchema,
@@ -96,6 +100,11 @@ describe('the conversation import wire contract', () => {
 
     // Act & Assert
     assertRejects([
+      {
+        name: 'long name',
+        schema: imports.ImportableConversationSchema,
+        value: { ...row, name: 'x'.repeat(imports.CONVERSATION_NAME_MAX + 1) },
+      },
       { name: 'path id', schema: imports.ImportConversationIdSchema, value: '../etc' },
       {
         name: 'long preview',

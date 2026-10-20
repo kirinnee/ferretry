@@ -124,9 +124,16 @@ catalog an operator writes — is unchanged and separate.)
 ## `fy new`
 
 `POST /v1/pack/new` — `operator`. `fy new` without `--continue` (with it, it still continues an existing
-conversation). Inside a ferret's pane, `FY_SESSION_ID` names the asking ferret, which becomes the parent,
-and the sub-ferret runs in the **parent's folder** unless `--cwd` says otherwise (only a caller at this
-machine may name one).
+conversation). Inside a ferret's pane, `FY_SESSION_ID` names the asking ferret, which becomes the parent —
+and when the agent's shell dropped it (a subshell, a sandbox), the CLI reads the pane's tmux session's own
+copy (`tmux show-environment FY_SESSION_ID`), so the parent is recorded either way.
+
+**Where it runs.** A sub-ferret runs in its **parent's folder** — the parent session's recorded working
+folder, so it lands in the parent's project group — never where the agent's shell happens to be (often its
+harness's scratch folder, `/tmp/claude-…`). Only `--cwd` moves it (made absolute against where `fy` ran; only a
+caller at this machine may name one). A **named** temporary folder — an explicit `--cwd`, or a top-level start
+from a person's shell — under `/tmp`, `/private/tmp`, `/var/tmp`, `/var/folders` or the daemon's `TMPDIR` is
+refused `scratch_cwd` unless `--allow-scratch` says it is meant. A parent's own folder is never refused.
 
 ```text
 fy new --runtime claude-auto-work --model claude-opus-5-5 --effort high "<complete brief>"
@@ -149,16 +156,17 @@ The answer is never an HTTP error for a refusal: it is `{outcome: 'refused', ref
 remedy}, attempts}`, every attempt listed, so a ferret falls back on the code. `fy new` exits **2** on a
 refusal (a failure of the command itself is 1).
 
-| Code                                  | Means                                                            |
-| ------------------------------------- | ---------------------------------------------------------------- |
-| `pack_off`                            | the machine's or this ferret's switch is off                     |
-| `limit_reached` / `depth_exceeded`    | see Limits; do the work yourself                                 |
-| `unknown_runtime` / `not_agent`       | no such runtime / one that cannot run sessions                   |
-| `cli_missing` / `not_logged_in`       | the CLI is not installed / the login needs signing in            |
-| `out_of_quota` / `model_unavailable`  | quota used up / the runtime does not offer the model             |
-| `probe_failed`                        | the "reply OK" check did not answer OK in time                   |
-| `no_candidate`                        | nothing in the guide can run here now                            |
-| `jev_unavailable` / `jev_cap_reached` | reserved; today both fall back to the guide's order, with a note |
+| Code                                  | Means                                                                 |
+| ------------------------------------- | --------------------------------------------------------------------- |
+| `pack_off`                            | the machine's or this ferret's switch is off                          |
+| `limit_reached` / `depth_exceeded`    | see Limits; do the work yourself                                      |
+| `unknown_runtime` / `not_agent`       | no such runtime / one that cannot run sessions                        |
+| `cli_missing` / `not_logged_in`       | the CLI is not installed / the login needs signing in                 |
+| `out_of_quota` / `model_unavailable`  | quota used up / the runtime does not offer the model                  |
+| `probe_failed`                        | the "reply OK" check did not answer OK in time                        |
+| `no_candidate`                        | nothing in the guide can run here now                                 |
+| `scratch_cwd`                         | the named folder is temporary; leave `--cwd` out or `--allow-scratch` |
+| `jev_unavailable` / `jev_cap_reached` | reserved; today both fall back to the guide's order, with a note      |
 
 ## Who decides
 

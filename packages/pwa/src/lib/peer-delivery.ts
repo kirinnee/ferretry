@@ -37,7 +37,7 @@ export const shellCommandOf = (call: Pick<ToolCall, 'use'>): string | undefined 
 };
 
 /** One shell word as written, and whether any of it was a shell expansion this reader cannot run. */
-interface Word {
+export interface Word {
   readonly text: string;
   readonly expanded: boolean;
 }
@@ -65,7 +65,7 @@ const expandHeredocs = (script: string): { readonly script: string; readonly bod
  * agent writes: single and double quotes, backslash escapes, and the heredoc substitution above. Any
  * other `$`/backtick inside a word marks it expanded rather than guessing at its value.
  */
-const simpleCommands = (script: string): readonly (readonly Word[])[] => {
+export const simpleCommands = (script: string): readonly (readonly Word[])[] => {
   const { script: source, bodies } = expandHeredocs(script);
   const commands: Word[][] = [[]];
   let text = '';
@@ -175,6 +175,17 @@ const stateOf = (call: Pick<ToolCall, 'result'>): Pick<SentMessage, 'state' | 'r
 const isClient = (word: string, clientName: string): boolean => word === clientName || word.endsWith(`/${clientName}`);
 
 /**
+ * Where the client starts in one simple command, or -1 when the command is not the client's. Only
+ * `direnv exec <dir> fy …` may stand in front of it, so a command that merely mentions it is not one.
+ */
+export const clientAt = (words: readonly Word[], clientName: string): number => {
+  const start = words.findIndex(word => isClient(word.text, clientName));
+  const launcher = words.slice(0, start).map(word => word.text);
+  const launched = start === 0 || (start === 3 && launcher[0] === 'direnv' && launcher[1] === 'exec');
+  return start !== -1 && launched ? start : -1;
+};
+
+/**
  * The `send` a tool call ran, or `null` when it is any other call.
  *
  * Only a command that IS a send counts: `<client> send <ferret> …` or `<client> reply <ferret> …`,
@@ -185,11 +196,8 @@ export const readSentMessage = (call: Pick<ToolCall, 'use' | 'result'>, clientNa
   const script = shellCommandOf(call);
   if (script === undefined || !script.includes(clientName)) return null;
   for (const words of simpleCommands(script)) {
-    const start = words.findIndex(word => isClient(word.text, clientName));
-    // `direnv exec <dir> fy …` is the only launcher allowed in front of the client.
-    const launcher = words.slice(0, start).map(word => word.text);
-    const launched = start === 0 || (start === 3 && launcher[0] === 'direnv' && launcher[1] === 'exec');
-    if (start === -1 || !launched) continue;
+    const start = clientAt(words, clientName);
+    if (start === -1) continue;
     const verb = words[start + 1]?.text;
     const to = words[start + 2];
     if ((verb !== 'send' && verb !== 'reply') || to === undefined || to.expanded || to.text.startsWith('-')) continue;

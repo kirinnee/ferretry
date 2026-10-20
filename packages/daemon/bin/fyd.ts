@@ -767,7 +767,9 @@ import {
 } from '../src/lib/index.ts';
 import {
   admitChild,
+  COMMON_SCRATCH_ROOTS,
   depthOf,
+  isScratchPath,
   JevPackRanker,
   type PackParent,
   PackService,
@@ -7759,6 +7761,19 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           return { runtimes: runtimes.runtimes, credentials: credentials.credentials, tools: machine.tools };
         },
         parent: async id => await packTree.parent(id),
+        // A named folder is judged where it really is: `/tmp` is `/private/tmp` on macOS, and a link into a
+        // temporary folder is still one. This machine's own TMPDIR and the runtime's temp folder count too.
+        scratch: async cwd => {
+          const real = (path: string): string => {
+            try {
+              return realpathSync(path);
+            } catch {
+              return path;
+            }
+          };
+          const roots = [...COMMON_SCRATCH_ROOTS, tmpdir(), ...(process.env.TMPDIR ? [process.env.TMPDIR] : [])];
+          return isScratchPath(real(cwd), [...roots, ...roots.map(real)]);
+        },
         probe: (() => {
           const cache = new ProbeCache(
             new CliPackProbe(

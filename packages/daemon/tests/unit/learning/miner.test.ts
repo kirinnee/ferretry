@@ -12,8 +12,8 @@ import type {
 } from '../../../src/lib/learning/index.ts';
 import type { FoundationPaths } from '../../../src/lib/paths.ts';
 import type { FileSystemPort } from '../../../src/lib/ports.ts';
-import type { SessionDirectorySubsystem } from '../../../src/lib/runtime/mounts/sessions.ts';
 import type { SessionControlSubsystem } from '../../../src/lib/runtime/mounts/session-control.ts';
+import type { SessionDirectorySubsystem } from '../../../src/lib/runtime/mounts/sessions.ts';
 import type { SessionTranscriptReader } from '../../../src/lib/session/transcript/reader.ts';
 import type { TranscriptEvent } from '../../../src/lib/transcript/types.ts';
 
@@ -487,6 +487,17 @@ describe('normalizedRecord', () => {
 
     // Assert
     should(record).deepEqual({ type: 'chat.user', timestamp: AT, data: { text: 'Hello.' } });
+  });
+
+  it("should not read the harness's own event as the owner's message", () => {
+    // Act
+    const record = normalizedRecord({
+      ...userEvent('<task-notification>…</task-notification>', AT),
+      inputSource: 'harness',
+    });
+
+    // Assert
+    should(record).deepEqual({ type: 'message', timestamp: AT });
   });
 
   it('should read a tool result as tool.result with its error flag', () => {

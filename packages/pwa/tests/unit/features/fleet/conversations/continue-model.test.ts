@@ -51,6 +51,13 @@ describe('continue sources', () => {
 });
 
 describe('stopped ferrets', () => {
+  it('finds a ferret by the name of the conversation it keeps', () => {
+    const named = [conversation('c-shop', { adoptedBy: 's-stopped', name: 'Cart bugfix' })];
+    expect(stoppedSessionRows(SESSIONS, named, { ...ANY, text: 'bugfix' }, NOW).map(row => row.view.config.id)).toEqual(
+      ['s-stopped'],
+    );
+  });
+
   it('lists every stopped ferret newest first, with the conversation it keeps', () => {
     const rows = stoppedSessionRows(SESSIONS, KEPT, ANY, NOW);
     expect(rows.map(row => [row.view.config.id, row.name, row.conversation?.id])).toEqual([

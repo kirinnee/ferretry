@@ -1,7 +1,11 @@
 import type { ConversationAdoptResult, ConversationImportListing, ImportableConversation } from '@ferretry/protocol';
 
-/** The first thing they typed, and the most recent, when the two differ. */
+/**
+ * What a row says it is: its NAME, when the CLI gave it one, then the first thing they typed; an unnamed
+ * conversation is the first thing they typed and the most recent, when the two differ.
+ */
 function previewLine(entry: ImportableConversation): string {
+  if (entry.name !== undefined) return entry.preview === '' ? entry.name : `${entry.name} — ${entry.preview}`;
   return entry.latest === undefined ? entry.preview : `${entry.preview} … ${entry.latest}`;
 }
 

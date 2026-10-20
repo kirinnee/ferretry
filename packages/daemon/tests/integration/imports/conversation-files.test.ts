@@ -148,6 +148,19 @@ describe('discovering conversations on disk', () => {
     should(await files.head(join(home, 'missing.md'), 5)).be.undefined();
     should(await files.head(join(home, '.claude'), 5)).be.undefined();
   });
+
+  it('should read at most the last bytes of a document, and nothing for a missing file or a folder', async () => {
+    // Arrange
+    const { home, claudeFile } = await fakeHome();
+    const files = new NodeConversationFiles();
+    const whole = await Bun.file(claudeFile).text();
+
+    // Act & Assert
+    should(await files.tail(claudeFile, 5)).equal(whole.slice(-5));
+    should(await files.tail(claudeFile, whole.length + 100)).equal(whole);
+    should(await files.tail(join(home, 'missing.md'), 5)).be.undefined();
+    should(await files.tail(join(home, '.claude'), 5)).be.undefined();
+  });
 });
 
 describe('linking a conversation into a runtime’s history', () => {

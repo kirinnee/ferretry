@@ -7,9 +7,12 @@ export {
   CODEX_INPUT_SHAPE_VERSION,
   CodexObservedInputObserver,
 } from './observed-input.ts';
-export { searchTranscript } from './search.ts';
+export { isOwnerMessage } from './owner.ts';
 export type { TranscriptSearchMatch, TranscriptSearchOptions } from './search.ts';
+export { searchTranscript } from './search.ts';
 export type {
+  ObservedHumanInput,
+  ObservedHumanInputProof,
   TranscriptAttachment,
   TranscriptAttachmentEvent,
   TranscriptBatch,
@@ -19,14 +22,12 @@ export type {
   TranscriptFileCursor,
   TranscriptFollowOptions,
   TranscriptHarness,
+  TranscriptInputObserver,
   TranscriptIssue,
   TranscriptIssueCode,
   TranscriptJsonValue,
   TranscriptMessageEvent,
-  TranscriptInputObserver,
   TranscriptObservationContext,
-  ObservedHumanInput,
-  ObservedHumanInputProof,
   TranscriptParseInput,
   TranscriptParseResult,
   TranscriptParser,

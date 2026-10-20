@@ -47,8 +47,36 @@ export interface SystemBlockInfo {
   /** A context boundary gets full-width divider treatment while retaining the
    *  same collapsed disclosure contract as every other system row. */
   readonly divider?: 'compaction';
+  /** Each background task a task notification reports, in order — one record can carry several. */
+  readonly tasks?: readonly BackgroundTaskEvent[];
   /** ALWAYS the full original text, untouched — the disclosure body. */
   readonly raw: string;
+}
+
+/** What kind of background work Claude Code reported on. */
+export type BackgroundTaskKind = 'command' | 'monitor' | 'agent' | 'task';
+
+/** How it went: `event` is a monitor's line of output, which is neither an end nor a failure. */
+export type BackgroundTaskOutcome = 'finished' | 'failed' | 'stopped' | 'event';
+
+/**
+ * ONE `<task-notification>`, read. Claude Code writes one when a `run_in_background` command, a
+ * Monitor or a subagent finishes or reports, and its `<summary>` is a sentence in one of a few fixed
+ * shapes (`Background command "…" completed (exit code 0)`, `Monitor event: "…"`, `Agent "…" finished`).
+ * The sentence is taken apart so a row can say what ran and how it ended without repeating the command
+ * twice; a summary in any other shape is kept whole as the subject, never dropped.
+ */
+export interface BackgroundTaskEvent {
+  readonly kind: BackgroundTaskKind;
+  readonly outcome: BackgroundTaskOutcome;
+  /** The command line, the monitor's description, the agent's name — or an unrecognised summary. */
+  readonly subject?: string;
+  readonly exitCode?: number;
+  /** Where Claude Code wrote the task's output, on the agent's machine. Shown as text, never a link. */
+  readonly outputFile?: string;
+  /** A subagent's `<result>`, a monitor's `<event>`, or why an agent failed. */
+  readonly detail?: string;
+  readonly tone?: SystemBlockTone;
 }
 
 /** ~160 chars is the point past which a one-line summary stops being scannable;
@@ -82,6 +110,109 @@ function toneForStatus(status: string | undefined): SystemBlockTone | undefined 
   if (status === 'killed' || status === 'failed') return 'err';
   return 'warn';
 }
+
+/** Claude Code escapes the text inside a notification's elements as XML; a row shows it as written. */
+const XML_ENTITIES: Readonly<Record<string, string>> = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'" };
+const decodeEntities = (value: string): string =>
+  value.replace(/&(amp|lt|gt|quot|apos);/gu, (_entity, name: string) => XML_ENTITIES[name] as string);
+
+/** A decoded element, or `undefined` when it is absent or blank. */
+function element(text: string, tag: string): string | undefined {
+  const value = tagContent(text, tag);
+  return value ? decodeEntities(value) : undefined;
+}
+
+// The fixed sentences Claude Code writes as a notification's `<summary>`. Each is anchored at both ends,
+// so a sentence in a shape this does not know is shown whole rather than half-parsed. A subject is
+// captured greedily because an agent's name or a command line can itself contain `"`.
+const SUMMARY_SHAPES: readonly {
+  readonly pattern: RegExp;
+  readonly kind: BackgroundTaskKind;
+  readonly outcome: BackgroundTaskOutcome;
+}[] = [
+  {
+    pattern: /^Background command "([\s\S]*)" completed \(exit code (\d+)[^)]*\)$/u,
+    kind: 'command',
+    outcome: 'finished',
+  },
+  { pattern: /^Background command "([\s\S]*)" failed with exit code (\d+)$/u, kind: 'command', outcome: 'failed' },
+  { pattern: /^Background command "([\s\S]*)" was stopped$/u, kind: 'command', outcome: 'stopped' },
+  { pattern: /^Monitor event: "([\s\S]*)"$/u, kind: 'monitor', outcome: 'event' },
+  { pattern: /^Monitor "([\s\S]*)" stream ended$/u, kind: 'monitor', outcome: 'finished' },
+  { pattern: /^Monitor "([\s\S]*)" script failed \(exit (\d+)\)$/u, kind: 'monitor', outcome: 'failed' },
+  { pattern: /^Monitor "([\s\S]*)" stopped$/u, kind: 'monitor', outcome: 'stopped' },
+  { pattern: /^Agent "([\s\S]*)" finished$/u, kind: 'agent', outcome: 'finished' },
+  { pattern: /^Agent "([\s\S]*)" was stopped by user$/u, kind: 'agent', outcome: 'stopped' },
+];
+const AGENT_FAILED = /^Agent "([\s\S]*?)" failed: ([\s\S]*)$/u;
+
+/** A status with no sentence to read it from: `killed` is a stop, anything unknown is just an event. */
+function outcomeForStatus(status: string | undefined): BackgroundTaskOutcome {
+  if (status === 'completed') return 'finished';
+  if (status === 'failed') return 'failed';
+  if (status === 'killed' || status === 'stopped') return 'stopped';
+  return 'event';
+}
+
+const TONE_FOR_OUTCOME: Readonly<Record<BackgroundTaskOutcome, SystemBlockTone | undefined>> = {
+  finished: 'ok',
+  failed: 'err',
+  stopped: 'warn',
+  event: undefined,
+};
+
+/** The trailing advice Claude Code appends inside a Monitor notification, which is addressed to the model. */
+const MONITOR_ADVICE = /\n?If this event is something the user would act on now[\s\S]*$/u;
+
+/** One `<task-notification>` block's body, read into a task event. */
+function backgroundTask(block: string): BackgroundTaskEvent {
+  const summary = element(block, 'summary');
+  const outputFile = element(block, 'output-file');
+  const status = tagContent(block, 'status');
+  const failure = summary === undefined ? null : AGENT_FAILED.exec(summary);
+  const shape = summary === undefined ? undefined : SUMMARY_SHAPES.find(candidate => candidate.pattern.test(summary));
+  const match = shape === undefined || summary === undefined ? null : shape.pattern.exec(summary);
+  const kind: BackgroundTaskKind = failure ? 'agent' : (shape?.kind ?? 'task');
+  const outcome = failure ? 'failed' : (shape?.outcome ?? outcomeForStatus(status));
+  const subject = failure ? failure[1] : match ? match[1] : summary;
+  const exitCode = match?.[2] === undefined ? undefined : Number(match[2]);
+  const detail = failure
+    ? failure[2]
+    : (element(block, 'result') ?? element(block, 'event')?.replace(MONITOR_ADVICE, ''));
+  const tone = toneForStatus(status) ?? TONE_FOR_OUTCOME[outcome];
+  return {
+    kind,
+    outcome,
+    ...(subject ? { subject } : {}),
+    ...(exitCode === undefined ? {} : { exitCode }),
+    ...(outputFile ? { outputFile } : {}),
+    ...(detail?.trim() ? { detail: detail.trim() } : {}),
+    ...(tone ? { tone } : {}),
+  };
+}
+
+const TASK_BLOCK = /<task-notification>([\s\S]*?)<\/task-notification>/gu;
+
+/**
+ * Claude Code's warning to the model that heads a notification it sends as a meta record — four lines
+ * saying the text is not the user. It is the harness talking to the model, so it is no part of the row.
+ */
+const NOT_USER_INPUT = /^\s*\[SYSTEM NOTIFICATION - NOT USER INPUT\][\s\S]*?(?=<task-notification>)/u;
+
+/** The worst tone across several tasks: one failure among three finishes is still a failure. */
+function worstTone(tasks: readonly BackgroundTaskEvent[]): SystemBlockTone | undefined {
+  const tones = tasks.map(task => task.tone);
+  if (tones.includes('err')) return 'err';
+  if (tones.includes('warn')) return 'warn';
+  return tones.includes('ok') ? 'ok' : undefined;
+}
+
+// A message another agent sent through Claude Code's own agent messaging — a subagent or teammate
+// inside this session, or the coordinator that spawned it — which Claude Code types into the user
+// channel with a fixed opener. It is a message, but never the owner's.
+const AGENT_MESSAGE =
+  /^Another Claude session sent a message(?: while you were working)?:\n<agent-message from="([^"]*)">\n?([\s\S]*?)\n?<\/agent-message>/u;
+const COORDINATOR_MESSAGE = /^The coordinator sent a message(?: while you were working)?:\n([\s\S]+)$/u;
 
 // The daemon's own turn prompt is the protocol's (`parseHandoffPointer`): one owner for the sentence the
 // daemon types and every reader of it, matched only as the WHOLE message and on the path's invariant
@@ -185,20 +316,37 @@ export function classifySystemText(text: string): SystemBlockInfo | null {
   //    both contribute to the compact line (result second, de-duplicated if it
   //    repeats the summary); the collapsed line may truncate, but the raw
   //    disclosure always retains the full text.
-  if (/^\s*<task-notification>/u.test(text)) {
-    const status = tagContent(text, 'status');
-    const summaryElement = oneLine(tagContent(text, 'summary'));
-    const resultLine = oneLine(firstLine(tagContent(text, 'result')));
+  //    A record may open with Claude Code's NOT-USER-INPUT warning and carry several notifications;
+  //    each becomes one task, and the row's tone is the worst of them.
+  const notifications = text.replace(NOT_USER_INPUT, '');
+  if (/^\s*<task-notification>/u.test(notifications)) {
+    const status = tagContent(notifications, 'status');
+    const summaryElement = oneLine(element(notifications, 'summary'));
+    const resultLine = oneLine(firstLine(element(notifications, 'result')));
     const parts = [summaryElement, resultLine === summaryElement ? undefined : resultLine].filter(Boolean);
     const summary = oneLine(parts.join(' · '));
-    const tone = toneForStatus(status);
+    const tasks = [...notifications.matchAll(TASK_BLOCK)].map(block => backgroundTask(block[1] as string));
+    const tone = tasks.length > 0 ? worstTone(tasks) : toneForStatus(status);
     return {
       label: 'task notification',
       raw: text,
+      tasks,
       ...(summary ? { summary } : {}),
       ...(status ? { status } : {}),
       ...(tone ? { tone } : {}),
     };
+  }
+
+  //    A message from another agent through Claude Code's own messaging, or from its coordinator.
+  const agent = AGENT_MESSAGE.exec(text);
+  if (agent) {
+    const summary = oneLine(firstLine(agent[2]));
+    return { label: 'agent message', raw: text, ...(summary ? { summary } : {}) };
+  }
+  const coordinator = COORDINATOR_MESSAGE.exec(text);
+  if (coordinator) {
+    const summary = oneLine(firstLine(coordinator[1]));
+    return { label: 'coordinator message', raw: text, ...(summary ? { summary } : {}) };
   }
 
   // 2. system-reminder (rare in chat.user; the common ones live inside tool
@@ -294,4 +442,31 @@ export function classifySystemText(text: string): SystemBlockInfo | null {
   }
 
   return null;
+}
+
+const TASK_NOUN: Readonly<Record<BackgroundTaskKind, string>> = {
+  command: 'Background command',
+  monitor: 'Monitor',
+  agent: 'Subagent',
+  task: 'Background task',
+};
+
+const OUTCOME_VERB: Readonly<Record<BackgroundTaskOutcome, string>> = {
+  finished: 'finished',
+  failed: 'failed',
+  stopped: 'stopped',
+  event: '',
+};
+
+/** `Background command finished`, `Monitor failed`, `Subagent stopped`; a monitor's output is a `Monitor event`. */
+export function backgroundTaskTitle(task: BackgroundTaskEvent): string {
+  if (task.kind === 'monitor' && task.outcome === 'finished') return 'Monitor ended';
+  if (task.kind === 'monitor' && task.outcome === 'event') return 'Monitor event';
+  return [TASK_NOUN[task.kind], OUTCOME_VERB[task.outcome]].filter(Boolean).join(' ');
+}
+
+/** A system block's label as a row heading: `System reminder`, `Interrupted`. A wrapper's tag stays as written. */
+export function systemBlockTitle(block: SystemBlockInfo): string {
+  if (!/^[a-z ]+$/u.test(block.label)) return block.label;
+  return `${block.label.charAt(0).toUpperCase()}${block.label.slice(1)}`;
 }

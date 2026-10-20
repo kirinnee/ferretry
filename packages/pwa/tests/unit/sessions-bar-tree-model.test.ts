@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import { sessionsBarView } from '../../src/shell/sessions-bar-model.ts';
 import {
   containsSession,
   rollupWords,
@@ -96,5 +97,66 @@ describe('tree words', () => {
     const [stub] = sessionTree([a], [lead, a]) as [TreeEntry];
     expect(containsSession(stub, 'lead')).toBe(false);
     expect(containsSession(stub, 'a')).toBe(true);
+  });
+});
+
+describe('a real Pack start', () => {
+  // What `fy new` records (packages/daemon/src/lib/pack/service.ts): the asking ferret as `parent`, the
+  // parent's own folder, an unattended mode and no board, on the runtime's wrapper.
+  const cwd = '/home/kirin/Workspace/personal/ferretry';
+  const parent = sessionView('mvlead-0001', {
+    config: { teammate: 'fernanda', mode: 'interactive', cwd, agent: 'claude-interactive-work' },
+    state: { lastActivityAt: '2026-10-20T00:10:00.000Z' },
+  });
+  const packChild = (id: string, teammate: string, at: string) =>
+    sessionView(id, {
+      config: {
+        teammate,
+        parent: 'mvlead-0001',
+        mode: 'auto',
+        cwd,
+        agent: 'claude-auto-work',
+        boardAccess: 'none',
+        model: 'claude-opus-5-5',
+        name: 'Review packages/daemon/src/lib/pack for races',
+      },
+      state: { lastActivityAt: at },
+    });
+  const nadia = packChild('mvq1k2-7f3a', 'nadia', '2026-10-20T00:20:00.000Z');
+  const tomi = packChild('mvq1k2-8b4c', 'tomi', '2026-10-20T00:05:00.000Z');
+
+  test('nests its sub-ferrets under it in the sessions bar, under the default filter', () => {
+    const sessions = [nadia, parent, tomi];
+    const { groups } = sessionsBarView(sessions, [{ name: 'ferretry', path: cwd }], {
+      mode: 'all',
+      showStopped: false,
+    });
+    expect(groups.map(group => group.name)).toEqual(['ferretry']);
+    const tree = sessionTree(groups[0]?.rows ?? [], sessions);
+    expect(ids(tree)).toEqual([
+      [
+        'row:mvlead-0001',
+        [
+          ['row:mvq1k2-7f3a', []],
+          ['row:mvq1k2-8b4c', []],
+        ],
+      ],
+    ]);
+    expect(rollupWords(tree[0]?.rollup as never)).toBe('2 running');
+  });
+
+  test('listing only unattended ferrets keeps them under a stub that names the interactive parent', () => {
+    const sessions = [parent, nadia, tomi];
+    const { groups } = sessionsBarView(sessions, [], { mode: 'auto', showStopped: false });
+    const tree = sessionTree(groups[0]?.rows ?? [], sessions);
+    expect(ids(tree)).toEqual([
+      [
+        'stub:mvlead-0001',
+        [
+          ['row:mvq1k2-7f3a', []],
+          ['row:mvq1k2-8b4c', []],
+        ],
+      ],
+    ]);
   });
 });
