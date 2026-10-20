@@ -137,6 +137,10 @@ still there.
 
 ## What is not built yet
 
+- **Copying a sign-in (Claude / Codex login tokens) — GAP, undecided.** A copied refresh token would live
+  on two machines, and a provider that rotates refresh tokens signs one of them out when the other
+  refreshes. A secret copy carries stored secrets only; the extension point is marked on the bundle's
+  plaintext schema in `packages/daemon/src/lib/secrets/clone.ts`.
 - **`fy secret clone --from <machine>` — GAP.** Copying is browser-only for now. The command line
   holds one credential, this host's admin token, and has no way to reach a second daemon; giving it one
   is a design of its own (it would need to be paired, like a browser). Copy from the PWA.

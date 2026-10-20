@@ -103,7 +103,15 @@ export interface SecretCloneIdentitySource {
   load(): Promise<DaemonIdentity | undefined>;
 }
 
-/** What a sealed bundle opens to. Values exist only between `seal` and `open`, never on a wire in clear. */
+/**
+ * What a sealed bundle opens to. Values exist only between `seal` and `open`, never on a wire in clear.
+ *
+ * EXTENSION POINT — LOGIN TOKENS ARE DELIBERATELY NOT HERE. Copying a Claude or Codex sign-in would put a
+ * refresh token on two machines, and a provider that rotates refresh tokens would sign one of them out
+ * the first time the other refreshes. The owner has not decided (docs/secrets.md, "Copying secrets to
+ * another machine"). If they do, a login travels as its own field beside `entries`, under a new
+ * `SECRET_CLONE_SCHEMA_VERSION`, so a receiving daemon that predates it refuses rather than drops it.
+ */
 const BundlePlaintextSchema = z.strictObject({
   entries: z
     .array(z.tuple([SecretNameSchema, SecretValueSchema]))
