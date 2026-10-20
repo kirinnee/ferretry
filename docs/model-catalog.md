@@ -266,7 +266,10 @@ How a priced session is then queried — metrics, labels, ranges and the merge a
 
 - **The same three sources, the same precedence.** A price lives in its catalog, so it follows the catalog:
   `config/models/<id>.yaml` > the published catalog > the built-in one, per catalog id. A machine's own
-  copy of a catalog prices its models with whatever it says — including nothing.
+  copy of a catalog prices its models with whatever it says — including nothing. A published catalog
+  that leaves a model unpriced (one published before prices existed, still held by a daemon, or a
+  rollback to one) takes this build's built-in price for that same catalog and model; a published price
+  still wins over it.
 - **Published beside the catalogs, not in them.** `catalog/models.json` keeps `catalogs` in the shape it
   always had, with no `price` key, because a daemon older than prices reads every model strictly and would
   refuse the whole catalog. The prices travel in a top-level `prices` map

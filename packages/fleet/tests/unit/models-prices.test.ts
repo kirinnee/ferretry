@@ -1,6 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { builtInModelCatalogs } from '../../src/lib/models/catalog.ts';
+import { builtInModelCatalogs, modelCatalogs } from '../../src/lib/models/catalog.ts';
 import {
   PUBLISHED_MODEL_CATALOG_FILE,
   publishedModelCatalogFiles,
@@ -149,6 +149,47 @@ describe('model catalog prices', () => {
       // Assert
       should(read?.rejected).deepEqual([]);
       should(read?.catalogs.anthropic?.claude?.models.every(model => model.price === undefined)).be.true();
+    });
+
+    it('should give a published catalog without prices the built-in prices, but never fill a machine file', () => {
+      // Arrange: a daemon holding a catalog published before prices existed, or a rollback to one.
+      const built = builtInModelCatalogs();
+      const { prices: _prices, ...older } = publishedDocument();
+      const published = readPublishedModelCatalog(older)?.catalogs ?? {};
+      const openai = published.openai as ModelCatalog;
+      const half = openai.codex as NonNullable<ModelCatalog['codex']>;
+      const repriced = {
+        ...openai,
+        codex: {
+          ...half,
+          models: half.models.map(model => (model.id === 'gpt-6-astra' ? { ...model, price: { ...price, input: 9 } } : model)),
+        },
+      };
+      const file = { ...(built.deepseek as ModelCatalog), origin: 'file' as const };
+      const unpricedFile = {
+        ...file,
+        codex: { ...(file.codex as NonNullable<ModelCatalog['codex']>), models: file.codex?.models.map(({ price: _p, ...model }) => model) ?? [] },
+      };
+
+      // Act
+      const effective = modelCatalogs({
+        builtIn: built,
+        published: { ...published, openai: repriced, custom: { ...repriced, id: 'custom' } },
+        files: { deepseek: unpricedFile },
+      });
+      const of = (catalog: string, id: string) => effective[catalog]?.codex?.models.find(model => model.id === id);
+
+      // Assert
+      should(effective.anthropic?.origin).equal('published');
+      should(effective.anthropic?.claude?.models.map(model => model.price)).deepEqual(
+        built.anthropic?.claude?.models.map(model => model.price),
+      );
+      should(of('openai', 'gpt-6-astra')?.price?.input).equal(9);
+      should(of('openai', 'gpt-6-luna')?.price).deepEqual(
+        built.openai?.codex?.models.find(model => model.id === 'gpt-6-luna')?.price,
+      );
+      should(of('custom', 'gpt-6-luna')?.price).be.undefined();
+      should(of('deepseek', 'deepseek-flash')?.price).be.undefined();
     });
 
     it('should leave out a price that does not check and keep its model, naming each refusal', () => {

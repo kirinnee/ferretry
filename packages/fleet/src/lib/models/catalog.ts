@@ -36,7 +36,7 @@ import type { Credential } from '../account/schema.ts';
 import { readConfigText } from '../config-files/yaml-text.ts';
 import type { HarnessKind } from '../manifest.ts';
 import type { ProviderPreset } from '../presets/schema.ts';
-import { type ModelCatalog, type ModelCatalogFile, ModelCatalogFileSchema } from './schema.ts';
+import { type CatalogHalf, type ModelCatalog, type ModelCatalogFile, ModelCatalogFileSchema } from './schema.ts';
 
 /** Every built-in catalog's text, by id. */
 export const BUILT_IN_MODEL_CATALOG_TEXTS: Readonly<Record<string, string>> = Object.freeze({
@@ -99,13 +99,40 @@ export function builtInModelCatalogs(): Readonly<Record<string, ModelCatalog>> {
   );
 }
 
+/**
+ * A published catalog with each model it leaves unpriced given the built-in catalog's price for the
+ * same model, when this build has one. A daemon holding a catalog published before prices existed — or
+ * a rollback to one — would otherwise price nothing that this build already knows the price of. A
+ * published price still wins; a machine's own file is never filled in (docs/model-catalog.md § Prices).
+ */
+function withBuiltInPrices(published: ModelCatalog, builtIn: ModelCatalog | undefined): ModelCatalog {
+  if (builtIn === undefined) return published;
+  const fill = (half: 'claude' | 'codex'): { readonly claude?: CatalogHalf; readonly codex?: CatalogHalf } => {
+    const listed = published[half];
+    if (listed === undefined) return {};
+    const models = listed.models.map(model => {
+      if (model.price !== undefined) return model;
+      const price = builtIn[half]?.models.find(candidate => candidate.id === model.id)?.price;
+      return price === undefined ? model : { ...model, price };
+    });
+    return { [half]: { ...listed, models } };
+  };
+  return { ...published, ...fill('claude'), ...fill('codex') };
+}
+
 /** The catalogs a machine reads: each id from the most owned source that has it (module doc). */
 export function modelCatalogs(sources: {
   readonly builtIn: Readonly<Record<string, ModelCatalog>>;
   readonly published?: Readonly<Record<string, ModelCatalog>>;
   readonly files?: Readonly<Record<string, ModelCatalog>>;
 }): Readonly<Record<string, ModelCatalog>> {
-  return { ...sources.builtIn, ...sources.published, ...sources.files };
+  const published = Object.fromEntries(
+    Object.entries(sources.published ?? {}).map(([id, catalog]) => [
+      id,
+      withBuiltInPrices(catalog, sources.builtIn[id]),
+    ]),
+  );
+  return { ...sources.builtIn, ...published, ...sources.files };
 }
 
 /** The plain value a catalog is written as: what `config/models/<id>.yaml` starts from. */
