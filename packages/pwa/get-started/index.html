@@ -7,7 +7,7 @@
     <title>Get started — Ferretry</title>
     <meta
       name="description"
-      content="Install Ferretry on your computer, start the daemon, and pair your phone in four steps."
+      content="Install Ferretry on your computer and run fy setup: it starts the daemon and pairs your phone."
     />
     <!-- A static page like the landing: no PWA bundle, no manifest. Every command
          below must also appear in INSTALLATION.md, which owns them — the
@@ -369,6 +369,15 @@
       .command pre code.continued::before {
         content: '  ';
       }
+      .command pre code.config::before {
+        content: none;
+      }
+      .intro code {
+        padding: 1px 5px;
+        background: var(--paper-shade);
+        color: var(--ink);
+        font-size: 0.8em;
+      }
       .agent {
         margin-top: 30px;
         padding-top: 26px;
@@ -586,13 +595,14 @@
       <section class="hero" aria-labelledby="title">
         <div class="frame">
           <p class="eyebrow">Get started</p>
-          <h1 id="title">Four steps to <span>your fleet</span></h1>
+          <h1 id="title">One command to <span>your fleet</span></h1>
           <p class="intro">
-            Set up a new computer: install Ferretry where Claude Code or Codex runs, start its daemon, and pair your
-            phone. About five minutes.
+            Install Ferretry where Claude Code or Codex runs, then run <code>fy setup</code>. It starts the daemon,
+            checks it, and shows a QR code for your phone.
           </p>
           <p class="note after">
-            Rather not type? <a class="jump" href="#agent">Let your agent set it up</a> with one prompt.
+            Rather have your agent do it? <a class="jump" href="#agent">Copy the prompt</a> — it hands you each command
+            to run.
           </p>
           <ul class="facts" aria-label="Before you start">
             <li>Latest release <strong>v%FY_RELEASE_VERSION%</strong></li>
@@ -607,83 +617,177 @@
           <div class="frame">
             <div class="step-copy">
               <p class="step-label">Step 01</p>
-              <h2 id="step-1-title">Install it on your computer.</h2>
+              <h2 id="step-1-title">Install it, then run setup.</h2>
               <p>
-                This installs the <code>fy</code> command and the <code>fyd</code> daemon. Pick your system — the tab
-                for this device is chosen for you.
+                Pick how you install software. The tab for this device is chosen for you. Each one ends with
+                <code>fy setup</code>, which starts the daemon as a user service, checks it, and offers the QR code for
+                your phone.
               </p>
+              <p>Safe to run again: it leaves a running daemon alone.</p>
             </div>
-            <div class="work" data-os-tabs>
-              <div class="tablist" role="tablist" aria-label="Your operating system" hidden>
-                <button class="tab" type="button" role="tab" id="tab-macos" aria-controls="panel-macos" data-os="macos">
-                  macOS
+            <div class="work" data-method-tabs>
+              <div class="tablist" role="tablist" aria-label="How you install software" hidden>
+                <button
+                  class="tab"
+                  type="button"
+                  role="tab"
+                  id="tab-brew"
+                  aria-controls="panel-brew"
+                  data-method="brew"
+                >
+                  Homebrew
                 </button>
-                <button class="tab" type="button" role="tab" id="tab-linux" aria-controls="panel-linux" data-os="linux">
-                  Linux
+                <button class="tab" type="button" role="tab" id="tab-nix" aria-controls="panel-nix" data-method="nix">
+                  Nix profile
                 </button>
-                <button class="tab" type="button" role="tab" id="tab-nix" aria-controls="panel-nix" data-os="nix">
-                  Nix
+                <button
+                  class="tab"
+                  type="button"
+                  role="tab"
+                  id="tab-home-manager"
+                  aria-controls="panel-home-manager"
+                  data-method="home-manager"
+                >
+                  Home Manager
+                </button>
+                <button
+                  class="tab"
+                  type="button"
+                  role="tab"
+                  id="tab-installer"
+                  aria-controls="panel-installer"
+                  data-method="installer"
+                >
+                  Installer
                 </button>
               </div>
-              <div class="panel" id="panel-macos" role="tabpanel" aria-labelledby="tab-macos" data-os="macos">
-                <h3 class="panel-title">macOS</h3>
-                <div class="command" data-agent-install>
-                  <header><span>Homebrew</span><button class="copy" type="button" hidden>Copy</button></header>
-                  <pre><code data-command>brew tap kirinnee/ferretry https://github.com/kirinnee/ferretry</code><code data-command>brew install --cask ferretry</code></pre>
+              <div class="panel" id="panel-brew" role="tabpanel" aria-labelledby="tab-brew" data-method="brew">
+                <h3 class="panel-title">Homebrew</h3>
+                <div class="command">
+                  <header><span>Homebrew · macOS</span><button class="copy" type="button" hidden>Copy</button></header>
+                  <pre><code data-command>brew tap kirinnee/ferretry https://github.com/kirinnee/ferretry</code><code data-command>brew install --cask ferretry</code><code data-command>fy setup</code></pre>
                 </div>
                 <p class="note">The cask clears macOS's quarantine flag for you, so the first run just works.</p>
               </div>
-              <div class="panel" id="panel-linux" role="tabpanel" aria-labelledby="tab-linux" data-os="linux">
-                <h3 class="panel-title">Linux</h3>
-                <div class="command" data-agent-install>
-                  <header><span>Debian / Ubuntu</span><button class="copy" type="button" hidden>Copy</button></header>
-                  <pre><code data-command>echo &quot;deb [trusted=yes] https://apt.fury.io/kirinnee97/ /&quot; | sudo tee /etc/apt/sources.list.d/fury.list</code><code data-command>sudo apt update</code><code data-command>sudo apt install fy</code></pre>
-                </div>
-                <div class="command" data-agent-install>
-                  <header><span>Fedora / RHEL</span><button class="copy" type="button" hidden>Copy</button></header>
-                  <pre><code data-command>sudo tee /etc/yum.repos.d/fury.repo &lt;&lt;&#39;EOF&#39;</code><code class="continued" data-command>[fury]</code><code class="continued" data-command>name=Gemfury kirinnee97</code><code class="continued" data-command>baseurl=https://yum.fury.io/kirinnee97/</code><code class="continued" data-command>enabled=1</code><code class="continued" data-command>gpgcheck=0</code><code class="continued" data-command>EOF</code><code data-command>sudo dnf install fy</code></pre>
-                </div>
-              </div>
-              <div class="panel" id="panel-nix" role="tabpanel" aria-labelledby="tab-nix" data-os="nix">
-                <h3 class="panel-title">Nix</h3>
-                <div class="command" data-agent-install>
-                  <header><span>Install</span><button class="copy" type="button" hidden>Copy</button></header>
-                  <pre><code data-command>nix profile install github:kirinnee/ferretry</code></pre>
-                </div>
+              <div class="panel" id="panel-nix" role="tabpanel" aria-labelledby="tab-nix" data-method="nix">
+                <h3 class="panel-title">Nix profile</h3>
                 <div class="command">
                   <header>
-                    <span>Or try it without installing</span><button class="copy" type="button" hidden>Copy</button>
+                    <span>Nix · macOS or Linux</span><button class="copy" type="button" hidden>Copy</button>
                   </header>
-                  <pre><code data-command>nix shell github:kirinnee/ferretry</code></pre>
+                  <pre><code data-command>nix profile install github:kirinnee/ferretry</code><code data-command>fy setup</code></pre>
+                </div>
+                <p class="note">Updates with <code>fy daemon update</code>, no config to edit.</p>
+              </div>
+              <div
+                class="panel"
+                id="panel-home-manager"
+                role="tabpanel"
+                aria-labelledby="tab-home-manager"
+                data-method="home-manager"
+              >
+                <h3 class="panel-title">Home Manager or nix-darwin</h3>
+                <div class="command">
+                  <header><span>Add to your flake</span><button class="copy" type="button" hidden>Copy</button></header>
+                  <pre><code class="config" data-command>inputs.ferretry.url = &quot;github:kirinnee/ferretry&quot;;</code><code class="config" data-command>home.packages = [ inputs.ferretry.packages.${pkgs.stdenv.hostPlatform.system}.default ];</code></pre>
+                </div>
+                <div class="command">
+                  <header><span>Then rebuild</span><button class="copy" type="button" hidden>Copy</button></header>
+                  <pre><code data-command>home-manager switch --flake .</code><code data-command>fy setup</code></pre>
                 </div>
                 <p class="note">
-                  Works on macOS and Linux. The daemon pins its own Nix store path, so garbage collection cannot remove
-                  it.
+                  On nix-darwin, rebuild with <code>darwin-rebuild switch --flake .</code> instead. Updating means
+                  bumping the flake input, because your config owns the version.
                 </p>
               </div>
-              <div class="command any">
-                <header>
-                  <span>Any Mac or Linux: one-line installer</span
-                  ><button class="copy" type="button" hidden>Copy</button>
-                </header>
-                <pre><code data-command>curl -fsSL --connect-timeout 30 --max-time 600 https://github.com/kirinnee/ferretry/releases/latest/download/install.sh | bash</code></pre>
+              <div
+                class="panel"
+                id="panel-installer"
+                role="tabpanel"
+                aria-labelledby="tab-installer"
+                data-method="installer"
+              >
+                <h3 class="panel-title">Installer</h3>
+                <div class="command">
+                  <header><span>Any Mac or Linux</span><button class="copy" type="button" hidden>Copy</button></header>
+                  <pre><code data-command>curl -fsSL --connect-timeout 30 --max-time 600 https://github.com/kirinnee/ferretry/releases/latest/download/install.sh | bash</code><code data-command>PATH=&quot;$HOME/.local/bin:$PATH&quot; fy setup</code></pre>
+                </div>
+                <p class="note">
+                  It checks the download and puts both programs in <code>~/.local/bin</code>; add that to your
+                  <code>PATH</code>.
+                </p>
               </div>
               <p class="note after">
-                It checks the download and puts both programs in <code>~/.local/bin</code>. Every option is in
-                <a href="https://github.com/kirinnee/ferretry/blob/main/INSTALLATION.md">INSTALLATION.md</a>.
+                Debian, Ubuntu or Fedora package? Every option is in
+                <a href="https://github.com/kirinnee/ferretry/blob/main/INSTALLATION.md">INSTALLATION.md</a>; run
+                <code>fy setup</code> after any of them.
               </p>
-              <section class="agent" id="agent" aria-labelledby="agent-title" hidden>
-                <h3 id="agent-title">Or let your agent set it up.</h3>
+              <section class="agent" id="agent" aria-labelledby="agent-title">
+                <h3 id="agent-title">Or let your agent do it.</h3>
                 <p class="note">
-                  Paste this into Claude Code or Codex, in a terminal on the machine you want to use. It follows the tab
-                  you picked (<strong data-agent-os></strong>), runs steps 1 to 3 for you, and stops so you can scan.
+                  Paste this into Claude Code or Codex on the computer you want to use. It looks around, recommends one
+                  way to install, and hands you each command to run. It never installs anything itself, so its safety
+                  checks never get in the way.
                 </p>
                 <div class="command prompt">
                   <header>
-                    <span>Prompt for <span data-agent-os></span></span
-                    ><button class="copy" type="button" hidden>Copy</button>
+                    <span>Prompt for Claude Code or Codex</span><button class="copy" type="button" hidden>Copy</button>
                   </header>
-                  <pre tabindex="0" aria-label="Prompt text"><code data-agent-prompt></code></pre>
+                  <pre
+                    tabindex="0"
+                    aria-label="Prompt text"
+                  ><code data-agent-prompt>Help me set up Ferretry on this computer. Follow these rules exactly.
+
+How to talk to me
+- Whenever I need to do something, reply in exactly this shape, then stop and wait:
+  **Run this**
+  ```bash
+  &lt;the exact command(s), nothing else&gt;
+  ```
+  **Why:** &lt;one short line&gt;
+  **What you'll see:** &lt;one short line&gt;
+- One action at a time. No paragraphs, no repeated caveats.
+- Report what you find in 3 to 5 short lines, then your recommendation.
+
+What you may run
+- Only read-only checks and the fy commands named below. I run every install, update, sudo or service command myself.
+- Claude Code: tell me to type the command after a ! in this chat. Codex: tell me to run it in my own terminal, and hand me any check your sandbox blocks.
+- Anything that needs sudo goes in my own terminal.
+- If a command is blocked or fails, tell me the error in one line and stop. Never retry it or look for a way around it.
+- Never print, save or ask for a token, a secret or a pairing code.
+
+1. Look around (read-only; an error just means "not there"):
+   uname -sm
+   command -v brew nix fy home-manager darwin-rebuild
+   fy setup --check --json
+   If that says "ready": true, go to step 3. Otherwise recommend ONE way to install with a one-line reason, list the others one line each, and let me choose:
+   - Homebrew, if brew is there: easiest updates.
+   - Home Manager or nix-darwin, if I use one: it lives in my config.
+   - nix profile, if nix is there: one command, no config.
+   - Installer, otherwise: one line, nothing else needed.
+
+2. Hand me ONE "Run this" for my choice.
+   Homebrew:
+     brew tap kirinnee/ferretry https://github.com/kirinnee/ferretry
+     brew install --cask ferretry
+     fy setup --yes
+   nix profile:
+     nix profile install github:kirinnee/ferretry
+     fy setup --yes
+   Home Manager or nix-darwin: first show me where these two lines go in my flake.
+   Then hand me the rebuild (home-manager switch --flake . or darwin-rebuild switch --flake .) and fy setup --yes:
+     inputs.ferretry.url = "github:kirinnee/ferretry";
+     home.packages = [ inputs.ferretry.packages.${pkgs.stdenv.hostPlatform.system}.default ];
+   Installer:
+     curl -fsSL --connect-timeout 30 --max-time 600 https://github.com/kirinnee/ferretry/releases/latest/download/install.sh | bash
+     PATH="$HOME/.local/bin:$PATH" fy setup --yes
+
+3. Check: run fy setup --check --json. Until "ready" is true, hand me the first entry of "next" as a "Run this". Then tell me it is done in one line.
+
+4. Pair my phone: hand me fy pair as a "Run this" for my own terminal, not this chat, so the code never reaches you. What I'll see: a QR code to scan with my phone's camera within two minutes.
+
+5. Stop. Afterwards, only when I ask: fy daemon status, fy credentials, fy runtimes, fy import conversations, and fy daemon setup (it asks questions, so I run it in my own terminal).
+   To update later: fy daemon update, or the Update button in the app.</code></pre>
                 </div>
               </section>
             </div>
@@ -694,28 +798,10 @@
           <div class="frame">
             <div class="step-copy">
               <p class="step-label">Step 02</p>
-              <h2 id="step-2-title">Start the daemon.</h2>
+              <h2 id="step-2-title">Pair your phone.</h2>
               <p>
-                The daemon is the part that runs your sessions. This installs it as a user service (launchd on macOS,
-                systemd on Linux), starts it, and brings it back after a restart.
-              </p>
-            </div>
-            <div class="work">
-              <div class="command">
-                <header><span>On your computer</span><button class="copy" type="button" hidden>Copy</button></header>
-                <pre><code data-key="daemon-install" data-command>fy daemon install</code></pre>
-              </div>
-            </div>
-          </div>
-        </li>
-
-        <li class="step">
-          <div class="frame">
-            <div class="step-copy">
-              <p class="step-label">Step 03</p>
-              <h2 id="step-3-title">Pair your phone.</h2>
-              <p>
-                Run this, then scan the QR code with your phone's camera. The code lasts two minutes and works once.
+                <code>fy setup</code> offers this at the end. To pair later, or another phone, run this and scan the QR
+                code with your phone's camera. The code lasts two minutes and works once.
               </p>
               <p>
                 Your phone does not need to be on the same network. When it cannot reach the computer directly, it
@@ -725,24 +811,25 @@
             <div class="work">
               <div class="command">
                 <header><span>On your computer</span><button class="copy" type="button" hidden>Copy</button></header>
-                <pre><code data-key="pair" data-command>fy pair</code></pre>
+                <pre><code data-command>fy pair</code></pre>
               </div>
               <details class="more">
-                <summary>Pairing from a script or an agent</summary>
+                <summary>Pairing over SSH, or at this computer</summary>
                 <p class="note">
+                  Run these in your own terminal, never through an agent: the code is a live key to this computer.
                   <code>fy pair</code> waits up to two minutes for the scan. Add <code>--no-wait</code> to print the QR
                   code and link and exit instead; add <code>--open</code> too when you are sitting at this computer, to
                   hand the link to its browser.
                 </p>
                 <div class="command">
                   <header><span>At this computer</span><button class="copy" type="button" hidden>Copy</button></header>
-                  <pre><code data-key="pair-open" data-command>fy pair --open --no-wait</code></pre>
+                  <pre><code data-command>fy pair --open --no-wait</code></pre>
                 </div>
                 <div class="command">
                   <header>
                     <span>Over SSH or from a script</span><button class="copy" type="button" hidden>Copy</button>
                   </header>
-                  <pre><code data-key="pair-print" data-command>fy pair --no-wait</code></pre>
+                  <pre><code data-command>fy pair --no-wait</code></pre>
                 </div>
               </details>
               <p class="note after">
@@ -755,8 +842,8 @@
         <li class="step">
           <div class="frame">
             <div class="step-copy">
-              <p class="step-label">Step 04</p>
-              <h2 id="step-4-title">Finish setup in the app.</h2>
+              <p class="step-label">Step 03</p>
+              <h2 id="step-3-title">Finish setup in the app.</h2>
               <p>
                 Once your phone is paired, the app opens setup by itself. Every step can be skipped and changed later in
                 Settings.
@@ -780,11 +867,19 @@
           <h2 id="trouble-title">If something is off.</h2>
           <ul class="trouble-list">
             <li>
+              <h3>Check everything.</h3>
+              <p>Daemon, version, updates and the relay, changing nothing.</p>
+              <div class="command">
+                <header><span>Check</span><button class="copy" type="button" hidden>Copy</button></header>
+                <pre><code data-command>fy setup --check</code></pre>
+              </div>
+            </li>
+            <li>
               <h3>Is the daemon running?</h3>
               <p>Says whether it is serving, and what started it.</p>
               <div class="command">
                 <header><span>Status</span><button class="copy" type="button" hidden>Copy</button></header>
-                <pre><code data-key="daemon-status" data-command>fy daemon status</code></pre>
+                <pre><code data-command>fy daemon status</code></pre>
               </div>
             </li>
             <li>
@@ -792,7 +887,7 @@
               <p>Prints the daemon's log.</p>
               <div class="command">
                 <header><span>Logs</span><button class="copy" type="button" hidden>Copy</button></header>
-                <pre><code data-key="daemon-logs" data-command>fy daemon logs</code></pre>
+                <pre><code data-command>fy daemon logs</code></pre>
               </div>
             </li>
             <li>
@@ -827,7 +922,7 @@
             <h2 id="finish-title">Already set up?</h2>
             <p>
               Open the app and go to your machines. This guide is only for a computer that has no Ferretry yet: to add
-              another one, run steps 1 to 3 on it.
+              another one, run step 1 on it.
             </p>
           </div>
           <a class="button" href="/app">Open the app</a>
@@ -845,116 +940,54 @@
       !(function () {
         var root = document.documentElement;
         root.className = 'js';
-        var group = document.querySelector('[data-os-tabs]');
+        var group = document.querySelector('[data-method-tabs]');
         var tabs = Array.prototype.slice.call(group.querySelectorAll('[role="tab"]'));
         var panels = Array.prototype.slice.call(group.querySelectorAll('[role="tabpanel"]'));
         var ua = (navigator.userAgent || '') + ' ' + (navigator.platform || '');
-        var guess = /Linux|X11|CrOS|Android/.test(ua) && !/Mac/.test(ua) ? 'linux' : 'macos';
-        tabs.forEach(function (tab, index) {
-          tab.addEventListener('click', function () {
-            select(tab.getAttribute('data-os'), false);
-          });
-          tab.addEventListener('keydown', function (event) {
-            var next = { ArrowRight: index + 1, ArrowLeft: index - 1, Home: 0, End: tabs.length - 1 }[event.key];
-            if (next === undefined) return;
-            event.preventDefault();
-            select(tabs[(next + tabs.length) % tabs.length].getAttribute('data-os'), true);
-          });
-        });
-        group.querySelector('[role="tablist"]').hidden = false;
-
-        /* THE AGENT PROMPT IS BUILT FROM THE COMMANDS ON THIS PAGE, never retyped: the install lines come from
-           the selected tab's blocks, the rest from the keyed lines in steps 2 and 3 and in Troubleshooting. A
-           command that changes in INSTALLATION.md and here changes in the prompt with it. */
-        var agent = document.querySelector('.agent');
-        var promptCode = agent.querySelector('[data-agent-prompt]');
-        var osNames = { macos: 'macOS', linux: 'Linux', nix: 'Nix' };
-        function lines(scope) {
-          return Array.prototype.map
-            .call(scope.querySelectorAll('[data-command]'), function (line) {
-              return line.textContent;
-            })
-            .join('\n');
-        }
-        function key(name) {
-          return document.querySelector('[data-key="' + name + '"]').textContent;
-        }
-        function agentPrompt(os) {
-          var fence = '```';
-          var blocks = Array.prototype.slice.call(
-            group.querySelector('[role="tabpanel"][data-os="' + os + '"]').querySelectorAll('[data-agent-install]'),
-          );
-          var install = blocks
-            .map(function (block) {
-              var label = block.querySelector('header span').textContent;
-              return (blocks.length > 1 ? label + ':\n' : '') + fence + 'bash\n' + lines(block) + '\n' + fence;
-            })
-            .join('\n\n');
-          var which =
-            os === 'linux'
-              ? 'Install Ferretry. Use the block for this distribution (apt on Debian or Ubuntu, dnf on Fedora or RHEL):'
-              : 'Install Ferretry (' + osNames[os] + '):';
-          return [
-            'Set up Ferretry on this computer with the commands below, then stop so I can pair my phone.',
-            '',
-            'Rules:',
-            '- Ask me before you run anything that needs sudo.',
-            '- Never print, paste or save a secret, token or the pairing code anywhere but this terminal.',
-            '- Run only the commands listed here. If one fails, show me its error and stop.',
-            '',
-            '1. ' + which,
-            install,
-            '',
-            '2. Start the daemon: ' + key('daemon-install'),
-            '',
-            '3. Check it: ' + key('daemon-status'),
-            '   Success: it says the daemon is serving. If it does not, run ' +
-              key('daemon-logs') +
-              ', tell me what it says, and stop.',
-            '',
-            '4. Pair my phone. If I am sitting at this computer, run ' +
-              key('pair-open') +
-              '; otherwise (SSH, a server) run ' +
-              key('pair-print') +
-              '.',
-            '   Either one prints a QR code and a link, then exits.',
-            '',
-            '5. Stop here. Tell me to scan the QR code with my phone camera within two minutes (the code works once). If the QR is hard to read, tell me to run ' +
-              key('pair') +
-              ' in my own terminal. Do nothing else.',
-          ].join('\n');
-        }
-        function select(os, focus) {
+        var guess = /Linux|X11|CrOS|Android/.test(ua) && !/Mac/.test(ua) ? 'installer' : 'brew';
+        function select(method, focus) {
           tabs.forEach(function (tab) {
-            var on = tab.getAttribute('data-os') === os;
+            var on = tab.getAttribute('data-method') === method;
             tab.setAttribute('aria-selected', on ? 'true' : 'false');
             tab.tabIndex = on ? 0 : -1;
             if (on && focus) tab.focus();
           });
           panels.forEach(function (panel) {
-            panel.hidden = panel.getAttribute('data-os') !== os;
-          });
-          promptCode.textContent = agentPrompt(os);
-          Array.prototype.forEach.call(agent.querySelectorAll('[data-agent-os]'), function (name) {
-            name.textContent = osNames[os];
+            panel.hidden = panel.getAttribute('data-method') !== method;
           });
         }
-        agent.hidden = false;
+        tabs.forEach(function (tab, index) {
+          tab.addEventListener('click', function () {
+            select(tab.getAttribute('data-method'), false);
+          });
+          tab.addEventListener('keydown', function (event) {
+            var next = { ArrowRight: index + 1, ArrowLeft: index - 1, Home: 0, End: tabs.length - 1 }[event.key];
+            if (next === undefined) return;
+            event.preventDefault();
+            select(tabs[(next + tabs.length) % tabs.length].getAttribute('data-method'), true);
+          });
+        });
+        group.querySelector('[role="tablist"]').hidden = false;
         select(guess, false);
 
+        /* The agent prompt is static text, the same for every tab: the agent looks at this computer and
+           recommends a method itself. tests/fixtures/agent-setup-prompt.txt is its golden copy. */
         var status = document.querySelector('[data-copy-status]');
         Array.prototype.slice.call(document.querySelectorAll('.command')).forEach(function (block) {
           var button = block.querySelector('.copy');
           var prompt = block.querySelector('[data-agent-prompt]');
-          function current() {
-            return prompt ? prompt.textContent : lines(block);
-          }
+          var text = prompt
+            ? prompt.textContent
+            : Array.prototype.map
+                .call(block.querySelectorAll('[data-command]'), function (line) {
+                  return line.textContent;
+                })
+                .join('\n');
           if (!navigator.clipboard) return;
           button.hidden = false;
-          if (!prompt) button.setAttribute('aria-label', 'Copy: ' + current());
-          else button.setAttribute('aria-label', 'Copy the prompt for your agent');
+          button.setAttribute('aria-label', prompt ? 'Copy the prompt for your agent' : 'Copy: ' + text);
           button.addEventListener('click', function () {
-            navigator.clipboard.writeText(current()).then(
+            navigator.clipboard.writeText(text).then(
               function () {
                 button.textContent = 'Copied';
                 status.textContent = 'Copied to the clipboard.';

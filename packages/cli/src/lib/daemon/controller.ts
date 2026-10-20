@@ -34,6 +34,7 @@ import {
   type ShutdownPolicy,
 } from './readiness.ts';
 import {
+  type DaemonStatusView,
   decideDaemonStatus,
   megabytes,
   renderDaemonStatus,
@@ -160,6 +161,16 @@ export interface DaemonControllerDeps {
   readonly updateStatus?: IDaemonUpdateStatusReader;
   /** Offers a nix profile install when `install` finds a daemon running from a `nix shell`. */
   readonly nixShellOffer?: INixShellOffer;
+}
+
+/** Everything `status` concluded, unrendered. See `DaemonController.inspect`. */
+export interface DaemonInspection {
+  readonly view: DaemonStatusView;
+  /** The installed daemon, or why this host has none. */
+  readonly located: InstalledDaemonBinary | { readonly reason: string };
+  readonly update: DaemonUpdateStatus | undefined;
+  /** Whether this platform has a service manager `install` can write a definition for. */
+  readonly serviceManager: boolean;
 }
 
 /** Reading what `status` says about installing and updating. Satisfied by `DaemonUpdateStatusReader`. */
@@ -521,14 +532,25 @@ export class DaemonController {
     if (answer.trim() !== RESET_CONFIRMATION_WORD) throw new DaemonResetRefusedError('reset cancelled');
   }
 
-  async status(options: DaemonCommandOptions): Promise<void> {
+  /**
+   * What `status` reads, before it is rendered: for a caller that decides from the facts rather than
+   * printing them — `fy setup` asks this to choose between install, start and nothing at all.
+   */
+  async inspect(): Promise<DaemonInspection> {
     const owner = await this.#owner();
     const health = await this.deps.health.probe();
     const supervisor = await owner.inspect(this.#handleFor(health));
     const view = decideDaemonStatus(this.#name, supervisor, health);
-    const code = statusExitCode(view);
     const located = this.#locateDaemon();
     const update = await this.deps.updateStatus?.read('reason' in located ? undefined : located, health !== undefined);
+    return { view, located, update, serviceManager: this.deps.service !== undefined };
+  }
+
+  async status(options: DaemonCommandOptions): Promise<void> {
+    const { view, update } = await this.inspect();
+    const health = view.health;
+    const supervisor = view.supervisor;
+    const code = statusExitCode(view);
     const human = [
       renderDaemonStatus(view),
       ...(update === undefined ? [] : renderUpdateStatus(update, this.deps.clientName)),

@@ -12,6 +12,84 @@ macOS arm64 (no Intel mac).
 > xattr -d com.apple.quarantine "$(command -v fy)"
 > ```
 
+## Quick start
+
+Install with the method you already use, then run `fy setup`. It installs the daemon as a user
+service (launchd on macOS, systemd on Linux), checks its health, version, updates and relay, and ends
+by offering the QR code for your phone. It is safe to run again: a daemon already running under its
+service manager is left alone.
+
+Homebrew (macOS):
+
+```bash
+brew tap kirinnee/ferretry https://github.com/kirinnee/ferretry
+brew install --cask ferretry
+fy setup
+```
+
+nix profile (macOS or Linux):
+
+```bash
+nix profile install github:kirinnee/ferretry
+fy setup
+```
+
+Home Manager or nix-darwin: add the flake input and the package to your configuration (pass `inputs`
+to Home Manager through `extraSpecialArgs` if you have not already), then rebuild:
+
+```nix
+inputs.ferretry.url = "github:kirinnee/ferretry";
+home.packages = [ inputs.ferretry.packages.${pkgs.stdenv.hostPlatform.system}.default ];
+```
+
+```bash
+home-manager switch --flake .
+fy setup
+```
+
+On nix-darwin, rebuild with this instead (it asks for your password):
+
+```bash
+darwin-rebuild switch --flake .
+```
+
+The one-line installer (any Mac or Linux) puts both programs in `~/.local/bin`:
+
+```bash
+curl -fsSL --connect-timeout 30 --max-time 600 https://github.com/kirinnee/ferretry/releases/latest/download/install.sh | bash
+PATH="$HOME/.local/bin:$PATH" fy setup
+```
+
+### What `fy setup` does
+
+| Flag      | Effect                                                                             |
+| --------- | ---------------------------------------------------------------------------------- |
+| (none)    | Asks before installing the daemon, then offers the pairing QR at the end.          |
+| `--yes`   | Installs without asking. Required when there is no terminal. Shows no QR.          |
+| `--check` | Changes nothing: reports what is there and what setup would do.                    |
+| `--json`  | Prints a summary an agent can read (`ready`, `daemon`, `update`, `relay`, `next`). |
+
+Exit status: `0` ready, `1` not running, `2` waiting for you (no terminal and no `--yes`, or you said
+no). It never updates or restarts a running daemon; it names `fy daemon update` when a release is
+out. The JSON has no field for a pairing code or a token: pairing is always `fy pair`, run by a
+person in their own terminal.
+
+```bash
+fy setup --check
+fy setup --yes
+PATH="$HOME/.local/bin:$PATH" fy setup --yes
+```
+
+### Setting up with an agent
+
+The [Get started](https://ferretry.pages.dev/get-started) page has a prompt for Claude Code or Codex.
+The agent only **looks** (`uname -sm`, `command -v …`, `fy setup --check --json`), recommends one
+install method, and hands **you** each command to run — in Claude Code by typing it after `!` in the
+chat, in Codex in your own terminal. It never installs, updates or uses `sudo` itself, so Claude
+Code's auto-mode safety checks and Codex's sandbox never block it halfway: those checks exist to stop
+an agent changing your system on its own, and here it does not. Pairing (`fy pair`) always runs in
+your own terminal so the code never reaches the agent.
+
 ## Debian / Ubuntu (apt)
 
 Releases push `.deb` packages to the `kirinnee97` Gemfury repository:
@@ -214,11 +292,13 @@ A few commands take you from a fresh install to a phone watching an agent work. 
 1. **Start the daemon.**
 
    ```bash
-   fy daemon install
+   fy setup
    ```
 
    This installs a user service (launchd on macOS, systemd on Linux), starts the daemon under it, and
-   brings it back after a restart. `fy daemon start` runs it once without a service instead.
+   brings it back after a restart, then checks it (see [What `fy setup` does](#what-fy-setup-does)).
+   It runs `fy daemon install` for you; `fy daemon start` runs the daemon once without a service
+   instead.
 
    Starting the daemon sets nothing up by itself. A new machine is **not set up** until you choose
    what to bring in. `fy doctor` checks what else the

@@ -44,6 +44,18 @@ describe(`cli (SIT, ${useInProcess ? 'in-process' : 'compiled binary'})`, () => 
     should(actual.out).containEql(binaryName);
   });
 
+  it('lists setup as the one command after installing, with its flags', async () => {
+    // Act
+    const top = await cli(['--help']);
+    const setup = await cli(['setup', '--help']);
+
+    // Assert
+    should(top.out).match(/\n {2}setup \[options\] +finish installing/);
+    should(setup.code).equal(0);
+    for (const flag of ['--yes', '--json', '--check']) should(setup.out).containEql(flag);
+    should(setup.out).containEql('Exit status: 0 ready, 1 not running, 2 waiting for you');
+  });
+
   it('rejects an unexpected argument with a non-zero exit', async () => {
     // Act
     const actual = await cli(['bogus']);

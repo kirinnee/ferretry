@@ -117,6 +117,9 @@ import { LessonController } from '../src/lib/lesson/controller';
 import { McpServer, registerMcpCommands } from '../src/lib/mcp';
 import { registerMigrationCommands } from '../src/lib/migration/commands';
 import { MigrationController } from '../src/lib/migration/controller';
+import { registerOnboardCommands } from '../src/lib/onboard/commands';
+import { OnboardController } from '../src/lib/onboard/controller';
+import { ProtocolOnboardRelay } from '../src/lib/onboard/relay';
 import { registerPairCommands } from '../src/lib/pair/commands';
 import { PairController } from '../src/lib/pair/controller';
 import { ProtocolPairingGateway } from '../src/lib/pair/gateway';
@@ -641,6 +644,38 @@ function buildDaemonController(world: CliWorld, client: SharedDaemonClient): Dae
   });
 }
 
+/** `fy pair`, and the QR `fy setup` offers at a terminal: one construction, so the two cannot differ. */
+function buildPairController(world: CliWorld, client: SharedDaemonClient): PairController {
+  return new PairController({
+    gateway: new ProtocolPairingGateway(client),
+    screen: new PlainScreen(),
+    progress: world.spinner,
+    exit: world.io,
+    clock: new SystemMillisecondClock(),
+    qr: new QrCodeTerminal(),
+    terminal: new ProcessTerminalSize(),
+    browser: desktopBrowserOpener(),
+    binaryName: BINARY_NAME,
+  });
+}
+
+/**
+ * The same terminal with every progress line on stderr, for a command whose stdout is JSON. `fy setup
+ * --json` drives verbs that report as they go, and their lines must not corrupt the one object an
+ * agent parses.
+ */
+function stderrOnly(io: ICliIo): ICliIo {
+  return {
+    success: message => io.diagnostic(message),
+    report: message => io.diagnostic(message),
+    warn: message => io.diagnostic(message),
+    error: message => io.error(message),
+    diagnostic: message => io.diagnostic(message),
+    setExitCode: code => io.setExitCode(code),
+    interactive: () => io.interactive(),
+  };
+}
+
 /**
  * Builds the state-home adopt controller.
  *
@@ -938,21 +973,7 @@ const DOMAIN_REGISTRARS: ReadonlyArray<(wiring: DomainWiring) => void> = [
     ),
   // Pairing writes its screen through its own uncoloured writer rather than `world.io`: the screen is
   // mostly a QR, and tinting the one image the onboarding depends on is a risk with nothing to gain.
-  ({ program, world, client }) =>
-    registerPairCommands(
-      program,
-      new PairController({
-        gateway: new ProtocolPairingGateway(client),
-        screen: new PlainScreen(),
-        progress: world.spinner,
-        exit: world.io,
-        clock: new SystemMillisecondClock(),
-        qr: new QrCodeTerminal(),
-        terminal: new ProcessTerminalSize(),
-        browser: desktopBrowserOpener(),
-        binaryName: BINARY_NAME,
-      }),
-    ),
+  ({ program, world, client }) => registerPairCommands(program, buildPairController(world, client)),
   // The owner's passkey recovery verb. It dials the daemon with the host's admin credential, which is the
   // one caller the daemon treats as "at the machine" — no other credential could be answered.
   ({ program, world, client }) =>
@@ -998,6 +1019,32 @@ const DOMAIN_REGISTRARS: ReadonlyArray<(wiring: DomainWiring) => void> = [
   },
   // `fy models list` and `fy models refresh` (docs/model-catalog.md): the catalogs the daemon reads.
   ({ program, world, client }) => registerModelsCommands(program, new ModelsController(client, world.io)),
+  // `fy setup`: the one command after installing. It drives the daemon verbs above, then offers the
+  // pairing QR only to a person at a terminal — `--json` and `--yes` name `fy pair` instead.
+  ({ program, world, client }) =>
+    registerOnboardCommands(
+      program,
+      () =>
+        new OnboardController({
+          daemon: quiet => buildDaemonController(quiet ? { ...world, io: stderrOnly(world.io) } : world, client),
+          relay: new ProtocolOnboardRelay(client),
+          machine: {
+            setUp: async () => {
+              try {
+                return (await new ProtocolAccountGateway(client).machine()).setUp;
+              } catch {
+                return undefined;
+              }
+            },
+          },
+          pairing: { pair: () => buildPairController(world, client).pair({}) },
+          prompt: world.prompt,
+          out: world.io,
+          interactive: () => world.io.interactive(),
+          clientName: BINARY_NAME,
+          clientVersion: pkg.version,
+        }),
+    ),
 ];
 
 /**
