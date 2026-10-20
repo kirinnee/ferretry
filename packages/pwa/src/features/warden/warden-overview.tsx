@@ -309,7 +309,7 @@ function NeedsYouBody({
     return <p className="m-0 px-cell-x py-row-y text-meta text-muted">Checking who needs you…</p>;
   if (attention.status === 'error')
     return (
-      <div role="alert" className="border-l-2 border-err px-cell-x py-row-y">
+      <div role="alert" className="border-l-heavy border-err px-cell-x py-row-y">
         <p className="m-0 text-row font-semibold text-err">Can’t say who needs you</p>
         <p className="m-0 mt-xs text-meta leading-base text-muted">
           {attention.reason}. Treat this as unknown, not as all clear.

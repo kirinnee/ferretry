@@ -62,7 +62,9 @@ export function QrSymbol({ matrix, label, className }: QrSymbolProps) {
       shapeRendering="crispEdges"
       className={className}
     >
+      {/* theme-literal-ok: a QR code must stay dark-on-light to scan, in every theme */}
       <rect width={span} height={span} fill="#ffffff" />
+      {/* theme-literal-ok: a QR code must stay dark-on-light to scan, in every theme */}
       <path d={path} fill="#000000" />
     </svg>
   );

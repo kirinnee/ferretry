@@ -180,8 +180,8 @@
    contrast the label would have, and the busy button is not dimmed like a disabled one — it is busy,
    not unavailable. */
 .fy-spinner--on-accent {
-  --spinner-arc: var(--accent-fg, #fff);
-  --spinner-track: color-mix(in srgb, var(--accent-fg, #fff) 30%, transparent);
+  --spinner-arc: var(--accent-fg);
+  --spinner-track: color-mix(in srgb, var(--accent-fg) 30%, transparent);
   --spinner-glow: none;
 }
 .fy-composer-send[data-sending]:disabled {

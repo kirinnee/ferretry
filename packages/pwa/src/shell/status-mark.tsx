@@ -190,7 +190,9 @@ const TONE_FILL: Record<StatusTone, string> = {
 const SHAPE_CLASS: Record<StatusShape, string> = {
   circle: 'rounded-full',
   // A rotated square reads as a diamond at 8px where an SVG path would not.
+  // theme-literal-ok: the 1px corner is part of the mark's shape, a non-colour signal that must not follow the theme
   diamond: 'rotate-45 rounded-[1px]',
+  // theme-literal-ok: a 1px corner is part of the square mark's shape, a non-colour signal that must not follow the theme
   square: 'rounded-[1px]',
 };
 

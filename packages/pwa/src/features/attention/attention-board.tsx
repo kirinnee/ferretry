@@ -417,7 +417,7 @@ function ResolutionAudit({ items }: { readonly items: readonly ResolvedAttention
               <li
                 key={`${item.id}:${item.resolvedAt}`}
                 className={cn(
-                  'min-w-0 border-l-2 pl-sm text-meta leading-base',
+                  'min-w-0 border-l-heavy pl-sm text-meta leading-base',
                   item.resolvedBy === 'agent' ? 'border-warn/60' : 'border-border-soft',
                 )}
               >

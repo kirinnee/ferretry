@@ -389,7 +389,7 @@ function LessonTabs({
             onClick={() => onSelect(entry.state)}
             onKeyDown={event => onKeyDown(event, index)}
             className={cn(
-              '-mb-px flex min-h-[44px] shrink-0 items-center gap-1.5 border-b-2 px-3 text-ui',
+              '-mb-px flex min-h-[44px] shrink-0 items-center gap-1.5 border-b-heavy px-3 text-ui',
               selected ? 'border-accent font-semibold text-fg' : 'border-transparent text-muted hover:text-fg',
             )}
           >

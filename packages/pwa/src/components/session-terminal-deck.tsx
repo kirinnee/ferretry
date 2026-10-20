@@ -219,18 +219,19 @@ const ownershipOf = (terminal: TerminalView | null): SurfaceOwnership => termina
 /** The theme, read from the live tokens so a theme switch repaints the pane. */
 function terminalTheme(): import('@xterm/xterm').ITheme {
   const style = getComputedStyle(document.documentElement);
-  const token = (name: string, fallback: string): string => style.getPropertyValue(name).trim() || fallback;
+  // An unset token yields `undefined`, which leaves xterm's own default in place rather than a literal here.
+  const token = (name: string): string | undefined => style.getPropertyValue(name).trim() || undefined;
   return {
-    background: token('--code-bg', '#111'),
-    foreground: token('--code-fg', '#eee'),
-    cursor: token('--accent', '#fff'),
-    cursorAccent: token('--code-bg', '#111'),
-    selectionBackground: token('--accent-soft', '#555'),
-    selectionForeground: token('--fg', '#fff'),
-    black: token('--fg', '#111'),
-    brightBlack: token('--muted', '#777'),
-    white: token('--surface-3', '#ddd'),
-    brightWhite: token('--fg', '#fff'),
+    background: token('--code-bg'),
+    foreground: token('--code-fg'),
+    cursor: token('--accent'),
+    cursorAccent: token('--code-bg'),
+    selectionBackground: token('--accent-soft'),
+    selectionForeground: token('--fg'),
+    black: token('--fg'),
+    brightBlack: token('--muted'),
+    white: token('--surface-3'),
+    brightWhite: token('--fg'),
   };
 }
 

@@ -83,11 +83,12 @@ function HandoffQr({ url, label }: { readonly url: string; readonly label: strin
       className="shrink-0 rounded-control"
       data-onboarding-qr=""
     >
+      {/* theme-literal-ok: a QR code must stay dark-on-light to scan, in every theme */}
       <rect x="0" y="0" width={span} height={span} fill="#ffffff" />
       {modules.map((row, y) =>
         row.map((dark, x) =>
           dark ? (
-            // biome-ignore lint/suspicious/noArrayIndexKey: a QR module IS its coordinate
+            // biome-ignore lint/suspicious/noArrayIndexKey: a QR module IS its coordinate; theme-literal-ok: a QR code must stay dark-on-light to scan, in every theme
             <rect key={`${y}-${x}`} x={x + quiet} y={y + quiet} width={1} height={1} fill="#000000" />
           ) : null,
         ),

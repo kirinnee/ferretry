@@ -109,7 +109,7 @@
   width: 7px;
   height: 7px;
   flex: 0 0 auto;
-  border: 1px solid color-mix(in srgb, var(--muted) 60%, transparent);
+  border: var(--stroke) solid color-mix(in srgb, var(--muted) 60%, transparent);
   border-radius: 50%;
   background: var(--surface-3);
 }
@@ -117,7 +117,7 @@
 .kt-webterm__lamp[data-state='live'] {
   border-color: var(--ok);
   background: var(--ok);
-  box-shadow: 0 0 0 2px color-mix(in srgb, var(--ok) 16%, transparent);
+  box-shadow: 0 0 0 var(--stroke-heavy) color-mix(in srgb, var(--ok) 16%, transparent);
 }
 
 .kt-webterm__lamp[data-state='connecting'] {

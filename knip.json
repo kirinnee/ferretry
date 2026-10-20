@@ -51,6 +51,7 @@
         "harness/compaction-screenshot.tsx",
         "harness/handoff-screenshot.tsx",
         "harness/pack-cards-screenshot.tsx",
+        "harness/theme-gallery-screenshot.tsx",
         "harness/peer-messages-screenshot.tsx",
         "harness/dictation-review-screenshot.tsx",
         "harness/conversation-picker-screenshot.tsx",

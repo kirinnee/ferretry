@@ -336,7 +336,7 @@ export function browserWaveformRuntime(canvas: HTMLCanvasElement): InputWaveform
     cancelFrame: handle => window.cancelAnimationFrame(handle),
     reducedMotion: window.matchMedia?.(REDUCED_MOTION_QUERY) ?? null,
     pixelRatio: window.devicePixelRatio || 1,
-    color: window.getComputedStyle(canvas).color || '#3b82f6',
+    color: window.getComputedStyle(canvas).color || 'currentcolor',
   };
 }
 
