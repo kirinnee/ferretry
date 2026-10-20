@@ -10,6 +10,7 @@ import {
   analyticsCatalogAliasGroups,
   snapshotAnalyticsUsagePricing,
 } from './pricing.ts';
+import type { AnalyticsSessionActivity } from './usage-fold.ts';
 
 export interface FinishedAnalyticsSession {
   readonly id: string;
@@ -34,6 +35,13 @@ export interface FinishedAnalyticsSession {
   readonly migrated: boolean;
   readonly completed: boolean;
   readonly usage?: Omit<AnalyticsTokenUsage, 'createdAt'> | null;
+  /**
+   * Active time and turns as the session's own transcript records them. Its turn count WINS over
+   * `turns` (the daemon's send counter, which never sees a prompt typed straight into the harness), so
+   * active time and the turns it is divided by share one definition; `turns` answers only when no
+   * transcript could be read.
+   */
+  readonly activity?: AnalyticsSessionActivity | null;
 }
 
 /** Durable session records are authoritative; an analytics index is never a source of truth. */
@@ -177,9 +185,9 @@ export function deriveAnalyticsSessionRecord(
       pricingModel: pricing?.identity?.modelId ?? null,
       equivalentApiCostUsdMicros,
       ...tokens,
-      turns: nonNegativeInteger(session.turns),
+      turns: session.activity?.turns ?? nonNegativeInteger(session.turns),
       durationMs: elapsed(durationStart, finishedAt),
-      activeDurationMs: null,
+      activeDurationMs: session.activity?.activeDurationMs ?? null,
       // Stamped by the query, never stored: the index is this daemon's alone, and its name can change.
       machine: null,
       timeToFirstOutputMs: elapsed(durationStart, session.firstOutputAt),

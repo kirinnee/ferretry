@@ -1,9 +1,9 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
 import {
-  AnalyticsIngestionService,
   type AnalyticsIngestCandidate,
   type AnalyticsIngestionParts,
+  AnalyticsIngestionService,
 } from '../../../src/lib/analytics/ingestion.ts';
 import type { AnalyticsPricingRate } from '../../../src/lib/analytics/pricing.ts';
 import type {
@@ -260,6 +260,38 @@ describe('AnalyticsIngestionService.ingest', () => {
     // 1000 input at 15 USD/M and 500 output at 75 USD/M, in whole micros.
     should(row?.raw.equivalentApiCostUsdMicros).equal(52_500);
     should(row?.pricing?.kind).equal('priced');
+  });
+
+  it('should store active time and transcript turns folded from the same transcript', async () => {
+    // Arrange — two prompts, 10 min and 5 min of work, an idle gap between them
+    const prompt = (timestamp: string): TranscriptEvent => ({
+      kind: 'message',
+      harness: 'claude',
+      role: 'user',
+      text: 'go',
+      timestamp,
+    });
+    const test = harness([candidate({ id: 's1', turns: 9 }), candidate({ id: 's2', turns: 4 })], async id =>
+      id === 's1'
+        ? readEvidence([
+            prompt('2026-08-01T00:00:00.000Z'),
+            { ...usageEvent('claude-opus-5', 10, 5), timestamp: '2026-08-01T00:05:00.000Z' },
+            { ...usageEvent('claude-opus-5', 10, 5), timestamp: '2026-08-01T00:10:00.000Z' },
+            prompt('2026-08-01T00:40:00.000Z'),
+            { ...usageEvent('claude-opus-5', 10, 5), timestamp: '2026-08-01T00:45:00.000Z' },
+          ])
+        : { kind: 'unresolved' },
+    );
+
+    // Act
+    await test.service.ingest();
+
+    // Assert — the transcript's turn count wins; with no transcript the daemon's own counter answers
+    const rows = new Map(test.store.rows().map(row => [row.raw.id, row.raw]));
+    should(rows.get('s1')?.activeDurationMs).equal(15 * 60_000);
+    should(rows.get('s1')?.turns).equal(2);
+    should(rows.get('s2')?.activeDurationMs).be.null();
+    should(rows.get('s2')?.turns).equal(4);
   });
 
   it('should keep the display model distinct from the model the transcript priced', async () => {

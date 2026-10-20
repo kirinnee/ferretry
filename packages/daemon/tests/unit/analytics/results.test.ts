@@ -199,3 +199,82 @@ describe('queryAnalyticsRecords', () => {
       should(nullMatcher.results.map(result => result.id)).deepEqual(['new', 'same-time-b']);
   });
 });
+
+describe('queryAnalyticsRecords v2', () => {
+  const records = [
+    record('a', { createdAt: '2026-10-19T12:00:00.000Z', equivalentApiCostUsdMicros: 5, cwd: '/work/a' }),
+    record('b', { createdAt: '2026-10-13T12:00:00.000Z', equivalentApiCostUsdMicros: 50, agent: 'claude-auto' }),
+    record('c', { createdAt: '2026-10-01T00:00:00.000Z', equivalentApiCostUsdMicros: null }),
+    record('d', { createdAt: null }),
+  ];
+  const now = '2026-10-20T00:00:00.000Z';
+
+  it('should keep only sessions created inside a relative range, and say which instants it meant', () => {
+    // Act
+    const actual = queryAnalyticsRecords(records, 'sum(cost_usd) [7d]', { index, now });
+
+    // Assert
+    should(actual.kind).equal('aggregate');
+    should(actual.parsed).deepEqual({
+      aggregation: 'sum',
+      metric: 'cost_usd',
+      groupBy: [],
+      matchers: [],
+      range: { kind: 'relative', seconds: 604_800 },
+    });
+    should(actual.scope).deepEqual({
+      allSessions: true,
+      indexed: index.sessions,
+      matched: 2,
+      window: { from: '2026-10-13T00:00:00.000Z', to: now },
+    });
+  });
+
+  it('should read an absolute range half-open and never count a session with no creation instant', () => {
+    // Act
+    const actual = queryAnalyticsRecords(records, '{} [2026-10-01..2026-10-13]', { index });
+
+    // Assert
+    should(actual.kind === 'raw' && actual.results.map(row => row.id)).deepEqual(['b', 'c']);
+    should(actual.scope.window).deepEqual({ from: '2026-10-01T00:00:00.000Z', to: '2026-10-14T00:00:00.000Z' });
+  });
+
+  it('should refuse a relative range when no answering instant was given', () => {
+    // Act
+    const run = () => queryAnalyticsRecords(records, '[7d]', { index });
+
+    // Assert
+    should(run).throw(/needs the instant the daemon answers at/);
+  });
+
+  it('should rank a bare-metric query highest first with unknown values last', () => {
+    // Act
+    const actual = queryAnalyticsRecords(records, 'cost_usd', { index });
+
+    // Assert
+    should(actual.kind === 'raw' && actual.results.map(row => row.id)).deepEqual(['b', 'd', 'a', 'c']);
+  });
+
+  it('should stamp the machine and answer the runtime, project, session and machine labels', () => {
+    // Act
+    const actual = queryAnalyticsRecords(
+      records,
+      'sum by (machine, runtime) {project=/work/a, session=a}',
+      { index, machine: 'kirin-box' },
+    );
+    const unnamed = queryAnalyticsRecords(records, '{session=a}', { index, machine: null });
+    const raw = queryAnalyticsRecords(records, '{session=a}', { index, machine: 'kirin-box' });
+
+    // Assert
+    should(actual.kind === 'aggregate' && actual.results.map(row => row.labels)).deepEqual([
+      { machine: 'kirin-box', runtime: 'codex-auto' },
+    ]);
+    should(actual.kind === 'aggregate' && actual.results[0]!.activeDurationMs).deepEqual({
+      value: 500,
+      known: 1,
+      total: 1,
+    });
+    should(unnamed.kind === 'raw' && unnamed.results[0]!.machine).be.null();
+    should(raw.kind === 'raw' && raw.results[0]!.machine).equal('kirin-box');
+  });
+});

@@ -1,11 +1,11 @@
 import type { AnalyticsResponse } from '@ferretry/protocol';
-import { ApiError } from '../../api/error.ts';
-import { type ApiRequest, type ApiResponse } from '../../api/http.ts';
-import { jsonResponse } from '../../api/responses.ts';
-import type { ApiRoute, RouteContext } from '../../api/route.ts';
+import type { AnalyticsIndexRead } from '../../analytics/ingestion.ts';
 import { AnalyticsQueryError, parseAnalyticsQuery, scopeAnalyticsQuery } from '../../analytics/query.ts';
 import { queryAnalyticsRecords } from '../../analytics/results.ts';
-import type { AnalyticsIndexRead } from '../../analytics/ingestion.ts';
+import { ApiError } from '../../api/error.ts';
+import type { ApiRequest, ApiResponse } from '../../api/http.ts';
+import { jsonResponse } from '../../api/responses.ts';
+import type { ApiRoute, RouteContext } from '../../api/route.ts';
 
 /**
  * The analytics read: one bounded PromQL-like query over every finished session the daemon has
@@ -69,6 +69,11 @@ const ANALYTICS_PARAMETERS = ['q', 'session'] as const;
 export interface AnalyticsSubsystem {
   /** The materialised rows, and an account of what they consist of. */
   index(): AnalyticsIndexRead;
+  /**
+   * The name this machine is known by — the one pairing gave it, which is what the app shows for it —
+   * stamped on every row as the `machine` label. Absent, rows carry `machine: null`.
+   */
+  machine?(): string | null;
 }
 
 /**
@@ -113,7 +118,11 @@ function query(subsystem: AnalyticsSubsystem, context: RouteContext): ApiRespons
     // full read of the store first.
     parseAnalyticsQuery(source);
     const read = subsystem.index();
-    const response: AnalyticsResponse = queryAnalyticsRecords(read.rows, source, { index: read.status });
+    const response: AnalyticsResponse = queryAnalyticsRecords(read.rows, source, {
+      index: read.status,
+      now: read.now,
+      machine: subsystem.machine?.() ?? null,
+    });
     return jsonResponse(response);
   } catch (error) {
     reraise(error);

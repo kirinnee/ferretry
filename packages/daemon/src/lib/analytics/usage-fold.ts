@@ -1,4 +1,5 @@
 import { type AnalyticsModelAliasGroup, normalizeAnalyticsModelIdentity } from '@ferretry/protocol';
+import { isOwnerMessage } from '../transcript/owner.ts';
 import type { TranscriptEvent, TranscriptHarness, TranscriptIssueCode } from '../transcript/types.ts';
 import type { AnalyticsTokenUsage } from './pricing.ts';
 
@@ -250,4 +251,96 @@ export function foldAnalyticsSessionUsage(
       ...(sawReasoning && sawMissingReasoning ? { reasoningTokensIncomplete: true } : {}),
     },
   };
+}
+
+/** How long a session was ACTIVE, and over how many turns, from its own transcript's timestamps. */
+export interface AnalyticsSessionActivity {
+  /** Σ over turns of (last record − prompt), in milliseconds, or `null` when it cannot be stated. */
+  readonly activeDurationMs: number | null;
+  /** Owner prompts in the transcript, or `null` when the transcript could not be read whole. */
+  readonly turns: number | null;
+}
+
+const UNKNOWN_ACTIVITY: AnalyticsSessionActivity = { activeDurationMs: null, turns: null };
+
+/**
+ * Which transcript RECORD an event came from. One prompt record can normalise to several message events
+ * — one per content block — and it is still one prompt. The record id where the harness states one, else
+ * the line it was read from.
+ */
+function recordKey(event: TranscriptEvent): string | undefined {
+  if (event.recordId !== undefined) return `id:${event.recordId}`;
+  return event.line === undefined ? undefined : `line:${event.line}`;
+}
+
+/**
+ * Context Codex writes into the USER channel before a prompt — the workspace's instructions and the
+ * environment it runs in. The owner never typed it, so it does not start a turn.
+ */
+const CODEX_INJECTED_CONTEXT = ['<environment_context>', '<user_instructions>'];
+
+/** Whether an event is an owner PROMPT: an owner message, less what a harness injects as one. */
+function isPrompt(event: TranscriptEvent): boolean {
+  if (!isOwnerMessage(event)) return false;
+  const text = event.text.trimStart();
+  return !(event.harness === 'codex' && CODEX_INJECTED_CONTEXT.some(prefix => text.startsWith(prefix)));
+}
+
+function eventInstant(event: TranscriptEvent): number | null {
+  if (event.timestamp === undefined) return null;
+  const parsed = Date.parse(event.timestamp);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+/**
+ * Fold one finished session's transcript into ACTIVE TIME and a turn count.
+ *
+ * A TURN starts at an owner prompt — a user-channel message the owner sent (`isOwnerMessage`), so a
+ * tool result, a background-task notification or any other record the harness wrote into the user
+ * channel is never a prompt, and neither is the context Codex injects there — and ends at the last timestamped record before the next owner prompt,
+ * or before the end of the transcript. Its length is (end − start), never negative. ACTIVE TIME is the
+ * sum over turns, so the time a session sat waiting for its owner between turns is not counted.
+ *
+ * The same definition holds for both harnesses, because both parsers normalise to the same events:
+ * a Claude `user` record with text, and a Codex `response_item` message with role `user`.
+ *
+ * UNKNOWN, NOT ZERO, whenever the evidence cannot carry the claim: an unresolved, unreadable, damaged
+ * or incomplete transcript, or a prompt with no readable timestamp, makes the whole session's active
+ * time null — a partial sum would read as a short session. So does a transcript with NO prompt in it:
+ * every session starts from one, so a transcript that shows none has a grammar this fold does not
+ * recognise, and both figures are left to say nothing rather than claim an idle session.
+ */
+export function foldAnalyticsSessionActivity(evidence: AnalyticsTranscriptEvidence): AnalyticsSessionActivity {
+  if (evidence.kind !== 'read') return UNKNOWN_ACTIVITY;
+  if (evidence.pendingBytes > 0 || evidence.issues.some(code => EVIDENCE_LOSING_ISSUES.includes(code))) {
+    return UNKNOWN_ACTIVITY;
+  }
+
+  let turns = 0;
+  let active = 0;
+  let timed = true;
+  let start: number | null = null;
+  let end: number | null = null;
+  let promptRecord: string | undefined;
+  const close = () => {
+    if (start !== null && end !== null) active += Math.max(0, end - start);
+  };
+  for (const event of evidence.events) {
+    const at = eventInstant(event);
+    if (isPrompt(event)) {
+      const key = recordKey(event);
+      if (key !== undefined && key === promptRecord) continue;
+      close();
+      turns += 1;
+      promptRecord = key;
+      if (at === null) timed = false;
+      start = at;
+      end = at;
+      continue;
+    }
+    if (start !== null && at !== null && (end === null || at > end)) end = at;
+  }
+  close();
+  if (turns === 0) return UNKNOWN_ACTIVITY;
+  return { activeDurationMs: timed ? active : null, turns };
 }

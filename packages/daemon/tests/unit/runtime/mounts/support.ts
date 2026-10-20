@@ -439,6 +439,7 @@ export function analyticsSubsystem(
   return {
     index: () => ({
       rows,
+      now: '2026-10-20T12:00:00.000Z',
       status: {
         schemaVersion: ANALYTICS_INDEX_SCHEMA_VERSION,
         sessions: rows.length,
