@@ -205,3 +205,55 @@ describe('SessionPlanner', () => {
     );
   });
 });
+
+describe('SessionPlanner, on an account whose catalog declares a window', () => {
+  const catalogued = account({
+    id: 'account-default',
+    agent: 'claude-default',
+    displayName: 'Default',
+    defaultModel: 'claude-opus-5-5',
+    models: [
+      { id: 'claude-opus-5-5', available: true, context: EXTENDED_CONTEXT_WINDOW },
+      { id: 'claude-sonnet-5', available: true, context: DEFAULT_CONTEXT_WINDOW },
+      { id: 'no-catalog', available: true },
+    ],
+  });
+
+  it('should plan the window the catalog declares, not the 200k default a bare id would read as', () => {
+    // Arrange / Act — the owner's refusal: claude-opus-5-5 is a 1M model, and its id carries no selector.
+    const plan = planFor(new SessionPlanner(policy()), { id: 's', account: catalogued, mode: 'interactive' });
+    const sonnet = planFor(new SessionPlanner(policy()), {
+      id: 's',
+      account: catalogued,
+      mode: 'interactive',
+      requestedModel: 'claude-sonnet-5',
+    });
+    const unlisted = planFor(new SessionPlanner(policy()), {
+      id: 's',
+      account: catalogued,
+      mode: 'interactive',
+      requestedModel: 'no-catalog',
+    });
+
+    // Assert
+    should(plan.contextWindow).equal(EXTENDED_CONTEXT_WINDOW);
+    should(sonnet.contextWindow).equal(DEFAULT_CONTEXT_WINDOW);
+    should(unlisted.contextWindow).equal(DEFAULT_CONTEXT_WINDOW);
+  });
+
+  it('should keep a [1m] selector on the model it plans, instead of refusing it as unserved', () => {
+    // Arrange / Act — a session records `claude-opus-5-5[1m]`; the account lists `claude-opus-5-5`.
+    // Matching the id literally made a Restart fall back to the default id, drop the selector and
+    // plan the default window for a conversation running in a million tokens.
+    const plan = planFor(new SessionPlanner(policy()), {
+      id: 's',
+      account: catalogued,
+      mode: 'interactive',
+      requestedModel: 'claude-opus-5-5[1m]',
+    });
+
+    // Assert
+    should(plan.model).equal('claude-opus-5-5[1m]');
+    should(plan.contextWindow).equal(EXTENDED_CONTEXT_WINDOW);
+  });
+});

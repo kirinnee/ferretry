@@ -152,3 +152,20 @@ describe('migration refusal classification', () => {
     expect(migrationFailure('socket closed')).toMatchObject({ kind: 'other', message: 'socket closed' });
   });
 });
+
+describe('a refused downgrade, in plain words', () => {
+  it('replaces the daemon’s sentence, which names an API field, with the two windows', () => {
+    const failure = migrationFailure(
+      new FyHttpError(
+        'claude-default serves claude-opus-5-5 with a 200000-token window and this session is running in 1000000. Send allowContextDowngrade to accept that.',
+        409,
+        'context_downgrade_refused',
+      ),
+    );
+    expect(failure.kind).toBe('context-downgrade');
+    expect(failure.message).toBe(
+      'Moving would give this conversation a smaller window — 200,000 tokens instead of 1,000,000 — so part of it would be cut off.',
+    );
+    expect(failure.suggestedModel).toBe('claude-opus-5-5[1m]');
+  });
+});

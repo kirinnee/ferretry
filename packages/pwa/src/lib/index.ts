@@ -169,6 +169,7 @@ export * from '../features/session-actions/core-actions.ts';
 export * from '../features/session-actions/fork-form.tsx';
 export * from '../features/session-actions/form-parts.tsx';
 export * from '../features/session-actions/registry.ts';
+export * from '../features/session-actions/context-downgrade.ts';
 export * from '../features/session-actions/restart-refusal.tsx';
 export * from '../features/session-actions/rename-form.tsx';
 export * from '../features/session-actions/session-mcp-api.ts';

@@ -1,6 +1,7 @@
 import {
   FY_REQUEST_ID_HEADER,
   MigrateSessionRequestSchema,
+  type ContextDowngrade,
   type MigrationRefusal,
   type SessionRelaunchSettings,
   type SessionView,
@@ -89,8 +90,8 @@ export class SessionMigrateError extends Error {
   constructor(
     readonly failure: SessionMigrateFailure,
     message: string,
-    /** What the inventory saw, on a `refused` — the data behind the sentence. */
-    readonly inflight?: MigrationRefusal,
+    /** The data behind the sentence: the inventory on a `refused`, the two windows on a `context_downgrade`. */
+    readonly data?: { readonly inflight?: MigrationRefusal; readonly downgrade?: ContextDowngrade },
   ) {
     super(message);
     this.name = 'SessionMigrateError';
@@ -147,13 +148,7 @@ const REFUSALS: Readonly<Record<SessionMigrateFailure, { readonly status: number
 function refuse(error: unknown): never {
   if (error instanceof SessionMigrateError) {
     const refusal = REFUSALS[error.failure];
-    throw new ApiError(
-      refusal.status,
-      error.message,
-      refusal.code,
-      undefined,
-      error.inflight === undefined ? undefined : { inflight: error.inflight },
-    );
+    throw new ApiError(refusal.status, error.message, refusal.code, undefined, error.data);
   }
   // 409: the id is usable, but it already names a different migration, and the caller has to decide
   // which one it meant. Not 400 — the request itself is well formed.

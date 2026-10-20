@@ -11,6 +11,7 @@ import {
   DetailedFailure,
   forkThroughLatest,
   NothingToForkError,
+  RestartDowngradeRefused,
   RestartRefused,
   restartRefusedSentence,
   restartWithResume,
@@ -284,5 +285,104 @@ describe('restartWithResume — a refusal that names what is running', () => {
       const state = scripted({ refuse: error });
       expect(await restartWithResume(client(state), view, 'req-7').catch((reason: unknown) => reason)).toBe(error);
     }
+  });
+});
+
+describe('restartWithResume — a refusal because the window would shrink', () => {
+  const downgrade = { model: 'claude-opus-5-5', targetWindow: 200_000, currentWindow: 1_000_000 };
+  const smaller = (payload: unknown, message = 'refused: raw words') =>
+    new FyHttpError(message, 409, 'context_downgrade_refused', payload);
+  const inflight = new FyHttpError('refused: raw words', 409, 'migration_refused', {
+    error: 'refused: raw words',
+    code: 'migration_refused',
+    inflight: {
+      status: 'running',
+      turn: 1,
+      blockedBy: 'unknown',
+      restartsWithCli: 0,
+      items: [{ kind: 'process', verdict: 'unknown', title: 'A program', blocks: true }],
+    },
+  });
+
+  /** Answers each migrate with the next scripted outcome, and records what it was asked. */
+  const sequence = (...outcomes: Array<Error | 'ok'>) => {
+    const asked: Array<readonly unknown[]> = [];
+    const migrate = async (...args: unknown[]) => {
+      asked.push(args);
+      const next = outcomes[asked.length - 1];
+      if (next instanceof Error) throw next;
+      return sessionView('done');
+    };
+    return { asked, client: { migrate } as unknown as Pick<IFyApiClient, 'migrate'> };
+  };
+
+  it('throws RestartDowngradeRefused with the numbers, in plain words and without the API field', async () => {
+    const { client: fake } = sequence(smaller({ error: 'x', code: 'context_downgrade_refused', downgrade }));
+    const thrown = await restartWithResume(fake, view, 'req-8').catch((reason: unknown) => reason);
+    expect(thrown).toBeInstanceOf(RestartDowngradeRefused);
+    expect((thrown as RestartDowngradeRefused).downgrade).toEqual(downgrade);
+    const message = (thrown as RestartDowngradeRefused).message;
+    expect(message).toContain('200,000 tokens instead of 1,000,000');
+    expect(message).toContain('Nothing was restarted.');
+    expect(message).not.toContain('allowContextDowngrade');
+  });
+
+  it('restarts with the smaller window by asking again with the consent, under a fresh request id', async () => {
+    const { asked, client: fake } = sequence(smaller({ downgrade }), 'ok');
+    const thrown = (await restartWithResume(fake, view, 'req-9').catch(
+      (reason: unknown) => reason,
+    )) as RestartDowngradeRefused;
+    expect((await thrown.restartAnyway()).config.id).toBe('done');
+    expect(asked[0]?.[3]).toBe(false);
+    expect(asked[1]?.[3]).toBe(true);
+    expect(String(asked[1]?.[4])).toStartWith('req-9-anyway-');
+    expect(asked[1]?.[5]).toBeUndefined();
+  });
+
+  it('keeps an earlier confirmation when the other refusal follows, in either order', async () => {
+    const first = sequence(inflight, smaller({ downgrade }), 'ok');
+    const paused = (await restartWithResume(first.client, view, 'req-10').catch(
+      (reason: unknown) => reason,
+    )) as RestartRefused;
+    const next = (await paused.restartAnyway().catch((reason: unknown) => reason)) as RestartDowngradeRefused;
+    expect(next).toBeInstanceOf(RestartDowngradeRefused);
+    await next.restartAnyway();
+    expect(first.asked.map(args => [args[3], args[5]])).toEqual([
+      [false, undefined],
+      [false, true],
+      [true, true],
+    ]);
+
+    const second = sequence(smaller({ downgrade }), inflight, 'ok');
+    const pausedFirst = (await restartWithResume(second.client, view, 'req-11').catch(
+      (reason: unknown) => reason,
+    )) as RestartDowngradeRefused;
+    const then = (await pausedFirst.restartAnyway().catch((reason: unknown) => reason)) as RestartRefused;
+    expect(then).toBeInstanceOf(RestartRefused);
+    await then.restartAnyway();
+    expect(second.asked.map(args => [args[3], args[5]])).toEqual([
+      [false, undefined],
+      [true, undefined],
+      [true, true],
+    ]);
+  });
+
+  it('recovers the numbers from an older daemon’s sentence, or says it without them', async () => {
+    const old = smaller(
+      undefined,
+      'claude-default serves claude-opus-5-5 with a 200000-token window and this session is running in 1000000; the conversation would be truncated. Send allowContextDowngrade to accept that.',
+    );
+    const unparsed = smaller(undefined, 'something about allowContextDowngrade');
+    const withNumbers = (await restartWithResume(sequence(old).client, view, 'req-12').catch(
+      (reason: unknown) => reason,
+    )) as RestartDowngradeRefused;
+    expect(withNumbers.downgrade).toEqual(downgrade);
+    const without = (await restartWithResume(sequence(unparsed).client, view, 'req-13').catch(
+      (reason: unknown) => reason,
+    )) as RestartDowngradeRefused;
+    expect(without.downgrade).toBeNull();
+    expect(without.message).toBe(
+      'Restart paused — Restarting would give this conversation a smaller window, so part of it would be cut off. Nothing was restarted.',
+    );
   });
 });

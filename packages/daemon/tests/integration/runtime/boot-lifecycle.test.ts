@@ -34,6 +34,7 @@ import {
   SessionStateSchema,
   SessionTranscriptPageSchema,
   type SessionView,
+  ContextDowngradeRefusedBodySchema,
   MigrationRefusedBodySchema,
   SessionViewSchema,
   type SttEnhancementResult,
@@ -606,8 +607,7 @@ async function seedFleet(home: string): Promise<string> {
  * A fleet with somewhere to migrate TO, and somewhere a migration must REFUSE to go.
  *
  * Three accounts, because a migration has three answers to give. The origin serves a million-token
- * window — the `[1m]` marker is the configuration convention `contextWindowFor` reads, and it is how a
- * session comes to be running in one. The same-family target serves the default 200k, so the downgrade
+ * window, declared by its catalog entry, which is how a session comes to be running in one. The same-family target serves the default 200k, so the downgrade
  * refusal is reachable without inventing a session state. The cross-family account is published and
  * available and this host can run it: it is refused for what it IS, not for anything missing about it.
  */
@@ -624,8 +624,11 @@ async function seedMigrationFleet(home: string): Promise<void> {
       wrapper: join(binary, WRAPPER),
       home: join(home, 'homes', 'origin'),
       displayName: 'Origin',
-      defaultModel: 'claude-opus-5[1m]',
-      models: [{ id: 'claude-opus-5[1m]', available: true }],
+      defaultModel: 'claude-opus-5',
+      // The shape a real manifest has: the BARE id, with the window the catalog declares for it. The
+      // fixture used to list `claude-opus-5[1m]` as the id, which no published manifest does and which
+      // hid a Restart planning 200k for a session running in a million.
+      models: [{ id: 'claude-opus-5', available: true, context: 1_000_000 }],
       available: true,
       unavailableReason: null,
     },
@@ -3154,6 +3157,22 @@ describe('daemon boot lifecycle', () => {
     const forcedRaw: unknown = await forced.json();
     const forcedReport = await readFile(reportFile, 'utf8');
     const forcedJournal = await readFile(join(home, 'state', 'sessions', id, 'events.jsonl'), 'utf8');
+    // RESTART IS NEVER A DOWNGRADE (the owner's second refusal). The session is on the 200k target and its
+    // harness reports a million-token window — the shape a stale or incomplete catalog produces. Restart asks
+    // for no new model on the same account, so it relaunches into the window it already has instead of being
+    // refused as a downgrade it cannot accept.
+    await writeFile(
+      stateFile,
+      JSON.stringify({
+        ...(JSON.parse(await readFile(stateFile, 'utf8')) as object),
+        status: 'rate_limited',
+        contextWindow: 1_000_000,
+      }),
+      { mode: 0o600 },
+    );
+    inventory.observation = { kind: 'observed', processes: [] };
+    const restartInPlace = await migrate({ agent: TARGET_WRAPPER }, 'req-restart-in-place');
+    const restartInPlaceRaw: unknown = await restartInPlace.json();
     // THE OTHER DIRECTION, which is a different session rather than a different request: a codex
     // session asked to move onto a claude account. Both crossings were permitted before, and they fail
     // differently — a claude transcript is unreadable to codex and a codex rollout is unreadable to
@@ -3224,7 +3243,15 @@ describe('daemon boot lifecycle', () => {
     should(afterMidTurn).have.property('agent', WRAPPER);
     // A smaller window is refused BEFORE the pane is even looked at, and nothing moved.
     should(downgrade.status).equal(409);
-    should((await downgrade.json()) as { code: string }).have.property('code', 'context_downgrade_refused');
+    const downgradeRefusal = ContextDowngradeRefusedBodySchema.parse(await downgrade.json());
+    should(downgradeRefusal.code).equal('context_downgrade_refused');
+    should(downgradeRefusal.downgrade).deepEqual({
+      model: 'claude-sonnet-5',
+      targetWindow: 200_000,
+      currentWindow: 1_000_000,
+    });
+    should(downgradeRefusal.error).not.containEql('allowContextDowngrade');
+    should(downgradeRefusal.error).containEql('part of this conversation would be cut off');
     should(afterDowngrade).have.property('agent', WRAPPER);
     // The refusal carries the inventory that produced it: a bare 409 would leave the operator with
     // no way to tell "a push is running" from "we could not look".
@@ -3251,11 +3278,11 @@ describe('daemon boot lifecycle', () => {
     // A new incarnation, because a different program is answering the next turn.
     should(afterMove).have.property('runtimeGeneration', 2);
     should(afterMove).have.property('incarnation', `${id}-2`);
-    // THE LIVE PANE WAS REPLACED, not typed into — for ALL THREE moves (the clean one, the way back and
-    // the forced restart). Without that the old account would still be serving the session while its own
+    // THE LIVE PANE WAS REPLACED, not typed into — for ALL FOUR moves (the clean one, the way back, the forced restart and
+    // the in-place restart). Without that the old account would still be serving the session while its own
     // record named the new one.
-    should(reviver.snapshots).deepEqual([id, id, id]);
-    should(reviver.relaunched).deepEqual([id, id, id]);
+    should(reviver.snapshots).deepEqual([id, id, id, id]);
+    should(reviver.relaunched).deepEqual([id, id, id, id]);
     // The replacement agent is pointed at the report, through the same turn document a revive writes.
     should(reviver.delivered[0]).containEql('turns/turn-002.md');
     should(turnTwo).containEql('migration-inflight.md');
@@ -3294,6 +3321,9 @@ describe('daemon boot lifecycle', () => {
     should(forcedJournal).containEql('"session.migrate_forced"');
     should(forcedJournal).containEql('some-vendor-tool --watch');
     should(forcedJournal).not.containEql('fy mcp serve');
+    if (restartInPlace.status !== 200)
+      throw new Error(`the same-account restart was refused: ${JSON.stringify(restartInPlaceRaw)}`);
+    should(SessionViewSchema.parse(restartInPlaceRaw).config.agent).equal(TARGET_WRAPPER);
     // An agent the fleet does not publish is a fact about the agent, not about the session.
     should(unknownAgent.status).equal(404);
     should((await unknownAgent.json()) as { code: string }).have.property('code', 'unknown_agent');

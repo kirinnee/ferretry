@@ -1,7 +1,10 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import type { MigrationRefusal, SessionView } from '@ferretry/protocol';
 import { useRestartRefusal } from '../../../../src/features/session-actions/restart-refusal.tsx';
-import { RestartRefused } from '../../../../src/features/session-actions/session-operations.ts';
+import {
+  RestartDowngradeRefused,
+  RestartRefused,
+} from '../../../../src/features/session-actions/session-operations.ts';
 import { interact, type Mounted, mount, must } from '../../../support/dom.ts';
 import { sessionView } from '../../../support/sessions.ts';
 
@@ -140,5 +143,88 @@ describe('useRestartRefusal', () => {
     await hold(async () => sessionView('a'));
     await must(mounted, 'mounted').render(<Probe publish={() => undefined} scope="b" />);
     expect(root.querySelector('[data-restart-refusal]')).toBeNull();
+  });
+});
+
+describe('useRestartRefusal — a smaller context window', () => {
+  const downgrade = { model: 'claude-opus-5-5', targetWindow: 200_000, currentWindow: 1_000_000 };
+  const holdDowngrade = async (
+    restartAnyway: () => Promise<SessionView>,
+    numbers: typeof downgrade | null = downgrade,
+  ) => {
+    let answer = false;
+    await interact(() => {
+      answer = must(held, 'capture')(new RestartDowngradeRefused(numbers, restartAnyway));
+    });
+    return answer;
+  };
+
+  it('says the two windows in plain words, with Cancel focused and the explicit button named for what it does', async () => {
+    const root = await show();
+    expect(await holdDowngrade(async () => sessionView('a'))).toBe(true);
+    const panel = text(root);
+    expect(panel).toContain(
+      'Restarting would give this conversation a smaller window — 200,000 tokens instead of 1,000,000 — so part of it would be cut off.',
+    );
+    expect(panel).toContain('Restart with the smaller window');
+    expect(panel).not.toContain('allowContextDowngrade');
+    expect(root.querySelector('[data-restart-downgrade]')).not.toBeNull();
+    expect(document.activeElement).toBe(root.querySelector('[data-restart-refusal-cancel]'));
+  });
+
+  it('says it without numbers when an older daemon sent none', async () => {
+    const root = await show();
+    await holdDowngrade(async () => sessionView('a'), null);
+    expect(text(root)).toContain('a smaller window, so part of it would be cut off.');
+  });
+
+  it('Cancel asks nothing; the explicit button asks once, publishes and closes', async () => {
+    const published: string[] = [];
+    let asked = 0;
+    const root = await show(view => published.push(view.config.id));
+    await holdDowngrade(async () => {
+      asked += 1;
+      return sessionView('a');
+    });
+    await press(root, 'data-restart-refusal-cancel');
+    expect(root.querySelector('[data-restart-downgrade]')).toBeNull();
+    expect(asked).toBe(0);
+    await holdDowngrade(async () => {
+      asked += 1;
+      return sessionView('a');
+    });
+    await press(root, 'data-restart-refusal-anyway');
+    await interact(() => Promise.resolve());
+    expect(asked).toBe(1);
+    expect(published).toEqual(['a']);
+    expect(root.querySelector('[data-restart-downgrade]')).toBeNull();
+  });
+
+  it('shows the busy label while asking, and names the failure by what was pressed', async () => {
+    const root = await show();
+    let release: (view: SessionView) => void = () => undefined;
+    await holdDowngrade(() => new Promise<SessionView>(resolve => (release = resolve)));
+    await press(root, 'data-restart-refusal-anyway');
+    expect(text(root)).toContain('Restarting…');
+    await interact(() => release(sessionView('a')));
+    await interact(() => Promise.resolve());
+    await holdDowngrade(async () => {
+      throw new Error('the machine did not answer');
+    });
+    await press(root, 'data-restart-refusal-anyway');
+    await interact(() => Promise.resolve());
+    expect(text(root)).toContain('Restart with the smaller window failed: the machine did not answer');
+  });
+
+  it('moves on to the other question when confirming this one meets it, instead of failing', async () => {
+    const root = await show();
+    await holdDowngrade(async () => {
+      throw new RestartRefused(refusal(), async () => sessionView('a'));
+    });
+    await press(root, 'data-restart-refusal-anyway');
+    await interact(() => Promise.resolve());
+    expect(root.querySelector('[data-restart-downgrade]')).toBeNull();
+    expect(root.querySelector('[data-restart-refusal]')).not.toBeNull();
+    expect(text(root)).not.toContain('failed');
   });
 });
