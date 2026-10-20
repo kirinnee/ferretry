@@ -24,7 +24,12 @@
  *   so leaving the flag off would hand the choice to whichever version is installed.
  * - Codex's trust override is the TOML inline table `-c projects={"<cwd>"={trust_level="trusted"}}`.
  *   The design's dotted spelling makes the quotes part of the key and does not work. The table
- *   MERGES with `config.toml`'s own `projects`, so it names the launch folder alone.
+ *   MERGES with `config.toml`'s own `projects`, so it names the launch folder alone — which also
+ *   keeps a launch in a subdirectory of a Git repository from the prompt whose yes trusts the whole
+ *   repository. From 0.160 Codex no longer asks about a folder with NO project marker and instead
+ *   starts it on workspace-write with granular approvals; the explicit `approval_policy` and
+ *   `sandbox_mode` below (and the trust entry, either alone) keep that default off, so an agent starts
+ *   in the mode the machine chose on 0.145 and 0.163 alike (`tests/contract/codex-launch.test.ts`).
  * - The bypass-permissions warning is suppressed by a `--settings` overlay holding
  *   `skipDangerousModePermissionPrompt`, returned here as `claudeSettingsOverlay` for the wrapper
  *   (`./materialise.ts`) to write and pass, because where that file lives is the wrapper's fact.

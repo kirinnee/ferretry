@@ -165,3 +165,21 @@ export async function treeContains(root: string, needle: string): Promise<boolea
 export async function reap(root: string): Promise<void> {
   await run(['pkill', '-9', '-f', root], { env: { PATH: '/usr/bin:/bin' }, timeoutMs: 10_000 });
 }
+
+/** A harness's `major.minor.patch`, read off its own `--version`, for a claim that changed at a release. */
+export type HarnessVersion = readonly [number, number, number];
+
+export async function harnessVersion(bin: string, env: Record<string, string>): Promise<HarnessVersion> {
+  const { stdout } = await run([bin, '--version'], { env });
+  const match = /(\d+)\.(\d+)\.(\d+)/u.exec(stdout);
+  if (match === null) throw new Error(`${bin} --version printed no version: ${JSON.stringify(stdout)}`);
+  return [Number(match[1]), Number(match[2]), Number(match[3])];
+}
+
+/** Whether `version` is `at` or newer. */
+export const atLeast = (version: HarnessVersion, at: HarnessVersion): boolean => {
+  for (let index = 0; index < 3; index += 1) {
+    if (version[index] !== at[index]) return (version[index] as number) > (at[index] as number);
+  }
+  return true;
+};

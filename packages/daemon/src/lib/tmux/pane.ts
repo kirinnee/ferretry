@@ -16,6 +16,8 @@ import { parsePermissionPrompt } from './permission-prompt.ts';
  */
 const STARTUP_BLOCKERS = [
   'do you trust the contents of this directory',
+  'trust this folder? codex can',
+  'opening will not change saved trust',
   'do you trust the files',
   'quick safety check: is this a project you created or one you trust',
   'yes, i trust this folder',
@@ -49,6 +51,8 @@ const BLOCKING_PROMPTS: readonly { readonly marker: string; readonly says: strin
   { marker: 'quick safety check: is this a project you created or one you trust', says: 'Do you trust this folder?' },
   { marker: 'do you trust the files', says: 'Do you trust this folder?' },
   { marker: 'do you trust the contents of this directory', says: 'Do you trust this folder?' },
+  { marker: 'trust this folder? codex can', says: 'Do you trust this folder?' },
+  { marker: 'opening will not change saved trust', says: 'Open this untrusted folder restricted?' },
   { marker: 'choose the text style', says: 'Choose a text style (first-run setup)' },
   { marker: 'do you want to use this api key', says: 'Use the custom API key it detected?' },
   { marker: 'resume full session as-is', says: 'Resume from a summary, or the full session?' },

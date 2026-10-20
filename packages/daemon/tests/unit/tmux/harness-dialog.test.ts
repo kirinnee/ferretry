@@ -8,7 +8,7 @@ import { DIALOG_KEYS, dialogCursorMoves, paneBlockingDialog, parseHarnessDialog 
 /**
  * The harness's own dialog a pane is parked on, read off real captured frames.
  *
- * The fixtures are frames of Codex 0.145.0 / 0.156.1 and Claude Code 2.1.220 / 2.1.281 as they were
+ * The fixtures are frames of Codex 0.145.0 / 0.156.1 / 0.163.0 and Claude Code 2.1.220 / 2.1.281 as they were
  * drawn; the synthetic frames below reach the branches no fixture happens to take.
  */
 
@@ -71,6 +71,13 @@ const SETTINGS_OPTIONS = [
   opt(2, 'Exit and fix manually'),
   opt(3, 'Continue without these settings'),
 ];
+
+const FOLDER_TRUST_BODY = [
+  'Trust this folder? Codex can read, edit, and run files here, subject to your permission settings. Folder settings',
+  'can run code automatically, even without a model request. Continue only if you trust these files. Your trust',
+  'decision will be saved.',
+].join('\n');
+const FOLDER_TRUST_OPTIONS = [opt(1, 'Trust and continue', true), opt(2, 'Back to Agent Command Center')];
 
 const EXPECTED: Readonly<Record<string, Shape>> = {
   'claude-2.1.220-mcp-servers': {
@@ -184,6 +191,43 @@ const EXPECTED: Readonly<Record<string, Shape>> = {
     body: RELEASE_NOTES,
     options: UPDATE_OPTIONS,
     escape: 'skip',
+    selected: 1,
+  },
+  'codex-0.163.0-directory-trust': {
+    harness: 'codex',
+    kind: 'directory-trust',
+    title: 'Folder access',
+    body: `/home/dev/project\n${FOLDER_TRUST_BODY}`,
+    options: FOLDER_TRUST_OPTIONS,
+    escape: 'back',
+    selected: 1,
+  },
+  'codex-0.163.0-directory-trust-subdirectory': {
+    harness: 'codex',
+    kind: 'directory-trust',
+    title: 'Folder access',
+    body: [
+      '/home/dev/project/sub',
+      'Note: You’re in a subdirectory of a Git project. Trusting will apply to the repository root:',
+      '/home/dev/project',
+      FOLDER_TRUST_BODY,
+    ].join('\n'),
+    options: FOLDER_TRUST_OPTIONS,
+    escape: 'back',
+    selected: 1,
+  },
+  'codex-0.163.0-directory-restricted': {
+    harness: 'codex',
+    kind: 'directory-trust',
+    title: 'Folder access',
+    body: [
+      '/home/dev/scratch',
+      'Config, hooks, and exec policies from untrusted folders stay disabled. Trusted project folders can still contribute',
+      'settings. Skills still load, and tools follow your permission settings. Opening will not change saved trust.',
+    ].join('\n'),
+    // Opening restricted changes no saved trust, so neither row grants any.
+    options: [opt(1, 'Open restricted'), opt(2, 'Back to Agent Command Center')],
+    escape: 'back',
     selected: 1,
   },
 };

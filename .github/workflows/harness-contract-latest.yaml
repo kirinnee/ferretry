@@ -13,6 +13,12 @@ on:
     # Daily, off the hour so it does not queue behind every other scheduled job.
     - cron: '17 6 * * *'
   workflow_dispatch:
+  # A change to the guard itself is measured against the newest harnesses before it lands, not the
+  # morning after; a change elsewhere cannot move what this measures.
+  pull_request:
+    paths:
+      - packages/fleet/tests/contract/**
+      - .github/workflows/harness-contract-latest.yaml
 
 jobs:
   latest:
