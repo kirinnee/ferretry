@@ -341,7 +341,7 @@
   display: flex;
   overflow: auto;
   padding: var(--pad-panel);
-  padding-bottom: max(var(--pad-panel), env(safe-area-inset-bottom, 0px));
+  padding-bottom: max(var(--pad-panel), var(--safe-bottom));
   background: var(--bg);
   inset-inline: 0;
   overscroll-behavior: contain;

@@ -49,6 +49,7 @@ import { chromium } from 'playwright-core';
 import { THEME_FAMILIES } from '../src/lib/theme-preferences.ts';
 import { captureElement } from './gallery-capture.ts';
 import { assertFixedElementsClear } from './landing-geometry.ts';
+import { runSafeAreaGeometry, SAFE_AREA_GEOMETRY_CHECKS } from './safe-area-geometry.ts';
 import { runSessionLayoutGeometry, SESSION_LAYOUT_GEOMETRY_CHECKS } from './session-layout-geometry.ts';
 
 const harnessDir = dirname(fileURLToPath(import.meta.url));
@@ -117,6 +118,8 @@ const FILES_ONLY = process.argv.includes('--files-only');
 const PAIRING_FAILURES_ONLY = process.argv.includes('--pairing-failures-only');
 /** Just the session page's layout geometry (`session-layout-geometry.ts`), capturing its evidence frames. */
 const SESSION_LAYOUT_ONLY = process.argv.includes('--session-layout-only');
+/** Just the bottom safe-area geometry (`safe-area-geometry.ts`), capturing its evidence frames. */
+const SAFE_AREA_ONLY = process.argv.includes('--safe-area-only');
 
 /**
  * Whether this invocation walks the Settings block at all, which decides which tally it owes.
@@ -143,7 +146,8 @@ const WALKS_SETTINGS = !(
   SESSION_CONTEXT_MENU_ONLY ||
   ABOUT_ONLY ||
   AGENT_CLIS_ONLY ||
-  SESSION_LAYOUT_ONLY
+  SESSION_LAYOUT_ONLY ||
+  SAFE_AREA_ONLY
 );
 
 /**
@@ -2071,7 +2075,7 @@ try {
 
   const browser = await chromium.launch({ executablePath: chrome, headless: true });
   try {
-    for (const viewport of SESSION_LAYOUT_ONLY ? [] : VIEWPORTS) {
+    for (const viewport of SESSION_LAYOUT_ONLY || SAFE_AREA_ONLY ? [] : VIEWPORTS) {
       const context = await browser.newContext({
         ...(viewport.name === 'mobile'
           ? PHONE_CONTEXT
@@ -3996,6 +4000,29 @@ try {
     if (owesSessionLayout)
       process.stdout.write(
         `✅ session layout geometry checks: ${sessionLayoutChecks}/${SESSION_LAYOUT_GEOMETRY_CHECKS} in ${SCHEME}\n`,
+      );
+
+    // THE BOTTOM SAFE-AREA INSET'S ONE OWNER, on a simulated home-indicator phone: at rest, keyboard up and
+    // down, and rotated. Its own contexts, so it runs after the viewport passes.
+    const owesSafeArea = WALKS_SETTINGS || SAFE_AREA_ONLY;
+    const safeAreaChecks = owesSafeArea
+      ? await runSafeAreaGeometry({
+          browser,
+          rootUrl: server.url.toString(),
+          scheme: SCHEME,
+          fail,
+          keyboardShim: VISUAL_VIEWPORT_SHIM,
+          ...(SAFE_AREA_ONLY ? { captureDir: outDir } : {}),
+        })
+      : 0;
+    if (owesSafeArea && safeAreaChecks !== SAFE_AREA_GEOMETRY_CHECKS)
+      fail(
+        `the run made ${safeAreaChecks} safe-area geometry checks instead of the ` +
+          `${SAFE_AREA_GEOMETRY_CHECKS} it owes — a screen or a scenario was skipped`,
+      );
+    if (owesSafeArea)
+      process.stdout.write(
+        `✅ safe-area geometry checks: ${safeAreaChecks}/${SAFE_AREA_GEOMETRY_CHECKS} in ${SCHEME}\n`,
       );
 
     // THE CLOSING LINE, and the only one the CI script insists on. It is reached after both viewports

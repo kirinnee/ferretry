@@ -144,6 +144,11 @@ for scheme in "${schemes[@]}"; do
   layout="$(grep '^✅ session layout geometry checks: ' "${log}" || true)"
   [ -z "${layout}" ] && echo "❌ the ${scheme} run exited 0 without reporting its session layout geometry tally" >&2 && echo "   The harness prints it only once the pass finishes; either the run ended early or the" >&2 && echo "   SESSION_LAYOUT_GEOMETRY_CHECKS assertion in harness/screenshot.ts was removed" >&2 && exit 1
 
+  # The bottom safe-area tally (one owner of the home-indicator inset, at rest, keyboard up and down, rotated),
+  # required for the same reason: iPhones shipped a dead band twice the inset with every gate green.
+  safe_area="$(grep '^✅ safe-area geometry checks: ' "${log}" || true)"
+  [ -z "${safe_area}" ] && echo "❌ the ${scheme} run exited 0 without reporting its safe-area geometry tally" >&2 && echo "   The harness prints it only once the pass finishes; either the run ended early or the" >&2 && echo "   SAFE_AREA_GEOMETRY_CHECKS assertion in harness/screenshot.ts was removed" >&2 && exit 1
+
   # A zero-byte PNG is a capture that failed in a way Playwright did not raise. Cheap to check, and it
   # keeps the artifact honest: a reviewer who opens an empty file learns nothing and blames the viewer.
   empty="$(find packages/pwa/harness/out -maxdepth 1 -name '*.png' -size 0 -print -quit)"

@@ -421,7 +421,7 @@
 }
 
 .kt-webterm[data-expanded] .kt-webterm__stage {
-  padding-bottom: env(safe-area-inset-bottom, 0);
+  padding-bottom: var(--safe-bottom);
 }
 
 /* CO-CONTROL — who else is in this shell, stated before the reader types.
