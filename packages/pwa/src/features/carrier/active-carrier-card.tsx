@@ -18,19 +18,64 @@
  * component chooses nothing about the wording; it only decides that the wording is
  * shown, for the carrier that is actually live.
  *
+ * ONE STATUS WORD COMES FIRST — direct, via relay, or reconnecting — because that is what a reader
+ * came here to learn, and the measured carrier alone cannot say the third: a router remembers the
+ * carrier that last WON, so during an outage it would go on naming a connection that is gone. The
+ * reconnect loop's state (`connection-health.ts`) is the one fact that knows, so it decides the word.
+ *
+ * RUNNING YOUR OWN RELAY IS NOT CONFIGURED HERE. It is an expert path set on the daemon
+ * (`config/daemon.json`), and this page follows whatever the daemon publishes; the card links the
+ * runbook rather than offering a setting, so there is no second place a carrier could be chosen.
+ *
  * NOT KNOWING IS ITS OWN STATE. Before the first request there is no measured
  * answer, and this says so rather than guessing "direct" — that guess was the bug in
  * the text this replaces, which claimed a carrier nothing had measured.
  */
 
-import { type ConnectionChoice, describeConnectionMethod } from '@ferretry/relay';
+import { type ConnectionChoice, type ConnectionMethod, describeConnectionMethod } from '@ferretry/relay';
+import type { ConnectionHealthState } from '../../lib/connection-health.ts';
+import { carrierLines, RECONNECTING_LABEL, stallCopy } from '../connection/connection-copy.ts';
 
 export interface ActiveCarrierCardProps {
   /** What the router measured, or `undefined` before anything has been carried. */
   readonly choice: ConnectionChoice | undefined;
   /** Whether a rendezvous is even available to fall back to, from the live advertisement. */
   readonly relayAdvertised: boolean;
+  /** The reconnect loop's state for this daemon; absent reads as nothing measured yet. */
+  readonly health?: ConnectionHealthState;
+  /** The machine's display name, for the reconnecting advice. */
+  readonly machine?: string;
 }
+
+/** The status the card leads with, as one machine-readable word. */
+export type ConnectionStatusKind = 'direct' | 'relay' | 'reconnecting' | 'none';
+
+/** Where running your own relay is documented. The app links it and never configures it. */
+export const SELF_HOSTING_RUNBOOK_URL =
+  'https://github.com/kirinnee/ferretry/blob/main/docs/cloudflare-relay-self-hosting.md';
+
+/** Said beside that link, so nobody looks for a relay setting this app does not have. */
+export const SELF_HOSTING_NOTE =
+  'Running your own relay is an expert option set on the daemon, not in this app. This page follows ' +
+  'whatever the daemon publishes.';
+
+/** The lead word for each status. */
+export const CONNECTION_STATUS_LABEL: Readonly<Record<ConnectionStatusKind, string>> = {
+  direct: 'Direct',
+  relay: 'Via relay',
+  reconnecting: RECONNECTING_LABEL,
+  none: 'Not measured yet',
+};
+
+/** Which relay carried it: whose, and the host it lives on — never the daemon fingerprint. */
+export const relayName = (method: Extract<ConnectionMethod, { kind: 'relay' }>): string =>
+  `${describeConnectionMethod(method).label} · ${new URL(method.relayUrl).host}`;
+
+/** Reconnecting outranks any measured carrier: the router's answer is the LAST one that won. */
+export const connectionStatusKind = (
+  method: ConnectionMethod | undefined,
+  health: ConnectionHealthState | undefined,
+): ConnectionStatusKind => (health?.kind === 'reconnecting' ? 'reconnecting' : (method?.kind ?? 'none'));
 
 /** Said before the first request, because a carrier nobody has tried is not a carrier. */
 export const CARRIER_UNMEASURED =
@@ -58,9 +103,17 @@ export const CARRIER_STREAM_DISCLOSURE =
   'of it — but it sees when each frame arrives and how big it is, and for a terminal that is the rhythm ' +
   'of your typing.';
 
-export function ActiveCarrierCard({ choice, relayAdvertised }: ActiveCarrierCardProps) {
+export function ActiveCarrierCard({
+  choice,
+  relayAdvertised,
+  health,
+  machine = 'this machine',
+}: ActiveCarrierCardProps) {
   const method = choice?.ok === true ? choice.method : undefined;
   const disclosure = method === undefined ? undefined : describeConnectionMethod(method);
+  const status = connectionStatusKind(method, health);
+  const outage = health?.kind === 'reconnecting' ? health : undefined;
+  const advice = outage === undefined ? undefined : stallCopy(outage.cause, machine);
   const caveat =
     method?.kind === 'relay'
       ? CARRIER_STREAM_DISCLOSURE
@@ -82,8 +135,33 @@ export function ActiveCarrierCard({ choice, relayAdvertised }: ActiveCarrierCard
       data-carrier-kind={method?.kind ?? 'none'}
     >
       <h3 id="settings-carrier-heading" className="m-0 text-row font-semibold text-fg">
-        {disclosure?.label ?? 'Carrier'}
+        Connection
       </h3>
+      {/* The lead answer. `role="status"` so a reader on assistive tech hears it change. */}
+      <p role="status" className="mb-0 mt-1 text-row font-semibold text-fg" data-connection-status={status}>
+        {CONNECTION_STATUS_LABEL[status]}
+        {method?.kind === 'relay' && outage === undefined ? (
+          <span className="font-normal text-muted"> — {relayName(method)}</span>
+        ) : null}
+      </p>
+      {outage === undefined ? null : (
+        <div className="mt-2" data-connection-outage="">
+          <p className="mb-0 text-cell leading-base text-warn">{advice?.heading}.</p>
+          <p className="mb-0 mt-1 text-cell leading-base text-muted">{advice?.advice}</p>
+          {outage.failures.length === 0 ? null : (
+            <ul className="mb-0 mt-2 flex list-disc flex-col gap-1 pl-5 text-meta leading-base text-muted">
+              {carrierLines(outage.failures).map(failure => (
+                <li key={failure.label}>
+                  {failure.label}: {failure.detail}
+                </li>
+              ))}
+            </ul>
+          )}
+          {method === undefined ? null : (
+            <h4 className="mb-0 mt-4 text-cell font-semibold text-fg">Last connected over {disclosure?.label}</h4>
+          )}
+        </div>
+      )}
       {/* The measured sentence, or the honest absence of one. Never a default. */}
       <p className="mb-0 mt-1 text-cell leading-base text-muted">
         {choice === undefined ? CARRIER_UNMEASURED : choice.reason}
@@ -120,6 +198,17 @@ export function ActiveCarrierCard({ choice, relayAdvertised }: ActiveCarrierCard
           </ul>
         </>
       )}
+      <p className="mb-0 mt-4 text-meta leading-base text-muted" data-self-hosting-note="">
+        {SELF_HOSTING_NOTE}{' '}
+        <a
+          className="inline-flex min-h-[44px] items-center text-accent underline sm:min-h-0"
+          href={SELF_HOSTING_RUNBOOK_URL}
+          target="_blank"
+          rel="noreferrer noopener"
+        >
+          Self-hosting runbook
+        </a>
+      </p>
     </section>
   );
 }

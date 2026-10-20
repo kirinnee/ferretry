@@ -19,6 +19,7 @@ import { DENSITY_OPTIONS, useDensity } from '../../hooks/use-density.ts';
 import { type ThemeState, useTheme } from '../../hooks/use-theme.ts';
 import type { WardenStatusReader } from '../../hooks/use-warden-status.ts';
 import { cn } from '../../lib/class-names.ts';
+import type { ConnectionHealthState } from '../../lib/connection-health.ts';
 import type { DaemonConnectionRecord } from '../../lib/connections.ts';
 import type { DaemonControlsStore } from '../../lib/controls.ts';
 import type { DaemonId } from '../../lib/daemon-connection.ts';
@@ -289,6 +290,8 @@ export interface SettingsPageProps {
   readonly carrier?: ConnectionChoice | undefined;
   /** Whether the live advertisement offers a rendezvous to fall back to at all. */
   readonly relayAdvertised?: boolean;
+  /** The reconnect loop's state for the active daemon, for the Connection panel. */
+  readonly connectionHealth?: ConnectionHealthState | undefined;
   /** How the page commits an in-app navigation; without one it assigns the address. */
   readonly onNavigate?: (to: string) => void;
   readonly className?: string;
@@ -324,6 +327,7 @@ export function SettingsPage({
   onAddDaemon,
   carrier,
   relayAdvertised = false,
+  connectionHealth,
   onNavigate,
   className,
 }: SettingsPageProps) {
@@ -576,6 +580,7 @@ export function SettingsPage({
               additionalTabs={daemonSettingsTabs}
               carrier={carrier}
               relayAdvertised={relayAdvertised}
+              connectionHealth={connectionHealth}
               probeDaemon={probeDaemon}
               onRenameDaemon={onRenameDaemon}
               onRemoveDaemon={onRemoveDaemon}
@@ -583,6 +588,7 @@ export function SettingsPage({
           ),
     [
       carrier,
+      connectionHealth,
       createGrantClient,
       createPairingClient,
       createPasskeyClient,

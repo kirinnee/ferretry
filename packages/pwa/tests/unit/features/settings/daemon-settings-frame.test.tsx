@@ -255,3 +255,33 @@ describe('daemon settings panel list', () => {
     }
   });
 });
+
+describe('daemon settings Connection panel', () => {
+  it('says reconnecting from the health it is handed, for this frame’s machine', () => {
+    const view = render(
+      <DaemonSettingsFrame
+        connection={alpha}
+        name="Alpha"
+        readWardenStatus={unavailable}
+        createWardenClient={unavailable}
+        panel="carrier"
+        onOpenPanel={() => undefined}
+        connectionHealth={{
+          kind: 'reconnecting',
+          since: 0,
+          attempt: 1,
+          nextAttemptAt: null,
+          failures: [],
+          cause: 'unknown',
+          stalled: false,
+        }}
+      />,
+    );
+
+    const status = must(view.root.findAll(node => node.props.role === 'status')[0], 'the connection status');
+    expect(status.props['data-connection-status']).toBe('reconnecting');
+    expect(JSON.stringify(view.toJSON())).toContain('Can’t reach Alpha');
+
+    run(() => view.unmount());
+  });
+});
