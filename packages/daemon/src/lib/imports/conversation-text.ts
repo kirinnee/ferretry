@@ -7,7 +7,7 @@ import {
   parseMessageAttachments,
   readHandoffDocument,
 } from '@ferretry/protocol';
-import type { TranscriptEvent } from '../transcript/index.ts';
+import { isOwnerMessage, type TranscriptEvent } from '../transcript/index.ts';
 
 /**
  * What the OWNER said in a conversation, read back out of a transcript that also records how it was
@@ -129,7 +129,7 @@ export function spokenMessages(
   documents: HandoffDocuments = NO_DOCUMENTS,
 ): readonly string[] {
   return events.flatMap(event => {
-    if (event.kind !== 'message' || event.role !== 'user') return [];
+    if (!isOwnerMessage(event)) return [];
     const spoken = spokenText(event.text, documents);
     return spoken === undefined ? [] : [spoken];
   });
@@ -151,7 +151,7 @@ export function recentExchanges(
 ): readonly ConversationExchangeMessage[] {
   const messages: ConversationExchangeMessage[] = [];
   for (const event of events) {
-    if (event.kind !== 'message') continue;
+    if (event.kind !== 'message' || event.inputSource === 'harness') continue;
     if (event.role === 'user') {
       const spoken = spokenText(event.text, documents);
       if (spoken !== undefined) messages.push({ role: 'user', text: spoken });

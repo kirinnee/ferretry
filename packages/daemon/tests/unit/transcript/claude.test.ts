@@ -307,6 +307,39 @@ describe('ClaudeTranscriptParser', () => {
     should(mixed.events).containDeep([{ kind: 'tool-result', result: { text: 'typed output' } }]);
     should(object.events).containDeep([{ kind: 'tool-result', result: { text: undefined } }]);
   });
+
+  it('should mark a user record Claude Code wrote itself as harness input, and nothing the person typed', () => {
+    // Arrange — the shapes Claude Code writes: a background task finishing (`origin.kind`), a
+    // subagent's message, a meta record, the person (`origin.kind: human`), and a record with no
+    // origin at all, which every older transcript is.
+    const subject = new ClaudeTranscriptParser();
+    const user = (extra: Record<string, unknown>, content: unknown) =>
+      subject.parseRecord({ type: 'user', message: { role: 'user', content }, ...extra }).events;
+    const notification =
+      '<task-notification>\n<task-id>bdwjs9ydf</task-id>\n<status>completed</status>\n<summary>Background command "bun test" completed (exit code 0)</summary>\n</task-notification>';
+
+    // Act
+    const task = user({ origin: { kind: 'task-notification' } }, notification);
+    const peer = user({ origin: { kind: 'peer', from: 'a82fcaa67939ed5ce', name: 'general-purpose' } }, [
+      {
+        type: 'text',
+        text: 'Another Claude session sent a message:\n<agent-message from="a82f">\nDone.\n</agent-message>',
+      },
+    ]);
+    const meta = user({ isMeta: true }, [{ type: 'text', text: '[Image: original 1080x2400]' }]);
+    const human = user({ origin: { kind: 'human' } }, 'ship it');
+    const plain = user({}, 'ship it too');
+    const blankOrigin = user({ origin: { kind: '' } }, 'still mine');
+    const result = user({ origin: { kind: 'task-notification' } }, [
+      { type: 'tool_result', tool_use_id: 'tool-1', content: 'out' },
+    ]);
+
+    // Assert
+    should(task).containDeep([{ kind: 'message', role: 'user', inputSource: 'harness', text: notification }]);
+    should(peer).containDeep([{ kind: 'message', inputSource: 'harness' }]);
+    should(meta).containDeep([{ kind: 'message', inputSource: 'harness' }]);
+    for (const events of [human, plain, blankOrigin, result]) should(events[0]).not.have.property('inputSource');
+  });
 });
 
 describe('ClaudeTranscriptParser compaction boundaries', () => {
