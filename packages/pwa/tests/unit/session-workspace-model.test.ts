@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-
+import { turnFileInstruction } from '@ferretry/protocol';
 import {
   type SessionWorkspaceRefreshEnvironment,
   sendRetrier,
@@ -7,7 +7,6 @@ import {
   transcriptEntriesFromLog,
 } from '../../src/components/session-workspace-model.ts';
 import { sessionView } from '../support/sessions.ts';
-import { turnFileInstruction } from '@ferretry/protocol';
 
 const NOW = Date.UTC(2026, 9, 18, 12, 0, 0);
 
@@ -643,6 +642,43 @@ describe('transcriptEntriesFromLog · who a user record is from', () => {
       expect.objectContaining({ kind: 'system', text: 'A notice with no clock.' }),
     ]);
     expect(entries[1]).not.toHaveProperty('at');
+  });
+
+  test("renders the harness's own background-task event as a system row, never as You", () => {
+    // The daemon's rendering of a real Claude Code record: the body indented under its header.
+    const entries = transcriptEntriesFromLog(
+      [
+        '[10:07:00] user/message: <task-notification>',
+        '    <task-id>bdwjs9ydf</task-id>',
+        '    <output-file>/tmp/claude-1000/project/session/tasks/bdwjs9ydf.output</output-file>',
+        '    <status>completed</status>',
+        '    <summary>Background command "bun test &amp;&amp; echo ok" completed (exit code 0)</summary>',
+        '    </task-notification>',
+        '[10:07:01] user/message: [Request interrupted by user]',
+        'user/message: thanks, that works',
+      ].join('\n'),
+      NOW,
+    );
+    expect(entries.map(entry => entry.kind)).toEqual(['system', 'system', 'user']);
+    expect(entries[0]).toMatchObject({
+      kind: 'system',
+      text: 'Background command "bun test && echo ok" completed (exit code 0)',
+      at: Date.UTC(2026, 9, 18, 10, 7, 0),
+      event: {
+        label: 'task notification',
+        tasks: [{ kind: 'command', outcome: 'finished', subject: 'bun test && echo ok', exitCode: 0 }],
+      },
+    });
+    expect(entries[0]).not.toHaveProperty('label');
+    expect(entries[1]).toMatchObject({ kind: 'system', event: { label: 'interrupted' } });
+    expect(entries[2]).toMatchObject({ kind: 'user', label: 'You', text: 'thanks, that works' });
+    expect(entries[2]).not.toHaveProperty('event');
+  });
+
+  test('a harness event with no summary reads as its label and keeps no clock it was not given', () => {
+    const [entry] = transcriptEntriesFromLog('user/message: <task-notification>\n    </task-notification>', NOW);
+    expect(entry).toMatchObject({ kind: 'system', text: 'task notification' });
+    expect(entry).not.toHaveProperty('at');
   });
 
   test("shows a person's own paste without its markup, still as You", () => {

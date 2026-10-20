@@ -5,6 +5,7 @@ import type { TranscriptEntry } from '../lib/session-screens.ts';
 import { PeerMessageRow, SystemNoticeRow } from './agent-message-rows.tsx';
 import { CommandRow } from './command-row.tsx';
 import { HandoffBody, HandoffView, useHandoffReading } from './handoff-message.tsx';
+import { HarnessEventRow } from './harness-event-row.tsx';
 import { LedgerMessage, type SendRetry } from './ledger-message.tsx';
 import { Markdown } from './markdown.tsx';
 import { useReferenceSurface } from './reference-surface.tsx';
@@ -70,6 +71,8 @@ export function TranscriptRow({
     return <PeerMessageRow entry={entry} peer={entry.peer} rhythm={rhythm} />;
   if (entry.kind === 'user' && entry.handoff !== undefined)
     return <HandoffRow answered={answered} entry={entry} handoff={entry.handoff} rhythm={rhythm} />;
+  if (entry.kind === 'system' && entry.event !== undefined)
+    return <HarnessEventRow event={entry.event} rhythm={rhythm} />;
   if (entry.kind === 'system') return <SystemNoticeRow entry={entry} rhythm={rhythm} />;
   if (entry.kind === 'user') return <OwnMessageRow answered={answered} entry={entry} rhythm={rhythm} />;
   return <TranscriptTextRow entry={entry} rhythm={rhythm} />;
