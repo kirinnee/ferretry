@@ -450,16 +450,6 @@ export interface CreateAppStoreOptions {
   readonly connectionSignals?: ConnectionSignalEnvironment;
 }
 
-/**
- * The origin a daemon's requests are built against.
- *
- * `baseUrl` is already normalised to an origin by `daemonBaseUrl`, so this is a
- * total function — but it is written as one place rather than inline so the router's
- * lookup and the request builder can never disagree about what "the same daemon"
- * means.
- */
-const daemonOrigin = (daemon: DaemonConnection): string => daemon.baseUrl;
-
 /** Builds the document-lifetime stores and registers every daemon cache together. */
 export async function createAppStore(options: CreateAppStoreOptions = {}): Promise<AppStore> {
   const fetcher = options.fetcher ?? browserFetch;
@@ -665,8 +655,9 @@ export async function createAppStore(options: CreateAppStoreOptions = {}): Promi
     forget: daemonId => void deviceKeys.remove(daemonId).catch(() => undefined),
   });
   // The router must never hold its own copy of who is paired: a second copy is how a
-  // request keeps going to a daemon somebody has unpaired.
-  carrier.resolveByOrigin(origin => connections.list().find(record => daemonOrigin(record) === origin));
+  // request keeps going to a daemon somebody has unpaired. It routes by the daemon a request was
+  // built for, never by address: two machines paired over the relay share one loopback origin.
+  carrier.resolvePaired(() => connections.list());
   const landingMarkerStorage = options.landingMarkerStorage ?? browserLandingMarkerStorage();
   const syncLandingPage = (): void =>
     syncLandingMarker(landingMarkerStorage, connections.getSnapshot().connections.length);

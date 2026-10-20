@@ -54,6 +54,7 @@ import {
 import { newDaemonIdentity } from '../../../relay/tests/support/identities.ts';
 import { FakeObjectState, type FakeSocket, testRuntime } from '../../../relay/tests/support/workers-fakes.ts';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
+import { daemonRequest } from '../../src/lib/daemon-transport.ts';
 import { daemonSessionScope } from '../../src/lib/daemon-scope.ts';
 import {
   DaemonCarrierRouter,
@@ -1211,5 +1212,106 @@ describe('a relayed remote browser view, browser to daemon, through the real ren
         'the stream path': streamPath,
       }),
     ).be.empty();
+  });
+});
+
+/* ---------- two machines that announce the same address ---------------------- */
+
+/**
+ * The address every daemon a phone pairs with over the hosted relay announces: its own loopback.
+ * Two machines, one origin — so an origin can never say which machine a request is for.
+ */
+const LOOPBACK_URL = 'http://127.0.0.1:7431';
+
+describe('two paired machines that share one loopback address, through the real rendezvous', () => {
+  /**
+   * The owner's blocker, reproduced end to end: "when I add 2 daemons (of two different machines), it
+   * will show both machine as the later added one". Each machine is a real daemon link behind its own
+   * rendezvous (one per fingerprint, as the hosted relay addresses them), the browser's real router
+   * walks direct-then-relay for both, and each machine answers with its own name.
+   */
+  const twoMachines = async () => {
+    const studio = await newDaemonIdentity();
+    const laptop = await newDaemonIdentity();
+    const bridges = new Map<string, RelayBridge>();
+    const served = new Map<string, string[]>();
+    for (const [identity, name] of [
+      [studio, 'studio'],
+      [laptop, 'laptop'],
+    ] as const) {
+      const bridge = new RelayBridge();
+      const paths: string[] = [];
+      served.set(name, paths);
+      await bridge.admitDaemon(identity, async request => {
+        paths.push(request.path);
+        return await answered(JSON.stringify({ name }))(request);
+      });
+      bridges.set(identity.daemonId, bridge);
+    }
+    const paired = (identity: Awaited<ReturnType<typeof newDaemonIdentity>>) =>
+      daemonConnection({
+        daemonId: identity.daemonId,
+        baseUrl: LOOPBACK_URL,
+        deviceId: DEVICE_ID,
+        carriers: [
+          { kind: 'direct', daemonUrl: LOOPBACK_URL },
+          { kind: 'relay', relayUrl: RELAY_URL, operator: 'hosted' },
+        ],
+      });
+    const studioConnection = paired(studio);
+    const laptopConnection = paired(laptop);
+    const overHttp: string[] = [];
+    const router = new DaemonCarrierRouter({
+      crypto,
+      deviceKey: async () => DEVICE.claim.key,
+      network: async input => {
+        overHttp.push(input.toString());
+        throw new TypeError('Failed to fetch');
+      },
+      // The phone cannot reach either machine's loopback; every rendezvous dial reaches the room its
+      // fingerprint addresses, exactly as the hosted relay routes it.
+      dial: url => {
+        const target = new URL(url);
+        if (target.hostname === new URL(LOOPBACK_URL).hostname)
+          return [...bridges.values()][0]?.unreachable() ?? new RelayBridge().unreachable();
+        const fingerprint = decodeURIComponent(target.pathname.split('/')[3] ?? '');
+        const bridge = bridges.get(fingerprint);
+        if (bridge === undefined) throw new Error(`no rendezvous for ${fingerprint}`);
+        return bridge.dial(fingerprint);
+      },
+      heartbeat: () => () => undefined,
+    });
+    // Newest first, the order the pairing registry lists them in: the laptop was added second.
+    router.resolvePaired(() => [laptopConnection, studioConnection]);
+    const settle = async () => await Promise.all([...bridges.values()].map(async bridge => await bridge.settle()));
+    return { router, studioConnection, laptopConnection, served, overHttp, settle };
+  };
+
+  it('should carry each machine its own requests even though both live at the same address', async () => {
+    const { router, studioConnection, laptopConnection, served, settle } = await twoMachines();
+
+    const askStudio = daemonRequest(studioConnection, '/v1/machine');
+    const askLaptop = daemonRequest(laptopConnection, '/v1/machine');
+    should(askStudio.url).equal(askLaptop.url);
+
+    const fromStudio = await router.fetch(askStudio.url, askStudio.init);
+    await settle();
+    const fromLaptop = await router.fetch(askLaptop.url, askLaptop.init);
+    await settle();
+
+    should(await fromStudio.json()).eql({ name: 'studio' });
+    should(await fromLaptop.json()).eql({ name: 'laptop' });
+    should(served.get('studio')).eql(['/v1/machine']);
+    should(served.get('laptop')).eql(['/v1/machine']);
+  });
+
+  it('should refuse a request that does not say which of the two machines it is for', async () => {
+    const { router, served, overHttp } = await twoMachines();
+
+    await should(router.fetch(`${LOOPBACK_URL}/v1/machine`, {})).be.rejectedWith(/2 paired machines share/u);
+    // Neither machine was asked, and nothing went to the plain network in its place.
+    should(served.get('studio')).eql([]);
+    should(served.get('laptop')).eql([]);
+    should(overHttp).eql([]);
   });
 });

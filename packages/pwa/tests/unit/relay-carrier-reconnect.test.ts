@@ -142,7 +142,7 @@ const routerFor = async (
     },
     health: health.reporter,
   });
-  router.resolveByOrigin(origin => (origin === DAEMON_URL ? daemon : undefined));
+  router.resolvePaired(() => [daemon]);
   return {
     router,
     daemon,

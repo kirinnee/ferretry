@@ -3,6 +3,7 @@ import type { IFyHttpTransport, SessionView } from '@ferretry/protocol';
 import should from 'should';
 import { DaemonHttpTransport, daemonApiClient, PWA_PROTOCOL_VERSION } from '../../src/lib/api-client.ts';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
+import { boundDaemonId } from '../../src/lib/daemon-transport.ts';
 
 const health = {
   ok: true,
@@ -196,6 +197,24 @@ describe('daemon HTTP transport', () => {
     should(String(captured?.input)).equal('https://daemon-a.example.test/v1/health');
     should(captured?.init?.credentials).equal('include');
     should(crossDaemon).throw('API client request must remain on the paired daemon');
+  });
+
+  it('should bind every request to its daemon, because another paired machine may share the address', async () => {
+    // Arrange
+    const bindings: unknown[] = [];
+    const transport = new DaemonHttpTransport(
+      paired('daemon-a', 'http://127.0.0.1:7431', 'token-a'),
+      async (_input, init) => {
+        bindings.push(boundDaemonId(init));
+        return new Response();
+      },
+    );
+
+    // Act
+    await transport.send('http://127.0.0.1:7431/v1/health', {});
+
+    // Assert
+    should(bindings).eql(['daemon-a']);
   });
 });
 

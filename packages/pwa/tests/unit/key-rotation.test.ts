@@ -265,7 +265,7 @@ const rig = async (
     },
     ...(options.rotation === false ? {} : { rotation: newRotation(store) }),
   });
-  router.resolveByOrigin(origin => (origin === URL_BASE ? connection : undefined));
+  router.resolvePaired(() => [connection]);
   return {
     router,
     daemonId: identity.daemonId,

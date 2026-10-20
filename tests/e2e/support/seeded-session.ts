@@ -58,13 +58,24 @@ export interface SeededSession {
   readonly sessionId: string;
 }
 
+/** What a journey with more than one machine needs to tell their sessions apart. Both default. */
+export interface SeededSessionOptions {
+  readonly sessionId?: string;
+  readonly name?: string;
+}
+
 /**
  * Write one running session into `home`, through the daemon's own storage.
  *
  * `FY_HOME` is set on this process because `buildWorld` resolves the state home from the
  * environment, and restored afterwards so nothing else in the suite inherits it.
  */
-export async function seedRunningSession(home: string, at = new Date().toISOString()): Promise<SeededSession> {
+export async function seedRunningSession(
+  home: string,
+  at = new Date().toISOString(),
+  options: SeededSessionOptions = {},
+): Promise<SeededSession> {
+  const sessionId = options.sessionId ?? SEEDED_SESSION_ID;
   const previous = process.env.FY_HOME;
   process.env.FY_HOME = home;
   try {
@@ -72,14 +83,14 @@ export async function seedRunningSession(home: string, at = new Date().toISOStri
       {},
       { userHome: join(tmpdir(), `fy-absent-user-home-${crypto.randomUUID()}`) },
     ).storage.open();
-    const id = parseSessionId(SEEDED_SESSION_ID);
+    const id = parseSessionId(sessionId);
     await opened.storage.writeConfig(
       id,
       SessionConfigSchema.parse({
-        id: SEEDED_SESSION_ID,
-        incarnation: `${SEEDED_SESSION_ID}-1`,
+        id: sessionId,
+        incarnation: `${sessionId}-1`,
         runtimeGeneration: 1,
-        name: 'Relay Journey',
+        name: options.name ?? 'Relay Journey',
         teammate: 'ada',
         boardAccess: 'none',
         agent: 'claude-auto',
@@ -104,11 +115,11 @@ export async function seedRunningSession(home: string, at = new Date().toISOStri
     );
     await opened.storage.writeState(
       id,
-      SessionStateSchema.parse({ id: SEEDED_SESSION_ID, status: 'running', turn: 1, lastActivityAt: at }),
+      SessionStateSchema.parse({ id: sessionId, status: 'running', turn: 1, lastActivityAt: at }),
     );
     await opened.storage.close();
     await writeUnlockOff(home, at);
-    return { sessionId: SEEDED_SESSION_ID };
+    return { sessionId };
   } finally {
     if (previous === undefined) delete process.env.FY_HOME;
     else process.env.FY_HOME = previous;
