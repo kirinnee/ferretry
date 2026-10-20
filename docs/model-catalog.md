@@ -239,8 +239,8 @@ input where a provider lists no cache-write price, a regional premium.
 
 Analytics priced a session ONLY from the operator rates in `config/daemon.json`
 (`analyticsPricing`), which default to empty — so on every machine nobody had typed rates into, every
-session was `unknown_pricing_model`. Even with rates, four things would
-have kept a session unpriced, and each is handled:
+session was `unknown_pricing_model`. With rates in place, four spellings and billing shapes decide
+whether a session can be priced; the first was already handled, the other three were not:
 
 - **`claude-opus-5-5[1m]`** — the selector's context suffix. Already removed by the shared model-identity
   rule (`packages/protocol/src/lib/analytics-model-identity.ts`), as is a dated revision
