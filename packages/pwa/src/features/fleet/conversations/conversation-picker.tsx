@@ -267,7 +267,7 @@ export function ConversationPicker({
           id={searchId}
           type="search"
           className="kt-input w-full"
-          placeholder="Search messages and folders"
+          placeholder="Search names, messages and folders"
           autoComplete="off"
           data-conversations-search=""
           value={filter.text}

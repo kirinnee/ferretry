@@ -387,7 +387,7 @@ export function ContinueConversation({
         id={searchId}
         type="search"
         className="kt-input w-full"
-        placeholder={source === 'sessions' ? 'Name, words or folder' : 'Words or folder'}
+        placeholder="Name, words or folder"
         autoComplete="off"
         data-continue-search=""
         value={text}
