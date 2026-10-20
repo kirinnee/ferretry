@@ -106,7 +106,7 @@ Every self-update is the same transaction:
 3. **Upgrade** with the method's own tool (`brew`, `nix profile`) or, for a standalone binary, by
    downloading and verifying the release archive.
 4. **Restart** through the service manager, exactly as `fy daemon restart` does.
-5. **Health check**: `/healthz` must report the target version within 30 seconds.
+5. **Health check**: the installed version must be the target **or newer**, and `/healthz` must report that installed version within 30 seconds. A package manager can build something newer than the release that was offered (semantic-release tags before the GitHub release, the cask and the archives catch up, and `nix profile upgrade` builds the flake's `main`); that is a healthy update, reported as `updated 4.46.0 → 4.47.1 (newer than the 4.47.0 release you were offered)`. An older, unchanged, pre-release-of-the-target or unreadable version is still rolled back. A nix install is offered the newest stable tag rather than only the latest release, so the prompt names the version it will get; Homebrew and standalone installs download release assets, so they are offered the release.
 6. **Roll back** when it does not: `nix profile rollback`, or putting the previous standalone binary
    back, then restart again and confirm the previous version serves.
 7. **Report** the outcome. The new daemon reads the report file and shows it in the app.

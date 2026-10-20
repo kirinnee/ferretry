@@ -54,6 +54,7 @@ import {
   type RelayCarrierDecision,
   RelayLink,
   type RelayLinkTimer,
+  relayCapacityRedialDelayMs,
   relayDialUrl,
   relayRedialDelayMs,
   relaySocketIsStale,
@@ -154,6 +155,8 @@ export class BunRelayCarrier {
   #received = 0;
   /** Redials scheduled since the rendezvous last accepted a claim. */
   #attempts = 0;
+  /** `4432` refusals in a row since the rendezvous last accepted a claim. */
+  #capacityRefusals = 0;
   #offlineSince: number | undefined;
   #dialledAt = 0;
   /** The last `error`/`closed` the rendezvous sent in-band on this socket: it explains a refusal and
@@ -382,6 +385,7 @@ export class BunRelayCarrier {
     }
     this.#attempts = 0;
     this.#offlineSince = undefined;
+    this.#capacityRefusals = 0;
   }
 
   /** Remember what the rendezvous said in-band about this socket, for the disconnect line. */
@@ -416,9 +420,25 @@ export class BunRelayCarrier {
       // the one disconnect that means "phones were being told this machine is gone".
       this.#say('liveness: the rendezvous no longer held this daemon’s claim — claiming again');
     }
-    const delay = relayRedialDelayMs(this.#attempts, this.#random(), this.#decision.reconnectMs);
+    const capacity =
+      closed.startsWith(`${RELAY_CLOSE_CODES.hostedCapacity} `) ||
+      said?.startsWith(`error ${RELAY_CLOSE_CODES.hostedCapacity} `) === true;
+    this.#capacityRefusals = capacity ? this.#capacityRefusals + 1 : 0;
+    const delay = capacity
+      ? relayCapacityRedialDelayMs(this.#capacityRefusals, this.#random())
+      : relayRedialDelayMs(this.#attempts, this.#random(), this.#decision.reconnectMs);
     this.#attempts += 1;
-    this.#say(`disconnected (${how}) — redial attempt ${this.#attempts} in ${formatDelay(delay)}`);
+    if (capacity) {
+      // A ceiling is the relay's answer, not a broken path, so it is said as one: what was refused, and
+      // that the next try is minutes away. One line per attempt is at most one a minute, because the
+      // capacity schedule never waits less than that — the 2026-10-19 log had one every four seconds.
+      this.#detail = `the hosted relay refused this daemon a connection slot (${how}); retrying every few minutes`;
+      this.#say(
+        `refused: the relay's per-daemon or account connection ceiling is full (${how}) — redial attempt ${this.#attempts} in ${formatDelay(delay)}`,
+      );
+    } else {
+      this.#say(`disconnected (${how}) — redial attempt ${this.#attempts} in ${formatDelay(delay)}`);
+    }
     this.#redial = this.#scheduler.after(delay, () => this.#dial());
   }
 

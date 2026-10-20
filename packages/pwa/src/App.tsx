@@ -75,6 +75,7 @@ import { DeviceRefusedNotice } from './features/pairing/device-refused-notice.ts
 import { PairingScreen } from './features/pairing/pairing-screen.tsx';
 import { ProjectDetailPage } from './features/projects/project-detail.tsx';
 import { ProjectsPage } from './features/projects/projects-page.tsx';
+import { sessionRowMenuRenderer } from './features/session-actions/row-actions-host.tsx';
 import { SessionSearchControl, SessionSearchProvider } from './features/session-search/session-search.tsx';
 import { aboutSettingsTab } from './features/settings/about-machine.tsx';
 import { CgroupConfigSurface } from './features/settings/cgroup-settings.tsx';
@@ -768,6 +769,7 @@ function ShellSessionsBar({
 }) {
   const store = useAppStore();
   const { navigate } = useRouter();
+  const rowMenuRenderer = useMemo(() => sessionRowMenuRenderer(navigate), [navigate]);
   const { connections } = useConnectionSnapshot();
   const allMachines = useContext(AllMachinesContext);
   const now = useLiveClock({ intervalMs: MACHINE_CLOCK_MS });
@@ -813,6 +815,7 @@ function ShellSessionsBar({
       onNavigate={navigate}
       onOpenPalette={onOpenPalette}
       presentation={shape}
+      renderSessionMenu={rowMenuRenderer}
       learningPassive={learning.passive}
       projects={projects}
       sessions={fleet.daemons.get(connection.daemonId)?.sessions ?? null}

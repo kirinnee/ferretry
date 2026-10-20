@@ -230,6 +230,27 @@
   background: var(--nav-hover, var(--surface-2));
   color: var(--fg);
 }
+/* A row that opens a menu on a held finger: no callout or text selection stealing the press, and the
+   hold shows itself — the row sinks and tints over the dwell — before the sheet arrives. */
+.fy-sbar__session[aria-haspopup] {
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.fy-sbar__session[data-sbar-pressing] {
+  background: var(--nav-sel-bg, var(--accent-soft));
+  border-color: var(--nav-sel-edge, var(--accent-border));
+  transform: scale(0.985);
+  transition:
+    transform 500ms ease-out,
+    background-color 500ms ease-out;
+}
+@media (prefers-reduced-motion: reduce) {
+  .fy-sbar__session[data-sbar-pressing] {
+    transform: none;
+    transition: none;
+  }
+}
 .fy-sbar__session[aria-current='page'] {
   border-color: var(--nav-sel-edge, var(--accent-border));
   background: var(--nav-sel-bg, var(--accent-soft));

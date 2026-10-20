@@ -64,6 +64,7 @@ import {
   HOSTED_RELAY_PUBLIC_PATH,
   type HostedRelayControlNamespace,
   hostedRelayControlStub,
+  reconcileHostedRelayReservations,
   releaseHostedRelayReservation,
   requestHostedRelayDecision,
 } from './hosted-control.ts';
@@ -166,6 +167,18 @@ const RESERVATION_HEADER = 'x-ferretry-relay-reservation';
  * no traffic to meter.
  */
 export const HOSTED_CONTROL_OUTAGE_GRACE_MS = 120_000;
+
+/**
+ * How often a live rendezvous tells the control object which reservations its sockets still carry.
+ *
+ * That report is what keeps a reservation leased (§13, "Reservations are leases"): the control object
+ * reclaims one nobody renewed for `HOSTED_RELAY_RESERVATION_LEASE_MILLISECONDS`, and reclaims at once
+ * any of this daemon's that the report shows no socket holds. The heartbeat sweep runs every
+ * `HEARTBEAT_SECONDS`; renewing on every sweep would put a full reservation listing on the one global
+ * object twice a minute per rendezvous, so it is spaced out here — ten renewals fit inside one lease.
+ * In memory: an evicted object renews on its first sweep, which only makes the lease fresher.
+ */
+export const HOSTED_RESERVATION_RENEW_MS = 60_000;
 
 /**
  * Route a socket to its rendezvous, or refuse it cheaply.
@@ -413,6 +426,8 @@ export class RendezvousDurableObject {
   private metering: Promise<void> | undefined;
   /** When the hosted control object first stopped answering, or nothing while it answers. */
   private controlUnreachableSince: number | undefined;
+  /** When this rendezvous last reported its live reservations, or nothing since it was loaded. */
+  private reservationsRenewedAt: number | undefined;
 
   constructor(
     private readonly objectState: RelayObjectState,
@@ -619,7 +634,13 @@ export class RendezvousDurableObject {
         const stamp = this.objectState.getWebSocketAutoResponseTimestamp(socket);
         if (stamp !== null) lastSeen[attachment.socketId] = stamp.getTime();
       }
-      await this.applyStep(reduceRendezvous(state, { kind: 'alarm', at: this.runtime.now(), lastSeen }));
+      try {
+        await this.applyStep(reduceRendezvous(state, { kind: 'alarm', at: this.runtime.now(), lastSeen }));
+      } finally {
+        // After the sweep, so the sockets it evicted have already given their reservations back, and in a
+        // `finally` because a sweep whose peer effect threw still holds whatever sockets it holds.
+        await this.renewReservations(state.daemonId);
+      }
     });
     await this.queue;
   }
@@ -743,6 +764,36 @@ export class RendezvousDurableObject {
     this.controlUnreachableSince ??= now;
     if (now - this.controlUnreachableSince < HOSTED_CONTROL_OUTAGE_GRACE_MS) return 'tolerated';
     return internalDecision('hosted relay accounting is unavailable');
+  }
+
+  /**
+   * Report the reservations this rendezvous's sockets carry, at most once per {@link HOSTED_RESERVATION_RENEW_MS}.
+   *
+   * The runtime's socket list is the only evidence anywhere of which reservations are still held: it
+   * includes hibernating sockets, and it drops sockets the runtime lost without ever calling
+   * `webSocketClose` — the case that leaked a daemon's whole per-daemon ceiling in 2026-10. Never
+   * throws: a report the control object did not take is retried on a later sweep, and the lease
+   * outlasts many missed ones.
+   */
+  private async renewReservations(daemonId: string): Promise<void> {
+    if (!this.isHosted()) return;
+    const control = this.environment.RELAY_CONTROL;
+    if (control === undefined) return;
+    const now = this.runtime.now();
+    if (this.reservationsRenewedAt !== undefined && now - this.reservationsRenewedAt < HOSTED_RESERVATION_RENEW_MS) {
+      return;
+    }
+    const live: string[] = [];
+    for (const socket of this.objectState.getWebSockets()) {
+      const reservationId = attachmentOf(socket)?.reservationId;
+      if (reservationId !== undefined) live.push(reservationId);
+    }
+    const answer = await reconcileHostedRelayReservations(control, daemonId, live);
+    if (answer === null) {
+      console.warn('relay rendezvous could not renew its reservations; retrying on a later sweep');
+      return;
+    }
+    this.reservationsRenewedAt = now;
   }
 
   private async releaseReservation(reservationId: string | undefined): Promise<void> {
