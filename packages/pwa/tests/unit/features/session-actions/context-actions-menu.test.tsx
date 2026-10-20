@@ -204,7 +204,6 @@ describe('ContextActionsMenu — on a desktop', () => {
     const resize = await show();
     await interact(() => window.dispatchEvent(new Event('resize')));
     expect(resize.log.closes).toEqual([false]);
-    mounted = undefined;
   });
 
   it('opens a form row in a popover at the press, and closes it with focus handed back', async () => {
