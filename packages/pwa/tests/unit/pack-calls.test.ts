@@ -305,6 +305,20 @@ describe('readPackCall — new', () => {
   });
 });
 
+describe('readPackCall — redirections', () => {
+  test('a stderr redirect is not part of the brief, the id or the task', () => {
+    expect(readPackCall(bash('fy new --runtime claude "Fix the bug" 2>&1'), 'fy')).toMatchObject({
+      kind: 'new',
+      brief: 'Fix the bug',
+    });
+    expect(readPackCall(bash('fy wait tomi-1 >/dev/null 2>&1'), 'fy')).toMatchObject({ kind: 'wait', id: 'tomi-1' });
+    expect(readPackCall(bash('fy recommend "pick a model" 2>&1 | head'), 'fy')).toMatchObject({
+      kind: 'recommend',
+      task: 'pick a model',
+    });
+  });
+});
+
 describe('readPackCall — wait', () => {
   test('reads the status, the summary and the stop that followed it', () => {
     const text = [

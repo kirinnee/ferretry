@@ -5,6 +5,7 @@ import {
   projectDeliveries,
   readSentMessage,
   shellCommandOf,
+  simpleCommands,
 } from '../../src/lib/peer-delivery.ts';
 import type { ToolCall, TranscriptEntry } from '../../src/lib/session-screens.ts';
 
@@ -34,6 +35,105 @@ describe('shellCommandOf', () => {
     expect(shellCommandOf(call('shell', { command: 'ls' }))).toBeUndefined();
     expect(shellCommandOf(call('shell', { command: [1] }))).toBeUndefined();
     expect(shellCommandOf({ use: { name: undefined as unknown as string, input: { command: 'ls' } } })).toBeUndefined();
+  });
+});
+
+const SCREENSHOT = 'Hello from home-manager-fd (the user asked me to say hi).';
+const argv = (script: string): (readonly string[])[] =>
+  simpleCommands(script).map(words => words.map(word => word.text));
+
+describe('shell redirections are not arguments', () => {
+  test('the "Sent to" card does not end in a stray 2>', () => {
+    expect(readSentMessage(bash(`fy send tanna "${SCREENSHOT}" 2>&1`), 'fy')).toMatchObject({
+      to: 'tanna',
+      body: SCREENSHOT,
+    });
+  });
+
+  const REAL_WORLD: readonly (readonly [string, string, string[][]])[] = [
+    ['stderr into stdout', `fy send tanna "${SCREENSHOT}" 2>&1`, [['fy', 'send', 'tanna', SCREENSHOT]]],
+    ['both to /dev/null', 'fy send tanna hi >/dev/null 2>&1', [['fy', 'send', 'tanna', 'hi']]],
+    ['spaced target', 'fy send tanna hi > /dev/null 2> /tmp/err.log', [['fy', 'send', 'tanna', 'hi']]],
+    [
+      'pipe to tee',
+      'fy send tanna hi 2>&1 | tee /tmp/out',
+      [
+        ['fy', 'send', 'tanna', 'hi'],
+        ['tee', '/tmp/out'],
+      ],
+    ],
+    [
+      'and then echo',
+      'fy send tanna hi 2>&1 && echo sent',
+      [
+        ['fy', 'send', 'tanna', 'hi'],
+        ['echo', 'sent'],
+      ],
+    ],
+    ['append', 'fy send tanna hi >> /tmp/log 2>>/tmp/err', [['fy', 'send', 'tanna', 'hi']]],
+    [
+      'clobber and both-streams',
+      'fy send tanna hi >| out; fy send tanna ho &> all &>> more',
+      [
+        ['fy', 'send', 'tanna', 'hi'],
+        ['fy', 'send', 'tanna', 'ho'],
+      ],
+    ],
+    ['stdin from a file', 'fy send tanna hi < in.txt', [['fy', 'send', 'tanna', 'hi']]],
+    ['here-string is not argv', 'fy send tanna hi <<< "not a word"', [['fy', 'send', 'tanna', 'hi']]],
+    ['dup and close', 'fy send tanna hi 2>&- >&2 <&3 3<&0 2>&1-', [['fy', 'send', 'tanna', 'hi']]],
+    ['quoted target', 'fy send tanna hi > "/tmp/my out" 2>\'/tmp/e r\'', [['fy', 'send', 'tanna', 'hi']]],
+    ['read-write and fd target', 'fy send tanna hi <> rw 5<in', [['fy', 'send', 'tanna', 'hi']]],
+    ['redirect glued to the word', 'fy send tanna hi>out', [['fy', 'send', 'tanna', 'hi']]],
+    ['redirect before the command', '>/dev/null fy send tanna hi', [['fy', 'send', 'tanna', 'hi']]],
+    ['>& with a file', 'fy send tanna hi >&out.log', [['fy', 'send', 'tanna', 'hi']]],
+    ['a digit apart from the operator is an argument', 'fy send tanna 2 > out', [['fy', 'send', 'tanna', '2']]],
+    ['a quoted digit is an argument', 'fy send tanna "2">out', [['fy', 'send', 'tanna', '2']]],
+    ['an escaped operator is text', 'fy send tanna a\\>b', [['fy', 'send', 'tanna', 'a>b']]],
+    ['an operator in quotes is text', 'fy send tanna "a > b 2>&1"', [['fy', 'send', 'tanna', 'a > b 2>&1']]],
+    [
+      'a dangling redirect',
+      'fy send tanna hi >; echo done',
+      [
+        ['fy', 'send', 'tanna', 'hi'],
+        ['echo', 'done'],
+      ],
+    ],
+  ];
+  for (const [name, script, expected] of REAL_WORLD) {
+    test(name, () => {
+      expect(argv(script)).toEqual(expected);
+    });
+  }
+
+  test('a heredoc after the command is dropped with its body', () => {
+    expect(argv('fy send tanna hi <<EOF\nfy send zed boom\nEOF\necho after')).toEqual([
+      ['fy', 'send', 'tanna', 'hi'],
+      ['echo', 'after'],
+    ]);
+    expect(argv("cat <<-'END' > out\n\tline\n\tEND\nls")).toEqual([['cat'], ['ls']]);
+    expect(argv('cat <<A <<B\none\nA\ntwo\nB\nls')).toEqual([['cat'], ['ls']]);
+    expect(argv('cat <<EOF\nnever closed\n')).toEqual([['cat']]);
+  });
+
+  test('a send with a heredoc substitution and a redirect keeps exactly its body', () => {
+    const script = `fy send tanna "$(cat <<'EOF'\nline one\nline two\nEOF\n)" > /dev/null 2>&1`;
+    expect(readSentMessage(bash(script), 'fy')?.body).toBe('line one\nline two');
+  });
+
+  test('--ask and a message file survive a redirect', () => {
+    expect(readSentMessage(bash('fy send tanna --ask --until 5m ok 2>&1'), 'fy')).toMatchObject({
+      body: 'ok',
+      ask: true,
+    });
+    expect(readSentMessage(bash('fy send tanna --message-file /tmp/b.md 2>&1'), 'fy')).toMatchObject({
+      body: null,
+      messageFile: '/tmp/b.md',
+    });
+  });
+
+  test('a redirected single read is still not the hand-off read', () => {
+    expect(isHandoffRead(bash(`cat ${TURN} 2>&1`), TURN)).toBe(false);
   });
 });
 
