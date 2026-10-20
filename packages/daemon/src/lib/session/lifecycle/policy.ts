@@ -138,8 +138,9 @@ export function firstTurnInstruction(taskFile: string): string {
  *
  * HYPERMEDIA DEFAULTS BY MODE, written FIRST so a stored switch wins: ON for an interactive ferret, OFF for an
  * auto one (a worker, a warden, a miner), so a ferret whose switch was never written follows its mode at the
- * next launch and only an explicit value the owner set overrides it (docs/hypermedia.md). A caller that cannot
- * name the mode gets the off default.
+ * next launch and only an explicit value the owner set overrides it (docs/hypermedia.md). THE MODE IS REQUIRED,
+ * read from the session's own record by every launch path: an optional one let a caller that forgot it launch
+ * an interactive ferret with hypermedia silently off.
  *
  * THE MEDIA FOLDER IS DERIVED TOO, and written last for the same reason as the id: a stored variable
  * must not be able to point an agent's "show this" files somewhere the media route does not read.
@@ -147,7 +148,7 @@ export function firstTurnInstruction(taskFile: string): string {
 export function sessionPaneEnvironment(
   id: SessionId,
   stored: Readonly<Record<string, string>>,
-  mode?: 'auto' | 'interactive',
+  mode: 'auto' | 'interactive',
   media?: string,
 ): Readonly<Record<string, string>> {
   return {

@@ -1,4 +1,7 @@
 import { describe, it } from 'bun:test';
+import { chmodSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import should from 'should';
 import {
   AGENT_INSTRUCTION,
@@ -578,14 +581,97 @@ describe('an account whose profile takes a variable from the secret store', () =
   });
 });
 
+/**
+ * A folder holding stand-in `claude` and `codex` executables whose `--help` prints `help`, so what the
+ * wrapper asks of the installed harness is this test's answer and never the host's.
+ */
+const fakeHarnesses = (help: string): string => {
+  const directory = mkdtempSync(join(tmpdir(), 'fy-wrapper-harness-'));
+  for (const name of ['claude', 'codex']) {
+    const file = join(directory, name);
+    writeFileSync(file, `#!/bin/sh\nprintf '%s\\n' ${shellQuote(help)}\n`);
+    chmodSync(file, 0o755);
+  }
+  return directory;
+};
+
+/** A harness that predates the system-prompt record, and so has no switch for it. */
+const OLD_HARNESS = fakeHarnesses('Usage: claude [options]\n  --append-system-prompt <prompt>');
+
 /** The arguments the rendered wrapper would exec its harness with, run for real in sh with `env`. */
-const launchArguments = (wrapper: string, env: Readonly<Record<string, string>>): readonly string[] => {
+const launchArguments = (
+  wrapper: string,
+  env: Readonly<Record<string, string>>,
+  harnesses: string = OLD_HARNESS,
+): readonly string[] => {
   const script = wrapper.replace(/^exec (?:claude|codex) /mu, "printf '%s\\0' ");
   const { stdout } = Bun.spawnSync(['sh', '-c', script, 'wrapper', 'the task'], {
-    env: { PATH: process.env.PATH ?? '', HOME: '/nonexistent', FY_SEED_FIRST_RUN: '0', ...env },
+    env: { PATH: `${harnesses}:${process.env.PATH ?? ''}`, HOME: '/nonexistent', FY_SEED_FIRST_RUN: '0', ...env },
   });
   return stdout.toString().split('\0').slice(0, -1);
 };
+
+describe("a resumed conversation hears this launch's sections", () => {
+  const BASE = 'Ferretry tools: the base instruction.';
+  const RECORDING_HARNESS = fakeHarnesses(
+    'Usage: claude [options]\n  --system-prompt-snapshot <on|off>     Record the system prompt once per conversation',
+  );
+
+  it("should turn Claude's system-prompt record off where the installed Claude keeps one", () => {
+    // Arrange — a Restart relaunches into the conversation it is bound to.
+    const wrapper = render(account({ flags: [`--append-system-prompt=${BASE}`] }));
+
+    // Act
+    const args = launchArguments(wrapper, { FY_HYPERMEDIA: '1' }, RECORDING_HARNESS);
+
+    // Assert — the record would otherwise replay the first launch's prompt, without this section.
+    should(args).containEql('--system-prompt-snapshot=off');
+    should(args.find(arg => arg.startsWith('--append-system-prompt='))).containEql('\n\nHypermedia:');
+    should(args.at(-1)).equal('the task');
+  });
+
+  it('should pass nothing new to a Claude without the switch, which would refuse a flag it does not know', () => {
+    // Act
+    const args = launchArguments(render(account({ flags: [`--append-system-prompt=${BASE}`] })), {});
+
+    // Assert
+    should(args.filter(arg => arg.includes('system-prompt-snapshot'))).be.empty();
+    should(args.at(-1)).equal('the task');
+  });
+
+  it('should give up on a harness that answers --help by starting a session, and still launch', () => {
+    // Arrange — a stand-in that, like a harness taking `--help` for a prompt, never exits.
+    const directory = mkdtempSync(join(tmpdir(), 'fy-wrapper-hang-'));
+    const file = join(directory, 'claude');
+    writeFileSync(file, '#!/bin/sh\nprintf "> "\nwhile IFS= read -r _turn; do :; done\nexec sleep 30\n');
+    chmodSync(file, 0o755);
+    const started = Date.now();
+
+    // Act
+    const args = launchArguments(render(account({ flags: [`--append-system-prompt=${BASE}`] })), {}, directory);
+
+    // Assert
+    should(Date.now() - started).be.below(10_000);
+    should(args.filter(arg => arg.includes('system-prompt-snapshot'))).be.empty();
+    should(args.at(-1)).equal('the task');
+  });
+
+  it('should ask the harness the wrapper execs, and leave Codex and a non-agent runtime alone', () => {
+    // Arrange
+    const agent = account({ flags: [`--append-system-prompt=${BASE}`] });
+
+    // Act
+    const resolved = render({ ...agent, harnessCommand: '/opt/harnesses/claude' });
+    const codex = render(account({ kind: 'codex', flags: ['-c', `developer_instructions="${BASE}"`] }));
+    const person = render({ ...agent, agent: false });
+
+    // Assert
+    should(resolved).containEql("_fy_help=\"$({ '/opt/harnesses/claude' --help </dev/null");
+    should(launchArguments(codex, {}, RECORDING_HARNESS)).not.containEql('--system-prompt-snapshot=off');
+    should(codex).not.containEql('system-prompt-snapshot');
+    should(person).not.containEql('system-prompt-snapshot');
+  });
+});
 
 describe("each ferret's sections of the appended system prompt", () => {
   const BASE = 'Ferretry tools: the base instruction.';

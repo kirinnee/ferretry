@@ -264,11 +264,11 @@ describe('the hypermedia mark', () => {
       />
     );
     view = await mount(bar(undefined));
-    expect(view.container.querySelector('.fy-session-bar__who [data-hypermedia-mark]')?.textContent).toBe(
-      'Hypermedia on',
-    );
+    expect(
+      view.container.querySelector('.fy-session-bar__who [data-switch-mark="hypermedia"]')?.getAttribute('aria-label'),
+    ).toContain('Hypermedia on');
     await view.unmount();
     view = await mount(bar(false));
-    expect(view.container.querySelector('[data-hypermedia-mark]')).toBeNull();
+    expect(view.container.querySelector('[data-switch-mark="hypermedia"]')).toBeNull();
   });
 });

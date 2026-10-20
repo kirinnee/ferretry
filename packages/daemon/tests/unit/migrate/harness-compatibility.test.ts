@@ -1,6 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { harnessMigrationRefusal } from '../../../src/lib/migrate/harness-compatibility.ts';
+import { harnessConversionRefusal, harnessMigrationRefusal } from '../../../src/lib/migrate/harness-compatibility.ts';
 
 /**
  * The same-kind constraint the CLI promised and the daemon did not check.
@@ -49,6 +49,9 @@ describe('the migration harness check', () => {
     should(toClaude).containEql('runs the codex harness');
     should(toClaude).containEql('claude-auto-target is a claude account');
     should(toClaude).containEql('migrate onto a codex account');
+    // And it names the one way across: converting the conversation.
+    should(toCodex).containEql('Convert the conversation instead (Move to Codex…, or `--convert`)');
+    should(toClaude).containEql('(Move to Claude…, or `--convert`)');
   });
 
   it('should refuse a family it does not recognise on either side, rather than defaulting', () => {
@@ -83,5 +86,41 @@ describe('the migration harness check', () => {
     // transcripts, tool ids and resume arguments this daemon cannot reason about at all.
     should(bothUnknownAndIdentical).containEql('records harness "gemini"');
     should(blank).containEql('records harness ""');
+  });
+});
+
+describe('the conversion harness check', () => {
+  it('should allow a conversion only onto the other family', () => {
+    // Act
+    const across = harnessConversionRefusal({
+      sourceHarness: 'claude',
+      targetHarness: 'codex',
+      targetAgent: 'codex-a',
+    });
+    const back = harnessConversionRefusal({ sourceHarness: 'codex', targetHarness: 'claude', targetAgent: 'claude-a' });
+    const same = harnessConversionRefusal({ sourceHarness: 'codex', targetHarness: 'codex', targetAgent: 'codex-b' });
+
+    // Assert
+    should(across).be.undefined();
+    should(back).be.undefined();
+    should(same).equal(
+      'codex-b runs codex like this session, so there is nothing to convert: move it without converting and the conversation is resumed as it is.',
+    );
+  });
+
+  it('should refuse a family the converter cannot write, on either side', () => {
+    // Act
+    const source = harnessConversionRefusal({
+      sourceHarness: 'gemini',
+      targetHarness: 'codex',
+      targetAgent: 'codex-a',
+    });
+    const target = harnessConversionRefusal({ sourceHarness: 'claude', targetHarness: 'gemini', targetAgent: 'g-a' });
+
+    // Assert
+    should(source).equal(
+      'this session records harness "gemini" and codex-a declares "codex"; the converter writes only claude, codex, so it will not guess',
+    );
+    should(target).containEql('g-a declares "gemini"');
   });
 });

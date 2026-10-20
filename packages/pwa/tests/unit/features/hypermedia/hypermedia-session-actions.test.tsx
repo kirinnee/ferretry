@@ -3,7 +3,6 @@ import type { SessionConfig, SessionView } from '@ferretry/protocol';
 import { useState } from 'react';
 import {
   type HypermediaActionContext,
-  HypermediaMark,
   useHypermediaSessionActions,
 } from '../../../../src/features/hypermedia/hypermedia-session-actions.tsx';
 import { ActionsMenu } from '../../../../src/features/session-actions/actions-menu.tsx';
@@ -135,12 +134,7 @@ describe('Hypermedia in a ferret’s Actions menu', () => {
     expect(row(mounted.container)).toBeNull();
   });
 
-  it('marks a header with an accessible name, and says HTTP when a refusal carries no words', async () => {
-    mounted = await mount(<HypermediaMark />);
-    const mark = must(mounted.container.querySelector('[data-hypermedia-mark]'), 'mark');
-    expect(textOf(mark)).toBe('Hypermedia on');
-    expect(mark.getAttribute('title')).toContain('diagrams');
-
+  it('says HTTP when a refusal carries no words', async () => {
     const bare: DaemonFetch = async () => new Response('not json', { status: 502 });
     const refused = await patchSessionHypermedia(DAEMON, 'session-hadi', true, bare).catch((error: unknown) => error);
     expect(refused).toMatchObject({ status: 502, message: 'HTTP 502' });

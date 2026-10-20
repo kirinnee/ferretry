@@ -38,13 +38,14 @@ export type ProbeSpawn = (input: {
 /**
  * The argv of one probe: the runtime's own launcher, at the absolute path a start runs — so the probe runs
  * exactly the login, profile and fixed layer a start would — in its CLI's one-shot mode, on the model
- * asked for, at the lowest effort the CLI lets a flag set. Claude Code takes its effort from settings
- * only, so a Claude probe runs at the runtime's own; Codex is told `low` through the start's own effort
- * argument.
+ * asked for. A Claude probe carries the start's own `--effort`, so an argument the start adds is tried
+ * before a pane exists; Codex is told `low` through the start's own effort argument, because its effort is
+ * a configuration override that every Codex model accepts.
  */
 export function probeCommand(request: PackProbeRequest, launcher: string): readonly string[] {
   const model = request.model === undefined ? [] : ['--model', request.model];
-  if (request.harness === 'claude') return [launcher, '-p', PROBE_PROMPT, ...model];
+  if (request.harness === 'claude')
+    return [launcher, '-p', PROBE_PROMPT, ...model, ...effortLaunchArguments('claude', request.effort)];
   return [launcher, 'exec', '--skip-git-repo-check', ...effortLaunchArguments('codex', 'low'), ...model, PROBE_PROMPT];
 }
 

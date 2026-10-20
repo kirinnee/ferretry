@@ -64,7 +64,36 @@ export function harnessMigrationRefusal(subject: HarnessMigrationSubject): strin
   return (
     `this session runs the ${source.data} harness and ${subject.targetAgent} is a ${target.data} account; a ` +
     'migration continues one conversation under a new account, and the transcript, the turn counter and the ' +
-    `open tool calls it carries are all ${source.data}'s — a ${target.data} harness cannot read them. Start a ` +
-    `new ${target.data} session instead, or migrate onto a ${source.data} account.`
+    `open tool calls it carries are all ${source.data}'s — a ${target.data} harness cannot read them as they ` +
+    `are. Convert the conversation instead (Move to ${HARNESS_NAME[target.data]}…, or \`--convert\`), start a new ` +
+    `${target.data} session, or migrate onto a ${source.data} account.`
+  );
+}
+
+/** Each harness family's product name, as a person reads it. */
+const HARNESS_NAME: Readonly<Record<string, string>> = { claude: 'Claude', codex: 'Codex' };
+
+/**
+ * The reason a CONVERTING migration (`conversation: 'convert'`) is refused, or `undefined` when the
+ * account is the session's other family.
+ *
+ * The mirror image of {@link harnessMigrationRefusal}: a conversion rewrites the conversation in the
+ * target's format, so it exists only to cross families. Onto the same family it would replace a
+ * transcript the target reads perfectly well with a lossy copy, so it is refused and the plain move is
+ * named instead. An unrecognised family is refused for the same reason as there: the converter cannot
+ * write a format it does not know.
+ */
+export function harnessConversionRefusal(subject: HarnessMigrationSubject): string | undefined {
+  const source = HarnessSchema.safeParse(subject.sourceHarness);
+  const target = HarnessSchema.safeParse(subject.targetHarness);
+  if (!source.success || !target.success)
+    return (
+      `this session records harness ${JSON.stringify(subject.sourceHarness)} and ${subject.targetAgent} declares ` +
+      `${JSON.stringify(subject.targetHarness)}; the converter writes only ${KNOWN_HARNESSES}, so it will not guess`
+    );
+  if (source.data !== target.data) return undefined;
+  return (
+    `${subject.targetAgent} runs ${source.data} like this session, so there is nothing to convert: move it ` +
+    'without converting and the conversation is resumed as it is.'
   );
 }

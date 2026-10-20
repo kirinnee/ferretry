@@ -25,6 +25,11 @@ export interface DeliveryFrame {
   readonly dead: boolean;
   readonly promptReady: boolean;
   readonly visible: string;
+  /**
+   * The pane's scrollback, carried only for a dead pane: tmux redraws a dead pane's screen with its
+   * "Pane is dead" line and the last lines the process printed survive only here.
+   */
+  readonly history?: string;
   readonly exitCode?: number;
   /** Where tmux put the cursor, which is what tells a composer's placeholder from typed input. */
   readonly cursorX?: number | undefined;
@@ -40,6 +45,40 @@ export interface DeliveryFrame {
  * types an answer into whatever appears next.
  */
 export const MAX_STARTUP_DIALOG_ATTEMPTS = 3;
+
+/** At most this many of a dead pane's last non-blank lines are quoted in its exit reason. */
+const EXIT_OUTPUT_LINES = 3;
+
+/** And at most this many characters of them, so one runaway line cannot flood a card. */
+const EXIT_OUTPUT_CHARACTERS = 300;
+
+/**
+ * Why a pane is gone, in words a card can show: the exit status tmux kept, and the last thing the
+ * process printed.
+ *
+ * The status alone says nothing a reader can act on — "exited (2)" is every CLI's usage error and
+ * every shell's syntax error — while the last lines are the program's own explanation: the wrapper's
+ * refusal naming a missing secret, the harness rejecting a flag. Control characters are dropped so a
+ * colour code or a stray escape cannot reach a surface that renders the reason. The scrollback is read
+ * when there is one, because a dead pane's screen no longer shows what was printed just before it died.
+ */
+export function harnessExitReason(frame: Pick<DeliveryFrame, 'exitCode' | 'visible' | 'history'>): string {
+  const status =
+    frame.exitCode === undefined
+      ? 'the interactive harness exited; tmux reported no exit code'
+      : `the interactive harness exited (${frame.exitCode})`;
+  const output = frame.history === undefined || frame.history.trim() === '' ? frame.visible : frame.history;
+  const lines = output
+    // biome-ignore lint/suspicious/noControlCharactersInRegex: stripping control characters is the point.
+    .replace(/\u001b\[[0-9;?]*[ -/]*[@-~]|[\u0000-\u0008\u000b-\u001f\u007f]/gu, '')
+    .split('\n')
+    .map(line => line.trim())
+    .filter(line => line.length > 0 && !/^Pane is dead\b/u.test(line));
+  const tail = lines.slice(-EXIT_OUTPUT_LINES).join(' / ');
+  if (tail.length === 0) return status;
+  const quoted = tail.length > EXIT_OUTPUT_CHARACTERS ? `…${tail.slice(-EXIT_OUTPUT_CHARACTERS)}` : tail;
+  return `${status}: its last output was "${quoted}"`;
+}
 
 /** What the readiness loop should do about this frame. */
 export type ReadinessStep =
@@ -69,13 +108,7 @@ export function nextReadinessStep(
   maxAttempts: number = MAX_STARTUP_DIALOG_ATTEMPTS,
 ): ReadinessStep {
   if (!frame.alive || frame.dead) {
-    return {
-      kind: 'exited',
-      reason:
-        frame.exitCode === undefined
-          ? 'the interactive harness exited; tmux reported no exit code'
-          : `the interactive harness exited (${frame.exitCode})`,
-    };
+    return { kind: 'exited', reason: harnessExitReason(frame) };
   }
   const action = startupDialogAction(frame.visible, options);
   if (action !== undefined) {

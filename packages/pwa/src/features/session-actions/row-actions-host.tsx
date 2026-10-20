@@ -36,6 +36,7 @@ import { type SessionActionContribution, sessionActionSections } from './registr
 import { RenameForm } from './rename-form.tsx';
 import { useRestartRefusal } from './restart-refusal.tsx';
 import { forkThroughLatest, restartOnEarlierConversation, restartWithResume } from './session-operations.ts';
+import { useConvertAction } from './use-convert-action.tsx';
 
 const ROW_ACTION_IDS = { open: 'open', copyName: 'copy-name' } as const;
 
@@ -123,6 +124,17 @@ function RowActions({
     store.fleet.upsertSession(daemonId, next);
   };
   const restartRefusal = useRestartRefusal(publish, sessionId);
+  const convert = useConvertAction({
+    connection,
+    scope: daemonSessionScope(connection, sessionId),
+    view,
+    canControl: true,
+    accountPicker: store.accountPicker,
+    onMoved: (moved, sentence) => {
+      publish(moved);
+      setNotice(sentence);
+    },
+  });
   const copy = useCallback((text: string, what: string): void => {
     setNotice(null);
     copyToClipboard(text).catch((reason: unknown) => setNotice(`could not copy the ${what}: ${failureText(reason)}`));
@@ -162,6 +174,7 @@ function RowActions({
     canControl: true,
     copyId: () => copy(sessionId, 'session id'),
     openMigrate: () => setMigrateOpen(true),
+    ...(convert.openConvert === undefined ? {} : { openConvert: convert.openConvert }),
     restart: async () => {
       publish(
         await restartWithResume(
@@ -242,6 +255,7 @@ function RowActions({
       {pack.host}
       <ActionToast notice={notice} onDismiss={dismissNotice} />
       {restartRefusal.panel}
+      {convert.sheet}
       <MigrateSheet
         accountPicker={store.accountPicker}
         canMutate

@@ -22,6 +22,26 @@ import {
 } from '../fixtures.ts';
 import { assertCoversEverySchema, assertRejects, assertRoundTrips, type SchemaCase } from './schema-cases.ts';
 
+/** A conversion summary with every count present, for the cross-harness preview schemas. */
+const CONVERSION_SUMMARY = {
+  converter: 1,
+  sourceHarness: 'claude',
+  sourceVersion: '2.1.281',
+  targetHarness: 'codex',
+  targetVersion: '0.163.0',
+  turns: 4,
+  keptTurns: 4,
+  omittedTurns: 0,
+  cutNewest: false,
+  messages: 8,
+  nativeToolCalls: 1,
+  toolCallsAsText: 2,
+  attachments: 1,
+  dropped: { reasoning: 1, sidechains: 0, internal: 4, compactions: 0 },
+  estimatedTokens: 120,
+  budgetTokens: 154_800,
+};
+
 const sendEvidence = {
   key: 'send-1',
   harness: 'codex',
@@ -248,6 +268,48 @@ const sessionCases: SchemaCase[] = [
     name: 'migrate request starting fresh',
     schema: session.MigrateSessionRequestSchema,
     value: { agent: 'next', allowContextDowngrade: false, forceInflight: false, conversation: 'fresh' },
+  },
+  {
+    name: 'migrate request converting to the other harness',
+    schema: session.MigrateSessionRequestSchema,
+    value: { agent: 'codex-a', allowContextDowngrade: false, forceInflight: false, conversation: 'convert' },
+  },
+  { name: 'conversion preview request', schema: session.ConversionPreviewRequestSchema, value: { agent: 'codex-a' } },
+  {
+    name: 'conversion dropped counts',
+    schema: session.ConversionDroppedSchema,
+    value: { reasoning: 1, sidechains: 0, internal: 4, compactions: 0 },
+  },
+  {
+    name: 'conversion summary',
+    schema: session.ConversionSummarySchema,
+    value: CONVERSION_SUMMARY,
+  },
+  {
+    name: 'ready conversion preview',
+    schema: session.ConversionPreviewSchema,
+    value: { kind: 'ready', targetAgent: 'codex-a', targetModel: 'gpt-5.5', summary: CONVERSION_SUMMARY },
+  },
+  {
+    name: 'refused conversion preview',
+    schema: session.ConversionPreviewSchema,
+    value: { kind: 'refused', targetAgent: 'codex-a', reason: 'Too new.' },
+  },
+  {
+    name: 'conversation conversion lineage',
+    schema: session.ConversationConversionSchema,
+    value: {
+      v: 1,
+      converter: 1,
+      fromHarness: 'claude',
+      fromConversation: 'src-1',
+      fromFile: '/homes/claude/projects/-w/src-1.jsonl',
+      toHarness: 'codex',
+      toConversation: 'thread-1',
+      at: '2026-10-20T08:00:00.000Z',
+      keptTurns: 4,
+      omittedTurns: 0,
+    },
   },
   {
     name: 'conversation unresumable body',
@@ -493,6 +555,16 @@ describe('session schemas', () => {
   it('should reject impossible or untrusted session requests', () => {
     // Arrange
     const cases: SchemaCase[] = [
+      {
+        name: 'conversion preview naming no account',
+        schema: session.ConversionPreviewRequestSchema,
+        value: { model: 'gpt-5.5' },
+      },
+      {
+        name: 'ready conversion preview with no summary',
+        schema: session.ConversionPreviewSchema,
+        value: { kind: 'ready', targetAgent: 'codex-a', targetModel: 'gpt-5.5' },
+      },
       {
         name: 'migrate request with an unknown conversation choice',
         schema: session.MigrateSessionRequestSchema,

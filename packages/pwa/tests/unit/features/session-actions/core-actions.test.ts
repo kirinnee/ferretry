@@ -36,6 +36,7 @@ describe('SESSION_ACTION_IDS', () => {
       'fork',
       'copy-id',
       'move-login',
+      'move-harness',
       'move-machine',
       'add-mcp',
       'restart',
@@ -181,5 +182,41 @@ describe('CORE_SESSION_ACTIONS — a read-only connection', () => {
   it('never offers Add MCP server, even with a renderer, once control is gone', () => {
     const ids = idsFor(context('running', { canControl: false, renderAddMcp: () => null }));
     expect(ids).not.toContain(SESSION_ACTION_IDS.addMcp);
+  });
+});
+
+describe('CORE_SESSION_ACTIONS — Move to the other harness', () => {
+  const convertLabel = (ctx: CoreActionContext): string | undefined =>
+    sessionActionSections(CORE_SESSION_ACTIONS, ctx)
+      .flatMap(section => section.entries)
+      .find(entry => entry.id === SESSION_ACTION_IDS.convert)?.label;
+
+  it('says Move to Codex… on a Claude ferret and Move to Claude… on a Codex one, right after Move to another login', () => {
+    let opened = 0;
+    const claude = context('running', {
+      openConvert: () => {
+        opened += 1;
+      },
+    });
+    expect(convertLabel(claude)).toBe('Move to Codex…');
+    const ids = idsFor(claude);
+    expect(ids.indexOf(SESSION_ACTION_IDS.convert)).toBe(ids.indexOf(SESSION_ACTION_IDS.migrate) + 1);
+    const entry = sessionActionSections(CORE_SESSION_ACTIONS, claude)
+      .flatMap(section => section.entries)
+      .find(found => found.id === SESSION_ACTION_IDS.convert);
+    if (entry?.kind === 'run') entry.run();
+    expect(opened).toBe(1);
+    const codex = context('running', {
+      openConvert: noop,
+      view: sessionView('a1', { config: { harness: 'codex' } }),
+    });
+    expect(convertLabel(codex)).toBe('Move to Claude…');
+  });
+
+  it('is absent when the host offers no move or the connection cannot control the ferret', () => {
+    expect(idsFor(context('running'))).not.toContain(SESSION_ACTION_IDS.convert);
+    expect(idsFor(context('running', { openConvert: noop, canControl: false }))).not.toContain(
+      SESSION_ACTION_IDS.convert,
+    );
   });
 });

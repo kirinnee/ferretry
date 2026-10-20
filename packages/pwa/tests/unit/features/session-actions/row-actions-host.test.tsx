@@ -43,6 +43,29 @@ beforeEach(() => {
   });
 });
 
+const PREVIEW = {
+  kind: 'ready',
+  targetAgent: 'codex-a',
+  targetModel: 'gpt-5.5',
+  summary: {
+    converter: 1,
+    sourceHarness: 'claude',
+    targetHarness: 'codex',
+    targetVersion: '0.163.0',
+    turns: 4,
+    keptTurns: 4,
+    omittedTurns: 0,
+    cutNewest: false,
+    messages: 8,
+    nativeToolCalls: 0,
+    toolCallsAsText: 0,
+    attachments: 0,
+    dropped: { reasoning: 0, sidechains: 0, internal: 0, compactions: 0 },
+    estimatedTokens: 10,
+    budgetTokens: 100,
+  },
+};
+
 const grants = (warden: boolean): GrantsView => ({
   capabilities: DAEMON_CAPABILITIES.map(capability => ({
     capability,
@@ -68,7 +91,15 @@ interface Calls {
   readonly fetches: string[];
 }
 
-const setup = (options: { warden?: boolean; known?: boolean; pausedRestart?: boolean } = {}) => {
+const setup = (
+  options: {
+    warden?: boolean;
+    known?: boolean;
+    pausedRestart?: boolean;
+    convertible?: boolean;
+    moveRefusal?: boolean;
+  } = {},
+) => {
   const calls: Calls = { stop: [], resume: [], migrate: [], rename: [], fork: [], fetches: [] };
   const record = { ...alpha, pairedAt: 1, lastSelectedAt: 1 };
   const client = {
@@ -83,6 +114,8 @@ const setup = (options: { warden?: boolean; known?: boolean; pausedRestart?: boo
     },
     migrate: async (...args: unknown[]) => {
       calls.migrate.push(args);
+      if (options.moveRefusal === true && args[6] === 'convert')
+        throw new FyHttpError('Codex rejected the converted file.', 409, 'conversation_unresumable');
       if (options.pausedRestart === true && args[5] !== true)
         throw new FyHttpError('refused', 409, 'migration_refused', {
           error: 'refused',
@@ -128,13 +161,32 @@ const setup = (options: { warden?: boolean; known?: boolean; pausedRestart?: boo
     fleet,
     projects: new DaemonProjectsStore({ projects: async () => [] }),
     accountPicker: new DaemonAccountPickerStore({
-      catalog: async () => ({ accounts: [] }),
+      catalog: async () => ({
+        accounts:
+          options.convertible === true
+            ? [
+                {
+                  id: 'codex-a',
+                  wrapper: 'codex-a',
+                  displayName: 'Codex A',
+                  kind: 'codex',
+                  agent: true,
+                  credentialId: 'login-a',
+                  defaultModel: null,
+                  models: [],
+                  available: true,
+                  unavailableReason: null,
+                },
+              ]
+            : [],
+      }),
       health: async () => ({ credentials: [] }) as never,
       probe: async () => ({ credentials: [] }) as never,
     } as never),
     carrier: {
       fetch: async (input: string | URL | Request) => {
         calls.fetches.push(String(input));
+        if (String(input).endsWith('/conversion-preview')) return Response.json(PREVIEW);
         return Response.json({ passive: [], sessions: [] }, { status: 200 });
       },
     },
@@ -157,6 +209,8 @@ const show = async (
     warden?: boolean;
     known?: boolean;
     pausedRestart?: boolean;
+    convertible?: boolean;
+    moveRefusal?: boolean;
   } = {},
 ) => {
   const { calls, store } = setup(options);
@@ -297,6 +351,41 @@ describe('the sessions bar row actions', () => {
     expect(calls.migrate).toHaveLength(1);
     expect(calls.migrate[0]?.[0]).toBe('s-run');
     expect(calls.migrate[0]?.[6]).toBe('previous');
+  });
+
+  it('offers Move to Codex… only where the machine has a Codex account, and moves with conversation convert', async () => {
+    expect(ids((await show()).root)).not.toContain('move-harness');
+    await mounted?.unmount();
+    const { root, calls, store } = await show({ convertible: true });
+    expect(ids(root)).toContain('move-harness');
+    expect(ids(root).indexOf('move-harness')).toBe(ids(root).indexOf('move-login') + 1);
+    expect(item(root, 'move-harness').textContent).toContain('Move to Codex…');
+    await choose(root, 'move-harness');
+    expect(calls.fetches.some(url => url.endsWith('/v1/sessions/s-run/conversion-preview'))).toBe(true);
+    const sheet = must(document.body.querySelector<HTMLElement>('[data-convert-preview]'), 'preview');
+    expect(sheet.textContent).toContain('All 4 turns will move.');
+    await interact(() => must(document.body.querySelector<HTMLElement>('[data-convert-confirm]'), 'confirm').click());
+    await settle();
+    expect(calls.migrate).toHaveLength(1);
+    expect(calls.migrate[0]?.slice(0, 2)).toEqual(['s-run', 'codex-a']);
+    expect(calls.migrate[0]?.[6]).toBe('convert');
+    expect(must(root.querySelector('[data-action-toast] p'), 'toast').textContent).toBe('Moved to Codex (Codex A).');
+    expect(
+      store.fleet
+        .getSnapshot()
+        .daemons.get(ALPHA as DaemonId)
+        ?.byId.get('s-run'),
+    ).toBeDefined();
+  });
+
+  it('shows a refused move inside the sheet and leaves it open', async () => {
+    const { root } = await show({ convertible: true, moveRefusal: true });
+    await choose(root, 'move-harness');
+    await interact(() => must(document.body.querySelector<HTMLElement>('[data-convert-confirm]'), 'confirm').click());
+    await settle();
+    expect(must(document.body.querySelector('[data-convert-failure]'), 'failure').textContent).toContain(
+      'Codex rejected the converted file.',
+    );
   });
 
   it('restarts the CLI through a same-login migration', async () => {

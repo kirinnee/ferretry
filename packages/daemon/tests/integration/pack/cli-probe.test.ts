@@ -37,6 +37,19 @@ describe('probeCommand', () => {
     ]);
   });
 
+  it('should carry the start’s own --effort, so an argument only the start adds is tried before a pane exists', () => {
+    // Arrange + Act + Assert
+    should(probeCommand(request({ model: 'glm-5.3', effort: 'max' }), '/bin/claude-zai')).eql([
+      '/bin/claude-zai',
+      '-p',
+      PROBE_PROMPT,
+      '--model',
+      'glm-5.3',
+      '--effort',
+      'max',
+    ]);
+  });
+
   it('should run a Claude wrapper on its own default model when none is named', () => {
     should(probeCommand(request(), '/bin/claude-work')).eql(['/bin/claude-work', '-p', PROBE_PROMPT]);
   });
