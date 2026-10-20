@@ -884,6 +884,21 @@ pre,
    three height declarations are a deliberate fallback ladder: a browser without
    dvh gets vh, a page whose JS has not run yet gets dvh, and everything else
    gets the real visible height. */
+/* THE BOTTOM INSET HAS ONE OWNER: `.kt-shell`. A home-indicator phone reports ~34px. Whoever pays it
+   AND a descendant that pays it again leaves a gap twice that size — the "empty band under the composer
+   / under the tab bar" iPhones showed. So the shell reserves it once, nothing inside the shell reads
+   `env(safe-area-inset-bottom)` again, and a bar that wants its surface to reach the screen edge BLEEDS into
+   the reservation (`.kt-tabbar`) rather than adding to it. Surfaces that are `position: fixed` over the
+   viewport (sheets, overlays, toasts) are not inside the shell's padding and read the same variable.
+   The keyboard hides the indicator, and iOS standalone keeps reporting the inset while it is up, so the
+   variable is 0 while `data-keyboard='open'` — otherwise a band of dead space sits above the keys. */
+:root {
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+}
+html[data-keyboard='open'] {
+  --safe-bottom: 0px;
+}
+
 .kt-shell {
   position: fixed;
   left: 0;
@@ -899,7 +914,7 @@ pre,
      The release notice is pinned above the shell, so its measured height
      (`--release-notice-h`, App.tsx) is room the page starts below, not under. */
   padding-top: calc(env(safe-area-inset-top, 0px) + var(--release-notice-h, 0px));
-  padding-bottom: env(safe-area-inset-bottom, 0px);
+  padding-bottom: var(--safe-bottom);
   padding-left: env(safe-area-inset-left, 0px);
   padding-right: env(safe-area-inset-right, 0px);
 }
@@ -922,7 +937,7 @@ body {
   top: var(--app-top, 0px);
   height: 100dvh;
   height: var(--app-h, 100dvh);
-  padding-bottom: env(safe-area-inset-bottom, 0px);
+  padding-bottom: var(--safe-bottom);
 }
 
 /* ---- PHONE CHAT CHROME ----------------------------------------------------
@@ -1572,7 +1587,9 @@ body {
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
   flex-shrink: 0;
-  padding-bottom: env(safe-area-inset-bottom, 0px);
+  /* Bleeds into the shell's reservation: the bar's surface reaches the screen edge, its buttons stay above the indicator. */
+  margin-bottom: calc(-1 * var(--safe-bottom));
+  padding-bottom: var(--safe-bottom);
   border-top: var(--divider-width) solid var(--border-strong);
   background: var(--surface);
 }
@@ -2123,7 +2140,7 @@ body {
   min-width: 0;
   padding-top: 0.5rem;
   padding-right: var(--fy-chat-gutter, 0px);
-  padding-bottom: max(0.5rem, env(safe-area-inset-bottom));
+  padding-bottom: 0.5rem;
 }
 .fy-chat-input__column {
   width: 100%;

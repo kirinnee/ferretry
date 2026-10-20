@@ -331,10 +331,7 @@ export function MachineOnboarding(props: MachineOnboardingProps) {
             <div className="min-w-0">{body(at)}</div>
           </div>
         </div>
-        <footer
-          className="border-t border-border-strong bg-surface px-panel pt-3 pb-[calc(12px+env(safe-area-inset-bottom,0px))] md:px-8"
-          data-onboarding-foot=""
-        >
+        <footer className="border-t border-border-strong bg-surface px-panel pt-3 pb-3 md:px-8" data-onboarding-foot="">
           <div className="mx-auto flex w-full max-w-[52rem] min-w-0 items-center justify-between gap-2">
             <div className="shrink-0">
               {at === 'pair' ? null : (

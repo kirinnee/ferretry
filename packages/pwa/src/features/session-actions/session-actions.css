@@ -55,7 +55,7 @@
   border-radius: 0;
   box-shadow: none;
   background: transparent;
-  padding: 4px 8px calc(8px + env(safe-area-inset-bottom, 0px));
+  padding: 4px 8px calc(8px + var(--safe-bottom));
 }
 .fy-actions-menu__section + .fy-actions-menu__section {
   margin-top: 4px;
@@ -375,7 +375,7 @@
 .fy-action-toast {
   position: fixed;
   z-index: 40;
-  bottom: calc(96px + env(safe-area-inset-bottom, 0px));
+  bottom: calc(96px + var(--safe-bottom));
   left: 50%;
   display: flex;
   align-items: center;
@@ -422,7 +422,7 @@
 .fy-restart-refusal {
   position: fixed;
   z-index: 45;
-  bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+  bottom: calc(16px + var(--safe-bottom));
   left: 50%;
   width: min(520px, calc(100vw - 32px));
   max-height: calc(100dvh - 32px);
