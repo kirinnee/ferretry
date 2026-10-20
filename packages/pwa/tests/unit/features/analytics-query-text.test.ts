@@ -50,6 +50,10 @@ describe('analytics query text editing', () => {
     expect(activeRangeSource('sum(cost_usd) [7d]', ['7d', '30d'])).toBe('7d');
     expect(activeRangeSource('sum(cost_usd) [9d]', ['7d', '30d'])).toBeUndefined();
     expect(activeRangeSource('sum(cost_usd)', ['7d'])).toBeUndefined();
+    // Compared by length: 24h is written [1d], and still lights the 24h chip.
+    expect(activeRangeSource('sum(cost_usd) [1d]', ['24h', '7d'])).toBe('24h');
+    expect(activeRangeSource('sum(cost_usd) [2026-10-01..2026-10-02]', ['24h'])).toBeUndefined();
+    expect(activeRangeSource('sum(', ['24h'])).toBeUndefined();
   });
 });
 

@@ -15,19 +15,14 @@
 import { type ComponentType, useEffect, useMemo, useState } from 'react';
 
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
-import {
-  type AnalyticsView,
-  daemonAnalyticsPath,
-  daemonAnalyticsQueryPath,
-  daemonSessionPath,
-} from '../../lib/pages/routes.ts';
+import { type AnalyticsView, daemonAnalyticsPath, daemonAnalyticsQueryPath } from '../../lib/pages/routes.ts';
 import { useDaemonFetch } from '../../lib/store.tsx';
 import { INSIGHTS_COLUMN_CLASS } from '../../shell/insights-frame.tsx';
 import { Segmented } from '../fleet/conversations/conversation-picker.tsx';
 import { daemonDisplayName } from '../settings/daemon-settings.tsx';
 import { fetchAnalytics } from './analytics-api.ts';
 import type { AnalyticsRequest } from './analytics-custom-query.tsx';
-import { type AnalyticsMachine, type MachineOutcome, requestAcrossMachines } from './analytics-fanout.ts';
+import { type AnalyticsMachine, askEveryMachine } from './analytics-fanout.ts';
 import { AnalyticsOverviewPage } from './analytics-overview-page.tsx';
 import { AnalyticsQueryPage, type AnalyticsQueryPageProps } from './analytics-query-page.tsx';
 
@@ -81,24 +76,21 @@ export function GlobalAnalyticsPage({
     () => given ?? [{ connection, name: daemonDisplayName(connection) }],
     [connection, given],
   );
-  const linkQuery = initialQuery === undefined ? analyticsLinkQuery(globalThis.location?.search ?? '') : initialQuery;
-  const machineKey = machines.map(machine => machine.connection.daemonId).join('\n');
-  // The Query page asks once; this asks every machine and merges, and keeps who did not answer.
-  const [queryFailures, setQueryFailures] = useState<readonly Extract<MachineOutcome<unknown>, { status: 'failed' }>[]>(
-    [],
+  // READ ONCE, when the page arrives. A run mirrors its own canonical query into the address; reading
+  // the address again on a later render would hand the page a "new" link query and run it a second time.
+  const [linkQuery] = useState(() =>
+    initialQuery === undefined ? analyticsLinkQuery(globalThis.location?.search ?? '') : initialQuery,
   );
-  const fleetRequest = useMemo(
-    () => requestAcrossMachines(machines, requestAnalytics, setQueryFailures),
+  const machineKey = machines.map(machine => machine.connection.daemonId).join('\n');
+  // The reader's run asks every machine and merges, keeping who did not answer WITH its result; value
+  // suggestions ask the same way and report nothing, so they never move the run's banner.
+  const requestRun = useMemo(
+    () => (query: string | undefined) => askEveryMachine(machines, requestAnalytics, query),
     [machines, requestAnalytics],
   );
-  // A merged row names its machine as the app does (`stampMachine`), which finds the machine to open it on.
-  const sessionHref = useMemo(
-    () => (row: { readonly id: string; readonly machine: string | null }) =>
-      daemonSessionPath(
-        (machines.find(machine => machine.name === row.machine) ?? machines[0]!).connection.daemonId,
-        row.id,
-      ),
-    [machines],
+  const requestValues = useMemo<AnalyticsRequest>(
+    () => async (_connection, query) => (await askEveryMachine(machines, requestAnalytics, query)).response,
+    [machines, requestAnalytics],
   );
   const legacyQuery = view === 'overview' && linkQuery ? linkQuery : null;
   useEffect(() => {
@@ -146,33 +138,18 @@ export function GlobalAnalyticsPage({
           </div>
         </main>
       ) : (
-        <>
-          {queryFailures.length > 0 && (
-            <ul
-              role="status"
-              className={`${INSIGHTS_COLUMN_CLASS} m-0 grid shrink-0 list-none gap-xs p-0 pt-3 text-meta text-warn`}
-              data-analytics-failed=""
-            >
-              {queryFailures.map(outcome => (
-                <li key={outcome.machine.connection.daemonId}>
-                  {outcome.machine.name} did not answer: {outcome.error} Its sessions are not in this result.
-                </li>
-              ))}
-            </ul>
-          )}
-          <QueryPage
-            key={machineKey}
-            connection={connection}
-            connections={machines.map(machine => machine.connection)}
-            requestAnalytics={fleetRequest}
-            sessionHref={sessionHref}
-            {...(now === undefined ? {} : { now })}
-            onQueryChange={
-              onQueryChange ?? (query => replaceAddress(daemonAnalyticsQueryPath(connection.daemonId, query)))
-            }
-            initialQuery={linkQuery}
-          />
-        </>
+        <QueryPage
+          key={machineKey}
+          connection={connection}
+          connections={machines.map(machine => machine.connection)}
+          requestAnalytics={requestValues}
+          requestRun={requestRun}
+          {...(now === undefined ? {} : { now })}
+          onQueryChange={
+            onQueryChange ?? (query => replaceAddress(daemonAnalyticsQueryPath(connection.daemonId, query)))
+          }
+          initialQuery={linkQuery}
+        />
       )}
     </div>
   );

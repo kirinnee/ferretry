@@ -10,16 +10,18 @@
  * answer from the previous one cannot reach the screen.
  */
 
-import type { AnalyticsRawSession, AnalyticsResponse } from '@ferretry/protocol';
+import type { AnalyticsResponse } from '@ferretry/protocol';
 import { Trash2 } from 'lucide-react';
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
+import { daemonSessionPath } from '../../lib/pages/routes.ts';
 import { useDaemonFetch } from '../../lib/store.tsx';
 import { INSIGHTS_COLUMN_CLASS } from '../../shell/insights-frame.tsx';
 import { Button } from '../../shell/primitives.tsx';
 import { fetchAnalytics } from './analytics-api.ts';
 import { ANALYTICS_QUERY_DEFAULT, AnalyticsQueryEditor, type AnalyticsRequest } from './analytics-custom-query.tsx';
+import type { FleetAnswer, MachineFailure } from './analytics-fanout.ts';
 import { ANALYTICS_QUERY_EXAMPLES } from './analytics-query-examples.ts';
 import { readAnalyticsQuery } from './analytics-query-text.ts';
 import { AnalyticsResponseView, analyticsErrorMessage } from './analytics-response-view.tsx';
@@ -35,10 +37,15 @@ import {
 
 export interface AnalyticsQueryPageProps {
   readonly connection: DaemonConnection;
-  /** Every connected machine; only said in the caption — fan-out belongs to `requestAnalytics`. */
+  /** Every connected machine; only said in the caption — fan-out belongs to `requestRun`. */
   readonly connections?: readonly DaemonConnection[];
-  /** Injectable for deterministic render and screenshot harnesses. */
+  /** Reads one answer, for value suggestions; injectable for deterministic render and screenshot harnesses. */
   readonly requestAnalytics?: AnalyticsRequest;
+  /**
+   * Runs the query the reader asked: one answer, the machines missing from it and where each session
+   * lives. Defaults to asking `requestAnalytics` on this machine alone.
+   */
+  readonly requestRun?: (query: string | undefined) => Promise<FleetAnswer>;
   /** The clock "ran at" reads. */
   readonly now?: () => Date;
   /** A query handed in by a link; it is run at once. */
@@ -47,8 +54,6 @@ export interface AnalyticsQueryPageProps {
   readonly onQueryChange?: (query: string) => void;
   /** Injectable browser storage for saved queries. */
   readonly savedStorage?: SavedQueriesStorage;
-  /** Where a session row of a raw result opens, on the machine it came from. */
-  readonly sessionHref?: (row: AnalyticsRawSession) => string;
 }
 
 const newId = (): string => globalThis.crypto.randomUUID();
@@ -57,16 +62,26 @@ export function AnalyticsQueryPage({
   connection,
   connections,
   requestAnalytics: injected,
+  requestRun: injectedRun,
   now,
   initialQuery,
   onQueryChange,
   savedStorage,
-  sessionHref,
 }: AnalyticsQueryPageProps) {
   const fetcher = useDaemonFetch();
   const requestAnalytics = useMemo<AnalyticsRequest>(
     () => injected ?? ((daemon, query) => fetchAnalytics(daemon, query, fetcher)),
     [fetcher, injected],
+  );
+  const requestRun = useMemo(
+    () =>
+      injectedRun ??
+      (async (query: string | undefined): Promise<FleetAnswer> => ({
+        response: await requestAnalytics(connection, query),
+        failed: [],
+        daemonOf: () => connection.daemonId,
+      })),
+    [connection, injectedRun, requestAnalytics],
   );
   return (
     <main
@@ -79,11 +94,11 @@ export function AnalyticsQueryPage({
         connection={connection}
         machines={connections?.length ?? 1}
         requestAnalytics={requestAnalytics}
+        requestRun={requestRun}
         now={now ?? (() => new Date())}
         initialQuery={initialQuery ?? null}
         onQueryChange={onQueryChange}
         savedStorage={savedStorage}
-        sessionHref={sessionHref}
       />
     </main>
   );
@@ -93,23 +108,25 @@ function QueryBody({
   connection,
   machines,
   requestAnalytics,
+  requestRun,
   now,
   initialQuery,
   onQueryChange,
   savedStorage,
-  sessionHref,
 }: {
   readonly connection: DaemonConnection;
   readonly machines: number;
   readonly requestAnalytics: AnalyticsRequest;
+  readonly requestRun: (query: string | undefined) => Promise<FleetAnswer>;
   readonly now: () => Date;
   readonly initialQuery: string | null;
   readonly onQueryChange: ((query: string) => void) | undefined;
   readonly savedStorage: SavedQueriesStorage | undefined;
-  readonly sessionHref: ((row: AnalyticsRawSession) => string) | undefined;
 }) {
   const [text, setText] = useState(initialQuery || ANALYTICS_QUERY_DEFAULT);
-  const [result, setResult] = useState<AnalyticsResponse | null>(null);
+  // The result, the machines missing from it and where its sessions live are ONE value, set together
+  // under the run's serial, so a banner can never describe a different run than the result it sits on.
+  const [answer, setAnswer] = useState<FleetAnswer | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [querying, setQuerying] = useState(false);
   const [ranAt, setRanAt] = useState<string | null>(null);
@@ -122,23 +139,24 @@ function QueryBody({
       setQuerying(true);
       setError(null);
       try {
-        const response = await requestAnalytics(connection, source.trim() || undefined);
+        const fleet = await requestRun(source.trim() || undefined);
         if (mine !== serial.current) return;
+        const response = fleet.response;
         lastResult.current = response;
         setText(response.query);
-        setResult(response);
+        setAnswer(fleet);
         setRanAt(now().toISOString().slice(11, 16));
         onQueryChange?.(response.query);
       } catch (reason) {
         if (mine === serial.current) {
-          setResult(null);
+          setAnswer(null);
           setError(analyticsErrorMessage(reason));
         }
       } finally {
         if (mine === serial.current) setQuerying(false);
       }
     },
-    [connection, now, onQueryChange, requestAnalytics],
+    [now, onQueryChange, requestRun],
   );
 
   // A link's query runs once, when it arrives — not again each time `run` is rebuilt.
@@ -204,12 +222,17 @@ function QueryBody({
             The query failed: {error}
           </p>
         )}
-        {!querying && !error && !result && (
+        {!querying && !error && !answer && (
           <p className="m-0 text-cell text-muted">Run a query, or start from an example below.</p>
         )}
-        {result && (
+        {answer && (
           <>
-            <AnalyticsResponseView response={result} chart {...(sessionHref ? { sessionHref } : {})} />
+            <MissingMachines failed={answer.failed} />
+            <AnalyticsResponseView
+              response={answer.response}
+              chart
+              sessionHref={row => daemonSessionPath(answer.daemonOf(row.id) ?? connection.daemonId, row.id)}
+            />
             {ranAt && <p className="m-0 text-2xs text-faint">Ran at {ranAt} UTC</p>}
           </>
         )}
@@ -220,6 +243,20 @@ function QueryBody({
         <Examples onRun={runText} />
       </div>
     </div>
+  );
+}
+
+/** The machines a result leaves out, named under it — never a silent zero for them. */
+function MissingMachines({ failed }: { readonly failed: readonly MachineFailure[] }) {
+  if (failed.length === 0) return null;
+  return (
+    <ul role="status" className="m-0 grid list-none gap-xs p-0 text-meta text-warn" data-analytics-failed="">
+      {failed.map(outcome => (
+        <li key={outcome.machine.connection.daemonId}>
+          {outcome.machine.name} did not answer: {outcome.error} Its sessions are not in this result.
+        </li>
+      ))}
+    </ul>
   );
 }
 

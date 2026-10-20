@@ -10,9 +10,9 @@
  * Nothing here knows a transport: the caller hands in the function that reads one machine.
  */
 
-import { type AnalyticsResponse, mergeAnalyticsResponses } from '@ferretry/protocol';
+import { AnalyticsMergeError, type AnalyticsResponse, mergeAnalyticsResponses } from '@ferretry/protocol';
 
-import type { DaemonConnection } from '../../lib/daemon-connection.ts';
+import type { DaemonConnection, DaemonId } from '../../lib/daemon-connection.ts';
 import type { AnalyticsRequest } from './analytics-custom-query.tsx';
 import { analyticsErrorMessage } from './analytics-response-view.tsx';
 
@@ -53,39 +53,51 @@ export const machinesSummary = (outcomes: readonly MachineOutcome<unknown>[], ex
   return answered === expected ? `all ${expected} machines` : `${answered} of ${expected} machines`;
 };
 
-/**
- * Names one machine's answer as the app names the machine: every raw row's `machine`, and a `machine`
- * group label. Two machines that share a host name then stay two rows of "by machine", and a row can be
- * traced back to the machine it came from.
- */
-export const stampMachine = (response: AnalyticsResponse, name: string): AnalyticsResponse =>
-  response.kind === 'raw'
-    ? { ...response, results: response.results.map(row => ({ ...row, machine: name })) }
-    : {
-        ...response,
-        results: response.results.map(result =>
-          'machine' in result.labels ? { ...result, labels: { ...result.labels, machine: name } } : result,
-        ),
-      };
+/** A machine that did not answer, or answered in a form the others' answers cannot be merged with. */
+export type MachineFailure = Extract<MachineOutcome<unknown>, { readonly status: 'failed' }>;
+
+/** One query's answer from every machine: the merged response, who is missing from it, and where each session lives. */
+export interface FleetAnswer {
+  readonly response: AnalyticsResponse;
+  readonly failed: readonly MachineFailure[];
+  /** The machine a session row of the response came from, by session id. */
+  readonly daemonOf: (sessionId: string) => DaemonId | undefined;
+}
 
 /**
- * A request that asks EVERY machine the same query and answers with one merged response
- * (`mergeAnalyticsResponses`). `onFailures` hears, after each run, the machines that did not answer;
- * when none did, the run fails with the first machine's reason.
+ * Asks EVERY machine one query and merges the answers with the protocol's `mergeAnalyticsResponses`.
+ *
+ * The answers merge ONE AT A TIME, so an answer that cannot be merged with the rest (a machine on an
+ * older build answering a different shape) becomes that machine's failure rather than discarding every
+ * machine's answer. Each machine's own `machine` value is kept as it answered: it is the value a
+ * `{machine=…}` matcher is compared with on that machine, so what is shown can be typed back.
+ * Fails only when no machine answered, with the first machine's reason.
  */
-export const requestAcrossMachines =
-  (
-    machines: readonly AnalyticsMachine[],
-    request: AnalyticsRequest,
-    onFailures: (failed: readonly Extract<MachineOutcome<AnalyticsResponse>, { status: 'failed' }>[]) => void,
-  ): AnalyticsRequest =>
-  async (_connection, query) => {
-    const outcomes = await readEveryMachine(machines, async connection => await request(connection, query));
-    const failed = outcomes.flatMap(outcome => (outcome.status === 'failed' ? [outcome] : []));
-    const answered = outcomes.flatMap(outcome =>
-      outcome.status === 'answered' ? [stampMachine(outcome.value, outcome.machine.name)] : [],
-    );
-    onFailures(failed);
-    if (answered.length === 0) throw new Error(failed[0]?.error ?? 'no machine to ask');
-    return mergeAnalyticsResponses(answered);
-  };
+export const askEveryMachine = async (
+  machines: readonly AnalyticsMachine[],
+  request: AnalyticsRequest,
+  query: string | undefined,
+): Promise<FleetAnswer> => {
+  const outcomes = await readEveryMachine(machines, async connection => await request(connection, query));
+  const failed: MachineFailure[] = outcomes.flatMap(outcome => (outcome.status === 'failed' ? [outcome] : []));
+  const origin = new Map<string, DaemonId>();
+  let merged: AnalyticsResponse | undefined;
+  for (const outcome of outcomes) {
+    if (outcome.status !== 'answered') continue;
+    try {
+      merged = merged === undefined ? outcome.value : mergeAnalyticsResponses([merged, outcome.value]);
+    } catch (reason) {
+      if (!(reason instanceof AnalyticsMergeError)) throw reason;
+      failed.push({
+        machine: outcome.machine,
+        status: 'failed',
+        error: `its answer cannot be merged with the others (${reason.message}).`,
+      });
+      continue;
+    }
+    if (outcome.value.kind === 'raw')
+      for (const row of outcome.value.results) origin.set(row.id, outcome.machine.connection.daemonId);
+  }
+  if (merged === undefined) throw new Error(failed[0]?.error ?? 'there is no machine to ask');
+  return { response: merged, failed, daemonOf: sessionId => origin.get(sessionId) };
+};

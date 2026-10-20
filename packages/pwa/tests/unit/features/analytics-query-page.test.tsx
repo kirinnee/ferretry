@@ -3,6 +3,7 @@ import type { AnalyticsResponse } from '@ferretry/protocol';
 import type { ReactElement } from 'react';
 import { act, type ReactTestInstance, type ReactTestRenderer } from 'react-test-renderer';
 import { ANALYTICS_QUERY_DEFAULT } from '../../../src/features/analytics/analytics-custom-query.tsx';
+import type { FleetAnswer } from '../../../src/features/analytics/analytics-fanout.ts';
 import { ANALYTICS_QUERY_EXAMPLES } from '../../../src/features/analytics/analytics-query-examples.ts';
 import { AnalyticsQueryPage } from '../../../src/features/analytics/analytics-query-page.tsx';
 import {
@@ -297,6 +298,41 @@ describe('AnalyticsQueryPage', () => {
     });
     await settle();
     expect(input(renderer).props.value).toBe('sum(turns)');
+  });
+
+  it('names the machines a run missed WITH that run, never over a newer one', async () => {
+    const resolvers: ((answer: FleetAnswer) => void)[] = [];
+    const missed: FleetAnswer['failed'] = [
+      { machine: { connection: daemonB, name: 'kirin-box' }, status: 'failed', error: 'asleep' },
+    ];
+    const renderer = mount(
+      <AnalyticsQueryPage
+        connection={daemonA}
+        requestAnalytics={fleet([])}
+        requestRun={() => new Promise<FleetAnswer>(resolve => resolvers.push(resolve))}
+      />,
+    );
+    const submit = async () =>
+      await runAsync(async () => {
+        renderer.root.findAllByType('form')[0]!.props.onSubmit({ preventDefault() {} });
+        await Promise.resolve();
+      });
+    await submit();
+    await submit();
+    await runAsync(async () => {
+      resolvers[1]!({ response: answer('new'), failed: [], daemonOf: () => undefined });
+      resolvers[0]!({ response: answer('old'), failed: missed, daemonOf: () => undefined });
+      await Promise.resolve();
+    });
+    await settle();
+    expect(text(renderer)).not.toContain('did not answer');
+    await submit();
+    await runAsync(async () => {
+      resolvers[2]!({ response: answer('third'), failed: missed, daemonOf: () => undefined });
+      await Promise.resolve();
+    });
+    await settle();
+    expect(text(renderer)).toContain('kirin-box did not answer: asleep Its sessions are not in this result.');
   });
 
   it('reads through the paired carrier by default', async () => {

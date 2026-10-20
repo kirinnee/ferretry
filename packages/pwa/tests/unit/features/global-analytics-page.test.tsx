@@ -5,10 +5,9 @@ import { act, type ReactTestRenderer } from 'react-test-renderer';
 
 import type { AnalyticsRequest } from '../../../src/features/analytics/analytics-custom-query.tsx';
 import {
+  askEveryMachine,
   machinesSummary,
   readEveryMachine,
-  requestAcrossMachines,
-  stampMachine,
 } from '../../../src/features/analytics/analytics-fanout.ts';
 import {
   AnalyticsOverviewPage,
@@ -386,51 +385,61 @@ describe('fan-out', () => {
 });
 
 describe('one query across every machine', () => {
-  const byMachine = (machine: string | null) => ({
-    ...dayAggregate('2026-10-13', 2, 2),
-    query: 'sum by (machine)',
-    parsed: { aggregation: 'sum' as const, groupBy: ['machine' as const], matchers: [] },
-    results:
-      dayAggregate('2026-10-13', 2, 2).kind === 'aggregate'
-        ? (dayAggregate('2026-10-13', 2, 2) as Extract<AnalyticsResponse, { kind: 'aggregate' }>).results.map(
-            result => ({
-              ...result,
-              labels: { machine },
-            }),
-          )
-        : [],
+  const rowsOf = (response: AnalyticsResponse) => (response.kind === 'raw' ? response.results : []);
+
+  it('merges every answer, keeps each machine’s own value, and knows where each session lives', async () => {
+    const answer = await askEveryMachine(
+      MACHINES,
+      async (daemon, query) =>
+        rawResponse([rawRow({ id: `${daemon.daemonId}-row`, machine: `host-${daemon.daemonId}` })], query),
+      '{}',
+    );
+    expect(rowsOf(answer.response).map(row => [row.id, row.machine]).sort()).toEqual([
+      ['daemon-a-row', 'host-daemon-a'],
+      ['daemon-b-row', 'host-daemon-b'],
+    ]);
+    expect(answer.failed).toEqual([]);
+    expect(answer.daemonOf('daemon-b-row')).toBe(daemonB.daemonId);
+    expect(answer.daemonOf('unknown')).toBeUndefined();
   });
 
-  it('names each machine’s rows and groups as the app does', () => {
-    const raw = stampMachine(rawResponse([rawRow({ id: 'a', machine: 'host' })]), 'kirin-box');
-    expect(raw.kind === 'raw' && raw.results[0]!.machine).toBe('kirin-box');
-    const grouped = stampMachine(byMachine('host') as AnalyticsResponse, 'kirin-box');
-    expect(grouped.kind === 'aggregate' && grouped.results[0]!.labels).toEqual({ machine: 'kirin-box' });
-    const other = stampMachine(dayAggregate('2026-10-13', 1, 1), 'kirin-box');
-    expect(other.kind === 'aggregate' && other.results[0]!.labels).toEqual({ day: '2026-10-13' });
-  });
-
-  it('merges every answer, says who did not answer, and fails only when nobody did', async () => {
-    const failures: string[][] = [];
-    const request = requestAcrossMachines(
+  it('names a machine that did not answer or cannot be merged, and fails only when nobody answered', async () => {
+    const partial = await askEveryMachine(
       MACHINES,
       async (daemon, query) => {
-        if (query === 'broken' && daemon.daemonId === 'daemon-b') throw new Error('gone');
-        if (query === 'dead') throw new Error(`${daemon.daemonId} down`);
-        return rawResponse([rawRow({ id: `${daemon.daemonId}-row` })], query);
+        if (daemon.daemonId === 'daemon-b') throw new Error('gone');
+        return rawResponse([rawRow({ id: 'a' })], query);
       },
-      failed => failures.push(failed.map(outcome => `${outcome.machine.name}: ${outcome.error}`)),
+      '{}',
     );
-    const merged = await request(daemonA, '{}');
-    expect(merged.kind === 'raw' && merged.results.map(row => [row.id, row.machine]).sort()).toEqual([
-      ['daemon-a-row', 'studio-mac'],
-      ['daemon-b-row', 'kirin-box'],
-    ]);
-    const partial = await request(daemonA, 'broken');
-    expect(partial.kind === 'raw' && partial.results).toHaveLength(1);
-    await expect(request(daemonA, 'dead')).rejects.toThrow('daemon-a down');
-    await expect(requestAcrossMachines([], request, () => {})(daemonA, '{}')).rejects.toThrow('no machine to ask');
-    expect(failures).toEqual([[], ['kirin-box: gone'], ['studio-mac: daemon-a down', 'kirin-box: daemon-b down']]);
+    expect(rowsOf(partial.response)).toHaveLength(1);
+    expect(partial.failed.map(outcome => `${outcome.machine.name}: ${outcome.error}`)).toEqual(['kirin-box: gone']);
+
+    // An older build answering another shape is that machine's failure, not the end of the result.
+    const mixed = await askEveryMachine(
+      MACHINES,
+      async (daemon, query) =>
+        daemon.daemonId === 'daemon-a' ? rawResponse([rawRow({ id: 'a' })], query) : dayAggregate('2026-10-13', 1, 1),
+      '{}',
+    );
+    expect(rowsOf(mixed.response).map(row => row.id)).toEqual(['a']);
+    expect(mixed.failed[0]?.machine.name).toBe('kirin-box');
+    expect(mixed.failed[0]?.error).toStartWith('its answer cannot be merged with the others (');
+    expect(mixed.daemonOf('a')).toBe(daemonA.daemonId);
+
+    const aggregate = await askEveryMachine(MACHINES, async () => dayAggregate('2026-10-13', 1, 1), 'sum by (day)');
+    expect(aggregate.response.kind).toBe('aggregate');
+
+    await expect(
+      askEveryMachine(
+        MACHINES,
+        async daemon => {
+          throw new Error(`${daemon.daemonId} down`);
+        },
+        'dead',
+      ),
+    ).rejects.toThrow('daemon-a down');
+    await expect(askEveryMachine([], async () => rawResponse([]), '{}')).rejects.toThrow('there is no machine to ask');
   });
 });
 
@@ -544,46 +553,47 @@ describe('GlobalAnalyticsPage', () => {
     }
   });
 
-  it('asks every machine for a query, names who did not answer and links rows to their machine', async () => {
-    let href: ((row: { readonly id: string; readonly machine: string | null }) => string) | undefined;
-    const FleetQuery = (props: {
-      readonly connection: DaemonConnection;
-      readonly requestAnalytics?: AnalyticsRequest;
-      readonly sessionHref?: (row: { readonly id: string; readonly machine: string | null }) => string;
-    }) => {
-      href = props.sessionHref;
-      return (
-        <button
-          type="button"
-          data-ask=""
-          onClick={() => void props.requestAnalytics?.(props.connection, '{}').catch(() => {})}
-        >
-          ask
-        </button>
-      );
-    };
+  it('runs a link’s query once on every machine, names who did not answer and links rows by machine id', async () => {
+    window.history.replaceState({}, '', '/d/daemon-a/analytics/query?q=%7B%7D');
+    const calls: string[] = [];
     const renderer = mount(
       <GlobalAnalyticsPage
         connection={daemonA}
-        machines={MACHINES}
+        machines={[MACHINES[0]!, { connection: daemonB, name: MACHINES[0]!.name }]}
         view="query"
         onNavigate={() => {}}
-        initialQuery={null}
+        now={NOW}
         requestAnalytics={async (daemon, query) => {
-          if (daemon.daemonId === 'daemon-b') throw new Error('asleep');
-          return rawResponse(FLEET_A, query);
+          calls.push(`${daemon.daemonId} ${query}`);
+          if (query?.startsWith('count')) throw new Error('values unavailable');
+          if (daemon.daemonId === 'daemon-b' && query === 'sum by (day)') throw new Error('asleep');
+          return daemon.daemonId === 'daemon-a'
+            ? rawResponse(FLEET_A, query)
+            : query === '{}'
+              ? rawResponse(FLEET_B, query)
+              : dayAggregate('2026-10-13', 1, 1);
         }}
-        QueryPage={FleetQuery as never}
       />,
     );
+    await settle();
+    // ONE run per machine, although the run rewrote the address it was read from.
+    expect(calls).toEqual(['daemon-a {}', 'daemon-b {}']);
+    // Two machines with one display name still link each row to its own machine.
+    const links = renderer.root.findAll(node => node.type === 'a' && node.props['data-raw-session'] !== undefined);
+    expect(links.find(link => link.props['data-raw-session'] === 'hadi')?.props.href).toBe('/d/daemon-b/session/hadi');
+    expect(links.find(link => link.props['data-raw-session'] === 'root')?.props.href).toBe('/d/daemon-a/session/root');
+    expect(text(renderer)).not.toContain('did not answer');
+
+    // A run that one machine misses says so, with that run's result.
+    const editor = renderer.root.findByProps({ role: 'combobox' });
+    run(() => editor.props.onChange({ currentTarget: { value: 'sum by (day)', selectionStart: 12 } }));
     await runAsync(async () => {
-      renderer.root.findByProps({ 'data-ask': '' }).props.onClick();
+      renderer.root.findAllByType('form')[0]!.props.onSubmit({ preventDefault() {} });
       await Promise.resolve();
     });
     await settle();
-    expect(text(renderer)).toContain('kirin-box did not answer: asleep Its sessions are not in this result.');
-    expect(href?.({ id: 'x', machine: 'kirin-box' })).toBe('/d/daemon-b/session/x');
-    expect(href?.({ id: 'y', machine: null })).toBe('/d/daemon-a/session/y');
+    expect(text(renderer)).toContain('studio-mac did not answer: asleep Its sessions are not in this result.');
+    window.history.replaceState({}, '', '/');
   });
 
   it('reads the query a link brought', () => {

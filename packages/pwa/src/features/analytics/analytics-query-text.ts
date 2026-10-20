@@ -63,8 +63,17 @@ export const withRange = (text: string, range: string | undefined): string => {
   return read.ok ? edit(text, () => ({ range: read.parsed.range })) : text;
 };
 
-/** The range chip that is active: a relative range written exactly as one of the offered presets. */
+/** A relative range's length in seconds, as the grammar reads it, or `undefined` for any other range. */
+const relativeSeconds = (text: string): number | undefined => {
+  const read = readAnalyticsQuery(text);
+  return read.ok && read.parsed.range?.kind === 'relative' ? read.parsed.range.seconds : undefined;
+};
+
+/**
+ * The range chip that is active: the preset the query's relative range is AS LONG AS. Compared by
+ * length, not spelling, because the canonical spelling is not the chip's — `[24h]` is written `[1d]`.
+ */
 export const activeRangeSource = (text: string, presets: readonly string[]): string | undefined => {
-  const match = text.match(/\[\s*([^\]]*?)\s*\]\s*$/);
-  return match && presets.includes(match[1]!) ? match[1] : undefined;
+  const seconds = relativeSeconds(text);
+  return seconds === undefined ? undefined : presets.find(preset => relativeSeconds(`sum [${preset}]`) === seconds);
 };
