@@ -14,6 +14,7 @@
 import {
   type IFyApiClient,
   type SealedSecretBundle,
+  SecretCloneNamesSchema,
   type SecretExportResponse,
   SecretExportResponseSchema,
   type SecretImportOffer,
@@ -49,7 +50,8 @@ export async function exportSecrets(
     {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ offer, names }),
+      // Parsed here too: a sign-in token's name cannot be put on this wire, whatever called us.
+      body: JSON.stringify({ offer, names: SecretCloneNamesSchema.parse(names) }),
     },
   );
 }

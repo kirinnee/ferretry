@@ -1,5 +1,10 @@
 import { beforeAll, describe, it } from 'bun:test';
-import type { SealedSecretBundle, SecretExportResponse, SecretImportOffer } from '@ferretry/protocol';
+import {
+  mcpOAuthSecretNames,
+  type SealedSecretBundle,
+  type SecretExportResponse,
+  type SecretImportOffer,
+} from '@ferretry/protocol';
 import type { DaemonIdentity } from '@ferretry/relay';
 import { WebCryptoRelayCrypto } from '@ferretry/relay/adapters';
 import should from 'should';
@@ -227,6 +232,21 @@ describe('the secret clone routes', () => {
 
     // Assert
     should(answer.status).equal(200);
+  });
+
+  it('should refuse to seal a sign-in token, whoever asks and whatever the vault holds', async () => {
+    // Arrange — an MCP server's access token is the one sign-in the vault holds; the owner decided it is not copied.
+    const { source, target } = await machines();
+    const token = mcpOAuthSecretNames('linear', 'https://mcp.example.com/mcp').access;
+    await source.directory.put(token, VALUE);
+    const offer = (await drive(target, '/v1/secrets/imports', undefined)).body as unknown as SecretImportOffer;
+
+    // Act
+    const answer = await drive(source, `/v1/secrets/exports/${offer.importId}`, { offer, names: [token] }, HOST);
+
+    // Assert
+    should(answer.status).equal(400);
+    should(answer.raw).not.containEql(VALUE);
   });
 
   it('should refuse rather than guess when the boundary handed over no governance', async () => {

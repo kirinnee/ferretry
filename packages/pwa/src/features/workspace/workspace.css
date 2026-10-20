@@ -64,7 +64,7 @@
   scrollbar-width: none;
 }
 .fy-ws-tabs[data-drop-target='true'] {
-  box-shadow: inset 0 -2px 0 var(--accent);
+  box-shadow: inset 0 calc(-1 * var(--stroke-heavy)) 0 var(--accent);
 }
 .fy-ws-tab {
   display: inline-flex;
@@ -278,7 +278,7 @@
   gap: var(--gap-sm);
   padding: var(--gap-xs) var(--gap-xs) var(--gap-xs) var(--pad-control-x);
   border: var(--stroke) solid var(--warn-border);
-  border-radius: 999px;
+  border-radius: var(--radius-control);
   background: var(--warn-bg);
   color: var(--warn);
   box-shadow: var(--shadow-md);
@@ -293,14 +293,14 @@
 .fy-ws-marker-dot {
   width: 7px;
   height: 7px;
-  border-radius: 999px;
+  border-radius: var(--radius-dot);
   background: var(--warn);
 }
 .fy-ws-marker-action {
   min-height: var(--control-h-sm);
   padding: 0 var(--pad-control-x);
   border: var(--stroke) solid currentColor;
-  border-radius: 999px;
+  border-radius: var(--radius-control);
   background: var(--surface);
   color: inherit;
   font: inherit;

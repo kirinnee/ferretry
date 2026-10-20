@@ -240,6 +240,7 @@
   width: 100%;
   max-height: min(60dvh, 720px);
   border-radius: var(--radius-sm);
+  /* theme-literal-ok: a video letterboxes onto black in every theme */
   background: #000;
 }
 

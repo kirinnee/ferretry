@@ -3314,9 +3314,12 @@ describe('daemon boot lifecycle', () => {
     // record named the new one.
     should(reviver.snapshots).deepEqual([id, id, id, id]);
     should(reviver.relaunched).deepEqual([id, id, id, id]);
-    // The replacement agent is pointed at the report, through the same turn document a revive writes.
+    // This session was idle, so the replacement is told only that nothing was interrupted — as a Ferretry
+    // notice through the same turn document a revive writes, never the old "You were migrated mid-turn" message.
+    // The report is still written; the notice only points at it when work was interrupted.
     should(reviver.delivered[0]).containEql('turns/turn-002.md');
-    should(turnTwo).containEql('migration-inflight.md');
+    should(turnTwo).containEql('[ferretry] Restarted — nothing was interrupted.');
+    should(turnTwo).not.containEql('migrated mid-turn');
     // Both halves of the report: the inventory written before the pane died, and the outcome that is
     // the only part allowed to claim the move happened.
     should(report).containEql('# Migration in-flight report');

@@ -621,7 +621,7 @@
   overflow: hidden;
   padding: 0 6px;
   border: var(--stroke-control) solid var(--border);
-  border-radius: 999px;
+  border-radius: var(--radius-badge);
   background: var(--surface-2);
   color: var(--fg-soft);
   font-family: var(--font-mono);
@@ -635,8 +635,8 @@
   flex: none;
   width: 8px;
   height: 8px;
-  border: 1.5px solid var(--faint, var(--muted));
-  border-radius: 999px;
+  border: var(--stroke-control) solid var(--faint);
+  border-radius: var(--radius-dot);
 }
 .fy-machine-dot[data-reach='online'] {
   border-color: var(--ok);
@@ -801,10 +801,10 @@
   cursor: grabbing;
 }
 .fy-sbar__machine-group[data-drop-edge='before'] {
-  box-shadow: inset 0 2px 0 var(--accent);
+  box-shadow: inset 0 var(--stroke-heavy) 0 var(--accent);
 }
 .fy-sbar__machine-group[data-drop-edge='after'] {
-  box-shadow: inset 0 -2px 0 var(--accent);
+  box-shadow: inset 0 calc(-1 * var(--stroke-heavy)) 0 var(--accent);
 }
 @media (pointer: coarse) {
   .fy-sbar__machine-grip,

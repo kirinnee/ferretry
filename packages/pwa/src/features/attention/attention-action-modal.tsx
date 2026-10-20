@@ -496,7 +496,7 @@ function AddressedAudit({ record }: { readonly record: ResolvedAttentionItem }) 
   const badge = resolutionBadge(record);
   const BadgeIcon = badge.icon;
   return (
-    <div className="mx-auto mt-sm max-w-md border-l-2 border-border-soft pl-sm text-left text-meta leading-base">
+    <div className="mx-auto mt-sm max-w-md border-l-heavy border-border-soft pl-sm text-left text-meta leading-base">
       <p className="m-0 font-medium text-muted">{record.subject}</p>
       <p className="m-0 mt-xs flex flex-wrap items-center gap-x-sm gap-y-xs text-faint">
         <span

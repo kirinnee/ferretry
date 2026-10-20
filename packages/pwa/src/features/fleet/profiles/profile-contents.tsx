@@ -49,7 +49,11 @@ export function ContentsList(props: ContentsListProps) {
       {items.map((item, index) => (
         <li
           key={item.reference}
-          className={cn(ITEM_ROW, 'md:cursor-grab', dropBefore === index && 'shadow-[0_-3px_0_0_var(--accent)]')}
+          className={cn(
+            ITEM_ROW,
+            'md:cursor-grab',
+            dropBefore === index && 'shadow-[0_calc(-1*var(--border-width-heavy))_0_0_var(--accent)]',
+          )}
           draggable
           onDragStart={event => onDragStart(event, index)}
           onDragEnd={onDragEnd}

@@ -20,8 +20,8 @@
  */
 
 import { CircleAlert, CloudOff, PowerOff, RefreshCw, WifiOff } from 'lucide-react';
-import { Spinner } from '../../components/spinner.tsx';
 import { type ReactNode, useId, useState } from 'react';
+import { Spinner } from '../../components/spinner.tsx';
 import { useConnectionHealth } from '../../hooks/use-connection-health.ts';
 import { useLiveClock } from '../../hooks/use-live-clock.ts';
 import type { ConnectionHealth, ConnectionHealthState, LikelyCause } from '../../lib/connection-health.ts';
@@ -54,7 +54,10 @@ interface ConnectionPillProps {
   readonly onOpen: () => void;
 }
 
-/** The small one-line pill. A real button; under reduced motion the spinner pulses instead of turning. */
+/**
+ * The small one-line pill — a real `kt-btn`, so its corners and stroke are the theme's control shape;
+ * under reduced motion the spinner pulses instead of turning.
+ */
 function ConnectionPill({ state, now, sheetId, sheetOpen, onOpen }: ConnectionPillProps) {
   const detail = pillDetail(state, now);
   return (
@@ -66,7 +69,7 @@ function ConnectionPill({ state, now, sheetId, sheetOpen, onOpen }: ConnectionPi
       aria-controls={sheetId}
       title="Show connection details"
       data-connection-pill=""
-      className="kt-btn kt-btn--sm min-h-control max-w-full items-center gap-xs rounded-full text-muted"
+      className="kt-btn kt-btn--sm min-h-control max-w-full items-center gap-xs text-muted"
     >
       <Spinner size={13} />
       <span className="truncate text-fg">{RECONNECTING_LABEL}</span>

@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import {
+  CloneableSecretNameSchema,
+  mcpOAuthSecretNames,
   SECRET_SCHEMA_VERSION,
   type SealedSecretBundle,
   type SecretImportOffer,
@@ -63,13 +65,16 @@ const OFFER: SecretImportOffer = {
   signature: 'c2ln',
 };
 
+/** Names as a copy carries them: parsed, so a sign-in token's name cannot be written here by accident. */
+const named = (...names: readonly string[]) => names.map(name => CloneableSecretNameSchema.parse(name));
+
 const BUNDLE: SealedSecretBundle = {
   v: 1,
   importId: IMPORT_ID,
   sourceDaemonId: SOURCE_ID,
   targetDaemonId: TARGET_ID,
   expiresAt: AT,
-  names: ['API_KEY'],
+  names: named('API_KEY'),
   ephemeralKey: 'ZXBo',
   nonce: 'bm9uY2U',
   ciphertext: 'Y2lwaGVy',
@@ -78,8 +83,8 @@ const BUNDLE: SealedSecretBundle = {
 const RESULT = (imported: readonly string[], replaced: readonly string[] = []): SecretImportResult => ({
   importId: IMPORT_ID,
   sourceDaemonId: SOURCE_ID,
-  imported,
-  replaced,
+  imported: named(...imported),
+  replaced: named(...replaced),
 });
 
 interface Call {
@@ -153,7 +158,7 @@ describe('the secret copy calls', () => {
     const result = await copySecrets(await createClient(STUDIO), await createClient(LAPTOP), ['API_KEY']);
 
     // Assert — the offer goes to the source with the names; the bundle goes back to the target.
-    expect(result.imported).toEqual(['API_KEY']);
+    expect(result.imported).toEqual(named('API_KEY'));
     expect(calls.map(call => `${call.machine} ${call.method} ${call.path}`)).toEqual([
       'laptop POST /v1/secrets/imports',
       `studio POST /v1/secrets/exports/${IMPORT_ID}`,
@@ -190,8 +195,8 @@ describe('the secret copy wording', () => {
 
     // Assert
     expect(rows).toEqual([
-      { name: 'API_KEY', uses: ['login glm-env', 'config/daemon.json → AUTH'], onTarget: false },
-      { name: 'ZETA', uses: [], onTarget: true },
+      { name: 'API_KEY', uses: ['login glm-env', 'config/daemon.json → AUTH'], onTarget: false, signIn: false },
+      { name: 'ZETA', uses: [], onTarget: true, signIn: false },
     ]);
     expect(secretCopyRows(source, null).every(row => !row.onTarget)).toBe(true);
     expect(initialPicks(rows, ['ZETA', 'MISSING'])).toEqual(['ZETA']);
@@ -254,6 +259,41 @@ describe('the secret copy panel', () => {
     expect(text(renderer)).toContain('1 secret copied to laptop.');
     expect(copied).toEqual([RESULT(['API_KEY'])]);
     expect(calls.find(call => call.path.startsWith('/v1/secrets/exports'))?.machine).toBe('studio');
+  });
+
+  it('should list a sign-in token but never tick it, offer it, or let it be picked', async () => {
+    // Arrange — an MCP server's access token is a sign-in: it does not travel, the person signs in again.
+    const token = mcpOAuthSecretNames('linear', 'https://mcp.example.com/mcp').access;
+    const { calls, createClient } = pair(['API_KEY', token], [], RESULT(['API_KEY']));
+    const renderer = render(
+      <SecretCopyPanel
+        direction="from"
+        here={LAPTOP}
+        others={[STUDIO]}
+        createClient={createClient}
+        machineName={machine => machine.daemonName ?? ''}
+        preselect={['API_KEY', token]}
+      />,
+    );
+    await settle();
+
+    // Act
+    const picking = text(renderer);
+    await runAsync(async () => button(renderer, 'Select none').props.onClick());
+    await runAsync(async () => button(renderer, 'Select all').props.onClick());
+    const all = text(renderer);
+    const disabled = box(renderer, token).props.disabled;
+    await runAsync(async () => button(renderer, 'Copy 1 secret').props.onClick());
+    await settle();
+
+    // Assert
+    expect(disabled).toBe(true);
+    expect(picking).toContain('A sign-in isn’t copied. Sign in again on laptop.');
+    // Every copyable row is ticked, so the button reads "Select none" with only the sign-in left over.
+    expect(picking).toContain('Select none');
+    expect(all).toContain('Copy 1 secret');
+    expect(JSON.stringify(calls.map(call => call.body))).not.toContain(token);
+    expect(calls.find(call => call.path.startsWith('/v1/secrets/exports'))?.body).toMatchObject({ names: ['API_KEY'] });
   });
 
   it('should copy TO a machine the person picks, marking what it replaces', async () => {

@@ -6,6 +6,7 @@ import {
   parseFerretryNotice,
   parsePeerEnvelope,
   peerEnvelopePreamble,
+  splitFerretryNotice,
 } from '../../src/lib/agent-messages.ts';
 
 describe('the peer envelope', () => {
@@ -98,5 +99,16 @@ describe('Ferretry notices', () => {
   it('should not claim ordinary text or an empty notice', () => {
     should(parseFerretryNotice('ferretry is great')).be.null();
     should(parseFerretryNotice('[ferretry]   ')).be.null();
+  });
+
+  it('should split the headline from what is addressed to the agent', () => {
+    should(splitFerretryNotice('Restarted.\n\nRead the file.\n\nThen carry on.')).eql({
+      headline: 'Restarted.',
+      details: 'Read the file.\n\nThen carry on.',
+    });
+    should(splitFerretryNotice('Your message did not arrive.')).eql({
+      headline: 'Your message did not arrive.',
+      details: null,
+    });
   });
 });

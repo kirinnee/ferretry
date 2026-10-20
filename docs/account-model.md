@@ -23,7 +23,8 @@ An `environment` credential is no sign-in at all: a named set of variables put i
 each a plain value, a `${secret:NAME}` reference or — for a cloud — a reference to a credential this
 machine already has (`aws-profile:<name>`, `gcloud-adc`, `azure-cli`). It is usually made from a
 **provider preset** (GLM, DeepSeek, Bedrock, OpenRouter…), has a **Test** instead of Check now, and is
-copied by Clone as plain values and secret NAMES with what the target still needs. A provider that serves
+copied by Clone as plain values and secret NAMES, and its keys follow in one sealed copy the source confirms with a
+passkey ([secrets.md](secrets.md#sign-ins-are-not-copied-api-keys-are)). A provider that serves
 both CLIs makes ONE environment login with a `claude:` and a `codex:` half and one secret, so it drives
 either. Its scope chip — **Claude only**, **Codex only** or **Claude + Codex** — comes from the CLIs it
 drives, and every place that picks a login for one CLI offers only logins with a half for it. A dual login
@@ -80,17 +81,17 @@ Settings. The link is `#machines/<name>/<tab>`.
 
 **Terminal** (`fy`; the name is derived from `packages/cli/package.json`):
 
-| Verb                                                                                       | Does                                                                 |
-| ------------------------------------------------------------------------------------------ | -------------------------------------------------------------------- |
-| `fy daemon setup` / `fy daemon import claude\|codex [--name <runtime>]`                    | the first run and "import again", asked; or one tool, unasked        |
-| `fy machine` / `fy machine set agent-permissions auto\|skip` / `fy machine install <tool>` | facts, Agent permissions, installing Claude Code or Codex            |
-| `fy machine export` / `fy machine clone <file> [--replace]`                                | copy a setup to another machine (a sign-in arrives as an empty slot) |
-| `fy runtimes` / `fy runtime add\|show\|set\|rm`                                            | runtimes                                                             |
-| `fy credentials` / `fy credential add\|check\|signin\|signout\|label\|rm`                  | logins, their status and usage (`fy logins` / `fy login …` too)      |
-| `fy profiles` / `fy profile ls\|show\|build\|edit\|rm`                                     | profiles, each with its scope                                        |
-| `fy components [kind]` / `fy component show\|add\|edit\|rm <kind>/<name>`                  | components                                                           |
-| `fy start --agent <runtime>`                                                               | launch an agent runtime                                              |
-| `fy fleet recommend <task…>`                                                               | which agent suits a piece of work (the only `fleet` verb)            |
+| Verb                                                                                       | Does                                                                       |
+| ------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------- |
+| `fy daemon setup` / `fy daemon import claude\|codex [--name <runtime>]`                    | the first run and "import again", asked; or one tool, unasked              |
+| `fy machine` / `fy machine set agent-permissions auto\|skip` / `fy machine install <tool>` | facts, Agent permissions, installing Claude Code or Codex                  |
+| `fy machine export` / `fy machine clone <file> [--replace]`                                | copy a setup to another machine (a sign-in is never copied: an empty slot) |
+| `fy runtimes` / `fy runtime add\|show\|set\|rm`                                            | runtimes                                                                   |
+| `fy credentials` / `fy credential add\|check\|signin\|signout\|label\|rm`                  | logins, their status and usage (`fy logins` / `fy login …` too)            |
+| `fy profiles` / `fy profile ls\|show\|build\|edit\|rm`                                     | profiles, each with its scope                                              |
+| `fy components [kind]` / `fy component show\|add\|edit\|rm <kind>/<name>`                  | components                                                                 |
+| `fy start --agent <runtime>`                                                               | launch an agent runtime                                                    |
+| `fy fleet recommend <task…>`                                                               | which agent suits a piece of work (the only `fleet` verb)                  |
 
 ## Routes
 

@@ -133,6 +133,7 @@ describe('the composer in a real browser', () => {
           bullet: before('[data-md-marker="bullet"]').content,
           bulletInk: style('[data-md-marker="bullet"]').color,
           quote: style('[data-block="quote"]').borderLeftWidth,
+          heavyStroke: getComputedStyle(editor).getPropertyValue('--stroke-heavy').trim(),
           codeLine: style('[data-block="code"]').fontFamily,
           codeBackground: style('[data-block="code"]').backgroundColor,
         };
@@ -146,7 +147,9 @@ describe('the composer in a real browser', () => {
       expect(looks.markerColour).not.toBe(looks.textColour);
       expect(looks.bullet).toBe('"•"');
       expect(looks.bulletInk).toBe('rgba(0, 0, 0, 0)');
-      expect(looks.quote).toBe('3px');
+      // The quote rule is the theme's heavy stroke, so it is thicker in Neo than in Studio.
+      expect(looks.quote).toBe(looks.heavyStroke);
+      expect(Number.parseFloat(looks.quote)).toBeGreaterThan(1);
       expect(looks.codeLine).toMatch(/mono/iu);
       expect(looks.codeBackground).not.toBe('rgba(0, 0, 0, 0)');
 

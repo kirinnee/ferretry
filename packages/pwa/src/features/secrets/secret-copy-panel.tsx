@@ -18,6 +18,7 @@ import type { DaemonConnection } from '../../lib/daemon-connection.ts';
 import { copySecrets, type SecretCloneClient } from './secret-clone-api.ts';
 import {
   copiedSentence,
+  copyableRows,
   copyButtonLabel,
   copyRefusalSentence,
   initialPicks,
@@ -160,7 +161,7 @@ export function SecretCopyPanel(props: SecretCopyPanelProps) {
           sourceName={machineName(source)}
           targetName={machineName(target)}
           onToggle={toggle}
-          onAll={on => setPicks(on && lists.kind === 'ready' ? lists.rows.map(row => row.name) : [])}
+          onAll={on => setPicks(on && lists.kind === 'ready' ? copyableRows(lists.rows).map(row => row.name) : [])}
           onCopy={() => void copy()}
         />
       )}
@@ -221,7 +222,7 @@ function CopyBody({ uid, lists, picks, phase, sourceName, targetName, onToggle, 
       </p>
     );
   const copying = phase.kind === 'copying';
-  const everything = picks.length === lists.rows.length;
+  const everything = picks.length === copyableRows(lists.rows).length;
   return (
     <div className="flex min-w-0 flex-col gap-2">
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -248,7 +249,7 @@ function CopyBody({ uid, lists, picks, phase, sourceName, targetName, onToggle, 
                 type="checkbox"
                 className="mt-1 shrink-0"
                 checked={picks.includes(row.name)}
-                disabled={copying}
+                disabled={copying || row.signIn}
                 onChange={event => onToggle(row.name, event.target.checked)}
               />
               <span className="flex min-w-0 flex-col gap-0.5">
@@ -261,7 +262,11 @@ function CopyBody({ uid, lists, picks, phase, sourceName, targetName, onToggle, 
                   )}
                 </span>
                 <span className="text-meta leading-base text-muted">
-                  {row.uses.length === 0 ? 'No setting names it' : `Used by ${row.uses.join(', ')}`}
+                  {row.signIn
+                    ? `A sign-in isn’t copied. Sign in again on ${targetName}.`
+                    : row.uses.length === 0
+                      ? 'No setting names it'
+                      : `Used by ${row.uses.join(', ')}`}
                 </span>
               </span>
             </label>
