@@ -92,7 +92,20 @@ export function describePark(input: { disposition: SendDisposition; peer: string
 }
 
 /** The fates a `send --wait` stops at: where a send has SETTLED, one way or the other. */
-export const SETTLED_SEND_FATES: ReadonlySet<SendRecord['fate']> = new Set(['delivered', 'timed_out', 'unaccounted']);
+export const SETTLED_SEND_FATES: ReadonlySet<SendRecord['fate']> = new Set([
+  'delivered',
+  'timed_out',
+  'unaccounted',
+  'cancelled',
+]);
+
+/** What cancelling did on the agent's screen, in words. */
+const CANCEL_EFFECTS: Readonly<Record<NonNullable<SendRecord['cancelEffect']>, string>> = {
+  cleared: 'it was erased from the agent’s composer',
+  not_in_pane: 'it never reached the agent',
+  left_in_queue: 'the agent was already holding it in its own queue and may still read it',
+  left_in_composer: 'the agent’s composer held other text too, so it was left as it was',
+};
 
 /** Where a send settled, in words — and, for the two that did not land, what the sender may do. */
 export function describeFate(record: SendRecord): string {
@@ -103,6 +116,10 @@ export function describeFate(record: SendRecord): string {
     return `not delivered (${reason}) after ${attempts} attempt(s); it is safe to send it again`;
   if (record.fate === 'unaccounted')
     return `unconfirmed (${reason}) — it may still have landed, so do not resend it blindly`;
+  if (record.fate === 'cancelled')
+    return `cancelled by a person — ${CANCEL_EFFECTS[record.cancelEffect ?? 'not_in_pane']}`;
+  if (record.typedNotSent === true)
+    return 'typed into the agent’s composer and not sent — press Enter on it in the ferret, or cancel it';
   return record.fate === 'queued'
     ? 'queued — the agent is holding it until its current turn ends'
     : 'accepted — not yet proven anywhere';

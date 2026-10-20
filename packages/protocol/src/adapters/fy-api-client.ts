@@ -70,6 +70,7 @@ import {
   ResumeSessionRequestSchema,
   type RuntimeControlRequest,
   RuntimeControlRequestSchema,
+  SendCancelRequestSchema,
   SendListResponseSchema,
   type SendRecord,
   SendRecordSchema,
@@ -78,6 +79,7 @@ import {
   type SendResult,
   SendResultSchema,
   SendRetryRequestSchema,
+  SendSubmitRequestSchema,
   type SessionAttachTarget,
   SessionAttachTargetSchema,
   SessionListSchema,
@@ -110,10 +112,6 @@ import {
   WARDEN_ATTENTION_PATH,
   WARDEN_INVESTIGATE_PATH,
   WARDEN_LEAVE_PATH,
-  type WardenLeaveRequest,
-  WardenLeaveRequestSchema,
-  type WardenLeaveView,
-  WardenLeaveViewSchema,
   type WardenAttentionView,
   WardenAttentionViewSchema,
   type WardenConfigPatch,
@@ -124,6 +122,10 @@ import {
   WardenInvestigateRequestSchema,
   type WardenInvestigateView,
   WardenInvestigateViewSchema,
+  type WardenLeaveRequest,
+  WardenLeaveRequestSchema,
+  type WardenLeaveView,
+  WardenLeaveViewSchema,
   WardenRunRequestSchema,
   type WardenRunView,
   WardenRunViewSchema,
@@ -673,6 +675,26 @@ export class FyApiClient implements IFyApiClient {
       `sends/${encodeURIComponent(NonEmptyValueSchema.parse(sendId))}/retry`,
       SendRetryRequestSchema,
       force === true ? { force: true } : {},
+      SendRecordSchema,
+    );
+  }
+
+  cancelSend(id: string, sendId: string): Promise<SendRecord> {
+    return this.#post(
+      id,
+      `sends/${encodeURIComponent(NonEmptyValueSchema.parse(sendId))}/cancel`,
+      SendCancelRequestSchema,
+      {},
+      SendRecordSchema,
+    );
+  }
+
+  submitSend(id: string, sendId: string): Promise<SendRecord> {
+    return this.#post(
+      id,
+      `sends/${encodeURIComponent(NonEmptyValueSchema.parse(sendId))}/enter`,
+      SendSubmitRequestSchema,
+      {},
       SendRecordSchema,
     );
   }

@@ -744,6 +744,9 @@ button.fy-receipt {
 .fy-receipt-line .fy-receipt[data-send-receipt='failed'] .fy-receipt-mark {
   color: var(--err, #b42318);
 }
+.fy-receipt-line .fy-receipt[data-send-receipt='typed'] .fy-receipt-mark {
+  color: var(--warn, #8a6420);
+}
 .fy-receipt-chip {
   border: 1px solid var(--border, var(--fy-border));
   border-radius: 4px;
@@ -755,6 +758,10 @@ button.fy-receipt {
 .fy-receipt-chip[data-send-chip='failed'] {
   border-color: var(--err-border, var(--fy-border));
   color: var(--err, #b42318);
+}
+.fy-receipt-chip[data-send-chip='typed'] {
+  border-color: var(--warn-border, var(--fy-border));
+  color: var(--warn, #8a6420);
 }
 .fy-receipt-detail {
   color: var(--fy-muted);

@@ -11,6 +11,7 @@ import {
   type SendVerdict,
 } from './tracking.ts';
 import {
+  type SendHeldAt,
   type SendLedger,
   type SendRecord,
   type SendRepository,
@@ -76,7 +77,7 @@ export interface SendRoster {
 export interface SendTrackerPorts {
   readonly ledger: Pick<SendLedger, 'list' | 'settle'>;
   readonly evidence: SendEvidenceSource;
-  readonly terminal: Pick<SendTerminal, 'observe' | 'holds'>;
+  readonly terminal: Pick<SendTerminal, 'observe' | 'heldAt'>;
   readonly repository: Pick<SendRepository, 'read' | 'journal'>;
   readonly attempts: SendReattempter;
   readonly notifier: SendFailureNotifier;
@@ -94,6 +95,9 @@ export interface SendTrackingLoop {
 }
 
 const UNREADABLE: SendEvidenceReading = { readable: false, inputs: [] };
+
+/** One look at where the pane holds a send: a place, nowhere, or a pane that could not be read. */
+type PaneHold = SendHeldAt | 'nowhere' | 'unreadable';
 
 export class SendTracker implements SendTracking, SendTrackingLoop {
   constructor(
@@ -152,12 +156,14 @@ export class SendTracker implements SendTracking, SendTrackingLoop {
         continue;
       }
       if (!isOpenSend(record)) continue;
-      const current =
+      const proven =
         verdict?.queuedAt !== undefined && record.fate === 'accepted'
-          ? await this.queued(id, record, verdict.queuedAt)
+          ? await this.queued(id, record, verdict.queuedAt, 'transcript')
           : record;
+      const hold = await this.paneHold(id, proven);
+      const current = await this.observed(id, proven, hold);
       const due = deadlineOf(current, this.settings);
-      const after = now < due ? current : await this.expire(id, current, reading, verdict, now);
+      const after = now < due ? current : await this.expire(id, current, reading, verdict, hold, now);
       if (!isOpenSend(after)) continue;
       // A send this look re-typed is looked at again soon, like any fresh transport.
       const at =
@@ -183,14 +189,47 @@ export class SendTracker implements SendTracking, SendTrackingLoop {
     });
   }
 
-  private async queued(id: SessionId, record: SendRecord, queuedAt: string): Promise<SendRecord> {
+  private async queued(
+    id: SessionId,
+    record: SendRecord,
+    queuedAt: string,
+    proof: 'transcript' | 'pane',
+  ): Promise<SendRecord> {
     const next = await this.ports.ledger.settle(id, record.sendId, {
       fate: 'queued',
       fateAt: this.ports.clock.now(),
       queuedAt,
-      queueProof: 'transcript',
+      queueProof: proof,
+      typedNotSent: undefined,
     });
-    await this.ports.repository.journal(id, 'control.send_queued', { sendId: record.sendId, proof: 'transcript' });
+    await this.ports.repository.journal(id, 'control.send_queued', { sendId: record.sendId, proof });
+    return next ?? record;
+  }
+
+  /** Where the pane holds this send right now. A held-for-revive record has no pane to look in. */
+  private async paneHold(id: SessionId, record: SendRecord): Promise<PaneHold> {
+    const text = record.matchText ?? record.message;
+    return await this.ports.terminal.heldAt(id, text).then(
+      where => where ?? 'nowhere',
+      () => 'unreadable' as const,
+    );
+  }
+
+  /**
+   * Moves what the pane shows onto the record, on EVERY look rather than only at a deadline.
+   *
+   * A message left TYPED in the composer is said as itself within one look — a harness never submits
+   * composer text on its own, so "Sending" would be a promise nothing is keeping. One that shows up in
+   * the harness's own queue becomes `queued` on that proof, and a typed flag the pane no longer
+   * supports is dropped.
+   */
+  private async observed(id: SessionId, record: SendRecord, hold: PaneHold): Promise<SendRecord> {
+    if (hold === 'queue' && record.fate === 'accepted')
+      return await this.queued(id, record, this.ports.clock.now(), 'pane');
+    const typed = hold === 'composer';
+    if (hold === 'unreadable' || typed === (record.typedNotSent === true)) return record;
+    const next = await this.ports.ledger.settle(id, record.sendId, { typedNotSent: typed ? true : undefined });
+    if (typed) await this.ports.repository.journal(id, 'control.send_typed_not_sent', { sendId: record.sendId });
     return next ?? record;
   }
 
@@ -203,6 +242,7 @@ export class SendTracker implements SendTracking, SendTrackingLoop {
     record: SendRecord,
     reading: SendEvidenceReading,
     verdict: SendVerdict | undefined,
+    hold: PaneHold,
     now: number,
   ): Promise<SendRecord> {
     if (!reading.readable) {
@@ -226,9 +266,8 @@ export class SendTracker implements SendTracking, SendTrackingLoop {
     if (!pane.alive || pane.dead) return await this.settle(id, record, 'timed_out', 'session_ended');
     // Not delivered, and nothing will be until somebody answers the dialog: retyping would type into it.
     if (pane.blockingPrompt !== undefined) return await this.settle(id, record, 'unaccounted', 'blocked_by_prompt');
-    const inPane = await this.ports.terminal.holds(id, record.matchText ?? record.message).catch(() => undefined);
-    if (inPane === undefined) return await this.settle(id, record, 'unaccounted', 'pane_unreadable');
-    if (verdict?.holding === true || inPane) {
+    if (hold === 'unreadable') return await this.settle(id, record, 'unaccounted', 'pane_unreadable');
+    if (verdict?.holding === true || hold !== 'nowhere') {
       // Still held — behind a busy turn, or sitting in the composer. That is waiting, not loss, so
       // the look is pushed out rather than counted against an attempt, up to a ceiling.
       if (now - Date.parse(record.acceptedAt) >= this.settings.holdLimitMs)

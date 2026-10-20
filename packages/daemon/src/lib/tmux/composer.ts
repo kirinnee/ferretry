@@ -29,8 +29,10 @@ export type LandingEvidence = 'chars' | 'placeholder';
  * The capture group is the placeholder's counter, so a SECOND paste (`#2`) is recognisable as new
  * even while the frame still shows the first.
  */
-const PASTE_PLACEHOLDER =
-  /\[(?:Pasted text|Pasted Content|Image|Audio|\.{3}Truncated text)(?:[^\]\n]*?#(\d+))?[^\]\n]*\]/gi;
+export const PASTE_PLACEHOLDER_PATTERN =
+  '\\[(?:Pasted text|Pasted Content|Image|Audio|\\.{3}Truncated text)(?:[^\\]\\n]*?#(\\d+))?[^\\]\\n]*\\]';
+
+const PASTE_PLACEHOLDER = new RegExp(PASTE_PLACEHOLDER_PATTERN, 'gi');
 
 /**
  * Above this many characters — or on any embedded newline — a payload travels as a BRACKETED PASTE

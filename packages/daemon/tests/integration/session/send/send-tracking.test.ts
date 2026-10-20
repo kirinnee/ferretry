@@ -7,9 +7,13 @@ import { FileSendLedger } from '../../../../src/adapters/index.ts';
 import { type ClockPort, parseSessionId, type SerialExecutor, type SessionId } from '../../../../src/lib/index.ts';
 import {
   AgentSendFailureNotifier,
+  type ComposerClearOutcome,
+  type ComposerSubmitOutcome,
   defaultSendTrackerSettings,
   defaultSessionSendSettings,
   ReviveRefusedForSend,
+  SendComposerOccupied,
+  type SendHeldAt,
   type SendPaneObservation,
   type SendQueueOutcome,
   type SendRecord,
@@ -47,7 +51,11 @@ class FakeHarness implements SendTerminal {
   alive = true;
   /** The keys go in and nothing happens — the pane repainted, the agent crashed mid-submit. */
   drops = false;
-  /** What the harness is visibly holding, in its composer or its queue. */
+  /** Enter does not submit: the text stays typed in the composer, as a swallowed Enter leaves it. */
+  strands = false;
+  /** What sits typed in the composer and was never submitted. */
+  composer = '';
+  /** What the harness is visibly holding in its own queue. */
   private held: string[] = [];
 
   constructor(
@@ -56,11 +64,22 @@ class FakeHarness implements SendTerminal {
   ) {}
 
   async observe(): Promise<SendPaneObservation> {
-    return { alive: this.alive, dead: false, promptReady: !this.busy, activeWork: this.busy };
+    return {
+      alive: this.alive,
+      dead: false,
+      promptReady: !this.busy && this.composer === '',
+      activeWork: this.busy,
+      ...(this.composer === '' ? {} : { draft: this.composer }),
+    };
   }
 
   async deliver(_id: SessionId, text: string): Promise<void> {
+    if (this.composer !== '') throw new SendComposerOccupied(this.composer);
     this.typed.push(text);
+    if (this.strands) {
+      this.composer = text;
+      throw new Error('the turn landed but stayed in the composer');
+    }
     if (!this.drops) this.userTurn(text);
   }
 
@@ -79,8 +98,30 @@ class FakeHarness implements SendTerminal {
 
   async pressStopKey(): Promise<void> {}
 
-  async holds(_id: SessionId, text: string): Promise<boolean> {
-    return this.held.includes(text);
+  async heldAt(_id: SessionId, text: string): Promise<SendHeldAt | undefined> {
+    if (this.composer === text) return 'composer';
+    return this.held.includes(text) ? 'queue' : undefined;
+  }
+
+  async clearComposer(_id: SessionId, text: string): Promise<ComposerClearOutcome> {
+    if (this.composer === '') return 'absent';
+    if (this.composer !== text) return 'foreign';
+    this.composer = '';
+    return 'cleared';
+  }
+
+  async submitComposer(_id: SessionId, text: string): Promise<ComposerSubmitOutcome> {
+    if (this.composer !== text) return 'absent';
+    this.composer = '';
+    this.userTurn(text);
+    return 'submitted';
+  }
+
+  /** Submits whatever the composer holds — what a person pressing Enter in the terminal does. */
+  pressEnter(): void {
+    const text = this.composer;
+    this.composer = '';
+    this.userTurn(text);
   }
 
   /** The turn ends: the harness submits everything it was holding, in order. */
@@ -138,7 +179,9 @@ class Rig {
       queue: async (id, text) => await terminal(id).queue(id, text),
       stopActiveTurn: async id => await terminal(id).stopActiveTurn(),
       pressStopKey: async () => undefined,
-      holds: async (id, text) => await terminal(id).holds(id, text),
+      heldAt: async (id, text) => await terminal(id).heldAt(id, text),
+      clearComposer: async (id, text) => await terminal(id).clearComposer(id, text),
+      submitComposer: async (id, text) => await terminal(id).submitComposer(id, text),
     };
     const repository: SendRepository = {
       read: async id => this.targets.get(id),
@@ -364,5 +407,102 @@ describe('an agent-to-agent send', () => {
     should(subject.harness.typed).have.length(4);
     should(notice).match({ senderKind: 'daemon', fate: 'delivered' });
     should(subject.sender.typed[0]).match(/Your message to session-1 \(send send-1\) did not reach it/);
+  });
+});
+
+describe('a Codex message left typed and not sent — the owner’s stuck "hi" and "hello"', () => {
+  it('is said as typed-not-sent within one look, refuses to type a second message onto it, and cancels cleanly', async () => {
+    // Arrange — Enter never takes, so `hi` stays typed in Codex's composer.
+    const subject = await rig('codex');
+    subject.harness.strands = true;
+
+    // Act
+    const first = await subject.service
+      .send({ id: ID, sendId: 'send-1', message: 'hi' })
+      .catch((error: unknown) => error);
+    const looked = await subject.at(2_000);
+    const second = await subject.service
+      .send({ id: ID, sendId: 'send-2', message: 'hello' })
+      .catch((error: unknown) => error);
+    const cancelled = await subject.service.cancel(ID, 'send-1');
+    const later = await subject.at(70_000);
+
+    // Assert — the stranded row says so instead of "Sending", and `hello` was never typed onto it,
+    // which is what reached Codex as `hihello` before.
+    should((first as Error).message).match(/stayed in the composer/u);
+    should(looked).match({ fate: 'accepted', typedNotSent: true });
+    should((second as Error).message).match(/already holds unsent text \("hi"\).*Press Enter on it or cancel it/u);
+    should(await subject.record('send-2')).be.undefined();
+    should(subject.harness.typed).eql(['hi']);
+    should(cancelled).match({ fate: 'cancelled', cancelEffect: 'cleared' });
+    should(Object.hasOwn(cancelled, 'typedNotSent')).be.false();
+    should(subject.harness.composer).equal('');
+    // Cancelled is final: a later look neither re-opens it nor retypes it.
+    should(later).match({ fate: 'cancelled' });
+    should(subject.harness.typed).eql(['hi']);
+  });
+
+  it('is sent by one Press Enter and then proven delivered from the transcript', async () => {
+    const subject = await rig('codex');
+    subject.harness.strands = true;
+    await subject.service.send({ id: ID, sendId: 'send-1', message: 'hi' }).catch(() => undefined);
+    await subject.at(2_000);
+
+    const submitted = await subject.service.submit(ID, 'send-1');
+    const delivered = await subject.at(4_000);
+    const again = await subject.service.submit(ID, 'send-1').catch((error: unknown) => error);
+
+    should(Object.hasOwn(submitted, 'typedNotSent')).be.false();
+    should(delivered).match({ fate: 'delivered', evidence: { tier: 'exact-text' } });
+    // A second tap finds nothing typed and presses nothing.
+    should((again as Error).message).match(/is delivered; there is nothing to submit/u);
+  });
+
+  it('proves both halves of a message Codex received joined, so neither row waits forever', async () => {
+    // Arrange — the shape the old daemon produced: `hi` stranded, `hello` typed onto it, and Codex
+    // submitting `hihello` as one user turn. Both rows are open in the ledger.
+    const subject = await rig('codex');
+    subject.harness.strands = true;
+    await subject.service.send({ id: ID, sendId: 'send-1', message: 'hi' }).catch(() => undefined);
+    subject.nowMs = T0 + 1_000;
+    await subject.ledger.accept(ID, {
+      sendId: 'send-2',
+      acceptedAt: subject.clock.now(),
+      acceptedTurn: 1,
+      path: 'native-inline',
+      message: 'hello',
+      matchText: 'hello',
+      fate: 'queued',
+      attempt: 1,
+    });
+    subject.harness.composer = 'hihello';
+    subject.harness.pressEnter();
+
+    // Act
+    const hi = await subject.at(3_000);
+    const hello = await subject.record('send-2');
+
+    // Assert
+    should(hi).match({ fate: 'delivered', evidence: { tier: 'merged-text' } });
+    should(hello).match({ fate: 'delivered', evidence: { tier: 'merged-text' } });
+    should(hello.evidence?.key).equal(hi.evidence?.key);
+  });
+
+  it('refuses to cancel what the agent already read, and says what it left where it cannot reach', async () => {
+    const subject = await rig('codex');
+    await subject.service.send({ id: ID, sendId: 'send-1', message: 'run the tests' });
+    await subject.at(2_000);
+    subject.harness.busy = true;
+    await subject.service.send({ id: ID, sendId: 'send-2', message: 'and the docs' });
+
+    const delivered = await subject.service.cancel(ID, 'send-1').catch((error: unknown) => error);
+    const queued = await subject.service.cancel(ID, 'send-2');
+    const twice = await subject.service.cancel(ID, 'send-2');
+    const missing = await subject.service.cancel(ID, 'send-9').catch((error: unknown) => error);
+
+    should((delivered as Error).message).match(/already delivered/u);
+    should(queued).match({ fate: 'cancelled', cancelEffect: 'left_in_queue' });
+    should(twice).eql(queued);
+    should((missing as Error).message).match(/has no send send-9/u);
   });
 });

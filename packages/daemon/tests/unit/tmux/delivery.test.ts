@@ -504,3 +504,46 @@ describe('submit classification', () => {
     should(actual).deepEqual({ kind: 'holding' });
   });
 });
+
+describe('submit classification read from the composer', () => {
+  const capture = (state: string): DeliveryFrame => {
+    const dir = join(import.meta.dir, '../../fixtures/composer');
+    const [x, y] = readFileSync(join(dir, `codex-0.156.1-${state}.cursor`), 'utf8')
+      .trim()
+      .split('|');
+    const visible = readFileSync(join(dir, `codex-0.156.1-${state}.txt`), 'utf8');
+    return { alive: true, dead: false, promptReady: false, visible, cursorX: Number(x), cursorY: Number(y) };
+  };
+
+  it('should hold while a swallowed Enter left the payload in a two-line composer', () => {
+    // Real capture: Enter arrived inside Codex's paste-burst window and opened a new line instead.
+    should(classifySubmit(capture('idle-typed-newline'), 'fix the flaky testx', 'chars')).deepEqual({
+      kind: 'holding',
+    });
+  });
+
+  it('should call a payload delivered once the composer is back to its placeholder, though it is echoed above', () => {
+    // Arrange — `hi` is all over this frame (`› hihello` in history, `anything` in the placeholder),
+    // which the whole-frame search read as "still in the composer".
+    const frame = capture('idle-empty');
+
+    should(classifySubmit(frame, 'hi', 'chars')).deepEqual({ kind: 'delivered', outcome: 'turn-started' });
+  });
+
+  it('should hold a collapsed paste until the composer lets it go', () => {
+    const pasted: DeliveryFrame = {
+      alive: true,
+      dead: false,
+      promptReady: false,
+      visible: '› [Pasted Content 900 chars]',
+      cursorX: 29,
+      cursorY: 0,
+    };
+
+    should(classifySubmit(pasted, 'z'.repeat(900), 'placeholder')).deepEqual({ kind: 'holding' });
+    should(classifySubmit({ ...pasted, visible: '› ' }, 'z'.repeat(900), 'placeholder')).deepEqual({
+      kind: 'delivered',
+      outcome: 'turn-started',
+    });
+  });
+});

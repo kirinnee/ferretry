@@ -1,10 +1,12 @@
 import {
   FY_REQUEST_ID_HEADER,
   InterruptSessionRequestSchema,
+  SendCancelRequestSchema,
   type SendRecord,
   SendRequestSchema,
   type SendResult,
   SendRetryRequestSchema,
+  SendSubmitRequestSchema,
   type SessionHandoff,
   SessionHandoffNameSchema,
   type SessionView,
@@ -80,6 +82,10 @@ export interface SessionSendSubsystem {
   sendStatus(sessionId: string, sendId: string): Promise<SendRecord>;
   /** Re-attempts one send under its original id, as a person asked. */
   retry(sessionId: string, sendId: string, force: boolean): Promise<SendRecord>;
+  /** Takes back one send not proven delivered, erasing it from the composer when it is typed there. */
+  cancel(sessionId: string, sendId: string): Promise<SendRecord>;
+  /** Presses Enter once for a send sitting typed, and not sent, in the agent's composer. */
+  submit(sessionId: string, sendId: string): Promise<SendRecord>;
   /** What the person sent in one hand-off document (`turn-008`, `queued-<send id>`). */
   handoff(sessionId: string, name: string): Promise<SessionHandoff>;
 }
@@ -278,6 +284,33 @@ function sendLedgerRoutes(subsystem: SessionSendSubsystem): readonly ApiRoute[] 
         const sendId = pathSendId(context);
         const request = await parseBody(context.request, SendRetryRequestSchema);
         return jsonResponse(await subsystem.retry(id, sendId, request.force === true).catch(refuse));
+      },
+    },
+    // Cancel and Enter finish or take back a send, so they are governed exactly as the send and its
+    // retry are: `operator`, no capability of their own. Each touches only the composer, and only
+    // when it holds exactly that send's text — the service refuses anything else.
+    {
+      method: 'POST',
+      path: '/v1/sessions/:sessionId/sends/:sendId/cancel',
+      minimum: 'operator',
+      noStore: true,
+      handle: async context => {
+        const id = pathSessionId(context);
+        const sendId = pathSendId(context);
+        await parseBody(context.request, SendCancelRequestSchema);
+        return jsonResponse(await subsystem.cancel(id, sendId).catch(refuse));
+      },
+    },
+    {
+      method: 'POST',
+      path: '/v1/sessions/:sessionId/sends/:sendId/enter',
+      minimum: 'operator',
+      noStore: true,
+      handle: async context => {
+        const id = pathSessionId(context);
+        const sendId = pathSendId(context);
+        await parseBody(context.request, SendSubmitRequestSchema);
+        return jsonResponse(await subsystem.submit(id, sendId).catch(refuse));
       },
     },
   ];

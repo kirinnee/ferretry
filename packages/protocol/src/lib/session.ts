@@ -8,8 +8,8 @@ import {
 } from './common.ts';
 import { ProviderQuotaBalanceSchema } from './fleet-credentials.ts';
 import { HarnessSchema } from './session-base.ts';
-import { SessionLiveActivitySchema } from './session-live.ts';
 import { HarnessDialogSchema } from './session-dialog.ts';
+import { SessionLiveActivitySchema } from './session-live.ts';
 import { PermissionRequestSchema } from './session-permission.ts';
 import { SessionProvenanceSchema } from './session-provenance.ts';
 import { SessionTransferEdgeSchema } from './session-transfer-edge.ts';
@@ -37,8 +37,10 @@ export type InteractionMode = z.infer<typeof InteractionModeSchema>;
  *   * `unaccounted`— the daemon could not prove it either way (`reason` says why); it MAY have landed.
  *   * `timed_out`  — PROVEN absent after every attempt: not in the transcript, not in the harness queue,
  *                    not in the composer. Safe to retry under the same id.
+ *   * `cancelled`  — a person took it back before it was proven delivered. `cancelEffect` says what
+ *                    that did to the agent's screen, because only some of it can be undone there.
  */
-export const SendFateSchema = z.enum(['accepted', 'queued', 'delivered', 'unaccounted', 'timed_out']);
+export const SendFateSchema = z.enum(['accepted', 'queued', 'delivered', 'unaccounted', 'timed_out', 'cancelled']);
 export type SendFate = z.infer<typeof SendFateSchema>;
 
 export const SendPathSchema = z.enum(['direct', 'turn-file', 'native-inline', 'native-file', 'revive', 'revive-queue']);
@@ -85,9 +87,27 @@ export const SendEvidenceSchema = z.object({
   originatedAt: InstantSchema.optional(),
   shapeVersion: PositiveIntegerSchema,
   matchedTurn: NonNegativeIntegerSchema,
-  tier: z.enum(['queue-file-id', 'turn-instruction', 'exact-text']),
+  /**
+   * `merged-text`: the harness submitted this message JOINED to the sends either side of it — what a
+   * TUI does when a second message is typed onto one still sitting in its composer — so one user record
+   * proves several sends, in order.
+   */
+  tier: z.enum(['queue-file-id', 'turn-instruction', 'exact-text', 'merged-text']),
 });
 export type SendEvidence = z.infer<typeof SendEvidenceSchema>;
+
+/**
+ * What cancelling a send did on the agent's screen.
+ *
+ *   * `cleared`        — it was typed in the composer and has been erased from it.
+ *   * `not_in_pane`    — it was in neither the composer nor the harness's queue; only the record moved.
+ *   * `left_in_queue`  — the harness is holding it in its own queue, which Ferretry cannot edit: the
+ *                        agent may still read it at its next turn boundary.
+ *   * `left_in_composer` — the composer holds it beside other text, or could not be proven clear, so
+ *                        it was left alone rather than erasing somebody's draft.
+ */
+export const SendCancelEffectSchema = z.enum(['cleared', 'not_in_pane', 'left_in_queue', 'left_in_composer']);
+export type SendCancelEffect = z.infer<typeof SendCancelEffectSchema>;
 
 /** Public send-ledger row. Private payload paths never cross the API boundary. */
 export const SendRecordSchema = z.object({
@@ -125,6 +145,13 @@ export const SendRecordSchema = z.object({
    * anyway", because the original may have landed.
    */
   retryable: z.boolean().optional(),
+  /**
+   * The message is sitting TYPED in the agent's composer and was not submitted. A harness never sends
+   * composer text on its own, so it waits there until somebody presses Enter or clears it.
+   */
+  typedNotSent: z.boolean().optional(),
+  /** What a `cancelled` fate did to the agent's screen. */
+  cancelEffect: SendCancelEffectSchema.optional(),
   opportunityAt: InstantSchema.optional(),
   unaccountedDeadline: InstantSchema.optional(),
   hardDeadline: InstantSchema.optional(),
@@ -143,6 +170,20 @@ export type SendListResponse = z.infer<typeof SendListResponseSchema>;
  */
 export const SendRetryRequestSchema = z.strictObject({ force: z.boolean().optional() });
 export type SendRetryRequest = z.infer<typeof SendRetryRequestSchema>;
+
+/**
+ * Taking back one send that was not proven delivered: the record leaves the open queue, and a copy
+ * sitting typed in the agent's composer is erased. Nothing else is accepted, so a body is refused.
+ */
+export const SendCancelRequestSchema = z.strictObject({});
+export type SendCancelRequest = z.infer<typeof SendCancelRequestSchema>;
+
+/**
+ * Pressing Enter ONCE for a send that is sitting typed in the agent's composer. Refused unless the
+ * composer holds exactly that message, so it can never submit somebody else's draft.
+ */
+export const SendSubmitRequestSchema = z.strictObject({});
+export type SendSubmitRequest = z.infer<typeof SendSubmitRequestSchema>;
 
 export const RuntimeModelOptionSchema = z.object({
   value: z.string().min(1),

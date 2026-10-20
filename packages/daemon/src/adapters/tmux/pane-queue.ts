@@ -6,20 +6,12 @@
  *
  * The composer is filled through the SAME evidence loop the delivery adapter uses, because the two
  * share the only hard part — proving text actually landed in a TUI that may be repainting. What
- * differs is everything after the fill: this path wants the payload to STAY visible.
+ * differs is everything after the fill: this path wants the payload to turn up in the harness's own
+ * queue, and says so only when the pane shows it there.
  */
 
-import {
-  composerEvidence,
-  composerHolds,
-  composerTransport,
-  type LandingEvidence,
-  landingEvidence,
-  needsQueueKey,
-  queueAccepted,
-  type TmuxController,
-} from '../../lib/tmux/index.ts';
-import type { DeliverySleep } from './pane-delivery.ts';
+import { type LandingEvidence, needsQueueKey, queuedWhere, type TmuxController } from '../../lib/tmux/index.ts';
+import { captureFrame, type DeliverySleep, fillComposer } from './composer-fill.ts';
 
 export interface PaneQueueOptions {
   /** Times the composer may be filled from scratch. */
@@ -50,6 +42,18 @@ export class PaneQueueError extends Error {
   }
 }
 
+/**
+ * What a busy-pane transport proved.
+ *
+ * `held` — the harness shows it in its own queue. `typed` — it is still in the composer after the
+ * submit and queue keys, which a TUI will NOT send on its own when the turn ends. `left` — it left
+ * the composer and no queue shows it: the keys were taken, and only the transcript can say where to.
+ * That is the ordinary answer from Codex 0.163, whose Enter mid-turn steers the message straight
+ * into the running turn (measured), and from a pane that went idle between the fill and the submit —
+ * in both the message was submitted, so failing the send would report a delivered message as lost.
+ */
+export type PaneQueueOutcome = 'held' | 'typed' | 'left';
+
 export class TmuxPaneQueue {
   private readonly settings: Required<PaneQueueOptions>;
 
@@ -62,13 +66,13 @@ export class TmuxPaneQueue {
   }
 
   /**
-   * Put `text` into the pane's queue and prove it is being held.
+   * Put `text` into the pane's queue and report what the pane proves about it.
    *
    * The proof at the end is not optional politeness. Without it a submit that landed on a prompt that
    * had just gone idle would be reported as `queued`, and the caller would wait at a turn boundary
-   * for a message the harness consumed — or dropped — seconds earlier.
+   * for a message the harness consumed seconds earlier.
    */
-  async queue(session: string, text: string): Promise<'held' | 'working'> {
+  async queue(session: string, text: string): Promise<PaneQueueOutcome> {
     const evidence = await this.fill(session, text);
     const submitted = await this.tmux.sendKey(session, 'Enter').then(
       () => true,
@@ -76,47 +80,25 @@ export class TmuxPaneQueue {
     );
     if (!submitted) throw new PaneQueueError(`tmux could not submit into the queue of session ${session}`);
     await this.sleep(this.settings.submitSettleMs);
-    if (needsQueueKey(await this.tmux.capture(session, false), text, evidence)) {
+    let frame = await captureFrame(this.tmux, session);
+    if (needsQueueKey(frame, text, evidence)) {
       await this.tmux.sendKey(session, 'Tab');
       await this.sleep(this.settings.queueKeySettleMs);
+      frame = await captureFrame(this.tmux, session);
     }
-    // HELD is the only answer that proves the harness has the text: it is still on screen after the
-    // submit. A pane that is merely working is accepted too — it is about to consume or queue it — but
-    // it is reported as such, so nothing upstream calls the send queued on that alone.
-    const frame = await this.tmux.capture(session, false);
-    if (composerHolds(frame, text, evidence)) return 'held';
-    if (queueAccepted(frame, text, evidence)) return 'working';
-    throw new PaneQueueError(
-      `the message left the composer of tmux session ${session} without queue evidence; ` +
-        'the pane may have gone idle mid-type',
-    );
+    const where = queuedWhere(frame, text, evidence);
+    if (where === 'queue') return 'held';
+    return where === 'composer' ? 'typed' : 'left';
   }
 
-  /**
-   * Fill the composer and return the evidence that proved it.
-   *
-   * The composer is cleared before a RETRY only, and only where nothing landed: clearing a paste the
-   * harness has already taken would destroy a message that is on its way.
-   */
   private async fill(session: string, text: string): Promise<LandingEvidence> {
-    for (let attempt = 0; attempt < this.settings.composerAttempts; attempt++) {
-      if (attempt > 0) {
-        await this.tmux.sendKey(session, 'C-u');
-        await this.sleep(this.settings.pollMs);
-      }
-      const before = composerEvidence(await this.tmux.capture(session, false), text);
-      if (composerTransport(text) === 'paste') await this.tmux.paste(session, text);
-      else await this.tmux.sendLiteral(session, text);
-      for (let poll = 0; poll < this.settings.composerPolls; poll++) {
-        await this.sleep(this.settings.pollMs);
-        const proved = landingEvidence(before, composerEvidence(await this.tmux.capture(session, false), text));
-        if (proved !== undefined) return proved;
-      }
-      // No NEW evidence, but a placeholder is nonetheless in the composer: a paste of ours is in
-      // there, and a repaint can hide the counter bump. Submitting that is right; retyping would
-      // duplicate it.
-      if (composerEvidence(await this.tmux.capture(session, false), text).placeholders > 0) return 'placeholder';
-    }
-    throw new PaneQueueError(`the message did not land in the composer of tmux session ${session}`);
+    return await fillComposer(
+      this.tmux,
+      this.sleep,
+      this.settings,
+      session,
+      text,
+      () => new PaneQueueError(`the message did not land in the composer of tmux session ${session}`),
+    );
   }
 }

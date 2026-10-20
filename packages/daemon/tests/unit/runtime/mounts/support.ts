@@ -1420,6 +1420,19 @@ export class FakeSessionSend implements SessionSendSubsystem {
     return await this.sendStatus(sessionId, sendId);
   }
 
+  readonly cancels: Array<readonly [string, string]> = [];
+  readonly submits: Array<readonly [string, string]> = [];
+
+  async cancel(sessionId: string, sendId: string): Promise<SendRecord> {
+    this.cancels.push([sessionId, sendId]);
+    return { ...(await this.sendStatus(sessionId, sendId)), fate: 'cancelled', cancelEffect: 'cleared' };
+  }
+
+  async submit(sessionId: string, sendId: string): Promise<SendRecord> {
+    this.submits.push([sessionId, sendId]);
+    return await this.sendStatus(sessionId, sendId);
+  }
+
   /** Hand-off documents by name; a name not here is a document that is gone. */
   handoffs: Record<string, SessionHandoff> = {};
 

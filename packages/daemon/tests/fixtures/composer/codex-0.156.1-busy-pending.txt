@@ -1,0 +1,40 @@
+
+› hello
+
+
+
+› hey?
+
+
+• ack 10: hey?
+
+  03:39
+
+
+› hello
+
+
+• ack 11: hello
+
+  03:40
+
+
+› hihello
+
+
+• ack 13: hihello
+
+  03:40
+
+
+› slow c156
+
+
+• Working (4s • esc to interrupt)
+
+• Messages to be submitted after next tool call (press esc to interrupt and send immediately)
+  ↳ hello
+
+› Ask Codex to do anything
+
+  gpt-5 default · ~/work · ⠦                                                                  ⚠ 2 warnings · f2 to view
