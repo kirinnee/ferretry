@@ -6,7 +6,7 @@
  * already holds one by that name — every fact a person needs to choose, none of them a value.
  */
 
-import type { SecretImportResult, SecretList } from '@ferretry/protocol';
+import { isSignInSecretName, type SecretImportResult, type SecretList } from '@ferretry/protocol';
 import { FyHttpError } from '@ferretry/protocol/client';
 import { changeRefusalSentence } from '../fleet/shell/apply-change.ts';
 
@@ -17,6 +17,8 @@ export interface SecretCopyRow {
   readonly uses: readonly string[];
   /** The target already holds a secret by this name, so copying replaces it. */
   readonly onTarget: boolean;
+  /** A sign-in token a server filed itself. It is never copied: sign in on the other machine (docs/secrets.md). */
+  readonly signIn: boolean;
 }
 
 /**
@@ -31,13 +33,21 @@ export function secretCopyRows(source: SecretList, targetNames: ReadonlySet<stri
       name: secret.name,
       uses: source.references.filter(reference => reference.name === secret.name).map(reference => reference.origin),
       onTarget: targetNames?.has(secret.name) === true,
+      signIn: isSignInSecretName(secret.name),
     }))
     .toSorted((left, right) => left.name.localeCompare(right.name));
 }
 
+/** The rows a person may tick: every one but a sign-in. */
+export function copyableRows(rows: readonly SecretCopyRow[]): readonly SecretCopyRow[] {
+  return rows.filter(row => !row.signIn);
+}
+
 /** The names to start with ticked: the ones asked for that the source actually holds, or none. */
 export function initialPicks(rows: readonly SecretCopyRow[], preselect: readonly string[]): readonly string[] {
-  return rows.filter(row => preselect.includes(row.name)).map(row => row.name);
+  return copyableRows(rows)
+    .filter(row => preselect.includes(row.name))
+    .map(row => row.name);
 }
 
 const count = (n: number): string => `${n} ${n === 1 ? 'secret' : 'secrets'}`;

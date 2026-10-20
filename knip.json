@@ -32,6 +32,7 @@
         "tests/**/*.test.{ts,tsx}",
         "harness/screenshot.ts",
         "harness/secret-copy-screenshot.tsx",
+        "harness/clone-keys-screenshot.tsx",
         "harness/cleanup-kept-screenshot.tsx",
         "harness/connection-status-screenshot.tsx",
         "harness/release-notice-screenshot.tsx",

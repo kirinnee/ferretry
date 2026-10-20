@@ -13,8 +13,6 @@
  * the route's, and `tests/unit/runtime/mounts/secret-clone.test.ts` pins it.
  */
 import { afterEach, describe, it } from 'bun:test';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
-import { join, resolve } from 'node:path';
 import {
   SecretExportResponseSchema,
   SecretImportOfferSchema,
@@ -22,86 +20,21 @@ import {
   SecretListSchema,
 } from '@ferretry/protocol';
 import should from 'should';
-import { buildWorld } from '../../../bin/fyd.ts';
-import { ABSENT_USER_HOME, cleanupTempDirectories, tempDirectory } from '../support/repository.ts';
+import { bootDaemon, stopBootedDaemons } from '../support/booted-daemon.ts';
+import { cleanupTempDirectories } from '../support/repository.ts';
 
-const FYD_ENTRY = resolve(import.meta.dir, '../../../bin/fyd.ts');
 const VALUE = 'sk-live-clone-journey-0123';
 const OTHER_VALUE = 'correct-horse-battery-staple';
 
-const children: Bun.Subprocess[] = [];
-
 afterEach(async () => {
-  for (const child of children.splice(0)) {
-    child.kill();
-    await child.exited;
-  }
+  await stopBootedDaemons();
   await cleanupTempDirectories();
 });
-
-async function freeLoopbackPort(): Promise<number> {
-  const server = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: () => new Response('probe') });
-  const port = server.port;
-  await server.stop(true);
-  if (port === undefined) throw new Error('the fixture server reported no port');
-  return port;
-}
-
-interface Daemon {
-  readonly base: string;
-  readonly headers: Readonly<Record<string, string>>;
-  post(path: string, body?: unknown): Promise<Response>;
-}
-
-/** One daemon in its own process and state home, with the hosted relay switched off. */
-async function boot(label: string): Promise<Daemon> {
-  const home = await tempDirectory(`ferretry-clone-${label}-`);
-  const port = await freeLoopbackPort();
-  const previous = process.env.FY_HOME;
-  process.env.FY_HOME = home;
-  const opened = await buildWorld({}, { userHome: ABSENT_USER_HOME }).storage.open();
-  await opened.storage.close();
-  if (previous === undefined) delete process.env.FY_HOME;
-  else process.env.FY_HOME = previous;
-  await mkdir(join(home, 'config'), { recursive: true });
-  await writeFile(
-    join(home, 'config', 'daemon.json'),
-    JSON.stringify({ host: '127.0.0.1', port, relay: { url: 'ws://127.0.0.1:9', enabled: false } }),
-    { mode: 0o600 },
-  );
-  const child = Bun.spawn({
-    cmd: [process.execPath, FYD_ENTRY],
-    env: { ...process.env, FY_HOME: home, HOME: ABSENT_USER_HOME },
-    stdin: 'ignore',
-    stdout: Bun.file(join(home, 'fyd.out')),
-    stderr: Bun.file(join(home, 'fyd.err')),
-  });
-  children.push(child);
-  const base = `http://127.0.0.1:${port}`;
-  let healthy = false;
-  for (let attempt = 0; attempt < 400 && !healthy; attempt += 1) {
-    healthy = (await fetch(`${base}/healthz`).catch(() => undefined))?.ok === true;
-    if (!healthy) await Bun.sleep(50);
-  }
-  if (!healthy) throw new Error(`the ${label} daemon never answered: ${await readFile(join(home, 'fyd.err'), 'utf8')}`);
-  const token = (await readFile(join(home, 'api-token'), 'utf8')).trim();
-  const headers = { authorization: `Bearer ${token}`, 'content-type': 'application/json' };
-  return {
-    base,
-    headers,
-    post: async (path, body) =>
-      await fetch(`${base}${path}`, {
-        method: 'POST',
-        headers,
-        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-      }),
-  };
-}
 
 describe('copying secrets between two booted daemons', () => {
   it('should carry only ciphertext between them and file the copy once on the target', async () => {
     // Arrange
-    const [source, target] = await Promise.all([boot('source'), boot('target')]);
+    const [source, target] = await Promise.all([bootDaemon('source'), bootDaemon('target')]);
     for (const [name, value] of [
       ['API_KEY', VALUE],
       ['DB_PASSWORD', OTHER_VALUE],
@@ -150,7 +83,7 @@ describe('copying secrets between two booted daemons', () => {
 
   it('should let the target USE the copied value, proving it arrived intact', async () => {
     // Arrange
-    const [source, target] = await Promise.all([boot('source'), boot('target')]);
+    const [source, target] = await Promise.all([bootDaemon('source'), bootDaemon('target')]);
     await source.post('/v1/secrets', { name: 'API_KEY', value: VALUE });
     const offer = SecretImportOfferSchema.parse(await (await target.post('/v1/secrets/imports')).json());
     const { bundle } = SecretExportResponseSchema.parse(

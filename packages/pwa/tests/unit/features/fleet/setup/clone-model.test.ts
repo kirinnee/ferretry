@@ -179,6 +179,8 @@ describe('copiesRows', () => {
       profiles: 0,
       runtimes: 2,
       logins: 2,
+      signIns: 1,
+      apiKeyLogins: 1,
       checkPaths: [],
       missingTools: [],
       notCopied: [],
@@ -261,7 +263,7 @@ describe('the review of what a copy runs (cross-machine §3a)', () => {
 
   it('says what the source shares with the target before anything is picked (§3d)', () => {
     expect(cloneSharesSentence('work-linux')).toBe(
-      'work-linux receives a copy of the instructions, skills, settings and hooks of the machine you pick, so only pick one whose setup you’re happy for work-linux to see. Logins and secret values never leave it.',
+      'work-linux receives a copy of the instructions, skills, settings and hooks of the machine you pick, so only pick one whose setup you’re happy for work-linux to see. A sign-in never leaves it; an API key does only sealed, with your passkey.',
     );
   });
 });

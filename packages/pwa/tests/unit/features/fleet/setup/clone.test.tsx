@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import type { FleetMachineView } from '@ferretry/protocol';
+import { type FleetMachineView, secretReference } from '@ferretry/protocol';
 import { FyHttpError } from '@ferretry/protocol/client';
 import type { FleetClient } from '../../../../../src/features/fleet/fleet-client.ts';
 import { CloneMachine } from '../../../../../src/features/fleet/setup/clone.tsx';
@@ -384,9 +384,9 @@ describe('CloneMachine · Preview', () => {
       expect(copies).toContain('3 runtimes');
 
       const notCopied = screen.text('[data-setup-section="not-copied"]');
-      expect(notCopied).toContain('2 login tokens');
+      expect(notCopied).toContain('2 sign-ins');
       expect(notCopied).toContain(
-        'Each signed-in login becomes an empty slot on studio-mac that needs sign-in. Runtimes keep pointing at their slot.',
+        'Claude Code and Codex sign-ins never copy: a refresh token on two machines would sign one of them out. Each becomes an empty slot on studio-mac; sign in there. Runtimes keep pointing at their slot.',
       );
       expect(notCopied).toContain('History and device settings');
       expect(notCopied).toContain(
@@ -489,7 +489,13 @@ describe('CloneMachine · Preview', () => {
       expect(slots[1]?.textContent).toContain('Codex · Work');
       expect(slots[1]?.textContent).toContain('Empty slot · used by 1 runtime · Codex isn’t installed here');
       expect(slots[0]?.getAttribute('href')).toContain('claude-work');
-      expect(done).toContain('Sign in once per slot. Every runtime that uses it is fixed together.');
+      expect(done).toContain(
+        'A sign-in never copies, so each login is signed in on studio-mac. Sign in once per login: every runtime that uses it is fixed together.',
+      );
+      expect(slots.map(slot => slot.textContent)).toEqual([
+        expect.stringContaining('Sign in'),
+        expect.stringContaining('Sign in'),
+      ]);
 
       const after = screen.text('[data-setup-note="check-paths-after"]');
       expect(after).toContain('Check 2 paths on studio-mac');
@@ -616,7 +622,7 @@ describe('CloneMachine · what a copy runs here (cross-machine §3a, §3c, §3d)
     const screen = await render({ createClient });
     try {
       expect(screen.text('[data-clone-shares]')).toBe(
-        'studio-mac receives a copy of the instructions, skills, settings and hooks of the machine you pick, so only pick one whose setup you’re happy for studio-mac to see. Logins and secret values never leave it.',
+        'studio-mac receives a copy of the instructions, skills, settings and hooks of the machine you pick, so only pick one whose setup you’re happy for studio-mac to see. A sign-in never leaves it; an API key does only sealed, with your passkey.',
       );
     } finally {
       await screen.view.unmount();
@@ -921,8 +927,8 @@ describe('CloneMachine · What to copy', () => {
       expect(screen.q('[data-clone-step="preview"] [data-step-next]')).toBeNull();
       expect(screen.text('[data-change-submit]')).toBe('Copy 4 items from work-linux');
       // The logins are fleet-only; the secret and history rows stay.
-      expect(screen.text('[data-setup-section="not-copied"]')).not.toContain('login token');
-      expect(screen.text('[data-setup-section="not-copied"]')).toContain('Secret values');
+      expect(screen.text('[data-setup-section="not-copied"]')).not.toContain('sign-in');
+      expect(screen.text('[data-setup-section="not-copied"]')).toContain('Other secret values');
       expect(screen.q('[data-clone-need="sign-in:claude-work"]')).toBeNull();
 
       await click(tick(screen, 'fleet'), 'tick fleet again');
@@ -997,7 +1003,7 @@ describe('CloneMachine · what the copy needs here', () => {
     try {
       await toPreview(screen);
       const needs = screen.text('[data-setup-section="clone-needs"]');
-      expect(needs).toContain('Never copied: secrets and login tokens');
+      expect(needs).toContain('Secrets and sign-ins this setup needs');
       expect(needs).toContain(
         'The copied settings need: JEV_API_KEY, LESSON_TOKEN, Claude Code login (claude-work), Codex login (codex-work).',
       );
@@ -1069,7 +1075,8 @@ describe('CloneMachine · what the copy needs here', () => {
       await click(add(), 'Add');
 
       expect(secrets.posted.map(call => call.body)).toEqual([{ name: 'JEV_API_KEY', value: 'test-value-not-a-key' }]);
-      expect(calls.work.some(call => call.path === '/v1/secrets')).toBe(false);
+      // The source's secret list is read (names only); nothing is written to it.
+      expect(calls.work.some(call => call.path === '/v1/secrets' && call.body !== undefined)).toBe(false);
       const row = must(screen.q('[data-clone-need="secret:JEV_API_KEY"]'), 'row');
       expect(row.getAttribute('data-held')).toBe('yes');
       expect(row.textContent).toContain('set ✓');
@@ -1471,6 +1478,218 @@ describe('CloneMachine · Done: held, refused and sign-in', () => {
       await click(screen.q('[data-clone-need-add="JEV_API_KEY"]'), 'Add');
       expect(screen.q('[data-clone-need="secret:JEV_API_KEY"]')?.getAttribute('data-held')).toBe('yes');
       expect(screen.view.container.textContent).not.toContain('test-value-not-a-key');
+    } finally {
+      await screen.view.unmount();
+    }
+  });
+});
+
+// ── API keys travel sealed, sign-ins do not (docs/secrets.md, owner decision 2026-10-20) ─────────
+
+const STAMP = '2026-10-20T10:00:00.000Z';
+const IMPORT_ID = `fy_secret_import_${'a'.repeat(22)}`;
+const OFFER = {
+  v: 1,
+  importId: IMPORT_ID,
+  daemonId: `fy_daemon_${'T'.repeat(43)}`,
+  identityKey: 'aWQ',
+  publicKey: 'cHVi',
+  expiresAt: STAMP,
+  signature: 'c2ln',
+};
+const SEALED = {
+  v: 1,
+  importId: IMPORT_ID,
+  sourceDaemonId: `fy_daemon_${'S'.repeat(43)}`,
+  targetDaemonId: OFFER.daemonId,
+  expiresAt: STAMP,
+  names: ['ZAI_API_KEY'],
+  ephemeralKey: 'ZXBo',
+  nonce: 'bm9uY2U',
+  ciphertext: 'Y2lwaGVy',
+};
+const IMPORTED = {
+  importId: IMPORT_ID,
+  sourceDaemonId: SEALED.sourceDaemonId,
+  imported: ['ZAI_API_KEY'],
+  replaced: [],
+};
+
+/** A GLM API-key login beside a Claude Code sign-in: the one copies with its key, the other cannot. */
+const MIXED_LOGINS = () =>
+  bundle({
+    credentials: [
+      {
+        id: 'glm-env',
+        harness: 'claude',
+        label: 'GLM',
+        store: 'environment',
+        preset: 'zai-glm',
+        env: { ANTHROPIC_AUTH_TOKEN: secretReference('ZAI_API_KEY') },
+      },
+      { id: 'claude-work', harness: 'claude', email: 'me@work.example' },
+    ],
+    runtimes: {
+      'glm-default': { credential: 'glm-env', profile: 'default' },
+      'claude-default': { credential: 'claude-work', profile: 'default' },
+    },
+  });
+
+/** The source holds the key; the target opens an import and files what arrives, then lists it as held. */
+const sealedCopy = (over: { readonly exportAnswer?: unknown; readonly sourceNames?: readonly string[] } = {}) => {
+  const held: string[] = [];
+  return {
+    held,
+    work: {
+      '/v1/fleet/export': MIXED_LOGINS(),
+      '/v1/secrets': secretList(over.sourceNames ?? ['ZAI_API_KEY']),
+      [`/v1/secrets/exports/${IMPORT_ID}`]: over.exportAnswer ?? { bundle: SEALED, names: ['ZAI_API_KEY'] },
+    },
+    target: fullTarget({
+      '/v1/secrets': () => secretList(held),
+      '/v1/secrets/imports': OFFER,
+      [`/v1/secrets/imports/${IMPORT_ID}`]: () => {
+        held.push('ZAI_API_KEY');
+        return IMPORTED;
+      },
+    }),
+  };
+};
+
+const secretCalls = (calls: readonly Call[]) =>
+  calls.filter(call => call.path.startsWith('/v1/secrets/') && call.body !== undefined);
+
+describe('CloneMachine · API keys and sign-ins', () => {
+  it('lists the API-key login as copying with its key and the sign-in as one to sign in to here', async () => {
+    const copied = sealedCopy();
+    const { createClient } = daemons({ work: sourceFiles(copied.work), target: copied.target });
+    const screen = await render({ createClient });
+    try {
+      await toPreview(screen);
+      const logins = screen.text('[data-setup-section="clone-logins"]');
+      const glm = screen.text('[data-setup-row="login-glm-env"]');
+      expect(glm).toContain('Copies with its key');
+      expect(glm).toContain('API key ZAI_API_KEY');
+      const signIn = screen.text('[data-setup-row="login-claude-work"]');
+      expect(signIn).toContain('Sign in on studio-mac');
+      expect(signIn).toContain('Claude Code · me@work.example');
+      expect(signIn).toContain('a refresh token on two machines would sign one of them out');
+      expect(logins).toContain('Copy 1 API key with the logins');
+      expect(screen.text('[data-clone-keys-names]')).toBe('ZAI_API_KEY');
+      expect(screen.text('[data-clone-keys]')).toContain('asks for your passkey once');
+      expect((screen.q('[data-clone-keys-copy]') as HTMLInputElement).checked).toBe(true);
+      expect(screen.text('[data-setup-section="not-copied"]')).toContain('1 sign-in');
+    } finally {
+      await screen.view.unmount();
+    }
+  });
+
+  it('seals the key after the fleet copy, for one export, and never names the sign-in', async () => {
+    const copied = sealedCopy();
+    const { calls, createClient } = daemons({ work: sourceFiles(copied.work), target: copied.target });
+    const screen = await render({ createClient });
+    try {
+      await toPreview(screen);
+      await click(screen.q('[data-change-submit]'), 'Copy');
+
+      expect(screen.step()).toBe('done');
+      expect(calls.work.filter(call => call.path.startsWith('/v1/secrets/exports/')).map(call => call.body)).toEqual([
+        { offer: OFFER, names: ['ZAI_API_KEY'] },
+      ]);
+      expect(secretCalls(calls.target).map(call => call.path)).toEqual([
+        '/v1/secrets/imports',
+        `/v1/secrets/imports/${IMPORT_ID}`,
+      ]);
+      expect(secretCalls(calls.target)[1]?.body).toEqual({ bundle: SEALED });
+      expect(outcomes(screen)).toEqual([
+        'fleet:copied',
+        'warden:copied',
+        'learning:copied',
+        'voice:copied',
+        'controls:copied',
+        'keys:copied',
+      ]);
+      expect(screen.text('[data-clone-outcome="keys"]')).toBe('API keys: copied, in effect now.');
+      expect(screen.q('[data-clone-need="secret:ZAI_API_KEY"]')?.getAttribute('data-held')).toBe('yes');
+      // The sign-in is an empty slot to sign in to, with a button of its own; nothing about it was sealed.
+      expect(JSON.stringify(calls)).not.toContain('claude-work@');
+      expect(screen.text('[data-clone-slot="claude-work"]')).toContain('Sign in');
+    } finally {
+      await screen.view.unmount();
+    }
+  });
+
+  it('copies no key when the box is unticked, and says to add it yourself', async () => {
+    const copied = sealedCopy();
+    const { calls, createClient } = daemons({ work: sourceFiles(copied.work), target: copied.target });
+    const screen = await render({ createClient });
+    try {
+      await toPreview(screen);
+      await click(screen.q('[data-clone-keys-copy]'), 'keys box');
+      expect(screen.text('[data-clone-keys]')).toContain('Not copied: add each one on studio-mac yourself');
+      expect(screen.text('[data-setup-row="login-glm-env"]')).toContain('Copies, add its key');
+      await click(screen.q('[data-change-submit]'), 'Copy');
+
+      expect(screen.step()).toBe('done');
+      expect(secretCalls(calls.target)).toEqual([]);
+      expect(calls.work.some(call => call.path.startsWith('/v1/secrets/exports/'))).toBe(false);
+      expect(outcomes(screen)).toEqual([
+        'fleet:copied',
+        'warden:copied',
+        'learning:copied',
+        'voice:copied',
+        'controls:copied',
+      ]);
+    } finally {
+      await screen.view.unmount();
+    }
+  });
+
+  it('keeps the copy and says so when the passkey was not confirmed', async () => {
+    const copied = sealedCopy({ exportAnswer: new FyHttpError('no', 403, 'grant_step_up_required') });
+    const { createClient } = daemons({ work: sourceFiles(copied.work), target: copied.target });
+    const screen = await render({ createClient });
+    try {
+      await toPreview(screen);
+      await click(screen.q('[data-change-submit]'), 'Copy');
+
+      expect(screen.step()).toBe('done');
+      expect(outcomes(screen)).toEqual([
+        'fleet:copied',
+        'warden:copied',
+        'learning:copied',
+        'voice:copied',
+        'controls:copied',
+        'keys:refused',
+      ]);
+      expect(screen.text('[data-clone-outcome="keys"]')).toBe(
+        'API keys: not copied. Nothing was copied: the passkey wasn’t confirmed. Try again and confirm it. Copy them from the list below.',
+      );
+      expect(screen.q('[data-clone-need="secret:ZAI_API_KEY"]')?.getAttribute('data-held')).toBe('no');
+    } finally {
+      await screen.view.unmount();
+    }
+  });
+
+  it('sends no key when the source’s secret list cannot be read, rather than guessing', async () => {
+    const copied = sealedCopy();
+    const { '/v1/secrets': _unread, ...work } = copied.work;
+    const { calls, createClient } = daemons({ work: sourceFiles(work), target: copied.target });
+    const screen = await render({ createClient });
+    try {
+      await toPreview(screen);
+      expect(screen.q('[data-clone-keys]')).toBeNull();
+      await click(screen.q('[data-change-submit]'), 'Copy');
+
+      expect(screen.step()).toBe('done');
+      expect(secretCalls(calls.target)).toEqual([]);
+      expect(outcomes(screen)).toEqual([
+        'fleet:copied',
+        'warden:copied',
+        'learning:copied',
+        'voice:copied',
+        'controls:copied',
+      ]);
     } finally {
       await screen.view.unmount();
     }

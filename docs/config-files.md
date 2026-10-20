@@ -230,7 +230,9 @@ no file holds and no route returns.
   because its `advanced` block names this machine's own paths. Before anything is written the preview lists
   every secret and sign-in the copied settings need (`${secret:NAME}` references, the Jev, Groq or Cerebras key
   a copied Warden or voice setting spends, a login that arrives empty), each marked when this machine already
-  holds it, with a field to store it through `POST /v1/secrets`.
+  holds it, with a field to store it through `POST /v1/secrets`. The keys of the copied API-key logins and
+  settings are not left to that field: they travel sealed, for one passkey on the source, in the same Copy
+  ([secrets.md](secrets.md#sign-ins-are-not-copied-api-keys-are)); a sign-in never does.
 - **Export settings** zips every file `GET /v1/config/status` lists, read one by one, under `config/`. A file
   the daemon refused is **left out and named**: a pasted key is exactly what makes a file invalid, and an
   invalid file is still on disk as typed.
