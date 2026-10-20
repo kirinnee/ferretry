@@ -1,4 +1,4 @@
-import type { VoiceCleanupStyle } from '@ferretry/protocol';
+import type { VoiceCleanupStyle } from './config-files.ts';
 
 /**
  * The always-on guard around dictation cleanup. A person may rewrite the cleanup PROMPT, but never the
