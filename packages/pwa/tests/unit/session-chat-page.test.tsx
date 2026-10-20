@@ -135,6 +135,10 @@ const renderSessionChatPage = (
 
 beforeEach(() => {
   globalThis.fetch = (async (input: string | URL | Request) => route(input)) as typeof fetch;
+  // The transcript-hold gate is one module for the whole process: a tree another file left mounted
+  // keeps it attached, and an unreleased pointerdown there latches it and freezes every Transcript
+  // here. A mouse release ends any such gesture at once (no touch settle), so each test starts free.
+  window.dispatchEvent(Object.assign(new Event('pointerup'), { pointerType: 'mouse' }));
 });
 
 afterEach(() => {
