@@ -167,8 +167,19 @@ installed iPhone/iPad Home Screen app cannot use it.
 
 ## Clean-up: prompts you can edit
 
-Clean-up runs once, after Stop, on the machine's Groq or Cerebras key — and only on a dictation you made.
-It is configured in the machine's `voice.yaml` (Settings › Dictation edits it; so can you, or `fy config`):
+Clean-up runs once, after Stop, and only on a dictation you made. **Where it runs** depends on where the key is:
+
+- **A key on this device** (Settings › This device › Speed-up keys): the browser calls Groq or Cerebras
+  itself — no round trip through a machine, which is the fast path. The key is encrypted in this browser
+  and never sent to any machine or agent ([secrets.md](secrets.md#device-held-speed-up-keys)).
+- **Otherwise, the machine's key** (Settings › This machine › Speed-ups): the browser asks the daemon, which
+  spends the key from its secret store.
+- **Neither:** the raw words are kept, and the review box says to add a key in Settings › This device.
+
+Either way the request is built, and the reply judged, by the same shared code (`@ferretry/protocol`
+`stt-cleanup*.ts`), and the conversation it reads is the one the session page already shows.
+
+What it does is configured in the machine's `voice.yaml` (Settings › Dictation edits it; so can you, or `fy config`):
 
 ```yaml
 postProcessing:
@@ -188,12 +199,12 @@ postProcessing:
 - **Use the conversation for context** (off by default) sends the newest N messages of the current session so
   names and terms are spelled right. The machine decides: a device cannot send more than `voice.yaml` allows.
   Turning it on is a loosening, so it waits for the owner to confirm like switching clean-up on.
-- **The guard cannot be edited away.** The daemon wraps whichever prompt runs in a fixed system message
-  (`lib/stt/cleanup-guard.ts`): only the text in `<dictation>` is corrected, it is never answered or
+- **The guard cannot be edited away.** Whichever prompt runs is wrapped in a fixed system message
+  (`@ferretry/protocol` `stt-cleanup-guard.ts`, on both paths): only the text in `<dictation>` is corrected, it is never answered or
   continued, and conversation and vocabulary are read-only reference that is never merged in. Your prompt is
   placed under it as a style hint and cannot outrank it. Text inside a block cannot close it.
 - **The reply is checked.** If its length diverges grossly from the dictation (Fix is stricter than Polish), it
-  repeats a run of five words found only in the conversation, or it leaks the wrapper's tags, the daemon returns
+  repeats a run of five words found only in the conversation, or it leaks the wrapper's tags, clean-up returns
   your raw transcript, marked `kept: "raw"`. A failed check costs nothing but the call.
 - **gpt-oss reasoning.** For a `gpt-oss` model the request asks for `reasoning_effort: low` (and Groq's
   `include_reasoning: false`); the reply's separate `reasoning` field is never read.
