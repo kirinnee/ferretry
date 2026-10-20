@@ -45,6 +45,7 @@ export * from './migrate/process-inventory-port.ts';
 export * from './migrate/process-table.ts';
 export * from './migrate/render-text.ts';
 export * from './migrate/report-render.ts';
+export * from './models/pricing.ts';
 export * from './models/published.ts';
 export * from './models/service.ts';
 export * from './models/view.ts';

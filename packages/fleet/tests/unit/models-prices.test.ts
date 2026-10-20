@@ -102,6 +102,7 @@ describe('model catalog prices', () => {
     should(CatalogPriceSchema.safeParse({ ...price, input: 0.0000001 }).success).be.false();
     should(CatalogPriceSchema.safeParse({ ...price, input: -1 }).success).be.false();
     should(CatalogPriceSchema.safeParse({ ...price, source: 'http://example.com/prices' }).success).be.false();
+    should(CatalogPriceSchema.safeParse({ ...price, source: 'https://example.com/prices#opus' }).success).be.false();
     should(CatalogPriceSchema.safeParse({ ...price, verified: '20 October' }).success).be.false();
     should(CatalogPriceSchema.parse({ ...price, input: 0.1375 }).input).equal(0.1375);
   });

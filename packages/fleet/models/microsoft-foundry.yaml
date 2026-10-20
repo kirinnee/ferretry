@@ -17,7 +17,7 @@ claude:
         cacheRead: 0.2
         cacheWrite5m: 5
         cacheWrite1h: 8
-        source: https://platform.claude.com/docs/en/about-claude/pricing#claude-in-microsoft-foundry-pricing
+        source: https://platform.claude.com/docs/en/about-claude/pricing
         verified: '2026-10-20'
       label: Opus 5.5 (your Opus deployment)
       tier: best
@@ -33,7 +33,7 @@ claude:
         cacheRead: 0.1
         cacheWrite5m: 2.5
         cacheWrite1h: 4
-        source: https://platform.claude.com/docs/en/about-claude/pricing#claude-in-microsoft-foundry-pricing
+        source: https://platform.claude.com/docs/en/about-claude/pricing
         verified: '2026-10-20'
       label: Sonnet 5.5 (your Sonnet deployment)
       tier: balanced
@@ -48,7 +48,7 @@ claude:
         cacheRead: 0.01
         cacheWrite5m: 0.125
         cacheWrite1h: 0.2
-        source: https://platform.claude.com/docs/en/about-claude/pricing#claude-in-microsoft-foundry-pricing
+        source: https://platform.claude.com/docs/en/about-claude/pricing
         verified: '2026-10-20'
       label: Haiku 5.5 (your Haiku deployment)
       tier: fast

@@ -15,7 +15,7 @@
  *
  * Pure.
  */
-import { AnalyticsPricingProviderSchema } from '@ferretry/protocol';
+import { AnalyticsPricingProviderSchema, AnalyticsPricingSourceUrlSchema } from '@ferretry/protocol';
 import { z } from 'zod';
 import type { HarnessKind } from '../manifest.ts';
 
@@ -77,8 +77,8 @@ export const CatalogPriceSchema = z
     cacheWrite5m: UsdPerMillionSchema.optional(),
     cacheWrite1h: UsdPerMillionSchema.optional(),
     reasoning: UsdPerMillionSchema.optional(),
-    /** The provider's own pricing page, where these numbers were read. */
-    source: z.url({ protocol: /^https$/u }),
+    /** The provider's own pricing page, where these numbers were read: https, no credential, no fragment. */
+    source: AnalyticsPricingSourceUrlSchema,
     /** When they were read there. */
     verified: z.string().regex(YYYY_MM_DD, { message: 'write the date as YYYY-MM-DD' }),
   })
