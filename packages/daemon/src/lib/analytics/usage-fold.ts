@@ -135,6 +135,25 @@ function reasoningIsBilledApart(harness: TranscriptHarness): boolean {
   return harness === 'codex';
 }
 
+/**
+ * The index of the usage record that speaks for each Claude message.
+ *
+ * Claude Code writes ONE LINE PER CONTENT BLOCK — thinking, text, each tool call — and every line
+ * repeats its message's `message.id` and full `usage`. Summing them charged one API response two or
+ * three times. A message id names exactly one API response, so it is the key; the LAST line wins
+ * because it is the one written after the response finished, when the output figure is final.
+ * Only Claude is keyed: Codex reports usage per request in its own records, with nothing repeated.
+ */
+function lastUsagePerMessage(events: readonly TranscriptEvent[]): ReadonlyMap<string, number> {
+  const last = new Map<string, number>();
+  events.forEach((event, index) => {
+    if (event.kind === 'usage' && event.harness === 'claude' && event.messageId !== undefined) {
+      last.set(event.messageId, index);
+    }
+  });
+  return last;
+}
+
 function isCountable(value: number | undefined): value is number {
   return value !== undefined && Number.isSafeInteger(value) && value >= 0;
 }
@@ -177,7 +196,8 @@ export function foldAnalyticsSessionUsage(
   let sawReasoning = false;
   let sawMissingReasoning = false;
 
-  for (const event of evidence.events) {
+  const speaksForMessage = lastUsagePerMessage(evidence.events);
+  for (const [index, event] of evidence.events.entries()) {
     if (event.kind === 'settings') {
       // A turn-context record states the model the turn that FOLLOWS it ran under. Codex records
       // the model only here, so without it every Codex session would be unattributable.
@@ -185,6 +205,9 @@ export function foldAnalyticsSessionUsage(
       continue;
     }
     if (event.kind !== 'usage') continue;
+    if (event.harness === 'claude' && event.messageId !== undefined && speaksForMessage.get(event.messageId) !== index) {
+      continue;
+    }
 
     const { usage } = event;
     const input = usage.inputTokens ?? 0;
@@ -274,16 +297,60 @@ function recordKey(event: TranscriptEvent): string | undefined {
 }
 
 /**
- * Context Codex writes into the USER channel before a prompt — the workspace's instructions and the
- * environment it runs in. The owner never typed it, so it does not start a turn.
+ * Context a harness writes into the USER channel as if the owner had said it, by the text it starts
+ * with. Spellings are taken from real transcripts:
+ *
+ * - Codex opens every rollout with the workspace's instructions (`# AGENTS.md instructions` then
+ *   `<INSTRUCTIONS>`, older builds `<user_instructions>`) and the environment (`<environment_context>`).
+ * - Claude Code records a slash command (`<command-name>`, `<command-message>`), its local output
+ *   (`<local-command-stdout>` / `<local-command-stderr>`) and an interrupt
+ *   (`[Request interrupted by user`, with or without `for tool use]`) as user records.
  */
-const CODEX_INJECTED_CONTEXT = ['<environment_context>', '<user_instructions>'];
+const INJECTED_PREFIXES: { readonly [H in TranscriptHarness]: readonly string[] } = {
+  codex: ['# AGENTS.md instructions', '<INSTRUCTIONS>', '<user_instructions>', '<environment_context>'],
+  claude: [
+    '<command-name>',
+    '<command-message>',
+    '<command-args>',
+    '<local-command-stdout>',
+    '<local-command-stderr>',
+    '[Request interrupted by user',
+  ],
+};
 
-/** Whether an event is an owner PROMPT: an owner message, less what a harness injects as one. */
-function isPrompt(event: TranscriptEvent): boolean {
-  if (!isOwnerMessage(event)) return false;
-  const text = event.text.trimStart();
-  return !(event.harness === 'codex' && CODEX_INJECTED_CONTEXT.some(prefix => text.startsWith(prefix)));
+/** How one event bears on active time. */
+type ActivityRole =
+  /** An owner prompt: closes the open turn and opens a new, counted one. */
+  | 'prompt'
+  /** User-channel input nobody typed as a prompt: closes the open turn, opens an uncounted segment. */
+  | 'input'
+  /** The harness or model doing something: extends whatever segment is open. */
+  | 'work'
+  /** The harness saying a turn is over: extends, then closes, the open segment. */
+  | 'done'
+  /** Bookkeeping — settings, turn starts, compaction, system context — which never moves a turn. */
+  | 'none';
+
+function activityRole(event: TranscriptEvent): ActivityRole {
+  if (event.kind === 'message' && event.role === 'user') {
+    if (!isOwnerMessage(event)) return 'input';
+    const text = event.text.trimStart();
+    return INJECTED_PREFIXES[event.harness].some(prefix => text.startsWith(prefix)) ? 'input' : 'prompt';
+  }
+  switch (event.kind) {
+    case 'message':
+      return event.role === 'assistant' ? 'work' : 'none';
+    case 'reasoning':
+    case 'tool-call':
+    case 'tool-result':
+    case 'usage':
+    case 'error':
+      return 'work';
+    case 'turn':
+      return event.state === 'started' ? 'none' : 'done';
+    default:
+      return 'none';
+  }
 }
 
 function eventInstant(event: TranscriptEvent): number | null {
@@ -295,14 +362,22 @@ function eventInstant(event: TranscriptEvent): number | null {
 /**
  * Fold one finished session's transcript into ACTIVE TIME and a turn count.
  *
- * A TURN starts at an owner prompt — a user-channel message the owner sent (`isOwnerMessage`), so a
- * tool result, a background-task notification or any other record the harness wrote into the user
- * channel is never a prompt, and neither is the context Codex injects there — and ends at the last timestamped record before the next owner prompt,
- * or before the end of the transcript. Its length is (end − start), never negative. ACTIVE TIME is the
- * sum over turns, so the time a session sat waiting for its owner between turns is not counted.
+ * A TURN starts at an owner prompt and runs to its last WORK record — an assistant message, reasoning,
+ * a tool call or result, a usage or error record — before whatever ends it: the next prompt, input the
+ * harness wrote into the user channel, the harness's own turn-complete record, or the end of the
+ * transcript. Only work moves a turn's end. A settings record, a turn-started marker or a background
+ * notification arriving hours later is not work, and letting it extend the turn counted the idle
+ * time before it as active.
  *
- * The same definition holds for both harnesses, because both parsers normalise to the same events:
- * a Claude `user` record with text, and a Codex `response_item` message with role `user`.
+ * Not every user-channel message is a prompt: a tool result is not a message at all; a record the
+ * harness wrote itself (`isOwnerMessage` is false: a task notification, a compact summary) and the
+ * context or commands listed in `INJECTED_PREFIXES` are INPUT. Input closes the open turn and opens an
+ * UNCOUNTED segment — the work it provokes (a reply to a notification) is active time, but no turn. A
+ * record whose first block is injected is injected as a whole: Codex sends its instructions and its
+ * environment as two blocks of one message.
+ *
+ * A segment starts no earlier than the previous one ended, so records written slightly out of order
+ * never count the same time twice. ACTIVE TIME is the sum of every segment.
  *
  * UNKNOWN, NOT ZERO, whenever the evidence cannot carry the claim: an unresolved, unreadable, damaged
  * or incomplete transcript, or a prompt with no readable timestamp, makes the whole session's active
@@ -319,26 +394,43 @@ export function foldAnalyticsSessionActivity(evidence: AnalyticsTranscriptEviden
   let turns = 0;
   let active = 0;
   let timed = true;
-  let start: number | null = null;
-  let end: number | null = null;
-  let promptRecord: string | undefined;
+  /** The open segment, or null between segments. */
+  let open = null as { start: number; end: number } | null;
+  /** Where the last segment ended: no later segment may start before it. */
+  let floor = Number.NEGATIVE_INFINITY;
+  /** The user-channel record whose blocks are being read. */
+  let userRecord: string | undefined;
+
   const close = () => {
-    if (start !== null && end !== null) active += Math.max(0, end - start);
+    if (open === null) return;
+    active += open.end - open.start;
+    floor = open.end;
+    open = null;
   };
+  const begin = (at: number | null) => {
+    close();
+    open = at === null ? null : { start: Math.max(at, floor), end: Math.max(at, floor) };
+  };
+
   for (const event of evidence.events) {
     const at = eventInstant(event);
-    if (isPrompt(event)) {
-      const key = recordKey(event);
-      if (key !== undefined && key === promptRecord) continue;
-      close();
+    // A later block of the user record just read is that record's: one prompt, one injection.
+    const key = recordKey(event);
+    const userMessage = event.kind === 'message' && event.role === 'user';
+    const continuing = userMessage && key !== undefined && key === userRecord;
+    userRecord = userMessage ? key : undefined;
+    const role = continuing ? 'none' : activityRole(event);
+
+    if (role === 'prompt') {
       turns += 1;
-      promptRecord = key;
       if (at === null) timed = false;
-      start = at;
-      end = at;
-      continue;
+      begin(at);
+    } else if (role === 'input') {
+      begin(at);
+    } else if ((role === 'work' || role === 'done') && open !== null && at !== null && at > open.end) {
+      open.end = at;
     }
-    if (start !== null && at !== null && (end === null || at > end)) end = at;
+    if (role === 'done') close();
   }
   close();
   if (turns === 0) return UNKNOWN_ACTIVITY;

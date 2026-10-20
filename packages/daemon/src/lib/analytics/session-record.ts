@@ -166,6 +166,11 @@ export function deriveAnalyticsSessionRecord(
   const finishedAt = canonicalInstant(session.finishedAt);
   const durationStart = canonicalInstant(session.startedAt) ?? createdAt;
   const equivalentApiCostUsdMicros = pricing?.kind === 'priced' ? pricing.equivalentApiCostUsdMicros : null;
+  const durationMs = elapsed(durationStart, finishedAt);
+  const active = session.activity?.activeDurationMs ?? null;
+  // Active time is a part of wall time, so it never exceeds it: a transcript that began before the
+  // recorded start, or whose clock ran ahead, is bounded by the run it belongs to.
+  const activeDurationMs = active === null || durationMs === null ? active : Math.min(active, durationMs);
 
   return {
     raw: {
@@ -186,8 +191,8 @@ export function deriveAnalyticsSessionRecord(
       equivalentApiCostUsdMicros,
       ...tokens,
       turns: session.activity?.turns ?? nonNegativeInteger(session.turns),
-      durationMs: elapsed(durationStart, finishedAt),
-      activeDurationMs: session.activity?.activeDurationMs ?? null,
+      durationMs,
+      activeDurationMs,
       // Stamped by the query, never stored: the index is this daemon's alone, and its name can change.
       machine: null,
       timeToFirstOutputMs: elapsed(durationStart, session.firstOutputAt),

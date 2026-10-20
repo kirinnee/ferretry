@@ -315,7 +315,12 @@ function ratio(numerator: number | null, denominator: number | null, scale: numb
 export function analyticsMetricValue(result: AnalyticsAggregateResult, metric: AnalyticsMetric): number | null {
   const { measure, per, scale } = ANALYTICS_METRIC_MEASURES[metric];
   if (measure === 'sessions') return result.sessions;
-  if (per !== undefined) return ratio(result[measure].value, result[per].value, scale);
+  if (per !== undefined) {
+    // Both sides must speak for the same sessions: a numerator covering fewer sessions than its
+    // denominator (an older machine that sent no active time) would divide part by whole.
+    if (result[measure].total !== result[per].total) return null;
+    return ratio(result[measure].value, result[per].value, scale);
+  }
   const value = result[measure].value;
   return value === null ? null : value * scale;
 }

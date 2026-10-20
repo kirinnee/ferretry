@@ -92,10 +92,14 @@ function claudeAttachment(block: Record<string, unknown>): TranscriptAttachment 
  * Claude states it on the record: `origin.kind` names who produced a prompt (`human` for the person;
  * `task-notification`, `peer`, `coordinator` for the harness's own events), and `isMeta` marks a record
  * its own UI never shows as a message (an image's size line, a skill's body, a scheduled prompt). A
- * record carrying neither is the person's, which keeps every older transcript reading as it did.
+ * compaction's summary (`isCompactSummary`, "This session is being continued…") and a record shown only
+ * in the transcript view (`isVisibleInTranscriptOnly`) are the harness's too. A record carrying none of
+ * these is the person's, which keeps every older transcript reading as it did.
  */
 function harnessWritten(record: Record<string, unknown>): boolean {
-  if (record.isMeta === true) return true;
+  if (record.isMeta === true || record.isCompactSummary === true || record.isVisibleInTranscriptOnly === true) {
+    return true;
+  }
   const kind = transcriptString(transcriptObject(record.origin)?.kind);
   return kind !== undefined && kind !== '' && kind !== 'human';
 }

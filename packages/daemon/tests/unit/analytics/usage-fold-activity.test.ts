@@ -161,8 +161,10 @@ describe('analytics session activity fold', () => {
     // Act
     const actual = foldAnalyticsSessionActivity(claude(CLAUDE_SESSION));
 
-    // Assert — 10:00:00→10:02:00 is 120 s, 11:02:00→11:02:30 is 30 s; the hour between is idle
-    should(actual).deepEqual({ activeDurationMs: 150_000, turns: 2 });
+    // Assert — turn one runs to its last work (10:00:40, the tool result): 40 s. The meta record at
+    // 10:01 is harness input: it opens an uncounted segment to its reply at 10:02 (60 s). Turn two is
+    // 30 s, and the hour between is idle: 130 s over two turns.
+    should(actual).deepEqual({ activeDurationMs: 130_000, turns: 2 });
   });
 
   it('should time a Codex rollout, skipping the context Codex injects as user messages', () => {
@@ -230,5 +232,147 @@ describe('analytics session activity fold', () => {
 
     // Assert
     should(actual).deepEqual({ activeDurationMs: null, turns: null });
+  });
+});
+
+describe('analytics session activity fold, on the records real transcripts carry', () => {
+  const assistant = (uuid: string, time: string, content: object[], stop?: string) => ({
+    type: 'assistant',
+    uuid,
+    timestamp: at(time),
+    message: { id: `msg_${uuid}`, role: 'assistant', model: 'claude-opus-5-5', content, stop_reason: stop ?? null },
+  });
+  const user = (uuid: string, time: string, content: unknown, extra: object = {}) => ({
+    type: 'user',
+    uuid,
+    timestamp: at(time),
+    message: { role: 'user', content },
+    ...extra,
+  });
+
+  it('should not stretch a Codex turn over the idle gap that task_started and turn_context open', () => {
+    // Arrange — the order a real rollout writes a second turn in: complete, hours idle, started,
+    // turn_context, then the prompt.
+    const rollout = [
+      ...CODEX_SESSION.slice(0, 10),
+      { timestamp: at('09:00:26'), type: 'event_msg', payload: { type: 'task_complete', last_agent_message: 'a.ts' } },
+      { timestamp: at('13:00:00'), type: 'event_msg', payload: { type: 'task_started', model_context_window: 1 } },
+      { timestamp: at('13:00:00'), type: 'turn_context', payload: { model: 'gpt-6-astra', cwd: '/work' } },
+      {
+        timestamp: at('13:00:01'),
+        type: 'response_item',
+        payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'Again' }] },
+      },
+      {
+        timestamp: at('13:00:11'),
+        type: 'response_item',
+        payload: { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'Done' }] },
+      },
+      { timestamp: at('13:00:12'), type: 'event_msg', payload: { type: 'task_complete' } },
+    ];
+
+    // Act
+    const actual = foldAnalyticsSessionActivity(codex(rollout));
+
+    // Assert — 09:00:10→09:00:26 (16 s) and 13:00:01→13:00:12 (11 s); the four hours are idle
+    should(actual).deepEqual({ activeDurationMs: 27_000, turns: 2 });
+  });
+
+  it('should count the AGENTS.md injection Codex sends as two blocks of one message as no turn', () => {
+    // Arrange — the spelling every current rollout opens with
+    const rollout = [
+      {
+        timestamp: at('09:00:00'),
+        type: 'response_item',
+        payload: {
+          type: 'message',
+          role: 'user',
+          content: [
+            { type: 'input_text', text: '# AGENTS.md instructions\n\n<INSTRUCTIONS>\nBe terse.\n</INSTRUCTIONS>' },
+            { type: 'input_text', text: '<environment_context>\n  <cwd>/work</cwd>\n</environment_context>' },
+          ],
+        },
+      },
+      ...CODEX_SESSION.slice(4, 10),
+    ];
+
+    // Act
+    const actual = foldAnalyticsSessionActivity(codex(rollout));
+
+    // Assert
+    should(actual).deepEqual({ activeDurationMs: 15_000, turns: 1 });
+  });
+
+  it('should close a Claude turn at a task notification and count its reply apart, as no turn', () => {
+    // Arrange — the turn ends at 10:00:10; a notification arrives five hours later and is answered
+    const transcript = [
+      user('u1', '10:00:00', 'Start the build'),
+      assistant('a1', '10:00:10', [{ type: 'text', text: 'Started.' }], 'end_turn'),
+      user('n1', '15:00:00', '<task-notification>build done</task-notification>', {
+        origin: { kind: 'task-notification' },
+      }),
+      assistant('a2', '15:00:04', [{ type: 'text', text: 'No response requested.' }], 'end_turn'),
+    ];
+
+    // Act
+    const actual = foldAnalyticsSessionActivity(claude(transcript));
+
+    // Assert — 10 s of turn plus the 4 s reply; never the five hours
+    should(actual).deepEqual({ activeDurationMs: 14_000, turns: 1 });
+  });
+
+  it('should count no Claude slash command, command output, interrupt or compact summary as a turn', () => {
+    // Arrange
+    const transcript = [
+      user('u1', '10:00:00', 'Refactor the parser'),
+      assistant('a1', '10:00:20', [{ type: 'tool_use', id: 't1', name: 'Edit', input: {} }], 'tool_use'),
+      user('i1', '10:00:30', [{ type: 'text', text: '[Request interrupted by user for tool use]' }]),
+      user('c1', '10:01:00', '<command-name>/model</command-name>\n<command-message>model</command-message>'),
+      user('c2', '10:01:00', '<local-command-stdout>Set model to opus</local-command-stdout>'),
+      user('s1', '10:02:00', 'This session is being continued from a previous conversation…', {
+        isCompactSummary: true,
+        isVisibleInTranscriptOnly: true,
+      }),
+      assistant('a2', '10:02:30', [{ type: 'text', text: 'Continuing.' }], 'end_turn'),
+    ];
+
+    // Act
+    const actual = foldAnalyticsSessionActivity(claude(transcript));
+
+    // Assert — one turn (20 s) and the compaction's continuation (30 s); the rest are inputs with no work
+    should(actual).deepEqual({ activeDurationMs: 50_000, turns: 1 });
+  });
+
+  it('should never count the same time twice when a prompt is stamped before the last work', () => {
+    // Arrange — a queued prompt written 2 s before the previous turn's final record
+    const transcript = [
+      user('u1', '10:00:00', 'One'),
+      assistant('a1', '10:00:10', [{ type: 'text', text: 'Working' }]),
+      user('u2', '10:00:08', 'Two'),
+      assistant('a2', '10:00:20', [{ type: 'text', text: 'Done' }], 'end_turn'),
+    ];
+
+    // Act
+    const actual = foldAnalyticsSessionActivity(claude(transcript));
+
+    // Assert — 10:00:00→10:00:10 and 10:00:10→10:00:20, not 10 + 12
+    should(actual).deepEqual({ activeDurationMs: 20_000, turns: 2 });
+  });
+
+  it('should skip input that carries no timestamp without counting anything for it', () => {
+    // Arrange
+    const events: TranscriptEvent[] = [
+      { harness: 'claude', role: 'user', kind: 'message', text: 'go', timestamp: at('10:00:00') },
+      { harness: 'claude', role: 'assistant', kind: 'message', text: 'ok', timestamp: at('10:00:05') },
+      { harness: 'claude', role: 'user', kind: 'message', text: 'note', inputSource: 'harness' },
+      { harness: 'claude', role: 'assistant', kind: 'message', text: 'reply', timestamp: at('12:00:00') },
+      { harness: 'claude', role: 'developer', kind: 'message', text: 'context', timestamp: at('13:00:00') },
+    ];
+
+    // Act
+    const actual = foldAnalyticsSessionActivity({ kind: 'read', harness: 'claude', events, issues: [], pendingBytes: 0 });
+
+    // Assert
+    should(actual).deepEqual({ activeDurationMs: 5_000, turns: 1 });
   });
 });

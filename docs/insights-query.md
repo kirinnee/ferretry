@@ -96,7 +96,7 @@ every measure, so a table can show them all while a chart plots the chosen one.
 
 | Metric                             | Unit    | Exact definition (per session, then aggregated)                                                         |
 | ---------------------------------- | ------- | ------------------------------------------------------------------------------------------------------- |
-| `tokens`                           | tokens  | gross input + output, summed over every request in the transcript                                       |
+| `tokens`                           | tokens  | gross input + output, summed over every request in the transcript (one per Claude `message.id`)         |
 | `tokens_input`                     | tokens  | gross input: uncached + cache read + cache write (Claude); the prompt total (Codex)                     |
 | `tokens_output`                    | tokens  | output, reasoning included                                                                              |
 | `tokens_cache_read`                | tokens  | input served from cache, a subset of `tokens_input`                                                     |
@@ -188,21 +188,37 @@ Both durations come from finished sessions only.
 
 ### Turns
 
-A **turn** starts at an **owner prompt** and ends at the **last timestamped transcript record before
-the next owner prompt**, or before the end of the transcript.
+A **turn** starts at an **owner prompt**. It runs to its **last work record** before whatever ends it:
+the next prompt, input the harness wrote into the user channel, the harness's own turn-complete record
+(Codex `task_complete` or `turn_aborted`, Claude `stop_reason: end_turn`), or the end of the
+transcript.
+
+**Work** is an assistant message, reasoning, a tool call or tool result, a usage record or an error.
+Nothing else moves a turn's end: not a settings record (`turn_context`), not a turn-started marker
+(`task_started`), not developer or system context. Codex writes `task_started` and `turn_context`
+just before each new prompt, sometimes hours after the last turn ended, so letting them extend the turn
+would count that idle time as active.
 
 An owner prompt is a user-channel message the owner sent (`isOwnerMessage`). The following are **not**
 prompts:
 
-- a tool result (Claude's `tool_result` block, Codex's `function_call_output`), which is a different
-  event kind altogether;
-- a record the harness wrote into the user channel itself (Claude `isMeta`, a non-human `origin`):
-  background-task notifications, subagent messages;
-- the context Codex injects as user messages (`<environment_context>`, `<user_instructions>`).
+- a tool result (Claude's `tool_result` block, Codex's `function_call_output`). It is a different
+  event kind altogether, and it is work.
+- a record the harness wrote into the user channel itself. For Claude that is `isMeta`,
+  `isCompactSummary`, `isVisibleInTranscriptOnly` or a non-human `origin`: background-task
+  notifications, subagent messages, the "This session is being continued…" compaction summary.
+- the context Codex injects as user messages: `# AGENTS.md instructions` / `<INSTRUCTIONS>` (current
+  builds, two blocks of one message, so the whole message is injected), `<user_instructions>` and
+  `<environment_context>`.
+- what Claude Code records for a slash command (`<command-name>`, `<command-message>`,
+  `<command-args>`), its local output (`<local-command-stdout>`, `<local-command-stderr>`), and an
+  interrupt (`[Request interrupted by user…]`).
 
-One prompt record split into several content blocks is one prompt. Claude records are `user` lines
-with text, and Codex records are `response_item` messages with role `user`. Both parsers normalise to
-the same events, so one definition holds for both.
+These are **input**. Input closes the open turn and opens an **uncounted segment**: the work it provokes,
+such as the model replying to a task notification or continuing after a compaction, is active time, but
+it is not a turn. One prompt record split into several content blocks is one prompt. Claude records are
+`user` lines with text, and Codex records are `response_item` messages with role `user`. Both parsers
+normalise to the same events, so one definition holds for both.
 
 `turns` counts the transcript's prompts. The daemon's send counter (`state.turn`) answers only when no
 transcript could be read, because it never sees a prompt typed straight into the harness, and the
@@ -210,15 +226,21 @@ per-turn metric must divide by the turns the active time was measured over.
 
 ### Active time
 
-**Active time** = Σ over turns of (turn end − turn start), from the transcript records' own
-`timestamp` fields. A record stamped before its own prompt never makes a turn negative. The wait
-between one turn's last record and the next prompt, which is a person reading, thinking or away, is
-not counted.
+**Active time** = Σ over turns and uncounted segments of (last work − start), from the transcript
+records' own `timestamp` fields.
+
+- A segment starts no earlier than the previous one ended: start = max(prompt, previous end). Records
+  written slightly out of order (a queued prompt stamped before the last record of the turn it
+  interrupts) never count the same time twice, and no segment is negative.
+- The wait between one turn's last work and the next prompt or input is not counted. That is a person
+  reading, thinking or away, or a session idle until a notification.
+- Active time never exceeds wall time: the session row clamps it to `durationMs`.
 
 Active time is **null** (unknown, never zero) when the transcript is unresolved, unreadable, damaged
 (any byte never parsed) or read mid-record, when any prompt has no readable timestamp, or when the
 transcript shows no prompt at all. Every session starts from one, so a transcript with none uses a
-grammar the fold does not recognise. In those cases `turns` falls back to the send counter.
+grammar the fold does not recognise. In those cases `turns` falls back to the send counter. Input with
+no readable timestamp opens nothing: its segment is skipped.
 
 ### Wall time
 
@@ -234,22 +256,32 @@ commutative, associative):
 
 - aggregate rows merge only when **every grouping label matches**. `known` and `total` add. `sum`
   adds, `min` and `max` take the extreme, and `avg` is weighted by `known`. A null part makes the
-  merged value null, the same "partial = unknown" rule as one daemon. A part with `total: 0` (an older
-  daemon's defaulted `activeDurationMs`) is the identity;
+  merged value null, the same "partial = unknown" rule as one daemon. A measure with `total: 0` on a
+  row that has sessions is an older daemon's defaulted `activeDurationMs`. It merges as unknown for
+  those sessions (`{ value: null, known: 0, total: sessions }`), so the fleet figure turns unknown
+  instead of silently describing only the machines that sent it;
 - rates are weighted by sessions; `scope` counts add; `scope.window` spans the earliest `from` to the
   latest `to`; the index account adds, `schemaVersion` is the **oldest** in the fleet, and `refreshing`
   is true if any machine is;
-- a ratio metric is read **after** the merge, from the merged numerator and denominator;
+- a ratio metric is read **after** the merge, from the merged numerator and denominator, and is null
+  unless both cover the same sessions (equal `total`);
 - raw answers concatenate under the one shared ordering (`compareAnalyticsRawSessions`), cut to the
   largest limit, with `truncated` if any part was or the concatenation exceeds it;
 - an empty list, mixed kinds, or answers aggregated, grouped or measured differently are refused
   (`AnalyticsMergeError`).
 
 A daemon older than this contract omits `activeDurationMs` and `machine`. The schemas default them
-(`{ value: null, known: 0, total: 0 }` and `null`), so its answer still parses and merges as "no
-duration evidence".
+(`{ value: null, known: 0, total: 0 }` and `null`), so its answer still parses, and it merges as
+sessions whose active time is unknown.
 
 ## Declared gaps
+
+- **A wait inside a turn counts as active.** A permission prompt or an `AskUserQuestion` answered
+  hours later comes back as a tool result, which is work. So the whole wait between the question and
+  the answer is active time, up to the session's wall time.
+- **One Claude API response is counted once, by `message.id`.** Claude Code writes a line per content
+  block, each repeating the response's usage, and the fold keeps the last line for each id. A
+  transcript that reused one id across two responses would under-count.
 
 - **Only finished sessions are indexed.** A session is ingested at a durable terminal state, so a
   running session is in no query. A revived session leaves the index until it ends again.

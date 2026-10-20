@@ -308,22 +308,48 @@ describe('merging analytics answers across machines', () => {
   });
 
   describe('examples', () => {
-    it('should keep a known fleet total known when an older daemon defaulted the measure', () => {
-      // Arrange
-      const known = answer(sessions(random(1), 3), [], 'sum');
-      const older = answer(sessions(random(2), 2), [], 'sum');
-      const olderResults = older.kind === 'aggregate' ? older.results : [];
-      const defaulted = {
+    it('should merge an older daemon\'s missing measure as unknown for its sessions, never as nothing', () => {
+      // Arrange — machine A (new): one session, 10 turns, 600 s active. Machine B (older): one session,
+      // 10 turns, and no active-time field, which the schema defaults to { null, 0, 0 }.
+      const zero = Object.fromEntries(MEASURES.map(key => [key, 0])) as Record<AnalyticsMeasureKey, number>;
+      const session = (active: number) => ({
+        labels: {},
+        values: { ...zero, activeDurationMs: active, turns: 10 },
+        status: 'completed' as const,
+      });
+      const fresh = answer([session(600_000)], [], 'sum');
+      const older = answer([session(0)], [], 'sum');
+      const defaulted = AnalyticsResponseSchema.parse({
         ...older,
-        results: olderResults.map(row => ({ ...row, activeDurationMs: { value: null, known: 0, total: 0 } })),
-      } as AnalyticsResponse;
-      const knownActive = known.kind === 'aggregate' ? known.results[0]!.activeDurationMs : undefined;
+        results: (older.kind === 'aggregate' ? older.results : []).map(({ activeDurationMs: _, ...row }) => row),
+      });
 
       // Act
-      const merged = mergeAnalyticsResponses([known, defaulted]);
+      const merged = mergeAnalyticsResponses([fresh, defaulted]);
+      const reversed = mergeAnalyticsResponses([defaulted, fresh]);
+      const row = merged.kind === 'aggregate' ? merged.results[0]! : undefined;
+
+      // Assert — the fleet's active time is unknown for B's session, and so is the per-turn ratio
+      should(row!.activeDurationMs).deepEqual({ value: null, known: 1, total: 2 });
+      should(row!.turns).deepEqual({ value: 20, known: 2, total: 2 });
+      should(analyticsMetricValue(row!, 'duration_active_seconds_per_turn')).be.null();
+      should(reversed.kind === 'aggregate' && reversed.results[0]!.activeDurationMs).deepEqual(row!.activeDurationMs);
+    });
+
+    it('should read the per-turn ratio as unknown when an unmerged answer lacks active time', () => {
+      // Arrange — an older daemon's answer on its own
+      const zero = Object.fromEntries(MEASURES.map(key => [key, 0])) as Record<AnalyticsMeasureKey, number>;
+      const older = answer([{ labels: {}, values: { ...zero, turns: 10 }, status: 'completed' }], [], 'sum');
+      const row = older.kind === 'aggregate' ? older.results[0]! : undefined;
+
+      // Act
+      const perTurn = analyticsMetricValue(
+        { ...row!, activeDurationMs: { value: null, known: 0, total: 0 } },
+        'duration_active_seconds_per_turn',
+      );
 
       // Assert
-      should(merged.kind === 'aggregate' && merged.results[0]!.activeDurationMs).deepEqual(knownActive);
+      should(perTurn).be.null();
     });
 
     it('should combine the index accounts and the resolved windows', () => {

@@ -32,11 +32,10 @@ const MEASURE_KEYS = Object.keys(AnalyticsAggregateResultSchema.shape).filter(
 /**
  * Two parts of one measure, as one.
  *
- * A part with no sessions behind it (`total: 0`) is the identity — it is how an older daemon's
- * defaulted measure arrives, and it must not turn a known fleet total unknown. Otherwise the daemon's
- * own rule carries over: a value is stated only when every session behind it stated one, so a null
- * part makes the merged value null, and `known`/`total` still add so the reader sees how much is known.
- * `avg` merges weighted by `known`, which for a stated value equals its session count.
+ * The daemon's own rule carries over: a value is stated only when every session behind it stated one,
+ * so a null part makes the merged value null, and `known`/`total` still add so the reader sees how much
+ * is known. `avg` merges weighted by `known`, which for a stated value equals its session count. A part
+ * with `total: 0` adds nothing; `partOf` decides what such a part means before it gets here.
  */
 function mergeMeasure(
   left: AnalyticsMeasure,
@@ -59,6 +58,21 @@ function mergeMeasure(
   return { value, known, total };
 }
 
+/**
+ * A row's measure as the merge must read it.
+ *
+ * `total: 0` on a row that HAS sessions is not "no sessions": it is an older daemon that never sent the
+ * measure, defaulted on read. Those sessions exist and stated nothing, so they merge as unknown —
+ * `{ value: null, known: 0, total: sessions }` — and the fleet value turns unknown instead of silently
+ * describing only the machines that answered. `count` is the exception: it states no measure at all.
+ */
+function partOf(row: AnalyticsAggregateResult, key: AnalyticsMeasureKey, aggregation: AnalyticsAggregation): AnalyticsMeasure {
+  const measure = row[key];
+  return aggregation !== 'count' && measure.total === 0 && row.sessions > 0
+    ? { value: null, known: 0, total: row.sessions }
+    : measure;
+}
+
 function mergeRow(
   left: AnalyticsAggregateResult,
   right: AnalyticsAggregateResult,
@@ -69,7 +83,7 @@ function mergeRow(
   const rate = (key: keyof AnalyticsAggregateResult['rates']) =>
     (left.rates[key] * left.sessions + right.rates[key] * right.sessions) / sessions;
   const measures = Object.fromEntries(
-    MEASURE_KEYS.map(key => [key, mergeMeasure(left[key], right[key], aggregation)]),
+    MEASURE_KEYS.map(key => [key, mergeMeasure(partOf(left, key, aggregation), partOf(right, key, aggregation), aggregation)]),
   ) as { [K in AnalyticsMeasureKey]: AnalyticsMeasure };
   return {
     labels: left.labels,
