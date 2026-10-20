@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import { afterEach, beforeAll, beforeEach, describe, expect, test } from 'bun:test';
 import {
   type HarnessDialog,
   MCP_OAUTH_PATH,
@@ -21,6 +21,7 @@ import { ReferenceSurfaceProvider } from '../../src/components/reference-surface
 import type { RuntimeModelControls } from '../../src/components/runtime-controls.tsx';
 import { SessionTopBar, sessionDisplayName } from '../../src/components/session-top-bar.tsx';
 import { Transcript } from '../../src/components/transcript.tsx';
+import { TOUCH_SELECTION_RELEASE_SETTLE_MS } from '../../src/hooks/use-live-clock.ts';
 import { SessionAnalyticsSurface } from '../../src/features/analytics/session-analytics-surface.tsx';
 import { AttentionActionModal } from '../../src/features/attention/attention-action-modal.tsx';
 import { ContextRailBody } from '../../src/features/context-rail/context-rail-body.tsx';
@@ -133,12 +134,18 @@ const renderSessionChatPage = (
   return render(daemon === undefined ? tree : <DaemonClientProvider client={daemon}>{tree}</DaemonClientProvider>);
 };
 
+// The transcript-hold gate is one module for the whole process. A tree an earlier file left mounted
+// keeps it attached, and a press it never released (row-context-gesture fires touch pointer 1 without
+// a pointerup) latches it for up to its 20 s cap — freezing every Transcript this file renders. A blur
+// ends any held gesture whatever its pointer ids, and a touch release then settles on a timer, so wait
+// that out once before the first test.
+beforeAll(async () => {
+  window.dispatchEvent(new Event('blur'));
+  await Bun.sleep(TOUCH_SELECTION_RELEASE_SETTLE_MS + 30);
+});
+
 beforeEach(() => {
   globalThis.fetch = (async (input: string | URL | Request) => route(input)) as typeof fetch;
-  // The transcript-hold gate is one module for the whole process: a tree another file left mounted
-  // keeps it attached, and an unreleased pointerdown there latches it and freezes every Transcript
-  // here. A mouse release ends any such gesture at once (no touch settle), so each test starts free.
-  window.dispatchEvent(Object.assign(new Event('pointerup'), { pointerType: 'mouse' }));
 });
 
 afterEach(() => {
