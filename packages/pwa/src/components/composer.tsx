@@ -108,6 +108,8 @@ export interface ComposerProps {
   readonly dictationSettings?: SttSettings;
   /** Test/visual seam; production feature-detects the ambient browser. */
   readonly dictationRecognition?: BrowserRecognitionProvider;
+  /** The conversation on screen, oldest first, which dictation clean-up reads for names and terms. */
+  readonly dictationConversation?: () => readonly string[];
   /** One already-read daemon fleet slice, shared with transcript references. */
   readonly autocompleteSessions?: readonly SessionView[];
   /** The session's unresolved Attention items, shared with reference proof. */
@@ -306,6 +308,7 @@ export function Composer({
   phoneEnterKeyPreference = null,
   dictationSettings,
   dictationRecognition,
+  dictationConversation,
   autocompleteSessions,
   autocompleteAttention,
   autocompleteSkills,
@@ -872,6 +875,7 @@ export function Composer({
       layout="compact"
       onDraftChange={applyDictation}
       {...(dictationRecognition === undefined ? {} : { recognition: dictationRecognition })}
+      {...(dictationConversation === undefined ? {} : { readConversation: dictationConversation })}
       selectionRef={inputRef}
       sessionId={sessionId}
       settings={dictationSettings}
