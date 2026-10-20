@@ -31,7 +31,7 @@ import {
   sendRetrier,
   sendSubmitter,
   startSessionWorkspaceRefresh,
-  type transcriptEntriesFromLog,
+  transcriptEntriesFromLog,
 } from './components/session-workspace-model.ts';
 import { SessionsPage } from './components/sessions-page.tsx';
 import { GlobalAnalyticsPage } from './features/analytics/global-analytics-page.tsx';
@@ -115,6 +115,7 @@ import { useMachineOrder } from './hooks/use-machine-order.ts';
 import { type ListedMachine, useMachineSources } from './hooks/use-machine-sources.ts';
 import { useMachinesPoll } from './hooks/use-machines-poll.ts';
 import { useNeedsRuntime } from './hooks/use-needs-runtime.ts';
+import { type NotificationOpenSource, useNotificationOpen } from './hooks/use-notification-open.ts';
 import {
   type NotificationControlsHost,
   useNotificationControls,
@@ -134,7 +135,7 @@ import { useTheme } from './hooks/use-theme.ts';
 import { type MachineSource, machineDisplayOrder } from './lib/all-machines.ts';
 import type { DaemonConnectionRecord } from './lib/connections.ts';
 import { type DaemonConnection, type DaemonId, daemonCarriers } from './lib/daemon-connection.ts';
-import { daemonSessionScope } from './lib/daemon-scope.ts';
+import { daemonSessionKey, daemonSessionScope } from './lib/daemon-scope.ts';
 import { projectKeyFor } from './lib/fleet-grouping.ts';
 import { installBanner } from './lib/install-prompt.ts';
 import { placeLedgerRows } from './lib/ledger-placement.ts';
@@ -181,7 +182,9 @@ import {
 import { isCarrierOutage } from './lib/relay-carrier.ts';
 import { RELEASE_WORKER_RELEASE } from './lib/release-manifest.ts';
 import { RouterProvider, useRouter } from './lib/router.tsx';
+import { chatScrollSlot } from './lib/scroll-memory.ts';
 import { type LedgerSendRecord, parseLedgerSendsResponse } from './lib/send-ledger.ts';
+import type { CachedTranscript } from './lib/session-cache.ts';
 import {
   createAppStore,
   StoreProvider,
@@ -206,6 +209,7 @@ import { AppUpdatedToast } from './shell/app-updated-toast.tsx';
 import { ChunkErrorBoundary } from './shell/chunk-error-boundary.tsx';
 import { CommandPalette, type PaletteSettingsSource } from './shell/command-palette.tsx';
 import { InsightsFrame } from './shell/insights-frame.tsx';
+import { PageScrollRegion } from './shell/page-scroll-region.tsx';
 import { pairPhonePaletteCommand } from './shell/palette-destinations.ts';
 import { paletteSessionEntries } from './shell/palette-model.ts';
 import { PullToPaletteRegion } from './shell/pull-to-palette-region.tsx';
@@ -674,7 +678,16 @@ function SessionsRoute({ connection }: DaemonPageProps) {
   );
 }
 
+/** The New session page's fragment while Continue is the open choice. */
+const CONTINUE_HASH = '#continue';
+
 /** A runtime's Launch names it as `?agent=`: a hint the Account box may honour, never a start. */
+/** Where the service worker's messages arrive, or `null` in a browser with no worker. */
+const notificationOpenSource = (): NotificationOpenSource | null =>
+  typeof navigator !== 'undefined' && 'serviceWorker' in navigator
+    ? (navigator.serviceWorker as unknown as NotificationOpenSource)
+    : null;
+
 const launchHint = (search: string): { readonly initialAgent?: string } => {
   const agent = new URLSearchParams(search).get('agent');
   return agent === null || agent === '' ? {} : { initialAgent: agent };
@@ -682,7 +695,15 @@ const launchHint = (search: string): { readonly initialAgent?: string } => {
 
 function NewSessionRoute({ connection }: DaemonPageProps) {
   const store = useAppStore();
-  const { navigate } = useRouter();
+  const { navigate, back } = useRouter();
+  // Continue is part of the address (`#continue`), replaced in place: Back to this page, or a reload, opens
+  // the list the reader was scrolling rather than the empty form.
+  const continuing = window.location.hash === CONTINUE_HASH;
+  const chooseContinuing = useCallback(
+    (next: boolean) =>
+      navigate(`${window.location.pathname}${window.location.search}${next ? CONTINUE_HASH : ''}`, { replace: true }),
+    [navigate],
+  );
   const record = useConnectionSnapshot().connections.find(candidate => candidate.daemonId === connection.daemonId);
   // "Continue a conversation" reads and adopts through the same fleet client as Settings; one stable factory.
   const createFleetClient = useCallback<FleetClientFactory>(daemon => store.clients.client(daemon), [store.clients]);
@@ -698,6 +719,9 @@ function NewSessionRoute({ connection }: DaemonPageProps) {
       resumeSession={async (daemon, sessionId) => await (await store.clients.client(daemon)).resume(sessionId)}
       usage={store.usage}
       onNavigate={navigate}
+      onBack={back}
+      continuing={continuing}
+      onContinuingChange={chooseContinuing}
       {...launchHint(window.location.search)}
     />
   );
@@ -903,7 +927,7 @@ function SessionRoute({ connection, scope }: SessionChatPageProps) {
       ),
     [store.carrier, store.connectionHealth],
   );
-  const { navigate } = useRouter();
+  const { navigate, back } = useRouter();
   const layout = useLayoutMode();
   const dictation = useSttSettings(store.stt);
   // Actions › Warden: offered only where this caller's grants open the Warden (read once per machine).
@@ -957,9 +981,27 @@ function SessionRoute({ connection, scope }: SessionChatPageProps) {
   const hypermediaActions = useHypermediaSessionActions({ connection, fetcher: useDaemonFetch() });
   // Pack mode's Actions-menu toggle, and its status line: also read at the next launch.
   const packActions = usePackSessionActions({ connection, fetcher: useDaemonFetch() });
-  const [entries, setEntries] = useState<ReturnType<typeof transcriptEntriesFromLog>>([]);
+  /*
+   * DRAWN FROM THIS DEVICE'S CACHE FIRST. Back into a chat, or a reload, used to open on an empty
+   * transcript that refilled a round trip later; the last copy this device saw is drawn in the first
+   * frame instead (`lib/session-cache.ts`), and `transcriptCached` says "Updating…" over it until the
+   * first live read replaces it.
+   */
+  const [entries, setEntries] = useState<ReturnType<typeof transcriptEntriesFromLog>>(() =>
+    transcriptEntriesFromLog(store.sessionCache.peekTranscript(scope)?.log ?? ''),
+  );
   /** The session's send ledger — where each message the reader (or a teammate) sent actually went. */
-  const [sends, setSends] = useState<readonly LedgerSendRecord[]>([]);
+  const [sends, setSends] = useState<readonly LedgerSendRecord[]>(() =>
+    parseLedgerSendsResponse(store.sessionCache.peekTranscript(scope)?.sends ?? []),
+  );
+  const [transcriptCached, setTranscriptCached] = useState(
+    () => store.sessionCache.peekTranscript(scope) !== undefined,
+  );
+  // Per session, not per history entry: coming back to a conversation by any route finds the reading position.
+  const readingPosition = useMemo(
+    () => chatScrollSlot(store.scrollMemory, daemonSessionKey(scope)),
+    [scope, store.scrollMemory],
+  );
   const [client, setClient] = useState<Awaited<ReturnType<typeof store.clients.client>> | null>(null);
   const [error, setError] = useState<string | null>(null);
   /** The daemon can prove no transcript is this session's: Chat cannot fill and no send can be confirmed. */
@@ -1072,10 +1114,24 @@ function SessionRoute({ connection, scope }: SessionChatPageProps) {
   useEffect(() => {
     let current = true;
     let control: SessionWorkspaceRefreshControl | null = null;
+    /** Whether a live read has answered under this effect: from then on the cache never draws again. */
+    let live = false;
+    const cacheScope = daemonSessionScope(connection, sessionId);
+    const generation = store.sessionCache.generation(daemonId);
+    const drawCached = (cached: CachedTranscript | null | undefined): void => {
+      setEntries(cached == null ? [] : transcriptEntriesFromLog(cached.log));
+      setSends(cached == null ? [] : parseLedgerSendsResponse(cached.sends));
+      setTranscriptCached(cached != null);
+    };
     setError(null);
     setTranscriptUnbound(false);
-    setEntries([]);
-    setSends([]);
+    const inMemory = store.sessionCache.peekTranscript(cacheScope);
+    drawCached(inMemory);
+    // Not in memory (a reload): the stored copy, unless the daemon has answered first.
+    if (inMemory === undefined)
+      void store.sessionCache.transcript(cacheScope).then(cached => {
+        if (current && !live && cached !== null) drawCached(cached);
+      });
     setClient(null);
     void store.clients
       .client(connection)
@@ -1097,8 +1153,16 @@ function SessionRoute({ connection, scope }: SessionChatPageProps) {
           },
           sessionId,
           environment: browserWorkspaceRefreshEnvironment,
-          onTranscript: setEntries,
-          onSends: rows => setSends(parseLedgerSendsResponse(rows)),
+          onTranscript: next => {
+            live = true;
+            setTranscriptCached(false);
+            setEntries(next);
+          },
+          onLog: log => store.sessionCache.saveTranscript(cacheScope, { log }, generation),
+          onSends: rows => {
+            store.sessionCache.saveTranscript(cacheScope, { sends: rows }, generation);
+            setSends(parseLedgerSendsResponse(rows));
+          },
           // fetchSession publishes the same proved view into the daemon-scoped
           // fleet cache; publishing it again here would force two shell renders.
           onSession: () => undefined,
@@ -1117,7 +1181,7 @@ function SessionRoute({ connection, scope }: SessionChatPageProps) {
       control?.stop();
       if (refreshControl.current === control) refreshControl.current = null;
     };
-  }, [clientAttempt, connection, daemonId, sessionId, store.attention, store.clients, store.fleet]);
+  }, [clientAttempt, connection, daemonId, sessionId, store.attention, store.clients, store.fleet, store.sessionCache]);
 
   /**
    * THE LIVE FEED, AND THE FIRST THING IN THIS APP THAT CONSUMES ONE.
@@ -1341,6 +1405,8 @@ function SessionRoute({ connection, scope }: SessionChatPageProps) {
           pins={store.pins}
           refreshError={sessionIssue}
           transcriptUnbound={transcriptUnbound}
+          updating={transcriptCached}
+          readingPosition={readingPosition}
           session={session}
           surfaceEvents={surfaceEvents}
           liveActivity={liveActivity}
@@ -1348,11 +1414,7 @@ function SessionRoute({ connection, scope }: SessionChatPageProps) {
         />
       ) : (
         <main className="mx-auto flex h-full w-full max-w-[980px] flex-col gap-3 overflow-y-auto py-3">
-          <button
-            type="button"
-            className="kt-btn self-start"
-            onClick={() => navigate(daemonSessionsPath(scope.daemonId))}
-          >
+          <button type="button" className="kt-btn self-start" onClick={() => back(daemonSessionsPath(scope.daemonId))}>
             ← Sessions
           </button>
           <section className="kt-panel p-panel" aria-labelledby="session-route-heading">
@@ -1469,9 +1531,15 @@ function SettingsRoute({ connection }: DaemonPageProps) {
     ],
     [createDaemonClient, store.clients],
   );
+  // This device's copy of every machine's sessions and messages, and where each page was scrolled.
+  const clearCachedData = useCallback(async (): Promise<void> => {
+    await store.sessionCache.clearAll();
+    store.scrollMemory.clear();
+  }, [store.scrollMemory, store.sessionCache]);
   return (
     <SettingsPage
       daemonId={connection.daemonId}
+      onClearCachedData={clearCachedData}
       connections={connectionSnapshot.connections}
       controls={store.controls}
       dictation={dictation}
@@ -1709,7 +1777,7 @@ export function AppShell() {
   useAppViewport();
   const store = useAppStore();
   const connectionSnapshot = useConnectionSnapshot();
-  const { route, navigate } = useRouter();
+  const { route, navigate, entryKey } = useRouter();
   const pageRoute: PageRoute = route.kind === 'legacy-tasks-redirect' ? route.to : route;
   const connection =
     pageRoute.kind === 'connection-picker' || pageRoute.kind === 'setup'
@@ -1718,6 +1786,8 @@ export function AppShell() {
   // The machine on screen tells this browser when its configuration moves, so no screen showing it
   // needs a reload to see a change made anywhere else. See `useConfigChangeFeed`.
   useConfigChangeFeed(store, connection);
+  // A notification tap routes here in the app instead of the worker reloading the window.
+  useNotificationOpen(notificationOpenSource(), window.location.origin, navigate);
   /*
    * ONE SESSION LIST ACROSS EVERY MACHINE, unless the reader chose the machine on screen alone. Each
    * machine's list is read through its own pairing — its own device key — at a slower beat for the
@@ -1845,7 +1915,7 @@ export function AppShell() {
   });
   useEffect(() => {
     if (shortcut === null) return;
-    navigate(daemonSessionsPath(shortcut));
+    navigate(daemonSessionsPath(shortcut), { replace: true });
   }, [navigate, shortcut]);
   const effectiveRoute: PageRoute = pageRoute.kind === 'connection-picker' && setupJourney ? SETUP_ROUTE : pageRoute;
 
@@ -2180,7 +2250,9 @@ export function AppShell() {
               >
                 <DeviceRefusedGate connection={connection}>
                   <ChunkErrorBoundary onChunkError={raiseRecovery} onReload={applyUpdate}>
-                    <PageHost key={pageKey} route={pageRoute} connection={connection} slots={PAGE_SLOTS} />
+                    <PageScrollRegion entryKey={entryKey} memory={store.scrollMemory}>
+                      <PageHost key={pageKey} route={pageRoute} connection={connection} slots={PAGE_SLOTS} />
+                    </PageScrollRegion>
                   </ChunkErrorBoundary>
                 </DeviceRefusedGate>
               </PullToPaletteRegion>

@@ -51,6 +51,7 @@
  * Pure and total: the machine setting, the launch folder and what the installed Claude accepts are
  * all parameters, read at launch by the caller, so a change applies to new sessions only (F5).
  */
+import type { LaunchInstructionSectionId, SessionLaunchInstructions } from '@ferretry/protocol';
 import type { HarnessKind } from '../manifest.ts';
 import { deepMergeSettings, type SettingsObject } from '../settings.ts';
 import {
@@ -294,11 +295,18 @@ export const PACK_INSTRUCTION = (fy: string): string =>
     `Stop sub-ferrets you no longer need (\`${fy} stop children <your id> --yes\`).`,
   ].join('\n');
 
+/** One per-ferret section: the name a surface shows it by, the variable that turns it on, and its text. */
+export interface FerretSection {
+  readonly id: Extract<LaunchInstructionSectionId, 'hypermedia' | 'pack' | 'learning'>;
+  readonly env: string;
+  readonly text: string;
+}
+
 /** The per-ferret sections, in the order the wrapper appends them, each with the variable that turns it on. */
-export const FERRET_SECTIONS = (fy: string): readonly { readonly env: string; readonly text: string }[] => [
-  { env: HYPERMEDIA_ENV, text: HYPERMEDIA_INSTRUCTION },
-  { env: PACK_ENV, text: PACK_INSTRUCTION(fy) },
-  { env: PASSIVE_LEARNING_ENV, text: LESSONS_INSTRUCTION(fy) },
+export const FERRET_SECTIONS = (fy: string): readonly FerretSection[] => [
+  { id: 'hypermedia', env: HYPERMEDIA_ENV, text: HYPERMEDIA_INSTRUCTION },
+  { id: 'pack', env: PACK_ENV, text: PACK_INSTRUCTION(fy) },
+  { id: 'learning', env: PASSIVE_LEARNING_ENV, text: LESSONS_INSTRUCTION(fy) },
 ];
 
 /** The built-in instruction: the tools exist, and how names work. Short on purpose — it is in every prompt. */
@@ -368,6 +376,32 @@ export const SET_UP_FERRETRY_INSTRUCTION = (fy: string): string =>
  */
 export const AGENT_INSTRUCTION = (fy: string): string =>
   `${AGENT_TOOLS_INSTRUCTION}\n\n${SET_UP_FERRETRY_INSTRUCTION(fy)}`;
+
+/**
+ * What an agent launched with `env` is told, by section name and size — never the text: the sections
+ * of the ONE appended system prompt, in the order the wrapper composes them, and whether the question
+ * tool is left in.
+ *
+ * Read off the same constants the wrapper renders (`../wrappers.ts`), so it cannot describe a prompt
+ * the wrapper would not build: the tools and settings sections always, each {@link FERRET_SECTIONS}
+ * entry whose variable is exactly `1`, and the question tool only for a launch whose
+ * {@link SESSION_MODE_ENV} is `interactive` (O3) — the same rule for Claude and Codex. It describes an
+ * AGENT runtime's wrapper, the only kind a session can be started on.
+ */
+export function launchInstructions(fy: string, env: Readonly<Record<string, string>>): SessionLaunchInstructions {
+  const mode = env[SESSION_MODE_ENV] === 'interactive' ? 'interactive' : 'auto';
+  return {
+    sections: [
+      { id: 'tools', chars: AGENT_TOOLS_INSTRUCTION.length },
+      { id: 'settings', chars: SET_UP_FERRETRY_INSTRUCTION(fy).length },
+      ...FERRET_SECTIONS(fy)
+        .filter(section => env[section.env] === '1')
+        .map(section => ({ id: section.id, chars: section.text.length })),
+    ],
+    mode,
+    questions: mode === 'interactive',
+  };
+}
 
 /**
  * What the tools server says when an agent connects (MCP `initialize` instructions): one line. Every

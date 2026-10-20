@@ -26,6 +26,7 @@
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'bun:test';
 import {
   type AttentionSnapshot,
+  CONVERSATION_IMPORT_PATH,
   DAEMON_CAPABILITIES,
   DoctorReportSchema,
   type FyEvent,
@@ -67,6 +68,8 @@ import { daemonSessionScope } from '../../src/lib/daemon-scope.ts';
 import type { PageRoute } from '../../src/lib/pages/routes.ts';
 import { type DaemonCarrierRouter, DEVICE_NOT_ACCEPTED_SENTENCE } from '../../src/lib/relay-carrier.ts';
 import { RouterProvider } from '../../src/lib/router.tsx';
+import { SCROLL_MEMORY_KEY, type ScrollMemoryStorage } from '../../src/lib/scroll-memory.ts';
+import { SessionCache, type SessionCacheBackend } from '../../src/lib/session-cache.ts';
 import { type AppStore, createAppStore, StoreProvider } from '../../src/lib/store.tsx';
 import { openWorkspaceTab, workspaceTab } from '../../src/lib/workspace-layout.ts';
 import { UPDATE_CHIP } from '../../src/shell/app-bar.tsx';
@@ -399,6 +402,14 @@ interface ShellOptions {
   readonly accounts?: readonly unknown[];
   /** Which sessions each daemon (by host) says are instructed to learn, on `GET /v1/learning/sessions`. */
   readonly learners?: Readonly<Record<string, readonly string[]>>;
+  /** Where the session cache keeps its copy; the default keeps it in memory only, so no suite shares one. */
+  readonly sessionCacheBackend?: SessionCacheBackend;
+  /** Where scroll positions are remembered; the default remembers none. */
+  readonly scrollMemoryStorage?: ScrollMemoryStorage;
+  /** Holds every `logs` read open until it resolves, so a cached transcript can be seen before the live one. */
+  readonly transcriptGate?: () => Promise<void>;
+  /** Send-ledger rows `sends` answers with; without it the client has no `sends`, as before. */
+  readonly sends?: readonly unknown[];
 }
 
 interface HealthRead {
@@ -527,6 +538,8 @@ const appStore = async (
   daemonNetwork = network;
   return await createAppStore({
     repository: new MemoryRepository(),
+    sessionCacheBackend: options.sessionCacheBackend ?? null,
+    scrollMemoryStorage: options.scrollMemoryStorage ?? null,
     // The reconnect loop never arms a real timer here: a suite drives recovery by sending requests.
     connectionHealthEnvironment: idleConnectionHealth,
     connectionSignals: { listen: () => () => undefined },
@@ -551,10 +564,12 @@ const appStore = async (
           ),
         logs: async (sessionId: string) => {
           transcriptReads.push(`${connection.daemonId}:${sessionId}`);
+          await options.transcriptGate?.();
           return typeof options.transcript === 'function'
             ? options.transcript(connection.daemonId, sessionId)
             : (options.transcript ?? '');
         },
+        ...(options.sends === undefined ? {} : { sends: async () => options.sends }),
         interrupt: async (sessionId: string) => sessionView(sessionId),
         start: async () => sessionView('started'),
         // The configuration stream the shell keeps open for the machine on screen: like the live feed
@@ -3265,6 +3280,8 @@ describe('one push worker per paired machine', () => {
         ready: new Promise(() => undefined),
         getRegistration: async () => undefined,
         addEventListener: () => undefined,
+        // The notification-tap listener (`useNotificationOpen`) is removed again when the shell unmounts.
+        removeEventListener: () => undefined,
         register: async () => {
           throw new Error('no worker in this suite');
         },
@@ -3921,6 +3938,7 @@ describe('App', () => {
         },
         getRegistration: async () => registration,
         addEventListener: () => undefined,
+        removeEventListener: () => undefined,
       }),
     );
     try {
@@ -4339,6 +4357,363 @@ describe('pairing a phone from the machine menu and the finder', () => {
       }
     } finally {
       restore();
+    }
+  });
+});
+
+/* ---------- the navigation cache: Back returns to a page as it was left ---- */
+
+/** A session-cache backend that keeps its records in a map a test can read and pre-fill. */
+class MemoryCacheBackend implements SessionCacheBackend {
+  readonly records = new Map<string, unknown>();
+  async get(key: string): Promise<unknown> {
+    return this.records.get(key);
+  }
+  async put(key: string, value: unknown): Promise<void> {
+    this.records.set(key, value);
+  }
+  async delete(key: string): Promise<void> {
+    this.records.delete(key);
+  }
+  async keys(): Promise<readonly string[]> {
+    return [...this.records.keys()];
+  }
+  async clear(): Promise<void> {
+    this.records.clear();
+  }
+}
+
+/** A `sessionStorage` stand-in for the scroll memory, readable by the test. */
+class MemoryScrollStorage implements ScrollMemoryStorage {
+  readonly values = new Map<string, string>();
+  getItem(key: string): string | null {
+    return this.values.get(key) ?? null;
+  }
+  setItem(key: string, value: string): void {
+    this.values.set(key, value);
+  }
+  removeItem(key: string): void {
+    this.values.delete(key);
+  }
+}
+
+/** A `logs` gate a test opens and closes: while it is shut, only the cache can fill the transcript. */
+const transcriptValve = () => {
+  let release: (() => void) | undefined;
+  let held: Promise<void> | undefined;
+  return {
+    gate: async (): Promise<void> => await held,
+    shut: (): void => {
+      held = new Promise(resolve => {
+        release = resolve;
+      });
+    },
+    open: (): void => {
+      held = undefined;
+      release?.();
+    },
+  };
+};
+
+/**
+ * The browser's own Back/Forward to an entry the reader already visited: that entry's `history.state`
+ * comes back with it, which is how the router knows it is the SAME entry and not a new visit.
+ */
+const returnTo = async (state: unknown, path: string): Promise<void> => {
+  window.history.replaceState(state, '', path);
+  await interact(() => window.dispatchEvent(new PopStateEvent('popstate')));
+};
+
+const transcriptText = (container: HTMLElement): string => container.querySelector('[role="log"]')?.textContent ?? '';
+const updatingShown = (container: HTMLElement): boolean => container.querySelector('[data-cache-updating]') !== null;
+
+describe('the navigation cache', () => {
+  it('replaces the picker with the only machine’s sessions, so Back does not return to the picker', async () => {
+    // Arrange
+    setPath('/');
+
+    // Act
+    const { view } = await renderShell('/', [alpha.daemonId]);
+    try {
+      // Assert
+      expect(window.location.pathname).toBe(`/d/${ALPHA}`);
+      // The same entry the document opened on: a push would have put the picker behind it at index 0.
+      expect((window.history.state as { fyIndex?: number }).fyIndex).toBe(0);
+    } finally {
+      await view.unmount();
+    }
+  });
+
+  it('keeps the shell and draws the cached transcript at once when the reader returns to a session', async () => {
+    // Arrange
+    let live = 'assistant/message: First read of the conversation.';
+    const valve = transcriptValve();
+    const { view } = await renderShell(`/d/${ALPHA}`, [alpha.daemonId], {
+      sessions: ['shared'],
+      transcript: () => live,
+      transcriptGate: valve.gate,
+    });
+    try {
+      await settle();
+      const shell = must(view.container.firstElementChild, 'the shell root');
+      const region = must(view.container.querySelector('[data-page-scroll-region]'), 'the page scroll region');
+      const sessionsEntry = window.history.state as unknown;
+      const row = must(
+        view.container.querySelector<HTMLAnchorElement>('main a[href$="/session/shared"]'),
+        'the session row',
+      );
+      await interact(() => row.click());
+      await settle();
+      const sessionEntry = window.history.state as unknown;
+      // A first visit has nothing cached: no "Updating…" over the live read.
+      expect(updatingShown(view.container)).toBe(false);
+      expect(transcriptText(view.container)).toContain('First read of the conversation.');
+
+      // Act — Back to the list, then Forward into the chat while the daemon has not answered yet.
+      await returnTo(sessionsEntry, `/d/${ALPHA}`);
+      const shellAfterBack = view.container.firstElementChild;
+      const regionAfterBack = view.container.querySelector('[data-page-scroll-region]');
+      valve.shut();
+      live = 'assistant/message: The live read that replaces it.';
+      await returnTo(sessionEntry, `/d/${ALPHA}/session/shared`);
+      const drawnBeforeLive = transcriptText(view.container);
+      const updatingBeforeLive = updatingShown(view.container);
+      valve.open();
+      await settle();
+
+      // Assert
+      expect(shellAfterBack).toBe(shell);
+      expect(regionAfterBack).toBe(region);
+      expect(view.container.firstElementChild).toBe(shell);
+      expect(drawnBeforeLive).toContain('First read of the conversation.');
+      expect(updatingBeforeLive).toBe(true);
+      expect(transcriptText(view.container)).toContain('The live read that replaces it.');
+      expect(updatingShown(view.container)).toBe(false);
+    } finally {
+      valve.open();
+      await view.unmount();
+    }
+  });
+
+  it('reads a reloaded session’s transcript from storage until the daemon answers', async () => {
+    // Arrange
+    const scope = daemonSessionScope(alpha, 'shared');
+    const backend = new MemoryCacheBackend();
+    const seed = new SessionCache(backend);
+    seed.saveTranscript(scope, { log: 'assistant/message: Kept on this device.' }, seed.generation(alpha.daemonId));
+    await settleUntil(() => backend.records.size > 0, 'the seeded transcript to reach storage', interact);
+    const valve = transcriptValve();
+    valve.shut();
+
+    // Act
+    const { store, view } = await renderShell(`/d/${ALPHA}/session/shared`, [alpha.daemonId], {
+      sessionCacheBackend: backend,
+      transcript: 'assistant/message: Fresh from the daemon.',
+      transcriptGate: valve.gate,
+    });
+    try {
+      await settle();
+      const drawnFromStorage = transcriptText(view.container);
+      const updatingFromStorage = updatingShown(view.container);
+      valve.open();
+      await settle();
+
+      // Assert
+      expect(drawnFromStorage).toContain('Kept on this device.');
+      expect(updatingFromStorage).toBe(true);
+      expect(transcriptText(view.container)).toContain('Fresh from the daemon.');
+      expect(transcriptText(view.container)).not.toContain('Kept on this device.');
+      expect(updatingShown(view.container)).toBe(false);
+      expect(store.sessionCache.peekTranscript(scope)?.log).toBe('assistant/message: Fresh from the daemon.');
+    } finally {
+      valve.open();
+      await view.unmount();
+    }
+  });
+
+  it('saves every live log and send-ledger read into the cache for the next open', async () => {
+    // Arrange
+    const scope = daemonSessionScope(alpha, 'shared');
+    const sendRows = [{ sendId: 'unreadable-row' }];
+
+    // Act
+    const { store, view } = await renderShell(`/d/${ALPHA}/session/shared`, [alpha.daemonId], {
+      transcript: 'assistant/message: Worth keeping.',
+      sends: sendRows,
+    });
+    try {
+      await settle();
+      const cached = store.sessionCache.peekTranscript(scope);
+
+      // Assert
+      expect(cached?.log).toBe('assistant/message: Worth keeping.');
+      expect(cached?.sends).toEqual(sendRows);
+    } finally {
+      await view.unmount();
+    }
+  });
+
+  it('steps back to the sessions list from a failed session reached from it', async () => {
+    // Arrange
+    const backs: string[] = [];
+    const { view } = await renderShell(`/d/${ALPHA}`, [alpha.daemonId], { sessionFailure: 'daemon refused the read' });
+    const restoreBack = patchGlobal(window.history, 'back', () => backs.push(window.location.pathname));
+    try {
+      await settle();
+      // Reached FROM the list (a notification tap, a link), so the list is the entry behind it.
+      await popTo(`/d/${ALPHA}/session/shared`);
+      await settle();
+      const sessions = must(
+        [...view.container.querySelectorAll('button')].find(button => button.textContent === '← Sessions'),
+        'the error page’s way back',
+      );
+
+      // Act
+      await interact(() => sessions.click());
+
+      // Assert
+      expect(backs).toEqual([`/d/${ALPHA}/session/shared`]);
+    } finally {
+      restoreBack();
+      await view.unmount();
+    }
+  });
+
+  it('pushes the sessions list from a failed session opened by a deep link', async () => {
+    // Arrange
+    const backs: string[] = [];
+    const { view } = await renderShell(`/d/${ALPHA}/session/shared`, [alpha.daemonId], {
+      sessionFailure: 'daemon refused the read',
+    });
+    const restoreBack = patchGlobal(window.history, 'back', () => backs.push(window.location.pathname));
+    try {
+      await settle();
+      const sessions = must(
+        [...view.container.querySelectorAll('button')].find(button => button.textContent === '← Sessions'),
+        'the error page’s way back',
+      );
+
+      // Act
+      await interact(() => sessions.click());
+
+      // Assert
+      expect(backs).toEqual([]);
+      expect(window.location.pathname).toBe(`/d/${ALPHA}`);
+    } finally {
+      restoreBack();
+      await view.unmount();
+    }
+  });
+
+  /** Every Continue listing answers empty, whatever query it carries. */
+  const EMPTY_CONTINUE_LISTINGS = new Proxy(
+    {},
+    {
+      get: (_target, path) =>
+        typeof path === 'string' && path.startsWith(CONVERSATION_IMPORT_PATH)
+          ? { conversations: [], matched: 0 }
+          : undefined,
+    },
+  ) as Readonly<Record<string, unknown>>;
+
+  it('opens Continue from the #continue address and writes the choice into it in place', async () => {
+    // Arrange
+    const { view } = await renderShell(`/d/${ALPHA}/new?agent=claude-default#continue`, [alpha.daemonId], {
+      fleet: EMPTY_CONTINUE_LISTINGS,
+    });
+    try {
+      await settle();
+      const entry = (window.history.state as { fyEntry?: string }).fyEntry;
+      const choice = (kind: 'new' | 'continue'): HTMLButtonElement =>
+        must(
+          view.container.querySelector<HTMLButtonElement>(
+            `[data-segmented="new-session-kind"] [data-segment="${kind}"]`,
+          ),
+          `the ${kind} choice`,
+        );
+      const openedOnContinue = choice('continue').getAttribute('aria-pressed');
+
+      // Act
+      await interact(() => choice('new').click());
+      const afterNew = { hash: window.location.hash, search: window.location.search };
+      await interact(() => choice('continue').click());
+
+      // Assert
+      expect(openedOnContinue).toBe('true');
+      expect(afterNew).toEqual({ hash: '', search: '?agent=claude-default' });
+      expect(window.location.hash).toBe('#continue');
+      expect(window.location.pathname).toBe(`/d/${ALPHA}/new`);
+      // Replaced in place: still the entry the page opened on.
+      expect((window.history.state as { fyEntry?: string }).fyEntry).toBe(entry);
+    } finally {
+      await view.unmount();
+    }
+  });
+
+  it('steps back to the sessions list from New session opened from it', async () => {
+    // Arrange
+    const backs: string[] = [];
+    const { view } = await renderShell(`/d/${ALPHA}`, [alpha.daemonId]);
+    const restoreBack = patchGlobal(window.history, 'back', () => backs.push(window.location.pathname));
+    try {
+      await settle();
+      await interact(() =>
+        must(view.container.querySelector<HTMLAnchorElement>('main a[href$="/new"]'), 'the New session link').click(),
+      );
+      await settle();
+      const sessions = must(
+        [...view.container.querySelectorAll('button')].find(button => button.textContent === '← Sessions'),
+        'the New session page’s way back',
+      );
+
+      // Act
+      await interact(() => sessions.click());
+
+      // Assert
+      expect(backs).toEqual([`/d/${ALPHA}/new`]);
+    } finally {
+      restoreBack();
+      await view.unmount();
+    }
+  });
+
+  it('clears the session cache and every remembered scroll position from Settings › This device', async () => {
+    // Arrange
+    const scope = daemonSessionScope(alpha, 'shared');
+    const backend = new MemoryCacheBackend();
+    const scrolls = new MemoryScrollStorage();
+    const { store, view } = await renderShell(`/d/${ALPHA}/settings#device`, [alpha.daemonId], {
+      sessionCacheBackend: backend,
+      scrollMemoryStorage: scrolls,
+    });
+    try {
+      store.sessionCache.saveTranscript(
+        scope,
+        { log: 'assistant/message: cached' },
+        store.sessionCache.generation(alpha.daemonId),
+      );
+      store.scrollMemory.rememberPage('entry-somewhere', '', 240);
+      await settle();
+      const button = (label: string): HTMLButtonElement =>
+        must(
+          [...view.container.querySelectorAll<HTMLButtonElement>('button')].find(
+            candidate => candidate.textContent?.trim() === label,
+          ),
+          `the ${label} button`,
+        );
+
+      // Act
+      await interact(() => button('Clear cached data').click());
+      await interact(() => button('Clear').click());
+      await settle();
+
+      // Assert
+      expect(store.sessionCache.peekTranscript(scope)).toBeUndefined();
+      expect(backend.records.size).toBe(0);
+      expect(scrolls.values.has(SCROLL_MEMORY_KEY)).toBe(false);
+      expect(view.container.querySelector('[data-clear-cached-data="cleared"]')).not.toBeNull();
+    } finally {
+      await view.unmount();
     }
   });
 });

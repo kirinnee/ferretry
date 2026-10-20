@@ -31,6 +31,7 @@ describe('shared settings catalog', () => {
       'dictation',
       'notifications',
       'install-app',
+      'clear-cached-data',
       'sessions-list',
       'motion',
       'message-marks',
@@ -61,7 +62,7 @@ describe('shared settings catalog', () => {
         'dictation',
         'notifications',
       ],
-      ['install-app'],
+      ['install-app', 'clear-cached-data'],
       [],
     ]);
 
@@ -89,6 +90,7 @@ describe('shared settings catalog', () => {
     expect(settingsSectionForSetting('text-size')).toBe('appearance');
     expect(settingsSectionForSetting('theme')).toBe('appearance');
     expect(settingsSectionForSetting('install-app')).toBe('device');
+    expect(settingsSectionForSetting('clear-cached-data')).toBe('device');
     expect(settingsSectionForSetting('composer-markdown')).toBe('behaviour');
     expect(settingsSectionForSetting('composer-enter-key')).toBe('behaviour');
     expect(settingsSectionForSetting('composer-suggestions')).toBe('behaviour');

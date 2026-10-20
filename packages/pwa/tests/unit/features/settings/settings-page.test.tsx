@@ -83,6 +83,8 @@ interface PageOptions {
   readonly lockedMachines?: readonly DaemonId[];
   /** Leave out onNavigate, as a page composed without a router would. */
   readonly routerless?: boolean;
+  /** The host's way to empty this device's cache; absent where it keeps none. */
+  readonly onClearCachedData?: () => Promise<void>;
 }
 
 const page = (options: PageOptions = {}) => {
@@ -111,6 +113,7 @@ const page = (options: PageOptions = {}) => {
         : { onMachineNamed: (id: DaemonId, name: string) => callbacks.named?.push(`${String(id)}=${name}`) })}
       onRemoveDaemon={id => callbacks.removed.push(id)}
       onAddDaemon={() => callbacks.added.push('add')}
+      {...(options.onClearCachedData === undefined ? {} : { onClearCachedData: options.onClearCachedData })}
       {...(options.routerless === true ? {} : { onNavigate: (to: string) => callbacks.navigated.push(to) })}
       {...(options.createMachineClient === undefined ? {} : { createMachineClient: options.createMachineClient })}
       {...(options.machineTabs === undefined ? {} : { machineTabs: options.machineTabs })}
@@ -254,6 +257,58 @@ describe('SettingsPage sections', () => {
         ?.getAttribute('aria-current'),
     ).toBeNull();
     await view.unmount();
+  });
+
+  it('renders Cached data in This device and wires it to the host’s clear', async () => {
+    // Arrange
+    let cleared = 0;
+    const view = await mount(
+      page({
+        onClearCachedData: async () => {
+          cleared += 1;
+        },
+      }),
+    );
+    try {
+      // Act
+      await visit('#device');
+      const setting = must(
+        view.container.querySelector<HTMLElement>('[data-setting-id="clear-cached-data"]'),
+        'the Cached data setting',
+      );
+      const press = async (label: string): Promise<void> =>
+        interact(() =>
+          must(
+            [...setting.querySelectorAll('button')].find(node => node.textContent?.includes(label)),
+            label,
+          ).click(),
+        );
+      await press('Clear cached data');
+      await press('Clear');
+
+      // Assert
+      expect(shownSection(view.container)).toBe('device');
+      expect(setting.querySelector('[data-clear-cached-data]')?.getAttribute('data-clear-cached-data')).toBe('cleared');
+      expect(cleared).toBe(1);
+    } finally {
+      await view.unmount();
+    }
+  });
+
+  it('says a host without a cache keeps no cached data', async () => {
+    // Arrange
+    const view = await mount(page());
+    try {
+      // Act
+      await visit('#device');
+
+      // Assert
+      expect(view.container.querySelector('[data-setting-id="clear-cached-data"]')?.textContent).toContain(
+        'This copy of Ferretry keeps no cached data.',
+      );
+    } finally {
+      await view.unmount();
+    }
   });
 
   it('persists the composer suggestion families and Vim keys as shared device controls', () => {

@@ -1,4 +1,5 @@
 import { isAbsolute } from 'node:path';
+import { type SessionLaunchInstructions, SessionLaunchInstructionsSchema } from '@ferretry/protocol';
 import { z } from 'zod';
 import { MAX_SESSION_TITLE_LENGTH } from '../../names/types.ts';
 import { type SessionId, SessionIdSchema } from '../../session-id.ts';
@@ -64,6 +65,8 @@ export const SessionLifecycleStateSchema = z.object({
   startedAt: z.iso.datetime({ offset: true }).optional(),
   finishedAt: z.iso.datetime({ offset: true }).optional(),
   reason: z.string().min(1).optional(),
+  /** What the current pane was told at launch (`SessionLaunchInstructions`), refreshed by every launch. */
+  launchInstructions: SessionLaunchInstructionsSchema.optional(),
 });
 export type SessionLifecycleState = z.infer<typeof SessionLifecycleStateSchema>;
 
@@ -118,7 +121,12 @@ export interface SessionLifecycleRepository {
 export interface SessionLifecycleLauncher {
   /** True when this session's terminal already exists — the only safe guard against a second pane. */
   alive(record: SessionLifecycleRecord): Promise<boolean>;
-  launch(record: SessionLifecycleRecord): Promise<void>;
+  /**
+   * Opens the pane, and answers what it was told — the launch's system-prompt sections and question
+   * rule — read off the environment it was actually built with. `undefined` from a launcher that
+   * cannot say; the lifecycle then keeps whatever the record already held.
+   */
+  launch(record: SessionLifecycleRecord): Promise<SessionLaunchInstructions | undefined>;
   /**
    * Waits until the newly launched harness is at an idle prompt, clearing only recognised startup
    * dialogs. Required so pre-turn runtime work cannot weaken the interactive control path's

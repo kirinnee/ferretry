@@ -1,3 +1,5 @@
+import { launchInstructions } from '@ferretry/fleet';
+import type { SessionLaunchInstructions } from '@ferretry/protocol';
 import { type AccountLaunchEnvironment, launchEnvironment } from '../../../lib/fleet/launch-environment.ts';
 import type { AccountLaunchRenewal } from '../../../lib/fleet/launch-renewal.ts';
 import { type SessionMediaDirectory, sessionPaneEnvironment } from '../../../lib/session/lifecycle/policy.ts';
@@ -105,6 +107,8 @@ export class TmuxResumeLauncher implements ResumeLauncher {
     private readonly accountRenewal?: AccountLaunchRenewal,
     /** The same media folder the first launch handed the pane, so a revive keeps it. */
     private readonly media?: SessionMediaDirectory,
+    /** The CLI's binary name; see the launch path's identical parameter. */
+    private readonly clientName?: string,
   ) {}
 
   async observe(id: SessionId): Promise<PaneObservation> {
@@ -131,7 +135,7 @@ export class TmuxResumeLauncher implements ResumeLauncher {
    * come back with no credential at all, so its profile is resolved here exactly as it is on the
    * first launch.
    */
-  async relaunch(id: SessionId): Promise<void> {
+  async relaunch(id: SessionId): Promise<SessionLaunchInstructions | undefined> {
     const spec = await this.spec(id);
     const account = spec.agent === undefined ? {} : ((await this.accountEnvironment?.forWrapper(spec.agent)) ?? {});
     // Resolve from the CURRENT saved resource-limit document, but never bake the transient wrapper
@@ -143,15 +147,17 @@ export class TmuxResumeLauncher implements ResumeLauncher {
     // An executable this daemon does not publish is not a fleet account, and a spec with none names
     // nothing to renew — so the lookup is skipped rather than asked about `undefined`.
     if (spec.agent !== undefined) await this.accountRenewal?.beforeLaunch(spec.agent);
-    await this.tmux.launch({
-      session: spec.tmuxSession,
-      cwd: spec.cwd,
-      command: [program, ...arguments_],
-      env: sessionPaneEnvironment(id, launchEnvironment(account, spec.env ?? {}), spec.mode, await this.media?.(id)),
-    });
+    const env = sessionPaneEnvironment(
+      id,
+      launchEnvironment(account, spec.env ?? {}),
+      spec.mode,
+      await this.media?.(id),
+    );
+    await this.tmux.launch({ session: spec.tmuxSession, cwd: spec.cwd, command: [program, ...arguments_], env });
     // The process incarnation changed. Hot apply and terminal reap must address this replacement,
     // never the pid the revive just killed.
     await this.register(id, spec.tmuxSession);
+    return this.clientName === undefined ? undefined : launchInstructions(this.clientName, env);
   }
 
   /**

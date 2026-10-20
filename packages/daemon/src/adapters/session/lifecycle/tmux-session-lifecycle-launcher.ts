@@ -1,3 +1,5 @@
+import { launchInstructions } from '@ferretry/fleet';
+import type { SessionLaunchInstructions } from '@ferretry/protocol';
 import { type AccountLaunchEnvironment, launchEnvironment } from '../../../lib/fleet/launch-environment.ts';
 import type { AccountLaunchRenewal } from '../../../lib/fleet/launch-renewal.ts';
 import {
@@ -63,13 +65,18 @@ export class TmuxSessionLifecycleLauncher implements SessionLifecycleLauncher {
     private readonly accountRenewal?: AccountLaunchRenewal,
     /** Creates and names the session's media folder, handed to the pane as `FY_MEDIA_DIR`. */
     private readonly media?: SessionMediaDirectory,
+    /**
+     * The CLI's binary name, as the wrapper's instructions spell it. With it, a launch answers what the
+     * pane was told (`launchInstructions`); without it, it answers nothing and the record keeps what it had.
+     */
+    private readonly clientName?: string,
   ) {}
 
   async alive(record: SessionLifecycleRecord): Promise<boolean> {
     return await this.tmux.alive(record.config.tmuxSession);
   }
 
-  async launch(record: SessionLifecycleRecord): Promise<void> {
+  async launch(record: SessionLifecycleRecord): Promise<SessionLaunchInstructions | undefined> {
     // Resolved per launch, from the saved limits and this session's own spawn record, and applied to
     // the argv rather than to the durable command — see `AgentLaunchWrapper`. A daemon with no
     // wrapper, or one whose limits are off, gets back exactly what it passed in.
@@ -108,6 +115,9 @@ export class TmuxSessionLifecycleLauncher implements SessionLifecycleLauncher {
       env,
     });
     await this.register(record);
+    // Read off the environment the pane was just given, never the stored one: a switch flipped after
+    // this launch reaches the agent only at its next one.
+    return this.clientName === undefined ? undefined : launchInstructions(this.clientName, env);
   }
 
   /**

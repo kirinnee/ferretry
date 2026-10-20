@@ -22,6 +22,16 @@ import {
 } from '../fixtures.ts';
 import { assertCoversEverySchema, assertRejects, assertRoundTrips, type SchemaCase } from './schema-cases.ts';
 
+const launchInstructions = {
+  sections: [
+    { id: 'tools', chars: 512 },
+    { id: 'settings', chars: 420 },
+    { id: 'hypermedia', chars: 1100 },
+  ],
+  mode: 'interactive',
+  questions: true,
+};
+
 const sendEvidence = {
   key: 'send-1',
   harness: 'codex',
@@ -175,6 +185,18 @@ const sessionCases: SchemaCase[] = [
     value: { agent: 'agent', availability: 'available', retryAt: null, fiveHourPercent: 25 },
   },
   { name: 'session state', schema: session.SessionStateSchema, value: sessionView.state },
+  { name: 'launch instruction section id', schema: session.LaunchInstructionSectionIdSchema, value: 'hypermedia' },
+  {
+    name: 'launch instruction section',
+    schema: session.LaunchInstructionSectionSchema,
+    value: { id: 'tools', chars: 512 },
+  },
+  { name: 'launch instructions', schema: session.SessionLaunchInstructionsSchema, value: launchInstructions },
+  {
+    name: 'session state with launch instructions',
+    schema: session.SessionStateSchema,
+    value: { ...sessionView.state, launchInstructions },
+  },
   { name: 'session view', schema: session.SessionViewSchema, value: sessionView },
   { name: 'session list', schema: session.SessionListSchema, value: [sessionView] },
   {
@@ -435,6 +457,20 @@ describe('session schemas', () => {
         schema: session.SessionProvenanceSchema,
         value: descentWithoutWardenOrigin,
       },
+    ]);
+  });
+
+  it('should refuse a launch record naming an unknown section, a negative size or no question answer', () => {
+    // Arrange
+    const unknownSection = { ...launchInstructions, sections: [{ id: 'secret-sauce', chars: 1 }] };
+    const negativeSize = { ...launchInstructions, sections: [{ id: 'tools', chars: -1 }] };
+    const { questions: _questions, ...noQuestions } = launchInstructions;
+
+    // Act + Assert
+    assertRejects([
+      { name: 'unknown section', schema: session.SessionLaunchInstructionsSchema, value: unknownSection },
+      { name: 'negative size', schema: session.SessionLaunchInstructionsSchema, value: negativeSize },
+      { name: 'no question answer', schema: session.SessionLaunchInstructionsSchema, value: noQuestions },
     ]);
   });
 

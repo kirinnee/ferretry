@@ -24,6 +24,7 @@ export type SettingId =
   | 'dictation'
   | 'notifications'
   | 'install-app'
+  | 'clear-cached-data'
   | 'sessions-list';
 
 export type SettingsSectionId = 'appearance' | 'behaviour' | 'device' | 'machines';
@@ -242,6 +243,13 @@ export const SETTINGS_DEFINITIONS: readonly SettingDefinition[] = [
     ],
   },
   {
+    id: 'clear-cached-data',
+    label: 'Cached data',
+    description:
+      'Sessions and recent messages this device keeps so screens open at once. Clearing removes only this device’s copy.',
+    keywords: ['cache', 'cached', 'clear', 'offline', 'storage', 'privacy', 'forget', 'data', 'delete'],
+  },
+  {
     id: 'sessions-list',
     label: 'Sessions list',
     description:
@@ -314,8 +322,8 @@ export const SETTINGS_SECTIONS: readonly SettingsSectionDefinition[] = [
   {
     id: 'device',
     label: 'This device',
-    description: 'Ferretry as an app on this device.',
-    settingIds: ['install-app'],
+    description: 'Ferretry as an app on this device, and what it keeps here.',
+    settingIds: ['install-app', 'clear-cached-data'],
   },
   {
     /**

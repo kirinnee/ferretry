@@ -1,4 +1,4 @@
-import { SessionStatusSchema, type SessionStatus } from '@ferretry/protocol';
+import { type SessionLaunchInstructions, SessionStatusSchema, type SessionStatus } from '@ferretry/protocol';
 import { z } from 'zod';
 import { SessionIdSchema, type SessionId } from '../../session-id.ts';
 
@@ -217,6 +217,8 @@ export interface ResumeTransition {
   readonly clearPendingQuestion?: boolean | undefined;
   readonly clearNeedsHuman?: boolean | undefined;
   readonly data?: Readonly<Record<string, string | number | boolean>> | undefined;
+  /** The launch fact a relaunch just produced, written over the previous pane's. */
+  readonly launchInstructions?: SessionLaunchInstructions | undefined;
 }
 
 /** The terminal a resume replaces. Every call goes through the injected tmux port, never a shell. */
@@ -226,7 +228,8 @@ export interface ResumeLauncher {
   snapshot(id: SessionId): Promise<void>;
   /** Kills the pane this daemon created for this session, and nothing else. */
   kill(id: SessionId, reason: string): Promise<void>;
-  relaunch(id: SessionId): Promise<void>;
+  /** Replaces the pane; answers what the replacement was told, as the lifecycle launcher's `launch` does. */
+  relaunch(id: SessionId): Promise<SessionLaunchInstructions | undefined>;
   deliver(id: SessionId, instruction: string): Promise<void>;
   /**
    * Independently re-probes after a relaunch error. A readiness failure is one observation; the

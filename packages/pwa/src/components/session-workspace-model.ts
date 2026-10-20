@@ -296,6 +296,8 @@ export interface SessionWorkspaceRefreshInput {
   readonly intervalMs?: number;
   readonly environment: SessionWorkspaceRefreshEnvironment;
   readonly onTranscript: (entries: readonly TranscriptEntry[]) => void;
+  /** Every good read's raw log text, before it is parsed: what the session cache keeps for the next open. */
+  readonly onLog?: (text: string) => void;
   readonly onSession: (view: SessionView) => void;
   /** Every refresh's send ledger, when the api reads one. A failed read keeps the previous rows. */
   readonly onSends?: (sends: readonly SendRecord[]) => void;
@@ -354,8 +356,10 @@ export const startSessionWorkspaceRefresh = (input: SessionWorkspaceRefreshInput
         const errors: string[] = [];
         const quiet = input.quiet ?? (() => false);
         let silenced = false;
-        if (logs.status === 'fulfilled') input.onTranscript(transcriptEntriesFromLog(logs.value));
-        else if (quiet(logs.reason)) silenced = true;
+        if (logs.status === 'fulfilled') {
+          input.onLog?.(logs.value);
+          input.onTranscript(transcriptEntriesFromLog(logs.value));
+        } else if (quiet(logs.reason)) silenced = true;
         else errors.push(`Transcript: ${errorMessage(logs.reason)}`);
         if (!silenced) input.onTranscriptUnbound?.(logs.status === 'rejected' && isTranscriptUnbound(logs.reason));
 

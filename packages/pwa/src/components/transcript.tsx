@@ -9,6 +9,7 @@ import { type ContextMenuEventLike, textContextMenuEventAllowed } from '../lib/c
 import { daemonId as toDaemonId } from '../lib/daemon-connection.ts';
 import type { PaneActivity } from '../lib/pane-activity.ts';
 import { quoteSelectionIntoComposer } from '../lib/quote.ts';
+import type { ChatScrollSlot } from '../lib/scroll-memory.ts';
 import { type TranscriptEntry, transcriptItems } from '../lib/session-screens.ts';
 import { newTailRows, prependedAbove, prependRestoreTarget } from '../lib/transcript-follow.ts';
 import { ContextMenu, type ContextMenuItem } from '../shell/context-menu.tsx';
@@ -46,6 +47,8 @@ export interface TranscriptProps {
    * Opening a session needs no bump: a new daemon or session id does the same thing by itself.
    */
   readonly pinSignal?: number;
+  /** Where this session's reading position is kept, so coming back finds it (`useStickToBottom`). */
+  readonly readingPosition?: ChatScrollSlot;
 }
 /**
  * An assistant row labelled with the agent's name — "Hadi" rather than "Assistant", the harness, or the
@@ -118,6 +121,7 @@ export function Transcript({
   live = null,
   agentName,
   pinSignal = 0,
+  readingPosition,
 }: TranscriptProps) {
   const hold = useTranscriptHold();
   const shown = useHeldStill({ entries, busy, activity, activityFallback, turnStartedAt, live }, hold);
@@ -145,6 +149,7 @@ export function Transcript({
     resetKey: `${daemonId}\u0000${sessionId}\u0000${pinSignal}`,
     contentKeys: [shown.entries, shown.busy],
     onFollow: clearCount,
+    ...(readingPosition === undefined ? {} : { memory: readingPosition }),
   });
 
   // ---- DETACHED: count the rows that arrived at the tail, for the pill -----------------------------

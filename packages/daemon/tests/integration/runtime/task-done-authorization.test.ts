@@ -62,7 +62,7 @@ class RecordingSessionLauncher implements SessionLifecycleLauncher {
     return this.live.has(record.config.tmuxSession);
   }
 
-  async launch(record: SessionLifecycleRecord): Promise<void> {
+  async launch(record: SessionLifecycleRecord): Promise<undefined> {
     this.live.add(record.config.tmuxSession);
   }
 

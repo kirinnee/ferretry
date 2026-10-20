@@ -157,6 +157,7 @@ function DashboardContent({
     dashboardView: view.controls.dashboardView,
     density,
     error: view.slice.error,
+    updating: view.slice.cachedAt !== undefined,
     groups: view.groups,
     narrow,
     now,

@@ -8,6 +8,9 @@ import {
   INFO_HINT,
   INFO_TAB_LABEL,
   INFO_TABS,
+  charsLabel,
+  LAUNCH_SECTION_LABEL,
+  launchInstructionFacts,
   learningLabel,
   lineage,
   loginScope,
@@ -238,5 +241,50 @@ describe('pack', () => {
     expect(packLabel(true)).toBe('On · may delegate to sub-ferrets');
     expect(packLabel(false)).toBe('Off · works alone');
     expect(INFO_HINT.pack).toContain('next launch');
+  });
+});
+
+describe('charsLabel', () => {
+  it('says a small size whole and a large one in thousands, dropping a bare .0', () => {
+    expect(charsLabel(0)).toBe('0 chars');
+    expect(charsLabel(999)).toBe('999 chars');
+    expect(charsLabel(1000)).toBe('1k chars');
+    expect(charsLabel(1234)).toBe('1.2k chars');
+  });
+});
+
+describe('launchInstructionFacts', () => {
+  it('names each recorded section with its size, the mode and the question rule', () => {
+    const facts = launchInstructionFacts(
+      sessionView('s', {
+        state: {
+          launchInstructions: {
+            sections: [
+              { id: 'tools', chars: 640 },
+              { id: 'hypermedia', chars: 1180 },
+            ],
+            mode: 'interactive',
+            questions: true,
+          },
+        },
+      }),
+    );
+    expect(facts).toEqual({
+      sections: [
+        { id: 'tools', label: 'Ferretry tools · 640 chars' },
+        { id: 'hypermedia', label: 'Hypermedia · 1.2k chars' },
+      ],
+      mode: 'Interactive',
+      questions: 'Yes',
+    });
+  });
+
+  it('says Agent and No for an unattended launch, and nothing for one never recorded', () => {
+    const auto = launchInstructionFacts(
+      sessionView('s', { state: { launchInstructions: { sections: [], mode: 'auto', questions: false } } }),
+    );
+    expect(auto).toEqual({ sections: [], mode: 'Agent', questions: 'No' });
+    expect(launchInstructionFacts(sessionView('s'))).toBeUndefined();
+    expect(Object.keys(LAUNCH_SECTION_LABEL)).toEqual(['tools', 'settings', 'hypermedia', 'pack', 'learning']);
   });
 });

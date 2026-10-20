@@ -1,5 +1,6 @@
 import { describe, it } from 'bun:test';
 import { createHash } from 'node:crypto';
+import type { SessionLaunchInstructions } from '@ferretry/protocol';
 import should from 'should';
 import { type ClockPort, parseSessionId, type SerialExecutor, type SessionId } from '../../../../src/lib/index.ts';
 import type {
@@ -27,6 +28,15 @@ import {
 } from '../../../../src/lib/session/lifecycle/index.ts';
 
 const AGENT = '/opt/fleet/bin/claude-auto-loge';
+const LAUNCHED: SessionLaunchInstructions = {
+  sections: [
+    { id: 'tools', chars: 600 },
+    { id: 'settings', chars: 450 },
+    { id: 'pack', chars: 900 },
+  ],
+  mode: 'auto',
+  questions: false,
+};
 const ID = 'ms8-abcd1234';
 const FIRST_TURN_INSTRUCTION =
   `Read the file /state/sessions/${ID}/turns/turn-001.md now, then carefully follow every instruction ` +
@@ -89,7 +99,10 @@ class RecordingLauncher implements SessionLifecycleLauncher {
     return this.live;
   }
 
-  async launch(): Promise<void> {
+  /** What a successful launch says its pane was told; `undefined` is a launcher that cannot say. */
+  launched: SessionLaunchInstructions | undefined;
+
+  async launch(): Promise<SessionLaunchInstructions | undefined> {
     this.record('launch');
     const failure = this.launchErrors.shift();
     if (failure) {
@@ -97,6 +110,7 @@ class RecordingLauncher implements SessionLifecycleLauncher {
       throw failure;
     }
     if (this.livenessFromLaunch) this.live = true;
+    return this.launched;
   }
 
   async ready(_record: SessionLifecycleRecord): Promise<void> {
@@ -790,6 +804,42 @@ describe('SessionLifecycleService', () => {
     await should(subject.start(ID)).be.rejectedWith(/already exists/u);
     should(launcher.launches()).equal(1);
     should(repository.current().state.status).equal('failed');
+  });
+
+  it('should record what the launched pane was told on the running record', async () => {
+    // Arrange
+    const { repository, launcher, subject } = harness();
+    launcher.livenessFromLaunch = true;
+    launcher.launched = LAUNCHED;
+
+    // Act
+    const actual = await subject.createAndStart(input());
+
+    // Assert
+    should(actual.state.status).equal('running');
+    should(actual.state.launchInstructions).deepEqual(LAUNCHED);
+    should(repository.current().state.launchInstructions).deepEqual(LAUNCHED);
+  });
+
+  it('should keep a launched pane’s instructions through a failure, and keep them when the next launcher cannot say', async () => {
+    // Arrange
+    const { repository, launcher, subject } = harness();
+    launcher.launched = LAUNCHED;
+    const failing = async (): Promise<void> => {
+      throw new Error('runtime setup failed');
+    };
+    await should(subject.createAndStart(input({ mode: 'interactive', prompt: undefined }), failing)).be.rejected();
+    const failed = repository.current().state;
+    launcher.launched = undefined;
+
+    // Act
+    const actual = await subject.start(ID);
+
+    // Assert
+    should(failed.status).equal('failed');
+    should(failed.launchInstructions).deepEqual(LAUNCHED);
+    should(actual.state.status).equal('running');
+    should(actual.state.launchInstructions).deepEqual(LAUNCHED);
   });
 
   it('should let a failed launch be started again', async () => {

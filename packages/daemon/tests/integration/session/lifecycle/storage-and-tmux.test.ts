@@ -1427,3 +1427,68 @@ describe('TmuxSessionLifecycleLauncher and a credential that can renew itself', 
     should(port.calls.filter(call => call[0] === 'new-session')).have.length(1);
   });
 });
+
+/**
+ * What a launch says its pane was told: read off the environment the pane was actually given — the
+ * stored switches, the mode-derived hypermedia default — and never the text itself.
+ */
+describe('TmuxSessionLifecycleLauncher launch instructions', () => {
+  const named = (port: TmuxCommandPort, stored: Readonly<Record<string, string>>) => {
+    const controller = new TmuxController(port);
+    const environment: SessionEnvironmentStore = { write: async () => undefined, read: async () => stored };
+    return new TmuxSessionLifecycleLauncher(
+      controller,
+      new TmuxPaneDelivery(controller, async () => {}),
+      environment,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      'zz',
+    );
+  };
+
+  it('should answer the sections and question rule of the environment it launched the pane with', async () => {
+    // Arrange
+    const port = new RecordingTmuxPort();
+    const subject = named(port, { FY_SESSION_MODE: 'interactive', FY_PACK: '1', FY_LEARNING_PASSIVE: '0' });
+
+    // Act
+    const launched = await subject.launch(record('told-session', { mode: 'interactive' }));
+
+    // Assert
+    should(launched?.sections.map(section => section.id)).deepEqual(['tools', 'settings', 'hypermedia', 'pack']);
+    should(launched?.sections.every(section => section.chars > 0)).be.true();
+    should(launched?.mode).equal('interactive');
+    should(launched?.questions).be.true();
+    should(JSON.stringify(launched)).not.containEql('Pack mode:');
+  });
+
+  it('should let a stored switch win over the mode default, and withhold questions from an unattended pane', async () => {
+    // Arrange
+    const port = new RecordingTmuxPort();
+    const subject = named(port, { FY_SESSION_MODE: 'auto', FY_HYPERMEDIA: '1' });
+
+    // Act
+    const launched = await subject.launch(record('worker-session'));
+
+    // Assert
+    should(launched?.sections.map(section => section.id)).deepEqual(['tools', 'settings', 'hypermedia']);
+    should(launched?.questions).be.false();
+  });
+
+  it('should answer nothing when it was not told the binary name', async () => {
+    // Arrange
+    const port = new RecordingTmuxPort();
+    const controller = new TmuxController(port);
+    const subject = new TmuxSessionLifecycleLauncher(controller, new TmuxPaneDelivery(controller, async () => {}));
+
+    // Act
+    const launched = await subject.launch(record('unnamed-session'));
+
+    // Assert
+    should(launched).be.undefined();
+  });
+});

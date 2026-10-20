@@ -547,6 +547,35 @@ const DeclaredWaitSchema = z.object({
   peerName: z.string().optional(),
 });
 
+/**
+ * The named sections of the system prompt Ferretry appends to an agent, in the order a wrapper
+ * composes them (`@ferretry/fleet` `launchInstructions`): the tools and the settings rules every agent
+ * gets, then each per-ferret section its launch switched on.
+ */
+export const LaunchInstructionSectionIdSchema = z.enum(['tools', 'settings', 'hypermedia', 'pack', 'learning']);
+export type LaunchInstructionSectionId = z.infer<typeof LaunchInstructionSectionIdSchema>;
+
+/** One appended section, by name and size. The text itself is never carried. */
+export const LaunchInstructionSectionSchema = z.object({
+  id: LaunchInstructionSectionIdSchema,
+  chars: NonNegativeIntegerSchema,
+});
+export type LaunchInstructionSection = z.infer<typeof LaunchInstructionSectionSchema>;
+
+/**
+ * What one launch of a session was told, recorded when its pane was built: which Ferretry
+ * system-prompt sections it carried, its mode, and whether it may ask the owner a question.
+ *
+ * A LAUNCH FACT, refreshed by every launch and relaunch: a switch flipped while the session runs
+ * reaches the agent only at its next launch, so the stored environment is not what it was told.
+ */
+export const SessionLaunchInstructionsSchema = z.object({
+  sections: z.array(LaunchInstructionSectionSchema),
+  mode: InteractionModeSchema,
+  questions: z.boolean(),
+});
+export type SessionLaunchInstructions = z.infer<typeof SessionLaunchInstructionsSchema>;
+
 /** Public session state; internal queue payloads and filesystem proofs are omitted. */
 export const SessionStateSchema = z.object({
   id: z.string().min(1),
@@ -587,6 +616,8 @@ export const SessionStateSchema = z.object({
   usageAtLimit: z.boolean().optional(),
   usageAuthOk: z.boolean().optional(),
   launchedAt: InstantSchema.optional(),
+  /** What the current pane was told at launch; absent for a session last launched before it was recorded. */
+  launchInstructions: SessionLaunchInstructionsSchema.optional(),
   observedModel: z.string().optional(),
   observedModelAt: InstantSchema.optional(),
   observedReasoningEffort: z.string().optional(),

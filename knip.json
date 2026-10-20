@@ -75,6 +75,7 @@
         "tests/integration/fixtures/composer-editor-scene.tsx",
         "tests/integration/fixtures/all-machines-scene.tsx",
         "tests/integration/fixtures/machine-reorder-scene.tsx",
+        "tests/integration/fixtures/nav-cache-scene.tsx",
         "tests/integration/fixtures/sessions-list-scene.tsx",
         "scripts/fy-render-shell/bootstrap.ts",
         "scripts/fy-render-shell/mermaid-entry.ts",

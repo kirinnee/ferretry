@@ -11,7 +11,12 @@
  * WORDS: which tab a fact is on, how it is said, and what its explainer says.
  */
 
-import { type ManagedWorktreeView, type SessionView, sessionHypermediaEnabled } from '@ferretry/protocol';
+import {
+  type LaunchInstructionSectionId,
+  type ManagedWorktreeView,
+  type SessionView,
+  sessionHypermediaEnabled,
+} from '@ferretry/protocol';
 import { launchedModel } from '../../components/composer-runtime.tsx';
 
 export type InfoTab = 'overview' | 'runtime' | 'usage' | 'folder' | 'signals' | 'surfaces';
@@ -42,7 +47,9 @@ export const INFO_HINT = {
   mode: 'Interactive ferrets wait for you at their prompt; auto ferrets keep going on their own.',
   ferretryTools:
     'Ferretry’s own MCP server, which lets this ferret use the controls you allowed (Settings › Agent controls).',
-  instructions: 'The instruction files at the root of this ferret’s folder, which the CLI reads.',
+  instructionFiles: 'The instruction files at the root of this ferret’s folder, which the CLI reads.',
+  instructions:
+    'The parts of the system prompt Ferretry added when this ferret was launched, with their sizes, and whether it may stop to ask you a question. Recorded at each launch: a switch changed since takes effect at the next one.',
   context: 'How full the model’s context window is. Near 100% the CLI compacts the conversation.',
   cost: 'What the tokens would cost at the provider’s list prices. Without known pricing it says so, never a guess.',
   quota: 'The login’s own limits. Ferretry reads them only while someone is looking, at most once a minute.',
@@ -155,6 +162,40 @@ export const hypermediaLabel = (on: boolean): string =>
  * hypermedia: the machine's own switch and the depth limit still apply on top of it.
  */
 export const packOn = (view: SessionView): boolean => view.config.pack !== false;
+
+/** Each Ferretry system-prompt section, by the name a person knows it by. */
+export const LAUNCH_SECTION_LABEL: Readonly<Record<LaunchInstructionSectionId, string>> = {
+  tools: 'Ferretry tools',
+  settings: 'Settings rules',
+  hypermedia: 'Hypermedia',
+  pack: 'Pack mode',
+  learning: 'Learning',
+};
+
+/** A section's size in characters, short: "640 chars", "1.2k chars". */
+export const charsLabel = (chars: number): string =>
+  chars < 1000 ? `${chars} chars` : `${(chars / 1000).toFixed(1).replace(/\.0$/u, '')}k chars`;
+
+/** The Instructions row's facts, or `undefined` for a ferret last launched before they were recorded. */
+export interface LaunchInstructionFacts {
+  readonly sections: readonly { readonly id: LaunchInstructionSectionId; readonly label: string }[];
+  readonly mode: 'Interactive' | 'Agent';
+  readonly questions: 'Yes' | 'No';
+}
+
+/** What this ferret was told at its last launch, in words (never the prompt text — the daemon keeps none). */
+export const launchInstructionFacts = (view: SessionView): LaunchInstructionFacts | undefined => {
+  const launched = view.state.launchInstructions;
+  if (launched === undefined) return undefined;
+  return {
+    sections: launched.sections.map(section => ({
+      id: section.id,
+      label: `${LAUNCH_SECTION_LABEL[section.id]} · ${charsLabel(section.chars)}`,
+    })),
+    mode: launched.mode === 'interactive' ? 'Interactive' : 'Agent',
+    questions: launched.questions ? 'Yes' : 'No',
+  };
+};
 
 /** The Pack mode row's value: said as what the ferret is told, and when a change lands. */
 export const packLabel = (on: boolean): string => (on ? 'On · may delegate to sub-ferrets' : 'Off · works alone');

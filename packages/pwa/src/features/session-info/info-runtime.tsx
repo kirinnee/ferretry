@@ -18,6 +18,7 @@ import {
   hypermediaLabel,
   hypermediaOn,
   INFO_HINT,
+  launchInstructionFacts,
   learningLabel,
   loginScope,
   modelFacts,
@@ -77,6 +78,7 @@ export function InfoRuntime({
   onRestart,
 }: InfoRuntimeProps) {
   const model = modelFacts(view);
+  const launched = launchInstructionFacts(view);
   return (
     <InfoSection>
       <InfoRow label="CLI">{harnessLabel(view)}</InfoRow>
@@ -117,8 +119,33 @@ export function InfoRuntime({
       <InfoRow hint={INFO_HINT.ferretryTools} label="Ferretry tools">
         <InfoChip tone="ok">On</InfoChip>
       </InfoRow>
-      <InfoRow label="Other MCP">{listText(mcp, 'None')}</InfoRow>
       <InfoRow hint={INFO_HINT.instructions} label="Instructions">
+        {launched === undefined ? (
+          <span className="fy-info-muted" data-info-launch-unrecorded="">
+            Recorded from the next launch
+          </span>
+        ) : (
+          <>
+            <span className="fy-info-line" data-info-launch-sections="">
+              {launched.sections.map(section => (
+                <InfoChip key={section.id} tone="accent">
+                  <span data-info-launch-section={section.id}>{section.label}</span>
+                </InfoChip>
+              ))}
+            </span>
+            <span className="fy-info-line" data-info-launch-mode="">
+              <span className="fy-info-muted">Mode</span>
+              {launched.mode}
+            </span>
+            <span className="fy-info-line" data-info-launch-questions="">
+              <span className="fy-info-muted">Can ask questions</span>
+              {launched.questions}
+            </span>
+          </>
+        )}
+      </InfoRow>
+      <InfoRow label="Other MCP">{listText(mcp, 'None')}</InfoRow>
+      <InfoRow hint={INFO_HINT.instructionFiles} label="Instruction files">
         {listText(instructions, 'None at the folder’s root')}
       </InfoRow>
       <InfoRow label="Skills">

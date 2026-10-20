@@ -103,6 +103,12 @@ export interface DaemonFleetSlice {
    * says "last seen 5m". Absent until a read has succeeded; a failed read never moves it.
    */
   readonly readAt?: number;
+  /**
+   * Set while the rows on screen are THIS DEVICE'S CACHED COPY (`session-cache.ts`) and no live read
+   * has confirmed them yet: when that copy was saved. A screen says "Updating…" while it is set; the
+   * first good live read clears it.
+   */
+  readonly cachedAt?: number;
 }
 
 /** Every paired daemon's fleet, addressed only by `DaemonId`. */
@@ -258,6 +264,19 @@ export class DaemonFleetStore {
   }
 
   /**
+   * Draws a machine's list from this device's cached copy before the live read answers. Only an
+   * UNREAD slice is seeded: rows a live read already produced are never replaced by older ones, and a
+   * live answer that lands later replaces these. The connection's entry is taken exactly as a read
+   * would take it, so a clear or a re-pair drops the seeded rows like any others.
+   */
+  seed(daemon: DaemonConnection, sessions: readonly SessionView[], savedAt: number): boolean {
+    const entry = this.#entryFor(daemon);
+    if (this.fleet(entry.daemonId).sessions !== null) return false;
+    this.#patchSlice(entry.daemonId, { sessions, byId: indexById(sessions), readAt: savedAt, cachedAt: savedAt });
+    return true;
+  }
+
+  /**
    * Reads ONE session. Coalescing is keyed by the full `daemonSessionKey`, so
    * the same session id on two paired daemons is two independent requests.
    */
@@ -381,6 +400,7 @@ export class DaemonFleetStore {
       status: 'ready',
       error: null,
       readAt: this.#now(),
+      cachedAt: undefined,
     });
   }
 

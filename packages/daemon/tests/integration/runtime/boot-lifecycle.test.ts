@@ -423,7 +423,7 @@ class RecordingSessionLauncher implements SessionLifecycleLauncher {
     return this.live.has(record.config.tmuxSession);
   }
 
-  async launch(record: SessionLifecycleRecord): Promise<void> {
+  async launch(record: SessionLifecycleRecord): Promise<undefined> {
     this.launched.push({ command: [...record.config.command], cwd: record.config.cwd });
     this.live.add(record.config.tmuxSession);
   }
@@ -493,7 +493,7 @@ class RecordingResumeLauncher implements ResumeLauncher {
     this.killed.push(id);
   }
 
-  async relaunch(id: string): Promise<void> {
+  async relaunch(id: string): Promise<undefined> {
     this.relaunched.push(id);
     if (this.argvFor !== undefined) this.argv.push(await this.argvFor(parseSessionId(id)));
   }

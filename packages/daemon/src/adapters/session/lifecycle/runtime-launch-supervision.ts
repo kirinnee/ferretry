@@ -14,6 +14,7 @@
  * Housekeeping after an ending never fails the ending: the supervisor answers a value and never throws,
  * and a session id whose record cannot be read is simply not followed up.
  */
+import type { SessionLaunchInstructions } from '@ferretry/protocol';
 import { type CodexAppServerOutcome, codexLaunchFailure } from '../../../lib/fleet/codex-runtime.ts';
 import type { SessionLifecycleLauncher, SessionLifecycleRecord } from '../../../lib/session/lifecycle/index.ts';
 import type { ExactTerminalReaper } from '../../../lib/session/reap-service.ts';
@@ -40,8 +41,8 @@ export class RuntimeSupervisedLauncher implements SessionLifecycleLauncher {
     return await this.inner.alive(record);
   }
 
-  async launch(record: SessionLifecycleRecord): Promise<void> {
-    await this.inner.launch(record);
+  async launch(record: SessionLifecycleRecord): Promise<SessionLaunchInstructions | undefined> {
+    return await this.inner.launch(record);
   }
 
   async ready(record: SessionLifecycleRecord): Promise<void> {

@@ -16,12 +16,16 @@ import {
   type FixedLayerInput,
   fixedLayerFor,
   FERRET_SECTIONS,
+  AGENT_TOOLS_INSTRUCTION,
   HYPERMEDIA_ENV,
   HYPERMEDIA_INSTRUCTION,
   LESSONS_INSTRUCTION,
+  launchInstructions,
   PACK_ENV,
   PACK_INSTRUCTION,
   PASSIVE_LEARNING_ENV,
+  SESSION_MODE_ENV,
+  SET_UP_FERRETRY_INSTRUCTION,
   tomlString,
 } from '../../src/lib/account/fixed-layer.ts';
 import { type ResolvedProfile, resolveProfile } from '../../src/lib/account/layering.ts';
@@ -576,7 +580,7 @@ describe('hypermedia teaching', () => {
 
     // Assert
     should(FERRETRY_MCP_ENV_VARS).not.containEql(HYPERMEDIA_ENV);
-    should(FERRET_SECTIONS('fy')[0]).deepEqual({ env: HYPERMEDIA_ENV, text: HYPERMEDIA_INSTRUCTION });
+    should(FERRET_SECTIONS('fy')[0]).deepEqual({ id: 'hypermedia', env: HYPERMEDIA_ENV, text: HYPERMEDIA_INSTRUCTION });
     should(HYPERMEDIA_ENV).equal('FY_HYPERMEDIA');
     for (const form of forms) should(lines.some(line => line.startsWith(`- ${form}:`))).be.true();
     should(lines).containDeepOrdered(['```fy-render', 'type: mermaid', '---', '```']);
@@ -617,5 +621,47 @@ describe('Pack mode teaching', () => {
       should(teaching).containEql(code);
     should(teaching).not.containEql('fy ');
     should(teaching.length).be.below(1200);
+  });
+});
+
+describe('launchInstructions', () => {
+  it('should name every section the wrapper would compose for an interactive ferret, with each size, and leave its question tool in', () => {
+    // Arrange
+    const binary = 'zz';
+    const env = {
+      [SESSION_MODE_ENV]: 'interactive',
+      [HYPERMEDIA_ENV]: '1',
+      [PACK_ENV]: '1',
+      [PASSIVE_LEARNING_ENV]: '1',
+    };
+
+    // Act
+    const launched = launchInstructions(binary, env);
+
+    // Assert
+    should(launched).deepEqual({
+      sections: [
+        { id: 'tools', chars: AGENT_TOOLS_INSTRUCTION.length },
+        { id: 'settings', chars: SET_UP_FERRETRY_INSTRUCTION(binary).length },
+        { id: 'hypermedia', chars: HYPERMEDIA_INSTRUCTION.length },
+        { id: 'pack', chars: PACK_INSTRUCTION(binary).length },
+        { id: 'learning', chars: LESSONS_INSTRUCTION(binary).length },
+      ],
+      mode: 'interactive',
+      questions: true,
+    });
+  });
+
+  it('should carry only the always-on sections, and withhold questions, for a launch with no mode and no switch exactly 1', () => {
+    // Arrange
+    const env = { [HYPERMEDIA_ENV]: '0', [PACK_ENV]: 'yes', [PASSIVE_LEARNING_ENV]: '' };
+
+    // Act
+    const launched = launchInstructions('fy', env);
+
+    // Assert
+    should(launched.sections.map(section => section.id)).deepEqual(['tools', 'settings']);
+    should(launched.mode).equal('auto');
+    should(launched.questions).be.false();
   });
 });

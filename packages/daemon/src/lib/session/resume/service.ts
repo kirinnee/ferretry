@@ -1,3 +1,4 @@
+import type { SessionLaunchInstructions } from '@ferretry/protocol';
 import type { SerialExecutor } from '../../ports.ts';
 import type { SessionId } from '../../session-id.ts';
 import {
@@ -225,8 +226,9 @@ export class SessionResumeService {
       turn: action.turn,
       ...(action.resetRetryAttempt ? { retryAttempt: 0 } : {}),
     });
+    let launchInstructions: SessionLaunchInstructions | undefined;
     try {
-      await this.ports.launcher.relaunch(target.id);
+      launchInstructions = await this.ports.launcher.relaunch(target.id);
       if (instruction !== undefined) await this.ports.launcher.deliver(target.id, instruction);
     } catch (error) {
       return await this.recover(starting, action, policy, error, attempt);
@@ -256,7 +258,7 @@ export class SessionResumeService {
         // would be told about a journal rather than about a warning that is still standing. The
         // session's status being stale is the smaller, self-correcting problem.
         await this.ports.repository
-          .transition(target.id, { event: 'session.resumed', status: 'running' })
+          .transition(target.id, { event: 'session.resumed', status: 'running', launchInstructions })
           .catch(() => undefined);
         throw new ResumeAcknowledgementFailed(target.id, { cause });
       }
@@ -264,6 +266,7 @@ export class SessionResumeService {
     const revived = await this.ports.repository.transition(target.id, {
       event: 'session.resumed',
       status: 'running',
+      launchInstructions,
       ...(action.clearNeedsHuman ? { clearNeedsHuman: true } : {}),
     });
     return { target: revived, disposition: 'revived' };
