@@ -344,7 +344,11 @@ export interface TranscriptFileCursor {
   readonly identity?: string;
   readonly byteOffset: number;
   readonly pendingBytes: number;
-  readonly nextLine: number;
+  /**
+   * The one-based line the next record starts on. Absent when the read began mid-file: counting the
+   * lines before it would mean reading every byte the window exists to skip.
+   */
+  readonly nextLine?: number;
 }
 
 export interface TranscriptBatch {
@@ -377,9 +381,49 @@ export interface TranscriptFollowOptions extends TranscriptReadOptions {
   readonly signal?: AbortSignal;
 }
 
+/**
+ * Where a window begins.
+ *
+ * `since` starts at a record boundary no later than the first record the harness stamped at or after
+ * `instant`, found by scanning back from the END of the file — so what it costs is the bytes written
+ * since then, never the file's size. `tail` starts on the first record boundary inside the last
+ * `bytes` of the file, for a question about what is happening NOW. `beginning` reads the whole file,
+ * one bounded step at a time.
+ */
+export type TranscriptWindowStart =
+  | { readonly at: 'beginning' }
+  | { readonly at: 'since'; readonly instant: string }
+  | { readonly at: 'tail'; readonly bytes: number };
+
+export interface TranscriptWindowOptions extends TranscriptReadOptions {
+  readonly start: TranscriptWindowStart;
+}
+
+/** One bounded step of a window: the records appended since the last step, if any. */
+export interface TranscriptWindowStep {
+  readonly batch?: TranscriptBatch;
+  /** True when the step stopped at its byte cap with bytes still unread, so another step is owed. */
+  readonly more: boolean;
+}
+
+/**
+ * An APPEND-ONLY, pull-based read of one file: it remembers its byte offset, and each step reads only
+ * what was appended since — at most one bounded read's worth, with a partial last line carried until
+ * its newline arrives. A replaced or truncated file restarts the window and says so (`batch.reset`).
+ *
+ * This is the read for a file that grows without limit. `read` answers "the whole conversation" and
+ * must stop at a cap; a consumer that only needs what happened after some moment — did a send land,
+ * what is the agent doing now — opens a window instead, and its cost is what was written since.
+ */
+export interface TranscriptWindow {
+  readonly file: string;
+  next(): Promise<TranscriptWindowStep>;
+}
+
 /** IO boundary implemented by transcript adapters. */
 export interface TranscriptSource {
   readonly harness: TranscriptHarness;
   read(file: string, options?: TranscriptReadOptions): Promise<TranscriptBatch>;
   follow(file: string, options?: TranscriptFollowOptions): AsyncIterable<TranscriptBatch>;
+  window(file: string, options: TranscriptWindowOptions): TranscriptWindow;
 }

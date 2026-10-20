@@ -27,6 +27,12 @@ export interface SendTrackerSettings {
   readonly busyExtensionMs: number;
   /** The ceiling on waiting behind a busy agent, after which a held send is reported unconfirmed. */
   readonly holdLimitMs: number;
+  /**
+   * How long a REPAIRABLE send is still looked for — one settled unconfirmed only because its
+   * transcript could not be read, or one a person cancelled — so a reading failure that has since been
+   * fixed corrects the rows it wrongly settled, without a send ever being watched for good.
+   */
+  readonly repairLimitMs: number;
   /** Harness and daemon clocks disagree slightly; a proof this far before acceptance still counts. */
   readonly matchSlackMs: number;
 }
@@ -40,12 +46,58 @@ export const defaultSendTrackerSettings: SendTrackerSettings = {
   },
   busyExtensionMs: 60_000,
   holdLimitMs: 2 * 60 * 60_000,
+  repairLimitMs: 3 * 24 * 60 * 60_000,
   matchSlackMs: 5_000,
 };
 
 /** Fates still being looked for. */
 export function isOpenSend(record: SendRecord): boolean {
   return (record.fate === 'accepted' || record.fate === 'queued') && record.held !== true;
+}
+
+/**
+ * A settled send the transcript may still prove delivered: one unconfirmed only because the
+ * transcript could not be read, or one a person cancelled — usually while it read as unconfirmed.
+ */
+export function isRepairableSend(record: SendRecord): boolean {
+  return (
+    record.fate === 'cancelled' ||
+    (record.fate === 'unaccounted' && record.unaccountedReason === 'transcript_unreadable')
+  );
+}
+
+/**
+ * Judges every watched send, CANCELLED ONES LAST AND ONLY BY WHAT CAME BEFORE THE CANCEL.
+ *
+ * A cancelled send is proven delivered only by a record written before the person cancelled it —
+ * then the cancel came too late, and the agent had it. A record written after is somebody's NEXT
+ * message, and judging the cancelled send first would let it take that record from the live send
+ * that is actually waiting for it.
+ */
+export function judgeWatchedSends(
+  watched: readonly SendRecord[],
+  claimed: ReadonlySet<string>,
+  inputs: readonly ObservedHumanInput[],
+  slackMs: number,
+): ReadonlyMap<string, SendVerdict> {
+  const live = watched.filter(record => record.fate !== 'cancelled');
+  const verdicts = new Map(judgeSends(live, claimed, inputs, slackMs));
+  const taken = new Set([
+    ...claimed,
+    ...[...verdicts.values()].flatMap(verdict => (verdict.delivered === undefined ? [] : [verdict.delivered.key])),
+  ]);
+  const cancelled = watched
+    .filter(record => record.fate === 'cancelled')
+    .sort((left, right) => Date.parse(left.acceptedAt) - Date.parse(right.acceptedAt));
+  for (const record of cancelled) {
+    const cancelledAt = Date.parse(record.fateAt ?? record.acceptedAt) + slackMs;
+    const before = inputs.filter(input => Date.parse(input.observedAt) <= cancelledAt);
+    const verdict = judgeSends([record], taken, before, slackMs).get(record.sendId);
+    if (verdict?.delivered === undefined) continue;
+    taken.add(verdict.delivered.key);
+    verdicts.set(record.sendId, verdict);
+  }
+  return verdicts;
 }
 
 /** The attempts the daemon makes for this sender before settling the send. */

@@ -83,4 +83,15 @@ describe('foreign harness history integration', () => {
     should(JSON.stringify(body)).not.containEql(root);
     await chmod(unreadable, 0o600);
   });
+
+  it('should size only a regular file, so a huge transcript is refused before it is read', async () => {
+    const directory = await temporaryDirectory();
+    const file = join(directory, 'big.jsonl');
+    await writeFile(file, claudeRecord('hello'));
+    const files = new NodeForeignHistoryFiles();
+
+    should(await files.size(file)).equal(claudeRecord('hello').length);
+    should(await files.size(directory)).be.undefined();
+    should(await files.size(join(directory, 'missing.jsonl'))).be.undefined();
+  });
 });

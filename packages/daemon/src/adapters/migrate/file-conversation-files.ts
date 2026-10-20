@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { chmod, copyFile, mkdir, open, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { chmod, copyFile, type FileHandle, mkdir, open, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
 import type { Harness } from '@ferretry/protocol';
 import type { ConversationFilesPort, PriorConversation } from '../../lib/migrate/conversation-carry.ts';
@@ -125,10 +125,39 @@ async function modified(file: string): Promise<number> {
     .catch(() => 0);
 }
 
-/** Whether a transcript names `needle`. A file that cannot be read names nothing. */
+/** How much of a transcript a search holds at once. */
+const MENTION_CHUNK_BYTES = 1024 * 1024;
+
+/**
+ * Whether a transcript names `needle`. A file that cannot be read names nothing.
+ *
+ * Searched a chunk at a time, never read whole: up to {@link NEWEST} transcripts are searched at once
+ * and one of them can be hundreds of megabytes, so a whole read of each was a repair that could take
+ * the daemon down. Each chunk keeps the previous one's last bytes, so a mention split across the
+ * boundary between two chunks is still found.
+ */
 async function mentions(file: string, needle: string): Promise<boolean> {
-  return await Bun.file(file)
-    .text()
-    .then(text => text.includes(needle))
-    .catch(() => false);
+  const wanted = Buffer.from(needle, 'utf8');
+  const handle = await open(file, 'r').catch(() => undefined);
+  if (handle === undefined) return false;
+  try {
+    return await search(handle, wanted).catch(() => false);
+  } finally {
+    await handle.close();
+  }
+}
+
+async function search(handle: FileHandle, wanted: Buffer): Promise<boolean> {
+  const chunk = Buffer.allocUnsafe(MENTION_CHUNK_BYTES + wanted.byteLength);
+  let carried = 0;
+  let position = 0;
+  for (;;) {
+    const { bytesRead } = await handle.read(chunk, carried, MENTION_CHUNK_BYTES, position);
+    const filled = carried + bytesRead;
+    if (chunk.subarray(0, filled).includes(wanted)) return true;
+    if (bytesRead === 0) return false;
+    carried = Math.min(wanted.byteLength, filled);
+    chunk.copy(chunk, 0, filled - carried, filled);
+    position += bytesRead;
+  }
 }

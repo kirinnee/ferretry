@@ -1,4 +1,4 @@
-import { watch as watchFileSystem, type FSWatcher } from 'node:fs';
+import { type FSWatcher, watch as watchFileSystem } from 'node:fs';
 import { open, stat } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import type {
@@ -11,6 +11,9 @@ import type {
   TranscriptParser,
   TranscriptReadOptions,
   TranscriptSource,
+  TranscriptWindow,
+  TranscriptWindowOptions,
+  TranscriptWindowStep,
 } from '../../lib/transcript/types.ts';
 
 const READ_CHUNK_BYTES = 64 * 1024;
@@ -34,15 +37,26 @@ export const DEFAULT_MAX_READ_BYTES = 32 * 1024 * 1024;
  */
 export const DEFAULT_MAX_PENDING_BYTES = 4 * 1024 * 1024;
 
+/**
+ * How far back from a file's end a `since` window may reach.
+ *
+ * A window's cost is what was written after its instant, so this is only met by an instant older
+ * than a quarter-gigabyte of transcript. It is bounded anyway because the instant comes from a
+ * caller and the file from an agent: the window is placed at the limit and says it was.
+ */
+export const DEFAULT_MAX_WINDOW_BYTES = 256 * 1024 * 1024;
+
 /** Caller-tunable read bounds; the defaults are the ones the daemon ships with. */
 export interface TranscriptReadLimits {
   readonly maxReadBytes?: number;
   readonly maxPendingBytes?: number;
+  readonly maxWindowBytes?: number;
 }
 
 interface ResolvedTranscriptReadLimits {
   readonly maxReadBytes: number;
   readonly maxPendingBytes: number;
+  readonly maxWindowBytes: number;
 }
 
 function resolveLimits(limits: TranscriptReadLimits = {}): ResolvedTranscriptReadLimits {
@@ -51,6 +65,7 @@ function resolveLimits(limits: TranscriptReadLimits = {}): ResolvedTranscriptRea
   return {
     maxReadBytes: positive(limits.maxReadBytes, DEFAULT_MAX_READ_BYTES),
     maxPendingBytes: positive(limits.maxPendingBytes, DEFAULT_MAX_PENDING_BYTES),
+    maxWindowBytes: positive(limits.maxWindowBytes, DEFAULT_MAX_WINDOW_BYTES),
   };
 }
 
@@ -241,7 +256,10 @@ interface FollowState {
    *  record's tail is never mistaken for a line of its own. */
   readonly skipToNewline: boolean;
   readonly anchor: Uint8Array;
+  /** Relative to where the cursor was placed when `linesUnknown`, so it is never reported then. */
   readonly nextLine: number;
+  /** Set when the cursor was placed mid-file, where no line number is known without a full scan. */
+  readonly linesUnknown?: true;
   readonly modifiedMs?: number;
 }
 
@@ -393,8 +411,15 @@ function cursorOf(state: FollowState): TranscriptFileCursor {
     identity: state.identity,
     byteOffset: state.byteOffset,
     pendingBytes: state.partial.byteLength,
-    nextLine: state.nextLine,
+    ...(state.linesUnknown === true ? {} : { nextLine: state.nextLine }),
   };
+}
+
+/** A line number counted from mid-file names some other line, so it is dropped rather than served. */
+function withoutLine<T extends { readonly line?: number }>(value: T): T {
+  if (value.line === undefined) return value;
+  const { line: _line, ...rest } = value;
+  return rest as T;
 }
 
 /**
@@ -415,14 +440,15 @@ function batchOf(
   observedInputs: TranscriptBatch['observedInputs'] = [],
   rawRecords?: TranscriptBatch['rawRecords'],
 ): TranscriptBatch {
+  const lines = state.linesUnknown !== true;
   return {
     harness: parser.harness,
     file,
     reset,
     cursor: cursorOf(state),
-    events,
+    events: lines ? events : events.map(withoutLine),
     observedInputs,
-    issues,
+    issues: lines ? issues : issues.map(withoutLine),
     ...(rawRecords === undefined ? {} : { rawRecords }),
   };
 }
@@ -725,6 +751,7 @@ async function reconcileFollow(
     skipToNewline: skipping || overflowed,
     anchor: advanceAnchor(base.anchor, appended),
     nextLine: base.nextLine + skippedLines + countLines(complete),
+    ...(base.linesUnknown === true ? { linesUnknown: true as const } : {}),
     modifiedMs: afterInfo.modifiedMs,
   };
   const issues = [...parsed.issues];
@@ -764,6 +791,197 @@ async function reconcileFollow(
   };
 }
 
+const SEEK_CHUNK_BYTES = 1024 * 1024;
+const TIMESTAMP_KEY = Buffer.from('"timestamp":"');
+/** The longest ISO instant a harness writes, with room to spare; anything longer is not one. */
+const TIMESTAMP_VALUE_BYTES = 40;
+
+/**
+ * The latest harness timestamp anywhere in `bytes`, or nothing when it holds none.
+ *
+ * Read off the raw bytes rather than parsed, because the scan exists to AVOID decoding what it skips.
+ * Both harnesses stamp their records with a top-level `"timestamp":"<ISO>"` — Claude at a record's
+ * end, Codex at its start — and the quote of a key inside a JSON string is escaped, so only a real
+ * key matches. A nested key with an older instant can only lower the answer for a chunk that is
+ * already old; a newer one only makes the scan go further back, which costs bytes and never records.
+ */
+function latestStamp(bytes: Uint8Array): number | undefined {
+  const buffer = Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  let latest: number | undefined;
+  let at = buffer.indexOf(TIMESTAMP_KEY);
+  while (at >= 0) {
+    const start = at + TIMESTAMP_KEY.byteLength;
+    const end = buffer.indexOf(0x22, start);
+    if (end < 0) break;
+    const instant = end - start <= TIMESTAMP_VALUE_BYTES ? Date.parse(buffer.toString('latin1', start, end)) : NaN;
+    if (Number.isFinite(instant) && (latest === undefined || instant > latest)) latest = instant;
+    at = buffer.indexOf(TIMESTAMP_KEY, end);
+  }
+  return latest;
+}
+
+/** The first record boundary at or after `from`, or `size` when no newline follows it. */
+async function boundaryFrom(runtime: TranscriptFileRuntime, file: string, from: number, size: number): Promise<number> {
+  let position = from;
+  while (position < size) {
+    const bytes = await runtime.readRange(file, position, Math.min(SEEK_CHUNK_BYTES, size - position));
+    if (bytes.byteLength === 0) break;
+    const feed = firstNewline(bytes);
+    if (feed >= 0) return position + feed + 1;
+    position += bytes.byteLength;
+  }
+  return size;
+}
+
+/**
+ * Where a `since` window starts: scanning BACK from the end, a chunk at a time, to the first chunk
+ * whose every harness timestamp is older than `since`, and starting on a record boundary inside it.
+ *
+ * Records are appended in time order, so everything after that boundary is either older (and harmless
+ * to read) or newer (and wanted). The scan reads what was written since `since` plus at most one
+ * chunk, and it never reaches past `limit` bytes from the end: a window that would have to is placed
+ * at the limit instead and reported `capped`, so a caller can say the older part was not read.
+ */
+async function seekSince(
+  runtime: TranscriptFileRuntime,
+  file: string,
+  size: number,
+  since: number,
+  limit: number,
+): Promise<{ readonly byteOffset: number; readonly capped: boolean }> {
+  const floor = Math.max(0, size - limit);
+  let end = size;
+  while (end > floor) {
+    const begin = Math.max(floor, end - SEEK_CHUNK_BYTES);
+    const bytes = await runtime.readRange(file, begin, end - begin);
+    const latest = latestStamp(bytes);
+    const feed = latest !== undefined && latest < since ? firstNewline(bytes) : -1;
+    if (feed >= 0) return { byteOffset: begin + feed + 1, capped: false };
+    end = begin;
+  }
+  if (floor === 0) return { byteOffset: 0, capped: false };
+  return { byteOffset: await boundaryFrom(runtime, file, floor, size), capped: true };
+}
+
+/** The pull-based window over one file; see `TranscriptWindow`. */
+class NodeTranscriptWindow implements TranscriptWindow {
+  private state: FollowState | undefined;
+  /** An issue placement owes the first batch, held until a step has a batch to carry it. */
+  private owed: TranscriptIssue | undefined;
+  private readonly observer: TranscriptInputObserver;
+
+  constructor(
+    private readonly parser: TranscriptParser,
+    private readonly runtime: TranscriptFileRuntime,
+    private readonly clock: TranscriptClock,
+    private readonly limits: ResolvedTranscriptReadLimits,
+    readonly file: string,
+    private readonly options: TranscriptWindowOptions,
+  ) {
+    this.observer = parser.createInputObserver();
+  }
+
+  async next(): Promise<TranscriptWindowStep> {
+    if (this.state === undefined) {
+      const placed = await this.place();
+      if (placed !== undefined) return { batch: placed, more: false };
+    }
+    const reconciled = await reconcileFollow(
+      this.parser,
+      this.runtime,
+      this.file,
+      this.options,
+      this.state as FollowState,
+      this.observer,
+      this.clock,
+      this.limits,
+    );
+    this.state = reconciled.state;
+    const owed = this.owed;
+    this.owed = undefined;
+    const batch =
+      owed === undefined
+        ? reconciled.batch
+        : reconciled.batch === undefined
+          ? batchOf(this.parser, this.file, reconciled.state, false, [], [owed])
+          : { ...reconciled.batch, issues: [owed, ...reconciled.batch.issues] };
+    return { ...(batch === undefined ? {} : { batch }), more: reconciled.more === true };
+  }
+
+  /**
+   * Puts the cursor where the window starts, or answers with why it cannot be placed yet.
+   *
+   * A window that cannot be placed stays unplaced, so the next step tries again: falling back to the
+   * beginning would read the very bytes the window exists to skip.
+   */
+  private async place(): Promise<TranscriptBatch | undefined> {
+    const start = this.options.start;
+    const since = start.at === 'since' ? Date.parse(start.instant) : NaN;
+    const tail = start.at === 'tail' && Number.isFinite(start.bytes) ? Math.max(0, Math.floor(start.bytes)) : NaN;
+    if (!Number.isFinite(since) && !Number.isFinite(tail)) {
+      this.state = unpositionedState({ initialized: false, availability: 'unknown' });
+      return undefined;
+    }
+    const failed = (message: string): TranscriptBatch =>
+      batchOf(
+        this.parser,
+        this.file,
+        unpositionedState(),
+        false,
+        [],
+        [sourceIssue(this.parser, this.file, 'source-read-failed', message)],
+      );
+    let info: TranscriptFileInfo | undefined;
+    try {
+      info = await this.runtime.info(this.file);
+    } catch {
+      return failed('transcript file metadata could not be read');
+    }
+    if (info === undefined)
+      return missingResult(this.parser, this.file, unpositionedState({ initialized: false, availability: 'unknown' }))
+        .batch;
+    if (!info.isFile) return failed('transcript source is not a regular file');
+    let seek: { readonly byteOffset: number; readonly capped: boolean };
+    let anchor: Uint8Array;
+    try {
+      seek = Number.isFinite(tail)
+        ? {
+            // One byte early, so a window that lands exactly on a boundary keeps the record starting there.
+            byteOffset:
+              info.size <= tail ? 0 : await boundaryFrom(this.runtime, this.file, info.size - tail - 1, info.size),
+            capped: false,
+          }
+        : await seekSince(this.runtime, this.file, info.size, since, this.limits.maxWindowBytes);
+      anchor = await readAnchor(this.runtime, this.file, seek.byteOffset);
+    } catch {
+      return failed('transcript window could not be placed');
+    }
+    this.state = {
+      initialized: true,
+      seekToEnd: false,
+      positioned: true,
+      availability: 'present',
+      identity: info.identity,
+      byteOffset: seek.byteOffset,
+      partial: new Uint8Array(),
+      skipToNewline: false,
+      anchor,
+      nextLine: 1,
+      ...(seek.byteOffset === 0 ? {} : { linesUnknown: true as const }),
+      modifiedMs: info.modifiedMs,
+    };
+    if (seek.capped)
+      this.owed = sourceIssue(
+        this.parser,
+        this.file,
+        'source-truncated',
+        'transcript window reached its byte limit before the requested instant',
+        { byteOffset: 0, byteLength: seek.byteOffset },
+      );
+    return undefined;
+  }
+}
+
 /** Exact-path reader and live follower; harness behavior is supplied only through `TranscriptParser`. */
 export class NodeTranscriptSource implements TranscriptSource {
   readonly harness: TranscriptParser['harness'];
@@ -781,6 +999,10 @@ export class NodeTranscriptSource implements TranscriptSource {
 
   async read(file: string, options: TranscriptReadOptions = {}): Promise<TranscriptBatch> {
     return await this.readConsistent(file, options, true, this.parser.createInputObserver());
+  }
+
+  window(file: string, options: TranscriptWindowOptions): TranscriptWindow {
+    return new NodeTranscriptWindow(this.parser, this.runtime, this.clock, this.limits, file, options);
   }
 
   private async readConsistent(

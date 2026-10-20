@@ -11,7 +11,12 @@ class FixtureFiles implements ForeignHistoryFiles {
   constructor(
     private readonly tree: Readonly<Record<string, readonly ForeignHistoryEntry[]>>,
     private readonly texts: Readonly<Record<string, string>>,
+    private readonly sizes: Readonly<Record<string, number>> = {},
   ) {}
+
+  async size(file: string): Promise<number | undefined> {
+    return this.sizes[file] ?? this.texts[file]?.length;
+  }
 
   async entries(directory: string): Promise<readonly ForeignHistoryEntry[]> {
     return this.tree[directory] ?? [];
@@ -141,5 +146,36 @@ describe('ForeignHistoryImporter', () => {
     );
 
     await expect(history.list()).resolves.toEqual({ conversations: [], skipped: [] });
+  });
+
+  test('skips a transcript too large to read whole, says how large, and never reads it', async () => {
+    const source = `${CLAUDE_ROOT}/project/adopted.jsonl`;
+    const unreadable = `${CLAUDE_ROOT}/project/vanished.jsonl`;
+    const files = new FixtureFiles(
+      {
+        [CLAUDE_ROOT]: [{ name: 'project', kind: 'directory' }],
+        [`${CLAUDE_ROOT}/project`]: [
+          { name: 'adopted.jsonl', kind: 'file' },
+          { name: 'vanished.jsonl', kind: 'file' },
+        ],
+      },
+      { [source]: validClaude },
+      { [source]: 200 * 1024 * 1024 },
+    );
+    const read: string[] = [];
+    const text = files.text.bind(files);
+    files.text = async file => {
+      read.push(file);
+      return await text(file);
+    };
+
+    await expect(importer(files).list()).resolves.toEqual({
+      conversations: [],
+      skipped: [
+        { harness: 'claude', source, reason: 'the transcript is 200 MB, more than the 32 MB a history listing reads' },
+        { harness: 'claude', source: unreadable, reason: 'the transcript could not be read' },
+      ],
+    });
+    expect(read).toEqual([]);
   });
 });

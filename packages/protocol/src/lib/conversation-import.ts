@@ -60,6 +60,11 @@ export const ImportableConversationSchema = z.strictObject({
   lastActivityAt: InstantSchema,
   /** How many times the owner spoke. */
   turns: z.number().int().nonnegative(),
+  /**
+   * Set when the conversation was too large for a listing to read whole: it was described from its
+   * first and last few megabytes, so `turns` counts only the messages there and is a LOWER BOUND.
+   */
+  turnsAtLeast: z.literal(true).optional(),
   model: z.string().min(1).optional(),
   /** The Ferretry session that already owns this conversation; such a row cannot be picked again. */
   adoptedBy: z.string().min(1).optional(),

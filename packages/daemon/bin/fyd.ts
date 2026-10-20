@@ -23,6 +23,7 @@ import {
   hostCodexCredentialFile,
   hostCodexHome,
   InMemoryCredentialStatusStore,
+  type ModelCatalog,
   manifestRuntimes,
   PACK_ENV,
   PASSIVE_LEARNING_ENV,
@@ -30,7 +31,6 @@ import {
   runtimeIdsPath,
   sanitizeHarnessEnv,
   sharedHistoryPoolDirectory,
-  type ModelCatalog,
   wrapperNameOf,
 } from '@ferretry/fleet';
 import {
@@ -515,6 +515,7 @@ import {
   directCarrierSocketRoute,
   doneMarkerCertifiesTurn,
   type ExecutableResolverPort,
+  effectiveAnalyticsPricing,
   exactWorkerAssignee,
   FixedSettingsUnreadableError,
   FleetEventStreamService,
@@ -538,8 +539,8 @@ import {
   type HarnessDiscoveryPolicy,
   type HarnessPreflight,
   HarnessQuirkService,
-  type HarnessVersionPort,
   HarnessUpdateService,
+  type HarnessVersionPort,
   HOSTED_APP_ORIGIN,
   handoffFolders,
   handoffPointerPaths,
@@ -570,15 +571,14 @@ import {
   type ManagedWorktreeRegistry,
   ManagedWorktreeService,
   McpOAuthService,
-  effectiveAnalyticsPricing,
   MigrationPreflight,
   type MigrationReportStore,
   type MillisecondClockPort,
   ModelCatalogService,
-  modelCatalogPricingRates,
   type MountedSubsystems,
   mayTrustDirectLoopback,
   messageWithAttachments,
+  modelCatalogPricingRates,
   modelCatalogsView,
   type NameAllocationErrorCode,
   type NameAllocationRequest,
@@ -780,6 +780,7 @@ import {
   TranscriptSendEvidence,
   type TranscriptSource,
   type TriageGuardPort,
+  tailTranscriptEvents,
   taskBoardTaskActionAuthorizer,
   temporaryFilePath,
   transcriptKey,
@@ -824,8 +825,8 @@ import {
   LeaseClaimingLaunchWrapper,
   LeaseReleasingSessionExits,
 } from '../src/lib/session/conversation-lease.ts';
-import { sessionTmuxName } from '../src/lib/session/lifecycle/policy.ts';
 import { LaunchEnvironmentStore, type LaunchSwitchDefaults } from '../src/lib/session/lifecycle/launch-environment.ts';
+import { sessionTmuxName } from '../src/lib/session/lifecycle/policy.ts';
 import { SessionPackService } from '../src/lib/session/pack/index.ts';
 import { knownProjectRoots } from '../src/lib/session-mcp/service.ts';
 import {
@@ -6633,9 +6634,10 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         const harness = config.data.harness === 'codex' ? 'codex' : 'claude';
         const source = transcriptSources.find(candidate => candidate.harness === harness);
         if (source === undefined) return { kind: 'unreadable' };
-        const batch = await source.read(file, { sessionId }).catch(() => undefined);
-        if (batch === undefined) return { kind: 'unreadable' };
-        return { kind: 'read', events: batch.events.slice(-limit) };
+        // Read from the END: a tail of a capped read from byte zero described an old moment as now.
+        const events = await tailTranscriptEvents(source, file, sessionId, limit).catch(() => undefined);
+        if (events === undefined) return { kind: 'unreadable' };
+        return { kind: 'read', events };
       },
     };
   };

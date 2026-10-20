@@ -1,4 +1,4 @@
-import { readdir } from 'node:fs/promises';
+import { readdir, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { ForeignHistoryEntry, ForeignHistoryFiles, ForeignHistoryRoots } from '../../lib/imports/index.ts';
 
@@ -11,6 +11,11 @@ export class NodeForeignHistoryFiles implements ForeignHistoryFiles {
       // A symlink is intentionally `other`: foreign history discovery never follows it.
       kind: entry.isDirectory() ? 'directory' : entry.isFile() ? 'file' : 'other',
     }));
+  }
+
+  async size(file: string): Promise<number | undefined> {
+    const details = await stat(file).catch(() => undefined);
+    return details?.isFile() === true ? details.size : undefined;
   }
 
   async text(file: string): Promise<string | undefined> {

@@ -1,15 +1,21 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
 import {
+  DEFAULT_TRANSCRIPT_TAIL_BYTES,
+  drainTranscriptWindow,
   SessionTranscriptReader,
   type TranscriptDigestJournal,
   type TranscriptFileResolver,
+  tailTranscriptEvents,
 } from '../../../../src/lib/session/transcript/index.ts';
 import type {
   TranscriptBatch,
   TranscriptEvent,
   TranscriptHarness,
   TranscriptSource,
+  TranscriptWindow,
+  TranscriptWindowStart,
+  TranscriptWindowStep,
 } from '../../../../src/lib/transcript/types.ts';
 
 const event = (id: string): TranscriptEvent => ({
@@ -29,11 +35,31 @@ const batch = (file: string, events: readonly TranscriptEvent[]): TranscriptBatc
   issues: [],
 });
 
-const source = (harness: TranscriptHarness, read: (file: string) => Promise<TranscriptBatch>): TranscriptSource => ({
+/**
+ * A source over `read`: its window answers the whole read as one step, which is what a window over a
+ * small file is, and records where each window was asked to start.
+ */
+const source = (
+  harness: TranscriptHarness,
+  read: (file: string) => Promise<TranscriptBatch>,
+  starts: TranscriptWindowStart[] = [],
+): TranscriptSource => ({
   harness,
   read: async file => await read(file),
   follow: () => {
     throw new Error('the reader never follows');
+  },
+  window: (file, options) => {
+    starts.push(options.start);
+    let read$ = false;
+    return {
+      file,
+      next: async () => {
+        if (read$) return { more: false };
+        read$ = true;
+        return { batch: await read(file), more: false };
+      },
+    };
   },
 });
 
@@ -310,5 +336,123 @@ describe('SessionTranscriptReader', () => {
     await should(
       withoutTranscript.digest({ sessionId: 'session-1', harness: 'claude' }, { v: 1, byteOffset: 0, blockIndex: 0 }),
     ).be.rejected();
+  });
+});
+
+/** A window answering from a script of steps, then nothing new. */
+const scripted = (steps: readonly TranscriptWindowStep[]): TranscriptWindow & { taken: number } => {
+  const remaining = [...steps];
+  return {
+    file: '/t.jsonl',
+    taken: 0,
+    async next() {
+      this.taken += 1;
+      return remaining.shift() ?? { more: false };
+    },
+  };
+};
+
+const stepOf = (events: readonly TranscriptEvent[], more: boolean, reset = false): TranscriptWindowStep => ({
+  batch: { ...batch('/t.jsonl', events), reset },
+  more,
+});
+
+describe('reading a transcript from its end', () => {
+  it('should ask for the tail of the file, not a read from its first byte', async () => {
+    // Arrange
+    const starts: TranscriptWindowStart[] = [];
+    const subject = new SessionTranscriptReader(
+      [source('claude', async file => batch(file, [event('tool-1')]), starts)],
+      resolving('/h/big.jsonl'),
+    );
+
+    // Act
+    await subject.tail({ sessionId: 'session-1', harness: 'claude' });
+
+    // Assert
+    should(starts).eql([{ at: 'tail', bytes: DEFAULT_TRANSCRIPT_TAIL_BYTES }]);
+  });
+
+  it('should keep only the newest events across steps, and forget a file that restarted', async () => {
+    // Arrange
+    const many = Array.from({ length: 5 }, (_, index) => event(`tool-${String(index)}`));
+    const window = scripted([stepOf(many.slice(0, 3), true), stepOf(many.slice(3), false)]);
+    const restarting = scripted([stepOf(many.slice(0, 3), true), stepOf(many.slice(4), false, true)]);
+    const tailOf = (held: TranscriptWindow): TranscriptSource => ({
+      ...source('claude', async () => batch('/t', [])),
+      window: () => held,
+    });
+
+    // Act
+    const newest = await tailTranscriptEvents(tailOf(window), '/t.jsonl', 'session-1', 2);
+    const restarted = await tailTranscriptEvents(tailOf(restarting), '/t.jsonl', 'session-1');
+
+    // Assert
+    should(newest.map(each => (each.kind === 'tool-call' ? each.call.id : ''))).eql(['tool-3', 'tool-4']);
+    should(restarted.map(each => (each.kind === 'tool-call' ? each.call.id : ''))).eql(['tool-4']);
+  });
+
+  it('should stop a window that never reaches the end of a file growing faster than it reads', async () => {
+    // Arrange
+    const endless = {
+      file: '/t.jsonl',
+      taken: 0,
+      async next(): Promise<TranscriptWindowStep> {
+        this.taken += 1;
+        return { more: true };
+      },
+    };
+    const visited: TranscriptBatch[] = [];
+    const finite = scripted([stepOf([event('a')], true), { more: false }]);
+
+    // Act
+    const tailed = await tailTranscriptEvents(
+      { ...source('claude', async () => batch('/t', [])), window: () => endless },
+      '/t.jsonl',
+      'session-1',
+    );
+    const reachedEnd = await drainTranscriptWindow(finite, each => void visited.push(each));
+    const stopped = await drainTranscriptWindow(endless, () => undefined);
+
+    // Assert
+    should(tailed).eql([]);
+    should(endless.taken).equal(128);
+    should(reachedEnd).be.true();
+    should(visited).have.length(1);
+    should(stopped).be.false();
+  });
+
+  it('should open a window on the resolved file, and nothing when it cannot name the file or speak its harness', async () => {
+    // Arrange
+    const starts: TranscriptWindowStart[] = [];
+    const named = new SessionTranscriptReader(
+      [source('claude', async file => batch(file, []), starts)],
+      resolving('/h/a.jsonl'),
+    );
+    const unnamed = new SessionTranscriptReader(
+      [source('claude', async file => batch(file, []))],
+      resolving(undefined),
+    );
+    const failing = new SessionTranscriptReader([source('claude', async file => batch(file, []))], {
+      file: async () => {
+        throw new Error('home unmounted');
+      },
+    });
+    const target = { sessionId: 'session-1', harness: 'claude' as const };
+
+    // Act
+    const window = await named.window(target, { at: 'since', instant: '2026-10-20T12:00:00.000Z' });
+    const file = await named.file(target);
+    const sourceless = await named.window({ ...target, harness: 'codex' }, { at: 'beginning' });
+    const nameless = await unnamed.window(target, { at: 'beginning' });
+    const failed = await failing.file(target);
+
+    // Assert
+    should(window?.file).equal('/h/a.jsonl');
+    should(starts).eql([{ at: 'since', instant: '2026-10-20T12:00:00.000Z' }]);
+    should(file).equal('/h/a.jsonl');
+    should(sourceless).be.undefined();
+    should(nameless).be.undefined();
+    should(failed).be.undefined();
   });
 });

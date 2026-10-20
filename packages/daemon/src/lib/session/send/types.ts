@@ -286,8 +286,8 @@ export interface SendLedger {
   list(id: SessionId): Promise<readonly SendRecord[]>;
   /**
    * Appends a new snapshot of an existing send with `patch` applied — a proven fate, a re-attempt, an
-   * extended deadline. A field set to `undefined` is cleared. A withdrawn or cancelled send is never
-   * settled.
+   * extended deadline. A field set to `undefined` is cleared. A withdrawn send is never settled, and a
+   * cancelled one only by proof it was delivered before the cancel.
    */
   settle(id: SessionId, sendId: string, patch: SendSettlement): Promise<SendRecord | undefined>;
 }

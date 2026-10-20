@@ -10,6 +10,8 @@ import { transcriptName } from '../../../src/lib/imports/conversation-name.ts';
 import {
   adoptedConversationFile,
   adoptedTranscriptProvenance,
+  CONVERSATION_HEAD_READ_MAX_BYTES,
+  CONVERSATION_TAIL_READ_MAX_BYTES,
   type ConversationAdopter,
   type ConversationAdoption,
   type ConversationFileEntry,
@@ -97,7 +99,8 @@ class FakeFiles implements ConversationFiles {
       : undefined;
   }
 
-  async text(file: string): Promise<string | undefined> {
+  /** A transcript read, counted apart from the hand-off documents `heads` records. */
+  private transcript(file: string): string | undefined {
     this.reads += 1;
     const node = this.node(file);
     return typeof node === 'string' && !node.startsWith('UNREADABLE') ? node : undefined;
@@ -106,12 +109,17 @@ class FakeFiles implements ConversationFiles {
   readonly heads: { readonly file: string; readonly maxBytes: number }[] = [];
 
   async head(file: string, maxBytes: number): Promise<string | undefined> {
+    if (file.endsWith('.jsonl')) return this.transcript(file)?.slice(0, maxBytes);
     this.heads.push({ file, maxBytes });
     const node = this.node(file);
     return typeof node === 'string' ? node.slice(0, maxBytes) : undefined;
   }
 
   async tail(file: string, maxBytes: number): Promise<string | undefined> {
+    if (file.endsWith('.jsonl') && !file.endsWith('session_index.jsonl')) {
+      const text = this.transcript(file);
+      return text?.slice(Math.max(0, text.length - maxBytes));
+    }
     const node = this.node(file);
     return typeof node === 'string' ? node.slice(Math.max(0, node.length - maxBytes)) : undefined;
   }
@@ -585,11 +593,20 @@ describe('where a listing reads and what its rows say', () => {
     const files = new FakeFiles(unreadable);
     const subjectService = service(files);
     await subjectService.list();
-    files.text = async () => undefined;
+    files.head = async () => undefined;
+    const gone = new FakeFiles(unreadable);
+    const goneService = service(gone);
+    await goneService.list();
+    const real = gone.info.bind(gone);
+    let looks = 0;
+    // Seen by the listing the preview runs, then gone by the time the preview reads it.
+    gone.info = async file => (looks++ === 0 ? await real(file) : undefined);
 
     // Act & Assert
     should(await subjectService.preview('claude', 'missing')).be.undefined();
     should(await subjectService.preview('claude', POINTED)).be.undefined();
+    // Listed, then gone before it was previewed.
+    should(await goneService.preview('claude', POINTED)).be.undefined();
   });
 });
 
@@ -869,5 +886,101 @@ describe('conversations wrapped by a harness or by Ferretry', () => {
 
     // Assert
     should(row).containDeep({ preview: 'Rename the product grid component', turns: 1 });
+  });
+});
+
+describe('a conversation too large to read whole', () => {
+  const ADOPTED = '55555555-5555-4555-8555-555555555555';
+  const said = (text: string, at: string): string => claude(text, at, { sessionId: ADOPTED, cwd: '/work/adopted' });
+  /** Owner messages nobody reads: the middle of a 9 MB transcript. */
+  const middle = Array.from({ length: 900 }, (_, index) =>
+    said(`middle ${String(index)} ${'x'.repeat(10_000)}`, '2026-10-19T08:00:00.000Z'),
+  );
+  const transcript = [
+    said('Start the migration', '2026-10-01T08:00:00.000Z'),
+    ...middle,
+    said('hi', '2026-10-20T15:00:00.000Z'),
+    claudeReply('2026-10-20T15:00:05.000Z'),
+  ].join('\n');
+  const big: Tree = { pool: { claude: { projects: { '-work-adopted': { [`${ADOPTED}.jsonl`]: transcript } } } } };
+
+  it('should describe it from its two ends, and say its turn count is only a floor', async () => {
+    // Arrange
+    const files = new FakeFiles(big);
+    const reads: number[] = [];
+    const head = files.head.bind(files);
+    const tail = files.tail.bind(files);
+    files.head = async (file, maxBytes) => {
+      reads.push(maxBytes);
+      return await head(file, maxBytes);
+    };
+    files.tail = async (file, maxBytes) => {
+      reads.push(maxBytes);
+      return await tail(file, maxBytes);
+    };
+
+    // Act
+    const listing = await subject(new Map(), new RecordingAdopter(), files).list({ source: 'ferretry' });
+    const preview = await subject(new Map(), new RecordingAdopter(), files).preview('claude', ADOPTED);
+
+    // Assert
+    const row = listing.conversations[0];
+    should(transcript.length).be.above(CONVERSATION_HEAD_READ_MAX_BYTES + CONVERSATION_TAIL_READ_MAX_BYTES);
+    should(row).containDeep({
+      id: ADOPTED,
+      project: '/work/adopted',
+      preview: 'Start the migration',
+      latest: 'hi',
+      lastActivityAt: '2026-10-20T15:00:05.000Z',
+      model: 'claude-sonnet-4-5',
+      turnsAtLeast: true,
+    });
+    should(row?.turns).be.below(900);
+    should(reads.every(bytes => bytes <= CONVERSATION_HEAD_READ_MAX_BYTES)).be.true();
+    should(preview?.messages.at(-1)?.text).equal('Done.');
+  });
+
+  it('should drop the pieces of records each end cuts through, even an end with no record boundary', async () => {
+    // Arrange: a tail that is one enormous unfinished record, which no part of may be parsed.
+    const files = new FakeFiles({
+      pool: {
+        claude: {
+          projects: { '-work-adopted': { [`${ADOPTED}.jsonl`]: `${transcript}\n${'y'.repeat(5 * 1024 * 1024)}` } },
+        },
+      },
+    });
+
+    // Act
+    const listing = await subject(new Map(), new RecordingAdopter(), files).list({ source: 'ferretry' });
+
+    // Assert
+    should(listing.conversations[0]).containDeep({ preview: 'Start the migration', turnsAtLeast: true });
+    // What the head did read is all it can say; nothing of the unfinished record is a message.
+    should(listing.conversations[0]?.latest).startWith('middle ');
+    should(JSON.stringify(listing)).not.containEql('yyyy');
+  });
+
+  it('should read a small conversation whole and claim an exact count', async () => {
+    // Arrange
+    const files = new FakeFiles({
+      pool: {
+        claude: {
+          projects: {
+            '-work-adopted': {
+              [`${ADOPTED}.jsonl`]: [said('a', '2026-10-01T08:00:00.000Z'), said('b', '2026-10-01T08:01:00.000Z')].join(
+                '\n',
+              ),
+            },
+          },
+        },
+      },
+    });
+
+    // Act
+    const listing = await subject(new Map(), new RecordingAdopter(), files).list({ source: 'ferretry' });
+
+    // Assert
+    should(listing.conversations[0]).containDeep({ turns: 2 });
+    should(listing.conversations[0]?.turnsAtLeast).be.undefined();
   });
 });

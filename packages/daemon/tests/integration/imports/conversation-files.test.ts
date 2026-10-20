@@ -134,7 +134,7 @@ describe('discovering conversations on disk', () => {
     // Act & Assert
     should(await files.info(join(home, 'missing.jsonl'))).be.undefined();
     should(await files.info(join(home, '.claude'))).be.undefined();
-    should(await files.text(join(home, 'missing.jsonl'))).be.undefined();
+    should(await files.tail(join(home, 'missing.jsonl'), 5)).be.undefined();
     should(await files.entries(join(home, 'missing'))).deepEqual([]);
   });
 

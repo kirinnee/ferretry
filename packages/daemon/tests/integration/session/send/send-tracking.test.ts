@@ -160,6 +160,8 @@ class Rig {
     [SENDER, { id: SENDER, status: 'running', mode: 'auto', turn: 1, teammate: 'hadi' }],
   ]);
   readable = true;
+  /** Whether the reader sees the records at all — false is a read that saw nothing, not a partial one. */
+  visible = true;
   refuseRevive = false;
   readonly ledger: FileSendLedger;
   readonly service: SessionSendService;
@@ -244,7 +246,7 @@ class Rig {
                 : new ClaudeObservedInputObserver();
             return {
               readable: this.readable,
-              inputs: harness.transcript.flatMap((record, index) =>
+              inputs: (this.visible ? harness.transcript : []).flatMap((record, index) =>
                 observer.observe(record, { source: `/${id}.jsonl`, byteOffset: index, byteLength: 1 }),
               ),
             };
@@ -343,6 +345,7 @@ describe('a send that never arrived', () => {
   it('is unconfirmed, with its reason, when the transcript cannot be read — and never silently retyped', async () => {
     const subject = await rig('codex');
     subject.readable = false;
+    subject.visible = false;
 
     await subject.service.send({ id: ID, sendId: 'send-1', message: 'run the tests' });
     const record = await subject.at(60_000);
@@ -353,6 +356,80 @@ describe('a send that never arrived', () => {
     should(record).match({ fate: 'unaccounted', unaccountedReason: 'transcript_unreadable' });
     should(refused).match(/send it again anyway/);
     should(subject.harness.typed).have.length(1);
+  });
+});
+
+describe('a send to a conversation too large to read whole — an adopted one', () => {
+  it('is confirmed by the record it landed as, though absence could not be proven', async () => {
+    const subject = await rig('claude');
+    // What a capped read of a 200 MB transcript was: unable to prove absence, and blind to the end.
+    // A window from the send sees the end, so the record the send became is in hand.
+    subject.readable = false;
+
+    await subject.service.send({ id: ID, sendId: 'send-1', message: 'hi' });
+    const record = await subject.at(2_000);
+
+    should(record).match({ fate: 'delivered', evidence: { tier: 'exact-text' } });
+    should(subject.harness.typed).eql(['hi']);
+  });
+
+  it('corrects a send it settled unconfirmed once the transcript can be read, for days but not for ever', async () => {
+    const subject = await rig('claude');
+    subject.readable = false;
+    subject.visible = false;
+    await subject.service.send({ id: ID, sendId: 'send-1', message: 'run the tests' });
+    const unconfirmed = await subject.at(60_000);
+    subject.readable = true;
+    subject.visible = true;
+    // Past the ordinary two-hour watch on unconfirmed sends: this one failed only because of the read.
+    const repaired = await subject.at(3 * 60 * 60_000);
+
+    const late = await rig('claude');
+    late.readable = false;
+    late.visible = false;
+    await late.service.send({ id: ID, sendId: 'send-1', message: 'run the tests' });
+    await late.at(60_000);
+    late.visible = true;
+    const abandoned = await late.at(4 * 24 * 60 * 60_000);
+
+    should(unconfirmed).match({ fate: 'unaccounted', unaccountedReason: 'transcript_unreadable' });
+    should(repaired).match({ fate: 'delivered', evidence: { tier: 'exact-text' } });
+    should(repaired.unaccountedReason).be.undefined();
+    should(abandoned.fate).equal('unaccounted');
+  });
+
+  it('says a send a person cancelled was delivered when the agent had it before the cancel', async () => {
+    const subject = await rig('claude');
+    subject.readable = false;
+    subject.visible = false;
+    await subject.service.send({ id: ID, sendId: 'send-1', message: 'hi' });
+    await subject.at(60_000);
+    const cancelled = await subject.service.cancel(ID, 'send-1');
+    subject.visible = true;
+    const corrected = await subject.at(120_000);
+
+    should(cancelled).match({ fate: 'cancelled', cancelEffect: 'not_in_pane' });
+    should(corrected).match({ fate: 'delivered' });
+    should(corrected.cancelEffect).be.undefined();
+  });
+
+  it('never lets a cancelled send take the record of the message sent after it', async () => {
+    const subject = await rig('claude');
+    subject.readable = false;
+    subject.visible = false;
+    subject.harness.drops = true;
+    await subject.service.send({ id: ID, sendId: 'send-1', message: 'run the tests' });
+    await subject.at(60_000);
+    await subject.service.cancel(ID, 'send-1');
+    subject.readable = true;
+    subject.visible = true;
+    subject.harness.drops = false;
+    subject.nowMs = T0 + 70_000;
+    await subject.service.send({ id: ID, sendId: 'send-2', message: 'run the tests' });
+    await subject.at(80_000);
+
+    should(await subject.record('send-1')).match({ fate: 'cancelled' });
+    should(await subject.record('send-2')).match({ fate: 'delivered' });
   });
 });
 

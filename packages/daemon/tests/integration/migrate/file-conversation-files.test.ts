@@ -1,5 +1,5 @@
 import { afterEach, describe, it } from 'bun:test';
-import { mkdir, readdir, readFile, stat, utimes, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, readdir, readFile, stat, utimes, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import should from 'should';
 import { FileConversationFiles } from '../../../src/adapters/migrate/file-conversation-files.ts';
@@ -78,6 +78,30 @@ describe('FileConversationFiles', () => {
     should(found[1]).have.property('file', join(folder, 'real.jsonl'));
     should(found[1]?.modifiedMs).equal(1_800_000_000_000);
     should(none).deepEqual([]);
+  });
+
+  it('should find a mention in a transcript larger than one search chunk, split across two chunks or not', async () => {
+    // Arrange: the session's name straddles the first 1 MiB boundary in one file, and is absent from
+    // another of the same size, so both are searched a chunk at a time rather than read whole.
+    const home = await tempDirectory('conversation-prior-large');
+    const folder = join(home, 'projects', '-work-repo');
+    const cut = 1024 * 1024 - Math.floor(SESSION.length / 2);
+    await put(join(folder, 'split.jsonl'), `${'a'.repeat(cut)}${SESSION}${'b'.repeat(2 * 1024 * 1024)}`, 1_800_000_000);
+    await put(join(folder, 'absent.jsonl'), 'c'.repeat(3 * 1024 * 1024), 1_800_000_100);
+    await put(join(folder, 'sealed.jsonl'), SESSION, 1_800_000_200);
+    await chmod(join(folder, 'sealed.jsonl'), 0o000);
+    const subject = new FileConversationFiles(new NodeCodexRolloutIndex());
+
+    // Act
+    const found = await subject.prior('claude', home, '/work/repo', SESSION);
+    await chmod(join(folder, 'sealed.jsonl'), 0o600);
+
+    // Assert: a file it cannot open names nothing.
+    should(found.map(entry => [entry.id, entry.mentionsSession])).deepEqual([
+      ['sealed', false],
+      ['absent', false],
+      ['split', true],
+    ]);
   });
 
   it('should list Codex rollouts with whether each was correlated to the session', async () => {
