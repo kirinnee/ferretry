@@ -62,6 +62,8 @@ export const SttEnhancementResultSchema = z.object({
   latencyMs: NonNegativeFiniteSchema,
   /** Present when the daemon refused the model's reply and returned the transcript untouched. */
   kept: z.literal('raw').optional(),
+  /** Why: one short sentence naming the guard rule that fired; never any of the text. */
+  keptReason: z.string().max(240).optional(),
 });
 export type SttEnhancementResult = z.infer<typeof SttEnhancementResultSchema>;
 

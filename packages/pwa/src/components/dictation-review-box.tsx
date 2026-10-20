@@ -25,6 +25,13 @@ import type { DictationReview } from '../hooks/use-dictation.ts';
 import { cn } from '../lib/class-names.ts';
 import { Button } from '../shell/primitives.tsx';
 
+/** The daemon words a reason in lower case without a stop; the box reads it as a sentence. */
+const asSentence = (message: string): string => {
+  const text = message.trim();
+  const sentence = `${text.charAt(0).toUpperCase()}${text.slice(1)}`;
+  return /[.!?]$/u.test(sentence) ? sentence : `${sentence}.`;
+};
+
 export type ReviewKeyAction = 'insert' | 'discard';
 
 export interface ReviewKeyEvent {
@@ -102,7 +109,7 @@ export function DictationReviewBox({ review, onInsert, onDiscard, onRetry }: Dic
     <div className="flex w-full min-w-0 flex-col gap-1 px-2 py-1.5">
       {review.enhancementError ? (
         <p role="status" data-review-notice="cleanup-failed" className="m-0 text-meta leading-base text-warn">
-          Cleanup failed, so this is the raw transcript. {review.enhancementError.message}
+          Cleanup failed, so this is the raw transcript. {asSentence(review.enhancementError.message)}
         </p>
       ) : null}
 

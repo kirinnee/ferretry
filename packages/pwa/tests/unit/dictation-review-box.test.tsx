@@ -46,6 +46,20 @@ describe('reviewKeyAction', () => {
   const key = (name: string, extra: Partial<{ shiftKey: boolean; isComposing: boolean }> = {}) =>
     reviewKeyAction({ key: name, shiftKey: false, isComposing: false, ...extra });
 
+  it('reads a daemon reason as a sentence: capitalised and stopped', async () => {
+    const { element } = harness({
+      ...plainTake,
+      enhancementError: {
+        code: 'enhancement-too-long',
+        message: 'enhancement provider says the request is too large (HTTP 413)',
+      },
+    });
+    const view = await mount(element);
+    const notice = must(view.container.querySelector('[data-review-notice="cleanup-failed"]'), 'the notice');
+    expect(notice.textContent).toContain('Enhancement provider says the request is too large (HTTP 413).');
+    await view.unmount();
+  });
+
   it('inserts on Enter and discards on Escape', () => {
     expect(key('Enter')).toBe('insert');
     expect(key('Escape')).toBe('discard');

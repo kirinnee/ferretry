@@ -7,6 +7,8 @@ export class SttEnhancementError extends Error {
     message: string,
     readonly retryAfterMs?: number,
     options?: ErrorOptions,
+    /** The provider's HTTP status when it is what failed; a number only, never any of its body. */
+    readonly providerStatus?: number,
   ) {
     super(message, options);
     this.name = 'SttEnhancementError';

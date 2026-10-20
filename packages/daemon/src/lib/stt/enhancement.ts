@@ -11,7 +11,13 @@ import {
 } from '@ferretry/protocol';
 import { CEREBRAS_HOST, GROQ_HOST, SPEEDUP_CATALOG } from '../speedups/catalog.ts';
 import type { AuthorizedOutcome } from '../speedups/ports.ts';
-import { buildCleanupSystemPrompt, cleanupOutputIsFaithful, neutralizeCleanupTags } from './cleanup-guard.ts';
+import {
+  buildCleanupSystemPrompt,
+  CLEANUP_VIOLATION_REASONS,
+  cleanupViolation,
+  neutralizeCleanupTags,
+} from './cleanup-guard.ts';
+import { conversationReference, estimateTokens } from './context.ts';
 import { SttEnhancementError } from './errors.ts';
 
 /**
@@ -39,7 +45,6 @@ import { SttEnhancementError } from './errors.ts';
  */
 export const ENHANCEMENT_LIMITS = {
   maxTextChars: 8_000,
-  maxContextChars: 2_000,
   maxUserContextChars: 2_000,
   maxDictionaryChars: 4_000,
   maxModelIdChars: 128,
@@ -49,7 +54,7 @@ export const ENHANCEMENT_LIMITS = {
   maxOutputChars: 16_000,
 } as const;
 
-export const DEFAULT_ENHANCEMENT_TIMEOUT_MS = 2_000;
+export const DEFAULT_ENHANCEMENT_TIMEOUT_MS = 4_000;
 
 const ENHANCEMENT_ERROR_STATUS: Readonly<Record<SttEnhancementErrorCode, number>> = {
   bad_request: 400,
@@ -176,27 +181,6 @@ function boundedTail(value: string, maxChars: number): string {
   return value.length <= maxChars ? value : value.slice(value.length - maxChars);
 }
 
-/**
- * Each entry is bounded as it is consumed and the walk stops at the total cap,
- * so the peak allocation is the cap rather than the sum of what was sent. The
- * earlier version joined every raw entry first and trimmed afterwards, which
- * meant ten schema-valid multi-megabyte entries were all materialized to retain
- * two thousand characters. Entries are taken newest-last, so the most recent
- * context is the context that survives.
- */
-function normalizedContext(context: readonly string[] | undefined): readonly string[] {
-  const entries: string[] = [];
-  let remaining = ENHANCEMENT_LIMITS.maxContextChars;
-  for (const raw of [...(context ?? [])].reverse()) {
-    if (remaining <= 0) break;
-    const entry = boundedTail(raw.slice(-ENHANCEMENT_LIMITS.maxContextChars).trim(), remaining);
-    if (entry.length === 0) continue;
-    entries.push(entry);
-    remaining -= entry.length + 1;
-  }
-  return entries.reverse();
-}
-
 function normalizedDictionary(dictionary: SttEnhancementRequest['dictionary']): readonly string[] {
   const lines: string[] = [];
   let used = 0;
@@ -238,9 +222,7 @@ export function parseEnhancementRequest(
   if (cleanup.style === 'off') throw new SttEnhancementError('bad_request', 'cleanup is switched off on this machine');
   const style = cleanup.style;
   // The machine decides whether the conversation is shared and how much of it: a device cannot widen it.
-  const context = cleanup.useConversation
-    ? normalizedContext(request.context).slice(-cleanup.conversationMessages)
-    : [];
+  const context = cleanup.useConversation ? conversationReference(request.context, cleanup.conversationMessages) : [];
 
   const userContext = request.userContext?.trim();
   return {
@@ -296,12 +278,22 @@ export interface ChatCompletionBody {
   readonly messages: readonly { readonly role: 'system' | 'user'; readonly content: string }[];
   readonly temperature: 0;
   readonly stream: false;
+  readonly max_completion_tokens: number;
   readonly reasoning_effort?: 'low';
   readonly include_reasoning?: boolean;
 }
 
 /** gpt-oss models think before they answer; dictation cleanup wants the least thinking and none of it back. */
 const REASONING_MODEL = /gpt-oss/iu;
+
+/**
+ * The reply cap. It counts a reasoning model's thinking too, so it is the dictation's own size twice
+ * over plus room to think: enough that a long dictation is never cut off, small enough that a model
+ * which will not stop cannot hold the request for minutes.
+ */
+export function completionBudget(request: NormalizedEnhancement): number {
+  return Math.min(4_096, Math.max(1_024, estimateTokens(request.text) * 2 + 768));
+}
 
 export function buildEnhancementBody(request: NormalizedEnhancement): ChatCompletionBody {
   return {
@@ -312,6 +304,7 @@ export function buildEnhancementBody(request: NormalizedEnhancement): ChatComple
     ],
     temperature: 0,
     stream: false,
+    max_completion_tokens: completionBudget(request),
     ...(REASONING_MODEL.test(request.model) ? { reasoning_effort: 'low', ...request.provider.hideReasoning } : {}),
   };
 }
@@ -326,35 +319,114 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-/** Extract assistant text from an OpenAI-compatible chat completion payload. */
-export function parseChatCompletion(payload: unknown): string | undefined {
+const CLOSED_THINKING = /<think(?:ing)?>[\s\S]*?<\/think(?:ing)?>/giu;
+const OPEN_THINKING = /<think(?:ing)?>[\s\S]*$/iu;
+const STRAY_CLOSE = /^[\s\S]*<\/think(?:ing)?>/iu;
+/** gpt-oss's own channel markup, which some gateways leave in `content` instead of splitting out. */
+const FINAL_CHANNEL = /^[\s\S]*(?:<\|channel\|>\s*final\s*<\|message\|>|assistantfinal)/u;
+const CHANNEL_TOKENS = /<\|[a-z_]+\|>/gu;
+
+/**
+ * The reply with every trace of the model's thinking removed: a closed `<think>` block, one that was
+ * cut off before it closed (everything after it is thinking), a closing tag with no opener (the
+ * thinking sits before it), and gpt-oss channel markup, where the answer is whatever follows the
+ * final-channel marker.
+ */
+export function withoutReasoning(content: string): string {
+  return content
+    .replace(CLOSED_THINKING, '')
+    .replace(OPEN_THINKING, '')
+    .replace(STRAY_CLOSE, '')
+    .replace(FINAL_CHANNEL, '')
+    .replace(CHANNEL_TOKENS, '');
+}
+
+function firstChoice(payload: unknown): Record<string, unknown> | undefined {
   if (!isRecord(payload)) return undefined;
   const choices = payload.choices;
   if (!Array.isArray(choices) || choices.length === 0) return undefined;
   const first: unknown = choices[0];
-  if (!isRecord(first)) return undefined;
-  const message = first.message;
+  return isRecord(first) ? first : undefined;
+}
+
+/** Extract assistant text from an OpenAI-compatible chat completion payload. */
+export function parseChatCompletion(payload: unknown): string | undefined {
+  const message = firstChoice(payload)?.message;
   if (!isRecord(message)) return undefined;
   const content = message.content;
   // Reasoning travels in its own field and is never read; a model that inlines it is stripped here.
-  return typeof content === 'string' ? content.replace(/<think>[\s\S]*?<\/think>/giu, '') : undefined;
+  return typeof content === 'string' ? withoutReasoning(content) : undefined;
 }
 
-/** A non-2xx status maps to a distinct, body-free error. */
+const OUT_OF_TOKENS = 'enhancement model used its whole reply budget thinking and returned no text';
+const EMPTY_REPLY = 'enhancement model returned an empty reply';
+
+/** Whether the model stopped because it hit the reply cap rather than because it finished. */
+function ranOutOfTokens(payload: unknown): boolean {
+  return firstChoice(payload)?.finish_reason === 'length';
+}
+
+/** A non-2xx status maps to a distinct, body-free error that names the status and the next step. */
 export function enhancementErrorForStatus(status: number, retryAfterSeconds?: number): SttEnhancementError {
+  const at = `HTTP ${String(status)}`;
   if (status === 401 || status === 403) {
-    return new SttEnhancementError('secret_invalid', 'enhancement provider rejected the daemon credentials');
+    return new SttEnhancementError(
+      'secret_invalid',
+      `enhancement provider rejected the daemon credentials (${at}); check the provider key`,
+      undefined,
+      undefined,
+      status,
+    );
   }
-  if (status === 404) return new SttEnhancementError('bad_model', 'enhancement model is not available');
+  if (status === 404) {
+    return new SttEnhancementError(
+      'bad_model',
+      `enhancement model is not available (${at}); pick another model`,
+      undefined,
+      undefined,
+      status,
+    );
+  }
+  if (status === 413) {
+    return new SttEnhancementError(
+      'too_long',
+      `enhancement provider says the request is too large for its limit (${at})`,
+      undefined,
+      undefined,
+      status,
+    );
+  }
   if (status === 429) {
     const retryAfterMs =
       retryAfterSeconds !== undefined && Number.isFinite(retryAfterSeconds) && retryAfterSeconds >= 0
         ? Math.round(retryAfterSeconds * 1_000)
         : undefined;
-    return new SttEnhancementError('rate_limited', 'enhancement provider is rate limiting requests', retryAfterMs);
+    const wait =
+      retryAfterMs === undefined ? '' : `; try again in ${String(Math.max(1, Math.ceil(retryAfterMs / 1_000)))}s`;
+    return new SttEnhancementError(
+      'rate_limited',
+      `enhancement provider is rate limiting requests (${at})${wait}`,
+      retryAfterMs,
+      undefined,
+      status,
+    );
   }
-  if (status >= 500) return new SttEnhancementError('provider_error', 'enhancement provider returned an error');
-  return new SttEnhancementError('provider_error', 'enhancement provider rejected the request');
+  if (status >= 500) {
+    return new SttEnhancementError(
+      'provider_error',
+      `enhancement provider returned an error (${at})`,
+      undefined,
+      undefined,
+      status,
+    );
+  }
+  return new SttEnhancementError(
+    'provider_error',
+    `enhancement provider rejected the request (${at})`,
+    undefined,
+    undefined,
+    status,
+  );
 }
 
 /** Turn a transport outcome into the result, or into the one error that fits it. */
@@ -391,11 +463,28 @@ export function classifyEnhancementOutcome(
     throw new SttEnhancementError('malformed_response', 'enhancement provider returned an unexpected response');
   }
   const text = content.trim();
-  if (text.length === 0 || text.length > ENHANCEMENT_LIMITS.maxOutputChars) {
-    throw new SttEnhancementError('malformed_response', 'enhancement provider returned an unusable response');
+  if (text.length === 0) {
+    const reason = ranOutOfTokens(outcome.payload) ? OUT_OF_TOKENS : EMPTY_REPLY;
+    throw new SttEnhancementError('malformed_response', reason);
   }
-  if (!cleanupOutputIsFaithful({ raw: request.text, output: text, style: request.style, reference: request.context })) {
-    return { text: request.text, provider: request.provider.id, model: request.model, latencyMs, kept: 'raw' };
+  if (text.length > ENHANCEMENT_LIMITS.maxOutputChars) {
+    throw new SttEnhancementError('malformed_response', 'enhancement model returned an over-long reply');
+  }
+  const violation = cleanupViolation({
+    raw: request.text,
+    output: text,
+    style: request.style,
+    reference: request.context,
+  });
+  if (violation !== undefined) {
+    return {
+      text: request.text,
+      provider: request.provider.id,
+      model: request.model,
+      latencyMs,
+      kept: 'raw',
+      keptReason: CLEANUP_VIOLATION_REASONS[violation],
+    };
   }
   return { text, provider: request.provider.id, model: request.model, latencyMs };
 }

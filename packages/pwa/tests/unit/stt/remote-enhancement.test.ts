@@ -8,6 +8,7 @@ import should from 'should';
 import { daemonConnection } from '../../../src/lib/daemon-connection.ts';
 import { MAX_DICTIONARY_TERMS, MAX_USER_CONTEXT_CHARS } from '../../../src/lib/stt/enhancement.ts';
 import {
+  MAX_REMOTE_CONTEXT_MESSAGE_CHARS,
   MAX_REMOTE_ENHANCEMENT_TEXT_CHARS,
   REMOTE_ENHANCEMENT_TIMEOUT_MS,
   type RemoteEnhancementError,
@@ -323,6 +324,31 @@ describe('requestRemoteEnhancement', () => {
     should(result.provider).be.undefined();
     should(result.model).be.undefined();
     should(result.latencyMs).be.undefined();
+  });
+
+  it('reports a kept-raw reply with its reason, and a default reason when none came', async () => {
+    const withReason = recorder(() => json({ text: 'run kteem now', kept: 'raw', keptReason: 'it answered instead' }));
+    const without = recorder(() => json({ text: 'run kteem now', kept: 'raw' }));
+    const plain = recorder(() => json({ text: 'run kteam now' }));
+
+    const first = await requestRemoteEnhancement(alpha, ask({ fetchImpl: withReason.fetchImpl }));
+    const second = await requestRemoteEnhancement(alpha, ask({ fetchImpl: without.fetchImpl }));
+    const third = await requestRemoteEnhancement(alpha, ask({ fetchImpl: plain.fetchImpl }));
+
+    should(first).containDeep({ kept: 'raw', keptReason: 'it answered instead' });
+    should(second.keptReason).match(/did not read as your words/u);
+    should(third.kept).be.undefined();
+  });
+
+  it('keeps one huge conversation message off the wire', async () => {
+    const { calls, fetchImpl } = recorder(() => json({ text: 'ok' }));
+
+    await requestRemoteEnhancement(alpha, ask({ fetchImpl, context: ['a', `${'b'.repeat(50_000)}tail`] }));
+
+    const sent = JSON.parse(String(calls[0]?.init.body)) as { context: string[] };
+    should(sent.context[0]).equal('a');
+    should(sent.context[1]?.length).equal(MAX_REMOTE_CONTEXT_MESSAGE_CHARS);
+    should(sent.context[1]?.endsWith('tail')).be.true();
   });
 
   it('has a default deadline so a hung provider cannot hold the draft', () => {

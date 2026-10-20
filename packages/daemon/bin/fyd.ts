@@ -8337,6 +8337,11 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
     clock: millisecondClock,
     sttEnhancement: new SttEnhancementService(outboundAuthorizer, speedupStopwatch, {
       cleanup: () => configFiles.current().evaluation.effective.voice.postProcessing,
+      // One line per call, sizes and reasons only: the report type has no field a transcript could ride in.
+      report: report =>
+        process.stdout.write(
+          `${JSON.stringify({ at: new Date().toISOString(), type: 'stt.enhance', data: report })}\n`,
+        ),
     }),
     untilShutdown: untilTerminated,
   };

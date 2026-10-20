@@ -8,8 +8,9 @@ import {
   buildEnhancementBody,
   CLEANUP_GUARD,
   type CleanupSettings,
+  CONTEXT_LIMITS,
   classifyEnhancementOutcome,
-  cleanupOutputIsFaithful,
+  cleanupViolation,
   DEFAULT_CLEANUP_SETTINGS,
   DEFAULT_ENHANCEMENT_PROVIDERS,
   ENHANCEMENT_LIMITS,
@@ -136,7 +137,7 @@ describe('enhancement request parsing', () => {
 
   it('should keep the tail of over-long context rather than rejecting the request', () => {
     // Arrange
-    const long = 'x'.repeat(1_500);
+    const long = `${'word '.repeat(110)}`;
 
     // Act
     const actual = parseEnhancementRequest(
@@ -146,8 +147,9 @@ describe('enhancement request parsing', () => {
     );
 
     // Assert
-    should(actual.context.join('\n').length).equal(2_000);
-    should(actual.context.join('\n').endsWith('tail')).be.true();
+    should(actual.context.length).equal(2);
+    should(actual.context.every(line => line.length <= CONTEXT_LIMITS.maxMessageChars)).be.true();
+    should(actual.context.at(-1)?.endsWith('tail')).be.true();
   });
 
   it('should stop adding dictionary lines once the dictionary cap is reached', () => {
@@ -219,15 +221,15 @@ describe('enhancement request parsing', () => {
 
   it('should bound each context entry as it is consumed, not after joining them', () => {
     // Arrange — ten schema-valid entries far larger than the cap
-    const entries = Array.from({ length: 10 }, (_, index) => `${'x'.repeat(50_000)}end-${index}`);
+    const entries = Array.from({ length: 10 }, (_, index) => `${'word '.repeat(10_000)}end-${index}`);
 
     // Act
     const actual = parseEnhancementRequest(request({ context: entries }), DEFAULT_ENHANCEMENT_PROVIDERS, shared());
 
     // Assert — only the cap survives, and it is the most recent context
-    should(actual.context.join('\n').length).be.belowOrEqual(ENHANCEMENT_LIMITS.maxContextChars);
+    should(actual.context.join('\n').length).be.belowOrEqual(CONTEXT_LIMITS.maxTotalChars);
     should(actual.context.at(-1)?.endsWith('end-9')).be.true();
-    should(actual.context.length).equal(1);
+    should(actual.context.length).equal(4);
   });
 
   it('should map every error code to a stable HTTP status and a body-free view', () => {
@@ -386,7 +388,7 @@ describe('cleanup prompts and the always-on guard', () => {
   });
 
   const faithful = (output: string, style: 'fix' | 'polish' = 'fix', reference: string[] = []) =>
-    cleanupOutputIsFaithful({ raw: 'um so the deploy failed on tuesday i think', output, style, reference });
+    cleanupViolation({ raw: 'um so the deploy failed on tuesday i think', output, style, reference }) === undefined;
 
   it('should accept a corrected transcript', () => {
     should(faithful('So the deploy failed on Tuesday, I think.')).be.true();
@@ -405,7 +407,7 @@ describe('cleanup prompts and the always-on guard', () => {
   it('should let polish run longer than fix', () => {
     // Arrange
     const longer =
-      'The deploy failed on Tuesday, and I believe that is what happened to us at some point during the week.';
+      'So the deploy failed on Tuesday, I think. The deploy, I think, failed on Tuesday, so the deploy failed.';
 
     // Assert
     should(faithful(longer, 'fix')).be.false();
@@ -512,6 +514,7 @@ describe('enhancement outcome classification', () => {
       model: 'openai/gpt-oss-120b',
       latencyMs: 7,
       kept: 'raw',
+      keptReason: 'The cleanup reply was much longer than what you said.',
     });
   });
 
@@ -587,7 +590,7 @@ describe('enhancement service', () => {
       accept: 'application/json',
     });
     should(transport.sent[0]?.url).equal('https://api.groq.com/openai/v1/chat/completions');
-    should(transport.sent[0]?.timeoutMs).equal(2_000);
+    should(transport.sent[0]?.timeoutMs).equal(4_000);
   });
 
   it("should read the machine's cleanup settings on every call", async () => {

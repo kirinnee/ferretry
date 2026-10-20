@@ -1,4 +1,4 @@
-import type { SttEnhancementResult } from '@ferretry/protocol';
+import type { SttEnhancementErrorCode, SttEnhancementResult } from '@ferretry/protocol';
 import {
   buildEnhancementBody,
   type CleanupSettings,
@@ -11,11 +11,37 @@ import {
   type EnhancementProviderTable,
   type EnhancementProviderView,
   enhancementProviderViews,
+  type NormalizedEnhancement,
   parseEnhancementRequest,
 } from './enhancement.ts';
+import { SttEnhancementError } from './errors.ts';
 import type { EnhancementAuthorizer, SttMonotonicClockPort } from './ports.ts';
 
+/**
+ * One enhancement call, as a log line. It carries sizes, codes and the guard's reason and NEVER the
+ * dictation, the conversation, the provider's reply or any credential.
+ */
+export interface EnhancementReport {
+  readonly outcome: 'cleaned' | 'kept_raw' | 'failed';
+  readonly provider: string;
+  readonly model: string;
+  readonly textChars: number;
+  readonly contextMessages: number;
+  /** The context was dropped and the call repeated because the provider found the request too big. */
+  readonly retriedWithoutContext: boolean;
+  readonly code?: SttEnhancementErrorCode;
+  readonly providerStatus?: number;
+  readonly reason?: string;
+  readonly latencyMs: number;
+}
+
+/** A failure that more reference text caused and less can cure: the provider says the request is too big or invalid. */
+const isContextSized = (error: SttEnhancementError): boolean =>
+  error.providerStatus === 413 || error.providerStatus === 400;
+
 export interface SttEnhancementServiceOptions {
+  /** Told once per call how it ended, for the daemon's log. */
+  readonly report?: (report: EnhancementReport) => void;
   readonly providers?: EnhancementProviderTable;
   readonly timeoutMs?: number;
   /** The machine's cleanup settings (`voice.yaml`), read per call so an edit takes effect at once. */
@@ -35,6 +61,7 @@ export class SttEnhancementService {
   private readonly providers: EnhancementProviderTable;
   private readonly timeoutMs: number;
   private readonly cleanup: () => CleanupSettings;
+  private readonly report: (report: EnhancementReport) => void;
 
   constructor(
     private readonly authorizer: EnhancementAuthorizer,
@@ -44,6 +71,7 @@ export class SttEnhancementService {
     this.providers = options.providers ?? DEFAULT_ENHANCEMENT_PROVIDERS;
     this.timeoutMs = options.timeoutMs ?? DEFAULT_ENHANCEMENT_TIMEOUT_MS;
     this.cleanup = options.cleanup ?? (() => DEFAULT_CLEANUP_SETTINGS);
+    this.report = options.report ?? (() => undefined);
     if (!Number.isFinite(this.timeoutMs) || this.timeoutMs <= 0) {
       throw new RangeError('timeoutMs must be a positive, finite number');
     }
@@ -56,8 +84,56 @@ export class SttEnhancementService {
 
   async enhance(input: unknown): Promise<SttEnhancementResult> {
     const request = parseEnhancementRequest(input, this.providers, this.cleanup());
-
     const startedAt = this.clock.monotonicMs();
+    const elapsed = (): number => Math.max(0, this.clock.monotonicMs() - startedAt);
+    const note = (
+      retried: boolean,
+      latencyMs: number,
+      rest: Pick<EnhancementReport, 'outcome'> & Partial<EnhancementReport>,
+    ): void =>
+      this.report({
+        provider: request.provider.id,
+        model: request.model,
+        textChars: request.text.length,
+        contextMessages: request.context.length,
+        retriedWithoutContext: retried,
+        latencyMs,
+        ...rest,
+      });
+
+    let retried = false;
+    let result: SttEnhancementResult;
+    try {
+      try {
+        result = await this.attempt(request);
+      } catch (error) {
+        if (!(error instanceof SttEnhancementError) || !isContextSized(error) || request.context.length === 0) {
+          throw error;
+        }
+        // The reference is a nicety: when the provider finds the request too big, the dictation alone still fits.
+        retried = true;
+        result = await this.attempt({ ...request, context: [] });
+      }
+    } catch (error) {
+      if (error instanceof SttEnhancementError) {
+        note(retried, elapsed(), {
+          outcome: 'failed',
+          code: error.code,
+          ...(error.providerStatus === undefined ? {} : { providerStatus: error.providerStatus }),
+          reason: error.message,
+        });
+      }
+      throw error;
+    }
+    const latencyMs = elapsed();
+    note(retried, latencyMs, {
+      outcome: result.kept === 'raw' ? 'kept_raw' : 'cleaned',
+      ...(result.keptReason === undefined ? {} : { reason: result.keptReason }),
+    });
+    return { ...result, latencyMs };
+  }
+
+  private async attempt(request: NormalizedEnhancement): Promise<SttEnhancementResult> {
     const outcome = await this.authorizer.send(request.provider.secretName, request.provider.hosts, {
       method: 'POST',
       url: request.provider.endpoint,
@@ -66,7 +142,6 @@ export class SttEnhancementService {
       timeoutMs: this.timeoutMs,
       maxResponseBytes: ENHANCEMENT_LIMITS.maxResponseBytes,
     });
-
-    return classifyEnhancementOutcome(outcome, request, Math.max(0, this.clock.monotonicMs() - startedAt));
+    return classifyEnhancementOutcome(outcome, request, 0);
   }
 }
