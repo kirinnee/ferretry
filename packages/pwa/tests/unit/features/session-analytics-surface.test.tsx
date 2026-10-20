@@ -103,7 +103,7 @@ describe('SessionAnalyticsSurface', () => {
     const rows = renderer.root.findAll(node => node.type === 'li' && node.props['data-cost-row'] !== undefined);
     expect(rows.map(row => row.props['data-cost-row'])).toEqual(['claude-opus-5-5', 'claude-sonnet-5-5', 'unpriced']);
     const link = renderer.root.find(node => node.type === 'a' && node.props['data-open-analytics'] === '');
-    expect(link.props.href).toBe(`/d/daemon-a/analytics?q=${encodeURIComponent('sum by (model) {tree=="root"}')}`);
+    expect(link.props.href).toBe(`/d/daemon-a/analytics/query?q=${encodeURIComponent('sum by (model) {tree=="root"}')}`);
     expect(renderer.root.findByProps({ 'aria-label': 'Session cost' }).props['data-session-cost']).toBe('ready');
   });
 
@@ -243,7 +243,7 @@ describe('SessionAnalyticsSurface', () => {
     await settle();
     const link = renderer.root.find(node => node.type === 'a' && node.props['data-open-analytics'] === '');
     run(() => link.props.onClick({ button: 0, preventDefault() {} }));
-    expect(window.location.pathname).toBe('/d/daemon-a/analytics');
+    expect(window.location.pathname).toBe('/d/daemon-a/analytics/query');
     expect(new URLSearchParams(window.location.search).get('q')).toBe('sum by (model) {tree=="root"}');
     window.history.replaceState({}, '', '/');
   });

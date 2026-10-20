@@ -102,9 +102,16 @@ import { SessionsPage } from '../src/components/sessions-page.tsx';
 import { type PaneSnapshotReader, TerminalSnapshotView } from '../src/components/terminal-snapshot.tsx';
 import { ThinkingIndicator } from '../src/components/thinking-indicator.tsx';
 import { Transcript } from '../src/components/transcript.tsx';
-import { AnalyticsCostChart } from '../src/features/analytics/analytics-cost-chart.tsx';
 import type { AnalyticsRequest } from '../src/features/analytics/analytics-custom-query.tsx';
-import { analyticsOverview, analyticsRangeDays } from '../src/features/analytics/analytics-overview.ts';
+import { AnalyticsMetricChart } from '../src/features/analytics/analytics-metric-chart.tsx';
+import {
+  analyticsOverview,
+  analyticsRangeDays,
+  formatAxisUsd,
+  formatDay,
+  formatDollars,
+  overviewRow,
+} from '../src/features/analytics/analytics-overview.ts';
 import { AnalyticsResponseView } from '../src/features/analytics/analytics-response-view.tsx';
 import type { AnalyticsAggregateResponse } from '../src/features/analytics/analytics-result-table.tsx';
 import { AnalyticsResultTable } from '../src/features/analytics/analytics-result-table.tsx';
@@ -287,7 +294,12 @@ import { SidePaneTabs } from '../src/shell/side-pane-tabs.tsx';
 import { StatusMark } from '../src/shell/status-mark.tsx';
 import { ViewTabs } from '../src/shell/view-tabs.tsx';
 import { harnessCatalogAnswer } from './account-model-catalog.ts';
-import { ANALYTICS_FIXTURE_NOW, ANALYTICS_FIXTURE_ROWS, answerAnalyticsFixture } from './analytics-fixture.ts';
+import {
+  ANALYTICS_FIXTURE_MACHINES,
+  ANALYTICS_FIXTURE_NOW,
+  ANALYTICS_FIXTURE_ROWS,
+  answerAnalyticsFixture,
+} from './analytics-fixture.ts';
 import { harnessConfigFilesClient } from './config-files-fixture.ts';
 import {
   LEARNING_PASSIVE,
@@ -1249,9 +1261,12 @@ function AppChromeHarness({ active }: { readonly active: string }) {
     destination === 'analytics' ? (
       <GlobalAnalyticsPage
         connection={daemon}
+        machines={HARNESS_ANALYTICS_MACHINES}
+        view={new URLSearchParams(window.location.search).get('analytics-view') === 'query' ? 'query' : 'overview'}
+        onNavigate={() => {}}
         requestAnalytics={HARNESS_GLOBAL_ANALYTICS_REQUEST}
         now={() => ANALYTICS_FIXTURE_NOW}
-        initialQuery={null}
+        initialQuery={new URLSearchParams(window.location.search).get('q')}
       />
     ) : destination === 'learning' ? (
       <LearningHubHarness
@@ -4010,15 +4025,33 @@ const ANALYTICS_RAW: AnalyticsResponse = {
 };
 
 /** Stable injected requests prevent parent harness renders from restarting either analytics surface. */
-const HARNESS_GLOBAL_ANALYTICS_REQUEST: AnalyticsRequest = async (_connection, query) =>
-  answerAnalyticsFixture(query ?? 'sum by (day)', ANALYTICS);
-const HARNESS_SESSION_ANALYTICS_REQUEST: SessionAnalyticsRequest = async (_connection, _scope, query) =>
-  answerAnalyticsFixture(query ?? 'sum by (model)', ANALYTICS);
-/** The cost chart on its own, over the same fleet the Analytics page reads. */
-const HARNESS_ANALYTICS_DAYS = analyticsOverview(
+const HARNESS_GLOBAL_ANALYTICS_REQUEST: AnalyticsRequest = async (connection, query) =>
+  answerAnalyticsFixture(query ?? 'sum by (day)', connection.daemonId);
+const HARNESS_SESSION_ANALYTICS_REQUEST: SessionAnalyticsRequest = async (connection, _scope, query) =>
+  answerAnalyticsFixture(query ?? 'sum by (model)', connection.daemonId);
+/** The second machine the analytics fixture answers for. */
+const analyticsOtherDaemon = daemonConnection({
+  daemonId: ANALYTICS_FIXTURE_MACHINES[1].daemonId,
+  baseUrl: 'https://kirin-box.invalid/',
+  deviceId: 'harness-other-token',
+  daemonName: ANALYTICS_FIXTURE_MACHINES[1].name,
+});
+/** Both machines, as the app hands them to Analytics. */
+const HARNESS_ANALYTICS_MACHINES = [
+  { connection: daemon, name: ANALYTICS_FIXTURE_MACHINES[0].name },
+  { connection: analyticsOtherDaemon, name: ANALYTICS_FIXTURE_MACHINES[1].name },
+];
+/** The metric chart on its own: cost per day over the same fleet the Analytics page reads. */
+const HARNESS_ANALYTICS_POINTS = analyticsOverview(
   analyticsRangeDays(14, ANALYTICS_FIXTURE_NOW),
-  ANALYTICS_FIXTURE_ROWS,
-).days;
+  ANALYTICS_FIXTURE_ROWS.map(row => overviewRow(row, { daemonId: 'harness-daemon', name: row.machine ?? '' })),
+).days.map(bucket => ({
+  key: bucket.key,
+  label: formatDay(bucket.key),
+  values: [bucket.totals.costMicros / 1_000_000],
+  flagged: bucket.totals.unpriced > 0,
+  empty: bucket.totals.sessions === 0,
+}));
 
 class HarnessBrowserSocket implements RemoteBrowserSocket {
   readyState = 0;
@@ -6058,6 +6091,8 @@ function Shell() {
       render: () => (
         <GlobalAnalyticsPage
           connection={daemon}
+          machines={HARNESS_ANALYTICS_MACHINES}
+          onNavigate={() => {}}
           requestAnalytics={HARNESS_GLOBAL_ANALYTICS_REQUEST}
           now={() => ANALYTICS_FIXTURE_NOW}
           initialQuery={null}
@@ -6097,7 +6132,14 @@ function Shell() {
             <Label>Analytics — cost per day</Label>
           </PanelHeader>
           <PanelBody className="min-w-0">
-            <AnalyticsCostChart days={HARNESS_ANALYTICS_DAYS} />
+            <AnalyticsMetricChart
+              title="Equivalent API cost per day"
+              series={[{ key: 'cost', label: 'Equivalent API cost', tone: 'accent' }]}
+              points={HARNESS_ANALYTICS_POINTS}
+              format={formatDollars}
+              formatAxis={formatAxisUsd}
+              flagNote="has unpriced sessions"
+            />
           </PanelBody>
         </Card>
       ),

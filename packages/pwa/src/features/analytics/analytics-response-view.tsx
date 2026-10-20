@@ -7,7 +7,9 @@
  */
 import { type AnalyticsMetric, type AnalyticsRawSession, type AnalyticsResponse, analyticsRawMetricValue } from '@ferretry/protocol';
 
+import { useOptionalRouter } from '../../lib/router.tsx';
 import { DaemonResponseError } from '../../lib/runtime-models.ts';
+import { RouteLink } from '../../shell/route-link.tsx';
 import { AnalyticsQueryChart } from './analytics-query-chart.tsx';
 import {
   ANALYTICS_METRIC_LABELS,
@@ -44,11 +46,15 @@ const rawValue = (row: AnalyticsRawSession, metric: AnalyticsMetric | undefined)
 export function AnalyticsResponseView({
   response,
   chart = false,
+  sessionHref,
 }: {
   readonly response: AnalyticsResponse;
   /** Draw the chart of the result above its table. */
   readonly chart?: boolean;
+  /** Where a session row opens; without it a row names its session without a link. */
+  readonly sessionHref?: (row: AnalyticsRawSession) => string;
 }) {
+  const router = useOptionalRouter();
   const metric = response.parsed.metric;
   const scope = (
     <p className="m-0 text-meta text-muted">
@@ -83,7 +89,18 @@ export function AnalyticsResponseView({
             key={row.id}
             className="grid grid-cols-[minmax(0,1fr)_auto] gap-x-3 gap-y-1 rounded-control border border-border-soft bg-surface px-3 py-2 text-cell"
           >
-            <span className="mono truncate text-2xs text-accent">{row.id}</span>
+            {sessionHref ? (
+              <RouteLink
+                to={sessionHref(row)}
+                {...(router ? { onNavigate: router.navigate } : {})}
+                className="mono min-w-0 truncate text-2xs text-accent hover:underline"
+                data-raw-session={row.id}
+              >
+                {row.label ?? row.id}
+              </RouteLink>
+            ) : (
+              <span className="mono truncate text-2xs text-accent">{row.id}</span>
+            )}
             <span className="text-right font-medium tabular-nums text-fg">{rawValue(row, metric)}</span>
             <span className="text-muted">
               {row.model ?? 'model unknown'} · {row.status ?? 'status unknown'} · {row.tokens ?? 'tokens unknown'}{' '}

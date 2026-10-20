@@ -20,7 +20,7 @@
     "./features/analytics-result-table": "./src/features/analytics/analytics-result-table.tsx",
     "./features/analytics-response-view": "./src/features/analytics/analytics-response-view.tsx",
     "./features/session-analytics-surface": "./src/features/analytics/session-analytics-surface.tsx",
-    "./features/analytics-cost-chart": "./src/features/analytics/analytics-cost-chart.tsx",
+    "./features/analytics-metric-chart": "./src/features/analytics/analytics-metric-chart.tsx",
     "./features/browser-login-banner": "./src/features/browser/browser-login-banner.tsx",
     "./features/remote-browser-pane": "./src/features/browser/remote-browser-pane.tsx",
     "./features/dictation-shortcut": "./src/features/settings/dictation-shortcut.ts",

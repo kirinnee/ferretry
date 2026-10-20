@@ -4,7 +4,10 @@ import {
   AnalyticsResponseView,
   analyticsErrorMessage,
 } from '../../../src/features/analytics/analytics-response-view.tsx';
+import { act } from 'react-test-renderer';
+import { RouterProvider } from '../../../src/lib/router.tsx';
 import { DaemonResponseError } from '../../../src/lib/runtime-models.ts';
+import '../../support/dom.ts';
 import { render } from '../../support/react.ts';
 
 const index = {
@@ -107,6 +110,22 @@ describe('AnalyticsResponseView', () => {
     expect(text).toContain('session-one');
     expect(text).toContain('Unpriced');
     expect(text).not.toContain('$0.00');
+  });
+
+  it('links each session row to where the host says it opens, in-app under a router', () => {
+    const linked = render(<AnalyticsResponseView response={raw()} sessionHref={row => `/d/elsewhere/session/${row.id}`} />);
+    const link = linked.root.find(node => node.type === 'a' && node.props['data-raw-session'] !== undefined);
+    expect(link.props.href).toBe(`/d/elsewhere/session/${link.props['data-raw-session']}`);
+    window.history.replaceState({}, '', '/');
+    const routed = render(
+      <RouterProvider>
+        <AnalyticsResponseView response={raw()} sessionHref={row => `/d/elsewhere/session/${row.id}`} />
+      </RouterProvider>,
+    );
+    const inApp = routed.root.find(node => node.type === 'a' && node.props['data-raw-session'] !== undefined);
+    act(() => inApp.props.onClick({ button: 0, preventDefault() {} }));
+    expect(window.location.pathname).toBe(inApp.props.href);
+    window.history.replaceState({}, '', '/');
   });
 
   it('keeps truncation and an empty response explicit', () => {

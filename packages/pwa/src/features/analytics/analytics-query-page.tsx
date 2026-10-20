@@ -10,7 +10,7 @@
  * answer from the previous one cannot reach the screen.
  */
 
-import type { AnalyticsResponse } from '@ferretry/protocol';
+import type { AnalyticsRawSession, AnalyticsResponse } from '@ferretry/protocol';
 import { Trash2 } from 'lucide-react';
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 
@@ -47,6 +47,8 @@ export interface AnalyticsQueryPageProps {
   readonly onQueryChange?: (query: string) => void;
   /** Injectable browser storage for saved queries. */
   readonly savedStorage?: SavedQueriesStorage;
+  /** Where a session row of a raw result opens, on the machine it came from. */
+  readonly sessionHref?: (row: AnalyticsRawSession) => string;
 }
 
 const newId = (): string => globalThis.crypto.randomUUID();
@@ -59,6 +61,7 @@ export function AnalyticsQueryPage({
   initialQuery,
   onQueryChange,
   savedStorage,
+  sessionHref,
 }: AnalyticsQueryPageProps) {
   const fetcher = useDaemonFetch();
   const requestAnalytics = useMemo<AnalyticsRequest>(
@@ -80,6 +83,7 @@ export function AnalyticsQueryPage({
         initialQuery={initialQuery ?? null}
         onQueryChange={onQueryChange}
         savedStorage={savedStorage}
+        sessionHref={sessionHref}
       />
     </main>
   );
@@ -93,6 +97,7 @@ function QueryBody({
   initialQuery,
   onQueryChange,
   savedStorage,
+  sessionHref,
 }: {
   readonly connection: DaemonConnection;
   readonly machines: number;
@@ -101,6 +106,7 @@ function QueryBody({
   readonly initialQuery: string | null;
   readonly onQueryChange: ((query: string) => void) | undefined;
   readonly savedStorage: SavedQueriesStorage | undefined;
+  readonly sessionHref: ((row: AnalyticsRawSession) => string) | undefined;
 }) {
   const [text, setText] = useState(initialQuery || ANALYTICS_QUERY_DEFAULT);
   const [result, setResult] = useState<AnalyticsResponse | null>(null);
@@ -135,8 +141,11 @@ function QueryBody({
     [connection, now, onQueryChange, requestAnalytics],
   );
 
+  // A link's query runs once, when it arrives — not again each time `run` is rebuilt.
+  const runLatest = useRef(run);
+  runLatest.current = run;
   useEffect(() => {
-    if (initialQuery) void run(initialQuery);
+    if (initialQuery) void runLatest.current(initialQuery);
     return () => {
       serial.current += 1;
     };
@@ -188,7 +197,7 @@ function QueryBody({
           </p>
         )}
         {error && (
-          <p role="alert" className="m-0 rounded-control border border-err/40 bg-err/10 px-3 py-2 text-cell text-err">
+          <p role="alert" className="m-0 rounded-control border border-err-border bg-err-bg px-3 py-2 text-cell text-err">
             The query failed: {error}
           </p>
         )}
@@ -197,7 +206,7 @@ function QueryBody({
         )}
         {result && (
           <>
-            <AnalyticsResponseView response={result} chart />
+            <AnalyticsResponseView response={result} chart {...(sessionHref ? { sessionHref } : {})} />
             {ranAt && <p className="m-0 text-2xs text-faint">Ran at {ranAt} UTC</p>}
           </>
         )}
