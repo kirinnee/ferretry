@@ -18,6 +18,7 @@ import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState, useS
 import { DENSITY_OPTIONS, useDensity } from '../../hooks/use-density.ts';
 import { type ThemeState, useTheme } from '../../hooks/use-theme.ts';
 import type { WardenStatusReader } from '../../hooks/use-warden-status.ts';
+import { machineDisplayOrder } from '../../lib/all-machines.ts';
 import { cn } from '../../lib/class-names.ts';
 import type { ConnectionHealthState } from '../../lib/connection-health.ts';
 import type { DaemonConnectionRecord } from '../../lib/connections.ts';
@@ -552,12 +553,14 @@ export function SettingsPage({
     createClient: createUpdateClient,
     ...(lockedMachines === undefined ? {} : { locked: lockedMachines }),
   });
-  const machines: readonly SettingsMachineEntry[] = connections.map(connection => ({
-    daemonId: connection.daemonId,
-    name: distinctDaemonName(connection, connections),
-    reach: reach.reachOf(connection.daemonId),
-    updateAvailable: updates.has(connection.daemonId),
-  }));
+  const machines: readonly SettingsMachineEntry[] = machineDisplayOrder(connections, device.machineOrder).map(
+    connection => ({
+      daemonId: connection.daemonId,
+      name: distinctDaemonName(connection, connections),
+      reach: reach.reachOf(connection.daemonId),
+      updateAvailable: updates.has(connection.daemonId),
+    }),
+  );
 
   const daemonPanels = useMemo<DaemonPanelsRenderer | undefined>(
     () =>
