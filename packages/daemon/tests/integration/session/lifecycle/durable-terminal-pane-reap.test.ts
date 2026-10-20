@@ -218,6 +218,58 @@ describe('durable terminal pane reap adapters', () => {
 });
 
 /**
+ * A harness that exits before its pane is registered — the start the owner saw fail as "no stable
+ * incarnation identity" on every provider runtime. tmux keeps the dead pane and its pid, the process
+ * is gone, and the reason must be the exit and what the process printed, not the identity read.
+ */
+describe('registering a pane whose harness has already exited', () => {
+  async function relaunch(subject: ReapFixture, script: string): Promise<void> {
+    await subject.controller.stop(subject.record.config.tmuxSession);
+    await subject.controller.launch({
+      session: subject.record.config.tmuxSession,
+      cwd: process.cwd(),
+      // The pause lets the launch set remain-on-exit before the process ends, as a real harness does.
+      command: ['/bin/sh', '-c', `sleep 0.3; ${script}`],
+    });
+    for (let attempt = 0; attempt < 100; attempt++) {
+      if ((await subject.controller.state(subject.record.config.tmuxSession)).dead) return;
+      await Bun.sleep(50);
+    }
+    throw new Error('test setup: the pane never exited');
+  }
+
+  it('should report the exit status and the last output instead of the identity read', async () => {
+    // Arrange
+    const subject = await fixture();
+    await relaunch(subject, `echo 'ferretry: DEEPSEEK_TOKEN is not set' >&2; exit 2`);
+
+    // Act / Assert
+    await should(subject.registrar.register(subject.record)).be.rejectedWith(
+      'the interactive harness exited (2): its last output was "ferretry: DEEPSEEK_TOKEN is not set"',
+    );
+  });
+
+  it('should still refuse a live pane whose process start cannot be read', async () => {
+    // Arrange
+    const subject = await fixture();
+    const registrar = new DurableTerminalPaneRegistrar(
+      DAEMON,
+      subject.controller,
+      subject.files,
+      subject.storage.paths,
+      {
+        startOf: async () => undefined,
+      },
+    );
+
+    // Act / Assert -- nothing on disk may claim a pane it cannot tell from a later one.
+    await should(registrar.register(subject.record)).be.rejectedWith(
+      'the launched pane process has no stable incarnation identity',
+    );
+  });
+});
+
+/**
  * One hand-edited registration, read by the two callers that want opposite things from it.
  *
  * A sweep KILLS, so a ledger it cannot read whole is not one it may act on at all. A settings

@@ -146,13 +146,17 @@ fy new --auto "<complete brief>"            # the decision mode picks
    candidates in the guide's order, or **Jev's** order when Jev decides.
 3. **Probe — always, in both modes.** Each candidate in turn is asked to "Reply with exactly: OK" through its
    own wrapper — resolved exactly as the start resolves it, the published absolute launcher in
-   `$FY_HOME/fleet/bin` and never a name looked up on `PATH`, with the same login environment — in its CLI's one-shot mode (`claude -p`, `codex exec` at `low` effort), bounded by
+   `$FY_HOME/fleet/bin` and never a name looked up on `PATH`, with the same login environment — in its CLI's one-shot mode (`claude -p` with the start's own `--model` and `--effort`, `codex exec` at `low`
+   effort), bounded by
    `probe.timeoutSeconds` (45 s). A probe spends a token or two, and only when a ferret asked for a start —
-   never on a timer. Its answer is kept per runtime and model for `probe.cacheSeconds` (60 s) and probes
+   never on a timer. Its answer is kept per runtime, model and effort for `probe.cacheSeconds` (60 s) and probes
    already running are shared, so twenty sub-ferrets started at once probe once. A failed probe refuses that
    candidate `probe_failed` and the next is tried; nothing is launched for it.
 4. **Start**: the same session start every surface uses (callsign, launch, audit), with `parent` recorded and
-   the brief followed by a footer telling the sub-ferret to finish with `fy signal done "<result>"`.
+   the brief followed by a footer telling the sub-ferret to finish with `fy signal done "<result>"`. A
+   harness that exits before it is ready fails the start with its exit status **and its last output lines**
+   (`the interactive harness exited (2): its last output was "…"`), so the card says why — the wrapper's
+   refusal naming a missing secret, or the harness rejecting an argument the one-shot probe does not pass.
 
 The answer is never an HTTP error for a refusal: it is `{outcome: 'refused', refusal: {code, message,
 remedy}, attempts}`, every attempt listed, so a ferret falls back on the code. `fy new` exits **2** on a
@@ -220,8 +224,9 @@ through the configuration-file routes, so a loosening is held exactly as an edit
 
 ## Declared gaps
 
-- **A Claude probe runs at the runtime's own effort.** Claude Code takes its effort from settings only; the
-  probe passes no settings overlay of its own beside the wrapper's.
+- **The probe is one-shot, the start is interactive.** The probe carries the start's model and effort, but
+  not its `--session-id`, hand-off `Read(...)` rules, fast-mode overlay or remote-control arguments, so a
+  harness that refuses only one of those passes the probe and fails the start — with its own words on the card.
 - **A probe leaves a one-line conversation** in the runtime's history, as any one-shot run of the CLI does.
 - **Quota is what the fleet last read.** `recommend` and `new` do not ask a provider for fresh quota; an
   environment login whose quota nobody has watched reads as not exhausted, and the probe is what catches it.
