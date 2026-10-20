@@ -2,19 +2,23 @@
  * ONE SESSION IN THE SESSIONS BAR: the status mark, the agent's name, one mark on the right, a line of
  * what it is doing and the directory it runs in. The open one is a soft filled pill.
  *
+ * Right-click, long-press, the Menu key and Shift+F10 open the bar's one row menu (`SessionMenuContext`).
+ *
  * The mark on the right is the row's one exception: "needs you", else the graduation-cap mark of a ferret that learns — or,
  * inside the all-machines Needs you group, the machine's name, because every row there needs you and
  * nothing else on the line says where it runs.
  */
 
 import type { SessionView } from '@ferretry/protocol';
-import type { ReactNode } from 'react';
+import { type ReactNode, useContext, useState } from 'react';
 import { PassiveLearningMark } from '../features/learning/passive-learning.tsx';
 import { displayCallsign } from '../lib/callsign.ts';
 import type { DaemonId } from '../lib/daemon-connection.ts';
 import { daemonSessionPath } from '../lib/pages/routes.ts';
 import { MachineChip } from './machine-chip.tsx';
 import { RouteLink } from './route-link.tsx';
+import { useRowContextGesture } from './row-context-gesture.ts';
+import { SessionMenuContext } from './session-menu-context.ts';
 import { needsYou, pendingQuestionPreview, sessionsBarDirectory, sessionsBarSubline } from './sessions-bar-model.ts';
 import { StatusMark } from './status-mark.tsx';
 
@@ -46,13 +50,23 @@ export function SessionsBarRow({
   const task = sessionsBarSubline(view);
   const directory = sessionsBarDirectory(view);
   const question = pendingQuestionPreview(view);
+  const openMenu = useContext(SessionMenuContext);
+  const [pressing, setPressing] = useState(false);
+  const gesture = useRowContextGesture<SessionView>(
+    openMenu === undefined ? undefined : (target, x, y, trigger) => openMenu({ view: target, daemonId }, x, y, trigger),
+    view,
+    setPressing,
+  );
   return (
     <li data-sbar-depth={depth}>
       <RouteLink
         aria-current={active ? 'page' : undefined}
         className="fy-sbar__session"
+        aria-haspopup={gesture === undefined ? undefined : 'menu'}
+        data-sbar-pressing={pressing ? '' : undefined}
         data-sbar-session={view.config.id}
         onNavigate={onNavigate}
+        {...gesture}
         title={`${name} — ${task}${question === undefined ? '' : `\n${question}`}\n${view.config.cwd}`}
         to={daemonSessionPath(daemonId, view.config.id)}
       >

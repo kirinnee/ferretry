@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'bun:test';
 import type { SessionView } from '@ferretry/protocol';
 import { CLICK_SUPPRESS_MS, LONG_PRESS_MS, MOVE_CANCEL_PX } from '../../src/shell/agent-sidebar-model.ts';
-import { type OpenSessionMenu, useRowContextGesture } from '../../src/shell/row-context-gesture.ts';
+import {
+  type OpenSessionMenu,
+  opensContextMenuKey,
+  useRowContextGesture,
+} from '../../src/shell/row-context-gesture.ts';
 import { interact, mount, must } from '../support/dom.ts';
 import { sessionView } from '../support/sessions.ts';
 
@@ -199,5 +203,89 @@ describe('useRowContextGesture', () => {
     await harnessed.unmount();
     await interact(dwell);
     expect(harnessed.opened).toHaveLength(0);
+  });
+});
+
+const fireKey = (target: HTMLElement, key: string, shiftKey = false): Event => {
+  const event = new Event('keydown', { bubbles: true, cancelable: true });
+  Object.assign(event, { key, shiftKey });
+  target.dispatchEvent(event);
+  return event;
+};
+
+describe('useRowContextGesture — the keyboard', () => {
+  it('knows the two keys every platform opens a context menu on, and no others', () => {
+    expect(opensContextMenuKey({ key: 'ContextMenu', shiftKey: false })).toBe(true);
+    expect(opensContextMenuKey({ key: 'F10', shiftKey: true })).toBe(true);
+    expect(opensContextMenuKey({ key: 'F10', shiftKey: false })).toBe(false);
+    expect(opensContextMenuKey({ key: 'Enter', shiftKey: false })).toBe(false);
+  });
+
+  it('opens at the row on the Menu key and on Shift+F10, and keeps the browser out of it', async () => {
+    const harnessed = await harness();
+    const rect = { left: 40, bottom: 90, width: 300, top: 60, right: 340, height: 30, x: 40, y: 60 };
+    harnessed.row.getBoundingClientRect = () => rect as DOMRect;
+    expect(fireKey(harnessed.row, 'ContextMenu').defaultPrevented).toBe(true);
+    expect(fireKey(harnessed.row, 'F10', true).defaultPrevented).toBe(true);
+    expect(harnessed.opened).toHaveLength(2);
+    expect(harnessed.opened[0]).toMatchObject({ x: 72, y: 90 });
+    expect(must(harnessed.opened[1], 'second').trigger).toBe(harnessed.row);
+    await harnessed.unmount();
+  });
+
+  it('keeps to the row’s own width when the row is narrower than the usual offset', async () => {
+    const harnessed = await harness();
+    harnessed.row.getBoundingClientRect = () => ({ left: 10, bottom: 20, width: 20 }) as DOMRect;
+    fireKey(harnessed.row, 'ContextMenu');
+    expect(harnessed.opened[0]).toMatchObject({ x: 20, y: 20 });
+    await harnessed.unmount();
+  });
+
+  it('ignores every other key, leaving it to the row', async () => {
+    const harnessed = await harness();
+    expect(fireKey(harnessed.row, 'Enter').defaultPrevented).toBe(false);
+    expect(fireKey(harnessed.row, 'F10').defaultPrevented).toBe(false);
+    expect(harnessed.opened).toHaveLength(0);
+    await harnessed.unmount();
+  });
+});
+
+describe('useRowContextGesture — showing the hold', () => {
+  const pressing: boolean[] = [];
+  function Row({ open }: { open: OpenSessionMenu }) {
+    const gesture = useRowContextGesture(open, view, state => pressing.push(state));
+    return (
+      <button data-role="row" type="button" {...gesture}>
+        Row
+      </button>
+    );
+  }
+  const row = async () => {
+    pressing.length = 0;
+    const mounted = await mount(<Row open={() => undefined} />);
+    return { row: must(mounted.container.querySelector<HTMLElement>('[data-role="row"]'), 'row'), mounted };
+  };
+
+  it('says a hold began when a finger lands and ended when the menu arrives', async () => {
+    const held = await row();
+    await interact(() => firePointer(held.row, 'pointerdown'));
+    expect(pressing.at(-1)).toBe(true);
+    await interact(dwell);
+    expect(pressing.at(-1)).toBe(false);
+    await held.mounted.unmount();
+  });
+
+  it('says it ended when the finger lifts or drifts, and never starts one for a mouse', async () => {
+    const held = await row();
+    await interact(() => firePointer(held.row, 'pointerdown'));
+    await interact(() => firePointer(held.row, 'pointerup'));
+    expect(pressing.at(-1)).toBe(false);
+    await interact(() => firePointer(held.row, 'pointerdown', { clientX: 0, clientY: 0 }));
+    await interact(() => firePointer(held.row, 'pointermove', { clientX: 0, clientY: MOVE_CANCEL_PX + 5 }));
+    expect(pressing.at(-1)).toBe(false);
+    const before = pressing.length;
+    await interact(() => firePointer(held.row, 'pointerdown', { pointerType: 'mouse' }));
+    expect(pressing.length).toBe(before);
+    await held.mounted.unmount();
   });
 });
