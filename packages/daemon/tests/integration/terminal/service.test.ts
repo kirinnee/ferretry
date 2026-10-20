@@ -1,7 +1,15 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
 import { ManagedTerminalService, TerminalServiceError } from '../../../src/adapters/index.ts';
-import type { TerminalRecord, TerminalRuntimePort, TerminalSessionResolver } from '../../../src/lib/index.ts';
+import type {
+  TerminalCapture,
+  TerminalRecord,
+  TerminalRuntimePort,
+  TerminalSessionResolver,
+} from '../../../src/lib/index.ts';
+
+/** What the fake pane shows. */
+const SCREEN: TerminalCapture = { lines: ['ready $'], cols: 100, rows: 1, cursorX: 7, cursorY: 0, historySize: 0 };
 
 const base: TerminalRecord = {
   id: '0123456789ab',
@@ -49,9 +57,9 @@ class FakeRuntime implements TerminalRuntimePort {
   async write(_record: TerminalRecord, _bytes: Uint8Array): Promise<void> {
     this.calls.push('write');
   }
-  async capture(_record: TerminalRecord): Promise<Uint8Array> {
+  async capture(_record: TerminalRecord): Promise<TerminalCapture> {
     this.calls.push('capture');
-    return Uint8Array.of(27);
+    return SCREEN;
   }
   async text(_record: TerminalRecord, lines: number): Promise<string> {
     this.calls.push(`text:${String(lines)}`);
@@ -122,7 +130,7 @@ describe('ManagedTerminalService', () => {
     const renamed = await service.rename('session-a', created.id, ' shell ');
     const resized = await service.resize('session-a', created.id, 200, 40);
     await service.write('session-a', created.id, Uint8Array.of(13));
-    const captured = await service.capture('session-a', created.id);
+    const captured = await service.capture('session-a', created.id, 200);
     await service.close('session-a', created.id);
 
     // Assert
@@ -131,17 +139,19 @@ describe('ManagedTerminalService', () => {
     should(read.id).equal(created.id);
     should(renamed.title).equal('shell');
     should(resized).deepEqual({ cols: 200, rows: 40 });
-    should(captured).deepEqual(Uint8Array.of(27));
-    should(runtime.calls).containDeepOrdered([
+    should(captured).equal(SCREEN);
+    // A route lists tmux before it answers; a stream's write and capture act on the terminal the service
+    // already knows, so neither costs a `list` — that extra process used to sit in front of every echo.
+    should(runtime.calls).deepEqual([
+      'list',
       'create',
+      'list',
       'list',
       'list',
       'rename',
       'list',
       'resize',
-      'list',
       'write',
-      'list',
       'capture',
       'list',
       'kill',
@@ -183,6 +193,18 @@ describe('ManagedTerminalService', () => {
     // Act + Assert
     await should(service.create('session-a')).be.rejectedWith(TerminalServiceError);
     await should(relative.list('session-a')).be.rejectedWith(TerminalServiceError);
+  });
+  it("should still refuse a stream's write or capture once the lifecycle has closed its terminal", async () => {
+    // Arrange
+    const { runtime, service } = subject();
+    const created = await service.create('session-a');
+    await service.close('session-a', created.id);
+    runtime.calls.length = 0;
+
+    // Act + Assert — unknown to the service, so each falls back to a fresh list, which no longer has it.
+    await should(service.write('session-a', created.id, Uint8Array.of(13))).be.rejectedWith(TerminalServiceError);
+    await should(service.capture('session-a', created.id, 200)).be.rejectedWith(TerminalServiceError);
+    should(runtime.calls).deepEqual(['list', 'list']);
   });
 });
 

@@ -81,9 +81,18 @@ export interface RelaySocket {
   deserializeAttachment(): unknown;
 }
 
+/** The one write option this adapter uses — the Workers runtime's own name for it. */
+export interface RelayStoragePutOptions {
+  /**
+   * Let outgoing messages leave before this write is confirmed durable. Without it the runtime's
+   * OUTPUT GATE holds every message the object sends after the write until the write is confirmed.
+   */
+  readonly allowUnconfirmed?: boolean;
+}
+
 export interface RelayStorage {
   get<T>(key: string): Promise<T | undefined>;
-  put<T>(key: string, value: T): Promise<void>;
+  put<T>(key: string, value: T, options?: RelayStoragePutOptions): Promise<void>;
   setAlarm(scheduledTime: number): Promise<void>;
 }
 
@@ -513,7 +522,7 @@ export class RendezvousDurableObject {
       const relayedBytes = step.effects.some(effect => effect.kind === 'send' && effect.frame === decoded.frame)
         ? message.byteLength
         : 0;
-      await this.applyStep(step);
+      await this.applyStep(step, state);
       // A probe is the rendezvous talking to itself about the slot; it carries nobody's traffic.
       if (!isClaimProbe(decoded.frame)) this.meter(state.daemonId, relayedBytes);
     });
@@ -852,9 +861,22 @@ export class RendezvousDurableObject {
    * its own and the first failure is raised once the others have had their turn: nothing is
    * swallowed, and a genuine forwarding failure is still an error, just not one that also costs the
    * caller its accounting.
+   *
+   * THE WRITE IS WHAT A RELAYED FRAME WAITED FOR. Every forwarded frame moves a credit window, and the
+   * Workers runtime holds a message an object sends after a storage write until that write is confirmed
+   * durable — so every keystroke and every redraw used to cross the rendezvous only after a durable
+   * write had been confirmed. A step that changed nothing but a window (`windowOnly`) is therefore
+   * written `allowUnconfirmed`: the frame leaves at once and the counter is persisted behind it. What
+   * that gives up is stated in `docs/relay-protocol.md` §9 ("Forwarding does not wait for the
+   * write"): if the runtime fails to confirm such a write it resets the object, and a session that
+   * outlives the reset holding counters older than its traffic is ended (`4430`) by the first frame
+   * the restored window disagrees with. Nothing about the end-to-end channel depends on the counters.
+   * Every step that admits, ends or reshapes anything is still written confirmed, and a step that
+   * changed nothing at all — `unchangedFrom` is the state it was reduced from — is not written.
    */
-  private async applyStep(step: RendezvousStep): Promise<void> {
-    await this.objectState.storage.put(STATE_KEY, step.state);
+  private async applyStep(step: RendezvousStep, unchangedFrom?: RendezvousState): Promise<void> {
+    if (step.windowOnly === true) await this.objectState.storage.put(STATE_KEY, step.state, { allowUnconfirmed: true });
+    else if (step.state !== unchangedFrom) await this.objectState.storage.put(STATE_KEY, step.state);
     const sockets = this.socketsById();
     this.markHolder(step.state, sockets);
     const failures: unknown[] = [];

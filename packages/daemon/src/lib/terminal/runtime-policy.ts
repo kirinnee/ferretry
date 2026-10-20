@@ -46,13 +46,6 @@ export function hexInputChunks(
   return chunks;
 }
 
-export function terminalSnapshotFrame(captured: string, cursorX: number, cursorY: number): string {
-  const x = Number.isFinite(cursorX) ? Math.max(0, Math.trunc(cursorX)) : 0;
-  const y = Number.isFinite(cursorY) ? Math.max(0, Math.trunc(cursorY)) : 0;
-  const paneText = captured.replace(/\n$/u, '').replaceAll('\n', '\r\n');
-  return `\u001b[3J\u001b[2J\u001b[H${paneText}\u001b[${y + 1};${x + 1}H`;
-}
-
 export function terminalMetadataIsSane(value: TerminalRuntimeMetadata): boolean {
   return (
     /^[a-f0-9]{12}$/u.test(value.id) &&

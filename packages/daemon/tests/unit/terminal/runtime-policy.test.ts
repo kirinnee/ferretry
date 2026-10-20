@@ -4,7 +4,6 @@ import {
   hexInputChunks,
   terminalMetadataIsSane,
   terminalPaneTarget,
-  terminalSnapshotFrame,
   terminalTmuxSessionName,
 } from '../../../src/lib/terminal/index.ts';
 
@@ -36,14 +35,6 @@ describe('terminal runtime policy', () => {
     // Act + Assert
     should(() => hexInputChunks(new Uint8Array(), 0)).throw(RangeError);
     should(() => hexInputChunks(new Uint8Array(), 0.5)).throw(RangeError);
-  });
-
-  it('should build a self-contained redraw frame with normalized cursor coordinates', () => {
-    // Act
-    const frame = terminalSnapshotFrame('one\ntwo\n', -4, Number.NaN);
-
-    // Assert
-    should(frame).equal('\u001b[3J\u001b[2J\u001b[Hone\r\ntwo\u001b[1;1H');
   });
 
   it('should accept only plausible recovered terminal metadata', () => {

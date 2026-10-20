@@ -17,6 +17,7 @@ import {
   decodeControlMessage,
   encodeClaim,
   encodeControlMessage,
+  encodeCreditPayload,
   encodeFrame,
   FRAME_KINDS,
   fromBase64UrlFixed,
@@ -203,6 +204,39 @@ describe('rendezvous durable object', () => {
     const back: RelayFrame = { kind: FRAME_KINDS.data, sessionId, sequence: 1, payload: new Uint8Array([8]) };
     await harness.object.webSocketMessage(daemonSocket, bytesOf(back));
     should(clientSocket.drain()).deepEqual([back]);
+  });
+
+  it('should not hold a relayed frame behind a confirmed write, and still confirm what admits a session', async () => {
+    // On Cloudflare a message sent after an ordinary write waits until that write is durable. Every
+    // relayed frame moves a credit window, so every keystroke used to wait for one. A frame's write is
+    // made `allowUnconfirmed`; a claim and a session open are not.
+    const harness = makeObject();
+    const { identity, daemonSocket } = await claimRendezvous(harness);
+    const claimWrites = [...harness.objectState.storage.writes];
+    daemonSocket.drain();
+    const { clientSocket, sessionId } = await joinClient(harness, identity.daemonId);
+    const openWrites = harness.objectState.storage.writes.slice(claimWrites.length);
+    daemonSocket.drain();
+    harness.objectState.storage.writes.length = 0;
+
+    await harness.object.webSocketMessage(
+      clientSocket,
+      bytesOf({ kind: FRAME_KINDS.data, sessionId, sequence: 1, payload: new Uint8Array([7]) }),
+    );
+    await harness.object.webSocketMessage(
+      daemonSocket,
+      bytesOf({ kind: FRAME_KINDS.credit, sessionId, sequence: 0, payload: encodeCreditPayload(1) }),
+    );
+
+    should(claimWrites.some(write => !write.unconfirmed)).be.true();
+    should(openWrites.length).be.above(0);
+    should(openWrites.every(write => !write.unconfirmed)).be.true();
+    should(harness.objectState.storage.writes).deepEqual([
+      { key: 'rendezvous', unconfirmed: true },
+      { key: 'rendezvous', unconfirmed: true },
+    ]);
+    should(daemonSocket.drain()).have.length(1);
+    should(clientSocket.drain()).have.length(1);
   });
 
   it('should close a socket that speaks text, or sends something that is not a frame', async () => {
@@ -474,6 +508,27 @@ describe('hosted rendezvous enforcement', () => {
 
     should(daemonSocket.drain().map(controlOf)).deepEqual([{ t: 'held' }]);
     should(hosted.calls.filter(call => call.path === '/internal/meter')).be.empty();
+  });
+
+  it('should not write anything for a probe, which changes nothing it stores', async () => {
+    // A write that changed nothing would still close the output gate in front of the `held` answer.
+    const harness = makeObject();
+    const { daemonSocket } = await claimRendezvous(harness, undefined, '?features=claim-probe');
+    daemonSocket.drain();
+    harness.objectState.storage.writes.length = 0;
+
+    await harness.object.webSocketMessage(
+      daemonSocket,
+      bytesOf({
+        kind: FRAME_KINDS.control,
+        sessionId: RENDEZVOUS_SESSION_ID,
+        sequence: 0,
+        payload: encodeControlMessage({ t: 'probe' }),
+      }),
+    );
+
+    should(daemonSocket.drain().map(controlOf)).deepEqual([{ t: 'held' }]);
+    should(harness.objectState.storage.writes).deepEqual([]);
   });
 
   it('should carry live sessions through a meter outage, re-report the bytes, and fail closed only past the grace', async () => {

@@ -7,10 +7,29 @@ import {
   type TerminalStreamTimer,
 } from '../../../src/adapters/index.ts';
 import {
-  TERMINAL_INPUT_REDRAW_MS,
+  TERMINAL_INPUT_REDRAW_LADDER_MS,
   TERMINAL_MAX_BUFFERED_OUTPUT_BYTES,
+  TERMINAL_POLL_HISTORY_LINES,
+  TERMINAL_REATTACH_LINES,
   TERMINAL_REDRAW_POLL_MS,
+  type TerminalCapture,
 } from '../../../src/lib/index.ts';
+
+const ESC = '\u001b';
+/** A pane of `lines`, all of them visible, at the size a 100×N viewer reports. */
+const pane = (lines: readonly string[], cursorX = 0, cursorY = 0): TerminalCapture => ({
+  lines,
+  cols: 100,
+  rows: lines.length,
+  cursorX,
+  cursorY,
+  historySize: 0,
+});
+/** The smallest pane the protocol lets a viewer report: five rows, a prompt on the first. */
+const PROMPT = pane(['$ ', '', '', '', ''], 2);
+/** The complete redraw of {@link PROMPT}: erase everything, paint both rows, park the cursor. */
+const PROMPT_REDRAW = `${ESC}[3J${ESC}[2J${ESC}[H$ \r\n\r\n\r\n\r\n${ESC}[1;3H`;
+const text = (frames: readonly Uint8Array[]): string[] => frames.map(frame => new TextDecoder().decode(frame));
 
 class FakeService implements TerminalStreamService {
   readonly calls: string[] = [];
@@ -31,11 +50,16 @@ class FakeService implements TerminalStreamService {
     this.calls.push(`resize:${cols}x${rows}`);
     return undefined;
   }
-  async capture(): Promise<Uint8Array> {
+  /** What the next capture returns. */
+  screen: TerminalCapture = PROMPT;
+  /** How much history each capture asked for, in order. */
+  readonly depths: number[] = [];
+  async capture(_sessionId: string, _terminalId: string, historyLines: number): Promise<TerminalCapture> {
     this.calls.push('capture');
+    this.depths.push(historyLines);
     if (this.holding) await new Promise<void>(resolve => (this.held = resolve));
     if (this.fail) throw new Error('no terminal');
-    return Uint8Array.of(27);
+    return this.screen;
   }
 }
 
@@ -77,7 +101,9 @@ describe('TerminalStreamBridge', () => {
     await Bun.sleep(1);
 
     // Assert
-    should(sent).deepEqual([Uint8Array.of(27), Uint8Array.of(27)]);
+    // Both complete: the first because nothing came before it, the second because the resize reflowed
+    // the viewer, so nothing it showed before may be a delta's starting point.
+    should(text(sent)).deepEqual([PROMPT_REDRAW, PROMPT_REDRAW]);
     should(service.calls.includes('write:13')).be.true();
     should(service.calls.includes('resize:120x40')).be.true();
     should(service.calls.filter(call => call === 'capture')).have.length(2);
@@ -215,7 +241,7 @@ describe('TerminalStreamBridge', () => {
 
     // Assert
     should(whileBehind).deepEqual([0, 0]);
-    should(sent).deepEqual([Uint8Array.of(27)]);
+    should(text(sent)).deepEqual([PROMPT_REDRAW]);
     should(service.calls).deepEqual(['capture']);
   });
 
@@ -286,9 +312,109 @@ describe('TerminalStreamBridge', () => {
     scheduler.callback?.();
     await Bun.sleep(1);
 
-    // Assert — the armed tick was replaced by a short one, and the poll after it is ordinary again.
+    // Assert — the armed tick was replaced by the first rung, the next capture by the second, and the
+    // poll after the last rung is ordinary again.
     should(scheduler.cleared).be.true();
-    should(scheduler.delays).deepEqual([TERMINAL_REDRAW_POLL_MS, TERMINAL_INPUT_REDRAW_MS, TERMINAL_REDRAW_POLL_MS]);
-    should(TERMINAL_INPUT_REDRAW_MS).be.below(TERMINAL_REDRAW_POLL_MS);
+    should(scheduler.delays).deepEqual([TERMINAL_REDRAW_POLL_MS, ...TERMINAL_INPUT_REDRAW_LADDER_MS.slice(0, 2)]);
+    for (let rung = 2; rung <= TERMINAL_INPUT_REDRAW_LADDER_MS.length; rung += 1) {
+      scheduler.callback?.();
+      await Bun.sleep(1);
+    }
+    should(scheduler.delays).deepEqual([
+      TERMINAL_REDRAW_POLL_MS,
+      ...TERMINAL_INPUT_REDRAW_LADDER_MS,
+      TERMINAL_REDRAW_POLL_MS,
+    ]);
+    should(TERMINAL_INPUT_REDRAW_LADDER_MS[0]).equal(0);
+    should(Math.max(...TERMINAL_INPUT_REDRAW_LADDER_MS)).be.below(TERMINAL_REDRAW_POLL_MS);
+  });
+
+  it("should send a viewer of the pane's own size only the row a keystroke changed", async () => {
+    // A keystroke used to cost a complete redraw — the whole history and screen, for one character.
+    // Arrange
+    const service = new FakeService();
+    const scheduler = new FakeScheduler();
+    const sent: Uint8Array[] = [];
+    const bridge = new TerminalStreamBridge(
+      service,
+      'session-a',
+      '0123456789ab',
+      { send: bytes => sent.push(bytes), close: () => undefined, bufferedBytes: () => 0 },
+      scheduler,
+    );
+
+    // Act — the viewer says its size (the pane's), the first redraw lands, then one character is typed.
+    await bridge.open();
+    bridge.fromClient(JSON.stringify({ type: 'resize', cols: 100, rows: 5 }));
+    await Bun.sleep(1);
+    scheduler.callback?.();
+    await Bun.sleep(1);
+    service.screen = pane(['$ a', '', '', '', ''], 3);
+    bridge.fromClient(Uint8Array.of(97));
+    await Bun.sleep(1);
+    scheduler.callback?.();
+    await Bun.sleep(1);
+
+    // Assert — after the two complete redraws (attach, then the resize), one row and a cursor move; and
+    // only the complete redraws read the whole history, the keystroke's capture a window of it.
+    should(text(sent)).deepEqual([PROMPT_REDRAW, PROMPT_REDRAW, `${ESC}[1;1H${ESC}[0m${ESC}[2K$ a${ESC}[1;4H`]);
+    should(service.depths).deepEqual([TERMINAL_REATTACH_LINES, TERMINAL_REATTACH_LINES, TERMINAL_POLL_HISTORY_LINES]);
+  });
+
+  it('should read the whole history again when a poll finds the viewer needs a complete redraw', async () => {
+    // A delta needs a window of history; a complete redraw is worth all of it. A viewer that never said
+    // its size can only be sent complete redraws, so its poll's window is followed by a full capture.
+    // Arrange
+    const service = new FakeService();
+    const scheduler = new FakeScheduler();
+    const sent: Uint8Array[] = [];
+    const bridge = new TerminalStreamBridge(
+      service,
+      'session-a',
+      '0123456789ab',
+      { send: bytes => sent.push(bytes), close: () => undefined, bufferedBytes: () => 0 },
+      scheduler,
+    );
+
+    // Act
+    await bridge.open();
+    service.screen = pane(['$ a', '', '', '', ''], 3);
+    scheduler.callback?.();
+    await Bun.sleep(1);
+
+    // Assert
+    should(service.depths).deepEqual([TERMINAL_REATTACH_LINES, TERMINAL_POLL_HISTORY_LINES, TERMINAL_REATTACH_LINES]);
+    should(text(sent)).deepEqual([PROMPT_REDRAW, `${ESC}[3J${ESC}[2J${ESC}[H$ a\r\n\r\n\r\n\r\n${ESC}[1;4H`]);
+  });
+
+  it('should drop the second capture of a viewer that left while the first was being read', async () => {
+    // Arrange — the full capture is the one suspended; the viewer leaves during it.
+    const service = new FakeService();
+    const scheduler = new FakeScheduler();
+    const sent: Uint8Array[] = [];
+    const bridge = new TerminalStreamBridge(
+      service,
+      'session-a',
+      '0123456789ab',
+      { send: bytes => sent.push(bytes), close: () => undefined, bufferedBytes: () => 0 },
+      scheduler,
+    );
+    await bridge.open();
+    service.screen = pane(['$ a', '', '', '', ''], 3);
+    const window = service.capture.bind(service);
+    service.capture = async (sessionId, terminalId, historyLines) => {
+      if (historyLines === TERMINAL_REATTACH_LINES) service.holding = true;
+      return await window(sessionId, terminalId, historyLines);
+    };
+
+    // Act
+    scheduler.callback?.();
+    await Bun.sleep(1);
+    bridge.close();
+    service.release();
+    await Bun.sleep(1);
+
+    // Assert — the attach's redraw only; the complete redraw the second capture was for went nowhere.
+    should(text(sent)).deepEqual([PROMPT_REDRAW]);
   });
 });

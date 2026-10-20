@@ -71,6 +71,8 @@
         "harness/tasks-pane-benchmark.tsx",
         "harness/parakeet-smoke.ts",
         "harness/parakeet-smoke-page.ts",
+        "harness/relay-terminal-bench.ts",
+        "harness/relay-terminal-bench-page.ts",
         "harness/parakeet-near-live-smoke.ts",
         "harness/parakeet-near-live-smoke-page.ts",
         "harness/fy-render-safari/probe.ts",

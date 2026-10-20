@@ -18,6 +18,7 @@ import type {
   BrowserSessionLauncher,
   SessionLifecycleLauncher,
   SessionLifecycleRecord,
+  TerminalCapture,
   TerminalRecord,
   TerminalRuntimePort,
 } from '../../../src/lib/index.ts';
@@ -104,8 +105,8 @@ class RecordingTerminals implements TerminalRuntimePort {
   async write(record: TerminalRecord, bytes: Uint8Array): Promise<void> {
     this.typed.set(record.id, `${this.typed.get(record.id) ?? ''}${new TextDecoder().decode(bytes)}`);
   }
-  async capture(): Promise<Uint8Array> {
-    return new TextEncoder().encode('$ ');
+  async capture(): Promise<TerminalCapture> {
+    return { lines: ['$ '], cols: 80, rows: 1, cursorX: 2, cursorY: 0, historySize: 0 };
   }
   async text(record: TerminalRecord): Promise<string> {
     return `$ ${this.typed.get(record.id) ?? ''}`;
