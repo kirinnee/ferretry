@@ -658,11 +658,9 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.fy-handoff-via {
-  display: flex;
-  justify-content: flex-end;
-}
-.fy-handoff-via .fy-handoff-via-button {
+/* The delivery note is the LEFT end of the foot's one line (`MessageFooter`'s `lead`); the time and ticks
+   stay at the right, so a bubble with extra meta spends one row on it, not two. */
+.fy-receipt-line .fy-handoff-via-button {
   align-items: center;
   background: transparent;
   border: 0;
@@ -673,7 +671,7 @@
   font-size: 11px;
   gap: 3px;
   line-height: 16px;
-  margin: 0;
+  margin: 0 auto 0 0;
   min-height: 0;
   min-width: 0;
   padding: 0;
@@ -692,12 +690,8 @@
   flex: 0 0 auto;
   margin-top: 2px;
 }
-.fy-handoff-note[data-handoff-note='explained'] {
-  justify-content: flex-end;
-  text-align: right;
-}
 @media (pointer: coarse) {
-  .fy-handoff-via .fy-handoff-via-button::after {
+  .fy-receipt-line .fy-handoff-via-button::after {
     content: '';
     height: var(--target-floor, 44px);
     left: 50%;
@@ -2074,6 +2068,44 @@ html[data-keyboard='open'] .fy-composer[data-composer-layout='phone'] .fy-compos
 .fy-system-text p {
   display: inline;
   margin: 0;
+}
+/* A notice that travelled as a file: a gear, the headline, and the agent-facing text behind "details". */
+.fy-system-icon {
+  align-self: center;
+  color: var(--fy-muted);
+  flex: 0 0 auto;
+}
+.fy-system-details {
+  background: transparent;
+  border: 0;
+  color: var(--fy-muted);
+  cursor: pointer;
+  font: inherit;
+  margin: 0;
+  min-height: 0;
+  min-width: 0;
+  padding: 0;
+  position: relative;
+  text-decoration: underline;
+  text-decoration-color: var(--fy-border);
+  text-underline-offset: 2px;
+}
+.fy-system-detail {
+  color: var(--fy-muted);
+  flex: 1 0 100%;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+@media (pointer: coarse) {
+  :root button.fy-system-details::after {
+    content: '';
+    height: var(--target-floor, 44px);
+    left: 50%;
+    position: absolute;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    width: max(100%, var(--target-floor, 44px));
+  }
 }
 /* The quiet links keep the transcript's density on a touch screen: each stays its own size and gets the
    same invisible, centred 44px hit area the transcript's other disclosures get. */

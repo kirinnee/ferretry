@@ -55,13 +55,18 @@ export interface AssembleInflightReportInput {
   readonly blindSpots?: readonly string[];
 }
 
-const activeStatuses: ReadonlySet<SessionStatus> = new Set([
+const busyStatuses: ReadonlySet<SessionStatus> = new Set([
   'starting',
   'running',
   'thinking',
   'tool_running',
   'retrying',
 ]);
+
+/** The session is working a turn right now. */
+export function isBusyStatus(status: SessionStatus): boolean {
+  return busyStatuses.has(status);
+}
 
 /**
  * Combines observable signals into a fail-closed migration safety report.
@@ -75,7 +80,7 @@ export function assembleInflightReport(input: AssembleInflightReportInput): Infl
   const processes = inspection.kind === 'observed' ? inspection.processes : [];
   const blindSpots: string[] = [...(input.blindSpots ?? [])];
   if (inspection.kind === 'unobservable') blindSpots.push(inspection.reason);
-  const claimsWork = activeStatuses.has(input.status) || input.subprocessSince !== undefined;
+  const claimsWork = busyStatuses.has(input.status) || input.subprocessSince !== undefined;
   const observedItems = input.openTools.length + processes.length + discrepancy;
   if (inspection.kind === 'observed' && claimsWork && observedItems === 0)
     blindSpots.push(`the session reports ${input.status} work but nothing was observable in its pane`);
@@ -93,7 +98,7 @@ export function assembleInflightReport(input: AssembleInflightReportInput): Infl
   return {
     status: input.status,
     turn: input.turn,
-    empty: blindSpots.length === 0 && !activeStatuses.has(input.status) && !hasInflight,
+    empty: blindSpots.length === 0 && !busyStatuses.has(input.status) && !hasInflight,
     openTools: input.openTools,
     processes,
     codexBackgroundTerminals: discrepancy,

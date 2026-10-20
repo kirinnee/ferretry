@@ -115,3 +115,13 @@ export function parseFerretryNotice(text: string): string | null {
   const notice = trimmed.slice(NOTICE_TAG.length).trim();
   return notice === '' ? null : notice;
 }
+
+/**
+ * A notice as the app draws it: its first paragraph is the headline a person reads, and anything
+ * after the first blank line is addressed to the agent — shown only behind a "details" control.
+ */
+export function splitFerretryNotice(notice: string): { readonly headline: string; readonly details: string | null } {
+  const [headline = '', ...rest] = notice.split(/\n[^\S\n]*\n/u);
+  const details = rest.join('\n\n').trim();
+  return { headline: headline.trim(), details: details === '' ? null : details };
+}

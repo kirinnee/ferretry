@@ -283,3 +283,64 @@ describe('a ferret’s message handed over through a file', () => {
     await view.unmount();
   });
 });
+
+describe('the delivery note shares the foot’s one line', () => {
+  it('puts "via turn file" on the same row as the time, with its explanation under the row', async () => {
+    const handoffs = source();
+    const view = await mount(inSession(handoffs.value));
+    await interact(() => handoffs.pending[0]?.resolve(HANDOFF));
+
+    const line = must(view.container.querySelector<HTMLElement>('[data-message-footer]'), 'the foot');
+    const via = must(line.querySelector<HTMLButtonElement>('.fy-handoff-via-button'), 'via turn file');
+    expect(line.querySelector('time')).not.toBeNull();
+    expect(view.container.querySelectorAll('[data-message-footer]')).toHaveLength(1);
+    expect(line.firstElementChild).toBe(via);
+    expect(via.getAttribute('aria-expanded')).toBe('false');
+
+    await interact(() => via.click());
+    expect(via.getAttribute('aria-expanded')).toBe('true');
+    expect(line.nextElementSibling?.getAttribute('data-handoff-note')).toBe('explained');
+    await view.unmount();
+  });
+});
+
+describe('a Ferretry notice handed over through a file', () => {
+  const NOTICE: SessionHandoff = {
+    name: 'turn-008',
+    message:
+      '[ferretry] Restarted mid-turn — 1 command was interrupted.\n\n' +
+      'This notice is from Ferretry, not from the owner. Before re-running anything, read /state/migration-inflight.md.',
+    attachments: [],
+  };
+
+  it('is a system row with its headline, never the owner’s bubble, and the agent text behind details', async () => {
+    const handoffs = source();
+    const view = await mount(inSession(handoffs.value));
+    await interact(() => handoffs.pending[0]?.resolve(NOTICE));
+
+    const row = must(view.container.querySelector<HTMLElement>('[data-system-notice]'), 'the notice row');
+    expect(view.container.querySelector('.fy-message-user')).toBeNull();
+    expect(row.textContent).toContain('Restarted mid-turn — 1 command was interrupted.');
+    expect(row.textContent).not.toContain('not from the owner');
+    expect(row.querySelector('[data-system-detail]')).toBeNull();
+
+    const details = must(row.querySelector<HTMLButtonElement>('.fy-system-details'), 'details');
+    await interact(() => details.click());
+    expect(must(row.querySelector('[data-system-detail]'), 'the detail').textContent).toContain('not from the owner');
+    await interact(() => details.click());
+    expect(row.querySelector('[data-system-detail]')).toBeNull();
+    await view.unmount();
+  });
+
+  it('has no details control when the notice is only its headline', async () => {
+    const handoffs = source();
+    const view = await mount(inSession(handoffs.value));
+    await interact(() =>
+      handoffs.pending[0]?.resolve({ ...NOTICE, message: '[ferretry] Your message did not arrive.' }),
+    );
+    const row = must(view.container.querySelector<HTMLElement>('[data-system-notice]'), 'the notice row');
+    expect(row.textContent).toContain('Your message did not arrive.');
+    expect(row.querySelector('.fy-system-details')).toBeNull();
+    await view.unmount();
+  });
+});

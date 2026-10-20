@@ -236,3 +236,40 @@ describe('transcriptItems', () => {
     expect(transcriptItems([{ id: 'x', kind: 'user', text: 'alone' }])[0]?.answered).toBeUndefined();
   });
 });
+
+describe('MessageFooter with a lead', () => {
+  const lead = <span data-lead="">via turn file</span>;
+
+  test('draws the lead alone on the line when nothing recorded a time', () => {
+    const footer = render(<MessageFooter lead={lead} />);
+    expect(footer.root.findAllByProps({ 'data-lead': '' })).toHaveLength(1);
+    expect(footer.root.findAllByType('button')).toHaveLength(0);
+  });
+
+  test('puts the lead ahead of the time on the same line, and its detail under the line', () => {
+    const footer = render(
+      <MessageFooter
+        clock={{ short: '13:58', full: '18 Oct 2026, 13:58:44 JST' }}
+        lead={lead}
+        leadDetail={<p data-lead-detail="">why</p>}
+      />,
+    );
+    expect(footer.root.findAllByProps({ 'data-message-footer': '' })).toHaveLength(1);
+    expect(footer.root.findAllByProps({ 'data-lead': '' })).toHaveLength(1);
+    expect(footer.root.findAllByProps({ 'data-lead-detail': '' })).toHaveLength(1);
+  });
+
+  test('shares the line with a receipt too', () => {
+    const footer = render(
+      <MessageFooter
+        clock={{ short: '14:02', full: '14:02:55' }}
+        lead={lead}
+        leadDetail={<p data-lead-detail="">why</p>}
+        record={record({ fate: 'delivered' })}
+      />,
+    );
+    expect(footer.root.findAllByProps({ 'data-message-footer': '' })).toHaveLength(1);
+    expect(footer.root.findAllByProps({ 'data-lead': '' })).toHaveLength(1);
+    expect(footer.root.findAllByProps({ 'data-lead-detail': '' })).toHaveLength(1);
+  });
+});
