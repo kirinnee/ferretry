@@ -212,6 +212,8 @@ export const PACK_NEW_PATH = '/v1/pack/new';
  * - `probe_failed`: the "reply OK" check did not answer OK in time.
  * - `no_candidate`: nothing in the guide can run here now.
  * - `jev_unavailable` / `jev_cap_reached`: Jev decides, and could not.
+ * - `scratch_cwd`: the folder named is a temporary or scratch folder, not a project; a sub-ferret runs in
+ *   its parent's folder, so this comes only from an explicit `--cwd` or a start with no parent.
  */
 export const PACK_REFUSAL_CODES = [
   'pack_off',
@@ -227,6 +229,7 @@ export const PACK_REFUSAL_CODES = [
   'no_candidate',
   'jev_unavailable',
   'jev_cap_reached',
+  'scratch_cwd',
 ] as const;
 export const PackRefusalCodeSchema = z.enum(PACK_REFUSAL_CODES);
 export type PackRefusalCode = z.infer<typeof PackRefusalCodeSchema>;
@@ -295,6 +298,8 @@ export const PackNewRequestSchema = z
     auto: z.boolean().optional(),
     useCase: GuideUseCaseIdSchema.optional(),
     cwd: NonEmpty.optional(),
+    /** Run in a temporary or scratch folder anyway (`--allow-scratch`); refused `scratch_cwd` otherwise. */
+    allowScratch: z.boolean().optional(),
     name: NonEmpty.max(120).optional(),
     mode: InteractionModeSchema.optional(),
   })

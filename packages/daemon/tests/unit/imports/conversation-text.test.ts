@@ -139,6 +139,21 @@ describe('what the owner said', () => {
     should(spoken).deepEqual(['Fix the flaky upload test', 'Now ship it']);
     should(spokenMessages([user('Hello')])).deepEqual(['Hello']);
   });
+
+  it("should never read the harness's own events as the owner's words", () => {
+    // Arrange — Claude Code's wording for a subagent's message, which no tag rule catches.
+    const harness: TranscriptEvent = {
+      ...user('Another Claude session sent a message:\n<agent-message from="a1">\nDone.\n</agent-message>'),
+      inputSource: 'harness',
+    };
+
+    // Act & Assert
+    should(spokenMessages([harness, user('Now ship it')])).deepEqual(['Now ship it']);
+    should(recentExchanges([user('one'), assistant('reply one'), harness, assistant('reply two')])).deepEqual([
+      { role: 'user', text: 'one' },
+      { role: 'assistant', text: 'reply two' },
+    ]);
+  });
 });
 
 describe('the last exchanges', () => {

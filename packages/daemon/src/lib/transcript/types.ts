@@ -42,7 +42,13 @@ export interface TranscriptEventMetadata {
   readonly turnId?: string;
   readonly phase?: string;
   readonly stopReason?: string;
-  readonly inputSource?: 'native-queue';
+  /**
+   * How a user message reached the harness when it was not typed into the composer: `native-queue` is a
+   * prompt Claude queued while busy and drained later, and `harness` is text the HARNESS wrote into the
+   * user channel itself — a background-task notification, a subagent's or coordinator's message, a meta
+   * record. A `harness` message is never something the owner said (`isOwnerMessage`).
+   */
+  readonly inputSource?: 'native-queue' | 'harness';
   readonly blockIndex?: number;
 }
 

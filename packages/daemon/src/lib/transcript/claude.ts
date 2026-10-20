@@ -14,11 +14,11 @@ import type {
   TranscriptUsageEvent,
 } from './types.ts';
 import {
+  normalizeTranscriptQuestions,
   transcriptJsonValue,
   transcriptNullableString,
   transcriptNumber,
   transcriptObject,
-  normalizeTranscriptQuestions,
   transcriptRecordIssue,
   transcriptString,
 } from './value.ts';
@@ -84,6 +84,20 @@ function claudeAttachment(block: Record<string, unknown>): TranscriptAttachment 
     };
   }
   return uri?.trim() || data?.trim() ? { kind: 'file', name, mediaType, uri, data } : undefined;
+}
+
+/**
+ * Whether Claude Code wrote this user record itself rather than taking it from the person.
+ *
+ * Claude states it on the record: `origin.kind` names who produced a prompt (`human` for the person;
+ * `task-notification`, `peer`, `coordinator` for the harness's own events), and `isMeta` marks a record
+ * its own UI never shows as a message (an image's size line, a skill's body, a scheduled prompt). A
+ * record carrying neither is the person's, which keeps every older transcript reading as it did.
+ */
+function harnessWritten(record: Record<string, unknown>): boolean {
+  if (record.isMeta === true) return true;
+  const kind = transcriptString(transcriptObject(record.origin)?.kind);
+  return kind !== undefined && kind !== '' && kind !== 'human';
 }
 
 function isClaudeAttachmentType(type: string): boolean {
@@ -266,11 +280,12 @@ export class ClaudeTranscriptParser implements TranscriptParser {
 
     const content = message.content ?? record.content;
     const blocks = Array.isArray(content) ? content : content === undefined ? [] : [content];
+    const source = role === 'user' && harnessWritten(record) ? ({ inputSource: 'harness' } as const) : {};
     for (let blockIndex = 0; blockIndex < blocks.length; blockIndex += 1) {
       const value = blocks[blockIndex];
       const blockMetadata = metadata(role, blockIndex);
       if (typeof value === 'string') {
-        events.push({ ...blockMetadata, kind: 'message', text: value });
+        events.push({ ...blockMetadata, ...source, kind: 'message', text: value });
         continue;
       }
 
@@ -290,7 +305,7 @@ export class ClaudeTranscriptParser implements TranscriptParser {
       }
 
       if (blockType === 'text' && typeof block.text === 'string') {
-        events.push({ ...blockMetadata, kind: 'message', text: block.text });
+        events.push({ ...blockMetadata, ...source, kind: 'message', text: block.text });
         continue;
       }
       if (blockType === 'thinking' && role === 'assistant' && typeof block.thinking === 'string') {

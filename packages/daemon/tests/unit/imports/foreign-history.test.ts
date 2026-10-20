@@ -83,6 +83,35 @@ describe('ForeignHistoryImporter', () => {
     expect(listing.conversations.some(conversation => conversation.harness === 'codex')).toBe(true);
   });
 
+  test("titles a conversation by the owner's first words, never the harness's own records", async () => {
+    const source = `${CLAUDE_ROOT}/project/background.jsonl`;
+    const record = (extra: Record<string, unknown>, content: string) =>
+      JSON.stringify({ type: 'user', sessionId: 'background', message: { role: 'user', content }, ...extra });
+    const lines = [
+      record(
+        { origin: { kind: 'task-notification' } },
+        '<task-notification>\n<status>completed</status>\n</task-notification>',
+      ),
+      record({}, '<command-name>/clear</command-name>'),
+      record({ origin: { kind: 'human' } }, '  Fix the   upload test  '),
+    ];
+    const titled = async (text: string) =>
+      (
+        await importer(
+          new FixtureFiles(
+            {
+              [CLAUDE_ROOT]: [{ name: 'project', kind: 'directory' }],
+              [`${CLAUDE_ROOT}/project`]: [{ name: 'background.jsonl', kind: 'file' }],
+            },
+            { [source]: text },
+          ),
+        ).list()
+      ).conversations[0]?.title;
+
+    expect(await titled(`${lines.join('\n')}\n`)).toBe('Fix the upload test');
+    expect(await titled(`${lines.slice(0, 2).join('\n')}\n`)).toBe('background.jsonl');
+  });
+
   test('reports malformed history as skipped rather than an empty conversation', async () => {
     const source = `${CLAUDE_ROOT}/project/damaged.jsonl`;
     const history = importer(

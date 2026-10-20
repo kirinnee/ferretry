@@ -94,7 +94,7 @@ const cases: SchemaCase[] = [
   {
     name: 'automatic new request',
     schema: pack.PackNewRequestSchema,
-    value: { task: 'do it', auto: true, useCase: 'bulk' },
+    value: { task: 'do it', auto: true, useCase: 'bulk', allowScratch: true },
   },
   { name: 'attempt', schema: pack.PackAttemptSchema, value: attempt },
   {
@@ -198,5 +198,6 @@ describe('packConfigFromFile', () => {
   it('should start from a guide file that names no use case, so the derived guide is in effect', () => {
     should(pack.DEFAULT_MODELS_GUIDE_FILE).deepEqual({});
     should(pack.PACK_REFUSAL_CODES).containEql('limit_reached');
+    should(pack.PACK_REFUSAL_CODES).containEql('scratch_cwd');
   });
 });
