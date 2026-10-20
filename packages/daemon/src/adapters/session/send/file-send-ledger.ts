@@ -66,9 +66,11 @@ export class FileSendLedger implements SendLedger {
 
   async settle(id: SessionId, sendId: string, patch: SendSettlement): Promise<SendRecord | undefined> {
     const current = (await this.all(id)).get(sendId);
-    // Neither a tombstone nor a send a person cancelled is ever settled again: a tracker look that
-    // began before the cancel must not write a stale fate over it.
-    if (current === undefined || current.fate === 'withdrawn' || current.fate === 'cancelled') return undefined;
+    // A tombstone is never settled again, and neither is a cancelled send — a tracker look that began
+    // before the cancel must not write a stale fate over it — EXCEPT by proof it was delivered: then
+    // the cancel came too late, and saying so is the truth rather than a stale fate.
+    if (current === undefined || current.fate === 'withdrawn') return undefined;
+    if (current.fate === 'cancelled' && patch.fate !== 'delivered') return undefined;
     const merged: Record<string, unknown> = { ...current, ...patch };
     // `undefined` in a patch CLEARS a field: a re-attempt must not carry the previous attempt's
     // deadline or reason forward, and JSON would silently keep the old value otherwise.

@@ -107,6 +107,9 @@ function recordingSource(
     follow: () => {
       throw new Error('a transfer never follows a transcript');
     },
+    window: () => {
+      throw new Error('a transfer reads a whole transcript, never a window of one');
+    },
   };
 }
 

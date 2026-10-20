@@ -12,7 +12,14 @@
  */
 
 import type { ConversationMessagePoint } from '@ferretry/protocol';
-import type { TranscriptBatch, TranscriptEvent, TranscriptHarness, TranscriptSource } from '../../transcript/types.ts';
+import type {
+  TranscriptBatch,
+  TranscriptEvent,
+  TranscriptHarness,
+  TranscriptSource,
+  TranscriptWindow,
+  TranscriptWindowStart,
+} from '../../transcript/types.ts';
 import {
   type ConversationDigest,
   ConversationDigestError,
@@ -40,6 +47,63 @@ export interface TranscriptDigestJournal {
 /** The most recent window of a transcript, which is all any in-flight question needs. */
 export const DEFAULT_TRANSCRIPT_TAIL = 400;
 
+/**
+ * How many bytes from a transcript's END a tail reads.
+ *
+ * A tail answers "what is happening now", and what is happening now is at the end of the file. It
+ * used to be the last N events of a read that started at byte zero and stopped at a cap, so a
+ * conversation bigger than the cap — an adopted one, a long-lived one — answered every such question
+ * from history: the turn state, the pending question, the logs all described an old moment and said
+ * nothing was wrong. The tail is now read from the end, and its cost no longer grows with the file.
+ */
+export const DEFAULT_TRANSCRIPT_TAIL_BYTES = 16 * 1024 * 1024;
+
+/**
+ * The steps a drained window may take before it stops: a file growing faster than a step reads
+ * would otherwise keep one caller reading forever.
+ */
+const WINDOW_STEP_LIMIT = 64;
+
+/**
+ * The last `limit` events of `file`, read from its end in bounded steps.
+ *
+ * Only the newest `limit` events are ever held, so memory is bounded by the limit and one step, not
+ * by the file.
+ */
+export async function tailTranscriptEvents(
+  source: TranscriptSource,
+  file: string,
+  sessionId: string,
+  limit = DEFAULT_TRANSCRIPT_TAIL,
+  bytes = DEFAULT_TRANSCRIPT_TAIL_BYTES,
+): Promise<readonly TranscriptEvent[]> {
+  const window = source.window(file, { sessionId, start: { at: 'tail', bytes } });
+  let events: TranscriptEvent[] = [];
+  for (let step = 0; step < WINDOW_STEP_LIMIT; step += 1) {
+    const { batch, more } = await window.next();
+    if (batch?.reset === true) events = [];
+    if (batch !== undefined) events = [...events, ...batch.events].slice(-limit);
+    if (!more) break;
+  }
+  return events;
+}
+
+/**
+ * Every step of `window` until it reaches the end of the file, handed to `visit` one at a time and
+ * never collected: the visitor keeps what it needs. Answers whether the end was reached.
+ */
+export async function drainTranscriptWindow(
+  window: TranscriptWindow,
+  visit: (batch: TranscriptBatch) => void,
+): Promise<boolean> {
+  for (let step = 0; step < WINDOW_STEP_LIMIT; step += 1) {
+    const { batch, more } = await window.next();
+    if (batch !== undefined) visit(batch);
+    if (!more) return true;
+  }
+  return false;
+}
+
 export class SessionTranscriptReader {
   private readonly bySource: ReadonlyMap<TranscriptHarness, TranscriptSource>;
 
@@ -60,8 +124,26 @@ export class SessionTranscriptReader {
    * same shape either way and reports the absence in its own vocabulary.
    */
   async tail(target: TranscriptTarget, limit = DEFAULT_TRANSCRIPT_TAIL): Promise<readonly TranscriptEvent[]> {
-    const batch = await this.read(target);
-    return batch?.events.slice(-limit) ?? [];
+    const file = await this.resolver.file(target.sessionId).catch(() => undefined);
+    const source = this.bySource.get(target.harness);
+    if (file === undefined || source === undefined) return [];
+    return await tailTranscriptEvents(source, file, target.sessionId, limit).catch(() => []);
+  }
+
+  /**
+   * An append-only window over this session's transcript, or nothing when the daemon cannot name the
+   * file. A caller holds the window and steps it again later, reading only what was appended since.
+   */
+  async window(target: TranscriptTarget, start: TranscriptWindowStart): Promise<TranscriptWindow | undefined> {
+    const file = await this.resolver.file(target.sessionId).catch(() => undefined);
+    const source = this.bySource.get(target.harness);
+    if (file === undefined || source === undefined) return undefined;
+    return source.window(file, { sessionId: target.sessionId, start });
+  }
+
+  /** The file this session's transcript resolves to now, so a held window can tell it was re-bound. */
+  async file(target: TranscriptTarget): Promise<string | undefined> {
+    return await this.resolver.file(target.sessionId).catch(() => undefined);
   }
 
   /**

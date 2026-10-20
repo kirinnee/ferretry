@@ -109,6 +109,7 @@ class World {
   readonly notices: Array<{ sender: string; recipient: string; record: SendRecord }> = [];
   reading: SendEvidenceReading = { readable: true, inputs: [] };
   readFails = false;
+  readonly sinces: string[] = [];
   target: SendTarget | undefined = { id: ID, status: 'running', mode: 'auto', turn: 4 };
   pane: SendPaneObservation | undefined = pane();
   inPane: SendHeldAt | false | undefined = false;
@@ -140,7 +141,8 @@ class World {
           },
         },
         evidence: {
-          read: async () => {
+          read: async (_id, since) => {
+            this.sinces.push(since);
             if (this.readFails) throw new Error('transcript gone');
             return this.reading;
           },
@@ -668,5 +670,87 @@ describe('a ledger read that asks for a look first', () => {
     // Assert
     should(failing.looked).eql([ID]);
     should(idle.looked).eql([]);
+  });
+});
+
+describe('a conversation too large to read whole', () => {
+  it('reads evidence only from the oldest watched send on, less the clock slack', async () => {
+    const world = new World(
+      record({ sendId: 'send-1', acceptedAt: at(30_000) }),
+      record({ sendId: 'send-2', acceptedAt: at(10_000), message: 'and the docs', matchText: 'and the docs' }),
+      record({ sendId: 'send-3', acceptedAt: at(0), fate: 'delivered' }),
+    );
+
+    await world.checkAt(31_000);
+
+    should(world.sinces).eql([at(10_000 - defaultSendTrackerSettings.matchSlackMs)]);
+  });
+
+  it('settles a send delivered on the record it saw, even when absence could not be proven', async () => {
+    const world = new World(record());
+    world.reading = {
+      readable: false,
+      inputs: observe(new ClaudeObservedInputObserver(), [claude.user('ship it now please', 1_000)]),
+    };
+
+    await world.checkAt(2_000);
+
+    should(world.only).match({ fate: 'delivered' });
+    should(world.journal).eql([{ event: 'control.send_delivered', data: { sendId: 'send-1', attempt: 1 } }]);
+  });
+
+  it('repairs a send settled unconfirmed by an unreadable transcript, and says what it corrected', async () => {
+    const day = 24 * 60 * 60_000;
+    const world = new World(
+      record({ fate: 'unaccounted', unaccountedReason: 'transcript_unreadable', retryable: false }),
+      record({ sendId: 'send-2', fate: 'unaccounted', unaccountedReason: 'pane_unreadable' }),
+    );
+    world.evidence(new ClaudeObservedInputObserver(), [claude.user('ship it now please', 1_000)]);
+
+    const watching = await world.tracker.watching(ID);
+    await world.checkAt(day);
+    world.nowMs = T0 + 4 * day;
+    const stale = await new World(
+      record({ fate: 'unaccounted', unaccountedReason: 'transcript_unreadable' }),
+    ).tracker.watching(ID);
+
+    should(watching).be.true();
+    should(world.only).match({ fate: 'delivered' });
+    should(world.only.unaccountedReason).be.undefined();
+    should(world.only.retryable).be.undefined();
+    should(world.journal).eql([
+      { event: 'control.send_delivered', data: { sendId: 'send-1', attempt: 1, corrected: 'unaccounted' } },
+    ]);
+    // Any other unconfirmed send is still watched only for the ordinary two hours.
+    should(world.records.get('send-2')?.fate).equal('unaccounted');
+    should(world.sinces).eql([at(-defaultSendTrackerSettings.matchSlackMs)]);
+    should(stale).be.true();
+  });
+
+  it('lets a repairable send go after the repair window', async () => {
+    const world = new World(record({ fate: 'cancelled', fateAt: at(1_000), cancelEffect: 'not_in_pane' }));
+    world.nowMs = T0 + defaultSendTrackerSettings.repairLimitMs;
+
+    should(await world.tracker.watching(ID)).be.false();
+  });
+
+  it('judges a cancelled send only by records written before the cancel, after every live send', async () => {
+    const world = new World(
+      record({ sendId: 'send-1', fate: 'cancelled', fateAt: at(1_000), cancelEffect: 'not_in_pane' }),
+      record({ sendId: 'send-2', acceptedAt: at(20_000), attemptAt: at(20_000) }),
+      record({ sendId: 'send-3', acceptedAt: at(500), fate: 'cancelled', fateAt: at(30_000) }),
+    );
+    world.evidence(new ClaudeObservedInputObserver(), [
+      claude.user('ship it now please', 21_000, 'later'),
+      claude.user('ship it now please', 8_000, 'earlier'),
+    ]);
+
+    await world.checkAt(22_000);
+
+    // send-2 is live and takes the record written after it; send-1 was cancelled before either record
+    // and proves nothing; send-3 was cancelled after the earlier one, so the agent had it.
+    should(world.records.get('send-2')).match({ fate: 'delivered', evidence: { key: 'later' } });
+    should(world.records.get('send-1')?.fate).equal('cancelled');
+    should(world.records.get('send-3')).match({ fate: 'delivered', evidence: { key: 'earlier' } });
   });
 });

@@ -730,6 +730,7 @@ import {
   type SessionSignalSubsystem,
   type SessionTranscriptMessageTokenCodec,
   SessionTranscriptReader,
+  tailTranscriptEvents,
   SessionTranscriptResolver,
   type SessionTranscriptTail,
   SessionTurnWatcher,
@@ -6633,9 +6634,10 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         const harness = config.data.harness === 'codex' ? 'codex' : 'claude';
         const source = transcriptSources.find(candidate => candidate.harness === harness);
         if (source === undefined) return { kind: 'unreadable' };
-        const batch = await source.read(file, { sessionId }).catch(() => undefined);
-        if (batch === undefined) return { kind: 'unreadable' };
-        return { kind: 'read', events: batch.events.slice(-limit) };
+        // Read from the END: a tail of a capped read from byte zero described an old moment as now.
+        const events = await tailTranscriptEvents(source, file, sessionId, limit).catch(() => undefined);
+        if (events === undefined) return { kind: 'unreadable' };
+        return { kind: 'read', events };
       },
     };
   };

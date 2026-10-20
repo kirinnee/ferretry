@@ -10,7 +10,14 @@ import {
   sendRecordView,
   TranscriptSendEvidence,
 } from '../../../../src/lib/session/send/index.ts';
-import type { TranscriptBatch } from '../../../../src/lib/transcript/types.ts';
+import type { SessionTranscriptReader, TranscriptTarget } from '../../../../src/lib/session/transcript/reader.ts';
+import type {
+  ObservedHumanInput,
+  TranscriptBatch,
+  TranscriptWindow,
+  TranscriptWindowStart,
+  TranscriptWindowStep,
+} from '../../../../src/lib/transcript/types.ts';
 
 const ID = parseSessionId('session-1');
 const AT = '2026-08-01T12:00:00.000Z';
@@ -83,48 +90,177 @@ describe('a send record on the wire', () => {
 });
 
 describe('transcript evidence for the tracker', () => {
-  const batch = (issues: TranscriptBatch['issues']): TranscriptBatch => ({
+  type Issue = TranscriptBatch['issues'][number];
+  const issue = (code: Issue['code']): Issue => ({ harness: 'claude', code, message: code, recoverable: true });
+  const input = (key: string, observedAt = AT): ObservedHumanInput => ({
+    harness: 'claude',
+    text: key,
+    proof: 'normal-user-record',
+    observedAt,
+    proofKey: key,
+    shapeVersion: 1,
+  });
+  const batch = (
+    inputs: readonly ObservedHumanInput[],
+    issues: readonly Issue[] = [],
+    reset = false,
+  ): TranscriptBatch => ({
     harness: 'claude',
     file: '/t.jsonl',
-    reset: false,
+    reset,
     cursor: { byteOffset: 0, pendingBytes: 0, nextLine: 1 },
     events: [],
-    observedInputs: [
-      { harness: 'claude', text: 'hi', proof: 'normal-user-record', observedAt: AT, proofKey: 'k', shapeVersion: 1 },
-    ],
+    observedInputs: inputs,
     issues,
   });
 
-  it('is readable only when nothing blinded the read to its newest records', async () => {
-    const reads: string[] = [];
-    const subject = (result: TranscriptBatch | undefined, known = true, bound = true) =>
-      new TranscriptSendEvidence(async id => (known ? { sessionId: id, harness: 'claude' } : undefined), {
-        read: async target => {
-          reads.push(target.sessionId);
-          return result;
-        },
-        bound: async () => bound,
-      });
+  /** A window that answers each step from a script, then reports nothing new. */
+  class ScriptedWindow implements TranscriptWindow {
+    readonly steps: (TranscriptWindowStep | Error)[];
+    taken = 0;
+    constructor(
+      readonly file: string,
+      readonly start: TranscriptWindowStart,
+      steps: (TranscriptWindowStep | Error)[] = [],
+    ) {
+      this.steps = [...steps];
+    }
+    async next(): Promise<TranscriptWindowStep> {
+      this.taken += 1;
+      const step = this.steps.shift() ?? { more: false };
+      if (step instanceof Error) throw step;
+      return step;
+    }
+  }
 
-    const clean = await subject(batch([])).read(ID);
-    const truncated = await subject(
-      batch([{ harness: 'claude', code: 'source-truncated', message: 'cut', recoverable: true }]),
-    ).read(ID);
-    const recoverable = await subject(
-      batch([{ harness: 'claude', code: 'invalid-json', message: 'bad line', recoverable: true }]),
-    ).read(ID);
-    const unresolved = await subject(undefined).read(ID);
-    const unbound = await subject(undefined, true, false).read(ID);
-    const unknown = await subject(batch([]), false).read(ID);
+  class FakeReader implements Pick<SessionTranscriptReader, 'window' | 'file'> {
+    file$: string | undefined = '/t.jsonl';
+    opened: ScriptedWindow[] = [];
+    script: (TranscriptWindowStep | Error)[][] = [];
+    noSource = false;
+    async file(): Promise<string | undefined> {
+      return this.file$;
+    }
+    async window(_target: TranscriptTarget, start: TranscriptWindowStart): Promise<TranscriptWindow | undefined> {
+      if (this.noSource) return undefined;
+      const window = new ScriptedWindow(this.file$ ?? '', start, this.script.shift());
+      this.opened.push(window);
+      return window;
+    }
+  }
 
-    should(clean).match({ readable: true, inputs: [{ proofKey: 'k' }] });
-    should(truncated.readable).be.false();
-    should(recoverable.readable).be.true();
-    should(unresolved).deepEqual({ readable: false, inputs: [] });
+  const evidence = (reader: FakeReader, known = true) =>
+    new TranscriptSendEvidence(async id => (known ? { sessionId: id, harness: 'claude' } : undefined), reader);
+
+  it('opens a window a minute before the oldest send, and is readable when nothing blinded it', async () => {
+    const reader = new FakeReader();
+    reader.script = [[{ batch: batch([input('k')], [issue('invalid-json')]), more: false }]];
+
+    const reading = await evidence(reader).read(ID, AT);
+
+    should(reading).match({ readable: true, inputs: [{ proofKey: 'k' }] });
+    should(reader.opened[0]?.start).eql({ at: 'since', instant: '2026-08-01T11:59:00.000Z' });
+  });
+
+  it('holds the window, so a later look reads only what was appended since', async () => {
+    const reader = new FakeReader();
+    reader.script = [
+      [
+        { batch: batch([input('a')]), more: true },
+        { batch: batch([input('b')]), more: false },
+      ],
+    ];
+    const subject = evidence(reader);
+
+    const first = await subject.read(ID, AT);
+    reader.opened[0]?.steps.push({ batch: batch([input('c')]), more: false });
+    const second = await subject.read(ID, '2026-08-01T12:05:00.000Z');
+    reader.opened[0]?.steps.push({ batch: batch([input('d')], [], true), more: false });
+    const replaced = await subject.read(ID, '2026-08-01T12:05:00.000Z');
+
+    should(first.inputs.map(each => each.proofKey)).eql(['a', 'b']);
+    should(second.inputs.map(each => each.proofKey)).eql(['a', 'b', 'c']);
+    // A file that restarted drops what the old one proved.
+    should(replaced.inputs.map(each => each.proofKey)).eql(['d']);
+    should(reader.opened).have.length(1);
+  });
+
+  it('opens a new window for an older send, a re-bound file, or an instant it cannot read', async () => {
+    const reader = new FakeReader();
+    const subject = evidence(reader);
+
+    await subject.read(ID, AT);
+    await subject.read(ID, '2026-08-01T11:00:00.000Z');
+    reader.file$ = '/other.jsonl';
+    await subject.read(ID, '2026-08-01T11:00:00.000Z');
+    await subject.read(parseSessionId('session-9'), 'not an instant');
+
+    should(reader.opened.map(window => window.file)).eql(['/t.jsonl', '/t.jsonl', '/other.jsonl', '/other.jsonl']);
+    should(reader.opened.at(-1)?.start).eql({ at: 'beginning' });
+  });
+
+  it('is blind on a look that lost records, and for good once the window could not reach the send', async () => {
+    const reader = new FakeReader();
+    reader.script = [
+      [{ batch: batch([], [issue('oversized-record')]), more: false }],
+      [{ batch: batch([input('k')], [issue('source-truncated')]), more: false }],
+    ];
+    const lossy = evidence(reader);
+    const capped = evidence(reader);
+
+    const lost = await lossy.read(ID, AT);
+    const recovered = await lossy.read(ID, AT);
+    const partial = await capped.read(ID, AT);
+    const stillPartial = await capped.read(ID, AT);
+
+    should(lost.readable).be.false();
+    should(recovered.readable).be.true();
+    // Presence it saw is still handed over; only absence is unprovable.
+    should(partial).match({ readable: false, inputs: [{ proofKey: 'k' }] });
+    should(stillPartial.readable).be.false();
+  });
+
+  it('is blind when a step throws or the file outgrows the steps one look may take', async () => {
+    const reader = new FakeReader();
+    reader.script = [[new Error('EIO')], Array.from({ length: 80 }, () => ({ batch: batch([]), more: true }))];
+
+    const failed = await evidence(reader).read(ID, AT);
+    const endless = await evidence(reader).read(ID, AT);
+
+    should(failed.readable).be.false();
+    should(endless.readable).be.false();
+    should(reader.opened[1]?.taken).equal(64);
+  });
+
+  it('tells an unknown session, an unbound transcript and a missing source apart', async () => {
+    const reader = new FakeReader();
+    const unknown = await evidence(reader, false).read(ID, AT);
+    reader.noSource = true;
+    const sourceless = await evidence(reader).read(ID, AT);
+    reader.file$ = undefined;
+    const unbound = await evidence(reader).read(ID, AT);
+
+    should(unknown).deepEqual({ readable: false, inputs: [] });
+    should(sourceless).deepEqual({ readable: false, inputs: [] });
     // No transcript this daemon can prove: said as itself, because waiting never makes it readable.
     should(unbound).deepEqual({ readable: false, unbound: true, inputs: [] });
-    should(unknown.readable).be.false();
-    should(reads).eql([ID, ID, ID, ID, ID]);
+  });
+
+  it('holds a bounded number of windows and inputs', async () => {
+    const reader = new FakeReader();
+    const many = Array.from({ length: 5_000 }, (_, index) => input(`k${String(index)}`));
+    reader.script = [[{ batch: batch(many), more: false }]];
+    const subject = evidence(reader);
+
+    await subject.read(ID, AT);
+    const kept = await subject.read(ID, AT);
+    for (let index = 0; index < 64; index += 1) await subject.read(parseSessionId(`session-x${String(index)}`), AT);
+    await subject.read(ID, AT);
+
+    should(kept.inputs).have.length(4_096);
+    should(kept.inputs[0]?.proofKey).equal('k904');
+    // The first session's window was the least recently used, so it was let go and opened again.
+    should(reader.opened).have.length(66);
   });
 });
 

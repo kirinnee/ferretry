@@ -6,7 +6,8 @@ import {
   attemptsAllowed,
   deadlineOf,
   isOpenSend,
-  judgeSends,
+  isRepairableSend,
+  judgeWatchedSends,
   type SendTrackerSettings,
   type SendVerdict,
 } from './tracking.ts';
@@ -50,7 +51,11 @@ export interface SendEvidenceReading {
 
 /** The transcript side: what the harness has recorded the agent receiving or holding. */
 export interface SendEvidenceSource {
-  read(id: SessionId): Promise<SendEvidenceReading>;
+  /**
+   * What the transcript holds from `since` on — the acceptance of the oldest send being looked for,
+   * before which nothing can prove one. A source may read less than the whole file because of it.
+   */
+  read(id: SessionId, since: string): Promise<SendEvidenceReading>;
 }
 
 /** One pending look per session; scheduling again replaces it. */
@@ -145,14 +150,17 @@ export class SendTracker implements SendTracking, SendTrackingLoop {
   /**
    * Open sends, and settled-but-unproven ones for a while: one that was unconfirmed may still turn up
    * in the transcript, and the honest thing then is to say it was delivered after all.
+   *
+   * A REPAIRABLE one is watched for longer. A send settled unconfirmed only because its transcript
+   * could not be read, and one a person cancelled while it showed as unconfirmed, were both often
+   * answered by the agent anyway — the transcript simply had not been read far enough to say so.
    */
   private watches(record: SendRecord, now: number): boolean {
     if (record.held === true) return false;
     if (isOpenSend(record)) return true;
-    return (
-      (record.fate === 'unaccounted' || record.fate === 'timed_out') &&
-      now - Date.parse(record.acceptedAt) < this.settings.holdLimitMs
-    );
+    const age = now - Date.parse(record.acceptedAt);
+    if (isRepairableSend(record)) return age < this.settings.repairLimitMs;
+    return (record.fate === 'unaccounted' || record.fate === 'timed_out') && age < this.settings.holdLimitMs;
   }
 
   private async checkLocked(id: SessionId): Promise<void> {
@@ -160,11 +168,13 @@ export class SendTracker implements SendTracking, SendTrackingLoop {
     const now = Date.parse(this.ports.clock.now());
     const watched = records.filter(record => this.watches(record, now));
     if (watched.length === 0) return;
-    const reading = await this.ports.evidence.read(id).catch(() => UNREADABLE);
+    const oldest = Math.min(...watched.map(record => Date.parse(record.acceptedAt)));
+    const since = new Date(oldest - this.settings.matchSlackMs).toISOString();
+    const reading = await this.ports.evidence.read(id, since).catch(() => UNREADABLE);
     const claimed = new Set(records.flatMap(record => (record.evidence === undefined ? [] : [record.evidence.key])));
-    const verdicts = reading.readable
-      ? judgeSends(watched, claimed, reading.inputs, this.settings.matchSlackMs)
-      : new Map<string, SendVerdict>();
+    // Presence is proof whatever else could not be read: a record that carries the send IS the send
+    // arriving. Only absence needs the whole transcript, and `expire` is where absence is decided.
+    const verdicts = judgeWatchedSends(watched, claimed, reading.inputs, this.settings.matchSlackMs);
     let next: number | undefined;
     for (const record of watched) {
       const verdict = verdicts.get(record.sendId);
@@ -199,10 +209,13 @@ export class SendTracker implements SendTracking, SendTrackingLoop {
       deadlineAt: undefined,
       unaccountedReason: undefined,
       retryable: undefined,
+      cancelEffect: undefined,
     });
     await this.ports.repository.journal(id, 'control.send_delivered', {
       sendId: record.sendId,
       attempt: record.attempt ?? 1,
+      // A repair says what it corrected, so the history shows the earlier fate was a reading failure.
+      ...(isOpenSend(record) ? {} : { corrected: record.fate }),
     });
   }
 
