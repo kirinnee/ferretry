@@ -1,26 +1,28 @@
 import { describe, it } from 'bun:test';
-import type { SttEnhancementErrorView } from '@ferretry/protocol';
-import { DEFAULT_VOICE_CLEANUP_PROMPTS } from '@ferretry/protocol';
+import {
+  buildCleanupSystemPrompt,
+  CLEANUP_GUARD,
+  CLEANUP_LIMITS,
+  CONTEXT_LIMITS,
+  cleanupViolation,
+  DEFAULT_VOICE_CLEANUP_PROMPTS,
+  neutralizeCleanupTags,
+  parseChatCompletion,
+  type SttEnhancementErrorView,
+} from '@ferretry/protocol';
 import should from 'should';
 import {
   type AuthorizedOutcome,
-  buildCleanupSystemPrompt,
   buildEnhancementBody,
-  CLEANUP_GUARD,
   type CleanupSettings,
-  CONTEXT_LIMITS,
   classifyEnhancementOutcome,
-  cleanupViolation,
   DEFAULT_CLEANUP_SETTINGS,
   DEFAULT_ENHANCEMENT_PROVIDERS,
-  ENHANCEMENT_LIMITS,
   type EnhancementAuthorizer,
   type EnhancementHttpRequest,
   type EnhancementProviderTable,
   enhancementErrorStatus,
   enhancementErrorView,
-  neutralizeCleanupTags,
-  parseChatCompletion,
   parseEnhancementRequest,
   type SttEnhancementError,
   SttEnhancementService,
@@ -208,14 +210,14 @@ describe('enhancement request parsing', () => {
     // Act — the cap the daemon documents must be exactly the cap that is enforced
     const actual = {
       atCap: parseEnhancementRequest(
-        request({ text: 'a'.repeat(ENHANCEMENT_LIMITS.maxTextChars) }),
+        request({ text: 'a'.repeat(CLEANUP_LIMITS.maxTextChars) }),
         DEFAULT_ENHANCEMENT_PROVIDERS,
       ).text.length,
-      overCap: failedParse(request({ text: 'a'.repeat(ENHANCEMENT_LIMITS.maxTextChars + 1) })),
+      overCap: failedParse(request({ text: 'a'.repeat(CLEANUP_LIMITS.maxTextChars + 1) })),
     };
 
     // Assert
-    should(actual.atCap).equal(ENHANCEMENT_LIMITS.maxTextChars);
+    should(actual.atCap).equal(CLEANUP_LIMITS.maxTextChars);
     should(actual.overCap).deepEqual({ error: 'text exceeds the maximum size', code: 'too_long' });
   });
 

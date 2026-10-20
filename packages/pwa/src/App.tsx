@@ -79,6 +79,7 @@ import { ProjectsPage } from './features/projects/projects-page.tsx';
 import { sessionRowMenuRenderer } from './features/session-actions/row-actions-host.tsx';
 import { SessionSearchControl, SessionSearchProvider } from './features/session-search/session-search.tsx';
 import { aboutSettingsTab } from './features/settings/about-machine.tsx';
+import { agentClisSettingsTab } from './features/settings/agent-clis.tsx';
 import { CgroupConfigSurface } from './features/settings/cgroup-settings.tsx';
 import { daemonDisplayName, distinctDaemonName } from './features/settings/daemon-settings.tsx';
 import { dictationShortcutLabel } from './features/settings/dictation-shortcut.ts';
@@ -1472,6 +1473,8 @@ function SettingsRoute({ connection }: DaemonPageProps) {
       PACK_SETTINGS_TAB,
       // What this machine runs and getting it up to date (docs/updating.md).
       aboutSettingsTab(createDaemonClient),
+      // The agent CLIs its ferrets run, whether Ferretry verified them, and updating them (docs/updating.md).
+      agentClisSettingsTab(createDaemonClient),
     ],
     [createDaemonClient, store.clients],
   );

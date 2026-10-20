@@ -23,6 +23,7 @@
  * Afterwards the result is checked with the daemon's one harness resolver (`locateHarnessCommand`), so
  * "installed" means this daemon can now find the tool, not merely that a manager exited zero.
  */
+import { HARNESS_PACKAGES } from '@ferretry/protocol';
 import type { CallerGovernance } from '../api/capability.ts';
 import type { ExecutableResolverPort, HarnessLocation } from '../core/harness-readiness.ts';
 import type { HarnessKind } from '../core/inventory.ts';
@@ -34,7 +35,8 @@ export type PackageManager = 'brew' | 'apt' | 'npm';
 /**
  * THE declared table: per harness, the arguments each manager is given, after the manager's own name.
  *
- * The one place a package name is spelled. Claude Code ships a `claude-code` cask and
+ * The package names come from `HARNESS_PACKAGES`, the one place they are spelled, which the harness
+ * update (`docs/updating.md`) reads too. Claude Code ships a `claude-code` cask and
  * `@anthropic-ai/claude-code` on npm; Codex ships a `codex` cask and `@openai/codex`. Neither publishes
  * an apt package, so neither has an `apt` entry and apt is never offered — adding one here is the whole
  * change if that ever stops being true.
@@ -42,8 +44,14 @@ export type PackageManager = 'brew' | 'apt' | 'npm';
 export const TOOL_PACKAGES: Readonly<
   Record<HarnessKind, Readonly<Partial<Record<PackageManager, readonly string[]>>>>
 > = {
-  claude: { brew: ['install', '--cask', 'claude-code'], npm: ['install', '-g', '@anthropic-ai/claude-code'] },
-  codex: { brew: ['install', '--cask', 'codex'], npm: ['install', '-g', '@openai/codex'] },
+  claude: {
+    brew: ['install', '--cask', HARNESS_PACKAGES.claude.cask],
+    npm: ['install', '-g', HARNESS_PACKAGES.claude.npm],
+  },
+  codex: {
+    brew: ['install', '--cask', HARNESS_PACKAGES.codex.cask],
+    npm: ['install', '-g', HARNESS_PACKAGES.codex.npm],
+  },
 };
 
 /**
@@ -149,7 +157,7 @@ export type ToolInstallPlan =
     };
 
 /** Find one manager on this machine: the inherited `PATH` first, then its usual locations. */
-function locateManager(manager: PackageManager, executables: ExecutableResolverPort): string | undefined {
+export function locateManager(manager: PackageManager, executables: ExecutableResolverPort): string | undefined {
   return (
     executables.resolve(MANAGER_COMMAND[manager]) ?? MANAGER_LOCATIONS[manager].find(path => executables.runnable(path))
   );
@@ -238,6 +246,18 @@ function lastLine(tail: readonly string[]): string | undefined {
   return line === undefined ? undefined : line.slice(0, 200);
 }
 
+/**
+ * What a manager's last lines say: whether it needed admin rights it was not given, and the last thing
+ * it said. Shared with the harness update (`harness-update/service.ts`), which reads the same managers.
+ */
+export function readManagerTail(tail: readonly string[]): {
+  readonly needsAdmin: boolean;
+  readonly said: string | undefined;
+} {
+  const lines = tail.map(stripTerminalEscapes);
+  return { needsAdmin: lines.some(line => NEEDS_ADMIN.some(pattern => pattern.test(line))), said: lastLine(tail) };
+}
+
 /** Read how a run ended into an outcome. Pure, so every failure's words are tested without a manager. */
 export function classifyInstallResult(
   plan: Extract<ToolInstallPlan, { kind: 'runnable' }>,
@@ -255,7 +275,7 @@ export function classifyInstallResult(
   const manager = MANAGER_NAME[plan.manager];
   if (result.kind === 'not-started')
     return failed('could-not-start', `${manager} could not be started here: ${result.reason}`);
-  const said = lastLine(result.tail);
+  const { needsAdmin, said } = readManagerTail(result.tail);
   const quoted = said === undefined ? '' : ` It said: ${said}`;
   if (result.kind === 'timed-out')
     return failed(
@@ -263,8 +283,7 @@ export function classifyInstallResult(
       `${manager} did not finish within ${timeoutMinutes} minutes, so it was stopped.${quoted}`,
     );
   if (result.code === 0) return undefined;
-  const lines = result.tail.map(stripTerminalEscapes);
-  if (lines.some(line => NEEDS_ADMIN.some(pattern => pattern.test(line))))
+  if (needsAdmin)
     return failed(
       'needs-admin',
       SUDO_REMEDY[plan.manager]

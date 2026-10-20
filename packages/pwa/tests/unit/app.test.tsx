@@ -3400,13 +3400,15 @@ describe('the settings route composition', () => {
     // sidebar can show each one's status, and a machine's tabs read its setup (`/v1/fleet/...`). Those are
     // the account model's reads, proved in their own suites; this test is about the health probe. The
     // shell also asks the machine on screen whether it may offer "Pair a phone" (`/v1/grants`), and the
-    // machine list asks each machine once whether it has an update, for its dot (`/v1/daemon/update`).
+    // machine list asks each machine once whether it — or an agent CLI it runs — has an update, for its dot
+    // (`/v1/daemon/update`, `/v1/harnesses/update`).
     const probes = () =>
       healthReads.filter(
         read =>
           read.path !== '/v1/pair/devices' &&
           read.path !== '/v1/grants' &&
           read.path !== '/v1/daemon/update' &&
+          read.path !== '/v1/harnesses/update' &&
           !read.path.startsWith('/v1/fleet/'),
       );
 

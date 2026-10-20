@@ -93,13 +93,14 @@ import { ProtocolAccountGateway } from '../src/lib/fleet/account-gateway';
 import { registerAccountModelCommands } from '../src/lib/fleet/account-model';
 import type { AccountCommandDeps } from '../src/lib/fleet/account-ports';
 import { registerFleetCommands } from '../src/lib/fleet/commands';
-import { ambientSession, PackController, ProtocolPackGateway, registerRecommendCommand } from '../src/lib/pack';
 import { ProtocolRecommendationGateway } from '../src/lib/fleet/gateway';
 import { resolveFleetLayout } from '../src/lib/fleet/layout';
 import { RecommendController } from '../src/lib/fleet/recommend';
 import { registerGrantCommands } from '../src/lib/grants/commands';
 import { GrantController } from '../src/lib/grants/controller';
 import { ProtocolGrantGateway } from '../src/lib/grants/gateway';
+import { registerHarnessCommands } from '../src/lib/harness/commands';
+import { HarnessController } from '../src/lib/harness/controller';
 import { registerHistoryCommands } from '../src/lib/history/commands';
 import { HistoryController } from '../src/lib/history/controller';
 import {
@@ -118,9 +119,12 @@ import { LessonController } from '../src/lib/lesson/controller';
 import { McpServer, registerMcpCommands } from '../src/lib/mcp';
 import { registerMigrationCommands } from '../src/lib/migration/commands';
 import { MigrationController } from '../src/lib/migration/controller';
+import { registerModelsCommands } from '../src/lib/models/commands';
+import { ModelsController } from '../src/lib/models/controller';
 import { registerOnboardCommands } from '../src/lib/onboard/commands';
 import { OnboardController } from '../src/lib/onboard/controller';
 import { ProtocolOnboardRelay } from '../src/lib/onboard/relay';
+import { ambientSession, PackController, ProtocolPackGateway, registerRecommendCommand } from '../src/lib/pack';
 import { registerPairCommands } from '../src/lib/pair/commands';
 import { PairController } from '../src/lib/pair/controller';
 import { ProtocolPairingGateway } from '../src/lib/pair/gateway';
@@ -134,8 +138,6 @@ import { registerReadsCommands } from '../src/lib/reads/commands';
 import { ReadsController } from '../src/lib/reads/controller';
 import { registerScratchCommands } from '../src/lib/scratch/commands';
 import { ScratchController } from '../src/lib/scratch/controller';
-import { registerModelsCommands } from '../src/lib/models/commands';
-import { ModelsController } from '../src/lib/models/controller';
 import { registerSecretCommands } from '../src/lib/secrets/commands';
 import { SecretController } from '../src/lib/secrets/controller';
 import { ProtocolSecretGateway } from '../src/lib/secrets/gateway';
@@ -339,6 +341,8 @@ type SharedDaemonClient = Pick<
   | 'migrate'
   | 'scratchPlan'
   | 'scratchSweep'
+  | 'harnessUpdate'
+  | 'startHarnessUpdate'
   | 'snapshot'
   | 'logs'
   | 'events'
@@ -355,6 +359,8 @@ function lazyDaemonClient(client: () => Promise<IFyApiClient>): SharedDaemonClie
       return timeoutMs === undefined ? ready.request(path, schema, init) : ready.request(path, schema, init, timeoutMs);
     },
     analytics: async (query?: string): Promise<AnalyticsResponse> => (await client()).analytics(query),
+    harnessUpdate: async () => (await client()).harnessUpdate(),
+    startHarnessUpdate: async request => (await client()).startHarnessUpdate(request),
     list: async (): Promise<SessionView[]> => (await client()).list(),
     get: async (id: string, signal?: AbortSignal): Promise<SessionView> => (await client()).get(id, signal),
     stop: async (id: string, reason?: string): Promise<SessionView> => (await client()).stop(id, reason),
@@ -756,6 +762,18 @@ const DOMAIN_REGISTRARS: ReadonlyArray<(wiring: DomainWiring) => void> = [
       new MigrationController(client, new SessionPresenter(world.io, new SystemClock())),
     ),
   ({ program, world, client }) => registerScratchCommands(program, new ScratchController(client, world.io)),
+  ({ program, world, client }) =>
+    registerHarnessCommands(
+      program,
+      new HarnessController({
+        gateway: client,
+        out: world.io,
+        prompt: world.prompt,
+        interactive: world.interactive,
+        wait: async milliseconds => await Bun.sleep(milliseconds),
+        binaryName: BINARY_NAME,
+      }),
+    ),
   ({ program, world, ownSessionId }) => registerSessionCommands(program, sessionCommands(world, ownSessionId)),
   ({ program, world, client, ownSessionId }) =>
     registerTaskCommands(program, {

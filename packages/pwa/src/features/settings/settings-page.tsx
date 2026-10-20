@@ -63,6 +63,7 @@ import {
   settingsSectionForSetting,
 } from './settings-catalog.ts';
 import { SettingsHome, type SettingsMachineEntry, SettingsSidebar } from './settings-navigation.tsx';
+import { SpeedupKeysSettings } from './speedup-keys-settings.tsx';
 
 export const TEXT_SCALE_OPTIONS = [
   { id: 'default', label: 'Default', description: 'Use the interface’s designed size.' },
@@ -97,6 +98,8 @@ const LEGACY_PANEL_ANCHORS: ReadonlySet<string> = new Set([
   'export',
   // Settings › Machine › About, named by the palette's Updates link.
   'about',
+  // Settings › Machine › Agent CLIs, named by the palette's Agent CLIs link.
+  'agent-clis',
 ]);
 
 const hashWord = (): string => (typeof window === 'undefined' ? '' : window.location.hash.replace(/^#/, ''));
@@ -480,6 +483,7 @@ export function SettingsPage({
       ),
       theme: <ThemeSettings theme={theme} />,
       'install-app': <InstallAppSetting />,
+      'speedup-keys': <SpeedupKeysSettings />,
       dictation: (
         <DictationSettings {...dictation} {...(selectedRecord === undefined ? {} : { daemon: selectedRecord })} />
       ),
