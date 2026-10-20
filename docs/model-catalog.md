@@ -261,6 +261,9 @@ each of those spellings.
 
 ### How a price reaches analytics
 
+How a priced session is then queried — metrics, labels, ranges and the merge across machines — is
+[the Insights query language](insights-query.md).
+
 - **The same three sources, the same precedence.** A price lives in its catalog, so it follows the catalog:
   `config/models/<id>.yaml` > the published catalog > the built-in one, per catalog id. A machine's own
   copy of a catalog prices its models with whatever it says — including nothing.
