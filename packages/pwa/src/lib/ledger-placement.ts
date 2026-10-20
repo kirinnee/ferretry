@@ -20,7 +20,26 @@ export const ledgerPlacementCopy = (placement: LedgerBlockPlacement): string | u
 /** How long a send that settled without arriving keeps its row, before it retires from view. */
 export const SETTLED_ROW_LIFETIME_MS = 24 * 60 * 60_000;
 
-/** Whitespace-insensitive, case-sensitive: a soft-wrapped composer is not a different message. */
+/**
+ * Does this undelivered send still have a row under the conversation? Sending and queued ones always
+ * do; one that settled (or was cancelled) keeps its row for a day, and then retires from view.
+ */
+const keepsItsRow = (record: LedgerSendRecord, nowMs: number): boolean => {
+  if (record.fate === 'delivered') return false;
+  if (record.fate === 'accepted' || record.fate === 'queued') return true;
+  const at = Date.parse(record.acceptedAt);
+  return !Number.isFinite(at) || nowMs - at < SETTLED_ROW_LIFETIME_MS;
+};
+
+/**
+ * A STUCK send: one the reader can still see waiting, that nothing has proved arrived, that nobody has
+ * taken back and that is not deliberately held for a revive. It is what "Clear stuck messages" clears,
+ * so the count in its question is the number of such rows on screen.
+ */
+export const isStuckSend = (record: LedgerSendRecord, nowMs: number = Date.now()): boolean =>
+  record.withdrawn !== true && record.held !== true && record.fate !== 'cancelled' && keepsItsRow(record, nowMs);
+
+/** Whitespace-insensitive,case-sensitive: a soft-wrapped composer is not a different message. */
 const norm = (value: string): string => value.normalize('NFC').replace(/\s+/gu, ' ').trim();
 
 /**
@@ -72,14 +91,7 @@ export const placeLedgerRows = (
       break;
     }
   }
-  const pending = folded
-    .filter(record => record.fate !== 'delivered')
-    .filter(record => {
-      if (record.fate === 'accepted' || record.fate === 'queued') return true;
-      const at = Date.parse(record.acceptedAt);
-      return !Number.isFinite(at) || nowMs - at < SETTLED_ROW_LIFETIME_MS;
-    })
-    .reverse();
+  const pending = folded.filter(record => keepsItsRow(record, nowMs)).reverse();
   return markReplies([
     ...entries.map((entry, index) => {
       const send = chips.get(index);

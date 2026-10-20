@@ -305,6 +305,50 @@ describe('the session send ledger routes', () => {
   });
 });
 
+describe('taking a send back, and pressing Enter for one typed and not sent', () => {
+  const record: SendRecord = {
+    v: 1,
+    sendId: 'send-1',
+    acceptedAt: '2026-08-01T12:00:00.000Z',
+    acceptedTurn: 1,
+    path: 'direct',
+    message: 'hi',
+    attachmentIds: [],
+    fate: 'accepted',
+    typedNotSent: true,
+  };
+
+  it('should hand the session and send to the service and serve the record it settled', async () => {
+    // Arrange
+    const sessions = new FakeSessionSend();
+    sessions.ledger = [record];
+    const subject = dispatcher(sessions);
+    const post = (path: string, body = '{}') => request({ method: 'POST', path, headers: human, body });
+
+    // Act
+    const cancelled = await subject.dispatch(post('/v1/sessions/s1/sends/send-1/cancel'));
+    const entered = await subject.dispatch(post('/v1/sessions/s1/sends/send-1/enter'));
+    const extra = await subject.dispatch(post('/v1/sessions/s1/sends/send-1/cancel', JSON.stringify({ all: true })));
+    const extraEnter = await subject.dispatch(post('/v1/sessions/s1/sends/send-1/enter', JSON.stringify({ x: 1 })));
+    const missing = await subject.dispatch(post('/v1/sessions/s1/sends/send-9/cancel'));
+    const anonymous = await subject.dispatch(
+      request({ method: 'POST', path: '/v1/sessions/s1/sends/send-1/enter', headers: {}, body: '{}' }),
+    );
+
+    // Assert
+    should(SendRecordSchema.parse(JSON.parse(cancelled.body))).match({ fate: 'cancelled', cancelEffect: 'cleared' });
+    should(entered.status).equal(200);
+    should([extra.status, extraEnter.status]).deepEqual([400, 400]);
+    should(missing.status).equal(404);
+    should(anonymous.status).not.equal(200);
+    should(sessions.cancels).deepEqual([
+      ['s1', 'send-1'],
+      ['s1', 'send-9'],
+    ]);
+    should(sessions.submits).deepEqual([['s1', 'send-1']]);
+  });
+});
+
 describe('the hand-off read', () => {
   const handoff = {
     name: 'turn-008',

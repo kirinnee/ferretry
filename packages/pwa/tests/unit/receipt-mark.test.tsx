@@ -1,17 +1,19 @@
 import { describe, expect, test } from 'bun:test';
 import { ReceiptMark } from '../../src/components/receipt-mark.tsx';
-import type { SendReceiptKind } from '../../src/lib/send-receipt.ts';
 import { MessageMarksLegend } from '../../src/features/settings/message-marks-legend.tsx';
+import type { SendReceiptKind } from '../../src/lib/send-receipt.ts';
 import { render } from '../support/react.ts';
 
 const KINDS: readonly SendReceiptKind[] = [
   'sending',
   'held',
   'queued',
+  'typed',
   'delivered',
   'answered',
   'unconfirmed',
   'failed',
+  'cancelled',
 ];
 
 const draw = (kind: SendReceiptKind) =>
@@ -74,12 +76,14 @@ describe('MessageMarksLegend', () => {
     expect(rows.map(row => row.findByType('svg').props['data-receipt-mark'])).toEqual([
       'sending',
       'queued',
+      'typed',
       'delivered',
       'answered',
       'unconfirmed',
       'failed',
+      'cancelled',
     ]);
-    expect(legend.root.findAllByType('dd')).toHaveLength(6);
+    expect(legend.root.findAllByType('dd')).toHaveLength(8);
     expect(JSON.stringify(legend.toJSON())).toContain('Waiting in the agent’s queue in Claude or Codex.');
   });
 });

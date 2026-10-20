@@ -21,7 +21,7 @@
 // ledger — the reader would see no trace of a message that exists. So unknown
 // values degrade field by field, and the row survives.
 
-import type { SendFate, SendPath, SendSenderKind, SendUnaccountedReason } from '@ferretry/protocol';
+import type { SendCancelEffect, SendFate, SendPath, SendSenderKind, SendUnaccountedReason } from '@ferretry/protocol';
 
 /**
  * Slack when joining a durable row to the optimistic row that caused it. The
@@ -38,7 +38,7 @@ export const RECORD_CLOCK_SLACK_MS = 5_000;
 export interface LedgerSendEvidence {
   readonly key: string;
   readonly kind?: 'chat.user' | 'queued_command' | 'response_item';
-  readonly tier?: 'queue-file-id' | 'turn-instruction' | 'exact-text';
+  readonly tier?: 'queue-file-id' | 'turn-instruction' | 'exact-text' | 'merged-text';
   readonly harness?: 'claude' | 'codex';
   readonly proof?: 'normal-user-record' | 'native-queue-drain';
   readonly observedAt?: string;
@@ -83,18 +83,29 @@ export interface LedgerSendRecord {
   readonly attemptAt?: string;
   /** True only on a send the daemon PROVED never arrived, so retrying it cannot duplicate it. */
   readonly retryable?: true;
+  /** The message is sitting typed in the agent’s composer and was never submitted. */
+  readonly typedNotSent?: true;
+  /** What a `cancelled` fate did to the agent’s screen. */
+  readonly cancelEffect?: SendCancelEffect;
 }
+
+/**
+ * A row no deadline can retire: withdrawn, deliberately held, delivered, or taken back by a person.
+ * None of them is a stale attempt, so none is ever re-badged unconfirmed or timed out of view.
+ */
+const isSettledForGood = (record: LedgerSendRecord): boolean =>
+  record.withdrawn === true || record.held === true || record.fate === 'delivered' || record.fate === 'cancelled';
 
 /**
  * Has the durable row outlived the daemon's final live-view deadline?
  *
  * This is presentation retirement only; the append-only ledger stays intact.
  * Missing or malformed deadlines stay VISIBLE: version skew must degrade
- * toward showing uncertainty, never toward silently hiding it. Delivered and
- * deliberately-held rows are not stale attempts, so they never expire.
+ * toward showing uncertainty, never toward silently hiding it. Delivered,
+ * cancelled and deliberately-held rows are not stale attempts, so they never expire.
  */
 export const hasLedgerHardExpired = (record: LedgerSendRecord, nowMs: number = Date.now()): boolean => {
-  if (record.withdrawn === true || record.held === true || record.fate === 'delivered') return false;
+  if (isSettledForGood(record)) return false;
   const deadline = Date.parse(record.hardDeadline ?? '');
   return Number.isFinite(deadline) && deadline <= nowMs;
 };
@@ -105,7 +116,7 @@ export const hasLedgerHardExpired = (record: LedgerSendRecord, nowMs: number = D
  * unconfirmed rows instead of pretending something is still happening now.
  */
 export const isLedgerUnconfirmed = (record: LedgerSendRecord, nowMs: number = Date.now()): boolean => {
-  if (record.withdrawn === true || record.held === true || record.fate === 'delivered') return false;
+  if (isSettledForGood(record)) return false;
   if (record.fate === 'unaccounted') return true;
   const deadline = Date.parse(record.unaccountedDeadline ?? '');
   return Number.isFinite(deadline) && deadline <= nowMs;
@@ -122,7 +133,7 @@ export const nextLedgerViewDeadline = (
 ): number | undefined => {
   let next = Number.POSITIVE_INFINITY;
   for (const record of records) {
-    if (record.withdrawn === true || record.held === true || record.fate === 'delivered') continue;
+    if (isSettledForGood(record)) continue;
     const candidates =
       record.fate === 'accepted' ? [record.unaccountedDeadline, record.hardDeadline] : [record.hardDeadline];
     for (const value of candidates) {
@@ -152,6 +163,9 @@ const SEND_LEDGER_EVENTS: ReadonlySet<string> = new Set([
   'control.send_timed_out',
   'control.send_retried',
   'control.send_released',
+  'control.send_typed_not_sent',
+  'control.send_cancelled',
+  'control.send_submitted',
   'control.send_withdrawn',
 ]);
 
@@ -162,7 +176,14 @@ const SEND_LEDGER_EVENTS: ReadonlySet<string> = new Set([
  */
 export const isSendLedgerEvent = (event: { readonly type: string }): boolean => SEND_LEDGER_EVENTS.has(event.type);
 
-const FATES: ReadonlySet<string> = new Set<SendFate>(['accepted', 'queued', 'delivered', 'unaccounted', 'timed_out']);
+const FATES: ReadonlySet<string> = new Set<SendFate>([
+  'accepted',
+  'queued',
+  'delivered',
+  'unaccounted',
+  'timed_out',
+  'cancelled',
+]);
 const PATHS: ReadonlySet<string> = new Set<SendPath>([
   'direct',
   'turn-file',
@@ -180,6 +201,12 @@ const REASONS: ReadonlySet<string> = new Set<SendUnaccountedReason>([
   'pane_unreadable',
   'blocked_by_prompt',
   'not_delivered',
+]);
+const CANCEL_EFFECTS: ReadonlySet<string> = new Set<SendCancelEffect>([
+  'cleared',
+  'not_in_pane',
+  'left_in_queue',
+  'left_in_composer',
 ]);
 const SENDERS: ReadonlySet<string> = new Set<SendSenderKind>(['human', 'agent', 'daemon']);
 
@@ -208,7 +235,10 @@ const parseEvidence = (value: unknown): LedgerSendEvidence | undefined => {
   return {
     key,
     ...optional('kind', literal(source['kind'], ['chat.user', 'queued_command', 'response_item'] as const)),
-    ...optional('tier', literal(source['tier'], ['queue-file-id', 'turn-instruction', 'exact-text'] as const)),
+    ...optional(
+      'tier',
+      literal(source['tier'], ['queue-file-id', 'turn-instruction', 'exact-text', 'merged-text'] as const),
+    ),
     ...optional('harness', literal(source['harness'], ['claude', 'codex'] as const)),
     ...optional('proof', literal(source['proof'], ['normal-user-record', 'native-queue-drain'] as const)),
     ...optional('observedAt', str(source['observedAt'])),
@@ -268,6 +298,8 @@ export const parseLedgerSendRecord = (raw: unknown): LedgerSendRecord | null => 
     ...optional('attempt', num(row['attempt'])),
     ...optional('attemptAt', str(row['attemptAt'])),
     ...(row['retryable'] === true ? { retryable: true as const } : {}),
+    ...(row['typedNotSent'] === true ? { typedNotSent: true as const } : {}),
+    ...optional('cancelEffect', literal(row['cancelEffect'], [...CANCEL_EFFECTS] as SendCancelEffect[])),
   };
 };
 
@@ -293,10 +325,18 @@ export const parseLedgerSendsResponse = (raw: unknown): LedgerSendRecord[] => {
 /**
  * Fate ordering. Within one delivery attempt a send only moves up this ladder:
  * accepted → queued (the harness holds it) → unaccounted or timed out (the
- * daemon settled it unproven) → delivered (proof arrived). Nothing legitimately
+ * daemon settled it unproven) → cancelled (a person took it back) → delivered (proof arrived,
+ * which outranks a cancel: a message the agent read was read). Nothing legitimately
  * moves down within an attempt; a RE-attempt starts the ladder again.
  */
-const FATE_RANK: Record<SendFate, number> = { accepted: 0, queued: 1, unaccounted: 2, timed_out: 2, delivered: 3 };
+const FATE_RANK: Record<SendFate, number> = {
+  accepted: 0,
+  queued: 1,
+  unaccounted: 2,
+  timed_out: 2,
+  cancelled: 3,
+  delivered: 4,
+};
 
 /**
  * Should `incoming` replace `existing` for the same sendId?

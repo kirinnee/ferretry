@@ -407,3 +407,39 @@ export const sendRetrier =
     refresh();
     return true;
   };
+
+/**
+ * A ledger row's Cancel, bound to one session: takes the send back (erasing it from the agent's composer
+ * when it is sitting typed there), then asks for fresh evidence so the row moves at once. The daemon's
+ * refusal reaches the caller as a rejection carrying its own sentence.
+ */
+export const sendCanceller =
+  (
+    client: Pick<IFyApiClient, 'cancelSend'> | null,
+    sessionId: string,
+    refresh: () => void,
+  ): ((record: { readonly sendId: string }) => Promise<boolean>) =>
+  async record => {
+    if (client === null) return false;
+    await client.cancelSend(sessionId, record.sendId);
+    refresh();
+    return true;
+  };
+
+/**
+ * A ledger row's Press Enter, bound to one session: presses Enter ONCE for a send sitting typed in the
+ * agent's composer, then asks for fresh evidence. The daemon refuses unless the composer holds exactly
+ * that message.
+ */
+export const sendSubmitter =
+  (
+    client: Pick<IFyApiClient, 'submitSend'> | null,
+    sessionId: string,
+    refresh: () => void,
+  ): ((record: { readonly sendId: string }) => Promise<boolean>) =>
+  async record => {
+    if (client === null) return false;
+    await client.submitSend(sessionId, record.sendId);
+    refresh();
+    return true;
+  };

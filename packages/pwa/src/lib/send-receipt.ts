@@ -20,7 +20,16 @@
 import { sendBadge } from './send-badge.ts';
 import type { LedgerSendRecord } from './send-ledger.ts';
 
-export type SendReceiptKind = 'sending' | 'held' | 'queued' | 'delivered' | 'answered' | 'unconfirmed' | 'failed';
+export type SendReceiptKind =
+  | 'sending'
+  | 'held'
+  | 'queued'
+  | 'typed'
+  | 'delivered'
+  | 'answered'
+  | 'unconfirmed'
+  | 'failed'
+  | 'cancelled';
 
 export interface SendReceipt {
   readonly kind: SendReceiptKind;
@@ -47,6 +56,8 @@ const ANSWERED_DETAIL = 'the agent has replied since this message arrived';
  * | `delivered` + a reply after it      | `answered`    | two accent ticks| —               |
  * | `unaccounted`                       | `unconfirmed` | faint question  | "unconfirmed"   |
  * | `timed_out`                         | `failed`      | small red !     | "not delivered" |
+ * | `accepted`/`queued` + typed     | `typed`       | pencil          | "typed, not sent" |
+ * | `cancelled`                       | `cancelled`   | struck circle   | "cancelled"     |
  */
 export const sendReceipt = (record: LedgerSendRecord, answered = false): SendReceipt => {
   const { detail } = sendBadge(record);
@@ -55,11 +66,15 @@ export const sendReceipt = (record: LedgerSendRecord, answered = false): SendRec
       return answered
         ? { kind: 'answered', name: 'Answered', detail: `${detail}; ${ANSWERED_DETAIL}` }
         : { kind: 'delivered', name: 'Delivered', detail };
+    case 'cancelled':
+      return { kind: 'cancelled', name: 'Cancelled', detail, chip: 'cancelled' };
     case 'timed_out':
       return { kind: 'failed', name: 'Not delivered', detail, chip: 'not delivered' };
     case 'unaccounted':
       return { kind: 'unconfirmed', name: 'Unconfirmed', detail, chip: 'unconfirmed' };
     default:
+      if (record.typedNotSent === true)
+        return { kind: 'typed', name: 'Typed, not sent', detail, chip: 'typed, not sent' };
       if (record.held === true) return { kind: 'held', name: 'Held for revive', detail };
       if (record.fate === 'queued') return { kind: 'queued', name: 'Queued', detail };
       return { kind: 'sending', name: 'Sending', detail };
@@ -80,8 +95,18 @@ export interface ReceiptLegendRow {
 export const RECEIPT_LEGEND: readonly ReceiptLegendRow[] = [
   { kind: 'sending', name: 'Sending', meaning: 'On its way, or kept until the session is revived.' },
   { kind: 'queued', name: 'Queued', meaning: 'Waiting in the agent’s queue in Claude or Codex.' },
+  {
+    kind: 'typed',
+    name: 'Typed, not sent',
+    meaning: 'It is sitting in the agent’s composer. Press Enter on the message to send it, or cancel it.',
+  },
   { kind: 'delivered', name: 'Delivered', meaning: 'It is in the transcript.' },
   { kind: 'answered', name: 'Answered', meaning: 'The agent replied after it.' },
   { kind: 'unconfirmed', name: 'Unconfirmed', meaning: 'It could not be proven either way.' },
   { kind: 'failed', name: 'Not delivered', meaning: 'It never arrived. Retry is offered on the message.' },
+  {
+    kind: 'cancelled',
+    name: 'Cancelled',
+    meaning: 'You took it back. The message says what that did on the agent’s screen.',
+  },
 ];

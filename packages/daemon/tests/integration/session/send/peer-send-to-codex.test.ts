@@ -4,13 +4,12 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { TranscriptProvenance } from '@ferretry/protocol';
 import should from 'should';
-import rollout0156 from '../../../fixtures/transcript/codex-rollouts/codex-0.156.1.jsonl' with { type: 'text' };
 import { FileSendLedger, NodeCodexRolloutIndex } from '../../../../src/adapters/index.ts';
 import { NodeTranscriptSource } from '../../../../src/adapters/transcript/index.ts';
 import {
   type ClockPort,
-  codexCorrelationArguments,
   CodexTranscriptParser,
+  codexCorrelationArguments,
   parseSessionId,
   type SerialExecutor,
   type SessionId,
@@ -29,6 +28,7 @@ import {
   SessionSendService,
   TranscriptSendEvidence,
 } from '../../../../src/lib/session/send/index.ts';
+import rollout0156 from '../../../fixtures/transcript/codex-rollouts/codex-0.156.1.jsonl' with { type: 'text' };
 
 /**
  * A CLAUDE ferret sending to a CODEX ferret — the owner's "they are all ferrets" report — through the
@@ -149,7 +149,9 @@ async function rig(launchedWithCorrelationRoot: boolean) {
     queue: async () => 'unproven',
     stopActiveTurn: async () => await codex.observe(),
     pressStopKey: async () => undefined,
-    holds: async () => false,
+    heldAt: async () => undefined,
+    clearComposer: async () => 'absent',
+    submitComposer: async () => 'absent',
   };
   const repository: SendRepository = {
     read: async id => targets.get(id),

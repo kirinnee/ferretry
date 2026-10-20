@@ -38,6 +38,8 @@ export function sendRecordView(record: SendRecord): SendRecordView {
     ...optional('attemptAt', record.attemptAt),
     ...optional('deadlineAt', record.deadlineAt),
     ...optional('retryable', record.retryable),
+    ...optional('typedNotSent', record.typedNotSent),
+    ...optional('cancelEffect', record.cancelEffect),
   };
 }
 
