@@ -59,6 +59,9 @@ import {
 import {
   type AnswerSessionRequest,
   AnswerSessionRequestSchema,
+  type ConversionPreview,
+  ConversionPreviewRequestSchema,
+  ConversionPreviewSchema,
   type FyEvent,
   FyEventListSchema,
   FyEventStreamFrameSchema,
@@ -758,6 +761,16 @@ export class FyApiClient implements IFyApiClient {
       { agent, model, allowContextDowngrade, forceInflight, ...(conversation === undefined ? {} : { conversation }) },
       SessionViewSchema,
       NonEmptyValueSchema.parse(requestId ?? this.#requestId()),
+    );
+  }
+
+  conversionPreview(id: string, agent: string, model?: string): Promise<ConversionPreview> {
+    return this.#post(
+      id,
+      'conversion-preview',
+      ConversionPreviewRequestSchema,
+      { agent, ...(model === undefined ? {} : { model }) },
+      ConversionPreviewSchema,
     );
   }
 

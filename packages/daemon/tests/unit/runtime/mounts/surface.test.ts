@@ -669,6 +669,7 @@ describe('the mounted daemon surface', () => {
       1 + // an owner's request for a Warden investigation (the "who needs you" feed is `authenticated`, like the status)
       1 + // the owner leaving a ferret alone for longer than the Warden would
       1 + // a Restart's stale-settings read: would a relaunch change what this session runs on
+      1 + // a cross-harness move's preview: what converting the conversation would carry (docs/migration-cross-harness.md)
       3 + // existing conversations kept as ferrets: the listing, one conversation's preview and the adoption
       3 + // the model catalogs: the list, a check for a newer published one, and a read of the models Ollama has installed (docs/model-catalog.md)
       9; // lessons: the default's write, Apply's preview and write, the per-ferret switch and its list, and the scan's estimate, start, read and cancel (a ferret's own door is `none`)
@@ -824,6 +825,7 @@ describe('the mounted daemon surface', () => {
       'GET /v1/sessions/by-request/:requestId',
       'POST /v1/sessions/:sessionId/resume',
       'GET /v1/sessions/:sessionId/relaunch-settings',
+      'POST /v1/sessions/:sessionId/conversion-preview',
       'POST /v1/sessions/:sessionId/migrate',
       'POST /v1/sessions/:sessionId/handover',
       'GET /v1/sessions/:sessionId/handover',

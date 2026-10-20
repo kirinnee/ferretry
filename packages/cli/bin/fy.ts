@@ -93,7 +93,6 @@ import { ProtocolAccountGateway } from '../src/lib/fleet/account-gateway';
 import { registerAccountModelCommands } from '../src/lib/fleet/account-model';
 import type { AccountCommandDeps } from '../src/lib/fleet/account-ports';
 import { registerFleetCommands } from '../src/lib/fleet/commands';
-import { ambientSession, PackController, ProtocolPackGateway, registerRecommendCommand } from '../src/lib/pack';
 import { ProtocolRecommendationGateway } from '../src/lib/fleet/gateway';
 import { resolveFleetLayout } from '../src/lib/fleet/layout';
 import { RecommendController } from '../src/lib/fleet/recommend';
@@ -117,9 +116,12 @@ import { LessonController } from '../src/lib/lesson/controller';
 import { McpServer, registerMcpCommands } from '../src/lib/mcp';
 import { registerMigrationCommands } from '../src/lib/migration/commands';
 import { MigrationController } from '../src/lib/migration/controller';
+import { registerModelsCommands } from '../src/lib/models/commands';
+import { ModelsController } from '../src/lib/models/controller';
 import { registerOnboardCommands } from '../src/lib/onboard/commands';
 import { OnboardController } from '../src/lib/onboard/controller';
 import { ProtocolOnboardRelay } from '../src/lib/onboard/relay';
+import { ambientSession, PackController, ProtocolPackGateway, registerRecommendCommand } from '../src/lib/pack';
 import { registerPairCommands } from '../src/lib/pair/commands';
 import { PairController } from '../src/lib/pair/controller';
 import { ProtocolPairingGateway } from '../src/lib/pair/gateway';
@@ -133,8 +135,6 @@ import { registerReadsCommands } from '../src/lib/reads/commands';
 import { ReadsController } from '../src/lib/reads/controller';
 import { registerScratchCommands } from '../src/lib/scratch/commands';
 import { ScratchController } from '../src/lib/scratch/controller';
-import { registerModelsCommands } from '../src/lib/models/commands';
-import { ModelsController } from '../src/lib/models/controller';
 import { registerSecretCommands } from '../src/lib/secrets/commands';
 import { SecretController } from '../src/lib/secrets/controller';
 import { ProtocolSecretGateway } from '../src/lib/secrets/gateway';
@@ -336,6 +336,7 @@ type SharedDaemonClient = Pick<
   | 'get'
   | 'stop'
   | 'migrate'
+  | 'conversionPreview'
   | 'scratchPlan'
   | 'scratchSweep'
   | 'snapshot'
@@ -359,6 +360,7 @@ function lazyDaemonClient(client: () => Promise<IFyApiClient>): SharedDaemonClie
     stop: async (id: string, reason?: string): Promise<SessionView> => (await client()).stop(id, reason),
     migrate: async (id, agent, model, allowContextDowngrade, requestId, forceInflight, conversation) =>
       (await client()).migrate(id, agent, model, allowContextDowngrade, requestId, forceInflight, conversation),
+    conversionPreview: async (id, agent, model) => (await client()).conversionPreview(id, agent, model),
     scratchPlan: async (limit?: number) => (await client()).scratchPlan(limit),
     scratchSweep: async (force?: boolean) => (await client()).scratchSweep(force),
     snapshot: async (id: string) => (await client()).snapshot(id),

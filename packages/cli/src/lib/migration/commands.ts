@@ -5,7 +5,7 @@ import type { MigrationCommandOptions, MigrationController } from './controller.
 export function registerMigrationCommands(program: Command, controller: MigrationController): void {
   program
     .command('migrate')
-    .description('continue a session on another same-kind runtime')
+    .description('continue a session on another runtime (another harness only with --convert)')
     .argument('<id>', 'session id or callsign')
     .requiredOption('-a, --agent <agent>', 'the runtime to move the session onto')
     .option('--model <model>', "override the model; defaults to the target account's configured model")
@@ -19,8 +19,13 @@ export function registerMigrationCommands(program: Command, controller: Migratio
     )
     .option(
       '--conversation <choice>',
-      'resume (default) continues the conversation the session is on; fresh starts a new one; previous goes back to the one an earlier Restart left behind',
+      'resume (default) continues the conversation the session is on; fresh starts a new one; previous goes back to the one an earlier Restart left behind; convert rewrites it for the other harness',
     )
+    .option(
+      '--convert',
+      'move onto a runtime of the OTHER harness (Claude ↔ Codex) by converting the conversation; same as --conversation convert',
+    )
+    .option('--preview', 'with --convert: show what the conversion would carry and change nothing')
     .option('--request-id <id>', 'stable idempotency key for an explicit retry of this migration')
     .option('--json', 'print the migrated session as JSON')
     .action(async (id: string, options: MigrationCommandOptions) => {

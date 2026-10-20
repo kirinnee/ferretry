@@ -1,23 +1,25 @@
 import {
+  type ContextDowngrade,
+  type ConversionPreview,
+  ConversionPreviewRequestSchema,
   FY_REQUEST_ID_HEADER,
   MigrateSessionRequestSchema,
-  type ContextDowngrade,
   type MigrationConversation,
   type MigrationRefusal,
   type SessionRelaunchSettings,
   type SessionView,
 } from '@ferretry/protocol';
+import { parseBody } from '../../api/body.ts';
+import { ApiError } from '../../api/error.ts';
+import { type ApiRequest, type ApiResponse, decodeParameter, headerValue } from '../../api/http.ts';
+import { jsonResponse } from '../../api/responses.ts';
+import type { ApiRoute, RouteContext } from '../../api/route.ts';
 import {
   MIGRATION_REPLAY_MAX_ENTRIES,
   MigrationReplayCapacityError,
   MigrationReplayGuard,
   MigrationReplayMismatchError,
 } from '../../migrate/replay-guard.ts';
-import { parseBody } from '../../api/body.ts';
-import { ApiError } from '../../api/error.ts';
-import { decodeParameter, headerValue, type ApiRequest, type ApiResponse } from '../../api/http.ts';
-import { jsonResponse } from '../../api/responses.ts';
-import type { ApiRoute, RouteContext } from '../../api/route.ts';
 
 /**
  * Moving a live session onto another account: `POST /v1/sessions/:sessionId/migrate`.
@@ -129,6 +131,14 @@ export interface SessionMigrateSubsystem {
    * question Info › Runtime answers with "Running with older settings — Restart to apply".
    */
   relaunchSettings(sessionId: string): Promise<SessionRelaunchSettings>;
+  /**
+   * What converting the conversation onto `agent` (a cross-harness move) would carry, or why it cannot
+   * be made — the preview a person confirms before "Move to Codex…" changes anything. Writes nothing.
+   */
+  conversionPreview(
+    sessionId: string,
+    request: { readonly agent: string; readonly model?: string },
+  ): Promise<ConversionPreview>;
 }
 
 /** The HTTP status and code each refusal answers with. */
@@ -285,6 +295,25 @@ export function sessionMigrateRoutes(
       minimum: 'operator',
       noStore: true,
       handle: async context => jsonResponse(await subsystem.relaunchSettings(pathSessionId(context)).catch(refuse)),
+    },
+    {
+      // A read, though a POST: it names an account and a model. `operator` like the move it previews,
+      // and no request id, because it writes nothing and a repeat costs only the read.
+      method: 'POST',
+      path: '/v1/sessions/:sessionId/conversion-preview',
+      minimum: 'operator',
+      noStore: true,
+      handle: async context => {
+        const request = await parseBody(context.request, ConversionPreviewRequestSchema);
+        return jsonResponse(
+          await subsystem
+            .conversionPreview(pathSessionId(context), {
+              agent: request.agent,
+              ...(request.model === undefined ? {} : { model: request.model }),
+            })
+            .catch(refuse),
+        );
+      },
     },
     {
       method: 'POST',

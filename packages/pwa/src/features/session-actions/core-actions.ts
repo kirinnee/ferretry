@@ -11,9 +11,22 @@
  */
 
 import type { SessionView } from '@ferretry/protocol';
-import { Copy, GitFork, History, KeyRound, Pencil, Play, Plug, RotateCw, Server, Square } from 'lucide-react';
+import {
+  ArrowLeftRight,
+  Copy,
+  GitFork,
+  History,
+  KeyRound,
+  Pencil,
+  Play,
+  Plug,
+  RotateCw,
+  Server,
+  Square,
+} from 'lucide-react';
 import type { ReactNode } from 'react';
 import { TERMINAL_STATUSES } from '../../shell/status-mark.tsx';
+import { HARNESS_SHORT, otherHarness } from '../fleet/credentials/credentials-model.ts';
 import type { SessionActionContribution, SessionActionFormHost } from './registry.ts';
 
 export interface CoreActionContext {
@@ -24,6 +37,11 @@ export interface CoreActionContext {
   readonly canControl: boolean;
   readonly copyId: () => void;
   readonly openMigrate: () => void;
+  /**
+   * Opens "Move to Codex… / Move to Claude…". Absent where this host cannot offer it, or when the machine
+   * has no account of the other harness to move onto; the menu then has no such row.
+   */
+  readonly openConvert?: () => void;
   readonly restart: () => Promise<void>;
   /**
    * Restart on the conversation an earlier Restart left behind. Absent where a host offers no repair;
@@ -44,6 +62,7 @@ export const SESSION_ACTION_IDS = {
   fork: 'fork',
   copyId: 'copy-id',
   migrate: 'move-login',
+  convert: 'move-harness',
   machine: 'move-machine',
   addMcp: 'add-mcp',
   restart: 'restart',
@@ -109,6 +128,20 @@ export const CORE_SESSION_ACTIONS: readonly SessionActionContribution<CoreAction
             icon: KeyRound,
             detail: context.view.config.agent,
             run: context.openMigrate,
+          }
+        : null,
+  },
+  {
+    group: 'move',
+    order: 20,
+    build: context =>
+      context.canControl && context.openConvert !== undefined
+        ? {
+            kind: 'run',
+            id: SESSION_ACTION_IDS.convert,
+            label: `Move to ${HARNESS_SHORT[otherHarness(context.view.config.harness)]}…`,
+            icon: ArrowLeftRight,
+            run: context.openConvert,
           }
         : null,
   },

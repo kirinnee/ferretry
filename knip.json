@@ -36,6 +36,7 @@
         "harness/release-notice-screenshot.tsx",
         "harness/relaunch-settings-screenshot.tsx",
         "harness/restart-unresumable-screenshot.tsx",
+        "harness/convert-sheet-screenshot.tsx",
         "harness/approval-card-screenshot.tsx",
         "harness/dialog-card-screenshot.tsx",
         "harness/model-catalog-screenshot.tsx",

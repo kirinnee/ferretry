@@ -70,7 +70,7 @@ echo "🔎 harness contract (${mode}, $(uname -s)): claude ${claude_version} · 
 
 export FY_HARNESS_CONTRACT=1
 set +e
-bun test --timeout 180000 ./packages/fleet/tests/contract/ 2>&1 | tee "${artifacts}/bun-test.log"
+bun test --timeout 180000 ./packages/fleet/tests/contract/ ./packages/daemon/tests/contract/ 2>&1 | tee "${artifacts}/bun-test.log"
 status="${PIPESTATUS[0]}"
 set -e
 

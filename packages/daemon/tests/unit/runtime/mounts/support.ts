@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import {
   type CapabilityGrants,
   type ConfigChangeKind,
+  type ConversionPreview,
   type CreateTerminalRequest,
   DAEMON_CAPABILITIES,
   type LearningConfig,
@@ -1516,6 +1517,43 @@ export class FakeSessionMigrate implements SessionMigrateSubsystem {
     if (refusal !== undefined) throw refusal;
     if (!this.known.includes(sessionId)) throw new SessionMigrateError('not_found', `no session ${sessionId}`);
     return { current: false, reasons: ['settings'] };
+  }
+
+  /** Every preview asked for, as the session and the request it carried. */
+  readonly previews: Array<readonly [string, { readonly agent: string; readonly model?: string }]> = [];
+
+  async conversionPreview(
+    sessionId: string,
+    request: { readonly agent: string; readonly model?: string },
+  ): Promise<ConversionPreview> {
+    this.previews.push([sessionId, request]);
+    const refusal = this.refusals[sessionId];
+    if (refusal !== undefined) throw refusal;
+    if (!this.known.includes(sessionId)) throw new SessionMigrateError('not_found', `no session ${sessionId}`);
+    if (request.agent === 'claude-same') return { kind: 'refused', targetAgent: request.agent, reason: 'same harness' };
+    return {
+      kind: 'ready',
+      targetAgent: request.agent,
+      targetModel: request.model ?? 'gpt-5.5',
+      summary: {
+        converter: 1,
+        sourceHarness: 'claude',
+        sourceVersion: '2.1.281',
+        targetHarness: 'codex',
+        targetVersion: '0.163.0',
+        turns: 4,
+        keptTurns: 4,
+        omittedTurns: 0,
+        cutNewest: false,
+        messages: 8,
+        nativeToolCalls: 1,
+        toolCallsAsText: 2,
+        attachments: 0,
+        dropped: { reasoning: 1, sidechains: 0, internal: 3, compactions: 0 },
+        estimatedTokens: 120,
+        budgetTokens: 154800,
+      },
+    };
   }
 }
 

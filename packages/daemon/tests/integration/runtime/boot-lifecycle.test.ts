@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, it } from 'bun:test';
 import { createHash } from 'node:crypto';
-import { mkdir, readdir, readFile, utimes, writeFile } from 'node:fs/promises';
+import { mkdir, readdir, readFile, rm, utimes, writeFile } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
 import { buildFleetManifest, RETIRED_FLEET_CONFIG_SENTENCE } from '@ferretry/fleet';
 import {
@@ -10,7 +10,11 @@ import {
   type ConfigChangeFrame,
   ConfigChangeFrameSchema,
   type ConfigChangeKind,
+  ContextDowngradeRefusedBodySchema,
   ConversationMessagePointSchema,
+  ConversationUnresumableBodySchema,
+  type ConversionPreview,
+  ConversionPreviewSchema,
   DaemonCarriersViewSchema,
   type FyEventStreamFrame,
   FyEventStreamFrameSchema,
@@ -18,6 +22,7 @@ import {
   LearningConfigSchema,
   LearningPatchResponseSchema,
   LearningStatusSchema,
+  MigrationRefusedBodySchema,
   NameSuggestionsSchema,
   PairingCodeMintResponseSchema,
   PairingCodeStatusResponseSchema,
@@ -28,15 +33,12 @@ import {
   SendResultSchema,
   SessionConfigSchema,
   SessionHypermediaPatchResultSchema,
+  SessionListSchema,
   SessionPackPatchResultSchema,
   SessionResultSchema,
-  SessionListSchema,
   SessionStateSchema,
   SessionTranscriptPageSchema,
   type SessionView,
-  ContextDowngradeRefusedBodySchema,
-  ConversationUnresumableBodySchema,
-  MigrationRefusedBodySchema,
   SessionViewSchema,
   type SttEnhancementResult,
   TerminalListViewSchema,
@@ -3792,6 +3794,270 @@ describe('daemon boot lifecycle', () => {
   });
 
   /**
+   * A cross-harness move that CONVERTS the conversation, driven through the production composition root.
+   *
+   * Everything real except the two harness CLIs, which are stand-ins declared through `harness.paths`
+   * exactly as an operator would: each answers `--version`, and on resume opens the converted file where
+   * its harness would look and sends the loopback model the history it found — so the validation run the
+   * move gates on is the production one, against a CLI that genuinely reads the file. The real CLIs are
+   * measured against the same files in the harness contract suite.
+   */
+  it('should convert a Claude conversation onto Codex and back, refusing a target that rejects it', async () => {
+    // Arrange
+    const home = await tempDirectory('fyd-convert');
+    const port = await freeLoopbackPort();
+    const cleanups: Array<() => void | Promise<void>> = [];
+    const launcher = new RecordingSessionLauncher();
+    const reviver = new RecordingResumeLauncher();
+    let release = (): void => {};
+    const world = {
+      ...(await worldAt(home, port, async () => {
+        await new Promise<void>(resolve => {
+          release = resolve;
+        });
+      })),
+      sessionLauncher: launcher,
+      createResumeLauncher: (
+        _storage: unknown,
+        relaunch: (id: SessionId) => Promise<readonly string[] | undefined>,
+      ) => {
+        reviver.argvFor = relaunch;
+        return reviver;
+      },
+    };
+    const binary = join(home, 'bin');
+    const harnessBin = join(home, 'harness-bin');
+    await mkdir(binary, { recursive: true });
+    await mkdir(harnessBin, { recursive: true });
+    const login = (name: string): string => join(home, 'homes', name);
+    const wrappers = [
+      {
+        wrapper: WRAPPER,
+        kind: 'claude' as const,
+        id: ORIGIN_ACCOUNT,
+        variable: 'CLAUDE_CONFIG_DIR',
+        model: 'claude-opus-5',
+      },
+      {
+        wrapper: CROSS_FAMILY_WRAPPER,
+        kind: 'codex' as const,
+        id: CROSS_FAMILY_ACCOUNT,
+        variable: 'CODEX_HOME',
+        model: 'gpt-5.6-terra',
+      },
+    ];
+    for (const entry of wrappers)
+      await writeFile(
+        join(binary, entry.wrapper),
+        `#!/bin/sh\nexport ${entry.variable}="${login(entry.wrapper)}"\nexit 0\n`,
+        {
+          mode: 0o755,
+        },
+      );
+    await publishManifest(
+      home,
+      wrappers.map(entry => ({
+        id: entry.id,
+        kind: entry.kind,
+        mode: 'auto' as const,
+        wrapper: join(binary, entry.wrapper),
+        home: login(entry.wrapper),
+        displayName: entry.wrapper,
+        defaultModel: entry.model,
+        models: [{ id: entry.model, available: true }],
+        available: true,
+        unavailableReason: null,
+      })),
+    );
+    // The stand-in CLIs. Control files beside each say which version it reports and whether it rejects.
+    for (const kind of ['claude', 'codex'] as const)
+      await writeFile(join(harnessBin, kind), fakeHarnessCli(kind), { mode: 0o755 });
+    await writeFile(join(harnessBin, 'claude.version'), '2.1.304 (Claude Code)\n');
+    await writeFile(join(harnessBin, 'codex.version'), 'codex-cli 0.163.0\n');
+    const configFile = join(home, 'config', 'daemon.json');
+    await writeFile(
+      configFile,
+      JSON.stringify({
+        ...(JSON.parse(await readFile(configFile, 'utf8')) as Record<string, unknown>),
+        harness: { paths: { claude: join(harnessBin, 'claude'), codex: join(harnessBin, 'codex') } },
+      }),
+      { mode: 0o600 },
+    );
+    const exit = start(world, cleanups);
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined)) !== undefined) break;
+      await Bun.sleep(50);
+    }
+    const token = (await readFile(join(home, 'api-token'), 'utf8')).trim();
+    const cli = { authorization: `Bearer ${token}`, 'content-type': 'application/json', 'x-ferretry-client': 'cli' };
+    const sessions = `http://127.0.0.1:${port}/v1/sessions`;
+    const created = await fetch(sessions, {
+      method: 'POST',
+      headers: { ...cli, 'x-fy-request-id': 'req-convert-start' },
+      body: JSON.stringify({ agent: WRAPPER, mode: 'auto', prompt: 'remember the launch code is 4471', cwd: home }),
+    });
+    const id = parseSessionId(SessionViewSchema.parse(await created.json()).config.id);
+    const sessionDirectory = join(home, 'state', 'sessions', id);
+    const documentOf = async (name: string): Promise<Record<string, unknown>> =>
+      JSON.parse(await readFile(join(sessionDirectory, name), 'utf8')) as Record<string, unknown>;
+    const patch = async (name: string, fields: Record<string, unknown>): Promise<void> =>
+      await writeFile(join(sessionDirectory, name), JSON.stringify({ ...(await documentOf(name)), ...fields }), {
+        mode: 0o600,
+      });
+    let asked = 0;
+    const migrate = async (body: Record<string, unknown>): Promise<Response> => {
+      await patch('state.json', { status: 'rate_limited', openTools: [] });
+      reviver.pane = { alive: true, dead: false, promptReady: true };
+      asked += 1;
+      return await fetch(`${sessions}/${id}/migrate`, {
+        method: 'POST',
+        headers: { ...cli, 'x-fy-request-id': `req-convert-${asked}` },
+        body: JSON.stringify(body),
+      });
+    };
+    const preview = async (agent: string): Promise<ConversionPreview> => {
+      const response = await fetch(`${sessions}/${id}/conversion-preview`, {
+        method: 'POST',
+        headers: cli,
+        body: JSON.stringify({ agent }),
+      });
+      return ConversionPreviewSchema.parse(await response.json());
+    };
+    // The conversation Claude had: a real recorded transcript, opened by the turn-one pointer the start sent.
+    const started = (await documentOf('config.json')).transcript as Record<string, unknown>;
+    const claudeId = String(started.harnessSessionId);
+    const claudeFile = String(started.file);
+    const pointer = {
+      type: 'user',
+      sessionId: claudeId,
+      version: '2.1.281',
+      timestamp: '2026-10-20T06:00:00.000Z',
+      message: {
+        role: 'user',
+        content: `Read the file ${sessionDirectory}/turns/turn-001.md now, then carefully follow every instruction inside it. This is your complete task for this turn.`,
+      },
+    };
+    const recorded = await Bun.file(
+      new URL('../../fixtures/transcript/convert/claude-2.1.281.jsonl', import.meta.url),
+    ).text();
+    const lines = recorded.split('\n');
+    const claudeBody = [
+      JSON.stringify(pointer),
+      ...lines.slice(
+        0,
+        lines.findIndex(line => line.includes('"compact_boundary"')),
+      ),
+    ].join('\n');
+    await mkdir(dirname(claudeFile), { recursive: true });
+    await writeFile(claudeFile, claudeBody, { mode: 0o600 });
+
+    // Act
+    const ready = await preview(CROSS_FAMILY_WRAPPER);
+    const sameFamily = await preview(WRAPPER);
+    // A target that cannot open it: refused in plain words, and nothing moved.
+    await writeFile(join(harnessBin, 'codex.reject'), '');
+    const relaunchesBefore = reviver.relaunched.length;
+    const rejected = await migrate({ agent: CROSS_FAMILY_WRAPPER, conversation: 'convert' });
+    const rejectedBody = ConversationUnresumableBodySchema.parse(await rejected.json());
+    const afterRejection = await documentOf('config.json');
+    const relaunchesAfterRejection = reviver.relaunched.length;
+    await rm(join(harnessBin, 'codex.reject'));
+    // Untested Codex: the preview says so before anything is attempted.
+    await writeFile(join(harnessBin, 'codex.version'), 'codex-cli 0.150.0\n');
+    const untested = await preview(CROSS_FAMILY_WRAPPER);
+    await writeFile(join(harnessBin, 'codex.version'), 'codex-cli 0.163.0\n');
+    // The move itself.
+    const converted = await migrate({ agent: CROSS_FAMILY_WRAPPER, conversation: 'convert' });
+    const convertedRaw: unknown = await converted.json();
+    const convertedArgv = reviver.argv.at(-1) ?? [];
+    const onCodex = await documentOf('config.json');
+    const codexTranscript = onCodex.transcript as Record<string, unknown>;
+    const rollout = await readFile(String(codexTranscript.file), 'utf8');
+    // Restart afterwards resumes the converted conversation.
+    const restarted = await migrate({ agent: CROSS_FAMILY_WRAPPER });
+    const restartedArgv = reviver.argv.at(-1) ?? [];
+    const afterRestart = await documentOf('config.json');
+    // And back onto Claude — whose CLI, this time, declares no shell tool for the model, so the shell
+    // commands go back as text after the native rendering is refused.
+    await writeFile(join(harnessBin, 'claude.notools'), '');
+    const back = await migrate({ agent: WRAPPER, conversation: 'convert' });
+    const backRaw: unknown = await back.json();
+    const backArgv = reviver.argv.at(-1) ?? [];
+    const onClaude = await documentOf('config.json');
+    const journal = await readFile(join(sessionDirectory, 'events.jsonl'), 'utf8');
+    release();
+    const code = await exit;
+    await runCleanups(cleanups);
+
+    // Assert
+    should(code).equal(0);
+    if (ready.kind !== 'ready') throw new Error(`the preview refused: ${ready.reason}`);
+    should(ready.summary).match({
+      sourceHarness: 'claude',
+      sourceVersion: '2.1.281',
+      targetHarness: 'codex',
+      targetVersion: '0.163.0',
+      omittedTurns: 0,
+      nativeToolCalls: 1,
+      toolCallsAsText: 2,
+      attachments: 1,
+    });
+    should(sameFamily).match({ kind: 'refused', targetAgent: WRAPPER });
+    should(rejected.status).equal(409);
+    should(rejectedBody.error).equal(
+      'Codex refused to open the converted conversation. It said: Error: thread/resume failed Nothing was changed.',
+    );
+    should(relaunchesAfterRejection).equal(relaunchesBefore);
+    should(afterRejection).match({ harness: 'claude', agent: WRAPPER, transcript: started });
+    should(untested.kind === 'refused' ? untested.reason : '').containEql('This machine runs Codex 0.150.0');
+    // Converted: the session is the same session, on Codex, bound to a fresh thread in the Codex home.
+    if (converted.status !== 200) throw new Error(`the conversion was refused: ${JSON.stringify(convertedRaw)}`);
+    should(onCodex).match({ id, harness: 'codex', agent: CROSS_FAMILY_WRAPPER, harnessFlags: [] });
+    should(String(codexTranscript.file).startsWith(join(login(CROSS_FAMILY_WRAPPER), 'sessions'))).be.true();
+    should(codexTranscript).match({ identity: 'adopted', correlationToken: sessionDirectory });
+    const thread = String(codexTranscript.harnessSessionId);
+    should(convertedArgv.slice(1, 3)).deepEqual(['resume', thread]);
+    should(rollout).containEql('[Ferretry moved this conversation here from Claude Code');
+    // The turn pointer became the message it pointed at.
+    should(rollout).containEql('remember the launch code is 4471');
+    should(rollout).not.containEql('/turns/turn-001.md now');
+    should(onCodex.conversion).match({
+      v: 1,
+      converter: 1,
+      fromHarness: 'claude',
+      fromConversation: claudeId,
+      fromFile: claudeFile,
+      toHarness: 'codex',
+      toConversation: thread,
+      omittedTurns: 0,
+    });
+    // The Claude conversation is untouched on disk, and the saved attachment is in the session's folder.
+    should(await readFile(claudeFile, 'utf8')).equal(claudeBody);
+    should(await readdir(join(sessionDirectory, 'conversions', thread))).deepEqual(['attachment-1.png']);
+    should(journal).containEql('"conversation":"converted"');
+    should(journal).containEql(`"convertedFrom":{"harness":"claude","conversation":"${claudeId}"`);
+    // Restart keeps the converted conversation and its lineage.
+    should(restarted.status).equal(200);
+    should(restartedArgv.slice(1, 3)).deepEqual(['resume', thread]);
+    should(afterRestart.conversion).deepEqual(onCodex.conversion);
+    // Back onto Claude: another fresh conversation, resumed by Claude's own id.
+    if (back.status !== 200) throw new Error(`the conversion back was refused: ${JSON.stringify(backRaw)}`);
+    const claudeAgain = onClaude.transcript as Record<string, unknown>;
+    should(onClaude).match({
+      harness: 'claude',
+      agent: WRAPPER,
+      conversion: { fromHarness: 'codex', fromConversation: thread },
+    });
+    should(claudeAgain.harnessSessionId).not.equal(claudeId);
+    should(backArgv).containDeep(['--resume', String(claudeAgain.harnessSessionId)]);
+    const claudeText = await readFile(String(claudeAgain.file), 'utf8');
+    should(claudeText).containEql('remember the launch code is 4471');
+    should(claudeText).not.containEql('"tool_use"');
+    should(claudeText).containEql('[ran shell: echo fixture-output]');
+    should(journal).containEql('"nativeToolCalls":0');
+  });
+
+  /**
    * The cross-harness handover, driven through the production composition root over a real socket.
    *
    * WHAT THIS TIER ADDS, and why the handover's own integration file does not already cover it. That
@@ -6528,3 +6794,59 @@ describe('daemon boot lifecycle', () => {
     });
   });
 });
+
+/**
+ * A stand-in harness CLI for the conversion journey: a Bun script that reports the version in the
+ * control file beside it, refuses when a `<kind>.reject` file is there, and otherwise resumes the
+ * conversation id it was given the way its harness would — finding the file in its home, rebuilding the
+ * history, and sending it to the model the environment points at.
+ */
+function fakeHarnessCli(kind: 'claude' | 'codex'): string {
+  return `#!/usr/bin/env bun
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
+import { join } from 'node:path';
+const kind = '${kind}';
+const args = process.argv.slice(2);
+if (args[0] === '--version') {
+  process.stdout.write(readFileSync(join(import.meta.dir, kind + '.version'), 'utf8'));
+  process.exit(0);
+}
+if (existsSync(join(import.meta.dir, kind + '.reject'))) {
+  console.error('Error: thread/resume failed');
+  process.exit(1);
+}
+const find = (dir, name) => {
+  for (const entry of readdirSync(dir)) {
+    const path = join(dir, entry);
+    if (statSync(path).isDirectory()) {
+      const found = find(path, name);
+      if (found) return found;
+    } else if (entry.endsWith(name)) return path;
+  }
+  return undefined;
+};
+const tools = declared => (existsSync(join(import.meta.dir, kind + '.notools')) ? [] : declared);
+const records = file => readFileSync(file, 'utf8').split('\\n').filter(Boolean).map(line => JSON.parse(line));
+let url;
+let body;
+if (kind === 'claude') {
+  const id = args[args.indexOf('--resume') + 1];
+  const file = find(join(process.env.CLAUDE_CONFIG_DIR, 'projects'), id + '.jsonl');
+  const messages = records(file)
+    .filter(record => record.type === 'user' || record.type === 'assistant')
+    .map(record => ({ role: record.message.role, content: record.message.content }));
+  url = process.env.ANTHROPIC_BASE_URL + '/v1/messages';
+  body = { tools: tools([{ name: 'Bash' }]), messages: [...messages, { role: 'user', content: args.at(-1) }] };
+} else {
+  const id = args[args.indexOf('resume') + 1];
+  const home = process.env.CODEX_HOME;
+  const file = find(join(home, 'sessions'), id + '.jsonl');
+  const input = records(file).filter(record => record.type === 'response_item').map(record => record.payload);
+  const base = /base_url = "([^"]+)"/.exec(readFileSync(join(home, 'config.toml'), 'utf8'))[1];
+  url = base + '/responses';
+  body = { tools: tools([{ name: 'exec_command' }]), input: [...input, { type: 'message', role: 'user', content: [{ type: 'input_text', text: args.at(-1) }] }] };
+}
+await (await fetch(url, { method: 'POST', body: JSON.stringify(body) })).text();
+console.log('OK');
+`;
+}

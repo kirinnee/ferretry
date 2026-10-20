@@ -93,6 +93,9 @@ const REFUSED_CAUSE: Readonly<Record<MigrationRefusal['blockedBy'], string>> = {
   unreadable: 'Ferretry couldn’t check what the agent is running',
 };
 
+/** Why the daemon would not stop what the agent is running, as a clause. */
+export const refusedCause = (refusal: MigrationRefusal): string => REFUSED_CAUSE[refusal.blockedBy];
+
 /** One sentence for an alert: why nothing happened, and that nothing did. */
 export const restartRefusedSentence = (refusal: MigrationRefusal): string =>
   `Restart paused — ${REFUSED_CAUSE[refusal.blockedBy]}. Nothing was restarted.`;

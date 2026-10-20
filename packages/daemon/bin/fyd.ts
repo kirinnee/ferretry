@@ -52,9 +52,12 @@ import {
   type Advertisement,
   type AnalyticsPricingRate,
   CONFIG_ACCEPTED_FILE,
+  type ConversionPreview,
+  type ConversionSummary as ConversionSummaryView,
   type DaemonCarrier,
   type FleetCredentialList,
   FY_DEFAULT_DAEMON_PORT,
+  type Harness,
   type LearningConfig,
   localOnlyNotice,
   type MigrationConversation,
@@ -74,8 +77,8 @@ import {
   sessionHypermediaEnabled,
   type TaskBoardChildAccess,
   TERMINAL_MAX_GLOBAL,
-  type TranscriptProvenance,
   TERMINAL_MAX_PER_SESSION,
+  type TranscriptProvenance,
   type WardenGuardConfig,
 } from '@ferretry/protocol';
 // One WebCrypto binding of the relay's crypto port serves the daemon, the browser and the Worker that
@@ -179,9 +182,9 @@ import {
   NodeSessionBrowserLauncher,
   type OpenedDaemonStorage,
   PaneProcessInventory,
-  ProjectMcpServers,
   PerformanceStopwatch,
   ProcCgroupPlacements,
+  ProjectMcpServers,
   quotaFailoverRoot,
   RegisteredCgroupPaneLedger,
   RuntimeEnvironment,
@@ -343,6 +346,7 @@ import {
   TmuxTerminalRuntime,
 } from '../src/adapters/terminal/index.ts';
 import { BunTmuxProcess, RealHarnessLaunchGuard, TmuxPaneDelivery, TmuxPaneQueue } from '../src/adapters/tmux/index.ts';
+import { CliConversionCheck, CliHarnessVersion } from '../src/adapters/transcript/conversion-check.ts';
 import { NodeTranscriptSource } from '../src/adapters/transcript/index.ts';
 import {
   FileSessionAttachmentCopier,
@@ -398,6 +402,11 @@ import {
   sessionForkKey,
 } from '../src/lib/fork/index.ts';
 import {
+  HANDOFF_READ_MAX_BYTES,
+  type HandoffDocuments,
+  isReadableHandoff,
+} from '../src/lib/imports/conversation-text.ts';
+import {
   type AccountInventoryPort,
   AgentSendFailureNotifier,
   AgentToolService,
@@ -450,16 +459,19 @@ import {
   CodexRuntimeCatalogCache,
   CodexTranscriptParser,
   type ConversationAdopter,
+  type ConversationConvert,
+  type ConversationFilesPort,
   ConversationImportService,
   type ConversationLinker,
+  type ConversionCheckPort,
+  type ConversionSummary as ConvertedConversationSummary,
   CredentialAgentIdentities,
   CredentialUsageSource,
   canServeModel,
   childGrantRequester,
-  declaredModel,
-  findAccountByAgent,
   chooseRelayCarrierSources,
   claimStartName,
+  codexModelProvider,
   combinedReferences,
   configuredAt,
   contextWindowForSession,
@@ -480,6 +492,7 @@ import {
   type DeliveredAttachment,
   DeviceGrantService,
   DONE_MARKER_FILENAME,
+  declaredModel,
   decodeInitialAttachments,
   defaultManagedWorktreeRoot,
   defaultSendTrackerSettings,
@@ -509,6 +522,7 @@ import {
   ForeignHistoryImporter,
   type FoundationPaths,
   fastStartRefusal,
+  findAccountByAgent,
   firstWriteReleasedAnswerAttention,
   fleetManifestRefusal,
   foreignAdvertisementNotice,
@@ -520,17 +534,16 @@ import {
   type HarnessDiscoveryPolicy,
   type HarnessPreflight,
   HarnessQuirkService,
+  type HarnessVersionPort,
   HOSTED_APP_ORIGIN,
   handoffFolders,
+  handoffPointerPaths,
   handoffView,
   harnessAbsentWarning,
+  harnessConversionRefusal,
   harnessDiscoveryPolicy,
   harnessLocationSummary,
   harnessMigrationRefusal,
-  planConversationCarry,
-  previousConversation,
-  type ConversationFilesPort,
-  transcriptLaunchArguments,
   harnessOverrideFailures,
   harnessPreflightSummary,
   harnessQuirks,
@@ -593,8 +606,11 @@ import {
   parseSessionId,
   parseWardenConfigPatch,
   passkeyVerifier,
+  planConversationCarry,
+  planConversationConvert,
   planInitialAttachments,
   portCandidates,
+  previousConversation,
   projectObservedRuntime,
   projectStructuredQuestion,
   publishableDirectCarrier,
@@ -756,6 +772,7 @@ import {
   taskBoardTaskActionAuthorizer,
   temporaryFilePath,
   transcriptKey,
+  transcriptLaunchArguments,
   tryParseSessionId,
   UnknownPeerRefused,
   type UsageFeedPort,
@@ -3810,6 +3827,14 @@ interface SessionMigrateParts {
   readonly transcriptProvenance: TranscriptProvenanceCapture;
   /** The transcripts a migration reads and carries into the target login's home. */
   readonly conversationFiles: ConversationFilesPort;
+  /** The validation run a converted conversation must pass before a cross-harness move switches. */
+  readonly conversionCheck: ConversionCheckPort;
+  /** The version each harness CLI reports, which the converter is gated on. */
+  readonly harnessVersion: HarnessVersionPort;
+  /** The harness CLI itself — the binary a target runtime's wrapper runs — or nothing when absent. */
+  readonly locateHarness: (kind: HarnessKind) => string | undefined;
+  /** A fresh harness conversation id for a converted conversation. */
+  readonly conversationId: () => string;
   /** The session's own private directory, which is what a Codex rollout is correlated by. */
   readonly sessionDirectory: (id: SessionId) => string;
   /** The folders the agent is pointed into to read what it was sent (`handoffFolders`). */
@@ -3880,11 +3905,166 @@ type RelaunchConversation =
       readonly launchArguments: readonly string[];
     }
   | {
+      readonly kind: 'convert';
+      readonly provenance: TranscriptProvenance;
+      readonly copy?: undefined;
+      readonly launchArguments: readonly string[];
+      /** The converted transcript, written into the target home before the record points at it. */
+      readonly transcript: { readonly file: string; readonly text: string };
+      /** Attachments the converted history references, saved first. */
+      readonly files: readonly { readonly file: string; readonly data: string }[];
+      readonly summary: ConvertedConversationSummary;
+      /** The conversation it was converted from, which stays on disk. */
+      readonly from: { readonly harness: Harness; readonly conversationId: string; readonly file: string };
+      /** The target conversation's fresh id. */
+      readonly conversationId: string;
+    }
+  | {
       readonly kind: 'unresumable';
       readonly reason: string;
       readonly provenance?: undefined;
       readonly copy?: undefined;
     };
+
+/** The most of a source transcript a conversion reads. A larger one is refused rather than cut. */
+const CONVERSION_SOURCE_MAX_BYTES = 512 * 1024 * 1024;
+/** The most of a Codex `config.toml` read for its model provider. */
+const CODEX_CONFIG_MAX_BYTES = 256 * 1024;
+
+/** What a conversion needs to know about the move it is part of. */
+interface ConversionSubject {
+  readonly id: SessionId;
+  readonly config: z.infer<typeof SessionConfigSchema>;
+  readonly harness: HarnessKind;
+  readonly executable: string;
+  readonly targetAgent: string;
+  readonly targetModel: string;
+  readonly targetWindow: number;
+}
+
+/**
+ * The conversation converted for a cross-harness move, from reads alone — the source transcript, the
+ * hand-off documents its pointers name inside the session's own folder, the target home and its CLI's
+ * version. Shared by the preview and the move, so what a person confirms is what is written.
+ */
+async function planConversion(
+  parts: SessionMigrateParts,
+  subject: ConversionSubject,
+  nativeShell = true,
+): Promise<ConversationConvert> {
+  const { id, config, harness, executable } = subject;
+  const source = config.transcript;
+  const sourceText =
+    source?.file === undefined
+      ? undefined
+      : await parts.conversationFiles.read(source.file, CONVERSION_SOURCE_MAX_BYTES);
+  if (source?.file !== undefined && sourceText === undefined && (await parts.conversationFiles.written(source.file)))
+    return {
+      kind: 'unconvertible',
+      reason: `The conversation file ${source.file} couldn't be read whole (the converter reads at most 512 MB), so it can't be converted. Nothing was changed.`,
+    };
+  const sessionDirectory = parts.sessionDirectory(id);
+  const documents = new Map<string, string>();
+  for (const path of handoffPointerPaths(sourceText ?? '')) {
+    // Only this session's own hand-off documents: the transcript is the agent's, and the agent does
+    // not get to choose what the daemon reads.
+    if (!isReadableHandoff(path, { roots: [sessionDirectory], coordinatorHomes: [] })) continue;
+    const document = await parts.conversationFiles.read(path, HANDOFF_READ_MAX_BYTES);
+    if (document !== undefined) documents.set(path, document);
+  }
+  const targetHome = await parts.transcriptProvenance.home(harness, executable);
+  const binary = parts.locateHarness(harness);
+  const targetModelProvider =
+    harness === 'codex' && targetHome !== undefined
+      ? codexModelProvider(await parts.conversationFiles.read(join(targetHome, 'config.toml'), CODEX_CONFIG_MAX_BYTES))
+      : undefined;
+  return planConversationConvert({
+    sourceHarness: config.harness,
+    targetHarness: harness,
+    source,
+    sourceText,
+    documents: documents satisfies HandoffDocuments,
+    targetHome,
+    targetVersion: binary === undefined ? undefined : await parts.harnessVersion.version(binary),
+    ...(targetModelProvider === undefined ? {} : { targetModelProvider }),
+    targetAgent: subject.targetAgent,
+    targetModel: subject.targetModel,
+    targetWindow: subject.targetWindow,
+    cwd: config.cwd,
+    sessionDirectory,
+    conversationId: parts.conversationId(),
+    at: parts.clock.now(),
+    ...(nativeShell ? {} : { nativeShell: false }),
+  });
+}
+
+/**
+ * A conversion, proven: planned, then resumed by the target CLI in a throwaway home before anything is
+ * switched. Any doubt is `unresumable` with the reason, and the session is left exactly as it was.
+ */
+async function convertRelaunchConversation(
+  parts: SessionMigrateParts,
+  subject: ConversionSubject,
+): Promise<RelaunchConversation> {
+  const native = await planConversion(parts, subject);
+  if (native.kind === 'unconvertible') return { kind: 'unresumable', reason: native.reason };
+  const binary = parts.locateHarness(subject.harness);
+  const source = subject.config.transcript;
+  // A plan exists only for a located CLI and an identified source; this restates that for the types.
+  if (binary === undefined || source?.file === undefined || source.harnessSessionId === undefined)
+    return { kind: 'unresumable', reason: 'The conversion could not be checked. Nothing was changed.' };
+  const check = async (plan: ConversationConvert & { readonly kind: 'convert' }) =>
+    await parts.conversionCheck.check({
+      harness: subject.harness,
+      executable: binary,
+      model: subject.targetModel,
+      render: plan.render,
+    });
+  let planned = native;
+  let verdict = await check(native);
+  // A CLI that does not declare its shell tool for this model gets the shell commands as text instead,
+  // checked again: a lossier history is better than no move, and the summary says which it was.
+  if (!verdict.ok && verdict.missingTools !== undefined) {
+    const textual = await planConversion(parts, subject, false);
+    if (textual.kind === 'convert') {
+      planned = textual;
+      verdict = await check(textual);
+    }
+  }
+  if (!verdict.ok) return { kind: 'unresumable', reason: `${verdict.reason} Nothing was changed.` };
+  return {
+    kind: 'convert',
+    provenance: planned.provenance,
+    launchArguments: transcriptLaunchArguments(subject.harness, planned.provenance, []),
+    transcript: planned.transcript,
+    files: planned.files,
+    summary: planned.summary,
+    from: { harness: subject.config.harness, conversationId: source.harnessSessionId, file: source.file },
+    conversationId: planned.conversationId,
+  };
+}
+
+/** A conversion's own account, in the protocol's words. */
+function conversionSummaryView(summary: ConvertedConversationSummary): ConversionSummaryView {
+  return {
+    converter: summary.converter,
+    sourceHarness: summary.source.harness,
+    ...(summary.source.version === undefined ? {} : { sourceVersion: summary.source.version }),
+    targetHarness: summary.target.harness,
+    targetVersion: summary.target.version,
+    turns: summary.turns,
+    keptTurns: summary.keptTurns,
+    omittedTurns: summary.omittedTurns,
+    cutNewest: summary.cutNewest,
+    messages: summary.messages,
+    nativeToolCalls: summary.nativeToolCalls,
+    toolCallsAsText: summary.toolCallsAsText,
+    attachments: summary.attachments,
+    dropped: summary.dropped,
+    estimatedTokens: summary.estimatedTokens,
+    budgetTokens: summary.budgetTokens,
+  };
+}
 
 /**
  * The conversation a migration relaunches into, decided from reads alone.
@@ -3902,10 +4082,13 @@ async function decideRelaunchConversation(
     readonly harness: HarnessKind;
     readonly executable: string;
     readonly targetAgent: string;
+    readonly targetModel: string;
+    readonly targetWindow: number;
     readonly conversation: MigrationConversation;
   },
 ): Promise<RelaunchConversation> {
   const { id, config, harness, executable } = subject;
+  if (subject.conversation === 'convert') return await convertRelaunchConversation(parts, subject);
   const at = parts.clock.now();
   if (subject.conversation === 'fresh') {
     const captured = await parts.transcriptProvenance.capture({
@@ -4015,35 +4198,28 @@ function createSessionMigrateSubsystem(parts: SessionMigrateParts): SessionMigra
     };
   };
 
-  const migrate = async (
-    id: SessionId,
-    request: Parameters<SessionMigrateSubsystem['migrate']>[1],
-  ): Promise<SessionView> => {
-    const { config, state, tmuxSession } = await subject(id);
-    const { account, executable } = await resolveStartAccount(
-      parts.accounts,
-      request.agent,
-      parts.executables,
-      CLIENT_NAME,
-    ).catch((error: unknown) => {
+  /** The account a move names, resolved with the start's own rule, its refusals in the move's words. */
+  const resolveTarget = async (agent: string) =>
+    await resolveStartAccount(parts.accounts, agent, parts.executables, CLIENT_NAME).catch((error: unknown) => {
       if (!(error instanceof SessionControlError)) throw error;
       const failure = MIGRATE_RESOLUTION_REFUSALS[error.failure];
       if (failure === undefined) throw error;
       throw new SessionMigrateError(failure, error.message);
     });
-    // SAME-KIND, ENFORCED HERE — the first thing decided once both families are known, and before any
-    // other work at all. Everything below it either reads the host or writes the session: the planner,
-    // the transcript capture that inspects the target's harness home, the report, the restamp and the
-    // kill. Refusing at this point is what makes the refusal cost nothing and leave nothing behind, so
-    // the caller may present the same request id again against an account of the right family.
-    const mismatch = harnessMigrationRefusal({
-      sourceHarness: config.harness,
-      targetHarness: account.kind,
-      targetAgent: account.agent,
-    });
-    if (mismatch !== undefined) throw new SessionMigrateError('harness_mismatch', mismatch);
-    // The same planner the start uses, so the model a migration records and the window it is measured
-    // against come from the one decision rather than two that can disagree.
+
+  /**
+   * The model a move plans on the target — the same planner the start uses, so the model a migration
+   * records and the window it is measured against come from the one decision rather than two that can
+   * disagree. Shared by the move and the conversion preview, so the window a person was shown is the
+   * window the move fits.
+   */
+  const planModel = (
+    id: SessionId,
+    config: z.infer<typeof SessionConfigSchema>,
+    state: z.infer<typeof SessionStateSchema>,
+    account: Awaited<ReturnType<typeof resolveTarget>>['account'],
+    requestedModel: string | undefined,
+  ) => {
     const shape = {
       id,
       account,
@@ -4058,15 +4234,37 @@ function createSessionMigrateSubsystem(parts: SessionMigrateParts): SessionMigra
     // for instead; only when the target cannot serve it does the target's default decide, as before.
     const current = currentLaunchModel(config, state, model => canServeModel(account, model));
     const keep =
-      request.model === undefined && current !== undefined
+      requestedModel === undefined && current !== undefined
         ? parts.planner.plan({ ...shape, requestedModel: current })
         : undefined;
     const planned =
       keep?.kind === 'planned'
         ? keep
-        : parts.planner.plan({ ...shape, ...(request.model === undefined ? {} : { requestedModel: request.model }) });
-    // And the effort it is on, which no request names.
-    const effort = currentLaunchEffort(config, state);
+        : parts.planner.plan({ ...shape, ...(requestedModel === undefined ? {} : { requestedModel }) });
+    return { keep, planned };
+  };
+
+  const migrate = async (
+    id: SessionId,
+    request: Parameters<SessionMigrateSubsystem['migrate']>[1],
+  ): Promise<SessionView> => {
+    const { config, state, tmuxSession } = await subject(id);
+    const { account, executable } = await resolveTarget(request.agent);
+    // SAME-KIND, ENFORCED HERE — the first thing decided once both families are known, and before any
+    // other work at all. Everything below it either reads the host or writes the session: the planner,
+    // the transcript capture that inspects the target's harness home, the report, the restamp and the
+    // kill. Refusing at this point is what makes the refusal cost nothing and leave nothing behind, so
+    // the caller may present the same request id again against an account of the right family.
+    // A CONVERSION IS THE ONE WAY ACROSS: `conversation: 'convert'` rewrites the conversation in the
+    // target's format, so it is refused the other way round — onto the session's own family.
+    const converting = request.conversation === 'convert';
+    const families = { sourceHarness: config.harness, targetHarness: account.kind, targetAgent: account.agent };
+    const mismatch = converting ? harnessConversionRefusal(families) : harnessMigrationRefusal(families);
+    if (mismatch !== undefined) throw new SessionMigrateError('harness_mismatch', mismatch);
+    const { keep, planned } = planModel(id, config, state, account, request.model);
+    // And the effort it is on, which no request names — unless the move crosses harnesses, whose effort
+    // vocabularies differ: the target then starts on its own login's setting.
+    const effort = converting ? undefined : currentLaunchEffort(config, state);
     // A MIGRATION ONTO A MODEL THE TARGET DOES NOT SERVE IS REFUSED, for the same reason the start
     // refuses it and with more at stake: a migration that quietly landed on the account's default
     // would move a live conversation into a different model and a different context window while the
@@ -4094,6 +4292,8 @@ function createSessionMigrateSubsystem(parts: SessionMigrateParts): SessionMigra
       harness: account.kind,
       executable,
       targetAgent: account.agent,
+      targetModel: plan.model,
+      targetWindow: plan.contextWindow,
       conversation: request.conversation ?? 'resume',
     });
     const command = ((): readonly string[] => {
@@ -4108,7 +4308,8 @@ function createSessionMigrateSubsystem(parts: SessionMigrateParts): SessionMigra
             readableFolders: parts.readableHandoffs(id),
             model: plan.model,
             ...(effort === undefined ? {} : { effort }),
-            harnessFlags: config.harnessFlags,
+            // The owner's extra flags are the source CLI's; the other harness would refuse them.
+            harnessFlags: converting ? [] : config.harnessFlags,
           }),
           defaultSessionLifecycleSettings,
         );
@@ -4128,7 +4329,9 @@ function createSessionMigrateSubsystem(parts: SessionMigrateParts): SessionMigra
     // has; a plan that disagrees is a catalog or selector gap, and refusing would make Restart impossible.
     const relaunchesSameModel =
       request.model === undefined && keep?.kind === 'planned' && account.agent === config.agent;
-    if (plan.contextWindow < window && !request.allowContextDowngrade && !relaunchesSameModel)
+    // A CONVERSION FITS THE TARGET BY CONSTRUCTION: it keeps the newest history the target's window can
+    // hold, tells the target how much it left out, and the preview the person confirmed said so.
+    if (plan.contextWindow < window && !request.allowContextDowngrade && !relaunchesSameModel && !converting)
       throw new SessionMigrateError(
         'context_downgrade',
         `${account.agent} serves ${plan.model} with a ${plan.contextWindow}-token window and this session is ` +
@@ -4187,6 +4390,22 @@ function createSessionMigrateSubsystem(parts: SessionMigrateParts): SessionMigra
     // The level the session is on carries over; with none known, the target's own settings decide.
     const launchEffort =
       effort ?? (await readPersistedReasoningEffort(account.kind, relaunchConversation.provenance?.home));
+    // A converted conversation, written before the record that points at it: its attachments first,
+    // then the transcript the target CLI already accepted in the validation run.
+    if (relaunchConversation.kind === 'convert') {
+      const converted = relaunchConversation;
+      try {
+        for (const attachment of converted.files)
+          await parts.conversationFiles.write(attachment.file, Buffer.from(attachment.data, 'base64'));
+        await parts.conversationFiles.write(converted.transcript.file, converted.transcript.text);
+      } catch (error) {
+        throw new SessionMigrateError(
+          'failed',
+          `the converted conversation could not be written into ${account.agent}'s home (${converted.transcript.file}): ` +
+            (error instanceof Error ? error.message : String(error)),
+        );
+      }
+    }
     // The target login's copy of the conversation, written before the record that points at it.
     const carried = relaunchConversation.copy;
     if (carried !== undefined)
@@ -4203,14 +4422,36 @@ function createSessionMigrateSubsystem(parts: SessionMigrateParts): SessionMigra
       // silently keep the old harness's file under the new harness's name.
       // Fast mode is dropped with the effort's launch record: the target is another login, often
       // another harness, and a model there may have none. It starts on that login's own setting.
+      // The conversion lineage goes with the conversation it describes: a new conversion replaces it,
+      // a resume of the same conversation keeps it, and a fresh or an earlier conversation drops it.
       const {
         transcript: _replaced,
         launchReasoningEffort: _previousEffort,
         launchFast: _previousFast,
+        conversion: previousLineage,
         ...retained
       } = jsonObject(current) ?? {};
+      const lineage =
+        relaunchConversation.kind === 'convert'
+          ? {
+              v: 1,
+              converter: relaunchConversation.summary.converter,
+              fromHarness: relaunchConversation.from.harness,
+              fromConversation: relaunchConversation.from.conversationId,
+              fromFile: relaunchConversation.from.file,
+              toHarness: account.kind,
+              toConversation: relaunchConversation.conversationId,
+              at,
+              keptTurns: relaunchConversation.summary.keptTurns,
+              omittedTurns: relaunchConversation.summary.omittedTurns,
+            }
+          : (request.conversation ?? 'resume') === 'resume'
+            ? previousLineage
+            : undefined;
       return {
         ...retained,
+        ...(lineage === undefined ? {} : { conversion: lineage }),
+        ...(converting ? { harnessFlags: [] } : {}),
         ...(launchEffort === undefined ? {} : { launchReasoningEffort: launchEffort }),
         agent: account.agent,
         harness: account.kind,
@@ -4228,7 +4469,22 @@ function createSessionMigrateSubsystem(parts: SessionMigrateParts): SessionMigra
       from,
       to: account.agent,
       model: plan.model,
-      conversation: relaunchConversation.kind === 'fresh' ? 'fresh' : 'resumed',
+      conversation:
+        relaunchConversation.kind === 'fresh'
+          ? 'fresh'
+          : relaunchConversation.kind === 'convert'
+            ? 'converted'
+            : 'resumed',
+      ...(relaunchConversation.kind === 'convert'
+        ? {
+            convertedFrom: {
+              harness: relaunchConversation.from.harness,
+              conversation: relaunchConversation.from.conversationId,
+              file: relaunchConversation.from.file,
+            },
+            conversion: conversionSummaryView(relaunchConversation.summary),
+          }
+        : {}),
       ...(relaunchConversation.provenance?.harnessSessionId === undefined
         ? {}
         : { harnessSessionId: relaunchConversation.provenance.harnessSessionId }),
@@ -4282,7 +4538,56 @@ function createSessionMigrateSubsystem(parts: SessionMigrateParts): SessionMigra
     return await view(id, 'was migrated');
   };
 
+  /**
+   * What converting onto an account would carry — the same plan the move makes, minus the validation
+   * run and every write. A refusal is an answer here, not an error: it is what the sheet shows in place
+   * of the confirm button.
+   */
+  const conversionPreview = async (
+    id: SessionId,
+    request: { readonly agent: string; readonly model?: string },
+  ): Promise<ConversionPreview> => {
+    const { config, state } = await subject(id);
+    const { account, executable } = await resolveTarget(request.agent);
+    const refused = (reason: string): ConversionPreview => ({ kind: 'refused', targetAgent: account.agent, reason });
+    const mismatch = harnessConversionRefusal({
+      sourceHarness: config.harness,
+      targetHarness: account.kind,
+      targetAgent: account.agent,
+    });
+    if (mismatch !== undefined) return refused(mismatch);
+    const { planned } = planModel(id, config, state, account, request.model);
+    if (planned.kind === 'unservable-model') return refused(planned.reason);
+    const conversion = await planConversion(parts, {
+      id,
+      config,
+      harness: account.kind,
+      executable,
+      targetAgent: account.agent,
+      targetModel: planned.plan.model,
+      targetWindow: planned.plan.contextWindow,
+    });
+    if (conversion.kind === 'unconvertible') return refused(conversion.reason);
+    return {
+      kind: 'ready',
+      targetAgent: account.agent,
+      targetModel: planned.plan.model,
+      summary: conversionSummaryView(conversion.summary),
+    };
+  };
+
+  /** The id a caller named, parsed, of a session that exists — or the refusal saying which it is not. */
+  const existing = (reference: string): SessionId => {
+    const id = tryParseSessionId(reference);
+    if (id === undefined)
+      throw new SessionMigrateError('invalid', `${JSON.stringify(reference)} is not a usable session id`);
+    if (parts.storage.findSession(id) === undefined)
+      throw new SessionMigrateError('not_found', `no session ${reference}`);
+    return id;
+  };
+
   return {
+    conversionPreview: async (reference, request) => await conversionPreview(existing(reference), request),
     migrate: async (reference, request) => {
       const id = tryParseSessionId(reference);
       if (id === undefined)
@@ -7479,6 +7784,15 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         transcripts: createTranscriptReader(storage),
         transcriptProvenance,
         conversationFiles: new FileConversationFiles(codexRollouts),
+        conversionCheck: new CliConversionCheck(),
+        harnessVersion: new CliHarnessVersion(),
+        // The SAME discovery a start's readiness check and the doctor use, so the CLI a conversion is
+        // validated against is the one this host would launch.
+        locateHarness: kind => {
+          const located = locateHarnessCommand(kind, harnessDiscovery, executables);
+          return located.outcome === 'located' ? located.path : undefined;
+        },
+        conversationId: () => crypto.randomUUID(),
         sessionDirectory: id => createSessionPaths(paths, id).directory,
         readableHandoffs: id => handoffFolders(createSessionPaths(paths, id).directory, attachmentOriginals(id)),
         // Its own queue: a migration holds its lock across a pane kill and a relaunch, and must not
