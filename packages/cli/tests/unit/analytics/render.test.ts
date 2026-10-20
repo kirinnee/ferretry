@@ -2,7 +2,7 @@ import { describe, it } from 'bun:test';
 import { AnalyticsResponseSchema } from '@ferretry/protocol';
 import should from 'should';
 import { EQUIVALENT_API_COST_CAVEAT, renderAnalytics } from '../../../src/lib/analytics/render';
-import { INDEX, aggregate, aggregateResponse, known, partial, rawResponse, rawSession, unknown } from './fixtures';
+import { aggregate, aggregateResponse, INDEX, known, partial, rawResponse, rawSession, unknown } from './fixtures';
 
 const lines = (text: string): string[] => text.split('\n');
 const row = (text: string, index: number): string => lines(text)[index] ?? '';
@@ -106,7 +106,7 @@ describe('aggregate table', () => {
     should(row(actual, 3)).startWith('GROUP');
     should(row(actual, 3)).containEql('EQUIV API COST');
     should(row(actual, 5)).equal(
-      'agent=sol  4         1.0m   234.6k  900.0k      100.0k       1.2m   $12.50          48     1h02m     850ms  64.3%    5.00%  12.5%  82.5%',
+      'agent=sol  4         1.0m   234.6k  900.0k      100.0k       1.2m   $12.50          48     1h02m     30m00s  850ms  64.3%    5.00%  12.5%  82.5%',
     );
   });
 
@@ -245,10 +245,10 @@ describe('raw table', () => {
 
     // Assert — kteam read `result.wrapper`, a field the protocol does not have, so the column was blank.
     should(row(actual, 3)).equal(
-      'ID        STATUS     AGENT             MODEL          HARNESS  LABEL  TOKENS  EQUIV API COST  TURNS  DURATION',
+      'ID        STATUS     AGENT             MODEL          HARNESS  LABEL  TOKENS  EQUIV API COST  TURNS  DURATION  ACTIVE',
     );
     should(row(actual, 5)).equal(
-      'ms8kkfyd  completed  claude-auto-loge  claude-opus-5  claude   cli2   512.0k  $4.500          21     1m35s',
+      'ms8kkfyd  completed  claude-auto-loge  claude-opus-5  claude   cli2   512.0k  $4.500          21     1m35s     1m00s',
     );
   });
 
@@ -264,13 +264,14 @@ describe('raw table', () => {
       equivalentApiCostUsdMicros: null,
       turns: null,
       durationMs: null,
+      activeDurationMs: null,
     });
 
     // Act
     const actual = renderAnalytics(rawResponse([bare]));
 
     // Assert
-    should(row(actual, 5)).equal('ms8kkfyd  —       —      —      —        —      —       —               —      —');
+    should(row(actual, 5)).equal('ms8kkfyd  —       —      —      —        —      —       —               —      —         —');
   });
 
   it('should tell the reader when the row set was cut short', () => {
