@@ -112,6 +112,7 @@ import { useInputModality } from './hooks/use-input-modality.ts';
 import { useInstallPrompt } from './hooks/use-install-prompt.ts';
 import { useLayoutMode } from './hooks/use-layout-mode.ts';
 import { useLiveClock } from './hooks/use-live-clock.ts';
+import { useMachineOrder } from './hooks/use-machine-order.ts';
 import { type ListedMachine, useMachineSources } from './hooks/use-machine-sources.ts';
 import { useMachinesPoll } from './hooks/use-machines-poll.ts';
 import { useNeedsRuntime } from './hooks/use-needs-runtime.ts';
@@ -139,6 +140,7 @@ import { projectKeyFor } from './lib/fleet-grouping.ts';
 import { installBanner } from './lib/install-prompt.ts';
 import { placeLedgerRows } from './lib/ledger-placement.ts';
 import { createLiveActivityHub } from './lib/live-activity-feed.ts';
+import { moveMachine } from './lib/machine-order.ts';
 import type { NotificationCategory, QuietHours } from './lib/notification-filter.ts';
 import type {
   NotificationPermissionState,
@@ -803,6 +805,8 @@ function ShellSessionsBar({
   const collapsed = useSyncExternalStore(store.controls.subscribe, () =>
     store.controls.controls(connection.daemonId),
   ).sidebarCollapsed;
+  const machineOrder = useMachineOrder(store.controls);
+  const displayed = machineDisplayOrder(connections, machineOrder.saved);
   const record = connections.find(candidate => candidate.daemonId === connection.daemonId);
   // The desktop column, folded to its icon rail only when the reader folded it.
   const shape: SessionsBarPresentation = presentation === 'column' && collapsed ? 'rail' : presentation;
@@ -816,12 +820,22 @@ function ShellSessionsBar({
       {...(needsRuntime
         ? { createRuntimeHref: `${daemonSettingsPath(connection.daemonId)}${machineHash(machineName, 'runtimes')}` }
         : {})}
-      machines={machineDisplayOrder(connections).map(candidate => ({
+      machines={displayed.map(candidate => ({
         daemonId: candidate.daemonId,
         name: distinctDaemonName(candidate, connections),
         updateAvailable: updates.has(candidate.daemonId),
       }))}
       {...(updateReady === null ? {} : { update: updateOffer(updateReady), onApplyUpdate })}
+      onMoveMachine={(id, target, edge) =>
+        machineOrder.commit(
+          moveMachine(
+            displayed.map(candidate => candidate.daemonId),
+            id,
+            target,
+            edge,
+          ),
+        )
+      }
       onAddMachine={() => navigate(connectionPickerPath())}
       {...(onPairPhone === undefined ? {} : { onPairPhone })}
       onNavigate={navigate}
@@ -1716,16 +1730,17 @@ export function AppShell() {
   const layoutPhone = layout === 'drawer';
   const sessionsList = useSyncExternalStore(store.controls.subscribe, () => store.controls.snapshot()).device
     .sessionsList;
+  const savedMachineOrder = useMachineOrder(store.controls).saved;
   const everyMachine = sessionsList === 'all' && connectionSnapshot.connections.length > 1 && connection !== undefined;
   const listedMachines = useMemo<readonly ListedMachine[]>(
     () =>
       connection === undefined || !everyMachine
         ? []
-        : machineDisplayOrder(connectionSnapshot.connections).map(record => ({
+        : machineDisplayOrder(connectionSnapshot.connections, savedMachineOrder).map(record => ({
             connection: record,
             name: distinctDaemonName(record, connectionSnapshot.connections),
           })),
-    [connection, connectionSnapshot.connections, everyMachine],
+    [connection, connectionSnapshot.connections, everyMachine, savedMachineOrder],
   );
   const polled = useMemo<readonly DaemonConnection[]>(
     () =>

@@ -17,12 +17,15 @@ import { displayCallsign } from '../lib/callsign.ts';
 import type { DaemonId } from '../lib/daemon-connection.ts';
 import { daemonSessionPath } from '../lib/pages/routes.ts';
 import { MachineReachDot, MachineReachWords } from './machine-chip.tsx';
+import { MachineHeadControls, type MoveMachine, useMachineReorder } from './machine-reorder.tsx';
 import { RouteLink } from './route-link.tsx';
 import { sessionsBarSubline } from './sessions-bar-model.ts';
 import { SessionsBarRow } from './sessions-bar-row.tsx';
 import { sessionTree } from './sessions-bar-tree.ts';
 import { SessionsBarTree } from './sessions-bar-tree.tsx';
 import { StatusMark } from './status-mark.tsx';
+
+const NO_MOVE: MoveMachine = () => undefined;
 
 export interface SessionsBarMachinesProps {
   readonly view: AllMachinesView;
@@ -37,6 +40,8 @@ export interface SessionsBarMachinesProps {
    * to another machine's set — except the one on screen, which still reads `learningPassive`.
    */
   readonly machineLearners?: MachineLearners;
+  /** Reorders the machine headings; absent, or with a single machine, the headings carry no grip. */
+  readonly onMoveMachine?: MoveMachine;
   readonly now: number;
   readonly onNavigate: (to: string) => void;
 }
@@ -49,7 +54,15 @@ export function SessionsBarMachines({
   machineLearners,
   now,
   onNavigate,
+  onMoveMachine,
 }: SessionsBarMachinesProps) {
+  const reorder = useMachineReorder(
+    view.machines.map(machine => machine.daemonId),
+    new Map(view.machines.map(machine => [machine.daemonId, machine.name])),
+    onMoveMachine ?? NO_MOVE,
+  );
+  const reorderable = onMoveMachine !== undefined && view.machines.length > 1;
+  const byId = new Map(view.machines.map(machine => [machine.daemonId, machine]));
   const active = (machine: DaemonId, session: SessionView): boolean =>
     machine === daemonId && session.config.id === activeSessionId;
   const learns = (machine: DaemonId, session: SessionView): boolean =>
@@ -78,47 +91,59 @@ export function SessionsBarMachines({
           </ul>
         </section>
       )}
-      {view.machines.map(machine => {
-        const reach = machineReachLabel(machine, now);
-        return (
-          <section
-            aria-label={machine.name}
-            className="fy-sbar__machine-group"
-            data-machine-reach={machine.reach}
-            data-sbar-machine-group={machine.daemonId}
-            key={machine.daemonId}
-          >
-            <h2 className="fy-sbar__machine-head">
-              <MachineReachDot reach={machine.reach} />
-              <span className="fy-sbar__machine-label truncate">{machine.name}</span>
-              <MachineReachWords className="fy-sbar__machine-reach truncate" label={reach} />
-              <span className="fy-sbar__count">{machine.total}</span>
-            </h2>
-            {machine.groups.length === 0 ? (
-              <p className="fy-sbar__empty">
-                {machine.needsYou > 0 ? 'Everything here is in Needs you.' : 'No sessions.'}
-              </p>
-            ) : (
-              machine.groups.map(group => (
-                <div className="fy-sbar__group" key={group.path || group.name}>
-                  <h3 className="fy-sbar__project">
-                    <span className="truncate">{group.name}</span>
-                    <span className="fy-sbar__count">{group.rows.length}</span>
-                  </h3>
-                  <SessionsBarTree
-                    activeSessionId={machine.daemonId === daemonId ? activeSessionId : null}
-                    daemonId={machine.daemonId}
-                    entries={sessionTree(group.rows, machine.sessions)}
-                    isActive={row => active(machine.daemonId, row)}
-                    learns={row => learns(machine.daemonId, row)}
-                    onNavigate={onNavigate}
-                  />
-                </div>
-              ))
-            )}
-          </section>
-        );
-      })}
+      {reorder.drawn
+        .flatMap(id => byId.get(id) ?? [])
+        .map(machine => {
+          const reach = machineReachLabel(machine, now);
+          return (
+            <section
+              aria-label={machine.name}
+              className="fy-sbar__machine-group"
+              key={machine.daemonId}
+              data-machine-reach={machine.reach}
+              data-sbar-machine-group={machine.daemonId}
+              {...(reorder.dragging === machine.daemonId ? { 'data-dragging': '' } : {})}
+              {...(reorder.over?.id === machine.daemonId ? { 'data-drop-edge': reorder.over.edge } : {})}
+            >
+              <h2 className="fy-sbar__machine-head">
+                {reorderable ? (
+                  <MachineHeadControls id={machine.daemonId} name={machine.name} reorder={reorder} />
+                ) : null}
+                <MachineReachDot reach={machine.reach} />
+                <span className="fy-sbar__machine-label truncate">{machine.name}</span>
+                <MachineReachWords className="fy-sbar__machine-reach truncate" label={reach} />
+                <span className="fy-sbar__count">{machine.total}</span>
+              </h2>
+              {machine.groups.length === 0 ? (
+                <p className="fy-sbar__empty">
+                  {machine.needsYou > 0 ? 'Everything here is in Needs you.' : 'No sessions.'}
+                </p>
+              ) : (
+                machine.groups.map(group => (
+                  <div className="fy-sbar__group" key={group.path || group.name}>
+                    <h3 className="fy-sbar__project">
+                      <span className="truncate">{group.name}</span>
+                      <span className="fy-sbar__count">{group.rows.length}</span>
+                    </h3>
+                    <SessionsBarTree
+                      activeSessionId={machine.daemonId === daemonId ? activeSessionId : null}
+                      daemonId={machine.daemonId}
+                      entries={sessionTree(group.rows, machine.sessions)}
+                      isActive={row => active(machine.daemonId, row)}
+                      learns={row => learns(machine.daemonId, row)}
+                      onNavigate={onNavigate}
+                    />
+                  </div>
+                ))
+              )}
+            </section>
+          );
+        })}
+      <div className="relative">
+        <div aria-live="assertive" className="sr-only" role="status">
+          {reorder.announcement}
+        </div>
+      </div>
     </>
   );
 }

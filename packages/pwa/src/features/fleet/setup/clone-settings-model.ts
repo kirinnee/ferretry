@@ -15,7 +15,8 @@
  *   reviewed `machine.settings` change. `machine.yaml` is NOT copied whole: its advanced block names
  *   this machine's own paths and tools.
  *
- * SECRETS AND LOGIN TOKENS NEVER TRAVEL — no route returns a value. What travels can still NEED one,
+ * SECRETS AND LOGIN TOKENS NEVER TRAVEL WITH THE SETTINGS — no route returns a value, and a secret is copied
+ * only by name, on its own (docs/secrets.md). What travels can still NEED one,
  * so the preview lists every secret and sign-in the copied settings need ("needs: JEV_API_KEY,
  * GROQ_API_KEY, Claude Code login…"), each marked when this machine already holds it, with a field to
  * add it now.

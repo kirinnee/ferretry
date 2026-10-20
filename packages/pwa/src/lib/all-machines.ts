@@ -34,6 +34,7 @@ import type { ConnectionHealthState } from './connection-health.ts';
 import type { DaemonId } from './daemon-connection.ts';
 import { type FleetProject, groupByProject, type ModeCounts, type SessionGroup } from './fleet-grouping.ts';
 import type { DaemonFleetSlice } from './fleet-store.ts';
+import { reconcileMachineOrder } from './machine-order.ts';
 
 /**
  * How one machine is reached right now, as its heading's dot says it.
@@ -226,8 +227,21 @@ export const machineReachLabel = (section: Pick<MachineSection, 'reach' | 'readA
  * screen; a list that then hoisted it would move every row under the reader's pointer, and the row they
  * just clicked would jump to the top. The order is a fact about the pairings alone, so it holds still
  * whichever machine is open — and it is not the registry's order either, which moves on every select.
+ *
+ * `saved` is the order the reader dragged them into on this device (`lib/machine-order.ts`): those
+ * first, in that order, then any machine it has never seen, in pairing order. Every surface that lists
+ * machines goes through here, so they cannot disagree.
  */
 export const machineDisplayOrder = <T extends { readonly daemonId: DaemonId; readonly pairedAt: number }>(
   machines: readonly T[],
-): readonly T[] =>
-  [...machines].sort((left, right) => left.pairedAt - right.pairedAt || left.daemonId.localeCompare(right.daemonId));
+  saved: readonly string[] = [],
+): readonly T[] => {
+  const paired = [...machines].sort(
+    (left, right) => left.pairedAt - right.pairedAt || left.daemonId.localeCompare(right.daemonId),
+  );
+  const byId = new Map(paired.map(machine => [machine.daemonId, machine] as const));
+  return reconcileMachineOrder(
+    paired.map(machine => machine.daemonId),
+    saved,
+  ).map(id => byId.get(id) as T);
+};

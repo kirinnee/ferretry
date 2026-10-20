@@ -113,7 +113,7 @@ function NeedRow({
       <span className="shrink-0 text-muted" aria-hidden="true">
         {need.kind === 'sign-in' ? <KeyRound size={14} /> : <Lock size={14} />}
       </span>
-      <span className="flex min-w-0 flex-1 flex-col">
+      <span className="flex min-w-0 flex-[1_1_10rem] flex-col">
         <span className="[overflow-wrap:anywhere] font-mono text-ui text-fg">needs {need.name}</span>
         <span className="[overflow-wrap:anywhere] text-meta text-muted">for {need.why}</span>
       </span>
@@ -171,6 +171,7 @@ export function CloneNeedsList({
   machineName,
   signIn,
   onAdd,
+  copy,
 }: {
   readonly needs: readonly CloneNeed[];
   readonly machineName: string;
@@ -178,10 +179,13 @@ export function CloneNeedsList({
   readonly signIn?: (need: CloneNeed) => ReactNode;
   /** Store one value on this machine. Resolves to a sentence on failure, `null` when stored. */
   readonly onAdd: (name: string, value: string) => Promise<string | null>;
+  /** Copying secrets from the source, explicitly and by name (docs/secrets.md); absent offers none. */
+  readonly copy?: ReactNode;
 }) {
   const sentence = needsSentence(needs);
   return (
     <SetupSection title="Never copied: secrets and login tokens" name="clone-needs">
+      {copy}
       {needs.length === 0 ? (
         <p className="m-0 text-cell text-muted" data-clone-needs-none="">
           The copied settings need no secret and no sign-in.
