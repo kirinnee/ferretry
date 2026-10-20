@@ -33,6 +33,7 @@
  *   bun harness/screenshot.ts --landing-only # capture the built landing and /get-started/ at both viewports and schemes
  *   bun harness/screenshot.ts --mcp-sign-in-only   # an MCP server's sign-in, its sheet and the callback page
  *   bun harness/screenshot.ts --pair-from-menu-only [--light]   # Pair a phone from the machine menu
+ *   bun harness/screenshot.ts --session-context-menu-only [--light]   # right-click menu / long-press sheet on a session row
  *   bun harness/screenshot.ts --about-only [--light]   # Settings › Machine › About and its update states
  *   bun harness/screenshot.ts --session-layout-only [--light]   # the session page's layout checks, with frames
  *   bun harness/screenshot.ts --settings-only [--light]   # what CI runs
@@ -93,6 +94,8 @@ const PROJECTS_ONLY = process.argv.includes('--projects-only');
 const MCP_SIGN_IN_ONLY = process.argv.includes('--mcp-sign-in-only');
 /** "Pair a phone" from the machine menu: the switcher, the sheet and the minted (fake) QR. */
 const PAIR_FROM_MENU_ONLY = process.argv.includes('--pair-from-menu-only');
+/** The sessions bar's row menu: right-click at the pointer on a desktop, a long-press sheet on a phone. */
+const SESSION_CONTEXT_MENU_ONLY = process.argv.includes('--session-context-menu-only');
 /** Settings › Machine › About: an update available, the mid-turn choice, and a deb's manual steps. */
 const ABOUT_ONLY = process.argv.includes('--about-only');
 
@@ -134,6 +137,7 @@ const WALKS_SETTINGS = !(
   PAIRING_FAILURES_ONLY ||
   MCP_SIGN_IN_ONLY ||
   PAIR_FROM_MENU_ONLY ||
+  SESSION_CONTEXT_MENU_ONLY ||
   ABOUT_ONLY ||
   SESSION_LAYOUT_ONLY
 );
@@ -666,6 +670,69 @@ const capturePairFromMenu = async (page: Page, viewportName: string): Promise<vo
   const focusedSwitcher = await page.evaluate(() => document.activeElement?.hasAttribute('data-sbar-machine') === true);
   if (!focusedSwitcher)
     fail(`closing the pairing sheet did not return focus to the machine switcher at ${viewportName}`);
+};
+
+/**
+ * The sessions bar's row menu (`?session-context-menu`, `harness/session-context-menu.tsx`), driven the way a
+ * reader does it: a right-click on a parent row on a desktop (a menu at the pointer, inside the viewport,
+ * the same Actions as the header), a held finger on a phone (a bottom sheet of 44px rows). Both are walked
+ * through Escape and the inline Stop confirmation, and a sub-ferret row's menu is captured too.
+ */
+const captureSessionContextMenu = async (page: Page, viewportName: string): Promise<void> => {
+  const shot = async (name: string): Promise<void> => {
+    const wide = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+    if (wide > 1) fail(`session-context-menu ${name} scrolls sideways by ${wide}px at ${viewportName}`);
+    const target = join(outDir, `session-context-menu-${name}-${SCHEME}-${viewportName}.png`);
+    await page.screenshot({ path: target, animations: 'disabled' });
+    process.stdout.write(`📸 session context menu ${name} ${SCHEME} ${viewportName} -> ${target}\n`);
+  };
+  await page.goto(`${server.url}?session-context-menu`);
+  const parent = page.locator('[data-sbar-session="hadi"]');
+  await parent.waitFor({ state: 'visible' });
+  const phone = viewportName === 'mobile';
+  const openMenu = async (id: string): Promise<void> => {
+    const target = page.locator(`[data-sbar-session="${id}"]`);
+    if (!phone) {
+      await target.click({ button: 'right' });
+    } else {
+      const box = await target.boundingBox();
+      if (box === null) fail(`no box for ${id}`);
+      const client = await page.context().newCDPSession(page);
+      const point = { x: box.x + box.width / 2, y: box.y + box.height / 2, id: 1 };
+      await client.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [point] });
+      await page.waitForTimeout(700);
+      await client.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+    }
+    await page.getByRole('menu', { name: /actions$/u }).waitFor({ state: 'visible' });
+  };
+  await openMenu('hadi');
+  const menu = page.getByRole('menu', { name: 'Hadi actions' });
+  const labels = (await menu.getByRole('menuitem').allTextContents()).map(label => label.trim());
+  for (const wanted of ['Open', 'Rename…', 'Restart CLI', 'Stop ferret…'])
+    if (!labels.some(label => label.startsWith(wanted))) fail(`the row menu has no "${wanted}": ${labels.join(' | ')}`);
+  const box = await menu.boundingBox();
+  const viewport = page.viewportSize();
+  if (box === null || viewport === null) fail('no menu box');
+  else if (box.x < 0 || box.y < 0 || box.x + box.width > viewport.width + 1)
+    fail(`the row menu leaves the viewport: ${JSON.stringify(box)}`);
+  if (phone) {
+    const short = await menu
+      .getByRole('menuitem')
+      .evaluateAll(rows => rows.map(row => row.getBoundingClientRect().height).filter(height => height < 44));
+    if (short.length > 0) fail(`row-menu rows under the 44px touch floor on a phone: ${short.join(', ')}`);
+  }
+  await shot('menu');
+
+  await menu.getByRole('menuitem', { name: /^Stop ferret/u }).click();
+  await page.locator('[data-menu-confirm]').waitFor({ state: 'visible' });
+  await shot('confirm');
+  await page.keyboard.press('Escape');
+  await page.keyboard.press('Escape');
+  await page.getByRole('menu', { name: /actions$/u }).waitFor({ state: 'detached' });
+
+  await openMenu('hadi-a');
+  await page.getByRole('menu', { name: /actions$/u }).waitFor({ state: 'visible' });
+  await shot('sub-ferret');
 };
 
 /**
@@ -2013,6 +2080,10 @@ try {
           }
           if (PAIR_FROM_MENU_ONLY) {
             await capturePairFromMenu(page, viewport.name);
+            continue;
+          }
+          if (SESSION_CONTEXT_MENU_ONLY) {
+            await captureSessionContextMenu(page, viewport.name);
             continue;
           }
           if (ABOUT_ONLY) {

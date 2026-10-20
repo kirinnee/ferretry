@@ -31,6 +31,32 @@
   overflow-y: auto;
   padding: 4px;
 }
+/* Opened at a press rather than under a button: placed by left/top, above the phone drawer, no focus ring
+   on the frame itself (the rows take focus). */
+.fy-actions-menu--at,
+.fy-action-popover--at {
+  z-index: 60;
+}
+/* Every action is one scroll-free look: the menu may use the whole height, the clamp slides it up. */
+.fy-actions-menu--at {
+  max-height: calc(100dvh - 16px);
+}
+.fy-actions-menu--at:focus,
+.fy-action-popover--at:focus {
+  outline: none;
+}
+/* The same menu inside the bottom sheet: the sheet is the frame. */
+.fy-actions-menu--sheet {
+  position: static;
+  width: auto;
+  max-width: none;
+  max-height: none;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  background: transparent;
+  padding: 4px 8px calc(8px + env(safe-area-inset-bottom, 0px));
+}
 .fy-actions-menu__section + .fy-actions-menu__section {
   margin-top: 4px;
   border-top: var(--divider-width, 1px) solid var(--border-soft);

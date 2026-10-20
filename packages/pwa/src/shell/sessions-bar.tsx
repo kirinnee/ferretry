@@ -20,7 +20,7 @@
 
 import type { SessionView } from '@ferretry/protocol';
 import { ChartNoAxesCombined, ChevronDown, FolderKanban, Menu, Plus, QrCode, Search, Settings, X } from 'lucide-react';
-import { type ReactNode, useRef, useState, useSyncExternalStore } from 'react';
+import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { pairPhoneLabel } from '../features/settings/pair-phone.tsx';
 import { RailDivider } from '../features/workspace/split-divider.tsx';
 import { useDialogFocus } from '../hooks/use-dialog-focus.ts';
@@ -43,6 +43,7 @@ import { ContextMenu, type ContextMenuItem, type MenuAnchor } from './context-me
 import { NewSessionMenu } from './new-session-menu.tsx';
 import { PALETTE_KEYSHORTCUTS, paletteShortcutLabel } from './palette-shortcut.ts';
 import { RouteLink } from './route-link.tsx';
+import { type OpenRowMenu, SessionMenuContext, type SessionMenuState } from './session-menu-context.ts';
 import { SessionsBarFilters, sessionsBarEmptyMessage } from './sessions-bar-filters.tsx';
 import { SessionsBarMachines, SessionsRailMachineDots } from './sessions-bar-machines.tsx';
 import {
@@ -128,6 +129,11 @@ export interface SessionsBarProps {
   readonly machineSources?: readonly MachineSource[];
   /** The clock a machine's "last seen" is measured against. */
   readonly now?: number;
+  /**
+   * The menu a row opens (right-click, long-press, the Menu key): the host draws it for the pressed ferret.
+   * Absent, rows have no menu and the browser's own is left alone.
+   */
+  readonly renderSessionMenu?: (menu: SessionMenuState, close: (restoreFocus: boolean) => void) => ReactNode;
 }
 
 /**
@@ -633,10 +639,69 @@ function SessionsColumn(props: SessionsBarProps & ListFilterProps) {
   );
 }
 
+/**
+ * The row menu's state, kept by the bar so the column, the rail and the drawer share one. A press is a
+ * finger when the last thing the reader did was touch a screen; a keyboard open is never one.
+ */
+function useSessionMenu(enabled: boolean) {
+  const [menu, setMenu] = useState<SessionMenuState | null>(null);
+  const modality = useRef<string>('mouse');
+  useEffect(() => {
+    if (!enabled) return;
+    const onPointer = (event: PointerEvent): void => {
+      modality.current = event.pointerType;
+    };
+    const onKey = (): void => {
+      modality.current = 'keyboard';
+    };
+    document.addEventListener('pointerdown', onPointer, true);
+    document.addEventListener('keydown', onKey, true);
+    return () => {
+      document.removeEventListener('pointerdown', onPointer, true);
+      document.removeEventListener('keydown', onKey, true);
+    };
+  }, [enabled]);
+  const open = useMemo<OpenRowMenu | undefined>(
+    () =>
+      enabled
+        ? (target, x, y, trigger) =>
+            setMenu({
+              ...target,
+              x,
+              y,
+              trigger,
+              touch: modality.current === 'touch' || modality.current === 'pen',
+              open: true,
+            })
+        : undefined,
+    [enabled],
+  );
+  const latest = useRef(menu);
+  latest.current = menu;
+  const close = useCallback((restoreFocus: boolean): void => {
+    const current = latest.current;
+    if (restoreFocus && current?.trigger.isConnected === true) current.trigger.focus();
+    setMenu(shown => (shown === null ? null : { ...shown, open: false }));
+  }, []);
+  return { menu, open, close };
+}
+
 export function SessionsBar(props: SessionsBarProps) {
   const [listFilter, onListFilterChange] = useState<SessionsListFilter>(DEFAULT_LIST_FILTER);
+  const { menu, open, close } = useSessionMenu(props.renderSessionMenu !== undefined);
   const filtered = { ...props, listFilter, onListFilterChange };
-  if (props.presentation === 'drawer') return <SessionsDrawer {...filtered} />;
-  if (props.presentation === 'rail') return <SessionsRail {...filtered} />;
-  return <SessionsColumn {...filtered} />;
+  const bar =
+    props.presentation === 'drawer' ? (
+      <SessionsDrawer {...filtered} />
+    ) : props.presentation === 'rail' ? (
+      <SessionsRail {...filtered} />
+    ) : (
+      <SessionsColumn {...filtered} />
+    );
+  return (
+    <SessionMenuContext.Provider value={open}>
+      {bar}
+      {menu === null ? null : props.renderSessionMenu?.(menu, close)}
+    </SessionMenuContext.Provider>
+  );
 }
