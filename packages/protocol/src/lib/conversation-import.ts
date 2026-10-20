@@ -25,6 +25,9 @@ import { HarnessSchema } from './session-base.ts';
 export const CONVERSATION_IMPORT_PATH = '/v1/imports/conversations';
 export const CONVERSATION_ADOPT_PATH = '/v1/imports/conversations/adopt';
 
+/** A conversation's name (its title) is cut to this many characters. */
+export const CONVERSATION_NAME_MAX = 120;
+
 /** The preview is the first user message cut to this many characters, never the transcript. */
 export const CONVERSATION_PREVIEW_MAX = 120;
 /** How many exchanges (an owner's message and the replies to it) a conversation preview shows. */
@@ -45,6 +48,11 @@ export const ImportableConversationSchema = z.strictObject({
   harness: HarnessSchema,
   /** The absolute folder the conversation ran in, which is where a resumed ferret runs too. */
   project: z.string().min(1),
+  /**
+   * The name the CLI gave it: Claude Code's `/rename` title, else its generated one; Codex's thread name.
+   * Absent when the conversation was never named, which is when the first message stands in for it.
+   */
+  name: z.string().min(1).max(CONVERSATION_NAME_MAX).optional(),
   /** The first user message, whitespace-collapsed and truncated. */
   preview: z.string().max(CONVERSATION_PREVIEW_MAX),
   /** The most recent user message, the same way, when it differs from the first. */
@@ -73,7 +81,7 @@ export const ConversationImportQuerySchema = z.strictObject({
   /** Only conversations kept there. Absent reads both, Ferretry's copy first. */
   source: ConversationSourceSchema.optional(),
   harness: HarnessSchema.optional(),
-  /** Case-insensitive words, each of which must appear in the preview, the latest message or the folder. */
+  /** Case-insensitive words, each of which must appear in the name, the preview, the latest message or the folder. */
   q: z.string().max(200).optional(),
   /** Only conversations active at or after this instant. */
   since: InstantSchema.optional(),

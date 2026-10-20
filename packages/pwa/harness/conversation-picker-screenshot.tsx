@@ -2,7 +2,8 @@
  * "Import conversations" and New session's "Continue a conversation", on a phone and a desktop, in a
  * dark and a light theme: the picker with a few rows kept, one "Start now" on and a row a ferret already
  * keeps; Continue's two sources (the stopped ferrets, and every conversation in Ferretry's history) with
- * the CLI and date filters; and an open row showing its last exchanges above the button that continues it.
+ * the CLI and date filters; each row headed by its name (a Claude title, a Codex thread name, a ferret) with
+ * the first message under it, and the unnamed rows headed by their first message; and an open row showing its last exchanges above the button that continues it.
  *
  *   bun harness/conversation-picker-screenshot.tsx      # writes harness/out/conversation-picker-*.png
  *
@@ -41,11 +42,11 @@ import { daemonConnection } from '../../src/lib/daemon-connection.ts';
 const NOW = Date.parse('2026-10-13T08:00:00.000Z');
 const ago = hours => new Date(NOW - hours * 3_600_000).toISOString();
 const ROWS = [
-  { id: 'c1', harness: 'claude', project: '/work/shop', preview: 'Fix the checkout total when a coupon and a gift card are both applied', latest: 'Now add a test for the rounding', lastActivityAt: ago(2), turns: 14, model: 'Sonnet 5.5' },
-  { id: 'c2', harness: 'claude', project: '/work/shop', preview: 'Why does the cart badge flicker on Safari?', lastActivityAt: ago(30), turns: 6, model: 'Opus 5.5' },
-  { id: 'c3', harness: 'claude', project: '/work/notes', preview: 'Summarise this week of meeting notes into a short list', lastActivityAt: ago(5), turns: 3, model: 'Haiku 5.5', adoptedBy: 'notes-weekly' },
+  { id: 'c1', harness: 'claude', name: 'Checkout total: coupon plus gift card', project: '/work/shop', preview: 'Fix the checkout total when a coupon and a gift card are both applied', latest: 'Now add a test for the rounding', lastActivityAt: ago(2), turns: 14, model: 'Sonnet 5.5' },
+  { id: 'c2', harness: 'claude', name: 'Safari cart badge flicker', project: '/work/shop', preview: 'Why does the cart badge flicker on Safari?', lastActivityAt: ago(30), turns: 6, model: 'Opus 5.5' },
+  { id: 'c3', harness: 'claude', name: 'Weekly meeting notes digest', project: '/work/notes', preview: 'Summarise this week of meeting notes into a short list', lastActivityAt: ago(5), turns: 3, model: 'Haiku 5.5', adoptedBy: 'notes-weekly' },
   { id: 'c4', harness: 'claude', project: '/work/notes', preview: 'Tag every note that mentions the launch', lastActivityAt: ago(50), turns: 9 },
-  { id: 'c5', harness: 'codex', project: '/work/api/services/billing-gateway-with-a-long-folder-name', preview: 'Add retries to the invoice webhook', lastActivityAt: ago(80), turns: 22, model: 'GPT-6' },
+  { id: 'c5', harness: 'codex', name: 'Invoice webhook retries', project: '/work/api/services/billing-gateway-with-a-long-folder-name', preview: 'Add retries to the invoice webhook', lastActivityAt: ago(80), turns: 22, model: 'GPT-6' },
   { id: 'c6', harness: 'claude', project: '/work/shop', preview: 'Rename the product grid component', lastActivityAt: ago(24 * 9), turns: 2, model: 'Sonnet 5.5' },
 ];
 const ferret = (id, name, harness, cwd, status, hours) => ({
@@ -163,7 +164,7 @@ const VIEWPORTS = {
 } as const;
 
 try {
-  for (const theme of ['studio-light', 'studio-dark', 'neo-light', 'neo-dark'] as const) {
+  for (const theme of ['studio-light', 'studio-dark'] as const) {
     for (const [vp, options] of Object.entries(VIEWPORTS)) {
       const context = await browser.newContext({
         ...options,

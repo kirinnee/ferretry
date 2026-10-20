@@ -29,6 +29,15 @@ export class NodeConversationFiles implements ConversationFiles {
     return details?.isFile() === true ? { modifiedAtMs: details.mtimeMs, size: details.size } : undefined;
   }
 
+  async tail(file: string, maxBytes: number): Promise<string | undefined> {
+    const details = await this.info(file);
+    if (details === undefined) return undefined;
+    return await Bun.file(file)
+      .slice(Math.max(0, details.size - maxBytes), details.size)
+      .text()
+      .catch(() => undefined);
+  }
+
   async text(file: string): Promise<string | undefined> {
     return await Bun.file(file)
       .text()

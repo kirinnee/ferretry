@@ -306,7 +306,7 @@ export function ContinueConversation({
               <ConversationLines
                 row={{ ...row.conversation, lastActivityAt: row.lastActivityAt }}
                 now={at}
-                lead={row.name}
+                title={row.name}
               />
             )
           }
@@ -387,7 +387,7 @@ export function ContinueConversation({
         id={searchId}
         type="search"
         className="kt-input w-full"
-        placeholder={source === 'sessions' ? 'Name, words or folder' : 'Words or folder'}
+        placeholder="Name, words or folder"
         autoComplete="off"
         data-continue-search=""
         value={text}

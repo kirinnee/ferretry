@@ -30,6 +30,23 @@ describe('renderImportListing', () => {
     should(text).containEql('unknown model');
   });
 
+  it('should lead a named conversation with its name, then the first message, and drop the latest', () => {
+    // Arrange
+    const rows = [
+      conversation({ id: 'c-1', name: 'Login page fix', preview: 'Fix login', latest: 'Fixed it' }),
+      conversation({ id: 'c-2', name: 'Quiet one', preview: '' }),
+    ];
+
+    // Act
+    const text = renderImportListing(listing(rows), 'fy');
+
+    // Assert
+    should(text).containEql('Login page fix — Fix login');
+    should(text).not.containEql('Fixed it');
+    should(text).containEql('Quiet one');
+    should(text).not.containEql('Quiet one —');
+  });
+
   it('should mark an already-adopted row and the limit and skipped counts', () => {
     // Arrange
     const rows = [conversation({ id: 'c-1', adoptedBy: 's-1' })];
@@ -76,5 +93,13 @@ describe('renderSearchMatches', () => {
       '1) /work/app  claude  2026-10-10T00:00:00.000Z  Fix the login page',
       '2) /work/other  codex  2026-10-10T00:00:00.000Z  Fix the login page',
     ]);
+  });
+
+  it('should lead a named row with its name', () => {
+    // Act
+    const text = renderSearchMatches([conversation({ name: 'Login page fix' })]);
+
+    // Assert
+    should(text).equal('1) /work/app  claude  2026-10-10T00:00:00.000Z  Login page fix — Fix the login page');
   });
 });
