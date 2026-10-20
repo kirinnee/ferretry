@@ -308,7 +308,7 @@ describe('merging analytics answers across machines', () => {
   });
 
   describe('examples', () => {
-    it('should merge an older daemon\'s missing measure as unknown for its sessions, never as nothing', () => {
+    it("should merge an older daemon's missing measure as unknown for its sessions, never as nothing", () => {
       // Arrange — machine A (new): one session, 10 turns, 600 s active. Machine B (older): one session,
       // 10 turns, and no active-time field, which the schema defaults to { null, 0, 0 }.
       const zero = Object.fromEntries(MEASURES.map(key => [key, 0])) as Record<AnalyticsMeasureKey, number>;

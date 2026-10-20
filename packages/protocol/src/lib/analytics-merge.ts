@@ -66,7 +66,11 @@ function mergeMeasure(
  * `{ value: null, known: 0, total: sessions }` — and the fleet value turns unknown instead of silently
  * describing only the machines that answered. `count` is the exception: it states no measure at all.
  */
-function partOf(row: AnalyticsAggregateResult, key: AnalyticsMeasureKey, aggregation: AnalyticsAggregation): AnalyticsMeasure {
+function partOf(
+  row: AnalyticsAggregateResult,
+  key: AnalyticsMeasureKey,
+  aggregation: AnalyticsAggregation,
+): AnalyticsMeasure {
   const measure = row[key];
   return aggregation !== 'count' && measure.total === 0 && row.sessions > 0
     ? { value: null, known: 0, total: row.sessions }
@@ -83,7 +87,10 @@ function mergeRow(
   const rate = (key: keyof AnalyticsAggregateResult['rates']) =>
     (left.rates[key] * left.sessions + right.rates[key] * right.sessions) / sessions;
   const measures = Object.fromEntries(
-    MEASURE_KEYS.map(key => [key, mergeMeasure(partOf(left, key, aggregation), partOf(right, key, aggregation), aggregation)]),
+    MEASURE_KEYS.map(key => [
+      key,
+      mergeMeasure(partOf(left, key, aggregation), partOf(right, key, aggregation), aggregation),
+    ]),
   ) as { [K in AnalyticsMeasureKey]: AnalyticsMeasure };
   return {
     labels: left.labels,

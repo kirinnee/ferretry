@@ -373,7 +373,12 @@ describe('analytics session usage fold, on Claude multi-block messages', () => {
           role: 'assistant',
           model: 'claude-opus-5-5',
           content: [block],
-          usage: { input_tokens: 10, output_tokens: output, cache_read_input_tokens: 1_000, cache_creation_input_tokens: 50 },
+          usage: {
+            input_tokens: 10,
+            output_tokens: output,
+            cache_read_input_tokens: 1_000,
+            cache_creation_input_tokens: 50,
+          },
         },
       });
     const text = [

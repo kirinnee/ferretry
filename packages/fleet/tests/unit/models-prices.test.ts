@@ -162,13 +162,18 @@ describe('model catalog prices', () => {
         ...openai,
         codex: {
           ...half,
-          models: half.models.map(model => (model.id === 'gpt-6-astra' ? { ...model, price: { ...price, input: 9 } } : model)),
+          models: half.models.map(model =>
+            model.id === 'gpt-6-astra' ? { ...model, price: { ...price, input: 9 } } : model,
+          ),
         },
       };
       const file = { ...(built.deepseek as ModelCatalog), origin: 'file' as const };
       const unpricedFile = {
         ...file,
-        codex: { ...(file.codex as NonNullable<ModelCatalog['codex']>), models: file.codex?.models.map(({ price: _p, ...model }) => model) ?? [] },
+        codex: {
+          ...(file.codex as NonNullable<ModelCatalog['codex']>),
+          models: file.codex?.models.map(({ price: _p, ...model }) => model) ?? [],
+        },
       };
 
       // Act

@@ -370,7 +370,13 @@ describe('analytics session activity fold, on the records real transcripts carry
     ];
 
     // Act
-    const actual = foldAnalyticsSessionActivity({ kind: 'read', harness: 'claude', events, issues: [], pendingBytes: 0 });
+    const actual = foldAnalyticsSessionActivity({
+      kind: 'read',
+      harness: 'claude',
+      events,
+      issues: [],
+      pendingBytes: 0,
+    });
 
     // Assert
     should(actual).deepEqual({ activeDurationMs: 5_000, turns: 1 });

@@ -216,8 +216,14 @@ describe('deriveAnalyticsSessionRecord', () => {
 describe('active time against wall time', () => {
   it('should bound active time by the wall time of the run it belongs to', () => {
     // Act — the fixture's wall time is 60 s
-    const over = deriveAnalyticsSessionRecord({ ...finished, activity: { activeDurationMs: 90_000, turns: 2 } }, catalog);
-    const under = deriveAnalyticsSessionRecord({ ...finished, activity: { activeDurationMs: 45_000, turns: 2 } }, catalog);
+    const over = deriveAnalyticsSessionRecord(
+      { ...finished, activity: { activeDurationMs: 90_000, turns: 2 } },
+      catalog,
+    );
+    const under = deriveAnalyticsSessionRecord(
+      { ...finished, activity: { activeDurationMs: 45_000, turns: 2 } },
+      catalog,
+    );
     const unbounded = deriveAnalyticsSessionRecord(
       { ...finished, finishedAt: 'not an instant', activity: { activeDurationMs: 90_000, turns: 2 } },
       catalog,

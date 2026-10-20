@@ -205,7 +205,11 @@ export function foldAnalyticsSessionUsage(
       continue;
     }
     if (event.kind !== 'usage') continue;
-    if (event.harness === 'claude' && event.messageId !== undefined && speaksForMessage.get(event.messageId) !== index) {
+    if (
+      event.harness === 'claude' &&
+      event.messageId !== undefined &&
+      speaksForMessage.get(event.messageId) !== index
+    ) {
       continue;
     }
 
