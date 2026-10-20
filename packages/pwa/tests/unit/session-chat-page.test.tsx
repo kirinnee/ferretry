@@ -3187,6 +3187,32 @@ describe('SessionChatPage Info and Actions', () => {
     }
   });
 
+  test('the header’s switch marks carry the host’s answers, and a tap only for a reader who may control it', async () => {
+    const taps: string[] = [];
+    const switches = { hypermedia: true, pack: false, onToggle: (section: string) => taps.push(section) };
+    for (const canControl of [true, false]) {
+      const page = renderSessionChatPage(chatPage({ infoLearning: true, switches, canControl }), fakeDaemon().factory);
+      try {
+        await flush();
+        const marks = page.root.findByType(SessionTopBar).props.switches;
+        expect(marks).toMatchObject({ learning: true, hypermedia: true, pack: false });
+        expect(marks.onToggle === undefined).toBe(!canControl);
+        marks.onToggle?.('hypermedia', false);
+      } finally {
+        run(() => page.unmount());
+      }
+    }
+    expect(taps).toEqual(['hypermedia']);
+    // A host that hands none leaves the bar to read the record itself.
+    const bare = renderSessionChatPage(chatPage({}), fakeDaemon().factory);
+    try {
+      await flush();
+      expect(bare.root.findByType(SessionTopBar).props.switches).toBeUndefined();
+    } finally {
+      run(() => bare.unmount());
+    }
+  });
+
   test('Info reads through the page ports, and every Info link opens where the page keeps it', async () => {
     const daemon = fakeDaemon();
     const layouts = new WorkspaceLayoutStore(NO_STORAGE);

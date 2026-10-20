@@ -65,6 +65,8 @@ cp "${worker_bin}" "${tools}/${worker_name}"
 # The fake harness: named like the real one so the daemon finds it the way it finds a real install.
 cat >"${tools}/claude" <<'HARNESS'
 #!/bin/sh
+# Asked for its usage (the wrapper asks what flags it takes), it answers and exits, like the real one.
+[ "${1:-}" = --help ] && { echo "Usage: claude [options]"; exit 0; }
 # A ready harness shows a prompt line with the cursor left on it; that is what the daemon waits for.
 # Each line it reads is a turn: it answers and draws a fresh, empty prompt, as a real harness would.
 printf 'smoke harness started\n> '

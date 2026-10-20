@@ -1807,7 +1807,10 @@ describe('daemon boot lifecycle', () => {
     should(offBody.view.config.hypermedia).be.false();
     should(offBody.note).startWith('Hypermedia is off');
     should(stored).have.property('FY_HYPERMEDIA', '0');
-    should(sessionPaneEnvironment(parseSessionId(started.config.id), stored)).have.property('FY_HYPERMEDIA', '0');
+    should(sessionPaneEnvironment(parseSessionId(started.config.id), stored, 'interactive')).have.property(
+      'FY_HYPERMEDIA',
+      '0',
+    );
     should(absent.status).equal(404);
   });
 
@@ -2885,7 +2888,7 @@ describe('daemon boot lifecycle', () => {
     // the same function the launcher hands to `tmux -e`, so the two halves of the chain meet on one
     // value rather than on two spellings of it. A pane launched with no identity — the state this unit
     // found the daemon in — presents nothing here, and every assertion about `from` below fails.
-    const paneEnvironment = sessionPaneEnvironment(parseSessionId(sender.config.id), {});
+    const paneEnvironment = sessionPaneEnvironment(parseSessionId(sender.config.id), {}, 'auto');
     const attributed = await send(
       { 'x-ferretry-session-id': paneEnvironment[SESSION_ID_VARIABLE] ?? '' },
       'the gate is green, pick up the migration',

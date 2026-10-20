@@ -17,6 +17,10 @@ This page is the contract. The wire shapes are `packages/protocol/src/lib/pack.t
 | One ferret's    | `config.pack` on its session document (absent = on); `PATCH …/pack` | on      |
 | What it is told | `FY_PACK=1` or `0` in its launch environment, written at its start  | —       |
 
+A ferret whose environment holds no `FY_PACK` — one started before Pack mode existed, or whose start could
+not write it — is given what its record says at every launch (the same rule, from `config.pack`, the
+machine's switch and its depth) rather than nothing; a stored value still wins.
+
 - A new ferret gets `FY_PACK=1` when the machine's switch is on **and** it sits shallow enough to start a
   sub-ferret of its own. A ferret at the deepest level is never told about a door it cannot open. A
   learning miner or a warden is never told; an adopted conversation (`fy new --continue`, Import) is a
@@ -46,13 +50,13 @@ Stop sub-ferrets you no longer need (`fy stop children <your id> --yes`).
 
 Built-in subagents are **discouraged, not blocked**: nothing is taken away from the harness.
 
-**Size.** Every Ferretry instruction together is about 3.5 KB (≈ 870 tokens) with every section on:
+**Size.** Every Ferretry instruction together is about 4.0 KB (≈ 1,000 tokens) with every section on:
 
 | Section                                  | Characters | ≈ tokens | When                        |
 | ---------------------------------------- | ---------- | -------- | --------------------------- |
 | Tools (terminals, browser pages)         | 620        | 155      | every agent runtime         |
 | Ferretry settings (short "Set up" skill) | 478        | 120      | every agent runtime         |
-| Hypermedia                               | 1,062      | 266      | `FY_HYPERMEDIA=1`           |
+| Hypermedia                               | 1,597      | 399      | `FY_HYPERMEDIA=1`           |
 | Pack mode                                | 890        | 223      | `FY_PACK=1`                 |
 | Lessons                                  | 413        | 104      | `FY_LEARNING_PASSIVE=1`     |
 | The tools server's MCP instructions      | 112        | 28       | always — one line, no rules |

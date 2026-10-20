@@ -33,6 +33,11 @@ export interface HypermediaSessionActions {
   readonly host: ReactNode;
   /** Whether one ferret is told to use hypermedia, with an answer the list has not caught up with yet. */
   readonly onFor: (view: SessionView) => boolean;
+  /**
+   * Switches one ferret from outside the Actions menu — its header mark. A refusal is said in the same
+   * status line as the answer, because a mark has no menu of its own to report it in.
+   */
+  readonly tap: (sessionId: string, next: boolean) => Promise<void>;
 }
 
 export function useHypermediaSessionActions({
@@ -55,6 +60,17 @@ export function useHypermediaSessionActions({
       setNote(result.note);
     },
     [connection, fetcher],
+  );
+
+  const tap = useCallback(
+    async (sessionId: string, next: boolean) => {
+      try {
+        await toggle(sessionId, next);
+      } catch (reason) {
+        setNote(`Hypermedia could not be switched: ${reason instanceof Error ? reason.message : String(reason)}`);
+      }
+    },
+    [toggle],
   );
 
   const contributions = useMemo<readonly SessionActionContribution<HypermediaActionContext>[]>(
@@ -100,19 +116,5 @@ export function useHypermediaSessionActions({
       </div>
     );
 
-  return { contributions, host, onFor };
-}
-
-/** The mark a ferret's header carries while it is told it may use hypermedia. */
-export function HypermediaMark() {
-  return (
-    <span
-      className="inline-flex shrink-0 items-center text-accent"
-      data-hypermedia-mark=""
-      title="Hypermedia on: this ferret may explain with diagrams, drawings, interactive pages and media"
-    >
-      <Shapes size={13} aria-hidden="true" />
-      <span className="sr-only">Hypermedia on</span>
-    </span>
-  );
+  return { contributions, host, onFor, tap };
 }

@@ -314,7 +314,12 @@ describe('tmux resume launcher', () => {
     const controller = new TmuxController(port);
     return new TmuxResumeLauncher(
       controller,
-      async () => ({ tmuxSession: 'fy-session-1', cwd: '/workspace/project', command: ['/opt/fleet/bin/agent'] }),
+      async () => ({
+        tmuxSession: 'fy-session-1',
+        mode: 'auto',
+        cwd: '/workspace/project',
+        command: ['/opt/fleet/bin/agent'],
+      }),
       new TmuxPaneDelivery(controller, async () => {}, options),
       snapshots,
     );
@@ -375,6 +380,7 @@ describe('tmux resume launcher', () => {
       controller,
       async () => ({
         tmuxSession: 'fy-session-1',
+        mode: 'auto',
         cwd: '/workspace/project',
         command: ['/opt/fleet/bin/agent'],
         env: { FY_SESSION_BOARD_CAPABILITY: 'stored-secret' },
@@ -403,7 +409,7 @@ describe('tmux resume launcher', () => {
     // Arrange
     const port = new RecordingTmuxPort();
     const controller = new TmuxController(port);
-    const revive = async (mode: 'auto' | 'interactive' | undefined, env: Record<string, string>) => {
+    const revive = async (mode: 'auto' | 'interactive', env: Record<string, string>) => {
       await new TmuxResumeLauncher(
         controller,
         async () => ({
@@ -411,7 +417,7 @@ describe('tmux resume launcher', () => {
           cwd: '/workspace/project',
           command: ['/opt/fleet/bin/agent'],
           env,
-          ...(mode === undefined ? {} : { mode }),
+          mode,
         }),
         new TmuxPaneDelivery(controller, async () => {}),
       ).relaunch(ID);
@@ -421,15 +427,13 @@ describe('tmux resume launcher', () => {
     port.alive = false;
     await revive('interactive', {});
     await revive('auto', {});
-    await revive(undefined, {});
     await revive('auto', { FY_HYPERMEDIA: '1' });
 
     // Assert
     const launches = port.calls.filter(call => call[0] === 'new-session');
     should(launches[0]).containDeep(['-e', 'FY_HYPERMEDIA=1']);
     should(launches[1]).containDeep(['-e', 'FY_HYPERMEDIA=0']);
-    should(launches[2]).containDeep(['-e', 'FY_HYPERMEDIA=0']);
-    should(launches[3]).containDeep(['-e', 'FY_HYPERMEDIA=1']);
+    should(launches[2]).containDeep(['-e', 'FY_HYPERMEDIA=1']);
   });
 
   it('should relaunch with the argv built at launch rather than the one recorded', async () => {
@@ -443,6 +447,7 @@ describe('tmux resume launcher', () => {
       controller,
       async () => ({
         tmuxSession: 'fy-session-1',
+        mode: 'auto',
         cwd: '/workspace/project',
         command: ['/opt/fleet/bin/agent', '--model', 'recorded'],
         relaunch: async () => {
@@ -469,7 +474,7 @@ describe('tmux resume launcher', () => {
     // Arrange
     const subject = new TmuxResumeLauncher(
       new TmuxController(new RecordingTmuxPort()),
-      async () => ({ tmuxSession: 'fy-session-1', cwd: '/workspace/project', command: [] }),
+      async () => ({ tmuxSession: 'fy-session-1', mode: 'auto', cwd: '/workspace/project', command: [] }),
       new TmuxPaneDelivery(new TmuxController(new RecordingTmuxPort()), async () => {}),
     );
 
@@ -651,6 +656,7 @@ describe('the resume launcher and a profile-authenticated account', () => {
       controller,
       async () => ({
         tmuxSession: 'fy-session-1',
+        mode: 'auto',
         cwd: '/workspace/project',
         command: ['/opt/fleet/bin/agent'],
         env: { FY_SESSION_BOARD_CAPABILITY: 'stored-secret' },
@@ -681,7 +687,12 @@ describe('the resume launcher and a profile-authenticated account', () => {
     const controller = new TmuxController(port);
     const subject = new TmuxResumeLauncher(
       controller,
-      async () => ({ tmuxSession: 'fy-session-1', cwd: '/workspace/project', command: ['/opt/fleet/bin/agent'] }),
+      async () => ({
+        tmuxSession: 'fy-session-1',
+        mode: 'auto',
+        cwd: '/workspace/project',
+        command: ['/opt/fleet/bin/agent'],
+      }),
       new TmuxPaneDelivery(controller, async () => {}),
       undefined,
       undefined,
@@ -709,6 +720,7 @@ describe('the resume launcher and a profile-authenticated account', () => {
       controller,
       async () => ({
         tmuxSession: 'fy-session-1',
+        mode: 'auto',
         cwd: '/workspace/project',
         command: ['/opt/fleet/bin/agent'],
         env: { FY_SESSION_BOARD_CAPABILITY: 'this-session-only' },
@@ -739,7 +751,12 @@ describe('the resume launcher and a profile-authenticated account', () => {
     let asked = 0;
     const subject = new TmuxResumeLauncher(
       controller,
-      async () => ({ tmuxSession: 'fy-session-1', cwd: '/workspace/project', command: ['/opt/fleet/bin/agent'] }),
+      async () => ({
+        tmuxSession: 'fy-session-1',
+        mode: 'auto',
+        cwd: '/workspace/project',
+        command: ['/opt/fleet/bin/agent'],
+      }),
       new TmuxPaneDelivery(controller, async () => {}),
       undefined,
       undefined,
@@ -769,6 +786,7 @@ describe('the resume launcher and a profile-authenticated account', () => {
       controller,
       async () => ({
         tmuxSession: 'fy-session-1',
+        mode: 'auto',
         cwd: '/workspace/project',
         command: ['/opt/fleet/bin/agent'],
         agent: '/opt/fleet/bin/agent',
@@ -806,6 +824,7 @@ describe('the resume launcher and a credential that can renew itself', () => {
       controller,
       async () => ({
         tmuxSession: 'fy-session-1',
+        mode: 'auto',
         cwd: '/workspace/project',
         command: ['/opt/fleet/bin/agent'],
         ...spec,

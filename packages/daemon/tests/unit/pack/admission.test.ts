@@ -1,6 +1,12 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { admitChild, depthOf, type Lineage, packInstructed } from '../../../src/lib/pack/admission.ts';
+import {
+  admitChild,
+  depthOf,
+  type Lineage,
+  packInstructed,
+  packLaunchDefault,
+} from '../../../src/lib/pack/admission.ts';
 import { packConfig } from './support.ts';
 
 const LIMITS = packConfig().limits;
@@ -139,5 +145,24 @@ describe('depthOf', () => {
 
     // Assert
     should(depth).equal(0);
+  });
+});
+
+describe('packLaunchDefault', () => {
+  it('should tell a ferret its record says is on, and never a miner, a warden, a switched-off one or one too deep', () => {
+    // Arrange — a ferret started before Pack mode: no stored FY_PACK, no `config.pack`.
+    const on = packConfig();
+    const top = { eligible: true, ownSwitch: undefined, depth: 0 };
+
+    // Act
+    const told = packLaunchDefault(on, top);
+    const miner = packLaunchDefault(on, { ...top, eligible: false });
+    const switchedOff = packLaunchDefault(on, { ...top, ownSwitch: false });
+    const deepest = packLaunchDefault(on, { ...top, depth: on.limits.maxDepth });
+    const machineOff = packLaunchDefault({ ...on, enabled: false }, top);
+
+    // Assert
+    should(told).equal('1');
+    should([miner, switchedOff, deepest, machineOff]).deepEqual(['0', '0', '0', '0']);
   });
 });
