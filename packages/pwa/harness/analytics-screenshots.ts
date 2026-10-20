@@ -56,9 +56,17 @@ const PAGES = [
   { name: 'overview', search: '?app-chrome=analytics' },
   {
     name: 'query',
-    search: `?app-chrome=analytics&analytics-view=query&q=${encodeURIComponent('sum(cost_usd) by (model) [14d]')}`,
+    search: `?app-chrome=analytics&analytics-view=query&q=${encodeURIComponent('sum(cost_usd) by (model) [7d]')}`,
   },
 ] as const;
+
+/** A reader's saved queries, so the Query page's saved list is not empty in review. */
+const SAVED_KEY = 'fy-analytics-saved-queries-v1';
+const SAVED_QUERIES = [
+  { id: 'saved-1', name: 'Opus spend this week', query: 'sum(cost_usd) by (day) {model=claude-opus-5-5} [7d]' },
+  { id: 'saved-2', name: 'Active time per turn by runtime', query: 'avg(duration_active_seconds_per_turn) by (runtime) [14d]' },
+  { id: 'saved-3', name: 'Tokens by machine', query: 'sum(tokens) by (machine) [30d]' },
+];
 
 const executablePath = Bun.which('google-chrome') ?? Bun.which('chromium') ?? undefined;
 const browser = await chromium.launch({ ...(executablePath ? { executablePath } : {}), headless: true });
@@ -82,8 +90,11 @@ try {
       await page.goto(server.url.href);
       for (const family of FAMILIES) {
         await page.evaluate(
-          ([themeFamily, mode]) => localStorage.setItem('fy-theme-v1', JSON.stringify({ family: themeFamily, mode })),
-          [family, scheme] as const,
+          ([themeFamily, mode, savedKey, saved]) => {
+            localStorage.setItem("fy-theme-v1", JSON.stringify({ family: themeFamily, mode }));
+            localStorage.setItem(savedKey, saved);
+          },
+          [family, scheme, SAVED_KEY, JSON.stringify(SAVED_QUERIES)] as const,
         );
         for (const target of PAGES) {
           await page.setViewportSize({ width: viewport.width, height: viewport.height });

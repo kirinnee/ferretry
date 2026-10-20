@@ -16,6 +16,7 @@ import {
 import { ArrowDown, ArrowDownUp, ArrowUp } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { cn } from '../../lib/class-names.ts';
+import { formatDollars } from './analytics-overview.ts';
 
 export type AnalyticsSortKey =
   | 'group'
@@ -261,7 +262,8 @@ export const formatDurationSeconds = (seconds: number): string => {
 export const formatMetricMeasure = (metric: AnalyticsMetric, measure: AnalyticsMeasure): string => {
   if (measure.value === null) return metric === 'cost_usd' ? 'Unpriced' : 'Unknown';
   const bound = lowerBound(measure);
-  if (metric === 'cost_usd') return `${bound}${formatUsdMicros(BigInt(Math.round(measure.value * 1_000_000)))}`;
+  // The metric column is read, not audited: to the cent, as every other cost on the page.
+  if (metric === 'cost_usd') return `${bound}${formatDollars(measure.value)}`;
   if (metric.startsWith('duration_'))
     return `${bound}${formatDurationSeconds(measure.value)}`;
   return `${bound}${NUMBER_FORMAT.format(measure.value)}`;

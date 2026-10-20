@@ -92,10 +92,12 @@ function XLabels({
   return (
     <div aria-hidden="true" className={className}>
       {points.map((point, index) => (
-        // The end labels grow inward, so the last point never pushes the page sideways.
+        // A thinned axis lets a label spill over its unlabelled neighbours; a full one (every bar named,
+        // as a by-model result is) keeps each label to its own bar and ends it in an ellipsis. The end
+        // labels align inward either way, so the last never pushes the page sideways.
         <span
           key={point.key}
-          className={`mono flex min-w-0 flex-1 whitespace-nowrap ${index === 0 ? 'justify-start' : index === points.length - 1 ? 'justify-end' : 'justify-center'}`}
+          className={`mono min-w-0 flex-1 ${every === 1 ? 'truncate' : 'flex whitespace-nowrap'} ${index === 0 ? 'justify-start text-left' : index === points.length - 1 ? 'justify-end text-right' : 'justify-center text-center'}`}
         >
           {shown.has(point.key) ? point.label : ''}
         </span>
