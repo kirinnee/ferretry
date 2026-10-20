@@ -14,7 +14,8 @@ import {
 import { z } from 'zod';
 import type { TerminalWait } from '../agent-tools/client.ts';
 import { renderToolResult } from '../agent-tools/controller.ts';
-import { MCP_CONFIG_TOOLS, MCP_LESSON_TOOLS, MCP_TOOLS } from './tools.ts';
+import { instructionsReport, renderInstructionsReport } from '../instructions/report.ts';
+import { MCP_CONFIG_TOOLS, MCP_INSTRUCTIONS_TOOL, MCP_LESSON_TOOLS, MCP_TOOLS } from './tools.ts';
 
 /**
  * THE FERRETRY TOOLS AS AN MCP SERVER — JSON-RPC 2.0 over stdio, written out by hand.
@@ -56,6 +57,8 @@ export interface McpServerInfo {
    * built-in "Set up Ferretry" skill, so any agent can set the machine up from its files.
    */
   readonly instructions?: string;
+  /** The binary's name, as the `instructions` tool's answer names a command to run. */
+  readonly binary?: string;
 }
 
 type JsonRpcId = string | number | null;
@@ -154,6 +157,8 @@ export class McpServer {
   constructor(
     private readonly tools: McpToolsPort,
     private readonly info: McpServerInfo,
+    /** The launch environment this server inherited from the ferret, which the `instructions` tool reports. */
+    private readonly environment: Readonly<Record<string, string | undefined>> = {},
   ) {}
 
   /**
@@ -184,7 +189,7 @@ export class McpServer {
           jsonrpc: '2.0',
           id,
           result: {
-            tools: [...MCP_TOOLS, ...MCP_CONFIG_TOOLS, ...MCP_LESSON_TOOLS].map(
+            tools: [...MCP_TOOLS, ...MCP_CONFIG_TOOLS, ...MCP_LESSON_TOOLS, MCP_INSTRUCTIONS_TOOL].map(
               ({ name, description, inputSchema }) => ({
                 name,
                 description,
@@ -217,6 +222,19 @@ export class McpServer {
     if (!parsed.success)
       return failure(id, JSON_RPC_ERRORS.invalidParams, 'tools/call needs a tool name and its arguments');
     const args = parsed.data.arguments ?? {};
+    if (parsed.data.name === MCP_INSTRUCTIONS_TOOL.name)
+      return {
+        jsonrpc: '2.0',
+        id,
+        result: {
+          content: [
+            {
+              type: 'text',
+              text: renderInstructionsReport(instructionsReport(this.environment), this.info.binary ?? this.info.name),
+            },
+          ],
+        },
+      };
     const configTool = MCP_CONFIG_TOOLS.find(candidate => candidate.name === parsed.data.name);
     if (configTool !== undefined) return await this.config(id, configTool.configTool, args);
     const lessonTool = MCP_LESSON_TOOLS.find(candidate => candidate.name === parsed.data.name);

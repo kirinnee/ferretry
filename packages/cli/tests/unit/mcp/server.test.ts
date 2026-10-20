@@ -19,6 +19,7 @@ function harness(
     config?: (call: AgentConfigToolCall) => Promise<AgentConfigToolResult>;
     lessons?: (call: AgentLessonToolCall) => Promise<AgentLessonToolResult>;
     instructions?: string;
+    environment?: Readonly<Record<string, string>>;
   } = {},
 ) {
   const calls: (AgentToolCall | TerminalWait)[] = [];
@@ -48,6 +49,7 @@ function harness(
       version: '9.9.9',
       ...(options.instructions === undefined ? {} : { instructions: options.instructions }),
     },
+    options.environment,
   );
   const request = async (method: string, params?: unknown, id: number | string = 1) =>
     await server.handle({ jsonrpc: '2.0', id, method, ...(params === undefined ? {} : { params }) });
@@ -137,6 +139,7 @@ describe('McpServer — the tools', () => {
       'config_validate',
       'config_write',
       'lessons_suggest',
+      'instructions',
     ]);
     should(names.every(name => /^[a-zA-Z0-9_-]{1,64}$/u.test(name))).be.true();
     should(answer.result.tools.every(tool => tool.inputSchema.type === 'object')).be.true();
@@ -470,5 +473,28 @@ describe('McpServer — the lessons tool', () => {
     should(await odd.request('tools/call', toolCall('lessons_suggest', { rule: 'a rule', scope: 'global' }))).match({
       result: { isError: true, content: [{ text: 'a bare string' }] },
     });
+  });
+});
+
+describe('the instructions tool', () => {
+  it('should answer from the launch environment it inherited, without calling the daemon', async () => {
+    // Arrange — an interactive ferret launched with hypermedia on and Pack mode off.
+    const { request, calls } = harness(async () => ({ summary: 'unused' }), {
+      environment: { FY_SESSION_ID: 'session-7', FY_SESSION_MODE: 'interactive', FY_HYPERMEDIA: '1', FY_PACK: '0' },
+    });
+
+    // Act
+    const answer = (await request('tools/call', toolCall('instructions'))) as {
+      result: { content: { type: string; text: string }[] };
+    };
+
+    // Assert
+    const text = answer.result.content[0]?.text ?? '';
+    should(text).startWith('Sections ferret session-7 launched with (interactive):');
+    should(text).containEql('✓ Hypermedia: on');
+    should(text).containEql(
+      '✗ Pack mode: off. The owner turns it on in Ferretry: open this ferret › Actions › Pack mode.',
+    );
+    should(calls).be.empty();
   });
 });

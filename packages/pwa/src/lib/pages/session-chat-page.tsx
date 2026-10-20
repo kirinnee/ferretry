@@ -25,6 +25,7 @@ import {
 } from '../../components/runtime-controls.tsx';
 import type { TerminalDeckDependencies } from '../../components/session-terminal-deck.tsx';
 import { SessionTopBar, sessionDisplayName } from '../../components/session-top-bar.tsx';
+import type { SwitchSection } from '../../features/session-info/switch-marks.tsx';
 import { SubFerretIndicator } from '../../components/sub-ferrets.tsx';
 import type { PaneSnapshotReader } from '../../components/terminal-snapshot.tsx';
 import { readPaneSnapshot } from '../../components/terminal-snapshot-model.ts';
@@ -278,6 +279,15 @@ export interface SessionChatPageProps {
    * passive-learning read (the one Actions toggles), `null` while unread. Absent: no row.
    */
   readonly infoLearning?: boolean | null;
+  /**
+   * The header's Hypermedia and Pack mode marks: the switches' latest answers for this ferret, and the tap
+   * that switches one (the host's own Actions toggles). Absent: read from the record, marks only.
+   */
+  readonly switches?: {
+    readonly hypermedia: boolean;
+    readonly pack: boolean;
+    readonly onToggle: (section: SwitchSection, next: boolean) => void;
+  };
   /** Info open on this tab from the first frame. Absent: Info starts shut. */
   readonly initialInfo?: InfoTab;
 }
@@ -394,6 +404,7 @@ export function SessionChatPage({
   actionContributions = NO_CONTRIBUTIONS,
   infoRuntimeControls,
   infoLearning,
+  switches,
   initialInfo,
 }: SessionChatPageProps) {
   const scope = useMemo(() => daemonSessionScope(connection, session.config.id), [connection, session.config.id]);
@@ -1196,6 +1207,16 @@ export function SessionChatPage({
         {...(infoSlot === undefined ? {} : { onToggleInfo: info.toggle })}
         {...(onOpenSessions === undefined ? {} : { onOpenSessions })}
         {...(startedBy === undefined ? {} : { startedBy })}
+        {...(switches === undefined
+          ? {}
+          : {
+              switches: {
+                learning: infoLearning === true,
+                hypermedia: switches.hypermedia,
+                pack: switches.pack,
+                ...(canControl ? { onToggle: switches.onToggle } : {}),
+              },
+            })}
         subFerrets={
           <SubFerretIndicator
             compact={compact}

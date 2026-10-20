@@ -70,6 +70,7 @@ import {
 import { setupHandoffFromHref } from './features/onboarding/setup-handoff.ts';
 import type { SetupSharePort } from './features/onboarding/setup-handoff-panel.tsx';
 import { usePackSessionActions } from './features/pack/pack-session-actions.tsx';
+import { switchTapper } from './features/session-info/switch-marks.tsx';
 import { PACK_SETTINGS_TAB } from './features/pack/pack-settings.tsx';
 import { DeviceRefusedNotice } from './features/pairing/device-refused-notice.tsx';
 import { PairingScreen } from './features/pairing/pairing-screen.tsx';
@@ -1296,6 +1297,11 @@ function SessionRoute({ connection, scope }: SessionChatPageProps) {
           accountPicker={store.accountPicker}
           actionContributions={sessionActions}
           infoLearning={learningActions.passiveFor(scope.sessionId)}
+          switches={{
+            hypermedia: hypermediaActions.onFor(session),
+            pack: packActions.onFor(session),
+            onToggle: switchTapper({ hypermedia: hypermediaActions, pack: packActions }, session.config.id),
+          }}
           browserLogin={store.browserLogin}
           attention={attention}
           chatWidth={controls.chatWidth}

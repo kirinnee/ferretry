@@ -789,6 +789,7 @@ import {
   PackStartRefused,
   ProbeCache,
   packInstructed,
+  packLaunchDefault,
 } from '../src/lib/pack/index.ts';
 import type { PackSubsystem } from '../src/lib/runtime/mounts/pack.ts';
 import type { SessionForkSubsystem } from '../src/lib/runtime/mounts/session-fork.ts';
@@ -799,6 +800,7 @@ import {
   LeaseReleasingSessionExits,
 } from '../src/lib/session/conversation-lease.ts';
 import { sessionTmuxName } from '../src/lib/session/lifecycle/policy.ts';
+import { LaunchEnvironmentStore, type LaunchSwitchDefaults } from '../src/lib/session/lifecycle/launch-environment.ts';
 import { SessionPackService } from '../src/lib/session/pack/index.ts';
 import { knownProjectRoots } from '../src/lib/session-mcp/service.ts';
 import {
@@ -3149,6 +3151,8 @@ interface SessionPackHooks {
   admit(parent: string): Promise<PackRefusal | undefined>;
   /** Records the new ferret's switch and writes `FY_PACK` into its launch environment. */
   adopt(id: SessionId, eligible: boolean, parent: string | undefined): Promise<void>;
+  /** The `FY_PACK` a launch derives from the session's record, for an environment that never stored one. */
+  launchDefault: LaunchSwitchDefaults;
 }
 
 /** A session status after which no process runs until the session is launched again. */
@@ -3236,11 +3240,21 @@ function createPackTree(sessions: SessionDirectorySubsystem): PackTree {
  */
 function createSessionPackHooks(
   tree: PackTree,
+  sessions: SessionDirectorySubsystem,
   environments: FileSessionEnvironmentStore,
   serial: KeyedSerialExecutor,
   packConfig: () => Promise<PackConfig>,
 ): SessionPackHooks {
   return {
+    launchDefault: async (id): Promise<Readonly<Record<string, string>>> => {
+      const view = await sessions.get(id).catch(() => undefined);
+      // A session the documents cannot show is launched exactly as before: nothing is filled in.
+      if (view === undefined) return {};
+      const { config } = view;
+      const depth = config.parent === undefined ? 0 : (await tree.depth(config.parent)) + 1;
+      const eligible = config.label !== LEARNING_MINER_LABEL && config.provenance?.wardenLineage !== true;
+      return { [PACK_ENV]: packLaunchDefault(await packConfig(), { eligible, ownSwitch: config.pack, depth }) };
+    },
     admit: async parent => {
       const facts = await tree.parent(parent);
       return facts === undefined ? undefined : admitChild(facts, (await packConfig()).limits);
@@ -6145,6 +6159,14 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
    */
   const sessionCredentials = new NodeSessionCredentialIssuer();
   const sessionEnvironments = new FileSessionEnvironmentStore(id => createSessionPaths(paths, id).directory);
+  // What a pane is LAUNCHED with: the stored environment over the per-ferret switches its record implies
+  // (`LaunchEnvironmentStore`). The defaults are assigned once Pack mode's hooks exist below; a launch
+  // before then derives nothing, as every launch did before.
+  let launchSwitchDefaults: LaunchSwitchDefaults = async () => ({});
+  const launchEnvironments = new LaunchEnvironmentStore(
+    sessionEnvironments,
+    async id => await launchSwitchDefaults(id),
+  );
   // Where a session's agent puts media it made to show the person, created per launch so a pane is never
   // handed a folder that does not exist. Owner-only, like the rest of the session's state.
   const sessionMedia = async (id: SessionId): Promise<string> => {
@@ -6452,7 +6474,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           // The SAME store the launch path reads, for the same reason it reads it per launch: a
           // replacement pane must carry the session's CURRENT environment. Read here rather than
           // captured at construction, and merged with the derived session id by the launcher.
-          env: await sessionEnvironments.read(id),
+          env: await launchEnvironments.read(id),
           // The executable, so a revive can resolve the same profile the first launch did. Without
           // it a profile-authenticated account would come back with no credential at all.
           agent: config.agent,
@@ -6628,7 +6650,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         // teammate attribute a message to itself — through `tmux -e`, never through argv: argv is
         // world-readable on this host through /proc, and the fleet wrappers read the values from their
         // environment anyway.
-        sessionEnvironments,
+        launchEnvironments,
         new DurableTerminalPaneRegistrar(paths.home, launchTmux, stateFiles, paths),
         lastSnapshots,
         // What makes the resource-limit settings a capability rather than a stored preference: the
@@ -7340,7 +7362,8 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       // Pack mode (docs/pack-mode.md): read fresh per use, so a saved pack.yaml applies to the next start.
       const packConfig = async (): Promise<PackConfig> => (await configFiles.load()).evaluation.effective.pack;
       const packTree = createPackTree(sessions);
-      const packHooks = createSessionPackHooks(packTree, sessionEnvironments, sessionMutations, packConfig);
+      const packHooks = createSessionPackHooks(packTree, sessions, sessionEnvironments, sessionMutations, packConfig);
+      launchSwitchDefaults = async id => await packHooks.launchDefault(id);
       // ONE claim surface over the ledger for the start and the rename, so both take names through the
       // same allocator and the same file.
       const nameClaims = createCallsignClaims(storage, stateFiles, paths, callsignClaims);

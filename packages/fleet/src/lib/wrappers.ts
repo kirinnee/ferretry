@@ -470,6 +470,8 @@ export function renderRuntimeWrapperScript(input: RuntimeWrapperInput): string {
   }
   const environment = environmentLines(input.env, input.secretsFile);
   const sections = input.agent ? ferretSectionLines(input.harness, input.fyCommand) : [];
+  const harness =
+    input.harnessCommand === undefined ? HARNESS_BINARIES[input.harness] : shellPath(input.harnessCommand);
   const args = [...defaultModelArgs(input.harness, input.defaultModel), ...input.args]
     .filter(arg => arg !== CLAUDE_NO_QUESTIONS_FLAG)
     .map(arg => (sections.length > 0 ? instructionArgument(input.harness, arg) : undefined) ?? shellQuote(arg))
@@ -485,8 +487,9 @@ export function renderRuntimeWrapperScript(input: RuntimeWrapperInput): string {
     ...(input.trustLaunchFolder === true ? codexTrustLines() : []),
     ...(input.agent ? questionLines(input.harness) : []),
     ...sections,
+    ...(sections.length > 0 ? promptSnapshotLines(input.harness, harness) : []),
     '',
-    `exec ${input.harnessCommand === undefined ? HARNESS_BINARIES[input.harness] : shellPath(input.harnessCommand)}${args === '' ? '' : ` ${args}`} "$@"`,
+    `exec ${harness}${args === '' ? '' : ` ${args}`} "$@"`,
     '',
   ].join('\n');
 }
@@ -528,6 +531,30 @@ function instructionArgument(harness: HarnessKind, arg: string): string | undefi
     return arg.startsWith('--append-system-prompt=') ? `${shellQuote(arg)}"$${SECTIONS_VARIABLE}"` : undefined;
   if (!arg.startsWith('developer_instructions="') || !arg.endsWith('"')) return undefined;
   return `${shellQuote(arg.slice(0, -1))}"$${SECTIONS_VARIABLE}"${shellQuote('"')}`;
+}
+
+/** Claude's switch for the system-prompt record a conversation keeps, spelled as one argument. */
+const CLAUDE_PROMPT_SNAPSHOT_OFF = '--system-prompt-snapshot=off';
+
+/**
+ * A RESUMED CONVERSATION MUST HEAR THIS LAUNCH'S SECTIONS. Claude Code records a conversation's system
+ * prompt at its first request and, by default, replays that record verbatim on every later request and
+ * `--resume` — "even when a later launch passes different text" (`claude --help`,
+ * `--system-prompt-snapshot`). Every Restart, migration, revive and import relaunches into the SAME
+ * conversation, so without this the sections composed above would reach only a conversation's first
+ * launch: a ferret started before a section existed, or with a switch off, would never be told, and the
+ * owner's "takes effect at the next restart" would be false.
+ *
+ * Off is what Claude did before it recorded at all: the prompt is rendered on each request. Asked of the
+ * installed Claude at exec time rather than assumed, because an older Claude refuses a flag it does not
+ * know — and that refusal would be a ferret that cannot launch. Codex reads `developer_instructions` on
+ * every launch, so it needs nothing.
+ */
+function promptSnapshotLines(harness: HarnessKind, command: string): string[] {
+  if (harness !== 'claude') return [];
+  return [
+    `if ${command} --help 2>/dev/null | grep -q -- --system-prompt-snapshot; then set -- ${CLAUDE_PROMPT_SNAPSHOT_OFF} "$@"; fi`,
+  ];
 }
 
 /**

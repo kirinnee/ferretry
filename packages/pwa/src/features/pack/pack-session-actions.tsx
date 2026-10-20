@@ -34,6 +34,11 @@ export interface PackSessionActions {
   readonly host: ReactNode;
   /** Whether one ferret may delegate, with an answer the list has not caught up with yet. */
   readonly onFor: (view: SessionView) => boolean;
+  /**
+   * Switches one ferret from outside the Actions menu — its header mark. A refusal is said in the same
+   * status line as the answer, because a mark has no menu of its own to report it in.
+   */
+  readonly tap: (sessionId: string, next: boolean) => Promise<void>;
 }
 
 export function usePackSessionActions({
@@ -56,6 +61,17 @@ export function usePackSessionActions({
       setNote(result.note);
     },
     [connection, fetcher],
+  );
+
+  const tap = useCallback(
+    async (sessionId: string, next: boolean) => {
+      try {
+        await toggle(sessionId, next);
+      } catch (reason) {
+        setNote(`Pack mode could not be switched: ${reason instanceof Error ? reason.message : String(reason)}`);
+      }
+    },
+    [toggle],
   );
 
   const contributions = useMemo<readonly SessionActionContribution<PackActionContext>[]>(
@@ -101,5 +117,5 @@ export function usePackSessionActions({
       </div>
     );
 
-  return { contributions, host, onFor };
+  return { contributions, host, onFor, tap };
 }

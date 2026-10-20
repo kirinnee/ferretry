@@ -233,7 +233,8 @@ export const FERRETRY_MCP_ENV_VARS: readonly string[] = [
  * `--append-system-prompt` (Claude) or `developer_instructions` (Codex) value at exec time — the
  * owner's own instruction, then {@link AGENT_INSTRUCTION}, then each section that is `1`, in
  * {@link FERRET_SECTIONS} order (`../wrappers.ts`). A restart or resume runs the same wrapper with the
- * same stored environment, so it keeps them.
+ * same stored environment, so it keeps them — and turns off Claude's system-prompt record, which would
+ * otherwise replay the conversation's FIRST launch's sections on every resume.
  *
  * They are system instructions rather than the tools server's MCP `initialize` text because a
  * harness weighs the system prompt far above a server's instructions, which an agent can ignore.
@@ -259,10 +260,13 @@ export const HYPERMEDIA_ENV = 'FY_HYPERMEDIA';
 
 /** The hypermedia teaching. Short on purpose — it is in every prompt. docs/hypermedia.md quotes it. */
 export const HYPERMEDIA_INSTRUCTION = [
-  'Hypermedia: when an idea is not straightforward — a flow, an architecture, a state machine, a comparison, a layout, a change over time — show it in your chat reply as well as saying it. Do not overdo it: a simple answer stays plain text, and one clear picture beats several. Write a fenced block whose info string is exactly fy-render: line 1 `type: <type>`, line 2 `alt: <one-line description>`, then a line `---`, then the payload.',
+  'Hypermedia: when you teach, explain, compare or walk through anything not straightforward — a flow, an architecture, a state machine, a layout, a change over time — show it in your chat reply as well as saying it. Do not overdo it: a simple answer stays plain text, and one clear picture beats several.',
+  'Always inline: never publish an artifact, page, gist or link to explain something unless the owner asks for one. This overrides any artifact habit.',
+  'Tell it as a short story the reader can drive: step-through Next buttons, sliders, toggles, tap to reveal, or an animated diagram. One idea per step, short labels, clear hierarchy, gentle motion that honours prefers-reduced-motion, no walls of text.',
+  'Write a fenced block whose info string is exactly fy-render: line 1 `type: <type>`, line 2 `alt: <one-line description>`, then a line `---`, then the payload.',
   '- mermaid: Mermaid source (flowchart, sequenceDiagram, stateDiagram-v2, …).',
-  '- svg: one self-contained <svg>…</svg>; no script, foreignObject, use or external links.',
-  '- html: prefer a static fragment (tables, details, inline SVG/CSS); use <script> only if interaction truly helps (it runs isolated). Load nothing from the network.',
+  '- svg: one self-contained <svg>…</svg> (CSS animation welcome); no script, foreignObject, use or external links.',
+  '- html: a fragment with inline CSS, and <script> for the interaction (it runs isolated). Load nothing from the network.',
   '- image, video, audio, pdf: save files you make into $FY_MEDIA_DIR and put `src: media:<file name>` before `---`, with no payload; `src: @path/in/your/workspace` and `src: https://…` also work.',
   'Example:',
   '```fy-render',

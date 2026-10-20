@@ -112,6 +112,7 @@ import {
 import { registerLearningCommands } from '../src/lib/learning/commands';
 import { LearningController } from '../src/lib/learning/controller';
 import { ProtocolLearningGateway } from '../src/lib/learning/gateway';
+import { registerInstructionsCommands } from '../src/lib/instructions/commands';
 import { registerLessonCommands } from '../src/lib/lesson/commands';
 import { LessonController } from '../src/lib/lesson/controller';
 import { McpServer, registerMcpCommands } from '../src/lib/mcp';
@@ -799,18 +800,25 @@ const DOMAIN_REGISTRARS: ReadonlyArray<(wiring: DomainWiring) => void> = [
     registerBrowserPageCommands(program, tools);
     // `fy lesson suggest`: the same agent route and credential as the MCP tool below.
     registerLessonCommands(program, new LessonController(toolsClient, world.io));
+    // `fy instructions`: the sections this ferret launched with, read from the environment the wrapper read.
+    registerInstructionsCommands(program, world.environment, world.io, BINARY_NAME);
     // The same client, as the MCP server every agent runtime starts: it acts only as the agent session
     // whose credential is in its environment. Stdout carries nothing but protocol.
     registerMcpCommands(program, async () => {
       await serveMcpOverStdio(
-        new McpServer(toolsClient, {
-          name: PRODUCT_NAME,
-          version: assertSemver(pkg.version),
-          // One line only. Every behavioural instruction — the tools, the settings rules, and each ferret's own
-          // hypermedia, Pack mode and lessons sections — is in the appended system prompt the runtime wrapper
-          // composes (fleet's fixed-layer.ts), which a harness weighs above a server's instructions.
-          instructions: TOOLS_SERVER_INSTRUCTIONS,
-        }),
+        new McpServer(
+          toolsClient,
+          {
+            name: PRODUCT_NAME,
+            version: assertSemver(pkg.version),
+            // One line only. Every behavioural instruction — the tools, the settings rules, and each ferret's own
+            // hypermedia, Pack mode and lessons sections — is in the appended system prompt the runtime wrapper
+            // composes (fleet's fixed-layer.ts), which a harness weighs above a server's instructions.
+            instructions: TOOLS_SERVER_INSTRUCTIONS,
+            binary: BINARY_NAME,
+          },
+          world.environment,
+        ),
         Bun.stdin.stream(),
         line => {
           process.stdout.write(line);

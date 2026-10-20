@@ -76,3 +76,24 @@ export async function depthOf(
   }
   return depth;
 }
+
+/** What deciding one ferret's Pack instruction at launch needs, read from its own session record. */
+export interface PackLaunchFacts {
+  /** False for a learning miner or a warden's descendant, which are never told. */
+  readonly eligible: boolean;
+  /** `config.pack`; absent means on. */
+  readonly ownSwitch: boolean | undefined;
+  readonly depth: number;
+}
+
+/**
+ * The `FY_PACK` a launch is handed when this ferret's launch environment never recorded one.
+ *
+ * The start writes the variable, but a ferret started before Pack mode existed has none, and the start's
+ * write is best-effort — so without this the wrapper's `${FY_PACK:-0}` told such a ferret nothing at
+ * every restart, migration and revive while its record (`config.pack` absent = on) said it was on. A
+ * value the store DOES hold still wins: it is the owner's switch, or the start's own decision.
+ */
+export function packLaunchDefault(config: PackConfig, facts: PackLaunchFacts): '1' | '0' {
+  return facts.eligible && packInstructed(config, facts.ownSwitch, facts.depth) ? '1' : '0';
+}
