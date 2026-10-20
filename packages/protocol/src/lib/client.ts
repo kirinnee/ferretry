@@ -162,6 +162,7 @@ export interface IFyApiClient {
     model?: string,
     allowContextDowngrade?: boolean,
     requestId?: string,
+    forceInflight?: boolean,
   ): Promise<SessionView>;
   /**
    * Start a cross-harness handover of a top-level session. Returns the durable receipt at its current

@@ -177,6 +177,7 @@ import {
   NodeSessionBrowserLauncher,
   type OpenedDaemonStorage,
   PaneProcessInventory,
+  ProjectMcpServers,
   PerformanceStopwatch,
   ProcCgroupPlacements,
   quotaFailoverRoot,
@@ -3461,7 +3462,7 @@ function createWardenSubsystem(parts: WardenParts): WardenSubsystem {
           await parts.control.stop(sessionId, reason);
         },
         failover: async (sessionId, agent) => {
-          await parts.migrate.migrate(sessionId, { agent, allowContextDowngrade: false });
+          await parts.migrate.migrate(sessionId, { agent, allowContextDowngrade: false, forceInflight: false });
         },
       },
       costs: {
@@ -4029,10 +4030,23 @@ function createSessionMigrateSubsystem(parts: SessionMigrateParts): SessionMigra
       // the evidence is genuinely absent rather than always.
       await parts.transcripts.tail({ sessionId: id, harness: config.harness === 'codex' ? 'codex' : 'claude' }),
     );
-    const decision = parts.preflight.gate(report);
+    const decision = parts.preflight.gate(report, { force: request.forceInflight });
     if (!decision.proceed)
-      throw new SessionMigrateError('refused', `${decision.reason}\n${parts.preflight.summarize(report)}`);
+      throw new SessionMigrateError(
+        'refused',
+        `${decision.reason}\n${parts.preflight.summarize(report)}`,
+        parts.preflight.describe(report),
+      );
     const at = parts.clock.now();
+    if (decision.forced)
+      await parts.storage.append(id, 'session.migrate_forced', {
+        to: account.agent,
+        verdict: report.worstVerdict,
+        went_past: parts.preflight
+          .describe(report)
+          .items.filter(item => item.blocks)
+          .map(item => ({ title: item.title, ...(item.detail === undefined ? {} : { detail: item.detail }) })),
+      });
     const reportPath = await parts.reports.write(
       id,
       parts.preflight.document(report, {
@@ -4201,7 +4215,7 @@ function createQuotaFailoverSubsystem(wiring: QuotaFailoverWiring): QuotaFailove
     usage: wiring.usage,
     migrator: {
       migrate: async (sessionId, agent) => {
-        await wiring.migrate.migrate(sessionId, { agent, allowContextDowngrade: false });
+        await wiring.migrate.migrate(sessionId, { agent, allowContextDowngrade: false, forceInflight: false });
       },
     },
     journal: {
@@ -6429,7 +6443,10 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       { set: (key, value) => (process.env[key] = value) },
     ),
     migratePreflight: new MigrationPreflight(
-      new PaneProcessInventory(tmux, new BunProcessProbe(Bun.which('ps') ?? undefined)),
+      new PaneProcessInventory(tmux, new BunProcessProbe(Bun.which('ps') ?? undefined), {
+        binaryName: CLIENT_NAME,
+        servers: new ProjectMcpServers(),
+      }),
       new TmuxPaneSnapshot(tmux),
     ),
     wardenReports: stateDirectory => new WardenReportReader(wardenFiles, createWardenPaths(stateDirectory).reports),
@@ -8233,7 +8250,10 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           migrate: sessionMigrate,
           analytics: analyticsIngestion,
           events: listener => storage.subscribeEvents(listener),
-          processes: new PaneProcessInventory(launchTmuxCommands, new BunProcessProbe(Bun.which('ps') ?? undefined)),
+          processes: new PaneProcessInventory(launchTmuxCommands, new BunProcessProbe(Bun.which('ps') ?? undefined), {
+            binaryName: CLIENT_NAME,
+            servers: new ProjectMcpServers(),
+          }),
         }),
         sessionReads: operatorReads,
         sessionAttach,

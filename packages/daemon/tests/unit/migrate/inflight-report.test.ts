@@ -54,12 +54,14 @@ describe('migration in-flight reporting', () => {
     should(gateInflight(actual)).deepEqual({
       proceed: false,
       forced: false,
-      reason: 'refused: the session reports running work but nothing was observable in its pane',
+      reason:
+        'refused: The agent says it is working, but Ferretry can’t see what it is running — the session reports running work but nothing was observable in its pane',
     });
     should(gateInflight(actual, { force: true })).deepEqual({
       proceed: true,
       forced: true,
-      reason: 'forced past the session reports running work but nothing was observable in its pane',
+      reason:
+        'forced past The agent says it is working, but Ferretry can’t see what it is running — the session reports running work but nothing was observable in its pane',
     });
   });
 
@@ -97,7 +99,7 @@ describe('migration in-flight reporting', () => {
     should(gateInflight(actual)).deepEqual({
       proceed: false,
       forced: false,
-      reason: 'refused: ps exited 1: cannot allocate memory',
+      reason: 'refused: Ferretry couldn’t check what the agent is running — ps exited 1: cannot allocate memory',
     });
   });
 
@@ -139,12 +141,12 @@ describe('migration in-flight reporting', () => {
     should(gateInflight(actual)).deepEqual({
       proceed: false,
       forced: false,
-      reason: 'refused: in-flight work is unknown',
+      reason: 'refused: Codex has 2 background terminals Ferretry can’t see into',
     });
     should(gateInflight(actual, { force: true })).deepEqual({
       proceed: true,
       forced: true,
-      reason: 'forced past in-flight work is unknown',
+      reason: 'forced past Codex has 2 background terminals Ferretry can’t see into',
     });
   });
 
@@ -170,7 +172,7 @@ describe('migration in-flight reporting', () => {
     should(gateInflight(destructive)).deepEqual({
       proceed: false,
       forced: false,
-      reason: 'refused: in-flight work is destructive_to_interrupt',
+      reason: 'refused: A command that changes things is running — stopping it could leave work half-done — command',
     });
   });
 });

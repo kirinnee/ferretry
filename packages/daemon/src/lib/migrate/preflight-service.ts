@@ -1,5 +1,6 @@
-import type { SessionStatus } from '@ferretry/protocol';
+import type { MigrationRefusal, SessionStatus } from '@ferretry/protocol';
 import { backgroundTerminalCount } from './background-terminals.ts';
+import { describeInflight } from './inflight-describe.ts';
 import { assembleInflightReport, gateInflight, type GateDecision, type InflightReport } from './inflight-report.ts';
 import { handoffMessage, renderMigrationOutcome, type MigrationOutcome } from './outcome-render.ts';
 import type { ProcessInventoryPort } from './process-inventory-port.ts';
@@ -82,6 +83,11 @@ export class MigrationPreflight {
   /** Refuses unless the report is demonstrably safe, or the caller forced the decision. */
   gate(report: InflightReport, options: { readonly force?: boolean } = {}): GateDecision {
     return gateInflight(report, options);
+  }
+
+  /** The inventory as data a person can read, carried on the refusal so the PWA can show it. */
+  describe(report: InflightReport): MigrationRefusal {
+    return describeInflight(report);
   }
 
   /** The compact table printed to a terminal on refusal. */

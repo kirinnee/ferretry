@@ -2,6 +2,8 @@ import { NO_GOVERNED_ROUTES_GUARD } from '../../../../src/lib/api/capability.ts'
 import { describe, it } from 'bun:test';
 import {
   FY_REQUEST_ID_HEADER,
+  MigrationRefusedBodySchema,
+  type MigrationRefusal,
   type SessionRelaunchSettings,
   SessionRelaunchSettingsSchema,
   type SessionView,
@@ -69,7 +71,7 @@ describe('the session migrate mount', () => {
     should(view.config.id).equal('s1');
     should(view.config.agent).equal('codex-auto');
     should(migrator.migrations).deepEqual([
-      ['s1', { agent: 'codex-auto', model: 'gpt-5.6-terra', allowContextDowngrade: false }],
+      ['s1', { agent: 'codex-auto', model: 'gpt-5.6-terra', allowContextDowngrade: false, forceInflight: false }],
     ]);
   });
 
@@ -188,6 +190,65 @@ describe('the session migrate mount', () => {
       [400, 'invalid_session_id'],
       [404, 'not-found'],
     ]);
+  });
+
+  it('should hand the gate an explicit force only when the caller sent one', async () => {
+    // `forceInflight` is `z.default(false)` on the wire: saying nothing is declining to go past the
+    // refusal, and only a caller that sends `true` — a person who confirmed "Restart anyway" — forces.
+    // Two request ids, because forcing is a different request, not a replay of declining.
+    // Arrange
+    const migrator = new FakeSessionMigrate();
+    const subject = dispatcher(migrator);
+
+    // Act
+    const plain = await subject.dispatch(migrateRequest('s1', withRequestId(human, 'req-plain')));
+    const forced = await subject.dispatch(
+      migrateRequest('s1', withRequestId(human, 'req-forced'), { agent: 'claude-auto-other', forceInflight: true }),
+    );
+    const malformed = await subject.dispatch(
+      migrateRequest('s1', withRequestId(human, 'req-bad'), { agent: 'claude-auto-other', forceInflight: 'yes' }),
+    );
+
+    // Assert
+    should([plain.status, forced.status, malformed.status]).deepEqual([200, 200, 400]);
+    should(migrator.migrations.map(([, sent]) => sent.forceInflight)).deepEqual([false, true]);
+  });
+
+  it('should answer a refusal with the inventory as data beside the sentence', async () => {
+    // The sentence is for a log; the PWA lists what is running from `inflight`, so a person can decide
+    // whether to restart anyway. A refusal with no data carries no such field.
+    // Arrange
+    const inflight: MigrationRefusal = {
+      status: 'running',
+      turn: 13,
+      blockedBy: 'unknown',
+      restartsWithCli: 1,
+      items: [
+        {
+          kind: 'process',
+          verdict: 'unknown',
+          title: 'A program Ferretry doesn’t recognise is running',
+          detail: 'some-vendor-tool --watch',
+          age: '2m',
+          blocks: true,
+        },
+      ],
+    };
+    const subject = dispatcher(
+      new FakeSessionMigrate(['s1'], {
+        s1: new SessionMigrateError('refused', 'refused: a program', inflight),
+        s2: new SessionMigrateError('refused', 'refused: ps failed'),
+      }),
+    );
+
+    // Act
+    const withData = await subject.dispatch(migrateRequest('s1'));
+    const without = await subject.dispatch(migrateRequest('s2'));
+
+    // Assert
+    should(JSON.parse(withData.body)).deepEqual({ error: 'refused: a program', code: 'migration_refused', inflight });
+    should(MigrationRefusedBodySchema.parse(JSON.parse(withData.body)).inflight?.items).have.length(1);
+    should(JSON.parse(without.body)).deepEqual({ error: 'refused: ps failed', code: 'migration_refused' });
   });
 
   it('should carry the whole in-flight inventory in the refusal, because a bare 409 is unactionable', async () => {
@@ -319,7 +380,12 @@ describe('the session migrate mount, replayed', () => {
     constructor(private readonly outcomes: ReadonlyArray<'ok' | SessionMigrateError> = ['ok']) {}
     async migrate(
       sessionId: string,
-      request: { readonly agent: string; readonly model?: string; readonly allowContextDowngrade: boolean },
+      request: {
+        readonly agent: string;
+        readonly model?: string;
+        readonly allowContextDowngrade: boolean;
+        readonly forceInflight: boolean;
+      },
     ): Promise<SessionView> {
       const outcome = this.outcomes[Math.min(this.calls, this.outcomes.length - 1)];
       this.calls += 1;

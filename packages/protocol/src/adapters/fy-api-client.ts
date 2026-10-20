@@ -725,12 +725,13 @@ export class FyApiClient implements IFyApiClient {
     model?: string,
     allowContextDowngrade = false,
     requestId?: string,
+    forceInflight = false,
   ): Promise<SessionView> {
     return this.#post(
       id,
       'migrate',
       MigrateSessionRequestSchema,
-      { agent, model, allowContextDowngrade },
+      { agent, model, allowContextDowngrade, forceInflight },
       SessionViewSchema,
       NonEmptyValueSchema.parse(requestId ?? this.#requestId()),
     );

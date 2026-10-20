@@ -1,5 +1,11 @@
 import { z } from 'zod';
-import { InstantSchema, NonNegativeFiniteSchema, NonNegativeIntegerSchema, PositiveIntegerSchema } from './common.ts';
+import {
+  ApiErrorResponseSchema,
+  InstantSchema,
+  NonNegativeFiniteSchema,
+  NonNegativeIntegerSchema,
+  PositiveIntegerSchema,
+} from './common.ts';
 import { ProviderQuotaBalanceSchema } from './fleet-credentials.ts';
 import { HarnessSchema } from './session-base.ts';
 import { SessionLiveActivitySchema } from './session-live.ts';
@@ -868,9 +874,49 @@ export const MigrateSessionRequestSchema = z.strictObject({
   agent: z.string().min(1),
   model: z.string().min(1).optional(),
   allowContextDowngrade: z.boolean().default(false),
+  /** Proceed past a refusal the in-flight inventory raised. Only an explicit, human-confirmed Restart anyway sets it. */
+  forceInflight: z.boolean().default(false),
 });
 export type MigrateSessionRequest = z.infer<typeof MigrateSessionRequestSchema>;
 export type MigrateSessionRequestInput = z.input<typeof MigrateSessionRequestSchema>;
+
+/**
+ * One thing the in-flight inventory saw while a Restart was being checked, in words a person reads.
+ *
+ * `title` is a plain sentence ("A program Ferretry doesn't recognise is running"), `detail` the command
+ * or tool input behind it, trimmed to one line. `blocks` is whether THIS item is what made the daemon
+ * refuse; the rest are listed so the confirmation shows the whole picture rather than one culprit.
+ */
+export const InflightItemSchema = z.strictObject({
+  kind: z.enum(['process', 'tool', 'terminal', 'unreadable']),
+  verdict: z.enum(['safe_to_kill', 're_armable', 'destructive_to_interrupt', 'unknown']),
+  title: z.string().min(1),
+  detail: z.string().optional(),
+  age: z.string().optional(),
+  blocks: z.boolean(),
+});
+export type InflightItem = z.infer<typeof InflightItemSchema>;
+
+/**
+ * Why a Restart (a migration) was refused, as data. `restartsWithCli` counts the processes the
+ * inventory recognised as the agent's own — the Ferretry tools server, the harness's helpers, servers
+ * from its configuration — which a restart relaunches and which therefore never block it.
+ */
+export const MigrationRefusalSchema = z.strictObject({
+  status: z.string().min(1),
+  turn: NonNegativeIntegerSchema,
+  blockedBy: z.enum(['unknown', 'destructive', 'unreadable']),
+  items: z.array(InflightItemSchema),
+  restartsWithCli: NonNegativeIntegerSchema,
+});
+export type MigrationRefusal = z.infer<typeof MigrationRefusalSchema>;
+
+/** The `409 migration_refused` body. `inflight` is absent from a daemon that predates it. */
+export const MigrationRefusedBodySchema = ApiErrorResponseSchema.extend({
+  code: z.literal('migration_refused'),
+  inflight: MigrationRefusalSchema.optional(),
+});
+export type MigrationRefusedBody = z.infer<typeof MigrationRefusedBodySchema>;
 
 /**
  * An agent's first name as a caller may type it: `Hadi`, `marin`, `mary-jane`.

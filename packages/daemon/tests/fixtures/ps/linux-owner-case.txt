@@ -1,0 +1,3 @@
+3884580       1  2-02:47:44 /home/user/.nix-profile/bin/tmux -u -S /home/user/.ferretry/tmux.sock new-session -d -s fy-mvd5wylu-001d90b1 -c /home
+3887833 3884580  2-02:46:30 claude --model opus[1m] --permission-mode auto --disallowed-tools=AskUserQuestion --mcp-config={"mcpServers":{"ferretry":{"type":"stdio","command":"fy","args":["mcp","serve"],"env":{"FY_TOKEN":""}}}} --append-system-prompt=Ferretry tools: you can open and drive terminals
+3887914 3887833  2-02:46:29 fy mcp serve

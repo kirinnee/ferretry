@@ -1,10 +1,16 @@
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { readFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, it } from 'bun:test';
 import should from 'should';
 import {
   BunProcessProbe,
   PaneProcessInventory,
+  ProjectMcpServers,
   TmuxPaneSnapshot,
 } from '../../../src/adapters/migrate/bun-process-inventory.ts';
+import type { ConfiguredServer } from '../../../src/lib/migrate/harness-provenance.ts';
 import type { ProcessProbePort, ProcessTableRead } from '../../../src/lib/migrate/process-inventory-port.ts';
 import type { TmuxCommandPort, TmuxCommandResult } from '../../../src/lib/tmux/contracts.ts';
 
@@ -53,6 +59,8 @@ class FakeProbe implements ProcessProbePort {
 
 const table = (stdout: string): ProcessTableRead => ({ kind: 'read', stdout });
 
+const provenance = { binaryName: 'fy', servers: { read: async (): Promise<readonly ConfiguredServer[]> => [] } };
+
 describe('PaneProcessInventory', () => {
   it('should inspect only pane descendants through the socket-scoped tmux port', async () => {
     // Arrange
@@ -60,7 +68,7 @@ describe('PaneProcessInventory', () => {
     const probe = new FakeProbe(table('100 1 50 harness\n200 100 20 npm test\n300 1 10 unrelated'));
 
     // Act
-    const actual = await new PaneProcessInventory(tmux, probe).collect('isolated-session');
+    const actual = await new PaneProcessInventory(tmux, probe, provenance).collect('isolated-session');
 
     // Assert
     should(actual).deepEqual({
@@ -70,7 +78,7 @@ describe('PaneProcessInventory', () => {
       ],
     });
     should(tmux.calls).deepEqual([['display-message', '-p', '-t', 'isolated-session', '#{pane_pid}']]);
-    should(probe.workingDirectoryCalls).deepEqual([200]);
+    should(probe.workingDirectoryCalls).deepEqual([200, 100]);
   });
 
   it('should report an unresolvable pane as unobservable while the session still exists', async () => {
@@ -80,7 +88,9 @@ describe('PaneProcessInventory', () => {
     const tmux = new FakeTmux({ code: 1, stdout: '', stderr: "no server running on '/tmp/fy.sock'\n" });
 
     // Act
-    const actual = await new PaneProcessInventory(tmux, new FakeProbe(table(''))).collect('isolated-session');
+    const actual = await new PaneProcessInventory(tmux, new FakeProbe(table('')), provenance).collect(
+      'isolated-session',
+    );
 
     // Assert
     should(actual).deepEqual({
@@ -98,7 +108,9 @@ describe('PaneProcessInventory', () => {
     const tmux = new FakeTmux({ code: 1, stdout: '', stderr: 'no server running\n' }, NO_SUCH_SESSION);
 
     // Act
-    const actual = await new PaneProcessInventory(tmux, new FakeProbe(table(''))).collect('isolated-session');
+    const actual = await new PaneProcessInventory(tmux, new FakeProbe(table('')), provenance).collect(
+      'isolated-session',
+    );
 
     // Assert
     should(actual).deepEqual({ kind: 'observed', processes: [] });
@@ -113,7 +125,9 @@ describe('PaneProcessInventory', () => {
     const tmux = new FakeTmux({ code: 3, stdout: '', stderr: '   ' });
 
     // Act
-    const actual = await new PaneProcessInventory(tmux, new FakeProbe(table(''))).collect('isolated-session');
+    const actual = await new PaneProcessInventory(tmux, new FakeProbe(table('')), provenance).collect(
+      'isolated-session',
+    );
 
     // Assert
     should(actual).deepEqual({
@@ -127,7 +141,9 @@ describe('PaneProcessInventory', () => {
     const tmux = new FakeTmux({ code: 0, stdout: 'not-a-pid\n', stderr: '' });
 
     // Act
-    const actual = await new PaneProcessInventory(tmux, new FakeProbe(table(''))).collect('isolated-session');
+    const actual = await new PaneProcessInventory(tmux, new FakeProbe(table('')), provenance).collect(
+      'isolated-session',
+    );
 
     // Assert
     should(actual).deepEqual({
@@ -142,7 +158,7 @@ describe('PaneProcessInventory', () => {
     const probe = new FakeProbe({ kind: 'failed', reason: 'ps exited 1: cannot allocate memory' });
 
     // Act
-    const actual = await new PaneProcessInventory(tmux, probe).collect('isolated-session');
+    const actual = await new PaneProcessInventory(tmux, probe, provenance).collect('isolated-session');
 
     // Assert
     should(actual).deepEqual({
@@ -156,7 +172,7 @@ describe('PaneProcessInventory', () => {
     const tmux = new FakeTmux({ code: 0, stdout: '100\n', stderr: '' });
 
     // Act
-    const actual = await new PaneProcessInventory(tmux, new FakeProbe(table(''))).collect('NOT A SESSION');
+    const actual = await new PaneProcessInventory(tmux, new FakeProbe(table('')), provenance).collect('NOT A SESSION');
 
     // Assert
     should(actual).deepEqual({
@@ -268,5 +284,117 @@ describe('TmuxPaneSnapshot', () => {
       ['capture-pane', '-p', '-t', 'isolated-session'],
       ['has-session', '-t', 'isolated-session'],
     ]);
+  });
+});
+
+const fixtureTable = (name: string): ProcessTableRead => ({
+  kind: 'read',
+  stdout: readFileSync(`${import.meta.dir}/../../fixtures/ps/${name}`, 'utf8'),
+});
+
+describe('PaneProcessInventory, over real process tables', () => {
+  it('should not call the harness’s own Ferretry tools server unknown (the owner’s refusal)', async () => {
+    // Arrange — `claude` IS the pane process here, as tmux reports it, and `fy mcp serve` is its child.
+    const tmux = new FakeTmux({ code: 0, stdout: '3887833\n', stderr: '' });
+    const probe = new FakeProbe(fixtureTable('linux-owner-case.txt'));
+
+    // Act
+    const actual = await new PaneProcessInventory(tmux, probe, provenance).collect('fy-session');
+
+    // Assert
+    should(actual).deepEqual({
+      kind: 'observed',
+      processes: [
+        {
+          pid: 3_887_914,
+          argv: 'fy mcp serve',
+          startedSecondsAgo: 2 * 86_400 + 2 * 3600 + 46 * 60 + 29,
+          cwd: '/work/repository',
+          verdict: 'safe_to_kill',
+          known: { kind: 'ferretry-tools', label: 'The Ferretry tools server' },
+        },
+      ],
+    });
+  });
+
+  it('should read the project’s configured servers from the pane directory and explain macOS npx servers', async () => {
+    // Arrange
+    const tmux = new FakeTmux({ code: 0, stdout: '412\n', stderr: '' });
+    const asked: string[] = [];
+    const servers = {
+      read: async (directory: string): Promise<readonly ConfiguredServer[]> => {
+        asked.push(directory);
+        return [{ name: 'search', command: 'npx', args: ['-y', '@acme/search-mcp@latest'] }];
+      },
+    };
+
+    // Act
+    const actual = await new PaneProcessInventory(tmux, new FakeProbe(fixtureTable('macos-claude-pane.txt')), {
+      binaryName: 'fy',
+      servers,
+    }).collect('fy-session');
+
+    // Assert
+    if (actual.kind !== 'observed') throw new Error('expected an observation');
+    should(asked).deepEqual(['/work/repository']);
+    should(actual.processes.map(entry => [entry.pid, entry.verdict, entry.known?.kind])).deepEqual([
+      [413, 'safe_to_kill', 'harness'],
+      [431, 'safe_to_kill', 'ferretry-tools'],
+      [455, 'safe_to_kill', 'configured-server'],
+      [611, 'unknown', undefined],
+      [620, 'unknown', undefined],
+      [460, 'safe_to_kill', 'configured-server'],
+      [612, 'safe_to_kill', undefined],
+      [621, 'unknown', undefined],
+    ]);
+  });
+
+  it('should leave configured servers unexplained when the pane directory is not readable', async () => {
+    // Arrange — macOS has no /proc, so the working directory is unknown and nothing is read or guessed.
+    const tmux = new FakeTmux({ code: 0, stdout: '412\n', stderr: '' });
+    const servers = {
+      read: async (): Promise<readonly ConfiguredServer[]> => {
+        throw new Error('must not be asked');
+      },
+    };
+
+    // Act
+    const actual = await new PaneProcessInventory(
+      tmux,
+      { processTable: async () => fixtureTable('macos-claude-pane.txt'), workingDirectory: async () => undefined },
+      { binaryName: 'fy', servers },
+    ).collect('fy-session');
+
+    // Assert
+    if (actual.kind !== 'observed') throw new Error('expected an observation');
+    should(actual.processes.find(entry => entry.pid === 455)?.verdict).equal('unknown');
+    should(actual.processes.find(entry => entry.pid === 431)?.known?.kind).equal('ferretry-tools');
+  });
+});
+
+describe('ProjectMcpServers', () => {
+  it('should read the servers of the .mcp.json in a directory, and none from anywhere else', async () => {
+    // Arrange
+    const directory = await mkdtemp(join(tmpdir(), 'fy-mcp-servers-'));
+    try {
+      await writeFile(
+        join(directory, '.mcp.json'),
+        JSON.stringify({ mcpServers: { search: { command: 'npx', args: ['search-mcp'] } } }),
+      );
+      const empty = await mkdtemp(join(tmpdir(), 'fy-mcp-none-'));
+
+      // Act
+      const found = await new ProjectMcpServers().read(directory);
+      const none = await new ProjectMcpServers().read(empty);
+      const missing = await new ProjectMcpServers().read(join(empty, 'absent'));
+
+      // Assert
+      should(found).deepEqual([{ name: 'search', command: 'npx', args: ['search-mcp'] }]);
+      should(none).deepEqual([]);
+      should(missing).deepEqual([]);
+      await rm(empty, { recursive: true, force: true });
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
   });
 });

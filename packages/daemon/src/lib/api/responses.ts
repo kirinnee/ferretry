@@ -37,8 +37,13 @@ export function textResponse(
 
 /** The uniform error envelope. A `code` is included whenever the client can act on the distinction
  *  programmatically rather than by matching on prose. */
-export function errorResponse(status: number, message: string, code?: string): ApiResponse {
-  return jsonResponse(code === undefined ? { error: message } : { error: message, code }, status);
+export function errorResponse(
+  status: number,
+  message: string,
+  code?: string,
+  extra: Readonly<Record<string, unknown>> = {},
+): ApiResponse {
+  return jsonResponse(code === undefined ? { ...extra, error: message } : { ...extra, error: message, code }, status);
 }
 
 /**
