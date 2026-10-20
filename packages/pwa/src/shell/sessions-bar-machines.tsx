@@ -11,6 +11,7 @@
  */
 
 import type { SessionView } from '@ferretry/protocol';
+import type { MachineLearners } from '../features/learning/passive-learning.tsx';
 import { type AllMachinesView, machineReachLabel } from '../lib/all-machines.ts';
 import { displayCallsign } from '../lib/callsign.ts';
 import type { DaemonId } from '../lib/daemon-connection.ts';
@@ -30,6 +31,12 @@ export interface SessionsBarMachinesProps {
   readonly activeSessionId: string | null;
   /** The machine on screen's passive learners. Session ids collide across machines, so only its rows read it. */
   readonly learningPassive?: ReadonlySet<string>;
+  /**
+   * Every listed machine's passive learners, by machine: each machine's rows read their own set, so a
+   * learner is marked whichever machine it runs on. A machine missing here falls back to nothing — never
+   * to another machine's set — except the one on screen, which still reads `learningPassive`.
+   */
+  readonly machineLearners?: MachineLearners;
   readonly now: number;
   readonly onNavigate: (to: string) => void;
 }
@@ -39,13 +46,15 @@ export function SessionsBarMachines({
   daemonId,
   activeSessionId,
   learningPassive,
+  machineLearners,
   now,
   onNavigate,
 }: SessionsBarMachinesProps) {
   const active = (machine: DaemonId, session: SessionView): boolean =>
     machine === daemonId && session.config.id === activeSessionId;
   const learns = (machine: DaemonId, session: SessionView): boolean =>
-    machine === daemonId && learningPassive?.has(session.config.id) === true;
+    (machineLearners?.get(machine) ?? (machine === daemonId ? learningPassive : undefined))?.has(session.config.id) ===
+    true;
   return (
     <>
       {view.needsYou.length === 0 ? null : (
@@ -120,7 +129,7 @@ export function SessionsRailMachineDots({
   daemonId,
   activeSessionId,
   onNavigate,
-}: Omit<SessionsBarMachinesProps, 'learningPassive' | 'now'>) {
+}: Omit<SessionsBarMachinesProps, 'learningPassive' | 'machineLearners' | 'now'>) {
   const rows = [
     ...view.needsYou.map(entry => ({ daemonId: entry.daemonId, machine: entry.machineName, view: entry.view })),
     ...view.machines.flatMap(machine =>
