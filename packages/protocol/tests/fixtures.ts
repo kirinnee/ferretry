@@ -362,3 +362,37 @@ export const wardenLeaveView = {
   blessing: { sessionId: 'session-1', kinds: ['sus_thinking'], expiresAt: INSTANT, by: 'owner' },
   message: 'Left alone for 4 h: a new kind of trouble or a change of status still raises a flag.',
 } satisfies WardenLeaveView;
+
+export const harnessUpdateView = {
+  harnesses: [
+    {
+      harness: 'claude',
+      location: {
+        state: 'located',
+        path: '/opt/homebrew/bin/claude',
+        rule: 'inherited environment',
+        declaredBy: 'PATH',
+      },
+      installed: { state: 'ok', version: '2.1.200' },
+      method: { kind: 'homebrew', type: 'cask', package: 'claude-code' },
+      plan: {
+        kind: 'self',
+        steps: [{ command: 'brew update' }, { command: 'brew upgrade --cask claude-code' }],
+        rollback: 'none',
+        pinsVersion: false,
+      },
+      check: {
+        state: 'ok',
+        checkedAt: '2026-10-18T09:00:00.000Z',
+        latest: { version: '2.1.230', url: 'https://github.com/anthropics/claude-code/blob/main/CHANGELOG.md' },
+      },
+      verified: {
+        version: '2.1.220',
+        url: 'https://github.com/kirinnee/ferretry/blob/main/packages/fleet/tests/contract/README.md',
+      },
+      verification: 'older',
+      available: true,
+      job: null,
+    },
+  ],
+} as const;

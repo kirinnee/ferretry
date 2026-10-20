@@ -96,6 +96,8 @@ const LEGACY_PANEL_ANCHORS: ReadonlySet<string> = new Set([
   'export',
   // Settings › Machine › About, named by the palette's Updates link.
   'about',
+  // Settings › Machine › Agent CLIs, named by the palette's Agent CLIs link.
+  'agent-clis',
 ]);
 
 const hashWord = (): string => (typeof window === 'undefined' ? '' : window.location.hash.replace(/^#/, ''));

@@ -34,6 +34,12 @@ import {
   SessionHandoverRequestSchema,
 } from '../lib/handover.ts';
 import {
+  type HarnessUpdateStartRequest,
+  HarnessUpdateStartRequestSchema,
+  type HarnessUpdateView,
+  HarnessUpdateViewSchema,
+} from '../lib/harness-update.ts';
+import {
   AttachmentUploadRequestSchema,
   type AttachmentView,
   AttachmentViewSchema,
@@ -529,6 +535,18 @@ export class FyApiClient implements IFyApiClient {
       '/v1/daemon/update/settings',
       DaemonUpdateViewSchema,
       jsonRequest('PATCH', DaemonUpdateSettingsPatchSchema, patch),
+    );
+  }
+
+  harnessUpdate(): Promise<HarnessUpdateView> {
+    return this.request('/v1/harnesses/update', HarnessUpdateViewSchema);
+  }
+
+  startHarnessUpdate(request: HarnessUpdateStartRequest): Promise<HarnessUpdateView> {
+    return this.request(
+      '/v1/harnesses/update',
+      HarnessUpdateViewSchema,
+      jsonRequest('POST', HarnessUpdateStartRequestSchema, request),
     );
   }
 

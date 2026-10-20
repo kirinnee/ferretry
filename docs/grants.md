@@ -100,6 +100,8 @@ which can never step up, can never quiet its own supervision or anyone else's.
 **Updating the daemon is `fleet`.** Reading `GET /v1/daemon/update` is `use`; starting an update and
 changing automatic install are `configure`, and a governed device also gives a passkey step-up for that
 act alone (turning automatic install off never needs one). See [updating.md](updating.md).
+Updating an agent CLI is the same act and the same gate: `GET /v1/harnesses/update` is `use`, `POST
+/v1/harnesses/update` is `configure` plus the step-up, and a ferret may never start one.
 
 **The Console is a terminal.** `POST /v1/sessions/:sessionId/console/input` types into the agent's own
 Claude / Codex pane and is declared `terminal` / `use` like every terminal route, so it is governed

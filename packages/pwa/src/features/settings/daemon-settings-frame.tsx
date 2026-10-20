@@ -27,6 +27,7 @@ import {
   ShieldCheck,
   SlidersHorizontal,
   Smartphone,
+  SquareTerminal,
   Stethoscope,
   Zap,
 } from 'lucide-react';
@@ -102,6 +103,8 @@ const PANEL_ICONS: Readonly<Record<string, ReactNode>> = {
   speedups: <Zap size={16} aria-hidden="true" />,
   // A circled arrow up: the version this machine runs, and moving it to a newer one.
   about: <CircleArrowUp size={16} aria-hidden="true" />,
+  // A terminal prompt: the command-line agents (Claude Code, Codex) this machine's ferrets run.
+  'agent-clis': <SquareTerminal size={16} aria-hidden="true" />,
 };
 
 /**

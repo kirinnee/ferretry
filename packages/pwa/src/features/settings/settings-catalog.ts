@@ -639,6 +639,28 @@ export const SETTINGS_LINKS: readonly SettingsLinkDefinition[] = [
       'auto-update',
     ],
   },
+  {
+    // The harnesses' and their package managers' own names: "codex", "claude code" or "npm" is what somebody types.
+    id: 'agent-clis',
+    label: 'Agent CLIs',
+    description:
+      'The Claude Code and Codex this machine runs, how each was installed, whether Ferretry has verified that version, and updating it. On this machine — opens its Machine tab.',
+    href: daemon => `${daemonSettingsPath(daemon)}#agent-clis`,
+    keywords: [
+      'agent cli',
+      'claude',
+      'claude code',
+      'codex',
+      'harness',
+      'update claude',
+      'update codex',
+      'npm',
+      'brew',
+      'nix',
+      'verified',
+      'version',
+    ],
+  },
 ] as const;
 
 const SETTINGS_BY_ID = new Map(SETTINGS_DEFINITIONS.map(definition => [definition.id, definition]));
