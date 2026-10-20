@@ -52,6 +52,7 @@ const ROWS = [
   { id: 'c6', harness: 'claude', project: '/work/shop', preview: 'Rename the product grid component', lastActivityAt: ago(24 * 9), turns: 2, model: 'Sonnet 5.5' },
   { id: 'c7', harness: 'claude', project: '/tmp/claude-1000/-work-shop/d711c5af-2c1e-4b7a-9d3e-0f6a1b2c3d4e/scratchpad', preview: 'Fix the checkout total when a coupon is applied', lastActivityAt: ago(3), turns: 4, model: 'Opus 5.5' },
   { id: 'c8', harness: 'codex', project: '/work/api', preview: 'Add retries to the invoice webhook and log each attempt', lastActivityAt: ago(4), turns: 2, model: 'GPT-6', adoptedBy: 'billing-live' },
+  { id: 'c9', harness: 'claude', name: 'Ledger move to Postgres', project: '/work/ledger', preview: 'Move the ledger from SQLite to Postgres', latest: 'hi', lastActivityAt: ago(1), turns: 186, turnsAtLeast: true, model: 'Opus 5.5' },
 ];
 const ferret = (id, name, harness, cwd, status, hours) => ({
   config: { id, name, teammate: name, harness, cwd, updatedAt: ago(hours) },
