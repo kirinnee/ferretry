@@ -1,6 +1,7 @@
 import type { FyClientOptions, IFyHttpTransport } from '@ferretry/protocol';
 import { FyApiClient } from '@ferretry/protocol/client';
 import type { DaemonConnection } from './daemon-connection.ts';
+import { daemonBound } from './daemon-transport.ts';
 import type { DaemonFetch } from './runtime-models.ts';
 
 /**
@@ -38,10 +39,12 @@ export type DaemonApiClientOptions = Omit<FyClientOptions, 'baseUrl' | 'token' |
  * insists on writing is a placeholder, and it is removed here rather than sent.
  */
 export class DaemonHttpTransport implements IFyHttpTransport {
+  readonly #daemon: DaemonConnection;
   readonly #origin: string;
   readonly #fetch: DaemonFetch;
 
   constructor(daemon: DaemonConnection, fetcher: DaemonFetch) {
+    this.#daemon = daemon;
     this.#origin = new URL(daemon.baseUrl).origin;
     this.#fetch = fetcher;
   }
@@ -52,7 +55,8 @@ export class DaemonHttpTransport implements IFyHttpTransport {
     // Call through a local so a caller-supplied function never receives this
     // transport as its receiver.
     const fetcher = this.#fetch;
-    return fetcher(target.toString(), { ...init, credentials: 'include' });
+    // Bound to THIS daemon, because its address may be another paired machine's too (`daemonBound`).
+    return fetcher(target.toString(), daemonBound(this.#daemon, init));
   }
 }
 

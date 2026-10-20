@@ -1,7 +1,7 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
-import { daemonRequest, daemonUrl } from '../../src/lib/daemon-transport.ts';
+import { boundDaemonId, daemonBound, daemonRequest, daemonUrl } from '../../src/lib/daemon-transport.ts';
 
 const daemon = daemonConnection({
   daemonId: 'daemon-a',
@@ -40,5 +40,38 @@ describe('daemon transport', () => {
     should(new Headers(actual.init.headers).get('x-request-id')).equal('request-1');
     should(actual.init.credentials).equal('include');
     should(JSON.stringify(actual)).not.containEql('fy_dev_paired');
+  });
+
+  it('should name the daemon a request is for, beside an address another machine may share', () => {
+    // Arrange — two machines paired over the relay both announce their own loopback.
+    const studio = daemonConnection({
+      daemonId: 'daemon-studio',
+      baseUrl: 'http://127.0.0.1:7431',
+      deviceId: 'fy_dev_a',
+    });
+    const laptop = daemonConnection({
+      daemonId: 'daemon-laptop',
+      baseUrl: 'http://127.0.0.1:7431',
+      deviceId: 'fy_dev_b',
+    });
+
+    // Act
+    const toStudio = daemonRequest(studio, '/v1/machine', { method: 'GET' });
+    const toLaptop = daemonRequest(laptop, '/v1/machine');
+
+    // Assert
+    should(toStudio.url).equal(toLaptop.url);
+    should(boundDaemonId(toStudio.init)).equal('daemon-studio');
+    should(boundDaemonId(toLaptop.init)).equal('daemon-laptop');
+    // The binding survives the spread every caller does to add a signal, and never reaches the wire.
+    should(boundDaemonId({ ...toStudio.init, signal: new AbortController().signal })).equal('daemon-studio');
+    should(JSON.stringify(toStudio)).not.containEql('daemon-studio');
+  });
+
+  it('should read an unbound request as bound to nothing', () => {
+    // Assert
+    should(boundDaemonId(undefined)).be.undefined();
+    should(boundDaemonId({ method: 'GET' })).be.undefined();
+    should(daemonBound(daemon).credentials).equal('include');
   });
 });

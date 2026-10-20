@@ -18,6 +18,7 @@ import {
 import { HEARTBEAT_GRACE_SECONDS, RELAY_CLOSE_CODES, SESSION_PROTOCOL_ID } from '@ferretry/relay';
 import should from 'should';
 import { daemonConnection, type RelayCarrier } from '../../src/lib/daemon-connection.ts';
+import { daemonRequest } from '../../src/lib/daemon-transport.ts';
 import { DeviceKeyMissingError, DeviceKeyUnreadableError } from '../../src/lib/device-keys.ts';
 import {
   AppOutdatedError,
@@ -472,7 +473,7 @@ describe('the carrier router', () => {
       network: options.network ?? unreachable,
       ...(options.presence === undefined ? {} : { presence: options.presence }),
     });
-    router.resolveByOrigin(origin => (origin === DAEMON_URL ? daemon : undefined));
+    router.resolvePaired(() => [daemon]);
     return { router, daemon, identity, carriers, auto: carriers.live };
   };
 
@@ -482,6 +483,67 @@ describe('the carrier router', () => {
     should(carriers.hosts()).eql([DIRECT_HOST]);
     should(router.choice(daemon.daemonId)?.reason).equal('Connected over direct.');
     should(auto.requests).eql([{ t: 'req', id: 1, method: 'GET', path: '/v1/projects', query: [['page', '2']] }]);
+  });
+
+  it('should route by the daemon a request was built for, never by the address two machines share', async () => {
+    // Arrange — a second machine paired at the very same address, listed first as the newest pairing is.
+    const { router, daemon, auto } = await routerFor({ answer: { body: 'this machine' } });
+    const other = daemonConnection({ daemonId: 'fy_daemon_otherMachine', baseUrl: DAEMON_URL, deviceId: DEVICE_ID });
+    router.resolvePaired(() => [other, daemon]);
+
+    // Act
+    const mine = daemonRequest(daemon, '/v1/machine');
+    const answer = await router.fetch(mine.url, mine.init);
+
+    // Assert
+    should(await answer.text()).equal('this machine');
+    should(auto.requests).eql([{ t: 'req', id: 1, method: 'GET', path: '/v1/machine' }]);
+  });
+
+  it('should never hand a request for an unpaired daemon to the paired one that shares its address', async () => {
+    // Arrange
+    let overNetwork = 0;
+    const { router, daemon, carriers } = await routerFor({
+      network: async () => {
+        overNetwork += 1;
+        return new Response('plain');
+      },
+    });
+    const unpaired = daemonConnection({ daemonId: 'fy_daemon_unpairedOne', baseUrl: DAEMON_URL, deviceId: DEVICE_ID });
+    const stale = daemonRequest(unpaired, '/v1/machine');
+
+    // Act
+    const answer = await router.fetch(stale.url, stale.init);
+
+    // Assert — the plain network, as any unpaired address; no session to the paired machine was opened.
+    should(await answer.text()).equal('plain');
+    should(overNetwork).equal(1);
+    should(carriers.hosts()).eql([]);
+    should(router.choice(daemon.daemonId)).be.undefined();
+  });
+
+  it('should refuse an unbound request when two paired machines share its address, and route it when one does', async () => {
+    // Arrange
+    let overNetwork = 0;
+    const { router, daemon } = await routerFor({
+      answer: { body: 'the one owner' },
+      network: async () => {
+        overNetwork += 1;
+        return new Response('plain');
+      },
+    });
+    const twin = daemonConnection({ daemonId: 'fy_daemon_twinMachine', baseUrl: DAEMON_URL, deviceId: DEVICE_ID });
+
+    // Act + Assert — one owner: routed to it.
+    should(await (await router.fetch(`${DAEMON_URL}/v1/projects`)).text()).equal('the one owner');
+    // No owner: the plain network, as before.
+    should(await (await router.fetch('https://nobody.example.test/v1/projects')).text()).equal('plain');
+    // Two owners: refused rather than guessed.
+    router.resolvePaired(() => [twin, daemon]);
+    await should(router.fetch(`${DAEMON_URL}/v1/projects`)).be.rejectedWith(
+      `2 paired machines share ${DAEMON_URL}, and this request does not say which one it is for`,
+    );
+    should(overNetwork).equal(1);
   });
 
   it('should mark a request presence only while a person is at the device', async () => {
@@ -537,7 +599,7 @@ describe('the carrier router', () => {
       dial: carriers.dial,
       heartbeat: () => () => undefined,
     });
-    router.resolveByOrigin(origin => (origin === DAEMON_URL ? daemon : undefined));
+    router.resolvePaired(() => [daemon]);
 
     should((await router.fetch(`${DAEMON_URL}/v1/projects?page=2`)).status).equal(200);
     should(carriers.dialled).eql([`wss://other-direct.example/v1/rendezvous/${identity.daemonId}/client`]);
@@ -584,7 +646,7 @@ describe('the carrier router', () => {
       },
       network: unreachable,
     });
-    router.resolveByOrigin(origin => (origin === DAEMON_URL ? daemon : undefined));
+    router.resolvePaired(() => [daemon]);
 
     should((await router.fetch(`${DAEMON_URL}/v1/projects`)).status).equal(200);
     should(carriers.hosts()).eql([DIRECT_HOST, 'relay.example']);
@@ -634,7 +696,7 @@ describe('the carrier router', () => {
       network: unreachable,
       dial: carriers.dial,
     });
-    router.resolveByOrigin(origin => (origin === DAEMON_URL ? daemon : undefined));
+    router.resolvePaired(() => [daemon]);
 
     should((await router.send(daemon, `${DAEMON_URL}/v1/projects`)).status).equal(200);
     should(carriers.hosts()).eql([DIRECT_HOST, 'relay-one.example', 'relay-two.example']);
@@ -826,7 +888,7 @@ describe('the carrier router', () => {
         return RELAY.relayUrl;
       },
     });
-    router.resolveByOrigin(origin => (origin === DAEMON_URL ? daemon : undefined));
+    router.resolvePaired(() => [daemon]);
 
     should((await router.send(daemon, `${DAEMON_URL}/v1/projects`)).status).equal(200);
 
@@ -856,7 +918,7 @@ describe('the carrier router', () => {
         return undefined;
       },
     });
-    router.resolveByOrigin(origin => (origin === DAEMON_URL ? daemon : undefined));
+    router.resolvePaired(() => [daemon]);
 
     await should(router.send(daemon, `${DAEMON_URL}/v1/projects`)).be.rejectedWith(/No configured connection worked/u);
 
@@ -886,7 +948,7 @@ describe('the carrier router', () => {
         return RELAY.relayUrl;
       },
     });
-    router.resolveByOrigin(origin => (origin === DAEMON_URL ? daemon : undefined));
+    router.resolvePaired(() => [daemon]);
 
     should((await router.send(daemon, `${DAEMON_URL}/v1/projects`)).status).equal(200);
 
@@ -942,7 +1004,7 @@ describe('the carrier router', () => {
         return pending;
       },
     });
-    router.resolveByOrigin(origin => (origin === DAEMON_URL ? daemon : undefined));
+    router.resolvePaired(() => [daemon]);
 
     const inflight = router.send(daemon, `${DAEMON_URL}/v1/projects`);
     await settle(2);
@@ -977,7 +1039,7 @@ describe('the carrier router', () => {
       heartbeat: () => () => undefined,
       network: unreachable,
     });
-    router.resolveByOrigin(origin => (origin === DAEMON_URL ? daemon : undefined));
+    router.resolvePaired(() => [daemon]);
 
     await should(router.send(daemon, `${DAEMON_URL}/v1/projects`)).be.rejectedWith(/session was opening/u);
     await settle(5);
@@ -1090,7 +1152,7 @@ describe('the carrier router', () => {
         return socket;
       },
     });
-    router.resolveByOrigin(origin => (origin === DAEMON_URL ? daemon : undefined));
+    router.resolvePaired(() => [daemon]);
     // The scripted daemon checks the proof, and the proof covers the app session; a wrong one closes.
     should((await router.send(daemon, `${DAEMON_URL}/v1/projects`)).status).equal(200);
     should(credentials.length).be.above(1);
@@ -1118,7 +1180,7 @@ describe('the carrier router meeting a daemon from before device keys', () => {
         return await healthz();
       },
     });
-    router.resolveByOrigin(origin => (origin === DAEMON_URL ? daemon : undefined));
+    router.resolvePaired(() => [daemon]);
     return { router, daemon, carriers, asked };
   };
 
@@ -1188,7 +1250,7 @@ describe('the carrier router meeting a daemon from before device keys', () => {
         return older.dial();
       },
     });
-    router.resolveByOrigin(origin => (origin === DAEMON_URL ? daemon : undefined));
+    router.resolvePaired(() => [daemon]);
 
     const request = await router.send(daemon, `${DAEMON_URL}/v1/projects`).then(
       () => undefined,
@@ -1223,7 +1285,7 @@ describe('the carrier router meeting a daemon from before device keys', () => {
       // The first rendezvous — or anybody on it — sends the words an old daemon uses, before any key.
       dial: url => (new URL(url).hostname === 'relay.example' ? older.dial() : live.dial(url)),
     });
-    router.resolveByOrigin(origin => (origin === DAEMON_URL ? daemon : undefined));
+    router.resolvePaired(() => [daemon]);
 
     should((await router.send(daemon, `${DAEMON_URL}/v1/projects`)).status).equal(200);
     should(older.sockets).have.length(1);
@@ -1262,7 +1324,7 @@ describe('the carrier router meeting a daemon NEWER than this app', () => {
       heartbeat: () => () => undefined,
       network: healthz,
     });
-    router.resolveByOrigin(origin => (origin === DAEMON_URL ? daemon : undefined));
+    router.resolvePaired(() => [daemon]);
     return { router, daemon };
   };
 
@@ -1317,7 +1379,7 @@ describe('the carrier router meeting a daemon NEWER than this app', () => {
         return refused;
       },
     });
-    router.resolveByOrigin(origin => (origin === DAEMON_URL ? daemon : undefined));
+    router.resolvePaired(() => [daemon]);
 
     // Act
     const request = await router.send(daemon, `${DAEMON_URL}/v1/projects`).then(
@@ -1349,7 +1411,7 @@ describe('the carrier router meeting a daemon that no longer accepts this device
       heartbeat: () => () => undefined,
       network: unreachable,
     });
-    router.resolveByOrigin(origin => (origin === DAEMON_URL ? daemon : undefined));
+    router.resolvePaired(() => [daemon]);
     return { router, daemon, network };
   };
 
@@ -1435,7 +1497,7 @@ describe('the carrier router meeting a daemon that no longer accepts this device
       heartbeat: () => () => undefined,
       network: unreachable,
     });
-    router.resolveByOrigin(origin => (origin === DAEMON_URL ? daemon : undefined));
+    router.resolvePaired(() => [daemon]);
     should((await router.send(daemon, `${DAEMON_URL}/v1/projects`)).status).equal(200);
     accepted = (await testDevice()).publicKey;
 
@@ -1465,7 +1527,7 @@ describe('the carrier router meeting a daemon that no longer accepts this device
       heartbeat: () => () => undefined,
       network: unreachable,
     });
-    router.resolveByOrigin(origin => (origin === DAEMON_URL ? daemon : undefined));
+    router.resolvePaired(() => [daemon]);
     should((await router.send(daemon, `${DAEMON_URL}/v1/projects`)).status).equal(200);
     accepted = (await testDevice()).publicKey;
     // The request session ends (a lease, a network change), so the next request opens a new one.
@@ -1500,7 +1562,7 @@ describe('the carrier router opening a stream', () => {
       heartbeat: () => () => undefined,
       network: unreachable,
     });
-    router.resolveByOrigin(origin => (origin === DAEMON_URL ? daemon : undefined));
+    router.resolvePaired(() => [daemon]);
     return { router, daemon, carriers };
   };
 
@@ -1562,7 +1624,7 @@ describe('the carrier router opening a stream', () => {
       deviceKey: async () => undefined,
       dial: carriers.dial,
     });
-    router.resolveByOrigin(origin => (origin === DAEMON_URL ? daemon : undefined));
+    router.resolvePaired(() => [daemon]);
     await should(router.openStream(daemon, { path: '/v1/events', onData: () => undefined })).be.rejectedWith(
       DeviceKeyMissingError,
     );
@@ -1612,7 +1674,7 @@ describe('the carrier router defaults', () => {
         return Promise.resolve(new Response('ok'));
       },
     });
-    router.resolveByOrigin(origin => (origin === DAEMON_URL ? daemon : undefined));
+    router.resolvePaired(() => [daemon]);
 
     await router.fetch('https://unpaired.example/v1/anything');
     await router.fetch(`${DAEMON_URL}/v1/projects`).catch(() => undefined);
@@ -1650,7 +1712,7 @@ describe('the carrier router meeting a passkey step-up', () => {
       network: unreachable,
       ...(stepUp === undefined ? {} : { stepUp }),
     });
-    router.resolveByOrigin(origin => (origin === DAEMON_URL ? daemon : undefined));
+    router.resolvePaired(() => [daemon]);
     return { router, daemon, attempts: () => attempts };
   };
 
@@ -1871,7 +1933,7 @@ describe('the carrier router meeting a presence requirement', () => {
       network: unreachable,
       ...handlers,
     });
-    router.resolveByOrigin(origin => (origin === DAEMON_URL ? daemon : undefined));
+    router.resolvePaired(() => [daemon]);
     return { router, daemon, attempts: () => attempts };
   };
 

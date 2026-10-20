@@ -73,6 +73,7 @@ import {
   sameDaemonCarrier,
   sameDaemonConnection,
 } from './daemon-connection.ts';
+import { boundDaemonId } from './daemon-transport.ts';
 import { DeviceKeyMissingError, DeviceKeyUnreadableError } from './device-keys.ts';
 import type { KeyRotation } from './key-rotation.ts';
 import { stepUpAct } from './grants.ts';
@@ -1049,7 +1050,7 @@ export class DaemonCarrierRouter {
   readonly #unknownFates = new Set<string>();
   /** Per-call ordinal for stream session keys. Never reused, so no two streams can collide. */
   #streams = 0;
-  #lookup: (origin: string) => DaemonConnection | undefined = () => undefined;
+  #paired: () => readonly DaemonConnection[] = () => [];
 
   /**
    * THE INJECTED NETWORK IS DETACHED FROM ITS RECEIVER EXACTLY ONCE, HERE.
@@ -1088,14 +1089,40 @@ export class DaemonCarrierRouter {
   }
 
   /**
-   * How a URL is resolved back to the daemon that owns it.
+   * Who is paired, read at call time so a request can be routed to the daemon that owns it.
    *
    * Supplied by the composition root from the pairing registry, because the router
    * must not hold its own copy of who is paired: a second copy is how a request
    * keeps going to a daemon that has been unpaired.
    */
-  resolveByOrigin(lookup: (origin: string) => DaemonConnection | undefined): void {
-    this.#lookup = lookup;
+  resolvePaired(paired: () => readonly DaemonConnection[]): void {
+    this.#paired = paired;
+  }
+
+  /**
+   * The paired daemon a request is for — BY ITS IDENTITY, never by its address alone.
+   *
+   * An origin names an address and two machines can share one: every daemon paired over the hosted
+   * relay announces its own loopback address. Resolving by origin alone picked whichever pairing
+   * was listed first — the newest — so every request for an older machine went to the newest one, and
+   * every screen showed both machines as the one added last. A request built by `daemonRequest` names
+   * its daemon (`boundDaemonId`), and that name decides.
+   *
+   * A bound request whose daemon is not paired at that address is no pairing's request: it goes to the
+   * plain network as any unpaired address always has — no session, so no grant is presented — and never
+   * to another pairing that happens to share the address. An UNBOUND request is routed by origin only
+   * while one pairing owns it; when several do, it is refused — guessing is how one machine's answers
+   * came to be shown under another's name.
+   */
+  #owner(origin: string, init: RequestInit | undefined): DaemonConnection | undefined {
+    const sharing = this.#paired().filter(daemon => daemon.baseUrl === origin);
+    const bound = boundDaemonId(init);
+    if (bound !== undefined) return sharing.find(daemon => daemon.daemonId === bound);
+    if (sharing.length > 1)
+      throw new Error(
+        `${String(sharing.length)} paired machines share ${origin}, and this request does not say which one it is for`,
+      );
+    return sharing[0];
   }
 
   subscribe(listener: () => void): () => void {
@@ -1266,8 +1293,9 @@ export class DaemonCarrierRouter {
     } catch {
       return await this.#network(input, init);
     }
-    const daemon = this.#lookup(origin);
-    if (daemon === undefined || input instanceof Request) return await this.#network(input, init);
+    if (input instanceof Request) return await this.#network(input, init);
+    const daemon = this.#owner(origin, init);
+    if (daemon === undefined) return await this.#network(input, init);
     return await this.send(daemon, url, init ?? {});
   };
 
