@@ -261,6 +261,16 @@ const sessionCases: SchemaCase[] = [
     value: { status: 'running', turn: 13, blockedBy: 'unreadable', restartsWithCli: 1, items: [] },
   },
   {
+    name: 'context downgrade',
+    schema: session.ContextDowngradeSchema,
+    value: { model: 'claude-sonnet-5', targetWindow: 200_000, currentWindow: 1_000_000 },
+  },
+  {
+    name: 'context downgrade refused body',
+    schema: session.ContextDowngradeRefusedBodySchema,
+    value: { error: 'refused', code: 'context_downgrade_refused' },
+  },
+  {
     name: 'migration refused body',
     schema: session.MigrationRefusedBodySchema,
     value: { error: 'refused: nothing', code: 'migration_refused' },

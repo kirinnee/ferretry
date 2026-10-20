@@ -25,6 +25,7 @@ describe('session migration', () => {
         model: 'gpt-5.6-sol',
         allowContextDowngrade: true,
         requestId: 'logical-move-1',
+        forceInflight: false,
       },
     ]);
     should(io.out[0]).containEql('codex-secondary');
@@ -39,7 +40,9 @@ describe('session migration', () => {
     await subject.execute('ses-1', { agent: 'codex-secondary', model: '   ' });
 
     // Assert
-    should(gateway.calls).deepEqual([{ id: 'ses-1', agent: 'codex-secondary', allowContextDowngrade: false }]);
+    should(gateway.calls).deepEqual([
+      { id: 'ses-1', agent: 'codex-secondary', allowContextDowngrade: false, forceInflight: false },
+    ]);
   });
 
   it('should print the schema-parsed session under --json', async () => {

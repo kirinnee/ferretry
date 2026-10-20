@@ -7,11 +7,13 @@
 import {
   type ForkSessionOutcome,
   type IFyApiClient,
+  type ContextDowngrade,
   MigrationRefusedBodySchema,
   type MigrationRefusal,
   type SessionView,
 } from '@ferretry/protocol';
 import { FyHttpError } from '@ferretry/protocol/client';
+import { downgradeOf, downgradeSentence } from './context-downgrade.ts';
 
 /** The largest page the messages route serves. */
 const PAGE = 1_000;
@@ -105,30 +107,62 @@ const refusalOf = (reason: FyHttpError): MigrationRefusal | null => {
 };
 
 /**
+ * The daemon refused a Restart because it would give the conversation a smaller context window than it
+ * is running in. Nothing was restarted. `downgrade` is null when an older daemon said it without the
+ * numbers; {@link RestartDowngradeRefused.restartAnyway} is the one way past, which the person chooses.
+ */
+export class RestartDowngradeRefused extends Error {
+  constructor(
+    readonly downgrade: ContextDowngrade | null,
+    readonly restartAnyway: () => Promise<SessionView>,
+  ) {
+    super(`Restart paused — ${downgradeSentence(downgrade)} Nothing was restarted.`);
+  }
+}
+
+/** What a Restart the daemon paused was paused for. */
+export type PausedRestart = RestartRefused | RestartDowngradeRefused;
+
+/** Which refusals the person has already confirmed, so a chain of two never asks the first again. */
+interface RestartConsent {
+  readonly forceInflight?: boolean;
+  readonly allowContextDowngrade?: boolean;
+}
+
+/**
  * Restarts the ferret's CLI on the login it is already on, with its conversation: the daemon's
  * same-login migration, which snapshots the pane, refuses if in-flight work would be lost, and
  * relaunches with resume. It is how a ferret picks up a newly added MCP server.
  *
- * A refusal that names what is running is thrown as {@link RestartRefused}. Its `restartAnyway` asks
- * again with `forceInflight` under a FRESH request id: the daemon remembers an id with the body it
- * first saw, and the same id with a different body is a 409 `request_id_reused`.
+ * A refusal that names what is running is thrown as {@link RestartRefused}, and one about a smaller
+ * context window as {@link RestartDowngradeRefused}. Each carries `restartAnyway`, which asks again with
+ * that consent ADDED to whatever was already confirmed, under a FRESH request id: the daemon remembers
+ * an id with the body it first saw, and the same id with a different body is a 409 `request_id_reused`.
  */
 export const restartWithResume = async (
   client: Pick<IFyApiClient, 'migrate'>,
   view: SessionView,
   requestId: string,
-  options: { readonly forceInflight?: boolean } = {},
+  consent: RestartConsent = {},
 ): Promise<SessionView> => {
+  const again = async (more: RestartConsent): Promise<SessionView> =>
+    await restartWithResume(client, view, `${requestId}-anyway-${Date.now()}`, { ...consent, ...more });
   try {
-    return await client.migrate(view.config.id, view.config.agent, undefined, false, requestId, options.forceInflight);
+    return await client.migrate(
+      view.config.id,
+      view.config.agent,
+      undefined,
+      consent.allowContextDowngrade === true,
+      requestId,
+      consent.forceInflight,
+    );
   } catch (reason) {
-    if (!(reason instanceof FyHttpError) || reason.code !== 'migration_refused') throw reason;
+    if (!(reason instanceof FyHttpError)) throw reason;
+    if (reason.code === 'context_downgrade_refused')
+      throw new RestartDowngradeRefused(downgradeOf(reason), async () => await again({ allowContextDowngrade: true }));
+    if (reason.code !== 'migration_refused') throw reason;
     const refusal = refusalOf(reason);
-    if (refusal !== null)
-      throw new RestartRefused(
-        refusal,
-        async () => await restartWithResume(client, view, `${requestId}-anyway-${Date.now()}`, { forceInflight: true }),
-      );
+    if (refusal !== null) throw new RestartRefused(refusal, async () => await again({ forceInflight: true }));
     if (reason.message.includes(PS_BLIND_SPOT)) throw new DetailedFailure(RESTART_PS_FAILED, reason.message);
     throw reason;
   }

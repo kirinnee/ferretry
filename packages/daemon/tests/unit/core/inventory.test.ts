@@ -2,6 +2,7 @@ import { describe, it } from 'bun:test';
 import should from 'should';
 import {
   canServeModel,
+  declaredModel,
   defaultStartWaitPolicy,
   findAccountByAgent,
   findAccountById,
@@ -83,6 +84,37 @@ describe('servableModels', () => {
 
     // Act / Assert
     should(servableModels(entry)).deepEqual([]);
+  });
+});
+
+describe('a model written with its context selector', () => {
+  const catalogued = account({
+    id: 'account-selector',
+    agent: 'claude-selector',
+    displayName: 'Selector',
+    defaultModel: 'apex',
+    models: [
+      { id: 'apex', available: true, context: 1_000_000 },
+      { id: 'forge', available: false, unavailableReason: 'not on this plan' },
+    ],
+  });
+
+  it('should be served, and found, as the catalog entry it names', () => {
+    // Act / Assert
+    should(canServeModel(catalogued, 'apex[1m]')).be.true();
+    should(canServeModel(catalogued, 'forge[1m]')).be.false();
+    should(canServeModel({ ...catalogued, available: false, unavailableReason: 'down' }, 'apex')).be.false();
+    should(declaredModel(catalogued, 'apex[1m]')?.context).equal(1_000_000);
+    should(declaredModel(catalogued, 'ghost[1m]')).be.undefined();
+  });
+
+  it('should refuse an unavailable one with the operator’s own reason', () => {
+    // Act
+    const resolved = resolveDisplayModel(catalogued, 'forge[1m]');
+
+    // Assert
+    should(resolved.kind).equal('unservable');
+    should(resolved.kind === 'unservable' ? resolved.reason : '').containEql('not on this plan');
   });
 });
 

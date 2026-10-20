@@ -236,7 +236,7 @@ describe('the session migrate mount', () => {
     };
     const subject = dispatcher(
       new FakeSessionMigrate(['s1'], {
-        s1: new SessionMigrateError('refused', 'refused: a program', inflight),
+        s1: new SessionMigrateError('refused', 'refused: a program', { inflight }),
         s2: new SessionMigrateError('refused', 'refused: ps failed'),
       }),
     );
@@ -249,6 +249,23 @@ describe('the session migrate mount', () => {
     should(JSON.parse(withData.body)).deepEqual({ error: 'refused: a program', code: 'migration_refused', inflight });
     should(MigrationRefusedBodySchema.parse(JSON.parse(withData.body)).inflight?.items).have.length(1);
     should(JSON.parse(without.body)).deepEqual({ error: 'refused: ps failed', code: 'migration_refused' });
+  });
+
+  it('should carry the two windows of a context downgrade as data, never as an API field name', async () => {
+    // Arrange
+    const downgrade = { model: 'claude-sonnet-5', targetWindow: 200_000, currentWindow: 1_000_000 };
+    const subject = dispatcher(
+      new FakeSessionMigrate(['s1'], {
+        s1: new SessionMigrateError('context_downgrade', 'cut off', { downgrade }),
+      }),
+    );
+
+    // Act
+    const response = await subject.dispatch(migrateRequest('s1'));
+
+    // Assert
+    should(response.status).equal(409);
+    should(JSON.parse(response.body)).deepEqual({ error: 'cut off', code: 'context_downgrade_refused', downgrade });
   });
 
   it('should carry the whole in-flight inventory in the refusal, because a bare 409 is unactionable', async () => {

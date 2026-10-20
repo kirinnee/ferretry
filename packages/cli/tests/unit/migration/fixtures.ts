@@ -8,6 +8,7 @@ interface MigrationCall {
   readonly agent: string;
   readonly model?: string;
   readonly allowContextDowngrade?: boolean;
+  readonly forceInflight?: boolean;
   readonly requestId?: string;
 }
 
@@ -28,6 +29,7 @@ class RecordingMigrationGateway implements IMigrationGateway {
     model?: string,
     allowContextDowngrade?: boolean,
     requestId?: string,
+    forceInflight?: boolean,
   ): Promise<SessionView> {
     this.calls.push({
       id,
@@ -35,6 +37,7 @@ class RecordingMigrationGateway implements IMigrationGateway {
       ...(model === undefined ? {} : { model }),
       ...(allowContextDowngrade === undefined ? {} : { allowContextDowngrade }),
       ...(requestId === undefined ? {} : { requestId }),
+      ...(forceInflight === undefined ? {} : { forceInflight }),
     });
     return Promise.resolve(this.response);
   }
