@@ -199,6 +199,8 @@ describe('MigrationPreflight', () => {
     should(document).containEql('- **FORCED past a destructive/unknown refusal');
     should(document).containEql('| DESTRUCTIVE | 900 | ? | ? | `rm -rf work` |');
     should(settled).containEql('## Outcome — MIGRATION SUCCEEDED');
-    should(preflight.handoff('/state/report.md')).containEql('Read /state/report.md');
+    should(preflight.handoff(report, '/state/report.md')).be.undefined();
+    const busy = await preflight.inspect(view({ status: 'tool_running' }));
+    should(preflight.handoff(busy, '/state/report.md')).containEql('read /state/report.md');
   });
 });

@@ -51,6 +51,7 @@
         "harness/live-activity-screenshot.tsx",
         "harness/compaction-screenshot.tsx",
         "harness/handoff-screenshot.tsx",
+        "harness/migrate-notice-screenshot.tsx",
         "harness/pack-cards-screenshot.tsx",
         "harness/peer-messages-screenshot.tsx",
         "harness/dictation-review-screenshot.tsx",

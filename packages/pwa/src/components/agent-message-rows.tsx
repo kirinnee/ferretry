@@ -1,4 +1,6 @@
-import type { MouseEvent, ReactNode } from 'react';
+import { splitFerretryNotice } from '@ferretry/protocol';
+import { Cog } from 'lucide-react';
+import { type MouseEvent, type ReactNode, useState } from 'react';
 import { displayCallsign } from '../lib/callsign.ts';
 import { clockOfInstant } from '../lib/message-clock.ts';
 import { daemonSessionPath } from '../lib/pages/routes.ts';
@@ -132,6 +134,58 @@ export function SystemNoticeRow({ entry, rhythm }: { readonly entry: TranscriptE
       <span className="fy-system-label">Ferretry</span>
       <Markdown className="fy-system-text" text={entry.text} />
       <MessageFooter clock={clockOfInstant(entry.at)} side="other" />
+    </div>
+  );
+}
+
+/**
+ * A Ferretry notice that reached the agent THROUGH A FILE, such as the one a restart sends when it
+ * interrupted work: a gear and its one-line headline, with what was written for the agent behind a
+ * "details" control. It is never an owner bubble — the owner did not type it.
+ */
+export function HandoffNoticeRow({
+  entry,
+  notice,
+  rhythm,
+}: {
+  readonly entry: TranscriptEntry;
+  readonly notice: string;
+  readonly rhythm: Rhythm;
+}) {
+  const [open, setOpen] = useState(false);
+  const { headline, details } = splitFerretryNotice(notice);
+  return (
+    <div
+      className="fy-message fy-message-system fy-message-chrome"
+      data-system-notice=""
+      data-transcript-kind="system"
+      role="note"
+      {...rhythm}
+    >
+      <Cog aria-hidden="true" className="fy-system-icon" size={12} />
+      <span className="fy-system-text">
+        <span className="sr-only">Ferretry: </span>
+        {headline}
+        {details === null ? null : (
+          <>
+            <span aria-hidden="true"> · </span>
+            <button
+              aria-expanded={open}
+              className="fy-system-details"
+              onClick={() => setOpen(current => !current)}
+              type="button"
+            >
+              details
+            </button>
+          </>
+        )}
+      </span>
+      <MessageFooter clock={clockOfInstant(entry.at)} side="other" />
+      {open && details !== null ? (
+        <p className="fy-system-detail" data-system-detail="">
+          {details}
+        </p>
+      ) : null}
     </div>
   );
 }

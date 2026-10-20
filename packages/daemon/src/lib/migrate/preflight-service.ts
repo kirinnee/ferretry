@@ -2,9 +2,10 @@ import type { MigrationRefusal, SessionStatus } from '@ferretry/protocol';
 import { backgroundTerminalCount } from './background-terminals.ts';
 import { describeInflight } from './inflight-describe.ts';
 import { assembleInflightReport, gateInflight, type GateDecision, type InflightReport } from './inflight-report.ts';
-import { handoffMessage, renderMigrationOutcome, type MigrationOutcome } from './outcome-render.ts';
+import { renderMigrationOutcome, type MigrationOutcome } from './outcome-render.ts';
 import type { ProcessInventoryPort } from './process-inventory-port.ts';
 import { renderInflightCli, renderInflightReport, type ReportMeta } from './report-render.ts';
+import { restartNotice } from './restart-notice.ts';
 import { joinOpenTools } from './tool-inventory.ts';
 
 /** The session facts the preflight needs, projected out of whatever served them. */
@@ -105,8 +106,8 @@ export class MigrationPreflight {
     return renderMigrationOutcome(outcome);
   }
 
-  /** The message that points the migrated agent at its report. */
-  handoff(reportPath: string): string {
-    return handoffMessage(reportPath);
+  /** What the restarted agent is told, or nothing: see {@link restartNotice}. */
+  handoff(report: InflightReport, reportPath: string): string | undefined {
+    return restartNotice(report, reportPath);
   }
 }

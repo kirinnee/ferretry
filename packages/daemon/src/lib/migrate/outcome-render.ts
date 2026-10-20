@@ -100,8 +100,3 @@ export function renderMigrationOutcome(outcome: MigrationOutcome): string {
   const lines = outcome.ok ? successLines(outcome, model) : failureLines(outcome, model);
   return `${lines.join('\n')}\n`;
 }
-
-/** The one-line handoff message sent to the migrated agent once the move succeeds. */
-export function handoffMessage(reportPath: string): string {
-  return `You were migrated mid-turn. Read ${reportPath} — it lists what was running and what to check before re-running anything.`;
-}

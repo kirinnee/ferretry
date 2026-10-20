@@ -1,10 +1,10 @@
-import { type HandoffPointer, parsePeerEnvelope } from '@ferretry/protocol';
-import type { ReactNode } from 'react';
+import { type HandoffPointer, parseFerretryNotice, parsePeerEnvelope } from '@ferretry/protocol';
+import { type ReactNode, useState } from 'react';
 import { clockOfInstant } from '../lib/message-clock.ts';
 import type { AgentRunMark, TranscriptEntry } from '../lib/session-screens.ts';
-import { PeerMessageRow, SystemNoticeRow } from './agent-message-rows.tsx';
+import { HandoffNoticeRow, PeerMessageRow, SystemNoticeRow } from './agent-message-rows.tsx';
 import { CommandRow } from './command-row.tsx';
-import { HandoffBody, HandoffView, useHandoffReading } from './handoff-message.tsx';
+import { HandoffBody, HandoffVia, HandoffViaDetail, HandoffView, useHandoffReading } from './handoff-message.tsx';
 import { HarnessEventRow } from './harness-event-row.tsx';
 import { LedgerMessage, type SendCancel, type SendRetry, type SendSubmit } from './ledger-message.tsx';
 import { Markdown } from './markdown.tsx';
@@ -114,6 +114,8 @@ function HandoffRow({
   readonly answered: boolean;
 }) {
   const { reading, source } = useHandoffReading(handoff.name);
+  const notice = reading.state === 'read' ? parseFerretryNotice(reading.handoff.message) : null;
+  if (notice !== null) return <HandoffNoticeRow entry={entry} notice={notice} rhythm={rhythm} />;
   const parsed = reading.state === 'read' ? parsePeerEnvelope(reading.handoff.message) : null;
   if (parsed !== null && source !== null && reading.state === 'read')
     return (
@@ -128,9 +130,7 @@ function HandoffRow({
   if (sender !== undefined && entry.send !== undefined)
     return (
       <PeerMessageRow
-        body={
-          <HandoffView explain={false} pointer={handoff} pointerText={entry.text} reading={reading} source={source} />
-        }
+        body={<HandoffView pointer={handoff} pointerText={entry.text} reading={reading} source={source} />}
         entry={entry}
         peer={{
           name: entry.send.fromName ?? sender,
@@ -143,7 +143,7 @@ function HandoffRow({
       />
     );
   return (
-    <OwnMessageRow answered={answered} entry={entry} rhythm={rhythm}>
+    <OwnMessageRow answered={answered} entry={entry} rhythm={rhythm} viaTurnFile={reading.state !== 'gone'}>
       <HandoffView pointer={handoff} pointerText={entry.text} reading={reading} source={source} />
     </OwnMessageRow>
   );
@@ -159,18 +159,29 @@ function OwnMessageRow({
   rhythm,
   answered,
   children,
+  viaTurnFile = false,
 }: {
   readonly entry: TranscriptEntry;
   readonly rhythm: Record<string, string | undefined>;
   readonly answered: boolean;
   /** What the message holds, when it is not `entry.text` — a hand-off's document. */
   readonly children?: ReactNode;
+  /** The message travelled as a file: say so on the foot's own line, not on one of its own. */
+  readonly viaTurnFile?: boolean;
 }) {
+  const [viaOpen, setViaOpen] = useState(false);
   return (
     <article className="fy-message fy-message-user" data-transcript-kind="user" {...rhythm}>
       <span className="sr-only">You said:</span>
       {children ?? <p>{entry.text}</p>}
-      <MessageFooter answered={answered} clock={clockOfInstant(entry.at)} record={entry.send} side="own" />
+      <MessageFooter
+        answered={answered}
+        clock={clockOfInstant(entry.at)}
+        lead={viaTurnFile ? <HandoffVia onToggle={() => setViaOpen(current => !current)} open={viaOpen} /> : undefined}
+        leadDetail={viaTurnFile && viaOpen ? <HandoffViaDetail /> : undefined}
+        record={entry.send}
+        side="own"
+      />
     </article>
   );
 }
