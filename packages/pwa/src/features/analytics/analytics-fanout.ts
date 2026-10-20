@@ -64,12 +64,39 @@ export interface FleetAnswer {
   readonly daemonOf: (sessionId: string) => DaemonId | undefined;
 }
 
+/** What decides whether two answers merge: their kind, aggregation, metric and grouping. */
+const answerShape = (response: AnalyticsResponse): string =>
+  JSON.stringify([
+    response.kind,
+    response.kind === 'aggregate' ? response.aggregation : null,
+    response.parsed.metric ?? null,
+    response.parsed.groupBy,
+  ]);
+
+/**
+ * The answers in the order they merge: the MOST COMMON shape first (the earliest machine breaking a
+ * tie), the rest after it. Seeding from whichever machine happens to come first would let one machine on
+ * an older build turn every other machine into "cannot be merged".
+ */
+const mergeOrder = <T extends { readonly value: AnalyticsResponse }>(answers: readonly T[]): readonly T[] => {
+  const counts = new Map<string, number>();
+  for (const answer of answers) counts.set(answerShape(answer.value), (counts.get(answerShape(answer.value)) ?? 0) + 1);
+  const common = answers.reduce<string | undefined>((best, answer) => {
+    const shape = answerShape(answer.value);
+    return best === undefined || counts.get(shape)! > counts.get(best)! ? shape : best;
+  }, undefined);
+  return [
+    ...answers.filter(answer => answerShape(answer.value) === common),
+    ...answers.filter(answer => answerShape(answer.value) !== common),
+  ];
+};
+
 /**
  * Asks EVERY machine one query and merges the answers with the protocol's `mergeAnalyticsResponses`.
  *
- * The answers merge ONE AT A TIME, so an answer that cannot be merged with the rest (a machine on an
- * older build answering a different shape) becomes that machine's failure rather than discarding every
- * machine's answer. Each machine's own `machine` value is kept as it answered: it is the value a
+ * The answers merge ONE AT A TIME, from the most common shape (`mergeOrder`), so an answer that cannot
+ * be merged with the rest (a machine on an older build answering a different shape) becomes that
+ * machine's failure rather than discarding every machine's answer. Each machine's own `machine` value is kept as it answered: it is the value a
  * `{machine=…}` matcher is compared with on that machine, so what is shown can be typed back.
  * Fails only when no machine answered, with the first machine's reason.
  */
@@ -82,8 +109,8 @@ export const askEveryMachine = async (
   const failed: MachineFailure[] = outcomes.flatMap(outcome => (outcome.status === 'failed' ? [outcome] : []));
   const origin = new Map<string, DaemonId>();
   let merged: AnalyticsResponse | undefined;
-  for (const outcome of outcomes) {
-    if (outcome.status !== 'answered') continue;
+  const answered = outcomes.flatMap(outcome => (outcome.status === 'answered' ? [outcome] : []));
+  for (const outcome of mergeOrder(answered)) {
     try {
       merged = merged === undefined ? outcome.value : mergeAnalyticsResponses([merged, outcome.value]);
     } catch (reason) {

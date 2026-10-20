@@ -407,6 +407,25 @@ describe('one query across every machine', () => {
     expect(answer.daemonOf('unknown')).toBeUndefined();
   });
 
+  it('merges from the most common answer, so the odd machine out is the one named', async () => {
+    const daemonC = daemonConnection({ daemonId: 'daemon-c', baseUrl: 'https://c.example.test', deviceId: 'token-c' });
+    // The FIRST machine is the older build: seeding from it would fail the other two.
+    const answer = await askEveryMachine(
+      [
+        { connection: daemonA, name: 'old-build' },
+        { connection: daemonB, name: 'kirin-box' },
+        { connection: daemonC, name: 'studio-mac' },
+      ],
+      async (daemon, query) =>
+        daemon.daemonId === 'daemon-a'
+          ? dayAggregate('2026-10-13', 1, 1)
+          : rawResponse([rawRow({ id: `${daemon.daemonId}-row` })], query),
+      '{}',
+    );
+    expect(rowsOf(answer.response).map(row => row.id).sort()).toEqual(['daemon-b-row', 'daemon-c-row']);
+    expect(answer.failed.map(outcome => outcome.machine.name)).toEqual(['old-build']);
+  });
+
   it('names a machine that did not answer or cannot be merged, and fails only when nobody answered', async () => {
     const partial = await askEveryMachine(
       MACHINES,
