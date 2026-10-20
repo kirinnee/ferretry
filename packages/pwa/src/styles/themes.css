@@ -260,6 +260,14 @@
   --card-shadow: var(--bubble-shadow);
   --card-edge: var(--stroke-heavy);
 
+  /* ---- icon-only ghost controls (the composer's attach and mic) ----
+     Quiet by default: no fill, no edge, no shadow. A family whose every control is an inked block
+     (Neo) or must never be invisible (High Contrast) restates these, so a bare icon is never the one
+     unstyled control in a row of themed ones. */
+  --ghost-bg: transparent;
+  --ghost-edge: transparent;
+  --ghost-shadow: none;
+
   /* ---- code / mono surfaces ---- */
   --code-bg: #f5f5f7;
   --code-border: #e7e7ec;
@@ -867,6 +875,10 @@
 [data-swatch^='neo-'] {
   /* ═══ structural token layer ═══ */
 
+  --ghost-bg: var(--surface);
+  --ghost-edge: var(--border);
+  --ghost-shadow: var(--shadow-control);
+
   --chrome-fg: var(--faint);
   --weight-normal: 500;
   --weight-medium: 700;
@@ -1141,6 +1153,7 @@
    ============================================================================ */
 :root[data-theme^='contrast-'],
 [data-swatch^='contrast-'] {
+  --ghost-edge: var(--border-strong);
   /* ═══ structural token layer ═══ */
 
   /* An UNDECORATED instrument, not monochrome Neo: no offset shadows, no display

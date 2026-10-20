@@ -30,8 +30,9 @@
 }
 
 /* ---- each family's hand --------------------------------------------------------------------------
-   Colour is the family's own accent in every block (the sweep proves it holds 3:1 in both modes);
-   what changes is the stroke — the same reason a Neo button is a hard block and a Geist one a hairline. */
+   Colour is the family's own accent (the sweep proves it holds 3:1 in both modes) except in Neo, whose
+   busy marks are ink like its status dots and edges, so a working row never reads as a link; what
+   changes otherwise is the stroke — the same reason a Neo button is a hard block and a Geist one a hairline. */
 
 /* Mission Control: an instrument dial — a hairline square-cap needle over a ticked bezel. */
 :root[data-theme^='mission-'],
@@ -43,9 +44,10 @@
   --spinner-timing: linear;
   --spinner-track-dash: 1.6 1.54;
 }
-/* Neo-Brutalism: a thick square-cap arc on a hard ink track. */
+/* Neo-Brutalism: a thick square-cap ink arc on a hard ink track. */
 :root[data-theme^='neo-'],
 [data-swatch^='neo-'] {
+  --spinner-arc: var(--fg);
   --spinner-track: color-mix(in srgb, var(--fg) 30%, transparent);
   --spinner-stroke: 3.25;
   --spinner-cap: square;
