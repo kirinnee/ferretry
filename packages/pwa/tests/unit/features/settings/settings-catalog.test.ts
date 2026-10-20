@@ -31,6 +31,7 @@ describe('shared settings catalog', () => {
       'dictation',
       'notifications',
       'install-app',
+      'speedup-keys',
       'sessions-list',
       'motion',
       'message-marks',
@@ -61,7 +62,7 @@ describe('shared settings catalog', () => {
         'dictation',
         'notifications',
       ],
-      ['install-app'],
+      ['install-app', 'speedup-keys'],
       [],
     ]);
 

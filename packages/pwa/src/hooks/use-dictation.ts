@@ -27,16 +27,17 @@
  * a cancelled browser can deliver a late result, and enhancement can resolve
  * after unmount. Only the first current owner can commit.
  *
- * The paired daemon remains explicit for two OPTIONAL text-only operations:
- * recent conversation read as correction vocabulary, and Groq enhancement.
- * Local correction never sends the transcript across that boundary, and audio
- * cannot cross it.
+ * Hosted clean-up (Groq or Cerebras) goes STRAIGHT from this browser to the provider when this device
+ * holds a key for it (Settings › This device › Speed-up keys, `lib/stt/speedup-keys.ts`); only without
+ * one does it ask the paired daemon, which spends a key from its own secret store. The conversation it
+ * reads is the transcript this page already shows, when the host hands it in. Local correction never
+ * sends the transcript anywhere, and audio cannot leave through either path.
  */
 
-import type { IFyApiClient } from '@ferretry/protocol';
+import { CLEANUP_PROVIDERS, type IFyApiClient } from '@ferretry/protocol';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { DaemonConnection } from '../lib/daemon-connection.ts';
-import { useDaemonFetch, useParakeetVoice } from '../lib/store.tsx';
+import { useDaemonFetch, useParakeetVoice, useSpeedupKeys } from '../lib/store.tsx';
 import {
   BrowserRecognitionError,
   type BrowserRecognitionProvider,
@@ -46,6 +47,7 @@ import {
   browserRecognitionErrorFrom,
   browserRecognitionProvider,
 } from '../lib/stt/browser-recognition.ts';
+import { DEVICE_KEYS_PLACE, requestDeviceCleanup } from '../lib/stt/device-cleanup.ts';
 import { insertTranscript, readSelection, type SelectionLike } from '../lib/stt/draft.ts';
 import { enhance } from '../lib/stt/enhancement.ts';
 import {
@@ -57,7 +59,12 @@ import {
 } from '../lib/stt/level-monitor.ts';
 import { joinWords, type NearLiveState } from '../lib/stt/near-live.ts';
 import type { ParakeetVoice } from '../lib/stt/parakeet-voice.ts';
-import { type RemoteEnhancementFetch, requestRemoteEnhancement } from '../lib/stt/remote-enhancement.ts';
+import {
+  type RemoteEnhancementFetch,
+  type RemoteEnhancementResult,
+  requestRemoteEnhancement,
+} from '../lib/stt/remote-enhancement.ts';
+import type { DeviceSpeedupKeys } from '../lib/stt/speedup-keys.ts';
 import { isRemoteEnhancementProvider, type SttSettings, sttDictionary } from '../lib/stt/stt-settings.ts';
 import { DEFAULT_VOICE_CLEANUP, type VoiceCleanup } from '../lib/stt/voice-cleanup.ts';
 import { verifyWordOnly } from '../lib/stt/word-only-verifier.ts';
@@ -156,6 +163,28 @@ export function extractContextMessages(records: readonly ContextRecordLike[] | u
   return texts.slice(-MAX_CONTEXT_MESSAGES);
 }
 
+/** A transcript row, as far as the conversation a clean-up reads is concerned. */
+interface ConversationRowLike {
+  readonly kind: string;
+  readonly text: string;
+  readonly handoff?: unknown;
+}
+
+/**
+ * What was SAID in a transcript the page already holds: the person's messages and the agent's replies,
+ * oldest first. Tool rows, notices and a hand-off pointer (whose text is plumbing, not words) are not.
+ */
+export function conversationFromTranscript(rows: readonly ConversationRowLike[]): string[] {
+  return rows
+    .filter(row => (row.kind === 'user' && row.handoff === undefined) || row.kind === 'assistant')
+    .map(row => row.text);
+}
+
+/** The newest 10 non-empty messages of a conversation the page holds. */
+export function extractHeldMessages(messages: readonly string[]): string[] {
+  return messages.filter(message => message.trim().length > 0).slice(-MAX_CONTEXT_MESSAGES);
+}
+
 /** Sparse context is weaker evidence than the dictionary alone. */
 export function hasUsableContext(messages: readonly string[]): boolean {
   return messages.length >= MIN_CONTEXT_MESSAGES;
@@ -170,6 +199,10 @@ export const enhancementErrorFrom = (failure: unknown): DictationError => {
       failure instanceof Error ? failure.message : 'Enhancement failed for an unknown reason; raw dictation was kept.',
   };
 };
+
+/** Said when neither this device nor the daemon holds a key for the chosen provider. */
+export const noCleanupKeyMessage = (provider: string): string =>
+  `No ${provider} key, so your words were kept as you said them: add a ${provider} key in ${DEVICE_KEYS_PLACE}.`;
 
 export interface UseDictationOptions {
   /** Used only by optional context/Groq enhancement. Audio never reaches it. */
@@ -198,6 +231,13 @@ export interface UseDictationOptions {
   readonly voiceCleanup?: VoiceCleanup;
   /** Optional text-only correction transport through the paired daemon. */
   readonly enhancementFetch?: RemoteEnhancementFetch;
+  /** Provider keys this device holds. Read from the app store when omitted; `null` means none here. */
+  readonly speedupKeys?: DeviceSpeedupKeys | null;
+  /**
+   * The session's conversation as the page already holds it, oldest first. When given, clean-up reads
+   * this instead of fetching history from the daemon.
+   */
+  readonly readConversation?: () => readonly string[];
   readonly disabled?: boolean;
 }
 
@@ -256,6 +296,9 @@ export function useDictation(options: UseDictationOptions): DictationHandle {
   const recognition = options.recognition ?? ambientRecognition;
   const contextVoice = useParakeetVoice();
   const voice = options.parakeet === undefined ? contextVoice : options.parakeet;
+  const contextKeys = useSpeedupKeys();
+  const speedupKeysRef = useRef<DeviceSpeedupKeys | null>(null);
+  speedupKeysRef.current = options.speedupKeys === undefined ? contextKeys : options.speedupKeys;
   const engine = options.settings.engine;
   // Unchosen counts as supported: the mic stays live so pressing it can ask the person to choose.
   const supported =
@@ -361,6 +404,10 @@ export function useDictation(options: UseDictationOptions): DictationHandle {
    */
   const readContext = useCallback(async (needsEvidence: boolean): Promise<string[]> => {
     const current = optionsRef.current;
+    if (current.readConversation !== undefined) {
+      const held = extractHeldMessages(current.readConversation());
+      return !needsEvidence || hasUsableContext(held) ? held : [];
+    }
     if (current.sessionId === undefined || current.api === undefined) return [];
     try {
       const events = await withinContextFetchBudget(
@@ -393,18 +440,36 @@ export function useDictation(options: UseDictationOptions): DictationHandle {
       if (!isCurrent(token)) return raw;
 
       if (isRemoteEnhancementProvider(active.enhancementProvider)) {
+        const provider = active.enhancementProvider;
         try {
           const signal = controllerRef.current?.signal;
-          const result = await requestRemoteEnhancement(current.daemon, {
-            provider: active.enhancementProvider,
-            model: active.enhancementModel,
-            text: raw,
-            dictionary: entries,
-            context,
-            userContext: active.userContext,
-            ...(signal ? { signal } : {}),
-            fetchImpl: current.enhancementFetch ?? routedFetchRef.current,
-          });
+          const keys = speedupKeysRef.current;
+          // This device's own key first: straight to the provider, no daemon round trip.
+          const direct: RemoteEnhancementResult | undefined =
+            keys === null
+              ? undefined
+              : await requestDeviceCleanup(keys, {
+                  provider,
+                  model: active.enhancementModel,
+                  text: raw,
+                  dictionary: entries,
+                  context,
+                  userContext: active.userContext,
+                  cleanup,
+                  ...(signal ? { signal } : {}),
+                });
+          const result =
+            direct ??
+            (await requestRemoteEnhancement(current.daemon, {
+              provider,
+              model: active.enhancementModel,
+              text: raw,
+              dictionary: entries,
+              context,
+              userContext: active.userContext,
+              ...(signal ? { signal } : {}),
+              fetchImpl: current.enhancementFetch ?? routedFetchRef.current,
+            }));
           if (result.kept === 'raw') {
             // The daemon refused the model's reply and sent the words back: say why instead of looking like a no-op.
             onFailure({
@@ -415,7 +480,12 @@ export function useDictation(options: UseDictationOptions): DictationHandle {
           return result.text;
         } catch (failure) {
           if (!isCurrent(token) || controllerRef.current?.signal.aborted === true) return raw;
-          onFailure(enhancementErrorFrom(failure));
+          const notConfigured = (failure as { code?: unknown } | null)?.code === 'not-configured';
+          onFailure(
+            notConfigured
+              ? { code: 'enhancement-not-configured', message: noCleanupKeyMessage(CLEANUP_PROVIDERS[provider].label) }
+              : enhancementErrorFrom(failure),
+          );
           return raw;
         }
       }

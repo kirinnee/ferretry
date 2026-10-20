@@ -58,8 +58,8 @@ import {
 import { ForkForm } from '../../features/session-actions/fork-form.tsx';
 import { type SessionActionContribution, sessionActionSections } from '../../features/session-actions/registry.ts';
 import { RenameForm } from '../../features/session-actions/rename-form.tsx';
-import { addSessionMcp, previewSessionMcp, readSessionMcp } from '../../features/session-actions/session-mcp-api.ts';
 import { useRestartRefusal } from '../../features/session-actions/restart-refusal.tsx';
+import { addSessionMcp, previewSessionMcp, readSessionMcp } from '../../features/session-actions/session-mcp-api.ts';
 import { forkThroughLatest, restartWithResume } from '../../features/session-actions/session-operations.ts';
 import type { InfoTab } from '../../features/session-info/info-model.ts';
 import { readRelaunchSettings } from '../../features/session-info/relaunch-settings-api.ts';
@@ -75,6 +75,7 @@ import { useSessionWorkspace } from '../../features/workspace/use-session-worksp
 import { type SurfaceEventFeed, useSurfaceDriving } from '../../features/workspace/use-surface-driving.ts';
 import { useSessionTerminals, useWorkspaceFormFactor } from '../../features/workspace/use-workspace-environment.ts';
 import { useChatScrollbarGutter } from '../../hooks/use-chat-scrollbar-gutter.ts';
+import { conversationFromTranscript } from '../../hooks/use-dictation.ts';
 import { useLiveActivity } from '../../hooks/use-live-counter.ts';
 import { useOptionalSessionQuota } from '../../hooks/use-usage.ts';
 import { BottomSheet } from '../../shell/bottom-sheet.tsx';
@@ -465,6 +466,10 @@ export function SessionChatPage({
     // and nothing to fail about, so the fallback simply does not apply.
     else if (typeof document !== 'undefined') document.getElementById(`${attentionId}-trigger`)?.focus();
   }, [attentionId]);
+  // Dictation clean-up reads the conversation on screen instead of fetching the session's history again.
+  const entriesRef = useRef(entries);
+  entriesRef.current = entries;
+  const readDictationConversation = useCallback(() => conversationFromTranscript(entriesRef.current), []);
   const composerCatalogs = useComposerReferenceCatalogs(client, session.config.id, {
     tasks: referenceTasks,
     skills: skills.catalog,
@@ -1298,6 +1303,7 @@ export function SessionChatPage({
               {...(composerSuggestions === undefined ? {} : { suggestions: composerSuggestions })}
               vimMode={composerVimMode}
               {...(dictationSettings === undefined ? {} : { dictationSettings })}
+              dictationConversation={readDictationConversation}
               enterKeyPreference={composerEnterKey}
               phoneEnterKeyPreference={composerPhoneEnterKey}
               daemon={connection}

@@ -179,6 +179,47 @@ What it does NOT protect against: the provider. A key you hand Groq is a key Gro
 the daemon sends (a transcript, or the Warden's redacted snapshot) is text that provider receives — the
 Speed-ups screen says what leaves the machine for each one.
 
+## Device-held speed-up keys
+
+Settings › This device › **Speed-up keys** takes a Groq and/or a Cerebras key that lives in **one
+browser** and is spent **by that browser**. With one saved, dictation clean-up goes straight from the
+page to `api.groq.com` or `api.cerebras.ai` — no daemon on the path, because one more round trip
+through a machine made clean-up slow (owner decision). **This is not the secret store above, and it
+does not reach it.**
+
+- **It never reaches a daemon or an agent.** The key is not sent to any machine, not synced, not copied
+  by Copy settings, and not in any request a daemon sees. Agents run on daemons, so no agent can name
+  it, `use` it or read it — `${secret:…}` and `fy secret use` know nothing about it.
+- **Write-only in the page, too.** `lib/stt/speedup-keys.ts` has no getter: after Save the screen can
+  say only "saved · ends with ••ab". The one place the value is decrypted is `send`, which puts it on
+  ONE request whose URL the vault picks from the shared provider table
+  (`@ferretry/protocol` `stt-cleanup.ts`), so a Groq key can only ever go to `api.groq.com`. That
+  request carries no cookie, no referrer and no cache entry, and nothing logs it.
+- **Encrypted at rest.** Each key is AES-GCM ciphertext under a wrapping key minted **non-extractable**
+  and kept in IndexedDB as a `CryptoKey` object (like the [pairing key](pairing.md)). A copy of the
+  profile's files, a backup, or the database restored into another browser yields ciphertext and a key
+  reference nothing can open. The provider id is bound in as additional data, so a record moved into
+  the other provider's slot fails to open.
+- **The page's policy names the two hosts.** `connect-src` in `packages/pwa/public/_headers` lists
+  exactly `https://api.groq.com` and `https://api.cerebras.ai`, and `scripts/validate/pages-config.sh`
+  fails if that list and the provider table disagree.
+- **The same decisions as the daemon.** The prompt, its fixed guard, how much conversation goes along
+  (the machine's `voice.yaml` still decides), reasoning stripping and the kept-raw check are the
+  shared `stt-cleanup` code both paths run ([voice.md](voice.md)).
+- **Without one**, clean-up asks the daemon, which spends its own [speed-up key](#speed-up-keys-the-fifth-holder)
+  if it has one; with neither, the raw words are kept and the review box says where to add a key.
+
+What it does NOT protect against:
+
+- **Code running in this page.** An XSS or a malicious deploy can spend the key while the tab is open
+  — it cannot carry the wrapping key away, but it can call `send`. Same limit as the pairing key.
+- **Anyone using this browser profile.** Whoever can open Ferretry in it can dictate on your key. A
+  device you hand to somebody else should have its keys removed first (Remove on each card).
+- **The provider.** As with the daemon's keys: Groq or Cerebras receives the recognised text, your word
+  list and the conversation `voice.yaml` allows, and can bill the key. Never audio.
+- **A browser that clears site data.** Clearing it deletes the key; the screen then says it is not
+  saved, and you paste it again.
+
 ## Secrets the daemon files itself
 
 A [remote MCP server signed in to from the PWA](mcp-oauth.md) leaves its tokens here, under names
