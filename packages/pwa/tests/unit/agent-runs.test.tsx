@@ -1,4 +1,6 @@
-import { describe, expect, test } from 'bun:test';
+import { afterEach, describe, expect, test } from 'bun:test';
+import type { ReactElement } from 'react';
+import type { ReactTestRenderer } from 'react-test-renderer';
 import { Transcript } from '../../src/components/transcript.tsx';
 import { TranscriptRow } from '../../src/components/transcript-row.tsx';
 import {
@@ -8,7 +10,18 @@ import {
   type TranscriptEntry,
   transcriptItems,
 } from '../../src/lib/session-screens.ts';
-import { render } from '../support/react.ts';
+import { render as mount, run } from '../support/react.ts';
+
+// An unmounted tree is a subscriber the transcript-hold gate no longer counts; a leaked one starves later suites.
+const mounted: ReactTestRenderer[] = [];
+const render = (element: ReactElement): ReactTestRenderer => {
+  const tree = mount(element);
+  mounted.push(tree);
+  return tree;
+};
+afterEach(() => {
+  for (const tree of mounted.splice(0)) run(() => tree.unmount());
+});
 
 const T0 = Date.UTC(2026, 9, 20, 9, 0, 0);
 const assistant = (id: string, at: number | null = T0): TranscriptEntry => ({
