@@ -552,8 +552,11 @@ const CLAUDE_PROMPT_SNAPSHOT_OFF = '--system-prompt-snapshot=off';
  */
 function promptSnapshotLines(harness: HarnessKind, command: string): string[] {
   if (harness !== 'claude') return [];
+  // Bounded, and with no terminal to read: a launch must never wait on a harness that answers `--help`
+  // by starting a session. Three seconds, then the probe is killed and no flag is added.
   return [
-    `if ${command} --help 2>/dev/null | grep -q -- --system-prompt-snapshot; then set -- ${CLAUDE_PROMPT_SNAPSHOT_OFF} "$@"; fi`,
+    `_fy_help="$({ ${command} --help </dev/null 2>/dev/null & _fy_p=$!; { sleep 3; kill "$_fy_p"; } >/dev/null 2>&1 & _fy_k=$!; wait "$_fy_p" 2>/dev/null; kill "$_fy_k" 2>/dev/null; })"`,
+    `case "$_fy_help" in *--system-prompt-snapshot*) set -- ${CLAUDE_PROMPT_SNAPSHOT_OFF} "$@" ;; esac`,
   ];
 }
 

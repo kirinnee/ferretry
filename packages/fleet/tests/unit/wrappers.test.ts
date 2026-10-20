@@ -639,6 +639,23 @@ describe("a resumed conversation hears this launch's sections", () => {
     should(args.at(-1)).equal('the task');
   });
 
+  it('should give up on a harness that answers --help by starting a session, and still launch', () => {
+    // Arrange — a stand-in that, like a harness taking `--help` for a prompt, never exits.
+    const directory = mkdtempSync(join(tmpdir(), 'fy-wrapper-hang-'));
+    const file = join(directory, 'claude');
+    writeFileSync(file, '#!/bin/sh\nprintf "> "\nwhile IFS= read -r _turn; do :; done\nexec sleep 30\n');
+    chmodSync(file, 0o755);
+    const started = Date.now();
+
+    // Act
+    const args = launchArguments(render(account({ flags: [`--append-system-prompt=${BASE}`] })), {}, directory);
+
+    // Assert
+    should(Date.now() - started).be.below(10_000);
+    should(args.filter(arg => arg.includes('system-prompt-snapshot'))).be.empty();
+    should(args.at(-1)).equal('the task');
+  });
+
   it('should ask the harness the wrapper execs, and leave Codex and a non-agent runtime alone', () => {
     // Arrange
     const agent = account({ flags: [`--append-system-prompt=${BASE}`] });
@@ -649,7 +666,7 @@ describe("a resumed conversation hears this launch's sections", () => {
     const person = render({ ...agent, agent: false });
 
     // Assert
-    should(resolved).containEql("if '/opt/harnesses/claude' --help 2>/dev/null | grep -q -- --system-prompt-snapshot");
+    should(resolved).containEql("_fy_help=\"$({ '/opt/harnesses/claude' --help </dev/null");
     should(launchArguments(codex, {}, RECORDING_HARNESS)).not.containEql('--system-prompt-snapshot=off');
     should(codex).not.containEql('system-prompt-snapshot');
     should(person).not.containEql('system-prompt-snapshot');
