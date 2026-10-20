@@ -358,6 +358,9 @@ export function parseChatCompletion(payload: unknown): string | undefined {
   return typeof content === 'string' ? withoutReasoning(content) : undefined;
 }
 
+const OUT_OF_TOKENS = 'enhancement model used its whole reply budget thinking and returned no text';
+const EMPTY_REPLY = 'enhancement model returned an empty reply';
+
 /** Whether the model stopped because it hit the reply cap rather than because it finished. */
 function ranOutOfTokens(payload: unknown): boolean {
   return firstChoice(payload)?.finish_reason === 'length';
@@ -461,12 +464,8 @@ export function classifyEnhancementOutcome(
   }
   const text = content.trim();
   if (text.length === 0) {
-    throw new SttEnhancementError(
-      'malformed_response',
-      ranOutOfTokens(outcome.payload)
-        ? 'enhancement model used its whole reply budget thinking and returned no text'
-        : 'enhancement model returned an empty reply',
-    );
+    const reason = ranOutOfTokens(outcome.payload) ? OUT_OF_TOKENS : EMPTY_REPLY;
+    throw new SttEnhancementError('malformed_response', reason);
   }
   if (text.length > ENHANCEMENT_LIMITS.maxOutputChars) {
     throw new SttEnhancementError('malformed_response', 'enhancement model returned an over-long reply');
