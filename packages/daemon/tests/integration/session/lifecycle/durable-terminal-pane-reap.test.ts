@@ -229,10 +229,13 @@ describe('registering a pane whose harness has already exited', () => {
       session: subject.record.config.tmuxSession,
       cwd: process.cwd(),
       // The pause lets the launch set remain-on-exit before the process ends, as a real harness does.
-      command: ['/bin/sh', '-c', `sleep 0.3; ${script}`],
+      command: ['/bin/sh', '-c', `sleep 1; ${script}`],
     });
+    // An exit status, not just `dead`: a metadata read that fails under load also reads as dead, and
+    // registering then would find the process still running.
     for (let attempt = 0; attempt < 100; attempt++) {
-      if ((await subject.controller.state(subject.record.config.tmuxSession)).dead) return;
+      const pane = await subject.controller.state(subject.record.config.tmuxSession);
+      if (pane.alive && pane.dead && pane.exitCode === 2) return;
       await Bun.sleep(50);
     }
     throw new Error('test setup: the pane never exited');
