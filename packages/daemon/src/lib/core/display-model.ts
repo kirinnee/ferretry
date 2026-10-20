@@ -1,4 +1,4 @@
-import { canServeModel, type CoreAccount, servableModels } from './inventory.ts';
+import { canServeModel, type CoreAccount, declaredModel, servableModels } from './inventory.ts';
 
 export type DisplayModelSource = 'harness' | 'requested' | 'account-default' | 'unknown';
 
@@ -47,7 +47,7 @@ const unservableReason = (account: CoreAccount, requested: string): string => {
   // Not `available === false`: after the manifest's own checks, "carries a reason" and "is declared
   // unavailable" are the same fact, and reading the reason is what makes this total without a branch
   // that could print an empty why.
-  const declared = account.models.find(model => model.id === requested);
+  const declared = declaredModel(account, requested);
   if (declared !== undefined && !declared.available)
     return `account ${account.agent} cannot serve model ${named}: ${declared.unavailableReason}. ${alternatives}, or take ${named} back into service in the fleet configuration`;
   return `account ${account.agent} does not serve model ${named}. ${alternatives}, or declare ${named} on the account in the fleet configuration`;

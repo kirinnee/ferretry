@@ -10,7 +10,7 @@
  */
 import { contextPercent, contextWindowFor, type ContextWindowEvidence } from './context-window.ts';
 import { resolveDisplayModel, startWaitMs, type DisplayModelSource, type StartWaitPolicy } from './display-model.ts';
-import type { CoreAccount } from './inventory.ts';
+import { declaredModel, type CoreAccount } from './inventory.ts';
 import { harnessDisplayName, remoteControlArgs, resolveParent, shellSafeSessionName } from './session-shape.ts';
 
 export interface SessionPlanRequest {
@@ -88,9 +88,13 @@ export class SessionPlanner {
     // a session nobody asked for.
     if (display.kind === 'unservable')
       return { kind: 'unservable-model', requested: display.requested, reason: display.reason };
+    // What the account's catalog says the model holds, so a model whose id carries no selector still plans
+    // the window it really has rather than the default.
+    const declared = declaredModel(request.account, display.model)?.context;
     const evidence: ContextWindowEvidence = {
       configuredModel: display.model,
       overrides: this.policy.contextWindowOverrides,
+      ...(declared === undefined ? {} : { declaredWindow: declared }),
       ...(request.reportedWindow === undefined ? {} : { reportedWindow: request.reportedWindow }),
     };
     return {

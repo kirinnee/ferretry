@@ -6,6 +6,7 @@ export interface MigrationCommandOptions {
   readonly agent: string;
   readonly model?: string;
   readonly allowContextDowngrade?: boolean;
+  readonly forceInflight?: boolean;
   readonly requestId?: string;
   readonly json?: boolean;
 }
@@ -26,7 +27,14 @@ export class MigrationController {
     const requestId = optionalText(options.requestId);
     if (options.requestId !== undefined && requestId === undefined) throw new Error('--request-id must not be blank');
 
-    const view = await this.gateway.migrate(id, agent, model, options.allowContextDowngrade === true, requestId);
+    const view = await this.gateway.migrate(
+      id,
+      agent,
+      model,
+      options.allowContextDowngrade === true,
+      requestId,
+      options.forceInflight === true,
+    );
     this.presenter.view(view, options.json === true);
   }
 }

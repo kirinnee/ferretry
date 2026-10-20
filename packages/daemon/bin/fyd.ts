@@ -454,6 +454,8 @@ import {
   CredentialUsageSource,
   canServeModel,
   childGrantRequester,
+  declaredModel,
+  findAccountByAgent,
   chooseRelayCarrierSources,
   claimStartName,
   combinedReferences,
@@ -3841,12 +3843,17 @@ function migrateRelaunchRefusal(error: unknown): never {
  * serves.  The core projection also retains a configured `[1m]` selector that
  * harness output strips away.
  */
-function currentContextWindow(config: z.infer<typeof SessionConfigSchema>, state: z.infer<typeof SessionStateSchema>) {
+function currentContextWindow(
+  config: z.infer<typeof SessionConfigSchema>,
+  state: z.infer<typeof SessionStateSchema>,
+  declaredWindow?: number,
+) {
   return contextWindowForSession({
     configuredModel: config.model,
     modelHint: config.modelHint,
     observedModel: state.observedModel,
     reportedWindow: state.contextWindow,
+    ...(declaredWindow === undefined ? {} : { declaredWindow }),
   });
 }
 
@@ -4016,12 +4023,25 @@ function createSessionMigrateSubsystem(parts: SessionMigrateParts): SessionMigra
         throw new SessionMigrateError('unavailable', error instanceof Error ? error.message : String(error));
       }
     })();
-    const window = currentContextWindow(config, state);
-    if (plan.contextWindow < window && !request.allowContextDowngrade)
+    // The window the session runs in, read the way the plan reads the target's: the harness's own report, the
+    // selector in its configured model, then what its account's catalog declares for it.
+    const sourceAccount = findAccountByAgent(await parts.accounts.accounts(), config.agent);
+    const window = currentContextWindow(
+      config,
+      state,
+      sourceAccount === undefined ? undefined : declaredModel(sourceAccount, config.model ?? '')?.context,
+    );
+    // A RESTART IS NEVER A DOWNGRADE. The same model on the same account relaunches into the window it already
+    // has; a plan that disagrees is a catalog or selector gap, and refusing would make Restart impossible.
+    const relaunchesSameModel =
+      request.model === undefined && keep?.kind === 'planned' && account.agent === config.agent;
+    if (plan.contextWindow < window && !request.allowContextDowngrade && !relaunchesSameModel)
       throw new SessionMigrateError(
         'context_downgrade',
         `${account.agent} serves ${plan.model} with a ${plan.contextWindow}-token window and this session is ` +
-          `running in ${window}; the conversation would be truncated. Send allowContextDowngrade to accept that.`,
+          `running in ${window}, so part of this conversation would be cut off. ` +
+          'Re-run with --allow-context-downgrade to accept that.',
+        { downgrade: { model: plan.model, targetWindow: plan.contextWindow, currentWindow: window } },
       );
     const report = await parts.preflight.inspect(
       {
@@ -4042,11 +4062,9 @@ function createSessionMigrateSubsystem(parts: SessionMigrateParts): SessionMigra
     );
     const decision = parts.preflight.gate(report, { force: request.forceInflight });
     if (!decision.proceed)
-      throw new SessionMigrateError(
-        'refused',
-        `${decision.reason}\n${parts.preflight.summarize(report)}`,
-        parts.preflight.describe(report),
-      );
+      throw new SessionMigrateError('refused', `${decision.reason}\n${parts.preflight.summarize(report)}`, {
+        inflight: parts.preflight.describe(report),
+      });
     const at = parts.clock.now();
     if (decision.forced)
       await parts.storage.append(id, 'session.migrate_forced', {

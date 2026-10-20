@@ -37,6 +37,7 @@ describe('migration command surface', () => {
       model: 'gpt-5.6-sol',
       allowContextDowngrade: true,
       requestId: 'move-1',
+      forceInflight: false,
     });
     should(JSON.parse(io.out[0] ?? '')).have.property('config');
   });
@@ -46,8 +47,15 @@ describe('migration command surface', () => {
     await should(run(['migrate', 'Fable']).parsed).be.rejected();
   });
 
-  it('should not offer kteam force-inflight against a daemon route with no force path', async () => {
-    // Arrange + Act + Assert
-    await should(run(['migrate', 'Fable', '--agent', 'codex-secondary', '--force-inflight']).parsed).be.rejected();
+  it('should pass an explicit force past the in-flight check, and never force by default', async () => {
+    // Arrange + Act
+    const forced = run(['migrate', 'Fable', '--agent', 'codex-secondary', '--force-inflight']);
+    await forced.parsed;
+    const plain = run(['migrate', 'Fable', '--agent', 'codex-secondary']);
+    await plain.parsed;
+
+    // Assert
+    should(forced.gateway.calls[0]).have.property('forceInflight', true);
+    should(plain.gateway.calls[0]).have.property('forceInflight', false);
   });
 });
