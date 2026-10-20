@@ -349,6 +349,14 @@ export function SettingsPage({
   const focusFrame = useRef<number | undefined>(undefined);
   const selectedRecord = connections.find(candidate => candidate.daemonId === daemonId);
   const selectedName = selectedRecord === undefined ? undefined : daemonDisplayName(selectedRecord);
+  // The machines secrets can be copied to, kept as ONE array while they read the same: `connections` is a
+  // fresh array on every render, and a fresh list here would rebuild every machine tab with it.
+  const otherList = connections.filter(other => other.daemonId !== daemonId);
+  const otherKey = otherList.map(other => `${other.daemonId} ${daemonDisplayName(other)}`).join('\n');
+  const latestOthers = useRef(otherList);
+  latestOthers.current = otherList;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `otherKey` IS the list's identity; see above.
+  const otherMachines = useMemo(() => latestOthers.current, [otherKey]);
 
   const followHash = useCallback((): void => {
     if (followedHash.current === window.location.hash) return;
@@ -575,6 +583,7 @@ export function SettingsPage({
               {...(createPairingClient ? { createPairingClient } : {})}
               {...(createPasskeyClient ? { createPasskeyClient } : {})}
               {...(createSecretClient ? { createSecretClient } : {})}
+              otherMachines={otherMachines}
               panel={panel}
               onOpenPanel={onOpenPanel}
               additionalTabs={daemonSettingsTabs}
@@ -598,6 +607,7 @@ export function SettingsPage({
       daemonSettingsTabs,
       onRemoveDaemon,
       onRenameDaemon,
+      otherMachines,
       probeDaemon,
       readWardenStatus,
       relayAdvertised,

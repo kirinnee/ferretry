@@ -141,7 +141,8 @@ closed would make a fresh remote session useless until somebody walked to the ma
 **The primary security layer is locality.** A remote caller can never turn a capability on. The passkey
 **unlock** is the **second layer**: a governed caller does nothing until its device unlocks the machine,
 and the unlock then stands in for the step-up over every `configure` and the `use` of `terminal`,
-`browser`, `pairing` and `secrets` — except minting a code, widening a device, or turning "what agents
+`browser`, `pairing` and `secrets` — except minting a code, widening a device, sealing secrets for
+another machine ([secrets.md](secrets.md#copying-secrets-to-another-machine)), or turning "what agents
 may control" back ON (terminals/browsers/files) from a remote device, which always want a passkey for
 that act ([design/zero-trust.md](design/zero-trust.md) B1). Turning one of those three OFF never asks
 for more than the ordinary `fleet.configure` step-up — only the ON half of a write does, so a single

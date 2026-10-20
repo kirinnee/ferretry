@@ -11,9 +11,11 @@
  */
 
 import type { SecretList } from '@ferretry/protocol';
+import { ArrowRightLeft } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
-import { useDaemonClient } from '../../lib/store.tsx';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
+import { useDaemonClient } from '../../lib/store.tsx';
+import { SecretCopyPanel } from './secret-copy-panel.tsx';
 import { listSecrets, putSecret, removeSecret, type SecretClient } from './secrets-api.ts';
 import { SecretsCard } from './secrets-card.tsx';
 
@@ -31,9 +33,14 @@ function message(cause: unknown): string {
 export function SecretsSurface({
   connection,
   createClient: injectedClient,
+  others = [],
+  machineName = other => other.daemonName ?? other.baseUrl,
 }: {
   readonly connection: DaemonConnection;
   readonly createClient?: SecretClientFactory;
+  /** The other machines this browser is paired with, for "Copy to another machine…". */
+  readonly others?: readonly DaemonConnection[];
+  readonly machineName?: (connection: DaemonConnection) => string;
 }) {
   // The carrier-routed client unless a test or the harness hands one in: a plain-network client
   // reaches no daemon at all, because a paired browser is answered only inside its own session.
@@ -42,6 +49,7 @@ export function SecretsSurface({
   const [client, setClient] = useState<SecretClient | null>(null);
   const [loaded, setLoaded] = useState<Loaded | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
+  const [copying, setCopying] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loadFailure, setLoadFailure] = useState<{
     readonly daemonId: DaemonConnection['daemonId'];
@@ -130,5 +138,27 @@ export function SecretsSurface({
       </section>
     );
 
-  return <SecretsCard list={loaded.list} busy={busy} error={error} onPut={put} onRemove={remove} />;
+  return (
+    <div className="flex min-w-0 flex-col gap-3">
+      <SecretsCard list={loaded.list} busy={busy} error={error} onPut={put} onRemove={remove} />
+      {copying ? (
+        <SecretCopyPanel
+          direction="to"
+          here={connection}
+          others={others}
+          createClient={createClient}
+          machineName={machineName}
+          onClose={() => setCopying(false)}
+        />
+      ) : (
+        loaded.list.secrets.length > 0 && (
+          <div>
+            <button type="button" className="kt-btn min-h-[44px]" onClick={() => setCopying(true)}>
+              <ArrowRightLeft size={14} aria-hidden="true" /> Copy to another machine…
+            </button>
+          </div>
+        )
+      )}
+    </div>
+  );
 }

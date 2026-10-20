@@ -259,6 +259,24 @@ export const AUDITED_ROUTES: readonly AuditedRouteRule[] = [
     subject: 'name',
     detail: { action: 'delete' },
   },
+  // Copying secrets to another machine: both ends name the SAME import id as the subject, so the source's
+  // record and the target's can be matched up by eye. Names only — the bundle is never read here.
+  {
+    method: 'POST',
+    path: '/v1/secrets/exports/:importId',
+    event: 'secrets.used',
+    subject: 'importId',
+    responseNames: 'names',
+    detail: { action: 'clone-export' },
+  },
+  {
+    method: 'POST',
+    path: '/v1/secrets/imports/:importId',
+    event: 'secrets.changed',
+    subject: 'importId',
+    responseNames: 'imported',
+    detail: { action: 'clone-import' },
+  },
   { method: 'POST', path: '/v1/worktrees/remove', event: 'worktree.removed' },
   { method: 'POST', path: '/v1/browser/login', event: 'browser.opened', detail: { action: 'sign-in-window' } },
   {
