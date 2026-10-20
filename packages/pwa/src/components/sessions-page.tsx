@@ -9,7 +9,7 @@
 import { useEffect, useMemo } from 'react';
 
 import type { WardenReportRequest } from '../features/warden/warden-verdicts.tsx';
-import { useAccountPickerSlice } from '../hooks/use-account-picker.ts';
+import { useAccountPickerSlice, useMachineRosters } from '../hooks/use-account-picker.ts';
 import { useDensity } from '../hooks/use-density.ts';
 import { useFleetView } from '../hooks/use-fleet-view.ts';
 import { type LiveClockOptions, useLiveClock } from '../hooks/use-live-clock.ts';
@@ -22,7 +22,7 @@ import {
   useProjectScope,
 } from '../hooks/use-project-scope.ts';
 import { useProjects } from '../hooks/use-projects.ts';
-import { useUsage } from '../hooks/use-usage.ts';
+import { useMachinesUsage, useUsage } from '../hooks/use-usage.ts';
 import { useWardenStatus, type WardenStatusReader } from '../hooks/use-warden-status.ts';
 import type { DaemonAccountPickerStore } from '../lib/account-picker-store.ts';
 import { allMachinesView, type MachineSource } from '../lib/all-machines.ts';
@@ -60,6 +60,11 @@ export interface SessionsPageProps {
   readonly machineSources?: readonly MachineSource[];
   /** The machines "+ New" may start on. */
   readonly newSessionMachines?: readonly NewSessionMachine[];
+  /**
+   * Every listed machine's pairing, with `machineSources`: a full row on any machine then reads that
+   * machine's own quota and roster, through that machine's own pairing.
+   */
+  readonly machineConnections?: readonly DaemonConnection[];
 }
 
 interface DashboardContentProps extends Omit<SessionsPageProps, 'scopeNavigation' | 'clock' | 'narrow'> {
@@ -68,31 +73,46 @@ interface DashboardContentProps extends Omit<SessionsPageProps, 'scopeNavigation
   readonly narrow?: boolean;
 }
 
-type FullDensityProps = Omit<SessionDashboardProps, 'usage' | 'accounts'> & {
+type FullDensityProps = Omit<SessionDashboardProps, 'usage' | 'accounts' | 'machineAccounts'> & {
   usageStore: DaemonUsageStore;
   accountPicker?: DaemonAccountPickerStore;
+  machineConnections: readonly DaemonConnection[];
 };
 
 /**
  * Owns the full-density usage and roster subscriptions; lean views never mount
  * either hook, because they render neither quota nor an account name.
  */
-function FullDensityDashboard({ usageStore, accountPicker, ...props }: FullDensityProps) {
+function FullDensityDashboard({ usageStore, accountPicker, machineConnections, ...props }: FullDensityProps) {
   useUsage(usageStore, props.connection);
+  useMachinesUsage(usageStore, machineConnections);
   return accountPicker === undefined ? (
     <SessionDashboard {...props} usage={usageStore} />
   ) : (
-    <RosterDashboard {...props} accountPicker={accountPicker} usage={usageStore} />
+    <RosterDashboard
+      {...props}
+      accountPicker={accountPicker}
+      machineConnections={machineConnections}
+      usage={usageStore}
+    />
   );
 }
+
+/** No other machine is listed: the one on screen's own reads are all there is. */
+const NO_MACHINES: readonly DaemonConnection[] = [];
 
 /** A separate component only so the roster hook is never called conditionally. */
 function RosterDashboard({
   accountPicker,
+  machineConnections,
   ...props
-}: Omit<SessionDashboardProps, 'accounts'> & { accountPicker: DaemonAccountPickerStore }) {
+}: Omit<SessionDashboardProps, 'accounts' | 'machineAccounts'> & {
+  accountPicker: DaemonAccountPickerStore;
+  machineConnections: readonly DaemonConnection[];
+}) {
   const slice = useAccountPickerSlice(accountPicker, props.connection);
-  return <SessionDashboard {...props} accounts={slice.catalog?.accounts ?? null} />;
+  const machineAccounts = useMachineRosters(accountPicker, machineConnections);
+  return <SessionDashboard {...props} accounts={slice.catalog?.accounts ?? null} machineAccounts={machineAccounts} />;
 }
 
 function DashboardContent({
@@ -110,6 +130,7 @@ function DashboardContent({
   narrow,
   machineSources,
   newSessionMachines,
+  machineConnections,
 }: DashboardContentProps) {
   const projectList = useProjects(projects, connection);
   const view = useFleetView({ fleet, controls, daemonId: connection.daemonId, projects: projectList });
@@ -161,6 +182,7 @@ function DashboardContent({
     <FullDensityDashboard
       {...dashboard}
       {...(accountPicker === undefined ? {} : { accountPicker })}
+      machineConnections={allMachines === undefined ? NO_MACHINES : (machineConnections ?? NO_MACHINES)}
       usageStore={usage}
     />
   ) : (

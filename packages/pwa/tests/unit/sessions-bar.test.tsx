@@ -513,6 +513,32 @@ describe('SessionsBar across every machine', () => {
     expect(view.container.querySelector('[data-sbar-filter="all"] .fy-sbar__count')?.textContent).toBe('5');
   });
 
+  test('marks each machine’s learners from that machine’s own set, whichever machine is on screen', async () => {
+    // "hadi-1" runs on both machines; only the OTHER machine says its own learns.
+    const { element } = bar({
+      machineSources: sources('online'),
+      now: NOW,
+      learningPassive: new Set(['maryah-1']),
+      machineLearners: new Map([[BETA, new Set(['hadi-1'])]]),
+    });
+    view = await mount(element);
+    const learns = (machine: string, id: string) =>
+      view?.container.querySelector(
+        `[data-sbar-machine-group="${machine}"] [data-sbar-session="${id}"] [data-learning-passive]`,
+      ) !== null;
+    expect([learns(DAEMON, 'hadi-1'), learns(BETA, 'hadi-1')]).toEqual([false, true]);
+    // A machine missing from the map: the one on screen falls back to its own set, never another's.
+    await view.render(
+      bar({
+        machineSources: sources('online'),
+        now: NOW,
+        learningPassive: new Set(['hadi-1']),
+        machineLearners: new Map(),
+      }).element,
+    );
+    expect([learns(DAEMON, 'hadi-1'), learns(BETA, 'hadi-1')]).toEqual([true, false]);
+  });
+
   test('an online machine pins its own question, and a machine whose sessions all moved says so', async () => {
     const { element } = bar({ machineSources: [source(BETA, 'kirin-box', [BETA_SESSIONS[1]!], 'online')], now: NOW });
     view = await mount(element);

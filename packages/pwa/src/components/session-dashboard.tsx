@@ -19,6 +19,7 @@ import {
   WardenVerdicts,
   type WardenVerdictView,
 } from '../features/warden/warden-verdicts.tsx';
+import type { MachineRosters } from '../hooks/use-account-picker.ts';
 import { useDashboardNarrow } from '../hooks/use-dashboard-view.ts';
 import { PULL_TO_PALETTE_ATTR } from '../hooks/use-pull-to-palette.ts';
 import type { PickerAccount } from '../lib/account-picker-catalog.ts';
@@ -90,6 +91,8 @@ export interface SessionDashboardProps {
   readonly onFocusMachine?: (daemonId: DaemonId, path: string) => void;
   /** The machines "+ New" may start on. With more than one it asks which; the default is this one. */
   readonly newSessionMachines?: readonly NewSessionMachine[];
+  /** Full density across machines: each machine's own roster, so every machine's rows name their account. */
+  readonly machineAccounts?: MachineRosters;
 }
 
 /** How many rows the all-machines list draws: Needs you, plus every machine's groups. */
@@ -124,6 +127,7 @@ export function SessionDashboard({
   allMachines,
   onFocusMachine,
   newSessionMachines,
+  machineAccounts,
 }: SessionDashboardProps) {
   const headingId = useId();
   const viewportNarrow = useDashboardNarrow();
@@ -264,6 +268,7 @@ export function SessionDashboard({
         {allMachines !== undefined && read ? (
           <AllMachinesGroups
             accounts={accounts}
+            {...(machineAccounts === undefined ? {} : { machineAccounts })}
             daemonId={connection.daemonId}
             density={density}
             mode={mode}

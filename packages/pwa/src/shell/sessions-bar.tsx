@@ -21,6 +21,7 @@
 import type { SessionView } from '@ferretry/protocol';
 import { ChartNoAxesCombined, ChevronDown, FolderKanban, Menu, Plus, QrCode, Search, Settings, X } from 'lucide-react';
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import type { MachineLearners } from '../features/learning/passive-learning.tsx';
 import { pairPhoneLabel } from '../features/settings/pair-phone.tsx';
 import { RailDivider } from '../features/workspace/split-divider.tsx';
 import { useDialogFocus } from '../hooks/use-dialog-focus.ts';
@@ -118,6 +119,8 @@ export interface SessionsBarProps {
   readonly onPairPhone?: () => void;
   /** Sessions instructed to file lessons, which carry a "Learning: passive" chip. */
   readonly learningPassive?: ReadonlySet<string>;
+  /** Across every machine: each listed machine's own learners, so every machine's rows carry the mark. */
+  readonly machineLearners?: MachineLearners;
   /** Present only while this machine has no runtime: the empty list then leads with creating one. */
   readonly createRuntimeHref?: string;
   /** Where the column's width is remembered. The page-wide store by default, shared with the context rail. */
@@ -360,6 +363,7 @@ function SessionsBarBody(props: SessionsBarProps & ListFilterProps & { readonly 
               activeSessionId={activeSessionId}
               daemonId={daemonId}
               {...(props.learningPassive === undefined ? {} : { learningPassive: props.learningPassive })}
+              {...(props.machineLearners === undefined ? {} : { machineLearners: props.machineLearners })}
               now={props.now ?? Date.now()}
               onNavigate={navigate}
               view={machineView}

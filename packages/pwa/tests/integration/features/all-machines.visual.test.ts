@@ -66,11 +66,13 @@ const build = async (): Promise<{ readonly css: string; readonly js: string }> =
 };
 
 const open = async (
-  scene: 'bar' | 'page',
+  scene: 'bar' | 'page' | 'drawer',
   theme: string,
   mode: 'light' | 'dark',
+  /** Opens the laptop's session, with the laptop answering. */
+  openOn: 'studio' | 'laptop' = 'studio',
 ): Promise<{ readonly context: BrowserContext; readonly tab: Page }> => {
-  const phone = scene === 'page';
+  const phone = scene !== 'bar';
   const context = await browser.newContext({
     viewport: phone ? { width: 390, height: 844 } : { width: 1_440, height: 900 },
     colorScheme: mode,
@@ -83,8 +85,12 @@ const open = async (
     new URL(route.request().url()).origin === origin ? await route.continue() : await route.abort(),
   );
   const tab = await context.newPage();
-  await tab.goto(`${origin}/?scene=${scene}&theme=${theme}-${mode}`);
-  await tab.waitForSelector('[data-machine-reach="offline"]');
+  await tab.goto(`${origin}/?scene=${scene}&theme=${theme}-${mode}&open=${openOn}`);
+  await tab.waitForSelector(
+    openOn === 'studio'
+      ? '[data-machine-reach="offline"]'
+      : '[data-machine-reach="online"] + [data-machine-reach="online"]',
+  );
   return { context, tab };
 };
 
@@ -143,7 +149,7 @@ describe('one session list across two machines, one offline', () => {
       expect(pinned[1]).toContain('Ora');
       expect(await texts(tab, '[data-sbar-needs-you-group] [data-machine-chip]')).toEqual(['studio', 'studio']);
 
-      // Machines in order, the one on screen first; the offline one says when it was last seen.
+      // Machines in the order they were paired; the offline one says when it was last seen.
       expect(await texts(tab, '.fy-sbar__machine-label')).toEqual(['studio', 'laptop']);
       expect(await texts(tab, '[data-machine-reach="offline"] .fy-sbar__machine-reach')).toEqual([
         'offline · last seen 5m',
@@ -181,6 +187,56 @@ describe('one session list across two machines, one offline', () => {
       await context.close();
     }
   }, 120_000);
+
+  it('opens the second machine’s session without moving the list, and marks both machines’ learners', async () => {
+    const { context, tab } = await open('bar', 'studio', 'light', 'laptop');
+    try {
+      const seen = await evidence(tab);
+      // The machine just opened is NOT hoisted: the list holds the order it had.
+      expect(await texts(tab, '.fy-sbar__machine-label')).toEqual(['studio', 'laptop']);
+      expect(await texts(tab, '[data-sbar-machine] .fy-sbar__machine-name')).toEqual(['laptop']);
+      // `s-ivo` runs on both; the open one is the laptop's, and only it.
+      const current = `[data-sbar-machine-group="${seen.laptop}"] [data-sbar-session="s-ivo"][aria-current="page"]`;
+      expect(await tab.$$eval('[data-sbar-session][aria-current="page"]', nodes => nodes.length)).toBe(1);
+      expect(await tab.$$eval(current, nodes => nodes.length)).toBe(1);
+      // Each machine marks ITS learners — the studio's too, though the laptop is the one on screen.
+      const learns = async (machine: string, id: string): Promise<boolean> =>
+        (await tab.$$eval(
+          `[data-sbar-machine-group="${machine}"] [data-sbar-session="${id}"] [data-learning-passive]`,
+          nodes => nodes.length,
+        )) === 1;
+      expect([
+        await learns(seen.studio, 's-noa'),
+        await learns(seen.studio, 's-ivo'),
+        await learns(seen.laptop, 's-ivo'),
+      ]).toEqual([true, false, true]);
+      // A studio row still opens the studio's session.
+      await tab.click(`[data-sbar-machine-group="${seen.studio}"] [data-sbar-session="s-ivo"]`);
+      expect((await evidence(tab)).navigations.at(-1)).toBe(`/d/${encodeURIComponent(seen.studio)}/session/s-ivo`);
+      for (const mode of ['light', 'dark'] as const)
+        for (const scene of ['bar', 'drawer'] as const) {
+          const shot = await open(scene, 'studio', mode, 'laptop');
+          try {
+            // The phone drawer is shorter than the list: bring the open row into the capture.
+            if (scene === 'drawer')
+              await shot.tab.evaluate(() =>
+                document.querySelector('[aria-current="page"]')?.scrollIntoView({ block: 'center' }),
+              );
+            const wide = await shot.tab.evaluate(() => document.documentElement.scrollWidth - innerWidth);
+            expect(wide).toBeLessThanOrEqual(0);
+            if (shotsDir !== '')
+              await writeFile(
+                join(shotsDir, `second-machine-open-${scene === 'bar' ? 'desktop' : 'phone'}-${mode}.png`),
+                await shot.tab.screenshot({ animations: 'disabled' }),
+              );
+          } finally {
+            await shot.context.close();
+          }
+        }
+    } finally {
+      await context.close();
+    }
+  }, 180_000);
 
   it('lists Needs you and every machine on the phone Sessions page', async () => {
     const { context, tab } = await open('page', 'studio', 'light');

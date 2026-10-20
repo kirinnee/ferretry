@@ -14,10 +14,11 @@
  */
 
 import type { SessionView } from '@ferretry/protocol';
-import { useEffect, useSyncExternalStore } from 'react';
+import { useEffect, useRef, useSyncExternalStore } from 'react';
 import type { DaemonConnection, DaemonId } from '../lib/daemon-connection.ts';
-import type { DaemonUsageSlice, DaemonUsageStore } from '../lib/usage-store.ts';
 import type { ResolvedQuota } from '../lib/usage.ts';
+import type { DaemonUsageSlice, DaemonUsageStore } from '../lib/usage-store.ts';
+import { pairingKey } from './use-machines-poll.ts';
 
 /**
  * Subscribes to one paired daemon's feed for as long as the caller is mounted,
@@ -30,6 +31,25 @@ export const useUsage = (store: DaemonUsageStore, daemon: DaemonConnection): Dae
     () => store.usage(daemon.daemonId),
     () => store.usage(daemon.daemonId),
   );
+};
+
+/**
+ * Joins EVERY listed machine's feed — each through its own pairing, each in the store's shared,
+ * refcounted poll — for the list across machines, whose full rows show each machine's own quota. The
+ * reads are the resolver's: every one already names the machine (`quotaFor(daemonId, view)`).
+ */
+export const useMachinesUsage = (store: DaemonUsageStore, machines: readonly DaemonConnection[]): void => {
+  const latest = useRef(machines);
+  latest.current = machines;
+  const key = pairingKey(machines);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the pairings' facts are the deliberate key
+  useEffect(() => {
+    const releases = latest.current.map(machine => store.watch(machine));
+    return () => {
+      for (const release of releases) release();
+    };
+  }, [store, key]);
+  useSyncExternalStore(store.subscribe, store.getSnapshot, store.getSnapshot);
 };
 
 /**

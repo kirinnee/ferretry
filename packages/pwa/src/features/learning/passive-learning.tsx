@@ -9,7 +9,8 @@
 import type { SessionLearning, SessionLearningPatchResult } from '@ferretry/protocol';
 import { GraduationCap } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { DaemonConnection } from '../../lib/daemon-connection.ts';
+import { pairingKey } from '../../hooks/use-machines-poll.ts';
+import type { DaemonConnection, DaemonId } from '../../lib/daemon-connection.ts';
 import { fetchSessionLearning, patchSessionLearning } from '../../lib/learning-api.ts';
 import type { DaemonFetch } from '../../lib/runtime-models.ts';
 
@@ -71,6 +72,55 @@ export function usePassiveLearning(
     [sessions],
   );
   return { sessions, passive, refresh, set };
+}
+
+/** Every listed machine's learners, by the machine they run on. Session ids collide across machines. */
+export type MachineLearners = ReadonlyMap<DaemonId, ReadonlySet<string>>;
+
+/**
+ * Which ferrets learn, on EVERY machine the list shows — each read through that machine's own pairing,
+ * and kept under that machine's id. The sessions bar across machines needs the mark on every machine's
+ * rows, not only the one on screen: reading this machine's set alone left every other machine's
+ * learners unmarked.
+ *
+ * Keyed on the pairings, not the connection objects, like the list's own poll: a daemon republishing its
+ * carriers hands the app a new object for the same machine, and that is no reason to read again.
+ */
+export function useMachinesPassiveLearning(
+  machines: readonly DaemonConnection[],
+  fetcher: DaemonFetch,
+  pollMs: number = PASSIVE_LEARNING_POLL_MS,
+): MachineLearners {
+  const [learners, setLearners] = useState<MachineLearners>(() => new Map());
+  const latest = useRef(machines);
+  latest.current = machines;
+  const key = pairingKey(machines);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the pairings' facts are the deliberate key
+  useEffect(() => {
+    let alive = true;
+    const listed = new Set(latest.current.map(machine => machine.daemonId));
+    // A machine that left the list takes its learners with it.
+    setLearners(current => new Map([...current].filter(([daemonId]) => listed.has(daemonId))));
+    const read = (): void => {
+      for (const machine of latest.current)
+        void fetchSessionLearning(machine, fetcher).then(
+          sessions => {
+            if (!alive) return;
+            const passive = new Set(sessions.filter(entry => entry.passive).map(entry => entry.sessionId));
+            setLearners(current => new Map(current).set(machine.daemonId, passive));
+          },
+          // A daemon without the route has no ferret learning; its marks are simply absent.
+          () => undefined,
+        );
+    };
+    read();
+    const timer = setInterval(read, pollMs);
+    return () => {
+      alive = false;
+      clearInterval(timer);
+    };
+  }, [key, fetcher, pollMs]);
+  return learners;
 }
 
 /** What the mark says in words: its accessible name, and the tooltip a pointer reads. */

@@ -220,13 +220,14 @@ export const machineReachLabel = (section: Pick<MachineSection, 'reach' | 'readA
 };
 
 /**
- * The machines in the order the list shows them: the one on screen first, then the rest as the
- * pairing registry orders them (most recently chosen first).
+ * The machines in the order the list shows them: the order they were paired in, oldest first.
+ *
+ * NEVER "THE ONE ON SCREEN FIRST". Opening a row on the second machine makes that machine the one on
+ * screen; a list that then hoisted it would move every row under the reader's pointer, and the row they
+ * just clicked would jump to the top. The order is a fact about the pairings alone, so it holds still
+ * whichever machine is open — and it is not the registry's order either, which moves on every select.
  */
-export const machineDisplayOrder = <T extends { readonly daemonId: DaemonId }>(
+export const machineDisplayOrder = <T extends { readonly daemonId: DaemonId; readonly pairedAt: number }>(
   machines: readonly T[],
-  current: DaemonId,
-): readonly T[] => [
-  ...machines.filter(machine => machine.daemonId === current),
-  ...machines.filter(machine => machine.daemonId !== current),
-];
+): readonly T[] =>
+  [...machines].sort((left, right) => left.pairedAt - right.pairedAt || left.daemonId.localeCompare(right.daemonId));
