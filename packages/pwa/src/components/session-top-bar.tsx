@@ -15,7 +15,9 @@
  * That is the header's one rule, LOOK vs DO. The old ⋯ menu and the panel-toggle icon are gone: what
  * they held is now either a fact in Info or an action in Actions.
  *
- * On a phone the bar is ☰ (the sessions drawer), the name, the status dot, the primary action, ⓘ and ▾.
+ * On a phone the bar is ☰ (the sessions drawer), the name, the status dot, the primary action, ⓘ and ▾ —
+ * and nothing else: the switch marks (Learning, Hypermedia, Pack) live in Info there, and a dropped live
+ * feed is one small icon, not a word and a link.
  *
  * PRESENTATIONAL ONLY. The page owns every action and every piece of state; this file draws what it is
  * handed, so a test can mount it with plain values and the page cannot end up with two owners of the
@@ -129,7 +131,11 @@ export function SessionTopBar({
       )}
       <div className="fy-session-bar__who" title={task === undefined ? name : `${name} — ${task}`}>
         <h1 className="fy-session-bar__name">{name}</h1>
-        <SwitchMarks {...(switches ?? { learning: false, hypermedia: hypermediaOn(session), pack: packOn(session) })} />
+        {compact ? null : (
+          <SwitchMarks
+            {...(switches ?? { learning: false, hypermedia: hypermediaOn(session), pack: packOn(session) })}
+          />
+        )}
         {project === null || compact ? null : <span className="fy-session-bar__project">{project}</span>}
         {startedBy === undefined || compact ? null : (
           <button

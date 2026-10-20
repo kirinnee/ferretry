@@ -112,6 +112,20 @@ describe('SessionTopBar', () => {
     expect(opened).toBe(1);
   });
 
+  test('on a phone it draws no switch marks — they live in Info — and on a desktop it still does', async () => {
+    const props = {
+      actions: null,
+      project: null,
+      session: sessionView('s1', { config: { teammate: 'hadi', mode: 'interactive' } }),
+      switches: { learning: true, hypermedia: true, pack: true },
+    };
+    view = await mount(<SessionTopBar {...props} compact={false} />);
+    expect(view.container.querySelector('[data-switch-marks]')).not.toBeNull();
+    await view.render(<SessionTopBar {...props} compact />);
+    expect(view.container.querySelector('[data-switch-marks]')).toBeNull();
+    expect(view.container.querySelector('[data-switch-mark]')).toBeNull();
+  });
+
   test('omits the project when the folder cannot be named, and ⓘ when the host has no Info', async () => {
     view = await mount(<SessionTopBar actions={null} compact={false} project={null} session={sessionView('s1')} />);
     expect(view.container.querySelector('.fy-session-bar__project')).toBeNull();

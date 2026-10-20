@@ -268,6 +268,35 @@
 .fy-sbar__session[aria-current='page'] .fy-sbar__name {
   font-weight: var(--weight-strong);
 }
+/* The ferret on a row: a small initial disc and its name, the second line under the task. */
+.fy-sbar__ferret {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.fy-sbar__initial {
+  display: inline-grid;
+  flex-shrink: 0;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  border-radius: var(--radius-pill, 9999px);
+  background: var(--surface-2);
+  color: var(--muted);
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-strong);
+  line-height: 1;
+}
+.fy-sbar__session[aria-current='page'] .fy-sbar__initial {
+  background: var(--surface);
+  color: inherit;
+}
+.fy-sbar__ferret-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .fy-sbar__badge {
   color: var(--warn);
   font-size: var(--text-2xs);
@@ -517,6 +546,57 @@
 }
 .fy-live-quiet[data-tone='err'] {
   color: var(--err);
+}
+/* A phone's: an arc or a crossed signal and an icon-only Reconnect, never a word that can run into the name. */
+.fy-live-quiet--compact {
+  gap: 4px;
+  flex-shrink: 0;
+}
+.fy-live-quiet__reconnect--icon {
+  display: inline-grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  color: var(--accent);
+  text-decoration: none;
+}
+.fy-live-quiet[data-tone='err'] .fy-live-quiet__reconnect--icon {
+  color: var(--err);
+}
+/* Reconnect keeps its 28px glyph under a finger too: the 44px floor would make it the widest thing beside the
+   ferret's name. The full floor tall is laid over it, and only 4px wider each side — the gap to ⓘ — so it never
+   takes a tap from its neighbour. */
+@media (pointer: coarse) {
+  :root .fy-live-quiet__reconnect--icon {
+    min-height: 28px;
+    min-width: 28px;
+    position: relative;
+  }
+  :root .fy-live-quiet__reconnect--icon::after {
+    content: '';
+    height: var(--target-floor);
+    left: -4px;
+    position: absolute;
+    right: -4px;
+    top: 50%;
+    transform: translateY(-50%);
+  }
+}
+/* On a phone the chip gives the ferret's name the room: same words, a smaller pill. */
+.fy-session-bar[data-compact] .fy-needs-you {
+  min-height: 18px;
+  padding: 0 6px;
+  font-size: var(--text-2xs);
+  flex-shrink: 0;
+}
+.fy-session-bar[data-compact] .fy-session-bar__status {
+  gap: 4px;
+}
+.fy-session-bar[data-compact] .fy-session-bar__name {
+  min-width: 4.5ch;
+}
+.fy-session-bar[data-compact] .fy-session-bar__who {
+  align-items: center;
 }
 .fy-live-quiet__reconnect {
   padding: 0;

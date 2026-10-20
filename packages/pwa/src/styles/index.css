@@ -891,9 +891,13 @@ pre,
    the reservation (`.kt-tabbar`) rather than adding to it. Surfaces that are `position: fixed` over the
    viewport (sheets, overlays, toasts) are not inside the shell's padding and read the same variable.
    The keyboard hides the indicator, and iOS standalone keeps reporting the inset while it is up, so the
-   variable is 0 while `data-keyboard='open'` — otherwise a band of dead space sits above the keys. */
+   variable is 0 while `data-keyboard='open'` — otherwise a band of dead space sits above the keys.
+   IT PAYS HALF THE INSET, not all of it: the platform's 34px is the whole home-indicator zone, but the indicator
+   itself is a ~5px bar 8px up from the edge, so reserving all of it plus the composer's own padding left ~46px
+   of dead ground under the model chips (measured at 393x852) — "the bottom is very far away". Half keeps every
+   control clear of the indicator and its swipe-home strip. Android Chrome reports 0, so it is unchanged there. */
 :root {
-  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-bottom: calc(env(safe-area-inset-bottom, 0px) / 2);
 }
 html[data-keyboard='open'] {
   --safe-bottom: 0px;

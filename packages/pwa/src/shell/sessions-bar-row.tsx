@@ -1,6 +1,6 @@
 /**
- * ONE SESSION IN THE SESSIONS BAR: the status mark, the agent's name, one mark on the right, a line of
- * what it is doing and the directory it runs in. The open one is a soft filled pill.
+ * ONE SESSION IN THE SESSIONS BAR: the status mark, the task's name, one mark on the right, the ferret doing
+ * it (an initial and its name) and the directory it runs in. The open one is a soft filled pill.
  *
  * Right-click, long-press, the Menu key and Shift+F10 open the bar's one row menu (`SessionMenuContext`).
  *
@@ -14,14 +14,13 @@ import type { SessionView } from '@ferretry/protocol';
 import { type ReactNode, useContext, useState } from 'react';
 import { hypermediaOn, packOn } from '../features/session-info/info-model.ts';
 import { SwitchMarks } from '../features/session-info/switch-marks.tsx';
-import { displayCallsign } from '../lib/callsign.ts';
 import type { DaemonId } from '../lib/daemon-connection.ts';
 import { daemonSessionPath } from '../lib/pages/routes.ts';
 import { MachineChip } from './machine-chip.tsx';
 import { RouteLink } from './route-link.tsx';
 import { useRowContextGesture } from './row-context-gesture.ts';
 import { SessionMenuContext } from './session-menu-context.ts';
-import { needsYou, pendingQuestionPreview, sessionsBarDirectory, sessionsBarSubline } from './sessions-bar-model.ts';
+import { needsYou, pendingQuestionPreview, sessionsBarDirectory, sessionsBarNames } from './sessions-bar-model.ts';
 import { StatusMark } from './status-mark.tsx';
 
 export function SessionsBarRow({
@@ -47,9 +46,8 @@ export function SessionsBarRow({
   /** The branch beneath the row: its fold button and its children. */
   readonly children?: ReactNode;
 }) {
-  const name = displayCallsign(view.config.teammate) || view.config.label || view.config.id;
+  const { title: name, ferret } = sessionsBarNames(view);
   const waiting = needsYou(view);
-  const task = sessionsBarSubline(view);
   const directory = sessionsBarDirectory(view);
   const question = pendingQuestionPreview(view);
   const openMenu = useContext(SessionMenuContext);
@@ -69,7 +67,7 @@ export function SessionsBarRow({
         data-sbar-session={view.config.id}
         onNavigate={onNavigate}
         {...gesture}
-        title={`${name} — ${task}${question === undefined ? '' : `\n${question}`}\n${view.config.cwd}`}
+        title={`${name}${ferret === null ? '' : ` — ${ferret}`}${question === undefined ? '' : `\n${question}`}\n${view.config.cwd}`}
         to={daemonSessionPath(daemonId, view.config.id)}
       >
         <StatusMark view={view} />
@@ -88,7 +86,14 @@ export function SessionsBarRow({
             {question}
           </span>
         )}
-        {task === view.config.cwd ? null : <span className="fy-sbar__sub">{task}</span>}
+        {ferret === null ? null : (
+          <span className="fy-sbar__sub fy-sbar__ferret" data-sbar-ferret="">
+            <span aria-hidden="true" className="fy-sbar__initial">
+              {ferret.charAt(0).toUpperCase()}
+            </span>
+            <span className="fy-sbar__ferret-name">{ferret}</span>
+          </span>
+        )}
         {/* Truncated from the left (`direction: rtl`), so the folder's own name survives; `bdi` keeps
             the path's slashes reading left to right inside it. */}
         <span className="fy-sbar__dir" data-sbar-dir="">

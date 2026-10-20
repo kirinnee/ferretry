@@ -1230,7 +1230,7 @@ export function SessionChatPage({
             {/* THE LIVE FEED'S OWN STATE, folded into the status dot: nothing visible while it is
                 healthy, a word and Reconnect once it is not — on a phone too, which is where a screen
                 lock or a Wi-Fi roam most often drops the socket. */}
-            {liveStream === undefined ? null : <LiveStreamIndicator {...liveStream} quiet />}
+            {liveStream === undefined ? null : <LiveStreamIndicator {...liveStream} compact={compact} quiet />}
           </>
         }
         {...(infoSlot === undefined ? {} : { onToggleInfo: info.toggle })}

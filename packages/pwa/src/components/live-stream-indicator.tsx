@@ -1,4 +1,6 @@
+import { WifiOff } from 'lucide-react';
 import { Badge, Button, type BadgeTone } from '../shell/primitives.tsx';
+import { Spinner } from './spinner.tsx';
 import type { SessionEventStreamStatus } from './session-event-stream-model.ts';
 
 /**
@@ -84,6 +86,12 @@ export interface LiveStreamIndicatorProps {
    * sentence are identical in both forms, so a screen reader hears the same transitions either way.
    */
   readonly quiet?: boolean;
+  /**
+   * A phone's session bar, with {@link quiet}: no words at all, ONE icon button. Its turning arc says it is reconnecting, its crossed
+   * signal says it is offline, and tapping it reconnects — named for a screen reader, unable to
+   * outgrow the room beside the ferret's name.
+   */
+  readonly compact?: boolean;
 }
 
 /** Whether the quiet form has anything to draw: only a feed that is not healthy earns pixels. */
@@ -130,7 +138,31 @@ export const liveStreamState = (
  * The visible word and the announced sentence deliberately differ — see {@link LIVE_STREAM_SENTENCE}
  * — so the chip is `aria-hidden` and the sentence is the only thing assistive technology reads.
  */
-export function LiveStreamIndicator({ status, onReconnect, quiet = false }: LiveStreamIndicatorProps) {
+export function LiveStreamIndicator({ status, onReconnect, quiet = false, compact = false }: LiveStreamIndicatorProps) {
+  if (quiet && compact)
+    return (
+      <span
+        className="fy-live-quiet fy-live-quiet--compact"
+        data-live-stream={status}
+        data-tone={LIVE_STREAM_TONE[status]}
+        role="status"
+        aria-live="polite"
+      >
+        <span className="sr-only">{LIVE_STREAM_SENTENCE[status]}</span>
+        {offersReconnect(status) ? (
+          <button
+            aria-label="Reconnect"
+            className="fy-live-quiet__reconnect fy-live-quiet__reconnect--icon"
+            data-live-stream-reconnect=""
+            onClick={onReconnect}
+            title="Reconnect"
+            type="button"
+          >
+            {status === 'reconnecting' ? <Spinner size={14} /> : <WifiOff aria-hidden="true" size={15} />}
+          </button>
+        ) : null}
+      </span>
+    );
   if (quiet)
     return (
       <span

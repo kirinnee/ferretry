@@ -26,6 +26,9 @@ const KEYBOARD_VISUAL_HEIGHT = 430;
 /** The composer's own bottom padding (0.5rem), the only thing allowed under it besides the inset. */
 const COMPOSER_PAD = 8;
 const EPSILON = 1;
+/** The shell reserves this fraction of the platform's inset: the indicator is a thin bar, not the whole zone. */
+const PAID = 0.5;
+const paid = (inset: number): number => inset * PAID;
 
 export const SAFE_AREA_GEOMETRY_CHECKS = 3 + 3 + 2 + 2 + 2;
 
@@ -153,8 +156,8 @@ export async function runSafeAreaGeometry(run: SafeAreaRun): Promise<number> {
       fail(
         `the harness did not simulate the inset: env(safe-area-inset-bottom) is ${at.safeBottom}px, wanted ${PORTRAIT.insets.bottom}px`,
       );
-    if (!near(at.shellPaddingBottom, at.safeBottom))
-      fail(`${where}: the shell pays ${at.shellPaddingBottom}px, not the one inset (${at.safeBottom}px)`);
+    if (!near(at.shellPaddingBottom, paid(at.safeBottom)))
+      fail(`${where}: the shell pays ${at.shellPaddingBottom}px, not its one reservation (${paid(at.safeBottom)}px)`);
     pass(where, `shell reserves the inset once (${at.shellPaddingBottom}px)`);
     if (at.inputPaddingBottom !== COMPOSER_PAD)
       fail(
@@ -162,11 +165,11 @@ export async function runSafeAreaGeometry(run: SafeAreaRun): Promise<number> {
       );
     pass(where, `composer adds only its own ${COMPOSER_PAD}px`);
     const gap = at.innerHeight - (at.inputBottom ?? Number.NaN);
-    if (!near(gap, at.safeBottom))
+    if (!near(gap, paid(at.safeBottom)))
       fail(
-        `${where}: the composer's box ends ${gap}px above the screen edge — one inset is ${at.safeBottom}px, so a band of ${gap - at.safeBottom}px is dead space`,
+        `${where}: the composer's box ends ${gap}px above the screen edge — one reservation is ${paid(at.safeBottom)}px, so a band of ${gap - paid(at.safeBottom)}px is dead space`,
       );
-    pass(where, `composer box ends ${gap}px above the edge (= the inset)`);
+    pass(where, `composer box ends ${gap}px above the edge (= half the ${at.safeBottom}px inset)`);
     await frame(page, 'chat');
   });
 
@@ -182,11 +185,11 @@ export async function runSafeAreaGeometry(run: SafeAreaRun): Promise<number> {
         );
       pass(where, 'tab bar surface reaches the screen edge');
       const clear = at.innerHeight - (at.tabItemsBottom ?? Number.NaN);
-      if (!near(clear, at.safeBottom))
+      if (!near(clear, paid(at.safeBottom)))
         fail(
-          `${where}: the tab buttons end ${clear}px above the edge — exactly one inset (${at.safeBottom}px) belongs there`,
+          `${where}: the tab buttons end ${clear}px above the edge — exactly one reservation (${paid(at.safeBottom)}px) belongs there`,
         );
-      pass(where, `tab buttons clear the indicator by one inset (${clear}px)`);
+      pass(where, `tab buttons clear the indicator by one reservation (${clear}px)`);
       if (destination === 'settings') await frame(page, 'settings');
       else await frame(page, 'sessions');
       if (destination === 'settings') {
@@ -229,9 +232,9 @@ export async function runSafeAreaGeometry(run: SafeAreaRun): Promise<number> {
     await keyboard(null);
     await page.waitForFunction(() => document.documentElement.dataset.keyboard === undefined);
     const closed = await measure(page);
-    if (!near(closed.innerHeight - (closed.inputBottom ?? Number.NaN), closed.safeBottom))
+    if (!near(closed.innerHeight - (closed.inputBottom ?? Number.NaN), paid(closed.safeBottom)))
       fail(
-        `${where}: after the keyboard closed the composer ends ${closed.innerHeight - (closed.inputBottom ?? 0)}px above the edge, wanted ${closed.safeBottom}px`,
+        `${where}: after the keyboard closed the composer ends ${closed.innerHeight - (closed.inputBottom ?? 0)}px above the edge, wanted ${paid(closed.safeBottom)}px`,
       );
     pass(where, 'keyboard closed: the one inset is back and nothing is left over');
   });
@@ -244,19 +247,19 @@ export async function runSafeAreaGeometry(run: SafeAreaRun): Promise<number> {
       const edge = destination === 'chat' ? at.inputBottom : at.tabItemsBottom;
       if (edge === null) {
         // A landscape phone is wider than the drawer breakpoint's tab bar: the sessions column is shown instead.
-        if (!near(at.shellPaddingBottom, LANDSCAPE.insets.bottom))
+        if (!near(at.shellPaddingBottom, paid(LANDSCAPE.insets.bottom)))
           fail(
-            `${where}: the shell pays ${at.shellPaddingBottom}px, landscape's inset is ${LANDSCAPE.insets.bottom}px`,
+            `${where}: the shell pays ${at.shellPaddingBottom}px, landscape's reservation is ${paid(LANDSCAPE.insets.bottom)}px`,
           );
         pass(where, `no tab bar at this width; shell reserves landscape's ${at.shellPaddingBottom}px`);
         return;
       }
       const gap = at.innerHeight - edge;
-      if (!near(gap, LANDSCAPE.insets.bottom))
+      if (!near(gap, paid(LANDSCAPE.insets.bottom)))
         fail(
-          `${where}: the bottom control ends ${gap}px above the edge, landscape's single inset is ${LANDSCAPE.insets.bottom}px`,
+          `${where}: the bottom control ends ${gap}px above the edge, landscape's single reservation is ${paid(LANDSCAPE.insets.bottom)}px`,
         );
-      pass(where, `bottom control clears the indicator by landscape's one inset (${gap}px)`);
+      pass(where, `bottom control clears the indicator by landscape's one reservation (${gap}px)`);
       await frame(page, `landscape-${destination}`);
     });
 

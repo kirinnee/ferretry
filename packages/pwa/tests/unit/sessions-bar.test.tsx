@@ -94,12 +94,15 @@ describe('SessionsBar as a column', () => {
     expect(projects).toEqual(['home-manager', 'ferretry']);
     const open = must(view.container.querySelector('[data-sbar-session="hadi-1"]'), 'the open session');
     expect(open.getAttribute('aria-current')).toBe('page');
-    expect(open.querySelector('.fy-sbar__name')?.textContent).toBe('Hadi');
-    expect(open.querySelector('.fy-sbar__sub')?.textContent).toBe('Fix the stuck sign-in');
+    // The title is the task; the ferret doing it is the small second line, with its initial.
+    expect(open.querySelector('.fy-sbar__name')?.textContent).toBe('Fix the stuck sign-in');
+    expect(open.querySelector('[data-sbar-ferret] .fy-sbar__ferret-name')?.textContent).toBe('Hadi');
+    expect(open.querySelector('[data-sbar-ferret] .fy-sbar__initial')?.textContent).toBe('H');
     expect(open.querySelector('[data-sbar-dir]')?.textContent).toBe('/work/ferretry');
     // A session with no task of its own shows its folder once, not twice.
     const nameless = must(view.container.querySelector('[data-sbar-session="nameless"]'), 'the nameless session');
     expect(nameless.querySelector('.fy-sbar__sub')).toBeNull();
+    expect(nameless.querySelector('[data-sbar-ferret]')).toBeNull();
     expect(nameless.querySelector('[data-sbar-dir]')?.textContent).toBe('/work/home-manager');
     expect(view.container.querySelector('[data-sbar-session="maryah-1"] [data-sbar-needs-you]')).not.toBeNull();
     expect(view.container.querySelector('[data-sbar-session="hadi-1"] [data-sbar-needs-you]')).toBeNull();
@@ -107,6 +110,24 @@ describe('SessionsBar as a column', () => {
     expect(view.container.querySelector('[data-sbar-question]')).toBeNull();
     // A session with no callsign and no label falls back to its id rather than an empty row.
     expect(view.container.querySelector('[data-sbar-session="nameless"] .fy-sbar__name')?.textContent).toBe('nameless');
+  });
+
+  test('titles a row by its task and falls back to the ferret when there is no task title', async () => {
+    const taskless = sessionView('taskless-1', {
+      config: { teammate: 'pim', label: undefined as never, name: undefined as never, cwd: '/work/ferretry' },
+    });
+    const labelOnly = sessionView('label-only', {
+      config: { teammate: undefined as never, label: 'Home Manager', cwd: '/work/ferretry' },
+    });
+    view = await mount(bar({ sessions: [...SESSIONS, taskless, labelOnly] }).element);
+    const row = (id: string) => must(view?.container.querySelector(`[data-sbar-session="${id}"]`) ?? null, id);
+    expect(row('maryah-1').querySelector('.fy-sbar__name')?.textContent).toBe('Diene work');
+    expect(row('maryah-1').querySelector('.fy-sbar__ferret-name')?.textContent).toBe('Maryah');
+    expect(row('taskless-1').querySelector('.fy-sbar__name')?.textContent).toBe('Pim');
+    expect(row('taskless-1').querySelector('[data-sbar-ferret]')).toBeNull();
+    expect(row('label-only').querySelector('.fy-sbar__name')?.textContent).toBe('Home Manager');
+    expect(row('label-only').querySelector('[data-sbar-ferret]')).toBeNull();
+    expect(row('maryah-1').getAttribute('title')).toContain('Diene work — Maryah');
   });
 
   test('marks a ferret instructed to learn with the cap alone, unless it needs the reader', async () => {
