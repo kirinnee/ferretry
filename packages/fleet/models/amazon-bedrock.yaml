@@ -5,6 +5,8 @@ docs: https://code.claude.com/docs/en/amazon-bedrock
 verified: '2026-10-18'
 unverified:
   - The ids are the us. inference profiles; a login whose AWS_REGION is outside the US needs the matching eu., au., jp. or global. prefix.
+  - "Haiku 5.5 costs five times as much for a request whose prompt is over 100,000 tokens; analytics prices whole sessions, so its price is the lower one and a long-prompt session is under-counted."
+  - "The prices are Bedrock's US regional ones (10% above its global endpoint), matching the us. ids."
 customIds: true
 claude:
   tiers:
@@ -13,6 +15,15 @@ claude:
     haiku: us.anthropic.claude-haiku-5-5
   models:
     - id: us.anthropic.claude-opus-5-5
+      price:
+        provider: anthropic
+        input: 4.4
+        output: 22
+        cacheRead: 0.22
+        cacheWrite5m: 5.5
+        cacheWrite1h: 8.8
+        source: https://aws.amazon.com/bedrock/pricing/
+        verified: '2026-10-20'
       label: Opus 5.5
       tier: best
       context: 1000000
@@ -20,12 +31,30 @@ claude:
       defaultEffort: medium
       default: true
     - id: us.anthropic.claude-sonnet-5-5
+      price:
+        provider: anthropic
+        input: 2.2
+        output: 11
+        cacheRead: 0.11
+        cacheWrite5m: 2.75
+        cacheWrite1h: 4.4
+        source: https://aws.amazon.com/bedrock/pricing/
+        verified: '2026-10-20'
       label: Sonnet 5.5
       tier: balanced
       context: 1000000
       efforts: [low, medium, high, xhigh, max]
       defaultEffort: high
     - id: us.anthropic.claude-haiku-5-5
+      price:
+        provider: anthropic
+        input: 0.11
+        output: 0.55
+        cacheRead: 0.011
+        cacheWrite5m: 0.1375
+        cacheWrite1h: 0.22
+        source: https://aws.amazon.com/bedrock/pricing/
+        verified: '2026-10-20'
       label: Haiku 5.5
       tier: fast
       context: 1000000

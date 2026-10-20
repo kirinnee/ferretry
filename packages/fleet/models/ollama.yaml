@@ -3,6 +3,8 @@
 label: Ollama (local)
 docs: https://docs.ollama.com/integrations/codex
 verified: '2026-10-18'
+unverified:
+  - "gpt-oss:20b and gpt-oss:120b run on this machine through Ollama; there is no per-token price, so they have none."
 customIds: true
 detect: ollama
 codex:

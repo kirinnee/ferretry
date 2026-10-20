@@ -4,6 +4,9 @@ docs: https://openrouter.ai/docs/guides/guides/claude-code-integration
 verified: '2026-10-18'
 unverified:
   - OpenRouter's Codex guide names only ~openai/gpt-sol-latest; whether Astra and Luna have ~latest aliases is not documented.
+  - "Haiku 5.5 costs five times as much for a request whose prompt is over 100,000 tokens; analytics prices whole sessions, so its price is the lower one and a long-prompt session is under-counted."
+  - "The prices are those of the models the ~latest aliases resolve to today (Opus, Sonnet and Haiku 5.5, GPT-6.1 Sol); OpenRouter may move an alias."
+  - "A transcript may name the resolved model (anthropic/claude-opus-5.5) rather than the alias, and that spelling is not priced."
 customIds: true
 claude:
   tiers:
@@ -12,6 +15,15 @@ claude:
     haiku: ~anthropic/claude-haiku-latest
   models:
     - id: ~anthropic/claude-opus-latest
+      price:
+        provider: anthropic
+        input: 4
+        output: 20
+        cacheRead: 0.2
+        cacheWrite5m: 5
+        cacheWrite1h: 8
+        source: https://openrouter.ai/api/v1/models
+        verified: '2026-10-20'
       suffix: '[1m]'
       label: Claude Opus (latest)
       tier: best
@@ -19,6 +31,15 @@ claude:
       efforts: [low, medium, high, xhigh, max]
       defaultEffort: medium
     - id: ~anthropic/claude-sonnet-latest
+      price:
+        provider: anthropic
+        input: 2
+        output: 10
+        cacheRead: 0.1
+        cacheWrite5m: 2.5
+        cacheWrite1h: 4
+        source: https://openrouter.ai/api/v1/models
+        verified: '2026-10-20'
       suffix: '[1m]'
       label: Claude Sonnet (latest)
       tier: balanced
@@ -27,6 +48,15 @@ claude:
       defaultEffort: high
       default: true
     - id: ~anthropic/claude-haiku-latest
+      price:
+        provider: anthropic
+        input: 0.1
+        output: 0.5
+        cacheRead: 0.01
+        cacheWrite5m: 0.125
+        cacheWrite1h: 0.2
+        source: https://openrouter.ai/api/v1/models
+        verified: '2026-10-20'
       label: Claude Haiku (latest)
       tier: fast
       context: 1000000
@@ -36,6 +66,14 @@ codex:
   docs: https://openrouter.ai/docs/cookbook/coding-agents/codex-cli
   models:
     - id: ~openai/gpt-sol-latest
+      price:
+        provider: openai
+        input: 2
+        output: 10
+        cacheRead: 0.1
+        cacheWrite: 2.5
+        source: https://openrouter.ai/api/v1/models
+        verified: '2026-10-20'
       label: GPT Sol (latest)
       tier: balanced
       context: 1050000
