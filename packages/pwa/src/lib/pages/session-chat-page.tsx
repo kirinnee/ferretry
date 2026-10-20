@@ -61,6 +61,7 @@ import { type SessionActionContribution, sessionActionSections } from '../../fea
 import { RenameForm } from '../../features/session-actions/rename-form.tsx';
 import { addSessionMcp, previewSessionMcp, readSessionMcp } from '../../features/session-actions/session-mcp-api.ts';
 import { useRestartRefusal } from '../../features/session-actions/restart-refusal.tsx';
+import { useConvertAction } from '../../features/session-actions/use-convert-action.tsx';
 import {
   forkThroughLatest,
   restartOnEarlierConversation,
@@ -629,6 +630,17 @@ export function SessionChatPage({
     [connection, onRefresh, onSessionChange, session.config.id],
   );
   const restartRefusal = useRestartRefusal(publish, session.config.id);
+  const convert = useConvertAction({
+    connection,
+    scope,
+    view: session,
+    canControl,
+    accountPicker,
+    onMoved: (moved, sentence) => {
+      publish(moved);
+      setActionNotice(sentence);
+    },
+  });
   const questionApi = useMemo<QuestionAnswerApi>(
     () => ({
       answer: async (daemon, sessionId, toolUseId, labels, other, responses, answers, requestId) => {
@@ -966,6 +978,7 @@ export function SessionChatPage({
     canControl,
     copyId: copySessionId,
     openMigrate: () => setMigrateOpen(true),
+    ...(convert.openConvert === undefined ? {} : { openConvert: convert.openConvert }),
     restart,
     restartOnEarlierConversation: async () => {
       publish(
@@ -1422,6 +1435,7 @@ export function SessionChatPage({
                 targetId={attentionTarget}
               />
             )}
+            {convert.sheet}
             <MigrateSheet
               {...(accountPicker === undefined ? {} : { accountPicker })}
               canMutate={canControl}

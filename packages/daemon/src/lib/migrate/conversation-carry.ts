@@ -177,6 +177,10 @@ export interface ConversationFilesPort {
   written(file: string): Promise<boolean>;
   /** Copies a transcript into another login's home, creating its folders and replacing a stale copy. */
   copy(from: string, to: string): Promise<void>;
+  /** A file's whole text, or `undefined` when it cannot be read or is larger than `maxBytes`. */
+  read(file: string, maxBytes: number): Promise<string | undefined>;
+  /** Writes a file whole and private, creating its folders: a converted transcript, or an attachment. */
+  write(file: string, data: string | Uint8Array): Promise<void>;
   /** The transcripts a harness home holds for this working directory, and whether each names `needle`. */
   prior(harness: Harness, home: string, cwd: string, needle: string): Promise<readonly PriorConversation[]>;
 }

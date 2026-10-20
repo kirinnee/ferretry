@@ -38,6 +38,7 @@ export * from './migrate/background-terminals.ts';
 export * from './migrate/command-classifier.ts';
 export * from './migrate/command-tables.ts';
 export * from './migrate/conversation-carry.ts';
+export * from './migrate/conversation-convert.ts';
 export * from './migrate/harness-compatibility.ts';
 export * from './migrate/inflight-report.ts';
 export * from './migrate/outcome-render.ts';

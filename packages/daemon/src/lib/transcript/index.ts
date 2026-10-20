@@ -1,5 +1,6 @@
 export { ClaudeTranscriptParser } from './claude.ts';
 export { CodexTranscriptParser } from './codex.ts';
+export * from './convert/index.ts';
 export { parseTranscriptJsonl } from './jsonl.ts';
 export {
   CLAUDE_INPUT_SHAPE_VERSION,

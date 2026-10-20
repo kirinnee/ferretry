@@ -339,6 +339,7 @@ type SharedDaemonClient = Pick<
   | 'get'
   | 'stop'
   | 'migrate'
+  | 'conversionPreview'
   | 'scratchPlan'
   | 'scratchSweep'
   | 'harnessUpdate'
@@ -366,6 +367,7 @@ function lazyDaemonClient(client: () => Promise<IFyApiClient>): SharedDaemonClie
     stop: async (id: string, reason?: string): Promise<SessionView> => (await client()).stop(id, reason),
     migrate: async (id, agent, model, allowContextDowngrade, requestId, forceInflight, conversation) =>
       (await client()).migrate(id, agent, model, allowContextDowngrade, requestId, forceInflight, conversation),
+    conversionPreview: async (id, agent, model) => (await client()).conversionPreview(id, agent, model),
     scratchPlan: async (limit?: number) => (await client()).scratchPlan(limit),
     scratchSweep: async (force?: boolean) => (await client()).scratchSweep(force),
     snapshot: async (id: string) => (await client()).snapshot(id),

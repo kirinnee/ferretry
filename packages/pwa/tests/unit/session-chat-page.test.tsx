@@ -16,6 +16,7 @@ import { FileInstanceSurface } from '../../src/components/file-instance-surface.
 import { FilesTab } from '../../src/components/files-tab.tsx';
 import { HandoffSourceProvider } from '../../src/components/handoff-message.tsx';
 import { MigrateSheet } from '../../src/components/migrate-sheet.tsx';
+import { ConvertSheet } from '../../src/features/session-actions/convert-sheet.tsx';
 import { QuestionForm } from '../../src/components/question-form.tsx';
 import { ReferenceSurfaceProvider } from '../../src/components/reference-surface.tsx';
 import type { RuntimeModelControls } from '../../src/components/runtime-controls.tsx';
@@ -2822,6 +2823,51 @@ describe('SessionChatPage Info and Actions', () => {
       const agent = sessionView('shared').config.agent;
       expect(daemon.calls).toEqual([`migrate:shared:${agent}:undefined:false:true`]);
       expect(published.at(-1)?.config.id).toBe('shared');
+    } finally {
+      run(() => page.unmount());
+    }
+  });
+
+  test('offers Move to Codex… only where the machine has a Codex account, and publishes the moved view', async () => {
+    const codex = {
+      id: 'codex-a',
+      wrapper: 'codex-a',
+      displayName: 'Codex A',
+      kind: 'codex',
+      agent: true,
+      credentialId: 'login-a',
+      defaultModel: null,
+      models: [],
+      available: true,
+      unavailableReason: null,
+    };
+    const picker = (accounts: unknown[]) =>
+      new DaemonAccountPickerStore({
+        catalog: async () => ({ accounts }) as never,
+        health: async () => ({ health: new Map(), error: null }),
+        checkHealth: async () => ({ health: new Map(), error: null }),
+      });
+    const none = renderSessionChatPage(chatPage({ accountPicker: picker([]) }));
+    try {
+      await flush();
+      expect(actionLabels(none.root)).not.toContain('Move to Codex…');
+      expect(none.root.findAllByType(ConvertSheet)).toHaveLength(0);
+    } finally {
+      run(() => none.unmount());
+    }
+    const published: SessionView[] = [];
+    const page = renderSessionChatPage(
+      chatPage({ accountPicker: picker([codex]), onSessionChange: view => published.push(view) }),
+    );
+    try {
+      await flush();
+      expect(actionLabels(page.root)).toContain('Move to Codex…');
+      chooseAction(page.root, 'move-harness');
+      expect(page.root.findByType(ConvertSheet).props.open).toBe(true);
+      run(() => page.root.findByType(ConvertSheet).props.onMoved(sessionView('shared'), 'Moved to Codex (Codex A).'));
+      expect(published.at(-1)?.config.id).toBe('shared');
+      run(() => page.root.findByType(ConvertSheet).props.onClose());
+      expect(page.root.findByType(ConvertSheet).props.open).toBe(false);
     } finally {
       run(() => page.unmount());
     }

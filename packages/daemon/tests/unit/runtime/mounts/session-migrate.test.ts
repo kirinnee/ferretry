@@ -1,15 +1,17 @@
-import { NO_GOVERNED_ROUTES_GUARD } from '../../../../src/lib/api/capability.ts';
 import { describe, it } from 'bun:test';
 import {
+  type ConversionPreview,
+  ConversionPreviewSchema,
   FY_REQUEST_ID_HEADER,
-  MigrationRefusedBodySchema,
   type MigrationRefusal,
+  MigrationRefusedBodySchema,
   type SessionRelaunchSettings,
   SessionRelaunchSettingsSchema,
   type SessionView,
   SessionViewSchema,
 } from '@ferretry/protocol';
 import should from 'should';
+import { NO_GOVERNED_ROUTES_GUARD } from '../../../../src/lib/api/capability.ts';
 import { ApiDispatcher } from '../../../../src/lib/api/dispatcher.ts';
 import { ApiRouter } from '../../../../src/lib/api/router.ts';
 import { SessionMigrateError, sessionMigrateRoutes } from '../../../../src/lib/runtime/mounts/session-migrate.ts';
@@ -383,6 +385,63 @@ describe('the session relaunch-settings read', () => {
 });
 
 /**
+ * The conversion preview: what a cross-harness move would carry, asked before anything moves.
+ *
+ * A read with a body. Served under the migration's own floor and refusals, needing no request id
+ * because nothing is written, and answering a refusal as a 200 `refused` the sheet shows in place.
+ */
+describe('the session conversion-preview read', () => {
+  const preview = (sessionId: string, body: unknown, headers: Readonly<Record<string, string>> = human) =>
+    request({
+      method: 'POST',
+      path: `/v1/sessions/${sessionId}/conversion-preview`,
+      headers: { ...headers, 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+
+  it('should answer the subsystem preview in the protocol shape, passing the account and model through', async () => {
+    // Arrange
+    const migrator = new FakeSessionMigrate();
+    const subject = dispatcher(migrator);
+
+    // Act
+    const ready = await subject.dispatch(preview('s1', { agent: 'codex-a', model: 'gpt-5.5' }));
+    const refused = await subject.dispatch(preview('s1', { agent: 'claude-same' }));
+
+    // Assert
+    should(ready.status).equal(200);
+    should(ConversionPreviewSchema.parse(JSON.parse(ready.body))).match({ kind: 'ready', targetAgent: 'codex-a' });
+    should(refused.status).equal(200);
+    should(ConversionPreviewSchema.parse(JSON.parse(refused.body))).deepEqual({
+      kind: 'refused',
+      targetAgent: 'claude-same',
+      reason: 'same harness',
+    });
+    should(migrator.previews).deepEqual([
+      ['s1', { agent: 'codex-a', model: 'gpt-5.5' }],
+      ['s1', { agent: 'claude-same' }],
+    ]);
+    should(migrator.migrations).be.empty();
+  });
+
+  it('should refuse a body with no account, an unknown session, and an anonymous caller', async () => {
+    // Arrange
+    const migrator = new FakeSessionMigrate();
+    const subject = dispatcher(migrator);
+
+    // Act
+    const noAgent = await subject.dispatch(preview('s1', {}));
+    const absent = await subject.dispatch(preview('s404', { agent: 'codex-a' }));
+    const anonymous = await subject.dispatch(preview('s1', { agent: 'codex-a' }, {}));
+
+    // Assert
+    should(noAgent.status).equal(400);
+    should(absent.status).equal(404);
+    should(anonymous.status).equal(401);
+  });
+});
+
+/**
  * The route's replay contract.
  *
  * The protocol client retries this POST up to three times on transport failure and a migration kills
@@ -414,6 +473,9 @@ describe('the session migrate mount, replayed', () => {
     }
     async relaunchSettings(sessionId: string): Promise<SessionRelaunchSettings> {
       return await this.#views.relaunchSettings(sessionId);
+    }
+    async conversionPreview(sessionId: string, request: { readonly agent: string }): Promise<ConversionPreview> {
+      return await this.#views.conversionPreview(sessionId, request);
     }
   }
 

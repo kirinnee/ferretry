@@ -381,6 +381,28 @@ export const TranscriptProvenanceSchema = z
   });
 export type TranscriptProvenance = z.infer<typeof TranscriptProvenanceSchema>;
 
+/**
+ * Where a session's conversation came from, when a cross-harness migration converted it
+ * (`conversation: 'convert'`). The original transcript is never deleted; this is the pointer back to
+ * it, and the reason the converted one opens with a notice saying it was carried.
+ */
+export const ConversationConversionSchema = z.strictObject({
+  v: z.literal(1),
+  /** The converter version that wrote it. */
+  converter: PositiveIntegerSchema,
+  fromHarness: HarnessSchema,
+  /** The source harness's own id for the conversation. */
+  fromConversation: z.string().min(1),
+  /** The source transcript, left where it was. */
+  fromFile: z.string().min(1),
+  toHarness: HarnessSchema,
+  toConversation: z.string().min(1),
+  at: InstantSchema,
+  keptTurns: NonNegativeIntegerSchema,
+  omittedTurns: NonNegativeIntegerSchema,
+});
+export type ConversationConversion = z.infer<typeof ConversationConversionSchema>;
+
 /** Effective, safe-to-publish session configuration. */
 export const SessionConfigSchema = z.object({
   id: z.string().min(1),
@@ -453,6 +475,8 @@ export const SessionConfigSchema = z.object({
     .optional(),
   /** Target-only lineage back to the transfer decision that created this fresh session. */
   transferredFrom: SessionTransferEdgeSchema.optional(),
+  /** Where the conversation came from, when a cross-harness migration converted it. */
+  conversion: ConversationConversionSchema.optional(),
   /**
    * Optional because a session started before this record existed has none, and because a harness
    * home the daemon cannot resolve must leave the session with no transcript rather than a guessed
@@ -923,8 +947,14 @@ export type ResumeSessionRequest = z.infer<typeof ResumeSessionRequestSchema>;
  *   * `previous` — the repair for a session a Restart already moved onto a new conversation: rebind to
  *     the newest OTHER transcript in the same harness home that mentions this session's directory, and
  *     resume that one. Refused like `resume` when there is none.
+ *   * `convert` — move onto an account of the OTHER harness (Claude ↔ Codex): the conversation is
+ *     rewritten in the target's own format under a fresh id the target owns, the target CLI is shown to
+ *     accept it before anything is switched, and the session is rebound to it. The original transcript
+ *     stays on disk; the session records where the converted one came from ({@link ConversationConversionSchema}).
+ *     Refused with `409 conversation_unresumable` when it cannot be converted or the target rejects it.
+ *     See `docs/migration-cross-harness.md`.
  */
-export const MigrationConversationSchema = z.enum(['resume', 'fresh', 'previous']);
+export const MigrationConversationSchema = z.enum(['resume', 'fresh', 'previous', 'convert']);
 export type MigrationConversation = z.infer<typeof MigrationConversationSchema>;
 
 export const MigrateSessionRequestSchema = z.strictObject({
@@ -942,6 +972,74 @@ export const MigrateSessionRequestSchema = z.strictObject({
 });
 export type MigrateSessionRequest = z.infer<typeof MigrateSessionRequestSchema>;
 export type MigrateSessionRequestInput = z.input<typeof MigrateSessionRequestSchema>;
+
+/** `POST /v1/sessions/:sessionId/conversion-preview`: what converting onto `agent` would carry. */
+export const ConversionPreviewRequestSchema = z.strictObject({
+  agent: z.string().min(1),
+  model: z.string().min(1).optional(),
+});
+export type ConversionPreviewRequest = z.infer<typeof ConversionPreviewRequestSchema>;
+
+/** What a conversion dropped rather than carried. */
+export const ConversionDroppedSchema = z.strictObject({
+  /** Thinking or reasoning blocks — neither provider accepts the other's. */
+  reasoning: NonNegativeIntegerSchema,
+  /** Records of a subagent's own conversation. */
+  sidechains: NonNegativeIntegerSchema,
+  /** Harness-internal records: reminders, meta records, developer messages, delivery plumbing. */
+  internal: NonNegativeIntegerSchema,
+  /** Compactions the source harness had already made; only what followed the newest one is carried. */
+  compactions: NonNegativeIntegerSchema,
+});
+export type ConversionDropped = z.infer<typeof ConversionDroppedSchema>;
+
+/**
+ * A conversion's account of itself — what a person confirms before "Move to Codex…" switches anything,
+ * and what the session keeps afterwards.
+ */
+export const ConversionSummarySchema = z.strictObject({
+  /** The converter's own version, bumped whenever what it produces changes. */
+  converter: PositiveIntegerSchema,
+  sourceHarness: HarnessSchema,
+  sourceVersion: z.string().min(1).optional(),
+  targetHarness: HarnessSchema,
+  targetVersion: z.string().min(1),
+  /** Turns in the source once harness-internal records are dropped: one per thing the person said. */
+  turns: NonNegativeIntegerSchema,
+  keptTurns: NonNegativeIntegerSchema,
+  /** The oldest turns left out to fit the target's window; the target is told how many. */
+  omittedTurns: NonNegativeIntegerSchema,
+  /** Whether the newest turn itself was too long and was cut. */
+  cutNewest: z.boolean(),
+  /** Messages carried as messages: the person's and the agent's. */
+  messages: NonNegativeIntegerSchema,
+  /** Shell commands carried as the target's own shell tool calls, with their output. */
+  nativeToolCalls: NonNegativeIntegerSchema,
+  /** Other tool calls, carried as text lines inside the agent's turns. */
+  toolCallsAsText: NonNegativeIntegerSchema,
+  /** Attachments carried as references to files the target can open. */
+  attachments: NonNegativeIntegerSchema,
+  dropped: ConversionDroppedSchema,
+  estimatedTokens: NonNegativeIntegerSchema,
+  /** The share of the target's window the history was allowed. */
+  budgetTokens: NonNegativeIntegerSchema,
+});
+export type ConversionSummary = z.infer<typeof ConversionSummarySchema>;
+
+/**
+ * The preview's answer: what the conversion would carry, or why it cannot be made. A refusal is an
+ * answer rather than an error status, because the sheet shows it in place of the confirm button.
+ */
+export const ConversionPreviewSchema = z.discriminatedUnion('kind', [
+  z.strictObject({
+    kind: z.literal('ready'),
+    targetAgent: z.string().min(1),
+    targetModel: z.string().min(1),
+    summary: ConversionSummarySchema,
+  }),
+  z.strictObject({ kind: z.literal('refused'), targetAgent: z.string().min(1), reason: z.string().min(1) }),
+]);
+export type ConversionPreview = z.infer<typeof ConversionPreviewSchema>;
 
 /**
  * One thing the in-flight inventory saw while a Restart was being checked, in words a person reads.

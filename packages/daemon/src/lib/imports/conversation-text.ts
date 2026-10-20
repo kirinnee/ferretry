@@ -104,10 +104,14 @@ export function handoffDocumentMessage(document: string): string {
   return readHandoffDocument(body).message;
 }
 
+/** A user message without the reminders and the blocks a harness injected, keeping a delivery's attachment list. */
+export function withoutHarnessBlocks(text: string): string {
+  return text.replace(REMINDER_BLOCK, '').replace(AGENTS_FILE_BLOCK, '').replace(INJECTED_BLOCK, '').trim();
+}
+
 /** A user message without the reminders, the injected blocks and the attachment list a harness or a delivery wrapped it in. */
 export function withoutDeliveryWrappers(text: string): string {
-  const typed = text.replace(REMINDER_BLOCK, '').replace(AGENTS_FILE_BLOCK, '').replace(INJECTED_BLOCK, '');
-  return parseMessageAttachments(typed.trim()).message;
+  return parseMessageAttachments(withoutHarnessBlocks(text)).message;
 }
 
 /**
