@@ -102,25 +102,26 @@ const MERMAID_INIT_DIRECTIVE = `%%{init: {"flowchart": {"htmlLabels": true}}}%%\
 const fence = (type: string, alt: string, payload: string): string => `type: ${type}\nalt: ${alt}\n---\n${payload}`;
 
 /**
- * An html fragment that tries everything a static fragment must refuse. Every payload either sets
- * `window.__fyPwned` if it runs, or names `/beacon?<what>` on this server if it loads, and the style
- * rules aim at the HOST page — `fy-render-fragment.security.test.ts` asserts none of it lands.
+ * An html fragment that tries everything a STATIC fragment must refuse. It holds no `<script>` and no
+ * `on…` handler on purpose: either one routes an `html` block to the interactive frame instead
+ * (`fyRenderHtmlRunsScript`), whose own corpus is `fy-render-html.security.test.ts`. Every payload
+ * either sets `window.__fyPwned` if it runs (the `javascript:` link), or names `/beacon?<what>` on this
+ * server if it loads, and the style rules aim at the HOST page — `fy-render-fragment.security.test.ts`
+ * asserts none of it lands.
  */
 const FRAGMENT_XSS = [
   '<p id="ok">fragment rendered</p>',
-  "<script>window.__fyPwned = 'script'</script>",
-  '<img src="x" onerror="window.__fyPwned = \'img-onerror\'">',
   '<img src="/beacon?img" alt="">',
-  '<svg onload="window.__fyPwned = \'svg-onload\'"><circle r="2"/></svg>',
+  '<svg><circle r="2"/></svg>',
   '<a id="js" href="javascript:window.__fyPwned=\'js-href\'">js link</a>',
   '<a id="rel" href="/beacon?anchor">relative link</a>',
   '<div style="background: url(/beacon?style-url)">inline style</div>',
   '<style>@import url(/beacon?import); p { background: url(/beacon?style-element) } body { background: rgb(255, 0, 0) !important } #outside { color: rgb(255, 0, 0) !important }</style>',
   '<form action="/beacon?form"><input name="q" value="x"><button id="submit">go</button></form>',
-  '<iframe srcdoc="<script>parent.__fyPwned = \'srcdoc\'</script>"></iframe>',
+  '<iframe srcdoc="<b>a frame</b>"></iframe>',
   '<object data="/beacon?object"></object><embed src="/beacon?embed">',
   '<meta http-equiv="refresh" content="0;url=/beacon?meta"><link rel="stylesheet" href="/beacon?link"><base href="/beacon/">',
-  '<svg><foreignObject><img src="x" onerror="window.__fyPwned = \'foreign\'"></foreignObject><use href="/beacon?use#a"/></svg>',
+  '<svg><foreignObject><img src="/beacon?foreign"></foreignObject><use href="/beacon?use#a"/></svg>',
   '<div id="overlay" style="position: fixed; inset: 0; background: rgba(255, 0, 0, 0.5)">overlay</div>',
 ].join('\n');
 

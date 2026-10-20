@@ -226,10 +226,10 @@ a single user, and the result never reaches a sink as a string.
 
 **Measured in real Chromium** (`tests/integration/fy-render-fragment.security.test.ts`, the shipped
 block under the exact `/*` policy from `_headers`, Trusted Types included, and a server-side request
-ledger): a corpus of a script element, an image `onerror`, an SVG `onload`, a `javascript:` link, a
-relative link, an inline-style `url()`, a `<style>` with `@import` and `url()` and rules aimed at the
+ledger): a corpus — free of `<script>` and `on…` handlers, since either one now routes a block to the
+interactive frame — of a `javascript:` link, a relative link, an inline-style `url()`, a `<style>` with `@import` and `url()` and rules aimed at the
 HOST page's `body` and `#outside`, a form with an action, an `iframe srcdoc`, an `object`, an `embed`, a
-meta refresh, a `link` stylesheet, a `base`, an SVG `foreignObject` with a handler, a `use` and a
+meta refresh, a `link` stylesheet, a `base`, an SVG `foreignObject`, a `use`, a remote image and a
 `position: fixed` overlay. Nothing set `window.__fyPwned` — before or after the test clicked the links
 and the submit button — the page never navigated, the ledger saw **zero** `/beacon` requests, the host
 page's computed styles were unchanged, the overlay stayed inside the fragment's box, and the page raised
