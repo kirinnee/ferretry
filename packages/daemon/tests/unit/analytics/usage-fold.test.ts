@@ -1,7 +1,11 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
 import { type AnalyticsTranscriptEvidence, foldAnalyticsSessionUsage } from '../../../src/lib/analytics/usage-fold.ts';
-import { ClaudeTranscriptParser, CodexTranscriptParser, parseTranscriptJsonl } from '../../../src/lib/transcript/index.ts';
+import {
+  ClaudeTranscriptParser,
+  CodexTranscriptParser,
+  parseTranscriptJsonl,
+} from '../../../src/lib/transcript/index.ts';
 import type { TranscriptEvent, TranscriptHarness } from '../../../src/lib/transcript/types.ts';
 
 type UsageFigures = NonNullable<Extract<TranscriptEvent, { kind: 'usage' }>>['usage'];
@@ -420,13 +424,22 @@ describe('analytics session usage fold, on Codex repeated token counts', () => {
         payload: {
           type: 'token_count',
           info: {
-            last_token_usage: { input_tokens: input, cached_input_tokens: 0, output_tokens: 10, reasoning_output_tokens: 0 },
+            last_token_usage: {
+              input_tokens: input,
+              cached_input_tokens: 0,
+              output_tokens: 10,
+              reasoning_output_tokens: 0,
+            },
             total_token_usage: { total_tokens: total },
           },
         },
       });
     const text = [
-      JSON.stringify({ timestamp: '2026-10-20T09:00:00.000Z', type: 'turn_context', payload: { model: 'gpt-6-astra' } }),
+      JSON.stringify({
+        timestamp: '2026-10-20T09:00:00.000Z',
+        type: 'turn_context',
+        payload: { model: 'gpt-6-astra' },
+      }),
       count(1_000, 1_010),
       count(2_000, 3_020),
       count(2_000, 3_020),

@@ -441,11 +441,18 @@ describe('analytics session activity fold, on records Claude Code writes for its
     const transcript = [
       record('user', 'c1', '10:00:00', {
         role: 'user',
-        content: '<command-message>review</command-message>\n<command-name>/review</command-name>\n<command-args>parser</command-args>',
+        content:
+          '<command-message>review</command-message>\n<command-name>/review</command-name>\n<command-args>parser</command-args>',
       }),
-      record('user', 'm1', '10:00:00', { role: 'user', content: [{ type: 'text', text: 'Review the parser…' }] }, {
-        isMeta: true,
-      }),
+      record(
+        'user',
+        'm1',
+        '10:00:00',
+        { role: 'user', content: [{ type: 'text', text: 'Review the parser…' }] },
+        {
+          isMeta: true,
+        },
+      ),
       record('assistant', 'a1', '10:00:40', {
         id: 'msg_a1',
         role: 'assistant',

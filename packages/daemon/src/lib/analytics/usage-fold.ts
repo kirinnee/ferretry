@@ -366,7 +366,11 @@ function userRecordStarts(events: readonly TranscriptEvent[]): {
   const localCommands = new Set<number>();
   starts.forEach((start, position) => {
     const next = starts[position + 1];
-    if (next !== undefined && startsWithAny(start.text, COMMAND_PREFIXES) && startsWithAny(next.text, LOCAL_OUTPUT_PREFIXES)) {
+    if (
+      next !== undefined &&
+      startsWithAny(start.text, COMMAND_PREFIXES) &&
+      startsWithAny(next.text, LOCAL_OUTPUT_PREFIXES)
+    ) {
       localCommands.add(start.index);
     }
   });

@@ -422,7 +422,11 @@ describe('one query across every machine', () => {
           : rawResponse([rawRow({ id: `${daemon.daemonId}-row` })], query),
       '{}',
     );
-    expect(rowsOf(answer.response).map(row => row.id).sort()).toEqual(['daemon-b-row', 'daemon-c-row']);
+    expect(
+      rowsOf(answer.response)
+        .map(row => row.id)
+        .sort(),
+    ).toEqual(['daemon-b-row', 'daemon-c-row']);
     expect(answer.failed.map(outcome => outcome.machine.name)).toEqual(['old-build']);
   });
 
