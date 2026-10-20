@@ -1,217 +1,216 @@
 /**
- * CUSTOM QUERY — the analytics query language, kept and moved out of the way.
+ * THE QUERY EDITOR — the text box, its helpers and the inline parse error.
  *
- * The language is the tool for questions the overview does not answer, so it sits last on the page,
- * closed until somebody opens it. The diagnostic starters (pricing coverage, identity check, …) live
- * inside it rather than being the page's main controls. Nothing is requested until a query is run; a
- * link that arrives with `?q=` (the session cost pane's "Open in Analytics") opens it and runs that
- * query at once.
- *
- * The component is keyed by its daemon by the page, so a daemon switch mounts a fresh one: an in-flight
- * answer from the previous daemon lands in an unmounted instance and is never shown.
+ * The text is the source of truth: the metric picker, aggregation picker, range chips and group-by
+ * chips all rewrite it through the protocol grammar (`analytics-query-text.ts`), and typing in it
+ * moves the helpers. A text the grammar rejects shows the parser's own sentence under the box and
+ * switches the helpers off rather than guessing what was meant.
  */
 
-import type { AnalyticsResponse } from '@ferretry/protocol';
-import { ChevronRight, Loader2 } from 'lucide-react';
-import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
+import {
+  type AnalyticsAggregation,
+  AnalyticsAggregationSchema,
+  type AnalyticsLabel,
+  type AnalyticsMetric,
+  AnalyticsMetricSchema,
+  type AnalyticsResponse,
+} from '@ferretry/protocol';
+import { Loader2 } from 'lucide-react';
+import { type ReactNode, useId, useMemo } from 'react';
 
+import { cn } from '../../lib/class-names.ts';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
 import { Button } from '../../shell/primitives.tsx';
 import { AnalyticsQueryAutocomplete } from './analytics-query-autocomplete.tsx';
-import { AnalyticsResponseView, analyticsErrorMessage } from './analytics-response-view.tsx';
-import type { AnalyticsStarter } from './session-analytics-query.ts';
+import { ANALYTICS_RANGE_PRESETS } from './analytics-query-complete.ts';
+import {
+  activeRangeSource,
+  readAnalyticsQuery,
+  toggleGroupLabel,
+  withAggregation,
+  withMetric,
+  withRange,
+} from './analytics-query-text.ts';
+import { ANALYTICS_METRIC_LABELS } from './analytics-result-table.tsx';
 
-export const GLOBAL_ANALYTICS_DEFAULT_QUERY = 'sum by (day)';
-
-export const GLOBAL_ANALYTICS_STARTERS: readonly AnalyticsStarter[] = [
-  {
-    id: 'daily',
-    label: 'Daily',
-    query: GLOBAL_ANALYTICS_DEFAULT_QUERY,
-    hint: 'Sessions, tokens, and equivalent API cost per UTC day.',
-  },
-  { id: 'weekly', label: 'Weekly', query: 'sum by (week)', hint: 'The same ledger rolled up by ISO week.' },
-  { id: 'models', label: 'By model', query: 'sum by (model)', hint: 'Fleet totals by attributed model.' },
-  {
-    id: 'pricing-coverage',
-    label: 'Pricing coverage',
-    query: 'sum by (token_data)',
-    hint: 'Groups known and unknown token evidence. Equivalent-cost coverage on each row exposes unpriced sessions without treating them as zero.',
-  },
-  {
-    id: 'identity-check',
-    label: 'Identity check',
-    query: 'count by (model, pricing_model)',
-    hint: 'Selected model beside transcript pricing model; different values expose attribution disagreement.',
-  },
-  { id: 'average', label: 'Average', query: 'avg by (model)', hint: 'Average measures per grouped model.' },
-  { id: 'maximum', label: 'Maximum', query: 'max by (model)', hint: 'Largest per-session measures by model.' },
-  {
-    id: 'status',
-    label: 'Status count',
-    query: 'count by (status)',
-    hint: 'Session counts only; no token or cost measures.',
-  },
-];
-
+/** One analytics read against exactly the supplied daemon; the host decides how it travels. */
 export type AnalyticsRequest = (daemon: DaemonConnection, query?: string) => Promise<AnalyticsResponse>;
 
-export interface AnalyticsCustomQueryProps {
-  readonly connection: DaemonConnection;
-  readonly requestAnalytics: AnalyticsRequest;
-  /** A query handed in by a link; it opens the section and runs at once. */
-  readonly initialQuery?: string | null;
+/** The query the page opens with, and the box's placeholder. */
+export const ANALYTICS_QUERY_DEFAULT = 'sum(cost_usd) by (model) [7d]';
+
+/** The labels offered as one-click grouping chips; a subset of the protocol's, typed so it stays valid. */
+export const ANALYTICS_GROUP_HELPERS: readonly AnalyticsLabel[] = [
+  'runtime',
+  'model',
+  'harness',
+  'machine',
+  'project',
+  'session',
+  'day',
+  'week',
+];
+
+const NO_METRIC = '';
+
+export interface AnalyticsQueryEditorProps {
+  readonly value: string;
+  readonly onValueChange: (value: string) => void;
+  readonly onRun: () => void;
+  readonly querying: boolean;
+  readonly loadValues: (label: string) => Promise<readonly string[]>;
 }
 
-export function AnalyticsCustomQuery({ connection, requestAnalytics, initialQuery }: AnalyticsCustomQueryProps) {
+export function AnalyticsQueryEditor({ value, onValueChange, onRun, querying, loadValues }: AnalyticsQueryEditorProps) {
   const queryId = useId();
-  const [open, setOpen] = useState(Boolean(initialQuery));
-  const [query, setQuery] = useState(initialQuery || GLOBAL_ANALYTICS_DEFAULT_QUERY);
-  const [result, setResult] = useState<AnalyticsResponse | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [querying, setQuerying] = useState(false);
-  const requestSerial = useRef(0);
   const treeIds = useMemo(() => [], []);
-
-  const runQuery = useCallback(
-    async (source: string) => {
-      const serial = ++requestSerial.current;
-      setQuerying(true);
-      setError(null);
-      setResult(null);
-      try {
-        const response = await requestAnalytics(connection, source.trim() || undefined);
-        if (serial !== requestSerial.current) return;
-        setQuery(response.query);
-        setResult(response);
-      } catch (reason) {
-        if (serial === requestSerial.current) setError(analyticsErrorMessage(reason));
-      } finally {
-        if (serial === requestSerial.current) setQuerying(false);
-      }
-    },
-    [connection, requestAnalytics],
-  );
-
-  useEffect(() => {
-    if (initialQuery) void runQuery(initialQuery);
-    return () => {
-      requestSerial.current += 1;
-    };
-  }, [initialQuery, runQuery]);
-
-  const loadValues = useCallback(
-    async (label: string): Promise<readonly string[]> => {
-      const response = await requestAnalytics(connection, `count by (${label})`);
-      if (response.kind !== 'aggregate') return [];
-      return [
-        ...new Set(
-          response.results
-            .map(row => row.labels[label])
-            .filter((value): value is string => typeof value === 'string' && value.length > 0),
-        ),
-      ].sort();
-    },
-    [connection, requestAnalytics],
-  );
+  const read = useMemo(() => readAnalyticsQuery(value), [value]);
+  const parsed = read.ok ? read.parsed : undefined;
+  const showError = !read.ok && value.trim() !== '';
+  const range = activeRangeSource(value, ANALYTICS_RANGE_PRESETS);
 
   return (
-    <section
-      aria-labelledby={`${queryId}-title`}
-      className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-3"
-      data-analytics-custom-query=""
-    >
-      <h2 id={`${queryId}-title`} className="m-0 min-w-0">
-        <button
-          type="button"
-          aria-expanded={open}
-          onClick={() => setOpen(current => !current)}
-          className="flex min-h-[44px] w-full min-w-0 items-center gap-sm text-left text-cell font-semibold text-fg"
-        >
-          <ChevronRight
-            size={16}
-            aria-hidden="true"
-            className={`shrink-0 text-muted transition-transform motion-reduce:transition-none ${open ? 'rotate-90' : ''}`}
-          />
-          Custom query
-          {!open && (
-            <span className="min-w-0 truncate text-meta font-normal text-muted">
-              Any grouping, in the analytics query language
-            </span>
+    <div className="grid min-w-0 gap-3" data-analytics-query-editor="">
+      <form
+        className="flex min-w-0 gap-2"
+        onSubmit={event => {
+          event.preventDefault();
+          onRun();
+        }}
+      >
+        <label htmlFor={queryId} className="sr-only">
+          Analytics query
+        </label>
+        <AnalyticsQueryAutocomplete
+          inputId={queryId}
+          value={value}
+          onValueChange={onValueChange}
+          onRun={onRun}
+          disabled={querying}
+          sources={{ treeIds }}
+          loadValues={loadValues}
+          placeholder={ANALYTICS_QUERY_DEFAULT}
+        />
+        <Button type="submit" variant="primary" disabled={querying || showError} className="min-h-[44px] shrink-0">
+          {querying ? (
+            <Loader2 size={15} className="animate-spin motion-reduce:animate-none" aria-hidden="true" />
+          ) : (
+            'Run'
           )}
-        </button>
-      </h2>
+          {querying && <span className="sr-only">Running query</span>}
+        </Button>
+      </form>
 
-      {open && (
-        <div className="grid min-w-0 gap-3">
-          <form
-            className="flex min-w-0 gap-2"
-            onSubmit={event => {
-              event.preventDefault();
-              void runQuery(query);
+      {showError && (
+        <p
+          role="alert"
+          data-analytics-parse-error=""
+          className="m-0 rounded-control border border-err/40 bg-err/10 px-3 py-2 text-cell text-err"
+        >
+          {read.ok ? '' : read.error}
+        </p>
+      )}
+
+      <div className="grid min-w-0 grid-cols-1 gap-2 sm:grid-cols-2" aria-label="Query helpers" role="group">
+        <label className="grid min-w-0 gap-xs text-meta text-muted">
+          Metric
+          <select
+            className="kt-input min-h-[44px] w-full"
+            disabled={!parsed}
+            value={parsed?.metric ?? NO_METRIC}
+            onChange={event => {
+              const next = event.currentTarget.value;
+              onValueChange(withMetric(value, next === NO_METRIC ? undefined : (next as AnalyticsMetric)));
             }}
           >
-            <label htmlFor={queryId} className="sr-only">
-              Global analytics query
-            </label>
-            <AnalyticsQueryAutocomplete
-              inputId={queryId}
-              value={query}
-              onValueChange={setQuery}
-              onRun={() => void runQuery(query)}
-              disabled={querying}
-              sources={{ treeIds }}
-              loadValues={loadValues}
-              placeholder={GLOBAL_ANALYTICS_DEFAULT_QUERY}
-            />
-            <Button type="submit" variant="outline" disabled={querying} className="min-h-[44px] shrink-0">
-              {querying ? (
-                <Loader2 size={15} className="animate-spin motion-reduce:animate-none" aria-hidden="true" />
-              ) : (
-                'Run'
-              )}
-              {querying && <span className="sr-only">Running query</span>}
-            </Button>
-          </form>
-
-          <div className="flex flex-wrap gap-xs" aria-label="Query starters" role="toolbar">
-            {GLOBAL_ANALYTICS_STARTERS.map(starter => (
-              <Button
-                key={starter.id}
-                type="button"
-                variant="ghost"
-                size="sm"
-                className="min-h-[44px] text-xs"
-                title={starter.hint}
-                onClick={() => {
-                  setQuery(starter.query);
-                  void runQuery(starter.query);
-                }}
-                disabled={querying}
-              >
-                {starter.label}
-              </Button>
+            <option value={NO_METRIC}>Every measure</option>
+            {AnalyticsMetricSchema.options.map(metric => (
+              <option key={metric} value={metric}>
+                {ANALYTICS_METRIC_LABELS[metric]}
+              </option>
             ))}
-          </div>
+          </select>
+        </label>
+        <label className="grid min-w-0 gap-xs text-meta text-muted">
+          Aggregation
+          <select
+            className="kt-input min-h-[44px] w-full"
+            disabled={!parsed}
+            value={parsed?.aggregation ?? ''}
+            onChange={event => onValueChange(withAggregation(value, event.currentTarget.value as AnalyticsAggregation))}
+          >
+            {!parsed?.aggregation && <option value="">Raw sessions</option>}
+            {AnalyticsAggregationSchema.options.map(aggregation => (
+              <option key={aggregation} value={aggregation}>
+                {aggregation}
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
 
-          <div aria-live="polite" aria-busy={querying} className="grid min-w-0 gap-4">
-            {querying && (
-              <p role="status" className="m-0 py-3 text-cell text-muted">
-                Running the query…
-              </p>
-            )}
-            {error && (
-              <p
-                role="alert"
-                className="m-0 rounded-control border border-err/40 bg-err/10 px-3 py-2 text-cell text-err"
-              >
-                The query failed: {error}
-              </p>
-            )}
-            {result && <AnalyticsResponseView response={result} />}
-          </div>
-        </div>
-      )}
-    </section>
+      <ChipRow label="Range">
+        {ANALYTICS_RANGE_PRESETS.map(preset => (
+          <Chip
+            key={preset}
+            pressed={range === preset}
+            disabled={!parsed}
+            onClick={() => onValueChange(withRange(value, range === preset ? undefined : preset))}
+          >
+            {preset}
+          </Chip>
+        ))}
+      </ChipRow>
+
+      <ChipRow label="Group by">
+        {ANALYTICS_GROUP_HELPERS.map(label => (
+          <Chip
+            key={label}
+            pressed={parsed?.groupBy.includes(label) ?? false}
+            disabled={!parsed}
+            onClick={() => onValueChange(toggleGroupLabel(value, label))}
+          >
+            {label}
+          </Chip>
+        ))}
+      </ChipRow>
+    </div>
+  );
+}
+
+function ChipRow({ label, children }: { readonly label: string; readonly children: ReactNode }) {
+  return (
+    <fieldset className="m-0 flex min-w-0 flex-wrap items-center gap-xs border-0 p-0">
+      <legend className="sr-only">{label}</legend>
+      <span aria-hidden="true" className="w-16 shrink-0 text-meta text-muted">
+        {label}
+      </span>
+      {children}
+    </fieldset>
+  );
+}
+
+function Chip({
+  pressed,
+  disabled,
+  onClick,
+  children,
+}: {
+  readonly pressed: boolean;
+  readonly disabled: boolean;
+  readonly onClick: () => void;
+  readonly children: ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      aria-pressed={pressed}
+      disabled={disabled}
+      onClick={onClick}
+      data-variant={pressed ? undefined : 'ghost'}
+      className={cn('kt-btn kt-btn--sm min-h-[44px] min-w-[44px]', pressed ? 'text-accent' : 'text-muted')}
+    >
+      {children}
+    </button>
   );
 }

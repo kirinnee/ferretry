@@ -5,10 +5,16 @@
  * the daemon that the host selected at runtime. In particular, unknown pricing
  * stays unknown instead of being silently represented as a zero-cost result.
  */
-import type { AnalyticsRawSession, AnalyticsResponse } from '@ferretry/protocol';
+import { type AnalyticsMetric, type AnalyticsRawSession, type AnalyticsResponse, analyticsRawMetricValue } from '@ferretry/protocol';
 
 import { DaemonResponseError } from '../../lib/runtime-models.ts';
-import { AnalyticsResultTable, formatUsdMicros } from './analytics-result-table.tsx';
+import { AnalyticsQueryChart } from './analytics-query-chart.tsx';
+import {
+  ANALYTICS_METRIC_LABELS,
+  AnalyticsResultTable,
+  formatMetricMeasure,
+  formatUsdMicros,
+} from './analytics-result-table.tsx';
 
 /** Gives the temporarily unavailable analytics index an actionable explanation. */
 export const analyticsErrorMessage = (error: unknown): string => {
@@ -24,12 +30,26 @@ const rawEquivalentCost = (row: AnalyticsRawSession): string => {
     : 'Unpriced';
 };
 
+const rawValue = (row: AnalyticsRawSession, metric: AnalyticsMetric | undefined): string => {
+  if (metric === undefined) return rawEquivalentCost(row);
+  const value = analyticsRawMetricValue(row, metric);
+  return formatMetricMeasure(metric, { value, known: value === null ? 0 : 1, total: 1 });
+};
+
 /**
  * Renders exactly one daemon response. Hosts own query execution and must pass
  * a response from their current DaemonConnection, preventing cross-daemon
  * caches or requests from entering this presentation layer.
  */
-export function AnalyticsResponseView({ response }: { readonly response: AnalyticsResponse }) {
+export function AnalyticsResponseView({
+  response,
+  chart = false,
+}: {
+  readonly response: AnalyticsResponse;
+  /** Draw the chart of the result above its table. */
+  readonly chart?: boolean;
+}) {
+  const metric = response.parsed.metric;
   const scope = (
     <p className="m-0 text-meta text-muted">
       {response.scope.matched} of {response.scope.indexed} session{response.scope.indexed === 1 ? '' : 's'} matched
@@ -39,7 +59,8 @@ export function AnalyticsResponseView({ response }: { readonly response: Analyti
     return (
       <div className="grid min-w-0 gap-xs">
         {scope}
-        <AnalyticsResultTable response={response} caption={`Result for ${response.query}`} />
+        {chart && <AnalyticsQueryChart response={response} />}
+        <AnalyticsResultTable response={response} caption={`Result for ${response.query}`} metric={response.parsed.metric} />
       </div>
     );
   }
@@ -63,12 +84,14 @@ export function AnalyticsResponseView({ response }: { readonly response: Analyti
             className="grid grid-cols-[minmax(0,1fr)_auto] gap-x-3 gap-y-1 rounded-control border border-border-soft bg-surface px-3 py-2 text-cell"
           >
             <span className="mono truncate text-2xs text-accent">{row.id}</span>
-            <span className="text-right font-medium text-fg">{rawEquivalentCost(row)}</span>
+            <span className="text-right font-medium tabular-nums text-fg">{rawValue(row, metric)}</span>
             <span className="text-muted">
               {row.model ?? 'model unknown'} · {row.status ?? 'status unknown'} · {row.tokens ?? 'tokens unknown'}{' '}
               tokens
             </span>
-            <span className="text-right text-2xs text-faint">Equivalent API cost</span>
+            <span className="text-right text-2xs text-faint">
+              {metric ? ANALYTICS_METRIC_LABELS[metric] : 'Equivalent API cost'}
+            </span>
           </div>
         ))
       )}
