@@ -71,6 +71,7 @@ const ALTERED_DEVICE_CONTROLS: DeviceControls = {
   motion: 'reduced',
   sidebarCollapsed: true,
   sessionsList: 'current',
+  machineOrder: ['b', 'a'],
   suggestionKeys: 'both',
   skillSuggestions: false,
   composerVimMode: true,
@@ -123,6 +124,7 @@ describe('parseControlsRecord — kteam controls cases, on the new nested shape'
       // with the @ ladder, offers $ skills and keeps Vim keys off — no version bump.
       suggestionKeys: 'ladder',
       skillSuggestions: true,
+      machineOrder: [],
       composerVimMode: false,
     });
     // The old shape had no daemon scopes at all.
@@ -594,7 +596,7 @@ describe('DaemonControlsStore', () => {
 
       should(store.setDeviceControls({ [field]: altered } as Partial<DeviceControls>)[field]).equal(altered);
       should(storage.writes).have.length(1);
-      should(new DaemonControlsStore(storage).snapshot().device[field]).equal(altered);
+      should(new DaemonControlsStore(storage).snapshot().device[field]).eql(altered);
     }
   });
 

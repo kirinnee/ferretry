@@ -222,7 +222,7 @@ export const StepUpDemandSchema = z.strictObject({
    * The ONE act this confirmation is for, when the act is one that adds access to this machine and so
    * wants a passkey proved for it alone ({@link STEP_UP_ACTS}). Absent for every other step-up.
    */
-  act: z.enum(['add-device', 'widen-device', 'enable-agent-control', 'loosen-config']).optional(),
+  act: z.enum(['add-device', 'widen-device', 'enable-agent-control', 'loosen-config', 'clone-secrets']).optional(),
 });
 export type StepUpDemand = z.infer<typeof StepUpDemandSchema>;
 
@@ -249,6 +249,12 @@ export const STEP_UP_ACTS = {
    * a remote owner confirms it with a passkey proved for this act alone.
    */
   loosenConfig: 'loosen-config',
+  /**
+   * Sealing this machine's secrets for another machine (docs/secrets.md). The values leave this daemon,
+   * encrypted to the other one, so every copy wants a passkey proved for it alone (owner decision
+   * 2026-10-20: "require the passkey again").
+   */
+  cloneSecrets: 'clone-secrets',
 } as const satisfies Record<string, NonNullable<StepUpDemand['act']>>;
 
 /**

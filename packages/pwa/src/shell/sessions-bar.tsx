@@ -41,6 +41,7 @@ import {
 } from '../lib/pages/routes.ts';
 import { type WorkspaceRailPreferenceStore, workspaceRailPreferences } from '../lib/workspace-rail-preferences.ts';
 import { ContextMenu, type ContextMenuItem, type MenuAnchor } from './context-menu.tsx';
+import type { MoveMachine } from './machine-reorder.tsx';
 import { NewSessionMenu } from './new-session-menu.tsx';
 import { PALETTE_KEYSHORTCUTS, paletteShortcutLabel } from './palette-shortcut.ts';
 import { RouteLink } from './route-link.tsx';
@@ -112,6 +113,8 @@ export interface SessionsBarProps {
   /** Drawer only: closes it. */
   readonly onClose?: () => void;
   readonly onAddMachine: () => void;
+  /** Drops a machine heading beside another, from the all-machines list. Absent: the headings stay put. */
+  readonly onMoveMachine?: MoveMachine;
   /**
    * Opens "Pair a phone with ‹this machine›". Absent when the reader may not pair a device with this
    * machine (`pairing.use` is closed), and then the switcher does not offer it.
@@ -364,6 +367,7 @@ function SessionsBarBody(props: SessionsBarProps & ListFilterProps & { readonly 
               daemonId={daemonId}
               {...(props.learningPassive === undefined ? {} : { learningPassive: props.learningPassive })}
               {...(props.machineLearners === undefined ? {} : { machineLearners: props.machineLearners })}
+              {...(props.onMoveMachine === undefined ? {} : { onMoveMachine: props.onMoveMachine })}
               now={props.now ?? Date.now()}
               onNavigate={navigate}
               view={machineView}

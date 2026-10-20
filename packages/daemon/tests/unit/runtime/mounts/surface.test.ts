@@ -646,6 +646,7 @@ describe('the mounted daemon surface', () => {
       4 + // the credential sign-in family: start, then read, answer or cancel one flow
       5 + // the MCP sign-in family: its status read, start, finish, cancel and sign out (docs/mcp-oauth.md)
       2 + // the account model's credential list and its Check now
+      3 + // copying secrets to another machine: open an import, seal for one, file one (docs/secrets.md)
       2 + // an environment login's Test, and the provider presets one is made from (docs/provider-presets.md)
       7 + // the account model's four catalogue reads and its three proposal routes
       1 + // the draft-profile preview, a read with a body
@@ -810,6 +811,10 @@ describe('the mounted daemon surface', () => {
       'POST /v1/secrets/use',
       'POST /v1/secrets',
       'DELETE /v1/secrets/:name',
+      // Copying to another machine: an offer, ciphertext only the target opens, and the names filed.
+      'POST /v1/secrets/imports',
+      'POST /v1/secrets/imports/:importId',
+      'POST /v1/secrets/exports/:importId',
       'GET /v1/sessions',
       'GET /v1/sessions/:sessionId',
       'GET /v1/projects',

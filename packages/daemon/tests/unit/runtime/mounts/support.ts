@@ -40,6 +40,8 @@ import {
   type WardenStatusView,
   type WardenVerdictsView,
 } from '@ferretry/protocol';
+import type { DaemonIdentity } from '@ferretry/relay';
+import { WebCryptoRelayCrypto } from '@ferretry/relay/adapters';
 import type { AnalyticsPricingRate } from '../../../../src/lib/analytics/pricing.ts';
 import {
   type FinishedAnalyticsSession,
@@ -93,6 +95,7 @@ import {
 } from '../../../../src/lib/learning/index.ts';
 import { CALLSIGN_WINDOW_MS, type NameClaim } from '../../../../src/lib/names/index.ts';
 import { type PinRepository, PinService, type PinSessionDirectory } from '../../../../src/lib/pins/index.ts';
+import type { ClockPort } from '../../../../src/lib/ports.ts';
 import type { AnalyticsSubsystem } from '../../../../src/lib/runtime/mounts/analytics.ts';
 import type { DaemonHealthSubsystem, ScratchReclamation } from '../../../../src/lib/runtime/mounts/health.ts';
 import type { LearningSubsystem } from '../../../../src/lib/runtime/mounts/learning.ts';
@@ -132,6 +135,8 @@ import {
   type SecretCipherPort,
   SecretDirectory,
   type SecretDocumentStore,
+  SecretExportService,
+  SecretImportService,
   SecretStoreError,
   SecretUseService,
   SecretVault,
@@ -2139,6 +2144,9 @@ export interface SecretWorld {
   readonly documents?: SecretDocumentStore;
   readonly recipes?: Readonly<Record<string, string>>;
   readonly runner?: SecretChildRunner;
+  /** This daemon's identity, for copying secrets; absent reads as an identity it cannot load. */
+  readonly identity?: DaemonIdentity;
+  readonly clock?: ClockPort;
 }
 
 /** A clock the vault fixtures stamp with, so every summary in a test is the same instant. */
@@ -2149,12 +2157,18 @@ export function secretSubsystem(world: SecretWorld = {}): SecretSubsystem {
   const documents = world.documents ?? new MemorySecretDocuments();
   const cipher = new FakeSecretCipher();
   const recipes = world.recipes ?? {};
+  const clock = world.clock ?? SECRET_CLOCK;
+  const directory = new SecretDirectory(documents, cipher, clock);
+  const identity = { load: async () => world.identity };
+  const crypto = new WebCryptoRelayCrypto();
   return {
-    directory: new SecretDirectory(documents, cipher, SECRET_CLOCK),
+    directory,
     references: { references: async () => configuredReferences(recipes) },
     uses: new SecretUseService(new SecretVault(documents, cipher), world.runner ?? new EchoSecretChildRunner(), {
       read: async () => recipes,
     }),
+    imports: new SecretImportService({ crypto, identity, directory, clock }),
+    exports: new SecretExportService({ crypto, identity, vault: new SecretVault(documents, cipher), clock }),
   };
 }
 
