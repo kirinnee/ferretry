@@ -58,8 +58,8 @@ import {
 import { ForkForm } from '../../features/session-actions/fork-form.tsx';
 import { type SessionActionContribution, sessionActionSections } from '../../features/session-actions/registry.ts';
 import { RenameForm } from '../../features/session-actions/rename-form.tsx';
-import { useRestartRefusal } from '../../features/session-actions/restart-refusal.tsx';
 import { addSessionMcp, previewSessionMcp, readSessionMcp } from '../../features/session-actions/session-mcp-api.ts';
+import { useRestartRefusal } from '../../features/session-actions/restart-refusal.tsx';
 import { forkThroughLatest, restartWithResume } from '../../features/session-actions/session-operations.ts';
 import type { InfoTab } from '../../features/session-info/info-model.ts';
 import { readRelaunchSettings } from '../../features/session-info/relaunch-settings-api.ts';

@@ -27,6 +27,11 @@ import { DaemonAccountPickerStore } from './account-picker-store.ts';
 import { DaemonHttpTransport, daemonApiClient } from './api-client.ts';
 import { DaemonAttentionClient } from './attention-client.ts';
 import { browserLoginPort, DaemonBrowserLoginStore } from './browser-login.ts';
+import {
+  type DaemonConnectionRepository,
+  DaemonConnectionStore,
+  type DaemonConnectionsSnapshot,
+} from './connections.ts';
 import { DaemonConfigChangeStore } from './config-changes.ts';
 import {
   browserConnectionHealthEnvironment,
@@ -39,11 +44,6 @@ import {
   type ConnectionSignalEnvironment,
   watchConnectionSignals,
 } from './connection-signals.ts';
-import {
-  type DaemonConnectionRepository,
-  DaemonConnectionStore,
-  type DaemonConnectionsSnapshot,
-} from './connections.ts';
 import { browserControlsStorage, DaemonControlsStore } from './controls.ts';
 import { type DaemonConnection, type DaemonId, sameDaemonConnection } from './daemon-connection.ts';
 import { daemonRequest } from './daemon-transport.ts';
@@ -1024,15 +1024,15 @@ export function useLockedMachines(gate: StepUpGate): readonly DaemonId[] {
  * Outside a provider — a component rendered on its own by a test — there is no router to route
  * through, and the answer is the plain network.
  */
-/**
- * This device's Parakeet service, or `null` outside a store (a static render, a component suite).
- * Dictation and Settings read it from here so the composer never has to carry it.
- */
 /** This device's provider keys, or `null` outside a store (a component rendered on its own). */
 export function useSpeedupKeys(): DeviceSpeedupKeys | null {
   return useContext(StoreContext)?.speedupKeys ?? null;
 }
 
+/**
+ * This device's Parakeet service, or `null` outside a store (a static render, a component suite).
+ * Dictation and Settings read it from here so the composer never has to carry it.
+ */
 export function useParakeetVoice(): ParakeetVoice | null {
   return useContext(StoreContext)?.voice ?? null;
 }

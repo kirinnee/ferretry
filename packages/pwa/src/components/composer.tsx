@@ -19,9 +19,9 @@ import { applyFormat, type FormatCommand, formatShortcut } from '../lib/live-mar
 import { useMdComposePref } from '../lib/md-compose.ts';
 import { registerComposerQuoteTarget } from '../lib/quote.ts';
 import { findReferences } from '../lib/references.ts';
-import { carrierDelivery } from '../lib/relay-carrier.ts';
 import type { DaemonFetch } from '../lib/runtime-models.ts';
 import { browserFetch } from '../lib/runtime-models.ts';
+import { carrierDelivery } from '../lib/relay-carrier.ts';
 import { canSubmitComposer } from '../lib/session-screens.ts';
 import type { BrowserRecognitionProvider } from '../lib/stt/browser-recognition.ts';
 import type { SttSettings } from '../lib/stt/stt-settings.ts';
