@@ -1,4 +1,9 @@
-import type { ConversationAdoptResult, ConversationImportListing, ImportableConversation } from '@ferretry/protocol';
+import {
+  type ConversationAdoptResult,
+  type ConversationImportListing,
+  conversationFolder,
+  type ImportableConversation,
+} from '@ferretry/protocol';
 
 /**
  * What a row says it is: its NAME, when the CLI gave it one, then the first thing they typed; an unnamed
@@ -9,14 +14,27 @@ function previewLine(entry: ImportableConversation): string {
   return entry.latest === undefined ? entry.preview : `${entry.preview} … ${entry.latest}`;
 }
 
+/** The marks the browser draws as coloured badges, as text tags: the CLI, then the ferret that keeps it. */
+function tags(entry: ImportableConversation): string {
+  const ferret = entry.adoptedBy === undefined ? '' : ` [ferret ${entry.adoptedBy}]`;
+  return `[${entry.harness}]${ferret}`;
+}
+
+/** A folder by its own name, a throwaway one tagged `[scratch]`. */
+function folderTag(project: string): string {
+  const folder = conversationFolder(project);
+  if (!folder.scratch) return folder.name ?? project;
+  return folder.name === undefined ? '[scratch]' : `[scratch] ${folder.name}`;
+}
+
 function formatRow(entry: ImportableConversation): string {
   const model = entry.model ?? 'unknown model';
-  const kept = entry.adoptedBy === undefined ? '' : `  — kept as ${entry.adoptedBy}`;
-  return `${entry.id}  ${entry.lastActivityAt}  ${entry.turns} turn(s)  ${model}  ${previewLine(entry)}${kept}`;
+  return `${tags(entry)}  ${entry.id}  ${entry.lastActivityAt}  ${entry.turns} turn(s)  ${model}  ${previewLine(entry)}`;
 }
 
 /**
- * The listing from `fy import conversations`, grouped by project folder. Row order within a group
+ * The listing from `fy import conversations`, grouped by project folder: each group headed by the
+ * folder's own name (or `[scratch]`) and its full path, each row tagged with its CLI and its ferret. Row order within a group
  * follows the daemon's own answer (newest first), which this CLI never re-sorts.
  */
 export function renderImportListing(listing: ConversationImportListing, binaryName: string): string {
@@ -33,7 +51,7 @@ export function renderImportListing(listing: ConversationImportListing, binaryNa
 
   const lines: string[] = [];
   for (const [project, entries] of byProject) {
-    lines.push(`${project}:`);
+    lines.push(`${folderTag(project)}  ${project}:`);
     for (const entry of entries) lines.push(`  ${formatRow(entry)}`);
     lines.push('');
   }
@@ -65,7 +83,7 @@ export function renderSearchMatches(rows: readonly ImportableConversation[]): st
   return rows
     .map(
       (entry, index) =>
-        `${index + 1}) ${entry.project}  ${entry.harness}  ${entry.lastActivityAt}  ${previewLine(entry)}`,
+        `${index + 1}) ${tags(entry)}  ${folderTag(entry.project)}  ${entry.lastActivityAt}  ${previewLine(entry)}`,
     )
     .join('\n');
 }

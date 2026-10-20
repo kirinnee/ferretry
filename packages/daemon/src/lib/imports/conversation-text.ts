@@ -39,6 +39,21 @@ const ASSIGNED_TASK_MARKER = '\n# Assigned task\n\n';
 /** A harness's reminder blocks, which ride inside a user record but were never typed. */
 const REMINDER_BLOCK = /<system-reminder>[\s\S]*?<\/system-reminder>/gu;
 
+/**
+ * What a CLI writes AS the user before or around what was typed, each block whole:
+ *
+ *   Codex        the folder's AGENTS.md, as `# AGENTS.md instructions for <folder>` over an `<INSTRUCTIONS>`
+ *                block, and its `<environment_context>`, `<user_instructions>`, `<user_environment>`,
+ *                `<turn_aborted>` and `<user_shell_command>` blocks
+ *   Claude Code  a slash command's `<command-name>`, `<command-message>` and `<command-args>`, and the
+ *                `<local-command-*>` caveat and output around it
+ *
+ * A block is dropped only when it is closed, so a person who types one of these tags keeps their words.
+ */
+const AGENTS_FILE_BLOCK = /^# AGENTS\.md instructions for [^\n]*\n+<INSTRUCTIONS>[\s\S]*?<\/INSTRUCTIONS>/gmu;
+const INJECTED_BLOCK =
+  /<(environment_context|user_instructions|user_environment|turn_aborted|user_shell_command|command-name|command-message|command-args|local-command-stdout|local-command-stderr|local-command-caveat)>[\s\S]*?<\/\1>/gu;
+
 /** Whole messages a CLI writes as the user that say nothing about the conversation. */
 const NOISE = new Set(['[Request interrupted by user]', '[Request interrupted by user for tool use]']);
 
@@ -89,9 +104,10 @@ export function handoffDocumentMessage(document: string): string {
   return readHandoffDocument(body).message;
 }
 
-/** A user message without the reminders and the attachment list a harness or a delivery wrapped it in. */
+/** A user message without the reminders, the injected blocks and the attachment list a harness or a delivery wrapped it in. */
 export function withoutDeliveryWrappers(text: string): string {
-  return parseMessageAttachments(text.replace(REMINDER_BLOCK, '').trim()).message;
+  const typed = text.replace(REMINDER_BLOCK, '').replace(AGENTS_FILE_BLOCK, '').replace(INJECTED_BLOCK, '');
+  return parseMessageAttachments(typed.trim()).message;
 }
 
 /**
@@ -110,6 +126,50 @@ export function spokenText(text: string, documents: HandoffDocuments = NO_DOCUME
   }
   const spoken = collapse(withoutDeliveryWrappers(message));
   return spoken === '' || spoken.startsWith('<') || NOISE.has(spoken) ? undefined : spoken;
+}
+
+/** The words of `text` a title is compared on: lower-case, letters and digits, a plural's `s` dropped. */
+export function titleWords(text: string): readonly string[] {
+  return (text.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? []).flatMap(word => {
+    if (word.length < 3 && !/\p{N}/u.test(word)) return [];
+    return [word.length > 3 && word.endsWith('s') ? word.slice(0, -1) : word];
+  });
+}
+
+/**
+ * The words only the WRAPPERS of a conversation used: every owner message as it was recorded (a pointer
+ * and its path, an AGENTS.md block, a reminder) and each hand-off document's preamble, less every word
+ * the owner actually said. Empty when nothing was wrapped, so a plain conversation never loses a title.
+ */
+export function wrapperOnlyWords(
+  events: readonly TranscriptEvent[],
+  documents: HandoffDocuments = NO_DOCUMENTS,
+): ReadonlySet<string> {
+  const recorded = new Set<string>();
+  const spoken = new Set<string>();
+  for (const event of events) {
+    if (!isOwnerMessage(event)) continue;
+    const said = spokenText(event.text, documents);
+    for (const word of titleWords(said ?? '')) spoken.add(word);
+    if (said !== undefined && said === collapse(event.text)) continue;
+    for (const word of titleWords(event.text)) recorded.add(word);
+    const document = documents.get(handoffPointerPath(event.text) ?? '');
+    const task = document?.indexOf(ASSIGNED_TASK_MARKER) ?? -1;
+    if (document !== undefined && task > 0) for (const word of titleWords(document.slice(0, task))) recorded.add(word);
+  }
+  return new Set([...recorded].filter(word => !spoken.has(word)));
+}
+
+/**
+ * Whether a GENERATED title describes the wrapper it was generated from rather than the conversation:
+ * most of its words are ones only the wrappers used ("Ferretry session turn-001 file", "Turn-001.md
+ * instructions" — a CLI titled the pointer line it was given). A word list alone would also drop a
+ * person's own "turn instructions" conversation; matching the wrapper actually recorded does not.
+ */
+export function isWrapperTitle(title: string, wrapperWords: ReadonlySet<string>): boolean {
+  const words = titleWords(title);
+  const borrowed = words.filter(word => wrapperWords.has(word)).length;
+  return borrowed > 0 && borrowed * 2 > words.length;
 }
 
 /** Every path a user message of `events` points at, so the caller can read those documents first. */

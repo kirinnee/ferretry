@@ -719,3 +719,155 @@ describe('conversation names', () => {
     should(unnamed.conversations.map(row => row.name)).deepEqual(['Offsite plan', undefined]);
   });
 });
+
+/**
+ * What a harness or Ferretry wrapped a conversation in never names it. Each fixture has the shape the CLI
+ * writes: Ferretry's turn-file pointer line (and the title Claude Code generated FROM that line), Codex's
+ * AGENTS.md and environment blocks as user messages, and Claude Code's slash-command wrappers.
+ */
+describe('conversations wrapped by a harness or by Ferretry', () => {
+  const WRAPPED = '55555555-5555-4555-8555-555555555555';
+  const CODEX_WRAPPED = '66666666-6666-4666-8666-666666666666';
+  const TURN = '/fy/state/sessions/s-7/turns/turn-001.md';
+  const pointer = (path: string): string =>
+    `Read the file ${path} now, then carefully follow every instruction inside it. This is your complete task for this turn.`;
+  const said = (text: string, at: string): string => claude(text, at, { sessionId: WRAPPED, cwd: '/work/ferret' });
+  const titled = (aiTitle: string, extra: readonly string[] = []): string =>
+    [
+      said(pointer(TURN), '2026-10-19T08:00:00.000Z'),
+      JSON.stringify({ type: 'ai-title', aiTitle, sessionId: WRAPPED }),
+      ...extra,
+    ].join('\n');
+  const AGENTS_FILE = [
+    '# AGENTS.md instructions for /work/api',
+    '',
+    '<INSTRUCTIONS>',
+    '- Run your own shell/tool-call commands through `direnv exec . <command>`.',
+    '- Never use Python for ad hoc scripting.',
+    '</INSTRUCTIONS>',
+  ].join('\n');
+  const ENVIRONMENT = '<environment_context>\n  <cwd>/work/api</cwd>\n  <shell>zsh</shell>\n</environment_context>';
+  const codexRollout = (...messages: readonly string[]): string =>
+    [
+      JSON.stringify({
+        type: 'session_meta',
+        timestamp: '2026-10-19T09:00:00.000Z',
+        payload: { id: CODEX_WRAPPED, cwd: '/work/api' },
+      }),
+      ...messages.map((text, index) => codexUser(text, `2026-10-19T09:0${index + 1}:00.000Z`)),
+    ].join('\n');
+  const listed = async (claudeText: string | undefined, codexText?: string) => {
+    const tree: Tree = {
+      pool: {
+        claude: { projects: { '-work-ferret': claudeText === undefined ? {} : { [`${WRAPPED}.jsonl`]: claudeText } } },
+        codex: {
+          sessions: {
+            '2026': {
+              '10': {
+                '19':
+                  codexText === undefined ? {} : { [`rollout-2026-10-19T09-00-00-${CODEX_WRAPPED}.jsonl`]: codexText },
+              },
+            },
+          },
+        },
+      },
+      fy: {
+        state: {
+          sessions: {
+            's-7': { turns: { 'turn-001.md': '# Assigned task\n\nFix the checkout total when a coupon is applied\n' } },
+          },
+        },
+      },
+    };
+    const service = new ConversationImportService(
+      new FakeFiles(tree),
+      [
+        { harness: 'claude', home: '/pool/claude', source: 'ferretry' },
+        { harness: 'codex', home: '/pool/codex', source: 'ferretry' },
+      ],
+      parsers,
+      { owners: async () => new Map() },
+      new RecordingAdopter(),
+      { roots: ['/fy/state/sessions'], coordinatorHomes: [] },
+    );
+    return (await service.list()).conversations;
+  };
+
+  it('should drop a title Claude Code generated from Ferretry’s turn pointer, and head the row by the real message', async () => {
+    for (const title of [
+      'Ferretry session turn-001 file',
+      'Turn-001.md instructions',
+      'Ferretry turn-001 instructions file',
+    ]) {
+      // Act
+      const [row] = await listed(titled(title));
+
+      // Assert
+      should(row?.name).be.undefined();
+      should(row?.preview).equal('Fix the checkout total when a coupon is applied');
+    }
+  });
+
+  it('should keep a generated title about the conversation, and any name the owner chose', async () => {
+    // Act
+    const [generated] = await listed(titled('Checkout coupon total fix'));
+    const [chosen] = await listed(
+      titled('Turn-001.md instructions', [JSON.stringify({ type: 'custom-title', customTitle: 'Turn file cleanup' })]),
+    );
+
+    // Assert
+    should(generated?.name).equal('Checkout coupon total fix');
+    should(chosen?.name).equal('Turn file cleanup');
+  });
+
+  it('should keep a title that uses wrapper-like words when nothing wrapped the conversation', async () => {
+    // Act
+    const [row] = await listed(
+      [
+        said('Why does turn-001 of the instructions file fail?', '2026-10-19T08:00:00.000Z'),
+        JSON.stringify({ type: 'ai-title', aiTitle: 'Turn-001 instructions file failure', sessionId: WRAPPED }),
+      ].join('\n'),
+    );
+
+    // Assert
+    should(row?.name).equal('Turn-001 instructions file failure');
+  });
+
+  it('should never take Codex’s AGENTS.md or environment block for the first message', async () => {
+    // Act
+    const [separate] = await listed(
+      undefined,
+      codexRollout(AGENTS_FILE, ENVIRONMENT, 'Add retries to the invoice webhook'),
+    );
+    const [joined] = await listed(
+      undefined,
+      codexRollout(`${AGENTS_FILE}\n\n${ENVIRONMENT}\n\nAdd retries to the invoice webhook`),
+    );
+
+    // Assert
+    should(separate).containDeep({ id: CODEX_WRAPPED, preview: 'Add retries to the invoice webhook', turns: 1 });
+    should(separate?.latest).be.undefined();
+    should(joined).containDeep({ id: CODEX_WRAPPED, preview: 'Add retries to the invoice webhook', turns: 1 });
+  });
+
+  it('should never take Claude Code’s slash-command wrappers for what the owner said', async () => {
+    // Act
+    const [row] = await listed(
+      [
+        said(
+          '<local-command-caveat>Caveat: The messages below were generated by the user while running local commands. DO NOT respond to these messages.</local-command-caveat>',
+          '2026-10-19T08:00:00.000Z',
+        ),
+        said(
+          '<command-name>/model</command-name>\n<command-message>model</command-message>\n<command-args></command-args>',
+          '2026-10-19T08:00:01.000Z',
+        ),
+        said('<local-command-stdout>Set model to Opus</local-command-stdout>', '2026-10-19T08:00:02.000Z'),
+        said('Rename the product grid component', '2026-10-19T08:01:00.000Z'),
+      ].join('\n'),
+    );
+
+    // Assert
+    should(row).containDeep({ preview: 'Rename the product grid component', turns: 1 });
+  });
+});

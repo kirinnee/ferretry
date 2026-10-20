@@ -1,10 +1,7 @@
 /**
- * New session › "Continue a conversation", from one of two sources the person picks at the top:
- *
- *   Ferretry sessions   every STOPPED ferret on this machine; continuing one resumes it in place, with
- *                       its conversation intact, through the same resume the session page offers
- *   All conversations   every Claude Code and Codex conversation in Ferretry's own history (which holds
- *                       what was imported at setup), searched on the daemon (`q`, `harness`, `since`)
+ * New session › "Continue a conversation": ONE list of Ferretry's conversations and stopped ferrets,
+ * narrowed by the source chips (All · Ferretry · Claude · Codex, see `continue-model.ts`), the date and
+ * a search the daemon runs (`q`, `harness`, `since`). Each row is the shared conversation card.
  *
  * Each row says what it is about without asking anything: what the owner first said, the latest thing
  * they said, and where. Tapping a row opens a short preview of its last few exchanges with the button
@@ -24,30 +21,23 @@ import { ChevronDown, ChevronUp } from 'lucide-react';
 import { type ReactNode, useEffect, useId, useRef, useState } from 'react';
 import type { DaemonConnection } from '../../../lib/daemon-connection.ts';
 import { daemonSessionPath } from '../../../lib/pages/routes.ts';
-import { relativeTime, sessionStatusLabel } from '../../../lib/session-screens.ts';
 import { Button } from '../../../shell/primitives.tsx';
 import { readFleetRuntimes } from '../catalog-api.ts';
-import { HARNESS_SHORT } from '../credentials/credentials-model.ts';
 import type { FleetClientFactory } from '../fleet-client.ts';
 import { useSetupAccess } from '../setup/setup-access.ts';
 import {
   CONTINUE_SOURCES,
+  type ContinueEntry,
   type ContinueSource,
+  continueEntries,
   conversationsQuery,
   keptConversationAction,
   keptConversationsQuery,
-  type StoppedSessionRow,
-  stoppedSessionRows,
+  sessionActivityAt,
 } from './continue-model.ts';
-import { ConversationLines, Segmented } from './conversation-picker.tsx';
-import {
-  DATE_FILTERS,
-  type DateFilter,
-  folderLabel,
-  HARNESS_FILTERS,
-  type HarnessFilter,
-  runtimeChoice,
-} from './conversation-picker-model.ts';
+import { ConversationLines, FerretLines, SourceChips } from './conversation-card.tsx';
+import { Segmented } from './conversation-picker.tsx';
+import { DATE_FILTERS, type DateFilter, runtimeChoice } from './conversation-picker-model.ts';
 import { adoptConversations, readConversationPreview, readImportableConversations } from './conversations-api.ts';
 
 /** How many matches one search shows, newest first. */
@@ -63,8 +53,8 @@ export interface ContinueConversationProps {
   /** Receives the session to open. */
   readonly onNavigate: (path: string) => void;
   /**
-   * This machine's ferrets, as the app already reads them (`null` while the first read is out). With
-   * `resume`, it adds the "Ferretry sessions" source; without them only "All conversations" is shown.
+   * This machine's ferrets, as the app already reads them (`null` while the first read is out): they
+   * mark the conversations they keep and add the stopped ones the listing does not describe.
    */
   readonly sessions?: readonly SessionView[] | null;
   /** Resumes a stopped ferret in place. */
@@ -102,11 +92,9 @@ export function ContinueConversation({
   debounceMs = SEARCH_DEBOUNCE_MS,
 }: ContinueConversationProps) {
   const { read, act } = useSetupAccess({ connection, createClient });
-  const offersSessions = sessions !== undefined && resume !== undefined;
-  const [source, setSource] = useState<ContinueSource>(offersSessions ? 'sessions' : 'conversations');
+  const [source, setSource] = useState<ContinueSource>('all');
   const [text, setText] = useState('');
   const [query, setQuery] = useState('');
-  const [harness, setHarness] = useState<HarnessFilter>('all');
   const [date, setDate] = useState<DateFilter>('any');
   const [results, setResults] = useState<Listing>({ kind: 'reading' });
   const [kept, setKept] = useState<Listing>({ kind: 'reading' });
@@ -135,19 +123,19 @@ export function ContinueConversation({
   }, [read]);
 
   useEffect(() => {
-    if (source !== 'conversations') return;
+    if (source === 'ferretry') return;
     let live = true;
-    const search = conversationsQuery({ text: query, harness, date }, clock.current(), CONTINUE_LIMIT);
+    setResults({ kind: 'reading' });
+    const search = conversationsQuery(source, { text: query, date }, clock.current(), CONTINUE_LIMIT);
     void read(client => readImportableConversations(client, search)).then(answer => {
       if (live) setResults(listingResult(answer));
     });
     return () => {
       live = false;
     };
-  }, [read, source, query, harness, date]);
+  }, [read, source, query, date]);
 
   useEffect(() => {
-    if (source !== 'sessions') return;
     let live = true;
     void read(client => readImportableConversations(client, keptConversationsQuery(KEPT_LIMIT))).then(answer => {
       if (live) setKept(listingResult(answer));
@@ -155,7 +143,7 @@ export function ContinueConversation({
     return () => {
       live = false;
     };
-  }, [read, source]);
+  }, [read]);
 
   const toggle = (key: string, conversation: ImportableConversation | undefined): void => {
     setPicking(null);
@@ -260,151 +248,125 @@ export function ContinueConversation({
     </>
   );
 
-  const conversationRows = (rows: readonly ImportableConversation[]): ReactNode =>
-    rows.map(row => {
-      const key = conversationKey(row.harness, row.id);
-      const action = row.adoptedBy === undefined ? 'adopt' : keptConversationAction(row, sessions ?? []);
+  const entryRow = (entry: ContinueEntry): ReactNode => {
+    if (entry.kind === 'session') {
+      const { view, ferret } = entry;
+      const key = sessionKey(view.config.id);
       return (
         <ContinueRow
           key={key}
           rowKey={key}
           open={expanded === key}
           disabled={busy !== null}
-          onToggle={() => toggle(key, row)}
-          lines={<ConversationLines row={row} now={at} />}
-          preview={previews.get(key)}
-          actionLabel={
-            busy === key
-              ? 'Starting…'
-              : action === 'adopt'
-                ? 'Continue'
-                : action === 'resume'
-                  ? 'Resume ferret'
-                  : 'Open ferret'
-          }
-          onAction={() => continueConversation(row)}
-          notes={notes(key)}
-          data={{ 'data-continue-row': row.id }}
-        />
-      );
-    });
-
-  const sessionRows = (rows: readonly StoppedSessionRow[]): ReactNode =>
-    rows.map(row => {
-      const key = sessionKey(row.view.config.id);
-      return (
-        <ContinueRow
-          key={key}
-          rowKey={key}
-          open={expanded === key}
-          disabled={busy !== null}
-          onToggle={() => toggle(key, row.conversation)}
+          onToggle={() => toggle(key, undefined)}
           lines={
-            row.conversation === undefined ? (
-              <SessionLines row={row} now={at} />
-            ) : (
-              <ConversationLines
-                row={{ ...row.conversation, lastActivityAt: row.lastActivityAt }}
-                now={at}
-                title={row.name}
-              />
-            )
+            <FerretLines
+              ferret={ferret}
+              harness={view.config.harness}
+              cwd={view.config.cwd}
+              lastActivityAt={sessionActivityAt(view)}
+              now={at}
+            />
           }
-          preview={row.conversation === undefined ? undefined : previews.get(key)}
+          preview={undefined}
           actionLabel={busy === key ? 'Resuming…' : 'Resume'}
-          onAction={() => void resumeFerret(key, row.view.config.id)}
+          onAction={() => void resumeFerret(key, view.config.id)}
           notes={notes(key)}
-          data={{ 'data-continue-session': row.view.config.id }}
+          data={{ 'data-continue-session': view.config.id }}
         />
-      );
-    });
-
-  const listed = (() => {
-    if (source === 'conversations') {
-      if (results.kind !== 'read') return <ListingState listing={results} />;
-      if (results.rows.length === 0)
-        return (
-          <p className="m-0 text-cell text-muted" data-continue-empty="">
-            No conversation matches.
-          </p>
-        );
-      return (
-        <>
-          <p className="m-0 text-meta text-muted" data-continue-count="">
-            {results.matched > results.rows.length
-              ? `${results.rows.length} most recent of ${results.matched} matches`
-              : `${results.matched} ${results.matched === 1 ? 'match' : 'matches'}`}
-          </p>
-          <ul className="kt-panel fy-session-group__list fy-convo-list">{conversationRows(results.rows)}</ul>
-        </>
       );
     }
-    if (sessions === null || sessions === undefined || kept.kind === 'reading')
-      return <ListingState listing={{ kind: 'reading' }} />;
-    const rows = stoppedSessionRows(
-      sessions,
-      kept.kind === 'read' ? kept.rows : [],
-      { text: query, harness, date },
+    const row = entry.conversation;
+    const key = conversationKey(row.harness, row.id);
+    const action = row.adoptedBy === undefined ? 'adopt' : keptConversationAction(row, sessions ?? []);
+    return (
+      <ContinueRow
+        key={key}
+        rowKey={key}
+        open={expanded === key}
+        disabled={busy !== null}
+        onToggle={() => toggle(key, row)}
+        lines={
+          <ConversationLines row={row} now={at} {...(entry.ferret === undefined ? {} : { ferret: entry.ferret })} />
+        }
+        preview={previews.get(key)}
+        actionLabel={
+          busy === key
+            ? 'Starting…'
+            : action === 'adopt'
+              ? 'Continue'
+              : action === 'resume'
+                ? 'Resume ferret'
+                : 'Open ferret'
+        }
+        onAction={() => continueConversation(row)}
+        notes={notes(key)}
+        data={{ 'data-continue-row': row.id }}
+      />
+    );
+  };
+
+  const listed = (() => {
+    // Ferretry reads only the kept listing; when it is refused, the stopped ferrets are still listed bare.
+    if (source !== 'ferretry' && results.kind !== 'read') return <ListingState listing={results} />;
+    if (kept.kind === 'reading' || sessions === null) return <ListingState listing={{ kind: 'reading' }} />;
+    const searched = source !== 'ferretry' && results.kind === 'read' ? results : undefined;
+    const entries = continueEntries(
+      {
+        source,
+        searched: searched?.rows ?? [],
+        kept: kept.kind === 'read' ? kept.rows : [],
+        sessions: sessions ?? [],
+        search: { text: query, date },
+      },
       at,
     );
-    if (rows.length === 0)
+    if (entries.length === 0)
       return (
         <p className="m-0 text-cell text-muted" data-continue-empty="">
-          {query === '' && harness === 'all' && date === 'any'
-            ? 'No ferret on this machine is stopped. A running one is in Sessions.'
-            : 'No stopped ferret matches.'}
+          {source === 'ferretry' && query === '' && date === 'any'
+            ? 'No ferret keeps a conversation yet, and none is stopped.'
+            : 'No conversation matches.'}
         </p>
       );
+    const more = searched !== undefined && searched.matched > searched.rows.length;
     return (
       <>
         <p className="m-0 text-meta text-muted" data-continue-count="">
-          {`${rows.length} stopped ${rows.length === 1 ? 'ferret' : 'ferrets'}`}
+          {`${entries.length} ${entries.length === 1 ? 'conversation' : 'conversations'}`}
+          {more ? ` · newest ${searched.rows.length} of ${searched.matched}` : ''}
         </p>
-        <ul className="kt-panel fy-session-group__list fy-convo-list">{sessionRows(rows)}</ul>
+        <ul className="kt-panel fy-session-group__list fy-convo-list">{entries.map(entryRow)}</ul>
       </>
     );
   })();
 
   return (
     <div className="flex min-w-0 flex-col gap-3" data-continue-conversation="">
-      {offersSessions ? (
-        <Segmented<ContinueSource>
-          label="Continue from"
-          name="continue-source"
-          options={CONTINUE_SOURCES}
-          value={source}
-          onChoose={choice => {
-            setSource(choice);
-            setExpanded(null);
-            setPicking(null);
-          }}
-        />
-      ) : null}
-      <label htmlFor={searchId} className="sr-only">
-        {source === 'sessions' ? 'Search stopped ferrets' : 'Search your conversations'}
-      </label>
-      <input
-        id={searchId}
-        type="search"
-        className="kt-input w-full"
-        placeholder="Name, words or folder"
-        autoComplete="off"
-        data-continue-search=""
-        value={text}
-        onChange={event => setText(event.target.value)}
+      <SourceChips
+        options={CONTINUE_SOURCES}
+        value={source}
+        onChoose={choice => {
+          setSource(choice);
+          setExpanded(null);
+          setPicking(null);
+        }}
       />
-      <div className="flex min-w-0 gap-2" data-continue-filters="">
-        <div className="min-w-0 flex-auto">
-          <Segmented<HarnessFilter>
-            fit
-            label="CLI"
-            name="harness"
-            options={HARNESS_FILTERS}
-            value={harness}
-            onChoose={setHarness}
-          />
-        </div>
-        <div className="min-w-0 flex-auto">
+      <div className="flex min-w-0 flex-wrap gap-2" data-continue-filters="">
+        <label htmlFor={searchId} className="sr-only">
+          Search your conversations
+        </label>
+        <input
+          id={searchId}
+          type="search"
+          className="kt-input min-w-0 flex-[1_1_12rem]"
+          placeholder="Name, words or folder"
+          autoComplete="off"
+          data-continue-search=""
+          value={text}
+          onChange={event => setText(event.target.value)}
+        />
+        <div className="min-w-0 flex-[0_0_auto]">
           <Segmented<DateFilter>
             fit
             label="Last active"
@@ -444,29 +406,6 @@ function ListingState({ listing }: { readonly listing: Exclude<Listing, { readon
   );
 }
 
-/** A stopped ferret whose conversation the listing does not have: its name, where, and how it stopped. */
-function SessionLines({ row, now }: { readonly row: StoppedSessionRow; readonly now: number }) {
-  const { config, state } = row.view;
-  return (
-    <>
-      <span className="flex min-w-0 items-baseline gap-sm">
-        <span className="min-w-0 flex-1 truncate text-row text-fg">{row.name}</span>
-        <span className="mono shrink-0 text-meta text-faint" data-conversation-age="">
-          {relativeTime(row.lastActivityAt, now)}
-        </span>
-      </span>
-      <span className="flex min-w-0 items-baseline gap-1 overflow-hidden text-meta text-faint">
-        <span className="max-w-[45%] shrink-0 truncate font-mono" title={config.cwd}>
-          {folderLabel(config.cwd)}
-        </span>
-        <span className="shrink-0 whitespace-nowrap">
-          · {HARNESS_SHORT[config.harness]} · {sessionStatusLabel(state.status)}
-        </span>
-      </span>
-    </>
-  );
-}
-
 interface ContinueRowProps {
   readonly rowKey: string;
   readonly open: boolean;
@@ -496,7 +435,7 @@ function ContinueRow({
 }: ContinueRowProps) {
   const panelId = `fy-continue-${useId()}`;
   return (
-    <li className="fy-convo-item">
+    <li className="fy-convo-item" data-open={open ? '' : undefined}>
       <button
         type="button"
         className="fy-convo-row disabled:opacity-70"

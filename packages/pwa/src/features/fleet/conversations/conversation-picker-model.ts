@@ -14,7 +14,9 @@ import {
   type FleetRuntimeView,
   type Harness,
   type ImportableConversation,
+  type SessionStatus,
 } from '@ferretry/protocol';
+import { isTerminalSessionStatus } from '../../../lib/session-screens.ts';
 import { SETUP_HARNESS_NAMES } from '../setup/setup-words.ts';
 
 const DAY_MS = 86_400_000;
@@ -42,32 +44,47 @@ const words = (text: string): readonly string[] =>
     .split(/\s+/u)
     .filter(word => word !== '');
 
-/** Every typed word appears in the first message, the latest one, or the folder. Case does not matter. */
-export const matchesSearch = (row: ImportableConversation, text: string): boolean => {
-  const haystack = `${row.name ?? ''}\n${row.preview}\n${row.latest ?? ''}\n${row.project}`.toLowerCase();
+/**
+ * Every typed word appears in the name, the first message, the latest one, the folder, or the `also`
+ * text a caller adds (the name of the ferret keeping it). Case does not matter.
+ */
+export const matchesSearch = (row: ImportableConversation, text: string, also = ''): boolean => {
+  const haystack = `${row.name ?? ''}\n${row.preview}\n${row.latest ?? ''}\n${row.project}\n${also}`.toLowerCase();
   return words(text).every(word => haystack.includes(word));
 };
 
 /** The words a row's lines are made of. A name leads; the first message is the secondary line. */
 export interface ConversationHeadline {
   readonly headline: string;
-  /** What sits under the headline: the first real message, or the conversation's name under a ferret's. */
+  /** What sits under the headline: the first real message, when a name heads the row. */
   readonly secondary?: string;
   /** Whether the headline is a name, as opposed to the first message standing in for one. */
   readonly named: boolean;
 }
 
 /**
- * A conversation's headline is its NAME — the ferret's own when `title` is given (what the Sessions list
- * shows), else the CLI's title — and only a conversation with no name at all is headed by its first
- * message, cleaned.
+ * A conversation's headline is what it is ABOUT: the CLI's name for it, and only a conversation with no
+ * name at all is headed by its first message, cleaned. The ferret that keeps it is a mark of its own, so
+ * a ferret's name never stands in for the subject.
  */
-export const conversationHeadline = (row: ImportableConversation, title?: string): ConversationHeadline => {
+export const conversationHeadline = (row: ImportableConversation): ConversationHeadline => {
   const first = row.preview.trim() === '' ? undefined : row.preview;
-  const headline = title ?? row.name;
-  if (headline === undefined) return { headline: first ?? 'No message preview', named: false };
-  const secondary = title !== undefined && row.name !== undefined && row.name !== title ? row.name : first;
-  return { headline, named: true, ...(secondary === undefined ? {} : { secondary }) };
+  if (row.name === undefined) return { headline: first ?? 'No message preview', named: false };
+  return { headline: row.name, named: true, ...(first === undefined ? {} : { secondary: first }) };
+};
+
+/** The ferret that keeps a conversation: its name, and how it is when the app has read it. */
+export interface FerretMark {
+  readonly id: string;
+  readonly name: string;
+  readonly status?: SessionStatus;
+}
+
+/** A ferret's state as its avatar dot says it: live, stopped, or failed; nothing when it was not read. */
+export const ferretState = (status: SessionStatus | undefined): 'live' | 'stopped' | 'failed' | undefined => {
+  if (status === undefined) return undefined;
+  if (status === 'failed') return 'failed';
+  return isTerminalSessionStatus(status) ? 'stopped' : 'live';
 };
 
 export const matchesDate = (row: ImportableConversation, filter: DateFilter, now: number): boolean => {
@@ -103,12 +120,6 @@ export const visibleConversations = (
   );
   const shown = filter.showAll ? matching : matching.slice(0, RECENT_LIMIT);
   return { rows: shown, hidden: matching.length - shown.length };
-};
-
-/** The last two segments of a folder, which is as much of the path as a row has room to say. */
-export const folderLabel = (project: string): string => {
-  const segments = project.split(/[\\/]+/u).filter(segment => segment !== '');
-  return segments.length === 0 ? project : segments.slice(-2).join('/');
 };
 
 /** "Found 12 conversations · 2 already kept". */
@@ -196,12 +207,6 @@ export const runtimeChoice = (runtimes: readonly FleetRuntimeView[], harness: Ha
 };
 
 export type HarnessFilter = 'all' | Harness;
-
-export const HARNESS_FILTERS: readonly { readonly id: HarnessFilter; readonly label: string }[] = [
-  { id: 'all', label: 'All' },
-  { id: 'claude', label: 'Claude' },
-  { id: 'codex', label: 'Codex' },
-];
 
 /** The daemon-side search the Continue mode sends: only the narrowing it has. */
 export const listingQuery = (

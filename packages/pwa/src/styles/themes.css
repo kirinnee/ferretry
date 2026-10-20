@@ -262,6 +262,11 @@
   --err-bg: #f7eded;
   --err-border: #e6cfcf;
 
+  /* ---- conversation-source hues: Claude warm, Codex cool (Ferretry is the accent). One hue per
+     source for every theme: `session-screens.css` mixes it with the theme's own ink and surface. */
+  --src-claude: #d4683f;
+  --src-codex: #138fa8;
+
   /* ---- per-tool-type hues (consistent colour per tool across a transcript) */
   --tool-bash: #2b7e4e;
   --tool-read: #2e6cd0;

@@ -1,9 +1,11 @@
 /**
  * "Import conversations" and New session's "Continue a conversation", on a phone and a desktop, in a
  * dark and a light theme: the picker with a few rows kept, one "Start now" on and a row a ferret already
- * keeps; Continue's two sources (the stopped ferrets, and every conversation in Ferretry's history) with
- * the CLI and date filters; each row headed by its name (a Claude title, a Codex thread name, a ferret) with
- * the first message under it, and the unnamed rows headed by their first message; and an open row showing its last exchanges above the button that continues it.
+ * keeps; Continue's ONE list under each source chip (All, and Ferretry — what ferrets keep and the
+ * stopped ferrets) with the date filter; each row the shared card — a coloured avatar (a ferret's
+ * initial and state dot, else the CLI's mark), its name or first real message, and the ferret, CLI and
+ * folder badges, a scratch run tagged "scratch"; and an open row showing its last exchanges above the
+ * button that continues it.
  *
  *   bun harness/conversation-picker-screenshot.tsx      # writes harness/out/conversation-picker-*.png
  *
@@ -48,6 +50,8 @@ const ROWS = [
   { id: 'c4', harness: 'claude', project: '/work/notes', preview: 'Tag every note that mentions the launch', lastActivityAt: ago(50), turns: 9 },
   { id: 'c5', harness: 'codex', name: 'Invoice webhook retries', project: '/work/api/services/billing-gateway-with-a-long-folder-name', preview: 'Add retries to the invoice webhook', lastActivityAt: ago(80), turns: 22, model: 'GPT-6' },
   { id: 'c6', harness: 'claude', project: '/work/shop', preview: 'Rename the product grid component', lastActivityAt: ago(24 * 9), turns: 2, model: 'Sonnet 5.5' },
+  { id: 'c7', harness: 'claude', project: '/tmp/claude-1000/-work-shop/d711c5af-2c1e-4b7a-9d3e-0f6a1b2c3d4e/scratchpad', preview: 'Fix the checkout total when a coupon is applied', lastActivityAt: ago(3), turns: 4, model: 'Opus 5.5' },
+  { id: 'c8', harness: 'codex', project: '/work/api', preview: 'Add retries to the invoice webhook and log each attempt', lastActivityAt: ago(4), turns: 2, model: 'GPT-6', adoptedBy: 'billing-live' },
 ];
 const ferret = (id, name, harness, cwd, status, hours) => ({
   config: { id, name, teammate: name, harness, cwd, updatedAt: ago(hours) },
@@ -58,6 +62,7 @@ const SESSIONS = [
   ferret('shop-badge', 'otto', 'claude', '/work/shop', 'completed', 30),
   ferret('billing-retries', 'ash', 'codex', '/work/api/services/billing', 'failed', 80),
   ferret('live-one', 'pip', 'claude', '/work/shop', 'running', 1),
+  ferret('billing-live', 'juno', 'codex', '/work/api', 'running', 4),
 ];
 ROWS[5].adoptedBy = 'shop-badge';
 const PREVIEW = [
@@ -175,7 +180,7 @@ try {
         await context.route('**/*', async route =>
           new URL(route.request().url()).origin !== server.url.origin ? await route.abort() : await route.continue(),
         );
-        for (const view of ['picker', 'sessions', 'conversations', 'preview'] as const) {
+        for (const view of ['picker', 'all', 'ferretry', 'preview'] as const) {
           const page = await context.newPage();
           await page.goto(`${server.url}?theme=${theme}&view=${view}`);
           if (view === 'picker') {
@@ -183,9 +188,9 @@ try {
             await pickSome(page);
           } else {
             await page.locator('[data-continue-count]').waitFor({ state: 'visible' });
-            if (view !== 'sessions') {
-              await page.locator('[data-segment="conversations"]').click();
-              await page.locator('[data-continue-row="c1"]').waitFor({ state: 'visible' });
+            if (view === 'ferretry') {
+              await page.locator('[data-segment="ferretry"]').click();
+              await page.locator('[data-continue-row="c3"]').waitFor({ state: 'visible' });
             }
             if (view === 'preview') {
               await page.locator('[data-continue-row="c3"]').click();
