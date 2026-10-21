@@ -4,8 +4,14 @@ export interface PdfDecryptWorkerRequest {
   readonly maxBytes: number;
 }
 
+/** Asks the worker only to prove it started and loaded qpdf; it answers `{ ok: true, probe: true }`. */
+export interface PdfDecryptProbeRequest {
+  readonly probe: true;
+}
+
 export type PdfDecryptWorkerResponse =
   | { readonly ok: true; readonly output: ArrayBuffer }
+  | { readonly ok: true; readonly probe: true }
   | { readonly ok: false; readonly failure: 'wrong_password' | 'unreadable_document' | 'too_large' };
 
 export type PdfDecryptFailure = 'wrong_password' | 'unreadable_document' | 'decryption_timeout' | 'too_large';

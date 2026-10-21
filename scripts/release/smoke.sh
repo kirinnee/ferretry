@@ -133,6 +133,13 @@ check_out="$("${tools}/${daemon_name}" --check </dev/null 2>&1 || true)"
 webrtc_line="$(grep '^webrtc ' <<<"${check_out}" || true)"
 grep -q 'engine ready' <<<"${webrtc_line}" || fail "the compiled WebRTC engine did not pass its self-test: ${webrtc_line:-no webrtc line}"
 echo "✅ ${webrtc_line}"
+# ── The worker threads ────────────────────────────────────────────────────────────────────────
+# Every `bin/*.worker.ts` is embedded beside the daemon's entry (compile-executable.ts) and started by
+# its URL inside the binary. A binary that did not embed one still starts, so nothing else here would
+# notice until somebody unlocked a PDF; `--check` starts each worker for real on this target.
+workers_line="$(grep '^workers ' <<<"${check_out}" || true)"
+grep -q ' ready$' <<<"${workers_line}" || fail "a worker thread did not start in the compiled daemon: ${workers_line:-no workers line}"
+echo "✅ ${workers_line}"
 
 "${name}" daemon adopt </dev/null >/dev/null
 

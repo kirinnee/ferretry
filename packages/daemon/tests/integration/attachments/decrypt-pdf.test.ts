@@ -1,12 +1,13 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { decryptPdfInMemory } from '../../../src/adapters/attachments/index.ts';
+import { decryptPdfInMemory, probePdfDecryptWorker } from '../../../src/adapters/attachments/index.ts';
 import { PdfDecryptError } from '../../../src/lib/attachments/index.ts';
 
 type WorkerOutcome =
   | { readonly kind: 'message'; readonly data: unknown }
   | { readonly kind: 'error' }
-  | { readonly kind: 'silent' };
+  | { readonly kind: 'silent' }
+  | { readonly kind: 'unconstructable' };
 
 class FakeWorker {
   onmessage: ((event: { readonly data: unknown }) => void) | null = null;
@@ -34,6 +35,7 @@ async function withWorker<T>(outcome: WorkerOutcome, run: (worker: () => FakeWor
   const workers: FakeWorker[] = [];
   class ControlledWorker extends FakeWorker {
     constructor() {
+      if (outcome.kind === 'unconstructable') throw new Error('no such worker program');
       super(outcome);
       workers.push(this);
     }
@@ -108,6 +110,55 @@ describe('decryptPdfInMemory', () => {
         error => should(error).have.property('failure', 'decryption_timeout'),
       );
       should(worker().terminated).be.true();
+    });
+  });
+});
+
+describe('probePdfDecryptWorker', () => {
+  it('should call the worker ready only when it answers the probe', async () => {
+    await withWorker({ kind: 'message', data: { ok: true, probe: true } }, async worker => {
+      should(await probePdfDecryptWorker()).deepEqual({ ready: true });
+      should(worker().requests).deepEqual([{ probe: true }]);
+      should(worker().terminated).be.true();
+    });
+  });
+
+  it('should say the worker started but qpdf did not load for any other answer', async () => {
+    await withWorker({ kind: 'message', data: { ok: false, failure: 'unreadable_document' } }, async () => {
+      should(await probePdfDecryptWorker()).deepEqual({
+        ready: false,
+        reason: 'the worker started but qpdf did not load',
+      });
+    });
+  });
+
+  it('should report a worker that failed, never answered, or could not be created', async () => {
+    await withWorker({ kind: 'error' }, async () => {
+      should(await probePdfDecryptWorker()).deepEqual({ ready: false, reason: 'the worker failed: no detail' });
+    });
+    await withWorker({ kind: 'silent' }, async worker => {
+      should(await probePdfDecryptWorker({ timeoutMs: 1 })).deepEqual({
+        ready: false,
+        reason: 'no answer within 1 ms — the worker did not start',
+      });
+      should(worker().terminated).be.true();
+    });
+    await withWorker({ kind: 'unconstructable' }, async () => {
+      should(await probePdfDecryptWorker()).deepEqual({
+        ready: false,
+        reason: 'the worker could not be created: no such worker program',
+      });
+    });
+  });
+
+  it('should refuse a probe answer handed back to a decryption', async () => {
+    await withWorker({ kind: 'message', data: { ok: true, probe: true } }, async () => {
+      await decryptPdfInMemory(new Uint8Array([9]), 'use once').then(
+        () => {
+          throw new Error('a probe answer is not plaintext');
+        },
+        error => should(error).have.property('failure', 'unreadable_document'),
+      );
     });
   });
 });

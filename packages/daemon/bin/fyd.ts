@@ -95,6 +95,7 @@ import pkg from '../package.json' with { type: 'json' };
 import { BunSqliteAnalyticsStoreFactory, HttpAnalyticsPricingFeed } from '../src/adapters/analytics/index.ts';
 import {
   decryptPdfInMemory,
+  probePdfDecryptWorker,
   FileAttachmentOriginals,
   FileSessionAttachmentStore,
   NodeRawDeflate,
@@ -142,6 +143,7 @@ import {
   BunSqliteIndexFactory,
   CachedUsageFeed,
   CliUpdateLauncher,
+  describeWorkerProbes,
   CloudflaredLocator,
   ConfigGrantDocument,
   ConfigSecretRecipes,
@@ -228,6 +230,7 @@ import {
   WebCryptoSecretCipher,
   WebPushFetchTransport,
   type WorkerClientOptions,
+  type WorkerProbeReport,
   WorkerLoopWatchdog,
   XvfbDisplay,
 } from '../src/adapters/index.ts';
@@ -1377,6 +1380,11 @@ export interface DaemonWorld {
    * ask whether a daemon would start.
    */
   readonly webrtcEngine: WebRtcEnginePort & WebRtcPeerEngine;
+  /**
+   * Starts every worker thread this binary carries and reports whether each one ran — for `--check`.
+   * A compiled binary that did not embed a worker's program used to fail only when someone needed it.
+   */
+  readonly probeWorkers: () => Promise<readonly WorkerProbeReport[]>;
   /**
    * The subsystems mounted onto that surface. Every field the result carries is a capability the
    * running product actually has; a subsystem absent from it is one the daemon never constructs.
@@ -7551,6 +7559,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       });
     },
     webrtcEngine: new NodeDataChannelEngine(),
+    probeWorkers: async () => [{ name: 'pdf-decrypt', ...(await probePdfDecryptWorker()) }],
     createDirectCarrier: async (dispatch, sockets, devices, pairing) => {
       const identity = await readDaemonRelayIdentity(
         stateFiles,
@@ -10312,6 +10321,10 @@ export async function checkConfiguration(
       `webrtc       switched off in ${world.config.path} — devices reach this daemon directly or through the relay instead`,
     );
   }
+  // The worker threads this binary carries, each started for real. Like the engine above it never changes
+  // the exit code: the daemon serves without them, but the feature each one runs does not work.
+  const workerProbes = await world.probeWorkers();
+  say(`workers      ${describeWorkerProbes(workerProbes)}`);
   // Directly beneath the carrier, because this is the address that has to work on its own and whether
   // anybody but this machine can dial it. It DOES read the carrier above it now, through the one
   // derivation the boot uses, so this line and the QR `fy pair` draws for the same daemon agree. Two
