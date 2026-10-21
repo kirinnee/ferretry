@@ -531,6 +531,14 @@ function putMachineSettings(
     );
   }
 
+  // A client that predates Auto-resume leaves it out, and leaves it as it is.
+  const autoResume = change.autoResume ?? model.machine.autoResume;
+  if (autoResume !== model.machine.autoResume) {
+    draft.machine.autoResume = autoResume;
+    parts.push(`auto-resume after restart ${autoResume ? 'on' : 'off'}`);
+    consequences.push('Applies the next time the daemon starts.');
+  }
+
   if (parts.length === 0) return 'Keep machine settings the same';
   return `Set ${parts.join('; ')}`;
 }

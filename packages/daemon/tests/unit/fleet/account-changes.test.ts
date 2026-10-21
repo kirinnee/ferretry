@@ -1331,6 +1331,59 @@ describe('deriveAccountChange: machine.settings', () => {
     should(edit.model.machine.browserMode).equal('window');
   });
 
+  it('should switch auto-resume off, saying it waits for the next daemon start', () => {
+    // Act
+    const edit = derive({
+      kind: 'machine.settings',
+      agentPermissions: 'auto',
+      defaultRuntime: null,
+      agentControl: { terminals: true, browsers: true, files: true },
+      autoResume: false,
+    });
+
+    // Assert
+    should(edit.summary).equal('Set auto-resume after restart off');
+    should(edit.model.machine.autoResume).equal(false);
+    should(edit.consequences).deepEqual(['Applies the next time the daemon starts.']);
+  });
+
+  it('should leave auto-resume as it is when an older client leaves it out', () => {
+    // Arrange
+    const model = modelOf({ machine: { autoResume: false } });
+
+    // Act
+    const edit = derive(
+      {
+        kind: 'machine.settings',
+        agentPermissions: 'auto',
+        defaultRuntime: null,
+        agentControl: { terminals: true, browsers: true, files: true },
+      },
+      model,
+    );
+
+    // Assert
+    should(edit.summary).equal('Keep machine settings the same');
+    should(edit.model.machine.autoResume).equal(false);
+  });
+
+  it('should switch auto-resume back on', () => {
+    // Act
+    const edit = derive(
+      {
+        kind: 'machine.settings',
+        agentPermissions: 'auto',
+        defaultRuntime: null,
+        agentControl: { terminals: true, browsers: true, files: true },
+        autoResume: true,
+      },
+      modelOf({ machine: { autoResume: false } }),
+    );
+
+    // Assert
+    should(edit.summary).equal('Set auto-resume after restart on');
+  });
+
   it('should say nothing moved when every field matches the current machine settings', () => {
     // Act
     const edit = derive({

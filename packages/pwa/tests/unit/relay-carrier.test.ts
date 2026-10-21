@@ -497,6 +497,7 @@ describe('the carrier router', () => {
     });
     const carriers = carriersFor(identity, options.reach ?? directOnly, options.answer ?? {});
     const router = new DaemonCarrierRouter({
+      preference: () => 'auto',
       crypto: relayCrypto,
       deviceKey: options.deviceKey ?? deviceKey,
       dial: carriers.dial,
@@ -625,6 +626,7 @@ describe('the carrier router', () => {
     });
     const carriers = carriersFor(identity, () => 'live');
     const router = new DaemonCarrierRouter({
+      preference: () => 'auto',
       crypto: relayCrypto,
       deviceKey,
       dial: carriers.dial,
@@ -666,6 +668,7 @@ describe('the carrier router', () => {
     const carriers = carriersFor(identity, url => (url.hostname === DIRECT_HOST ? 'silent' : 'live'));
     const asked: number[] = [];
     const router = new DaemonCarrierRouter({
+      preference: () => 'auto',
       crypto: relayCrypto,
       deviceKey,
       dial: carriers.dial,
@@ -721,6 +724,7 @@ describe('the carrier router', () => {
     });
     const carriers = carriersFor(identity, url => (url.hostname === 'relay-two.example' ? 'live' : 'refuse'));
     const router = new DaemonCarrierRouter({
+      preference: () => 'auto',
       crypto: relayCrypto,
       deviceKey,
       heartbeat: () => () => undefined,
@@ -975,6 +979,7 @@ describe('the carrier router', () => {
     const carriers = carriersFor(identity, relayOnly);
     let asked = 0;
     const router = new DaemonCarrierRouter({
+      preference: () => 'auto',
       crypto: relayCrypto,
       deviceKey,
       dial: carriers.dial,
@@ -1005,6 +1010,7 @@ describe('the carrier router', () => {
     const carriers = carriersFor(identity, relayOnly);
     let asked = 0;
     const router = new DaemonCarrierRouter({
+      preference: () => 'auto',
       crypto: relayCrypto,
       deviceKey,
       dial: carriers.dial,
@@ -1035,6 +1041,7 @@ describe('the carrier router', () => {
     const carriers = carriersFor(identity, relayOnly);
     let asked = 0;
     const router = new DaemonCarrierRouter({
+      preference: () => 'auto',
       crypto: relayCrypto,
       deviceKey,
       dial: carriers.dial,
@@ -1089,6 +1096,7 @@ describe('the carrier router', () => {
     const carriers = carriersFor(identity, relayOnly);
     let refuseDirect = (): void => {};
     const router = new DaemonCarrierRouter({
+      preference: () => 'auto',
       crypto: relayCrypto,
       deviceKey,
       heartbeat: () => () => undefined,
@@ -1125,6 +1133,7 @@ describe('the carrier router', () => {
     });
     const carriers = carriersFor(identity, relayOnly);
     const router = new DaemonCarrierRouter({
+      preference: () => 'auto',
       crypto: relayCrypto,
       deviceKey,
       // The unpair lands while the FIRST rendezvous is still shaking hands.
@@ -1235,6 +1244,7 @@ describe('the carrier router', () => {
     const carriers = carriersFor(identity, () => 'live');
     const appSession = 'AAAAAAAAAAAAAAAAAAAAAA';
     const router = new DaemonCarrierRouter({
+      preference: () => 'auto',
       crypto: relayCrypto,
       deviceKey,
       appSession,
@@ -1268,6 +1278,7 @@ describe('the carrier router meeting a daemon from before device keys', () => {
     const carriers = carriersFor(identity, reach);
     const asked: string[] = [];
     const router = new DaemonCarrierRouter({
+      preference: () => 'auto',
       crypto: relayCrypto,
       deviceKey,
       dial: carriers.dial,
@@ -1332,6 +1343,7 @@ describe('the carrier router meeting a daemon from before device keys', () => {
     const older = olderDaemonDial();
     const dialled: string[] = [];
     const router = new DaemonCarrierRouter({
+      preference: () => 'auto',
       crypto: relayCrypto,
       deviceKey,
       heartbeat: () => () => undefined,
@@ -1375,6 +1387,7 @@ describe('the carrier router meeting a daemon from before device keys', () => {
     const older = olderDaemonDial();
     const live = carriersFor(identity, url => (url.hostname === 'relay-two.example' ? 'live' : 'refuse'));
     const router = new DaemonCarrierRouter({
+      preference: () => 'auto',
       crypto: relayCrypto,
       deviceKey,
       heartbeat: () => () => undefined,
@@ -1415,6 +1428,7 @@ describe('the carrier router meeting a daemon NEWER than this app', () => {
     });
     const carriers = carriersFor(identity, () => 'refuse');
     const router = new DaemonCarrierRouter({
+      preference: () => 'auto',
       crypto: relayCrypto,
       deviceKey,
       dial: carriers.dial,
@@ -1465,6 +1479,7 @@ describe('the carrier router meeting a daemon NEWER than this app', () => {
     });
     const newerDaemon = newerDaemonDial();
     const router = new DaemonCarrierRouter({
+      preference: () => 'auto',
       crypto: relayCrypto,
       deviceKey,
       heartbeat: () => () => undefined,
@@ -1502,6 +1517,7 @@ describe('the carrier router meeting a daemon that no longer accepts this device
     });
     const network = carriersFor(identity, reach, { devicePublicKey: (await testDevice()).publicKey });
     const router = new DaemonCarrierRouter({
+      preference: () => 'auto',
       crypto: relayCrypto,
       deviceKey,
       dial: network.dial,
@@ -1588,6 +1604,7 @@ describe('the carrier router meeting a daemon that no longer accepts this device
       },
     });
     const router = new DaemonCarrierRouter({
+      preference: () => 'auto',
       crypto: relayCrypto,
       deviceKey,
       dial: () => live.dial(),
@@ -1618,6 +1635,7 @@ describe('the carrier router meeting a daemon that no longer accepts this device
       },
     });
     const router = new DaemonCarrierRouter({
+      preference: () => 'auto',
       crypto: relayCrypto,
       deviceKey,
       dial: () => live.dial(),
@@ -1653,6 +1671,7 @@ describe('the carrier router opening a stream', () => {
     });
     const carriers = carriersFor(identity, reach, answer);
     const router = new DaemonCarrierRouter({
+      preference: () => 'auto',
       crypto: relayCrypto,
       deviceKey,
       dial: carriers.dial,
@@ -1717,6 +1736,7 @@ describe('the carrier router opening a stream', () => {
     const daemon = daemonConnection({ daemonId: identity.daemonId, baseUrl: DAEMON_URL, deviceId: DEVICE_ID });
     const carriers = carriersFor(identity, () => 'live');
     const router = new DaemonCarrierRouter({
+      preference: () => 'auto',
       crypto: relayCrypto,
       deviceKey: async () => undefined,
       dial: carriers.dial,
@@ -1762,6 +1782,7 @@ describe('the carrier router defaults', () => {
     const identity = await newDaemonIdentity();
     const daemon = daemonConnection({ daemonId: identity.daemonId, baseUrl: DAEMON_URL, deviceId: DEVICE_ID });
     const router = new DaemonCarrierRouter({
+      preference: () => 'auto',
       crypto: relayCrypto,
       deviceKey,
       dial: carriersFor(identity, () => 'refuse').dial,
@@ -1802,6 +1823,7 @@ describe('the carrier router meeting a passkey step-up', () => {
       },
     });
     const router = new DaemonCarrierRouter({
+      preference: () => 'auto',
       crypto: relayCrypto,
       deviceKey,
       dial: carriers.dial,
@@ -2023,6 +2045,7 @@ describe('the carrier router meeting a presence requirement', () => {
       },
     });
     const router = new DaemonCarrierRouter({
+      preference: () => 'auto',
       crypto: relayCrypto,
       deviceKey,
       dial: carriers.dial,

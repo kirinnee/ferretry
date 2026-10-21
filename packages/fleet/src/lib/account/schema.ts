@@ -169,6 +169,12 @@ export const MACHINE_SHAPE = {
    * Not a loosening: it changes how the one browser draws, not what an agent may do with it.
    */
   browserMode: BrowserModeSchema.default('headless'),
+  /**
+   * "Auto-resume after restart": when the daemon boots and finds ferrets that were running when the host
+   * went down, it resumes them with their conversation intact. On by default; sessions the owner stopped
+   * stay stopped. Read when the daemon starts.
+   */
+  autoResume: z.boolean().default(true),
 };
 
 export const MachineSchema = z.strictObject(MACHINE_SHAPE).prefault({});

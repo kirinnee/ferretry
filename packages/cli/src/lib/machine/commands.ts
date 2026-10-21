@@ -46,6 +46,7 @@ export function renderMachine(machine: FleetMachineView, binaryName: string): st
       `Agent permissions: ${machine.agentPermissions === 'auto' ? 'auto (the tool decides what needs asking)' : 'skip (agents are never asked)'}`,
       `Default runtime for new agents: ${machine.defaultRuntime ?? 'none set, and no claude-default runtime exists yet'}`,
       `What agents may control: ${AGENT_CONTROL_WORDS(machine.agentControl)}`,
+      ...autoResumeLines(machine),
       `Sessions running: ${machine.runningSessions}`,
       'Tools:',
       ...machine.tools.map(
@@ -57,6 +58,21 @@ export function renderMachine(machine: FleetMachineView, binaryName: string): st
       ? []
       : ['', `Set it up with \`${binaryName} daemon setup\`, or pair a phone and finish in the app.`]),
   ].join('\n');
+}
+
+/** "Auto-resume after restart" and what the last pass did, in words; nothing for a daemon that predates it. */
+function autoResumeLines(machine: FleetMachineView): string[] {
+  if (machine.autoResume === undefined) return [];
+  const last = machine.lastAutoResume;
+  return [
+    `Auto-resume after restart: ${machine.autoResume ? 'on' : 'off'}`,
+    ...(last === null || last === undefined
+      ? []
+      : [
+          `  Last restart: resumed ${last.resumed} ferret${last.resumed === 1 ? '' : 's'} (${last.at})`,
+          ...last.skipped.map(item => `  Couldn't auto-resume ${item.sessionId}: ${item.reason}`),
+        ]),
+  ];
 }
 
 /** How installing one tool ended, in words. */
@@ -135,6 +151,7 @@ function machineSettingsEdit(
   agentPermissions: FleetMachineView['agentPermissions'];
   defaultRuntime: string | null;
   agentControl: FleetAgentControl;
+  autoResume?: boolean;
 } {
   const base = {
     agentPermissions: current.agentPermissions,
@@ -166,6 +183,11 @@ function machineSettingsEdit(
     const field = AGENT_CONTROL_FIELDS[kind as AgentControlWord];
     return { ...base, agentControl: { ...base.agentControl, [field]: state === 'on' } };
   }
+  if (setting === 'auto-resume') {
+    const [state] = value;
+    if (state !== 'on' && state !== 'off') throw new AccountCommandError('Say on or off.');
+    return { ...base, autoResume: state === 'on' };
+  }
   throw new AccountCommandError(
     `"${setting}" is not a machine setting. Try: ${binaryName} machine set agent-permissions auto`,
   );
@@ -185,9 +207,9 @@ export function registerMachineCommands(program: Command, deps: AccountCommandDe
     machine
       .command('set')
       .description(
-        'change a machine setting: agent-permissions auto|skip, default-runtime <name>|automatic, agent-control terminals|browsers|files|settings on|off',
+        'change a machine setting: agent-permissions auto|skip, default-runtime <name>|automatic, agent-control terminals|browsers|files|settings on|off, auto-resume on|off',
       )
-      .argument('<setting>', 'agent-permissions, default-runtime, or agent-control')
+      .argument('<setting>', 'agent-permissions, default-runtime, agent-control, or auto-resume')
       .argument('<value...>', 'the new value — two words for agent-control'),
   ).action(async (setting: string, value: string[], _options: unknown, command: Command) => {
     const options = mergedOptions(command);

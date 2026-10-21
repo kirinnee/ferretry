@@ -55,9 +55,9 @@ import {
   type ConnectionChoice,
   type ConnectionMethod,
   type ConnectionProbe,
+  type ConnectionSkip,
   carrierProbe,
   chooseConnection,
-  type ConnectionSkip,
   connectionSocketUrl,
   describeConnectionMethod,
   HEARTBEAT_GRACE_SECONDS,
@@ -930,7 +930,7 @@ export interface DaemonCarrierRouterOptions {
   readonly hostedRelay?: () => Promise<string | undefined>;
   /**
    * THIS BROWSER'S CONNECTION PREFERENCE FOR ONE MACHINE (§15 "The choice"), read at the start of every
-   * walk. Absent is Auto for every machine. A change must be followed by {@link DaemonCarrierRouter.rewalk},
+   * walk. Absent is Relay (the default) for every machine. A change must be followed by {@link DaemonCarrierRouter.rewalk},
    * which forgets the winner the old preference chose.
    */
   readonly preference?: (daemonId: DaemonId) => CarrierPreference;

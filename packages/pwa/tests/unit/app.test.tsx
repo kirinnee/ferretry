@@ -64,6 +64,7 @@ import { NUDGE_SETTLE_MS } from '../../src/components/session-workspace-model.ts
 import { CARRIER_NO_FALLBACK } from '../../src/features/carrier/active-carrier-card.tsx';
 import { PALETTE_PULL_THRESHOLD_PX, PULL_TO_PALETTE_ATTR } from '../../src/hooks/use-pull-to-palette.ts';
 import { themePreferences } from '../../src/hooks/use-theme.ts';
+import { CARRIER_PREFERENCE_KEY, CarrierPreferenceStore } from '../../src/lib/carrier-preference.ts';
 import type { DaemonConnectionRepository } from '../../src/lib/connections.ts';
 import { type DaemonConnection, type DaemonId, daemonConnection, daemonId } from '../../src/lib/daemon-connection.ts';
 import { daemonSessionScope } from '../../src/lib/daemon-scope.ts';
@@ -72,7 +73,6 @@ import { type DaemonCarrierRouter, DEVICE_NOT_ACCEPTED_SENTENCE } from '../../sr
 import { RouterProvider } from '../../src/lib/router.tsx';
 import { SCROLL_MEMORY_KEY, type ScrollMemoryStorage } from '../../src/lib/scroll-memory.ts';
 import { SessionCache, type SessionCacheBackend } from '../../src/lib/session-cache.ts';
-import { CarrierPreferenceStore } from '../../src/lib/carrier-preference.ts';
 import { type AppStore, createAppStore, StoreProvider } from '../../src/lib/store.tsx';
 import { openWorkspaceTab, workspaceTab } from '../../src/lib/workspace-layout.ts';
 import { UPDATE_CHIP } from '../../src/shell/app-bar.tsx';
@@ -101,6 +101,17 @@ const ALPHA_IDENTITY = await newDaemonIdentity();
 const BETA_IDENTITY = await newDaemonIdentity();
 const GAMMA_IDENTITY = await newDaemonIdentity();
 const ALPHA = ALPHA_IDENTITY.daemonId;
+const autoCarrierPreferences = (): CarrierPreferenceStore => {
+  const stored = new Map<string, string>();
+  stored.set(
+    CARRIER_PREFERENCE_KEY,
+    JSON.stringify(Object.fromEntries([ALPHA, BETA, GAMMA_ID, alphaRelayed.daemonId].map(id => [id, 'auto']))),
+  );
+  return new CarrierPreferenceStore({
+    getItem: key => stored.get(key) ?? null,
+    setItem: (key, value) => void stored.set(key, value),
+  });
+};
 const BETA = BETA_IDENTITY.daemonId;
 const DEVICE_KEY = (await testDevice()).privateKey;
 const alpha = daemonConnection({
@@ -546,7 +557,8 @@ const appStore = async (
   return await createAppStore({
     repository: new MemoryRepository(),
     // In memory, never this browser's storage: a preference one case picks must not narrow the next one's walk.
-    carrierPreferences: new CarrierPreferenceStore(undefined),
+    // Every machine is on Auto here, because these cases prove the walk (direct first); Relay is the default elsewhere.
+    carrierPreferences: autoCarrierPreferences(),
     sessionCacheBackend: options.sessionCacheBackend ?? null,
     scrollMemoryStorage: options.scrollMemoryStorage ?? null,
     // The reconnect loop never arms a real timer here: a suite drives recovery by sending requests.

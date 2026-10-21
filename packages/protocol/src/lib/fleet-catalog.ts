@@ -32,6 +32,7 @@
  * Every object is strict, so a field the daemon grew without adding it here fails the response.
  */
 import { z } from 'zod';
+import { AutoResumeSummarySchema } from './auto-resume.ts';
 import { BrowserModeSchema } from './browser.ts';
 import { InstantSchema, NonEmptyStringSchema, NonNegativeIntegerSchema } from './common.ts';
 import {
@@ -164,6 +165,14 @@ export const FleetMachineViewSchema = z.strictObject({
    * daemon, which has no such setting and runs headless.
    */
   browserMode: BrowserModeSchema.optional(),
+  /**
+   * "Auto-resume after restart": when the daemon boots and finds ferrets that were running when the host
+   * went down, it resumes them with their conversation intact. Optional only so a newer app can read an
+   * older daemon, which has no such setting (and does not do it).
+   */
+  autoResume: z.boolean().optional(),
+  /** What the last auto-resume pass did, or `null` when none has run. Left out by an older daemon. */
+  lastAutoResume: AutoResumeSummarySchema.nullable().optional(),
   tools: z.array(FleetMachineToolSchema).readonly(),
   runtimeCount: NonNegativeIntegerSchema,
   runningSessions: NonNegativeIntegerSchema,
@@ -698,6 +707,8 @@ export const FleetAccountChangeSchema = z.discriminatedUnion('kind', [
     agentControl: FleetAgentControlSchema.extend({ ferretrySettings: z.boolean().optional() }),
     /** Left out by a client that predates it, and then left as it is. */
     browserMode: BrowserModeSchema.optional(),
+    /** Left out by a client that predates it, and then left as it is. */
+    autoResume: z.boolean().optional(),
   }),
   z.strictObject({
     kind: z.literal('setup.import'),

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'bun:test';
 import { BROWSER_LOGIN_PATH } from '../../src/lib/browser-login.ts';
 import type { DaemonConnectionRepository } from '../../src/lib/connections.ts';
 import { createAppStore } from '../../src/lib/store.tsx';
-import { autoDial, dialByHost, keyedDaemon, relayCrypto } from '../support/relay.ts';
+import { AutoCarrierPreferences, autoDial, dialByHost, keyedDaemon, relayCrypto } from '../support/relay.ts';
 
 class MemoryRepository implements DaemonConnectionRepository {
   readonly values = new Map<string, string>();
@@ -44,6 +44,7 @@ describe('the app store’s browser-login port', () => {
     const otherScripted = autoDial(other.identity);
     const store = await createAppStore({
       repository: new MemoryRepository(),
+      carrierPreferences: new AutoCarrierPreferences(undefined),
       deviceKeys,
       relayCrypto,
       relayDial: dialByHost({ 'alpha.example.test': scripted.dial, 'beta.example.test': otherScripted.dial }).dial,

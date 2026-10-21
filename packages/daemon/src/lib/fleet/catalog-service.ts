@@ -53,6 +53,7 @@ import {
   skillSourceReference,
 } from '@ferretry/fleet';
 import type {
+  AutoResumeSummary,
   FleetAccountChange,
   FleetAccountChangeOutcome,
   FleetAccountChangePreview,
@@ -215,6 +216,8 @@ export interface FleetCatalogServiceDeps {
   modelCatalogs?(): Promise<ModelCatalogSources>;
   /** The fleet manifest as it is published now, unparsed; `undefined` when there is none. */
   publishedManifest?(): Promise<unknown>;
+  /** The last auto-resume pass after a restart, for the Machine view; `null` when none has run. */
+  lastAutoResume?(): Promise<AutoResumeSummary | null>;
   /** The first-run import and clone executors. Absent means "not available on this machine yet". */
   readonly executors?: {
     readonly setup?: AccountChangeExecutor<SetupChange>;
@@ -600,6 +603,7 @@ export class FleetCatalogService {
       missingCommands,
       credentialStatus: await this.#credentialStatus(),
       acceptsAutoPermissionMode: this.deps.acceptsAutoPermissionMode,
+      lastAutoResume: (await this.deps.lastAutoResume?.()) ?? null,
       ...(await this.#modelCatalogs()),
     };
   }

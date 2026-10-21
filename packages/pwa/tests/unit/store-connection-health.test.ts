@@ -6,13 +6,20 @@
 
 import { describe, expect, it } from 'bun:test';
 import type { FyApiClient } from '@ferretry/protocol/client';
+import { startSessionEventStream } from '../../src/components/session-event-stream-model.ts';
 import type { ConnectionHealthEnvironment, DaemonConnectionHealth } from '../../src/lib/connection-health.ts';
 import type { ConnectionSignal } from '../../src/lib/connection-signals.ts';
 import type { DaemonConnectionRepository } from '../../src/lib/connections.ts';
 import type { DaemonId } from '../../src/lib/daemon-connection.ts';
-import { startSessionEventStream } from '../../src/components/session-event-stream-model.ts';
 import { createAppStore } from '../../src/lib/store.tsx';
-import { autoDial, keyedDaemon, relayCrypto, ScriptedSocket, settle } from '../support/relay.ts';
+import {
+  AutoCarrierPreferences,
+  autoDial,
+  keyedDaemon,
+  relayCrypto,
+  ScriptedSocket,
+  settle,
+} from '../support/relay.ts';
 
 class MemoryRepository implements DaemonConnectionRepository {
   readonly values = new Map<string, string>();
@@ -61,6 +68,7 @@ describe('the store’s connection health', () => {
     const timers = manualHealthEnvironment();
     let signal: ((kind: ConnectionSignal) => void) | undefined;
     const store = await createAppStore({
+      carrierPreferences: new AutoCarrierPreferences(undefined),
       repository: new MemoryRepository(),
       connectClient: async () => ({}) as unknown as FyApiClient,
       fetcher: async () => Response.json({}),
@@ -103,6 +111,7 @@ describe('the store’s connection health', () => {
   it('attempts nothing for a daemon that is no longer paired', async () => {
     const timers = manualHealthEnvironment();
     const store = await createAppStore({
+      carrierPreferences: new AutoCarrierPreferences(undefined),
       repository: new MemoryRepository(),
       connectClient: async () => ({}) as unknown as FyApiClient,
       fetcher: async () => Response.json({}),
@@ -139,6 +148,7 @@ describe('the store’s connection health', () => {
     const timers = manualHealthEnvironment();
     let signal: ((kind: ConnectionSignal) => void) | undefined;
     const store = await createAppStore({
+      carrierPreferences: new AutoCarrierPreferences(undefined),
       repository: new MemoryRepository(),
       connectClient: async () => ({}) as unknown as FyApiClient,
       fetcher: async () => Response.json({}),

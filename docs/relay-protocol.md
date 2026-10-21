@@ -29,16 +29,18 @@ There are four **kinds** of carrier and one security model across all of them. T
 describe the first two; §15 adds WebRTC and the hosted Cloudflare tunnel, and the per-device choice
 among them. Which carriers a daemon holds is the daemon's answer rather than the browser's.
 
-| Carrier    | What it is                                                                      | Where it belongs                                                              |
-| ---------- | ------------------------------------------------------------------------------- | ----------------------------------------------------------------------------- |
-| **Direct** | The browser opens a WebSocket straight at the daemon, and runs a session on it. | Attempted first, automatically, whenever the daemon is reachable.             |
-| **Relay**  | A Cloudflare Worker + Durable Object forwarding opaque frames it cannot read.   | The automatic fallback when direct is not. Up to four; Ferretry operates one. |
+| Carrier    | What it is                                                                      | Where it belongs                                                  |
+| ---------- | ------------------------------------------------------------------------------- | ----------------------------------------------------------------- |
+| **Direct** | The browser opens a WebSocket straight at the daemon, and runs a session on it. | Attempted first under **Auto** (§15), and in first contact (§14). |
+| **Relay**  | A Cloudflare Worker + Durable Object forwarding opaque frames it cannot read.   | The **default** carrier (§15). Up to four; Ferretry operates one. |
 
 **The default asks nothing; a choice exists for whoever wants one.** The owner decided on 2026-10-21
 that a person may choose a carrier per device and machine — Auto, WebRTC only, tunnel only or relay
-only (§15) — and that **Auto is the default**: direct first, because direct has fewer hops and fewer
-observers; then WebRTC; then a tunnel when the daemon published one; then each rendezvous it published,
-in the daemon's own order. This retires the earlier rule that a conforming product has no carrier
+only (§15) — and a later decision the same day made **Relay the default**, with no Auto mode unless it
+is chosen: a device and machine nobody chose for goes through the relay (each rendezvous the daemon
+published, in its own order, then the hosted fallback). Auto stays an explicit option — direct first,
+because direct has fewer hops and fewer observers; then WebRTC; then a tunnel when the daemon published
+one; then the relays. This retires the earlier rule that a conforming product has no carrier
 chooser. What it does not retire: nothing has to be chosen to work, a carrier is still chosen by
 trying it, there is no silent degradation, and a surface that shows a connection without naming its
 carrier and why the others were passed over is not conforming. The interim three-way chooser that was
@@ -2262,16 +2264,16 @@ and §7's records, and nothing a carrier operator holds can read, alter or inser
 
 **A connection preference is per device and per machine**, chosen in the PWA's Settings › This
 device and in the Connection status popover, and stored in that browser keyed by the daemon's
-fingerprint. It is never sent to the daemon and the daemon never reads one: the daemon still
+fingerprint. **Relay is the default**: a machine with no stored choice is walked as Relay only, and Auto is a value a person has to pick (so it is stored, where Relay is stored as nothing). A device that held the earlier Auto-by-absence default moves to Relay on its first read of the current storage key; a deliberate WebRTC-only or Tunnel-only choice is carried forward as it was. It is never sent to the daemon and the daemon never reads one: the daemon still
 publishes the carriers it holds (§13), and the preference decides only which of them this browser
 walks, and in what order.
 
-| Preference      | Walk                                        | Notes                                                                                                                                                                                                                                                                    |
-| --------------- | ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| **Auto**        | direct → WebRTC → tunnel → relay            | The default. Direct stays first because it has the fewest parties; WebRTC is the first remote carrier. A tunnel is tried only when the daemon published one. A WebRTC attempt costs about 0.4 s when it works and is bounded by its ICE deadline when it does not (§16). |
-| **WebRTC only** | WebRTC                                      | The relay (or direct) session is still used to **introduce** the two ends — signalling only, never the session's bytes.                                                                                                                                                  |
-| **Tunnel only** | tunnel                                      | Says "not set up by the operator" when the hosted service advertises `available: false`, and "this machine has no tunnel yet" when the daemon published none.                                                                                                            |
-| **Relay only**  | relay (published, then the hosted fallback) | Exactly the pre-choice relay behaviour.                                                                                                                                                                                                                                  |
+| Preference      | Walk                                        | Notes                                                                                                                                                                                                                                                                                  |
+| --------------- | ------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Auto**        | direct → WebRTC → tunnel → relay            | Chosen, never the default. Direct stays first because it has the fewest parties; WebRTC is the first remote carrier. A tunnel is tried only when the daemon published one. A WebRTC attempt costs about 0.4 s when it works and is bounded by its ICE deadline when it does not (§16). |
+| **WebRTC only** | WebRTC                                      | The relay (or direct) session is still used to **introduce** the two ends — signalling only, never the session's bytes.                                                                                                                                                                |
+| **Tunnel only** | tunnel                                      | Says "not set up by the operator" when the hosted service advertises `available: false`, and "this machine has no tunnel yet" when the daemon published none.                                                                                                                          |
+| **Relay only**  | relay (published, then the hosted fallback) | **The default** for every device and machine that has not chosen — exactly the pre-choice relay behaviour.                                                                                                                                                                             |
 
 The walk's rules from §13 are unchanged inside each preference: the carrier is chosen by **trying**
 it, only a transport failure from a replay-safe request advances, a winner is remembered for the
@@ -2535,7 +2537,7 @@ one). That is stated as a gap, not solved.
 
 ## 16. The WebRTC carrier
 
-§15 is the carrier choice, where the owner made WebRTC the default remote carrier. This section is the
+§15 is the carrier choice, where the owner first made WebRTC the preferred remote carrier and then made Relay the default. This section is the
 WebRTC carrier itself: what crosses which wire, what it may and may not change, the native engine
 that carries it on the daemon, and what has been measured. It is built in stacked steps, and "What is
 built, and what is not" at the end of this section says which step this repository is at; every
@@ -2550,7 +2552,7 @@ Each data channel then carries **exactly what a direct WebSocket carries** (§4)
 frames (§3), the same handshake against the pinned fingerprint (§6), the same records (§7), the same
 device proof, lease and §14 modes. Nothing above the channel knows which carrier it is on.
 
-What that buys over the relay, and why it is the default remote carrier:
+What that buys over the relay, and why it is the preferred remote carrier under Auto or WebRTC only:
 
 - **One leg instead of two.** A relayed byte goes phone → edge → home; a peer-to-peer byte goes phone
   → home. The relay's Durable Object sits where it was first created, near the daemon, so a phone far
@@ -2821,7 +2823,7 @@ rendezvous.
   the page's connection, as every winner does (§13, "The walk", rule 4); WebRTC is tried again only
   when that carrier fails or the page reloads. A background upgrade would be a second, racing walk,
   which §13 rules out until it can still say why each carrier won.
-- **GAP — first contact still pays the direct attempt.** Auto tries direct first (§15), so a page away
+- **GAP — first contact still pays the direct attempt.** Auto tries direct first (§15; the default, Relay, never reaches WebRTC), so a page away
   from home waits out its 4 seconds before WebRTC is even introduced; the measured 5.6–13.1 s above
   includes it.
 - **GAP — no NAT is in any test.** Both peers run on one machine, so ICE pairs host candidates;

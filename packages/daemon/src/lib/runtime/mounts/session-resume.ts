@@ -1,11 +1,11 @@
 import { ResumeSessionRequestSchema, type SessionView } from '@ferretry/protocol';
-import { parseActor, type ApiActor } from '../../api/actor.ts';
+import { type ApiActor, parseActor } from '../../api/actor.ts';
 import { parseOptionalBody } from '../../api/body.ts';
 import { ApiError } from '../../api/error.ts';
-import { decodeParameter, type ApiResponse } from '../../api/http.ts';
+import { type ApiResponse, decodeParameter } from '../../api/http.ts';
 import { jsonResponse } from '../../api/responses.ts';
 import type { ApiRoute, RouteContext } from '../../api/route.ts';
-import { ResumeActorSchema, type ResumeActor } from '../../session/resume/index.ts';
+import { type ResumeActor, ResumeActorSchema, type ResumePolicy } from '../../session/resume/index.ts';
 
 /**
  * Reviving a stopped or dead session with its conversation intact: `POST /v1/sessions/:sessionId/resume`.
@@ -71,7 +71,16 @@ export class SessionResumeError extends Error {
  * terminal back, while an auto session gets the default resume prompt.
  */
 export interface SessionResumeSubsystem {
-  resume(sessionId: string, actor: ResumeActor, message: string | undefined): Promise<SessionView>;
+  /**
+   * `policy` is for the daemon's own automatic callers (the restart auto-resume), which must name the
+   * guard they were scheduled against; an HTTP revive never passes one.
+   */
+  resume(
+    sessionId: string,
+    actor: ResumeActor,
+    message: string | undefined,
+    policy?: ResumePolicy,
+  ): Promise<SessionView>;
 }
 
 /** The HTTP status and code each refusal answers with. */

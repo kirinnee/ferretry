@@ -220,6 +220,37 @@ failing (`packages/protocol/src/lib/daemon-restart.ts`):
   call already waiting; the next `fy` invocation finds it.
 - A browser waits through a restart with its own "restarting" state; it does not use this client policy.
 
+## After the host restarts: auto-resume
+
+A daemon restart leaves the ferrets running (above). A **host** restart — a reboot, a crash, a logout
+that tears down the user's processes — does not: the daemon's tmux server goes with it, and every pane
+is gone while the session records still say they were running. **Auto-resume brings those ferrets back
+with their conversation intact.** It is a per-machine setting, **on by default**: Settings › Machine ›
+_Auto-resume after restart_, or `fy machine set auto-resume on|off` (`fy machine` shows it, and the last
+pass).
+
+- **What counts as "was running".** The daemon's FIRST self-check after boot settles every session whose
+  terminal is gone. Those it settles because the pane vanished — not a pane that exited with a status, not a
+  session a person stopped or that finished — are written to `<state home>/auto-resume.json` _before_
+  anything is attempted, so a second power cut mid-pass loses nothing. A pane that dies on a daemon that
+  stayed up is an ordinary crash and is not auto-resumed.
+- **How.** After the daemon is serving, never before. It uses the revive a send uses
+  (`--resume <id>` / Codex resume; the bound conversation travels with it), two at a time, four
+  seconds apart. Each entry is removed from the ledger when it has been dealt with, and an entry older than
+  24 hours is dropped rather than revived.
+- **What the ferret is told.** Nothing, unless it was mid-turn: then one short Ferretry notice that the
+  machine restarted and the turn could not be checked (the same rule as a daemon restart). An idle
+  interactive ferret is relaunched without a first message.
+- **What is left alone.** A session someone stopped, one that finished, or one already revived by hand
+  stays as it is: only a session still `failed` is resumed.
+- **What is skipped, and said.** A session whose runtime or login is unavailable is not resumed; its
+  journal gets `couldn't auto-resume: <reason>` (a `session.auto_resume_skipped` event), and so does a
+  revive that failed. A resumed one gets `session.auto_resumed`.
+- **Where it shows.** The Machine tab shows "Resumed 5 ferrets after restart" with the skipped ones and
+  their reasons, from `lastAutoResume` on the machine view (`<state home>/auto-resume-summary.json`).
+- **Turned off** it resumes nothing and clears the ledger, so turning it on later does not revive a
+  reboot from days ago.
+
 ## Updating from an agent
 
 An agent (Claude Code, Codex) never runs the update itself. Claude Code's auto-mode safety checks

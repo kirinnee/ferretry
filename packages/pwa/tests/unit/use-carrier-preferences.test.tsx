@@ -3,7 +3,7 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
 import { useCarrierPreferences, useTunnelService } from '../../src/hooks/use-carrier-preferences.ts';
-import { type CarrierPreferences, CarrierPreferenceStore } from '../../src/lib/carrier-preference.ts';
+import { CarrierPreferenceStore, type CarrierPreferences } from '../../src/lib/carrier-preference.ts';
 import type { DaemonId } from '../../src/lib/daemon-connection.ts';
 import type { TunnelServiceState } from '../../src/lib/tunnel-service.ts';
 import { render, run, runAsync } from '../support/react.ts';
@@ -20,8 +20,8 @@ describe('useCarrierPreferences', () => {
     };
     const view = render(<Probe />);
     should(seen).eql({});
-    run(() => store.set(STUDIO, 'relay'));
-    should(seen).eql({ [STUDIO]: 'relay' });
+    run(() => store.set(STUDIO, 'tunnel'));
+    should(seen).eql({ [STUDIO]: 'tunnel' });
     run(() => view.unmount());
   });
 });

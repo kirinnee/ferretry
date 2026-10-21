@@ -256,6 +256,7 @@ const rig = async (
   };
   const connection = daemonConnection({ daemonId: identity.daemonId, baseUrl: URL_BASE, deviceId: DEVICE_ID });
   const router = new DaemonCarrierRouter({
+    preference: () => 'auto',
     crypto: relayCrypto,
     dial,
     heartbeat: () => () => undefined,
