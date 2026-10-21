@@ -86,18 +86,22 @@ export function SessionsBarRow({
             {question}
           </span>
         )}
-        {ferret === null ? null : (
-          <span className="fy-sbar__sub fy-sbar__ferret" data-sbar-ferret="">
-            <span aria-hidden="true" className="fy-sbar__initial">
-              {ferret.charAt(0).toUpperCase()}
+        {/* One wrapper so a compact bar can fold the ferret and the directory into the open row's
+            single second line; in the full bar it adds no box (`display: contents`). */}
+        <span className="fy-sbar__detail" data-sbar-detail="">
+          {ferret === null ? null : (
+            <span className="fy-sbar__sub fy-sbar__ferret" data-sbar-ferret="">
+              <span aria-hidden="true" className="fy-sbar__initial">
+                {ferret.charAt(0).toUpperCase()}
+              </span>
+              <span className="fy-sbar__ferret-name">{ferret}</span>
             </span>
-            <span className="fy-sbar__ferret-name">{ferret}</span>
+          )}
+          {/* Truncated from the left (`direction: rtl`), so the folder's own name survives; `bdi` keeps
+              the path's slashes reading left to right inside it. */}
+          <span className="fy-sbar__dir" data-sbar-dir="">
+            <bdi>{directory}</bdi>
           </span>
-        )}
-        {/* Truncated from the left (`direction: rtl`), so the folder's own name survives; `bdi` keeps
-            the path's slashes reading left to right inside it. */}
-        <span className="fy-sbar__dir" data-sbar-dir="">
-          <bdi>{directory}</bdi>
         </span>
       </RouteLink>
       {children}
