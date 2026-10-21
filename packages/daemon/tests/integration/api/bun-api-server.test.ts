@@ -12,6 +12,7 @@ import {
   type ApiServerHandle,
   ApiSocketDispatcher,
   BodyTooLargeError,
+  conditional,
   jsonResponse,
   MAX_REQUEST_BODY_BYTES,
   NO_GOVERNED_ROUTES_GUARD,
@@ -338,6 +339,39 @@ describe('BunApiServer', () => {
     should(lookalike.status).equal(403);
     should(await lookalike.json()).match({ code: 'cors_preflight_refused' });
     should(calls).equal(0);
+  });
+
+  it('should carry a conditional read across origins: the validator admitted, the tag exposed, a 304 bodyless', async () => {
+    // Arrange
+    const handle = await serve({
+      method: 'GET',
+      path: '/v1/sessions/:sessionId/logs',
+      minimum: 'none',
+      handle: async context =>
+        conditional(textResponse('the transcript'), context.request.headers.get('if-none-match')),
+    });
+    const origin = 'https://ferretry.pages.dev';
+    const path = `${handle.url}/v1/sessions/s1/logs`;
+
+    // Act
+    const preflight = await fetch(path, {
+      method: 'OPTIONS',
+      headers: { origin, 'access-control-request-method': 'GET', 'access-control-request-headers': 'If-None-Match' },
+    });
+    const first = await fetch(path, { headers: { origin } });
+    const etag = first.headers.get('etag') ?? '';
+    const again = await fetch(path, { headers: { origin, 'if-none-match': etag } });
+
+    // Assert
+    should(preflight.status).equal(204);
+    should(preflight.headers.get('access-control-allow-headers')).equal('if-none-match');
+    should(await first.text()).equal('the transcript');
+    should(first.headers.get('access-control-expose-headers')).containEql('etag');
+    should(etag).not.equal('');
+    should(again.status).equal(304);
+    should(await again.text()).equal('');
+    should(again.headers.get('etag')).equal(etag);
+    should(again.headers.get('access-control-allow-origin')).equal(origin);
   });
 
   it('should refuse unlisted origins and unsupported preflight capabilities before dispatch', async () => {

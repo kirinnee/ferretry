@@ -2,6 +2,8 @@ import { describe, it } from 'bun:test';
 import { FY_VERSION_HEADER } from '@ferretry/protocol';
 import should from 'should';
 import {
+  conditional,
+  entityTag,
   errorResponse,
   jsonResponse,
   methodNotAllowedResponse,
@@ -122,5 +124,69 @@ describe('noStore', () => {
     should(marked.headers.get('x-trace')).equal('abc');
     should(marked.body).equal(original.body);
     should(original.headers.has('cache-control')).be.false();
+  });
+});
+
+describe('entityTag', () => {
+  it('should name equal bodies alike and different bodies differently, as a strong quoted tag', () => {
+    // Act
+    const tag = entityTag('the transcript');
+
+    // Assert
+    should(tag).match(/^"[A-Za-z0-9_-]{43}"$/u);
+    should(entityTag('the transcript')).equal(tag);
+    should(entityTag('the transcript.')).not.equal(tag);
+  });
+});
+
+describe('conditional', () => {
+  it('should tag a response the request holds no validator for, leaving the rest of it as it was', () => {
+    // Arrange
+    const original = textResponse('the transcript');
+
+    // Act
+    const answered = conditional(original, undefined);
+
+    // Assert
+    should(answered.status).equal(200);
+    should(answered.body).equal('the transcript');
+    should(answered.headers.get('etag')).equal(entityTag('the transcript'));
+    should(answered.headers.get('content-type')).equal('text/plain; charset=utf-8');
+    should(original.headers.has('etag')).be.false();
+  });
+
+  it('should answer 304 with no body when the request already holds this tag', () => {
+    // Arrange
+    const tag = entityTag('the transcript');
+
+    // Act
+    const answered = conditional(textResponse('the transcript'), tag);
+
+    // Assert
+    should(answered.status).equal(304);
+    should(answered.body).equal('');
+    should(answered.headers.get('etag')).equal(tag);
+  });
+
+  it('should serve the whole body when the held tag names an older answer', () => {
+    // Act
+    const answered = conditional(textResponse('the transcript, moved on'), entityTag('the transcript'));
+
+    // Assert
+    should(answered.status).equal(200);
+    should(answered.body).equal('the transcript, moved on');
+  });
+
+  it('should match a tag anywhere in a list, weakly, and match a wildcard', () => {
+    // Arrange
+    const tag = entityTag('the transcript');
+
+    // Act
+    const listed = conditional(textResponse('the transcript'), `"other", W/${tag}`);
+    const wildcard = conditional(textResponse('the transcript'), '*');
+
+    // Assert
+    should(listed.status).equal(304);
+    should(wildcard.status).equal(304);
   });
 });

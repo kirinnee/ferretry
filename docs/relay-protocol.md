@@ -1620,6 +1620,15 @@ The daemon answers each request with one of:
 { "t": "res", "id": 1, "status": 200, "headers": { "content-type": "application/json" }, "body": "…" }
 ```
 
+**A conditional read is an ordinary request and answer**, because every byte a session carries is
+metered. `GET /v1/sessions/:id/logs` — the transcript tail the chat page re-reads every few seconds,
+tens to hundreds of kilobytes — carries a strong `etag`, a digest of the text after redaction. A
+request whose `if-none-match` names it is answered `304` with an empty body, and the client returns
+the body it holds for that exact path. The client holds the last 16 paths in memory, per connection;
+it sends a validator only for a path it holds, and treats any other `304` as an error, never as an
+empty transcript. An unchanged transcript costs its headers, a few hundred bytes. The same headers
+work on the direct path: `if-none-match` is an admitted CORS request header and `etag` an exposed one.
+
 **A body larger than one record travels in ordered parts**, in both directions. §7 caps plaintext at
 65492 bytes with the envelope inside it, so a sender cuts the body with the shared rule
 (`partitionTunnelBody` in `@ferretry/protocol`: each part's JSON-escaped UTF-8 fits what the envelope

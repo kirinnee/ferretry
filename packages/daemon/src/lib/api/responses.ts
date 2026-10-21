@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { FY_VERSION_HEADER } from '@ferretry/protocol';
 import { daemonVersion } from '../version.ts';
 import type { ApiResponse } from './http.ts';
@@ -66,6 +67,41 @@ export function methodNotAllowedResponse(method: string, path: string, allowed: 
   );
 }
 
+/**
+ * A strong validator for a body: a digest of its exact bytes, so the same answer always carries the
+ * same tag — across a daemon restart too, which is when a client most wants its last read confirmed.
+ *
+ * It is computed over the body AS SERVED, after every redaction, for two reasons. A tag over the raw
+ * evidence would let a client learn that something a redaction hides has changed, and it would match
+ * across a change to the redaction itself, handing the client back a body this daemon no longer serves.
+ */
+export function entityTag(body: string): string {
+  return `"${createHash('sha256').update(body).digest('base64url')}"`;
+}
+
+/** Whether `If-None-Match` names this tag. GET compares weakly (RFC 9110 §13.1.2), so `W/` is ignored. */
+function namesTag(ifNoneMatch: string, etag: string): boolean {
+  return ifNoneMatch
+    .split(',')
+    .map(candidate => candidate.trim())
+    .some(candidate => candidate === '*' || candidate.replace(/^W\//u, '') === etag);
+}
+
+/**
+ * A successful response made conditional: it carries an `etag`, and a request whose `If-None-Match`
+ * already names it is answered `304` with an empty body instead.
+ *
+ * WHY. A client that polls a large answer re-downloaded every byte of it each time, changed or not, and
+ * across a metered relay that is the whole cost of watching a quiet session. A `304` is the headers
+ * alone. The client keeps the body it already holds, so nothing about what it shows can differ.
+ */
+export function conditional(response: ApiResponse, ifNoneMatch: string | undefined): ApiResponse {
+  const etag = entityTag(response.body);
+  const headers = new Map(response.headers);
+  headers.set('etag', etag);
+  if (ifNoneMatch !== undefined && namesTag(ifNoneMatch, etag)) return { status: 304, headers, body: '' };
+  return { ...response, headers };
+}
 /** Marks a response as never cacheable. Used for anything carrying credentials or working-tree
  *  bytes, and for the machine feeds, whose whole value is freshness. */
 export function noStore(response: ApiResponse): ApiResponse {

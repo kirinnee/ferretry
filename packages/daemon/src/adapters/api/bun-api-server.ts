@@ -240,6 +240,7 @@ const CORS_METHODS = new Set(['DELETE', 'GET', 'PATCH', 'POST']);
 const CORS_REQUEST_HEADERS = new Set([
   'authorization',
   'content-type',
+  'if-none-match',
   'range',
   'x-ferretry-session-id',
   'x-fy-board-capability',
