@@ -305,19 +305,25 @@ li[data-pack-attempt='refused'] .fy-pack-attempt-outcome {
   margin: 0 0 8px;
 }
 
-/* On a phone the list spans the bar, 16px in from each edge, instead of hanging off the chip (which sits
-   wherever the name ends, so a chip-anchored list ran off the left of a 390px screen). */
-.fy-session-bar[data-compact] {
-  position: relative;
+/* Info's pack: the active list, and the finished ones one quiet toggle away. */
+.fy-sub-ferret-pack {
+  display: grid;
+  gap: 8px;
+  justify-items: start;
+  min-width: 0;
 }
-[data-compact] .fy-sub-ferret-indicator {
-  position: static;
+.fy-sub-ferret-finished-toggle {
+  background: transparent;
+  border: 0;
+  color: var(--accent);
+  cursor: pointer;
+  font: inherit;
+  font-size: var(--text-sm);
+  padding: 0;
 }
-[data-compact] .fy-sub-ferret-popover {
-  left: 16px;
-  right: 16px;
-  top: calc(100% - 4px);
-  width: auto;
+.fy-sub-ferret-finished-toggle:hover,
+.fy-sub-ferret-finished-toggle:focus-visible {
+  text-decoration: underline;
 }
 
 /* The small controls keep their size on a touch screen and get an invisible, centred 44px hit area, as
@@ -325,6 +331,7 @@ li[data-pack-attempt='refused'] .fy-pack-attempt-outcome {
 @media (pointer: coarse) {
   :root button.fy-sub-ferret-toggle,
   :root button.fy-sub-ferret-link,
+  :root button.fy-sub-ferret-finished-toggle,
   :root .fy-pack-fold summary {
     min-height: 0;
     min-width: 0;
@@ -332,6 +339,7 @@ li[data-pack-attempt='refused'] .fy-pack-attempt-outcome {
   }
   :root button.fy-sub-ferret-toggle::after,
   :root button.fy-sub-ferret-link::after,
+  :root button.fy-sub-ferret-finished-toggle::after,
   :root .fy-pack-fold summary::after {
     content: '';
     height: var(--target-floor);

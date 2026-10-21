@@ -1121,7 +1121,13 @@ button.fy-receipt {
   gap: 4px;
   outline: var(--outline-always, none);
   outline-offset: calc(-1 * var(--stroke-control, 1px));
-  padding: 4px;
+  /* THE INSET IS THE THEME'S: a control's own horizontal padding plus the stroke it is drawn with, so the
+     +, the mic and send keep the same breathing room from the frame in every family. A thick Neo or
+     Contrast border (and a heavy outline) would otherwise swallow the old flat 4px and leave the
+     controls hugging it. Vertical follows the theme's small gap on the same stroke. */
+  --composer-inset-x: calc(var(--pad-control-x, 10px) + var(--stroke-control, 1px));
+  --composer-inset-y: calc(var(--gap-sm, 6px) + var(--stroke-control, 1px));
+  padding: var(--composer-inset-y) var(--composer-inset-x);
 }
 .fy-composer-row:focus-within {
   border-color: var(--accent, var(--fy-accent));
@@ -1707,7 +1713,7 @@ button.fy-receipt {
 .fy-composer[data-composer-layout='phone'] .fy-composer-row {
   align-items: stretch;
   gap: var(--flow-1, 4px);
-  padding: var(--flow-1, 4px);
+  padding: calc(var(--gap-md, 10px) + var(--stroke-control, 1px)) var(--composer-inset-x);
 }
 .fy-composer[data-composer-layout='phone'] .fy-composer-dock {
   display: flex;
@@ -2181,9 +2187,15 @@ html[data-keyboard='open'] .fy-composer[data-composer-layout='phone'] .fy-compos
   }
 }
 
+/* ONE column that may shrink below its content: an implicit `auto` track is as wide as its widest
+   unbreakable line, so a long path or title widened every group past the phone and the page scrolled sideways. */
 .fy-session-groups {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: calc(var(--flow-4) + var(--fy-shadow-reach));
+}
+.fy-session-group {
+  min-width: 0;
 }
 
 /* The heading is a 32px line on the page; its 44px touch target grows UP into the gap above it, never

@@ -15,7 +15,7 @@
  *
  * IT IS ALSO THE EVIDENCE DRIVER. Set `COMPOSER_EVIDENCE_DIR` to an absolute directory outside the
  * repository and the last journey writes the screenshots the PR links: each editor style with
- * formatted content, the Vim indicator, and the two buttons, at desktop and phone, in three themes.
+ * formatted content, the Vim indicator, and the two buttons, at desktop and phone, in studio and neo, light and dark.
  */
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { mkdir } from 'node:fs/promises';
@@ -443,7 +443,11 @@ describe('the composer in a real browser', () => {
               const size = (selector: string) =>
                 Number.parseFloat(getComputedStyle(document.querySelector(selector) as Element).fontSize);
               const row = box('.fy-composer-row');
+              const rowStyle = getComputedStyle(document.querySelector('.fy-composer-row') as Element);
               return {
+                padX: Number.parseFloat(rowStyle.paddingLeft),
+                padY: Number.parseFloat(rowStyle.paddingTop),
+                borderX: Number.parseFloat(rowStyle.borderLeftWidth),
                 send: box('[data-composer-send]'),
                 interrupt: box('[data-composer-interrupt]'),
                 row,
@@ -461,6 +465,11 @@ describe('the composer in a real browser', () => {
             expect({ label, wider: measured.overflow > 0 }).toEqual({ label, wider: false });
             expect({ label, heading: measured.heading > measured.body }).toEqual({ label, heading: true });
             expect({ label, bold: measured.bold >= 600 }).toEqual({ label, bold: true });
+            // The controls keep real breathing room from the frame: at least 8px of padding past the border's
+            // own thickness on the sides (the theme's control padding plus its stroke, so Neo's thick frame
+            // gets more than Studio's hairline), and a comfortable inset above and below.
+            expect({ label, side: measured.padX >= measured.borderX + 8 }).toEqual({ label, side: true });
+            expect({ label, vertical: measured.padY >= measured.borderX + 4 }).toEqual({ label, vertical: true });
             // The buttons and the editor sit inside the row, never on its border.
             for (const inner of [measured.send, measured.interrupt, measured.editor]) {
               expect({ label, inside: inner.left >= measured.row.left && inner.right <= measured.row.right }).toEqual({
@@ -478,7 +487,7 @@ describe('the composer in a real browser', () => {
     }
   }, 120_000);
 
-  test('evidence: each editor style, the Vim indicator and the two buttons, three themes, desktop and phone', async () => {
+  test('evidence: each editor style, the Vim indicator and the two buttons, studio and neo in both modes, desktop and phone', async () => {
     if (evidenceDir === null) return;
     await mkdir(evidenceDir, { recursive: true });
     const sample = [
@@ -493,7 +502,7 @@ describe('the composer in a real browser', () => {
       'const sent = markdown;',
       '```',
     ].join('\n');
-    for (const theme of ['studio-light', 'neo-light', 'phosphor-dark'])
+    for (const theme of ['studio-light', 'studio-dark', 'neo-light', 'neo-dark'])
       for (const phone of [false, true]) {
         const device = phone ? 'phone' : 'desktop';
         for (const [name, parameters] of [
@@ -612,7 +621,7 @@ describe('the composer on a phone with the keyboard up', () => {
   test('evidence: keyboard up, a long draft and the @ list, three themes', async () => {
     if (evidenceDir === null) return;
     await mkdir(evidenceDir, { recursive: true });
-    for (const theme of ['studio-light', 'neo-light', 'phosphor-dark'])
+    for (const theme of ['studio-light', 'studio-dark', 'neo-light', 'neo-dark'])
       for (const editor of ['on', 'rich']) {
         const scene = await openWithKeyboard(theme, editor);
         try {

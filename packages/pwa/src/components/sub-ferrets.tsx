@@ -2,8 +2,10 @@
  * A PARENT'S VIEW OF ITS PACK — the sub-ferrets a ferret started, seen from the parent (docs/pack-mode.md).
  *
  * The child already says "Started by <parent>". This is the other direction, in two places that read the
- * same rows: the session bar's compact indicator ("3 sub-ferrets · 1 running", which opens the list) and
- * Info's lineage list. Each row is the sub-ferret's name as a link, how it is doing now — with the reason
+ * same rows: the desktop session bar's indicator ("3 sub-ferrets · 1 running", which opens the list) and
+ * Info's lineage list. Both are about the ACTIVE pack: a finished, stopped or failed sub-ferret is not
+ * counted in the bar and sits behind "Show finished (n)" in Info, so a long-running parent's history
+ * cannot flood either. A phone's bar draws no indicator at all — Info › Sub-ferrets is its way in. Each row is the sub-ferret's name as a link, how it is doing now — with the reason
  * when it failed, stopped or wants you — and the model it runs on (`lib/sub-ferret-state.ts`).
  *
  * The rows are live because the session list they come from is: the page re-reads it, and nothing here
@@ -15,6 +17,7 @@ import { Network } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import {
   type SubFerretReading,
+  subFerretLive,
   subFerretModel,
   subFerretName,
   subFerretState,
@@ -80,6 +83,10 @@ export function SubFerretRow({ item }: { readonly item: SubFerretItem }) {
   );
 }
 
+/** The sub-ferrets still at work: starting, working, at their prompt or waiting on you. */
+export const activeSubFerrets = (children: readonly SessionView[]): readonly SessionView[] =>
+  children.filter(view => subFerretLive(subFerretState(view)));
+
 export function SubFerretList({ items }: { readonly items: readonly SubFerretItem[] }) {
   return (
     <ul className="fy-sub-ferret-list" data-sub-ferret-list="">
@@ -91,17 +98,51 @@ export function SubFerretList({ items }: { readonly items: readonly SubFerretIte
 }
 
 /**
- * The session bar's indicator: the summary as a button that opens the list beneath it. On a phone only
- * the icon and the count show; the list is the same.
+ * Info's sub-ferrets: the active ones as a list, and the finished ones (done, stopped, failed) behind a
+ * "Show finished (n)" toggle. `sessions` is every sub-ferret, as `subFerretsOf` lists them.
+ */
+export function SubFerretsPack({
+  sessions,
+  onOpenSession,
+}: {
+  readonly sessions: readonly SessionView[];
+  readonly onOpenSession?: (sessionId: string) => void;
+}) {
+  const [showFinished, setShowFinished] = useState(false);
+  const active = activeSubFerrets(sessions);
+  const finished = sessions.filter(view => !active.includes(view));
+  return (
+    <div className="fy-sub-ferret-pack" data-sub-ferret-pack="">
+      {active.length === 0 ? <span className="fy-info-muted">None active</span> : null}
+      {active.length === 0 ? null : <SubFerretList items={subFerretItems(active, onOpenSession)} />}
+      {finished.length === 0 ? null : (
+        <>
+          <button
+            aria-expanded={showFinished}
+            className="fy-sub-ferret-finished-toggle"
+            data-sub-ferret-finished-toggle=""
+            onClick={() => setShowFinished(current => !current)}
+            type="button"
+          >
+            {showFinished ? 'Hide' : 'Show'} finished ({finished.length})
+          </button>
+          {showFinished ? <SubFerretList items={subFerretItems(finished, onOpenSession)} /> : null}
+        </>
+      )}
+    </div>
+  );
+}
+
+/**
+ * The desktop session bar's indicator: the summary of the ACTIVE sub-ferrets as a button that opens the
+ * list beneath it. Nothing active, nothing drawn. (The bar itself leaves it out on a phone.)
  */
 export function SubFerretIndicator({
   sessions,
-  compact,
   onOpenSession,
 }: {
-  /** The sub-ferrets, as `subFerretsOf` lists them. */
+  /** The sub-ferrets, as `subFerretsOf` lists them; only the active ones are shown and counted. */
   readonly sessions: readonly SessionView[];
-  readonly compact: boolean;
   readonly onOpenSession?: (sessionId: string) => void;
 }) {
   const [open, setOpen] = useState(false);
@@ -120,10 +161,11 @@ export function SubFerretIndicator({
       document.removeEventListener('pointerdown', close);
     };
   }, [open]);
-  if (sessions.length === 0) return null;
-  const summary = subFerretSummary(sessions);
+  const active = activeSubFerrets(sessions);
+  if (active.length === 0) return null;
+  const summary = subFerretSummary(active);
   const items = subFerretItems(
-    sessions,
+    active,
     onOpenSession === undefined
       ? undefined
       : (id: string) => {
@@ -135,7 +177,6 @@ export function SubFerretIndicator({
     <span className="fy-sub-ferret-indicator" data-sub-ferrets="" ref={root}>
       <button
         aria-expanded={open}
-        aria-label={compact ? summary : undefined}
         className="fy-sub-ferret-toggle"
         data-sub-ferret-toggle=""
         onClick={() => setOpen(current => !current)}
@@ -143,7 +184,7 @@ export function SubFerretIndicator({
         type="button"
       >
         <Network aria-hidden="true" size={13} />
-        <span>{compact ? String(sessions.length) : summary}</span>
+        <span>{summary}</span>
       </button>
       {open ? (
         <div className="fy-sub-ferret-popover" data-sub-ferret-popover="">
