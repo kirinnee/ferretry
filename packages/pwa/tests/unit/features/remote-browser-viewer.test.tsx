@@ -2,6 +2,7 @@ import { describe, expect, it } from 'bun:test';
 import { type BrowserInputEvent, type BrowserStatus, encodeBrowserStreamChunks } from '@ferretry/protocol';
 import type { ReactNode } from 'react';
 import { useLayoutEffect } from 'react';
+import type { TestRendererOptions } from 'react-test-renderer';
 import { type RemoteBrowserSocket, RemoteBrowserViewer } from '../../../src/features/browser/remote-browser-viewer.tsx';
 import { type DaemonConnection, daemonConnection } from '../../../src/lib/daemon-connection.ts';
 import { daemonSessionScope } from '../../../src/lib/daemon-scope.ts';
@@ -445,7 +446,7 @@ describe('RemoteBrowserViewer re-scoping', () => {
 /** The frame's on-screen box, fixed so pointer maths is arithmetic, not layout. */
 const frameRect = { left: 100, top: 50, width: 320, height: 240 };
 
-const interactive = (overrides: Record<string, unknown> = {}) => {
+const interactive = (overrides: Record<string, unknown> = {}, options?: TestRendererOptions) => {
   const sockets: FakeSocket[] = [];
   const activity: string[] = [];
   const renderer = render(
@@ -466,6 +467,7 @@ const interactive = (overrides: Record<string, unknown> = {}) => {
       revokeObjectUrl={() => undefined}
       {...overrides}
     />,
+    options,
   );
   const socket = sockets[0];
   if (socket === undefined) throw new Error('no socket was opened');
@@ -509,6 +511,7 @@ const keyEvent = (overrides: Record<string, unknown> = {}) => ({
   metaKey: false,
   shiftKey: false,
   nativeEvent: { isComposing: false },
+  getModifierState: () => false,
   preventDefault: () => {},
   ...overrides,
 });
@@ -628,6 +631,92 @@ describe('RemoteBrowserViewer input', () => {
     run(() => canvas.props.onKeyUp(keyEvent()));
     run(() => canvas.props.onBlur());
     expect(socket.inputs()).toHaveLength(2);
+  });
+
+  it('is a keyboard-owning surface whose real focus stop is the text sink', () => {
+    const { canvas, renderer } = interactive();
+    const sink = renderer.root.find(node => node.props.className === 'fy-remote-browser-sink');
+    expect(canvas.props['data-keyboard-capture']).toBe('');
+    expect(sink.props['data-keyboard-capture']).toBe('');
+    expect(sink.props.inputMode).toBe('none');
+    expect(sink.props['aria-label']).toContain('Shift+Escape');
+    expect(canvas.props.tabIndex).toBe(-1);
+    // Focus that lands on the canvas (a click) moves to the sink so IME can run.
+    run(() => canvas.props.onFocus());
+    expect(sink.props.rows).toBe(1);
+  });
+
+  it('moves focus from the canvas to the sink', () => {
+    let focused = 0;
+    const { canvas } = interactive(
+      {},
+      { createNodeMock: element => (element.type === 'textarea' ? { focus: () => (focused += 1) } : null) },
+    );
+    run(() => canvas.props.onFocus());
+    expect(focused).toBe(1);
+  });
+
+  it('sends every key the sink receives and releases them on blur', () => {
+    const { socket, renderer } = interactive();
+    const sink = renderer.root.find(node => node.props.className === 'fy-remote-browser-sink');
+    run(() => sink.props.onKeyDown(keyEvent({ key: 'R', code: 'KeyR', keyCode: 82, shiftKey: true })));
+    expect(socket.inputs()).toEqual([
+      expect.objectContaining({ kind: 'key', type: 'keyDown', key: 'R', text: 'R', modifiers: 8 }),
+    ]);
+    run(() => sink.props.onKeyUp(keyEvent({ key: 'R', code: 'KeyR', keyCode: 82, shiftKey: true })));
+    run(() => sink.props.onBlur());
+    expect(socket.inputs()).toHaveLength(2);
+  });
+
+  it('reports AltGr so a layout character is typed, not run as Ctrl+Alt', () => {
+    const { socket, canvas } = interactive();
+    run(() =>
+      canvas.props.onKeyDown(
+        keyEvent({
+          key: '@',
+          code: 'KeyQ',
+          altKey: true,
+          ctrlKey: true,
+          getModifierState: (name: string) => name === 'AltGraph',
+        }),
+      ),
+    );
+    expect(socket.inputs()[0]).toMatchObject({ text: '@', modifiers: 0 });
+  });
+
+  it('leaves composition and dead keys to the sink and commits the composed text as insertText', () => {
+    const { socket, activity, renderer } = interactive();
+    const sink = renderer.root.find(node => node.props.className === 'fy-remote-browser-sink');
+    let prevented = 0;
+    const keys = [
+      keyEvent({ key: 'Dead', keyCode: 192 }),
+      keyEvent({ key: 'a', keyCode: 229 }),
+      keyEvent({ key: 'Process', keyCode: 229 }),
+      keyEvent({ key: 'n', nativeEvent: { isComposing: true } }),
+    ];
+    for (const key of keys) run(() => sink.props.onKeyDown({ ...key, preventDefault: () => (prevented += 1) }));
+    expect(prevented).toBe(0);
+    expect(socket.inputs()).toEqual([]);
+
+    const field = { value: 'é' };
+    run(() => sink.props.onInput({ currentTarget: field, nativeEvent: { isComposing: true } }));
+    expect(socket.inputs()).toEqual([]);
+    run(() => sink.props.onCompositionEnd({ currentTarget: field, data: 'é' }));
+    expect(socket.inputs()).toEqual([{ kind: 'insertText', text: 'é' }]);
+    expect(field.value).toBe('');
+    expect(activity).toEqual(['keyboard']);
+  });
+
+  it('commits text a soft keyboard typed into the sink without a usable key press', () => {
+    const { socket, renderer } = interactive();
+    const sink = renderer.root.find(node => node.props.className === 'fy-remote-browser-sink');
+    const field = { value: '你好' };
+    run(() => sink.props.onInput({ currentTarget: field, nativeEvent: { isComposing: false } }));
+    expect(socket.inputs()).toEqual([{ kind: 'insertText', text: '你好' }]);
+    expect(field.value).toBe('');
+    // An empty value (the echo after the commit) sends nothing.
+    run(() => sink.props.onInput({ currentTarget: field, nativeEvent: { isComposing: false } }));
+    expect(socket.inputs()).toHaveLength(1);
   });
 
   it('sends a long paste as several whole text events, never splitting a character', () => {

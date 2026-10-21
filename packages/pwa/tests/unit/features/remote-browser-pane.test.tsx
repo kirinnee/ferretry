@@ -749,6 +749,7 @@ describe('RemoteBrowserPane text entry', () => {
         ctrlKey: false,
         metaKey: false,
         shiftKey: false,
+        getModifierState: () => false,
         nativeEvent: { isComposing: false },
         preventDefault: () => {
           prevented = true;
@@ -760,6 +761,8 @@ describe('RemoteBrowserPane text entry', () => {
       {
         kind: 'key',
         type: 'keyDown',
+        text: '\r',
+        unmodifiedText: '\r',
         key: 'Enter',
         code: 'Enter',
         windowsVirtualKeyCode: 13,

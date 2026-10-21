@@ -24,8 +24,8 @@
 
 import { describe, it } from 'bun:test';
 import { createHash } from 'node:crypto';
-import should from 'should';
 import type { BrowserInputEvent, BrowserScreencastFrame } from '@ferretry/protocol';
+import should from 'should';
 import { type ApiRequest, type ApiResponse, headersFrom } from '../../../daemon/src/lib/api/http.ts';
 import type { SocketDownstream, SocketFrame, SocketUpgradeDecision } from '../../../daemon/src/lib/api/socket.ts';
 import type { FrameClock } from '../../../daemon/src/lib/browser/transport/contracts.ts';
@@ -54,8 +54,8 @@ import {
 import { newDaemonIdentity } from '../../../relay/tests/support/identities.ts';
 import { FakeObjectState, type FakeSocket, testRuntime } from '../../../relay/tests/support/workers-fakes.ts';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
-import { daemonRequest } from '../../src/lib/daemon-transport.ts';
 import { daemonSessionScope } from '../../src/lib/daemon-scope.ts';
+import { daemonRequest } from '../../src/lib/daemon-transport.ts';
 import {
   DaemonCarrierRouter,
   openRelaySession,
@@ -64,15 +64,16 @@ import {
   relayTunnelRequest,
 } from '../../src/lib/relay-carrier.ts';
 import { redeemPairingInSession } from '../../src/lib/relay-pairing.ts';
-import { decodeRemoteBrowserFrame, remoteBrowserStreamSocketFactory } from '../../src/lib/remote-browser.ts';
 import {
   RELAY_DATA_BYTE_BUDGET,
   type RelayClientSession,
   RelaySessionError,
   type SessionDeviceClaim,
 } from '../../src/lib/relay-session.ts';
+import { decodeRemoteBrowserFrame, remoteBrowserStreamSocketFactory } from '../../src/lib/remote-browser.ts';
 import type { DaemonFetch } from '../../src/lib/runtime-models.ts';
 import { browserTerminalStreamAttach, type TerminalStream } from '../../src/lib/web-terminals.ts';
+import { startTypingPage, typingReachesThePage } from './support/real-chrome-typing.ts';
 
 const HOST = 'relay.example';
 const RELAY_URL = `https://${HOST}`;
@@ -1213,6 +1214,87 @@ describe('a relayed remote browser view, browser to daemon, through the real ren
       }),
     ).be.empty();
   });
+});
+
+const TYPING_BURST = 8;
+
+describe('typing in a relayed remote browser view, browser to a real Chrome, through the real rendezvous', () => {
+  /**
+   * THE SAME KEYBOARD, THE OTHER CARRIER. Every key of a US keyboard crosses the real rendezvous as
+   * stream records into the daemon's real viewer stream and a real headless Chrome, and the page's
+   * own field must end up holding exactly what was typed.
+   */
+  it('should deliver every printable key, the editing keys and composed text to the page exactly', async () => {
+    const page = await startTypingPage(SESSION_ID);
+    try {
+      const identity = await newDaemonIdentity();
+      const daemon = daemonConnection({
+        daemonId: identity.daemonId,
+        baseUrl: DAEMON_URL,
+        deviceId: DEVICE_ID,
+        carriers: [
+          { kind: 'direct', daemonUrl: DAEMON_URL },
+          { kind: 'relay', relayUrl: RELAY_URL, operator: 'hosted' },
+        ],
+      });
+      const scope = daemonSessionScope(daemon, SESSION_ID);
+      const streamPath = `/v1/sessions/${encodeURIComponent(SESSION_ID)}/browser/stream`;
+      let viewer: BrowserViewerStream | undefined;
+
+      const bridge = new RelayBridge();
+      await bridge.admitDaemon(identity, answered('{}'), undefined, {
+        reauthorize: () => true,
+        upgrade: async request => {
+          if (request.path !== streamPath) return { outcome: 'unclaimed' } satisfies SocketUpgradeDecision;
+          return {
+            outcome: 'accepted',
+            attach: async socket => ({
+              open: async () => {
+                viewer = await BrowserViewerStream.connect(page.browser, SESSION_ID, socket, timerClock);
+              },
+              fromClient: frame => viewer?.fromClient(clientFrame(frame)),
+              close: () => viewer?.close(),
+            }),
+          } satisfies SocketUpgradeDecision;
+        },
+      });
+      const router = new DaemonCarrierRouter({
+        crypto,
+        deviceKey: async () => DEVICE.claim.key,
+        network: async () => {
+          throw new TypeError('Failed to fetch');
+        },
+        dial: url =>
+          new URL(url).hostname === new URL(DAEMON_URL).hostname
+            ? bridge.unreachable()
+            : bridge.dial(identity.daemonId),
+        heartbeat: () => () => undefined,
+      });
+      await router.send(daemon, `${DAEMON_URL}/v1/carriers`);
+      await bridge.settle();
+      should(router.activeMethod(daemon.daemonId)?.kind).equal('relay');
+      const socket = remoteBrowserStreamSocketFactory(
+        async (target, request) => await router.openStream(target, request),
+      )(daemon, scope);
+      await bridge.settle();
+      should(viewer).not.be.undefined();
+
+      await typingReachesThePage(page, async events => {
+        // A person types a few keys at a time; the rendezvous grants credit per record, so the
+        // test lets it settle between small bursts instead of flooding it in one tick.
+        for (let sent = 0; sent < events.length; sent += TYPING_BURST) {
+          for (const event of events.slice(sent, sent + TYPING_BURST)) socket.send(JSON.stringify(event));
+          await bridge.settle();
+        }
+        await viewer?.settled;
+      });
+
+      socket.close(1000, 'viewer detached');
+      await bridge.settle();
+    } finally {
+      await page.close();
+    }
+  }, 120_000);
 });
 
 /* ---------- two machines that announce the same address ---------------------- */

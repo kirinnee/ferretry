@@ -16,7 +16,7 @@ import {
   resetSidePaneTabsStates,
   setSidePaneFullViewport,
 } from '../../src/shell/side-pane-tab-model.ts';
-import { interact, mount, pressKey } from '../support/dom.ts';
+import { interact, mount, must, pressKey } from '../support/dom.ts';
 import { render, run } from '../support/react.ts';
 
 const daemonA = daemonConnection({ daemonId: 'daemon-a', baseUrl: 'https://a.example.test', deviceId: 'a-token' });
@@ -330,6 +330,45 @@ describe('SidePaneWorkspace', () => {
     await interact(() => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
     expect(readSidePaneTabsState(scopeA).fullViewport).toBe(false);
     expect(view.container.querySelector('[data-bottom-sheet]')).not.toBeNull();
+    await view.unmount();
+  });
+
+  it('hands plain Escape to a keyboard-owning surface and leaves only on Shift+Escape', async () => {
+    openSidePaneBrowserTab(scopeA, null, { forceNew: true });
+    const view = await mount(workspace(scopeA, 'sheet'));
+    await interact(() =>
+      (view.container.querySelector('[aria-label="Expand browser to fill the viewport"]') as HTMLButtonElement).click(),
+    );
+    const owner = document.createElement('textarea');
+    owner.setAttribute('data-keyboard-capture', '');
+    document.body.appendChild(owner);
+
+    const plain = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
+    await interact(() => owner.dispatchEvent(plain));
+    expect(plain.defaultPrevented).toBe(false);
+    expect(readSidePaneTabsState(scopeA).fullViewport).toBe(true);
+
+    const chord = new KeyboardEvent('keydown', { key: 'Escape', shiftKey: true, bubbles: true, cancelable: true });
+    await interact(() => owner.dispatchEvent(chord));
+    expect(chord.defaultPrevented).toBe(true);
+    expect(readSidePaneTabsState(scopeA).fullViewport).toBe(false);
+    owner.remove();
+    await view.unmount();
+  });
+
+  it('does not close the pane when Escape is pressed inside a keyboard-owning surface', async () => {
+    let closes = 0;
+    const view = await mount(
+      <SidePaneShell id="pane" titleId="pane-title" onClose={() => (closes += 1)}>
+        <h2 id="pane-title">Files</h2>
+        <textarea data-keyboard-capture="" aria-label="owner" />
+      </SidePaneShell>,
+    );
+    const owner = must(view.container.querySelector('textarea'), 'the owning surface');
+    await interact(() => pressKey(owner, 'Escape'));
+    expect(closes).toBe(0);
+    await interact(() => pressKey(owner, 'Escape', { shiftKey: true }));
+    expect(closes).toBe(1);
     await view.unmount();
   });
 
