@@ -2243,12 +2243,12 @@ and §7's records, and nothing a carrier operator holds can read, alter or inser
 
 ### The four carriers
 
-| Carrier    | What carries the bytes                                                                                    | Who can observe metadata                                       |
-| ---------- | --------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------- |
-| **Direct** | A WebSocket straight to the daemon's own listener (§4).                                                   | The networks in between.                                       |
-| **WebRTC** | A peer-to-peer data channel, introduced over an authenticated session (owned by the WebRTC carrier spec). | The networks in between, and the STUN server learns both IPs.  |
-| **Tunnel** | Cloudflare's edge, to a `cloudflared` connector the daemon runs, to a loopback listener on the daemon.    | Ferretry (who provisioned it) and Cloudflare, as listed below. |
-| **Relay**  | A rendezvous Durable Object passing opaque frames (§§5–9, §13).                                           | The relay operator and Cloudflare, as §10 lists.               |
+| Carrier    | What carries the bytes                                                                                 | Who can observe metadata                                       |
+| ---------- | ------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------- |
+| **Direct** | A WebSocket straight to the daemon's own listener (§4).                                                | The networks in between.                                       |
+| **WebRTC** | A peer-to-peer data channel, introduced over an authenticated session (§16).                           | The networks in between, and the STUN server learns both IPs.  |
+| **Tunnel** | Cloudflare's edge, to a `cloudflared` connector the daemon runs, to a loopback listener on the daemon. | Ferretry (who provisioned it) and Cloudflare, as listed below. |
+| **Relay**  | A rendezvous Durable Object passing opaque frames (§§5–9, §13).                                        | The relay operator and Cloudflare, as §10 lists.               |
 
 ### The choice
 
@@ -2258,12 +2258,12 @@ fingerprint. It is never sent to the daemon and the daemon never reads one: the 
 publishes the carriers it holds (§13), and the preference decides only which of them this browser
 walks, and in what order.
 
-| Preference      | Walk                                        | Notes                                                                                                                                                         |
-| --------------- | ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Auto**        | direct → WebRTC → tunnel → relay            | The default. Direct stays first because it has the fewest parties; WebRTC is the first remote carrier. A tunnel is tried only when the daemon published one.  |
-| **WebRTC only** | WebRTC                                      | The relay (or direct) session is still used to **introduce** the two ends — signalling only, never the session's bytes.                                       |
-| **Tunnel only** | tunnel                                      | Says "not set up by the operator" when the hosted service advertises `available: false`, and "this machine has no tunnel yet" when the daemon published none. |
-| **Relay only**  | relay (published, then the hosted fallback) | Exactly the pre-choice relay behaviour.                                                                                                                       |
+| Preference      | Walk                                        | Notes                                                                                                                                                                                                                                                                    |
+| --------------- | ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Auto**        | direct → WebRTC → tunnel → relay            | The default. Direct stays first because it has the fewest parties; WebRTC is the first remote carrier. A tunnel is tried only when the daemon published one. A WebRTC attempt costs about 0.4 s when it works and is bounded by its ICE deadline when it does not (§16). |
+| **WebRTC only** | WebRTC                                      | The relay (or direct) session is still used to **introduce** the two ends — signalling only, never the session's bytes.                                                                                                                                                  |
+| **Tunnel only** | tunnel                                      | Says "not set up by the operator" when the hosted service advertises `available: false`, and "this machine has no tunnel yet" when the daemon published none.                                                                                                            |
+| **Relay only**  | relay (published, then the hosted fallback) | Exactly the pre-choice relay behaviour.                                                                                                                                                                                                                                  |
 
 The walk's rules from §13 are unchanged inside each preference: the carrier is chosen by **trying**
 it, only a transport failure from a replay-safe request advances, a winner is remembered for the
