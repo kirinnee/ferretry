@@ -1,12 +1,10 @@
+import { DAEMON_STARTING_CODE } from '@ferretry/protocol';
 import type { ApiRequest, ApiResponse } from '../api/http.ts';
 import { errorResponse, noStore } from '../api/responses.ts';
 import { type DaemonLivenessSource, livenessResponse, livenessView } from '../api/routes/health.ts';
 import type { ApiHttpDispatch, ApiSocketGate } from '../api/server.ts';
 import type { SocketUpgradeDecision } from '../api/socket.ts';
 import type { MillisecondClockPort } from './boot.ts';
-
-/** The code a client reads to tell "still booting, ask again" from every other refusal. */
-export const DAEMON_STARTING_CODE = 'daemon_starting';
 
 /**
  * The surface a daemon binds BEFORE its subsystems exist, and keeps serving once they do.
@@ -21,7 +19,8 @@ export const DAEMON_STARTING_CODE = 'daemon_starting';
  *
  * WHAT IT ANSWERS BEFORE {@link mount}. `GET /healthz` is the real liveness answer, served from the
  * same function the mounted route uses. Everything else — `/v1/health` included — is a 503 carrying
- * {@link DAEMON_STARTING_CODE}, the step and a `retry-after`, because answering a route from a subsystem
+ * the protocol's {@link DAEMON_STARTING_CODE} (which a client reads as "refused: ask again"), the step
+ * and a `retry-after`, because answering a route from a subsystem
  * that does not exist yet would be inventing a reading. No socket is claimed, so an upgrade request gets
  * that same 503 rather than a half-switched protocol.
  *
