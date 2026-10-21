@@ -117,6 +117,12 @@ class World {
   targetFails = false;
   cancelled = 0;
   nowMs = T0;
+  /** The sessions the boot walk covers, and which of them a look has started on, in order. */
+  roster: readonly SessionId[] = [ID];
+  readonly looked: SessionId[] = [];
+  /** When set, each look waits here until the test releases it. */
+  readonly holds: Array<() => void> = [];
+  holdLooks = false;
   readonly tracker: SendTracker;
 
   constructor(...initial: SendRecord[]) {
@@ -129,7 +135,11 @@ class World {
     this.tracker = new SendTracker(
       {
         ledger: {
-          list: async () => [...this.records.values()],
+          list: async id => {
+            this.looked.push(id);
+            if (this.holdLooks) await new Promise<void>(resolve => this.holds.push(resolve));
+            return [...this.records.values()];
+          },
           settle: async (_id, sendId, patch: SendSettlement) => {
             const current = this.records.get(sendId);
             if (current === undefined) return undefined;
@@ -189,7 +199,7 @@ class World {
             this.cancelled += 1;
           },
         },
-        roster: { sessions: () => [ID] },
+        roster: { sessions: () => this.roster },
         serial,
         clock,
       },
@@ -496,6 +506,31 @@ describe('the tracker as the daemon runs it', () => {
     should(world.scheduled[0]).match({ id: ID, delayMs: 2_000 });
     should(world.only.fate).equal('delivered');
     should(world.retyped).be.empty();
+    should(world.cancelled).equal(1);
+  });
+
+  it('re-derives the sessions at boot one at a time, and stops the walk once disarmed', async () => {
+    // Every session's look used to start at once, and a look can parse a window hundreds of megabytes
+    // back: a restart over long conversations parsed all of them together on the event loop.
+    const world = new World();
+    const second = parseSessionId('session-2');
+    const third = parseSessionId('session-3');
+    world.roster = [ID, second, third];
+    world.holdLooks = true;
+
+    const disarm = world.tracker.arm();
+    await Bun.sleep(0);
+    const whileFirstRuns = [...world.looked];
+    world.holds.shift()?.();
+    await Bun.sleep(0);
+    const afterFirst = [...world.looked];
+    disarm();
+    world.holds.shift()?.();
+    await Bun.sleep(0);
+
+    should(whileFirstRuns).eql([ID]);
+    should(afterFirst).eql([ID, second]);
+    should(world.looked).eql([ID, second]);
     should(world.cancelled).equal(1);
   });
 

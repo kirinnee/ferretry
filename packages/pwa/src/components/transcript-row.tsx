@@ -21,6 +21,7 @@ import { PackCallRow } from './pack-call.tsx';
 import { useReferenceSurface } from './reference-surface.tsx';
 import { MessageFooter } from './send-receipt.tsx';
 import { SentMessageRow } from './sent-message.tsx';
+import { type SendDismiss, type SendExpand, SettledSendNote } from './settled-send-note.tsx';
 import { ToolGroup } from './tool-group.tsx';
 
 export interface TranscriptRowProps {
@@ -38,6 +39,10 @@ export interface TranscriptRowProps {
   readonly onCancel?: SendCancel;
   /** Offered on a ledger row, and only a message typed in the composer uses it. */
   readonly onSubmit?: SendSubmit;
+  /** Offered on a send that is not delivered: put it away on this device. */
+  readonly onDismiss?: SendDismiss;
+  /** Opens or folds a settled send's one-line note. */
+  readonly onExpand?: SendExpand;
   /** An assistant row follows this one, so a delivered send on it reads as `read`. */
   /** Where an assistant text sits in its run of agent output; only the first names the agent. */
   readonly run?: AgentRunMark | undefined;
@@ -59,6 +64,8 @@ export function TranscriptRow({
   onRetry,
   onCancel,
   onSubmit,
+  onDismiss,
+  onExpand,
   answered = false,
   run,
 }: TranscriptRowProps) {
@@ -67,6 +74,12 @@ export function TranscriptRow({
     return <SentMessageRow entry={entry} isLast={isLast} live={live} rhythm={rhythm} sent={entry.sent} />;
   if (entry.pack !== undefined)
     return <PackCallRow entry={entry} isLast={isLast} live={live} pack={entry.pack} rhythm={rhythm} />;
+  if (entry.kind === 'ledger' && entry.ledger !== undefined && entry.settled === 'slim')
+    return (
+      <div className="fy-message fy-message-ledger" data-transcript-kind="ledger" data-settled="slim" {...rhythm}>
+        <SettledSendNote onDismiss={onDismiss} onExpand={onExpand} record={entry.ledger} />
+      </div>
+    );
   const own = ownSendOf(entry);
   if (own !== undefined)
     return (
@@ -74,6 +87,8 @@ export function TranscriptRow({
         answered={answered}
         entry={entry}
         onCancel={onCancel}
+        onCollapse={entry.settled === 'expanded' ? onExpand : undefined}
+        onDismiss={onDismiss}
         onRetry={onRetry}
         onSubmit={onSubmit}
         record={own}
@@ -85,6 +100,8 @@ export function TranscriptRow({
       <div className="fy-message fy-message-ledger" data-transcript-kind="ledger" {...rhythm}>
         <LedgerMessage
           onCancel={onCancel}
+          onCollapse={entry.settled === 'expanded' ? onExpand : undefined}
+          onDismiss={onDismiss}
           onRetry={onRetry}
           onSubmit={onSubmit}
           placement={entry.placement}
@@ -149,6 +166,8 @@ function OwnSendRow({
   onRetry,
   onCancel,
   onSubmit,
+  onDismiss,
+  onCollapse,
 }: {
   readonly entry: TranscriptEntry;
   readonly record: LedgerSendRecord;
@@ -157,6 +176,8 @@ function OwnSendRow({
   readonly onRetry?: SendRetry | undefined;
   readonly onCancel?: SendCancel | undefined;
   readonly onSubmit?: SendSubmit | undefined;
+  readonly onDismiss?: SendDismiss | undefined;
+  readonly onCollapse?: SendExpand | undefined;
 }) {
   const pointer = entry.kind === 'user' ? entry.handoff : undefined;
   const { reading, source } = useHandoffReading(pointer?.name);
@@ -169,7 +190,14 @@ function OwnSendRow({
       answered={answered}
       controls={
         travelling ? (
-          <LedgerControls onCancel={onCancel} onRetry={onRetry} onSubmit={onSubmit} record={record} />
+          <LedgerControls
+            onCancel={onCancel}
+            onCollapse={onCollapse}
+            onDismiss={onDismiss}
+            onRetry={onRetry}
+            onSubmit={onSubmit}
+            record={record}
+          />
         ) : undefined
       }
       entry={entry}

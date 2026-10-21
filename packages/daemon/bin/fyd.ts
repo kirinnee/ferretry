@@ -9,7 +9,7 @@ import {
   statSync,
   writeSync,
 } from 'node:fs';
-import { mkdir, realpath } from 'node:fs/promises';
+import { mkdir, realpath, stat } from 'node:fs/promises';
 import { hostname, tmpdir, userInfo } from 'node:os';
 import { dirname, isAbsolute, join } from 'node:path';
 import {
@@ -172,6 +172,7 @@ import {
   FileTunnelHolding,
   HostedTunnelProvisioner,
   HostedTunnelService,
+  NodeDataChannelEngine,
   HostHarnessFacts,
   HostHarnessProbe,
   HostInstallFacts,
@@ -222,6 +223,7 @@ import {
   WebCryptoSecretCipher,
   WebPushFetchTransport,
   type WorkerClientOptions,
+  WorkerLoopWatchdog,
   XvfbDisplay,
 } from '../src/adapters/index.ts';
 import {
@@ -419,6 +421,7 @@ import {
 import {
   type AccountInventoryPort,
   AccountModelConversationListPolicy,
+  ActivityLedger,
   AgentSendFailureNotifier,
   AgentToolService,
   type AnalyticsIndexStoreFactory,
@@ -449,6 +452,7 @@ import {
   attachmentDirectory,
   authorizeSessionCommand,
   type BootNoticePort,
+  BootProgress,
   type BootRefusal,
   type BrowserLoginLifecycle,
   type BrowserSessionLauncher,
@@ -498,7 +502,9 @@ import {
   type DaemonConfig,
   type DaemonConfigStore,
   type DaemonHealthSubsystem,
+  type DaemonLivenessSource,
   DaemonUpdateService,
+  DEFAULT_EVENT_LOOP_LAG_POLICY,
   DEFAULT_HANDOVER_SETTINGS,
   type DecodedInitialAttachment,
   type DeliveredAttachment,
@@ -518,10 +524,12 @@ import {
   describeConfiguration,
   describeDaemonTimings,
   describeGrantPosture,
+  describeLoopStall,
   describeRelayCarrierPosture,
   dialledRelayUrl,
   directCarrierSocketRoute,
   doneMarkerCertifiesTurn,
+  EventLoopLagMeter,
   type ExecutableResolverPort,
   effectiveAnalyticsPricing,
   exactWorkerAssignee,
@@ -571,6 +579,7 @@ import {
   LiveDeviceConnections,
   LocalModelsService,
   type LogLevel,
+  type LoopWatchdogPort,
   launchGuardActive,
   launchReasoningEffort,
   locateHarnessCommand,
@@ -594,6 +603,7 @@ import {
   NameAllocator,
   type NameClaim,
   type NameSubsystem,
+  NO_WATCHDOG,
   NotificationService,
   type ObservedSession,
   type OpenedAnalyticsIndexStore,
@@ -618,9 +628,11 @@ import {
   PushService,
   packageRole,
   paneShowsActiveWork,
+  paneTextFor,
   parseDaemonTimings,
   parseSessionId,
   parseWardenConfigPatch,
+  parseWatchdogLimit,
   passkeyVerifier,
   planConversationCarry,
   planConversationConvert,
@@ -641,6 +653,8 @@ import {
   type RelayCarrierSource,
   type RelayDeviceDirectory,
   type RelayDirectoryPort,
+  describeWebRtcEngine,
+  type WebRtcEnginePort,
   type RelayPairingRedeemer,
   type RelayStreamDispatch,
   type ResumeAnswerAttention,
@@ -744,6 +758,7 @@ import {
   type SocketRoute,
   SpeedupsService,
   STRUCTURED_ANSWER_RELEASED_ATTENTION_KIND,
+  StagedApiSurface,
   StepUpRegistry,
   StepUpService,
   StructuredAnswerCoordinator,
@@ -786,6 +801,7 @@ import {
   type TranscriptSearchOptions,
   TranscriptSendEvidence,
   type TranscriptSource,
+  TranscriptTailCache,
   type TriageGuardPort,
   tailTranscriptEvents,
   taskBoardTaskActionAuthorizer,
@@ -800,6 +816,7 @@ import {
   usageRefreshMs,
   verifySessionTranscriptMessageToken,
   WARDEN_LABEL,
+  WATCHDOG_VARIABLE,
   type WardenFleetSession,
   WardenLivenessMonitor,
   type WardenSubsystem,
@@ -967,6 +984,17 @@ export interface DaemonWorld {
      * — so no default may quietly stand in for it.
      */
     readonly preferredPort: number;
+    /**
+     * The named work in flight, shared by the boot's steps and every background tick, so an event-loop
+     * stall names what was running. One ledger per world, because the stall meter reads all of it.
+     */
+    readonly activities: ActivityLedger;
+    /** Starts this boot's progress — the step `/healthz` reports — and makes it the one health reads. */
+    readonly beginProgress: () => BootProgress;
+    /** How long the loop may be silent before the watchdog ends the process; `0` is off. */
+    readonly watchdogLimitMs: number;
+    /** Starts the watchdog thread. A world field so a test can drive the boot without one. */
+    readonly watchdog: (limitMs: number) => LoopWatchdogPort;
   };
   readonly config: DaemonConfigStore;
   /** What this invocation said on the command line, overriding the document for this run only. */
@@ -1273,6 +1301,14 @@ export interface DaemonWorld {
       'entry' | 'cloudflared' | 'service' | 'openListener' | 'publish' | 'notices'
     >,
   ) => TunnelCarrier;
+  /**
+   * The peer-to-peer carrier's native engine (`docs/relay-protocol.md` §16), asked only whether it works.
+   *
+   * A world field because `--check` proves it with a real self-test — two loopback peers echoing
+   * one message — and a suite that is not about WebRTC should not have to load a native library to
+   * ask whether a daemon would start.
+   */
+  readonly webrtcEngine: WebRtcEnginePort;
   /**
    * The subsystems mounted onto that surface. Every field the result carries is a capability the
    * running product actually has; a subsystem absent from it is one the daemon never constructs.
@@ -6018,6 +6054,13 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
   let analyticsMachineName: string | undefined;
   const clock = new SystemClock();
   const millisecondClock = { now: () => Date.now() };
+  /**
+   * The boot's named work and its progress. The progress is created when a boot STARTS, not here,
+   * so its elapsed time is the boot's; health reads whichever boot this world last began, and a world
+   * no boot has begun is a world whose bootstrap has not finished.
+   */
+  const activities = new ActivityLedger(millisecondClock);
+  let bootProgress: BootProgress | undefined;
   const environment = new RuntimeEnvironment(process.env, () => userHome);
   const paths = createFoundationPaths(resolveStateHome(environment.stateHomeInput()));
   const messageTokenKey = sessionMessageTokenKeyFile(paths.state);
@@ -6677,6 +6720,8 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
    * which is a claim the daemon has no basis for. So the file is resolved first and its absence is
    * reported as an absence; only a file this daemon can prove is the session's own is ever read.
    */
+  /** One memory of parsed tails for every reader this world builds, so no two of them re-parse alike. */
+  const transcriptTails = new TranscriptTailCache();
   const createSessionTranscriptTail = (storage: DaemonStorage): SessionTranscriptTail => {
     const resolver = createTranscriptFileResolver(storage);
     return {
@@ -6691,7 +6736,14 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         const source = transcriptSources.find(candidate => candidate.harness === harness);
         if (source === undefined) return { kind: 'unreadable' };
         // Read from the END: a tail of a capped read from byte zero described an old moment as now.
-        const events = await tailTranscriptEvents(source, file, sessionId, limit).catch(() => undefined);
+        const read = async () => await tailTranscriptEvents(source, file, sessionId, limit).catch(() => undefined);
+        // Re-parsed only when the file changed, shared by concurrent asks, and throttled daemon-wide —
+        // see `TranscriptTailCache` for the minutes-long stall that an uncached tail per read caused.
+        const info = await stat(file).catch(() => undefined);
+        const events =
+          info === undefined
+            ? await read()
+            : await transcriptTails.events(sessionId, { file, size: info.size, mtimeMs: info.mtimeMs }, limit, read);
         if (events === undefined) return { kind: 'unreadable' };
         return { kind: 'read', events };
       },
@@ -6985,6 +7037,13 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       probe: new DaemonHealthProbe({ fetch: (url, init) => fetch(url, init) }),
       binder: new DaemonBinder({ sleep: milliseconds => Bun.sleep(milliseconds) }, { now: () => Date.now() }),
       preferredPort: FY_DEFAULT_DAEMON_PORT,
+      activities,
+      beginProgress: () => {
+        bootProgress = new BootProgress(millisecondClock, activities);
+        return bootProgress;
+      },
+      watchdogLimitMs: parseWatchdogLimit(process.env[WATCHDOG_VARIABLE]),
+      watchdog: limitMs => new WorkerLoopWatchdog({ limitMs, prefix: `${DAEMON_NAME} ` }),
     },
     // An operator's own document when they named one, and the state home's otherwise. The confined
     // filesystem port refuses every path outside the home, which is right for the daemon's own state
@@ -7085,9 +7144,9 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
             },
             armedAtMs: () => wardenSupervision.armedAtMs,
             lastSweepAt: () => wardenSupervision.lastSweepAt,
-            // Boot state is owned by `start`; until it reports otherwise a booted daemon that
-            // reached this point has finished the storage bootstrap it does have.
-            bootstrapFinished: () => true,
+            // Boot state is owned by `start`, through the progress it began: a daemon serving routes
+            // while the rest of its boot is still running reports `bootstrapping`, which it is.
+            bootstrapFinished: () => bootProgress?.finished ?? false,
             bootstrapErrors: () => [],
           }),
           consistency: new StorageConsistencyPass(storage, stateFiles, paths, settings),
@@ -7348,6 +7407,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         random: Math.random,
       });
     },
+    webrtcEngine: new NodeDataChannelEngine(),
     createDirectCarrier: async (dispatch, sockets, devices, pairing) => {
       const identity = await readDaemonRelayIdentity(
         stateFiles,
@@ -8291,7 +8351,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           },
         },
         {
-          capture: async sessionId => {
+          capture: async (sessionId, scope) => {
             const id = tryParseSessionId(sessionId);
             if (id === undefined) return undefined;
             // PARSED for the reason every other terminal address is: a document that no longer
@@ -8301,9 +8361,10 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
             );
             if (!lifecycle.success) return undefined;
             const state = await launchTmux.state(lifecycle.data.tmuxSession);
-            // The scrollback, not the visible frame: an operator reading a snapshot is catching up on
-            // what happened, and the visible 24 lines are whatever the harness last redrew.
-            return { alive: state.alive, dead: state.dead, text: state.history };
+            // The scrollback by default: an operator reading a snapshot is catching up on what
+            // happened, and the visible 24 lines are whatever the harness last redrew. `screen` is for
+            // a poller that reads only the frame's last lines, and costs a fraction of the bytes.
+            return { alive: state.alive, dead: state.dead, text: paneTextFor(state, scope) };
           },
         },
         createSessionTranscriptTail(storage),
@@ -9065,9 +9126,37 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
     return 1;
   }
   world.notices.step('starting', `${DAEMON_NAME} ${daemonVersion}, pid ${String(process.pid)}`);
+  /**
+   * The loop's own heartbeat, armed BEFORE anything that could block it.
+   *
+   * The lag meter names every stall in the journal with the work that was running, and the watchdog —
+   * on its own thread — ends a process whose loop has stopped altogether, so its service manager can
+   * replace it. Both exist because a real daemon sat alive and silent for minutes at a time and nothing
+   * inside or outside it could say why (see `lib/runtime/liveness.ts`).
+   */
+  const activities = world.boot.activities;
+  const progress = world.boot.beginProgress();
+  const meter = new EventLoopLagMeter(world.clock, activities, DEFAULT_EVENT_LOOP_LAG_POLICY, stall =>
+    world.notices.state(describeLoopStall(stall)),
+  );
+  const watchdog = world.boot.watchdogLimitMs > 0 ? world.boot.watchdog(world.boot.watchdogLimitMs) : NO_WATCHDOG;
+  const lagTicks = setInterval(() => {
+    meter.tick();
+    watchdog.beat(activities.inFlight());
+  }, DEFAULT_EVENT_LOOP_LAG_POLICY.intervalMs);
+  cleanups.push(() => {
+    clearInterval(lagTicks);
+    watchdog.stop();
+  });
+  const liveness: DaemonLivenessSource = {
+    pid: process.pid,
+    boot: () => progress.snapshot(),
+    loop: () => meter.view(),
+  };
 
   // Registered for release immediately: an exception from anything below must not leave the lock
   // behind, because a stale lock fails the NEXT start for a reason unrelated to what broke.
+  progress.enter('opening the state home');
   let opened: OpenedDaemonStorage;
   try {
     opened = await world.storage.open();
@@ -9082,6 +9171,7 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
   cleanups.push(() => opened.storage.close());
   world.notices.step('state home opened', opened.paths.home);
 
+  progress.enter('loading configuration');
   const peeked = await world.config.peek();
   const loaded = overriddenBy(
     peeked.document === undefined ? await world.config.load() : peeked.config,
@@ -9093,6 +9183,7 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
   // BEFORE the subsystems, because everything below assembles addresses from this document — the
   // pairing link, the browser origins, the advertised URL. A boot that only learned its real port at
   // bind time would have handed every one of them the port it did not take.
+  progress.enter('choosing the address');
   const decided = await decideAddress(world, loaded);
   if ('exitCode' in decided) {
     world.notices.state(decided.message);
@@ -9121,12 +9212,71 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
   if (advertisesForeignAddress(config))
     world.notices.state(foreignAdvertisementNotice(config.bindUrl, config.publicUrl, world.config.path));
   /**
+   * The address is bound HERE — as soon as it is decided, and before every step that can take time.
+   *
+   * It used to be bound last, after the pairing identity, the analytics index, every subsystem, the
+   * grants and a full first self-check: on a real fleet that was twenty seconds of a closed port every
+   * boot, and indefinitely when one step stalled, with nothing outside the process able to tell that
+   * from a crash. The staged surface answers `/healthz` with the step in progress from this moment on
+   * and refuses every other route with a 503 naming it, until the boot mounts the real dispatchers below.
+   *
+   * The address is still bound with the same retry, refused in the same words, and served with the same
+   * CORS origins and loopback rule — all of which depend only on the configuration decided above. The
+   * bind retry is because the common restart is "the outgoing daemon is still draining its socket" —
+   * kteam's own supervisor hit that window routinely and reported a permanent failure for a condition
+   * that clears in a second.
+   */
+  const startedAtMs = world.clock.now();
+  const surface = new StagedApiSurface(world.clock, startedAtMs, liveness);
+  progress.enter('binding the address');
+  let server: ApiServerHandle;
+  try {
+    server = await world.boot.binder.bind(
+      async () =>
+        await world.api.listen(
+          {
+            http: surface.http,
+            sockets: surface.sockets,
+            corsOrigins: browserOrigins(config),
+          },
+          {
+            host: config.host,
+            port: config.port,
+            // A loopback peer is privileged only on a loopback-only direct bind. A wildcard bind
+            // can still have a local reverse proxy forwarding a remote browser, so Bun's immediate
+            // peer is never enough proof there — even when its public URL is the pairing remedy.
+            directLoopbackIsPrivileged: mayTrustDirectLoopback(config),
+          },
+        ),
+    );
+  } catch (error) {
+    // A REFUSAL, not a crash. The address was probed and looked free, so arriving here means the
+    // host will not let this daemon listen there — a privileged port, a host name that resolves to
+    // no local interface, or something that took the address in the interval. All three are the
+    // operator's to resolve, and a stack trace about a socket says none of it. The exit is non-zero,
+    // so a service manager never mistakes a daemon that could not bind for one that is serving.
+    const refusal = refuseUnbindableAddress(
+      config.bindUrl,
+      error instanceof Error ? error.message : String(error),
+      world.config.path,
+    );
+    world.notices.state(refusal.message);
+    return refusal.exitCode;
+  }
+  // Sockets BEFORE the host, and both registered rather than relying on `stop` alone: a live
+  // terminal stream holds a redraw timer armed against its socket, so the handler must be told the
+  // stream is over while the socket it writes to still exists.
+  cleanups.push(() => server.closeSockets());
+  cleanups.push(() => server.stop());
+  world.notices.step('listening', `${config.bindUrl} — answering /healthz while the boot continues`);
+  /**
    * The runtime relay advertisement is read ONCE, here, before either consumer receives the set.
    * Construction below receives these sources rather than the directory, so no second read can hide
    * inside a carrier factory. A duplicate that only becomes visible after discovery is a boot
    * refusal: silently dropping one entry would choose between the operator's relay and the hosted
    * one on their behalf, and that choice would change when the directory changes.
    */
+  progress.enter('reading the relay advertisement');
   const resolvedRelays = await resolveRelayCarrierSources(config, world.relayDirectory);
   if (resolvedRelays.kind === 'refused') {
     world.notices.state(`relay carrier configuration refused — ${resolvedRelays.reason}`);
@@ -9156,6 +9306,7 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
    * It is a `state` rather than a `step` when nothing is ready, so no log level can filter away the
    * one line that explains why launching a session will fail.
    */
+  progress.enter('checking agent harnesses');
   const harnesses = await readHarnesses(world.harnesses.accounts, world.harnesses.executables, harnessDiscovery);
   world.notices.step('harnesses checked', harnessPreflightSummary(harnesses));
   // WHERE each command was found and WHICH RULE found it, every boot. An operator who has just
@@ -9172,8 +9323,9 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
   if (config.retiredAccountModel) world.notices.state(RETIRED_ACCOUNT_MODEL_NOTICE);
   if (config.retiredFleetBlock) world.notices.state(RETIRED_FLEET_BLOCK_NOTICE);
 
+  progress.enter('opening the usage feed');
   const usage = await world.createUsageFeed(config);
-  const startedAtMs = world.clock.now();
+  progress.enter('opening the pairing identity');
   const pairing = await world.createPairing(config, world.clock, carriers, discoverableRelayUrl(relaySources));
   world.notices.step('pairing identity opened');
   if (pairing.securityNotice !== undefined) world.notices.state(pairing.securityNotice);
@@ -9190,6 +9342,7 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
     world.notices.state(
       `${idleExpired} paired device${idleExpired === 1 ? '' : 's'} unused for ${pairing.security.current().idleExpiryDays} days ${idleExpired === 1 ? 'was' : 'were'} removed`,
     );
+  progress.enter('loading API credentials');
   /** Which key a session must prove, answered by the pairing state machine that owns the grants. */
   const sessionDevices: RelayDeviceDirectory = {
     deviceKey: async deviceId => await pairing.subsystem.deviceKey(deviceId),
@@ -9207,6 +9360,7 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
     usage,
     clock: world.clock,
     startedAtMs,
+    liveness,
   };
   // `healthIntervalSeconds` was declared in `config/daemon.json` and read by nothing, because no
   // self-check ran to have a cadence. It is the operator's number now — and the wedge threshold moves
@@ -9235,9 +9389,11 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
    * now fixed six times. A disk this daemon cannot materialize an index on is a fault to report at
    * startup, not one to discover as a suspiciously cheap month.
    */
+  progress.enter('opening the analytics index');
   const analyticsStore = await world.analyticsIndexes.open(opened.paths, opened.fileSystem);
   cleanups.push(() => analyticsStore.store.close());
   world.notices.step('analytics index opened', analyticsStore.rebuildRequired ? 'a rebuild is required' : undefined);
+  progress.enter('mounting subsystems');
   const subsystems = world.createSubsystems(
     opened.storage,
     world.terminalRuntime,
@@ -9300,6 +9456,7 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
    * caught by `execute`, which reports it and exits non-zero, so the operator is told which document
    * to repair instead of discovering it as a UI that stopped working.
    */
+  progress.enter('reading capability grants');
   await subsystems.grants.refresh();
   world.notices.step('capability grants read');
   // The operator password is gone; a passkey step-up from the paired device replaced it. A verifier an
@@ -9310,6 +9467,7 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
       'operator password retired',
       'deleted state/operator-password.json — a passkey confirmation from the paired device replaced it',
     );
+  progress.enter('first self-check (reconciling the session index)');
   await health.selfCheck().catch(() => undefined);
   world.notices.step('first self-check done');
   // The address comes from configuration, never a constant: a hardcoded port is how a daemon ends
@@ -9344,45 +9502,12 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
   );
   if ('refusal' in direct) world.notices.state(`direct sessions unavailable — ${direct.refusal}`);
   const socketDispatcher = createMountedSocketDispatcher(base, subsystems, 'route' in direct ? [direct.route] : []);
-  let server: ApiServerHandle;
-  try {
-    server = await world.boot.binder.bind(
-      async () =>
-        await world.api.listen(
-          {
-            http: dispatcher,
-            sockets: socketDispatcher,
-            corsOrigins: browserOrigins(config),
-          },
-          {
-            host: config.host,
-            port: config.port,
-            // A loopback peer is privileged only on a loopback-only direct bind. A wildcard bind
-            // can still have a local reverse proxy forwarding a remote browser, so Bun's immediate
-            // peer is never enough proof there — even when its public URL is the pairing remedy.
-            directLoopbackIsPrivileged: mayTrustDirectLoopback(config),
-          },
-        ),
-    );
-  } catch (error) {
-    // A REFUSAL, not a crash. The address was probed and looked free, so arriving here means the
-    // host will not let this daemon listen there — a privileged port, a host name that resolves to
-    // no local interface, or something that took the address in the interval. All three are the
-    // operator's to resolve, and a stack trace about a socket says none of it.
-    const refusal = refuseUnbindableAddress(
-      config.bindUrl,
-      error instanceof Error ? error.message : String(error),
-      world.config.path,
-    );
-    world.notices.state(refusal.message);
-    return refusal.exitCode;
-  }
-  // Sockets BEFORE the host, and both registered rather than relying on `stop` alone: a live
-  // terminal stream holds a redraw timer armed against its socket, so the handler must be told the
-  // stream is over while the socket it writes to still exists.
-  cleanups.push(() => server.closeSockets());
-  cleanups.push(() => server.stop());
-  world.notices.step('listening', config.bindUrl);
+  // Every route is served from here on, on the address bound at the top of this boot. Before this
+  // line the staged surface answered `/healthz` alone; after it, every request reaches the very
+  // dispatchers a direct bind would have served.
+  surface.mount(dispatcher, socketDispatcher);
+  progress.serving();
+  world.notices.step('serving', 'every route is mounted');
   /**
    * The relay carriers, dialled AFTER the bind and serving the very same dispatcher.
    *
@@ -9518,7 +9643,7 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
   // freshness. The handle is registered for cancellation like every other acquisition, so a stopped
   // daemon does not leave a timer firing at closed storage.
   const ticks = setInterval(() => {
-    void health.selfCheck().catch(() => undefined);
+    void activities.run('self-check', () => health.selfCheck()).catch(() => undefined);
   }, healthSettings.selfCheckIntervalMs);
   cleanups.push(() => clearInterval(ticks));
   /**
@@ -9538,12 +9663,19 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
    * next reader that something is still watching these parks.
    */
   subsystems.monitor.arm();
-  await subsystems.monitor.run();
-  const waitTicks = setInterval(() => void subsystems.monitor.run(), subsystems.monitor.intervalMs);
+  progress.enter('declared-wait watcher');
+  await activities.run('declared-wait watcher', () => subsystems.monitor.run());
+  const waitTicks = setInterval(
+    () => void activities.run('declared-wait watcher', () => subsystems.monitor.run()),
+    subsystems.monitor.intervalMs,
+  );
   // Whose turn it is: a local pane capture and a transcript stat per live session, every couple of
   // seconds, so a finished turn reads as finished — and notifies — within seconds. Spends no tokens.
-  void subsystems.turns.run();
-  const turnTicks = setInterval(() => void subsystems.turns.run(), subsystems.turns.intervalMs);
+  void activities.run('turn watcher', () => subsystems.turns.run());
+  const turnTicks = setInterval(
+    () => void activities.run('turn watcher', () => subsystems.turns.run()),
+    subsystems.turns.intervalMs,
+  );
   cleanups.push(() => clearInterval(turnTicks));
   cleanups.push(async () => {
     clearInterval(waitTicks);
@@ -9569,7 +9701,7 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
   const failoverIntervalMs = await subsystems.quotaFailover.intervalMs().catch(() => undefined);
   if (failoverIntervalMs !== undefined) {
     const failoverTicks = setInterval(() => {
-      void subsystems.quotaFailover.run().catch(() => undefined);
+      void activities.run('quota failover', () => subsystems.quotaFailover.run()).catch(() => undefined);
     }, failoverIntervalMs);
     cleanups.push(() => clearInterval(failoverTicks));
   }
@@ -9595,9 +9727,9 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
   const fleetRefreshIntervalMs = await world.usageRefreshMs();
   // Start a collection after binding but do not make a slow provider probe delay daemon readiness.
   // The loop serializes it with the fixed timer below, and all failures remain in the existing feeds.
-  void subsystems.fleetRefresh.run();
+  void activities.run('fleet refresh', () => subsystems.fleetRefresh.run());
   const fleetRefreshTicks = setInterval(() => {
-    void subsystems.fleetRefresh.run();
+    void activities.run('fleet refresh', () => subsystems.fleetRefresh.run());
   }, fleetRefreshIntervalMs);
   cleanups.push(() => clearInterval(fleetRefreshTicks));
   /**
@@ -9616,19 +9748,27 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
    * Errors are swallowed for the reason every other background timer swallows its own: an unhandled
    * rejection from a timer takes down a daemon whose fleet is fine. A pass that could not run leaves
    * the index reporting what it does hold, which is the honest reading.
+   *
+   * NOT AWAITED. A rebuild over a large fleet reads every finished transcript again, and awaiting it
+   * here held back the configuration watcher, the warden, the handover reconciler and the update check
+   * behind it — for as long as the rebuild took. Passes are serialized by the service itself, so the
+   * timer below queues behind this one rather than racing it, and the analytics view already reports
+   * `refreshing` while a pass is outstanding.
    */
-  await (analyticsStore.rebuildRequired ? subsystems.analyticsIngest.rebuild() : subsystems.analyticsIngest.ingest())
-    .then(() => undefined)
+  void activities
+    .run(analyticsStore.rebuildRequired ? 'analytics rebuild' : 'analytics ingest', () =>
+      analyticsStore.rebuildRequired ? subsystems.analyticsIngest.rebuild() : subsystems.analyticsIngest.ingest(),
+    )
     .catch(() => undefined);
   const analyticsTicks = setInterval(() => {
-    void subsystems.analyticsIngest.ingest().catch(() => undefined);
+    void activities.run('analytics ingest', () => subsystems.analyticsIngest.ingest()).catch(() => undefined);
   }, ANALYTICS_INGEST_INTERVAL_MS);
   cleanups.push(() => clearInterval(analyticsTicks));
   // The registry, durable session reader, exact observer and exact reaper the earlier increment
   // stubbed. Identity is re-checked at the moment of the kill, not at planning time.
   const terminalReaper = world.createTerminalReaper(opened.storage);
   const terminalReapTicks = setInterval(() => {
-    void terminalReaper.sweep().catch(() => undefined);
+    void activities.run('terminal reaper', () => terminalReaper.sweep()).catch(() => undefined);
   }, 5_000);
   cleanups.push(() => clearInterval(terminalReapTicks));
   // The security log's fold windows close on this tick too, not only on the next record like them: a
@@ -9648,9 +9788,11 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
   // a daemon whose fleet is fine must not fail to serve because its supervisor could not start, and
   // the absence is already visible as `wardenTimerArmed: false` on its own health report.
   // The configuration files: first load, editors' schemas, and the watcher (docs/config-files.md).
+  progress.enter('arming the configuration watcher');
   cleanups.push(await subsystems.configFiles.arm());
   // Which models Ollama has installed, read once now that the fleet can be republished with them.
   void subsystems.models.refreshLocal().catch(() => undefined);
+  progress.enter('arming the warden');
   await subsystems.warden
     .arm()
     .then(disarm => cleanups.push(disarm))
@@ -9684,6 +9826,7 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
   // The line an operator greps for. Everything above it is a step that can stall; a log that reaches
   // here and stops is a daemon that is serving, which is a completely different report from one that
   // stops at "state home opened" — and before any of this existed the two were the same empty file.
+  progress.finish();
   world.notices.step('ready', `serving ${config.bindUrl}`);
   await world.untilShutdown();
   world.notices.step('stopping', 'releasing everything this boot acquired');
@@ -9906,6 +10049,11 @@ export async function checkConfiguration(
       }
     }
   }
+  // The peer-to-peer engine, beside the carriers it will join. Proved rather than assumed — a native
+  // library is the one dependency a build machine can have and a host can lack — and it never changes
+  // the exit code: a daemon without it starts, and devices reach it directly or through the relay.
+  const webrtcEngine = await world.webrtcEngine.selfTest();
+  say(`webrtc       ${describeWebRtcEngine(webrtcEngine)}`);
   // Directly beneath the carrier, because this is the address that has to work on its own and whether
   // anybody but this machine can dial it. It DOES read the carrier above it now, through the one
   // derivation the boot uses, so this line and the QR `fy pair` draws for the same daemon agree. Two

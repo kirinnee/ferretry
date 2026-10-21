@@ -31,6 +31,7 @@ import type {
   SessionView,
   SignalKind,
   SignalOptions,
+  SnapshotScope,
   StartSessionRequestInput,
   StructuredQuestionAnswer,
 } from './session.ts';
@@ -218,7 +219,7 @@ export interface IFyApiClient {
   signal(id: string, kind: SignalKind, message?: string, options?: SignalOptions): Promise<SessionView>;
   remove(id: string, purge?: boolean, force?: boolean): Promise<void>;
   attachTarget(id: string): Promise<SessionAttachTarget>;
-  snapshot(id: string): Promise<string>;
+  snapshot(id: string, scope?: SnapshotScope): Promise<string>;
   logs(id: string, turn?: number): Promise<string>;
   /**
    * Read one session's durable conversation as rows a caller can fork through. This is NOT `logs`

@@ -25,7 +25,19 @@
  * Each rewrite is pinned to the text Playwright declares it with, and the build FAILS when a required
  * anchor is missing: a Playwright upgrade that moves one must be noticed here, not shipped as a worker
  * that silently fails on every machine but the one that built it.
+ *
+ * AND ONE NATIVE ADDON IS EMBEDDED PER TARGET: the WebRTC engine (`node-datachannel`, see
+ * docs/relay-protocol.md §16). Its loader picks `@node-datachannel/<platform>` with a COMPUTED
+ * `require`, which the bundler cannot follow, so a compiled `fyd` would look for a package that is
+ * not beside it and report the engine unavailable on every machine. The loader module is replaced by
+ * one that imports the TARGET's prebuilt `.node` as an embedded file and loads it from there — the
+ * target's, not the build machine's, because a release cross-compiles three platforms on one Linux
+ * runner. A cross-compile therefore needs every target's prebuild installed (`compile.sh` installs
+ * them), and a build for a target with no mapping, or with its prebuild missing, FAILS rather than
+ * shipping a daemon whose peer-to-peer carrier can never start.
  */
+import { createRequire } from 'node:module';
+import { dirname } from 'node:path';
 import type { BunPlugin } from 'bun';
 
 interface Rewrite {
@@ -71,6 +83,67 @@ const playwrightPortable: BunPlugin = {
   },
 };
 
+const NODE_DATACHANNEL_LOADER = /node-datachannel[\\/]dist[\\/]esm[\\/]lib[\\/]node-datachannel\.mjs$/;
+/** The anchor the replaced loader is pinned to: an upgrade that stops computing its path is noticed here. */
+const NODE_DATACHANNEL_ANCHOR = 'function loadBinding()';
+
+/**
+ * The `@node-datachannel/*` prebuild for a Bun compile target, or for this machine when there is no
+ * target (the Nix build compiles natively). glibc for Linux: every Linux target this repository ships
+ * is a glibc one, and a musl target is mapped explicitly rather than guessed.
+ */
+function nodeDataChannelPrebuild(target: string | undefined): string {
+  const host = `bun-${process.platform}-${process.arch}`;
+  const named = (target ?? host).replace(/-(baseline|modern)$/u, '');
+  const prebuilds: Record<string, string> = {
+    'bun-linux-x64': 'linux-x64-gnu',
+    'bun-linux-arm64': 'linux-arm64-gnu',
+    'bun-linux-x64-musl': 'linux-x64-musl',
+    'bun-linux-arm64-musl': 'linux-arm64-musl',
+    'bun-darwin-arm64': 'darwin-arm64',
+    'bun-darwin-x64': 'darwin-x64',
+  };
+  const prebuild = prebuilds[named];
+  if (prebuild === undefined) {
+    throw new Error(
+      `no node-datachannel prebuild is mapped for ${target ?? host}; add it to scripts/release/compile-executable.ts`,
+    );
+  }
+  return `@node-datachannel/${prebuild}/node_datachannel.node`;
+}
+
+const nodeDataChannelEmbedded = (target: string | undefined): BunPlugin => ({
+  name: 'node-datachannel-embedded',
+  setup(build) {
+    build.onLoad({ filter: NODE_DATACHANNEL_LOADER }, async args => {
+      const source = await Bun.file(args.path).text();
+      if (!source.includes(NODE_DATACHANNEL_ANCHOR)) {
+        throw new Error(
+          `${args.path} no longer contains ${NODE_DATACHANNEL_ANCHOR}; re-measure the compiled WebRTC engine and update scripts/release/compile-executable.ts`,
+        );
+      }
+      const specifier = nodeDataChannelPrebuild(target);
+      let addon: string;
+      try {
+        addon = createRequire(args.path).resolve(specifier);
+      } catch {
+        throw new Error(
+          `${specifier} is not installed beside ${dirname(args.path)}; a cross-compile needs every target's prebuild (scripts/release/compile.sh installs them)`,
+        );
+      }
+      return {
+        contents: [
+          `import addon from ${JSON.stringify(addon)} with { type: 'file' };`,
+          `import { createRequire } from 'node:module';`,
+          `const nodeDataChannel = createRequire(import.meta.url)(addon);`,
+          `export { nodeDataChannel as default };`,
+        ].join('\n'),
+        loader: 'js',
+      };
+    });
+  },
+});
+
 interface Options {
   readonly entry: string;
   readonly outfile: string;
@@ -109,7 +182,7 @@ const result = await Bun.build({
   },
   define: options.define,
   external: UNUSED_OPTIONAL_MODULES,
-  plugins: [playwrightPortable],
+  plugins: [playwrightPortable, nodeDataChannelEmbedded(options.target)],
 });
 if (!result.success) {
   for (const log of result.logs) console.error(log);

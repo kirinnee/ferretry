@@ -1,4 +1,4 @@
-import { type HealthView, HealthViewSchema } from '@ferretry/protocol';
+import { type HealthView, HealthViewSchema, type LivenessView, LivenessViewSchema } from '@ferretry/protocol';
 import type { InstalledDaemonBinary } from '../../../src/lib/daemon/binary';
 import type { DaemonEnvironmentInput, DaemonLayout } from '../../../src/lib/daemon/layout';
 import { resolveDaemonLayout } from '../../../src/lib/daemon/layout';
@@ -522,4 +522,23 @@ export class FakeSessionTerminals implements ISessionTerminalServerPort {
     this.trail.push(`end-terminals:${socket}`);
     return Promise.resolve(this.answer);
   }
+}
+
+/** A daemon's liveness answer: by default one still booting, eight seconds into its first self-check. */
+export function liveness(overrides: Partial<LivenessView> = {}): LivenessView {
+  return LivenessViewSchema.parse({
+    status: 'starting',
+    version: '1.2.3',
+    sessionProtocol: 'ferretry-relay/2',
+    uptimeSeconds: 12,
+    pid: 9001,
+    boot: {
+      phase: 'starting',
+      step: 'first self-check (reconciling the session index)',
+      stepElapsedSeconds: 8,
+      elapsedSeconds: 12,
+    },
+    eventLoop: { lagMs: 0, maxLagMs: 0, stalls: 0 },
+    ...overrides,
+  });
 }

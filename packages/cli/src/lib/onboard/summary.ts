@@ -1,5 +1,6 @@
 import { describeInstallMethod, type InstallMethodKind, knownLatestRelease } from '@ferretry/protocol';
 import type { DaemonInspection } from '../daemon/controller.ts';
+import type { DaemonReachability } from '../daemon/render.ts';
 import { nextStep } from '../update/status.ts';
 import type { RelayReach } from './ports.ts';
 
@@ -17,6 +18,9 @@ export function planDaemon(inspection: DaemonInspection): DaemonPlan {
     const supervised = view.supervisor.manager !== 'direct' && !view.orphan;
     return supervised || !serviceManager ? 'none' : 'install';
   }
+  // A daemon that is booting or busy is UP: installing or starting another over it would only fight it
+  // for the state home's lock. The summary reports the state and `status` says what it is doing.
+  if (view.reachability === 'starting' || view.reachability === 'busy') return 'none';
   if ('reason' in located) return 'missing';
   return serviceManager ? 'install' : 'start';
 }
@@ -55,7 +59,7 @@ export interface SetupSummary {
   readonly client: { readonly version: string };
   readonly install: { readonly method: InstallMethodKind; readonly description: string } | null;
   readonly daemon: {
-    readonly state: 'serving' | 'unreachable' | 'stopped' | 'not-installed';
+    readonly state: DaemonReachability | 'not-installed';
     readonly action: DaemonAction;
     readonly version: string | null;
     readonly installedVersion: string | null;

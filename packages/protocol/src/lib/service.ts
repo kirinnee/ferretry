@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { InstantSchema, NonNegativeFiniteSchema, NonNegativeIntegerSchema, PositiveIntegerSchema } from './common.ts';
-import { AccountAvailabilitySchema, AccountUnavailableReasonSchema } from './session.ts';
 import { ProviderQuotaBalanceSchema } from './fleet-credentials.ts';
+import { AccountAvailabilitySchema, AccountUnavailableReasonSchema } from './session.ts';
 
 export const HealthViewSchema = z.object({
   ok: z.boolean(),
@@ -27,6 +27,42 @@ export const HealthViewSchema = z.object({
   time: InstantSchema,
 });
 export type HealthView = z.infer<typeof HealthViewSchema>;
+
+/**
+ * `GET /healthz`: liveness, answered from the moment the daemon's address is bound.
+ *
+ * `status` is `starting` while no route beyond this one is mounted, and `ok` from then on. `boot` says
+ * which step a boot is on and for how long — so "the process exists but nothing answers" can become
+ * "starting: first self-check, 40s" — and `eventLoop` says how late the loop has been running, which is
+ * what separates a daemon that is busy from one that is wedged. Both are optional on the wire because a
+ * daemon from before them answers with neither.
+ */
+export const LivenessViewSchema = z.object({
+  status: z.enum(['ok', 'starting']),
+  version: z.string().min(1),
+  sessionProtocol: z.string().optional(),
+  uptimeSeconds: NonNegativeIntegerSchema,
+  pid: PositiveIntegerSchema.optional(),
+  boot: z
+    .object({
+      phase: z.enum(['starting', 'finishing', 'ready']),
+      step: z.string(),
+      stepElapsedSeconds: NonNegativeIntegerSchema,
+      elapsedSeconds: NonNegativeIntegerSchema,
+    })
+    .optional(),
+  eventLoop: z
+    .object({
+      lagMs: NonNegativeFiniteSchema,
+      maxLagMs: NonNegativeFiniteSchema,
+      stalls: NonNegativeIntegerSchema,
+      lastStall: z
+        .object({ at: InstantSchema, durationMs: NonNegativeFiniteSchema, during: z.array(z.string()) })
+        .optional(),
+    })
+    .optional(),
+});
+export type LivenessView = z.infer<typeof LivenessViewSchema>;
 
 export const CgroupLimitSchema = z.object({
   cpuPercent: z.number().finite().gt(0).max(100),

@@ -240,7 +240,7 @@ async function seedFleet(home: string): Promise<void> {
 
 async function untilListening(port: number): Promise<void> {
   for (let attempt = 0; attempt < 600; attempt += 1) {
-    if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined)) !== undefined) return;
+    if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined))?.ok === true) return;
     await Bun.sleep(50);
   }
   throw new Error('the daemon never started listening');

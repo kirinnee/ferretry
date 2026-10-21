@@ -726,6 +726,22 @@ const CASES: readonly MethodCase[] = [
     expected: SNAPSHOT_TEXT,
   },
   {
+    name: 'snapshot of the whole history',
+    invoke: client => client.snapshot(SESSION_ID, 'history'),
+    verb: 'GET',
+    path: '/v1/sessions/session-1/snapshot?live=true',
+    response: () => textResponse(SNAPSHOT_TEXT),
+    expected: SNAPSHOT_TEXT,
+  },
+  {
+    name: 'snapshot of the visible screen',
+    invoke: client => client.snapshot(SESSION_ID, 'screen'),
+    verb: 'GET',
+    path: '/v1/sessions/session-1/snapshot?live=true&scope=screen',
+    response: () => textResponse(SNAPSHOT_TEXT),
+    expected: SNAPSHOT_TEXT,
+  },
+  {
     name: 'logs without a turn',
     invoke: client => client.logs(SESSION_ID),
     verb: 'GET',

@@ -32,6 +32,11 @@ describe('terminal snapshot url', () => {
     expect(snapshotUrl(scope)).toBe('/v1/sessions/pane%2Fsession/snapshot?live=false');
     expect(snapshotUrl(scope, true)).toBe('/v1/sessions/pane%2Fsession/snapshot?live=true');
   });
+
+  it('adds the screen scope only when asked, so the default URL never changes', () => {
+    expect(snapshotUrl(scope, true, 'history')).toBe('/v1/sessions/pane%2Fsession/snapshot?live=true');
+    expect(snapshotUrl(scope, true, 'screen')).toBe('/v1/sessions/pane%2Fsession/snapshot?live=true&scope=screen');
+  });
 });
 
 describe('reading a pane snapshot', () => {
@@ -43,6 +48,22 @@ describe('reading a pane snapshot', () => {
     });
     expect(text).toBe('$ bun test\nok');
     expect(seen).toEqual(['https://pane.example.test/v1/sessions/pane%2Fsession/snapshot?live=false']);
+  });
+
+  it('reads only the visible screen when asked', async () => {
+    const seen: string[] = [];
+    await readPaneSnapshot(
+      daemon,
+      scope,
+      undefined,
+      async url => {
+        seen.push(String(url));
+        return new Response('screen');
+      },
+      true,
+      'screen',
+    );
+    expect(seen).toEqual(['https://pane.example.test/v1/sessions/pane%2Fsession/snapshot?live=true&scope=screen']);
   });
 
   it('refuses a scope belonging to another daemon rather than crossing the pair', async () => {

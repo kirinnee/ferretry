@@ -34,6 +34,7 @@ import {
   transcriptEntriesFromLog,
 } from './components/session-workspace-model.ts';
 import { SessionsPage } from './components/sessions-page.tsx';
+import type { SendDismiss, SendExpand } from './components/settled-send-note.tsx';
 import { GlobalAnalyticsPage } from './features/analytics/global-analytics-page.tsx';
 import { configFilesSettingsTab } from './features/config-files/config-files-settings.tsx';
 import { ConnectionHealthNotice } from './features/connection/connection-health-notice.tsx';
@@ -98,6 +99,7 @@ import { pricingSettingsTab } from './features/settings/pricing-settings.tsx';
 import { securityLogSettingsTab } from './features/settings/security-log-settings.tsx';
 import { settingsPaletteEntries } from './features/settings/settings-catalog.ts';
 import { SettingsPage } from './features/settings/settings-page.tsx';
+import { ConnectionPreferenceSettings } from './features/settings/connection-preference-settings.tsx';
 import { ViewportOverlay } from './features/settings/viewport-details.tsx';
 import { speedupsSettingsTab } from './features/speedups/speedups-surface.tsx';
 import { StepUpDialog, UNLOCK_COPY } from './features/step-up/step-up-dialog.tsx';
@@ -106,6 +108,7 @@ import { useAskWardenActions } from './features/warden/ask-warden.tsx';
 import { WardenOverviewSurface } from './features/warden/warden-overview-surface.tsx';
 import { useAccountPickerSlice } from './hooks/use-account-picker.ts';
 import { useActiveCarrier, useDeviceRefused } from './hooks/use-active-carrier.ts';
+import { useCarrierPreferences, useTunnelService } from './hooks/use-carrier-preferences.ts';
 import { useAppViewport } from './hooks/use-app-viewport.ts';
 import { useAttentionSession, useAttentionSnapshot } from './hooks/use-attention.ts';
 import { useConfigChangeFeed } from './hooks/use-config-change-feed.ts';
@@ -127,6 +130,7 @@ import {
 } from './hooks/use-notifications.ts';
 import { useKnownProjects, useProjects } from './hooks/use-projects.ts';
 import { browserReleaseAsk, releaseContainer, useReleaseIntegrity } from './hooks/use-release-integrity.ts';
+import { useSendView } from './hooks/use-send-view.ts';
 import {
   canRegister,
   type ServiceWorkerUpdateEnvironment,
@@ -138,6 +142,8 @@ import { useTheme } from './hooks/use-theme.ts';
 import { type MachineSource, machineDisplayOrder } from './lib/all-machines.ts';
 import type { DaemonConnectionRecord } from './lib/connections.ts';
 import { type DaemonConnection, type DaemonId, daemonCarriers } from './lib/daemon-connection.ts';
+import { DEFAULT_CARRIER_PREFERENCE } from './lib/carrier-preference.ts';
+import { tunnelNote } from './lib/tunnel-service.ts';
 import { daemonSessionKey, daemonSessionScope } from './lib/daemon-scope.ts';
 import { projectKeyFor } from './lib/fleet-grouping.ts';
 import { installBanner } from './lib/install-prompt.ts';
@@ -1265,7 +1271,16 @@ function SessionRoute({ connection, scope }: SessionChatPageProps) {
    * The transcript with the send ledger IN it: delivered sends chip the message they became, and every
    * send not yet in the conversation sits after it with a chip saying where it is.
    */
-  const placedEntries = useMemo(() => placeLedgerRows(entries, sends), [entries, sends]);
+  const sendView = useSendView(sends);
+  const { view: sendViewState, tick: settledTick, dismiss: dismissSends, setExpanded: expandSend } = sendView;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `settledTick` re-places the rows when one folds or retires on its own.
+  const placedEntries = useMemo(
+    () => placeLedgerRows(entries, sends, Date.now(), sendViewState),
+    [entries, sends, sendViewState, settledTick],
+  );
+  /** A row's × — puts one undelivered send away on this device; the daemon's ledger is never told. */
+  const dismissSend = useCallback<SendDismiss>(record => dismissSends([record.sendId]), [dismissSends]);
+  const toggleSend = useCallback<SendExpand>((record, open) => expandSend(record.sendId, open), [expandSend]);
   /** A row's Retry, under the send's ORIGINAL id — see `sendRetrier`. */
   const retrySend = useMemo<SendRetry>(
     () => sendRetrier(client, sessionId, () => void refreshControl.current?.refresh(true)),
@@ -1284,7 +1299,14 @@ function SessionRoute({ connection, scope }: SessionChatPageProps) {
     [client, sessionId, refreshSends],
   );
   // "Clear stuck messages" — Actions-menu entry that takes back every message nothing proved arrived.
-  const stuckActions = useStuckMessageActions({ client, sessionId, sends, refresh: refreshSends });
+  const stuckActions = useStuckMessageActions({
+    client,
+    sessionId,
+    sends,
+    refresh: refreshSends,
+    view: sendViewState,
+    dismiss: dismissSends,
+  });
   // Every feature's Actions-menu entries for this ferret: Warden, Learning, Hypermedia, Pack mode, then stuck messages.
   const sessionActions = useMemo(
     () => [
@@ -1423,6 +1445,8 @@ function SessionRoute({ connection, scope }: SessionChatPageProps) {
           onRetry={retrySend}
           onCancel={cancelSend}
           onSubmit={submitSend}
+          onDismiss={dismissSend}
+          onExpand={toggleSend}
           onNavigate={navigate}
           {...(openSessions === null ? {} : { onOpenSessions: openSessions })}
           project={projectKeyFor(session.config.cwd, projects).name}
@@ -1477,6 +1501,32 @@ function SettingsRoute({ connection }: DaemonPageProps) {
   const dictation = useSttSettings(store.stt);
   const carrier = useActiveCarrier(store.carrier, connection.daemonId);
   const connectionHealth = useConnectionHealth(store.connectionHealth, connection.daemonId);
+  /**
+   * WHICH CARRIERS THIS DEVICE WALKS FOR EACH MACHINE (§15), offered twice from one value: beside the
+   * active machine's Connection status, and for every machine under This device › Connection. Whether
+   * "Tunnel only" could carry anything is the machine's own published set first, then the service.
+   */
+  const carrierPreferences = useCarrierPreferences(store.carrierPreferences);
+  const tunnelService = useTunnelService(store.tunnelService);
+  const preferenceAvailability = useCallback(
+    (daemon: DaemonConnection) => ({
+      webrtc: store.webrtcAvailable,
+      tunnelNote: tunnelNote(
+        daemonCarriers(daemon).some(method => method.kind === 'tunnel'),
+        tunnelService,
+      ),
+    }),
+    [store.webrtcAvailable, tunnelService],
+  );
+  const carrierPreference = useMemo(
+    () => ({
+      value: carrierPreferences[connection.daemonId] ?? DEFAULT_CARRIER_PREFERENCE,
+      onChange: (preference: Parameters<typeof store.carrierPreferences.set>[1]) =>
+        store.carrierPreferences.set(connection.daemonId, preference),
+      availability: preferenceAvailability(connection),
+    }),
+    [carrierPreferences, connection, preferenceAvailability, store.carrierPreferences],
+  );
   const notifications = useNotificationControls(useNotificationControlsHost(), connection);
   const notificationFilter = useNotificationFilterPreferences(store.notificationFilter);
   // Every OTHER paired machine: the current one already has its own "Notify me" switch above, which
@@ -1604,6 +1654,18 @@ function SettingsRoute({ connection }: DaemonPageProps) {
       // attempt, so the cached set alone would advertise a fallback that can never be tried — and
       // would hide "there is no relay to fall back on" from the one reader it is written for.
       relayAdvertised={daemonCarriers(connection).some(method => method.kind === 'relay')}
+      carrierPreference={carrierPreference}
+      connectionPreferences={
+        <ConnectionPreferenceSettings
+          machines={connectionSnapshot.connections.map(machine => ({
+            daemonId: machine.daemonId,
+            label: distinctDaemonName(machine, connectionSnapshot.connections),
+            preference: carrierPreferences[machine.daemonId] ?? DEFAULT_CARRIER_PREFERENCE,
+            availability: preferenceAvailability(machine),
+          }))}
+          onChange={(daemonId, preference) => store.carrierPreferences.set(daemonId, preference)}
+        />
+      }
       notifications={
         <div className="flex flex-col gap-4">
           <NotificationSettingsView
