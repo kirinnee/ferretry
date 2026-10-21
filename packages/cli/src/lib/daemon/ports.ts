@@ -1,4 +1,4 @@
-import type { HealthView } from '@ferretry/protocol';
+import type { HealthView, LivenessView } from '@ferretry/protocol';
 import type { DaemonManagerKind } from './layout.ts';
 
 /** The result of one external command. */
@@ -88,6 +88,12 @@ export interface IServiceFilePort {
  */
 export interface IDaemonHealthPort {
   probe(): Promise<HealthView | undefined>;
+  /**
+   * The daemon's liveness answer, read whatever its status code: a booting daemon answers 503 with the
+   * step it is on, and that body is exactly what `status` needs to say "starting" instead of "down".
+   * Optional so a probe that cannot ask still reports what it can.
+   */
+  liveness?(): Promise<LivenessView | undefined>;
 }
 
 /**

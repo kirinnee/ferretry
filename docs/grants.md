@@ -63,6 +63,9 @@ it the machine.
   **unconditionally** for a relayed session, whatever address the request appears to carry, and for a
   direct session exactly what the listener decided for its WebSocket upgrade — the same answer the
   same listener gives an HTTP request — and nothing inside a record can change it.
+- a **tunnel** arrival (protocol §15) reaches the daemon through `cloudflared` from a loopback peer, so
+  it never lands on the API listener: the daemon's dedicated tunnel listener serves only the session
+  route and stamps every arrival `loopback: false` and unprivileged, exactly like a relayed one.
 
 Nothing re-derives it, and no header can move it.
 `packages/daemon/tests/unit/grants/policy.test.ts` asserts exactly this with a relayed request that

@@ -3,7 +3,13 @@ import { HealthViewSchema } from '@ferretry/protocol';
 import { FyApiClient } from '@ferretry/protocol/client';
 import should from 'should';
 import type { z } from 'zod';
-import { HEALTH_PATH, type HealthApiClient, ProtocolDaemonHealth } from '../../../src/adapters/daemon/health';
+import {
+  HEALTH_PATH,
+  type HealthApiClient,
+  LIVENESS_PATH,
+  type LivenessFetch,
+  ProtocolDaemonHealth,
+} from '../../../src/adapters/daemon/health';
 
 const body = {
   ok: true,
@@ -134,5 +140,69 @@ describe('protocol daemon health', () => {
   it('should accept exactly the shape the protocol schema accepts', () => {
     // Act + Assert — the fixture is real, so no test here asserts against an invented daemon reply.
     should(() => HealthViewSchema.parse(body)).not.throw();
+  });
+});
+
+describe('protocol daemon liveness', () => {
+  const servers: Array<ReturnType<typeof Bun.serve>> = [];
+
+  afterEach(async () => {
+    for (const server of servers.splice(0)) await server.stop(true);
+  });
+
+  /** The same raw read `fy` wires: one GET whose body is read whatever its status. */
+  const rawFrom =
+    (url: string): LivenessFetch =>
+    async (path, timeoutMs) => {
+      const response = await fetch(new URL(path, `${url}/`), { signal: AbortSignal.timeout(timeoutMs) });
+      return { status: response.status, body: await response.json().catch(() => undefined) };
+    };
+
+  it('should read a booting daemon’s 503 for the step it is on', async () => {
+    // Arrange — the body a daemon answers while it is still starting.
+    const paths: string[] = [];
+    const { server, url } = serve(request => {
+      paths.push(new URL(request.url).pathname);
+      return Response.json(
+        {
+          status: 'starting',
+          version: '1.2.3',
+          uptimeSeconds: 9,
+          pid: 4242,
+          boot: { phase: 'starting', step: 'mounting subsystems', stepElapsedSeconds: 4, elapsedSeconds: 9 },
+        },
+        { status: 503 },
+      );
+    });
+    servers.push(server);
+    const probe = new ProtocolDaemonHealth(await client(url), 1_000, rawFrom(url));
+
+    // Act
+    const answer = await probe.liveness();
+
+    // Assert
+    should(paths).deepEqual([LIVENESS_PATH]);
+    should(answer?.status).equal('starting');
+    should(answer?.boot?.step).equal('mounting subsystems');
+  });
+
+  it('should treat silence, a body that is not liveness, and no raw read alike: no answer', async () => {
+    // Arrange
+    const { server, url } = serve(() => Response.json({ hello: 'world' }));
+    servers.push(server);
+    const connected = await client(url);
+    const silent: LivenessFetch = async () => {
+      throw new Error('the probe timed out');
+    };
+
+    // Act
+    const stranger = await new ProtocolDaemonHealth(connected, 1_000, rawFrom(url)).liveness();
+    const timedOut = await new ProtocolDaemonHealth(connected, 1_000, silent).liveness();
+    const unasked = await new ProtocolDaemonHealth(connected).liveness();
+
+    // Assert
+    should(stranger).be.undefined();
+    should(timedOut).be.undefined();
+    should(unasked).be.undefined();
   });
 });

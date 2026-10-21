@@ -1,11 +1,11 @@
 import type { MillisecondClockPort } from '../runtime/boot.ts';
 import type { UsageFeedPort } from '../usage/types.ts';
 import type { ApiCredentials } from './authentication.ts';
-import { ApiDispatcher } from './dispatcher.ts';
 import { NO_GOVERNED_ROUTES_GUARD } from './capability.ts';
+import { ApiDispatcher } from './dispatcher.ts';
 import type { ApiRoute } from './route.ts';
 import { ApiRouter } from './router.ts';
-import { healthRoutes } from './routes/health.ts';
+import { type DaemonLivenessSource, healthRoutes } from './routes/health.ts';
 import { usageRoutes } from './routes/usage.ts';
 import type { ApiSocketDispatcher } from './socket.ts';
 
@@ -42,6 +42,12 @@ export interface ApiServerHandle {
   stop(): Promise<void>;
 }
 
+/** The request/response half of a surface: what the transport adapter calls for an ordinary request. */
+export type ApiHttpDispatch = Pick<ApiDispatcher, 'dispatch'>;
+
+/** The protocol-switch half: whether a request is a socket, and the decision to switch it. */
+export type ApiSocketGate = Pick<ApiSocketDispatcher, 'claims' | 'upgrade'>;
+
 /**
  * Every part of the surface one adapter serves: request/response routes and protocol switches.
  *
@@ -54,8 +60,8 @@ export interface ApiServerHandle {
  * moved into the browser and the seam went with it. See `runtime/mounts/index.ts` for the record.
  */
 export interface ApiSurface {
-  readonly http: ApiDispatcher;
-  readonly sockets: ApiSocketDispatcher;
+  readonly http: ApiHttpDispatch;
+  readonly sockets: ApiSocketGate;
   /** Exact browser origins admitted by the transport-level CORS boundary. */
   readonly corsOrigins: readonly string[];
 }
@@ -73,6 +79,8 @@ export interface DaemonApiDependencies {
   readonly clock: MillisecondClockPort;
   /** Epoch milliseconds at which this daemon process started, for the liveness answer. */
   readonly startedAtMs: number;
+  /** Boot progress and event-loop lag for the liveness answer; absent in route tests. */
+  readonly liveness?: DaemonLivenessSource;
 }
 
 /**
@@ -83,7 +91,7 @@ export interface DaemonApiDependencies {
  */
 export function daemonApiRoutes(dependencies: DaemonApiDependencies): readonly ApiRoute[] {
   return [
-    ...healthRoutes(dependencies.clock, dependencies.startedAtMs),
+    ...healthRoutes(dependencies.clock, dependencies.startedAtMs, dependencies.liveness),
     ...usageRoutes(dependencies.usage, dependencies.clock),
   ];
 }

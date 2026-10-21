@@ -26,6 +26,7 @@ import {
 } from '../../components/runtime-controls.tsx';
 import type { TerminalDeckDependencies } from '../../components/session-terminal-deck.tsx';
 import { SessionTopBar, sessionDisplayName } from '../../components/session-top-bar.tsx';
+import type { SendDismiss, SendExpand } from '../../components/settled-send-note.tsx';
 import type { SwitchSection } from '../../features/session-info/switch-marks.tsx';
 import { SubFerretIndicator } from '../../components/sub-ferrets.tsx';
 import type { PaneSnapshotReader } from '../../components/terminal-snapshot.tsx';
@@ -214,6 +215,10 @@ export interface SessionChatPageProps {
   readonly onCancel?: SendCancel;
   /** Presses Enter once for a send typed in the agent's composer, from its row. */
   readonly onSubmit?: SendSubmit;
+  /** Puts a send that is not delivered away on this device. */
+  readonly onDismiss?: SendDismiss;
+  /** Opens or folds a settled send's one-line note. */
+  readonly onExpand?: SendExpand;
   /** Test seam for the Console's live capture of the agent's pane. */
   readonly readSnapshot?: PaneSnapshotReader;
   /** Test seam for typing into the Console; absent, it types through the daemon's own route. */
@@ -398,6 +403,8 @@ export function SessionChatPage({
   onRetry,
   onCancel,
   onSubmit,
+  onDismiss,
+  onExpand,
   readSnapshot,
   typeIntoConsole,
   deck,
@@ -1303,6 +1310,8 @@ export function SessionChatPage({
           {...(onRetry === undefined ? {} : { onRetry })}
           {...(onCancel === undefined ? {} : { onCancel })}
           {...(onSubmit === undefined ? {} : { onSubmit })}
+          {...(onDismiss === undefined ? {} : { onDismiss })}
+          {...(onExpand === undefined ? {} : { onExpand })}
           pinSignal={pinSignal}
           {...(readingPosition === undefined ? {} : { readingPosition })}
           sessionId={session.config.id}

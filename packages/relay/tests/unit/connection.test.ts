@@ -1,9 +1,9 @@
 import { describe, it } from 'bun:test';
 import {
-  carrierProbe,
-  carrierWalkAdvances,
   type ConnectionMethod,
   ConnectionMethodSchema,
+  carrierProbe,
+  carrierWalkAdvances,
   chooseConnection,
   connectionPreferenceOrder,
   connectionSocketUrl,
@@ -157,6 +157,12 @@ describe('carrier disclosure and choice', () => {
     should(
       publishedConnectionMethods([
         { kind: 'relay', url: 'http://not-loopback.example' } as never,
+        { kind: 'direct', url: 'http://box.lan:7431' },
+      ]),
+    ).deepEqual([{ kind: 'direct', daemonUrl: 'http://box.lan:7431' }]);
+    should(
+      publishedConnectionMethods([
+        { kind: 'tunnel', url: 'https://abc.tunnels.example.com' },
         { kind: 'direct', url: 'http://box.lan:7431' },
       ]),
     ).deepEqual([{ kind: 'direct', daemonUrl: 'http://box.lan:7431' }]);

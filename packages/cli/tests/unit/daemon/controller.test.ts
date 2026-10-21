@@ -1263,7 +1263,7 @@ describe('daemon status', () => {
     await controller.status({});
 
     // Assert
-    should(out.text).containEql('process exists (pid 4242) but its API is unavailable');
+    should(out.text).containEql('process exists (pid 4242) but answered nothing in time');
     should(out.exitCode).equal(1);
   });
 
