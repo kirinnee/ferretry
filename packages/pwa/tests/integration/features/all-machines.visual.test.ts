@@ -14,7 +14,10 @@
  *   - the offline machine says "offline · last seen 5m", and its rows are greyed;
  *   - the same session id on two machines is two rows, and only this machine's is the open one;
  *   - a row opens its own machine's session, and "+ New" asks which machine, this one first;
- *   - a phone and a desktop, light and dark, never scroll sideways.
+ *   - a phone and a desktop, light and dark, never scroll sideways;
+ *   - crowded, the compact bar draws one short line per session and a quiet one-line machine label,
+ *     the selected row alone opens to a second line, and Comfortable keeps the full rows — all
+ *     without sideways scroll, on the desktop column and the phone drawer, light and dark.
  *
  * Set `FY_ALL_MACHINES_SHOTS_DIR` to keep the captures for review; every name in them is fake.
  */
@@ -71,6 +74,8 @@ const open = async (
   mode: 'light' | 'dark',
   /** Opens the laptop's session, with the laptop answering. */
   openOn: 'studio' | 'laptop' = 'studio',
+  /** Extra scene switches, e.g. `&big=1&density=full`: a crowded list at a chosen density. */
+  extra = '',
 ): Promise<{ readonly context: BrowserContext; readonly tab: Page }> => {
   const phone = scene !== 'bar';
   const context = await browser.newContext({
@@ -85,7 +90,7 @@ const open = async (
     new URL(route.request().url()).origin === origin ? await route.continue() : await route.abort(),
   );
   const tab = await context.newPage();
-  await tab.goto(`${origin}/?scene=${scene}&theme=${theme}-${mode}&open=${openOn}`);
+  await tab.goto(`${origin}/?scene=${scene}&theme=${theme}-${mode}&open=${openOn}${extra}`);
   await tab.waitForSelector(
     openOn === 'studio'
       ? '[data-machine-reach="offline"]'
@@ -253,6 +258,61 @@ describe('one session list across two machines, one offline', () => {
       await context.close();
     }
   }, 120_000);
+
+  it('draws compact rows as one short line and Comfortable as the full rows, crowded, without sideways scroll', async () => {
+    for (const mode of ['light', 'dark'] as const)
+      for (const scene of ['bar', 'drawer'] as const) {
+        const heights: Record<string, number> = {};
+        for (const density of ['compact', 'full'] as const) {
+          const { context, tab } = await open(scene, 'studio', mode, 'laptop', `&big=1&density=${density}`);
+          try {
+            const wide = await tab.evaluate(() => document.documentElement.scrollWidth - innerWidth);
+            expect(wide).toBeLessThanOrEqual(0);
+            const listWide = await tab.$$eval('.fy-sbar__list', nodes =>
+              nodes.map(node => node.scrollWidth - node.clientWidth),
+            );
+            for (const overflow of listWide) expect(overflow).toBeLessThanOrEqual(0);
+
+            const plain = '[data-sbar-machine-group] [data-sbar-session]:not([aria-current="page"])';
+            const rowHeights = await tab.$$eval(plain, nodes => nodes.map(node => node.getBoundingClientRect().height));
+            expect(rowHeights.length).toBeGreaterThan(8);
+            const tallest = Math.max(...rowHeights);
+            heights[density] = Math.min(...rowHeights);
+            const head = await tab.$$eval('.fy-sbar__machine-head', nodes =>
+              nodes.map(node => node.getBoundingClientRect().height),
+            );
+            expect(head.length).toBe(2);
+            for (const height of head) expect(height).toBeLessThanOrEqual(32);
+
+            const detailBox = await tab.$eval(`${plain} .fy-sbar__detail`, node => {
+              const box = node.getBoundingClientRect().height;
+              return box > 0 ? box : (node.firstElementChild?.getBoundingClientRect().height ?? 0);
+            });
+            const open = await tab.$eval('[aria-current="page"] .fy-sbar__detail', node => ({
+              height: node.getBoundingClientRect().height,
+              ferret: node.querySelector('[data-sbar-ferret]') !== null,
+            }));
+            if (density === 'compact') {
+              // One line: 32px on a pointer, the 44px touch floor on a phone; the detail is clipped away.
+              expect(tallest).toBeLessThanOrEqual(scene === 'bar' ? 34 : 46);
+              expect(detailBox).toBeLessThanOrEqual(1);
+              expect(open.height).toBeGreaterThan(8);
+              expect(open.ferret).toBe(true);
+            } else {
+              expect(detailBox).toBeGreaterThan(8);
+            }
+            if (shotsDir !== '')
+              await writeFile(
+                join(shotsDir, `sidebar-${density}-${scene === 'bar' ? 'desktop' : 'phone'}-${mode}.png`),
+                await tab.screenshot({ animations: 'disabled' }),
+              );
+          } finally {
+            await context.close();
+          }
+        }
+        expect(heights.compact).toBeLessThan(heights.full as number);
+      }
+  }, 240_000);
 
   it('fits a phone and a desktop, light and dark, in two theme families', async () => {
     for (const theme of ['studio', 'neo'])

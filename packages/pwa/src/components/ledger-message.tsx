@@ -30,7 +30,7 @@
  */
 
 import { Check, Copy, CornerDownLeft, RotateCw, X } from 'lucide-react';
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { browserClipboardWriter, type ClipboardWriter } from '../features/onboarding/copy-button.tsx';
 import { displayCallsign } from '../lib/callsign.ts';
 import { type LedgerBlockPlacement, ledgerPlacementCopy } from '../lib/ledger-placement.ts';
@@ -109,6 +109,77 @@ export function LedgerMessage({
 }: LedgerMessageProps) {
   const { from, body } = peerFrom(record.message);
   const boundary = ledgerPlacementCopy(placement);
+  return (
+    <div className="kt-bubble-row" data-ledger-placement={placement}>
+      <span className="sr-only">{from ? `${displayCallsign(from.name)} sent:` : 'You said:'}</span>
+      <div className="kt-bubble">
+        {/* No "You" header: the bubble's alignment already says who sent it. A teammate's message
+            keeps its sender's name, because alignment cannot. */}
+        {from ? (
+          <div className="px-panel pt-1 text-[10.5px] font-medium text-muted">{displayCallsign(from.name)}</div>
+        ) : null}
+        {boundary === undefined ? null : (
+          <span className="sr-only" data-ledger-boundary>
+            {boundary}
+          </span>
+        )}
+        {body ? (
+          <div className="kt-user-copy min-w-0 max-w-full whitespace-pre-wrap break-words px-panel pb-0 pt-1 text-[13px] leading-snug text-[color:var(--bubble-fg)]">
+            {body}
+          </div>
+        ) : null}
+        <div className="px-panel pb-1">
+          <MessageFooter clock={clockOfInstant(record.acceptedAt)} record={record} />
+        </div>
+        <LedgerControls onCancel={onCancel} onRetry={onRetry} onSubmit={onSubmit} record={record} write={write} />
+      </div>
+    </div>
+  );
+}
+
+/**
+ * How long a send still on its way keeps its Retry, Cancel and Copy out of sight. Almost every message
+ * lands within a poll or two, and a toolbar that unfolds under the bubble only to fold away again a
+ * second later is the jump a reader sees right after sending. A message still travelling after this
+ * long is the one whose way out matters, and it gets it. A message typed into the agent's composer and
+ * never submitted is not on its way at all, so its Press Enter shows at once.
+ */
+export const OPEN_SEND_SETTLE_MS = 8_000;
+
+/** True until `settleMs` after `since`, re-rendering once when that moment passes. */
+const useStillSettling = (since: number, settleMs: number): boolean => {
+  const remaining = Number.isFinite(since) ? since + settleMs - Date.now() : 0;
+  const [, settled] = useState(0);
+  const settling = remaining > 0;
+  useEffect(() => {
+    if (!settling) return;
+    const timer = setTimeout(() => settled(tick => tick + 1), remaining);
+    return () => clearTimeout(timer);
+  });
+  return settling;
+};
+
+export interface LedgerControlsProps {
+  readonly record: LedgerSendRecord;
+  readonly onRetry?: SendRetry | undefined;
+  readonly onCancel?: SendCancel | undefined;
+  readonly onSubmit?: SendSubmit | undefined;
+  readonly write?: ClipboardWriter;
+}
+
+/**
+ * Everything a send that is NOT in the conversation offers under its bubble — Retry, Cancel, Press Enter,
+ * Copy text, the warnings that guard a second copy, and what each action came to. It is its own component
+ * so the reader's own bubble and a teammate's draw the same controls, whichever shell carries them.
+ */
+export function LedgerControls({
+  record,
+  onRetry,
+  onCancel,
+  onSubmit,
+  write = browserClipboardWriter(),
+}: LedgerControlsProps) {
+  const { body } = peerFrom(record.message);
   const actionHeld = useRef(false);
   const [busy, setBusy] = useState<ActionKind | null>(null);
   const [confirming, setConfirming] = useState(false);
@@ -131,6 +202,7 @@ export function LedgerMessage({
   const delivered = record.fate === 'delivered';
   const open = (record.fate === 'accepted' || record.fate === 'queued') && record.held !== true;
   const typed = record.typedNotSent === true && open;
+  const settling = useStillSettling(Date.parse(record.acceptedAt), OPEN_SEND_SETTLE_MS) && open && !typed;
   // Held for a revive is kept deliberately; delivered and cancelled are done. Everything else can be taken back.
   const actionable = open || ((record.fate === 'timed_out' || record.fate === 'unaccounted') && record.held !== true);
   const showCopy = !delivered && body.length > 0;
@@ -138,7 +210,7 @@ export function LedgerMessage({
   const canEnter = typed && onSubmit !== undefined;
   const canCancel = actionable && onCancel !== undefined;
   const retryOnce = retryable && onRetry !== undefined && result !== 'accepted';
-  const toolbar = canEnter || canCancel || retryOnce || openRetry || showCopy;
+  const toolbar = !settling && (canEnter || canCancel || retryOnce || openRetry || showCopy);
 
   const retry = async (force: boolean): Promise<void> => {
     if (!onRetry || actionHeld.current) return;
@@ -179,182 +251,160 @@ export function LedgerMessage({
   };
 
   return (
-    <div className="kt-bubble-row" data-ledger-placement={placement}>
-      <span className="sr-only">{from ? `${displayCallsign(from.name)} sent:` : 'You said:'}</span>
-      <div className="kt-bubble">
-        {/* No "You" header: the bubble's alignment already says who sent it. A teammate's message
-            keeps its sender's name, because alignment cannot. */}
-        {from ? (
-          <div className="px-panel pt-1 text-[10.5px] font-medium text-muted">{displayCallsign(from.name)}</div>
-        ) : null}
-        {boundary === undefined ? null : (
-          <span className="sr-only" data-ledger-boundary>
-            {boundary}
-          </span>
-        )}
-        {body ? (
-          <div className="kt-user-copy min-w-0 max-w-full whitespace-pre-wrap break-words px-panel pb-0 pt-1 text-[13px] leading-snug text-[color:var(--bubble-fg)]">
-            {body}
-          </div>
-        ) : null}
-        <div className="px-panel pb-1">
-          <MessageFooter clock={clockOfInstant(record.acceptedAt)} record={record} />
+    <>
+      {toolbar ? (
+        <div
+          className="mx-panel mb-2 flex flex-wrap items-center gap-1.5 border-t border-border-soft pt-1.5 text-[11px] text-muted"
+          data-ledger-actions=""
+        >
+          {typed && onSubmit !== undefined ? (
+            <button
+              className={ACTION_BUTTON}
+              data-ledger-action="enter"
+              data-variant="primary"
+              disabled={busy !== null}
+              onClick={() => void act('enter', () => onSubmit(record))}
+              type="button"
+            >
+              <CornerDownLeft aria-hidden="true" size={14} />
+              {busy === 'enter' ? 'pressing…' : 'Press Enter'}
+            </button>
+          ) : null}
+          {retryOnce ? (
+            <button
+              className={ACTION_BUTTON}
+              data-ledger-action="retry"
+              disabled={busy !== null}
+              onClick={() => void retry(false)}
+              type="button"
+            >
+              <RotateCw aria-hidden="true" size={14} />
+              {busy === 'retry' ? 'retrying…' : 'Retry'}
+            </button>
+          ) : null}
+          {openRetry ? (
+            <button
+              aria-expanded={confirming}
+              className={ACTION_BUTTON}
+              data-ledger-action="retry-open"
+              disabled={busy !== null}
+              onClick={() => setConfirming(current => !current)}
+              type="button"
+            >
+              <RotateCw aria-hidden="true" size={14} />
+              Retry…
+            </button>
+          ) : null}
+          {actionable && onCancel !== undefined ? (
+            <button
+              className={ACTION_BUTTON}
+              data-ledger-action="cancel"
+              disabled={busy !== null}
+              onClick={() => void act('cancel', () => onCancel(record))}
+              type="button"
+            >
+              <X aria-hidden="true" size={14} />
+              {busy === 'cancel' ? 'cancelling…' : 'Cancel'}
+            </button>
+          ) : null}
+          {showCopy ? (
+            <button
+              className={ACTION_BUTTON}
+              data-copy-state={copied}
+              data-ledger-action="copy"
+              onClick={copy}
+              type="button"
+            >
+              {copied === 'copied' ? <Check aria-hidden="true" size={14} /> : <Copy aria-hidden="true" size={14} />}
+              {copied === 'copied' ? 'Copied' : 'Copy text'}
+            </button>
+          ) : null}
+          {retryOnce ? <span className="basis-full">it never arrived, so this cannot send it twice</span> : null}
+          {record.fate === 'queued' && !typed && canCancel ? (
+            <span className="basis-full" data-ledger-queued-cancel="">
+              {QUEUED_CANCEL_COPY}
+            </span>
+          ) : null}
+          {copied === 'failed' ? (
+            <span className="basis-full text-warn" role="status">
+              Copy was blocked — select the text instead
+            </span>
+          ) : null}
         </div>
-
-        {toolbar ? (
-          <div
-            className="mx-panel mb-2 flex flex-wrap items-center gap-1.5 border-t border-border-soft pt-1.5 text-[11px] text-muted"
-            data-ledger-actions=""
-          >
-            {typed && onSubmit !== undefined ? (
-              <button
-                className={ACTION_BUTTON}
-                data-ledger-action="enter"
-                data-variant="primary"
-                disabled={busy !== null}
-                onClick={() => void act('enter', () => onSubmit(record))}
-                type="button"
-              >
-                <CornerDownLeft aria-hidden="true" size={14} />
-                {busy === 'enter' ? 'pressing…' : 'Press Enter'}
-              </button>
-            ) : null}
-            {retryOnce ? (
-              <button
-                className={ACTION_BUTTON}
-                data-ledger-action="retry"
-                disabled={busy !== null}
-                onClick={() => void retry(false)}
-                type="button"
-              >
-                <RotateCw aria-hidden="true" size={14} />
-                {busy === 'retry' ? 'retrying…' : 'Retry'}
-              </button>
-            ) : null}
-            {openRetry ? (
-              <button
-                aria-expanded={confirming}
-                className={ACTION_BUTTON}
-                data-ledger-action="retry-open"
-                disabled={busy !== null}
-                onClick={() => setConfirming(current => !current)}
-                type="button"
-              >
-                <RotateCw aria-hidden="true" size={14} />
-                Retry…
-              </button>
-            ) : null}
-            {actionable && onCancel !== undefined ? (
-              <button
-                className={ACTION_BUTTON}
-                data-ledger-action="cancel"
-                disabled={busy !== null}
-                onClick={() => void act('cancel', () => onCancel(record))}
-                type="button"
-              >
-                <X aria-hidden="true" size={14} />
-                {busy === 'cancel' ? 'cancelling…' : 'Cancel'}
-              </button>
-            ) : null}
-            {showCopy ? (
-              <button
-                className={ACTION_BUTTON}
-                data-copy-state={copied}
-                data-ledger-action="copy"
-                onClick={copy}
-                type="button"
-              >
-                {copied === 'copied' ? <Check aria-hidden="true" size={14} /> : <Copy aria-hidden="true" size={14} />}
-                {copied === 'copied' ? 'Copied' : 'Copy text'}
-              </button>
-            ) : null}
-            {retryOnce ? <span className="basis-full">it never arrived, so this cannot send it twice</span> : null}
-            {record.fate === 'queued' && !typed && canCancel ? (
-              <span className="basis-full" data-ledger-queued-cancel="">
-                {QUEUED_CANCEL_COPY}
-              </span>
-            ) : null}
-            {copied === 'failed' ? (
-              <span className="basis-full text-warn" role="status">
-                Copy was blocked — select the text instead
-              </span>
-            ) : null}
+      ) : null}
+      {openRetry && confirming ? (
+        <div
+          className="mx-panel mb-2 rounded-control border border-warn-border bg-warn-bg px-2 py-1.5 text-[11px] text-warn"
+          data-ledger-retry-confirm=""
+        >
+          <p>{OPEN_RESEND_RISK_COPY}</p>
+          <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+            <button
+              className="kt-btn kt-btn--sm shrink-0"
+              data-variant="danger"
+              disabled={busy !== null}
+              onClick={() => void retry(true)}
+              type="button"
+            >
+              {busy === 'retry' ? 'sending…' : 'Send again anyway'}
+            </button>
+            <button className="kt-btn kt-btn--sm shrink-0" onClick={() => setConfirming(false)} type="button">
+              Keep waiting
+            </button>
           </div>
-        ) : null}
-        {openRetry && confirming ? (
-          <div
-            className="mx-panel mb-2 rounded-control border border-warn-border bg-warn-bg px-2 py-1.5 text-[11px] text-warn"
-            data-ledger-retry-confirm=""
-          >
-            <p>{OPEN_RESEND_RISK_COPY}</p>
-            <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+        </div>
+      ) : null}
+      {unconfirmed && onRetry !== undefined && result !== 'accepted' ? (
+        <details className="mx-panel mb-2 border-t border-border-soft pt-1.5 text-[11px] text-muted">
+          <summary className="w-fit cursor-pointer select-none rounded-sm px-1.5 py-1 font-medium hover:bg-surface-2 hover:text-fg">
+            send again…
+          </summary>
+          <div className="mt-1.5 rounded-control border border-warn-border bg-warn-bg px-2 py-1.5 text-warn">
+            <p>{RESEND_RISK_COPY}</p>
+            <div className="mt-1.5 flex items-center gap-2">
               <button
-                className="kt-btn kt-btn--sm shrink-0"
-                data-variant="danger"
+                className="rounded-sm border border-warn-border px-2 py-1 font-semibold hover:bg-surface disabled:cursor-wait disabled:opacity-60"
                 disabled={busy !== null}
                 onClick={() => void retry(true)}
                 type="button"
               >
                 {busy === 'retry' ? 'sending…' : 'Send again anyway'}
               </button>
-              <button className="kt-btn kt-btn--sm shrink-0" onClick={() => setConfirming(false)} type="button">
-                Keep waiting
-              </button>
             </div>
           </div>
-        ) : null}
-        {unconfirmed && onRetry !== undefined && result !== 'accepted' ? (
-          <details className="mx-panel mb-2 border-t border-border-soft pt-1.5 text-[11px] text-muted">
-            <summary className="w-fit cursor-pointer select-none rounded-sm px-1.5 py-1 font-medium hover:bg-surface-2 hover:text-fg">
-              send again…
-            </summary>
-            <div className="mt-1.5 rounded-control border border-warn-border bg-warn-bg px-2 py-1.5 text-warn">
-              <p>{RESEND_RISK_COPY}</p>
-              <div className="mt-1.5 flex items-center gap-2">
-                <button
-                  className="rounded-sm border border-warn-border px-2 py-1 font-semibold hover:bg-surface disabled:cursor-wait disabled:opacity-60"
-                  disabled={busy !== null}
-                  onClick={() => void retry(true)}
-                  type="button"
-                >
-                  {busy === 'retry' ? 'sending…' : 'Send again anyway'}
-                </button>
-              </div>
-            </div>
-          </details>
-        ) : null}
-        {unbound ? (
-          <p
-            className="mx-panel mb-2 mt-0 border-t border-border-soft pt-1.5 text-[11px] text-muted"
-            data-send-unbound=""
-          >
-            {UNBOUND_SEND_COPY}
-          </p>
-        ) : null}
-        {result === 'accepted' ? (
-          <div className="mx-panel mb-2 text-[11px] text-muted" role="status">
-            Sending again — this row updates when the agent has it.
-          </div>
-        ) : null}
-        {result === 'error' ? (
-          <div className="mx-panel mb-2 text-[11px] text-err" role="alert">
-            The retry did not go through — {outcome?.message ?? 'check this row before trying again.'}
-          </div>
-        ) : null}
-        {note?.result === 'done' ? (
-          <div className="mx-panel mb-2 text-[11px] text-muted" role="status">
-            {note.kind === 'cancel'
-              ? 'Cancel sent — this row updates once the agent’s screen has been checked.'
-              : 'Enter pressed — this row updates when the agent has it.'}
-          </div>
-        ) : null}
-        {note?.result === 'error' ? (
-          <div className="mx-panel mb-2 text-[11px] text-err" role="alert">
-            {note.kind === 'cancel' ? 'Cancel did not go through' : 'Enter was not pressed'} —{' '}
-            {note.message ?? 'check this row before trying again.'}
-          </div>
-        ) : null}
-      </div>
-    </div>
+        </details>
+      ) : null}
+      {unbound ? (
+        <p
+          className="mx-panel mb-2 mt-0 border-t border-border-soft pt-1.5 text-[11px] text-muted"
+          data-send-unbound=""
+        >
+          {UNBOUND_SEND_COPY}
+        </p>
+      ) : null}
+      {result === 'accepted' ? (
+        <div className="mx-panel mb-2 text-[11px] text-muted" role="status">
+          Sending again — this row updates when the agent has it.
+        </div>
+      ) : null}
+      {result === 'error' ? (
+        <div className="mx-panel mb-2 text-[11px] text-err" role="alert">
+          The retry did not go through — {outcome?.message ?? 'check this row before trying again.'}
+        </div>
+      ) : null}
+      {note?.result === 'done' ? (
+        <div className="mx-panel mb-2 text-[11px] text-muted" role="status">
+          {note.kind === 'cancel'
+            ? 'Cancel sent — this row updates once the agent’s screen has been checked.'
+            : 'Enter pressed — this row updates when the agent has it.'}
+        </div>
+      ) : null}
+      {note?.result === 'error' ? (
+        <div className="mx-panel mb-2 text-[11px] text-err" role="alert">
+          {note.kind === 'cancel' ? 'Cancel did not go through' : 'Enter was not pressed'} —{' '}
+          {note.message ?? 'check this row before trying again.'}
+        </div>
+      ) : null}
+    </>
   );
 }

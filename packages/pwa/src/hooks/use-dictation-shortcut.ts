@@ -19,6 +19,7 @@ import {
   matchesDictationShortcut,
   sameDictationShortcutTrigger,
 } from '../features/settings/dictation-shortcut.ts';
+import { isKeyboardCaptured } from '../lib/keyboard-capture.ts';
 import type { DictationPhase } from './use-dictation.ts';
 
 export interface ShortcutDictationHandle {
@@ -69,6 +70,7 @@ export const isActiveShortcutComposer = (element: ClosestLike | null): boolean =
 export const shortcutTargetAllowed = (target: unknown, composer: HTMLElement | null): boolean => {
   if (target === null || typeof target !== 'object') return true;
   if (target === composer) return true;
+  if (isKeyboardCaptured(target as EventTarget)) return false;
   const element = target as ClosestLike & { tagName?: string; isContentEditable?: boolean };
   if (typeof element.closest === 'function') {
     if (element.closest('[role="dialog"], [aria-modal="true"], [data-settings-scroller]') !== null) return false;

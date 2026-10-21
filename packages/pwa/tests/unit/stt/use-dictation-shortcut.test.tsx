@@ -170,6 +170,15 @@ describe('shortcutTargetAllowed', () => {
     ).be.false();
   });
 
+  it('refuses a keyboard-owning surface even though it is not a text field', () => {
+    should(
+      shortcutTargetAllowed(
+        { tagName: 'CANVAS', closest: (selector: string) => (selector.includes('keyboard-capture') ? {} : null) },
+        composer,
+      ),
+    ).be.false();
+  });
+
   it('refuses a bare form control by its tag', () => {
     should(shortcutTargetAllowed({ tagName: 'INPUT' }, composer)).be.false();
     should(shortcutTargetAllowed({ tagName: 'SELECT' }, composer)).be.false();

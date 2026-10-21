@@ -670,6 +670,34 @@ describe('AgentToolService — a takeover holds one tab, and only that tab', () 
     should(world.browser.acts).deepEqual([]);
   });
 
+  it('should tell an agent that a page is asking for a human check, and that the owner solves it', async () => {
+    // Arrange — the page the agent acted on appears to show a captcha.
+    const world = agentToolWorld();
+    await world.service.call(agent, { tool: 'browser.open', name: 'app' });
+    const original = world.browser.actOnPage.bind(world.browser);
+    world.browser.actOnPage = async (sessionId, key, action, guard) => {
+      const answer = await original(sessionId, key, action, guard);
+      if (!('result' in answer)) return answer;
+      const pages = answer.result.pages.map(page => ({ ...page, challenge: { provider: 'cloudflare' as const } }));
+      return { ...answer, result: { ...answer.result, pages } };
+    };
+
+    // Act
+    const navigated = await world.service.call(agent, {
+      tool: 'browser.navigate',
+      name: 'app',
+      url: 'https://shop.test/',
+    });
+    const read = await world.service.call(agent, { tool: 'browser.read', name: 'app' });
+    const shot = await world.service.call(agent, { tool: 'browser.screenshot', name: 'app' });
+
+    // Assert
+    for (const result of [navigated, read, shot]) {
+      should(result.summary).containEql('appears to be showing a human check');
+      should(result.summary).containEql('ask your owner to take the page over');
+    }
+  });
+
   it('should stop an agent’s wait the moment a person takes the terminal over', async () => {
     const world = agentToolWorld();
     await world.service.call(agent, { tool: 'terminal.open', name: 'dev' });

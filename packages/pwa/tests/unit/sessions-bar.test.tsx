@@ -409,6 +409,59 @@ describe('SessionsBar as a column', () => {
   });
 });
 
+describe('SessionsBar row density', () => {
+  const column = (): Element =>
+    must(view?.container.querySelector('[data-sessions-bar="column"]') ?? null, 'the column');
+  const options = (): Element | null => view?.container.querySelector('[data-sbar-options]') ?? null;
+  const items = (): string[] =>
+    [...document.querySelectorAll('[role="menuitem"]')].map(
+      node => node.textContent?.replace(/\s+/g, ' ').trim() ?? '',
+    );
+
+  test('draws one-line rows unless the reader chose Full, on the column and on the drawer', async () => {
+    view = await mount(bar().element);
+    expect(column().getAttribute('data-sbar-density')).toBe('compact');
+    await view.unmount();
+    view = await mount(bar({ density: 'full' }).element);
+    expect(column().getAttribute('data-sbar-density')).toBe('comfortable');
+    await view.unmount();
+    view = await mount(bar({ density: 'minimal', presentation: 'drawer' }).element);
+    expect(view.container.querySelector('.fy-sbar--drawer')?.getAttribute('data-sbar-density')).toBe('compact');
+    await view.unmount();
+    view = await mount(bar({ density: 'full', presentation: 'drawer' }).element);
+    expect(view.container.querySelector('.fy-sbar--drawer')?.getAttribute('data-sbar-density')).toBe('comfortable');
+  });
+
+  test('keeps the ferret and the directory in the row, inside one detail wrapper', async () => {
+    view = await mount(bar().element);
+    const row = must(view.container.querySelector('[data-sbar-session="hadi-1"]'), 'a row');
+    const detail = must(row.querySelector('[data-sbar-detail]'), 'the detail');
+    expect(detail.querySelector('[data-sbar-ferret]')).not.toBeNull();
+    expect(detail.querySelector('[data-sbar-dir]')).not.toBeNull();
+  });
+
+  test('offers the density menu only to a host that can store the choice', async () => {
+    view = await mount(bar().element);
+    expect(options()).toBeNull();
+  });
+
+  test('says which density is in force and writes the one the reader picks', async () => {
+    const chosen: string[] = [];
+    view = await mount(bar({ onDensityChange: next => chosen.push(next) }).element);
+    await click(options(), 'the options button');
+    expect(items()).toEqual(['Compactcurrent', 'Comfortable']);
+    await click(document.querySelector('[role="menuitem"]:nth-child(2)'), 'Comfortable');
+    expect(chosen).toEqual(['full']);
+    await view.unmount();
+
+    view = await mount(bar({ density: 'full', onDensityChange: next => chosen.push(next) }).element);
+    await click(options(), 'the options button');
+    expect(items()).toEqual(['Compact', 'Comfortablecurrent']);
+    await click(document.querySelector('[role="menuitem"]:nth-child(1)'), 'Compact');
+    expect(chosen).toEqual(['full', 'compact']);
+  });
+});
+
 describe('SessionsBar column width', () => {
   /** A remembered store over memory, so a commit is observable and no test touches localStorage. */
   const rails = () => {

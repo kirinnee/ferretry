@@ -168,9 +168,11 @@ install command for this machine, for example:
 Chrome is not installed on this machine: install it with `brew install --cask google-chrome`, or set FY_CHROME_BIN to its path.
 ```
 
-`FY_CHROME_BIN` in the daemon's environment points it at any other Chrome. On Linux the browser draws
-into the daemon's X display when it has one and runs headless when it does not (a server or an
-SSH-only box), so no display server is required.
+`FY_CHROME_BIN` in the daemon's environment points it at any other Chrome; otherwise a real Google
+Chrome is preferred over Chromium. The agent browser runs headless by default, so no display server is
+required. Browser mode "Real window" ([docs/browser-mode.md](docs/browser-mode.md)) runs it as a real
+window instead — for an owner who browses and signs in through it — and on Linux that needs **Xvfb**
+(`sudo apt-get install -y xvfb`), which the daemon starts privately on first use.
 
 ## Updating
 

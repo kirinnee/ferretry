@@ -201,6 +201,21 @@ describe('FleetFilters', () => {
     await screen.unmount();
   });
 
+  test('“/” belongs to a keyboard-owning surface instead of stealing its focus', async () => {
+    const screen = await render();
+    const owner = document.createElement('div');
+    owner.setAttribute('data-keyboard-capture', '');
+    owner.tabIndex = -1;
+    document.body.appendChild(owner);
+    owner.focus();
+    const event = new KeyboardEvent('keydown', { key: '/', bubbles: true, cancelable: true });
+    await interact(() => owner.dispatchEvent(event));
+    expect(event.defaultPrevented).toBe(false);
+    expect(document.activeElement).toBe(owner);
+    owner.remove();
+    await screen.unmount();
+  });
+
   test('leaves a modified “/” to the browser', async () => {
     const screen = await render();
     await interact(() => pressKey(document.body, '/', { metaKey: true }));

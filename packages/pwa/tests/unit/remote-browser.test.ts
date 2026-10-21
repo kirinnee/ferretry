@@ -12,6 +12,7 @@ import {
   decodeRemoteBrowserFrame,
   fetchRemoteBrowserStatus,
   isLocalPasteChord,
+  isRemoteCompositionKey,
   nextRemoteClickRun,
   REMOTE_MAX_CLICK_COUNT,
   type RemoteBrowserSocket,
@@ -21,6 +22,7 @@ import {
   remoteInputModifiers,
   remoteKeyInput,
   remoteKeyRelease,
+  remoteKeyText,
   remotePageLabel,
   remotePointerButton,
   remoteViewportForContainer,
@@ -433,12 +435,49 @@ describe('remote browser input translation', () => {
     expect(remoteKeyInput(keyEvent({ ctrlKey: true }), 'keyDown')).not.toHaveProperty('text');
     expect(remoteKeyInput(keyEvent({ metaKey: true }), 'keyDown')).not.toHaveProperty('text');
     expect(remoteKeyInput(keyEvent({ altKey: true }), 'keyDown')).not.toHaveProperty('text');
-    expect(remoteKeyInput(keyEvent({ key: 'Enter', code: 'Enter' }), 'keyDown')).not.toHaveProperty('text');
+    expect(remoteKeyInput(keyEvent({ key: 'Enter', code: 'Enter' }), 'keyDown')).toMatchObject({ text: '\r' });
     expect(remoteKeyInput(keyEvent(), 'keyUp')).not.toHaveProperty('text');
     expect(remoteKeyInput(keyEvent({ location: 3, repeat: true }), 'keyDown')).toMatchObject({
       isKeypad: true,
       autoRepeat: true,
     });
+  });
+
+  it('types every printable ASCII character, shifted and unshifted, as its own text', () => {
+    const shifted = '~!@#$%^&*()_+{}|:"<>?ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+    for (let code = 0x20; code <= 0x7e; code += 1) {
+      const key = String.fromCharCode(code);
+      const input = remoteKeyInput(keyEvent({ key, shiftKey: shifted.includes(key) }), 'keyDown');
+      expect(input).toMatchObject({ key, text: key, unmodifiedText: key });
+    }
+  });
+
+  it('types a layout character that Alt, AltGr or an astral code point produced', () => {
+    // macOS Option+O is "ø": a non-ASCII character is the layout's own text, not a shortcut.
+    expect(remoteKeyText(keyEvent({ key: 'ø', altKey: true }))).toBe('ø');
+    // Alt+F on Windows/Linux is a menu/shortcut, so it carries no text.
+    expect(remoteKeyText(keyEvent({ key: 'f', altKey: true }))).toBeNull();
+    // German AltGr+Q is "@", reported as Ctrl+Alt on Windows; it is text, not a chord.
+    const altGr = keyEvent({ key: '@', code: 'KeyQ', altKey: true, ctrlKey: true, altGraph: true });
+    expect(remoteKeyText(altGr)).toBe('@');
+    expect(remoteKeyInput(altGr, 'keyDown')).toMatchObject({ text: '@', modifiers: 0 });
+    expect(remoteKeyText(keyEvent({ key: 'q', altKey: true, ctrlKey: true }))).toBeNull();
+    expect(remoteKeyText(keyEvent({ key: '😀' }))).toBe('😀');
+    expect(remoteKeyText(keyEvent({ key: '😀', metaKey: true }))).toBeNull();
+    expect(remoteKeyText(keyEvent({ key: 'Enter' }))).toBe('\r');
+    expect(remoteKeyText(keyEvent({ key: 'Enter', shiftKey: true }))).toBe('\r');
+    for (const chord of [{ ctrlKey: true }, { metaKey: true }, { altKey: true }])
+      expect(remoteKeyText(keyEvent({ key: 'Enter', ...chord }))).toBeNull();
+    expect(remoteKeyText(keyEvent({ key: 'Tab' }))).toBeNull();
+    expect(remoteKeyText(keyEvent({ key: '' }))).toBeNull();
+  });
+
+  it('recognises composition keys that must not be sent as key presses', () => {
+    expect(isRemoteCompositionKey({ key: 'a', keyCode: 229 })).toBe(true);
+    expect(isRemoteCompositionKey({ key: 'Dead', keyCode: 192 })).toBe(true);
+    expect(isRemoteCompositionKey({ key: 'Process', keyCode: 0 })).toBe(true);
+    expect(isRemoteCompositionKey({ key: 'Unidentified', keyCode: 0 })).toBe(true);
+    expect(isRemoteCompositionKey({ key: 'a', keyCode: 65 })).toBe(false);
   });
 
   it('releases a retained key without its text or stale modifiers', () => {

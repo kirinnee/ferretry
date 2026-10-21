@@ -18,15 +18,17 @@ import type {
 import { useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { type DaemonConnection, sameDaemonConnection } from '../../lib/daemon-connection.ts';
 import type { DaemonSessionScope } from '../../lib/daemon-scope.ts';
+import { KEYBOARD_CAPTURE_ATTRIBUTE } from '../../lib/keyboard-capture.ts';
 import {
   decodeRemoteBrowserFrame,
   isLocalPasteChord,
+  isRemoteCompositionKey,
   nextRemoteClickRun,
+  type RemoteBrowserSocket,
+  type RemoteBrowserSocketFactory,
   type RemoteClickRun,
   type RemoteKeyEvent,
   type RemotePointerButton,
-  type RemoteBrowserSocket,
-  type RemoteBrowserSocketFactory,
   remoteBrowserStreamSocketFactory,
   remoteCanvasPoint,
   remoteInputModifiers,
@@ -178,6 +180,7 @@ export function RemoteBrowserViewer({
   const frameContainerRef = useRef<HTMLDivElement | null>(null);
   const imageRef = useRef<HTMLImageElement | null>(null);
   const frameRef = useRef<HTMLCanvasElement | null>(null);
+  const sinkRef = useRef<HTMLTextAreaElement | null>(null);
   const socketRef = useRef<RemoteBrowserSocket | null>(null);
   const pressedKeysRef = useRef(new Map<string, BrowserInputEvent>());
   const pressedPointersRef = useRef(new Map<number, RemotePointerButton>());
@@ -574,7 +577,9 @@ export function RemoteBrowserViewer({
   };
 
   const onKey = (event: ReactKeyboardEvent<HTMLElement>, type: 'keyDown' | 'keyUp') => {
-    if (event.nativeEvent.isComposing) return;
+    // A composition (IME, dead key, accent menu) is not a key press: let it run in the text sink and
+    // commit as `insertText` once the composed text is known.
+    if (event.nativeEvent.isComposing || isRemoteCompositionKey(event)) return;
     // The LOCAL paste chord is deliberately not consumed: preventDefault here
     // cancels the page's own paste, so the frame's `paste` event would never
     // fire and the keystroke would instead paste the REMOTE clipboard.
@@ -591,9 +596,16 @@ export function RemoteBrowserViewer({
         ctrlKey: event.ctrlKey,
         metaKey: event.metaKey,
         shiftKey: event.shiftKey,
+        altGraph: event.getModifierState('AltGraph'),
       },
       type,
     );
+  };
+
+  /** Text the keyboard produced without a usable key press: composition, dead keys, a soft keyboard. */
+  const commitSinkText = (sink: HTMLTextAreaElement, text: string) => {
+    sink.value = '';
+    insertText(text, 'keyboard');
   };
 
   const onPaste = (event: ReactClipboardEvent<HTMLElement>) => {
@@ -667,42 +679,68 @@ export function RemoteBrowserViewer({
             A read-only viewer renders none of it, so it exposes no focus stop
             and no handlers rather than an inert element that looks live. */}
         {canInteract && frameUrl !== null && viewport !== undefined && (
-          <canvas
-            ref={frameRef}
-            className="fy-remote-browser-input"
-            // In Fit, layout measurement pins this surface to the image's exact
-            // letterboxed rectangle. At 1:1, both stay at the negotiated pixel
-            // size at the scroll box's top-left.
-            width={viewport.width}
-            height={viewport.height}
-            style={
-              fit
-                ? inputRect === null
-                  ? { height: 0, inset: 'auto', visibility: 'hidden', width: 0 }
-                  : {
-                      height: inputRect.height,
-                      inset: 'auto',
-                      left: inputRect.left,
-                      maxHeight: 'none',
-                      maxWidth: 'none',
-                      top: inputRect.top,
-                      width: inputRect.width,
-                    }
-                : { height: viewport.height, maxHeight: 'none', maxWidth: 'none', width: viewport.width }
-            }
-            tabIndex={0}
-            aria-label="Live remote page; click to send pointer and keyboard input"
-            onPointerDown={beginPointer}
-            onPointerMove={event => sendPointer(event, 'mouseMoved')}
-            onPointerUp={finishPointer}
-            onPointerCancel={finishPointer}
-            onWheel={onWheel}
-            onKeyDown={event => onKey(event, 'keyDown')}
-            onKeyUp={event => onKey(event, 'keyUp')}
-            onPaste={onPaste}
-            onBlur={releasePressedKeys}
-            onContextMenu={event => event.preventDefault()}
-          />
+          <>
+            <textarea
+              ref={sinkRef}
+              className="fy-remote-browser-sink"
+              {...{ [KEYBOARD_CAPTURE_ATTRIBUTE]: '' }}
+              aria-label="Live remote page; click to send pointer and keyboard input. Shift+Escape returns to Ferretry."
+              autoCapitalize="off"
+              autoComplete="off"
+              autoCorrect="off"
+              inputMode="none"
+              rows={1}
+              spellCheck={false}
+              // Uncontrolled and always empty: it exists only so the browser will run IME and dead-key
+              // composition; the committed text leaves through `insertText`, never through this value.
+              onKeyDown={event => onKey(event, 'keyDown')}
+              onKeyUp={event => onKey(event, 'keyUp')}
+              onPaste={onPaste}
+              onBlur={releasePressedKeys}
+              onCompositionEnd={event => commitSinkText(event.currentTarget, event.data)}
+              onInput={event => {
+                if ('isComposing' in event.nativeEvent && event.nativeEvent.isComposing === true) return;
+                commitSinkText(event.currentTarget, event.currentTarget.value);
+              }}
+            />
+            <canvas
+              ref={frameRef}
+              className="fy-remote-browser-input"
+              // In Fit, layout measurement pins this surface to the image's exact
+              // letterboxed rectangle. At 1:1, both stay at the negotiated pixel
+              // size at the scroll box's top-left.
+              width={viewport.width}
+              height={viewport.height}
+              style={
+                fit
+                  ? inputRect === null
+                    ? { height: 0, inset: 'auto', visibility: 'hidden', width: 0 }
+                    : {
+                        height: inputRect.height,
+                        inset: 'auto',
+                        left: inputRect.left,
+                        maxHeight: 'none',
+                        maxWidth: 'none',
+                        top: inputRect.top,
+                        width: inputRect.width,
+                      }
+                  : { height: viewport.height, maxHeight: 'none', maxWidth: 'none', width: viewport.width }
+              }
+              tabIndex={-1}
+              {...{ [KEYBOARD_CAPTURE_ATTRIBUTE]: '' }}
+              onFocus={() => sinkRef.current?.focus()}
+              onPointerDown={beginPointer}
+              onPointerMove={event => sendPointer(event, 'mouseMoved')}
+              onPointerUp={finishPointer}
+              onPointerCancel={finishPointer}
+              onWheel={onWheel}
+              onKeyDown={event => onKey(event, 'keyDown')}
+              onKeyUp={event => onKey(event, 'keyUp')}
+              onPaste={onPaste}
+              onBlur={releasePressedKeys}
+              onContextMenu={event => event.preventDefault()}
+            />
+          </>
         )}
         {displayState === 'stalled' && (
           <p className="fy-remote-browser-stalled">The last frame is shown while the stream recovers.</p>
