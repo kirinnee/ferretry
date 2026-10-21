@@ -471,7 +471,7 @@
   width: 22px;
   height: 22px;
   box-sizing: border-box;
-  border: 2px solid var(--bg);
+  border: var(--stroke-heavy) solid var(--bg);
   border-radius: 50% 50% 50% 0;
   background: var(--fy-map-pin);
   box-shadow: var(--shadow-sm);

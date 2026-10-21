@@ -59,11 +59,11 @@ export const MAP_DEFAULT_ZOOM = 13;
 export const MAP_LISTING_LINES = 200;
 
 const PALETTE: Readonly<Record<string, string>> = {
-  amber: '#d97706',
-  blue: '#2563eb',
-  green: '#16a34a',
-  purple: '#7c3aed',
-  red: '#dc2626',
+  amber: '#d97706', // theme-literal-ok: a colour the author names is data and must not follow the theme
+  blue: '#2563eb', // theme-literal-ok: a colour the author names is data and must not follow the theme
+  green: '#16a34a', // theme-literal-ok: a colour the author names is data and must not follow the theme
+  purple: '#7c3aed', // theme-literal-ok: a colour the author names is data and must not follow the theme
+  red: '#dc2626', // theme-literal-ok: a colour the author names is data and must not follow the theme
 };
 const HEX_COLOR = /^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/iu;
 

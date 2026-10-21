@@ -65,6 +65,7 @@ const popupOf = (title: string | null, body: string | null): HTMLElement | null 
 };
 
 const shapeStyle = (color: MapColor, fill: boolean): L.PathOptions => ({
+  // theme-literal-ok: the route colour when the author named none; a route keeps its colour in every theme
   color: color ?? '#2563eb',
   fillOpacity: fill ? 0.18 : 0,
   lineCap: 'round',
