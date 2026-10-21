@@ -53,6 +53,7 @@ import {
 } from '../hooks/use-dictation.ts';
 import { browserShortcutHost, type ShortcutHost, useDictationShortcut } from '../hooks/use-dictation-shortcut.ts';
 import { cn } from '../lib/class-names.ts';
+import { useDictationDebugSnapshot } from '../lib/store.tsx';
 import type { DaemonConnection } from '../lib/daemon-connection.ts';
 import type { BrowserRecognitionProvider } from '../lib/stt/browser-recognition.ts';
 import type { SelectionLike } from '../lib/stt/draft.ts';
@@ -60,6 +61,7 @@ import type { MicMeterPort } from '../lib/stt/level-monitor.ts';
 import type { RemoteEnhancementFetch } from '../lib/stt/remote-enhancement.ts';
 import { isRemoteEnhancementProvider, type SttSettings } from '../lib/stt/stt-settings.ts';
 import { Button } from '../shell/primitives.tsx';
+import { DictationDebugSheet } from './dictation-debug-sheet.tsx';
 import { DictationSheet, type DictationStage, dictationStage } from './dictation-sheet.tsx';
 import type { InputWaveformRuntime } from './input-waveform.tsx';
 
@@ -210,6 +212,8 @@ export function useDictationBundle(props: DictationControlProps): DictationBundl
   const [open, setOpen] = useState(false);
   const [elapsedMs, setElapsedMs] = useState(0);
   const [wasCapturing, setWasCapturing] = useState(false);
+  const [detailsFor, setDetailsFor] = useState<string | null>(null);
+  const debug = useDictationDebugSnapshot();
   const startedAt = useRef(0);
   const nowRef = useRef(now);
   nowRef.current = now;
@@ -362,27 +366,38 @@ export function useDictationBundle(props: DictationControlProps): DictationBundl
     </Button>
   ) : null;
 
+  const debugRecord =
+    debug.enabled && dictation.review?.debugId !== undefined
+      ? debug.records.find(record => record.id === dictation.review?.debugId)
+      : undefined;
+
   const sheet = enabled ? (
-    <DictationSheet
-      open={open}
-      stage={stage}
-      elapsedMs={elapsedMs}
-      liveText={dictation.liveText}
-      liveInterim={dictation.liveInterim}
-      livePaused={dictation.livePaused}
-      inputMonitor={dictation.inputMonitor}
-      engine={dictation.engine}
-      {...(props.waveformRuntime ? { waveformRuntime: props.waveformRuntime } : {})}
-      {...(visibleError?.code ? { errorCode: visibleError.code } : {})}
-      {...(visibleError?.message ? { errorMessage: visibleError.message } : {})}
-      review={dictation.review}
-      onDismiss={dismissPanel}
-      onStop={dictation.stop}
-      onInsert={dictation.insert}
-      onDiscard={reset}
-      onCancel={reset}
-      onRetry={beginRecording}
-    />
+    <>
+      <DictationSheet
+        open={open}
+        stage={stage}
+        elapsedMs={elapsedMs}
+        liveText={dictation.liveText}
+        liveInterim={dictation.liveInterim}
+        livePaused={dictation.livePaused}
+        inputMonitor={dictation.inputMonitor}
+        engine={dictation.engine}
+        {...(props.waveformRuntime ? { waveformRuntime: props.waveformRuntime } : {})}
+        {...(visibleError?.code ? { errorCode: visibleError.code } : {})}
+        {...(visibleError?.message ? { errorMessage: visibleError.message } : {})}
+        review={dictation.review}
+        {...(debugRecord === undefined ? {} : { onDetails: () => setDetailsFor(debugRecord.id) })}
+        onDismiss={dismissPanel}
+        onStop={dictation.stop}
+        onInsert={dictation.insert}
+        onDiscard={reset}
+        onCancel={reset}
+        onRetry={beginRecording}
+      />
+      {debugRecord !== undefined && detailsFor === debugRecord.id ? (
+        <DictationDebugSheet record={debugRecord} onClose={() => setDetailsFor(null)} />
+      ) : null}
+    </>
   ) : null;
 
   return { supported: enabled && dictation.supported, control, sheet, handle, shortcut: settings.shortcut, stage };

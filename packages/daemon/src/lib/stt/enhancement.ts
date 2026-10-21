@@ -3,7 +3,10 @@ import {
   type ChatCompletionBody,
   CLEANUP_PROVIDERS,
   type CleanupRequest,
+  type CleanupTraceAttempt,
   DEFAULT_CLEANUP_TIMEOUT_MS,
+  describeCleanupReply,
+  describeCleanupRequest,
   prepareCleanup,
   readCleanupReply,
   type SecretName,
@@ -12,6 +15,7 @@ import {
   type SttEnhancementProvider,
   SttEnhancementRequestSchema,
   type SttEnhancementResult,
+  TRACE_REDACTED,
   type VoiceConfig,
 } from '@ferretry/protocol';
 import { SPEEDUP_CATALOG } from '../speedups/catalog.ts';
@@ -56,7 +60,7 @@ export function enhancementErrorStatus(code: SttEnhancementErrorCode): number {
 }
 
 export function enhancementErrorView(error: SttEnhancementError): SttEnhancementErrorView {
-  return { error: error.message, code: error.code };
+  return { error: error.message, code: error.code, ...(error.trace === undefined ? {} : { debug: error.trace }) };
 }
 
 /**
@@ -141,6 +145,8 @@ export function findEnhancementProvider(
 /** Every request the enhancer will act on: the shared cleanup request, and the provider that runs it. */
 export interface NormalizedEnhancement extends CleanupRequest {
   readonly provider: EnhancementProviderDefinition;
+  /** The caller asked for this call's debug record back. */
+  readonly debug: boolean;
 }
 
 const REFUSALS = {
@@ -175,7 +181,7 @@ export function parseEnhancementRequest(
     settings: cleanup,
   });
   if ('refused' in prepared) throw REFUSALS[prepared.refused]();
-  return { ...prepared, provider };
+  return { ...prepared, provider, debug: request.debug === true };
 }
 
 interface SchemaIssue {
@@ -206,6 +212,33 @@ export const ENHANCEMENT_HEADERS: Readonly<Record<string, string>> = Object.free
   'content-type': 'application/json',
   accept: 'application/json',
 });
+
+/**
+ * One attempt as a debug record. The request is shown with its credential header redacted — the
+ * authorizer adds the real one, which this file never sees — and the reply is described by the same
+ * shared decisions the browser path uses. The transport hands back the provider's parsed JSON, so the
+ * raw reply is that value printed back, and a non-2xx status has no body to show.
+ */
+export function describeEnhancementAttempt(
+  request: NormalizedEnhancement,
+  body: ChatCompletionBody,
+  outcome: AuthorizedOutcome,
+  totalMs: number,
+  failure: string | undefined,
+): CleanupTraceAttempt {
+  return {
+    withContext: request.context.length > 0,
+    request: describeCleanupRequest({
+      endpoint: request.provider.endpoint,
+      headers: { ...ENHANCEMENT_HEADERS, authorization: TRACE_REDACTED },
+      body,
+    }),
+    ...(outcome.kind === 'status' ? { status: outcome.status } : {}),
+    ...(outcome.kind === 'completion' ? { response: describeCleanupReply(outcome.payload, request) } : {}),
+    ...(failure === undefined ? {} : { failure }),
+    timings: { totalMs },
+  };
+}
 
 /** A non-2xx status maps to a distinct, body-free error that names the status and the next step. */
 export function enhancementErrorForStatus(status: number, retryAfterSeconds?: number): SttEnhancementError {

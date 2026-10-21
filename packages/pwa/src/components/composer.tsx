@@ -17,6 +17,7 @@ import { daemonSessionKey, daemonSessionScope } from '../lib/daemon-scope.ts';
 import { type DaemonDraftStore, documentDraftStore } from '../lib/drafts.ts';
 import { applyFormat, type FormatCommand, formatShortcut } from '../lib/live-markdown.ts';
 import { useMdComposePref } from '../lib/md-compose.ts';
+import { REINSERT_TRANSCRIPTION_EVENT, reinsertTranscriptionText } from '../lib/stt/reinsert-transcription.ts';
 import { registerComposerQuoteTarget } from '../lib/quote.ts';
 import { findReferences } from '../lib/references.ts';
 import type { DaemonFetch } from '../lib/runtime-models.ts';
@@ -572,6 +573,24 @@ export function Composer({
     }
     syncAutocompleteSelection.current({ start: pending.start, end: pending.end });
   }, [draft]);
+
+  // Words put back from the transcription log land at the end of THIS composer's draft, when it is the visible one.
+  const draftNow = useRef(draft);
+  draftNow.current = draft;
+  useEffect(() => {
+    const onReinsert = (event: Event): void => {
+      const element = elementRef.current;
+      if (element === null || element.closest('[aria-hidden="true"], [inert]') !== null || event.defaultPrevented)
+        return;
+      const text = reinsertTranscriptionText(event);
+      if (text === undefined) return;
+      const current = draftNow.current;
+      setDraft(current === '' || /\s$/u.test(current) ? `${current}${text}` : `${current} ${text}`);
+      event.preventDefault();
+    };
+    window.addEventListener(REINSERT_TRANSCRIPTION_EVENT, onReinsert);
+    return () => window.removeEventListener(REINSERT_TRANSCRIPTION_EVENT, onReinsert);
+  }, [setDraft]);
 
   useEffect(() => {
     const timer = setTimeout(() => draftStore.save(scope, draft), 400);
