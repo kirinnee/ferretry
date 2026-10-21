@@ -121,7 +121,12 @@ async function awaitExit(controller: TmuxController, session: string, gate: stri
     if (pane.alive && pane.dead && pane.exitCode === 2) return;
     await Bun.sleep(50);
   }
-  throw new Error(`test setup: the pane never exited (last state ${last})`);
+  const sock = join(gate, '..', 'throwaway-tmux.sock');
+  const raw = Bun.spawnSync(['tmux', '-S', sock, 'display-message', '-p', '-t', session, '#{pane_pid}|#{pane_dead}|#{pane_dead_status}|#{pane_dead_signal}|#{pane_dead_time}|#{pane_current_command}|#{version}'], { stdout: 'pipe', stderr: 'pipe' });
+  const pid = new TextDecoder().decode(raw.stdout).split('|')[0]?.trim() ?? '';
+  const ps = Bun.spawnSync(['ps', '-o', 'pid,ppid,stat,args', '-p', pid], { stdout: 'pipe', stderr: 'pipe' });
+  const tmuxv = Bun.spawnSync(['tmux', '-V'], { stdout: 'pipe' });
+  throw new Error(`PROBE test setup: the pane never exited (last state ${last}) raw=[${new TextDecoder().decode(raw.stdout)}${new TextDecoder().decode(raw.stderr)}] ps=[${new TextDecoder().decode(ps.stdout)}] v=${new TextDecoder().decode(tmuxv.stdout)} exe=${Bun.which('tmux')}`);
 }
 
 function service(subject: ReapFixture, runtime = subject.runtime): TerminalReapService {
