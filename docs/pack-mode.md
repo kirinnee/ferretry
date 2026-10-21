@@ -42,7 +42,7 @@ called `fy`:
 ```text
 Pack mode: you may hand self-contained parts of your task to sub-ferrets — other agents, each on the model that suits its part. Prefer them over your built-in subagents for real work; do small things yourself.
 1. `fy recommend "<part>"` lists the models usable now, best first, with the command to start each.
-2. `fy new --runtime <runtime> --model <model> [--effort <level>] "<complete brief>"` starts one (`fy new --auto "<brief>"` lets Ferretry choose). The brief is all it knows: say what to do, where, and what to report.
+2. `fy new --runtime <runtime> --model <model> [--effort <level>] --name "<short task title>" "<complete brief>"` starts one (`fy new --auto "<brief>"` lets Ferretry choose). Always pass `--name` (2–5 Title Case words). The brief is all it knows: say what to do, where, and what to report.
 3. If it refuses (out_of_quota, not_logged_in, cli_missing, probe_failed, …), read the reason and start the next candidate. limit_reached or depth_exceeded: do the work yourself.
 4. `fy wait <id>` blocks until it finishes and prints its result. Check it, then combine the results yourself.
 Stop sub-ferrets you no longer need (`fy stop children <your id> --yes`).
@@ -141,8 +141,8 @@ from a person's shell — under `/tmp`, `/private/tmp`, `/var/tmp`, `/var/folder
 refused `scratch_cwd` unless `--allow-scratch` says it is meant. A parent's own folder is never refused.
 
 ```text
-fy new --runtime claude-auto-work --model claude-opus-5-5 --effort high "<complete brief>"
-fy new --auto "<complete brief>"            # the decision mode picks
+fy new --runtime claude-auto-work --model claude-opus-5-5 --effort high --name "Fix Login Redirect" "<complete brief>"
+fy new --auto --name "Fix Login Redirect" "<complete brief>"   # the decision mode picks
 ```
 
 1. **Admission**: Pack mode on for the machine and the parent; the parent's limits (below).

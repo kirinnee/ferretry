@@ -96,6 +96,7 @@ function Scene() {
         active={null}
         activeSessionId={null}
         daemonId={first?.daemonId as DaemonId}
+        initialMode="all"
         machineName="studio"
         machineSources={shown.map(sourceOf)}
         machines={shown.map(record => ({ daemonId: record.daemonId, name: record.name }))}

@@ -44,6 +44,7 @@ const bar = (props: Partial<BarProps> = {}) => (
     activeSessionId={null}
     daemonId={DAEMON}
     machineName="work-mac"
+    initialMode="all"
     machines={[{ daemonId: DAEMON, name: 'work-mac' }]}
     onAddMachine={() => undefined}
     onCollapse={() => undefined}

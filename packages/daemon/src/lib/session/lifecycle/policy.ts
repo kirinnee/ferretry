@@ -3,6 +3,7 @@ import { HARNESS_LABEL, HYPERMEDIA_ENV } from '@ferretry/fleet';
 import {
   assignedTaskDocument as protocolAssignedTaskDocument,
   type SessionLaunchInstructions,
+  taskTitleFor,
   turnFileInstruction,
 } from '@ferretry/protocol';
 import type { CoreAccount } from '../../core/inventory.ts';
@@ -194,8 +195,7 @@ export function createSessionRecord(
   // Titles are shown verbatim in listings, so control characters and length are normalized here
   // rather than left to whatever renders them.
   const name =
-    formatSessionTitle(request.name ?? '') ||
-    formatSessionTitle(prompt ? prompt.split(/\s+/u).slice(0, 5).join('-') : 'interactive');
+    formatSessionTitle(request.name ?? '') || formatSessionTitle(prompt ? taskTitleFor(prompt, 'Task') : 'interactive');
   // Parsed, not asserted: this is the same shape `read` parses back, so a config that violates its
   // own schema can never reach the store and strand the session there.
   const record = SessionLifecycleRecordSchema.parse({

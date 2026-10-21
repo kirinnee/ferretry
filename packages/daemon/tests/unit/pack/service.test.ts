@@ -7,9 +7,10 @@ import type {
   SessionView,
   StartSessionRequest,
 } from '@ferretry/protocol';
+import { briefHash } from '@ferretry/protocol';
 import should from 'should';
-import type { PackProbeOutcome, PackProbeRequest } from '../../../src/lib/pack/probe.ts';
 import type { JevRanking, RankableCandidate } from '../../../src/lib/pack/jev.ts';
+import type { PackProbeOutcome, PackProbeRequest } from '../../../src/lib/pack/probe.ts';
 import { SCRATCH_REMEDY, scratchMessage } from '../../../src/lib/pack/scratch.ts';
 import {
   type PackParent,
@@ -367,6 +368,24 @@ describe('PackService.newChild with a named runtime', () => {
     should(outcome.outcome).equal('started');
     should(starts[0]?.cwd).equal('/elsewhere');
     should(starts[0]?.mode).equal('auto');
+  });
+
+  it('should title an unnamed sub-ferret from its brief, else from its use case and a short hash', async () => {
+    // Arrange
+    const { subject, starts } = build({ parents: { p1: PARENT } });
+    const boilerplate = 'You are an implementer. Read /tmp/briefs/x.md and follow it exactly.';
+
+    // Act
+    await subject.newChild(request({ runtime: 'claude-main', model: 'opus', task: 'Fix the login redirect bug now' }));
+    await subject.newChild(request({ runtime: 'claude-main', model: 'opus', task: boilerplate }));
+    await subject.newChild(
+      request({ runtime: 'claude-main', model: 'opus', task: boilerplate, useCase: 'code-review' }),
+    );
+
+    // Assert
+    should(starts[0]?.name).equal('Fix the Login Redirect Bug');
+    should(starts[1]?.name).equal(`Sub Ferret ${briefHash(boilerplate)}`);
+    should(starts[2]?.name).equal(`Code Review ${briefHash(boilerplate)}`);
   });
 
   it("should run a sub-ferret in its parent's folder even when that folder is temporary", async () => {

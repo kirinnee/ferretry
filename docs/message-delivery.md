@@ -67,15 +67,15 @@ is honest because nothing was typed.
 
 ## What a message row can say
 
-| Row                         | Proof                                                                               |
-| --------------------------- | ----------------------------------------------------------------------------------- |
-| Sending                     | Accepted; nothing has proved where it is yet                                        |
-| Typed, not sent             | `typedNotSent`: the composer holds exactly this message and it was not submitted    |
-| Queued                      | The harness shows it in its own queue (a Claude queue record, or Codex's `↳` entry) |
-| Delivered                   | A user record in the transcript carries it — or carries it JOINED to its neighbours |
-| Unconfirmed / Not delivered | As before: `unaccounted` / `timed_out`, with the reason                             |
-| Cancelled                   | A person took it back; `cancelEffect` says what that did on the agent's screen      |
-| Status unknown              | THIS BROWSER could not read the ledger for 15 s; the row says since when, and why   |
+| Row                         | Proof                                                                                 |
+| --------------------------- | ------------------------------------------------------------------------------------- |
+| Sending                     | Accepted; nothing has proved where it is yet                                          |
+| Typed, not sent             | `typedNotSent`: the composer still holds exactly this message ≥4 s after it was typed |
+| Queued                      | The harness shows it in its own queue (a Claude queue record, or Codex's `↳` entry)   |
+| Delivered                   | A user record in the transcript carries it — or carries it JOINED to its neighbours   |
+| Unconfirmed / Not delivered | As before: `unaccounted` / `timed_out`, with the reason                               |
+| Cancelled                   | A person took it back; `cancelEffect` says what that did on the agent's screen        |
+| Status unknown              | THIS BROWSER could not read the ledger for 15 s; the row says since when, and why     |
 
 `typedNotSent` is set by the tracker on **every** look (the first is ~2 s after the send), not only at a
 deadline, and is dropped when the composer no longer holds the message. **Queued** is set only when the

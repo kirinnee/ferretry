@@ -188,13 +188,18 @@ export class SendTracker implements SendTracking, SendTrackingLoop {
           ? await this.queued(id, record, verdict.queuedAt, 'transcript')
           : record;
       const hold = await this.paneHold(id, proven);
-      const current = await this.observed(id, proven, hold);
-      const due = deadlineOf(current, this.settings);
-      const after = now < due ? current : await this.expire(id, current, reading, verdict, hold, now);
+      const current = await this.observed(id, proven, hold, now);
+      const deadline = deadlineOf(current, this.settings);
+      const after = now < deadline ? current : await this.expire(id, current, reading, verdict, hold, now);
       if (!isOpenSend(after)) continue;
       // A send this look re-typed is looked at again soon, like any fresh transport.
+      const due = deadlineOf(after, this.settings);
       const at =
-        after.attempt !== current.attempt ? now + this.settings.firstCheckMs : deadlineOf(after, this.settings);
+        after.attempt !== current.attempt
+          ? now + this.settings.firstCheckMs
+          : hold === 'composer' && after.typedNotSent !== true
+            ? Math.min(due, this.typedSince(after) + this.settings.typedStableMs)
+            : due;
       next = next === undefined ? at : Math.min(next, at);
     }
     if (next !== undefined)
@@ -248,19 +253,29 @@ export class SendTracker implements SendTracking, SendTrackingLoop {
   /**
    * Moves what the pane shows onto the record, on EVERY look rather than only at a deadline.
    *
-   * A message left TYPED in the composer is said as itself within one look — a harness never submits
+   * A message left TYPED in the composer is said as itself once it has sat there `typedStableMs` — a harness never submits
    * composer text on its own, so "Sending" would be a promise nothing is keeping. One that shows up in
    * the harness's own queue becomes `queued` on that proof, and a typed flag the pane no longer
    * supports is dropped.
    */
-  private async observed(id: SessionId, record: SendRecord, hold: PaneHold): Promise<SendRecord> {
+  private async observed(id: SessionId, record: SendRecord, hold: PaneHold, now: number): Promise<SendRecord> {
     if (hold === 'queue' && record.fate === 'accepted')
       return await this.queued(id, record, this.ports.clock.now(), 'pane');
-    const typed = hold === 'composer';
+    // Text still in the composer is only SAID to be unsent once it has sat there for `typedStableMs`: a
+    // harness needs a moment between Enter and its transcript record, and a flag raised in that window
+    // flips to "delivered" a second later. Once raised it stays for as long as the pane shows the text.
+    const typed =
+      hold === 'composer' &&
+      (record.typedNotSent === true || now - this.typedSince(record) >= this.settings.typedStableMs);
     if (hold === 'unreadable' || typed === (record.typedNotSent === true)) return record;
     const next = await this.ports.ledger.settle(id, record.sendId, { typedNotSent: typed ? true : undefined });
     if (typed) await this.ports.repository.journal(id, 'control.send_typed_not_sent', { sendId: record.sendId });
     return next ?? record;
+  }
+
+  /** When the current attempt put this send in the composer, in epoch milliseconds. */
+  private typedSince(record: SendRecord): number {
+    return Date.parse(record.attemptAt ?? record.acceptedAt);
   }
 
   /**

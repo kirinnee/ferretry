@@ -4,8 +4,8 @@ import {
   queuedMessageInstruction,
   turnFileInstruction,
 } from '@ferretry/protocol';
-import type { SessionSendSettings } from './settings.ts';
 import { STRUCTURED_ANSWER_RELEASED_ATTENTION_KIND } from '../question/answer-ledger.ts';
+import type { SessionSendSettings } from './settings.ts';
 import {
   IDLE_SEND_STATUSES,
   type SendPaneObservation,

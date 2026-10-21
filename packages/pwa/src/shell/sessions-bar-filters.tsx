@@ -1,10 +1,11 @@
 /**
  * THE SESSIONS BAR'S FILTERS: the kind of session, and whether the stopped ones are listed.
  *
- * All · Agents · Interactive is kteam's sidebar segment, with its counts — each the length of the list
- * choosing it would draw. "Agents" is the `auto` mode in the reader's words. The labels are written out
- * in full at every width: kteam's squeezed to "A…" and "IN…" in a narrow column, so here a segment never
- * shrinks below its own label and the strip WRAPS onto a second line before it would clip one.
+ * Interactive · All · Agents — Interactive first, because it is what a new device opens on — each with its
+ * count: the length of the list choosing it would draw. "Agents" is the `auto` mode in the reader's words.
+ * The labels are written out in full at every width: kteam's squeezed to "A…" and "IN…" in a narrow column, so
+ * here a segment never shrinks below its own label and the strip WRAPS onto a second line before it would clip
+ * one.
  *
  * "Show stopped" is one line under the segment, with the number it would add, so a reader who sees
  * fewer sessions than they remember is told how many are tucked away and where the tick is.
@@ -26,7 +27,7 @@ const MODE_HINT: Readonly<Record<ModeFilter, string>> = {
   interactive: 'Interactive — a person drives them',
 };
 
-const MODE_ORDER: readonly ModeFilter[] = ['all', 'auto', 'interactive'];
+const MODE_ORDER: readonly ModeFilter[] = ['interactive', 'all', 'auto'];
 
 export function SessionsBarFilters({
   filter,

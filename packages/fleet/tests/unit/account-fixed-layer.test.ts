@@ -642,6 +642,7 @@ describe('Pack mode teaching', () => {
       '`zz recommend "<part>"`',
       '`zz new --runtime',
       '`zz new --auto',
+      '--name "<short task title>"',
       '`zz wait <id>`',
       '`zz stop children',
     ])
