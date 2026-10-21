@@ -657,6 +657,8 @@ const appStore = async (
           if (path === '/v1/fleet/runtimes' && options.accounts !== undefined)
             return { format: 'version-2', runtimes: options.accounts };
           if (options.fleet?.[path] !== undefined) return options.fleet[path];
+          // Settings › Machine › Conversations reads machine.yaml; an empty file is a valid answer.
+          if (path.startsWith('/v1/config/file?')) return { text: '', etag: 'fixture' };
           return path === '/v1/doctor' ? doctorReport : {};
         },
       } as unknown as FyApiClient;
@@ -3438,7 +3440,7 @@ describe('the settings route composition', () => {
     // the account model's reads, proved in their own suites; this test is about the health probe. The
     // shell also asks the machine on screen whether it may offer "Pair a phone" (`/v1/grants`), and the
     // machine list asks each machine once whether it — or an agent CLI it runs — has an update, for its dot
-    // (`/v1/daemon/update`, `/v1/harnesses/update`).
+    // (`/v1/daemon/update`, `/v1/harnesses/update`), and the Machine tab reads machine.yaml (`/v1/config/file`).
     const probes = () =>
       healthReads.filter(
         read =>
@@ -3446,7 +3448,8 @@ describe('the settings route composition', () => {
           read.path !== '/v1/grants' &&
           read.path !== '/v1/daemon/update' &&
           read.path !== '/v1/harnesses/update' &&
-          !read.path.startsWith('/v1/fleet/'),
+          !read.path.startsWith('/v1/fleet/') &&
+          !read.path.startsWith('/v1/config/file?'),
       );
 
     // A daemon tab does not read another daemon merely by being visible. Opening
