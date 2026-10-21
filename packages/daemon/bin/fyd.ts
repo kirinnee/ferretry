@@ -614,6 +614,7 @@ import {
   PushService,
   packageRole,
   paneShowsActiveWork,
+  paneTextFor,
   parseDaemonTimings,
   parseSessionId,
   parseWardenConfigPatch,
@@ -8230,7 +8231,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           },
         },
         {
-          capture: async sessionId => {
+          capture: async (sessionId, scope) => {
             const id = tryParseSessionId(sessionId);
             if (id === undefined) return undefined;
             // PARSED for the reason every other terminal address is: a document that no longer
@@ -8240,9 +8241,10 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
             );
             if (!lifecycle.success) return undefined;
             const state = await launchTmux.state(lifecycle.data.tmuxSession);
-            // The scrollback, not the visible frame: an operator reading a snapshot is catching up on
-            // what happened, and the visible 24 lines are whatever the harness last redrew.
-            return { alive: state.alive, dead: state.dead, text: state.history };
+            // The scrollback by default: an operator reading a snapshot is catching up on what
+            // happened, and the visible 24 lines are whatever the harness last redrew. `screen` is for
+            // a poller that reads only the frame's last lines, and costs a fraction of the bytes.
+            return { alive: state.alive, dead: state.dead, text: paneTextFor(state, scope) };
           },
         },
         createSessionTranscriptTail(storage),

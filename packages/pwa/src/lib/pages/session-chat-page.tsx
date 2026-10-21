@@ -748,7 +748,7 @@ export function SessionChatPage({
   const working = session.state.turnState === 'working';
   const legacyLive = session.state.turnState === undefined && statusMark(session).klass === 'active';
   const readActivityFrame = useCallback<PaneFrameReader>(
-    async signal => await readPaneSnapshot(connection, scope, signal, referenceFetch, true),
+    async signal => await readPaneSnapshot(connection, scope, signal, referenceFetch, true, 'screen'),
     [connection, referenceFetch, scope],
   );
   const pane = usePaneActivity(readActivityFrame, working || legacyLive);
