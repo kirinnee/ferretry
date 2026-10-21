@@ -140,6 +140,7 @@ import { type DaemonConnection, type DaemonId, daemonCarriers } from './lib/daem
 import { daemonSessionKey, daemonSessionScope } from './lib/daemon-scope.ts';
 import { projectKeyFor } from './lib/fleet-grouping.ts';
 import { installBanner } from './lib/install-prompt.ts';
+import { isKeyboardCaptured } from './lib/keyboard-capture.ts';
 import { placeLedgerRows } from './lib/ledger-placement.ts';
 import { createLiveActivityHub } from './lib/live-activity-feed.ts';
 import { moveMachine } from './lib/machine-order.ts';
@@ -831,8 +832,9 @@ function ShellSessionsBar({
     store.controls.controls(connection.daemonId),
   ).sidebarCollapsed;
   const machineOrder = useMachineOrder(store.controls);
-  const sessionsMode = useSyncExternalStore(store.controls.subscribe, () => store.controls.snapshot()).device
-    .sessionsMode;
+  const { sessionsMode, density } = useSyncExternalStore(store.controls.subscribe, () =>
+    store.controls.snapshot(),
+  ).device;
   const displayed = machineDisplayOrder(connections, machineOrder.saved);
   const record = connections.find(candidate => candidate.daemonId === connection.daemonId);
   // The desktop column, folded to its icon rail only when the reader folded it.
@@ -844,6 +846,8 @@ function ShellSessionsBar({
       activeSessionId={route.kind === 'session' ? route.sessionId : null}
       daemonId={connection.daemonId}
       machineName={machineName}
+      density={density}
+      onDensityChange={next => store.controls.setDeviceControls({ density: next })}
       initialMode={sessionsMode}
       onModeChange={mode => store.controls.setDeviceControls({ sessionsMode: mode })}
       {...(needsRuntime
@@ -2161,6 +2165,7 @@ export function AppShell() {
       if (event.key !== 'k' && event.key !== 'K') return;
       if (event.shiftKey || event.altKey || (!event.metaKey && !event.ctrlKey)) return;
       const sessionScoped = barSessionSearch;
+      if (isKeyboardCaptured(event.target)) return;
       if (isModalShortcutTarget(event.target)) return;
       if (isTextEntryTarget(event.target) && (!sessionScoped || !isSessionSearchShortcutTarget(event.target))) return;
       event.preventDefault();

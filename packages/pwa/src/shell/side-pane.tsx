@@ -26,6 +26,7 @@ import {
   useSyncExternalStore,
 } from 'react';
 import type { DaemonSessionScope } from '../lib/daemon-scope.ts';
+import { isCaptureEscapeChord, isKeyboardCaptured } from '../lib/keyboard-capture.ts';
 import {
   clampSidePaneWidth,
   SIDE_PANE_DEFAULT_WIDTH,
@@ -118,6 +119,8 @@ export function SidePaneShell({
         aria-hidden={hidden ? true : undefined}
         onKeyDown={event => {
           if (event.key !== 'Escape') return;
+          // A surface that owns the keyboard keeps plain Escape for itself; Shift+Escape is the way out.
+          if (isKeyboardCaptured(event.target) && !isCaptureEscapeChord(event.nativeEvent)) return;
           event.stopPropagation();
           if (fullViewport) onExitFullViewport?.();
           else onClose();
@@ -298,8 +301,8 @@ export function SidePaneWorkspace({
     if (!fullViewport) return;
     const exitOnEscape = (event: KeyboardEvent): void => {
       if (event.key !== 'Escape') return;
-      // Capture before the remote browser canvas can send Escape into the page:
-      // in full view it is the explicit way back to Ferretry.
+      // The remote page owns plain Escape; Shift+Escape is the explicit way back to Ferretry.
+      if (isKeyboardCaptured(event.target) && !isCaptureEscapeChord(event)) return;
       event.preventDefault();
       event.stopPropagation();
       exitFullViewport();

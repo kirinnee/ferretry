@@ -410,6 +410,7 @@ export * from './harness-dialogs.ts';
 export * from './highlight.ts';
 export * from './hypermedia-api.ts';
 export * from './install-prompt.ts';
+export * from './keyboard-capture.ts';
 export * from './learning-api.ts';
 export * from './ledger-placement.ts';
 export * from './lineage.ts';
