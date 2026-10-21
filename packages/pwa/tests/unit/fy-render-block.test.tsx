@@ -4,7 +4,8 @@ import type { ReactTestInstance, ReactTestRenderer } from 'react-test-renderer';
 import should from 'should';
 import { FyRenderBlock } from '../../src/components/fy-render-block.tsx';
 import { FyRenderFragment } from '../../src/components/fy-render-fragment.tsx';
-import { type FyRenderHtmlPaint, FyRenderHtmlFrame } from '../../src/components/fy-render-html-frame.tsx';
+import { FyRenderHtmlFrame, type FyRenderHtmlPaint } from '../../src/components/fy-render-html-frame.tsx';
+import { FyRenderMap } from '../../src/components/fy-render-map.tsx';
 import { FyRenderMedia } from '../../src/components/fy-render-media.tsx';
 import { FyRenderSandbox, type FyRenderSandboxFailure } from '../../src/components/fy-render-sandbox.tsx';
 import {
@@ -1058,5 +1059,74 @@ describe('FyRenderBlock fullscreen focus', () => {
     // Assert
     should(event.defaultPrevented).be.false();
     await page.unmount();
+  });
+});
+
+describe('FyRenderBlock map', () => {
+  const mapBlock = (): ParsedBlock => parsed('type: map', 'alt: A city', '---', 'center: [51.5, -0.12]');
+  const neverLoads = (): Promise<never> => new Promise(() => {});
+  const mapProps = (tree: ReactTestRenderer) =>
+    tree.root.findByType(FyRenderMap).props as {
+      readonly alt: string;
+      readonly payload: string;
+      readonly fullscreen: boolean;
+      readonly mode: 'dark' | 'light';
+      readonly onListing: (listing: boolean) => void;
+    };
+
+  test('should draw a map in this document, with no frame and no executing sink', () => {
+    // Act
+    const tree = render(<FyRenderBlock block={mapBlock()} loadMap={neverLoads} />);
+
+    // Assert — a map is data: the component mounts, and nothing that could run an author's bytes does.
+    should(count(tree, FyRenderMap)).equal(1);
+    should(mapProps(tree).alt).equal('A city');
+    should(mapProps(tree).payload).equal('center: [51.5, -0.12]');
+    for (const forbidden of ['iframe', 'script', 'object', 'embed'] as const) should(count(tree, forbidden)).equal(0);
+    should(tools(tree)).eql(['Zoom in', 'Zoom out', 'map source', 'Fullscreen']);
+  });
+
+  test('should hold a quiet plane and mount no map until the block is near', () => {
+    // Arrange
+    const tree = renderObserved(<FyRenderBlock block={mapBlock()} loadMap={neverLoads} />);
+
+    // Assert
+    should(count(tree, FyRenderMap)).equal(0);
+    should(marked(tree, { className: 'fy-render-placeholder' })).equal(1);
+
+    // Act
+    viewport(true);
+
+    // Assert
+    should(count(tree, FyRenderMap)).equal(1);
+  });
+
+  test('should offer nothing to enlarge once the map shows its coordinate list instead', () => {
+    // Arrange
+    const tree = render(<FyRenderBlock block={mapBlock()} loadMap={neverLoads} />);
+
+    // Act
+    run(() => mapProps(tree).onListing(true));
+
+    // Assert — the source stays; a list has no fullscreen. (The zoom buttons are the child's own.)
+    should(tools(tree)).eql(['Zoom in', 'Zoom out', 'map source']);
+
+    // Act
+    run(() => mapProps(tree).onListing(false));
+
+    // Assert
+    should(tools(tree)).eql(['Zoom in', 'Zoom out', 'map source', 'Fullscreen']);
+  });
+
+  test('should give the map the whole plane in fullscreen', () => {
+    // Arrange
+    const tree = render(<FyRenderBlock block={mapBlock()} loadMap={neverLoads} />);
+    should(mapProps(tree).fullscreen).be.false();
+
+    // Act
+    run(() => tool(tree, 'Fullscreen').props.onClick());
+
+    // Assert
+    should(mapProps(tree).fullscreen).be.true();
   });
 });
