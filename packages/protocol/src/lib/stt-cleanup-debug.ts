@@ -88,7 +88,7 @@ export const CleanupTraceAttemptSchema = z.strictObject({
   /** The provider's HTTP status, when one came back. */
   status: z.number().int().min(100).max(599).optional(),
   response: CleanupTraceResponseSchema.optional(),
-  /** The provider's body on a non-2xx status, capped; read only because a record was asked for. */
+  /** The provider's body on a non-2xx status, or a 2xx body that was not JSON; capped, read only because a record was asked for. */
   errorBody: TEXT.optional(),
   /** Why the attempt produced no reply: a sentence, never a credential. */
   failure: z.string().max(400).optional(),

@@ -210,6 +210,39 @@ postProcessing:
   `include_reasoning: false`); the reply's separate `reasoning` field is never read.
 - Neither the API key nor a transcript is ever logged.
 
+## Seeing what clean-up sent and got back
+
+Two device-local tools, both in Settings › This device. Neither is synced, and neither is ever sent to a daemon.
+
+### Dictation debug (off by default, in memory only)
+
+Switch it on and every clean-up call this tab makes leaves one **debug record**: the provider, model and
+endpoint host; timings and token usage; the full request (the always-on guard wrapper, your Fix/Polish
+prompt, the conversation that went along, the raw transcript); the provider's raw reply, reasoning included;
+each post-processing step (reasoning stripped, the guard's decision and reason, the kept-raw fallback); and
+the final text. The review box then shows a **Details** link that opens the record, and Settings lists the
+**Recent calls**.
+
+- **Only the last 10 are kept, in this tab's memory.** A reload or switching it off empties them; nothing is
+  written to disk (`lib/stt/dictation-debug.ts`). Only the switch itself is remembered.
+- **The key is never in a record.** Request headers are redacted by name (`TRACE_REDACTED`), and the
+  device path never reads the key at all — it shows a placeholder. A record does hold dictated words and the
+  conversation sent with them, which is why it is opt-in and never leaves the tab.
+- **Through the daemon** the browser asks for the echo with `debug: true` on `POST /v1/stt/enhance`; the
+  reply carries `debug` (a `CleanupTrace`) for that call only, on success and on failure. The daemon does
+  not log or keep it. Its raw reply is the parsed JSON re-printed, and it has no first-byte time.
+- The record's shape and its redaction are `@ferretry/protocol` `stt-cleanup-debug.ts`.
+
+### Transcription log (on by default)
+
+Every dictation is kept as one entry in this browser's IndexedDB (`lib/stt/transcription-log*.ts`) so words
+are never lost to a mis-tap: the time, the conversation it was for, the engine (Parakeet in-browser / Web
+Speech), the duration, the raw transcript, the cleaned text, which prompt ran, and whether it was inserted or
+discarded. **No audio is stored.** It keeps the newest 200 entries, none older than 30 days. You can search it,
+copy from it, put an entry back into the open composer, and **Clear** it; an off switch stops recording
+(what is kept stays until Clear). If the browser refuses storage the log keeps working for the tab and says it
+is not saved. An entry links to its debug record while that record is still held.
+
 ## Not built yet
 
 - **Parakeet on your machine** (kteam's daemon engine, sherpa-onnx `parakeet-tdt-0.6b-v2-int8`):

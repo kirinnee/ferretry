@@ -158,6 +158,8 @@ export function dictationFailureCopy(code: string | undefined, engine: StripEngi
 
 export interface DictationSheetProps {
   readonly open: boolean;
+  /** Opens the debug record of this take; given only while dictation debug is on and the record is still held. */
+  readonly onDetails?: () => void;
   readonly stage: DictationStage;
   /** Milliseconds elapsed in the CURRENT recording. Ignored off `recording`. */
   readonly elapsedMs: number;
@@ -305,6 +307,7 @@ export function DictationSheet({
   errorCode,
   errorMessage,
   engine = 'browser',
+  onDetails,
   onDismiss,
   review = null,
   onStop,
@@ -372,6 +375,7 @@ export function DictationSheet({
             onInsert={onInsert}
             onDiscard={onDiscard}
             onRetry={onRetry}
+            {...(onDetails === undefined ? {} : { onDetails })}
           />
         </>
       ) : (

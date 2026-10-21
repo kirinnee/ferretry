@@ -355,3 +355,70 @@ describe('requestRemoteEnhancement', () => {
     should(REMOTE_ENHANCEMENT_TIMEOUT_MS).be.below(5_000);
   });
 });
+
+describe('the daemon’s debug echo', () => {
+  const trace = {
+    via: 'daemon',
+    provider: 'groq',
+    model: 'm',
+    host: 'api.groq.com',
+    totalMs: 4,
+    outcome: 'cleaned',
+    finalText: 'run kteam now',
+    attempts: [
+      {
+        withContext: false,
+        request: {
+          host: 'api.groq.com',
+          path: '/p',
+          headers: { authorization: '[redacted]' },
+          params: {},
+          messages: [],
+        },
+        timings: { totalMs: 4 },
+      },
+    ],
+  };
+
+  it('should ask for the record only when told to, and hand it back on the result', async () => {
+    // Arrange
+    const quiet = recorder(() => json({ text: 'run kteam now', debug: trace }));
+    const loud = recorder(() => json({ text: 'run kteam now', debug: trace }));
+
+    // Act
+    const without = await requestRemoteEnhancement(alpha, ask({ fetchImpl: quiet.fetchImpl }));
+    const withIt = await requestRemoteEnhancement(alpha, ask({ fetchImpl: loud.fetchImpl, debug: true }));
+
+    // Assert
+    should(JSON.parse(String(quiet.calls[0]?.init.body))).not.have.property('debug');
+    should(JSON.parse(String(loud.calls[0]?.init.body))).have.property('debug', true);
+    should(without.trace).be.undefined();
+    should(withIt.trace).deepEqual(trace);
+  });
+
+  it('should ignore a record that does not parse, rather than failing the dictation over it', async () => {
+    // Arrange
+    const { fetchImpl } = recorder(() => json({ text: 'run kteam now', debug: { nonsense: true } }));
+
+    // Act
+    const result = await requestRemoteEnhancement(alpha, ask({ fetchImpl, debug: true }));
+
+    // Assert
+    should(result.text).equal('run kteam now');
+    should(result.trace).be.undefined();
+  });
+
+  it('should carry the record of a refused call on the error', async () => {
+    // Arrange
+    const refused = recorder(() => json({ error: 'slow down', code: 'rate_limited', debug: trace }, 429));
+    const plain = recorder(() => json({ error: 'slow down', code: 'rate_limited', debug: trace }, 429));
+
+    // Act
+    const withIt = await rejection(requestRemoteEnhancement(alpha, ask({ fetchImpl: refused.fetchImpl, debug: true })));
+    const without = await rejection(requestRemoteEnhancement(alpha, ask({ fetchImpl: plain.fetchImpl })));
+
+    // Assert
+    should(withIt.trace).deepEqual(trace);
+    should(without.trace).be.undefined();
+  });
+});
