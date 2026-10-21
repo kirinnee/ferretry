@@ -35,6 +35,10 @@ const which = new URLSearchParams(location.search).get('case') ?? 'mermaid';
 const source = FY_RENDER_VISUAL_CASES[which];
 if (source === undefined) throw new Error(`no such fy-render fixture: ${which}`);
 
+// `?theme=studio-light` flips the page the way the app's theme switch does, before the block mounts.
+const theme = new URLSearchParams(location.search).get('theme');
+if (theme !== null) document.documentElement.setAttribute('data-theme', theme);
+
 const parsed = parseFyRender(source);
 if (!parsed.ok) throw new Error(`fixture did not parse: ${parsed.reason}`);
 

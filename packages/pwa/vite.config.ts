@@ -77,8 +77,37 @@ const overriddenDirectory = process.env.FY_RELAY_DIRECTORY_ORIGIN?.trim() ?? '';
  */
 const appVersion = readFileSync(fileURLToPath(new URL('../../VERSION', import.meta.url)), 'utf8').trim();
 
+/**
+ * LEAFLET'S ONE LOAD-TIME MARKUP WRITE, removed from the bundle.
+ *
+ * At module evaluation Leaflet feature-tests inline SVG with `div.innerHTML = '<svg/>'`. The page's
+ * policy is `require-trusted-types-for 'script'` with no `default` policy, so that assignment THROWS in
+ * Chromium and the whole `type: map` chunk would fail to evaluate. Every browser this app supports has
+ * inline SVG, so the test is replaced by its answer rather than a new Trusted Types policy being named in
+ * the CSP for a string that is a constant. The transform FAILS THE BUILD if it no longer matches, so a
+ * Leaflet bump is a conscious re-audit (`tests/unit/build-contract.test.ts` also proves the built chunk
+ * has no `innerHTML = '<svg` left and no policy named).
+ */
+export const LEAFLET_INLINE_SVG_TEST =
+  /var inlineSvg = !!svg\$1 && \(function \(\) \{\s*var div = document\.createElement\('div'\);\s*div\.innerHTML = '<svg\/>';\s*return \(div\.firstChild && div\.firstChild\.namespaceURI\) === 'http:\/\/www\.w3\.org\/2000\/svg';\s*\}\)\(\);/u;
+
+export const leafletTrustedTypes = {
+  name: 'fy-leaflet-trusted-types',
+  enforce: 'pre' as const,
+  transform(code: string, id: string): string | undefined {
+    if (!/[\\/]leaflet[\\/]dist[\\/]leaflet-src(?:\.esm)?\.js(?:\?|$)/u.test(id)) return undefined;
+    if (!LEAFLET_INLINE_SVG_TEST.test(code)) {
+      throw new Error(
+        'fy-leaflet-trusted-types: Leaflet no longer has the inline-SVG test this plugin removes; re-audit its markup writes',
+      );
+    }
+    return code.replace(LEAFLET_INLINE_SVG_TEST, () => 'var inlineSvg = !!svg$1;');
+  },
+};
+
 export default defineConfig({
   plugins: [
+    leafletTrustedTypes,
     {
       name: 'fy-release-version',
       transformIndexHtml: {

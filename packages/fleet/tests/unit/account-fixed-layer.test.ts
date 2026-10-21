@@ -601,7 +601,7 @@ describe('passive learning teaching', () => {
 describe('hypermedia teaching', () => {
   it('should be a per-ferret system prompt section and teach every form with one fenced example', () => {
     // Arrange
-    const forms = ['mermaid', 'svg', 'html', 'image, video, audio, pdf'];
+    const forms = ['mermaid', 'svg', 'html', 'map', 'image, video, audio, pdf'];
 
     // Act
     const lines = HYPERMEDIA_INSTRUCTION.split('\n');

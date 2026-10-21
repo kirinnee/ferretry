@@ -92,7 +92,11 @@ done
 # so `img-src https:` would turn every remote image an agent writes into an automatic request. An https
 # `image` block is fetched and admitted by the parent instead (docs/fy-render.md).
 require_in_block '/*' "media-src 'self' blob: https:;"
-refuse_in_block '/*' 'img-src[^;]*https:' 'widened img-src to https:, which makes every Markdown image an automatic request'
+# The ONE https host `img-src` names is the map tile server (docs/fy-render.md, "Maps"): a `map` block is
+# drawn in the page by the reader's press of Render and loads tiles from there and nowhere else. It is pinned
+# exactly, and the refusal below is for a BARE `https:` scheme, which is the widening this guards against.
+require_in_block '/*' "img-src 'self' data: blob: https://tile.openstreetmap.org;"
+refuse_in_block '/*' "img-src[^;]* https:( |;)" 'widened img-src to https:, which makes every Markdown image an automatic request'
 
 # The shell's CONTENT policy lives in the generated document, not here. Assert the
 # `/*` policy was not widened to accommodate it: the app still frames nothing, and
