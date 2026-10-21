@@ -1,11 +1,12 @@
 import { describe, it } from 'bun:test';
+import { DAEMON_STARTING_CODE } from '@ferretry/protocol';
 import should from 'should';
 import type { ApiRequest, ApiResponse } from '../../../src/lib/api/http.ts';
 import { jsonResponse } from '../../../src/lib/api/responses.ts';
 import type { DaemonLivenessSource } from '../../../src/lib/api/routes/health.ts';
 import type { ApiHttpDispatch, ApiSocketGate } from '../../../src/lib/api/server.ts';
 import type { BootSnapshot } from '../../../src/lib/runtime/liveness.ts';
-import { DAEMON_STARTING_CODE, StagedApiSurface } from '../../../src/lib/runtime/staged-surface.ts';
+import { StagedApiSurface } from '../../../src/lib/runtime/staged-surface.ts';
 import { daemonVersion } from '../../../src/lib/version.ts';
 import { fixedClock, jsonBody, request } from '../api/support.ts';
 
