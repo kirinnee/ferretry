@@ -44,6 +44,13 @@ export interface ConsoleSurfaceProps {
   readonly agentName?: string;
 }
 
+/**
+ * The fastest the Console re-reads the pane because of typing. Each re-read is a whole capture over
+ * the carrier, so a key per read made typing cost a capture per keystroke; the first key after a quiet
+ * second reads at once, and a burst collapses into one trailing read that shows where it ended.
+ */
+export const CONSOLE_REFRESH_MIN_MS = 1_000;
+
 /** A refusal in the grant's own words when it is one; the daemon's message otherwise. */
 const refusalText = (error: unknown): string => {
   const grant = grantRefusalNotice(error);
@@ -79,6 +86,24 @@ export function ConsoleSurface({
   const [font, setFont] = useState<string | undefined>(undefined);
   const inputRef = useRef<HTMLInputElement | null>(null);
   const queue = useRef<Promise<void>>(Promise.resolve());
+  const lastRefreshAt = useRef(Number.NEGATIVE_INFINITY);
+  const trailingRefresh = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+
+  const refreshSoon = useCallback((): void => {
+    const wait = lastRefreshAt.current + CONSOLE_REFRESH_MIN_MS - Date.now();
+    if (wait <= 0) {
+      lastRefreshAt.current = Date.now();
+      setRefreshKey(key => key + 1);
+      return;
+    }
+    if (trailingRefresh.current !== undefined) return;
+    trailingRefresh.current = setTimeout(() => {
+      trailingRefresh.current = undefined;
+      lastRefreshAt.current = Date.now();
+      setRefreshKey(key => key + 1);
+    }, wait);
+  }, []);
+  useEffect(() => () => clearTimeout(trailingRefresh.current), []);
 
   // The pane is drawn in the terminal's face once it is loaded, so a host with no monospace font of
   // its own still shows the agent's columns lined up.
@@ -102,10 +127,10 @@ export function ConsoleSurface({
         } catch (error) {
           setRefusal(refusalText(error));
         }
-        setRefreshKey(key => key + 1);
+        refreshSoon();
       });
     },
-    [connection, scope, typer],
+    [connection, refreshSoon, scope, typer],
   );
 
   useEffect(() => {

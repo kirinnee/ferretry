@@ -388,6 +388,7 @@ const sessionCases: SchemaCase[] = [
   { name: 'send result', schema: session.SendResultSchema, value: { ...sessionView, disposition: 'delivered' } },
   { name: 'signal kind', schema: session.SignalKindSchema, value: 'done' },
   { name: 'signal options', schema: session.SignalOptionsSchema, value: { until: INSTANT } },
+  { name: 'snapshot scope', schema: session.SnapshotScopeSchema, value: 'screen' },
   { name: 'signal request', schema: session.SignalSessionRequestSchema, value: { kind: 'done' } },
 ];
 

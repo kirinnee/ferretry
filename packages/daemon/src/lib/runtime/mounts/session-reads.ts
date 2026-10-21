@@ -111,6 +111,10 @@ async function events(
  * `?live=false` selects the final frame captured at terminalization; the omitted and `true` forms
  * retain the live-pane default. A missing artifact remains a refusal instead of a blank screen,
  * because absence is not evidence that the final screen was blank.
+ *
+ * `?scope=screen` narrows a LIVE capture to the visible frame; omitted or `history` is the whole
+ * scrollback, which is what every reader before the scope existed received. A stored final frame is
+ * already one frame, so the scope does not touch it.
  */
 async function snapshot(
   reads: OperatorReadService,
@@ -121,9 +125,12 @@ async function snapshot(
   const live = queryValue(context.request, 'live');
   if (live !== undefined && live !== 'true' && live !== 'false')
     throw new ApiError(400, 'query parameter "live" must be true or false', 'invalid_query');
+  const scope = queryValue(context.request, 'scope');
+  if (scope !== undefined && scope !== 'screen' && scope !== 'history')
+    throw new ApiError(400, 'query parameter "scope" must be screen or history', 'invalid_query');
   await requireSession(sessions, id);
   try {
-    return textResponse(await reads.snapshot(id, live !== 'false'));
+    return textResponse(await reads.snapshot(id, live !== 'false', scope ?? 'history'));
   } catch (error) {
     return refuse(error);
   }
