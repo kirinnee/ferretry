@@ -41,6 +41,7 @@ import {
   slugName,
 } from '@ferretry/fleet';
 import type {
+  BrowserMode,
   FleetAccountChange,
   FleetAgentControl,
   FleetComponentInput,
@@ -519,9 +520,26 @@ function putMachineSettings(
     consequences.push('Applies to an agent’s next action; nothing already running is interrupted.');
   }
 
+  // A client that predates Browser mode leaves it out, and leaves it as it is.
+  const browserMode = change.browserMode ?? model.machine.browserMode;
+  if (browserMode !== model.machine.browserMode) {
+    draft.machine.browserMode = browserMode;
+    parts.push(`the browser mode to ${BROWSER_MODE_WORDS[browserMode]}`);
+    // Read when the browser starts: closing a running one here would close every agent's pages.
+    consequences.push(
+      'Applies the next time the browser starts; a browser already running keeps its mode until it stops.',
+    );
+  }
+
   if (parts.length === 0) return 'Keep machine settings the same';
   return `Set ${parts.join('; ')}`;
 }
+
+/** The product's words for each Browser mode (docs/browser-mode.md). */
+const BROWSER_MODE_WORDS: Readonly<Record<BrowserMode, string>> = {
+  headless: 'Headless',
+  window: 'Real window',
+};
 
 /** The product's words for each Agent permissions choice (F4). */
 const AGENT_PERMISSION_WORDS: Readonly<Record<'auto' | 'skip', string>> = {

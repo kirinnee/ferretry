@@ -4,6 +4,7 @@
  *
  * - **Agent permissions** — Auto mode or Skip all permission checks, each with a plain sentence. It
  *   applies to new sessions; with sessions running, the tab says how many keep the old mode (E32).
+ * - **Browser mode** — Headless, or a Real window an owner browses through (docs/browser-mode.md).
  * - **Tools on <machine>** — Claude Code and Codex, installed or not, with **Install**.
  * - **Setup** — **Set up <machine>** while it is not set up, otherwise **Import again**; **Clone from
  *   another machine**.
@@ -15,7 +16,7 @@
  * "Set up <machine>" link lands straight in the first run.
  */
 
-import type { FleetAgentControl, FleetMachineView } from '@ferretry/protocol';
+import type { BrowserMode, FleetAgentControl, FleetMachineView } from '@ferretry/protocol';
 import { ChevronRight } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import type { DaemonConnectionRecord } from '../../../lib/connections.ts';
@@ -63,12 +64,15 @@ const machineSettings = (
     readonly agentPermissions: AgentPermissions;
     readonly defaultRuntime: string | null;
     readonly agentControl: FleetAgentControl;
+    readonly browserMode: BrowserMode;
   }>,
 ) => ({
   kind: 'machine.settings' as const,
   agentPermissions: machine.agentPermissions,
   defaultRuntime: machine.defaultRuntime,
   agentControl: machine.agentControl,
+  // Sent only to a daemon that has the setting: an older one refuses a field it does not know.
+  ...(machine.browserMode === undefined ? {} : { browserMode: machine.browserMode }),
   ...edit,
 });
 
@@ -330,6 +334,77 @@ export function AgentControlSection({
   );
 }
 
+/** "Browser mode" (docs/browser-mode.md): each choice's words. */
+export const BROWSER_MODE_WORDS: Readonly<Record<BrowserMode, { readonly title: string; readonly detail: string }>> = {
+  headless: {
+    title: 'Headless',
+    detail: 'No window. What agents use by default, and the only choice on a server with no screen.',
+  },
+  window: {
+    title: 'Real window',
+    detail:
+      'A real Chrome window, for when you browse and sign in yourself: sites see an ordinary desktop browser. On Linux it draws on a private virtual screen (needs Xvfb); on a Mac it is a window on your desktop.',
+  },
+};
+
+export function BrowserModeSection({
+  machine,
+  machineName,
+  access,
+  onSaved,
+}: {
+  readonly machine: FleetMachineView;
+  readonly machineName: string;
+  readonly access: SetupAccess;
+  readonly onSaved: () => void;
+}) {
+  const { changes } = access;
+  const current = machine.browserMode ?? 'headless';
+  const [draft, setDraft] = useState<BrowserMode>(current);
+  const pending = draft !== current;
+  const save = (): void => {
+    void changes.apply(machineSettings(machine, { browserMode: draft })).then(result => {
+      if (result.kind === 'refused') return;
+      onSaved();
+    });
+  };
+  // A daemon that predates the setting runs headless and cannot be asked for anything else.
+  if (machine.browserMode === undefined) return null;
+  return (
+    <SetupSection title="Browser mode" name="browser-mode">
+      <RadioChoices
+        legend="Browser mode"
+        legendHidden
+        name="browser-mode"
+        value={draft}
+        onChoose={value => {
+          setDraft(value);
+          changes.clear();
+        }}
+        options={(['headless', 'window'] as const).map(mode => ({ id: mode, ...BROWSER_MODE_WORDS[mode] }))}
+      />
+      <p className="m-0 text-meta leading-base text-muted" data-browser-mode-hint="">
+        Applies the next time the browser on {machineName} starts. Neither mode solves a captcha for you: when a page
+        asks, take it over and solve it yourself.
+      </p>
+      {pending ? (
+        <ChangeApplyPanel
+          machineName={machineName}
+          authority={changes.authority}
+          busy={changes.busy}
+          refusal={changes.refusal}
+          submitLabel="Save browser mode"
+          onSubmit={save}
+        >
+          <Button type="button" data-browser-mode-undo="" onClick={() => setDraft(current)}>
+            Keep {BROWSER_MODE_WORDS[current].title}
+          </Button>
+        </ChangeApplyPanel>
+      ) : null}
+    </SetupSection>
+  );
+}
+
 export function MachineSettingsTab(props: MachineSettingsTabProps) {
   const { machine, machineName, online, checking, connection, createClient, onRetry, sources, browser } = props;
   // After a save here the machine is read again QUIETLY: a loud re-check swapped every section for
@@ -411,6 +486,14 @@ export function MachineSettingsTab(props: MachineSettingsTabProps) {
 
       <AgentControlSection
         key={AGENT_CONTROL_KINDS.map(kind => machine.agentControl[kind]).join(',')}
+        machine={machine}
+        machineName={machineName}
+        access={access}
+        onSaved={onSaved}
+      />
+
+      <BrowserModeSection
+        key={machine.browserMode ?? 'headless'}
         machine={machine}
         machineName={machineName}
         access={access}

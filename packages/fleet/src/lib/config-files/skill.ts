@@ -34,7 +34,7 @@ Run \`${bin} config path\` for the directory. Inside it:
 
 | File | What it holds |
 | --- | --- |
-| \`machine.yaml\` | agent permissions, the default runtime, what agents may control, advanced settings |
+| \`machine.yaml\` | agent permissions, the default runtime, what agents may control, browser mode, advanced settings |
 | \`logins/<id>.yaml\` | one login: \`harness\`, \`store\` (\`host\`, \`ferretry\` or \`environment\`), \`env\` |
 | \`components/<kind>/<name>.yaml\` | one component; kind is \`instructions\`, \`mcp\`, \`skills\`, \`settings\`, \`hooks\` or \`modelSets\` |
 | \`profiles/<name>.yaml\` | \`contents:\` — components and other profiles (\`mcp/github\`, \`profile/base\`), in order; a later entry overrides an earlier one |
