@@ -20,6 +20,13 @@ export const OFFLINE_TEST_ENVIRONMENT = {
 
 for (const [name, value] of Object.entries(OFFLINE_TEST_ENVIRONMENT)) process.env[name] ??= value;
 
+/**
+ * A booted `fyd` holds its housekeeping — analytics, the fleet refresh, the reaper — for two minutes after
+ * it serves, so a large fleet's first requests are answered first. A test that boots one expects that work
+ * now, so the lane opens as soon as it serves; a test about the delay sets the variable itself.
+ */
+process.env.FYD_BACKGROUND_DELAY_SECONDS ??= '0';
+
 /** Hosts a test may never reach: the hosted app, the hosted relay, and GitHub's release API. */
 export const FORBIDDEN_TEST_HOST =
   /(^|\.)ferretry\.pages\.dev$|^api\.github\.com$|(^|\.)ferretry-hosted-relay\.[a-z0-9-]+\.workers\.dev$/u;

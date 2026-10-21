@@ -537,6 +537,26 @@ describe('AnalyticsIngestionService.ingest', () => {
     should(test.reads).have.length(3);
   });
 
+  it('should read at most its cap per pass and leave the rest for the next pass', async () => {
+    // Arrange
+    const test = harness(
+      ['s1', 's2', 's3', 's4', 's5'].map(id => candidate({ id })),
+      async () => readEvidence([usageEvent('claude-opus-5', 10, 10)]),
+      { concurrency: 2, readsPerPass: 2 },
+    );
+
+    // Act
+    const first = await test.service.ingest();
+    const second = await test.service.ingest();
+    const third = await test.service.ingest();
+
+    // Assert — every session is read once, two per pass, and nothing is read twice.
+    should([first.ingested, first.postponed]).deepEqual([2, 3]);
+    should([second.ingested, second.postponed]).deepEqual([2, 1]);
+    should([third.ingested, third.postponed, third.unchanged]).deepEqual([1, 0, 4]);
+    should(test.reads).deepEqual(['s1', 's2', 's3', 's4', 's5']);
+  });
+
   it('should run passes one at a time so neither re-folds what the other proved', async () => {
     // Two overlapping passes would each read the store's markers before the other wrote its rows.
     // Arrange

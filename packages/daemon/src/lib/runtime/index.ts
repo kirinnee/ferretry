@@ -1,4 +1,5 @@
 export * from './arguments.ts';
+export * from './background-lane.ts';
 export * from './boot.ts';
 export * from './carriers.ts';
 export * from './config.ts';

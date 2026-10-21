@@ -63,6 +63,14 @@ export interface AnalyticsIngestionParts {
    *  many of those bounds are resident at the same instant. */
   readonly concurrency: number;
   /**
+   * How many transcripts one pass may read at most; the rest are left for the next pass.
+   *
+   * A rebuild over a large fleet used to read every finished transcript in one pass — hundreds of
+   * megabytes, all at once, every boot. A cap turns that into a few each minute, so ingestion catches up
+   * steadily instead of in one burst that holds everything else back. Absent is no cap.
+   */
+  readonly readsPerPass?: number;
+  /**
    * Whether the store handed over was created fresh or discarded on open, so nothing carried across.
    *
    * DECLARED rather than inferred from an empty table. A daemon whose index was thrown away — a schema
@@ -103,6 +111,8 @@ export interface AnalyticsIngestSummary {
    * exactly what they said — refused, never zero.
    */
   readonly deferred: number;
+  /** Sessions due a read that this pass left for the next one, because it reached its read cap. */
+  readonly postponed: number;
   /** Rows stored with a token total this daemon could not prove. Never stored as zero. */
   readonly usageRefused: number;
   /** Transcript reads that raised rather than answering. */
@@ -327,21 +337,22 @@ export class AnalyticsIngestionService implements AnalyticsIngestionLoop {
       );
     });
 
+    const due = pending.slice(0, Math.max(1, this.parts.readsPerPass ?? pending.length));
     let sourceErrors = 0;
     let usageRefused = 0;
     const rows: AnalyticsStoredSession[] = [];
     // At least one per batch, so a misconfigured concurrency is a slow pass rather than a loop that
     // never advances.
     const batchSize = Math.max(1, this.parts.concurrency);
-    for (let start = 0; start < pending.length; start += batchSize) {
+    for (let start = 0; start < due.length; start += batchSize) {
       const batch = await Promise.all(
-        pending.slice(start, start + batchSize).map(async entry => await this.materialize(entry, catalog)),
+        due.slice(start, start + batchSize).map(async entry => await this.materialize(entry, catalog)),
       );
       for (const [index, result] of batch.entries()) {
         if (result.sourceError) sourceErrors += 1;
         if (result.row.usageRefusal !== null) usageRefused += 1;
         rows.push(result.row);
-        const entry = pending[start + index];
+        const entry = due[start + index];
         if (entry === undefined) continue;
         if (result.row.usageRefusal !== null && READ_REFUSALS.has(result.row.usageRefusal))
           this.refusals.set(entry.session.id, { signature: entry.signature, atMs: nowMs });
@@ -357,6 +368,7 @@ export class AnalyticsIngestionService implements AnalyticsIngestionLoop {
       ingested: rows.length,
       unchanged: admitted.length - stale.length,
       deferred: stale.length - pending.length,
+      postponed: pending.length - due.length,
       usageRefused,
       sourceErrors,
       forgotten: forgotten.length,

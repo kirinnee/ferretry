@@ -222,6 +222,57 @@ describe('listRollouts and newestRolloutRateLimits', () => {
     should(early?.fiveHour?.usedPercent).equal(42);
   });
 
+  it('should find a reading whose record straddles the boundary between two scanned windows', async () => {
+    // The scan walks back from the end one window at a time; a record cut by a window's start must be
+    // joined to the window before it, not lost between the two.
+    // Arrange — the reading ends a few bytes past where the first 256 KiB window from the end begins.
+    const root = await sessions();
+    const reading = `${tokenCount('2026-10-13T09:00:00.000Z', limits(77, 7))}\n`;
+    const tail = `${JSON.stringify({ type: 'response_item', payload: { text: 'y'.repeat(256 * 1024 - 80) } })}\n`;
+    const filler = `${JSON.stringify({ type: 'response_item', payload: { text: 'x'.repeat(1_000) } })}\n`.repeat(3_000);
+    const file = join(root, `rollout-straddle-${CONVERSATION}.jsonl`);
+    await writeFile(file, `${filler}${reading}${tail}`);
+
+    // Act
+    const found = await newestRolloutRateLimits([{ path: file, modifiedAt: 1 }]);
+
+    // Assert
+    should(Buffer.byteLength(tail)).be.below(256 * 1024);
+    should(Buffer.byteLength(reading) + Buffer.byteLength(tail)).be.above(256 * 1024);
+    should(found?.fiveHour?.usedPercent).equal(77);
+  });
+
+  it('should scan past one record longer than a whole window to the reading before it', async () => {
+    // Arrange — a single 3 MiB record at the end: two windows find no line break at all.
+    const root = await sessions();
+    const giant = `${JSON.stringify({ type: 'response_item', payload: { text: 'z'.repeat(3 * 1024 * 1024) } })}\n`;
+    const file = join(root, `rollout-giant-${CONVERSATION}.jsonl`);
+    await writeFile(file, `${tokenCount('2026-10-13T05:00:00.000Z', limits(64, 6))}\n${giant}`);
+
+    // Act
+    const found = await newestRolloutRateLimits([{ path: file, modifiedAt: 1 }]);
+
+    // Assert
+    should(found?.fiveHour?.usedPercent).equal(64);
+  });
+
+  it('should find the newest reading in a large compressed rollout, scanned from its end', async () => {
+    // Arrange
+    const root = await sessions();
+    const filler = `${JSON.stringify({ type: 'response_item', payload: { text: 'x'.repeat(1_000) } })}\n`.repeat(5_000);
+    const file = join(root, `rollout-zst-${CONVERSATION}.jsonl.zst`);
+    await writeFile(
+      file,
+      Bun.zstdCompressSync(Buffer.from(`${tokenCount('2026-10-13T06:00:00.000Z', limits(31, 3))}\n${filler}`)),
+    );
+
+    // Act
+    const found = await newestRolloutRateLimits([{ path: file, modifiedAt: 1 }]);
+
+    // Assert
+    should(found?.fiveHour?.usedPercent).equal(31);
+  });
+
   it('should skip a day directory it cannot read', async () => {
     // Arrange
     const root = await sessions();

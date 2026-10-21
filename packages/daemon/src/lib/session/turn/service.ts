@@ -104,16 +104,16 @@ export class SessionTurnWatcher implements TurnWatchLoop {
     const sessions = await this.ports.sessions();
     const changed = new Map<SessionId, TurnStateChange>();
     const failures = new Map<SessionId, string>();
-    await Promise.all(
-      sessions.map(async session => {
-        try {
-          const change = await this.watch(session);
-          if (change !== undefined) changed.set(session.id, change);
-        } catch (error) {
-          failures.set(session.id, message(error));
-        }
-      }),
-    );
+    // One session at a time: every live session's tail and pane capture at once was a burst of parses
+    // and spawns on a large fleet, and the tick is a background watcher that nothing waits on.
+    for (const session of sessions) {
+      try {
+        const change = await this.watch(session);
+        if (change !== undefined) changed.set(session.id, change);
+      } catch (error) {
+        failures.set(session.id, message(error));
+      }
+    }
     const roster = new Set(sessions.map(session => session.id));
     for (const id of this.previous.keys()) if (!roster.has(id)) this.previous.delete(id);
     return { changed, failures };

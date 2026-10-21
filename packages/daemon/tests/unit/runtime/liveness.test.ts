@@ -1,5 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
+import { AsyncActivityScope } from '../../../src/adapters/runtime/stall-attribution.ts';
 import {
   ActivityLedger,
   BootProgress,
@@ -8,11 +9,15 @@ import {
   describeLoopStall,
   describeWatchdogFire,
   EventLoopLagMeter,
+  FLAT_ACTIVITY_SCOPE,
   type LoopStall,
   NO_WATCHDOG,
   parseWatchdogLimit,
+  type StackSample,
+  summariseStacks,
   WATCHDOG_VARIABLE,
   watchdogShouldFire,
+  watchdogSilenceFrom,
 } from '../../../src/lib/runtime/liveness.ts';
 
 /** A clock a test moves by hand. */
@@ -123,6 +128,84 @@ describe('ActivityLedger', () => {
   });
 });
 
+describe('ActivityLedger nesting', () => {
+  it('should label work run inside another activity with its whole path, across awaits', async () => {
+    // Arrange
+    const clock = manualClock();
+    const ledger = new ActivityLedger(clock, new AsyncActivityScope());
+    let seen: readonly string[] = [];
+
+    // Act
+    await ledger.run('fleet refresh', async () => {
+      await Promise.resolve();
+      await ledger.run('runtime homes', async () => {
+        await Bun.sleep(1);
+        seen = ledger.inFlight();
+      });
+    });
+
+    // Assert
+    should(seen).deepEqual(['fleet refresh', 'fleet refresh › runtime homes']);
+    should(ledger.inFlight()).deepEqual([]);
+  });
+
+  it('should keep only the deepest overlapping labels as the innermost', async () => {
+    // Arrange
+    const clock = manualClock();
+    const ledger = new ActivityLedger(clock, new AsyncActivityScope());
+    const endTurns = ledger.begin('turn watcher');
+    clock.advance(1);
+
+    // Act
+    await ledger.run('fleet refresh', async () => {
+      clock.advance(1);
+      await ledger.run('usage feed', () => {
+        clock.advance(1_000);
+      });
+    });
+    endTurns();
+
+    // Assert — the loop that only enclosed the step is not a suspect of its own; a sibling loop is.
+    should(ledger.overlapping(1_000_002, 1_001_002)).deepEqual([
+      'turn watcher',
+      'fleet refresh',
+      'fleet refresh › usage feed',
+    ]);
+    should(ledger.innermost(1_000_002, 1_001_002)).deepEqual(['turn watcher', 'fleet refresh › usage feed']);
+  });
+
+  it('should name an enclosing activity as innermost when its step ended before the window', async () => {
+    // Arrange
+    const clock = manualClock();
+    const ledger = new ActivityLedger(clock, new AsyncActivityScope());
+
+    // Act
+    await ledger.run('analytics ingest', async () => {
+      await ledger.run('discover', () => undefined);
+      clock.advance(2_000);
+    });
+
+    // Assert
+    should(ledger.innermost(1_001_000, 1_002_000)).deepEqual(['analytics ingest']);
+  });
+
+  it('should nest nothing without a scope, as a flat ledger always did', async () => {
+    // Arrange
+    const ledger = new ActivityLedger(manualClock(), FLAT_ACTIVITY_SCOPE);
+    let seen: readonly string[] = [];
+
+    // Act
+    await ledger.run('outer', () =>
+      ledger.run('inner', () => {
+        seen = ledger.inFlight();
+      }),
+    );
+
+    // Assert
+    should(seen).deepEqual(['outer', 'inner']);
+  });
+});
+
 describe('BootProgress', () => {
   it('should report the step in progress and how long it and the boot have run', () => {
     // Arrange
@@ -226,24 +309,176 @@ describe('EventLoopLagMeter', () => {
     meter.tick();
 
     // Assert
-    should(stalls).deepEqual([{ atMs: 1_366_900, durationMs: 366_650, during: ['session listing'] }]);
-    should(meter.view()).deepEqual({
-      lagMs: 0,
-      maxLagMs: 366_650,
-      stalls: 1,
-      lastStall: { atMs: 1_366_900, durationMs: 366_650, during: ['session listing'] },
+    const stall = {
+      atMs: 1_366_900,
+      durationMs: 366_650,
+      during: ['session listing'],
+      innermost: ['session listing'],
+      stacks: [],
+    };
+    should(stalls).deepEqual([stall]);
+    should(meter.view()).deepEqual({ lagMs: 0, maxLagMs: 366_650, stalls: 1, lastStall: stall, worstStall: stall });
+  });
+
+  it('should call a tick a quarter second late a stall, and one just under it lag', () => {
+    // Arrange
+    const clock = manualClock();
+    const stalls: LoopStall[] = [];
+    const meter = new EventLoopLagMeter(clock, new ActivityLedger(clock), DEFAULT_EVENT_LOOP_LAG_POLICY, stall =>
+      stalls.push(stall),
+    );
+
+    // Act
+    clock.advance(499);
+    meter.tick();
+    clock.advance(500);
+    meter.tick();
+
+    // Assert
+    should(stalls.map(stall => stall.durationMs)).deepEqual([250]);
+  });
+
+  it('should attribute a stall to the stacks sampled during it, and only those', () => {
+    // Arrange
+    const clock = manualClock();
+    const ledger = new ActivityLedger(clock, new AsyncActivityScope());
+    const batches: StackSample[][] = [
+      [{ frames: [{ name: 'before' }] }],
+      [
+        { frames: [{ name: 'readFileSync' }, { name: 'scan', url: '/w/packages/fleet/src/homes.ts', line: 88 }] },
+        { frames: [{ name: 'readFileSync' }, { name: 'scan', url: '/w/packages/fleet/src/homes.ts', line: 88 }] },
+        { frames: [{ name: 'parse' }] },
+      ],
+    ];
+    const sampler = { drain: () => batches.shift() ?? [] };
+    const stalls: LoopStall[] = [];
+    const meter = new EventLoopLagMeter(
+      clock,
+      ledger,
+      DEFAULT_EVENT_LOOP_LAG_POLICY,
+      stall => stalls.push(stall),
+      sampler,
+    );
+
+    // Act — an on-time tick drains the first window's samples; the late one holds only its own.
+    clock.advance(250);
+    meter.tick();
+    clock.advance(1_250);
+    meter.tick();
+
+    // Assert
+    should(stalls).have.length(1);
+    should(stalls[0]?.stacks).deepEqual([
+      { stack: 'readFileSync ← scan (fleet/src/homes.ts:88)', share: 0.67 },
+      { stack: 'parse', share: 0.33 },
+    ]);
+  });
+
+  it('should keep the worst stall beside the last one', () => {
+    // Arrange
+    const clock = manualClock();
+    const meter = new EventLoopLagMeter(
+      clock,
+      new ActivityLedger(clock),
+      DEFAULT_EVENT_LOOP_LAG_POLICY,
+      () => undefined,
+    );
+
+    // Act
+    clock.advance(4_250);
+    meter.tick();
+    clock.advance(750);
+    meter.tick();
+
+    // Assert
+    should(meter.view().worstStall?.durationMs).equal(4_000);
+    should(meter.view().lastStall?.durationMs).equal(500);
+  });
+});
+
+describe('summariseStacks', () => {
+  it('should count each distinct innermost stack once per sample, hottest first, at most three', () => {
+    // Arrange
+    const sample = (...names: string[]): StackSample => ({ frames: names.map(name => ({ name })) });
+
+    // Act
+    const actual = summariseStacks([
+      sample('a'),
+      sample('b'),
+      sample('b'),
+      sample('c'),
+      sample('c'),
+      sample('c'),
+      sample('d'),
+      sample(),
+    ]);
+
+    // Assert — the empty sample names nothing and counts toward nothing.
+    should(actual).deepEqual([
+      { stack: 'c', share: 0.43 },
+      { stack: 'b', share: 0.29 },
+      { stack: 'a', share: 0.14 },
+    ]);
+  });
+
+  it('should name a frame by its workspace path, its line when known, and an anonymous one as such', () => {
+    // Act
+    const actual = summariseStacks([
+      {
+        frames: [
+          { name: '', url: '/$bunfs/root/packages/daemon/src/x.ts', line: 3 },
+          { name: 'outer', url: '/elsewhere/y.ts' },
+        ],
+      },
+    ]);
+
+    // Assert
+    should(actual).deepEqual([{ stack: '(anonymous) (daemon/src/x.ts:3) ← outer (/elsewhere/y.ts)', share: 1 }]);
+  });
+
+  it('should cut a stack to its six innermost frames so one hot loop is one place', () => {
+    // Arrange
+    const deep = (leaf: string): StackSample => ({
+      frames: [leaf, 'f2', 'f3', 'f4', 'f5', 'f6', 'f7'].map(name => ({ name })),
     });
+
+    // Act
+    const actual = summariseStacks([deep('f1'), { frames: [...deep('f1').frames.slice(0, 6), { name: 'other' }] }]);
+
+    // Assert
+    should(actual).deepEqual([{ stack: 'f1 ← f2 ← f3 ← f4 ← f5 ← f6', share: 1 }]);
   });
 });
 
 describe('stall and watchdog wording', () => {
-  it('should say how long the loop stalled and what was running, or that nothing named was', () => {
+  it('should say how long the loop stalled and the innermost work, or that nothing named was', () => {
     // Act / Assert
     should(
-      describeLoopStall({ atMs: 0, durationMs: 2_345, during: ['boot: mounting subsystems', 'self-check'] }),
-    ).equal('event loop stalled for 2.3s — during boot: mounting subsystems, self-check');
-    should(describeLoopStall({ atMs: 0, durationMs: 600, during: [] })).equal(
+      describeLoopStall({
+        atMs: 0,
+        durationMs: 2_345,
+        during: ['boot: mounting subsystems', 'fleet refresh', 'fleet refresh › usage feed'],
+        innermost: ['boot: mounting subsystems', 'fleet refresh › usage feed'],
+        stacks: [],
+      }),
+    ).equal('event loop stalled for 2.3s — during boot: mounting subsystems, fleet refresh › usage feed');
+    should(describeLoopStall({ atMs: 0, durationMs: 600, during: [], innermost: [], stacks: [] })).equal(
       'event loop stalled for 0.6s — no named work was in flight',
+    );
+  });
+
+  it('should say where the hottest sampled stack spent the stall', () => {
+    // Act / Assert
+    should(
+      describeLoopStall({
+        atMs: 0,
+        durationMs: 1_300,
+        during: ['analytics ingest'],
+        innermost: ['analytics ingest'],
+        stacks: [{ stack: 'JSON.parse ← fold (daemon/src/lib/analytics/x.ts:9)', share: 0.8 }],
+      }),
+    ).equal(
+      'event loop stalled for 1.3s — during analytics ingest — 80% in JSON.parse ← fold (daemon/src/lib/analytics/x.ts:9)',
     );
   });
 
@@ -260,6 +495,40 @@ describe('stall and watchdog wording', () => {
     should(watchdogShouldFire(299_999, 300_000)).be.false();
     should(watchdogShouldFire(300_000, 300_000)).be.true();
     should(watchdogShouldFire(10_000_000, 0)).be.false();
+  });
+
+  it('should measure a stuck loop from its last heartbeat while the watchdog itself ran on time', () => {
+    // Arrange — the thread checked a second ago; the loop last beat six minutes ago.
+    const now = 10_000_000;
+
+    // Act
+    const from = watchdogSilenceFrom(now - 360_000, now, now - 1_000, 0, 1_000);
+
+    // Assert
+    should(from).equal(now - 360_000);
+    should(watchdogShouldFire(now - from, 300_000)).be.true();
+  });
+
+  it('should restart the silence when the whole process was suspended, as a sleeping Mac is', () => {
+    // Arrange — the lid was closed for an hour: the thread's own previous check is an hour old too.
+    const now = 10_000_000;
+
+    // Act
+    const from = watchdogSilenceFrom(now - 3_600_000, now, now - 3_600_000, 0, 1_000);
+
+    // Assert — not fired on waking, and a loop that stays stuck is still caught one limit later.
+    should(from).equal(now);
+    should(watchdogShouldFire(now - from, 300_000)).be.false();
+    const later = watchdogSilenceFrom(now - 3_600_000, now + 300_000, now + 299_000, from, 1_000);
+    should(watchdogShouldFire(now + 300_000 - later, 300_000)).be.true();
+  });
+
+  it('should measure from a heartbeat that arrived after the process resumed', () => {
+    // Act
+    const from = watchdogSilenceFrom(5_000, 6_000, 5_500, 4_000, 1_000);
+
+    // Assert
+    should(from).equal(5_000);
   });
 
   it('should offer a watchdog that watches nothing', () => {

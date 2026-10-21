@@ -8,7 +8,10 @@ import type {
   TranscriptInputObserver,
   TranscriptIssue,
   TranscriptIssueCode,
+  TranscriptParseInput,
   TranscriptParser,
+  TranscriptParseResult,
+  TranscriptRawRecord,
   TranscriptReadOptions,
   TranscriptSource,
   TranscriptWindow,
@@ -18,6 +21,99 @@ import type {
 
 const READ_CHUNK_BYTES = 64 * 1024;
 const CURSOR_ANCHOR_BYTES = 512;
+
+/**
+ * How many bytes of transcript are parsed between two looks at the clock, and how long a parse may hold
+ * the event loop before it yields.
+ *
+ * A bounded read is still up to 32 MiB, and parsing it in one synchronous call held a daemon's event
+ * loop for seconds — on a Mac with three 200 MB transcripts, long enough that nothing answered at all.
+ * The parse is cut at record boundaries and hands the loop back whenever a slice has run past the
+ * budget, so a large read costs time, never responsiveness.
+ */
+const PARSE_SLICE_BYTES = 256 * 1024;
+const PARSE_BUDGET_MS = 12;
+
+/** Lets every timer and socket waiting on the loop run before the parse continues. */
+const yieldToLoop = (): Promise<void> => new Promise(resolve => setImmediate(resolve));
+
+/** Where a slice of at most `limit` bytes starting at `from` ends: just past a newline, or at the end. */
+function sliceEnd(bytes: Uint8Array, from: number, limit: number): number {
+  if (bytes.byteLength - from <= limit) return bytes.byteLength;
+  const newline = bytes.lastIndexOf(0x0a, from + limit - 1);
+  if (newline >= from) return newline + 1;
+  // One record longer than a slice: it is parsed whole, up to its own terminator.
+  const next = bytes.indexOf(0x0a, from + limit);
+  return next < 0 ? bytes.byteLength : next + 1;
+}
+
+/**
+ * The same parse as `parser.parse` over `bytes`, cut into record-aligned slices with the event loop
+ * handed back between them once a slice runs past {@link PARSE_BUDGET_MS}.
+ *
+ * Every slice but the last ends on a record terminator, so none leaves a remainder, and one observer
+ * carries the parser's cross-record state through all of them exactly as one call would. Line numbers
+ * and byte offsets continue from slice to slice, so what is reported is what one whole parse reports.
+ */
+export async function parseInSlices(
+  parser: TranscriptParser,
+  input: Omit<TranscriptParseInput, 'text' | 'bytes'> & { readonly bytes: Uint8Array },
+  observer: TranscriptInputObserver = parser.createInputObserver(),
+): Promise<TranscriptParseResult> {
+  const { bytes } = input;
+  if (bytes.byteLength <= PARSE_SLICE_BYTES)
+    return parser.parse({ ...input, text: Buffer.from(bytes).toString('utf8') }, observer);
+  const events: TranscriptParseResult['events'][number][] = [];
+  const observedInputs: TranscriptParseResult['observedInputs'][number][] = [];
+  const issues: TranscriptParseResult['issues'][number][] = [];
+  const rawRecords: TranscriptRawRecord[] = [];
+  let parsedRecords = 0;
+  let ignoredRecords = 0;
+  let remainder = '';
+  let line = input.startLine ?? 1;
+  let byteOffset = input.startByteOffset ?? 0;
+  let sliceStartedAt = performance.now();
+  for (let from = 0; from < bytes.byteLength; ) {
+    const to = sliceEnd(bytes, from, PARSE_SLICE_BYTES);
+    const slice = bytes.subarray(from, to);
+    const last = to >= bytes.byteLength;
+    const parsed = parser.parse(
+      {
+        ...input,
+        text: Buffer.from(slice).toString('utf8'),
+        bytes: slice,
+        endOfInput: last ? input.endOfInput : false,
+        startLine: line,
+        startByteOffset: byteOffset,
+      },
+      observer,
+    );
+    events.push(...parsed.events);
+    observedInputs.push(...parsed.observedInputs);
+    issues.push(...parsed.issues);
+    if (parsed.rawRecords !== undefined) rawRecords.push(...parsed.rawRecords);
+    parsedRecords += parsed.parsedRecords;
+    ignoredRecords += parsed.ignoredRecords;
+    remainder = parsed.remainder;
+    for (const byte of slice) if (byte === 0x0a) line += 1;
+    byteOffset += slice.byteLength;
+    from = to;
+    if (!last && performance.now() - sliceStartedAt >= PARSE_BUDGET_MS) {
+      await yieldToLoop();
+      sliceStartedAt = performance.now();
+    }
+  }
+  return {
+    harness: parser.harness,
+    events,
+    observedInputs,
+    issues,
+    remainder,
+    parsedRecords,
+    ignoredRecords,
+    rawRecords,
+  };
+}
 
 /**
  * The most transcript bytes any single read may pull into memory.
@@ -725,10 +821,10 @@ async function reconcileFollow(
   if (afterInfo.identity !== info.identity || afterInfo.size < byteOffset) {
     return { state };
   }
-  const parsed = parser.parse(
+  const parsed = await parseInSlices(
+    parser,
     {
-      text: complete.toString('utf8'),
-      // The very bytes `text` was decoded from, so the parser can report each record's exact slice
+      // The very bytes the text is decoded from, so the parser can report each record's exact slice
       // instead of a re-encoding of what the decoder made of it.
       bytes: complete,
       source: file,
@@ -1104,11 +1200,10 @@ export class NodeTranscriptSource implements TranscriptSource {
     // A capped read stops mid-record, so it is cut back to the last record terminator. The cursor it
     // reports is therefore a legal resume point: `follow` continues from exactly there.
     const bytes = read.truncated ? read.bytes.subarray(0, lastNewline(read.bytes) + 1) : read.bytes;
-    const text = Buffer.from(bytes).toString('utf8');
-    const parsed = this.parser.parse(
+    const parsed = await parseInSlices(
+      this.parser,
       {
-        text,
-        // The SAME bounded bytes `text` was decoded from. Record-exact evidence can only come from
+        // The SAME bounded bytes the text is decoded from. Record-exact evidence can only come from
         // these: a decode replaces every invalid sequence irreversibly, and two different malformed
         // records would otherwise commit to one value and become able to replace each other.
         bytes,

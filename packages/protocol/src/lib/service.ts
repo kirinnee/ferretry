@@ -37,6 +37,19 @@ export type HealthView = z.infer<typeof HealthViewSchema>;
  * what separates a daemon that is busy from one that is wedged. Both are optional on the wire because a
  * daemon from before them answers with neither.
  */
+/**
+ * One event-loop stall: when, how long, the labelled work that overlapped it, the deepest of those
+ * labels, and where the sampled stack spent it. The last two are optional because a daemon older than
+ * them reports only the first three.
+ */
+const LoopStallViewSchema = z.object({
+  at: InstantSchema,
+  durationMs: NonNegativeFiniteSchema,
+  during: z.array(z.string()),
+  innermost: z.array(z.string()).optional(),
+  stacks: z.array(z.object({ stack: z.string(), share: z.number().finite().min(0).max(1) })).optional(),
+});
+
 export const LivenessViewSchema = z.object({
   status: z.enum(['ok', 'starting']),
   version: z.string().min(1),
@@ -56,9 +69,8 @@ export const LivenessViewSchema = z.object({
       lagMs: NonNegativeFiniteSchema,
       maxLagMs: NonNegativeFiniteSchema,
       stalls: NonNegativeIntegerSchema,
-      lastStall: z
-        .object({ at: InstantSchema, durationMs: NonNegativeFiniteSchema, during: z.array(z.string()) })
-        .optional(),
+      lastStall: LoopStallViewSchema.optional(),
+      worstStall: LoopStallViewSchema.optional(),
     })
     .optional(),
 });
