@@ -3,6 +3,7 @@ import { FyApiClient } from '@ferretry/protocol/client';
 import type { DaemonConnection } from './daemon-connection.ts';
 import { daemonBound } from './daemon-transport.ts';
 import type { DaemonFetch } from './runtime-models.ts';
+import { type ReadSender, sharingIdenticalReads } from './shared-reads.ts';
 
 /**
  * This is the public PWA build's protocol version, not a daemon identity.
@@ -37,26 +38,28 @@ export type DaemonApiClientOptions = Omit<FyClientOptions, 'baseUrl' | 'token' |
  * browser holds no bearer value at all, and its requests are carried by a session
  * the device key opened (`relay-carrier.ts`). So the header the shared client
  * insists on writing is a placeholder, and it is removed here rather than sent.
+ *
+ * An identical read already in flight to this daemon is joined rather than sent
+ * again (`shared-reads.ts`): opening the app asks several of the same questions at once.
  */
 export class DaemonHttpTransport implements IFyHttpTransport {
   readonly #daemon: DaemonConnection;
   readonly #origin: string;
-  readonly #fetch: DaemonFetch;
+  readonly #send: ReadSender;
 
   constructor(daemon: DaemonConnection, fetcher: DaemonFetch) {
     this.#daemon = daemon;
     this.#origin = new URL(daemon.baseUrl).origin;
-    this.#fetch = fetcher;
+    // Called through a closure so a caller-supplied function never receives this
+    // transport as its receiver.
+    this.#send = sharingIdenticalReads((url, init) => fetcher(url, init));
   }
 
   send(url: string, init: RequestInit): Promise<Response> {
     const target = new URL(url);
     if (target.origin !== this.#origin) throw new Error('API client request must remain on the paired daemon');
-    // Call through a local so a caller-supplied function never receives this
-    // transport as its receiver.
-    const fetcher = this.#fetch;
     // Bound to THIS daemon, because its address may be another paired machine's too (`daemonBound`).
-    return fetcher(target.toString(), daemonBound(this.#daemon, init));
+    return this.#send(target.toString(), daemonBound(this.#daemon, init));
   }
 }
 

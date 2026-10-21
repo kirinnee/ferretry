@@ -59,6 +59,8 @@ import {
   sessionsBarPlace,
   updateOffer,
 } from '../../src/App.tsx';
+import { SESSION_EVENT_STREAM_QUIET_MS } from '../../src/components/session-event-stream-model.ts';
+import { NUDGE_SETTLE_MS } from '../../src/components/session-workspace-model.ts';
 import { CARRIER_NO_FALLBACK } from '../../src/features/carrier/active-carrier-card.tsx';
 import { PALETTE_PULL_THRESHOLD_PX, PULL_TO_PALETTE_ATTR } from '../../src/hooks/use-pull-to-palette.ts';
 import { themePreferences } from '../../src/hooks/use-theme.ts';
@@ -355,6 +357,8 @@ afterEach(async () => {
 interface ShellOptions {
   /** Fleet reads by path, answered as given; any other path answers an empty document. */
   readonly fleet?: Readonly<Record<string, unknown>>;
+  /** Where the stub daemon says each session's journal stands, on `get`. Absent: an older daemon. */
+  readonly journalSequence?: number;
   /** Sessions the stub daemon answers `list` with. */
   readonly sessions?: readonly string[];
   /** The kind the Sessions bar was left on: 'all' unless a test says otherwise, null for a device that never chose. */
@@ -558,6 +562,7 @@ const appStore = async (
               name: `${connection.daemonId} session`,
             },
             ...(options.sessionState === undefined ? {} : { state: options.sessionState }),
+            ...(options.journalSequence === undefined ? {} : { journalSequence: options.journalSequence }),
           });
         },
         list: async () =>
@@ -1551,6 +1556,10 @@ describe('AppShell', () => {
 
     await interact(() => feed.emit(liveEvent(9)));
     await settle();
+    // The refresh an event asks for waits out the burst it may be part of, on the real browser clock.
+    expect(reads.length).toBe(sessionReads);
+    await interact(() => new Promise(resolve => setTimeout(resolve, NUDGE_SETTLE_MS + 20)));
+    await settle();
 
     expect(session.getAttribute('data-live-events')).toBe('9');
     expect(reads.length).toBeGreaterThan(sessionReads);
@@ -1562,6 +1571,25 @@ describe('AppShell', () => {
     await settle();
 
     expect(session.getAttribute('data-live-events')).toBe('9');
+    await view.unmount();
+  });
+
+  it('starts the live feed where the session journal stood rather than replaying its history', async () => {
+    const { liveFeeds, store, view } = await renderShell(`/d/${ALPHA}/session/shared`, [alpha.daemonId], {
+      journalSequence: 2_000,
+    });
+    await settle();
+    await interact(async () => {
+      await store.carrier.send(alpha, `${alpha.baseUrl}/v1/health`);
+    });
+    await settle();
+
+    // No replay of the whole history: the transcript and the surfaces are read directly.
+    const feed = must(liveFeeds.at(-1), 'the live event subscription');
+    expect(feed.after).toBe(2_000);
+    const session = must(view.container.querySelector('[data-session="shared"]'), 'the mounted session route');
+    // Nothing has ARRIVED yet: the cursor a harness reads still says so.
+    expect(session.getAttribute('data-live-events')).toBe('0');
     await view.unmount();
   });
 
@@ -1970,14 +1998,19 @@ describe('AppShell', () => {
     // The daemon goes away. Before this PR the route swallowed exactly this and changed nothing.
     await interact(() => must(liveFeeds[0], 'the live event subscription').end());
     await settle();
+    // A drop is not news until it outlasts the quiet window (a blip back inside it is never said),
+    // which here is waited out on the real browser clock.
+    expect(region().getAttribute('data-live-stream')).toBe('live');
+    await interact(() => new Promise(resolve => setTimeout(resolve, SESSION_EVENT_STREAM_QUIET_MS + 50)));
+    await settle();
 
     expect(region().getAttribute('data-live-stream')).toBe('reconnecting');
     expect(must(region().querySelector('.sr-only'), 'the announced sentence').textContent).toContain(
       'still refreshes on a timer',
     );
-    // NO SECOND SUBSCRIPTION YET. The reconnection is waiting out a backoff window on the real
-    // browser clock, which is what makes the manual control below a distinct fact and not a race.
-    expect(liveFeeds).toHaveLength(1);
+    // The first backoff window is shorter than the quiet window, so its retry has opened a second
+    // subscription by now, and nothing has proved it yet: still reconnecting, and the control is offered.
+    expect(liveFeeds).toHaveLength(2);
 
     const reconnect = must(
       region().querySelector<HTMLButtonElement>('button[data-live-stream-reconnect]'),
@@ -1988,12 +2021,12 @@ describe('AppShell', () => {
 
     // ONE new subscription, resuming at the cursor the old one reached rather than replaying the
     // tail — and the route is back to an honest unproved state rather than claiming to be live.
-    expect(liveFeeds).toHaveLength(2);
-    expect(must(liveFeeds[1], 'the resumed subscription').after).toBe(3);
+    expect(liveFeeds).toHaveLength(3);
+    expect(must(liveFeeds[2], 'the resumed subscription').after).toBe(3);
     expect(session.getAttribute('data-live-events')).toBe('3');
     expect(region().getAttribute('data-live-stream')).toBe('connecting');
 
-    await interact(() => must(liveFeeds[1], 'the resumed subscription').emit(liveEvent(11)));
+    await interact(() => must(liveFeeds[2], 'the resumed subscription').emit(liveEvent(11)));
     await settle();
 
     // RECOVERED: the resubscription is a working feed, not just a reopened socket.

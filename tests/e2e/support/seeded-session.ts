@@ -62,6 +62,15 @@ export interface SeededSession {
 export interface SeededSessionOptions {
   readonly sessionId?: string;
   readonly name?: string;
+  /**
+   * A Claude transcript file to bind as this session's own, recorded as ADOPTED provenance — the
+   * benchmark's way to give a session a long conversation without running a harness. Absent: none.
+   */
+  readonly transcript?: { readonly file: string; readonly harnessSessionId: string };
+  /** Whose turn it is, as the daemon's turn watcher would have recorded it. Absent: not recorded. */
+  readonly turnState?: 'working' | 'your-turn' | 'needs-input';
+  /** How many journal events to append, so a session has the long history a real one accumulates. */
+  readonly journal?: number;
 }
 
 /**
@@ -111,12 +120,35 @@ export async function seedRunningSession(
         resumeMenuChoice: 'full',
         maxSnapshots: 10,
         retry: { transientAttempts: 0, stalledAttempts: 0, waitForQuotaReset: false, allowAccountFailover: false },
+        ...(options.transcript === undefined
+          ? {}
+          : {
+              transcript: {
+                v: 1,
+                home,
+                harnessSessionId: options.transcript.harnessSessionId,
+                identity: 'adopted',
+                file: options.transcript.file,
+                resolvedAt: at,
+              },
+            }),
       }),
     );
     await opened.storage.writeState(
       id,
-      SessionStateSchema.parse({ id: sessionId, status: 'running', turn: 1, lastActivityAt: at }),
+      SessionStateSchema.parse({
+        id: sessionId,
+        status: 'running',
+        turn: 1,
+        lastActivityAt: at,
+        ...(options.turnState === undefined ? {} : { turnState: options.turnState, turnStateAt: at }),
+      }),
     );
+    for (let index = 0; index < (options.journal ?? 0); index += 1)
+      await opened.storage.append(id, 'bench.history', {
+        state: index % 2 === 0 ? 'working' : 'your-turn',
+        note: `seeded history ${String(index)}: ${'a long-running session journals every turn. '.repeat(4)}`,
+      });
     await opened.storage.close();
     await writeUnlockOff(home, at);
     return { sessionId };

@@ -5,6 +5,7 @@
  * the transcript, the session, then the composer, in yellow and red. The fact is one per machine
  * (`connection-health.ts`), so it is said once, here, under the top chrome on every page:
  *
+ * - nothing for the first {@link RECONNECTING_GRACE_MS}: a blip the loop recovers from is not news;
  * - while the reconnect loop works, a small pill — a spinner and "Reconnecting…", the attempt count once
  *   there has been a retry — that opens the details sheet;
  * - after {@link CONNECTION_STALL_MS} it becomes a banner: one heading naming the likely cause, one
@@ -24,7 +25,12 @@ import { type ReactNode, useId, useState } from 'react';
 import { Spinner } from '../../components/spinner.tsx';
 import { useConnectionHealth } from '../../hooks/use-connection-health.ts';
 import { useLiveClock } from '../../hooks/use-live-clock.ts';
-import type { ConnectionHealth, ConnectionHealthState, LikelyCause } from '../../lib/connection-health.ts';
+import {
+  type ConnectionHealth,
+  type ConnectionHealthState,
+  type LikelyCause,
+  RECONNECTING_GRACE_MS,
+} from '../../lib/connection-health.ts';
 import type { DaemonId } from '../../lib/daemon-connection.ts';
 import { BottomSheet } from '../../shell/bottom-sheet.tsx';
 import {
@@ -229,7 +235,7 @@ export function ConnectionHealthNoticeView({ state, machineName, now, onRetryNow
     <>
       {/* ONE live region that outlives the pill: it is polite, and it is there before the words are. */}
       <div role="status" aria-live="polite" data-connection-health={state.kind}>
-        {state.kind !== 'reconnecting' ? null : (
+        {state.kind !== 'reconnecting' || (!state.stalled && now - state.since < RECONNECTING_GRACE_MS) ? null : (
           <div className="flex min-w-0 justify-center px-4 pt-2 sm:px-3" data-kb-hide="">
             {state.stalled ? (
               <div className="w-full">

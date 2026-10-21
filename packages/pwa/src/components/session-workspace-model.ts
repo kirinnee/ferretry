@@ -288,7 +288,28 @@ export interface SessionWorkspaceRefreshEnvironment {
   readonly setInterval: (callback: () => void, milliseconds: number) => unknown;
   readonly clearInterval: (handle: unknown) => void;
   readonly onVisibility: (callback: () => void) => () => void;
+  /** The clock a relaxed poll measures its spacing on. Absent: the poll is never relaxed. */
+  readonly now?: () => number;
+  /** For {@link SessionWorkspaceRefreshControl.nudge}'s settle window. Absent: a nudge reads at once. */
+  readonly setTimeout?: (callback: () => void, milliseconds: number) => unknown;
+  readonly clearTimeout?: (handle: unknown) => void;
 }
+
+/**
+ * The poll's spacing while nothing can change unannounced: the live feed is up and the agent is idle
+ * at its prompt. Every journal append — a send, a turn starting, a question — arrives on the feed and
+ * {@link SessionWorkspaceRefreshControl.nudge}s a read, so the three-second poll in that state only
+ * re-read an unchanged transcript, session, ledger and board: four relay round trips every three
+ * seconds for a page nobody is typing into. The slow poll stays as the safety net under the feed.
+ */
+export const RELAXED_REFRESH_MS = 15_000;
+
+/**
+ * How long a nudge waits for the rest of its burst. A turn ending journals several events within a few
+ * milliseconds, and each used to queue a full read of its own (four requests) behind the one before.
+ * One read after the burst has settled sees all of it.
+ */
+export const NUDGE_SETTLE_MS = 150;
 
 export interface SessionWorkspaceRefreshInput {
   readonly api: SessionWorkspaceReadApi;
@@ -318,6 +339,12 @@ export interface SessionWorkspaceRefreshInput {
    * transcript where it is: the screen goes stale, not blank. Absent means every failure is said here.
    */
   readonly quiet?: (reason: unknown) => boolean;
+  /**
+   * Whether nothing can change without the live feed saying so (the feed is up and the agent is idle),
+   * asked on every poll tick. While it answers `true` the poll reads at most every
+   * {@link RELAXED_REFRESH_MS}. Absent: always the full rate.
+   */
+  readonly relaxed?: () => boolean;
 }
 
 export interface SessionWorkspaceRefreshControl {
@@ -326,6 +353,11 @@ export interface SessionWorkspaceRefreshControl {
    * already in flight. Timer/visibility reads leave it false and still
    * coalesce onto the current request. */
   readonly refresh: (afterCurrent?: boolean) => Promise<void>;
+  /**
+   * Something changed (a live event): read once the burst settles, and after any read in flight.
+   * Every nudge inside one {@link NUDGE_SETTLE_MS} window is the same read.
+   */
+  readonly nudge: () => void;
   readonly stop: () => void;
 }
 
@@ -344,11 +376,16 @@ const isTranscriptUnbound = (reason: unknown): boolean =>
 export const startSessionWorkspaceRefresh = (input: SessionWorkspaceRefreshInput): SessionWorkspaceRefreshControl => {
   let stopped = false;
   let inflight: Promise<void> | null = null;
+  const environment = input.environment;
+  /** When the last read started, on {@link SessionWorkspaceRefreshEnvironment.now}'s clock. */
+  let lastReadAt = Number.NEGATIVE_INFINITY;
+  let settle: unknown;
 
   const refresh = (afterCurrent = false): Promise<void> => {
-    if (stopped || !input.environment.visible()) return Promise.resolve();
+    if (stopped || !environment.visible()) return Promise.resolve();
     if (inflight !== null) return afterCurrent ? inflight.then(() => refresh()) : inflight;
 
+    lastReadAt = environment.now?.() ?? lastReadAt;
     inflight = Promise.allSettled([
       input.api.logs(input.sessionId),
       input.api.get(input.sessionId),
@@ -384,17 +421,40 @@ export const startSessionWorkspaceRefresh = (input: SessionWorkspaceRefreshInput
     return inflight;
   };
 
-  const interval = input.environment.setInterval(() => void refresh(), Math.max(1_000, input.intervalMs ?? 3_000));
-  const stopVisibility = input.environment.onVisibility(() => void refresh());
+  /** A poll tick, skipped while relaxed and the last read is younger than {@link RELAXED_REFRESH_MS}. */
+  const tick = (): void => {
+    const now = environment.now?.();
+    if (now !== undefined && input.relaxed?.() === true && now - lastReadAt < RELAXED_REFRESH_MS) return;
+    void refresh();
+  };
+
+  const nudge = (): void => {
+    if (stopped) return;
+    if (environment.setTimeout === undefined) {
+      void refresh(true);
+      return;
+    }
+    if (settle !== undefined) return;
+    settle = environment.setTimeout(() => {
+      settle = undefined;
+      void refresh(true);
+    }, NUDGE_SETTLE_MS);
+  };
+
+  const interval = environment.setInterval(tick, Math.max(1_000, input.intervalMs ?? 3_000));
+  const stopVisibility = environment.onVisibility(() => void refresh());
   const initial = refresh();
 
   return {
     initial,
     refresh,
+    nudge,
     stop: () => {
       if (stopped) return;
       stopped = true;
-      input.environment.clearInterval(interval);
+      environment.clearInterval(interval);
+      if (settle !== undefined) environment.clearTimeout?.(settle);
+      settle = undefined;
       stopVisibility();
     },
   };

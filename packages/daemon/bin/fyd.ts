@@ -1555,12 +1555,20 @@ function createSessionDirectorySubsystem(
 ): SessionDirectorySubsystem {
   /** The pair of documents for one indexed session, parsed, or `undefined` when either is unusable. */
   const view = async (id: SessionId): Promise<SessionView | undefined> => {
+    // Read BEFORE the documents: a reader starting its live feed after this sequence is replayed every
+    // event the documents might not reflect yet, and misses none they do not.
+    const journalSequence = storage.findSession(id)?.lastSequence;
     const rawConfig = await storage.readConfig(id);
     const config = SessionConfigSchema.safeParse(rawConfig);
     if (config.success) await project?.(id, config.data);
     const state = SessionStateSchema.safeParse(await storage.readState(id));
     if (!config.success || !state.success) return undefined;
-    return { config: config.data, state: state.data, directory: createSessionPaths(paths, id).directory };
+    return {
+      config: config.data,
+      state: state.data,
+      directory: createSessionPaths(paths, id).directory,
+      ...(journalSequence === undefined ? {} : { journalSequence }),
+    };
   };
   return {
     list: async () => {

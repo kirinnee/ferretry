@@ -135,7 +135,12 @@ export interface RendezvousProcess {
   stop(): Promise<void>;
 }
 
-export async function startRendezvous(root: string, teardown: HarnessTeardown): Promise<RendezvousProcess> {
+/** `flags` are extra arguments for the process, such as the benchmark-only `--one-way-ms` and `--timing-only`. */
+export async function startRendezvous(
+  root: string,
+  teardown: HarnessTeardown,
+  flags: readonly string[] = [],
+): Promise<RendezvousProcess> {
   const observationsPath = await assertNoLiveStatePath(join(root, 'rendezvous-frames.jsonl'), 'relay observations');
   await writeFile(observationsPath, '', 'utf8');
 
@@ -149,7 +154,7 @@ export async function startRendezvous(root: string, teardown: HarnessTeardown): 
   const launch = async (port: number): Promise<RunningRendezvous> => {
     const child = spawn(
       process.execPath,
-      [script, '--observations', observationsPath, '--port', String(port), '--allow', [...allowed].join(',')],
+      [script, '--observations', observationsPath, '--port', String(port), '--allow', [...allowed].join(','), ...flags],
       {
         cwd: REPOSITORY_ROOT,
         // The rendezvous inherits nothing from the isolated home: it is a THIRD PARTY to this journey

@@ -46,7 +46,7 @@ import {
 } from './connections.ts';
 import { browserControlsStorage, DaemonControlsStore } from './controls.ts';
 import { type DaemonConnection, type DaemonId, sameDaemonConnection } from './daemon-connection.ts';
-import { daemonRequest } from './daemon-transport.ts';
+import { boundDaemonId, daemonRequest } from './daemon-transport.ts';
 import { type DeviceKeyStore, IndexedDbDeviceKeyStore, mintDeviceKey } from './device-keys.ts';
 import { documentDraftStore } from './drafts.ts';
 import { DaemonEventTransport, type DaemonStreamOpener } from './event-transport.ts';
@@ -77,6 +77,7 @@ import { browserScrollMemoryStorage, ScrollMemory, type ScrollMemoryStorage } fr
 import { fetchSecuritySettings, UNLOCK_STAYS_FALLBACK, unlockStaysSentence } from './security-settings-client.ts';
 import { SessionCache, type SessionCacheBackend, seedFleetFromCache } from './session-cache.ts';
 import { browserSessionCacheBackend } from './session-cache-storage.ts';
+import { sharingIdenticalReads } from './shared-reads.ts';
 import {
   browserCredentials,
   describeStepUpFailure,
@@ -588,6 +589,13 @@ export async function createAppStore(options: CreateAppStoreOptions = {}): Promi
   });
   const carried = carrier.fetch;
   /**
+   * The same carrier for the stores that read without the typed client, with an identical read still
+   * in flight to the same daemon joined rather than sent twice (`shared-reads.ts`): several surfaces
+   * read the usage feed, the projects and a session's board in the same instant. Scoped by the
+   * daemon the request is bound to, because two paired machines may announce one address.
+   */
+  const sharedReads = sharingIdenticalReads(carried, init => boundDaemonId(init) ?? '');
+  /**
    * THE TYPED CLIENT TRAVELS THE CARRIER TOO, and it did not used to.
    *
    * `daemonApiClient`'s default transport dials the daemon's own address directly,
@@ -646,7 +654,7 @@ export async function createAppStore(options: CreateAppStoreOptions = {}): Promi
   const fleet = new DaemonFleetStore(fleetPort);
   const controls = new DaemonControlsStore();
   const configChanges = new DaemonConfigChangeStore();
-  const projects = new DaemonProjectsStore(daemonProjectsPort(carried));
+  const projects = new DaemonProjectsStore(daemonProjectsPort(sharedReads));
   const accountPicker = new DaemonAccountPickerStore({
     catalog: async daemon => await readAccountPickerCatalog(await clients.client(daemon)),
     health: async daemon => await readAccountPickerHealth(await clients.client(daemon)),
@@ -655,8 +663,8 @@ export async function createAppStore(options: CreateAppStoreOptions = {}): Promi
   // Attention is not part of the generated FyApiClient yet, but it still takes
   // the SAME carrier as every generated call. A direct-only second client would
   // make the action modal fail on precisely the remote phone it is for.
-  const attention = new DaemonAttentionClient(undefined, carried);
-  const usage = new DaemonUsageStore(daemonUsagePort(carried));
+  const attention = new DaemonAttentionClient(undefined, sharedReads);
+  const usage = new DaemonUsageStore(daemonUsagePort(sharedReads));
   const pins = new DaemonPinClient(undefined, carried);
   const browserLogin = new DaemonBrowserLoginStore(daemon => ({
     status: async () => await browserLoginPort(await clients.client(daemon)).status(),

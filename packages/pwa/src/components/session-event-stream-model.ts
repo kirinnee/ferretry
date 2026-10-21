@@ -113,6 +113,14 @@ export const sessionEventStreamDeadlineMs = (declaredIdleSeconds: number | undef
   return missedWindows * honoured;
 };
 
+/**
+ * How long a lost feed stays UNSAID. Most drops are a relay socket that is back within a round trip or
+ * two, and the chip saying "Reconnecting" for each of them read as an app that was always
+ * reconnecting. The model still knows at once — its recovery hook and `status()` read the truth — and
+ * only the published report waits: a feed that is `live` again within this window never said it left.
+ */
+export const SESSION_EVENT_STREAM_QUIET_MS = 2_000;
+
 export interface SessionEventStreamEnvironment {
   readonly setTimeout: (callback: () => void, milliseconds: number) => unknown;
   readonly clearTimeout: (handle: unknown) => void;
@@ -210,13 +218,38 @@ export const startSessionEventStream = (input: SessionEventStreamInput): Session
   let silence: unknown;
   let abort: AbortController | undefined;
   let status: SessionEventStreamStatus = 'connecting';
+  /** What the host was last told, which trails `status` only while a drop is inside its quiet window. */
+  let reported: SessionEventStreamStatus = 'connecting';
+  let quiet: unknown;
   /** The daemon's own declared idle period, learned from the first proof and kept across attempts. */
   let declaredIdleSeconds: number | undefined;
 
+  const report = (next: SessionEventStreamStatus): void => {
+    if (quiet !== undefined) environment.clearTimeout(quiet);
+    quiet = undefined;
+    if (reported === next) return;
+    reported = next;
+    input.onStatus?.(next);
+  };
+
+  /**
+   * A drop from `live` is reported only once it has outlasted {@link SESSION_EVENT_STREAM_QUIET_MS};
+   * every other change is reported at once, and any later change cancels a report still waiting.
+   */
   const publish = (next: SessionEventStreamStatus): void => {
     if (status === next) return;
+    const from = status;
     status = next;
-    input.onStatus?.(next);
+    if (next === 'reconnecting' && from === 'live' && reported === 'live') {
+      if (quiet !== undefined) environment.clearTimeout(quiet);
+      quiet = environment.setTimeout(() => {
+        quiet = undefined;
+        if (!stopped) report(status);
+      }, SESSION_EVENT_STREAM_QUIET_MS);
+      return;
+    }
+    if (quiet !== undefined && next === 'connecting') return;
+    report(next);
   };
 
   const clearSilence = (): void => {
@@ -357,6 +390,8 @@ export const startSessionEventStream = (input: SessionEventStreamInput): Session
       if (stopped) return;
       stopped = true;
       stopRecovered?.();
+      if (quiet !== undefined) environment.clearTimeout(quiet);
+      quiet = undefined;
       // Both halves, because a loop is only ever in one of them: the transport is cancelled through
       // the signal it was handed, and a scheduled reconnection is cancelled before it can fire.
       // Nothing is published — the owner tearing this down is not news anyone is left to hear.

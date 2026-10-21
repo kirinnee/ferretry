@@ -15,6 +15,14 @@ import type { DaemonId } from './daemon-connection.ts';
 /** After this long without a working carrier the UI stops saying "reconnecting" and explains why. */
 export const CONNECTION_STALL_MS = 30_000;
 
+/**
+ * How long an outage stays UNSAID. A relay socket that drops and is back within a round trip or two is
+ * a blip, not news: the reconnect loop has already started, the screen keeps showing the last good
+ * data, and a pill that flashes on and off for every one of them taught the owner the app was "ALWAYS
+ * reconnecting". Only an outage older than this is shown; the stall banner later is unaffected.
+ */
+export const RECONNECTING_GRACE_MS = 2_000;
+
 /** One carrier the last attempt tried and why it did not work — one entry per carrier, never per panel. */
 export interface CarrierFailure {
   /** The carrier's human label, e.g. "Direct", "Hosted relay", "Your own relay". */

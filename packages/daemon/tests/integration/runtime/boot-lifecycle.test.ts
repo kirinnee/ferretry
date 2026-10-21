@@ -1613,6 +1613,8 @@ describe('daemon boot lifecycle', () => {
     should(launchesAfterRetry).equal(1);
     // Visible to the fleet read, which only a document satisfying BOTH schemas can be.
     should(listed.map(session => session.config.id)).deepEqual([startedBody.config.id]);
+    // Where its journal stood, so a reader starting the live feed here replays none of the history.
+    should(listed[0]?.journalSequence).be.a.Number().and.be.above(0);
     // And visible to the callsign pool: the name this session took is no longer offered.
     should(names).not.containEql(SEEDED_CALLSIGN);
     should(stopped.status).equal(200);

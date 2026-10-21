@@ -1666,6 +1666,14 @@ it sends a validator only for a path it holds, and treats any other `304` as an 
 empty transcript. An unchanged transcript costs its headers, a few hundred bytes. The same headers
 work on the direct path: `if-none-match` is an admitted CORS request header and `etag` an exposed one.
 
+**A live feed starts where the reader already is**, for the same reason. A session view carries
+`journalSequence`, the journal's last sequence read just before its documents, and a reader that has
+the view opens `/v1/events?sessionId=…&after=<journalSequence>` rather than `after=0`: replaying a
+long session's history was ~370 KB per 1000 events on every chat open, for events the page never
+reads (its transcript and surfaces are read directly). A daemon that predates the field sends none,
+and the reader replays as before. Alongside it, the reference client sends an identical read that is
+already in flight once (`shared-reads.ts`): the answer is shared, never cached.
+
 **A body larger than one record travels in ordered parts**, in both directions. §7 caps plaintext at
 65492 bytes with the envelope inside it, so a sender cuts the body with the shared rule
 (`partitionTunnelBody` in `@ferretry/protocol`: each part's JSON-escaped UTF-8 fits what the envelope
