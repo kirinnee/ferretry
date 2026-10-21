@@ -15,3 +15,5 @@ export * from './identity.ts';
 export * from './rendezvous.ts';
 export * from './tenancy.ts';
 export * from './tunnel.ts';
+export * from './tunnel-pool.ts';
+export * from './tunnel-provisioner.ts';

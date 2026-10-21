@@ -2287,8 +2287,10 @@ separate from the relay meter). The wire contract is `packages/relay/src/lib/tun
 { "version": 1, "available": true }
 ```
 
-`available` is `true` when at least one pool account is accepting. `false` is "not set up by the
-operator", not an error, and a read that fails is treated the same way. The origin is the one the
+`available` is `true` when the pool parses and at least one account is accepting and has not failed
+its zone check (below). Capacity is not consulted: a full pool is still set up, and says so at
+provision time. `false` is "not set up by the operator", not an error, and a read that fails is
+treated the same way — a deployment without the `TUNNEL_CONTROL` binding answers `false` too. The origin is the one the
 relay advertisement is read from (§13 piece 1), so no tunnel address is compiled in either.
 
 **Provisioning.** Two calls, both JSON over HTTPS from the daemon:
@@ -2309,11 +2311,26 @@ The signature is the daemon identity's Ed25519 signature over
 
 with `LP` as in §5. The service accepts only when the key hashes to the fingerprint, the nonce is one
 it issued for that fingerprint less than `deadlineSeconds` ago and has not been spent, and the
-signature verifies over the transcript it rebuilds from **its own** host. A nonce is spent by its
-first use, accepted or not. `POST /v1/tunnel/release` takes the same signed fields without
-`originPort`, under the label `ferretry-tunnel-release-v1`, and deletes the daemon's tunnel — what a
-daemon does when its operator switches the carrier off. **A daemon refuses to sign a host it did not
-discover**, exactly as for a rendezvous claim.
+signature verifies over the transcript it rebuilds from **its own** host — the host of the URL the
+Worker is serving, never a value the request supplies. A nonce is spent by its first use, accepted or
+not. `POST /v1/tunnel/release` takes the same signed fields without `originPort`, under the label
+`ferretry-tunnel-release-v1`, and deletes the daemon's tunnel — what a daemon does when its operator
+switches the carrier off:
+
+```
+POST /v1/tunnel/release     { "daemonId", "publicKey", "nonce", "signature" }
+  → { "version": 1, "released": true }      // false: this daemon held no tunnel — idempotent, not an error
+```
+
+The answer does not wait on Cloudflare. The tunnel is taken off the daemon at once and deleted
+upstream in the same request when Cloudflare cooperates; a step that fails is left to the reclaim
+below, so a daemon never retries a release. **A daemon refuses to sign a host it did not discover**,
+exactly as for a rendezvous claim.
+
+Challenges are bounded because hosted mode has no allowlist and asking for one proves nothing yet: at
+most **3 unspent nonces per daemon**, **6 issued per daemon per minute** and **512 issued by the whole
+service per minute**. Past any of them the answer is `tunnel_rate_limited`. A challenge is refused
+`tunnel_unavailable` while the pool does not parse, so an unconfigured service stores nothing.
 
 Provisioning is **idempotent**: a daemon that already has a tunnel gets the same hostname back, its
 `lastSeenAt` is stamped (that is the renewal), and the ingress is rewritten only when the port
@@ -2328,7 +2345,9 @@ Cloudflare API failed — retried by the daemon with backoff), and `tunnel_bad_r
 Cloudflare Tunnel: Edit, Zone › DNS: Edit and Zone › Zone: Read on that zone):
 
 1. `POST /accounts/{account}/cfd_tunnel` `{ name: "fy-<label>", config_src: "cloudflare" }` — a
-   remotely managed tunnel; its `id` and `token` are kept.
+   remotely managed tunnel; its `id` is kept. **The connector token is never stored**: every
+   provision, new or renewal, reads it with `GET /accounts/{account}/cfd_tunnel/{id}/token` and hands
+   it straight to the daemon, so the control object holds no credential a storage read could leak.
 2. `PUT /accounts/{account}/cfd_tunnel/{id}/configurations` with the ingress `tunnelIngress` builds:
    the one rule `hostname: <label>.<zone>`, `path: ^/v1/rendezvous/<daemonId>/client$`,
    `service: http://127.0.0.1:<originPort>`, then `http_status:404` for everything else.
@@ -2341,7 +2360,19 @@ Cloudflare documents that `cfargotunnel.com` "only proxies traffic for DNS recor
 Cloudflare account", which is why the pool is a list of (account, token, zone) triples rather than
 accounts and zones chosen separately. The service checks `GET /zones/{zone}` answers that account and
 that zone name before it places a tunnel there, and reports an account that does not as
-misconfigured instead of using it.
+misconfigured instead of using it. A verdict is cached against the (account, zone id, zone) triple it
+checked: a pass for a day, a failure for an hour, so an operator who fixes a zone is not locked out
+until the pool changes. A zone check that could not reach Cloudflare is no verdict — the walk moves on
+to the next account, and answers `tunnel_upstream_failed` only if no account took the tunnel.
+
+**A row before every call.** The control object writes the tunnel's row — daemon, account, label,
+hostname, port — **before** it asks Cloudflare for anything, and writes each step's result (tunnel
+id, ingress port, DNS record id) before it starts the next. A step that fails answers
+`tunnel_upstream_failed` and leaves the row saying exactly what exists; the daemon's retry resumes from
+it. A create whose answer was lost — committed upstream, never recorded — is found again by name:
+before creating, the service looks for a live tunnel named `fy-<label>` and a CNAME named
+`<label>.<zone>` and adopts what it finds. No sequence of failures leaves a tunnel nobody records.
+Requests are served one at a time, so two racing provisions for one daemon make one tunnel.
 
 **Capacity.** Cloudflare allows 1,000 `cloudflared` tunnels per account by default (raisable only on
 Enterprise). An account's `maxTunnels` defaults to that and may be set lower, never higher. A new
@@ -2358,18 +2389,40 @@ row is kept until every step has succeeded, so a half-deleted tunnel never loses
 to finish deleting it. A daemon that comes back after a reclaim provisions a new tunnel with a new
 hostname, and its devices learn it from the next `GET /v1/carriers` refresh.
 
+A tunnel whose provisioning never finished is reclaimed after **one day**, not `reclaimAfterDays`:
+it serves nobody and still counts against its account. A reclaimed or released tunnel is first
+**retired** — taken off its daemon, kept as a row until its deletion finishes, still counted against
+its account — so a daemon can get a new tunnel while the old one is deleted. One alarm pass attempts
+at most 8 deletions (each is up to five Cloudflare calls, and an alarm on the Workers Free plan may
+make fifty subrequests) and comes back a minute later when more remain. `reclaimAfterDays` (1–365) is
+set with `PUT /v1/operator/tunnels` `{ "reclaimAfterDays": 7 }`, or the `tunnels` operation of the
+hosted workflow.
+
+**An account removed from the pool** leaves its rows behind with no token that could delete them.
+They are reported as `orphaned` and never retried; a daemon whose tunnel was on it is given a new one
+elsewhere at its next renewal, and its old row is retired. If the account comes back to the pool, its
+rows are renewed or reclaimed like any other. A pool that does not parse orphans every row the same
+way, so a broken secret can never trigger a deletion.
+
 **The operator's view.** `GET /v1/operator/tunnels`, behind the same bearer as `/v1/operator/*`,
-answers each account's name, zone, `accepting`, `maxTunnels`, live tunnel count and whether its zone
-check passed — and never a token, an account's API token or a connector token.
+answers each account's name, zone, `accepting`, `maxTunnels`, live tunnel count and zone check
+(`passed`, `failed` or `unchecked`); the pool's state (`absent`, `invalid` with the reason, or
+`ready`); the settings; orphaned rows per removed account; deletions still pending; and rows that
+would not parse — and never a token, an account's API token or a connector token.
 
 ### The pool is configuration, never the repository
 
 The pool is the Worker secret `TUNNEL_ACCOUNTS`: a JSON array of `TunnelAccountSchema`
 (`name`, `accountId`, `apiToken`, `zoneId`, `zone`, `maxTunnels`, `accepting`). Its source of truth
-is the GitHub Actions secret `HOSTED_TUNNEL_ACCOUNTS`; the hosted deploy installs it, and the
-`tunnel-accounts` operation of `.github/workflows/relay-hosted.yaml` reinstalls it without a deploy.
-A pool that does not parse is **no pool** — the service advertises `available: false` and logs why
-— rather than a partial one. The operator runbook is
+is the GitHub Actions secret `HOSTED_TUNNEL_ACCOUNTS`; a deploy that publishes installs it when it is
+set, and the `tunnel-accounts` operation of `.github/workflows/relay-hosted.yaml` reinstalls it
+without a deploy. A deploy's secrets are **additive** — an unset `HOSTED_TUNNEL_ACCOUNTS` leaves the
+Worker's pool as it was — and installing a secret publishes a new Worker version, which drops live
+sessions exactly as a deploy does. The value only ever travels through environment variables and
+stdin: never an argument vector, a file in the repository or a log line, which
+`scripts/validate/relay-config.sh` checks. A pool that does not parse is **no pool** — the service
+advertises `available: false` and logs why, by issue path and code and never by value — rather than a
+partial one. The operator runbook is
 [`cloudflare-tunnel-pool.md`](cloudflare-tunnel-pool.md).
 
 ### The daemon end
