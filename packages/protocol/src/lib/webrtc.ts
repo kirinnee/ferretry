@@ -44,8 +44,9 @@ export const WEBRTC_GATHER_REFLEXIVE_GRACE_MS = 250;
 export const WEBRTC_GATHER_CAP_MS = 3_000;
 
 /**
- * How long the browser waits, from sending its offer, for an open data channel before it stops trying
- * and carries on over the relay.
+ * How long the browser waits, from applying the daemon's answer, for an open data channel before it stops
+ * trying and carries on over the relay. It bounds the path search (ICE, then DTLS and SCTP), not the
+ * signalling: the offer's request rides a carrier with bounds of its own.
  */
 export const WEBRTC_CONNECT_DEADLINE_MS = 8_000;
 
