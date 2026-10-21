@@ -4,6 +4,7 @@ import {
   type AnalyticsIngestCandidate,
   type AnalyticsIngestionParts,
   AnalyticsIngestionService,
+  REFUSAL_RETRY_MS,
 } from '../../../src/lib/analytics/ingestion.ts';
 import type { AnalyticsPricingRate } from '../../../src/lib/analytics/pricing.ts';
 import type {
@@ -539,16 +540,89 @@ describe('AnalyticsIngestionService.ingest', () => {
   it('should run passes one at a time so neither re-folds what the other proved', async () => {
     // Two overlapping passes would each read the store's markers before the other wrote its rows.
     // Arrange
-    const test = harness([candidate({ id: 's1' })], async () => readEvidence([usageEvent('claude-opus-5', 10, 10)]));
+    let release = (): void => undefined;
+    const gate = new Promise<void>(resolve => {
+      release = resolve;
+    });
+    const test = harness([candidate({ id: 's1' })], async () => {
+      await gate;
+      return readEvidence([usageEvent('claude-opus-5', 10, 10)]);
+    });
 
-    // Act
-    const [first, second] = await Promise.all([test.service.ingest(), test.service.ingest()]);
+    // Act — the first pass is running when the second is asked for.
+    const first = test.service.ingest();
+    await new Promise(resolve => setImmediate(resolve));
+    const second = test.service.ingest();
+    release();
 
     // Assert
-    should(first.ingested).equal(1);
-    should(second.ingested).equal(0);
-    should(second.unchanged).equal(1);
+    should((await first).ingested).equal(1);
+    should((await second).ingested).equal(0);
+    should((await second).unchanged).equal(1);
     should(test.reads).deepEqual(['s1']);
+  });
+
+  it('should join a pass that is already waiting instead of queueing another behind it', async () => {
+    // A timer that outpaced a slow pass used to grow the queue without bound; a waiting pass will read
+    // everything a second one would have.
+    // Arrange
+    let release = (): void => undefined;
+    const gate = new Promise<void>(resolve => {
+      release = resolve;
+    });
+    let listings = 0;
+    const test = harness([candidate({ id: 's1' })], async () => readEvidence([usageEvent('claude-opus-5', 10, 10)]), {
+      candidates: {
+        listCandidates: async () => {
+          listings += 1;
+          await gate;
+          return [candidate({ id: 's1' })];
+        },
+      },
+    });
+
+    // Act — one pass running, then three asks while the next one waits behind it.
+    const running = test.service.ingest();
+    await new Promise(resolve => setImmediate(resolve));
+    const waiting = [test.service.ingest(), test.service.ingest(), test.service.ingest()];
+    release();
+    await running;
+    const joined = await Promise.all(waiting);
+
+    // Assert — two passes ran, not four, and the three asks share the second one's answer.
+    should(listings).equal(2);
+    should(joined[1]).equal(joined[0]);
+    should(joined[2]).equal(joined[0]);
+  });
+
+  it('should leave an unchanged read refusal unread until it is old, and re-read a changed one at once', async () => {
+    // A finished transcript too big to read whole is refused the same way on every pass; re-reading it
+    // each minute was most of a second of a blocked loop per session, forever.
+    // Arrange
+    let nowMs = Date.parse('2026-08-02T00:00:00.000Z');
+    const test = harness(
+      [candidate({ id: 's1' })],
+      async () => ({ ...readEvidence([usageEvent('claude-opus-5', 10, 10)]), pendingBytes: 12 }),
+      { clock: { now: () => new Date(nowMs).toISOString() } },
+    );
+    await test.service.ingest();
+
+    // Act
+    nowMs += 60_000;
+    const soon = await test.service.ingest();
+    nowMs += REFUSAL_RETRY_MS;
+    const later = await test.service.ingest();
+    test.setPricing([{ ...RATES[0]!, rates: { ...RATES[0]!.rates, output: 150_000_000 } }]);
+    const repriced = await test.service.ingest();
+
+    // Assert
+    should(test.store.rows()[0]?.usageRefusal).equal('transcript_incomplete');
+    should(soon.deferred).equal(1);
+    should(soon.ingested).equal(0);
+    should(later.deferred).equal(0);
+    should(later.ingested).equal(1);
+    should(repriced.ingested).equal(1);
+    should(test.reads).deepEqual(['s1', 's1', 's1']);
   });
 
   it('should keep serving later passes after one of them failed', async () => {

@@ -538,7 +538,13 @@ function resolveWorldDaemonLayout(world: CliWorld): DaemonLayout {
 
 /** The local daemon's health probe: THIS state home's own address, never `FY_URL` (see below). */
 function localDaemonHealth(world: CliWorld, stateHome: string): ProtocolDaemonHealth {
-  return new ProtocolDaemonHealth(lazyHealthClient({ ...world.environment, FY_URL: undefined }, stateHome));
+  const environment = { ...world.environment, FY_URL: undefined };
+  return new ProtocolDaemonHealth(lazyHealthClient(environment, stateHome), undefined, async (path, timeoutMs) => {
+    const response = await fetch(new URL(path, `${await daemonBaseUrl(environment, stateHome)}/`), {
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+    return { status: response.status, body: await response.json().catch(() => undefined) };
+  });
 }
 
 /** How the installed daemon got onto this host, read from the host itself. */

@@ -537,6 +537,73 @@ describe('FyApiClient through a daemon restart', () => {
     );
   });
 
+  /** What a daemon that has bound its address but not mounted its routes answers to every route. */
+  const starting = (): Response =>
+    Response.json(
+      {
+        error: 'the daemon is starting (first self-check (reconciling the session index)); ask again shortly',
+        code: 'daemon_starting',
+      },
+      { status: 503, headers: { 'retry-after': '2' } },
+    );
+
+  it('should wait out a daemon that answers it is still starting, exactly as a refused one, when patient', async () => {
+    // Before the daemon bound its address first, this moment was a refused connection; a ferret's call
+    // must not start failing because the daemon now answers it.
+    // Arrange
+    const transport = new QueuedHttpTransport(
+      starting(),
+      starting(),
+      starting(),
+      starting(),
+      jsonResponse('after the boot'),
+    );
+    const time = virtualTime();
+    const client = await connect(transport, {
+      ...time,
+      restartPatience: { expected: () => true, waiting: () => undefined },
+    });
+
+    // Act
+    const actual = await client.request('/v1/sessions', z.string(), { method: 'POST', body: '{}' });
+
+    // Assert
+    should(actual).equal('after the boot');
+    should(transport.calls).have.length(5);
+  });
+
+  it('should say the daemon is starting, in its own words, to a caller that does not wait', async () => {
+    // Arrange
+    const transport = new QueuedHttpTransport(starting(), starting(), starting());
+    const client = await connect(transport);
+
+    // Act
+    const error = await captureError(() => client.request('/v1/sessions', z.string()));
+
+    // Assert
+    should(error instanceof FyTransportError).be.true();
+    should((error as FyTransportError).message).containEql('the daemon is starting (first self-check');
+  });
+
+  it('should leave every other 503 the HTTP error it always was', async () => {
+    // Arrange
+    const transport = new QueuedHttpTransport(
+      Response.json({ error: 'the callsign ledger is damaged', code: 'ledger_damaged' }, { status: 503 }),
+      new Response('upstream down', { status: 503 }),
+    );
+    const client = await connect(transport);
+
+    // Act
+    const coded = await captureError(() => client.request('/v1/sessions', z.string()));
+    const bare = await captureError(() => client.request('/v1/sessions', z.string()));
+
+    // Assert
+    should(coded instanceof FyTransportError).be.false();
+    should((coded as Error).message).containEql('the callsign ledger is damaged');
+    should(bare instanceof FyTransportError).be.false();
+    should(transport.calls).have.length(2);
+  });
+
   it('should fail as before once the window closes, and never wait without patience', async () => {
     // Arrange
     const outcomes = Array.from({ length: 64 }, () => ({ throws: refused() }));

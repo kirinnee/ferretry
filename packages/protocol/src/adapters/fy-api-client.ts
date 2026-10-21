@@ -15,8 +15,10 @@ import { ApiErrorResponseSchema, NonNegativeIntegerSchema, PositiveIntegerSchema
 import { CONFIG_CHANGE_TOPIC, type ConfigChangeFrame, ConfigChangeFrameSchema } from '../lib/config-changes.ts';
 import {
   classifyDaemonUnreachable,
+  DAEMON_STARTING_CODE,
   type DaemonAttempt,
   type DaemonRestartPatience,
+  DaemonStartingError,
   waitOutDaemonRestart,
 } from '../lib/daemon-restart.ts';
 import {
@@ -543,10 +545,25 @@ export class FyApiClient implements IFyApiClient {
     return response;
   }
 
-  #send(path: string, init: RequestInit, headers: Headers, timeoutMs: number): Promise<Response> {
+  /**
+   * One request on the wire. A daemon that answers that it is still STARTING is thrown as
+   * {@link DaemonStartingError} rather than returned: it ran no route, so the request is exactly as
+   * safe to send again as a refused connection, and the restart wait above treats it as one. Before
+   * the daemon bound its address first, the same moment was a refused connection.
+   */
+  async #send(path: string, init: RequestInit, headers: Headers, timeoutMs: number): Promise<Response> {
     const deadline = AbortSignal.timeout(timeoutMs);
     const signal = init.signal == null ? deadline : AbortSignal.any([init.signal, deadline]);
-    return this.#transport.send(`${this.#baseUrl}${path}`, { ...init, headers, signal });
+    const response = await this.#transport.send(`${this.#baseUrl}${path}`, { ...init, headers, signal });
+    if (response.status !== 503) return response;
+    const body = ApiErrorResponseSchema.safeParse(
+      await response
+        .clone()
+        .json()
+        .catch(() => undefined),
+    );
+    if (body.success && body.data.code === DAEMON_STARTING_CODE) throw new DaemonStartingError(body.data.error);
+    return response;
   }
 
   /** One attempt as the restart wait reads it: an answer, the daemon away, or anything else. */
