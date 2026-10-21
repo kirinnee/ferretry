@@ -29,7 +29,9 @@ on:
   workflow_dispatch:
     inputs:
       operation:
-        description: Deploy, change the runtime kill switch, read operator metrics, or change the ceilings
+        description: >-
+          Deploy, change the runtime kill switch, read operator metrics, change the ceilings, read or
+          configure the tunnel service, or reinstall the tunnel pool without a deploy
         required: true
         default: deploy
         type: choice
@@ -39,6 +41,8 @@ on:
           - disable
           - metrics
           - limits
+          - tunnels
+          - tunnel-accounts
       relay_url:
         description: Optional relay origin for enable; blank uses this Worker's workers.dev origin
         required: false
@@ -58,6 +62,11 @@ on:
         type: string
       global_gib_per_minute:
         description: 'limits: bytes the whole relay may carry per minute, in GiB (blank keeps it)'
+        required: false
+        type: string
+      # `tunnels` only: blank reads the tunnel service status and changes nothing.
+      reclaim_after_days:
+        description: 'tunnels: days a tunnel may go unrenewed before it is deleted, 1-365 (blank only reads)'
         required: false
         type: string
 
@@ -94,6 +103,9 @@ jobs:
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          # The tunnel pool (docs/cloudflare-tunnel-pool.md). Optional: unset, the deploy installs nothing
+          # and the Worker keeps whatever pool it already holds, because a secrets file is additive.
+          HOSTED_TUNNEL_ACCOUNTS: ${{ secrets.HOSTED_TUNNEL_ACCOUNTS }}
           HOSTED_RELAY_ORIGIN: ${{ vars.HOSTED_RELAY_ORIGIN }}
           # A manual deploy is an operator decision and always publishes (it reinstalls the operator
           # bearer after a token rotation); a push publishes only a Worker that changed.
@@ -142,8 +154,14 @@ jobs:
             # second time. The file is private to the runner and removed whatever happens next.
             secrets_file="$RUNNER_TEMP/relay-secrets.json"
             trap 'rm -f "$secrets_file"' EXIT
+            # The tunnel pool rides the same file, read by jq from its ENVIRONMENT rather than passed as
+            # an argument: an argument vector is visible to every process on the runner, and this one is
+            # a list of Cloudflare API tokens. Unset or blank, the file carries no `TUNNEL_ACCOUNTS` and
+            # the Worker keeps the pool it has.
             # shellcheck disable=SC2016 # $token is a jq variable
-            (umask 077 && jq -n --arg token "$operator_token" '{RELAY_OPERATOR_TOKEN: $token}' >"$secrets_file")
+            (umask 077 && jq -n --arg token "$operator_token" \
+              '{RELAY_OPERATOR_TOKEN: $token} + (if (env.HOSTED_TUNNEL_ACCOUNTS // "") == "" then {} else {TUNNEL_ACCOUNTS: env.HOSTED_TUNNEL_ACCOUNTS} end)' \
+              >"$secrets_file")
             # shellcheck disable=SC2016 # expanded by the inner shell, on purpose
             RELAY_BUNDLE="$built" RELAY_SECRETS_FILE="$secrets_file" nix develop .#ci -c bash -c '
               set -euo pipefail
@@ -223,7 +241,8 @@ jobs:
     if: >-
       github.ref == 'refs/heads/main' &&
       github.event_name == 'workflow_dispatch' &&
-      inputs.operation != 'deploy'
+      inputs.operation != 'deploy' &&
+      inputs.operation != 'tunnel-accounts'
     # Its own group: `disable` is the emergency stop and must never wait on a deploy. Two control
     # runs still serialise against each other, so a read never straddles a half-applied write.
     concurrency:
@@ -245,6 +264,7 @@ jobs:
           DAEMON_MIB_PER_MINUTE: ${{ inputs.daemon_mib_per_minute }}
           GLOBAL_GIB_PER_DAY: ${{ inputs.global_gib_per_day }}
           GLOBAL_GIB_PER_MINUTE: ${{ inputs.global_gib_per_minute }}
+          RECLAIM_AFTER_DAYS: ${{ inputs.reclaim_after_days }}
         run: |
           set -euo pipefail
 
@@ -265,6 +285,30 @@ jobs:
                 | jq -er '.result.subdomain'
             )"
             HOSTED_RELAY_ORIGIN="https://ferretry-hosted-relay.$worker_subdomain.workers.dev"
+          fi
+
+          if [[ "$OPERATION" == "tunnels" ]]; then
+            # The tunnel service (docs/relay-protocol.md §15). Its status names accounts by label and
+            # zone and never carries a token; the account ids of orphaned rows are left out of this
+            # public log all the same.
+            if [[ -n "$RECLAIM_AFTER_DAYS" ]]; then
+              if [[ ! "$RECLAIM_AFTER_DAYS" =~ ^[1-9][0-9]{0,2}$ ]] || ((RECLAIM_AFTER_DAYS > 365)); then
+                echo "reclaim_after_days must be a whole number from 1 to 365 (got '${RECLAIM_AFTER_DAYS}');" \
+                  "nothing was changed" >&2
+                exit 1
+              fi
+              curl --fail --silent --show-error \
+                --request PUT \
+                --header "Authorization: Bearer $operator_token" \
+                --header 'Content-Type: application/json' \
+                --data-binary "$(jq -cn --arg days "$RECLAIM_AFTER_DAYS" '{reclaimAfterDays: ($days | tonumber)}')" \
+                "$HOSTED_RELAY_ORIGIN/v1/operator/tunnels" >/dev/null
+            fi
+            curl --fail --silent --show-error \
+              --header "Authorization: Bearer $operator_token" \
+              "$HOSTED_RELAY_ORIGIN/v1/operator/tunnels" \
+              | jq '{available, pool, poolProblem, settings, accounts, orphaned: [.orphaned[] | {account, tunnels}], pendingDeletions, damagedRows}'
+            exit 0
           fi
 
           if [[ "$OPERATION" == "metrics" ]]; then
@@ -355,3 +399,53 @@ jobs:
             --data-binary "$next" \
             "$HOSTED_RELAY_ORIGIN/v1/operator/config" \
             | jq
+
+  # THE TUNNEL POOL, REINSTALLED WITHOUT A DEPLOY. `HOSTED_TUNNEL_ACCOUNTS` is the source of truth
+  # (docs/cloudflare-tunnel-pool.md); this copies it into the Worker secret `TUNNEL_ACCOUNTS`. A secret
+  # change publishes a new Worker version, which restarts the Worker and drops live sessions exactly as
+  # a deploy does, so it shares the deploy job's queue and is something an operator runs on purpose.
+  tunnel-accounts:
+    name: Install Tunnel Pool
+    if: >-
+      github.ref == 'refs/heads/main' &&
+      github.event_name == 'workflow_dispatch' &&
+      inputs.operation == 'tunnel-accounts'
+    concurrency:
+      group: hosted-relay-production-deploy
+      cancel-in-progress: false
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: cachix/install-nix-action@v31
+      - name: Install the tunnel pool secret
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          HOSTED_TUNNEL_ACCOUNTS: ${{ secrets.HOSTED_TUNNEL_ACCOUNTS }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${HOSTED_TUNNEL_ACCOUNTS}" ]]; then
+            echo "the GitHub secret HOSTED_TUNNEL_ACCOUNTS is not set; nothing was changed" \
+              "(docs/cloudflare-tunnel-pool.md)" >&2
+            exit 1
+          fi
+          # A shape check only, before anything is written: the Worker validates every field itself.
+          # jq reads the value from its environment and its own error output is discarded, because a
+          # parse error quotes the text around the fault — and that text is API tokens.
+          if ! jq -en 'env.HOSTED_TUNNEL_ACCOUNTS | fromjson | type == "array"' >/dev/null 2>&1; then
+            echo "HOSTED_TUNNEL_ACCOUNTS is not a JSON array; nothing was changed" \
+              "(docs/cloudflare-tunnel-pool.md)" >&2
+            exit 1
+          fi
+          # The value reaches Wrangler on stdin from a shell builtin: never an argument, never a file.
+          # shellcheck disable=SC2016 # expanded by the inner shell, on purpose
+          nix develop .#ci -c bash -c '
+            set -euo pipefail
+            cd packages/relay
+            printf "%s" "$HOSTED_TUNNEL_ACCOUNTS" | wrangler secret put TUNNEL_ACCOUNTS --config wrangler.hosted.json
+          '
+          echo "installed TUNNEL_ACCOUNTS; run this workflow with operation: tunnels to read what the Worker made of it"

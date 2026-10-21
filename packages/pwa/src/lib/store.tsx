@@ -24,6 +24,7 @@ import {
   readAccountPickerHealth,
 } from './account-picker-catalog.ts';
 import { DaemonAccountPickerStore } from './account-picker-store.ts';
+import { CarrierPreferenceStore } from './carrier-preference.ts';
 import { DaemonHttpTransport, daemonApiClient } from './api-client.ts';
 import { DaemonAttentionClient } from './attention-client.ts';
 import { browserLoginPort, DaemonBrowserLoginStore } from './browser-login.ts';
@@ -68,11 +69,13 @@ import {
   outdatedError,
   outdatedRefusal,
   outdatedSide,
+  type CarrierDialers,
   type RelayDial,
 } from './relay-carrier.ts';
 import { PairingOutcomeUnknownError, pairingCandidates, redeemPairingInSession } from './relay-pairing.ts';
 import { RelayPairingRefusedError, RelaySessionError } from './relay-session.ts';
 import { browserFetch, type DaemonFetch } from './runtime-models.ts';
+import { readTunnelService, type TunnelServiceState } from './tunnel-service.ts';
 import { browserScrollMemoryStorage, ScrollMemory, type ScrollMemoryStorage } from './scroll-memory.ts';
 import { fetchSecuritySettings, UNLOCK_STAYS_FALLBACK, unlockStaysSentence } from './security-settings-client.ts';
 import { SessionCache, type SessionCacheBackend, seedFleetFromCache } from './session-cache.ts';
@@ -406,6 +409,20 @@ export interface AppStore {
    */
   readonly carrier: DaemonCarrierRouter;
   /**
+   * WHICH CARRIERS THIS BROWSER WALKS FOR EACH MACHINE (§15 "The choice"), kept on this device.
+   *
+   * A change is the router's cue to forget that machine's winner and walk again; the store wires that,
+   * so a surface only ever calls `set`.
+   */
+  readonly carrierPreferences: CarrierPreferenceStore;
+  /** Whether this build can dial WebRTC at all, so a selector can say so beside the option. */
+  readonly webrtcAvailable: boolean;
+  /**
+   * Whether the hosted tunnel service is set up, read once per document on first ask, never throwing.
+   * Only ever a sentence: a tunnel the daemon published is dialled whatever this says.
+   */
+  readonly tunnelService: () => Promise<TunnelServiceState>;
+  /**
    * HOW WELL EACH DAEMON IS REACHED, as one fact per daemon — and the loop that recovers it.
    *
    * Fed by the carrier router; read by every surface through `useConnectionHealth`. A lost carrier is
@@ -466,6 +483,10 @@ export interface CreateAppStoreOptions {
   readonly deviceKeys?: DeviceKeyStore;
   /** The browser WebSocket by default. Injected so no suite opens one. */
   readonly relayDial?: RelayDial;
+  /** Carriers that need more than a URL to dial; none by default, so WebRTC is passed over, said. */
+  readonly carrierDialers?: CarrierDialers;
+  /** This browser's `localStorage` by default. Injected so a suite decides each machine's preference. */
+  readonly carrierPreferences?: CarrierPreferenceStore;
   /** `navigator.credentials` by default: where a passkey step-up is asked of the person. */
   readonly passkeyCredentials?: CredentialsPort;
   /** `location.origin` by default: this copy of the app, which a passkey belongs to. */
@@ -511,6 +532,19 @@ export async function createAppStore(options: CreateAppStoreOptions = {}): Promi
   const hostedRelayUrl = readDefaultRelay().then(fallback =>
     fallback.kind === 'available' ? fallback.relayUrl : undefined,
   );
+
+  /**
+   * The hosted tunnel service's advertisement, from the SAME directory origin as the relay's (§15), read
+   * once — and only when something asks: "Tunnel only" with no tunnel to dial, or a selector saying why.
+   * An ordinary page load never pays for it.
+   */
+  let tunnelServiceRead: Promise<TunnelServiceState> | undefined;
+  const tunnelService = async (): Promise<TunnelServiceState> => {
+    tunnelServiceRead ??= readTunnelService({ directoryUrl: bundledRelayDirectory(), fetcher });
+    return await tunnelServiceRead;
+  };
+  const carrierPreferences = options.carrierPreferences ?? new CarrierPreferenceStore();
+  const carrierDialers = options.carrierDialers ?? {};
 
   // One adapter for the document, shared by the carrier router and by a redemption that has to fall
   // back to a rendezvous. A second instance would be harmless and is still worth not having: it is
@@ -583,6 +617,9 @@ export async function createAppStore(options: CreateAppStoreOptions = {}): Promi
       return key === undefined ? undefined : relayCrypto.deviceKeyHandle(key);
     },
     ...(options.relayDial === undefined ? {} : { dial: options.relayDial }),
+    preference: daemonId => carrierPreferences.preference(daemonId),
+    dialers: carrierDialers,
+    tunnelService,
     // The same one-per-load promise both other readers await; the router waits on it only after a
     // daemon's own carriers have all failed, so nothing on the ordinary path pays for the read.
     hostedRelay: async () => await hostedRelayUrl,
@@ -741,6 +778,23 @@ export async function createAppStore(options: CreateAppStoreOptions = {}): Promi
     checkLiveness: () => carrier.checkLiveness(),
   });
 
+  /**
+   * A NEW PREFERENCE IS A NEW WALK, AT ONCE. The router forgets the machine's winner and closes what it
+   * held, and the same `/v1/carriers` read a reconnect makes walks the new preference straight away, so
+   * Connection status names the new carrier — or says why there is none — without waiting for the next
+   * request. Its outcome reaches the health model like every probe's.
+   */
+  carrierPreferences.subscribe(daemonId => {
+    carrier.rewalk(daemonId);
+    const daemon = connections.list().find(record => record.daemonId === daemonId);
+    if (daemon === undefined) return;
+    const request = daemonRequest(daemon, '/v1/carriers', {
+      cache: 'no-store',
+      signal: AbortSignal.timeout(CONNECTION_PROBE_TIMEOUT_MS),
+    });
+    void carrier.probe(daemon, request.url, request.init).catch(() => undefined);
+  });
+
   carrier.onConnected(daemon => {
     void (async () => {
       const request = daemonRequest(daemon, '/v1/carriers', { cache: 'no-store' });
@@ -754,6 +808,9 @@ export async function createAppStore(options: CreateAppStoreOptions = {}): Promi
 
   return {
     carrier,
+    carrierPreferences,
+    webrtcAvailable: carrierDialers.webrtc !== undefined,
+    tunnelService,
     connectionHealth,
     stepUp,
     unlockGate,

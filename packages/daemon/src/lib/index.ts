@@ -114,4 +114,5 @@ export * from './update/index.ts';
 export * from './usage/index.ts';
 export * from './version.ts';
 export * from './warden/index.ts';
+export * from './webrtc/index.ts';
 export * from './worktrees/index.ts';

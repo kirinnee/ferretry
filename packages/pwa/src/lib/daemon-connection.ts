@@ -5,13 +5,13 @@
  * A CONNECTION IS AN ORDERED CARRIER SET, and none of it is compiled in.
  * `baseUrl` is the direct address the pairing link arrived on; `carriers` is the
  * daemon-published cache that may contain that direct address, another direct
- * address, and up to four rendezvous links. `docs/relay-protocol.md` §13 is the
- * contract: every direct carrier is attempted first, then every relay, preserving
+ * address, a Cloudflare tunnel, and up to four rendezvous links. `docs/relay-protocol.md`
+ * §13 and §15 are the contract: direct, then the tunnel, then every relay, preserving
  * the daemon's order within each kind.
  *
- * There is deliberately no "which carrier" preference stored anywhere. The order
- * is a property of the protocol (`connectionPreferenceOrder`), so a stored
- * preference could only ever disagree with it.
+ * The ORDER is the protocol's (`connectionPreferenceOrder`) and is never stored here.
+ * Which kinds a browser walks is a per-device preference (`carrier-preference.ts`)
+ * that narrows this set at dial time; it never rewrites what the daemon published.
  */
 import {
   type ConnectionMethod,
@@ -108,9 +108,20 @@ export const daemonRelayCarrier = (value: RelayCarrier): RelayCarrier => {
   return parsed.data;
 };
 
-/** Validates one cached carrier without changing the daemon's preference within its kind. */
-const daemonCarrier = (value: ConnectionMethod): ConnectionMethod => {
+/**
+ * Validates one cached carrier without changing the daemon's preference within its kind, or drops it.
+ *
+ * WEBRTC IS NEVER CACHED: it has no address and no daemon publishes one, so a stored entry of that kind
+ * is not a carrier anybody said this daemon has. A tunnel is held to the protocol's tunnel rule.
+ */
+const daemonCarrier = (value: ConnectionMethod): ConnectionMethod | undefined => {
   if (value.kind === 'direct') return { kind: 'direct', daemonUrl: daemonBaseUrl(value.daemonUrl) };
+  if (value.kind === 'webrtc') return undefined;
+  if (value.kind === 'tunnel') {
+    const parsed = ConnectionMethodSchema.safeParse(value);
+    if (!parsed.success) throw new Error('tunnel carrier is not a bare https origin');
+    return parsed.data;
+  }
   return daemonRelayCarrier(value);
 };
 
@@ -131,7 +142,9 @@ export const daemonConnection = (input: DaemonConnectionInput): DaemonConnection
   const baseUrl = daemonBaseUrl(input.baseUrl);
   const name = input.daemonName?.trim() || undefined;
   const direct: ConnectionMethod = { kind: 'direct', daemonUrl: baseUrl };
-  const carriers = connectionPreferenceOrder((input.carriers ?? [direct]).map(daemonCarrier));
+  const carriers = connectionPreferenceOrder(
+    (input.carriers ?? [direct]).flatMap(carrier => daemonCarrier(carrier) ?? []),
+  );
   return {
     daemonId: daemonId(input.daemonId),
     baseUrl,
@@ -148,8 +161,8 @@ export const daemonConnection = (input: DaemonConnectionInput): DaemonConnection
  * function's, so a caller cannot accidentally probe a relay before the daemon
  * address it already has.
  *
- * A RELAY IS OFFERED ONLY WHEN THE PAIRING PINNED A FINGERPRINT THIS PROTOCOL CAN
- * ADDRESS. A rendezvous is addressed by `fy_daemon_<43 base64url>` (§4) and the
+ * A RELAY OR A TUNNEL IS OFFERED ONLY WHEN THE PAIRING PINNED A FINGERPRINT THIS PROTOCOL CAN
+ * ADDRESS — a tunnel's one route is `/v1/rendezvous/<fingerprint>/client` too. A rendezvous is addressed by `fy_daemon_<43 base64url>` (§4) and the
  * handshake is checked against that same string (§6), so a `daemonId` in any other
  * spelling has no rendezvous to reach and no fingerprint to verify against. That
  * is refused rather than dialled: a session keyed against an unverifiable
@@ -196,11 +209,12 @@ export const hostedRelayFallbackCarrier = (
 };
 
 /** Is this the same published address, dialled the same way? */
-export const sameDaemonCarrier = (left: ConnectionMethod, right: ConnectionMethod): boolean =>
-  left.kind === right.kind &&
-  (left.kind === 'direct'
-    ? right.kind === 'direct' && left.daemonUrl === right.daemonUrl
-    : right.kind === 'relay' && left.relayUrl === right.relayUrl && left.operator === right.operator);
+export const sameDaemonCarrier = (left: ConnectionMethod, right: ConnectionMethod): boolean => {
+  if (left.kind === 'direct') return right.kind === 'direct' && left.daemonUrl === right.daemonUrl;
+  if (left.kind === 'webrtc') return right.kind === 'webrtc';
+  if (left.kind === 'tunnel') return right.kind === 'tunnel' && left.tunnelUrl === right.tunnelUrl;
+  return right.kind === 'relay' && left.relayUrl === right.relayUrl && left.operator === right.operator;
+};
 
 /** Equality for the daemon-authored cache, including published order. */
 export const sameDaemonCarriers = (left: readonly ConnectionMethod[], right: readonly ConnectionMethod[]): boolean =>

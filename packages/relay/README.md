@@ -42,6 +42,11 @@ listed. `docs/relay-protocol.md` §§9, 11 and 13 define both operating modes an
 
 `src/lib/rendezvous.ts` is the whole rendezvous as a pure state machine; the Durable Object around it
 moves bytes and reads clocks and decides nothing.
+The hosted tunnel provisioner has the same shape: `src/lib/tunnel-pool.ts` (placement, nonces,
+reclaim, the operator view) and `src/lib/tunnel-provisioner.ts` (the call order, behind a
+`CloudflareTunnelApi` port and a `TunnelStore` port) decide; `src/adapters/hosted-tunnel-control.ts`
+(the `TUNNEL_CONTROL` Durable Object), `hosted-tunnel-routes.ts` and `cloudflare-tunnel-api.ts` move
+bytes.
 
 ## Deploying one of your own (expert)
 
@@ -75,6 +80,12 @@ The operator bearer is a domain-separated digest of the GitHub Cloudflare token,
 Worker secret, so neither credential is present in this repository or in a browser bundle. **After
 rotating `CLOUDFLARE_API_TOKEN`, run the `deploy` operation once** to reinstall the derived secret —
 until you do, every runtime control operation answers `401`.
+
+**The hosted tunnel service** (`docs/relay-protocol.md` §15) runs in the same Worker, hosted mode only.
+Its pool of Cloudflare accounts is the Worker secret `TUNNEL_ACCOUNTS`, installed from the GitHub
+secret `HOSTED_TUNNEL_ACCOUNTS` by a publishing `deploy` or, without a deploy, by the `tunnel-accounts`
+operation; the `tunnels` operation reads its status and sets `reclaim_after_days`. The runbook is
+[docs/cloudflare-tunnel-pool.md](../../docs/cloudflare-tunnel-pool.md).
 
 The metrics **API** is daemon-keyed: connection requests and refusals, exact encoded bytes forwarded,
 current/peak concurrent connections, first/last activity and current minute/day windows, globally and

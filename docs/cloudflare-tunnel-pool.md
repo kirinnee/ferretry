@@ -69,21 +69,28 @@ the entries above. The Worker reads it as its own secret `TUNNEL_ACCOUNTS`.
    ]
    ```
 
-2. Store it, then delete the file:
+2. Store it **minified to one line**, then delete the file. GitHub masks a secret in logs line by
+   line, so a pretty-printed pool would be masked a fragment at a time:
 
    ```bash
-   gh secret set HOSTED_TUNNEL_ACCOUNTS --repo kirinnee/ferretry < pool.json
+   jq -c . pool.json | gh secret set HOSTED_TUNNEL_ACCOUNTS --repo kirinnee/ferretry
    rm pool.json
    ```
 
-3. Install it into the Worker without a deploy: run **Actions › Hosted relay › Run workflow** with
-   `operation: tunnel-accounts` (a `deploy` installs it too).
+3. Install it into the Worker without a deploy: run **Actions › Deploy Hosted Relay › Run workflow**
+   with `operation: tunnel-accounts` (a `deploy` that publishes installs it too). It refuses a value
+   that is not a JSON array before writing anything. **Installing a secret publishes a new Worker
+   version, which drops every live session** exactly as a deploy does — do it on purpose, not
+   routinely. A deploy never removes the pool: its secrets are additive, so leaving
+   `HOSTED_TUNNEL_ACCOUNTS` unset keeps whatever the Worker holds.
 
-4. Check it: `GET /v1/operator/tunnels` with the operator bearer (see
-   [`relay-protocol.md` §13](relay-protocol.md#runtime-default-and-kill-switch) for the bearer) lists
-   every account with its live count and whether its **zone check** passed. An entry whose zone is
-   not in its account is reported `misconfigured` and is never used. Then
-   `GET /v1/tunnel-service` should answer `"available": true`.
+4. Check it: run the workflow with `operation: tunnels`, or `GET /v1/operator/tunnels` with the
+   operator bearer (see [`relay-protocol.md` §13](relay-protocol.md#runtime-default-and-kill-switch)
+   for the bearer). It lists every account with its live count and its **zone check** — `passed`,
+   `failed` (the zone is not in that account, or the token cannot read it: the account is never used),
+   or `unchecked` (nobody has been placed on it yet; the first placement checks it). It also says
+   whether the pool parsed (`pool`, and `poolProblem` when it did not). Then `GET /v1/tunnel-service`
+   should answer `"available": true`.
 
 A pool that does not parse is treated as **no pool**: the service advertises `available: false`
 and the Worker logs the reason (never the value). Fix the JSON and rerun step 3.
@@ -102,8 +109,38 @@ and the Worker logs the reason (never the value). Fix the JSON and rerun step 3.
 ## Reclaiming
 
 A daemon renews its tunnel every day it runs. A tunnel nobody renewed for **30 days** is deleted by
-the control object's daily alarm, its DNS record included; the window is the `reclaimAfterDays`
-setting in the operator configuration. A daemon that returns later simply gets a new hostname.
+the control object's daily alarm, its DNS record included. A daemon that returns later simply gets a
+new hostname. A tunnel whose creation never finished (Cloudflare failed halfway and the daemon never
+retried) is deleted after one day.
+
+Change the window with the workflow's `tunnels` operation and `reclaim_after_days` (1–365), or:
+
+```bash
+curl --request PUT --header "Authorization: Bearer $OPERATOR_BEARER" \
+  --header 'Content-Type: application/json' --data '{"reclaimAfterDays": 14}' \
+  "$HOSTED_RELAY_ORIGIN/v1/operator/tunnels"
+```
+
+A deletion step Cloudflare refuses is retried on the next alarm; the tunnel stays counted against its
+account (and in `pendingDeletions`) until every step has succeeded. A pass deletes at most 8 tunnels
+and comes back a minute later for the rest. The Worker logs every failed step — what Cloudflare said,
+never a token — under the Worker's observability logs.
+
+## Orphaned tunnels
+
+If an account is removed from the pool while it still holds tunnels, the status lists them under
+`orphaned`. The service never touches them again (it has no token for that account), and a daemon
+whose tunnel was there is given a new one on another account at its next renewal. Either put the
+account back — with `"accepting": false` — so they are reclaimed normally, or delete them by hand in
+that account's dashboard. The same reasoning keeps every row safe while the pool does not parse: a
+broken secret orphans rows, it never deletes them.
+
+## What is proved, and what is not
+
+The provisioner is tested against a fake Cloudflare that models the per-account tunnel limit, zone
+ownership, error 1022 (a tunnel with live connections refuses deletion) and the CNAME a deleted
+tunnel leaves behind. That proves the service's half. It does not prove Cloudflare behaves like the
+fake: the first real account in the pool is that test, and `operation: tunnels` is how you read it.
 
 ## Turning it off
 

@@ -12,19 +12,22 @@ let
     pname = "ferretry-bun-deps";
     # This fixed-output derivation's name is part of its cache identity. Keep it paired with the
     # pinned outputHash; release-facing fy/fyd metadata derives from VERSION below.
-    version = "0.108.0";
+    version = "0.109.0";
     inherit src;
 
     nativeBuildInputs = [ pkgs.bun ];
     outputHashMode = "recursive";
     outputHashAlgo = "sha256";
-    outputHash = "sha256-ub4r2csFfVqcMUHqrmJMvitKT570W/INHwd6UpKC9yg=";
+    outputHash = "sha256-U28VhuWoxrbYeoQi99vwckRx+OuQhzjz48r3oKUEOx0=";
     dontFixup = true;
 
     buildPhase = ''
       export HOME="$TMPDIR/home"
       mkdir -p "$HOME"
-      bun install --frozen-lockfile --filter=fy --filter=@ferretry/daemon
+      # Every shipped platform's optional prebuilds, not only this builder's: the daemon's WebRTC engine is a
+      # native addon per platform, and installing only the host's would make this output differ between a
+      # Linux and a macOS builder — a fixed-output derivation with one hash cannot.
+      bun install --frozen-lockfile --os=linux --os=darwin --cpu=x64 --cpu=arm64 --filter=fy --filter=@ferretry/daemon
     '';
     installPhase = ''
       mkdir -p "$out"

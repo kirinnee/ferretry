@@ -168,6 +168,7 @@ import {
   GitHubLatestRelease,
   HostedModelCatalog,
   HostedRelayDirectory,
+  NodeDataChannelEngine,
   HostHarnessFacts,
   HostHarnessProbe,
   HostInstallFacts,
@@ -649,6 +650,8 @@ import {
   type RelayCarrierSource,
   type RelayDeviceDirectory,
   type RelayDirectoryPort,
+  describeWebRtcEngine,
+  type WebRtcEnginePort,
   type RelayPairingRedeemer,
   type RelayStreamDispatch,
   type ResumeAnswerAttention,
@@ -1262,6 +1265,14 @@ export interface DaemonWorld {
    * builds them.
    */
   readonly relayDirectory: RelayDirectoryPort;
+  /**
+   * The peer-to-peer carrier's native engine (`docs/relay-protocol.md` §16), asked only whether it works.
+   *
+   * A world field because `--check` proves it with a real self-test — two loopback peers echoing
+   * one message — and a suite that is not about WebRTC should not have to load a native library to
+   * ask whether a daemon would start.
+   */
+  readonly webrtcEngine: WebRtcEnginePort;
   /**
    * The subsystems mounted onto that surface. Every field the result carries is a capability the
    * running product actually has; a subsystem absent from it is one the daemon never constructs.
@@ -7343,6 +7354,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       },
     ),
     relayDirectory: new HostedRelayDirectory(environment.relayDirectoryOrigin()),
+    webrtcEngine: new NodeDataChannelEngine(),
     createDirectCarrier: async (dispatch, sockets, devices, pairing) => {
       const identity = await readDaemonRelayIdentity(
         stateFiles,
@@ -9916,6 +9928,11 @@ export async function checkConfiguration(
       }
     }
   }
+  // The peer-to-peer engine, beside the carriers it will join. Proved rather than assumed — a native
+  // library is the one dependency a build machine can have and a host can lack — and it never changes
+  // the exit code: a daemon without it starts, and devices reach it directly or through the relay.
+  const webrtcEngine = await world.webrtcEngine.selfTest();
+  say(`webrtc       ${describeWebRtcEngine(webrtcEngine)}`);
   // Directly beneath the carrier, because this is the address that has to work on its own and whether
   // anybody but this machine can dial it. It DOES read the carrier above it now, through the one
   // derivation the boot uses, so this line and the QR `fy pair` draws for the same daemon agree. Two
