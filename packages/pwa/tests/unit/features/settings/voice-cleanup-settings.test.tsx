@@ -163,10 +163,58 @@ describe('<VoiceCleanupSettings>', () => {
     await shown?.render(<VoiceCleanupSettings state={on.state} />);
     const count = must(c.querySelector<HTMLInputElement>('#stt-cleanup-messages'), 'the count');
     expect(count.value).toBe('6');
-    await typeInto(count, '9');
-    expect(on.saved).toEqual([{ conversationMessages: 9 }]);
+    // Typed as a draft and saved when the field is left — never per keystroke, which saved "1" of "10".
+    await typeInto(count, '1');
+    await typeInto(count, '10');
+    expect(on.saved).toEqual([]);
+    expect(count.disabled).toBe(false);
+    await interact(() => {
+      count.focus();
+      count.blur();
+    });
+    expect(on.saved).toEqual([{ conversationMessages: 10 }]);
+    // A value no machine would take is put back rather than sent.
     await typeInto(count, '');
+    await interact(() => count.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })));
     expect(on.saved).toHaveLength(1);
+    expect(count.value).toBe('6');
+  });
+
+  it('keeps a prompt being typed when the machine’s copy is read again, and offers the new one', async () => {
+    const first = fakeState({ ...DEFAULT_VOICE_CLEANUP, prompts: { fix: 'before' } });
+    const c = await show(first.state);
+    const area = must(c.querySelector<HTMLTextAreaElement>('#stt-cleanup-prompt-fix'), 'prompt');
+    await typeInto(area, 'half typed');
+
+    // The same value read again — the background re-read every config event causes — changes nothing.
+    await shown?.render(
+      <VoiceCleanupSettings state={fakeState({ ...DEFAULT_VOICE_CLEANUP, prompts: { fix: 'before' } }).state} />,
+    );
+    expect(area.value).toBe('half typed');
+    expect(c.querySelector('[data-changed-elsewhere]')).toBeNull();
+
+    // Another device saved a different prompt: the typing stays, and loading theirs is one press.
+    await shown?.render(
+      <VoiceCleanupSettings state={fakeState({ ...DEFAULT_VOICE_CLEANUP, prompts: { fix: 'theirs' } }).state} />,
+    );
+    expect(area.value).toBe('half typed');
+    expect(c.querySelector('[data-changed-elsewhere="voice-prompt-fix"]')).not.toBeNull();
+    await interact(() => c.querySelector<HTMLButtonElement>('[data-changed-elsewhere-reload]')?.click());
+    expect(area.value).toBe('theirs');
+  });
+
+  it('ends the edit when its own save lands, with no "changed elsewhere"', async () => {
+    const before = fakeState(DEFAULT_VOICE_CLEANUP);
+    const c = await show(before.state);
+    const area = must(c.querySelector<HTMLTextAreaElement>('#stt-cleanup-prompt-fix'), 'prompt');
+    await typeInto(area, 'Mine now');
+    await interact(() => button(c, 'Save prompt').click());
+    await shown?.render(
+      <VoiceCleanupSettings state={fakeState({ ...DEFAULT_VOICE_CLEANUP, prompts: { fix: 'Mine now' } }).state} />,
+    );
+    expect(area.value).toBe('Mine now');
+    expect(c.querySelector('[data-changed-elsewhere]')).toBeNull();
+    expect(button(c, 'Save prompt').disabled).toBe(true);
   });
 
   it('says so when an edit is held for confirmation or refused', async () => {

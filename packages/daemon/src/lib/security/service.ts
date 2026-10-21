@@ -3,11 +3,12 @@ import {
   SECURITY_SETTING_FIELDS,
   type SecuritySettingField,
   type SecuritySettings,
+  type SecuritySettingsChange,
   type SecuritySettingsPatch,
   type SecuritySettingsSource,
   type SecuritySettingsView,
-  type SecuritySettingsChange,
   widensSecurity,
+  widensWithPasskey,
 } from '@ferretry/protocol';
 import type { GrantAuditPort } from '../grants/types.ts';
 
@@ -21,6 +22,12 @@ import type { GrantAuditPort } from '../grants/types.ts';
  * route that calls {@link patch} demands `pairing.configure`, so a remote caller also needs a passkey
  * confirmation — but only somebody at the machine may make it looser. A change is judged field by
  * field and refused WHOLE if any field loosens remotely, so a mixed request takes neither half.
+ *
+ * ONE EXCEPTION, BOUGHT WITH A PASSKEY: a device may raise a field in `SECURITY_PASSKEY_WIDEN_FIELDS`
+ * (how long an unlock lasts) when it proved a passkey for that one change. The person proving presence
+ * is the owner's consent, so the change is applied at once — no hold — and journaled with
+ * {@link PASSKEY_WIDEN_JOURNAL_LINE}. A request that also loosens anything else is still refused whole,
+ * before any passkey is asked.
  *
  * ## A DAMAGED DOCUMENT FAILS CLOSED
  *
@@ -55,12 +62,27 @@ export interface SecuritySettingsDocumentPort {
 export interface SecurityCaller {
   readonly hostLocal: boolean;
   readonly actor: string;
+  /**
+   * Whether this caller proved a passkey for THIS change and has not spent it (the boundary's
+   * `freshStepUp`), which is what lets a device raise one of {@link SECURITY_PASSKEY_WIDEN_FIELDS}.
+   * Never read from a body.
+   */
+  readonly freshPasskey?: boolean;
 }
 
 export type SecurityPatchOutcome =
-  | { readonly ok: true; readonly change: SecuritySettingsChange }
+  | {
+      readonly ok: true;
+      readonly change: SecuritySettingsChange;
+      /** The change loosened the machine on the caller's fresh passkey, which the route must now spend. */
+      readonly spentPasskey: boolean;
+    }
   | { readonly ok: false; readonly refusal: 'widen-remote'; readonly fields: readonly SecuritySettingField[] }
+  | { readonly ok: false; readonly refusal: 'passkey-required'; readonly fields: readonly SecuritySettingField[] }
   | { readonly ok: false; readonly refusal: 'unavailable' };
+
+/** The journal line a change loosened on a device's passkey carries, so the history says how it was allowed. */
+export const PASSKEY_WIDEN_JOURNAL_LINE = 'security.loosened-with=passkey';
 
 export interface SecuritySettingsDeps {
   readonly document: SecuritySettingsDocumentPort;
@@ -132,10 +154,16 @@ export class SecuritySettingsService {
     const current = this.#settings;
     const next: SecuritySettings = { ...current, ...patch };
     const widened = SECURITY_SETTING_FIELDS.filter(field => widensSecurity(field, current[field], next[field]));
-    if (widened.length > 0 && !caller.hostLocal) return { ok: false, refusal: 'widen-remote', fields: widened };
+    const remoteWiden = widened.length > 0 && !caller.hostLocal;
+    if (remoteWiden) {
+      // Judged before any passkey is asked: a widen no passkey could buy must not ask for one first.
+      if (!widened.every(widensWithPasskey)) return { ok: false, refusal: 'widen-remote', fields: widened };
+      if (caller.freshPasskey !== true) return { ok: false, refusal: 'passkey-required', fields: widened };
+    }
     const changes = SECURITY_SETTING_FIELDS.filter(field => current[field] !== next[field]).map(
       field => `security.${field}=${String(current[field])}->${String(next[field])}`,
     );
+    if (remoteWiden) changes.push(PASSKEY_WIDEN_JOURNAL_LINE);
     const at = new Date(this.deps.clock.nowMs()).toISOString();
     if (changes.length > 0) {
       await this.deps.document.write({ settings: next, updatedAt: at });
@@ -147,7 +175,7 @@ export class SecuritySettingsService {
     await this.deps.audit.record({ actor: caller.actor, changes, at });
     const devicesExpiring =
       next.idleExpiryDays < current.idleExpiryDays ? (this.deps.devicesIdleLongerThan?.(next.idleExpiryDays) ?? 0) : 0;
-    return { ok: true, change: { view: this.view(caller), devicesExpiring } };
+    return { ok: true, change: { view: this.view(caller), devicesExpiring }, spentPasskey: remoteWiden };
   }
 
   #apply(settings: SecuritySettings, source: SecuritySettingsSource): void {

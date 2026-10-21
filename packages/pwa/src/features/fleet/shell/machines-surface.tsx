@@ -46,6 +46,11 @@ export interface MachineTabProps {
   readonly checking: boolean;
   /** Check the machine again. */
   readonly onRetry: () => void;
+  /**
+   * Read the machine again after a change made here, keeping what is on screen until the answer lands.
+   * Absent falls back to {@link onRetry}.
+   */
+  readonly onRefresh?: () => void;
   /** Through the app's client pool, so every call rides the measured carrier. */
   readonly createClient: FleetClientFactory;
   /** The daemon's connection and security panels, for the Machine tab. */
@@ -103,6 +108,8 @@ export interface MachinesSurfaceProps {
   readonly reach: ShownReach;
   /** Ask this machine again. */
   readonly onRetry: () => void;
+  /** Ask it again after a change made here, without showing "checking" meanwhile. */
+  readonly onRefresh?: () => void;
   /** A link named a machine this browser has not paired, so the page fell back to this one. */
   readonly unknownMachine?: string;
   /** Go to a machine's tab. The page turns this into an address. */
@@ -122,6 +129,7 @@ export function MachinesSurface({
   tab,
   reach,
   onRetry,
+  onRefresh,
   unknownMachine,
   onOpen,
   onSetUp,
@@ -237,6 +245,7 @@ export function MachinesSurface({
             online={reach.kind !== 'offline'}
             checking={reach.kind === 'checking'}
             onRetry={onRetry}
+            {...(onRefresh === undefined ? {} : { onRefresh })}
             createClient={createClient}
             {...(daemonPanels === undefined ? {} : { daemonPanels })}
             {...(onSetUp === undefined ? {} : { onSetUp: (startAt?: string) => onSetUp(daemonId, startAt) })}

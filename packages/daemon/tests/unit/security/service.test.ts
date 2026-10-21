@@ -7,11 +7,13 @@ import {
   type SecuritySettingsPatch,
   SecuritySettingsPatchSchema,
   widensSecurity,
+  widensWithPasskey,
 } from '@ferretry/protocol';
 import should from 'should';
 import type { GrantAuditEntry } from '../../../src/lib/grants/index.ts';
 import {
   DAMAGED_SECURITY_SETTINGS,
+  PASSKEY_WIDEN_JOURNAL_LINE,
   type SecurityCaller,
   SecuritySettingsService,
   type StoredSecuritySettings,
@@ -266,7 +268,7 @@ describe('loosening, field by field', () => {
   for (const patch of WIDENING) {
     const [field] = Object.keys(patch) as [keyof SecuritySettings];
 
-    it(`should refuse widening ${field} from a device, naming the field, and change nothing`, async () => {
+    it(`should refuse widening ${field} from a device with no fresh passkey, naming the field, and change nothing`, async () => {
       // Arrange
       const { service, writes, audited } = await ready();
 
@@ -274,7 +276,8 @@ describe('loosening, field by field', () => {
       const outcome = await service.patch(patch, REMOTE);
 
       // Assert
-      should(outcome).deepEqual({ ok: false, refusal: 'widen-remote', fields: [field] });
+      const refusal = widensWithPasskey(field) ? 'passkey-required' : 'widen-remote';
+      should(outcome).deepEqual({ ok: false, refusal, fields: [field] });
       should(service.current()).deepEqual(MIDDLE);
       should(writes).be.empty();
       should(audited).be.empty();
@@ -369,10 +372,13 @@ describe('a mixed request', () => {
     const { service, writes, audited, announced } = await ready();
 
     // Act
-    const outcome = await service.patch({ idleExpiryDays: 5, unlockValidityHours: 24, stepUpWindowMinutes: 0 }, REMOTE);
+    const outcome = await service.patch(
+      { idleExpiryDays: 5, deviceKeyRotationDays: 60, stepUpWindowMinutes: 0 },
+      REMOTE,
+    );
 
     // Assert
-    should(outcome).deepEqual({ ok: false, refusal: 'widen-remote', fields: ['unlockValidityHours'] });
+    should(outcome).deepEqual({ ok: false, refusal: 'widen-remote', fields: ['deviceKeyRotationDays'] });
     should(service.current()).deepEqual(MIDDLE);
     should(writes).be.empty();
     should(audited).be.empty();
@@ -404,6 +410,122 @@ describe('a mixed request', () => {
     // Assert
     should(outcome.ok).be.true();
     should(service.current()).deepEqual({ ...MIDDLE, idleExpiryDays: 5, unlockValidityHours: 24 });
+  });
+});
+
+describe('raising how long an unlock lasts, with a passkey (owner decision 2026-10-21)', () => {
+  const PROVED: SecurityCaller = { ...REMOTE, freshPasskey: true };
+
+  it('should apply it at once from a device that proved a passkey for it, and say the passkey is spent', async () => {
+    // Arrange
+    const { service, writes, announced } = await ready();
+
+    // Act
+    const outcome = await service.patch(
+      { unlockValidityHours: SECURITY_SETTING_BOUNDS.unlockValidityHours.max },
+      PROVED,
+    );
+
+    // Assert
+    should(outcome).containDeep({ ok: true, spentPasskey: true });
+    should(service.current()).deepEqual({ ...MIDDLE, unlockValidityHours: 168 });
+    should(writes).have.length(1);
+    should(announced.at(-1)?.unlockValidityHours).equal(168);
+  });
+
+  it('should journal the change with how it was allowed', async () => {
+    // Arrange
+    const { service, audited } = await ready();
+
+    // Act
+    await service.patch({ unlockValidityHours: 72 }, PROVED);
+
+    // Assert
+    should(audited).deepEqual([
+      {
+        actor: 'device:phone',
+        changes: ['security.unlockValidityHours=12->72', PASSKEY_WIDEN_JOURNAL_LINE],
+        at: AT,
+      },
+    ]);
+  });
+
+  it('should ask for the passkey, not send the person to the machine, when none was proved', async () => {
+    // Arrange
+    const { service, writes, audited } = await ready();
+
+    // Act
+    const outcome = await service.patch({ unlockValidityHours: 24 }, { ...REMOTE, freshPasskey: false });
+
+    // Assert
+    should(outcome).deepEqual({ ok: false, refusal: 'passkey-required', fields: ['unlockValidityHours'] });
+    should(writes).be.empty();
+    should(audited).be.empty();
+  });
+
+  it('should still refuse every other loosening, however fresh the passkey', async () => {
+    // Arrange
+    const { service, writes } = await ready();
+
+    // Act
+    const outcome = await service.patch({ idleExpiryDays: 60 }, PROVED);
+
+    // Assert
+    should(outcome).deepEqual({ ok: false, refusal: 'widen-remote', fields: ['idleExpiryDays'] });
+    should(writes).be.empty();
+  });
+
+  it('should refuse a request that raises it AND loosens something else whole, before asking for a passkey', async () => {
+    // A widen no passkey could buy must not ask for one first.
+    // Arrange
+    const { service, writes } = await ready();
+
+    // Act
+    const outcome = await service.patch({ unlockValidityHours: 24, unlockOnOpen: false }, REMOTE);
+
+    // Assert
+    should(outcome).deepEqual({
+      ok: false,
+      refusal: 'widen-remote',
+      fields: ['unlockOnOpen', 'unlockValidityHours'],
+    });
+    should(writes).be.empty();
+  });
+
+  it('should not spend a passkey on a change that loosened nothing', async () => {
+    // Arrange
+    const { service, audited } = await ready();
+
+    // Act
+    const outcome = await service.patch({ unlockValidityHours: 2 }, PROVED);
+
+    // Assert
+    should(outcome).containDeep({ ok: true, spentPasskey: false });
+    should(audited[0]?.changes).deepEqual(['security.unlockValidityHours=12->2']);
+  });
+
+  it('should leave the machine needing no passkey to raise it, and journal nothing extra', async () => {
+    // Arrange
+    const { service, audited } = await ready();
+
+    // Act
+    const outcome = await service.patch({ unlockValidityHours: 168 }, HOST);
+
+    // Assert
+    should(outcome).containDeep({ ok: true, spentPasskey: false });
+    should(audited[0]?.changes).deepEqual(['security.unlockValidityHours=12->168']);
+  });
+
+  it('should still refuse a damaged document to a device, passkey or not', async () => {
+    // Arrange
+    const { service } = build({ unreadable: new Error('bad json') });
+    await service.refresh();
+
+    // Act
+    const outcome = await service.patch({ unlockValidityHours: 2 }, PROVED);
+
+    // Assert
+    should(outcome).deepEqual({ ok: false, refusal: 'unavailable' });
   });
 });
 

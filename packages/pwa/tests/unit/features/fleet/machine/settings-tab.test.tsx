@@ -207,6 +207,31 @@ describe('MachineSettingsTab', () => {
     );
   });
 
+  it('Save asks the shell to re-read the machine QUIETLY when it offers that, not to show "checking"', async () => {
+    const calls: Call[] = [];
+    const retried = { count: 0 };
+    const refreshed = { count: 0 };
+    const tabProps = props({ answers: { '/v1/fleet/proposals': STAGED, [APPLY_PATH]: OUTCOME } }, calls, retried);
+    const view = await mount(
+      <MachineSettingsTab
+        {...tabProps}
+        onRefresh={() => {
+          refreshed.count += 1;
+        }}
+      />,
+    );
+    try {
+      await settle();
+      const q = (selector: string) => view.container.querySelector(selector);
+      await click(q('[data-setup-choice="skip"] input'), 'skip radio');
+      await click(q('[data-change-submit]'), 'save');
+      expect(refreshed.count).toBe(1);
+      expect(retried.count).toBe(0);
+    } finally {
+      await view.unmount();
+    }
+  });
+
   it('a refused Save says why and does not ask the shell to check again', async () => {
     await withTab({ answers: { '/v1/fleet/proposals': new Error('unreachable') } }, async ({ q, retried }) => {
       await click(q('[data-setup-choice="skip"] input'), 'skip radio');

@@ -20,7 +20,7 @@ nothing in a header — so a copied browser profile, a backup or a sniffed LAN i
 session's authority is a **15-minute lease** the device renews silently by signing a daemon
 challenge, and a device unused for **30 days** must pair again. Before it may do anything at all, a
 device **unlocks** the machine with a **passkey** — Face ID / Touch ID / a PIN on the phone — that the
-**daemon** verifies; the unlock lasts **8 hours** by default (1–24) across page loads, and inside it
+**daemon** verifies; the unlock lasts **8 hours** by default (1 hour to 7 days) across page loads, and inside it
 the device may do everything its grants allow with no further prompt (B1). **Adding access always asks
 again**: minting a pairing code, widening another device, and turning "what agents may control"
 (terminals/browsers/files) back ON from a remote device each need a passkey proved for that one act —
@@ -458,11 +458,13 @@ challenge is single-use and bound to one device and `appSession`).
   audit log (C) lands.
 - Issued challenges are swept on every issue: an unanswered one lives at most its two minutes, so a
   device that opens a session per fresh `appSession` and asks once cannot grow the ledger without bound.
-- A verified **unlock** is held **in the daemon's memory** for the `deviceId` — every page of it — for
-  `unlockValidityHours` (8 by default). A verified per-act **step-up** is held for `(deviceId,
-appSession)` for `stepUpWindowMinutes` (15 by default). Both end early on revoke and on a daemon
-  restart; a step-up also ends when the page closes (a new `appSession`). Neither is a value the browser
-  holds.
+- A verified **unlock** is held by the daemon for the `deviceId` — every page of it — for
+  `unlockValidityHours` (8 by default), and **survives a daemon restart** (owner decision 2026-10-21: "we
+  don't need to authenticate every time the daemon updates"): `state/unlocks.json` keeps the device id and
+  the instant, nothing else, bound to the daemon identity. A verified per-act **step-up** is held in memory
+  for `(deviceId, appSession)` for `stepUpWindowMinutes` (15 by default). Both end early on revoke; a
+  step-up also ends on a restart and when the page closes (a new `appSession`). Neither is a value the
+  browser holds.
 - Verification is WebCrypto only: a minimal CBOR reader (attestation object, COSE key) and DER →
   raw conversion for ES256 are written here rather than imported, because the verifier is ~300 lines
   with a fixed input shape and every dependency on this path is attack surface.
@@ -701,7 +703,7 @@ default and hard bounds; a value outside the bounds is refused, never clamped.
 | Setting                 | Default    | Bounds                   | Narrower means |
 | ----------------------- | ---------- | ------------------------ | -------------- |
 | `unlockOnOpen`          | **on**     | on / off                 | on             |
-| `unlockValidityHours`   | 8          | 1–24                     | smaller        |
+| `unlockValidityHours`   | 8          | 1–168 (one week)         | smaller        |
 | `stepUpOnActions`       | off        | on / off                 | on             |
 | `stepUpWindowMinutes`   | 15         | 0–60 (0 = every time)    | smaller        |
 | `deviceKeyRotationDays` | 30         | 7–90                     | smaller        |
@@ -740,6 +742,9 @@ action on the `pairing` capability.
 - **Widening** (a larger window or period, a switch turned OFF) is allowed **only at the machine** —
   the owner's admin token over loopback, i.e. the CLI (B4); a browser on the host is a device like any
   other. A remote widen is `403` with a sentence naming the command to run at the machine.
+  **Except** `unlockValidityHours` (owner decision 2026-10-21): a device may raise it with a passkey proved
+  for that one change (`loosen-security`), applied at once and journaled — [grants.md](../grants.md) owns
+  the rule.
 - A request that changes several fields is judged field by field and refused whole if any field
   widens remotely.
 - Where it lives: `<FY_HOME>/state/security.json` (`schemaVersion: 1`, written atomically, mode
@@ -779,8 +784,8 @@ fail-closed path; and the audit record for every change.
   `GET /v1/security`, `POST /v1/unlock/options`, `POST /v1/unlock`, and passkey registration
   (`POST /v1/passkeys/options`, `POST /v1/passkeys`), which keeps its own rules (B2) — a freshly paired
   device holds no passkey, so registering one is how it gets in. A stream open is refused the same way, because both route tables share the boundary. An unlock is
-  held in the daemon's memory per **device** for `unlockValidityHours`, so it survives page loads and ends
-  on a restart or a revoke. Registering a passkey grants no unlock and no step-up (review M3: code in the
+  held per **device** for `unlockValidityHours`, so it survives page loads and a daemon restart (see the
+  unlock ledger above) and ends when it lapses or on a revoke. Registering a passkey grants no unlock and no step-up (review M3: code in the
   page can forge an attestation): a new device registers its first passkey, then unlocks with it. Every
   browser is asked, on the host too (B4).
 - **The unlock is the step-up.** `StepUpService.held` — the witness the boundary asks — answers yes for a

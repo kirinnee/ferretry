@@ -10,6 +10,8 @@ export interface NewSessionDraft {
   mode: 'auto' | 'interactive';
   /** Launch in the harness's fast mode. */
   fast: boolean;
+  /** Start with the Claude Code Remote Control surface published. Off unless the owner opts in. */
+  remoteControl: boolean;
   label: string;
   prompt: string;
 }
@@ -20,6 +22,7 @@ export const emptyNewSessionDraft: NewSessionDraft = {
   model: '',
   mode: 'auto',
   fast: false,
+  remoteControl: false,
   label: '',
   prompt: '',
 };
@@ -54,6 +57,7 @@ export function buildStartSessionRequest(draft: NewSessionDraft): StartSessionRe
     ...(model === undefined ? {} : { model }),
     mode: draft.mode,
     ...(draft.fast ? { fast: true } : {}),
+    ...(draft.remoteControl ? { remoteControl: true } : {}),
     ...(label === undefined ? {} : { label }),
     ...(prompt === undefined ? {} : { prompt }),
   });

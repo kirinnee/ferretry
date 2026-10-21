@@ -13,7 +13,9 @@
  * Tightening is allowed from a paired device with a passkey confirmation, which the carrier raises by
  * itself when the machine asks. LOOSENING is allowed only at the machine, so when this caller may not
  * (`view.mayWiden`) the loosening direction is switched off and ONE sentence names the command to run
- * there. Nothing is drawn that would only fail on press.
+ * there. Nothing is drawn that would only fail on press. The one exception is how long an unlock lasts
+ * (`widensWithPasskey`): a device may raise it with a passkey proved for that change, so its Save stays
+ * on and one sentence says the passkey will be asked for.
  *
  * ## EVERY FAILURE IS ONE SENTENCE
  *
@@ -24,16 +26,18 @@ import {
   isSecuritySwitch,
   SECURITY_SETTING_BOUNDS,
   type SecuritySettingField,
-  type SecuritySwitchField,
   type SecuritySettingsPatch,
   type SecuritySettingsView,
+  type SecuritySwitchField,
   widensSecurity,
+  widensWithPasskey,
 } from '@ferretry/protocol';
 import { SlidersHorizontal } from 'lucide-react';
 import { useEffect, useId, useState } from 'react';
-
+import { cn } from '../../lib/class-names.ts';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
 import {
+  boundsLabel,
   boundsSentence,
   changeSecuritySettings,
   DAMAGED_SETTINGS_SENTENCE,
@@ -44,11 +48,12 @@ import {
   parseSettingDraft,
   SECURITY_LOAD_FAILURE,
   SECURITY_SETTING_COPY,
+  SECURITY_SETTING_PRESETS,
   type SecuritySettingsClient,
   securityFailureSentence,
+  WIDEN_WITH_PASSKEY_SENTENCE,
   widenAtMachineSentence,
 } from '../../lib/security-settings-client.ts';
-import { cn } from '../../lib/class-names.ts';
 
 type SecuritySettingsClientFactory = (connection: DaemonConnection) => Promise<SecuritySettingsClient>;
 
@@ -88,9 +93,14 @@ function NumberRow({ field, view, draft, busy, onDraft, onSave }: NumberRowProps
   const dirty = draft !== undefined && draft !== String(current);
   const parsed = draft === undefined ? null : parseSettingDraft(field, draft);
   const outOfBounds = dirty && draft !== undefined ? boundsSentence(field, draft) : null;
-  const widens = parsed !== null && widensSecurity(field, current, parsed);
-  const blocked = widens && !view.mayWiden;
-  const note = outOfBounds ?? (blocked ? widenAtMachineSentence(view.widenCommand) : null);
+  const widens = parsed !== null && widensSecurity(field, current, parsed) && !view.mayWiden;
+  const withPasskey = widens && widensWithPasskey(field);
+  const blocked = widens && !withPasskey;
+  const note =
+    outOfBounds ??
+    (blocked ? widenAtMachineSentence(view.widenCommand) : withPasskey ? WIDEN_WITH_PASSKEY_SENTENCE : null);
+  const shown = draft ?? String(current);
+  const presets = SECURITY_SETTING_PRESETS[field] ?? [];
   return (
     <div className="min-w-0 border-t border-border-soft py-2 first:border-t-0" data-security-setting={field}>
       <div className="flex min-w-0 flex-wrap items-baseline justify-between gap-x-3">
@@ -103,8 +113,35 @@ function NumberRow({ field, view, draft, busy, onDraft, onSave }: NumberRowProps
       </div>
       <p className="m-0 text-meta leading-base text-muted">{copy.explanation}</p>
       <p className="m-0 text-meta leading-base text-muted" data-security-bounds={field}>
-        {`Allowed: ${bounds.min} to ${describeSettingValue(field, bounds.max)}.`}
+        {boundsLabel(field)}
       </p>
+      {presets.length === 0 ? null : (
+        <fieldset
+          className="m-0 mt-1 flex min-w-0 flex-wrap gap-1.5 border-0 p-0"
+          aria-label={`${copy.label}: common choices`}
+        >
+          {presets.map(value => {
+            const chosen = shown === String(value);
+            return (
+              <button
+                key={value}
+                type="button"
+                aria-pressed={chosen}
+                disabled={busy}
+                data-security-preset={`${field}:${value}`}
+                onClick={() => onDraft(String(value))}
+                className={cn(
+                  'min-h-[44px] rounded-control border px-control-x text-ui transition-colors',
+                  chosen ? 'border-accent bg-accent-soft text-accent' : 'border-border bg-surface-2 text-fg',
+                  busy ? 'cursor-not-allowed opacity-70' : 'hover:border-accent',
+                )}
+              >
+                {describeSettingValue(field, value)}
+              </button>
+            );
+          })}
+        </fieldset>
+      )}
       <div className="mt-1 flex flex-wrap items-center gap-2">
         <input
           id={inputId}
@@ -113,14 +150,17 @@ function NumberRow({ field, view, draft, busy, onDraft, onSave }: NumberRowProps
           min={bounds.min}
           max={bounds.max}
           step={1}
-          value={draft ?? String(current)}
+          value={shown}
           disabled={busy}
           aria-describedby={note === null ? undefined : noteId}
           aria-invalid={outOfBounds === null ? undefined : true}
           data-security-input={field}
           onChange={event => onDraft(event.currentTarget.value)}
-          className="kt-input !min-h-[44px] w-24 min-w-0"
+          className="kt-input !min-h-[44px] !w-24 min-w-0"
         />
+        <span className="text-meta text-muted" aria-hidden="true">
+          {copy.unit?.many}
+        </span>
         {dirty ? (
           <button
             type="button"
@@ -140,6 +180,7 @@ function NumberRow({ field, view, draft, busy, onDraft, onSave }: NumberRowProps
         <p
           id={noteId}
           className={cn('m-0 mt-1 text-meta leading-base', outOfBounds === null ? LIMIT_TONE : ERROR_TONE)}
+          data-security-note-kind={outOfBounds === null ? (blocked ? 'at-machine' : 'passkey') : 'bounds'}
           data-security-note={field}
         >
           {note}

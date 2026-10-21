@@ -108,6 +108,7 @@ const ACCESS_ACTS: Readonly<Record<NonNullable<StepUpDemand['act']>, string>> = 
   'enable-agent-control': 'let agents control that again',
   'loosen-config': 'put a configuration change into effect',
   'clone-secrets': 'copy secrets to another machine',
+  'loosen-security': 'make this machine ask for your passkey less often',
 };
 
 /**

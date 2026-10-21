@@ -204,6 +204,7 @@ import {
   StatePasskeyStore,
   StatePushRepository,
   StateSecuritySettingsDocument,
+  StateUnlockLedger,
   StateVapidKeys,
   StorageConversationOwners,
   SystemClock,
@@ -1141,6 +1142,8 @@ export interface DaemonWorld {
      */
     readonly security: SecuritySettingsService;
     readonly securityNotice: string | undefined;
+    /** The boot sentence when the unlock ledger could not be read and every device is asked again. */
+    readonly unlockNotice?: string | undefined;
     /** Bearer-token grants a pre-device-key `devices.json` held and this boot dropped. */
     readonly droppedBearerGrants: number;
   }>;
@@ -2075,7 +2078,7 @@ function createSessionControlSubsystem(
         ...(launchEffort === undefined ? {} : { launchReasoningEffort: launchEffort }),
         ...(launchFast === undefined ? {} : { launchFast }),
         ...(settingsDigest === undefined ? {} : { launchSettings: settingsDigest }),
-        remoteControl: request.remoteControl === true,
+        remoteControl: request.remoteControl === true && account.kind === 'claude',
         harnessFlags: [...(request.harnessFlags ?? [])],
         /**
          * WHICH TURN THIS SESSION IS ON, which is the number of the turn document it was handed.
@@ -7163,6 +7166,8 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         // An added passkey is told to every enrolled browser, so the owner learns of one they did not add.
         announce: async notice => await push.notify({ payload: notice }),
         settings: () => security.current(),
+        // Each device's unlock outlives a restart — an update — inside its period, bound to this identity.
+        unlocks: new StateUnlockLedger(paths, stateFiles, state.daemonId),
         // A device's key, replaced inside a step-up (B6): the new key proves itself over the carrying
         // session's transcript, the grant is rewritten, the device's other sessions end as lapsed
         // leases so each reopens on the new key, and the swap is journalled.
@@ -7223,12 +7228,15 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           failures: auditFailures,
         },
       );
+      // Read back before anything is served, so a device unlocked before the restart is not asked again.
+      const unlockNotice = await stepUp.restore();
       return {
         credentials,
         push,
         stepUp,
         security,
         securityNotice,
+        unlockNotice,
         droppedBearerGrants: state.droppedBearerGrants,
         subsystem: pairingService,
       };
@@ -9077,6 +9085,7 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
   const pairing = await world.createPairing(config, world.clock, carriers, discoverableRelayUrl(relaySources));
   world.notices.step('pairing identity opened');
   if (pairing.securityNotice !== undefined) world.notices.state(pairing.securityNotice);
+  if (pairing.unlockNotice !== undefined) world.notices.state(pairing.unlockNotice);
   // NO COMPATIBILITY, SAID ONCE. A `devices.json` from before device keys held bearer-token grants
   // nothing can accept any more; the repository dropped them, and the operator is told how many
   // devices have to pair again rather than discovering it one phone at a time.

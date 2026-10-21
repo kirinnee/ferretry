@@ -332,6 +332,9 @@ export function AgentControlSection({
 
 export function MachineSettingsTab(props: MachineSettingsTabProps) {
   const { machine, machineName, online, checking, connection, createClient, onRetry, sources, browser } = props;
+  // After a save here the machine is read again QUIETLY: a loud re-check swapped every section for
+  // "Checking…" and back, which unmounted what the person was editing and moved the page under them.
+  const onSaved = props.onRefresh ?? onRetry;
   const route = useSettingsFlow(machineName, browser);
   const access = useSetupAccess({ connection, createClient });
   const leave = (): void => route.open(null);
@@ -395,7 +398,7 @@ export function MachineSettingsTab(props: MachineSettingsTabProps) {
         machine={machine}
         machineName={machineName}
         access={access}
-        onSaved={onRetry}
+        onSaved={onSaved}
       />
 
       <AgentPermissionsSection
@@ -403,7 +406,7 @@ export function MachineSettingsTab(props: MachineSettingsTabProps) {
         machine={machine}
         machineName={machineName}
         access={access}
-        onSaved={onRetry}
+        onSaved={onSaved}
       />
 
       <AgentControlSection
@@ -411,7 +414,7 @@ export function MachineSettingsTab(props: MachineSettingsTabProps) {
         machine={machine}
         machineName={machineName}
         access={access}
-        onSaved={onRetry}
+        onSaved={onSaved}
       />
 
       <SetupSection title={`Tools on ${machineName}`} name="tools">

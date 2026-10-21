@@ -24,6 +24,7 @@ import {
   modelFacts,
   packLabel,
   packOn,
+  remoteControlLabel,
 } from './info-model.ts';
 import { InfoChip, InfoRow, InfoSection } from './info-parts.tsx';
 import { type InfoRelaunchRead, InfoRelaunchRow } from './info-relaunch.tsx';
@@ -115,6 +116,9 @@ export function InfoRuntime({
       )}
       <InfoRow hint={INFO_HINT.mode} label="Mode">
         {view.config.mode}
+      </InfoRow>
+      <InfoRow hint={INFO_HINT.remoteControl} label="Remote control">
+        <span data-info-remote-control={view.config.remoteControl ? 'on' : 'off'}>{remoteControlLabel(view)}</span>
       </InfoRow>
       <InfoRow hint={INFO_HINT.ferretryTools} label="Ferretry tools">
         <InfoChip tone="ok">On</InfoChip>

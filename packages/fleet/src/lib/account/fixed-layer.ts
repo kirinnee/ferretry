@@ -40,6 +40,16 @@
  *   source, so it did not count, and an agent nobody watches sat on the dialog with every message
  *   failing. A `--settings` file IS the flag source, so naming the same mode there removes the
  *   condition; {@link CLAUDE_PROMPTS_SEEN} records the dialog as seen as well, and either alone holds.
+ * - Remote Control is forced OFF at startup (`remoteControlAtStartup: false`, also in the overlay).
+ *   Claude Code 2.1.281 starts the bridge in a session when ANY of these is true, in this order:
+ *   the `--rc` flag; an explicit `remoteControlAtStartup` from policy, FLAG, then user settings (and
+ *   the legacy copy in `~/.claude.json`); and — only when none of those says — the account's org policy
+ *   or GrowthBook default (`tengu_cobalt_harbor`). So a value copied in from the owner's own setup, or an
+ *   account-side rollout, would start every unattended ferret with a web control channel nobody asked
+ *   for. The overlay is the flag source, which outranks user settings and the account default; `--rc`
+ *   still turns it on for the one ferret that asks (`remoteControlArgs`), and only an org policy lock
+ *   can outrank us. Codex has nothing to switch: its `remote_control` feature is removed (0.156.1) and
+ *   its remote control is a separate `codex remote-control` daemon, not a session startup behaviour.
  * - Codex's one-shot notices (the full-access warning, the rate-limit model nudge, the model
  *   migration prompts) are hidden with ONE `-c notice={…}` inline table, which merges with
  *   `config.toml`'s own `[notice]` like the trust table does.
@@ -70,6 +80,7 @@ export type FixedEntryPurpose =
   | 'skip-prompt'
   | 'trust'
   | 'onboarding'
+  | 'remote-control'
   | 'one-time-prompts'
   | 'no-questions'
   | 'no-alt-screen'
@@ -193,6 +204,9 @@ export const CODEX_PERMISSIONS: Readonly<
  * {@link SESSION_MODE_ENV} is `interactive`. A launch with no mode is treated as unattended.
  */
 export const CLAUDE_NO_QUESTIONS_FLAG = '--disallowed-tools=AskUserQuestion';
+
+/** Claude's "start Remote Control in every session" preference. */
+export const CLAUDE_REMOTE_CONTROL_KEY = 'remoteControlAtStartup';
 
 /** Codex gates `request_user_input` outside Plan mode behind this feature; only interactive ferrets enable it. */
 export const CODEX_QUESTIONS_FEATURE = 'default_mode_request_user_input';
@@ -433,6 +447,7 @@ export function fixedLayerFor(input: FixedLayerInput): FixedLayerResult {
       ...(skip ? [entry('skip-prompt', 'settings', ['skipDangerousModePermissionPrompt'], true)] : []),
       entry('trust', 'claude-json', ['projects', cwd, 'hasTrustDialogAccepted'], true),
       entry('onboarding', 'claude-json', ['hasCompletedOnboarding'], true),
+      entry('remote-control', 'settings', [CLAUDE_REMOTE_CONTROL_KEY], false),
       ...Object.entries(CLAUDE_PROMPTS_SEEN).map(([key, value]) =>
         entry('one-time-prompts', 'claude-json', [key], value),
       ),
@@ -460,6 +475,7 @@ export function fixedLayerFor(input: FixedLayerInput): FixedLayerResult {
         // is what keeps the auto-default dialog away (see the header).
         claudeSettingsOverlay: {
           permissions: { defaultMode: mode },
+          [CLAUDE_REMOTE_CONTROL_KEY]: false,
           ...(skip ? { skipDangerousModePermissionPrompt: true } : { skipAutoPermissionPrompt: true }),
         },
         claudeJson: {

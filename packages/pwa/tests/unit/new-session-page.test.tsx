@@ -87,6 +87,25 @@ describe('NewSessionPage', () => {
     expect(untouched.starts[0]?.request).not.toHaveProperty('fast');
   });
 
+  it('starts with Remote Control off, and sends it only when the Advanced options box was ticked', async () => {
+    const { view, starts } = page();
+    const box = (): ReactTestInstance => view.root.findByProps({ id: 'fy-new-session-remote-control' });
+    expect(box().props.checked).toBeFalse();
+    expect(box().props.disabled).toBeFalse();
+    change(view, 'fy-new-session-agent', 'claude-auto-loge');
+    change(view, 'fy-new-session-prompt', 'Port the page');
+    await runAsync(() => button(view, 'Create session').props.onClick());
+    expect(starts[0]?.request).not.toHaveProperty('remoteControl');
+
+    const ticked = page();
+    change(ticked.view, 'fy-new-session-agent', 'claude-auto-loge');
+    change(ticked.view, 'fy-new-session-prompt', 'Port the page');
+    run(() => ticked.view.root.findByProps({ id: 'fy-new-session-remote-control' }).props.onChange());
+    expect(ticked.view.root.findByProps({ id: 'fy-new-session-remote-control' }).props.checked).toBeTrue();
+    await runAsync(() => button(ticked.view, 'Create session').props.onClick());
+    expect(ticked.starts[0]?.request).toMatchObject({ remoteControl: true });
+  });
+
   it('speaks the product, not the tool it replaced, and says what each mode means', () => {
     const { view } = page();
     const text = JSON.stringify(view.toJSON());
@@ -745,6 +764,28 @@ describe('NewSessionPage with the daemon pickers', () => {
     await create();
 
     expect(Object.hasOwn(must(recorder.starts.at(0), 'a start').request, 'fast')).toBeFalse();
+  });
+
+  it('takes the Remote Control box away from a Codex runtime, says why, and never sends it', async () => {
+    const { props, recorder } = wire({ accounts: [terminal, studio, atelier] });
+    await show(props);
+    const remoteControl = () =>
+      must(root().querySelector<HTMLInputElement>('#fy-new-session-remote-control'), 'the Remote Control box');
+
+    expect(remoteControl().disabled).toBeFalse();
+    await interact(() => remoteControl().click());
+    expect(remoteControl().checked).toBeTrue();
+
+    await chooseRuntime('codex-auto-atelier');
+    expect(remoteControl().disabled).toBeTrue();
+    expect(remoteControl().checked).toBeFalse();
+    expect(root().querySelector('#fy-new-session-remote-control-reason')?.textContent).toBe(
+      'Codex has no Remote Control.',
+    );
+    await typeInto(promptBox(), 'Quick one');
+    await create();
+
+    expect(Object.hasOwn(must(recorder.starts.at(0), 'a start').request, 'remoteControl')).toBeFalse();
   });
 
   it('moves the model suggestions and the default hint to the runtime the reader taps', async () => {

@@ -9,18 +9,21 @@ import { FyHttpError } from '@ferretry/protocol/client';
 import should from 'should';
 import type { z } from 'zod';
 import {
+  boundsLabel,
   boundsSentence,
   changeSecuritySettings,
   DAMAGED_SETTINGS_SENTENCE,
   describeSettingValue,
-  UNLOCK_STAYS_FALLBACK,
-  unlockStaysSentence,
   devicesExpiringSentence,
   fetchSecuritySettings,
+  type NumericSecuritySetting,
   parseSettingDraft,
   SECURITY_SETTING_COPY,
+  SECURITY_SETTING_PRESETS,
   type SecuritySettingsClient,
   securityFailureSentence,
+  UNLOCK_STAYS_FALLBACK,
+  unlockStaysSentence,
   widenAtMachineSentence,
 } from '../../src/lib/security-settings-client.ts';
 
@@ -84,6 +87,28 @@ describe('what a setting says', () => {
     should(describeSettingValue('stepUpWindowMinutes', 0)).equal('0 minutes');
     should(describeSettingValue('idleExpiryDays', 30)).equal('30 days');
     should(describeSettingValue('unlockValidityHours', 1)).equal('1 hour');
+  });
+
+  it('should say a whole number of days of unlock in days, and anything else in hours', () => {
+    should(describeSettingValue('unlockValidityHours', 24)).equal('1 day');
+    should(describeSettingValue('unlockValidityHours', 72)).equal('3 days');
+    should(describeSettingValue('unlockValidityHours', 168)).equal('7 days');
+    should(describeSettingValue('unlockValidityHours', 36)).equal('36 hours');
+    should(describeSettingValue('unlockValidityHours', 12)).equal('12 hours');
+    should(unlockStaysSentence(168)).equal('It stays unlocked on this device for 7 days.');
+  });
+
+  it('should say the bounds with one unit when both ends share it, and each its own when not', () => {
+    should(boundsLabel('stepUpWindowMinutes')).equal('Allowed: 0 to 60 minutes.');
+    should(boundsLabel('idleExpiryDays')).equal('Allowed: 1 to 90 days.');
+    should(boundsLabel('unlockValidityHours')).equal('Allowed: 1 hour to 7 days.');
+  });
+
+  it('should offer only presets the machine would accept', () => {
+    for (const [field, values] of Object.entries(SECURITY_SETTING_PRESETS))
+      for (const value of values ?? [])
+        should(boundsSentence(field as NumericSecuritySetting, String(value))).be.null();
+    should(SECURITY_SETTING_PRESETS.unlockValidityHours).eql([1, 8, 24, 72, 168]);
   });
 
   it('should say how long an unlock stays, in the machine’s own number, and when it cannot be read', () => {
