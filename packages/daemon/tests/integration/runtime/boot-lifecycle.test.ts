@@ -4867,9 +4867,13 @@ describe('daemon boot lifecycle', () => {
       });
     });
     const exit = start(world, cleanups);
-    for (let attempt = 0; attempt < 100; attempt += 1) {
-      if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined))?.ok === true) break;
-      await Bun.sleep(50);
+    // READY, not merely serving: the hand edits below must land after the configuration watcher's first
+    // load, or a load that runs between two of the writes splits one edit across two frames.
+    for (let attempt = 0; attempt < 200; attempt += 1) {
+      const liveness = await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined);
+      const body = (await liveness?.json().catch(() => undefined)) as { boot?: { phase?: string } } | undefined;
+      if (body?.boot?.phase === 'ready') break;
+      await Bun.sleep(25);
     }
     const token = (await readFile(join(home, 'api-token'), 'utf8')).trim();
     const headers = { authorization: `Bearer ${token}`, 'x-ferretry-client': 'cli' };
