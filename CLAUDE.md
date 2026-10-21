@@ -75,7 +75,11 @@ the default, which asks nothing — walks direct → WebRTC → the hosted Cloud
 published one → relay, and "WebRTC / tunnel / relay only" narrow that walk; every surface still names
 the live carrier and why the others were passed over. Pairing ignores the choice (direct, then the
 hosted relay). A tunnel arrival reaches the daemon through `cloudflared` on loopback, so it lands on a
-dedicated listener that stamps it remote — never on the API listener. The tunnel pool (several
+dedicated listener that stamps it remote — never on the API listener. A WebRTC arrival (§16) is one
+data channel per session, introduced by a sealed `POST /v1/webrtc/offer` inside a session that already
+reaches the daemon, so the rendezvous never sees SDP; it is ALWAYS remote and governed, uses STUN only
+(no TURN), and falls back to the relay at an 8 s ICE deadline saying why. Its native engine
+(`node-datachannel`) is embedded per release target and self-tested by `fyd --check`. The tunnel pool (several
 Cloudflare accounts, one zone each) is Worker configuration — runbook
 [docs/cloudflare-tunnel-pool.md](docs/cloudflare-tunnel-pool.md). No **carrier** address is compiled
 in: each build carries only the

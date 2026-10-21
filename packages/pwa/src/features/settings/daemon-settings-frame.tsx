@@ -37,6 +37,7 @@ import type { ConnectionHealthState } from '../../lib/connection-health.ts';
 import type { DaemonConnectionRecord } from '../../lib/connections.ts';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
 import { Button } from '../../shell/primitives.tsx';
+import { useCarrierRtt } from '../../hooks/use-carrier-rtt.ts';
 import { ActiveCarrierCard, type CarrierPreferenceControl } from '../carrier/active-carrier-card.tsx';
 import { type SecretClientFactory, SecretsSurface } from '../secrets/secrets-surface.tsx';
 import { type WardenClientFactory, WardenConfigSurface } from '../warden/warden-config-card.tsx';
@@ -147,6 +148,7 @@ interface FrameLive {
   readonly relayAdvertised: boolean;
   readonly carrierPreference: CarrierPreferenceControl | undefined;
   readonly connectionHealth: ConnectionHealthState | undefined;
+  readonly measureCarrierRtt: (() => Promise<number | undefined>) | undefined;
   readonly probeDaemon: DaemonReachabilityProbe | undefined;
   readonly onRenameDaemon: ((daemonId: DaemonConnection['daemonId'], label?: string) => void) | undefined;
   readonly onRemoveDaemon: ((daemonId: DaemonConnection['daemonId']) => void) | undefined;
@@ -202,10 +204,11 @@ function SecurityPanel({ connection }: DaemonSettingsTabProps) {
 }
 
 function CarrierPanel() {
-  const { carrier, relayAdvertised, carrierPreference, connectionHealth, name } = useFrameLive();
+  const { carrier, relayAdvertised, carrierPreference, connectionHealth, measureCarrierRtt, name } = useFrameLive();
+  const measured = useCarrierRtt(carrier, measureCarrierRtt);
   return (
     <ActiveCarrierCard
-      choice={carrier}
+      choice={measured}
       relayAdvertised={relayAdvertised}
       {...(carrierPreference === undefined ? {} : { preference: carrierPreference })}
       {...(connectionHealth === undefined ? {} : { health: connectionHealth })}
@@ -340,6 +343,8 @@ export interface DaemonSettingsFrameProps {
   readonly carrierPreference?: CarrierPreferenceControl | undefined;
   /** The reconnect loop's state for this daemon, so the Connection tab can say "reconnecting". */
   readonly connectionHealth?: ConnectionHealthState | undefined;
+  /** This machine's peer-to-peer round trip, asked while the Connection panel shows a WebRTC carrier. */
+  readonly measureCarrierRtt?: (() => Promise<number | undefined>) | undefined;
   readonly probeDaemon?: DaemonReachabilityProbe;
   readonly onRenameDaemon?: (daemonId: DaemonConnection['daemonId'], label?: string) => void;
   readonly onRemoveDaemon?: (daemonId: DaemonConnection['daemonId']) => void;
@@ -368,6 +373,7 @@ export function DaemonSettingsFrame({
   relayAdvertised = false,
   carrierPreference,
   connectionHealth,
+  measureCarrierRtt,
   probeDaemon,
   onRenameDaemon,
   onRemoveDaemon,
@@ -390,6 +396,7 @@ export function DaemonSettingsFrame({
       relayAdvertised,
       carrierPreference,
       connectionHealth,
+      measureCarrierRtt,
       probeDaemon,
       onRenameDaemon,
       onRemoveDaemon,
@@ -407,6 +414,7 @@ export function DaemonSettingsFrame({
       relayAdvertised,
       carrierPreference,
       connectionHealth,
+      measureCarrierRtt,
       probeDaemon,
       onRenameDaemon,
       onRemoveDaemon,

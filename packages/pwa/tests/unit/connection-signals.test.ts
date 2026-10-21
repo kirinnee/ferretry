@@ -182,3 +182,58 @@ describe('browserConnectionSignals', () => {
     expect(heard).toEqual(['online']);
   });
 });
+
+describe('watchConnectionSignals, when the device changes networks', () => {
+  it.each<[ConnectionSignal, boolean]>([
+    ['online', true],
+    ['network-change', true],
+    ['visible', false],
+  ])('should tell the peer-to-peer carrier about %s: %s', (signal, expected) => {
+    // Arrange
+    let emit: ((fired: ConnectionSignal) => void) | undefined;
+    let changed = 0;
+    watchConnectionSignals(
+      {
+        listen: listener => {
+          emit = listener;
+          return () => undefined;
+        },
+      },
+      {
+        reconnecting: () => [],
+        retryNow: () => undefined,
+        checkLiveness: () => undefined,
+        networkChanged: () => {
+          changed += 1;
+        },
+      },
+    );
+
+    // Act
+    emit?.(signal);
+
+    // Assert
+    expect(changed === 1).toBe(expected);
+  });
+
+  it('should still act on a network change when nothing listens for one', () => {
+    // Arrange
+    let emit: ((fired: ConnectionSignal) => void) | undefined;
+    let checked = 0;
+    watchConnectionSignals(
+      {
+        listen: listener => {
+          emit = listener;
+          return () => undefined;
+        },
+      },
+      { reconnecting: () => [], retryNow: () => undefined, checkLiveness: () => (checked += 1) },
+    );
+
+    // Act
+    emit?.('network-change');
+
+    // Assert
+    expect(checked).toBe(1);
+  });
+});

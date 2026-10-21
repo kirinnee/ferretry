@@ -1539,6 +1539,11 @@ function SettingsRoute({ connection }: DaemonPageProps) {
     }),
     [store.webrtcAvailable, tunnelService],
   );
+  // One identity per machine, so the Connection panel's poll restarts only when the machine changes.
+  const measureCarrierRtt = useCallback(
+    async () => await store.webrtcRttMs(connection.daemonId),
+    [store, connection.daemonId],
+  );
   const carrierPreference = useMemo(
     () => ({
       value: carrierPreferences[connection.daemonId] ?? DEFAULT_CARRIER_PREFERENCE,
@@ -1676,6 +1681,7 @@ function SettingsRoute({ connection }: DaemonPageProps) {
       // would hide "there is no relay to fall back on" from the one reader it is written for.
       relayAdvertised={daemonCarriers(connection).some(method => method.kind === 'relay')}
       carrierPreference={carrierPreference}
+      measureCarrierRtt={measureCarrierRtt}
       connectionPreferences={
         <ConnectionPreferenceSettings
           machines={connectionSnapshot.connections.map(machine => ({

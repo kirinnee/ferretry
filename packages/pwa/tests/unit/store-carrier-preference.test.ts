@@ -8,7 +8,9 @@ import { describe, expect, it } from 'bun:test';
 import type { FyApiClient } from '@ferretry/protocol/client';
 import { CarrierPreferenceStore } from '../../src/lib/carrier-preference.ts';
 import type { DaemonConnectionRepository } from '../../src/lib/connections.ts';
+import type { ConnectionSignal } from '../../src/lib/connection-signals.ts';
 import { createAppStore } from '../../src/lib/store.tsx';
+import { WebRtcDialer } from '../../src/lib/webrtc-carrier.ts';
 import { autoDial, keyedDaemon, relayCrypto, ScriptedSocket, settle } from '../support/relay.ts';
 
 class MemoryRepository implements DaemonConnectionRepository {
@@ -99,5 +101,53 @@ describe('the store’s connection preference', () => {
     expect(await store.tunnelService()).toBe('unavailable');
     expect(await store.tunnelService()).toBe('unavailable');
     expect(asked).toBe(before);
+  });
+});
+
+describe('the store’s WebRTC dialer (docs/relay-protocol.md §16)', () => {
+  class SpyDialer extends WebRtcDialer {
+    networkChanges = 0;
+    override networkChanged(): void {
+      this.networkChanges += 1;
+    }
+    override async rttMs(daemonId: string): Promise<number | undefined> {
+      return daemonId === 'fy_daemon_measured' ? 23 : undefined;
+    }
+  }
+
+  const options = () => ({
+    repository: new MemoryRepository(),
+    connectClient: async () => ({}) as unknown as FyApiClient,
+    fetcher: async () => Response.json({}),
+    carrierPreferences: memoryPreferences(),
+  });
+
+  it('dials WebRTC with the dialer it was given, reads its round trip, and drops its paths on a new network', async () => {
+    let emit: ((signal: ConnectionSignal) => void) | undefined;
+    const dialer = new SpyDialer({ createPeer: () => ({}) as never, iceServers: [], timers: globalThis });
+    const store = await createAppStore({
+      ...options(),
+      webrtc: dialer,
+      connectionSignals: {
+        listen: listener => {
+          emit = listener;
+          return () => undefined;
+        },
+      },
+    });
+
+    emit?.('visible');
+    emit?.('network-change');
+
+    expect(store.webrtcAvailable).toBe(true);
+    expect(await store.webrtcRttMs('fy_daemon_measured' as never)).toBe(23);
+    expect(dialer.networkChanges).toBe(1);
+  });
+
+  it('has no WebRTC when told so, and measures nothing', async () => {
+    const store = await createAppStore({ ...options(), webrtc: null });
+
+    expect(store.webrtcAvailable).toBe(false);
+    expect(await store.webrtcRttMs('fy_daemon_measured' as never)).toBeUndefined();
   });
 });

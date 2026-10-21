@@ -53,7 +53,9 @@ import { TerminalStreamBridge, type TerminalStreamService } from '../../daemon/s
 import { TmuxTerminalRuntime } from '../../daemon/src/adapters/terminal/tmux-terminal-runtime.ts';
 import { BunTmuxProcess } from '../../daemon/src/adapters/tmux/bun-tmux-process.ts';
 import type { SocketDownstream, SocketHandler, SocketUpgradeDecision } from '../../daemon/src/lib/api/socket.ts';
+import { NodeDataChannelEngine } from '../../daemon/src/adapters/webrtc/index.ts';
 import { DirectSession } from '../../daemon/src/lib/relay/direct-carrier.ts';
+import { WebRtcCarrier } from '../../daemon/src/lib/webrtc/index.ts';
 import type { RelayLinkScheduler } from '../../daemon/src/lib/relay/link.ts';
 import { WebCryptoRelayCrypto } from '../../relay/src/adapters/index.ts';
 import { newDaemonIdentity } from '../../relay/tests/support/identities.ts';
@@ -374,7 +376,7 @@ const quantile = (values: readonly number[], q: number): number => {
 
 interface ScenarioResult {
   readonly name: string;
-  readonly carrier: 'direct' | 'relay';
+  readonly carrier: 'direct' | 'relay' | 'webrtc';
   readonly network: string;
   readonly networkDescription: string;
   readonly scrollback: number;
@@ -393,10 +395,14 @@ interface ScenarioResult {
 function summarise(scenario: Scenario, result: BenchPageResult, observed: readonly ObservedFrame[]): ScenarioResult {
   const hops = hopsFor(result, observed);
   const totals = result.keys.map(key => key.paintedAt - key.sentAt);
+  // WebRTC is UDP, which the shaping proxy (TCP) cannot touch, so it is run on loopback only: its path
+  // adds nothing, and on a real network it pays ONE leg, phone to home — the direct path's round trip.
   const pathRttMs =
-    scenario.carrier === 'direct'
-      ? 2 * scenario.network.direct.oneWayMs
-      : 2 * (scenario.network.clientRelay.oneWayMs + scenario.network.daemonRelay.oneWayMs);
+    scenario.carrier === 'webrtc'
+      ? 0
+      : scenario.carrier === 'direct'
+        ? 2 * scenario.network.direct.oneWayMs
+        : 2 * (scenario.network.clientRelay.oneWayMs + scenario.network.daemonRelay.oneWayMs);
   const median = (pick: (hop: Hops) => number | undefined): number =>
     quantile(
       hops.map(pick).filter((value): value is number => value !== undefined),
@@ -438,7 +444,7 @@ function summarise(scenario: Scenario, result: BenchPageResult, observed: readon
 
 interface Scenario {
   readonly name: string;
-  readonly carrier: 'direct' | 'relay';
+  readonly carrier: 'direct' | 'relay' | 'webrtc';
   readonly network: NetworkProfile;
   readonly scrollback: number;
   readonly outputGateMs: number;
@@ -468,6 +474,7 @@ const SCENARIOS: readonly Scenario[] = SHOTS_ONLY
   : [
       ...HISTORIES.map(history => scenario('direct', LOOPBACK, history, 0, false)),
       ...HISTORIES.map(history => scenario('direct', WAN, history, 0, true)),
+      ...HISTORIES.map(history => scenario('webrtc', LOOPBACK, history, 0, true)),
       ...GATES.flatMap(gate => [
         ...HISTORIES.map(history => scenario('relay', LOOPBACK, history, gate, false)),
         ...HISTORIES.map(history => scenario('relay', WAN, history, gate, true)),
@@ -653,6 +660,17 @@ const directListener = Bun.serve<DirectSocketData>({
 
 const direct = await ShapedProxy.listen(directListener.port ?? 0);
 
+/** The daemon's peer-to-peer carrier: the real `WebRtcCarrier` and engine, its sessions direct sessions. */
+const webrtcCarrier = new WebRtcCarrier({
+  availability: { kind: 'ready' },
+  engine: new NodeDataChannelEngine(),
+  iceServers: [],
+  sessions: (arrival, downstream, release) =>
+    new DirectSession(linkDependencies as never, arrival, downstream, release),
+  scheduler: runtimeScheduler,
+  peerId: () => crypto.randomUUID(),
+});
+
 const pageHtml = `<!doctype html><meta charset="utf-8"><style>${await readFile(
   join(harnessDir, '..', 'node_modules', '@xterm', 'xterm', 'css', 'xterm.css'),
   'utf8',
@@ -682,6 +700,11 @@ let failure: unknown;
 try {
   const tab = await (await browser.newContext({ viewport: { width: 1_440, height: 900 } })).newPage();
   tab.on('pageerror', error => console.log(`[page error] ${error.message}`));
+  await tab.exposeFunction('__benchOffer', async (sdp: string) => {
+    const answered = await webrtcCarrier.offer(sdp, { deviceId: DEVICE_ID, appSession: 'bench' });
+    if (answered.kind !== 'answered') throw new Error(answered.reason);
+    return answered.sdp;
+  });
   tab.on('console', message => progress(`page: ${message.text()}`));
   progress('loading the page');
   await tab.goto(`http://127.0.0.1:${String(pageServer.port)}/`);
@@ -696,7 +719,7 @@ try {
 
   const byGate = new Map<number, Scenario[]>();
   for (const entry of SCENARIOS) {
-    const key = entry.carrier === 'direct' ? -1 : entry.outputGateMs;
+    const key = entry.carrier === 'relay' ? entry.outputGateMs : -1;
     byGate.set(key, [...(byGate.get(key) ?? []), entry]);
   }
   if (SHOTS !== undefined && !byGate.has(0)) byGate.set(0, []);
@@ -738,9 +761,11 @@ try {
         daemonId: identity.daemonId,
         deviceId: DEVICE_ID,
         method:
-          entry.carrier === 'direct'
-            ? { kind: 'direct', daemonUrl: `http://127.0.0.1:${String(direct.port)}` }
-            : { kind: 'relay', relayUrl: `ws://127.0.0.1:${String(clientRelay?.port ?? 0)}` },
+          entry.carrier === 'webrtc'
+            ? { kind: 'webrtc' }
+            : entry.carrier === 'direct'
+              ? { kind: 'direct', daemonUrl: `http://127.0.0.1:${String(direct.port)}` }
+              : { kind: 'relay', relayUrl: `ws://127.0.0.1:${String(clientRelay?.port ?? 0)}` },
         path: `/v1/sessions/${SESSION_ID}/terminals/${created.id}/stream`,
         cols: COLS,
         rows: ROWS,

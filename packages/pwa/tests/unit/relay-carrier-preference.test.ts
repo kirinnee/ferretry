@@ -599,3 +599,56 @@ describe('changing the preference', () => {
     await settle(5);
   });
 });
+
+describe('the reason a faster carrier is not carrying (WebRTC, docs/relay-protocol.md §16)', () => {
+  const failingWebRtc = {
+    webrtc: async (): Promise<never> => {
+      throw new Error('no direct path found in 8 s');
+    },
+  };
+
+  it('should carry WebRTC’s own sentence beside the relay that won after it failed', async () => {
+    const { router, daemon } = await setup({
+      published: [RELAY],
+      reach: { 'relay.example': 'live' },
+      dialers: failingWebRtc,
+    });
+
+    should((await fetchProjects(router, daemon)).status).equal(200);
+
+    const choice = router.choice(daemon.daemonId);
+    if (choice?.ok !== true) throw new Error('the relay did not carry the request');
+    const missed = choice.passedOver.find(skip => skip.method.kind === 'webrtc');
+    should(choice.method.kind).equal('relay');
+    should(choice.fallbackReason).equal(missed?.detail);
+    should(choice.fallbackReason).match(/no direct path found in 8 s/u);
+    await settle(5);
+  });
+
+  it('should give no fallback reason when WebRTC was never tried in this build', async () => {
+    const { router, daemon } = await setup({ published: [RELAY], reach: { 'relay.example': 'live' } });
+
+    should((await fetchProjects(router, daemon)).status).equal(200);
+
+    const choice = router.choice(daemon.daemonId);
+    if (choice?.ok !== true) throw new Error('the relay did not carry the request');
+    should(choice.passedOver.some(skip => skip.method.kind === 'webrtc' && skip.untried === true)).be.true();
+    should(choice.fallbackReason).be.undefined();
+    await settle(5);
+  });
+
+  it('should give no fallback reason to a direct carrier, which outranks WebRTC', async () => {
+    const { router, daemon } = await setup({
+      published: [RELAY],
+      reach: { [DIRECT_HOST]: 'live' },
+      dialers: failingWebRtc,
+    });
+
+    should((await fetchProjects(router, daemon)).status).equal(200);
+
+    const choice = router.choice(daemon.daemonId);
+    should(choice).match({ ok: true, method: { kind: 'direct' } });
+    should(choice?.ok === true ? choice.fallbackReason : 'not ok').be.undefined();
+    await settle(5);
+  });
+});

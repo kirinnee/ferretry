@@ -106,4 +106,3 @@ verb-unproven GET /v1/sessions/:sessionId/fs/diff # ANALYSIS: cli filesystem/gat
 verb-unproven GET /v1/sessions/:sessionId/terminals # ANALYSIS: pwa web-terminals.ts:81 trailing `fetcher` argument is indistinguishable from an init
 verb-unproven GET /v1/sessions/by-request/:requestId # ANALYSIS: fy-api-client.ts:481 trailing FY_RECOVERY_TIMEOUT_MS is indistinguishable from an init
 
-unreached POST /v1/webrtc/offer # the WebRTC carrier lands daemon-first (docs/relay-protocol.md §16); the PWA dial is the next stacked PR, which removes this line
