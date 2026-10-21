@@ -14,9 +14,11 @@ import {
   ActiveCarrierCard,
   CARRIER_NO_FALLBACK,
   CARRIER_STREAM_DISCLOSURE,
+  CARRIER_TUNNEL_STREAM_DISCLOSURE,
   CARRIER_UNMEASURED,
   CONNECTION_STATUS_LABEL,
   connectionStatusKind,
+  NOT_CONNECTED_LABEL,
   SELF_HOSTING_NOTE,
   SELF_HOSTING_RUNBOOK_URL,
 } from '../../../src/features/carrier/active-carrier-card.tsx';
@@ -123,6 +125,16 @@ describe('the connection status the card leads with', () => {
 
   it('should say "not measured yet" rather than default to direct', () => {
     should(statusOf(render(<ActiveCarrierCard choice={undefined} relayAdvertised />))).equal('none');
+    // A walk that ran and carried nothing was measured: it says so, and names why below.
+    const refused = render(
+      <ActiveCarrierCard
+        choice={{ ok: false, reason: 'Tunnel only: not set up by the operator.', passedOver: [] }}
+        relayAdvertised
+      />,
+    );
+    should(statusOf(refused)).equal('none');
+    should(text(refused)).containEql(NOT_CONNECTED_LABEL);
+    should(text(refused)).not.containEql(CONNECTION_STATUS_LABEL.none);
     should(connectionStatusKind(undefined, { kind: 'connected' })).equal('none');
   });
 
@@ -192,5 +204,75 @@ describe('subscribing to the measured carrier', () => {
       router.clearDaemon(daemonId);
     });
     should(seen).be.undefined();
+  });
+});
+
+describe('the card on a Cloudflare tunnel or WebRTC (§15)', () => {
+  const TUNNEL: ConnectionMethod = { kind: 'tunnel', tunnelUrl: 'https://k3x9.tunnels.example.com' };
+  const WEBRTC: ConnectionMethod = { kind: 'webrtc' };
+
+  it('should name the tunnel and its hostname, with Cloudflare’s observers and its stream caveat', () => {
+    const choice = chooseConnection([
+      { method: DIRECT, reachable: false, detail: 'Failed to fetch' },
+      { method: WEBRTC, reachable: false, detail: 'WebRTC isn’t available in this build yet', untried: true },
+      { method: TUNNEL, reachable: true },
+    ]);
+    const card = render(<ActiveCarrierCard choice={choice} relayAdvertised />);
+    const rendered = text(card);
+    should(statusOf(card)).equal('tunnel');
+    should(rendered).containEql(CONNECTION_STATUS_LABEL.tunnel);
+    should(rendered).containEql('k3x9.tunnels.example.com');
+    should(rendered).containEql(CARRIER_TUNNEL_STREAM_DISCLOSURE);
+    for (const observer of describeConnectionMethod(TUNNEL).observers) should(rendered).containEql(observer);
+    // A carrier passed over without being tried says so.
+    should(rendered).containEql('WebRTC');
+    should(rendered).containEql(' (not tried)');
+    should(card.root.findByProps({ 'data-active-carrier': '' }).props['data-carrier-kind']).equal('tunnel');
+  });
+
+  it('should name WebRTC, with the round trip and the fallback reason the carrier measured', () => {
+    const chosen = chooseConnection([{ method: WEBRTC, reachable: true }]);
+    if (!chosen.ok) throw new Error('expected WebRTC');
+    const card = render(
+      <ActiveCarrierCard
+        choice={{ ...chosen, rttMs: 23.4, fallbackReason: 'ICE restarted after a network change' }}
+        relayAdvertised
+      />,
+    );
+    const rendered = text(card);
+    should(statusOf(card)).equal('webrtc');
+    should(rendered).containEql(CONNECTION_STATUS_LABEL.webrtc);
+    should(card.root.findByProps({ 'data-carrier-rtt': '' }).children.join('')).equal('Round trip: 23 ms');
+    should(card.root.findByProps({ 'data-carrier-fallback-reason': '' }).children.join('')).equal(
+      'Why not a faster carrier: ICE restarted after a network change',
+    );
+  });
+
+  it('should render neither line when the carrier measured neither', () => {
+    const card = render(
+      <ActiveCarrierCard choice={chooseConnection([{ method: DIRECT, reachable: true }])} relayAdvertised />,
+    );
+    should(card.root.findAllByProps({ 'data-carrier-rtt': '' })).have.length(0);
+    should(card.root.findAllByProps({ 'data-carrier-fallback-reason': '' })).have.length(0);
+  });
+
+  it('should carry the connection preference selector when given one, and hand back a change', () => {
+    const chosen: string[] = [];
+    const card = render(
+      <ActiveCarrierCard
+        choice={undefined}
+        relayAdvertised
+        preference={{
+          value: 'auto',
+          onChange: preference => chosen.push(preference),
+          availability: { webrtc: false, tunnelNote: 'This machine has no tunnel yet.' },
+        }}
+      />,
+    );
+    should(card.root.findByType('legend').children.join('')).equal('How this device connects');
+    const relay = card.root.findAllByType('input').find(input => input.props.value === 'relay');
+    run(() => relay?.props.onChange());
+    should(chosen).eql(['relay']);
+    should(text(card)).containEql('This machine has no tunnel yet.');
   });
 });

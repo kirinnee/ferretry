@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import type { ConnectionChoice } from '@ferretry/relay';
-import { useLayoutEffect, useState } from 'react';
+import { type ReactNode, useLayoutEffect, useState } from 'react';
 import type { ReactTestRenderer } from 'react-test-renderer';
 import type { FleetClientFactory } from '../../../../src/features/fleet/fleet-client.ts';
 import { useSettingsFlow } from '../../../../src/features/fleet/setup/settings-route.ts';
@@ -85,6 +85,8 @@ interface PageOptions {
   readonly routerless?: boolean;
   /** The host's way to empty this device's cache; absent where it keeps none. */
   readonly onClearCachedData?: () => Promise<void>;
+  /** This device › Connection, as the host composes it. */
+  readonly connectionPreferences?: ReactNode;
 }
 
 const page = (options: PageOptions = {}) => {
@@ -114,6 +116,7 @@ const page = (options: PageOptions = {}) => {
       onRemoveDaemon={id => callbacks.removed.push(id)}
       onAddDaemon={() => callbacks.added.push('add')}
       {...(options.onClearCachedData === undefined ? {} : { onClearCachedData: options.onClearCachedData })}
+      {...(options.connectionPreferences === undefined ? {} : { connectionPreferences: options.connectionPreferences })}
       {...(options.routerless === true ? {} : { onNavigate: (to: string) => callbacks.navigated.push(to) })}
       {...(options.createMachineClient === undefined ? {} : { createMachineClient: options.createMachineClient })}
       {...(options.machineTabs === undefined ? {} : { machineTabs: options.machineTabs })}
@@ -311,6 +314,34 @@ describe('SettingsPage sections', () => {
       expect(shownSection(view.container)).toBe('device');
     } finally {
       await view.unmount();
+    }
+  });
+
+  it('lists this device’s connection choice for each machine under This device, or says why it cannot', async () => {
+    // Arrange
+    const composed = await mount(page({ connectionPreferences: <p data-composed-preferences="">per machine</p> }));
+    try {
+      // Act
+      await visit('#device');
+
+      // Assert
+      const setting = must(
+        composed.container.querySelector<HTMLElement>('[data-setting-id="connection-preference"]'),
+        'the Connection setting',
+      );
+      expect(setting.textContent).toContain('Connection');
+      expect(setting.querySelector('[data-composed-preferences]')).not.toBeNull();
+    } finally {
+      await composed.unmount();
+    }
+    const bare = await mount(page());
+    try {
+      await visit('#device');
+      expect(bare.container.querySelector('[data-setting-id="connection-preference"]')?.textContent).toContain(
+        'The connection choice is unavailable',
+      );
+    } finally {
+      await bare.unmount();
     }
   });
 

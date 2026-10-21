@@ -8,6 +8,7 @@ import {
   connectionPreferenceOrder,
   connectionSocketUrl,
   describeConnectionMethod,
+  describeSkip,
   parseRendezvousPath,
   publishedConnectionMethods,
   SocketEndpointSchema,
@@ -19,6 +20,8 @@ const direct: ConnectionMethod = { kind: 'direct', daemonUrl: 'https://box.tailn
 const relay: ConnectionMethod = { kind: 'relay', relayUrl: 'https://relay.example' };
 const hosted: ConnectionMethod = { kind: 'relay', relayUrl: 'https://hosted.example', operator: 'hosted' };
 const secureDirect: ConnectionMethod = { kind: 'direct', daemonUrl: 'https://box.example' };
+const tunnel: ConnectionMethod = { kind: 'tunnel', tunnelUrl: 'https://k3x9.tunnels.example.com' };
+const webrtc: ConnectionMethod = { kind: 'webrtc' };
 
 describe('socket endpoints', () => {
   it('should accept secure schemes anywhere and insecure ones only where the published CSP allows', () => {
@@ -64,6 +67,21 @@ describe('socket endpoints', () => {
     should(ConnectionMethodSchema.safeParse({ kind: 'hosted', relayUrl: 'https://relay.example' }).success).be.false();
   });
 
+  it('should hold a tunnel to a bare https origin, and give WebRTC no address at all', () => {
+    should(ConnectionMethodSchema.parse({ kind: 'tunnel', tunnelUrl: 'https://k3x9.tunnels.example.com/' })).deepEqual(
+      tunnel,
+    );
+    should(
+      ConnectionMethodSchema.safeParse({ kind: 'tunnel', tunnelUrl: 'http://k3x9.example.com' }).success,
+    ).be.false();
+    should(ConnectionMethodSchema.safeParse({ kind: 'tunnel', tunnelUrl: 'https://localhost' }).success).be.false();
+    should(
+      ConnectionMethodSchema.safeParse({ kind: 'tunnel', tunnelUrl: 'https://k3x9.example.com/path' }).success,
+    ).be.false();
+    should(ConnectionMethodSchema.parse(webrtc)).deepEqual(webrtc);
+    should(ConnectionMethodSchema.safeParse({ kind: 'webrtc', url: 'https://x.example' }).success).be.false();
+  });
+
   it('should hold a direct carrier to the daemon origin rule, not the rendezvous one', () => {
     // A daemon on a private network address commonly serves plain HTTP, and it is the operator's own
     // machine — refusing it here would reject the most ordinary direct carrier there is.
@@ -93,6 +111,18 @@ describe('rendezvous addressing', () => {
     should(connectionSocketUrl({ kind: 'relay', relayUrl: 'ws://localhost:8787' }, daemonId, 'client')).equal(
       `ws://localhost:8787/v1/rendezvous/${daemonId}/client`,
     );
+  });
+
+  it('should dial a tunnel exactly like a direct address, as the client and never as the daemon', () => {
+    should(connectionSocketUrl(tunnel, daemonId, 'client')).equal(
+      `wss://k3x9.tunnels.example.com/v1/rendezvous/${daemonId}/client`,
+    );
+    should(connectionSocketUrl(tunnel, daemonId, 'daemon')).be.null();
+  });
+
+  it('should give WebRTC no socket address for either role', () => {
+    should(connectionSocketUrl(webrtc, daemonId, 'client')).be.null();
+    should(connectionSocketUrl(webrtc, daemonId, 'daemon')).be.null();
   });
 
   it('should refuse a daemon role on a direct carrier, and an identifier that is not one', () => {
@@ -131,10 +161,32 @@ describe('carrier disclosure and choice', () => {
     should(hostedDisclosure.label).equal('Hosted relay');
     should(hostedDisclosure.observers.join(' ')).match(/cannot read frame payloads/u);
     should(hostedDisclosure.requires.join(' ')).match(/global ceilings/u);
+
+    // §15 "What a tunnel operator can see, honestly", carrier by carrier.
+    const tunnelled = describeConnectionMethod(tunnel);
+    should(tunnelled.label).equal('Cloudflare tunnel');
+    should(tunnelled.noun).equal('Cloudflare tunnel');
+    should(tunnelled.observers.join(' ')).match(/Ferretry, which provisioned the tunnel, and Cloudflare/u);
+    should(tunnelled.observers.join(' ')).match(/cannot read, alter or insert/u);
+    should(tunnelled.observers.join(' ')).match(/stolen connector token/u);
+    should(tunnelled.requires.join(' ')).match(/set up by its operator/u);
+
+    const peer = describeConnectionMethod(webrtc);
+    should(peer.label).equal('WebRTC');
+    should(peer.observers.join(' ')).match(/STUN server/u);
+    should(peer.summary).match(/only introduces the two ends/u);
   });
 
-  it('should always try direct first', () => {
+  it('should try direct, then WebRTC, then a tunnel, then a relay, keeping the order within a kind', () => {
     should(connectionPreferenceOrder([relay, direct])).deepEqual([direct, relay]);
+    should(connectionPreferenceOrder([hosted, tunnel, relay, webrtc, direct, secureDirect])).deepEqual([
+      direct,
+      secureDirect,
+      webrtc,
+      tunnel,
+      hosted,
+      relay,
+    ]);
   });
 
   it('should turn a published set into direct-first methods without reordering within a kind', () => {
@@ -165,7 +217,14 @@ describe('carrier disclosure and choice', () => {
         { kind: 'tunnel', url: 'https://abc.tunnels.example.com' },
         { kind: 'direct', url: 'http://box.lan:7431' },
       ]),
-    ).deepEqual([{ kind: 'direct', daemonUrl: 'http://box.lan:7431' }]);
+    ).deepEqual([
+      { kind: 'direct', daemonUrl: 'http://box.lan:7431' },
+      { kind: 'tunnel', tunnelUrl: 'https://abc.tunnels.example.com' },
+    ]);
+    // A tunnel held to the wrong rule on the way in is dropped like any other undialable member.
+    should(publishedConnectionMethods([{ kind: 'tunnel', url: 'http://abc.tunnels.example.com' } as never])).deepEqual(
+      [],
+    );
   });
 
   it('should drop one undialable published carrier of either kind and keep the rest', () => {
@@ -233,5 +292,24 @@ describe('carrier disclosure and choice', () => {
     const nothingWorked = chooseConnection([{ method: direct, reachable: false }]);
     should(nothingWorked.ok).be.false();
     if (!nothingWorked.ok) should(nothingWorked.reason).match(/no reason reported/u);
+  });
+
+  it('should say a carrier passed over without being tried differently from one that did not answer', () => {
+    const chosen = chooseConnection([
+      { method: webrtc, reachable: false, detail: 'WebRTC isn’t available in this build yet', untried: true },
+      { method: tunnel, reachable: false, detail: 'timed out' },
+      { method: hosted, reachable: true },
+    ]);
+    if (!chosen.ok) throw new Error('expected the hosted relay to carry');
+    should(chosen.reason).equal(
+      'Connected over hosted relay because WebRTC was not tried (WebRTC isn’t available in this build yet); Cloudflare tunnel was not reachable (timed out).',
+    );
+    should(chosen.passedOver[0]).deepEqual({
+      method: webrtc,
+      detail: 'WebRTC isn’t available in this build yet',
+      untried: true,
+    });
+    should(chosen.passedOver[1]).deepEqual({ method: tunnel, detail: 'timed out' });
+    should(describeSkip({ method: direct, detail: 'refused' })).equal('direct was not reachable (refused)');
   });
 });
