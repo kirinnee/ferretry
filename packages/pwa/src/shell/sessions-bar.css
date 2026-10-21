@@ -954,7 +954,7 @@
   }
   .fy-sbar__machine-head .fy-sbar__machine-grip:hover,
   .fy-sbar__machine-head .fy-sbar__machine-more:hover {
-    box-shadow: inset 0 0 0 99px var(--nav-hover, var(--surface-2));
+    background-image: linear-gradient(var(--nav-hover, var(--surface-2)), var(--nav-hover, var(--surface-2)));
   }
 }
 @media (prefers-reduced-motion: reduce) {
