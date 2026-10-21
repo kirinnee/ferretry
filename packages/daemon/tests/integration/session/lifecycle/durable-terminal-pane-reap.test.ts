@@ -52,7 +52,20 @@ function lifecycleRecord(id = 'reap-session') {
   ).record;
 }
 
-async function fixture(id = 'reap-session'): Promise<ReapFixture> {
+/** A harness that waits for `gate` and then runs `script` -- exiting only when the test says so. */
+function gatedHarness(gate: string, script: string): readonly [string, ...string[]] {
+  return ['/bin/sh', '-c', `while [ ! -e '${gate}' ]; do sleep 0.05; done; ${script}`];
+}
+
+/**
+ * @param exits When given, the first pane runs this script to its end instead of `sleep 600`, and the
+ *   fixture returns once tmux holds it as a dead pane with that script's exit status. The pane is the
+ *   private server's FIRST, never a relaunch: stopping the only session makes tmux exit asynchronously,
+ *   and a server started on the same socket while the old one is still leaving can lose its socket to
+ *   the old server's exit-time unlink, so the new session reads as gone for good.
+ */
+async function fixture(exits?: string): Promise<ReapFixture> {
+  const id = 'reap-session';
   const home = await mkdtemp(join(tmpdir(), 'ferretry-terminal-reap-'));
   const tmuxExecutable = Bun.which('tmux');
   if (tmuxExecutable === null) throw new Error('tmux is required for terminal-reap integration coverage');
@@ -73,10 +86,11 @@ async function fixture(id = 'reap-session'): Promise<ReapFixture> {
   const controller = new TmuxController(tmux);
   // A fresh private server assigns its first pane `%0`; the production registrar and reaper must
   // prove that real first-pane identity rather than avoiding it with a bootstrap session.
+  const gate = join(home, 'harness-may-exit');
   await controller.launch({
     session: record.config.tmuxSession,
     cwd: process.cwd(),
-    command: ['/bin/sh', '-c', 'exec sleep 600'],
+    command: exits === undefined ? ['/bin/sh', '-c', 'exec sleep 600'] : gatedHarness(gate, exits),
   });
   const files = new StateFileSystem(opened.paths);
   const registrar = new DurableTerminalPaneRegistrar(DAEMON, controller, files, opened.paths);
@@ -87,7 +101,27 @@ async function fixture(id = 'reap-session'): Promise<ReapFixture> {
     await opened.storage.close();
     await rm(home, { recursive: true, force: true });
   });
+  if (exits !== undefined) await awaitExit(controller, record.config.tmuxSession, gate);
   return { home, files, storage: opened.storage, record, controller, registrar, store, runtime, tmuxExecutable };
+}
+
+/**
+ * The gate is opened only once launch() has returned, so remain-on-exit is already set and the pane
+ * can only end as a dead pane. The wait is for an exit STATUS, not just `dead`: a metadata read that
+ * fails under load also reads as dead, and registering then would find the process still running. The
+ * bound is generous because it is only ever spent when something is wrong.
+ */
+async function awaitExit(controller: TmuxController, session: string, gate: string): Promise<void> {
+  await writeFile(gate, '');
+  const deadline = Date.now() + 30_000;
+  let last = 'no state read';
+  while (Date.now() < deadline) {
+    const pane = await controller.state(session);
+    last = JSON.stringify({ alive: pane.alive, dead: pane.dead, exitCode: pane.exitCode });
+    if (pane.alive && pane.dead && pane.exitCode === 2) return;
+    await Bun.sleep(50);
+  }
+  throw new Error(`test setup: the pane never exited (last state ${last})`);
 }
 
 function service(subject: ReapFixture, runtime = subject.runtime): TerminalReapService {
@@ -223,34 +257,9 @@ describe('durable terminal pane reap adapters', () => {
  * is gone, and the reason must be the exit and what the process printed, not the identity read.
  */
 describe('registering a pane whose harness has already exited', () => {
-  async function relaunch(subject: ReapFixture, script: string): Promise<void> {
-    await subject.controller.stop(subject.record.config.tmuxSession);
-    // The harness waits on a gate file rather than a fixed pause: it may only end once the launch has
-    // finished setting remain-on-exit. A timed pause lost that race on a loaded runner, tmux then
-    // destroyed the pane outright and the session vanished instead of leaving a dead pane to read.
-    const gate = join(subject.home, 'harness-may-exit');
-    await subject.controller.launch({
-      session: subject.record.config.tmuxSession,
-      cwd: process.cwd(),
-      command: ['/bin/sh', '-c', `while [ ! -e '${gate}' ]; do sleep 0.05; done; ${script}`],
-    });
-    await writeFile(gate, '');
-    // An exit status, not just `dead`: a metadata read that fails under load also reads as dead, and
-    // registering then would find the process still running. The bound is generous because it is only
-    // ever spent when something is wrong; a healthy pane returns on the first few polls.
-    const deadline = Date.now() + 30_000;
-    while (Date.now() < deadline) {
-      const pane = await subject.controller.state(subject.record.config.tmuxSession);
-      if (pane.alive && pane.dead && pane.exitCode === 2) return;
-      await Bun.sleep(50);
-    }
-    throw new Error('test setup: the pane never exited');
-  }
-
   it('should report the exit status and the last output instead of the identity read', async () => {
     // Arrange
-    const subject = await fixture();
-    await relaunch(subject, `echo 'ferretry: DEEPSEEK_TOKEN is not set' >&2; exit 2`);
+    const subject = await fixture(`echo 'ferretry: DEEPSEEK_TOKEN is not set' >&2; exit 2`);
 
     // Act / Assert
     await should(subject.registrar.register(subject.record)).be.rejectedWith(
