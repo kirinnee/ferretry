@@ -900,3 +900,41 @@ describe('RemoteBrowserViewer input', () => {
     else globals.ResizeObserver = previousResizeObserver;
   });
 });
+
+describe('RemoteBrowserViewer while the page is hidden', () => {
+  const setPageVisibility = (state: 'hidden' | 'visible'): void => {
+    Object.defineProperty(document, 'visibilityState', { configurable: true, value: state });
+    run(() => document.dispatchEvent(new Event('visibilitychange')));
+  };
+
+  it('closes its stream when the document is hidden and opens a fresh one when it is shown', () => {
+    const sockets: FakeSocket[] = [];
+    const renderer = render(
+      <RemoteBrowserViewer
+        daemon={daemonA}
+        scope={daemonSessionScope(daemonA, 'session-a')}
+        status={running('session-a')}
+        socketFactory={() => {
+          const socket = new FakeSocket();
+          sockets.push(socket);
+          return socket;
+        }}
+      />,
+    );
+    expect(sockets).toHaveLength(1);
+
+    try {
+      // Frames for a page nobody can see are still metered on a relay, so none are asked for.
+      setPageVisibility('hidden');
+      expect(sockets[0]?.closes).toEqual([{ code: 1000, reason: 'viewer detached' }]);
+      expect(sockets).toHaveLength(1);
+      expect(JSON.stringify(renderer.toJSON())).toContain('Display idle');
+
+      setPageVisibility('visible');
+      expect(sockets).toHaveLength(2);
+    } finally {
+      Reflect.deleteProperty(document, 'visibilityState');
+    }
+    run(() => renderer.unmount());
+  });
+});

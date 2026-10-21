@@ -65,7 +65,7 @@ export class TerminalStreamBridge {
    * one is a sealed record, a credit and a metered frame — and a changed one sends only the change.
    * Only a frame the transport took counts: one it DROPPED (`send` answering `0`) never reached the
    * viewer, so this is forgotten and the next poll sends a complete redraw. A resize forgets it too,
-   * because the viewer's emulator has just reflowed.
+   * because the viewer's emulator has just reflowed — but only when the size actually changed.
    */
   private lastSent?: TerminalCapture;
   /**
@@ -112,8 +112,10 @@ export class TerminalStreamBridge {
           await this.service.write(this.sessionId, this.terminalId, parsed.charged.operation.bytes);
           this.hurry();
         } else {
-          this.lastSent = undefined;
           const { cols, rows } = parsed.charged.operation.size;
+          // Only a CHANGED size reflows the viewer's emulator. A repeat of the size it already has
+          // keeps the picture, so the next poll stays a delta instead of a complete redraw.
+          if (this.viewer?.cols !== cols || this.viewer?.rows !== rows) this.lastSent = undefined;
           this.viewer = { cols, rows };
           await this.service.resize(this.sessionId, this.terminalId, cols, rows);
         }

@@ -16,6 +16,7 @@ import type {
   Ref,
 } from 'react';
 import { useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useDocumentVisible } from '../../hooks/use-document-visible.ts';
 import { type DaemonConnection, sameDaemonConnection } from '../../lib/daemon-connection.ts';
 import type { DaemonSessionScope } from '../../lib/daemon-scope.ts';
 import { KEYBOARD_CAPTURE_ATTRIBUTE } from '../../lib/keyboard-capture.ts';
@@ -199,6 +200,8 @@ export function RemoteBrowserViewer({
   scopeRef.current = scope;
 
   const running = status?.state === 'running';
+  // A page nobody can see holds no stream: every frame it received would still be metered on a relay.
+  const documentVisible = useDocumentVisible();
   const currentPageId = activePageId(status);
   // A MONOTONIC GENERATION, not a key string. This transport's identity includes
   // the device token, and a token belongs in no value that can reach a DOM
@@ -406,7 +409,7 @@ export function RemoteBrowserViewer({
   }, [currentPageId, revokeObjectUrl]);
 
   useEffect(() => {
-    if (!isActive || !running) {
+    if (!isActive || !running || !documentVisible) {
       setDisplayState('idle');
       return;
     }
@@ -478,6 +481,7 @@ export function RemoteBrowserViewer({
     };
   }, [
     createObjectUrl,
+    documentVisible,
     isActive,
     reconnectAfterMs,
     releasePressedKeys,

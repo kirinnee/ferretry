@@ -876,3 +876,146 @@ describe('SessionTerminalDeck as one workspace tab', () => {
     expect(ports.at(-1)).toBeNull();
   });
 });
+
+/** Hides or shows the page the way a backgrounded tab does, and says so to every listener. */
+const setPageVisibility = (state: 'hidden' | 'visible'): void => {
+  Object.defineProperty(document, 'visibilityState', { configurable: true, value: state });
+  run(() => document.dispatchEvent(new Event('visibilitychange')));
+};
+
+describe('SessionTerminalDeck on screen', () => {
+  const frames = (socket: { readonly sent: unknown[] }): string[] =>
+    socket.sent.filter((frame): frame is string => typeof frame === 'string');
+
+  test('holds no stream while its workspace tab is not the one shown, and attaches once it is', async () => {
+    const deck = fakeDeck(async () => terminalListing([terminalView(FIRST)]));
+    const element = (active: boolean) => (
+      <SessionTerminalDeck
+        active={active}
+        connection={alpha}
+        dependencies={deck.dependencies}
+        focusTerminalId={FIRST}
+        scope={scopeAlpha}
+        solo
+      />
+    );
+    const page = mount(element(false));
+    await settle();
+    // Mounted and listed, but unseen: nothing is attached, so a relay meters nothing for it.
+    expect(deck.sockets).toHaveLength(0);
+
+    run(() => page.update(element(true)));
+    await settle();
+    expect(deck.sockets).toHaveLength(1);
+
+    run(() => page.update(element(false)));
+    expect(deck.sockets[0]?.closes).toEqual([{ code: 1000, reason: 'terminal tab detached' }]);
+    run(() => page.unmount());
+  });
+
+  test('detaches while the page is hidden and attaches a fresh stream when it is shown again', async () => {
+    const deck = fakeDeck(async () => terminalListing([terminalView(FIRST)]));
+    const page = mount(<SessionTerminalDeck connection={alpha} dependencies={deck.dependencies} scope={scopeAlpha} />);
+    await settle();
+    expect(deck.sockets).toHaveLength(1);
+
+    try {
+      setPageVisibility('hidden');
+      expect(deck.sockets[0]?.closes[0]?.code).toBe(1000);
+      await settle();
+      expect(deck.sockets).toHaveLength(1);
+
+      setPageVisibility('visible');
+      await settle();
+      expect(deck.sockets).toHaveLength(2);
+    } finally {
+      Reflect.deleteProperty(document, 'visibilityState');
+    }
+    run(() => page.unmount());
+  });
+
+  test('sizes the stream once however many times the observer reports the same size, and again when it changes', async () => {
+    const observers: Array<() => void> = [];
+    const original = globalThis.ResizeObserver;
+    globalThis.ResizeObserver = class {
+      constructor(callback: () => void) {
+        observers.push(callback);
+      }
+      observe(): void {}
+      disconnect(): void {}
+    } as unknown as typeof ResizeObserver;
+    try {
+      const spy = xtermSpy();
+      const deck = fakeDeck(async () => terminalListing([terminalView(FIRST)]), { loadXterm: async () => spy.modules });
+      const page = mount(
+        <SessionTerminalDeck connection={alpha} dependencies={deck.dependencies} scope={scopeAlpha} />,
+      );
+      await settle();
+      const socket = deck.sockets[0];
+      if (socket === undefined) throw new Error('the deck opened no socket');
+      await runAsync(async () => {
+        socket.emit('open');
+        await new Promise(resolve => setTimeout(resolve, 20));
+      });
+      expect(frames(socket)).toEqual(['{"type":"resize","cols":80,"rows":24}']);
+
+      // The keyboard coming and going, or a divider drag, reports the size it already was.
+      run(() => {
+        for (const notify of observers) notify();
+        for (const notify of observers) notify();
+      });
+      expect(frames(socket)).toHaveLength(1);
+      run(() => page.unmount());
+    } finally {
+      globalThis.ResizeObserver = original;
+    }
+  });
+
+  test('tells a reattached stream the size even though the previous stream was told the same', async () => {
+    const deck = fakeDeck(async () => terminalListing([terminalView(FIRST)]));
+    const page = mount(<SessionTerminalDeck connection={alpha} dependencies={deck.dependencies} scope={scopeAlpha} />);
+    const openLatest = async (): Promise<void> => {
+      await settle();
+      const socket = deck.sockets.at(-1);
+      if (socket === undefined) throw new Error('the deck opened no socket');
+      await runAsync(async () => {
+        socket.emit('open');
+        await new Promise(resolve => setTimeout(resolve, 20));
+      });
+    };
+    await openLatest();
+    try {
+      setPageVisibility('hidden');
+      setPageVisibility('visible');
+      await openLatest();
+    } finally {
+      Reflect.deleteProperty(document, 'visibilityState');
+    }
+
+    expect(deck.sockets).toHaveLength(2);
+    expect(deck.sockets.map(socket => frames(socket))).toEqual([
+      ['{"type":"resize","cols":80,"rows":24}'],
+      ['{"type":"resize","cols":80,"rows":24}'],
+    ]);
+    run(() => page.unmount());
+  });
+
+  test('sends no size for a pane that cannot be measured, because 80x24 would resize the shell for every viewer', async () => {
+    const deck = fakeDeck(async () => terminalListing([terminalView(FIRST)]));
+    const page = render(
+      <SessionTerminalDeck connection={alpha} dependencies={deck.dependencies} scope={scopeAlpha} />,
+      { createNodeMock: () => ({ clientWidth: 0, clientHeight: 0 }) },
+    );
+    await settle();
+    const socket = deck.sockets[0];
+    if (socket === undefined) throw new Error('the deck opened no socket');
+    await runAsync(async () => {
+      socket.emit('open');
+      await new Promise(resolve => setTimeout(resolve, 20));
+    });
+
+    expect(frames(socket)).toEqual([]);
+    expect(json(page)).toContain('live');
+    run(() => page.unmount());
+  });
+});
