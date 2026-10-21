@@ -6,4 +6,5 @@ export * from './provenance.ts';
 export * from './reader.ts';
 export * from './relaunch.ts';
 export * from './resolver.ts';
+export * from './tail-cache.ts';
 export * from './wrapper-home.ts';

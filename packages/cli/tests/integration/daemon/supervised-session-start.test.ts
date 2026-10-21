@@ -180,7 +180,7 @@ async function arrange(
 
 async function waitForHealth(port: number, logFile: string): Promise<void> {
   for (let attempt = 0; attempt < 400; attempt += 1) {
-    if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined)) !== undefined) return;
+    if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined))?.ok === true) return;
     await Bun.sleep(50);
   }
   const log = await readFile(logFile, 'utf8').catch(() => '(no log)');

@@ -122,6 +122,47 @@ describe('health routes', () => {
     // Assert
     should(jsonBody(response).uptimeSeconds).equal(0);
   });
+
+  it('should add the boot step, the pid and the loop lag once a boot supplies them', async () => {
+    // Arrange — a boot that is serving every route and still arming its background loops.
+    const routes = healthRoutes(fixedClock(NOW), NOW - 30_000, {
+      pid: 4242,
+      boot: () => ({ phase: 'finishing', step: 'arming the warden', stepElapsedMs: 1_200, bootElapsedMs: 30_000 }),
+      loop: () => ({ lagMs: 4, maxLagMs: 4, stalls: 0 }),
+    });
+
+    // Act
+    const response = await routes[0]!.handle({ request: request(), params: new Map() });
+
+    // Assert — status is `ok` from the moment routes are served; the boot block says what is left.
+    should(response.status).equal(200);
+    should(jsonBody(response)).deepEqual({
+      status: 'ok',
+      version: daemonVersion,
+      sessionProtocol: 'ferretry-relay/2',
+      uptimeSeconds: 30,
+      pid: 4242,
+      boot: { phase: 'finishing', step: 'arming the warden', stepElapsedSeconds: 1, elapsedSeconds: 30 },
+      eventLoop: { lagMs: 4, maxLagMs: 4, stalls: 0 },
+    });
+  });
+
+  it('should answer a still-starting boot with a 503 carrying the whole liveness body', async () => {
+    // Arrange
+    const routes = healthRoutes(fixedClock(NOW), NOW, {
+      pid: 4242,
+      boot: () => ({ phase: 'starting', step: 'mounting subsystems', stepElapsedMs: 0, bootElapsedMs: 0 }),
+      loop: () => ({ lagMs: 0, maxLagMs: 0, stalls: 0 }),
+    });
+
+    // Act
+    const response = await routes[0]!.handle({ request: request(), params: new Map() });
+
+    // Assert
+    should(response.status).equal(503);
+    should(jsonBody(response).status).equal('starting');
+    should(response.headers.get('cache-control')).equal('no-store');
+  });
 });
 
 describe('the usage feed', () => {

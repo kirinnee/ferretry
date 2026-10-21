@@ -1,8 +1,9 @@
 import { type HandoffPointer, parseMessageAttachments } from '@ferretry/protocol';
 import { markReplies } from './peer-delivery.ts';
 import { peerFrom } from './peer-message.ts';
+import { EMPTY_SEND_VIEW, type SendViewState } from './send-dismissals.ts';
 import { foldLedgerSendRecords, type LedgerSendRecord, RECORD_CLOCK_SLACK_MS } from './send-ledger.ts';
-import type { TranscriptEntry } from './session-screens.ts';
+import type { SettledForm, TranscriptEntry } from './session-screens.ts';
 
 /**
  * Where a durable send row sits relative to the transcript currently loaded, and the reading of it a
@@ -21,23 +22,121 @@ export const ledgerPlacementCopy = (placement: LedgerBlockPlacement): string | u
 export const SETTLED_ROW_LIFETIME_MS = 24 * 60 * 60_000;
 
 /**
- * Does this undelivered send still have a row under the conversation? Sending and queued ones always
- * do; one that settled (or was cancelled) keeps its row for a day, and then retires from view.
+ * How long a CANCELLED message keeps a row at all. The reader took it back themselves, so it is not news
+ * for a day: a few minutes is long enough to see what the cancel did, and then it leaves. A note the
+ * reader opened stays until they close it.
  */
-const keepsItsRow = (record: LedgerSendRecord, nowMs: number): boolean => {
+export const CANCELLED_ROW_LIFETIME_MS = 10 * 60_000;
+
+/**
+ * How long a send that has just settled is drawn as the whole bubble — with its Retry, Copy and Dismiss —
+ * before it folds to a one-line note. Long enough to read what happened, short enough that the note, not
+ * the bubble, is what a conversation keeps.
+ */
+export const SETTLED_FRESH_MS = 10_000;
+
+const instant = (value: string | undefined): number | undefined => {
+  const at = Date.parse(value ?? '');
+  return Number.isFinite(at) ? at : undefined;
+};
+
+/**
+ * A TERMINAL send: one the reader took back, or that the daemon gave up on, and that nothing is still
+ * trying to deliver. It is not part of the live conversation, so it never rides under it: it is placed
+ * where it was SENT and drawn as a one-line note. A tombstone is not a row at all, and a send held for a
+ * revive is kept deliberately (a cancelled one is terminal whatever it was held for).
+ */
+export const isSettledUndelivered = (record: LedgerSendRecord): boolean =>
+  record.withdrawn !== true &&
+  (record.fate === 'cancelled' ||
+    ((record.fate === 'timed_out' || record.fate === 'unaccounted') && record.held !== true));
+
+/** When a terminal send reached its fate: the daemon's word, else when it was sent. */
+const settledSince = (record: LedgerSendRecord): number | undefined =>
+  instant(record.fateAt) ?? instant(record.acceptedAt);
+
+/**
+ * Does this undelivered send still have a row? Sending and queued ones always do. One that settled keeps
+ * it for a day; a cancelled one for {@link CANCELLED_ROW_LIFETIME_MS}, unless the reader opened it
+ * (`expanded`).
+ */
+const keepsItsRow = (record: LedgerSendRecord, nowMs: number, expanded: ReadonlySet<string> = new Set()): boolean => {
   if (record.fate === 'delivered') return false;
   if (record.fate === 'accepted' || record.fate === 'queued') return true;
-  const at = Date.parse(record.acceptedAt);
-  return !Number.isFinite(at) || nowMs - at < SETTLED_ROW_LIFETIME_MS;
+  if (record.fate === 'cancelled') {
+    const since = settledSince(record);
+    return since === undefined || expanded.has(record.sendId) || nowMs - since < CANCELLED_ROW_LIFETIME_MS;
+  }
+  const at = instant(record.acceptedAt);
+  return at === undefined || nowMs - at < SETTLED_ROW_LIFETIME_MS;
 };
 
 /**
  * A STUCK send: one the reader can still see waiting, that nothing has proved arrived, that nobody has
- * taken back and that is not deliberately held for a revive. It is what "Clear stuck messages" clears,
- * so the count in its question is the number of such rows on screen.
+ * taken back and that is not deliberately held for a revive. It is what "Clear stuck messages" takes
+ * back, so the count in its question is the number of such rows on screen.
  */
 export const isStuckSend = (record: LedgerSendRecord, nowMs: number = Date.now()): boolean =>
   record.withdrawn !== true && record.held !== true && record.fate !== 'cancelled' && keepsItsRow(record, nowMs);
+
+/**
+ * The terminal sends the reader can see right now — not dismissed, not yet retired — oldest first. These
+ * are what "Dismiss all cancelled" and "Clear stuck messages" put away.
+ */
+export const visibleSettledSends = (
+  records: readonly LedgerSendRecord[],
+  nowMs: number,
+  view: SendViewState = EMPTY_SEND_VIEW,
+): LedgerSendRecord[] =>
+  foldLedgerSendRecords(records)
+    .filter(
+      record =>
+        isSettledUndelivered(record) && !view.dismissed.has(record.sendId) && keepsItsRow(record, nowMs, view.expanded),
+    )
+    .reverse();
+
+/**
+ * How a terminal send is drawn: the whole bubble while it is fresh, a one-line note after, and the whole
+ * bubble again once the reader opened it.
+ */
+export const settledForm = (
+  record: LedgerSendRecord,
+  nowMs: number,
+  expanded: ReadonlySet<string> = new Set(),
+): SettledForm => {
+  if (expanded.has(record.sendId)) return 'expanded';
+  const since = settledSince(record);
+  return since !== undefined && nowMs - since < SETTLED_FRESH_MS ? 'fresh' : 'slim';
+};
+
+/**
+ * The next instant the settled rows change on their own: a fresh bubble folds to its note, or a note
+ * retires. One scheduled wake-up instead of polling; `undefined` when nothing will.
+ */
+export const nextSettledChange = (
+  records: readonly LedgerSendRecord[],
+  nowMs: number,
+  view: SendViewState = EMPTY_SEND_VIEW,
+): number | undefined => {
+  let next = Number.POSITIVE_INFINITY;
+  for (const record of visibleSettledSends(records, nowMs, view)) {
+    if (view.expanded.has(record.sendId)) continue;
+    const since = settledSince(record);
+    const sent = instant(record.acceptedAt);
+    const candidates: (number | undefined)[] = [
+      since === undefined ? undefined : since + SETTLED_FRESH_MS,
+      record.fate === 'cancelled'
+        ? since === undefined
+          ? undefined
+          : since + CANCELLED_ROW_LIFETIME_MS
+        : sent === undefined
+          ? undefined
+          : sent + SETTLED_ROW_LIFETIME_MS,
+    ];
+    for (const at of candidates) if (at !== undefined && at > nowMs && at < next) next = at;
+  }
+  return Number.isFinite(next) ? next : undefined;
+};
 
 /** Whitespace-insensitive, case-sensitive: a soft-wrapped composer is not a different message. */
 const norm = (value: string): string => value.normalize('NFC').replace(/\s+/gu, ' ').trim();
@@ -65,11 +164,6 @@ export const sendRowId = (sendId: string): string => `send:${sendId}`;
  * the transcript read that carries the row — and without this the message vanished for that poll.
  */
 export const LANDING_GRACE_MS = 30_000;
-
-const instant = (value: string | undefined): number | undefined => {
-  const at = Date.parse(value ?? '');
-  return Number.isFinite(at) ? at : undefined;
-};
 
 /** Still on its way. A transcript row that carries it can only be the message landing. */
 const travelling = (record: LedgerSendRecord): boolean => record.fate === 'accepted' || record.fate === 'queued';
@@ -238,10 +332,19 @@ const stillLanding = (
  *     the row's text is only the pointer. A delivered send whose row is outside the loaded window simply
  *     has nothing to wear, which is right: it is in the conversation, just not on screen.
  *   * Several sends the harness joined into one message are worn by that one row (`joinedSends`).
- *   * Every other send is shown after the transcript, oldest first, as its own bubble: still sending,
- *     held in the agent's queue, settled without arriving — and, briefly, a delivered one whose row the
- *     loaded transcript does not carry yet (`stillLanding`), so a confirmation that outruns the
- *     transcript read does not make the message blink out.
+ *   * A send still on its way is shown after the transcript, oldest first, as its own bubble: sending, held
+ *     in the agent's queue, held for a revive — and, briefly, a delivered one whose row the loaded
+ *     transcript does not carry yet (`stillLanding`), so a confirmation that outruns the transcript read
+ *     does not make the message blink out.
+ *   * A TERMINAL send — cancelled, or given up on — is NOT under the conversation: nothing is trying to
+ *     deliver it, so pinning it below the live messages made the whole chat feel blocked. It is placed in
+ *     the timeline at the moment it was SENT and drawn as a one-line note (`settledForm`), the whole
+ *     bubble only while fresh or once the reader opened it. If the daemon later finds it WAS delivered it
+ *     is worn by its transcript row like any other, under the same key, so the note becomes the
+ *     message in place. A cancelled one retires after ten minutes.
+ *   * Any undelivered send the reader dismissed (`view.dismissed`) is not drawn at all. That is a choice
+ *     about THIS device's screen: the daemon is never told, and a dismissed send that turns out to be
+ *     delivered is still the message it became.
  *
  * This never decides a FATE: a landing row wears the send's own fate until the daemon moves it. Matching
  * only chooses which row shows a message the daemon already has; a row it cannot place stays unworn
@@ -255,23 +358,35 @@ export const placeLedgerRows = (
   entries: readonly TranscriptEntry[],
   records: readonly LedgerSendRecord[],
   nowMs: number = Date.now(),
+  view: SendViewState = EMPTY_SEND_VIEW,
 ): readonly TranscriptEntry[] => {
   const folded = foldLedgerSendRecords(records);
   const { worn, inside } = wearSends(entries, folded);
   const shown = new Set([...worn.values()].map(record => record.sendId));
-  const trailing = folded
+  const unplaced = folded.filter(
+    record =>
+      !shown.has(record.sendId) &&
+      !inside.has(record.sendId) &&
+      (record.fate === 'delivered' || !view.dismissed.has(record.sendId)),
+  );
+  const settled = unplaced
+    .filter(record => isSettledUndelivered(record) && keepsItsRow(record, nowMs, view.expanded))
+    .reverse();
+  const trailing = unplaced
     .filter(
       record =>
-        !shown.has(record.sendId) &&
-        !inside.has(record.sendId) &&
-        (keepsItsRow(record, nowMs) || stillLanding(record, entries, worn, nowMs)),
+        !isSettledUndelivered(record) && (keepsItsRow(record, nowMs) || stillLanding(record, entries, worn, nowMs)),
     )
     .reverse();
+  const conversation = entries.map((entry, index) => {
+    const send = worn.get(index);
+    return send === undefined ? entry : { ...entry, id: sendRowId(send.sendId), send };
+  });
   return markReplies([
-    ...entries.map((entry, index) => {
-      const send = worn.get(index);
-      return send === undefined ? entry : { ...entry, id: sendRowId(send.sendId), send };
-    }),
+    ...settled.reduce(
+      (rows, record) => withSettledNote(rows, record, settledForm(record, nowMs, view.expanded)),
+      conversation,
+    ),
     ...trailing.map(
       (record): TranscriptEntry => ({
         id: sendRowId(record.sendId),
@@ -282,6 +397,33 @@ export const placeLedgerRows = (
       }),
     ),
   ]);
+};
+
+/**
+ * Puts a terminal send's note into the timeline at the moment it was sent: before the first row written
+ * after it. Rows with no time stay where they are, and notes arrive oldest first, so two notes keep their
+ * order. A send older than everything loaded sits at the top and says so; one with no readable time goes
+ * last and says that.
+ */
+const withSettledNote = (
+  rows: readonly TranscriptEntry[],
+  record: LedgerSendRecord,
+  settled: SettledForm,
+): TranscriptEntry[] => {
+  const sentAt = instant(record.acceptedAt);
+  const after = sentAt === undefined ? -1 : rows.findIndex(row => row.at !== undefined && row.at > sentAt);
+  const index = after === -1 ? rows.length : after;
+  const placement: LedgerBlockPlacement =
+    sentAt === undefined ? 'unknown-time' : index === 0 && rows.length > 0 ? 'before-loaded' : 'chronological';
+  const note: TranscriptEntry = {
+    id: sendRowId(record.sendId),
+    kind: 'ledger',
+    text: record.message,
+    ledger: record,
+    placement,
+    settled,
+  };
+  return [...rows.slice(0, index), note, ...rows.slice(index)];
 };
 
 /**

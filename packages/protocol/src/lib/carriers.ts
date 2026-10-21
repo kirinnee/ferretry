@@ -8,11 +8,13 @@
  * is: both halves are healthy, the room is simply empty. Publishing the set is what replaces that
  * coincidence with an answer.
  *
- * THE TWO VARIANTS ARE NOT THE SAME KIND OF THING, and the discriminator carries the difference:
+ * THE THREE VARIANTS ARE NOT THE SAME KIND OF THING, and the discriminator carries the difference:
  *
  * - `direct` — the daemon's own address. The bytes go to the machine and to nobody else.
  * - `relay` — a rendezvous that passes ciphertext between two parties who cannot see each other. A
  *   third party is on the path, which is why its address is held to the stricter rule below.
+ * - `tunnel` — a Cloudflare Tunnel hostname the hosted service provisioned for this daemon (§15). The
+ *   browser opens the same session it opens on a direct address, but Cloudflare's edge is on the path.
  *
  * THE URL RULES DIFFER ON PURPOSE, AND NEITHER IS `z.url()`. A relay address goes through
  * {@link SocketEndpointSchema}, so it is encrypted everywhere except against loopback: a stranger's
@@ -133,6 +135,46 @@ export const DaemonOriginSchema = z
   });
 
 /**
+ * A CLOUDFLARE TUNNEL HOSTNAME, as a daemon publishes the one it was provisioned (§15).
+ *
+ * HTTPS ONLY, AND AN ORIGIN ONLY. A tunnel hostname is served by Cloudflare's edge, which always
+ * terminates TLS for it, so a plain-HTTP spelling of one is not an address anything serves — and a
+ * path, a query or credentials would be the same smuggled state {@link DaemonOriginSchema} refuses.
+ * A loopback host is refused too: a tunnel exists to be reached from somewhere else, and a loopback
+ * "tunnel" is a direct carrier wearing the wrong label, which would put the wrong disclosure on screen.
+ *
+ * IT IS NOT {@link DaemonOriginSchema}: a direct address may be plain HTTP because the machine is the
+ * operator's own, while a tunnel always has a third party — Cloudflare — on the path, exactly like a
+ * rendezvous. That is also why it is its own `kind` rather than a `direct` entry: the bytes are the
+ * same session, but who can observe them is not, and a surface owes the reader that difference.
+ */
+export const TunnelOriginSchema = z
+  .string()
+  .max(2048)
+  .transform((value, context) => {
+    let url: URL;
+    try {
+      url = new URL(value);
+    } catch {
+      context.addIssue({ code: 'custom', message: 'tunnel address is not a URL' });
+      return z.NEVER;
+    }
+    if (url.protocol !== 'https:') {
+      context.addIssue({ code: 'custom', message: 'tunnel address must use https' });
+      return z.NEVER;
+    }
+    if (isLoopbackHost(url.hostname)) {
+      context.addIssue({ code: 'custom', message: 'tunnel address may not be a loopback host' });
+      return z.NEVER;
+    }
+    if (url.username !== '' || url.password !== '' || url.search !== '' || url.hash !== '' || url.pathname !== '/') {
+      context.addIssue({ code: 'custom', message: 'tunnel address must be a bare https origin' });
+      return z.NEVER;
+    }
+    return url.origin;
+  });
+
+/**
  * How many carriers one daemon may publish.
  *
  * It is the wire's ceiling rather than the configuration's: a daemon may hold at most one bind and at
@@ -145,7 +187,31 @@ export const MAX_PUBLISHED_CARRIERS = 8;
 export const DaemonCarrierSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('direct'), url: DaemonOriginSchema }),
   z.strictObject({ kind: z.literal('relay'), url: SocketEndpointSchema }),
+  z.strictObject({ kind: z.literal('tunnel'), url: TunnelOriginSchema }),
 ]);
+
+/** Every carrier kind this build can dial. A published entry of any other kind is skipped, not refused. */
+export const KNOWN_CARRIER_KINDS: ReadonlySet<string> = new Set(['direct', 'relay', 'tunnel']);
+
+/**
+ * Drops entries of a kind this build does not know, BEFORE the strict union reads the rest.
+ *
+ * Adding `tunnel` to the union was a breaking change for every older reader — a strict union refuses
+ * the whole array over one unknown member, and the failure looks like the daemon refusing the device
+ * (`version-skew.ts`). It shipped in the same release as the readers that know it, as that rule
+ * demands; this filter is what keeps the NEXT kind from being one. An unknown kind is a carrier this
+ * build cannot dial, so skipping it loses nothing the reader could have used, while a KNOWN kind that
+ * breaks its own address rule is still refused — that is a daemon publishing something wrong, not
+ * something new. An over-long array is passed through untouched so the bound below still refuses it.
+ */
+const skipUnknownKinds = (value: unknown): unknown => {
+  if (!Array.isArray(value) || value.length > MAX_PUBLISHED_CARRIERS) return value;
+  return value.filter(entry => {
+    if (typeof entry !== 'object' || entry === null || !('kind' in entry)) return true;
+    const kind: unknown = entry.kind;
+    return typeof kind !== 'string' || KNOWN_CARRIER_KINDS.has(kind);
+  });
+};
 export type DaemonCarrier = z.infer<typeof DaemonCarrierSchema>;
 
 /**
@@ -156,7 +222,10 @@ export type DaemonCarrier = z.infer<typeof DaemonCarrierSchema>;
  * `connectionPreferenceOrder` owns it — but WITHIN each kind the daemon's order is the answer, because
  * the daemon is where the operator wrote it down.
  */
-export const PublishedCarriersSchema = z.array(DaemonCarrierSchema).max(MAX_PUBLISHED_CARRIERS).readonly();
+export const PublishedCarriersSchema = z.preprocess(
+  skipUnknownKinds,
+  z.array(DaemonCarrierSchema).max(MAX_PUBLISHED_CARRIERS).readonly(),
+);
 
 /**
  * What `GET /v1/carriers` answers, so a paired device can refresh without pairing again.

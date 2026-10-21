@@ -114,9 +114,27 @@ export class SendTracker implements SendTracking, SendTrackingLoop {
     this.ports.scheduler.schedule(id, this.settings.firstCheckMs, () => void this.check(id).catch(() => undefined));
   }
 
+  /**
+   * Re-derives every session's sends at boot, ONE SESSION AT A TIME.
+   *
+   * It used to start every session's look at once, and a look can open a transcript window hundreds of
+   * megabytes back to prove a send absent: a restart over a fleet of long conversations parsed all of
+   * them together on the event loop, which is exactly when a freshly started daemon most needs to
+   * answer. Walking the roster in turn costs the same work spread out, with the loop free between
+   * looks. A disarm stops the walk as well as the scheduled looks.
+   */
   arm(): () => void {
-    for (const id of this.ports.roster.sessions()) void this.check(id).catch(() => undefined);
-    return () => this.ports.scheduler.cancelAll();
+    let armed = true;
+    void (async () => {
+      for (const id of this.ports.roster.sessions()) {
+        if (!armed) return;
+        await this.check(id).catch(() => undefined);
+      }
+    })();
+    return () => {
+      armed = false;
+      this.ports.scheduler.cancelAll();
+    };
   }
 
   /**

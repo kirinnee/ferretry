@@ -287,6 +287,10 @@ export function publishedConnectionMethods(
 ): readonly ConnectionMethod[] {
   const methods: ConnectionMethod[] = [];
   for (const carrier of carriers) {
+    // A tunnel (§15) is a carrier this connection model cannot express yet: it is dialled like a direct
+    // address but disclosed like a relay, and reading it as either would be dialling the wrong role or
+    // telling the reader the wrong observers. It is skipped until the method grows its own kind.
+    if (carrier.kind === 'tunnel') continue;
     const parsed = ConnectionMethodSchema.safeParse(
       carrier.kind === 'direct'
         ? { kind: 'direct', daemonUrl: carrier.url }
