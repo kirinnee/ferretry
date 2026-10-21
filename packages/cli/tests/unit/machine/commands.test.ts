@@ -39,6 +39,38 @@ describe('renderMachine', () => {
     should(text).not.match(/fz daemon setup/);
   });
 
+  it('should say nothing of auto-resume for a daemon that predates it', () => {
+    should(renderMachine(machine(), 'fz')).not.match(/Auto-resume/);
+  });
+
+  it('should show auto-resume and what the last restart resumed and could not', () => {
+    const text = renderMachine(
+      machine({
+        autoResume: true,
+        lastAutoResume: {
+          at: '2026-10-21T08:00:00.000Z',
+          resumed: 1,
+          skipped: [{ sessionId: 's1', reason: 'its runtime is signed out' }],
+        },
+      }),
+      'fz',
+    );
+    should(text)
+      .match(/Auto-resume after restart: on/)
+      .and.match(/Last restart: resumed 1 ferret \(2026-10-21T08:00:00.000Z\)/)
+      .and.match(/Couldn't auto-resume s1: its runtime is signed out/);
+    should(renderMachine(machine({ autoResume: false, lastAutoResume: null }), 'fz'))
+      .match(/Auto-resume after restart: off/)
+      .and.not.match(/Last restart/);
+    should(
+      renderMachine(
+        machine({ autoResume: true, lastAutoResume: { at: '2026-10-21T08:00:00.000Z', resumed: 3, skipped: [] } }),
+        'fz',
+      ),
+    ).match(/resumed 3 ferrets/);
+    should(renderMachine(machine({ autoResume: true }), 'fz')).not.match(/Last restart/);
+  });
+
   it('should say when no default runtime resolves', () => {
     const text = renderMachine(
       machine({
@@ -256,6 +288,23 @@ describe('registerMachineCommands', () => {
     });
     await runCommand(registerMachineCommands, world, ['machine', 'set', 'agent-control', 'settings', 'off']);
     should(world.gateway.called('stage')[1]?.args[0]).match({ agentControl: { ferretrySettings: false } });
+  });
+
+  it('should switch auto-resume on or off, and refuse anything else', async () => {
+    const world = fakeWorld({ answers: ['y', 'y'] });
+    await runCommand(registerMachineCommands, world, ['machine', 'set', 'auto-resume', 'off']);
+    should(world.gateway.called('stage')[0]?.args[0]).eql({
+      kind: 'machine.settings',
+      agentPermissions: 'auto',
+      defaultRuntime: 'claude-default',
+      agentControl: { terminals: true, browsers: true, files: true, ferretrySettings: false },
+      autoResume: false,
+    });
+    await runCommand(registerMachineCommands, world, ['machine', 'set', 'auto-resume', 'on']);
+    should(world.gateway.called('stage')[1]?.args[0]).match({ autoResume: true });
+    await should(
+      runCommand(registerMachineCommands, world, ['machine', 'set', 'auto-resume', 'maybe']),
+    ).be.rejectedWith(/on or off/);
   });
 
   it('should list settings in what agents may control, on or off', () => {

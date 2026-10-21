@@ -22,8 +22,8 @@ import {
   type DaemonCarrierRouterOptions,
   DIRECT_SESSION_DEADLINE_MS,
   RELAY_UNAVAILABLE,
-  type WebRtcDialContext,
   WEBRTC_UNAVAILABLE,
+  type WebRtcDialContext,
 } from '../../src/lib/relay-carrier.ts';
 import type { TunnelServiceState } from '../../src/lib/tunnel-service.ts';
 import { autoDial, newDaemonIdentity, relayCrypto, ScriptedSocket, settle, testDevice } from '../support/relay.ts';
@@ -78,7 +78,8 @@ const setup = async (options: Setup = {}) => {
   };
   let tunnelReads = 0;
   let hostedReads = 0;
-  const preference = options.preference;
+  // Auto unless a case names one: these cases prove each walk, and Relay (the app's default) is walked below.
+  const preference = options.preference ?? 'auto';
   const router = new DaemonCarrierRouter({
     crypto: relayCrypto,
     deviceKey: async () => device.claim.key,
@@ -87,9 +88,7 @@ const setup = async (options: Setup = {}) => {
     network: async () => {
       throw new TypeError('Failed to fetch');
     },
-    ...(preference === undefined
-      ? {}
-      : { preference: typeof preference === 'function' ? preference : () => preference }),
+    preference: typeof preference === 'function' ? preference : () => preference,
     ...(options.dialers === undefined ? {} : { dialers: options.dialers }),
     ...(options.tunnelService === undefined
       ? {}
@@ -201,7 +200,7 @@ describe('Auto', () => {
     await settle(5);
   });
 
-  it('should treat a preference this build does not know, read from storage, as Auto', async () => {
+  it('should treat a preference this build does not know, read from storage, as Relay, the default', async () => {
     const identity = await newDaemonIdentity();
     const stored = new CarrierPreferenceStore({
       getItem: key =>
@@ -209,14 +208,14 @@ describe('Auto', () => {
       setItem: () => undefined,
     });
     const { router, daemon, hosts } = await setup({
-      published: [TUNNEL],
-      reach: { [DIRECT_HOST]: 'live' },
+      published: [TUNNEL, RELAY],
+      reach: { [DIRECT_HOST]: 'live', [TUNNEL_HOST]: 'live', 'relay.example': 'live' },
       preference: daemonId => stored.preference(daemonId as never),
     });
 
     should((await fetchProjects(router, daemon)).status).equal(200);
-    should(hosts()).eql([DIRECT_HOST]);
-    should(router.choice(daemon.daemonId)?.reason).equal('Connected over direct.');
+    should(hosts()).eql(['relay.example']);
+    should(router.choice(daemon.daemonId)?.reason).equal('Connected over your own relay.');
     await settle(5);
   });
 });
@@ -366,6 +365,7 @@ describe('WebRTC', () => {
       },
       heartbeat: () => () => undefined,
       dialers: { webrtc: webrtc.dialer },
+      preference: () => 'auto',
       hostedRelay: async () => HOSTED.relayUrl,
     });
     router.resolvePaired(() => [daemon]);
@@ -589,6 +589,7 @@ describe('changing the preference', () => {
       crypto: relayCrypto,
       deviceKey: async () => device.claim.key,
       dial: () => rejecting.dial(),
+      preference: () => 'auto',
       heartbeat: () => () => undefined,
     });
     router2.resolvePaired(() => [refused.daemon]);

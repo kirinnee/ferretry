@@ -2,8 +2,8 @@
  * Screenshots of the CONNECTION CHOICE (docs/relay-protocol.md §15 "The choice"). Four scenes, each at
  * phone (390) and desktop (1440) in the light and dark studio themes:
  *
- *   * tunnel — Auto, and the session won on the machine's Cloudflare tunnel after direct failed.
- *   * relay — Auto, every carrier before the relay passed over, with a fallback reason.
+ *   * tunnel — Auto (chosen), and the session won on the machine's Cloudflare tunnel after direct failed.
+ *   * relay — the default, every carrier before the relay passed over, with a fallback reason.
  *   * not-set-up — "Tunnel only" on a machine with no tunnel while the operator has no service.
  *   * device — Settings › This device › Connection, one selector per paired machine.
  *
@@ -60,7 +60,7 @@ const scenes = {
   },
   relay: {
     carrier: { ...relayed, fallbackReason: 'this network blocks the tunnel’s hostname' },
-    preference: 'auto',
+    preference: 'relay',
     availability: { webrtc: false },
   },
   'not-set-up': {
@@ -88,7 +88,7 @@ function Scene({ scene }) {
 }
 
 function Device() {
-  const [preferences, setPreferences] = useState({ studio: 'auto', laptop: 'relay' });
+  const [preferences, setPreferences] = useState({ studio: 'relay', laptop: 'auto' });
   return (
     <section className="kt-panel p-panel">
       <h3 className="m-0 mb-3 text-row font-semibold text-fg">Connection</h3>

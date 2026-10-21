@@ -47,6 +47,7 @@ import {
   wouldIncludeItself,
 } from '@ferretry/fleet';
 import type {
+  AutoResumeSummary,
   FleetCatalogAct,
   FleetCatalogFormat,
   FleetComponentCatalog,
@@ -178,6 +179,8 @@ export interface CatalogFacts {
   readonly acceptsAutoPermissionMode: boolean;
   /** The model catalogs and presets in effect (docs/model-catalog.md); absent, runtimes show their model set only. */
   readonly modelCatalogs?: ModelCatalogSources;
+  /** What the last auto-resume pass did, or `null`/absent when none has run. */
+  readonly lastAutoResume?: AutoResumeSummary | null;
 }
 
 const HARNESSES: readonly HarnessKind[] = ['claude', 'codex'];
@@ -200,6 +203,8 @@ export function machineView(
     defaultRuntime: resolveDefaultRuntime(model) ?? null,
     agentControl: { ...model.machine.agentControl },
     browserMode: model.machine.browserMode,
+    autoResume: model.machine.autoResume,
+    lastAutoResume: facts.lastAutoResume ?? null,
     tools: HARNESSES.map(harness => {
       const command = facts.tools[harness];
       return {

@@ -413,6 +413,8 @@ describe('machineView', () => {
       defaultRuntime: null,
       agentControl: { terminals: true, browsers: true, files: true, ferretrySettings: false },
       browserMode: 'headless',
+      autoResume: true,
+      lastAutoResume: null,
       tools: [
         { harness: 'claude', label: 'Claude Code', installed: true, command: '/usr/local/bin/claude' },
         { harness: 'codex', label: 'Codex', installed: true, command: '/usr/local/bin/codex' },
@@ -421,6 +423,24 @@ describe('machineView', () => {
       runningSessions: 2,
       authority: OPEN,
     });
+    FleetMachineViewSchema.parse(actual);
+  });
+
+  it('should carry auto-resume and what the last pass did', () => {
+    // Arrange
+    const model = modelOf({ machine: { autoResume: false } });
+    const lastAutoResume = {
+      at: '2026-10-21T08:00:00.000Z',
+      resumed: 2,
+      skipped: [{ sessionId: 's1', reason: 'its runtime is signed out' }],
+    };
+
+    // Act
+    const actual = machineView(model, factsOf({ lastAutoResume }), OPEN);
+
+    // Assert
+    should(actual.autoResume).equal(false);
+    should(actual.lastAutoResume).deepEqual(lastAutoResume);
     FleetMachineViewSchema.parse(actual);
   });
 

@@ -441,6 +441,84 @@ describe('MachineSettingsTab', () => {
     );
   });
 
+  it('hides Auto-resume for a daemon that predates it, and never sends it one', async () => {
+    await withTab({ answers: { '/v1/fleet/proposals': STAGED, [APPLY_PATH]: OUTCOME } }, async ({ q, calls }) => {
+      expect(q('[data-setup-section="auto-resume"]')).toBeNull();
+      await click(q('[data-setup-choice="skip"] input'), 'skip radio');
+      await click(q('[data-change-submit]'), 'save');
+      const staged = must(
+        calls.find(call => call.path === '/v1/fleet/proposals'),
+        'the staged change call',
+      );
+      expect(JSON.stringify(staged.body)).not.toContain('autoResume');
+    });
+  });
+
+  it('shows Auto-resume On, and Save sends Off with a way to Keep On', async () => {
+    await withTab(
+      {
+        machine: machineView({ autoResume: true }),
+        answers: { '/v1/fleet/proposals': STAGED, [APPLY_PATH]: OUTCOME },
+      },
+      async ({ q, calls, retried }) => {
+        const section = must(q('[data-setup-section="auto-resume"]'), 'auto-resume');
+        expect(section.querySelector('[data-setup-choice="on"]')?.textContent).toContain('ferrets that were running');
+        expect(section.querySelector<HTMLInputElement>('[data-setup-choice="on"] input')?.checked).toBe(true);
+        expect(q('[data-auto-resume-summary]')).toBeNull();
+        await click(q('[data-setup-choice="off"] input'), 'off radio');
+        expect(q('[data-change-submit]')?.textContent).toBe('Save auto-resume');
+        expect(q('[data-auto-resume-undo]')?.textContent).toBe('Keep On');
+        await click(q('[data-change-submit]'), 'save');
+        const staged = must(
+          calls.find(call => call.path === '/v1/fleet/proposals'),
+          'the staged change call',
+        );
+        expect(JSON.stringify(staged.body)).toContain('"autoResume":false');
+        expect(retried.count).toBe(1);
+      },
+    );
+  });
+
+  it('shows Off, undoes a pending switch, and lists what the last restart resumed and could not', async () => {
+    await withTab(
+      {
+        machine: machineView({
+          autoResume: false,
+          lastAutoResume: {
+            at: '2026-10-21T08:00:00.000Z',
+            resumed: 5,
+            skipped: [{ sessionId: 'abc', reason: 'its runtime is signed out' }],
+          },
+        }),
+        answers: { '/v1/fleet/proposals': new Error('unreachable') },
+      },
+      async ({ q }) => {
+        expect(q('[data-setup-choice="off"] input') as HTMLInputElement).toHaveProperty('checked', true);
+        expect(q('[data-auto-resume-summary]')?.textContent).toContain('Resumed 5 ferrets after restart');
+        expect(q('[data-auto-resume-skipped]')?.textContent).toBe(
+          'Couldn’t auto-resume abc: its runtime is signed out',
+        );
+        await click(q('[data-setup-choice="on"] input'), 'on radio');
+        await click(q('[data-auto-resume-undo]'), 'keep');
+        expect(q('[data-change-submit]')).toBeNull();
+      },
+    );
+  });
+
+  it('says one ferret in the singular', async () => {
+    await withTab(
+      {
+        machine: machineView({
+          autoResume: true,
+          lastAutoResume: { at: '2026-10-21T08:00:00.000Z', resumed: 1, skipped: [] },
+        }),
+      },
+      async ({ q }) => {
+        expect(q('[data-auto-resume-summary]')?.textContent).toBe('Resumed 1 ferret after restart');
+      },
+    );
+  });
+
   it('lists the tools and offers Install only for one that is missing', async () => {
     await withTab({}, async ({ q, browser }) => {
       const tools = must(q('[data-setup-section="tools"]'), 'tools');

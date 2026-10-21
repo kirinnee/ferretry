@@ -5,6 +5,7 @@
  * - **Agent permissions** — Auto mode or Skip all permission checks, each with a plain sentence. It
  *   applies to new sessions; with sessions running, the tab says how many keep the old mode (E32).
  * - **Browser mode** — Headless, or a Real window an owner browses through (docs/browser-mode.md).
+ * - **Auto-resume after restart** — On (the default) or Off, and what the last restart resumed.
  * - **Tools on <machine>** — Claude Code and Codex, installed or not, with **Install**.
  * - **Setup** — **Set up <machine>** while it is not set up, otherwise **Import again**; **Clone from
  *   another machine**.
@@ -68,6 +69,7 @@ const machineSettings = (
     readonly defaultRuntime: string | null;
     readonly agentControl: FleetAgentControl;
     readonly browserMode: BrowserMode;
+    readonly autoResume: boolean;
   }>,
 ) => ({
   kind: 'machine.settings' as const,
@@ -490,6 +492,88 @@ export function BrowserModeSection({
   );
 }
 
+/** "Auto-resume after restart": each choice's words. */
+export const AUTO_RESUME_WORDS: Readonly<Record<'on' | 'off', { readonly title: string; readonly detail: string }>> = {
+  on: {
+    title: 'On',
+    detail:
+      'When this machine restarts, ferrets that were running pick up where they left off, with their conversation intact. Ones you stopped stay stopped.',
+  },
+  off: {
+    title: 'Off',
+    detail: 'Nothing restarts by itself. Resume each ferret yourself when you want it back.',
+  },
+};
+
+/** The summary of the last pass, as the sentence the row leads with. */
+export const autoResumeSentence = (resumed: number): string =>
+  `Resumed ${resumed} ${resumed === 1 ? 'ferret' : 'ferrets'} after restart`;
+
+export function AutoResumeSection({
+  machine,
+  machineName,
+  access,
+  onSaved,
+}: {
+  readonly machine: FleetMachineView;
+  readonly machineName: string;
+  readonly access: SetupAccess;
+  readonly onSaved: () => void;
+}) {
+  const { changes } = access;
+  const current = machine.autoResume === false ? 'off' : 'on';
+  const [draft, setDraft] = useState<'on' | 'off'>(current);
+  const pending = draft !== current;
+  const last = machine.lastAutoResume ?? null;
+  const save = (): void => {
+    void changes.apply(machineSettings(machine, { autoResume: draft === 'on' })).then(result => {
+      if (result.kind === 'refused') return;
+      onSaved();
+    });
+  };
+  // A daemon that predates the setting does not resume anything and cannot be asked to.
+  if (machine.autoResume === undefined) return null;
+  return (
+    <SetupSection title="Auto-resume after restart" name="auto-resume">
+      <RadioChoices
+        legend="Auto-resume after restart"
+        legendHidden
+        name="auto-resume"
+        value={draft}
+        onChoose={value => {
+          setDraft(value);
+          changes.clear();
+        }}
+        options={(['on', 'off'] as const).map(choice => ({ id: choice, ...AUTO_RESUME_WORDS[choice] }))}
+      />
+      {last === null ? null : (
+        <div className="flex min-w-0 flex-col gap-1" data-auto-resume-summary="">
+          <p className="m-0 text-ui font-semibold text-fg">{autoResumeSentence(last.resumed)}</p>
+          {last.skipped.map(item => (
+            <p key={item.sessionId} className="m-0 text-meta leading-base text-warn" data-auto-resume-skipped="">
+              Couldn’t auto-resume {item.sessionId}: {item.reason}
+            </p>
+          ))}
+        </div>
+      )}
+      {pending ? (
+        <ChangeApplyPanel
+          machineName={machineName}
+          authority={changes.authority}
+          busy={changes.busy}
+          refusal={changes.refusal}
+          submitLabel="Save auto-resume"
+          onSubmit={save}
+        >
+          <Button type="button" data-auto-resume-undo="" onClick={() => setDraft(current)}>
+            Keep {AUTO_RESUME_WORDS[current].title}
+          </Button>
+        </ChangeApplyPanel>
+      ) : null}
+    </SetupSection>
+  );
+}
+
 export function MachineSettingsTab(props: MachineSettingsTabProps) {
   const { machine, machineName, online, checking, connection, createClient, onRetry, sources, browser } = props;
   // After a save here the machine is read again QUIETLY: a loud re-check swapped every section for
@@ -579,6 +663,13 @@ export function MachineSettingsTab(props: MachineSettingsTabProps) {
 
       <BrowserModeSection
         key={machine.browserMode ?? 'headless'}
+        machine={machine}
+        machineName={machineName}
+        access={access}
+        onSaved={onSaved}
+      />
+      <AutoResumeSection
+        key={String(machine.autoResume)}
         machine={machine}
         machineName={machineName}
         access={access}

@@ -1,32 +1,33 @@
 import { describe, expect, it } from 'bun:test';
+import { OLDER_DAEMON_SENTENCE } from '@ferretry/protocol';
 import type { FyApiClient } from '@ferretry/protocol/client';
+import { RELAY_CLOSE_CODES } from '@ferretry/relay';
 import { useState } from 'react';
 import { HOSTED_RELAY_PATH } from '../../src/features/onboarding/hosted-relay.ts';
 import type { DaemonConnectionRepository, DaemonConnectionStore } from '../../src/lib/connections.ts';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
 import { UNSUPPORTED_DEVICE_KEY_SENTENCE } from '../../src/lib/device-keys.ts';
-import { DaemonOutdatedError } from '../../src/lib/relay-carrier.ts';
-import { RelayPairingRefusedError } from '../../src/lib/relay-session.ts';
 import { PairingUnreachableError } from '../../src/lib/pairing-unreachable.ts';
+import { DaemonOutdatedError } from '../../src/lib/relay-carrier.ts';
 import { PairingOutcomeUnknownError } from '../../src/lib/relay-pairing.ts';
-import { RELAY_CLOSE_CODES } from '@ferretry/relay';
-import { OLDER_DAEMON_SENTENCE } from '@ferretry/protocol';
+import { RelayPairingRefusedError } from '../../src/lib/relay-session.ts';
 import {
   type AppStore,
   browserConnectionRepository,
   createAppStore,
   DaemonApiPool,
+  DaemonClientProvider,
   exchangePairing,
   IndexedDbConnectionRepository,
   StoreProvider,
   useAppStore,
   useConnectionSnapshot,
   useDaemonClient,
-  DaemonClientProvider,
 } from '../../src/lib/store.tsx';
 import { MemoryDeviceKeyStore } from '../support/device-keys.ts';
 import { interact, mount, must } from '../support/dom.ts';
 import {
+  AutoCarrierPreferences,
   autoDial,
   dialByHost,
   keyedDaemon,
@@ -616,6 +617,7 @@ const countSubscriptions = (connections: DaemonConnectionStore): SubscriptionLog
 
 const memoryStore = async (): Promise<AppStore> =>
   await createAppStore({
+    carrierPreferences: new AutoCarrierPreferences(undefined),
     repository: new MemoryRepository(),
     connectClient: async () => client('unused'),
     fetcher: async () => Response.json({}),
@@ -648,6 +650,7 @@ describe('StoreProvider', () => {
 
     try {
       const store = await createAppStore({
+        carrierPreferences: new AutoCarrierPreferences(undefined),
         repository: new MemoryRepository(),
         connectClient: async () => client('unused'),
         fetcher: async input => {
@@ -686,6 +689,7 @@ describe('StoreProvider', () => {
 
     try {
       const store = await createAppStore({
+        carrierPreferences: new AutoCarrierPreferences(undefined),
         repository: new MemoryRepository(),
         connectClient: async () => client('unused'),
         deviceKeys,
@@ -719,6 +723,7 @@ describe('StoreProvider', () => {
           : { body: [] },
     });
     const store = await createAppStore({
+      carrierPreferences: new AutoCarrierPreferences(undefined),
       repository: new MemoryRepository(),
       deviceKeys,
       relayCrypto,
@@ -758,6 +763,7 @@ describe('StoreProvider', () => {
           : { body: { ok: true } },
     });
     const store = await createAppStore({
+      carrierPreferences: new AutoCarrierPreferences(undefined),
       repository: new MemoryRepository(),
       deviceKeys,
       relayCrypto,
@@ -808,6 +814,7 @@ describe('StoreProvider', () => {
       },
     });
     const store = await createAppStore({
+      carrierPreferences: new AutoCarrierPreferences(undefined),
       repository: new MemoryRepository(),
       deviceKeys,
       relayCrypto,
@@ -856,6 +863,7 @@ describe('StoreProvider', () => {
     };
     const store = await withRelayDirectory(RELAY_DIRECTORY, async () =>
       createAppStore({
+        carrierPreferences: new AutoCarrierPreferences(undefined),
         repository,
         deviceKeys,
         relayCrypto,
@@ -882,7 +890,14 @@ describe('StoreProvider', () => {
 
     // THE KILL SWITCH, on the next document: `relayUrl: null` leaves only the daemon's own address.
     const withdrawn = await withRelayDirectory(RELAY_DIRECTORY, async () =>
-      createAppStore({ repository, deviceKeys, relayCrypto, relayDial: route.dial, fetcher: fetcher(null) }),
+      createAppStore({
+        carrierPreferences: new AutoCarrierPreferences(undefined),
+        repository,
+        deviceKeys,
+        relayCrypto,
+        relayDial: route.dial,
+        fetcher: fetcher(null),
+      }),
     );
     await expect(withdrawn.carrier.fetch(`${daemon.baseUrl}/v1/projects`)).rejects.toThrow(
       /No configured connection worked/u,
@@ -911,6 +926,7 @@ describe('StoreProvider', () => {
     });
     const store = await withRelayDirectory(RELAY_DIRECTORY, async () =>
       createAppStore({
+        carrierPreferences: new AutoCarrierPreferences(undefined),
         repository,
         deviceKeys,
         relayCrypto,
@@ -974,6 +990,7 @@ describe('StoreProvider', () => {
   it('keeps the public landing marker content-free and in sync with pairing changes', async () => {
     const values = new Map<string, string>();
     const store = await createAppStore({
+      carrierPreferences: new AutoCarrierPreferences(undefined),
       repository: new MemoryRepository(),
       connectClient: async () => client('unused'),
       fetcher: async () => Response.json({}),
@@ -1232,6 +1249,7 @@ describe('useDaemonClient', () => {
   it('hands a screen the store pool’s client, so it rides the carrier rather than the plain network', async () => {
     const pooled = client('pooled');
     const store = await createAppStore({
+      carrierPreferences: new AutoCarrierPreferences(undefined),
       repository: new MemoryRepository(),
       connectClient: async () => pooled,
       fetcher: async () => Response.json({}),

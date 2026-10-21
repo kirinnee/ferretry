@@ -70,9 +70,10 @@ Bun workspaces monorepo — see [README.md](README.md#layout). Only `packages/cl
 `packages/relay` owns how a browser reaches a daemon: the end-to-end session protocol and the
 Cloudflare rendezvous that can carry it. The wire contract is
 [docs/relay-protocol.md](docs/relay-protocol.md) — implement against that document, not the code.
-Carriers are a per-device, per-machine **choice** (owner decision 2026-10-21, protocol §15): Auto —
-the default, which asks nothing — walks direct → WebRTC → the hosted Cloudflare tunnel when the daemon
-published one → relay, and "WebRTC / tunnel / relay only" narrow that walk; every surface still names
+Carriers are a per-device, per-machine **choice** (owner decision 2026-10-21, protocol §15): **Relay is the
+default** (a later same-day decision: no Auto unless chosen) and asks nothing; Auto walks direct → WebRTC →
+the hosted Cloudflare tunnel when the daemon published one → relay, and "WebRTC / tunnel / relay only"
+narrow that walk; every surface still names
 the live carrier and why the others were passed over. Pairing ignores the choice (direct, then the
 hosted relay). A tunnel arrival reaches the daemon through `cloudflared` on loopback, so it lands on a
 dedicated listener that stamps it remote — never on the API listener. A WebRTC arrival (§16) is one

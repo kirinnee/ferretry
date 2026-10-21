@@ -149,6 +149,7 @@ const routerFor = async (
   const carriers = carriersFor(identity, () => reach, options.answer ?? {});
   const health = recordingHealth();
   const router = new DaemonCarrierRouter({
+    preference: () => 'auto',
     crypto: relayCrypto,
     deviceKey: options.deviceKey ?? deviceKey,
     dial: carriers.dial,
@@ -430,6 +431,7 @@ describe('what the connection model is told', () => {
     const older = olderDaemonDial();
     const health = recordingHealth();
     const router = new DaemonCarrierRouter({
+      preference: () => 'auto',
       crypto: relayCrypto,
       deviceKey,
       heartbeat: () => () => undefined,

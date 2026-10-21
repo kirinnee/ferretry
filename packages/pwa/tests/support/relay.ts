@@ -51,6 +51,7 @@ import {
   verifyDeviceProof,
 } from '@ferretry/relay';
 import { WebCryptoRelayCrypto } from '@ferretry/relay/adapters';
+import { type CarrierPreference, CarrierPreferenceStore } from '../../src/lib/carrier-preference.ts';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
 import type { RelayCarrierSocket } from '../../src/lib/relay-carrier.ts';
 import type { SessionDeviceClaim } from '../../src/lib/relay-session.ts';
@@ -619,3 +620,8 @@ export const olderDaemonDial = (
   };
   return { dial, sockets };
 };
+
+/** A preference store that walks Auto for every machine: these suites prove the walk, and Relay is the app default. */
+export class AutoCarrierPreferences extends CarrierPreferenceStore {
+  override preference = (): CarrierPreference => 'auto';
+}

@@ -815,6 +815,7 @@ const openRelayedTerminal = async (): Promise<RelayedTerminal> => {
     throw new TypeError('Failed to fetch');
   };
   const router = new DaemonCarrierRouter({
+    preference: () => 'auto',
     crypto,
     deviceKey: async () => DEVICE.claim.key,
     network,
@@ -1139,6 +1140,7 @@ describe('a relayed remote browser view, browser to daemon, through the real ren
     });
 
     const router = new DaemonCarrierRouter({
+      preference: () => 'auto',
       crypto,
       deviceKey: async () => DEVICE.claim.key,
       network: async () => {
@@ -1259,6 +1261,7 @@ describe('typing in a relayed remote browser view, browser to a real Chrome, thr
         },
       });
       const router = new DaemonCarrierRouter({
+        preference: () => 'auto',
         crypto,
         deviceKey: async () => DEVICE.claim.key,
         network: async () => {
@@ -1344,6 +1347,7 @@ describe('two paired machines that share one loopback address, through the real 
     const laptopConnection = paired(laptop);
     const overHttp: string[] = [];
     const router = new DaemonCarrierRouter({
+      preference: () => 'auto',
       crypto,
       deviceKey: async () => DEVICE.claim.key,
       network: async input => {

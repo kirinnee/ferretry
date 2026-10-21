@@ -22,7 +22,7 @@ export const CARRIER_PREFERENCE_DESCRIPTION: Readonly<Record<CarrierPreference, 
   auto: 'Direct first, then WebRTC, then a Cloudflare tunnel, then a relay — whichever answers.',
   webrtc: 'Peer to peer. The relay is used only to introduce the two ends.',
   tunnel: 'Through this machine’s Cloudflare tunnel, and nothing else.',
-  relay: 'Through a relay — the machine’s own, or Ferretry’s hosted one.',
+  relay: 'Through a relay — the machine’s own, or Ferretry’s hosted one. The default.',
 };
 
 /** What a selector needs to know about one machine to say what each option would do. */

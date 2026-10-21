@@ -52,6 +52,7 @@ import {
 import {
   type Advertisement,
   type AnalyticsPricingRate,
+  type AutoResumeSummary,
   CONFIG_ACCEPTED_FILE,
   type ConversionPreview,
   type ConversionSummary as ConversionSummaryView,
@@ -132,6 +133,7 @@ import {
   BrowserProfileStore,
   BrowserWorkerClient,
   BunApiServer,
+  BunConnectorProcesses,
   BunProcessProbe,
   BunRelayCarrier,
   BunSecretChildRunner,
@@ -139,6 +141,7 @@ import {
   BunSqliteIndexFactory,
   CachedUsageFeed,
   CliUpdateLauncher,
+  CloudflaredLocator,
   ConfigGrantDocument,
   ConfigSecretRecipes,
   DaemonBinder,
@@ -162,17 +165,14 @@ import {
   FileSecretKey,
   FileSessionSpawnFacts,
   FileSpeedupTestLedger,
+  FileTunnelHolding,
   FileUpdateDocuments,
   foreignHistoryRoots,
   GitHubLatestRelease,
   HostedModelCatalog,
   HostedRelayDirectory,
-  BunConnectorProcesses,
-  CloudflaredLocator,
-  FileTunnelHolding,
   HostedTunnelProvisioner,
   HostedTunnelService,
-  NodeDataChannelEngine,
   HostHarnessFacts,
   HostHarnessProbe,
   HostInstallFacts,
@@ -186,6 +186,7 @@ import {
   NodeCatalog,
   NodeConversationFiles,
   NodeConversationLinker,
+  NodeDataChannelEngine,
   NodeForeignHistoryFiles,
   NodePairingCryptography,
   NodeSessionBrowserLauncher,
@@ -226,6 +227,14 @@ import {
   WorkerLoopWatchdog,
   XvfbDisplay,
 } from '../src/adapters/index.ts';
+import {
+  AccountAutoResumeAvailability,
+  BootExitRecorder,
+  FileAutoResumeLedger,
+  FileAutoResumeSummaryStore,
+  RepositoryAutoResumeRoster,
+  StorageAutoResumeJournal,
+} from '../src/adapters/session/auto-resume/index.ts';
 import {
   CatalogPrices,
   ConfigFileLearningSettings,
@@ -405,6 +414,17 @@ import {
 } from '../src/lib/fleet/credentials-service.ts';
 import { createFleetSetupSubsystem } from '../src/lib/fleet/setup-service.ts';
 import { resolveStartAccount } from '../src/lib/fleet/start-resolution.ts';
+
+/** The ordinary revive a send uses, as the auto-resume pass sees it. */
+type AutoResumeRevive = (id: string, message: string | undefined) => Promise<void>;
+
+/** What the composition root drives: record at boot, work the ledger off once serving. */
+interface AutoResumeBoot {
+  /** Persists what the first self-check found. Call once, straight after that check. */
+  recordBootExits(): Promise<void>;
+  run(): Promise<AutoResumeSummary | undefined>;
+}
+
 import { ToolInstallService } from '../src/lib/fleet/tool-install.ts';
 import { HarnessLoginService } from '../src/lib/fleet-login/service.ts';
 import {
@@ -445,6 +465,7 @@ import {
   AUDIT_FOLD_WINDOW_MS,
   AuditedPairingService,
   AuditLog,
+  AutoResumeService,
   adoptedTranscriptProvenance,
   advertisesForeignAddress,
   agentSpokenName,
@@ -470,6 +491,7 @@ import {
   type ChildGrantRequester,
   ClaudeTranscriptParser,
   type ClockPort,
+  type CloudflaredLocatorPort,
   CodexPickerCleanup,
   CodexRuntimeCatalogCache,
   CodexTranscriptParser,
@@ -490,6 +512,7 @@ import {
   combinedReferences,
   computerConversationRoots,
   configuredAt,
+  connectorBaseEnvironment,
   contextWindowForSession,
   conversationResumeArguments,
   createFoundationPaths,
@@ -513,6 +536,8 @@ import {
   DONE_MARKER_FILENAME,
   declaredModel,
   decodeInitialAttachments,
+  defaultAutoResumeSettings,
+  type SessionExitPort,
   defaultManagedWorktreeRoot,
   defaultSendTrackerSettings,
   defaultSessionLifecycleSettings,
@@ -527,6 +552,7 @@ import {
   describeGrantPosture,
   describeLoopStall,
   describeRelayCarrierPosture,
+  describeTunnelPosture,
   describeWebRtcEngine,
   dialledRelayUrl,
   directCarrierSocketRoute,
@@ -625,6 +651,8 @@ import {
   ProviderPresetService,
   ProviderProbeService,
   ProviderQuotaService,
+  PublishedCarrierSet,
+  type PublishedCarrierView,
   PublishedModelCatalogService,
   PushNewDeviceAlert,
   PushService,
@@ -803,12 +831,18 @@ import {
   type TranscriptSource,
   TranscriptTailCache,
   type TriageGuardPort,
+  TunnelCarrier,
+  type TunnelCarrierDependencies,
+  type TunnelServicePort,
   tailTranscriptEvents,
   taskBoardTaskActionAuthorizer,
   temporaryFilePath,
   transcriptKey,
   transcriptLaunchArguments,
   tryParseSessionId,
+  tunnelListenerSurface,
+  tunnelPeer,
+  tunnelServiceOrigin,
   UnknownPeerRefused,
   type UsageFeedPort,
   unattendedUsageFeed,
@@ -834,17 +868,6 @@ import {
   wardenTriggerEnabled,
   withLivenessLedger,
   xvfbMissingMessage,
-  type CloudflaredLocatorPort,
-  connectorBaseEnvironment,
-  describeTunnelPosture,
-  PublishedCarrierSet,
-  type PublishedCarrierView,
-  TunnelCarrier,
-  type TunnelCarrierDependencies,
-  type TunnelServicePort,
-  tunnelListenerSurface,
-  tunnelPeer,
-  tunnelServiceOrigin,
 } from '../src/lib/index.ts';
 import {
   admitChild,
@@ -1105,6 +1128,14 @@ export interface DaemonWorld {
    * against a period the timer does not fire on is a detector measuring nothing.
    */
   readonly createSessionHealth: (storage: DaemonStorage, settings: SessionHealthSettings) => SessionHealthService;
+  /**
+   * Brings back the sessions a host restart took down (docs/cli.md, `fy daemon`).
+   *
+   * A FACTORY because it needs the storage this boot opened and the mounted revive. It shares one
+   * recorder with {@link createSessionHealth}: the FIRST self-check settles every session whose
+   * terminal is gone, and those are the ones that were running when the host went down.
+   */
+  readonly createAutoResume: (storage: DaemonStorage, resume: AutoResumeRevive) => AutoResumeBoot;
   /**
    * The terminal a revive replaces: tmux panes on the daemon's own private socket, never the host's
    * default one.
@@ -2576,13 +2607,18 @@ function createSessionResumeSubsystem(
   held: Pick<SessionSendService, 'releaseHeld'>,
 ): SessionResumeSubsystem {
   return {
-    resume: async (reference, actor, message) => {
+    resume: async (reference, actor, message, policy) => {
       const id = tryParseSessionId(reference);
       if (id === undefined)
         throw new SessionResumeError('invalid', `${JSON.stringify(reference)} is not a usable session id`);
       if (storage.findSession(id) === undefined) throw new SessionResumeError('not_found', `no session ${reference}`);
       await service
-        .resume({ id, actor, ...(message === undefined ? {} : { message }) })
+        .resume({
+          id,
+          actor,
+          ...(message === undefined ? {} : { message }),
+          ...(policy === undefined ? {} : { policy }),
+        })
         .catch((error: unknown) => resumeRefusal(error));
       /**
        * The spawn stamp is brought up to date HERE, between the relaunch and the read-back.
@@ -7018,6 +7054,13 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
    */
   const launchGate = new InMemoryLaunchGate(milliseconds => Bun.sleep(milliseconds));
   const resumeTurns = new FileResumeTurnStore(id => createSessionPaths(paths, id).directory);
+  /** Set by `createSessionHealth`; read by `createAutoResume` — the two halves of one boot-time observation. */
+  let bootExits: BootExitRecorder | undefined;
+  const recordBootExits = (exits: SessionExitPort): SessionExitPort => {
+    bootExits = new BootExitRecorder(exits, clock);
+    return bootExits;
+  };
+  const autoResumeSummary = new FileAutoResumeSummaryStore(stateFiles, join(paths.home, 'auto-resume-summary.json'));
   /** The resume factory, held as a local for the same reason `createSessionLifecycle` is: the mounted
    *  subsystems must get the same one the world publishes rather than a second construction. */
   const createSessionResume: DaemonWorld['createSessionResume'] = (storage, launcher, answerAttention, serial) =>
@@ -7155,6 +7198,32 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         }),
       );
     },
+    createAutoResume: (storage, resume) => {
+      const service = new AutoResumeService(
+        {
+          ledger: new FileAutoResumeLedger(stateFiles, join(paths.home, 'auto-resume.json')),
+          roster: new RepositoryAutoResumeRoster(new StorageResumeRepository(storage)),
+          availability: new AccountAutoResumeAvailability(
+            async id => {
+              const config = SessionConfigSchema.safeParse(await storage.readConfig(parseSessionId(id)));
+              return config.success ? config.data.agent : undefined;
+            },
+            async agent => await resolveStartAccount(accounts, agent, executables, CLIENT_NAME),
+          ),
+          resumer: { resume },
+          journal: new StorageAutoResumeJournal(storage),
+          summary: autoResumeSummary,
+          setting: { enabled: async () => (await declaredAccountModel())?.machine.autoResume ?? true },
+          clock: { now: () => clock.now(), nowMs: () => Date.now() },
+          sleep: async milliseconds => await Bun.sleep(milliseconds),
+        },
+        defaultAutoResumeSettings,
+      );
+      return {
+        recordBootExits: async () => await service.record(bootExits?.close() ?? []),
+        run: async () => await service.run(),
+      };
+    },
     createSessionHealth: (storage, settings) =>
       new SessionHealthService(
         {
@@ -7183,16 +7252,18 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           // use, so an exit is only ever proven against a pane this daemon registered and never while
           // one of its own launches is replacing it.
           // Wrapped so a settled exit also frees the conversations that session held (account model §9.3).
-          exits: new LeaseReleasingSessionExits(
-            new TmuxSessionExitObserver(
-              paths.home,
-              storage,
-              new DurableTerminalPaneStore(storage, stateFiles, paths),
-              launchTmuxCommands,
-              launchGate,
-              clock,
+          exits: recordBootExits(
+            new LeaseReleasingSessionExits(
+              new TmuxSessionExitObserver(
+                paths.home,
+                storage,
+                new DurableTerminalPaneStore(storage, stateFiles, paths),
+                launchTmuxCommands,
+                launchGate,
+                clock,
+              ),
+              conversationLeases(storage),
             ),
-            conversationLeases(storage),
           ),
           events: new FileSessionHealthEventSink(stateFiles, join(paths.home, 'health-events.jsonl'), clock),
           clock,
@@ -8286,6 +8357,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         }),
         modelCatalogs: async () => await modelCatalogService.sources(),
         publishedManifest: async () => await publishedManifest(),
+        lastAutoResume: async () => await autoResumeSummary.read(),
       };
       /**
        * First-run import, Import again, tool install, and the Clone export and import
@@ -9547,6 +9619,17 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
     );
   progress.enter('first self-check (reconciling the session index)');
   await health.selfCheck().catch(() => undefined);
+  // Written down BEFORE anything is attempted: the host can go down again mid-pass, and what is owed
+  // must survive that. Nothing is resumed yet — the daemon is not serving.
+  const autoResume = world.createAutoResume(opened.storage, async (id, message) => {
+    await subsystems.sessionResume.resume(id, 'daemon', message, {
+      automatic: true,
+      dedupeSharedRecoveryScope: false,
+      expectedStatus: 'failed',
+      humanOperator: false,
+    });
+  });
+  await autoResume.recordBootExits().catch(() => undefined);
   world.notices.step('first self-check done');
   // The address comes from configuration, never a constant: a hardcoded port is how a daemon ends
   // up fighting whatever else the host already runs on it. The bind is retried because the common
@@ -9725,6 +9808,10 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
     void activities.run('self-check', () => health.selfCheck()).catch(() => undefined);
   }, healthSettings.selfCheckIntervalMs);
   cleanups.push(() => clearInterval(ticks));
+  // After the daemon is serving, never before: a revive that raced the boot would be a launch the
+  // person's first request has to wait behind. Staggered inside the service; a failure is journalled
+  // per session, so nothing here needs to surface it.
+  void activities.run('auto-resume', () => autoResume.run()).catch(() => undefined);
   /**
    * The declared-wait tick, armed beside the self-check and for the same reasons.
    *
