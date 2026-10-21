@@ -21,6 +21,7 @@ import {
   StepUpService,
   type StepUpSubject,
   type StoredPasskey,
+  type UnlockLedgerPort,
 } from '../../../src/lib/step-up/index.ts';
 import {
   type Authenticator,
@@ -95,6 +96,8 @@ function fixture(
     deviceName?: string;
     /** This machine's name as pairing knows it; `studio` otherwise. */
     machineName?: string;
+    /** Where unlocks are kept across a restart; absent keeps them in memory only. */
+    unlocks?: UnlockLedgerPort;
   } = {},
 ) {
   const clock = { now: options.nowMs ?? PAIRED_AT_MS + 60_000 };
@@ -136,6 +139,7 @@ function fixture(
       ? { settings: () => ({ ...DEFAULT_SECURITY_SETTINGS, ...options.settings }) }
       : {}),
     ...(options.rotation === undefined ? {} : { rotation: options.rotation }),
+    ...(options.unlocks === undefined ? {} : { unlocks: options.unlocks }),
     audit: {
       record: async entry => {
         audited.push(entry);
@@ -1413,6 +1417,171 @@ describe('StepUpService unlock on opening (B6)', () => {
 
     // Assert
     should(refused).eql({ ok: false, refusal: 'not-verified' });
+    should(service.unlockRequired(phone)).be.true();
+  });
+});
+
+/** The unlock ledger in memory, standing in for `state/unlocks.json` across a "restart". */
+class MemoryUnlockLedger implements UnlockLedgerPort {
+  stored = new Map<string, number>();
+  writes = 0;
+  failRead: Error | undefined;
+  failWrite: Error | undefined;
+  async read(): Promise<ReadonlyMap<string, number>> {
+    if (this.failRead !== undefined) throw this.failRead;
+    return new Map(this.stored);
+  }
+  async write(unlocks: ReadonlyMap<string, number>): Promise<void> {
+    this.writes += 1;
+    if (this.failWrite !== undefined) throw this.failWrite;
+    this.stored = new Map(unlocks);
+  }
+}
+
+describe('StepUpService unlock across a restart (owner: "we don\'t need to authenticate every time the daemon updates")', () => {
+  const nextAssertion = (authenticator: Authenticator, signCount: number) =>
+    assertionBody(authenticator, { auth: { signCount }, storedCount: signCount - 1 });
+
+  /** A machine whose phone has unlocked, then a fresh copy of the service over the same ledger: a restart. */
+  async function unlockedThenRestarted(settings: Partial<SecuritySettings> = { unlockOnOpen: true }) {
+    const unlocks = new MemoryUnlockLedger();
+    const before = fixture({ settings, unlocks });
+    const authenticator = await es256Authenticator();
+    await enrol(before.service, authenticator);
+    before.clock.now += HOUR_MS;
+    await before.service.unlockOptions(remote(), ORIGIN);
+    should((await before.service.unlock(remote(), await nextAssertion(authenticator, 1))).ok).be.true();
+    const unlockedAt = before.clock.now;
+    const after = fixture({ settings, unlocks, nowMs: unlockedAt + HOUR_MS });
+    return { unlocks, before, after, unlockedAt };
+  }
+
+  it('should keep a device unlocked through a restart inside its period, and ask again once it lapses', async () => {
+    // Arrange
+    const { after, unlockedAt, unlocks } = await unlockedThenRestarted({ unlockOnOpen: true, unlockValidityHours: 8 });
+    should(unlocks.stored.get(phone.deviceId)).equal(unlockedAt);
+
+    // Act
+    const notice = await after.service.restore();
+
+    // Assert
+    should(notice).be.undefined();
+    should(after.service.unlockRequired(phone)).be.false();
+    should(after.service.held(phone)).be.true();
+    after.clock.now = unlockedAt + 8 * HOUR_MS;
+    should(after.service.unlockRequired(phone)).be.true();
+  });
+
+  it('should honour a shorter period set while it was down, and the longest one a week allows', async () => {
+    // Arrange
+    const shorter = await unlockedThenRestarted({ unlockOnOpen: true, unlockValidityHours: 1 });
+    const week = await unlockedThenRestarted({ unlockOnOpen: true, unlockValidityHours: 168 });
+
+    // Act
+    await shorter.after.service.restore();
+    week.after.clock.now = week.unlockedAt + 167 * HOUR_MS;
+    await week.after.service.restore();
+
+    // Assert
+    should(shorter.after.service.unlockRequired(phone)).be.true();
+    should(week.after.service.unlockRequired(phone)).be.false();
+  });
+
+  it('should restore nothing for a device unpaired meanwhile, an instant in the future, or one older than any period', async () => {
+    // Arrange
+    const unpaired = await unlockedThenRestarted();
+    unpaired.after.directory.paired = false;
+    const future = await unlockedThenRestarted();
+    future.unlocks.stored.set(phone.deviceId, future.after.clock.now + 1);
+    const ancient = await unlockedThenRestarted({ unlockOnOpen: true, unlockValidityHours: 168 });
+    ancient.after.clock.now = ancient.unlockedAt + 168 * HOUR_MS;
+
+    // Act
+    await unpaired.after.service.restore();
+    await future.after.service.restore();
+    await ancient.after.service.restore();
+
+    // Assert
+    unpaired.after.directory.paired = true;
+    should(unpaired.after.service.unlockRequired(phone)).be.true();
+    should(future.after.service.unlockRequired(phone)).be.true();
+    should(ancient.after.service.unlockRequired(phone)).be.true();
+  });
+
+  it('should forget a revoked device in the ledger too, so no restart brings its unlock back', async () => {
+    // Arrange
+    const { before, unlocks } = await unlockedThenRestarted();
+
+    // Act
+    await before.service.forgetDevice(phone.deviceId);
+
+    // Assert
+    should(unlocks.stored.has(phone.deviceId)).be.false();
+  });
+
+  it('should drop an unlock no setting could honour when it next writes', async () => {
+    // Arrange
+    const { before, unlocks } = await unlockedThenRestarted();
+    unlocks.stored.set(laptop.deviceId, 0);
+    before.clock.now += 200 * HOUR_MS;
+
+    // Act
+    await before.service.forgetDevice(laptop.deviceId);
+
+    // Assert
+    should([...unlocks.stored.keys()]).eql([]);
+  });
+
+  it('should ask every device again, and say why, when the ledger cannot be read', async () => {
+    // Arrange
+    const { after, unlocks } = await unlockedThenRestarted();
+    unlocks.failRead = new Error('not valid JSON');
+
+    // Act
+    const notice = await after.service.restore();
+
+    // Assert
+    should(notice).equal(
+      'the unlock ledger could not be read (not valid JSON), so every device is asked to unlock again',
+    );
+    should(after.service.unlockRequired(phone)).be.true();
+    unlocks.failRead = undefined;
+    // A thrown non-Error is said as itself.
+    const odd = fixture({
+      settings: { unlockOnOpen: true },
+      unlocks: { read: async () => Promise.reject('gone'), write: async () => {} },
+    });
+    should(await odd.service.restore()).equal(
+      'the unlock ledger could not be read (gone), so every device is asked to unlock again',
+    );
+  });
+
+  it('should still unlock when the ledger cannot be written, costing only the next restart', async () => {
+    // Arrange
+    const unlocks = new MemoryUnlockLedger();
+    unlocks.failWrite = new Error('disk full');
+    const { service, clock } = fixture({ settings: { unlockOnOpen: true }, unlocks });
+    const authenticator = await es256Authenticator();
+    await enrol(service, authenticator);
+    clock.now += HOUR_MS;
+    await service.unlockOptions(remote(), ORIGIN);
+
+    // Act
+    const granted = await service.unlock(remote(), await nextAssertion(authenticator, 1));
+
+    // Assert
+    should(granted.ok).be.true();
+    should(service.unlockRequired(phone)).be.false();
+    should(unlocks.writes).equal(1);
+    should(unlocks.stored.size).equal(0);
+  });
+
+  it('should restore nothing, and say nothing, without a ledger', async () => {
+    // Arrange
+    const { service } = fixture({ settings: { unlockOnOpen: true } });
+
+    // Act / Assert
+    should(await service.restore()).be.undefined();
     should(service.unlockRequired(phone)).be.true();
   });
 });

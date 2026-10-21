@@ -268,7 +268,14 @@ right about the artefact it was handed, and the formatter had changed the artefa
 **The unlock comes first** (owner decision 2026-10-14, [design/zero-trust.md](design/zero-trust.md) B1): a
 governed device is answered `401 unlock_required` on everything but the routes it needs to get in, until it
 unlocks this machine with a passkey; one unlock lasts `unlockValidityHours` (8 by default, 1 hour to 7 days)
-for that device.
+for that device — **across a daemon restart too** (owner decision 2026-10-21: "we don't need to authenticate
+every time the daemon updates"). `state/unlocks.json` keeps each device's id and the instant it unlocked —
+no key, token or signature, owner-only, bound to the daemon identity that wrote it — and is read back at boot
+for devices that are still paired. Whether that instant is still inside the period is asked of the settings
+in force, so a shorter period set meanwhile applies at once; revoking a device removes its line; a damaged
+file asks every device again, with one boot notice. A per-act step-up and a fresh "for this act" proof stay
+in memory and end with the process: they are minutes long, and an update is the moment to ask again for one.
+Writing that file needs this machine's disk, which already holds the admin token — it widens nothing.
 **While a device is unlocked, its step-up is held** for every act below — the unlock IS the step-up — unless
 the owner turned on `stepUpOnActions`, which asks for a passkey again per act inside an unlock. A machine
 with the unlock turned off always asks per act. **Adding access always asks:** minting a pairing code,

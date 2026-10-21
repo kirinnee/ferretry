@@ -1192,7 +1192,7 @@ describe('signing Claude Code in from the first run', () => {
 });
 
 describe('the unlock model: passkeys, unlock, and who may loosen security', () => {
-  it('should re-lock on restart, tighten from the device, loosen only at the machine, and audit both', async () => {
+  it('should stay unlocked through a restart, re-lock once lapsed, tighten from the device, loosen only at the machine, and audit both', async () => {
     const journey = 'j03-j12-unlock-security';
     await withProduct(journey, async product => {
       const { environment, browser, origin } = product;
@@ -1213,16 +1213,41 @@ describe('the unlock model: passkeys, unlock, and who may loosen security', () =
       await registerPasskeyAndUnlock(product, daemonId, journey);
       const stored = await deviceGrantForLeakSearchOnly(page as never);
 
-      // Act / Assert — a restart forgets the unlock; the next open asks again and one passkey answers.
-      await softStep(journey, 'relock-on-restart', async () => {
+      // Act / Assert — an update restarts fyd; inside its period the unlock survives it (owner: "can you
+      // make it such that we don't need to authenticate every time the daemon updates?").
+      await softStep(journey, 'unlock-survives-restart', async () => {
         await environment.stopDaemon();
         await bootDaemon(environment, product.boot);
         await page.goto(`${origin.origin}/d/${daemonId}`, { waitUntil: 'load', timeout: 30_000 });
+        if (await unlockIfAsked(page, 8_000)) throw new Error('a restarted machine asked an unlocked device again');
+        const ledger = JSON.parse(await readFile(join(environment.paths.fyHome, 'state', 'unlocks.json'), 'utf8')) as {
+          unlocks: { deviceId: string }[];
+        };
+        if (!ledger.unlocks.some(entry => entry.deviceId === stored.deviceId))
+          throw new Error('the unlock ledger does not hold this device');
+        return { value: undefined, evidence: 'after fyd restarted, the app opened with no unlock prompt' };
+      });
+
+      // An unlock that lapsed while fyd was down asks again: the ledger's instant is moved back past the
+      // period with the daemon stopped, exactly what a long downtime leaves on disk.
+      await softStep(journey, 'relock-after-expiry', async () => {
+        await environment.stopDaemon();
+        const ledgerPath = join(environment.paths.fyHome, 'state', 'unlocks.json');
+        const ledger = JSON.parse(await readFile(ledgerPath, 'utf8')) as {
+          unlocks: { deviceId: string; unlockedAt: string }[];
+        };
+        const lapsed = new Date(Date.now() - 9 * 60 * 60 * 1_000).toISOString();
+        await writeFile(
+          ledgerPath,
+          `${JSON.stringify({ ...ledger, unlocks: ledger.unlocks.map(entry => ({ ...entry, unlockedAt: lapsed })) })}\n`,
+        );
+        await bootDaemon(environment, product.boot);
+        await page.goto(`${origin.origin}/d/${daemonId}`, { waitUntil: 'load', timeout: 30_000 });
         if (!(await unlockIfAsked(page, 20_000)))
-          throw new Error('a restarted machine did not ask to be unlocked again');
+          throw new Error('a restarted machine did not ask once the unlock had lapsed');
         return {
           value: undefined,
-          evidence: 'after fyd restarted, the app asked to unlock and the passkey unlocked it',
+          evidence: 'with the unlock 9 h old (period 8 h), the restarted machine asked and the passkey unlocked it',
         };
       });
 

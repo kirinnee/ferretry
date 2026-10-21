@@ -71,7 +71,8 @@ The owner chose friendliness here: **"once we unlock the app with a passkey, fee
   add your first passkey.
 - **After the unlock:** this device can do anything its permissions allow — terminals, files, secrets,
   settings, starting agents — with **no more prompts**, for the unlock period. It lasts across page
-  loads and tabs on this device. A daemon restart, a revoke or the period ending locks it again.
+  loads and tabs on this device, and through a daemon restart or update. A revoke or the period ending
+  locks it again.
 - **Except adding access.** Pairing a new device, or giving a device more, always asks for a fresh
   passkey for that act.
 - **Want more prompts?** In Settings › ‹machine› › Machine › Security, turn on **ask again for each

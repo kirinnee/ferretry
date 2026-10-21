@@ -134,3 +134,17 @@ export interface DeviceKeyRotationPort {
     readonly transcriptHash: Uint8Array;
   }): Promise<boolean>;
 }
+
+/**
+ * Where each device's last UNLOCK is kept across a restart (owner: "can you make it such that we don't
+ * need to authenticate every time the daemon updates?").
+ *
+ * A device id and an instant per device — nothing that proves anything, and nothing a copy could replay:
+ * the device still has to open a session with its own key, and the unlock still lapses at
+ * `unlockValidityHours` from that instant under the settings in force. Writing this file needs this
+ * machine's disk, which already holds the admin token.
+ */
+export interface UnlockLedgerPort {
+  read(): Promise<ReadonlyMap<string, number>>;
+  write(unlocks: ReadonlyMap<string, number>): Promise<void>;
+}
