@@ -28,7 +28,7 @@ describe('the cloudflared process', () => {
     // Arrange
     const fake = await fakeCloudflared();
     const lines: string[] = [];
-    const processes = new BunConnectorProcesses({ ...process.env, FAKE_CLOUDFLARED_RECORD: fake.record });
+    const processes = new BunConnectorProcesses(process.env);
 
     // Act
     const child = processes.spawn(
@@ -57,20 +57,17 @@ describe('the cloudflared process', () => {
 
   it('should report an exit code, and deliver a last line that had no newline', async () => {
     // Arrange
-    const fake = await fakeCloudflared();
+    const fake = await fakeCloudflared('partial');
+    const exiting = await fakeCloudflared('exit:7');
     const lines: string[] = [];
-    const processes = new BunConnectorProcesses({ ...process.env, FAKE_CLOUDFLARED_MODE: 'partial' });
-    const exiting = new BunConnectorProcesses({
-      ...process.env,
-      FAKE_CLOUDFLARED_MODE: 'exit',
-      FAKE_CLOUDFLARED_EXIT: '7',
-    });
+    const processes = new BunConnectorProcesses(process.env);
 
     // Act
     const partial = processes.spawn({ executable: fake.path, args: [], environment: {} }, line => lines.push(line));
     const partialCode = await partial.exited;
     await waitFor(() => lines.length === 2, 'the unterminated line');
-    const exited = await exiting.spawn({ executable: fake.path, args: [], environment: {} }, () => undefined).exited;
+    const exited = await processes.spawn({ executable: exiting.path, args: [], environment: {} }, () => undefined)
+      .exited;
 
     // Assert
     should(partialCode).equal(0);
@@ -80,9 +77,9 @@ describe('the cloudflared process', () => {
 
   it('should kill a child that ignores its stop once the grace period is over', async () => {
     // Arrange
-    const fake = await fakeCloudflared();
+    const fake = await fakeCloudflared('stubborn');
     const lines: string[] = [];
-    const processes = new BunConnectorProcesses({ ...process.env, FAKE_CLOUDFLARED_MODE: 'stubborn' }, 200);
+    const processes = new BunConnectorProcesses(process.env, 200);
     const child = processes.spawn({ executable: fake.path, args: [], environment: {} }, line => lines.push(line));
     await waitFor(() => lines.some(line => line.includes('Registered')), 'the child to start');
 

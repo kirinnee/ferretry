@@ -113,6 +113,26 @@ describe('the hosted tunnel provisioner', () => {
     });
   });
 
+  it('should never follow a redirect with the signed body or the token’s answer', async () => {
+    // Arrange — the "service" points at another host that would gladly answer.
+    const elsewhere = serving(() =>
+      Response.json({
+        version: 1,
+        tunnelUrl: 'https://quiet-otter.tunnels.example',
+        connectorToken: 'fake-connector-token',
+        renewAfterSeconds: 3_600,
+      }),
+    );
+    const redirecting = serving(path => Response.redirect(`${elsewhere.origin}${path}`, 307));
+
+    // Act
+    const answer = await new HostedTunnelProvisioner(redirecting.origin).provision({ ...SIGNED, originPort: 1 });
+
+    // Assert
+    should(answer).deepEqual({ kind: 'failed', reason: 'this daemon could not reach the hosted tunnel service' });
+    should(elsewhere.seen).deepEqual([]);
+  });
+
   it('should treat an answer it cannot read, or no answer, as a failure', async () => {
     // Arrange — a provision answer missing its token is not a tunnel this daemon can run.
     const service = serving(() => Response.json({ version: 1, tunnelUrl: 'https://quiet-otter.tunnels.example' }));

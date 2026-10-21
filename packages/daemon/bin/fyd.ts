@@ -812,6 +812,7 @@ import {
   withLivenessLedger,
   xvfbMissingMessage,
   type CloudflaredLocatorPort,
+  connectorBaseEnvironment,
   describeTunnelPosture,
   PublishedCarrierSet,
   type PublishedCarrierView,
@@ -7336,7 +7337,8 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           await readDaemonRelayIdentity(stateFiles, paths.daemonIdentity, new WebCryptoRelayIdentityKeys()),
         crypto: new WebCryptoRelayCrypto(),
         provisioner: origin => new HostedTunnelProvisioner(origin),
-        processes: new BunConnectorProcesses(process.env),
+        // An allowlist of the daemon's environment, never all of it: see `connectorBaseEnvironment`.
+        processes: new BunConnectorProcesses(connectorBaseEnvironment(process.env)),
         scheduler: {
           after: (milliseconds, action) => {
             const handle = setTimeout(action, milliseconds);

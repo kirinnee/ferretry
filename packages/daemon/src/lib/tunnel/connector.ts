@@ -69,6 +69,37 @@ export function cloudflaredRemedy(reason: string): string {
 }
 
 /**
+ * What `cloudflared` inherits from the daemon's environment: where to find programs, whose home it is,
+ * which certificates to trust, the clock's zone — and nothing else.
+ *
+ * AN ALLOWLIST, NOT THE DAEMON'S ENVIRONMENT. The daemon's environment can hold the operator's secrets
+ * and provider credentials, and `cloudflared` is a third-party binary that needs none of them; it also
+ * reads `TUNNEL_*` variables as flags, so a stray one in the daemon's environment would silently change
+ * how the connector runs. The token is added on top by {@link connectorEnvironment}.
+ */
+export const CONNECTOR_INHERITED_VARIABLES: readonly string[] = Object.freeze([
+  'PATH',
+  'HOME',
+  'TMPDIR',
+  'TZ',
+  'SSL_CERT_FILE',
+  'SSL_CERT_DIR',
+  'NIX_SSL_CERT_FILE',
+]);
+
+/** The daemon's environment narrowed to {@link CONNECTOR_INHERITED_VARIABLES}. */
+export function connectorBaseEnvironment(
+  environment: Readonly<Record<string, string | undefined>>,
+): Readonly<Record<string, string>> {
+  const inherited: Record<string, string> = {};
+  for (const name of CONNECTOR_INHERITED_VARIABLES) {
+    const value = environment[name];
+    if (value !== undefined) inherited[name] = value;
+  }
+  return inherited;
+}
+
+/**
  * The connector's environment ADDITIONS: the token, and nothing else. The process adapter merges this
  * over the daemon's own environment for that one child and never writes it anywhere.
  */

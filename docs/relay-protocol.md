@@ -2397,17 +2397,27 @@ A pool that does not parse is **no pool** — the service advertises `available:
   `GET /v1/rendezvous/<its daemonId>/client` and answers `404` to everything else, and that stamps every
   arrival `loopback: false` and not privileged — the relay rule (§14, "What this tunnel does not
   carry"), for the same reason. The per-peer bounds of §4 key a tunnel arrival by its
-  `CF-Connecting-IP`, falling back to one shared key when it is absent or not an address. The route
+  `CF-Connecting-IP` — an IPv4 address whole, an IPv6 address by its **/64**, because one subscriber is
+  routinely given a whole /64 and per-address buckets would bound nobody — falling back to one shared
+  key when it is absent or not an address. The route
   is its **own instance** of the direct carrier's, so tunnel arrivals are admitted against their own
   bounds rather than sharing a budget with the network's; any other method on that path is the same
-  `404` as any other path, so the port does not reveal which path it serves.
+  `404` as any other path, so the port does not reveal which path it serves. That `404` is answered
+  before CORS is consulted, so a preflight or a foreign `Origin` on any other path is the same `404`
+  too; only the session upgrade itself is held to the browser origins the API listener admits.
+  **A pairing session is refused on the tunnel listener**: the session's arrival carries the tunnel
+  marker, and its `pair` record gets the ordinary uniform `pair-refused` and close without the pairing
+  service being asked — no guess is spent from the code's direct budget, and no grant can be recorded
+  (or announced to the other devices) as paired on the local network.
 - **Provisioning runs behind the boot, never in front of it.** The listener is bound and the first
   provision is made after the bind and the relays; a slow or absent service never holds a boot up,
   and nothing about the tunnel can fail one. A failure that may clear (`5xx`, `tunnel_unavailable`,
   `tunnel_capacity`, `tunnel_upstream_failed`, `tunnel_rate_limited`, `tunnel_challenge_expired`, no
   answer) is retried with equal-jitter backoff from 5 s to ten minutes, each retry stated with its wait;
   `tunnel_claim_rejected` and `tunnel_bad_request` turn the carrier off for the boot. Each attempt
-  asks for exactly one challenge. A renewal answers the token every time (the service re-fetches it);
+  asks for exactly one challenge. Neither the advertisement read nor a provisioning call follows a
+  redirect (`redirect: 'error'`): a redirect would hand the signed body, or the answer carrying the
+  connector token, to a host the daemon never discovered. A renewal answers the token every time (the service re-fetches it);
   the connector is restarted only when it **changed**, and a changed hostname is withdrawn and
   republished once the new connector registers.
 - **What is on disk is that a tunnel is held, never how to run one.** After a provision the daemon
@@ -2423,6 +2433,15 @@ A pool that does not parse is **no pool** — the service advertises `available:
   `Registered tunnel connection connIndex=N` lines minus `Unregistered …`, so one of four edge
   connections dropping is not a withdrawal. A child asked to stop gets `SIGTERM`, then `SIGKILL` after
   five seconds. A token change kills the old child and starts the new one only once the old has gone.
+  The child inherits an **allowlist** of the daemon's environment — `PATH`, `HOME`, `TMPDIR`, `TZ`,
+  `SSL_CERT_FILE`, `SSL_CERT_DIR`, `NIX_SSL_CERT_FILE` — plus `TUNNEL_TOKEN`, so no daemon secret
+  reaches a third-party binary and no stray `TUNNEL_*` variable (which `cloudflared` reads as a flag)
+  changes how it runs. **Declared GAP:** a daemon killed hard (`SIGKILL`, a crash) cannot stop its
+  child, and an orphaned `cloudflared` keeps holding its edge connections and forwarding to the dead
+  daemon's old port until something kills it. That costs availability only — a forwarded arrival meets
+  a closed port, or a later daemon's listener once its provision rewrites the ingress — never the
+  session: every byte is still §6/§7 under the pinned identity key. A process-group kill on the next
+  boot is not attempted, because identifying "our" orphan by PID is unsafe across PID reuse.
 - **What it publishes.** Once `cloudflared` reports a registered connection the daemon publishes
   `{ "kind": "tunnel", "url": "https://<label>.<zone>" }` in its carrier set (§13), and withdraws it
   when the connector is down or the tunnel was released, in the order direct → tunnel → relays. The

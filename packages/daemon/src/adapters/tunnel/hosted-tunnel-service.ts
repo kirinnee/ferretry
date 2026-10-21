@@ -48,6 +48,8 @@ export class HostedTunnelService implements TunnelServicePort {
     try {
       response = await this.fetcher(tunnelServiceAddress(origin), {
         cache: 'no-store',
+        // The answer is about THIS origin; a redirect is another service answering for it.
+        redirect: 'error',
         signal: AbortSignal.timeout(this.timeoutMs),
       });
     } catch {

@@ -31,6 +31,8 @@ import type { SocketRoute } from '../../../src/lib/api/socket.ts';
 import { DISCOVERED_TUNNEL_CARRIER } from '../../../src/lib/runtime/carriers.ts';
 import {
   CLOUDFLARED_ARGUMENTS,
+  CONNECTOR_INHERITED_VARIABLES,
+  connectorBaseEnvironment,
   type TunnelCarrierDependencies,
   TunnelCarrier,
   tunnelListenerSurface,
@@ -150,7 +152,15 @@ async function harness(): Promise<Harness> {
           },
         };
       },
-      processes: new BunConnectorProcesses({ ...process.env, FAKE_CLOUDFLARED_RECORD: fake.record }),
+      // Exactly what production hands the child: an allowlist — here of an environment that ALSO holds a
+      // secret and a stray TUNNEL_ flag, neither of which may reach it.
+      processes: new BunConnectorProcesses(
+        connectorBaseEnvironment({
+          ...process.env,
+          FY_SECRET_DATABASE_URL: 'operator-secret',
+          TUNNEL_LOGLEVEL: 'debug',
+        }),
+      ),
       scheduler: {
         after: (milliseconds, action) => {
           const handle = setTimeout(action, milliseconds);
@@ -199,6 +209,13 @@ describe('the hosted tunnel carrier, with every production adapter', () => {
     should(world.service.provisions).deepEqual([{ originPort: world.port(), daemonId: world.identity.daemonId }]);
     should(record?.argv).deepEqual([...CLOUDFLARED_ARGUMENTS]);
     should(record?.tokenSha256).equal(sha256(TOKEN));
+    // The child inherited the allowlist and the token — no secret, no stray flag. (A runtime may add
+    // its own bookkeeping variables to a child it starts; none of them is the daemon's.)
+    const allowed = new Set([...CONNECTOR_INHERITED_VARIABLES, 'TUNNEL_TOKEN']);
+    should(record?.environment.filter(name => name.startsWith('FY_') || name.startsWith('TUNNEL_'))).deepEqual([
+      'TUNNEL_TOKEN',
+    ]);
+    should(record?.environment.filter(name => !allowed.has(name) && !/^(BUN|_)/u.test(name))).deepEqual([]);
     should(world.published).deepEqual(['https://quiet-otter.tunnels.example', undefined]);
     should(JSON.parse(holding)).deepEqual({
       version: 1,
@@ -235,6 +252,11 @@ describe('the hosted tunnel carrier, with every production adapter', () => {
     );
     const otherSocket = await upgrade(`ws://127.0.0.1:${String(world.port())}/v1/events`);
     const posted = await fetch(`${base}/v1/rendezvous/${world.identity.daemonId}/client`, { method: 'POST' });
+    const preflight = await fetch(`${base}/v1/health`, {
+      method: 'OPTIONS',
+      headers: { origin: 'https://ferretry.pages.dev', 'access-control-request-method': 'GET' },
+    });
+    const foreignOrigin = await fetch(`${base}/v1/health`, { headers: { origin: 'https://stranger.example' } });
 
     // Assert
     should([withEdgeAddress, withoutEdgeAddress]).deepEqual(['open', 'open']);
@@ -244,7 +266,10 @@ describe('the hosted tunnel carrier, with every production adapter', () => {
       [false, false, '203.0.113.9'],
       [false, false, 'tunnel'],
     ]);
-    should([plainGet.status, ...others, otherSocket, posted.status]).deepEqual([404, 404, 404, 404, 404, 404, 404]);
+    should([plainGet.status, ...others, otherSocket, posted.status, preflight.status, foreignOrigin.status]).deepEqual([
+      404, 404, 404, 404, 404, 404, 404, 404, 404,
+    ]);
+    should(preflight.headers.get('access-control-allow-origin')).be.null();
   });
 
   it('should refuse a query-string token on the tunnel listener that a loopback listener honours', async () => {
@@ -288,11 +313,8 @@ describe('the hosted tunnel carrier, with every production adapter', () => {
   it('should withdraw the tunnel while cloudflared is down, and keep restarting it', async () => {
     // Arrange — a connector that exits as soon as it starts.
     const world = await harness();
-    const fake = await fakeCloudflared();
-    const subject = world.carrier({
-      cloudflared: new CloudflaredLocator({ FY_CLOUDFLARED: fake.path }),
-      processes: new BunConnectorProcesses({ ...process.env, FAKE_CLOUDFLARED_MODE: 'exit' }),
-    });
+    const fake = await fakeCloudflared('exit');
+    const subject = world.carrier({ cloudflared: new CloudflaredLocator({ FY_CLOUDFLARED: fake.path }) });
     cleanups.push(() => subject.stop());
 
     // Act

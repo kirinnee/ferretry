@@ -68,6 +68,9 @@ export class HostedTunnelProvisioner implements TunnelProvisionerPort {
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify(body),
         cache: 'no-store',
+        // A redirect would hand the signed body, and the answer carrying the connector token, to a host
+        // this daemon never discovered.
+        redirect: 'error',
         signal: AbortSignal.timeout(this.timeoutMs),
       });
     } catch {

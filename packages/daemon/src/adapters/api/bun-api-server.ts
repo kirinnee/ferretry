@@ -162,6 +162,11 @@ export class BunApiServer implements ApiServerPort {
           options.directLoopbackIsPrivileged,
           options.remotePeer,
         );
+        // THE TUNNEL LISTENER ANSWERS NOTHING BUT ITS ONE UPGRADE: a CORS preflight or a refused origin
+        // on any other path would tell a prober the port is a daemon's. Everything unclaimed is the
+        // listener's own 404, before CORS is consulted at all.
+        if (options.remotePeer !== undefined && !(wantsSocket(request) && surface.sockets.claims(apiRequest)))
+          return toResponse(await surface.http.dispatch(apiRequest));
         const presentedOrigin = request.headers.get('origin');
         const origin =
           presentedOrigin === null || presentedOrigin === new URL(request.url).origin ? null : presentedOrigin;
@@ -443,6 +448,7 @@ export function toApiRequest(
     clientAddress: remotePeer === undefined ? remoteAddress : remotePeer(headers),
     loopback: peerIsLoopback,
     privilegedLoopback: directLoopbackIsPrivileged && peerIsLoopback,
+    ...(remotePeer === undefined ? {} : { carrier: 'tunnel' as const }),
     // The runtime's own abort, passed through rather than re-derived: it is what a disconnect actually
     // fires, and a handler that walks a tree needs to hear it from the transport that noticed.
     signal: request.signal,

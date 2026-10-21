@@ -176,7 +176,12 @@ function carrier(
 /** Upgrade one socket the way the transport would, and open the handler. */
 async function connect(
   route: ReturnType<typeof carrier>['route'],
-  arrival: { readonly loopback?: boolean; readonly privilegedLoopback?: boolean; readonly clientAddress?: string } = {},
+  arrival: {
+    readonly loopback?: boolean;
+    readonly privilegedLoopback?: boolean;
+    readonly clientAddress?: string;
+    readonly carrier?: 'tunnel';
+  } = {},
 ): Promise<{ readonly handler: SocketHandler; readonly wire: Downstream; readonly sessionId: SessionId }> {
   const attach = await route.accept({
     request: request({ path: `/v1/rendezvous/${identity.daemonId}/client`, ...arrival }),
@@ -344,6 +349,40 @@ describe('the direct carrier', () => {
     should(await pairings[0]?.attempt.prove()).be.false();
     should(lastControl(wire)).containDeep({ t: 'closed', code: RELAY_SESSION_CONCLUDED_CLOSE_CODE });
     should(wire.closes.at(-1)?.code).equal(RELAY_SESSION_CONCLUDED_CLOSE_CODE);
+  });
+
+  it('should refuse first-contact pairing on a TUNNEL session exactly as it refuses a wrong code', async () => {
+    // §15: pairing is never carried by a tunnel. Counted as direct, an internet caller would spend the
+    // code's direct budget and the grant would be announced as "paired on the local network".
+    // Arrange — the same pair record, once over a direct socket and once over the tunnel listener's.
+    const pair = {
+      t: 'pair',
+      protocol: SESSION_PROTOCOL_ID,
+      code: 'ABCD-2345',
+      deviceName: 'phone',
+      deviceKey: deviceKeyText,
+      proof: toBase64Url(new Uint8Array(64)),
+    };
+    const direct = carrier();
+    const tunnel = carrier();
+    const overDirect = await connect(direct.route, { clientAddress: '192.0.2.4' });
+    const overTunnel = await connect(tunnel.route, { clientAddress: '203.0.113.9', carrier: 'tunnel' });
+    const directKeys = await handshake(overDirect.handler, overDirect.wire, overDirect.sessionId);
+    const tunnelKeys = await handshake(overTunnel.handler, overTunnel.wire, overTunnel.sessionId);
+
+    // Act
+    await send(overDirect.handler, directKeys.channel, pair);
+    await send(overTunnel.handler, tunnelKeys.channel, pair);
+
+    // Assert — the pairing service is never asked, so no guess is spent; the outcome a client sees,
+    // records and close alike, is the one a wrong code gets, so the refusal is no oracle.
+    should(tunnel.pairings).have.length(0);
+    should(direct.pairings).have.length(1);
+    should(await records(overTunnel.wire, tunnelKeys.channel)).deepEqual(
+      await records(overDirect.wire, directKeys.channel),
+    );
+    should(lastControl(overTunnel.wire)).containDeep({ t: 'closed', code: RELAY_SESSION_CONCLUDED_CLOSE_CODE });
+    should(overTunnel.wire.closes.at(-1)?.code).equal(overDirect.wire.closes.at(-1)?.code);
   });
 
   it('should key a peer it cannot name by its own session, never by a shared placeholder', async () => {

@@ -61,6 +61,22 @@ describe('the hosted tunnel service read', () => {
     should(init[0]?.cache).equal('no-store');
   });
 
+  it('should not take another host’s answer through a redirect', async () => {
+    // Arrange
+    const elsewhere = serving(() => Response.json({ version: 1, available: true }));
+    const redirecting = serving(() => Response.redirect(`${elsewhere.origin}/v1/tunnel-service`, 302));
+
+    // Act
+    const availability = await new HostedTunnelService(redirecting.origin).read();
+
+    // Assert
+    should(availability).deepEqual({
+      kind: 'unavailable',
+      reason: 'this daemon could not reach the hosted tunnel service',
+    });
+    should(elsewhere.paths).deepEqual([]);
+  });
+
   it('should fold every failure into one unavailable sentence and never throw', async () => {
     // Arrange
     const failing = serving(() => new Response('nope', { status: 503 }));

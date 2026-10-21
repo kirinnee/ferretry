@@ -1222,6 +1222,27 @@ describe('daemon boot lifecycle', () => {
           (await fetch(`${tunnelBase}${path}`, { headers: { authorization: `Bearer ${adminToken}` } })).status,
       ),
     );
+    // First contact is never carried by a tunnel: a fresh code tried there is refused like a wrong one,
+    // and — because the attempt never reached the pairing service — still redeems directly afterwards.
+    const second = PairingCodeMintResponseSchema.parse(
+      await (
+        await fetch(`${base}/v1/pair/code`, { method: 'POST', headers: { authorization: `Bearer ${adminToken}` } })
+      ).json(),
+    );
+    const pairedOverTunnel = await pairOverSession(
+      tunnelBase,
+      second.daemonId,
+      second.code,
+      'Stranger',
+      await newTestDevice(),
+    );
+    const pairedDirectAfter = await pairOverSession(
+      base,
+      second.daemonId,
+      second.code,
+      'Second phone',
+      await newTestDevice(),
+    );
     tunnelled.close();
     direct.close();
     release();
@@ -1243,6 +1264,8 @@ describe('daemon boot lifecycle', () => {
     should(privilegedThroughTunnel.status).equal(403);
     should(privilegedDirect.status).not.equal(403);
     should([grantsThroughTunnel.governed, grantsThroughTunnel.hostLocal]).deepEqual([true, false]);
+    should(pairedOverTunnel.kind).equal('refused');
+    should(pairedDirectAfter.kind).equal('paired');
     // Nothing but the session route is served on the tunnel's port, whatever credential is presented.
     should(plainHttp).deepEqual([404, 404, 404]);
     should(afterStop).equal('refused');

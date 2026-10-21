@@ -30,22 +30,25 @@ export async function removeTempDirectories(): Promise<void> {
 }
 
 /**
- * A stand-in for `cloudflared`, as a real executable. It records how it was started — its arguments
- * and a DIGEST of the token it was given, never the token — then prints what a real connector prints.
- * `FAKE_CLOUDFLARED_MODE` picks the behaviour: `register` (default), `exit`, `partial`, `stubborn`.
+ * A stand-in for `cloudflared`, as a real executable. It records how it was started — its arguments,
+ * the NAMES of the variables it inherited, and a DIGEST of the token it was given, never the token —
+ * beside itself, then prints what a real connector prints. Its behaviour is read from a `mode` file
+ * beside it rather than its environment, because the daemon hands it only an allowlisted environment:
+ * `register` (default), `exit` (code 3), `exit:<code>`, `partial`, `stubborn`.
  */
 const FAKE_CLOUDFLARED = `#!/usr/bin/env bun
 import { appendFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 const token = process.env.TUNNEL_TOKEN ?? '';
-const record = process.env.FAKE_CLOUDFLARED_RECORD;
-if (record) appendFileSync(record, JSON.stringify({
+appendFileSync(import.meta.dir + '/record.jsonl', JSON.stringify({
   argv: process.argv.slice(2),
+  environment: Object.keys(process.env).sort(),
   tokenSha256: token === '' ? null : new Bun.CryptoHasher('sha256').update(token).digest('hex'),
   pid: process.pid,
 }) + '\\n');
-const mode = process.env.FAKE_CLOUDFLARED_MODE ?? 'register';
+const mode = readFileSync(import.meta.dir + '/mode', 'utf8').trim();
 process.stderr.write('2026-10-21T10:00:00Z INF Starting tunnel tunnelID=fake\\n');
-if (mode === 'exit') process.exit(Number(process.env.FAKE_CLOUDFLARED_EXIT ?? '3'));
+if (mode.startsWith('exit')) process.exit(Number(mode.split(':')[1] ?? '3'));
 if (mode === 'partial') {
   process.stderr.write('2026-10-21T10:00:01Z INF Registered tunnel connection connIndex=3');
   process.exit(0);
@@ -56,16 +59,18 @@ setInterval(() => {}, 1000);
 `;
 
 /** Writes the fake connector into a fresh directory as an executable named `cloudflared`. */
-export async function fakeCloudflared(): Promise<{ readonly path: string; readonly record: string }> {
+export async function fakeCloudflared(mode = 'register'): Promise<{ readonly path: string; readonly record: string }> {
   const directory = await tempDirectory('fake-cloudflared');
   const path = join(directory, 'cloudflared');
   await writeFile(path, FAKE_CLOUDFLARED);
+  await writeFile(join(directory, 'mode'), mode);
   await chmod(path, 0o755);
   return { path, record: join(directory, 'record.jsonl') };
 }
 
 export interface ConnectorRecord {
   readonly argv: readonly string[];
+  readonly environment: readonly string[];
   readonly tokenSha256: string | null;
   readonly pid: number;
 }

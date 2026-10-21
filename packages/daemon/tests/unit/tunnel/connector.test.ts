@@ -10,7 +10,9 @@ import {
   CLOUDFLARED_NOT_ON_PATH,
   cloudflaredOverrideRefusal,
   cloudflaredRemedy,
+  CONNECTOR_INHERITED_VARIABLES,
   CONNECTOR_TOKEN_VARIABLE,
+  connectorBaseEnvironment,
   connectorEnvironment,
   connectorEvent,
 } from '../../../src/lib/tunnel/connector.ts';
@@ -25,6 +27,33 @@ describe('the cloudflared connector', () => {
   it('should hand the token over in the child’s TUNNEL_TOKEN and nothing else', () => {
     should(CONNECTOR_TOKEN_VARIABLE).equal('TUNNEL_TOKEN');
     should(connectorEnvironment('fake-connector-token')).deepEqual({ TUNNEL_TOKEN: 'fake-connector-token' });
+  });
+
+  it('should pass cloudflared an allowlist of the daemon’s environment, never its secrets or TUNNEL_ flags', () => {
+    // Arrange
+    const daemon = {
+      PATH: '/usr/bin',
+      HOME: '/home/me',
+      SSL_CERT_FILE: '/etc/ssl/cert.pem',
+      NIX_SSL_CERT_FILE: '/nix/ca.pem',
+      TZ: undefined,
+      GROQ_API_KEY: 'provider-secret',
+      FY_SECRET_DATABASE_URL: 'operator-secret',
+      TUNNEL_LOGLEVEL: 'debug',
+      TUNNEL_TOKEN: 'a-stale-token',
+    };
+
+    // Act
+    const inherited = connectorBaseEnvironment(daemon);
+
+    // Assert
+    should(inherited).deepEqual({
+      PATH: '/usr/bin',
+      HOME: '/home/me',
+      SSL_CERT_FILE: '/etc/ssl/cert.pem',
+      NIX_SSL_CERT_FILE: '/nix/ca.pem',
+    });
+    should(CONNECTOR_INHERITED_VARIABLES.some(name => name.startsWith('TUNNEL_'))).be.false();
   });
 
   it('should state the consequence and every remedy in one line, and that nothing is downloaded', () => {
