@@ -2446,6 +2446,8 @@ describe('SessionChatPage on a brand-new idle session', () => {
   ].join('\n');
   const CODEX_WORKING = ['• Working (5s • Esc to interrupt)', '', '› '].join('\n');
 
+  const paneQueries: string[] = [];
+
   /** Answers the live pane read with `frame` (or a failure), and everything else as the shared fixture does. */
   const paneAnswers = (frame: string | null): string[] => {
     const reads: string[] = [];
@@ -2453,6 +2455,7 @@ describe('SessionChatPage on a brand-new idle session', () => {
       const url = new URL(String(input), 'https://fixture.example.test');
       if (url.pathname.endsWith('/snapshot') && url.searchParams.get('live') === 'true') {
         reads.push(url.pathname);
+        paneQueries.push(url.search);
         return frame === null ? new Response('gone', { status: 503 }) : new Response(frame);
       }
       return route(input);
@@ -2552,6 +2555,24 @@ describe('SessionChatPage on a brand-new idle session', () => {
       }
     });
   }
+
+  test('the live line reads only the visible screen, never the whole scrollback', async () => {
+    // Arrange
+    paneQueries.length = 0;
+    const reads = paneAnswers(CLAUDE_WORKING);
+    const page = mountPage(fresh('claude', { turn: 3, turnState: 'working' }));
+
+    try {
+      // Act
+      await settleUntil(() => reads.length > 0, 'the live pane read', runAsync);
+
+      // Assert
+      expect(paneQueries.length).toBeGreaterThan(0);
+      expect(new Set(paneQueries)).toEqual(new Set(['?live=true&scope=screen']));
+    } finally {
+      run(() => page.unmount());
+    }
+  });
 
   test('a finished turn reads Ready once the pane shows the prompt again', async () => {
     // Arrange — the daemon still records the send's `promptReady: false`; only the pane knows better.

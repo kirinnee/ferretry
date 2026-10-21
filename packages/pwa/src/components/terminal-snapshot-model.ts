@@ -9,6 +9,7 @@
  * pair and refuses a scope that belongs to a different daemon.
  */
 
+import type { SnapshotScope } from '@ferretry/protocol';
 import type { DaemonConnection } from '../lib/daemon-connection.ts';
 import type { DaemonSessionScope } from '../lib/daemon-scope.ts';
 import { daemonRequest } from '../lib/daemon-transport.ts';
@@ -18,9 +19,15 @@ import { browserFetch, type DaemonFetch, DaemonResponseError } from '../lib/runt
  * `live=false` is the original's choice and the reason the header says
  * "cached": the tab shows the snapshot the daemon already holds rather than
  * making every reader poll force a live capture off the pane.
+ *
+ * `extent` is the daemon's `scope` query: `screen` asks a live capture for the visible frame only,
+ * which is all the activity line reads, instead of the whole scrollback every poll would otherwise
+ * carry over the relay. It is omitted for `history`, so the default URL is the one it always was.
  */
-export const snapshotUrl = (scope: DaemonSessionScope, live = false): string =>
-  `/v1/sessions/${encodeURIComponent(scope.sessionId)}/snapshot?live=${live ? 'true' : 'false'}`;
+export const snapshotUrl = (scope: DaemonSessionScope, live = false, extent: SnapshotScope = 'history'): string =>
+  `/v1/sessions/${encodeURIComponent(scope.sessionId)}/snapshot?live=${live ? 'true' : 'false'}${
+    extent === 'screen' ? '&scope=screen' : ''
+  }`;
 
 const failure = async (response: Response): Promise<DaemonResponseError> => {
   const body = (await response.json().catch(() => ({}))) as { error?: unknown; code?: unknown };
@@ -39,9 +46,11 @@ export const readPaneSnapshot = async (
   fetcher: DaemonFetch = browserFetch,
   /** Capture the pane now rather than answer with the stored final frame — the activity line's read. */
   live = false,
+  /** How much of a live pane to return; `screen` is the visible frame. */
+  extent: SnapshotScope = 'history',
 ): Promise<string> => {
   if (daemon.daemonId !== scope.daemonId) throw new Error('terminal scope must belong to the requested daemon');
-  const target = daemonRequest(daemon, snapshotUrl(scope, live), { signal });
+  const target = daemonRequest(daemon, snapshotUrl(scope, live, extent), { signal });
   const response = await fetcher(target.url, target.init);
   if (!response.ok) throw await failure(response);
   return await response.text();

@@ -1206,6 +1206,10 @@ export const SignalOptionsSchema = z.strictObject({
 });
 export type SignalOptions = z.infer<typeof SignalOptionsSchema>;
 
+/** How much of a live pane a snapshot read returns: the whole scrollback, or only the visible frame. */
+export const SnapshotScopeSchema = z.enum(['history', 'screen']);
+export type SnapshotScope = z.infer<typeof SnapshotScopeSchema>;
+
 export const SignalSessionRequestSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('done'), message: z.string().min(1).optional() }),
   z.strictObject({ kind: z.literal('help'), message: z.string().min(1) }),

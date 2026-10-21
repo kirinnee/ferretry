@@ -103,6 +103,8 @@ import {
   SessionViewSchema,
   type SignalKind,
   type SignalOptions,
+  type SnapshotScope,
+  SnapshotScopeSchema,
   SignalSessionRequestSchema,
   type StartSessionRequestInput,
   StartSessionRequestSchema,
@@ -908,9 +910,10 @@ export class FyApiClient implements IFyApiClient {
     );
   }
 
-  snapshot(id: string): Promise<string> {
+  snapshot(id: string, scope: SnapshotScope = 'history'): Promise<string> {
+    const suffix = SnapshotScopeSchema.parse(scope) === 'screen' ? '&scope=screen' : '';
     return this.request(
-      `/v1/sessions/${encodeURIComponent(NonEmptyValueSchema.parse(id))}/snapshot?live=true`,
+      `/v1/sessions/${encodeURIComponent(NonEmptyValueSchema.parse(id))}/snapshot?live=true${suffix}`,
       TextResponseSchema,
     );
   }

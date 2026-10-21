@@ -134,6 +134,19 @@ export interface SessionEventJournal {
   replay(sessionId: string, afterSequence: number, limit: number): Promise<readonly StoredSessionEvent[]>;
 }
 
+/**
+ * How much of the pane a live capture returns. `history` is the whole scrollback and is what every
+ * reader got before the scope existed; `screen` is the visible frame only, about 1–2 KB against the
+ * 22–93 KB a long scrollback measures, for a caller that reads only the last few lines of it.
+ */
+export type PaneScope = 'history' | 'screen';
+
+/** The text of a pane capture for one scope: the visible frame for `screen`, the scrollback otherwise. */
+export const paneTextFor = (
+  frames: { readonly history: string; readonly visible: string },
+  scope: PaneScope,
+): string => (scope === 'screen' ? frames.visible : frames.history);
+
 /** What a live tmux capture of one session's pane produced. */
 export interface PaneCapture {
   readonly alive: boolean;
@@ -150,7 +163,7 @@ export interface PaneCapture {
  * because an operator acts differently on each.
  */
 export interface SessionPaneReader {
-  capture(sessionId: string): Promise<PaneCapture | undefined>;
+  capture(sessionId: string, scope: PaneScope): Promise<PaneCapture | undefined>;
 }
 
 /** A transcript read that reports whether the file was RESOLVED, separately from what it contained. */
@@ -431,9 +444,9 @@ export class OperatorReadService {
    * an empty string for a dead pane, which is indistinguishable from a healthy blank screen and is
    * the exact false-success shape this migration keeps finding.
    */
-  async snapshot(sessionId: string, live = true): Promise<string> {
+  async snapshot(sessionId: string, live = true, scope: PaneScope = 'history'): Promise<string> {
     if (!live) return await this.redactor.redact(await this.storedSnapshot(sessionId));
-    const capture = await this.pane.capture(sessionId);
+    const capture = await this.pane.capture(sessionId, scope);
     if (capture === undefined)
       throw new OperatorReadError('no_terminal', `session ${sessionId} records no terminal this daemon could capture`);
     if (!capture.alive || capture.dead)
