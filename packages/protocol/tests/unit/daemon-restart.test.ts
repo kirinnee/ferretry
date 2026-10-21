@@ -2,6 +2,8 @@ import { describe, it } from 'bun:test';
 import should from 'should';
 import {
   classifyDaemonUnreachable,
+  DAEMON_STARTING_CODE,
+  DaemonStartingError,
   DAEMON_RESTART_PATIENCE_MS,
   type DaemonAttempt,
   type DaemonRestartPatience,
@@ -46,6 +48,17 @@ function patience(expected: boolean | Promise<boolean>, windowMs?: number) {
 }
 
 describe('classifyDaemonUnreachable', () => {
+  it('should read a daemon that answered it is still starting as refused, keeping its words', () => {
+    // Act
+    const starting = new DaemonStartingError('the daemon is starting (mounting subsystems); ask again shortly');
+
+    // Assert — it ran no route, so it is as safe to send again as a refused connection.
+    should(classifyDaemonUnreachable(starting)).equal('refused');
+    should(starting.name).equal('DaemonStartingError');
+    should(starting.message).containEql('mounting subsystems');
+    should(DAEMON_STARTING_CODE).equal('daemon_starting');
+  });
+
   it('should call a refused connection refused, from Bun, Node or a missing socket', () => {
     // Arrange
     const codes = ['ConnectionRefused', 'FailedToOpenSocket', 'ECONNREFUSED', 'ENOENT'];
