@@ -101,7 +101,7 @@ async function fixture(exits?: string): Promise<ReapFixture> {
     await opened.storage.close();
     await rm(home, { recursive: true, force: true });
   });
-  if (exits !== undefined) await awaitExit(controller, record.config.tmuxSession, gate);
+  if (exits !== undefined) await awaitExit(controller, record.config.tmuxSession, gate, tmuxExecutable, join(home, 'throwaway-tmux.sock'));
   return { home, files, storage: opened.storage, record, controller, registrar, store, runtime, tmuxExecutable };
 }
 
@@ -111,18 +111,24 @@ async function fixture(exits?: string): Promise<ReapFixture> {
  * fails under load also reads as dead, and registering then would find the process still running. The
  * bound is generous because it is only ever spent when something is wrong.
  */
-async function awaitExit(controller: TmuxController, session: string, gate: string): Promise<void> {
+async function awaitExit(controller: TmuxController, session: string, gate: string, exe: string, sock: string): Promise<void> {
   await writeFile(gate, '');
   const deadline = Date.now() + 30_000;
   let last = 'no state read';
+  let nudged = 0;
   while (Date.now() < deadline) {
     const pane = await controller.state(session);
     last = JSON.stringify({ alive: pane.alive, dead: pane.dead, exitCode: pane.exitCode });
     if (pane.alive && pane.dead && pane.exitCode === 2) return;
+    if (Date.now() > deadline - 28_000 && pane.alive && pane.dead && pane.exitCode === undefined) {
+      const server = Bun.spawnSync([exe, '-S', sock, 'display-message', '-p', '#{pid}'], { stdout: 'pipe' });
+      const pid = Number(new TextDecoder().decode(server.stdout).trim());
+      if (Number.isInteger(pid) && pid > 1) { process.kill(pid, 'SIGCHLD'); nudged++; }
+    }
     await Bun.sleep(50);
   }
-  const sock = join(gate, '..', 'throwaway-tmux.sock');
-  const raw = Bun.spawnSync(['tmux', '-S', sock, 'display-message', '-p', '-t', session, '#{pane_pid}|#{pane_dead}|#{pane_dead_status}|#{pane_dead_signal}|#{pane_dead_time}|#{pane_current_command}|#{version}'], { stdout: 'pipe', stderr: 'pipe' });
+  const sock2 = join(gate, '..', 'throwaway-tmux.sock');
+  const raw = Bun.spawnSync(['tmux', '-S', sock2, 'display-message', '-p', '-t', session, '#{pane_pid}|#{pane_dead}|#{pane_dead_status}|#{pane_dead_signal}|#{pane_dead_time}|#{pane_current_command}|#{version}'], { stdout: 'pipe', stderr: 'pipe' });
   const pid = new TextDecoder().decode(raw.stdout).split('|')[0]?.trim() ?? '';
   const ppid = Bun.spawnSync(['ps', '-o', 'ppid=', '-p', pid], { stdout: 'pipe' });
   const parent = new TextDecoder().decode(ppid.stdout).trim();
@@ -130,7 +136,7 @@ async function awaitExit(controller: TmuxController, session: string, gate: stri
   const zs = Bun.spawnSync(['sh', '-c', "ps -e -o pid,ppid,stat,args | grep -E ' Z|tmux' | head -20"], { stdout: 'pipe' });
   const ps = Bun.spawnSync(['ps', '-o', 'pid,ppid,stat,args', '-p', pid], { stdout: 'pipe', stderr: 'pipe' });
   const tmuxv = Bun.spawnSync(['tmux', '-V'], { stdout: 'pipe' });
-  throw new Error(`PROBE test setup: the pane never exited (last state ${last}) raw=[${new TextDecoder().decode(raw.stdout)}${new TextDecoder().decode(raw.stderr)}] ps=[${new TextDecoder().decode(ps.stdout)}] v=${new TextDecoder().decode(tmuxv.stdout)} exe=${Bun.which('tmux')} PARENT=[${new TextDecoder().decode(sig.stdout).replaceAll('\n', ' ; ')}] ALL=[${new TextDecoder().decode(zs.stdout).replaceAll('\n', ' ; ')}]`);
+  throw new Error(`PROBE nudged=${nudged} test setup: the pane never exited (last state ${last}) raw=[${new TextDecoder().decode(raw.stdout)}${new TextDecoder().decode(raw.stderr)}] ps=[${new TextDecoder().decode(ps.stdout)}] v=${new TextDecoder().decode(tmuxv.stdout)} exe=${Bun.which('tmux')} PARENT=[${new TextDecoder().decode(sig.stdout).replaceAll('\n', ' ; ')}] ALL=[${new TextDecoder().decode(zs.stdout).replaceAll('\n', ' ; ')}]`);
 }
 
 function service(subject: ReapFixture, runtime = subject.runtime): TerminalReapService {
