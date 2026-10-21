@@ -19,6 +19,7 @@
     "@ferretry/protocol": "workspace:*",
     "@ferretry/relay": "workspace:*",
     "@neslinesli93/qpdf-wasm": "0.3.0",
+    "node-datachannel": "0.33.4",
     "playwright-core": "1.62.1",
     "zod": "4.4.3"
   }

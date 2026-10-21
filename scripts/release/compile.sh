@@ -7,6 +7,11 @@ set -euo pipefail
 # start (the worker is run beside the daemon, see packages/daemon/src/lib/browser/runtime/worker-program.ts).
 ./scripts/ci/setup.sh
 
+# The daemon embeds its WebRTC engine's native addon per TARGET (scripts/release/compile-executable.ts),
+# and an ordinary install fetches only this runner's. Install the prebuilds for every platform below so
+# the cross-compiled darwin and arm64 daemons carry their own, not a Linux x64 one or none at all.
+bun install --frozen-lockfile --os=linux --os=darwin --cpu=x64 --cpu=arm64
+
 CLI_PKG="packages/cli"
 DAEMON_PKG="packages/daemon"
 
