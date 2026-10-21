@@ -97,6 +97,7 @@ import {
   utf8Text,
 } from '@ferretry/relay';
 import { z } from 'zod';
+import { hostedAllowanceSentence } from './relay-allowance.ts';
 
 /** The one socket surface this session needs. Injected, so no suite opens a real one. */
 export interface RelayClientSocket {
@@ -895,6 +896,7 @@ export class RelayClientSession {
    */
   #closedWithoutOutcome(code: number, reason: string): string {
     if (this.#phase !== 'awaiting-credential' && this.#phase !== 'streaming') {
+      if (code === RELAY_CLOSE_CODES.hostedBandwidth) return hostedAllowanceSentence(reason) ?? reason;
       return reason === '' ? 'the carrier closed this session' : reason;
     }
     return code === RELAY_SESSION_CONCLUDED_CLOSE_CODE
@@ -1034,7 +1036,11 @@ export class RelayClientSession {
       case 'error':
         // The rendezvous closes the socket immediately after this, so closing from
         // here as well would race its own close frame. The reason is what matters.
-        this.#quietly(message.code, `the rendezvous refused this browser: ${message.code} ${message.reason}`);
+        this.#quietly(
+          message.code,
+          (message.code === RELAY_CLOSE_CODES.hostedBandwidth ? hostedAllowanceSentence(message.reason) : undefined) ??
+            `the rendezvous refused this browser: ${message.code} ${message.reason}`,
+        );
         return;
       default:
         // `challenge`, `claim`, `claimed` and `open` belong to the daemon role.

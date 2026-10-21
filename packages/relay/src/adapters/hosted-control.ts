@@ -38,6 +38,7 @@ import {
   reclaimableHostedRelayDaemon,
   recountHostedRelayConnections,
   releaseHostedRelayConnection,
+  upgradeHostedRelayConfiguration,
 } from '../lib/index.ts';
 
 export const HOSTED_RELAY_CONTROL_OBJECT_NAME = 'ferretry-relay-control/v1' as const;
@@ -660,7 +661,16 @@ export class HostedRelayControlDurableObject {
     const configuration = HostedRelayConfigurationSchema.safeParse(rawConfiguration);
     const global = HostedRelayGlobalMetricsSchema.safeParse(rawGlobal);
     if (!configuration.success || !global.success) return { ok: false, reason: 'relay control state is damaged' };
-    return { ok: true, value: { configured: true, configuration: configuration.data, global: global.data } };
+    // Every decision reads limits through here, so a stored superseded default set is lifted on the
+    // first read after a deploy — a daemon refused under the old ceiling is admitted on its next dial.
+    return {
+      ok: true,
+      value: {
+        configured: true,
+        configuration: upgradeHostedRelayConfiguration(configuration.data),
+        global: global.data,
+      },
+    };
   }
 
   private async daemonMetrics(

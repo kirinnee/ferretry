@@ -162,3 +162,31 @@ export function relayCapacityRedialDelayMs(refusals: number, random: number): nu
   const jitter = Number.isFinite(random) ? Math.min(1, Math.max(0, random)) : 0;
   return Math.round(windowMs / 2 + (windowMs / 2) * jitter);
 }
+
+/** The soonest a daemon redials after a hosted relay refuses it for bytes (`4433`). */
+export const RELAY_BANDWIDTH_REDIAL_MIN_MS = 60_000;
+/**
+ * The longest a `4433` waits before asking again, however far away the reset is. The operator can
+ * raise a ceiling at any time, and a daemon that slept until midnight would ignore that for hours.
+ */
+export const RELAY_BANDWIDTH_RECHECK_MS = 1_800_000;
+/** How far past the reset a redial is spread, so every refused daemon does not dial at midnight UTC. */
+export const RELAY_BANDWIDTH_REDIAL_SPREAD_MS = 30_000;
+
+/**
+ * How long to wait before redialling after a hosted relay refused this daemon for bytes.
+ *
+ * A BYTE CEILING IS A DATE, NOT A STORM TO RIDE OUT. A refused daemon that redialled on the ordinary
+ * schedule was admitted, claimed, sent one frame and was refused again, every few seconds, until the
+ * window rolled over — spending the account's request budget to learn what the refusal already said.
+ * So it waits until the reset the refusal names (`untilResetMs`), never less than
+ * {@link RELAY_BANDWIDTH_REDIAL_MIN_MS} and never more than {@link RELAY_BANDWIDTH_RECHECK_MS}, plus up
+ * to {@link RELAY_BANDWIDTH_REDIAL_SPREAD_MS} of jitter. Total: an unusable `untilResetMs` waits the
+ * recheck interval, an unusable `random` adds no jitter.
+ */
+export function relayBandwidthRedialDelayMs(untilResetMs: number, random: number): number {
+  const until = Number.isNaN(untilResetMs) ? RELAY_BANDWIDTH_RECHECK_MS : untilResetMs;
+  const wait = Math.min(RELAY_BANDWIDTH_RECHECK_MS, Math.max(RELAY_BANDWIDTH_REDIAL_MIN_MS, until));
+  const jitter = Number.isFinite(random) ? Math.min(1, Math.max(0, random)) : 0;
+  return Math.round(wait + RELAY_BANDWIDTH_REDIAL_SPREAD_MS * jitter);
+}

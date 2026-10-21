@@ -76,8 +76,10 @@ const relaySentence = (leg: PairingLegFailure): string => {
         "That is a count the relay keeps, not the machine being busy. If this machine does not have many devices connected, the relay's count is wrong; " +
         'it repairs that by itself within about ten minutes, and the machine reconnects by itself too, so try again then.'
       );
-    case RELAY_CLOSE_CODES.rendezvousBusy:
     case RELAY_CLOSE_CODES.hostedBandwidth:
+      // Not "busy": a data allowance comes back at a fixed time, and "wait a minute" is wrong for a day.
+      return `Ferretry's relay (${host}) refused the connection because a relay data allowance is used up; a daily one resets at midnight UTC. Direct connections still work.`;
+    case RELAY_CLOSE_CODES.rendezvousBusy:
       return `Ferretry's relay (${host}) is busy right now. Wait a minute and try again.`;
     case RELAY_CLOSE_CODES.heartbeatTimeout:
       return `Ferretry's relay (${host}) did not answer in time.`;

@@ -34,7 +34,13 @@
  */
 
 import type { DaemonIdentity, RelayCrypto } from '@ferretry/relay';
-import { decodeControlMessage, decodeFrame, FRAME_KINDS, RELAY_CLOSE_CODES } from '@ferretry/relay';
+import {
+  decodeControlMessage,
+  decodeFrame,
+  FRAME_KINDS,
+  parseHostedBandwidthRefusal,
+  RELAY_CLOSE_CODES,
+} from '@ferretry/relay';
 import type { DeviceConnectionTracker } from '../../lib/pairing/index.ts';
 import type {
   AccessLeasePolicy,
@@ -54,6 +60,7 @@ import {
   type RelayCarrierDecision,
   RelayLink,
   type RelayLinkTimer,
+  relayBandwidthRedialDelayMs,
   relayCapacityRedialDelayMs,
   relayDialUrl,
   relayRedialDelayMs,
@@ -133,6 +140,18 @@ const IN_BAND_WINDOW_MS = 5_000;
 const printable = (value: string): string => value.replace(/\p{Cc}/gu, ' ').slice(0, 120);
 
 const formatSeconds = (milliseconds: number): string => `${(Math.max(0, milliseconds) / 1_000).toFixed(1)}s`;
+
+/**
+ * The byte-ceiling refusal a close or the relay's in-band `error` carried, or `null`. The close
+ * reason is the same sentence as the in-band one, so either is enough on its own.
+ */
+const bandwidthRefusal = (closed: string, said: string | undefined, now: number) => {
+  const closePrefix = `${RELAY_CLOSE_CODES.hostedBandwidth} `;
+  const saidPrefix = `error ${RELAY_CLOSE_CODES.hostedBandwidth} `;
+  if (said?.startsWith(saidPrefix) === true) return parseHostedBandwidthRefusal(said.slice(saidPrefix.length), now);
+  if (closed.startsWith(closePrefix)) return parseHostedBandwidthRefusal(closed.slice(closePrefix.length), now);
+  return null;
+};
 
 const formatDelay = (milliseconds: number): string =>
   milliseconds < 1_000 ? `${milliseconds}ms` : formatSeconds(milliseconds);
@@ -424,11 +443,24 @@ export class BunRelayCarrier {
       closed.startsWith(`${RELAY_CLOSE_CODES.hostedCapacity} `) ||
       said?.startsWith(`error ${RELAY_CLOSE_CODES.hostedCapacity} `) === true;
     this.#capacityRefusals = capacity ? this.#capacityRefusals + 1 : 0;
+    const bandwidth = capacity ? null : bandwidthRefusal(closed, said, this.#now());
     const delay = capacity
       ? relayCapacityRedialDelayMs(this.#capacityRefusals, this.#random())
-      : relayRedialDelayMs(this.#attempts, this.#random(), this.#decision.reconnectMs);
+      : bandwidth !== null
+        ? relayBandwidthRedialDelayMs(bandwidth.resetsAt - this.#now(), this.#random())
+        : relayRedialDelayMs(this.#attempts, this.#random(), this.#decision.reconnectMs);
     this.#attempts += 1;
-    if (capacity) {
+    if (bandwidth !== null) {
+      // An allowance is spent until a known instant, so the next try waits for it (or for the recheck
+      // interval, in case the operator raises the ceiling first) instead of asking every few seconds.
+      const whose = bandwidth.scope === 'daemon' ? 'this machine' : 'the whole relay';
+      const span = bandwidth.window === 'day' ? 'today' : 'this minute';
+      const resets = new Date(bandwidth.resetsAt).toISOString();
+      this.#detail = `the hosted relay's data allowance for ${whose} is used up for ${span} (${how}); it resets at ${resets}`;
+      this.#say(
+        `refused: the hosted relay's data allowance for ${whose} is used up for ${span}, resetting at ${resets} — redial attempt ${this.#attempts} in ${formatDelay(delay)}`,
+      );
+    } else if (capacity) {
       // A ceiling is the relay's answer, not a broken path, so it is said as one: what was refused, and
       // that the next try is minutes away. One line per attempt is at most one a minute, because the
       // capacity schedule never waits less than that — the 2026-10-19 log had one every four seconds.

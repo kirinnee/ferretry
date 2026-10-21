@@ -29,7 +29,7 @@ on:
   workflow_dispatch:
     inputs:
       operation:
-        description: Deploy, change the runtime kill switch, or read operator metrics
+        description: Deploy, change the runtime kill switch, read operator metrics, or change the ceilings
         required: true
         default: deploy
         type: choice
@@ -38,8 +38,26 @@ on:
           - enable
           - disable
           - metrics
+          - limits
       relay_url:
         description: Optional relay origin for enable; blank uses this Worker's workers.dev origin
+        required: false
+        type: string
+      # `limits` only. Each is a whole number; blank keeps the value the relay holds now.
+      daemon_gib_per_day:
+        description: 'limits: bytes one machine may relay per UTC day, in GiB (blank keeps it)'
+        required: false
+        type: string
+      daemon_mib_per_minute:
+        description: 'limits: bytes one machine may relay per minute, in MiB (blank keeps it)'
+        required: false
+        type: string
+      global_gib_per_day:
+        description: 'limits: bytes the whole relay may carry per UTC day, in GiB (blank keeps it)'
+        required: false
+        type: string
+      global_gib_per_minute:
+        description: 'limits: bytes the whole relay may carry per minute, in GiB (blank keeps it)'
         required: false
         type: string
 
@@ -222,6 +240,11 @@ jobs:
           HOSTED_RELAY_ORIGIN: ${{ vars.HOSTED_RELAY_ORIGIN }}
           OPERATION: ${{ inputs.operation }}
           REQUESTED_RELAY_URL: ${{ inputs.relay_url }}
+          # Through the environment, never interpolated into the script: an input is untrusted text.
+          DAEMON_GIB_PER_DAY: ${{ inputs.daemon_gib_per_day }}
+          DAEMON_MIB_PER_MINUTE: ${{ inputs.daemon_mib_per_minute }}
+          GLOBAL_GIB_PER_DAY: ${{ inputs.global_gib_per_day }}
+          GLOBAL_GIB_PER_MINUTE: ${{ inputs.global_gib_per_minute }}
         run: |
           set -euo pipefail
 
@@ -266,7 +289,45 @@ jobs:
           # Both branches project the strict input document — {version, relayUrl, limits}. The stored
           # document GET returns also carries the server-owned `updatedAt`, which the endpoint
           # refuses, so the fields are named rather than echoed back.
-          if [[ "$OPERATION" == "disable" ]]; then
+          if [[ "$OPERATION" == "limits" ]]; then
+            # Validate every input BEFORE anything is written, and say which one is wrong. The relay
+            # refuses an inconsistent document too, but only as a bare 400 that curl --fail hides.
+            for name in DAEMON_GIB_PER_DAY DAEMON_MIB_PER_MINUTE GLOBAL_GIB_PER_DAY GLOBAL_GIB_PER_MINUTE; do
+              value="${!name}"
+              if [[ -n "$value" && ! "$value" =~ ^[1-9][0-9]{0,5}$ ]]; then
+                echo "${name,,} must be a whole number from 1 to 999999, or blank to keep it (got '${value}');" \
+                  "nothing was changed" >&2
+                exit 1
+              fi
+            done
+            if [[ -z "$DAEMON_GIB_PER_DAY$DAEMON_MIB_PER_MINUTE$GLOBAL_GIB_PER_DAY$GLOBAL_GIB_PER_MINUTE" ]]; then
+              echo "limits needs at least one value; nothing was changed" >&2
+              exit 1
+            fi
+            next="$(jq -c \
+              --arg daemon_day "$DAEMON_GIB_PER_DAY" --arg daemon_minute "$DAEMON_MIB_PER_MINUTE" \
+              --arg global_day "$GLOBAL_GIB_PER_DAY" --arg global_minute "$GLOBAL_GIB_PER_MINUTE" '
+                def gib: tonumber * 1073741824;
+                def mib: tonumber * 1048576;
+                .configuration
+                | {version, relayUrl, limits}
+                | if $daemon_day == "" then . else .limits.maxBytesPerDayPerDaemon = ($daemon_day | gib) end
+                | if $daemon_minute == "" then . else .limits.maxBytesPerMinutePerDaemon = ($daemon_minute | mib) end
+                | if $global_day == "" then . else .limits.maxBytesPerDayGlobal = ($global_day | gib) end
+                | if $global_minute == "" then . else .limits.maxBytesPerMinuteGlobal = ($global_minute | gib) end
+              ' <<<"$current")"
+            # The same orderings the relay enforces, said in the units the operator typed.
+            problems="$(jq -r '.limits
+              | [ if .maxBytesPerDayGlobal < .maxBytesPerDayPerDaemon then "the global day ceiling is below one machine'"'"'s" else empty end,
+                  if .maxBytesPerMinuteGlobal < .maxBytesPerMinutePerDaemon then "the global minute ceiling is below one machine'"'"'s" else empty end,
+                  if .maxBytesPerDayPerDaemon < .maxBytesPerMinutePerDaemon then "one machine'"'"'s day ceiling is below its minute ceiling" else empty end,
+                  if .maxBytesPerDayGlobal < .maxBytesPerMinuteGlobal then "the global day ceiling is below its minute ceiling" else empty end ]
+              | join("; ")' <<<"$next")"
+            if [[ -n "$problems" ]]; then
+              echo "refusing these limits: ${problems}; nothing was changed" >&2
+              exit 1
+            fi
+          elif [[ "$OPERATION" == "disable" ]]; then
             next="$(jq -c '.configuration | {version, relayUrl: null, limits}' <<<"$current")"
           else
             relay_url="${REQUESTED_RELAY_URL:-$HOSTED_RELAY_ORIGIN}"
