@@ -65,10 +65,23 @@ export const DEFAULT_TRANSCRIPT_TAIL_BYTES = 16 * 1024 * 1024;
 const WINDOW_STEP_LIMIT = 64;
 
 /**
+ * The first window a tail tries, before it grows towards its byte bound.
+ *
+ * A tail was always the last 16 MiB, parsed in one synchronous step — a third of a second of a blocked
+ * event loop per 200 MB conversation, every time — although the newest few hundred events of a
+ * conversation almost always sit in its last megabyte or two. A tail now starts small and widens only
+ * while it has found fewer events than it was asked for and there are older bytes it has not read, so
+ * the common answer costs a small parse and the rare one still reaches the same bound it always had.
+ */
+const TAIL_GROWTH_BYTES: readonly number[] = [512 * 1024, 2 * 1024 * 1024];
+
+/**
  * The last `limit` events of `file`, read from its end in bounded steps.
  *
  * Only the newest `limit` events are ever held, so memory is bounded by the limit and one step, not
- * by the file.
+ * by the file. The window starts small and grows to at most `bytes` (see {@link TAIL_GROWTH_BYTES});
+ * because every window ends at the end of the file, the newest `limit` events of a smaller window that
+ * found `limit` of them are exactly the newest `limit` events of the largest.
  */
 export async function tailTranscriptEvents(
   source: TranscriptSource,
@@ -77,15 +90,37 @@ export async function tailTranscriptEvents(
   limit = DEFAULT_TRANSCRIPT_TAIL,
   bytes = DEFAULT_TRANSCRIPT_TAIL_BYTES,
 ): Promise<readonly TranscriptEvent[]> {
+  const windows = [...TAIL_GROWTH_BYTES.filter(size => size < bytes), bytes];
+  let events: readonly TranscriptEvent[] = [];
+  for (const size of windows) {
+    const read = await tailWindow(source, file, sessionId, limit, size);
+    events = read.events;
+    if (events.length >= limit || read.fromStart) break;
+  }
+  return events;
+}
+
+/** One tail window: its newest `limit` events, and whether it began at the start of the file. */
+async function tailWindow(
+  source: TranscriptSource,
+  file: string,
+  sessionId: string,
+  limit: number,
+  bytes: number,
+): Promise<{ readonly events: readonly TranscriptEvent[]; readonly fromStart: boolean }> {
   const window = source.window(file, { sessionId, start: { at: 'tail', bytes } });
   let events: TranscriptEvent[] = [];
+  // A window that began mid-file cannot number its lines, so a first batch that does began at byte
+  // zero: there is nothing older for a wider window to find. No batch at all is an empty file.
+  let fromStart: boolean | undefined;
   for (let step = 0; step < WINDOW_STEP_LIMIT; step += 1) {
     const { batch, more } = await window.next();
+    if (batch !== undefined && fromStart === undefined) fromStart = batch.cursor.nextLine !== undefined;
     if (batch?.reset === true) events = [];
     if (batch !== undefined) events = [...events, ...batch.events].slice(-limit);
     if (!more) break;
   }
-  return events;
+  return { events, fromStart: fromStart ?? true };
 }
 
 /**

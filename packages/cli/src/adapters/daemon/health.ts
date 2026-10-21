@@ -1,4 +1,4 @@
-import { type HealthView, HealthViewSchema } from '@ferretry/protocol';
+import { type HealthView, HealthViewSchema, type LivenessView, LivenessViewSchema } from '@ferretry/protocol';
 import type { IDaemonHealthPort } from '../../lib/daemon/ports.ts';
 
 /** The one client capability the health probe consumes. */
@@ -8,6 +8,18 @@ export type HealthApiClient = {
 
 /** The daemon's health route. */
 export const HEALTH_PATH = '/v1/health';
+
+/** The daemon's liveness route, served from the moment its address is bound. */
+export const LIVENESS_PATH = '/healthz';
+
+/**
+ * One GET whose body is wanted WHATEVER its status: the protocol client refuses a non-2xx response, and
+ * a booting daemon's 503 carries the very facts `status` reports. It rejects only when nothing answered.
+ */
+export type LivenessFetch = (
+  path: string,
+  timeoutMs: number,
+) => Promise<{ readonly status: number; readonly body: unknown }>;
 
 /**
  * Asks the daemon about itself over the protocol client.
@@ -21,7 +33,18 @@ export class ProtocolDaemonHealth implements IDaemonHealthPort {
   constructor(
     private readonly client: HealthApiClient,
     private readonly timeoutMs = 2_000,
+    private readonly raw?: LivenessFetch,
   ) {}
+
+  async liveness(): Promise<LivenessView | undefined> {
+    if (this.raw === undefined) return undefined;
+    try {
+      const parsed = LivenessViewSchema.safeParse((await this.raw(LIVENESS_PATH, this.timeoutMs)).body);
+      return parsed.success ? parsed.data : undefined;
+    } catch {
+      return undefined;
+    }
+  }
 
   async probe(): Promise<HealthView | undefined> {
     try {
