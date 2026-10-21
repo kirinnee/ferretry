@@ -1,6 +1,12 @@
-import { fileURLToPath } from 'node:url';
-
-import type { PdfDecryptWorkerRequest, PdfDecryptWorkerResponse } from '../src/lib/attachments/pdf-decrypt-protocol.ts';
+// Imported as a FILE, so a compiled binary embeds it and this is a path inside the binary. Resolving it
+// from the package at run time found it only in a source checkout, and the compiled worker could never
+// load qpdf at all.
+import QPDF_WASM_PATH from '@neslinesli93/qpdf-wasm/dist/qpdf.wasm' with { type: 'file' };
+import type {
+  PdfDecryptProbeRequest,
+  PdfDecryptWorkerRequest,
+  PdfDecryptWorkerResponse,
+} from '../src/lib/attachments/pdf-decrypt-protocol.ts';
 
 interface QpdfRuntime {
   callMain(args: string[]): number;
@@ -13,7 +19,6 @@ interface QpdfRuntime {
 
 type QpdfFactory = (options: { locateFile(): string; noInitialRun: boolean }) => Promise<QpdfRuntime>;
 
-const QPDF_WASM_PATH = fileURLToPath(new URL('./qpdf.wasm', import.meta.resolve('@neslinesli93/qpdf-wasm')));
 const INPUT = '/input.pdf';
 const OUTPUT = '/output.pdf';
 const PASSWORD = '/password';
@@ -33,19 +38,34 @@ const post = (response: PdfDecryptWorkerResponse, transfer: ArrayBuffer[] = []):
   (postMessage as (value: unknown, transfer?: ArrayBuffer[]) => void)(response, transfer);
 };
 
-declare const self: { onmessage: ((event: MessageEvent<PdfDecryptWorkerRequest>) => void) | null };
+declare const self: {
+  onmessage: ((event: MessageEvent<PdfDecryptWorkerRequest | PdfDecryptProbeRequest>) => void) | null;
+};
+
+const startQpdf = async (): Promise<QpdfRuntime> => {
+  const { default: factory } = await import('@neslinesli93/qpdf-wasm');
+  return await (factory as unknown as QpdfFactory)({ locateFile: () => QPDF_WASM_PATH, noInitialRun: true });
+};
 
 self.onmessage = async event => {
   let passwordBytes: Uint8Array | undefined;
   let qpdf: QpdfRuntime | undefined;
   try {
+    if ('probe' in event.data) {
+      // Proves this thread started and qpdf loaded inside it — `fyd --check` asks, so a binary whose
+      // worker or engine cannot start says so before anyone tries to unlock a PDF with it.
+      qpdf = await startQpdf();
+      post(
+        qpdf.callMain(['--version']) === 0 ? { ok: true, probe: true } : { ok: false, failure: 'unreadable_document' },
+      );
+      return;
+    }
     const request = event.data;
     if (!(request.input instanceof ArrayBuffer) || typeof request.password !== 'string' || request.maxBytes <= 0) {
       post({ ok: false, failure: 'unreadable_document' });
       return;
     }
-    const { default: factory } = await import('@neslinesli93/qpdf-wasm');
-    qpdf = await (factory as unknown as QpdfFactory)({ locateFile: () => QPDF_WASM_PATH, noInitialRun: true });
+    qpdf = await startQpdf();
     qpdf.FS.writeFile(INPUT, new Uint8Array(request.input));
     passwordBytes = new TextEncoder().encode(request.password);
     qpdf.FS.writeFile(PASSWORD, passwordBytes);

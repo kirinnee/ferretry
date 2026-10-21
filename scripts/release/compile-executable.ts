@@ -35,9 +35,15 @@
  * runner. A cross-compile therefore needs every target's prebuild installed (`compile.sh` installs
  * them), and a build for a target with no mapping, or with its prebuild missing, FAILS rather than
  * shipping a daemon whose peer-to-peer carrier can never start.
+ *
+ * AND EVERY WORKER THREAD'S PROGRAM IS EMBEDDED BESIDE THE ENTRY. A `bin/<name>.worker.ts` next to the
+ * entry is compiled in as an extra entrypoint, so the binary holds it as `<root>/<name>.worker.js` —
+ * the path `packages/daemon/src/adapters/runtime/bundled-worker.ts` resolves it by. Without this, a
+ * `new Worker` in a compiled binary names a file the binary does not have and never starts: the PDF
+ * unlock shipped that way. `fyd --check` starts each worker, and the release smoke asserts it.
  */
 import { createRequire } from 'node:module';
-import { dirname } from 'node:path';
+import { dirname, join } from 'node:path';
 import type { BunPlugin } from 'bun';
 
 interface Rewrite {
@@ -174,8 +180,12 @@ function parse(argv: readonly string[]): Options {
 }
 
 const options = parse(Bun.argv.slice(2));
+/** Every worker program beside the entry, in a stable order. */
+const workers = [...new Bun.Glob('*.worker.ts').scanSync({ cwd: dirname(options.entry) })]
+  .sort()
+  .map(name => join(dirname(options.entry), name));
 const result = await Bun.build({
-  entrypoints: [options.entry],
+  entrypoints: [options.entry, ...workers],
   compile: {
     outfile: options.outfile,
     ...(options.target === undefined ? {} : { target: options.target as Bun.Build.CompileTarget }),
@@ -188,4 +198,6 @@ if (!result.success) {
   for (const log of result.logs) console.error(log);
   process.exit(1);
 }
-console.log(`✅ compiled ${options.entry} -> ${options.outfile}`);
+console.log(
+  `✅ compiled ${options.entry}${workers.length === 0 ? '' : ` (+ ${workers.join(', ')})`} -> ${options.outfile}`,
+);

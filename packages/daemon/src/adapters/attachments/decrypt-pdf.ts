@@ -1,10 +1,15 @@
 import {
   PdfDecryptError,
+  type PdfDecryptProbeRequest,
   type PdfDecryptWorkerRequest,
   type PdfDecryptWorkerResponse,
 } from '../../lib/attachments/pdf-decrypt-protocol.ts';
+import { bundledWorkerUrl } from '../runtime/bundled-worker.ts';
 
-function workerResponse(value: unknown): value is PdfDecryptWorkerResponse {
+/** A decryption's answer — never a probe's, which only `probePdfDecryptWorker` asks for. */
+type DecryptAnswer = Exclude<PdfDecryptWorkerResponse, { readonly probe: true }>;
+
+function workerResponse(value: unknown): value is DecryptAnswer {
   if (typeof value !== 'object' || value === null) return false;
   const response = value as { ok?: unknown; output?: unknown; failure?: unknown };
   return (
@@ -28,7 +33,7 @@ export async function decryptPdfInMemory(
   password: string,
   { timeoutMs = 20_000, maxBytes = 40 * 1024 * 1024 }: { readonly timeoutMs?: number; readonly maxBytes?: number } = {},
 ): Promise<Uint8Array> {
-  const worker = new Worker(new URL('../../../bin/pdf-decrypt-worker.ts', import.meta.url), { type: 'module' });
+  const worker = new Worker(bundledWorkerUrl('pdf-decrypt'), { type: 'module' });
   const input = encrypted.slice();
   try {
     return await new Promise<Uint8Array>((resolve, reject) => {
@@ -49,6 +54,54 @@ export async function decryptPdfInMemory(
       worker.onerror = () => finish(() => reject(new PdfDecryptError('unreadable_document')));
       const request: PdfDecryptWorkerRequest = { input: input.buffer as ArrayBuffer, password, maxBytes };
       worker.postMessage(request, [input.buffer as ArrayBuffer]);
+    });
+  } finally {
+    worker.terminate();
+  }
+}
+
+/** Whether the PDF worker starts and loads qpdf here, and if not, why — for `fyd --check`. */
+export type PdfWorkerProbe = { readonly ready: true } | { readonly ready: false; readonly reason: string };
+
+/**
+ * Starts the PDF worker, asks it to load qpdf, and ends it.
+ *
+ * The one end-to-end proof that this process can unlock a PDF at all: a compiled binary that did not
+ * embed the worker, or the wasm it loads, used to fail only when somebody typed a password.
+ */
+export async function probePdfDecryptWorker({
+  timeoutMs = 20_000,
+}: { readonly timeoutMs?: number } = {}): Promise<PdfWorkerProbe> {
+  let worker: Worker;
+  try {
+    worker = new Worker(bundledWorkerUrl('pdf-decrypt'), { type: 'module' });
+  } catch (error) {
+    return {
+      ready: false,
+      reason: `the worker could not be created: ${error instanceof Error ? error.message : String(error)}`,
+    };
+  }
+  try {
+    return await new Promise<PdfWorkerProbe>(resolve => {
+      const timeout = setTimeout(
+        () => resolve({ ready: false, reason: `no answer within ${String(timeoutMs)} ms — the worker did not start` }),
+        timeoutMs,
+      );
+      const settle = (probe: PdfWorkerProbe): void => {
+        clearTimeout(timeout);
+        resolve(probe);
+      };
+      worker.onmessage = (event: MessageEvent<unknown>) => {
+        const answer = event.data as { ok?: unknown; probe?: unknown } | null;
+        settle(
+          answer?.ok === true && answer.probe === true
+            ? { ready: true }
+            : { ready: false, reason: 'the worker started but qpdf did not load' },
+        );
+      };
+      worker.onerror = event => settle({ ready: false, reason: `the worker failed: ${event?.message ?? 'no detail'}` });
+      const request: PdfDecryptProbeRequest = { probe: true };
+      worker.postMessage(request);
     });
   } finally {
     worker.terminate();
