@@ -110,9 +110,14 @@ describe('installAppViewport', () => {
   it('publishes the visual geometry, detects a focused phone keyboard, restores document scroll, and cleans up', () => {
     const fixture = makeEnvironment();
     fixture.set({ scroll: { x: 3, y: 4 } });
+    // A leftover from an earlier keyboard frame must not outlive a page that starts at rest.
+    fixture.root.style.setProperty('--app-h', '400px');
+    fixture.root.style.setProperty('--app-top', '9px');
     const stop = installAppViewport(fixture.env);
-    expect(fixture.root.style.getPropertyValue('--app-h')).toBe('844px');
-    expect(fixture.root.style.getPropertyValue('--app-top')).toBe('0px');
+    // AT REST NOTHING SIZES THE SHELL FROM HERE: the stylesheet's 100dvh is the screen.
+    expect(fixture.root.style.getPropertyValue('--app-h')).toBe('');
+    expect(fixture.root.style.getPropertyValue('--app-top')).toBe('');
+    expect(fixture.root.style.getPropertyValue('--kb-h')).toBe('0px');
     expect(fixture.root.getAttribute(KEYBOARD_ATTRIBUTE)).toBeNull();
 
     const input = document.createElement('input');
@@ -125,6 +130,9 @@ describe('installAppViewport', () => {
     fixture.flush();
     expect(fixture.root.style.getPropertyValue('--kb-h')).toBe(`${844 - 500 - 10}px`);
     expect(fixture.root.getAttribute(KEYBOARD_ATTRIBUTE)).toBe('open');
+    // The keyboard pans the visual viewport, so the shell follows the visible box while it is up.
+    expect(fixture.root.style.getPropertyValue('--app-h')).toBe('500px');
+    expect(fixture.root.style.getPropertyValue('--app-top')).toBe('10px');
     // The keyboard came up over the focused field, so the field is brought back into view — once, on the
     // opening frame, never again while the reader scrolls with the keyboard up.
     expect(fixture.revealed).toEqual([input]);
@@ -138,6 +146,9 @@ describe('installAppViewport', () => {
     fixture.documentEvents.emit('visibilitychange');
     fixture.flush();
     expect(fixture.root.getAttribute(KEYBOARD_ATTRIBUTE)).toBeNull();
+    // The keyboard closed: the visible-box numbers go, and the shell is the screen again.
+    expect(fixture.root.style.getPropertyValue('--app-h')).toBe('');
+    expect(fixture.root.style.getPropertyValue('--app-top')).toBe('');
     expect(KEYBOARD_MIN_PX).toBe(120);
 
     fixture.viewportEvents.emit('resize');
@@ -154,7 +165,9 @@ describe('installAppViewport', () => {
       return <span />;
     };
     const view = await mount(<Probe />);
-    expect(document.documentElement.style.getPropertyValue('--app-h')).not.toBe('');
+    // Mounted and measuring (--kb-h is always written); at rest the shell keeps its CSS height.
+    expect(document.documentElement.style.getPropertyValue('--kb-h')).not.toBe('');
+    expect(document.documentElement.style.getPropertyValue('--app-h')).toBe('');
     await view.unmount();
   });
 
@@ -176,7 +189,10 @@ describe('installAppViewport', () => {
     };
     try {
       const view = await mount(<Probe />);
-      expect(document.documentElement.style.getPropertyValue('--app-h')).toBe('600px');
+      // The adapter reads the native height and pan offset: what the keyboard hides is measured from them.
+      expect(document.documentElement.style.getPropertyValue('--kb-h')).toBe(
+        `${Math.max(0, Math.round(window.innerHeight - 600 - 8))}px`,
+      );
       expect(listeners.size).toBe(1);
       await view.unmount();
       expect(listeners.size).toBe(0);

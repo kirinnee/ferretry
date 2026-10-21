@@ -26,6 +26,7 @@ export type SettingId =
   | 'install-app'
   | 'device-permissions'
   | 'clear-cached-data'
+  | 'about-device'
   | 'speedup-keys'
   | 'dictation-debug'
   | 'transcription-log'
@@ -326,6 +327,24 @@ export const SETTINGS_DEFINITIONS: readonly SettingDefinition[] = [
     ],
   },
   {
+    id: 'about-device',
+    label: 'About this device',
+    description:
+      'How this screen measures itself — its size, the safe areas around the notch and home indicator, and where the app’s edges landed. For a screenshot when something at the edge of the screen looks out of place.',
+    keywords: [
+      'viewport',
+      'screen',
+      'safe area',
+      'notch',
+      'home indicator',
+      'diagnostics',
+      'debug',
+      'gap',
+      'standalone',
+      'device',
+    ],
+  },
+  {
     id: 'speedup-keys',
     label: 'Speed-up keys',
     description:
@@ -431,6 +450,7 @@ export const SETTINGS_SECTIONS: readonly SettingsSectionDefinition[] = [
       'transcription-log',
       'dictation-debug',
       'clear-cached-data',
+      'about-device',
     ],
   },
   {

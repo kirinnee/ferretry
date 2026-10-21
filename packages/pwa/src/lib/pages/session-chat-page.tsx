@@ -1308,7 +1308,7 @@ export function SessionChatPage({
           sessionId={session.config.id}
         />
       </div>
-      <div className="fy-chat-input" data-session-input="">
+      <div className="fy-chat-input" data-safe-bottom="" data-session-input="">
         <div className="fy-chat-input__column">
           {permissionRequest === undefined || !canControl ? null : (
             <ApprovalCard

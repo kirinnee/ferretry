@@ -872,35 +872,44 @@ pre,
    land alongside theme work without either side touching the other's values.
    ============================================================================ */
 
-/* ---- THE SHELL IS THE VISUAL VIEWPORT -------------------------------------
-   `100dvh` is not what the reader can see once a software keyboard is up. iOS
-   Safari keeps the layout viewport at full height and PANS the visual viewport
-   over it, so the bottom of a 100dvh, overflow:hidden shell — the composer, the
-   send button — sits behind the keyboard with nothing to scroll it into view.
-   Android only resizes once the viewport meta opts in (index.html).
+/* ---- THE SHELL IS THE SCREEN ----------------------------------------------
+   At rest the shell is `100dvh`, pinned to the top of the layout viewport, and nothing in JavaScript
+   sizes it. Only while a software keyboard is up does `src/hooks/use-app-viewport.ts` write
+   --app-h / --app-top: iOS keeps the layout viewport at full height and PANS the visual viewport
+   over it, so a 100dvh, overflow:hidden shell would leave the composer and the send button behind
+   the keyboard with nothing to scroll them into view. The three height declarations are a fallback
+   ladder: a browser without dvh gets vh, every other one gets dvh, and the keyboard frame gets the
+   visible height. --kb-h is always written (the keyboard's own height). */
 
-   So the shell is sized from `window.visualViewport` and positioned at its pan
-   offset (src/hooks/useAppViewport.ts writes --app-h / --app-top / --kb-h). The
-   three height declarations are a deliberate fallback ladder: a browser without
-   dvh gets vh, a page whose JS has not run yet gets dvh, and everything else
-   gets the real visible height. */
-/* THE BOTTOM INSET HAS ONE OWNER: `.kt-shell`. A home-indicator phone reports ~34px. Whoever pays it
-   AND a descendant that pays it again leaves a gap twice that size — the "empty band under the composer
-   / under the tab bar" iPhones showed. So the shell reserves it once, nothing inside the shell reads
-   `env(safe-area-inset-bottom)` again, and a bar that wants its surface to reach the screen edge BLEEDS into
-   the reservation (`.kt-tabbar`) rather than adding to it. Surfaces that are `position: fixed` over the
-   viewport (sheets, overlays, toasts) are not inside the shell's padding and read the same variable.
-   The keyboard hides the indicator, and iOS standalone keeps reporting the inset while it is up, so the
-   variable is 0 while `data-keyboard='open'` — otherwise a band of dead space sits above the keys.
-   IT PAYS HALF THE INSET, not all of it: the platform's 34px is the whole home-indicator zone, but the indicator
-   itself is a ~5px bar 8px up from the edge, so reserving all of it plus the composer's own padding left ~46px
-   of dead ground under the model chips (measured at 393x852) — "the bottom is very far away". Half keeps every
-   control clear of the indicator and its swipe-home strip. Android Chrome reports 0, so it is unchanged there. */
+/* THE PLATFORM'S INSETS ARE READ ONCE, HERE. Everything below reads these variables, never `env()`,
+   so there is one place that says what the device reported — the one Settings › This device ›
+   About this device › Viewport details shows, and the one a geometry harness sets when the engine
+   it runs cannot report a home indicator. */
 :root {
-  --safe-bottom: calc(env(safe-area-inset-bottom, 0px) / 2);
+  --inset-top: env(safe-area-inset-top, 0px);
+  --inset-bottom: env(safe-area-inset-bottom, 0px);
+  /* What the bottom of the screen owes the home indicator: all of it, or nothing while a keyboard is
+     up (it hides the indicator, and iOS standalone keeps reporting the inset under it). */
+  --safe-bottom: var(--inset-bottom);
 }
 html[data-keyboard='open'] {
   --safe-bottom: 0px;
+}
+
+/* AN INSTALLED iOS 26 APP STARTS SHORT. With `viewport-fit=cover` and the `black-translucent` status
+   bar (app/index.html), WebKit sizes a home-screen app's viewport short by the status bar's height
+   (WebKit bug 301108): innerHeight, 100dvh and visualViewport.height all read e.g. 793 on an 852pt
+   screen, and the fixed shell stops there, leaving a band of page ground under the composer — the
+   "bottom of the app is very far away" that no amount of trimming the inset fixed. The viewport is
+   only short while the DOCUMENT is shorter than the screen, so the root is asked to be the large
+   viewport tall; once WebKit hands over the full viewport, 100% IS that height and the rule is inert.
+   The `min()` cap keeps an opaque status bar (top inset 0, 100lvh already the whole screen) from
+   gaining a status bar's worth of scroll. Android, desktop and a Safari tab (no `standalone`
+   display mode, or a top inset of 0) compute `100%` and are untouched. */
+@media (display-mode: standalone) {
+  html {
+    min-height: min(100lvh, calc(100% + var(--inset-top)));
+  }
 }
 
 .kt-shell {
@@ -913,14 +922,40 @@ html[data-keyboard='open'] {
   height: 100dvh;
   height: var(--app-h, 100dvh);
   /* Notch and home indicator. `viewport-fit=cover` lets the app paint edge to
-     edge; these pay the insets back exactly once, at the outermost box, so no
-     component has to know about them and desktop (`env()` = 0) is untouched.
+     edge; these pay the insets back at the outermost box, so no component has
+     to know about them and desktop (`env()` = 0) is untouched.
      The release notice is pinned above the shell, so its measured height
      (`--release-notice-h`, App.tsx) is room the page starts below, not under. */
-  padding-top: calc(env(safe-area-inset-top, 0px) + var(--release-notice-h, 0px));
+  padding-top: calc(var(--inset-top) + var(--release-notice-h, 0px));
   padding-bottom: var(--safe-bottom);
   padding-left: env(safe-area-inset-left, 0px);
   padding-right: env(safe-area-inset-right, 0px);
+}
+
+/* THE BOTTOM INSET HAS EXACTLY ONE OWNER PER SCREEN.
+   On a phone the owner is the bar the screen ends in — the composer, the tab bar, the terminal key
+   bar, the setup footer — each marked `data-safe-bottom` and declaring its own resting padding as
+   `--own-pad-bottom`. It pays `max(own padding, inset)`: the inset ABSORBS the bar's own padding
+   instead of stacking on it, so the composer's last line sits one inset (34px on a 15 Pro) above the
+   screen edge and its ground runs to the edge. While such a bar is on screen the shell pays nothing.
+   A screen that ends in content (Files, a settings page) has no owner, and the shell pays it instead.
+   A bar in a `hidden` tab panel is not on screen and claims nothing.
+   From 768px up (the drawer breakpoint, `DRAWER_MAX`) several columns meet the bottom edge side by
+   side, so the shell pays it for all of them and every bar keeps only its own padding.
+   Fixed surfaces outside the shell (sheets, overlays, toasts) are not inside either and read
+   --safe-bottom themselves. History: the shell AND the bars both paid it (#649 measured 68px at
+   393x852), then the shell alone plus the composer's own padding, then half the inset (#651) —
+   none of which moved the band, because the band was the short viewport above. */
+[data-safe-bottom] {
+  padding-bottom: var(--own-pad-bottom, 0px);
+}
+@media (max-width: 767.98px) {
+  [data-safe-bottom] {
+    padding-bottom: max(var(--own-pad-bottom, 0px), var(--safe-bottom));
+  }
+  .kt-shell:has([data-safe-bottom]:not([hidden] *)) {
+    padding-bottom: 0;
+  }
 }
 
 /* Nothing behind the app scrolls, ever. The shell IS the viewport, so a page
@@ -1591,9 +1626,9 @@ body {
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
   flex-shrink: 0;
-  /* Bleeds into the shell's reservation: the bar's surface reaches the screen edge, its buttons stay above the indicator. */
-  margin-bottom: calc(-1 * var(--safe-bottom));
-  padding-bottom: var(--safe-bottom);
+  /* The phone's bottom-inset owner (`data-safe-bottom`, see THE BOTTOM INSET above): its surface reaches
+     the screen edge and its buttons sit one inset above it. */
+  --own-pad-bottom: 0px;
   border-top: var(--divider-width) solid var(--border-strong);
   background: var(--surface);
 }
@@ -2144,7 +2179,9 @@ body {
   min-width: 0;
   padding-top: 0.5rem;
   padding-right: var(--fy-chat-gutter, 0px);
-  padding-bottom: 0.5rem;
+  /* Its resting bottom padding. On a phone it is the screen's bottom-inset owner (`data-safe-bottom`) and
+     pays max(this, the inset) — see THE BOTTOM INSET in the MOBILE / TOUCH section. */
+  --own-pad-bottom: 0.5rem;
 }
 .fy-chat-input__column {
   width: 100%;

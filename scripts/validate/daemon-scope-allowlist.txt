@@ -83,3 +83,5 @@ access packages/pwa/src/components/fy-render-media.tsx # an author-named https i
 retain packages/pwa/src/lib/message-clock.ts:formatters # memoised Intl.DateTimeFormat objects keyed by locale and timezone. They describe how this device prints a time, which every paired daemon shares; no daemon record is stored.
 retain packages/pwa/src/components/fy-render-fragment.tsx:purifier # one DOMPurify instance with this module's fixed hooks; it holds sanitizer rules, never a daemon record, and is the same for every paired daemon.
 retain packages/pwa/src/lib/trusted-types.ts:fragmentPolicies # one fy-fragment Trusted Types policy per browser policy factory, because the browser refuses a second policy of the same name; no daemon record is stored.
+retain packages/pwa/src/features/settings/viewport-details.tsx:overlayShown # the Viewport details "Show over the app" switch: whether THIS device's screen readout is pinned. It measures the browser, holds no daemon record, and a reload clears it.
+retain packages/pwa/src/features/settings/viewport-details.tsx:overlayListeners # the subscribers to that one per-device switch (useSyncExternalStore); no daemon record is stored.

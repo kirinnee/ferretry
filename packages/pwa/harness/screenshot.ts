@@ -45,13 +45,14 @@ import { mkdirSync, readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { Locator, Page } from 'playwright-core';
-import { chromium } from 'playwright-core';
+import { type Browser, chromium, webkit } from 'playwright-core';
 import { THEME_FAMILIES } from '../src/lib/theme-preferences.ts';
 import { captureElement } from './gallery-capture.ts';
 import { assertFixedElementsClear } from './landing-geometry.ts';
 import { runSafeAreaGeometry, SAFE_AREA_GEOMETRY_CHECKS } from './safe-area-geometry.ts';
 import { runSessionsPageGeometry, SESSIONS_PAGE_GEOMETRY_CHECKS } from './sessions-page-geometry.ts';
 import { runSessionLayoutGeometry, SESSION_LAYOUT_GEOMETRY_CHECKS } from './session-layout-geometry.ts';
+import { runViewportMatrix } from './viewport-matrix.ts';
 
 const harnessDir = dirname(fileURLToPath(import.meta.url));
 const packageDir = resolve(harnessDir, '..');
@@ -123,6 +124,11 @@ const SESSION_LAYOUT_ONLY = process.argv.includes('--session-layout-only');
 const SAFE_AREA_ONLY = process.argv.includes('--safe-area-only');
 /** Just the Sessions page's sideways-scroll geometry (`sessions-page-geometry.ts`). */
 const SESSIONS_PAGE_ONLY = process.argv.includes('--sessions-page-only');
+/**
+ * The bottom of the app across the device matrix (`viewport-matrix.ts`): iPhones in WebKit when
+ * `FY_WEBKIT` names a Playwright WebKit executable, an installed Android app and a desktop in Chromium.
+ */
+const VIEWPORT_MATRIX_ONLY = process.argv.includes('--viewport-matrix-only');
 
 /**
  * Whether this invocation walks the Settings block at all, which decides which tally it owes.
@@ -151,7 +157,8 @@ const WALKS_SETTINGS = !(
   AGENT_CLIS_ONLY ||
   SESSION_LAYOUT_ONLY ||
   SAFE_AREA_ONLY ||
-  SESSIONS_PAGE_ONLY
+  SESSIONS_PAGE_ONLY ||
+  VIEWPORT_MATRIX_ONLY
 );
 
 /**
@@ -2083,7 +2090,9 @@ try {
 
   const browser = await chromium.launch({ executablePath: chrome, headless: true });
   try {
-    for (const viewport of SESSION_LAYOUT_ONLY || SAFE_AREA_ONLY || SESSIONS_PAGE_ONLY ? [] : VIEWPORTS) {
+    for (const viewport of SESSION_LAYOUT_ONLY || SAFE_AREA_ONLY || SESSIONS_PAGE_ONLY || VIEWPORT_MATRIX_ONLY
+      ? []
+      : VIEWPORTS) {
       const context = await browser.newContext({
         ...(viewport.name === 'mobile'
           ? PHONE_CONTEXT
@@ -4032,6 +4041,31 @@ try {
       process.stdout.write(
         `✅ safe-area geometry checks: ${safeAreaChecks}/${SAFE_AREA_GEOMETRY_CHECKS} in ${SCHEME}\n`,
       );
+
+    // THE BOTTOM OF THE APP ACROSS THE DEVICE MATRIX, each in its own engine. A WebKit row with no WebKit on
+    // this machine is reported as skipped, never counted as passed.
+    if (VIEWPORT_MATRIX_ONLY) {
+      const webkitPath = process.env.FY_WEBKIT;
+      const engine: Browser | undefined =
+        webkitPath === undefined || webkitPath === ''
+          ? undefined
+          : await webkit.launch({ executablePath: webkitPath, headless: true });
+      try {
+        const matrix = await runViewportMatrix({
+          browsers: engine === undefined ? { chromium: browser } : { chromium: browser, webkit: engine },
+          rootUrl: server.url.toString(),
+          scheme: SCHEME,
+          fail,
+          keyboardShim: VISUAL_VIEWPORT_SHIM,
+          captureDir: outDir,
+        });
+        if (matrix.checks !== matrix.owed)
+          fail(`the viewport matrix made ${matrix.checks} checks instead of the ${matrix.owed} it owes`);
+        process.stdout.write(`✅ viewport matrix checks: ${matrix.checks}/${matrix.owed} in ${SCHEME}\n`);
+      } finally {
+        await engine?.close();
+      }
+    }
 
     // THE SESSIONS PAGE'S SIDEWAYS SCROLL, on a phone at four widths and every density, with the worst text.
     const owesSessionsPage = WALKS_SETTINGS || SESSIONS_PAGE_ONLY;
