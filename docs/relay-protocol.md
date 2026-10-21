@@ -25,20 +25,25 @@ deployment is `src/adapters`.
 the browser a daemon address and a **key fingerprint**; what was missing was a way to make that
 address reachable when the daemon has no inbound route.
 
-There are two **kinds** of carrier and one security model across both. A daemon may hold several of
-the second kind, and which ones exist is the daemon's answer rather than the browser's.
+There are four **kinds** of carrier and one security model across all of them. This section and §§2–14
+describe the first two; §15 adds WebRTC and the hosted Cloudflare tunnel, and the per-device choice
+among them. Which carriers a daemon holds is the daemon's answer rather than the browser's.
 
 | Carrier    | What it is                                                                      | Where it belongs                                                              |
 | ---------- | ------------------------------------------------------------------------------- | ----------------------------------------------------------------------------- |
 | **Direct** | The browser opens a WebSocket straight at the daemon, and runs a session on it. | Attempted first, automatically, whenever the daemon is reachable.             |
 | **Relay**  | A Cloudflare Worker + Durable Object forwarding opaque frames it cannot read.   | The automatic fallback when direct is not. Up to four; Ferretry operates one. |
 
-**Neither is a question a conforming product asks.** The required behaviour is: try every direct
-carrier the daemon published first, because direct has fewer hops and fewer observers; then each
-rendezvous it published, in the daemon's own order; and always say which carrier is live and why the
-others were passed over. No carrier chooser, nothing to opt into, and no silent degradation — a
-surface that shows a connection without naming its carrier is not conforming. The PWA's interim
-three-way chooser and self-hosting setup route have been removed (§13 piece 5).
+**The default asks nothing; a choice exists for whoever wants one.** The owner decided on 2026-10-21
+that a person may choose a carrier per device and machine — Auto, WebRTC only, tunnel only or relay
+only (§15) — and that **Auto is the default**: direct first, because direct has fewer hops and fewer
+observers; then WebRTC; then a tunnel when the daemon published one; then each rendezvous it published,
+in the daemon's own order. This retires the earlier rule that a conforming product has no carrier
+chooser. What it does not retire: nothing has to be chosen to work, a carrier is still chosen by
+trying it, there is no silent degradation, and a surface that shows a connection without naming its
+carrier and why the others were passed over is not conforming. The interim three-way chooser that was
+removed (§13 piece 5) chose a relay's OPERATOR during onboarding; the §15 choice is a preference over
+carriers the daemon already publishes, and onboarding still asks no carrier question.
 
 The decision layer for that behaviour is in this package today: `connectionPreferenceOrder` in
 `packages/relay/src/lib/connection.ts` orders direct before relay, and `chooseConnection` returns the
@@ -2224,3 +2229,188 @@ the rendezvous's own close-code constants for a close the rendezvous never sends
 byte budget above is owned the same way, as that package's `relayDataByteBudget`: both ends take the
 number from one derivation, each passing in the record ceiling, so a split write and the seal that
 receives it cannot disagree by arithmetic.
+
+---
+
+## 15. The tunnel carrier, and the carrier choice
+
+Two owner decisions (2026-10-21) changed what §1 used to forbid: "can we choose between WebRTC,
+relay and Cloudflare tunnel? make it a choice … make the default WebRTC … can I give multiple
+Cloudflare accounts so multiple tunnels are possible?" This section is the contract for both the
+**hosted tunnel carrier** and the **per-device choice** among carriers. The end-to-end session is
+untouched by either: every carrier below runs §6's handshake against the fingerprint pairing pinned,
+and §7's records, and nothing a carrier operator holds can read, alter or insert into it.
+
+### The four carriers
+
+| Carrier    | What carries the bytes                                                                                    | Who can observe metadata                                       |
+| ---------- | --------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------- |
+| **Direct** | A WebSocket straight to the daemon's own listener (§4).                                                   | The networks in between.                                       |
+| **WebRTC** | A peer-to-peer data channel, introduced over an authenticated session (owned by the WebRTC carrier spec). | The networks in between, and the STUN server learns both IPs.  |
+| **Tunnel** | Cloudflare's edge, to a `cloudflared` connector the daemon runs, to a loopback listener on the daemon.    | Ferretry (who provisioned it) and Cloudflare, as listed below. |
+| **Relay**  | A rendezvous Durable Object passing opaque frames (§§5–9, §13).                                           | The relay operator and Cloudflare, as §10 lists.               |
+
+### The choice
+
+**A connection preference is per device and per machine**, chosen in the PWA's Settings › This
+device and in the Connection status popover, and stored in that browser keyed by the daemon's
+fingerprint. It is never sent to the daemon and the daemon never reads one: the daemon still
+publishes the carriers it holds (§13), and the preference decides only which of them this browser
+walks, and in what order.
+
+| Preference      | Walk                                        | Notes                                                                                                                                                         |
+| --------------- | ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Auto**        | direct → WebRTC → tunnel → relay            | The default. Direct stays first because it has the fewest parties; WebRTC is the first remote carrier. A tunnel is tried only when the daemon published one.  |
+| **WebRTC only** | WebRTC                                      | The relay (or direct) session is still used to **introduce** the two ends — signalling only, never the session's bytes.                                       |
+| **Tunnel only** | tunnel                                      | Says "not set up by the operator" when the hosted service advertises `available: false`, and "this machine has no tunnel yet" when the daemon published none. |
+| **Relay only**  | relay (published, then the hosted fallback) | Exactly the pre-choice relay behaviour.                                                                                                                       |
+
+The walk's rules from §13 are unchanged inside each preference: the carrier is chosen by **trying**
+it, only a transport failure from a replay-safe request advances, a winner is remembered for the
+life of the connection, and a surface always names the live carrier and why the others were passed
+over. A preference that leaves nothing to try is a stated failure — "Tunnel only: this machine has no
+tunnel yet" — never a silent fall back to a carrier the person excluded.
+
+**Pairing ignores the preference.** First contact is direct, then the hosted relay (§14), whatever is
+chosen: WebRTC needs a device key to signal and a tunnel is published only to a paired device.
+
+### The hosted tunnel service
+
+The hosted relay's Worker (§13) also serves a tunnel **provisioner**. It holds a **pool** of
+Cloudflare accounts — operator configuration, never the repository — and gives each daemon that asks
+one tunnel on one account with room, recorded in a control Durable Object (`TUNNEL_CONTROL`,
+separate from the relay meter). The wire contract is `packages/relay/src/lib/tunnel.ts`.
+
+**Discovery.** `GET <hosted origin>/v1/tunnel-service`, `Cache-Control: no-store`:
+
+```
+{ "version": 1, "available": true }
+```
+
+`available` is `true` when at least one pool account is accepting. `false` is "not set up by the
+operator", not an error, and a read that fails is treated the same way. The origin is the one the
+relay advertisement is read from (§13 piece 1), so no tunnel address is compiled in either.
+
+**Provisioning.** Two calls, both JSON over HTTPS from the daemon:
+
+```
+POST /v1/tunnel/challenge   { "daemonId": "fy_daemon_…" }
+  → { "version": 1, "nonce": <32 bytes b64url>, "deadlineSeconds": 60 }
+
+POST /v1/tunnel/provision   { "daemonId", "publicKey": <SPKI b64url>, "nonce", "signature", "originPort": 41234 }
+  → { "version": 1, "tunnelUrl": "https://<label>.<zone>", "connectorToken": "…", "renewAfterSeconds": 86400 }
+```
+
+The signature is the daemon identity's Ed25519 signature over
+
+```
+"ferretry-tunnel-provision-v1" ‖ LP("ferretry-tunnel/1") ‖ LP(daemonId) ‖ LP(host) ‖ LP(nonce) ‖ LP(originPort as decimal)
+```
+
+with `LP` as in §5. The service accepts only when the key hashes to the fingerprint, the nonce is one
+it issued for that fingerprint less than `deadlineSeconds` ago and has not been spent, and the
+signature verifies over the transcript it rebuilds from **its own** host. A nonce is spent by its
+first use, accepted or not. `POST /v1/tunnel/release` takes the same signed fields without
+`originPort`, under the label `ferretry-tunnel-release-v1`, and deletes the daemon's tunnel — what a
+daemon does when its operator switches the carrier off. **A daemon refuses to sign a host it did not
+discover**, exactly as for a rendezvous claim.
+
+Provisioning is **idempotent**: a daemon that already has a tunnel gets the same hostname back, its
+`lastSeenAt` is stamped (that is the renewal), and the ingress is rewritten only when the port
+changed. A daemon renews every `renewAfterSeconds` while it runs and on every boot.
+
+Refusals are `{ "error": { "code", "message" } }`: `tunnel_unavailable` (503, no accepting account),
+`tunnel_capacity` (503, every accepting account is at `maxTunnels`), `tunnel_claim_rejected` (401),
+`tunnel_challenge_expired` (401), `tunnel_rate_limited` (429), `tunnel_upstream_failed` (502, the
+Cloudflare API failed — retried by the daemon with backoff), and `tunnel_bad_request` (400).
+
+**What the service does on Cloudflare**, per account, with that account's API token (Account ›
+Cloudflare Tunnel: Edit, Zone › DNS: Edit and Zone › Zone: Read on that zone):
+
+1. `POST /accounts/{account}/cfd_tunnel` `{ name: "fy-<label>", config_src: "cloudflare" }` — a
+   remotely managed tunnel; its `id` and `token` are kept.
+2. `PUT /accounts/{account}/cfd_tunnel/{id}/configurations` with the ingress `tunnelIngress` builds:
+   the one rule `hostname: <label>.<zone>`, `path: ^/v1/rendezvous/<daemonId>/client$`,
+   `service: http://127.0.0.1:<originPort>`, then `http_status:404` for everything else.
+3. `POST /zones/{zone}/dns_records` `{ type: "CNAME", proxied: true, name: <label>.<zone>, content: <id>.cfargotunnel.com }`.
+
+The hostname is **one random label** under the account's zone — never derived from the fingerprint,
+so DNS and certificate logs do not link a hostname to a daemon — and one label deep because Universal
+SSL's wildcard covers exactly that. The zone **must be in the same Cloudflare account as the tunnel**:
+Cloudflare documents that `cfargotunnel.com` "only proxies traffic for DNS records in the same
+Cloudflare account", which is why the pool is a list of (account, token, zone) triples rather than
+accounts and zones chosen separately. The service checks `GET /zones/{zone}` answers that account and
+that zone name before it places a tunnel there, and reports an account that does not as
+misconfigured instead of using it.
+
+**Capacity.** Cloudflare allows 1,000 `cloudflared` tunnels per account by default (raisable only on
+Enterprise). An account's `maxTunnels` defaults to that and may be set lower, never higher. A new
+tunnel goes to the **first accepting account, in the pool's declared order, with room** — the
+operator's order is the preference, as a daemon's carrier order is (§13). An account with
+`accepting: false` is **draining**: it takes no new tunnels and keeps renewing and reclaiming the ones
+it holds, which is how an account is retired without stranding tunnels nobody can delete.
+
+**Reclaim.** A tunnel whose `lastSeenAt` is older than `reclaimAfterDays` (default 30, operator
+configuration) is deleted by the control object's daily alarm: its connections are cleaned up
+(`DELETE …/cfd_tunnel/{id}/connections`), the tunnel is deleted, and its DNS record is deleted — a
+tunnel's deletion does not remove its record. A step that fails is retried on the next alarm and the
+row is kept until every step has succeeded, so a half-deleted tunnel never loses the evidence needed
+to finish deleting it. A daemon that comes back after a reclaim provisions a new tunnel with a new
+hostname, and its devices learn it from the next `GET /v1/carriers` refresh.
+
+**The operator's view.** `GET /v1/operator/tunnels`, behind the same bearer as `/v1/operator/*`,
+answers each account's name, zone, `accepting`, `maxTunnels`, live tunnel count and whether its zone
+check passed — and never a token, an account's API token or a connector token.
+
+### The pool is configuration, never the repository
+
+The pool is the Worker secret `TUNNEL_ACCOUNTS`: a JSON array of `TunnelAccountSchema`
+(`name`, `accountId`, `apiToken`, `zoneId`, `zone`, `maxTunnels`, `accepting`). Its source of truth
+is the GitHub Actions secret `HOSTED_TUNNEL_ACCOUNTS`; the hosted deploy installs it, and the
+`tunnel-accounts` operation of `.github/workflows/relay-hosted.yaml` reinstalls it without a deploy.
+A pool that does not parse is **no pool** — the service advertises `available: false` and logs why
+— rather than a partial one. The operator runbook is
+[`cloudflare-tunnel-pool.md`](cloudflare-tunnel-pool.md).
+
+### The daemon end
+
+- **The carrier entry.** The daemon's `carriers` list (§13) gains `{ "kind": "tunnel", "source":
+"discovery" }`, implied when the list declares no tunnel of its own, exactly as the hosted relay
+  entry is; `{ "kind": "tunnel", "source": "discovery", "enabled": false }` switches it off and a
+  daemon that held a tunnel then releases it. At most one tunnel.
+- **`cloudflared` is a dependency, not a download.** The Nix package puts it on the daemon's path;
+  the Homebrew cask depends on the `cloudflared` formula; a standalone install requires it on `PATH`
+  or at `FY_CLOUDFLARED`. Ferretry never fetches a binary itself. Without one the carrier is off, and
+  `fyd --check` and the boot trail say so with the remedy.
+- **The connector token stays in memory.** The daemon passes it to `cloudflared tunnel
+--no-autoupdate run --protocol quic` through the child's `TUNNEL_TOKEN` environment variable — never
+  an argument (argument vectors are world-readable in a process list), never a log line, never a
+  file. `cloudflared` is supervised: restarted with backoff when it exits, stopped with the daemon.
+- **A dedicated listener, and every arrival on it is remote.** `cloudflared` forwards from the
+  daemon's own host, so an arrival through it comes from a loopback peer. The tunnel therefore never
+  points at the daemon's API listener: the daemon binds a **second** listener on `127.0.0.1`, on an
+  ephemeral port (the `originPort` it provisions with), that serves **only**
+  `GET /v1/rendezvous/<its daemonId>/client` and answers `404` to everything else, and that stamps every
+  arrival `loopback: false` and not privileged — the relay rule (§14, "What this tunnel does not
+  carry"), for the same reason. The per-peer bounds of §4 key a tunnel arrival by its
+  `CF-Connecting-IP`, falling back to one shared key when it is absent.
+- **What it publishes.** Once `cloudflared` reports a registered connection the daemon publishes
+  `{ "kind": "tunnel", "url": "https://<label>.<zone>" }` in its carrier set (§13), and withdraws it
+  when the connector is down or the tunnel was released. The published set's union **skips kinds a
+  reader does not know** rather than refusing the set (`KNOWN_CARRIER_KINDS`), so this is the last
+  carrier kind whose addition is a breaking change.
+
+### What a tunnel operator can see, honestly
+
+Ferretry, which provisioned the tunnel, and Cloudflare, which carries it, can see: the hostname and
+which account holds it, and the mapping from it to the daemon fingerprint (in the control object);
+both IP addresses; when sessions open and close; frame counts, sizes and timing (the §10 list, minus
+nothing); and that the daemon renews. Cloudflare terminates the **outer** TLS at its edge, so it sees
+the WebSocket upgrade's path and headers — but every byte above the upgrade is §6/§7 ciphertext under
+a key agreed with the daemon's identity key, so it cannot read, alter or insert into a session.
+
+**A stolen connector token** lets its holder run a connector for that hostname and receive some of
+its traffic. What arrives is a handshake only the daemon's identity key can complete (§6), so the
+holder can drop sessions, not impersonate the daemon. The daemon's next renewal does not rotate the
+token in this version; an operator who suspects one deletes the tunnel (the daemon provisions a new
+one). That is stated as a gap, not solved.

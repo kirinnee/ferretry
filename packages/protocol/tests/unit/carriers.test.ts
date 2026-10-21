@@ -3,9 +3,11 @@ import {
   DaemonCarrierSchema,
   DaemonCarriersViewSchema,
   DaemonOriginSchema,
+  KNOWN_CARRIER_KINDS,
   MAX_PUBLISHED_CARRIERS,
   PublishedCarriersSchema,
   SocketEndpointSchema,
+  TunnelOriginSchema,
 } from '@ferretry/protocol';
 
 describe('published daemon carriers', () => {
@@ -35,6 +37,43 @@ describe('published daemon carriers', () => {
     expect(DaemonOriginSchema.safeParse('https://box.example/#fingerprint').success).toBe(false);
     expect(DaemonOriginSchema.safeParse('box.example:7431').success).toBe(false);
     expect(DaemonOriginSchema.safeParse('not a URL').success).toBe(false);
+  });
+
+  it('holds a tunnel to a bare, non-loopback https origin', () => {
+    expect(TunnelOriginSchema.parse('https://abc.tunnels.example.com/')).toBe('https://abc.tunnels.example.com');
+    expect(DaemonCarrierSchema.parse({ kind: 'tunnel', url: 'https://abc.tunnels.example.com' })).toEqual({
+      kind: 'tunnel',
+      url: 'https://abc.tunnels.example.com',
+    });
+    expect(TunnelOriginSchema.safeParse('http://abc.tunnels.example.com').success).toBe(false);
+    expect(TunnelOriginSchema.safeParse('wss://abc.tunnels.example.com').success).toBe(false);
+    expect(TunnelOriginSchema.safeParse('https://127.0.0.1').success).toBe(false);
+    expect(TunnelOriginSchema.safeParse('https://localhost').success).toBe(false);
+    expect(TunnelOriginSchema.safeParse('https://abc.example.com/path').success).toBe(false);
+    expect(TunnelOriginSchema.safeParse('https://user:pw@abc.example.com').success).toBe(false);
+    expect(TunnelOriginSchema.safeParse('https://abc.example.com?x=1').success).toBe(false);
+    expect(TunnelOriginSchema.safeParse('not a URL').success).toBe(false);
+  });
+
+  it('skips a carrier kind this build does not know instead of refusing the set', () => {
+    const set = PublishedCarriersSchema.parse([
+      { kind: 'direct', url: 'http://box.lan:7431' },
+      { kind: 'teleport', url: 'https://future.example' },
+      { kind: 'tunnel', url: 'https://abc.tunnels.example.com' },
+    ]);
+    expect(set).toEqual([
+      { kind: 'direct', url: 'http://box.lan:7431' },
+      { kind: 'tunnel', url: 'https://abc.tunnels.example.com' },
+    ]);
+    expect(KNOWN_CARRIER_KINDS.has('tunnel')).toBe(true);
+    // A KNOWN kind breaking its own rule is still refused, and so is an entry with no usable kind.
+    expect(PublishedCarriersSchema.safeParse([{ kind: 'tunnel', url: 'http://abc.example.com' }]).success).toBe(false);
+    expect(PublishedCarriersSchema.safeParse([{ kind: 7, url: 'https://abc.example.com' }]).success).toBe(false);
+    expect(PublishedCarriersSchema.safeParse(['nope']).success).toBe(false);
+    expect(PublishedCarriersSchema.safeParse([null]).success).toBe(false);
+    expect(PublishedCarriersSchema.safeParse('nope').success).toBe(false);
+    const tooMany = Array.from({ length: MAX_PUBLISHED_CARRIERS + 1 }, () => ({ kind: 'teleport', url: 'x' }));
+    expect(PublishedCarriersSchema.safeParse(tooMany).success).toBe(false);
   });
 
   it('keeps direct and relay carriers as a strict discriminated union', () => {
