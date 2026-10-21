@@ -76,12 +76,12 @@ describe('SessionTopBar', () => {
     expect(view.container.querySelector('[data-session-started-by]')).toBeNull();
   });
 
-  test('carries the sub-ferret indicator beside the name, on a phone too', async () => {
+  test('carries the sub-ferret indicator beside the name on a desktop and draws none on a phone', async () => {
     const props = { actions: null, project: null, session: sessionView('s1'), subFerrets: <span data-pack-slot="" /> };
     view = await mount(<SessionTopBar {...props} compact={false} />);
     expect(view.container.querySelector('.fy-session-bar__who [data-pack-slot]')).not.toBeNull();
     await view.render(<SessionTopBar {...props} compact />);
-    expect(view.container.querySelector('.fy-session-bar__who [data-pack-slot]')).not.toBeNull();
+    expect(view.container.querySelector('[data-pack-slot]')).toBeNull();
   });
 
   test('on a phone it keeps the name and the dot, drops the project, and opens the sessions drawer', async () => {

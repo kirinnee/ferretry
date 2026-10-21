@@ -184,12 +184,45 @@ describe('InfoOverview', () => {
       }),
     ];
     const { root } = await show({ view: parent, sessions: [parent, ...kids], onOpenSession: () => undefined });
-    const rows = [...root.querySelectorAll<HTMLElement>('[data-sub-ferret]')];
-    expect(rows.map(row => row.dataset['subFerret'])).toEqual(['k1', 'k2']);
-    expect(rows[0]?.querySelector('[data-sub-ferret-state]')?.textContent).toBe('Needs you — Trust this folder?');
-    expect(rows[0]?.querySelector('.fy-sub-ferret-model')?.textContent).toBe('claude-opus-5-5');
-    expect(rows[1]?.querySelector('[data-sub-ferret-state="failed"]')?.textContent).toBe('Failed — out of quota');
-    expect(rows[1]?.querySelector('.fy-sub-ferret-model')).toBeNull();
+    const rows = (): HTMLElement[] => [...root.querySelectorAll<HTMLElement>('[data-sub-ferret]')];
+    // The failed one is finished: hidden until asked for.
+    expect(rows().map(row => row.dataset['subFerret'])).toEqual(['k1']);
+    expect(rows()[0]?.querySelector('[data-sub-ferret-state]')?.textContent).toBe('Needs you — Trust this folder?');
+    expect(rows()[0]?.querySelector('.fy-sub-ferret-model')?.textContent).toBe('claude-opus-5-5');
+    await interact(() =>
+      must(root.querySelector<HTMLButtonElement>('[data-sub-ferret-finished-toggle]'), 'toggle').click(),
+    );
+    expect(rows().map(row => row.dataset['subFerret'])).toEqual(['k1', 'k2']);
+    expect(rows()[1]?.querySelector('[data-sub-ferret-state="failed"]')?.textContent).toBe('Failed — out of quota');
+    expect(rows()[1]?.querySelector('.fy-sub-ferret-model')).toBeNull();
+  });
+
+  it('counts only the active sub-ferrets and keeps the finished behind a toggle', async () => {
+    const parent = sessionView('parent-a');
+    const kids = [
+      sessionView('live', { config: { parent: 'parent-a' }, state: { status: 'running' } }),
+      sessionView('done', { config: { parent: 'parent-a' }, state: { status: 'completed' } }),
+      sessionView('stopped', { config: { parent: 'parent-a' }, state: { status: 'stopped' } }),
+    ];
+    const { root } = await show({ view: parent, sessions: [parent, ...kids] });
+    expect(root.querySelector('[data-info-row="Sub-ferrets (1)"]')).not.toBeNull();
+    const toggle = must(root.querySelector<HTMLButtonElement>('[data-sub-ferret-finished-toggle]'), 'toggle');
+    expect(toggle.textContent).toBe('Show finished (2)');
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    await interact(() => toggle.click());
+    expect(toggle.textContent).toBe('Hide finished (2)');
+    expect(root.querySelectorAll('[data-sub-ferret]').length).toBe(3);
+    await interact(() => toggle.click());
+    expect(root.querySelectorAll('[data-sub-ferret]').length).toBe(1);
+  });
+
+  it('says none are active, with the finished one tap away, when every sub-ferret is finished', async () => {
+    const parent = sessionView('parent-a');
+    const kid = sessionView('done', { config: { parent: 'parent-a' }, state: { status: 'completed' } });
+    const { root } = await show({ view: parent, sessions: [parent, kid] });
+    expect(root.querySelector('[data-info-row="Sub-ferrets (0)"]')?.textContent).toContain('None active');
+    expect(root.querySelector('[data-sub-ferret]')).toBeNull();
+    expect(root.querySelector('[data-sub-ferret-finished-toggle]')?.textContent).toBe('Show finished (1)');
   });
 
   it('says None when a ferret has started no children', async () => {
