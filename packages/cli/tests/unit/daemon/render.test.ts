@@ -212,6 +212,71 @@ describe('human status rendering', () => {
     should(calm).not.containEql('stalled');
   });
 
+  it('should name the innermost work and the hot stack of the last stall, and the worst one apart', () => {
+    // Act
+    const actual = renderDaemonStatus(
+      decideDaemonStatus(
+        'fyd',
+        runningReport,
+        health(),
+        liveness({
+          status: 'ok',
+          eventLoop: {
+            lagMs: 0,
+            maxLagMs: 14_300,
+            stalls: 46,
+            lastStall: {
+              at: '2026-10-21T17:29:17.926Z',
+              durationMs: 1_300,
+              during: ['fleet refresh', 'fleet refresh › usage feed', 'turn watcher'],
+              innermost: ['fleet refresh › usage feed', 'turn watcher'],
+              stacks: [{ stack: 'newestFromEnd (fleet/src/adapters/rollout-rate-limits.ts:150)', share: 0.81 }],
+            },
+            worstStall: {
+              at: '2026-10-21T17:20:00.000Z',
+              durationMs: 14_300,
+              during: ['analytics ingest'],
+              innermost: [],
+              stacks: [{ stack: 'parse (daemon/src/lib/transcript/claude.ts:300)', share: 0.9 }],
+            },
+          },
+        }),
+      ),
+      'fy',
+    );
+
+    // Assert — the deepest labels, not every loop in flight; and the worst says what it was.
+    should(actual).containEql(
+      'last 1.3s at 2026-10-21T17:29:17.926Z during fleet refresh › usage feed, turn watcher\n' +
+        '    last: 81% in newestFromEnd (fleet/src/adapters/rollout-rate-limits.ts:150)\n' +
+        '  worst stall 14.3s at 2026-10-21T17:20:00.000Z during analytics ingest\n' +
+        '    worst: 90% in parse (daemon/src/lib/transcript/claude.ts:300)',
+    );
+  });
+
+  it('should not repeat the worst stall when it is the last one', () => {
+    // Arrange
+    const stall = { at: '2026-10-21T08:00:00.000Z', durationMs: 900, during: ['self-check'], stacks: [] };
+
+    // Act
+    const actual = renderDaemonStatus(
+      decideDaemonStatus(
+        'fyd',
+        runningReport,
+        health(),
+        liveness({
+          status: 'ok',
+          eventLoop: { lagMs: 0, maxLagMs: 900, stalls: 1, lastStall: stall, worstStall: stall },
+        }),
+      ),
+      'fy',
+    );
+
+    // Assert
+    should(actual).containEql('last 0.9s at 2026-10-21T08:00:00.000Z during self-check');
+    should(actual).not.containEql('worst stall');
+  });
+
   it('should say plainly when nothing supervises the daemon', () => {
     // Act
     const actual = renderDaemonStatus(decideDaemonStatus('fyd', absentReport, undefined), 'fy');

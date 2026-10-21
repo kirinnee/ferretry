@@ -24,8 +24,31 @@ import type { MillisecondClockPort } from './boot.ts';
 /** How many finished activities a ledger remembers, so a stall can still name work that just ended. */
 const RECENT_ACTIVITY_LIMIT = 64;
 
+/** What separates an activity's name from the activity it runs inside: `fleet refresh › runtime homes`. */
+export const ACTIVITY_NESTING = ' › ';
+
+/**
+ * Which activity the code running right now belongs to, carried across every `await` inside it.
+ *
+ * A PORT because only a runtime can carry a value across asynchronous continuations — the composition
+ * root hands in one backed by `AsyncLocalStorage`. Without one, every activity is top-level, which is
+ * exactly what the ledger was before activities could nest.
+ */
+export interface ActivityScopePort<T> {
+  current(): T | undefined;
+  within<R>(value: T, work: () => R): R;
+}
+
+/** No scope at all: nothing nests. */
+export const FLAT_ACTIVITY_SCOPE: ActivityScopePort<never> = Object.freeze({
+  current: () => undefined,
+  within: <R>(_value: never, work: () => R): R => work(),
+});
+
 interface ActivityRecord {
-  readonly name: string;
+  /** The full label: every enclosing activity's name, outermost first, then this one's. */
+  readonly label: string;
+  readonly parent: ActivityRecord | undefined;
   readonly startedAtMs: number;
   endedAtMs: number | undefined;
 }
@@ -38,17 +61,53 @@ interface ActivityRecord {
  * Asking only what is in flight at detection time would therefore miss exactly the culprit — it has
  * already ended. The ledger keeps the recently finished ones too, and the meter asks for everything that
  * was running at any instant of the window the loop was stalled for.
+ *
+ * WHY NESTING. Six background loops overlap almost every window on a busy daemon, so "during fleet
+ * refresh, self-check, terminal reaper, analytics ingest, declared-wait watcher, turn watcher" names
+ * everything and pins nothing. An activity run inside another is labelled with its whole path, and
+ * {@link innermost} keeps only the deepest labels that overlapped — the step, not the loop around it.
  */
 export class ActivityLedger {
   readonly #live = new Set<ActivityRecord>();
   readonly #recent: ActivityRecord[] = [];
 
-  constructor(private readonly clock: MillisecondClockPort) {}
+  constructor(
+    private readonly clock: MillisecondClockPort,
+    private readonly scope: ActivityScopePort<ActivityRecord> = FLAT_ACTIVITY_SCOPE,
+  ) {}
 
-  /** Marks `name` as running and returns the function that marks it finished. Ending twice is harmless. */
+  /**
+   * Marks `name` as running and returns the function that marks it finished. Ending twice is harmless.
+   * Begun inside a {@link run}, it is labelled as nested in that activity.
+   */
   begin(name: string): () => void {
-    const record: ActivityRecord = { name, startedAtMs: this.clock.now(), endedAtMs: undefined };
+    return this.#end(this.#start(name));
+  }
+
+  /** Runs `work` as the activity `name`, ending it however the work settles. Activities run inside nest. */
+  async run<T>(name: string, work: () => Promise<T> | T): Promise<T> {
+    const record = this.#start(name);
+    const end = this.#end(record);
+    try {
+      return await this.scope.within(record, work);
+    } finally {
+      end();
+    }
+  }
+
+  #start(name: string): ActivityRecord {
+    const parent = this.scope.current();
+    const record: ActivityRecord = {
+      label: parent === undefined ? name : `${parent.label}${ACTIVITY_NESTING}${name}`,
+      parent,
+      startedAtMs: this.clock.now(),
+      endedAtMs: undefined,
+    };
     this.#live.add(record);
+    return record;
+  }
+
+  #end(record: ActivityRecord): () => void {
     return () => {
       if (!this.#live.delete(record)) return;
       record.endedAtMs = this.clock.now();
@@ -57,34 +116,35 @@ export class ActivityLedger {
     };
   }
 
-  /** Runs `work` as the activity `name`, ending it however the work settles. */
-  async run<T>(name: string, work: () => Promise<T> | T): Promise<T> {
-    const end = this.begin(name);
-    try {
-      return await work();
-    } finally {
-      end();
-    }
-  }
-
-  /** The names running right now, oldest first, each named once. */
+  /** The labels running right now, oldest first, each named once. */
   inFlight(): readonly string[] {
-    return distinct([...this.#live].sort((a, b) => a.startedAtMs - b.startedAtMs).map(record => record.name));
+    return labels([...this.#live]);
   }
 
-  /** Every name that was running at any instant of `[fromMs, toMs]`, oldest first, each named once. */
+  /** Every label that was running at any instant of `[fromMs, toMs]`, oldest first, each named once. */
   overlapping(fromMs: number, toMs: number): readonly string[] {
-    return distinct(
-      [...this.#recent, ...this.#live]
-        .filter(record => record.startedAtMs <= toMs && (record.endedAtMs === undefined || record.endedAtMs >= fromMs))
-        .sort((a, b) => a.startedAtMs - b.startedAtMs)
-        .map(record => record.name),
+    return labels(this.#overlapping(fromMs, toMs));
+  }
+
+  /**
+   * The deepest labels that were running at any instant of `[fromMs, toMs]`: every overlapping activity
+   * that no other overlapping activity ran inside. A loop with a labelled step is named by the step.
+   */
+  innermost(fromMs: number, toMs: number): readonly string[] {
+    const overlapping = this.#overlapping(fromMs, toMs);
+    const enclosing = new Set(overlapping.map(record => record.parent));
+    return labels(overlapping.filter(record => !enclosing.has(record)));
+  }
+
+  #overlapping(fromMs: number, toMs: number): ActivityRecord[] {
+    return [...this.#recent, ...this.#live].filter(
+      record => record.startedAtMs <= toMs && (record.endedAtMs === undefined || record.endedAtMs >= fromMs),
     );
   }
 }
 
-function distinct(names: readonly string[]): readonly string[] {
-  return [...new Set(names)];
+function labels(records: readonly ActivityRecord[]): readonly string[] {
+  return [...new Set([...records].sort((a, b) => a.startedAtMs - b.startedAtMs).map(record => record.label))];
 }
 
 /**
@@ -163,12 +223,85 @@ export class BootProgress {
   }
 }
 
+/** One stack frame of a sample, as the runtime's profiler reported it. */
+export interface StackFrame {
+  readonly name: string;
+  /** The script it is in; absent for the runtime's own native frames. */
+  readonly url?: string;
+  readonly line?: number;
+}
+
+/** One sample of the JavaScript stack, innermost frame first. */
+export interface StackSample {
+  readonly frames: readonly StackFrame[];
+}
+
+/**
+ * Samples of the main thread's JavaScript stack, taken by the runtime while the loop runs.
+ *
+ * A PORT because only the runtime can sample its own stack, and only from another thread — the loop
+ * cannot look at itself while it is the thing that is stuck. `drain` hands back every sample taken since
+ * the last drain and forgets them, so a meter that drains on every tick holds exactly the samples of the
+ * window between two ticks: when a tick is late, the stall's own samples.
+ */
+export interface StackSamplerPort {
+  drain(): readonly StackSample[];
+}
+
+/** No sampler: a stall is attributed to its labelled work alone. */
+export const NO_STACK_SAMPLER: StackSamplerPort = Object.freeze({ drain: () => [] });
+
+/** One distinct stack a stall spent its samples in, and the share of the samples it holds. */
+export interface StallStack {
+  /** The innermost frames, innermost first: `readFileSync ← scan (fleet/src/adapters/homes.ts:88) ← …`. */
+  readonly stack: string;
+  /** The share of the stall's samples in this stack, 0 to 1. */
+  readonly share: number;
+}
+
+/** How many frames of a stack name it, and how many distinct stacks a stall reports. */
+const STACK_DEPTH = 6;
+const STACK_LIMIT = 3;
+
+/**
+ * The stacks a stall's samples spent their time in, hottest first.
+ *
+ * A sample is reduced to its innermost {@link STACK_DEPTH} frames, so one hot loop that is sampled at
+ * many different statements still counts as one place. A path is cut to its workspace-relative part —
+ * `packages/fleet/src/…` rather than an absolute checkout path or a compiled binary's virtual root.
+ */
+export function summariseStacks(samples: readonly StackSample[]): readonly StallStack[] {
+  const counts = new Map<string, number>();
+  for (const sample of samples) {
+    const key = sample.frames.slice(0, STACK_DEPTH).map(describeFrame).join(' ← ');
+    if (key === '') continue;
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  }
+  const total = [...counts.values()].reduce((sum, count) => sum + count, 0);
+  return [...counts]
+    .sort(([, a], [, b]) => b - a)
+    .slice(0, STACK_LIMIT)
+    .map(([stack, count]) => ({ stack, share: Math.round((count / total) * 100) / 100 }));
+}
+
+function describeFrame(frame: StackFrame): string {
+  const name = frame.name === '' ? '(anonymous)' : frame.name;
+  if (frame.url === undefined || frame.url === '') return name;
+  const packages = frame.url.lastIndexOf('packages/');
+  const file = packages >= 0 ? frame.url.slice(packages + 'packages/'.length) : frame.url;
+  return frame.line === undefined ? `${name} (${file})` : `${name} (${file}:${String(frame.line)})`;
+}
+
 /** One period during which the event loop could not run anything. */
 export interface LoopStall {
   readonly atMs: number;
   readonly durationMs: number;
   /** The work that was running at some instant of the stall: the suspects, oldest first. */
   readonly during: readonly string[];
+  /** The deepest of those labels — the step rather than the loop around it. */
+  readonly innermost: readonly string[];
+  /** Where the sampled stack spent the stall, hottest first; empty without a sampler. */
+  readonly stacks: readonly StallStack[];
 }
 
 export interface EventLoopView {
@@ -179,6 +312,8 @@ export interface EventLoopView {
   /** How many ticks were late by at least the stall threshold. */
   readonly stalls: number;
   readonly lastStall?: LoopStall;
+  /** The longest stall since this process started, with what ran during it. */
+  readonly worstStall?: LoopStall;
 }
 
 export interface EventLoopLagPolicy {
@@ -188,15 +323,22 @@ export interface EventLoopLagPolicy {
   readonly stallMs: number;
 }
 
-/** A tick every quarter second, and a stall at half a second late — short enough to name a culprit. */
-export const DEFAULT_EVENT_LOOP_LAG_POLICY: EventLoopLagPolicy = Object.freeze({ intervalMs: 250, stallMs: 500 });
+/**
+ * A tick every quarter second, and a stall at a quarter second late.
+ *
+ * A quarter second rather than the half second it was: the daemon's budget is no stall over 100 ms, so
+ * a 300 ms block is a defect to be named, not noise — and a lower bar would name the tick's own jitter.
+ */
+export const DEFAULT_EVENT_LOOP_LAG_POLICY: EventLoopLagPolicy = Object.freeze({ intervalMs: 250, stallMs: 250 });
 
 /**
  * The event loop's lateness, measured by a fixed-period tick.
  *
  * A timer cannot fire while the loop is busy, so the amount by which a tick is late IS the length of
- * the longest period the loop spent unable to run anything — no sampling, no profiler. The timer that
- * drives `tick` is the composition root's; this class only measures and reports.
+ * the longest period the loop spent unable to run anything — no profiler needed to know that it
+ * stalled. To know WHERE, a stall is attributed twice: to the innermost labelled work that overlapped
+ * it, and, when the runtime samples stacks, to the stacks its samples spent their time in. The timer
+ * that drives `tick` is the composition root's; this class only measures and reports.
  */
 export class EventLoopLagMeter {
   #lastTickMs: number;
@@ -204,12 +346,14 @@ export class EventLoopLagMeter {
   #maxLagMs = 0;
   #stalls = 0;
   #lastStall: LoopStall | undefined;
+  #worstStall: LoopStall | undefined;
 
   constructor(
     private readonly clock: MillisecondClockPort,
     private readonly activities: ActivityLedger,
     private readonly policy: EventLoopLagPolicy,
     private readonly onStall: (stall: LoopStall) => void,
+    private readonly sampler: StackSamplerPort = NO_STACK_SAMPLER,
   ) {
     this.#lastTickMs = clock.now();
   }
@@ -217,6 +361,8 @@ export class EventLoopLagMeter {
   /** One tick of the timer. */
   tick(): void {
     const now = this.clock.now();
+    // Drained on EVERY tick, so the samples held when a tick is late are that window's and no other's.
+    const samples = this.sampler.drain();
     const lag = Math.max(0, now - this.#lastTickMs - this.policy.intervalMs);
     const previous = this.#lastTickMs;
     this.#lastTickMs = now;
@@ -224,8 +370,16 @@ export class EventLoopLagMeter {
     this.#maxLagMs = Math.max(this.#maxLagMs, lag);
     if (lag < this.policy.stallMs) return;
     this.#stalls += 1;
-    this.#lastStall = { atMs: now, durationMs: lag, during: this.activities.overlapping(previous, now) };
-    this.onStall(this.#lastStall);
+    const stall: LoopStall = {
+      atMs: now,
+      durationMs: lag,
+      during: this.activities.overlapping(previous, now),
+      innermost: this.activities.innermost(previous, now),
+      stacks: summariseStacks(samples),
+    };
+    this.#lastStall = stall;
+    if (this.#worstStall === undefined || stall.durationMs > this.#worstStall.durationMs) this.#worstStall = stall;
+    this.onStall(stall);
   }
 
   view(): EventLoopView {
@@ -234,14 +388,18 @@ export class EventLoopLagMeter {
       maxLagMs: this.#maxLagMs,
       stalls: this.#stalls,
       ...(this.#lastStall === undefined ? {} : { lastStall: this.#lastStall }),
+      ...(this.#worstStall === undefined ? {} : { worstStall: this.#worstStall }),
     };
   }
 }
 
-/** The line a stall writes to the boot journal: how long, and what was running. */
+/** The line a stall writes to the boot journal: how long, what was running, and where it spent the time. */
 export function describeLoopStall(stall: LoopStall): string {
-  const suspects = stall.during.length === 0 ? 'no named work was in flight' : `during ${stall.during.join(', ')}`;
-  return `event loop stalled for ${(stall.durationMs / 1_000).toFixed(1)}s — ${suspects}`;
+  const suspects =
+    stall.innermost.length === 0 ? 'no named work was in flight' : `during ${stall.innermost.join(', ')}`;
+  const hottest = stall.stacks[0];
+  const where = hottest === undefined ? '' : ` — ${String(Math.round(hottest.share * 100))}% in ${hottest.stack}`;
+  return `event loop stalled for ${(stall.durationMs / 1_000).toFixed(1)}s — ${suspects}${where}`;
 }
 
 /**
@@ -254,6 +412,32 @@ export function describeLoopStall(stall: LoopStall): string {
  */
 export function watchdogShouldFire(silentMs: number, limitMs: number): boolean {
   return limitMs > 0 && silentMs >= limitMs;
+}
+
+/**
+ * Where the watchdog should measure the loop's silence from: the later of the last heartbeat and the
+ * moment the process last RESUMED.
+ *
+ * A MAC THAT SLEEPS SUSPENDS EVERY THREAD AT ONCE. On waking, the watchdog's own check fires with a
+ * heartbeat that is as old as the sleep, and a lid closed over lunch read as a loop silent for an hour —
+ * so a healthy daemon was killed on every wake, and its replacement paid a whole boot for nothing. The
+ * tell is the watchdog's OWN lateness: a thread that was free to run checks every `checkMs`, so a check
+ * that arrives many periods after the previous one means nothing in the process ran, the loop included.
+ * The silence then starts again from that check, and a loop that really is stuck is still caught one
+ * limit later.
+ *
+ * Self-contained, because the watchdog thread embeds it by its source.
+ */
+export function watchdogSilenceFrom(
+  beatMs: number,
+  nowMs: number,
+  previousCheckMs: number,
+  previousFromMs: number,
+  checkMs: number,
+): number {
+  const suspended = nowMs - previousCheckMs > Math.max(checkMs * 10, 10_000);
+  const from = Math.max(beatMs, previousFromMs);
+  return suspended ? Math.max(from, nowMs) : from;
 }
 
 /** What the watchdog says just before it ends the daemon. */

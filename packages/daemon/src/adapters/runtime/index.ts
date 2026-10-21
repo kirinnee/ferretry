@@ -3,3 +3,4 @@ export * from './daemon-config.ts';
 export * from './daemon-secrets.ts';
 export * from './explicit-config.ts';
 export * from './loop-watchdog.ts';
+export * from './stall-attribution.ts';

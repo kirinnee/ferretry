@@ -1,7 +1,7 @@
 import type { LivenessView } from '@ferretry/protocol';
 import { SESSION_PROTOCOL_ID } from '@ferretry/relay';
 import type { MillisecondClockPort } from '../../runtime/boot.ts';
-import type { BootSnapshot, EventLoopView } from '../../runtime/liveness.ts';
+import type { BootSnapshot, EventLoopView, LoopStall } from '../../runtime/liveness.ts';
 import { daemonVersion } from '../../version.ts';
 import type { ApiResponse } from '../http.ts';
 import { jsonResponse, noStore } from '../responses.ts';
@@ -20,6 +20,16 @@ export interface DaemonLivenessSource {
 }
 
 const seconds = (milliseconds: number): number => Math.max(0, Math.round(milliseconds / 1_000));
+
+type LoopStallView = NonNullable<NonNullable<LivenessView['eventLoop']>['lastStall']>;
+
+const stallView = (stall: LoopStall): LoopStallView => ({
+  at: new Date(stall.atMs).toISOString(),
+  durationMs: stall.durationMs,
+  during: [...stall.during],
+  innermost: [...stall.innermost],
+  stacks: stall.stacks.map(({ stack, share }) => ({ stack, share })),
+});
 
 /** The liveness body, shared by the mounted route and the boot-time surface that serves it alone. */
 export function livenessView(
@@ -52,15 +62,8 @@ export function livenessView(
             lagMs: loop.lagMs,
             maxLagMs: loop.maxLagMs,
             stalls: loop.stalls,
-            ...(loop.lastStall === undefined
-              ? {}
-              : {
-                  lastStall: {
-                    at: new Date(loop.lastStall.atMs).toISOString(),
-                    durationMs: loop.lastStall.durationMs,
-                    during: [...loop.lastStall.during],
-                  },
-                }),
+            ...(loop.lastStall === undefined ? {} : { lastStall: stallView(loop.lastStall) }),
+            ...(loop.worstStall === undefined ? {} : { worstStall: stallView(loop.worstStall) }),
           },
         }),
   };
