@@ -1,8 +1,9 @@
 import type { IFyApiClient, SessionView } from '@ferretry/protocol';
-import { ArrowUp, Plus, Zap } from 'lucide-react';
+import { ArrowUp, MapPin, Paperclip, Plus, Zap } from 'lucide-react';
 import { type ReactNode, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { readInputModality, useInputModality } from '../hooks/use-input-modality.ts';
 import { useKeyboardOpen } from '../hooks/use-keyboard-open.ts';
+import { useLocationShareHost } from '../hooks/use-location-share.ts';
 import { uploadAttachment as uploadSessionAttachment } from '../lib/attachment-upload.ts';
 import { continueList, type DraftEdit, insideCodeBlock } from '../lib/composer-editing.ts';
 import { useComposerHostWarmup } from '../lib/composer-host-warmup.ts';
@@ -16,16 +17,18 @@ import type { DaemonConnection } from '../lib/daemon-connection.ts';
 import { daemonSessionKey, daemonSessionScope } from '../lib/daemon-scope.ts';
 import { type DaemonDraftStore, documentDraftStore } from '../lib/drafts.ts';
 import { applyFormat, type FormatCommand, formatShortcut } from '../lib/live-markdown.ts';
+import { asLocationError, formatLocationBlock } from '../lib/location-share.ts';
 import { useMdComposePref } from '../lib/md-compose.ts';
 import { REINSERT_TRANSCRIPTION_EVENT, reinsertTranscriptionText } from '../lib/stt/reinsert-transcription.ts';
 import { registerComposerQuoteTarget } from '../lib/quote.ts';
 import { findReferences } from '../lib/references.ts';
+import { carrierDelivery } from '../lib/relay-carrier.ts';
 import type { DaemonFetch } from '../lib/runtime-models.ts';
 import { browserFetch } from '../lib/runtime-models.ts';
-import { carrierDelivery } from '../lib/relay-carrier.ts';
 import { canSubmitComposer } from '../lib/session-screens.ts';
 import type { BrowserRecognitionProvider } from '../lib/stt/browser-recognition.ts';
 import type { SttSettings } from '../lib/stt/stt-settings.ts';
+import { ContextMenu, type MenuAnchor } from '../shell/context-menu.tsx';
 import { type ComposerAttachmentUploader, useComposerAttachments } from './composer-attachments.ts';
 import {
   type ComposerField,
@@ -44,6 +47,7 @@ import { ComposerFormatToolbar } from './composer-format-toolbar.tsx';
 import { ComposerQuota, type ComposerQuotaProps } from './composer-quota.tsx';
 import { DictationControl } from './dictation-control.tsx';
 import { LiveMarkdownEditor } from './live-markdown-editor.tsx';
+import { type LocationDraft, PendingLocationChip } from './location-chip.tsx';
 import { Markdown } from './markdown.tsx';
 import { type ReferenceSurface, useReferenceSurface } from './reference-surface.tsx';
 import { PendingAttachmentStrip } from './session-chat-parts.tsx';
@@ -330,6 +334,11 @@ export function Composer({
   const attachments = useComposerAttachments(uploader, daemonSessionKey(scope));
   const fileInput = useRef<HTMLInputElement | null>(null);
   const [dropping, setDropping] = useState(false);
+  const locationHost = useLocationShareHost();
+  const [location, setLocation] = useState<LocationDraft | null>(null);
+  const [plusAnchor, setPlusAnchor] = useState<MenuAnchor | null>(null);
+  const plusButton = useRef<HTMLButtonElement | null>(null);
+  const locating = useRef(0);
   /**
    * The draft is TAGGED with the session it belongs to, and read back through
    * that tag.
@@ -602,7 +611,8 @@ export function Composer({
   // the agent should be told why a list of paths arrived.
   const canSubmit =
     !attachments.uploading &&
-    (canSubmitComposer(draft, disabled, sending) || (attachmentIds.length > 0 && !disabled && !sending));
+    (canSubmitComposer(draft, disabled, sending) ||
+      ((attachmentIds.length > 0 || location?.kind === 'ready') && !disabled && !sending));
   /**
    * `interrupt` is the ONLY way a send asks the daemon for `now`, and only the explicit ⌘/Ctrl+⇧+↵
    * reaches it. `now` makes the daemon press Escape on the agent's pane, which stops a turn — so it
@@ -616,7 +626,13 @@ export function Composer({
     setSending(true);
     setError(null);
     try {
-      const message = draft.trim() || 'See the attached files.';
+      const typed = draft.trim();
+      // The block is plain text in the message: that is how an agent receives it, and how the sent
+      // message redraws it as a chip.
+      const message =
+        location?.kind === 'ready'
+          ? `${typed === '' ? 'Here is where I am.' : typed}\n\n${formatLocationBlock(location.fix)}`
+          : typed || 'See the attached files.';
       const sent = (await api.send(sessionId, {
         message,
         ...(attachmentIds.length === 0 ? {} : { attachmentIds: [...attachmentIds] }),
@@ -627,6 +643,8 @@ export function Composer({
       setRecalled(false);
       for (const provider of autocompleteProviders) provider.reset?.();
       attachments.clear();
+      locating.current += 1;
+      setLocation(null);
       setDraft('');
       // The next message starts as text, not as commands.
       setVim(initialVimState);
@@ -858,6 +876,27 @@ export function Composer({
     },
   };
 
+  /** One reading per tap. A stale answer (the chip was removed, or asked again) is dropped. */
+  const shareLocation = (): void => {
+    if (locationHost === null) return;
+    locating.current += 1;
+    const ticket = locating.current;
+    setLocation({ kind: 'locating' });
+    // Started in the tap itself: the browser's location prompt rides the gesture.
+    void locationHost.locate().then(
+      fix => {
+        if (locating.current === ticket) setLocation({ kind: 'ready', fix });
+      },
+      (reason: unknown) => {
+        if (locating.current === ticket) setLocation({ kind: 'failed', error: asLocationError(reason) });
+      },
+    );
+  };
+  const removeLocation = (): void => {
+    locating.current += 1;
+    setLocation(null);
+  };
+
   const modifierLabel = shortcutModifier();
   const sendKeyLabel = bareEnterAction === 'send' ? '↵' : '⇧↵';
   const sendLabel = sending ? 'Sending…' : 'Send';
@@ -871,11 +910,21 @@ export function Composer({
   // left-hand column.
   const attachButton = (
     <button
-      aria-label="Attach an image, audio or a file"
+      aria-label={locationHost === null ? 'Attach an image, audio or a file' : 'Add a file or share your location'}
+      aria-expanded={locationHost === null ? undefined : plusAnchor !== null}
+      aria-haspopup={locationHost === null ? undefined : 'menu'}
       className="fy-composer-icon"
       data-composer-attach=""
       disabled={fieldDisabled}
-      onClick={() => fileInput.current?.click()}
+      onClick={() => {
+        if (locationHost === null) {
+          fileInput.current?.click();
+          return;
+        }
+        const rect = plusButton.current?.getBoundingClientRect();
+        setPlusAnchor({ x: rect?.left ?? 0, y: rect?.top ?? 0 });
+      }}
+      ref={plusButton}
       title="Attach an image, audio or a file — or drop or paste one here"
       type="button"
     >
@@ -928,6 +977,19 @@ export function Composer({
       <label className="sr-only" htmlFor={`${fieldId}-input`}>
         Message
       </label>
+      {location === null ? null : (
+        <PendingLocationChip
+          disabled={sending}
+          draft={location}
+          onPlace={place =>
+            setLocation(current =>
+              current?.kind === 'ready' ? { kind: 'ready', fix: { ...current.fix, place } } : current,
+            )
+          }
+          onRemove={removeLocation}
+          onRetry={shareLocation}
+        />
+      )}
       {attachments.entries.length === 0 ? null : (
         <PendingAttachmentStrip
           entries={attachments.entries}
@@ -969,6 +1031,30 @@ export function Composer({
           </div>
         ) : (
           attachButton
+        )}
+        {locationHost === null ? null : (
+          <ContextMenu
+            anchor={plusAnchor ?? { x: 0, y: 0 }}
+            ariaLabel="Add to message"
+            items={[
+              {
+                key: 'attach',
+                label: 'Attach a file',
+                icon: <Paperclip size={16} aria-hidden="true" />,
+                onSelect: () => fileInput.current?.click(),
+              },
+              {
+                key: 'location',
+                label: 'Share my location',
+                icon: <MapPin size={16} aria-hidden="true" />,
+                onSelect: shareLocation,
+              },
+            ]}
+            onClose={() => setPlusAnchor(null)}
+            open={plusAnchor !== null}
+            touch={inputModality.touchAffected}
+            triggerRef={plusButton}
+          />
         )}
         <input
           aria-hidden="true"

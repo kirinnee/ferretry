@@ -501,3 +501,4 @@ export * from './web-terminals.ts';
 export * from './workspace-layout.ts';
 export * from './workspace-layout-store.ts';
 export * from './workspace-rail-preferences.ts';
+export * from './qr-frame-decoder.ts';

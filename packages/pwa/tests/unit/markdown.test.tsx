@@ -3,7 +3,13 @@ import type { AttentionId } from '@ferretry/protocol';
 import type { ReactTestInstance } from 'react-test-renderer';
 import should from 'should';
 import { FyRenderBlock } from '../../src/components/fy-render-block.tsx';
-import { fyRenderFenceBody, Markdown, referenceHasTrustedOrigin } from '../../src/components/markdown.tsx';
+import { LocationChip } from '../../src/components/location-chip.tsx';
+import {
+  fyRenderFenceBody,
+  locationFenceBody,
+  Markdown,
+  referenceHasTrustedOrigin,
+} from '../../src/components/markdown.tsx';
 import type { DaemonId } from '../../src/lib/daemon-connection.ts';
 import {
   type ResolvedReference,
@@ -860,5 +866,54 @@ describe('Markdown fy-render workspace media', () => {
     should(
       tree.root.findAllByType(FyRenderBlock).map(block => block.props.readWorkspaceMedia === readWorkspaceMedia),
     ).deepEqual([true]);
+  });
+});
+
+describe('fy-location fences', () => {
+  const block = (...lines: string[]) => ['```fy-location', ...lines, '```'].join('\n');
+  const fixLines = [
+    'latitude: 51.50735',
+    'longitude: -0.12776',
+    'accuracy: 20 m',
+    'captured: 2026-10-21T12:00:00.000Z',
+  ];
+
+  test('should draw a well-formed location block as a chip', () => {
+    const tree = render(<Markdown text={block(...fixLines, 'place: Home')} />);
+    const chips = tree.root.findAllByType(LocationChip);
+    should(chips).have.length(1);
+    should(chips[0]?.props.fix.place).equal('Home');
+    should(chips[0]?.props.fix.latitude).equal(51.50735);
+  });
+
+  test('should leave a malformed location block as an ordinary code fence', () => {
+    const tree = render(<Markdown text={block('latitude: nowhere')} />);
+    should(tree.root.findAllByType(LocationChip)).be.empty();
+    should(tree.root.findAllByType('pre')).have.length(1);
+  });
+
+  const codeNode = (className: unknown, value: unknown = 'latitude: 1\n') => ({
+    children: [{ type: 'element', tagName: 'code', properties: { className }, children: [{ type: 'text', value }] }],
+  });
+
+  test('should read the body of a fy-location fence, without the newline hast added', () => {
+    should(locationFenceBody(codeNode(['language-fy-location']))).equal('latitude: 1');
+  });
+
+  test('should refuse anything that is not a fy-location code element holding text', () => {
+    should(locationFenceBody(null)).be.null();
+    should(locationFenceBody({})).be.null();
+    should(locationFenceBody({ children: [{ type: 'element', tagName: 'span' }] })).be.null();
+    should(locationFenceBody({ children: [{ type: 'element', tagName: 'code', properties: {} }] })).be.null();
+    should(locationFenceBody(codeNode(['language-ts']))).be.null();
+    should(locationFenceBody(codeNode('language-fy-location'))).be.null();
+    should(
+      locationFenceBody({
+        children: [
+          { type: 'element', tagName: 'code', properties: { className: ['language-fy-location'] }, children: [] },
+        ],
+      }),
+    ).be.null();
+    should(locationFenceBody(codeNode(['language-fy-location'], 7))).be.null();
   });
 });

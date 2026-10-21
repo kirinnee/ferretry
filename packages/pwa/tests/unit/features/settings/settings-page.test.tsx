@@ -295,6 +295,25 @@ describe('SettingsPage sections', () => {
     }
   });
 
+  it('lists the device permissions under This device, and reads without asking', async () => {
+    // Arrange
+    const view = await mount(page());
+    try {
+      // Act
+      await visit('#device');
+
+      // Assert
+      const setting = must(
+        view.container.querySelector<HTMLElement>('[data-setting-id="device-permissions"]'),
+        'the Permissions setting',
+      );
+      expect(setting.textContent).toContain('Permissions');
+      expect(shownSection(view.container)).toBe('device');
+    } finally {
+      await view.unmount();
+    }
+  });
+
   it('says a host without a cache keeps no cached data', async () => {
     // Arrange
     const view = await mount(page());

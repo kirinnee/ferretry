@@ -34,12 +34,16 @@
  * (`lib/install-prompt.ts`, `hooks/use-install-prompt.ts`).
  */
 
+import runtimeUrl from 'onnxruntime-web/ort-wasm-simd-threaded.wasm?url';
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { App } from './App.tsx';
+import { DevicePermissionsContext } from './hooks/use-device-permissions.ts';
 import { InstallPromptContext } from './hooks/use-install-prompt.ts';
+import { LocationShareContext } from './hooks/use-location-share.ts';
+import { windowPermissionsHost } from './lib/device-permissions.ts';
 import { createBrowserInstallPrompt } from './lib/install-prompt.ts';
-import runtimeUrl from 'onnxruntime-web/ort-wasm-simd-threaded.wasm?url';
+import { browserLocationShareHost } from './lib/location-share.ts';
 import workerUrl from './worker/parakeet-worker.ts?worker&url';
 import './styles/index.css';
 
@@ -50,11 +54,17 @@ const host = document.getElementById('root');
 if (!host) throw new Error('missing #root — the host document is not this app’s index.html');
 
 const installPrompt = createBrowserInstallPrompt(window);
+const devicePermissions = windowPermissionsHost(window as unknown as Parameters<typeof windowPermissionsHost>[0]);
+const locationShare = browserLocationShareHost(navigator);
 
 createRoot(host).render(
   <StrictMode>
-    <InstallPromptContext.Provider value={installPrompt}>
-      <App speechAssets={{ workerUrl, runtimeUrl }} />
-    </InstallPromptContext.Provider>
+    <DevicePermissionsContext.Provider value={devicePermissions}>
+      <InstallPromptContext.Provider value={installPrompt}>
+        <LocationShareContext.Provider value={locationShare}>
+          <App speechAssets={{ workerUrl, runtimeUrl }} />
+        </LocationShareContext.Provider>
+      </InstallPromptContext.Provider>
+    </DevicePermissionsContext.Provider>
   </StrictMode>,
 );

@@ -14,6 +14,7 @@
 import type { PushDeviceView } from '@ferretry/protocol';
 
 import { cn } from '../../lib/class-names.ts';
+import { Button } from '../../shell/primitives.tsx';
 
 export type NotificationPermission = 'unsupported' | 'default' | 'denied' | 'granted';
 export type PushDeliveryState = 'idle' | 'checking' | 'active' | 'unavailable';
@@ -119,6 +120,13 @@ export function NotificationSettingsView({
         ? 'Checking closed-app Web Push…'
         : (deliveryMessage ?? 'Web Push is not active for this device yet; the live app can still show changes.');
 
+  const status =
+    permission === 'granted'
+      ? 'Allowed in this browser.'
+      : denied
+        ? 'Blocked in this browser.'
+        : 'Not asked yet — nothing is shown until you allow it.';
+
   return (
     <section className="flex flex-col gap-2" aria-label="Notification controls">
       <Toggle
@@ -128,6 +136,17 @@ export function NotificationSettingsView({
         label="Notify me"
         description="System notification when a session needs attention. Turning this on asks the browser for permission."
       />
+      <p className="m-0 text-ui leading-base text-muted" data-notification-permission={permission}>
+        Permission: {status}
+      </p>
+      {permission === 'default' && !enabled ? (
+        <div>
+          {/* An explicit button, so the browser prompt (and iOS's) comes from a tap. */}
+          <Button variant="primary" data-notification-allow="" onClick={() => onEnabled(true)}>
+            Allow notifications
+          </Button>
+        </div>
+      ) : null}
       {denied && (
         <p role="status" className="m-0 text-ui leading-base text-warn">
           {NOTIFICATION_DENIED_NOTE}

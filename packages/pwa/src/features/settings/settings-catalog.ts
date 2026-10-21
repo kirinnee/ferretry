@@ -24,6 +24,7 @@ export type SettingId =
   | 'dictation'
   | 'notifications'
   | 'install-app'
+  | 'device-permissions'
   | 'clear-cached-data'
   | 'speedup-keys'
   | 'dictation-debug'
@@ -229,6 +230,35 @@ export const SETTINGS_DEFINITIONS: readonly SettingDefinition[] = [
     ],
   },
   {
+    id: 'device-permissions',
+    label: 'Permissions',
+    description:
+      'Every permission Ferretry can use on this device — camera, microphone, notifications, location, clipboard and storage — with what it is for, whether it is allowed, and how to turn it on. Nothing is asked for until you press its button.',
+    keywords: [
+      'permission',
+      'permissions',
+      'camera',
+      'microphone',
+      'mic',
+      'location',
+      'gps',
+      'geolocation',
+      'clipboard',
+      'paste',
+      'storage',
+      'persistent',
+      'allow',
+      'blocked',
+      'denied',
+      'privacy',
+      'ios',
+      'iphone',
+      'prompt',
+      'qr',
+      'scan',
+    ],
+  },
+  {
     id: 'install-app',
     label: 'Install app',
     description:
@@ -392,8 +422,16 @@ export const SETTINGS_SECTIONS: readonly SettingsSectionDefinition[] = [
   {
     id: 'device',
     label: 'This device',
-    description: 'Ferretry as an app on this device, the provider keys only this device holds, and what it keeps here.',
-    settingIds: ['install-app', 'speedup-keys', 'transcription-log', 'dictation-debug', 'clear-cached-data'],
+    description:
+      'Ferretry as an app on this device, what it may use (camera, location, notifications), the provider keys only this device holds, and what it keeps here.',
+    settingIds: [
+      'install-app',
+      'device-permissions',
+      'speedup-keys',
+      'transcription-log',
+      'dictation-debug',
+      'clear-cached-data',
+    ],
   },
   {
     /**

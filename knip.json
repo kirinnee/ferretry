@@ -66,6 +66,7 @@
         "harness/mobile-ui3-screenshot.tsx",
         "harness/pack-mode-screenshot.tsx",
         "harness/voice-cleanup-screenshot.tsx",
+        "harness/device-permissions-screenshot.tsx",
         "harness/setup-import-screenshot.tsx",
         "harness/add-login-screenshot.tsx",
         "harness/app-screenshot.ts",
