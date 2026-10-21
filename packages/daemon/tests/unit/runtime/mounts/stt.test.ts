@@ -77,6 +77,43 @@ describe('the dictation enhancement mount', () => {
     should(jsonBody(response)).deepEqual({ error: 'slow down', code: 'rate_limited' });
   });
 
+  it('should carry the failed call’s debug record in the error body the caller asked for', async () => {
+    // Arrange
+    const error = new SttEnhancementError('timeout', 'enhancement request timed out');
+    error.trace = {
+      via: 'daemon',
+      provider: 'groq',
+      model: 'm',
+      host: 'api.groq.com',
+      totalMs: 4,
+      outcome: 'failed',
+      failure: { code: 'timeout', message: 'enhancement request timed out' },
+      attempts: [
+        {
+          withContext: false,
+          request: {
+            host: 'api.groq.com',
+            path: '/p',
+            headers: { authorization: '[redacted]' },
+            params: {},
+            messages: [],
+          },
+          failure: 'enhancement request timed out',
+          timings: { totalMs: 4 },
+        },
+      ],
+    };
+
+    // Act
+    const response = await dispatcher(new FakeSttEnhancer(error)).dispatch(
+      post(JSON.stringify({ text: 'x', provider: 'groq', debug: true })),
+    );
+
+    // Assert
+    should(response.status).equal(504);
+    should(jsonBody(response)).deepEqual({ error: error.message, code: 'timeout', debug: error.trace });
+  });
+
   it('should refuse a body that is not JSON', async () => {
     // Arrange
     const enhancer = new FakeSttEnhancer();

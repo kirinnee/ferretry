@@ -1,5 +1,7 @@
 import {
   CLEANUP_LIMITS,
+  type CleanupTrace,
+  type CleanupTraceAttempt,
   isContextSizedStatus,
   type SttEnhancementErrorCode,
   type SttEnhancementResult,
@@ -11,6 +13,7 @@ import {
   DEFAULT_CLEANUP_SETTINGS,
   DEFAULT_ENHANCEMENT_PROVIDERS,
   DEFAULT_ENHANCEMENT_TIMEOUT_MS,
+  describeEnhancementAttempt,
   ENHANCEMENT_HEADERS,
   type EnhancementProviderTable,
   type EnhancementProviderView,
@@ -104,21 +107,43 @@ export class SttEnhancementService {
         ...rest,
       });
 
+    const attempts: CleanupTraceAttempt[] = [];
+    const trace = (
+      rest: Pick<CleanupTrace, 'outcome' | 'totalMs'> & Partial<CleanupTrace>,
+    ): CleanupTrace | undefined => {
+      const first = attempts[0];
+      if (!request.debug || first === undefined) return undefined;
+      return {
+        via: 'daemon',
+        provider: request.provider.id,
+        model: request.model,
+        host: first.request.host,
+        attempts,
+        ...rest,
+      };
+    };
+
     let retried = false;
     let result: SttEnhancementResult;
     try {
       try {
-        result = await this.attempt(request);
+        result = await this.attempt(request, attempts);
       } catch (error) {
         if (!(error instanceof SttEnhancementError) || !isContextSized(error) || request.context.length === 0) {
           throw error;
         }
         // The reference is a nicety: when the provider finds the request too big, the dictation alone still fits.
         retried = true;
-        result = await this.attempt({ ...request, context: [] });
+        result = await this.attempt({ ...request, context: [] }, attempts);
       }
     } catch (error) {
       if (error instanceof SttEnhancementError) {
+        const failed = trace({
+          outcome: 'failed',
+          totalMs: elapsed(),
+          failure: { code: error.code, message: error.message },
+        });
+        if (failed !== undefined) error.trace = failed;
         note(retried, elapsed(), {
           outcome: 'failed',
           code: error.code,
@@ -133,18 +158,40 @@ export class SttEnhancementService {
       outcome: result.kept === 'raw' ? 'kept_raw' : 'cleaned',
       ...(result.keptReason === undefined ? {} : { reason: result.keptReason }),
     });
-    return { ...result, latencyMs };
+    const debug = trace({
+      outcome: result.kept === 'raw' ? 'kept_raw' : 'cleaned',
+      totalMs: latencyMs,
+      finalText: result.text,
+    });
+    return { ...result, latencyMs, ...(debug === undefined ? {} : { debug }) };
   }
 
-  private async attempt(request: NormalizedEnhancement): Promise<SttEnhancementResult> {
+  private async attempt(
+    request: NormalizedEnhancement,
+    attempts: CleanupTraceAttempt[],
+  ): Promise<SttEnhancementResult> {
+    const body = buildEnhancementBody(request);
+    const sentAt = request.debug ? this.clock.monotonicMs() : 0;
     const outcome = await this.authorizer.send(request.provider.secretName, request.provider.hosts, {
       method: 'POST',
       url: request.provider.endpoint,
       headers: ENHANCEMENT_HEADERS,
-      body: JSON.stringify(buildEnhancementBody(request)),
+      body: JSON.stringify(body),
       timeoutMs: this.timeoutMs,
       maxResponseBytes: CLEANUP_LIMITS.maxResponseBytes,
     });
-    return classifyEnhancementOutcome(outcome, request, 0);
+    const totalMs = request.debug ? Math.max(0, this.clock.monotonicMs() - sentAt) : 0;
+    const record = (failure: string | undefined): void => {
+      if (request.debug) attempts.push(describeEnhancementAttempt(request, body, outcome, totalMs, failure));
+    };
+    try {
+      const result = classifyEnhancementOutcome(outcome, request, 0);
+      record(undefined);
+      return result;
+    } catch (error) {
+      // classification throws nothing but its own refusals, each with a fixed sentence
+      record((error as SttEnhancementError).message);
+      throw error;
+    }
   }
 }

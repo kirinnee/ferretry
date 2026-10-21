@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { NonNegativeFiniteSchema } from './common.ts';
+import { CleanupTraceSchema } from './stt-cleanup-debug.ts';
 
 /**
  * Dictation enhancement, and nothing else.
@@ -52,6 +53,8 @@ export const SttEnhancementRequestSchema = z.strictObject({
     )
     .max(MAX_STT_DICTIONARY_ENTRIES)
     .optional(),
+  /** Ask for the call's debug record back in the reply. It is for this caller only and is never logged. */
+  debug: z.boolean().optional(),
 });
 export type SttEnhancementRequest = z.infer<typeof SttEnhancementRequestSchema>;
 
@@ -64,6 +67,8 @@ export const SttEnhancementResultSchema = z.object({
   kept: z.literal('raw').optional(),
   /** Why: one short sentence naming the guard rule that fired; never any of the text. */
   keptReason: z.string().max(240).optional(),
+  /** The call's debug record, present only when the request asked for it. */
+  debug: CleanupTraceSchema.optional(),
 });
 export type SttEnhancementResult = z.infer<typeof SttEnhancementResultSchema>;
 
@@ -85,5 +90,7 @@ export type SttEnhancementErrorCode = z.infer<typeof SttEnhancementErrorCodeSche
 export const SttEnhancementErrorViewSchema = z.object({
   error: z.string().min(1),
   code: SttEnhancementErrorCodeSchema,
+  /** The failed call's debug record, present only when the request asked for it and one could be built. */
+  debug: CleanupTraceSchema.optional(),
 });
 export type SttEnhancementErrorView = z.infer<typeof SttEnhancementErrorViewSchema>;

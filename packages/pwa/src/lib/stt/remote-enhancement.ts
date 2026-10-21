@@ -16,7 +16,12 @@
  * therefore never be posted to a daemon the reader did not choose.
  */
 
-import { MAX_STT_DICTIONARY_ENTRIES, MAX_STT_USER_CONTEXT_CHARS } from '@ferretry/protocol';
+import {
+  type CleanupTrace,
+  CleanupTraceSchema,
+  MAX_STT_DICTIONARY_ENTRIES,
+  MAX_STT_USER_CONTEXT_CHARS,
+} from '@ferretry/protocol';
 import type { DaemonConnection } from '../daemon-connection.ts';
 import { daemonRequest } from '../daemon-transport.ts';
 import type { DictionaryEntry } from './enhancement.ts';
@@ -47,6 +52,8 @@ export type RemoteEnhancementErrorCode =
 export class RemoteEnhancementError extends Error {
   readonly code: RemoteEnhancementErrorCode;
   readonly status: number;
+  /** The call's debug record, when one was asked for and the call got far enough to have one. */
+  trace?: CleanupTrace;
 
   constructor(code: RemoteEnhancementErrorCode, message: string, status = 0) {
     super(message);
@@ -67,6 +74,8 @@ export interface RemoteEnhancementInput {
   readonly userContext: string;
   readonly signal?: AbortSignal;
   readonly timeoutMs?: number;
+  /** Ask the daemon to echo this one call's debug record back; it keeps nothing. */
+  readonly debug?: boolean;
   /** The carrier router's fetch: this is a daemon request and must reach a relay-only daemon. */
   readonly fetchImpl: RemoteEnhancementFetch;
 }
@@ -79,6 +88,8 @@ export interface RemoteEnhancementResult {
   /** Set when the daemon refused the model's reply and sent the raw words back; `keptReason` says why. */
   readonly kept?: 'raw';
   readonly keptReason?: string;
+  /** This call's debug record: present only when it was asked for. */
+  readonly trace?: CleanupTrace;
 }
 
 const errorCode = (status: number, code: unknown): RemoteEnhancementErrorCode => {
@@ -102,6 +113,11 @@ const boundedMessage = (value: unknown, fallback: string): string =>
 
 const asRecord = (value: unknown): Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
+
+const readTrace = (value: unknown): CleanupTrace | undefined => {
+  const parsed = CleanupTraceSchema.safeParse(value);
+  return parsed.success ? parsed.data : undefined;
+};
 
 const optionalString = (value: unknown): string | undefined => (typeof value === 'string' ? value : undefined);
 
@@ -163,6 +179,7 @@ export async function requestRemoteEnhancement(
       // value the UI called valid must never be the thing that makes every
       // remote correction fail, so the tail of the prose is dropped instead.
       userContext: input.userContext.slice(0, MAX_STT_USER_CONTEXT_CHARS),
+      ...(input.debug === true ? { debug: true } : {}),
     }),
     signal: controller.signal,
   });
@@ -202,7 +219,10 @@ export async function requestRemoteEnhancement(
         code === 'unavailable'
           ? 'This daemon does not support remote enhancement yet; raw dictation was kept.'
           : `Enhancement failed (HTTP ${response.status}); raw dictation was kept.`;
-      throw new RemoteEnhancementError(code, boundedMessage(record.error, fallback), response.status);
+      const refusal = new RemoteEnhancementError(code, boundedMessage(record.error, fallback), response.status);
+      const failedTrace = input.debug === true ? readTrace(record.debug) : undefined;
+      if (failedTrace !== undefined) refusal.trace = failedTrace;
+      throw refusal;
     }
 
     const text = typeof record.text === 'string' ? record.text.trim() : '';
@@ -213,8 +233,10 @@ export async function requestRemoteEnhancement(
         response.status,
       );
     }
+    const trace = input.debug === true ? readTrace(record.debug) : undefined;
     return {
       text,
+      ...(trace === undefined ? {} : { trace }),
       ...(record.kept === 'raw' ? { kept: 'raw' as const } : {}),
       ...(record.kept === 'raw'
         ? { keptReason: boundedMessage(record.keptReason, 'The cleanup reply did not read as your words corrected.') }

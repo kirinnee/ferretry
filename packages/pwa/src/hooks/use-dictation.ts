@@ -34,10 +34,16 @@
  * sends the transcript anywhere, and audio cannot leave through either path.
  */
 
-import { CLEANUP_PROVIDERS, type IFyApiClient } from '@ferretry/protocol';
+import { CLEANUP_PROVIDERS, type CleanupTrace, type IFyApiClient } from '@ferretry/protocol';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { DaemonConnection } from '../lib/daemon-connection.ts';
-import { useDaemonFetch, useParakeetVoice, useSpeedupKeys } from '../lib/store.tsx';
+import {
+  useDaemonFetch,
+  useDictationDebug,
+  useParakeetVoice,
+  useSpeedupKeys,
+  useTranscriptionLog,
+} from '../lib/store.tsx';
 import {
   BrowserRecognitionError,
   type BrowserRecognitionProvider,
@@ -48,6 +54,7 @@ import {
   browserRecognitionProvider,
 } from '../lib/stt/browser-recognition.ts';
 import { DEVICE_KEYS_PLACE, requestDeviceCleanup } from '../lib/stt/device-cleanup.ts';
+import type { DictationDebugLog } from '../lib/stt/dictation-debug.ts';
 import { insertTranscript, readSelection, type SelectionLike } from '../lib/stt/draft.ts';
 import { enhance } from '../lib/stt/enhancement.ts';
 import {
@@ -60,6 +67,7 @@ import {
 import { joinWords, type NearLiveState } from '../lib/stt/near-live.ts';
 import type { ParakeetVoice } from '../lib/stt/parakeet-voice.ts';
 import {
+  type RemoteEnhancementError,
   type RemoteEnhancementFetch,
   type RemoteEnhancementResult,
   requestRemoteEnhancement,
@@ -67,6 +75,7 @@ import {
 import type { DeviceSpeedupKeys } from '../lib/stt/speedup-keys.ts';
 import { isRemoteEnhancementProvider, type SttSettings, sttDictionary } from '../lib/stt/stt-settings.ts';
 import { DEFAULT_VOICE_CLEANUP, type VoiceCleanup } from '../lib/stt/voice-cleanup.ts';
+import type { TranscriptionLog } from '../lib/stt/transcription-log.ts';
 import { verifyWordOnly } from '../lib/stt/word-only-verifier.ts';
 import { readUserMessage } from '../lib/user-message.ts';
 
@@ -102,6 +111,14 @@ export interface DictationReview {
   readonly raw: string;
   readonly cleaned: string;
   readonly enhancementError?: DictationError;
+  /** The cleanup call's record in the debug ring, when dictation debug was on for this take. */
+  readonly debugId?: string;
+}
+
+/** What a cleanup call leaves behind besides its text, for the debug ring and the transcription log. */
+interface CleanupNotes {
+  trace?: CleanupTrace;
+  prompt?: VoiceCleanup['style'];
 }
 
 /**
@@ -233,6 +250,14 @@ export interface UseDictationOptions {
   readonly enhancementFetch?: RemoteEnhancementFetch;
   /** Provider keys this device holds. Read from the app store when omitted; `null` means none here. */
   readonly speedupKeys?: DeviceSpeedupKeys | null;
+  /** The dictation debug ring. Read from the app store when omitted; `null` means none here. */
+  readonly dictationDebug?: DictationDebugLog | null;
+  /** This device's transcription log. Read from the app store when omitted; `null` means none here. */
+  readonly transcriptionLog?: TranscriptionLog | null;
+  /** What the conversation is called, for the transcription log. */
+  readonly sessionLabel?: string;
+  /** Wall clock for the transcription log and debug timings; a suite supplies its own. */
+  readonly now?: () => number;
   /**
    * The session's conversation as the page already holds it, oldest first. When given, clean-up reads
    * this instead of fetching history from the daemon.
@@ -299,6 +324,12 @@ export function useDictation(options: UseDictationOptions): DictationHandle {
   const contextKeys = useSpeedupKeys();
   const speedupKeysRef = useRef<DeviceSpeedupKeys | null>(null);
   speedupKeysRef.current = options.speedupKeys === undefined ? contextKeys : options.speedupKeys;
+  const contextDebug = useDictationDebug();
+  const dictationDebugRef = useRef<DictationDebugLog | null>(null);
+  dictationDebugRef.current = options.dictationDebug === undefined ? contextDebug : options.dictationDebug;
+  const contextLog = useTranscriptionLog();
+  const transcriptionLogRef = useRef<TranscriptionLog | null>(null);
+  transcriptionLogRef.current = options.transcriptionLog === undefined ? contextLog : options.transcriptionLog;
   const engine = options.settings.engine;
   // Unchosen counts as supported: the mic stays live so pressing it can ask the person to choose.
   const supported =
@@ -318,6 +349,10 @@ export function useDictation(options: UseDictationOptions): DictationHandle {
   const [error, setError] = useState<DictationError | null>(null);
   const [review, setReview] = useState<DictationReview | null>(null);
   const reviewIdRef = useRef(0);
+  /** The transcription-log entry for the take now in review, until it is inserted or discarded. */
+  const logEntryRef = useRef<{ readonly id: string; readonly cleaned: string } | null>(null);
+  /** When the take being recorded began, by generation, so a restarting mobile engine cannot move it. */
+  const takeStartRef = useRef<{ readonly token: number; readonly at: number } | null>(null);
   const [live, setLive] = useState<LiveWords>(NO_LIVE_WORDS);
   const [inputMonitor, setInputMonitor] = useState<CaptureMonitor | null>(null);
   const meterRef = useRef<MicMeter | null>(null);
@@ -342,6 +377,15 @@ export function useDictation(options: UseDictationOptions): DictationHandle {
   recognitionRef.current = recognition;
 
   const isCurrent = useCallback((token: number): boolean => generationRef.current === token, []);
+
+  /** Settle the take in review in the transcription log: what became of its words. */
+  const settleLog = useCallback((outcome: 'inserted' | 'discarded', inserted?: string): void => {
+    const entry = logEntryRef.current;
+    logEntryRef.current = null;
+    if (entry === null) return;
+    const changed = inserted !== undefined && inserted.trim() !== entry.cleaned;
+    transcriptionLogRef.current?.update(entry.id, { outcome, ...(changed ? { inserted: inserted.trim() } : {}) });
+  }, []);
 
   /** Close the meter-only microphone, if one is open, and drop the tap. */
   const releaseMeter = useCallback((): void => {
@@ -382,11 +426,12 @@ export function useDictation(options: UseDictationOptions): DictationHandle {
   useEffect(() => {
     if (!disabled) return;
     invalidate();
+    settleLog('discarded');
     setLive(NO_LIVE_WORDS);
     setError(null);
     setReview(null);
     setPhase('idle');
-  }, [disabled, invalidate]);
+  }, [disabled, invalidate, settleLog]);
 
   const commit = useCallback((transcript: string) => {
     const spoken = transcript.trim();
@@ -422,7 +467,12 @@ export function useDictation(options: UseDictationOptions): DictationHandle {
 
   /** Correct the raw words or return them untouched. */
   const enhanceTranscript = useCallback(
-    async (raw: string, token: number, onFailure: (failure: DictationError) => void): Promise<string> => {
+    async (
+      raw: string,
+      token: number,
+      onFailure: (failure: DictationError) => void,
+      notes: CleanupNotes,
+    ): Promise<string> => {
       const current = optionsRef.current;
       const active = current.settings;
       if (!active.enhancement) return raw;
@@ -441,6 +491,8 @@ export function useDictation(options: UseDictationOptions): DictationHandle {
 
       if (isRemoteEnhancementProvider(active.enhancementProvider)) {
         const provider = active.enhancementProvider;
+        const debug = dictationDebugRef.current?.snapshot().enabled === true;
+        notes.prompt = cleanup.style;
         try {
           const signal = controllerRef.current?.signal;
           const keys = speedupKeysRef.current;
@@ -456,6 +508,7 @@ export function useDictation(options: UseDictationOptions): DictationHandle {
                   context,
                   userContext: active.userContext,
                   cleanup,
+                  ...(debug ? { debug } : {}),
                   ...(signal ? { signal } : {}),
                 });
           const result =
@@ -467,9 +520,11 @@ export function useDictation(options: UseDictationOptions): DictationHandle {
               dictionary: entries,
               context,
               userContext: active.userContext,
+              ...(debug ? { debug } : {}),
               ...(signal ? { signal } : {}),
               fetchImpl: current.enhancementFetch ?? routedFetchRef.current,
             }));
+          notes.trace = result.trace;
           if (result.kept === 'raw') {
             // The daemon refused the model's reply and sent the words back: say why instead of looking like a no-op.
             onFailure({
@@ -480,6 +535,7 @@ export function useDictation(options: UseDictationOptions): DictationHandle {
           return result.text;
         } catch (failure) {
           if (!isCurrent(token) || controllerRef.current?.signal.aborted === true) return raw;
+          notes.trace = (failure as Partial<RemoteEnhancementError> | null)?.trace;
           const notConfigured = (failure as { code?: unknown } | null)?.code === 'not-configured';
           onFailure(
             notConfigured
@@ -506,6 +562,8 @@ export function useDictation(options: UseDictationOptions): DictationHandle {
       finishingSessionRef.current = session;
       releaseMeter();
       setPhase('transcribing');
+      const stoppedAt = (optionsRef.current.now ?? Date.now)();
+      const take = takeStartRef.current?.token === token ? takeStartRef.current : null;
 
       let enhancementFailure: DictationError | null = null;
       try {
@@ -518,16 +576,44 @@ export function useDictation(options: UseDictationOptions): DictationHandle {
         }
 
         controllerRef.current = new AbortController();
-        const text = await enhanceTranscript(raw, token, failure => {
-          enhancementFailure = failure;
-        });
+        const notes: CleanupNotes = {};
+        const text = await enhanceTranscript(
+          raw,
+          token,
+          failure => {
+            enhancementFailure = failure;
+          },
+          notes,
+        );
         if (!isCurrent(token)) return;
         reviewIdRef.current += 1;
+        const current = optionsRef.current;
+        const clock = current.now ?? Date.now;
+        const debugId =
+          notes.trace === undefined
+            ? undefined
+            : dictationDebugRef.current?.record(notes.trace, notes.trace.startedAt ?? clock());
+        const cleaned = text.trim();
+        const changed = cleaned !== raw.trim();
+        const logged = transcriptionLogRef.current?.add({
+          at: stoppedAt,
+          ...(current.sessionId === undefined ? {} : { sessionId: current.sessionId }),
+          ...(current.sessionLabel === undefined ? {} : { sessionLabel: current.sessionLabel }),
+          engine: engine === 'parakeet' ? 'parakeet' : 'web-speech',
+          ...(take === null ? {} : { durationMs: Math.max(0, stoppedAt - take.at) }),
+          raw: raw.trim(),
+          ...(changed ? { cleaned } : {}),
+          ...(notes.prompt === undefined || notes.prompt === 'off' ? {} : { prompt: notes.prompt }),
+          outcome: 'pending',
+          ...(debugId === undefined ? {} : { debugId }),
+        });
+        logEntryRef.current = logged === undefined ? null : { id: logged, cleaned: changed ? cleaned : raw.trim() };
         setReview({
           id: reviewIdRef.current,
           raw: raw.trim(),
-          cleaned: text.trim(),
+          cleaned,
           ...(enhancementFailure === null ? {} : { enhancementError: enhancementFailure }),
+          ...(debugId === undefined ? {} : { debugId }),
         });
         setLive(NO_LIVE_WORDS);
         setPhase('review');
@@ -551,7 +637,7 @@ export function useDictation(options: UseDictationOptions): DictationHandle {
         if (isCurrent(token)) controllerRef.current = null;
       }
     },
-    [enhanceTranscript, isCurrent, releaseMeter],
+    [enhanceTranscript, engine, isCurrent, releaseMeter],
   );
 
   const start = useCallback(() => {
@@ -559,6 +645,7 @@ export function useDictation(options: UseDictationOptions): DictationHandle {
 
     const provider = recognitionRef.current;
     const token = invalidate();
+    settleLog('discarded');
     setLive(NO_LIVE_WORDS);
     setError(null);
     setReview(null);
@@ -588,6 +675,9 @@ export function useDictation(options: UseDictationOptions): DictationHandle {
       const callbacks: BrowserRecognitionSessionOptions = {
         onStart: () => {
           if (!isCurrent(token)) return;
+          if (takeStartRef.current?.token !== token) {
+            takeStartRef.current = { token, at: (optionsRef.current.now ?? Date.now)() };
+          }
           setPhase('recording');
           const port = meterPortRef.current;
           if (engine !== 'browser' || port === null || meterTakeRef.current === token) return;
@@ -673,7 +763,7 @@ export function useDictation(options: UseDictationOptions): DictationHandle {
       setError({ code: recognitionFailure.code, message: recognitionFailure.message });
       setPhase('error');
     }
-  }, [disabled, engine, finish, invalidate, isCurrent, phase, releaseMeter]);
+  }, [disabled, engine, finish, invalidate, isCurrent, phase, releaseMeter, settleLog]);
 
   const stop = useCallback(() => {
     const session = liveSessionRef.current;
@@ -683,20 +773,22 @@ export function useDictation(options: UseDictationOptions): DictationHandle {
 
   const cancel = useCallback(() => {
     invalidate();
+    settleLog('discarded');
     setLive(NO_LIVE_WORDS);
     setError(null);
     setReview(null);
     setPhase('idle');
-  }, [invalidate]);
+  }, [invalidate, settleLog]);
 
   const insert = useCallback(
     (text: string) => {
       if (phase !== 'review') return;
       commit(text);
+      settleLog('inserted', text);
       setReview(null);
       setPhase('idle');
     },
-    [commit, phase],
+    [commit, phase, settleLog],
   );
 
   const dismissError = useCallback(() => {

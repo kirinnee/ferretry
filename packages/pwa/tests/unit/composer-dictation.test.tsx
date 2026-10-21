@@ -14,6 +14,7 @@ import { Composer } from '../../src/components/composer.tsx';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
 import { DaemonDraftStore, type DraftStorage } from '../../src/lib/drafts.ts';
 import { writeMdComposePref } from '../../src/lib/md-compose.ts';
+import { requestReinsert } from '../../src/lib/stt/reinsert-transcription.ts';
 import { DEFAULT_STT_SETTINGS } from '../../src/lib/stt/stt-settings.ts';
 import { type FakeRecognitionProvider, fakeRecognitionProvider } from '../support/browser-recognition.ts';
 import { interact, mount, must } from '../support/dom.ts';
@@ -223,5 +224,77 @@ describe('Composer dictation slot', () => {
     );
     expect(micButton(composer.container).disabled).toBe(true);
     await composer.unmount();
+  });
+});
+
+describe('Composer: words put back from the transcription log', () => {
+  const mountPlain = async (draft = '', hidden = false) => {
+    const store = new DaemonDraftStore(memoryStorage());
+    if (draft !== '') store.save({ daemonId: daemon.daemonId, sessionId: 'put-back' }, draft);
+    const composer = await mount(
+      <div aria-hidden={hidden ? 'true' : undefined}>
+        <Composer api={api} daemon={daemon} draftStore={store} sessionId="put-back" />
+      </div>,
+    );
+    return composer;
+  };
+  const put = async (text: unknown): Promise<boolean> => {
+    let taken = false;
+    await interact(() => {
+      taken = requestReinsert(window, { text: text as string });
+    });
+    return taken;
+  };
+
+  it('takes the words into an empty draft and says it took them', async () => {
+    const composer = await mountPlain();
+
+    expect(await put('Put me back.')).toBe(true);
+
+    expect(textareaOf(composer.container).value).toBe('Put me back.');
+    await composer.unmount();
+  });
+
+  it('appends after what is already typed, with one space between', async () => {
+    const composer = await mountPlain('typed so far');
+
+    await put('and more');
+
+    expect(textareaOf(composer.container).value).toBe('typed so far and more');
+    await composer.unmount();
+  });
+
+  it('does not double the space after a draft that ends in one', async () => {
+    const composer = await mountPlain('ends open ');
+
+    await put('then this');
+
+    expect(textareaOf(composer.container).value).toBe('ends open then this');
+    await composer.unmount();
+  });
+
+  it('leaves a hidden (retained) composer alone, so the event stays unhandled', async () => {
+    const composer = await mountPlain('', true);
+
+    expect(await put('not here')).toBe(false);
+
+    expect(textareaOf(composer.container).value).toBe('');
+    await composer.unmount();
+  });
+
+  it('ignores an event that carries no words', async () => {
+    const composer = await mountPlain();
+
+    expect(await put('')).toBe(false);
+
+    expect(textareaOf(composer.container).value).toBe('');
+    await composer.unmount();
+  });
+
+  it('stops listening once unmounted', async () => {
+    const composer = await mountPlain();
+    await composer.unmount();
+
+    expect(await put('too late')).toBe(false);
   });
 });

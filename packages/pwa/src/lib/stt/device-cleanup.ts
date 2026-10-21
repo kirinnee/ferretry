@@ -11,6 +11,12 @@
  *
  * Every failure keeps the raw words: the caller treats a throw as "use the text you already have".
  * Nothing here logs a request or a reply, because both hold dictated text.
+ *
+ * When the caller asks for it (`debug`), each call also builds a `CleanupTrace`: the request as sent
+ * with the authorization header shown as redacted, the provider's raw reply, the steps the shared
+ * cleanup took, and the timings. That record is handed back to the caller and nowhere else. This file
+ * never reads the key — it shows a placeholder where the key goes — and with `debug` off it reads no
+ * error body and builds nothing.
  */
 
 import {
@@ -18,10 +24,15 @@ import {
   CLEANUP_LIMITS,
   CLEANUP_PROVIDERS,
   type CleanupRequest,
+  type CleanupTrace,
+  type CleanupTraceAttempt,
   DEFAULT_CLEANUP_TIMEOUT_MS,
+  describeCleanupReply,
+  describeCleanupRequest,
   isContextSizedStatus,
   prepareCleanup,
   readCleanupReply,
+  TRACE_REDACTED,
 } from '@ferretry/protocol';
 import type { DictionaryEntry } from './enhancement.ts';
 import { RemoteEnhancementError, type RemoteEnhancementResult } from './remote-enhancement.ts';
@@ -42,6 +53,30 @@ export interface DeviceCleanupInput {
   readonly cleanup: VoiceCleanup;
   readonly signal?: AbortSignal;
   readonly timeoutMs?: number;
+  /** Build a debug record of this call and return it with the result (or on the error). */
+  readonly debug?: boolean;
+  /** Wall clock in epoch milliseconds, for the record's timings; a suite supplies its own. */
+  readonly now?: () => number;
+}
+
+/** The most of a provider's error body a record keeps. */
+const ERROR_BODY_CAP = 8_000;
+
+/** What one attempt saw, filled in as it goes so a record can be made however it ends. */
+interface AttemptProbe {
+  readonly now: () => number;
+  readonly startedAt: number;
+  status?: number;
+  firstByteMs?: number;
+  errorBody?: string;
+  raw?: string;
+  payload?: unknown;
+}
+
+/** Where a call's attempts are collected, and the clock they are timed by. */
+interface TraceSink {
+  readonly attempts: CleanupTraceAttempt[];
+  readonly now: () => number;
 }
 
 /** The provider said this much; nothing of its body is kept. */
@@ -97,13 +132,62 @@ const retryAfter = (response: Response): number | undefined => {
   return Number.isFinite(value) && value >= 0 ? value : undefined;
 };
 
-/** One attempt, bounded by its own deadline and by the caller's signal. */
+/** One attempt, and the record of it when the caller asked for one. */
 async function attempt(
   keys: DeviceSpeedupKeys,
   provider: SpeedupKeyProvider,
   request: CleanupRequest,
   signal: AbortSignal | undefined,
   timeoutMs: number,
+  sink: TraceSink | undefined,
+): Promise<RemoteEnhancementResult | undefined> {
+  const probe: AttemptProbe | undefined = sink && { now: sink.now, startedAt: sink.now() };
+  try {
+    const result = await run(keys, provider, request, signal, timeoutMs, probe);
+    if (sink && probe && result !== undefined) record(sink, provider, request, probe);
+    return result;
+  } catch (failure) {
+    if (sink && probe) record(sink, provider, request, probe, (failure as Error).message);
+    throw failure;
+  }
+}
+
+const record = (
+  sink: TraceSink,
+  provider: SpeedupKeyProvider,
+  request: CleanupRequest,
+  probe: AttemptProbe,
+  failure?: string,
+): void => {
+  const config = CLEANUP_PROVIDERS[provider];
+  const body = buildCleanupBody(request, config);
+  sink.attempts.push({
+    withContext: request.context.length > 0,
+    request: describeCleanupRequest({
+      endpoint: config.endpoint,
+      headers: { authorization: TRACE_REDACTED, 'content-type': 'application/json' },
+      body,
+    }),
+    ...(probe.status === undefined ? {} : { status: probe.status }),
+    ...(probe.payload === undefined ? {} : { response: describeCleanupReply(probe.payload, request, probe.raw) }),
+    ...(probe.errorBody === undefined ? {} : { errorBody: probe.errorBody }),
+    ...(failure === undefined ? {} : { failure: failure.slice(0, 400) }),
+    timings: {
+      startedAt: probe.startedAt,
+      ...(probe.firstByteMs === undefined ? {} : { firstByteMs: probe.firstByteMs }),
+      totalMs: Math.max(0, probe.now() - probe.startedAt),
+    },
+  });
+};
+
+/** One attempt, bounded by its own deadline and by the caller's signal. */
+async function run(
+  keys: DeviceSpeedupKeys,
+  provider: SpeedupKeyProvider,
+  request: CleanupRequest,
+  signal: AbortSignal | undefined,
+  timeoutMs: number,
+  probe: AttemptProbe | undefined,
 ): Promise<RemoteEnhancementResult | undefined> {
   const controller = new AbortController();
   let timedOut = false;
@@ -132,13 +216,19 @@ async function attempt(
         signal: controller.signal,
       });
       if (sent.kind !== 'response') return sent.kind === 'missing' ? undefined : unreadableKey(provider);
+      if (probe) {
+        probe.firstByteMs = Math.max(0, probe.now() - probe.startedAt);
+        probe.status = sent.response.status;
+      }
       if (!sent.response.ok) {
+        if (probe) probe.errorBody = await readErrorBody(sent.response);
         throw deviceCleanupStatusError(provider, {
           status: sent.response.status,
           ...(retryAfter(sent.response) === undefined ? {} : { retryAfterSeconds: retryAfter(sent.response) }),
         });
       }
       body = await sent.response.text();
+      if (probe) probe.raw = body;
     } catch (failure) {
       if (failure instanceof RemoteEnhancementError) throw failure;
       throw (
@@ -153,7 +243,9 @@ async function attempt(
     try {
       if (body.length > CLEANUP_LIMITS.maxResponseBytes) throw new Error('oversized');
       payload = JSON.parse(body);
+      if (probe) probe.payload = payload;
     } catch {
+      if (probe) probe.errorBody = body.slice(0, ERROR_BODY_CAP);
       throw new RemoteEnhancementError(
         'invalid-response',
         `${label(provider)} returned an unreadable response; raw dictation was kept.`,
@@ -170,6 +262,15 @@ async function attempt(
     signal?.removeEventListener('abort', onAbort);
   }
 }
+
+/** What the provider said with a non-2xx status, capped; an unreadable body is simply absent. */
+const readErrorBody = async (response: Response): Promise<string | undefined> => {
+  try {
+    return (await response.text()).slice(0, ERROR_BODY_CAP);
+  } catch {
+    return undefined;
+  }
+};
 
 const unreadableKey = (provider: SpeedupKeyProvider): never => {
   throw new RemoteEnhancementError(
@@ -204,13 +305,61 @@ export async function requestDeviceCleanup(
     return { text: input.text };
   }
   const timeoutMs = Math.max(1, input.timeoutMs ?? DEFAULT_CLEANUP_TIMEOUT_MS);
+  const sink: TraceSink | undefined = input.debug === true ? { attempts: [], now: input.now ?? Date.now } : undefined;
+  const startedAt = sink?.now() ?? 0;
   try {
-    return await attempt(keys, input.provider, prepared, input.signal, timeoutMs);
+    const result = await attemptWithRetry(keys, input.provider, prepared, input.signal, timeoutMs, sink);
+    if (sink === undefined || result === undefined) return result;
+    return { ...result, trace: traceOf(sink, input.provider, prepared.model, startedAt, result) };
+  } catch (failure) {
+    if (sink !== undefined && failure instanceof RemoteEnhancementError && sink.attempts.length > 0) {
+      failure.trace = traceOf(sink, input.provider, prepared.model, startedAt, failure);
+    }
+    throw failure;
+  }
+}
+
+/** The first attempt, and — when the provider found the request too big — one more without the conversation. */
+async function attemptWithRetry(
+  keys: DeviceSpeedupKeys,
+  provider: SpeedupKeyProvider,
+  prepared: CleanupRequest,
+  signal: AbortSignal | undefined,
+  timeoutMs: number,
+  sink: TraceSink | undefined,
+): Promise<RemoteEnhancementResult | undefined> {
+  try {
+    return await attempt(keys, provider, prepared, signal, timeoutMs, sink);
   } catch (failure) {
     const sized = failure instanceof RemoteEnhancementError && isContextSizedStatus(failure.status);
     if (!sized || prepared.context.length === 0) throw failure;
-    return await attempt(keys, input.provider, { ...prepared, context: [] }, input.signal, timeoutMs);
+    return await attempt(keys, provider, { ...prepared, context: [] }, signal, timeoutMs, sink);
   }
+}
+
+/** The whole call as one record, from the attempts it made and how it ended. */
+function traceOf(
+  sink: TraceSink,
+  provider: SpeedupKeyProvider,
+  model: string,
+  startedAt: number,
+  ending: RemoteEnhancementResult | RemoteEnhancementError,
+): CleanupTrace {
+  const failed = ending instanceof RemoteEnhancementError;
+  const outcome = failed ? 'failed' : ending.kept === 'raw' ? 'kept_raw' : 'cleaned';
+  return {
+    via: 'device',
+    provider,
+    model,
+    host: new URL(CLEANUP_PROVIDERS[provider].endpoint).host,
+    startedAt,
+    totalMs: Math.max(0, sink.now() - startedAt),
+    outcome,
+    ...(failed
+      ? { failure: { code: ending.code, message: ending.message.slice(0, 400) } }
+      : { finalText: ending.text }),
+    attempts: sink.attempts,
+  };
 }
 
 /** What a key's Test found: how many models it can use, or why it cannot. */
