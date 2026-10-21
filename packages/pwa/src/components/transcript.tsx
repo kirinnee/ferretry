@@ -17,6 +17,7 @@ import { CompactionCard, CompactionStrip } from './compaction-card.tsx';
 import { JumpToLatest } from './jump-to-latest.tsx';
 import type { SendCancel, SendRetry, SendSubmit } from './ledger-message.tsx';
 import { LiveActivityLine } from './live-activity.tsx';
+import type { SendDismiss, SendExpand } from './settled-send-note.tsx';
 import { TranscriptRow } from './transcript-row.tsx';
 
 export interface TranscriptProps {
@@ -31,6 +32,10 @@ export interface TranscriptProps {
   readonly onCancel?: SendCancel;
   /** Offered on ledger rows. Absent means Enter cannot be pressed for a typed message from here. */
   readonly onSubmit?: SendSubmit;
+  /** Offered on a send that is not delivered. Absent means it cannot be put away from here. */
+  readonly onDismiss?: SendDismiss;
+  /** Opens or folds a settled send's one-line note. */
+  readonly onExpand?: SendExpand;
   /** The harness's own live status line while `busy`, when its pane could be read. */
   readonly activity?: PaneActivity | null;
   /** The daemon's activity sentence, shown when the pane said nothing readable. */
@@ -115,6 +120,8 @@ export function Transcript({
   onRetry,
   onCancel,
   onSubmit,
+  onDismiss,
+  onExpand,
   activity = null,
   activityFallback = null,
   turnStartedAt = null,
@@ -247,6 +254,8 @@ export function Transcript({
                 isLast={index === items.length - 1}
                 live={shown.busy}
                 onCancel={onCancel}
+                onDismiss={onDismiss}
+                onExpand={onExpand}
                 onRetry={onRetry}
                 onSubmit={onSubmit}
                 previous={item.previous}

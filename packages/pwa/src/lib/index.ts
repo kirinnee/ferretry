@@ -308,6 +308,7 @@ export * from '../hooks/use-qr-scan.ts';
 export * from '../hooks/use-release-integrity.ts';
 export * from '../hooks/use-remote-browser.ts';
 export * from '../hooks/use-route-scroll-memory.ts';
+export * from '../hooks/use-send-view.ts';
 export * from '../hooks/use-service-worker-update.ts';
 export * from '../hooks/use-stt-settings.ts';
 export * from '../hooks/use-theme.ts';

@@ -8,6 +8,7 @@ import {
 } from '../../src/components/ledger-message.tsx';
 import { Transcript } from '../../src/components/transcript.tsx';
 import {
+  CANCELLED_ROW_LIFETIME_MS,
   isStuckSend,
   type LedgerBlockPlacement,
   ledgerPlacementCopy,
@@ -145,9 +146,16 @@ describe('isStuckSend', () => {
     expect(isStuckSend(record({ fate: 'timed_out' }))).toBe(false);
   });
 
-  test('keeps a cancelled row in the conversation for a day so it can say what the cancel did', () => {
-    const placed = placeLedgerRows([], [record({ sendId: 'c', fate: 'cancelled', cancelEffect: 'cleared' })], now);
-    expect(placed.map(entry => entry.id)).toEqual(['send:c']);
+  test('keeps a cancelled row for ten minutes after the cancel, so it can say what the cancel did', () => {
+    const cancelled = record({
+      sendId: 'c',
+      fate: 'cancelled',
+      cancelEffect: 'cleared',
+      fateAt: new Date(now - CANCELLED_ROW_LIFETIME_MS + 1).toISOString(),
+    });
+    const retired = { ...cancelled, fateAt: new Date(now - CANCELLED_ROW_LIFETIME_MS).toISOString() };
+    expect(placeLedgerRows([], [cancelled], now).map(entry => entry.id)).toEqual(['send:c']);
+    expect(placeLedgerRows([], [retired], now)).toEqual([]);
   });
 });
 
@@ -232,7 +240,12 @@ describe('placeLedgerRows', () => {
     );
 
     expect(placed.map(entry => entry.id)).toEqual(['send:undated', 'send:lost', 'send:sending', 'send:queued']);
-    expect(placed[0]).toMatchObject({ kind: 'ledger', placement: 'chronological', text: 'ship the tool group' });
+    expect(placed[0]).toMatchObject({
+      kind: 'ledger',
+      placement: 'unknown-time',
+      settled: 'slim',
+      text: 'ship the tool group',
+    });
   });
 });
 

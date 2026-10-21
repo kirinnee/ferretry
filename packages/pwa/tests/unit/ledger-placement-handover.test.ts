@@ -101,9 +101,9 @@ describe('a send that has landed in the transcript before the daemon confirmed i
     ]);
   });
 
-  test('settled sends are never worn: a failure stays its own bubble beside any look-alike', () => {
+  test('settled sends are never worn: a failure stays its own note, at the time it was sent, beside any look-alike', () => {
     const rows = placeLedgerRows([user('b', 'ship it', 1_000)], [send({ fate: 'timed_out' })], T0 + 2_000);
-    expect(shape(rows).map(row => row.kind)).toEqual(['user', 'ledger']);
+    expect(shape(rows).map(row => row.kind)).toEqual(['ledger', 'user']);
   });
 });
 
