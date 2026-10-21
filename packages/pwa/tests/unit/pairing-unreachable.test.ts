@@ -24,9 +24,11 @@ describe('describePairingUnreachable', () => {
       describePairingUnreachable([{ kind: 'relay', address: RELAY, ...(code === undefined ? {} : { code }) }]);
     expect(relay(RELAY_CLOSE_CODES.daemonAbsent)).toContain('the machine is not connected to it right now');
     expect(relay(RELAY_CLOSE_CODES.hostedDisabled)).toContain('is switched off right now');
-    for (const busy of [RELAY_CLOSE_CODES.rendezvousBusy, RELAY_CLOSE_CODES.hostedBandwidth]) {
-      expect(relay(busy)).toContain('is busy right now');
-    }
+    expect(relay(RELAY_CLOSE_CODES.rendezvousBusy)).toContain('is busy right now');
+    // A data allowance comes back at a fixed time; "wait a minute" is wrong for a day.
+    expect(relay(RELAY_CLOSE_CODES.hostedBandwidth)).toContain('a relay data allowance is used up');
+    expect(relay(RELAY_CLOSE_CODES.hostedBandwidth)).toContain('Direct connections still work.');
+    expect(relay(RELAY_CLOSE_CODES.hostedBandwidth)).not.toContain('busy right now');
     // A full connection count is said as what it is, never as a busy relay to wait a minute for.
     expect(relay(RELAY_CLOSE_CODES.hostedCapacity)).toContain(
       'connection limit for this machine, or for the relay as a whole, is full',

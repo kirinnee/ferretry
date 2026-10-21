@@ -16,7 +16,9 @@ import {
   type HostedRelayDaemonMetrics,
   initialHostedRelayDaemonMetrics,
   initialHostedRelayGlobalMetrics,
+  MAX_FRAME_BYTES,
   RELAY_CLOSE_CODES,
+  SUPERSEDED_HOSTED_RELAY_LIMITS,
 } from '../../src/lib/index.ts';
 import { FakeHostedRelayControlStorage } from '../support/hosted-control-fakes.ts';
 
@@ -211,6 +213,48 @@ describe('hosted relay control Durable Object', () => {
         )
       ).json(),
     ).match({ ok: false, code: RELAY_CLOSE_CODES.hostedDisabled });
+  });
+
+  it('should lift a stored first-deployment ceiling on the next read and keep a customised one', async () => {
+    const [firstDeployment] = SUPERSEDED_HOSTED_RELAY_LIMITS;
+    if (firstDeployment === undefined) throw new Error('no superseded default set');
+    const mebibyte = 1024 * 1024;
+    const harness = makeObject();
+    // The operator endpoint stores what it is given, so this is the document a first deploy left behind.
+    await configure(harness, { ...enabledConfiguration(), limits: firstDeployment });
+    should(harness.storage.values.get('control:configuration')).match({ limits: firstDeployment });
+    should(await (await harness.object.fetch(request('/operator/configuration'))).json()).match({
+      configuration: { limits: DEFAULT_HOSTED_RELAY_LIMITS },
+    });
+
+    should(
+      await (
+        await harness.object.fetch(
+          request('/internal/reserve', 'POST', { daemonId, reservationId: 'reservation_0001' }),
+        )
+      ).json(),
+    ).deepEqual({ ok: true });
+    // 1.2 GiB across three minutes: refused at 64 MiB under the old minute ceiling and at 1 GiB under
+    // the old day ceiling, carried under the current defaults.
+    for (const bytes of [500 * mebibyte, 500 * mebibyte, 230 * mebibyte]) {
+      // One report is a batch of frames, each at most MAX_FRAME_BYTES.
+      const events = Math.ceil(bytes / MAX_FRAME_BYTES);
+      should(
+        await (await harness.object.fetch(request('/internal/meter', 'POST', { daemonId, bytes, events }))).json(),
+      ).match({ ok: true });
+      harness.runtime.clock += 60_000;
+    }
+    should(await (await harness.object.fetch(request('/internal/inspect', 'POST', { daemonId }))).json()).match({
+      ok: true,
+    });
+    const metrics = await (await harness.object.fetch(request('/operator/metrics'))).json();
+    should(metrics).match({ configuration: { limits: DEFAULT_HOSTED_RELAY_LIMITS }, daemons: [{ daemonId }] });
+
+    const customised = { ...firstDeployment, maxBytesPerDayPerDaemon: 2 * firstDeployment.maxBytesPerDayPerDaemon };
+    await configure(harness, { ...enabledConfiguration(), limits: customised });
+    should(await (await harness.object.fetch(request('/operator/configuration'))).json()).match({
+      configuration: { limits: customised },
+    });
   });
 
   it('should reject malformed internal calls and unknown routes', async () => {

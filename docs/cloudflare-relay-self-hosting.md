@@ -473,6 +473,31 @@ Re-run `git pull && task relay:check && task relay:deploy` when you update Ferre
 Cloudflare describes it as _"a date in the form `yyyy-mm-dd`, which will be used to determine which
 version of the Workers runtime is used"_ — so a redeploy is not silently a runtime upgrade.
 
+**Ferretry's own hosted relay is operated from GitHub Actions**, so nobody needs the operator bearer on
+a laptop. In this repository, **Actions → Deploy Hosted Relay → Run workflow** (on `main`) with:
+
+| `operation` | What it does                                                                                       |
+| ----------- | -------------------------------------------------------------------------------------------------- |
+| `metrics`   | Prints the configuration and the account-wide counters. Per-machine rows stay out of the log.      |
+| `limits`    | Changes the byte ceilings. Fill only the values to change; a blank one keeps what the relay holds. |
+| `disable`   | The kill switch: the hosted relay stops serving new and live traffic.                              |
+| `enable`    | Turns it back on, at this Worker's origin or the `relay_url` you give.                             |
+| `deploy`    | Publishes the Worker, and reinstalls the operator bearer after `CLOUDFLARE_API_TOKEN` rotates.     |
+
+`limits` takes whole numbers — `daemon_gib_per_day`, `daemon_mib_per_minute`, `global_gib_per_day`,
+`global_gib_per_minute` — and checks them **before writing anything**: a value that is not a whole
+number, or a set where a global ceiling is below one machine's or a day is below its minute, fails the
+run with the reason and changes nothing. A machine refused `4433` is admitted on its next dial once the
+ceiling it hit is above what it has used, and it redials within half an hour on its own. There is no
+"reset today's counter" operation: raising the ceiling is the reset, and the counter rolls over at
+midnight UTC regardless.
+
+**The bearer is never typed and never printed.** It is not a separate secret: the workflow derives it
+from the `CLOUDFLARE_API_TOKEN` repository secret, masks it before first use, and every `deploy`
+installs the same derivation as the Worker's `RELAY_OPERATOR_TOKEN` secret — so a second secret that
+could drift from the Worker's copy does not exist. After rotating `CLOUDFLARE_API_TOKEN`, run
+`deploy` once, or every other operation answers `401` (`docs/relay-protocol.md` §13).
+
 **If you stop operating it:** every daemon that named it stops being reachable through it. Nothing
 is lost — no session content ever lived there, and the relay holds no key material — but the route
 is gone. Move those daemons back to the hosted default, or to another relay, before you tear it down.

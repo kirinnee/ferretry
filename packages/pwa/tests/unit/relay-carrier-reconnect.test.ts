@@ -8,7 +8,12 @@
 
 import { describe, expect, it } from 'bun:test';
 import { FY_REQUEST_ID_HEADER } from '@ferretry/protocol';
-import { HEARTBEAT_GRACE_SECONDS, RELAY_CLOSE_CODES } from '@ferretry/relay';
+import {
+  HEARTBEAT_GRACE_SECONDS,
+  HOSTED_RELAY_BANDWIDTH_REASONS,
+  hostedBandwidthReason,
+  RELAY_CLOSE_CODES,
+} from '@ferretry/relay';
 import type { CarrierOutage, ConnectionHealthReporter } from '../../src/lib/connection-health.ts';
 import { type DaemonId, daemonConnection, type RelayCarrier } from '../../src/lib/daemon-connection.ts';
 import {
@@ -68,7 +73,10 @@ const manualSchedule = () => {
   return { armed, schedule, live, fire };
 };
 
-type Reach = (url: URL) => 'live' | 'refuse' | 'absent';
+type Reach = (url: URL) => 'live' | 'refuse' | 'absent' | 'spent';
+
+/** The refusal a 'spent' relay closes with: this machine's daily allowance, resetting at a fixed instant. */
+const SPENT_REASON = hostedBandwidthReason(HOSTED_RELAY_BANDWIDTH_REASONS.daemon.day, Date.UTC(2026, 9, 22));
 
 /** Live on some addresses, refused (never opened) on others, or opened and closed `4404` by a relay. */
 const carriersFor = (
@@ -87,6 +95,11 @@ const carriersFor = (
       if (verdict === 'absent') {
         socket.onOpen?.();
         socket.onClose?.(RELAY_CLOSE_CODES.daemonAbsent, 'no daemon holds this rendezvous');
+        return;
+      }
+      if (verdict === 'spent') {
+        socket.onOpen?.();
+        socket.onClose?.(RELAY_CLOSE_CODES.hostedBandwidth, SPENT_REASON);
         return;
       }
       socket.onClose?.(1006, 'the address did not answer');
@@ -117,6 +130,7 @@ const routerFor = async (
   options: {
     reach?: Reach;
     relay?: boolean;
+    relayCarrier?: RelayCarrier;
     answer?: Parameters<typeof autoDial>[1];
     deviceKey?: DaemonCarrierRouterOptions['deviceKey'];
     heartbeat?: DaemonCarrierRouterOptions['heartbeat'];
@@ -127,7 +141,9 @@ const routerFor = async (
     daemonId: identity.daemonId,
     baseUrl: DAEMON_URL,
     deviceId: DEVICE_ID,
-    ...(options.relay === false ? {} : { carriers: [{ kind: 'direct' as const, daemonUrl: DAEMON_URL }, RELAY] }),
+    ...(options.relay === false
+      ? {}
+      : { carriers: [{ kind: 'direct' as const, daemonUrl: DAEMON_URL }, options.relayCarrier ?? RELAY] }),
   });
   let reach: Reach = options.reach ?? (() => 'live');
   const carriers = carriersFor(identity, () => reach, options.answer ?? {});
@@ -328,6 +344,22 @@ describe('no carrier at all', () => {
     expect(outage.outage.daemonAbsent).toBe(false);
     expect(outage.delivery).toBe('unsent');
     expect(health.calls).toEqual([{ kind: 'outage', daemonId: daemon.daemonId, outage: outage.outage }]);
+  });
+
+  it('should name a spent relay data allowance plainly, on the hosted relay it came from', async () => {
+    // A device that has not discovered the hosted address files the relay as somebody's own; the
+    // hosted-only refusal is what corrects the label.
+    const { router, daemon } = await routerFor({
+      reach: url => (url.hostname === DIRECT_HOST ? 'refuse' : 'spent'),
+      relayCarrier: { ...RELAY, operator: 'self' },
+    });
+    const outage = (await rejection(router.send(daemon, `${DAEMON_URL}/v1/projects`))) as CarrierUnavailableError;
+    expect(outage).toBeInstanceOf(CarrierUnavailableError);
+    const [direct, relayed] = outage.outage.failures;
+    expect(direct?.label).toBe('Direct');
+    expect(relayed?.label).toBe('Hosted relay');
+    expect(relayed?.detail).toStartWith("Today's relay data allowance for this machine is used up (resets at ");
+    expect(relayed?.detail).toContain('Direct connections still work.');
   });
 
   it('should tell a relay with no daemon behind it from a relay nobody could reach', async () => {

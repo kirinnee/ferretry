@@ -31,6 +31,8 @@ import {
   FRAME_KINDS,
   fromBase64UrlFixed,
   HANDSHAKE_FRAME_SEQUENCE,
+  HOSTED_RELAY_BANDWIDTH_REASONS,
+  hostedBandwidthReason,
   NONCE_BYTES,
   openChannel,
   openRecord,
@@ -1037,6 +1039,49 @@ describe('a carrier that survives a dropped rendezvous', () => {
     await claimOn(socketAt(5));
     socketAt(5).onclose?.({ code: 4432, reason: 'hosted relay per-daemon connection ceiling is reached' });
     should(clock.delays.at(-1)).equal(60_000);
+    carrier.stop();
+  });
+
+  it('should wait for a spent relay data allowance to reset instead of redialling it', () => {
+    // Arrange — the bottom of the jitter range, so every wait is exactly the schedule's.
+    const { carrier, clock, lines, socketAt } = redialingCarrier({}, 0);
+    carrier.start();
+    socketAt(0).onopen?.(undefined);
+    const resetsAt = 1_000 + 600_000;
+    socketAt(0).onmessage?.({
+      data: controlFrame({
+        t: 'error',
+        code: 4433,
+        reason: hostedBandwidthReason(HOSTED_RELAY_BANDWIDTH_REASONS.daemon.day, resetsAt),
+      }),
+    });
+
+    // Act — explained in-band, then a close that carries nothing.
+    socketAt(0).onclose?.({ code: 1006, reason: '' });
+
+    // Assert — until the reset the relay named, and a status that says what ran out and when.
+    should(clock.delays.at(-1)).equal(600_000);
+    should(lines.at(-1)).match(
+      /refused: the hosted relay's data allowance for this machine is used up for today, resetting at 1970-01-01T00:10:01\.000Z — redial attempt 1 in 600\.0s/u,
+    );
+    should(carrier.status().detail).match(/data allowance for this machine is used up for today .* resets at/u);
+
+    // Act — an older relay names no reset: the UTC day is hours away, so it rechecks in half an hour.
+    clock.advance(600_000);
+    socketAt(1).onclose?.({ code: 4433, reason: HOSTED_RELAY_BANDWIDTH_REASONS.global.day });
+    should(clock.delays.at(-1)).equal(1_800_000);
+    should(lines.at(-1)).match(/allowance for the whole relay is used up for today/u);
+
+    // Act — a minute window is never redialled sooner than a minute.
+    clock.advance(1_800_000);
+    socketAt(2).onclose?.({ code: 4433, reason: HOSTED_RELAY_BANDWIDTH_REASONS.daemon.minute });
+    should(clock.delays.at(-1)).equal(60_000);
+    should(lines.at(-1)).match(/used up for this minute/u);
+
+    // Act — a 4433 whose words this build does not know is an ordinary drop.
+    clock.advance(60_000);
+    socketAt(3).onclose?.({ code: 4433, reason: 'something else' });
+    should(lines.at(-1)).match(/^relay https:\/\/relay\.example: disconnected \(4433 something else\)/u);
     carrier.stop();
   });
 

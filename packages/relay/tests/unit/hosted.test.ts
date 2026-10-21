@@ -7,6 +7,7 @@ import {
   DEFAULT_HOSTED_RELAY_LIMITS,
   forgetHostedRelayDaemons,
   HOSTED_RELAY_CONFIG_VERSION,
+  HOSTED_RELAY_BANDWIDTH_REASONS,
   HOSTED_RELAY_DAEMON_CEILING_REASON,
   HOSTED_RELAY_DAY_MILLISECONDS,
   HOSTED_RELAY_MINUTE_MILLISECONDS,
@@ -24,6 +25,7 @@ import {
   HostedRelayLimitsSchema,
   type HostedRelayReservation,
   HostedRelayReservationSchema,
+  hostedBandwidthReason,
   hostedRelayConnection,
   hostedRelayDayStart,
   initialHostedRelayConfiguration,
@@ -32,10 +34,14 @@ import {
   inspectHostedRelayCapacity,
   MAX_FRAME_BYTES,
   meterHostedRelayRequest,
+  parseHostedBandwidthRefusal,
   RELAY_CLOSE_CODES,
+  readHostedBandwidthRefusal,
   reclaimableHostedRelayDaemon,
   recountHostedRelayConnections,
   releaseHostedRelayConnection,
+  SUPERSEDED_HOSTED_RELAY_LIMITS,
+  upgradeHostedRelayConfiguration,
 } from '@ferretry/relay';
 import should from 'should';
 
@@ -71,6 +77,48 @@ describe('hosted relay runtime configuration', () => {
     should(advertiseHostedRelay(initial)).deepEqual({ version: 1, relayUrl: null });
     should(hostedRelayConnection(advertiseHostedRelay(initial))).be.null();
     should(HostedRelayConfigurationSchema.parse(initial)).deepEqual(initial);
+  });
+
+  it("should size the default byte ceilings for a working day of one person's machines", () => {
+    const gibibyte = 1024 * 1024 * 1024;
+    should(DEFAULT_HOSTED_RELAY_LIMITS).match({
+      maxBytesPerMinutePerDaemon: gibibyte / 2,
+      maxBytesPerMinuteGlobal: 4 * gibibyte,
+      maxBytesPerDayPerDaemon: 20 * gibibyte,
+      maxBytesPerDayGlobal: 200 * gibibyte,
+    });
+    should(HostedRelayLimitsSchema.parse(DEFAULT_HOSTED_RELAY_LIMITS)).deepEqual(DEFAULT_HOSTED_RELAY_LIMITS);
+    for (const superseded of SUPERSEDED_HOSTED_RELAY_LIMITS) {
+      should(HostedRelayLimitsSchema.parse(superseded)).deepEqual(superseded);
+      should(superseded).not.deepEqual(DEFAULT_HOSTED_RELAY_LIMITS);
+    }
+  });
+
+  it('should read a stored superseded default set as the current defaults and keep everything else', () => {
+    const [firstDeployment] = SUPERSEDED_HOSTED_RELAY_LIMITS;
+    if (firstDeployment === undefined) throw new Error('no superseded default set');
+    should(firstDeployment.maxBytesPerDayPerDaemon).equal(1024 * 1024 * 1024);
+    const stored = configureHostedRelay(
+      { version: HOSTED_RELAY_CONFIG_VERSION, relayUrl: 'https://relay.example/', limits: firstDeployment },
+      at,
+    );
+    const upgraded = upgradeHostedRelayConfiguration(stored);
+    should(upgraded).deepEqual({ ...stored, limits: DEFAULT_HOSTED_RELAY_LIMITS });
+    should(upgradeHostedRelayConfiguration(upgraded)).equal(upgraded);
+    should(HostedRelayConfigurationSchema.parse(upgraded)).deepEqual(upgraded);
+
+    // One field the operator chose is the operator's decision for the whole document.
+    const customised = configureHostedRelay(
+      {
+        version: HOSTED_RELAY_CONFIG_VERSION,
+        relayUrl: null,
+        limits: { ...firstDeployment, maxTrackedDaemons: firstDeployment.maxTrackedDaemons - 1 },
+      },
+      at,
+    );
+    should(upgradeHostedRelayConfiguration(customised)).equal(customised);
+    const current = configuration();
+    should(upgradeHostedRelayConfiguration(current)).equal(current);
   });
 
   it('should turn a remotely supplied address into the existing relay carrier', () => {
@@ -528,11 +576,19 @@ describe('hosted relay live reservation checks', () => {
       [base.global, { ...base.daemon, day: { ...base.daemon.day, bytes: cap * 3 } }],
       [{ ...base.global, day: { ...base.global.day, bytes: cap * 4 } }, base.daemon],
     ];
-    for (const [global, daemon] of cases) {
-      should(inspectHostedRelayCapacity(config, global, daemon, at + 2)).match({
-        ok: false,
-        code: RELAY_CLOSE_CODES.hostedBandwidth,
-      });
+    const expected = [
+      ['daemon', 'minute'],
+      ['global', 'minute'],
+      ['daemon', 'day'],
+      ['global', 'day'],
+    ] as const;
+    for (const [index, [global, daemon]] of cases.entries()) {
+      const decision = inspectHostedRelayCapacity(config, global, daemon, at + 2);
+      should(decision).match({ ok: false, code: RELAY_CLOSE_CODES.hostedBandwidth });
+      if (decision.ok) throw new Error('expected a refusal');
+      // The reason names the window and carries the reset the decision computed.
+      const [scope, window] = expected[index] ?? ['daemon', 'minute'];
+      should(readHostedBandwidthRefusal(decision.reason)).deepEqual({ scope, window, resetsAt: decision.retryAt });
     }
 
     should(
@@ -640,5 +696,43 @@ describe('hosted relay reservation audit', () => {
       at + 2,
     );
     should(refused.decision).match({ ok: false, reason: HOSTED_RELAY_DAEMON_CEILING_REASON });
+  });
+});
+
+describe('hosted relay byte-ceiling refusal reasons', () => {
+  const sentence = HOSTED_RELAY_BANDWIDTH_REASONS.daemon.day;
+  const midnight = HOSTED_RELAY_DAY_MILLISECONDS * 3;
+
+  it('should carry the reset inside a close reason a WebSocket can send', () => {
+    for (const scope of ['daemon', 'global'] as const) {
+      for (const window of ['minute', 'day'] as const) {
+        const reason = hostedBandwidthReason(HOSTED_RELAY_BANDWIDTH_REASONS[scope][window], midnight);
+        should(new TextEncoder().encode(reason).length).be.belowOrEqual(123);
+        should(readHostedBandwidthRefusal(reason)).deepEqual({ scope, window, resetsAt: midnight });
+        should(parseHostedBandwidthRefusal(reason, midnight - 1)).deepEqual({ scope, window, resetsAt: midnight });
+      }
+    }
+  });
+
+  it('should derive the reset an older relay did not say, and distrust one that is unreadable or past', () => {
+    const now = midnight - 5_000;
+    should(readHostedBandwidthRefusal(sentence)).deepEqual({ scope: 'daemon', window: 'day', resetsAt: null });
+    should(parseHostedBandwidthRefusal(sentence, now)).deepEqual({
+      scope: 'daemon',
+      window: 'day',
+      resetsAt: midnight,
+    });
+    should(parseHostedBandwidthRefusal(`${sentence}; resets yesterday`, now)).match({ resetsAt: midnight });
+    should(parseHostedBandwidthRefusal(hostedBandwidthReason(sentence, now - 1), now)).match({ resetsAt: midnight });
+    should(parseHostedBandwidthRefusal(HOSTED_RELAY_BANDWIDTH_REASONS.global.minute, now)).deepEqual({
+      scope: 'global',
+      window: 'minute',
+      resetsAt: now + HOSTED_RELAY_MINUTE_MILLISECONDS,
+    });
+  });
+
+  it('should not read any other refusal as a byte ceiling', () => {
+    should(readHostedBandwidthRefusal(HOSTED_RELAY_DAEMON_CEILING_REASON)).be.null();
+    should(parseHostedBandwidthRefusal('hosted relay is disabled', midnight)).be.null();
   });
 });
