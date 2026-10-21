@@ -1,16 +1,17 @@
 import {
-  SessionFileIndexEntrySchema,
-  SessionFileIndexSkipReasonSchema,
   type SessionFileIndex,
   type SessionFileIndexCoverage,
   type SessionFileIndexEntry,
+  SessionFileIndexEntrySchema,
   type SessionFileIndexSkip,
   type SessionFileIndexSkipReason,
+  SessionFileIndexSkipReasonSchema,
 } from '@ferretry/protocol';
 import { deniedSegment, gateCandidates, isDeniedPath, looksBinary, normalizeRelativePath } from './path-policy.ts';
 import type {
   AfterValidationHook,
   ComponentIdentity,
+  PinnedFileKind,
   PinnedOpenOptions,
   PinnedRoot,
   PinnedTarget,
@@ -87,6 +88,15 @@ class IndexBudget implements SpawnBudget {
     return Math.max(0, this.deadlineMs - this.nowMs());
   }
 }
+
+/**
+ * How many tracked names one probe call proves before the event loop is handed back.
+ *
+ * The probe is synchronous where the platform is (macOS), so this is the longest any index can hold the
+ * loop: a few hundred metadata calls, rather than one turn for the whole tree — which on a host whose
+ * endpoint security intercepts every call was a ten-second stall of every timer in the daemon.
+ */
+const INDEX_PROBE_BATCH = 256;
 
 /**
  * Roots a filename search never enters, even when they are not ignored.
@@ -188,13 +198,6 @@ function indexEntry(rel: string): SessionFileIndexEntry | undefined {
   return parsed.success ? parsed.data : undefined;
 }
 
-/** A Git candidate that is absent or not an ordinary current file is safely unsupported, not unreadable. */
-function unsupportedCandidate(error: unknown): boolean {
-  return (
-    error instanceof FsError && ['not_found', 'not_a_directory', 'not_a_file', 'escapes_root'].includes(error.code)
-  );
-}
-
 /**
  * Read-only working-tree access for ONE session, rooted at its own cwd.
  *
@@ -208,7 +211,8 @@ function unsupportedCandidate(error: unknown): boolean {
  * every session and every daemon: the pinned root is derived from the cwd handed to each call and never
  * cached. There is deliberately no memoisation anywhere in this subsystem — a cache keyed by anything
  * short of "this descriptor, right now" would serve one tree's bytes for another tree's request, which
- * is the exact failure the pin exists to prevent.
+ * is the exact failure the pin exists to prevent. The one thing held between two questions is an index's
+ * {@link PinnedFileProbe}, and it lives exactly as long as the one call that opened it, under that call's pin.
  */
 export class SessionFilesystem {
   constructor(
@@ -340,52 +344,69 @@ export class SessionFilesystem {
     let overflow = listed.truncated ? 1 : 0;
     if (candidates.length > maxCandidates) overflow += candidates.length - maxCandidates;
     const considered = candidates.slice(0, maxCandidates);
-    for (const [position, path] of considered.entries()) {
-      // Two reasons to stop, counted the same way, because they leave a reader in the same position:
-      // these paths were not looked at. `maxFiles` belongs here rather than only in the response bound —
-      // the candidates are already in the comparator's order, so once that many rows are accepted every
-      // remaining one sorts after all of them and would be sliced off after being opened for nothing.
-      if (files.length >= maxFiles || budget.expired()) {
-        overflow += considered.length - position;
-        break;
-      }
-      if (isIndexExcludedPath(path)) {
-        excluded += 1;
-        continue;
-      }
-      if (isDeniedPath(path)) {
-        denied += 1;
-        continue;
-      }
-      const entry = indexEntry(path);
-      if (entry === undefined) {
-        unsupported += 1;
-        continue;
-      }
-      let target: PinnedTarget;
-      try {
-        // `git ls-files --cached` can name a deleted file and either half can be a symlink. The same
-        // descriptor-confined walk as a read is therefore the final authority, never Git's pathname.
-        target = await pinned.open(entry.path);
-      } catch (error) {
-        if (unsupportedCandidate(error)) unsupported += 1;
-        else tally(skips, 'unreadable', 1);
-        continue;
-      }
-      try {
-        if (
-          target.metadata.type !== 'file' ||
-          target.canonical !== entry.path ||
-          isIndexExcludedPath(target.canonical) ||
-          isDeniedPath(target.canonical)
-        ) {
-          unsupported += 1;
+    // `git ls-files --cached` can name a deleted file and either half can be a symlink. The pinned walk
+    // is therefore the final authority, never Git's pathname — asked through ONE probe, so the
+    // directories it walks are walked once for every file beneath them rather than once per file.
+    const probe = pinned.probe();
+    try {
+      let position = 0;
+      while (position < considered.length) {
+        // `maxFiles` belongs here rather than only in the response bound: the candidates are already in
+        // the comparator's order, so once that many rows are accepted every remaining one sorts after all
+        // of them and would be sliced off after being proved for nothing.
+        if (files.length >= maxFiles) {
+          overflow += considered.length - position;
+          break;
+        }
+        // The cheap refusals are pure and cost nothing to ask, so they are settled while the batch is
+        // gathered. A batch never asks for more than the response still has room for.
+        const batch: SessionFileIndexEntry[] = [];
+        const room = Math.min(INDEX_PROBE_BATCH, maxFiles - files.length);
+        while (position < considered.length && batch.length < room) {
+          const path = considered[position] ?? '';
+          position += 1;
+          if (isIndexExcludedPath(path)) {
+            excluded += 1;
+            continue;
+          }
+          if (isDeniedPath(path)) {
+            denied += 1;
+            continue;
+          }
+          const entry = indexEntry(path);
+          // The gates are asked again of the name the walk will prove, because normalising is what could
+          // turn an innocent spelling into a gated one.
+          if (entry === undefined || isIndexExcludedPath(entry.path) || isDeniedPath(entry.path)) unsupported += 1;
+          else batch.push(entry);
+        }
+        if (batch.length === 0) continue;
+        let kinds: readonly PinnedFileKind[];
+        try {
+          kinds = await probe.classify(
+            batch.map(entry => entry.path),
+            budget,
+          );
+        } catch {
+          // A probe that cannot answer at all proved none of these names; it says nothing about the next.
+          tally(skips, 'unreadable', batch.length);
           continue;
         }
-        files.push(entry);
-      } finally {
-        await target.close();
+        for (const [index, kind] of kinds.entries()) {
+          const entry = batch[index];
+          if (entry === undefined) continue;
+          if (kind === 'file') files.push(entry);
+          else if (kind === 'unsupported') unsupported += 1;
+          else tally(skips, 'unreadable', 1);
+        }
+        // A short answer is a spent budget. What it never reached and everything after it were not looked
+        // at, which is the same position for a reader and so the same word.
+        if (kinds.length < batch.length) {
+          overflow += batch.length - kinds.length + (considered.length - position);
+          break;
+        }
       }
+    } finally {
+      await probe.close();
     }
     tally(skips, 'denied', denied);
     tally(skips, 'excluded', excluded);

@@ -1,12 +1,14 @@
 import {
   closeSync,
   constants,
+  type Dir,
   fstatSync,
   lstatSync,
-  openSync,
   opendirSync,
+  openSync,
   read,
   realpathSync,
+  type Stats,
   statSync,
 } from 'node:fs';
 import path from 'node:path';
@@ -15,6 +17,8 @@ import {
   type FsEntryType,
   FsError,
   type PinnedDirectoryEntry,
+  type PinnedFileKind,
+  type PinnedFileProbe,
   type PinnedListing,
   type PinnedMetadata,
   type PinnedOpenOptions,
@@ -34,7 +38,13 @@ import {
   direntType,
   errorCode,
   isMissing,
+  leafErrorKind,
+  leafKind,
+  type ProbeSegments,
   pinnedMetadata,
+  probeSegments,
+  refusedKind,
+  sameDirectory,
 } from './pin-support.ts';
 
 /**
@@ -62,9 +72,17 @@ import {
  * resolved against a cached string is a property of the runtime, not a documented guarantee — and this
  * runtime is inconsistent about it (its `realpath` does NOT honour the installed directory, which is
  * why the single `realpath` here is handed an absolute path). A wrong answer would raise no error; it
- * would quietly describe another tree. So each bracket opens `.` and compares its identity against the
- * descriptor just installed, and the whole surface refuses on a mismatch. One `open` and one `fstat`
- * turn an assumption about a runtime into a fact about this call.
+ * would quietly describe another tree. So each bracket asks `.` for its identity and compares it against
+ * the descriptor just installed, and the whole surface refuses on a mismatch. The proof is made with the
+ * SAME call the bracket then relies on: a bracket that opens proves by opening `.`, and a bracket that
+ * only describes names proves by describing `.` — one `lstat` rather than an `open`, which matters on a
+ * host whose endpoint security intercepts every `open`.
+ *
+ * WHY AN INDEX PROBES RATHER THAN OPENS. A file index proves tens of thousands of names, and walking
+ * each from the root cost a bracket, an `open`, an `fstat` and a `close` PER COMPONENT PER NAME — about
+ * fifty calls for a file four directories deep, every one of them synchronous. {@link PosixFileProbe}
+ * holds the chain of directories it last walked, so a sibling re-walks nothing, and describes a run of
+ * siblings inside ONE bracket. See that class for what it does and does not promise.
  *
  * ACCEPTED RESIDUAL RISK, beyond those the sibling implementation lists. A listed SYMLINK's badge —
  * does it escape, what does it point at, how big is it — needs one `realpath`, and it is given an
@@ -73,6 +91,40 @@ import {
  * It cannot yield wrong bytes: name and type come from the pinned enumeration, and no symlink is ever
  * served.
  */
+
+/**
+ * The synchronous file calls this pinner makes, and nothing else.
+ *
+ * A constructor dependency for one reason: so a test can COUNT them. On a host where every `open` is
+ * intercepted, the number of calls a request makes is its latency, and a budget nobody measures is a
+ * budget that regresses silently.
+ */
+export interface PinFileCalls {
+  open(name: string, flags: number): number;
+  close(fd: number): void;
+  fstat(fd: number): Stats;
+  lstat(name: string): Stats;
+  stat(name: string): Stats;
+  realpath(name: string): string;
+  opendir(name: string): Dir;
+}
+
+/** The runtime's own calls, which is what every caller but a counting test passes. */
+export const NODE_PIN_FILE_CALLS: PinFileCalls = {
+  open: (name, flags) => openSync(name, flags),
+  close: fd => closeSync(fd),
+  fstat: fd => fstatSync(fd),
+  lstat: name => lstatSync(name),
+  stat: name => statSync(name),
+  realpath: name => realpathSync(name),
+  opendir: name => opendirSync(name),
+};
+
+/** Hands the event loop back before a batch of synchronous calls, so batches cannot add up to a stall. */
+const yieldToLoop = (): Promise<void> => new Promise(resolve => setImmediate(resolve));
+
+/** How a bracket proves the kernel installed what it was asked to: by the same call the bracket uses. */
+type Proof = 'open' | 'describe';
 
 /**
  * The runtime's own working directory, borrowed and handed back.
@@ -84,23 +136,29 @@ import {
 class InstalledDirectory {
   private home: number | undefined;
 
-  constructor(private readonly syscalls: DirectorySyscalls) {}
+  constructor(
+    private readonly syscalls: DirectorySyscalls,
+    readonly fs: PinFileCalls,
+  ) {}
 
   /**
    * Installs `fd`, proves the kernel agrees, and returns the undo.
    *
    * The undo never throws: it is called from a `finally`, where a throw would replace the caller's own
    * error with this one and leave the runtime standing in a session's directory.
+   *
+   * `identity` is the installed descriptor's own `fstat`, when the caller already holds it — an open
+   * descriptor's device and inode cannot change, so asking again would be a call that proves nothing.
    */
-  install(fd: number): () => void {
-    this.home ??= openSync('.', constants.O_RDONLY | constants.O_DIRECTORY);
+  install(fd: number, proof: Proof = 'open', identity?: Stats): () => void {
+    this.home ??= this.fs.open('.', constants.O_RDONLY | constants.O_DIRECTORY);
     const home = this.home;
     if (this.syscalls.fchdir(fd) !== 0) throw new FsError('denied', 'the session folder could not be held open');
     const release = (): void => {
       this.syscalls.fchdir(home);
     };
     try {
-      this.prove(fd);
+      this.prove(fd, proof, identity);
     } catch (error) {
       release();
       throw error;
@@ -109,8 +167,8 @@ class InstalledDirectory {
   }
 
   /** Runs `act` with `fd` installed. `act` MUST NOT await — see this file's header. */
-  enter<Result>(fd: number, act: () => Result): Result {
-    const release = this.install(fd);
+  enter<Result>(fd: number, act: () => Result, proof: Proof = 'open', identity?: Stats): Result {
+    const release = this.install(fd, proof, identity);
     try {
       return act();
     } finally {
@@ -135,17 +193,21 @@ class InstalledDirectory {
    * Does a relative name reach the directory just installed?
    *
    * A mismatch means this runtime resolved `.` against something other than the kernel's working
-   * directory, so every relative open in the bracket would land somewhere unintended. There is no
+   * directory, so every relative call in the bracket would land somewhere unintended. There is no
    * degraded mode to fall back to, and a pathname fallback is the hole this class exists to close.
    */
-  private prove(fd: number): void {
-    const here = openSync('.', constants.O_RDONLY | constants.O_DIRECTORY);
+  private prove(fd: number, proof: Proof, identity: Stats | undefined): void {
+    const installed = identity ?? this.fs.fstat(fd);
+    const reached = proof === 'describe' ? this.fs.lstat('.') : this.reachedByOpen();
+    if (reached.dev !== installed.dev || reached.ino !== installed.ino) throw unsupportedPlatform(process.platform);
+  }
+
+  private reachedByOpen(): Stats {
+    const here = this.fs.open('.', constants.O_RDONLY | constants.O_DIRECTORY);
     try {
-      const reached = fstatSync(here);
-      const installed = fstatSync(fd);
-      if (reached.dev !== installed.dev || reached.ino !== installed.ino) throw unsupportedPlatform(process.platform);
+      return this.fs.fstat(here);
     } finally {
-      closeSync(here);
+      this.fs.close(here);
     }
   }
 }
@@ -208,7 +270,7 @@ class PosixPinnedTarget implements PinnedTarget {
   async list(maxEntries: number, budget?: WorkBudget): Promise<PinnedListing> {
     return this.directory.enter(this.fd, () => {
       const here = this.directory.here();
-      const dir = opendirSync('.');
+      const dir = this.directory.fs.opendir('.');
       const entries: PinnedDirectoryEntry[] = [];
       let truncated = false;
       try {
@@ -238,7 +300,7 @@ class PosixPinnedTarget implements PinnedTarget {
 
   async close(): Promise<void> {
     try {
-      closeSync(this.fd);
+      this.directory.fs.close(this.fd);
     } catch {
       // already closed
     }
@@ -255,9 +317,10 @@ class PosixPinnedTarget implements PinnedTarget {
    */
   private classify(here: string, entry: FoundEntry): PinnedDirectoryEntry {
     const { name, type } = entry;
+    const fs = this.directory.fs;
     if (type !== 'symlink') {
       try {
-        const metadata = lstatSync(name);
+        const metadata = fs.lstat(name);
         return { name, type, size: metadata.size, mtime: metadata.mtime.toISOString() };
       } catch (error) {
         if (!isMissing(error)) throw error;
@@ -265,14 +328,157 @@ class PosixPinnedTarget implements PinnedTarget {
       }
     }
     try {
-      const linkReal = realpathSync(path.join(here, name));
+      const linkReal = fs.realpath(path.join(here, name));
       if (!contains(this.rootReal, linkReal)) return { name, type, escapes: true };
-      const metadata = statSync(name);
+      const metadata = fs.stat(name);
       const target = canonicalRel(this.rootReal, linkReal);
       return { name, type, size: metadata.size, mtime: metadata.mtime.toISOString(), ...(target ? { target } : {}) };
     } catch (error) {
       if (!isMissing(error)) throw error;
       return { name, type, escapes: true }; // a broken link: nothing to serve either way
+    }
+  }
+}
+
+/** One directory a probe holds open, with the name that reached it from its parent and its identity. */
+interface HeldDirectory {
+  readonly name: string;
+  readonly fd: number;
+  readonly identity: Stats;
+}
+
+/** Opens ONE directory component from its already-open parent, refusing a link: the walk's own step. */
+type DirectoryStep = (parent: number, segment: string, reported: string) => number;
+
+/**
+ * Many regular-file questions against one pin, sharing every directory walk between them.
+ *
+ * THE CHAIN. The probe holds the directories it last walked, root-most first. A name in the same
+ * directory reuses the whole chain; a cousin closes back to the shared ancestor and opens only what
+ * differs. Candidates arrive sorted, so a tree of N files in D directories costs about D opens rather
+ * than one per component per file — and the chain is never deeper than the deepest path, so the
+ * descriptors held stay bounded however large the tree.
+ *
+ * THE LEAF. Answered by `lstat` inside a bracket on its parent, never by opening it: an index needs the
+ * leaf's TYPE, and `lstat` reports a link as a link, so there is nothing to follow. Every sibling that
+ * follows in the same directory is described inside the SAME bracket.
+ *
+ * WHAT CHANGED BY NOT OPENING THE LEAF, said plainly. A regular file the daemon may not read (mode
+ * `000`) is now listed rather than counted `unreadable`: it IS a name in the tree, and the read that
+ * follows still opens it through the walk and reports its own refusal. It also means a FIFO at a
+ * tracked path can no longer stall the walk by being opened for reading.
+ */
+class PosixFileProbe implements PinnedFileProbe {
+  private readonly chain: HeldDirectory[] = [];
+  /** The last directory that refused, so its remaining children cost no second walk. */
+  private refused: { readonly directory: string; readonly kind: PinnedFileKind } | undefined;
+  private rootIdentity: Stats | undefined;
+  private closed = false;
+
+  constructor(
+    private readonly rootFd: number,
+    private readonly directory: InstalledDirectory,
+    private readonly step: DirectoryStep,
+  ) {}
+
+  async classify(rels: readonly string[], budget?: WorkBudget): Promise<readonly PinnedFileKind[]> {
+    if (this.closed) throw new Error('the file probe is closed');
+    await yieldToLoop();
+    const split = rels.map(probeSegments);
+    const kinds: PinnedFileKind[] = [];
+    let stopped = false;
+    while (!stopped && kinds.length < rels.length) {
+      if (budget?.expired() === true) break;
+      const first = split[kinds.length];
+      if (first === undefined) {
+        kinds.push('unsupported');
+        continue;
+      }
+      const held = this.reach(first.directories);
+      if (typeof held === 'string') {
+        kinds.push(held);
+        continue;
+      }
+      // One bracket for this name AND every sibling that follows it; the budget is still asked before each.
+      this.directory.enter(
+        held.fd,
+        () => {
+          kinds.push(this.describe(first.leaf));
+          while (kinds.length < rels.length) {
+            const next: ProbeSegments | undefined = split[kinds.length];
+            if (next === undefined || !sameDirectory(next.directories, first.directories)) return;
+            if (budget?.expired() === true) {
+              stopped = true;
+              return;
+            }
+            kinds.push(this.describe(next.leaf));
+          }
+        },
+        'describe',
+        held.identity,
+      );
+    }
+    return kinds;
+  }
+
+  async close(): Promise<void> {
+    this.closed = true;
+    this.release(0);
+  }
+
+  /** The leaf's own type, from inside its parent's bracket. */
+  private describe(leaf: string): PinnedFileKind {
+    try {
+      return leafKind(this.directory.fs.lstat(leaf));
+    } catch (error) {
+      return leafErrorKind(error);
+    }
+  }
+
+  /** Holds the chain open down to `directories`, or names why it could not be reached. */
+  private reach(directories: readonly string[]): Pick<HeldDirectory, 'fd' | 'identity'> | PinnedFileKind {
+    const key = directories.join('/');
+    const refused = this.refused;
+    if (refused !== undefined && (key === refused.directory || key.startsWith(`${refused.directory}/`)))
+      return refused.kind;
+    let kept = 0;
+    while (kept < this.chain.length && kept < directories.length && this.chain[kept]?.name === directories[kept])
+      kept += 1;
+    this.release(kept);
+    for (const [depth, segment] of directories.entries()) {
+      if (depth < kept) continue;
+      const parent = this.chain.at(-1)?.fd ?? this.rootFd;
+      let fd: number;
+      try {
+        fd = this.step(parent, segment, directories.slice(0, depth + 1).join('/'));
+      } catch (error) {
+        this.refused = { directory: directories.slice(0, depth + 1).join('/'), kind: refusedKind(error) };
+        return this.refused.kind;
+      }
+      try {
+        this.chain.push({ name: segment, fd, identity: this.directory.fs.fstat(fd) });
+      } catch (error) {
+        this.directory.fs.close(fd);
+        this.refused = { directory: directories.slice(0, depth + 1).join('/'), kind: refusedKind(error) };
+        return this.refused.kind;
+      }
+    }
+    const top = this.chain.at(-1);
+    if (top !== undefined) return top;
+    this.rootIdentity ??= this.directory.fs.fstat(this.rootFd);
+    return { fd: this.rootFd, identity: this.rootIdentity };
+  }
+
+  /** Closes every held directory deeper than `depth`. The root itself belongs to the pin and stays. */
+  private release(depth: number): void {
+    while (this.chain.length > depth) {
+      const held = this.chain.pop();
+      if (held === undefined) break;
+      try {
+        this.directory.fs.close(held.fd);
+      } catch {
+        // already closed
+      }
     }
   }
 }
@@ -296,11 +502,12 @@ class PosixPinnedRoot implements PinnedRoot {
   }
 
   async open(rel: string, options: PinnedOpenOptions = {}): Promise<PinnedTarget> {
+    const fs = this.directory.fs;
     const segments = rel === '' ? [] : rel.split('/');
     // A fresh descriptor for the same directory, so the walk can close what it holds without ever
     // closing the root itself.
-    let current = this.directory.enter(this.fd, () => openSync('.', constants.O_RDONLY | constants.O_DIRECTORY));
-    let metadata = fstatSync(current);
+    let current = this.directory.enter(this.fd, () => fs.open('.', constants.O_RDONLY | constants.O_DIRECTORY));
+    let metadata = fs.fstat(current);
     const identities: ComponentIdentity[] = [componentIdentity(metadata)];
     const walked: string[] = [];
 
@@ -311,9 +518,9 @@ class PosixPinnedRoot implements PinnedRoot {
         const next = this.step(current, segment, [...walked, segment].join('/'), rel, wantDirectory);
         // Adopt the new descriptor BEFORE describing it. The outer catch closes whatever `current`
         // holds, so a failing `fstat` needs no error path of its own and cannot leak a descriptor.
-        closeSync(current);
+        fs.close(current);
         current = next;
-        metadata = fstatSync(current);
+        metadata = fs.fstat(current);
         walked.push(segment);
         identities.push(componentIdentity(metadata));
       }
@@ -326,14 +533,20 @@ class PosixPinnedRoot implements PinnedRoot {
         this.rootReal,
       );
     } catch (error) {
-      closeSync(current);
+      fs.close(current);
       throw error;
     }
   }
 
+  probe(): PinnedFileProbe {
+    return new PosixFileProbe(this.fd, this.directory, (parent, segment, reported) =>
+      this.step(parent, segment, reported, reported, true),
+    );
+  }
+
   async close(): Promise<void> {
     try {
-      closeSync(this.fd);
+      this.directory.fs.close(this.fd);
     } catch {
       // already closed
     }
@@ -351,7 +564,7 @@ class PosixPinnedRoot implements PinnedRoot {
     const flags = constants.O_RDONLY | constants.O_NOFOLLOW | (wantDirectory ? constants.O_DIRECTORY : 0);
     return this.directory.enter(parent, () => {
       try {
-        return openSync(segment, flags);
+        return this.directory.fs.open(segment, flags);
       } catch (error) {
         const code = errorCode(error);
         if (code === 'ELOOP') throw this.symlinkRefusal(segment, reported);
@@ -370,7 +583,7 @@ class PosixPinnedRoot implements PinnedRoot {
   /** Was this component a symlink? Message fidelity only; the link is already refused. */
   private isSymlinkHere(segment: string): boolean {
     try {
-      return lstatSync(segment).isSymbolicLink();
+      return this.directory.fs.lstat(segment).isSymbolicLink();
     } catch {
       return false;
     }
@@ -387,7 +600,7 @@ class PosixPinnedRoot implements PinnedRoot {
    */
   private symlinkRefusal(segment: string, reportedPath: string): FsError {
     try {
-      const target = realpathSync(path.join(this.directory.here(), segment));
+      const target = this.directory.fs.realpath(path.join(this.directory.here(), segment));
       if (!contains(this.rootReal, target))
         return new FsError('escapes_root', `path escapes the session root: ${reportedPath}`);
     } catch {
@@ -407,12 +620,15 @@ class PosixPinnedRoot implements PinnedRoot {
  *
  * The C calls are a constructor dependency so a test can withhold them and prove the refusal, and so a
  * runtime that cannot reach them fails at the first pin with a message a reader can act on instead of
- * at import time with a stack trace.
+ * at import time with a stack trace. The file calls are one so a test can count them.
  */
 export class PosixSessionRootPinner implements SessionRootPinner {
   private directory: InstalledDirectory | undefined;
 
-  constructor(private readonly load: () => DirectorySyscalls = loadDirectorySyscalls) {}
+  constructor(
+    private readonly load: () => DirectorySyscalls = loadDirectorySyscalls,
+    private readonly fs: PinFileCalls = NODE_PIN_FILE_CALLS,
+  ) {}
 
   async pin(cwd: string): Promise<PinnedRoot> {
     const directory = this.installer();
@@ -420,13 +636,13 @@ export class PosixSessionRootPinner implements SessionRootPinner {
     try {
       // Read the location of the object we actually HOLD, not of the name we were given.
       const rootReal = directory.realPathOf(fd);
-      if (!fstatSync(fd).isDirectory()) throw new FsError('not_a_directory', 'session cwd is not a directory');
+      if (!this.fs.fstat(fd).isDirectory()) throw new FsError('not_a_directory', 'session cwd is not a directory');
       // The chokepoint every entry point shares, so a denied root is refused for listings, content,
       // diffs and changes alike.
       if (rootIsDenied(rootReal)) throw new FsError('denied', 'session cwd is not served');
       return new PosixPinnedRoot(fd, directory, rootReal);
     } catch (error) {
-      closeSync(fd);
+      this.fs.close(fd);
       throw error;
     }
   }
@@ -435,7 +651,7 @@ export class PosixSessionRootPinner implements SessionRootPinner {
   private installer(): InstalledDirectory {
     if (this.directory === undefined) {
       try {
-        this.directory = new InstalledDirectory(this.load());
+        this.directory = new InstalledDirectory(this.load(), this.fs);
       } catch {
         throw unsupportedPlatform(process.platform);
       }
@@ -445,7 +661,7 @@ export class PosixSessionRootPinner implements SessionRootPinner {
 
   private openRoot(cwd: string): number {
     try {
-      return openSync(cwd, constants.O_RDONLY | constants.O_DIRECTORY);
+      return this.fs.open(cwd, constants.O_RDONLY | constants.O_DIRECTORY);
     } catch (error) {
       // `ENOTDIR` from `O_DIRECTORY` means it exists but is not a directory.
       if (errorCode(error) === 'ENOTDIR') throw new FsError('not_a_directory', 'session cwd is not a directory');
