@@ -7,7 +7,7 @@ import {
   renderInstalled,
   statusExitCode,
 } from '../../../src/lib/daemon/render';
-import { absentReport, health, runningReport, stoppedReport } from './fixtures';
+import { absentReport, health, liveness, runningReport, stoppedReport } from './fixtures';
 
 describe('status decision', () => {
   it('should call the daemon serving whenever its API answered', () => {
@@ -19,13 +19,27 @@ describe('status decision', () => {
     should(actual.health?.pid).equal(4242);
   });
 
-  it('should call a supervised-but-silent daemon unreachable', () => {
+  it('should call a supervised daemon that answered nothing at all wedged', () => {
     // Act
     const actual = decideDaemonStatus('fyd', runningReport, undefined);
 
     // Assert
-    should(actual.reachability).equal('unreachable');
+    should(actual.reachability).equal('wedged');
     should(actual.health).be.undefined();
+  });
+
+  it('should call a daemon whose liveness answer says so starting, and one whose report timed out busy', () => {
+    // Act
+    const starting = decideDaemonStatus('fyd', runningReport, undefined, liveness());
+    const busy = decideDaemonStatus('fyd', runningReport, undefined, liveness({ status: 'ok' }));
+    const serving = decideDaemonStatus('fyd', runningReport, health(), liveness({ status: 'ok' }));
+
+    // Assert — "process exists but its API is unavailable" used to be all three.
+    should(starting.reachability).equal('starting');
+    should(starting.liveness?.boot?.step).equal('first self-check (reconciling the session index)');
+    should(busy.reachability).equal('busy');
+    should(serving.reachability).equal('serving');
+    should(serving.liveness?.status).equal('ok');
   });
 
   it('should call a daemon nothing can find stopped', () => {
@@ -43,13 +57,14 @@ describe('status exit code', () => {
     should(statusExitCode(decideDaemonStatus('fyd', runningReport, health()))).equal(0);
     should(statusExitCode(decideDaemonStatus('fyd', runningReport, undefined))).equal(1);
     should(statusExitCode(decideDaemonStatus('fyd', stoppedReport, undefined))).equal(1);
+    should(statusExitCode(decideDaemonStatus('fyd', runningReport, undefined, liveness()))).equal(1);
   });
 });
 
 describe('human status rendering', () => {
   it('should lead with the verdict and summarise the health the daemon reported', () => {
     // Act
-    const actual = renderDaemonStatus(decideDaemonStatus('fyd', runningReport, health()));
+    const actual = renderDaemonStatus(decideDaemonStatus('fyd', runningReport, health()), 'fy');
 
     // Assert — kteam printed a raw 20-key JSON object and nothing else.
     should(actual).startWith('fyd is serving\n');
@@ -63,31 +78,143 @@ describe('human status rendering', () => {
     // Act
     const actual = renderDaemonStatus(
       decideDaemonStatus('fyd', runningReport, health({ bootstrapState: 'degraded', bootstrapDegraded: true })),
+      'fy',
     );
 
     // Assert
     should(actual).containEql('bootstrap degraded (degraded)');
   });
 
-  it('should say a process exists when the API does not answer', () => {
+  it('should call a silent process wedged and name the restart that replaces it', () => {
     // Act
-    const actual = renderDaemonStatus(decideDaemonStatus('fyd', runningReport, undefined));
+    const actual = renderDaemonStatus(decideDaemonStatus('fyd', runningReport, undefined), 'fy');
 
     // Assert
-    should(actual).startWith('fyd process exists (pid 4242) but its API is unavailable');
+    should(actual).startWith('fyd process exists (pid 4242) but answered nothing in time');
+    should(actual).containEql('`fy daemon restart` replaces it');
+    should(actual).containEql('`fy daemon logs`');
   });
 
   it('should omit the pid when the supervisor did not report one', () => {
     // Act
-    const actual = renderDaemonStatus(decideDaemonStatus('fyd', { manager: 'launchd', state: 'running' }, undefined));
+    const actual = renderDaemonStatus(
+      decideDaemonStatus('fyd', { manager: 'launchd', state: 'running' }, undefined),
+      'fy',
+    );
 
     // Assert
-    should(actual).startWith('fyd process exists but its API is unavailable');
+    should(actual).startWith('fyd process exists but answered nothing in time');
+  });
+
+  it('should name the boot step a starting daemon is on and how long it has taken', () => {
+    // Act
+    const actual = renderDaemonStatus(decideDaemonStatus('fyd', runningReport, undefined, liveness()), 'fy');
+
+    // Assert
+    should(actual).startWith(
+      'fyd is starting (pid 9001) — first self-check (reconciling the session index), 8s on this step, 12s since it started',
+    );
+    should(actual).not.containEql('daemon restart');
+  });
+
+  it('should call a step that has run for minutes stuck, and say how to restart it', () => {
+    // Act
+    const actual = renderDaemonStatus(
+      decideDaemonStatus(
+        'fyd',
+        runningReport,
+        undefined,
+        liveness({
+          boot: {
+            phase: 'starting',
+            step: 'opening the pairing identity',
+            stepElapsedSeconds: 400,
+            elapsedSeconds: 401,
+          },
+        }),
+      ),
+      'fy',
+    );
+
+    // Assert
+    should(actual).containEql('that step has run for over 120s');
+    should(actual).containEql('`fy daemon restart` starts it again');
+  });
+
+  it('should report a starting daemon that did not say its step', () => {
+    // Act
+    const actual = renderDaemonStatus(
+      decideDaemonStatus('fyd', { manager: 'direct', state: 'stopped' }, undefined, {
+        status: 'starting',
+        version: '1.2.3',
+        uptimeSeconds: 3,
+      }),
+      'fy',
+    );
+
+    // Assert
+    should(actual).startWith('fyd is starting — its boot step is not reported');
+  });
+
+  it('should call a daemon that answers liveness but not its report busy, with the stall it saw', () => {
+    // Act
+    const actual = renderDaemonStatus(
+      decideDaemonStatus(
+        'fyd',
+        runningReport,
+        undefined,
+        liveness({
+          status: 'ok',
+          eventLoop: {
+            lagMs: 2_400,
+            maxLagMs: 366_900,
+            stalls: 3,
+            lastStall: { at: '2026-10-21T08:00:00.000Z', durationMs: 2_400, during: ['session listing'] },
+          },
+        }),
+      ),
+      'fy',
+    );
+
+    // Assert
+    should(actual).startWith('fyd is up (pid 9001) but busy');
+    should(actual).containEql(
+      'event loop stalled 3x, worst 366.9s; last 2.4s at 2026-10-21T08:00:00.000Z during session listing',
+    );
+  });
+
+  it('should add the last stall under a serving daemon, and nothing when it never stalled', () => {
+    // Act
+    const stalled = renderDaemonStatus(
+      decideDaemonStatus(
+        'fyd',
+        runningReport,
+        health(),
+        liveness({
+          status: 'ok',
+          eventLoop: {
+            lagMs: 0,
+            maxLagMs: 900,
+            stalls: 1,
+            lastStall: { at: '2026-10-21T08:00:00.000Z', durationMs: 900, during: [] },
+          },
+        }),
+      ),
+      'fy',
+    );
+    const calm = renderDaemonStatus(
+      decideDaemonStatus('fyd', runningReport, health(), liveness({ status: 'ok' })),
+      'fy',
+    );
+
+    // Assert
+    should(stalled).containEql('event loop stalled 1x, worst 0.9s; last 0.9s at 2026-10-21T08:00:00.000Z\n');
+    should(calm).not.containEql('stalled');
   });
 
   it('should say plainly when nothing supervises the daemon', () => {
     // Act
-    const actual = renderDaemonStatus(decideDaemonStatus('fyd', absentReport, undefined));
+    const actual = renderDaemonStatus(decideDaemonStatus('fyd', absentReport, undefined), 'fy');
 
     // Assert
     should(actual).equal('fyd is stopped\n  not managed by a service manager');
@@ -97,6 +224,7 @@ describe('human status rendering', () => {
     // Act
     const actual = renderDaemonStatus(
       decideDaemonStatus('fyd', { manager: 'systemd', state: 'failed', detail: 'systemd reports failed' }, undefined),
+      'fy',
     );
 
     // Assert
@@ -107,6 +235,7 @@ describe('human status rendering', () => {
     // Act
     const actual = renderDaemonStatus(
       decideDaemonStatus('fyd', { manager: 'systemd', state: 'stopped', detail: '' }, undefined),
+      'fy',
     );
 
     // Assert
@@ -185,7 +314,7 @@ describe('status of a daemon serving outside its service manager', () => {
 
   it('should say it is serving but supervised by nothing, beside what the manager reports', () => {
     // Act
-    const actual = renderDaemonStatus(decideDaemonStatus('fyd', failedUnit, health({ pid: 31337 })));
+    const actual = renderDaemonStatus(decideDaemonStatus('fyd', failedUnit, health({ pid: 31337 })), 'fy');
 
     // Assert
     should(actual).startWith('fyd is serving, but OUTSIDE systemd — nothing supervises it\n');

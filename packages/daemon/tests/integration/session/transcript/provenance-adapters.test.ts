@@ -1,5 +1,5 @@
 import { afterEach, describe, it } from 'bun:test';
-import { chmod, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readFile, rm, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { TranscriptProvenance } from '@ferretry/protocol';
@@ -180,6 +180,39 @@ describe('NodeCodexRolloutIndex', () => {
 
     // Assert
     should(ids).eql(['dddddddd-4444-4444-4444-444444444444']);
+  });
+
+  it('should read an unchanged rollout once, and again only once its size or time moves', async () => {
+    // A Codex session whose rollout is not attributed yet is discovered again on every transcript read,
+    // and each discovery used to re-read every rollout in the home. The proof that it no longer does is
+    // a rewrite that keeps size and modification time: the index must keep its first answer.
+    // Arrange
+    const home = await temporaryDirectory('ferretry-codex-home-');
+    const token = '/state/sessions/20260801-cached';
+    const file = await writeRollout(home, '2026/08/01', 'eeeeeeee-5555-5555-5555-555555555555', [
+      JSON.stringify({ type: 'response_item', payload: { text: `working in ${token}` } }),
+    ]);
+    // A whole second, so restoring it later reproduces the modification time exactly.
+    const pinned = 1_785_000_000;
+    await utimes(file, pinned, pinned);
+    const index = new NodeCodexRolloutIndex();
+    const first = await index.candidates(home, token);
+    const same = (await readFile(file, 'utf8')).replace(token, token.replace('cached', 'CACHED'));
+    await writeFile(file, same, 'utf8');
+    await utimes(file, pinned, pinned);
+
+    // Act
+    const unchanged = await index.candidates(home, token);
+    await writeFile(file, `${same}${JSON.stringify({ type: 'response_item', payload: { text: 'more' } })}\n`, 'utf8');
+    const grown = await index.candidates(home, token);
+    await rm(file);
+    const gone = await index.candidates(home, token);
+
+    // Assert
+    should(first.map(candidate => candidate.correlated)).eql([true]);
+    should(unchanged.map(candidate => candidate.correlated)).eql([true]);
+    should(grown.map(candidate => candidate.correlated)).eql([false]);
+    should(gone).be.empty();
   });
 });
 

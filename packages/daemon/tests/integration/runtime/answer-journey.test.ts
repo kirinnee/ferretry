@@ -372,7 +372,7 @@ async function boot(home: string, port: number): Promise<Daemon> {
   const exit = start(world, cleanups);
   for (let attempt = 0; attempt < 200; attempt += 1) {
     const health = await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined);
-    if (health !== undefined) break;
+    if (health?.ok === true) break;
     await Bun.sleep(25);
   }
   const token = (await readFile(join(home, 'api-token'), 'utf8')).trim();
