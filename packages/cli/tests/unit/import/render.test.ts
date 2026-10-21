@@ -48,6 +48,21 @@ describe('renderImportListing', () => {
     should(text).not.containEql('Quiet one —');
   });
 
+  it('should mark a row that is only on this computer, in the listing and in the picker', () => {
+    // Arrange
+    const rows = [conversation({ id: 'c-1', keptIn: 'computer' }), conversation({ id: 'c-2', keptIn: 'ferretry' })];
+
+    // Act
+    const text = renderImportListing(listing(rows), 'fy');
+    const picker = renderSearchMatches(rows).split('\n');
+
+    // Assert
+    should(text).containEql('[claude] [on this computer]  c-1  ');
+    should(text).containEql('[claude]  c-2  ');
+    should(picker[0]).containEql('[claude] [on this computer]  app');
+    should(picker[1]).not.containEql('on this computer');
+  });
+
   it('should mark an already-adopted row and the limit and skipped counts', () => {
     // Arrange
     const rows = [conversation({ id: 'c-1', adoptedBy: 's-1' })];

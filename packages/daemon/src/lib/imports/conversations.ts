@@ -76,6 +76,19 @@ export interface ConversationOwners {
   owners(): Promise<ReadonlyMap<string, string>>;
 }
 
+/**
+ * Whether a `synced` listing includes the computer's own homes: the owner's "Keep in sync" switch
+ * (Settings › Machine › Conversations). Asked fresh for every listing, so flipping it applies to the next
+ * open of the list with no restart. It governs LISTING only: continuing a conversation the owner names
+ * adopts it from wherever it is kept.
+ */
+export interface ConversationListPolicy {
+  listsComputer(): Promise<boolean>;
+}
+
+/** The policy of a machine that never switched anything: the computer's conversations are listed. */
+export const LIST_COMPUTER_CONVERSATIONS: ConversationListPolicy = { listsComputer: async () => true };
+
 /** A conversation as the daemon knows it: the wire row plus where its file is. Never sent. */
 export interface DiscoveredConversation extends Omit<ImportableConversation, 'adoptedBy'> {
   /** The transcript file. */
@@ -288,13 +301,19 @@ export class ConversationImportService {
     private readonly adopter: ConversationAdopter,
     /** Where a hand-off pointer's document may be read from; a pointer anywhere else says nothing. */
     private readonly handoffScope: HandoffScope = NO_HANDOFF_SCOPE,
+    private readonly policy: ConversationListPolicy = LIST_COMPUTER_CONVERSATIONS,
   ) {}
 
   async list(query: ConversationImportQuery = {}): Promise<ConversationImportListing> {
-    const { conversations, skipped } = await this.discover(query.harness, query.source);
+    const computerListed = query.source !== 'synced' || (await this.policy.listsComputer());
+    const { conversations, skipped } = await this.discover(
+      query.harness,
+      query.source === 'synced' ? (computerListed ? undefined : 'ferretry') : query.source,
+    );
     const owners = await this.owners.owners();
     const matching = conversations.filter(conversationMatcher(query));
     return {
+      ...(computerListed ? {} : { computerListed: false as const }),
       matched: matching.length,
       conversations: matching
         .slice(0, query.limit ?? matching.length)
@@ -395,6 +414,7 @@ export class ConversationImportService {
           seen.set(key, {
             ...described,
             ...(indexed === undefined ? {} : { name: indexed }),
+            keptIn: root.source,
             source: candidate.source,
             relativePath: candidate.relativePath,
           });

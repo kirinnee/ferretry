@@ -63,6 +63,18 @@ describe('ProtocolImportGateway.list', () => {
     );
   });
 
+  it('should ask for the synced listing by name', async () => {
+    // Arrange
+    const fake = client({ '/v1/imports/conversations?source=synced&limit=20': listing([]) });
+    const gateway = new ProtocolImportGateway(fake);
+
+    // Act
+    await gateway.list({ source: 'synced', limit: 20 });
+
+    // Assert
+    should(fake.sent[0]?.path).equal('/v1/imports/conversations?source=synced&limit=20');
+  });
+
   it('should omit an empty query word', async () => {
     // Arrange
     const fake = client({ '/v1/imports/conversations': listing([]) });

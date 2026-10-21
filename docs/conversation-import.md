@@ -4,15 +4,37 @@ An owner who used Claude Code or Codex before Ferretry already has conversations
 can keep any of them "on" as a ferret from the import picker (onboarding's Claude Code / Codex steps, and
 Settings › Runtimes › Import conversations…). The CLI equivalent is `fy import conversations`.
 
-New session › Continue a conversation picks up work already IN Ferretry (`fy new --continue` searches the second source), from
+New session › Continue a conversation picks up earlier work (`fy new --continue` searches the second source), from
 one of two sources:
 
 - **Ferretry sessions** — every stopped ferret on the machine, resumed in place with its conversation
   intact through the session's own resume.
-- **All conversations** — every conversation in Ferretry's shared history (`source=ferretry`), which
-  holds what its sessions said and everything imported. It never lists the computer's own `~/.claude` /
-  `~/.codex`: importing is the only thing that reads those. A conversation a stopped ferret keeps
-  resumes that ferret; one a running ferret keeps opens it; any other is adopted and started.
+- **All conversations** — Ferretry's shared history (`ferretry`) and, while **Keep in sync** is on,
+  the conversations in the computer's own Claude Code and Codex homes (`computer`) — one list, asked for
+  with `source=synced`. A row kept only in the computer's home is marked **On this computer**
+  (`keptIn: 'computer'`) and has its own filter chip. A conversation a stopped ferret keeps resumes that
+  ferret; one a running ferret keeps opens it; any other is **adopted on the spot** (hard-linked into
+  the runtime's history, never copied or moved) and started with the CLI's own resume.
+
+### Keep in sync
+
+Settings › Machine › Conversations › **Keep in sync** is `machine.conversations.listComputer` in
+`machine.yaml`, **on by default**. It governs LISTING only:
+
+- On: a `source=synced` listing also reads the computer's homes. They are read when the list is opened
+  (and on `fy import conversations` / `fy new --continue`); there is no timer, so a conversation begun in
+  the owner's own terminal a minute ago is simply there the next time the list opens. Read-only: the
+  daemon never writes a computer home, and nothing is imported until the owner continues one.
+- Off: a `synced` listing reads Ferretry's history only and says `computerListed: false`, so the
+  Continue list can say why nothing from the computer is shown. Continuing a conversation the owner names
+  (`adopt`) still reads the computer's home; so does `source=computer` and a listing with no `source`
+  (onboarding's import picker and `fy import conversations` ask for both homes whatever the switch says).
+- Read fresh for every listing, so flipping it applies to the next open with no restart. Switching it on
+  is not a "loosening" edit: it widens no agent's authority, only what the owner's own browser lists.
+- Deduped: an adopted conversation is one file under two names, so it is listed once, as Ferretry's
+  (`keptIn: 'ferretry'`), and a conversation a session already keeps is never offered as new.
+- Per machine: every daemon lists its own computer's homes, so in the all-machines view each machine's rows
+  are its own and carry that machine's switch.
 
 Tapping a row shows its last few exchanges (`GET /v1/imports/conversations/:harness/:id/preview`, four
 exchanges, each message cut to 280 characters) before the button that continues it.
@@ -24,8 +46,11 @@ The wire contract is `packages/protocol/src/lib/conversation-import.ts`; the dae
 ## What is read
 
 - **Where:** Ferretry's shared history pool (`<FY_HOME>/fleet/shared/<harness>`, `source=ferretry`)
-  first, then the CLI's own home as the daemon inherited it (`CLAUDE_CONFIG_DIR` or `~/.claude`;
-  `CODEX_HOME` or `~/.codex`; `source=computer`). A listing with no `source` reads both.
+  first, then the CLI's own home as the daemon inherited it (an absolute `CLAUDE_CONFIG_DIR`, else
+  `~/.claude`; an absolute `CODEX_HOME`, else `~/.codex`; `source=computer`; the same on macOS and
+  Linux, only the user's home differs). A RELATIVE variable is never guessed at: Claude falls back to
+  `~/.claude`, Codex reads nothing from the computer. A listing with no `source` reads both;
+  `source=synced` is both unless Keep in sync is off.
   Claude: `projects/<folder>/<id>.jsonl` (a conversation's sub-agent files are not listed). Codex:
   `sessions/YYYY/MM/DD/rollout-*.jsonl`. Links are never followed.
 - **Name:** every row leads with its NAME when the CLI gave one (`name`, 120 characters); the first

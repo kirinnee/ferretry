@@ -25,9 +25,11 @@ describe('configJsonSchema', () => {
       'agentControl',
       'agentPermissions',
       'browserMode',
+      'conversations',
       'defaultRuntime',
     ]);
     should(Object.keys(actual.properties.agentControl?.properties ?? {})).containEql('ferretrySettings');
+    should(Object.keys(actual.properties.conversations?.properties ?? {})).deepEqual(['listComputer']);
   });
 
   it('should describe a file as it is WRITTEN: a defaulted key is not required', () => {

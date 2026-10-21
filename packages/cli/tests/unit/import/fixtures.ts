@@ -25,12 +25,13 @@ export function conversation(overrides: Partial<ImportableConversation> = {}): I
 
 export function listing(
   conversations: readonly ImportableConversation[] = [conversation()],
-  overrides: Partial<Pick<ConversationImportListing, 'matched' | 'skipped'>> = {},
+  overrides: Partial<Pick<ConversationImportListing, 'matched' | 'skipped' | 'computerListed'>> = {},
 ): ConversationImportListing {
   return {
     conversations: [...conversations],
     matched: overrides.matched ?? conversations.length,
     skipped: overrides.skipped ?? 0,
+    ...(overrides.computerListed === undefined ? {} : { computerListed: overrides.computerListed }),
   };
 }
 
