@@ -48,7 +48,7 @@ export async function changeSecuritySettings(
 
 /** The line under an unlock prompt: how long the unlock lasts, in the machine's own number. */
 export function unlockStaysSentence(hours: number): string {
-  return `It stays unlocked on this device for ${hours} ${hours === 1 ? 'hour' : 'hours'}.`;
+  return `It stays unlocked on this device for ${describeSettingValue('unlockValidityHours', hours)}.`;
 }
 
 /** The same line when the machine's number could not be read. */
@@ -60,6 +60,11 @@ export interface SecuritySettingCopy {
   readonly explanation: string;
   /** `null` for the one setting that is a switch. */
   readonly unit: { readonly one: string; readonly many: string } | null;
+  /**
+   * A larger unit a whole multiple is said in instead — `168` hours reads as `7 days`. Absent for a
+   * setting whose numbers stay readable in their own unit.
+   */
+  readonly larger?: { readonly per: number; readonly one: string; readonly many: string };
 }
 
 export const SECURITY_SETTING_COPY: Readonly<Record<SecuritySettingField, SecuritySettingCopy>> = {
@@ -82,6 +87,7 @@ export const SECURITY_SETTING_COPY: Readonly<Record<SecuritySettingField, Securi
     label: 'An unlock lasts',
     explanation: 'How long one unlock lasts for a device, across page loads.',
     unit: { one: 'hour', many: 'hours' },
+    larger: { per: 24, one: 'day', many: 'days' },
   },
   stepUpOnActions: {
     label: 'Ask again for each change',
@@ -95,16 +101,42 @@ export const SECURITY_SETTING_COPY: Readonly<Record<SecuritySettingField, Securi
   },
 };
 
-/** `15 minutes`, `1 hour`: the value with its unit in the right number. */
-export function describeSettingValue(field: NumericSecuritySetting, value: number): string {
-  const unit = SECURITY_SETTING_COPY[field].unit;
-  return `${value} ${value === 1 ? unit?.one : unit?.many}`;
+/** The larger unit `value` is said in, or nothing when it is said in the setting's own unit. */
+function largerUnitOf(field: NumericSecuritySetting, value: number): SecuritySettingCopy['larger'] {
+  const larger = SECURITY_SETTING_COPY[field].larger;
+  return larger !== undefined && value >= larger.per && value % larger.per === 0 ? larger : undefined;
 }
+
+/** `15 minutes`, `1 hour`, `7 days`: the value with its unit in the right number. */
+export function describeSettingValue(field: NumericSecuritySetting, value: number): string {
+  const larger = largerUnitOf(field, value);
+  const count = larger === undefined ? value : value / larger.per;
+  const unit = larger ?? SECURITY_SETTING_COPY[field].unit;
+  return `${count} ${count === 1 ? unit?.one : unit?.many}`;
+}
+
+/** `Allowed: 0 to 60 minutes.`, or `Allowed: 1 hour to 7 days.` when the two ends are said in different units. */
+export function boundsLabel(field: NumericSecuritySetting): string {
+  const { min, max } = SECURITY_SETTING_BOUNDS[field];
+  const sameUnit = largerUnitOf(field, min) === largerUnitOf(field, max);
+  return `Allowed: ${sameUnit ? String(min) : describeSettingValue(field, min)} to ${describeSettingValue(field, max)}.`;
+}
+
+/**
+ * The choices offered beside a number, so the common values are one press away. Every one is inside the
+ * protocol's bounds; a value between them can still be typed.
+ */
+export const SECURITY_SETTING_PRESETS: Readonly<Partial<Record<NumericSecuritySetting, readonly number[]>>> = {
+  unlockValidityHours: [1, 8, 24, 72, 168],
+};
 
 /** The one sentence for a change the caller may not make from here. */
 export function widenAtMachineSentence(widenCommand: string): string {
   return `Loosening this can only be done at the machine: run ${widenCommand}.`;
 }
+
+/** The one sentence for a loosening this device may make, with a passkey proved for it. */
+export const WIDEN_WITH_PASSKEY_SENTENCE = 'Raising this asks for your passkey, then takes effect at once.';
 
 /** How many devices a shortened idle period will unpair, or nothing when it unpairs none. */
 export function devicesExpiringSentence(count: number): string | null {

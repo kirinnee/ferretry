@@ -1,13 +1,14 @@
 import { describe, it } from 'bun:test';
 import {
   DEFAULT_SECURITY_SETTINGS,
-  UNLOCK_REQUIRED_CODE,
   SECURITY_SETTING_BOUNDS,
   SECURITY_WIDEN_REFUSED_CODE,
   type SecuritySettings,
   SecuritySettingsChangeSchema,
   SecuritySettingsViewSchema,
+  STEP_UP_ACTS,
   STEP_UP_REQUIRED_CODE,
+  UNLOCK_REQUIRED_CODE,
 } from '@ferretry/protocol';
 import should from 'should';
 import type { StepUpWitness } from '../../../../src/lib/api/capability.ts';
@@ -16,7 +17,11 @@ import type { SessionDevice } from '../../../../src/lib/api/http.ts';
 import { ApiRouter } from '../../../../src/lib/api/router.ts';
 import { DEFAULT_CAPABILITY_GRANTS, type GrantAuditEntry } from '../../../../src/lib/grants/index.ts';
 import { securityRoutes } from '../../../../src/lib/runtime/mounts/security.ts';
-import { DAMAGED_SECURITY_SETTINGS, SecuritySettingsService } from '../../../../src/lib/security/index.ts';
+import {
+  DAMAGED_SECURITY_SETTINGS,
+  PASSKEY_WIDEN_JOURNAL_LINE,
+  SecuritySettingsService,
+} from '../../../../src/lib/security/index.ts';
 import { jsonBody, request } from '../../api/support.ts';
 import { CREDENTIALS, grantSubsystem, human } from './support.ts';
 
@@ -365,11 +370,11 @@ describe('who may change what, over the route', () => {
     const { dispatcher, service } = await mount({ stepUps: witnessFor(PHONE) });
 
     // Act
-    const answered = await dispatcher.dispatch(fromHostBrowser('PATCH', { unlockValidityHours: 24 }));
+    const answered = await dispatcher.dispatch(fromHostBrowser('PATCH', { deviceKeyRotationDays: 60 }));
 
     // Assert
     should([answered.status, jsonBody(answered).code]).deepEqual([403, SECURITY_WIDEN_REFUSED_CODE]);
-    should(service.current().unlockValidityHours).equal(12);
+    should(service.current().deviceKeyRotationDays).equal(40);
   });
 
   it('should not let a merely loopback peer loosen, however stepped up', async () => {
@@ -428,6 +433,96 @@ describe('who may change what, over the route', () => {
     // Assert
     should(answered.status).equal(403);
     should(jsonBody(answered)).have.property('code', 'forbidden');
+  });
+});
+
+describe('raising how long an unlock lasts from a device, over the route', () => {
+  /** A device that holds its step-up and, when `fresh`, proved a passkey for the act at hand. */
+  const provedWitness = (fresh: boolean) => {
+    const spent: SessionDevice[] = [];
+    let proved = fresh;
+    const witness: StepUpWitness = {
+      held: subject => subject.deviceId === PHONE.deviceId,
+      freshlyHeld: () => proved,
+      spendFresh: subject => {
+        spent.push(subject);
+        proved = false;
+      },
+    };
+    return { witness, spent };
+  };
+
+  it('should ask for a passkey for THIS change, naming the act, when the device holds only its unlock', async () => {
+    // Arrange
+    const { witness } = provedWitness(false);
+    const { dispatcher, service, writes } = await mount({ stepUps: witness });
+
+    // Act
+    const answered = await dispatcher.dispatch(fromDevice('PATCH', { unlockValidityHours: 168 }));
+
+    // Assert
+    should(answered.status).equal(403);
+    should(jsonBody(answered)).containDeep({
+      code: STEP_UP_REQUIRED_CODE,
+      demand: { capability: 'pairing', axis: 'configure', act: STEP_UP_ACTS.loosenSecurity },
+    });
+    should(service.current().unlockValidityHours).equal(12);
+    should(writes).be.empty();
+  });
+
+  it('should apply it at once on a fresh passkey, spend that passkey, and journal it', async () => {
+    // Arrange
+    const { witness, spent } = provedWitness(true);
+    const { dispatcher, service, audited } = await mount({ stepUps: witness });
+
+    // Act
+    const answered = await dispatcher.dispatch(fromDevice('PATCH', { unlockValidityHours: 168 }));
+
+    // Assert
+    should(answered.status).equal(200);
+    should(SecuritySettingsChangeSchema.parse(jsonBody(answered)).view.settings.unlockValidityHours).equal(168);
+    should(service.current().unlockValidityHours).equal(168);
+    should(spent).deepEqual([PHONE]);
+    should(audited[0]?.changes).deepEqual(['security.unlockValidityHours=12->168', PASSKEY_WIDEN_JOURNAL_LINE]);
+  });
+
+  it('should not spend the passkey on a narrowing', async () => {
+    // Arrange
+    const { witness, spent } = provedWitness(true);
+    const { dispatcher } = await mount({ stepUps: witness });
+
+    // Act
+    const answered = await dispatcher.dispatch(fromDevice('PATCH', { unlockValidityHours: 2 }));
+
+    // Assert
+    should(answered.status).equal(200);
+    should(spent).be.empty();
+  });
+
+  it('should still send every other loosening to the machine, however fresh the passkey', async () => {
+    // Arrange
+    const { witness, spent } = provedWitness(true);
+    const { dispatcher, service } = await mount({ stepUps: witness });
+
+    // Act
+    const answered = await dispatcher.dispatch(fromDevice('PATCH', { unlockValidityHours: 24, unlockOnOpen: false }));
+
+    // Assert
+    should([answered.status, jsonBody(answered).code]).deepEqual([403, SECURITY_WIDEN_REFUSED_CODE]);
+    should(service.current()).deepEqual(MIDDLE);
+    should(spent).be.empty();
+  });
+
+  it('should let the host raise it with no passkey at all, as before', async () => {
+    // Arrange
+    const { dispatcher, service } = await mount();
+
+    // Act
+    const answered = await dispatcher.dispatch(fromHost('PATCH', { unlockValidityHours: 168 }));
+
+    // Assert
+    should(answered.status).equal(200);
+    should(service.current().unlockValidityHours).equal(168);
   });
 });
 

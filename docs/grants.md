@@ -267,7 +267,8 @@ right about the artefact it was handed, and the formatter had changed the artefa
 
 **The unlock comes first** (owner decision 2026-10-14, [design/zero-trust.md](design/zero-trust.md) B1): a
 governed device is answered `401 unlock_required` on everything but the routes it needs to get in, until it
-unlocks this machine with a passkey; one unlock lasts `unlockValidityHours` (8 by default) for that device.
+unlocks this machine with a passkey; one unlock lasts `unlockValidityHours` (8 by default, 1 hour to 7 days)
+for that device.
 **While a device is unlocked, its step-up is held** for every act below — the unlock IS the step-up — unless
 the owner turned on `stepUpOnActions`, which asks for a passkey again per act inside an unlock. A machine
 with the unlock turned off always asks per act. **Adding access always asks:** minting a pairing code,
@@ -359,6 +360,23 @@ that grant **and** a current step-up, and may only **narrow**. Widening any fiel
 (`arrivedOnHost`): a remote widen is `403 security_widen_at_machine`, whose sentence names
 `fy daemon security set <setting> <value>`. A request that changes several fields is judged field by field
 and refused whole if any one widens remotely. Reading them (`GET /v1/security`) needs no capability.
+
+**One exception: raising how long an unlock lasts** (owner decision 2026-10-21). A paired device may raise
+`unlockValidityHours` — up to its 7-day bound — with a passkey proved **for that change**
+(`STEP_UP_ACTS.loosenSecurity`, act `loosen-security`). The unlock it already holds is not enough: without a
+fresh proof the answer is `403 grant_step_up_required` naming that act, the app raises its one prompt, and
+the retry is applied **at once** — no hold, because the person proving presence is the owner's consent — and
+spends the proof. The journal line carries `security.loosened-with=passkey` beside the old and new value.
+The list of fields this applies to is `SECURITY_PASSKEY_WIDEN_FIELDS` in
+`packages/protocol/src/lib/security.ts`, and it is only this one: raising it asks the person less often, and
+every unlock it stretches was itself a passkey. Turning the unlock or the per-act confirmation off, a longer
+key period or a longer idle period stay at the machine. A request that raises the unlock **and** loosens
+anything else is refused whole as before, without asking for a passkey first. At the machine nothing changes:
+`fy` with the admin token raises it with no prompt.
+
+The cost, stated: a thief holding an unlocked phone **and** its passkey (the person's biometric) could
+stretch that phone's unlock to a week. They could already do everything else that passkey buys; the week is
+bounded, journaled and undone at the machine or by revoking the device.
 
 ## Widening is a local act. There is no remote path to it.
 

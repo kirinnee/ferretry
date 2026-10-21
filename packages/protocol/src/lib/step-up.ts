@@ -222,7 +222,9 @@ export const StepUpDemandSchema = z.strictObject({
    * The ONE act this confirmation is for, when the act is one that adds access to this machine and so
    * wants a passkey proved for it alone ({@link STEP_UP_ACTS}). Absent for every other step-up.
    */
-  act: z.enum(['add-device', 'widen-device', 'enable-agent-control', 'loosen-config', 'clone-secrets']).optional(),
+  act: z
+    .enum(['add-device', 'widen-device', 'enable-agent-control', 'loosen-config', 'clone-secrets', 'loosen-security'])
+    .optional(),
 });
 export type StepUpDemand = z.infer<typeof StepUpDemandSchema>;
 
@@ -255,6 +257,13 @@ export const STEP_UP_ACTS = {
    * 2026-10-20: "require the passkey again").
    */
   cloneSecrets: 'clone-secrets',
+  /**
+   * Raising a security setting a device may loosen with a passkey ({@link SECURITY_PASSKEY_WIDEN_FIELDS}
+   * in `security.ts`) — today how long one unlock lasts. The person proving presence for this one change
+   * IS the owner's consent, so it is applied at once and journaled rather than sent to the machine
+   * (owner decision 2026-10-21).
+   */
+  loosenSecurity: 'loosen-security',
 } as const satisfies Record<string, NonNullable<StepUpDemand['act']>>;
 
 /**

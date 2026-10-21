@@ -10,6 +10,7 @@ import {
   type SecuritySettings,
   type SecuritySettingsPatch,
   type SecuritySettingsView,
+  STEP_UP_REQUIRED_CODE,
 } from '@ferretry/protocol';
 import { FyHttpError } from '@ferretry/protocol/client';
 import type { ReactTestRenderer } from 'react-test-renderer';
@@ -115,7 +116,7 @@ describe('SecuritySettingsBlock reading', () => {
     expect(text(block)).toContain('15 minutes');
     expect(text(block)).toContain('Allowed: 0 to 60 minutes.');
     expect(text(block)).toContain('Allowed: 7 to 90 days.');
-    expect(text(block)).toContain('Allowed: 1 to 24 hours.');
+    expect(text(block)).toContain('Allowed: 1 hour to 7 days.');
     expect(text(block)).toContain('30 days');
     expect(text(block)).toContain('A change confirmation lasts');
     should(marked(block, 'data-security-value', 'unlockOnOpen')[0]?.children).eql(['On']);
@@ -310,6 +311,84 @@ describe('SecuritySettingsBlock loosening', () => {
     // Assert
     should(ledger.patches).eql([{ idleExpiryDays: 60 }, { unlockOnOpen: false }]);
     expect(text(block)).not.toContain('Loosening this');
+    run(() => block.unmount());
+  });
+});
+
+describe('SecuritySettingsBlock raising how long an unlock lasts (up to a week, with a passkey)', () => {
+  it('offers the common choices, the current one pressed, each said in its own unit', async () => {
+    // Arrange / Act
+    const block = await mountBlock(machine(view(), () => new Error('unused')));
+
+    // Assert
+    const presets = marked(block, 'data-security-preset');
+    should(presets.map(node => node.props['data-security-preset'])).eql([
+      'unlockValidityHours:1',
+      'unlockValidityHours:8',
+      'unlockValidityHours:24',
+      'unlockValidityHours:72',
+      'unlockValidityHours:168',
+    ]);
+    should(presets.map(node => node.children)).eql([['1 hour'], ['8 hours'], ['1 day'], ['3 days'], ['7 days']]);
+    should(presets.filter(node => node.props['aria-pressed'] === true).map(node => node.children)).eql([['8 hours']]);
+    run(() => block.unmount());
+  });
+
+  it('lets a device raise it with a passkey: Save stays on and one sentence says the passkey is asked for', async () => {
+    // Arrange
+    const ledger: Ledger = { patches: [] };
+    const block = await mountBlock(
+      machine(view(), patch => ({ view: view({}, patch as Partial<SecuritySettings>), devicesExpiring: 0 }), ledger),
+    );
+
+    // Act
+    await press(block, 'data-security-preset', 'unlockValidityHours:168');
+
+    // Assert
+    should(marked(block, 'data-security-input', 'unlockValidityHours')[0]?.props.value).equal('168');
+    should(saveButton(block, 'unlockValidityHours')?.props.disabled).equal(false);
+    should(marked(block, 'data-security-note-kind', 'passkey')).have.length(1);
+    expect(text(block)).toContain('Raising this asks for your passkey, then takes effect at once.');
+    should(marked(block, 'data-security-note-kind', 'at-machine')).be.empty();
+
+    // Act
+    await press(block, 'data-security-save', 'unlockValidityHours');
+
+    // Assert
+    should(ledger.patches).eql([{ unlockValidityHours: 168 }]);
+    should(marked(block, 'data-security-value', 'unlockValidityHours')[0]?.children).eql(['7 days']);
+    expect(text(block)).toContain('An unlock lasts: now 7 days.');
+    run(() => block.unmount());
+  });
+
+  it('says nothing about a passkey for a shorter unlock, or on the machine', async () => {
+    // Arrange
+    const shorter = await mountBlock(machine(view(), () => new Error('unused')));
+    const atMachine = await mountBlock(machine(view({ mayWiden: true }), () => new Error('unused')));
+
+    // Act
+    await press(shorter, 'data-security-preset', 'unlockValidityHours:1');
+    await press(atMachine, 'data-security-preset', 'unlockValidityHours:168');
+
+    // Assert
+    should(marked(shorter, 'data-security-note', 'unlockValidityHours')).be.empty();
+    should(marked(atMachine, 'data-security-note', 'unlockValidityHours')).be.empty();
+    run(() => shorter.unmount());
+    run(() => atMachine.unmount());
+  });
+
+  it('says a passkey that was not confirmed changed nothing, and keeps the choice', async () => {
+    // Arrange
+    const refused = new FyHttpError('needs a passkey', 403, STEP_UP_REQUIRED_CODE);
+    const block = await mountBlock(machine(view(), () => refused));
+
+    // Act
+    await press(block, 'data-security-preset', 'unlockValidityHours:72');
+    await press(block, 'data-security-save', 'unlockValidityHours');
+
+    // Assert
+    expect(text(block)).toContain('This change needs your passkey, and it was not confirmed. Nothing was changed.');
+    should(marked(block, 'data-security-input', 'unlockValidityHours')[0]?.props.value).equal('72');
     run(() => block.unmount());
   });
 });

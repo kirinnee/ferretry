@@ -1249,13 +1249,35 @@ describe('the unlock model: passkeys, unlock, and who may loosen security', () =
         return { value: undefined, evidence: 'the device shortened the unlock to 4 h; the daemon holds 4' };
       });
 
-      // Loosen from the device: the control refuses, and says where to do it.
-      await softStep(journey, 'loosen-refused-on-device', async () => {
-        await page.fill('[data-security-input="unlockValidityHours"]', '12');
-        const disabled = await page.evaluate<boolean>(
-          `document.querySelector('[data-security-save="unlockValidityHours"]')?.disabled === true`,
+      // Raise the unlock from the device: allowed, on a passkey proved for this change (owner decision
+      // 2026-10-21). A passkey proved moments ago (the unlock above) may already count, so the prompt is
+      // answered when it appears and the daemon's value is what is checked.
+      await softStep(journey, 'raise-unlock-with-passkey', async () => {
+        await page.click('[data-security-preset="unlockValidityHours:72"]');
+        await page.click('[data-security-save="unlockValidityHours"]');
+        const prompted = await unlockIfAsked(page, 5_000);
+        await waitUntil(
+          page,
+          `(document.querySelector('[data-security-value="unlockValidityHours"]')?.textContent ?? '').includes('3 days')`,
+          15_000,
+          'the raised validity to show',
         );
-        const note = String(await textNow(page, '[data-security-note="unlockValidityHours"]'));
+        const read = await asOwner(environment, 'GET', '/v1/security');
+        const hours = (read.body as { settings?: { unlockValidityHours?: number } }).settings?.unlockValidityHours;
+        if (hours !== 72) throw new Error(`the daemon reads unlockValidityHours=${String(hours)}`);
+        return {
+          value: undefined,
+          evidence: `the device raised the unlock to 3 days${prompted ? ' after a passkey prompt' : ' on its fresh passkey'}; the daemon holds 72`,
+        };
+      });
+
+      // Loosen anything else from the device: the control refuses, and says where to do it.
+      await softStep(journey, 'loosen-refused-on-device', async () => {
+        await page.fill('[data-security-input="idleExpiryDays"]', '60');
+        const disabled = await page.evaluate<boolean>(
+          `document.querySelector('[data-security-save="idleExpiryDays"]')?.disabled === true`,
+        );
+        const note = String(await textNow(page, '[data-security-note="idleExpiryDays"]'));
         await captureScreens(page, journey, '17-security-loosen-refused');
         if (!disabled) throw new Error('the device is offered a Save that would loosen security');
         if (!/fy daemon security set/u.test(note))
@@ -1264,17 +1286,25 @@ describe('the unlock model: passkeys, unlock, and who may loosen security', () =
       });
 
       // Loosen at the machine.
+      // Loosen at the machine what the device could not, then put the unlock back to its default.
       await softStep(journey, 'loosen-at-machine', async () => {
-        const set = await environment.runFy(['daemon', 'security', 'set', 'unlockValidityHours', '8'], {
+        const set = await environment.runFy(['daemon', 'security', 'set', 'idleExpiryDays', '60'], {
           FY_URL: environment.httpUrl(),
         });
         if (set.code !== 0) throw new Error(`fy daemon security set failed (${String(set.code)}): ${set.err.trim()}`);
+        const reset = await environment.runFy(['daemon', 'security', 'set', 'unlockValidityHours', '8'], {
+          FY_URL: environment.httpUrl(),
+        });
+        if (reset.code !== 0)
+          throw new Error(`fy daemon security set failed (${String(reset.code)}): ${reset.err.trim()}`);
         const read = await asOwner(environment, 'GET', '/v1/security');
-        const hours = (read.body as { settings?: { unlockValidityHours?: number } }).settings?.unlockValidityHours;
-        if (hours !== 8) throw new Error(`after fy set, the daemon reads ${String(hours)}`);
+        const settings = (read.body as { settings?: { unlockValidityHours?: number; idleExpiryDays?: number } })
+          .settings;
+        if (settings?.idleExpiryDays !== 60 || settings.unlockValidityHours !== 8)
+          throw new Error(`after fy set, the daemon reads ${JSON.stringify(settings)}`);
         return {
           value: undefined,
-          evidence: `fy daemon security set → "${set.out.trim().slice(0, 120)}"; the daemon holds 8`,
+          evidence: `fy daemon security set → "${set.out.trim().slice(0, 120)}"; the daemon holds 60 days idle, 8 h unlock`,
         };
       });
 

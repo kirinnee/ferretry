@@ -20,7 +20,7 @@ nothing in a header — so a copied browser profile, a backup or a sniffed LAN i
 session's authority is a **15-minute lease** the device renews silently by signing a daemon
 challenge, and a device unused for **30 days** must pair again. Before it may do anything at all, a
 device **unlocks** the machine with a **passkey** — Face ID / Touch ID / a PIN on the phone — that the
-**daemon** verifies; the unlock lasts **8 hours** by default (1–24) across page loads, and inside it
+**daemon** verifies; the unlock lasts **8 hours** by default (1 hour to 7 days) across page loads, and inside it
 the device may do everything its grants allow with no further prompt (B1). **Adding access always asks
 again**: minting a pairing code, widening another device, and turning "what agents may control"
 (terminals/browsers/files) back ON from a remote device each need a passkey proved for that one act —
@@ -701,7 +701,7 @@ default and hard bounds; a value outside the bounds is refused, never clamped.
 | Setting                 | Default    | Bounds                   | Narrower means |
 | ----------------------- | ---------- | ------------------------ | -------------- |
 | `unlockOnOpen`          | **on**     | on / off                 | on             |
-| `unlockValidityHours`   | 8          | 1–24                     | smaller        |
+| `unlockValidityHours`   | 8          | 1–168 (one week)         | smaller        |
 | `stepUpOnActions`       | off        | on / off                 | on             |
 | `stepUpWindowMinutes`   | 15         | 0–60 (0 = every time)    | smaller        |
 | `deviceKeyRotationDays` | 30         | 7–90                     | smaller        |
@@ -740,6 +740,9 @@ action on the `pairing` capability.
 - **Widening** (a larger window or period, a switch turned OFF) is allowed **only at the machine** —
   the owner's admin token over loopback, i.e. the CLI (B4); a browser on the host is a device like any
   other. A remote widen is `403` with a sentence naming the command to run at the machine.
+  **Except** `unlockValidityHours` (owner decision 2026-10-21): a device may raise it with a passkey proved
+  for that one change (`loosen-security`), applied at once and journaled — [grants.md](../grants.md) owns
+  the rule.
 - A request that changes several fields is judged field by field and refused whole if any field
   widens remotely.
 - Where it lives: `<FY_HOME>/state/security.json` (`schemaVersion: 1`, written atomically, mode

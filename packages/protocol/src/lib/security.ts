@@ -10,7 +10,8 @@ import { InstantSchema } from './common.ts';
  *
  * WHICH DIRECTION IS NARROWER is a fact both ends need — the daemon to decide, the app to say before
  * anybody presses a button that a change can only be made at the machine — so it is written once here.
- * Narrowing is allowed from a paired device with a passkey confirmation; widening only at the machine.
+ * Narrowing is allowed from a paired device with a passkey confirmation; widening only at the machine,
+ * except the few {@link SECURITY_PASSKEY_WIDEN_FIELDS} a device may raise with a passkey proved for it.
  */
 
 export const SECURITY_SETTING_FIELDS = [
@@ -37,7 +38,7 @@ export const isSecuritySwitch = (field: SecuritySettingField): field is Security
 export const SECURITY_SETTING_BOUNDS = {
   stepUpWindowMinutes: { min: 0, max: 60 },
   deviceKeyRotationDays: { min: 7, max: 90 },
-  unlockValidityHours: { min: 1, max: 24 },
+  unlockValidityHours: { min: 1, max: 168 },
   idleExpiryDays: { min: 1, max: 90 },
 } as const;
 
@@ -103,6 +104,20 @@ export function widensSecurity<F extends SecuritySettingField>(
   if (isSecuritySwitch(field)) return from === true && to === false;
   return (to as number) > (from as number);
 }
+
+/**
+ * The settings a paired device MAY loosen, with a passkey proved for that one change (owner decision
+ * 2026-10-21, `STEP_UP_ACTS.loosenSecurity`). Every other field still loosens only at the machine.
+ *
+ * Only how long an unlock lasts: raising it asks the person less often, and every unlock it stretches
+ * was itself a passkey. Turning the unlock or the per-act confirmation OFF, a longer key or a longer idle
+ * period are a different kind of loosening, and stay at the machine.
+ */
+export const SECURITY_PASSKEY_WIDEN_FIELDS = ['unlockValidityHours'] as const satisfies readonly SecuritySettingField[];
+
+/** Whether a paired device may loosen this setting with a passkey proved for that one change. */
+export const widensWithPasskey = (field: SecuritySettingField): boolean =>
+  (SECURITY_PASSKEY_WIDEN_FIELDS as readonly string[]).includes(field);
 
 /** Where the settings came from: the owner's document, the defaults, or the fail-closed reading. */
 export const SECURITY_SETTINGS_SOURCES = ['document', 'defaults', 'damaged'] as const;
