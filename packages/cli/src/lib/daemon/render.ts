@@ -1,14 +1,30 @@
-import type { HealthView } from '@ferretry/protocol';
+import type { HealthView, LivenessView } from '@ferretry/protocol';
 import type { DaemonSupervisorReport } from './ports.ts';
 import { servesOutsideSupervisor } from './probe.ts';
+
+/**
+ * How far the daemon answered.
+ *
+ * - `serving` — its full health report answered.
+ * - `starting` — it is booting: its liveness answer names the step and how long it has taken.
+ * - `busy` — its liveness answer came back but the full report did not in time: up, but slow.
+ * - `wedged` — a process exists and answered NOTHING in time. A loop that is not running answers no
+ *   request, so this is the state a restart is for.
+ * - `stopped` — no daemon is running.
+ *
+ * "Process exists but its API is unavailable" used to cover the middle three, and a person reading it
+ * could not tell a daemon twenty seconds into a boot from one that had been stuck for an hour.
+ */
+export type DaemonReachability = 'serving' | 'starting' | 'busy' | 'wedged' | 'stopped';
 
 /** What `daemon status` concluded, before it is turned into text or JSON. */
 export interface DaemonStatusView {
   readonly daemon: string;
-  /** `serving`: the HTTP API answered. `unreachable`: a process exists but the API does not answer. */
-  readonly reachability: 'serving' | 'unreachable' | 'stopped';
+  readonly reachability: DaemonReachability;
   readonly supervisor: DaemonSupervisorReport;
   readonly health?: HealthView | undefined;
+  /** The daemon's liveness answer, when it gave one: its boot step and how late its loop has run. */
+  readonly liveness?: LivenessView | undefined;
   /** Serving, but not as the installed service manager's daemon. See `servesOutsideSupervisor`. */
   readonly orphan: boolean;
 }
@@ -24,13 +40,52 @@ export function decideDaemonStatus(
   daemon: string,
   supervisor: DaemonSupervisorReport,
   health: HealthView | undefined,
+  liveness?: LivenessView,
 ): DaemonStatusView {
+  const answered = liveness === undefined ? {} : { liveness };
   if (health !== undefined) {
-    return { daemon, reachability: 'serving', supervisor, health, orphan: servesOutsideSupervisor(supervisor, health) };
+    return {
+      daemon,
+      reachability: 'serving',
+      supervisor,
+      health,
+      ...answered,
+      orphan: servesOutsideSupervisor(supervisor, health),
+    };
   }
+  if (liveness !== undefined)
+    return {
+      daemon,
+      reachability: liveness.status === 'starting' ? 'starting' : 'busy',
+      supervisor,
+      ...answered,
+      orphan: false,
+    };
   const alive = supervisor.state === 'running';
-  return { daemon, reachability: alive ? 'unreachable' : 'stopped', supervisor, orphan: false };
+  return { daemon, reachability: alive ? 'wedged' : 'stopped', supervisor, orphan: false };
 }
+
+/**
+ * A step this old is not a slow step. Long enough for the largest honest boot step measured — a first
+ * self-check over a big fleet takes seconds, not minutes — and short enough that a stuck boot is called
+ * stuck the first time someone looks.
+ */
+const STUCK_STEP_SECONDS = 120;
+
+/** How the loop has been running, when the daemon has stalled at all: one line, or none. */
+function stallLine(liveness: LivenessView | undefined): string[] {
+  const stall = liveness?.eventLoop?.lastStall;
+  if (stall === undefined) return [];
+  const during = stall.during.length === 0 ? '' : ` during ${stall.during.join(', ')}`;
+  return [
+    `  event loop stalled ${String(liveness?.eventLoop?.stalls ?? 1)}x, worst ${((liveness?.eventLoop?.maxLagMs ?? stall.durationMs) / 1_000).toFixed(1)}s; last ${(stall.durationMs / 1_000).toFixed(1)}s at ${stall.at}${during}`,
+  ];
+}
+
+const pidOf = (view: DaemonStatusView): string => {
+  const pid = view.liveness?.pid ?? view.supervisor.pid;
+  return pid === undefined ? '' : ` (pid ${String(pid)})`;
+};
 
 /** A status that is not `serving` is a failure for a script asking "can I use the daemon?". */
 export function statusExitCode(view: DaemonStatusView): number {
@@ -55,7 +110,7 @@ function healthLines(health: HealthView): string[] {
  * a 20-key object and a script got the same thing with no way to ask for either. Here the human form
  * is the default and `--json` is the machine contract.
  */
-export function renderDaemonStatus(view: DaemonStatusView): string {
+export function renderDaemonStatus(view: DaemonStatusView, clientName: string): string {
   const supervised =
     view.supervisor.manager === 'direct'
       ? '  not managed by a service manager'
@@ -65,11 +120,40 @@ export function renderDaemonStatus(view: DaemonStatusView): string {
     const headline = view.orphan
       ? `${view.daemon} is serving, but OUTSIDE ${view.supervisor.manager} — nothing supervises it`
       : `${view.daemon} is serving`;
-    return [headline, ...healthLines(view.health), supervised].join('\n');
+    return [headline, ...healthLines(view.health), ...stallLine(view.liveness), supervised].join('\n');
   }
-  if (view.reachability === 'unreachable') {
-    const pid = view.supervisor.pid === undefined ? '' : ` (pid ${String(view.supervisor.pid)})`;
-    return [`${view.daemon} process exists${pid} but its API is unavailable`, supervised].join('\n');
+  if (view.reachability === 'starting') {
+    const boot = view.liveness?.boot;
+    const step =
+      boot === undefined
+        ? 'its boot step is not reported'
+        : `${boot.step}, ${String(boot.stepElapsedSeconds)}s on this step, ${String(boot.elapsedSeconds)}s since it started`;
+    const stuck =
+      boot !== undefined && boot.stepElapsedSeconds >= STUCK_STEP_SECONDS
+        ? [
+            `  that step has run for over ${String(STUCK_STEP_SECONDS)}s, which no healthy boot needs: \`${clientName} daemon logs\` shows the trail, and \`${clientName} daemon restart\` starts it again`,
+          ]
+        : [];
+    return [
+      `${view.daemon} is starting${pidOf(view)} — ${step}`,
+      ...stuck,
+      ...stallLine(view.liveness),
+      supervised,
+    ].join('\n');
+  }
+  if (view.reachability === 'busy') {
+    return [
+      `${view.daemon} is up${pidOf(view)} but busy — it answered its liveness check, not its full health report, in time`,
+      ...stallLine(view.liveness),
+      supervised,
+    ].join('\n');
+  }
+  if (view.reachability === 'wedged') {
+    return [
+      `${view.daemon} process exists${pidOf(view)} but answered nothing in time — its event loop looks stalled or wedged`,
+      `  \`${clientName} daemon logs\` shows the last step and any stall it reported; \`${clientName} daemon restart\` replaces it`,
+      supervised,
+    ].join('\n');
   }
   return [`${view.daemon} is stopped`, supervised].join('\n');
 }
@@ -83,6 +167,7 @@ export function renderDaemonStatusJson(view: DaemonStatusView, extra: Readonly<R
     {
       daemon: view.daemon,
       reachability: view.reachability,
+      ...(view.liveness === undefined ? {} : { liveness: view.liveness }),
       orphan: view.orphan,
       supervisor: {
         manager: view.supervisor.manager,

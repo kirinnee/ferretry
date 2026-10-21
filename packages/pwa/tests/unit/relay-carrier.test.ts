@@ -735,7 +735,12 @@ describe('the carrier router', () => {
     should(choice?.ok).be.true();
     if (choice?.ok) {
       should(choice.method).eql(second);
-      should(choice.passedOver.map(skip => skip.method)).eql([{ kind: 'direct', daemonUrl: DAEMON_URL }, first]);
+      // WebRTC sits between direct and the relays (§15, Auto); with no dialer it is named, not hidden.
+      should(choice.passedOver.map(skip => skip.method)).eql([
+        { kind: 'direct', daemonUrl: DAEMON_URL },
+        { kind: 'webrtc' },
+        first,
+      ]);
     }
   });
 
@@ -763,7 +768,7 @@ describe('the carrier router', () => {
 
     const choice = router.choice(daemon.daemonId);
     should(choice?.ok).be.false();
-    should(choice?.passedOver.map(skip => skip.method.kind)).eql(['direct', 'relay']);
+    should(choice?.passedOver.map(skip => skip.method.kind)).eql(['direct', 'webrtc', 'relay']);
   });
 
   /**

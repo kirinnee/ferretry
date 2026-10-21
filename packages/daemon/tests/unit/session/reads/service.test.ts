@@ -13,6 +13,8 @@ import {
   OperatorReadError,
   OperatorReadService,
   type PaneCapture,
+  type PaneScope,
+  paneTextFor,
   renderTranscript,
   type StoredSessionEvent,
   type TranscriptTailResult,
@@ -105,6 +107,7 @@ const service = (options: {
   readonly events?: readonly StoredSessionEvent[];
   readonly calls?: JournalCall[];
   readonly capture?: PaneCapture | undefined;
+  readonly scopes?: PaneScope[];
   readonly tail?: TranscriptTailResult;
   readonly tailLimits?: number[];
   readonly storedSnapshot?:
@@ -123,7 +126,12 @@ const service = (options: {
         return options.events ?? [];
       },
     },
-    { capture: async () => options.capture },
+    {
+      capture: async (_sessionId, scope) => {
+        options.scopes?.push(scope);
+        return options.capture;
+      },
+    },
     {
       tail: async (_sessionId, limit) => {
         options.tailLimits?.push(limit);
@@ -245,6 +253,44 @@ describe('OperatorReadService.snapshot', () => {
 
     // Assert
     should(screen).equal('the agent is thinking');
+  });
+
+  it('should capture the whole scrollback unless the caller asks for the screen', async () => {
+    // Arrange
+    const scopes: PaneScope[] = [];
+    const reads = service({ capture: { alive: true, dead: false, text: 'frame' }, scopes });
+
+    // Act
+    await reads.snapshot('s1');
+    await reads.snapshot('s1', true, 'screen');
+    await reads.snapshot('s1', true, 'history');
+
+    // Assert
+    should(scopes).deepEqual(['history', 'screen', 'history']);
+  });
+
+  it('should not capture the pane at all when the stored final frame is asked for', async () => {
+    // Arrange
+    const scopes: PaneScope[] = [];
+    const reads = service({ storedSnapshot: { kind: 'read', text: 'final' }, scopes });
+
+    // Act
+    const screen = await reads.snapshot('s1', false, 'screen');
+
+    // Assert
+    should(screen).equal('final');
+    should(scopes).deepEqual([]);
+  });
+
+  it('should pick the visible frame for the screen scope and the scrollback for history', () => {
+    // Arrange
+    const frames = { history: 'old\nold\nnew', visible: 'new' };
+
+    // Act
+    const actual = [paneTextFor(frames, 'screen'), paneTextFor(frames, 'history')];
+
+    // Assert
+    should(actual).deepEqual(['new', 'old\nold\nnew']);
   });
 
   it('should refuse a session that records no terminal', async () => {

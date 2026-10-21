@@ -847,7 +847,9 @@ describe('daemon boot lifecycle', () => {
     // The server is listening once /healthz answers; the poll bounds how long boot may take.
     let health: Response | undefined;
     for (let attempt = 0; attempt < 100 && health === undefined; attempt += 1) {
-      health = await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined);
+      health = await fetch(`http://127.0.0.1:${port}/healthz`)
+        .then(answer => (answer.ok ? answer : undefined))
+        .catch(() => undefined);
       if (health === undefined) await Bun.sleep(50);
     }
     const usage = await fetch(`http://127.0.0.1:${port}/usage`);
@@ -934,7 +936,7 @@ describe('daemon boot lifecycle', () => {
     const exit = start(world, cleanups);
     const base = `http://127.0.0.1:${String(port)}`;
     for (let attempt = 0; attempt < 100; attempt += 1) {
-      if ((await fetch(`${base}/healthz`).catch(() => undefined)) !== undefined) break;
+      if ((await fetch(`${base}/healthz`).catch(() => undefined))?.ok === true) break;
       await Bun.sleep(50);
     }
     const token = (await readFile(join(home, 'api-token'), 'utf8')).trim();
@@ -1023,7 +1025,7 @@ describe('daemon boot lifecycle', () => {
     const exit = start(world, cleanups);
     const base = `http://127.0.0.1:${port}`;
     for (let attempt = 0; attempt < 100; attempt += 1) {
-      if ((await fetch(`${base}/healthz`).catch(() => undefined)) !== undefined) break;
+      if ((await fetch(`${base}/healthz`).catch(() => undefined))?.ok === true) break;
       await Bun.sleep(50);
     }
     const adminToken = (await readFile(join(home, 'api-token'), 'utf8')).trim();
@@ -1174,7 +1176,7 @@ describe('daemon boot lifecycle', () => {
     // Act
     const exit = start(world, cleanups);
     for (let attempt = 0; attempt < 100; attempt += 1) {
-      if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined)) !== undefined) break;
+      if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined))?.ok === true) break;
       await Bun.sleep(50);
     }
     const afterBoot = await readdir(join(home, 'state'));
@@ -1197,7 +1199,7 @@ describe('daemon boot lifecycle', () => {
     };
     const secondExit = start(secondWorld, secondCleanups);
     for (let attempt = 0; attempt < 100; attempt += 1) {
-      if ((await fetch(`http://127.0.0.1:${secondPort}/healthz`).catch(() => undefined)) !== undefined) break;
+      if ((await fetch(`http://127.0.0.1:${secondPort}/healthz`).catch(() => undefined))?.ok === true) break;
       await Bun.sleep(50);
     }
     secondRelease();
@@ -1238,7 +1240,7 @@ describe('daemon boot lifecycle', () => {
     await seedSession(home, at);
     const exit = start(world, cleanups);
     for (let attempt = 0; attempt < 100; attempt += 1) {
-      if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined)) !== undefined) break;
+      if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined))?.ok === true) break;
       await Bun.sleep(50);
     }
     const token = (await readFile(join(home, 'api-token'), 'utf8')).trim();
@@ -1376,7 +1378,7 @@ describe('daemon boot lifecycle', () => {
     });
     const exit = start(world, cleanups);
     for (let attempt = 0; attempt < 100; attempt += 1) {
-      if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined)) !== undefined) break;
+      if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined))?.ok === true) break;
       await Bun.sleep(50);
     }
     const token = (await readFile(join(home, 'api-token'), 'utf8')).trim();
@@ -1473,7 +1475,7 @@ describe('daemon boot lifecycle', () => {
     const executable = await seedFleet(home);
     const exit = start(world, cleanups);
     for (let attempt = 0; attempt < 100; attempt += 1) {
-      if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined)) !== undefined) break;
+      if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined))?.ok === true) break;
       await Bun.sleep(50);
     }
     const token = (await readFile(join(home, 'api-token'), 'utf8')).trim();
@@ -1670,7 +1672,7 @@ describe('daemon boot lifecycle', () => {
     await seedFleet(home);
     const exit = start(world, cleanups);
     for (let attempt = 0; attempt < 100; attempt += 1) {
-      if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined)) !== undefined) break;
+      if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined))?.ok === true) break;
       await Bun.sleep(50);
     }
     const token = (await readFile(join(home, 'api-token'), 'utf8')).trim();
@@ -1761,7 +1763,7 @@ describe('daemon boot lifecycle', () => {
     await seedFleet(home);
     const exit = start(world, cleanups);
     for (let attempt = 0; attempt < 100; attempt += 1) {
-      if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined)) !== undefined) break;
+      if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined))?.ok === true) break;
       await Bun.sleep(50);
     }
     const token = (await readFile(join(home, 'api-token'), 'utf8')).trim();
@@ -1844,7 +1846,7 @@ describe('daemon boot lifecycle', () => {
     await writeFile(join(home, 'config', 'pack.yaml'), 'limits:\n  autoChildren: 1\n', { mode: 0o600 });
     const exit = start(world, cleanups);
     for (let attempt = 0; attempt < 100; attempt += 1) {
-      if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined)) !== undefined) break;
+      if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined))?.ok === true) break;
       await Bun.sleep(50);
     }
     const token = (await readFile(join(home, 'api-token'), 'utf8')).trim();
@@ -1962,7 +1964,7 @@ describe('daemon boot lifecycle', () => {
     ]);
     const exit = start(world, cleanups);
     for (let attempt = 0; attempt < 100; attempt += 1) {
-      if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined)) !== undefined) break;
+      if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined))?.ok === true) break;
       await Bun.sleep(50);
     }
     const token = (await readFile(join(home, 'api-token'), 'utf8')).trim();
@@ -2073,7 +2075,7 @@ describe('daemon boot lifecycle', () => {
     ]);
     const exit = start(world, cleanups);
     for (let attempt = 0; attempt < 100; attempt += 1) {
-      if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined)) !== undefined) break;
+      if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined))?.ok === true) break;
       await Bun.sleep(50);
     }
     const token = (await readFile(join(home, 'api-token'), 'utf8')).trim();
@@ -2204,7 +2206,7 @@ describe('daemon boot lifecycle', () => {
     ]);
     const exit = start(world, cleanups);
     for (let attempt = 0; attempt < 100; attempt += 1) {
-      if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined)) !== undefined) break;
+      if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined))?.ok === true) break;
       await Bun.sleep(50);
     }
     const token = (await readFile(join(home, 'api-token'), 'utf8')).trim();
@@ -2291,7 +2293,7 @@ describe('daemon boot lifecycle', () => {
     await seeded.storage.close();
     const exit = start(world, cleanups);
     for (let attempt = 0; attempt < 100; attempt += 1) {
-      if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined)) !== undefined) break;
+      if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined))?.ok === true) break;
       await Bun.sleep(50);
     }
     const token = (await readFile(join(home, 'api-token'), 'utf8')).trim();
@@ -2393,7 +2395,7 @@ describe('daemon boot lifecycle', () => {
     await seedFleet(home);
     const exit = start(world, cleanups);
     for (let attempt = 0; attempt < 100; attempt += 1) {
-      if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined)) !== undefined) break;
+      if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined))?.ok === true) break;
       await Bun.sleep(50);
     }
     const token = (await readFile(join(home, 'api-token'), 'utf8')).trim();
@@ -2465,7 +2467,7 @@ describe('daemon boot lifecycle', () => {
     await seedFleet(home);
     const exit = start(world, cleanups);
     for (let attempt = 0; attempt < 100; attempt += 1) {
-      if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined)) !== undefined) break;
+      if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined))?.ok === true) break;
       await Bun.sleep(50);
     }
     const token = (await readFile(join(home, 'api-token'), 'utf8')).trim();
@@ -2603,7 +2605,7 @@ describe('daemon boot lifecycle', () => {
     await seedFleet(home);
     const exit = start(world, cleanups);
     for (let attempt = 0; attempt < 100; attempt += 1) {
-      if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined)) !== undefined) break;
+      if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined))?.ok === true) break;
       await Bun.sleep(50);
     }
     const token = (await readFile(join(home, 'api-token'), 'utf8')).trim();
@@ -2709,7 +2711,7 @@ describe('daemon boot lifecycle', () => {
     await seedFleet(home);
     const exit = start(world, cleanups);
     for (let attempt = 0; attempt < 100; attempt += 1) {
-      if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined)) !== undefined) break;
+      if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined))?.ok === true) break;
       await Bun.sleep(50);
     }
     const token = (await readFile(join(home, 'api-token'), 'utf8')).trim();
@@ -2848,7 +2850,7 @@ describe('daemon boot lifecycle', () => {
     await seedFleet(home);
     const exit = start(world, cleanups);
     for (let attempt = 0; attempt < 100; attempt += 1) {
-      if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined)) !== undefined) break;
+      if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined))?.ok === true) break;
       await Bun.sleep(50);
     }
     const token = (await readFile(join(home, 'api-token'), 'utf8')).trim();
@@ -2993,7 +2995,7 @@ describe('daemon boot lifecycle', () => {
     await seedMigrationFleet(home);
     const exit = start(world, cleanups);
     for (let attempt = 0; attempt < 100; attempt += 1) {
-      if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined)) !== undefined) break;
+      if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined))?.ok === true) break;
       await Bun.sleep(50);
     }
     const token = (await readFile(join(home, 'api-token'), 'utf8')).trim();
@@ -3437,7 +3439,7 @@ describe('daemon boot lifecycle', () => {
     ]);
     const exit = start(world, cleanups);
     for (let attempt = 0; attempt < 100; attempt += 1) {
-      if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined)) !== undefined) break;
+      if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined))?.ok === true) break;
       await Bun.sleep(50);
     }
     const token = (await readFile(join(home, 'api-token'), 'utf8')).trim();
@@ -3643,7 +3645,7 @@ describe('daemon boot lifecycle', () => {
     );
     const exit = start(world, cleanups);
     for (let attempt = 0; attempt < 100; attempt += 1) {
-      if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined)) !== undefined) break;
+      if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined))?.ok === true) break;
       await Bun.sleep(50);
     }
     const token = (await readFile(join(home, 'api-token'), 'utf8')).trim();
@@ -3892,7 +3894,7 @@ describe('daemon boot lifecycle', () => {
     );
     const exit = start(world, cleanups);
     for (let attempt = 0; attempt < 100; attempt += 1) {
-      if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined)) !== undefined) break;
+      if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined))?.ok === true) break;
       await Bun.sleep(50);
     }
     const token = (await readFile(join(home, 'api-token'), 'utf8')).trim();
@@ -4098,7 +4100,7 @@ describe('daemon boot lifecycle', () => {
     await seedMigrationFleet(home);
     const exit = start(world, cleanups);
     for (let attempt = 0; attempt < 100; attempt += 1) {
-      if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined)) !== undefined) break;
+      if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined))?.ok === true) break;
       await Bun.sleep(50);
     }
     const token = (await readFile(join(home, 'api-token'), 'utf8')).trim();
@@ -4222,7 +4224,7 @@ describe('daemon boot lifecycle', () => {
     ]);
     const exit = start(world, cleanups);
     for (let attempt = 0; attempt < 100; attempt += 1) {
-      if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined)) !== undefined) break;
+      if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined))?.ok === true) break;
       await Bun.sleep(50);
     }
     const token = (await readFile(join(home, 'api-token'), 'utf8')).trim();
@@ -4319,7 +4321,7 @@ describe('daemon boot lifecycle', () => {
     await seedSession(home, '2026-07-31T09:00:00.000Z', 'wire-live');
     const exit = start(world, cleanups);
     for (let attempt = 0; attempt < 100; attempt += 1) {
-      if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined)) !== undefined) break;
+      if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined))?.ok === true) break;
       await Bun.sleep(50);
     }
     const token = (await readFile(join(home, 'api-token'), 'utf8')).trim();
@@ -4460,7 +4462,7 @@ describe('daemon boot lifecycle', () => {
     const exit = start(world, cleanups);
     const base = `http://127.0.0.1:${String(port)}`;
     for (let attempt = 0; attempt < 100; attempt += 1) {
-      if ((await fetch(`${base}/healthz`).catch(() => undefined)) !== undefined) break;
+      if ((await fetch(`${base}/healthz`).catch(() => undefined))?.ok === true) break;
       await Bun.sleep(50);
     }
     const token = (await readFile(join(home, 'api-token'), 'utf8')).trim();
@@ -4571,7 +4573,7 @@ describe('daemon boot lifecycle', () => {
     await seedSession(home, '2026-07-31T09:00:00.000Z');
     const exit = start(world, cleanups);
     for (let attempt = 0; attempt < 100; attempt += 1) {
-      if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined)) !== undefined) break;
+      if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined))?.ok === true) break;
       await Bun.sleep(50);
     }
     const token = (await readFile(join(home, 'api-token'), 'utf8')).trim();
@@ -4639,7 +4641,7 @@ describe('daemon boot lifecycle', () => {
     await seedSession(home, '2026-07-31T09:00:00.000Z');
     const exit = start(world, cleanups);
     for (let attempt = 0; attempt < 100; attempt += 1) {
-      if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined)) !== undefined) break;
+      if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined))?.ok === true) break;
       await Bun.sleep(50);
     }
     const token = (await readFile(join(home, 'api-token'), 'utf8')).trim();
@@ -4741,7 +4743,7 @@ describe('daemon boot lifecycle', () => {
     await seedFleet(home);
     const exit = start(world, cleanups);
     for (let attempt = 0; attempt < 100; attempt += 1) {
-      if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined)) !== undefined) break;
+      if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined))?.ok === true) break;
       await Bun.sleep(50);
     }
     const token = (await readFile(join(home, 'api-token'), 'utf8')).trim();
@@ -4865,9 +4867,13 @@ describe('daemon boot lifecycle', () => {
       });
     });
     const exit = start(world, cleanups);
-    for (let attempt = 0; attempt < 100; attempt += 1) {
-      if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined)) !== undefined) break;
-      await Bun.sleep(50);
+    // READY, not merely serving: the hand edits below must land after the configuration watcher's first
+    // load, or a load that runs between two of the writes splits one edit across two frames.
+    for (let attempt = 0; attempt < 200; attempt += 1) {
+      const liveness = await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined);
+      const body = (await liveness?.json().catch(() => undefined)) as { boot?: { phase?: string } } | undefined;
+      if (body?.boot?.phase === 'ready') break;
+      await Bun.sleep(25);
     }
     const token = (await readFile(join(home, 'api-token'), 'utf8')).trim();
     const headers = { authorization: `Bearer ${token}`, 'x-ferretry-client': 'cli' };
@@ -4958,7 +4964,7 @@ describe('daemon boot lifecycle', () => {
     await seedSession(home, '2026-07-31T09:00:00.000Z');
     const exit = start(world, cleanups);
     for (let attempt = 0; attempt < 100; attempt += 1) {
-      if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined)) !== undefined) break;
+      if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined))?.ok === true) break;
       await Bun.sleep(50);
     }
     const token = (await readFile(join(home, 'api-token'), 'utf8')).trim();
@@ -5003,7 +5009,7 @@ describe('daemon boot lifecycle', () => {
     await seedSession(home, new Date().toISOString());
     const exit = start(world, cleanups);
     for (let attempt = 0; attempt < 100; attempt += 1) {
-      if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined)) !== undefined) break;
+      if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined))?.ok === true) break;
       await Bun.sleep(50);
     }
     const token = (await readFile(join(home, 'api-token'), 'utf8')).trim();
@@ -5114,7 +5120,7 @@ describe('daemon boot lifecycle', () => {
     );
     const exit = start(world, cleanups);
     for (let attempt = 0; attempt < 100; attempt += 1) {
-      if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined)) !== undefined) break;
+      if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined))?.ok === true) break;
       await Bun.sleep(50);
     }
     const token = (await readFile(join(home, 'api-token'), 'utf8')).trim();
@@ -5245,7 +5251,7 @@ describe('daemon boot lifecycle', () => {
     };
     const exit = start(world, cleanups);
     for (let attempt = 0; attempt < 100; attempt += 1) {
-      if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined)) !== undefined) break;
+      if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined))?.ok === true) break;
       await Bun.sleep(50);
     }
     const token = (await readFile(join(home, 'api-token'), 'utf8')).trim();
@@ -5339,7 +5345,7 @@ describe('daemon boot lifecycle', () => {
     });
     const exit = start(world, cleanups);
     for (let attempt = 0; attempt < 100; attempt += 1) {
-      if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined)) !== undefined) break;
+      if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined))?.ok === true) break;
       await Bun.sleep(50);
     }
     const token = (await readFile(join(home, 'api-token'), 'utf8')).trim();
@@ -5430,7 +5436,7 @@ describe('daemon boot lifecycle', () => {
     const enhancer = new RecordingSttEnhancer();
     const exit = start({ ...base, sttEnhancement: enhancer }, cleanups);
     for (let attempt = 0; attempt < 100; attempt += 1) {
-      if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined)) !== undefined) break;
+      if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined))?.ok === true) break;
       await Bun.sleep(50);
     }
     const token = (await readFile(join(home, 'api-token'), 'utf8')).trim();
@@ -5515,8 +5521,9 @@ describe('daemon boot lifecycle', () => {
 
     // Assert
     should(code).equal(EXIT_ALREADY_RUNNING);
-    // The open failed, so nothing was acquired and there is nothing to release.
-    should(cleanups).be.empty();
+    // The open failed, so the only acquisition is the loop's heartbeat and watchdog — armed before the
+    // home is opened, because opening it is a step that can stall too.
+    should(cleanups).have.length(1);
     // THE MESSAGE, not just the code: this branch used to return 78 and write nothing, so the
     // launcher pointed the operator at a log file that was empty.
     should(said.stated).have.length(1);
@@ -5544,8 +5551,8 @@ describe('daemon boot lifecycle', () => {
 
     // Assert
     should(code).equal(EXIT_ALREADY_RUNNING);
-    // The home was opened before the address was probed, so its release is the one registered step.
-    should(cleanups).have.length(1);
+    // The heartbeat, then the home — opened before the address was probed — are the registered steps.
+    should(cleanups).have.length(2);
     should(said.stated).have.length(1);
     should(said.stated[0]).match(/9\.9\.9/u);
     should(said.stated[0]).match(/pid 4242/u);
@@ -5637,7 +5644,9 @@ describe('daemon boot lifecycle', () => {
     // Act — the daemon answers on the address it took, which is not the one it preferred.
     let health: Response | undefined;
     for (let attempt = 0; attempt < 200 && health === undefined; attempt += 1) {
-      health = await fetch(`http://127.0.0.1:${String(preferredPort + 1)}/healthz`).catch(() => undefined);
+      health = await fetch(`http://127.0.0.1:${String(preferredPort + 1)}/healthz`)
+        .then(answer => (answer.ok ? answer : undefined))
+        .catch(() => undefined);
       if (health === undefined) await Bun.sleep(25);
     }
     const recorded = JSON.parse(await readFile(join(home, 'config', 'daemon.json'), 'utf8')) as Record<string, unknown>;
@@ -5676,7 +5685,9 @@ describe('daemon boot lifecycle', () => {
     const booting = start(world, cleanups);
     let health: Response | undefined;
     for (let attempt = 0; attempt < 200 && health === undefined; attempt += 1) {
-      health = await fetch(`http://127.0.0.1:${String(port)}/healthz`).catch(() => undefined);
+      health = await fetch(`http://127.0.0.1:${String(port)}/healthz`)
+        .then(answer => (answer.ok ? answer : undefined))
+        .catch(() => undefined);
       if (health === undefined) await Bun.sleep(25);
     }
     release();
@@ -5733,7 +5744,7 @@ describe('daemon boot lifecycle', () => {
     // Act
     const booting = start(world, cleanups);
     for (let attempt = 0; attempt < 200; attempt += 1) {
-      if ((await fetch(`http://127.0.0.1:${String(port)}/healthz`).catch(() => undefined)) !== undefined) break;
+      if ((await fetch(`http://127.0.0.1:${String(port)}/healthz`).catch(() => undefined))?.ok === true) break;
       await Bun.sleep(25);
     }
     release();
@@ -5787,7 +5798,7 @@ describe('daemon boot lifecycle', () => {
     // Act
     const booting = start(world, cleanups);
     for (let attempt = 0; attempt < 200; attempt += 1) {
-      if ((await fetch(`http://127.0.0.1:${String(port)}/healthz`).catch(() => undefined)) !== undefined) break;
+      if ((await fetch(`http://127.0.0.1:${String(port)}/healthz`).catch(() => undefined))?.ok === true) break;
       await Bun.sleep(25);
     }
     release();
@@ -5827,7 +5838,7 @@ describe('daemon boot lifecycle', () => {
     // Act
     const booting = start(world, cleanups);
     for (let attempt = 0; attempt < 200; attempt += 1) {
-      if ((await fetch(`http://127.0.0.1:${String(port)}/healthz`).catch(() => undefined)) !== undefined) break;
+      if ((await fetch(`http://127.0.0.1:${String(port)}/healthz`).catch(() => undefined))?.ok === true) break;
       await Bun.sleep(25);
     }
     release();
@@ -5843,9 +5854,11 @@ describe('daemon boot lifecycle', () => {
       'state home opened',
       'configuration loaded',
       'address is free',
+      // The address is bound as soon as it is decided, so liveness answers while the rest boots.
+      'listening',
       'harnesses checked',
       'subsystems mounted',
-      'listening',
+      'serving',
       'ready',
     ]);
     // The state home and the address it serves are named, not merely implied.
@@ -6366,7 +6379,7 @@ describe('daemon boot lifecycle', () => {
       // Act
       const booting = start(world, cleanups);
       for (let attempt = 0; attempt < 200; attempt += 1) {
-        if ((await fetch(`http://127.0.0.1:${String(port)}/healthz`).catch(() => undefined)) !== undefined) break;
+        if ((await fetch(`http://127.0.0.1:${String(port)}/healthz`).catch(() => undefined))?.ok === true) break;
         await Bun.sleep(25);
       }
       release();
@@ -6405,7 +6418,7 @@ describe('daemon boot lifecycle', () => {
       // Act
       const booting = start(world, cleanups);
       for (let attempt = 0; attempt < 200; attempt += 1) {
-        if ((await fetch(`http://127.0.0.1:${String(port)}/healthz`).catch(() => undefined)) !== undefined) break;
+        if ((await fetch(`http://127.0.0.1:${String(port)}/healthz`).catch(() => undefined))?.ok === true) break;
         await Bun.sleep(25);
       }
       release();
@@ -6465,7 +6478,7 @@ describe('daemon boot lifecycle', () => {
       // Act
       const booting = start(world, cleanups);
       for (let attempt = 0; attempt < 200; attempt += 1) {
-        if ((await fetch(`http://127.0.0.1:${String(port)}/healthz`).catch(() => undefined)) !== undefined) break;
+        if ((await fetch(`http://127.0.0.1:${String(port)}/healthz`).catch(() => undefined))?.ok === true) break;
         await Bun.sleep(25);
       }
       release();
@@ -6562,7 +6575,7 @@ describe('daemon boot lifecycle', () => {
       const booting = start({ ...world, notices: said.port, untilShutdown: async () => await stopped }, cleanups);
       const base = `http://127.0.0.1:${String(port)}`;
       for (let attempt = 0; attempt < 400; attempt += 1) {
-        if ((await fetch(`${base}/healthz`).catch(() => undefined)) !== undefined) break;
+        if ((await fetch(`${base}/healthz`).catch(() => undefined))?.ok === true) break;
         await Bun.sleep(25);
       }
       let answer: T;
@@ -6761,7 +6774,7 @@ describe('daemon boot lifecycle', () => {
       const exit = start(world, cleanups);
       const base = `http://127.0.0.1:${String(port)}`;
       for (let attempt = 0; attempt < 400; attempt += 1) {
-        if ((await fetch(`${base}/healthz`).catch(() => undefined)) !== undefined) break;
+        if ((await fetch(`${base}/healthz`).catch(() => undefined))?.ok === true) break;
         await Bun.sleep(25);
       }
       // The boot pass and then a REGISTERED TICK. Nothing in this test reads usage, so every one of

@@ -8,6 +8,7 @@ import {
   OperatorReadService,
   type OperatorReadRedactor,
   type PaneCapture,
+  type PaneScope,
   type StoredSessionEvent,
   type TranscriptTailResult,
 } from '../../../../src/lib/session/reads/index.ts';
@@ -66,6 +67,8 @@ function fixture(
   options: {
     readonly events?: readonly StoredSessionEvent[];
     readonly capture?: PaneCapture;
+    /** Every scope the pane was asked for, in order. */
+    readonly scopes?: PaneScope[];
     /** A session the daemon recorded no terminal address for, which is not the same as a dead pane. */
     readonly noTerminal?: true;
     readonly tail?: TranscriptTailResult;
@@ -80,8 +83,12 @@ function fixture(
   const reads = new OperatorReadService(
     { replay: async () => options.events ?? [] },
     {
-      capture: async () =>
-        options.noTerminal === true ? undefined : (options.capture ?? { alive: true, dead: false, text: 'screen' }),
+      capture: async (_sessionId, scope) => {
+        options.scopes?.push(scope);
+        return options.noTerminal === true
+          ? undefined
+          : (options.capture ?? { alive: true, dead: false, text: 'screen' });
+      },
     },
     { tail: async () => options.tail ?? { kind: 'read', events: [] } },
     {
@@ -231,6 +238,49 @@ describe('the session snapshot route', () => {
     should(response.status).equal(200);
     should(response.body).equal('the agent is thinking');
     should(response.headers.get('cache-control')).eql('no-store');
+  });
+
+  it('should capture the scrollback by default and the visible screen when asked', async () => {
+    // Arrange
+    const scopes: PaneScope[] = [];
+    const dispatch = fixture({ scopes });
+
+    // Act
+    const omitted = await dispatch({ path: '/v1/sessions/s1/snapshot', headers: human });
+    const history = await dispatch({
+      path: '/v1/sessions/s1/snapshot',
+      query: [
+        ['live', 'true'],
+        ['scope', 'history'],
+      ],
+      headers: human,
+    });
+    const screen = await dispatch({
+      path: '/v1/sessions/s1/snapshot',
+      query: [
+        ['live', 'true'],
+        ['scope', 'screen'],
+      ],
+      headers: human,
+    });
+
+    // Assert
+    should([omitted.status, history.status, screen.status]).deepEqual([200, 200, 200]);
+    should(scopes).deepEqual(['history', 'history', 'screen']);
+  });
+
+  it('should refuse a scope it does not know before touching the pane', async () => {
+    // Arrange
+    const scopes: PaneScope[] = [];
+    const dispatch = fixture({ scopes });
+
+    // Act
+    const response = await dispatch({ path: '/v1/sessions/s1/snapshot', query: [['scope', 'all']], headers: human });
+
+    // Assert
+    should(response.status).equal(400);
+    should(jsonBody(response)).have.property('code', 'invalid_query');
+    should(scopes).deepEqual([]);
   });
 
   it('should serve a stored final frame when the daemon captured one', async () => {

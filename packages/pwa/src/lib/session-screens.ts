@@ -25,6 +25,12 @@ export interface ToolCall {
   readonly orphanResult?: boolean;
 }
 
+/**
+ * How a terminal send (cancelled, or given up on) is drawn: `fresh` is the whole bubble just after it
+ * settled, `slim` the one-line note it folds to, `expanded` the whole bubble because the reader opened it.
+ */
+export type SettledForm = 'fresh' | 'slim' | 'expanded';
+
 /** A browser-safe, display-only transcript row. Content remains daemon-owned. */
 export interface TranscriptEntry {
   readonly id: string;
@@ -44,6 +50,8 @@ export interface TranscriptEntry {
   readonly ledger?: LedgerSendRecord;
   /** Where that attempt sits relative to the loaded transcript. */
   readonly placement?: LedgerBlockPlacement;
+  /** Present on a `ledger` row whose send is terminal: it sits in the timeline at its send time, not under it. */
+  readonly settled?: SettledForm;
   /** The delivered send a `user` row IS, so the row can wear its chip. */
   readonly send?: LedgerSendRecord;
   /** The agent a `user` row came from, when another session sent it rather than the person. */

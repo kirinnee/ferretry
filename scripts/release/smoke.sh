@@ -123,6 +123,17 @@ fail() {
 cat >"${fy_home}/config/daemon.json" <<'CONFIG'
 { "relay": { "url": "ws://127.0.0.1:1", "enabled": false } }
 CONFIG
+# ── The WebRTC engine ─────────────────────────────────────────────────────────────────────────
+# The daemon embeds a native WebRTC library per target (scripts/release/compile-executable.ts). A
+# compiled daemon that cannot load the right one still starts — devices fall back to the relay — so
+# nothing else in this smoke would notice. `--check` runs the engine's self-test: two loopback peers
+# in the compiled binary open a data channel and echo one message. Its exit code is about other
+# things, so only the line is judged.
+check_out="$("${tools}/${daemon_name}" --check </dev/null 2>&1 || true)"
+webrtc_line="$(grep '^webrtc ' <<<"${check_out}" || true)"
+grep -q 'engine ready' <<<"${webrtc_line}" || fail "the compiled WebRTC engine did not pass its self-test: ${webrtc_line:-no webrtc line}"
+echo "✅ ${webrtc_line}"
+
 "${name}" daemon adopt </dev/null >/dev/null
 
 "${name}" daemon start </dev/null

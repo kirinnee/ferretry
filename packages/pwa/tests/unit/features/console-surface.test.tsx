@@ -1,7 +1,11 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import type { TerminalInputPort } from '../../../src/components/session-terminal-deck.tsx';
 import { consoleKeyInput } from '../../../src/features/workspace/console-keys.ts';
-import { ConsoleSurface, type ConsoleTyper } from '../../../src/features/workspace/console-surface.tsx';
+import {
+  CONSOLE_REFRESH_MIN_MS,
+  ConsoleSurface,
+  type ConsoleTyper,
+} from '../../../src/features/workspace/console-surface.tsx';
 import { daemonConnection } from '../../../src/lib/daemon-connection.ts';
 import { daemonSessionScope } from '../../../src/lib/daemon-scope.ts';
 import { DaemonResponseError } from '../../../src/lib/runtime-models.ts';
@@ -110,6 +114,40 @@ describe('the Console surface', () => {
     expect(reads.length).toBeGreaterThan(before);
     expect(view.container.textContent).toContain('live · updated');
     expect(view.container.querySelector('[role="alert"]')).toBeNull();
+  });
+
+  it('re-reads the pane at most once a second however fast the keys come', async () => {
+    const sent: string[] = [];
+    const { field, reads, settle } = await setup(async (_connection, _at, data) => {
+      sent.push(data);
+    });
+    await settle();
+    const before = reads.length;
+
+    // Three keys inside one window: the first reads at once, the others share one trailing read.
+    await type(field, 'a');
+    await type(field, 'b');
+    await type(field, 'c');
+    await settle();
+    expect(sent).toEqual(['a', 'b', 'c']);
+    expect(reads.length).toBe(before + 1);
+
+    await interact(async () => await new Promise(resolve => setTimeout(resolve, CONSOLE_REFRESH_MIN_MS + 200)));
+    await settle();
+    expect(reads.length).toBe(before + 2);
+  });
+
+  it('drops a pending trailing read when the Console goes away', async () => {
+    const { view, field, reads, settle } = await setup(async () => undefined);
+    await settle();
+    await type(field, 'a');
+    await type(field, 'b');
+    await settle();
+    const before = reads.length;
+    await view.unmount();
+    mounted.splice(0);
+    await new Promise(resolve => setTimeout(resolve, CONSOLE_REFRESH_MIN_MS + 200));
+    expect(reads.length).toBe(before);
   });
 
   it('waits for a composition to finish before it sends what was composed', async () => {

@@ -97,6 +97,12 @@ export interface AnalyticsIngestSummary {
   readonly ingested: number;
   /** Sessions already stored whose evidence cannot have changed, so no transcript was read. */
   readonly unchanged: number;
+  /**
+   * Sessions whose last read was REFUSED and whose evidence has not changed since, left unread this
+   * pass because that refusal is younger than {@link REFUSAL_RETRY_MS}. Their stored rows keep saying
+   * exactly what they said — refused, never zero.
+   */
+  readonly deferred: number;
   /** Rows stored with a token total this daemon could not prove. Never stored as zero. */
   readonly usageRefused: number;
   /** Transcript reads that raised rather than answering. */
@@ -144,8 +150,41 @@ interface AdmittedCandidate {
  * soon as the evidence can be read. A proven total is never re-read: the session is over and its
  * transcript is final.
  */
+/**
+ * How long a refused read stands before a pass reads that transcript again, while nothing about the
+ * session has changed.
+ *
+ * A refusal used to be retried on EVERY pass, and the commonest refusal is permanent: a finished
+ * transcript bigger than the bounded read is refused as truncated, and stays exactly that big. Each
+ * retry re-read 32 MiB from byte zero and parsed it — most of a second of a blocked event loop per
+ * session, every minute, for as long as the daemon ran. A refusal that a changed session could clear
+ * is still re-read at once, because its signature moves; only an identical one waits.
+ */
+export const REFUSAL_RETRY_MS = 15 * 60_000;
+
+/**
+ * The refusals that waited on a read of the transcript itself — the expensive ones, and the ones a
+ * finished session's final transcript will give again. "Unresolved" and "unreadable" are NOT here:
+ * neither read the file, and either can clear the moment a transcript is attributed or a disk comes
+ * back, so they are retried on every pass as before.
+ */
+const READ_REFUSALS: ReadonlySet<string> = new Set([
+  'transcript_damaged',
+  'transcript_incomplete',
+  'no_usage_evidence',
+  'ambiguous_token_accounting',
+]);
+
 export class AnalyticsIngestionService implements AnalyticsIngestionLoop {
   private pass: AnalyticsIngestSummary | undefined;
+  /**
+   * An ingest pass asked for and not yet started. A second ask while one is waiting joins it instead
+   * of queueing another: the waiting pass will read everything the second would have, and a timer that
+   * outpaced a slow pass used to grow this queue without bound.
+   */
+  private waiting: Promise<AnalyticsIngestSummary> | undefined;
+  /** When each session's read was last refused, and under which signature. See {@link REFUSAL_RETRY_MS}. */
+  private readonly refusals = new Map<string, { readonly signature: string; readonly atMs: number }>();
   /**
    * Passes asked for and not yet finished, including any still queued.
    *
@@ -173,7 +212,13 @@ export class AnalyticsIngestionService implements AnalyticsIngestionLoop {
 
   /** One pass over every session the daemon holds durable documents for. */
   async ingest(): Promise<AnalyticsIngestSummary> {
-    return await this.enqueue(async () => await this.sweep());
+    if (this.waiting !== undefined) return await this.waiting;
+    const pass = this.enqueue(async () => {
+      this.waiting = undefined;
+      return await this.sweep();
+    });
+    this.waiting = pass;
+    return await pass;
   }
 
   /**
@@ -266,9 +311,20 @@ export class AnalyticsIngestionService implements AnalyticsIngestionLoop {
     const forgotten = [...stored.keys()].filter(id => !live.has(id));
     if (forgotten.length > 0) this.parts.store.forget(forgotten);
 
-    const pending = admitted.filter(entry => {
+    const stale = admitted.filter(entry => {
       const marker = stored.get(entry.session.id);
       return !(marker?.signature === entry.signature && marker.hasUsage);
+    });
+    // Read only when something could be deferred, so a pass with nothing stale reads the clock once.
+    const nowMs = stale.length === 0 ? 0 : Date.parse(this.parts.clock.now());
+    const pending = stale.filter(entry => {
+      const marker = stored.get(entry.session.id);
+      const refused = this.refusals.get(entry.session.id);
+      return !(
+        marker?.signature === entry.signature &&
+        refused?.signature === entry.signature &&
+        nowMs - refused.atMs < REFUSAL_RETRY_MS
+      );
     });
 
     let sourceErrors = 0;
@@ -281,10 +337,15 @@ export class AnalyticsIngestionService implements AnalyticsIngestionLoop {
       const batch = await Promise.all(
         pending.slice(start, start + batchSize).map(async entry => await this.materialize(entry, catalog)),
       );
-      for (const result of batch) {
+      for (const [index, result] of batch.entries()) {
         if (result.sourceError) sourceErrors += 1;
         if (result.row.usageRefusal !== null) usageRefused += 1;
         rows.push(result.row);
+        const entry = pending[start + index];
+        if (entry === undefined) continue;
+        if (result.row.usageRefusal !== null && READ_REFUSALS.has(result.row.usageRefusal))
+          this.refusals.set(entry.session.id, { signature: entry.signature, atMs: nowMs });
+        else this.refusals.delete(entry.session.id);
       }
     }
     if (rows.length > 0) this.parts.store.upsert(rows);
@@ -294,7 +355,8 @@ export class AnalyticsIngestionService implements AnalyticsIngestionLoop {
       gateRefused: candidates.length - admitted.length,
       gateRefusals,
       ingested: rows.length,
-      unchanged: admitted.length - pending.length,
+      unchanged: admitted.length - stale.length,
+      deferred: stale.length - pending.length,
       usageRefused,
       sourceErrors,
       forgotten: forgotten.length,

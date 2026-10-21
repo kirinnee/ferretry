@@ -2467,3 +2467,224 @@ its traffic. What arrives is a handshake only the daemon's identity key can comp
 holder can drop sessions, not impersonate the daemon. The daemon's next renewal does not rotate the
 token in this version; an operator who suspects one deletes the tunnel (the daemon provisions a new
 one). That is stated as a gap, not solved.
+
+---
+
+## 16. The WebRTC carrier
+
+§15 is the carrier choice, where the owner made WebRTC the default remote carrier. This section is the
+WebRTC carrier itself: what crosses which wire, what it may and may not change, the native engine
+that carries it on the daemon, and what has been measured. It is built in stacked steps, and "What is
+built, and what is not" at the end of this section says which step this repository is at; every
+other paragraph here is contract for the steps that follow, written down before they are built so
+the daemon half and the browser half are implemented against one document.
+
+### What it is, and what it buys
+
+A browser and a daemon find a **direct UDP path** to each other through their NATs (ICE, with one
+public STUN server telling each end its public address) and open SCTP data channels over DTLS on it.
+Each data channel then carries **exactly what a direct WebSocket carries** (§4): one session, the same
+frames (§3), the same handshake against the pinned fingerprint (§6), the same records (§7), the same
+device proof, lease and §14 modes. Nothing above the channel knows which carrier it is on.
+
+What that buys over the relay, and why it is the default remote carrier:
+
+- **One leg instead of two.** A relayed byte goes phone → edge → home; a peer-to-peer byte goes phone
+  → home. The relay's Durable Object sits where it was first created, near the daemon, so a phone far
+  from both used to pay that distance on every keystroke (§14, "What is not done") — and nothing on
+  the relay side could shorten it. A peer-to-peer path is as short as the network allows.
+- **No third party carries the session.** A rendezvous sees every frame's size and timing (§10). On
+  this carrier the networks in between see the same encrypted UDP they would see of any video call,
+  and the STUN server sees one binding request per end (below). Nobody operates anything in the path.
+- **No meter and no ceiling.** §13's per-daemon byte and connection ceilings exist to bound a bill.
+  A peer-to-peer session costs nobody anything, so a terminal or a remote-browser view on it is never
+  refused `4432`/`4433`.
+
+What it does **not** buy, stated so nobody claims it: it is not reachable without a rendezvous or a
+direct address to signal through (below); it does not traverse every NAT (no TURN — below); and it
+does not make a session survive a network change any more than any other carrier does (§9).
+
+### Signalling travels inside an authenticated session, sealed
+
+An offer and an answer have to cross somehow before there is a path. They cross **inside an ordinary
+§14 request session** — over the relay when that is how the device reaches the daemon, or over a
+direct session when it can (which is rarely worth it, since direct already won):
+
+```
+POST /v1/webrtc/offer      inside a session the paired device key opened
+{ "sdp": "<the browser's offer>" }
+
+200 { "sdp": "<the daemon's answer>" }
+```
+
+The route is `authenticated`, like `GET /v1/carriers`: a paired device asking for another way to reach
+its own daemon is exactly the caller it exists for. Its refusals are ordinary answers a device reads
+and states: `404` from a daemon older than this carrier ("this daemon does not offer WebRTC yet"), and
+a `503` naming the reason when the daemon's engine is unavailable or the operator switched the carrier
+off. Neither demotes the session the request arrived on.
+
+**Not as rendezvous control frames**, and the reasons are contract rather than taste:
+
+1. **The relay never sees an SDP.** An offer carries both ends' candidate addresses — LAN addresses
+   included, where a browser does not hide them — and the DTLS certificate fingerprint. Sealed in a
+   record, a rendezvous learns that a record of some size crossed and nothing else; as a control frame
+   it would learn every address each end has and could edit any of them.
+2. **Only a paired device can make the daemon open a UDP port.** Answering an offer allocates sockets
+   and starts ICE. Behind the session's device proof, that is a resource only a credential can spend;
+   as a control frame it would be one anybody who knows the public fingerprint could spend.
+3. **The rendezvous changes zero code**, which is the rule §14 already keeps: nothing new is visible
+   outside the channel, so a deployed relay carries this carrier's signalling today.
+
+The consequence is a dependency worth naming: **WebRTC is reachable only through another carrier
+first.** A device that can reach neither the daemon's address nor a rendezvous cannot signal, and so
+cannot reach it peer-to-peer either. A relay switched off by its kill switch (§13) therefore also
+removes WebRTC for every device that needed the relay to introduce it.
+
+**Pairing never crosses this carrier.** Signalling needs a session a device key opened, and a device
+redeeming a code has no key yet. First contact stays direct, then relay (§14, "Pairing sessions").
+
+#### Gathering is bounded, not "complete"
+
+Signalling is **non-trickle**: one offer and one answer, each carrying every candidate its side
+gathered — one round trip through the session, instead of a stream of candidate messages each paying
+a relayed round trip of its own. But "every candidate" must be bounded. Measured against a public
+STUN server, Chrome reports its server-reflexive candidate in under 10 ms and then holds its
+gathering state short of `complete` for **about forty seconds**, until every STUN request on every
+interface has timed out. So each side sends its description at the FIRST of:
+
+- gathering `complete`;
+- **250 ms** after its first server-reflexive candidate;
+- **3 seconds** after gathering began.
+
+#### No TURN, and a deadline instead
+
+Version one uses **one STUN server and no TURN**. A path that needs a relay to exist at all —
+symmetric NAT on both ends, a network that blocks UDP — therefore fails ICE, and the remedy is not a
+second relay but the one this protocol already has: **a WebRTC attempt that has not delivered an open
+channel within 8 seconds of the offer leaving is abandoned, and the device carries on over the relay,
+saying so** ("WebRTC could not find a direct path in 8 s — this network may block peer-to-peer
+connections; using the relay"). The relay carries the requests that arrive meanwhile, so a failed
+attempt delays nothing but the switch.
+
+**The STUN server** is `stun:stun.cloudflare.com:3478`: no account and no credential, and Cloudflare
+states that the service "is free and unlimited" (Cloudflare Realtime TURN FAQ, checked 2026-10-21).
+It is configuration, like every other address here, not a protocol constant. What it learns: each
+end's public IP address and port and when they asked — one binding request per end per attempt. It
+never learns the daemon fingerprint, the session, or anything inside it.
+
+### On the channel
+
+- **One data channel is one session**, exactly as one direct socket is (§4). The browser opens a
+  channel per session it would otherwise open — requests, the event stream, each attached terminal —
+  on one peer connection, and SCTP gives each channel its own stream, so a busy terminal's
+  retransmissions never hold up the request channel beside it.
+- **Every channel is reliable and ordered.** §7 ends a session at the first sequence gap, so an
+  unordered or lossy channel would turn every lost packet into a torn-down session, and a terminal
+  frame is a delta against the frame before it (§14) — reordering one corrupts the picture. What an
+  unordered channel would have bought, independence from another stream's loss, the per-session
+  channel above already gives. So no channel is unordered.
+- **The daemon plays the direct carrier's part:** on a new channel it mints the session identifier,
+  sends `ready` with the same `limits`, and refuses a client control frame with `4400`. `fy-ping` and
+  `fy-pong` are text messages on the channel, at the §8 keepalive cadence.
+- **A close carries its code in a frame.** A data channel closes without a code, so before the daemon
+  closes one it sends the session's `closed` control frame (§5), which carries the code and reason a
+  WebSocket close would have. A channel that closes with no `closed` before it is a transport failure,
+  never a quiet end.
+
+### Authority: a WebRTC arrival is remote, always
+
+**A session that arrived over WebRTC is never a loopback caller**, whatever address its UDP came from.
+A browser on the daemon's own host that signals over the relay and connects peer-to-peer to its own
+machine is still a remote, governed caller ([`grants.md`](grants.md)): privilege is the accepting
+carrier's answer (§13), and this carrier answers `false` for every arrival, unconditionally, exactly
+as a rendezvous does. A candidate address is something the peer chose to send, and reading locality
+from it would hand a remote phone full control.
+
+The DTLS layer is **not** what authenticates the daemon. Its certificate fingerprint travels in the
+sealed SDP, so a relay cannot substitute it — but the identity this protocol trusts is still the one
+§6 pins inside every channel, against the QR's fingerprint. A data channel whose DTLS was somehow
+intercepted carries ciphertext the interceptor cannot read, and a forged daemon fails §6's first
+check before the device proves anything.
+
+A WebRTC caller's **rate-limit identity is its peer connection**, the value the daemon holds for the
+whole association, never a shared placeholder (§14's rule for relayed callers, applied again).
+
+**What the daemon bounds**, all initial configuration in the spirit of §13's ceilings: at most **8**
+peer connections at once, at most **8** channels on each, the §14 pre-credential deadline on every
+channel, and a peer connection with no open channel for **60 seconds** is closed.
+
+### When the network changes
+
+libdatachannel — the daemon's engine, below — refuses an ICE restart: an offer whose ICE credentials
+changed is rejected (`Invalid ICE settings from remote SDP`, measured against Chrome's `restartIce()`).
+So a phone that moves from Wi-Fi to cellular does not renegotiate the path it had. Its sessions end the
+way §9 already says sessions end — the keepalive or ICE consent freshness notices within seconds, the
+browser's immediate check on `online` and a network type change notices sooner — and the device does
+what it does on any carrier: re-sends reads, reopens streams from their cursors, never re-sends a
+write blind. Meanwhile the relay carries, and a fresh offer on the new network brings the session
+back to a peer-to-peer path. That is "resume without a full re-sync" in the only form §9 permits —
+the application's own cursors, not a session that pretends nothing happened.
+
+### What the browser shows
+
+The active carrier is always named (§1): "WebRTC (direct to this machine)" when a channel carries the
+session; the round trip, from the selected candidate pair's `currentRoundTripTime`; and, when the
+device fell back, the sentence that says why — the deadline, an engine the daemon reported unavailable,
+a daemon too old to offer it, or a choice (§15) that excluded it.
+
+### The engine
+
+Bun has no WebRTC, so the daemon carries one. Two were measured on 2026-10-21 (Bun 1.3.13, Linux x64,
+two peers in one process over loopback, 64-byte echo round trips and 16 KB echo throughput):
+
+| Engine                                                     | Channel open |     Echo p50 / p95 |   Throughput | Under Bun                                                                    |
+| ---------------------------------------------------------- | -----------: | -----------------: | -----------: | ---------------------------------------------------------------------------- |
+| **node-datachannel 0.33.4** (libdatachannel 0.24.5, N-API) |    **12 ms** | **0.21 / 0.70 ms** | **141 MB/s** | loads; embeds in a compiled `fyd` per target (below)                         |
+| werift 0.25.1 (pure TypeScript)                            |       250 ms |     0.15 / 0.56 ms |     7.5 MB/s | **throws an uncaught `ECONNREFUSED` from `node:dgram` when its peers close** |
+
+**node-datachannel**, because a process-killing exception on teardown is disqualifying for a daemon,
+and a remote-browser view (§14) needs more than 7.5 MB/s. Its cost is that it is native code:
+
+- **Every release target embeds its own prebuild.** The library chooses `@node-datachannel/<platform>`
+  with a computed `require` a bundler cannot follow, so `scripts/release/compile-executable.ts`
+  replaces that loader with one that imports the TARGET's `.node` as an embedded file — linux-x64,
+  linux-arm64 and darwin-arm64 — and fails the build for a target with no mapping or no installed
+  prebuild. `compile.sh` installs every target's prebuild first; the Nix build installs them all too,
+  so its fixed-output dependency hash is the same on every builder. The Linux prebuild links nothing
+  but the C library (OpenSSL and the C++ runtime are static), so it runs under Nix's glibc as well.
+- **It is proved, not assumed.** `fyd --check` prints a `webrtc` line from a real self-test — two
+  peers inside the binary, bound to loopback with no ICE server, open a channel and echo — and the
+  release smoke (`scripts/release/smoke.sh`) fails a target whose compiled daemon does not report the
+  engine ready. That runs on a Linux x64, a Linux arm64 and a macOS arm64 runner.
+- **It is loaded lazily and fails soft.** A host where the addon will not load starts normally,
+  `--check` says the engine is unavailable and why, and devices reach the daemon directly or through
+  the relay as before.
+- **Licence.** node-datachannel and libdatachannel are MPL-2.0: file-level copyleft that permits
+  distributing them, unmodified, inside a differently licensed binary. Their source is public.
+
+**Measured against a real Chrome** (Chrome 154, `packages/pwa/harness/webrtc-engine-bench.ts`,
+loopback, the engine answering Chrome's offer, beside a Bun WebSocket in the same process):
+
+| Measure                                    |                        WebRTC |        WebSocket |
+| ------------------------------------------ | ----------------------------: | ---------------: |
+| open, loopback only                        |                        195 ms |                — |
+| open, with `stun.cloudflare.com` gathering | 380 ms (reflexive in 8–10 ms) |                — |
+| 64-byte echo p50 / p95                     |          0.1–0.5 / 0.4–1.2 ms | 0.1 / 0.1–0.3 ms |
+| 16 KB echo throughput                      |                    57–60 MB/s |     199–260 MB/s |
+
+Loopback is the carrier's own overhead and nothing else: on a real path the round trip is the
+network's, and a peer-to-peer path pays it once where a relay pays two legs. The bench does not run a
+session above the channel, because the session is byte-for-byte the same on every carrier and costs the
+same on each. A keystroke over this carrier on a shaped WAN path is measured when the browser half
+exists, by extending §14's `relay-terminal-bench.ts`.
+
+### What is built, and what is not
+
+- **Built — the engine.** `packages/daemon/src/adapters/webrtc` (the self-test and the loader the
+  benchmark shares), the per-target embedding, the Nix and release installs, `fyd --check`'s `webrtc`
+  line and the smoke that proves it on every target.
+- **Not built yet — the daemon carrier**: `POST /v1/webrtc/offer`, a data channel as a direct-style
+  session with a remote arrival, the bounds above.
+- **Not built yet — the browser carrier**: the dial, bounded gathering, the 8-second deadline and the
+  relay fallback, reconnection on a network change, the Connection status above, and the real-browser
+  journey that proves a phone↔daemon data path and a forced ICE failure falling back to the relay.

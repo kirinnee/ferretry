@@ -25,6 +25,7 @@ export type SettingId =
   | 'notifications'
   | 'install-app'
   | 'device-permissions'
+  | 'connection-preference'
   | 'clear-cached-data'
   | 'about-device'
   | 'speedup-keys'
@@ -260,6 +261,26 @@ export const SETTINGS_DEFINITIONS: readonly SettingDefinition[] = [
     ],
   },
   {
+    id: 'connection-preference',
+    label: 'Connection',
+    description:
+      'How this device reaches each paired machine: Auto (direct, then WebRTC, then a Cloudflare tunnel, then a relay), WebRTC only, Tunnel only or Relay only. Chosen per machine, kept on this device, and never sent to the machine.',
+    keywords: [
+      'connection',
+      'carrier',
+      'carriers',
+      'relay',
+      'tunnel',
+      'cloudflare',
+      'webrtc',
+      'peer to peer',
+      'p2p',
+      'direct',
+      'network',
+      'auto',
+    ],
+  },
+  {
     id: 'install-app',
     label: 'Install app',
     description:
@@ -442,10 +463,11 @@ export const SETTINGS_SECTIONS: readonly SettingsSectionDefinition[] = [
     id: 'device',
     label: 'This device',
     description:
-      'Ferretry as an app on this device, what it may use (camera, location, notifications), the provider keys only this device holds, and what it keeps here.',
+      'Ferretry as an app on this device, what it may use (camera, location, notifications), how it connects to each machine, the provider keys only this device holds, and what it keeps here.',
     settingIds: [
       'install-app',
       'device-permissions',
+      'connection-preference',
       'speedup-keys',
       'transcription-log',
       'dictation-debug',
