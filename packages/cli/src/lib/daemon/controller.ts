@@ -1,4 +1,4 @@
-import type { HealthView } from '@ferretry/protocol';
+import type { HealthView, LivenessView } from '@ferretry/protocol';
 import { passMidTurn } from '../update/mid-turn.ts';
 import { type DaemonUpdateStatus, renderUpdateStatus } from '../update/status.ts';
 import type { InstalledDaemonBinary } from './binary.ts';
@@ -586,8 +586,9 @@ export class DaemonController {
   async inspect(): Promise<DaemonInspection> {
     const owner = await this.#owner();
     const health = await this.deps.health.probe();
-    const supervisor = await owner.inspect(this.#handleFor(health));
-    const view = decideDaemonStatus(this.#name, supervisor, health);
+    const liveness = await this.deps.health.liveness?.();
+    const supervisor = await owner.inspect(this.#handleFor(health) ?? this.#handleForLiveness(liveness));
+    const view = decideDaemonStatus(this.#name, supervisor, health, liveness);
     const located = this.#locateDaemon();
     const update = await this.deps.updateStatus?.read('reason' in located ? undefined : located, health !== undefined);
     return { view, located, update, serviceManager: this.deps.service !== undefined };
@@ -599,7 +600,7 @@ export class DaemonController {
     const supervisor = view.supervisor;
     const code = statusExitCode(view);
     const human = [
-      renderDaemonStatus(view),
+      renderDaemonStatus(view, this.deps.clientName),
       ...(update === undefined ? [] : renderUpdateStatus(update, this.deps.clientName)),
     ];
     if (options.json === true) {
@@ -873,6 +874,11 @@ export class DaemonController {
   /** The daemon reports its own pid, so a supervisor with no unit can still watch the right target. */
   #handleFor(health: HealthView | undefined): DaemonStartHandle | undefined {
     return health === undefined ? undefined : { pid: health.pid };
+  }
+
+  /** A booting daemon's pid, from its liveness answer, so a direct-run daemon reads as running. */
+  #handleForLiveness(liveness: LivenessView | undefined): DaemonStartHandle | undefined {
+    return liveness?.pid === undefined ? undefined : { pid: liveness.pid };
   }
 
   async #running(owner: IDaemonSupervisor, health: HealthView | undefined): Promise<boolean> {

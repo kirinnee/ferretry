@@ -213,7 +213,7 @@ async function boot(claudeScreen: readonly string[]): Promise<BootedDaemon> {
   const handle = await supervisor.start(fyd);
   if (handle.pid !== undefined) daemons.add(handle.pid);
   for (let attempt = 0; attempt < 400; attempt += 1) {
-    if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined)) !== undefined) break;
+    if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined))?.ok === true) break;
     await Bun.sleep(50);
   }
   const token = (await readFile(join(stateHome, 'api-token'), 'utf8')).trim();

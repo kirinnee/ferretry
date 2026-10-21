@@ -127,6 +127,14 @@ are governed exactly as the send and its retry are. Each is journalled (`control
 `control.send_submitted`) and audited as `agent.prompted` (`send-cancel`, `send-enter`), never with the
 text.
 
+**Dismissing is a view choice, never a daemon one.** A send that settled without arriving (cancelled, given
+up on, superseded, delivered elsewhere) sits in the timeline at its send time — never below the live
+conversation — as a one-line note: whole for ten seconds, then folded, then gone ten minutes after it
+settled unless the reader opened it. Each has **Dismiss**, remembered per device by send id (the
+`fy-dismissed-sends-v1` key; the ledger is append-only and is never told), and the session menu's **Dismiss
+all cancelled** and **Clear stuck messages** do it in bulk. If repair later finds the message in the
+transcript, the same row (`send:<id>`) becomes the ordinary delivered bubble in place.
+
 ## Declared gaps
 
 - **Claude's on-screen queue is not measured.** For Claude the queued proof is its transcript's

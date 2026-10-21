@@ -34,6 +34,7 @@ import {
   transcriptEntriesFromLog,
 } from './components/session-workspace-model.ts';
 import { SessionsPage } from './components/sessions-page.tsx';
+import type { SendDismiss, SendExpand } from './components/settled-send-note.tsx';
 import { GlobalAnalyticsPage } from './features/analytics/global-analytics-page.tsx';
 import { configFilesSettingsTab } from './features/config-files/config-files-settings.tsx';
 import { ConnectionHealthNotice } from './features/connection/connection-health-notice.tsx';
@@ -129,6 +130,7 @@ import {
 } from './hooks/use-notifications.ts';
 import { useKnownProjects, useProjects } from './hooks/use-projects.ts';
 import { browserReleaseAsk, releaseContainer, useReleaseIntegrity } from './hooks/use-release-integrity.ts';
+import { useSendView } from './hooks/use-send-view.ts';
 import {
   canRegister,
   type ServiceWorkerUpdateEnvironment,
@@ -1269,7 +1271,16 @@ function SessionRoute({ connection, scope }: SessionChatPageProps) {
    * The transcript with the send ledger IN it: delivered sends chip the message they became, and every
    * send not yet in the conversation sits after it with a chip saying where it is.
    */
-  const placedEntries = useMemo(() => placeLedgerRows(entries, sends), [entries, sends]);
+  const sendView = useSendView(sends);
+  const { view: sendViewState, tick: settledTick, dismiss: dismissSends, setExpanded: expandSend } = sendView;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `settledTick` re-places the rows when one folds or retires on its own.
+  const placedEntries = useMemo(
+    () => placeLedgerRows(entries, sends, Date.now(), sendViewState),
+    [entries, sends, sendViewState, settledTick],
+  );
+  /** A row's × — puts one undelivered send away on this device; the daemon's ledger is never told. */
+  const dismissSend = useCallback<SendDismiss>(record => dismissSends([record.sendId]), [dismissSends]);
+  const toggleSend = useCallback<SendExpand>((record, open) => expandSend(record.sendId, open), [expandSend]);
   /** A row's Retry, under the send's ORIGINAL id — see `sendRetrier`. */
   const retrySend = useMemo<SendRetry>(
     () => sendRetrier(client, sessionId, () => void refreshControl.current?.refresh(true)),
@@ -1288,7 +1299,14 @@ function SessionRoute({ connection, scope }: SessionChatPageProps) {
     [client, sessionId, refreshSends],
   );
   // "Clear stuck messages" — Actions-menu entry that takes back every message nothing proved arrived.
-  const stuckActions = useStuckMessageActions({ client, sessionId, sends, refresh: refreshSends });
+  const stuckActions = useStuckMessageActions({
+    client,
+    sessionId,
+    sends,
+    refresh: refreshSends,
+    view: sendViewState,
+    dismiss: dismissSends,
+  });
   // Every feature's Actions-menu entries for this ferret: Warden, Learning, Hypermedia, Pack mode, then stuck messages.
   const sessionActions = useMemo(
     () => [
@@ -1427,6 +1445,8 @@ function SessionRoute({ connection, scope }: SessionChatPageProps) {
           onRetry={retrySend}
           onCancel={cancelSend}
           onSubmit={submitSend}
+          onDismiss={dismissSend}
+          onExpand={toggleSend}
           onNavigate={navigate}
           {...(openSessions === null ? {} : { onOpenSessions: openSessions })}
           project={projectKeyFor(session.config.cwd, projects).name}

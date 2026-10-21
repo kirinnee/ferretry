@@ -3,13 +3,19 @@ import { sessionActionSections } from '../../src/features/session-actions/regist
 import {
   CLEAR_STUCK_MESSAGES_ACTION_ID,
   cancelAllStuck,
+  cancelledNotes,
+  clearableSends,
   clearStuckMessagesContribution,
+  DISMISS_CANCELLED_ACTION_ID,
+  dismissCancelledContribution,
+  NO_CANCELLED_MESSAGES_REASON,
   NO_STUCK_MESSAGES_REASON,
   type StuckMessageActionContext,
   type StuckMessageActions,
   stuckSends,
   useStuckMessageActions,
 } from '../../src/features/stuck-messages/use-stuck-message-actions.tsx';
+import { EMPTY_SEND_VIEW, type SendViewState } from '../../src/lib/send-dismissals.ts';
 import type { LedgerSendRecord } from '../../src/lib/send-ledger.ts';
 import { render, run } from '../support/react.ts';
 
@@ -34,6 +40,7 @@ const ledger = [
   record({ sendId: 'held', held: true }),
 ];
 
+const noDismiss = (): void => {};
 const owner: StuckMessageActionContext = { canControl: true };
 
 describe('stuckSends', () => {
@@ -48,7 +55,60 @@ describe('stuckSends', () => {
   });
 });
 
+describe('what is on screen to put away', () => {
+  const dismissedView: SendViewState = { dismissed: new Set(['lost', 'sending']), expanded: new Set() };
+
+  test('a dismissed message is no longer stuck, because the reader no longer sees it', () => {
+    expect(stuckSends(ledger, NOW, dismissedView).map(entry => entry.sendId)).toEqual(['queued', 'typed']);
+  });
+
+  test('Clear covers the stuck ones and every settled note on screen, each once', () => {
+    expect(clearableSends(ledger, NOW).map(entry => entry.sendId)).toEqual([
+      'sending',
+      'queued',
+      'typed',
+      'lost',
+      'cancelled',
+    ]);
+    expect(clearableSends(ledger, NOW, dismissedView).map(entry => entry.sendId)).toEqual([
+      'queued',
+      'typed',
+      'cancelled',
+    ]);
+  });
+
+  test('Dismiss all cancelled covers only the cancelled notes', () => {
+    expect(cancelledNotes(ledger, NOW).map(entry => entry.sendId)).toEqual(['cancelled']);
+    expect(cancelledNotes(ledger, NOW, { dismissed: new Set(['cancelled']), expanded: new Set() })).toEqual([]);
+  });
+
+  test('both default to a view with nothing dismissed, at the time they are asked', () => {
+    expect(clearableSends([record({ fate: 'cancelled' })])).toEqual([]);
+    expect(cancelledNotes([record({ fate: 'cancelled' })])).toEqual([]);
+  });
+});
+
 describe('cancelAllStuck', () => {
+  test('tells the caller about each message the daemon took back, and only those', async () => {
+    const heard: string[] = [];
+    const client = {
+      cancelSend: async (_sessionId: string, sendId: string) => {
+        if (sendId === 'queued') throw new Error('busy');
+        return {} as never;
+      },
+    };
+    await expect(
+      cancelAllStuck(
+        client,
+        's-1',
+        stuckSends(ledger, NOW),
+        () => {},
+        taken => void heard.push(taken.sendId),
+      ),
+    ).rejects.toThrow('1 of 4');
+    expect(heard).toEqual(['sending', 'typed', 'lost']);
+  });
+
   test('cancels each in turn, one at a time, then refreshes once', async () => {
     const order: string[] = [];
     let refreshed = 0;
@@ -144,10 +204,51 @@ describe('the Clear stuck messages entry', () => {
     expect(entryOf([record()], { canControl: false }).entry).toBeNull();
   });
 
+  test('says cancelled ones are just put away', () => {
+    const { entry } = entryOf([record()]);
+    expect(entry?.kind === 'confirm' ? entry.consequence : '').toContain('Cancelled ones are just put away');
+  });
+
   test('sits in the Session section of the menu', () => {
     const sections = sessionActionSections([clearStuckMessagesContribution([record()], async () => {})], owner);
     expect(sections.map(section => [section.group, section.entries.map(entry => entry.id)])).toEqual([
       ['session', [CLEAR_STUCK_MESSAGES_ACTION_ID]],
+    ]);
+  });
+});
+
+describe('the Dismiss all cancelled entry', () => {
+  test('runs at once with the count, and asks nothing', () => {
+    let dismissed = 0;
+    const dismiss = () => {
+      dismissed += 1;
+    };
+    const entry = dismissCancelledContribution([record({ sendId: 'c', fate: 'cancelled' })], dismiss).build(owner);
+    expect(entry).toMatchObject({
+      kind: 'run',
+      id: DISMISS_CANCELLED_ACTION_ID,
+      label: 'Dismiss all cancelled',
+      detail: '1',
+    });
+    expect(entry).not.toHaveProperty('unavailable');
+    if (entry?.kind === 'run') void entry.run();
+    expect(dismissed).toBe(1);
+  });
+
+  test('is dimmed with its reason when nothing is cancelled, and is offered to a connection that cannot control', () => {
+    const entry = dismissCancelledContribution([], () => {}).build({ canControl: false });
+    expect(entry).toMatchObject({ kind: 'run', unavailable: NO_CANCELLED_MESSAGES_REASON });
+    expect(entry).not.toHaveProperty('detail');
+  });
+
+  test('sits just under Clear stuck messages', () => {
+    const sections = sessionActionSections(
+      [dismissCancelledContribution([record()], () => {}), clearStuckMessagesContribution([record()], async () => {})],
+      owner,
+    );
+    expect(sections[0]?.entries.map(entry => entry.id)).toEqual([
+      CLEAR_STUCK_MESSAGES_ACTION_ID,
+      DISMISS_CANCELLED_ACTION_ID,
     ]);
   });
 });
@@ -158,13 +259,17 @@ describe('useStuckMessageActions', () => {
     sends,
     refresh,
     out,
+    view = EMPTY_SEND_VIEW,
+    dismiss = noDismiss,
   }: {
     readonly client: { cancelSend: (sessionId: string, sendId: string) => Promise<never> } | null;
     readonly sends: readonly LedgerSendRecord[];
     readonly refresh: () => void;
     readonly out: { current: StuckMessageActions | null };
+    readonly view?: SendViewState;
+    readonly dismiss?: (sendIds: readonly string[]) => void;
   }) {
-    out.current = useStuckMessageActions({ client, sessionId: 's-1', sends, refresh });
+    out.current = useStuckMessageActions({ client, sessionId: 's-1', sends, refresh, view, dismiss });
     return null;
   }
 
@@ -202,5 +307,38 @@ describe('useStuckMessageActions', () => {
     expect(out.current?.contributions).toBe(first);
     run(() => view.update(<Probe client={client} out={out} refresh={refresh} sends={[]} />));
     expect(out.current?.count).toBe(0);
+  });
+
+  test('Clear puts away the cancelled notes and every message the daemon took back; Dismiss all cancelled only the notes', async () => {
+    const out: { current: StuckMessageActions | null } = { current: null };
+    const dismissed: string[][] = [];
+    const client = {
+      cancelSend: async (_sessionId: string, sendId: string) => {
+        if (sendId === 'b') throw new Error('busy');
+        return {} as never;
+      },
+    };
+    const justNow = new Date().toISOString();
+    const sends = [
+      record({ sendId: 'a', acceptedAt: justNow }),
+      record({ sendId: 'b', fate: 'queued', acceptedAt: justNow }),
+      record({ sendId: 'c', fate: 'cancelled', acceptedAt: justNow }),
+    ];
+    render(
+      <Probe
+        client={client}
+        dismiss={ids => void dismissed.push([...ids])}
+        out={out}
+        refresh={() => {}}
+        sends={sends}
+      />,
+    );
+
+    expect(out.current?.count).toBe(3);
+    const [clear, dismissAll] = out.current?.contributions.map(contribution => contribution.build(owner)) ?? [];
+    if (dismissAll?.kind === 'run') await dismissAll.run();
+    expect(dismissed).toEqual([['c']]);
+    if (clear?.kind === 'confirm') await expect(clear.run()).rejects.toThrow('1 of 2');
+    expect(dismissed).toEqual([['c'], ['c'], ['a']]);
   });
 });

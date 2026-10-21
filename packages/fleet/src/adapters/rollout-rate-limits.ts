@@ -18,7 +18,7 @@
  * Nothing here is credential material, and nothing is written.
  */
 import type { Dirent } from 'node:fs';
-import { readdir, readFile, stat } from 'node:fs/promises';
+import { open, readdir, readFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { parseCodexRateLimits } from '../lib/quota.ts';
 import type { PassiveUsageRecord } from '../lib/usage.ts';
@@ -108,10 +108,46 @@ export function newestRateLimitsInRollout(text: string, fallbackAt: number): Pas
   return undefined;
 }
 
-/** A rollout's text, decompressing a `.zst` one. */
-async function rolloutText(path: string): Promise<string> {
-  const bytes = await readFile(path);
-  return path.endsWith('.zst') ? new TextDecoder().decode(Bun.zstdDecompressSync(bytes)) : bytes.toString('utf8');
+/**
+ * How much of a plain rollout's END each attempt reads, before reading it whole.
+ *
+ * A rollout grows for as long as its agent works, and its newest `token_count` is one of its last
+ * records. Reading every rollout whole on every usage pass meant hundreds of megabytes decoded and
+ * split on the daemon's event loop each minute for a busy Codex account; a tail almost always holds the
+ * answer, and the file is still read whole when it does not.
+ */
+const ROLLOUT_TAIL_BYTES: readonly number[] = [256 * 1024, 2 * 1024 * 1024];
+
+/** The last `bytes` of a file as text, and whether that was the whole file. */
+async function tailText(path: string, bytes: number): Promise<{ readonly text: string; readonly whole: boolean }> {
+  const handle = await open(path, 'r');
+  try {
+    const { size } = await handle.stat();
+    const length = Math.min(size, bytes);
+    const buffer = Buffer.alloc(length);
+    const { bytesRead } = await handle.read(buffer, 0, length, size - length);
+    // A tail that starts mid-record leaves a partial first line; it fails to parse and is skipped.
+    return { text: buffer.subarray(0, bytesRead).toString('utf8'), whole: length === size };
+  } finally {
+    await handle.close().catch(() => undefined);
+  }
+}
+
+/**
+ * One rollout's newest reading. A `.zst` rollout cannot be read from its end, so it is decompressed
+ * whole; a plain one is read from its end in growing windows, and whole only as the last resort.
+ */
+async function newestInRollout(file: RolloutFile): Promise<PassiveUsageRecord | undefined> {
+  if (file.path.endsWith('.zst')) {
+    const text = new TextDecoder().decode(Bun.zstdDecompressSync(await readFile(file.path)));
+    return newestRateLimitsInRollout(text, file.modifiedAt);
+  }
+  for (const bytes of ROLLOUT_TAIL_BYTES) {
+    const tail = await tailText(file.path, bytes);
+    const reading = newestRateLimitsInRollout(tail.text, file.modifiedAt);
+    if (reading !== undefined || tail.whole) return reading;
+  }
+  return newestRateLimitsInRollout(await readFile(file.path, 'utf8'), file.modifiedAt);
 }
 
 /**
@@ -124,13 +160,12 @@ async function rolloutText(path: string): Promise<string> {
 export async function newestRolloutRateLimits(files: readonly RolloutFile[]): Promise<PassiveUsageRecord | undefined> {
   const ordered = [...files].sort((left, right) => right.modifiedAt - left.modifiedAt);
   for (const file of ordered) {
-    let text: string;
+    let reading: PassiveUsageRecord | undefined;
     try {
-      text = await rolloutText(file.path);
+      reading = await newestInRollout(file);
     } catch {
       continue;
     }
-    const reading = newestRateLimitsInRollout(text, file.modifiedAt);
     if (reading !== undefined) return reading;
   }
   return undefined;
