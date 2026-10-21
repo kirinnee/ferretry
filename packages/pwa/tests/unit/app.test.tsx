@@ -2753,6 +2753,18 @@ describe('the command palette shortcut', () => {
     expect(document.activeElement).toBe(action);
     expect(search.getAttribute('aria-expanded')).toBe('false');
 
+    // A keyboard-owning surface (the remote browser view) gets Cmd+K for the page it shows.
+    const surface = document.createElement('div');
+    surface.setAttribute('data-keyboard-capture', '');
+    surface.tabIndex = -1;
+    document.body.appendChild(surface);
+    surface.focus();
+    const captured = new KeyboardEvent('keydown', { key: 'k', metaKey: true, bubbles: true, cancelable: true });
+    await interact(() => surface.dispatchEvent(captured));
+    expect(captured.defaultPrevented).toBe(false);
+    expect(search.getAttribute('aria-expanded')).toBe('false');
+    surface.remove();
+
     rename.remove();
     dialog.remove();
     await view.unmount();

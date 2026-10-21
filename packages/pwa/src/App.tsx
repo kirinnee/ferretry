@@ -140,6 +140,7 @@ import { type DaemonConnection, type DaemonId, daemonCarriers } from './lib/daem
 import { daemonSessionKey, daemonSessionScope } from './lib/daemon-scope.ts';
 import { projectKeyFor } from './lib/fleet-grouping.ts';
 import { installBanner } from './lib/install-prompt.ts';
+import { isKeyboardCaptured } from './lib/keyboard-capture.ts';
 import { placeLedgerRows } from './lib/ledger-placement.ts';
 import { createLiveActivityHub } from './lib/live-activity-feed.ts';
 import { moveMachine } from './lib/machine-order.ts';
@@ -2164,6 +2165,7 @@ export function AppShell() {
       if (event.key !== 'k' && event.key !== 'K') return;
       if (event.shiftKey || event.altKey || (!event.metaKey && !event.ctrlKey)) return;
       const sessionScoped = barSessionSearch;
+      if (isKeyboardCaptured(event.target)) return;
       if (isModalShortcutTarget(event.target)) return;
       if (isTextEntryTarget(event.target) && (!sessionScoped || !isSessionSearchShortcutTarget(event.target))) return;
       event.preventDefault();

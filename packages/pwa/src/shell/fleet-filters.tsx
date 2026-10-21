@@ -24,6 +24,7 @@ import { Radio, Search, X } from 'lucide-react';
 import { useEffect, useRef } from 'react';
 import type { ModeFilter } from '../lib/controls.ts';
 import type { ModeCounts } from '../lib/fleet-grouping.ts';
+import { isKeyboardCaptured } from '../lib/keyboard-capture.ts';
 import { MODE_HINT } from './mode-badge.tsx';
 
 /** The segment order, which is also the cycle order the rail's one button uses. */
@@ -132,6 +133,7 @@ export function FleetFilters({
       if (event.key !== '/' || event.metaKey || event.ctrlKey || event.altKey) return;
       const target = event.target as HTMLElement | null;
       if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) return;
+      if (isKeyboardCaptured(target)) return;
       event.preventDefault();
       inputRef.current?.focus();
     };
