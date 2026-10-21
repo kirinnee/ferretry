@@ -95,7 +95,7 @@ export async function parseInSlices(
     parsedRecords += parsed.parsedRecords;
     ignoredRecords += parsed.ignoredRecords;
     remainder = parsed.remainder;
-    for (const byte of slice) if (byte === 0x0a) line += 1;
+    line += countLines(slice);
     byteOffset += slice.byteLength;
     from = to;
     if (!last && performance.now() - sliceStartedAt >= PARSE_BUDGET_MS) {
@@ -426,24 +426,25 @@ function createWakeController(): WakeController {
   };
 }
 
+/**
+ * How many record terminators `bytes` holds.
+ *
+ * By `indexOf`, which the runtime answers with a native scan, rather than by iterating the bytes: the
+ * iterator cost about 30 ms a megabyte, and a bounded read counts up to 32 MiB of them, so counting
+ * lines alone held the event loop longer than parsing the records did.
+ */
 function countLines(bytes: Uint8Array): number {
   let lines = 0;
-  for (const byte of bytes) if (byte === 0x0a) lines += 1;
+  for (let at = bytes.indexOf(0x0a); at >= 0; at = bytes.indexOf(0x0a, at + 1)) lines += 1;
   return lines;
 }
 
 function lastNewline(bytes: Uint8Array): number {
-  for (let index = bytes.byteLength - 1; index >= 0; index -= 1) {
-    if (bytes[index] === 0x0a) return index;
-  }
-  return -1;
+  return bytes.lastIndexOf(0x0a);
 }
 
 function firstNewline(bytes: Uint8Array): number {
-  for (let index = 0; index < bytes.byteLength; index += 1) {
-    if (bytes[index] === 0x0a) return index;
-  }
-  return -1;
+  return bytes.indexOf(0x0a);
 }
 
 function bytesEqual(left: Uint8Array, right: Uint8Array): boolean {

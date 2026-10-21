@@ -414,6 +414,13 @@ leave edge cases to the tiers below.
 **No load or performance tier.** Throughput and latency testing belongs with the daemon
 (`fyd`), which is also a placeholder today.
 
+**One budget lives in the integration tier instead.** `packages/daemon/tests/integration/runtime/boot-stalls.test.ts`
+boots a real `fyd` over a fleet built at the size of the one that stalled in production
+(`tests/integration/support/scaled-fleet.ts`: 36 sessions, three 200 MB transcripts, 2,000 Codex
+rollouts) and fails if the event loop is ever blocked for more than 200 ms. A failure carries the
+stacks the runtime sampled during the block. It is an integration test because it asserts a property
+of the composed daemon, not throughput; it is not the start of a performance tier.
+
 Do not add a tier speculatively. A tier that exists but is empty is worse than no tier: it
 implies coverage that is not there.
 

@@ -492,3 +492,20 @@ export function foldAnalyticsSessionActivity(evidence: AnalyticsTranscriptEviden
   if (turns === 0) return UNKNOWN_ACTIVITY;
   return { activeDurationMs: timed ? active : null, turns };
 }
+
+/** Everything ingestion keeps from one transcript: its token total (or refusal) and its activity. */
+export interface AnalyticsTranscriptFold {
+  readonly usage: AnalyticsSessionUsageFold;
+  readonly activity: AnalyticsSessionActivity;
+}
+
+/**
+ * Folds a transcript read into what ingestion stores — the ONE fold, whether it runs on the event loop
+ * or in a worker thread, so where it runs can never change what it concludes.
+ */
+export function foldAnalyticsTranscript(
+  evidence: AnalyticsTranscriptEvidence,
+  aliasGroups: readonly AnalyticsModelAliasGroup[] = [],
+): AnalyticsTranscriptFold {
+  return { usage: foldAnalyticsSessionUsage(evidence, aliasGroups), activity: foldAnalyticsSessionActivity(evidence) };
+}
