@@ -361,6 +361,52 @@ describe('TerminalStreamBridge', () => {
     should(service.depths).deepEqual([TERMINAL_REATTACH_LINES, TERMINAL_REATTACH_LINES, TERMINAL_POLL_HISTORY_LINES]);
   });
 
+  it('should keep sending deltas when a viewer repeats the size it already has, and redraw only when it changes', async () => {
+    // A resize control used to forget the picture the viewer holds even when it named the size the
+    // viewer already was, so a client re-sending its size turned every following poll into a complete
+    // redraw of up to the byte budget. Only a size that CHANGED reflows the emulator.
+    // Arrange
+    const service = new FakeService();
+    const scheduler = new FakeScheduler();
+    const sent: Uint8Array[] = [];
+    const bridge = new TerminalStreamBridge(
+      service,
+      'session-a',
+      '0123456789ab',
+      { send: bytes => sent.push(bytes), close: () => undefined, bufferedBytes: () => 0 },
+      scheduler,
+    );
+    const poll = async (): Promise<void> => {
+      scheduler.callback?.();
+      await Bun.sleep(1);
+    };
+
+    // Act — the viewer reports its size and receives that redraw, then reports the SAME size again and
+    // one character is typed.
+    await bridge.open();
+    bridge.fromClient(JSON.stringify({ type: 'resize', cols: 100, rows: 5 }));
+    await Bun.sleep(1);
+    await poll();
+    bridge.fromClient(JSON.stringify({ type: 'resize', cols: 100, rows: 5 }));
+    await Bun.sleep(1);
+    service.screen = pane(['$ a', '', '', '', ''], 3);
+    await poll();
+    const beforeChange = text(sent);
+    bridge.fromClient(JSON.stringify({ type: 'resize', cols: 90, rows: 5 }));
+    await Bun.sleep(1);
+    await poll();
+
+    // Assert — attach and the first resize are complete redraws; the repeat leaves the next poll a one-row
+    // delta; a changed size is complete again.
+    should(beforeChange).deepEqual([PROMPT_REDRAW, PROMPT_REDRAW, `${ESC}[1;1H${ESC}[0m${ESC}[2K$ a${ESC}[1;4H`]);
+    should(sent).have.length(4);
+    should(service.calls.filter(call => call.startsWith('resize:'))).deepEqual([
+      'resize:100x5',
+      'resize:100x5',
+      'resize:90x5',
+    ]);
+  });
+
   it('should read the whole history again when a poll finds the viewer needs a complete redraw', async () => {
     // A delta needs a window of history; a complete redraw is worth all of it. A viewer that never said
     // its size can only be sent complete redraws, so its poll's window is followed by a full capture.

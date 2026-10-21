@@ -1907,12 +1907,18 @@ printed with every result.
 - **Only the change is sent.** Against the last frame the stream ACCEPTED, the daemon sends the rows
   that changed — a typed character repaints one row, about 45 bytes — or, when output scrolled, the
   newly scrolled lines followed by the screen. A complete redraw is sent only when there is nothing to
-  be a delta against: a fresh attach, a dropped frame, a resize, a viewer whose emulator is not the
+  be a delta against: a fresh attach, a dropped frame, a resize to a size the viewer did not already
+  have (a repeat of its current size leaves the picture it holds), a viewer whose emulator is not the
   pane's size (another viewer resized it), or a history that was cleared or rewritten rather than
   grown. Each row tmux captures sets its own colours and resets them at its end, which is what makes
   repainting one row alone correct. A delta's newly scrolled lines are trimmed to the record budget
   from the oldest, so the visible screen is always right and only the viewer's scrollback can show a
   gap where a burst of output scrolled further than one record holds.
+- **A client holds a stream only while it is looking.** The PWA attaches a terminal only for the
+  workspace tab on screen and only while the page is visible, and detaches (an explicit `stream-close`)
+  otherwise; the remote-browser display does the same on page visibility. Scrollback stays in the
+  emulator, and showing the tab again pays one complete redraw. A client also sends a resize only for a
+  pane it can measure and never repeats the size it last sent on that stream.
 
 **The rendezvous does not hold a frame behind a write** (§9, "Forwarding does not wait for the write").
 

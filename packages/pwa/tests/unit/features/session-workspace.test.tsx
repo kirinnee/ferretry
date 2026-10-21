@@ -239,7 +239,9 @@ describe('SessionWorkspace on a desktop', () => {
       await settle();
       // The terminal and the browser stay mounted behind the selected Files tab, as live bodies do.
       const terminal = page.root.findByType(SessionTerminalDeck);
-      expect(terminal.props).toMatchObject({ focusTerminalId: TERMINAL, solo: true });
+      // Not the selected tab, so it is told it is not on screen and holds no stream.
+      expect(terminal.props).toMatchObject({ focusTerminalId: TERMINAL, solo: true, active: false });
+      expect(deck.sockets).toHaveLength(0);
       expect(page.root.findByType(UnifiedBrowserSurface).props).toMatchObject({ isActive: false });
       const picker = page.root.findByType(FilesTab);
       expect(picker.props.cwd).toBe('/work/shared');
@@ -262,6 +264,11 @@ describe('SessionWorkspace on a desktop', () => {
       // The browser body is told when it is the one on screen.
       run(() => captured.workspace.openSurface('browser', 'b1'));
       expect(page.root.findByType(UnifiedBrowserSurface).props.isActive).toBe(true);
+      run(() => captured.workspace.openSurface('terminal', TERMINAL));
+      await settle();
+      expect(page.root.findByType(SessionTerminalDeck).props.active).toBe(true);
+      expect(deck.sockets).toHaveLength(1);
+      run(() => captured.workspace.openSurface('browser', 'b1'));
       run(() => page.root.findByType(UnifiedBrowserSurface).props.onClose());
     } finally {
       run(() => page.unmount());

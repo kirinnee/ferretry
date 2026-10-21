@@ -54,6 +54,7 @@ import {
   useRef,
   useState,
 } from 'react';
+import { useDocumentVisible } from '../hooks/use-document-visible.ts';
 import type { DaemonConnection } from '../lib/daemon-connection.ts';
 import type { DaemonSessionScope } from '../lib/daemon-scope.ts';
 import { grantRefusalNotice } from '../lib/grants.ts';
@@ -187,6 +188,12 @@ export interface SessionTerminalDeckProps {
    * strip. A shell missing from the daemon's listing says so instead of showing another one.
    */
   readonly solo?: boolean;
+  /**
+   * Is this deck on screen? A retained workspace tab that is not the selected one is mounted but unseen,
+   * and a stream it holds is metered on a relay for output nobody reads. Off, the deck detaches every
+   * stream and keeps each pane's scrollback; on, it reattaches. Defaults to on.
+   */
+  readonly active?: boolean;
   /** Rewrites what the reader typed before it is sent: the phone key bar's sticky ctrl. */
   readonly interceptInput?: (data: string) => string;
   /** Hands the host a way to type into, and focus, the shell on screen — the phone key bar. */
@@ -250,6 +257,31 @@ function bytesFromBinaryString(value: string): Uint8Array<ArrayBuffer> {
   return bytes;
 }
 
+interface SentResize {
+  readonly stream: TerminalStream;
+  readonly frame: string;
+}
+
+/**
+ * Tells a stream its pane's size, unless it was last told exactly that.
+ *
+ * A resize is one complete control frame and is never split: half a message is corruption. Repeating
+ * a size changes nothing for the daemon and is a metered record on a relay, and the observer and the
+ * stream's own open both report it. The last size is remembered per stream, so a new stream is told.
+ */
+const sendResize = (
+  last: { current: SentResize | null },
+  stream: TerminalStream | null,
+  cols: number,
+  rows: number,
+): void => {
+  if (stream === null) return;
+  const frame = terminalResizeFrame(cols, rows);
+  if (last.current?.stream === stream && last.current.frame === frame) return;
+  last.current = { stream, frame };
+  stream.control(frame);
+};
+
 interface TerminalCanvasProps {
   readonly connection: DaemonConnection;
   readonly scope: DaemonSessionScope;
@@ -299,6 +331,7 @@ function TerminalCanvas({
   const [readyVersion, setReadyVersion] = useState(0);
   const [reopenVersion, setReopenVersion] = useState(0);
   const attemptRef = useRef(0);
+  const lastResizeRef = useRef<SentResize | null>(null);
 
   useEffect(() => {
     const host = hostRef.current;
@@ -364,8 +397,7 @@ function TerminalCanvas({
           } catch {
             return;
           }
-          // A resize is one complete control frame and is never split: half a message is corruption.
-          streamRef.current?.control(terminalResizeFrame(xterm.cols, xterm.rows));
+          sendResize(lastResizeRef, streamRef.current, xterm.cols, xterm.rows);
         };
         if (typeof ResizeObserver !== 'undefined') {
           observer = new ResizeObserver(() => fitAndResize());
@@ -454,9 +486,11 @@ function TerminalCanvas({
           onLinkRef.current('live');
           globalThis.requestAnimationFrame(() => {
             if (disposed || stream === null) return;
+            // An unmeasurable host reports 80x24, which would resize the shell under every other viewer.
+            if (hostRef.current === null || hostRef.current.clientWidth < 1 || hostRef.current.clientHeight < 1) return;
             try {
               fit.fit();
-              stream.control(terminalResizeFrame(xterm.cols, xterm.rows));
+              sendResize(lastResizeRef, stream, xterm.cols, xterm.rows);
             } catch {
               // A zero-sized retained pane is fitted by ResizeObserver later.
             }
@@ -541,9 +575,12 @@ export function SessionTerminalDeck({
   dependencies,
   focusTerminalId,
   solo = false,
+  active: onScreen = true,
   interceptInput = passInput,
   onInputPort,
 }: SessionTerminalDeckProps) {
+  // Not on screen is not attached: a hidden tab or a backgrounded page holds no stream.
+  const streaming = useDocumentVisible() && onScreen;
   const [list, setList] = useState<TerminalListView | null>(null);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [link, setLink] = useState<Record<string, TerminalLinkState>>({});
@@ -894,7 +931,7 @@ export function SessionTerminalDeck({
                 role="tabpanel"
               >
                 <TerminalCanvas
-                  active={terminal.id === activeId}
+                  active={streaming && terminal.id === activeId}
                   connection={connection}
                   dependencies={dependencies}
                   interceptInput={interceptInput}

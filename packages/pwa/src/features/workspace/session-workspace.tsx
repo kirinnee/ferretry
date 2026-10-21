@@ -304,6 +304,7 @@ export function SessionWorkspace({
             <div className="fy-ws-marker-row">{marker(tab, true)}</div>
           ) : null}
           <SessionTerminalDeck
+            active={options.active}
             connection={connection}
             dependencies={deck}
             focusTerminalId={tab.key}
