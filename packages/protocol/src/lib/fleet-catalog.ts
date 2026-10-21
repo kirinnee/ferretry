@@ -32,6 +32,7 @@
  * Every object is strict, so a field the daemon grew without adding it here fails the response.
  */
 import { z } from 'zod';
+import { BrowserModeSchema } from './browser.ts';
 import { InstantSchema, NonEmptyStringSchema, NonNegativeIntegerSchema } from './common.ts';
 import {
   FleetApplyOutcomeSchema,
@@ -157,6 +158,12 @@ export const FleetMachineViewSchema = z.strictObject({
    */
   defaultRuntime: NonEmptyStringSchema.nullable(),
   agentControl: FleetAgentControlSchema,
+  /**
+   * "Browser mode": how this machine runs its agent browser — `headless`, or a real `window` an owner
+   * browses through themselves (docs/browser-mode.md). Optional only so a newer app can read an older
+   * daemon, which has no such setting and runs headless.
+   */
+  browserMode: BrowserModeSchema.optional(),
   tools: z.array(FleetMachineToolSchema).readonly(),
   runtimeCount: NonNegativeIntegerSchema,
   runningSessions: NonNegativeIntegerSchema,
@@ -689,6 +696,8 @@ export const FleetAccountChangeSchema = z.discriminatedUnion('kind', [
     defaultRuntime: NonEmptyStringSchema.nullable(),
     /** `ferretrySettings` may be left out by a client that predates it, and is then left as it is. */
     agentControl: FleetAgentControlSchema.extend({ ferretrySettings: z.boolean().optional() }),
+    /** Left out by a client that predates it, and then left as it is. */
+    browserMode: BrowserModeSchema.optional(),
   }),
   z.strictObject({
     kind: z.literal('setup.import'),

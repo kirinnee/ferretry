@@ -39,6 +39,7 @@ import {
   type RemoteViewportMode,
   remoteViewportForContainer,
 } from '../../lib/remote-browser.ts';
+import { BrowserChallengeBanner, shownChallenge } from './browser-challenge-banner.tsx';
 import {
   type RemoteBrowserConnection,
   RemoteBrowserControls,
@@ -229,6 +230,7 @@ export function RemoteBrowserPane({
 
   const connection = displayConnection(displayState);
   const page = remoteBrowserPage(status);
+  const challenge = shownChallenge(status);
   const running = status?.state === 'running';
   const connected = connection === 'connected';
   const loading = page?.pageState === 'loading';
@@ -396,6 +398,7 @@ export function RemoteBrowserPane({
           />
         }
       />
+      {challenge !== null && <BrowserChallengeBanner challenge={challenge} />}
       {page?.pageError !== undefined && (
         <div role="alert" className="shrink-0 border-b border-err/30 bg-err-bg px-3 py-2 text-meta text-err">
           {page.pageError}

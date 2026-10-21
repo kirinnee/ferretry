@@ -24,6 +24,7 @@ describe('configJsonSchema', () => {
       'advanced',
       'agentControl',
       'agentPermissions',
+      'browserMode',
       'defaultRuntime',
     ]);
     should(Object.keys(actual.properties.agentControl?.properties ?? {})).containEql('ferretrySettings');

@@ -164,6 +164,8 @@ export interface XvfbDisplayOptions extends BrowserLoginTiming {
   readonly executable: () => string | undefined;
   readonly screen?: BrowserViewport;
   readonly spawn?: (argv: readonly string[]) => XvfbChild;
+  /** The refusal on a host with no Xvfb, when this display serves something other than the login window. */
+  readonly missing?: () => string;
 }
 
 /**
@@ -229,7 +231,8 @@ export class XvfbDisplay implements BrowserDisplayPort {
     if (executable === undefined) {
       throw new BrowserControlError(
         'launch_failed',
-        'Xvfb was not found on this host; the login window renders on a private X display rather than the operator’s own',
+        this.options.missing?.() ??
+          'Xvfb was not found on this host; the login window renders on a private X display rather than the operator’s own',
       );
     }
     const screen = this.options.screen ?? { width: BROWSER_MAX_WIDTH, height: BROWSER_MAX_HEIGHT };

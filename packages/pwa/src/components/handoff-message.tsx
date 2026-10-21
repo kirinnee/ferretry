@@ -16,7 +16,7 @@
  * the session live. Outside a session there is no source, and the row degrades to the faded pointer.
  */
 
-import type { HandoffPointer, SessionHandoff } from '@ferretry/protocol';
+import type { DeliveredAttachment, HandoffPointer, SessionHandoff } from '@ferretry/protocol';
 import { FileText, Info } from 'lucide-react';
 import { createContext, type ReactNode, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import type { StoredTranscriptAttachment } from '../lib/attachments.ts';
@@ -84,21 +84,34 @@ export type HandoffReading =
   | { readonly state: 'read'; readonly handoff: SessionHandoff }
   | { readonly state: 'gone' };
 
-function useHandoff(reader: HandoffReader | null, name: string): HandoffReading {
-  const [reading, setReading] = useState<HandoffReading>(reader === null ? { state: 'gone' } : { state: 'reading' });
+const GONE: HandoffReading = { state: 'gone' };
+const READING: HandoffReading = { state: 'reading' };
+
+/**
+ * The reading of ONE named document, held against the reader and the name it was read for. A row that
+ * starts reading a document later — the reader's own message the moment it lands as a hand-off — is
+ * therefore `reading` from its first render, never a frame of a previous answer or of `gone`.
+ * No name reads nothing.
+ */
+function useHandoff(reader: HandoffReader | null, name: string | undefined): HandoffReading {
+  const [held, setHeld] = useState<{
+    readonly reader: HandoffReader;
+    readonly name: string;
+    readonly reading: HandoffReading;
+  } | null>(null);
   useEffect(() => {
-    if (reader === null) return;
+    if (reader === null || name === undefined) return;
     let live = true;
-    setReading({ state: 'reading' });
     reader.read(name).then(
-      handoff => live && setReading({ state: 'read', handoff }),
-      () => live && setReading({ state: 'gone' }),
+      handoff => live && setHeld({ reader, name, reading: { state: 'read', handoff } }),
+      () => live && setHeld({ reader, name, reading: GONE }),
     );
     return () => {
       live = false;
     };
   }, [reader, name]);
-  return reading;
+  if (reader === null) return GONE;
+  return held !== null && held.reader === reader && held.name === name ? held.reading : READING;
 }
 
 /**
@@ -106,7 +119,7 @@ function useHandoff(reader: HandoffReader | null, name: string): HandoffReading 
  * what the document holds — a ferret's message carries its banner — so the read is lifted out of the
  * renderer and handed to whichever row that turns out to be.
  */
-export function useHandoffReading(name: string): {
+export function useHandoffReading(name: string | undefined): {
   readonly reading: HandoffReading;
   readonly source: HandoffSource | null;
 } {
@@ -115,23 +128,39 @@ export function useHandoffReading(name: string): {
   return { reading, source: reader === null ? null : reader.source };
 }
 
+/**
+ * What the reader's own send put in its document, known before the document is read: the send IS the
+ * document's message. Drawn while the document is being read so a message handed over through a file
+ * reads the same from the moment it is sent, instead of flashing an "Opening…" line as it lands.
+ */
+export interface HandoffDraft {
+  readonly message: string;
+  readonly files: readonly DeliveredAttachment[];
+}
+
 /** A hand-off as its reading stands: the message, an "Opening…" line, or the faded pointer. */
 export function HandoffView({
   pointer,
   pointerText,
   reading,
   source,
+  draft,
 }: {
-  readonly pointer: HandoffPointer;
+  /** Absent for a send not handed over yet: there is no pointer, only the message on its way. */
+  readonly pointer?: HandoffPointer | undefined;
   /** The line the agent was typed, shown faded only when the document cannot be read. */
   readonly pointerText: string;
   readonly reading: HandoffReading;
   readonly source: HandoffSource | null;
+  /** The message as its send knows it, drawn until the document has been read. */
+  readonly draft?: HandoffDraft | undefined;
 }) {
   return (
-    <div className="fy-handoff" data-handoff={pointer.name} data-handoff-state={reading.state}>
+    <div className="fy-handoff" data-handoff={pointer?.name} data-handoff-state={reading.state}>
       {reading.state === 'read' && source !== null ? (
         <HandoffBody handoff={reading.handoff} source={source} />
+      ) : reading.state === 'reading' && draft !== undefined ? (
+        <HandoffDraftBody draft={draft} />
       ) : reading.state === 'reading' ? (
         <p aria-busy="true" className="fy-handoff-pending">
           Opening the message…
@@ -175,6 +204,32 @@ export function HandoffBody({ handoff, source }: { readonly handoff: SessionHand
               <span>{file.filename}</span>
             </li>
           ))}
+        </ul>
+      )}
+    </>
+  );
+}
+
+/**
+ * The send's own copy of the message, drawn exactly as `HandoffBody` draws the document: the same
+ * Markdown, and each file it names as a chip. A file the daemon can serve becomes a thumbnail once the
+ * document is read; until then its name is all this browser knows.
+ */
+function HandoffDraftBody({ draft }: { readonly draft: HandoffDraft }) {
+  return (
+    <>
+      {draft.message.trim() === '' ? null : <Markdown className="fy-handoff-text" text={draft.message} />}
+      {draft.files.length === 0 ? null : (
+        <ul className="fy-handoff-chips">
+          {draft.files.map(file => {
+            const filename = file.path.split(/[\\/]/u).at(-1) || file.path;
+            return (
+              <li className="fy-handoff-chip" key={`${file.path}\u0000${file.mime}`} title={file.mime}>
+                <FileText aria-hidden="true" size={14} />
+                <span>{filename}</span>
+              </li>
+            );
+          })}
         </ul>
       )}
     </>
