@@ -451,6 +451,17 @@ quarantine flag for you; after any other install, clear it once:
 xattr -d com.apple.quarantine "$(command -v fy)"
 ```
 
+`fy attach` refuses with "the live pane no longer matches the daemon attach proof": the message lists
+which check failed (tmux session, pane id, pid, or process start identity). If the session is running
+and you just need its terminal, attach to the daemon's private tmux server yourself. Its socket is
+`tmux.sock` in the state home and the tmux session is `fy-` followed by the session id:
+
+```bash
+tmux -S "${FY_HOME:-$HOME/.ferretry}/tmux.sock" attach -t fy-<session-id>
+```
+
+Detach with `Ctrl-b d`, which leaves the agent running.
+
 Start over completely. This removes ALL of Ferretry's data on this machine — configuration, sessions
 and transcripts, stored secrets and paired devices — after listing what will go and asking first:
 

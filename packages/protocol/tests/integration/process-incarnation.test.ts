@@ -4,13 +4,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import should from 'should';
 import {
-  PsProcessIncarnation,
   ProcStatProcessIncarnation,
+  PsProcessIncarnation,
   processIncarnationFor,
-  procStatStartTicks,
-  psStartSeconds,
   UnsupportedProcessIncarnation,
-} from '../../../../src/adapters/index.ts';
+} from '../../src/adapters/process-incarnation.ts';
 
 const cleanups = new Set<string>();
 
@@ -44,19 +42,6 @@ function stat(command: string, startTicks: string): string {
   return `4242 (${command}) ${after.join(' ')}\n`;
 }
 
-describe('procStatStartTicks', () => {
-  it('reads field 22 even when the command name holds spaces and parentheses', () => {
-    should(procStatStartTicks(stat('a (b) c', '987654'))).equal(987654);
-  });
-
-  it('refuses text with no command name, too few fields, or a non-positive start', () => {
-    should(procStatStartTicks('no parenthesis here')).be.undefined();
-    should(procStatStartTicks('4242 (sh) S 1 2')).be.undefined();
-    should(procStatStartTicks(stat('sh', '0'))).be.undefined();
-    should(procStatStartTicks(stat('sh', 'x'))).be.undefined();
-  });
-});
-
 describe('ProcStatProcessIncarnation', () => {
   it('reads a stat file under the configured root and answers undefined for a pid that has none', async () => {
     const root = await scratch();
@@ -65,20 +50,6 @@ describe('ProcStatProcessIncarnation', () => {
     const incarnation = new ProcStatProcessIncarnation(root);
     should(await incarnation.startOf(77)).equal(31337);
     should(await incarnation.startOf(78)).be.undefined();
-  });
-});
-
-describe('psStartSeconds', () => {
-  it('reads the C-locale lstart text as UTC epoch seconds, including a space-padded day', () => {
-    should(psStartSeconds('Sat Sep 26 18:48:09 2026\n')).equal(Date.UTC(2026, 8, 26, 18, 48, 9) / 1000);
-    should(psStartSeconds('  Sun Sep  6 01:02:03 2026')).equal(Date.UTC(2026, 8, 6, 1, 2, 3) / 1000);
-  });
-
-  it('refuses localised, unknown-month, empty or epoch text', () => {
-    should(psStartSeconds('sam. 26 sept. 18:48:09 2026')).be.undefined();
-    should(psStartSeconds('Sat Xyz 26 18:48:09 2026')).be.undefined();
-    should(psStartSeconds('')).be.undefined();
-    should(psStartSeconds('Thu Jan  1 00:00:00 1970')).be.undefined();
   });
 });
 

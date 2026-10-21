@@ -6,7 +6,8 @@
   "type": "module",
   "exports": {
     ".": "./src/lib/index.ts",
-    "./client": "./src/adapters/fy-api-client.ts"
+    "./client": "./src/adapters/fy-api-client.ts",
+    "./process-incarnation": "./src/adapters/process-incarnation.ts"
   },
   "types": "./src/lib/index.ts",
   "dependencies": {

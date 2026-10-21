@@ -2,6 +2,7 @@ import { afterEach, describe, it } from 'bun:test';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { processIncarnationFor } from '@ferretry/protocol/process-incarnation';
 import should from 'should';
 import {
   BunSqliteIndexFactory,
@@ -24,6 +25,7 @@ import {
   defaultSessionLifecycleSettings,
   parseSessionId,
   type RegisteredTerminalPane,
+  SessionAttachService,
   TerminalReapService,
   TmuxController,
 } from '../../../../src/lib/index.ts';
@@ -194,6 +196,25 @@ describe('durable terminal pane reap adapters', () => {
 
     // Assert -- the forged copy is ignored because its directory does not own its session id.
     should(actual).deepEqual([persisted]);
+  });
+
+  it('should prove an attach target whose start identity is the one the CLI reads back from the live pane', async () => {
+    // Arrange
+    const subject = await fixture();
+    await subject.registrar.register(subject.record);
+    const attach = new SessionAttachService(
+      DAEMON,
+      '/run/user/1000/fy/tmux.sock',
+      { list: daemonId => subject.store.registrations(daemonId) },
+      subject.runtime,
+    );
+
+    // Act
+    const target = await attach.resolve(subject.record.config.id);
+
+    // Assert -- `fy attach` re-reads this value through `@ferretry/protocol/process-incarnation`;
+    // if the daemon wrote it any other way, every attach on that platform would be refused.
+    should(target.processStartTicks).equal(await processIncarnationFor().startOf(target.pid));
   });
 
   it('should reap an exact terminal pane after its durable terminal state is recorded', async () => {

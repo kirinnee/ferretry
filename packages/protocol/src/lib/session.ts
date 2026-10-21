@@ -726,7 +726,7 @@ export const SessionAttachTargetSchema = z.strictObject({
   tmuxSession: z.string().min(1),
   paneId: z.string().regex(/^%(?:0|[1-9][0-9]*)$/u),
   pid: PositiveIntegerSchema.refine(value => value > 1, 'the pane pid must be greater than one'),
-  /** Linux `/proc/<pid>/stat` start ticks, which distinguish a reused PID. */
+  /** The pane process's start identity (`ProcessIncarnation`: Linux start ticks, macOS epoch seconds), which distinguishes a reused PID. */
   processStartTicks: PositiveIntegerSchema,
 });
 export type SessionAttachTarget = z.infer<typeof SessionAttachTargetSchema>;

@@ -978,7 +978,9 @@ const DOMAIN_REGISTRARS: ReadonlyArray<(wiring: DomainWiring) => void> = [
         world.io,
         new SystemPollClock(),
         new FileMarkerProbe(world.cwd),
-        new ExactTmuxAttacher(new BunTmuxAttachProcess(), world.environment),
+        new ExactTmuxAttacher(new BunTmuxAttachProcess(), world.environment, message =>
+          world.io.diagnostic(`${BINARY_NAME}: ${message}`),
+        ),
         BINARY_NAME,
         // A settled wait hands back the ferret's result and stops one still running (docs/pack-mode.md).
         (() => {

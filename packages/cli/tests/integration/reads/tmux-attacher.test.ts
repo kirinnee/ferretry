@@ -3,12 +3,13 @@ import { chmod, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { SessionAttachTarget } from '@ferretry/protocol';
+import { processIncarnationFor } from '@ferretry/protocol/process-incarnation';
 import should from 'should';
 import {
   BunTmuxAttachProcess,
   currentTmuxSocket,
   ExactTmuxAttacher,
-  parseProcessStartTicks,
+  type ProcessStart,
   type TmuxAttachCommandResult,
   type TmuxAttachProcess,
 } from '../../../src/adapters/reads/tmux-attacher.ts';
@@ -18,7 +19,7 @@ import {
  *
  * Everything here is about what it REFUSES. The daemon's proof is a claim about an incarnation that
  * may already be gone by the time the client acts on it, so the adapter re-observes the pane and
- * compares the whole identity — session, pane, pid and process start ticks — before it does anything
+ * compares the whole identity — session, pane, pid and process start identity — before it does anything
  * irreversible. A mismatch on any one of them means the name now addresses somebody else's terminal.
  */
 
@@ -59,7 +60,7 @@ const interactArgv = (action: string): string[] => [
 interface TmuxScript {
   readonly tmux?: string | undefined;
   readonly inspect?: Partial<TmuxAttachCommandResult>;
-  readonly ticks?: number | undefined;
+  readonly start?: ProcessStart;
   readonly code?: number;
 }
 
@@ -67,7 +68,7 @@ interface TmuxScript {
 class ScriptedTmuxProcess implements TmuxAttachProcess {
   readonly inspected: string[][] = [];
   readonly interacted: string[][] = [];
-  readonly ticksAsked: number[] = [];
+  readonly startsAsked: number[] = [];
 
   constructor(private readonly script: TmuxScript = {}) {}
 
@@ -85,15 +86,16 @@ class ScriptedTmuxProcess implements TmuxAttachProcess {
     return this.script.code ?? 0;
   }
 
-  async processStartTicks(pid: number): Promise<number | undefined> {
-    this.ticksAsked.push(pid);
-    return 'ticks' in this.script ? this.script.ticks : TARGET.processStartTicks;
+  async processStart(pid: number): Promise<ProcessStart> {
+    this.startsAsked.push(pid);
+    return this.script.start ?? { kind: 'known', value: TARGET.processStartTicks };
   }
 }
 
 const attaching = (script: TmuxScript = {}, environment: Record<string, string | undefined> = {}) => {
   const host = new ScriptedTmuxProcess(script);
-  return { host, subject: new ExactTmuxAttacher(host, environment) };
+  const notices: string[] = [];
+  return { host, notices, subject: new ExactTmuxAttacher(host, environment, message => notices.push(message)) };
 };
 
 const refusal = async (
@@ -107,33 +109,6 @@ const refusal = async (
   );
   return { error, host };
 };
-
-describe('reading a process start time out of procfs', () => {
-  const statLine = (startTicks: number, comm = 'bash'): string =>
-    `1234 (${comm}) S ${Array.from({ length: 18 }, (_, index) => index).join(' ')} ${startTicks} 0 0`;
-
-  it('should read the start ticks past a command name that contains its own parentheses', () => {
-    // Arrange — a process may rename itself to anything, including text with spaces and brackets.
-    const plain = statLine(555_111);
-    const awkward = statLine(555_111, 'my (weird) name');
-
-    // Act + Assert — parsing from the LAST bracket is what keeps the field offsets true.
-    should(parseProcessStartTicks(plain)).equal(555_111);
-    should(parseProcessStartTicks(awkward)).equal(555_111);
-  });
-
-  it('should report nothing rather than a wrong number for unusable stat text', () => {
-    // Arrange
-    const truncated = '1234 (bash) S 0 1 2';
-    const unparseable = `1234 (bash) S ${Array.from({ length: 18 }, () => 0).join(' ')} not-a-number 0`;
-    const zero = statLine(0);
-
-    // Act + Assert — undefined never matches a recorded tick count, so it always refuses the attach.
-    should(parseProcessStartTicks(truncated)).be.undefined();
-    should(parseProcessStartTicks(unparseable)).be.undefined();
-    should(parseProcessStartTicks(zero)).be.undefined();
-  });
-});
 
 describe('reading the ambient tmux socket', () => {
   it('should take the socket path off a real TMUX record, commas in the path included', () => {
@@ -165,9 +140,22 @@ describe('handing the terminal to a daemon-proved pane', () => {
 
     // Assert — the daemon-supplied socket and pane id are addressed directly; nothing is guessed.
     should(host.inspected).eql([INSPECT_ARGV]);
-    should(host.ticksAsked).eql([TARGET.pid]);
+    should(host.startsAsked).eql([TARGET.pid]);
     should(host.interacted).eql([interactArgv('attach-session')]);
     should(actual).equal(7);
+  });
+
+  it('should attach to the first pane of a fresh tmux server, which is %0', async () => {
+    // Arrange — the daemon's private server numbers its first pane 0, and the wire schema allows it.
+    const first: SessionAttachTarget = { ...TARGET, paneId: '%0' };
+    const host = new ScriptedTmuxProcess({ inspect: { stdout: 'fy-s1\t%0\t4242' } });
+
+    // Act
+    const actual = await new ExactTmuxAttacher(host, {}).attach(first);
+
+    // Assert
+    should(actual).equal(0);
+    should(host.interacted).have.length(1);
   });
 
   it('should switch the current client when it already lives on that same tmux server', async () => {
@@ -227,26 +215,95 @@ describe('handing the terminal to a daemon-proved pane', () => {
       should((error as Error).message).equal('tmux no longer reports the pane identity the daemon supplied');
   });
 
-  it('should refuse every way the live pane can differ from the daemon proof', async () => {
-    // Arrange — a reused pane name, a reused pane id, a reused pid, and a reused pid slot.
-    const cases: TmuxScript[] = [
-      { inspect: { stdout: 'fy-other\t%7\t4242' } },
-      { inspect: { stdout: 'fy-s1\t%9\t4242' } },
-      { inspect: { stdout: 'fy-s1\t%7\t9999' }, ticks: TARGET.processStartTicks },
-      { ticks: 111_111 },
-      { ticks: undefined },
+  it('should name the check that failed for every way the live pane can differ from the daemon proof', async () => {
+    // Arrange — a reused pane name, a reused pane id, a reused pid, a reused pid slot, and a dead process.
+    const cases: readonly [TmuxScript, string][] = [
+      [{ inspect: { stdout: 'fy-other\t%7\t4242' } }, 'tmux session is "fy-other", the daemon proved "fy-s1"'],
+      [{ inspect: { stdout: 'fy-s1\t%9\t4242' } }, 'pane id is %9, the daemon proved %7'],
+      [{ inspect: { stdout: 'fy-s1\t%7\t9999' } }, 'pane pid is 9999, the daemon proved 4242'],
+      [{ start: { kind: 'known', value: 111_111 } }, 'process start identity is 111111, the daemon proved 987654'],
+      [{ start: { kind: 'gone' } }, 'pane process 4242 is no longer running'],
     ];
 
     // Act
-    const results = await Promise.all(cases.map(script => refusal(script)));
+    const results = await Promise.all(cases.map(async ([script]) => await refusal(script)));
 
-    // Assert — the start ticks are what distinguish a recycled pid from the original process.
-    for (const { error, host } of results) {
+    // Assert — the start identity is what distinguishes a recycled pid from the original process.
+    results.forEach(({ error, host }, index) => {
       should((error as Error).message).equal(
-        'the live pane no longer matches the daemon attach proof; refusing to attach',
+        `the live pane no longer matches the daemon attach proof (${cases[index]?.[1]}); refusing to attach`,
       );
       should(host.interacted).be.empty();
-    }
+    });
+  });
+
+  it('should not read a process start identity for a pid the daemon did not prove', async () => {
+    // Act
+    const { host } = await refusal({ inspect: { stdout: 'fy-s1\t%7\t9999' } });
+
+    // Assert — another process's start time cannot vouch for this proof.
+    should(host.startsAsked).be.empty();
+  });
+
+  it('should report every failed check at once rather than only the first', async () => {
+    // Act
+    const { error } = await refusal({ inspect: { stdout: 'fy-other\t%9\t4242' }, start: { kind: 'known', value: 1 } });
+
+    // Assert
+    should((error as Error).message).equal(
+      'the live pane no longer matches the daemon attach proof (tmux session is "fy-other", the daemon proved "fy-s1"; pane id is %9, the daemon proved %7; process start identity is 1, the daemon proved 987654); refusing to attach',
+    );
+  });
+
+  it('should attach on session, pane and pid, and say so, when the host has no start identity source', async () => {
+    // Arrange
+    const { host, notices, subject } = attaching({
+      start: { kind: 'unavailable', reason: 'sessions cannot start on freebsd' },
+      code: 3,
+    });
+
+    // Act
+    const actual = await subject.attach(TARGET);
+
+    // Assert — no source is the absence of evidence, not evidence of a recycled pid; the proof is the
+    // daemon's own observation moments ago, and a reader is told which check was skipped.
+    should(actual).equal(3);
+    should(host.interacted).eql([interactArgv('attach-session')]);
+    should(notices).eql([
+      "could not check the pane's process start identity (sessions cannot start on freebsd); attaching on the tmux session, pane id and pid the daemon just proved",
+    ]);
+  });
+
+  it('should attach without a notice sink when the start identity source is unavailable', async () => {
+    // Arrange — a caller that wires no sink still gets the attach; the notice is courtesy, not a gate.
+    const host = new ScriptedTmuxProcess({ start: { kind: 'unavailable', reason: 'no source' } });
+
+    // Act
+    const actual = await new ExactTmuxAttacher(host, {}).attach(TARGET);
+
+    // Assert
+    should(actual).equal(0);
+  });
+
+  it('should still refuse a mismatched pane when the start identity source is unavailable', async () => {
+    // Act
+    const { error, host } = await refusal({
+      inspect: { stdout: 'fy-other\t%7\t4242' },
+      start: { kind: 'unavailable', reason: 'no source' },
+    });
+
+    // Assert — a missing check never widens what the remaining ones accept.
+    should((error as Error).message).startWith('the live pane no longer matches the daemon attach proof (tmux session');
+    should(host.interacted).be.empty();
+  });
+
+  it('should stay silent when every check ran', async () => {
+    // Act
+    const { notices, subject } = attaching();
+    await subject.attach(TARGET);
+
+    // Assert
+    should(notices).be.empty();
   });
 
   it('should refuse to choose a server when the ambient TMUX record is malformed', async () => {
@@ -344,21 +401,115 @@ describe('the real tmux and procfs operations', () => {
     should(await subject.interact(['/bin/sh', '-c', 'exit 5'])).equal(5);
   });
 
-  it('should read this process own start ticks and refuse an unreadable pid', async () => {
+  it('should read this process own start identity through the shared source, and call a missing pid gone', async () => {
     // Arrange
     const subject = new BunTmuxAttachProcess();
 
     // Act
-    const own = await subject.processStartTicks(process.pid);
-    const missing = await subject.processStartTicks(2_147_483_646);
+    const own = await subject.processStart(process.pid);
+    const again = await subject.processStart(process.pid);
+    const missing = await subject.processStart(2_147_483_646);
 
-    // Assert — on a host without procfs there is no evidence, and no evidence must refuse the attach.
-    if (process.platform === 'linux') {
-      should(own).equal(parseProcessStartTicks(await Bun.file(`/proc/${process.pid}/stat`).text()));
-      should(own).be.above(0);
-    } else {
-      should(own).be.undefined();
+    // Assert — the number is the daemon's own: it is read by the module the daemon registers panes with.
+    should(own.kind).equal('known');
+    should(again).eql(own);
+    should(own).eql({ kind: 'known', value: (await processIncarnationFor().startOf(process.pid)) as number });
+    should(missing).eql({ kind: 'gone' });
+  });
+
+  it('should call a platform with no start identity source unavailable and say why', async () => {
+    // Arrange
+    const subject = new BunTmuxAttachProcess(processIncarnationFor('freebsd'));
+
+    // Act
+    const actual = await subject.processStart(process.pid);
+
+    // Assert
+    should(actual.kind).equal('unavailable');
+    should(actual.kind === 'unavailable' && actual.reason).match(/sessions cannot start on freebsd/u);
+  });
+
+  it('should describe a thrown non-error by its text', async () => {
+    // Arrange
+    const subject = new BunTmuxAttachProcess({
+      startOf: async () => {
+        throw 'no source';
+      },
+    });
+
+    // Act + Assert
+    should(await subject.processStart(1)).eql({ kind: 'unavailable', reason: 'no source' });
+  });
+});
+
+describe('attaching to a real tmux pane through the daemon proof', () => {
+  it('should accept the proof the daemon builds from the same start identity, on this kernel', async () => {
+    // Arrange — a private tmux server with one real pane, and the proof exactly as the daemon forms it:
+    // tmux's own pane identity plus the shared start identity of the pane's process.
+    const tmux = Bun.which('tmux');
+    if (tmux === null) throw new Error('tmux is required for the real attach proof');
+    const directory = await mkdtemp(join(tmpdir(), 'fy-attach-'));
+    const socketPath = join(directory, 't.sock');
+    const run = async (...argv: string[]): Promise<string> => {
+      const child = Bun.spawn([tmux, '-S', socketPath, ...argv], { stdout: 'pipe', stderr: 'pipe' });
+      const [code, out, err] = await Promise.all([
+        child.exited,
+        new Response(child.stdout).text(),
+        new Response(child.stderr).text(),
+      ]);
+      if (code !== 0) throw new Error(`tmux ${argv.join(' ')} failed: ${err}`);
+      return out.trim();
+    };
+    try {
+      await run('new-session', '-d', '-s', 'fy-proof', 'sleep 600');
+      const [tmuxSession = '', paneId = '', rawPid = ''] = (
+        await run('display-message', '-p', '-t', 'fy-proof', '#{session_name}\t#{pane_id}\t#{pane_pid}')
+      ).split('\t');
+      const pid = Number(rawPid);
+      const ticks = await processIncarnationFor().startOf(pid);
+      should(ticks).be.a.Number();
+      const target: SessionAttachTarget = {
+        socketPath,
+        tmuxSession,
+        paneId,
+        pid,
+        processStartTicks: ticks as number,
+      };
+      const real = new BunTmuxAttachProcess();
+      const interacted: string[][] = [];
+      const host: TmuxAttachProcess = {
+        executable: () => real.executable(),
+        inspect: async argv => await real.inspect(argv),
+        // An attach needs a terminal; the claim here is that the proof is accepted and the right argv is chosen.
+        interact: async argv => {
+          interacted.push([...argv]);
+          return 0;
+        },
+        processStart: async value => await real.processStart(value),
+      };
+      const notices: string[] = [];
+
+      // Act
+      const accepted = await new ExactTmuxAttacher(host, {}, message => notices.push(message)).attach(target);
+      const refused = await new ExactTmuxAttacher(host, {})
+        .attach({ ...target, processStartTicks: target.processStartTicks + 1 })
+        .then(
+          () => undefined,
+          (thrown: unknown) => thrown as Error,
+        );
+
+      // Assert — before this check read the shared source, a macOS pane could never be attached to.
+      should(accepted).equal(0);
+      should(notices).be.empty();
+      should(interacted).eql([
+        [tmux, '-S', socketPath, 'select-pane', '-t', paneId, ';', 'attach-session', '-t', 'fy-proof'],
+      ]);
+      should(refused?.message).startWith(
+        'the live pane no longer matches the daemon attach proof (process start identity',
+      );
+    } finally {
+      await run('kill-server').catch(() => undefined);
+      await rm(directory, { recursive: true, force: true });
     }
-    should(missing).be.undefined();
   });
 });
