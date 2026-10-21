@@ -262,6 +262,10 @@ describe('durable terminal pane reap adapters', () => {
  * is gone, and the reason must be the exit and what the process printed, not the identity read.
  */
 describe('registering a pane whose harness has already exited', () => {
+  for (let probe = 0; probe < 25; probe++) it(`PROBE repeat ${probe}`, async () => {
+    await fixture(`echo 'x' >&2; exit 2`);
+  });
+
   it('should report the exit status and the last output instead of the identity read', async () => {
     // Arrange
     const subject = await fixture(`echo 'ferretry: DEEPSEEK_TOKEN is not set' >&2; exit 2`);
