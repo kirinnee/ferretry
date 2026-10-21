@@ -10,12 +10,23 @@ import {
   sessionsBarNames,
   sessionsBarSubline,
   sessionsBarView,
+  sidebarCompact,
 } from '../../src/shell/sessions-bar-model.ts';
 import { sessionView } from '../support/sessions.ts';
 
 const NOW = Date.parse('2026-10-16T12:00:00.000Z');
 const ago = (milliseconds: number): string => new Date(NOW - milliseconds).toISOString();
 const DAY = 24 * 60 * 60 * 1000;
+
+describe('how much a row says', () => {
+  test('is one line unless the reader chose Full', () => {
+    expect(sidebarCompact(undefined)).toBe(true);
+    expect(sidebarCompact(null)).toBe(true);
+    expect(sidebarCompact('compact')).toBe(true);
+    expect(sidebarCompact('minimal')).toBe(true);
+    expect(sidebarCompact('full')).toBe(false);
+  });
+});
 
 describe('who needs the reader', () => {
   test('a session parked on a person, by any of the three ways it can say so', () => {

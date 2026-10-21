@@ -30,9 +30,15 @@
 
 import type { SessionView } from '@ferretry/protocol';
 import { displayCallsign } from '../lib/callsign.ts';
-import type { ModeFilter } from '../lib/controls.ts';
+import type { Density, ModeFilter } from '../lib/controls.ts';
 import { type FleetProject, groupByProject, type ModeCounts, type SessionGroup } from '../lib/fleet-grouping.ts';
 import { TERMINAL_STATUSES } from './status-mark.tsx';
+
+/**
+ * Whether the bar draws one-line rows. Compact is the bar's default: only a reader who chose Full (Settings ›
+ * Appearance › Density, or the bar's own options menu) gets the three-line rows; Minimal reads as compact here.
+ */
+export const sidebarCompact = (density: Density | null | undefined): boolean => density !== 'full';
 
 /** The two controls the bar owns: which kind of session, and whether the stopped ones are listed. */
 export interface SessionsListFilter {

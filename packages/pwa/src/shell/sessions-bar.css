@@ -654,19 +654,24 @@
   margin-top: var(--gap-sm);
   border-top: var(--divider-width) solid var(--border);
 }
+/* The machine heading is a quiet section label — one line, a step quieter than a folder label — so a
+   machine costs a row, not a banner. Its grip and "⋯" are not part of that line: see REORDERING. */
 .fy-sbar__machine-head {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 6px;
+  min-height: 28px;
   margin: 0;
-  padding: 10px 8px 2px;
-  color: var(--fg);
+  padding: 4px 8px 0;
+  color: var(--muted);
   font-family: var(--font-display);
-  font-size: var(--text-sm);
+  font-size: var(--text-xs);
   font-weight: var(--weight-strong);
 }
 .fy-sbar__machine-label {
   min-width: 0;
+  color: var(--fg-soft);
 }
 .fy-sbar__machine-reach {
   min-width: 0;
@@ -886,10 +891,137 @@
 .fy-sbar__machine-group[data-drop-edge='after'] {
   box-shadow: inset 0 calc(-1 * var(--stroke-heavy)) 0 var(--accent);
 }
-@media (pointer: coarse) {
-  .fy-sbar__machine-grip,
-  .fy-sbar__machine-more {
-    width: 32px;
-    height: 32px;
+/* On a touch screen there is no hover to wait for: both sit small at the line's end, and a pseudo-element
+   widens each one's hit area to the 44px floor without growing the line. */
+.fy-sbar__machine-head .fy-sbar__machine-grip,
+.fy-sbar__machine-head .fy-sbar__machine-more {
+  position: relative;
+  order: 2;
+  width: 28px;
+  min-height: 0;
+  height: 28px;
+  margin: 0;
+}
+.fy-sbar__machine-head .fy-sbar__machine-grip {
+  margin-left: auto;
+}
+.fy-sbar__machine-head .fy-sbar__machine-grip + .fy-sbar__machine-more {
+  margin-left: 0;
+}
+.fy-sbar__machine-head .fy-sbar__machine-grip::before,
+.fy-sbar__machine-head .fy-sbar__machine-more::before {
+  content: '';
+  position: absolute;
+  inset: -8px -2px;
+}
+.fy-sbar__machine-head .fy-sbar__count {
+  margin-left: auto;
+}
+.fy-sbar__machine-head .fy-sbar__machine-grip ~ .fy-sbar__count {
+  margin-left: 0;
+}
+/* A pointer that hovers: the controls are hidden until the line is hovered or holds focus, then lie
+   over its trailing end (reach words and count) so nothing moves. Opacity, not display, so a keyboard
+   can still reach them. */
+@media (hover: hover) and (pointer: fine) {
+  .fy-sbar__machine-head .fy-sbar__machine-grip,
+  .fy-sbar__machine-head .fy-sbar__machine-more {
+    position: absolute;
+    top: calc(50% + 2px);
+    translate: 0 -50%;
+    height: 22px;
+    background: var(--surface);
+    opacity: 0;
+    transition: opacity 100ms ease;
   }
+  .fy-sbar__machine-head .fy-sbar__machine-grip {
+    right: 32px;
+    margin-left: 0;
+  }
+  .fy-sbar__machine-head .fy-sbar__machine-more {
+    right: 6px;
+  }
+  .fy-sbar__machine-head .fy-sbar__machine-grip::before,
+  .fy-sbar__machine-head .fy-sbar__machine-more::before {
+    content: none;
+  }
+  .fy-sbar__machine-head:hover .fy-sbar__machine-grip,
+  .fy-sbar__machine-head:hover .fy-sbar__machine-more,
+  .fy-sbar__machine-head:focus-within .fy-sbar__machine-grip,
+  .fy-sbar__machine-head:focus-within .fy-sbar__machine-more,
+  .fy-sbar__machine-group[data-dragging] .fy-sbar__machine-grip {
+    opacity: 1;
+  }
+  .fy-sbar__machine-head .fy-sbar__machine-grip:hover,
+  .fy-sbar__machine-head .fy-sbar__machine-more:hover {
+    box-shadow: inset 0 0 0 99px var(--nav-hover, var(--surface-2));
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .fy-sbar__machine-head .fy-sbar__machine-grip,
+  .fy-sbar__machine-head .fy-sbar__machine-more {
+    transition: none;
+  }
+}
+
+/* ── COMPACT ROWS ────────────────────────────────────────────────────────────────────────────────
+   The sidebar's default. A session is one ~32px line — status, title, the marks, the needs-you
+   badge. The ferret and the directory (and a pending question) stay in the DOM, clipped for assistive
+   tech and carried in the row's tooltip and long-press menu, and open out into a second line only on
+   the selected row. Comfortable draws the full two-to-three lines. The drawer keeps its touch floor. */
+.fy-sbar__detail {
+  display: contents;
+}
+[data-sbar-density='compact'] .fy-sbar__session {
+  position: relative;
+  min-height: 32px;
+  padding-block: 3px;
+}
+
+[data-sbar-density='compact'].fy-sbar--drawer .fy-sbar__session {
+  min-height: max(36px, var(--target-floor));
+}
+[data-sbar-density='compact'] .fy-sbar__detail {
+  display: flex;
+  grid-column: 2 / 4;
+  gap: 8px;
+  align-items: center;
+  min-width: 0;
+}
+[data-sbar-density='compact'] .fy-sbar__detail .fy-sbar__ferret {
+  flex: 0 1 auto;
+  max-width: 50%;
+}
+[data-sbar-density='compact'] .fy-sbar__detail .fy-sbar__dir {
+  flex: 1 1 0;
+}
+[data-sbar-density='compact'] .fy-sbar__session:not([aria-current='page']) .fy-sbar__detail,
+[data-sbar-density='compact'] .fy-sbar__session:not([aria-current='page']) .fy-sbar__question {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+[data-sbar-density='compact'] .fy-sbar__project {
+  padding: 6px 8px 1px;
+  line-height: 1.2;
+}
+[data-sbar-density='compact'] .fy-sbar__list .fy-sbar__children {
+  margin: 0 0 1px 10px;
+  padding-left: 4px;
+}
+[data-sbar-density='compact'] .fy-sbar__list .fy-sbar__children .fy-sbar__children .fy-sbar__children {
+  margin-left: 0;
+  padding-left: 0;
+}
+[data-sbar-density='compact'] .fy-sbar__fold {
+  min-height: 20px;
+  padding-block: 0;
+  padding-left: 22px;
+}
+
+[data-sbar-density='compact'].fy-sbar--drawer .fy-sbar__fold {
+  min-height: max(28px, var(--target-floor));
 }

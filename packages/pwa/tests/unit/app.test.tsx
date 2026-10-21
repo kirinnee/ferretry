@@ -4062,6 +4062,26 @@ describe('the sessions bar', () => {
     }
   });
 
+  it('draws one-line rows until the reader picks Comfortable in the bar, and stores that device-wide', async () => {
+    const { view, store } = await renderShell(`/d/${ALPHA}/settings`, [alpha.daemonId], { sessions: ['one'] });
+    try {
+      await settle();
+      const column = must(view.container.querySelector('[data-sessions-bar="column"]'), 'the sessions column');
+      expect(column.getAttribute('data-sbar-density')).toBe('compact');
+
+      await interact(() => (column.querySelector('[data-sbar-options]') as HTMLElement).click());
+      const comfortable = [...document.querySelectorAll('[role="menuitem"]')].find(node =>
+        node.textContent?.includes('Comfortable'),
+      );
+      await interact(() => (must(comfortable ?? null, 'Comfortable') as HTMLElement).click());
+
+      expect(store.controls.snapshot().device.density).toBe('full');
+      expect(column.getAttribute('data-sbar-density')).toBe('comfortable');
+    } finally {
+      await view.unmount();
+    }
+  });
+
   it('lists every paired machine’s sessions, each read through its own pairing, unless the reader chose one', async () => {
     const { view, store } = await renderShell(`/d/${ALPHA}/settings`, [alpha.daemonId, beta.daemonId], {
       sessions: ['one'],
