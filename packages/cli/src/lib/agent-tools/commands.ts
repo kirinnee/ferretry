@@ -8,6 +8,8 @@ interface SessionOption {
 }
 
 const SESSION_HELP = 'act on this session yourself; without it, act as the agent session this runs inside';
+const ASK_HELP =
+  'hand it to the owner at once: their tab comes forward with “Your turn here”; optionally say what to do';
 
 /** A whole number from the command line, or a plain refusal naming the option. */
 export function wholeNumber(value: string, option: string): number {
@@ -60,18 +62,22 @@ export function registerTerminalCommands(program: Command, runner: IAgentToolsRu
     .argument('<name>', 'its name: a lowercase letter, then letters, digits or dashes')
     .argument('[command...]', 'a command to run in it; use -- before one that starts with a dash')
     .option('-f, --folder <dir>', 'where it starts: absolute, or relative to the session folder')
-    .action(async (name: string, command: string[], options: SessionOption & { folder?: string }) => {
-      const text = joined(command);
-      await call(
-        {
-          tool: 'terminal.open',
-          name,
-          ...(options.folder === undefined ? {} : { folder: options.folder }),
-          ...(text === undefined ? {} : { command: text }),
-        },
-        options,
-      );
-    });
+    .option('--ask [message]', ASK_HELP)
+    .action(
+      async (name: string, command: string[], options: SessionOption & { folder?: string; ask?: string | true }) => {
+        const text = joined(command);
+        await call(
+          {
+            tool: 'terminal.open',
+            name,
+            ...(options.folder === undefined ? {} : { folder: options.folder }),
+            ...(text === undefined ? {} : { command: text }),
+            ...(options.ask === undefined ? {} : { askOwner: options.ask }),
+          },
+          options,
+        );
+      },
+    );
 
   verb('send', 'type text and press keys in a terminal')
     .argument('<name>', 'the terminal’s name or id')
@@ -129,6 +135,14 @@ export function registerTerminalCommands(program: Command, runner: IAgentToolsRu
       await call({ tool: 'terminal.close', name }, options);
     });
 
+  verb('ask', 'hand a terminal to the owner: their tab comes forward with “Your turn here”')
+    .argument('<name>', 'the terminal’s name or id')
+    .argument('[message...]', 'what the owner should do there; never a secret')
+    .action(async (name: string, message: string[], options: SessionOption) => {
+      const text = joined(message);
+      await call({ tool: 'terminal.ask_owner', name, ...(text === undefined ? {} : { message: text }) }, options);
+    });
+
   registerControlVerbs('terminal', verb, run, sessionOf);
 }
 
@@ -153,17 +167,25 @@ export function registerBrowserPageCommands(program: Command, runner: IAgentTool
     .argument('<name>', 'its name: a lowercase letter, then letters, digits or dashes')
     .argument('[url]', 'an http or https URL to load')
     .option('--incognito', 'a throwaway page with its own cookies, shared with nothing; gone when closed')
-    .action(async (name: string, url: string | undefined, options: SessionOption & { incognito?: boolean }) => {
-      await call(
-        {
-          tool: 'browser.open',
-          name,
-          ...(url === undefined ? {} : { url }),
-          ...(options.incognito === true ? { incognito: true } : {}),
-        },
-        options,
-      );
-    });
+    .option('--ask [message]', ASK_HELP)
+    .action(
+      async (
+        name: string,
+        url: string | undefined,
+        options: SessionOption & { incognito?: boolean; ask?: string | true },
+      ) => {
+        await call(
+          {
+            tool: 'browser.open',
+            name,
+            ...(url === undefined ? {} : { url }),
+            ...(options.incognito === true ? { incognito: true } : {}),
+            ...(options.ask === undefined ? {} : { askOwner: options.ask }),
+          },
+          options,
+        );
+      },
+    );
 
   verb('navigate', 'load a URL in a page')
     .argument('<name>', 'the page’s name or id')
@@ -214,6 +236,14 @@ export function registerBrowserPageCommands(program: Command, runner: IAgentTool
     .argument('<name>', 'the page’s name or id')
     .action(async (name: string, options: SessionOption) => {
       await call({ tool: 'browser.close', name }, options);
+    });
+
+  verb('ask', 'hand a page to the owner: their tab comes forward with “Your turn here”')
+    .argument('<name>', 'the page’s name or id')
+    .argument('[message...]', 'what the owner should do there; never a secret')
+    .action(async (name: string, message: string[], options: SessionOption) => {
+      const text = joined(message);
+      await call({ tool: 'browser.ask_owner', name, ...(text === undefined ? {} : { message: text }) }, options);
     });
 
   registerControlVerbs('browser', verb, run, sessionOf);

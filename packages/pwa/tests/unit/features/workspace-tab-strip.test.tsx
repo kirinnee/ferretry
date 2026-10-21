@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'bun:test';
 import {
+  type AgentSurfaceTabs,
+  NO_AGENT_SURFACE_TABS,
+} from '../../../src/features/workspace/use-agent-surface-tabs.ts';
+import {
   type WorkspaceNewTabKind,
   WorkspaceTabStrip,
   type WorkspaceTabStripProps,
@@ -275,6 +279,58 @@ describe('WorkspaceTabStrip — workspace pane', () => {
       must(strip.container.querySelector<HTMLButtonElement>('[aria-haspopup="menu"]'), 'trigger').click(),
     );
     expect(strip.container.querySelectorAll('hr')).toHaveLength(0);
+    await strip.unmount();
+  });
+});
+
+describe('WorkspaceTabStrip — agent-opened surfaces', () => {
+  const surfaces = (overrides: Partial<AgentSurfaceTabs> = {}): AgentSurfaceTabs => ({
+    ...NO_AGENT_SURFACE_TABS,
+    ...overrides,
+  });
+
+  it('dots a tab the agent added and badges the one it handed over as YOUR TURN, both announced to a screen reader', async () => {
+    const strip = await render({
+      agentSurfaces: surfaces({ unseenTabIds: new Set([dev.id]), askedTabIds: new Set([app.id, dev.id]) }),
+    });
+    expect(strip.tab(app.id).getAttribute('data-asked')).toBe('true');
+    expect(strip.tab(app.id).textContent).toContain('YOUR TURN');
+    expect(strip.tab(app.id).getAttribute('aria-label')).toBe('app, your turn');
+    expect(strip.tab(dev.id).getAttribute('data-fresh')).toBe('false');
+    expect(strip.tab(login.id).getAttribute('data-fresh')).toBe('false');
+    await strip.unmount();
+
+    const dotted = await render({ agentSurfaces: surfaces({ unseenTabIds: new Set([dev.id]) }) });
+    expect(dotted.tab(dev.id).getAttribute('data-fresh')).toBe('true');
+    expect(dotted.tab(dev.id).querySelector('.fy-ws-new-dot')).not.toBeNull();
+    expect(dotted.tab(dev.id).getAttribute('aria-label')).toBe('dev, opened by the agent');
+    expect(dotted.tab(login.id).getAttribute('aria-label')).toBe(login.label);
+    await dotted.unmount();
+  });
+
+  it('offers a closed surface back in ＋ and reopens it', async () => {
+    const reopened: string[] = [];
+    const strip = await render({
+      agentSurfaces: surfaces({
+        reopenable: [
+          { tabId: 'terminal:x', kind: 'terminal', label: 'x' },
+          { tabId: 'browser:y', kind: 'browser', label: 'y' },
+        ],
+        reopen: id => reopened.push(id),
+      }),
+    });
+    const trigger = must(strip.container.querySelector<HTMLButtonElement>('[aria-haspopup="menu"]'), 'trigger');
+    await interact(() => trigger.click());
+    const items = [...strip.container.querySelectorAll<HTMLButtonElement>('[role^="menuitem"]')];
+    expect(items.map(item => item.textContent)).toEqual([
+      'New terminal',
+      'New browser',
+      'Open file',
+      'Reopen terminal x',
+      'Reopen page y',
+    ]);
+    await interact(() => items[4]?.click());
+    expect(reopened).toEqual(['browser:y']);
     await strip.unmount();
   });
 });

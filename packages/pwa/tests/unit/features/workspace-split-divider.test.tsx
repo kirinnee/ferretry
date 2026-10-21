@@ -296,3 +296,44 @@ describe('AgentControlMarker', () => {
     await mounted.unmount();
   });
 });
+
+describe('AgentControlMarker — an ask', () => {
+  it('says "Your turn here" with the agent\'s message, and offers Take over and Dismiss', async () => {
+    const taps: string[] = [];
+    const mounted = await mount(
+      <AgentControlMarker
+        driver={null}
+        takenOver={false}
+        ask={{ agent: 'Hadi', message: 'Type the sudo password' }}
+        onTakeOver={() => taps.push('take')}
+        onHandBack={() => undefined}
+        onDismissAsk={() => taps.push('dismiss')}
+      />,
+    );
+    const status = must(mounted.container.querySelector('[role="status"]'), 'status');
+    expect(status.getAttribute('data-state')).toBe('ask');
+    expect(status.textContent).toContain('Your turn here — Type the sudo password');
+    const buttons = [...status.querySelectorAll('button')];
+    expect(buttons.map(button => button.textContent)).toEqual(['Take over', 'Dismiss']);
+    await interact(() => (buttons[0] as HTMLButtonElement).click());
+    await interact(() => (buttons[1] as HTMLButtonElement).click());
+    expect(taps).toEqual(['take', 'dismiss']);
+    await mounted.unmount();
+  });
+
+  it('names the agent when it left no message, and omits Dismiss when it cannot dismiss', async () => {
+    const mounted = await mount(
+      <AgentControlMarker
+        driver={null}
+        takenOver={false}
+        ask={{ agent: 'Hadi' }}
+        onTakeOver={() => undefined}
+        onHandBack={() => undefined}
+      />,
+    );
+    const status = must(mounted.container.querySelector('[role="status"]'), 'status');
+    expect(status.textContent).toContain('Your turn here — Hadi needs you');
+    expect(status.querySelectorAll('button')).toHaveLength(1);
+    await mounted.unmount();
+  });
+});

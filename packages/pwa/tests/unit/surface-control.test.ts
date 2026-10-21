@@ -1,5 +1,12 @@
 import { describe, test } from 'bun:test';
-import type { FyEvent, SurfaceControlView, SurfaceDriving, SurfaceTakeover } from '@ferretry/protocol';
+import type {
+  FyEvent,
+  SurfaceAsked,
+  SurfaceControlView,
+  SurfaceDriving,
+  SurfaceOpened,
+  SurfaceTakeover,
+} from '@ferretry/protocol';
 import should from 'should';
 import {
   activeSurfaceDriving,
@@ -8,6 +15,9 @@ import {
   drivingAgentName,
   isSurfaceControlEvent,
   nextDrivingLapse,
+  openedSurfaces,
+  askedSurfaces,
+  surfaceAskFor,
   type SurfaceControlState,
   surfaceDrivingFor,
   surfaceTakeoverFor,
@@ -45,6 +55,8 @@ const view = (overrides: Partial<SurfaceControlView> = {}): SurfaceControlView =
   driving: [],
   takeovers: [],
   handed: [],
+  opened: [],
+  asked: [],
   ...overrides,
 });
 
@@ -127,6 +139,8 @@ describe('applySurfaceEvent', () => {
       event('surface.takeover', { id: 1 }),
       event('surface.handback', null),
       event('surface.handed', 'nope'),
+      event('surface.opened', { surface: 'terminal' }),
+      event('surface.asked', 42),
     ])
       should(applySurfaceEvent(UNREAD_SURFACE_CONTROL, SESSION, ignored)).equal(UNREAD_SURFACE_CONTROL);
   });
@@ -170,8 +184,15 @@ describe('who is driving', () => {
     should(drivingAgentName(nameless)).equal('The agent');
   });
 
-  test('should recognise exactly the four control events', () => {
-    for (const type of ['surface.driving', 'surface.takeover', 'surface.handback', 'surface.handed'])
+  test('should recognise exactly the control events', () => {
+    for (const type of [
+      'surface.driving',
+      'surface.takeover',
+      'surface.handback',
+      'surface.handed',
+      'surface.opened',
+      'surface.asked',
+    ])
       should(isSurfaceControlEvent(event(type, {}))).be.true();
     should(isSurfaceControlEvent(event('surface.closed', {}))).be.false();
   });
@@ -192,5 +213,80 @@ describe('createSurfaceEventHub', () => {
 
     // Assert
     should(seen).deepEqual(['a:surface.driving', 'b:surface.driving', 'b:surface.takeover']);
+  });
+});
+
+const opened = (overrides: Partial<SurfaceOpened> = {}): SurfaceOpened => ({
+  surface: 'terminal',
+  id: 'a1b2c3d4e5f6',
+  name: 'dev',
+  agentSessionId: SESSION,
+  agentName: 'Hadi',
+  at: EARLIER,
+  ...overrides,
+});
+const asked = (overrides: Partial<SurfaceAsked> = {}): SurfaceAsked => ({
+  ...opened({ at: LATER }),
+  message: 'Enter the code',
+  ...overrides,
+});
+const page = { surface: 'browser', id: 'PAGE1' } as const;
+
+describe('agent-opened and asked surfaces', () => {
+  test('should fold an opened surface once, replacing a repeat of the same id', () => {
+    // Act
+    const first = applySurfaceEvent(UNREAD_SURFACE_CONTROL, SESSION, event('surface.opened', opened()));
+    const second = applySurfaceEvent(first, SESSION, event('surface.opened', opened({ agentName: 'Sam' })));
+
+    // Assert
+    should(second.terminal?.opened).have.length(1);
+    should(second.terminal?.opened[0]?.agentName).equal('Sam');
+  });
+
+  test('should fold an ask, and clear it when a person takes the surface or hands it back', () => {
+    // Arrange
+    const standing = applySurfaceEvent(UNREAD_SURFACE_CONTROL, SESSION, event('surface.asked', asked()));
+
+    // Act
+    const taken = applySurfaceEvent(standing, SESSION, event('surface.takeover', takeover()));
+    const back = applySurfaceEvent(
+      standing,
+      SESSION,
+      event('surface.handback', { surface: 'terminal', id: 'a1b2c3d4e5f6', at: LATER }),
+    );
+
+    // Assert
+    should(standing.terminal?.asked).have.length(1);
+    should(taken.terminal?.asked).deepEqual([]);
+    should(back.terminal?.asked).deepEqual([]);
+  });
+
+  test('should ignore a late ask for a surface a person already holds', () => {
+    // Arrange
+    const held = applySurfaceEvent(UNREAD_SURFACE_CONTROL, SESSION, event('surface.takeover', takeover()));
+
+    // Act + Assert
+    should(applySurfaceEvent(held, SESSION, event('surface.asked', asked()))).equal(held);
+  });
+
+  test('should list opened and asked surfaces of both kinds, oldest first, and find an ask by id or name', () => {
+    // Arrange
+    const state: SurfaceControlState = {
+      terminal: view({ opened: [opened({ at: LATER })], asked: [asked()] }),
+      browser: view({
+        opened: [{ ...opened({ ...page, at: EARLIER }), name: 'login' }],
+        asked: [asked({ ...page, at: EARLIER })],
+      }),
+    };
+
+    // Act + Assert
+    should(openedSurfaces(state).map(entry => entry.id)).deepEqual(['PAGE1', 'a1b2c3d4e5f6']);
+    should(askedSurfaces(state).map(entry => entry.id)).deepEqual(['PAGE1', 'a1b2c3d4e5f6']);
+    should(surfaceAskFor(state, 'terminal', 'dev')?.message).equal('Enter the code');
+    should(surfaceAskFor(state, 'terminal', 'a1b2c3d4e5f6')?.id).equal('a1b2c3d4e5f6');
+    should(surfaceAskFor(state, 'terminal', 'nope')).be.undefined();
+    should(surfaceAskFor(UNREAD_SURFACE_CONTROL, 'terminal', 'dev')).be.undefined();
+    should(openedSurfaces(UNREAD_SURFACE_CONTROL)).deepEqual([]);
+    should(askedSurfaces(UNREAD_SURFACE_CONTROL)).deepEqual([]);
   });
 });

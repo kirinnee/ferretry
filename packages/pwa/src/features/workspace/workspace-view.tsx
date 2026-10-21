@@ -26,8 +26,8 @@
 
 import { type CSSProperties, type ReactNode, useId, useRef, useState } from 'react';
 import {
-  activateWorkspaceTab,
   AGENT_PANE_ID,
+  activateWorkspaceTab,
   canSplitWorkspacePane,
   closeWorkspaceTab,
   focusWorkspacePane,
@@ -51,6 +51,7 @@ import {
 } from '../../lib/workspace-layout.ts';
 import { ContextMenu, type MenuAnchor } from '../../shell/context-menu.tsx';
 import { SplitDivider } from './split-divider.tsx';
+import type { AgentSurfaceTabs } from './use-agent-surface-tabs.ts';
 import {
   type WorkspaceNewTabKind,
   type WorkspaceStripLayoutControls,
@@ -78,6 +79,7 @@ export interface WorkspaceViewProps {
   /** The agent's first name, when it has one: the Chat and Console tabs say whose they are. */
   readonly agentName?: string;
   readonly drivenTabIds?: ReadonlySet<WorkspaceTabId>;
+  readonly agentSurfaces?: AgentSurfaceTabs;
   readonly maxPanes?: number;
   /** Smallest share either side of a divider may shrink to. */
   readonly minRatio?: number;
@@ -159,6 +161,7 @@ function PaneView({ context, pane }: { readonly context: ViewContext; readonly p
         agentPane={agentPane}
         workspaceVisible={isWorkspaceVisible(layout)}
         {...(context.drivenTabIds ? { drivenTabIds: context.drivenTabIds } : {})}
+        {...(context.agentSurfaces ? { agentSurfaces: context.agentSurfaces } : {})}
         draggingTabId={context.dragging}
         {...(agentPane ? {} : { layoutControls: layoutControls(context, pane) })}
         onActivate={tabId => change(activateWorkspaceTab(layout, tabId))}

@@ -51,6 +51,7 @@ export const WORKSPACE_DEFAULT_RATIO = 0.5;
 /** Neither side of a split may shrink below this share of it. */
 export const WORKSPACE_MIN_RATIO = 0.15;
 export const WORKSPACE_LAYOUT_VERSION = 1;
+export const WORKSPACE_ANNOUNCED_LIMIT = 200;
 
 /** One tab's record. `key` is the kind-scoped identity (terminal key, page key,
  *  file path); the agent tabs use their kind as their key. */
@@ -102,6 +103,12 @@ export interface WorkspaceLayout {
   readonly focused: string;
   /** Monotonic id counter for new panes and splits. */
   readonly seq: number;
+  /**
+   * What the workspace has already done on an agent's behalf — a tab it added for a surface the agent
+   * opened, an ask it brought forward — so each happens ONCE, and a tab the owner closed stays closed.
+   * Not structure: omitted while empty, capped, and never read by the tree operations.
+   */
+  readonly announced?: readonly string[];
 }
 
 export interface WorkspaceCapOptions {
@@ -347,6 +354,65 @@ export const openWorkspaceTab = (
     tabs: { ...shown.tabs, [tab.id]: tab },
     focused: pane.id,
   };
+};
+
+// ---- agent-opened surfaces -----------------------------------------------------------
+
+/** Has the workspace already acted on this announcement? */
+export const hasAnnounced = (layout: WorkspaceLayout, announcement: string): boolean =>
+  (layout.announced ?? []).includes(announcement);
+
+/** Remembers an announcement, the oldest forgotten past the cap. */
+export const markAnnounced = (layout: WorkspaceLayout, announcement: string): WorkspaceLayout =>
+  hasAnnounced(layout, announcement)
+    ? layout
+    : { ...layout, announced: [...(layout.announced ?? []), announcement].slice(-WORKSPACE_ANNOUNCED_LIMIT) };
+
+/** The tab, among the ids that all name the one surface, that is already open. */
+const openAmong = (layout: WorkspaceLayout, ids: readonly WorkspaceTabId[]): WorkspaceTabId | undefined =>
+  ids.find(id => layout.tabs[id] !== undefined);
+
+/**
+ * An agent opened a surface: its tab appears in the workspace, ONCE, and nothing the owner is doing moves.
+ * The workspace is shown if it was hidden; the tab joins the focused workspace pane and becomes that
+ * pane's active tab only when the pane had none. The focused pane never changes, and neither does any
+ * tab already selected, so the owner's typing and reading are not interrupted. An announcement already
+ * made is a no-op, which is what keeps a tab the owner closed from coming back. `aliases` are the other
+ * ids the same surface may already be open under (a browser page by id or by name).
+ */
+export const adoptAgentSurface = (
+  layout: WorkspaceLayout,
+  tab: WorkspaceTab,
+  announcement: string,
+  aliases: readonly WorkspaceTabId[] = [],
+): WorkspaceLayout => {
+  if (!isWellFormedTab(tab) || isAgentTabId(tab.id) || hasAnnounced(layout, announcement)) return layout;
+  const marked = markAnnounced(layout, announcement);
+  if (openAmong(marked, [tab.id, ...aliases]) !== undefined) return marked;
+  const shown = showWorkspace(marked);
+  const pane = targetPane(shown, undefined) as WorkspacePaneNode;
+  return {
+    ...shown,
+    root: replacePane(shown.root, withTabs(pane, [...pane.tabs, tab.id], pane.active ?? tab.id)),
+    tabs: { ...shown.tabs, [tab.id]: tab },
+  };
+};
+
+/**
+ * An agent handed a surface to the owner: switch to its tab and focus it — opening it first when the owner
+ * closed it, or never had it. Once per ask: the announcement names the ask, so a reload, or the same ask
+ * arriving by poll and by event, does not pull the owner back after they have moved on.
+ */
+export const bringAskedSurfaceForward = (
+  layout: WorkspaceLayout,
+  tab: WorkspaceTab,
+  announcement: string,
+  aliases: readonly WorkspaceTabId[] = [],
+): WorkspaceLayout => {
+  if (!isWellFormedTab(tab) || isAgentTabId(tab.id) || hasAnnounced(layout, announcement)) return layout;
+  const marked = markAnnounced(layout, announcement);
+  const open = openAmong(marked, [tab.id, ...aliases]);
+  return open === undefined ? openWorkspaceTab(marked, tab) : activateWorkspaceTab(marked, open);
 };
 
 /** Closes a workspace tab. Pinned agent tabs never close. A workspace pane
@@ -633,7 +699,18 @@ export const parseWorkspaceLayout = (raw: unknown): WorkspaceLayout => {
   }
   const seq = typeof value.seq === 'number' && Number.isInteger(value.seq) && value.seq >= 0 ? value.seq : 0;
   const focused = typeof value.focused === 'string' ? value.focused : AGENT_PANE_ID;
-  const layout: WorkspaceLayout = { v: WORKSPACE_LAYOUT_VERSION, root, parked, tabs, focused, seq };
+  const announced = Array.isArray(value.announced)
+    ? value.announced.filter((entry): entry is string => typeof entry === 'string').slice(-WORKSPACE_ANNOUNCED_LIMIT)
+    : [];
+  const layout: WorkspaceLayout = {
+    v: WORKSPACE_LAYOUT_VERSION,
+    root,
+    parked,
+    tabs,
+    focused,
+    seq,
+    ...(announced.length === 0 ? {} : { announced }),
+  };
   if (!isCoherent(layout)) return defaultWorkspaceLayout();
   // Ids minted later must never collide with a restored one.
   const highest = Math.max(seq, ...[...seen].map(id => Number(/-(\d+)$/u.exec(id)?.[1] ?? 0)));
