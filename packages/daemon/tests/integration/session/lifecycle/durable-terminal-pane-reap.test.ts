@@ -1,5 +1,5 @@
 import { afterEach, describe, it } from 'bun:test';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import should from 'should';
@@ -225,15 +225,21 @@ describe('durable terminal pane reap adapters', () => {
 describe('registering a pane whose harness has already exited', () => {
   async function relaunch(subject: ReapFixture, script: string): Promise<void> {
     await subject.controller.stop(subject.record.config.tmuxSession);
+    // The harness waits on a gate file rather than a fixed pause: it may only end once the launch has
+    // finished setting remain-on-exit. A timed pause lost that race on a loaded runner, tmux then
+    // destroyed the pane outright and the session vanished instead of leaving a dead pane to read.
+    const gate = join(subject.home, 'harness-may-exit');
     await subject.controller.launch({
       session: subject.record.config.tmuxSession,
       cwd: process.cwd(),
-      // The pause lets the launch set remain-on-exit before the process ends, as a real harness does.
-      command: ['/bin/sh', '-c', `sleep 1; ${script}`],
+      command: ['/bin/sh', '-c', `while [ ! -e '${gate}' ]; do sleep 0.05; done; ${script}`],
     });
+    await writeFile(gate, '');
     // An exit status, not just `dead`: a metadata read that fails under load also reads as dead, and
-    // registering then would find the process still running.
-    for (let attempt = 0; attempt < 100; attempt++) {
+    // registering then would find the process still running. The bound is generous because it is only
+    // ever spent when something is wrong; a healthy pane returns on the first few polls.
+    const deadline = Date.now() + 30_000;
+    while (Date.now() < deadline) {
       const pane = await subject.controller.state(subject.record.config.tmuxSession);
       if (pane.alive && pane.dead && pane.exitCode === 2) return;
       await Bun.sleep(50);
