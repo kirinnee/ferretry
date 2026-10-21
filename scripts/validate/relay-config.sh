@@ -51,27 +51,35 @@ assert_hosted '.name == "ferretry-hosted-relay"' 'name is the origin the deploy 
 assert_hosted '.workers_dev == true' 'workers.dev must stay enabled; it is the origin discovery falls back to'
 assert_hosted '.observability.enabled == true' 'observability is how an operator sees a failing deployment at all'
 
-# Two bindings, exactly. `RENDEZVOUS` carries sessions; `RELAY_CONTROL` is the single global meter,
-# kill switch and admission controller. Without the second one every hosted request refuses with
-# "hosted relay accounting is unavailable" — fail-closed, but completely dead.
+# Three bindings, exactly. `RENDEZVOUS` carries sessions; `RELAY_CONTROL` is the single global meter,
+# kill switch and admission controller. Without it every hosted request refuses with "hosted relay
+# accounting is unavailable" — fail-closed, but completely dead. `TUNNEL_CONTROL` is the tunnel
+# provisioner (relay-protocol.md §15); without it the tunnel service advertises `available: false`.
 assert_hosted '
   [.durable_objects.bindings[] | {name, class_name}] | sort_by(.name) == [
     {name: "RELAY_CONTROL", class_name: "HostedRelayControlDurableObject"},
-    {name: "RENDEZVOUS", class_name: "RendezvousDurableObject"}
+    {name: "RENDEZVOUS", class_name: "RendezvousDurableObject"},
+    {name: "TUNNEL_CONTROL", class_name: "HostedTunnelControlDurableObject"}
   ]
-' 'durable_objects.bindings must bind exactly RENDEZVOUS and RELAY_CONTROL to their classes'
+' 'durable_objects.bindings must bind exactly RENDEZVOUS, RELAY_CONTROL and TUNNEL_CONTROL to their classes'
 
 # SQLite-backed classes are what the Workers Free plan allows, and `new_classes` would silently
 # provision the key-value backend instead — a different storage product under the same code.
 assert_hosted '
   ([.migrations[].new_sqlite_classes // []] | flatten | sort)
-    == ["HostedRelayControlDurableObject", "RendezvousDurableObject"]
-' 'migrations must declare both Durable Object classes as new_sqlite_classes'
+    == ["HostedRelayControlDurableObject", "HostedTunnelControlDurableObject", "RendezvousDurableObject"]
+' 'migrations must declare every Durable Object class as new_sqlite_classes'
+# A deployed migration is history Cloudflare has already applied. Editing `v1` instead of adding a tag
+# is refused at deploy time at best, and at worst re-describes classes that hold every live row.
+assert_hosted '
+  .migrations[0] == {tag: "v1", new_sqlite_classes: ["RendezvousDurableObject", "HostedRelayControlDurableObject"]}
+' 'migration v1 is applied history and must never change; add a new tag instead'
+assert_hosted '[.migrations[].tag] | length == (unique | length)' 'migration tags must be unique'
 assert_hosted '[.migrations[] | keys[]] | index("new_classes") | not' 'migrations must not use the key-value new_classes backend'
 
 # A class named in a migration that the entry module does not export is a deploy-time failure in
 # production and nothing at all here, so check the two halves agree.
-for class_name in RendezvousDurableObject HostedRelayControlDurableObject; do
+for class_name in RendezvousDurableObject HostedRelayControlDurableObject HostedTunnelControlDurableObject; do
   rg -q "\b${class_name}\b" "${worker}" ||
     fail "${worker} does not export ${class_name}, which ${hosted_config} deploys"
 done
@@ -125,6 +133,43 @@ done
 
 rg -qF -- "https://$(jq -r '.name' "${hosted_config}").\$worker_subdomain.workers.dev" "${workflow}" ||
   fail "${workflow} derives an origin that does not match the Worker name in ${hosted_config}"
+
+# ─── the tunnel pool: one secret, two names, never in an argument ─────────────────────────────
+#
+# The pool is a list of Cloudflare API tokens. Its source of truth is the GitHub secret
+# HOSTED_TUNNEL_ACCOUNTS and the Worker reads it as TUNNEL_ACCOUNTS (relay-protocol.md §15). A rename on
+# either side leaves the tunnel service advertising `available: false` with nothing failing anywhere,
+# and a value passed as an argument is readable by every process on the runner.
+tunnel_control="packages/relay/src/adapters/hosted-tunnel-control.ts"
+tunnel_contract="packages/relay/src/lib/tunnel.ts"
+rg -qF -- 'readonly TUNNEL_ACCOUNTS?: string;' "${tunnel_control}" ||
+  fail "${tunnel_control} no longer reads the pool from TUNNEL_ACCOUNTS, the secret ${workflow} installs"
+rg -qF -- 'HOSTED_TUNNEL_ACCOUNTS: ${{ secrets.HOSTED_TUNNEL_ACCOUNTS }}' "${workflow}" ||
+  fail "${workflow} must read the pool from the GitHub secret HOSTED_TUNNEL_ACCOUNTS"
+rg -qF -- 'wrangler secret put TUNNEL_ACCOUNTS --config wrangler.hosted.json' "${workflow}" ||
+  fail "${workflow} must reinstall TUNNEL_ACCOUNTS without a deploy (operation: tunnel-accounts)"
+rg -qF -- "inputs.operation == 'tunnel-accounts'" "${workflow}" ||
+  fail "${workflow} must run the tunnel-accounts job only for that operation"
+if rg -q -- '(--arg|--argjson|echo|curl)[^|]*\$\{?HOSTED_TUNNEL_ACCOUNTS' "${workflow}"; then
+  fail "${workflow} passes the tunnel pool as an argument or prints it; read it from the environment"
+fi
+tunnel_status_path="$(rg -o "TUNNEL_OPERATOR_STATUS_PATH = '[^']*'" "${tunnel_contract}" | sed "s/.*'\\(.*\\)'/\\1/")"
+[[ -n ${tunnel_status_path} ]] || fail "${tunnel_contract} no longer declares TUNNEL_OPERATOR_STATUS_PATH"
+rg -qF -- "${tunnel_status_path}" "${workflow}" ||
+  fail "${workflow} does not address ${tunnel_status_path}, the route TUNNEL_OPERATOR_STATUS_PATH declares"
+
+# The deploy's secrets file, proved by running the exact program the workflow runs: a set pool rides
+# along as a string, and an unset one adds nothing, so the Worker keeps the pool it already holds.
+# shellcheck disable=SC2016 # jq variables and jq's env, not shell expansions
+secrets_program='{RELAY_OPERATOR_TOKEN: $token} + (if (env.HOSTED_TUNNEL_ACCOUNTS // "") == "" then {} else {TUNNEL_ACCOUNTS: env.HOSTED_TUNNEL_ACCOUNTS} end)'
+rg -qF -- "${secrets_program}" "${workflow}" ||
+  fail "${workflow} no longer builds the deploy secrets file with the program this gate checks"
+with_pool="$(HOSTED_TUNNEL_ACCOUNTS='[{"name":"pool-1"}]' jq -cn --arg token t "${secrets_program}")"
+[[ ${with_pool} == '{"RELAY_OPERATOR_TOKEN":"t","TUNNEL_ACCOUNTS":"[{\"name\":\"pool-1\"}]"}' ]] ||
+  fail "the deploy secrets file does not carry a set tunnel pool as the TUNNEL_ACCOUNTS string"
+without_pool="$(env -u HOSTED_TUNNEL_ACCOUNTS jq -cn --arg token t "${secrets_program}")"
+[[ ${without_pool} == '{"RELAY_OPERATOR_TOKEN":"t"}' ]] ||
+  fail "the deploy secrets file must leave TUNNEL_ACCOUNTS out when the pool secret is unset"
 
 # ─── both ends must read the SAME advertisement, from the same path ───────────────────────────
 #
