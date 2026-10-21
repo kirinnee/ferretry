@@ -9,10 +9,11 @@ import {
   analyticsIngestSignature,
   analyticsPricingCatalogFingerprint,
 } from './store.ts';
+import type { AnalyticsModelAliasGroup } from '@ferretry/protocol';
 import {
   type AnalyticsTranscriptEvidenceSource,
-  foldAnalyticsSessionActivity,
-  foldAnalyticsSessionUsage,
+  type AnalyticsTranscriptFold,
+  foldAnalyticsTranscript,
 } from './usage-fold.ts';
 
 /**
@@ -33,6 +34,15 @@ export type AnalyticsIngestCandidate = Omit<
 };
 
 /** Every session the daemon holds durable documents for, parsed but unjudged. */
+/** A session's transcript, read and folded off the event loop: the fold alone comes back. */
+export interface AnalyticsTranscriptFoldSource {
+  foldFor(
+    sessionId: string,
+    harness: TranscriptHarness,
+    aliasGroups: readonly AnalyticsModelAliasGroup[],
+  ): Promise<AnalyticsTranscriptFold>;
+}
+
 export interface AnalyticsIngestCandidateSource {
   listCandidates(): Promise<readonly AnalyticsIngestCandidate[]>;
 }
@@ -44,6 +54,15 @@ export interface AnalyticsIngestClock {
 export interface AnalyticsIngestionParts {
   readonly candidates: AnalyticsIngestCandidateSource;
   readonly evidence: AnalyticsTranscriptEvidenceSource;
+  /**
+   * Reads AND folds a transcript somewhere other than the event loop — a worker thread — and hands back
+   * only the fold. Absent, the evidence is read through {@link evidence} and folded here.
+   *
+   * WHY. A finished session's transcript is read whole (up to 32 MiB) and every event of it is folded;
+   * on the event loop that was the largest single block left after parsing yielded, and the fold is
+   * all ingestion keeps. A fold that RAISES is a source error, exactly like a read that raises.
+   */
+  readonly folds?: AnalyticsTranscriptFoldSource;
   readonly store: AnalyticsIndexStore;
   /**
    * The rate catalog, read once at the start of every pass and held for that pass only, so an operator
@@ -391,24 +410,28 @@ export class AnalyticsIngestionService implements AnalyticsIngestionLoop {
     entry: AdmittedCandidate,
     catalog: readonly AnalyticsPricingRate[],
   ): Promise<{ readonly row: AnalyticsStoredSession; readonly sourceError: boolean }> {
-    const evidence = await this.parts.evidence
-      .evidenceFor(entry.session.id, entry.candidate.transcriptHarness)
-      .catch(() => undefined);
     // The catalog's alias groups have to reach the FOLD, not just the pricing step after it: the fold
     // is where two spellings become one identity or a mixed-model refusal, and a refusal decided
     // without them is one nothing downstream can reverse.
-    const read = evidence ?? { kind: 'unreadable' as const };
-    const fold = foldAnalyticsSessionUsage(read, analyticsCatalogAliasGroups(catalog));
+    const aliasGroups = analyticsCatalogAliasGroups(catalog);
+    const { id } = entry.session;
+    const harness = entry.candidate.transcriptHarness;
+    const folded = await (
+      this.parts.folds === undefined
+        ? this.parts.evidence.evidenceFor(id, harness).then(evidence => foldAnalyticsTranscript(evidence, aliasGroups))
+        : this.parts.folds.foldFor(id, harness, aliasGroups)
+    ).catch(() => undefined);
+    const { usage: fold, activity } = folded ?? foldAnalyticsTranscript({ kind: 'unreadable' }, aliasGroups);
     const derived = deriveAnalyticsSessionRecord(
       {
         ...entry.session,
         usage: fold.kind === 'usage' ? fold.usage : null,
-        activity: foldAnalyticsSessionActivity(read),
+        activity,
       },
       catalog,
     );
     return {
-      sourceError: evidence === undefined,
+      sourceError: folded === undefined,
       row: {
         raw: derived.raw,
         finishedAt: entry.session.finishedAt,

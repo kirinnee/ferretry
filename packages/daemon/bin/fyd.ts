@@ -92,7 +92,12 @@ import type { z } from 'zod';
 // model catalog the list vouches for (docs/model-catalog.md). Compiled in as text, from its one file.
 import HOSTED_APP_RELEASE_KEY from '../../pwa/release-signing-key.pub' with { type: 'text' };
 import pkg from '../package.json' with { type: 'json' };
-import { BunSqliteAnalyticsStoreFactory, HttpAnalyticsPricingFeed } from '../src/adapters/analytics/index.ts';
+import {
+  BunSqliteAnalyticsStoreFactory,
+  HttpAnalyticsPricingFeed,
+  readAnalyticsTranscriptEvidence,
+  WorkerTranscriptFolds,
+} from '../src/adapters/analytics/index.ts';
 import {
   decryptPdfInMemory,
   probePdfDecryptWorker,
@@ -144,6 +149,7 @@ import {
   CachedUsageFeed,
   CliUpdateLauncher,
   describeWorkerProbes,
+  probeBundledWorker,
   CloudflaredLocator,
   ConfigGrantDocument,
   ConfigSecretRecipes,
@@ -375,7 +381,7 @@ import {
 } from '../src/adapters/terminal/index.ts';
 import { BunTmuxProcess, RealHarnessLaunchGuard, TmuxPaneDelivery, TmuxPaneQueue } from '../src/adapters/tmux/index.ts';
 import { CliConversionCheck, CliHarnessVersion } from '../src/adapters/transcript/conversion-check.ts';
-import { DEFAULT_MAX_READ_BYTES, NodeTranscriptSource } from '../src/adapters/transcript/index.ts';
+import { NodeTranscriptSource } from '../src/adapters/transcript/index.ts';
 import {
   FileSessionAttachmentCopier,
   FileSessionTransferBriefWriter,
@@ -457,6 +463,7 @@ import {
   AnalyticsIngestionService,
   type AnalyticsSubsystem,
   type AnalyticsTranscriptEvidenceSource,
+  type AnalyticsTranscriptFoldSource,
   AnswerAcknowledged,
   AnswerReleased,
   AnswerRequestConflict,
@@ -5216,11 +5223,13 @@ function createAnalyticsIngestion(
   pricingConfiguration: AnalyticsPricingConfigurationPort,
   modelCatalogs: () => Promise<Readonly<Record<string, ModelCatalog>>>,
   evidence: AnalyticsTranscriptEvidenceSource,
+  folds: AnalyticsTranscriptFoldSource,
   clock: ClockPort,
 ): AnalyticsIngestionService {
   return new AnalyticsIngestionService({
     candidates: createAnalyticsCandidateSource(storage),
     evidence,
+    folds,
     store: opened.store,
     pricing: async () => {
       const read = await pricingConfiguration.readPricing();
@@ -6873,25 +6882,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         if (file === undefined) return { kind: 'unresolved' };
         const source = transcriptSources.find(candidate => candidate.harness === harness);
         if (source === undefined) return { kind: 'unreadable' };
-        // A transcript longer than one bounded read can never be proven complete, so reading — and
-        // parsing — its first 32 MiB again only to refuse it was pure cost: on a Mac with three 200 MB
-        // transcripts it was seconds of a blocked loop every pass and every boot. It is refused unread,
-        // with the bytes it could not account for, which is the refusal the read itself would have made.
-        const size = await stat(file).then(
-          info => info.size,
-          () => undefined,
-        );
-        if (size !== undefined && size > DEFAULT_MAX_READ_BYTES)
-          return { kind: 'read', harness, events: [], issues: ['source-truncated'], pendingBytes: size };
-        const batch = await source.read(file, { sessionId }).catch(() => undefined);
-        if (batch === undefined) return { kind: 'unreadable' };
-        return {
-          kind: 'read',
-          harness,
-          events: batch.events,
-          issues: batch.issues.map(issue => issue.code),
-          pendingBytes: batch.cursor.pendingBytes,
-        };
+        return await readAnalyticsTranscriptEvidence(source, file, sessionId, harness);
       },
     };
   };
@@ -7559,7 +7550,10 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       });
     },
     webrtcEngine: new NodeDataChannelEngine(),
-    probeWorkers: async () => [{ name: 'pdf-decrypt', ...(await probePdfDecryptWorker()) }],
+    probeWorkers: async () => [
+      await probeBundledWorker('analytics-fold'),
+      { name: 'pdf-decrypt', ...(await probePdfDecryptWorker()) },
+    ],
     createDirectCarrier: async (dispatch, sockets, devices, pairing) => {
       const identity = await readDaemonRelayIdentity(
         stateFiles,
@@ -8158,6 +8152,13 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         daemonConfigStore,
         pricedModelCatalogs,
         createAnalyticsTranscriptEvidence(storage),
+        // Read and folded on a worker thread: the event loop only resolves which file to read.
+        new WorkerTranscriptFolds(
+          (
+            resolver => async (sessionId: string) =>
+              await resolver.file(sessionId)
+          )(createTranscriptFileResolver(storage)),
+        ),
         clock,
       );
       const analyticsPricing = new AnalyticsPricingService(

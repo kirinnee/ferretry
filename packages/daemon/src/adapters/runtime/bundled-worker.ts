@@ -14,7 +14,7 @@
  */
 
 /** The bundled worker programs, by name: each is `packages/daemon/bin/<name>.worker.ts`. */
-export type BundledWorkerName = 'pdf-decrypt';
+export type BundledWorkerName = 'analytics-fold' | 'pdf-decrypt';
 
 /**
  * The URL to start the worker `name` from. `moduleUrl` is this module's own unless a test asks how a
@@ -42,4 +42,54 @@ export function describeWorkerProbes(reports: readonly WorkerProbeReport[]): str
   const failed = reports.find(report => !report.ready);
   if (failed !== undefined) return `! ${failed.name} did not start — ${failed.reason ?? 'no reason was given'}`;
   return `${reports.map(report => report.name).join(', ')} ready`;
+}
+
+/**
+ * Starts the worker `name`, sends it `{ probe: true }`, and ends it: ready when it answers with
+ * `probe: true` (and no `ok: false`) inside `timeoutMs`. Each worker program answers that message.
+ */
+export async function probeBundledWorker(
+  name: BundledWorkerName,
+  {
+    timeoutMs = 20_000,
+    spawn = () => new Worker(bundledWorkerUrl(name), { type: 'module' }),
+  }: {
+    readonly timeoutMs?: number;
+    readonly spawn?: () => Worker;
+  } = {},
+): Promise<WorkerProbeReport> {
+  let worker: Worker;
+  try {
+    worker = spawn();
+  } catch (error) {
+    return {
+      name,
+      ready: false,
+      reason: `it could not be created: ${error instanceof Error ? error.message : String(error)}`,
+    };
+  }
+  try {
+    return await new Promise<WorkerProbeReport>(resolve => {
+      const timeout = setTimeout(
+        () => resolve({ name, ready: false, reason: `no answer within ${String(timeoutMs)} ms` }),
+        timeoutMs,
+      );
+      const settle = (report: WorkerProbeReport): void => {
+        clearTimeout(timeout);
+        resolve(report);
+      };
+      worker.onmessage = (event: MessageEvent<unknown>) => {
+        const answer = event.data as { ok?: unknown; probe?: unknown } | null;
+        settle(
+          answer?.probe === true && answer.ok !== false
+            ? { name, ready: true }
+            : { name, ready: false, reason: 'it started but did not answer the probe' },
+        );
+      };
+      worker.onerror = event => settle({ name, ready: false, reason: `it failed: ${event?.message ?? 'no detail'}` });
+      worker.postMessage({ probe: true });
+    });
+  } finally {
+    worker.terminate();
+  }
 }

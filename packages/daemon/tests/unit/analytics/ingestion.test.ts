@@ -14,7 +14,7 @@ import type {
   AnalyticsStoreStatus,
 } from '../../../src/lib/analytics/store.ts';
 import { ANALYTICS_INDEX_SCHEMA_VERSION } from '../../../src/lib/analytics/store.ts';
-import type { AnalyticsTranscriptEvidence } from '../../../src/lib/analytics/usage-fold.ts';
+import { type AnalyticsTranscriptEvidence, foldAnalyticsTranscript } from '../../../src/lib/analytics/usage-fold.ts';
 import type { TranscriptEvent } from '../../../src/lib/transcript/types.ts';
 
 /**
@@ -555,6 +555,53 @@ describe('AnalyticsIngestionService.ingest', () => {
     should([second.ingested, second.postponed]).deepEqual([2, 1]);
     should([third.ingested, third.postponed, third.unchanged]).deepEqual([1, 0, 4]);
     should(test.reads).deepEqual(['s1', 's2', 's3', 's4', 's5']);
+  });
+
+  it('should take the fold from the fold source when there is one, and never read the evidence itself', async () => {
+    // Arrange — the worker's fold is the one the event loop would have made from the same events.
+    const asked: string[] = [];
+    const test = harness(
+      [candidate({ id: 's1' })],
+      async () => {
+        throw new Error('the evidence must not be read when a fold source is given');
+      },
+      {
+        folds: {
+          foldFor: async (sessionId, harness, aliasGroups) => {
+            asked.push(`${sessionId}:${harness}:${String(aliasGroups.length > 0)}`);
+            return foldAnalyticsTranscript(readEvidence([usageEvent('claude-opus-5', 10, 10)]), aliasGroups);
+          },
+        },
+      },
+    );
+
+    // Act
+    const summary = await test.service.ingest();
+
+    // Assert
+    should(summary.ingested).equal(1);
+    should(summary.sourceErrors).equal(0);
+    should(asked).deepEqual(['s1:claude:true']);
+    should(test.reads).deepEqual([]);
+    should(test.store.ingested().get('s1')?.hasUsage).be.true();
+  });
+
+  it('should count a fold that raised as a source error with an unreadable refusal, never as zero', async () => {
+    // Arrange
+    const test = harness([candidate({ id: 's1' })], async () => readEvidence([]), {
+      folds: {
+        foldFor: async () => {
+          throw new Error('the analytics worker failed');
+        },
+      },
+    });
+
+    // Act
+    const summary = await test.service.ingest();
+
+    // Assert
+    should(summary.sourceErrors).equal(1);
+    should(summary.usageRefused).equal(1);
   });
 
   it('should run passes one at a time so neither re-folds what the other proved', async () => {
