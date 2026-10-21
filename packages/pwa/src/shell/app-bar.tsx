@@ -566,7 +566,7 @@ export function AppTabBar({ daemon, active = null, onNavigate, onOpenPalette }: 
   const inMore = active !== null && MORE_PLACES.includes(active);
   return (
     <>
-      <nav aria-label="App" className="kt-tabbar" data-app-tab-bar="" data-kb-hide="">
+      <nav aria-label="App" className="kt-tabbar" data-app-tab-bar="" data-kb-hide="" data-safe-bottom="">
         {TAB_BAR_PLACES.map(place)}
         <button
           type="button"

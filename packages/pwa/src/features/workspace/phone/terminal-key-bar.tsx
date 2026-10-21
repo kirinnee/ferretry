@@ -81,8 +81,9 @@ export function TerminalKeyBar({ onSend, ctrl, onCtrlChange, onKeyboard, keyboar
     <div
       role="toolbar"
       aria-label="Terminal keys"
+      data-safe-bottom=""
       data-tab-swipe-ignore=""
-      className="flex items-center gap-0.5 overflow-x-auto border-t border-border-soft bg-surface px-1 py-xs [scrollbar-width:none] sm:gap-xs sm:px-panel [&::-webkit-scrollbar]:hidden"
+      className="flex items-center gap-0.5 overflow-x-auto border-t border-border-soft bg-surface px-1 pt-xs [--own-pad-bottom:var(--gap-xs)] [scrollbar-width:none] sm:gap-xs sm:px-panel [&::-webkit-scrollbar]:hidden"
     >
       <button
         type="button"

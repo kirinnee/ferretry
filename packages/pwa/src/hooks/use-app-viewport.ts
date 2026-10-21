@@ -4,7 +4,9 @@
  * iOS can pan a `100dvh` fixed shell above its software keyboard without
  * resizing it.  The stylesheet already consumes these properties, so this
  * module is the sole producer of `--app-h`, `--app-top`, `--kb-h`, and the
- * `data-keyboard` state observed by `useKeyboardOpen`.
+ * `data-keyboard` state observed by `useKeyboardOpen`. `--app-h` / `--app-top`
+ * exist only while that keyboard is up; at rest every reader falls back to
+ * `100dvh` / 0.
  */
 
 import { useEffect } from 'react';
@@ -104,8 +106,16 @@ export const installAppViewport = (env: AppViewportEnvironment): (() => void) =>
     const phoneLike = env.coarsePointer() || width < DRAWER_MAX;
     const keyboardOpen = phoneLike && (hidden > KEYBOARD_MIN_PX || (typing && height < baseline - KEYBOARD_MIN_PX));
 
-    env.root.style.setProperty('--app-h', `${height}px`);
-    env.root.style.setProperty('--app-top', `${offsetTop}px`);
+    // The visible box sizes the shell ONLY while a keyboard pans it. At rest the stylesheet's `100dvh` is the
+    // screen, and a number read here could only be worse: a stale frame after the keyboard closed, a pinch
+    // zoom's slice, or iOS 26 standalone's short first viewport (styles/index.css, "AN INSTALLED iOS 26 APP").
+    if (keyboardOpen) {
+      env.root.style.setProperty('--app-h', `${height}px`);
+      env.root.style.setProperty('--app-top', `${offsetTop}px`);
+    } else {
+      env.root.style.removeProperty('--app-h');
+      env.root.style.removeProperty('--app-top');
+    }
     env.root.style.setProperty('--kb-h', `${hidden}px`);
     if (keyboardOpen) env.root.setAttribute(KEYBOARD_ATTRIBUTE, 'open');
     else env.root.removeAttribute(KEYBOARD_ATTRIBUTE);

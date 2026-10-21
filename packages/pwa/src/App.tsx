@@ -98,6 +98,7 @@ import { pricingSettingsTab } from './features/settings/pricing-settings.tsx';
 import { securityLogSettingsTab } from './features/settings/security-log-settings.tsx';
 import { settingsPaletteEntries } from './features/settings/settings-catalog.ts';
 import { SettingsPage } from './features/settings/settings-page.tsx';
+import { ViewportOverlay } from './features/settings/viewport-details.tsx';
 import { speedupsSettingsTab } from './features/speedups/speedups-surface.tsx';
 import { StepUpDialog, UNLOCK_COPY } from './features/step-up/step-up-dialog.tsx';
 import { useStuckMessageActions } from './features/stuck-messages/use-stuck-message-actions.tsx';
@@ -2360,6 +2361,7 @@ export function AppShell() {
       <NotificationControlsContext.Provider value={notificationControlsHost}>
         <ThemeFollower />
         <MotionFollower />
+        <ViewportOverlay />
         <AppUpdatedToast />
         {/* The install offer shares the release notice's pinned dock, so the page starts below both
           rather than under either. Phone only: a desktop browser keeps its own install control in the

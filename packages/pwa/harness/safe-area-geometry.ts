@@ -1,36 +1,54 @@
 /**
- * THE BOTTOM SAFE-AREA INSET HAS ONE OWNER, MEASURED IN A REAL BROWSER.
+ * THE BOTTOM SAFE-AREA INSET HAS ONE OWNER PER SCREEN, MEASURED IN A REAL BROWSER.
  *
- * On a home-indicator iPhone the app showed a band of dead space under the composer and under the tab
- * bar: `.kt-shell` paid `env(safe-area-inset-bottom)` and then the composer / the tab bar paid it AGAIN
- * inside the shell, so the gap was twice the inset. A screenshot shows that badly — the band is just
- * background — so every claim here is a number.
+ * On a phone the bar a screen ends in — the composer, the tab bar — pays the home-indicator inset once,
+ * as `max(its own padding, the inset)`, and the shell pays nothing under it (styles/index.css, THE BOTTOM
+ * INSET). Wider than a phone the shell pays it for every column. A screenshot shows a wrong answer badly
+ * — the band is just background — so every claim here is a number.
  *
- * Chromium simulates the inset with `Emulation.setSafeAreaInsetsOverride`; the 34px bottom and 59px top
- * are an iPhone 15 / 16 Pro's. It is the layout half of the iOS standalone case: WebKit itself is not
- * installed on the runners, and the geometry is the shell's CSS, not an engine quirk.
+ * The inset is simulated two ways. Chromium's `Emulation.setSafeAreaInsetsOverride` makes `env()` itself
+ * report it (`cdp`). WebKit has no such switch, so there the stylesheet's one read of each inset
+ * (`--inset-top` / `--inset-bottom`) is set instead (`css`) — the same variables every rule below reads,
+ * so the geometry is the same; only the platform's report is stood in for. Neither reproduces iOS 26's
+ * short installed-app viewport, which is an iOS chrome behaviour: Settings › This device › About this
+ * device › Viewport details exists for that.
  *
  * Every check announces itself and is counted: a check that stops being reached reads exactly like one
  * that passed, so the run owes `SAFE_AREA_GEOMETRY_CHECKS`.
  */
 
 import { join } from 'node:path';
-import type { Browser, BrowserContext, CDPSession, Page } from 'playwright-core';
+import type { Browser, BrowserContext, Page } from 'playwright-core';
+
+interface Insets {
+  readonly top: number;
+  readonly bottom: number;
+  readonly left: number;
+  readonly right: number;
+}
+
+export interface Screen {
+  readonly width: number;
+  readonly height: number;
+  readonly insets: Insets;
+}
 
 /** An iPhone 15 / 16 Pro in portrait. */
-const PORTRAIT = { width: 393, height: 852, insets: { top: 59, bottom: 34, left: 0, right: 0 } } as const;
+const PORTRAIT: Screen = { width: 393, height: 852, insets: { top: 59, bottom: 34, left: 0, right: 0 } };
 /** The same phone on its side: the home indicator is shorter and the notch moves to a side. */
-const LANDSCAPE = { width: 852, height: 393, insets: { top: 0, bottom: 21, left: 59, right: 59 } } as const;
+const LANDSCAPE: Screen = { width: 852, height: 393, insets: { top: 0, bottom: 21, left: 59, right: 59 } };
 /** A software keyboard's visual viewport, an iPhone-plausible ~420px of the 852. */
 const KEYBOARD_VISUAL_HEIGHT = 430;
-/** The composer's own bottom padding (0.5rem), the only thing allowed under it besides the inset. */
-const COMPOSER_PAD = 8;
+/** The composer dock's own resting padding (0.5rem), which the inset absorbs on a phone. */
+export const COMPOSER_PAD = 8;
+/** "Jump to latest" sits this far above the composer's top edge (lib/viewport-diagnostics.ts PILL_GAP). */
+export const PILL_GAP = { min: 8, max: 16 } as const;
 const EPSILON = 1;
-/** The shell reserves this fraction of the platform's inset: the indicator is a thin bar, not the whole zone. */
-const PAID = 0.5;
-const paid = (inset: number): number => inset * PAID;
 
-export const SAFE_AREA_GEOMETRY_CHECKS = 3 + 3 + 2 + 2 + 2;
+/** Chat 4 + the pill 1; settings 3 and sessions 2; the keyboard 3; landscape chat 2 and settings 2. */
+export const SAFE_AREA_GEOMETRY_CHECKS = 4 + 1 + 3 + 2 + 3 + 2 + 2;
+
+export type InsetSimulation = 'cdp' | 'css';
 
 export interface SafeAreaRun {
   readonly browser: Browser;
@@ -41,24 +59,30 @@ export interface SafeAreaRun {
   readonly keyboardShim: string;
   /** Present: also capture the before/after evidence frames into this directory. */
   readonly captureDir?: string;
+  /** How the home-indicator inset is made to exist; Chromium's real `env()` override by default. */
+  readonly insetSimulation?: InsetSimulation;
 }
 
-const IPHONE_USER_AGENT =
+export const IPHONE_USER_AGENT =
   'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1';
 
-interface Measure {
+export interface Measure {
   readonly innerHeight: number;
-  readonly safeBottom: number;
+  /** The platform's bottom inset as the stylesheet read it (`--inset-bottom`). */
+  readonly insetBottom: number;
   readonly shellBottom: number;
   readonly shellPaddingBottom: number;
   readonly inputBottom: number | null;
   readonly inputPaddingBottom: number | null;
+  readonly composerTop: number | null;
+  readonly composerBottom: number | null;
+  readonly pillBottom: number | null;
   readonly tabbarBottom: number | null;
   readonly tabItemsBottom: number | null;
 }
 
 /** Measured once layout has settled: reduced motion still runs a 1ms transition on every element. */
-const measure = (page: Page): Promise<Measure> =>
+export const measure = (page: Page): Promise<Measure> =>
   page.evaluate(async () => {
     // An infinite busy mark (a spinner's pulse) never finishes, and is not layout.
     const finite = document.getAnimations().filter(a => a.effect?.getTiming().iterations !== Number.POSITIVE_INFINITY);
@@ -67,12 +91,11 @@ const measure = (page: Page): Promise<Measure> =>
     const shell = document.querySelector('.kt-shell');
     if (!(shell instanceof HTMLElement)) throw new Error('no .kt-shell on the page');
     const probe = document.createElement('div');
-    probe.style.cssText = 'position:fixed;bottom:0;height:env(safe-area-inset-bottom,0px);width:1px';
+    probe.style.cssText = 'position:fixed;bottom:0;height:var(--inset-bottom,0px);width:1px';
     document.body.append(probe);
-    const safeBottom = probe.getBoundingClientRect().height;
+    const insetBottom = probe.getBoundingClientRect().height;
     probe.remove();
-    const bottomOf = (selector: string): number | null =>
-      document.querySelector(selector)?.getBoundingClientRect().bottom ?? null;
+    const box = (selector: string): DOMRect | null => document.querySelector(selector)?.getBoundingClientRect() ?? null;
     const padOf = (selector: string): number | null => {
       const element = document.querySelector(selector);
       return element === null ? null : Number.parseFloat(getComputedStyle(element).paddingBottom);
@@ -80,18 +103,106 @@ const measure = (page: Page): Promise<Measure> =>
     const items = [...document.querySelectorAll('.kt-tabbar__item')];
     return {
       innerHeight: window.innerHeight,
-      safeBottom,
+      insetBottom,
       shellBottom: shell.getBoundingClientRect().bottom,
       shellPaddingBottom: Number.parseFloat(getComputedStyle(shell).paddingBottom),
-      inputBottom: bottomOf('.fy-chat-input'),
+      inputBottom: box('.fy-chat-input')?.bottom ?? null,
       inputPaddingBottom: padOf('.fy-chat-input'),
-      tabbarBottom: bottomOf('.kt-tabbar'),
+      composerTop: box('.fy-chat-input .fy-composer')?.top ?? null,
+      composerBottom: box('.fy-chat-input .fy-composer')?.bottom ?? null,
+      pillBottom: box('.fy-jump-latest')?.bottom ?? null,
+      tabbarBottom: box('.kt-tabbar')?.bottom ?? null,
       tabItemsBottom: items.length === 0 ? null : Math.max(...items.map(item => item.getBoundingClientRect().bottom)),
     };
   });
 
+/** Stands in for the platform's inset report where the engine cannot make one (`css`). */
+const cssInsetScript = (insets: Insets): string => `(() => {
+  const apply = () => {
+    const style = document.createElement('style');
+    style.dataset.harnessInsets = '';
+    style.textContent = ':root:root{--inset-top:${insets.top}px;--inset-bottom:${insets.bottom}px}';
+    document.head.append(style);
+  };
+  if (document.head) apply();
+  else document.addEventListener('DOMContentLoaded', apply, { once: true });
+})();`;
+
+export interface OpenOptions {
+  readonly browser: Browser;
+  readonly rootUrl: string;
+  readonly scheme: 'light' | 'dark';
+  readonly keyboardShim: string;
+  readonly insetSimulation: InsetSimulation;
+  readonly userAgent?: string;
+  readonly isMobile?: boolean;
+  /** Extra init script, e.g. one that answers `display-mode: standalone`. */
+  readonly initScript?: string;
+}
+
+/** A fresh, network-sealed context on `screen` with its insets simulated, at `query`, handed to `work`. */
+export async function openScreen(
+  options: OpenOptions,
+  screen: Screen,
+  query: string,
+  work: (page: Page) => Promise<void>,
+): Promise<void> {
+  const mobile = options.isMobile ?? true;
+  const context: BrowserContext = await options.browser.newContext({
+    viewport: { width: screen.width, height: screen.height },
+    deviceScaleFactor: mobile ? 3 : 1,
+    isMobile: mobile,
+    hasTouch: mobile,
+    ...(options.userAgent === undefined ? {} : { userAgent: options.userAgent }),
+    colorScheme: options.scheme,
+    reducedMotion: 'reduce',
+  });
+  try {
+    await context.route('**/*', async route => {
+      if (new URL(route.request().url()).origin !== new URL(options.rootUrl).origin) await route.abort();
+      else await route.continue();
+    });
+    await context.addInitScript(options.keyboardShim);
+    if (options.initScript !== undefined) await context.addInitScript(options.initScript);
+    if (options.insetSimulation === 'css') await context.addInitScript(cssInsetScript(screen.insets));
+    const page = await context.newPage();
+    if (options.insetSimulation === 'cdp') {
+      const cdp = await context.newCDPSession(page);
+      await cdp.send('Emulation.setSafeAreaInsetsOverride', { insets: screen.insets });
+    }
+    await page.goto(`${options.rootUrl}${query}`);
+    if (query.startsWith('#')) await page.reload();
+    await page.locator('.kt-shell').first().waitFor({ state: 'visible' });
+    await page.evaluate(async () => {
+      await document.fonts.ready;
+      await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    });
+    await work(page);
+  } finally {
+    await context.close();
+  }
+}
+
+/** Scrolls the transcript away from its tail the way a reader does, so "Jump to latest" appears. */
+export async function detachTranscript(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    const transcript = document.querySelector('.fy-transcript');
+    if (!(transcript instanceof HTMLElement)) throw new Error('no transcript on the page');
+    // A wheel is the reader's intent; the scroll that follows is then theirs, not a layout shift.
+    transcript.dispatchEvent(new WheelEvent('wheel', { deltaY: -600, bubbles: true }));
+    transcript.scrollTop = 0;
+  });
+  await page.locator('.fy-jump-latest').waitFor({ state: 'visible' });
+}
+
+export const keyboard = (page: Page, height: number | null): Promise<void> =>
+  page.evaluate(
+    h => (window as unknown as { __harnessKeyboard: (n: number | null) => void }).__harnessKeyboard(h),
+    height,
+  );
+
 export async function runSafeAreaGeometry(run: SafeAreaRun): Promise<number> {
-  const { browser, rootUrl, scheme } = run;
+  const { scheme } = run;
   const fail: (message: string) => never = run.fail;
   let checks = 0;
   const near = (a: number, b: number): boolean => Math.abs(a - b) <= EPSILON;
@@ -99,81 +210,63 @@ export async function runSafeAreaGeometry(run: SafeAreaRun): Promise<number> {
     checks += 1;
     process.stdout.write(`   safe area @ ${where}: ${what}\n`);
   };
-
-  const open = async (
-    screen: {
-      readonly width: number;
-      readonly height: number;
-      readonly insets: Readonly<Record<'top' | 'bottom' | 'left' | 'right', number>>;
-    },
-    query: string,
-    work: (page: Page, cdp: CDPSession) => Promise<void>,
-  ): Promise<void> => {
-    const context: BrowserContext = await browser.newContext({
-      viewport: { width: screen.width, height: screen.height },
-      deviceScaleFactor: 3,
-      isMobile: true,
-      hasTouch: true,
-      userAgent: IPHONE_USER_AGENT,
-      colorScheme: scheme,
-      reducedMotion: 'reduce',
-    });
-    try {
-      await context.route('**/*', async route => {
-        if (new URL(route.request().url()).origin !== new URL(rootUrl).origin) await route.abort();
-        else await route.continue();
-      });
-      await context.addInitScript(run.keyboardShim);
-      const page = await context.newPage();
-      const cdp = await context.newCDPSession(page);
-      await cdp.send('Emulation.setSafeAreaInsetsOverride', { insets: screen.insets });
-      await page.goto(`${rootUrl}${query}`);
-      if (query.startsWith('#')) await page.reload();
-      await page.locator('.kt-shell').first().waitFor({ state: 'visible' });
-      await page.evaluate(async () => {
-        await document.fonts.ready;
-        await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-      });
-      await work(page, cdp);
-    } finally {
-      await context.close();
-    }
+  const options: OpenOptions = {
+    browser: run.browser,
+    rootUrl: run.rootUrl,
+    scheme,
+    keyboardShim: run.keyboardShim,
+    insetSimulation: run.insetSimulation ?? 'cdp',
+    userAgent: IPHONE_USER_AGENT,
   };
+  const open = (screen: Screen, query: string, work: (page: Page) => Promise<void>) =>
+    openScreen(options, screen, query, work);
 
   const frame = async (page: Page, name: string): Promise<void> => {
     if (run.captureDir !== undefined)
       await page.screenshot({ path: join(run.captureDir, `safe-area-${name}-${scheme}.png`) });
   };
 
-  const insetWhere = (screen: typeof PORTRAIT | typeof LANDSCAPE): string => `${screen.width}x${screen.height}`;
+  const insetWhere = (screen: Screen): string => `${screen.width}x${screen.height}`;
 
-  // 1. The chat: the shell reserves the inset once; the composer adds only its own padding.
+  // 1. The chat: the composer dock owns the inset, absorbs its own padding into it, and the shell pays nothing.
   await open(PORTRAIT, '#session-workspace', async page => {
     await page.locator('.fy-chat-input').waitFor({ state: 'visible' });
     const at = await measure(page);
     const where = `${insetWhere(PORTRAIT)} chat`;
-    if (!near(at.safeBottom, PORTRAIT.insets.bottom))
+    if (!near(at.insetBottom, PORTRAIT.insets.bottom))
       fail(
-        `the harness did not simulate the inset: env(safe-area-inset-bottom) is ${at.safeBottom}px, wanted ${PORTRAIT.insets.bottom}px`,
+        `the harness did not simulate the inset: --inset-bottom is ${at.insetBottom}px, wanted ${PORTRAIT.insets.bottom}px`,
       );
-    if (!near(at.shellPaddingBottom, paid(at.safeBottom)))
-      fail(`${where}: the shell pays ${at.shellPaddingBottom}px, not its one reservation (${paid(at.safeBottom)}px)`);
-    pass(where, `shell reserves the inset once (${at.shellPaddingBottom}px)`);
-    if (at.inputPaddingBottom !== COMPOSER_PAD)
+    if (at.shellPaddingBottom !== 0)
+      fail(`${where}: the shell pays ${at.shellPaddingBottom}px under a composer that already owns the inset`);
+    pass(where, 'the shell pays nothing under the composer');
+    if (!near(at.inputPaddingBottom ?? Number.NaN, Math.max(COMPOSER_PAD, at.insetBottom)))
       fail(
-        `${where}: the composer pays ${at.inputPaddingBottom}px under itself, wanted its own ${COMPOSER_PAD}px and no second inset`,
+        `${where}: the composer dock pays ${at.inputPaddingBottom}px, wanted max(${COMPOSER_PAD}, ${at.insetBottom}) — the inset absorbing its own padding`,
       );
-    pass(where, `composer adds only its own ${COMPOSER_PAD}px`);
-    const gap = at.innerHeight - (at.inputBottom ?? Number.NaN);
-    if (!near(gap, paid(at.safeBottom)))
+    pass(where, `composer dock pays the inset once (${at.inputPaddingBottom}px), its own ${COMPOSER_PAD}px absorbed`);
+    if (!near(at.inputBottom ?? Number.NaN, at.innerHeight))
+      fail(`${where}: the composer dock ends ${at.innerHeight - (at.inputBottom ?? 0)}px short of the screen edge`);
+    pass(where, 'composer dock reaches the screen edge');
+    const gap = at.innerHeight - (at.composerBottom ?? Number.NaN);
+    if (!near(gap, at.insetBottom))
       fail(
-        `${where}: the composer's box ends ${gap}px above the screen edge — one reservation is ${paid(at.safeBottom)}px, so a band of ${gap - paid(at.safeBottom)}px is dead space`,
+        `${where}: the composer ends ${gap}px above the screen edge — one inset is ${at.insetBottom}px, so ${gap - at.insetBottom}px is dead space`,
       );
-    pass(where, `composer box ends ${gap}px above the edge (= half the ${at.safeBottom}px inset)`);
+    pass(where, `composer ends ${gap}px above the edge (= the one inset)`);
     await frame(page, 'chat');
+
+    // 1b. "Jump to latest" belongs to the composer: just above its top edge, wherever the composer is.
+    await detachTranscript(page);
+    const detached = await measure(page);
+    const pillGap = (detached.composerTop ?? Number.NaN) - (detached.pillBottom ?? Number.NaN);
+    if (!(pillGap >= PILL_GAP.min - EPSILON && pillGap <= PILL_GAP.max + EPSILON))
+      fail(`${where}: "Jump to latest" sits ${pillGap}px above the composer, wanted ${PILL_GAP.min}–${PILL_GAP.max}px`);
+    pass(where, `"Jump to latest" sits ${pillGap}px above the composer`);
+    await frame(page, 'chat-jump');
   });
 
-  // 2. The tab bar: its surface reaches the edge, its buttons clear the indicator by exactly one inset.
+  // 2. The tab bar: it owns the inset, its surface reaches the edge, its buttons clear the indicator by one inset.
   for (const destination of ['settings', 'sessions'] as const)
     await open(PORTRAIT, `?app-chrome=${destination}`, async page => {
       await page.locator('.kt-tabbar').waitFor({ state: 'visible' });
@@ -185,23 +278,20 @@ export async function runSafeAreaGeometry(run: SafeAreaRun): Promise<number> {
         );
       pass(where, 'tab bar surface reaches the screen edge');
       const clear = at.innerHeight - (at.tabItemsBottom ?? Number.NaN);
-      if (!near(clear, paid(at.safeBottom)))
+      if (!near(clear, at.insetBottom))
         fail(
-          `${where}: the tab buttons end ${clear}px above the edge — exactly one reservation (${paid(at.safeBottom)}px) belongs there`,
+          `${where}: the tab buttons end ${clear}px above the edge — exactly one inset (${at.insetBottom}px) belongs there`,
         );
-      pass(where, `tab buttons clear the indicator by one reservation (${clear}px)`);
+      pass(where, `tab buttons clear the indicator by one inset (${clear}px)`);
       if (destination === 'settings') await frame(page, 'settings');
       else await frame(page, 'sessions');
       if (destination === 'settings') {
-        // The keyboard hides the tab bar's buttons' need for an inset: nothing may keep reserving one.
-        await page.evaluate(
-          h => (window as unknown as { __harnessKeyboard: (n: number) => void }).__harnessKeyboard(h),
-          KEYBOARD_VISUAL_HEIGHT,
-        );
+        // The keyboard hides the indicator: nothing may keep reserving one.
+        await keyboard(page, KEYBOARD_VISUAL_HEIGHT);
         await page.waitForFunction(() => document.documentElement.dataset.keyboard === 'open');
-        const open = await measure(page);
-        if (open.shellPaddingBottom !== 0)
-          fail(`${where}: with the keyboard up the shell still reserves ${open.shellPaddingBottom}px`);
+        const up = await measure(page);
+        if (up.shellPaddingBottom !== 0)
+          fail(`${where}: with the keyboard up the shell still reserves ${up.shellPaddingBottom}px`);
         pass(where, 'keyboard up: the shell reserves nothing');
       }
     });
@@ -210,56 +300,49 @@ export async function runSafeAreaGeometry(run: SafeAreaRun): Promise<number> {
   await open(PORTRAIT, '#session-workspace', async page => {
     await page.locator('.fy-chat-input').waitFor({ state: 'visible' });
     const where = `${insetWhere(PORTRAIT)} chat keyboard`;
-    const keyboard = (height: number | null): Promise<void> =>
-      page.evaluate(
-        h => (window as unknown as { __harnessKeyboard: (n: number | null) => void }).__harnessKeyboard(h),
-        height,
-      );
-    await keyboard(KEYBOARD_VISUAL_HEIGHT);
+    await keyboard(page, KEYBOARD_VISUAL_HEIGHT);
     await page.waitForFunction(() => document.documentElement.dataset.keyboard === 'open');
     const up = await measure(page);
     if (!near(up.shellBottom, KEYBOARD_VISUAL_HEIGHT))
       fail(
         `${where}: the shell ends at ${up.shellBottom}px, not at the visible viewport (${KEYBOARD_VISUAL_HEIGHT}px)`,
       );
-    const above = up.shellBottom - (up.inputBottom ?? Number.NaN);
-    if (!near(above, 0))
+    pass(where, 'the shell follows the visible box above the keyboard');
+    const above = up.shellBottom - (up.composerBottom ?? Number.NaN);
+    if (!near(above, COMPOSER_PAD))
       fail(
-        `${where}: ${above}px of dead space sits between the composer and the keyboard — the home-indicator inset is still reserved`,
+        `${where}: ${above}px sits between the composer and the keyboard, wanted only its own ${COMPOSER_PAD}px — the home-indicator inset is still reserved`,
       );
-    pass(where, 'composer sits flush on the keyboard');
+    pass(where, `composer sits ${above}px above the keyboard (its own padding only)`);
     await frame(page, 'chat-keyboard');
-    await keyboard(null);
+    await keyboard(page, null);
     await page.waitForFunction(() => document.documentElement.dataset.keyboard === undefined);
     const closed = await measure(page);
-    if (!near(closed.innerHeight - (closed.inputBottom ?? Number.NaN), paid(closed.safeBottom)))
+    const gap = closed.innerHeight - (closed.composerBottom ?? Number.NaN);
+    if (!near(gap, closed.insetBottom))
       fail(
-        `${where}: after the keyboard closed the composer ends ${closed.innerHeight - (closed.inputBottom ?? 0)}px above the edge, wanted ${paid(closed.safeBottom)}px`,
+        `${where}: after the keyboard closed the composer ends ${gap}px above the edge, wanted ${closed.insetBottom}px`,
       );
     pass(where, 'keyboard closed: the one inset is back and nothing is left over');
   });
 
-  // 4. Rotation: the landscape home indicator is shorter, and the app follows it rather than keeping portrait's.
+  // 4. Rotation: wider than a phone, the shell pays landscape's shorter inset for every column, the bars only their own.
   for (const destination of ['chat', 'settings'] as const)
     await open(LANDSCAPE, destination === 'chat' ? '#session-workspace' : '?app-chrome=settings', async page => {
       const where = `${insetWhere(LANDSCAPE)} ${destination}`;
       const at = await measure(page);
-      const edge = destination === 'chat' ? at.inputBottom : at.tabItemsBottom;
-      if (edge === null) {
-        // A landscape phone is wider than the drawer breakpoint's tab bar: the sessions column is shown instead.
-        if (!near(at.shellPaddingBottom, paid(LANDSCAPE.insets.bottom)))
-          fail(
-            `${where}: the shell pays ${at.shellPaddingBottom}px, landscape's reservation is ${paid(LANDSCAPE.insets.bottom)}px`,
-          );
-        pass(where, `no tab bar at this width; shell reserves landscape's ${at.shellPaddingBottom}px`);
-        return;
+      if (!near(at.shellPaddingBottom, LANDSCAPE.insets.bottom))
+        fail(`${where}: the shell pays ${at.shellPaddingBottom}px, landscape's inset is ${LANDSCAPE.insets.bottom}px`);
+      pass(where, `the shell pays landscape's ${at.shellPaddingBottom}px for every column`);
+      if (destination === 'chat') {
+        const gap = at.innerHeight - (at.composerBottom ?? Number.NaN);
+        if (!near(gap, LANDSCAPE.insets.bottom + COMPOSER_PAD))
+          fail(`${where}: the composer ends ${gap}px above the edge, wanted the inset plus its own ${COMPOSER_PAD}px`);
+        pass(where, `composer ends ${gap}px above the edge (the inset, then its own padding)`);
+      } else {
+        if (at.tabbarBottom !== null) fail(`${where}: a tab bar is showing on a screen wider than a phone`);
+        pass(where, 'no tab bar at this width');
       }
-      const gap = at.innerHeight - edge;
-      if (!near(gap, paid(LANDSCAPE.insets.bottom)))
-        fail(
-          `${where}: the bottom control ends ${gap}px above the edge, landscape's single reservation is ${paid(LANDSCAPE.insets.bottom)}px`,
-        );
-      pass(where, `bottom control clears the indicator by landscape's one reservation (${gap}px)`);
       await frame(page, `landscape-${destination}`);
     });
 

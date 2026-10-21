@@ -173,6 +173,7 @@ import {
   type PairingClientFactory,
 } from '../src/features/settings/add-device-settings.tsx';
 import { AgentClisSurface } from '../src/features/settings/agent-clis.tsx';
+import { ViewportOverlay, viewportOverlay } from '../src/features/settings/viewport-details.tsx';
 import { CapabilityList } from '../src/features/settings/capability-list.tsx';
 import { CgroupConfigSurface } from '../src/features/settings/cgroup-settings.tsx';
 import type { DaemonSettingsTabDefinition } from '../src/features/settings/daemon-settings-frame.tsx';
@@ -8815,6 +8816,9 @@ if (host) {
   const mcpFrame = mcpSignInFrame(window.location.search);
   const pairFromMenu = isPairFromMenuPage(window.location.search);
   const sessionContextMenu = isSessionContextMenuPage(window.location.search);
+  // `?viewport-overlay`: Settings › This device › About this device's readout pinned over any frame, as the
+  // owner sees it on a phone after "Show over the app".
+  if (new URLSearchParams(window.location.search).has('viewport-overlay')) viewportOverlay.set(true);
   createRoot(host).render(
     // The harness answers its daemon inside the page, on the plain network, so every surface is handed
     // a client over it; the app itself only ever has the store's session-routed pool.
@@ -8849,6 +8853,7 @@ if (host) {
         ) : (
           <OnboardingStageHarness screen={screen} />
         )}
+        <ViewportOverlay />
       </SessionSearchProvider>
     </DaemonClientProvider>,
   );

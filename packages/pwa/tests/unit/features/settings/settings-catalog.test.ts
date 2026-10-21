@@ -35,6 +35,7 @@ describe('shared settings catalog', () => {
       'clear-cached-data',
       'transcription-log',
       'dictation-debug',
+      'about-device',
       'speedup-keys',
       'sessions-list',
       'motion',
@@ -73,6 +74,7 @@ describe('shared settings catalog', () => {
         'transcription-log',
         'dictation-debug',
         'clear-cached-data',
+        'about-device',
       ],
       [],
     ]);
