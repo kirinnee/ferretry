@@ -46,24 +46,19 @@
  * the refresh either way. See `docs/pairing.md` and `docs/relay-protocol.md` §§13–14.
  */
 
-import { type DaemonCarrier, DaemonCarriersViewSchema } from '@ferretry/protocol';
+import { DaemonCarriersViewSchema } from '@ferretry/protocol';
 import { type ApiRoute, jsonResponse } from '../../api/index.ts';
+import type { PublishedCarrierView } from '../published-carriers.ts';
 
 /**
- * THERE IS NO SUBSYSTEM INTERFACE HERE, AND THAT IS THE DESIGN.
- *
- * Every other mount in this directory takes an object with methods, because every other mount serves
- * something a daemon DOES. This one serves something a daemon IS, resolved once at boot and constant
- * for the life of the process, so the smallest honest dependency is the value itself.
- *
- * ONE ARRAY, TWO CONSUMERS. `PairingService` hands this set to a device at redemption and this route
- * hands the same set back on refresh. The composition root resolves it once and passes the SAME
- * reference to both, which is what makes the two answers agree by construction. A `current()` getter
- * would have read as the flexible choice and permitted the exact bug the published set exists to end:
- * two calls answering differently, so a device's stored copy and the daemon's next answer describe
- * different daemons. `readonly` is the whole guarantee it needs.
+ * ONE OWNER, TWO CONSUMERS. `PairingService` hands this set to a device at redemption and this route
+ * hands it back on refresh. The composition root passes the SAME view to both, which is what makes the
+ * two answers agree: they are read from one place. This used to be a frozen array, constant for the
+ * life of the process; a tunnel is published only while its connector is registered
+ * (`docs/relay-protocol.md` §15), so the set now changes while the daemon runs — and a device's refresh
+ * is exactly how it learns that. See `runtime/published-carriers.ts` for why one owner keeps the rule.
  */
-export function carrierRoutes(carriers: readonly DaemonCarrier[]): readonly ApiRoute[] {
+export function carrierRoutes(carriers: PublishedCarrierView): readonly ApiRoute[] {
   // PARSED HERE, WHERE THE TABLE IS BUILT, AND NOT INSIDE THE HANDLER.
   //
   // The schema is what holds a published direct address to the origin rule its readers apply — the
@@ -73,10 +68,9 @@ export function carrierRoutes(carriers: readonly DaemonCarrier[]): readonly ApiR
   // daemon and names no remedy. Here it is a boot failure, once, while somebody is still looking at
   // the terminal they started it from.
   //
-  // The view is also the whole answer, computed once: the set is resolved at boot and constant for the
-  // life of this daemon, so there is nothing about a request that could change it. That is why this
-  // route has no per-request work to do at all.
-  const view = DaemonCarriersViewSchema.parse({ carriers });
+  // Every LATER set is parsed by its owner when it is made (`PublishedCarrierSet.tunnel`), so the
+  // handler below serves what is current without a parse that could fail per request.
+  DaemonCarriersViewSchema.parse({ carriers: carriers.current() });
   return [
     {
       method: 'GET',
@@ -86,7 +80,7 @@ export function carrierRoutes(carriers: readonly DaemonCarrier[]): readonly ApiR
       // rendezvous the operator has just switched off, which is the failure the route exists to end.
       // The daemon holds ONE answer and reserving it is fine; a CLIENT holding a stale one is the bug.
       noStore: true,
-      handle: async () => jsonResponse(view),
+      handle: async () => jsonResponse({ carriers: carriers.current() }),
     },
   ];
 }

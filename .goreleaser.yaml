@@ -66,6 +66,12 @@ nfpms:
     maintainer: kirinnee <kirinnee97@gmail.com>
     homepage: https://github.com/kirinnee/ferretry
     description: Command-line client for the per-host agent daemon
+    # The daemon's hosted tunnel carrier runs `cloudflared` (docs/relay-protocol.md §15). Neither
+    # Debian nor Fedora ships it in the default repositories (Cloudflare publishes its own), so it is a
+    # weak dependency here: installed when a configured repository has it, never a reason the install
+    # fails. Without it the tunnel carrier is off and `fyd --check` names the remedy.
+    recommends:
+      - cloudflared
     bindir: /usr/bin
 
 release:
@@ -90,6 +96,11 @@ homebrew_casks:
     directory: Casks
     homepage: https://github.com/kirinnee/ferretry
     description: Command-line client for the per-host agent daemon
+    # The daemon's hosted tunnel carrier runs `cloudflared` (docs/relay-protocol.md §15). It is a
+    # DEPENDENCY, never a download: Homebrew installs it beside the daemon, and Ferretry never fetches
+    # a binary itself. Without it the tunnel carrier is off and `fyd --check` says so.
+    dependencies:
+      - formula: cloudflared
     # The Bun binary ships unsigned; strip the macOS quarantine attribute on install.
     hooks:
       post:

@@ -1,6 +1,7 @@
 import type { MillisecondClockPort } from '../runtime/boot.ts';
 import type { UsageFeedPort } from '../usage/types.ts';
 import type { ApiCredentials } from './authentication.ts';
+import type { ApiHeaders } from './http.ts';
 import { ApiDispatcher } from './dispatcher.ts';
 import { NO_GOVERNED_ROUTES_GUARD } from './capability.ts';
 import type { ApiRoute } from './route.ts';
@@ -24,6 +25,17 @@ export interface ApiBindOptions {
    * that claim: the immediate peer would be the proxy, not necessarily this machine's user.
    */
   readonly directLoopbackIsPrivileged: boolean;
+  /**
+   * PRESENT MEANS EVERY ARRIVAL ON THIS LISTENER IS REMOTE, whatever its peer address says.
+   *
+   * The tunnel listener (`docs/relay-protocol.md` §15) is bound on `127.0.0.1` because `cloudflared`
+   * forwards to it from this host — so every arrival comes from a loopback peer, and reading that peer
+   * would hand a phone on the far side of Cloudflare the machine. With this set, an arrival is stamped
+   * `loopback: false` and not privileged, exactly as a relayed one is, and its rate-limit identity is
+   * whatever this answers from the request's headers instead of the (always loopback) peer address.
+   * `directLoopbackIsPrivileged` is ignored when this is present.
+   */
+  readonly remotePeer?: (headers: ApiHeaders) => string;
 }
 
 /** A listening host. The adapter owns the sockets; nothing in the domain does. */
@@ -54,8 +66,9 @@ export interface ApiServerHandle {
  * moved into the browser and the seam went with it. See `runtime/mounts/index.ts` for the record.
  */
 export interface ApiSurface {
-  readonly http: ApiDispatcher;
-  readonly sockets: ApiSocketDispatcher;
+  /** What answers a request: the mounted dispatcher, or a listener's own narrower one (the tunnel's). */
+  readonly http: Pick<ApiDispatcher, 'dispatch'>;
+  readonly sockets: Pick<ApiSocketDispatcher, 'claims' | 'upgrade'>;
   /** Exact browser origins admitted by the transport-level CORS boundary. */
   readonly corsOrigins: readonly string[];
 }

@@ -42,7 +42,7 @@ describe('a real pairing, read back off the disk', () => {
         daemonId: state.daemonId,
         daemonName: state.daemonName,
         advertisement: { kind: 'address', url: 'https://workstation.example.test', origin: 'operator' },
-        carriers: [{ kind: 'direct', url: 'https://workstation.example.test' }],
+        carriers: { current: () => [{ kind: 'direct', url: 'https://workstation.example.test' }] },
         clock: { now: () => Date.now() },
         cryptography,
         devices: repository,

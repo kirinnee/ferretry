@@ -64,6 +64,9 @@ import {
   sessionMessageTokenKeyFile,
 } from '../../../src/adapters/session/transcript/file-message-token-codec.ts';
 import { NodeTranscriptSource } from '../../../src/adapters/transcript/index.ts';
+import { CloudflaredLocator } from '../../../src/adapters/tunnel/index.ts';
+import { CLOUDFLARED_NOT_ON_PATH, NO_TUNNEL_SERVICE } from '../../../src/lib/tunnel/index.ts';
+import { FakeHostedService, fakeCloudflared, removeTempDirectories } from '../tunnel/support.ts';
 import {
   type BootNoticePort,
   CodexTranscriptParser,
@@ -184,6 +187,10 @@ function buildIntegrationWorld(seams: WorldSeams = { userHome: ABSENT_USER_HOME 
     ...world,
     harnesses: { ...world.harnesses, executables: hostWithoutHarnesses(world.harnesses.executables) },
     relayDirectory: { read: async (): Promise<RelayAdvertisement> => NO_RELAY_DIRECTORY },
+    // The tunnel held off for the same reason, and DETERMINISTICALLY: whether this machine happens to
+    // have `cloudflared` installed must not decide what a boot says.
+    tunnelService: { read: async () => NO_TUNNEL_SERVICE },
+    cloudflared: { locate: () => CLOUDFLARED_NOT_ON_PATH },
   };
 }
 
@@ -1148,6 +1155,97 @@ describe('daemon boot lifecycle', () => {
     // The daemon keeps the PUBLIC half and nothing a copy of this file could replay.
     should(deviceDocument).containEql(device.publicKey);
     should(deviceDocument).not.containEql('tokenHash');
+  });
+
+  it('should publish the hosted tunnel and serve it as a remote carrier through the production composition root', async () => {
+    // `docs/relay-protocol.md` §15 "The daemon end", end to end: the production tunnel carrier against a
+    // fake hosted service on loopback (which verifies each signature over its own host) and a fake
+    // `cloudflared` executable. The test dials the dedicated listener directly, which is exactly where
+    // `cloudflared` forwards a tunnelled browser — from this host's loopback.
+    // Arrange
+    const home = await tempDirectory('fyd-tunnel');
+    const port = await freeLoopbackPort();
+    const service = new FakeHostedService();
+    const fake = await fakeCloudflared();
+    const cleanups: Array<() => void | Promise<void>> = [];
+    let release = (): void => {};
+    const seeded = await worldAt(home, port, async () => {
+      await new Promise<void>(resolve => {
+        release = resolve;
+      });
+    });
+    const world: DaemonWorld = {
+      ...seeded,
+      tunnelService: { read: async () => ({ kind: 'available', origin: service.origin }) },
+      cloudflared: new CloudflaredLocator({ FY_CLOUDFLARED: fake.path }),
+    };
+    const exit = start(world, cleanups);
+    const base = `http://127.0.0.1:${port}`;
+    const origin = 'https://ferretry.pages.dev';
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      if ((await fetch(`${base}/healthz`).catch(() => undefined)) !== undefined) break;
+      await Bun.sleep(50);
+    }
+    const adminToken = (await readFile(join(home, 'api-token'), 'utf8')).trim();
+    const minted = PairingCodeMintResponseSchema.parse(
+      await (
+        await fetch(`${base}/v1/pair/code`, { method: 'POST', headers: { authorization: `Bearer ${adminToken}` } })
+      ).json(),
+    );
+    const device = await newTestDevice();
+    const pairing = await pairOverSession(base, minted.daemonId, minted.code, 'Tunnel phone', device);
+    if (pairing.kind !== 'paired') throw new Error('the direct session refused a fresh code');
+    const direct = await deviceSession(base, minted.daemonId, pairing.response.deviceId, device, { origin });
+    await unlockThroughTheDaemon(direct, await es256Authenticator());
+    await waitUntil(() => service.provisions.length > 0, 'the tunnel to be provisioned');
+    const originPort = service.provisions[0]?.originPort ?? 0;
+    const tunnelBase = `http://127.0.0.1:${String(originPort)}`;
+    const carriersOf = async (session: TestSession) =>
+      DaemonCarriersViewSchema.parse(JSON.parse((await session.request('GET', '/v1/carriers')).body)).carriers;
+    for (let attempt = 0; attempt < 200; attempt += 1) {
+      if ((await carriersOf(direct)).some(carrier => carrier.kind === 'tunnel')) break;
+      await Bun.sleep(25);
+    }
+
+    // Act — the same device, through the tunnel's own listener.
+    const tunnelled = await deviceSession(tunnelBase, minted.daemonId, pairing.response.deviceId, device, { origin });
+    const carriersThroughTunnel = await carriersOf(tunnelled);
+    const privilegedThroughTunnel = await tunnelled.request('POST', '/v1/agent/tools', { body: '{}' });
+    const privilegedDirect = await direct.request('POST', '/v1/agent/tools', { body: '{}' });
+    const grantsThroughTunnel = JSON.parse((await tunnelled.request('GET', '/v1/grants')).body) as Record<
+      string,
+      unknown
+    >;
+    const plainHttp = await Promise.all(
+      ['/healthz', '/v1/carriers', `/v1/health?token=${adminToken}`].map(
+        async path =>
+          (await fetch(`${tunnelBase}${path}`, { headers: { authorization: `Bearer ${adminToken}` } })).status,
+      ),
+    );
+    tunnelled.close();
+    direct.close();
+    release();
+    const code = await exit;
+    await runCleanups(cleanups);
+    const afterStop = await fetch(`${tunnelBase}/healthz`).catch(() => 'refused');
+    await service.stop();
+    await removeTempDirectories();
+
+    // Assert
+    should(code).equal(0);
+    should(service.verdicts).deepEqual([true]);
+    // Published after direct and before any relay, at the hostname the service provisioned.
+    should(carriersThroughTunnel).deepEqual([
+      { kind: 'direct', url: base },
+      { kind: 'tunnel', url: 'https://quiet-otter.tunnels.example' },
+    ]);
+    // A tunnel arrival is remote: no privileged-only route, governed and not host-local, like a relay.
+    should(privilegedThroughTunnel.status).equal(403);
+    should(privilegedDirect.status).not.equal(403);
+    should([grantsThroughTunnel.governed, grantsThroughTunnel.hostLocal]).deepEqual([true, false]);
+    // Nothing but the session route is served on the tunnel's port, whatever credential is presented.
+    should(plainHttp).deepEqual([404, 404, 404]);
+    should(afterStop).equal('refused');
   });
 
   it('should delete a stale operator-password verifier at boot and say so once', async () => {

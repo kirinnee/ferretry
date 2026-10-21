@@ -110,6 +110,7 @@ export * from './tasks/index.ts';
 export * from './terminal/index.ts';
 export * from './tmux/index.ts';
 export * from './transcript/index.ts';
+export * from './tunnel/index.ts';
 export * from './update/index.ts';
 export * from './usage/index.ts';
 export * from './version.ts';

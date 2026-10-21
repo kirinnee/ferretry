@@ -28,6 +28,8 @@ cask "ferretry" do
     skip "Auto-generated on release."
   end
 
+  depends_on formula: "cloudflared"
+
   binary "fy"
   binary "fyd"
   binary "fyd-browser-worker"

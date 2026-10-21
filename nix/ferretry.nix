@@ -56,11 +56,15 @@ let
     {
       pname,
       executables,
+      postInstall ? "",
     }:
     pkgs.stdenvNoCC.mkDerivation {
-      inherit pname src;
+      inherit pname src postInstall;
       version = releaseVersion;
-      nativeBuildInputs = [ pkgs.bun ];
+      nativeBuildInputs = [
+        pkgs.bun
+        pkgs.makeWrapper
+      ];
 
       buildPhase = ''
         # Restore Bun's own filtered install tree instead of flattening package dependencies into a
@@ -83,10 +87,14 @@ let
           "bun scripts/release/compile-executable.ts --entry ${executable.entry} --outfile ${executable.name}"
         ) executables}
       '';
+      # A custom installPhase runs no hooks of its own, so `postInstall` (fyd's cloudflared wrapper) is
+      # run here explicitly.
       installPhase = ''
+        runHook preInstall
         ${lib.concatMapStringsSep "\n" (
           executable: "install -Dm755 ${executable.name} \"$out/bin/${executable.name}\""
         ) executables}
+        runHook postInstall
       '';
     };
 
@@ -101,6 +109,13 @@ let
   };
   fyd = mkBinary {
     pname = "fyd";
+    # The hosted tunnel carrier runs `cloudflared` (docs/relay-protocol.md §15). It is a DEPENDENCY,
+    # never a download: this package names the store's own binary through FY_CLOUDFLARED, which the
+    # daemon reads before searching PATH. `--set-default` keeps an operator's own FY_CLOUDFLARED
+    # winning, and naming the binary rather than prefixing PATH keeps it off every agent's PATH.
+    postInstall = ''
+      wrapProgram "$out/bin/fyd" --set-default FY_CLOUDFLARED ${lib.getExe pkgs.cloudflared}
+    '';
     executables = [
       {
         name = "fyd";

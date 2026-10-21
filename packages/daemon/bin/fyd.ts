@@ -55,7 +55,6 @@ import {
   CONFIG_ACCEPTED_FILE,
   type ConversionPreview,
   type ConversionSummary as ConversionSummaryView,
-  type DaemonCarrier,
   type FleetCredentialList,
   FY_DEFAULT_DAEMON_PORT,
   type Harness,
@@ -168,6 +167,11 @@ import {
   GitHubLatestRelease,
   HostedModelCatalog,
   HostedRelayDirectory,
+  BunConnectorProcesses,
+  CloudflaredLocator,
+  FileTunnelHolding,
+  HostedTunnelProvisioner,
+  HostedTunnelService,
   HostHarnessFacts,
   HostHarnessProbe,
   HostInstallFacts,
@@ -626,7 +630,6 @@ import {
   projectObservedRuntime,
   projectStructuredQuestion,
   publishableDirectCarrier,
-  publishedDaemonCarriers,
   type QuotaFailoverLoop,
   QuotaFailoverService,
   RELAY_DIRECTORY_NOT_ASKED,
@@ -808,6 +811,16 @@ import {
   wardenTriggerEnabled,
   withLivenessLedger,
   xvfbMissingMessage,
+  type CloudflaredLocatorPort,
+  describeTunnelPosture,
+  PublishedCarrierSet,
+  type PublishedCarrierView,
+  TunnelCarrier,
+  type TunnelCarrierDependencies,
+  type TunnelServicePort,
+  tunnelListenerSurface,
+  tunnelPeer,
+  tunnelServiceOrigin,
 } from '../src/lib/index.ts';
 import {
   admitChild,
@@ -1123,7 +1136,7 @@ export interface DaemonWorld {
   readonly createPairing: (
     config: DaemonConfig,
     clock: MillisecondClockPort,
-    carriers: readonly DaemonCarrier[],
+    carriers: PublishedCarrierView,
     /**
      * The rendezvous a fresh device can discover for itself — see {@link discoverableRelayUrl}.
      *
@@ -1238,6 +1251,28 @@ export interface DaemonWorld {
    */
   readonly relayDirectory: RelayDirectoryPort;
   /**
+   * WHETHER THE HOSTED SERVICE PROVISIONS TUNNELS — one read per boot, from the relay directory's own
+   * origin (`docs/relay-protocol.md` §15). A world field for the reason `relayDirectory` is one:
+   * `--check` asks it too, and it is the tunnel's one read from a service off this machine.
+   */
+  readonly tunnelService: TunnelServicePort;
+  /** Where `cloudflared` is: `FY_CLOUDFLARED`, else `PATH`. Asked by the boot and by `--check`. */
+  readonly cloudflared: CloudflaredLocatorPort;
+  /**
+   * THE HOSTED TUNNEL CARRIER: provisioning, the `cloudflared` child and the dedicated listener.
+   *
+   * The boot supplies what only it knows — the entry, the listener it serves, where to publish — and
+   * the service and locator above, PASSED IN so a test that overrides either changes what the carrier
+   * uses. Production fills the rest: the holding record, the identity pairing minted, the provisioner,
+   * the process spawner and the timers.
+   */
+  readonly createTunnelCarrier: (
+    input: Pick<
+      TunnelCarrierDependencies,
+      'entry' | 'cloudflared' | 'service' | 'openListener' | 'publish' | 'notices'
+    >,
+  ) => TunnelCarrier;
+  /**
    * The subsystems mounted onto that surface. Every field the result carries is a capability the
    * running product actually has; a subsystem absent from it is one the daemon never constructs.
    *
@@ -1322,8 +1357,8 @@ export interface DaemonWorld {
     stepUp: StepUpService,
     /** The machine's security settings, opened with pairing — see `createPairing`. */
     security: SecuritySettingsService,
-    /** The exact published set pairing redemption receives and authenticated refresh serves. */
-    carriers: readonly DaemonCarrier[],
+    /** The one published set pairing redemption reads and authenticated refresh serves. */
+    carriers: PublishedCarrierView,
     /**
      * Where this operator has said the harnesses are, passed IN for the same reason the usage feed
      * is: it is read from the configuration this boot loaded, and the doctor route must report the
@@ -7287,6 +7322,30 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       },
     ),
     relayDirectory: new HostedRelayDirectory(environment.relayDirectoryOrigin()),
+    tunnelService: new HostedTunnelService(environment.relayDirectoryOrigin()),
+    cloudflared: new CloudflaredLocator(process.env),
+    createTunnelCarrier: input => {
+      const directoryOrigin = environment.relayDirectoryOrigin();
+      return new TunnelCarrier({
+        ...input,
+        discoveryOrigin: directoryOrigin === undefined ? undefined : tunnelServiceOrigin(directoryOrigin),
+        // THAT a tunnel is held, and where from — never its connector token, which stays in memory.
+        holding: new FileTunnelHolding(join(paths.state, 'tunnel.json')),
+        // The key PAIRING minted, so the fingerprint the service records is the one every device pins.
+        identity: async () =>
+          await readDaemonRelayIdentity(stateFiles, paths.daemonIdentity, new WebCryptoRelayIdentityKeys()),
+        crypto: new WebCryptoRelayCrypto(),
+        provisioner: origin => new HostedTunnelProvisioner(origin),
+        processes: new BunConnectorProcesses(process.env),
+        scheduler: {
+          after: (milliseconds, action) => {
+            const handle = setTimeout(action, milliseconds);
+            return { cancel: () => clearTimeout(handle) };
+          },
+        },
+        random: Math.random,
+      });
+    },
     createDirectCarrier: async (dispatch, sockets, devices, pairing) => {
       const identity = await readDaemonRelayIdentity(
         stateFiles,
@@ -9077,8 +9136,11 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
   // origin; pairing and refresh receive this exact frozen array reference below.
   const directCarrier = directCarrierPublication(config);
   if (directCarrier.kind === 'omitted') world.notices.state(directCarrier.notice);
-  const carriers = Object.freeze(
-    publishedDaemonCarriers(directCarrier.kind === 'published' ? directCarrier.url : undefined, relaySources),
+  // ONE OWNER, read by pairing redemption and `GET /v1/carriers` alike. Direct and relays are fixed
+  // for this boot; the tunnel joins it while its connector is registered and leaves when it is not.
+  const carriers = new PublishedCarrierSet(
+    directCarrier.kind === 'published' ? directCarrier.url : undefined,
+    relaySources,
   );
   /**
    * Whether this host can launch an agent at all.
@@ -9392,6 +9454,58 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
   } else {
     world.notices.state(`no relay carriers — ${relay.refusal}`);
   }
+  /**
+   * THE HOSTED TUNNEL (`docs/relay-protocol.md` §15), after the bind and the relays, for the reason
+   * the relays wait for the bind: a boot that hands over to an incumbent must not first take a tunnel.
+   *
+   * ITS LISTENER IS NOT THIS DAEMON'S API LISTENER. `cloudflared` forwards from this host, so every
+   * arrival through it comes from loopback; the tunnel therefore points at a second listener on
+   * `127.0.0.1:0` that serves only this daemon's session route and stamps every arrival remote. The
+   * route is its OWN instance of the direct carrier's, so tunnel arrivals are admitted against their
+   * own bounds — keyed by `CF-Connecting-IP` — rather than sharing a budget with the network's.
+   *
+   * IT NEVER HOLDS THE BOOT UP AND NEVER FAILS IT. Provisioning talks to a service off this machine;
+   * it runs behind `start`, and every failure is a sentence and a carrier that is simply off.
+   */
+  const tunnel = world.createTunnelCarrier({
+    entry: config.carrierSet.tunnel,
+    cloudflared: world.cloudflared,
+    service: world.tunnelService,
+    openListener: async () => {
+      const route = await world.createDirectCarrier(
+        async request => await dispatcher.dispatch(request),
+        {
+          upgrade: async request => await socketDispatcher.upgrade(request),
+          reauthorize: request => socketDispatcher.reauthorize(request),
+        },
+        sessionDevices,
+        pairing.subsystem,
+      );
+      if ('refusal' in route) throw new Error(`there is no session route to serve — ${route.refusal}`);
+      const listener = await world.api.listen(
+        tunnelListenerSurface({
+          route: route.route,
+          credentials: base.credentials,
+          guard: subsystems.grants,
+          corsOrigins: browserOrigins(config),
+        }),
+        { host: '127.0.0.1', port: 0, directLoopbackIsPrivileged: false, remotePeer: tunnelPeer },
+      );
+      return {
+        port: listener.port,
+        close: async () => {
+          listener.closeSockets();
+          await listener.stop();
+        },
+      };
+    },
+    publish: url => carriers.tunnel(url),
+    notices: world.notices,
+  });
+  // Registered before it starts, like every other acquisition: the listener and the child it may take
+  // must be released whether the boot completes or not.
+  cleanups.push(async () => await tunnel.stop());
+  tunnel.start();
   // The self-check tick, armed only once the daemon is actually serving. Its cadence IS the number
   // the wedge detector measures lateness against, so it comes from the same settings object the
   // service reasons with rather than a constant here — a timer that fired on a different period
@@ -9766,6 +9880,19 @@ export async function checkConfiguration(
     for (const carrier of resolvedRelays.sources) {
       say(describeRelayCarrierPosture(carrier, world.config.path));
     }
+    // The tunnel, read through the boot's own order: the locator first, the service only when there is
+    // a `cloudflared` to run — so this command makes no request a boot would not.
+    const tunnelEntry = config.carrierSet.tunnel;
+    const tunnelLocation = tunnelEntry.enabled ? world.cloudflared.locate() : undefined;
+    const tunnelAvailability = tunnelLocation?.kind === 'found' ? await world.tunnelService.read() : undefined;
+    say(
+      describeTunnelPosture({
+        entry: tunnelEntry,
+        configFile: world.config.path,
+        location: tunnelLocation,
+        availability: tunnelAvailability,
+      }),
+    );
     const dialled = resolvedRelays.sources.find(carrier => dialledRelayUrl(carrier) !== undefined);
     carrierForGrants = dialled ?? resolvedRelays.sources[0];
     discoveredRelay = discoverableRelayUrl(resolvedRelays.sources);

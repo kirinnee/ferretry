@@ -1,6 +1,7 @@
 import { FY_VERSION_HEADER, isLoopbackPeer } from '@ferretry/protocol';
 import {
   type ApiBindOptions,
+  type ApiHeaders,
   type ApiRequest,
   type ApiResponse,
   type ApiServerHandle,
@@ -155,7 +156,12 @@ export class BunApiServer implements ApiServerPort {
       maxFrameBytes: SOCKET_MAX_FRAME_BYTES,
       maxBodyBytes: this.maxBodyBytes,
       fetch: async (request: Request) => {
-        const apiRequest = toApiRequest(request, server.requestIp(request), options.directLoopbackIsPrivileged);
+        const apiRequest = toApiRequest(
+          request,
+          server.requestIp(request),
+          options.directLoopbackIsPrivileged,
+          options.remotePeer,
+        );
         const presentedOrigin = request.headers.get('origin');
         const origin =
           presentedOrigin === null || presentedOrigin === new URL(request.url).origin ? null : presentedOrigin;
@@ -412,22 +418,31 @@ function finish(socket: HostSocket): void {
   state.handler?.close();
 }
 
-/** Translates a runtime `Request` into the transport-free shape the domain routes on. */
+/**
+ * Translates a runtime `Request` into the transport-free shape the domain routes on.
+ *
+ * `remotePeer` is the tunnel listener's rule (`ApiBindOptions.remotePeer`): when it is given, the
+ * arrival is REMOTE whatever the peer address is, and the rate-limit identity comes from the headers it
+ * reads. Loopback is decided from the carrier, never from the address a forwarder happens to use.
+ */
 export function toApiRequest(
   request: Request,
   remoteAddress: string | undefined,
   directLoopbackIsPrivileged = false,
+  remotePeer?: (headers: ApiHeaders) => string,
 ): ApiRequest {
   const url = new URL(request.url);
+  const headers = headersFrom(Object.fromEntries(request.headers));
+  const peerIsLoopback = remotePeer === undefined && remoteAddress !== undefined && isLoopbackPeer(remoteAddress);
   return {
     method: request.method,
     // `URL.pathname` is the raw, still-percent-encoded path, which is what the router must match.
     path: url.pathname,
     query: queryFrom(url.searchParams),
-    headers: headersFrom(Object.fromEntries(request.headers)),
-    clientAddress: remoteAddress,
-    loopback: remoteAddress !== undefined && isLoopbackPeer(remoteAddress),
-    privilegedLoopback: directLoopbackIsPrivileged && remoteAddress !== undefined && isLoopbackPeer(remoteAddress),
+    headers,
+    clientAddress: remotePeer === undefined ? remoteAddress : remotePeer(headers),
+    loopback: peerIsLoopback,
+    privilegedLoopback: directLoopbackIsPrivileged && peerIsLoopback,
     // The runtime's own abort, passed through rather than re-derived: it is what a disconnect actually
     // fires, and a handler that walks a tree needs to hear it from the transport that noticed.
     signal: request.signal,
