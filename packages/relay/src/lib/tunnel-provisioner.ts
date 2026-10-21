@@ -183,7 +183,13 @@ const PAGE_SIZE = 256;
 type Upstream<T> = { readonly ok: true; readonly value: T } | { readonly ok: false; readonly detail: string };
 
 export class TunnelProvisioner {
-  constructor(private readonly dependencies: TunnelProvisionerDependencies) {}
+  // A plain field, not a parameter property: `src/lib` is also loaded by Node's strip-only TypeScript
+  // (the PWA's `vite.config.ts` imports this package), which refuses parameter properties.
+  private readonly dependencies: TunnelProvisionerDependencies;
+
+  constructor(dependencies: TunnelProvisionerDependencies) {
+    this.dependencies = dependencies;
+  }
 
   /** `GET /v1/tunnel-service`. */
   async advertise(pool: TunnelPoolState): Promise<TunnelServiceAdvertisement> {
