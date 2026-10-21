@@ -4,12 +4,14 @@
  *   All        everything below, newest first
  *   Ferretry   every conversation a ferret keeps (running or stopped), and every STOPPED ferret whose
  *              conversation the listing does not have
- *   Claude     every Claude Code conversation in Ferretry's own history, kept by a ferret or not
+ *   On this computer  the conversations that live only in the CLIs' own homes here (`~/.claude`,
+ *              `~/.codex`): none a ferret keeps, none already in Ferretry's history
+ *   Claude     every Claude Code conversation, from either place
  *   Codex      the same for Codex
  *
- * The conversations are Ferretry's own history (the shared pool its runtimes read, which holds what was
- * imported at setup) — never the computer's own `~/.claude` / `~/.codex`, which only importing reads. A
- * row a ferret keeps carries BOTH marks: the ferret and its CLI.
+ * The listing is `source=synced`: Ferretry's own history plus, while "Keep in sync" is on, the CLIs' homes
+ * on this computer — read-only, and adopted only when the owner continues one. A row a ferret keeps
+ * carries BOTH marks: the ferret and its CLI; a row only the computer holds says so.
  *
  * Nothing here reads a clock: every rule that depends on "now" is handed it.
  */
@@ -26,29 +28,38 @@ import {
   sinceInstant,
 } from './conversation-picker-model.ts';
 
-export type ContinueSource = 'all' | 'ferretry' | Harness;
+export type ContinueSource = 'all' | 'ferretry' | 'computer' | Harness;
 
 export const CONTINUE_SOURCES: readonly { readonly id: ContinueSource; readonly label: string }[] = [
   { id: 'all', label: 'All' },
   { id: 'ferretry', label: 'Ferretry' },
+  { id: 'computer', label: 'On this computer' },
   { id: 'claude', label: 'Claude' },
   { id: 'codex', label: 'Codex' },
 ];
+
+/** How many times `limit` the "On this computer" chip reads, since it keeps only some of what comes back. */
+export const COMPUTER_LIMIT_FACTOR = 4;
 
 export interface ContinueSearch {
   readonly text: string;
   readonly date: DateFilter;
 }
 
-/** The daemon search a source sends: Ferretry's own history, narrowed to a CLI when the source is one. */
+/** The daemon search a source sends: Ferretry's history and the computer's, narrowed to a CLI when the source is one. */
 export const conversationsQuery = (
   source: ContinueSource,
   search: ContinueSearch,
   now: number,
   limit: number,
 ): ConversationImportQuery => ({
-  source: 'ferretry',
-  ...listingQuery({ ...search, harness: source === 'claude' || source === 'codex' ? source : 'all' }, now, limit),
+  source: 'synced',
+  ...listingQuery(
+    { ...search, harness: source === 'claude' || source === 'codex' ? source : 'all' },
+    now,
+    // The computer's rows are picked out of the answer here, so read enough of it for them to be in it.
+    source === 'computer' ? limit * COMPUTER_LIMIT_FACTOR : limit,
+  ),
 });
 
 /** The listing the ferrets' rows are joined from: every kept conversation, newest first. */
@@ -121,7 +132,9 @@ export const continueEntries = (
             entry =>
               entry.kind === 'conversation' && matchesSearch(entry.conversation, search.text, entry.ferret?.name),
           )
-      : searched.map(marked);
+      : searched
+          .filter(row => source !== 'computer' || (row.keptIn === 'computer' && row.adoptedBy === undefined))
+          .map(marked);
   const described = new Set(
     [...kept, ...searched].flatMap(row => (row.adoptedBy === undefined ? [] : [row.adoptedBy])),
   );

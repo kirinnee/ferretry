@@ -23,8 +23,10 @@ import type { CaptureMonitor, MicMeter, MicMeterPort } from '../../src/lib/stt/l
 import type { ParakeetSessionOptions } from '../../src/lib/stt/parakeet-session.ts';
 import type { ParakeetVoice } from '../../src/lib/stt/parakeet-voice.ts';
 import { RemoteEnhancementError } from '../../src/lib/stt/remote-enhancement.ts';
+import { DICTATION_DEBUG_KEY, DictationDebugLog } from '../../src/lib/stt/dictation-debug.ts';
 import { DeviceSpeedupKeys } from '../../src/lib/stt/speedup-keys.ts';
 import { DEFAULT_STT_SETTINGS, type SttSettings } from '../../src/lib/stt/stt-settings.ts';
+import { TRANSCRIPTION_LOG_KEY, TranscriptionLog } from '../../src/lib/stt/transcription-log.ts';
 import {
   type FakeRecognitionProvider,
   fakeRecognitionProvider,
@@ -1332,6 +1334,219 @@ describe('useDictation — clean-up with a key this device holds', () => {
     });
     expect(noCleanupKeyMessage('Groq')).toContain('add a Groq key in Settings › This device');
     await view.unmount();
+  });
+
+  describe('the debug ring and the transcription log', () => {
+    const memoryStorage = (initial: Record<string, string> = {}) => {
+      const values = new Map(Object.entries(initial));
+      return {
+        getItem: (key: string) => values.get(key) ?? null,
+        setItem: (key: string, value: string) => void values.set(key, value),
+      };
+    };
+    const rig = (debugOn: boolean, logOn = true) => {
+      const clock = { t: 1_000_000 };
+      const rows = new Map<string, unknown>();
+      const debug = new DictationDebugLog(memoryStorage({ [DICTATION_DEBUG_KEY]: debugOn ? 'on' : 'off' }));
+      const issued = { count: 0 };
+      const log = new TranscriptionLog(
+        {
+          list: async () => [...rows.values()],
+          put: async entry => void rows.set(entry.id, entry),
+          delete: async id => void rows.delete(id),
+          clear: async () => rows.clear(),
+        },
+        {
+          storage: memoryStorage({ [TRANSCRIPTION_LOG_KEY]: logOn ? 'on' : 'off' }),
+          now: () => clock.t,
+          newId: () => {
+            issued.count += 1;
+            return `entry-${String(issued.count)}`;
+          },
+        },
+      );
+      return { clock, debug, log };
+    };
+    const dictate = async (
+      view: Harness,
+      provider: FakeRecognitionProvider,
+      clock: { t: number },
+      words = 'raw words',
+    ): Promise<void> => {
+      await interact(() => view.handle().start());
+      await interact(() => provider.begin());
+      await interact(() => provider.speak(words));
+      clock.t += 4_000;
+      await settled(view, provider);
+    };
+    const options = async (
+      answer: () => Response,
+      debugOn: boolean,
+      logOn = true,
+    ): Promise<{
+      options: Partial<UseDictationOptions>;
+      r: ReturnType<typeof rig>;
+      calls: { body: Record<string, unknown> }[];
+      provider: FakeRecognitionProvider;
+    }> => {
+      const r = rig(debugOn, logOn);
+      const { keys, calls } = await deviceKeys(answer);
+      return {
+        r,
+        calls,
+        provider: fakeRecognitionProvider(),
+        options: {
+          settings: settingsWith({ enhancementProvider: 'groq' }),
+          voiceCleanup: { style: 'polish', prompts: {}, useConversation: false, conversationMessages: 8 },
+          speedupKeys: keys,
+          dictationDebug: r.debug,
+          transcriptionLog: r.log,
+          sessionId: 'session-1',
+          sessionLabel: 'Fix the build',
+          now: () => r.clock.t,
+        },
+      };
+    };
+
+    it('keeps one debug record for the call, without the key, and points the review and the log at it', async () => {
+      const { options: base, r, provider } = await options(completion('Raw words.'), true);
+      const view = await harness({ ...base, recognition: provider });
+      await dictate(view, provider, r.clock);
+      const id = view.handle().review?.debugId;
+      expect(id).toBe('debug-1');
+      expect(r.debug.snapshot().records.map(record => record.id)).toEqual(['debug-1']);
+      expect(JSON.stringify(r.debug.snapshot().records)).not.toContain('gsk_test');
+      expect(r.log.snapshot().entries[0]).toMatchObject({
+        id: 'entry-1',
+        sessionId: 'session-1',
+        sessionLabel: 'Fix the build',
+        engine: 'web-speech',
+        durationMs: 4_000,
+        raw: 'raw words',
+        cleaned: 'Raw words.',
+        prompt: 'polish',
+        outcome: 'pending',
+        debugId: 'debug-1',
+      });
+      await view.unmount();
+    });
+
+    it('keeps a debug record for a refused call too', async () => {
+      const { options: base, r, provider } = await options(() => new Response('{}', { status: 401 }), true);
+      const view = await harness({ ...base, recognition: provider });
+      await dictate(view, provider, r.clock);
+      expect(view.handle().review?.enhancementError?.code).toBe('enhancement-provider-auth');
+      expect(view.handle().review?.debugId).toBe('debug-1');
+      expect(r.log.snapshot().entries[0]?.cleaned).toBeUndefined();
+      await view.unmount();
+    });
+
+    it('keeps nothing in the ring, and asks the daemon for no echo, when debug is off', async () => {
+      const { options: base, r, provider } = await options(completion('Raw words.'), false);
+      const bodies: Record<string, unknown>[] = [];
+      const view = await harness({
+        ...base,
+        speedupKeys: null,
+        recognition: provider,
+        enhancementFetch: async (_url, init) => {
+          bodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+          return Response.json({ text: 'From the daemon.' });
+        },
+      });
+      await dictate(view, provider, r.clock);
+      expect(bodies[0]).not.toHaveProperty('debug');
+      expect(view.handle().review?.debugId).toBeUndefined();
+      expect(r.debug.snapshot().records).toEqual([]);
+      expect(r.log.snapshot().entries[0]?.debugId).toBeUndefined();
+      await view.unmount();
+    });
+
+    it('asks the daemon for its debug echo when debug is on', async () => {
+      const { options: base, r, provider } = await options(completion('unused'), true);
+      const bodies: Record<string, unknown>[] = [];
+      const view = await harness({
+        ...base,
+        speedupKeys: null,
+        recognition: provider,
+        enhancementFetch: async (_url, init) => {
+          bodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+          return Response.json({ text: 'From the daemon.' });
+        },
+      });
+      await dictate(view, provider, r.clock);
+      expect(bodies[0]?.debug).toBe(true);
+      expect(view.handle().review?.debugId).toBeUndefined();
+      await view.unmount();
+    });
+
+    it('records a take without cleanup as raw words only', async () => {
+      const r = rig(false);
+      const provider = fakeRecognitionProvider();
+      const view = await harness({
+        recognition: provider,
+        dictationDebug: r.debug,
+        transcriptionLog: r.log,
+        now: () => r.clock.t,
+      });
+      await dictate(view, provider, r.clock);
+      const entry = r.log.snapshot().entries[0];
+      expect(entry?.raw).toBe('raw words');
+      expect(entry?.cleaned).toBeUndefined();
+      expect(entry?.prompt).toBeUndefined();
+      expect(entry?.sessionId).toBeUndefined();
+      await view.unmount();
+    });
+
+    it('settles the entry as inserted, with the edited words only when they were edited', async () => {
+      const { options: base, r, provider } = await options(completion('Raw words.'), false);
+      const view = await harness({ ...base, recognition: provider });
+      await dictate(view, provider, r.clock);
+      await interact(() => view.handle().insert('Raw words.'));
+      expect(r.log.snapshot().entries[0]).toMatchObject({ outcome: 'inserted' });
+      expect(r.log.snapshot().entries[0]).not.toHaveProperty('inserted');
+      await dictate(view, provider, r.clock, 'second take');
+      await interact(() => view.handle().insert('  Edited by hand.  '));
+      expect(r.log.snapshot().entries[0]).toMatchObject({ outcome: 'inserted', inserted: 'Edited by hand.' });
+      await view.unmount();
+    });
+
+    it('settles the entry as discarded on cancel, on a new start and when dictation is switched off', async () => {
+      const { options: base, r, provider } = await options(completion('Raw words.'), false);
+      const view = await harness({ ...base, recognition: provider });
+      await dictate(view, provider, r.clock);
+      await interact(() => view.handle().cancel());
+      expect(r.log.snapshot().entries[0]?.outcome).toBe('discarded');
+      await dictate(view, provider, r.clock, 'again');
+      await interact(() => view.handle().start());
+      expect(r.log.snapshot().entries[0]?.outcome).toBe('discarded');
+      await interact(() => view.handle().cancel());
+      await dictate(view, provider, r.clock, 'third');
+      await view.render({ ...base, disabled: true, recognition: provider });
+      expect(r.log.snapshot().entries[0]?.outcome).toBe('discarded');
+      await view.unmount();
+    });
+
+    it('keeps no entry when the log is off, and works with neither the log nor the ring', async () => {
+      const off = await options(completion('Raw words.'), true, false);
+      const view = await harness({ ...off.options, recognition: off.provider });
+      await dictate(view, off.provider, off.r.clock);
+      expect(off.r.log.snapshot().entries).toEqual([]);
+      await interact(() => view.handle().insert('Raw words.'));
+      await view.unmount();
+
+      const none = await options(completion('Raw words.'), true);
+      const bare = await harness({
+        ...none.options,
+        dictationDebug: null,
+        transcriptionLog: null,
+        recognition: none.provider,
+      });
+      await dictate(bare, none.provider, none.r.clock);
+      expect(bare.handle().review?.cleaned).toBe('Raw words.');
+      expect(bare.handle().review?.debugId).toBeUndefined();
+      await interact(() => bare.handle().insert('Raw words.'));
+      await bare.unmount();
+    });
   });
 });
 

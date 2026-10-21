@@ -44,6 +44,8 @@ describe('AccountModelSchema', () => {
     should(actual.machine).deepEqual({
       agentPermissions: 'auto',
       agentControl: { terminals: true, browsers: true, files: true, ferretrySettings: false },
+      browserMode: 'headless',
+      conversations: { listComputer: true },
     });
     should(actual.runtimes['claude-default']).deepEqual({ credential: 'claude-you', profile: 'default', agent: false });
     should(actual.components.mcp).deepEqual({});
@@ -683,6 +685,30 @@ describe('the agent-control switches', () => {
 
     // Assert
     should(actual.some(message => message.startsWith('machine.agentControl.ferretrySettings'))).be.true();
+  });
+});
+
+describe('the conversations setting', () => {
+  it('should list the computer’s conversations unless the owner switches that off', () => {
+    // Arrange
+    const off = documentWith({ machine: { conversations: { listComputer: false } } });
+    const untouched = documentWith({ machine: { conversations: {} } });
+
+    // Act
+    const actual = [off, untouched].map(input => parseAccountModel(input).machine.conversations.listComputer);
+
+    // Assert
+    should(actual).deepEqual([false, true]);
+  });
+
+  it('should refuse a switch that is not a boolean, and a field it does not know', () => {
+    // Act
+    const notBoolean = messagesOf(documentWith({ machine: { conversations: { listComputer: 'yes' } } }));
+    const unknown = messagesOf(documentWith({ machine: { conversations: { adopt: true } } }));
+
+    // Assert
+    should(notBoolean.some(message => message.startsWith('machine.conversations.listComputer'))).be.true();
+    should(unknown.some(message => message.startsWith('machine.conversations'))).be.true();
   });
 });
 

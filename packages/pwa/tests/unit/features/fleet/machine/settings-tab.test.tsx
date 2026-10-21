@@ -376,6 +376,71 @@ describe('MachineSettingsTab', () => {
     });
   });
 
+  it('hides Browser mode for a daemon that predates it, and never sends it one', async () => {
+    await withTab({ answers: { '/v1/fleet/proposals': STAGED, [APPLY_PATH]: OUTCOME } }, async ({ q, calls }) => {
+      expect(q('[data-setup-section="browser-mode"]')).toBeNull();
+      await click(q('[data-setup-choice="skip"] input'), 'skip radio');
+      await click(q('[data-change-submit]'), 'save');
+      const staged = must(
+        calls.find(call => call.path === '/v1/fleet/proposals'),
+        'the staged change call',
+      );
+      expect(JSON.stringify(staged.body)).not.toContain('browserMode');
+    });
+  });
+
+  it('offers Headless and Real window, and Save sends the chosen Browser mode', async () => {
+    await withTab(
+      {
+        machine: machineView({ browserMode: 'headless' }),
+        answers: { '/v1/fleet/proposals': STAGED, [APPLY_PATH]: OUTCOME },
+      },
+      async ({ q, calls, retried }) => {
+        const section = must(q('[data-setup-section="browser-mode"]'), 'browser mode');
+        expect(section.querySelector('[data-setup-choice="headless"]')?.textContent).toContain('Headless');
+        expect(section.querySelector('[data-setup-choice="window"]')?.textContent).toContain('Real window');
+        expect(section.querySelector('[data-setup-choice="window"]')?.textContent).toContain('needs Xvfb');
+        expect(section.querySelector<HTMLInputElement>('[data-setup-choice="headless"] input')?.checked).toBe(true);
+        expect(q('[data-browser-mode-hint]')?.textContent).toContain(
+          'Applies the next time the browser on studio-mac starts.',
+        );
+        expect(q('[data-change-submit]')).toBeNull();
+
+        await click(q('[data-setup-choice="window"] input'), 'window radio');
+        expect(q('[data-change-submit]')?.textContent).toBe('Save browser mode');
+        expect(q('[data-browser-mode-undo]')?.textContent).toBe('Keep Headless');
+        await click(q('[data-change-submit]'), 'save');
+        const staged = must(
+          calls.find(call => call.path === '/v1/fleet/proposals'),
+          'the staged change call',
+        );
+        expect(JSON.stringify(staged.body)).toContain('"browserMode":"window"');
+        expect(JSON.stringify(staged.body)).toContain('"agentPermissions":"auto"');
+        expect(retried.count).toBe(1);
+      },
+    );
+  });
+
+  it('keeps a Real window machine’s mode, and Keep puts a pending switch back', async () => {
+    await withTab(
+      {
+        machine: machineView({ browserMode: 'window' }),
+        answers: { '/v1/fleet/proposals': new Error('unreachable') },
+      },
+      async ({ q, retried }) => {
+        expect(q('[data-setup-choice="window"] input') as HTMLInputElement).toHaveProperty('checked', true);
+        await click(q('[data-setup-choice="headless"] input'), 'headless radio');
+        expect(q('[data-browser-mode-undo]')?.textContent).toBe('Keep Real window');
+        await click(q('[data-change-submit]'), 'save');
+        expect(q('[data-change-refusal]')?.textContent).toContain('didn’t answer');
+        expect(retried.count).toBe(0);
+        await click(q('[data-browser-mode-undo]'), 'keep');
+        expect(q('[data-change-submit]')).toBeNull();
+        expect(q('[data-setup-choice="window"] input') as HTMLInputElement).toHaveProperty('checked', true);
+      },
+    );
+  });
+
   it('lists the tools and offers Install only for one that is missing', async () => {
     await withTab({}, async ({ q, browser }) => {
       const tools = must(q('[data-setup-section="tools"]'), 'tools');
@@ -730,5 +795,104 @@ describe('MachineSettingsSurface', () => {
       await view.unmount();
       window.location.hash = saved;
     }
+  });
+});
+
+describe('MachineSettingsTab › Conversations › Keep in sync', () => {
+  const READ = '/v1/config/file?path=machine.yaml';
+  const WRITE = '/v1/config/file';
+  const file = (text: string) => ({
+    path: 'machine.yaml',
+    absolutePath: '/home/you/.ferretry/config/machine.yaml',
+    kind: 'machine',
+    schema: 'machine',
+    exists: true,
+    text,
+    etag: 'etag-1',
+    state: 'ok',
+    issues: [],
+  });
+  const keep = (q: (selector: string) => Element | null): HTMLElement =>
+    must(q('[data-keep-in-sync]') as HTMLElement | null, 'switch');
+
+  it('shows it on when the file cannot be read, since on is the default', async () => {
+    // Arrange
+    const setup: Setup = {};
+
+    // Act / Assert
+    await withTab(setup, async ({ q }) => {
+      expect(keep(q).getAttribute('aria-checked')).toBe('true');
+      expect(q('[data-keep-in-sync-hint]')?.textContent).toContain('Read-only; nothing is imported');
+    });
+  });
+
+  it('shows what machine.yaml says, and ignores a file that does not parse', async () => {
+    // Arrange
+    const off: Setup = { answers: { [READ]: file('conversations:\n  listComputer: false\n') } };
+    const broken: Setup = { answers: { [READ]: file('conversations: [unclosed\n') } };
+
+    // Act / Assert
+    await withTab(off, async ({ q }) => expect(keep(q).getAttribute('aria-checked')).toBe('false'));
+    await withTab(broken, async ({ q }) => expect(keep(q).getAttribute('aria-checked')).toBe('true'));
+  });
+
+  it('writes the key against the etag it read when switched off, then back on', async () => {
+    // Arrange
+    let text = '# mine\n';
+    const answers = {
+      [READ]: () => file(text),
+      [WRITE]: (call: Call) => {
+        text = (call.body as { text: string }).text;
+        return { path: 'machine.yaml', etag: 'etag-2', outcome: 'applied' };
+      },
+    };
+
+    // Act / Assert
+    await withTab({ answers }, async ({ q, calls }) => {
+      await click(keep(q), 'switch');
+      expect(keep(q).getAttribute('aria-checked')).toBe('false');
+      const put = must(calls.find(call => call.path === WRITE) ?? null, 'put');
+      expect(put.headers['if-match']).toBe('etag-1');
+      expect(text).toContain('# mine');
+      expect(text).toContain('listComputer: false');
+      await click(keep(q), 'switch');
+      expect(keep(q).getAttribute('aria-checked')).toBe('true');
+      expect(text).toContain('listComputer: true');
+      expect(q('[data-keep-in-sync-note]')).toBeNull();
+    });
+  });
+
+  it('says a held change is not in effect yet', async () => {
+    // Arrange
+    const answers = {
+      [READ]: file(''),
+      [WRITE]: { path: 'machine.yaml', etag: 'etag-2', outcome: 'pending' },
+    };
+
+    // Act / Assert
+    await withTab({ answers }, async ({ q }) => {
+      await click(keep(q), 'switch');
+      expect(q('[data-keep-in-sync-note]')?.textContent).toBe('Saved, but not in effect until you confirm it.');
+    });
+  });
+
+  it('says so when the file has a problem or the machine refuses', async () => {
+    // Arrange
+    const broken: Setup = { answers: { [READ]: file('conversations: [unclosed\n') } };
+    const refused: Setup = { answers: { [READ]: file(''), [WRITE]: new Error('The machine said no.') } };
+
+    // Act / Assert
+    await withTab(broken, async ({ q }) => {
+      await click(keep(q), 'switch');
+      expect(q('[data-keep-in-sync-note]')?.textContent).toBe(
+        'machine.yaml has a problem; fix it in the Files panel first.',
+      );
+      expect(keep(q).getAttribute('aria-checked')).toBe('true');
+    });
+    await withTab(refused, async ({ q }) => {
+      await click(keep(q), 'switch');
+      expect(q('[data-keep-in-sync-note]')?.textContent?.length).toBeGreaterThan(0);
+      expect(keep(q).getAttribute('aria-checked')).toBe('true');
+    });
   });
 });

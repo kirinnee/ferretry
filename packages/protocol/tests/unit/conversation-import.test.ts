@@ -30,7 +30,12 @@ const cases: SchemaCase[] = [
   {
     name: 'ConversationImportListingSchema',
     schema: imports.ConversationImportListingSchema,
-    value: { conversations: [row, { ...row, id: 'b', latest: 'Ship it', adoptedBy: 's-1' }], matched: 2, skipped: 1 },
+    value: {
+      conversations: [row, { ...row, id: 'b', latest: 'Ship it', adoptedBy: 's-1', keptIn: 'computer' }],
+      matched: 2,
+      skipped: 1,
+      computerListed: false,
+    },
   },
   {
     name: 'ConversationImportQuerySchema',
@@ -38,6 +43,7 @@ const cases: SchemaCase[] = [
     value: { source: 'ferretry', harness: 'codex', q: 'login', since: INSTANT, limit: 20 },
   },
   { name: 'ConversationSourceSchema', schema: imports.ConversationSourceSchema, value: 'computer' },
+  { name: 'ConversationListSourceSchema', schema: imports.ConversationListSourceSchema, value: 'synced' },
   {
     name: 'ConversationExchangeMessageSchema',
     schema: imports.ConversationExchangeMessageSchema,
@@ -81,6 +87,26 @@ describe('the conversation import wire contract', () => {
 
     // Assert
     should(parsed.limit).equal(20);
+  });
+
+  it('should accept the synced source in a query and a keptIn mark on a row, and nothing else', () => {
+    // Act
+    const query = imports.ConversationImportQuerySchema.safeParse({ source: 'synced' });
+    const unknown = imports.ConversationImportQuerySchema.safeParse({ source: 'everywhere' });
+    const mark = imports.ImportableConversationSchema.safeParse({ ...row, keptIn: 'synced' });
+    const listed = imports.ConversationImportListingSchema.safeParse({
+      conversations: [],
+      matched: 0,
+      skipped: 0,
+      computerListed: true,
+    });
+
+    // Assert
+    should(query.success).be.true();
+    should(unknown.success).be.false();
+    should(mark.success).be.false();
+    // The flag exists only to say the computer's conversations were left out.
+    should(listed.success).be.false();
   });
 
   it('should default an item to adopting it stopped', () => {

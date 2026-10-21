@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import type { SessionView } from '@ferretry/protocol';
 import {
+  COMPUTER_LIMIT_FACTOR,
   CONTINUE_SOURCES,
   type ContinueEntry,
   type ContinueListing,
@@ -55,20 +56,91 @@ const keys = (entries: readonly ContinueEntry[]): readonly string[] =>
   );
 
 describe('continue sources', () => {
-  it('offers one list, narrowed to Ferretry, Claude or Codex', () => {
-    expect(CONTINUE_SOURCES.map(source => source.label)).toEqual(['All', 'Ferretry', 'Claude', 'Codex']);
+  it('offers one list, narrowed to Ferretry, this computer, Claude or Codex', () => {
+    // Arrange
+    const subject = CONTINUE_SOURCES;
+
+    // Act
+    const actual = subject.map(source => source.label);
+
+    // Assert
+    const expected = ['All', 'Ferretry', 'On this computer', 'Claude', 'Codex'];
+    expect(actual).toEqual(expected);
   });
 
-  it('asks only for Ferretry’s own history, narrowed to a CLI when the source is one', () => {
-    expect(conversationsQuery('claude', { text: ' cart ', date: 'any' }, NOW, 50)).toEqual({
-      source: 'ferretry',
-      harness: 'claude',
-      q: 'cart',
-      limit: 50,
-    });
-    expect(conversationsQuery('ferretry', ANY, NOW, 50)).toEqual({ source: 'ferretry', limit: 50 });
-    expect(conversationsQuery('all', ANY, NOW, 50)).toEqual({ source: 'ferretry', limit: 50 });
-    expect(keptConversationsQuery(1000)).toEqual({ source: 'ferretry', limit: 1000 });
+  it('asks for Ferretry’s history and the computer’s together, narrowed to a CLI when the source is one', () => {
+    // Arrange
+    const input = { text: ' cart ', date: 'any' } as const;
+
+    // Act
+    const actual = [
+      conversationsQuery('claude', input, NOW, 50),
+      conversationsQuery('ferretry', ANY, NOW, 50),
+      conversationsQuery('all', ANY, NOW, 50),
+      keptConversationsQuery(1000),
+    ];
+
+    // Assert
+    const expected: ReturnType<typeof conversationsQuery>[] = [
+      { source: 'synced', harness: 'claude', q: 'cart', limit: 50 },
+      { source: 'synced', limit: 50 },
+      { source: 'synced', limit: 50 },
+      { source: 'ferretry', limit: 1000 },
+    ];
+    expect(actual).toEqual(expected);
+  });
+
+  it('reads more of the answer for the computer chip, which keeps only some of it', () => {
+    // Arrange
+    const subject = conversationsQuery('computer', ANY, NOW, 50);
+
+    // Act
+    const actual = subject.limit;
+
+    // Assert
+    expect(actual).toBe(50 * COMPUTER_LIMIT_FACTOR);
+  });
+});
+
+describe('the continue list over this computer', () => {
+  const COMPUTER = [
+    conversation('m-new', { keptIn: 'computer', daysAgo: 0.5 }),
+    conversation('m-codex', { keptIn: 'computer', harness: 'codex', daysAgo: 3 }),
+    conversation('m-adopted', { keptIn: 'computer', adoptedBy: 's-stopped', daysAgo: 1 }),
+    conversation('m-kept', { keptIn: 'ferretry', daysAgo: 2 }),
+  ];
+
+  it('shows every row under All, each from where it was kept', () => {
+    // Arrange
+    const subject = listing('all', { searched: COMPUTER, kept: [] });
+
+    // Act
+    const actual = keys(continueEntries(subject, NOW)).filter(key => key.startsWith('m-'));
+
+    // Assert
+    expect(actual).toEqual(['m-new', 'm-adopted@Mika', 'm-kept', 'm-codex']);
+  });
+
+  it('narrows On this computer to the rows still only on the computer, with no stopped ferret', () => {
+    // Arrange
+    const subject = listing('computer', { searched: COMPUTER });
+
+    // Act
+    const actual = keys(continueEntries(subject, NOW));
+
+    // Assert
+    expect(actual).toEqual(['m-new', 'm-codex']);
+  });
+
+  it('narrows a CLI chip to that CLI’s computer rows too', () => {
+    // Arrange
+    const subject = listing('codex', { searched: COMPUTER.filter(row => row.harness === 'codex'), kept: [] });
+
+    // Act
+    const actual = keys(continueEntries(subject, NOW)).filter(key => key.startsWith('m-'));
+
+    // Assert
+    expect(actual).toEqual(['m-codex']);
   });
 });
 

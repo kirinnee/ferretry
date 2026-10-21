@@ -61,6 +61,8 @@ export interface DictationReviewBoxProps {
   onDiscard(): void;
   /** Throw this take away and record again. */
   onRetry(): void;
+  /** Open this take's cleanup debug record. Given only while dictation debug is on and the record is still held. */
+  onDetails?(): void;
 }
 
 const ACTION_CLASS = 'min-h-[44px] min-w-[44px] shrink-0 justify-center';
@@ -94,7 +96,7 @@ function Segment({
  * The editor and its footer. Remounted per take (the parent keys it on `review.id`), so a new take
  * never inherits the last one's edits or its cleaned/raw choice.
  */
-export function DictationReviewBox({ review, onInsert, onDiscard, onRetry }: DictationReviewBoxProps) {
+export function DictationReviewBox({ review, onInsert, onDiscard, onRetry, onDetails }: DictationReviewBoxProps) {
   const cleanupChangedWords = review.cleaned !== review.raw;
   const [view, setView] = useState<ReviewView>('cleaned');
   const [edits, setEdits] = useState<Record<ReviewView, string>>({ cleaned: review.cleaned, raw: review.raw });
@@ -155,6 +157,16 @@ export function DictationReviewBox({ review, onInsert, onDiscard, onRetry }: Dic
             <Segment label="Cleaned" selected={view === 'cleaned'} onSelect={() => setView('cleaned')} />
             <Segment label="Raw" selected={view === 'raw'} onSelect={() => setView('raw')} />
           </fieldset>
+        ) : null}
+        {onDetails ? (
+          <button
+            type="button"
+            data-review-details
+            onClick={onDetails}
+            className="min-h-[44px] shrink-0 px-2 text-meta text-accent underline underline-offset-2 hover:text-fg"
+          >
+            Details
+          </button>
         ) : null}
         <div className="ml-auto flex shrink-0 items-center gap-xs">
           <Button

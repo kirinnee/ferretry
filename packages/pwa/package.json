@@ -49,6 +49,7 @@
     "dompurify": "3.4.13",
     "highlight.js": "^11.11.1",
     "jsqr": "1.4.0",
+    "leaflet": "1.9.4",
     "lucide-react": "^0.468.0",
     "onnxruntime-web": "1.24.1",
     "parakeet.js": "1.4.4",
@@ -57,10 +58,12 @@
     "react-dom": "^19.0.0",
     "react-markdown": "^10.1.0",
     "remark-gfm": "^4.0.1",
+    "yaml": "2.9.0",
     "zod": "4.4.3"
   },
   "devDependencies": {
     "@happy-dom/global-registrator": "^20.11.1",
+    "@types/leaflet": "1.9.22",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@types/react-test-renderer": "^19.0.0",

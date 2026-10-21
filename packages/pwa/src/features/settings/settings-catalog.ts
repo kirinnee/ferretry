@@ -27,6 +27,8 @@ export type SettingId =
   | 'device-permissions'
   | 'clear-cached-data'
   | 'speedup-keys'
+  | 'dictation-debug'
+  | 'transcription-log'
   | 'sessions-list';
 
 export type SettingsSectionId = 'appearance' | 'behaviour' | 'device' | 'machines';
@@ -281,6 +283,49 @@ export const SETTINGS_DEFINITIONS: readonly SettingDefinition[] = [
     keywords: ['cache', 'cached', 'clear', 'offline', 'storage', 'privacy', 'forget', 'data', 'delete'],
   },
   {
+    id: 'transcription-log',
+    label: 'Transcription log',
+    description:
+      'Every dictation this device made, kept here only so words are never lost to a mis-tap: search it, copy from it, put one back in the composer. No audio is stored. Never synced, never sent to any machine.',
+    keywords: [
+      'transcription',
+      'transcript',
+      'log',
+      'history',
+      'dictation',
+      'voice',
+      'dictated',
+      'recover',
+      'lost',
+      'search',
+      'copy',
+      'insert',
+      'device',
+      'privacy',
+    ],
+  },
+  {
+    id: 'dictation-debug',
+    label: 'Dictation debug',
+    description:
+      'Off by default. When on, this tab keeps the last 10 clean-up calls (the prompt, the provider’s raw reply, the checks) so you can see why a dictation read the way it did. Held in memory only; gone on reload or when switched off.',
+    keywords: [
+      'debug',
+      'dictation',
+      'cleanup',
+      'clean-up',
+      'prompt',
+      'groq',
+      'cerebras',
+      'response',
+      'raw',
+      'trace',
+      'details',
+      'voice',
+      'developer',
+    ],
+  },
+  {
     id: 'speedup-keys',
     label: 'Speed-up keys',
     description:
@@ -379,7 +424,14 @@ export const SETTINGS_SECTIONS: readonly SettingsSectionDefinition[] = [
     label: 'This device',
     description:
       'Ferretry as an app on this device, what it may use (camera, location, notifications), the provider keys only this device holds, and what it keeps here.',
-    settingIds: ['install-app', 'device-permissions', 'speedup-keys', 'clear-cached-data'],
+    settingIds: [
+      'install-app',
+      'device-permissions',
+      'speedup-keys',
+      'transcription-log',
+      'dictation-debug',
+      'clear-cached-data',
+    ],
   },
   {
     /**

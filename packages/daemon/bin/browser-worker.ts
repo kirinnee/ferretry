@@ -18,6 +18,8 @@
 import { createInterface } from 'node:readline';
 import type { BrowserInputEvent } from '@ferretry/protocol';
 import { type Browser, type BrowserContext, type CDPSession, chromium, type Page } from 'playwright-core';
+import { recogniseBrowserChallenge } from '../src/lib/browser/transport/challenge.ts';
+import { type PointerPosition, pointerAfter, pointerSequence } from '../src/lib/browser/transport/pointer.ts';
 
 const endpoint = process.argv[2];
 const MAX_PAGES = 200;
@@ -48,6 +50,8 @@ const targets = new WeakMap<Page, Promise<string>>();
 const incognito = new WeakMap<Page, BrowserContext>();
 const queues = new Map<string, Promise<unknown>>();
 const viewports = new Map<string, Viewport>();
+/** Where the person's pointer last was on each page, so a bare press can be preceded by its arrival. */
+const pointers = new Map<string, PointerPosition>();
 const screencasts = new Map<string, CDPSession>();
 const heldFrames = new Map<number, HeldFrame>();
 let global: Promise<unknown> = Promise.resolve();
@@ -129,6 +133,7 @@ function registerPage(page: Page): void {
   page.on('close', () => {
     const id = pageId(page);
     viewports.delete(id);
+    pointers.delete(id);
     const cast = screencasts.get(id);
     screencasts.delete(id);
     if (cast) void cast.detach().catch(() => undefined);
@@ -199,6 +204,20 @@ async function targetId(page: Page): Promise<string> {
   return await id;
 }
 
+/** Whether the page appears to be asking for a human check — read from what the browser already knows
+ *  about it (address, title, frame addresses), running nothing inside the page. */
+async function challengeOf(page: Page): Promise<{ challenge?: { provider: string } }> {
+  try {
+    const challenge = recogniseBrowserChallenge({
+      url: safeUrl(page),
+      title: await safeTitle(page),
+      frameUrls: page.frames().map(each => each.url()),
+    });
+    return challenge === undefined ? {} : { challenge };
+  } catch {
+    return {};
+  }
+}
 /** A page that always exists, so a listing is never empty: Chrome's own first tab, or a new one. */
 async function anyPage(): Promise<Page> {
   return livePages()[0] ?? (await requireContext().newPage());
@@ -235,6 +254,7 @@ async function snapshot(focus: Page, extra: Readonly<Record<string, unknown>> = 
         title: await safeTitle(item),
         ...(incognito.has(item) ? { incognito: true } : {}),
         ...(openers.has(item) ? { openerId: openers.get(item) } : {}),
+        ...(await challengeOf(item)),
       })),
     ),
     pageState: state.state,
@@ -335,11 +355,22 @@ function frame(
   });
 }
 
-/** One input event, to exactly the page it names — never to "whatever is active". */
+/** One input event, to exactly the page it names — never to "whatever is active". A bare press first moves
+ * the pointer to where it presses (`pointerSequence`), as a real pointer would have. */
 async function input(page: Page, value: unknown): Promise<void> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('browser input is required');
   const session = await pageSession(page);
-  const event = value as BrowserInputEvent;
+  const id = pageId(page);
+  const received = value as BrowserInputEvent;
+  const last = pointers.get(id);
+  const next = pointerAfter(last, received);
+  if (next !== undefined) pointers.set(id, next);
+  // Every event is SENT before any reply is awaited: input is never queued, so awaiting the arrival first
+  // would let the next event — this press's own release — reach Chrome ahead of the press.
+  await Promise.all(pointerSequence(last, received).map(event => dispatch(session, event)));
+}
+
+async function dispatch(session: CDPSession, event: BrowserInputEvent): Promise<void> {
   if (event.kind === 'mouse')
     await session.send('Input.dispatchMouseEvent', {
       type: event.type,

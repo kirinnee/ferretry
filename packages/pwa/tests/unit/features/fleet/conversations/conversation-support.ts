@@ -36,7 +36,14 @@ export const conversation = (
 export const listing = (
   conversations: readonly ImportableConversation[],
   matched = conversations.length,
-): ConversationImportListing => ConversationImportListingSchema.parse({ conversations, matched, skipped: 0 });
+  computerListed?: false,
+): ConversationImportListing =>
+  ConversationImportListingSchema.parse({
+    conversations,
+    matched,
+    skipped: 0,
+    ...(computerListed === undefined ? {} : { computerListed }),
+  });
 
 export const type = async (input: HTMLInputElement, value: string): Promise<void> => {
   await interact(() => {

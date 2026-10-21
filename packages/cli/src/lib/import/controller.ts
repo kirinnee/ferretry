@@ -218,9 +218,9 @@ export class ContinueSessionController {
       return;
     }
 
-    // Continue lists Ferretry's own history; only importing reads the computer's CLI homes.
+    // Continue lists Ferretry's own history and, while "Keep in sync" is on, the computer's CLI homes.
     const listing = await this.gateway.list({
-      source: 'ferretry',
+      source: 'synced',
       ...(options.harness === undefined ? {} : { harness: options.harness }),
       ...(options.query === undefined || options.query === '' ? {} : { q: options.query }),
       ...(options.since === undefined ? {} : { since: sinceInstant(options.since, this.context.now) }),
@@ -229,7 +229,13 @@ export class ContinueSessionController {
     const rows = listing.conversations;
 
     if (rows.length === 0) {
-      this.out.error('no conversations matched; try a different search, or start fresh with `fy start`.');
+      this.out.error(
+        `no conversations matched; try a different search, or start fresh with \`fy start\`.${
+          listing.computerListed === false
+            ? ' Conversations on this computer are hidden: turn on Keep in sync in Settings › Machine › Conversations.'
+            : ''
+        }`,
+      );
       this.out.setExitCode(1);
       return;
     }

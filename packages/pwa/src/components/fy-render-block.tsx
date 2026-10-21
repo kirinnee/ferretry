@@ -71,7 +71,8 @@ import {
   type FyRenderBlock as ParsedBlock,
 } from '../lib/fy-render.ts';
 import { FyRenderFragment } from './fy-render-fragment.tsx';
-import { type FyRenderHtmlPaint, FyRenderHtmlFrame } from './fy-render-html-frame.tsx';
+import { FyRenderHtmlFrame, type FyRenderHtmlPaint } from './fy-render-html-frame.tsx';
+import { FyRenderMap, type FyRenderMapModules } from './fy-render-map.tsx';
 import { FyRenderMedia } from './fy-render-media.tsx';
 import { FyRenderSandbox, type FyRenderSandboxFailure } from './fy-render-sandbox.tsx';
 
@@ -211,6 +212,8 @@ export interface FyRenderBlockProps {
   readonly readWorkspaceMedia?: FyRenderWorkspaceReader;
   /** Shortened so streaming can be proven; the app never passes this. */
   readonly settleMs?: number;
+  /** Where a map's engine comes from; a test passes a fake so no map library loads, the app never passes this. */
+  readonly loadMap?: () => Promise<FyRenderMapModules>;
 }
 
 const humanType: Record<ParsedBlock['type'], string> = {
@@ -218,6 +221,7 @@ const humanType: Record<ParsedBlock['type'], string> = {
   html: 'HTML',
   image: 'image',
   lottie: 'Lottie',
+  map: 'map',
   mermaid: 'Mermaid',
   pdf: 'PDF',
   svg: 'SVG',
@@ -229,7 +233,12 @@ const RETRYABLE: ReadonlySet<Fallback['kind']> = new Set(['startup', 'library', 
 /** A failure that hands the block back to its source, as opposed to a designed stop. */
 type Fallback = { readonly kind: FyRenderSandboxFailure['kind'] | 'decode'; readonly detail: string | null };
 
-export function FyRenderBlock({ block: arriving, readWorkspaceMedia, settleMs = SETTLE_MS }: FyRenderBlockProps) {
+export function FyRenderBlock({
+  block: arriving,
+  readWorkspaceMedia,
+  settleMs = SETTLE_MS,
+  loadMap,
+}: FyRenderBlockProps) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const block = useSettledBlock(arriving, settleMs);
   const presentation = fyRenderPresentation(block);
@@ -247,6 +256,8 @@ export function FyRenderBlock({ block: arriving, readWorkspaceMedia, settleMs = 
   const [revision, setRevision] = useState(0);
   /** A media block showing a file row (a PDF, or a refusal) rather than a picture or a player. */
   const [mediaRow, setMediaRow] = useState(false);
+  /** A map block showing its coordinate list because it could not be drawn: nothing to enlarge. */
+  const [mapListing, setMapListing] = useState(false);
 
   /**
    * A COMPILED DIAGRAM OUTLIVES THE FRAME THAT DREW IT. Mermaid is static, so the
@@ -382,6 +393,7 @@ export function FyRenderBlock({ block: arriving, readWorkspaceMedia, settleMs = 
   // biome-ignore lint/correctness/useExhaustiveDependencies: a new page, a run-again or a re-entry is a new frame
   useEffect(() => setPageReady(false), [source, revision, running]);
   const media = near && presentation === 'media' && isFyRenderMediaBlock(block);
+  const map = live && presentation === 'map';
   const picture = live && presentation === 'visual';
   /**
    * A stage with something to enlarge and something to show the source of. Not a
@@ -393,7 +405,7 @@ export function FyRenderBlock({ block: arriving, readWorkspaceMedia, settleMs = 
     stopped === null &&
     !mediaRow &&
     block.type !== 'audio' &&
-    (picture || diagram || lottie || fragment || interactive || media);
+    (picture || diagram || lottie || fragment || interactive || media || map);
 
   /**
    * THE LONG PRESS, on touch only. A tap belongs to the content — a video's
@@ -494,6 +506,17 @@ export function FyRenderBlock({ block: arriving, readWorkspaceMedia, settleMs = 
         onError={onDecodeFailure(generation.current)}
         src={'mime' in block ? `data:${block.mime};base64,${block.payload}` : svgDataUrl(block.payload)}
       />
+    ) : map ? (
+      /** Data, not markup: drawn in this document by Leaflet from nodes it creates — see `fy-render-map.tsx`. */
+      <FyRenderMap
+        alt={block.alt}
+        fullscreen={fullscreen}
+        key={`map:${generation.current}:${revision}`}
+        load={loadMap}
+        mode={mode}
+        onListing={setMapListing}
+        payload={block.payload}
+      />
     ) : fragment ? (
       /** Static markup, sanitized into a closed shadow root — see `fy-render-fragment.tsx`. Nothing runs. */
       <FyRenderFragment
@@ -556,9 +579,9 @@ export function FyRenderBlock({ block: arriving, readWorkspaceMedia, settleMs = 
             onError={onDecodeFailure(generation.current)}
             src={svgDataUrl(compiled?.svg as string)}
           />
-        ) : near ? (
+        ) : near || presentation === 'map' ? (
           // A diagram's first draw holds a quiet plane rather than nothing, so the
-          // prose below does not jump twice.
+          // prose below does not jump twice. A map holds its plane from the start, for the same reason.
           <div aria-hidden="true" className="fy-render-placeholder" />
         ) : null}
         {drawDiagram ? (
@@ -644,14 +667,20 @@ export function FyRenderBlock({ block: arriving, readWorkspaceMedia, settleMs = 
                 >
                   <Code2 aria-hidden="true" size={14} />
                 </button>
-                <button
-                  aria-label={fullscreen ? 'Exit fullscreen' : 'Fullscreen'}
-                  className="fy-render-tool"
-                  onClick={() => setFullscreen(value => !value)}
-                  type="button"
-                >
-                  {fullscreen ? <Minimize2 aria-hidden="true" size={14} /> : <Maximize2 aria-hidden="true" size={14} />}
-                </button>
+                {map && mapListing ? null : (
+                  <button
+                    aria-label={fullscreen ? 'Exit fullscreen' : 'Fullscreen'}
+                    className="fy-render-tool"
+                    onClick={() => setFullscreen(value => !value)}
+                    type="button"
+                  >
+                    {fullscreen ? (
+                      <Minimize2 aria-hidden="true" size={14} />
+                    ) : (
+                      <Maximize2 aria-hidden="true" size={14} />
+                    )}
+                  </button>
+                )}
               </div>
             ) : null}
           </div>

@@ -65,7 +65,9 @@ import {
   settingsSectionForSetting,
 } from './settings-catalog.ts';
 import { SettingsHome, type SettingsMachineEntry, SettingsSidebar } from './settings-navigation.tsx';
+import { DictationDebugSettings } from './dictation-debug-settings.tsx';
 import { SpeedupKeysSettings } from './speedup-keys-settings.tsx';
+import { TranscriptionLogSettings } from './transcription-log-settings.tsx';
 
 export const TEXT_SCALE_OPTIONS = [
   { id: 'default', label: 'Default', description: 'Use the interface’s designed size.' },
@@ -493,6 +495,8 @@ export function SettingsPage({
         <ClearCachedDataSetting {...(onClearCachedData === undefined ? {} : { onClear: onClearCachedData })} />
       ),
       'speedup-keys': <SpeedupKeysSettings />,
+      'transcription-log': <TranscriptionLogSettings />,
+      'dictation-debug': <DictationDebugSettings />,
       dictation: (
         <DictationSettings {...dictation} {...(selectedRecord === undefined ? {} : { daemon: selectedRecord })} />
       ),

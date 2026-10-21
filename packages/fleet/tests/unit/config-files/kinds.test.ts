@@ -48,6 +48,8 @@ describe('SINGLETON_DEFAULTS', () => {
     should(SINGLETON_DEFAULTS.machine.machine).deepEqual({
       agentPermissions: 'auto',
       agentControl: { terminals: true, browsers: true, files: true, ferretrySettings: false },
+      browserMode: 'headless',
+      conversations: { listComputer: true },
     });
     should(SINGLETON_DEFAULTS.warden).equal(DEFAULT_WARDEN_CONFIG);
     should(SINGLETON_DEFAULTS.learning).equal(DEFAULT_LEARNING_CONFIG);

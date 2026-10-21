@@ -124,6 +124,28 @@ describe('<DictationReviewBox>', () => {
     await view.unmount();
   });
 
+  it('offers Details only when a debug record can be opened, and opens it without touching the take', async () => {
+    const calls: string[] = [];
+    const without = await mount(harness(cleanedTake).element);
+    expect(without.container.querySelector('[data-review-details]')).toBeNull();
+    await without.unmount();
+
+    const view = await mount(
+      <DictationReviewBox
+        review={cleanedTake}
+        onInsert={() => calls.push('insert')}
+        onDiscard={() => calls.push('discard')}
+        onRetry={() => calls.push('retry')}
+        onDetails={() => calls.push('details')}
+      />,
+    );
+    const details = must(view.container.querySelector('[data-review-details]'), 'the Details link');
+    expect(details.textContent).toBe('Details');
+    await interact(() => (details as HTMLButtonElement).click());
+    expect(calls).toEqual(['details']);
+    await view.unmount();
+  });
+
   it('has no switch when cleanup changed nothing', async () => {
     const { element } = harness(plainTake);
     const view = await mount(element);

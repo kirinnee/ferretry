@@ -1,8 +1,9 @@
 /**
  * "Import conversations" and New session's "Continue a conversation", on a phone and a desktop, in a
  * dark and a light theme: the picker with a few rows kept, one "Start now" on and a row a ferret already
- * keeps; Continue's ONE list under each source chip (All, and Ferretry — what ferrets keep and the
- * stopped ferrets) with the date filter; each row the shared card — a coloured avatar (a ferret's
+ * keeps; Continue's ONE list under each source chip (All, Ferretry — what ferrets keep and the
+ * stopped ferrets — and On this computer, the CLIs' own history, one row already adopted and one with a
+ * huge turn count) with the date filter, and Settings › Machine › Conversations' "Keep in sync" switch; each row the shared card — a coloured avatar (a ferret's
  * initial and state dot, else the CLI's mark), its name or first real message, and the ferret, CLI and
  * folder badges, a scratch run tagged "scratch"; and an open row showing its last exchanges above the
  * button that continues it.
@@ -37,6 +38,7 @@ const run = (command: string, args: readonly string[]): void => {
 
 const PAGE_ENTRY = `
 import { createRoot } from 'react-dom/client';
+import { ConversationsSection } from '../../src/features/fleet/machine/settings-tab.tsx';
 import { ContinueConversation } from '../../src/features/fleet/conversations/continue-conversation.tsx';
 import { ConversationPicker } from '../../src/features/fleet/conversations/conversation-picker.tsx';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
@@ -66,6 +68,19 @@ const SESSIONS = [
   ferret('billing-live', 'juno', 'codex', '/work/api', 'running', 4),
 ];
 ROWS[5].adoptedBy = 'shop-badge';
+const COMPUTER_ROWS = [
+  { id: 'm1', harness: 'claude', keptIn: 'computer', name: 'Auth middleware refactor', project: '/work/shop', preview: 'Refactor the auth middleware to drop the session cookie', latest: 'Looks good, run the suite', lastActivityAt: ago(1.5), turns: 31, model: 'Opus 5.5' },
+  { id: 'm2', harness: 'claude', keptIn: 'computer', project: '/work/ledger', preview: 'Why is the nightly ledger export so slow?', lastActivityAt: ago(26), turns: 2400, turnsAtLeast: true, model: 'Opus 5.5' },
+  { id: 'm3', harness: 'codex', keptIn: 'computer', project: '/work/api', preview: 'Add pagination to the invoices endpoint', lastActivityAt: ago(7), turns: 12, model: 'GPT-6' },
+  { id: 'm4', harness: 'claude', keptIn: 'computer', name: 'Release notes draft', project: '/work/notes', preview: 'Draft the release notes from the merged pull requests', lastActivityAt: ago(60), turns: 8, model: 'Sonnet 5.5', adoptedBy: 'live-one' },
+  { id: 'm5', harness: 'codex', keptIn: 'computer', project: '/work/shop', preview: 'Port the cart page to the new layout', lastActivityAt: ago(24 * 12), turns: 5, model: 'GPT-6' },
+];
+const KEEP_FILE = { path: 'machine.yaml', absolutePath: '/home/you/.ferretry/config/machine.yaml', kind: 'machine', schema: 'machine', exists: true, text: '', etag: 'e1', state: 'ok', issues: [] };
+const access = {
+  changes: {},
+  read: async work => ({ kind: 'done', value: await work({ request: async (path, schema) => schema.parse(KEEP_FILE) }) }),
+  act: async work => ({ kind: 'done', value: await work({ request: async (path, schema) => schema.parse(KEEP_FILE) }) }),
+};
 const PREVIEW = [
   { role: 'user', text: 'Summarise this week of meeting notes into a short list' },
   { role: 'assistant', text: 'Here are the five decisions and three open questions from this week, grouped by team.' },
@@ -88,7 +103,8 @@ const client = {
     if (path.startsWith('/v1/imports/conversations')) {
       const query = new URL(path, 'https://machine.test').searchParams;
       const harness = query.get('harness');
-      const rows = ROWS.filter(row => harness === null || row.harness === harness);
+      const pool = query.get('source') === 'synced' ? [...ROWS, ...COMPUTER_ROWS] : ROWS;
+      const rows = pool.filter(row => harness === null || row.harness === harness);
       return schema.parse({ conversations: rows, matched: rows.length, skipped: 0 });
     }
     if (path === '/v1/fleet/runtimes') return schema.parse({ format: 'version-2', runtimes: [] });
@@ -102,7 +118,9 @@ if (root === null) throw new Error('missing #root');
 createRoot(root).render(
   <main data-fixture="" style={{ margin: '0 auto', maxWidth: 720, padding: '12px 16px' }}>
     <section className="kt-panel p-panel">
-      {view !== 'picker' ? (
+      {view === 'settings' ? (
+        <ConversationsSection daemonId={connection.daemonId} access={access} />
+      ) : view !== 'picker' ? (
         <ContinueConversation connection={connection} createClient={async () => client} onNavigate={() => undefined} now={() => NOW} sessions={SESSIONS} resume={async () => undefined} />
       ) : (
         <ConversationPicker connection={connection} createClient={async () => client} harness="claude" runtimes={RUNTIMES} now={() => NOW} />
@@ -181,17 +199,23 @@ try {
         await context.route('**/*', async route =>
           new URL(route.request().url()).origin !== server.url.origin ? await route.abort() : await route.continue(),
         );
-        for (const view of ['picker', 'all', 'ferretry', 'preview'] as const) {
+        for (const view of ['picker', 'all', 'ferretry', 'computer', 'preview', 'settings'] as const) {
           const page = await context.newPage();
           await page.goto(`${server.url}?theme=${theme}&view=${view}`);
           if (view === 'picker') {
             await page.locator('[data-conversations-found]').waitFor({ state: 'visible' });
             await pickSome(page);
+          } else if (view === 'settings') {
+            await page.locator('[data-keep-in-sync]').waitFor({ state: 'visible' });
           } else {
             await page.locator('[data-continue-count]').waitFor({ state: 'visible' });
             if (view === 'ferretry') {
               await page.locator('[data-segment="ferretry"]').click();
               await page.locator('[data-continue-row="c3"]').waitFor({ state: 'visible' });
+            }
+            if (view === 'computer') {
+              await page.locator('[data-segment="computer"]').click();
+              await page.locator('[data-continue-row="m1"]').waitFor({ state: 'visible' });
             }
             if (view === 'preview') {
               await page.locator('[data-continue-row="c3"]').click();
@@ -200,7 +224,12 @@ try {
           }
           const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
           if (overflow > 0) fail(`${view} ${theme} ${vp} scrolls sideways by ${overflow}px`);
-          const name = view === 'picker' ? 'conversation-picker' : `conversation-continue-${view}`;
+          const name =
+            view === 'picker'
+              ? 'conversation-picker'
+              : view === 'settings'
+                ? 'conversation-settings-keep-in-sync'
+                : `conversation-continue-${view}`;
           const file = `${name}-${theme}-${vp}.png`;
           await page.screenshot({ path: join(outDir, file), fullPage: true });
           process.stdout.write(`📸 ${join(outDir, file)}\n`);

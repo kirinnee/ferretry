@@ -361,3 +361,200 @@ describe("a key's Test", () => {
     should(JSON.stringify(await testDeviceKey(slow.keys, 'groq', 5))).match(/did not answer within 0\.005s/u);
   });
 });
+
+describe('the debug record of a call', () => {
+  const KEY = 'gsk_test_0123456789abcdef';
+
+  /** A clock that moves 10 ms every time it is read, so timings are exact. */
+  const ticking = (): (() => number) => {
+    let at = 1_000;
+    return () => {
+      const now = at;
+      at += 10;
+      return now;
+    };
+  };
+
+  const lastMessage = 'Hello world, this is the dictation.';
+
+  it('should build nothing, and read no error body, unless asked', async () => {
+    // Arrange
+    const refused = new Response('provider body', { status: 429 });
+    const failing = await provider([() => refused]);
+    const working = await provider([reply(lastMessage)]);
+
+    // Act
+    const failure = await rejection(requestDeviceCleanup(failing.keys, input()));
+    const result = await requestDeviceCleanup(working.keys, input());
+
+    // Assert
+    should(failure.trace).be.undefined();
+    should(refused.bodyUsed).be.false();
+    should(result?.trace).be.undefined();
+  });
+
+  it('should record the request as sent, the raw reply, the timings and the final text, never the key', async () => {
+    // Arrange
+    const { keys, calls } = await provider([reply(`<think>fix it</think>${lastMessage}`)]);
+
+    // Act
+    const result = await requestDeviceCleanup(keys, input({ debug: true, now: ticking() }));
+
+    // Assert
+    const trace = result?.trace;
+    should(trace).be.ok();
+    should(trace).containEql({
+      via: 'device',
+      provider: 'groq',
+      model: 'openai/gpt-oss-120b',
+      host: 'api.groq.com',
+      outcome: 'cleaned',
+      finalText: lastMessage,
+      startedAt: 1_000,
+    });
+    const attempt = trace?.attempts[0];
+    should(trace?.attempts).have.length(1);
+    should(attempt?.request.headers).deepEqual({ authorization: '[redacted]', 'content-type': 'application/json' });
+    should(attempt?.request.path).equal('/openai/v1/chat/completions');
+    should(attempt?.request.messages).deepEqual(
+      ((calls[0]?.body?.messages ?? []) as { role: 'system' | 'user'; content: string }[]).map(({ role, content }) => ({
+        role,
+        content,
+      })),
+    );
+    should(attempt?.status).equal(200);
+    should(attempt?.response?.verdict).equal('cleaned');
+    should(attempt?.response?.steps.map(step => step.step)).deepEqual(['reasoning_stripped', 'guard_passed']);
+    should(JSON.parse(attempt?.response?.raw ?? '{}')).have.property('choices');
+    should(attempt?.timings).deepEqual({ startedAt: 1_010, firstByteMs: 10, totalMs: 20 });
+    should(trace?.totalMs).be.above(0);
+    should(JSON.stringify(trace)).not.containEql(KEY);
+    should(JSON.stringify(trace)).not.containEql('Bearer');
+  });
+
+  it('should stamp the record from the wall clock when no clock is supplied', async () => {
+    // Arrange
+    const { keys } = await provider([reply(lastMessage)]);
+
+    // Act
+    const result = await requestDeviceCleanup(keys, input({ debug: true }));
+
+    // Assert
+    should(result?.trace?.startedAt).be.a.Number();
+  });
+
+  it('should record a reply the guard refused as kept raw', async () => {
+    // Arrange
+    const { keys } = await provider([reply('Sure! Here is a poem about something else entirely, in many lines.')]);
+
+    // Act
+    const result = await requestDeviceCleanup(keys, input({ debug: true }));
+
+    // Assert
+    should(result?.kept).equal('raw');
+    should(result?.trace?.outcome).equal('kept_raw');
+    should(result?.trace?.finalText).equal(input().text);
+    should(result?.trace?.attempts[0]?.response?.steps.map(step => step.step)).deepEqual([
+      'guard_rejected',
+      'kept_raw',
+    ]);
+  });
+
+  it('should record a provider failure on the error, with the status and the provider’s own words', async () => {
+    // Arrange
+    const { keys } = await provider([status(429)]);
+
+    // Act
+    const failure = await rejection(requestDeviceCleanup(keys, input({ debug: true })));
+
+    // Assert
+    should(failure.trace).containEql({ outcome: 'failed' });
+    should(failure.trace?.failure?.code).equal('rate-limit');
+    should(failure.trace?.finalText).be.undefined();
+    should(failure.trace?.attempts[0]?.status).equal(429);
+    should(failure.trace?.attempts[0]?.errorBody).containEql('the provider body is never read');
+    should(failure.trace?.attempts[0]?.failure).equal(failure.message);
+    should(JSON.stringify(failure.trace)).not.containEql(KEY);
+  });
+
+  it('should record both attempts when the request is sent again without the conversation', async () => {
+    // Arrange
+    const { keys } = await provider([status(413), reply(lastMessage)]);
+    const cleanup = { ...DEFAULT_VOICE_CLEANUP, useConversation: true };
+
+    // Act
+    const result = await requestDeviceCleanup(
+      keys,
+      input({ cleanup, context: ['an earlier message that is long enough to keep'], debug: true }),
+    );
+
+    // Assert
+    should(result?.trace?.attempts.map(item => item.withContext)).deepEqual([true, false]);
+    should(result?.trace?.attempts[0]?.status).equal(413);
+    should(result?.trace?.attempts[1]?.status).equal(200);
+    should(result?.trace?.outcome).equal('cleaned');
+  });
+
+  it('should keep the body of a reply that was not JSON, and say nothing of one that cannot be read', async () => {
+    // Arrange
+    const garbled = await provider([() => new Response('<html>nope</html>', { status: 200 })]);
+    const broken = await provider([
+      () =>
+        new Response(
+          new ReadableStream({
+            start(controller) {
+              controller.error(new Error('cut'));
+            },
+          }),
+          { status: 500 },
+        ),
+    ]);
+
+    // Act
+    const unreadable = await rejection(requestDeviceCleanup(garbled.keys, input({ debug: true })));
+    const cut = await rejection(requestDeviceCleanup(broken.keys, input({ debug: true })));
+
+    // Assert
+    should(unreadable.trace?.attempts[0]?.errorBody).equal('<html>nope</html>');
+    should(unreadable.trace?.attempts[0]?.response).be.undefined();
+    should(cut.trace?.attempts[0]?.status).equal(500);
+    should(cut.trace?.attempts[0]?.errorBody).be.undefined();
+  });
+
+  it('should record a call that never got an answer, and one on a key that cannot be read', async () => {
+    // Arrange
+    const slow = await provider([hang]);
+    const lost = await provider([reply('x')]);
+    lost.records.values.delete('wrapping-key');
+
+    // Act
+    const timeout = await rejection(requestDeviceCleanup(slow.keys, input({ timeoutMs: 5, debug: true })));
+    const unreadable = await rejection(requestDeviceCleanup(lost.keys, input({ debug: true })));
+
+    // Assert
+    should(timeout.trace?.failure?.code).equal('timeout');
+    should(timeout.trace?.attempts[0]?.status).be.undefined();
+    should(timeout.trace?.attempts[0]?.timings.firstByteMs).be.undefined();
+    should(unreadable.trace?.failure?.code).equal('provider-auth');
+    should(unreadable.trace?.attempts).have.length(1);
+  });
+
+  it('should make no record where no call was made', async () => {
+    // Arrange
+    const none = await provider([reply('x')], { key: false });
+    const aborted = new AbortController();
+    aborted.abort();
+
+    // Act
+    const missing = await requestDeviceCleanup(none.keys, input({ debug: true }));
+    const refusal = await rejection(requestDeviceCleanup(none.keys, input({ debug: true, signal: aborted.signal })));
+    const badModel = await rejection(requestDeviceCleanup(none.keys, input({ debug: true, model: 'not valid!!' })));
+    const empty = await requestDeviceCleanup(none.keys, input({ debug: true, text: '   ' }));
+
+    // Assert
+    should(missing).be.undefined();
+    should(refusal.trace).be.undefined();
+    should(badModel.trace).be.undefined();
+    should(empty?.trace).be.undefined();
+  });
+});

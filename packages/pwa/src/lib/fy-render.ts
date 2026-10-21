@@ -99,7 +99,7 @@ const markFences = (node: MdNode): void => {
 
 export const remarkFyRenderFences = () => markFences;
 
-export const FY_RENDER_TYPES = ['html', 'svg', 'lottie', 'mermaid', 'image', 'video', 'audio', 'pdf'] as const;
+export const FY_RENDER_TYPES = ['html', 'svg', 'lottie', 'mermaid', 'map', 'image', 'video', 'audio', 'pdf'] as const;
 export type FyRenderType = (typeof FY_RENDER_TYPES)[number];
 
 /** The types a `src:` header may name, and the only ones it may appear on. */
@@ -167,6 +167,7 @@ export type FyRenderBlock =
   | FyRenderBaseBlock<'svg'>
   | FyRenderBaseBlock<'lottie'>
   | FyRenderBaseBlock<'mermaid'>
+  | FyRenderBaseBlock<'map'>
   | (FyRenderBaseBlock<'image'> & { readonly mime: FyRenderImageMime; readonly src?: undefined })
   | FyRenderMediaBlock;
 
@@ -189,7 +190,9 @@ export const isFyRenderMediaBlock = (block: FyRenderBlock): block is FyRenderMed
  * WITH script — any `<script>` or `on…=` handler, found before anything is
  * sanitized — and runs in its own opaque-origin frame on its own static shell
  * (`fy-render-html-frame.tsx`). `media` is any block with a `src:` — its bytes
- * are read or fetched once the block is near.
+ * are read or fetched once the block is near. `map` is a Leaflet map built from a small JSON or YAML
+ * description, in this document, from DOM nodes the engine creates — the author's bytes are data, never
+ * markup (`fy-render-map.tsx`).
  *
  * Decided by the BLOCK rather than the type, because `image` is two things: an
  * inline base64 payload that is admitted at parse time, and a `src:` whose
@@ -198,7 +201,7 @@ export const isFyRenderMediaBlock = (block: FyRenderBlock): block is FyRenderMed
  */
 export function fyRenderPresentation(
   block: FyRenderBlock,
-): 'visual' | 'sandbox' | 'fragment' | 'interactive' | 'media' {
+): 'visual' | 'sandbox' | 'fragment' | 'interactive' | 'media' | 'map' {
   if (isFyRenderMediaBlock(block)) return 'media';
   switch (block.type) {
     case 'svg':
@@ -207,6 +210,8 @@ export function fyRenderPresentation(
     case 'mermaid':
     case 'lottie':
       return 'sandbox';
+    case 'map':
+      return 'map';
     case 'html':
       return fyRenderHtmlRunsScript(block.payload) ? 'interactive' : 'fragment';
   }
@@ -1240,6 +1245,11 @@ export function parseFyRender(source: string): FyRenderParseResult {
     case 'mermaid': {
       if (characterLength(payload) > FY_RENDER_LIMITS.mermaidCharacters)
         return fail('Mermaid payload exceeds 20,000 characters');
+      return { ok: true, block: { type: kind, alt, payload, source } };
+    }
+    case 'map': {
+      if (byteLength(payload) > FY_RENDER_LIMITS.mapBytes) return fail('Map payload exceeds 32 KiB');
+      if (payload.trim() === '') return fail('A map block needs a payload describing it');
       return { ok: true, block: { type: kind, alt, payload, source } };
     }
     case 'lottie': {

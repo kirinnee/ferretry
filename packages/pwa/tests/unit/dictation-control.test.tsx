@@ -9,8 +9,10 @@ import {
 import type { ShortcutHost } from '../../src/hooks/use-dictation-shortcut.ts';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
 import { type AppStore, DaemonClientProvider, StoreProvider } from '../../src/lib/store.tsx';
+import { DICTATION_DEBUG_KEY, DictationDebugLog } from '../../src/lib/stt/dictation-debug.ts';
 import { browserMicMeter } from '../../src/lib/stt/level-monitor.ts';
 import type { ParakeetVoice } from '../../src/lib/stt/parakeet-voice.ts';
+import { DeviceSpeedupKeys } from '../../src/lib/stt/speedup-keys.ts';
 import { DEFAULT_STT_SETTINGS, type SttSettings } from '../../src/lib/stt/stt-settings.ts';
 import {
   type FakeRecognitionProvider,
@@ -620,6 +622,73 @@ describe('<DictationControl> input meter', () => {
     await openAndBegin(view.container, provider);
     expect(panel(view.container)?.getAttribute('data-dictation-panel')).toBe('non-modal');
     expect(panel(view.container)?.querySelector('canvas') ?? null).toBeNull();
+    await view.unmount();
+  });
+});
+
+describe('<DictationControl> details of the clean-up call', () => {
+  const keysThatRefuse = async (): Promise<DeviceSpeedupKeys> => {
+    const records = new Map<string, unknown>();
+    const keys = new DeviceSpeedupKeys(
+      {
+        get: async slot => records.get(slot),
+        put: async (slot, value) => void records.set(slot, value),
+        delete: async slot => void records.delete(slot),
+      },
+      crypto.subtle,
+      async () => new Response('{}', { status: 401 }),
+    );
+    await keys.save('groq', 'gsk_test_0123456789abcdef');
+    return keys;
+  };
+  const storeWith = async (enabled: boolean): Promise<AppStore> => {
+    const values = new Map<string, string>(enabled ? [[DICTATION_DEBUG_KEY, 'on']] : []);
+    return {
+      speedupKeys: await keysThatRefuse(),
+      dictationDebug: new DictationDebugLog({
+        getItem: key => values.get(key) ?? null,
+        setItem: (key, value) => void values.set(key, value),
+      }),
+      transcriptionLog: null,
+      carrier: { fetch: async () => new Response() },
+    } as unknown as AppStore;
+  };
+  const detailsLink = (): HTMLButtonElement | undefined =>
+    [...document.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Details');
+  const take = async (enabled: boolean) => {
+    const provider = promptRecognition();
+    const view = await mount(
+      <StoreProvider store={await storeWith(enabled)}>
+        <DictationControl
+          {...controlProps({ recognition: provider, settings: settingsWith({ enhancementProvider: 'groq' }) })}
+        />
+      </StoreProvider>,
+    );
+    await openAndBegin(view.container, provider);
+    await interact(() => provider.speak('raw words'));
+    await stop(view.container);
+    await settleUntil(() => view.container.querySelector('[data-review-text]') !== null, 'the review box', interact);
+    return view;
+  };
+
+  it('offers Details, opens the record of the call, and closes it again', async () => {
+    const view = await take(true);
+
+    await interact(() => must(detailsLink(), 'the Details link').click());
+    expect(document.body.textContent).toContain('Dictation details');
+    expect(document.body.textContent).not.toContain('gsk_test');
+    await interact(() =>
+      must(document.querySelector<HTMLButtonElement>('button[aria-label="Close"]'), 'close').click(),
+    );
+
+    expect(document.body.textContent).not.toContain('Dictation details');
+    await view.unmount();
+  });
+
+  it('offers no Details when dictation debug is off', async () => {
+    const view = await take(false);
+
+    expect(detailsLink()).toBeUndefined();
     await view.unmount();
   });
 });

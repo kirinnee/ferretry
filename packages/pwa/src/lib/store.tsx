@@ -91,7 +91,10 @@ import {
   type ParakeetGlobalLike,
   type ParakeetVoice,
 } from './stt/parakeet-voice.ts';
+import { type DictationDebugSnapshot, DictationDebugLog } from './stt/dictation-debug.ts';
 import { DeviceSpeedupKeys, IndexedDbSpeedupKeyRecords } from './stt/speedup-keys.ts';
+import { TranscriptionLog, type TranscriptionLogSnapshot } from './stt/transcription-log.ts';
+import { IndexedDbTranscriptionLogRecords } from './stt/transcription-log-records.ts';
 import { SttSettingsStore } from './stt/stt-settings.ts';
 import { DaemonUsageStore, daemonUsagePort } from './usage-store.ts';
 import { WorkspaceLayoutStore } from './workspace-layout-store.ts';
@@ -376,6 +379,10 @@ export interface AppStore {
   readonly voice: ParakeetVoice;
   /** Groq/Cerebras keys THIS device holds for direct dictation clean-up; never synced, never sent to a daemon. */
   readonly speedupKeys: DeviceSpeedupKeys;
+  /** The opt-in dictation debug switch and its in-memory ring of recent cleanup calls; this tab only. */
+  readonly dictationDebug: DictationDebugLog;
+  /** Every dictation this device made, kept in its own IndexedDB; never synced, never sent to a daemon. */
+  readonly transcriptionLog: TranscriptionLog;
   /** Every agent's remembered split workspace, forgotten with the machine it belongs to. */
   readonly workspaceLayouts: WorkspaceLayoutStore;
   readonly notificationPreferences: DaemonNotificationPreferences;
@@ -443,6 +450,10 @@ export interface CreateAppStoreOptions {
   readonly voice?: ParakeetVoice;
   /** Provider keys this device holds. Injected by suites; this browser's IndexedDB otherwise. */
   readonly speedupKeys?: DeviceSpeedupKeys;
+  /** The dictation debug ring. Injected by suites; a fresh one reading this browser's switch otherwise. */
+  readonly dictationDebug?: DictationDebugLog;
+  /** The transcription log. Injected by suites; this browser's IndexedDB otherwise. */
+  readonly transcriptionLog?: TranscriptionLog;
   readonly repository?: DaemonConnectionRepository;
   readonly fetcher?: DaemonFetch;
   readonly connectClient?: ConnectDaemonClient;
@@ -656,6 +667,10 @@ export async function createAppStore(options: CreateAppStoreOptions = {}): Promi
   const speedupKeys =
     options.speedupKeys ??
     new DeviceSpeedupKeys(new IndexedDbSpeedupKeyRecords(globalThis.indexedDB), globalThis.crypto.subtle, fetcher);
+  const dictationDebug = options.dictationDebug ?? new DictationDebugLog();
+  const transcriptionLog =
+    options.transcriptionLog ?? new TranscriptionLog(new IndexedDbTranscriptionLogRecords(globalThis.indexedDB));
+  void transcriptionLog.hydrate();
   const voice =
     options.voice ?? browserParakeetVoice(globalThis as unknown as ParakeetGlobalLike, options.speechAssets ?? null);
   // Reads what is already installed; it never downloads.
@@ -748,6 +763,8 @@ export async function createAppStore(options: CreateAppStoreOptions = {}): Promi
     stt,
     voice,
     speedupKeys,
+    dictationDebug,
+    transcriptionLog,
     workspaceLayouts,
     notificationPreferences,
     notificationFilter,
@@ -1064,6 +1081,35 @@ export function useLockedMachines(gate: StepUpGate): readonly DaemonId[] {
 /** This device's provider keys, or `null` outside a store (a component rendered on its own). */
 export function useSpeedupKeys(): DeviceSpeedupKeys | null {
   return useContext(StoreContext)?.speedupKeys ?? null;
+}
+
+/** The dictation debug switch and ring, or `null` outside a store. */
+export function useDictationDebug(): DictationDebugLog | null {
+  return useContext(StoreContext)?.dictationDebug ?? null;
+}
+
+const NO_DEBUG: DictationDebugSnapshot = Object.freeze({ enabled: false, records: [] });
+const noDebugSnapshot = (): DictationDebugSnapshot => NO_DEBUG;
+const noSubscription = (): (() => void) => () => undefined;
+
+/** What the debug ring holds right now; always off and empty outside a store. */
+export function useDictationDebugSnapshot(): DictationDebugSnapshot {
+  const log = useDictationDebug();
+  return useSyncExternalStore(log?.subscribe ?? noSubscription, log?.snapshot ?? noDebugSnapshot);
+}
+
+/** This device's transcription log, or `null` outside a store. */
+export function useTranscriptionLog(): TranscriptionLog | null {
+  return useContext(StoreContext)?.transcriptionLog ?? null;
+}
+
+const NO_LOG: TranscriptionLogSnapshot = Object.freeze({ enabled: false, entries: [], saved: false });
+const noLogSnapshot = (): TranscriptionLogSnapshot => NO_LOG;
+
+/** What the transcription log holds right now; off and empty outside a store. */
+export function useTranscriptionLogSnapshot(): TranscriptionLogSnapshot {
+  const log = useTranscriptionLog();
+  return useSyncExternalStore(log?.subscribe ?? noSubscription, log?.snapshot ?? noLogSnapshot);
 }
 
 /**

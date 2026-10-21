@@ -276,4 +276,76 @@ describe('keeping an existing conversation as a ferret, on a booted daemon', () 
     // Never copied, never modified.
     should(await readFile(source, 'utf8')).equal(original);
   });
+
+  it('should list the computer’s conversations only while “Keep in sync” is on, and continue one on the spot either way', async () => {
+    // Arrange
+    const home = await tempDirectory('ferretry-sync-journey-');
+    const owner = await tempDirectory('ferretry-sync-owner-');
+    const project = await tempDirectory('ferretry-sync-project-');
+    process.env.CLAUDE_CONFIG_DIR = join(owner, '.claude');
+    process.env.CODEX_HOME = join(owner, '.codex');
+    const port = await freeLoopbackPort();
+    const cleanups: Array<() => void | Promise<void>> = [];
+    let release = (): void => {};
+    process.env.FY_HOME = home;
+    const opened = await world().storage.open();
+    await opened.storage.close();
+    await mkdir(join(home, 'config'), { recursive: true });
+    await writeFile(join(home, 'config', 'daemon.json'), JSON.stringify({ host: '127.0.0.1', port }), { mode: 0o600 });
+    await seedRuntime(home);
+    const source = await seedOwnerConversation(owner, project);
+    const original = await readFile(source, 'utf8');
+    const shutdown = new Promise<void>(resolve => {
+      release = resolve;
+    });
+    const exit = start({ ...world(), untilShutdown: () => shutdown }, cleanups);
+    await waitForHealth(port);
+    const token = (await readFile(join(home, 'api-token'), 'utf8')).trim();
+    const headers = {
+      authorization: `Bearer ${token}`,
+      'content-type': 'application/json',
+      'x-ferretry-client': 'cli',
+    };
+    const base = `http://127.0.0.1:${port}/v1/imports/conversations`;
+    const synced = async () =>
+      ConversationImportListingSchema.parse(await (await fetch(`${base}?source=synced`, { headers })).json());
+
+    // Act
+    const defaulted = await synced();
+    await writeFile(join(home, 'config', 'machine.yaml'), 'conversations:\n  listComputer: false\n');
+    const off = await synced();
+    const adopted = ConversationAdoptResultSchema.parse(
+      await (
+        await fetch(`${base}/adopt`, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({ harness: 'claude', runtime: WRAPPER, conversations: [{ id: CONVERSATION }] }),
+        })
+      ).json(),
+    );
+    await writeFile(join(home, 'config', 'machine.yaml'), 'conversations:\n  listComputer: true\n');
+    const on = await synced();
+
+    release();
+    await exit;
+    for (const cleanup of cleanups) await cleanup();
+
+    // Assert
+    should(defaulted.conversations.map(row => [row.id, row.keptIn, row.adoptedBy])).deepEqual([
+      [CONVERSATION, 'computer', undefined],
+      [ROLLOUT, 'computer', undefined],
+    ]);
+    should(off.conversations).deepEqual([]);
+    should(off.computerListed).equal(false);
+    // Continuing one adopts it from the computer's home even though listing it is off.
+    should(adopted.refused).deepEqual([]);
+    should(adopted.adopted).have.length(1);
+    // Once it is hard-linked into Ferretry's history it is Ferretry's row, listed once and owned.
+    should(on.conversations.map(row => [row.id, row.keptIn, row.adoptedBy === undefined])).deepEqual([
+      [CONVERSATION, 'ferretry', false],
+      [ROLLOUT, 'computer', true],
+    ]);
+    should(on.computerListed).equal(undefined);
+    should(await readFile(source, 'utf8')).equal(original);
+  });
 });

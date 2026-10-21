@@ -275,14 +275,15 @@ export const HYPERMEDIA_ENV = 'FY_HYPERMEDIA';
 
 /** The hypermedia teaching. Short on purpose — it is in every prompt. docs/hypermedia.md quotes it. */
 export const HYPERMEDIA_INSTRUCTION = [
-  'Hypermedia: when you teach, explain, compare or walk through anything not straightforward — a flow, an architecture, a state machine, a layout, a change over time — show it in your chat reply as well as saying it. Do not overdo it: a simple answer stays plain text, and one clear picture beats several.',
-  'Always inline: never publish an artifact, page, gist or link to explain something unless the owner asks for one. This overrides any artifact habit.',
-  'Tell it as a short story the reader can drive: step-through Next buttons, sliders, toggles, tap to reveal, or an animated diagram. One idea per step, short labels, clear hierarchy, gentle motion that honours prefers-reduced-motion, no walls of text.',
+  'Hypermedia: when you teach, explain, compare or walk through anything not straightforward — a flow, architecture, state machine, layout or change over time — show it in your reply as well as saying it. Do not overdo it: a simple answer stays plain text; one picture beats several.',
+  'Always inline: never publish an artifact, page, gist or link to explain something unless the owner asks for one.',
+  'Tell it as a short story the reader can drive: step-through Next buttons, sliders, toggles, tap to reveal, animated diagrams. One idea per step, short labels, gentle motion that honours prefers-reduced-motion.',
   'Write a fenced block whose info string is exactly fy-render: line 1 `type: <type>`, line 2 `alt: <one-line description>`, then a line `---`, then the payload.',
-  '- mermaid: Mermaid source (flowchart, sequenceDiagram, stateDiagram-v2, …).',
-  '- svg: one self-contained <svg>…</svg> (CSS animation welcome); no script, foreignObject, use or external links.',
-  '- html: a fragment with inline CSS, and <script> for the interaction (it runs isolated). Load nothing from the network.',
-  '- image, video, audio, pdf: save files you make into $FY_MEDIA_DIR and put `src: media:<file name>` before `---`, with no payload; `src: @path/in/your/workspace` and `src: https://…` also work.',
+  '- mermaid: Mermaid source (flowchart, sequenceDiagram, …).',
+  '- svg: one self-contained <svg>…</svg> (CSS animation welcome); no script, foreignObject or external links.',
+  '- html: a fragment with inline CSS and <script> for interaction (runs isolated); load nothing from the network.',
+  '- map: JSON/YAML {center: [lat, lng], zoom, markers: [{at, label, popup}], lines: [{points}], polygons, geojson}; real places.',
+  '- image, video, audio, pdf: save files you make into $FY_MEDIA_DIR and put `src: media:<file name>` before `---`, with no payload; `src: @workspace/path` and `src: https://…` also work.',
   'Example:',
   '```fy-render',
   'type: mermaid',
@@ -291,7 +292,7 @@ export const HYPERMEDIA_INSTRUCTION = [
   'flowchart LR',
   '  Phone --> Relay --> Daemon',
   '```',
-  "It renders inline in the reader's chat. Chat only: never write fy-render into files, docs, commits or PR text.",
+  "It renders inline in the reader's chat. Chat only: never write fy-render into files, docs, commits or PRs.",
 ].join('\n');
 
 /**

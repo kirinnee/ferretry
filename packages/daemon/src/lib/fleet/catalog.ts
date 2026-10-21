@@ -199,6 +199,7 @@ export function machineView(
     agentPermissions: model.machine.agentPermissions,
     defaultRuntime: resolveDefaultRuntime(model) ?? null,
     agentControl: { ...model.machine.agentControl },
+    browserMode: model.machine.browserMode,
     tools: HARNESSES.map(harness => {
       const command = facts.tools[harness];
       return {
