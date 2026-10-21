@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 
 import { PairScanner } from '../../../src/features/pairing/pair-scanner.tsx';
+import { DevicePermissionsContext } from '../../../src/hooks/use-device-permissions.ts';
 import { type QrPreview, type QrScanHost, ScanError } from '../../../src/lib/pair-scan.ts';
 import { interact, mount, must } from '../../support/dom.ts';
 
@@ -79,6 +80,51 @@ describe('PairScanner', () => {
     await screen.unmount();
   });
 
+  it('writes the attributes iOS needs onto the video and starts playback from the tap', async () => {
+    const stream = new MediaStream();
+    let video: HTMLVideoElement | undefined;
+    let played = 0;
+    const host: QrScanHost = {
+      supported: true,
+      scan: async (preview: QrPreview) => {
+        video = preview.show(stream) as HTMLVideoElement;
+        video.play = () => {
+          played += 1;
+          return Promise.resolve();
+        };
+        preview.show(stream);
+        return await new Promise<string>(() => {});
+      },
+    };
+    const screen = await mount(<PairScanner host={host} label="Scan QR code" onText={() => {}} onFailed={() => {}} />);
+
+    await interact(() => buttonNamed(screen.container, 'Scan QR code').click());
+
+    expect(video?.muted).toBe(true);
+    expect(video?.hasAttribute('muted')).toBe(true);
+    expect(video?.hasAttribute('playsinline')).toBe(true);
+    expect(played).toBe(1);
+    await screen.unmount();
+  });
+
+  it('does not mind a browser that refuses to autoplay the preview', async () => {
+    const host: QrScanHost = {
+      supported: true,
+      scan: async (preview: QrPreview) => {
+        const video = preview.show(new MediaStream()) as HTMLVideoElement;
+        video.play = () => Promise.reject(new Error('NotAllowedError'));
+        preview.show(new MediaStream());
+        return await new Promise<string>(() => {});
+      },
+    };
+    const screen = await mount(<PairScanner host={host} label="Scan QR code" onText={() => {}} onFailed={() => {}} />);
+
+    await interact(() => buttonNamed(screen.container, 'Scan QR code').click());
+
+    expect(screen.container.textContent).toContain('Stop scanning');
+    await screen.unmount();
+  });
+
   it('stops on request and returns to the resting action', async () => {
     const screen = await mount(<PairScanner host={never} label="Scan QR code" onText={() => {}} onFailed={() => {}} />);
 
@@ -95,7 +141,7 @@ describe('PairScanner', () => {
     const host: QrScanHost = {
       supported: true,
       scan: async () => {
-        throw new ScanError('permission-denied', 'Camera access was blocked for this site.');
+        throw new ScanError('permission-denied', 'Camera access is turned off for Ferretry on this device.');
       },
     };
     const screen = await mount(
@@ -105,9 +151,79 @@ describe('PairScanner', () => {
     await interact(() => buttonNamed(screen.container, 'Scan QR code').click());
 
     expect(must(screen.container.querySelector('[role="alert"]'), 'the refusal').textContent).toContain(
-      'Camera access was blocked for this site.',
+      'Camera access is turned off for Ferretry on this device.',
     );
     expect(revealed).toBe(1);
+    await screen.unmount();
+  });
+
+  it('tells a refused camera how to turn it back on for this device, and to paste instead', async () => {
+    const host: QrScanHost = {
+      supported: true,
+      scan: async () => {
+        throw new ScanError('permission-denied', 'Camera access is turned off for Ferretry on this device.');
+      },
+    };
+    const hostWithFacts = {
+      facts: { family: 'ios', installed: true, secure: true } as const,
+      status: async () => 'denied' as const,
+      request: async () => 'denied' as const,
+    };
+    const screen = await mount(
+      <DevicePermissionsContext.Provider value={hostWithFacts}>
+        <PairScanner host={host} label="Scan QR code" onText={() => {}} onFailed={() => {}} />
+      </DevicePermissionsContext.Provider>,
+    );
+
+    await interact(() => buttonNamed(screen.container, 'Scan QR code').click());
+
+    const howTo = must(screen.container.querySelector('[data-camera-howto]'), 'the how-to');
+    expect(howTo.textContent).toContain('find Ferretry in the list of apps');
+    expect(howTo.textContent).toContain('paste the pairing link');
+    await screen.unmount();
+  });
+
+  it('does not show camera steps for a refusal that is not about permission', async () => {
+    const host: QrScanHost = {
+      supported: true,
+      scan: async () => {
+        throw new ScanError('camera-busy', 'The camera is in use by another app.');
+      },
+    };
+    const screen = await mount(<PairScanner host={host} label="Scan QR code" onText={() => {}} onFailed={() => {}} />);
+
+    await interact(() => buttonNamed(screen.container, 'Scan QR code').click());
+
+    expect(screen.container.querySelector('[data-camera-howto]')).toBeNull();
+    await screen.unmount();
+  });
+
+  it('says why there is no scanner, on a secure page and on an insecure one', async () => {
+    const secure = await mount(<PairScanner host={null} label="Scan QR code" onText={() => {}} onFailed={() => {}} />);
+    expect(must(secure.container.querySelector('[data-camera-unavailable]'), 'the note').textContent).toContain(
+      'This browser cannot scan here',
+    );
+    await secure.unmount();
+
+    const insecure = {
+      facts: { family: 'desktop', installed: false, secure: false } as const,
+      status: async () => 'unsupported' as const,
+      request: async () => 'unsupported' as const,
+    };
+    const screen = await mount(
+      <DevicePermissionsContext.Provider value={insecure}>
+        <PairScanner host={null} label="Scan QR code" onText={() => {}} onFailed={() => {}} />
+      </DevicePermissionsContext.Provider>,
+    );
+    expect(must(screen.container.querySelector('[data-camera-unavailable]'), 'the note').textContent).toContain(
+      'secure (https)',
+    );
+    await screen.unmount();
+  });
+
+  it('shows no unavailable note when the browser can scan', async () => {
+    const screen = await mount(<PairScanner host={never} label="Scan QR code" onText={() => {}} onFailed={() => {}} />);
+    expect(screen.container.querySelector('[data-camera-unavailable]')).toBeNull();
     await screen.unmount();
   });
 });

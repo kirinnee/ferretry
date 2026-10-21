@@ -18,14 +18,17 @@
  * the caller, which parses it with `pairingSeedFromUrl`. This module has no
  * opinion about pairing and never holds a single-use code.
  *
- * NO SOFTWARE DECODER, DELIBERATELY. `BarcodeDetector` is Chromium-only, so
- * WebKit gets no in-app scanner. That is not the blocked path it looks like:
- * the design's carrier is a QR scanned with the phone's OWN camera app, which
- * opens this PWA already pre-filled on every platform, and the in-app scanner
- * only serves someone who opened the app first. Those readers get the paste
- * field instead of a bundled decoder that every visitor would have to download.
- * If that trade ever changes, `QrScanEnvironment.detector` is the seam: hand it
- * a decoder built over a canvas grab and nothing else here moves.
+ * THE DECODER IS WHATEVER THE BROWSER HAS, ELSE A LAZY SOFTWARE ONE.
+ * `BarcodeDetector` is Chromium-only. WebKit has none, and with no decoder the
+ * scan button used to be disabled — so an iPhone never reached `getUserMedia`
+ * and never showed a camera prompt. `QrScanEnvironment.detector` is the seam:
+ * the composition root hands WebKit a canvas-grab decoder
+ * (`qr-frame-decoder.ts`) that downloads only when somebody taps Scan.
+ *
+ * THE CAMERA PROMPT RIDES THE TAP. iOS shows its prompt only when
+ * `getUserMedia` is called inside the user gesture, so `scan` reaches the call
+ * before its first `await`: nothing — not a permission query, not a decoder
+ * download — may be put in front of it.
  */
 
 /** Why a scan ended without a code, as a closed vocabulary. */
@@ -57,7 +60,7 @@ export const scanErrorFrom = (error: unknown): ScanError => {
   if (error instanceof ScanError) return error;
   const name = (error as { name?: string } | null)?.name ?? '';
   if (name === 'NotAllowedError' || name === 'SecurityError') {
-    return new ScanError('permission-denied', 'Camera access was blocked for this site.');
+    return new ScanError('permission-denied', 'Camera access is turned off for Ferretry on this device.');
   }
   if (name === 'NotFoundError' || name === 'OverconstrainedError') {
     return new ScanError('no-camera', 'No camera was found on this device.');
@@ -101,6 +104,8 @@ interface DetectedCode {
 /** `BarcodeDetector`, as the two members a scan needs. */
 export interface QrDetectorLike {
   detect(source: unknown): Promise<readonly DetectedCode[]>;
+  /** Fetches whatever `detect` needs, once the camera is already open. Absent where nothing is needed. */
+  prepare?(): Promise<void>;
 }
 
 interface MediaTrackLike {
@@ -140,8 +145,12 @@ export interface QrScanEnvironment {
  */
 export const SCAN_FRAME_INTERVAL_MS = 120;
 
-/** The rear camera is the one pointed at someone else's screen. */
-const SCAN_CONSTRAINTS = { video: { facingMode: 'environment' } } as const;
+/**
+ * The rear camera is the one pointed at someone else's screen. `ideal`, so a device with one camera
+ * (a laptop) opens it instead of refusing the constraint; `audio: false` so nothing here can ever ask
+ * for the microphone.
+ */
+const SCAN_CONSTRAINTS = { audio: false, video: { facingMode: { ideal: 'environment' } } } as const;
 
 const stopTracks = (stream: MediaStreamLike): void => {
   for (const track of stream.getTracks?.() ?? []) track.stop?.();
@@ -168,7 +177,10 @@ export const browserQrScanHost = (environment: QrScanEnvironment): QrScanHost =>
     supported: typeof getUserMedia === 'function' && detector !== undefined,
     scan: async (preview, signal) => {
       if (typeof getUserMedia !== 'function') {
-        throw new ScanError('no-camera-api', 'This browser cannot open a camera here.');
+        throw new ScanError(
+          'no-camera-api',
+          'This page cannot open a camera. Cameras need a secure (https) connection.',
+        );
       }
       if (detector === undefined) {
         throw new ScanError('no-decoder', 'This browser cannot read a QR code.');
@@ -185,6 +197,11 @@ export const browserQrScanHost = (environment: QrScanEnvironment): QrScanHost =>
       try {
         const source = preview.show(stream);
         const engine = detector();
+        try {
+          await engine.prepare?.();
+        } catch {
+          throw new ScanError('no-decoder', 'The QR reader could not be loaded. Check your connection and try again.');
+        }
         while (!signal.aborted) {
           // A frame that will not decode is the NORMAL case — the reader is
           // still aiming — so a rejected or empty detect keeps the loop alive.

@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'bun:test';
-
-import { useQrScan } from '../../src/hooks/use-qr-scan.ts';
 import type { QrScanController } from '../../src/hooks/use-qr-scan.ts';
+import { useQrScan } from '../../src/hooks/use-qr-scan.ts';
 import type { QrPreview, QrScanHost } from '../../src/lib/pair-scan.ts';
 import { ScanError } from '../../src/lib/pair-scan.ts';
 import { render, runAsync } from '../support/react.ts';
@@ -75,6 +74,7 @@ describe('useQrScan', () => {
     const view = render(<Probe host={deferredHost().host} onText={() => {}} seen={seen} />);
 
     expect(latest(seen).phase).toBe('idle');
+    expect(latest(seen).code).toBeNull();
     expect(latest(seen).message).toBeNull();
     expect(latest(seen).supported).toBe(true);
     await close(view);
@@ -112,13 +112,17 @@ describe('useQrScan', () => {
     const view = render(<Probe host={deferred.host} onText={() => {}} seen={seen} />);
 
     await runAsync(async () => latest(seen).start());
-    await settle(() => deferred.reject(new ScanError('permission-denied', 'Camera access was blocked for this site.')));
+    await settle(() =>
+      deferred.reject(new ScanError('permission-denied', 'Camera access is turned off for Ferretry on this device.')),
+    );
     expect(latest(seen).phase).toBe('failed');
-    expect(latest(seen).message).toBe('Camera access was blocked for this site.');
+    expect(latest(seen).message).toBe('Camera access is turned off for Ferretry on this device.');
+    expect(latest(seen).code).toBe('permission-denied');
 
     await runAsync(async () => latest(seen).start());
     await settle(() => deferred.reject(new Error('something else entirely')));
     expect(latest(seen).message).toBe('The camera could not be started.');
+    expect(latest(seen).code).toBe('scan-failed');
     await close(view);
   });
 

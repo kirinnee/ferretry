@@ -47,6 +47,7 @@ import { ComposerSuggestionsSettings } from './composer-suggestions-settings.tsx
 import { MotionSetting, SessionsListSetting } from './conversation-settings.tsx';
 import { type DaemonReachabilityProbe, daemonDisplayName, distinctDaemonName } from './daemon-settings.tsx';
 import { DaemonSettingsFrame, type DaemonSettingsTabDefinition } from './daemon-settings-frame.tsx';
+import { DevicePermissionsSetting } from './device-permissions-settings.tsx';
 import { DictationSettings, type DictationSettingsProps } from './dictation-settings.tsx';
 import type { GrantClientFactory } from './grants-settings.tsx';
 import { useMachineUpdates } from './machine-updates.ts';
@@ -487,6 +488,7 @@ export function SettingsPage({
       ),
       theme: <ThemeSettings theme={theme} />,
       'install-app': <InstallAppSetting />,
+      'device-permissions': <DevicePermissionsSetting />,
       'clear-cached-data': (
         <ClearCachedDataSetting {...(onClearCachedData === undefined ? {} : { onClear: onClearCachedData })} />
       ),

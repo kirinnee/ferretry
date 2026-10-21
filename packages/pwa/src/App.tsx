@@ -181,6 +181,7 @@ import {
   type PushContainerLike,
   supportsWebPush,
 } from './lib/push-enrolment.ts';
+import { frameQrDetector } from './lib/qr-frame-decoder.ts';
 import { isCarrierOutage } from './lib/relay-carrier.ts';
 import { RELEASE_WORKER_RELEASE } from './lib/release-manifest.ts';
 import { RouterProvider, useRouter } from './lib/router.tsx';
@@ -427,19 +428,27 @@ export const routeAnnouncement = (route: PageRoute): string =>
 /**
  * The camera, wired to the real browser — or `null`, which is an honest answer.
  *
- * Two capabilities are needed and neither is universal: `getUserMedia` is
- * ABSENT (not merely refused) outside a secure context, and `BarcodeDetector`
- * ships in Chromium and not in WebKit. A browser missing either gets no scan
- * button at all rather than one that fails when pressed; the pairing screen
- * shows its paste field instead.
+ * `getUserMedia` is ABSENT (not merely refused) outside a secure context, and a browser without it
+ * gets no scan button at all rather than one that fails when pressed; the pairing screen shows its
+ * paste field instead. `BarcodeDetector` is Chromium-only, so WebKit decodes frames in software.
  */
 export const browserQrScan = (): QrScanHost | null => {
   if (typeof window === 'undefined' || typeof navigator === 'undefined') return null;
-  const detector = (window as { BarcodeDetector?: new (options: { formats: string[] }) => QrDetectorLike })
+  const native = (window as { BarcodeDetector?: new (options: { formats: string[] }) => QrDetectorLike })
     .BarcodeDetector;
+  // WebKit has no BarcodeDetector. Giving it a software decoder (downloaded only when somebody taps
+  // Scan) is what lets an iPhone reach getUserMedia at all — and so show its camera prompt.
+  const detector: () => QrDetectorLike =
+    native === undefined
+      ? () =>
+          frameQrDetector({
+            createCanvas: () => document.createElement('canvas'),
+            loadDecoder: async () => (await import('jsqr')).default,
+          })
+      : () => new native({ formats: ['qr_code'] });
   const host = browserQrScanHost({
     media: navigator.mediaDevices,
-    detector: detector === undefined ? undefined : () => new detector({ formats: ['qr_code'] }),
+    detector,
     delay: async milliseconds => await new Promise(resolve => setTimeout(resolve, milliseconds)),
   });
   return host.supported ? host : null;

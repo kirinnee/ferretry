@@ -47,8 +47,7 @@ import {
   remarkFyRenderFences,
 } from '../lib/fy-render.ts';
 import { fenceLanguage, highlightToHtml } from '../lib/highlight.ts';
-import { trustedHighlight } from '../lib/trusted-types.ts';
-import { MarkdownTable } from './markdown-table.tsx';
+import { LOCATION_FENCE_LANGUAGE, parseLocationBlock } from '../lib/location-share.ts';
 import { daemonSessionPath } from '../lib/pages/routes.ts';
 import {
   type AgentReferenceResolver,
@@ -70,7 +69,10 @@ import {
   type TaskReferenceResolver,
 } from '../lib/references.ts';
 import { remarkTableLabels } from '../lib/remark-table-labels.ts';
+import { trustedHighlight } from '../lib/trusted-types.ts';
 import { FyRenderBlock } from './fy-render-block.tsx';
+import { LocationChip } from './location-chip.tsx';
+import { MarkdownTable } from './markdown-table.tsx';
 
 /**
  * Resolves authored file candidates to canonical session-relative paths. Injected
@@ -132,6 +134,25 @@ export function fyRenderFenceBody(node: MarkdownAstFenceNode | null | undefined)
   const body = code.children?.[0];
   if (body?.type !== 'text' || typeof body.value !== 'string') return null;
   // mdast-to-hast terminates a fence body with a newline the author did not type.
+  return body.value.replace(/\n$/u, '');
+}
+
+/**
+ * The authored body of an `fy-location` fence, or null for every other `<pre>`.
+ * Read from the language class: unlike `fy-render` this block does no harm when an
+ * author writes one, because the chip draws only numbers and one cleaned label.
+ *
+ * @internal Exported so the read has a focused regression of its own.
+ */
+export function locationFenceBody(node: MarkdownAstFenceNode | null | undefined): string | null {
+  const code = node?.children?.[0] as
+    | (MarkdownAstChildNode & { readonly properties?: { readonly className?: unknown } })
+    | undefined;
+  if (code?.type !== 'element' || code.tagName !== 'code') return null;
+  const classes = code.properties?.className;
+  if (!Array.isArray(classes) || !classes.includes(`language-${LOCATION_FENCE_LANGUAGE}`)) return null;
+  const body = code.children?.[0];
+  if (body?.type !== 'text' || typeof body.value !== 'string') return null;
   return body.value.replace(/\n$/u, '');
 }
 
@@ -465,6 +486,9 @@ export const Markdown = memo(function Markdown({
             const parsed = body === null ? null : parseFyRender(body);
             if (parsed?.ok === true)
               return <FyRenderBlock block={parsed.block} readWorkspaceMedia={readWorkspaceMedia} />;
+            const locationBody = locationFenceBody(node);
+            const fix = locationBody === null ? null : parseLocationBlock(locationBody);
+            if (fix !== null) return <LocationChip fix={fix} />;
             return <pre {...rest}>{children}</pre>;
           },
           // A phone reads a table as cards or as the real table, its own choice (`markdown-table.tsx`).

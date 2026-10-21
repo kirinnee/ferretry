@@ -64,6 +64,22 @@ describe('NotificationSettingsView', () => {
     expect(tree).not.toContain('closed-app delivery is ready');
   });
 
+  it('states the browser permission, and offers an explicit button only while it has not been asked', () => {
+    const asked = view({ permission: 'default', enabled: false });
+    expect(JSON.stringify(asked.renderer.toJSON())).toContain('Not asked yet');
+    const allow = asked.renderer.root.findByProps({ 'data-notification-allow': '' });
+    run(() => allow.props.onClick());
+    expect(asked.calls.enabled).toEqual([true]);
+
+    const granted = view({ permission: 'granted' });
+    expect(JSON.stringify(granted.renderer.toJSON())).toContain('Allowed in this browser.');
+    expect(granted.renderer.root.findAllByProps({ 'data-notification-allow': '' })).toHaveLength(0);
+
+    const denied = view({ permission: 'denied' });
+    expect(JSON.stringify(denied.renderer.toJSON())).toContain('Blocked in this browser.');
+    expect(denied.renderer.root.findAllByProps({ 'data-notification-allow': '' })).toHaveLength(0);
+  });
+
   it('flips only the master switch, never inventing daemon-global state', () => {
     const { calls, renderer } = view();
     const master = renderer.root.findByProps({ role: 'switch' });

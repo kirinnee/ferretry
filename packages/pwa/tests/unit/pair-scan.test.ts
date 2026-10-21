@@ -5,9 +5,9 @@ import {
   type QrDetectorLike,
   type QrPreview,
   type QrScanEnvironment,
+  SCAN_FRAME_INTERVAL_MS,
   ScanError,
   scanErrorFrom,
-  SCAN_FRAME_INTERVAL_MS,
 } from '../../src/lib/pair-scan.ts';
 
 interface FakeTrack {
@@ -63,7 +63,9 @@ describe('scanErrorFrom', () => {
     expect(scanErrorFrom(named('OverconstrainedError')).code).toBe('no-camera');
     expect(scanErrorFrom(named('NotReadableError')).code).toBe('camera-busy');
     expect(scanErrorFrom(named('AbortError')).code).toBe('camera-busy');
-    expect(scanErrorFrom(named('NotAllowedError')).message).toBe('Camera access was blocked for this site.');
+    expect(scanErrorFrom(named('NotAllowedError')).message).toBe(
+      'Camera access is turned off for Ferretry on this device.',
+    );
   });
 
   it('keeps an unrecognised error message, and invents one for a non-error', () => {
@@ -85,7 +87,7 @@ describe('browserQrScanHost support', () => {
     const recorder = recordingPreview();
     const noCamera = browserQrScanHost(environment({ media: undefined }));
     await expect(noCamera.scan(recorder.preview, new AbortController().signal)).rejects.toThrow(
-      'This browser cannot open a camera here.',
+      'This page cannot open a camera. Cameras need a secure (https) connection.',
     );
 
     let opened = 0;
@@ -147,7 +149,7 @@ describe('browserQrScanHost scan', () => {
     );
 
     await host.scan(recordingPreview('the-video').preview, new AbortController().signal);
-    expect(constraints).toEqual([{ video: { facingMode: 'environment' } }]);
+    expect(constraints).toEqual([{ audio: false, video: { facingMode: { ideal: 'environment' } } }]);
     expect(sources).toEqual(['the-video']);
   });
 
@@ -225,6 +227,73 @@ describe('browserQrScanHost scan', () => {
     await expect(host.scan(recordingPreview().preview, new AbortController().signal)).rejects.toMatchObject({
       code: 'permission-denied',
     });
+  });
+
+  it('calls getUserMedia in the tap itself, before anything can be awaited', async () => {
+    let opened = 0;
+    const host = browserQrScanHost(
+      environment({
+        media: {
+          getUserMedia: async () => {
+            opened += 1;
+            return fakeStream([]);
+          },
+        },
+      }),
+    );
+
+    const scanning = host.scan(recordingPreview().preview, new AbortController().signal);
+    expect(opened).toBe(1);
+    await scanning;
+  });
+
+  it('loads the decoder only after the camera is open, then scans', async () => {
+    const order: string[] = [];
+    const host = browserQrScanHost(
+      environment({
+        media: {
+          getUserMedia: async () => {
+            order.push('camera');
+            return fakeStream([]);
+          },
+        },
+        detector: () => ({
+          prepare: async () => {
+            order.push('prepare');
+          },
+          detect: async () => {
+            order.push('detect');
+            return [{ rawValue: 'code' }];
+          },
+        }),
+      }),
+    );
+
+    await expect(host.scan(recordingPreview().preview, new AbortController().signal)).resolves.toBe('code');
+    expect(order).toEqual(['camera', 'prepare', 'detect']);
+  });
+
+  it('says the reader could not be loaded, and still releases the camera, when preparing fails', async () => {
+    const tracks = [{ stopped: false }];
+    const recorder = recordingPreview();
+    const host = browserQrScanHost(
+      environment({
+        media: { getUserMedia: async () => fakeStream(tracks) },
+        detector: () => ({
+          prepare: async () => {
+            throw new Error('offline');
+          },
+          detect: async () => [],
+        }),
+      }),
+    );
+
+    await expect(host.scan(recorder.preview, new AbortController().signal)).rejects.toMatchObject({
+      code: 'no-decoder',
+      message: 'The QR reader could not be loaded. Check your connection and try again.',
+    });
+    expect(recorder.cleared).toBe(1);
+    expect(tracks[0]?.stopped).toBe(true);
   });
 
   it('survives a stream that reports no tracks to stop', async () => {

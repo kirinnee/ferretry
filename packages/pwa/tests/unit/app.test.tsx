@@ -3656,9 +3656,30 @@ describe('the connection picker slot', () => {
 
   it('offers the camera only when the browser has both halves of a scan', async () => {
     const win = window as unknown as { BarcodeDetector?: unknown };
-    // This DOM has no `BarcodeDetector`, which is exactly what WebKit looks
-    // like: no scan host at all, so the screen shows its paste field instead.
+    // No camera API at all: no scan host, so the screen shows its paste field instead.
     expect(browserQrScan()).toBeNull();
+
+    // WebKit: a camera but no `BarcodeDetector`. The software decoder gives it a host, which is what
+    // lets a tap reach getUserMedia (and so the permission prompt).
+    Object.defineProperty(navigator, 'mediaDevices', {
+      configurable: true,
+      value: { getUserMedia: async () => ({ getTracks: () => [] }) },
+    });
+    try {
+      const webkit = must(browserQrScan(), 'the software scan host');
+      expect(webkit.supported).toBe(true);
+      const stop = new AbortController();
+      const scanning = webkit.scan({ show: () => ({ videoWidth: 0, videoHeight: 0 }), clear: () => {} }, stop.signal);
+      const outcome = scanning.then(
+        () => 'resolved',
+        (error: { code?: string }) => error.code,
+      );
+      await new Promise(resolve => setTimeout(resolve, 20));
+      stop.abort();
+      await expect(outcome).resolves.toBe('cancelled');
+    } finally {
+      delete (navigator as { mediaDevices?: unknown }).mediaDevices;
+    }
 
     const formats: string[][] = [];
     win.BarcodeDetector = class {

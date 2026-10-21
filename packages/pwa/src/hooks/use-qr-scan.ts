@@ -10,7 +10,7 @@
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 
-import { type QrPreview, type QrScanHost, ScanError } from '../lib/pair-scan.ts';
+import { type QrPreview, type QrScanHost, ScanError, type ScanErrorCode } from '../lib/pair-scan.ts';
 
 /**
  * `failed` carries a sentence; `idle` is both "not started" and "stopped on
@@ -20,6 +20,8 @@ export type QrScanPhase = 'idle' | 'scanning' | 'failed';
 
 export interface QrScanController {
   readonly phase: QrScanPhase;
+  /** Which kind of refusal it was, so the screen can say what to do about THAT one. */
+  readonly code: ScanErrorCode | null;
   /** The refusal to show, or `null` when there is nothing to explain. */
   readonly message: string | null;
   /** Whether this browser can scan at all — false hides the action entirely. */
@@ -30,10 +32,11 @@ export interface QrScanController {
 
 interface ScanState {
   readonly phase: QrScanPhase;
+  readonly code: ScanErrorCode | null;
   readonly message: string | null;
 }
 
-const IDLE: ScanState = { phase: 'idle', message: null };
+const IDLE: ScanState = { phase: 'idle', code: null, message: null };
 
 /**
  * Runs one scan at a time against an injected host.
@@ -68,7 +71,7 @@ export const useQrScan = (
     running.current?.abort();
     const controller = new AbortController();
     running.current = controller;
-    setState({ phase: 'scanning', message: null });
+    setState({ phase: 'scanning', code: null, message: null });
     void host.scan(preview, controller.signal).then(
       text => {
         if (controller.signal.aborted) return;
@@ -82,11 +85,19 @@ export const useQrScan = (
         running.current = null;
         setState({
           phase: 'failed',
+          code: reason instanceof ScanError ? reason.code : 'scan-failed',
           message: reason instanceof ScanError ? reason.message : 'The camera could not be started.',
         });
       },
     );
   }, [host, preview]);
 
-  return { phase: state.phase, message: state.message, supported: host?.supported ?? false, start, stop };
+  return {
+    phase: state.phase,
+    code: state.code,
+    message: state.message,
+    supported: host?.supported ?? false,
+    start,
+    stop,
+  };
 };

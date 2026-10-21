@@ -18,7 +18,9 @@
 import { Camera, QrCode, X } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 
+import { useDeviceFacts } from '../../hooks/use-device-permissions.ts';
 import { useQrScan } from '../../hooks/use-qr-scan.ts';
+import { howToEnable } from '../../lib/device-permissions.ts';
 import type { QrPreview, QrScanHost } from '../../lib/pair-scan.ts';
 
 export interface PairScannerProps {
@@ -43,7 +45,15 @@ export function PairScanner({ host, label, onText, onFailed }: PairScannerProps)
     () => ({
       show: stream => {
         const element = video.current;
-        if (element !== null) element.srcObject = stream as MediaProvider;
+        if (element !== null) {
+          element.srcObject = stream as MediaProvider;
+          // iOS Safari will not play a camera stream it was not told, in the page, is muted and inline;
+          // React sets `muted` as a property only, so the attributes are written here as well.
+          element.muted = true;
+          element.setAttribute('muted', '');
+          element.setAttribute('playsinline', '');
+          void Promise.resolve(element.play()).catch(() => undefined);
+        }
         return element;
       },
       clear: () => {
@@ -56,6 +66,7 @@ export function PairScanner({ host, label, onText, onFailed }: PairScannerProps)
   );
 
   const scan = useQrScan(host, preview, onText);
+  const facts = useDeviceFacts();
   const scanning = scan.phase === 'scanning';
 
   // The caller is told in an effect, not during render: revealing the paste
@@ -116,6 +127,29 @@ export function PairScanner({ host, label, onText, onFailed }: PairScannerProps)
           {scan.message}
         </p>
       )}
+
+      {scan.code === 'permission-denied' ? (
+        <div
+          className="flex flex-col gap-1 rounded-control border border-border bg-surface-2 px-control-x py-3"
+          data-camera-howto=""
+        >
+          <span className="text-ui font-semibold text-fg">To scan, turn the camera back on:</span>
+          <ol className="m-0 flex list-decimal flex-col gap-1 pl-5 text-meta leading-base text-fg">
+            {howToEnable('camera', facts).map(step => (
+              <li key={step}>{step}</li>
+            ))}
+          </ol>
+          <span className="text-meta leading-base text-muted">Or paste the pairing link below instead.</span>
+        </div>
+      ) : null}
+
+      {host === null ? (
+        <p className="m-0 text-meta leading-base text-muted" data-camera-unavailable="">
+          {facts.secure
+            ? 'This browser cannot scan here. Paste the pairing link below instead.'
+            : 'This page is not on a secure (https) connection, so it cannot open the camera. Paste the pairing link below instead.'}
+        </p>
+      ) : null}
     </div>
   );
 }
