@@ -277,13 +277,26 @@ export function publishableDirectCarrier(
   };
 }
 
-/** The publishable direct address, when there is one, and every relay this boot will actually dial. */
+/**
+ * The publishable direct address, when there is one, the tunnel while its connector is registered, and
+ * every relay this boot will actually dial — in that order (`docs/relay-protocol.md` §15).
+ *
+ * THE TUNNEL GOES AFTER DIRECT AND BEFORE THE RELAYS because that is the order of who is on the path:
+ * direct has nobody, a tunnel has Cloudflare's edge, a relay has a rendezvous operator as well. A
+ * browser's preference re-orders across kinds anyway; this is the daemon's own answer within them.
+ *
+ * `tunnelUrl` is a value a caller passes only while `cloudflared` reports a registered connection. An
+ * address published while nothing serves it would send every device to dial a hostname that answers
+ * Cloudflare's own error page, which is the stale-carrier failure the published set exists to end.
+ */
 export function publishedDaemonCarriers(
   directUrl: string | undefined,
   sources: readonly RelayCarrierSource[],
+  tunnelUrl?: string,
 ): ReturnType<typeof PublishedCarriersSchema.parse> {
   return PublishedCarriersSchema.parse([
     ...(directUrl === undefined ? [] : [{ kind: 'direct' as const, url: directUrl }]),
+    ...(tunnelUrl === undefined ? [] : [{ kind: 'tunnel' as const, url: tunnelUrl }]),
     ...sources.flatMap(source => {
       const url = dialledRelayUrl(source);
       return url === undefined ? [] : [{ kind: 'relay' as const, url }];

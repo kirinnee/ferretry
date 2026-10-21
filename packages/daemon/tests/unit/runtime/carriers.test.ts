@@ -3,7 +3,9 @@ import {
   ConfiguredRelayCarrierSchema,
   DaemonCarriersDocumentSchema,
   DISCOVERED_RELAY_CARRIER,
+  DISCOVERED_TUNNEL_CARRIER,
   MAX_RELAY_CARRIERS,
+  MAX_TUNNEL_CARRIERS,
   relayCarrierIsConfigured,
   resolveDaemonCarriers,
   supersededCarrierKeys,
@@ -21,6 +23,7 @@ describe('daemon carrier configuration', () => {
     expect(resolveDaemonCarriers(legacy)).toEqual({
       bind: { kind: 'bind', host: '127.0.0.1', port: 7431 },
       relays: [DISCOVERED_RELAY_CARRIER],
+      tunnel: DISCOVERED_TUNNEL_CARRIER,
     });
     expect(relayCarrierIsConfigured(DISCOVERED_RELAY_CARRIER)).toBe(false);
   });
@@ -47,6 +50,7 @@ describe('daemon carrier configuration', () => {
     ).toEqual({
       bind: { kind: 'bind', host: '127.0.0.1', port: 7431 },
       relays: [{ kind: 'relay', url: 'wss://new.example', enabled: true, reconnectSeconds: 5 }],
+      tunnel: DISCOVERED_TUNNEL_CARRIER,
     });
     expect(
       resolveDaemonCarriers({
@@ -56,6 +60,7 @@ describe('daemon carrier configuration', () => {
     ).toEqual({
       bind: { kind: 'bind', host: 'box.lan' },
       relays: [DISCOVERED_RELAY_CARRIER],
+      tunnel: DISCOVERED_TUNNEL_CARRIER,
     });
   });
 
@@ -128,5 +133,53 @@ describe('daemon carrier configuration', () => {
         { kind: 'relay', url: 'https://relay.example/' },
       ]).success,
     ).toBe(false);
+  });
+
+  it('implies the hosted tunnel like the hosted relay, and lets an explicit entry switch it off', () => {
+    // Nothing declared: the hosted tunnel is asked for, exactly as the hosted relay is.
+    expect(resolveDaemonCarriers(legacy).tunnel).toEqual(DISCOVERED_TUNNEL_CARRIER);
+    expect(DISCOVERED_TUNNEL_CARRIER).toEqual({ kind: 'tunnel', source: 'discovery', enabled: true });
+    // "No tunnel, and I mean it" is a decision written down, and it wins.
+    const off = DaemonCarriersDocumentSchema.parse([{ kind: 'tunnel', source: 'discovery', enabled: false }]);
+    expect(resolveDaemonCarriers({ ...legacy, carriers: off }).tunnel).toEqual({
+      kind: 'tunnel',
+      source: 'discovery',
+      enabled: false,
+    });
+    // A tunnel entry is neither a bind nor a relay: the legacy relay is still read beside it.
+    const resolved = resolveDaemonCarriers({
+      ...legacy,
+      relay: { url: 'wss://legacy.example', enabled: true, reconnectSeconds: 5 },
+      carriers: off,
+    });
+    expect(resolved.relays).toEqual([
+      { kind: 'relay', url: 'wss://legacy.example', enabled: true, reconnectSeconds: 5 },
+    ]);
+  });
+
+  it('refuses a second tunnel, and a tunnel with an address of its own', () => {
+    expect(MAX_TUNNEL_CARRIERS).toBe(1);
+    const twice = DaemonCarriersDocumentSchema.safeParse([
+      { kind: 'tunnel', source: 'discovery' },
+      { kind: 'tunnel', source: 'discovery', enabled: false },
+    ]);
+    expect(twice.success).toBe(false);
+    expect(twice.error?.issues.map(issue => issue.message)).toEqual([
+      'the hosted service provisions one tunnel per daemon, so at most 1 "tunnel" carrier may be declared',
+    ]);
+    // There is nothing an operator could write down instead of discovery.
+    expect(DaemonCarriersDocumentSchema.safeParse([{ kind: 'tunnel', url: 'https://box.example' }]).success).toBe(
+      false,
+    );
+    // Four relays beside a tunnel are still within the relay bound: kinds are counted on their own.
+    expect(
+      DaemonCarriersDocumentSchema.safeParse([
+        { kind: 'tunnel', source: 'discovery' },
+        ...Array.from({ length: MAX_RELAY_CARRIERS }, (_, index) => ({
+          kind: 'relay',
+          url: `https://relay-${String(index)}.example`,
+        })),
+      ]).success,
+    ).toBe(true);
   });
 });

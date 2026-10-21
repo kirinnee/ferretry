@@ -174,6 +174,32 @@ required. Browser mode "Real window" ([docs/browser-mode.md](docs/browser-mode.m
 window instead — for an owner who browses and signs in through it — and on Linux that needs **Xvfb**
 (`sudo apt-get install -y xvfb`), which the daemon starts privately on first use.
 
+## cloudflared and the tunnel carrier
+
+The daemon can also be reached through a Cloudflare Tunnel that Ferretry's hosted service provisions
+for it ([docs/relay-protocol.md](docs/relay-protocol.md) §15). The daemon runs **`cloudflared`** for
+that, and `cloudflared` is a **dependency, never a download**: Ferretry never fetches a binary itself.
+
+| Install route      | How `cloudflared` arrives                                                                                                                                          |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Homebrew cask      | The cask depends on the `cloudflared` formula, so `brew install --cask ferretry` installs it.                                                                      |
+| Nix                | The `fyd` package names the store's own `cloudflared` through `FY_CLOUDFLARED`; nothing to install.                                                                |
+| deb / rpm          | Recommended, not required: neither distribution ships it by default. Add [Cloudflare's package repository](https://pkg.cloudflare.com/) and install `cloudflared`. |
+| One-line installer | Install `cloudflared` yourself (your package manager, or Cloudflare's releases) so it is on the daemon's `PATH`, or point `FY_CLOUDFLARED` at it.                  |
+
+The daemon looks at `FY_CLOUDFLARED` first (an absolute path to the binary, in the daemon's own
+environment — for a service, the unit's or plist's environment) and otherwise searches its `PATH`. A
+`FY_CLOUDFLARED` that names nothing runnable is reported as such; the daemon does not fall back to
+`PATH` behind your back. Without `cloudflared` the tunnel carrier is simply off — direct and relay
+sessions are unaffected — and both the boot log and `fyd --check` say so in one line with the remedy:
+
+```text
+tunnel       off — cloudflared is not on this daemon’s PATH, so this daemon has no tunnel carrier — install cloudflared (…) or set FY_CLOUDFLARED to its path, then restart. Ferretry never downloads it itself.
+```
+
+To switch the carrier off, add `{ "kind": "tunnel", "source": "discovery", "enabled": false }` to the
+`carriers` list in `config/daemon.json`; a daemon that held a tunnel releases it on its next boot.
+
 ## Updating
 
 ```bash

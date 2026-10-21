@@ -301,9 +301,13 @@ homebrew-cask)
     ((.homebrew_casks[0].binaries | sort) == ([$name] + $daemon | sort)) and
     (.homebrew_casks[0].repository.name == .project_name) and
     (.homebrew_casks[0].directory == "Casks") and
+    ((.homebrew_casks[0].dependencies // []) | any(.formula == "cloudflared")) and
     ([.homebrew_casks[].hooks.post.install] | join("\n") | contains("com.apple.quarantine")) and
     ([.homebrew_casks[].hooks.post.install] | join("\n") as $hook |
       [$name] + $daemon | all(. as $bin | $hook | contains("/" + $bin + "\"")))' >/dev/null
+  # The daemon's tunnel carrier runs cloudflared (docs/relay-protocol.md §15): a dependency the cask
+  # installs — in the generator above and the committed cask alike — never a download.
+  rg -qF 'depends_on formula: "cloudflared"' "Casks/${product}.rb"
   ;;
 installer-checksum)
   rg -qF 'checksums.txt' scripts/release/install.sh

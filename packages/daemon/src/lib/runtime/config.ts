@@ -328,7 +328,7 @@ function derivedAddresses(input: {
  * whole shape exists to make unrepresentable. Nothing here is ever written back to the document.
  */
 function boundAt(carriers: DaemonCarrierSet, bind: { readonly host: string; readonly port: number }): DaemonCarrierSet {
-  return { bind: { kind: 'bind', host: bind.host, port: bind.port }, relays: carriers.relays };
+  return { bind: { kind: 'bind', host: bind.host, port: bind.port }, relays: carriers.relays, tunnel: carriers.tunnel };
 }
 
 /** The recorded advertisement as `decideAdvertisement` wants it: absent rather than empty. */

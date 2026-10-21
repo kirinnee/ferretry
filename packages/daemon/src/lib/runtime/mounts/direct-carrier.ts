@@ -177,6 +177,7 @@ export function directCarrierSocketRoute(deps: DirectCarrierDependencies): Socke
         loopback: request.loopback,
         privilegedLoopback: request.privilegedLoopback === true,
         ...(request.clientAddress === undefined ? {} : { clientAddress: request.clientAddress }),
+        ...(request.carrier === undefined ? {} : { carrier: request.carrier }),
       };
       return async downstream => {
         attached = true;
