@@ -9898,10 +9898,13 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
    * next reader that something is still watching these parks.
    */
   subsystems.monitor.arm();
-  // Run at once but NOT awaited: the first tick reprojects every session's transcript tail, and on a
-  // large fleet holding the boot on it kept "ready" minutes away. The interval below serialises with it.
+  // AWAITED, so the first tick's reprojection of each session's question state has finished before the
+  // turn watcher below starts writing turn state over the same documents — the order every boot before
+  // 4.66.0 had. Unawaited, the two started together, and on CI a session read just after an unconfirmed
+  // answer came back without its `needsHuman` attention. It is cheap now: it reads only live sessions,
+  // one at a time, and every transcript parse yields to the loop.
   progress.enter('declared-wait watcher');
-  void activities.run('declared-wait watcher', () => subsystems.monitor.run()).catch(() => undefined);
+  await activities.run('declared-wait watcher', () => subsystems.monitor.run()).catch(() => undefined);
   const waitTicks = setInterval(
     () => void activities.run('declared-wait watcher', () => subsystems.monitor.run()),
     subsystems.monitor.intervalMs,
