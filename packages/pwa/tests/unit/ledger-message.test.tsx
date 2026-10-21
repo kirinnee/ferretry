@@ -147,7 +147,7 @@ describe('isStuckSend', () => {
 
   test('keeps a cancelled row in the conversation for a day so it can say what the cancel did', () => {
     const placed = placeLedgerRows([], [record({ sendId: 'c', fate: 'cancelled', cancelEffect: 'cleared' })], now);
-    expect(placed.map(entry => entry.id)).toEqual(['ledger:c']);
+    expect(placed.map(entry => entry.id)).toEqual(['send:c']);
   });
 });
 
@@ -231,7 +231,7 @@ describe('placeLedgerRows', () => {
       now,
     );
 
-    expect(placed.map(entry => entry.id)).toEqual(['ledger:undated', 'ledger:lost', 'ledger:sending', 'ledger:queued']);
+    expect(placed.map(entry => entry.id)).toEqual(['send:undated', 'send:lost', 'send:sending', 'send:queued']);
     expect(placed[0]).toMatchObject({ kind: 'ledger', placement: 'chronological', text: 'ship the tool group' });
   });
 });
