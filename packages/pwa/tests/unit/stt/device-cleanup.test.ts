@@ -69,10 +69,12 @@ const status =
   () =>
     new Response('{"error":{"message":"the provider body is never read"}}', { status: code, headers });
 
-/** Never answers; rejects the way fetch does when its signal aborts. */
+/** Never answers; rejects the way fetch does — at once if the signal is already aborted, else when it aborts. */
 const hang: Answer = (_call, signal) =>
   new Promise((_resolve, reject) => {
-    signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')));
+    const aborted = (): void => reject(new DOMException('aborted', 'AbortError'));
+    if (signal?.aborted === true) return aborted();
+    signal?.addEventListener('abort', aborted, { once: true });
   });
 
 const input = (patch: Partial<DeviceCleanupInput> = {}): DeviceCleanupInput => ({
