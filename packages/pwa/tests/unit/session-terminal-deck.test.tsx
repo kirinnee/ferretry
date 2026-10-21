@@ -646,6 +646,23 @@ describe('SessionTerminalDeck pane wiring', () => {
     expect(json(page)).toContain('"data-expanded"');
     run(() => page.unmount());
   });
+
+  test('keeps plain Escape for the shell and leaves the expanded view on Shift+Escape', async () => {
+    const deck = fakeDeck(async () => terminalListing([terminalView(FIRST)]));
+    const page = mount(<SessionTerminalDeck connection={alpha} dependencies={deck.dependencies} scope={scopeAlpha} />);
+    await settle();
+    clickNamed(page, 'Expand the terminal to fill the screen');
+    const shell = document.createElement('div');
+    shell.setAttribute('data-keyboard-capture', '');
+    document.body.appendChild(shell);
+
+    run(() => shell.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
+    expect(json(page)).toContain('"data-expanded"');
+    run(() => shell.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', shiftKey: true, bubbles: true })));
+    expect(json(page)).not.toContain('"data-expanded"');
+    shell.remove();
+    run(() => page.unmount());
+  });
 });
 
 describe('SessionTerminalDeck theming', () => {

@@ -57,9 +57,9 @@ import {
 import type { DaemonConnection } from '../lib/daemon-connection.ts';
 import type { DaemonSessionScope } from '../lib/daemon-scope.ts';
 import { grantRefusalNotice } from '../lib/grants.ts';
+import { isCaptureEscapeChord, isKeyboardCaptured, KEYBOARD_CAPTURE_ATTRIBUTE } from '../lib/keyboard-capture.ts';
 import type { DaemonFetch } from '../lib/runtime-models.ts';
 import { describeSurfaceOwnership, type SurfaceOwnership } from '../lib/surface-references.ts';
-import { terminalFontFamily } from '../lib/terminal-font.ts';
 import {
   describeCoControl,
   shouldReopenTerminalStream,
@@ -67,6 +67,7 @@ import {
   terminalReopenDelayMs,
   terminalResizeFrame,
 } from '../lib/terminal-co-control.ts';
+import { terminalFontFamily } from '../lib/terminal-font.ts';
 import {
   browserTerminalStreamAttach,
   closeSessionTerminal,
@@ -525,6 +526,7 @@ function TerminalCanvas({
       aria-label={`${terminal.title} shell`}
       className="kt-webterm__xterm"
       data-terminal-canvas={terminal.id}
+      {...{ [KEYBOARD_CAPTURE_ATTRIBUTE]: '' }}
       onKeyDown={(event: ReactKeyboardEvent<HTMLDivElement>) => event.stopPropagation()}
       ref={hostRef}
       role="application"
@@ -584,7 +586,10 @@ export function SessionTerminalDeck({
   useEffect(() => {
     if (!expanded) return;
     const onKey = (event: KeyboardEvent): void => {
-      if (event.key === 'Escape') setExpanded(false);
+      if (event.key !== 'Escape') return;
+      // The shell owns plain Escape (vim, readline); Shift+Escape leaves the expanded view.
+      if (isKeyboardCaptured(event.target) && !isCaptureEscapeChord(event)) return;
+      setExpanded(false);
     };
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
@@ -841,7 +846,7 @@ export function SessionTerminalDeck({
                 aria-pressed={expanded}
                 onClick={() => setExpanded(current => !current)}
                 size="sm"
-                title={expanded ? 'Collapse (Esc)' : 'Expand to full screen'}
+                title={expanded ? 'Collapse (Shift+Esc)' : 'Expand to full screen'}
                 type="button"
                 variant="ghost"
               >

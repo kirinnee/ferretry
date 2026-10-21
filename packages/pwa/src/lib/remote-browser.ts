@@ -399,24 +399,54 @@ export interface RemoteKeyEvent {
   readonly ctrlKey: boolean;
   readonly metaKey: boolean;
   readonly shiftKey: boolean;
+  /** `getModifierState('AltGraph')`: Windows reports AltGr as Ctrl+Alt, which is not a chord. */
+  readonly altGraph?: boolean;
 }
 
 /**
- * Builds one keyboard input event. `text` is attached only for an unmodified
- * printable key-down: sending it for a chord would make Chrome insert the
- * character *and* run the shortcut.
+ * The text a key-down types by itself, or null when it is a command, a chord or a named key.
+ *
+ * Enter types a carriage return: CDP inserts a newline into a textarea (or submits a form) only for an
+ * Enter key-down that carries `\r` as its text. Any other key types text only when the browser already
+ * resolved it to ONE character (a code point, so an astral emoji counts). Ctrl and Cmd make a shortcut.
+ * Alt alone is a shortcut for an ASCII key but
+ * the layout's own character for a non-ASCII one (macOS Option+O is "ø"). AltGr is always layout
+ * text: German "@" is AltGr+Q, and Windows reports AltGr as Ctrl+Alt.
+ */
+export const remoteKeyText = (event: RemoteKeyEvent): string | null => {
+  if (event.key === 'Enter' && !event.ctrlKey && !event.metaKey && !event.altKey) return '\r';
+  if ([...event.key].length !== 1 || event.metaKey) return null;
+  if (event.altGraph === true) return event.key;
+  if (event.ctrlKey) return null;
+  if (event.altKey) return (event.key.codePointAt(0) ?? 0) > 0x7f ? event.key : null;
+  return event.key;
+};
+
+/**
+ * Keys that start or continue an IME / dead-key composition rather than naming a key.
+ * They must reach the page's text sink untouched: the composed text arrives as `insertText`.
+ */
+export const isRemoteCompositionKey = (event: { readonly key: string; readonly keyCode: number }): boolean =>
+  event.keyCode === 229 || event.key === 'Dead' || event.key === 'Process' || event.key === 'Unidentified';
+
+/**
+ * Builds one keyboard input event. `text` is attached for a key-down that types a character (see
+ * `remoteKeyText`): sending it for a chord would make Chrome insert the character *and* run the
+ * shortcut.
  */
 export const remoteKeyInput = (event: RemoteKeyEvent, type: 'keyDown' | 'keyUp'): BrowserInputEvent => {
-  const printable = type === 'keyDown' && event.key.length === 1 && !event.ctrlKey && !event.metaKey && !event.altKey;
+  const text = type === 'keyDown' ? remoteKeyText(event) : null;
+  const layoutText = event.altGraph === true;
+  const modifiers = remoteInputModifiers(layoutText ? { ...event, altKey: false, ctrlKey: false } : event);
   return {
     kind: 'key',
     type,
     key: event.key,
     code: event.code,
-    ...(printable ? { text: event.key, unmodifiedText: event.key } : {}),
+    ...(text === null ? {} : { text, unmodifiedText: text }),
     windowsVirtualKeyCode: event.keyCode,
     nativeVirtualKeyCode: event.keyCode,
-    modifiers: remoteInputModifiers(event),
+    modifiers,
     autoRepeat: event.repeat,
     isKeypad: event.location === 3,
   };
