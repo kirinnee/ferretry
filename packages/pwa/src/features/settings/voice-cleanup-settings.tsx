@@ -11,6 +11,7 @@
  */
 
 import { useState } from 'react';
+import { useKeptDraft } from '../../hooks/use-kept-draft.ts';
 import { cn } from '../../lib/class-names.ts';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
 import {
@@ -22,6 +23,7 @@ import {
   type VoiceCleanupPatch,
 } from '../../lib/stt/voice-cleanup.ts';
 import { Textarea } from '../../shell/primitives.tsx';
+import { ChangedElsewhereNote } from './changed-elsewhere.tsx';
 import {
   type MachineVoiceCleanup,
   useMachineVoiceCleanup,
@@ -46,6 +48,48 @@ export const CLEANUP_OFF_EXPLANATION =
 const SWITCH_CLASS =
   'flex min-h-[44px] items-center justify-between gap-3 rounded-control border px-control-x py-2 text-left transition-colors';
 
+/** A prompt is saved trimmed, so a trailing newline the machine dropped is not an edit still open. */
+const samePrompt = (a: string, b: string): boolean => a.trim() === b.trim();
+
+/**
+ * How many messages to include, typed as a draft and saved when the field is left or Enter is pressed —
+ * never per keystroke: typing "12" used to save "1", disable the field under the cursor and lose the "2".
+ */
+function MessageCountField({ saved, onSave }: { readonly saved: number; onSave(patch: VoiceCleanupPatch): void }) {
+  const count = useKeptDraft(String(saved));
+  const commit = (): void => {
+    const next = Number(count.value);
+    if (!count.dirty) return;
+    if (Number.isInteger(next) && next >= 1 && next <= MAX_CONVERSATION_MESSAGES)
+      onSave({ conversationMessages: next });
+    else count.reload();
+  };
+  return (
+    <div className="flex flex-col gap-1">
+      <div className="flex items-center gap-3">
+        <label htmlFor="stt-cleanup-messages" className="text-ui font-semibold">
+          Latest messages to include
+        </label>
+        <input
+          id="stt-cleanup-messages"
+          className="kt-input min-h-[44px] w-20"
+          type="number"
+          min={1}
+          max={MAX_CONVERSATION_MESSAGES}
+          value={count.value}
+          data-voice-cleanup-messages=""
+          onChange={event => count.set(event.target.value)}
+          onBlur={commit}
+          onKeyDown={event => {
+            if (event.key === 'Enter') commit();
+          }}
+        />
+      </div>
+      {count.changedElsewhere ? <ChangedElsewhereNote field="voice-messages" onReload={count.reload} /> : null}
+    </div>
+  );
+}
+
 function PromptEditor({
   style,
   saved,
@@ -57,7 +101,10 @@ function PromptEditor({
   readonly busy: boolean;
   onSave(patch: VoiceCleanupPatch): void;
 }) {
-  const [draft, setDraft] = useState(saved);
+  // Kept while edited, never re-mounted from the saved prompt: a re-read (the first one, or another
+  // device's save) used to land mid-sentence and replace what was being typed.
+  const prompt = useKeptDraft(saved, samePrompt);
+  const draft = prompt.value;
   const fallback = DEFAULT_VOICE_CLEANUP_PROMPTS[style];
   const edited = saved !== fallback;
   const id = `stt-cleanup-prompt-${style}`;
@@ -78,8 +125,11 @@ function PromptEditor({
         spellCheck
         maxLength={MAX_VOICE_PROMPT_CHARS}
         value={draft}
-        onChange={event => setDraft(event.target.value)}
+        onChange={event => prompt.set(event.target.value)}
       />
+      {prompt.changedElsewhere ? (
+        <ChangedElsewhereNote field={`voice-prompt-${style}`} onReload={prompt.reload} />
+      ) : null}
       <div className="flex flex-wrap gap-2">
         <button
           type="button"
@@ -93,7 +143,7 @@ function PromptEditor({
           type="button"
           disabled={busy || (!edited && draft === fallback)}
           onClick={() => {
-            setDraft(fallback);
+            prompt.set(fallback);
             if (edited) onSave({ prompts: { [style]: null } });
           }}
           className="min-h-[44px] rounded-control border border-border-strong bg-surface-2 px-control-x text-ui text-fg disabled:opacity-50"
@@ -151,13 +201,7 @@ function VoiceCleanupView({ state }: { readonly state: MachineVoiceCleanup }) {
       {style === 'off' ? (
         <p className="text-meta leading-base text-muted">{CLEANUP_OFF_EXPLANATION}</p>
       ) : (
-        <PromptEditor
-          key={`${style}:${promptFor(cleanup, style)}`}
-          style={style}
-          saved={promptFor(cleanup, style)}
-          busy={busy}
-          onSave={commit}
-        />
+        <PromptEditor key={style} style={style} saved={promptFor(cleanup, style)} busy={busy} onSave={commit} />
       )}
       <p className="text-meta leading-base text-muted">{CLEANUP_GUARD_EXPLANATION}</p>
 
@@ -178,26 +222,7 @@ function VoiceCleanupView({ state }: { readonly state: MachineVoiceCleanup }) {
         <span className="text-meta">{cleanup.useConversation ? 'On' : 'Off'}</span>
       </button>
       <p className="text-meta leading-base text-muted">{CONVERSATION_CONTEXT_EXPLANATION}</p>
-      {cleanup.useConversation && (
-        <div className="flex items-center gap-3">
-          <label htmlFor="stt-cleanup-messages" className="text-ui font-semibold">
-            Latest messages to include
-          </label>
-          <input
-            id="stt-cleanup-messages"
-            className="kt-input min-h-[44px] w-20"
-            type="number"
-            min={1}
-            max={MAX_CONVERSATION_MESSAGES}
-            value={cleanup.conversationMessages}
-            disabled={busy}
-            onChange={event => {
-              const count = Number(event.target.value);
-              if (Number.isFinite(count) && count >= 1) commit({ conversationMessages: count });
-            }}
-          />
-        </div>
-      )}
+      {cleanup.useConversation && <MessageCountField saved={cleanup.conversationMessages} onSave={commit} />}
       {outcome !== null && outcome.kind !== 'applied' && (
         <p
           role="status"

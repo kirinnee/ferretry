@@ -561,12 +561,31 @@ describe('changing the settings from a device inside an unlock', () => {
 
     // Act
     const turnOff = await world.ask('PATCH', '/v1/security', json({ stepUpOnActions: false }));
-    const longer = await world.ask('PATCH', '/v1/security', json({ unlockValidityHours: 24 }));
     const unlockOff = await world.ask('PATCH', '/v1/security', json({ unlockOnOpen: false }));
 
     // Assert
-    for (const response of [turnOff, longer, unlockOff]) refusedAs(response, 403, SECURITY_WIDEN_REFUSED_CODE);
+    for (const response of [turnOff, unlockOff]) refusedAs(response, 403, SECURITY_WIDEN_REFUSED_CODE);
     should(world.security.current()).containDeep({ stepUpOnActions: true, unlockValidityHours: 4, unlockOnOpen: true });
+  });
+
+  it('should let a device raise how long an unlock lasts on the passkey it just proved, once', async () => {
+    // Arrange
+    const world = await machine({ unlockValidityHours: 4 });
+    await world.unlock();
+    // The unlock is itself a passkey just proved; once a challenge's lifetime has passed it is not.
+    world.clock.now = T0 + 11 * 60_000;
+
+    // Act: the unlock alone is not a passkey for THIS change; a step-up proved for it is, and is spent.
+    const onUnlock = await world.ask('PATCH', '/v1/security', json({ unlockValidityHours: 24 }));
+    world.registry.grant(phone, world.clock.now);
+    const onPasskey = await world.ask('PATCH', '/v1/security', json({ unlockValidityHours: 24 }));
+    const again = await world.ask('PATCH', '/v1/security', json({ unlockValidityHours: 168 }));
+
+    // Assert
+    refusedAs(onUnlock, 403, STEP_UP_REQUIRED_CODE);
+    should(onPasskey.status).equal(200);
+    refusedAs(again, 403, STEP_UP_REQUIRED_CODE);
+    should(world.security.current().unlockValidityHours).equal(24);
   });
 
   it('should refuse the same change before an unlock with 401, not as a widen', async () => {

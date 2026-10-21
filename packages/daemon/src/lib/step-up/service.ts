@@ -8,15 +8,16 @@ import {
   type PasskeyRegistrationOptions,
   type PasskeysView,
   type PasskeyView,
-  type UnlockGranted,
-  type SecuritySettings,
   type PasskeyWindowOpened,
   type PushNotificationPayload,
   PushNotificationPayloadSchema,
+  SECURITY_SETTING_BOUNDS,
+  type SecuritySettings,
   type StepUpAssertion,
   type StepUpGranted,
   type StepUpOptions,
   type StepUpRefusal,
+  type UnlockGranted,
 } from '@ferretry/protocol';
 import { fromBase64Url, toBase64Url } from '@ferretry/relay';
 import { secretsMatch } from '../api/authentication.ts';
@@ -32,6 +33,7 @@ import type {
   StepUpDeviceDirectory,
   StepUpRandom,
   StoredPasskey,
+  UnlockLedgerPort,
 } from './types.ts';
 
 /** A ceremony's answer: the value, or the one refusal that names the person's next step. */
@@ -74,11 +76,18 @@ export interface StepUpServiceDeps {
    * never undoes the registration, which the journal has already recorded.
    */
   readonly announce?: (notice: PushNotificationPayload) => Promise<unknown>;
+  /**
+   * Where each device's unlock is kept so a restart — an update — does not ask again inside its period.
+   * Absent keeps unlocks in memory only, and a restart asks every device again.
+   */
+  readonly unlocks?: UnlockLedgerPort;
 }
 
 const CHALLENGE_BYTES = 32;
 const DAY_MS = 24 * 60 * 60 * 1_000;
 const HOUR_MS = 60 * 60 * 1_000;
+/** The longest an unlock can be valid under any setting: an older one is dropped rather than kept. */
+const LONGEST_UNLOCK_MS = SECURITY_SETTING_BOUNDS.unlockValidityHours.max * HOUR_MS;
 const refuse = (refusal: StepUpRefusal): { readonly ok: false; readonly refusal: StepUpRefusal } => ({
   ok: false,
   refusal,
@@ -147,13 +156,43 @@ export const relyingPartyIdFor = (origin: string): string => new URL(origin).hos
 export class StepUpService {
   /**
    * When each DEVICE last confirmed a person on opening (`unlockOnOpen`). Per device rather than per
-   * copy of the app, so it holds across page loads; in memory, so a restart asks again.
+   * copy of the app, so it holds across page loads; written to {@link StepUpServiceDeps.unlocks} and
+   * read back by {@link restore}, so it holds across a restart too.
    */
   readonly #unlockedAt = new Map<string, number>();
+  /** Serializes the unlock ledger's writes, so an older map can never land after a newer one. */
+  #persisting: Promise<unknown> = Promise.resolve();
   /** Registration windows the owner re-opened, by device: when each closes. Spent by one passkey. */
   readonly #reopened = new Map<string, number>();
 
   constructor(private readonly deps: StepUpServiceDeps) {}
+
+  /**
+   * Reads back the unlocks a previous run of this daemon granted, before anything is served. Kept: a
+   * device that is still paired, unlocked no later than now and within the longest period any setting
+   * allows; whether it is still unlocked is then asked of the settings in force, as for any unlock.
+   *
+   * Returns a sentence for the boot trail when the ledger could not be read. A damaged ledger is never
+   * thrown: every device is asked to unlock again, which is how a machine without one behaved.
+   */
+  async restore(): Promise<string | undefined> {
+    const ledger = this.deps.unlocks;
+    if (ledger === undefined) return undefined;
+    let stored: ReadonlyMap<string, number>;
+    try {
+      stored = await ledger.read();
+    } catch (error) {
+      const cause = error instanceof Error ? error.message : String(error);
+      return `the unlock ledger could not be read (${cause}), so every device is asked to unlock again`;
+    }
+    const now = this.deps.clock.nowMs();
+    for (const [deviceId, at] of stored) {
+      if (at > now || now - at >= LONGEST_UNLOCK_MS) continue;
+      if ((await this.deps.devices.device(deviceId)) === undefined) continue;
+      this.#unlockedAt.set(deviceId, at);
+    }
+    return undefined;
+  }
 
   /**
    * Whether this device must confirm a person is present before it is served at all: the machine asks
@@ -389,6 +428,7 @@ export class StepUpService {
     const done = await this.#ceremony(caller, device, 'unlock', assertion, now);
     if (!done.ok) return done;
     this.#unlockedAt.set(device.deviceId, now);
+    await this.#persistUnlocks();
     this.deps.registry.grant(device, now);
     const settings = this.deps.settings?.();
     const unlockedUntil = instant(settings === undefined ? now : this.#unlockedUntil(device.deviceId, settings));
@@ -508,6 +548,22 @@ export class StepUpService {
     return { ok: true };
   }
 
+  /**
+   * Writes the unlocks held now, dropping any no setting could still honour. A write that fails leaves
+   * the unlock good in memory and costs only the next restart's prompt — the behaviour before the ledger
+   * — so it is swallowed rather than failing a ceremony the person already completed.
+   */
+  async #persistUnlocks(): Promise<void> {
+    const ledger = this.deps.unlocks;
+    if (ledger === undefined) return;
+    const now = this.deps.clock.nowMs();
+    for (const [deviceId, at] of this.#unlockedAt) if (now - at >= LONGEST_UNLOCK_MS) this.#unlockedAt.delete(deviceId);
+    const snapshot = new Map(this.#unlockedAt);
+    const operation = this.#persisting.then(async () => await ledger.write(snapshot));
+    this.#persisting = operation.catch(() => undefined);
+    await operation.catch(() => undefined);
+  }
+
   #unlockedUntil(deviceId: string, settings: SecuritySettings): number {
     const at = this.#unlockedAt.get(deviceId);
     return at === undefined ? 0 : at + settings.unlockValidityHours * HOUR_MS;
@@ -518,6 +574,7 @@ export class StepUpService {
     this.#reopened.delete(deviceId);
     this.deps.registry.forgetDevice(deviceId);
     this.#unlockedAt.delete(deviceId);
+    await this.#persistUnlocks();
     this.deps.challenges.forgetDevice(deviceId);
     await this.deps.store.forgetDevice(deviceId);
   }

@@ -155,4 +155,20 @@ describe('the security settings wire', () => {
     should(security.SECURITY_WIDEN_REFUSED_CODE).equal('security_widen_at_machine');
     should(security.UNLOCK_REQUIRED_CODE).equal('unlock_required');
   });
+
+  it('should let one unlock last up to a week, and no longer', () => {
+    // Owner decision 2026-10-21: "allow not just up to 24h, but up to 1 week".
+    should(bounds.unlockValidityHours).deepEqual({ min: 1, max: 168 });
+    should(security.SecuritySettingsSchema.safeParse({ ...defaults, unlockValidityHours: 168 }).success).be.true();
+    should(security.SecuritySettingsSchema.safeParse({ ...defaults, unlockValidityHours: 169 }).success).be.false();
+  });
+
+  it('should let a device loosen only how long an unlock lasts with a passkey, and nothing else', () => {
+    // Act
+    const passkeyFields = security.SECURITY_SETTING_FIELDS.filter(security.widensWithPasskey);
+
+    // Assert
+    should(passkeyFields).deepEqual(['unlockValidityHours']);
+    should([...security.SECURITY_PASSKEY_WIDEN_FIELDS]).deepEqual(passkeyFields);
+  });
 });

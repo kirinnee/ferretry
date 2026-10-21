@@ -10,12 +10,13 @@
 import type { ConnectionChoice } from '@ferretry/relay';
 import { ChevronDown, LoaderCircle, RefreshCw, Trash2, Wifi, WifiOff } from 'lucide-react';
 import { type FormEvent, useEffect, useId, useRef, useState } from 'react';
-
+import { useKeptDraft } from '../../hooks/use-kept-draft.ts';
 import { cn } from '../../lib/class-names.ts';
 import type { DaemonConnectionRecord } from '../../lib/connections.ts';
 import type { DaemonConnection, DaemonId } from '../../lib/daemon-connection.ts';
 import { sameDaemonConnection } from '../../lib/daemon-connection.ts';
 import { PanelPath } from '../../shell/panel-typography.tsx';
+import { ChangedElsewhereNote } from './changed-elsewhere.tsx';
 
 const DAEMON_REACHABILITY_INTERVAL_MS = 30_000;
 
@@ -206,11 +207,10 @@ function DaemonManagement({
   readonly onRemove: () => void;
 }) {
   const nameId = useId();
-  const [draft, setDraft] = useState(connection.label ?? '');
-
-  useEffect(() => {
-    setDraft(connection.label ?? '');
-  }, [connection]);
+  // Kept while edited: the pairing record is republished whenever the machine's name is learned or its
+  // carriers change, and resetting the field on each one threw the typing away.
+  const label = useKeptDraft(connection.label ?? '');
+  const draft = label.value;
 
   const error = daemonLabelError(draft);
   const submit = (event: FormEvent<HTMLFormElement>): void => {
@@ -238,7 +238,7 @@ function DaemonManagement({
               id={nameId}
               value={draft}
               maxLength={64}
-              onChange={event => setDraft(event.target.value)}
+              onChange={event => label.set(event.target.value)}
               placeholder={String(connection.daemonId)}
               aria-describedby={`${nameId}-help ${nameId}-error`}
               className="h-control min-w-0 flex-1 rounded-control border border-border bg-surface-2 px-control-x text-ui text-fg"
@@ -250,6 +250,7 @@ function DaemonManagement({
           <p id={`${nameId}-help`} className="m-0 text-meta leading-base text-faint">
             Leave blank to show the daemon fingerprint.
           </p>
+          {label.changedElsewhere ? <ChangedElsewhereNote field="daemon-label" onReload={label.reload} /> : null}
           {error !== undefined ? (
             <p id={`${nameId}-error`} role="alert" className="m-0 text-meta text-err">
               {error}

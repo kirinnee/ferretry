@@ -31,7 +31,7 @@ import {
   Stethoscope,
   Zap,
 } from 'lucide-react';
-import { type ComponentType, type ReactNode, useMemo } from 'react';
+import { type ComponentType, createContext, type ReactNode, useContext, useMemo } from 'react';
 import type { WardenStatusReader } from '../../hooks/use-warden-status.ts';
 import type { ConnectionHealthState } from '../../lib/connection-health.ts';
 import type { DaemonConnectionRecord } from '../../lib/connections.ts';
@@ -120,22 +120,188 @@ const FALLBACK_PANEL_ICON: ReactNode = <SlidersHorizontal size={16} aria-hidden=
 /** One empty list for every render, so a frame given no extra panels does not rebuild (and remount) its own. */
 const NO_ADDITIONAL_TABS: readonly DaemonSettingsTabDefinition[] = [];
 
-function WardenSettingsTab({
-  connection,
-  createWardenClient,
-}: {
-  /* These two are the frame's OWN panels rather than `additionalTabs` entries, so they take a
-     connection and not the whole `DaemonSettingsTabProps`: neither sends a reader to another panel,
-     and typing them by the seam would oblige the arrows below to forward a capability they ignore. */
-  readonly connection: DaemonConnection;
-  readonly createWardenClient?: WardenClientFactory;
-}) {
+/** No other machine: stable, so the tab table is not rebuilt on every render. */
+const NO_OTHER_MACHINES: readonly DaemonConnectionRecord[] = [];
+
+/**
+ * WHAT THE FRAME'S OWN PANELS READ THAT CAN CHANGE WHILE ONE IS OPEN — the carrier, the reconnect state,
+ * the page's callbacks — handed down through a context rather than closed over.
+ *
+ * A panel's `Surface` is a component TYPE. A Surface written as an arrow inside the frame is a new type
+ * every time any of these changed identity, and React unmounts a subtree whose type changed: the open
+ * panel lost what the person was typing, showed its "reading…" placeholder and dropped the scroll
+ * position. The app re-renders Settings on every background session poll (every 15 seconds) and the page
+ * hands down fresh callbacks each time, so that was "it keeps refreshing, esp after I typed". The panels
+ * are now declared once, below, and only RE-RENDER when one of these changes.
+ */
+interface FrameLive {
+  readonly name: string;
+  readonly connectionRecord: DaemonConnectionRecord | undefined;
+  readonly createWardenClient: WardenClientFactory | undefined;
+  readonly createSecretClient: SecretClientFactory | undefined;
+  readonly otherMachines: readonly DaemonConnectionRecord[];
+  readonly createGrantClient: GrantClientFactory | undefined;
+  readonly createPairingClient: PairingClientFactory | undefined;
+  readonly createPasskeyClient: PasskeyClientFactory | undefined;
+  readonly carrier: ConnectionChoice | undefined;
+  readonly relayAdvertised: boolean;
+  readonly connectionHealth: ConnectionHealthState | undefined;
+  readonly probeDaemon: DaemonReachabilityProbe | undefined;
+  readonly onRenameDaemon: ((daemonId: DaemonConnection['daemonId'], label?: string) => void) | undefined;
+  readonly onRemoveDaemon: ((daemonId: DaemonConnection['daemonId']) => void) | undefined;
+}
+
+const FrameLiveContext = createContext<FrameLive | null>(null);
+
+function useFrameLive(): FrameLive {
+  const live = useContext(FrameLiveContext);
+  if (live === null) throw new Error('a daemon settings panel rendered outside its frame');
+  return live;
+}
+
+function WardenPanel({ connection }: DaemonSettingsTabProps) {
+  const { createWardenClient } = useFrameLive();
   // The Warden's live status is on the Warden page (Insights); Settings holds only its settings.
   return <WardenConfigSurface connection={connection} createClient={createWardenClient} unavailable="message" />;
 }
 
-/** No other machine: stable, so the tab table is not rebuilt on every render. */
-const NO_OTHER_MACHINES: readonly DaemonConnectionRecord[] = [];
+function SecretsPanel({ connection }: DaemonSettingsTabProps) {
+  const { createSecretClient, otherMachines } = useFrameLive();
+  return (
+    <SecretsSurface
+      connection={connection}
+      {...(createSecretClient ? { createClient: createSecretClient } : {})}
+      others={otherMachines}
+      machineName={daemonDisplayName}
+    />
+  );
+}
+
+function DevicesPanel({ connection }: DaemonSettingsTabProps) {
+  const { createPairingClient } = useFrameLive();
+  return (
+    <AddDeviceSurface connection={connection} {...(createPairingClient ? { createClient: createPairingClient } : {})} />
+  );
+}
+
+function GrantsPanel({ connection }: DaemonSettingsTabProps) {
+  const { createGrantClient } = useFrameLive();
+  return <GrantsSurface connection={connection} {...(createGrantClient ? { createClient: createGrantClient } : {})} />;
+}
+
+function SecurityPanel({ connection }: DaemonSettingsTabProps) {
+  const { name, createPasskeyClient } = useFrameLive();
+  return (
+    <SecuritySurface
+      connection={connection}
+      machineName={name}
+      {...(createPasskeyClient ? { createClient: createPasskeyClient } : {})}
+    />
+  );
+}
+
+function CarrierPanel() {
+  const { carrier, relayAdvertised, connectionHealth, name } = useFrameLive();
+  return (
+    <ActiveCarrierCard
+      choice={carrier}
+      relayAdvertised={relayAdvertised}
+      {...(connectionHealth === undefined ? {} : { health: connectionHealth })}
+      machine={name}
+    />
+  );
+}
+
+function HostChecksPanel() {
+  const { connectionRecord, probeDaemon, carrier, onRenameDaemon, onRemoveDaemon } = useFrameLive();
+  if (connectionRecord && probeDaemon && onRenameDaemon && onRemoveDaemon)
+    return (
+      <DaemonHostChecks
+        connection={connectionRecord}
+        probeDaemon={probeDaemon}
+        carrier={carrier}
+        onRenameDaemon={onRenameDaemon}
+        onRemoveDaemon={onRemoveDaemon}
+      />
+    );
+  return (
+    <section className="kt-panel p-panel" role="status" aria-label="Host checks unavailable">
+      <h3 className="m-0 text-row font-semibold text-fg">Host checks unavailable</h3>
+      <p className="mb-0 mt-1 text-cell leading-base text-muted">
+        This daemon’s browser pairing record was not supplied, so Ferretry cannot safely show reachability or offer
+        pairing changes.
+      </p>
+    </section>
+  );
+}
+
+/** The frame's own panels before the composition root's, declared once so each keeps its identity. */
+const LEADING_TABS: readonly DaemonSettingsTabDefinition[] = [
+  {
+    id: 'warden',
+    label: 'Warden',
+    description: 'Supervision, account failover, and policy for this daemon.',
+    Surface: WardenPanel,
+  },
+  {
+    id: 'secrets',
+    label: 'Secrets',
+    description: 'Credentials agents can use without ever holding one.',
+    Surface: SecretsPanel,
+  },
+  {
+    /**
+     * Adding a device, immediately after the two panels that own this machine's own configuration.
+     *
+     * It is here rather than in a global Settings section because a pairing code belongs to ONE
+     * machine: the code, the device list and every revoke are read from this tab's connection, so a
+     * reader can never revoke a device on the daemon they just switched away from.
+     */
+    id: 'devices',
+    label: 'Add a device',
+    description: 'Pair another phone or browser with this machine, and revoke one.',
+    Surface: DevicesPanel,
+  },
+  {
+    /**
+     * The operator's limits, second, because it is the panel that explains why another panel's
+     * control is refused. A reader who meets a disabled control in Warden or Fleet is sent here,
+     * so it must not be buried after the tabs that send them.
+     */
+    id: 'grants',
+    label: 'What devices may do',
+    description: 'Per-capability limits for callers that are not on this machine.',
+    Surface: GrantsPanel,
+  },
+  {
+    /**
+     * Passkeys, right after the limits panel: the confirmation a refused change asks for is made
+     * here, so it sits beside the panel that explains the refusal.
+     */
+    id: 'security',
+    label: 'Security',
+    description: 'The passkeys this device holds for this machine, and adding another.',
+    Surface: SecurityPanel,
+  },
+  // A product-owned Doctor surface belongs with the daemon configuration (`additionalTabs`, next),
+  // before the connection carrier and browser-local pairing diagnostics.
+];
+
+/** The frame's own panels after the composition root's. */
+const TRAILING_TABS: readonly DaemonSettingsTabDefinition[] = [
+  {
+    id: 'carrier',
+    label: 'Connection',
+    description: 'How this device reaches the daemon right now: direct, via a relay, or reconnecting.',
+    Surface: CarrierPanel,
+  },
+  {
+    id: 'host-checks',
+    label: 'Host checks',
+    description: 'Reachability and this browser’s pairing for this daemon.',
+    Surface: HostChecksPanel,
+  },
+];
 
 export interface DaemonSettingsFrameProps {
   readonly connection: DaemonConnection;
@@ -201,137 +367,41 @@ export function DaemonSettingsFrame({
   onRemoveDaemon,
 }: DaemonSettingsFrameProps) {
   const tabs = useMemo<readonly DaemonSettingsTabDefinition[]>(
-    () => [
-      {
-        id: 'warden',
-        label: 'Warden',
-        description: 'Supervision, account failover, and policy for this daemon.',
-        Surface: ({ connection: activeConnection }) => (
-          <WardenSettingsTab connection={activeConnection} createWardenClient={createWardenClient} />
-        ),
-      },
-      {
-        id: 'secrets',
-        label: 'Secrets',
-        description: 'Credentials agents can use without ever holding one.',
-        Surface: ({ connection: activeConnection }) => (
-          <SecretsSurface
-            connection={activeConnection}
-            {...(createSecretClient ? { createClient: createSecretClient } : {})}
-            others={otherMachines}
-            machineName={daemonDisplayName}
-          />
-        ),
-      },
-      {
-        /**
-         * Adding a device, immediately after the two panels that own this machine's own configuration.
-         *
-         * It is here rather than in a global Settings section because a pairing code belongs to ONE
-         * machine: the code, the device list and every revoke are read from this tab's connection, so a
-         * reader can never revoke a device on the daemon they just switched away from.
-         */
-        id: 'devices',
-        label: 'Add a device',
-        description: 'Pair another phone or browser with this machine, and revoke one.',
-        Surface: ({ connection: activeConnection }) => (
-          <AddDeviceSurface
-            connection={activeConnection}
-            {...(createPairingClient ? { createClient: createPairingClient } : {})}
-          />
-        ),
-      },
-      {
-        /**
-         * The operator's limits, second, because it is the panel that explains why another panel's
-         * control is refused. A reader who meets a disabled control in Warden or Fleet is sent here,
-         * so it must not be buried after the tabs that send them.
-         */
-        id: 'grants',
-        label: 'What devices may do',
-        description: 'Per-capability limits for callers that are not on this machine.',
-        Surface: ({ connection: activeConnection }) => (
-          <GrantsSurface
-            connection={activeConnection}
-            {...(createGrantClient ? { createClient: createGrantClient } : {})}
-          />
-        ),
-      },
-      {
-        /**
-         * Passkeys, right after the limits panel: the confirmation a refused change asks for is made
-         * here, so it sits beside the panel that explains the refusal.
-         */
-        id: 'security',
-        label: 'Security',
-        description: 'The passkeys this device holds for this machine, and adding another.',
-        Surface: ({ connection: activeConnection }) => (
-          <SecuritySurface
-            connection={activeConnection}
-            machineName={name}
-            {...(createPasskeyClient ? { createClient: createPasskeyClient } : {})}
-          />
-        ),
-      },
-      // A product-owned Doctor surface belongs with the daemon configuration,
-      // before the connection carrier and browser-local pairing diagnostics.
-      ...additionalTabs,
-      {
-        id: 'carrier',
-        label: 'Connection',
-        description: 'How this device reaches the daemon right now: direct, via a relay, or reconnecting.',
-        Surface: () => (
-          <ActiveCarrierCard
-            choice={carrier}
-            relayAdvertised={relayAdvertised}
-            {...(connectionHealth === undefined ? {} : { health: connectionHealth })}
-            machine={name}
-          />
-        ),
-      },
-      {
-        id: 'host-checks',
-        label: 'Host checks',
-        description: 'Reachability and this browser’s pairing for this daemon.',
-        Surface: () => {
-          if (connectionRecord && probeDaemon && onRenameDaemon && onRemoveDaemon)
-            return (
-              <DaemonHostChecks
-                connection={connectionRecord}
-                probeDaemon={probeDaemon}
-                carrier={carrier}
-                onRenameDaemon={onRenameDaemon}
-                onRemoveDaemon={onRemoveDaemon}
-              />
-            );
-          return (
-            <section className="kt-panel p-panel" role="status" aria-label="Host checks unavailable">
-              <h3 className="m-0 text-row font-semibold text-fg">Host checks unavailable</h3>
-              <p className="mb-0 mt-1 text-cell leading-base text-muted">
-                This daemon’s browser pairing record was not supplied, so Ferretry cannot safely show reachability or
-                offer pairing changes.
-              </p>
-            </section>
-          );
-        },
-      },
-    ],
-    [
-      additionalTabs,
-      carrier,
-      connectionHealth,
+    () => [...LEADING_TABS, ...additionalTabs, ...TRAILING_TABS],
+    [additionalTabs],
+  );
+  const live = useMemo<FrameLive>(
+    () => ({
+      name,
       connectionRecord,
+      createWardenClient,
+      createSecretClient,
+      otherMachines,
       createGrantClient,
       createPairingClient,
       createPasskeyClient,
-      createSecretClient,
-      createWardenClient,
-      name,
-      onRemoveDaemon,
-      onRenameDaemon,
-      otherMachines,
-      probeDaemon,
+      carrier,
       relayAdvertised,
+      connectionHealth,
+      probeDaemon,
+      onRenameDaemon,
+      onRemoveDaemon,
+    }),
+    [
+      name,
+      connectionRecord,
+      createWardenClient,
+      createSecretClient,
+      otherMachines,
+      createGrantClient,
+      createPairingClient,
+      createPasskeyClient,
+      carrier,
+      relayAdvertised,
+      connectionHealth,
+      probeDaemon,
+      onRenameDaemon,
+      onRemoveDaemon,
     ],
   );
   /**
@@ -361,7 +431,9 @@ export function DaemonSettingsFrame({
           </Button>
         </div>
         <div className="min-w-0" data-daemon-panel-open={active.id}>
-          <Surface connection={connection} />
+          <FrameLiveContext.Provider value={live}>
+            <Surface connection={connection} />
+          </FrameLiveContext.Provider>
         </div>
       </section>
     );

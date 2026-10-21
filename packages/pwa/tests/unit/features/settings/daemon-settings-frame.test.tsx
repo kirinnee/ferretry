@@ -19,6 +19,7 @@ import {
   DaemonSettingsFrame,
   type DaemonSettingsTabDefinition,
 } from '../../../../src/features/settings/daemon-settings-frame.tsx';
+import type { DaemonConnectionRecord } from '../../../../src/lib/connections.ts';
 import { daemonConnection } from '../../../../src/lib/daemon-connection.ts';
 import { interact, mount, must } from '../../../support/dom.ts';
 import { render, run } from '../../../support/react.ts';
@@ -283,5 +284,71 @@ describe('daemon settings Connection panel', () => {
     expect(JSON.stringify(view.toJSON())).toContain('Can’t reach Alpha');
 
     run(() => view.unmount());
+  });
+});
+
+/**
+ * "IT KEEPS REFRESHING, ESP AFTER I TYPED". The app re-renders Settings on every background session
+ * poll, and the page hands the frame fresh callbacks each time. A panel written as an arrow inside the
+ * frame became a new component type on each of those renders, so React unmounted the open panel: the
+ * text being typed vanished. The frame's own panels are now declared once; a re-render reaches them as
+ * new values, never as a new mount.
+ */
+describe('an open panel across the frame re-rendering', () => {
+  const record: DaemonConnectionRecord = { ...alpha, label: 'Alpha', pairedAt: 0, lastSelectedAt: 0 };
+  const frame = (generation: number, connectionRecord: DaemonConnectionRecord = record) => (
+    <DaemonSettingsFrame
+      connection={alpha}
+      connectionRecord={connectionRecord}
+      name="Alpha"
+      createWardenClient={unavailable}
+      panel="host-checks"
+      onOpenPanel={() => undefined}
+      probeDaemon={async () => ({ ok: true })}
+      // A new arrow per render, exactly as the composition root hands them down.
+      onRenameDaemon={() => generation}
+      onRemoveDaemon={() => generation}
+      carrier={generation % 2 === 0 ? undefined : { ok: false, reason: 'Reconnecting.', passedOver: [] }}
+    />
+  );
+  const nameInput = (container: HTMLElement): HTMLInputElement =>
+    must(container.querySelector<HTMLInputElement>('[data-daemon-host-checks] form input'), 'the display name');
+  const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
+
+  it('keeps what is being typed, and the same field, through re-renders with new callbacks', async () => {
+    const shown = await mount(frame(0));
+    const input = nameInput(shown.container);
+    await interact(() => {
+      setValue?.call(input, 'Alpha workstation');
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+
+    for (const generation of [1, 2, 3]) await shown.render(frame(generation));
+
+    expect(nameInput(shown.container)).toBe(input);
+    expect(input.value).toBe('Alpha workstation');
+    await shown.unmount();
+  });
+
+  it('keeps it when the pairing record is republished, and says so only when the name really moved', async () => {
+    const shown = await mount(frame(0));
+    const input = nameInput(shown.container);
+    await interact(() => {
+      setValue?.call(input, 'Mine');
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+
+    // The same record, republished (a carrier change, the machine's name learned again).
+    await shown.render(frame(1, { ...record }));
+    expect(input.value).toBe('Mine');
+    expect(shown.container.querySelector('[data-changed-elsewhere]')).toBeNull();
+
+    // Renamed from another tab: the typing stays and loading the new name is offered.
+    await shown.render(frame(2, { ...record, label: 'Theirs' }));
+    expect(input.value).toBe('Mine');
+    expect(shown.container.querySelector('[data-changed-elsewhere="daemon-label"]')).not.toBeNull();
+    await interact(() => shown.container.querySelector<HTMLButtonElement>('[data-changed-elsewhere-reload]')?.click());
+    expect(input.value).toBe('Theirs');
+    await shown.unmount();
   });
 });

@@ -49,7 +49,7 @@ Each row is one protection. Read across to see what it stops.
 | **Encrypted channel**              | After the handshake, everything is encrypted between the app and the machine.                                                                                                                                            | The relay, Cloudflare, or anyone on your Wi-Fi reading or changing your traffic.                             |
 | **Access lease + silent renewal**  | A connection's permission lasts **15 minutes**. The device renews it quietly by signing a fresh challenge.                                                                                                               | A connection living on after you revoke the device. Each renewal re-checks that the device is still allowed. |
 | **12-hour cap**                    | No single connection lasts longer than **12 hours**. Then it opens a new one with a fresh proof.                                                                                                                         | One long-lived connection that never proves itself again.                                                    |
-| **Passkey unlock**                 | Before you unlock, the machine answers **every** request with "unlock first". One passkey confirmation unlocks it for this device for **8 hours** (you can set 1–24). The **machine** checks the passkey.                | A stolen phone, a copied key or a stranger's device doing anything at all without your face, finger or PIN.  |
+| **Passkey unlock**                 | Before you unlock, the machine answers **every** request with "unlock first". One passkey confirmation unlocks it for this device for **8 hours** (you can set 1 hour to 7 days). The **machine** checks the passkey.    | A stolen phone, a copied key or a stranger's device doing anything at all without your face, finger or PIN.  |
 | **Fresh passkey to add a device**  | Making a pairing code, or giving another device more access, asks for your passkey **for that one act**, even inside an unlock. One confirmation adds one device.                                                        | A thief with your unlocked phone pairing a device of their own, or handing one more access.                  |
 | **Per-device access**              | Each device has its own permissions. A new device gets full access behind its unlock. `fy pair --limited` makes one that can only read and chat. Any device can be narrowed later.                                       | A device doing more than you meant it to. No device can give another more than it has itself.                |
 | **"At the machine" = only `fy`**   | Only the `fy` command on the machine skips the rules. It proves itself with a token file that only someone on the machine can read. A browser on the machine is an ordinary device.                                      | A tunnel or proxy to the machine (`ssh -L`, `cloudflared`, `tailscale serve`) being mistaken for you.        |
@@ -71,7 +71,8 @@ The owner chose friendliness here: **"once we unlock the app with a passkey, fee
   add your first passkey.
 - **After the unlock:** this device can do anything its permissions allow — terminals, files, secrets,
   settings, starting agents — with **no more prompts**, for the unlock period. It lasts across page
-  loads and tabs on this device. A daemon restart, a revoke or the period ending locks it again.
+  loads and tabs on this device, and through a daemon restart or update. A revoke or the period ending
+  locks it again.
 - **Except adding access.** Pairing a new device, or giving a device more, always asks for a fresh
   passkey for that act.
 - **Want more prompts?** In Settings › ‹machine› › Machine › Security, turn on **ask again for each
@@ -91,7 +92,7 @@ One **Security** section per machine, in the app (Settings › ‹machine› ›
 | Setting                      | Default | Range                 |
 | ---------------------------- | ------- | --------------------- |
 | Unlock on open               | on      | on / off              |
-| Unlock lasts                 | 8 hours | 1–24 hours            |
+| Unlock lasts                 | 8 hours | 1 hour – 7 days       |
 | Ask again for each change    | off     | on / off              |
 | Each confirmation lasts      | 15 min  | 0–60 (0 = always ask) |
 | Replace the device key every | 30 days | 7–90 days             |
@@ -101,6 +102,8 @@ One **Security** section per machine, in the app (Settings › ‹machine› ›
 - **Tightening** (shorter times, a switch turned on) works from any unlocked device that may manage pairing.
 - **Loosening** works **only at the machine**: `fy daemon security set <setting> <value>`. The app
   tells you the exact command.
+- **One exception — a longer unlock.** You can raise "Unlock lasts" (up to 7 days) from a paired device.
+  The app asks for your passkey for that one change, then applies it at once and logs it.
 - **A damaged settings file fails safe**: unlock on for 1 hour, ask every time, rotate keys weekly.
 - Every change is written to the audit log.
 

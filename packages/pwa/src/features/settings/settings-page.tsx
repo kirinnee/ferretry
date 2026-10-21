@@ -732,6 +732,7 @@ export function SettingsPage({
                     tab={machineRoute.tab}
                     reach={reach.reachOf(daemonId)}
                     onRetry={() => reach.check(daemonId)}
+                    onRefresh={() => reach.check(daemonId, true)}
                     {...(unknownMachine === undefined ? {} : { unknownMachine })}
                     onOpen={openMachine}
                     onSetUp={openSetup}

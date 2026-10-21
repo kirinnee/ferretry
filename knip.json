@@ -89,6 +89,7 @@
         "tests/integration/fixtures/machine-reorder-scene.tsx",
         "tests/integration/fixtures/nav-cache-scene.tsx",
         "tests/integration/fixtures/sessions-list-scene.tsx",
+        "tests/integration/fixtures/settings-typing-scene.tsx",
         "scripts/fy-render-shell/bootstrap.ts",
         "scripts/fy-render-shell/mermaid-entry.ts",
         "scripts/fy-render-shell/lottie-entry.ts",
