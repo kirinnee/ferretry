@@ -115,7 +115,7 @@
   gap: var(--gap-xs);
   padding: 0 var(--gap-sm) var(--gap-sm);
 }
-/* All · Agents · Interactive: one segmented strip. A segment never shrinks below its own label, so the
+/* Interactive · All · Agents: one segmented strip. A segment never shrinks below its own label, so the
    strip wraps onto a second line before it would clip "Interactive" to "IN…". */
 .fy-sbar__segment {
   display: flex;

@@ -44,6 +44,7 @@ const mountBar = async (props: Partial<BarProps> = {}, withMenu = true): Promise
       active={null}
       activeSessionId={null}
       daemonId={DAEMON}
+      initialMode="all"
       machineName="work-mac"
       machines={[{ daemonId: DAEMON, name: 'work-mac' }]}
       onAddMachine={() => undefined}

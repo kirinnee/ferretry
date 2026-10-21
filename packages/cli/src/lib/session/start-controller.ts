@@ -1,3 +1,4 @@
+import { titleFromReferencedBrief } from '../tasks/task-title.ts';
 import type { ISessionApi, ISessionFiles, SessionEnvironment } from './ports.ts';
 import type { SessionPresenter } from './presenter.ts';
 import { buildStartRequest, type StartFlags } from './start-request.ts';
@@ -30,7 +31,11 @@ export class StartSessionController {
     const prompt = [flags.prompt?.trim() ?? '', filePrompt.trim()].filter(part => part !== '').join('\n\n');
     const attachments = await Promise.all((flags.filePaths ?? []).map(path => this.files.readAttachment(path)));
 
-    const plan = buildStartRequest({ ...flags, ...(prompt === '' ? {} : { prompt }), attachments }, this.environment);
+    const name = flags.name ?? (await titleFromReferencedBrief(prompt, path => this.files.readText(path)));
+    const plan = buildStartRequest(
+      { ...flags, ...(name === undefined ? {} : { name }), ...(prompt === '' ? {} : { prompt }), attachments },
+      this.environment,
+    );
     for (const warning of plan.warnings) this.presenter.note(warning);
 
     const view = await this.api.start(plan.request, flags.requestId, plan.boardCapability);

@@ -120,6 +120,8 @@ export interface DeviceControls {
   readonly sidebarCollapsed: boolean;
   /** Every paired machine's sessions in the list, or only the machine on screen's. */
   readonly sessionsList: SessionsListScope;
+  /** The Sessions bar's kind filter. null = never chosen on this device, so the bar opens on Interactive. */
+  readonly sessionsMode: ModeFilter | null;
   /**
    * The daemon ids in the order the reader dragged their machines into on THIS device. A preference
    * over the pairing order, reconciled against who is paired now (`lib/machine-order.ts`), so it may
@@ -169,6 +171,7 @@ export const DEFAULT_DEVICE_CONTROLS: DeviceControls = Object.freeze({
   motion: 'system',
   sidebarCollapsed: false,
   sessionsList: 'all',
+  sessionsMode: null,
   machineOrder: Object.freeze([]),
   suggestionKeys: DEFAULT_SUGGESTION_KEYS,
   skillSuggestions: true,
@@ -266,6 +269,10 @@ const readDeviceControls = (value: unknown): DeviceControls => {
       fields.composerEnterKey === 'send' || fields.composerEnterKey === 'newline' ? fields.composerEnterKey : null,
     sidebarCollapsed: readFlag(fields.sidebarCollapsed, DEFAULT_DEVICE_CONTROLS.sidebarCollapsed),
     sessionsList: fields.sessionsList === 'current' ? 'current' : DEFAULT_DEVICE_CONTROLS.sessionsList,
+    sessionsMode:
+      fields.sessionsMode === 'all' || fields.sessionsMode === 'auto' || fields.sessionsMode === 'interactive'
+        ? fields.sessionsMode
+        : null,
     machineOrder: readMachineOrder(fields.machineOrder),
     // The two switches this choice replaced (`mentionSuggestions`, `directReferenceSuggestions`) may
     // still sit in a stored record; they are left unread rather than translated, because the new

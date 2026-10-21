@@ -20,10 +20,11 @@ import type {
   SessionView,
   StartSessionRequest,
 } from '@ferretry/protocol';
+import { taskTitleFor } from '@ferretry/protocol';
 import { admitChild, type ParentFacts } from './admission.ts';
 import { effectiveGuide, fleetModels } from './guide.ts';
 import type { PackJevPort } from './jev.ts';
-import { type CachedProbe, type PackProbeRequest } from './probe.ts';
+import type { CachedProbe, PackProbeRequest } from './probe.ts';
 import { type PackFleetFacts, recommend, runtimeRefusal } from './recommend.ts';
 import { SCRATCH_REMEDY, scratchMessage } from './scratch.ts';
 
@@ -283,7 +284,7 @@ export class PackService {
           ...(parent === undefined ? {} : { parent }),
           ...(choice.model === undefined ? {} : { model: choice.model }),
           ...(choice.effort === undefined ? {} : { effort: choice.effort }),
-          ...(request.name === undefined ? {} : { name: request.name }),
+          name: request.name ?? taskTitleFor(request.task, request.useCase ?? 'Sub-ferret'),
         });
         attempts.push({ runtime, ...named, outcome: 'started', probe, probeMs: probed.outcome.ms });
         return {

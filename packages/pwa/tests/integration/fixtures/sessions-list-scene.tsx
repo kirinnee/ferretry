@@ -109,6 +109,8 @@ document.documentElement.dataset.theme = params.get('theme') ?? 'studio-light';
 const two = params.get('machines') === 'two';
 const drawer = params.get('view') === 'drawer';
 const pack = params.get('tree') === '1';
+/** `?mode=default` opens the bar the way a new device does; every other scene starts on All so its counts stay put. */
+const initialMode = params.get('mode') === 'default' ? null : 'all';
 
 const MACHINES = [
   { daemonId: STUDIO, name: 'studio' },
@@ -122,6 +124,7 @@ function Scene() {
         active={null}
         activeSessionId={pack ? 'p-ora' : 's-ivo'}
         daemonId={STUDIO}
+        initialMode={initialMode}
         learningPassive={LEARNING}
         machineName="studio"
         machines={MACHINES}

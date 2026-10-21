@@ -48,6 +48,7 @@ const bar = (props: Partial<BarProps> = {}) => {
       activeSessionId="hadi-1"
       daemonId={DAEMON}
       machineName="work-mac"
+      initialMode="all"
       machines={[
         { daemonId: DAEMON, name: 'work-mac' },
         { daemonId: 'beta' as DaemonId, name: 'kirin-box' },
@@ -234,6 +235,41 @@ describe('SessionsBar as a column', () => {
     await view.render(bar({ sessions: [SESSIONS[0] as (typeof SESSIONS)[number]] }).element);
     await click(segment('interactive'), 'Interactive');
     expect(view.container.textContent).toContain('No interactive sessions.');
+  });
+
+  test('opens on Interactive, listed first, until the device remembers another kind', async () => {
+    const person = sessionView('pat-1', {
+      config: { teammate: 'pat', label: 'Pairing', mode: 'interactive', cwd: '/work/ferretry' },
+    });
+    const sessions = [SESSIONS[0] as (typeof SESSIONS)[number], person];
+    const chosen: string[] = [];
+    const segments = () =>
+      [...(view?.container.querySelectorAll<HTMLButtonElement>('[data-sbar-filter]') ?? [])].map(node => [
+        node.getAttribute('data-sbar-filter'),
+        node.getAttribute('aria-pressed'),
+      ]);
+    const ids = () =>
+      [...(view?.container.querySelectorAll('[data-sbar-session]') ?? [])].map(node =>
+        node.getAttribute('data-sbar-session'),
+      );
+
+    view = await mount(bar({ sessions, initialMode: null, onModeChange: mode => chosen.push(mode) }).element);
+    expect(segments()).toEqual([
+      ['interactive', 'true'],
+      ['all', 'false'],
+      ['auto', 'false'],
+    ]);
+    expect(ids()).toEqual(['pat-1']);
+
+    await click(view.container.querySelector('[data-sbar-filter="auto"]'), 'Agents');
+    await click(view.container.querySelector('[data-sbar-show-stopped]'), 'Show stopped');
+    await click(view.container.querySelector('[data-sbar-filter="auto"]'), 'Agents');
+    expect(chosen).toEqual(['auto']);
+
+    await view.unmount();
+    view = await mount(bar({ sessions, initialMode: 'auto' }).element);
+    expect(segments()[2]).toEqual(['auto', 'true']);
+    expect(ids()).toEqual(['hadi-1']);
   });
 
   test('says it is still reading, and says plainly when nothing is running', async () => {

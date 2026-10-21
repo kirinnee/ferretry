@@ -64,6 +64,7 @@ const open = async (
   machines: 'one' | 'two',
   theme: string,
   tree = false,
+  extra = '',
 ): Promise<{ readonly context: BrowserContext; readonly tab: Page }> => {
   const phone = view === 'drawer';
   const context = await browser.newContext({
@@ -78,7 +79,7 @@ const open = async (
     new URL(route.request().url()).origin === origin ? await route.continue() : await route.abort(),
   );
   const tab = await context.newPage();
-  await tab.goto(`${origin}/?view=${view}&machines=${machines}&theme=${theme}${tree ? '&tree=1' : ''}`);
+  await tab.goto(`${origin}/?view=${view}&machines=${machines}&theme=${theme}${tree ? '&tree=1' : ''}${extra}`);
   await tab.waitForSelector('[data-sbar-session]');
   return { context, tab };
 };
@@ -133,7 +134,7 @@ describe('the sessions list', () => {
       try {
         const live = (await rowIds(tab)).slice().sort();
         expect(live).toEqual(['s-hadi', 's-ivo', 's-lea', 's-ora']);
-        expect(await segments(tab)).toEqual(['All 4', 'Agents 2', 'Interactive 2']);
+        expect(await segments(tab)).toEqual(['Interactive 2', 'All 4', 'Agents 2']);
         expect(await texts(tab, '.fy-sbar__stopped')).toEqual(['Show stopped 3']);
         expect(await clippedControls(tab)).toEqual([]);
         await shot(tab, `sessions-list-${view}-hidden`);
@@ -148,20 +149,37 @@ describe('the sessions list', () => {
           's-ora',
           's-rue',
         ]);
-        expect(await segments(tab)).toEqual(['All 7', 'Agents 4', 'Interactive 3']);
+        expect(await segments(tab)).toEqual(['Interactive 3', 'All 7', 'Agents 4']);
         expect(await texts(tab, '.fy-sbar__stopped')).toEqual(['Show stopped']);
         await shot(tab, `sessions-list-${view}-stopped`);
 
         await tab.click('[data-sbar-filter="auto"]');
         expect((await rowIds(tab)).slice().sort()).toEqual(['s-ivo', 's-kai', 's-lea', 's-noa']);
         // Choosing a kind leaves the other segments' numbers alone.
-        expect(await segments(tab)).toEqual(['All 7', 'Agents 4', 'Interactive 3']);
+        expect(await segments(tab)).toEqual(['Interactive 3', 'All 7', 'Agents 4']);
         await tab.click('[data-sbar-show-stopped]');
         expect((await rowIds(tab)).slice().sort()).toEqual(['s-ivo', 's-lea']);
         expect(await texts(tab, '.fy-sbar__stopped')).toEqual(['Show stopped 2']);
         await shot(tab, `sessions-list-${view}-agents`);
       } finally {
         await context.close();
+      }
+    }
+  }, 120_000);
+
+  it('opens a new device on Interactive, listed first, and remembers a chosen kind', async () => {
+    for (const view of ['column', 'drawer'] as const) {
+      for (const theme of ['studio-light', 'studio-dark']) {
+        const { context, tab } = await open(view, 'one', theme, false, '&mode=default');
+        try {
+          expect(await segments(tab)).toEqual(['Interactive 2', 'All 4', 'Agents 2']);
+          expect(await tab.getAttribute('[data-sbar-filter="interactive"]', 'aria-pressed')).toBe('true');
+          expect((await rowIds(tab)).slice().sort()).toEqual(['s-hadi', 's-ora']);
+          expect(await clippedControls(tab)).toEqual([]);
+          await shot(tab, `sessions-filter-default-${view}-${theme.replace('studio-', '')}`);
+        } finally {
+          await context.close();
+        }
       }
     }
   }, 120_000);
@@ -210,7 +228,7 @@ describe('the sessions list', () => {
         if (nav !== null) nav.style.width = '190px';
       });
       expect(await clippedControls(tab)).toEqual([]);
-      expect(await segments(tab)).toEqual(['All 4', 'Agents 2', 'Interactive 2']);
+      expect(await segments(tab)).toEqual(['Interactive 2', 'All 4', 'Agents 2']);
       const wide = await tab.evaluate(() => document.documentElement.scrollWidth - innerWidth);
       expect(wide).toBeLessThanOrEqual(0);
     } finally {
@@ -267,7 +285,7 @@ describe('the sessions list', () => {
           'site 1',
         ]);
         // Stopped sessions on either machine are hidden, and the segment counts both.
-        expect(await segments(tab)).toEqual(['All 6', 'Agents 3', 'Interactive 3']);
+        expect(await segments(tab)).toEqual(['Interactive 3', 'All 6', 'Agents 3']);
         expect(await texts(tab, '.fy-sbar__stopped')).toEqual(['Show stopped 4']);
         await shot(tab, `sessions-list-${view}-machines`);
 

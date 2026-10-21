@@ -3,7 +3,7 @@
  *
  * The left bar replaces the Sessions tab (the approved session-view redesign): every session on this
  * machine, grouped by project, with a status dot, a "needs you" badge and the fleet filters kteam's
- * sidebar has — All · Agents · Interactive, and "Show stopped". It is a navigator, not the dashboard, so
+ * sidebar has — Interactive · All · Agents, and "Show stopped". It is a navigator, not the dashboard, so
  * it answers a narrower question than the dashboard does: "which of my agents is doing what right
  * now, and which one wants me?"
  *
@@ -40,8 +40,8 @@ export interface SessionsListFilter {
   readonly showStopped: boolean;
 }
 
-/** Stopped sessions hidden, every kind shown: what the bar opens with. */
-export const DEFAULT_LIST_FILTER: SessionsListFilter = { mode: 'all', showStopped: false };
+/** Stopped sessions hidden, only the sessions a person drives: what a new device's bar opens with. */
+export const DEFAULT_LIST_FILTER: SessionsListFilter = { mode: 'interactive', showStopped: false };
 
 /** The session is waiting on a person, by its own account. */
 export const needsYou = (view: SessionView): boolean => {

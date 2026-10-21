@@ -2,6 +2,7 @@ import { describe, it } from 'bun:test';
 import should from 'should';
 import {
   AGENT_INSTRUCTION,
+  AGENT_TOOLS_INSTRUCTION,
   applyFixedLayer,
   CLAUDE_NO_QUESTIONS_FLAG,
   CLAUDE_PROMPTS_SEEN,
@@ -11,12 +12,11 @@ import {
   codexNoticeOverride,
   codexToolsServer,
   codexTrustOverride,
+  FERRET_SECTIONS,
   FERRETRY_MCP_ENV_VARS,
   type FixedLayer,
   type FixedLayerInput,
   fixedLayerFor,
-  FERRET_SECTIONS,
-  AGENT_TOOLS_INSTRUCTION,
   HYPERMEDIA_ENV,
   HYPERMEDIA_INSTRUCTION,
   LESSONS_INSTRUCTION,
@@ -614,6 +614,7 @@ describe('Pack mode teaching', () => {
       '`zz recommend "<part>"`',
       '`zz new --runtime',
       '`zz new --auto',
+      '--name "<short task title>"',
       '`zz wait <id>`',
       '`zz stop children',
     ])
