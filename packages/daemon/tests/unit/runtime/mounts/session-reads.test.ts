@@ -2,10 +2,11 @@ import { createHmac } from 'node:crypto';
 import { describe, it } from 'bun:test';
 import { NO_GOVERNED_ROUTES_GUARD } from '../../../../src/lib/api/capability.ts';
 import should from 'should';
-import { ApiDispatcher, type ApiResponse, ApiRouter } from '../../../../src/lib/api/index.ts';
+import { ApiDispatcher, type ApiResponse, ApiRouter, entityTag } from '../../../../src/lib/api/index.ts';
 import { sessionReadRoutes } from '../../../../src/lib/runtime/index.ts';
 import {
   OperatorReadService,
+  type OperatorReadRedactor,
   type PaneCapture,
   type StoredSessionEvent,
   type TranscriptTailResult,
@@ -73,6 +74,7 @@ function fixture(
       | { readonly kind: 'read'; readonly text: string };
     readonly rows?: readonly PortableConversationRow[];
     readonly noTranscript?: true;
+    readonly redactor?: OperatorReadRedactor;
   } = {},
 ) {
   const reads = new OperatorReadService(
@@ -90,6 +92,7 @@ function fixture(
     },
     CODEC,
     { read: async () => options.storedSnapshot ?? { kind: 'absent' } },
+    options.redactor,
   );
   const dispatcher = new ApiDispatcher(
     new ApiRouter([...sessionReadRoutes(reads, sessionDirectory([sessionView('s1')]))]),
@@ -385,6 +388,92 @@ describe('the session transcript route', () => {
     // Assert
     should(response.status).equal(400);
     should(jsonBody(response)).have.property('code', 'invalid_query');
+  });
+});
+
+describe('the session transcript route, read conditionally', () => {
+  const said = (text: string): TranscriptTailResult => ({
+    kind: 'read',
+    events: [{ kind: 'message', harness: 'claude', role: 'assistant', text, timestamp: INSTANT }],
+  });
+
+  it('should tag the transcript when the request holds no validator', async () => {
+    // Arrange
+    const dispatch = fixture({ tail: said('ready') });
+
+    // Act
+    const response = await dispatch({ path: '/v1/sessions/s1/logs', headers: human });
+
+    // Assert
+    should(response.status).equal(200);
+    should(response.body).equal('[09:08:07] assistant/message: ready');
+    should(response.headers.get('etag')).equal(entityTag(response.body));
+    should(response.headers.get('cache-control')).equal('no-store');
+  });
+
+  it('should answer 304 with no body when the transcript is the one the client holds', async () => {
+    // Arrange
+    const dispatch = fixture({ tail: said('ready') });
+    const first = await dispatch({ path: '/v1/sessions/s1/logs', headers: human });
+    const etag = first.headers.get('etag') ?? '';
+
+    // Act
+    const response = await dispatch({ path: '/v1/sessions/s1/logs', headers: { ...human, 'if-none-match': etag } });
+
+    // Assert
+    should(response.status).equal(304);
+    should(response.body).equal('');
+    should(response.headers.get('etag')).equal(etag);
+    should(response.headers.get('cache-control')).equal('no-store');
+  });
+
+  it('should serve the whole transcript when it moved on from the one the client holds', async () => {
+    // Arrange
+    const dispatch = fixture({ tail: said('ready, and more') });
+
+    // Act
+    const response = await dispatch({
+      path: '/v1/sessions/s1/logs',
+      headers: { ...human, 'if-none-match': entityTag('[09:08:07] assistant/message: ready') },
+    });
+
+    // Assert
+    should(response.status).equal(200);
+    should(response.body).equal('[09:08:07] assistant/message: ready, and more');
+  });
+
+  it('should take the tag over the redacted text, so a change of redaction is a new answer', async () => {
+    // Arrange
+    const scrubbing: OperatorReadRedactor = {
+      redact: async text => text.replaceAll('hunter2', '[redacted]'),
+      redactData: async value => value,
+    };
+    const scrubbed = await fixture({ tail: said('the key is hunter2'), redactor: scrubbing })({
+      path: '/v1/sessions/s1/logs',
+      headers: human,
+    });
+
+    // Act
+    const unscrubbed = await fixture({ tail: said('the key is hunter2') })({
+      path: '/v1/sessions/s1/logs',
+      headers: { ...human, 'if-none-match': scrubbed.headers.get('etag') ?? '' },
+    });
+
+    // Assert
+    should(scrubbed.body).equal('[09:08:07] assistant/message: the key is [redacted]');
+    should(scrubbed.headers.get('etag')).equal(entityTag(scrubbed.body));
+    should(unscrubbed.status).equal(200);
+  });
+
+  it('should still refuse, not 304, a transcript that cannot be read', async () => {
+    // Arrange
+    const dispatch = fixture({ tail: { kind: 'unreadable' } });
+
+    // Act
+    const response = await dispatch({ path: '/v1/sessions/s1/logs', headers: { ...human, 'if-none-match': '*' } });
+
+    // Assert
+    should(response.status).equal(409);
   });
 });
 

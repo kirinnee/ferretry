@@ -15,6 +15,7 @@ import {
   OLDER_DAEMON_SENTENCE,
   RELAY_ACCESS_LEASE_ENDED_CLOSE_CODE,
 } from '@ferretry/protocol';
+import { FyApiClient } from '@ferretry/protocol/client';
 import { HEARTBEAT_GRACE_SECONDS, RELAY_CLOSE_CODES, SESSION_PROTOCOL_ID } from '@ferretry/relay';
 import should from 'should';
 import { daemonConnection, type RelayCarrier } from '../../src/lib/daemon-connection.ts';
@@ -107,6 +108,36 @@ describe('turning a §14 answer into a Response', () => {
 
   it('should give a bodyless status no body, because the constructor refuses one', async () => {
     should(await relayResponse({ kind: 'response', status: 204, headers: {}, body: '' }).text()).equal('');
+  });
+
+  it('should carry a relayed 304 through the typed client as the transcript it already holds', async () => {
+    // Arrange
+    const answers = [
+      relayResponse({ kind: 'response', status: 200, headers: { etag: '"t1"' }, body: 'the transcript' }),
+      relayResponse({ kind: 'response', status: 304, headers: { etag: '"t1"' }, body: '' }),
+    ];
+    const relayed: ReturnType<typeof relayTunnelRequest>[] = [];
+    const client = await FyApiClient.connect({
+      baseUrl: DAEMON_URL,
+      token: 'carried-by-the-device-session',
+      version: '0.0.0',
+      transport: {
+        send: async (url, init) => {
+          relayed.push(relayTunnelRequest(url, init));
+          return answers.shift() ?? new Response(null, { status: 500 });
+        },
+      },
+    });
+
+    // Act
+    const first = await client.logs('s1');
+    const second = await client.logs('s1');
+
+    // Assert
+    should(first).equal('the transcript');
+    should(second).equal('the transcript');
+    should(relayed[0]?.headers).not.have.property('if-none-match');
+    should(relayed[1]?.headers).have.property('if-none-match', '"t1"');
   });
 });
 

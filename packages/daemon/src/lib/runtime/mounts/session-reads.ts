@@ -1,6 +1,6 @@
 import { ApiError } from '../../api/error.ts';
 import { type ApiResponse, decodeParameter, queryValue } from '../../api/http.ts';
-import { jsonResponse, textResponse } from '../../api/responses.ts';
+import { conditional, jsonResponse, textResponse } from '../../api/responses.ts';
 import type { ApiRoute, RouteContext } from '../../api/route.ts';
 import { OperatorReadError, type OperatorReadFailure, type OperatorReadService } from '../../session/reads/index.ts';
 import type { SessionDirectorySubsystem } from './sessions.ts';
@@ -135,6 +135,10 @@ async function snapshot(
  * `?turn` selects only transcript events between explicit normalized `turn/started` markers. A
  * transcript with no such marker cannot prove a partition, so it is refused rather than guessed from
  * timestamps or handed the whole tail.
+ *
+ * CONDITIONAL, because the chat page polls it every few seconds and a quiet session's tail is the same
+ * answer each time — up to hundreds of kilobytes on a metered relay, for nothing. The tag is taken over
+ * the scrubbed text the service returns, never over the transcript itself (see `entityTag`).
  */
 async function logs(
   reads: OperatorReadService,
@@ -144,7 +148,8 @@ async function logs(
   const id = sessionId(context);
   await requireSession(sessions, id);
   try {
-    return textResponse(await reads.logs(id, numberQuery(context, 'limit'), numberQuery(context, 'turn')));
+    const body = await reads.logs(id, numberQuery(context, 'limit'), numberQuery(context, 'turn'));
+    return conditional(textResponse(body), context.request.headers.get('if-none-match'));
   } catch (error) {
     return refuse(error);
   }

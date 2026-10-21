@@ -328,6 +328,54 @@ class FailedSendMemory {
   }
 }
 
+/** How many transcript reads keep their validator. A few open chats each; past that the oldest re-reads whole. */
+const VALIDATED_LOG_LIMIT = 16;
+
+/** The body a read last answered, and the `etag` that names it. */
+interface ValidatedText {
+  readonly etag: string;
+  readonly body: string;
+}
+
+/**
+ * The last transcript each read path answered, so the next read of it can be conditional.
+ *
+ * The chat page reads a session's whole transcript tail every few seconds, and a quiet session answers
+ * the same text each time — hundreds of kilobytes on a metered relay for nothing. Holding the last body
+ * and its `etag` lets the next read send `If-None-Match` and take a bodyless `304` instead.
+ *
+ * In memory and per client, which is per daemon connection: nothing here outlives the page or reaches
+ * another daemon. Bounded and least-recently-used, keyed by the exact read path (session and query), so
+ * `?turn=` reads never answer for the whole tail. The body is the daemon's already-redacted text.
+ */
+class ValidatedLogMemory {
+  readonly #entries = new Map<string, ValidatedText>();
+
+  recall(path: string): ValidatedText | undefined {
+    return this.#entries.get(path);
+  }
+
+  remember(path: string, entry: ValidatedText): void {
+    this.#entries.delete(path);
+    this.#entries.set(path, entry);
+    for (const oldest of this.#entries.keys()) {
+      if (this.#entries.size <= VALIDATED_LOG_LIMIT) break;
+      this.#entries.delete(oldest);
+    }
+  }
+
+  forget(path: string): void {
+    this.#entries.delete(path);
+  }
+}
+
+/** A successful answer's body: none for a `204`, parsed JSON when it says so, its text otherwise. */
+async function responsePayload(response: Response): Promise<unknown> {
+  if (response.status === 204) return undefined;
+  if ((response.headers.get('content-type') ?? '').includes('application/json')) return await response.json();
+  return await response.text();
+}
+
 /** One logical message: the session, the exact text, and the attachment set in a stable order. */
 function failedSendKey(id: string, input: SendRequest): string {
   return JSON.stringify([id, input.message, [...(input.attachmentIds ?? [])].sort()]);
@@ -345,6 +393,7 @@ export class FyApiClient implements IFyApiClient {
   readonly #sleep: (milliseconds: number) => Promise<void>;
   readonly #onVersionSkew: ((skew: VersionSkew) => void) | undefined;
   readonly #failedSends: FailedSendMemory;
+  readonly #validatedLogs = new ValidatedLogMemory();
   readonly #nowMs: () => number;
   readonly #restartPatience: DaemonRestartPatience | undefined;
   #reportedVersionSkew = false;
@@ -375,6 +424,17 @@ export class FyApiClient implements IFyApiClient {
     init: RequestInit = {},
     timeoutMs = FY_REQUEST_TIMEOUT_MS,
   ): Promise<T> {
+    return schema.parse(await responsePayload(await this.#exchange(path, init, timeoutMs, false)));
+  }
+
+  /**
+   * One request to its answer: retried, waited out across a restart, and refused unless it succeeded.
+   *
+   * `notModified` admits a `304` as an answer rather than an error. Only a caller that SENT a validator
+   * may pass it: a `304` to anyone else has no body it could stand for, and reading its empty text as
+   * the answer would show an empty transcript as though the session had said nothing.
+   */
+  async #exchange(path: string, init: RequestInit, timeoutMs: number, notModified: boolean): Promise<Response> {
     NonEmptyValueSchema.parse(path);
     PositiveIntegerSchema.parse(timeoutMs);
 
@@ -454,7 +514,7 @@ export class FyApiClient implements IFyApiClient {
     const daemonVersion = response.headers.get(FY_VERSION_HEADER);
     this.#noteVersion(daemonVersion);
 
-    if (!response.ok) {
+    if (!response.ok && !(notModified && response.status === 304)) {
       let candidate: unknown;
       try {
         candidate = await response.json();
@@ -478,16 +538,7 @@ export class FyApiClient implements IFyApiClient {
         candidate,
       );
     }
-
-    let payload: unknown;
-    if (response.status === 204) {
-      payload = undefined;
-    } else if ((response.headers.get('content-type') ?? '').includes('application/json')) {
-      payload = await response.json();
-    } else {
-      payload = await response.text();
-    }
-    return schema.parse(payload);
+    return response;
   }
 
   #send(path: string, init: RequestInit, headers: Headers, timeoutMs: number): Promise<Response> {
@@ -915,12 +966,32 @@ export class FyApiClient implements IFyApiClient {
     );
   }
 
-  logs(id: string, turn?: number): Promise<string> {
+  /**
+   * Conditional when this client has read the same path before: an unchanged transcript answers `304`
+   * and the body held from the last read is returned, so a caller cannot tell the two apart.
+   *
+   * The held entry is captured BEFORE the request, so a read of another session that evicts it while
+   * this one is in flight cannot leave a `304` with nothing to stand for.
+   */
+  async logs(id: string, turn?: number): Promise<string> {
     const suffix = turn === undefined ? '' : `?turn=${NonNegativeIntegerSchema.parse(turn)}`;
-    return this.request(
-      `/v1/sessions/${encodeURIComponent(NonEmptyValueSchema.parse(id))}/logs${suffix}`,
-      TextResponseSchema,
+    const path = `/v1/sessions/${encodeURIComponent(NonEmptyValueSchema.parse(id))}/logs${suffix}`;
+    const held = this.#validatedLogs.recall(path);
+    const response = await this.#exchange(
+      path,
+      { method: 'GET', headers: held === undefined ? {} : { 'if-none-match': held.etag } },
+      FY_REQUEST_TIMEOUT_MS,
+      held !== undefined,
     );
+    if (held !== undefined && response.status === 304) {
+      this.#validatedLogs.remember(path, held);
+      return held.body;
+    }
+    const body = TextResponseSchema.parse(await responsePayload(response));
+    const etag = response.headers.get('etag');
+    if (etag === null) this.#validatedLogs.forget(path);
+    else this.#validatedLogs.remember(path, { etag, body });
+    return body;
   }
 
   handoff(id: string, name: string): Promise<SessionHandoff> {
