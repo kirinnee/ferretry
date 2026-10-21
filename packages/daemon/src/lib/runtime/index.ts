@@ -37,6 +37,7 @@ export * from './mounts/task-boards.ts';
 export * from './mounts/tasks.ts';
 export * from './mounts/terminals.ts';
 export * from './mounts/warden.ts';
+export * from './mounts/webrtc.ts';
 export * from './provenance.ts';
 export * from './published-carriers.ts';
 export * from './secrets.ts';

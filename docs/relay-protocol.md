@@ -2573,10 +2573,22 @@ POST /v1/webrtc/offer      inside a session the paired device key opened
 ```
 
 The route is `authenticated`, like `GET /v1/carriers`: a paired device asking for another way to reach
-its own daemon is exactly the caller it exists for. Its refusals are ordinary answers a device reads
-and states: `404` from a daemon older than this carrier ("this daemon does not offer WebRTC yet"), and
-a `503` naming the reason when the daemon's engine is unavailable or the operator switched the carrier
-off. Neither demotes the session the request arrived on.
+its own daemon is exactly the caller it exists for. It must be a **device inside its session** — a
+host admin token is refused `403 webrtc_device_only`, because a peer connection belongs to one running
+copy of the app and that caller has none. It is not capability-gated: a carrier is a pipe, not an act,
+and every session on it meets the same guard. Both bodies are strict objects whose `sdp` is at most 32
+KiB (`packages/protocol/src/lib/webrtc.ts`). Its refusals are ordinary answers a device reads and
+states, each with a machine code: `404` from a daemon older than this carrier ("this daemon does not
+offer WebRTC yet"); `503 webrtc_disabled` when the operator switched the carrier off and `503
+webrtc_unavailable` when the daemon's engine did not pass its self-test, each with the sentence; `429
+webrtc_busy` at the peer bound below; `400 webrtc_offer_invalid` for an offer the engine could not
+use. None demotes the session the request arrived on.
+
+**The operator's switch** is a `webrtc` block in the daemon configuration document:
+`{ "enabled": true, "iceServers": ["stun:stun.cloudflare.com:3478"] }` is the default, `enabled: false`
+switches the carrier off (said in `fyd --check` and the boot trail), and `iceServers` takes at most
+four `stun:`/`stuns:` addresses — a `turn:` address is refused, because it would need a credential the
+document must never hold.
 
 **Not as rendezvous control frames**, and the reasons are contract rather than taste:
 
@@ -2616,7 +2628,7 @@ interface has timed out. So each side sends its description at the FIRST of:
 Version one uses **one STUN server and no TURN**. A path that needs a relay to exist at all —
 symmetric NAT on both ends, a network that blocks UDP — therefore fails ICE, and the remedy is not a
 second relay but the one this protocol already has: **a WebRTC attempt that has not delivered an open
-channel within 8 seconds of the offer leaving is abandoned, and the device carries on over the relay,
+channel within 8 seconds of the daemon's answer is abandoned, and the device carries on over the relay,
 saying so** ("WebRTC could not find a direct path in 8 s — this network may block peer-to-peer
 connections; using the relay"). The relay carries the requests that arrive meanwhile, so a failed
 attempt delays nothing but the switch.
@@ -2665,8 +2677,12 @@ A WebRTC caller's **rate-limit identity is its peer connection**, the value the 
 whole association, never a shared placeholder (§14's rule for relayed callers, applied again).
 
 **What the daemon bounds**, all initial configuration in the spirit of §13's ceilings: at most **8**
-peer connections at once, at most **8** channels on each, the §14 pre-credential deadline on every
-channel, and a peer connection with no open channel for **60 seconds** is closed.
+peer connections at once (counting offers still being answered, so a burst cannot overshoot), at most
+**4** for one device — a further offer replaces that device's oldest — and **one per running copy of
+the app**: the same device and `appSession` offering again replaces its own peer, which is exactly a
+phone that changed networks abandoning the path it had. At most **8** channels on each peer, the §14
+pre-credential deadline on every channel, and a peer connection with no open channel for **60
+seconds** is closed, which also bounds one that never connected.
 
 ### When the network changes
 
@@ -2738,8 +2754,15 @@ exists, by extending §14's `relay-terminal-bench.ts`.
 - **Built — the engine.** `packages/daemon/src/adapters/webrtc` (the self-test and the loader the
   benchmark shares), the per-target embedding, the Nix and release installs, `fyd --check`'s `webrtc`
   line and the smoke that proves it on every target.
-- **Not built yet — the daemon carrier**: `POST /v1/webrtc/offer`, a data channel as a direct-style
-  session with a remote arrival, the bounds above.
+- **Built — the daemon carrier.** `POST /v1/webrtc/offer` (`packages/daemon/src/lib/runtime/mounts/webrtc.ts`),
+  `WebRtcCarrier` (`packages/daemon/src/lib/webrtc/carrier.ts`: the bounds above, a data channel as a
+  direct session with the fixed remote arrival, the close code carried as the session's `closed`), the
+  engine's bounded non-trickle answer, and the `webrtc` configuration block. Proved by
+  `packages/daemon/tests/integration/webrtc/webrtc-carrier.test.ts`: two libdatachannel peers in one
+  process, the daemon's real carrier and direct session against the protocol's own client half — a
+  proven device's request crosses the channel and reaches the route table as `loopback: false`,
+  `webrtc-peer:…`, though both peers are on one machine; the heartbeat crosses as text; and a refused
+  device proof reaches the client as `closed` `4403` before the channel closes.
 - **Not built yet — the browser carrier**: the dial, bounded gathering, the 8-second deadline and the
   relay fallback, reconnection on a network change, the Connection status above, and the real-browser
   journey that proves a phone↔daemon data path and a forced ICE failure falling back to the relay.

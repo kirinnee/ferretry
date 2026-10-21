@@ -52,3 +52,48 @@ export function describeWebRtcEngine(report: WebRtcEngineReport): string {
   }
   return `engine unavailable — ${report.reason}; devices reach this daemon directly or through the relay instead`;
 }
+
+/**
+ * One data channel, as the carrier sees it: frames in, frames out, and an end.
+ *
+ * Text is its own call because a session's heartbeat (`fy-ping`/`fy-pong`, §8) is the one text message
+ * the protocol defines, and a channel that flattened it into bytes would hand the session a frame it
+ * must refuse.
+ */
+export interface WebRtcChannelPort {
+  readonly label: string;
+  /** False when the channel is gone and nothing was sent. */
+  send(frame: Uint8Array): boolean;
+  sendText(text: string): boolean;
+  /** Bytes queued on the channel and not yet handed to the network — the session's backpressure reading. */
+  bufferedBytes(): number;
+  close(): void;
+  onMessage(listener: (frame: string | Uint8Array) => void): void;
+  /** Called once, whoever closed it. */
+  onClosed(listener: () => void): void;
+}
+
+/** One peer connection the daemon answered: the channels a browser opens on it, and its end. */
+export interface WebRtcPeerPort {
+  onChannel(listener: (channel: WebRtcChannelPort) => void): void;
+  /** Called once, when the connection failed or closed. */
+  onClosed(listener: () => void): void;
+  close(): void;
+}
+
+export interface WebRtcAnswer {
+  readonly sdp: string;
+  readonly peer: WebRtcPeerPort;
+}
+
+/** The engine could not use an offer: it did not parse, or it described nothing this side can answer. */
+export class WebRtcOfferRefused extends Error {}
+
+/** The engine, as the carrier drives it. */
+export interface WebRtcPeerEngine {
+  /**
+   * Answer one offer, non-trickle: the answer carries every candidate gathered within §16's bounds.
+   * Throws {@link WebRtcOfferRefused} for an offer the engine cannot use.
+   */
+  answer(offerSdp: string, iceServers: readonly string[]): Promise<WebRtcAnswer>;
+}

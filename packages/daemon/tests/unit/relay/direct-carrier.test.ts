@@ -53,6 +53,7 @@ import {
 import {
   DIRECT_UPGRADE_WINDOW_MS,
   DIRECT_UPGRADES_PER_PEER,
+  type DirectSession,
   EVICTED_REASON,
   MAX_DIRECT_SESSIONS,
   MAX_DIRECT_UNPROVEN_PER_PEER,
@@ -268,6 +269,8 @@ describe('the direct carrier', () => {
       clientAddress: '127.0.0.1',
     });
     should(decodeControlMessage(wire.binary[0]?.payload ?? new Uint8Array())).containDeep({ t: 'ready' });
+    // The session names the identifier it announced, which a carrier with no close codes addresses its `closed` to.
+    should((handler as DirectSession).sessionId).eql(sessionId);
 
     // Act
     const { channel, transcript } = await handshake(handler, wire, sessionId);

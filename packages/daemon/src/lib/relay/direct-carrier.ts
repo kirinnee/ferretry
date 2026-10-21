@@ -155,6 +155,14 @@ export class DirectSession implements SocketHandler {
     });
   }
 
+  /**
+   * The identifier this socket's session was minted with — what a carrier with no close codes of its
+   * own (a WebRTC data channel, `docs/relay-protocol.md` §16) addresses the session's `closed` to.
+   */
+  get sessionId(): SessionId {
+    return this.#sessionId;
+  }
+
   /** Announce the session to the client, then open it on the link — the order a rendezvous uses. */
   async open(): Promise<void> {
     this.downstream.send(

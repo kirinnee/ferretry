@@ -14,27 +14,40 @@
  * already stands in for. Loading here turns that into the `unavailable` sentence instead.
  */
 
+import { WEBRTC_GATHER_CAP_MS, WEBRTC_GATHER_REFLEXIVE_GRACE_MS } from '@ferretry/protocol';
 import {
   WEBRTC_SELF_TEST_CHANNEL,
   WEBRTC_SELF_TEST_TIMEOUT_MS,
-  type WebRtcEngineReport,
+  type WebRtcAnswer,
+  type WebRtcChannelPort,
   type WebRtcEnginePort,
+  type WebRtcEngineReport,
+  WebRtcOfferRefused,
+  type WebRtcPeerEngine,
+  type WebRtcPeerPort,
 } from '../../lib/webrtc/index.ts';
 
-/** The slice of a data channel the self-test touches. */
+/** The slice of a data channel this adapter touches. */
 export interface EngineDataChannel {
+  getLabel(): string;
   onOpen(callback: () => void): void;
   onMessage(callback: (message: string | ArrayBuffer | Buffer) => void): void;
+  onClosed(callback: () => void): void;
   sendMessage(message: string): boolean;
+  sendMessageBinary(message: Uint8Array): boolean;
+  bufferedAmount(): number;
   close(): void;
 }
 
-/** The slice of a peer connection the self-test touches. */
+/** The slice of a peer connection this adapter touches. */
 export interface EnginePeerConnection {
   onLocalDescription(callback: (sdp: string, type: string) => void): void;
   onLocalCandidate(callback: (candidate: string, mid: string) => void): void;
+  onGatheringStateChange(callback: (state: string) => void): void;
+  onStateChange(callback: (state: string) => void): void;
   onDataChannel(callback: (channel: EngineDataChannel) => void): void;
   setRemoteDescription(sdp: string, type: never): void;
+  localDescription(): { readonly sdp: string; readonly type: string } | null;
   addRemoteCandidate(candidate: string, mid: string): void;
   createDataChannel(label: string): EngineDataChannel;
   close(): void;
@@ -54,6 +67,9 @@ export type NodeDataChannelLoader = () => Promise<NodeDataChannelModule>;
 export interface NodeDataChannelEngineOptions {
   readonly load?: NodeDataChannelLoader;
   readonly timeoutMs?: number;
+  /** §16's gathering bounds; a suite shortens them, production never does. */
+  readonly gatherCapMs?: number;
+  readonly reflexiveGraceMs?: number;
   /** Milliseconds on a monotonic clock — `performance.now()` unless a suite needs another. */
   readonly now?: () => number;
 }
@@ -73,21 +89,141 @@ function firstLine(error: unknown): string {
   return text.split('\n')[0]?.trim() ?? '';
 }
 
-export class NodeDataChannelEngine implements WebRtcEnginePort {
+/** Calls `listener` at most once, however many times the returned function is called. */
+function once(listener: () => void): () => void {
+  let called = false;
+  return () => {
+    if (called) return;
+    called = true;
+    listener();
+  };
+}
+
+/** One received message as bytes or text, never a Node `Buffer` the session would have to know about. */
+function frameOf(message: string | ArrayBuffer | Buffer): string | Uint8Array {
+  if (typeof message === 'string') return message;
+  if (message instanceof ArrayBuffer) return new Uint8Array(message);
+  return new Uint8Array(message.buffer, message.byteOffset, message.byteLength);
+}
+
+/** A data channel as the carrier drives it. Every call into the library is guarded: a channel the
+ *  native side already tore down throws, and a throw here would take a session's whole send path down. */
+function channelPort(channel: EngineDataChannel): WebRtcChannelPort {
+  const attempt = (action: () => boolean): boolean => {
+    try {
+      return action();
+    } catch {
+      return false;
+    }
+  };
+  return {
+    label: channel.getLabel(),
+    send: frame => attempt(() => channel.sendMessageBinary(frame)),
+    sendText: text => attempt(() => channel.sendMessage(text)),
+    bufferedBytes: () => {
+      try {
+        return channel.bufferedAmount();
+      } catch {
+        return 0;
+      }
+    },
+    close: () => void attempt(() => (channel.close(), true)),
+    onMessage: listener => channel.onMessage(message => listener(frameOf(message))),
+    onClosed: listener => channel.onClosed(once(listener)),
+  };
+}
+
+/** A peer connection as the carrier drives it. `failed` and `closed` are its end; `disconnected` is
+ *  not — ICE may recover it, and the session's own keepalive decides when a silent path is dead. */
+function peerPort(peer: EnginePeerConnection): WebRtcPeerPort {
+  return {
+    onChannel: listener => peer.onDataChannel(channel => listener(channelPort(channel))),
+    onClosed: listener => {
+      const ended = once(listener);
+      peer.onStateChange(state => {
+        if (state === 'failed' || state === 'closed') ended();
+      });
+    },
+    close: () => {
+      try {
+        peer.close();
+      } catch {
+        // Already gone on the native side; there is nothing left to release.
+      }
+    },
+  };
+}
+
+export class NodeDataChannelEngine implements WebRtcEnginePort, WebRtcPeerEngine {
   private readonly load: NodeDataChannelLoader;
   private readonly timeoutMs: number;
   private readonly now: () => number;
+  private readonly gatherCapMs: number;
+  private readonly reflexiveGraceMs: number;
+  #loaded: Promise<NodeDataChannelModule> | undefined;
 
   constructor(options: NodeDataChannelEngineOptions = {}) {
     this.load = options.load ?? loadNodeDataChannel;
     this.timeoutMs = options.timeoutMs ?? WEBRTC_SELF_TEST_TIMEOUT_MS;
     this.now = options.now ?? (() => performance.now());
+    this.gatherCapMs = options.gatherCapMs ?? WEBRTC_GATHER_CAP_MS;
+    this.reflexiveGraceMs = options.reflexiveGraceMs ?? WEBRTC_GATHER_REFLEXIVE_GRACE_MS;
+  }
+
+  /** The library, loaded once. A failed load is not cached, so the next ask tries again. */
+  #module(): Promise<NodeDataChannelModule> {
+    this.#loaded ??= this.load().catch(error => {
+      this.#loaded = undefined;
+      throw error;
+    });
+    return this.#loaded;
+  }
+
+  /**
+   * Answer one offer, non-trickle, within §16's gathering bounds.
+   *
+   * libdatachannel answers by itself once the remote offer is set (auto-negotiation), and gathers in the
+   * background; this waits for the FIRST of gathering `complete`, a short grace after the first
+   * server-reflexive candidate, or the cap, and then reads the description as it stands — so the answer
+   * carries the host candidates and every public address found by then.
+   */
+  async answer(offerSdp: string, iceServers: readonly string[]): Promise<WebRtcAnswer> {
+    const module = await this.#module();
+    const peer = new module.PeerConnection('fy-webrtc-peer', { iceServers: [...iceServers] });
+    const gathered = new Promise<void>(resolve => {
+      const cap = setTimeout(resolve, this.gatherCapMs);
+      let grace: ReturnType<typeof setTimeout> | undefined;
+      const done = (): void => {
+        clearTimeout(cap);
+        clearTimeout(grace);
+        resolve();
+      };
+      peer.onGatheringStateChange(state => {
+        if (state === 'complete') done();
+      });
+      peer.onLocalCandidate(candidate => {
+        if (grace === undefined && / typ srflx( |$)/u.test(candidate)) grace = setTimeout(done, this.reflexiveGraceMs);
+      });
+    });
+    try {
+      peer.setRemoteDescription(offerSdp, 'offer' as never);
+    } catch (error) {
+      peerPort(peer).close();
+      throw new WebRtcOfferRefused(firstLine(error));
+    }
+    await gathered;
+    const local = peer.localDescription();
+    if (local === null || local.type !== 'answer') {
+      peerPort(peer).close();
+      throw new WebRtcOfferRefused('the engine produced no answer for that offer');
+    }
+    return { sdp: local.sdp, peer: peerPort(peer) };
   }
 
   async selfTest(): Promise<WebRtcEngineReport> {
     let module: NodeDataChannelModule;
     try {
-      module = await this.load();
+      module = await this.#module();
     } catch (error) {
       return {
         kind: 'unavailable',
