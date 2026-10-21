@@ -1298,6 +1298,15 @@ export class RelayLink {
    */
   async #redeemPairing(session: LinkSession, request: RelayTunnelPair): Promise<void> {
     session.phase = 'concluding';
+    // PAIRING IS NEVER CARRIED BY A TUNNEL (§15). Counted as direct, an internet caller would spend the
+    // code's direct budget rather than the relay one, and the grant would be recorded — and announced to
+    // the other devices — as paired on the local network. Refused with the one uniform outcome, the same
+    // record and close as a wrong code, so the refusal is no oracle; the pairing service is not asked.
+    if (this.deps.arrival?.carrier === 'tunnel') {
+      this.#queue(session, { t: 'pair-refused', protocol: SESSION_PROTOCOL_ID, reason: 'pairing_refused' });
+      this.#conclude(session);
+      return;
+    }
     const transcript = session.transcript;
     // Handed over rather than run here: the pairing service runs it only after its per-peer admission,
     // so a limited stranger cannot make this daemon verify a signature first.

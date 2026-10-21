@@ -304,6 +304,16 @@ export interface DeviceScopedState {
   forgetDevice(deviceId: string): Promise<unknown>;
 }
 
+/**
+ * WHERE A REDEMPTION READS THIS DAEMON'S PUBLISHED CARRIERS: the frozen set current right now.
+ *
+ * Declared here, by its first consumer, so pairing depends on nothing above it; the runtime's
+ * `PublishedCarrierSet` is the one production owner and `GET /v1/carriers` reads the same object.
+ */
+export interface PublishedCarrierView {
+  current(): readonly DaemonCarrier[];
+}
+
 interface PairingServiceOptions {
   readonly daemonId: string;
   readonly daemonName: string;
@@ -322,18 +332,19 @@ interface PairingServiceOptions {
    * belongs — a phone that learned only the direct address it paired over has no way to find the
    * rendezvous that would still work when it leaves the house.
    *
-   * IT IS THE VALUE, NOT A WAY TO ASK FOR ONE. The composition root resolves the set once, before this
-   * service exists, and gives the SAME ARRAY to `GET /v1/carriers`. A getter would have been the
-   * flexible choice and it would also have been the bug: two calls may answer differently, so the set
-   * a device is handed at pairing could stop matching the set it refreshes, which is precisely the
-   * disagreement the published set was introduced to end.
+   * ONE OWNER, READ AT THE MOMENT OF REDEMPTION. The composition root holds the set and gives the SAME
+   * view to `GET /v1/carriers`, so a device's first copy and its refresh are read from one place. It
+   * used to be a frozen array, on the argument that a getter could answer differently on two calls; a
+   * tunnel (`docs/relay-protocol.md` §15) is published only while its connector is registered, so the
+   * set now legitimately changes, and the rule is kept by the single owner rather than by constancy —
+   * see `runtime/published-carriers.ts`.
    *
-   * THIS SERVICE DECIDES NOTHING ABOUT IT. Nothing here filters, re-orders or adds to it, and it is
-   * never held as anything but `readonly`. It is CHECKED at construction — see the constructor — so a
-   * carrier this daemon's own device would refuse cannot leave through here, and cannot be discovered
-   * halfway through a redemption either.
+   * THIS SERVICE DECIDES NOTHING ABOUT IT. Nothing here filters, re-orders or adds to it. It is CHECKED
+   * at construction — see the constructor — and every later set is parsed by its owner when it is made,
+   * so a carrier this daemon's own device would refuse cannot leave through here, and cannot be
+   * discovered halfway through a redemption either.
    */
-  readonly carriers: readonly DaemonCarrier[];
+  readonly carriers: PublishedCarrierView;
   /**
    * The rendezvous a device that has never met this daemon can find FOR ITSELF, or nothing.
    *
@@ -443,8 +454,8 @@ export class PairingService {
     // WHY THE COPY IS DISCARDED. `parse` returns a NEW array, and adopting it would make this service a
     // second authority on a fact the composition root owns — the refresh route would then answer from
     // one array and a redemption from another, which is the disagreement this whole feature exists to
-    // end. What is wanted is the CHECK, not the result: `this.options.carriers` stays the one reference.
-    PublishedCarriersSchema.parse(options.carriers);
+    // end. What is wanted is the CHECK, not the result: `this.options.carriers` stays the one owner.
+    PublishedCarriersSchema.parse(options.carriers.current());
     this.advertisement = normalizedAdvertisement(options.advertisement);
     this.pairingAppUrl = new URL(options.pairingAppUrl ?? FERRETRY_PAIRING_APP_URL).toString();
     this.capabilities = [...(options.capabilities ?? ['daemon-api'])];
@@ -895,7 +906,7 @@ export class PairingService {
         // refresh route holds, so a device's first answer and its next one cannot disagree. It cannot
         // fail this parse: the constructor already refused a set this schema would reject, which is
         // what keeps a bad carrier from being discovered after the code has been spent.
-        carriers: this.options.carriers,
+        carriers: this.options.carriers.current(),
         idleExpiryDays: this.options.idleExpiryDays?.() ?? DEVICE_IDLE_EXPIRY_DAYS,
       }),
     };

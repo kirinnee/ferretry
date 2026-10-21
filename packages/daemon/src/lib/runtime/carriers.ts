@@ -59,6 +59,11 @@ export const PortSchema = z.number().int().min(1).max(65_535);
 /** How many of each kind one daemon may declare. See the module note: the asymmetry is the point. */
 export const MAX_BIND_CARRIERS = 1;
 export const MAX_RELAY_CARRIERS = 4;
+/**
+ * One tunnel, because the hosted service provisions one per daemon fingerprint (§15): a second entry
+ * could only ever name the same tunnel twice, and an operator who wrote two meant something by it.
+ */
+export const MAX_TUNNEL_CARRIERS = 1;
 
 /**
  * The CEILING of the redial backoff, in seconds (clamped to 1–10 where it is used): the first redial
@@ -129,7 +134,41 @@ export function relayCarrierIsConfigured(
   return 'url' in relay;
 }
 
-export const DaemonCarrierEntrySchema = z.union([DaemonBindCarrierSchema, DaemonRelayCarrierSchema]);
+/**
+ * THE HOSTED TUNNEL, as an ordinary entry — `docs/relay-protocol.md` §15 "The daemon end".
+ *
+ * A third kind with a third consequence. It DIALS OUT like a relay — `cloudflared` opens the
+ * connection to Cloudflare's edge from behind this machine's NAT — but what arrives through it is
+ * forwarded to a SECOND LISTENER this daemon binds on loopback for it alone, so it is neither a bind
+ * (it adds no address anybody on a network can reach) nor a relay (no rendezvous is involved).
+ *
+ * There is only `source: 'discovery'`: the tunnel is whatever Ferretry's hosted service provisions for
+ * this fingerprint, and there is nothing an operator could write down instead. Saying "no tunnel, and I
+ * mean it" is this entry with `enabled: false`, and a daemon that held a tunnel then releases it.
+ */
+export const DaemonTunnelCarrierSchema = z.strictObject({
+  kind: z.literal('tunnel'),
+  source: z.literal('discovery'),
+  enabled: EnabledSchema,
+});
+export type DaemonTunnelCarrierEntry = z.output<typeof DaemonTunnelCarrierSchema>;
+
+/**
+ * What a document that declares no tunnel means: ask the hosted service for one.
+ *
+ * IMPLIED EXACTLY AS THE HOSTED RELAY ENTRY IS, for the same reason — a fresh install with nothing
+ * configured should be reachable from somewhere else — and with the same escape: an explicit entry
+ * switched off is a decision, which an omission can never be.
+ */
+export const DISCOVERED_TUNNEL_CARRIER: DaemonTunnelCarrierEntry = Object.freeze(
+  DaemonTunnelCarrierSchema.parse({ kind: 'tunnel', source: 'discovery' }),
+);
+
+export const DaemonCarrierEntrySchema = z.union([
+  DaemonBindCarrierSchema,
+  DaemonRelayCarrierSchema,
+  DaemonTunnelCarrierSchema,
+]);
 export type DaemonCarrierEntry = z.output<typeof DaemonCarrierEntrySchema>;
 
 /**
@@ -146,7 +185,14 @@ export const DaemonCarriersDocumentSchema = z
   .default([])
   .superRefine((carriers, context) => {
     const binds = carriers.filter(carrier => carrier.kind === 'bind').length;
-    const relays = carriers.length - binds;
+    const relays = carriers.filter(carrier => carrier.kind === 'relay').length;
+    const tunnels = carriers.filter(carrier => carrier.kind === 'tunnel').length;
+    if (tunnels > MAX_TUNNEL_CARRIERS) {
+      context.addIssue({
+        code: 'custom',
+        message: `the hosted service provisions one tunnel per daemon, so at most ${String(MAX_TUNNEL_CARRIERS)} "tunnel" carrier may be declared`,
+      });
+    }
     if (binds > MAX_BIND_CARRIERS) {
       context.addIssue({
         code: 'custom',
@@ -194,6 +240,8 @@ export interface DaemonCarrierDocumentInput {
 export interface DaemonCarrierSet {
   readonly bind: DaemonBindCarrier;
   readonly relays: readonly DaemonRelayCarrierEntry[];
+  /** Always present: the declared entry, or the implied hosted one ({@link DISCOVERED_TUNNEL_CARRIER}). */
+  readonly tunnel: DaemonTunnelCarrierEntry;
 }
 
 /**
@@ -219,11 +267,15 @@ export function resolveDaemonCarriers(input: DaemonCarrierDocumentInput): Daemon
           ...(input.port === undefined ? {} : { port: input.port }),
         })
       : DaemonBindCarrierSchema.parse(listener);
-  if (declaredRelays.length > 0) return { bind, relays: declaredRelays };
+  // There is no legacy spelling of a tunnel, so the only question is whether the list names one.
+  const tunnel =
+    input.carriers.find((carrier): carrier is DaemonTunnelCarrierEntry => carrier.kind === 'tunnel') ??
+    DISCOVERED_TUNNEL_CARRIER;
+  if (declaredRelays.length > 0) return { bind, relays: declaredRelays, tunnel };
   const legacy = input.relay;
   const relay =
     legacy === undefined ? DISCOVERED_RELAY_CARRIER : ConfiguredRelayCarrierSchema.parse({ kind: 'relay', ...legacy });
-  return { bind, relays: [relay] };
+  return { bind, relays: [relay], tunnel };
 }
 
 /**

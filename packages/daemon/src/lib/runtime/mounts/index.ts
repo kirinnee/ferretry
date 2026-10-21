@@ -1,4 +1,4 @@
-import type { DaemonCarrier } from '@ferretry/protocol';
+import type { PublishedCarrierView } from '../published-carriers.ts';
 import type { AgentToolService } from '../../agent-tools/service.ts';
 import type { AgentIdentityResolver } from '../../agent-tools/types.ts';
 import type { AnalyticsIngestionLoop } from '../../analytics/ingestion.ts';
@@ -146,12 +146,12 @@ export interface MountedSubsystems {
   readonly stepUp: StepUpService;
   /** The machine's security settings — `docs/design/zero-trust.md` B6. */
   readonly security: SecuritySettingsService;
-  /** Every way this daemon can be reached, as the daemon itself publishes it. NOT A SUBSYSTEM BUT A
-   *  VALUE, and the only field here that is one: it is resolved once at boot and it is THE SAME ARRAY
-   *  the pairing service hands out on redemption, so the set a device is given and the set it later
-   *  refreshes cannot be two answers. A daemon that published its carriers only at pairing time had no
-   *  way to tell an already-paired phone that its rendezvous had changed. */
-  readonly carriers: readonly DaemonCarrier[];
+  /** Every way this daemon can be reached, as the daemon itself publishes it: THE SAME VIEW the pairing
+   *  service hands out on redemption, so the set a device is given and the set it later refreshes are
+   *  read from one owner. It changes while the daemon runs — a tunnel is published only while its
+   *  connector is registered (`runtime/published-carriers.ts`). A daemon that published its carriers
+   *  only at pairing time had no way to tell an already-paired phone that its reach had changed. */
+  readonly carriers: PublishedCarrierView;
   /** The peer-to-peer carrier's signalling: a paired device's offer in, this daemon's answer out
    *  (`docs/relay-protocol.md` §16). */
   readonly webrtc: WebRtcSignallingSubsystem;

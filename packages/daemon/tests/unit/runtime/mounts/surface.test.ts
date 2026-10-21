@@ -7,6 +7,7 @@ import { HandoverReconcileLoop } from '../../../../src/lib/handover/index.ts';
 import {
   createMountedDispatcher,
   createMountedSocketDispatcher,
+  fixedCarrierView,
   type MountedSubsystems,
   mountedDaemonRoutes,
   mountedSocketRoutes,
@@ -124,13 +125,12 @@ const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
     },
   },
   stepUp: stepUpSubsystem(),
-  // A VALUE, not a subsystem, and the only field here that is one: the set is resolved once at boot and
-  // the pairing service is handed the very same array. Non-empty on purpose — an empty one would let
-  // `PairingResponseSchema`'s default stand in for a carried-through set.
-  carriers: [
+  // The published set's one view, which the pairing service reads too. Non-empty on purpose — an empty
+  // one would let `PairingResponseSchema`'s default stand in for a carried-through set.
+  carriers: fixedCarrierView([
     { kind: 'direct', url: 'https://workstation.example.test' },
     { kind: 'relay', url: 'wss://rendezvous.example.test/fy' },
-  ],
+  ]),
   webrtc: {
     offer: async () => {
       throw new Error('not exercised by the surface inventory');

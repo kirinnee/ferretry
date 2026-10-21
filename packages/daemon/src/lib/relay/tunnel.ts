@@ -402,6 +402,12 @@ export interface SessionArrival {
   readonly loopback: boolean;
   readonly privilegedLoopback: boolean;
   readonly clientAddress?: string;
+  /**
+   * `'tunnel'` for a session the daemon's tunnel listener accepted (§15). Pairing is never carried by a
+   * tunnel: such a session's `pair` record is refused with the ordinary `pair-refused` before the
+   * pairing service is asked, so no code guess is spent and no grant is recorded as direct.
+   */
+  readonly carrier?: 'tunnel';
 }
 
 /** Everything an `ApiRequest` needs that a credential record can supply. A stream names no method,

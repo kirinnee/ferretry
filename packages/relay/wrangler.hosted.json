@@ -16,6 +16,10 @@
       {
         "name": "RELAY_CONTROL",
         "class_name": "HostedRelayControlDurableObject"
+      },
+      {
+        "name": "TUNNEL_CONTROL",
+        "class_name": "HostedTunnelControlDurableObject"
       }
     ]
   },
@@ -23,6 +27,10 @@
     {
       "tag": "v1",
       "new_sqlite_classes": ["RendezvousDurableObject", "HostedRelayControlDurableObject"]
+    },
+    {
+      "tag": "v2",
+      "new_sqlite_classes": ["HostedTunnelControlDurableObject"]
     }
   ],
   "observability": {

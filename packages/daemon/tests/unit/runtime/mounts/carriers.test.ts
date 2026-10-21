@@ -5,6 +5,7 @@ import { NO_GOVERNED_ROUTES_GUARD } from '../../../../src/lib/api/capability.ts'
 import { ApiDispatcher } from '../../../../src/lib/api/dispatcher.ts';
 import { ApiRouter } from '../../../../src/lib/api/router.ts';
 import { carrierRoutes } from '../../../../src/lib/runtime/mounts/carriers.ts';
+import { PublishedCarrierSet } from '../../../../src/lib/runtime/published-carriers.ts';
 import { request } from '../../api/support.ts';
 import { CREDENTIALS, human } from './support.ts';
 
@@ -22,6 +23,9 @@ const CARRIERS: readonly DaemonCarrier[] = [
   { kind: 'relay', url: 'wss://rendezvous.example.test/fy' },
 ];
 
+/** A set as one view, the shape the route reads. */
+const view = (carriers: readonly DaemonCarrier[]) => ({ current: () => carriers });
+
 /** A paired browser: the caller this route is FOR. */
 /** A paired device is whoever its session proved; the headers it sends carry no credential. */
 const DEVICE = { deviceId: 'device-1', appSession: 'app-one' } as const;
@@ -33,7 +37,7 @@ const asCaller = (headers: Readonly<Record<string, string>>) => ({
 const warden = { authorization: `Bearer ${CREDENTIALS.warden}`, 'x-ferretry-client': 'cli' } as const;
 
 function dispatcher(carriers: readonly DaemonCarrier[] = CARRIERS): ApiDispatcher {
-  return new ApiDispatcher(new ApiRouter(carrierRoutes(carriers)), CREDENTIALS, NO_GOVERNED_ROUTES_GUARD);
+  return new ApiDispatcher(new ApiRouter(carrierRoutes(view(carriers))), CREDENTIALS, NO_GOVERNED_ROUTES_GUARD);
 }
 
 async function ask(headers: Readonly<Record<string, string>>, carriers?: readonly DaemonCarrier[]) {
@@ -148,24 +152,36 @@ describe('the carrier refresh mount', () => {
 
     // Act / Assert — each refusal is matched by its OWN reason. A bare `.throw()` would pass on any
     // failure at all, including one that had nothing to do with the address it was given.
-    should(() => carrierRoutes(credentialled)).throw(/daemon address may not carry credentials/u);
-    should(() => carrierRoutes(plaintextRelay)).throw(/must be wss\/https, or ws\/http on loopback/u);
+    should(() => carrierRoutes(view(credentialled))).throw(/daemon address may not carry credentials/u);
+    should(() => carrierRoutes(view(plaintextRelay))).throw(/must be wss\/https, or ws\/http on loopback/u);
   });
 
-  it('should answer from one projection rather than re-deriving it per request', async () => {
-    // The set is resolved at boot and constant afterwards, so there is nothing about a request that could
-    // change the answer. Two calls agree byte for byte — which is also what makes the failure above a
-    // boot failure rather than a recurring one.
+  it('should answer what is published at the moment it is asked, so a tunnel arrives and leaves', async () => {
+    // A tunnel is published only while its connector is registered (`docs/relay-protocol.md` §15), so
+    // the set changes while the daemon runs — and a device's refresh is exactly how it learns that. The
+    // owner is one object, so two reads differ only because the daemon's reach did.
     // Arrange
-    const subject = dispatcher();
+    const published = new PublishedCarrierSet('https://workstation.example.test', []);
+    const subject = new ApiDispatcher(new ApiRouter(carrierRoutes(published)), CREDENTIALS, NO_GOVERNED_ROUTES_GUARD);
+    const read = async () =>
+      DaemonCarriersViewSchema.parse(
+        JSON.parse((await subject.dispatch(request({ path: '/v1/carriers', ...asCaller(device) }))).body),
+      ).carriers;
 
     // Act
-    const first = await subject.dispatch(request({ path: '/v1/carriers', ...asCaller(device) }));
-    const second = await subject.dispatch(request({ path: '/v1/carriers', ...asCaller(device) }));
+    const before = await read();
+    published.tunnel('https://quiet-otter.tunnels.example');
+    const during = await read();
+    published.tunnel(undefined);
+    const after = await read();
 
-    // Assert
-    should([first.status, second.status]).deepEqual([200, 200]);
-    should(first.body).equal(second.body);
+    // Assert — the tunnel sits after direct, and leaves without a trace.
+    should(before).deepEqual([{ kind: 'direct', url: 'https://workstation.example.test' }]);
+    should(during).deepEqual([
+      { kind: 'direct', url: 'https://workstation.example.test' },
+      { kind: 'tunnel', url: 'https://quiet-otter.tunnels.example' },
+    ]);
+    should(after).deepEqual(before);
   });
 
   it('should reach the daemon over one route and no more', async () => {
@@ -173,15 +189,15 @@ describe('the carrier refresh mount', () => {
     // daemon's carriers at a rendezvous of its own choosing — which is a configuration change, and the
     // operator's document is the only place that decides one.
     // Arrange / Act
-    const routes = carrierRoutes(CARRIERS).map(route => `${route.method} ${route.path}`);
+    const routes = carrierRoutes(view(CARRIERS)).map(route => `${route.method} ${route.path}`);
 
     // Assert
     should(routes).deepEqual(['GET /v1/carriers']);
     // Neither privileged-arrival-only nor capability-gated, and both are deliberate: the remote device
     // is the reader, and an operator who switched `pairing` off to stop NEW devices being added must
     // not thereby strand the devices already paired on a rendezvous this daemon no longer dials.
-    should(carrierRoutes(CARRIERS).map(route => [route.minimum, route.privilegedOnly, route.capability])).deepEqual([
-      ['authenticated', undefined, undefined],
-    ]);
+    should(
+      carrierRoutes(view(CARRIERS)).map(route => [route.minimum, route.privilegedOnly, route.capability]),
+    ).deepEqual([['authenticated', undefined, undefined]]);
   });
 });
