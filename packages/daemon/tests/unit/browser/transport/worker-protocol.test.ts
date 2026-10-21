@@ -63,6 +63,25 @@ describe('browser worker snapshots', () => {
     ]);
   });
 
+  it('should keep a challenge hint only when it names a provider the wire knows', () => {
+    // Arrange
+    const reply = snapshotReply({
+      pages: [
+        { ...page('p0'), challenge: { provider: 'cloudflare' } },
+        { ...page('p1'), challenge: { provider: 'solver-service' } },
+      ],
+    });
+
+    // Act
+    const normalized = normalizeWorkerSnapshot(reply);
+
+    // Assert
+    should(normalized.ok && normalized.value.pages).deepEqual([
+      { id: 'p0', url: 'https://example.test/p0', title: 'title p0', challenge: { provider: 'cloudflare' } },
+      { id: 'p1', url: 'https://example.test/p1', title: 'title p1' },
+    ]);
+  });
+
   it('should substitute a blank URL for a tab the worker described without one', () => {
     // Arrange: kteam emitted an empty string here, which the wire schema rejects outright.
     const reply = snapshotReply({ pages: [{ id: 'p1', title: 'new tab' }] });

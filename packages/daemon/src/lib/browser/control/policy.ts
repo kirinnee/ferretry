@@ -3,6 +3,7 @@ import {
   BROWSER_MAX_WIDTH,
   BROWSER_MIN_HEIGHT,
   BROWSER_MIN_WIDTH,
+  type BrowserMode,
   type BrowserViewport,
 } from '@ferretry/protocol';
 
@@ -82,8 +83,14 @@ export interface ChromeSearch {
   readonly available?: (command: string) => boolean;
 }
 
-const LINUX_BROWSER_NAMES = ['google-chrome', 'google-chrome-stable', 'chromium', 'chromium-browser'] as const;
+const LINUX_CHROME_NAMES = ['google-chrome', 'google-chrome-stable'] as const;
+const LINUX_CHROMIUM_NAMES = ['chromium', 'chromium-browser'] as const;
 
+/**
+ * Every place a browser may be, GOOGLE CHROME FIRST: the real, installed Google Chrome is the browser a
+ * site sees every day, so it wins over a Chromium build wherever each was found — a Chromium in
+ * `/usr/bin` no longer shadows a Google Chrome on PATH. Chromium is the fallback, never the preference.
+ */
 export function chromeExecutableCandidates(
   platform: NodeJS.Platform,
   override?: string,
@@ -91,20 +98,28 @@ export function chromeExecutableCandidates(
 ): readonly string[] {
   if (override?.trim()) return [override.trim()];
   if (platform === 'darwin') {
-    const system = [
-      '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
-      '/Applications/Chromium.app/Contents/MacOS/Chromium',
-    ];
+    const chrome = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
+    const chromium = '/Applications/Chromium.app/Contents/MacOS/Chromium';
     return search.home
-      ? [...system, `${search.home}/Applications/Google Chrome.app/Contents/MacOS/Google Chrome`]
-      : system;
+      ? [chrome, `${search.home}/Applications/Google Chrome.app/Contents/MacOS/Google Chrome`, chromium]
+      : [chrome, chromium];
   }
-  const fixed = [...LINUX_BROWSER_NAMES.map(name => `/usr/bin/${name}`), '/snap/bin/chromium'];
-  const onPath = (search.path ?? '')
+  const directories = (search.path ?? '')
     .split(':')
     .filter(directory => directory.startsWith('/'))
-    .flatMap(directory => LINUX_BROWSER_NAMES.map(name => `${directory.replace(/\/+$/, '')}/${name}`));
-  return [...new Set([...fixed, ...onPath])];
+    .map(directory => directory.replace(/\/+$/, ''));
+  const named = (names: readonly string[]): readonly string[] =>
+    directories.flatMap(directory => names.map(name => `${directory}/${name}`));
+  return [
+    ...new Set([
+      ...LINUX_CHROME_NAMES.map(name => `/usr/bin/${name}`),
+      '/opt/google/chrome/chrome',
+      ...named(LINUX_CHROME_NAMES),
+      ...LINUX_CHROMIUM_NAMES.map(name => `/usr/bin/${name}`),
+      '/snap/bin/chromium',
+      ...named(LINUX_CHROMIUM_NAMES),
+    ]),
+  ];
 }
 
 /**
@@ -157,7 +172,22 @@ export interface ChromeLaunchOptions {
    * with NO display (a server, an SSH-only box) runs it headless instead of failing to start it.
    */
   readonly headless?: boolean;
+  /**
+   * Keep every window painting while it is not the focused one. A HEADED browser stops rendering a
+   * window that is hidden, occluded or in the background, and the agent browser opens each page in a
+   * window of its own — every one of which an agent may be driving, and a person watching, at once.
+   */
+  readonly keepPainting?: boolean;
 }
+
+/**
+ * Switches that tell every page it is being automated (`navigator.webdriver`, the "controlled by
+ * automated test software" bar), or that hide that it is. NEITHER kind is ever passed: the agent
+ * browser is driven over its loopback debugging port, which no page can see, so the browser a site meets
+ * is the ordinary Chrome it is — not a disguised one. Named so the tests can hold every mode to it.
+ */
+export const AUTOMATION_SWITCH_PATTERN =
+  /^--(?:enable-automation|disable-blink-features=.*AutomationControlled|remote-debugging-pipe)/;
 
 export function chromeLaunchArguments(
   executable: string,
@@ -180,6 +210,13 @@ export function chromeLaunchArguments(
     '--disable-component-update',
     '--disable-features=Translate,MediaRouter',
     '--disable-dev-shm-usage',
+    ...(options.keepPainting === true
+      ? [
+          '--disable-backgrounding-occluded-windows',
+          '--disable-renderer-backgrounding',
+          '--disable-background-timer-throttling',
+        ]
+      : []),
     ...(platform === 'linux'
       ? [
           '--no-sandbox',
@@ -288,4 +325,52 @@ export function normalizeViewport(width: number, height: number): BrowserViewpor
     width: Math.min(BROWSER_MAX_WIDTH, Math.max(BROWSER_MIN_WIDTH, Math.round(width))),
     height: Math.min(BROWSER_MAX_HEIGHT, Math.max(BROWSER_MIN_HEIGHT, Math.round(height))),
   };
+}
+
+/**
+ * The machine's one agent browser, launched in the mode `machine.yaml` names (docs/browser-mode.md).
+ *
+ * - `headless` — no window anywhere: what agents get by default, and the only thing a server with no
+ *   display can run.
+ * - `window` — a real, headed Chrome: on Linux it draws into the private X display the launcher hands it
+ *   (`DISPLAY`), on macOS it is a real window on the owner's desktop. No `--headless`, so the page sees the
+ *   browser's own user agent rather than `HeadlessChrome` and renders the way a desktop Chrome does.
+ *
+ * Both keep the loopback debugging port: it is what the view streams and the agent tools drive through.
+ * Neither passes an automation switch ({@link AUTOMATION_SWITCH_PATTERN}).
+ */
+export function agentBrowserArguments(
+  executable: string,
+  profile: string,
+  cdpPort: number,
+  viewport: BrowserViewport,
+  platform: NodeJS.Platform,
+  mode: BrowserMode,
+): readonly string[] {
+  return chromeLaunchArguments(executable, profile, cdpPort, viewport, platform, {
+    headless: mode === 'headless',
+    keepPainting: mode === 'window',
+  });
+}
+
+/** What to install for the private display a Linux `window` browser draws into, from this host's managers. */
+export function xvfbInstallCommand(available: (command: string) => boolean): string | undefined {
+  const managers: readonly (readonly [string, string])[] = [
+    ['apt-get', 'sudo apt-get install -y xvfb'],
+    ['dnf', 'sudo dnf install -y xorg-x11-server-Xvfb'],
+    ['pacman', 'sudo pacman -S --noconfirm xorg-server-xvfb'],
+    ['zypper', 'sudo zypper install -y xvfb-run'],
+    ['nix', 'nix profile install nixpkgs#xvfb'],
+  ];
+  return managers.find(([manager]) => available(manager))?.[1];
+}
+
+/**
+ * The refusal a Linux `window` browser gives on a host with no Xvfb: one sentence naming the fix — install
+ * it, or go back to headless — rather than a Chrome that fails to open a display.
+ */
+export function xvfbMissingMessage(available: (command: string) => boolean): string {
+  const command = xvfbInstallCommand(available);
+  const install = command === undefined ? 'install Xvfb' : `install it with \`${command}\``;
+  return `Browser mode is Real window, which needs Xvfb on Linux and this host has none: ${install}, or set Browser mode back to Headless.`;
 }

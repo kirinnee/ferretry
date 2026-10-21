@@ -1,6 +1,6 @@
 import { z } from 'zod';
-import { InstantSchema, NonNegativeIntegerSchema } from './common.ts';
 import { SurfaceNameSchema } from './agent-tools.ts';
+import { InstantSchema, NonNegativeIntegerSchema } from './common.ts';
 import { SurfaceOpenerSchema } from './surface.ts';
 
 export const BROWSER_MAX_INSTANCES = 3;
@@ -27,6 +27,42 @@ export type BrowserProfileKind = z.infer<typeof BrowserProfileKindSchema>;
 
 export const BrowserPageStateSchema = z.enum(['loading', 'ready', 'error']);
 export type BrowserPageState = z.infer<typeof BrowserPageStateSchema>;
+
+/**
+ * How this machine runs its one agent browser (`machine.yaml` `browserMode`, docs/browser-mode.md).
+ *
+ * - `headless` — no window: what agents get by default, and what a server with no display can run.
+ * - `window` — a real Chrome window: a private virtual display on Linux, a real window on macOS. For an
+ *   owner who browses and signs in through it themselves, so a site sees an ordinary desktop browser.
+ *
+ * Both are an honest Chrome. Neither disguises automation, and neither solves a challenge for anyone.
+ */
+export const BrowserModeSchema = z.enum(['headless', 'window']);
+export type BrowserMode = z.infer<typeof BrowserModeSchema>;
+
+/** Who is asking the person on a page to prove they are human, as far as the page shows it. */
+export const BrowserChallengeProviderSchema = z.enum([
+  'cloudflare',
+  'recaptcha',
+  'hcaptcha',
+  'google',
+  'datadome',
+  'arkose',
+  'perimeterx',
+  'other',
+]);
+export type BrowserChallengeProvider = z.infer<typeof BrowserChallengeProviderSchema>;
+
+/**
+ * A page that appears to be showing a human check — a captcha or a "checking your browser" interstitial.
+ * A HINT for the view, recognised from the page's address, title and frames: it can be absent while a
+ * check is showing and present on a page that only embeds one. Ferretry never solves one — the view asks
+ * the person to take the page over and solve it themselves.
+ */
+export const BrowserChallengeSchema = z.object({
+  provider: BrowserChallengeProviderSchema,
+});
+export type BrowserChallenge = z.infer<typeof BrowserChallengeSchema>;
 
 export const BrowserActivitySchema = z.enum([
   'start',
@@ -116,6 +152,8 @@ export const BrowserPageSummarySchema = z.object({
   incognito: z.literal(true).optional(),
   /** The page that opened this one, when it is a popup. */
   openerId: z.string().min(1).max(BROWSER_MAX_PAGE_ID_LENGTH).optional(),
+  /** The page appears to be asking the person to prove they are human. Absent when nothing was seen. */
+  challenge: BrowserChallengeSchema.optional(),
   /**
    * The session the page belongs to, and that session's display name — what a reader groups pages by
    * ("Hadi's browser": every page one agent opened, together). Each page has its own window; the

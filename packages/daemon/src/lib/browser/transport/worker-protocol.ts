@@ -1,10 +1,12 @@
 import {
   BROWSER_MAX_PAGE_ID_LENGTH,
-  BrowserPageActionSnapshotSchema,
-  BrowserPageSnapshotSchema,
+  type BrowserChallenge,
+  BrowserChallengeProviderSchema,
   type BrowserErrorCode,
   type BrowserPageActionSnapshot,
+  BrowserPageActionSnapshotSchema,
   type BrowserPageSnapshot,
+  BrowserPageSnapshotSchema,
   type BrowserPageSummary,
   type BrowserScreencastFrame,
 } from '@ferretry/protocol';
@@ -69,6 +71,12 @@ function asRecord(value: unknown): Readonly<Record<string, unknown>> {
   return value !== null && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
 }
 
+/** A challenge hint survives only as a provider the wire knows: anything else from the worker is dropped. */
+function challengeOf(value: unknown): { readonly challenge?: BrowserChallenge } {
+  const provider = BrowserChallengeProviderSchema.safeParse(asRecord(value)['provider']);
+  return provider.success ? { challenge: { provider: provider.data } } : {};
+}
+
 export type WorkerSnapshotResult<TSnapshot> =
   | { readonly ok: true; readonly value: TSnapshot }
   | { readonly ok: false; readonly message: string };
@@ -111,6 +119,7 @@ export function normalizeWorkerSnapshot(value: unknown): WorkerSnapshotResult<Br
         // Only the exact values mean anything: an incognito page is `true`, and an opener is an id.
         ...(page['incognito'] === true ? { incognito: true as const } : {}),
         ...(pageIdentity(page['openerId']) === undefined ? {} : { openerId: pageIdentity(page['openerId']) }),
+        ...challengeOf(page['challenge']),
       });
     }
     return pages;

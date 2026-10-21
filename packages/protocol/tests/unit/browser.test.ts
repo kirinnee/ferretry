@@ -132,6 +132,14 @@ const browserCases: SchemaCase[] = [
   { name: 'actor kind', schema: browser.BrowserActorKindSchema, value: 'human' },
   { name: 'profile kind', schema: browser.BrowserProfileKindSchema, value: 'session' },
   { name: 'page state', schema: browser.BrowserPageStateSchema, value: 'ready' },
+  { name: 'mode', schema: browser.BrowserModeSchema, value: 'window' },
+  { name: 'challenge provider', schema: browser.BrowserChallengeProviderSchema, value: 'cloudflare' },
+  { name: 'challenge', schema: browser.BrowserChallengeSchema, value: { provider: 'hcaptcha' } },
+  {
+    name: 'page summary showing a challenge',
+    schema: browser.BrowserPageSummarySchema,
+    value: { ...homePage, challenge: { provider: 'recaptcha' } },
+  },
   { name: 'activity', schema: browser.BrowserActivitySchema, value: 'navigate' },
   { name: 'viewport', schema: browser.BrowserViewportSchema, value: viewport },
   { name: 'screencast frame', schema: browser.BrowserScreencastFrameSchema, value: screencastFrame },
@@ -375,6 +383,8 @@ describe('browser schemas', () => {
         schema: browser.BrowserActionSchema,
         value: { action: 'human-activity', kind: 'scroll' },
       },
+      { name: 'unknown browser mode', schema: browser.BrowserModeSchema, value: 'kiosk' },
+      { name: 'unknown challenge provider', schema: browser.BrowserChallengeSchema, value: { provider: 'solver' } },
     ];
 
     // Act + Assert

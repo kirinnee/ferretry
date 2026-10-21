@@ -171,6 +171,18 @@ describe('XvfbDisplay', () => {
     await subject.close();
   });
 
+  it('should refuse in the words its owner gives it, when it serves something other than the login window', async () => {
+    // Arrange
+    const subject = new XvfbDisplay({ executable: () => undefined, missing: () => 'install Xvfb for a real window' });
+
+    // Act
+    const failure = await subject.display().catch((error: unknown) => error);
+
+    // Assert
+    should(failure).be.instanceof(BrowserControlError);
+    should((failure as BrowserControlError).message).equal('install Xvfb for a real window');
+  });
+
   it('should retry rather than replay a failure, once the host can serve one', async () => {
     // The memo is on the promise, so a failed attempt must clear it: an operator who installs Xvfb and
     // tries again should get a display, not the error the first `start` produced.
