@@ -14,20 +14,26 @@
 
 import type { Harness, ImportableConversation } from '@ferretry/protocol';
 import { conversationFolder } from '@ferretry/protocol';
-import { Asterisk, CodeXml, FlaskConical, Folder, PawPrint } from 'lucide-react';
+import { Asterisk, CodeXml, FlaskConical, Folder, Laptop, PawPrint } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { relativeTime, sessionStatusLabel } from '../../../lib/session-screens.ts';
 import { HARNESS_SHORT } from '../credentials/credentials-model.ts';
 import { conversationHeadline, type FerretMark, ferretState } from './conversation-picker-model.ts';
 
 /** Who a row belongs to, as its colour says it. */
-export type ConversationSourceMark = 'ferretry' | Harness;
+export type ConversationSourceMark = 'ferretry' | 'computer' | Harness;
 
 const HARNESS_ICON: Readonly<Record<Harness, typeof Asterisk>> = { claude: Asterisk, codex: CodeXml };
 
-/** A mark's icon: the CLI's own, or a paw for Ferretry. */
+const MARK_ICON: Readonly<Record<ConversationSourceMark, typeof Asterisk>> = {
+  ...HARNESS_ICON,
+  ferretry: PawPrint,
+  computer: Laptop,
+};
+
+/** A mark's icon: the CLI's own, a paw for Ferretry, or a laptop for what is only on this computer. */
 export function SourceIcon({ source, size = 12 }: { readonly source: ConversationSourceMark; readonly size?: number }) {
-  const Icon = source === 'ferretry' ? PawPrint : HARNESS_ICON[source];
+  const Icon = MARK_ICON[source];
   return <Icon size={size} aria-hidden="true" className="shrink-0" />;
 }
 
@@ -179,6 +185,11 @@ export function ConversationLines({
           <SourceBadge source={row.harness} data={{ 'data-conversation-harness': row.harness }}>
             {HARNESS_SHORT[row.harness]}
           </SourceBadge>
+          {row.keptIn === 'computer' ? (
+            <SourceBadge source="computer" data={{ 'data-conversation-computer': '' }}>
+              On this computer
+            </SourceBadge>
+          ) : null}
           <FolderMark project={row.project} />
           <span className="fy-convo-facts">
             {turns}
@@ -225,7 +236,7 @@ export function FerretLines({
   );
 }
 
-/** "All · Ferretry · Claude · Codex": one pressed chip, each in its source's colour. */
+/** "All · Ferretry · On this computer · Claude · Codex": one pressed chip, each in its source's colour. */
 export function SourceChips({
   options,
   value,

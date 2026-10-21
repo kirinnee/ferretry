@@ -253,6 +253,36 @@ describe('ContinueSessionController.run', () => {
     should(out.errors[0]).containEql('no conversations matched');
   });
 
+  it('should say how to show the computer’s conversations when listing them is switched off', async () => {
+    // Arrange
+    const { subject, out } = continueController(new RecordingImportGateway(listing([], { computerListed: false })));
+
+    // Act
+    await subject.run({ continue: true });
+
+    // Assert
+    should(out.exitCode).equal(1);
+    should(out.errors[0]).containEql('turn on Keep in sync in Settings › Machine › Conversations');
+  });
+
+  it('should continue a conversation that is only on this computer like any other', async () => {
+    // Arrange
+    const gateway = new RecordingImportGateway(listing([conversation({ id: 'c-1', keptIn: 'computer' })]), {
+      adopted: [{ id: 'c-1', session: 's-1', name: 'Fable', status: 'running' }],
+      refused: [],
+    });
+    const { subject, out } = continueController(gateway);
+
+    // Act
+    await subject.run({ continue: true, runtime: 'work' });
+
+    // Assert
+    should(gateway.adoptRequests).eql([
+      { harness: 'claude', runtime: 'work', conversations: [{ id: 'c-1', start: true }] },
+    ]);
+    should(out.exitCode).equal(undefined);
+  });
+
   it('should open an already-adopted match without adopting again', async () => {
     // Arrange
     const gateway = new RecordingImportGateway(listing([conversation({ id: 'c-1', adoptedBy: 's-1' })]));
@@ -402,7 +432,7 @@ describe('ContinueSessionController.run', () => {
 
     // Assert
     should(gateway.queries[0]).eql({
-      source: 'ferretry',
+      source: 'synced',
       harness: 'claude',
       q: 'login bug',
       since: new Date(NOW_MS - 2 * 3_600_000).toISOString(),

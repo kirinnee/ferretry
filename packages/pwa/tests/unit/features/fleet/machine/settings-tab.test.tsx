@@ -732,3 +732,102 @@ describe('MachineSettingsSurface', () => {
     }
   });
 });
+
+describe('MachineSettingsTab › Conversations › Keep in sync', () => {
+  const READ = '/v1/config/file?path=machine.yaml';
+  const WRITE = '/v1/config/file';
+  const file = (text: string) => ({
+    path: 'machine.yaml',
+    absolutePath: '/home/you/.ferretry/config/machine.yaml',
+    kind: 'machine',
+    schema: 'machine',
+    exists: true,
+    text,
+    etag: 'etag-1',
+    state: 'ok',
+    issues: [],
+  });
+  const keep = (q: (selector: string) => Element | null): HTMLElement =>
+    must(q('[data-keep-in-sync]') as HTMLElement | null, 'switch');
+
+  it('shows it on when the file cannot be read, since on is the default', async () => {
+    // Arrange
+    const setup: Setup = {};
+
+    // Act / Assert
+    await withTab(setup, async ({ q }) => {
+      expect(keep(q).getAttribute('aria-checked')).toBe('true');
+      expect(q('[data-keep-in-sync-hint]')?.textContent).toContain('Read-only; nothing is imported');
+    });
+  });
+
+  it('shows what machine.yaml says, and ignores a file that does not parse', async () => {
+    // Arrange
+    const off: Setup = { answers: { [READ]: file('conversations:\n  listComputer: false\n') } };
+    const broken: Setup = { answers: { [READ]: file('conversations: [unclosed\n') } };
+
+    // Act / Assert
+    await withTab(off, async ({ q }) => expect(keep(q).getAttribute('aria-checked')).toBe('false'));
+    await withTab(broken, async ({ q }) => expect(keep(q).getAttribute('aria-checked')).toBe('true'));
+  });
+
+  it('writes the key against the etag it read when switched off, then back on', async () => {
+    // Arrange
+    let text = '# mine\n';
+    const answers = {
+      [READ]: () => file(text),
+      [WRITE]: (call: Call) => {
+        text = (call.body as { text: string }).text;
+        return { path: 'machine.yaml', etag: 'etag-2', outcome: 'applied' };
+      },
+    };
+
+    // Act / Assert
+    await withTab({ answers }, async ({ q, calls }) => {
+      await click(keep(q), 'switch');
+      expect(keep(q).getAttribute('aria-checked')).toBe('false');
+      const put = must(calls.find(call => call.path === WRITE) ?? null, 'put');
+      expect(put.headers['if-match']).toBe('etag-1');
+      expect(text).toContain('# mine');
+      expect(text).toContain('listComputer: false');
+      await click(keep(q), 'switch');
+      expect(keep(q).getAttribute('aria-checked')).toBe('true');
+      expect(text).toContain('listComputer: true');
+      expect(q('[data-keep-in-sync-note]')).toBeNull();
+    });
+  });
+
+  it('says a held change is not in effect yet', async () => {
+    // Arrange
+    const answers = {
+      [READ]: file(''),
+      [WRITE]: { path: 'machine.yaml', etag: 'etag-2', outcome: 'pending' },
+    };
+
+    // Act / Assert
+    await withTab({ answers }, async ({ q }) => {
+      await click(keep(q), 'switch');
+      expect(q('[data-keep-in-sync-note]')?.textContent).toBe('Saved, but not in effect until you confirm it.');
+    });
+  });
+
+  it('says so when the file has a problem or the machine refuses', async () => {
+    // Arrange
+    const broken: Setup = { answers: { [READ]: file('conversations: [unclosed\n') } };
+    const refused: Setup = { answers: { [READ]: file(''), [WRITE]: new Error('The machine said no.') } };
+
+    // Act / Assert
+    await withTab(broken, async ({ q }) => {
+      await click(keep(q), 'switch');
+      expect(q('[data-keep-in-sync-note]')?.textContent).toBe(
+        'machine.yaml has a problem; fix it in the Files panel first.',
+      );
+      expect(keep(q).getAttribute('aria-checked')).toBe('true');
+    });
+    await withTab(refused, async ({ q }) => {
+      await click(keep(q), 'switch');
+      expect(q('[data-keep-in-sync-note]')?.textContent?.length).toBeGreaterThan(0);
+      expect(keep(q).getAttribute('aria-checked')).toBe('true');
+    });
+  });
+});

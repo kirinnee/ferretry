@@ -413,6 +413,7 @@ import {
 } from '../src/lib/imports/conversation-text.ts';
 import {
   type AccountInventoryPort,
+  AccountModelConversationListPolicy,
   AgentSendFailureNotifier,
   AgentToolService,
   type AnalyticsIndexStoreFactory,
@@ -478,6 +479,7 @@ import {
   claimStartName,
   codexModelProvider,
   combinedReferences,
+  computerConversationRoots,
   configuredAt,
   contextWindowForSession,
   conversationResumeArguments,
@@ -7772,9 +7774,12 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         new NodeConversationFiles(),
         [
           { harness: 'claude', home: sharedHistoryPoolDirectory(paths.fleet, 'claude'), source: 'ferretry' },
-          { harness: 'claude', home: process.env.CLAUDE_CONFIG_DIR ?? join(userHome, '.claude'), source: 'computer' },
           { harness: 'codex', home: sharedHistoryPoolDirectory(paths.fleet, 'codex'), source: 'ferretry' },
-          { harness: 'codex', home: process.env.CODEX_HOME ?? join(userHome, '.codex'), source: 'computer' },
+          ...computerConversationRoots({
+            claudeConfigDir: process.env.CLAUDE_CONFIG_DIR,
+            codexHome: process.env.CODEX_HOME,
+            userHome,
+          }),
         ],
         { claude: claudeTranscriptParser, codex: codexTranscriptParser },
         new StorageConversationOwners(storage),
@@ -7801,6 +7806,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           new NodeConversationLinker(),
         ),
         { roots: [paths.sessions], coordinatorHomes: [userHome] },
+        new AccountModelConversationListPolicy(declaredAccountModel),
       );
       const wardenPaths = createWardenPaths(paths.home);
       const notifications = new NotificationService({

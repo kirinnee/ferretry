@@ -128,6 +128,21 @@ export const AgentControlSchema = z
 export type AgentControl = z.infer<typeof AgentControlSchema>;
 
 /**
+ * "Conversations" (Settings › Machine): how Ferretry treats the CLIs' own history on this computer.
+ *
+ * `listComputer` is "Keep in sync": while it is on, the Continue list also shows the conversations in
+ * the owner's default Claude Code and Codex homes (read-only, read when the list is opened or
+ * `fy import conversations` runs, never on a timer). Nothing is adopted until the owner continues one.
+ * On by default; switching it off hides them from Continue and nothing else.
+ */
+export const ConversationsSchema = z
+  .strictObject({
+    listComputer: z.boolean().default(true),
+  })
+  .prefault({});
+export type Conversations = z.infer<typeof ConversationsSchema>;
+
+/**
  * The runtime name Ferretry's first run gives the first Claude Code it imports (§4.3 step 4's
  * suggestion). Not a schema default — a machine that never imported this way has no such runtime —
  * but the one name {@link resolveDefaultRuntime} tries when the machine named no default itself.
@@ -146,6 +161,7 @@ export const MACHINE_SHAPE = {
    */
   defaultRuntime: RuntimeNameSchema.optional(),
   agentControl: AgentControlSchema,
+  conversations: ConversationsSchema,
 };
 
 export const MachineSchema = z.strictObject(MACHINE_SHAPE).prefault({});

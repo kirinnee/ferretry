@@ -2295,6 +2295,9 @@ html[data-keyboard='open'] .fy-composer[data-composer-layout='phone'] .fy-compos
 [data-source='codex'] {
   --fy-src: var(--src-codex);
 }
+[data-source='computer'] {
+  --fy-src: var(--src-computer);
+}
 [data-source='ferretry'],
 [data-source='all'] {
   --fy-src: var(--accent);

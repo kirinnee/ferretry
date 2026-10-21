@@ -18,9 +18,11 @@
 import type { FleetAgentControl, FleetMachineView } from '@ferretry/protocol';
 import { ChevronRight } from 'lucide-react';
 import { useEffect, useState } from 'react';
+import { cn } from '../../../lib/class-names.ts';
 import type { DaemonConnectionRecord } from '../../../lib/connections.ts';
-import { useConnectionSnapshot } from '../../../lib/store.tsx';
+import { useConfigChangeCounter, useConnectionSnapshot } from '../../../lib/store.tsx';
 import { Button } from '../../../shell/primitives.tsx';
+import { readConfigFile, writeConfigFile } from '../../config-files/config-files-api.ts';
 import { readFleetRuntimes } from '../catalog-api.ts';
 import { CloneMachine } from '../setup/clone.tsx';
 import { ExportSettings } from '../setup/export-settings.tsx';
@@ -31,6 +33,7 @@ import { CheckChoices, RadioChoices, SetupNote, SetupRow, SetupSection } from '.
 import { countWords } from '../setup/setup-words.ts';
 import { ChangeApplyPanel } from '../shell/apply-change-panel.tsx';
 import type { MachineTabProps } from '../shell/machines-surface.tsx';
+import { KEEP_IN_SYNC_EXPLANATION, MACHINE_FILE, readKeepInSync, withKeepInSync } from './conversations-setting.ts';
 
 type AgentPermissions = FleetMachineView['agentPermissions'];
 type AgentControlKind = keyof FleetAgentControl;
@@ -330,6 +333,88 @@ export function AgentControlSection({
   );
 }
 
+type KeepInSyncSave = 'applied' | 'broken' | 'held';
+
+/** Settings › Machine › Conversations: whether Continue lists this computer's own CLI conversations. */
+export function ConversationsSection({
+  daemonId,
+  access,
+}: {
+  readonly daemonId: DaemonConnectionRecord['daemonId'];
+  readonly access: SetupAccess;
+}) {
+  const { read, act } = access;
+  const [on, setOn] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [note, setNote] = useState<{ readonly tone: 'warn' | 'err'; readonly text: string } | null>(null);
+  const moved = useConfigChangeCounter(daemonId, ['machine']);
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `moved` is the re-read trigger
+  useEffect(() => {
+    let live = true;
+    void read(client => readConfigFile(client, MACHINE_FILE)).then(result => {
+      const kept = result.kind === 'done' ? readKeepInSync(result.value.text) : null;
+      if (live && kept !== null) setOn(kept);
+    });
+    return () => {
+      live = false;
+    };
+  }, [read, moved]);
+
+  const toggle = (): void => {
+    const next = !on;
+    setBusy(true);
+    setNote(null);
+    void act<KeepInSyncSave>(async client => {
+      const file = await readConfigFile(client, MACHINE_FILE);
+      const edited = withKeepInSync(file.text, next);
+      if (edited === null) return 'broken';
+      const written = await writeConfigFile(client, MACHINE_FILE, edited, file.etag);
+      return written.outcome === 'pending' ? 'held' : 'applied';
+    }).then(result => {
+      setBusy(false);
+      if (result.kind === 'refused') return setNote({ tone: 'err', text: result.sentence });
+      if (result.value === 'broken') {
+        return setNote({ tone: 'err', text: 'machine.yaml has a problem; fix it in the Files panel first.' });
+      }
+      setOn(next);
+      if (result.value === 'held') setNote({ tone: 'warn', text: 'Saved, but not in effect until you confirm it.' });
+    });
+  };
+
+  return (
+    <SetupSection title="Conversations" name="conversations">
+      <button
+        type="button"
+        role="switch"
+        aria-checked={on}
+        disabled={busy}
+        data-keep-in-sync=""
+        onClick={toggle}
+        className={cn(
+          'flex min-h-[44px] items-center justify-between gap-3 rounded-control border px-control-x py-2 text-left transition-colors',
+          on ? 'border-accent bg-accent-soft text-accent' : 'border-border-strong bg-surface-2 text-fg',
+        )}
+      >
+        <span className="text-ui font-semibold">Keep in sync</span>
+        <span className="text-meta">{on ? 'On' : 'Off'}</span>
+      </button>
+      <p className="m-0 text-meta leading-base text-muted" data-keep-in-sync-hint="">
+        {KEEP_IN_SYNC_EXPLANATION}
+      </p>
+      {note === null ? null : (
+        <p
+          role="status"
+          className={cn('m-0 text-meta leading-base', note.tone === 'err' ? 'text-err' : 'text-warn')}
+          data-keep-in-sync-note=""
+        >
+          {note.text}
+        </p>
+      )}
+    </SetupSection>
+  );
+}
+
 export function MachineSettingsTab(props: MachineSettingsTabProps) {
   const { machine, machineName, online, checking, connection, createClient, onRetry, sources, browser } = props;
   // After a save here the machine is read again QUIETLY: a loud re-check swapped every section for
@@ -416,6 +501,8 @@ export function MachineSettingsTab(props: MachineSettingsTabProps) {
         access={access}
         onSaved={onSaved}
       />
+
+      <ConversationsSection daemonId={connection.daemonId} access={access} />
 
       <SetupSection title={`Tools on ${machineName}`} name="tools">
         {machine.tools.map(tool => (
