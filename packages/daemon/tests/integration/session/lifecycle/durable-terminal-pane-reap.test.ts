@@ -124,9 +124,13 @@ async function awaitExit(controller: TmuxController, session: string, gate: stri
   const sock = join(gate, '..', 'throwaway-tmux.sock');
   const raw = Bun.spawnSync(['tmux', '-S', sock, 'display-message', '-p', '-t', session, '#{pane_pid}|#{pane_dead}|#{pane_dead_status}|#{pane_dead_signal}|#{pane_dead_time}|#{pane_current_command}|#{version}'], { stdout: 'pipe', stderr: 'pipe' });
   const pid = new TextDecoder().decode(raw.stdout).split('|')[0]?.trim() ?? '';
+  const ppid = Bun.spawnSync(['ps', '-o', 'ppid=', '-p', pid], { stdout: 'pipe' });
+  const parent = new TextDecoder().decode(ppid.stdout).trim();
+  const sig = Bun.spawnSync(['grep', '-E', 'State|Sig|Threads|Name', `/proc/${parent}/status`], { stdout: 'pipe' });
+  const zs = Bun.spawnSync(['sh', '-c', "ps -e -o pid,ppid,stat,args | grep -E ' Z|tmux' | head -20"], { stdout: 'pipe' });
   const ps = Bun.spawnSync(['ps', '-o', 'pid,ppid,stat,args', '-p', pid], { stdout: 'pipe', stderr: 'pipe' });
   const tmuxv = Bun.spawnSync(['tmux', '-V'], { stdout: 'pipe' });
-  throw new Error(`PROBE test setup: the pane never exited (last state ${last}) raw=[${new TextDecoder().decode(raw.stdout)}${new TextDecoder().decode(raw.stderr)}] ps=[${new TextDecoder().decode(ps.stdout)}] v=${new TextDecoder().decode(tmuxv.stdout)} exe=${Bun.which('tmux')}`);
+  throw new Error(`PROBE test setup: the pane never exited (last state ${last}) raw=[${new TextDecoder().decode(raw.stdout)}${new TextDecoder().decode(raw.stderr)}] ps=[${new TextDecoder().decode(ps.stdout)}] v=${new TextDecoder().decode(tmuxv.stdout)} exe=${Bun.which('tmux')} PARENT=[${new TextDecoder().decode(sig.stdout).replaceAll('\n', ' ; ')}] ALL=[${new TextDecoder().decode(zs.stdout).replaceAll('\n', ' ; ')}]`);
 }
 
 function service(subject: ReapFixture, runtime = subject.runtime): TerminalReapService {
@@ -262,8 +266,8 @@ describe('durable terminal pane reap adapters', () => {
  * is gone, and the reason must be the exit and what the process printed, not the identity read.
  */
 describe('registering a pane whose harness has already exited', () => {
-  for (let probe = 0; probe < 25; probe++) it(`PROBE repeat ${probe}`, async () => {
-    await fixture(`echo 'x' >&2; exit 2`);
+  for (let probe = 0; probe < 40; probe++) it(`PROBE repeat ${probe}`, async () => {
+    await fixture(probe % 2 === 0 ? `echo 'x' >&2; exit 2` : `echo 'ferretry: DEEPSEEK_TOKEN is not set' >&2; exit 2`);
   });
 
   it('should report the exit status and the last output instead of the identity read', async () => {
