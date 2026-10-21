@@ -2753,6 +2753,18 @@ describe('the command palette shortcut', () => {
     expect(document.activeElement).toBe(action);
     expect(search.getAttribute('aria-expanded')).toBe('false');
 
+    // A keyboard-owning surface (the remote browser view) gets Cmd+K for the page it shows.
+    const surface = document.createElement('div');
+    surface.setAttribute('data-keyboard-capture', '');
+    surface.tabIndex = -1;
+    document.body.appendChild(surface);
+    surface.focus();
+    const captured = new KeyboardEvent('keydown', { key: 'k', metaKey: true, bubbles: true, cancelable: true });
+    await interact(() => surface.dispatchEvent(captured));
+    expect(captured.defaultPrevented).toBe(false);
+    expect(search.getAttribute('aria-expanded')).toBe('false');
+    surface.remove();
+
     rename.remove();
     dialog.remove();
     await view.unmount();
@@ -4078,6 +4090,26 @@ describe('the sessions bar', () => {
 
       expect(pressed()).toEqual(['auto']);
       expect(store.controls.snapshot().device.sessionsMode).toBe('auto');
+    } finally {
+      await view.unmount();
+    }
+  });
+
+  it('draws one-line rows until the reader picks Comfortable in the bar, and stores that device-wide', async () => {
+    const { view, store } = await renderShell(`/d/${ALPHA}/settings`, [alpha.daemonId], { sessions: ['one'] });
+    try {
+      await settle();
+      const column = must(view.container.querySelector('[data-sessions-bar="column"]'), 'the sessions column');
+      expect(column.getAttribute('data-sbar-density')).toBe('compact');
+
+      await interact(() => (column.querySelector('[data-sbar-options]') as HTMLElement).click());
+      const comfortable = [...document.querySelectorAll('[role="menuitem"]')].find(node =>
+        node.textContent?.includes('Comfortable'),
+      );
+      await interact(() => (must(comfortable ?? null, 'Comfortable') as HTMLElement).click());
+
+      expect(store.controls.snapshot().device.density).toBe('full');
+      expect(column.getAttribute('data-sbar-density')).toBe('comfortable');
     } finally {
       await view.unmount();
     }

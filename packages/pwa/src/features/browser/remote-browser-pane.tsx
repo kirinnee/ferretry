@@ -32,7 +32,13 @@ import {
 } from '../../hooks/use-remote-browser.ts';
 import { type DaemonConnection, sameDaemonConnection } from '../../lib/daemon-connection.ts';
 import type { DaemonSessionScope } from '../../lib/daemon-scope.ts';
-import { isLocalPasteChord, type RemoteViewportMode, remoteViewportForContainer } from '../../lib/remote-browser.ts';
+import { KEYBOARD_CAPTURE_ATTRIBUTE } from '../../lib/keyboard-capture.ts';
+import {
+  isLocalPasteChord,
+  isRemoteCompositionKey,
+  type RemoteViewportMode,
+  remoteViewportForContainer,
+} from '../../lib/remote-browser.ts';
 import {
   type RemoteBrowserConnection,
   RemoteBrowserControls,
@@ -310,7 +316,7 @@ export function RemoteBrowserPane({
   };
 
   const onTextKey = (event: ReactKeyboardEvent<HTMLTextAreaElement>, type: 'keyDown' | 'keyUp') => {
-    if (event.nativeEvent.isComposing) return;
+    if (event.nativeEvent.isComposing || isRemoteCompositionKey(event)) return;
     // The LOCAL paste chord must reach this field's own `paste` handler, not be
     // forwarded as a keystroke: preventDefault would cancel the native paste, and
     // sending the chord would make the remote Chrome paste the REMOTE clipboard.
@@ -334,6 +340,7 @@ export function RemoteBrowserPane({
         ctrlKey: event.ctrlKey,
         metaKey: event.metaKey,
         shiftKey: event.shiftKey,
+        altGraph: event.getModifierState('AltGraph'),
       },
       type,
     );
@@ -372,6 +379,7 @@ export function RemoteBrowserPane({
             aria-label="Type into remote browser"
             placeholder="Type into page…"
             inputMode="text"
+            {...{ [KEYBOARD_CAPTURE_ATTRIBUTE]: '' }}
             autoCapitalize="none"
             autoCorrect="off"
             spellCheck={false}
