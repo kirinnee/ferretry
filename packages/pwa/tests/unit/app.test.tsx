@@ -70,6 +70,7 @@ import { type DaemonCarrierRouter, DEVICE_NOT_ACCEPTED_SENTENCE } from '../../sr
 import { RouterProvider } from '../../src/lib/router.tsx';
 import { SCROLL_MEMORY_KEY, type ScrollMemoryStorage } from '../../src/lib/scroll-memory.ts';
 import { SessionCache, type SessionCacheBackend } from '../../src/lib/session-cache.ts';
+import { CarrierPreferenceStore } from '../../src/lib/carrier-preference.ts';
 import { type AppStore, createAppStore, StoreProvider } from '../../src/lib/store.tsx';
 import { openWorkspaceTab, workspaceTab } from '../../src/lib/workspace-layout.ts';
 import { UPDATE_CHIP } from '../../src/shell/app-bar.tsx';
@@ -540,6 +541,8 @@ const appStore = async (
   daemonNetwork = network;
   return await createAppStore({
     repository: new MemoryRepository(),
+    // In memory, never this browser's storage: a preference one case picks must not narrow the next one's walk.
+    carrierPreferences: new CarrierPreferenceStore(undefined),
     sessionCacheBackend: options.sessionCacheBackend ?? null,
     scrollMemoryStorage: options.scrollMemoryStorage ?? null,
     // The reconnect loop never arms a real timer here: a suite drives recovery by sending requests.
@@ -3394,6 +3397,43 @@ describe('the settings route composition', () => {
    * alone would tell that reader a rendezvous will catch them when nothing ever will
    * — and would withhold the one line saying the daemon has to be reachable from here.
    */
+  /**
+   * §15 "The choice", through the real composition: the same per-machine value is offered beside the
+   * machine's Connection status and under This device › Connection, and a pick in either is this
+   * device's preference for that machine.
+   */
+  it('keeps this device’s connection preference from the Connection panel and from This device', async () => {
+    const { store, view } = await renderShell(`/d/${ALPHA}/settings#daemons`, [alpha.daemonId], SET_UP_SHELL);
+    await settle();
+    await openPanel(view, 'carrier', 'the Connection panel tab');
+
+    const relayOnly = must(
+      view.container.querySelector<HTMLInputElement>('[data-carrier-preference-control] input[value="relay"]'),
+      'Relay only on the Connection panel',
+    );
+    await interact(() => relayOnly.click());
+    await settle();
+    expect(store.carrierPreferences.preference(alpha.daemonId)).toBe('relay');
+    // This suite's build has no relay directory, so "Tunnel only" says the operator has not set it up.
+    expect(view.container.textContent).toContain('Not set up by the operator.');
+    await view.unmount();
+
+    const device = await renderShell(`/d/${ALPHA}/settings#device`, [alpha.daemonId], SET_UP_SHELL);
+    await settle();
+    const preferences = must(
+      device.view.container.querySelector<HTMLElement>('[data-setting-id="connection-preference"]'),
+      'This device › Connection',
+    );
+    const tunnelOnly = must(
+      preferences.querySelector<HTMLInputElement>('input[value="tunnel"]'),
+      'Tunnel only under This device',
+    );
+    await interact(() => tunnelOnly.click());
+    await settle();
+    expect(device.store.carrierPreferences.preference(alpha.daemonId)).toBe('tunnel');
+    await device.view.unmount();
+  });
+
   it('names the missing fallback when the router would strip this pairing’s relay', async () => {
     expect(await carrierPanelText(alphaRelayed)).toContain(CARRIER_NO_FALLBACK);
   });

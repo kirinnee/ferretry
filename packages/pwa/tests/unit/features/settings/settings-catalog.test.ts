@@ -31,6 +31,7 @@ describe('shared settings catalog', () => {
       'dictation',
       'notifications',
       'device-permissions',
+      'connection-preference',
       'install-app',
       'clear-cached-data',
       'transcription-log',
@@ -70,6 +71,7 @@ describe('shared settings catalog', () => {
       [
         'install-app',
         'device-permissions',
+        'connection-preference',
         'speedup-keys',
         'transcription-log',
         'dictation-debug',
@@ -104,6 +106,7 @@ describe('shared settings catalog', () => {
     expect(settingsSectionForSetting('theme')).toBe('appearance');
     expect(settingsSectionForSetting('install-app')).toBe('device');
     expect(settingsSectionForSetting('device-permissions')).toBe('device');
+    expect(settingsSectionForSetting('connection-preference')).toBe('device');
     expect(settingsSectionForSetting('clear-cached-data')).toBe('device');
     expect(settingsSectionForSetting('composer-markdown')).toBe('behaviour');
     expect(settingsSectionForSetting('composer-enter-key')).toBe('behaviour');

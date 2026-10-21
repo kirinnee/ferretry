@@ -1,13 +1,14 @@
 /**
  * WHICH CARRIER A DAEMON'S TRAFFIC IS ACTUALLY ON, AND THE BYTES GOING OVER IT.
  *
- * `docs/relay-protocol.md` §1 states the required behaviour and it is not a
- * preference: try DIRECT first because it has fewer hops and fewer observers, fall
- * back to the hosted relay when direct does not work, and always be able to say
- * which carrier is live and why the other was passed over. Nothing here asks a
- * user to choose, and nothing here stores a choice — the order is
- * `connectionPreferenceOrder`'s, so a stored preference could only disagree with
- * the protocol.
+ * `docs/relay-protocol.md` §15 states the required behaviour: walk the carriers this
+ * browser's CONNECTION PREFERENCE for the machine allows, in its order — Auto is
+ * direct, WebRTC, the daemon's tunnel, then a relay with the hosted one last — and
+ * always be able to say which carrier is live and why the others were passed over.
+ * The preference only narrows the walk; it never reorders a kind's addresses, which
+ * stay the daemon's, and a preference that leaves nothing to try is a stated failure,
+ * never a silent fall back to a carrier the person excluded. Pairing does not come
+ * through here and ignores the preference (`relay-pairing.ts`).
  *
  * THE PROBE IS THE REQUEST ITSELF. There is deliberately no synthetic health
  * check: the first request a daemon receives is attempted over direct, and a
@@ -55,6 +56,7 @@ import {
   type ConnectionProbe,
   carrierProbe,
   chooseConnection,
+  type ConnectionSkip,
   connectionSocketUrl,
   describeConnectionMethod,
   HEARTBEAT_GRACE_SECONDS,
@@ -64,6 +66,12 @@ import {
   SESSION_PROTOCOL_ID,
   toBase64Url,
 } from '@ferretry/relay';
+import {
+  CARRIER_PREFERENCE_LABEL,
+  type CarrierPreference,
+  carrierOrder,
+  DEFAULT_CARRIER_PREFERENCE,
+} from './carrier-preference.ts';
 import type { CarrierOutage, ConnectionHealthReporter } from './connection-health.ts';
 import {
   type DaemonConnection,
@@ -91,6 +99,7 @@ import {
 } from './relay-session.ts';
 import { browserFetch, type DaemonFetch } from './runtime-models.ts';
 import type { PromptOrigin } from './step-up-gate.ts';
+import { noTunnelReason, type TunnelServiceState } from './tunnel-service.ts';
 
 /* ---------- the socket adapter seam --------------------------------------- */
 
@@ -109,6 +118,62 @@ export interface RelayCarrierSocket extends RelayClientSocket {
 }
 
 export type RelayDial = (url: string) => RelayCarrierSocket;
+
+/**
+ * THE MESSAGE SOCKET EVERY CARRIER HANDS THE SESSION, whatever carries the bytes underneath.
+ *
+ * A WebSocket to a daemon, a tunnel or a rendezvous is one of these (`browserRelayDial`); a WebRTC data
+ * channel is another. The session above it is identical on all of them (§6, §7).
+ *
+ * A DIALER THAT RESOLVES ONE hands it over before delivering anything on it: the router installs its
+ * handlers in the same turn the promise resolves, so a message delivered earlier would be lost.
+ * `onOpen` is called once the channel can carry — after resolution even when it was already open
+ * (a queued call is enough) — and `onClose` once when it ends, with a reason a person can read.
+ */
+export type CarrierSocket = RelayCarrierSocket;
+
+/** What the WebRTC dialer is given for one attempt. */
+export interface WebRtcDialContext {
+  /** The paired machine: its fingerprint, its grant, and its published carriers. */
+  readonly daemon: DaemonConnection;
+  /**
+   * The carriers that may INTRODUCE the two ends, in the order a walk would try them: the daemon's own
+   * direct addresses and rendezvous, then the hosted relay when it published none. Signalling only —
+   * §15 never lets the introduction carry the session's bytes. Never a tunnel: its listener serves the
+   * session route and nothing else.
+   */
+  readonly introducers: readonly ConnectionMethod[];
+  /**
+   * One authenticated daemon request — signalling such as `POST /v1/webrtc/offer` — sent over the
+   * {@link introducers} in order and nothing else: never WebRTC itself, never a tunnel. It rides the
+   * request session this router already holds on an introducer, or opens one there, so a dialer never
+   * opens a second session to the same rendezvous. Only a transport failure moves to the next
+   * introducer, and a write whose session died after it left is not sent again; any answer, any
+   * status, is returned as it came. Rejects when no introducer carried it.
+   */
+  readonly request: (path: string, init?: RequestInit) => Promise<Response>;
+  /**
+   * Aborted when this attempt is abandoned: the pairing was replaced or removed, or the person changed
+   * this machine's connection preference. A dialer stops negotiating and rejects.
+   */
+  readonly signal: AbortSignal;
+}
+
+/**
+ * Carriers that need more than a URL to dial, supplied by the composition root. A carrier with no
+ * dialer in this build is passed over with {@link WEBRTC_UNAVAILABLE}, said out loud, and "WebRTC only"
+ * with no dialer is a stated failure.
+ */
+export interface CarrierDialers {
+  /** A peer-to-peer data channel to the daemon, or a rejection saying why none could be negotiated. */
+  readonly webrtc?: (context: WebRtcDialContext) => Promise<CarrierSocket>;
+}
+
+/** Said for WebRTC wherever a walk would have tried it in a build that has no dialer. */
+export const WEBRTC_UNAVAILABLE = 'WebRTC isn’t available in this build yet';
+
+/** Said for "Relay only" when the daemon published no rendezvous and there is no hosted one to use. */
+export const RELAY_UNAVAILABLE = 'there is no relay for this machine right now';
 
 /** Cancels a repeating timer. Injected so no suite depends on wall-clock behaviour. */
 export type RelayHeartbeatSchedule = (tick: () => void, intervalMilliseconds: number) => () => void;
@@ -525,28 +590,39 @@ const directSessionUrl = (daemon: DaemonConnection, address: URL): string | null
 };
 
 export const openRelaySession = async ({
-  crypto,
   dial,
-  daemon,
   method,
+  ...options
+}: OpenRelaySessionOptions): Promise<RelayClientSession> => {
+  // A tunnel is dialled exactly as a direct address is: the daemon's own listener behind Cloudflare
+  // serves the same client route, and nothing else (§15 "The daemon end").
+  const url =
+    method.kind === 'direct'
+      ? directSessionUrl(
+          options.daemon,
+          new URL(`/v1/rendezvous/${encodeURIComponent(options.daemon.daemonId)}/client`, method.daemonUrl),
+        )
+      : connectionSocketUrl(method, options.daemon.daemonId, 'client');
+  if (url === null) {
+    // `connectionSocketUrl` refuses a fingerprint a session cannot be checked against, and a carrier
+    // with no address of its own. That is a refusal, not an address to improvise around.
+    throw new RelaySessionError('this daemon fingerprint cannot address a session', RELAY_CLOSE_CODES.protocolError);
+  }
+  return await openSessionOnSocket({ ...options, socket: dial(url) });
+};
+
+/** {@link openRelaySession} once a carrier has produced its socket — the part every carrier shares. */
+export const openSessionOnSocket = async ({
+  crypto,
+  socket,
+  daemon,
   heartbeat = browserHeartbeat,
   mode,
   onData,
   deadlineMs,
-}: OpenRelaySessionOptions): Promise<RelayClientSession> => {
-  const url =
-    method.kind === 'direct'
-      ? directSessionUrl(
-          daemon,
-          new URL(`/v1/rendezvous/${encodeURIComponent(daemon.daemonId)}/client`, method.daemonUrl),
-        )
-      : connectionSocketUrl(method, daemon.daemonId, 'client');
-  if (url === null) {
-    // `connectionSocketUrl` refuses a fingerprint a session cannot be checked against. That
-    // is a refusal, not an address to improvise around.
-    throw new RelaySessionError('this daemon fingerprint cannot address a session', RELAY_CLOSE_CODES.protocolError);
-  }
-  const socket = dial(url);
+}: Omit<OpenRelaySessionOptions, 'dial' | 'method'> & {
+  readonly socket: CarrierSocket;
+}): Promise<RelayClientSession> => {
   const session = new RelayClientSession({
     crypto,
     daemonId: daemon.daemonId,
@@ -852,6 +928,19 @@ export interface DaemonCarrierRouterOptions {
    */
   readonly hostedRelay?: () => Promise<string | undefined>;
   /**
+   * THIS BROWSER'S CONNECTION PREFERENCE FOR ONE MACHINE (§15 "The choice"), read at the start of every
+   * walk. Absent is Auto for every machine. A change must be followed by {@link DaemonCarrierRouter.rewalk},
+   * which forgets the winner the old preference chose.
+   */
+  readonly preference?: (daemonId: DaemonId) => CarrierPreference;
+  /** Carriers that need more than a URL to dial. See {@link CarrierDialers}. */
+  readonly dialers?: CarrierDialers;
+  /**
+   * The hosted tunnel service's one advertisement read, awaited ONLY when "Tunnel only" finds no tunnel
+   * to dial, to say why. Absent is a build with no service: "not set up by the operator".
+   */
+  readonly tunnelService?: () => Promise<TunnelServiceState>;
+  /**
    * Asked when the daemon refuses a request for want of a passkey step-up (`grant_step_up_required`):
    * `true` once the person has confirmed, and the request is then sent again ONCE. Absent means
    * nothing can ask, and the refusal is returned as it came. `origin` says whether a person started the
@@ -894,11 +983,54 @@ interface CarrierSession {
 }
 
 /** Where one carrier lives, as the key its sessions are held under. */
-const carrierAddress = (method: ConnectionMethod): string =>
-  method.kind === 'direct' ? `direct ${method.daemonUrl}` : method.relayUrl;
+const carrierAddress = (method: ConnectionMethod): string => {
+  if (method.kind === 'direct') return `direct ${method.daemonUrl}`;
+  if (method.kind === 'webrtc') return 'webrtc';
+  if (method.kind === 'tunnel') return `tunnel ${method.tunnelUrl}`;
+  return method.relayUrl;
+};
+
+/**
+ * A winner the daemon's republished set can never name, and so is not withdrawn by omitting it.
+ *
+ * A direct address the daemon cannot express on the wire (see `#refreshed`), and WebRTC, which no
+ * daemon publishes at all — dropping it on every `/v1/carriers` refresh would tear down the very
+ * channel that just carried the refresh.
+ */
+const outlivesRepublish = (method: ConnectionMethod): boolean => method.kind === 'direct' || method.kind === 'webrtc';
+
+/** WebRTC has no address; this is the one value of its kind. */
+const WEBRTC: ConnectionMethod = { kind: 'webrtc' };
+
+/** The carriers that may introduce two ends for WebRTC: everything addressed except a tunnel. */
+const introducer = (method: ConnectionMethod): boolean => method.kind === 'direct' || method.kind === 'relay';
+
+/**
+ * One thing a walk may do next: try a carrier, or state why one was passed over without being tried.
+ */
+interface WalkCandidate {
+  readonly method: ConnectionMethod;
+  /** Set when this carrier is passed over untried; the sentence is why. */
+  readonly untried?: string;
+}
+
+/**
+ * One walk's preference, and — when the preference leaves nothing to try — why, in a sentence that
+ * names the preference. `why` is written by `#candidates` as it discovers it.
+ */
+interface WalkPlan {
+  readonly preference: CarrierPreference;
+  why?: string;
+}
 
 interface CarrierEntry {
   readonly connection: DaemonConnection;
+  /**
+   * Aborted when this entry is abandoned for good — unpaired, re-paired, or re-walked under a new
+   * preference — so a dial still negotiating (WebRTC) stops. A carrier refresh carries it across,
+   * because it carries the sessions across too.
+   */
+  readonly retired: AbortController;
   choice: ConnectionChoice | undefined;
   /**
    * The daemon refused this device (`4403`). Sticky for this pairing: a re-pair or an unpair replaces
@@ -981,7 +1113,10 @@ const STALE_SESSION_REASON =
  * every case is that the request was in flight and is not being carried any further.
  */
 const STALE_WALK_REASON =
-  'this daemon was re-paired, unpaired or republished while this request was in flight, so it was not carried to another carrier';
+  'this daemon was re-paired, unpaired or republished, or its connection preference changed, while this request was in flight, so it was not carried to another carrier';
+
+/** Said to every session a preference change ends. */
+const PREFERENCE_CHANGED_REASON = 'the connection preference for this machine changed';
 
 /**
  * MARKS THE ONE FAILURE THAT ENDS A WALK WITHOUT SAYING ANYTHING ABOUT AN ADDRESS.
@@ -1062,6 +1197,9 @@ export class DaemonCarrierRouter {
   readonly #crypto: RelayClientSessionDependencies['crypto'];
   readonly #heartbeat: RelayHeartbeatSchedule | undefined;
   readonly #hostedRelay: () => Promise<string | undefined>;
+  readonly #preference: (daemonId: DaemonId) => CarrierPreference;
+  readonly #dialers: CarrierDialers;
+  readonly #tunnelService: () => Promise<TunnelServiceState>;
   readonly #deviceKey: DeviceKeyResolver;
   readonly #appSession: string;
   readonly #stepUp: DaemonCarrierRouterOptions['stepUp'];
@@ -1102,6 +1240,9 @@ export class DaemonCarrierRouter {
     this.#heartbeat = options.heartbeat;
     // No provider is direct-only, which is what a build with no relay directory honestly is.
     this.#hostedRelay = options.hostedRelay ?? (async () => undefined);
+    this.#preference = options.preference ?? (() => DEFAULT_CARRIER_PREFERENCE);
+    this.#dialers = options.dialers ?? {};
+    this.#tunnelService = options.tunnelService ?? (async () => 'unavailable');
     this.#deviceKey = options.deviceKey;
     this.#appSession = options.appSession ?? toBase64Url(options.crypto.randomBytes(APP_SESSION_BYTES));
     this.#stepUp = options.stepUp;
@@ -1245,11 +1386,16 @@ export class DaemonCarrierRouter {
     const seen: CarrierFailureSeen[] = [];
     let outdated: OutdatedSide | undefined;
     let refused = false;
-    for await (const method of this.#candidates(daemon)) {
+    const plan = this.#plan(daemon);
+    for await (const { method, untried } of this.#candidates(daemon, plan)) {
       this.#assertCurrent(entry);
+      if (untried !== undefined) {
+        probes.push(untriedProbe(method, untried));
+        continue;
+      }
       try {
         const session = await this.#streamOn(entry, method, request);
-        this.#decide(entry, [...probes, carrierProbe(method, { kind: 'answered', status: 101 })]);
+        this.#decide(entry, [...probes, carrierProbe(method, { kind: 'answered', status: 101 })], plan);
         return session;
       } catch (reason) {
         if (reason instanceof RelayDialDeferred) throw this.#deferred(null);
@@ -1268,7 +1414,7 @@ export class DaemonCarrierRouter {
         outdated ??= await this.#looksOutdated(method, reason);
       }
     }
-    this.#decide(entry, probes);
+    this.#decide(entry, probes, plan);
     if (refused) throw this.#refuse(entry);
     if (outdated !== undefined) throw outdatedError(outdated);
     throw this.#unavailable(entry, seen, null);
@@ -1298,13 +1444,43 @@ export class DaemonCarrierRouter {
     const entry = this.#entries.get(daemonId);
     if (entry === undefined) return;
     this.#entries.delete(daemonId);
+    this.#retire(entry, 'this daemon was re-paired or unpaired');
+    this.#announce();
+  }
+
+  /**
+   * THE CONNECTION PREFERENCE FOR THIS MACHINE CHANGED: forget the winner and walk again.
+   *
+   * The remembered winner was chosen under the old preference, and keeping it would go on carrying
+   * traffic over a carrier the person may just have excluded — so the entry is REPLACED rather than
+   * edited. Every session on it is closed, saying why, which ends any stream on it so its owner reopens
+   * on the new walk; a walk still in flight finds its entry gone and stops rather than deciding a
+   * winner under the old preference. The pairing itself — and a device refusal, which no preference
+   * changes — is kept. Nothing is dialled here: the next request, or the caller's probe, walks.
+   */
+  rewalk(daemonId: DaemonId): void {
+    const entry = this.#entries.get(daemonId);
+    if (entry === undefined) return;
+    this.#entries.set(daemonId, {
+      connection: entry.connection,
+      retired: new AbortController(),
+      choice: undefined,
+      refused: entry.refused,
+      sessions: new Map(),
+    });
+    this.#retire(entry, PREFERENCE_CHANGED_REASON);
+    this.#announce();
+  }
+
+  /** Ends everything an abandoned entry holds, and any dial it still has negotiating. */
+  #retire(entry: CarrierEntry, reason: string): void {
+    entry.retired.abort(new Error(reason));
     for (const held of entry.sessions.values()) {
       void held.session.then(
-        connected => connected.close('this daemon was re-paired or unpaired'),
+        connected => connected.close(reason),
         () => undefined,
       );
     }
-    this.#announce();
   }
 
   /** The `DaemonFetch` the composition root hands to every daemon-bound caller. */
@@ -1529,12 +1705,17 @@ export class DaemonCarrierRouter {
     const probes: ConnectionProbe[] = [];
     let outdated: OutdatedSide | undefined;
     let refused = false;
-    for await (const method of this.#candidates(daemon)) {
+    const plan = this.#plan(daemon);
+    for await (const { method, untried } of this.#candidates(daemon, plan)) {
       // ASKED BEFORE EVERY ATTEMPT, not once at the top: a walk takes as long as its failures do, and
       // an unpair, a re-pair or a republish can land between any two of them. Every address below
       // would be dialled with THIS walk's `DaemonConnection` — the old base URL, the old device grant,
       // the withdrawn rendezvous — which is the one thing a cleared pairing must never do again.
       this.#assertCurrent(entry);
+      if (untried !== undefined) {
+        probes.push(untriedProbe(method, untried));
+        continue;
+      }
       try {
         const response = await this.#over(entry, method, url, init, dial);
         // WHETHER AN ATTEMPT ADVANCES THE WALK IS THE PROTOCOL'S RULE, not this
@@ -1542,7 +1723,7 @@ export class DaemonCarrierRouter {
         // this carrier working, and only a transport failure as a reason to try the
         // next address. Spelling that out a second time here is how a client and its
         // own protocol come to disagree about what "reachable" means.
-        this.#decide(entry, [...probes, carrierProbe(method, { kind: 'answered', status: response.status })]);
+        this.#decide(entry, [...probes, carrierProbe(method, { kind: 'answered', status: response.status })], plan);
         return response;
       } catch (thrown) {
         if (thrown instanceof RelayAnswerError) throw thrown.cause;
@@ -1564,32 +1745,59 @@ export class DaemonCarrierRouter {
         // possibly-applied request to the next carrier. One whose session never opened was never
         // sent anywhere, and walking on with it is the whole point of a fallback.
         if (!unsent && !replaySafe(init)) {
-          this.#decide(entry, probes);
+          this.#decide(entry, probes, plan);
           throw this.#unavailable(entry, seen, requestId, reason);
         }
       }
     }
-    this.#decide(entry, probes);
+    this.#decide(entry, probes, plan);
     if (refused) throw this.#refuse(entry);
     if (outdated !== undefined) throw outdatedError(outdated);
     throw this.#unavailable(entry, seen, requestId);
   }
 
+  /** This walk's preference, read once at its start so one walk never mixes two. */
+  #plan(daemon: DaemonConnection): WalkPlan {
+    return { preference: this.#preference(daemon.daemonId) };
+  }
+
   /**
-   * Every address this walk may try, in order: the daemon's own set, then the fallback.
+   * Every carrier this walk may try, in the preference's order (`carrierOrder`): the daemon's own
+   * addresses of each kind in the daemon's order, WebRTC through its dialer, and the hosted relay last.
    *
-   * THE FALLBACK IS LAST AND IS REACHED ONLY BY EXHAUSTION. A daemon that authored a rendezvous is
-   * answered entirely from its own set — the generator returns before the advertisement is even
-   * awaited — so the directory cannot delay a direct-first attempt on the ordinary path. It is
-   * dialled and never written down; `hostedRelayFallbackCarrier` owns why, and owns the fingerprint
-   * and address rules it is held to.
+   * THE FALLBACK IS LAST AND IS REACHED ONLY BY EXHAUSTION, and only by a preference that walks relays
+   * at all (Auto, Relay only). A daemon that authored a rendezvous is answered entirely from its own
+   * set — the advertisement is never awaited — so the directory cannot delay a direct-first attempt on
+   * the ordinary path. It is dialled and never written down; `hostedRelayFallbackCarrier` owns why,
+   * and owns the fingerprint and address rules it is held to.
+   *
+   * A TUNNEL IS TRIED ONLY WHEN THE DAEMON PUBLISHED ONE (§15). Under "Tunnel only" with none, the
+   * service advertisement is read to say which of the two reasons applies.
+   *
+   * WEBRTC WITH NO DIALER IS PASSED OVER, NOT HIDDEN: it is yielded `untried` so the choice names it.
    */
-  async *#candidates(daemon: DaemonConnection): AsyncGenerator<ConnectionMethod> {
+  async *#candidates(daemon: DaemonConnection, plan: WalkPlan): AsyncGenerator<WalkCandidate> {
     const authored = daemonCarriers(daemon);
-    yield* authored;
-    if (authored.some(method => method.kind === 'relay')) return;
-    const hosted = hostedRelayFallbackCarrier(daemon, await this.#hostedRelay());
-    if (hosted !== undefined) yield hosted;
+    for (const kind of carrierOrder(plan.preference)) {
+      if (kind === 'webrtc') {
+        if (this.#dialers.webrtc !== undefined) yield { method: WEBRTC };
+        else {
+          plan.why = WEBRTC_UNAVAILABLE;
+          yield { method: WEBRTC, untried: WEBRTC_UNAVAILABLE };
+        }
+        continue;
+      }
+      const ofKind = authored.filter(method => method.kind === kind);
+      for (const method of ofKind) yield { method };
+      if (ofKind.length > 0 || kind === 'direct') continue;
+      if (kind === 'tunnel') {
+        if (plan.preference === 'tunnel') plan.why = noTunnelReason(await this.#tunnelService());
+        continue;
+      }
+      const hosted = hostedRelayFallbackCarrier(daemon, await this.#hostedRelay());
+      if (hosted !== undefined) yield { method: hosted };
+      else plan.why = RELAY_UNAVAILABLE;
+    }
   }
 
   /**
@@ -1611,7 +1819,13 @@ export class DaemonCarrierRouter {
     if (current !== undefined && carrierRefreshOnly(current.connection, daemon))
       return this.#refreshed(current, daemon);
     if (current !== undefined) this.clearDaemon(daemon.daemonId);
-    const entry: CarrierEntry = { connection: daemon, choice: undefined, refused: false, sessions: new Map() };
+    const entry: CarrierEntry = {
+      connection: daemon,
+      retired: new AbortController(),
+      choice: undefined,
+      refused: false,
+      sessions: new Map(),
+    };
     this.#entries.set(daemon.daemonId, entry);
     return entry;
   }
@@ -1657,8 +1871,11 @@ export class DaemonCarrierRouter {
     const winner = current.choice?.ok === true ? carrierAddress(current.choice.method) : undefined;
     const sessions = new Map<string, CarrierSession>();
     for (const [key, held] of current.sessions) {
-      // A direct winner's own sessions stay for the reason the winner itself stays (below).
-      if (published.has(held.address) || (held.address === winner && held.address.startsWith('direct '))) {
+      // A direct or WebRTC winner's own sessions stay for the reason the winner itself stays (below).
+      if (
+        published.has(held.address) ||
+        (held.address === winner && current.choice?.ok === true && outlivesRepublish(current.choice.method))
+      ) {
         sessions.set(key, held);
         continue;
       }
@@ -1672,22 +1889,28 @@ export class DaemonCarrierRouter {
     const chosen = current.choice;
     const kept =
       chosen?.ok === true &&
-      (carriers.some(method => sameDaemonCarrier(method, chosen.method)) || chosen.method.kind === 'direct')
+      (carriers.some(method => sameDaemonCarrier(method, chosen.method)) || outlivesRepublish(chosen.method))
         ? chosen
         : undefined;
-    const entry: CarrierEntry = { connection: daemon, choice: kept, refused: current.refused, sessions };
+    const entry: CarrierEntry = {
+      connection: daemon,
+      retired: current.retired,
+      choice: kept,
+      refused: current.refused,
+      sessions,
+    };
     this.#entries.set(daemon.daemonId, entry);
     this.#announce();
     return entry;
   }
 
-  #decide(entry: CarrierEntry, probes: readonly ConnectionProbe[]): void {
+  #decide(entry: CarrierEntry, probes: readonly ConnectionProbe[], plan: WalkPlan): void {
     // Initial requests may walk concurrently. Once one has an answer, that winner
     // is the connection's fact: a later walk that happened to lose direct and
     // reach a relay must still return its own response, but may not turn timing
     // into a relay preference for every request that follows.
     if (entry.choice?.ok === true) return;
-    entry.choice = chooseConnection(probes);
+    entry.choice = choiceFor(probes, plan);
     this.#announce();
     if (!entry.choice.ok) return;
     for (const listener of this.#connectedListeners) {
@@ -1841,17 +2064,21 @@ export class DaemonCarrierRouter {
     onData?: RelayStreamRequest['onData'],
   ): Promise<RelayClientSession> {
     const device = await this.#claim(entry);
-    const open = async (claim: SessionDeviceClaim): Promise<RelayClientSession> =>
-      await openRelaySession({
+    const open = async (claim: SessionDeviceClaim): Promise<RelayClientSession> => {
+      const options = {
         crypto: this.#crypto,
-        dial: this.#dial,
         daemon: entry.connection,
-        method,
         ...(this.#heartbeat === undefined ? {} : { heartbeat: this.#heartbeat }),
         mode: mode(claim),
         ...(onData === undefined ? {} : { onData }),
-        ...(method.kind === 'direct' ? { deadlineMs: DIRECT_SESSION_DEADLINE_MS } : {}),
-      });
+        // Only a relay keeps the full heartbeat grace: it is the last resort. Every carrier before it
+        // gets the direct acceptance deadline, so a carrier that neither answers nor refuses costs
+        // seconds before the walk moves on (§15: a tunnel is dialled like a direct session).
+        ...(method.kind === 'relay' ? {} : { deadlineMs: DIRECT_SESSION_DEADLINE_MS }),
+      };
+      if (method.kind === 'webrtc') return await openSessionOnSocket({ ...options, socket: await this.#webrtc(entry) });
+      return await openRelaySession({ ...options, dial: this.#dial, method });
+    };
     try {
       return await open(device);
     } catch (refused) {
@@ -1868,6 +2095,57 @@ export class DaemonCarrierRouter {
         throw refused;
       }
     }
+  }
+
+  /**
+   * A WebRTC data channel for this entry's daemon, from the composition root's dialer.
+   *
+   * Only reached when a dialer exists — `#candidates` passes WebRTC over otherwise. The introducers are
+   * the walk's own addressed carriers minus the tunnel, with the hosted relay when the daemon authored
+   * none, so the dialer never has to rediscover what this router already knows.
+   */
+  async #webrtc(entry: CarrierEntry): Promise<CarrierSocket> {
+    const dialer = this.#dialers.webrtc as NonNullable<CarrierDialers['webrtc']>;
+    const authored = daemonCarriers(entry.connection).filter(introducer);
+    const hosted = authored.some(method => method.kind === 'relay')
+      ? undefined
+      : hostedRelayFallbackCarrier(entry.connection, await this.#hostedRelay());
+    const introducers = hosted === undefined ? authored : [...authored, hosted];
+    return await dialer({
+      daemon: entry.connection,
+      introducers,
+      request: async (path, init = {}) => await this.#introduce(entry, introducers, path, init),
+      signal: entry.retired.signal,
+    });
+  }
+
+  /**
+   * A signalling request over the introducers only — {@link WebRtcDialContext.request}.
+   *
+   * It is part of a WebRTC attempt the walk already admitted, so it dials as the model's own attempt
+   * would rather than waiting on the reconnect gate, and it decides nothing: an introducer that carried
+   * signalling is not the connection's carrier.
+   */
+  async #introduce(
+    entry: CarrierEntry,
+    introducers: readonly ConnectionMethod[],
+    path: string,
+    init: RequestInit,
+  ): Promise<Response> {
+    const url = new URL(path, entry.connection.baseUrl).toString();
+    let failure: unknown = new Error('no carrier can introduce WebRTC to this machine');
+    for (const method of introducers) {
+      this.#assertCurrent(entry);
+      try {
+        return await this.#over(entry, method, url, init, 'probe');
+      } catch (thrown) {
+        if (thrown instanceof RelayAnswerError) throw thrown.cause;
+        const unsent = thrown instanceof RelayUnsentError;
+        failure = unsent ? thrown.cause : thrown;
+        if (!unsent && !replaySafe(init)) throw failure;
+      }
+    }
+    throw failure;
   }
 
   /**
@@ -1967,6 +2245,30 @@ export class DaemonCarrierRouter {
     for (const listener of this.#listeners) listener();
   }
 }
+
+/** A carrier passed over without being tried, and why. */
+const untriedProbe = (method: ConnectionMethod, detail: string): ConnectionProbe => ({
+  method,
+  reachable: false,
+  detail,
+  untried: true,
+});
+
+/**
+ * The choice a walk ends with.
+ *
+ * WHEN THE PREFERENCE LEFT NOTHING TO TRY, the sentence names the preference and the reason — "Tunnel
+ * only: this machine has no tunnel yet." — rather than the protocol's generic one, because the person
+ * chose that narrowing and is owed the reason it carries nothing. Anything actually tried is said in
+ * `chooseConnection`'s words, unchanged.
+ */
+const choiceFor = (probes: readonly ConnectionProbe[], plan: WalkPlan): ConnectionChoice => {
+  const chosen = chooseConnection(probes);
+  const nothingTried = probes.every(probe => probe.untried === true);
+  if (chosen.ok || plan.why === undefined || plan.preference === 'auto' || !nothingTried) return chosen;
+  const passedOver: readonly ConnectionSkip[] = chosen.passedOver;
+  return { ok: false, reason: `${CARRIER_PREFERENCE_LABEL[plan.preference]}: ${plan.why}.`, passedOver };
+};
 
 /** A read (`GET`, `HEAD`) is background work; any other method is something a person pressed. */
 const requestOrigin = (init: RequestInit): PromptOrigin => {

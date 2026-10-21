@@ -37,7 +37,7 @@ import type { ConnectionHealthState } from '../../lib/connection-health.ts';
 import type { DaemonConnectionRecord } from '../../lib/connections.ts';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
 import { Button } from '../../shell/primitives.tsx';
-import { ActiveCarrierCard } from '../carrier/active-carrier-card.tsx';
+import { ActiveCarrierCard, type CarrierPreferenceControl } from '../carrier/active-carrier-card.tsx';
 import { type SecretClientFactory, SecretsSurface } from '../secrets/secrets-surface.tsx';
 import { type WardenClientFactory, WardenConfigSurface } from '../warden/warden-config-card.tsx';
 import { AddDeviceSurface, type PairingClientFactory } from './add-device-settings.tsx';
@@ -145,6 +145,7 @@ interface FrameLive {
   readonly createPasskeyClient: PasskeyClientFactory | undefined;
   readonly carrier: ConnectionChoice | undefined;
   readonly relayAdvertised: boolean;
+  readonly carrierPreference: CarrierPreferenceControl | undefined;
   readonly connectionHealth: ConnectionHealthState | undefined;
   readonly probeDaemon: DaemonReachabilityProbe | undefined;
   readonly onRenameDaemon: ((daemonId: DaemonConnection['daemonId'], label?: string) => void) | undefined;
@@ -201,11 +202,12 @@ function SecurityPanel({ connection }: DaemonSettingsTabProps) {
 }
 
 function CarrierPanel() {
-  const { carrier, relayAdvertised, connectionHealth, name } = useFrameLive();
+  const { carrier, relayAdvertised, carrierPreference, connectionHealth, name } = useFrameLive();
   return (
     <ActiveCarrierCard
       choice={carrier}
       relayAdvertised={relayAdvertised}
+      {...(carrierPreference === undefined ? {} : { preference: carrierPreference })}
       {...(connectionHealth === undefined ? {} : { health: connectionHealth })}
       machine={name}
     />
@@ -292,7 +294,8 @@ const TRAILING_TABS: readonly DaemonSettingsTabDefinition[] = [
   {
     id: 'carrier',
     label: 'Connection',
-    description: 'How this device reaches the daemon right now: direct, via a relay, or reconnecting.',
+    description:
+      'How this device reaches the daemon right now — direct, WebRTC, a Cloudflare tunnel or a relay — and which of them it may use.',
     Surface: CarrierPanel,
   },
   {
@@ -333,6 +336,8 @@ export interface DaemonSettingsFrameProps {
   /** Measured for this exact daemon connection, never inferred from a preference. */
   readonly carrier?: ConnectionChoice | undefined;
   readonly relayAdvertised?: boolean;
+  /** This machine's connection preference on this device (§15), offered on the Connection panel. */
+  readonly carrierPreference?: CarrierPreferenceControl | undefined;
   /** The reconnect loop's state for this daemon, so the Connection tab can say "reconnecting". */
   readonly connectionHealth?: ConnectionHealthState | undefined;
   readonly probeDaemon?: DaemonReachabilityProbe;
@@ -361,6 +366,7 @@ export function DaemonSettingsFrame({
   additionalTabs = NO_ADDITIONAL_TABS,
   carrier,
   relayAdvertised = false,
+  carrierPreference,
   connectionHealth,
   probeDaemon,
   onRenameDaemon,
@@ -382,6 +388,7 @@ export function DaemonSettingsFrame({
       createPasskeyClient,
       carrier,
       relayAdvertised,
+      carrierPreference,
       connectionHealth,
       probeDaemon,
       onRenameDaemon,
@@ -398,6 +405,7 @@ export function DaemonSettingsFrame({
       createPasskeyClient,
       carrier,
       relayAdvertised,
+      carrierPreference,
       connectionHealth,
       probeDaemon,
       onRenameDaemon,
