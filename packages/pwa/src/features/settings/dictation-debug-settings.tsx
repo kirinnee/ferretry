@@ -130,7 +130,7 @@ export function DictationDebugSettings({ log: injected }: DictationDebugSettings
             disabled={snapshot.records.length === 0}
             onClick={() => log?.clear()}
           >
-            <Trash2 size={14} aria-hidden="true" /> Clear
+            <Trash2 size={14} aria-hidden="true" /> Clear calls
           </button>
         </div>
         {snapshot.records.length === 0 ? (

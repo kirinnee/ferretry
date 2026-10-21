@@ -75,7 +75,7 @@ describe('DictationDebugSettings', () => {
     // Assert
     expect(theSwitch(view).getAttribute('aria-checked')).toBe('false');
     expect(view.textContent).toContain(DICTATION_DEBUG_OFF_HINT);
-    expect(buttonWith(view, 'Clear').disabled).toBe(true);
+    expect(buttonWith(view, 'Clear calls').disabled).toBe(true);
     expect(view.textContent).toContain('last 10 calls in memory only');
   });
 
@@ -133,7 +133,7 @@ describe('DictationDebugSettings', () => {
     await click(must(document.querySelector('button[aria-label="Close"]'), 'the sheet close') as HTMLElement);
     const closed = document.body.textContent;
     await click(must(view.querySelector('[data-debug-call]'), 'the call row') as HTMLElement);
-    await click(buttonWith(view, 'Clear'));
+    await click(buttonWith(view, 'Clear calls'));
 
     // Assert
     expect(opened).toContain('Dictation details');

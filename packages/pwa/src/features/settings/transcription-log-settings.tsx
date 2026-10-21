@@ -166,7 +166,7 @@ export function TranscriptionLogSettings({
             disabled={snapshot.entries.length === 0}
             onClick={() => log?.clear()}
           >
-            <Trash2 size={14} aria-hidden="true" /> Clear
+            <Trash2 size={14} aria-hidden="true" /> Clear log
           </button>
         </div>
 

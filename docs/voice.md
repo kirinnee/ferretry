@@ -239,8 +239,8 @@ Every dictation is kept as one entry in this browser's IndexedDB (`lib/stt/trans
 are never lost to a mis-tap: the time, the conversation it was for, the engine (Parakeet in-browser / Web
 Speech), the duration, the raw transcript, the cleaned text, which prompt ran, and whether it was inserted or
 discarded. **No audio is stored.** It keeps the newest 200 entries, none older than 30 days. You can search it,
-copy from it, put an entry back into the open composer, and **Clear** it; an off switch stops recording
-(what is kept stays until Clear). If the browser refuses storage the log keeps working for the tab and says it
+copy from it, put an entry back into the open composer, and clear it with **Clear log**; an off switch stops recording
+(what is kept stays until the log is cleared). If the browser refuses storage the log keeps working for the tab and says it
 is not saved. An entry links to its debug record while that record is still held.
 
 ## Not built yet

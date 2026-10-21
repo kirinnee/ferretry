@@ -143,7 +143,7 @@ describe('TranscriptionLogSettings', () => {
     expect(theSwitch(view).getAttribute('aria-checked')).toBe('true');
     expect(view.textContent).toContain(TRANSCRIPTION_LOG_EMPTY);
     expect(view.textContent).not.toContain(TRANSCRIPTION_LOG_UNSAVED);
-    expect(buttonWith(view, 'Clear').disabled).toBe(true);
+    expect(buttonWith(view, 'Clear log').disabled).toBe(true);
     expect(view.textContent).toContain('No audio is stored');
   });
 
@@ -243,7 +243,7 @@ describe('TranscriptionLogSettings', () => {
     // Act
     await click(theSwitch(view));
     const afterSwitch = [theSwitch(view).getAttribute('aria-checked'), entries(view).length];
-    await click(buttonWith(view, 'Clear'));
+    await click(buttonWith(view, 'Clear log'));
 
     // Assert
     expect(afterSwitch).toEqual(['false', 1]);
