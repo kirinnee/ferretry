@@ -30,8 +30,8 @@ import {
   type LayerReferenceText,
   layersScope,
   layerWords,
-  looksSecret,
   loginModelCatalog,
+  looksSecret,
   type ModelCatalogSources,
   type PartialSupport,
   type ProfileScope,
@@ -592,6 +592,7 @@ function modelsView(
 const FIXED_ENTRY_WORDS: Readonly<Partial<Record<FixedEntry['purpose'], { key: string; value: string }>>> = {
   trust: { key: 'trust prompt', value: 'off' },
   onboarding: { key: 'onboarding screens', value: 'off' },
+  'remote-control': { key: 'Remote Control at startup', value: 'off' },
   'one-time-prompts': { key: 'one-time prompts (nudges, upsells, notices)', value: 'off' },
   tools: { key: 'Ferretry tools (terminals and browsers)', value: 'on' },
   instructions: { key: 'Ferretry tools instruction', value: 'on' },

@@ -187,6 +187,7 @@ Per-harness mapping (§8.4 has the launch mechanics):
 | Skip all checks         | `permissions.defaultMode = bypassPermissions`, plus `skipDangerousModePermissionPrompt = true`                                                                                                                                                              | `approval_policy = never`, `sandbox_mode = danger-full-access` (what `--dangerously-bypass-approvals-and-sandbox` sets) |
 | trust prompt = off      | the launch directory recorded as trusted in the runtime's `.claude.json` (**INFERRED** key, CI-guarded)                                                                                                                                                     | `projects."<dir>".trust_level = "trusted"` as a `-c` override (**INFERRED**, CI-guarded)                                |
 | onboarding = done       | `hasCompletedOnboarding = true` in the runtime's `.claude.json`                                                                                                                                                                                             | — (Codex has no onboarding screen that blocks a launch; **INFERRED**)                                                   |
+| Remote Control = off    | `remoteControlAtStartup = false` in the `--settings` overlay, so an imported `true` (or the account's default) never publishes the session; `--rc` is the explicit opt-in                                                                                   | — (Codex has no Remote Control; its `remote_control` feature was removed in 0.156.1)                                    |
 | one-shot dialogs = seen | `hasSeenAutoDefaultNudge`, the effort nudge and the fullscreen upsell recorded as seen in `.claude.json`, and the permission mode named again in the `--settings` overlay (**MEASURED**, CI-guarded: the auto-mode dialog otherwise parks a bypass runtime) | `-c notice={hide_…=true}` for the full-access warning, rate-limit nudge and model-migration prompts                     |
 
 The prototype abbreviates the Codex rows to `approval_policy`; the sandbox key belongs to the same
@@ -806,7 +807,9 @@ status --json` reports logged in for both; neither config dir gains a credential
 2. Without the variable, the second dir reports logged out (the variable is load-bearing).
 3. The binary still contains the `CLAUDE_SECURESTORAGE_CONFIG_DIR` read (`rg -a`), so a rename fails
    here with a message naming the variable.
-4. `--settings` overlay: a key set only in the overlay is visible in the effective settings.
+4. `--settings` overlay: a key set only in the overlay is visible in the effective settings, and a
+   `remoteControlAtStartup: false` in it outranks `true` in the config dir's `settings.json` (the
+   bridge's `[bridge:` debug lines appear with the control and not with the overlay).
 5. `--permission-mode auto` and `bypassPermissions` are accepted; with the trust/onboarding keys
    written, a launch reaches the prompt without a trust or onboarding screen.
 

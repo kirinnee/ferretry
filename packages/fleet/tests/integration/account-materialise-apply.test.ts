@@ -165,6 +165,7 @@ describe('materialising the account model onto disk', () => {
     // The overlay names the mode as well: a flag-settings mode keeps the auto-default dialog away.
     should(JSON.parse(await readFile(path.join(host.claudeHome, '.fy', 'fixed.json'), 'utf8'))).eql({
       permissions: { defaultMode: 'bypassPermissions' },
+      remoteControlAtStartup: false,
       skipDangerousModePermissionPrompt: true,
     });
     should(JSON.parse(await readFile(path.join(host.claudeHome, '.fy', 'materialised.json'), 'utf8'))).eql({

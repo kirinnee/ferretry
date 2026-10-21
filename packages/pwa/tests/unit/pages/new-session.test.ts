@@ -38,6 +38,7 @@ describe('new session decisions', () => {
       model: '',
       mode: 'auto',
       fast: false,
+      remoteControl: false,
       label: '',
       prompt: '',
     });
@@ -95,6 +96,11 @@ describe('new session decisions', () => {
   test('should send fast mode only when it was asked for', () => {
     expect(buildStartSessionRequest(draft({ fast: true }))).toMatchObject({ fast: true });
     expect(buildStartSessionRequest(draft({ fast: false }))).not.toHaveProperty('fast');
+  });
+
+  test('should send Remote Control only when it was asked for', () => {
+    expect(buildStartSessionRequest(draft({ remoteControl: true }))).toMatchObject({ remoteControl: true });
+    expect(buildStartSessionRequest(draft({ remoteControl: false }))).not.toHaveProperty('remoteControl');
   });
 
   test('should use schema validation for an invalid request', () => {

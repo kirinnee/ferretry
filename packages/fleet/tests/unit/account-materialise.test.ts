@@ -683,6 +683,7 @@ describe('materialiseFleet', () => {
       );
       should(JSON.parse((only(result, overlay) as { content: string }).content)).eql({
         permissions: { defaultMode: 'auto' },
+        remoteControlAtStartup: false,
         skipAutoPermissionPrompt: true,
       });
       should(only(result, `${HOME_A}/settings.json`)).match({
@@ -704,7 +705,7 @@ describe('materialiseFleet', () => {
         kind: 'file',
         path: overlay,
         content:
-          '{\n  "permissions": {\n    "defaultMode": "bypassPermissions"\n  },\n  "skipDangerousModePermissionPrompt": true\n}\n',
+          '{\n  "permissions": {\n    "defaultMode": "bypassPermissions"\n  },\n  "remoteControlAtStartup": false,\n  "skipDangerousModePermissionPrompt": true\n}\n',
         mode: 0o600,
       });
       should(

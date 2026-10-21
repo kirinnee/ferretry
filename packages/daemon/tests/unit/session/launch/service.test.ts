@@ -1,13 +1,13 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
 import {
+  defaultStartWaitPolicy,
   type LaunchSubject,
   parseSessionId,
   type RecordedLaunch,
-  SessionLaunchService,
   type SessionLaunchPorts,
+  SessionLaunchService,
   SessionPlanner,
-  defaultStartWaitPolicy,
 } from '../../../../src/lib/index.ts';
 import { launchAccount, launchConfig, launchState } from './support.ts';
 
@@ -132,6 +132,20 @@ describe('SessionLaunchService.relaunch', () => {
     should(argv?.at(-1)).equal('--verbose');
     should(argv?.length).be.above(READ_RULES.length + 4);
     should(argv).not.containEql('--session-id');
+    should(argv).containEql('--rc');
+  });
+
+  it('should never start the Remote Control surface for a session that did not ask for it', async () => {
+    // Arrange
+    const ports = new Ports();
+    ports.subjectValue = legacySubject({ config: launchConfig({ remoteControl: false }), command: [WRAPPER] });
+
+    // Act
+    const argv = await new SessionLaunchService(ports).relaunch(ID);
+
+    // Assert — the wrapper's fixed settings switch it off; --rc is the only thing that turns it on.
+    should(argv).not.containEql('--rc');
+    should(argv).not.containEql('--chrome');
   });
 
   it('should fall back to the account default when the model it was on is no longer served', async () => {
