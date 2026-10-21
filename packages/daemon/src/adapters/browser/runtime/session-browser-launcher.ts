@@ -1,23 +1,41 @@
-import { createServer } from 'node:net';
 import { existsSync } from 'node:fs';
+import { createServer } from 'node:net';
+import type { BrowserMode } from '@ferretry/protocol';
 import {
+  agentBrowserArguments,
   BrowserControlError,
-  browserEnvironment,
-  chromeLaunchArguments,
-  selectChromeExecutable,
   type BrowserProfilePort,
+  browserEnvironment,
+  selectChromeExecutable,
 } from '../../../lib/browser/control/index.ts';
-import type { BrowserAutomation } from '../../../lib/browser/transport/index.ts';
 import type { BrowserSessionLauncher, BrowserWorkerProgram } from '../../../lib/browser/runtime/index.ts';
+import type { BrowserAutomation } from '../../../lib/browser/transport/index.ts';
+import type { BrowserDisplayPort } from '../control/login-runtime.ts';
 import { BrowserWorkerClient, type WorkerClientOptions } from '../transport/worker-client.ts';
 
-/** Launches the machine's ONE agent Chrome — headless on every platform, over the dedicated agent
- * profile, shared by every session — and the worker that drives it. The profile lease is held until both
+/** Launches the machine's ONE agent Chrome — in the machine's Browser mode (headless by default; a real
+ * window when the owner asked for one), over the dedicated agent profile, shared by every session — and the
+ * worker that drives it. The profile lease is held until both
  * Chrome and the worker are gone, so a login window can never open over a live automation browser —
  * and a lease kept because cleanup could not be confirmed closes the profile to EVERY later launch,
  * this same session's retry included; only confirmed cleanup or dead-owner recovery frees it. */
 /** Who holds the agent profile's lease: the machine's agent browser, not any one session. */
 const AGENT_BROWSER_HOLDER = 'agent-browser';
+
+/**
+ * How the launcher learns the machine's Browser mode, and where a Linux real window draws.
+ *
+ * The mode is READ AT EVERY LAUNCH, never cached: an owner who switches it gets it the next time the browser
+ * starts, with no daemon restart. The display is the launcher's OWN private X server — never `$DISPLAY`,
+ * which on a desktop host is the operator's real session — and the composition root closes it at shutdown.
+ */
+export interface SessionBrowserModeOptions {
+  /** This machine's Browser mode right now. Absent means headless, which is what every daemon ran before. */
+  readonly mode?: () => Promise<BrowserMode>;
+  /** The private display a Linux `window` browser draws into. */
+  readonly display?: BrowserDisplayPort;
+  readonly platform?: NodeJS.Platform;
+}
 
 export class NodeSessionBrowserLauncher implements BrowserSessionLauncher {
   constructor(
@@ -27,6 +45,7 @@ export class NodeSessionBrowserLauncher implements BrowserSessionLauncher {
     private readonly environment: Readonly<Record<string, string | undefined>> = process.env,
     private readonly connectWorker: (options: WorkerClientOptions) => Promise<BrowserWorkerClient> = options =>
       BrowserWorkerClient.connect(options),
+    private readonly modes: SessionBrowserModeOptions = {},
   ) {}
 
   async launch(viewport: { readonly width: number; readonly height: number }): Promise<BrowserAutomation> {
@@ -38,17 +57,22 @@ export class NodeSessionBrowserLauncher implements BrowserSessionLauncher {
       path: this.environment.PATH,
       available: command => Bun.which(command, { PATH: this.environment.PATH ?? '' }) !== null,
     });
+    // The display is a precondition too: a Linux real window with no Xvfb refuses here, before any lease.
+    const platform = this.modes.platform ?? process.platform;
+    const mode = await this.mode();
+    const display = mode === 'window' && platform === 'linux' ? await this.privateDisplay() : undefined;
     const lease = await this.profile.acquire({ sessionId: AGENT_BROWSER_HOLDER });
     let chrome: ReturnType<typeof Bun.spawn> | undefined;
     try {
       const port = await freePort();
       chrome = Bun.spawn({
         cmd: [
-          // HEADLESS EVERYWHERE: a headed browser renders only the window that has focus, and every
-          // agent's window — and the page a person is watching — must keep painting at once.
-          ...chromeLaunchArguments(executable, lease.profile, port, viewport, process.platform, { headless: true }),
+          // HEADLESS unless the owner chose a real window. A real window keeps every page's window painting
+          // while another has focus (`agentBrowserArguments`), because an agent may be driving — and a
+          // person watching — any of them at once.
+          ...agentBrowserArguments(executable, lease.profile, port, viewport, platform, mode),
         ],
-        env: defined(browserEnvironment(undefined, this.environment)),
+        env: defined(browserEnvironment(display, this.environment)),
         stdin: 'ignore',
         stdout: 'ignore',
         stderr: 'ignore',
@@ -74,6 +98,19 @@ export class NodeSessionBrowserLauncher implements BrowserSessionLauncher {
       if (chrome === undefined || (await reapChrome(chrome, 'SIGKILL'))) await lease.release().catch(() => undefined);
       throw error;
     }
+  }
+
+  /** The Browser mode to launch in. A setting that cannot be read is the default, never a refusal: the
+   *  agent browser must still start on a machine whose configuration is momentarily unreadable. */
+  private async mode(): Promise<BrowserMode> {
+    return (await this.modes.mode?.().catch(() => undefined)) ?? 'headless';
+  }
+
+  private async privateDisplay(): Promise<string> {
+    if (this.modes.display === undefined) {
+      throw new BrowserControlError('launch_failed', 'this daemon has no private display for a real browser window');
+    }
+    return await this.modes.display.display();
   }
 }
 

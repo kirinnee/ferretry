@@ -22,7 +22,7 @@
  *
  * Pure throughout: no filesystem, no environment, no clock.
  */
-import { CONFIG_COMPONENT_KINDS, isLoopbackHost } from '@ferretry/protocol';
+import { BrowserModeSchema, CONFIG_COMPONENT_KINDS, isLoopbackHost } from '@ferretry/protocol';
 import { z } from 'zod';
 import { AliasSchema, EnvSchema, SafeNameSchema, UsageSchema } from '../config.ts';
 import { HarnessKindSchema } from '../manifest.ts';
@@ -162,6 +162,13 @@ export const MACHINE_SHAPE = {
   defaultRuntime: RuntimeNameSchema.optional(),
   agentControl: AgentControlSchema,
   conversations: ConversationsSchema,
+  /**
+   * "Browser mode" (docs/browser-mode.md): `headless` (the default — what agents and a display-less
+   * server get) or `window`, a real Chrome window for an owner who browses and signs in through it
+   * themselves. Read when the agent browser STARTS, so a running browser keeps its mode until it stops.
+   * Not a loosening: it changes how the one browser draws, not what an agent may do with it.
+   */
+  browserMode: BrowserModeSchema.default('headless'),
 };
 
 export const MachineSchema = z.strictObject(MACHINE_SHAPE).prefault({});

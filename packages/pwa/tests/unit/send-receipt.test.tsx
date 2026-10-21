@@ -222,7 +222,19 @@ describe('the reader’s own row', () => {
     );
     expect(row.root.findAllByType('header')).toHaveLength(0);
     expect(receiptButton(row).props['data-send-receipt']).toBe('answered');
-    expect(receiptButton(row).props['aria-label']).toBe(`Answered, sent ${clockOfInstant(AT)?.full}`);
+    // A row that IS a send reads when it was sent, so it says the same before and after it lands.
+    expect(receiptButton(row).props['aria-label']).toBe(
+      `Answered, sent ${clockOfInstant('2026-07-31T10:00:00.000Z')?.full}`,
+    );
+  });
+
+  test('falls back to the row’s own instant when the send’s time cannot be read', () => {
+    const row = render(
+      <TranscriptRow
+        entry={{ at: AT, id: 'u', kind: 'user', text: 'ship it', send: record({ acceptedAt: 'not a date' }) }}
+      />,
+    );
+    expect(receiptButton(row).props['aria-label']).toBe(`Sending, sent ${clockOfInstant(AT)?.full}`);
   });
 
   test('prints the row’s instant on the reader’s clock and ignores any clock a label carries', () => {

@@ -1293,6 +1293,44 @@ describe('deriveAccountChange: machine.settings', () => {
     ]);
   });
 
+  it('should switch the browser mode, saying it waits for the next browser start', () => {
+    // Act
+    const edit = derive({
+      kind: 'machine.settings',
+      agentPermissions: 'auto',
+      defaultRuntime: null,
+      agentControl: { terminals: true, browsers: true, files: true },
+      browserMode: 'window',
+    });
+
+    // Assert
+    should(edit.summary).equal('Set the browser mode to Real window');
+    should(edit.model.machine.browserMode).equal('window');
+    should(edit.consequences).deepEqual([
+      'Applies the next time the browser starts; a browser already running keeps its mode until it stops.',
+    ]);
+  });
+
+  it('should leave the browser mode as it is when an older client leaves it out', () => {
+    // Arrange
+    const model = modelOf({ machine: { browserMode: 'window' } });
+
+    // Act
+    const edit = derive(
+      {
+        kind: 'machine.settings',
+        agentPermissions: 'auto',
+        defaultRuntime: null,
+        agentControl: { terminals: true, browsers: true, files: true },
+      },
+      model,
+    );
+
+    // Assert
+    should(edit.summary).equal('Keep machine settings the same');
+    should(edit.model.machine.browserMode).equal('window');
+  });
+
   it('should say nothing moved when every field matches the current machine settings', () => {
     // Act
     const edit = derive({

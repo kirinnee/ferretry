@@ -1,12 +1,21 @@
 import { type HandoffPointer, parseFerretryNotice, parsePeerEnvelope } from '@ferretry/protocol';
 import { type ReactNode, useState } from 'react';
+import { handedOverDraft, isOwnSend, ledgerPlacementCopy } from '../lib/ledger-placement.ts';
 import { clockOfInstant } from '../lib/message-clock.ts';
+import type { LedgerSendRecord } from '../lib/send-ledger.ts';
 import type { AgentRunMark, TranscriptEntry } from '../lib/session-screens.ts';
 import { HandoffNoticeRow, PeerMessageRow, SystemNoticeRow } from './agent-message-rows.tsx';
 import { CommandRow } from './command-row.tsx';
-import { HandoffBody, HandoffVia, HandoffViaDetail, HandoffView, useHandoffReading } from './handoff-message.tsx';
+import {
+  HandoffBody,
+  type HandoffReading,
+  HandoffVia,
+  HandoffViaDetail,
+  HandoffView,
+  useHandoffReading,
+} from './handoff-message.tsx';
 import { HarnessEventRow } from './harness-event-row.tsx';
-import { LedgerMessage, type SendCancel, type SendRetry, type SendSubmit } from './ledger-message.tsx';
+import { LedgerControls, LedgerMessage, type SendCancel, type SendRetry, type SendSubmit } from './ledger-message.tsx';
 import { Markdown } from './markdown.tsx';
 import { PackCallRow } from './pack-call.tsx';
 import { useReferenceSurface } from './reference-surface.tsx';
@@ -58,6 +67,19 @@ export function TranscriptRow({
     return <SentMessageRow entry={entry} isLast={isLast} live={live} rhythm={rhythm} sent={entry.sent} />;
   if (entry.pack !== undefined)
     return <PackCallRow entry={entry} isLast={isLast} live={live} pack={entry.pack} rhythm={rhythm} />;
+  const own = ownSendOf(entry);
+  if (own !== undefined)
+    return (
+      <OwnSendRow
+        answered={answered}
+        entry={entry}
+        onCancel={onCancel}
+        onRetry={onRetry}
+        onSubmit={onSubmit}
+        record={own}
+        rhythm={rhythm}
+      />
+    );
   if (entry.kind === 'ledger' && entry.ledger !== undefined) {
     return (
       <div className="fy-message fy-message-ledger" data-transcript-kind="ledger" {...rhythm}>
@@ -94,6 +116,86 @@ export function TranscriptRow({
   if (entry.kind === 'system') return <SystemNoticeRow entry={entry} rhythm={rhythm} />;
   if (entry.kind === 'user') return <OwnMessageRow answered={answered} entry={entry} rhythm={rhythm} />;
   return <TranscriptTextRow entry={entry} rhythm={rhythm} run={run} />;
+}
+
+/**
+ * The reader's own send this row is: the send it travels as (a `ledger` row), or the send a transcript
+ * row wears. A teammate's or Ferretry's send keeps its own row shapes.
+ */
+const ownSendOf = (entry: TranscriptEntry): LedgerSendRecord | undefined => {
+  if (entry.kind === 'ledger') return entry.ledger !== undefined && isOwnSend(entry.ledger) ? entry.ledger : undefined;
+  if (entry.kind !== 'user' || entry.peer !== undefined || entry.send === undefined) return undefined;
+  return isOwnSend(entry.send) ? entry.send : undefined;
+};
+
+/** A send on its way has no document to read yet: it is drawn from its own copy until it lands. */
+const ON_ITS_WAY: HandoffReading = { state: 'reading' };
+
+/**
+ * THE READER'S OWN MESSAGE WHILE THE LEDGER KNOWS IT AS A SEND — on its way, after the conversation, or
+ * on the transcript row it became. One component for both, drawn under one key (`sendRowId`), so when
+ * the message lands the bubble stays the same element where it is: the words do not change, the time
+ * does not change, and only the mark moves on. The controls a travelling send offers fold away, because
+ * it is in the conversation now.
+ *
+ * A message handed over through a FILE reads the same the whole way: the send's own copy of the
+ * document while it travels and while the document is read, then the document itself.
+ */
+function OwnSendRow({
+  entry,
+  record,
+  rhythm,
+  answered,
+  onRetry,
+  onCancel,
+  onSubmit,
+}: {
+  readonly entry: TranscriptEntry;
+  readonly record: LedgerSendRecord;
+  readonly rhythm: Record<string, string | undefined>;
+  readonly answered: boolean;
+  readonly onRetry?: SendRetry | undefined;
+  readonly onCancel?: SendCancel | undefined;
+  readonly onSubmit?: SendSubmit | undefined;
+}) {
+  const pointer = entry.kind === 'user' ? entry.handoff : undefined;
+  const { reading, source } = useHandoffReading(pointer?.name);
+  const draft = handedOverDraft(record);
+  const travelling = entry.kind === 'ledger';
+  const boundary = travelling ? ledgerPlacementCopy(entry.placement ?? 'chronological') : undefined;
+  const viaFile = pointer !== undefined || draft !== undefined;
+  return (
+    <OwnMessageRow
+      answered={answered}
+      controls={
+        travelling ? (
+          <LedgerControls onCancel={onCancel} onRetry={onRetry} onSubmit={onSubmit} record={record} />
+        ) : undefined
+      }
+      entry={entry}
+      record={record}
+      rhythm={rhythm}
+      sendRow={travelling ? 'travelling' : 'landed'}
+      viaTurnFile={viaFile && (pointer === undefined || reading.state !== 'gone')}
+    >
+      {viaFile ? (
+        <HandoffView
+          draft={draft}
+          pointer={pointer}
+          pointerText={entry.text}
+          reading={pointer === undefined ? ON_ITS_WAY : reading}
+          source={source}
+        />
+      ) : (
+        <p>{travelling ? record.message : entry.text}</p>
+      )}
+      {boundary === undefined ? null : (
+        <span className="sr-only" data-ledger-boundary>
+          {boundary}
+        </span>
+      )}
+    </OwnMessageRow>
+  );
 }
 
 /**
@@ -160,6 +262,9 @@ function OwnMessageRow({
   answered,
   children,
   viaTurnFile = false,
+  record = entry.send,
+  controls,
+  sendRow,
 }: {
   readonly entry: TranscriptEntry;
   readonly rhythm: Record<string, string | undefined>;
@@ -168,20 +273,33 @@ function OwnMessageRow({
   readonly children?: ReactNode;
   /** The message travelled as a file: say so on the foot's own line, not on one of its own. */
   readonly viaTurnFile?: boolean;
+  /** The send this message is. Its time is when it was SENT, so it reads the same before and after it lands. */
+  readonly record?: LedgerSendRecord | undefined;
+  /** What a send still on its way offers under its foot. */
+  readonly controls?: ReactNode;
+  /** Whether this bubble is a send on its way or the transcript row it became. */
+  readonly sendRow?: 'travelling' | 'landed';
 }) {
   const [viaOpen, setViaOpen] = useState(false);
   return (
-    <article className="fy-message fy-message-user" data-transcript-kind="user" {...rhythm}>
+    <article
+      className="fy-message fy-message-user"
+      data-send-id={record?.sendId}
+      data-send-row={sendRow}
+      data-transcript-kind="user"
+      {...rhythm}
+    >
       <span className="sr-only">You said:</span>
       {children ?? <p>{entry.text}</p>}
       <MessageFooter
         answered={answered}
-        clock={clockOfInstant(entry.at)}
+        clock={clockOfInstant(record?.acceptedAt) ?? clockOfInstant(entry.at)}
         lead={viaTurnFile ? <HandoffVia onToggle={() => setViaOpen(current => !current)} open={viaOpen} /> : undefined}
         leadDetail={viaTurnFile && viaOpen ? <HandoffViaDetail /> : undefined}
-        record={entry.send}
+        record={record}
         side="own"
       />
+      {controls}
     </article>
   );
 }

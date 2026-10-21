@@ -24,6 +24,7 @@ describe('configJsonSchema', () => {
       'advanced',
       'agentControl',
       'agentPermissions',
+      'browserMode',
       'conversations',
       'defaultRuntime',
     ]);

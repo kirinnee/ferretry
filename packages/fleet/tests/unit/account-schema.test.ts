@@ -44,6 +44,7 @@ describe('AccountModelSchema', () => {
     should(actual.machine).deepEqual({
       agentPermissions: 'auto',
       agentControl: { terminals: true, browsers: true, files: true, ferretrySettings: false },
+      browserMode: 'headless',
       conversations: { listComputer: true },
     });
     should(actual.runtimes['claude-default']).deepEqual({ credential: 'claude-you', profile: 'default', agent: false });

@@ -376,6 +376,71 @@ describe('MachineSettingsTab', () => {
     });
   });
 
+  it('hides Browser mode for a daemon that predates it, and never sends it one', async () => {
+    await withTab({ answers: { '/v1/fleet/proposals': STAGED, [APPLY_PATH]: OUTCOME } }, async ({ q, calls }) => {
+      expect(q('[data-setup-section="browser-mode"]')).toBeNull();
+      await click(q('[data-setup-choice="skip"] input'), 'skip radio');
+      await click(q('[data-change-submit]'), 'save');
+      const staged = must(
+        calls.find(call => call.path === '/v1/fleet/proposals'),
+        'the staged change call',
+      );
+      expect(JSON.stringify(staged.body)).not.toContain('browserMode');
+    });
+  });
+
+  it('offers Headless and Real window, and Save sends the chosen Browser mode', async () => {
+    await withTab(
+      {
+        machine: machineView({ browserMode: 'headless' }),
+        answers: { '/v1/fleet/proposals': STAGED, [APPLY_PATH]: OUTCOME },
+      },
+      async ({ q, calls, retried }) => {
+        const section = must(q('[data-setup-section="browser-mode"]'), 'browser mode');
+        expect(section.querySelector('[data-setup-choice="headless"]')?.textContent).toContain('Headless');
+        expect(section.querySelector('[data-setup-choice="window"]')?.textContent).toContain('Real window');
+        expect(section.querySelector('[data-setup-choice="window"]')?.textContent).toContain('needs Xvfb');
+        expect(section.querySelector<HTMLInputElement>('[data-setup-choice="headless"] input')?.checked).toBe(true);
+        expect(q('[data-browser-mode-hint]')?.textContent).toContain(
+          'Applies the next time the browser on studio-mac starts.',
+        );
+        expect(q('[data-change-submit]')).toBeNull();
+
+        await click(q('[data-setup-choice="window"] input'), 'window radio');
+        expect(q('[data-change-submit]')?.textContent).toBe('Save browser mode');
+        expect(q('[data-browser-mode-undo]')?.textContent).toBe('Keep Headless');
+        await click(q('[data-change-submit]'), 'save');
+        const staged = must(
+          calls.find(call => call.path === '/v1/fleet/proposals'),
+          'the staged change call',
+        );
+        expect(JSON.stringify(staged.body)).toContain('"browserMode":"window"');
+        expect(JSON.stringify(staged.body)).toContain('"agentPermissions":"auto"');
+        expect(retried.count).toBe(1);
+      },
+    );
+  });
+
+  it('keeps a Real window machine’s mode, and Keep puts a pending switch back', async () => {
+    await withTab(
+      {
+        machine: machineView({ browserMode: 'window' }),
+        answers: { '/v1/fleet/proposals': new Error('unreachable') },
+      },
+      async ({ q, retried }) => {
+        expect(q('[data-setup-choice="window"] input') as HTMLInputElement).toHaveProperty('checked', true);
+        await click(q('[data-setup-choice="headless"] input'), 'headless radio');
+        expect(q('[data-browser-mode-undo]')?.textContent).toBe('Keep Real window');
+        await click(q('[data-change-submit]'), 'save');
+        expect(q('[data-change-refusal]')?.textContent).toContain('didn’t answer');
+        expect(retried.count).toBe(0);
+        await click(q('[data-browser-mode-undo]'), 'keep');
+        expect(q('[data-change-submit]')).toBeNull();
+        expect(q('[data-setup-choice="window"] input') as HTMLInputElement).toHaveProperty('checked', true);
+      },
+    );
+  });
+
   it('lists the tools and offers Install only for one that is missing', async () => {
     await withTab({}, async ({ q, browser }) => {
       const tools = must(q('[data-setup-section="tools"]'), 'tools');
