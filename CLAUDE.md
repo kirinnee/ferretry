@@ -70,8 +70,15 @@ Bun workspaces monorepo — see [README.md](README.md#layout). Only `packages/cl
 `packages/relay` owns how a browser reaches a daemon: the end-to-end session protocol and the
 Cloudflare rendezvous that can carry it. The wire contract is
 [docs/relay-protocol.md](docs/relay-protocol.md) — implement against that document, not the code.
-The carrier contract has no chooser: direct is attempted first, and Ferretry's hosted relay is the
-automatic fallback. No **carrier** address is compiled in: each build carries only the
+Carriers are a per-device, per-machine **choice** (owner decision 2026-10-21, protocol §15): Auto —
+the default, which asks nothing — walks direct → WebRTC → the hosted Cloudflare tunnel when the daemon
+published one → relay, and "WebRTC / tunnel / relay only" narrow that walk; every surface still names
+the live carrier and why the others were passed over. Pairing ignores the choice (direct, then the
+hosted relay). A tunnel arrival reaches the daemon through `cloudflared` on loopback, so it lands on a
+dedicated listener that stamps it remote — never on the API listener. The tunnel pool (several
+Cloudflare accounts, one zone each) is Worker configuration — runbook
+[docs/cloudflare-tunnel-pool.md](docs/cloudflare-tunnel-pool.md). No **carrier** address is compiled
+in: each build carries only the
 **discovery origin** it reads the advertisement from — a service address, never a user's — while the
 relay endpoint and the daemon URL are runtime values. The hosted default therefore comes from a
 no-store runtime advertisement whose operator can change or disable it without a release.
@@ -87,8 +94,9 @@ Running your own relay stays supported as an **expert opt-in path** with its own
 [docs/cloudflare-relay-self-hosting.md](docs/cloudflare-relay-self-hosting.md), and its fingerprint
 allowlist remains independent of the hosted deployment. First-run onboarding asks no carrier
 question: the three-way chooser and the self-hosting steps are gone, and the daemon step only says
-how other devices reach it. The machine's **Connection** panel is read-only — direct, via relay
-(which, and why) or reconnecting — and links the runbook instead of offering a relay setting. **Both carriers are sessions**: direct is a WebSocket session on the
+how other devices reach it. The machine's **Connection** panel names the live carrier — direct, WebRTC,
+tunnel, via relay (which, and why) or reconnecting — and holds this device's carrier preference for
+that machine (§15); it links the runbook instead of offering a relay address setting. **Both carriers are sessions**: direct is a WebSocket session on the
 daemon's own listener (`/v1/rendezvous/<daemonId>/client`), byte-for-byte the protocol a relay carries,
 so the LAN is encrypted end to end too, and there are no socket tickets — every stream is its own
 session. **First contact is no longer direct-only.** A session commits to one of three modes with its

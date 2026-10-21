@@ -31,6 +31,15 @@ const TAIL_BYTES = 256 * 1024;
 /** A walk bound, so a home with a pathological number of rollouts cannot stall a discovery. */
 const MAX_ROLLOUTS = 4_000;
 
+/** What one rollout was found to be, valid for as long as its size and modification time hold. */
+interface RolloutFacts {
+  readonly size: number;
+  readonly mtimeMs: number;
+  readonly id: string | undefined;
+  /** Each correlation token asked about, and whether this file's windows contain it. */
+  readonly tokens: Map<string, boolean>;
+}
+
 interface RolloutMeta {
   readonly id?: string;
   readonly cwd?: string;
@@ -56,11 +65,23 @@ function metaFromHead(head: string): RolloutMeta {
 }
 
 export class NodeCodexRolloutIndex implements CodexRolloutIndex, CodexRolloutBaseline {
+  /**
+   * What each rollout was found to be, keyed by path and trusted only while its size and modification
+   * time are unchanged.
+   *
+   * A Codex session whose rollout is not attributed yet is discovered again on EVERY transcript read —
+   * every session listing, turn tick and live sample — and each discovery read two windows of up to
+   * four thousand files: about a gigabyte of reads and decoding per ask, the bulk of it for rollouts
+   * that had not changed in weeks. A walk now costs a `stat` per unchanged rollout and reads only the
+   * ones that changed. Entries for files a walk no longer finds are dropped with it.
+   */
+  readonly #facts = new Map<string, RolloutFacts>();
+
   /** Every rollout id this home already holds — the baseline a start records before launching. */
   async ids(home: string): Promise<readonly string[]> {
     const ids: string[] = [];
     for (const file of await this.files(home)) {
-      const id = await this.identify(file);
+      const id = (await this.facts(file)).id;
       if (id !== undefined) ids.push(id);
     }
     return ids;
@@ -69,11 +90,38 @@ export class NodeCodexRolloutIndex implements CodexRolloutIndex, CodexRolloutBas
   async candidates(home: string, correlationToken: string): Promise<readonly CodexRolloutCandidate[]> {
     const candidates: CodexRolloutCandidate[] = [];
     for (const file of await this.files(home)) {
-      const id = await this.identify(file);
-      if (id === undefined) continue;
-      candidates.push({ id, file, correlated: await this.contains(file, correlationToken) });
+      const facts = await this.facts(file);
+      if (facts.id === undefined) continue;
+      let correlated = facts.tokens.get(correlationToken);
+      if (correlated === undefined) {
+        correlated = await this.contains(file, facts.size, correlationToken);
+        facts.tokens.set(correlationToken, correlated);
+      }
+      candidates.push({ id: facts.id, file, correlated });
     }
     return candidates;
+  }
+
+  /**
+   * This rollout's facts, read again only when it changed. A rollout that vanished since the walk is
+   * still reported by the id its filename carries, exactly as before, and remembered for nothing.
+   */
+  private async facts(file: string): Promise<RolloutFacts> {
+    const info = await stat(file).catch(() => undefined);
+    if (info === undefined) {
+      this.#facts.delete(file);
+      return { size: 0, mtimeMs: 0, id: await this.identify(file), tokens: new Map() };
+    }
+    const known = this.#facts.get(file);
+    if (known !== undefined && known.size === info.size && known.mtimeMs === info.mtimeMs) return known;
+    const facts: RolloutFacts = {
+      size: info.size,
+      mtimeMs: info.mtimeMs,
+      id: await this.identify(file),
+      tokens: new Map(),
+    };
+    this.#facts.set(file, facts);
+    return facts;
   }
 
   /** Every `.jsonl` beneath `<home>/sessions`, bounded. */
@@ -88,6 +136,10 @@ export class NodeCodexRolloutIndex implements CodexRolloutIndex, CodexRolloutBas
         else if (entry.isFile() && entry.name.endsWith('.jsonl')) found.push(child);
       }
     }
+    const walked = new Set(found);
+    const root = join(home, 'sessions');
+    for (const file of this.#facts.keys())
+      if (file.startsWith(`${root}/`) && !walked.has(file)) this.#facts.delete(file);
     return found;
   }
 
@@ -97,12 +149,9 @@ export class NodeCodexRolloutIndex implements CodexRolloutIndex, CodexRolloutBas
   }
 
   /** Whether the rollout's head or tail contains the token. */
-  private async contains(file: string, needle: string): Promise<boolean> {
+  private async contains(file: string, size: number, needle: string): Promise<boolean> {
     const head = await this.window(file, 0, HEAD_BYTES);
     if (head?.includes(needle) === true) return true;
-    const size = await stat(file)
-      .then(info => info.size)
-      .catch(() => 0);
     if (size <= HEAD_BYTES) return false;
     const tail = await this.window(file, Math.max(HEAD_BYTES, size - TAIL_BYTES), TAIL_BYTES);
     return tail?.includes(needle) === true;

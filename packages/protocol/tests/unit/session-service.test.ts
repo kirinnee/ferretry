@@ -394,6 +394,24 @@ const sessionCases: SchemaCase[] = [
 
 const serviceCases: SchemaCase[] = [
   { name: 'health', schema: service.HealthViewSchema, value: healthView },
+  {
+    name: 'liveness while starting',
+    schema: service.LivenessViewSchema,
+    value: {
+      status: 'starting',
+      version: '1.2.3',
+      sessionProtocol: 'ferretry-relay/2',
+      uptimeSeconds: 12,
+      pid: 4242,
+      boot: { phase: 'starting', step: 'mounting subsystems', stepElapsedSeconds: 4, elapsedSeconds: 12 },
+      eventLoop: {
+        lagMs: 3.5,
+        maxLagMs: 812,
+        stalls: 1,
+        lastStall: { at: '2026-10-21T09:00:00.000Z', durationMs: 812, during: ['boot: mounting subsystems'] },
+      },
+    },
+  },
   { name: 'cgroup limit', schema: service.CgroupLimitSchema, value: { cpuPercent: 50, memoryPercent: 50 } },
   { name: 'cgroup config', schema: service.CgroupConfigSchema, value: cgroupConfigView.config },
   { name: 'cgroup patch', schema: service.CgroupConfigPatchSchema, value: { enabled: false } },

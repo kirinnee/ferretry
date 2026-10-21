@@ -33,7 +33,34 @@ export const daemonRestartBackoffMs = (look: number): number =>
 /** How a request failed to reach the daemon, when it did. */
 export type DaemonUnreachable = 'refused' | 'dropped';
 
+/**
+ * The error code a daemon answers every route with while it is still starting — a 503 from a daemon
+ * that has bound its address but not yet mounted its routes. It ran nothing.
+ */
+export const DAEMON_STARTING_CODE = 'daemon_starting';
+
+/** The code a client's {@link DaemonStartingError} carries, so the restart wait reads it as refused. */
+const DAEMON_STARTING_ERROR = 'DaemonStarting';
+
+/**
+ * A daemon answered that it is still starting.
+ *
+ * A REFUSAL FOR EVERY PURPOSE THAT MATTERS: the daemon ran no route, so sending the request again is as
+ * safe as after a refused connection — which is exactly what this same moment was before the daemon
+ * bound its address first. A client that waits out restarts therefore waits this out too, and one that
+ * does not says the daemon's own sentence (which names the boot step) instead of a bare 503.
+ */
+export class DaemonStartingError extends Error {
+  readonly code = DAEMON_STARTING_ERROR;
+
+  constructor(message: string) {
+    super(message);
+    this.name = 'DaemonStartingError';
+  }
+}
+
 const REFUSED_CODES: ReadonlySet<string> = new Set([
+  DAEMON_STARTING_ERROR,
   // Bun's fetch.
   'ConnectionRefused',
   'FailedToOpenSocket',

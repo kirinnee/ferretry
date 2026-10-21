@@ -14,6 +14,8 @@
  *     itself, so this presses Enter once. One tap, because the daemon refuses unless the composer holds
  *     exactly this message.
  *   * COPY TEXT — always, so cancelling never costs the words.
+ *   * DISMISS — every message that is not delivered can be put away, on this device, with no question
+ *     asked; and a settled one the reader opened can be folded back to its one-line note.
  *   * RETRY, and every retry re-sends under the ORIGINAL id, so the daemon's ledger can never turn it
  *     into a second copy the agent reads without the reader being told:
  *       - NOT DELIVERED — the daemon proved it never arrived. Retry is one tap, because it cannot duplicate.
@@ -29,7 +31,7 @@
  * the agent is holding it) and a generic "failed" would hide it.
  */
 
-import { Check, Copy, CornerDownLeft, RotateCw, X } from 'lucide-react';
+import { Check, ChevronUp, Copy, CornerDownLeft, RotateCw, X } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { browserClipboardWriter, type ClipboardWriter } from '../features/onboarding/copy-button.tsx';
 import { displayCallsign } from '../lib/callsign.ts';
@@ -38,6 +40,7 @@ import { clockOfInstant } from '../lib/message-clock.ts';
 import { peerFrom } from '../lib/peer-message.ts';
 import type { LedgerSendRecord } from '../lib/send-ledger.ts';
 import { MessageFooter } from './send-receipt.tsx';
+import type { SendDismiss, SendExpand } from './settled-send-note.tsx';
 
 export const UNBOUND_SEND_COPY =
   'Ferretry can’t confirm this, because it can’t find this session’s transcript. Check the Console tab before sending it again.';
@@ -82,6 +85,8 @@ export interface LedgerMessageProps {
   readonly onRetry?: SendRetry;
   readonly onCancel?: SendCancel;
   readonly onSubmit?: SendSubmit;
+  readonly onDismiss?: SendDismiss;
+  readonly onCollapse?: SendExpand;
   readonly write?: ClipboardWriter;
 }
 
@@ -105,6 +110,8 @@ export function LedgerMessage({
   onRetry,
   onCancel,
   onSubmit,
+  onDismiss,
+  onCollapse,
   write = browserClipboardWriter(),
 }: LedgerMessageProps) {
   const { from, body } = peerFrom(record.message);
@@ -131,7 +138,15 @@ export function LedgerMessage({
         <div className="px-panel pb-1">
           <MessageFooter clock={clockOfInstant(record.acceptedAt)} record={record} />
         </div>
-        <LedgerControls onCancel={onCancel} onRetry={onRetry} onSubmit={onSubmit} record={record} write={write} />
+        <LedgerControls
+          onCancel={onCancel}
+          onCollapse={onCollapse}
+          onDismiss={onDismiss}
+          onRetry={onRetry}
+          onSubmit={onSubmit}
+          record={record}
+          write={write}
+        />
       </div>
     </div>
   );
@@ -164,6 +179,8 @@ export interface LedgerControlsProps {
   readonly onRetry?: SendRetry | undefined;
   readonly onCancel?: SendCancel | undefined;
   readonly onSubmit?: SendSubmit | undefined;
+  readonly onDismiss?: SendDismiss | undefined;
+  readonly onCollapse?: SendExpand | undefined;
   readonly write?: ClipboardWriter;
 }
 
@@ -177,6 +194,8 @@ export function LedgerControls({
   onRetry,
   onCancel,
   onSubmit,
+  onDismiss,
+  onCollapse,
   write = browserClipboardWriter(),
 }: LedgerControlsProps) {
   const { body } = peerFrom(record.message);
@@ -210,7 +229,10 @@ export function LedgerControls({
   const canEnter = typed && onSubmit !== undefined;
   const canCancel = actionable && onCancel !== undefined;
   const retryOnce = retryable && onRetry !== undefined && result !== 'accepted';
-  const toolbar = !settling && (canEnter || canCancel || retryOnce || openRetry || showCopy);
+  const canDismiss = onDismiss !== undefined && !delivered;
+  const canCollapse = onCollapse !== undefined && !delivered;
+  const toolbar =
+    !settling && (canEnter || canCancel || retryOnce || openRetry || showCopy || canDismiss || canCollapse);
 
   const retry = async (force: boolean): Promise<void> => {
     if (!onRetry || actionHeld.current) return;
@@ -317,6 +339,28 @@ export function LedgerControls({
             >
               {copied === 'copied' ? <Check aria-hidden="true" size={14} /> : <Copy aria-hidden="true" size={14} />}
               {copied === 'copied' ? 'Copied' : 'Copy text'}
+            </button>
+          ) : null}
+          {canCollapse ? (
+            <button
+              className={ACTION_BUTTON}
+              data-ledger-action="collapse"
+              onClick={() => onCollapse(record, false)}
+              type="button"
+            >
+              <ChevronUp aria-hidden="true" size={14} />
+              Fold
+            </button>
+          ) : null}
+          {canDismiss ? (
+            <button
+              className={ACTION_BUTTON}
+              data-ledger-action="dismiss"
+              onClick={() => onDismiss(record)}
+              type="button"
+            >
+              <X aria-hidden="true" size={14} />
+              Dismiss
             </button>
           ) : null}
           {retryOnce ? <span className="basis-full">it never arrived, so this cannot send it twice</span> : null}

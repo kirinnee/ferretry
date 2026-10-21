@@ -369,8 +369,62 @@ describe('reading a transcript from its end', () => {
     // Act
     await subject.tail({ sessionId: 'session-1', harness: 'claude' });
 
+    // Assert — the window began at the first byte, so one small tail already covered the whole file.
+    should(starts).eql([{ at: 'tail', bytes: 512 * 1024 }]);
+  });
+
+  it('should widen the tail to its bound only while a mid-file window holds too few events', async () => {
+    // Arrange — a window that starts mid-file cannot number its lines, which is how "older bytes exist"
+    // reads from outside.
+    const midFile = (events: readonly TranscriptEvent[]): TranscriptBatch => ({
+      ...batch('/h/big.jsonl', events),
+      cursor: { byteOffset: 9_000_000, pendingBytes: 0 },
+    });
+    const sparse: TranscriptWindowStart[] = [];
+    const dense: TranscriptWindowStart[] = [];
+    const many = Array.from({ length: 3 }, (_, index) => event(`tool-${String(index)}`));
+
+    // Act
+    const few = await tailTranscriptEvents(
+      source('claude', async () => midFile([event('only')]), sparse),
+      '/h/big.jsonl',
+      'session-1',
+      3,
+    );
+    const enough = await tailTranscriptEvents(
+      source('claude', async () => midFile(many), dense),
+      '/h/big.jsonl',
+      'session-1',
+      3,
+    );
+
+    // Assert — the sparse file grew to the same bound every tail always had; the dense one never had to.
+    should(sparse).eql([
+      { at: 'tail', bytes: 512 * 1024 },
+      { at: 'tail', bytes: 2 * 1024 * 1024 },
+      { at: 'tail', bytes: DEFAULT_TRANSCRIPT_TAIL_BYTES },
+    ]);
+    should(few).have.length(1);
+    should(dense).eql([{ at: 'tail', bytes: 512 * 1024 }]);
+    should(enough).have.length(3);
+  });
+
+  it('should never widen past a bound smaller than its first window', async () => {
+    // Arrange
+    const starts: TranscriptWindowStart[] = [];
+    const midFile = { ...batch('/h/big.jsonl', []), cursor: { byteOffset: 4_096, pendingBytes: 0 } };
+
+    // Act
+    await tailTranscriptEvents(
+      source('claude', async () => midFile, starts),
+      '/h/big.jsonl',
+      'session-1',
+      3,
+      1_024,
+    );
+
     // Assert
-    should(starts).eql([{ at: 'tail', bytes: DEFAULT_TRANSCRIPT_TAIL_BYTES }]);
+    should(starts).eql([{ at: 'tail', bytes: 1_024 }]);
   });
 
   it('should keep only the newest events across steps, and forget a file that restarted', async () => {
