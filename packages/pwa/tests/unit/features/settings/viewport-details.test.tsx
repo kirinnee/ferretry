@@ -91,7 +91,7 @@ describe('readViewport', () => {
       expect(Object.keys(reading.units)).toEqual(['vh', 'dvh', 'svh', 'lvh']);
       expect(Object.keys(reading.insets)).toEqual(['top', 'right', 'bottom', 'left']);
       // Every measuring box is gone again.
-      expect(document.body.querySelectorAll('[aria-hidden="true"]')).toHaveLength(0);
+      expect(document.querySelectorAll('[data-viewport-probe]')).toHaveLength(0);
     } finally {
       scene.remove();
     }

@@ -59,6 +59,7 @@ const shown = (document: Document, selector: string): Element | undefined =>
 const measure = (document: Document, length: string): number => {
   const probe = document.createElement('div');
   probe.setAttribute('aria-hidden', 'true');
+  probe.setAttribute('data-viewport-probe', '');
   probe.style.cssText = `position:fixed;top:0;left:0;width:0;visibility:hidden;pointer-events:none;height:${length}`;
   document.body.append(probe);
   const height = probe.getBoundingClientRect().height;
