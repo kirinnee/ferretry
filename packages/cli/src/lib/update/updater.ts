@@ -16,6 +16,7 @@ import {
 } from '@ferretry/protocol';
 import type { InstalledDaemonBinary } from '../daemon/binary.ts';
 import type { IClockPort, IDaemonOutput, IDaemonPrompt, IServiceFilePort } from '../daemon/ports.ts';
+import { passMidTurn } from './mid-turn.ts';
 import type {
   IDaemonUpdateViewPort,
   IInstallFactsPort,
@@ -34,9 +35,12 @@ export interface DaemonUpdateOptions {
   readonly to?: string;
   /** Skip the "update now?" confirmation. */
   readonly yes?: boolean;
-  /** Wait until no ferret is mid-turn. */
+  /** Wait until no ferret is mid-turn. Without it the update goes ahead: ferrets keep running. */
   readonly whenIdle?: boolean;
-  /** Restart even though ferrets are mid-turn. */
+  /**
+   * Accepted and ignored: it once said "restart even though ferrets are mid-turn", which is now what
+   * every update does. Kept so a script or an older daemon's launch that passes it still works.
+   */
   readonly anyway?: boolean;
   /** Consent to move a `nix shell` daemon into the nix profile. */
   readonly switchToProfile?: boolean;
@@ -75,9 +79,7 @@ class DaemonUpdateRefusedError extends Error {
   }
 }
 
-/** How long, between looks, `--when-idle` waits for the last ferret to finish its turn. */
 const DEFAULT_POLL_MS = 1_000;
-const IDLE_POLL_MS = 5_000;
 
 /** Everything an update decided before it changed anything. */
 interface UpdateIntent {
@@ -229,7 +231,7 @@ export class DaemonUpdater {
         ].join('\n'),
       );
     }
-    if (intent.running) await this.#awaitConsentToInterrupt(options);
+    if (intent.running) await this.#passMidTurn(options);
     await this.#confirm(intent, options);
     const applied = await this.#upgrade(intent, options);
     if (applied.kind === 'failed') return { outcome: 'failed', message: applied.message };
@@ -243,26 +245,17 @@ export class DaemonUpdater {
     return isYes(await this.deps.prompt.ask('Switch to a nix profile install now? [y/N]'));
   }
 
-  /** Never mid-turn: wait for idle, proceed on `--anyway`, ask a terminal, refuse a script. */
-  async #awaitConsentToInterrupt(options: DaemonUpdateOptions): Promise<void> {
-    if (options.anyway === true) return;
-    let midTurn = await this.#midTurn();
-    if (midTurn === 0) return;
-    if (options.whenIdle === true) {
-      this.deps.out.warn(`${ferrets(midTurn)} mid-turn; waiting until every ferret is idle before updating`);
-      while (midTurn > 0) {
-        await this.deps.clock.sleep(IDLE_POLL_MS);
-        midTurn = await this.#midTurn();
-      }
-      return;
-    }
-    const why = `${ferrets(midTurn)} mid-turn, and restarting the daemon interrupts ${midTurn === 1 ? 'it' : 'them'}`;
-    if (!this.deps.interactive()) {
-      throw new DaemonUpdateRefusedError(`${why}; pass --when-idle to wait, or --anyway to update now`);
-    }
-    if (!isYes(await this.deps.prompt.ask(`${why}. Update anyway? [y/N]`))) {
-      throw new DaemonUpdateRefusedError('update cancelled; nothing changed');
-    }
+  /** Ferrets mid-turn keep running through the restart: say so, or wait for idle when asked to. */
+  async #passMidTurn(options: DaemonUpdateOptions): Promise<void> {
+    await passMidTurn(
+      {
+        midTurn: () => this.#midTurn(),
+        sleep: ms => this.deps.clock.sleep(ms),
+        warn: line => this.deps.out.warn(line),
+      },
+      options.whenIdle === true,
+      'updating',
+    );
   }
 
   async #midTurn(): Promise<number> {
@@ -479,7 +472,5 @@ function failedCommand(command: string, stderr: string, code: number, hint?: str
     message: hint === undefined ? what : `${what}. ${hint}`,
   };
 }
-
-const ferrets = (count: number): string => (count === 1 ? 'one ferret is' : `${String(count)} ferrets are`);
 
 const errorText = (error: unknown): string => (error instanceof Error ? error.message : String(error));

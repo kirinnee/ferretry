@@ -72,11 +72,6 @@ const cases: SchemaCase[] = [
     value: { target: '4.29.0', when: 'now', confirmMidTurn: true },
   },
   { name: 'settings patch', schema: update.DaemonUpdateSettingsPatchSchema, value: { autoInstall: true } },
-  {
-    name: 'mid-turn body',
-    schema: update.DaemonUpdateMidTurnBodySchema,
-    value: { error: 'two ferrets are mid-turn', code: 'update_mid_turn', midTurn: 2 },
-  },
 ];
 
 describe('daemon update schemas', () => {

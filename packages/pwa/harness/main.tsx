@@ -45,7 +45,6 @@ import type {
 } from '@ferretry/protocol';
 import {
   DAEMON_CAPABILITIES,
-  DAEMON_UPDATE_CODES,
   HARNESS_UPDATE_CODES,
   matchesSessionSearchQuery,
   SECRET_SCHEMA_VERSION,
@@ -943,8 +942,9 @@ const harnessMinutesAgo = (minutes: number): string => new Date(Date.now() - min
 
 /**
  * SETTINGS › MACHINE › ABOUT, answered in the page (`docs/updating.md`). `?about=manual` makes the
- * harness daemon a deb install (steps, no button); otherwise it is a Homebrew install with 4.29.0 out,
- * whose Update press answers `409 update_mid_turn` so the mid-turn choice is reachable by clicking.
+ * harness daemon a deb install (steps, no button); otherwise it is a Homebrew install with 4.29.0 out and
+ * two ferrets mid-turn, so the "they keep running" line and Update when idle are on screen. Update starts
+ * the update; Update when idle waits.
  * The app is stamped 4.29.0 against the machine's 4.28.0, so the version warning is on screen too.
  */
 (globalThis as { __FY_APP_VERSION__?: string }).__FY_APP_VERSION__ = '4.29.0';
@@ -995,15 +995,12 @@ const harnessAboutClient = async (connection: DaemonConnection) => {
   return {
     daemonUpdate: async () => view,
     startDaemonUpdate: async (request: DaemonUpdateStartRequest): Promise<DaemonUpdateView> => {
-      if (request.when === 'now' && request.confirmMidTurn !== true)
-        throw new FyHttpError('2 ferrets are mid-turn', 409, DAEMON_UPDATE_CODES.midTurn, {
-          error: '2 ferrets are mid-turn',
-          code: DAEMON_UPDATE_CODES.midTurn,
-          midTurn: 2,
-        });
       view = {
         ...view,
-        job: { state: 'waiting-for-idle', target: request.target, requestedAt: new Date().toISOString(), midTurn: 2 },
+        job:
+          request.when === 'now'
+            ? { state: 'running', target: request.target, startedAt: new Date().toISOString() }
+            : { state: 'waiting-for-idle', target: request.target, requestedAt: new Date().toISOString(), midTurn: 2 },
       };
       return view;
     },

@@ -47,8 +47,6 @@ export class DaemonUpdateRefusal extends Error {
   constructor(
     readonly code: DaemonUpdateCode,
     message: string,
-    /** Ferrets mid-turn, for `update_mid_turn`. */
-    readonly midTurn?: number,
   ) {
     super(message);
     this.name = 'DaemonUpdateRefusal';
@@ -97,8 +95,13 @@ export interface DaemonUpdateSubsystem {
  *
  * THE DAEMON NEVER UPDATES ITSELF IN-PROCESS. It starts `<client> daemon update`, which outlives the
  * restart it performs and leaves a report for whichever daemon comes up. Everything here is deciding
- * WHETHER and WHEN: a check at boot and at most every six hours, one update at a time, never mid-turn
- * without consent, and automatically only when somebody turned that on.
+ * WHETHER and WHEN: a check at boot and at most every six hours, one update at a time, and
+ * automatically only when somebody turned that on.
+ *
+ * A FERRET MID-TURN DOES NOT STOP AN UPDATE ASKED FOR NOW. It runs in tmux, outside this process; the
+ * next daemon adopts its pane again with its turn state on disk, and its Ferretry calls wait for that
+ * daemon instead of failing (docs/updating.md § Ferrets keep running). Waiting for idle is still
+ * offered — `when-idle` — and is what an AUTOMATIC update always does, because nobody chose that moment.
  */
 export class DaemonUpdateService implements DaemonUpdateSubsystem {
   readonly #options: DaemonUpdateServiceOptions;
@@ -193,15 +196,9 @@ export class DaemonUpdateService implements DaemonUpdateSubsystem {
         `${request.target} is not the latest release; the latest is ${latest.version}`,
       );
     }
-    const midTurn = await this.#options.activity.midTurn();
-    if (midTurn > 0 && request.when === 'when-idle') {
+    // `confirmMidTurn` is not read: a daemon from before this one asked for it, and this one never refuses.
+    if (request.when === 'when-idle' && (await this.#options.activity.midTurn()) > 0) {
       this.#pending = { state: 'waiting-for-idle', target: request.target, requestedAt: this.#nowIso() };
-    } else if (midTurn > 0 && request.confirmMidTurn !== true) {
-      throw new DaemonUpdateRefusal(
-        DAEMON_UPDATE_CODES.midTurn,
-        `${midTurn === 1 ? 'a ferret is' : `${String(midTurn)} ferrets are`} mid-turn; restarting now would interrupt ${midTurn === 1 ? 'it' : 'them'}`,
-        midTurn,
-      );
     } else {
       await this.#launch(request.target);
     }

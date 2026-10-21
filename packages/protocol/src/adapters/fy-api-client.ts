@@ -14,6 +14,12 @@ import {
 import { ApiErrorResponseSchema, NonNegativeIntegerSchema, PositiveIntegerSchema } from '../lib/common.ts';
 import { CONFIG_CHANGE_TOPIC, type ConfigChangeFrame, ConfigChangeFrameSchema } from '../lib/config-changes.ts';
 import {
+  classifyDaemonUnreachable,
+  type DaemonAttempt,
+  type DaemonRestartPatience,
+  waitOutDaemonRestart,
+} from '../lib/daemon-restart.ts';
+import {
   type DaemonUpdateSettingsPatch,
   DaemonUpdateSettingsPatchSchema,
   type DaemonUpdateStartRequest,
@@ -160,6 +166,11 @@ const defaultRequestId = (): string => crypto.randomUUID();
 
 const isTimeoutError = (error: unknown): boolean =>
   error instanceof Error && (error.name === 'TimeoutError' || error.name === 'AbortError');
+
+const unreachableOrFailed = (error: unknown): DaemonAttempt<Response> => {
+  const how = classifyDaemonUnreachable(error);
+  return how === undefined ? { kind: 'failed', error } : { kind: 'unreachable', how, error };
+};
 
 const jsonRequest = <Output>(method: string, schema: z.ZodType<Output>, value: unknown): RequestInit => ({
   method,
@@ -334,6 +345,8 @@ export class FyApiClient implements IFyApiClient {
   readonly #sleep: (milliseconds: number) => Promise<void>;
   readonly #onVersionSkew: ((skew: VersionSkew) => void) | undefined;
   readonly #failedSends: FailedSendMemory;
+  readonly #nowMs: () => number;
+  readonly #restartPatience: DaemonRestartPatience | undefined;
   #reportedVersionSkew = false;
 
   private constructor(options: FyClientOptions) {
@@ -347,7 +360,9 @@ export class FyApiClient implements IFyApiClient {
     this.#requestId = options.requestId ?? defaultRequestId;
     this.#sleep = options.sleep ?? defaultSleep;
     this.#onVersionSkew = options.onVersionSkew;
-    this.#failedSends = new FailedSendMemory(options.nowMs ?? Date.now);
+    this.#nowMs = options.nowMs ?? Date.now;
+    this.#failedSends = new FailedSendMemory(this.#nowMs);
+    this.#restartPatience = options.restartPatience;
   }
 
   static connect(options: FyClientOptions): Promise<FyApiClient> {
@@ -387,9 +402,7 @@ export class FyApiClient implements IFyApiClient {
       }
       if (attempt > 0) await this.#sleep(250 * attempt);
       try {
-        const deadline = AbortSignal.timeout(timeoutMs);
-        const signal = init.signal == null ? deadline : AbortSignal.any([init.signal, deadline]);
-        response = await this.#transport.send(`${this.#baseUrl}${path}`, { ...init, headers, signal });
+        response = await this.#send(path, init, headers, timeoutMs);
       } catch (error) {
         lastError = error;
         if (init.signal?.aborted) {
@@ -400,6 +413,26 @@ export class FyApiClient implements IFyApiClient {
           timedOut = true;
           break;
         }
+      }
+    }
+
+    // A daemon that is restarting refuses every quick retry above; a patient client waits it out.
+    if (response === undefined && !cancelled && !timedOut) {
+      const outcome = await waitOutDaemonRestart<Response>({
+        attempt: () => this.#attempt(path, init, headers, timeoutMs),
+        first: unreachableOrFailed(lastError),
+        // Every attempt carries the same logical request id, which is what the daemon applies once.
+        repeatable: true,
+        patience: this.#restartPatience,
+        nowMs: this.#nowMs,
+        sleep: this.#sleep,
+        signal: init.signal ?? undefined,
+      });
+      if (outcome.kind === 'answered') response = outcome.value;
+      else {
+        lastError = outcome.error;
+        cancelled = init.signal?.aborted === true;
+        timedOut = !cancelled && isTimeoutError(outcome.error);
       }
     }
 
@@ -455,6 +488,26 @@ export class FyApiClient implements IFyApiClient {
       payload = await response.text();
     }
     return schema.parse(payload);
+  }
+
+  #send(path: string, init: RequestInit, headers: Headers, timeoutMs: number): Promise<Response> {
+    const deadline = AbortSignal.timeout(timeoutMs);
+    const signal = init.signal == null ? deadline : AbortSignal.any([init.signal, deadline]);
+    return this.#transport.send(`${this.#baseUrl}${path}`, { ...init, headers, signal });
+  }
+
+  /** One attempt as the restart wait reads it: an answer, the daemon away, or anything else. */
+  async #attempt(
+    path: string,
+    init: RequestInit,
+    headers: Headers,
+    timeoutMs: number,
+  ): Promise<DaemonAttempt<Response>> {
+    try {
+      return { kind: 'answered', value: await this.#send(path, init, headers, timeoutMs) };
+    } catch (error) {
+      return unreachableOrFailed(error);
+    }
   }
 
   health(): Promise<HealthView> {

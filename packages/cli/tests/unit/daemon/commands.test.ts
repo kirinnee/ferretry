@@ -203,6 +203,26 @@ describe('daemon command surface', () => {
     should(service.calls).containEql('start');
   });
 
+  it('should hand restart --when-idle to the controller, and a bare restart nothing', async () => {
+    // Arrange
+    const seen: unknown[] = [];
+    const original = DaemonController.prototype.restart;
+    DaemonController.prototype.restart = async options => {
+      seen.push(options);
+    };
+
+    // Act
+    try {
+      await run(['daemon', 'restart', '--when-idle']).parsed;
+      await run(['daemon', 'restart']).parsed;
+    } finally {
+      DaemonController.prototype.restart = original;
+    }
+
+    // Assert
+    should(seen).deepEqual([{ whenIdle: true }, {}]);
+  });
+
   it('should route reset to the controller once --yes authorizes it', async () => {
     // Arrange + Act — no terminal in this suite, so `--yes` is what makes the verb reachable at all.
     const { parsed, resetTrees, out } = run(['daemon', 'reset', '--yes'], [undefined]);

@@ -8,8 +8,6 @@
 
 import {
   compareProtocolVersions,
-  DAEMON_UPDATE_CODES,
-  DaemonUpdateMidTurnBodySchema,
   type DaemonUpdateView,
   describeInstallMethod,
   INSTALL_METHOD_LABELS,
@@ -63,6 +61,13 @@ export const changelogRelease = (view: DaemonUpdateView): LatestRelease | undefi
 export const midTurnWords = (count: number): string =>
   count === 1 ? '1 ferret is mid-turn' : `${String(count)} ferrets are mid-turn`;
 
+/**
+ * The one line beside Update while ferrets are mid-turn. Updating no longer interrupts them: they run
+ * outside the daemon, and their Ferretry calls wait for it to come back (docs/updating.md).
+ */
+export const keepRunningWords = (count: number): string =>
+  `${midTurnWords(count)}. ${count === 1 ? 'It keeps' : 'They keep'} running while the machine restarts.`;
+
 export type JobTone = 'ok' | 'warn' | 'err' | 'pend';
 
 /** The update in flight, or the last one, as one sentence and a tone. */
@@ -112,27 +117,16 @@ export function versionPairWords(
   return { tone: 'warn', text: `App ${appVersion}, machine ${daemonVersion}: the versions differ. ${advice}` };
 }
 
-/** What an Update press came back with, when it was not the new view. */
-export type StartRefusal =
-  | { readonly kind: 'mid-turn'; readonly count: number }
-  | { readonly kind: 'message'; readonly text: string };
-
-/** The fields of a client error this reads; `FyHttpError` has all three. */
+/** The fields of a client error this reads; `FyHttpError` has both. */
 interface ErrorLike {
   readonly status?: unknown;
-  readonly code?: unknown;
-  readonly body?: unknown;
   readonly message?: unknown;
 }
 
-/** Turns a refused Update into the choice it needs ("mid-turn") or the daemon's own sentence. */
-export function startRefusal(cause: unknown): StartRefusal {
+/** A refused Update or setting, as the daemon's own sentence. */
+export function refusalWords(cause: unknown): string {
   const error = (typeof cause === 'object' && cause !== null ? cause : {}) as ErrorLike;
-  if (error.code === DAEMON_UPDATE_CODES.midTurn) {
-    const body = DaemonUpdateMidTurnBodySchema.safeParse(error.body);
-    return { kind: 'mid-turn', count: body.success ? body.data.midTurn : 1 };
-  }
-  return { kind: 'message', text: typeof error.message === 'string' ? error.message : String(cause) };
+  return typeof error.message === 'string' ? error.message : String(cause);
 }
 
 /** Whether a read failed because the machine has no update route yet: an older daemon, not a fault. */

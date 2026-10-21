@@ -511,7 +511,10 @@ export const DaemonUpdateViewSchema = z.strictObject({
   check: UpdateCheckSchema,
   /** A newer release is known — `isUpdateAvailable(current, knownLatestRelease(check))`. */
   available: z.boolean(),
-  /** Ferrets mid-turn right now; an update started `now` while this is not zero needs consent. */
+  /**
+   * Ferrets mid-turn right now. Informational: an update started `now` goes ahead anyway, because
+   * ferrets keep running through a restart; `when-idle` and an automatic install wait for zero.
+   */
   midTurn: NonNegativeIntegerSchema,
   /** "Install updates automatically when idle" — off unless somebody turned it on. */
   autoInstall: z.boolean(),
@@ -524,7 +527,11 @@ export const DaemonUpdateStartRequestSchema = z.strictObject({
   /** The version the person saw and agreed to — refused when it is no longer the latest known. */
   target: ProtocolVersionSchema,
   when: z.enum(['now', 'when-idle']),
-  /** "Update anyway": restart even though ferrets are mid-turn. Only read with `when: 'now'`. */
+  /**
+   * Not read by this daemon, which never refuses an update mid-turn. Still accepted, and still sent
+   * with every `now` by the app, because a daemon from before "update anytime" refuses a mid-turn
+   * `now` without it — so a newer app updating an older machine is never told no.
+   */
   confirmMidTurn: z.boolean().optional(),
 });
 export type DaemonUpdateStartRequest = z.infer<typeof DaemonUpdateStartRequestSchema>;
@@ -534,20 +541,11 @@ export type DaemonUpdateSettingsPatch = z.infer<typeof DaemonUpdateSettingsPatch
 
 /** Refusal codes the update routes answer with, so the app can say the right sentence. */
 export const DAEMON_UPDATE_CODES = {
-  midTurn: 'update_mid_turn',
   inProgress: 'update_in_progress',
   notAvailable: 'update_not_available',
   notSelfUpdatable: 'update_not_self_updatable',
   staleTarget: 'update_stale_target',
 } as const;
-
-/** The `409 update_mid_turn` body: how many ferrets would be interrupted. */
-export const DaemonUpdateMidTurnBodySchema = z.looseObject({
-  error: z.string(),
-  code: z.literal(DAEMON_UPDATE_CODES.midTurn),
-  midTurn: NonNegativeIntegerSchema,
-});
-export type DaemonUpdateMidTurnBody = z.infer<typeof DaemonUpdateMidTurnBodySchema>;
 
 // ---------------------------------------------------------------------------------------------------
 // Reading `nix profile list --json`

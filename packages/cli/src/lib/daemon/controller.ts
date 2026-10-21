@@ -1,4 +1,5 @@
 import type { HealthView } from '@ferretry/protocol';
+import { passMidTurn } from '../update/mid-turn.ts';
 import { type DaemonUpdateStatus, renderUpdateStatus } from '../update/status.ts';
 import type { InstalledDaemonBinary } from './binary.ts';
 import type { DaemonLayout } from './layout.ts';
@@ -13,6 +14,7 @@ import type {
   IDaemonLogPort,
   IDaemonOutput,
   IDaemonPrompt,
+  IDaemonRestartMarkerPort,
   IDaemonSupervisor,
   INixGcRootPort,
   IResetInventoryPort,
@@ -69,6 +71,20 @@ export interface DaemonCommandOptions {
  * would be a second thing to learn for the same class of act.
  */
 const RESET_CONFIRMATION_WORD = 'reset';
+
+/** Flags `restart` accepts. */
+export interface DaemonRestartOptions {
+  /** Wait until no ferret is mid-turn. Without it the restart goes ahead: ferrets keep running. */
+  readonly whenIdle?: boolean;
+  /** The caller has already said what the restart means for ferrets mid-turn (`fy daemon update`). */
+  readonly midTurnSaid?: boolean;
+}
+
+/**
+ * How long a restart marker vouches for a restart in progress. Longer than any restart takes, so it
+ * never expires under one; short enough that a marker a killed `fy` left behind stops mattering.
+ */
+const RESTART_MARKER_TTL_MS = 2 * 60_000;
 
 /** Flags `reset` accepts. */
 export interface DaemonResetOptions {
@@ -161,6 +177,13 @@ export interface DaemonControllerDeps {
   readonly updateStatus?: IDaemonUpdateStatusReader;
   /** Offers a nix profile install when `install` finds a daemon running from a `nix shell`. */
   readonly nixShellOffer?: INixShellOffer;
+  /**
+   * How many ferrets are mid-turn, for the line a restart says and for `--when-idle`. Answers 0 when
+   * the daemon cannot tell. Absent, a restart says nothing about ferrets.
+   */
+  readonly turns?: { midTurn(): Promise<number> };
+  /** Tells every `fy` on this host that a restart is underway, so their calls wait it out. */
+  readonly restartMarker?: IDaemonRestartMarkerPort;
 }
 
 /** Everything `status` concluded, unrendered. See `DaemonController.inspect`. */
@@ -248,8 +271,25 @@ export class DaemonController {
     await this.#serialized('stop', () => this.#stop());
   }
 
-  async restart(): Promise<void> {
+  /**
+   * Restarts the daemon — with ferrets mid-turn, too, because they keep running (`mid-turn.ts`).
+   * The mid-turn line, and any `--when-idle` wait, come BEFORE the claim, so waiting for a turn to end
+   * never holds every other `fy daemon …` invocation on this host.
+   */
+  async restart(options: DaemonRestartOptions = {}): Promise<void> {
     this.deps.installedDaemon();
+    const turns = this.deps.turns;
+    if (turns !== undefined && options.midTurnSaid !== true) {
+      await passMidTurn(
+        {
+          midTurn: () => turns.midTurn(),
+          sleep: ms => this.deps.clock.sleep(ms),
+          warn: line => this.deps.out.warn(line),
+        },
+        options.whenIdle === true,
+        'restarting',
+      );
+    }
     await this.#serialized('restart', () => this.#restart());
   }
 
@@ -360,7 +400,14 @@ export class DaemonController {
     const owner = await this.#owner();
     const health = await this.deps.health.probe();
     await owner.assertServes(health?.pid);
-    const ready = await this.#restartUnder(owner, daemon.path, health);
+    const marker = this.deps.restartMarker;
+    await marker?.mark(this.deps.clock.now() + RESTART_MARKER_TTL_MS);
+    let ready: HealthView;
+    try {
+      ready = await this.#restartUnder(owner, daemon.path, health);
+    } finally {
+      await marker?.clear();
+    }
     await this.#retireLegacyArtifacts();
     this.deps.out.success(`${this.#name} restarted (pid ${String(ready.pid)})`);
   }
