@@ -55,19 +55,63 @@ export const HostedRelayLimitsSchema = z
   });
 export type HostedRelayLimits = z.infer<typeof HostedRelayLimitsSchema>;
 
+const MEBIBYTE = 1024 * 1024;
+const GIBIBYTE = 1024 * MEBIBYTE;
+
 /**
- * Conservative first-deployment limits, intentionally mutable through the operator endpoint.
- * They are defaults for a new control object, not a baked-in relay address or an immutable policy.
+ * Limits for a new control object, intentionally mutable through the operator endpoint. They are
+ * defaults, not a baked-in relay address or an immutable policy.
+ *
+ * The byte ceilings are cost guards sized for one person's machines, not a rationing scheme: the
+ * first-deployment 1 GiB/day locked an owner out of their own daemon in an afternoon, while
+ * Cloudflare bills Workers and Durable Objects by requests, messages and duration rather than by
+ * bytes relayed. docs/relay-protocol.md §13 carries the sizing.
  */
 export const DEFAULT_HOSTED_RELAY_LIMITS: HostedRelayLimits = {
   maxConcurrentConnectionsPerDaemon: 16,
   maxConcurrentConnectionsGlobal: 512,
-  maxBytesPerMinutePerDaemon: 64 * 1024 * 1024,
-  maxBytesPerMinuteGlobal: 1024 * 1024 * 1024,
-  maxBytesPerDayPerDaemon: 1024 * 1024 * 1024,
-  maxBytesPerDayGlobal: 16 * 1024 * 1024 * 1024,
+  maxBytesPerMinutePerDaemon: 512 * MEBIBYTE,
+  maxBytesPerMinuteGlobal: 4 * GIBIBYTE,
+  maxBytesPerDayPerDaemon: 20 * GIBIBYTE,
+  maxBytesPerDayGlobal: 200 * GIBIBYTE,
   maxTrackedDaemons: 10_000,
 };
+
+/**
+ * Every default set this relay has ever shipped, oldest first, excluding the current one.
+ *
+ * A deploy seeds limits only into an untouched control object, so a stored configuration keeps
+ * whatever defaults were current when it was first written. One that still holds a former default
+ * set, field for field, was never chosen by its operator, and reading it as today's defaults is what
+ * makes raising a default reach the deployments that already exist. Anything else — even one field
+ * changed — is the operator's decision and is kept.
+ */
+export const SUPERSEDED_HOSTED_RELAY_LIMITS: readonly HostedRelayLimits[] = [
+  {
+    maxConcurrentConnectionsPerDaemon: 16,
+    maxConcurrentConnectionsGlobal: 512,
+    maxBytesPerMinutePerDaemon: 64 * MEBIBYTE,
+    maxBytesPerMinuteGlobal: GIBIBYTE,
+    maxBytesPerDayPerDaemon: GIBIBYTE,
+    maxBytesPerDayGlobal: 16 * GIBIBYTE,
+    maxTrackedDaemons: 10_000,
+  },
+];
+
+function sameLimits(left: HostedRelayLimits, right: HostedRelayLimits): boolean {
+  return (Object.keys(left) as (keyof HostedRelayLimits)[]).every(key => left[key] === right[key]);
+}
+
+/**
+ * The configuration a stored document means today: a superseded default set reads as the current
+ * defaults, and every other document is returned unchanged. Pure and idempotent, so it can run on
+ * every read without a migration step that a failed write could leave half-done.
+ */
+export function upgradeHostedRelayConfiguration(configuration: HostedRelayConfiguration): HostedRelayConfiguration {
+  return SUPERSEDED_HOSTED_RELAY_LIMITS.some(limits => sameLimits(limits, configuration.limits))
+    ? { ...configuration, limits: DEFAULT_HOSTED_RELAY_LIMITS }
+    : configuration;
+}
 
 export const HostedRelayConfigurationInputSchema = z.strictObject({
   version: z.literal(HOSTED_RELAY_CONFIG_VERSION),

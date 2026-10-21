@@ -36,6 +36,8 @@ import {
   reclaimableHostedRelayDaemon,
   recountHostedRelayConnections,
   releaseHostedRelayConnection,
+  SUPERSEDED_HOSTED_RELAY_LIMITS,
+  upgradeHostedRelayConfiguration,
 } from '@ferretry/relay';
 import should from 'should';
 
@@ -71,6 +73,48 @@ describe('hosted relay runtime configuration', () => {
     should(advertiseHostedRelay(initial)).deepEqual({ version: 1, relayUrl: null });
     should(hostedRelayConnection(advertiseHostedRelay(initial))).be.null();
     should(HostedRelayConfigurationSchema.parse(initial)).deepEqual(initial);
+  });
+
+  it("should size the default byte ceilings for a working day of one person's machines", () => {
+    const gibibyte = 1024 * 1024 * 1024;
+    should(DEFAULT_HOSTED_RELAY_LIMITS).match({
+      maxBytesPerMinutePerDaemon: gibibyte / 2,
+      maxBytesPerMinuteGlobal: 4 * gibibyte,
+      maxBytesPerDayPerDaemon: 20 * gibibyte,
+      maxBytesPerDayGlobal: 200 * gibibyte,
+    });
+    should(HostedRelayLimitsSchema.parse(DEFAULT_HOSTED_RELAY_LIMITS)).deepEqual(DEFAULT_HOSTED_RELAY_LIMITS);
+    for (const superseded of SUPERSEDED_HOSTED_RELAY_LIMITS) {
+      should(HostedRelayLimitsSchema.parse(superseded)).deepEqual(superseded);
+      should(superseded).not.deepEqual(DEFAULT_HOSTED_RELAY_LIMITS);
+    }
+  });
+
+  it('should read a stored superseded default set as the current defaults and keep everything else', () => {
+    const [firstDeployment] = SUPERSEDED_HOSTED_RELAY_LIMITS;
+    if (firstDeployment === undefined) throw new Error('no superseded default set');
+    should(firstDeployment.maxBytesPerDayPerDaemon).equal(1024 * 1024 * 1024);
+    const stored = configureHostedRelay(
+      { version: HOSTED_RELAY_CONFIG_VERSION, relayUrl: 'https://relay.example/', limits: firstDeployment },
+      at,
+    );
+    const upgraded = upgradeHostedRelayConfiguration(stored);
+    should(upgraded).deepEqual({ ...stored, limits: DEFAULT_HOSTED_RELAY_LIMITS });
+    should(upgradeHostedRelayConfiguration(upgraded)).equal(upgraded);
+    should(HostedRelayConfigurationSchema.parse(upgraded)).deepEqual(upgraded);
+
+    // One field the operator chose is the operator's decision for the whole document.
+    const customised = configureHostedRelay(
+      {
+        version: HOSTED_RELAY_CONFIG_VERSION,
+        relayUrl: null,
+        limits: { ...firstDeployment, maxTrackedDaemons: firstDeployment.maxTrackedDaemons - 1 },
+      },
+      at,
+    );
+    should(upgradeHostedRelayConfiguration(customised)).equal(customised);
+    const current = configuration();
+    should(upgradeHostedRelayConfiguration(current)).equal(current);
   });
 
   it('should turn a remotely supplied address into the existing relay carrier', () => {
