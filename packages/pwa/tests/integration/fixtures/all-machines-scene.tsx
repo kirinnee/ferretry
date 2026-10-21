@@ -60,6 +60,18 @@ const session = (
     directory: cwd,
   });
 
+const sessionChild = (
+  id: string,
+  teammate: string,
+  name: string,
+  cwd: string,
+  minutes: number,
+  parent: string,
+): SessionView => {
+  const child = session(id, teammate, name, cwd, minutes);
+  return sessionView(id, { config: { ...child.config, parent }, state: child.state, directory: cwd });
+};
+
 const SESSIONS: Readonly<Record<string, readonly SessionView[]>> = {
   [STUDIO.daemonId]: [
     session('s-ivo', 'ivo', 'Relay carrier bench', '/home/k/ferretry', 1),
@@ -77,6 +89,28 @@ const SESSIONS: Readonly<Record<string, readonly SessionView[]>> = {
   ],
 };
 
+/**
+ * `?big=1`: about eight sessions on each machine, a sub-ferret tree under `s-ivo` and a long task name,
+ * so the density captures show a list that scrolls. None of them needs a person, so the assertions on
+ * the small scene (what is pinned, what is offline) do not move.
+ */
+const CROWD: Readonly<Record<string, readonly SessionView[]>> = {
+  [STUDIO.daemonId]: [
+    session('s-kai', 'kai', 'Wire the relay metrics into the daemon status page and its tests', '/home/k/ferretry', 14),
+    sessionChild('s-zed', 'zed', 'Audit the grants copy', '/home/k/ferretry', 2, 's-ivo'),
+    sessionChild('s-mo', 'mo', 'Profile the sidebar', '/home/k/ferretry', 4, 's-ivo'),
+    session('s-tal', 'tal', 'Draft the migration notes', '/home/k/notes', 30),
+  ],
+  [LAPTOP.daemonId]: [
+    session('l-sol', 'sol', 'Draft release notes', '/Users/k/site', 11),
+    session('l-tev', 'tev', 'Fix the footer links', '/Users/k/site', 15),
+    session('l-uma', 'uma', 'Compress the hero images', '/Users/k/site', 18),
+    session('l-wes', 'wes', 'Check the pricing page', '/Users/k/site', 22),
+    session('l-xan', 'xan', 'Rewrite the FAQ', '/Users/k/site', 26),
+    session('l-yui', 'yui', 'Proof the about page', '/Users/k/site', 31),
+  ],
+};
+
 const PROJECTS: Readonly<Record<string, readonly FleetProject[]>> = {
   [STUDIO.daemonId]: [
     { name: 'ferretry', path: '/home/k/ferretry' },
@@ -84,6 +118,12 @@ const PROJECTS: Readonly<Record<string, readonly FleetProject[]>> = {
   ],
   [LAPTOP.daemonId]: [{ name: 'site', path: '/Users/k/site' }],
 };
+
+const crowded = new URLSearchParams(window.location.search).get('big') === '1';
+const sessionsOf = (daemonId: string): readonly SessionView[] => [
+  ...(SESSIONS[daemonId] ?? []),
+  ...(crowded ? (CROWD[daemonId] ?? []) : []),
+];
 
 const OWN_DEVICE: Readonly<Record<string, string>> = {
   [STUDIO.daemonId]: STUDIO.deviceId,
@@ -112,7 +152,7 @@ let laptopUp = true;
 let clock = NOW - 5 * 60_000;
 const fleet = new DaemonFleetStore(
   {
-    list: async daemon => answer(daemon, 'sessions', SESSIONS[daemon.daemonId] ?? []),
+    list: async daemon => answer(daemon, 'sessions', sessionsOf(daemon.daemonId)),
     get: async () => await Promise.reject(new Error('not in this scene')),
   },
   () => clock,
@@ -150,6 +190,10 @@ const navigate = (to: string): void => {
   evidence.navigations.push(to);
 };
 
+/** `?density=full|compact` is the reader's stored choice; absent, the bar's own default. */
+const densityParam = new URLSearchParams(window.location.search).get('density');
+const storedDensity = densityParam === 'full' || densityParam === 'compact' ? densityParam : undefined;
+
 function Scene({ scene, open }: { readonly scene: 'bar' | 'page' | 'drawer'; readonly open: DaemonConnection }) {
   useMachinesPoll(
     fleet,
@@ -186,6 +230,7 @@ function Scene({ scene, open }: { readonly scene: 'bar' | 'page' | 'drawer'; rea
         active={null}
         activeSessionId="s-ivo"
         daemonId={open.daemonId}
+        density={storedDensity ?? null}
         initialMode="all"
         learningPassive={LEARNERS.get(open.daemonId) ?? new Set()}
         machineLearners={LEARNERS}
@@ -194,6 +239,7 @@ function Scene({ scene, open }: { readonly scene: 'bar' | 'page' | 'drawer'; rea
         machines={NEW_SESSION_MACHINES}
         now={NOW}
         onAddMachine={() => undefined}
+        onMoveMachine={() => undefined}
         onClose={() => undefined}
         onNavigate={navigate}
         onOpenPalette={() => undefined}

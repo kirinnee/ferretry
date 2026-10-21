@@ -29,7 +29,7 @@ import { useInputModality } from '../hooks/use-input-modality.ts';
 import { allMachinesView, type MachineSource } from '../lib/all-machines.ts';
 import { displayCallsign } from '../lib/callsign.ts';
 import { cn } from '../lib/class-names.ts';
-import type { ModeFilter } from '../lib/controls.ts';
+import type { Density, ModeFilter } from '../lib/controls.ts';
 import type { DaemonId } from '../lib/daemon-connection.ts';
 import type { FleetProject } from '../lib/fleet-grouping.ts';
 import {
@@ -47,6 +47,7 @@ import { NewSessionMenu } from './new-session-menu.tsx';
 import { PALETTE_KEYSHORTCUTS, paletteShortcutLabel } from './palette-shortcut.ts';
 import { RouteLink } from './route-link.tsx';
 import { type OpenRowMenu, SessionMenuContext, type SessionMenuState } from './session-menu-context.ts';
+import { SessionsBarOptions } from './sessions-bar-density.tsx';
 import { SessionsBarFilters, sessionsBarEmptyMessage } from './sessions-bar-filters.tsx';
 import { SessionsBarMachines, SessionsRailMachineDots } from './sessions-bar-machines.tsx';
 import {
@@ -54,6 +55,7 @@ import {
   type SessionsListFilter,
   sessionsBarSubline,
   sessionsBarView,
+  sidebarCompact,
 } from './sessions-bar-model.ts';
 import { sessionTree } from './sessions-bar-tree.ts';
 import { SessionsBarTree } from './sessions-bar-tree.tsx';
@@ -116,6 +118,13 @@ export interface SessionsBarProps {
   readonly onAddMachine: () => void;
   /** Drops a machine heading beside another, from the all-machines list. Absent: the headings stay put. */
   readonly onMoveMachine?: MoveMachine;
+  /**
+   * How much a row says: the device's Density setting, `null`/absent while the reader has not chosen. Only
+   * Full draws the three-line rows; every other value, and no choice, draws one line per session.
+   */
+  readonly density?: Density | null;
+  /** The reader chose a density in the bar's options menu. Absent: the bar offers no such menu. */
+  readonly onDensityChange?: (density: Density) => void;
   /** The kind filter this device remembered, read when the bar opens. Absent or null: Interactive. */
   readonly initialMode?: ModeFilter | null;
   /** The reader chose a kind: store it for this device. Absent: the choice lasts only while the bar does. */
@@ -322,6 +331,9 @@ const allMachinesFor = (props: SessionsBarProps, listFilter: SessionsListFilter)
         sortRows: true,
       });
 
+const densityWord = (density: Density | null | undefined): 'compact' | 'comfortable' =>
+  sidebarCompact(density) ? 'compact' : 'comfortable';
+
 /** The column's and the drawer's content: everything but the frame. */
 function SessionsBarBody(props: SessionsBarProps & ListFilterProps & { readonly navigate: (to: string) => void }) {
   const { daemonId, sessions, projects, activeSessionId, active, navigate, listFilter } = props;
@@ -506,6 +518,9 @@ function SessionsBarTop(props: SessionsBarProps & { readonly navigate: (to: stri
         onNavigate={props.navigate}
         {...(props.onPairPhone === undefined ? {} : { onPairPhone: props.onPairPhone })}
       />
+      {props.onDensityChange === undefined ? null : (
+        <SessionsBarOptions compact={sidebarCompact(props.density)} onChange={props.onDensityChange} />
+      )}
       <NewSessionControl marked navigate={props.navigate} props={props} />
     </div>
   );
@@ -607,7 +622,7 @@ function SessionsDrawer(props: SessionsBarProps & ListFilterProps) {
         tabIndex={-1}
         type="button"
       />
-      <div className="fy-sbar fy-sbar--drawer">
+      <div className="fy-sbar fy-sbar--drawer" data-sbar-density={densityWord(props.density)}>
         <SessionsBarTop {...props} navigate={navigate} />
         <SessionsBarBody {...props} navigate={navigate} />
       </div>
@@ -633,6 +648,7 @@ function SessionsColumn(props: SessionsBarProps & ListFilterProps) {
       <nav
         aria-label="Sessions"
         className={cn('fy-sbar', 'fy-sbar--column')}
+        data-sbar-density={densityWord(props.density)}
         data-sessions-bar="column"
         style={{ width: `${width}px` }}
       >
