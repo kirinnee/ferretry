@@ -144,6 +144,17 @@ describe('fastLaunchArguments', () => {
     should(JSON.parse(off[1] as string)).containEql({ fastMode: false });
   });
 
+  it('should keep the fixed Remote Control off switch in the settings that replace the overlay', () => {
+    // Arrange
+    const fixed = JSON.stringify({ permissions: { defaultMode: 'auto' }, remoteControlAtStartup: false });
+
+    // Act
+    const on = fastLaunchArguments('claude', true, fixed);
+
+    // Assert — a fast launch must not hand Remote Control back to the imported preference.
+    should(JSON.parse(on[1] as string)).containEql({ remoteControlAtStartup: false, fastMode: true });
+  });
+
   it('should launch a login with no fixed file on a settings object of its own', () => {
     // Act / Assert
     should(fastLaunchArguments('claude', true, undefined)).eql(['--settings', '{"fastMode":true}']);

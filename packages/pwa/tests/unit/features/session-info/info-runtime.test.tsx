@@ -208,6 +208,26 @@ describe('InfoRuntime — Pack mode', () => {
   });
 });
 
+describe('InfoRuntime — Remote control', () => {
+  it('says off for a session that did not ask for it', async () => {
+    const root = await show();
+    must(root.querySelector('[data-info-row="Remote control"]'), 'remote control row');
+    expect(root.querySelector('[data-info-remote-control="off"]')?.textContent).toBe('Off');
+  });
+
+  it('says on only when the session explicitly asked for it', async () => {
+    const root = await show({ view: sessionView('session-a', { config: { remoteControl: true } }) });
+    expect(root.querySelector('[data-info-remote-control="on"]')?.textContent).toBe(
+      'On · another device can drive this session',
+    );
+  });
+
+  it('says it is not available on Codex', async () => {
+    const root = await show({ view: sessionView('session-a', { config: { harness: 'codex' } }) });
+    expect(root.querySelector('[data-info-remote-control="off"]')?.textContent).toBe('Not available on Codex');
+  });
+});
+
 describe('InfoRuntime — Instructions', () => {
   it('lists each launch section with its size, the mode and whether it may ask questions', async () => {
     const root = await show({

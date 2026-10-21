@@ -2,6 +2,7 @@ import { describe, it } from 'bun:test';
 import should from 'should';
 import {
   AGENT_INSTRUCTION,
+  AGENT_TOOLS_INSTRUCTION,
   applyFixedLayer,
   CLAUDE_NO_QUESTIONS_FLAG,
   CLAUDE_PROMPTS_SEEN,
@@ -11,12 +12,11 @@ import {
   codexNoticeOverride,
   codexToolsServer,
   codexTrustOverride,
+  FERRET_SECTIONS,
   FERRETRY_MCP_ENV_VARS,
   type FixedLayer,
   type FixedLayerInput,
   fixedLayerFor,
-  FERRET_SECTIONS,
-  AGENT_TOOLS_INSTRUCTION,
   HYPERMEDIA_ENV,
   HYPERMEDIA_INSTRUCTION,
   LESSONS_INSTRUCTION,
@@ -139,6 +139,13 @@ describe('fixedLayerFor — Claude', () => {
             key: 'hasCompletedOnboarding',
             value: true,
           },
+          {
+            purpose: 'remote-control',
+            target: 'settings',
+            path: ['remoteControlAtStartup'],
+            key: 'remoteControlAtStartup',
+            value: false,
+          },
           ...CLAUDE_SEEN_ENTRIES,
           {
             purpose: 'skip-prompt',
@@ -172,7 +179,11 @@ describe('fixedLayerFor — Claude', () => {
           },
         ],
         args: ['--permission-mode', 'auto', '--disallowed-tools=AskUserQuestion', ...CLAUDE_TOOL_ARGS],
-        claudeSettingsOverlay: { permissions: { defaultMode: 'auto' }, skipAutoPermissionPrompt: true },
+        claudeSettingsOverlay: {
+          permissions: { defaultMode: 'auto' },
+          remoteControlAtStartup: false,
+          skipAutoPermissionPrompt: true,
+        },
         claudeJson: {
           hasCompletedOnboarding: true,
           ...CLAUDE_PROMPTS_SEEN,
@@ -202,6 +213,7 @@ describe('fixedLayerFor — Claude', () => {
     // The overlay names the mode too: a flag-settings mode is what keeps the auto-default dialog away.
     should(actual.claudeSettingsOverlay).deepEqual({
       permissions: { defaultMode: 'bypassPermissions' },
+      remoteControlAtStartup: false,
       skipDangerousModePermissionPrompt: true,
     });
     should(actual.entries.some(entry => entry.key === 'skipAutoPermissionPrompt')).be.false();
@@ -324,6 +336,7 @@ describe('applyFixedLayer', () => {
     should(actual.settings).deepEqual({
       permissions: { defaultMode: 'auto', allow: ['Bash(ls)'] },
       theme: 'dark',
+      remoteControlAtStartup: false,
       skipAutoPermissionPrompt: true,
     });
     should(actual.fixed).equal(claudeAuto);
@@ -336,6 +349,21 @@ describe('applyFixedLayer', () => {
       layer: { name: 'mine' },
       fixed: { purpose: 'permission-mode', value: 'auto' },
     });
+  });
+
+  it('should override an imported Remote Control at startup preference and strike it through', () => {
+    // Arrange — the owner's own Claude settings, copied into a profile, start every session with it on
+    const profile = profileWith('claude', { body: { remoteControlAtStartup: true } });
+
+    // Act
+    const actual = applyFixedLayer(profile, claudeAuto);
+
+    // Assert
+    should(actual.settings).containDeep({ remoteControlAtStartup: false });
+    should(actual.overridden.map(entry => entry.kind === 'setting' && [entry.key, entry.value])).deepEqual([
+      ['remoteControlAtStartup', true],
+    ]);
+    should(actual.overridden[0]).containDeep({ fixed: { purpose: 'remote-control', value: false } });
   });
 
   it('should not report a user value equal to the fixed one', () => {

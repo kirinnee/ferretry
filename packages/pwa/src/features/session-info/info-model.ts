@@ -57,6 +57,8 @@ export const INFO_HINT = {
     'Passive learning only controls whether this ferret is instructed to file lessons with fy lesson suggest. Change it in Actions.',
   hypermedia:
     'Whether this ferret is told it may explain with diagrams, drawings, interactive pages and media in chat. A change takes effect when it next starts. Change it in Actions.',
+  remoteControl:
+    'Whether this Claude Code session is published to claude.ai/code and the Claude app so another device can drive it. Ferretry starts every session with it off unless it was asked for in New session › Advanced options. Takes effect at the next launch.',
   pack: 'Pack mode: whether this ferret is told it may delegate to sub-ferrets and pick the model each one runs on. The machine’s own switch and the depth limit still apply. A change takes effect at its next launch. Change it in Actions.',
 } as const;
 
@@ -199,3 +201,9 @@ export const launchInstructionFacts = (view: SessionView): LaunchInstructionFact
 
 /** The Pack mode row's value: said as what the ferret is told, and when a change lands. */
 export const packLabel = (on: boolean): string => (on ? 'On · may delegate to sub-ferrets' : 'Off · works alone');
+
+/** The Remote Control row's value: off unless the session asked for it, and not offered at all on Codex. */
+export const remoteControlLabel = (view: SessionView): string => {
+  if (view.config.harness === 'codex') return 'Not available on Codex';
+  return view.config.remoteControl ? 'On · another device can drive this session' : 'Off';
+};

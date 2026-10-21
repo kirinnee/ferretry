@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import type { ManagedWorktreeView } from '@ferretry/protocol';
 import {
+  charsLabel,
   effortLabel,
   harnessLabel,
   hypermediaLabel,
@@ -8,7 +9,6 @@ import {
   INFO_HINT,
   INFO_TAB_LABEL,
   INFO_TABS,
-  charsLabel,
   LAUNCH_SECTION_LABEL,
   launchInstructionFacts,
   learningLabel,
@@ -17,6 +17,7 @@ import {
   modelFacts,
   packLabel,
   packOn,
+  remoteControlLabel,
   worktreeFact,
 } from '../../../../src/features/session-info/info-model.ts';
 import { sessionView } from '../../../support/sessions.ts';
@@ -241,6 +242,19 @@ describe('pack', () => {
     expect(packLabel(true)).toBe('On · may delegate to sub-ferrets');
     expect(packLabel(false)).toBe('Off · works alone');
     expect(INFO_HINT.pack).toContain('next launch');
+  });
+});
+
+describe('remoteControlLabel', () => {
+  it('reads off unless the session explicitly asked, and not available on Codex', () => {
+    expect(remoteControlLabel(sessionView('plain'))).toBe('Off');
+    expect(remoteControlLabel(sessionView('on', { config: { remoteControl: true } }))).toBe(
+      'On · another device can drive this session',
+    );
+    expect(remoteControlLabel(sessionView('codex', { config: { harness: 'codex', remoteControl: true } }))).toBe(
+      'Not available on Codex',
+    );
+    expect(INFO_HINT.remoteControl).toContain('next launch');
   });
 });
 

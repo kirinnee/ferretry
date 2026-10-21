@@ -124,7 +124,7 @@ export interface NewSessionPageProps {
   readonly createFleetClient?: FleetClientFactory;
 }
 
-type TextDraftField = Exclude<keyof NewSessionDraft, 'mode' | 'fast'>;
+type TextDraftField = Exclude<keyof NewSessionDraft, 'mode' | 'fast' | 'remoteControl'>;
 
 const fieldId = (field: TextDraftField): string => `fy-new-session-${field}`;
 
@@ -205,6 +205,10 @@ const fastUnavailableReason = (account: AccountPickerOption | null, typed: strin
 };
 
 const FAST_REASON_ID = 'fy-new-session-fast-reason';
+const REMOTE_CONTROL_ID = 'fy-new-session-remote-control';
+const REMOTE_CONTROL_REASON_ID = 'fy-new-session-remote-control-reason';
+/** Codex has no Remote Control surface, so its sessions can never ask for one. */
+const REMOTE_CONTROL_CODEX_REASON = 'Codex has no Remote Control.';
 
 const modelPlaceholder = (account: AccountPickerOption | null): string =>
   account?.defaultModel ? `default: ${account.defaultModel}` : '';
@@ -307,6 +311,7 @@ export function NewSessionPage({
   // A model the catalog says has no fast mode cannot be launched with it, so the switch says why it is
   // unavailable and the request never carries it (the daemon would refuse it too).
   const fastReason = fastUnavailableReason(chosen, draft.model);
+  const remoteControlReason = chosen?.kind === 'codex' ? REMOTE_CONTROL_CODEX_REASON : undefined;
   const noAccounts = (
     <NoSessionAccounts
       onOpenSettings={() =>
@@ -321,10 +326,17 @@ export function NewSessionPage({
     setSubmitting(true);
     setError(null);
     try {
-      const scope = await submitNewSession(fastReason === undefined ? draft : { ...draft, fast: false }, {
-        connection,
-        start: request => startSession(connection, request),
-      });
+      const scope = await submitNewSession(
+        {
+          ...draft,
+          fast: draft.fast && fastReason === undefined,
+          remoteControl: draft.remoteControl && remoteControlReason === undefined,
+        },
+        {
+          connection,
+          start: request => startSession(connection, request),
+        },
+      );
       onNavigate(daemonSessionPath(scope.daemonId, scope.sessionId));
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught));
@@ -528,6 +540,31 @@ export function NewSessionPage({
               Faster output on models that offer it. {FAST_COST_NOTE}
             </p>
           </div>
+
+          <details className="rounded-control border border-border-strong px-3 py-2" data-new-session-advanced="">
+            <summary className="cursor-pointer text-ui font-medium text-fg-soft">Advanced options</summary>
+            <div className="mt-2" data-new-session-remote-control="">
+              <label className="flex min-h-[44px] items-start gap-sm text-ui text-fg" htmlFor={REMOTE_CONTROL_ID}>
+                <input
+                  aria-describedby={remoteControlReason === undefined ? undefined : REMOTE_CONTROL_REASON_ID}
+                  checked={draft.remoteControl && remoteControlReason === undefined}
+                  className="mt-1 h-4 w-4 shrink-0"
+                  disabled={remoteControlReason !== undefined}
+                  id={REMOTE_CONTROL_ID}
+                  onChange={() => setDraft(current => ({ ...current, remoteControl: !current.remoteControl }))}
+                  type="checkbox"
+                />
+                <span>Start with Remote Control on</span>
+              </label>
+              <p
+                className="m-0 mt-1 text-meta leading-base text-muted"
+                {...(remoteControlReason === undefined ? {} : { id: REMOTE_CONTROL_REASON_ID })}
+              >
+                {remoteControlReason ??
+                  'Lets claude.ai/code and the Claude app drive this session. Off by default; Ferretry switches it off even if your Claude settings turn it on.'}
+              </p>
+            </div>
+          </details>
 
           <SessionField hint="optional — groups related sessions" inputId={fieldId('label')} label="Label">
             <input

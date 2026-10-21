@@ -48,6 +48,7 @@
         "harness/local-models-screenshot.tsx",
         "harness/runtime-switch-screenshot.tsx",
         "harness/fast-mode-screenshot.tsx",
+        "harness/remote-control-screenshot.tsx",
         "harness/receipts-screenshot.tsx",
         "harness/harness-events-screenshot.tsx",
         "harness/transcript-unbound-screenshot.tsx",

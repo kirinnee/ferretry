@@ -2075,7 +2075,7 @@ function createSessionControlSubsystem(
         ...(launchEffort === undefined ? {} : { launchReasoningEffort: launchEffort }),
         ...(launchFast === undefined ? {} : { launchFast }),
         ...(settingsDigest === undefined ? {} : { launchSettings: settingsDigest }),
-        remoteControl: request.remoteControl === true,
+        remoteControl: request.remoteControl === true && account.kind === 'claude',
         harnessFlags: [...(request.harnessFlags ?? [])],
         /**
          * WHICH TURN THIS SESSION IS ON, which is the number of the turn document it was handed.

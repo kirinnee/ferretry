@@ -14,6 +14,11 @@
  *   `settings.json` names a non-auto mode; `hasSeenAutoDefaultNudge` in `.claude.json`, or the same mode
  *   named by the `--settings` overlay, each keeps it away.
  *
+ * - Remote Control at startup: a user `settings.json` carrying `remoteControlAtStartup: true` makes the
+ *   session attempt the Remote Control bridge (the debug log's `[bridge:` lines); the same key set false
+ *   in the `--settings` overlay keeps it away. `--rc` itself is not observable here, because a fake
+ *   credential has no organisation and claude says "--rc flag ignored".
+ *
  * The credential is a fake in a shared store and every request dies at the recording proxy, so the
  * session never gets further than its first screen.
  */
@@ -28,6 +33,9 @@ import { type RecordingProxy, startProxy } from './support/network.ts';
 
 const ONBOARDING = /Welcome to Claude Code|Choose the text style/;
 const TRUST = /Quick safety check|trust this folder/;
+/** How long a session gets to attempt the Remote Control bridge; it does so within a second of the first screen. */
+const BRIDGE_WAIT_MS = 12_000;
+const BRIDGE_TEST_MS = 30_000;
 /** The input footer: "? for shortcuts" until 2.1.2xx, the permission-mode line once auto became the default. */
 const PROMPT = /\? for shortcuts|shift\+tab to cycle/;
 const BYPASS_WARNING = /Bypass Permissions mode/;
@@ -100,7 +108,16 @@ describe.skipIf(!claudeCredentialPlantable)('claude contract: launching an agent
     };
     const screen = (args: string[], settled: readonly RegExp[] = SETTLED, timeoutMs?: number) =>
       screenOf([claude().bin, ...args], { env, cwd, settled, ...(timeoutMs === undefined ? {} : { timeoutMs }) });
-    return { screen, overlay, env, cwd };
+    /** Starts claude with a debug log and returns the `[bridge:` lines it wrote: the Remote Control bridge's attempts. */
+    const bridgeLog = async (args: string[]) => {
+      const log = path.join(root, 'debug.log');
+      await screen([...args, '--debug-file', log], [/NEVER_SETTLES/], BRIDGE_WAIT_MS).catch(() => '');
+      const text = await Bun.file(log)
+        .text()
+        .catch(() => '');
+      return text.split('\n').filter(line => line.includes('[bridge:'));
+    };
+    return { screen, overlay, bridgeLog, env, cwd };
   };
 
   it('shows onboarding to a config dir with neither key (the control)', async () => {
@@ -219,5 +236,28 @@ describe.skipIf(!claudeCredentialPlantable)('claude contract: launching an agent
     );
     should(screen).match(BYPASS_ON);
     should(screen).not.match(AUTO_NUDGE);
+  });
+
+  describe('Remote Control at startup', () => {
+    const ON = { remoteControlAtStartup: true };
+
+    it(
+      'attempts the Remote Control bridge when the user settings turn it on (the control)',
+      async () => {
+        const r = await runtime({ onboarded: true, trusted: true, settings: ON });
+        should((await r.bridgeLog([])).length).be.above(0);
+      },
+      BRIDGE_TEST_MS,
+    );
+
+    it(
+      'never attempts the bridge when a --settings overlay turns it off over the user settings',
+      async () => {
+        const r = await runtime({ onboarded: true, trusted: true, settings: ON });
+        const fixed = await r.overlay({ remoteControlAtStartup: false });
+        should(await r.bridgeLog(['--settings', fixed])).eql([]);
+      },
+      BRIDGE_TEST_MS,
+    );
   });
 });

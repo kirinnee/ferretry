@@ -100,6 +100,25 @@ Fast mode is built the same way, and only when it was ever decided: a ferret lau
 since) has its state named on the argv — Codex `-c service_tier=…`, Claude an inline `--settings` that carries the
 login's fixed overlay with it — and one that never decided asserts nothing ([fast-mode.md](fast-mode.md)).
 
+## Remote Control is off unless asked for
+
+Claude Code publishes a session to claude.ai/code and the Claude app (Remote Control) when
+`remoteControlAtStartup` is true. It reads that from, in order, org policy, the `--settings` file, the
+config dir's `settings.json`, the legacy global config, and finally the account's own default. A runtime
+imported from an owner who turned it on, or an account with the default on, therefore started every ferret
+with it on. Ferretry's **fixed layer** now writes `remoteControlAtStartup: false` into the overlay it passes
+as `--settings` (and fast mode's replacement overlay carries it), which outranks everything but org policy.
+
+The one thing that turns it on is the ferret's own `remoteControl` field, set by **New session › Advanced
+options › Start with Remote Control on** (or `fy start --rc`): that adds `--chrome --rc …` to the argv. Info ›
+Runtime › Remote control shows which it is. A change takes effect at the next launch, and the fixed layer's
+change shows up as "Running with older settings" on ferrets launched before it. Codex has no Remote Control to
+switch, so its form box is disabled and its Info row says so.
+
+Declared gap: an org-policy lock on Remote Control outranks the overlay, and `--rc` is ignored by Claude Code
+for a login whose organisation it cannot determine; the contract test therefore pins the off switch against
+the user-settings control and the `--rc` argv in the unit tests.
+
 The model a relaunch asks for is the one the ferret is on: the CLI's own report when it is newer than the
 daemon's last decision (start, migration, or the previous relaunch) and names a model the login serves;
 otherwise the recorded decision. A model the login has stopped serving falls back to its default.
