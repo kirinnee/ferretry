@@ -415,24 +415,34 @@ fy daemon status
 
 It says one of:
 
-- **serving**: everything answers. A recent event-loop stall is shown with the work it happened during.
+- **serving**: everything answers. A recent event-loop stall is shown with the work it happened during,
+  and where the code spent the time.
 - **starting**: the daemon is booting. It names the step and how long that step has taken. A step
   that runs for minutes is called stuck, with the restart command.
 - **busy**: its liveness check answered but its full health report did not in time.
 - **wedged**: the process exists but answered nothing. Run `fy daemon restart`. A daemon whose event
   loop stops for five minutes also ends itself, so systemd or launchd can start a fresh one.
-  (`FYD_WATCHDOG_SECONDS` changes that limit; `0` switches it off.)
+  (`FYD_WATCHDOG_SECONDS` changes that limit; `0` switches it off.) A computer that was asleep does
+  not count as a stopped loop.
 - **stopped**: no daemon process is running.
 
 The same facts without the CLI: `curl -s -m 2 http://127.0.0.1:7431/healthz`. It answers from the
 moment the daemon binds its address, with HTTP 503 and the boot step while starting, and 200 after.
 
 The daemon's log (add `--follow` to keep streaming it). It names every boot step, and every stall
-longer than half a second with the work that was running:
+longer than a quarter of a second with the work that was running and the code it was in:
 
 ```bash
 fy daemon logs
 ```
+
+Two settings for the daemon's environment:
+
+- `FYD_BACKGROUND_DELAY_SECONDS`: how long after it starts serving the daemon waits before its
+  background work (analytics, usage refresh, cleaning up finished terminals). The default is `120`.
+  That work then runs one job at a time.
+- `FYD_STACK_SAMPLER=0`: stop sampling where stalls happen. Sampling costs a few percent of CPU, and
+  only while the daemon is busy.
 
 macOS refuses to open `fy` or `fyd`: the binaries are not code-signed. The Homebrew cask clears the
 quarantine flag for you; after any other install, clear it once:

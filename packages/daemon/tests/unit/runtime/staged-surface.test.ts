@@ -12,10 +12,32 @@ import { fixedClock, jsonBody, request } from '../api/support.ts';
 
 const NOW = 1_800_000_000_000;
 
+const STALL = {
+  atMs: NOW - 1_000,
+  durationMs: 812,
+  during: ['fleet refresh', 'fleet refresh › usage feed'],
+  innermost: ['fleet refresh › usage feed'],
+  stacks: [{ stack: 'readFileSync ← scan (fleet/src/adapters/homes.ts:88)', share: 0.75 }],
+};
+
+const STALL_VIEW = {
+  at: new Date(NOW - 1_000).toISOString(),
+  durationMs: 812,
+  during: ['fleet refresh', 'fleet refresh › usage feed'],
+  innermost: ['fleet refresh › usage feed'],
+  stacks: [{ stack: 'readFileSync ← scan (fleet/src/adapters/homes.ts:88)', share: 0.75 }],
+};
+
 const booting = (boot: BootSnapshot): DaemonLivenessSource => ({
   pid: 4242,
   boot: () => boot,
-  loop: () => ({ lagMs: 3, maxLagMs: 812, stalls: 1, lastStall: { atMs: NOW - 1_000, durationMs: 812, during: [] } }),
+  loop: () => ({
+    lagMs: 3,
+    maxLagMs: 812,
+    stalls: 1,
+    lastStall: STALL,
+    worstStall: STALL,
+  }),
 });
 
 const SELF_CHECK: BootSnapshot = {
@@ -72,7 +94,8 @@ describe('StagedApiSurface before the boot mounts its routes', () => {
         lagMs: 3,
         maxLagMs: 812,
         stalls: 1,
-        lastStall: { at: new Date(NOW - 1_000).toISOString(), durationMs: 812, during: [] },
+        lastStall: STALL_VIEW,
+        worstStall: STALL_VIEW,
       },
     });
     should(surface.mounted).be.false();

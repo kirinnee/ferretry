@@ -126,6 +126,7 @@ import { BunGitRunner } from '../src/adapters/git/index.ts';
 import { FileHandoverReceiptStore } from '../src/adapters/handover/file-handover-receipt-store.ts';
 import {
   AnalyticsTranscriptSpend,
+  AsyncActivityScope,
   AuthorizedProviderProbe,
   type BrowserDisplayPort,
   BrowserLoginWindowService,
@@ -179,6 +180,7 @@ import {
   HttpUsageSource,
   hostCgroupFacts,
   JournalGrantAudit,
+  JscStackSampler,
   KeyedSerialExecutor,
   ManifestAccountInventory,
   MCP_OAUTH_SECRETS_DOCUMENT,
@@ -201,6 +203,7 @@ import {
   SocketViewerDownstream,
   SpawnCgroupCommands,
   SqliteHomeLockFactory,
+  STACK_SAMPLER_VARIABLE,
   StateApiCredentials,
   StateFileSystem,
   StateFileSystemFactory,
@@ -216,6 +219,7 @@ import {
   SystemClock,
   SystemFrameClock,
   SystemGrantClock,
+  stackSamplerEnabled,
   TmuxPaneSnapshot,
   type ViewerSocket,
   WebCryptoPasskeyCrypto,
@@ -359,7 +363,7 @@ import {
 } from '../src/adapters/terminal/index.ts';
 import { BunTmuxProcess, RealHarnessLaunchGuard, TmuxPaneDelivery, TmuxPaneQueue } from '../src/adapters/tmux/index.ts';
 import { CliConversionCheck, CliHarnessVersion } from '../src/adapters/transcript/conversion-check.ts';
-import { NodeTranscriptSource } from '../src/adapters/transcript/index.ts';
+import { DEFAULT_MAX_READ_BYTES, NodeTranscriptSource } from '../src/adapters/transcript/index.ts';
 import {
   FileSessionAttachmentCopier,
   FileSessionTransferBriefWriter,
@@ -605,6 +609,7 @@ import {
   NameAllocator,
   type NameClaim,
   type NameSubsystem,
+  NO_STACK_SAMPLER,
   NO_WATCHDOG,
   NotificationService,
   type ObservedSession,
@@ -634,6 +639,7 @@ import {
   parseDaemonTimings,
   parseSessionId,
   parseWardenConfigPatch,
+  parseBackgroundDelay,
   parseWatchdogLimit,
   passkeyVerifier,
   planConversationCarry,
@@ -760,6 +766,7 @@ import {
   STRUCTURED_ANSWER_RELEASED_ATTENTION_KIND,
   StagedApiSurface,
   StepUpRegistry,
+  type StackSamplerPort,
   StepUpService,
   StructuredAnswerCoordinator,
   StructuredQuestionAttemptFailed,
@@ -817,6 +824,8 @@ import {
   verifySessionTranscriptMessageToken,
   WARDEN_LABEL,
   WATCHDOG_VARIABLE,
+  BACKGROUND_DELAY_VARIABLE,
+  BackgroundLane,
   type WardenFleetSession,
   WardenLivenessMonitor,
   type WardenSubsystem,
@@ -999,8 +1008,18 @@ export interface DaemonWorld {
     readonly beginProgress: () => BootProgress;
     /** How long the loop may be silent before the watchdog ends the process; `0` is off. */
     readonly watchdogLimitMs: number;
+    /**
+     * How long after the routes are mounted the housekeeping lane opens — analytics, the fleet refresh,
+     * the terminal reaper and quota failover wait until then (see `BackgroundLane`).
+     */
+    readonly backgroundDelayMs: number;
     /** Starts the watchdog thread. A world field so a test can drive the boot without one. */
     readonly watchdog: (limitMs: number) => LoopWatchdogPort;
+    /**
+     * Starts sampling the main thread's stack, so a stall names the code it spent its time in as well as
+     * the labelled work around it; `undefined` where the runtime cannot sample or it is switched off.
+     */
+    readonly stackSampler?: () => Promise<StackSamplerPort | undefined>;
   };
   readonly config: DaemonConfigStore;
   /** What this invocation said on the command line, overriding the document for this run only. */
@@ -5050,6 +5069,17 @@ export function createSessionHandoverSubsystem(
  */
 const ANALYTICS_FOLD_CONCURRENCY = 4;
 
+/** The statuses after which a session's transcript no longer changes and no watcher needs to read it. */
+const ENDED_SESSION_STATUSES: ReadonlySet<string> = new Set(['completed', 'failed', 'stalled', 'stopped']);
+
+/**
+ * How many transcripts one ingestion pass may read; the rest wait for the next pass, a minute later.
+ *
+ * A rebuild used to read every finished transcript in one pass, every boot — on a large Mac fleet,
+ * hundreds of megabytes parsed while the daemon was trying to answer its first requests.
+ */
+const ANALYTICS_READS_PER_PASS = 8;
+
 /**
  * How often the ingestion sweep looks for sessions that have ended.
  *
@@ -5155,6 +5185,7 @@ function createAnalyticsIngestion(
     },
     clock,
     concurrency: ANALYTICS_FOLD_CONCURRENCY,
+    readsPerPass: ANALYTICS_READS_PER_PASS,
     rebuildRequired: opened.rebuildRequired,
   });
 }
@@ -6087,7 +6118,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
    * so its elapsed time is the boot's; health reads whichever boot this world last began, and a world
    * no boot has begun is a world whose bootstrap has not finished.
    */
-  const activities = new ActivityLedger(millisecondClock);
+  const activities = new ActivityLedger(millisecondClock, new AsyncActivityScope());
   let bootProgress: BootProgress | undefined;
   const environment = new RuntimeEnvironment(process.env, () => userHome);
   const paths = createFoundationPaths(resolveStateHome(environment.stateHomeInput()));
@@ -6798,6 +6829,16 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         if (file === undefined) return { kind: 'unresolved' };
         const source = transcriptSources.find(candidate => candidate.harness === harness);
         if (source === undefined) return { kind: 'unreadable' };
+        // A transcript longer than one bounded read can never be proven complete, so reading — and
+        // parsing — its first 32 MiB again only to refuse it was pure cost: on a Mac with three 200 MB
+        // transcripts it was seconds of a blocked loop every pass and every boot. It is refused unread,
+        // with the bytes it could not account for, which is the refusal the read itself would have made.
+        const size = await stat(file).then(
+          info => info.size,
+          () => undefined,
+        );
+        if (size !== undefined && size > DEFAULT_MAX_READ_BYTES)
+          return { kind: 'read', harness, events: [], issues: ['source-truncated'], pendingBytes: size };
         const batch = await source.read(file, { sessionId }).catch(() => undefined);
         if (batch === undefined) return { kind: 'unreadable' };
         return {
@@ -7071,7 +7112,10 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         return bootProgress;
       },
       watchdogLimitMs: parseWatchdogLimit(process.env[WATCHDOG_VARIABLE]),
+      backgroundDelayMs: parseBackgroundDelay(process.env[BACKGROUND_DELAY_VARIABLE]),
       watchdog: limitMs => new WorkerLoopWatchdog({ limitMs, prefix: `${DAEMON_NAME} ` }),
+      stackSampler: async () =>
+        stackSamplerEnabled(process.env[STACK_SAMPLER_VARIABLE]) ? await JscStackSampler.start() : undefined,
     },
     // An operator's own document when they named one, and the state home's otherwise. The confined
     // filesystem port refuses every path outside the home, which is right for the daemon's own state
@@ -7750,18 +7794,25 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           heartbeats: new FileWaitHeartbeat(id => createSessionPaths(paths, id).directory),
           nudge: new SendMonitorNudge(sends),
           questions: {
+            // LIVE SESSIONS ONLY, ONE AT A TIME, handing the loop back between them. Every session's
+            // tail at once was thirty-six transcript windows of up to 16 MiB parsed together on a Mac's
+            // first tick, and the loop stalled for seconds. A session the index says has ended asks no
+            // question anyone can answer here; its evidence is projected when it is next read.
             reconcile: async () => {
-              const outcomes = await Promise.all(
-                storage.listSessions().map(async session => {
-                  let failure: string | undefined;
-                  try {
-                    await projectSessionEvidence(session.id);
-                  } catch (error) {
-                    failure = error instanceof Error ? error.message : String(error);
-                  }
-                  return [session.id, failure] as const;
-                }),
-              );
+              const outcomes: (readonly [string, string | undefined])[] = [];
+              const live = storage
+                .listSessions()
+                .filter(session => session.status === undefined || !ENDED_SESSION_STATUSES.has(session.status));
+              for (const session of live) {
+                let failure: string | undefined;
+                try {
+                  await projectSessionEvidence(session.id);
+                } catch (error) {
+                  failure = error instanceof Error ? error.message : String(error);
+                }
+                outcomes.push([session.id, failure]);
+                await new Promise(resolve => setImmediate(resolve));
+              }
               const failures = new Map<string, string>();
               for (const [id, failure] of outcomes) {
                 if (failure !== undefined) failures.set(id, failure);
@@ -9169,8 +9220,12 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
    */
   const activities = world.boot.activities;
   const progress = world.boot.beginProgress();
-  const meter = new EventLoopLagMeter(world.clock, activities, DEFAULT_EVENT_LOOP_LAG_POLICY, stall =>
-    world.notices.state(describeLoopStall(stall)),
+  const meter = new EventLoopLagMeter(
+    world.clock,
+    activities,
+    DEFAULT_EVENT_LOOP_LAG_POLICY,
+    stall => world.notices.state(describeLoopStall(stall)),
+    (await world.boot.stackSampler?.()) ?? NO_STACK_SAMPLER,
   );
   const watchdog = world.boot.watchdogLimitMs > 0 ? world.boot.watchdog(world.boot.watchdogLimitMs) : NO_WATCHDOG;
   const lagTicks = setInterval(() => {
@@ -9721,6 +9776,20 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
   // takes down a daemon whose fleet is fine, and the failure is already visible as the next tick's
   // freshness. The handle is registered for cancellation like every other acquisition, so a stopped
   // daemon does not leave a timer firing at closed storage.
+  /**
+   * The housekeeping lane: analytics ingestion, the fleet refresh, the terminal reaper and quota
+   * failover, run one at a time and only once the lane opens, `backgroundDelayMs` after serving.
+   *
+   * Every one of them used to fire at boot on its own timer, all at once, while the daemon was trying to
+   * answer its first requests — on a large Mac fleet the loop stalled until it answered nothing at all.
+   * None of them is needed to serve, so they wait, and then they take turns (see `BackgroundLane`).
+   */
+  const lane = new BackgroundLane(activities, () => new Promise(resolve => setImmediate(resolve)));
+  const laneOpens = setTimeout(() => lane.open(), world.boot.backgroundDelayMs);
+  cleanups.push(() => {
+    clearTimeout(laneOpens);
+    lane.close();
+  });
   const ticks = setInterval(() => {
     void activities.run('self-check', () => health.selfCheck()).catch(() => undefined);
   }, healthSettings.selfCheckIntervalMs);
@@ -9742,8 +9811,10 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
    * next reader that something is still watching these parks.
    */
   subsystems.monitor.arm();
+  // Run at once but NOT awaited: the first tick reprojects every session's transcript tail, and on a
+  // large fleet holding the boot on it kept "ready" minutes away. The interval below serialises with it.
   progress.enter('declared-wait watcher');
-  await activities.run('declared-wait watcher', () => subsystems.monitor.run());
+  void activities.run('declared-wait watcher', () => subsystems.monitor.run()).catch(() => undefined);
   const waitTicks = setInterval(
     () => void activities.run('declared-wait watcher', () => subsystems.monitor.run()),
     subsystems.monitor.intervalMs,
@@ -9780,7 +9851,7 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
   const failoverIntervalMs = await subsystems.quotaFailover.intervalMs().catch(() => undefined);
   if (failoverIntervalMs !== undefined) {
     const failoverTicks = setInterval(() => {
-      void activities.run('quota failover', () => subsystems.quotaFailover.run()).catch(() => undefined);
+      lane.submit('quota failover', () => subsystems.quotaFailover.run());
     }, failoverIntervalMs);
     cleanups.push(() => clearInterval(failoverTicks));
   }
@@ -9804,17 +9875,17 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
    * running, and retrying immediately after a failure would spend the quota the loop measures.
    */
   const fleetRefreshIntervalMs = await world.usageRefreshMs();
-  // Start a collection after binding but do not make a slow provider probe delay daemon readiness.
-  // The loop serializes it with the fixed timer below, and all failures remain in the existing feeds.
-  void activities.run('fleet refresh', () => subsystems.fleetRefresh.run());
+  // Queued for the housekeeping lane, so the first collection runs once the lane opens rather than at
+  // boot; a slow provider probe never delays readiness, and all failures remain in the existing feeds.
+  lane.submit('fleet refresh', () => subsystems.fleetRefresh.run());
   const fleetRefreshTicks = setInterval(() => {
-    void activities.run('fleet refresh', () => subsystems.fleetRefresh.run());
+    lane.submit('fleet refresh', () => subsystems.fleetRefresh.run());
   }, fleetRefreshIntervalMs);
   cleanups.push(() => clearInterval(fleetRefreshTicks));
   /**
    * The analytics ingestion sweep.
    *
-   * THE FIRST PASS RUNS AT BOOT, and it is a REBUILD when the store reported that nothing survived
+   * THE FIRST PASS IS QUEUED AT BOOT, to run when the housekeeping lane opens, and it is a REBUILD when the store reported that nothing survived
    * being opened — a schema this daemon does not recognise, or a file naming another state home. A
    * daemon that has just restarted is also exactly when the store is most likely to be behind: every
    * session that ended while the process was down went uningested, and the sweep is what catches up.
@@ -9834,20 +9905,18 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
    * timer below queues behind this one rather than racing it, and the analytics view already reports
    * `refreshing` while a pass is outstanding.
    */
-  void activities
-    .run(analyticsStore.rebuildRequired ? 'analytics rebuild' : 'analytics ingest', () =>
-      analyticsStore.rebuildRequired ? subsystems.analyticsIngest.rebuild() : subsystems.analyticsIngest.ingest(),
-    )
-    .catch(() => undefined);
+  lane.submit(analyticsStore.rebuildRequired ? 'analytics rebuild' : 'analytics ingest', () =>
+    analyticsStore.rebuildRequired ? subsystems.analyticsIngest.rebuild() : subsystems.analyticsIngest.ingest(),
+  );
   const analyticsTicks = setInterval(() => {
-    void activities.run('analytics ingest', () => subsystems.analyticsIngest.ingest()).catch(() => undefined);
+    lane.submit('analytics ingest', () => subsystems.analyticsIngest.ingest());
   }, ANALYTICS_INGEST_INTERVAL_MS);
   cleanups.push(() => clearInterval(analyticsTicks));
   // The registry, durable session reader, exact observer and exact reaper the earlier increment
   // stubbed. Identity is re-checked at the moment of the kill, not at planning time.
   const terminalReaper = world.createTerminalReaper(opened.storage);
   const terminalReapTicks = setInterval(() => {
-    void activities.run('terminal reaper', () => terminalReaper.sweep()).catch(() => undefined);
+    lane.submit('terminal reaper', () => terminalReaper.sweep());
   }, 5_000);
   cleanups.push(() => clearInterval(terminalReapTicks));
   // The security log's fold windows close on this tick too, not only on the next record like them: a
@@ -9871,10 +9940,24 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
   cleanups.push(await subsystems.configFiles.arm());
   // Which models Ollama has installed, read once now that the fleet can be republished with them.
   void subsystems.models.refreshLocal().catch(() => undefined);
+  /**
+   * NOT AWAITED. Arming reads the warden's settings through the configuration service's queue, and on a
+   * real Mac whose loop was stalling every few seconds that read took longer than seventeen minutes — the
+   * boot sat on "arming the warden" the whole time and never reached ready. Nothing after this line needs
+   * the warden, and `wardenTimerArmed` on the health report already says whether it has armed yet. A
+   * disarm that arrives after shutdown began is run at once rather than registered too late to be.
+   */
   progress.enter('arming the warden');
-  await subsystems.warden
+  let releasing = false;
+  cleanups.push(() => {
+    releasing = true;
+  });
+  void subsystems.warden
     .arm()
-    .then(disarm => cleanups.push(disarm))
+    .then(disarm => {
+      if (releasing) disarm();
+      else cleanups.push(disarm);
+    })
     .catch(() => undefined);
   /**
    * The handover reconciler, armed beside the warden sweep and after the bind, because a pass can

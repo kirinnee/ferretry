@@ -72,13 +72,40 @@ export function decideDaemonStatus(
  */
 const STUCK_STEP_SECONDS = 120;
 
-/** How the loop has been running, when the daemon has stalled at all: one line, or none. */
+type LoopStallView = NonNullable<NonNullable<LivenessView['eventLoop']>['lastStall']>;
+
+/** The work a stall ran during: the deepest labels when the daemon reports them, every label otherwise. */
+function stallSuspects(stall: LoopStallView): string {
+  const named = stall.innermost !== undefined && stall.innermost.length > 0 ? stall.innermost : stall.during;
+  return named.length === 0 ? '' : ` during ${named.join(', ')}`;
+}
+
+/** Where a stall's sampled stack spent it, as an indented line, or nothing when it was not sampled. */
+function stallStackLine(label: string, stall: LoopStallView | undefined): string[] {
+  const hottest = stall?.stacks?.[0];
+  if (hottest === undefined) return [];
+  return [`    ${label}: ${String(Math.round(hottest.share * 100))}% in ${hottest.stack}`];
+}
+
+/**
+ * How the loop has been running, when the daemon has stalled at all: none, one line, or — when the
+ * worst stall is not the last one — a second naming the worst, each followed by where its sampled stack
+ * spent the time. "Worst 14.3s" with nothing about what it was is a number nobody can act on.
+ */
 function stallLine(liveness: LivenessView | undefined): string[] {
   const stall = liveness?.eventLoop?.lastStall;
   if (stall === undefined) return [];
-  const during = stall.during.length === 0 ? '' : ` during ${stall.during.join(', ')}`;
+  const worst = liveness?.eventLoop?.worstStall;
+  const worstIsLast = worst === undefined || (worst.at === stall.at && worst.durationMs === stall.durationMs);
   return [
-    `  event loop stalled ${String(liveness?.eventLoop?.stalls ?? 1)}x, worst ${((liveness?.eventLoop?.maxLagMs ?? stall.durationMs) / 1_000).toFixed(1)}s; last ${(stall.durationMs / 1_000).toFixed(1)}s at ${stall.at}${during}`,
+    `  event loop stalled ${String(liveness?.eventLoop?.stalls ?? 1)}x, worst ${((liveness?.eventLoop?.maxLagMs ?? stall.durationMs) / 1_000).toFixed(1)}s; last ${(stall.durationMs / 1_000).toFixed(1)}s at ${stall.at}${stallSuspects(stall)}`,
+    ...stallStackLine('last', stall),
+    ...(worstIsLast
+      ? []
+      : [
+          `  worst stall ${(worst.durationMs / 1_000).toFixed(1)}s at ${worst.at}${stallSuspects(worst)}`,
+          ...stallStackLine('worst', worst),
+        ]),
   ];
 }
 

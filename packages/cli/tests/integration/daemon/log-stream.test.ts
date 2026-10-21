@@ -1,9 +1,15 @@
 import { afterEach, beforeEach, describe, it } from 'bun:test';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import should from 'should';
-import { type LogStreamSpawner, TailDaemonLog } from '../../../src/adapters/daemon/log-stream';
+import { type LogStreamSpawner, relayingSpawner, TailDaemonLog } from '../../../src/adapters/daemon/log-stream';
+
+const LOG_STREAM_MODULE = JSON.stringify(resolve(import.meta.dir, '../../../src/adapters/daemon/log-stream.ts'));
+
+/** A log large enough to fill any pipe many times over, each line numbered so order is checkable. */
+const bigLog = (): string =>
+  Array.from({ length: 40_000 }, (_, index) => `${String(index).padStart(6, '0')} ${'x'.repeat(90)}`).join('\n') + '\n';
 
 describe('tail daemon log', () => {
   let root = '';
@@ -84,5 +90,78 @@ describe('tail daemon log', () => {
 
     // Assert
     should(commands).deepEqual([['cat', logFile]]);
+  });
+
+  it('should deliver a whole log to a reader slower than the pipe, as `fy daemon logs | grep` is', async () => {
+    // The defect: the child was handed this process's non-blocking stdout, and `cat` died with EAGAIN
+    // the moment a slow reader let the pipe fill. A real `fy`-like process, read slowly, proves it now.
+    // Arrange
+    const logFile = join(root, 'fyd.log');
+    const text = bigLog();
+    await Bun.write(logFile, text);
+    const child = Bun.spawn(
+      [
+        process.execPath,
+        '-e',
+        `import { TailDaemonLog } from ${LOG_STREAM_MODULE}; process.exit(await new TailDaemonLog().show(${JSON.stringify(logFile)}, false));`,
+      ],
+      { stdout: 'pipe', stderr: 'pipe' },
+    );
+
+    // Act — read in small sips with pauses, so the pipe is full most of the time.
+    const chunks: Uint8Array[] = [];
+    const reader = child.stdout.getReader();
+    for (let read = await reader.read(); !read.done; read = await reader.read()) {
+      chunks.push(read.value);
+      if (chunks.length % 8 === 0) await Bun.sleep(5);
+    }
+    const code = await child.exited;
+
+    // Assert
+    should(await new Response(child.stderr).text()).not.match(/write error|temporarily unavailable/u);
+    should(code).equal(0);
+    should(Buffer.concat(chunks).toString('utf8')).equal(text);
+  });
+
+  it('should relay every byte in order through a sink that takes its time', async () => {
+    // Arrange
+    const logFile = join(root, 'fyd.log');
+    const text = bigLog();
+    await Bun.write(logFile, text);
+    const received: Uint8Array[] = [];
+    const subject = new TailDaemonLog(
+      relayingSpawner({
+        write: async chunk => {
+          received.push(chunk);
+          if (received.length % 16 === 0) await Bun.sleep(1);
+        },
+      }),
+    );
+
+    // Act
+    const actual = await subject.show(logFile, false);
+
+    // Assert
+    should(actual).equal(0);
+    should(Buffer.concat(received).toString('utf8')).equal(text);
+  });
+
+  it('should end a followed log quietly when its reader goes away', async () => {
+    // Arrange — `tail -F` never exits on its own; a reader that closed (`| head`) must still end it.
+    const logFile = join(root, 'fyd.log');
+    await Bun.write(logFile, 'first\nsecond\n');
+    const subject = new TailDaemonLog(
+      relayingSpawner({
+        write: async () => {
+          throw Object.assign(new Error('broken pipe'), { code: 'EPIPE' });
+        },
+      }),
+    );
+
+    // Act
+    const actual = await subject.show(logFile, true);
+
+    // Assert — everything the reader asked for was delivered; that is a normal end.
+    should(actual).equal(0);
   });
 });

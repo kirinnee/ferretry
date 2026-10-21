@@ -1,4 +1,9 @@
-import { describeWatchdogFire, type LoopWatchdogPort, watchdogShouldFire } from '../../lib/runtime/liveness.ts';
+import {
+  describeWatchdogFire,
+  type LoopWatchdogPort,
+  watchdogShouldFire,
+  watchdogSilenceFrom,
+} from '../../lib/runtime/liveness.ts';
 
 /** How many bytes of "what was running" the watchdog can quote. Longer lists are cut, never refused. */
 const LABEL_BYTES = 2_048;
@@ -32,13 +37,19 @@ function watchdogSource(): string {
   return `
 const shouldFire = (${watchdogShouldFire.toString()});
 const describe = (${describeWatchdogFire.toString()});
+const silenceFrom = (${watchdogSilenceFrom.toString()});
 self.onmessage = ({ data }) => {
   const beat = new BigInt64Array(data.memory, ${String(HEARTBEAT_OFFSET)}, 1);
   const length = new Int32Array(data.memory, ${String(LENGTH_OFFSET)}, 1);
   const label = new Uint8Array(data.memory, ${String(LABEL_OFFSET)}, ${String(LABEL_BYTES)});
   const decoder = new TextDecoder();
+  let previousCheck = Date.now();
+  let from = 0;
   setInterval(() => {
-    const silent = Date.now() - Number(Atomics.load(beat, 0));
+    const now = Date.now();
+    from = silenceFrom(Number(Atomics.load(beat, 0)), now, previousCheck, from, data.checkMs);
+    previousCheck = now;
+    const silent = now - from;
     if (!shouldFire(silent, data.limitMs)) return;
     const during = decoder.decode(label.slice(0, Atomics.load(length, 0)));
     console.error(data.prefix + new Date().toISOString() + ' ! ' + describe(silent, during));
