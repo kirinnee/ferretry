@@ -307,7 +307,8 @@ homebrew-cask)
       [$name] + $daemon | all(. as $bin | $hook | contains("/" + $bin + "\"")))' >/dev/null
   # The daemon's tunnel carrier runs cloudflared (docs/relay-protocol.md §15): a dependency the cask
   # installs — in the generator above and the committed cask alike — never a download.
-  rg -qF 'depends_on formula: "cloudflared"' "Casks/${product}.rb"
+  # GoReleaser writes the dependency as a one-line string or, beside other formulae, a multi-line array.
+  rg -Uq 'depends_on formula: (\[\s*("[^"]*",\s*)*)?"cloudflared"' "Casks/${product}.rb"
   ;;
 installer-checksum)
   rg -qF 'checksums.txt' scripts/release/install.sh
