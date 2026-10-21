@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import should from 'should';
 
+import { MAP_TILE_ORIGIN } from '../../src/lib/fy-render-map-tiles.ts';
 import { contentTypeFor, parseReleaseHeaders, releaseHeadersFor } from '../../src/lib/release-headers.ts';
 
 const headerMap = (headers: readonly (readonly [string, string])[]): Record<string, string> =>
@@ -130,5 +131,19 @@ describe('the committed public/_headers', () => {
     should(page['content-security-policy']).containEql("frame-ancestors 'none'");
     should(page['x-content-type-options']).equal('nosniff');
     should(sandbox['content-security-policy']).equal("frame-ancestors 'self'; sandbox allow-scripts");
+  });
+
+  it('lets pictures come from the map tile host and nowhere else', async () => {
+    // Arrange
+    const rules = await committed();
+
+    // Act
+    const policy = headerMap(releaseHeadersFor('/app/', 'app/index.html', rules))['content-security-policy'] ?? '';
+    const imgSrc = policy.split(';').find(directive => directive.trim().startsWith('img-src')) ?? '';
+    const sources = imgSrc.trim().split(/\s+/u).slice(1);
+
+    // Assert — a bare `https:` would make every Markdown image a request this policy permits.
+    should(sources).eql(["'self'", 'data:', 'blob:', MAP_TILE_ORIGIN]);
+    should(sources).not.containEql('https:');
   });
 });

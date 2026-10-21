@@ -68,6 +68,11 @@ export const ImportableConversationSchema = z.strictObject({
   model: z.string().min(1).optional(),
   /** The Ferretry session that already owns this conversation; such a row cannot be picked again. */
   adoptedBy: z.string().min(1).optional(),
+  /**
+   * Where the file this row describes is kept: Ferretry's history, or only the computer's own home.
+   * A row kept in both (an adopted one, hard-linked) says `ferretry`: that copy is the one used.
+   */
+  keptIn: z.enum(['ferretry', 'computer']).optional(),
 });
 export type ImportableConversation = z.infer<typeof ImportableConversationSchema>;
 
@@ -81,10 +86,18 @@ export type ImportableConversation = z.infer<typeof ImportableConversationSchema
 export const ConversationSourceSchema = z.enum(['ferretry', 'computer']);
 export type ConversationSource = z.infer<typeof ConversationSourceSchema>;
 
+/**
+ * What a listing may be asked to read. `ferretry` and `computer` name one place; `synced` is what
+ * "Keep in sync" shows — Ferretry's history plus the computer's, unless the owner switched listing the
+ * computer's off (Settings › Machine › Conversations). Absent is both places regardless of that setting.
+ */
+export const ConversationListSourceSchema = z.enum(['ferretry', 'computer', 'synced']);
+export type ConversationListSource = z.infer<typeof ConversationListSourceSchema>;
+
 /** The listing query, as the daemon parses it from the URL. Every field narrows; none widens. */
 export const ConversationImportQuerySchema = z.strictObject({
   /** Only conversations kept there. Absent reads both, Ferretry's copy first. */
-  source: ConversationSourceSchema.optional(),
+  source: ConversationListSourceSchema.optional(),
   harness: HarnessSchema.optional(),
   /** Case-insensitive words, each of which must appear in the name, the preview, the latest message or the folder. */
   q: z.string().max(200).optional(),
@@ -101,6 +114,11 @@ export const ConversationImportListingSchema = z.strictObject({
   matched: z.number().int().nonnegative(),
   /** Files that looked like conversations but carried no usable id, folder or message. */
   skipped: z.number().int().nonnegative(),
+  /**
+   * Set (to `false`) only on a `synced` listing taken while the owner has listing this computer's
+   * conversations switched off, so a surface can say why none of them are here.
+   */
+  computerListed: z.literal(false).optional(),
 });
 export type ConversationImportListing = z.infer<typeof ConversationImportListingSchema>;
 

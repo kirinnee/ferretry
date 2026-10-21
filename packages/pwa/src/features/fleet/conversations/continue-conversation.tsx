@@ -1,7 +1,9 @@
 /**
  * New session › "Continue a conversation": ONE list of Ferretry's conversations and stopped ferrets,
- * narrowed by the source chips (All · Ferretry · Claude · Codex, see `continue-model.ts`), the date and
- * a search the daemon runs (`q`, `harness`, `since`). Each row is the shared conversation card.
+ * narrowed by the source chips (All · Ferretry · On this computer · Claude · Codex, see
+ * `continue-model.ts`), the date and a search the daemon runs (`source=synced`, `q`, `harness`,
+ * `since`). The list is read afresh every time Continue opens (never on a timer), so a conversation
+ * started in the CLI's own terminal a minute ago is there. Each row is the shared conversation card.
  *
  * Each row says what it is about without asking anything: what the owner first said, the latest thing
  * they said, and where. Tapping a row opens a short preview of its last few exchanges with the button
@@ -67,7 +69,13 @@ export interface ContinueConversationProps {
 type Listing =
   | { readonly kind: 'reading' }
   | { readonly kind: 'refused'; readonly sentence: string }
-  | { readonly kind: 'read'; readonly rows: readonly ImportableConversation[]; readonly matched: number };
+  | {
+      readonly kind: 'read';
+      readonly rows: readonly ImportableConversation[];
+      readonly matched: number;
+      /** `false` when "Keep in sync" is off, so the computer's conversations are not in the rows. */
+      readonly computerListed: boolean;
+    };
 
 /** A picked row waiting for its runtime, or the sentence saying why it can't continue. */
 type Picking =
@@ -82,7 +90,12 @@ type Preview =
 const conversationKey = (harness: Harness, id: string): string => `conversation:${harness}:${id}`;
 const sessionKey = (id: string): string => `session:${id}`;
 
-export function ContinueConversation({
+/** Continue for one machine: another machine is another list, so none of this machine's state carries over. */
+export function ContinueConversation(props: ContinueConversationProps) {
+  return <ContinueConversationBody key={props.connection.daemonId} {...props} />;
+}
+
+function ContinueConversationBody({
   connection,
   createClient,
   onNavigate,
@@ -306,6 +319,7 @@ export function ContinueConversation({
     );
   };
 
+  const computerHidden = results.kind === 'read' && !results.computerListed;
   const listed = (() => {
     // Ferretry reads only the kept listing; when it is refused, the stopped ferrets are still listed bare.
     if (source !== 'ferretry' && results.kind !== 'read') return <ListingState listing={results} />;
@@ -326,10 +340,12 @@ export function ContinueConversation({
         <p className="m-0 text-cell text-muted" data-continue-empty="">
           {source === 'ferretry' && query === '' && date === 'any'
             ? 'No ferret keeps a conversation yet, and none is stopped.'
-            : 'No conversation matches.'}
+            : source === 'computer' && query === '' && date === 'any' && computerHidden
+              ? 'Nothing to show: Keep in sync is off.'
+              : 'No conversation matches.'}
         </p>
       );
-    const more = searched !== undefined && searched.matched > searched.rows.length;
+    const more = searched !== undefined && source !== 'computer' && searched.matched > searched.rows.length;
     return (
       <>
         <p className="m-0 text-meta text-muted" data-continue-count="">
@@ -377,6 +393,11 @@ export function ContinueConversation({
           />
         </div>
       </div>
+      {computerHidden && source !== 'ferretry' ? (
+        <p className="m-0 text-meta text-muted" data-continue-computer-hidden="">
+          Conversations on this computer are hidden. Turn on Keep in sync in Settings › Machine › Conversations.
+        </p>
+      ) : null}
       {listed}
     </div>
   );
@@ -386,12 +407,21 @@ const listingResult = (
   answer:
     | {
         readonly kind: 'done';
-        readonly value: { readonly conversations: readonly ImportableConversation[]; readonly matched: number };
+        readonly value: {
+          readonly conversations: readonly ImportableConversation[];
+          readonly matched: number;
+          readonly computerListed?: false;
+        };
       }
     | { readonly kind: 'refused'; readonly sentence: string },
 ): Listing =>
   answer.kind === 'done'
-    ? { kind: 'read', rows: answer.value.conversations, matched: answer.value.matched }
+    ? {
+        kind: 'read',
+        rows: answer.value.conversations,
+        matched: answer.value.matched,
+        computerListed: answer.value.computerListed !== false,
+      }
     : { kind: 'refused', sentence: answer.sentence };
 
 function ListingState({ listing }: { readonly listing: Exclude<Listing, { readonly kind: 'read' }> }) {

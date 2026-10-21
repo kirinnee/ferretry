@@ -291,6 +291,7 @@
      source for every theme: `session-screens.css` mixes it with the theme's own ink and surface. */
   --src-claude: #d4683f;
   --src-codex: #138fa8;
+  --src-computer: #7a6bd4;
 
   /* ---- per-tool-type hues (consistent colour per tool across a transcript) */
   --tool-bash: #2b7e4e;

@@ -1,6 +1,8 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
 import {
+  AUTOMATION_SWITCH_PATTERN,
+  agentBrowserArguments,
   BrowserControlError,
   browserEnvironment,
   browserLoginChromeArguments,
@@ -14,6 +16,8 @@ import {
   selectChromeExecutable,
   vncSupervisorArguments,
   x11vncLaunchArguments,
+  xvfbInstallCommand,
+  xvfbMissingMessage,
 } from '../../../../src/lib/index.ts';
 
 describe('browser control policy', () => {
@@ -146,6 +150,92 @@ describe('browser control policy', () => {
     should(headless).containEql('--headless=new');
     should(headless).not.containEql('--ozone-platform=x11');
     should(headless).containEql('--no-sandbox');
+  });
+
+  it('should put the real Google Chrome ahead of any Chromium, wherever each was found', () => {
+    // Act
+    const linux = chromeExecutableCandidates('linux', undefined, { path: '/nix/bin' });
+    const mac = chromeExecutableCandidates('darwin', undefined, { home: '/Users/u' });
+    const chosen = selectChromeExecutable(
+      'linux',
+      undefined,
+      candidate => candidate === '/usr/bin/chromium' || candidate === '/nix/bin/google-chrome',
+      { path: '/nix/bin' },
+    );
+
+    // Assert — a Chromium in /usr/bin no longer shadows a Google Chrome on PATH.
+    should(chosen).equal('/nix/bin/google-chrome');
+    should(linux.indexOf('/opt/google/chrome/chrome')).be.below(linux.indexOf('/usr/bin/chromium'));
+    should(linux.indexOf('/nix/bin/google-chrome-stable')).be.below(linux.indexOf('/snap/bin/chromium'));
+    should(mac).deepEqual([
+      '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+      '/Users/u/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+      '/Applications/Chromium.app/Contents/MacOS/Chromium',
+    ]);
+    should(chromeExecutableCandidates('darwin')).deepEqual([
+      '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+      '/Applications/Chromium.app/Contents/MacOS/Chromium',
+    ]);
+  });
+
+  it('should launch the agent browser headless or as a real window, never with an automation switch', () => {
+    // Act
+    const viewport = { width: 1280, height: 800 };
+    const launches = {
+      linuxHeadless: agentBrowserArguments('/chrome', '/profile', 9222, viewport, 'linux', 'headless'),
+      linuxWindow: agentBrowserArguments('/chrome', '/profile', 9222, viewport, 'linux', 'window'),
+      macHeadless: agentBrowserArguments('/chrome', '/profile', 9222, viewport, 'darwin', 'headless'),
+      macWindow: agentBrowserArguments('/chrome', '/profile', 9222, viewport, 'darwin', 'window'),
+    };
+    const keepPainting = [
+      '--disable-backgrounding-occluded-windows',
+      '--disable-renderer-backgrounding',
+      '--disable-background-timer-throttling',
+    ];
+
+    // Assert — every mode keeps the loopback debugging port the view streams through, and none says or
+    // hides that it is automated.
+    for (const argv of Object.values(launches)) {
+      should(argv).containEql('--remote-debugging-address=127.0.0.1');
+      should(argv).containEql('--remote-debugging-port=9222');
+      should(argv).containEql('--user-data-dir=/profile');
+      should(argv.filter(argument => AUTOMATION_SWITCH_PATTERN.test(argument))).deepEqual([]);
+      should(argv.filter(argument => /automation/i.test(argument))).deepEqual([]);
+    }
+    // Headless is what it always was.
+    should(launches.linuxHeadless).containEql('--headless=new');
+    should(launches.macHeadless).containEql('--headless=new');
+    should(launches.linuxHeadless).not.containEql('--disable-renderer-backgrounding');
+    // A real window: no headless flag (so no HeadlessChrome user agent), drawing on X11 on Linux, and every
+    // window keeps painting while another has focus.
+    for (const argv of [launches.linuxWindow, launches.macWindow]) {
+      should(argv.some(argument => argument.startsWith('--headless'))).be.false();
+      for (const flag of keepPainting) should(argv).containEql(flag);
+    }
+    should(launches.linuxWindow).containEql('--ozone-platform=x11');
+    should(launches.macWindow).not.containEql('--ozone-platform=x11');
+  });
+
+  it('should name what installs Xvfb, or say to install it, when a Linux real window has no display', () => {
+    // Arrange
+    const has =
+      (...managers: string[]) =>
+      (command: string) =>
+        managers.includes(command);
+
+    // Act + Assert
+    should(xvfbInstallCommand(has('apt-get', 'nix'))).equal('sudo apt-get install -y xvfb');
+    should(xvfbInstallCommand(has('dnf'))).equal('sudo dnf install -y xorg-x11-server-Xvfb');
+    should(xvfbInstallCommand(has('pacman'))).equal('sudo pacman -S --noconfirm xorg-server-xvfb');
+    should(xvfbInstallCommand(has('zypper'))).equal('sudo zypper install -y xvfb-run');
+    should(xvfbInstallCommand(has('nix'))).equal('nix profile install nixpkgs#xvfb');
+    should(xvfbInstallCommand(has())).be.undefined();
+    should(xvfbMissingMessage(has('apt-get'))).equal(
+      'Browser mode is Real window, which needs Xvfb on Linux and this host has none: install it with `sudo apt-get install -y xvfb`, or set Browser mode back to Headless.',
+    );
+    should(xvfbMissingMessage(has())).equal(
+      'Browser mode is Real window, which needs Xvfb on Linux and this host has none: install Xvfb, or set Browser mode back to Headless.',
+    );
   });
 
   it('should bound login duration and build loopback-only VNC supervision commands', () => {

@@ -23,16 +23,17 @@ Use it in **one** place: a message you are writing into a chat, right where the 
 Every type renders **by itself, inline in the message**, as soon as it scrolls near the screen — no
 button, no card, no caption:
 
-| `type:`   | Today                                                                                     |
-| --------- | ----------------------------------------------------------------------------------------- |
-| `svg`     | renders as a picture                                                                      |
-| `image`   | renders as a picture (raster only) — inline base64, or from `src:`                        |
-| `mermaid` | renders as a diagram — drawn in a sandbox, shown as a picture                             |
-| `lottie`  | plays as an animation, with Pause and Play                                                |
-| `html`    | a **static** fragment in the message; with a `<script>`, a live page in an isolated frame |
-| `video`   | plays in the browser's own player, from `src:`                                            |
-| `audio`   | plays in the browser's own player, from `src:`                                            |
-| `pdf`     | a workspace PDF opens in a new tab or downloads; an https PDF is a link                   |
+| `type:`   | Today                                                                                                                      |
+| --------- | -------------------------------------------------------------------------------------------------------------------------- |
+| `svg`     | renders as a picture                                                                                                       |
+| `image`   | renders as a picture (raster only) — inline base64, or from `src:`                                                         |
+| `mermaid` | renders as a diagram — drawn in a sandbox, shown as a picture                                                              |
+| `map`     | an interactive map (pan, zoom, tap pins) from small JSON/YAML: `center`, `zoom`, `markers`, `lines`, `polygons`, `geojson` |
+| `lottie`  | plays as an animation, with Pause and Play                                                                                 |
+| `html`    | a **static** fragment in the message; with a `<script>`, a live page in an isolated frame                                  |
+| `video`   | plays in the browser's own player, from `src:`                                                                             |
+| `audio`   | plays in the browser's own player, from `src:`                                                                             |
+| `pdf`     | a workspace PDF opens in a new tab or downloads; an https PDF is a link                                                    |
 
 So write `mermaid` when a flowchart, sequence or state diagram is what you mean; you no longer have
 to hand-draw it as `svg`. Reach for `svg` when you want exact control over the drawing, `lottie` when
@@ -177,6 +178,7 @@ bytes), a small **Try rendering again** link sits under the code.
 | `html`    | 200 KiB                                                      |
 | `svg`     | 100 KiB, and at most 500 elements                            |
 | `mermaid` | 20,000 characters                                            |
+| `map`     | 32 KiB, 100 markers, 50 shapes, 2,000 vertices               |
 | `lottie`  | 1 MiB                                                        |
 | `image`   | 2 MiB decoded                                                |
 | `src:`    | no payload; a workspace file ≤ 1 MiB, an https image ≤ 2 MiB |

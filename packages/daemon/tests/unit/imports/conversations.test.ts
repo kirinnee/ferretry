@@ -7,6 +7,7 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
 import { transcriptName } from '../../../src/lib/imports/conversation-name.ts';
+import { NO_HANDOFF_SCOPE } from '../../../src/lib/imports/conversation-text.ts';
 import {
   adoptedConversationFile,
   adoptedTranscriptProvenance,
@@ -17,6 +18,7 @@ import {
   type ConversationFileEntry,
   type ConversationFiles,
   ConversationImportService,
+  type ConversationListPolicy,
   type ConversationRoot,
   conversationHead,
   conversationKey,
@@ -233,6 +235,7 @@ describe('conversation discovery', () => {
       preview: 'Fix the cart total',
       lastActivityAt: '2026-10-17T08:01:00.000Z',
       turns: 1,
+      keptIn: 'ferretry',
     });
     should(listing.conversations[1]).containDeep({ project: '/work/notes', preview: 'Draft the release notes' });
     // A conversation with no usable time falls back to its file's.
@@ -262,6 +265,7 @@ describe('conversation discovery', () => {
       lastActivityAt: '2026-10-17T08:03:00.000Z',
       turns: 2,
       model: 'claude-sonnet-4-5',
+      keptIn: 'computer',
     });
   });
 
@@ -982,5 +986,159 @@ describe('a conversation too large to read whole', () => {
     // Assert
     should(listing.conversations[0]).containDeep({ turns: 2 });
     should(listing.conversations[0]?.turnsAtLeast).be.undefined();
+  });
+});
+
+describe('keeping in sync with the computer’s own history', () => {
+  const newer = '55555555-5555-4555-8555-555555555555';
+  const policy = (listed: () => boolean): ConversationListPolicy & { asked: number } => {
+    const state = {
+      asked: 0,
+      listsComputer: async () => {
+        state.asked += 1;
+        return listed();
+      },
+    };
+    return state;
+  };
+  const synced = (files: FakeFiles, setting: ConversationListPolicy, adopter = new RecordingAdopter()) =>
+    new ConversationImportService(
+      files,
+      ROOTS,
+      parsers,
+      { owners: async () => new Map() },
+      adopter,
+      NO_HANDOFF_SCOPE,
+      setting,
+    );
+
+  it('should list Ferretry’s history and the computer’s together, saying where each file is kept', async () => {
+    // Arrange
+    const subjectService = synced(
+      new FakeFiles(tree),
+      policy(() => true),
+    );
+
+    // Act
+    const actual = await subjectService.list({ source: 'synced' });
+
+    // Assert
+    const expected = [
+      [CLAUDE_ID, 'ferretry'],
+      [CODEX_ID, 'computer'],
+      [CLAUDE_OLD, 'computer'],
+    ];
+    should(actual.conversations.map(row => [row.id, row.keptIn])).deepEqual(expected);
+    should(actual.computerListed).equal(undefined);
+  });
+
+  it('should list the computer’s history when no switch was ever given', async () => {
+    // Arrange
+    const subjectService = subject();
+
+    // Act
+    const actual = await subjectService.list({ source: 'synced' });
+
+    // Assert
+    should(actual.conversations.map(row => row.id)).deepEqual([CLAUDE_ID, CODEX_ID, CLAUDE_OLD]);
+  });
+
+  it('should keep one conversation held in both places as Ferretry’s, so an adopted one is listed once', async () => {
+    // Arrange
+    const subjectService = synced(
+      new FakeFiles(tree),
+      policy(() => true),
+    );
+
+    // Act
+    const actual = await subjectService.list({ source: 'synced', harness: 'claude', q: 'cart' });
+
+    // Assert
+    should(actual.conversations.map(row => [row.id, row.keptIn])).deepEqual([[CLAUDE_ID, 'ferretry']]);
+  });
+
+  it('should list only Ferretry’s history, and say so, while listing the computer is off', async () => {
+    // Arrange
+    const setting = policy(() => false);
+    const subjectService = synced(new FakeFiles(tree), setting);
+
+    // Act
+    const actual = await subjectService.list({ source: 'synced' });
+
+    // Assert
+    should(actual.conversations.map(row => row.id)).deepEqual([CLAUDE_ID]);
+    should(actual.computerListed).equal(false);
+  });
+
+  it('should still read the computer’s history when asked for it by name, or for both without a source', async () => {
+    // Arrange
+    const setting = policy(() => false);
+    const subjectService = synced(new FakeFiles(tree), setting);
+
+    // Act
+    const computer = await subjectService.list({ source: 'computer' });
+    const both = await subjectService.list();
+
+    // Assert
+    should(computer.conversations.map(row => row.id)).deepEqual([CLAUDE_ID, CODEX_ID, CLAUDE_OLD]);
+    should(both.conversations.map(row => row.id)).deepEqual([CLAUDE_ID, CODEX_ID, CLAUDE_OLD]);
+    should(computer.computerListed).equal(undefined);
+    // Only a synced listing consults the switch.
+    should(setting.asked).equal(0);
+  });
+
+  it('should adopt a computer conversation on the spot even while listing the computer is off', async () => {
+    // Arrange
+    const adopter = new RecordingAdopter();
+    const subjectService = synced(
+      new FakeFiles(tree),
+      policy(() => false),
+      adopter,
+    );
+
+    // Act
+    const actual = await subjectService.adopt({
+      harness: 'codex',
+      runtime: 'codex-main',
+      conversations: [{ id: CODEX_ID, start: true }],
+    });
+
+    // Assert
+    should(actual.adopted.map(item => item.id)).deepEqual([CODEX_ID]);
+    should(adopter.calls.map(call => [call.conversation.source, call.conversation.keptIn, call.start])).deepEqual([
+      [`/host/codex/sessions/2026/10/10/rollout-2026-10-10T09-00-00-${CODEX_ID}.jsonl`, 'computer', true],
+    ]);
+  });
+
+  it('should see a new conversation, and the switch flipping, on the very next listing with nothing timed', async () => {
+    // Arrange
+    let listed = false;
+    const mutable: Record<string, Tree | string | null> = {
+      host: { claude: { projects: {} } },
+      pool: { claude: { projects: {} } },
+    };
+    const subjectService = synced(
+      new FakeFiles(mutable),
+      policy(() => listed),
+    );
+    const first = await subjectService.list({ source: 'synced' });
+
+    // Act
+    mutable.host = {
+      claude: {
+        projects: {
+          '-work-shop': { [`${newer}.jsonl`]: claude('Brand new', '2026-10-20T08:00:00.000Z', { sessionId: newer }) },
+        },
+      },
+    };
+    const hidden = await subjectService.list({ source: 'synced' });
+    listed = true;
+    const shown = await subjectService.list({ source: 'synced' });
+
+    // Assert
+    should(first.conversations).deepEqual([]);
+    should(hidden.conversations).deepEqual([]);
+    should(hidden.computerListed).equal(false);
+    should(shown.conversations.map(row => [row.id, row.keptIn])).deepEqual([[newer, 'computer']]);
   });
 });

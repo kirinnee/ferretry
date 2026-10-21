@@ -312,10 +312,12 @@ export class AgentToolService {
     const page: { readonly url?: string; readonly text?: unknown; readonly screenshotBase64?: unknown } =
       'result' in answer ? answer.result : {};
     const at = page.url === undefined ? '' : ` (now at ${page.url})`;
-    if (typeof page.text === 'string') return { summary: `Read ${reference}${at}.`, output: clipOutput(page.text) };
+    const check = humanCheckNote(answer, surface.id);
+    if (typeof page.text === 'string')
+      return { summary: `Read ${reference}${at}.${check}`, output: clipOutput(page.text) };
     if (typeof page.screenshotBase64 === 'string')
-      return { summary: `A screenshot of ${reference}${at}.`, screenshotBase64: page.screenshotBase64 };
-    return { summary: `Done on ${reference}${at}.` };
+      return { summary: `A screenshot of ${reference}${at}.${check}`, screenshotBase64: page.screenshotBase64 };
+    return { summary: `Done on ${reference}${at}.${check}` };
   }
 
   /**
@@ -624,4 +626,15 @@ function translate(error: unknown): AgentToolError | undefined {
 export function browserUnavailable(reason: string): string {
   const first = (reason.split('\n')[0] ?? '').trim().slice(0, 200);
   return `Browser tools could not start a browser on this machine (${first || 'no reason given'}): install Google Chrome or set FY_CHROME_BIN to a Chrome binary, make sure the fyd-browser-worker program is installed beside fyd, then try again.`;
+}
+
+/**
+ * What an agent is told when the page it just acted on appears to be asking for a human check
+ * (docs/browser-mode.md): that it is one, and that the owner solves it — never the agent. Empty otherwise.
+ */
+function humanCheckNote(answer: BrowserActionResult, pageId: string): string {
+  if (!('result' in answer)) return '';
+  const page = answer.result.pages.find(candidate => candidate.id === (answer.result.actedPageId ?? pageId));
+  if (page?.challenge === undefined) return '';
+  return ' The page appears to be showing a human check (a captcha or a "checking your browser" page). Do not try to solve or get around it: ask your owner to take the page over in Ferretry and solve it themselves, then carry on.';
 }

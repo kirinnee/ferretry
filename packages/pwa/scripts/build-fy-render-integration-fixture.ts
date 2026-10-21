@@ -77,12 +77,16 @@ export const FY_RENDER_FIXTURE_MANIFEST_NAME = 'fy-render-fixture.json';
  * vendor CSS, which nothing in `fy-render` reads; everything this component does
  * read reaches here through `styles/index.css`'s `@import` graph.
  */
-const bundleOne = async (entry: string, label: string): Promise<string> => {
+const bundleOne = async (entry: string, label: string): Promise<{ readonly js: string; readonly css: string }> => {
   const result = await Bun.build({ entrypoints: [entry], minify: false, target: 'browser', throw: false });
   if (!result.success) throw new Error(`❌ ${label} did not build:\n${result.logs.join('\n')}`);
   const [artifact] = result.outputs;
   if (artifact === undefined) throw new Error(`❌ ${label} produced no output`);
-  return await artifact.text();
+  // A stylesheet a script imports (the map library's) is emitted beside it, not inside it.
+  const css = await Promise.all(
+    result.outputs.filter(output => output.path.endsWith('.css')).map(output => output.text()),
+  );
+  return { css: css.join('\n'), js: await artifact.text() };
 };
 
 const outDirectoryFrom = (argv: readonly string[]): string => {
@@ -103,11 +107,13 @@ export const buildFyRenderIntegrationFixture = async (directory: string): Promis
   // rather than into `public/`.
   const { artifacts } = await buildFyRenderShell(directory);
 
-  const appCss = await bundleOne(resolve(packageRoot, 'src/styles/index.css'), 'the app stylesheet');
-  const appJs = await bundleOne(
+  const stylesheet = await bundleOne(resolve(packageRoot, 'src/styles/index.css'), 'the app stylesheet');
+  const scene = await bundleOne(
     resolve(packageRoot, 'tests/integration/fixtures/fy-render-visual-scene.tsx'),
     'the visual scene',
   );
+  const appCss = `${stylesheet.css}\n${scene.css}`;
+  const appJs = scene.js;
 
   const appCssPath = resolve(directory, 'app.css');
   const appJsPath = resolve(directory, 'app.js');

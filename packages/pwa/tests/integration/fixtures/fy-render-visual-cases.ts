@@ -133,11 +133,22 @@ const FRAGMENT_TABLE = [
   '<details><summary>Why static?</summary><p>No script can run, so nothing needs a frame.</p></details>',
 ].join('');
 
+/** Markers with popups and a route between them: what an agent shows for "where is it, and how do I get there". */
+const MAP = [
+  'markers:',
+  '  - {at: [51.5007, -0.1246], label: Big Ben, popup: "Start here: the clock tower at Westminster.", color: red}',
+  '  - {at: [51.5033, -0.1195], label: London Eye, popup: "A ten minute walk along the river."}',
+  '  - {at: [51.5081, -0.0759], label: Tower Bridge, color: green}',
+  'lines:',
+  '  - {points: [[51.5007, -0.1246], [51.5033, -0.1195], [51.5075, -0.1135], [51.5081, -0.0759]], label: Route, color: blue}',
+].join('\n');
+
 export const FY_RENDER_VISUAL_CASES: Record<string, string> = {
   'fragment-table': fence('html', 'A comparison of rendering options', FRAGMENT_TABLE),
   'fragment-xss': fence('html', 'A fragment carrying every refused construct', FRAGMENT_XSS),
   'init-directive': fence('mermaid', 'A diagram whose author asked for HTML labels', MERMAID_INIT_DIRECTIVE),
   lottie: fence('lottie', 'A blue dot travelling across the frame', LOTTIE),
+  map: fence('map', 'A walk from Big Ben to Tower Bridge', MAP),
   mermaid: fence('mermaid', 'How an fy-render block reaches the reader', MERMAID),
   'mermaid-failure': fence('mermaid', 'A diagram that cannot be drawn', MERMAID_BROKEN),
 };

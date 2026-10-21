@@ -619,6 +619,17 @@
 .fy-message-user > p {
   margin-top: 0;
 }
+/* A send still on its way carries its controls (`LedgerControls`) inside this same bubble. They were
+   drawn for an unpadded shell and inset themselves; here the bubble's own padding is the inset. */
+.fy-message-user > .mx-panel {
+  margin-inline: 0;
+}
+.fy-message-user > .mx-panel:last-child {
+  margin-bottom: 0;
+}
+.fy-message-user > [data-ledger-actions] {
+  margin-top: 6px;
+}
 /* A message handed to the agent through a file (`handoff-message.tsx`): the file's text as Markdown,
    its attachments under it, and a small faded "via turn file" line that explains on hover or tap. */
 .fy-handoff {
@@ -2307,6 +2318,9 @@ html[data-keyboard='open'] .fy-composer[data-composer-layout='phone'] .fy-compos
 }
 [data-source='codex'] {
   --fy-src: var(--src-codex);
+}
+[data-source='computer'] {
+  --fy-src: var(--src-computer);
 }
 [data-source='ferretry'],
 [data-source='all'] {

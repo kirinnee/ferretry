@@ -11,13 +11,14 @@ import { FyHttpError } from '@ferretry/protocol/client';
 import type { z } from 'zod';
 import { ContinueConversation } from '../../../../../src/features/fleet/conversations/continue-conversation.tsx';
 import type { FleetClient } from '../../../../../src/features/fleet/fleet-client.ts';
+import { daemonConnection } from '../../../../../src/lib/daemon-connection.ts';
 import { interact, type Mounted, mount, must } from '../../../../support/dom.ts';
 import { sessionView } from '../../../../support/sessions.ts';
 import { RUNTIMES, runtime, STUDIO } from '../account-support.ts';
 import { conversation, listing, NOW, settle, type } from './conversation-support.ts';
 
 const RUNTIMES_PATH = '/v1/fleet/runtimes';
-const ALL = `${CONVERSATION_IMPORT_PATH}?source=ferretry&limit=50`;
+const ALL = `${CONVERSATION_IMPORT_PATH}?source=synced&limit=50`;
 const KEPT = `${CONVERSATION_IMPORT_PATH}?source=ferretry&limit=1000`;
 const HOUR = 3_600_000;
 
@@ -188,7 +189,7 @@ describe('ContinueConversation over all conversations', () => {
     await click('[data-segmented="source"] [data-segment="codex"]');
     await click('[data-segmented="date"] [data-segment="30d"]');
     expect(listed(sent).at(-1)).toBe(
-      `${CONVERSATION_IMPORT_PATH}?source=ferretry&harness=codex&q=shop+tests&since=2026-09-13T08%3A00%3A00.000Z&limit=50`,
+      `${CONVERSATION_IMPORT_PATH}?source=synced&harness=codex&q=shop+tests&since=2026-09-13T08%3A00%3A00.000Z&limit=50`,
     );
   });
 
@@ -503,5 +504,147 @@ describe('ContinueConversation marks and the Ferretry filter', () => {
     expect(view?.container.querySelector('[data-continue-preview]')).not.toBeNull();
     await click('[data-segmented="source"] [data-segment="claude"]');
     expect(view?.container.querySelector('[data-continue-preview]')).toBeNull();
+  });
+});
+
+describe('ContinueConversation over this computer', () => {
+  const COMPUTER_ROWS = [
+    conversation('mac-new', { keptIn: 'computer', daysAgo: 0.4, name: 'Release notes' }),
+    conversation('mac-codex', { keptIn: 'computer', harness: 'codex', daysAgo: 3, turnsAtLeast: true, turns: 2000 }),
+    conversation('mac-adopted', { keptIn: 'computer', adoptedBy: 'notes-ferret', daysAgo: 1 }),
+    conversation('mine', { keptIn: 'ferretry', daysAgo: 2 }),
+  ];
+  const computer = '[data-segmented="source"] [data-segment="computer"]';
+
+  it('marks the rows that are on this computer, and only those', async () => {
+    // Arrange
+    await open({ list: () => listing(COMPUTER_ROWS) });
+
+    // Act
+    const badges = [...(view?.container.querySelectorAll('[data-conversation-computer]') ?? [])];
+    const actual = badges.map(badge => badge.closest('[data-continue-row]')?.getAttribute('data-continue-row'));
+
+    // Assert
+    expect(actual).toEqual(['mac-new', 'mac-adopted', 'mac-codex']);
+    expect(text('[data-continue-row="mac-new"] [data-conversation-computer]')).toBe('On this computer');
+    expect(find('[data-continue-row="mac-new"] [data-conversation-computer]').getAttribute('data-source')).toBe(
+      'computer',
+    );
+  });
+
+  it('narrows to the rows only on this computer, asking for more of the answer', async () => {
+    // Arrange
+    const sent: Sent[] = [];
+    await open({ sent, list: () => listing(COMPUTER_ROWS) });
+
+    // Act
+    await click(computer);
+
+    // Assert
+    const rows = [...(view?.container.querySelectorAll('[data-continue-row]') ?? [])];
+    expect(rows.map(row => row.getAttribute('data-continue-row'))).toEqual(['mac-new', 'mac-codex']);
+    expect(listed(sent).at(-1)).toBe(`${CONVERSATION_IMPORT_PATH}?source=synced&limit=200`);
+  });
+
+  it('adopts a computer row like any other: start on, then opens the new ferret', async () => {
+    // Arrange
+    const navigated: string[] = [];
+    const sent: Sent[] = [];
+    await open({
+      navigated,
+      sent,
+      list: () => listing(COMPUTER_ROWS),
+      adopt: () => ({ adopted: [{ id: 'mac-new', session: 's-3', name: 'mac', status: 'running' }], refused: [] }),
+    });
+    await click(computer);
+
+    // Act
+    await click('[data-continue-row="mac-new"]');
+    await click(action('conversation:claude:mac-new'));
+
+    // Assert
+    expect(sent.find(call => call.path === CONVERSATION_ADOPT_PATH)?.body).toEqual({
+      harness: 'claude',
+      runtime: 'claude-default-w',
+      conversations: [{ id: 'mac-new', start: true }],
+    });
+    expect(navigated).toEqual(['/d/studio/session/s-3']);
+  });
+
+  it('says why nothing is here when Keep in sync is off, and where to turn it on', async () => {
+    // Arrange
+    await open({ list: () => listing([conversation('mine', { keptIn: 'ferretry' })], 1, false) });
+
+    // Act
+    await click(computer);
+
+    // Assert
+    expect(text('[data-continue-computer-hidden]')).toBe(
+      'Conversations on this computer are hidden. Turn on Keep in sync in Settings › Machine › Conversations.',
+    );
+    expect(text('[data-continue-empty]')).toBe('Nothing to show: Keep in sync is off.');
+  });
+
+  it('keeps the hint away from the Ferretry chip and from a listing that includes the computer', async () => {
+    // Arrange
+    await open({ list: () => listing([conversation('mine', { keptIn: 'ferretry' })], 1, false) });
+
+    // Act
+    await click('[data-segmented="source"] [data-segment="ferretry"]');
+    const onFerretry = view?.container.querySelector('[data-continue-computer-hidden]');
+    await view?.unmount();
+    await open({ list: () => listing(COMPUTER_ROWS) });
+    const onSynced = view?.container.querySelector('[data-continue-computer-hidden]');
+
+    // Assert
+    expect([onFerretry, onSynced]).toEqual([null, null]);
+  });
+
+  it('reads the list again each time it opens, with no timer between', async () => {
+    // Arrange
+    const sent: Sent[] = [];
+    await open({ sent });
+    const first = listed(sent).length;
+
+    // Act
+    await view?.unmount();
+    await open({ sent });
+    await settle();
+
+    // Assert
+    expect([first, listed(sent).length]).toEqual([2, 4]);
+  });
+
+  it('starts over when the machine changes: its rows, its chip, its open row', async () => {
+    // Arrange
+    const other = daemonConnection({ daemonId: 'laptop', baseUrl: 'https://laptop.example.test', deviceId: 't' });
+    const sent: Sent[] = [];
+    await open({ sent, list: () => listing(COMPUTER_ROWS) });
+    await click(computer);
+    await click('[data-continue-row="mac-new"]');
+    const before = listed(sent).length;
+    const client = machine(
+      { list: () => listing([conversation('laptop-row')]), runtimes: () => catalog([CLAUDE]) },
+      sent,
+    );
+
+    // Act
+    await view?.render(
+      <ContinueConversation
+        connection={other}
+        createClient={async () => client}
+        onNavigate={() => undefined}
+        now={() => NOW}
+        debounceMs={0}
+      />,
+    );
+    await settle();
+
+    // Assert
+    const rows = [...(view?.container.querySelectorAll('[data-continue-row]') ?? [])];
+    expect(rows.map(row => row.getAttribute('data-continue-row'))).toEqual(['laptop-row']);
+    expect(find('[data-segmented="source"] [data-segment="all"]').getAttribute('aria-pressed')).toBe('true');
+    expect(view?.container.querySelector('[data-continue-preview]')).toBeNull();
+    expect(listed(sent).length).toBeGreaterThan(before);
   });
 });

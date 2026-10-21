@@ -52,7 +52,7 @@ async function fakeChrome(
     file,
     `#!/bin/sh
 if [ "$1" = "--version" ]; then echo 'Google Chrome 150.0'; exit 0; fi
-${options.recordArguments ? `printf '%s\\n' "$@" > "${file}.args"\n` : ''}port=$(printf '%s\\n' "$@" | sed -n 's/--remote-debugging-port=//p')
+${options.recordArguments ? `printf '%s\\n' "$@" > "${file}.args"\n` : ''}${options.recordArguments ? `printf '%s\\n' "\${DISPLAY-unset}" > "${file}.display"\n` : ''}port=$(printf '%s\\n' "$@" | sed -n 's/--remote-debugging-port=//p')
 exec node -e "${trap}require('http').createServer((q,s)=>{s.writeHead(200,{'content-type':'application/json'});s.end('{}')}).listen(process.argv[1],'127.0.0.1')" "$port"
 `,
   );
@@ -199,6 +199,117 @@ describe('NodeSessionBrowserLauncher', () => {
     should(started).not.containEql('--ozone-platform=x11');
     // The debugging port takes no cross-origin WebSocket: only the worker, which sends no Origin.
     should(started).not.containEql('--remote-allow-origins');
+  });
+
+  describe('Browser mode', () => {
+    /** A launcher over a recording fake Chrome, in the given mode, with an injected worker. */
+    async function modeLauncher(modes: ConstructorParameters<typeof NodeSessionBrowserLauncher>[5]) {
+      const chrome = await fakeChrome({ recordArguments: true });
+      const root = await mkdtemp(join(tmpdir(), 'ferretry-session-profile-'));
+      roots.push(root);
+      const worker = { unexpectedExit: new Promise<number>(() => undefined), close: async () => undefined };
+      const launcher = new NodeSessionBrowserLauncher(
+        new BrowserProfileStore(root),
+        INJECTED_WORKER,
+        process.execPath,
+        // The host's own DISPLAY is set, and must never be what a real window draws on.
+        environment(chrome),
+        async () => worker as never,
+        modes,
+      );
+      return { chrome, root, launcher };
+    }
+    const keptPainting = ['--disable-backgrounding-occluded-windows', '--disable-renderer-backgrounding'];
+    const display = (name: string) => ({
+      taken: 0,
+      async display() {
+        this.taken += 1;
+        return name;
+      },
+      close: async () => undefined,
+    });
+
+    it('should run a Linux real window headed, on its own private display, with no automation switch', async () => {
+      // Arrange
+      const xvfb = display(':42');
+      const { chrome, launcher } = await modeLauncher({ mode: async () => 'window', display: xvfb, platform: 'linux' });
+
+      // Act
+      const browser = await launcher.launch({ width: 800, height: 600 });
+      opened.push(browser);
+
+      // Assert
+      const started = await readFile(`${chrome}.args`, 'utf8');
+      should(started).not.containEql('--headless');
+      should(started).containEql('--ozone-platform=x11');
+      for (const flag of keptPainting) should(started).containEql(flag);
+      should(started).not.match(/automation/i);
+      should(started).containEql('--remote-debugging-address=127.0.0.1');
+      should((await readFile(`${chrome}.display`, 'utf8')).trim()).equal(':42');
+      should(xvfb.taken).equal(1);
+    });
+
+    it('should open a macOS real window on the desktop, taking no private display', async () => {
+      // Arrange
+      const xvfb = display(':42');
+      const { chrome, launcher } = await modeLauncher({
+        mode: async () => 'window',
+        display: xvfb,
+        platform: 'darwin',
+      });
+
+      // Act
+      const browser = await launcher.launch({ width: 800, height: 600 });
+      opened.push(browser);
+
+      // Assert
+      const started = await readFile(`${chrome}.args`, 'utf8');
+      should(started).not.containEql('--headless');
+      should(started).not.containEql('--ozone-platform=x11');
+      for (const flag of keptPainting) should(started).containEql(flag);
+      should((await readFile(`${chrome}.display`, 'utf8')).trim()).equal('unset');
+      should(xvfb.taken).equal(0);
+    });
+
+    it('should run headless, taking no display, when the mode says so or cannot be read', async () => {
+      for (const mode of [async () => 'headless' as const, async () => Promise.reject(new Error('unreadable'))]) {
+        // Arrange
+        const xvfb = display(':42');
+        const { chrome, launcher } = await modeLauncher({ mode, display: xvfb, platform: 'linux' });
+
+        // Act
+        const browser = await launcher.launch({ width: 800, height: 600 });
+        opened.push(browser);
+
+        // Assert
+        const started = await readFile(`${chrome}.args`, 'utf8');
+        should(started).containEql('--headless=new');
+        should(started).not.containEql('--disable-renderer-backgrounding');
+        should((await readFile(`${chrome}.display`, 'utf8')).trim()).equal('unset');
+        should(xvfb.taken).equal(0);
+        await browser.close();
+      }
+    });
+
+    it('should refuse a Linux real window with no display BEFORE leasing the profile', async () => {
+      // Arrange
+      const missing = {
+        display: async (): Promise<string> => {
+          throw new Error('Browser mode is Real window, which needs Xvfb on Linux and this host has none');
+        },
+        close: async () => undefined,
+      };
+      const withoutXvfb = await modeLauncher({ mode: async () => 'window', display: missing, platform: 'linux' });
+      const withoutDisplay = await modeLauncher({ mode: async () => 'window', platform: 'linux' });
+
+      // Act + Assert — the refusal names the fix, and the profile is still free for the next launch.
+      await should(withoutXvfb.launcher.launch({ width: 800, height: 600 })).be.rejectedWith(/needs Xvfb/);
+      await should(withoutDisplay.launcher.launch({ width: 800, height: 600 })).be.rejectedWith(
+        'this daemon has no private display for a real browser window',
+      );
+      for (const { root } of [withoutXvfb, withoutDisplay])
+        should(await new BrowserProfileStore(root).acquire({ sessionId: 'next' })).have.property('sessionId', 'next');
+    });
   });
 
   it('should carry a screencast frame from the worker to the viewer that asked for one', async () => {

@@ -16,7 +16,7 @@
 
 import { describe, expect, it } from 'bun:test';
 import { HOSTED_RELAY_DIRECTORY_ORIGIN } from '@ferretry/relay';
-import viteConfig from '../../vite.config.ts';
+import viteConfig, { leafletTrustedTypes } from '../../vite.config.ts';
 
 /**
  * The `define` this config resolves for one value of `FY_RELAY_DIRECTORY_ORIGIN`.
@@ -129,5 +129,37 @@ describe('the relay directory the bundle asks', () => {
     // relayed first pairing, which fails closed but for a reason nothing would name.
     expect(JSON.parse(String(await directoryDefine('', 'blank')))).toBe(HOSTED_RELAY_DIRECTORY_ORIGIN);
     expect(JSON.parse(String(await directoryDefine('   ', 'whitespace')))).toBe(HOSTED_RELAY_DIRECTORY_ORIGIN);
+  });
+});
+
+/**
+ * Leaflet writes `div.innerHTML = '<svg/>'` while it loads, to learn whether the browser has inline SVG. Under
+ * `require-trusted-types-for 'script'` that is a thrown TypeError at import, which would take every map down.
+ * The plugin removes the write at build time; these cases pin that it still finds it, and that a Leaflet
+ * which changes shape stops the build rather than shipping unaudited.
+ */
+describe('the Leaflet Trusted Types transform', () => {
+  const leaflet = '/repo/node_modules/leaflet/dist/leaflet-src.js';
+  const feature =
+    "var inlineSvg = !!svg$1 && (function () { var div = document.createElement('div'); div.innerHTML = '<svg/>'; return (div.firstChild && div.firstChild.namespaceURI) === 'http://www.w3.org/2000/svg'; })();";
+
+  it('removes the load-time markup write from the real Leaflet source', async () => {
+    const source = await Bun.file(import.meta.resolve('leaflet/dist/leaflet-src.js').replace('file://', '')).text();
+    const out = leafletTrustedTypes.transform(source, leaflet);
+    expect(out).toBeString();
+    expect(out).not.toContain("innerHTML = '<svg/>'");
+    expect(out).toContain('var inlineSvg = !!svg$1;');
+  });
+
+  it('rewrites the ESM build too and ignores a query string', () => {
+    expect(leafletTrustedTypes.transform(feature, '/x/leaflet/dist/leaflet-src.esm.js?v=1')).not.toContain('<svg/>');
+  });
+
+  it('leaves every other module alone', () => {
+    expect(leafletTrustedTypes.transform(feature, '/repo/src/other.js')).toBeUndefined();
+  });
+
+  it('refuses to build when Leaflet no longer has the write it expects', () => {
+    expect(() => leafletTrustedTypes.transform('var nothing;', leaflet)).toThrow(/re-audit/u);
   });
 });

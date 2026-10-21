@@ -128,6 +128,7 @@ import { FileHandoverReceiptStore } from '../src/adapters/handover/file-handover
 import {
   AnalyticsTranscriptSpend,
   AuthorizedProviderProbe,
+  type BrowserDisplayPort,
   BrowserLoginWindowService,
   BrowserProfileStore,
   BrowserWorkerClient,
@@ -413,6 +414,7 @@ import {
 } from '../src/lib/imports/conversation-text.ts';
 import {
   type AccountInventoryPort,
+  AccountModelConversationListPolicy,
   AgentSendFailureNotifier,
   AgentToolService,
   type AnalyticsIndexStoreFactory,
@@ -478,6 +480,7 @@ import {
   claimStartName,
   codexModelProvider,
   combinedReferences,
+  computerConversationRoots,
   configuredAt,
   contextWindowForSession,
   conversationResumeArguments,
@@ -804,6 +807,7 @@ import {
   wardenEventTrigger,
   wardenTriggerEnabled,
   withLivenessLedger,
+  xvfbMissingMessage,
 } from '../src/lib/index.ts';
 import {
   admitChild,
@@ -1190,6 +1194,13 @@ export interface DaemonWorld {
   /** What starts a session's browser: a Chrome and the browser worker. A world field for the reason
    *  `terminalRuntime` is one. */
   readonly browserLauncher: BrowserSessionLauncher;
+  /**
+   * The private X display a Linux agent browser draws into when the machine's Browser mode is a real window
+   * (docs/browser-mode.md) — taken on the first such launch, never on a headless one, and released with
+   * the daemon. Its OWN Xvfb, separate from the login window's: that one is served over VNC, and an agent
+   * browser's windows must never be on a screen something else publishes.
+   */
+  readonly agentBrowserDisplay: BrowserDisplayPort;
   /**
    * The OTHER carriers this daemon can be reached over: outbound sockets to rendezvous.
    *
@@ -6309,6 +6320,12 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
    * configuration that is absent is a host with no fleet; one in the old account format refuses.
    */
   const declaredAccountModel = async () => await readDeclaredAccountModel(configFiles, configLocations);
+  // The agent browser's own private display for a Linux real window (see `DaemonWorld.agentBrowserDisplay`).
+  // Nothing is spawned until a real-window launch asks for it; a host without Xvfb is told what to install.
+  const agentBrowserDisplay = new XvfbDisplay({
+    executable: () => Bun.which('Xvfb', { PATH: process.env.PATH }) ?? undefined,
+    missing: () => xvfbMissingMessage(command => Bun.which(command, { PATH: process.env.PATH }) !== null),
+  });
   const publishedManifest = async () => await readFleetManifest(stateFiles, paths.fleetManifest);
   /** The fleet's declared probe interval. A host with no readable configuration keeps the default. */
   const declaredUsageRefreshMs = async (): Promise<number> =>
@@ -7252,6 +7269,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
     // The daemon's OWN private socket, never the host's default: a terminal must not land on a tmux
     // server something else on this machine already runs.
     terminalRuntime: new TmuxTerminalRuntime(tmux, () => Date.now()),
+    agentBrowserDisplay,
     browserLauncher: new NodeSessionBrowserLauncher(
       new BrowserProfileStore(paths.home),
       browserWorkerProgram(),
@@ -7261,6 +7279,12 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       Bun.which('node') ?? process.execPath,
       process.env,
       browserTransport.connectWorker,
+      {
+        // Read at every launch, so a switch applies the next time the browser starts. An unreadable
+        // configuration launches headless rather than not at all.
+        mode: async () => (await declaredAccountModel())?.machine.browserMode ?? 'headless',
+        display: agentBrowserDisplay,
+      },
     ),
     relayDirectory: new HostedRelayDirectory(environment.relayDirectoryOrigin()),
     createDirectCarrier: async (dispatch, sockets, devices, pairing) => {
@@ -7772,9 +7796,12 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         new NodeConversationFiles(),
         [
           { harness: 'claude', home: sharedHistoryPoolDirectory(paths.fleet, 'claude'), source: 'ferretry' },
-          { harness: 'claude', home: process.env.CLAUDE_CONFIG_DIR ?? join(userHome, '.claude'), source: 'computer' },
           { harness: 'codex', home: sharedHistoryPoolDirectory(paths.fleet, 'codex'), source: 'ferretry' },
-          { harness: 'codex', home: process.env.CODEX_HOME ?? join(userHome, '.codex'), source: 'computer' },
+          ...computerConversationRoots({
+            claudeConfigDir: process.env.CLAUDE_CONFIG_DIR,
+            codexHome: process.env.CODEX_HOME,
+            userHome,
+          }),
         ],
         { claude: claudeTranscriptParser, codex: codexTranscriptParser },
         new StorageConversationOwners(storage),
@@ -7801,6 +7828,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           new NodeConversationLinker(),
         ),
         { roots: [paths.sessions], coordinatorHomes: [userHome] },
+        new AccountModelConversationListPolicy(declaredAccountModel),
       );
       const wardenPaths = createWardenPaths(paths.home);
       const notifications = new NotificationService({
@@ -9185,6 +9213,7 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
   // be asked to put an X server, a Chrome and a VNC listener on this host, and whatever it took must
   // be released whether the boot completes or fails part-way.
   cleanups.push(() => world.browserLogin.close());
+  cleanups.push(() => world.agentBrowserDisplay.close());
   // A harness sign-in is a child this daemon launched, and a pending `codex login` holds this host's
   // `localhost:1455` while it lives. It ends with the daemon, or the next Codex sign-in finds the port
   // taken by a flow nobody can see any more.

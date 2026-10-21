@@ -4,7 +4,8 @@ A fenced block an assistant can put in its own chat message so a diagram, a draw
 renders where the explanation is, instead of as a wall of markup the reader has to imagine.
 
 **Read this first: one kind of block runs an author's code, and it runs it somewhere that cannot reach
-the app.** `svg` and inline `image` become an `<img>` directly. `mermaid` and `lottie` are handed as
+the app.** `svg` and inline `image` become an `<img>` directly. `map` is drawn **in the page** by a bundled map library from a small JSON/YAML description, with
+OpenStreetMap tiles as its one remote load ([Maps](#maps)). `mermaid` and `lottie` are handed as
 **data** to a trusted library running inside an opaque-origin sandbox frame. `html` WITHOUT script is a
 **static fragment**: sanitized against a strict allowlist and rendered into a closed shadow root in the
 message ([The `html` fragment](#the-html-fragment)). `html` WITH script **runs**, in its own
@@ -57,12 +58,12 @@ alt: A ten by ten square, filled solid
 
 **Header block** — `key: value` lines, one per line, from a closed set:
 
-| Key    | Required                                             | Value                                                                       |
-| ------ | ---------------------------------------------------- | --------------------------------------------------------------------------- |
-| `type` | yes, **and on the FIRST line**                       | one of `html`, `svg`, `lottie`, `mermaid`, `image`, `video`, `audio`, `pdf` |
-| `alt`  | yes                                                  | ≤ 200 characters, one line, no control characters                           |
-| `mime` | for an inline `image` only                           | one of `image/png`, `image/jpeg`, `image/gif`, `image/webp`                 |
-| `src`  | for `video`, `audio`, `pdf`; or instead of an `mime` | `@path` in the session's workspace, or an `https://` URL; ≤ 2048 characters |
+| Key    | Required                                             | Value                                                                              |
+| ------ | ---------------------------------------------------- | ---------------------------------------------------------------------------------- |
+| `type` | yes, **and on the FIRST line**                       | one of `html`, `svg`, `lottie`, `mermaid`, `map`, `image`, `video`, `audio`, `pdf` |
+| `alt`  | yes                                                  | ≤ 200 characters, one line, no control characters                                  |
+| `mime` | for an inline `image` only                           | one of `image/png`, `image/jpeg`, `image/gif`, `image/webp`                        |
+| `src`  | for `video`, `audio`, `pdf`; or instead of an `mime` | `@path` in the session's workspace, or an `https://` URL; ≤ 2048 characters        |
 
 `type` is positional, not merely present, so a block is identifiable from its opening line alone — by
 a reader scrolling and by a grep. `alt` is required rather than optional so an author cannot ship an
@@ -106,6 +107,7 @@ numbers.
 | `html`    | 200 KiB                          | —                                                                                                                                                                                                                                                                                          |
 | `svg`     | 100 KiB                          | `<!DOCTYPE>`/`<!ENTITY>`; `<script>`; `<foreignObject>`; `<use>`; more than 500 element opening tags; more than 32 filter primitives; a declared canvas over 8192 per axis or 16,777,216 pixels; an unterminated comment, CDATA section or tag; a payload that does not begin with `<svg>` |
 | `mermaid` | 20,000 characters                | —                                                                                                                                                                                                                                                                                          |
+| `map`     | 32 KiB                           | a blank payload; invalid JSON/YAML (aliases refused); more than 100 markers, 50 lines+polygons or 2,000 vertices; a coordinate off the globe; a zoom outside 0–18; a label over 80 or a popup over 500 characters — each falls back to a coordinates list, never a blank block             |
 | `lottie`  | 1 MiB                            | invalid JSON; a non-object root; a **string-valued** `"x"` expression key at any depth, or an array containing one at any index; more than 500 layers; deeper than 64 levels                                                                                                               |
 | `image`   | 2 MiB decoded (≈ 2.7 MiB base64) | anything that is not canonical base64; bytes that disagree with the declared MIME; a declared size over 8192 per axis or 16,777,216 pixels; animation; a container that fails the selected admission checks below                                                                          |
 | `src:`    | no payload at all                | a workspace file over **1 MiB** (the daemon's own per-file view limit, mirrored, not chosen); an https `image` over 2 MiB; an `image` whose fetched bytes fail the same admission checks below                                                                                             |
@@ -179,11 +181,66 @@ Two properties this feature must never change, and does not:
 | `html` (no script) | a static fragment in a closed shadow root, sanitized by DOMPurify     | Nothing runs; [The `html` fragment](#the-html-fragment) says what is stripped and what contains the rest     |
 | `html` (script)    | a live page in its own opaque frame, `/fy-render-html.html`           | The owner asked for interaction; [The interactive `html` frame](#the-interactive-html-frame) is the boundary |
 | `mermaid`          | `<img src="data:image/svg+xml,…">`                                    | Compiled to SVG in the sandbox frame, then re-admitted through the same gate an authored SVG passes          |
+| `map`              | a Leaflet map in the message, tiles from `tile.openstreetmap.org`     | The payload is data placed with `textContent`; [Maps](#maps) says what loads and what is refused             |
 | `lottie`           | live player inside the sandbox frame                                  | An animation has to keep running to animate, so this one stays live                                          |
 | `image` (`src:`)   | `<img src="blob:…">` of admitted bytes                                | Workspace or https bytes, checked like inline ones — [Media from `src:`](#media-from-src)                    |
 | `video`            | the browser's native `<video controls>`                               | A workspace file as a `blob:`; an https URL directly, which `media-src https:` admits                        |
 | `audio`            | the browser's native `<audio controls>`                               | As `video`                                                                                                   |
 | `pdf`              | a file row: workspace Open / Download of a minted `blob:`; https link | Measured: Chromium blocks its PDF viewer in a sandboxed frame, and the app policy refuses `blob:` frames     |
+
+### Maps
+
+**A `map` block is a Leaflet map drawn in the message, from a payload that is data.** Pan, zoom and tap a
+marker for its popup, like a native map; the theme follows light/dark. The payload is JSON or YAML (JSON is
+a YAML subset), at most 32 KiB:
+
+```text
+center: [51.5074, -0.1278]   # [lat, lng]; omit it to fit the view to everything drawn
+zoom: 12                     # 0–18; with a fit it is the closest the fit may zoom
+fit: true                    # fit to every marker and shape (implied when there is no centre)
+markers:
+  - {at: [51.5007, -0.1246], label: Big Ben, popup: "Clock tower", color: red}
+lines:                       # polylines / routes: [[lat, lng], …] or {points, label, color}
+  - {points: [[51.5, -0.12], [51.51, -0.1]], label: Route, color: blue}
+polygons:                    # {points, label, color}; a ring needs three points
+  - {points: [[51.50, -0.15], [51.51, -0.14], [51.50, -0.13]], label: Park}
+geojson: {…}                 # Point, LineString, Polygon and their Multi*/Feature/Collection forms
+```
+
+Colours are a short palette (`red`, `blue`, `green`, `amber`, `purple`) or a `#hex` literal, resolved before
+they reach a style.
+
+**What loads, and why it is safe.**
+
+- **The library is bundled and pinned** (Leaflet 1.9.4; `yaml` reads the payload) in a lazy chunk, fetched only
+  once a map is near the viewport. No runtime CDN.
+- **Markup is never built from the payload.** Labels and popups are placed with `textContent` into elements
+  the engine creates; Leaflet's string-markup paths (its zoom and attribution controls, the popup close
+  button) are not used — the component draws its own zoom buttons and attribution as ordinary React. A
+  label that looks like HTML is text.
+- **Trusted Types.** The page refuses a string at `innerHTML` (`require-trusted-types-for 'script'`, no default
+  policy). Leaflet writes `div.innerHTML = '<svg/>'` once at load to test for inline SVG; a build-time Vite
+  plugin (`leafletTrustedTypes` in `vite.config.ts`) removes that write and throws if Leaflet's source ever
+  stops matching, so a Leaflet upgrade must be re-audited. `tests/unit/build-contract.test.ts` pins it.
+- **One remote origin.** `img-src` names `https://tile.openstreetmap.org` and nothing else remote
+  (`public/_headers`; `scripts/validate/pages-config.sh` pins the line and still refuses a bare `https:`).
+  Markdown `![](url)` images remain requests the policy refuses. No API key exists anywhere in the client.
+- **Tile provider and policy.** OpenStreetMap's standard tile layer needs no key and permits light
+  interactive use under [its tile usage policy](https://operations.osmfoundation.org/policies/tiles/):
+  visible attribution (the component's © OpenStreetMap contributors link), a valid `Referer` (the tile
+  `<img>`s alone carry `referrerpolicy="strict-origin-when-cross-origin"`; the page's own policy stays
+  `no-referrer`), no bulk fetching, zoom capped at 18, a one-tile buffer, tiles loaded only when the map
+  is idle. A map draws only when it is near the viewport. Heavy deployments should move to a hosted
+  provider: change `MAP_TILE_ORIGIN` (`fy-render-map-tiles.ts`) and `img-src` together; the unit test and
+  the Pages gate fail until they agree.
+- **Touch.** On a coarse pointer one finger scrolls the transcript and the map is dragged in Fullscreen
+  (where the wheel zoom is also on); the Zoom buttons work inline.
+- **Dark mode** is a CSS filter on the tile pane, not a second tile source.
+
+**It fails to something readable.** A payload that is too large, not JSON/YAML, off the globe or over the
+caps shows the reason and a **coordinates list** (`Point: 51.5, -0.12`, up to 200 lines) taken from
+whatever could be read; the same list appears if the map library cannot load (offline, a blocked chunk).
+Tiles that fail to load leave the pins and lines on a plain background.
 
 ### The `html` fragment
 
@@ -546,14 +603,15 @@ count). They are never `display: none`: a keyboard reader who tabs into the bloc
 landed on. On a coarse pointer each icon resolves to the 44px touch floor through `--target-floor`;
 on a fine one it stays small.
 
-| Form                              | Source | Fullscreen | Play / Pause |
-| --------------------------------- | :----: | :--------: | :----------: |
-| `svg`, `image`, compiled Mermaid  |  yes   |    yes     |      —       |
-| `lottie`                          |  yes   |    yes     |     yes      |
-| `html`                            |  yes   |    yes     |      —       |
-| `src:` `image` / `video`          |  yes   |    yes     | the player's |
-| `src:` `audio`                    |   —    |     —      | the player's |
-| `pdf` and every media refusal row |   —    |     —      |      —       |
+| Form                              | Source | Fullscreen | Play / Pause  |
+| --------------------------------- | :----: | :--------: | :-----------: |
+| `svg`, `image`, compiled Mermaid  |  yes   |    yes     |       —       |
+| `lottie`                          |  yes   |    yes     |      yes      |
+| `html`                            |  yes   |    yes     |       —       |
+| `map`                             |  yes   |    yes     | Zoom in / out |
+| `src:` `image` / `video`          |  yes   |    yes     | the player's  |
+| `src:` `audio`                    |   —    |     —      | the player's  |
+| `pdf` and every media refusal row |   —    |     —      |       —       |
 
 An audio player gets no icons because its own controls fill that corner and there is nothing to see
 in fullscreen; a file row has its own Open and Download actions.
@@ -664,6 +722,14 @@ renders as an ordinary escaped fence.
 ## Declared gaps
 
 What this build knowingly does not do. Each of these is why row 65 is **not** ticked.
+
+0. **`type: map` leans on a third party's tile server.** Tiles come from OpenStreetMap's public servers under its
+   usage policy: the tile host sees the reader's IP and the area viewed (and a Referer carrying this app's
+   origin), a hosted-provider swap is the answer to heavy use, and an offline or blocked tile host leaves
+   pins on a blank background. Polygon holes are dropped (a polygon is its outer ring). Touch pan and
+   pinch were not exercised on a physical device in this build (the Chromium suite emulates a
+   coarse pointer), which is why Fullscreen is the documented route to full control. The page itself runs no
+   author code for a map.
 
 1. **`type: html` is a static fragment, and its residual is the sanitizer's.** Nothing in a fragment
    runs, so the egress an opaque frame could not close — self-navigation, prerender, WebRTC — has
@@ -819,4 +885,6 @@ artifacts outside the repository; cite them, do not assume they will outlive the
 | Interactive `html`: storage, parent, token, top navigation, popups, ordinary requests refused; cover contained; self-navigation egresses and is seen | `packages/pwa/tests/integration/fy-render-html.security.test.ts` (in this repository, real Chromium + request ledger)     |
 | `html` fragment: an XSS corpus runs nothing, loads nothing and escapes nothing under the app policy                                                  | `packages/pwa/tests/integration/fy-render-fragment.security.test.ts` (in this repository, real Chromium + request ledger) |
 | The production build renders every form inline, from an agent's reply, with media from `FY_MEDIA_DIR`                                                | `tests/e2e/product-journeys.e2e.test.ts` step `hypermedia-renders-inline` (in this repository)                            |
+| A map renders inline under the real Pages headers: tile requests go only to the tile origin, no Trusted Types or CSP violation, pins present         | `tests/e2e/fy-render-pages.e2e.test.ts` (production build under `wrangler pages dev`, tiles fulfilled by a fake)          |
+| Markers + route, light and dark, phone and desktop                                                                                                   | `packages/pwa/tests/integration/fy-render-component.visual.test.tsx` (real Chromium, tiles fulfilled by a fake)           |
 | The library shell is frameable under Pages pretty URLs; the `fy-fragment` policy and no other is allowed                                             | `tests/e2e/fy-render-pages.e2e.test.ts` (production build under `wrangler pages dev`)                                     |

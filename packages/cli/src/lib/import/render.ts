@@ -14,10 +14,11 @@ function previewLine(entry: ImportableConversation): string {
   return entry.latest === undefined ? entry.preview : `${entry.preview} … ${entry.latest}`;
 }
 
-/** The marks the browser draws as coloured badges, as text tags: the CLI, then the ferret that keeps it. */
+/** The marks the browser draws as coloured badges, as text tags: the CLI, where it is kept, then the ferret that keeps it. */
 function tags(entry: ImportableConversation): string {
+  const computer = entry.keptIn === 'computer' ? ' [on this computer]' : '';
   const ferret = entry.adoptedBy === undefined ? '' : ` [ferret ${entry.adoptedBy}]`;
-  return `[${entry.harness}]${ferret}`;
+  return `[${entry.harness}]${computer}${ferret}`;
 }
 
 /** A folder by its own name, a throwaway one tagged `[scratch]`. */
