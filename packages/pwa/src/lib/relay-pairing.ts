@@ -54,6 +54,9 @@ import {
   RELAY_CLOSE_CODES,
 } from '@ferretry/relay';
 import { daemonRelayCarrier, type RelayCarrier } from './daemon-connection.ts';
+
+/** The two carriers first contact can cross: the daemon's own address, or a rendezvous. */
+export type PairingCarrier = Extract<ConnectionMethod, { kind: 'direct' | 'relay' }>;
 import type { PairingSeed } from './pairing.ts';
 import { browserRelayDial, driveRelaySession, type RelayDial, type RelayHeartbeatSchedule } from './relay-carrier.ts';
 import {
@@ -69,11 +72,12 @@ import {
  * A fingerprint this protocol cannot address gets nothing — not even the direct address, because a
  * session is checked against that fingerprint on BOTH carriers now, and a pairing with nothing to
  * check the daemon against is exactly the session a hostile answerer would like this browser to open.
+ *
+ * PAIRING IGNORES THE CONNECTION PREFERENCE (§15), so this list is the same whatever a person chose:
+ * WebRTC needs a device key to signal and a tunnel is published only to a paired device, so neither
+ * can be a pairing carrier, and the type says so.
  */
-export const pairingCandidates = (
-  seed: PairingSeed,
-  hostedRelayUrl: string | undefined,
-): readonly ConnectionMethod[] => {
+export const pairingCandidates = (seed: PairingSeed, hostedRelayUrl: string | undefined): readonly PairingCarrier[] => {
   if (parseDaemonId(seed.daemonId) === null) return [];
   return [{ kind: 'direct', daemonUrl: seed.daemonUrl }, ...relayPairingCandidates(seed, hostedRelayUrl)];
 };
@@ -135,7 +139,7 @@ export interface RelayPairingAttemptOptions {
   readonly seed: PairingSeed;
   readonly deviceName: string;
   /** The one carrier this attempt may dial. One attempt is one session is one carrier. */
-  readonly method: ConnectionMethod;
+  readonly method: PairingCarrier;
   /** The device key being registered: its SPKI, and the private half that signs the proof. */
   readonly publicKey: string;
   readonly key: PrivateKeyHandle;

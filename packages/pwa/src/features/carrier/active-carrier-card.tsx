@@ -8,9 +8,12 @@
  * version that tells somebody their traffic is direct while it is going through
  * Cloudflare.
  *
- * NOTHING HERE IS A CHOICE. There is no control, because there is nothing to decide:
- * direct is attempted first and the relay is the automatic fallback. What a reader
- * gets is the answer and the reason, in `chooseConnection`'s own words.
+ * THE ONE CHOICE HERE IS WHICH CARRIERS THIS DEVICE WALKS, NOT WHICH ONE IS LIVE.
+ * §15 gives each device a per-machine preference — Auto, WebRTC only, Tunnel only or
+ * Relay only — and the card carries that selector (the same one Settings › This device
+ * lists), but what it REPORTS is still the measurement: the carrier that won under the
+ * preference, and the reason, in `chooseConnection`'s own words — including "Tunnel
+ * only: this machine has no tunnel yet" when a preference leaves nothing to try.
  *
  * THE OBSERVER LIST IS `describeConnectionMethod`'s, verbatim. A second copy of "what
  * a relay operator can see" would be a second thing to keep true, and the one in
@@ -18,7 +21,7 @@
  * component chooses nothing about the wording; it only decides that the wording is
  * shown, for the carrier that is actually live.
  *
- * ONE STATUS WORD COMES FIRST — direct, via relay, or reconnecting — because that is what a reader
+ * ONE STATUS WORD COMES FIRST — direct, WebRTC, via tunnel, via relay, or reconnecting — because that is what a reader
  * came here to learn, and the measured carrier alone cannot say the third: a router remembers the
  * carrier that last WON, so during an outage it would go on naming a connection that is gone. The
  * reconnect loop's state (`connection-health.ts`) is the one fact that knows, so it decides the word.
@@ -33,8 +36,17 @@
  */
 
 import { type ConnectionChoice, type ConnectionMethod, describeConnectionMethod } from '@ferretry/relay';
+import type { CarrierPreference } from '../../lib/carrier-preference.ts';
 import type { ConnectionHealthState } from '../../lib/connection-health.ts';
 import { carrierLines, RECONNECTING_LABEL, stallCopy } from '../connection/connection-copy.ts';
+import { type CarrierPreferenceAvailability, CarrierPreferenceSelector } from './carrier-preference-selector.tsx';
+
+/** This machine's connection preference on this device, and how to change it. */
+export interface CarrierPreferenceControl {
+  readonly value: CarrierPreference;
+  readonly onChange: (preference: CarrierPreference) => void;
+  readonly availability: CarrierPreferenceAvailability;
+}
 
 export interface ActiveCarrierCardProps {
   /** What the router measured, or `undefined` before anything has been carried. */
@@ -45,10 +57,12 @@ export interface ActiveCarrierCardProps {
   readonly health?: ConnectionHealthState;
   /** The machine's display name, for the reconnecting advice. */
   readonly machine?: string;
+  /** The connection preference selector; absent where nothing can change it. */
+  readonly preference?: CarrierPreferenceControl;
 }
 
 /** The status the card leads with, as one machine-readable word. */
-export type ConnectionStatusKind = 'direct' | 'relay' | 'reconnecting' | 'none';
+export type ConnectionStatusKind = ConnectionMethod['kind'] | 'reconnecting' | 'none';
 
 /** Where running your own relay is documented. The app links it and never configures it. */
 export const SELF_HOSTING_RUNBOOK_URL =
@@ -62,6 +76,8 @@ export const SELF_HOSTING_NOTE =
 /** The lead word for each status. */
 export const CONNECTION_STATUS_LABEL: Readonly<Record<ConnectionStatusKind, string>> = {
   direct: 'Direct',
+  webrtc: 'WebRTC',
+  tunnel: 'Via Cloudflare tunnel',
   relay: 'Via relay',
   reconnecting: RECONNECTING_LABEL,
   none: 'Not measured yet',
@@ -71,6 +87,16 @@ export const CONNECTION_STATUS_LABEL: Readonly<Record<ConnectionStatusKind, stri
 export const relayName = (method: Extract<ConnectionMethod, { kind: 'relay' }>): string =>
   `${describeConnectionMethod(method).label} · ${new URL(method.relayUrl).host}`;
 
+/**
+ * What follows the status word, naming WHICH carrier of its kind: a relay's operator and host, a
+ * tunnel's hostname (one random label, never the fingerprint). Direct and WebRTC need nothing more.
+ */
+export const carrierDetail = (method: ConnectionMethod): string | undefined => {
+  if (method.kind === 'relay') return relayName(method);
+  if (method.kind === 'tunnel') return new URL(method.tunnelUrl).host;
+  return undefined;
+};
+
 /** Reconnecting outranks any measured carrier: the router's answer is the LAST one that won. */
 export const connectionStatusKind = (
   method: ConnectionMethod | undefined,
@@ -78,6 +104,13 @@ export const connectionStatusKind = (
 ): ConnectionStatusKind => (health?.kind === 'reconnecting' ? 'reconnecting' : (method?.kind ?? 'none'));
 
 /** Said before the first request, because a carrier nobody has tried is not a carrier. */
+/**
+ * The lead word when a walk RAN and nothing carried — "Tunnel only: not set up by the operator." among
+ * them. Not "not measured yet": something was measured, and the answer was no. The machine-readable
+ * status stays `none`, because no carrier is live.
+ */
+export const NOT_CONNECTED_LABEL = 'Not connected';
+
 export const CARRIER_UNMEASURED =
   'Nothing has been carried yet, so there is no carrier to name. This will say which one is in use, ' +
   'and why, as soon as this daemon is asked for anything.';
@@ -103,23 +136,33 @@ export const CARRIER_STREAM_DISCLOSURE =
   'of it — but it sees when each frame arrives and how big it is, and for a terminal that is the rhythm ' +
   'of your typing.';
 
+/** The same disclosure for a tunnel: Cloudflare's edge sees each frame's size and timing (§15). */
+export const CARRIER_TUNNEL_STREAM_DISCLOSURE =
+  'Live updates and terminals travel this tunnel too, each on its own session. Cloudflare cannot read any of ' +
+  'it — but it sees when each frame arrives and how big it is, and for a terminal that is the rhythm of your typing.';
+
 export function ActiveCarrierCard({
   choice,
   relayAdvertised,
   health,
   machine = 'this machine',
+  preference,
 }: ActiveCarrierCardProps) {
   const method = choice?.ok === true ? choice.method : undefined;
   const disclosure = method === undefined ? undefined : describeConnectionMethod(method);
   const status = connectionStatusKind(method, health);
   const outage = health?.kind === 'reconnecting' ? health : undefined;
   const advice = outage === undefined ? undefined : stallCopy(outage.cause, machine);
+  const detail = method === undefined ? undefined : carrierDetail(method);
+  const measured = choice?.ok === true ? choice : undefined;
   const caveat =
     method?.kind === 'relay'
       ? CARRIER_STREAM_DISCLOSURE
-      : choice !== undefined && !relayAdvertised
-        ? CARRIER_NO_FALLBACK
-        : undefined;
+      : method?.kind === 'tunnel'
+        ? CARRIER_TUNNEL_STREAM_DISCLOSURE
+        : choice !== undefined && !relayAdvertised
+          ? CARRIER_NO_FALLBACK
+          : undefined;
   return (
     <section
       className="kt-panel p-panel"
@@ -139,9 +182,9 @@ export function ActiveCarrierCard({
       </h3>
       {/* The lead answer. `role="status"` so a reader on assistive tech hears it change. */}
       <p role="status" className="mb-0 mt-1 text-row font-semibold text-fg" data-connection-status={status}>
-        {CONNECTION_STATUS_LABEL[status]}
-        {method?.kind === 'relay' && outage === undefined ? (
-          <span className="font-normal text-muted"> — {relayName(method)}</span>
+        {status === 'none' && choice?.ok === false ? NOT_CONNECTED_LABEL : CONNECTION_STATUS_LABEL[status]}
+        {detail !== undefined && outage === undefined ? (
+          <span className="font-normal text-muted"> — {detail}</span>
         ) : null}
       </p>
       {outage === undefined ? null : (
@@ -170,6 +213,27 @@ export function ActiveCarrierCard({
           updating, or a daemon that stops answering from a café. `text-warn` because
           it is a limit on what works, not decoration. */}
       {caveat === undefined ? null : <p className="mb-0 mt-2 text-meta leading-base text-warn">{caveat}</p>}
+      {/* What a carrier measured about itself, when it measures anything (WebRTC does). */}
+      {measured?.rttMs === undefined ? null : (
+        <p className="mb-0 mt-2 text-meta leading-base text-muted" data-carrier-rtt="">
+          Round trip: {Math.round(measured.rttMs)} ms
+        </p>
+      )}
+      {measured?.fallbackReason === undefined ? null : (
+        <p className="mb-0 mt-2 text-meta leading-base text-muted" data-carrier-fallback-reason="">
+          Why not a faster carrier: {measured.fallbackReason}
+        </p>
+      )}
+      {preference === undefined ? null : (
+        <div className="mt-4" data-carrier-preference-control="">
+          <CarrierPreferenceSelector
+            legend="How this device connects"
+            value={preference.value}
+            onChange={preference.onChange}
+            availability={preference.availability}
+          />
+        </div>
+      )}
       {disclosure === undefined ? null : (
         <>
           <p className="mb-0 mt-3 text-cell leading-base text-fg">{disclosure.summary}</p>
@@ -192,7 +256,8 @@ export function ActiveCarrierCard({
           <ul className="mb-0 mt-2 flex list-disc flex-col gap-1 pl-5 text-meta leading-base text-muted">
             {choice.passedOver.map(skip => (
               <li key={`${skip.method.kind}:${skip.detail}`}>
-                {describeConnectionMethod(skip.method).label}: {skip.detail}
+                {describeConnectionMethod(skip.method).label}
+                {skip.untried === true ? ' (not tried)' : ''}: {skip.detail}
               </li>
             ))}
           </ul>

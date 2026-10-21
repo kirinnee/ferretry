@@ -28,6 +28,7 @@ import { daemonMachineSetupPath, daemonSettingsPath } from '../../lib/pages/rout
 import { CHAT_WIDTH_OPTIONS, ChatWidthControl } from '../../shell/chat-width-control.tsx';
 import { Badge, Button } from '../../shell/primitives.tsx';
 import { ThemeSettings } from '../../shell/theme-toggle.tsx';
+import type { CarrierPreferenceControl } from '../carrier/active-carrier-card.tsx';
 import type { FleetClientFactory } from '../fleet/fleet-client.ts';
 import { machineItemHash } from '../fleet/setup/settings-route.ts';
 import { DEFAULT_MACHINE_TAB, type MachineRoute, machineHash, parseMachineHash } from '../fleet/shell/machine-route.ts';
@@ -299,6 +300,13 @@ export interface SettingsPageProps {
   readonly carrier?: ConnectionChoice | undefined;
   /** Whether the live advertisement offers a rendezvous to fall back to at all. */
   readonly relayAdvertised?: boolean;
+  /** The ACTIVE machine's connection preference on this device (§15), offered beside its Connection status. */
+  readonly carrierPreference?: CarrierPreferenceControl | undefined;
+  /**
+   * Settings › This device › Connection: every paired machine's preference, composed by the caller
+   * (`ConnectionPreferenceSettings`). Absent says why there is nothing to choose here.
+   */
+  readonly connectionPreferences?: ReactNode;
   /** The reconnect loop's state for the active daemon, for the Connection panel. */
   readonly connectionHealth?: ConnectionHealthState | undefined;
   /** How the page commits an in-app navigation; without one it assigns the address. */
@@ -338,6 +346,8 @@ export function SettingsPage({
   onAddDaemon,
   carrier,
   relayAdvertised = false,
+  carrierPreference,
+  connectionPreferences,
   connectionHealth,
   onNavigate,
   onClearCachedData,
@@ -492,6 +502,11 @@ export function SettingsPage({
       theme: <ThemeSettings theme={theme} />,
       'install-app': <InstallAppSetting />,
       'device-permissions': <DevicePermissionsSetting />,
+      'connection-preference': connectionPreferences ?? (
+        <p role="status" className="m-0 text-cell leading-base text-muted">
+          The connection choice is unavailable until this page is composed with this device’s preferences.
+        </p>
+      ),
       'clear-cached-data': (
         <ClearCachedDataSetting {...(onClearCachedData === undefined ? {} : { onClear: onClearCachedData })} />
       ),
@@ -514,6 +529,7 @@ export function SettingsPage({
     // the whole record is as cheap as listing four of its fields and cannot fall
     // behind the next one that is added.
     [
+      connectionPreferences,
       controls,
       density,
       densityState.explicit,
@@ -612,6 +628,7 @@ export function SettingsPage({
               additionalTabs={daemonSettingsTabs}
               carrier={carrier}
               relayAdvertised={relayAdvertised}
+              carrierPreference={carrierPreference}
               connectionHealth={connectionHealth}
               probeDaemon={probeDaemon}
               onRenameDaemon={onRenameDaemon}
@@ -620,6 +637,7 @@ export function SettingsPage({
           ),
     [
       carrier,
+      carrierPreference,
       connectionHealth,
       createGrantClient,
       createPairingClient,
