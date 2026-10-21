@@ -101,8 +101,8 @@ survive the daemon's own restart: the systemd unit uses `KillMode=process` and t
 Every self-update is the same transaction:
 
 1. **Check** the target is newer than what runs, and the method can self-update.
-2. **Wait for idle**, or ask: a daemon with a ferret mid-turn is not restarted without consent (see
-   below).
+2. **Say what happens to ferrets mid-turn** — they keep running (see
+   [Ferrets keep running](#ferrets-keep-running)) — or, with `--when-idle`, wait until none is.
 3. **Upgrade** with the method's own tool (`brew`, `nix profile`) or, for a standalone binary, by
    downloading and verifying the release archive.
 4. **Restart** through the service manager, exactly as `fy daemon restart` does.
@@ -158,18 +158,67 @@ secret is present; `scripts/ci/sign-daemon-release.sh` refuses a key whose publi
 
 ## Safety
 
-- **Never mid-turn.** The daemon knows which ferrets are mid-turn (`turnState: working`). An update
-  asked for `now` while any is refuses with the count; the person chooses **Update when idle**
-  (the daemon waits, then starts it) or **Update anyway** (`confirmMidTurn`). `fy daemon update` asks
-  the same question at a terminal, and `--when-idle` waits.
+- **Mid-turn is not a reason to refuse.** The daemon knows which ferrets are mid-turn
+  (`turnState: working`) and the app and `fy` say so in one line, but an update asked for `now` goes
+  ahead: ferrets keep running through the restart (below). **Update when idle** (`when: 'when-idle'`,
+  `--when-idle`) is still there for whoever would rather wait for every turn to end.
 - **Remote devices** may start an update or change the update setting only with the `fleet`
   capability's `configure` axis **and** a passkey step-up, like loosening a configuration file. A
   remote update downloads and runs new code on the machine, which is at least as much as the acts that
   rule already covers. `fy` at the machine is ungoverned, as everywhere ([grants.md](grants.md)).
+- **Automatic installs still wait for idle.** Nobody chose that moment, so an automatic update starts
+  only when no ferret is mid-turn.
 - **No auto-update by default.** _Install updates automatically when idle_ is off until somebody turns
   it on. When on, the daemon starts the update only when no ferret is mid-turn, and only for a method
   that can self-update.
 - **One update at a time.** A second request while one is running answers `409 update_in_progress`.
+
+## Ferrets keep running
+
+**A daemon restart — an update, `fy daemon restart`, or the service manager bringing a crashed daemon
+back — no longer interrupts a ferret mid-turn.** "Update now" goes ahead with one line saying so.
+
+What survives the restart, and why:
+
+| piece                | where it lives                                | after the restart                                                                                                                |
+| -------------------- | --------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| the ferret itself    | the daemon's tmux server                      | still running; the service managers keep it (`KillMode=process`, `AbandonProcessGroup`) and the new daemon adopts its pane again |
+| its turn state       | the session's state document, on disk         | unchanged; the turn watcher's next look confirms it (`lib/session/turn/service.ts`)                                              |
+| a message sent to it | the send ledger, one file per send            | the tracker re-derives every open send from the transcript at boot and re-types nothing (`lib/session/send/tracker.ts`)          |
+| its Ferretry calls   | `fy` and `fy mcp serve`, in the ferret's pane | **wait for the daemon to come back**, below                                                                                      |
+
+### Calls made while the daemon is down
+
+`fy` (every command group but `fy daemon …`) and the MCP tools server wait out a restart instead of
+failing (`packages/protocol/src/lib/daemon-restart.ts`):
+
+- **Who waits.** A ferret always does (`FY_SESSION_ID` is set): it only exists because a daemon ran
+  it, so a daemon that refuses it is restarting. A person waits only while a restart is known to be
+  underway — `fy daemon restart` (and so every update) leaves `<state home>/restarting.json`, which
+  expires on its own after two minutes — so `fy list` against a daemon somebody _stopped_ still fails at
+  once. `fy daemon …` itself never waits: those verbs are the restart.
+- **How long.** Up to 60 seconds from the first failure, looking again after 250 ms, 500 ms, 1 s, then
+  every 2 s. It says `fy: daemon restarting, retrying for up to 60s…` once, on stderr (never on the MCP
+  server's stdout).
+- **What is sent again.** A request the daemon **refused** never reached it, so it is always sent again.
+  One it **dropped** mid-request may already have been applied: `fy`'s client sends it again under the
+  same `x-fy-request-id`, the logical id the daemon applies a send or a start once by; the MCP
+  tools, which carry no such id, repeat only the tools that change nothing (`terminal.list|read|wait`,
+  `browser.list|read|screenshot`, `config.read|validate`). A dropped `terminal.send` is never typed
+  twice; it fails with the original error.
+- **`fy wait`** is a loop of short reads, so it simply resumes: the read that met the restart waits, and
+  the loop goes on.
+- **A timeout, a cancellation and any HTTP answer are never waited on.** The daemon answered, or the
+  caller left.
+
+### Declared GAPs
+
+- **Event streams are not resumed.** `fy stream` ends with an error when the
+  daemon goes down; run them again (`fy stream <id> --after <n>` resumes a session from its cursor).
+  The app reconnects its own streams.
+- A daemon that comes back on a **different port** (its preferred one was taken) is not followed by a
+  call already waiting; the next `fy` invocation finds it.
+- A browser waits through a restart with its own "restarting" state; it does not use this client policy.
 
 ## Updating from an agent
 
@@ -204,6 +253,7 @@ around either. The agent hands the person the command instead:
 | -------------------------------------- | -------------------------------------------------------- |
 | `fy daemon status`                     | adds the install method and, when known, the update line |
 | `fy daemon update [--check] [--yes] …` | check, or apply the update for this install method       |
+| `fy daemon restart [--when-idle]`      | restart now (ferrets keep running), or once all are idle |
 | `fy daemon install`                    | on a `nix-shell` daemon, offers the nix profile install  |
 | `fy setup [--check] [--json]`          | reports the update and its command; never applies it     |
 | `GET /v1/daemon/update`                | the `DaemonUpdateView`                                   |

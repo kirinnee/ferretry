@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { InstantSchema } from './common.ts';
+import type { AgentConfigToolName } from './config-files.ts';
 
 /**
  * AGENT TOOLS — the wire an agent (and a script, and a person) drives terminals and browser pages
@@ -191,6 +192,28 @@ export const AgentToolCallSchema = z.discriminatedUnion('tool', [
 ]);
 export type AgentToolCall = z.infer<typeof AgentToolCallSchema>;
 export type AgentToolName = AgentToolCall['tool'];
+
+/**
+ * The tools that change nothing — they list, read, wait or look — plus the config tools that only read.
+ *
+ * A call to one of these that the daemon DROPPED mid-request (it was restarting) may be sent again
+ * without anything happening twice, so a patient client repeats it (`daemon-restart.ts`). Every other
+ * tool types, clicks, opens, closes or writes, and is repeated only when it provably never arrived.
+ */
+const REPEATABLE_AGENT_TOOLS: ReadonlySet<string> = new Set<AgentToolName | AgentConfigToolName>([
+  'terminal.list',
+  'terminal.read',
+  'terminal.wait',
+  'browser.list',
+  'browser.read',
+  'browser.screenshot',
+  'config.read',
+  'config.validate',
+]);
+
+/** Whether a tool, by its wire name, may be repeated after a dropped request. */
+export const isRepeatableAgentTool = (tool: unknown): boolean =>
+  typeof tool === 'string' && REPEATABLE_AGENT_TOOLS.has(tool);
 
 /** Every tool, in the order an agent is shown them. */
 export const AGENT_TOOL_NAMES: readonly AgentToolName[] = [

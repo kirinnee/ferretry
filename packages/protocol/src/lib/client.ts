@@ -2,6 +2,7 @@ import type { z } from 'zod';
 import type { AnalyticsResponse } from './analytics.ts';
 import type { ProjectList, SessionSkills } from './catalog.ts';
 import type { ConfigChangeFrame } from './config-changes.ts';
+import type { DaemonRestartPatience } from './daemon-restart.ts';
 import type { DaemonUpdateSettingsPatch, DaemonUpdateStartRequest, DaemonUpdateView } from './daemon-update.ts';
 import type { ForeignHistoryListing, ImportedConversationDetail } from './foreign-history.ts';
 import type { SessionHandoverReceipt, SessionHandoverRequestInput } from './handover.ts';
@@ -80,6 +81,11 @@ export interface FyClientOptions {
   /** Wall clock in milliseconds; injectable so the failed-send memory's expiry is testable. */
   nowMs?: () => number;
   onVersionSkew?: (skew: VersionSkew) => void;
+  /**
+   * Wait for a restarting daemon instead of failing (`daemon-restart.ts`). The CLI passes one; a
+   * browser does not, because it shows its own reconnecting state.
+   */
+  restartPatience?: DaemonRestartPatience;
 }
 
 export interface IFyApiClient {

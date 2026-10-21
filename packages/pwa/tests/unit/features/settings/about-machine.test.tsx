@@ -135,43 +135,55 @@ describe('AboutMachineSurface', () => {
     machine.startAnswers = [running];
     const container = await show(machine);
     await click(container, '[data-about-update]');
-    expect(machine.starts).toEqual([{ target: '4.29.0', when: 'now' }]);
+    expect(machine.starts).toEqual([{ target: '4.29.0', when: 'now', confirmMidTurn: true }]);
     await settle(40);
     expect(container.querySelector('[data-about-job]')?.textContent).toBe('Updated to 4.29.0.');
     expect(container.querySelector('[data-about-update]')).toBeNull();
   });
 
-  it('offers Update when idle, Update anyway and Not now when ferrets are mid-turn', async () => {
-    const midTurn = new HttpRefusal('2 ferrets are mid-turn', 409, 'update_mid_turn', {
-      error: '2 ferrets are mid-turn',
-      code: 'update_mid_turn',
+  it('updates now with ferrets mid-turn, saying they keep running, and still offers Update when idle', async () => {
+    const busy = updateView({ midTurn: 2 });
+    const running = updateView({
       midTurn: 2,
+      job: { state: 'running', target: '4.29.0', startedAt: '2026-10-18T11:59:00.000Z' },
     });
-    const waiting = updateView({
-      job: { state: 'waiting-for-idle', target: '4.29.0', requestedAt: '2026-10-18T12:00:00.000Z', midTurn: 2 },
-    });
-    const machine = new FakeMachine(updateView(), waiting);
-    machine.startAnswers = [midTurn, midTurn, midTurn, waiting];
+    const machine = new FakeMachine(busy, running);
+    machine.startAnswers = [running];
     const container = await show(machine, 10_000);
 
+    expect(container.querySelector('[data-about-mid-turn]')?.textContent).toBe(
+      '2 ferrets are mid-turn. They keep running while the machine restarts.',
+    );
+    expect(buttonNamed(container, 'Update when idle')).toBeDefined();
     await click(container, '[data-about-update]');
-    expect(container.querySelector('[data-about-mid-turn]')?.textContent).toContain('2 ferrets are mid-turn');
-    await interact(() => buttonNamed(container, 'Not now').click());
-    expect(container.querySelector('[data-about-mid-turn]')).toBeNull();
-
-    await click(container, '[data-about-update]');
-    await interact(() => buttonNamed(container, 'Update anyway').click());
     await settle();
-    expect(container.querySelector('[data-about-mid-turn]')?.textContent).toContain('2 ferrets');
+    expect(machine.starts).toEqual([{ target: '4.29.0', when: 'now', confirmMidTurn: true }]);
+    expect(container.querySelector('[data-about-mid-turn]')).toBeNull();
+    expect(container.querySelector('[data-about-update-when-idle]')).toBeNull();
+  });
+
+  it('waits for idle when asked, and says it is waiting', async () => {
+    const waiting = updateView({
+      midTurn: 1,
+      job: { state: 'waiting-for-idle', target: '4.29.0', requestedAt: '2026-10-18T12:00:00.000Z', midTurn: 1 },
+    });
+    const machine = new FakeMachine(updateView({ midTurn: 1 }), waiting);
+    machine.startAnswers = [waiting];
+    const container = await show(machine, 10_000);
+
+    expect(container.querySelector('[data-about-mid-turn]')?.textContent).toBe(
+      '1 ferret is mid-turn. It keeps running while the machine restarts.',
+    );
     await interact(() => buttonNamed(container, 'Update when idle').click());
     await settle();
-    expect(machine.starts).toEqual([
-      { target: '4.29.0', when: 'now' },
-      { target: '4.29.0', when: 'now' },
-      { target: '4.29.0', when: 'now', confirmMidTurn: true },
-      { target: '4.29.0', when: 'when-idle' },
-    ]);
+    expect(machine.starts).toEqual([{ target: '4.29.0', when: 'when-idle' }]);
     expect(container.querySelector('[data-about-job]')?.textContent).toContain('Waiting to update to 4.29.0');
+  });
+
+  it('says nothing about ferrets, and offers no wait, when none is mid-turn', async () => {
+    const container = await show(new FakeMachine(updateView({ midTurn: 0 })));
+    expect(container.querySelector('[data-about-mid-turn]')).toBeNull();
+    expect(container.querySelector('[data-about-update-when-idle]')).toBeNull();
   });
 
   it('says what the daemon refused, and turns automatic install on', async () => {

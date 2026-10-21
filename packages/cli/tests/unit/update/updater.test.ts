@@ -582,10 +582,24 @@ describe('DaemonUpdater — consent', () => {
     should(yes.report().outcome).equal('succeeded');
   });
 
-  it('never asks the daemon about ferrets when told --anyway', async () => {
+  it('goes ahead mid-turn with one line saying the ferrets keep running, on a terminal or off one', async () => {
+    const script = harness('homebrew', { midTurn: [1] });
+    await script.run({ report: '/r.json', yes: true });
+    should(script.out.text).match(
+      /one ferret is mid-turn; it keeps running through the restart, and Ferretry calls made meanwhile wait for the daemon to come back/u,
+    );
+    should(script.report().outcome).equal('succeeded');
+    const terminal = harness('homebrew', { midTurn: [2], interactive: true, answers: ['y'] });
+    await terminal.run({ report: '/r.json' });
+    should(terminal.prompt.asked).deepEqual(['Update fyd 1.2.3 → 1.3.0 via Homebrew cask ferretry? [y/N]']);
+    should(terminal.out.text).match(/2 ferrets are mid-turn; they keep running through the restart/u);
+    should(terminal.report().outcome).equal('succeeded');
+  });
+
+  it('accepts --anyway, which every update now is', async () => {
     const h = harness('homebrew', { midTurn: [3] });
     await h.run({ yes: true, anyway: true, report: '/r.json' });
-    should(h.view.looks).equal(0);
+    should(h.out.text).match(/3 ferrets are mid-turn; they keep running/u);
     should(h.report().outcome).equal('succeeded');
   });
 
@@ -593,28 +607,8 @@ describe('DaemonUpdater — consent', () => {
     const h = harness('homebrew', { midTurn: [2, 1, 0] });
     await h.run({ yes: true, whenIdle: true, report: '/r.json' });
     should(h.view.looks).equal(3);
-    should(h.out.text).match(/2 ferrets are mid-turn; waiting until every ferret is idle/u);
+    should(h.out.text).match(/2 ferrets are mid-turn; waiting until every ferret is idle before updating/u);
     should(h.report().outcome).equal('succeeded');
-  });
-
-  it('refuses mid-turn off a terminal, naming both ways forward', async () => {
-    const h = harness('homebrew', { midTurn: [1] });
-    await h.run();
-    should(h.report().message).equal(
-      'one ferret is mid-turn, and restarting the daemon interrupts it; pass --when-idle to wait, or --anyway to update now',
-    );
-  });
-
-  it('asks a terminal about ferrets mid-turn', async () => {
-    const yes = harness('homebrew', { midTurn: [2], interactive: true, answers: ['y'] });
-    await yes.run({ yes: true, report: '/r.json' });
-    should(yes.prompt.asked).deepEqual([
-      '2 ferrets are mid-turn, and restarting the daemon interrupts them. Update anyway? [y/N]',
-    ]);
-    should(yes.report().outcome).equal('succeeded');
-    const no = harness('homebrew', { midTurn: [2], interactive: true, answers: ['n'] });
-    await no.run({ yes: true, report: '/r.json' });
-    should(no.report().message).equal('update cancelled; nothing changed');
   });
 
   it('counts a daemon without the view as idle, and a stopped one is never asked', async () => {

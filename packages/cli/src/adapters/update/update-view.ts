@@ -13,9 +13,9 @@ export interface DaemonUpdateApiClient {
  * The daemon's update view, over the authenticated client.
  *
  * `undefined` for every failure: a daemon that is down, one too old to serve the route, one that
- * refuses this credential. `status` then simply says nothing about updates, and `update` counts no
- * ferret as mid-turn — which is right for a daemon that is not running, and the reason the daemon's
- * own trigger passes `--anyway` after asking its person itself.
+ * refuses this credential. `status` then simply says nothing about updates, and `update` and
+ * `restart` count no ferret as mid-turn — which is right for a daemon that is not running. The count
+ * only ever chooses a sentence or a `--when-idle` wait: no update or restart is refused for it.
  */
 export class ProtocolDaemonUpdateView implements IDaemonUpdateViewPort {
   constructor(

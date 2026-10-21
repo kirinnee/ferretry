@@ -87,7 +87,7 @@ describe('the client update launcher', () => {
       const report = join(directory, 'update', 'report.json');
       should(calls).deepEqual([
         [
-          ['/opt/fy/fy', 'daemon', 'update', '--yes', '--anyway', '--to', '4.29.0', '--report', report],
+          ['/opt/fy/fy', 'daemon', 'update', '--yes', '--to', '4.29.0', '--report', report],
           {
             environment: { PATH: '/usr/bin', FY_HOME: '/home/kirin/.ferretry' },
             logFile: join(directory, 'update', 'update.log'),
@@ -134,7 +134,7 @@ describe('the client update launcher', () => {
       const log = join(directory, 'update', 'update.log');
       await eventually(async () => ((await readFile(log, 'utf8').catch(() => '')) as string).includes('home:'));
       const written = await readFile(log, 'utf8');
-      should(written).match(/args: daemon update --yes --anyway --to 4\.29\.0 --report /u);
+      should(written).match(/args: daemon update --yes --to 4\.29\.0 --report /u);
       should(written).containEql(`home: ${directory}`);
     });
   });

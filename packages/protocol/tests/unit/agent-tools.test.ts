@@ -146,3 +146,20 @@ describe('agent tool schemas', () => {
     should(tools.AgentUrlSchema.parse('http://127.0.0.1:3000/')).equal('http://127.0.0.1:3000/');
   });
 });
+
+describe('isRepeatableAgentTool', () => {
+  it('should repeat only the tools that change nothing, after a request the daemon dropped', () => {
+    // Arrange
+    const reads = ['terminal.list', 'terminal.read', 'terminal.wait', 'browser.list', 'browser.read'];
+    const looks = ['browser.screenshot', 'config.read', 'config.validate'];
+    const acts = ['terminal.open', 'terminal.send', 'terminal.close', 'browser.click', 'config.write'];
+
+    // Act
+    const repeatable = [...reads, ...looks].map(tools.isRepeatableAgentTool);
+    const notRepeatable = [...acts, undefined, 42].map(tools.isRepeatableAgentTool);
+
+    // Assert
+    should(repeatable.every(Boolean)).be.true();
+    should(notRepeatable.some(Boolean)).be.false();
+  });
+});

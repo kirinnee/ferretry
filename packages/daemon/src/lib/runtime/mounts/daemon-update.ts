@@ -1,5 +1,4 @@
 import {
-  type DaemonUpdateMidTurnBody,
   DaemonUpdateSettingsPatchSchema,
   DaemonUpdateStartRequestSchema,
   type DaemonUpdateView,
@@ -53,18 +52,9 @@ export function ownerOnly(context: RouteContext, act: string): ApiResponse | und
   );
 }
 
-/**
- * Restates a domain refusal as a 409. The mid-turn one is an ANSWER rather than a thrown error,
- * because its body carries the count the app asks "update anyway?" with.
- */
-function refuse(error: unknown): ApiResponse {
+/** Restates a domain refusal as a 409 carrying its code, so the app can say the right sentence. */
+function refuse(error: unknown): never {
   if (!(error instanceof DaemonUpdateRefusal)) throw error;
-  if (error.midTurn !== undefined) {
-    return jsonResponse(
-      { error: error.message, code: 'update_mid_turn', midTurn: error.midTurn } satisfies DaemonUpdateMidTurnBody,
-      409,
-    );
-  }
   throw new ApiError(409, error.message, error.code);
 }
 

@@ -294,6 +294,18 @@ export interface IDaemonPrompt {
 }
 
 /** Time, injected so the readiness and shutdown waits are testable without real delay. */
+/**
+ * The note that a restart is underway, which every `fy` on this host reads before deciding whether a
+ * daemon that refuses its call is worth waiting for (`daemon-restart.ts`). Best effort both ways: a
+ * marker that cannot be written costs a person's call its patience, never the restart.
+ */
+export interface IDaemonRestartMarkerPort {
+  /** Vouches for a restart until `untilMs` (wall clock). Never throws. */
+  mark(untilMs: number): Promise<void>;
+  /** Withdraws it. Never throws; absent is success. */
+  clear(): Promise<void>;
+}
+
 export interface IClockPort {
   now(): number;
   sleep(milliseconds: number): Promise<void>;

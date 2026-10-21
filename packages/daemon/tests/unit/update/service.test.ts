@@ -272,17 +272,20 @@ describe('starting an update', () => {
     should(again.message).match(/already running/u);
   });
 
-  it('asks before interrupting ferrets, and goes ahead on "update anyway"', async () => {
+  it('updates now with ferrets mid-turn, because they keep running through the restart', async () => {
     const { service, launched, activity } = world();
     await service.tick();
     activity.midTurn = 2;
-    const asked = await refusal(service.start({ target: '4.29.0', when: 'now' }));
-    should(asked).containDeep({ code: DAEMON_UPDATE_CODES.midTurn, midTurn: 2 });
-    should(asked.message).equal('2 ferrets are mid-turn; restarting now would interrupt them');
+    const view = await service.start({ target: '4.29.0', when: 'now' });
+    should(launched).deepEqual(['4.29.0']);
+    should(view.job).containDeep({ state: 'running', target: '4.29.0' });
+    should(view.midTurn).equal(2);
+  });
+
+  it('ignores the consent an older app still sends with "now"', async () => {
+    const { service, launched, activity } = world();
+    await service.tick();
     activity.midTurn = 1;
-    should((await refusal(service.start({ target: '4.29.0', when: 'now' }))).message).equal(
-      'a ferret is mid-turn; restarting now would interrupt it',
-    );
     await service.start({ target: '4.29.0', when: 'now', confirmMidTurn: true });
     should(launched).deepEqual(['4.29.0']);
   });

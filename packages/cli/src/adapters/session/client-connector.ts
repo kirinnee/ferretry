@@ -1,4 +1,4 @@
-import type { IFyApiClient } from '@ferretry/protocol';
+import type { DaemonRestartPatience, IFyApiClient } from '@ferretry/protocol';
 import { FyApiClient } from '@ferretry/protocol/client';
 import { type ConnectionInput, resolveConnection } from '../../lib/session/connection.ts';
 import type { FyClientConnector } from './fy-session-api.ts';
@@ -8,6 +8,8 @@ export interface ConnectorOptions extends ConnectionInput {
   readonly version: string;
   /** Resolves the local daemon credential only when the caller did not explicitly set one. */
   readonly resolveLocalToken?: () => Promise<string>;
+  /** How the client waits out a daemon restart; absent, it fails as soon as the daemon is away. */
+  readonly restartPatience?: DaemonRestartPatience;
 }
 
 /**
@@ -29,6 +31,7 @@ export function createFyClientConnector(options: ConnectorOptions): FyClientConn
       token: connection.token,
       version: options.version,
       headers: { ...connection.headers },
+      ...(options.restartPatience === undefined ? {} : { restartPatience: options.restartPatience }),
     });
   };
 }

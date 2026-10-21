@@ -3,7 +3,14 @@ import { statSync } from 'node:fs';
 import { isAbsolute, join } from 'node:path';
 import { TOOLS_SERVER_INSTRUCTIONS } from '@ferretry/fleet';
 import { FileConversationLeaseStore, HostProcessStarts, resolveUserHome } from '@ferretry/fleet/adapters';
-import { type AnalyticsResponse, CONFIG_DIRECTORY_NAME, type IFyApiClient, type SessionView } from '@ferretry/protocol';
+import {
+  type AnalyticsResponse,
+  CONFIG_DIRECTORY_NAME,
+  DAEMON_RESTART_PATIENCE_MS,
+  type DaemonRestartPatience,
+  type IFyApiClient,
+  type SessionView,
+} from '@ferretry/protocol';
 import { FyApiClient } from '@ferretry/protocol/client';
 import { Command } from 'commander';
 import type { z } from 'zod';
@@ -27,6 +34,7 @@ import { BunDaemonProcess } from '../src/adapters/daemon/process';
 import { HostProcessIncarnations } from '../src/adapters/daemon/process-incarnation';
 import { ProtocolResetInventory } from '../src/adapters/daemon/reset-inventory';
 import { FileResetTrees } from '../src/adapters/daemon/reset-trees';
+import { FileDaemonRestartMarker, restartMarkerPath } from '../src/adapters/daemon/restart-marker';
 import { FileRetiredArtifacts } from '../src/adapters/daemon/retired-artifacts';
 import { FileServiceStore } from '../src/adapters/daemon/service-files';
 import { TmuxSessionTerminalServer } from '../src/adapters/daemon/session-terminals';
@@ -110,10 +118,10 @@ import {
   registerImportCommands,
   registerNewCommand,
 } from '../src/lib/import/index.ts';
+import { registerInstructionsCommands } from '../src/lib/instructions/commands';
 import { registerLearningCommands } from '../src/lib/learning/commands';
 import { LearningController } from '../src/lib/learning/controller';
 import { ProtocolLearningGateway } from '../src/lib/learning/gateway';
-import { registerInstructionsCommands } from '../src/lib/instructions/commands';
 import { registerLessonCommands } from '../src/lib/lesson/commands';
 import { LessonController } from '../src/lib/lesson/controller';
 import { McpServer, registerMcpCommands } from '../src/lib/mcp';
@@ -321,10 +329,39 @@ export async function daemonConnection(
 function lazyDaemonConnection(
   environment: Record<string, string | undefined>,
   homeDirectory: string,
+  restartPatience?: DaemonRestartPatience,
 ): () => Promise<IFyApiClient> {
   let connected: Promise<FyApiClient> | undefined;
   return (): Promise<FyApiClient> =>
-    (connected ??= daemonConnection(environment, homeDirectory).then(options => FyApiClient.connect(options)));
+    (connected ??= daemonConnection(environment, homeDirectory).then(options =>
+      FyApiClient.connect(restartPatience === undefined ? options : { ...options, restartPatience }),
+    ));
+}
+
+/**
+ * Waiting out a daemon restart (`daemon-restart.ts`, docs/updating.md § Ferrets keep running): one per
+ * process, shared by every client this invocation opens, so the note is said once.
+ *
+ * WHO WAITS. A ferret always does — it only exists because a daemon ran it, so a daemon that refuses
+ * it is restarting, or crashed and is being restarted by its service manager. A person waits only
+ * while `fy daemon restart` (or an update) has left the restart marker, so `fy list` against a daemon
+ * somebody stopped still fails at once instead of a minute later.
+ */
+function restartPatience(world: CliWorld, ownSessionId: string | undefined): DaemonRestartPatience {
+  const stateHome = resolveDaemonStateHome(world.homeDirectory, world.environment.FY_HOME, PRODUCT_NAME);
+  const marker = new FileDaemonRestartMarker(restartMarkerPath(stateHome));
+  let said = false;
+  return {
+    expected: async () => ownSessionId !== undefined || (await marker.active(Date.now())),
+    waiting: () => {
+      if (said) return;
+      said = true;
+      // On stderr, never stdout: stdout is a command's answer, and the MCP server's protocol.
+      world.io.diagnostic(
+        `${BINARY_NAME}: daemon restarting, retrying for up to ${String(DAEMON_RESTART_PATIENCE_MS / 1_000)}s…`,
+      );
+    },
+  };
 }
 
 /**
@@ -563,7 +600,7 @@ function buildDaemonUpdater(world: CliWorld, client: SharedDaemonClient): Daemon
       installed: () => resolveDaemonBinary(environment, DAEMON_NAME),
       versionOf: daemonBinaryVersion,
       executable: isExecutableFile,
-      restart: () => controllerFor().restart(),
+      restart: () => controllerFor().restart({ midTurnSaid: true }),
       installAt: path => controllerFor(path).install(),
       probe: () => health.probe(),
     },
@@ -650,6 +687,8 @@ function buildDaemonController(world: CliWorld, client: SharedDaemonClient): Dae
     }),
     updateStatus: new DaemonUpdateStatusReader(hostInstallFacts(world), new ProtocolDaemonUpdateView(client)),
     nixShellOffer: buildProfileSwitch(world, processes),
+    turns: { midTurn: async () => (await new ProtocolDaemonUpdateView(client).view())?.midTurn ?? 0 },
+    restartMarker: new FileDaemonRestartMarker(restartMarkerPath(layout.stateHome)),
   });
 }
 
@@ -708,6 +747,8 @@ export interface DomainWiring {
   readonly world: CliWorld;
   readonly client: SharedDaemonClient;
   readonly ownSessionId: string | undefined;
+  /** How every client in this invocation waits out a daemon restart. */
+  readonly restartPatience: DaemonRestartPatience;
 }
 
 /** The account model's collaborators, one set for every group that changes a machine's setup. */
@@ -776,7 +817,8 @@ const DOMAIN_REGISTRARS: ReadonlyArray<(wiring: DomainWiring) => void> = [
         binaryName: BINARY_NAME,
       }),
     ),
-  ({ program, world, ownSessionId }) => registerSessionCommands(program, sessionCommands(world, ownSessionId)),
+  ({ program, world, ownSessionId, restartPatience: patience }) =>
+    registerSessionCommands(program, sessionCommands(world, ownSessionId, patience)),
   ({ program, world, client, ownSessionId }) =>
     registerTaskCommands(program, {
       gateway: new FyTaskGateway(client),
@@ -808,8 +850,8 @@ const DOMAIN_REGISTRARS: ReadonlyArray<(wiring: DomainWiring) => void> = [
     ),
   // Terminals and browser pages by NAME — the agent tools' own actions, for scripts and for people. After
   // the browser group, because `browser page` mounts onto it.
-  ({ program, world, client, ownSessionId }) => {
-    const toolsClient = new AgentToolsClient(agentToolsGateways(world, client), {
+  ({ program, world, client, ownSessionId, restartPatience: patience }) => {
+    const toolsClient = new AgentToolsClient(agentToolsGateways(world, client, patience), {
       ...(world.environment.FY_SESSION_BOARD_CAPABILITY === undefined
         ? {}
         : { capability: world.environment.FY_SESSION_BOARD_CAPABILITY }),
@@ -949,13 +991,18 @@ const DOMAIN_REGISTRARS: ReadonlyArray<(wiring: DomainWiring) => void> = [
   // It does hold the shared one, for the setup notice alone. That is safe because the shared client is
   // LAZY — it resolves the address and the admin token on first use, and the only thing here that uses
   // it runs after a start has already waited for the daemon to serve.
-  ({ program, world, client }) =>
+  //
+  // AND ITS SHARED CLIENT NEVER WAITS OUT A RESTART: these verbs ARE the restart, and `restart` asking
+  // a stopped daemon how many ferrets are mid-turn must not wait a minute for an answer that is "none".
+  ({ program, world }) => {
+    const lifecycleClient = lazyDaemonClient(lazyDaemonConnection(world.environment, world.homeDirectory));
     registerDaemonCommands(
       program,
-      () => buildDaemonController(world, client),
+      () => buildDaemonController(world, lifecycleClient),
       () => buildStateHomeController(world),
-      () => buildDaemonUpdater(world, client),
-    ),
+      () => buildDaemonUpdater(world, lifecycleClient),
+    );
+  },
   // The grant verbs mount onto the group above and DO take the shared client, because unlike every
   // other daemon verb they change what the daemon serves rather than whether it is running. They are
   // registered after it for that reason: the group has to exist before verbs can be added to it.
@@ -1079,7 +1126,11 @@ const DOMAIN_REGISTRARS: ReadonlyArray<(wiring: DomainWiring) => void> = [
  * The agent tools' two ways to the daemon. A person's is the shared client. An agent's carries its
  * session credential ONLY — it never reads the host's admin token — and talks only to this machine.
  */
-function agentToolsGateways(world: CliWorld, client: SharedDaemonClient): AgentToolsGateways {
+function agentToolsGateways(
+  world: CliWorld,
+  client: SharedDaemonClient,
+  patience: DaemonRestartPatience,
+): AgentToolsGateways {
   const environment = world.environment;
   return {
     person: client,
@@ -1089,6 +1140,8 @@ function agentToolsGateways(world: CliWorld, client: SharedDaemonClient): AgentT
           environment,
           resolveDaemonStateHome(world.homeDirectory, environment.FY_HOME, PRODUCT_NAME),
         ),
+      fetch,
+      { patience, nowMs: () => Date.now(), sleep: milliseconds => Bun.sleep(milliseconds) },
     ),
   };
 }
@@ -1102,7 +1155,11 @@ function agentToolsGateways(world: CliWorld, client: SharedDaemonClient): AgentT
  * the daemon attributes it to the right actor. Still lazy: no token is demanded until a session
  * command actually runs.
  */
-function sessionCommands(world: CliWorld, ownSessionId: string | undefined): SessionCommandDeps {
+function sessionCommands(
+  world: CliWorld,
+  ownSessionId: string | undefined,
+  restartPatience: DaemonRestartPatience,
+): SessionCommandDeps {
   const cliEnvironment = world.environment;
   const environment: SessionEnvironment = {
     cwd: world.cwd,
@@ -1119,6 +1176,7 @@ function sessionCommands(world: CliWorld, ownSessionId: string | undefined): Ses
       resolveLocalToken: () =>
         daemonConnection(cliEnvironment, world.homeDirectory).then(connection => connection.token),
       ...(ownSessionId === undefined ? {} : { sessionId: ownSessionId }),
+      restartPatience,
     }),
   );
   const files = new SessionFiles();
@@ -1146,12 +1204,15 @@ function sessionCommands(world: CliWorld, ownSessionId: string | undefined): Ses
 export function registerDomain(program: Command, world: CliWorld): void {
   // The injected environment, never the ambient one: an in-process journey must not inherit FY_*.
   const environment = world.environment;
+  // One reading of "which session am I", shared by every group: blank is absent, not an empty id.
+  const ownSessionId = environmentSessionId(environment);
+  const patience = restartPatience(world, ownSessionId);
   const wiring: DomainWiring = {
     program,
     world,
-    client: lazyDaemonClient(lazyDaemonConnection(environment, world.homeDirectory)),
-    // One reading of "which session am I", shared by every group: blank is absent, not an empty id.
-    ownSessionId: environmentSessionId(environment),
+    client: lazyDaemonClient(lazyDaemonConnection(environment, world.homeDirectory, patience)),
+    ownSessionId,
+    restartPatience: patience,
   };
   registerDoctorCommand(program, environment);
   for (const register of DOMAIN_REGISTRARS) register(wiring);
