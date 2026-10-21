@@ -10,8 +10,12 @@ import should from 'should';
 import type { FileInformation, FileSystemPort } from '../../../src/lib/ports.ts';
 import {
   decideRelayCarrier,
+  RELAY_BANDWIDTH_RECHECK_MS,
+  RELAY_BANDWIDTH_REDIAL_MIN_MS,
+  RELAY_BANDWIDTH_REDIAL_SPREAD_MS,
   RELAY_CAPACITY_REDIAL_BASE_MS,
   RELAY_CAPACITY_REDIAL_CEILING_MS,
+  relayBandwidthRedialDelayMs,
   relayCapacityRedialDelayMs,
   relayDialUrl,
   relayRedialDelayMs,
@@ -226,5 +230,22 @@ describe('the redial schedule after a hosted connection ceiling', () => {
     should(relayCapacityRedialDelayMs(Number.POSITIVE_INFINITY, 1)).equal(RELAY_CAPACITY_REDIAL_CEILING_MS);
     should(relayCapacityRedialDelayMs(1, Number.NaN)).equal(RELAY_CAPACITY_REDIAL_BASE_MS / 2);
     should(relayCapacityRedialDelayMs(1, 7)).equal(RELAY_CAPACITY_REDIAL_BASE_MS);
+  });
+});
+
+describe('the redial schedule after a hosted byte ceiling', () => {
+  it('should wait until the reset, between a minute and the recheck interval, spread after it', () => {
+    should(relayBandwidthRedialDelayMs(300_000, 0)).equal(300_000);
+    should(relayBandwidthRedialDelayMs(300_000, 1)).equal(300_000 + RELAY_BANDWIDTH_REDIAL_SPREAD_MS);
+    should(relayBandwidthRedialDelayMs(5_000, 0)).equal(RELAY_BANDWIDTH_REDIAL_MIN_MS);
+    should(relayBandwidthRedialDelayMs(-5_000, 0)).equal(RELAY_BANDWIDTH_REDIAL_MIN_MS);
+    should(relayBandwidthRedialDelayMs(20 * 3_600_000, 0)).equal(RELAY_BANDWIDTH_RECHECK_MS);
+  });
+
+  it('should be total: an unusable wait is the recheck interval, an unusable random adds nothing', () => {
+    should(relayBandwidthRedialDelayMs(Number.NaN, 0)).equal(RELAY_BANDWIDTH_RECHECK_MS);
+    should(relayBandwidthRedialDelayMs(Number.POSITIVE_INFINITY, 0)).equal(RELAY_BANDWIDTH_RECHECK_MS);
+    should(relayBandwidthRedialDelayMs(300_000, Number.NaN)).equal(300_000);
+    should(relayBandwidthRedialDelayMs(300_000, 7)).equal(300_000 + RELAY_BANDWIDTH_REDIAL_SPREAD_MS);
   });
 });

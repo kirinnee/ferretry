@@ -717,12 +717,32 @@ interface CarrierFailureSeen {
   readonly sent: boolean;
 }
 
+/** Close codes only a hosted rendezvous sends: a relay you deploy yourself has no switch or ceilings. */
+const HOSTED_ONLY_CODES: ReadonlySet<number> = new Set([
+  RELAY_CLOSE_CODES.hostedDisabled,
+  RELAY_CLOSE_CODES.hostedCapacity,
+  RELAY_CLOSE_CODES.hostedBandwidth,
+]);
+
+/**
+ * The carrier a failure happened on, as a person should read it. Which relay is the hosted one is
+ * otherwise known only by comparing its address with the one this device discovered, and a device
+ * that has not discovered it (yet, or at all) would call Ferretry's relay "your own". A hosted-only
+ * refusal is the relay saying what it is, so that answer wins.
+ */
+const failureMethod = (failure: CarrierFailureSeen): ConnectionMethod =>
+  failure.method.kind === 'relay' &&
+  failure.reason instanceof RelaySessionError &&
+  HOSTED_ONLY_CODES.has(failure.reason.code)
+    ? { ...failure.method, operator: 'hosted' }
+    : failure.method;
+
 /** What a walk observed, in the terms the connection model reads. */
 const carrierOutage = (seen: readonly CarrierFailureSeen[]): CarrierOutage => {
   const relays = seen.filter(failure => failure.method.kind === 'relay');
   return {
     failures: seen.map(failure => ({
-      label: describeConnectionMethod(failure.method).label,
+      label: describeConnectionMethod(failureMethod(failure)).label,
       detail: transportFailure(failure.reason),
     })),
     daemonAbsent: seen.some(

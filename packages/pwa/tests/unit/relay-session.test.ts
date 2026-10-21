@@ -18,6 +18,7 @@ import {
   encodeFrame,
   FRAME_KINDS,
   MAX_PLAINTEXT_BYTES,
+  HOSTED_RELAY_BANDWIDTH_REASONS,
   RELAY_CLOSE_CODES,
   RELAY_LIMITS,
   SESSION_PROTOCOL_ID,
@@ -253,6 +254,27 @@ describe('a relay session reading frames from its carrier', () => {
     should(reason.message).match(/switched off/u);
     // An `error` is followed by the rendezvous' own close, so this side does not race it.
     should(refused.socket.closed).be.null();
+
+    // A spent data allowance is said in a person's words, not the operator's.
+    const spent = await opened();
+    await spent.session.receiveBinary(
+      controlFrame(sessionId, {
+        t: 'error',
+        code: RELAY_CLOSE_CODES.hostedBandwidth,
+        reason: HOSTED_RELAY_BANDWIDTH_REASONS.daemon.day,
+      }),
+    );
+    const allowance = await failure(spent.session.ready());
+    should(allowance.code).equal(RELAY_CLOSE_CODES.hostedBandwidth);
+    should(allowance.message).equal(
+      "Today's relay data allowance for this machine is used up (resets at midnight UTC). Direct connections still work.",
+    );
+    // A 4433 this build cannot read keeps the relay's own words.
+    const unknown = await opened();
+    await unknown.session.receiveBinary(
+      controlFrame(sessionId, { t: 'error', code: RELAY_CLOSE_CODES.hostedBandwidth, reason: 'over budget' }),
+    );
+    should((await failure(unknown.session.ready())).message).match(/refused this browser: 4433 over budget/u);
   });
 
   it('should refuse credit that is malformed or changes nothing', async () => {

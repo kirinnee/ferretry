@@ -875,7 +875,18 @@ one batch of `events` and `bytes`. The bytes a report names were relayed, so the
 when they cross a ceiling — the refusal stops what follows, not what already crossed. A refusal sends
 a typed `error` control frame to every socket the rendezvous holds and then closes them with `4432`
 or `4433`, including the reason (and, for bandwidth, a reset timestamp in the control-plane
-decision). **An unreachable control object is not a refusal.** A missing or unusable answer to a
+decision). **A byte-ceiling refusal carries its reset in the reason** — one of four fixed sentences,
+then `; resets <ISO-8601 UTC instant>` (`hostedBandwidthReason`; the longest is 91 bytes, inside a
+WebSocket close reason) — rather than as a new `error` field, because `error` is a strict shape and an
+older build would discard a frame with an extra field, explanation and all. A reason without the
+suffix, from a relay deployed before it, is read by the same rule the windows follow: the next UTC
+midnight for a day, a minute for a minute (`parseHostedBandwidthRefusal`). The daemon treats `4433`
+as a date rather than a dead path: it redials at the reset, but never sooner than a minute and never
+later than **30 minutes**, so an operator who raises the ceiling is picked up within half an hour,
+with up to 30 seconds of jitter so refused daemons do not all redial at midnight. A browser shows it as
+the allowance that ran out, when it resets in local time, and that direct connections still work; a
+hosted-only refusal (`4431`–`4433`) also labels its carrier "Hosted relay" even on a device that has
+not discovered the hosted address. **An unreachable control object is not a refusal.** A missing or unusable answer to a
 meter report or to the periodic inspection is asked for once more, and then live sockets keep
 carrying for up to 120 seconds from the first failure: the unreported bytes are folded into the next
 report, the heartbeat sweep keeps running, and the next frame or sweep asks again. Before this, one
