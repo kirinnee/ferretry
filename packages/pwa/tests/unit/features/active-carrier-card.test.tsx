@@ -18,6 +18,7 @@ import {
   CARRIER_UNMEASURED,
   CONNECTION_STATUS_LABEL,
   connectionStatusKind,
+  NOT_CONNECTED_LABEL,
   SELF_HOSTING_NOTE,
   SELF_HOSTING_RUNBOOK_URL,
 } from '../../../src/features/carrier/active-carrier-card.tsx';
@@ -124,6 +125,16 @@ describe('the connection status the card leads with', () => {
 
   it('should say "not measured yet" rather than default to direct', () => {
     should(statusOf(render(<ActiveCarrierCard choice={undefined} relayAdvertised />))).equal('none');
+    // A walk that ran and carried nothing was measured: it says so, and names why below.
+    const refused = render(
+      <ActiveCarrierCard
+        choice={{ ok: false, reason: 'Tunnel only: not set up by the operator.', passedOver: [] }}
+        relayAdvertised
+      />,
+    );
+    should(statusOf(refused)).equal('none');
+    should(text(refused)).containEql(NOT_CONNECTED_LABEL);
+    should(text(refused)).not.containEql(CONNECTION_STATUS_LABEL.none);
     should(connectionStatusKind(undefined, { kind: 'connected' })).equal('none');
   });
 

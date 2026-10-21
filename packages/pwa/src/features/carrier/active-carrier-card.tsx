@@ -104,6 +104,13 @@ export const connectionStatusKind = (
 ): ConnectionStatusKind => (health?.kind === 'reconnecting' ? 'reconnecting' : (method?.kind ?? 'none'));
 
 /** Said before the first request, because a carrier nobody has tried is not a carrier. */
+/**
+ * The lead word when a walk RAN and nothing carried — "Tunnel only: not set up by the operator." among
+ * them. Not "not measured yet": something was measured, and the answer was no. The machine-readable
+ * status stays `none`, because no carrier is live.
+ */
+export const NOT_CONNECTED_LABEL = 'Not connected';
+
 export const CARRIER_UNMEASURED =
   'Nothing has been carried yet, so there is no carrier to name. This will say which one is in use, ' +
   'and why, as soon as this daemon is asked for anything.';
@@ -175,7 +182,7 @@ export function ActiveCarrierCard({
       </h3>
       {/* The lead answer. `role="status"` so a reader on assistive tech hears it change. */}
       <p role="status" className="mb-0 mt-1 text-row font-semibold text-fg" data-connection-status={status}>
-        {CONNECTION_STATUS_LABEL[status]}
+        {status === 'none' && choice?.ok === false ? NOT_CONNECTED_LABEL : CONNECTION_STATUS_LABEL[status]}
         {detail !== undefined && outage === undefined ? (
           <span className="font-normal text-muted"> — {detail}</span>
         ) : null}
