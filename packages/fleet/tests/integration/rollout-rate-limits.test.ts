@@ -198,6 +198,30 @@ describe('listRollouts and newestRolloutRateLimits', () => {
     should(await newestRolloutRateLimits([])).be.undefined();
   });
 
+  it('should find the newest reading at the end of a large rollout, and one only its start holds', async () => {
+    // A busy account's rollout runs to hundreds of megabytes and used to be read whole every usage
+    // pass. The newest reading is near its end, so a tail answers; the whole file is still read when
+    // the tail holds none.
+    // Arrange — five megabytes of ordinary records, past every tail window.
+    const root = await sessions();
+    const filler = `${JSON.stringify({ type: 'response_item', payload: { text: 'x'.repeat(1_000) } })}\n`.repeat(5_000);
+    const atEnd = join(root, `rollout-end-${CONVERSATION}.jsonl`);
+    const atStart = join(root, `rollout-start-${OTHER}.jsonl`);
+    await writeFile(
+      atEnd,
+      `${tokenCount('2026-10-13T07:00:00.000Z', limits(10, 1))}\n${filler}${tokenCount('2026-10-13T08:00:00.000Z', limits(55, 5))}\n`,
+    );
+    await writeFile(atStart, `${tokenCount('2026-10-13T06:00:00.000Z', limits(42, 4))}\n${filler}`);
+
+    // Act
+    const newest = await newestRolloutRateLimits([{ path: atEnd, modifiedAt: 2 }]);
+    const early = await newestRolloutRateLimits([{ path: atStart, modifiedAt: 1 }]);
+
+    // Assert
+    should(newest?.fiveHour?.usedPercent).equal(55);
+    should(early?.fiveHour?.usedPercent).equal(42);
+  });
+
   it('should skip a day directory it cannot read', async () => {
     // Arrange
     const root = await sessions();
