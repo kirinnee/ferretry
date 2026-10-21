@@ -218,6 +218,11 @@ const sessionCases: SchemaCase[] = [
     value: { ...sessionView.state, launchInstructions },
   },
   { name: 'session view', schema: session.SessionViewSchema, value: sessionView },
+  {
+    name: 'session view with its journal position',
+    schema: session.SessionViewSchema,
+    value: { ...sessionView, journalSequence: 2_000 },
+  },
   { name: 'session list', schema: session.SessionListSchema, value: [sessionView] },
   {
     name: 'session config with launch settings',
@@ -567,6 +572,20 @@ describe('session schemas', () => {
 
     // Act + Assert
     assertRejects([{ name: 'config with a damaged stamp', schema: session.SessionConfigSchema, value: damaged }]);
+  });
+
+  it.each([
+    ['negative', -1],
+    ['fractional', 1.5],
+    ['textual', '12'],
+  ])('should refuse a session view whose journal position is %s', (_name, journalSequence) => {
+    // Arrange
+    const damaged = { ...sessionView, journalSequence };
+
+    // Act + Assert
+    assertRejects([
+      { name: 'view with a damaged journal position', schema: session.SessionViewSchema, value: damaged },
+    ]);
   });
 
   it('should resolve every runtime-control and signal union member', () => {

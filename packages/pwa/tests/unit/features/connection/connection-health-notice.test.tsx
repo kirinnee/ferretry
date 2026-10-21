@@ -4,7 +4,11 @@ import {
   ConnectionHealthNotice,
   ConnectionHealthNoticeView,
 } from '../../../../src/features/connection/connection-health-notice.tsx';
-import type { ConnectionHealth, ConnectionHealthState } from '../../../../src/lib/connection-health.ts';
+import {
+  type ConnectionHealth,
+  type ConnectionHealthState,
+  RECONNECTING_GRACE_MS,
+} from '../../../../src/lib/connection-health.ts';
 import { type DaemonId, daemonId } from '../../../../src/lib/daemon-connection.ts';
 import { interact, mount, must } from '../../../support/dom.ts';
 
@@ -37,6 +41,26 @@ const sheet = (): HTMLElement | null => document.querySelector('[data-connection
 const sheetOpen = (): boolean => document.querySelector('[role="dialog"][aria-modal="true"]') !== null;
 
 describe('ConnectionHealthNoticeView', () => {
+  it('says nothing about an outage younger than the grace, then the pill once it is older', async () => {
+    const shown = await mount(view(reconnecting({ since: NOW - RECONNECTING_GRACE_MS + 1 })));
+    try {
+      expect(pill()).toBeNull();
+      await shown.render(view(reconnecting({ since: NOW - RECONNECTING_GRACE_MS })));
+      expect(must(pill(), 'the pill').textContent).toContain('Reconnecting…');
+    } finally {
+      await shown.unmount();
+    }
+  });
+
+  it('shows the stall banner whatever the outage age says', async () => {
+    const shown = await mount(view(reconnecting({ since: NOW, stalled: true })));
+    try {
+      expect(shown.container.querySelector('[data-connection-stall]')).not.toBeNull();
+    } finally {
+      await shown.unmount();
+    }
+  });
+
   it('shows nothing before anything is measured, or while connected', async () => {
     const shown = await mount(view({ kind: 'unknown' }));
     try {

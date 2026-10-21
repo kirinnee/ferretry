@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import type { FyEvent, FyEventStreamIdle, SessionLiveActivity } from '@ferretry/protocol';
 import {
   SESSION_EVENT_STREAM_BACKOFF,
+  SESSION_EVENT_STREAM_QUIET_MS,
   SESSION_EVENT_STREAM_SILENCE,
   type SessionEventStreamEnvironment,
   type SessionEventStreamInput,
@@ -463,6 +464,7 @@ describe('the live feed subscription', () => {
     harness.transport.last.idle(idleFrame(30));
     harness.transport.last.fail();
     await settle();
+    harness.clock.fire(SESSION_EVENT_STREAM_QUIET_MS);
 
     // Assert — back to the first window. A stream that reconnects, sits quiet for an hour and then
     // flaps must not resume at the backoff it reached an hour ago.
@@ -568,8 +570,8 @@ describe('the live feed silence watchdog', () => {
     harness.clock.fire(500);
 
     // Assert — relearning from scratch would judge the reopened stream against a window three times
-    // shorter than the one the daemon told it about.
-    expect(harness.clock.delays).toEqual([sessionEventStreamDeadlineMs(120)]);
+    // shorter than the one the daemon told it about. (The drop from `live` is still inside its quiet window.)
+    expect(harness.clock.delays).toEqual([SESSION_EVENT_STREAM_QUIET_MS, sessionEventStreamDeadlineMs(120)]);
     harness.control.stop();
   });
 
@@ -732,6 +734,7 @@ describe('the live feed teardown', () => {
     settled.emit(event(5));
     settled.fail();
     await settle();
+    harness.clock.fire(SESSION_EVENT_STREAM_QUIET_MS);
     expect(harness.statuses).toEqual(['live', 'reconnecting']);
     expect(harness.clock.delays).toEqual([500]);
 
@@ -850,11 +853,13 @@ describe('the daemon coming back', () => {
     // Act
     signal.fire();
 
-    // Assert — no backoff waited out: a second subscription, resuming after 7, and nothing else armed.
+    // Assert — no backoff waited out: a second subscription, resuming after 7, and nothing else armed
+    // but the quiet window of a drop the host has not been told about.
     expect(harness.transport.attempts).toHaveLength(2);
     expect(harness.transport.last.after).toBe(7);
     expect(harness.control.status()).toBe('connecting');
-    expect(harness.clock.delays).toEqual([DEADLINE]);
+    expect(harness.clock.delays).toEqual([SESSION_EVENT_STREAM_QUIET_MS, DEADLINE]);
+    expect(harness.statuses).toEqual(['live']);
     harness.control.stop();
   });
 
@@ -887,5 +892,93 @@ describe('the daemon coming back', () => {
     expect(signal.listeners.size).toBe(1);
     harness.control.stop();
     expect(signal.listeners.size).toBe(0);
+  });
+});
+
+describe('the live feed quiet window', () => {
+  test('should never report a drop that is live again inside the window', async () => {
+    // Arrange
+    const harness = subject();
+    harness.transport.last.emit(event(1));
+
+    // Act — the socket drops, the retry reopens it, and a frame proves it before the window ends.
+    harness.transport.last.fail();
+    await settle();
+    harness.clock.fire(500);
+    harness.transport.last.emit(event(2));
+
+    // Assert
+    expect(harness.statuses).toEqual(['live']);
+    expect(harness.control.status()).toBe('live');
+    expect(harness.clock.delays).toEqual([DEADLINE]);
+    harness.control.stop();
+  });
+
+  test('should report a drop that outlasts the window, as whatever the feed is by then', async () => {
+    // Arrange
+    const harness = subject();
+    harness.transport.last.emit(event(1));
+    harness.transport.last.fail();
+    await settle();
+    const before = [...harness.statuses];
+
+    // Act
+    harness.clock.fire(SESSION_EVENT_STREAM_QUIET_MS);
+
+    // Assert
+    expect(before).toEqual(['live']);
+    expect(harness.statuses).toEqual(['live', 'reconnecting']);
+    harness.control.stop();
+  });
+
+  test('should report a reader-asked reconnect from inside the window once it has outlasted it', async () => {
+    // Arrange
+    const harness = subject();
+    harness.transport.last.emit(event(1));
+    harness.transport.last.fail();
+    await settle();
+
+    // Act — the reader presses Reconnect, and the new attempt is still connecting when the window ends.
+    harness.control.reconnect();
+    const during = [...harness.statuses];
+    harness.clock.fire(SESSION_EVENT_STREAM_QUIET_MS);
+
+    // Assert
+    expect(during).toEqual(['live']);
+    expect(harness.statuses).toEqual(['live', 'connecting']);
+    harness.control.stop();
+  });
+
+  test('should report a drop that runs out its budget at once, cancelling the window', async () => {
+    // Arrange
+    const harness = subject({ attemptBudget: 1 });
+    harness.transport.last.emit(event(1));
+    harness.transport.last.fail();
+    await settle();
+    harness.clock.fire(500);
+
+    // Act
+    harness.transport.last.fail();
+    await settle();
+
+    // Assert
+    expect(harness.statuses).toEqual(['live', 'disconnected']);
+    expect(harness.clock.delays).toEqual([]);
+    harness.control.stop();
+  });
+
+  test('should say nothing after stop, even with a window pending', async () => {
+    // Arrange
+    const harness = subject();
+    harness.transport.last.emit(event(1));
+    harness.transport.last.fail();
+    await settle();
+
+    // Act
+    harness.control.stop();
+
+    // Assert
+    expect(harness.clock.delays).toEqual([]);
+    expect(harness.statuses).toEqual(['live']);
   });
 });

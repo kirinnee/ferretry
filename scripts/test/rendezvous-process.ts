@@ -75,6 +75,12 @@
  *     that write is confirmed durable, unless the write was made with `allowUnconfirmed`. Here a write
  *     without that option holds every later send for `<n>` ms. It is a model with a chosen number, not
  *     a measurement of Cloudflare, and the benchmark reports it as one.
+ *
+ * And one for `scripts/local/bench-app-load.ts`, which times the whole app over this relay:
+ *
+ *   - `--one-way-ms <n>` holds every frame this process sends for `<n>` ms, in order, per socket. A
+ *     request crosses the rendezvous twice (client to daemon, then back), so `<n>` is half the
+ *     round trip it models: 50 for a 100 ms RTT. It is a fixed delay, not a jittered network.
  */
 
 import { appendFileSync } from 'node:fs';
@@ -139,7 +145,7 @@ interface SocketData {
 
 function usage(message: string): never {
   process.stderr.write(
-    `${message}\nusage: bun rendezvous-process.ts --observations <path> [--port <n>] [--allow <ids>] [--timing-only] [--output-gate-ms <n>]\n`,
+    `${message}\nusage: bun rendezvous-process.ts --observations <path> [--port <n>] [--allow <ids>] [--timing-only] [--output-gate-ms <n>] [--one-way-ms <n>]\n`,
   );
   process.exit(2);
 }
@@ -150,12 +156,14 @@ function parseArguments(argv: readonly string[]): {
   readonly allow: string;
   readonly timingOnly: boolean;
   readonly outputGateMs: number;
+  readonly oneWayMs: number;
 } {
   let observations: string | undefined;
   let port = 0;
   let allow = '';
   let timingOnly = false;
   let outputGateMs = 0;
+  let oneWayMs = 0;
   for (let index = 0; index < argv.length; index += 1) {
     const flag = argv[index];
     const value = argv[index + 1];
@@ -179,12 +187,17 @@ function parseArguments(argv: readonly string[]): {
       outputGateMs = Number(value);
       if (!Number.isFinite(outputGateMs) || outputGateMs < 0) usage('--output-gate-ms must be a duration');
       index += 1;
+    } else if (flag === '--one-way-ms') {
+      if (value === undefined) usage('--one-way-ms needs a number');
+      oneWayMs = Number(value);
+      if (!Number.isFinite(oneWayMs) || oneWayMs < 0) usage('--one-way-ms must be a duration');
+      index += 1;
     } else {
       usage(`unknown argument: ${String(flag)}`);
     }
   }
   if (observations === undefined) usage('--observations is required');
-  return { observations, port, allow, timingOnly, outputGateMs };
+  return { observations, port, allow, timingOnly, outputGateMs, oneWayMs };
 }
 
 const options = parseArguments(process.argv.slice(2));
@@ -255,6 +268,42 @@ class OutputGate {
 
 const outputGate = new OutputGate();
 
+/**
+ * The modelled network delay `--one-way-ms` asks for: every send leaves `delayMs` after it was made,
+ * never ahead of an earlier one. A no-op at zero.
+ */
+class DelayLine {
+  readonly #delayMs: number;
+  #queue: { readonly due: number; readonly send: () => void }[] = [];
+  #timer: ReturnType<typeof setTimeout> | undefined;
+
+  constructor(delayMs: number) {
+    this.#delayMs = delayMs;
+  }
+
+  pass(send: () => void): void {
+    if (this.#delayMs <= 0) {
+      send();
+      return;
+    }
+    this.#queue.push({ due: preciseNow() + this.#delayMs, send });
+    this.#arm();
+  }
+
+  #arm(): void {
+    const head = this.#queue[0];
+    if (this.#timer !== undefined || head === undefined) return;
+    this.#timer = setTimeout(
+      () => {
+        this.#timer = undefined;
+        while (this.#queue[0] !== undefined && this.#queue[0].due <= preciseNow()) this.#queue.shift()?.send();
+        this.#arm();
+      },
+      Math.max(0, head.due - preciseNow()),
+    );
+  }
+}
+
 function base64Of(data: ArrayBuffer | ArrayBufferView | string): string {
   if (typeof data === 'string') return Buffer.from(data, 'utf8').toString('base64');
   if (data instanceof ArrayBuffer) return Buffer.from(data).toString('base64');
@@ -282,23 +331,26 @@ class BunRelaySocket implements RelaySocket {
   #buffered: (ArrayBuffer | string)[] = [];
   #closing: { readonly code?: number; readonly reason?: string } | undefined;
   #attachment: unknown = null;
+  readonly #line = new DelayLine(options.oneWayMs);
 
   send(data: ArrayBuffer | string): void {
     // Through the modelled output gate (a no-op unless `--output-gate-ms` is set), and observed as it
     // LEAVES, so a held frame's wait is counted as the relay's own time rather than the network's.
     outputGate.pass(() => {
       observe('from-rendezvous', this.role, data);
-      const live = this.#live;
-      if (live === undefined) {
-        this.#buffered.push(data);
-        return;
-      }
-      live.send(typeof data === 'string' ? data : new Uint8Array(data));
+      this.#line.pass(() => {
+        const live = this.#live;
+        if (live === undefined) {
+          this.#buffered.push(data);
+          return;
+        }
+        live.send(typeof data === 'string' ? data : new Uint8Array(data));
+      });
     });
   }
 
   close(code?: number, reason?: string): void {
-    outputGate.pass(() => this.#close(code, reason));
+    outputGate.pass(() => this.#line.pass(() => this.#close(code, reason)));
   }
 
   #close(code?: number, reason?: string): void {

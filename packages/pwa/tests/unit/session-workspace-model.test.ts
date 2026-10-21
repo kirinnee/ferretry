@@ -1,6 +1,8 @@
 import { describe, expect, test } from 'bun:test';
 import { turnFileInstruction } from '@ferretry/protocol';
 import {
+  NUDGE_SETTLE_MS,
+  RELAXED_REFRESH_MS,
   type SessionWorkspaceRefreshEnvironment,
   sendCanceller,
   sendRetrier,
@@ -820,5 +822,180 @@ describe('sendCanceller and sendSubmitter', () => {
       sendSubmitter({ submitSend: refuse }, 's-1', () => (refreshed += 1))({ sendId: 'send-1' }),
     ).rejects.toThrow('still typed');
     expect(refreshed).toBe(0);
+  });
+});
+
+describe('startSessionWorkspaceRefresh · nudges and the relaxed poll', () => {
+  /** A clock and one pending timeout, driven by hand. */
+  const timed = () => {
+    const browser = environment();
+    let clock = NOW;
+    const pending = new Map<number, () => void>();
+    const delays: number[] = [];
+    const cleared: unknown[] = [];
+    let next = 0;
+    const env: SessionWorkspaceRefreshEnvironment = {
+      ...browser.env,
+      now: () => clock,
+      setTimeout: (callback, milliseconds) => {
+        next += 1;
+        pending.set(next, callback);
+        delays.push(milliseconds);
+        return next;
+      },
+      clearTimeout: handle => {
+        cleared.push(handle);
+        pending.delete(handle as number);
+      },
+    };
+    return {
+      ...browser,
+      env,
+      advance: (milliseconds: number) => {
+        clock += milliseconds;
+      },
+      fire: () => {
+        const callbacks = [...pending.values()];
+        pending.clear();
+        for (const callback of callbacks) callback();
+      },
+      pending: () => pending.size,
+      delays,
+      cleared,
+    };
+  };
+
+  const counting = () => {
+    let reads = 0;
+    return {
+      api: {
+        logs: async () => {
+          reads += 1;
+          return 'assistant/message: hello';
+        },
+        get: async () => sessionView('s-1'),
+      },
+      reads: () => reads,
+    };
+  };
+
+  const start = (
+    env: SessionWorkspaceRefreshEnvironment,
+    api: ReturnType<typeof counting>['api'],
+    relaxed?: () => boolean,
+  ) =>
+    startSessionWorkspaceRefresh({
+      api,
+      sessionId: 's-1',
+      environment: env,
+      onTranscript: () => undefined,
+      onSession: () => undefined,
+      onError: () => undefined,
+      ...(relaxed === undefined ? {} : { relaxed }),
+    });
+
+  test('should fold a burst of nudges into one read once it settles', async () => {
+    // Arrange
+    const browser = timed();
+    const reader = counting();
+    const subject = start(browser.env, reader.api);
+    await subject.initial;
+
+    // Act
+    subject.nudge();
+    subject.nudge();
+    subject.nudge();
+    const pendingDuringBurst = browser.pending();
+    browser.fire();
+    await subject.refresh();
+
+    // Assert
+    expect(pendingDuringBurst).toBe(1);
+    expect(browser.delays).toEqual([NUDGE_SETTLE_MS]);
+    expect(reader.reads()).toBe(2);
+    subject.stop();
+  });
+
+  test('should read at once on a nudge when the environment has no timer', async () => {
+    // Arrange
+    const browser = environment();
+    const reader = counting();
+    const subject = start(browser.env, reader.api);
+    await subject.initial;
+
+    // Act
+    subject.nudge();
+    await subject.refresh();
+
+    // Assert
+    expect(reader.reads()).toBe(2);
+    subject.stop();
+  });
+
+  test('should drop a pending nudge on stop, and ignore one after it', async () => {
+    // Arrange
+    const browser = timed();
+    const reader = counting();
+    const subject = start(browser.env, reader.api);
+    await subject.initial;
+    subject.nudge();
+
+    // Act
+    subject.stop();
+    subject.nudge();
+    browser.fire();
+
+    // Assert
+    expect(browser.cleared).toEqual([1]);
+    expect(browser.pending()).toBe(0);
+    expect(reader.reads()).toBe(1);
+  });
+
+  test('should stop with no nudge pending without clearing a timer', async () => {
+    // Arrange
+    const browser = timed();
+    const subject = start(browser.env, counting().api);
+    await subject.initial;
+
+    // Act
+    subject.stop();
+
+    // Assert
+    expect(browser.cleared).toEqual([]);
+  });
+
+  test.each([
+    ['relaxed, inside the window', true, RELAXED_REFRESH_MS - 1, 1],
+    ['relaxed, at the window', true, RELAXED_REFRESH_MS, 2],
+    ['not relaxed', false, 3_000, 2],
+  ])('should poll %s (ticks after %#)', async (_name, relaxed, elapsed, expected) => {
+    // Arrange
+    const browser = timed();
+    const reader = counting();
+    const subject = start(browser.env, reader.api, () => relaxed);
+    await subject.initial;
+
+    // Act
+    browser.advance(elapsed);
+    browser.tick();
+
+    // Assert
+    expect(reader.reads()).toBe(expected);
+    subject.stop();
+  });
+
+  test('should never relax a poll that has no clock', async () => {
+    // Arrange
+    const browser = environment();
+    const reader = counting();
+    const subject = start(browser.env, reader.api, () => true);
+    await subject.initial;
+
+    // Act
+    browser.tick();
+
+    // Assert
+    expect(reader.reads()).toBe(2);
+    subject.stop();
   });
 });

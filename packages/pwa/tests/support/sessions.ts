@@ -13,6 +13,7 @@ export interface SessionFixtureOverrides {
   readonly config?: Partial<SessionConfig>;
   readonly state?: Partial<SessionState>;
   readonly directory?: string;
+  readonly journalSequence?: number;
 }
 
 /** A running `auto` session, overridable field by field. */
@@ -38,4 +39,5 @@ export const sessionView = (id: string, overrides: SessionFixtureOverrides = {})
       ...overrides.state,
     },
     directory: overrides.directory ?? `/work/${id}`,
+    ...(overrides.journalSequence === undefined ? {} : { journalSequence: overrides.journalSequence }),
   }) as unknown as SessionView;

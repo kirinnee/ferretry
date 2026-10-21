@@ -930,6 +930,9 @@ const browserWorkspaceRefreshEnvironment: SessionWorkspaceRefreshEnvironment = {
     document.addEventListener('visibilitychange', callback);
     return () => document.removeEventListener('visibilitychange', callback);
   },
+  now: () => Date.now(),
+  setTimeout: (callback, milliseconds) => globalThis.setTimeout(callback, milliseconds),
+  clearTimeout: handle => globalThis.clearTimeout(handle as ReturnType<typeof globalThis.setTimeout>),
 };
 
 const browserEventStreamEnvironment: SessionEventStreamEnvironment = {
@@ -1045,6 +1048,9 @@ function SessionRoute({ connection, scope }: SessionChatPageProps) {
    * daemon-session seam: moving to another session mounts another route with a cursor of its own.
    */
   const liveCursorRef = useRef(0);
+  /** Where this session's journal stood when its view was read (`SessionView.journalSequence`), or 0. */
+  const journalHead = useRef(0);
+  journalHead.current = session?.journalSequence ?? 0;
   /**
    * The reported status AND THE OWNER THAT REPORTED IT, stored as one value because they are one
    * fact and storing them apart is what made them disagree.
@@ -1090,6 +1096,11 @@ function SessionRoute({ connection, scope }: SessionChatPageProps) {
   const measuredCarrier = useActiveCarrier(store.carrier, daemonId);
   const carrierKind = measuredCarrier?.ok === true ? measuredCarrier.method.kind : 'none';
   const refreshControl = useRef<SessionWorkspaceRefreshControl | null>(null);
+  /**
+   * Whether the poll may slow down: the live feed is up and the agent is idle at its prompt, so every
+   * change arrives as an event first. Written each render below, read by the poll on each tick.
+   */
+  const relaxedPoll = useRef(false);
   /**
    * HOW WELL THIS DAEMON IS REACHED, said once by the connection model rather than by this route.
    *
@@ -1197,6 +1208,7 @@ function SessionRoute({ connection, scope }: SessionChatPageProps) {
           onError: setError,
           onTranscriptUnbound: setTranscriptUnbound,
           quiet: isCarrierOutage,
+          relaxed: () => relaxedPoll.current,
         });
         refreshControl.current = control;
       })
@@ -1241,6 +1253,13 @@ function SessionRoute({ connection, scope }: SessionChatPageProps) {
     // The gating rules live on `streamOwner` above, because they decide an IDENTITY and not just a
     // permission — see its comment for why a carrier must be measured first and why the dependency
     // is the choice object rather than its kind.
+    // A FIRST subscription starts where the session's journal stood when its view was read, not at
+    // the beginning: replaying a long session's whole history was hundreds of kilobytes over the relay
+    // on every open, each replayed event asking for another full refresh, for nothing this route reads —
+    // the transcript and the surfaces are read directly. An older daemon reports no position, which is
+    // the old replay. The cursor takes the position as already accounted for, so a later resubscription
+    // resumes from it rather than from a newer view's.
+    if (liveCursorRef.current === 0) liveCursorRef.current = journalHead.current;
     const stream = startSessionEventStream({
       api: streamOwner.client,
       sessionId: streamOwner.sessionId,
@@ -1251,7 +1270,7 @@ function SessionRoute({ connection, scope }: SessionChatPageProps) {
         liveCursorRef.current = Math.max(liveCursorRef.current, event.sequence);
         setLiveCursor(current => Math.max(current, event.sequence));
         surfaceEvents.publish(event);
-        void refreshControl.current?.refresh(true);
+        refreshControl.current?.nudge();
       },
       onLive: live => liveActivity.publish(live),
       // Stamped with the owner, so a report can never be read by a later one. The model publishes
@@ -1351,6 +1370,8 @@ function SessionRoute({ connection, scope }: SessionChatPageProps) {
   const subscribed = streamOwner !== null;
   const ownedStatus: SessionEventStreamStatus =
     streamOwner !== null && reportedStream.owner === streamOwner ? reportedStream.status : 'connecting';
+  relaxedPoll.current =
+    ownedStatus === 'live' && (session?.state.turnState === 'your-turn' || session?.state.turnState === 'needs-input');
   const liveStream = useMemo(
     () => ({
       status: liveStreamState(subscribed, measuredCarrier?.ok === false, ownedStatus),

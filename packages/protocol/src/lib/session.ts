@@ -682,6 +682,12 @@ export const SessionViewSchema = z.object({
   config: SessionConfigSchema,
   state: SessionStateSchema,
   directory: z.string().min(1),
+  /**
+   * The highest event sequence this session's journal held when the view was read: where a reader
+   * that has just read the session can start `/v1/events?after=` instead of replaying the whole
+   * history. Absent from a daemon that predates it, which a reader takes as `0`.
+   */
+  journalSequence: NonNegativeIntegerSchema.optional(),
 });
 export type SessionView = z.infer<typeof SessionViewSchema>;
 
