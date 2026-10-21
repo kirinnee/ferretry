@@ -82,7 +82,8 @@ async function fixture(exits?: string): Promise<ReapFixture> {
   // The lifecycle store creates the directory and journal before its launcher writes a pane
   // registration there; a registrar must never create a bare session directory by itself.
   await opened.storage.writeState(record.config.id, { id: record.config.id, status: 'created' });
-  const tmux = new BunTmuxProcess(tmuxExecutable, join(home, 'throwaway-tmux.sock'));
+  const socket = join(home, 'throwaway-tmux.sock');
+  const tmux = new BunTmuxProcess(tmuxExecutable, socket);
   const controller = new TmuxController(tmux);
   // A fresh private server assigns its first pane `%0`; the production registrar and reaper must
   // prove that real first-pane identity rather than avoiding it with a bootstrap session.
@@ -101,7 +102,7 @@ async function fixture(exits?: string): Promise<ReapFixture> {
     await opened.storage.close();
     await rm(home, { recursive: true, force: true });
   });
-  if (exits !== undefined) await awaitExit(controller, record.config.tmuxSession, gate, tmuxExecutable, join(home, 'throwaway-tmux.sock'));
+  if (exits !== undefined) await awaitExit(controller, record.config.tmuxSession, gate, { tmuxExecutable, socket });
   return { home, files, storage: opened.storage, record, controller, registrar, store, runtime, tmuxExecutable };
 }
 
@@ -110,33 +111,38 @@ async function fixture(exits?: string): Promise<ReapFixture> {
  * can only end as a dead pane. The wait is for an exit STATUS, not just `dead`: a metadata read that
  * fails under load also reads as dead, and registering then would find the process still running. The
  * bound is generous because it is only ever spent when something is wrong.
+ *
+ * tmux 3.4 (the CI runner's) can miss the SIGCHLD of a pane process that ends: the pane reads dead, but
+ * the process stays an unreaped zombie and tmux never learns its status -- on CI 23 of 40 panes sat
+ * like that until the server was sent another SIGCHLD, which makes it reap at once. So a dead pane
+ * without a status gets that signal; it is a harmless "reap anything finished" request to the server.
  */
-async function awaitExit(controller: TmuxController, session: string, gate: string, exe: string, sock: string): Promise<void> {
+async function awaitExit(
+  controller: TmuxController,
+  session: string,
+  gate: string,
+  server: { readonly tmuxExecutable: string; readonly socket: string },
+): Promise<void> {
   await writeFile(gate, '');
   const deadline = Date.now() + 30_000;
   let last = 'no state read';
-  let nudged = 0;
   while (Date.now() < deadline) {
     const pane = await controller.state(session);
     last = JSON.stringify({ alive: pane.alive, dead: pane.dead, exitCode: pane.exitCode });
     if (pane.alive && pane.dead && pane.exitCode === 2) return;
-    if (Date.now() > deadline - 28_000 && pane.alive && pane.dead && pane.exitCode === undefined) {
-      const server = Bun.spawnSync([exe, '-S', sock, 'display-message', '-p', '#{pid}'], { stdout: 'pipe' });
-      const pid = Number(new TextDecoder().decode(server.stdout).trim());
-      if (Number.isInteger(pid) && pid > 1) { process.kill(pid, 'SIGCHLD'); nudged++; }
-    }
+    if (pane.alive && pane.dead && pane.exitCode === undefined) askServerToReap(server);
     await Bun.sleep(50);
   }
-  const sock2 = join(gate, '..', 'throwaway-tmux.sock');
-  const raw = Bun.spawnSync(['tmux', '-S', sock2, 'display-message', '-p', '-t', session, '#{pane_pid}|#{pane_dead}|#{pane_dead_status}|#{pane_dead_signal}|#{pane_dead_time}|#{pane_current_command}|#{version}'], { stdout: 'pipe', stderr: 'pipe' });
-  const pid = new TextDecoder().decode(raw.stdout).split('|')[0]?.trim() ?? '';
-  const ppid = Bun.spawnSync(['ps', '-o', 'ppid=', '-p', pid], { stdout: 'pipe' });
-  const parent = new TextDecoder().decode(ppid.stdout).trim();
-  const sig = Bun.spawnSync(['grep', '-E', 'State|Sig|Threads|Name', `/proc/${parent}/status`], { stdout: 'pipe' });
-  const zs = Bun.spawnSync(['sh', '-c', "ps -e -o pid,ppid,stat,args | grep -E ' Z|tmux' | head -20"], { stdout: 'pipe' });
-  const ps = Bun.spawnSync(['ps', '-o', 'pid,ppid,stat,args', '-p', pid], { stdout: 'pipe', stderr: 'pipe' });
-  const tmuxv = Bun.spawnSync(['tmux', '-V'], { stdout: 'pipe' });
-  throw new Error(`PROBE nudged=${nudged} test setup: the pane never exited (last state ${last}) raw=[${new TextDecoder().decode(raw.stdout)}${new TextDecoder().decode(raw.stderr)}] ps=[${new TextDecoder().decode(ps.stdout)}] v=${new TextDecoder().decode(tmuxv.stdout)} exe=${Bun.which('tmux')} PARENT=[${new TextDecoder().decode(sig.stdout).replaceAll('\n', ' ; ')}] ALL=[${new TextDecoder().decode(zs.stdout).replaceAll('\n', ' ; ')}]`);
+  throw new Error(`test setup: the pane never exited (last state ${last})`);
+}
+
+function askServerToReap(server: { readonly tmuxExecutable: string; readonly socket: string }): void {
+  const asked = Bun.spawnSync([server.tmuxExecutable, '-S', server.socket, 'display-message', '-p', '#{pid}'], {
+    stdout: 'pipe',
+    stderr: 'ignore',
+  });
+  const pid = Number(new TextDecoder().decode(asked.stdout).trim());
+  if (Number.isInteger(pid) && pid > 1) process.kill(pid, 'SIGCHLD');
 }
 
 function service(subject: ReapFixture, runtime = subject.runtime): TerminalReapService {
@@ -272,10 +278,6 @@ describe('durable terminal pane reap adapters', () => {
  * is gone, and the reason must be the exit and what the process printed, not the identity read.
  */
 describe('registering a pane whose harness has already exited', () => {
-  for (let probe = 0; probe < 40; probe++) it(`PROBE repeat ${probe}`, async () => {
-    await fixture(probe % 2 === 0 ? `echo 'x' >&2; exit 2` : `echo 'ferretry: DEEPSEEK_TOKEN is not set' >&2; exit 2`);
-  });
-
   it('should report the exit status and the last output instead of the identity read', async () => {
     // Arrange
     const subject = await fixture(`echo 'ferretry: DEEPSEEK_TOKEN is not set' >&2; exit 2`);
