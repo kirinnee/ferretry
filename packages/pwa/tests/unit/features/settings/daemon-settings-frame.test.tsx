@@ -285,6 +285,36 @@ describe('daemon settings Connection panel', () => {
 
     run(() => view.unmount());
   });
+
+  it('offers this machine’s connection preference beside its status when it is handed one', () => {
+    const chosen: string[] = [];
+    const view = render(
+      <DaemonSettingsFrame
+        connection={alpha}
+        name="Alpha"
+        readWardenStatus={unavailable}
+        createWardenClient={unavailable}
+        panel="carrier"
+        onOpenPanel={() => undefined}
+        carrierPreference={{
+          value: 'tunnel',
+          onChange: preference => chosen.push(preference),
+          availability: { webrtc: true },
+        }}
+      />,
+    );
+
+    const group = must(view.root.findAllByType('fieldset')[0], 'the preference group');
+    expect(group.props['data-carrier-preference']).toBe('tunnel');
+    const auto = must(
+      view.root.findAllByType('input').find(input => input.props.value === 'auto'),
+      'the Auto choice',
+    );
+    run(() => auto.props.onChange());
+    expect(chosen).toEqual(['auto']);
+
+    run(() => view.unmount());
+  });
 });
 
 /**

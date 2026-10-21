@@ -1,15 +1,19 @@
 /**
- * How a phone reaches a daemon. Two carriers, one security model.
+ * How a phone reaches a daemon. Four carriers, one security model (`docs/relay-protocol.md` §15).
  *
  * 1. **Direct** — the socket goes straight to the daemon: a laptop on the same network, a tailnet
- *    address, a VPN, a public host. Fewest hops, fewest parties, lowest latency. It is the
- *    preferred carrier whenever it is configured and reachable, not a fallback, and nobody has to
- *    opt out of a relay to get it.
- * 2. **Relay** — the Workers rendezvous in this package. Ferretry's metered hosted service is the
- *    automatic fallback only after direct fails; running the same carrier in your own Cloudflare
- *    account remains an expert override in the required product contract. The current PWA's
- *    interim carrier chooser has not caught up with that contract yet. Who operates and pays for
- *    the relay changes, but the wire protocol and security model do not.
+ *    address, a VPN, a public host. Fewest hops, fewest parties, lowest latency. It is the first
+ *    carrier tried whenever it is configured, not a fallback, and nobody has to opt out of anything
+ *    to get it.
+ * 2. **WebRTC** — a peer-to-peer data channel. Another session only INTRODUCES the two ends; it never
+ *    carries the session's bytes. It has no address of its own, so it is a kind without a URL.
+ * 3. **Tunnel** — a Cloudflare Tunnel hostname the hosted service provisioned for the daemon. It is
+ *    dialled exactly like a direct address (the daemon serves the same session route behind it), but
+ *    Cloudflare's edge is on the path, so it is disclosed like a relay.
+ * 4. **Relay** — the Workers rendezvous in this package. Ferretry's metered hosted service is the
+ *    automatic fallback after the others; running the same carrier in your own Cloudflare account
+ *    remains an expert override. Who operates and pays for the relay changes, but the wire protocol
+ *    and security model do not.
  *
  * A hosted relay anyone can reach is abusable precisely because its operator cannot read what it
  * carries. Ferretry accepts that risk for its hosted deployment and bounds the bill with runtime
@@ -17,18 +21,18 @@
  * can be changed or set to null without releasing this package, while a self-hosted address remains
  * a value its owner supplies directly.
  *
- * The end-to-end layer is identical on both carriers. A direct socket is not "trusted because it
- * is direct": it runs the same handshake, pins the same fingerprint and authenticates every record
- * the same way. Choosing a carrier changes latency, dependency and what an onlooker can observe —
- * it never changes what protects the traffic.
+ * The end-to-end layer is identical on every carrier. A direct socket is not "trusted because it is
+ * direct": it runs the same handshake, pins the same fingerprint and authenticates every record the
+ * same way. Choosing a carrier changes latency, dependency and what an onlooker can observe — it
+ * never changes what protects the traffic.
  *
- * The model is deliberately per daemon, so the future client mounting can persist one daemon as
- * direct and another as relayed without inventing a global carrier switch. That persistence and
- * transport are not mounted yet; this module defines the decision and disclosure contract they
- * must consume.
+ * WHICH OF THEM A BROWSER WALKS, AND IN WHAT ORDER, IS A PER-DEVICE, PER-MACHINE PREFERENCE (§15
+ * "The choice") that lives in the PWA and is never sent to the daemon. This module owns the default
+ * order ({@link connectionPreferenceOrder}) and the disclosure for each carrier; the preference only
+ * narrows which kinds are walked.
  */
 
-import { type DaemonCarrier, DaemonOriginSchema } from '@ferretry/protocol';
+import { type DaemonCarrier, DaemonOriginSchema, TunnelOriginSchema } from '@ferretry/protocol';
 import { z } from 'zod';
 import { parseDaemonId } from './identity.ts';
 
@@ -110,9 +114,19 @@ export const SocketEndpointSchema = z
  * a private network is allowed, while credentials, a proxy path, a query or a fragment are not. Held
  * to the relay rule instead, this branch would reject the most ordinary direct carrier there is and
  * disagree with `daemonBaseUrl`, the reader every stored direct address actually passes through.
+ *
+ * A TUNNEL IS `TunnelOriginSchema`, the protocol's third rule: a bare https origin and never loopback,
+ * because Cloudflare's edge always terminates TLS for it and a loopback "tunnel" would be a direct
+ * carrier wearing the wrong disclosure.
+ *
+ * WEBRTC HAS NO ADDRESS AT ALL. The data channel is negotiated over another session, so there is
+ * nothing to store and nothing a daemon publishes; the variant exists so a walk can try it, name it
+ * as the live carrier, and say why it was passed over, in the same terms as every other carrier.
  */
 export const ConnectionMethodSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('direct'), daemonUrl: DaemonOriginSchema }),
+  z.strictObject({ kind: z.literal('webrtc') }),
+  z.strictObject({ kind: z.literal('tunnel'), tunnelUrl: TunnelOriginSchema }),
   z.strictObject({
     kind: z.literal('relay'),
     relayUrl: SocketEndpointSchema,
@@ -121,21 +135,32 @@ export const ConnectionMethodSchema = z.discriminatedUnion('kind', [
 ]);
 export type ConnectionMethod = z.infer<typeof ConnectionMethodSchema>;
 
+/** Every carrier kind, in the order the protocol walks them by default (§15 "The choice", Auto). */
+export const CONNECTION_KINDS = [
+  'direct',
+  'webrtc',
+  'tunnel',
+  'relay',
+] as const satisfies readonly ConnectionMethod['kind'][];
+
 export type ConnectionRole = 'client' | 'daemon';
 
 /**
  * The socket URL for one role.
  *
- * Both carriers spell the path the same way, so a daemon serving direct clients and a rendezvous
- * serving relayed ones answer the same route. The daemon role exists only on a relay: on a direct
- * carrier the daemon is the server, so asking for it is a mistake and returns null rather than a
- * URL that would quietly connect to the wrong thing.
+ * Every addressed carrier spells the path the same way, so a daemon serving direct clients, the
+ * daemon's tunnel listener behind Cloudflare, and a rendezvous serving relayed ones all answer the
+ * same route. The daemon role exists only on a relay: on a direct carrier and a tunnel the daemon is
+ * the server, so asking for it is a mistake and returns null rather than a URL that would quietly
+ * connect to the wrong thing. WebRTC has no socket URL, so it is null for both roles.
  */
 export function connectionSocketUrl(method: ConnectionMethod, daemonId: string, role: ConnectionRole): string | null {
   const parsedDaemonId = parseDaemonId(daemonId);
   if (parsedDaemonId === null) return null;
-  if (method.kind === 'direct' && role === 'daemon') return null;
-  const base = method.kind === 'direct' ? method.daemonUrl : method.relayUrl;
+  if (method.kind === 'webrtc') return null;
+  if (method.kind !== 'relay' && role === 'daemon') return null;
+  const base =
+    method.kind === 'direct' ? method.daemonUrl : method.kind === 'tunnel' ? method.tunnelUrl : method.relayUrl;
   const url = new URL(base);
   url.protocol = url.protocol === 'https:' || url.protocol === 'wss:' ? 'wss:' : 'ws:';
   url.pathname = `${url.pathname.replace(/\/$/u, '')}/v1/rendezvous/${encodeURIComponent(parsedDaemonId)}/${role}`;
@@ -166,62 +191,114 @@ export function parseRendezvousPath(pathname: string): RendezvousRoute | null {
 /** What a carrier costs, in the terms a person choosing one actually cares about. */
 export interface ConnectionDisclosure {
   readonly label: string;
+  /**
+   * The carrier as it reads INSIDE a sentence — "Connected over {noun}". Its own field because a
+   * lowercased label is right for "direct" and wrong for "Cloudflare tunnel" and "WebRTC".
+   */
+  readonly noun: string;
   readonly summary: string;
   /** Every party on the path, and what that party can observe. Content is never on this list. */
   readonly observers: readonly string[];
   readonly requires: readonly string[];
 }
 
+const DIRECT_DISCLOSURE: ConnectionDisclosure = {
+  label: 'Direct',
+  noun: 'direct',
+  summary: 'Your browser connects straight to the daemon. No third party carries the traffic.',
+  observers: [
+    'Whoever runs the network between you and the daemon sees that a connection exists, its size and its timing.',
+    'Nobody else is on the path: there is no operator to trust and no service to be down.',
+  ],
+  requires: [
+    'The daemon address has to be reachable from wherever the browser is — same network, a VPN, a tailnet or a public host.',
+    'The address must serve TLS unless it is localhost or 127.0.0.1, the only two hosts the published web app may dial without it.',
+  ],
+};
+
+/**
+ * WebRTC, as §15's table states it: the networks in between, and the STUN server, which learns both
+ * addresses. The introduction is a session of its own and is said as such, so nobody reads "the relay
+ * is used" as "the relay carries the session".
+ */
+const WEBRTC_DISCLOSURE: ConnectionDisclosure = {
+  label: 'WebRTC',
+  noun: 'WebRTC',
+  summary:
+    'A peer-to-peer data channel between your browser and the daemon. Another connection only introduces the two ends; it never carries the session’s bytes.',
+  observers: [
+    'Whoever runs the networks in between sees that a connection exists, its size and its timing.',
+    'The STUN server both ends ask learns both IP addresses.',
+    'Whatever introduced the two ends sees that an introduction happened, and when — not what followed.',
+    'Nobody on the path can read, alter or insert into the session: every record is authenticated under a key derived on your two devices.',
+  ],
+  requires: [
+    'The two ends must be able to reach each other peer to peer. There is no server to carry the traffic when they cannot.',
+    'A carrier that can introduce them — the daemon’s own address or a relay.',
+  ],
+};
+
+/** The hosted Cloudflare Tunnel, as §15 "What a tunnel operator can see, honestly" states it. */
+const TUNNEL_DISCLOSURE: ConnectionDisclosure = {
+  label: 'Cloudflare tunnel',
+  noun: 'Cloudflare tunnel',
+  summary:
+    'Cloudflare’s edge carries the session to a connector the daemon runs, through a tunnel Ferretry provisioned for this machine. It works behind NAT without making you deploy infrastructure.',
+  observers: [
+    'Ferretry, which provisioned the tunnel, and Cloudflare, which carries it, know its hostname and which daemon it belongs to.',
+    'They see both IP addresses, when each session opens and closes, and that the daemon keeps renewing its tunnel.',
+    'They see how many frames go each way, how big each one is and exactly when it was sent.',
+    'Cloudflare ends the outer TLS, so it sees the connection’s path and headers — but every byte above that is end-to-end ciphertext it cannot read, alter or insert into.',
+    'Someone holding a stolen connector token could drop sessions, not impersonate the daemon: only the daemon’s identity key completes the handshake.',
+  ],
+  requires: [
+    'The hosted tunnel service must be set up by its operator; it can be withdrawn without an app release.',
+    'The daemon must be running cloudflared and have registered its tunnel.',
+  ],
+};
+
+const HOSTED_RELAY_DISCLOSURE: ConnectionDisclosure = {
+  label: 'Hosted relay',
+  noun: 'hosted relay',
+  summary:
+    'Ferretry’s Cloudflare Worker passes ciphertext between you and the daemon. It works behind NAT without making you deploy infrastructure.',
+  observers: [
+    'Ferretry and Cloudflare see the daemon fingerprint in the URL, because that is what addresses the rendezvous.',
+    'They see both IP addresses, when each side connects and for how long.',
+    'They see request counts, frame sizes and timing, and how many connections the daemon has.',
+    'They cannot read frame payloads, device tokens, session content, commands, output or names.',
+  ],
+  requires: [
+    'The hosted relay’s runtime advertisement must be enabled; the operator can disable it without an app release.',
+    'Traffic and connection use must remain below both the daemon’s ceilings and the hosted service’s global ceilings.',
+    'The same relay address must be configured on the daemon and this browser.',
+  ],
+};
+
+const OWN_RELAY_DISCLOSURE: ConnectionDisclosure = {
+  label: 'Your own relay',
+  noun: 'your own relay',
+  summary:
+    'A Cloudflare Worker in your own account passes ciphertext between you and the daemon. The daemon dials out, so it works from behind NAT, and nobody outside your account is on the path.',
+  observers: [
+    'The relay sees the daemon fingerprint in the URL, because that is what addresses the rendezvous.',
+    'The relay sees both IP addresses, when each side connects and for how long.',
+    'The relay sees how many frames go each way, how big each one is and exactly when it was sent.',
+    'The relay cannot read a frame, alter one or insert one: every record is authenticated under a key derived on your two devices.',
+    'You are the relay operator, so all of that is visible to you and to Cloudflare, and to nobody else.',
+  ],
+  requires: [
+    'A Cloudflare account, and one deploy of this package into it.',
+    'The daemon fingerprint listed in the relay deployment, so the relay serves you and not a stranger.',
+    'The relay address configured on both the daemon and this browser.',
+  ],
+};
+
 export function describeConnectionMethod(method: ConnectionMethod): ConnectionDisclosure {
-  if (method.kind === 'direct') {
-    return {
-      label: 'Direct',
-      summary: 'Your browser connects straight to the daemon. No third party carries the traffic.',
-      observers: [
-        'Whoever runs the network between you and the daemon sees that a connection exists, its size and its timing.',
-        'Nobody else is on the path: there is no operator to trust and no service to be down.',
-      ],
-      requires: [
-        'The daemon address has to be reachable from wherever the browser is — same network, a VPN, a tailnet or a public host.',
-        'The address must serve TLS unless it is localhost or 127.0.0.1, the only two hosts the published web app may dial without it.',
-      ],
-    };
-  }
-  if (method.operator === 'hosted') {
-    return {
-      label: 'Hosted relay',
-      summary:
-        'Ferretry’s Cloudflare Worker passes ciphertext between you and the daemon. It works behind NAT without making you deploy infrastructure.',
-      observers: [
-        'Ferretry and Cloudflare see the daemon fingerprint in the URL, because that is what addresses the rendezvous.',
-        'They see both IP addresses, when each side connects and for how long.',
-        'They see request counts, frame sizes and timing, and how many connections the daemon has.',
-        'They cannot read frame payloads, device tokens, session content, commands, output or names.',
-      ],
-      requires: [
-        'The hosted relay’s runtime advertisement must be enabled; the operator can disable it without an app release.',
-        'Traffic and connection use must remain below both the daemon’s ceilings and the hosted service’s global ceilings.',
-        'The same relay address must be configured on the daemon and this browser.',
-      ],
-    };
-  }
-  return {
-    label: 'Your own relay',
-    summary:
-      'A Cloudflare Worker in your own account passes ciphertext between you and the daemon. The daemon dials out, so it works from behind NAT, and nobody outside your account is on the path.',
-    observers: [
-      'The relay sees the daemon fingerprint in the URL, because that is what addresses the rendezvous.',
-      'The relay sees both IP addresses, when each side connects and for how long.',
-      'The relay sees how many frames go each way, how big each one is and exactly when it was sent.',
-      'The relay cannot read a frame, alter one or insert one: every record is authenticated under a key derived on your two devices.',
-      'You are the relay operator, so all of that is visible to you and to Cloudflare, and to nobody else.',
-    ],
-    requires: [
-      'A Cloudflare account, and one deploy of this package into it.',
-      'The daemon fingerprint listed in the relay deployment, so the relay serves you and not a stranger.',
-      'The relay address configured on both the daemon and this browser.',
-    ],
-  };
+  if (method.kind === 'direct') return DIRECT_DISCLOSURE;
+  if (method.kind === 'webrtc') return WEBRTC_DISCLOSURE;
+  if (method.kind === 'tunnel') return TUNNEL_DISCLOSURE;
+  return method.operator === 'hosted' ? HOSTED_RELAY_DISCLOSURE : OWN_RELAY_DISCLOSURE;
 }
 
 /** The result of trying one carrier, in preference order. */
@@ -230,11 +307,18 @@ export interface ConnectionProbe {
   readonly reachable: boolean;
   /** Why it was not reachable. Required when it was not, so a refusal is never unexplained. */
   readonly detail?: string;
+  /**
+   * The carrier was passed over WITHOUT being tried — no dialer in this build, say — rather than tried
+   * and found unreachable. The two are different facts and are said differently.
+   */
+  readonly untried?: true;
 }
 
 export interface ConnectionSkip {
   readonly method: ConnectionMethod;
   readonly detail: string;
+  /** See {@link ConnectionProbe.untried}. */
+  readonly untried?: true;
 }
 
 export type ConnectionChoice =
@@ -244,31 +328,43 @@ export type ConnectionChoice =
       /** Plain-language sentence a surface can show verbatim. */
       readonly reason: string;
       readonly passedOver: readonly ConnectionSkip[];
+      /** The live carrier's measured round trip, when the carrier measures one (WebRTC does). */
+      readonly rttMs?: number;
+      /**
+       * Why this carrier is carrying rather than a better one, in the carrier's own words, when it knows
+       * more than the passed-over list says — "ICE did not connect within 8 s", for instance.
+       */
+      readonly fallbackReason?: string;
     }
   | { readonly ok: false; readonly reason: string; readonly passedOver: readonly ConnectionSkip[] };
 
+const kindRank = (method: ConnectionMethod): number => CONNECTION_KINDS.indexOf(method.kind);
+
 /**
- * Order carriers by preference: direct first, always.
+ * Order carriers by preference: direct, then WebRTC, then a tunnel, then a relay (§15, Auto).
+ *
+ * Direct stays first because it has the fewest parties; a relay is last because it is the one every
+ * other carrier falls back to. The sort is stable, so within a kind the given order is kept.
  *
  * Ordering is separate from choosing so a caller cannot accidentally probe a relay before the
  * direct address it already has.
  */
 export function connectionPreferenceOrder(methods: readonly ConnectionMethod[]): readonly ConnectionMethod[] {
-  return [...methods.filter(method => method.kind === 'direct'), ...methods.filter(method => method.kind !== 'direct')];
+  return [...methods].sort((left, right) => kindRank(left) - kindRank(right));
 }
 
 /**
  * A daemon's PUBLISHED carrier set, as carriers this browser will dial, in the order it will try them.
  *
  * The order is `connectionPreferenceOrder`'s and nothing else's — every `direct` entry in the order the
- * daemon published them, then every `relay` in the order the daemon published them. WITHIN A KIND THE
- * DAEMON'S ORDER IS THE ANSWER, because it is where the operator wrote their preference down, and a
- * client that re-sorted it would be substituting its own. There is deliberately no latency race: a race
- * makes the winner nondeterministic, and a surface that reports which carrier is live has to be able to
- * say WHY that one won.
+ * daemon published them, then its tunnel, then every `relay` in the order the daemon published them.
+ * WITHIN A KIND THE DAEMON'S ORDER IS THE ANSWER, because it is where the operator wrote their
+ * preference down, and a client that re-sorted it would be substituting its own. There is deliberately
+ * no latency race: a race makes the winner nondeterministic, and a surface that reports which carrier
+ * is live has to be able to say WHY that one won.
  *
  * A CARRIER THE PROTOCOL WILL NOT DIAL IS DROPPED RATHER THAN CARRIED FORWARD, AND THAT IS PER ENTRY
- * FOR BOTH KINDS. The published set already passed the wire schema on the way across, so a failure
+ * FOR EVERY KIND. The published set already passed the wire schema on the way across, so a failure
  * here means the two ends disagree about what is dialable, and dialling anyway is how a client ends up
  * trusting a carrier its own protocol refuses. Dropping ONE entry rather than refusing the set is the
  * other half of the rule: this runs inside a pairing redemption and inside every carrier refresh, and
@@ -280,6 +376,8 @@ export function connectionPreferenceOrder(methods: readonly ConnectionMethod[]):
  * something a device can check. What a device CAN check is whether the address equals the hosted one it
  * discovered for itself, so that comparison is the answer, and an unrecognised address is somebody's
  * own relay. Nothing about the path changes either way; only the sentence a person reads.
+ *
+ * A TUNNEL is mapped to its own kind (§15): dialled like a direct address, disclosed as Cloudflare's.
  */
 export function publishedConnectionMethods(
   carriers: readonly DaemonCarrier[],
@@ -287,18 +385,16 @@ export function publishedConnectionMethods(
 ): readonly ConnectionMethod[] {
   const methods: ConnectionMethod[] = [];
   for (const carrier of carriers) {
-    // A tunnel (§15) is a carrier this connection model cannot express yet: it is dialled like a direct
-    // address but disclosed like a relay, and reading it as either would be dialling the wrong role or
-    // telling the reader the wrong observers. It is skipped until the method grows its own kind.
-    if (carrier.kind === 'tunnel') continue;
     const parsed = ConnectionMethodSchema.safeParse(
       carrier.kind === 'direct'
         ? { kind: 'direct', daemonUrl: carrier.url }
-        : {
-            kind: 'relay',
-            relayUrl: carrier.url,
-            operator: carrier.url === hostedRelayUrl ? 'hosted' : 'self',
-          },
+        : carrier.kind === 'tunnel'
+          ? { kind: 'tunnel', tunnelUrl: carrier.url }
+          : {
+              kind: 'relay',
+              relayUrl: carrier.url,
+              operator: carrier.url === hostedRelayUrl ? 'hosted' : 'self',
+            },
     );
     if (parsed.success) methods.push(parsed.data);
   }
@@ -355,14 +451,18 @@ export function chooseConnection(probes: readonly ConnectionProbe[]): Connection
   const passedOver: ConnectionSkip[] = [];
   for (const probe of probes) {
     if (!probe.reachable) {
-      passedOver.push({ method: probe.method, detail: probe.detail ?? 'unreachable, with no reason reported' });
+      passedOver.push({
+        method: probe.method,
+        detail: probe.detail ?? 'unreachable, with no reason reported',
+        ...(probe.untried === true ? { untried: true as const } : {}),
+      });
       continue;
     }
-    const label = describeConnectionMethod(probe.method).label.toLowerCase();
+    const noun = describeConnectionMethod(probe.method).noun;
     const reason =
       passedOver.length === 0
-        ? `Connected over ${label}.`
-        : `Connected over ${label} because ${passedOver.map(describeSkip).join('; ')}.`;
+        ? `Connected over ${noun}.`
+        : `Connected over ${noun} because ${passedOver.map(describeSkip).join('; ')}.`;
     return { ok: true, method: probe.method, reason, passedOver };
   }
   return {
@@ -375,6 +475,10 @@ export function chooseConnection(probes: readonly ConnectionProbe[]): Connection
   };
 }
 
-function describeSkip(skip: ConnectionSkip): string {
-  return `${describeConnectionMethod(skip.method).label.toLowerCase()} was not reachable (${skip.detail})`;
+/** One passed-over carrier, as a clause: tried and unreachable, or never tried, and why. */
+export function describeSkip(skip: ConnectionSkip): string {
+  const noun = describeConnectionMethod(skip.method).noun;
+  return skip.untried === true
+    ? `${noun} was not tried (${skip.detail})`
+    : `${noun} was not reachable (${skip.detail})`;
 }
