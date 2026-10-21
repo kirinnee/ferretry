@@ -55,13 +55,18 @@ describe('who needs the reader', () => {
   });
 });
 
-const SHOW_STOPPED = { ...DEFAULT_LIST_FILTER, showStopped: true };
+const ALL_KINDS = { ...DEFAULT_LIST_FILTER, mode: 'all' as const };
+const SHOW_STOPPED = { ...ALL_KINDS, showStopped: true };
+
+test('a new device opens on the sessions a person drives, stopped ones tucked away', () => {
+  expect(DEFAULT_LIST_FILTER).toEqual({ mode: 'interactive', showStopped: false });
+});
 
 describe('which sessions the bar lists', () => {
   test('stopped sessions are hidden by default, however recently they stopped', () => {
     const alive = sessionView('alive');
     const done = sessionView('done', { state: { status: 'completed', lastActivityAt: ago(1_000) } });
-    const view = sessionsBarView([alive, done], [], DEFAULT_LIST_FILTER);
+    const view = sessionsBarView([alive, done], [], ALL_KINDS);
     expect(view.groups.flatMap(group => group.rows.map(row => row.config.id))).toEqual(['alive']);
     expect(view.counts.all).toBe(1);
     expect(view.hiddenStopped).toBe(1);
@@ -125,13 +130,13 @@ describe('which sessions the bar lists', () => {
       sessionView('agent-done', { state: { status: 'completed' } }),
       sessionView('person-done', { config: { mode: 'interactive' }, state: { status: 'stopped' } }),
     ];
-    expect(listTallies(sessions, DEFAULT_LIST_FILTER).hiddenStopped).toBe(2);
+    expect(listTallies(sessions, ALL_KINDS).hiddenStopped).toBe(2);
     expect(listTallies(sessions, { mode: 'auto', showStopped: false }).hiddenStopped).toBe(1);
     expect(listTallies(sessions, { mode: 'interactive', showStopped: false }).hiddenStopped).toBe(1);
     expect(listTallies(sessions, SHOW_STOPPED).hiddenStopped).toBe(0);
 
     const open = (view: (typeof sessions)[number]) => view.config.id === 'agent-done';
-    const kept = sessionsBarView(sessions, [], DEFAULT_LIST_FILTER, open);
+    const kept = sessionsBarView(sessions, [], ALL_KINDS, open);
     expect(kept.groups.flatMap(group => group.rows.map(row => row.config.id)).sort()).toEqual(['agent-done', 'live']);
     expect(kept.counts.all).toBe(2);
     expect(kept.hiddenStopped).toBe(1);

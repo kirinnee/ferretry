@@ -7,9 +7,10 @@ import {
   installWords,
   isMissingRoute,
   jobWords,
+  keepRunningWords,
   midTurnWords,
+  refusalWords,
   shouldPoll,
-  startRefusal,
   updateHeadline,
   versionPairWords,
 } from '../../../../src/features/settings/about-machine-model.ts';
@@ -106,16 +107,17 @@ describe('about machine words', () => {
     });
   });
 
-  it('turns a refused Update into the mid-turn choice or the daemon’s sentence', () => {
-    expect(
-      startRefusal({ status: 409, code: 'update_mid_turn', body: { error: 'x', code: 'update_mid_turn', midTurn: 2 } }),
-    ).toEqual({ kind: 'mid-turn', count: 2 });
-    expect(startRefusal({ status: 409, code: 'update_mid_turn', body: 'garbled' })).toEqual({
-      kind: 'mid-turn',
-      count: 1,
-    });
-    expect(startRefusal(new Error('update_in_progress'))).toEqual({ kind: 'message', text: 'update_in_progress' });
-    expect(startRefusal('boom')).toEqual({ kind: 'message', text: 'boom' });
+  it('says a refused Update in the daemon’s own sentence', () => {
+    expect(refusalWords(new Error('an update to 4.29.0 is already running'))).toBe(
+      'an update to 4.29.0 is already running',
+    );
+    expect(refusalWords({ status: 409, message: 42 })).toBe('[object Object]');
+    expect(refusalWords('boom')).toBe('boom');
+  });
+
+  it('says ferrets mid-turn keep running through the restart', () => {
+    expect(keepRunningWords(1)).toBe('1 ferret is mid-turn. It keeps running while the machine restarts.');
+    expect(keepRunningWords(3)).toBe('3 ferrets are mid-turn. They keep running while the machine restarts.');
   });
 
   it('recognises an older machine with no update route', () => {

@@ -33,6 +33,12 @@ export interface SendTrackerSettings {
    * fixed corrects the rows it wrongly settled, without a send ever being watched for good.
    */
   readonly repairLimitMs: number;
+  /**
+   * How long text must have sat in the composer, unsubmitted, before it is SAID to be "typed, not sent".
+   * A harness takes a moment between Enter and its transcript record, and a pane read in that window
+   * looks exactly like a stuck message — saying so then flips the row to delivered a second later.
+   */
+  readonly typedStableMs: number;
   /** Harness and daemon clocks disagree slightly; a proof this far before acceptance still counts. */
   readonly matchSlackMs: number;
 }
@@ -48,6 +54,7 @@ export const defaultSendTrackerSettings: SendTrackerSettings = {
   holdLimitMs: 2 * 60 * 60_000,
   repairLimitMs: 3 * 24 * 60 * 60_000,
   matchSlackMs: 5_000,
+  typedStableMs: 4_000,
 };
 
 /** Fates still being looked for. */

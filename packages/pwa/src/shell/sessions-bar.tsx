@@ -6,7 +6,7 @@
  *
  *   - the machine this page belongs to, which is also the machine switcher, and ＋ for a new session;
  *   - ONE search: the finder (⌘K) everywhere, or this session's own file search on a session page;
- *   - All · Agents · Interactive, each with the count choosing it would show, and "Show stopped";
+ *   - Interactive · All · Agents, each with the count choosing it would show, and "Show stopped";
  *   - EVERY live session, grouped by project, each a status dot, the agent's name, a "needs you" badge, a
  *     line of what it is doing and the directory it runs in — the open one is a soft filled pill;
  *   - Projects, Insights (Analytics, Warden, Learning) and Settings, at the bottom.
@@ -29,6 +29,7 @@ import { useInputModality } from '../hooks/use-input-modality.ts';
 import { allMachinesView, type MachineSource } from '../lib/all-machines.ts';
 import { displayCallsign } from '../lib/callsign.ts';
 import { cn } from '../lib/class-names.ts';
+import type { ModeFilter } from '../lib/controls.ts';
 import type { DaemonId } from '../lib/daemon-connection.ts';
 import type { FleetProject } from '../lib/fleet-grouping.ts';
 import {
@@ -115,6 +116,10 @@ export interface SessionsBarProps {
   readonly onAddMachine: () => void;
   /** Drops a machine heading beside another, from the all-machines list. Absent: the headings stay put. */
   readonly onMoveMachine?: MoveMachine;
+  /** The kind filter this device remembered, read when the bar opens. Absent or null: Interactive. */
+  readonly initialMode?: ModeFilter | null;
+  /** The reader chose a kind: store it for this device. Absent: the choice lasts only while the bar does. */
+  readonly onModeChange?: (mode: ModeFilter) => void;
   /**
    * Opens "Pair a phone with ‹this machine›". Absent when the reader may not pair a device with this
    * machine (`pairing.use` is closed), and then the switcher does not offer it.
@@ -695,7 +700,14 @@ function useSessionMenu(enabled: boolean) {
 }
 
 export function SessionsBar(props: SessionsBarProps) {
-  const [listFilter, onListFilterChange] = useState<SessionsListFilter>(DEFAULT_LIST_FILTER);
+  const [listFilter, setListFilter] = useState<SessionsListFilter>({
+    ...DEFAULT_LIST_FILTER,
+    mode: props.initialMode ?? DEFAULT_LIST_FILTER.mode,
+  });
+  const onListFilterChange = (next: SessionsListFilter): void => {
+    setListFilter(next);
+    if (next.mode !== listFilter.mode) props.onModeChange?.(next.mode);
+  };
   const { menu, open, close } = useSessionMenu(props.renderSessionMenu !== undefined);
   const filtered = { ...props, listFilter, onListFilterChange };
   const bar =

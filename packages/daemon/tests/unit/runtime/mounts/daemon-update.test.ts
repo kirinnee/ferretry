@@ -180,13 +180,6 @@ describe('starting an update', () => {
     should(answer).containDeep({ status: 403, body: { code: 'forbidden' } });
   });
 
-  it('answers a mid-turn refusal with the count the app asks with', async () => {
-    const subsystem = new FakeUpdate(new DaemonUpdateRefusal(DAEMON_UPDATE_CODES.midTurn, 'two are mid-turn', 2));
-    const answer = await drive(subsystem, 'POST', '/v1/daemon/update', START);
-    should(answer.status).equal(409);
-    should(answer.body).deepEqual({ error: 'two are mid-turn', code: 'update_mid_turn', midTurn: 2 });
-  });
-
   it('answers every other refusal as a 409 with its code', async () => {
     for (const code of [
       DAEMON_UPDATE_CODES.inProgress,

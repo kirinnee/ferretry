@@ -92,7 +92,7 @@ export interface CliUpdateLauncherOptions {
 }
 
 /**
- * `<client> daemon update --yes --anyway --to <target> --report <file>`, detached.
+ * `<client> daemon update --yes --to <target> --report <file>`, detached.
  *
  * `--anyway` because the daemon already decided: it refused a mid-turn update without consent, or
  * waited for idle. The child outlives the daemon's restart — the systemd unit kills only the daemon
@@ -110,10 +110,10 @@ export class CliUpdateLauncher implements UpdateLauncher {
     const paths = updateFilePaths(this.options.directory);
     try {
       await this.options.files.ensureDirectory(dirname(paths.report), 0o700);
-      this.spawn(
-        [this.options.client, 'daemon', 'update', '--yes', '--anyway', '--to', target, '--report', paths.report],
-        { environment: { ...this.options.environment, FY_HOME: this.options.stateHome }, logFile: paths.log },
-      );
+      this.spawn([this.options.client, 'daemon', 'update', '--yes', '--to', target, '--report', paths.report], {
+        environment: { ...this.options.environment, FY_HOME: this.options.stateHome },
+        logFile: paths.log,
+      });
       return { kind: 'started' };
     } catch (error) {
       return { kind: 'failed', reason: error instanceof Error ? error.message : String(error) };

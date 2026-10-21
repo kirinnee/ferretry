@@ -488,3 +488,105 @@ describe('FyApiClient protocol version handling', () => {
     should(actual).equal(expected);
   });
 });
+
+describe('FyApiClient through a daemon restart', () => {
+  const refused = (): Error => Object.assign(new Error('Unable to connect'), { code: 'ConnectionRefused' });
+  const dropped = (): Error => Object.assign(new Error('socket closed'), { code: 'ECONNRESET' });
+
+  /** A clock that moves only when the client sleeps, so a minute of waiting costs nothing. */
+  const virtualTime = () => {
+    let now = 0;
+    const sleeps: number[] = [];
+    return {
+      sleeps,
+      nowMs: () => now,
+      sleep: async (milliseconds: number) => {
+        sleeps.push(milliseconds);
+        now += milliseconds;
+      },
+    };
+  };
+
+  it('should wait out a restart with the same request id and say so once, when patient', async () => {
+    // Arrange
+    const transport = new QueuedHttpTransport(
+      { throws: dropped() },
+      { throws: refused() },
+      { throws: refused() },
+      { throws: refused() },
+      { throws: refused() },
+      jsonResponse('after the restart'),
+    );
+    const time = virtualTime();
+    let told = 0;
+    const client = await connect(transport, {
+      ...time,
+      restartPatience: { expected: () => true, waiting: () => (told += 1) },
+    });
+
+    // Act
+    const actual = await client.request('/v1/sessions', z.string(), { method: 'POST', body: '{}' });
+
+    // Assert
+    should(actual).equal('after the restart');
+    should(told).equal(1);
+    should(transport.calls).have.length(6);
+    should(time.sleeps).deepEqual([250, 500, 250, 500, 1_000]);
+    should(new Set(transport.calls.map((_, index) => headersOf(transport, index).get('x-fy-request-id')))).deepEqual(
+      new Set(['request-1']),
+    );
+  });
+
+  it('should fail as before once the window closes, and never wait without patience', async () => {
+    // Arrange
+    const outcomes = Array.from({ length: 64 }, () => ({ throws: refused() }));
+    const patient = new QueuedHttpTransport(...outcomes);
+    const impatient = new QueuedHttpTransport(...outcomes);
+    const time = virtualTime();
+    const patientClient = await connect(patient, {
+      ...time,
+      restartPatience: { expected: () => true, waiting: () => undefined, windowMs: 5_000 },
+    });
+    const impatientClient = await connect(impatient);
+
+    // Act
+    const waited = await captureError(() => patientClient.request('/v1/health', z.string()));
+    const didNot = await captureError(() => impatientClient.request('/v1/health', z.string()));
+
+    // Assert
+    should(waited instanceof FyTransportError).be.true();
+    should((waited as FyTransportError).message).containEql('could not reach fyd');
+    should(time.nowMs()).equal(750 + 5_000);
+    should(didNot instanceof FyTransportError).be.true();
+    should(impatient.calls).have.length(3);
+  });
+
+  it('should report a caller that leaves mid-wait as cancelled, and a timeout mid-wait as timed out', async () => {
+    // Arrange
+    const controller = new AbortController();
+    const leaving = new QueuedHttpTransport({ throws: refused() }, { throws: refused() }, { throws: refused() }, () => {
+      controller.abort('gone');
+      throw refused();
+    });
+    const timeout = Object.assign(new Error('deadline'), { name: 'TimeoutError' });
+    const slow = new QueuedHttpTransport(
+      { throws: refused() },
+      { throws: refused() },
+      { throws: refused() },
+      { throws: timeout },
+    );
+    const patience = { expected: () => true, waiting: () => undefined };
+    const leavingClient = await connect(leaving, { ...virtualTime(), restartPatience: patience });
+    const slowClient = await connect(slow, { ...virtualTime(), restartPatience: patience });
+
+    // Act
+    const left = await captureError(() => leavingClient.request('/left', z.string(), { signal: controller.signal }));
+    const timedOut = await captureError(() => slowClient.request('/slow', z.string(), {}, 1_000));
+
+    // Assert
+    should((left as FyTransportError).message).containEql('was cancelled');
+    should((left as FyTransportError).timedOut).be.false();
+    should((timedOut as FyTransportError).timedOut).be.true();
+    should((timedOut as FyTransportError).cause).equal(timeout);
+  });
+});

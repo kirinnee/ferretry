@@ -1050,6 +1050,105 @@ describe('daemon restart', () => {
   });
 });
 
+describe('daemon restart with ferrets mid-turn', () => {
+  /** A mid-turn count per look, then the last forever. */
+  const turns = (counts: readonly number[]) => {
+    let looks = 0;
+    return {
+      looks: () => looks,
+      midTurn: async () => counts[Math.min(looks++, counts.length - 1)] ?? 0,
+    };
+  };
+  /** A marker that records what it was told, in order. */
+  const marker = () => {
+    const trail: string[] = [];
+    return {
+      trail,
+      mark: async (untilMs: number) => void trail.push(`mark ${String(untilMs)}`),
+      clear: async () => void trail.push('clear'),
+    };
+  };
+  const restarting = () => ({
+    probes: [health(), undefined, health()],
+    serviceReports: [runningReport, stoppedReport],
+  });
+
+  it('should go ahead, saying in one line that the ferrets keep running', async () => {
+    // Arrange
+    const counted = turns([2]);
+    const { controller, out, service } = harness({ ...restarting(), overrides: { turns: counted } });
+
+    // Act
+    await controller.restart();
+
+    // Assert
+    should(out.lines[0]).equal(
+      'warn: 2 ferrets are mid-turn; they keep running through the restart, and Ferretry calls made meanwhile wait for the daemon to come back',
+    );
+    should(service.calls).containEql('start');
+    should(out.text).endWith('ok: fyd restarted (pid 4242)');
+  });
+
+  it('should wait for every ferret to finish its turn when asked to, before taking the claim', async () => {
+    // Arrange
+    const counted = turns([1, 1, 0]);
+    const { controller, out, clock, lifecycle } = harness({ ...restarting(), overrides: { turns: counted } });
+
+    // Act
+    await controller.restart({ whenIdle: true });
+
+    // Assert
+    should(out.lines[0]).equal('warn: one ferret is mid-turn; waiting until every ferret is idle before restarting');
+    should(counted.looks()).equal(3);
+    should(clock.slept.filter(ms => ms === 5_000)).have.length(2);
+    should(lifecycle.requests.length).be.above(0);
+  });
+
+  it('should say nothing about ferrets when none is mid-turn, when the update already did, or without a count', async () => {
+    // Arrange
+    const idle = harness({ ...restarting(), overrides: { turns: turns([0]) } });
+    const counted = turns([4]);
+    const said = harness({ ...restarting(), overrides: { turns: counted } });
+    const blind = harness(restarting());
+
+    // Act
+    await idle.controller.restart();
+    await said.controller.restart({ midTurnSaid: true });
+    await blind.controller.restart();
+
+    // Assert
+    for (const each of [idle, said, blind]) should(each.out.text).not.containEql('mid-turn');
+    should(counted.looks()).equal(0);
+  });
+
+  it('should vouch for the restart while it runs and withdraw that even when the restart fails', async () => {
+    // Arrange
+    const served = marker();
+    const ok = harness({ ...restarting(), overrides: { restartMarker: served } });
+    const failing = marker();
+    const broken = harness({
+      probes: [health(), undefined],
+      serviceReports: [runningReport, stoppedReport],
+      overrides: { restartMarker: failing },
+    });
+    broken.service.start = async () => {
+      throw new Error('the unit would not start');
+    };
+
+    // Act
+    await ok.controller.restart();
+    const error = await broken.controller.restart().catch((cause: unknown) => cause);
+
+    // Assert
+    should(served.trail).have.length(2);
+    should(served.trail[0]).match(/^mark \d+$/u);
+    should(Number(served.trail[0]?.slice(5))).be.aboveOrEqual(120_000);
+    should(served.trail[1]).equal('clear');
+    should(error).be.instanceof(Error);
+    should(failing.trail.at(-1)).equal('clear');
+  });
+});
+
 describe('daemon status — install and update', () => {
   const updateStatus = new DaemonUpdateStatusReader(new FakeFacts('homebrew'), new FakeUpdateView([0]));
 

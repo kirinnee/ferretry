@@ -71,6 +71,7 @@ const ALTERED_DEVICE_CONTROLS: DeviceControls = {
   motion: 'reduced',
   sidebarCollapsed: true,
   sessionsList: 'current',
+  sessionsMode: 'auto',
   machineOrder: ['b', 'a'],
   suggestionKeys: 'both',
   skillSuggestions: false,
@@ -120,6 +121,8 @@ describe('parseControlsRecord — kteam controls cases, on the new nested shape'
       sidebarCollapsed: true,
       // A payload written before the list could span machines shows every machine: the new default.
       sessionsList: 'all',
+      // Never chosen: the Sessions bar opens on Interactive.
+      sessionsMode: null,
       // A payload written before the composer fields existed opens suggestions
       // with the @ ladder, offers $ skills and keeps Vim keys off — no version bump.
       suggestionKeys: 'ladder',
@@ -740,5 +743,15 @@ describe('the Sessions list scope', () => {
     should(read(undefined)).equal('all');
     should(read('current')).equal('current');
     should(read('every')).equal('all');
+  });
+});
+
+describe('the Sessions bar kind filter', () => {
+  it('is unchosen by default, keeps each kind, and refuses anything else', () => {
+    const read = (sessionsMode: unknown) =>
+      parseControlsRecord(stored({ v: CONTROLS_VERSION, device: { sessionsMode } })).device.sessionsMode;
+    should(read(undefined)).be.null();
+    for (const kind of ['all', 'auto', 'interactive'] as const) should(read(kind)).equal(kind);
+    should(read('headless')).be.null();
   });
 });

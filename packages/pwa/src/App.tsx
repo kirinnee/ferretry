@@ -832,6 +832,8 @@ function ShellSessionsBar({
     store.controls.controls(connection.daemonId),
   ).sidebarCollapsed;
   const machineOrder = useMachineOrder(store.controls);
+  const sessionsMode = useSyncExternalStore(store.controls.subscribe, () => store.controls.snapshot()).device
+    .sessionsMode;
   const displayed = machineDisplayOrder(connections, machineOrder.saved);
   const record = connections.find(candidate => candidate.daemonId === connection.daemonId);
   // The desktop column, folded to its icon rail only when the reader folded it.
@@ -843,6 +845,8 @@ function ShellSessionsBar({
       activeSessionId={route.kind === 'session' ? route.sessionId : null}
       daemonId={connection.daemonId}
       machineName={machineName}
+      initialMode={sessionsMode}
+      onModeChange={mode => store.controls.setDeviceControls({ sessionsMode: mode })}
       {...(needsRuntime
         ? { createRuntimeHref: `${daemonSettingsPath(connection.daemonId)}${machineHash(machineName, 'runtimes')}` }
         : {})}

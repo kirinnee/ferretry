@@ -588,8 +588,9 @@ const captureMcpSignIn = async (page: Page, viewportName: string): Promise<void>
 
 /**
  * SETTINGS › MACHINE › ABOUT, in its three states (`docs/updating.md`): an update available on a
- * Homebrew install, the mid-turn choice its Update press raises, and the manual steps a deb install
- * shows instead. The harness daemon answers all three in the page (`?about=manual` picks the deb).
+ * Homebrew install with two ferrets mid-turn (the "they keep running" line and Update when idle), the
+ * update running once Update is pressed, and the manual steps a deb install shows instead. The harness
+ * daemon answers all three in the page (`?about=manual` picks the deb).
  *
  * A narrow mode, so it owes no Settings tally; its own sideways check runs on every frame instead, and
  * the About panel's geometry in the gated walk is the `about` row of the daemon-panel loop.
@@ -620,11 +621,14 @@ const captureAbout = async (page: Page, viewportName: string): Promise<void> => 
     await settleTransitions(page);
     await shot(state);
     if (state === 'available') {
+      const note = frame.locator('[data-about-mid-turn]');
+      await note.waitFor({ state: 'visible' });
       await frame.locator('[data-about-update]').click();
-      const choice = frame.locator('[data-about-mid-turn]');
-      await choice.waitFor({ state: 'visible' });
-      await choice.scrollIntoViewIfNeeded();
-      await shot('mid-turn');
+      const running = frame.locator('[data-about-job]');
+      await running.waitFor({ state: 'visible' });
+      await running.scrollIntoViewIfNeeded();
+      await settleTransitions(page);
+      await shot('updating');
     }
   }
 };

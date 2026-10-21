@@ -186,6 +186,7 @@ function Scene({ scene, open }: { readonly scene: 'bar' | 'page' | 'drawer'; rea
         active={null}
         activeSessionId="s-ivo"
         daemonId={open.daemonId}
+        initialMode="all"
         learningPassive={LEARNERS.get(open.daemonId) ?? new Set()}
         machineLearners={LEARNERS}
         machineName={openName}

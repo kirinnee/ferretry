@@ -357,6 +357,8 @@ interface ShellOptions {
   readonly fleet?: Readonly<Record<string, unknown>>;
   /** Sessions the stub daemon answers `list` with. */
   readonly sessions?: readonly string[];
+  /** The kind the Sessions bar was left on: 'all' unless a test says otherwise, null for a device that never chose. */
+  readonly sessionsMode?: 'all' | 'auto' | 'interactive' | null;
   /** Makes `get` reject, which is the session route's failure path. */
   readonly sessionFailure?: string;
   /** Makes creating the daemon-bound client reject before any read starts. */
@@ -750,6 +752,7 @@ const renderShell = async (
   // every other test in this file keeps the raw router.
   const store: AppStore =
     options.carrierSeam === undefined ? built : { ...built, carrier: options.carrierSeam.wrap(built.carrier) };
+  if (options.sessionsMode !== null) store.controls.setDeviceControls({ sessionsMode: options.sessionsMode ?? 'all' });
   // Paired one millisecond apart, in the order listed: the all-machines list shows them in pairing order.
   const pairedFrom = Date.now();
   for (const [index, daemon] of paired.entries()) {
@@ -4042,6 +4045,33 @@ describe('the sessions bar', () => {
       'settings',
       null,
     ]);
+  });
+
+  it('opens the Sessions bar on Interactive for a device that never chose, and remembers the kind it picks', async () => {
+    const { view, store } = await renderShell(`/d/${ALPHA}/settings`, [alpha.daemonId], {
+      sessions: ['one'],
+      sessionsMode: null,
+    });
+    try {
+      await settle();
+      const column = must(view.container.querySelector('[data-sessions-bar="column"]'), 'the sessions column');
+      const pressed = (): string[] =>
+        [...column.querySelectorAll('[data-sbar-filter][aria-pressed="true"]')].map(
+          node => node.getAttribute('data-sbar-filter') as string,
+        );
+      expect(
+        [...column.querySelectorAll('[data-sbar-filter]')].map(node => node.getAttribute('data-sbar-filter')),
+      ).toEqual(['interactive', 'all', 'auto']);
+      expect(pressed()).toEqual(['interactive']);
+      expect(store.controls.snapshot().device.sessionsMode).toBeNull();
+
+      await interact(() => (column.querySelector('[data-sbar-filter="auto"]') as HTMLElement).click());
+
+      expect(pressed()).toEqual(['auto']);
+      expect(store.controls.snapshot().device.sessionsMode).toBe('auto');
+    } finally {
+      await view.unmount();
+    }
   });
 
   it('lists every paired machine’s sessions, each read through its own pairing, unless the reader chose one', async () => {

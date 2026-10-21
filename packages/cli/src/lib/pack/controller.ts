@@ -1,4 +1,5 @@
 import { type PackNewRequest, PackNewRequestSchema } from '@ferretry/protocol';
+import { titleFromReferencedBrief } from '../tasks/task-title.ts';
 import type { IPackGateway } from './gateway.ts';
 import { renderPackNewOutcome, renderPackRecommendation } from './render.ts';
 
@@ -72,6 +73,8 @@ export class PackController {
     if (task === '')
       throw new Error(`give the brief: ${this.deps.binaryName} new --runtime <runtime> "<complete brief>"`);
     const parent = await this.deps.parent();
+    const name =
+      options.name ?? (await titleFromReferencedBrief(task, path => this.deps.readFile(this.deps.absolute(path))));
     const request: PackNewRequest = PackNewRequestSchema.parse({
       task,
       ...(parent === undefined ? {} : { parent }),
@@ -88,7 +91,7 @@ export class PackController {
           ? { cwd: this.deps.cwd }
           : {}),
       ...(options.allowScratch === true ? { allowScratch: true } : {}),
-      ...(options.name === undefined ? {} : { name: options.name }),
+      ...(name === undefined ? {} : { name }),
       ...(options.mode === undefined ? {} : { mode: options.mode }),
     });
     const outcome = await this.deps.gateway.newChild(request);

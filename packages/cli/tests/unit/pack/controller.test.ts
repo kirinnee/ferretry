@@ -104,6 +104,20 @@ describe('PackController.newChild', () => {
     ]);
   });
 
+  it('should title a pointer brief from the file it points at, and never override --name', async () => {
+    // Arrange
+    const pointer = 'You are an implementer. Read /tmp/brief.md and follow it.';
+    const { controller, gateway } = build({ files: { '/tmp/brief.md': '# Port the Sessions Filter' } });
+
+    // Act
+    await controller.newChild([pointer], { runtime: 'r' });
+    await controller.newChild([pointer], { runtime: 'r', name: 'Mine' });
+
+    // Assert
+    should(gateway.newCalls[0]).have.property('name', 'Port the Sessions Filter');
+    should(gateway.newCalls[1]).have.property('name', 'Mine');
+  });
+
   it('should make a relative --cwd absolute against where it was run, and pass --allow-scratch on', async () => {
     // Arrange
     const { controller, gateway } = build({ parent: 'parent-1' });

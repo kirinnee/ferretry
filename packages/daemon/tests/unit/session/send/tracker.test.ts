@@ -522,19 +522,49 @@ describe('the tracker as the daemon runs it', () => {
 });
 
 describe('what the pane shows, on every look', () => {
-  it('says a message left typed in the composer within one look, and keeps waiting rather than retyping', async () => {
+  it('says a message left typed in the composer once it has sat there a few seconds, and keeps waiting rather than retyping', async () => {
     const world = new World(record({ message: 'hi', matchText: 'hi' }));
     world.inPane = 'composer';
     world.evidence(new CodexObservedInputObserver(), []);
 
     await world.checkAt(2_000);
     const early = world.only;
+    await world.checkAt(4_000);
+    const settled = world.only;
     await world.checkAt(61_000);
 
-    should(early).match({ fate: 'accepted', typedNotSent: true });
+    should(early.typedNotSent).be.undefined();
+    should(settled).match({ fate: 'accepted', typedNotSent: true });
     should(world.only).match({ fate: 'accepted', typedNotSent: true, deadlineAt: at(121_000) });
     should(world.retyped).be.empty();
     should(world.events.filter(event => event === 'control.send_typed_not_sent')).have.length(1);
+  });
+
+  it('never says typed-not-sent for a message the harness submits within the first seconds', async () => {
+    const world = new World(record({ message: 'hi', matchText: 'hi' }));
+    world.inPane = 'composer';
+    world.evidence(new CodexObservedInputObserver(), []);
+
+    await world.checkAt(2_000);
+    const typing = world.only;
+    world.inPane = false;
+    world.evidence(new CodexObservedInputObserver(), [codex.user('hi', 3_000)]);
+    await world.checkAt(4_000);
+
+    should(typing.typedNotSent).be.undefined();
+    should(world.only).match({ fate: 'delivered' });
+    should(Object.hasOwn(world.only, 'typedNotSent')).be.false();
+    should(world.events).not.containEql('control.send_typed_not_sent');
+  });
+
+  it('looks again exactly when the text has been stable long enough, not at the far deadline', async () => {
+    const world = new World(record({ message: 'hi', matchText: 'hi' }));
+    world.inPane = 'composer';
+    world.evidence(new CodexObservedInputObserver(), []);
+
+    await world.checkAt(2_000);
+
+    should(world.scheduled.at(-1)?.delayMs).equal(2_000);
   });
 
   it('drops the typed flag once the composer no longer holds it, and ignores a pane it cannot read', async () => {

@@ -1,9 +1,11 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
+import type { CoreAccount } from '../../../../src/lib/core/inventory.ts';
 import { parseSessionId } from '../../../../src/lib/index.ts';
 import {
   assignedTaskDocument,
   authorizeSessionCommand,
+  type CreateSessionLifecycleRequest,
   createSessionRecord,
   defaultSessionLifecycleSettings,
   firstTurnInstruction,
@@ -11,14 +13,12 @@ import {
   lifecycleSessionId,
   MAX_ASSIGNED_TASK_LENGTH,
   SESSION_ID_VARIABLE,
+  type SessionRecordContext,
   sessionPaneEnvironment,
   sessionTmuxName,
   transitionSessionRecord,
-  type CreateSessionLifecycleRequest,
-  type SessionRecordContext,
   unrunnableAccountRefusal,
 } from '../../../../src/lib/session/lifecycle/index.ts';
-import type { CoreAccount } from '../../../../src/lib/core/inventory.ts';
 
 const NOW = '2026-07-31T10:00:00.000Z';
 const AGENT = '/opt/fleet/bin/claude-auto-loge';
@@ -93,7 +93,7 @@ describe('session lifecycle policy', () => {
     );
 
     // Assert
-    should(named.record.config.name).equal('Implement-the-lifecycle-service');
+    should(named.record.config.name).equal('Implement the Lifecycle Service');
     should(interactive.record.config).containDeep({ name: 'interactive', mode: 'interactive' });
     should(interactive.record.config).not.have.property('prompt');
   });

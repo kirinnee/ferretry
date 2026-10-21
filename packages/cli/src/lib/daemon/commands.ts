@@ -1,7 +1,7 @@
-import type { Command } from 'commander';
+import { type Command, Option } from 'commander';
 import type { StateHomeAdoptOptions, StateHomeController } from '../state-home/controller.ts';
 import type { DaemonUpdateOptions, DaemonUpdater } from '../update/updater.ts';
-import type { DaemonCommandOptions, DaemonController, DaemonResetOptions } from './controller.ts';
+import type { DaemonCommandOptions, DaemonController, DaemonResetOptions, DaemonRestartOptions } from './controller.ts';
 
 /**
  * Mounts `fy daemon …` onto the program.
@@ -75,9 +75,10 @@ export function registerDaemonCommands(
 
   daemon
     .command('restart')
-    .description('stop the daemon, wait for it to go quiet, then start it again')
-    .action(async () => {
-      await controller().restart();
+    .description('stop the daemon, wait for it to go quiet, then start it again; ferrets keep running')
+    .option('--when-idle', 'wait until no ferret is mid-turn before restarting')
+    .action(async (flags: DaemonRestartOptions) => {
+      await controller().restart(flags.whenIdle === true ? { whenIdle: true } : {});
     });
 
   daemon
@@ -86,8 +87,8 @@ export function registerDaemonCommands(
     .option('--check', 'only report the install method, the latest release and what updating takes')
     .option('--to <version>', 'update to this version rather than the latest release')
     .option('-y, --yes', 'skip the confirmation; required when not on a terminal')
-    .option('--when-idle', 'wait until no ferret is mid-turn before restarting')
-    .option('--anyway', 'restart even though ferrets are mid-turn')
+    .option('--when-idle', 'wait until no ferret is mid-turn before restarting; without it, ferrets keep running')
+    .addOption(new Option('--anyway', 'accepted for older scripts; every update now goes ahead mid-turn').hideHelp())
     .option(
       '--switch-to-profile',
       'move a daemon run from a nix shell into your nix profile, which fixes updates for good',

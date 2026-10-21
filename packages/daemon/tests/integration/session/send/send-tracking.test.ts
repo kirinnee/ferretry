@@ -497,7 +497,8 @@ describe('a Codex message left typed and not sent — the owner’s stuck "hi" a
     const first = await subject.service
       .send({ id: ID, sendId: 'send-1', message: 'hi' })
       .catch((error: unknown) => error);
-    const looked = await subject.at(2_000);
+    const early = await subject.at(2_000);
+    const looked = await subject.at(4_000);
     const second = await subject.service
       .send({ id: ID, sendId: 'send-2', message: 'hello' })
       .catch((error: unknown) => error);
@@ -507,6 +508,7 @@ describe('a Codex message left typed and not sent — the owner’s stuck "hi" a
     // Assert — the stranded row says so instead of "Sending", and `hello` was never typed onto it,
     // which is what reached Codex as `hihello` before.
     should((first as Error).message).match(/stayed in the composer/u);
+    should(early.typedNotSent).be.undefined();
     should(looked).match({ fate: 'accepted', typedNotSent: true });
     should((second as Error).message).match(/already holds unsent text \("hi"\).*Press Enter on it or cancel it/u);
     should(await subject.record('send-2')).be.undefined();
@@ -523,7 +525,7 @@ describe('a Codex message left typed and not sent — the owner’s stuck "hi" a
     const subject = await rig('codex');
     subject.harness.strands = true;
     await subject.service.send({ id: ID, sendId: 'send-1', message: 'hi' }).catch(() => undefined);
-    await subject.at(2_000);
+    await subject.at(4_000);
 
     const submitted = await subject.service.submit(ID, 'send-1');
     const delivered = await subject.at(4_000);

@@ -3,10 +3,15 @@
  *
  * The daemon answers everything here (`GET /v1/daemon/update`, `docs/updating.md`): its version, how it
  * was installed, the latest release it knows of, and what updating takes. This panel only draws that
- * answer and sends the three requests a person can make — Update, Update when idle / anyway, and the
+ * answer and sends the three requests a person can make — Update, Update when idle, and the
  * automatic-install switch. A remote device's update needs a passkey; the app's carrier asks for it on
  * the daemon's `403 grant_step_up_required` and retries, exactly as for every other governed act, so
  * nothing here knows passkeys exist.
+ *
+ * FERRETS MID-TURN DO NOT BLOCK AN UPDATE. They run outside the daemon and their Ferretry calls wait for
+ * it to come back, so Update goes ahead with one line saying so; Update when idle is there for whoever
+ * would rather wait. Every `now` still carries `confirmMidTurn`, because a machine from before this
+ * change refuses a mid-turn update without it.
  *
  * THE RESTART IS EXPECTED. An update restarts the daemon that answered it, so the reads that follow can
  * fail for a few seconds. While an update runs, a failed read keeps the last view on screen and says
@@ -29,10 +34,9 @@ import {
   installWords,
   isMissingRoute,
   jobWords,
-  midTurnWords,
-  type StartRefusal,
+  keepRunningWords,
+  refusalWords,
   shouldPoll,
-  startRefusal,
   updateHeadline,
   versionPairWords,
 } from './about-machine-model.ts';
@@ -52,9 +56,9 @@ export interface AboutMachinePanelProps {
   readonly busy: boolean;
   /** The machine is restarting into an update and has not answered yet. */
   readonly restarting: boolean;
-  readonly refusal: StartRefusal | null;
-  readonly onUpdate: (choice: 'now' | 'when-idle' | 'anyway') => void;
-  readonly onDismissRefusal: () => void;
+  /** The daemon's sentence for the last request it refused. */
+  readonly refusal: string | null;
+  readonly onUpdate: (choice: 'now' | 'when-idle') => void;
   readonly onAutoInstall: (next: boolean) => void;
   readonly write: ClipboardWriter;
 }
@@ -91,22 +95,40 @@ function UpdateAction({
   if (plan.kind === 'self') {
     if (!view.available) return null;
     const pending = view.job !== null && view.job.state !== 'finished';
+    const disabled = busy || pending || restarting;
     return (
-      <div className="flex flex-wrap items-center gap-2" data-about-self="">
-        <Button
-          type="button"
-          variant="primary"
-          disabled={busy || pending || restarting}
-          data-about-update=""
-          onClick={() => onUpdate('now')}
-        >
-          {restarting ? 'Restarting…' : 'Update'}
-        </Button>
-        <span className="text-meta leading-base text-faint">
+      <div className="flex min-w-0 flex-col gap-2" data-about-self="">
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            type="button"
+            variant="primary"
+            disabled={disabled}
+            data-about-update=""
+            onClick={() => onUpdate('now')}
+          >
+            {restarting ? 'Restarting…' : 'Update'}
+          </Button>
+          {view.midTurn > 0 && !pending ? (
+            <Button
+              type="button"
+              disabled={disabled}
+              data-about-update-when-idle=""
+              onClick={() => onUpdate('when-idle')}
+            >
+              Update when idle
+            </Button>
+          ) : null}
+        </div>
+        {view.midTurn > 0 && !pending ? (
+          <p className="m-0 text-cell leading-base text-muted" data-about-mid-turn={String(view.midTurn)}>
+            {keepRunningWords(view.midTurn)}
+          </p>
+        ) : null}
+        <p className="m-0 text-meta leading-base text-faint">
           {plan.rollback === 'automatic'
             ? 'If the new version does not come up, the old one is put back on its own.'
             : 'This install method keeps no previous version, so a failed update cannot be undone on its own.'}
-        </span>
+        </p>
       </div>
     );
   }
@@ -126,41 +148,6 @@ function UpdateAction({
   );
 }
 
-function MidTurnChoice({
-  count,
-  busy,
-  onUpdate,
-  onDismiss,
-}: {
-  readonly count: number;
-  readonly busy: boolean;
-  readonly onUpdate: AboutMachinePanelProps['onUpdate'];
-  readonly onDismiss: () => void;
-}) {
-  return (
-    <fieldset
-      aria-label="Ferrets are mid-turn"
-      className="m-0 flex min-w-0 flex-col gap-2 rounded-control border border-warn-border bg-warn-bg p-3"
-      data-about-mid-turn={String(count)}
-    >
-      <p className="m-0 text-cell leading-base text-fg">
-        {midTurnWords(count)}. Updating restarts the machine, which interrupts what they are doing.
-      </p>
-      <div className="flex flex-wrap gap-2">
-        <Button type="button" variant="primary" disabled={busy} onClick={() => onUpdate('when-idle')}>
-          Update when idle
-        </Button>
-        <Button type="button" disabled={busy} onClick={() => onUpdate('anyway')}>
-          Update anyway
-        </Button>
-        <Button type="button" variant="ghost" disabled={busy} onClick={onDismiss}>
-          Not now
-        </Button>
-      </div>
-    </fieldset>
-  );
-}
-
 /** The panel, drawn from one view. Every request goes out through the callbacks. */
 export function AboutMachinePanel({
   view,
@@ -170,7 +157,6 @@ export function AboutMachinePanel({
   restarting,
   refusal,
   onUpdate,
-  onDismissRefusal,
   onAutoInstall,
   write,
 }: AboutMachinePanelProps) {
@@ -233,16 +219,12 @@ export function AboutMachinePanel({
         </p>
       )}
 
-      {refusal?.kind === 'mid-turn' ? (
-        <MidTurnChoice count={refusal.count} busy={busy} onUpdate={onUpdate} onDismiss={onDismissRefusal} />
-      ) : (
-        <UpdateAction view={view} busy={busy} restarting={restarting} write={write} onUpdate={onUpdate} />
-      )}
-      {refusal?.kind === 'message' ? (
+      <UpdateAction view={view} busy={busy} restarting={restarting} write={write} onUpdate={onUpdate} />
+      {refusal === null ? null : (
         <p role="alert" className="m-0 text-cell leading-base text-err" data-about-error="">
-          {refusal.text}
+          {refusal}
         </p>
-      ) : null}
+      )}
 
       {view.plan.kind === 'self' ? (
         <div className="flex min-w-0 flex-wrap items-center justify-between gap-2 border-t border-border-strong pt-3">
@@ -315,7 +297,7 @@ export function AboutMachineSurface({
   const [loaded, setLoaded] = useState<Loaded>({ kind: 'loading' });
   const [busy, setBusy] = useState(false);
   const [restarting, setRestarting] = useState(false);
-  const [refusal, setRefusal] = useState<StartRefusal | null>(null);
+  const [refusal, setRefusal] = useState<string | null>(null);
   // Bumped after every poll, answered or not, so the next one is scheduled.
   const [tick, setTick] = useState(0);
 
@@ -375,7 +357,7 @@ export function AboutMachineSurface({
         setLoaded({ kind: 'view', view: next });
         if (starting && next.job?.state === 'running') setRestarting(true);
       } catch (cause) {
-        setRefusal(startRefusal(cause));
+        setRefusal(refusalWords(cause));
       } finally {
         setBusy(false);
       }
@@ -419,16 +401,11 @@ export function AboutMachineSurface({
       restarting={restarting}
       refusal={refusal}
       write={write}
-      onDismissRefusal={() => setRefusal(null)}
       onUpdate={choice =>
         void act(
           active =>
             active.startDaemonUpdate(
-              choice === 'when-idle'
-                ? { target, when: 'when-idle' }
-                : choice === 'anyway'
-                  ? { target, when: 'now', confirmMidTurn: true }
-                  : { target, when: 'now' },
+              choice === 'when-idle' ? { target, when: 'when-idle' } : { target, when: 'now', confirmMidTurn: true },
             ),
           true,
         )

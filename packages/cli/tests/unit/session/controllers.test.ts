@@ -46,6 +46,23 @@ describe('StartSessionController', () => {
     should(io.err).be.empty();
   });
 
+  it('should title a pointer prompt from the file it points at, and never override --name', async () => {
+    // Arrange
+    const api = new RecordingApi({ start: sessionView() });
+    const files = new FakeFiles({ '/tmp/brief.md': '# Add Interactive Default' });
+    const { presenter } = capturedPresenter();
+    const controller = new StartSessionController(api, files, presenter, HERE, 'fy');
+    const prompt = 'You are an implementer. Read /tmp/brief.md and follow it.';
+
+    // Act
+    await controller.execute({ agent: 'claude-alpha', mode: 'auto', prompt });
+    await controller.execute({ agent: 'claude-alpha', mode: 'auto', prompt, name: 'Mine' });
+
+    // Assert
+    should(api.calls[0]?.args[0]).containDeep({ name: 'Add Interactive Default' });
+    should(api.calls[1]?.args[0]).containDeep({ name: 'Mine' });
+  });
+
   it('should read every attachment and pass the idempotency key through', async () => {
     // Arrange
     const api = new RecordingApi({ start: sessionView() });
