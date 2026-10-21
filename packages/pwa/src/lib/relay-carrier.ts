@@ -2257,8 +2257,8 @@ const untriedProbe = (method: ConnectionMethod, detail: string): ConnectionProbe
 
 /**
  * A carrier that won AFTER WebRTC was tried and failed carries WebRTC's own sentence as the reason a
- * faster one is not carrying (`docs/relay-protocol.md` §16, "What the browser shows") — "no direct path
- * found in 8 s…", the daemon's refusal, or a daemon too old to offer it. A WebRTC that
+ * faster one is not carrying (`docs/relay-protocol.md` §16, "What the browser shows") — "WebRTC could
+ * not find a direct path in 8 s…", the daemon's refusal, or a daemon too old to offer it. A WebRTC that
  * was never tried (no dialer in this build, a preference that left it out) is no fallback at all.
  */
 const withWebRtcFallbackReason = (chosen: ConnectionChoice & { readonly ok: true }): ConnectionChoice => {

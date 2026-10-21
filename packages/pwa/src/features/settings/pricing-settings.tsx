@@ -24,10 +24,9 @@ import {
   useRef,
   useState,
 } from 'react';
-
-import { useDaemonClient } from '../../lib/store.tsx';
 import { cn } from '../../lib/class-names.ts';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
+import { useDaemonClient } from '../../lib/store.tsx';
 import { EYEBROW, PanelPath } from '../../shell/panel-typography.tsx';
 import {
   type AnalyticsPricingClient,

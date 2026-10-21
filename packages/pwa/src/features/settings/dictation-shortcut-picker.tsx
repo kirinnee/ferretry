@@ -1,16 +1,16 @@
-import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
 import { KeyRound, RotateCcw } from 'lucide-react';
+import { type KeyboardEvent, useEffect, useRef, useState } from 'react';
 
 import { Button } from '../../shell/primitives.tsx';
 import {
   beginDictationShortcutCapture,
   DEFAULT_DICTATION_SHORTCUT,
+  type DictationShortcutBinding,
+  type DictationShortcutVerdict,
   dictationShortcutFromEvent,
   dictationShortcutLabel,
   sameDictationShortcutTrigger,
   validateDictationShortcut,
-  type DictationShortcutBinding,
-  type DictationShortcutVerdict,
 } from './dictation-shortcut.ts';
 
 export interface DictationShortcutPickerProps {

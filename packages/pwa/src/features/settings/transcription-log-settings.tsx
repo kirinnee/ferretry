@@ -12,9 +12,9 @@
 import { Bug, Clipboard, CornerDownLeft, Search, Trash2 } from 'lucide-react';
 import { useState, useSyncExternalStore } from 'react';
 import { DictationDebugSheet } from '../../components/dictation-debug-sheet.tsx';
-import { requestReinsert } from '../../lib/stt/reinsert-transcription.ts';
 import { useDictationDebug, useTranscriptionLog } from '../../lib/store.tsx';
 import type { DictationDebugLog } from '../../lib/stt/dictation-debug.ts';
+import { requestReinsert } from '../../lib/stt/reinsert-transcription.ts';
 import {
   searchTranscriptionLog,
   TRANSCRIPTION_ENGINE_LABELS,

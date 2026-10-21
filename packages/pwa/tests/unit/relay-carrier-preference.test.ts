@@ -22,8 +22,8 @@ import {
   type DaemonCarrierRouterOptions,
   DIRECT_SESSION_DEADLINE_MS,
   RELAY_UNAVAILABLE,
-  WEBRTC_UNAVAILABLE,
   type WebRtcDialContext,
+  WEBRTC_UNAVAILABLE,
 } from '../../src/lib/relay-carrier.ts';
 import type { TunnelServiceState } from '../../src/lib/tunnel-service.ts';
 import { autoDial, newDaemonIdentity, relayCrypto, ScriptedSocket, settle, testDevice } from '../support/relay.ts';

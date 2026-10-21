@@ -1,4 +1,8 @@
-import type { HostedRelayControlStorage, HostedRelayControlStorageTransaction } from '../../src/adapters/index.ts';
+import type {
+  HostedRelayControlStorage,
+  HostedRelayControlStorageTransaction,
+  HostedTunnelControlStorage,
+} from '../../src/adapters/index.ts';
 
 /**
  * Byte-ordered comparison, which is what Durable Object storage uses for both listing and `startAfter`.
@@ -48,5 +52,21 @@ export class FakeHostedRelayControlStorage implements HostedRelayControlStorage 
 
   async transaction<T>(closure: (transaction: HostedRelayControlStorageTransaction) => Promise<T>): Promise<T> {
     return closure(this);
+  }
+}
+
+/** The same storage with the alarm the tunnel control object schedules its reclaim on. */
+export class FakeHostedTunnelControlStorage
+  extends FakeHostedRelayControlStorage
+  implements HostedTunnelControlStorage
+{
+  alarm: number | null = null;
+
+  async getAlarm(): Promise<number | null> {
+    return this.alarm;
+  }
+
+  async setAlarm(scheduledTime: number): Promise<void> {
+    this.alarm = scheduledTime;
   }
 }

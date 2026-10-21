@@ -118,6 +118,18 @@ export const TunnelProvisionSchema = z.strictObject({
 });
 export type TunnelProvision = z.infer<typeof TunnelProvisionSchema>;
 
+/**
+ * `POST /v1/tunnel/release` answer. `released` is whether this daemon held a tunnel to release; `false`
+ * is an idempotent repeat, never an error. The answer does not wait for Cloudflare: the service takes
+ * the tunnel off the daemon at once and deletes it upstream, retrying on its daily alarm until every
+ * step has succeeded, so a daemon never retries a release.
+ */
+export const TunnelReleaseSchema = z.strictObject({
+  version: z.literal(TUNNEL_SERVICE_VERSION),
+  released: z.boolean(),
+});
+export type TunnelRelease = z.infer<typeof TunnelReleaseSchema>;
+
 export const TunnelRefusalCodeSchema = z.enum([
   'tunnel_unavailable',
   'tunnel_capacity',

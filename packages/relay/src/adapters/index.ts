@@ -16,6 +16,21 @@ export {
   releaseHostedRelayReservation,
   requestHostedRelayDecision,
 } from './hosted-control.ts';
+export { CLOUDFLARE_API_BASE, type CloudflareFetch, CloudflareFetchTunnelApi } from './cloudflare-tunnel-api.ts';
+export {
+  DurableTunnelStore,
+  HOSTED_TUNNEL_CONTROL_OBJECT_NAME,
+  HostedTunnelControlDurableObject,
+  type HostedTunnelControlEnvironment,
+  type HostedTunnelControlObjectState,
+  type HostedTunnelControlRuntime,
+  type HostedTunnelControlStorage,
+  hostedTunnelControlRuntime,
+  hostedTunnelControlStub,
+  TUNNEL_CONTROL_ROUTES,
+  TUNNEL_RECLAIM_CONTINUE_MS,
+} from './hosted-tunnel-control.ts';
+export { type HostedTunnelEnvironment, TUNNEL_REQUEST_MAX_BYTES } from './hosted-tunnel-routes.ts';
 export { RelayKeyHandleError, WebCryptoRelayCrypto } from './webcrypto-relay-crypto.ts';
 export {
   HOSTED_CONTROL_OUTAGE_GRACE_MS,

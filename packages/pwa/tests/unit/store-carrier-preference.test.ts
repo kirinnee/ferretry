@@ -7,8 +7,8 @@
 import { describe, expect, it } from 'bun:test';
 import type { FyApiClient } from '@ferretry/protocol/client';
 import { CarrierPreferenceStore } from '../../src/lib/carrier-preference.ts';
-import type { ConnectionSignal } from '../../src/lib/connection-signals.ts';
 import type { DaemonConnectionRepository } from '../../src/lib/connections.ts';
+import type { ConnectionSignal } from '../../src/lib/connection-signals.ts';
 import { createAppStore } from '../../src/lib/store.tsx';
 import { WebRtcDialer } from '../../src/lib/webrtc-carrier.ts';
 import { autoDial, keyedDaemon, relayCrypto, ScriptedSocket, settle } from '../support/relay.ts';

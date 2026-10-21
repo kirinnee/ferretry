@@ -24,7 +24,6 @@
 
 import {
   type AttachedSocket,
-  bytesEqual,
   decodeClaim,
   decodeFrame,
   encodeControlMessage,
@@ -55,7 +54,6 @@ import {
   servesDaemon,
   sessionIdFromBytes,
   toBase64Url,
-  utf8Bytes,
   verifyRendezvousClaim,
 } from '../lib/index.ts';
 import {
@@ -68,9 +66,12 @@ import {
   releaseHostedRelayReservation,
   requestHostedRelayDecision,
 } from './hosted-control.ts';
+import { hostedTunnelFetch, isHostedTunnelPath } from './hosted-tunnel-routes.ts';
+import { operatorRefusal } from './operator-auth.ts';
 import { WebCryptoRelayCrypto } from './webcrypto-relay-crypto.ts';
 
 export { HostedRelayControlDurableObject } from './hosted-control.ts';
+export { HostedTunnelControlDurableObject } from './hosted-tunnel-control.ts';
 
 // ─── the slice of the Workers runtime this adapter uses ───────────────────────────────────────
 
@@ -124,6 +125,16 @@ export interface RelayEnvironment {
   readonly RELAY_CONTROL?: HostedRelayControlNamespace;
   /** Secret binding provisioned by the hosted deployment workflow; never committed or bundled. */
   readonly RELAY_OPERATOR_TOKEN?: string;
+  /**
+   * The hosted tunnel provisioner (§15): one control object holding every tunnel row, separate from the
+   * relay meter. Absent, the tunnel service advertises `available: false` and refuses the rest.
+   */
+  readonly TUNNEL_CONTROL?: HostedRelayControlNamespace;
+  /**
+   * The tunnel pool, a Worker SECRET installed from the GitHub secret `HOSTED_TUNNEL_ACCOUNTS`. Only the
+   * tunnel control object reads it; it is listed here so the shape of the environment is stated once.
+   */
+  readonly TUNNEL_ACCOUNTS?: string;
 }
 
 /** The platform pieces that cannot be reached without the Workers runtime, so they are injected. */
@@ -213,6 +224,7 @@ export async function relayFetch(
   ) {
     return hostedOperatorRequest(request, environment);
   }
+  if (mode === 'hosted' && isHostedTunnelPath(url.pathname)) return hostedTunnelFetch(request, environment);
 
   const route = parseRendezvousPath(url.pathname);
   if (route === null) return new Response(NOT_FOUND, { status: 404 });
@@ -321,20 +333,8 @@ async function hostedPublicConfiguration(request: Request, environment: RelayEnv
 }
 
 async function hostedOperatorRequest(request: Request, environment: RelayEnvironment): Promise<Response> {
-  const token = environment.RELAY_OPERATOR_TOKEN;
-  if (token === undefined || token === '') return jsonError('relay operator authentication is not configured', 503);
-  const authorization = request.headers.get('Authorization') ?? '';
-  const supplied = authorization.startsWith('Bearer ') ? authorization.slice('Bearer '.length) : '';
-  if (!bytesEqual(utf8Bytes(supplied), utf8Bytes(token))) {
-    return new Response(JSON.stringify({ error: 'unauthorized' }), {
-      status: 401,
-      headers: {
-        'Content-Type': 'application/json; charset=utf-8',
-        'Cache-Control': 'no-store, max-age=0',
-        'WWW-Authenticate': 'Bearer',
-      },
-    });
-  }
+  const refused = operatorRefusal(request, environment.RELAY_OPERATOR_TOKEN);
+  if (refused !== null) return refused;
   const control = environment.RELAY_CONTROL;
   if (control === undefined) return jsonError('hosted relay control is unavailable', 503);
   const sourcePath = new URL(request.url).pathname;

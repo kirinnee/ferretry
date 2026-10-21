@@ -9,9 +9,8 @@
 import type { CgroupConfigPatch, CgroupConfigView, IFyApiClient } from '@ferretry/protocol';
 import { CircleAlert, Cpu, LoaderCircle, MemoryStick, RotateCcw, ShieldCheck } from 'lucide-react';
 import { useCallback, useEffect, useId, useState } from 'react';
-
-import { useDaemonClient } from '../../lib/store.tsx';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
+import { useDaemonClient } from '../../lib/store.tsx';
 
 export interface CgroupConfigDraft {
   readonly enabled: boolean;
