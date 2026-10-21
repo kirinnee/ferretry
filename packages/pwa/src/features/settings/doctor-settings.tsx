@@ -1,7 +1,7 @@
 import { defaultFleetHarness } from '@ferretry/fleet/harness';
 import type { DoctorReport } from '@ferretry/protocol';
 import { CircleAlert, CircleCheck, CircleMinus, Stethoscope } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
 
 export type DoctorReportReader = (connection: DaemonConnection) => Promise<DoctorReport>;
@@ -17,10 +17,14 @@ export function DoctorSettings({
     daemonId: String(connection.daemonId),
     report: null,
   });
+  // The reader is held in a ref: the composition root passes a new arrow on every render, and reading
+  // again on each one blanked the report to "unavailable" every time the app's background poll landed.
+  const reader = useRef(read);
+  reader.current = read;
   useEffect(() => {
     let cancelled = false;
     setHeld({ daemonId: String(connection.daemonId), report: null });
-    void read(connection).then(
+    void reader.current(connection).then(
       report => {
         if (!cancelled) setHeld({ daemonId: String(connection.daemonId), report });
       },
@@ -29,7 +33,7 @@ export function DoctorSettings({
     return () => {
       cancelled = true;
     };
-  }, [connection, read]);
+  }, [connection]);
   const report = held.daemonId === String(connection.daemonId) ? held.report : null;
   if (report === null)
     return (

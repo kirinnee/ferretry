@@ -187,6 +187,31 @@ describe('useMachineReach', () => {
     }
   });
 
+  it('asks quietly after a save, keeping the last answer on screen until the new one lands', async () => {
+    // A loud re-check swapped the Machine tab for "Checking…" after every save made on it, which unmounted
+    // what the person was editing and moved the page under them.
+    let gate: Deferred<FleetClient> | null = null;
+    const createClient: FleetClientFactory = async () => await (gate?.promise ?? machineClient(machineView()));
+    const view = await renderReach({ daemonId: alpha.daemonId, connections: [alpha], createClient });
+    try {
+      await settle();
+      expect(view.kind(alpha.daemonId)).toBe('online');
+      const pending = deferred<FleetClient>();
+      gate = pending;
+      await interact(() => view.current().check(alpha.daemonId, true));
+      await settle();
+      expect(view.kind(alpha.daemonId)).toBe('online');
+      await interact(() => view.current().check(alpha.daemonId));
+      expect(view.kind(alpha.daemonId)).toBe('checking');
+      gate = null;
+      pending.resolve(machineClient(machineView()));
+      await settle();
+      expect(view.kind(alpha.daemonId)).toBe('online');
+    } finally {
+      await view.unmount();
+    }
+  });
+
   it('asks one machine again on check, and ignores a check for a machine that is not paired', async () => {
     const { asked, createClient } = answering({ alpha: machineView(), beta: machineView() });
     const view = await renderReach({ daemonId: alpha.daemonId, connections: [alpha, beta], createClient });

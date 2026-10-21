@@ -121,4 +121,26 @@ describe('DoctorSettings', () => {
 
     expect(JSON.stringify(renderer.toJSON())).toContain('No missing evidence is treated as a healthy host.');
   });
+
+  it('keeps its report, and asks once, when re-rendered with a new reader for the same daemon', async () => {
+    // The composition root passes a new arrow each render; reading again on each one blanked the report
+    // every time the app's background poll re-rendered Settings.
+    let reads = 0;
+    const reader = () => async () => {
+      reads += 1;
+      return report;
+    };
+    const alpha = connection('alpha');
+    const renderer = render(<DoctorSettings connection={alpha} read={reader()} />);
+    await runAsync(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    run(() => renderer.update(<DoctorSettings connection={alpha} read={reader()} />));
+    run(() => renderer.update(<DoctorSettings connection={alpha} read={reader()} />));
+
+    expect(reads).toBe(1);
+    expect(renderer.root.findAllByProps({ 'data-doctor-daemon': 'alpha' }).length).toBeGreaterThan(0);
+  });
 });

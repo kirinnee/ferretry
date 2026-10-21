@@ -32,8 +32,11 @@ export interface MachineReachOptions {
 
 export interface MachineReachState {
   readonly reachOf: (daemonId: DaemonId) => ShownReach;
-  /** Ask one machine again. */
-  readonly check: (daemonId: DaemonId) => void;
+  /**
+   * Ask a machine again. `quietly` keeps its last answer on screen until the new one lands — for a
+   * re-read after the person's own save, which must not swap the page they are on for "Checking…".
+   */
+  readonly check: (daemonId: DaemonId, quietly?: boolean) => void;
 }
 
 export function useMachineReach({
@@ -85,9 +88,9 @@ export function useMachineReach({
   const lockedNow = new Set(locked);
   const reachOf = (id: DaemonId): ShownReach =>
     lockedNow.has(id) ? { kind: 'locked' } : (reach.get(id) ?? { kind: 'checking' });
-  const check = (id: DaemonId): void => {
+  const check = (id: DaemonId, quietly = false): void => {
     const connection = latest.current.find(candidate => candidate.daemonId === id);
-    if (connection) ask(connection);
+    if (connection) ask(connection, quietly);
   };
   return { reachOf, check };
 }
