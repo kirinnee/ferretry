@@ -24,10 +24,10 @@ import {
   readAccountPickerHealth,
 } from './account-picker-catalog.ts';
 import { DaemonAccountPickerStore } from './account-picker-store.ts';
-import { CarrierPreferenceStore } from './carrier-preference.ts';
 import { DaemonHttpTransport, daemonApiClient } from './api-client.ts';
 import { DaemonAttentionClient } from './attention-client.ts';
 import { browserLoginPort, DaemonBrowserLoginStore } from './browser-login.ts';
+import { CarrierPreferenceStore } from './carrier-preference.ts';
 import { DaemonConfigChangeStore } from './config-changes.ts';
 import {
   browserConnectionHealthEnvironment,
@@ -64,18 +64,17 @@ import { browserPresenceEnvironment, PresenceTracker } from './presence.ts';
 import { DaemonProjectsStore, daemonProjectsPort } from './projects-store.ts';
 import { DaemonPushDevices, type DaemonPushService, daemonPushService } from './push-enrolment.ts';
 import {
+  type CarrierDialers,
   DaemonCarrierRouter,
   type OutdatedSide,
   outdatedError,
   outdatedRefusal,
   outdatedSide,
-  type CarrierDialers,
   type RelayDial,
 } from './relay-carrier.ts';
 import { PairingOutcomeUnknownError, pairingCandidates, redeemPairingInSession } from './relay-pairing.ts';
 import { RelayPairingRefusedError, RelaySessionError } from './relay-session.ts';
 import { browserFetch, type DaemonFetch } from './runtime-models.ts';
-import { readTunnelService, type TunnelServiceState } from './tunnel-service.ts';
 import { browserScrollMemoryStorage, ScrollMemory, type ScrollMemoryStorage } from './scroll-memory.ts';
 import { fetchSecuritySettings, UNLOCK_STAYS_FALLBACK, unlockStaysSentence } from './security-settings-client.ts';
 import { SessionCache, type SessionCacheBackend, seedFleetFromCache } from './session-cache.ts';
@@ -88,18 +87,20 @@ import {
   unlockCeremony,
 } from './step-up-ceremony.ts';
 import { StepUpGate } from './step-up-gate.ts';
+import { DictationDebugLog, type DictationDebugSnapshot } from './stt/dictation-debug.ts';
 import {
   browserParakeetVoice,
   type ParakeetAssets,
   type ParakeetGlobalLike,
   type ParakeetVoice,
 } from './stt/parakeet-voice.ts';
-import { type DictationDebugSnapshot, DictationDebugLog } from './stt/dictation-debug.ts';
 import { DeviceSpeedupKeys, IndexedDbSpeedupKeyRecords } from './stt/speedup-keys.ts';
+import { SttSettingsStore } from './stt/stt-settings.ts';
 import { TranscriptionLog, type TranscriptionLogSnapshot } from './stt/transcription-log.ts';
 import { IndexedDbTranscriptionLogRecords } from './stt/transcription-log-records.ts';
-import { SttSettingsStore } from './stt/stt-settings.ts';
+import { readTunnelService, type TunnelServiceState } from './tunnel-service.ts';
 import { DaemonUsageStore, daemonUsagePort } from './usage-store.ts';
+import { browserWebRtcDialer, type WebRtcDialer } from './webrtc-carrier.ts';
 import { WorkspaceLayoutStore } from './workspace-layout-store.ts';
 
 const CONNECTION_DATABASE = 'ferretry-pwa';
@@ -416,6 +417,8 @@ export interface AppStore {
   readonly carrierPreferences: CarrierPreferenceStore;
   /** Whether this build can dial WebRTC at all, so a selector can say so beside the option. */
   readonly webrtcAvailable: boolean;
+  /** The measured round trip of this machine's peer-to-peer path, or `undefined` when it has none. */
+  readonly webrtcRttMs: (daemonId: DaemonId) => Promise<number | undefined>;
   /**
    * Whether the hosted tunnel service is set up, read once per document on first ask, never throwing.
    * Only ever a sentence: a tunnel the daemon published is dialled whatever this says.
@@ -484,6 +487,11 @@ export interface CreateAppStoreOptions {
   readonly relayDial?: RelayDial;
   /** Carriers that need more than a URL to dial; none by default, so WebRTC is passed over, said. */
   readonly carrierDialers?: CarrierDialers;
+  /**
+   * The WebRTC dialer (`docs/relay-protocol.md` §16): this browser's own, built from `RTCPeerConnection`,
+   * by default; `null` for none. Ignored when `carrierDialers` is given, which names its own.
+   */
+  readonly webrtc?: WebRtcDialer | null;
   /** This browser's `localStorage` by default. Injected so a suite decides each machine's preference. */
   readonly carrierPreferences?: CarrierPreferenceStore;
   /** `navigator.credentials` by default: where a passkey step-up is asked of the person. */
@@ -543,7 +551,8 @@ export async function createAppStore(options: CreateAppStoreOptions = {}): Promi
     return await tunnelServiceRead;
   };
   const carrierPreferences = options.carrierPreferences ?? new CarrierPreferenceStore();
-  const carrierDialers = options.carrierDialers ?? {};
+  const webrtc = options.webrtc === undefined ? browserWebRtcDialer() : (options.webrtc ?? undefined);
+  const carrierDialers = options.carrierDialers ?? (webrtc === undefined ? {} : { webrtc: webrtc.dial });
 
   // One adapter for the document, shared by the carrier router and by a redemption that has to fall
   // back to a rendezvous. A second instance would be harmless and is still worth not having: it is
@@ -768,6 +777,9 @@ export async function createAppStore(options: CreateAppStoreOptions = {}): Promi
     reconnecting: () => connectionHealth.reconnecting(),
     retryNow: daemonId => connectionHealth.retryNow(daemonId),
     checkLiveness: () => carrier.checkLiveness(),
+    // A path found on the network this device just left is not worth trusting: every peer-to-peer
+    // connection is dropped, its sessions redial, and the next WebRTC attempt negotiates on this one.
+    networkChanged: () => webrtc?.networkChanged(),
   });
 
   /**
@@ -802,6 +814,7 @@ export async function createAppStore(options: CreateAppStoreOptions = {}): Promi
     carrier,
     carrierPreferences,
     webrtcAvailable: carrierDialers.webrtc !== undefined,
+    webrtcRttMs: async daemonId => await webrtc?.rttMs(daemonId),
     tunnelService,
     connectionHealth,
     stepUp,

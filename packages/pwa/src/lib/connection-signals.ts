@@ -26,6 +26,8 @@ export interface ConnectionSignalTargets {
   readonly retryNow: (daemonId: DaemonId) => void;
   /** A ping on every held session, with a short deadline. */
   readonly checkLiveness: () => void;
+  /** The device is on a different network than before (back online, or its network type changed). */
+  readonly networkChanged?: () => void;
 }
 
 /** Act on every signal: retry each outage now, and prove each live session is still alive. */
@@ -33,7 +35,8 @@ export const watchConnectionSignals = (
   environment: ConnectionSignalEnvironment,
   targets: ConnectionSignalTargets,
 ): (() => void) =>
-  environment.listen(() => {
+  environment.listen(signal => {
+    if (signal !== 'visible') targets.networkChanged?.();
     targets.checkLiveness();
     for (const daemonId of targets.reconnecting()) targets.retryNow(daemonId);
   });

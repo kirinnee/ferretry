@@ -51,12 +51,13 @@ import {
 } from '@ferretry/protocol';
 import {
   APP_SESSION_BYTES,
+  CONNECTION_KINDS,
   type ConnectionChoice,
   type ConnectionMethod,
   type ConnectionProbe,
+  type ConnectionSkip,
   carrierProbe,
   chooseConnection,
-  type ConnectionSkip,
   connectionSocketUrl,
   describeConnectionMethod,
   HEARTBEAT_GRACE_SECONDS,
@@ -2255,6 +2256,19 @@ const untriedProbe = (method: ConnectionMethod, detail: string): ConnectionProbe
 });
 
 /**
+ * A carrier that won AFTER WebRTC was tried and failed carries WebRTC's own sentence as the reason a
+ * faster one is not carrying (`docs/relay-protocol.md` §16, "What the browser shows") — "no direct path
+ * found in 8 s…", the daemon's refusal, or a daemon too old to offer it. A WebRTC that
+ * was never tried (no dialer in this build, a preference that left it out) is no fallback at all.
+ */
+const withWebRtcFallbackReason = (chosen: ConnectionChoice & { readonly ok: true }): ConnectionChoice => {
+  const rank = (kind: ConnectionMethod['kind']): number => CONNECTION_KINDS.indexOf(kind);
+  const missed = chosen.passedOver.find(skip => skip.method.kind === 'webrtc' && skip.untried !== true);
+  if (missed === undefined || rank(chosen.method.kind) <= rank('webrtc')) return chosen;
+  return { ...chosen, fallbackReason: missed.detail };
+};
+
+/**
  * The choice a walk ends with.
  *
  * WHEN THE PREFERENCE LEFT NOTHING TO TRY, the sentence names the preference and the reason — "Tunnel
@@ -2264,8 +2278,9 @@ const untriedProbe = (method: ConnectionMethod, detail: string): ConnectionProbe
  */
 const choiceFor = (probes: readonly ConnectionProbe[], plan: WalkPlan): ConnectionChoice => {
   const chosen = chooseConnection(probes);
+  if (chosen.ok) return withWebRtcFallbackReason(chosen);
   const nothingTried = probes.every(probe => probe.untried === true);
-  if (chosen.ok || plan.why === undefined || plan.preference === 'auto' || !nothingTried) return chosen;
+  if (plan.why === undefined || plan.preference === 'auto' || !nothingTried) return chosen;
   const passedOver: readonly ConnectionSkip[] = chosen.passedOver;
   return { ok: false, reason: `${CARRIER_PREFERENCE_LABEL[plan.preference]}: ${plan.why}.`, passedOver };
 };

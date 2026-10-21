@@ -49,6 +49,7 @@ import { MotionSetting, SessionsListSetting } from './conversation-settings.tsx'
 import { type DaemonReachabilityProbe, daemonDisplayName, distinctDaemonName } from './daemon-settings.tsx';
 import { DaemonSettingsFrame, type DaemonSettingsTabDefinition } from './daemon-settings-frame.tsx';
 import { DevicePermissionsSetting } from './device-permissions-settings.tsx';
+import { DictationDebugSettings } from './dictation-debug-settings.tsx';
 import { DictationSettings, type DictationSettingsProps } from './dictation-settings.tsx';
 import type { GrantClientFactory } from './grants-settings.tsx';
 import { useMachineUpdates } from './machine-updates.ts';
@@ -66,7 +67,6 @@ import {
   settingsSectionForSetting,
 } from './settings-catalog.ts';
 import { SettingsHome, type SettingsMachineEntry, SettingsSidebar } from './settings-navigation.tsx';
-import { DictationDebugSettings } from './dictation-debug-settings.tsx';
 import { SpeedupKeysSettings } from './speedup-keys-settings.tsx';
 import { TranscriptionLogSettings } from './transcription-log-settings.tsx';
 import { ViewportDetails } from './viewport-details.tsx';
@@ -302,6 +302,8 @@ export interface SettingsPageProps {
   readonly relayAdvertised?: boolean;
   /** The ACTIVE machine's connection preference on this device (§15), offered beside its Connection status. */
   readonly carrierPreference?: CarrierPreferenceControl | undefined;
+  /** The ACTIVE machine's peer-to-peer round trip (§16), asked while its Connection panel shows WebRTC. */
+  readonly measureCarrierRtt?: (() => Promise<number | undefined>) | undefined;
   /**
    * Settings › This device › Connection: every paired machine's preference, composed by the caller
    * (`ConnectionPreferenceSettings`). Absent says why there is nothing to choose here.
@@ -347,6 +349,7 @@ export function SettingsPage({
   carrier,
   relayAdvertised = false,
   carrierPreference,
+  measureCarrierRtt,
   connectionPreferences,
   connectionHealth,
   onNavigate,
@@ -630,6 +633,7 @@ export function SettingsPage({
               relayAdvertised={relayAdvertised}
               carrierPreference={carrierPreference}
               connectionHealth={connectionHealth}
+              measureCarrierRtt={measureCarrierRtt}
               probeDaemon={probeDaemon}
               onRenameDaemon={onRenameDaemon}
               onRemoveDaemon={onRemoveDaemon}
@@ -639,6 +643,7 @@ export function SettingsPage({
       carrier,
       carrierPreference,
       connectionHealth,
+      measureCarrierRtt,
       createGrantClient,
       createPairingClient,
       createPasskeyClient,

@@ -4,7 +4,7 @@
  * One peer connection per daemon, and one data channel per session on it. The first dial negotiates:
  * it opens the first channel (an offer needs one to describe), gathers within §16's bounds, sends the
  * offer through a session that already reaches the daemon (the relay, usually), sets the answer, and
- * waits — at most {@link WEBRTC_CONNECT_DEADLINE_MS} from the offer leaving — for that channel to open.
+ * waits — at most {@link WEBRTC_CONNECT_DEADLINE_MS} from the answer — for that channel to open.
  * Every later dial opens another channel on the same connection, which costs no signalling at all.
  *
  * WHAT A DIAL HANDS BACK is the same message socket every carrier hands the session
@@ -13,7 +13,7 @@
  * opens, so messages that arrive before the socket is announced are held and delivered after `onOpen`.
  *
  * WHY A DIAL FAILS, AND WHAT IT SAYS. A refused or failed dial rejects with a sentence the carrier
- * walk shows verbatim beside the fallback it took — "WebRTC could not find a direct path in 8 s…" —
+ * walk shows verbatim beside the fallback it took — "WebRTC was not reachable (no direct path found in 8 s…)" —
  * so the Connection status names the reason, never just the carrier it fell back to.
  *
  * A PATH THAT DIED IS RENEGOTIATED, NEVER RESTARTED. libdatachannel refuses an ICE restart (§16, "When
@@ -22,6 +22,7 @@
  */
 
 import {
+  DEFAULT_WEBRTC_ICE_SERVERS,
   WEBRTC_CONNECT_DEADLINE_MS,
   WEBRTC_GATHER_CAP_MS,
   WEBRTC_GATHER_REFLEXIVE_GRACE_MS,
@@ -64,7 +65,7 @@ export interface WebRtcPeerLike {
   onconnectionstatechange: (() => void) | null;
 }
 
-export type WebRtcPeerFactory = (configuration: {
+type WebRtcPeerFactory = (configuration: {
   readonly iceServers: readonly { readonly urls: string }[];
 }) => WebRtcPeerLike;
 
@@ -89,7 +90,7 @@ export interface WebRtcCarrierDependencies {
 }
 
 /** The sentence a dial that ran out of time rejects with. */
-export const WEBRTC_NO_PATH_REASON = `WebRTC could not find a direct path in ${WEBRTC_CONNECT_DEADLINE_MS / 1_000} s — this network may block peer-to-peer connections`;
+export const WEBRTC_NO_PATH_REASON = `no direct path found in ${WEBRTC_CONNECT_DEADLINE_MS / 1_000} s — this network may block peer-to-peer connections`;
 
 /** The sentence a dial the router abandoned rejects with. */
 const WEBRTC_CANCELLED_REASON = 'the WebRTC attempt was cancelled';
@@ -234,11 +235,12 @@ export class WebRtcCarrier {
       await gathered;
       const offer = peer.localDescription;
       if (offer === null) throw new Error('this browser produced no WebRTC offer');
-      const deadline = this.#opened(first, WEBRTC_CONNECT_DEADLINE_MS, signal, () => WEBRTC_NO_PATH_REASON);
-      // Observed here so a refusal below cannot leave the deadline's rejection unhandled.
-      deadline.catch(() => undefined);
       const answer = await this.deps.signal(offer.sdp, signal);
       if (answer.kind === 'refused') throw new Error(answer.reason);
+      // The deadline is ICE's, counted from the answer: signalling is a request on a carrier that already
+      // has its own bounds, and charging its round trip to the path search failed WebRTC on exactly the
+      // slow introductions (a direct timeout, then a relay session) it exists to rescue.
+      const deadline = this.#opened(first, WEBRTC_CONNECT_DEADLINE_MS, signal, () => WEBRTC_NO_PATH_REASON);
       await peer.setRemoteDescription({ type: 'answer', sdp: answer.sdp });
       await deadline;
       this.#peer = peer;
@@ -381,4 +383,33 @@ export class WebRtcDialer {
     carrier.close();
     if (this.#carriers.get(daemonId) === carrier) this.#carriers.delete(daemonId);
   }
+}
+
+/** The slice of a browser global the default dialer reads. */
+export interface WebRtcGlobals {
+  readonly RTCPeerConnection?: new (configuration: {
+    readonly iceServers: readonly { readonly urls: string }[];
+  }) => unknown;
+}
+
+/**
+ * The dialer a real browser gets, or `undefined` where there is no `RTCPeerConnection` to dial with —
+ * a test environment, or a browser that switched WebRTC off. Absent, the router passes WebRTC over and
+ * says so (`WEBRTC_UNAVAILABLE`), which is the honest answer for that browser.
+ */
+export function browserWebRtcDialer(
+  globals: WebRtcGlobals = globalThis as unknown as WebRtcGlobals,
+): WebRtcDialer | undefined {
+  const Peer = globals.RTCPeerConnection;
+  if (typeof Peer !== 'function') return undefined;
+  return new WebRtcDialer({
+    // The DOM's own types describe event handlers with a `this` and an event this module never reads,
+    // so the native object is seen through the narrow shape it is driven by.
+    createPeer: configuration => new Peer(configuration) as WebRtcPeerLike,
+    iceServers: DEFAULT_WEBRTC_ICE_SERVERS,
+    timers: {
+      setTimeout: (action, milliseconds) => globalThis.setTimeout(action, milliseconds),
+      clearTimeout: handle => globalThis.clearTimeout(handle as ReturnType<typeof globalThis.setTimeout>),
+    },
+  });
 }

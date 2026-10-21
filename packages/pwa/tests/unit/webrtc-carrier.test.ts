@@ -10,11 +10,12 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
 import {
+  browserWebRtcDialer,
   WEBRTC_CHANNEL_OPEN_DEADLINE_MS,
   WEBRTC_NO_PATH_REASON,
   WebRtcCarrier,
-  WebRtcDialer,
   type WebRtcDataChannelLike,
+  WebRtcDialer,
   type WebRtcPeerLike,
   type WebRtcSignalOutcome,
   type WebRtcTimers,
@@ -643,7 +644,10 @@ describe('the WebRTC dialer', () => {
     const dialled = subject.dial(attempt('daemon-a'));
     await connectNewest();
     await dialled;
-    peers[0]?.stats.push(['p', { type: 'candidate-pair', state: 'succeeded', nominated: true, currentRoundTripTime: 0.03 }]);
+    peers[0]?.stats.push([
+      'p',
+      { type: 'candidate-pair', state: 'succeeded', nominated: true, currentRoundTripTime: 0.03 },
+    ]);
     const before = await subject.rttMs('daemon-a');
 
     // Act
@@ -654,5 +658,49 @@ describe('the WebRTC dialer', () => {
     should(peers[0]?.closed).be.true();
     should(await subject.rttMs('daemon-a')).be.undefined();
     should(await subject.rttMs('never-dialled')).be.undefined();
+  });
+});
+
+describe('the browser’s own WebRTC dialer', () => {
+  it('should be absent where the browser has no RTCPeerConnection', () => {
+    // Act + Assert
+    should(browserWebRtcDialer({})).be.undefined();
+  });
+
+  it('should dial with the browser’s RTCPeerConnection, asking the default STUN server', async () => {
+    // Arrange
+    const made: FakePeer[] = [];
+    const subject = browserWebRtcDialer({
+      RTCPeerConnection: class {
+        constructor(configuration: { readonly iceServers: readonly { readonly urls: string }[] }) {
+          const peer = new FakePeer(configuration.iceServers);
+          made.push(peer);
+          // biome-ignore lint/correctness/noConstructorReturn: the stand-in IS the scripted peer.
+          return peer;
+        }
+      },
+    });
+    const abort = new AbortController();
+
+    // Act
+    const dial = subject?.dial({
+      daemon: { daemonId: 'daemon-a' },
+      signal: abort.signal,
+      request: async () => new Response(JSON.stringify({ sdp: 'answer' })),
+    });
+    await settle();
+    made[0]?.gatherComplete();
+    await settle();
+    made[0]?.connect();
+    const socket = await dial;
+    const opened = new Promise<void>(resolve => {
+      if (socket !== undefined) socket.onOpen = resolve;
+    });
+
+    // Assert — announced on the real clock, after the dial resolved.
+    await opened;
+    should(made[0]?.iceServers).deepEqual([{ urls: 'stun:stun.cloudflare.com:3478' }]);
+    abort.abort();
+    should(made[0]?.closed).be.true();
   });
 });

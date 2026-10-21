@@ -2520,9 +2520,9 @@ interface has timed out. So each side sends its description at the FIRST of:
 Version one uses **one STUN server and no TURN**. A path that needs a relay to exist at all —
 symmetric NAT on both ends, a network that blocks UDP — therefore fails ICE, and the remedy is not a
 second relay but the one this protocol already has: **a WebRTC attempt that has not delivered an open
-channel within 8 seconds of the offer leaving is abandoned, and the device carries on over the relay,
-saying so** ("WebRTC could not find a direct path in 8 s — this network may block peer-to-peer
-connections; using the relay"). The relay carries the requests that arrive meanwhile, so a failed
+channel within 8 seconds of the daemon's answer is abandoned, and the device carries on over the relay,
+saying so**: the Connection status names the relay and, as the reason a faster carrier is not
+carrying, "no direct path found in 8 s — this network may block peer-to-peer connections". The relay carries the requests that arrive meanwhile, so a failed
 attempt delays nothing but the switch.
 
 **The STUN server** is `stun:stun.cloudflare.com:3478`: no account and no credential, and Cloudflare
