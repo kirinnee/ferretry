@@ -63,7 +63,16 @@ const tomi = view(TOMI, { teammate: 'tomi', parent: LEAD, model: 'claude-haiku-4
   { turnState: 'working' });
 const kamila = view(KAMILA, { teammate: 'kamila', parent: LEAD, model: 'gpt-6-astra', agent: 'codex-work', harness: 'codex', name: 'Second opinion on the plan', createdAt: '2026-10-20T01:50:00.000Z' },
   { turnState: 'needs-input', turnPrompt: 'Allow codex to run git push?' });
-const fleet = [lead, nadia, tomi, kamila];
+// A long pack: the finished ones that used to flood the bar (stopped, completed, failed) beside the three live.
+const finished = [
+  ['mvdone01-1a2b3c4d', 'ottilie', 'Port the grant policy tests', { status: 'stopped', reason: 'its result was collected' }],
+  ['mvdone02-2b3c4d5e', 'bertrand', 'Audit the relay allowlist', { status: 'completed' }],
+  ['mvdone03-3c4d5e6f', 'celeste', 'Regenerate the protocol fixtures', { status: 'failed', reason: 'exited 1' }],
+  ['mvdone04-4d5e6f70', 'dmitri', 'Trim the unused CSS tokens', { status: 'stopped', reason: 'its result was collected' }],
+  ['mvdone05-5e6f7081', 'eleni', 'Write the pairing walkthrough', { status: 'completed' }],
+].map(([id, teammate, name, state], index) =>
+  view(id, { teammate, parent: LEAD, name, createdAt: '2026-10-20T01:' + (10 + index) + ':00.000Z' }, state));
+const fleet = [lead, nadia, tomi, kamila, ...finished];
 const surface = { agentReferenceResolver: createAgentReferenceResolver('harness', fleet), onNavigate: () => undefined };
 const json = (value) => JSON.stringify(value);
 const indent = (text) => text.split('\\n').map((line, index) => (index === 0 ? line : '    ' + line)).join('\\n');
@@ -151,7 +160,7 @@ const header = (
       onToggleInfo={() => undefined}
       project="ferretry"
       session={lead}
-      subFerrets={<SubFerretIndicator compact={compact} onOpenSession={() => undefined} sessions={subFerretsOf(LEAD, fleet)} />}
+      subFerrets={<SubFerretIndicator onOpenSession={() => undefined} sessions={subFerretsOf(LEAD, fleet)} />}
       turn="working"
     />
   </section>
@@ -256,8 +265,14 @@ try {
         // The folds a reader would open: the ranked models and the working sub-ferret's brief.
         await page.locator('[data-pack-kind="recommend"] summary').click();
         await page.locator('[data-pack-state="started"]').last().locator('.fy-pack-fold summary').click();
-        await page.locator('[data-sub-ferret-toggle]').click();
-        await page.locator('[data-sub-ferret-popover]').waitFor({ state: 'visible' });
+        // A phone's bar draws no sub-ferret pill at all; the desktop's opens to the ACTIVE ones only.
+        if (viewport.mobile) {
+          if ((await page.locator('[data-sub-ferret-toggle]').count()) !== 0)
+            fail('a phone bar drew the sub-ferret pill');
+        } else {
+          await page.locator('[data-sub-ferret-toggle]').click();
+          await page.locator('[data-sub-ferret-popover]').waitFor({ state: 'visible' });
+        }
         const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
         if (overflow > 0) fail(`${scheme} ${viewport.name} scrolls sideways by ${overflow}px`);
         for (const name of SCENES) {
@@ -265,6 +280,10 @@ try {
           await page.locator(`[data-scene="${name}"]`).screenshot({ path: target });
           process.stdout.write(`📸 ${target}\n`);
         }
+        await page.locator('[data-sub-ferret-finished-toggle]').click();
+        const expanded = join(outDir, `pack-info-finished-${viewport.name}-${scheme}.png`);
+        await page.locator('[data-scene="info"]').screenshot({ path: expanded });
+        process.stdout.write(`📸 ${expanded}\n`);
       } finally {
         await context.close();
       }

@@ -4405,8 +4405,42 @@ const APP_CHROME_SESSIONS_CONTROLS = new DaemonControlsStore(memoryControlsStora
     APP_CHROME_SESSIONS_CONTROLS.setDeviceControls({ density });
 }
 
+/**
+ * `?long-names=1`: the sessions a phone must not scroll sideways for — a task title with one unbroken word, a
+ * deep folder, a path with no breaks, a long model, callsign and activity, and a long unbroken label — so the
+ * Sessions page's geometry gate (`sessions-page-geometry.ts`) measures the worst text, not the polite kind.
+ */
+const LONG_NAME_SESSIONS: readonly SessionView[] = [
+  dashboardSession(
+    'ms9long-a1',
+    'bartholomew-the-third-of-the-long-callsigns',
+    'Rewrite_the_quarterly_reconciliation_job_so_that_it_never_double_counts_a_settled_invoice_again',
+    '/work/ferretry/packages/pwa/src/components/very-long-folder-name-without-any-break-at-all/and-another-one',
+    {
+      status: 'awaiting_user',
+      needsHuman: 'Choose_the_release_window_for_the_unbroken_deployment_of_the_whole_monorepo_today',
+      activity: 'Waiting_on_the_extremely_long_running_integration_test_gate_for_the_pwa_package',
+    },
+    {
+      label: 'a-very-long-unbroken-task-label-that-keeps-going-and-going-and-going-past-any-phone-width',
+      model: 'claude-opus-5-5-with-an-unreasonably-long-model-identifier-1m-context',
+    },
+  ),
+  dashboardSession(
+    'ms9long-b2',
+    'ottilie',
+    'Fix the stuck sign-in on the checkout page when the saved card has expired and the user is on a slow network',
+    '/work/home-manager/modules/some/deeply/nested/module/directory/structure/that/never/ends/here',
+    { status: 'running' },
+    { label: 'Fix the stuck sign-in on the checkout page when the saved card has expired' },
+  ),
+];
+
 const SESSIONS_PAGE_FLEET = new DaemonFleetStore({
-  list: async () => DASHBOARD_SESSIONS,
+  list: async () =>
+    new URLSearchParams(window.location.search).has('long-names')
+      ? [...LONG_NAME_SESSIONS, ...DASHBOARD_SESSIONS]
+      : DASHBOARD_SESSIONS,
   get: async () => {
     throw new Error('the harness never reads a single session');
   },

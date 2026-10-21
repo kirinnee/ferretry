@@ -1248,7 +1248,6 @@ export function SessionChatPage({
             })}
         subFerrets={
           <SubFerretIndicator
-            compact={compact}
             sessions={subFerretsOf(session.config.id, daemonSessions ?? [])}
             {...(onNavigate === undefined
               ? {}

@@ -1,5 +1,10 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import { SubFerretIndicator, SubFerretList, subFerretItems } from '../../src/components/sub-ferrets.tsx';
+import {
+  SubFerretIndicator,
+  SubFerretList,
+  SubFerretsPack,
+  subFerretItems,
+} from '../../src/components/sub-ferrets.tsx';
 import '../support/dom.ts';
 import { interact, type Mounted, mount, must, pressKey } from '../support/dom.ts';
 import { sessionView } from '../support/sessions.ts';
@@ -22,9 +27,10 @@ const pack = [
 describe('the session bar’s sub-ferret indicator', () => {
   test('says how many and how they are doing, and opens a list that links to each', async () => {
     const opened: string[] = [];
-    view = await mount(<SubFerretIndicator compact={false} onOpenSession={id => opened.push(id)} sessions={pack} />);
+    view = await mount(<SubFerretIndicator onOpenSession={id => opened.push(id)} sessions={pack} />);
     const toggle = must(view.container.querySelector<HTMLButtonElement>('[data-sub-ferret-toggle]'), 'the toggle');
-    expect(toggle.textContent).toBe('3 sub-ferrets · 1 needs you · 1 running');
+    // Done is finished: not counted, not listed.
+    expect(toggle.textContent).toBe('2 sub-ferrets · 1 needs you · 1 running');
     expect(toggle.getAttribute('aria-expanded')).toBe('false');
     expect(toggle.hasAttribute('aria-label')).toBe(false);
     expect(view.container.querySelector('[data-sub-ferret-popover]')).toBeNull();
@@ -35,7 +41,6 @@ describe('the session bar’s sub-ferret indicator', () => {
     expect([...popover.querySelectorAll('[data-sub-ferret-state]')].map(state => state.textContent)).toEqual([
       'Working',
       'Needs you',
-      'Done',
     ]);
     expect(popover.querySelector('.fy-sub-ferret-model')?.textContent).toBe('claude-opus-5-5');
 
@@ -46,7 +51,7 @@ describe('the session bar’s sub-ferret indicator', () => {
   });
 
   test('closes on Escape and on a press outside it, but not on a press inside it or another key', async () => {
-    view = await mount(<SubFerretIndicator compact={false} sessions={pack} />);
+    view = await mount(<SubFerretIndicator sessions={pack} />);
     const toggle = must(view.container.querySelector<HTMLButtonElement>('[data-sub-ferret-toggle]'), 'the toggle');
     await interact(() => toggle.click());
     await interact(() => pressKey(document, 'Enter'));
@@ -67,16 +72,36 @@ describe('the session bar’s sub-ferret indicator', () => {
     expect(view.container.querySelector('[data-sub-ferret-popover]')).toBeNull();
   });
 
-  test('on a phone it is the icon and the count, named by the summary', async () => {
-    view = await mount(<SubFerretIndicator compact sessions={pack.slice(0, 1)} />);
+  test('counts and lists only the active, and draws nothing once every one has finished', async () => {
+    const finished = [
+      sessionView('f1', { config: { parent: 'lead' }, state: { status: 'completed' } }),
+      sessionView('f2', { config: { parent: 'lead' }, state: { status: 'stopped' } }),
+      sessionView('f3', { config: { parent: 'lead' }, state: { status: 'failed' } }),
+    ];
+    view = await mount(<SubFerretIndicator sessions={[...finished, ...pack.slice(0, 1)]} />);
     const toggle = must(view.container.querySelector<HTMLButtonElement>('[data-sub-ferret-toggle]'), 'the toggle');
-    expect(toggle.textContent).toBe('1');
-    expect(toggle.getAttribute('aria-label')).toBe('1 sub-ferret · 1 running');
+    expect(toggle.textContent).toBe('1 sub-ferret · 1 running');
+    await interact(() => toggle.click());
+    expect(view.container.querySelectorAll('[data-sub-ferret]').length).toBe(1);
+    await view.render(<SubFerretIndicator sessions={finished} />);
+    expect(view.container.innerHTML).toBe('');
   });
 
   test('draws nothing for a ferret that started none', async () => {
-    view = await mount(<SubFerretIndicator compact={false} sessions={[]} />);
+    view = await mount(<SubFerretIndicator sessions={[]} />);
     expect(view.container.innerHTML).toBe('');
+  });
+});
+
+describe('Info’s pack', () => {
+  test('the active ones show, the finished are behind a toggle, and a pack with none says so', async () => {
+    const finished = sessionView('f1', { config: { parent: 'lead' }, state: { status: 'completed' } });
+    view = await mount(<SubFerretsPack sessions={[...pack, finished]} />);
+    expect(view.container.querySelectorAll('[data-sub-ferret]').length).toBe(2);
+    await view.render(<SubFerretsPack sessions={pack.slice(0, 1)} />);
+    expect(view.container.querySelector('[data-sub-ferret-finished-toggle]')).toBeNull();
+    await view.render(<SubFerretsPack sessions={[finished]} />);
+    expect(view.container.textContent).toContain('None active');
   });
 });
 

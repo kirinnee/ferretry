@@ -2,7 +2,7 @@
 
 import type { ManagedWorktreeView, SessionView } from '@ferretry/protocol';
 import { GitBranch, ListTodo, Pencil } from 'lucide-react';
-import { SubFerretList, subFerretItems } from '../../components/sub-ferrets.tsx';
+import { SubFerretsPack, activeSubFerrets } from '../../components/sub-ferrets.tsx';
 import { displayCallsign } from '../../lib/callsign.ts';
 import { relativeTime } from '../../lib/session-screens.ts';
 import type { ClipboardWriter } from '../onboarding/copy-button.tsx';
@@ -98,12 +98,13 @@ export function InfoOverview({
           link(family.parent)
         )}
       </InfoRow>
-      <InfoRow label={`Sub-ferrets (${family.children.length})`}>
+      <InfoRow label={`Sub-ferrets (${activeSubFerrets(family.children).length})`}>
         {family.children.length === 0 ? (
           <span className="fy-info-muted">None</span>
         ) : (
           // Each with how it is doing now and the model it runs on, so a parent reads its pack here.
-          <SubFerretList items={subFerretItems(family.children, onOpenSession)} />
+          // Only the active ones show; the finished are one tap away.
+          <SubFerretsPack onOpenSession={onOpenSession} sessions={family.children} />
         )}
       </InfoRow>
       <InfoRow copy={view.config.id} hint={INFO_HINT.sessionId} label="Session id" mono write={write}>

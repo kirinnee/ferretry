@@ -50,6 +50,7 @@ import { THEME_FAMILIES } from '../src/lib/theme-preferences.ts';
 import { captureElement } from './gallery-capture.ts';
 import { assertFixedElementsClear } from './landing-geometry.ts';
 import { runSafeAreaGeometry, SAFE_AREA_GEOMETRY_CHECKS } from './safe-area-geometry.ts';
+import { runSessionsPageGeometry, SESSIONS_PAGE_GEOMETRY_CHECKS } from './sessions-page-geometry.ts';
 import { runSessionLayoutGeometry, SESSION_LAYOUT_GEOMETRY_CHECKS } from './session-layout-geometry.ts';
 
 const harnessDir = dirname(fileURLToPath(import.meta.url));
@@ -120,6 +121,8 @@ const PAIRING_FAILURES_ONLY = process.argv.includes('--pairing-failures-only');
 const SESSION_LAYOUT_ONLY = process.argv.includes('--session-layout-only');
 /** Just the bottom safe-area geometry (`safe-area-geometry.ts`), capturing its evidence frames. */
 const SAFE_AREA_ONLY = process.argv.includes('--safe-area-only');
+/** Just the Sessions page's sideways-scroll geometry (`sessions-page-geometry.ts`). */
+const SESSIONS_PAGE_ONLY = process.argv.includes('--sessions-page-only');
 
 /**
  * Whether this invocation walks the Settings block at all, which decides which tally it owes.
@@ -147,7 +150,8 @@ const WALKS_SETTINGS = !(
   ABOUT_ONLY ||
   AGENT_CLIS_ONLY ||
   SESSION_LAYOUT_ONLY ||
-  SAFE_AREA_ONLY
+  SAFE_AREA_ONLY ||
+  SESSIONS_PAGE_ONLY
 );
 
 /**
@@ -2075,7 +2079,7 @@ try {
 
   const browser = await chromium.launch({ executablePath: chrome, headless: true });
   try {
-    for (const viewport of SESSION_LAYOUT_ONLY || SAFE_AREA_ONLY ? [] : VIEWPORTS) {
+    for (const viewport of SESSION_LAYOUT_ONLY || SAFE_AREA_ONLY || SESSIONS_PAGE_ONLY ? [] : VIEWPORTS) {
       const context = await browser.newContext({
         ...(viewport.name === 'mobile'
           ? PHONE_CONTEXT
@@ -4023,6 +4027,21 @@ try {
     if (owesSafeArea)
       process.stdout.write(
         `✅ safe-area geometry checks: ${safeAreaChecks}/${SAFE_AREA_GEOMETRY_CHECKS} in ${SCHEME}\n`,
+      );
+
+    // THE SESSIONS PAGE'S SIDEWAYS SCROLL, on a phone at four widths and every density, with the worst text.
+    const owesSessionsPage = WALKS_SETTINGS || SESSIONS_PAGE_ONLY;
+    const sessionsPageChecks = owesSessionsPage
+      ? await runSessionsPageGeometry({ browser, rootUrl: server.url.toString(), scheme: SCHEME, fail })
+      : 0;
+    if (owesSessionsPage && sessionsPageChecks !== SESSIONS_PAGE_GEOMETRY_CHECKS)
+      fail(
+        `the run made ${sessionsPageChecks} sessions page geometry checks instead of the ` +
+          `${SESSIONS_PAGE_GEOMETRY_CHECKS} it owes — a width or a density was skipped`,
+      );
+    if (owesSessionsPage)
+      process.stdout.write(
+        `✅ sessions page geometry checks: ${sessionsPageChecks}/${SESSIONS_PAGE_GEOMETRY_CHECKS} in ${SCHEME}\n`,
       );
 
     // THE CLOSING LINE, and the only one the CI script insists on. It is reached after both viewports
