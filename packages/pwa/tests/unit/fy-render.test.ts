@@ -225,8 +225,8 @@ describe('fy-render fence language', () => {
     should(FY_RENDER_FENCE_LANGUAGE).equal('fy-render');
   });
 
-  test('should declare the eight types the block grammar accepts', () => {
-    should([...FY_RENDER_TYPES]).eql(['html', 'svg', 'lottie', 'mermaid', 'image', 'video', 'audio', 'pdf']);
+  test('should declare the nine types the block grammar accepts', () => {
+    should([...FY_RENDER_TYPES]).eql(['html', 'svg', 'lottie', 'mermaid', 'map', 'image', 'video', 'audio', 'pdf']);
   });
 
   test('should allow a src header on exactly the four media types', () => {
@@ -310,6 +310,7 @@ describe('fy-render presentation', () => {
       accepted(body('type: lottie', 'alt: A spinner', '---', '{"layers":[]}')),
       accepted(body('type: mermaid', 'alt: A graph', '---', 'graph TD;')),
       accepted(body('type: image', 'alt: A pixel', 'mime: image/png', '---', PIXEL)),
+      accepted(body('type: map', 'alt: A city', '---', 'center: [51.5, -0.12]')),
     ];
 
     // Act
@@ -324,6 +325,7 @@ describe('fy-render presentation', () => {
       ['lottie', 'sandbox'],
       ['mermaid', 'sandbox'],
       ['image', 'visual'],
+      ['map', 'map'],
     ]);
   });
 
@@ -448,6 +450,26 @@ describe('fy-render html payloads', () => {
     const payload = 'a'.repeat(FY_RENDER_LIMITS.htmlBytes + 1);
     should(reasonOf(parseFyRender(body('type: html', 'alt: A widget', '---', payload)))).equal(
       'HTML payload exceeds 200 KiB',
+    );
+  });
+});
+
+describe('fy-render map payloads', () => {
+  test('should accept a map payload inside the byte cap and keep it as written', () => {
+    const result = parseFyRender(body('type: map', 'alt: A city', '---', 'center: [51.5, -0.12]'));
+    should(result.ok && result.block.type === 'map' ? result.block.payload : null).equal('center: [51.5, -0.12]');
+  });
+
+  test('should refuse a map payload past the byte cap', () => {
+    const payload = 'a'.repeat(FY_RENDER_LIMITS.mapBytes + 1);
+    should(reasonOf(parseFyRender(body('type: map', 'alt: A city', '---', payload)))).equal(
+      'Map payload exceeds 32 KiB',
+    );
+  });
+
+  test('should refuse a map block with nothing to draw', () => {
+    should(reasonOf(parseFyRender(body('type: map', 'alt: A city', '---', '   ')))).equal(
+      'A map block needs a payload describing it',
     );
   });
 });

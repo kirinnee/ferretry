@@ -19,6 +19,15 @@ export const FY_RENDER_LIMITS = {
   svgBytes: 100 * 1024,
   svgElements: 500,
   mermaidCharacters: 20_000,
+  /** A `map` payload: JSON or YAML, a few markers and routes. Larger is a data dump, not an illustration. */
+  mapBytes: 32 * 1024,
+  /** A map draws at most this many pins, shapes (lines plus polygons) and vertices across all of them. */
+  mapMarkers: 100,
+  mapShapes: 50,
+  mapVertices: 2000,
+  /** A pin's label and its popup, cut to these rather than refused. */
+  mapLabelCharacters: 80,
+  mapPopupCharacters: 500,
   lottieBytes: 1024 * 1024,
   lottieLayers: 500,
   lottieDepth: 64,

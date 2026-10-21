@@ -65,15 +65,15 @@ next restart. A ferret should check before telling the owner a section is missin
 Exactly this, from `HYPERMEDIA_INSTRUCTION` in `packages/fleet/src/lib/account/fixed-layer.ts`. It is
 in every turn's context, so it is kept short; change it there and here together.
 
-````text
-Hypermedia: when you teach, explain, compare or walk through anything not straightforward — a flow, an architecture, a state machine, a layout, a change over time — show it in your chat reply as well as saying it. Do not overdo it: a simple answer stays plain text, and one clear picture beats several.
-Always inline: never publish an artifact, page, gist or link to explain something unless the owner asks for one. This overrides any artifact habit.
-Tell it as a short story the reader can drive: step-through Next buttons, sliders, toggles, tap to reveal, or an animated diagram. One idea per step, short labels, clear hierarchy, gentle motion that honours prefers-reduced-motion, no walls of text.
+````textHypermedia: when you teach, explain, compare or walk through anything not straightforward — a flow, architecture, state machine, layout or change over time — show it in your reply as well as saying it. Do not overdo it: a simple answer stays plain text; one picture beats several.
+Always inline: never publish an artifact, page, gist or link to explain something unless the owner asks for one.
+Tell it as a short story the reader can drive: step-through Next buttons, sliders, toggles, tap to reveal, animated diagrams. One idea per step, short labels, gentle motion that honours prefers-reduced-motion.
 Write a fenced block whose info string is exactly fy-render: line 1 `type: <type>`, line 2 `alt: <one-line description>`, then a line `---`, then the payload.
-- mermaid: Mermaid source (flowchart, sequenceDiagram, stateDiagram-v2, …).
-- svg: one self-contained <svg>…</svg> (CSS animation welcome); no script, foreignObject, use or external links.
-- html: a fragment with inline CSS, and <script> for the interaction (it runs isolated). Load nothing from the network.
-- image, video, audio, pdf: save files you make into $FY_MEDIA_DIR and put `src: media:<file name>` before `---`, with no payload; `src: @path/in/your/workspace` and `src: https://…` also work.
+- mermaid: Mermaid source (flowchart, sequenceDiagram, …).
+- svg: one self-contained <svg>…</svg> (CSS animation welcome); no script, foreignObject or external links.
+- html: a fragment with inline CSS and <script> for interaction (runs isolated); load nothing from the network.
+- map: JSON/YAML {center: [lat, lng], zoom, markers: [{at, label, popup}], lines: [{points}], polygons, geojson}; real places.
+- image, video, audio, pdf: save files you make into $FY_MEDIA_DIR and put `src: media:<file name>` before `---`, with no payload; `src: @workspace/path` and `src: https://…` also work.
 Example:
 ```fy-render
 type: mermaid
@@ -82,7 +82,7 @@ alt: How a request reaches the daemon
 flowchart LR
   Phone --> Relay --> Daemon
 ```
-It renders inline in the reader's chat. Chat only: never write fy-render into files, docs, commits or PR text.
+It renders inline in the reader's chat. Chat only: never write fy-render into files, docs, commits or PRs.
 ````
 
 ## The supported forms
@@ -92,15 +92,16 @@ A block the grammar refuses renders as an ordinary escaped code fence, so a malf
 breaks the transcript. Nothing decodes, downloads or runs until the reader presses **Render**
 ([fy-render.md](fy-render.md#no-browser-decoder-runs-until-the-reader-asks)).
 
-| `type:`   | Payload / header                    | Renders as                                                                                       |
-| --------- | ----------------------------------- | ------------------------------------------------------------------------------------------------ |
-| `mermaid` | Mermaid source                      | a diagram, compiled in the sandbox frame, theme following light/dark                             |
-| `svg`     | one `<svg>` document                | a picture through the measured `<img>` sink — never inline SVG                                   |
-| `html`    | one self-contained fragment         | no script: sanitized markup in a closed shadow root; with script: a live page in an opaque frame |
-| `image`   | `src:` — or `mime:` + base64 inline | a picture; an https image needs CORS from its host, else a link row                              |
-| `video`   | `src:`                              | the browser's native player (https plays directly)                                               |
-| `audio`   | `src:`                              | the browser's native player (https plays directly)                                               |
-| `pdf`     | `src:`                              | a file row with Open / Download; an https PDF is a link (no in-frame viewer)                     |
+| `type:`   | Payload / header                                  | Renders as                                                                                       |
+| --------- | ------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| `mermaid` | Mermaid source                                    | a diagram, compiled in the sandbox frame, theme following light/dark                             |
+| `map`     | small JSON/YAML: centre, markers, lines, polygons | an inline interactive map (Leaflet, OpenStreetMap tiles); a coordinates list if it cannot draw   |
+| `svg`     | one `<svg>` document                              | a picture through the measured `<img>` sink — never inline SVG                                   |
+| `html`    | one self-contained fragment                       | no script: sanitized markup in a closed shadow root; with script: a live page in an opaque frame |
+| `image`   | `src:` — or `mime:` + base64 inline               | a picture; an https image needs CORS from its host, else a link row                              |
+| `video`   | `src:`                                            | the browser's native player (https plays directly)                                               |
+| `audio`   | `src:`                                            | the browser's native player (https plays directly)                                               |
+| `pdf`     | `src:`                                            | a file row with Open / Download; an https PDF is a link (no in-frame viewer)                     |
 
 `src:` is one of three things, and nothing else:
 

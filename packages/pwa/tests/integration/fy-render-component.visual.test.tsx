@@ -34,6 +34,7 @@ import { resolve } from 'node:path';
 import type { Browser, Page } from 'playwright-core';
 import should from 'should';
 import { FY_RENDER_VISUAL_CASES } from './fixtures/fy-render-visual-cases.ts';
+import { fakeTilePng } from '../support/fake-tile.ts';
 import { sharedChromium } from './support/chromium.ts';
 import { fyRenderIntegrationFixture } from './support/fy-render-integration-fixture.ts';
 
@@ -145,6 +146,7 @@ beforeAll(async () => {
 body { margin: 0; background: var(--surface-1, #0f1115); color: var(--fg); font-family: var(--font-ui, ui-sans-serif, system-ui, sans-serif); font-size: var(--text-md, 13.5px); }
 .scene-pad { padding: 16px; max-width: 900px; margin: 0 auto; }
 #before { margin-bottom: 8px; }
+html[data-theme$="light"] body { background: #fafafa; color: #15171c; }
 </style>
 </head><body><div id="root"></div><script type="module" src="/app.js"></script></body></html>`,
         { headers: { 'content-type': 'text/html; charset=utf-8' } },
@@ -186,6 +188,8 @@ afterAll(async () => {
 interface Scene {
   readonly page: Page;
   readonly close: () => Promise<void>;
+  /** Every request the page made to an origin other than this test's own server, in order. */
+  readonly outside: string[];
   /** Captures a PNG when `FY_RENDER_EVIDENCE_DIR` is set, and records the facts. */
   readonly shot: (name: string, facts?: Record<string, unknown>) => Promise<void>;
 }
@@ -193,11 +197,11 @@ interface Scene {
 const openScene = async (
   which: string,
   viewport: (typeof VIEWPORTS)[number],
-  options: { reducedMotion?: 'reduce' } = {},
+  options: { reducedMotion?: 'reduce'; theme?: 'light' | 'dark' } = {},
 ): Promise<Scene> => {
   if (!caseNames.has(which)) throw new Error(`no such fy-render fixture: ${which}`);
   const context = await browser.newContext({
-    colorScheme: 'dark',
+    colorScheme: options.theme ?? 'dark',
     deviceScaleFactor: 2,
     reducedMotion: options.reducedMotion ?? 'no-preference',
     /**
@@ -223,10 +227,21 @@ const openScene = async (
     viewport: { height: viewport.height, width: viewport.width },
   });
   const page = await context.newPage();
-  await page.goto(`${server.url.origin}/?case=${which}`);
+  // A map's tiles are the one remote load a block makes. They are answered here, never fetched: a test that
+  // reached a real tile server would depend on the network and on that provider's goodwill.
+  const outside: string[] = [];
+  page.on('request', request => {
+    if (!request.url().startsWith(server.url.origin) && !request.url().startsWith('data:')) outside.push(request.url());
+  });
+  await page.route('https://tile.openstreetmap.org/**', route =>
+    route.fulfill({ body: Buffer.from(fakeTilePng()), contentType: 'image/png' }),
+  );
+  const theme = options.theme === 'light' ? '&theme=studio-light' : '';
+  await page.goto(`${server.url.origin}/?case=${which}${theme}`);
   await page.waitForSelector('[data-fy-render-type]');
   return {
     close: async () => await context.close(),
+    outside,
     page,
     shot: async (name, facts = {}) => {
       manifest.push({ case: which, scene: name, viewport: viewport.name, ...facts });
@@ -556,6 +571,90 @@ describe('fy-render component evidence — layout and focus', () => {
       should(await page.locator('[role="dialog"]').count()).equal(0);
       should(await page.evaluate(() => document.activeElement?.getAttribute('aria-label'))).equal('Fullscreen');
       await shot('focus-01-restored', { overflow: await overflow(page) });
+    } finally {
+      await scene.close();
+    }
+  }, 120_000);
+});
+
+describe('fy-render component evidence — Map', () => {
+  for (const theme of ['light', 'dark'] as const) {
+    for (const viewport of VIEWPORTS) {
+      test(`should draw an interactive map with markers and a route, ${theme}, at ${viewport.name}`, async () => {
+        // Arrange
+        const scene = await openScene('map', viewport, { theme });
+        const { outside, page, shot } = scene;
+
+        try {
+          // Act — nothing to press: the map is near the viewport, so it draws by itself.
+          await page.waitForSelector('[data-fy-render-map="drawn"]', { timeout: 40_000 });
+          await page.waitForSelector('img.leaflet-tile-loaded');
+          await page.waitForTimeout(500);
+
+          // Assert — pins, one route, loaded tiles, and the reader's mode.
+          should(await page.locator('.fy-map-pin').count()).equal(3);
+          should(await page.locator('.leaflet-overlay-pane path').count()).equal(1);
+          should(await page.locator('[data-fy-render-map]').getAttribute('data-fy-render-map-mode')).equal(theme);
+          const filter = await page.evaluate(
+            () => getComputedStyle(document.querySelector('.leaflet-tile-pane') as Element).filter,
+          );
+          should(filter === 'none').equal(theme === 'light');
+          const box = await page.locator('.fy-render-map').boundingBox();
+          should(box?.height ?? 0).be.above(180);
+          should(box?.width ?? 0).be.belowOrEqual(viewport.width);
+          should(await overflow(page)).equal(0);
+          // The tile host is the only origin the page reached, and only ever for tiles.
+          should(outside.length).be.above(0);
+          should(outside.every(url => url.startsWith('https://tile.openstreetmap.org/'))).be.true();
+          should(await page.locator('iframe').count()).equal(0);
+          await shot(`map-01-${theme}`, { overflow: await overflow(page), tiles: outside.length });
+        } finally {
+          await scene.close();
+        }
+      }, 120_000);
+    }
+  }
+
+  test('should open a popup on a tap and zoom from its own buttons', async () => {
+    // Arrange
+    const scene = await openScene('map', VIEWPORTS[1], { theme: 'light' });
+    const { page, shot } = scene;
+
+    try {
+      await page.waitForSelector('[data-fy-render-map="drawn"]', { timeout: 40_000 });
+      await page.waitForSelector('img.leaflet-tile-loaded');
+      const zoomOf = async (): Promise<number> =>
+        await page.evaluate(() => {
+          const tile = document.querySelector<HTMLImageElement>('img.leaflet-tile');
+          return Number(tile?.src.split('/').at(-3));
+        });
+      const before = await zoomOf();
+
+      // Act — tap a pin that has a popup.
+      await page.locator('.fy-map-pin').first().click();
+      await page.waitForSelector('.fy-map-popup');
+      await page.waitForTimeout(500);
+      await shot('map-02-popup');
+
+      // Assert — the popup is text in the page, and Zoom in asks for closer tiles.
+      should(await page.locator('.fy-map-popup-title').first().textContent()).equal('Big Ben');
+      await page.getByRole('button', { name: 'Zoom in' }).click();
+      await page.waitForFunction(
+        previous =>
+          Number(document.querySelector<HTMLImageElement>('img.leaflet-tile')?.src.split('/').at(-3)) > previous,
+        before,
+      );
+      should(await zoomOf()).be.above(before);
+
+      // Act / Assert — Fullscreen gives the map the whole window and Exit returns it.
+      await page.getByRole('button', { name: 'Fullscreen' }).click();
+      await page.waitForSelector('[role="dialog"]');
+      await page.waitForTimeout(400);
+      should(await page.locator('[role="dialog"] .leaflet-container').count()).equal(1);
+      should(await overflow(page)).equal(0);
+      await shot('map-03-fullscreen');
+      await page.getByRole('button', { name: 'Exit fullscreen' }).click();
+      should(await page.locator('[role="dialog"]').count()).equal(0);
     } finally {
       await scene.close();
     }
