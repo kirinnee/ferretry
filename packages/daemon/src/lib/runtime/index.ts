@@ -39,6 +39,7 @@ export * from './mounts/terminals.ts';
 export * from './mounts/warden.ts';
 export * from './mounts/webrtc.ts';
 export * from './provenance.ts';
+export * from './published-carriers.ts';
 export * from './secrets.ts';
 export * from './staged-surface.ts';
 export * from './timings.ts';

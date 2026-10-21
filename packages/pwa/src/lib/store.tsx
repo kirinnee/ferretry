@@ -24,10 +24,10 @@ import {
   readAccountPickerHealth,
 } from './account-picker-catalog.ts';
 import { DaemonAccountPickerStore } from './account-picker-store.ts';
+import { CarrierPreferenceStore } from './carrier-preference.ts';
 import { DaemonHttpTransport, daemonApiClient } from './api-client.ts';
 import { DaemonAttentionClient } from './attention-client.ts';
 import { browserLoginPort, DaemonBrowserLoginStore } from './browser-login.ts';
-import { CarrierPreferenceStore } from './carrier-preference.ts';
 import { DaemonConfigChangeStore } from './config-changes.ts';
 import {
   browserConnectionHealthEnvironment,
@@ -64,17 +64,18 @@ import { browserPresenceEnvironment, PresenceTracker } from './presence.ts';
 import { DaemonProjectsStore, daemonProjectsPort } from './projects-store.ts';
 import { DaemonPushDevices, type DaemonPushService, daemonPushService } from './push-enrolment.ts';
 import {
-  type CarrierDialers,
   DaemonCarrierRouter,
   type OutdatedSide,
   outdatedError,
   outdatedRefusal,
   outdatedSide,
+  type CarrierDialers,
   type RelayDial,
 } from './relay-carrier.ts';
 import { PairingOutcomeUnknownError, pairingCandidates, redeemPairingInSession } from './relay-pairing.ts';
 import { RelayPairingRefusedError, RelaySessionError } from './relay-session.ts';
 import { browserFetch, type DaemonFetch } from './runtime-models.ts';
+import { readTunnelService, type TunnelServiceState } from './tunnel-service.ts';
 import { browserScrollMemoryStorage, ScrollMemory, type ScrollMemoryStorage } from './scroll-memory.ts';
 import { fetchSecuritySettings, UNLOCK_STAYS_FALLBACK, unlockStaysSentence } from './security-settings-client.ts';
 import { SessionCache, type SessionCacheBackend, seedFleetFromCache } from './session-cache.ts';
@@ -87,18 +88,17 @@ import {
   unlockCeremony,
 } from './step-up-ceremony.ts';
 import { StepUpGate } from './step-up-gate.ts';
-import { DictationDebugLog, type DictationDebugSnapshot } from './stt/dictation-debug.ts';
 import {
   browserParakeetVoice,
   type ParakeetAssets,
   type ParakeetGlobalLike,
   type ParakeetVoice,
 } from './stt/parakeet-voice.ts';
+import { type DictationDebugSnapshot, DictationDebugLog } from './stt/dictation-debug.ts';
 import { DeviceSpeedupKeys, IndexedDbSpeedupKeyRecords } from './stt/speedup-keys.ts';
-import { SttSettingsStore } from './stt/stt-settings.ts';
 import { TranscriptionLog, type TranscriptionLogSnapshot } from './stt/transcription-log.ts';
 import { IndexedDbTranscriptionLogRecords } from './stt/transcription-log-records.ts';
-import { readTunnelService, type TunnelServiceState } from './tunnel-service.ts';
+import { SttSettingsStore } from './stt/stt-settings.ts';
 import { DaemonUsageStore, daemonUsagePort } from './usage-store.ts';
 import { browserWebRtcDialer, type WebRtcDialer } from './webrtc-carrier.ts';
 import { WorkspaceLayoutStore } from './workspace-layout-store.ts';

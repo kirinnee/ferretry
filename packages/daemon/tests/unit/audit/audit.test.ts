@@ -1072,7 +1072,7 @@ function pairing(
       daemonId: DAEMON_ID,
       daemonName: 'workstation',
       advertisement: { kind: 'address', url: 'https://workstation.example.test', origin: 'operator' },
-      carriers: [],
+      carriers: { current: () => [] },
       clock: { now: () => nowMs },
       cryptography,
       devices,

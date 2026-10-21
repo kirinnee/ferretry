@@ -49,7 +49,6 @@ import { MotionSetting, SessionsListSetting } from './conversation-settings.tsx'
 import { type DaemonReachabilityProbe, daemonDisplayName, distinctDaemonName } from './daemon-settings.tsx';
 import { DaemonSettingsFrame, type DaemonSettingsTabDefinition } from './daemon-settings-frame.tsx';
 import { DevicePermissionsSetting } from './device-permissions-settings.tsx';
-import { DictationDebugSettings } from './dictation-debug-settings.tsx';
 import { DictationSettings, type DictationSettingsProps } from './dictation-settings.tsx';
 import type { GrantClientFactory } from './grants-settings.tsx';
 import { useMachineUpdates } from './machine-updates.ts';
@@ -67,6 +66,7 @@ import {
   settingsSectionForSetting,
 } from './settings-catalog.ts';
 import { SettingsHome, type SettingsMachineEntry, SettingsSidebar } from './settings-navigation.tsx';
+import { DictationDebugSettings } from './dictation-debug-settings.tsx';
 import { SpeedupKeysSettings } from './speedup-keys-settings.tsx';
 import { TranscriptionLogSettings } from './transcription-log-settings.tsx';
 import { ViewportDetails } from './viewport-details.tsx';

@@ -82,7 +82,6 @@ import { SessionSearchControl, SessionSearchProvider } from './features/session-
 import { aboutSettingsTab } from './features/settings/about-machine.tsx';
 import { agentClisSettingsTab } from './features/settings/agent-clis.tsx';
 import { CgroupConfigSurface } from './features/settings/cgroup-settings.tsx';
-import { ConnectionPreferenceSettings } from './features/settings/connection-preference-settings.tsx';
 import { daemonDisplayName, distinctDaemonName } from './features/settings/daemon-settings.tsx';
 import { dictationShortcutLabel } from './features/settings/dictation-shortcut.ts';
 import { DoctorSettings } from './features/settings/doctor-settings.tsx';
@@ -100,6 +99,7 @@ import { pricingSettingsTab } from './features/settings/pricing-settings.tsx';
 import { securityLogSettingsTab } from './features/settings/security-log-settings.tsx';
 import { settingsPaletteEntries } from './features/settings/settings-catalog.ts';
 import { SettingsPage } from './features/settings/settings-page.tsx';
+import { ConnectionPreferenceSettings } from './features/settings/connection-preference-settings.tsx';
 import { ViewportOverlay } from './features/settings/viewport-details.tsx';
 import { speedupsSettingsTab } from './features/speedups/speedups-surface.tsx';
 import { StepUpDialog, UNLOCK_COPY } from './features/step-up/step-up-dialog.tsx';
@@ -108,9 +108,9 @@ import { useAskWardenActions } from './features/warden/ask-warden.tsx';
 import { WardenOverviewSurface } from './features/warden/warden-overview-surface.tsx';
 import { useAccountPickerSlice } from './hooks/use-account-picker.ts';
 import { useActiveCarrier, useDeviceRefused } from './hooks/use-active-carrier.ts';
+import { useCarrierPreferences, useTunnelService } from './hooks/use-carrier-preferences.ts';
 import { useAppViewport } from './hooks/use-app-viewport.ts';
 import { useAttentionSession, useAttentionSnapshot } from './hooks/use-attention.ts';
-import { useCarrierPreferences, useTunnelService } from './hooks/use-carrier-preferences.ts';
 import { useConfigChangeFeed } from './hooks/use-config-change-feed.ts';
 import { useConnectionHealth } from './hooks/use-connection-health.ts';
 import { useInputModality } from './hooks/use-input-modality.ts';
@@ -140,9 +140,10 @@ import {
 import { useSttSettings } from './hooks/use-stt-settings.ts';
 import { useTheme } from './hooks/use-theme.ts';
 import { type MachineSource, machineDisplayOrder } from './lib/all-machines.ts';
-import { DEFAULT_CARRIER_PREFERENCE } from './lib/carrier-preference.ts';
 import type { DaemonConnectionRecord } from './lib/connections.ts';
 import { type DaemonConnection, type DaemonId, daemonCarriers } from './lib/daemon-connection.ts';
+import { DEFAULT_CARRIER_PREFERENCE } from './lib/carrier-preference.ts';
+import { tunnelNote } from './lib/tunnel-service.ts';
 import { daemonSessionKey, daemonSessionScope } from './lib/daemon-scope.ts';
 import { projectKeyFor } from './lib/fleet-grouping.ts';
 import { installBanner } from './lib/install-prompt.ts';
@@ -206,7 +207,6 @@ import {
 } from './lib/store.tsx';
 import type { ParakeetAssets } from './lib/stt/parakeet-voice.ts';
 import { createSurfaceEventHub } from './lib/surface-control.ts';
-import { tunnelNote } from './lib/tunnel-service.ts';
 import {
   AppBar,
   AppTabBar,

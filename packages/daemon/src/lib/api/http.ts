@@ -40,6 +40,13 @@ export interface ApiRequest {
    */
   readonly privilegedLoopback?: boolean;
   /**
+   * `'tunnel'` when this request arrived on the dedicated tunnel listener (`docs/relay-protocol.md`
+   * §15), and absent everywhere else. Set by the transport from how the listener was BOUND — never from
+   * anything the caller sent — and carried into the session's arrival so a tunnel session can refuse
+   * what a tunnel may never carry: first-contact pairing.
+   */
+  readonly carrier?: 'tunnel';
+  /**
    * The paired device a SESSION proved, and nothing else can set this.
    *
    * A device authenticates by signing its session's transcript with a key it cannot export (see
