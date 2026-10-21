@@ -2590,10 +2590,23 @@ the application's own cursors, not a session that pretends nothing happened.
 
 ### What the browser shows
 
-The active carrier is always named (§1): "WebRTC (direct to this machine)" when a channel carries the
-session; the round trip, from the selected candidate pair's `currentRoundTripTime`; and, when the
-device fell back, the sentence that says why — the deadline, an engine the daemon reported unavailable,
-a daemon too old to offer it, or a choice (§15) that excluded it.
+The active carrier is always named (§1): WebRTC when a channel carries the session, with the round
+trip read from the nominated candidate pair's `currentRoundTripTime` — polled every 5 seconds while
+the machine's Connection panel shows it, and never otherwise. When a slower carrier won AFTER WebRTC
+was tried, the choice carries WebRTC's own sentence as the reason a faster carrier is not carrying
+("no direct path found in 8 s — this network may block peer-to-peer connections", the daemon's
+refusal, or "this machine does not offer WebRTC yet — updating Ferretry on it adds it"). A WebRTC that
+was never tried — no `RTCPeerConnection` in this browser, or a preference (§15) that leaves it out — is
+passed over as untried and is no fallback reason at all.
+
+**How the browser holds it.** One `RTCPeerConnection` per daemon serves every session: the first dial
+negotiates, every later one opens another channel on the same connection with no signalling. A
+channel's first message can arrive in the same task as its `open` (measured in Chrome, on a peer that
+is already connected), so a channel buffers from the moment it is created and the socket is announced
+to the session only after the dial has resolved. A connection that `failed` or `closed`, or that
+cannot open a new channel within 4 seconds, is dropped; so is every connection when the device comes
+back online or its network type changes. The next dial negotiates afresh over the network the device
+is on now — the renegotiation that stands in for the ICE restart libdatachannel refuses.
 
 ### The engine
 
@@ -2638,8 +2651,31 @@ loopback, the engine answering Chrome's offer, beside a Bun WebSocket in the sam
 Loopback is the carrier's own overhead and nothing else: on a real path the round trip is the
 network's, and a peer-to-peer path pays it once where a relay pays two legs. The bench does not run a
 session above the channel, because the session is byte-for-byte the same on every carrier and costs the
-same on each. A keystroke over this carrier on a shaped WAN path is measured when the browser half
-exists, by extending §14's `relay-terminal-bench.ts`.
+same on each.
+
+**A keystroke over it**, measured by §14's `packages/pwa/harness/relay-terminal-bench.ts` (real tmux,
+the daemon's real `WebRtcCarrier` and direct session, the PWA's own dialer and session in a real
+Chrome, xterm.js painting the echo; 30 keys per case, p50 / p95 ms, one machine, 2026-10-21). WebRTC
+runs on loopback only: it is UDP, which the bench's shaping proxy (TCP) cannot touch.
+
+| case                     |      direct |      WebRTC | relay (gate 0) |
+| ------------------------ | ----------: | ----------: | -------------: |
+| loopback · fresh         |  9.9 / 11.5 | 10.2 / 12.4 |    10.0 / 10.9 |
+| loopback · 300 lines     | 11.9 / 26.6 | 14.6 / 26.7 |    13.6 / 26.6 |
+| loopback · 1500 lines    | 11.8 / 26.7 | 12.4 / 26.7 |    12.8 / 26.9 |
+| WAN (60 ms path) · fresh | 72.4 / 73.8 |           — |    75.7 / 77.7 |
+
+So the carrier itself costs nothing measurable — a keystroke is the daemon's ~10 ms plus the path, on
+every carrier. What WebRTC changes is the path: away from home it is the direct path's ONE leg, phone
+to home, where the relay pays phone to edge to home and a phone far from both pays the Durable Object's
+placement on every key (§14, "What is not done").
+
+**What it costs to get there**, measured by the real-browser journey below on one machine: a session
+page away from home named WebRTC as its carrier **5.6–13.1 s** after it was asked for — the 4-second
+direct attempt, a relay session to introduce the two ends, the offer, ICE, DTLS and SCTP — and a page
+with no peer-to-peer path fell back to the relay at **14.2–17.8 s**, the 8-second ICE deadline
+included. An event the daemon appended after WebRTC won crossed with **zero** session frames on the
+rendezvous.
 
 ### What is built, and what is not
 
@@ -2655,6 +2691,24 @@ exists, by extending §14's `relay-terminal-bench.ts`.
   proven device's request crosses the channel and reaches the route table as `loopback: false`,
   `webrtc-peer:…`, though both peers are on one machine; the heartbeat crosses as text; and a refused
   device proof reaches the client as `closed` `4403` before the channel closes.
-- **Not built yet — the browser carrier**: the dial, bounded gathering, the 8-second deadline and the
-  relay fallback, reconnection on a network change, the Connection status above, and the real-browser
-  journey that proves a phone↔daemon data path and a forced ICE failure falling back to the relay.
+- **Built — the browser carrier.** `packages/pwa/src/lib/webrtc-carrier.ts` (`WebRtcDialer`: the dial,
+  bounded gathering, the deadline and the sentence it fails with, renegotiation on a dead path or a new
+  network, the signaller that posts through an introducer), wired as the router's `CarrierDialers.webrtc`
+  by the store, the fallback reason in the router's choice, and the round trip on the Connection panel
+  (`useCarrierRtt`). Proved by `tests/e2e/webrtc-carrier.e2e.test.ts`: a real Chrome, paired over a real
+  rendezvous with a freshly compiled `fyd` whose direct address is a sinkhole, is carried peer-to-peer
+  with no session bytes on the relay; and with every ICE candidate removed from both descriptions in
+  the page (a network with no peer-to-peer path; Chrome's own `disable_non_proxied_udp` policy was
+  measured NOT to stop a loopback connection), it falls back to the relay at the deadline and the
+  Connection panel says why.
+- **GAP — no upgrade in place.** A connection that fell back to the relay stays there for the life of
+  the page's connection, as every winner does (§13, "The walk", rule 4); WebRTC is tried again only
+  when that carrier fails or the page reloads. A background upgrade would be a second, racing walk,
+  which §13 rules out until it can still say why each carrier won.
+- **GAP — first contact still pays the direct attempt.** Auto tries direct first (§15), so a page away
+  from home waits out its 4 seconds before WebRTC is even introduced; the measured 5.6–13.1 s above
+  includes it.
+- **GAP — no NAT is in any test.** Both peers run on one machine, so ICE pairs host candidates;
+  whether a given home router or carrier-grade NAT lets two server-reflexive candidates meet is the
+  STUN half, which only a device on a real network can show. Symmetric NAT on both ends is expected to
+  fail and fall back — that is what the deadline is for.

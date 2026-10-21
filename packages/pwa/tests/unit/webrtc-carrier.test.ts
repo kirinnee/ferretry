@@ -316,6 +316,27 @@ describe('the WebRTC carrier, browser side', () => {
     should(built.peers[0]?.channels).have.length(2);
   });
 
+  it('should keep a message that arrived in the same turn as its channel opened (measured in Chrome)', async () => {
+    // Arrange — on a connected peer the daemon's `ready` can land in the very task that opens the channel.
+    const built = harness();
+    await connected(built);
+    const second = built.subject.dial(new AbortController().signal);
+    const channel = built.peers[0]?.channels[1] as FakeChannel;
+    const ready = new Uint8Array([0xfe, 1]).buffer;
+
+    // Act
+    channel.open();
+    channel.onmessage?.({ data: ready });
+    const socket = await second;
+    const events: string[] = [];
+    socket.onOpen = () => events.push('open');
+    socket.onBinary = bytes => events.push(`bytes ${[...bytes].join(',')}`);
+    built.timers.advance(0);
+
+    // Assert
+    should(events).deepEqual(['open', 'bytes 254,1']);
+  });
+
   it('should share one negotiation between dials that arrive together', async () => {
     // Arrange
     const built = harness();

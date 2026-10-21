@@ -12,8 +12,9 @@ import { type ConnectionMethod, toBase64Url } from '@ferretry/relay';
 import { WebCryptoRelayCrypto } from '@ferretry/relay/adapters';
 import { Terminal } from '@xterm/xterm';
 import { daemonConnection } from '../src/lib/daemon-connection.ts';
-import { browserRelayDial, openRelaySession } from '../src/lib/relay-carrier.ts';
+import { browserRelayDial, openRelaySession, openSessionOnSocket } from '../src/lib/relay-carrier.ts';
 import type { RelayStreamFrame, SessionDeviceClaim } from '../src/lib/relay-session.ts';
+import { WebRtcDialer, type WebRtcPeerLike } from '../src/lib/webrtc-carrier.ts';
 
 export interface BenchRunConfig {
   readonly daemonId: string;
@@ -49,6 +50,22 @@ export interface BenchPageResult {
 }
 
 const now = (): number => performance.timeOrigin + performance.now();
+
+/**
+ * The WebRTC carrier as the app runs it, minus the introduction: the offer is handed straight to the
+ * daemon's own `WebRtcCarrier` through a function the orchestrator exposes, because what is timed here
+ * is the keystroke on an open channel, and signalling happens once, before the first one. No ICE
+ * server: loopback host candidates only, so the bench touches no network.
+ */
+const webrtc = new WebRtcDialer({
+  createPeer: configuration => new RTCPeerConnection(configuration as RTCConfiguration) as unknown as WebRtcPeerLike,
+  iceServers: [],
+  timers: {
+    setTimeout: (action, milliseconds) => setTimeout(action, milliseconds),
+    clearTimeout: handle => clearTimeout(handle as number),
+  },
+});
+const offer = (globalThis as unknown as { __benchOffer?: (sdp: string) => Promise<string> }).__benchOffer;
 const crypto = new WebCryptoRelayCrypto();
 let claim: SessionDeviceClaim | undefined;
 
@@ -120,14 +137,25 @@ async function run(config: BenchRunConfig): Promise<BenchPageResult> {
   /** xterm trims a line's trailing blanks, so an empty prompt reads without its last space. */
   const bare = config.prompt.trimEnd();
   const ready = until(() => cursorLine() === bare, 15_000, 'the first prompt');
-  const session = await openRelaySession({
-    crypto,
-    dial: browserRelayDial,
-    daemon,
-    method: config.method,
-    mode: { kind: 'stream', device: claim, path: config.path },
-    onData,
-  });
+  const mode = { kind: 'stream', device: claim, path: config.path } as const;
+  const session =
+    config.method.kind === 'webrtc'
+      ? await openSessionOnSocket({
+          crypto,
+          daemon,
+          mode,
+          onData,
+          socket: await webrtc.dial({
+            daemon: { daemonId: config.daemonId },
+            signal: new AbortController().signal,
+            request: async (_path, init) => {
+              if (offer === undefined) throw new Error('the orchestrator exposed no offer function');
+              const body = JSON.parse(String(init?.body)) as { readonly sdp: string };
+              return new Response(JSON.stringify({ sdp: await offer(body.sdp) }));
+            },
+          }),
+        })
+      : await openRelaySession({ crypto, dial: browserRelayDial, daemon, method: config.method, mode, onData });
   let ended: string | undefined;
   session.onStreamClosed(closed => {
     ended = `the stream closed ${String(closed.code)} ${closed.reason}`;

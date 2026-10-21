@@ -95,11 +95,25 @@ export const WEBRTC_NO_PATH_REASON = `no direct path found in ${WEBRTC_CONNECT_D
 /** The sentence a dial the router abandoned rejects with. */
 const WEBRTC_CANCELLED_REASON = 'the WebRTC attempt was cancelled';
 
-/** Wraps one open data channel as the socket the session runs on. */
-function channelSocket(channel: WebRtcDataChannelLike, timers: WebRtcTimers): RelayCarrierSocket {
+/**
+ * Starts holding what a new channel receives, from the moment it is created.
+ *
+ * A browser may deliver a channel's `open` and its first message in the SAME task — measured in Chrome:
+ * on a peer that is already connected, the daemon's `ready` arrives with the channel's own opening — so
+ * a handler attached after `open` resolves would never see it, and the session would wait out its
+ * handshake deadline for a frame that already came.
+ */
+function holdMessages(channel: WebRtcDataChannelLike): unknown[] {
+  const held: unknown[] = [];
+  channel.binaryType = 'arraybuffer';
+  channel.onmessage = event => held.push(event.data);
+  return held;
+}
+
+/** Wraps one open data channel as the socket the session runs on; `held` is what arrived before it. */
+function channelSocket(channel: WebRtcDataChannelLike, timers: WebRtcTimers, held: unknown[]): RelayCarrierSocket {
   let ended = false;
   let announced = false;
-  const held: unknown[] = [];
   const socket: RelayCarrierSocket = {
     onOpen: null,
     onText: null,
@@ -132,7 +146,6 @@ function channelSocket(channel: WebRtcDataChannelLike, timers: WebRtcTimers): Re
       socket.onClose?.(ABNORMAL_CLOSURE, 'the peer-to-peer channel delivered a message of an unknown type');
     }
   };
-  channel.binaryType = 'arraybuffer';
   channel.onmessage = event => {
     if (announced) deliver(event.data);
     else held.push(event.data);
@@ -154,6 +167,8 @@ function channelSocket(channel: WebRtcDataChannelLike, timers: WebRtcTimers): Re
 interface Negotiated {
   readonly peer: WebRtcPeerLike;
   readonly first: WebRtcDataChannelLike;
+  /** What the first channel received before a dial claimed it. */
+  readonly held: unknown[];
 }
 
 /** The peer-to-peer path to ONE daemon: the connection it is on now, and the dials that use it. */
@@ -171,13 +186,14 @@ export class WebRtcCarrier {
     const peer = this.#peer;
     if (peer !== undefined && peer.connectionState === 'connected') {
       const channel = peer.createDataChannel(WEBRTC_SESSION_CHANNEL_LABEL, { ordered: true });
+      const held = holdMessages(channel);
       await this.#opened(channel, WEBRTC_CHANNEL_OPEN_DEADLINE_MS, signal, () => {
         // A connection that cannot open a channel in time is presumed dead (a changed network, often,
         // which its state has not caught up with): drop it so the next dial negotiates afresh.
         this.#drop(peer);
         return 'the peer-to-peer connection stopped answering';
       });
-      return channelSocket(channel, this.deps.timers);
+      return channelSocket(channel, this.deps.timers, held);
     }
     this.#negotiating ??= this.#negotiate(signal).finally(() => {
       this.#negotiating = undefined;
@@ -185,7 +201,7 @@ export class WebRtcCarrier {
     const negotiated = await this.#negotiating;
     if (this.#peer === negotiated.peer && !this.#claimed.has(negotiated.first)) {
       this.#claimed.add(negotiated.first);
-      return channelSocket(negotiated.first, this.deps.timers);
+      return channelSocket(negotiated.first, this.deps.timers, negotiated.held);
     }
     // Another dial took the channel the negotiation opened; this one opens its own on the same peer.
     return await this.dial(signal);
@@ -227,6 +243,7 @@ export class WebRtcCarrier {
     const peer = this.deps.createPeer({ iceServers: this.deps.iceServers.map(urls => ({ urls })) });
     try {
       const first = peer.createDataChannel(WEBRTC_SESSION_CHANNEL_LABEL, { ordered: true });
+      const held = holdMessages(first);
       peer.onconnectionstatechange = () => {
         if (peer.connectionState === 'failed' || peer.connectionState === 'closed') this.#drop(peer);
       };
@@ -244,7 +261,7 @@ export class WebRtcCarrier {
       await peer.setRemoteDescription({ type: 'answer', sdp: answer.sdp });
       await deadline;
       this.#peer = peer;
-      return { peer, first };
+      return { peer, first, held };
     } catch (error) {
       peer.close();
       throw error;

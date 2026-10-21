@@ -124,6 +124,7 @@ function daemon() {
 }
 
 interface Client {
+  readonly peer: PeerConnection;
   readonly channel: DataChannel;
   readonly frames: RelayFrame[];
   readonly texts: string[];
@@ -138,7 +139,30 @@ async function connect(carrier: WebRtcCarrier): Promise<Client> {
     peer.onGatheringStateChange(state => state === 'complete' && resolve()),
   );
   const channel = peer.createDataChannel(WEBRTC_SESSION_CHANNEL_LABEL);
-  const client: Client = { channel, frames: [], texts: [], closed: false };
+  const client = listen(peer, channel);
+  const opened = new Promise<void>(resolve => channel.onOpen(resolve));
+  await gathered;
+  const offer = peer.localDescription();
+  if (offer === null) throw new Error('the browser peer produced no offer');
+  const answered = await carrier.offer(offer.sdp, { deviceId: DEVICE_ID, appSession: APP_SESSION });
+  if (answered.kind !== 'answered') throw new Error(answered.reason);
+  peer.setRemoteDescription(answered.sdp, 'answer');
+  await opened;
+  return client;
+}
+
+/** Another session on a peer that is already connected: a new channel, no signalling at all. */
+async function another(peer: PeerConnection): Promise<Client> {
+  const channel = peer.createDataChannel(WEBRTC_SESSION_CHANNEL_LABEL);
+  const opened = new Promise<void>(resolve => channel.onOpen(resolve));
+  const client = listen(peer, channel);
+  await opened;
+  return client;
+}
+
+/** Records what arrives on one channel. */
+function listen(peer: PeerConnection, channel: DataChannel): Client {
+  const client: Client = { peer, channel, frames: [], texts: [], closed: false };
   channel.onMessage(message => {
     if (typeof message === 'string') client.texts.push(message);
     else {
@@ -151,14 +175,6 @@ async function connect(carrier: WebRtcCarrier): Promise<Client> {
   channel.onClosed(() => {
     client.closed = true;
   });
-  const opened = new Promise<void>(resolve => channel.onOpen(resolve));
-  await gathered;
-  const offer = peer.localDescription();
-  if (offer === null) throw new Error('the browser peer produced no offer');
-  const answered = await carrier.offer(offer.sdp, { deviceId: DEVICE_ID, appSession: APP_SESSION });
-  if (answered.kind !== 'answered') throw new Error(answered.reason);
-  peer.setRemoteDescription(answered.sdp, 'answer');
-  await opened;
   return client;
 }
 
@@ -294,17 +310,36 @@ describe('the WebRTC carrier, two real peers in one process', () => {
     should(requests).be.empty();
   });
 
-  it('should end the session when the browser closes its channel, and keep the peer for the next one', async () => {
+  it('should end the session when the browser closes its channel, and carry the next one on the same peer', async () => {
     // Arrange
-    const { carrier } = daemon();
+    const { carrier, requests } = daemon();
     const first = await connect(carrier);
     await handshake(first);
 
     // Act
     first.channel.close();
     await until('the channel to close', () => first.closed);
+    const second = await another(first.peer);
+    const { channel, transcript } = await handshake(second);
+    const proof = await signDeviceProof(
+      crypto_,
+      deviceKey,
+      deviceAuthMessage(transcript, 'auth', DEVICE_ID, APP_SESSION),
+    );
+    const next = await send(second, channel, {
+      t: 'auth',
+      protocol: SESSION_PROTOCOL_ID,
+      deviceId: DEVICE_ID,
+      appSession: APP_SESSION,
+      proof,
+    });
+    await until('the acceptance', () => second.frames.filter(frame => frame.kind === FRAME_KINDS.data).length >= 1);
+    await send(second, next, { t: 'req', id: 1, method: 'GET', path: '/v1/sessions' });
+    await until('the answer', () => second.frames.filter(frame => frame.kind === FRAME_KINDS.data).length >= 2);
 
     // Assert
     should(carrier.peers).equal(1);
+    should((await records(second, channel))[1]).containDeep({ t: 'res', id: 1, status: 200 });
+    should(requests).have.length(1);
   });
 });
