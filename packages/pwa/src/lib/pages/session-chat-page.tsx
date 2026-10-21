@@ -120,6 +120,7 @@ import type { DaemonUsageStore } from '../usage-store.ts';
 import { WorkspaceLayoutStore } from '../workspace-layout-store.ts';
 import { type WorkspaceRailPreferenceStore, workspaceRailPreferences } from '../workspace-rail-preferences.ts';
 import { daemonSessionPath } from './routes.ts';
+import { useAgentSurfaceTabs } from '../../features/workspace/use-agent-surface-tabs.ts';
 
 /** Only daemon operations this workspace can truthfully invoke. */
 export type SessionChatClient = Pick<IFyApiClient, 'answer' | 'interrupt' | 'resume' | 'send' | 'stop'> &
@@ -433,6 +434,13 @@ export function SessionChatPage({
   const driving = useSurfaceDriving(scope, connection, {
     client: daemonClient,
     ...(surfaceEvents === undefined ? {} : { events: surfaceEvents }),
+  });
+  const agentSurfaces = useAgentSurfaceTabs({
+    store: workspaceLayouts,
+    scope,
+    layout: workspace.layout,
+    opened: driving.opened,
+    asked: driving.asked,
   });
   const browserPages = useSessionBrowser(scope, connection, { client: daemonClient });
   const handoffs = useMemo(
@@ -1405,6 +1413,7 @@ export function SessionChatPage({
             data-session={session.config.id}
           >
             <SessionWorkspace
+              agentSurfaces={agentSurfaces}
               chat={chat}
               connection={connection}
               driving={driving}

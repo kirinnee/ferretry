@@ -57,6 +57,7 @@ import { WORKSPACE_FILES_PICKER_KEY } from './use-session-workspace.ts';
 import type { SurfaceDriving } from './use-surface-driving.ts';
 import type { WorkspaceNewTabKind } from './workspace-tab-strip.tsx';
 import { WorkspaceView } from './workspace-view.tsx';
+import { type AgentSurfaceTabs, NO_AGENT_SURFACE_TABS } from './use-agent-surface-tabs.ts';
 
 /**
  * Info, as the page binds it: whether it is open, the phone sheet's height, and the panel itself. The
@@ -92,6 +93,8 @@ export interface SessionWorkspaceProps {
   /** Proof and navigation for Markdown a file view renders: the transcript's own surface. */
   readonly references: FilesMarkdownContext;
   readonly driving: SurfaceDriving;
+  /** Tabs agents opened, surfaces they handed over: absent, nothing is announced. */
+  readonly agentSurfaces?: AgentSurfaceTabs;
   /** Info. Absent: this host has none to show. */
   readonly info?: SessionInfoSlot;
   readonly rails: WorkspaceRailPreferenceStore;
@@ -148,6 +151,7 @@ export function SessionWorkspace({
   chat,
   references,
   driving,
+  agentSurfaces = NO_AGENT_SURFACE_TABS,
   info,
   rails,
   deck,
@@ -200,6 +204,8 @@ export function SessionWorkspace({
   const marker = (tab: WorkspaceTab, inline = false): ReactNode => (
     <AgentControlMarker
       driver={driving.driverFor(tab.id)}
+      ask={agentSurfaces.askFor(tab.id)}
+      onDismissAsk={() => agentSurfaces.dismissAsk(tab.id)}
       inline={inline}
       takenOver={driving.takenOver(tab.id)}
       onTakeOver={() => driving.takeOver(tab.id)}
@@ -294,7 +300,7 @@ export function SessionWorkspace({
         <div className="relative flex min-h-0 flex-1 flex-col" data-workspace-terminal={tab.key}>
           {/* A strip of its own over the shell, never floating on it: a pill there would cover the
               deck's own header and the line it is writing. */}
-          {driving.driverFor(tab.id) !== null || driving.takenOver(tab.id) ? (
+          {driving.driverFor(tab.id) !== null || driving.takenOver(tab.id) || agentSurfaces.askFor(tab.id) !== null ? (
             <div className="fy-ws-marker-row">{marker(tab, true)}</div>
           ) : null}
           <SessionTerminalDeck
@@ -353,6 +359,25 @@ export function SessionWorkspace({
 
   // A refused Take over / Hand back is said where every other workspace failure is.
   const shownNotice = notice ?? driving.failure;
+  const opened = agentSurfaces.notice;
+  const openedLine =
+    opened === null ? null : (
+      <p className="fy-ws-opened" role="status">
+        <span aria-hidden="true" className="fy-ws-new-dot" />
+        <span className="fy-ws-opened-text">{opened.text}</span>
+        <button type="button" className="fy-ws-marker-action" onClick={agentSurfaces.showNotice}>
+          Show
+        </button>
+        <button
+          type="button"
+          className="fy-ws-opened-dismiss"
+          aria-label="Dismiss"
+          onClick={agentSurfaces.dismissNotice}
+        >
+          ×
+        </button>
+      </p>
+    );
   const noticeLine =
     shownNotice === null ? null : (
       <p className="m-0 px-3 py-1 text-ui text-err" role="alert">
@@ -384,6 +409,8 @@ export function SessionWorkspace({
         kind: tab.kind,
         label: tab.label,
         driver: driving.driverFor(tab.id),
+        fresh: agentSurfaces.unseenTabIds.has(tab.id),
+        asked: agentSurfaces.askedTabIds.has(tab.id),
         closable: true,
       }));
     const byId = new Map(tabs.map(tab => [tab.id, tab]));
@@ -401,6 +428,7 @@ export function SessionWorkspace({
             <>
               {renderHeader()}
               {noticeLine}
+              {openedLine}
             </>
           }
           onCloseOthers={tabId => closeTabs(phoneTabs.filter(tab => tab.id !== tabId).map(tab => tab.id))}
@@ -415,6 +443,11 @@ export function SessionWorkspace({
             return renderBody(tab, { active, interceptInput });
           }}
           tabs={phoneTabs}
+          reopen={agentSurfaces.reopenable.map(surface => ({
+            key: `reopen-${surface.tabId}`,
+            label: `Reopen ${surface.kind === 'terminal' ? 'terminal' : 'page'} ${surface.label}`,
+            onSelect: () => agentSurfaces.reopen(surface.tabId),
+          }))}
           {...(deck === undefined ? {} : { onNewTerminal: () => newTab('terminal') })}
           {...(endTerminal === undefined
             ? {}
@@ -433,6 +466,7 @@ export function SessionWorkspace({
   const view = (
     <WorkspaceView
       agentName={agentName}
+      agentSurfaces={agentSurfaces}
       drivenTabIds={driving.drivenTabIds}
       layout={layout}
       onLayoutChange={setLayout}
@@ -449,6 +483,7 @@ export function SessionWorkspace({
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         {renderHeader()}
         {noticeLine}
+        {openedLine}
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">{view}</div>
       </div>
       {info === undefined || formFactor !== 'desktop' || !info.open ? null : (

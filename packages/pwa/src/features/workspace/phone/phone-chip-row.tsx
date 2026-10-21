@@ -61,17 +61,22 @@ export interface PhoneNewTabActions {
   readonly onNewTerminal?: () => void;
   readonly onNewBrowser?: () => void;
   readonly onOpenFile?: () => void;
+  /** Surfaces an agent opened whose tab was closed: ＋ brings them back. */
+  readonly reopen?: readonly { readonly key: string; readonly label: string; readonly onSelect: () => void }[];
 }
 
 export const phoneNewTabItems = ({
   onNewTerminal,
   onNewBrowser,
   onOpenFile,
+  reopen = [],
 }: PhoneNewTabActions): readonly ContextMenuItem[] => {
   const items: ContextMenuItem[] = [];
   if (onNewTerminal) items.push({ key: 'terminal', label: 'New terminal', onSelect: onNewTerminal });
   if (onNewBrowser) items.push({ key: 'browser', label: 'New browser', onSelect: onNewBrowser });
   if (onOpenFile) items.push({ key: 'file', label: 'Open file', onSelect: onOpenFile });
+  for (const [index, entry] of reopen.entries())
+    items.push({ key: entry.key, label: entry.label, onSelect: entry.onSelect, separatorBefore: index === 0 });
   return items;
 };
 
@@ -182,6 +187,8 @@ function PhoneChip({
       tabIndex={active ? 0 : -1}
       title={driver ? `${tab.label} — ${driver} is driving` : tab.label}
       data-phone-chip={tab.id}
+      data-asked={tab.asked === true}
+      data-fresh={tab.fresh === true && tab.asked !== true}
       {...gesture}
       onClick={event => {
         // The ✕ is a part of the chip (a button inside role=tab is invalid), told apart by its marker.
@@ -208,7 +215,7 @@ function PhoneChip({
     >
       <Icon size={14} aria-hidden="true" className={cn('shrink-0', active && 'text-accent')} />
       <span className="truncate">{tab.label}</span>
-      {driver && (
+      {driver && tab.asked !== true && (
         <span
           className="shrink-0 rounded-control border border-accent-border px-badge-x text-2xs font-semibold tracking-wide text-accent"
           data-phone-chip-agent=""
@@ -220,6 +227,18 @@ function PhoneChip({
       {/* The ✕ rides on the ACTIVE chip only: a row of ✕s would spend the row's width on a rare act, and
           a long-press closes any chip. Its target is the chip's height by 44px wide (phone-chip-close in
           styles/index.css), so the row stays the slim switch the owner asked for. */}
+      {tab.asked === true && (
+        <span
+          className="shrink-0 rounded-control border border-accent-border px-badge-x text-2xs font-semibold tracking-wide text-accent"
+          data-phone-chip-ask=""
+        >
+          <span aria-hidden="true">YOUR TURN</span>
+          <span className="sr-only">, the agent is waiting for you here</span>
+        </span>
+      )}
+      {tab.fresh === true && tab.asked !== true && (
+        <span aria-hidden="true" className="fy-ws-new-dot" data-phone-chip-new="" />
+      )}
       {active && closable && (
         <span data-phone-chip-close="" role="presentation" title={`Close ${tab.label}`} className="fy-phone-chip-close">
           <X size={12} aria-hidden="true" />

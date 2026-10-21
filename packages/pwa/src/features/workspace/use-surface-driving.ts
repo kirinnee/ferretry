@@ -21,7 +21,7 @@
  * control, because a control the daemon would refuse is worse than none.
  */
 
-import type { FyEvent, IFyApiClient, SurfaceKind } from '@ferretry/protocol';
+import type { FyEvent, IFyApiClient, SurfaceAsked, SurfaceKind, SurfaceOpened } from '@ferretry/protocol';
 import { SurfaceControlViewSchema } from '@ferretry/protocol';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
@@ -29,9 +29,11 @@ import type { DaemonSessionScope } from '../../lib/daemon-scope.ts';
 import {
   activeSurfaceDriving,
   applySurfaceEvent,
+  askedSurfaces,
   drivingAgentName,
   isSurfaceControlEvent,
   nextDrivingLapse,
+  openedSurfaces,
   type SurfaceControlState,
   surfaceDrivingFor,
   surfaceTakeoverFor,
@@ -51,6 +53,10 @@ export interface SurfaceDriving {
   readonly handBack: (tabId: WorkspaceTabId) => void;
   /** The last Take over / Hand back the daemon refused, said as a sentence; null when none. */
   readonly failure: string | null;
+  /** Surfaces an agent opened in this session, oldest first: each earns a workspace tab. */
+  readonly opened: readonly SurfaceOpened[];
+  /** Surfaces an agent handed to the owner and nobody has taken yet. */
+  readonly asked: readonly SurfaceAsked[];
 }
 
 /** Nobody drives anything: the answer for a host with no daemon client to ask. */
@@ -61,6 +67,8 @@ export const NO_SURFACE_DRIVING: SurfaceDriving = Object.freeze({
   takeOver: () => undefined,
   handBack: () => undefined,
   failure: null,
+  opened: [],
+  asked: [],
 });
 
 /** How often the control views are re-read when no event has said anything. */
@@ -208,6 +216,9 @@ export function useSurfaceDriving(
     [drivenKey],
   );
 
+  const opened = useMemo(() => openedSurfaces(state), [state]);
+  const asked = useMemo(() => askedSurfaces(state), [state]);
+
   if (client === undefined) return NO_SURFACE_DRIVING;
   return {
     drivenTabIds,
@@ -223,5 +234,7 @@ export function useSurfaceDriving(
     takeOver: tabId => control('takeover', tabId),
     handBack: tabId => control('handback', tabId),
     failure,
+    opened,
+    asked,
   };
 }

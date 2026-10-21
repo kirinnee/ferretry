@@ -45,6 +45,8 @@ const drivingOf = (
     takeOver: tabId => takenOverCalls.push(tabId),
     handBack: tabId => handBackCalls.push(tabId),
     failure: overrides.failure ?? null,
+    opened: [],
+    asked: [],
   };
   return { driving, takenOverCalls, handBackCalls };
 };

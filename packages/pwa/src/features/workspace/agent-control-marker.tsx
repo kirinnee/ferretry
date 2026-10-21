@@ -8,6 +8,9 @@
  * sits INLINE at the end of the page strip instead, because floating there would
  * cover the browser's own toolbar.
  *
+ * An ASK comes first: the agent handed the surface over ("your turn here"), so the marker says so, with
+ * the agent's one line on what to do, Take over and Dismiss.
+ *
  * Presentational only. Who is driving comes from the daemon (`useSurfaceDriving`);
  * this component just reports it and raises the two intents.
  */
@@ -16,8 +19,16 @@ export interface AgentControlDriver {
   readonly name: string;
 }
 
+/** The agent has handed this surface to the owner. */
+export interface AgentControlAsk {
+  readonly agent: string;
+  readonly message?: string;
+}
+
 export interface AgentControlMarkerProps {
   readonly driver: AgentControlDriver | null;
+  readonly ask?: AgentControlAsk | null;
+  readonly onDismissAsk?: () => void;
   readonly takenOver: boolean;
   readonly onTakeOver: () => void;
   readonly onHandBack: () => void;
@@ -27,6 +38,8 @@ export interface AgentControlMarkerProps {
 
 export function AgentControlMarker({
   driver,
+  ask = null,
+  onDismissAsk,
   takenOver,
   onTakeOver,
   onHandBack,
@@ -40,6 +53,25 @@ export function AgentControlMarker({
         <button type="button" className="fy-ws-marker-action" onClick={onHandBack}>
           Hand back
         </button>
+      </div>
+    );
+  }
+  if (ask) {
+    return (
+      <div className="fy-ws-marker" data-placement={placement} data-state="ask" role="status">
+        <span aria-hidden="true" className="fy-ws-marker-dot" />
+        <span className="fy-ws-marker-text">
+          <strong>Your turn here</strong>
+          {ask.message === undefined ? ` — ${ask.agent} needs you` : ` — ${ask.message}`}
+        </span>
+        <button type="button" className="fy-ws-marker-action" onClick={onTakeOver}>
+          Take over
+        </button>
+        {onDismissAsk && (
+          <button type="button" className="fy-ws-marker-action" onClick={onDismissAsk}>
+            Dismiss
+          </button>
+        )}
       </div>
     );
   }

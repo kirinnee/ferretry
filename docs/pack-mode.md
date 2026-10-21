@@ -50,19 +50,21 @@ Stop sub-ferrets you no longer need (`fy stop children <your id> --yes`).
 
 Built-in subagents are **discouraged, not blocked**: nothing is taken away from the harness.
 
-**Size.** Every Ferretry instruction together is about 4.0 KB (≈ 1,000 tokens) with every section on:
+**Size.** Every Ferretry instruction together is about 4.4 KB (≈ 1,100 tokens) with every section on:
 
 | Section                                  | Characters | ≈ tokens | When                        |
 | ---------------------------------------- | ---------- | -------- | --------------------------- |
-| Tools (terminals, browser pages)         | 620        | 155      | every agent runtime         |
+| Tools (terminals, browser pages)         | 1,001      | 250      | every agent runtime         |
 | Ferretry settings (short "Set up" skill) | 478        | 120      | every agent runtime         |
 | Hypermedia                               | 1,597      | 399      | `FY_HYPERMEDIA=1`           |
-| Pack mode                                | 890        | 223      | `FY_PACK=1`                 |
+| Pack mode                                | 963        | 241      | `FY_PACK=1`                 |
 | Lessons                                  | 413        | 104      | `FY_LEARNING_PASSIVE=1`     |
 | The tools server's MCP instructions      | 112        | 28       | always — one line, no rules |
 
 The full "Set up Ferretry" skill (4.2 KB) is no longer in any prompt; the settings section points at
-`fy config guide`, which prints it. A test keeps the whole prompt under 4 KB.
+`fy config guide`, which prints it. A test keeps the whole prompt under 4.5 KB. The tools section grew from 620 characters when it began
+telling agents to hand the owner a terminal or page for every step only they can do
+([agent-tools.md](agent-tools.md#handing-a-surface-to-the-owner)).
 
 ## The models guide
 

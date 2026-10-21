@@ -113,7 +113,7 @@ describe('AgentToolsClient', () => {
 
   it('should take over, hand back and read control state on a person’s routes', async () => {
     // Arrange
-    const view = { sessionId: 's1', driving: [], takeovers: [], handed: [] };
+    const view = { sessionId: 's1', driving: [], takeovers: [], handed: [], opened: [], asked: [] };
     const port = gateway([view, view, view, view]);
     const client = new AgentToolsClient(both(port), {});
 

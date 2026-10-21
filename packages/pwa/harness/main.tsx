@@ -3016,6 +3016,24 @@ const harnessWorkspaceSurfaces = (kind: 'terminal' | 'browser'): readonly { id: 
 let harnessPageCount = HARNESS_WORKSPACE_PAGES.length;
 const harnessHeld = new Set<string>(window.location.search.includes('held') ? ['browser:C0FFEE0001'] : []);
 let harnessViewedPage = 'C0FFEE0001';
+/**
+ * `?agent-tabs=opened` has Hadi open the terminal and the pages (their tabs appear without a click);
+ * `?agent-tabs=asked` has it then hand the terminal over ("your turn here").
+ */
+const harnessAgentTabs = ((value: string | null) => (value === 'opened' || value === 'asked' ? value : null))(
+  new URLSearchParams(window.location.search).get('agent-tabs'),
+);
+const OPENED_AT = '2026-10-16T09:00:00.000Z';
+const ASKED_AT = '2026-10-16T09:02:00.000Z';
+const HARNESS_ASK_MESSAGE = 'Type the sudo password, then press Enter';
+const harnessAgentRecord = (kind: 'terminal' | 'browser', surface: { id: string; name?: string }, at: string) => ({
+  surface: kind,
+  id: surface.id,
+  ...(surface.name === undefined ? {} : { name: surface.name }),
+  agentSessionId: HARNESS_WORKSPACE_SESSION,
+  agentName: 'Hadi',
+  at,
+});
 const harnessControlView = (kind: 'terminal' | 'browser') => {
   const driven = harnessWorkspaceSurfaces(kind)[0];
   return {
@@ -3044,6 +3062,17 @@ const harnessControlView = (kind: 'terminal' | 'browser') => {
         since: '2026-10-16T09:01:00.000Z',
       })),
     handed: [],
+    opened:
+      harnessAgentTabs === null
+        ? []
+        : harnessWorkspaceSurfaces(kind).map(surface => harnessAgentRecord(kind, surface, OPENED_AT)),
+    asked:
+      harnessAgentTabs !== 'asked' || kind !== 'terminal'
+        ? []
+        : harnessWorkspaceSurfaces(kind)
+            .slice(0, 1)
+            .filter(surface => !harnessHeld.has(`${kind}:${surface.id}`))
+            .map(surface => ({ ...harnessAgentRecord(kind, surface, ASKED_AT), message: HARNESS_ASK_MESSAGE })),
   };
 };
 const harnessWorkspaceBrowser = () => {

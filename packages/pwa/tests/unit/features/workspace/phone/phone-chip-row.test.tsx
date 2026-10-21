@@ -294,3 +294,52 @@ describe('PhoneChipRow', () => {
     expect(ran).toEqual(['others b1']);
   });
 });
+
+describe('PhoneChipRow — agent-opened surfaces', () => {
+  const fresh = phoneTabOrder([
+    { id: 't1', kind: 'terminal', label: 'dev', fresh: true },
+    { id: 'b1', kind: 'browser', label: 'app', asked: true, fresh: true },
+    { id: 'f1', kind: 'file', label: 'login.tsx' },
+  ]);
+
+  it('dots a tab the agent added, and badges the one it handed over as YOUR TURN instead', async () => {
+    mounted = await mount(row({ tabs: fresh }));
+    const dev = chip(mounted.container, 't1');
+    const app = chip(mounted.container, 'b1');
+    expect(dev.getAttribute('data-fresh')).toBe('true');
+    expect(dev.querySelector('[data-phone-chip-new]')).not.toBeNull();
+    expect(dev.querySelector('[data-phone-chip-ask]')).toBeNull();
+    expect(app.getAttribute('data-asked')).toBe('true');
+    expect(app.getAttribute('data-fresh')).toBe('false');
+    expect(app.querySelector('[data-phone-chip-new]')).toBeNull();
+    expect(app.querySelector('[data-phone-chip-ask]')?.textContent).toContain('YOUR TURN');
+    expect(chip(mounted.container, 'f1').getAttribute('data-asked')).toBe('false');
+  });
+
+  it('offers a closed agent surface back in ＋, after the create commands', async () => {
+    const ran: string[] = [];
+    expect(
+      phoneNewTabItems({
+        onNewTerminal: () => {},
+        reopen: [
+          { key: 'r1', label: 'Reopen terminal dev', onSelect: () => ran.push('r1') },
+          { key: 'r2', label: 'Reopen page app', onSelect: () => ran.push('r2') },
+        ],
+      }).map(item => [item.label, item.separatorBefore === true]),
+    ).toEqual([
+      ['New terminal', false],
+      ['Reopen terminal dev', true],
+      ['Reopen page app', false],
+    ]);
+    mounted = await mount(
+      row({ reopen: [{ key: 'r1', label: 'Reopen terminal dev', onSelect: () => ran.push('r1') }] }),
+    );
+    await interact(() =>
+      must(mounted?.container.querySelector<HTMLButtonElement>('button[aria-label="New tab"]'), 'plus').click(),
+    );
+    const items = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')];
+    await interact(() => items[0]?.click());
+    expect(items.map(item => item.textContent)).toEqual(['Reopen terminal dev']);
+    expect(ran).toEqual(['r1']);
+  });
+});

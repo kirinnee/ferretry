@@ -51,6 +51,8 @@ export const AGENT_TOOL_MAX_URL_CHARS = 2_048;
 export const AGENT_TOOL_MAX_SELECTOR_CHARS = 1_024;
 /** The longest folder a terminal may be opened in. */
 export const AGENT_TOOL_MAX_FOLDER_CHARS = 1_024;
+/** The longest sentence an agent may leave the owner when it hands a surface over. */
+export const AGENT_TOOL_MAX_ASK_CHARS = 280;
 
 /**
  * A surface's human name: a lowercase letter, then up to 31 lowercase letters, digits or dashes.
@@ -125,6 +127,12 @@ export const AgentUrlSchema = z
     'only http and https URLs can be opened',
   );
 
+/** What the owner is asked to do when a surface is handed to them: a short plain sentence, never a secret. */
+export const AskOwnerMessageSchema = z.string().trim().min(1).max(AGENT_TOOL_MAX_ASK_CHARS);
+
+/** `true` asks the owner to take the surface over; a string says exactly what to do there. */
+const AskOwnerSchema = z.union([z.literal(true), AskOwnerMessageSchema]);
+
 const SelectorSchema = z.string().trim().min(1).max(AGENT_TOOL_MAX_SELECTOR_CHARS);
 
 export const AgentToolCallSchema = z.discriminatedUnion('tool', [
@@ -136,6 +144,8 @@ export const AgentToolCallSchema = z.discriminatedUnion('tool', [
     folder: z.string().trim().min(1).max(AGENT_TOOL_MAX_FOLDER_CHARS).optional(),
     /** Typed into the new shell and run, as if sent with `enter`. */
     command: TextSchema.optional(),
+    /** Hand the new shell to the owner at once: their tab opens on it, with this as what to do. */
+    askOwner: AskOwnerSchema.optional(),
   }),
   z
     .strictObject({
@@ -164,6 +174,11 @@ export const AgentToolCallSchema = z.discriminatedUnion('tool', [
     })
     .refine(call => (call.text === undefined) !== (call.exit === undefined), 'wait for text or for exit, not both'),
   z.strictObject({ tool: z.literal('terminal.close'), name: SurfaceKeySchema }),
+  z.strictObject({
+    tool: z.literal('terminal.ask_owner'),
+    name: SurfaceKeySchema,
+    message: AskOwnerMessageSchema.optional(),
+  }),
   z.strictObject({ tool: z.literal('browser.list') }),
   z.strictObject({
     tool: z.literal('browser.open'),
@@ -171,6 +186,8 @@ export const AgentToolCallSchema = z.discriminatedUnion('tool', [
     url: AgentUrlSchema.optional(),
     /** A throwaway page with its own cookies and storage, shared with nothing; gone when it closes. */
     incognito: z.literal(true).optional(),
+    /** Hand the new page to the owner at once: their tab opens on it, with this as what to do. */
+    askOwner: AskOwnerSchema.optional(),
   }),
   z.strictObject({ tool: z.literal('browser.navigate'), name: SurfaceKeySchema, url: AgentUrlSchema }),
   z.strictObject({ tool: z.literal('browser.click'), name: SurfaceKeySchema, selector: SelectorSchema }),
@@ -189,6 +206,11 @@ export const AgentToolCallSchema = z.discriminatedUnion('tool', [
   }),
   z.strictObject({ tool: z.literal('browser.screenshot'), name: SurfaceKeySchema }),
   z.strictObject({ tool: z.literal('browser.close'), name: SurfaceKeySchema }),
+  z.strictObject({
+    tool: z.literal('browser.ask_owner'),
+    name: SurfaceKeySchema,
+    message: AskOwnerMessageSchema.optional(),
+  }),
 ]);
 export type AgentToolCall = z.infer<typeof AgentToolCallSchema>;
 export type AgentToolName = AgentToolCall['tool'];
@@ -223,6 +245,7 @@ export const AGENT_TOOL_NAMES: readonly AgentToolName[] = [
   'terminal.read',
   'terminal.wait',
   'terminal.close',
+  'terminal.ask_owner',
   'browser.list',
   'browser.open',
   'browser.navigate',
@@ -231,6 +254,7 @@ export const AGENT_TOOL_NAMES: readonly AgentToolName[] = [
   'browser.read',
   'browser.screenshot',
   'browser.close',
+  'browser.ask_owner',
 ];
 
 /** One surface as a list call shows it. An unnamed surface is still listed, by id. */
@@ -287,6 +311,32 @@ export const SurfaceDrivingSchema = z.strictObject({
 });
 export type SurfaceDriving = z.infer<typeof SurfaceDrivingSchema>;
 
+/** An agent opened this surface: the workspace adds it as a tab. */
+export const SurfaceOpenedSchema = z.strictObject({
+  surface: SurfaceKindSchema,
+  id: z.string().min(1).max(128),
+  name: SurfaceNameSchema.optional(),
+  agentSessionId: z.string().min(1).max(128),
+  agentName: z.string().min(1).max(128).optional(),
+  incognito: z.literal(true).optional(),
+  at: InstantSchema,
+});
+export type SurfaceOpened = z.infer<typeof SurfaceOpenedSchema>;
+
+/** An agent handed this surface to the owner: their tab comes forward with "Your turn here". */
+export const SurfaceAskedSchema = z.strictObject({
+  surface: SurfaceKindSchema,
+  id: z.string().min(1).max(128),
+  name: SurfaceNameSchema.optional(),
+  agentSessionId: z.string().min(1).max(128),
+  agentName: z.string().min(1).max(128).optional(),
+  incognito: z.literal(true).optional(),
+  /** What the owner is asked to do there. */
+  message: AskOwnerMessageSchema.optional(),
+  at: InstantSchema,
+});
+export type SurfaceAsked = z.infer<typeof SurfaceAskedSchema>;
+
 /** Who took a surface over: a paired device (a person holding it), or somebody at this machine. */
 export const SurfaceControllerSchema = z.discriminatedUnion('by', [
   z.strictObject({ by: z.literal('human'), deviceId: z.string().min(1).max(128) }),
@@ -323,6 +373,10 @@ export const SurfaceControlViewSchema = z.strictObject({
   driving: z.array(SurfaceDrivingSchema),
   takeovers: z.array(SurfaceTakeoverSchema),
   handed: z.array(SurfaceHandedSchema),
+  /** Surfaces an agent opened and that are still alive. Absent from an older daemon. */
+  opened: z.array(SurfaceOpenedSchema).default([]),
+  /** Surfaces an agent handed to the owner and that the owner has not taken over since. */
+  asked: z.array(SurfaceAskedSchema).default([]),
 });
 export type SurfaceControlView = z.infer<typeof SurfaceControlViewSchema>;
 
@@ -346,13 +400,16 @@ export type SurfaceControlRequest = z.infer<typeof SurfaceControlRequestSchema>;
  * The session-journal events control changes are published as, on the existing `/v1/events` feed.
  * `surface.driving` carries {@link SurfaceDrivingSchema}; `surface.takeover` carries
  * {@link SurfaceTakeoverSchema}; `surface.handback` carries {@link SurfaceHandbackSchema}; `surface.handed`
- * carries {@link SurfaceHandedSchema}. The daemon replays them on start, so a takeover outlives a restart.
+ * carries {@link SurfaceHandedSchema}; `surface.opened` carries {@link SurfaceOpenedSchema} and `surface.asked`
+ * carries {@link SurfaceAskedSchema}. The daemon replays them on start, so a takeover outlives a restart.
  */
 export const SURFACE_EVENT_TYPES = {
   driving: 'surface.driving',
   takeover: 'surface.takeover',
   handback: 'surface.handback',
   handed: 'surface.handed',
+  opened: 'surface.opened',
+  asked: 'surface.asked',
 } as const;
 
 export const SurfaceHandbackSchema = z.strictObject({

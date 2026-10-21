@@ -34,6 +34,8 @@ const terminalView = (overrides: Partial<SurfaceControlView> = {}): SurfaceContr
   ],
   takeovers: [],
   handed: [],
+  opened: [],
+  asked: [],
   ...overrides,
 });
 const browserView = (overrides: Partial<SurfaceControlView> = {}): SurfaceControlView => ({
@@ -49,6 +51,8 @@ const browserView = (overrides: Partial<SurfaceControlView> = {}): SurfaceContro
   ],
   takeovers: [],
   handed: [],
+  opened: [],
+  asked: [],
   ...overrides,
 });
 
@@ -372,6 +376,39 @@ describe('useSurfaceDriving', () => {
       await new Promise(resolve => setTimeout(resolve, 40));
     });
     expect(seen.current.driverFor('terminal:a1b2c3d4e5f6')).toBeNull();
+    renderer.unmount();
+  });
+
+  test('should report the surfaces an agent opened and asked about, from the poll and from the feed', async () => {
+    // Arrange
+    const hub = createSurfaceEventHub();
+    const record = { surface: 'terminal', id: 'a1b2c3d4e5f6', name: 'dev', agentSessionId: 'sess-1' } as const;
+    const opened = { ...record, at: '2026-10-16T09:58:00.000Z' };
+    const asked = { ...record, at: '2026-10-16T09:59:00.000Z', message: 'Press Enter' };
+    const { client } = fakeClient(call =>
+      call.path === surfaceControlPath(scope, 'terminal')
+        ? terminalView({ opened: [opened] })
+        : browserView({ driving: [] }),
+    );
+    const { seen, renderer } = mount({ client, events: hub, now: () => NOW });
+    await settle();
+    expect(seen.current.opened).toEqual([opened]);
+    expect(seen.current.asked).toEqual([]);
+
+    // Act
+    run(() =>
+      hub.publish({
+        sequence: 3,
+        time: asked.at,
+        sessionId: 'sess-1',
+        type: 'surface.asked',
+        source: 'daemon',
+        data: asked,
+      }),
+    );
+
+    // Assert
+    expect(seen.current.asked).toEqual([asked]);
     renderer.unmount();
   });
 });

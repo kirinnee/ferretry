@@ -795,8 +795,28 @@ describe('the appended system prompt of a real agent runtime, for every combinat
       lessons: LESSONS_INSTRUCTION('fy').length,
     };
 
-    // Assert — the whole prompt, every section on, stays under 4 KB (docs/pack-mode.md records the sizes)
-    should(Object.values(sizes).reduce((sum, size) => sum + size, 0)).be.below(4_096);
+    // Assert — the whole prompt, every section on, stays under 4.5 KB (docs/pack-mode.md records the sizes)
+    should(Object.values(sizes).reduce((sum, size) => sum + size, 0)).be.below(4_608);
+    should(sizes.tools).be.below(1_100);
     should(sizes.settings).be.below(600);
+  });
+
+  it('should tell every ferret to hand the owner a terminal or page, driven as far as it goes, rather than describe the step', () => {
+    // Assert
+    for (const phrase of [
+      'sudo or password prompt',
+      'OAuth or device-code login',
+      'gh auth login',
+      '2FA',
+      'captcha',
+      'open the terminal or page',
+      'ask_owner',
+      'askOwner',
+      'exactly what to do',
+      'Never put a secret in chat',
+      'terminal_ask_owner',
+      'browser_ask_owner',
+    ])
+      should(AGENT_TOOLS_INSTRUCTION).containEql(phrase);
   });
 });

@@ -392,6 +392,18 @@ describe('AgentToolService — the driving marker', () => {
           until: '2026-10-16T10:00:15.000Z',
         },
       },
+      {
+        sessionId: 's1',
+        type: 'surface.opened',
+        data: {
+          surface: 'terminal',
+          id: '000000000001',
+          name: 'dev',
+          agentSessionId: 's1',
+          agentName: 'Hadi',
+          at: '2026-10-16T10:00:00.000Z',
+        },
+      },
     ]);
   });
 
@@ -402,6 +414,192 @@ describe('AgentToolService — the driving marker', () => {
       'Opened %terminal:dev.',
     );
     should((await world.service.controlView('s2', 'terminal')).driving).have.length(1);
+  });
+
+  it('should not fail an open because the journal could not take the ask, but fail an explicit ask', async () => {
+    // Arrange
+    const world = agentToolWorld();
+    world.events.failing = true;
+
+    // Act
+    const opened = await world.service.call(agent, { tool: 'terminal.open', name: 'dev', askOwner: 'Type it.' });
+    const asked = await world.service.call(agent, { tool: 'terminal.ask_owner', name: 'dev' }).catch((e: unknown) => e);
+
+    // Assert
+    should(opened.summary).equal('Opened %terminal:dev and asked the owner to take over (wait for them).');
+    should((asked as Error).message).equal('the journal is full');
+  });
+});
+
+describe('AgentToolService — opening a surface announces it to the owner', () => {
+  it('should publish an opened surface for an agent’s open, once, and never for a person’s', async () => {
+    // Arrange
+    const world = agentToolWorld();
+
+    // Act
+    await world.service.call(agent, { tool: 'terminal.open', name: 'dev' });
+    await world.service.call(agent, { tool: 'terminal.send', name: 'dev', text: 'ls' });
+    await world.service.call(person, { tool: 'terminal.open', name: 'shell' });
+    await world.service.call(agent, {
+      tool: 'browser.open',
+      name: 'app',
+      url: 'https://example.test/',
+      incognito: true,
+    });
+    const terminals = await world.service.controlView('s1', 'terminal');
+    const pages = await world.service.controlView('s1', 'browser');
+
+    // Assert
+    should(terminals.opened.map(entry => entry.name)).deepEqual(['dev']);
+    should(pages.opened.map(entry => [entry.name, entry.incognito, entry.agentName])).deepEqual([
+      ['app', true, 'Hadi'],
+    ]);
+    should(world.events.published.filter(event => event.type === 'surface.opened')).have.length(2);
+    should(world.events.published.some(event => event.type === 'surface.asked')).be.false();
+  });
+
+  it('should hand a surface to the owner on open, and again on each ask, with what to do', async () => {
+    // Arrange
+    const world = agentToolWorld();
+
+    // Act
+    const terminal = await world.service.call(agent, {
+      tool: 'terminal.open',
+      name: 'login',
+      command: 'gh auth login',
+      askOwner: 'Pick GitHub.com and press Enter.',
+    });
+    const page = await world.service.call(agent, { tool: 'browser.open', name: 'bank', askOwner: true });
+    world.clock.ms += 1_000;
+    const again = await world.service.call(agent, {
+      tool: 'terminal.ask_owner',
+      name: 'login',
+      message: 'Paste the code.',
+    });
+    const bare = await world.service.call(agent, { tool: 'browser.ask_owner', name: 'bank' });
+    const terminals = await world.service.controlView('s1', 'terminal');
+    const pages = await world.service.controlView('s1', 'browser');
+
+    // Assert
+    should(terminal.summary).equal(
+      'Opened %terminal:login and started the command and asked the owner to take over (wait for them).',
+    );
+    should(page.summary).startWith('Opened %browser:bank at ');
+    should(again.summary).equal(
+      'Asked the owner to take over %terminal:login and told them what to do. Wait for them: read the surface to see when they are done.',
+    );
+    should(bare.summary).equal(
+      'Asked the owner to take over %browser:bank. Wait for them: read the surface to see when they are done.',
+    );
+    should(terminals.asked).deepEqual([
+      {
+        surface: 'terminal',
+        id: '000000000001',
+        name: 'login',
+        agentSessionId: 's1',
+        agentName: 'Hadi',
+        message: 'Paste the code.',
+        at: '2026-10-16T10:00:01.000Z',
+      },
+    ]);
+    should(pages.asked.map(entry => entry.message)).deepEqual([undefined]);
+  });
+
+  it('should clear an ask when a person takes the surface over or hands it back, not when the agent reads', async () => {
+    // Arrange
+    const world = agentToolWorld();
+    await world.service.call(agent, { tool: 'terminal.open', name: 'dev', askOwner: true });
+    await world.service.call(agent, { tool: 'terminal.open', name: 'two', askOwner: true });
+
+    // Act
+    await world.service.call(agent, { tool: 'terminal.read', name: 'dev' });
+    const standing = (await world.service.controlView('s1', 'terminal')).asked.length;
+    await world.service.control(
+      's1',
+      'terminal',
+      { action: 'takeover', key: 'dev' },
+      { by: 'local' },
+      {
+        kind: 'person',
+        sessionId: 's1',
+        actor: { kind: 'host' },
+      },
+    );
+    const taken = (await world.service.controlView('s1', 'terminal')).asked.map(entry => entry.name);
+    await world.service.control(
+      's1',
+      'terminal',
+      { action: 'handback', key: 'two' },
+      { by: 'local' },
+      {
+        kind: 'person',
+        sessionId: 's1',
+        actor: { kind: 'host' },
+      },
+    );
+    const handedBack = (await world.service.controlView('s1', 'terminal')).asked.map(entry => entry.name);
+
+    // Assert
+    should(standing).equal(2);
+    should(taken).deepEqual(['two']);
+    should(handedBack).deepEqual([]);
+  });
+
+  it('should drop an opened surface and its ask once the surface itself is gone', async () => {
+    // Arrange
+    const world = agentToolWorld();
+    await world.service.call(agent, { tool: 'terminal.open', name: 'dev', askOwner: true });
+    await world.service.call(agent, { tool: 'browser.open', name: 'app', askOwner: true });
+
+    // Act — closed by a person's hand, outside the tools, so nothing forgot them.
+    await world.terminals.close('s1', '000000000001');
+    await world.browser.closePage('s1', 'app');
+    const terminals = await world.service.controlView('s1', 'terminal');
+    const pages = await world.service.controlView('s1', 'browser');
+    await world.service.call(agent, { tool: 'terminal.open', name: 'next' });
+    const closedByTool = await world.service.call(agent, { tool: 'terminal.close', name: 'next' });
+
+    // Assert
+    should([terminals.opened, terminals.asked, pages.opened, pages.asked]).deepEqual([[], [], [], []]);
+    should(closedByTool.summary).equal('Closed %terminal:next.');
+    should((await world.service.controlView('s1', 'terminal')).opened).deepEqual([]);
+  });
+
+  it('should refuse a person the ask tools, and an agent an ask on a surface it may not use', async () => {
+    // Arrange
+    const world = agentToolWorld();
+    await world.service.call(person, { tool: 'terminal.open', name: 'shell' });
+    await world.service.call(agent, { tool: 'terminal.open', name: 'dev' });
+
+    // Act
+    const byPerson = await refusal(world.service.call(person, { tool: 'terminal.ask_owner', name: 'dev' }));
+    const theirs = await refusal(world.service.call(agent, { tool: 'terminal.ask_owner', name: 'shell' }));
+
+    // Assert
+    should(byPerson.code).equal('bad_request');
+    should(theirs.code).equal('forbidden');
+  });
+
+  it('should audit an ask by whether it carried a message, never by the message', async () => {
+    // Arrange
+    const world = agentToolWorld();
+    await world.service.call(agent, { tool: 'terminal.open', name: 'dev', askOwner: 'the secret-ish sentence' });
+    await world.service.call(agent, { tool: 'terminal.ask_owner', name: 'dev', message: 'the secret-ish sentence' });
+    await world.service.call(agent, {
+      tool: 'browser.open',
+      name: 'app',
+      url: 'https://example.test/x',
+      askOwner: true,
+    });
+
+    // Act
+    const details = world.audit.entries.map(entry => entry.detail);
+
+    // Assert
+    should(JSON.stringify(details)).not.containEql('secret-ish');
+    should(details[0]).have.property('askOwner', true);
+    should(details[1]).have.property('message', true);
+    should(details[2]).have.property('askOwner', true);
   });
 });
 
@@ -816,6 +1014,16 @@ describe('AgentToolService — takeovers and hand-overs outlive a restart', () =
     fresh.terminals.list = world.terminals.list.bind(world.terminals);
     fresh.terminals.write = world.terminals.write.bind(world.terminals);
     fresh.events.earlier.set('s1', [
+      {
+        type: 'surface.asked',
+        data: {
+          surface: 'terminal',
+          id: '000000000001',
+          name: 'dev',
+          agentSessionId: 's1',
+          at: '2026-10-16T09:00:00.000Z',
+        },
+      },
       { type: 'surface.takeover', data: { surface: 'terminal', id: '000000000001', by: { by: 'local' }, since: 'x' } },
       {
         type: 'surface.takeover',
@@ -839,6 +1047,28 @@ describe('AgentToolService — takeovers and hand-overs outlive a restart', () =
       },
       { type: 'surface.handed', data: 'nonsense' },
       { type: 'surface.driving', data: {} },
+      {
+        type: 'surface.opened',
+        data: {
+          surface: 'terminal',
+          id: '000000000001',
+          name: 'dev',
+          agentSessionId: 's1',
+          at: '2026-10-16T09:00:00.000Z',
+        },
+      },
+      { type: 'surface.opened', data: 'nonsense' },
+      {
+        type: 'surface.asked',
+        data: {
+          surface: 'terminal',
+          id: '000000000002',
+          name: 'mine',
+          agentSessionId: 's1',
+          at: '2026-10-16T09:00:00.000Z',
+        },
+      },
+      { type: 'surface.asked', data: 7 },
     ]);
     fresh.events.unreadable = 1;
 
@@ -855,6 +1085,9 @@ describe('AgentToolService — takeovers and hand-overs outlive a restart', () =
     should(held.code).equal('taken_over');
     should(handed.summary).equal('Sent 2 characters to %terminal:mine.');
     should(view.takeovers.map(takeover => takeover.id)).deepEqual(['000000000001']);
+    // The ask on `dev` ended with the takeover that followed it; the one on `mine` still stands.
+    should(view.opened.map(entry => entry.id)).deepEqual(['000000000001']);
+    should(view.asked.map(entry => entry.id)).deepEqual(['000000000002']);
     should(fresh.events.reads).equal(2);
   });
 });

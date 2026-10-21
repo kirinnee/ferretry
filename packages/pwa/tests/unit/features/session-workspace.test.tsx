@@ -21,6 +21,10 @@ import {
   SessionWorkspace,
   type SessionWorkspaceProps,
 } from '../../../src/features/workspace/session-workspace.tsx';
+import {
+  type AgentSurfaceTabs,
+  NO_AGENT_SURFACE_TABS,
+} from '../../../src/features/workspace/use-agent-surface-tabs.ts';
 import { RailDivider } from '../../../src/features/workspace/split-divider.tsx';
 import {
   type SessionWorkspaceController,
@@ -329,6 +333,8 @@ describe('SessionWorkspace on a desktop', () => {
       takeOver: tabId => intents.push(`take:${tabId}`),
       handBack: tabId => intents.push(`back:${tabId}`),
       failure: 'Could not take over dev: refused',
+      opened: [],
+      asked: [],
     };
     const store = new WorkspaceLayoutStore(NO_STORAGE);
     store.update(scope, layout => openWorkspaceTab(layout, workspaceTab('terminal', TERMINAL)));
@@ -847,6 +853,107 @@ describe('closing workspace tabs', () => {
     const { page } = mountWorkspace('phone', {}, store);
     try {
       expect(page.root.findByType(PhoneWorkspace).props.onEndTerminal).toBeUndefined();
+    } finally {
+      run(() => page.unmount());
+    }
+  });
+});
+
+describe('SessionWorkspace — agent-opened surfaces', () => {
+  const calls: string[] = [];
+  const surfaces = (overrides: Partial<AgentSurfaceTabs> = {}): AgentSurfaceTabs => ({
+    ...NO_AGENT_SURFACE_TABS,
+    notice: { tabId: `terminal:${TERMINAL}`, text: 'Hadi opened terminal dev' },
+    showNotice: () => calls.push('show'),
+    dismissNotice: () => calls.push('dismiss-notice'),
+    ...overrides,
+  });
+  const lines = (page: ReturnType<typeof mountWorkspace>['page']) =>
+    page.root.findAll(node => node.props.className === 'fy-ws-opened' && node.type === 'p');
+
+  beforeEach(() => {
+    calls.length = 0;
+  });
+
+  for (const formFactor of ['desktop', 'phone'] as const) {
+    test(`says what the agent opened on a ${formFactor}, with Show and a dismiss`, () => {
+      const store = new WorkspaceLayoutStore(NO_STORAGE);
+      store.update(scope, layout => openWorkspaceTab(layout, workspaceTab('terminal', TERMINAL)));
+      const { page } = mountWorkspace(formFactor, { agentSurfaces: surfaces() }, store);
+      try {
+        const [line] = lines(page);
+        expect(line?.props.role).toBe('status');
+        expect(textOf(line as ReactTestInstance)).toContain('Hadi opened terminal dev');
+        const buttons = (line as ReactTestInstance).findAllByType('button');
+        run(() => buttons[0]?.props.onClick());
+        run(() => buttons[1]?.props.onClick());
+        expect(calls).toEqual(['show', 'dismiss-notice']);
+      } finally {
+        run(() => page.unmount());
+      }
+    });
+
+    test(`shows nothing on a ${formFactor} when no agent opened anything`, () => {
+      const { page } = mountWorkspace(formFactor);
+      try {
+        expect(lines(page)).toHaveLength(0);
+      } finally {
+        run(() => page.unmount());
+      }
+    });
+  }
+
+  test('passes the asked and unseen tabs to the strip and the ask to the marker on a desktop', () => {
+    const store = new WorkspaceLayoutStore(NO_STORAGE);
+    store.update(scope, layout => openWorkspaceTab(layout, workspaceTab('terminal', TERMINAL)));
+    const tabId = `terminal:${TERMINAL}`;
+    const agentSurfaces = surfaces({
+      notice: null,
+      askedTabIds: new Set([tabId]),
+      askFor: id => (id === tabId ? { agent: 'Hadi', message: 'Press Enter' } : null),
+      dismissAsk: id => calls.push(`dismiss-ask:${id}`),
+    });
+    const deck = fakeDeck(async () => terminalListing([terminalView(TERMINAL)]));
+    const { page } = mountWorkspace('desktop', { agentSurfaces, deck: deck.dependencies }, store);
+    try {
+      expect(page.root.findByType(WorkspaceView).props.agentSurfaces).toBe(agentSurfaces);
+      const marker = page.root.findByType(AgentControlMarker);
+      expect(marker.props.ask).toEqual({ agent: 'Hadi', message: 'Press Enter' });
+      run(() => marker.props.onDismissAsk());
+      expect(calls).toEqual([`dismiss-ask:${tabId}`]);
+      expect(page.root.findAllByProps({ className: 'fy-ws-marker-row' })).toHaveLength(1);
+    } finally {
+      run(() => page.unmount());
+    }
+  });
+
+  test('marks phone chips fresh or asked, and offers closed surfaces back through ＋', () => {
+    const store = new WorkspaceLayoutStore(NO_STORAGE);
+    store.update(scope, layout => openWorkspaceTab(layout, workspaceTab('terminal', TERMINAL)));
+    const tabId = `terminal:${TERMINAL}`;
+    const agentSurfaces = surfaces({
+      notice: null,
+      unseenTabIds: new Set([tabId]),
+      askedTabIds: new Set([tabId]),
+      reopenable: [
+        { tabId: 'terminal:x', kind: 'terminal', label: 'x' },
+        { tabId: 'browser:y', kind: 'browser', label: 'y' },
+      ],
+      reopen: id => calls.push(`reopen:${id}`),
+    });
+    const { page } = mountWorkspace('phone', { agentSurfaces }, store);
+    try {
+      const phone = page.root.findByType(PhoneWorkspace);
+      const chip = (phone.props.tabs as { id: string; fresh?: boolean; asked?: boolean }[]).find(
+        entry => entry.id === tabId,
+      );
+      expect(chip).toMatchObject({ fresh: true, asked: true });
+      expect(phone.props.reopen.map((entry: { label: string }) => entry.label)).toEqual([
+        'Reopen terminal x',
+        'Reopen page y',
+      ]);
+      run(() => phone.props.reopen[1].onSelect());
+      expect(calls).toEqual(['reopen:browser:y']);
     } finally {
       run(() => page.unmount());
     }

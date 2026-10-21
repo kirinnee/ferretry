@@ -2,6 +2,11 @@ import { describe, expect, it } from 'bun:test';
 import {
   AGENT_PANE_ID,
   activateWorkspaceTab,
+  adoptAgentSurface,
+  bringAskedSurfaceForward,
+  hasAnnounced,
+  markAnnounced,
+  WORKSPACE_ANNOUNCED_LIMIT,
   canSplitWorkspacePane,
   clampWorkspaceRatio,
   closeWorkspaceTab,
@@ -546,5 +551,109 @@ describe('parse / serialize', () => {
     expect(parsed.root).toMatchObject({ ratio: 1 - WORKSPACE_MIN_RATIO });
     const hidden = parseWorkspaceLayout({ ...goodHidden, parked: { ...goodHidden.parked, ratio: -1 } });
     expect(hidden.parked?.ratio).toBe(WORKSPACE_MIN_RATIO);
+  });
+});
+
+describe('agent-opened surfaces', () => {
+  const opened = workspaceTab('terminal', 'a1b2c3d4e5f6', { label: 'dev', title: 'Terminal dev' });
+  const alias = 'terminal:dev';
+
+  it('adds the tab once, shows the workspace, and leaves the focus and the selected tab alone', () => {
+    // Arrange
+    const start = openWorkspaceTab(defaultWorkspaceLayout(), dev);
+    const beforeFocus = start.focused;
+
+    // Act
+    const adopted = adoptAgentSurface(start, opened, 'open:terminal:a1b2c3d4e5f6');
+
+    // Assert
+    expect(ids(adopted)).toContain(opened.id);
+    expect(adopted.focused).toBe(beforeFocus);
+    expect(focusedWorkspaceTab(adopted)).toBe(focusedWorkspaceTab(start));
+    expect(adopted.tabs[opened.id]).toEqual(opened);
+    expect(hasAnnounced(adopted, 'open:terminal:a1b2c3d4e5f6')).toBe(true);
+  });
+
+  it('becomes the active tab only when its pane had none', () => {
+    const adopted = adoptAgentSurface(defaultWorkspaceLayout(), opened, 'open:one');
+    const pane = workspacePanes(adopted.root).find(candidate => candidate.id !== AGENT_PANE_ID);
+    expect(pane?.active).toBe(opened.id);
+    const second = adoptAgentSurface(adopted, shell, 'open:two');
+    const same = workspacePanes(second.root).find(candidate => candidate.id !== AGENT_PANE_ID);
+    expect(same?.active).toBe(opened.id);
+    expect(same?.tabs).toEqual([opened.id, shell.id]);
+  });
+
+  it('does it once: a tab the owner closed stays closed, and an announcement made is a no-op', () => {
+    // Arrange
+    const adopted = adoptAgentSurface(defaultWorkspaceLayout(), opened, 'open:one');
+
+    // Act
+    const closed = closeWorkspaceTab(adopted, opened.id);
+    const again = adoptAgentSurface(closed, opened, 'open:one');
+
+    // Assert
+    expect(again).toBe(closed);
+    expect(ids(again)).not.toContain(opened.id);
+  });
+
+  it('does not add a second tab for a surface already open under another id, but remembers it', () => {
+    const existing = openWorkspaceTab(defaultWorkspaceLayout(), dev);
+    const adopted = adoptAgentSurface(existing, opened, 'open:one', [alias]);
+    expect(Object.keys(adopted.tabs)).toEqual(Object.keys(existing.tabs));
+    expect(hasAnnounced(adopted, 'open:one')).toBe(true);
+    expect(adopted.root).toBe(existing.root);
+  });
+
+  it('refuses a malformed tab and the pinned agent tabs', () => {
+    const layout = defaultWorkspaceLayout();
+    expect(adoptAgentSurface(layout, { ...opened, key: 'other' }, 'open:bad')).toBe(layout);
+    const chat: WorkspaceTab = { id: WORKSPACE_CHAT_TAB_ID, kind: 'chat', key: 'chat', label: 'Chat', title: 'Chat' };
+    expect(adoptAgentSurface(layout, chat, 'open:chat')).toBe(layout);
+    expect(bringAskedSurfaceForward(layout, chat, 'ask:chat')).toBe(layout);
+  });
+
+  it('brings an asked surface forward: opens it when missing, focuses it, and does so once per ask', () => {
+    // Arrange
+    const layout = openWorkspaceTab(defaultWorkspaceLayout(), dev);
+
+    // Act
+    const forward = bringAskedSurfaceForward(layout, opened, 'ask:1');
+    const moved = focusWorkspacePane(forward, AGENT_PANE_ID);
+    const repeat = bringAskedSurfaceForward(moved, opened, 'ask:1');
+
+    // Assert
+    expect(focusedWorkspaceTab(forward)).toBe(opened.id);
+    expect(repeat).toBe(moved);
+    expect(focusedWorkspaceTab(bringAskedSurfaceForward(moved, opened, 'ask:2'))).toBe(opened.id);
+  });
+
+  it('activates the tab that is already open, under its alias, instead of adding another', () => {
+    const layout = openWorkspaceTab(openWorkspaceTab(defaultWorkspaceLayout(), dev), shell);
+    const forward = bringAskedSurfaceForward(layout, opened, 'ask:1', [alias]);
+    expect(focusedWorkspaceTab(forward)).toBe(alias);
+    expect(forward.tabs[opened.id]).toBeUndefined();
+  });
+
+  it('keeps the announcements capped, drops non-strings on parse, and omits them while empty', () => {
+    // Arrange
+    let layout = defaultWorkspaceLayout();
+    for (let count = 0; count < WORKSPACE_ANNOUNCED_LIMIT + 5; count += 1) layout = markAnnounced(layout, `a${count}`);
+
+    // Act
+    const raw = JSON.parse(serializeWorkspaceLayout(layout));
+    const parsed = parseWorkspaceLayout({ ...raw, announced: ['x', 3, 'y'] });
+
+    // Assert
+    expect(layout.announced).toHaveLength(WORKSPACE_ANNOUNCED_LIMIT);
+    expect(hasAnnounced(layout, 'a0')).toBe(false);
+    expect(hasAnnounced(layout, `a${WORKSPACE_ANNOUNCED_LIMIT + 4}`)).toBe(true);
+    expect(markAnnounced(layout, `a${WORKSPACE_ANNOUNCED_LIMIT + 4}`)).toBe(layout);
+    expect(parsed.announced).toEqual(['x', 'y']);
+    expect('announced' in parseWorkspaceLayout(JSON.parse(serializeWorkspaceLayout(defaultWorkspaceLayout())))).toBe(
+      false,
+    );
+    expect('announced' in parseWorkspaceLayout({ ...raw, announced: 'nope' })).toBe(false);
+    expect(parseWorkspaceLayout(raw).announced).toHaveLength(WORKSPACE_ANNOUNCED_LIMIT);
   });
 });

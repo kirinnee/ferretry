@@ -90,7 +90,7 @@ describe('AgentToolsController', () => {
 
   it('should take over and show control state only on a session that was named', async () => {
     // Arrange
-    const view: SurfaceControlView = { sessionId: 's1', driving: [], takeovers: [], handed: [] };
+    const view: SurfaceControlView = { sessionId: 's1', driving: [], takeovers: [], handed: [], opened: [], asked: [] };
     const world = harness([view, view]);
 
     // Act
@@ -173,7 +173,7 @@ describe('rendering', () => {
         '%browser:page-3  handed to the agent by device phone',
       ].join('\n'),
     );
-    should(renderControlView({ sessionId: 's1', driving: [], takeovers: [], handed: [] })).equal(
+    should(renderControlView({ sessionId: 's1', driving: [], takeovers: [], handed: [], opened: [], asked: [] })).equal(
       'no agent is driving anything in s1, and nothing is taken over',
     );
   });

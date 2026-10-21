@@ -16,15 +16,18 @@ the page and end with it. The reference grammar is unchanged — see
 
 ## Tools
 
-`terminal.list` · `terminal.open(name, folder?, command?)` · `terminal.send(name, text?, keys?)` ·
-`terminal.read(name, lines?)` · `terminal.wait(name, text | exit, timeoutMs?)` · `terminal.close(name)` ·
-`browser.list` · `browser.open(name, url?, incognito?)` · `browser.navigate(name, url)` ·
+`terminal.list` · `terminal.open(name, folder?, command?, askOwner?)` · `terminal.send(name, text?, keys?)` ·
+`terminal.read(name, lines?)` · `terminal.wait(name, text | exit, timeoutMs?)` · `terminal.close(name)` · `terminal.ask_owner(name, message?)` ·
+`browser.list` · `browser.open(name, url?, incognito?, askOwner?)` · `browser.navigate(name, url)` ·
 `browser.click(name, selector)` · `browser.type(name, selector, text)` ·
-`browser.read(name, mode: text | a11y, selector?)` · `browser.screenshot(name)` · `browser.close(name)`.
+`browser.read(name, mode: text | a11y, selector?)` · `browser.screenshot(name)` · `browser.close(name)` · `browser.ask_owner(name, message?)`.
 
 The wire body is `AgentToolCallSchema` (`packages/protocol/src/lib/agent-tools.ts`); the answer is
 `AgentToolResultSchema`. The same actions are `fy terminal …` and `fy browser page …`
-(`fy browser page open <name> [url] --incognito`).
+(`fy browser page open <name> [url] --incognito`; `fy terminal open <name> --ask [message]`;
+`fy terminal ask <name> [message]`).
+
+The MCP names swap the dot for an underscore: `terminal_open`, `terminal_ask_owner`, `browser_ask_owner`, …
 
 ## Routes
 
@@ -39,12 +42,39 @@ The wire body is `AgentToolCallSchema` (`packages/protocol/src/lib/agent-tools.t
 | `GET /v1/sessions/:sessionId/surfaces/browser/control`    | a person: who drives what | the path; `browser` grant   |
 
 A control request is `{ action: 'takeover' | 'handback' | 'handover', key }` and answers
-`SurfaceControlView { sessionId, driving[], takeovers[], handed[] }` for that kind.
+`SurfaceControlView { sessionId, driving[], takeovers[], handed[], opened[], asked[] }` for that kind.
+`opened` and `asked` default to `[]`, so a newer app reads an older daemon.
 
 Control changes are published on the session's journal, so `/v1/events` streams them:
 `surface.driving` (`SurfaceDrivingSchema`, carrying `until` — show the marker while `now < until`, and
-`incognito` for an incognito page), `surface.takeover`, `surface.handback` and `surface.handed`. The
-daemon replays its journal on start, so a takeover or a hand-over outlives a restart.
+`incognito` for an incognito page), `surface.takeover`, `surface.handback`, `surface.handed`,
+`surface.opened` (`SurfaceOpenedSchema`) and `surface.asked` (`SurfaceAskedSchema`). The daemon replays its
+journal on start, so a takeover, a hand-over, an open or an ask outlives a restart.
+
+## Handing a surface to the owner
+
+An agent that needs the person to act — a sudo or password prompt, an OAuth or device-code login,
+`gh auth login`, 2FA, "press Enter", a TUI wizard, a web login, a captcha, a payment or consent screen —
+is told, in the always-on tools section of every prompt (`AGENT_TOOLS_INSTRUCTION`), to open a terminal or
+page, drive it as far as it can, then hand it over and wait. It never puts a secret in chat or in a tool
+call.
+
+- **An open is announced.** When an AGENT opens a surface the daemon publishes `surface.opened` once
+  for it (never for a person's own open), and the app adds it as a tab beside Chat and Console. The tab is
+  added once per surface: closing it does not close the surface and does not bring the tab back, and the
+  ＋ menu offers "Reopen" for a surface that is still alive.
+- **An ask is a hand-off.** `askOwner` on `terminal.open` / `browser.open` (`true`, or up to 280 characters
+  saying exactly what to do), or a later `terminal.ask_owner` / `browser.ask_owner`, publishes
+  `surface.asked`. The app switches to that tab and marks it "Your turn here". Asking again is a fresh
+  ask. An ask stands until a person takes the surface over or hands it back (both end it, in the live
+  state and on replay) or the surface closes. Only an agent can ask; a person's call is refused.
+- **The message is not audited.** The audit record keeps only whether a message was sent, like the typed
+  text of `terminal.send`.
+- **Focus.** An open never moves focus, selection or the active tab of a pane that already has one — it
+  adds a tab and a small "new" mark, and a banner that says "Agent opened terminal dev" with a Show
+  button. Only an ask moves to the tab, because the agent is now waiting on the person.
+- **Closed surfaces vanish from the view.** A close is not journaled, so `GET …/control` reads `opened` and
+  `asked` against the surfaces still alive in the session.
 
 ## The browser: one shared agent profile per machine
 

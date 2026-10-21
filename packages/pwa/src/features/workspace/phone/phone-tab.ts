@@ -23,6 +23,10 @@ export interface PhoneTab {
   readonly kind: PhoneTabKind;
   readonly label: string;
   readonly driver?: PhoneTabDriver | null;
+  /** An agent added this tab and the person has not looked at it yet. */
+  readonly fresh?: boolean;
+  /** The agent handed this tab to the person: it is their turn. */
+  readonly asked?: boolean;
   /** A workspace tab the person may close. Chat and Console never are: they are the agent. */
   readonly closable?: boolean;
 }

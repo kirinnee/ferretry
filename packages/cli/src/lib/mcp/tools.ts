@@ -37,6 +37,15 @@ const NEW_NAME = {
   pattern: '^[a-z][a-z0-9-]{0,31}$',
   description: 'A short name you choose, e.g. "dev" or "app": a lowercase letter, then letters, digits or dashes.',
 };
+const ASK_OWNER = {
+  type: ['boolean', 'string'],
+  description:
+    'Hand it to the owner right away: their tab opens on it with "Your turn here". true, or a short plain sentence saying exactly what to do there. Never a secret.',
+};
+const ASK_MESSAGE = {
+  type: 'string',
+  description: 'A short plain sentence saying exactly what the owner should do there. Never a secret.',
+};
 const URL = { type: 'string', description: 'An http or https URL.' };
 const SELECTOR = { type: 'string', description: 'A CSS or Playwright selector, e.g. "button[type=submit]".' };
 
@@ -65,6 +74,7 @@ export const MCP_TOOLS: readonly (McpToolDefinition & { readonly tool: AgentTool
         name: NEW_NAME,
         folder: { type: 'string', description: 'Where it starts: absolute, or relative to your working folder.' },
         command: { type: 'string', description: 'A command to run in it, e.g. "bun dev".' },
+        askOwner: ASK_OWNER,
       },
       ['name'],
     ),
@@ -121,6 +131,13 @@ export const MCP_TOOLS: readonly (McpToolDefinition & { readonly tool: AgentTool
     inputSchema: object({ name: NAME }, ['name']),
   },
   {
+    name: 'terminal_ask_owner',
+    tool: 'terminal.ask_owner',
+    description:
+      'Hand a terminal to the owner when you need them to act in it (a password, a code, "press Enter"): their tab comes forward with "Your turn here". Then wait; read the terminal to see when they are done.',
+    inputSchema: object({ name: NAME, message: ASK_MESSAGE }, ['name']),
+  },
+  {
     name: 'browser_list',
     tool: 'browser.list',
     description: 'List the browser pages open in your session, by name.',
@@ -139,6 +156,7 @@ export const MCP_TOOLS: readonly (McpToolDefinition & { readonly tool: AgentTool
           type: 'boolean',
           description: 'A private page: its own cookies and storage, discarded when it closes.',
         },
+        askOwner: ASK_OWNER,
       },
       ['name'],
     ),
@@ -179,6 +197,13 @@ export const MCP_TOOLS: readonly (McpToolDefinition & { readonly tool: AgentTool
     tool: 'browser.close',
     description: 'Close a page.',
     inputSchema: object({ name: NAME }, ['name']),
+  },
+  {
+    name: 'browser_ask_owner',
+    tool: 'browser.ask_owner',
+    description:
+      'Hand a page to the owner when you need them to act in it (a login, a captcha, a payment, a consent screen): their tab comes forward with "Your turn here". Then wait; read the page to see when they are done.',
+    inputSchema: object({ name: NAME, message: ASK_MESSAGE }, ['name']),
   },
 ];
 

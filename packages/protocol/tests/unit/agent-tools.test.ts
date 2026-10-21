@@ -23,11 +23,24 @@ const takeover = {
   since: INSTANT,
 } as const;
 
+const opened = {
+  surface: 'terminal',
+  id: 'a1b2c3d4e5f6',
+  name: 'dev',
+  agentSessionId: 'mse7wwti-2a75bd9c',
+  agentName: 'Hadi',
+  at: INSTANT,
+} as const;
+
+const asked = { ...opened, message: 'Approve the sudo prompt, then press Enter.' } as const;
+
 const view = {
   sessionId: 's1',
   driving: [driving],
   takeovers: [takeover],
   handed: [{ surface: 'terminal', id: 'a1b2c3d4e5f6', by: { by: 'local' }, at: INSTANT }],
+  opened: [opened],
+  asked: [asked],
 } satisfies SurfaceControlView;
 
 const cases: SchemaCase[] = [
@@ -48,6 +61,9 @@ const cases: SchemaCase[] = [
   { name: 'takeover', schema: tools.SurfaceTakeoverSchema, value: takeover },
   { name: 'control view', schema: tools.SurfaceControlViewSchema, value: view },
   { name: 'handed', schema: tools.SurfaceHandedSchema, value: view.handed[0] },
+  { name: 'opened', schema: tools.SurfaceOpenedSchema, value: opened },
+  { name: 'asked', schema: tools.SurfaceAskedSchema, value: asked },
+  { name: 'ask message', schema: tools.AskOwnerMessageSchema, value: 'Log in, then say done.' },
   {
     name: 'control request',
     schema: tools.SurfaceControlRequestSchema,
@@ -61,6 +77,18 @@ const cases: SchemaCase[] = [
 ];
 
 describe('agent tool schemas', () => {
+  it('should read a control view from an older daemon as having nothing opened or asked', () => {
+    // Arrange
+    const { opened: _opened, asked: _asked, ...older } = view;
+
+    // Act
+    const parsed = tools.SurfaceControlViewSchema.parse(older);
+
+    // Assert
+    should(parsed.opened).deepEqual([]);
+    should(parsed.asked).deepEqual([]);
+  });
+
   it('should round-trip every public agent-tool schema', () => {
     assertRoundTrips(cases);
     assertCoversEverySchema(tools, cases);
@@ -70,20 +98,22 @@ describe('agent tool schemas', () => {
     // Arrange
     const calls: AgentToolCall[] = [
       { tool: 'terminal.list' },
-      { tool: 'terminal.open', name: 'dev', folder: 'web', command: 'bun dev' },
+      { tool: 'terminal.open', name: 'dev', folder: 'web', command: 'bun dev', askOwner: true },
       { tool: 'terminal.send', name: 'dev', keys: ['ctrl-c', 'enter'] },
       { tool: 'terminal.read', name: 'dev', lines: 50 },
       { tool: 'terminal.wait', name: 'dev', text: 'ready', timeoutMs: 5_000 },
       { tool: 'terminal.wait', name: 'dev', exit: true },
       { tool: 'terminal.close', name: 'dev' },
+      { tool: 'terminal.ask_owner', name: 'dev', message: 'Type your password.' },
       { tool: 'browser.list' },
-      { tool: 'browser.open', name: 'app', url: 'http://localhost:5173/', incognito: true },
+      { tool: 'browser.open', name: 'app', url: 'http://localhost:5173/', incognito: true, askOwner: 'Sign in.' },
       { tool: 'browser.navigate', name: 'app', url: 'https://example.test/' },
       { tool: 'browser.click', name: 'app', selector: 'button' },
       { tool: 'browser.type', name: 'app', selector: '#email', text: '' },
       { tool: 'browser.read', name: 'app', mode: 'a11y' },
       { tool: 'browser.screenshot', name: 'app' },
       { tool: 'browser.close', name: 'app' },
+      { tool: 'browser.ask_owner', name: 'app' },
     ];
 
     // Act
@@ -132,6 +162,9 @@ describe('agent tool schemas', () => {
       call({ tool: 'browser.type', name: 'app', selector: 'x', text: 'y'.repeat(tools.AGENT_TOOL_MAX_TEXT_CHARS + 1) }),
       call({ tool: 'browser.click', name: 'app', selector: 's'.repeat(tools.AGENT_TOOL_MAX_SELECTOR_CHARS + 1) }),
       call({ tool: 'terminal.list', sessionId: 'someone-else' }),
+      call({ tool: 'terminal.open', name: 'dev', askOwner: false }),
+      call({ tool: 'terminal.open', name: 'dev', askOwner: 'x'.repeat(tools.AGENT_TOOL_MAX_ASK_CHARS + 1) }),
+      call({ tool: 'browser.ask_owner', name: 'app', message: '   ' }),
     ]);
   });
 

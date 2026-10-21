@@ -23,6 +23,7 @@ import { type DragEvent, useEffect, useId, useRef, useState } from 'react';
 import type { WorkspaceSplitDirection, WorkspaceTab, WorkspaceTabId } from '../../lib/workspace-layout.ts';
 import { sidePaneTabIcon } from '../../shell/side-pane-tab-icons.ts';
 import { nextSidePaneTab } from '../../shell/side-pane-tabs.tsx';
+import type { AgentSurfaceTabs } from './use-agent-surface-tabs.ts';
 
 export type WorkspaceNewTabKind = 'terminal' | 'browser' | 'file';
 
@@ -48,6 +49,8 @@ export interface WorkspaceTabStripProps {
   readonly workspaceVisible: boolean;
   /** Tabs the agent is driving right now; they wear the AGENT badge. */
   readonly drivenTabIds?: ReadonlySet<WorkspaceTabId>;
+  /** Tabs an agent added, tabs it handed over, and surfaces ＋ can bring back. */
+  readonly agentSurfaces?: AgentSurfaceTabs;
   readonly draggingTabId: WorkspaceTabId | null;
   readonly layoutControls?: WorkspaceStripLayoutControls;
   readonly onActivate: (tabId: WorkspaceTabId) => void;
@@ -108,7 +111,12 @@ const menuItems = (props: WorkspaceTabStripProps): readonly (readonly MenuItem[]
   if (onMoveActiveToOtherPane) {
     layout.push({ key: 'move', label: 'Move tab to other pane', run: onMoveActiveToOtherPane });
   }
-  return layout.length > 0 ? [create, layout] : [create];
+  const reopen: MenuItem[] = (props.agentSurfaces?.reopenable ?? []).map(surface => ({
+    key: `reopen-${surface.tabId}`,
+    label: `Reopen ${surface.kind === 'terminal' ? 'terminal' : 'page'} ${surface.label}`,
+    run: () => props.agentSurfaces?.reopen(surface.tabId),
+  }));
+  return [create, ...(reopen.length > 0 ? [reopen] : []), ...(layout.length > 0 ? [layout] : [])];
 };
 
 function NewTabMenu(props: WorkspaceTabStripProps) {
@@ -218,7 +226,7 @@ const dropIndex = (event: DragEvent<HTMLElement>, tabs: readonly WorkspaceTab[])
 };
 
 export function WorkspaceTabStrip(props: WorkspaceTabStripProps) {
-  const { tabs, active, agentPane, idPrefix, draggingTabId, drivenTabIds } = props;
+  const { tabs, active, agentPane, idPrefix, draggingTabId, drivenTabIds, agentSurfaces } = props;
   const refs = useRef(new Map<WorkspaceTabId, HTMLButtonElement>());
   const order = tabs.map(tab => tab.id);
   const focusStop = active !== null && order.includes(active) ? active : order[0];
@@ -247,6 +255,11 @@ export function WorkspaceTabStrip(props: WorkspaceTabStripProps) {
           const selected = tab.id === active;
           const closable = !agentPane;
           const driven = drivenTabIds?.has(tab.id) ?? false;
+          const asked = agentSurfaces?.askedTabIds.has(tab.id) ?? false;
+          const fresh = !asked && (agentSurfaces?.unseenTabIds.has(tab.id) ?? false);
+          const said = [driven && 'agent is driving', asked && 'your turn', fresh && 'opened by the agent']
+            .filter(Boolean)
+            .join(', ');
           return (
             <button
               key={tab.id}
@@ -259,7 +272,7 @@ export function WorkspaceTabStrip(props: WorkspaceTabStripProps) {
               id={workspaceTabElementId(idPrefix, tab.id)}
               aria-selected={selected}
               aria-controls={workspacePanelElementId(idPrefix, tab.id)}
-              aria-label={driven ? `${tab.label}, agent is driving` : tab.label}
+              aria-label={said === '' ? tab.label : `${tab.label}, ${said}`}
               aria-keyshortcuts={closable ? 'Delete' : undefined}
               tabIndex={tab.id === focusStop ? 0 : -1}
               title={tab.title}
@@ -267,6 +280,8 @@ export function WorkspaceTabStrip(props: WorkspaceTabStripProps) {
               data-tab-id={tab.id}
               data-pinned={!closable}
               data-dragging={draggingTabId === tab.id}
+              data-asked={asked}
+              data-fresh={fresh}
               draggable={closable}
               onDragStart={event => {
                 if (event.dataTransfer) {
@@ -316,6 +331,12 @@ export function WorkspaceTabStrip(props: WorkspaceTabStripProps) {
                   AGENT
                 </span>
               )}
+              {asked && (
+                <span aria-hidden="true" className="fy-ws-ask-badge">
+                  YOUR TURN
+                </span>
+              )}
+              {fresh && <span aria-hidden="true" className="fy-ws-new-dot" />}
               {closable && (
                 <span
                   data-tab-close="true"

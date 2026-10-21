@@ -122,8 +122,22 @@ describe('SurfaceControl — takeover', () => {
     // Assert
     should(reusedName).be.undefined();
     should(otherSession).be.undefined();
-    should(await control.view('s1', 'browser')).deepEqual({ sessionId: 's1', driving: [], takeovers: [], handed: [] });
-    should(await control.view('s1', 'terminal')).deepEqual({ sessionId: 's1', driving: [], takeovers: [], handed: [] });
+    should(await control.view('s1', 'browser')).deepEqual({
+      sessionId: 's1',
+      driving: [],
+      takeovers: [],
+      handed: [],
+      opened: [],
+      asked: [],
+    });
+    should(await control.view('s1', 'terminal')).deepEqual({
+      sessionId: 's1',
+      driving: [],
+      takeovers: [],
+      handed: [],
+      opened: [],
+      asked: [],
+    });
     should(events.published.map(event => event.type)).deepEqual(['surface.takeover', 'surface.driving']);
     should(events.published[0]?.data).deepEqual({
       surface: 'browser',

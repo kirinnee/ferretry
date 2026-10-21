@@ -40,6 +40,10 @@ describe('fy terminal', () => {
     await run('terminal', 'read', 'dev', '--lines', '20');
     await run('terminal', 'read', 'dev');
     await run('terminal', 'close', 'dev');
+    await run('terminal', 'open', 'login', '--ask', 'Type your sudo password.', '--', 'sudo', 'true');
+    await run('terminal', 'open', 'gh', '--ask');
+    await run('terminal', 'ask', 'dev', 'Press', 'Enter.');
+    await run('terminal', 'ask', 'dev');
 
     // Assert
     should(calls.map(call => (call.kind === 'call' ? call.call : call))).deepEqual([
@@ -52,6 +56,10 @@ describe('fy terminal', () => {
       { tool: 'terminal.read', name: 'dev', lines: 20 },
       { tool: 'terminal.read', name: 'dev' },
       { tool: 'terminal.close', name: 'dev' },
+      { tool: 'terminal.open', name: 'login', command: 'sudo true', askOwner: 'Type your sudo password.' },
+      { tool: 'terminal.open', name: 'gh', askOwner: true },
+      { tool: 'terminal.ask_owner', name: 'dev', message: 'Press Enter.' },
+      { tool: 'terminal.ask_owner', name: 'dev' },
     ]);
   });
 
@@ -112,6 +120,10 @@ describe('fy browser page', () => {
     await run('browser', 'page', 'read', 'app', '--a11y', '--selector', 'main');
     await run('browser', 'page', 'screenshot', 'app', 'shot.png');
     await run('browser', 'page', 'close', 'app');
+    await run('browser', 'page', 'open', 'bank', 'https://example.test/', '--ask', 'Sign in.');
+    await run('browser', 'page', 'open', 'cap', '--ask');
+    await run('browser', 'page', 'ask', 'bank', 'Solve', 'the', 'captcha.');
+    await run('browser', 'page', 'ask', 'bank');
 
     // Assert
     should(calls).deepEqual([
@@ -125,6 +137,13 @@ describe('fy browser page', () => {
       { kind: 'call', call: { tool: 'browser.read', name: 'app', mode: 'a11y', selector: 'main' } },
       { kind: 'call', call: { tool: 'browser.screenshot', name: 'app' }, screenshotTo: 'shot.png' },
       { kind: 'call', call: { tool: 'browser.close', name: 'app' } },
+      {
+        kind: 'call',
+        call: { tool: 'browser.open', name: 'bank', url: 'https://example.test/', askOwner: 'Sign in.' },
+      },
+      { kind: 'call', call: { tool: 'browser.open', name: 'cap', askOwner: true } },
+      { kind: 'call', call: { tool: 'browser.ask_owner', name: 'bank', message: 'Solve the captcha.' } },
+      { kind: 'call', call: { tool: 'browser.ask_owner', name: 'bank' } },
     ]);
   });
 

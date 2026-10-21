@@ -138,7 +138,7 @@ export class AgentToolService {
 
   /** Every live driving marker, standing takeover and hand-over of one kind in one session. */
   async controlView(sessionId: string, surface: SurfaceKind): Promise<SurfaceControlView> {
-    return await this.ports.control.view(sessionId, surface);
+    return await this.alive(sessionId, surface, await this.ports.control.view(sessionId, surface));
   }
 
   /** A person takes a surface over from the agent, hands it back, or hands it to the agent. */
@@ -157,7 +157,7 @@ export class AgentToolService {
       else if (request.action === 'handback') await this.ports.control.handback(sessionId, surface);
       else await this.ports.control.hand(sessionId, surface, by);
       outcome = 'succeeded';
-      return await this.ports.control.view(sessionId, kind);
+      return await this.controlView(sessionId, kind);
     } catch (error) {
       throw translate(error) ?? error;
     } finally {
@@ -195,8 +195,9 @@ export class AgentToolService {
         if (call.command !== undefined)
           await this.ports.terminals.write(sessionId, opened.id, terminalInput(call.command, ['enter']));
         await this.drove(caller, call, facts.surface);
+        await this.announce(caller, facts.surface, call.askOwner);
         return {
-          summary: `Opened ${surfaceReference('terminal', call.name)}${call.command === undefined ? '' : ' and started the command'}.`,
+          summary: `Opened ${surfaceReference('terminal', call.name)}${call.command === undefined ? '' : ' and started the command'}${handedNote(call.askOwner)}.`,
         };
       }
       case 'browser.open': {
@@ -214,8 +215,11 @@ export class AgentToolService {
           ...(page.incognito ? { incognito: true } : {}),
         };
         await this.drove(caller, call, facts.surface);
+        await this.announce(caller, facts.surface, call.askOwner);
         const kind = call.incognito === true ? 'an incognito page, ' : '';
-        return { summary: `Opened ${kind}${surfaceReference('browser', call.name)} at ${page.url}.` };
+        return {
+          summary: `Opened ${kind}${surfaceReference('browser', call.name)} at ${page.url}${handedNote(call.askOwner)}.`,
+        };
       }
       default: {
         const surface = await this.resolve(sessionId, kindOf(call), call.name);
@@ -255,6 +259,14 @@ export class AgentToolService {
       }
       case 'terminal.wait':
         return await this.wait(caller, call, surface, reference);
+      case 'terminal.ask_owner':
+      case 'browser.ask_owner':
+        if (caller.kind !== 'agent')
+          throw new AgentToolError('bad_request', 'Only an agent hands a surface to its owner; you already have it.');
+        await this.announce(caller, surface, call.message ?? true, true);
+        return {
+          summary: `Asked the owner to take over ${reference}${call.message === undefined ? '' : ' and told them what to do'}. Wait for them: read the surface to see when they are done.`,
+        };
       case 'terminal.close':
         await this.ports.terminals.close(sessionId, surface.id);
         this.ports.control.forget(sessionId, surface);
@@ -475,6 +487,44 @@ export class AgentToolService {
       .catch(() => undefined);
   }
 
+  /**
+   * Tells the owner's workspace about a surface the AGENT opened (a tab appears) and, when it asked for
+   * them, hands it over ("your turn here"). Like the driving marker it is a courtesy to a person
+   * watching: a journal that cannot take it must not fail an act that already happened — except an
+   * explicit ask, whose failure the agent must hear about, since the owner would never be told.
+   */
+  private async announce(
+    caller: AgentToolCaller,
+    surface: ResolvedSurface,
+    askOwner: true | string | undefined,
+    explicit = false,
+  ): Promise<void> {
+    if (caller.kind !== 'agent') return;
+    const agent = caller.name === undefined ? {} : { name: caller.name };
+    const message = typeof askOwner === 'string' ? askOwner : undefined;
+    await this.ports.control.opened(caller.sessionId, surface, agent).catch(() => undefined);
+    if (askOwner === undefined) return;
+    const asking = this.ports.control.asked(caller.sessionId, surface, agent, message);
+    if (explicit) await asking;
+    else await asking.catch(() => undefined);
+  }
+
+  /** What is still alive: a close is not journaled, so a gone surface must not keep a tab or an ask. */
+  private async alive(sessionId: string, kind: SurfaceKind, view: SurfaceControlView): Promise<SurfaceControlView> {
+    if (view.opened.length === 0 && view.asked.length === 0) return view;
+    const live = new Set(
+      (kind === 'terminal'
+        ? (await this.ports.terminals.list(sessionId)).terminals
+        : (await this.ports.browser.status(sessionId)).pages
+      ).map(row => row.id),
+    );
+    return {
+      ...view,
+      opened: view.opened.filter(entry => live.has(entry.id)),
+      asked: view.asked.filter(entry => live.has(entry.id)),
+    };
+  }
+
   /** One record per call: the tool and the surface by name, and lengths — never what was typed. */
   private async record(
     caller: AgentToolCaller,
@@ -503,7 +553,11 @@ export class AgentToolService {
 function callFacts(call: AgentToolCall): AuditDetail {
   switch (call.tool) {
     case 'terminal.open':
-      return { ...(call.folder === undefined ? {} : { folder: true }), command: call.command !== undefined };
+      return {
+        ...(call.folder === undefined ? {} : { folder: true }),
+        command: call.command !== undefined,
+        ...(call.askOwner === undefined ? {} : { askOwner: true }),
+      };
     case 'terminal.send':
       return {
         ...(call.text === undefined ? {} : { textLength: call.text.length }),
@@ -520,7 +574,11 @@ function callFacts(call: AgentToolCall): AuditDetail {
       return {
         ...(call.url === undefined ? {} : { host: auditHost(call.url) }),
         ...(call.incognito === true ? { incognito: true } : {}),
+        ...(call.askOwner === undefined ? {} : { askOwner: true }),
       };
+    case 'terminal.ask_owner':
+    case 'browser.ask_owner':
+      return { message: call.message !== undefined };
     case 'browser.navigate':
       return { host: auditHost(call.url) };
     case 'browser.click':
@@ -533,6 +591,9 @@ function callFacts(call: AgentToolCall): AuditDetail {
       return {};
   }
 }
+
+const handedNote = (askOwner: true | string | undefined): string =>
+  askOwner === undefined ? '' : ' and asked the owner to take over (wait for them)';
 
 /** A listing's result: the rows the caller may see, and a sentence naming them. */
 function shown(surface: SurfaceKind, rows: readonly (AgentSurface | undefined)[]): AgentToolResult {

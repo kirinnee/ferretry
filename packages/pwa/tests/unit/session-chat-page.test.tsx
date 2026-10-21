@@ -1704,8 +1704,22 @@ describe('SessionChatPage', () => {
         idleTimeoutSeconds: 900,
         capacity: { running: 2, maximum: 60 },
       },
-      '/v1/sessions/shared/surfaces/terminals/control': { sessionId: 'shared', driving: [], takeovers: [], handed: [] },
-      '/v1/sessions/shared/surfaces/browser/control': { sessionId: 'shared', driving: [], takeovers: [], handed: [] },
+      '/v1/sessions/shared/surfaces/terminals/control': {
+        sessionId: 'shared',
+        driving: [],
+        takeovers: [],
+        handed: [],
+        opened: [],
+        asked: [],
+      },
+      '/v1/sessions/shared/surfaces/browser/control': {
+        sessionId: 'shared',
+        driving: [],
+        takeovers: [],
+        handed: [],
+        opened: [],
+        asked: [],
+      },
     };
     const daemonClient = async () =>
       ({

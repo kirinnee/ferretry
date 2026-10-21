@@ -27,6 +27,8 @@
 import {
   type FyEvent,
   SURFACE_EVENT_TYPES,
+  type SurfaceAsked,
+  SurfaceAskedSchema,
   type SurfaceControlView,
   type SurfaceDriving,
   SurfaceDrivingSchema,
@@ -34,6 +36,8 @@ import {
   type SurfaceHanded,
   SurfaceHandedSchema,
   type SurfaceKind,
+  type SurfaceOpened,
+  SurfaceOpenedSchema,
   type SurfaceTakeover,
   SurfaceTakeoverSchema,
 } from '@ferretry/protocol';
@@ -61,7 +65,14 @@ export const withSurfaceControlView = (
   view: SurfaceControlView,
 ): SurfaceControlState => (view.sessionId === sessionId ? { ...state, [kind]: view } : state);
 
-const emptyView = (sessionId: string): SurfaceControlView => ({ sessionId, driving: [], takeovers: [], handed: [] });
+const emptyView = (sessionId: string): SurfaceControlView => ({
+  sessionId,
+  driving: [],
+  takeovers: [],
+  handed: [],
+  opened: [],
+  asked: [],
+});
 
 /** Replaces the record with the same id, or appends it. */
 const upsert = <T extends { readonly id: string }>(records: readonly T[], next: T): T[] => [
@@ -96,6 +107,8 @@ const foldTakeover = (
       ...view,
       // The daemon drops the agent's marker the moment a person takes the surface.
       driving: withoutId(view.driving, takeover.id),
+      // A person taking the surface is the answer to an ask.
+      asked: withoutId(view.asked, takeover.id),
       takeovers: upsert(view.takeovers, takeover),
     },
   };
@@ -129,7 +142,28 @@ export const applySurfaceEvent = (
       const parsed = SurfaceHandbackSchema.safeParse(event.data);
       if (!parsed.success) return state;
       const view = viewFor(state, sessionId, parsed.data.surface);
-      return { ...state, [parsed.data.surface]: { ...view, takeovers: withoutId(view.takeovers, parsed.data.id) } };
+      return {
+        ...state,
+        [parsed.data.surface]: {
+          ...view,
+          takeovers: withoutId(view.takeovers, parsed.data.id),
+          asked: withoutId(view.asked, parsed.data.id),
+        },
+      };
+    }
+    case SURFACE_EVENT_TYPES.opened: {
+      const parsed = SurfaceOpenedSchema.safeParse(event.data);
+      if (!parsed.success) return state;
+      const view = viewFor(state, sessionId, parsed.data.surface);
+      return { ...state, [parsed.data.surface]: { ...view, opened: upsert(view.opened, parsed.data) } };
+    }
+    case SURFACE_EVENT_TYPES.asked: {
+      const parsed = SurfaceAskedSchema.safeParse(event.data);
+      if (!parsed.success) return state;
+      const view = viewFor(state, sessionId, parsed.data.surface);
+      // A surface a person already holds has nothing left to ask for.
+      if (view.takeovers.some(takeover => takeover.id === parsed.data.id)) return state;
+      return { ...state, [parsed.data.surface]: { ...view, asked: upsert(view.asked, parsed.data) } };
     }
     case SURFACE_EVENT_TYPES.handed: {
       const parsed = SurfaceHandedSchema.safeParse(event.data);
@@ -140,7 +174,7 @@ export const applySurfaceEvent = (
   }
 };
 
-/** Whether this event is one of the four control records — the feed's cue to fold it in. */
+/** Whether this event is one of the control records — the feed's cue to fold it in. */
 export const isSurfaceControlEvent = (event: FyEvent): boolean =>
   (Object.values(SURFACE_EVENT_TYPES) as readonly string[]).includes(event.type);
 
@@ -150,6 +184,22 @@ export const surfaceTakeoverFor = (
   kind: SurfaceKind,
   key: string,
 ): SurfaceTakeover | undefined => state[kind]?.takeovers.find(takeover => addresses(takeover, key));
+
+/** Every surface an agent opened in this session, of both kinds, oldest first. */
+export const openedSurfaces = (state: SurfaceControlState): readonly SurfaceOpened[] =>
+  (['terminal', 'browser'] as const)
+    .flatMap(kind => state[kind]?.opened ?? [])
+    .sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
+
+/** Every surface an agent has handed to the owner and nobody has taken yet, of both kinds. */
+export const askedSurfaces = (state: SurfaceControlState): readonly SurfaceAsked[] =>
+  (['terminal', 'browser'] as const)
+    .flatMap(kind => state[kind]?.asked ?? [])
+    .sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
+
+/** The ask standing on a surface, if the agent handed it over. */
+export const surfaceAskFor = (state: SurfaceControlState, kind: SurfaceKind, key: string): SurfaceAsked | undefined =>
+  state[kind]?.asked.find(asked => addresses(asked, key));
 
 /** The agent driving a surface right now — its marker unlapsed, and nobody holding the surface. */
 export const surfaceDrivingFor = (
