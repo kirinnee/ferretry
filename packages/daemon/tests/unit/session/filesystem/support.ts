@@ -1,10 +1,12 @@
 import {
-  FsError,
   type ComponentIdentity,
   type DiffSide,
+  FsError,
   type HeadBlob,
   type HeadEntry,
   type PinnedDirectoryEntry,
+  type PinnedFileKind,
+  type PinnedFileProbe,
   type PinnedListing,
   type PinnedOpenOptions,
   type PinnedRoot,
@@ -113,6 +115,8 @@ export interface FakeRootOptions {
    * domain performs to bind Git's verdict to the descriptor — sees a different object.
    */
   readonly onOpen?: (rel: string, attempt: number, tree: FakeTree) => void;
+  /** Raised by every probe `classify`, so a test can stage a probe that cannot answer at all. */
+  readonly probeError?: Error;
 }
 
 class FakePinnedRoot implements PinnedRoot {
@@ -125,6 +129,7 @@ class FakePinnedRoot implements PinnedRoot {
     readonly rootReal: string,
     private readonly tree: FakeTree,
     private readonly onOpen: FakeRootOptions['onOpen'],
+    private readonly probeError?: Error,
   ) {}
 
   get policyCwd(): string {
@@ -158,6 +163,48 @@ class FakePinnedRoot implements PinnedRoot {
     return target;
   }
 
+  /**
+   * A probe answered through this root's own `open`, so every existing observation — `opens`, `onOpen`,
+   * every target closed — still describes what an index asked. The budget is asked once per name, before
+   * it, exactly as the port promises.
+   */
+  probe(): PinnedFileProbe {
+    const probe = {
+      classify: async (rels: readonly string[], budget?: WorkBudget): Promise<readonly PinnedFileKind[]> => {
+        this.probeBatches.push([...rels]);
+        if (this.probeError) throw this.probeError;
+        const kinds: PinnedFileKind[] = [];
+        for (const rel of rels) {
+          if (budget?.expired() === true) break;
+          let target: PinnedTarget;
+          try {
+            target = await this.open(rel);
+          } catch (error) {
+            kinds.push(
+              error instanceof FsError &&
+                ['not_found', 'not_a_directory', 'not_a_file', 'escapes_root'].includes(error.code)
+                ? 'unsupported'
+                : 'unreadable',
+            );
+            continue;
+          }
+          kinds.push(target.metadata.type === 'file' && target.canonical === rel ? 'file' : 'unsupported');
+          await target.close();
+        }
+        return kinds;
+      },
+      close: async (): Promise<void> => {
+        this.probesClosed += 1;
+      },
+    };
+    this.probesOpened += 1;
+    return probe;
+  }
+
+  readonly probeBatches: string[][] = [];
+  probesOpened = 0;
+  probesClosed = 0;
+
   async close(): Promise<void> {
     this.closed = true;
   }
@@ -176,6 +223,7 @@ export class FakeRootPinner implements SessionRootPinner {
       this.options.rootReal ?? FAKE_ROOT,
       this.options.tree ?? new Map(),
       this.options.onOpen,
+      this.options.probeError,
     );
     this.roots.push(root);
     return root;

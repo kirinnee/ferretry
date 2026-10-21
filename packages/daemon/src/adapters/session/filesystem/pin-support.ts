@@ -1,6 +1,13 @@
 import type { Stats } from 'node:fs';
 import path from 'node:path';
-import type { ComponentIdentity, FsEntryType, PinnedMetadata } from '../../../lib/session/filesystem/index.ts';
+import {
+  type ComponentIdentity,
+  type FsEntryType,
+  FsError,
+  type FsErrorCode,
+  type PinnedFileKind,
+  type PinnedMetadata,
+} from '../../../lib/session/filesystem/index.ts';
 
 /**
  * The judgements every descriptor-backed pinner makes IDENTICALLY, kept in one place so two platforms
@@ -61,4 +68,50 @@ export function direntType(entry: {
   if (entry.isDirectory()) return 'dir';
   if (entry.isFile()) return 'file';
   return undefined; // fifo, socket, device — nothing a viewer can show
+}
+
+/** Where a probe's walk goes: the directories to hold open, root-most first, and the leaf to describe. */
+export interface ProbeSegments {
+  readonly directories: readonly string[];
+  readonly leaf: string;
+}
+
+/**
+ * `rel` as a probe walks it, or `undefined` for a name no walk accepts.
+ *
+ * An empty, `.` or `..` component is refused here rather than handed to the kernel: the walk opens one
+ * component at a time from its parent, and `..` is the one name that walks OUT of a held directory.
+ */
+export function probeSegments(rel: string): ProbeSegments | undefined {
+  const segments = rel.split('/');
+  if (segments.some(segment => segment === '' || segment === '.' || segment === '..')) return undefined;
+  const leaf = segments.pop();
+  return leaf === undefined ? undefined : { directories: segments, leaf };
+}
+
+export function sameDirectory(left: readonly string[], right: readonly string[]): boolean {
+  return left.length === right.length && left.every((segment, index) => segment === right[index]);
+}
+
+/** The refusals that say a name holds nothing a read would serve — as opposed to proving nothing. */
+const UNSUPPORTED_REFUSALS: ReadonlySet<FsErrorCode> = new Set([
+  'not_found',
+  'not_a_directory',
+  'not_a_file',
+  'escapes_root',
+]);
+
+/** A probe's verdict on a directory step that refused: the same split a read's refusal makes. */
+export function refusedKind(error: unknown): PinnedFileKind {
+  return error instanceof FsError && UNSUPPORTED_REFUSALS.has(error.code) ? 'unsupported' : 'unreadable';
+}
+
+/** A probe's verdict on a leaf from its OWN metadata, so a link is a link and never its target. */
+export function leafKind(metadata: Stats): PinnedFileKind {
+  return metadata.isFile() ? 'file' : 'unsupported';
+}
+
+/** A probe's verdict on a leaf that could not be described: gone is a kind, anything else is not. */
+export function leafErrorKind(error: unknown): PinnedFileKind {
+  return isMissing(error) ? 'unsupported' : 'unreadable';
 }

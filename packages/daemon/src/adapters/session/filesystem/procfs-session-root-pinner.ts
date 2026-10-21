@@ -6,6 +6,8 @@ import {
   type FsEntryType,
   FsError,
   type PinnedDirectoryEntry,
+  type PinnedFileKind,
+  type PinnedFileProbe,
   type PinnedListing,
   type PinnedMetadata,
   type PinnedOpenOptions,
@@ -23,7 +25,11 @@ import {
   direntType,
   errorCode,
   isMissing,
+  leafErrorKind,
+  leafKind,
   pinnedMetadata,
+  probeSegments,
+  refusedKind,
 } from './pin-support.ts';
 
 /**
@@ -203,6 +209,98 @@ class ProcfsPinnedTarget implements PinnedTarget {
   }
 }
 
+/**
+ * Many regular-file questions against one pin, sharing every directory walk between them.
+ *
+ * The same chain as the POSIX probe, held as handles: the directories last walked stay open, a sibling
+ * re-walks nothing and a cousin closes back to the shared ancestor. The leaf is described by `lstat`
+ * through its held parent's descriptor alias, so a link at the leaf reports as a link and is never
+ * followed — and a regular file the daemon may not read is listed rather than opened, for the same
+ * reason the POSIX probe gives.
+ */
+class ProcfsFileProbe implements PinnedFileProbe {
+  private readonly chain: { readonly name: string; readonly handle: FileHandle }[] = [];
+  /** The last directory that refused, so its remaining children cost no second walk. */
+  private refused: { readonly directory: string; readonly kind: PinnedFileKind } | undefined;
+  private closed = false;
+
+  constructor(
+    private readonly rootPath: string,
+    private readonly step: (from: string, segment: string, reported: string) => Promise<FileHandle>,
+  ) {}
+
+  async classify(rels: readonly string[], budget?: WorkBudget): Promise<readonly PinnedFileKind[]> {
+    if (this.closed) throw new Error('the file probe is closed');
+    const kinds: PinnedFileKind[] = [];
+    for (const rel of rels) {
+      if (budget?.expired() === true) break;
+      const split = probeSegments(rel);
+      if (split === undefined) {
+        kinds.push('unsupported');
+        continue;
+      }
+      const reached = await this.reach(split.directories);
+      if (!('from' in reached)) {
+        kinds.push(reached.kind);
+        continue;
+      }
+      try {
+        kinds.push(leafKind(await lstat(`${reached.from}/${split.leaf}`)));
+      } catch (error) {
+        kinds.push(leafErrorKind(error));
+      }
+    }
+    return kinds;
+  }
+
+  async close(): Promise<void> {
+    this.closed = true;
+    await this.release(0);
+  }
+
+  /** Holds the chain open down to `directories`, or names why it could not be reached. */
+  private async reach(
+    directories: readonly string[],
+  ): Promise<{ readonly from: string } | { readonly kind: PinnedFileKind }> {
+    const key = directories.join('/');
+    const refused = this.refused;
+    if (refused !== undefined && (key === refused.directory || key.startsWith(`${refused.directory}/`)))
+      return { kind: refused.kind };
+    let kept = 0;
+    while (kept < this.chain.length && kept < directories.length && this.chain[kept]?.name === directories[kept])
+      kept += 1;
+    await this.release(kept);
+    for (const [depth, segment] of directories.entries()) {
+      if (depth < kept) continue;
+      const parent = this.chain.at(-1);
+      const reported = directories.slice(0, depth + 1).join('/');
+      try {
+        const handle = await this.step(
+          parent === undefined ? this.rootPath : procPath(parent.handle.fd),
+          segment,
+          reported,
+        );
+        this.chain.push({ name: segment, handle });
+      } catch (error) {
+        this.refused = { directory: reported, kind: refusedKind(error) };
+        return { kind: this.refused.kind };
+      }
+    }
+    const top = this.chain.at(-1);
+    return { from: top === undefined ? this.rootPath : procPath(top.handle.fd) };
+  }
+
+  /** Closes every held directory deeper than `depth`. The root itself belongs to the pin and stays. */
+  private async release(depth: number): Promise<void> {
+    while (this.chain.length > depth) {
+      await this.chain
+        .pop()
+        ?.handle.close()
+        .catch(() => undefined);
+    }
+  }
+}
+
 /** A session root held open, plus the component walk that is the only way to reach anything beneath it. */
 class ProcfsPinnedRoot implements PinnedRoot {
   constructor(
@@ -239,6 +337,13 @@ class ProcfsPinnedRoot implements PinnedRoot {
       await current.close().catch(() => undefined);
       throw error;
     }
+  }
+
+  probe(): PinnedFileProbe {
+    return new ProcfsFileProbe(
+      this.policyCwd,
+      async (from, segment, reported) => await this.step(from, segment, reported, reported, true),
+    );
   }
 
   async close(): Promise<void> {
