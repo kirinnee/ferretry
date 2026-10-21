@@ -5,9 +5,10 @@ import {
   type ConfiguredAnalyticsPricingSources,
   ConfiguredAnalyticsPricingSourcesSchema,
   type DaemonCapability,
+  DEFAULT_WEBRTC_ICE_SERVERS,
   daemonAddress,
-  declaredBind,
   decideAdvertisement,
+  declaredBind,
   FY_DEFAULT_DAEMON_PORT,
   isLoopbackHost,
   isWildcardHost,
@@ -34,6 +35,7 @@ const CorsOriginSchema = z
   }, 'CORS entry must be an origin without a path, query, or fragment')
   .transform(value => new URL(value).origin);
 
+export type { AnalyticsPricingCatalog, ConfiguredAnalyticsPricingSources };
 /**
  * Operator-owned per-model prices for this daemon, validated by the shape the browser also edits.
  *
@@ -44,7 +46,6 @@ const CorsOriginSchema = z
  * or turn absence into a zero-cost result.
  */
 export { AnalyticsPricingCatalogSchema, ConfiguredAnalyticsPricingSourcesSchema };
-export type { AnalyticsPricingCatalog, ConfiguredAnalyticsPricingSources };
 
 /**
  * Where the daemon reads account quota from, BESIDES this host's own fleet.
@@ -105,6 +106,36 @@ export const DaemonRelayConfigSchema = z
   .strict();
 
 export type DaemonRelayConfig = z.output<typeof DaemonRelayConfigSchema>;
+
+/**
+ * The peer-to-peer carrier (`docs/relay-protocol.md` §16): whether this daemon answers WebRTC offers,
+ * and which STUN servers it asks for its own public address.
+ *
+ * ON BY DEFAULT, because it is the default remote carrier and it adds no inbound surface a device could
+ * reach without already holding a session: an offer is signalled inside one. Switching it off is a
+ * decision a device is told about (`webrtc_disabled`), never a silent absence.
+ *
+ * STUN ONLY. A `turn:` address needs a credential this document must never hold, and the carrier
+ * deliberately has no TURN in its first version — a path that needs one falls back to the relay.
+ */
+export const DaemonWebRtcConfigSchema = z
+  .object({
+    enabled: z.boolean().default(true),
+    iceServers: z
+      .array(
+        z
+          .string()
+          .trim()
+          .max(256)
+          .regex(/^stuns?:[^\s/?#@]+$/u, 'an ICE server here is a stun: or stuns: address, host and optional port'),
+      )
+      .max(4)
+      .readonly()
+      .default(DEFAULT_WEBRTC_ICE_SERVERS),
+  })
+  .strict();
+
+export type DaemonWebRtcConfig = z.output<typeof DaemonWebRtcConfigSchema>;
 
 /**
  * What the boot trail says, once, when `config/daemon.json` still carries the retired `accountModel`
@@ -210,6 +241,8 @@ export const DaemonConfigDocumentSchema = z
     usage: UsageFeedConfigSchema.prefault({}),
     /** The rendezvous carrier, if this host has one. Absent means direct-only. */
     relay: DaemonRelayConfigSchema.optional(),
+    /** The peer-to-peer carrier: on, with Cloudflare's public STUN server, unless the operator says otherwise. */
+    webrtc: DaemonWebRtcConfigSchema.prefault({}),
     /**
      * EVERY WAY THIS DAEMON MAY BE REACHED, as one list, beside the legacy spelling of the same fact.
      *

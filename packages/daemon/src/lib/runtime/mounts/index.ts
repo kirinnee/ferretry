@@ -95,6 +95,7 @@ import { type TaskBoardSubsystem, taskBoardRoutes } from './task-boards.ts';
 import { type TaskSubsystem, taskRoutes } from './tasks.ts';
 import { type TerminalSubsystem, terminalRoutes, terminalSocketRoutes } from './terminals.ts';
 import { type WardenSubsystem, wardenRoutes } from './warden.ts';
+import { type WebRtcSignallingSubsystem, webrtcRoutes } from './webrtc.ts';
 import { type WorktreeSubsystem, worktreeRoutes } from './worktrees.ts';
 
 /**
@@ -151,6 +152,9 @@ export interface MountedSubsystems {
    *  refreshes cannot be two answers. A daemon that published its carriers only at pairing time had no
    *  way to tell an already-paired phone that its rendezvous had changed. */
   readonly carriers: readonly DaemonCarrier[];
+  /** The peer-to-peer carrier's signalling: a paired device's offer in, this daemon's answer out
+   *  (`docs/relay-protocol.md` §16). */
+  readonly webrtc: WebRtcSignallingSubsystem;
   /** Driving a harness's OWN sign-in from a browser, holding no token. The daemon launches the
    *  harness's own login against one credential's store with piped stdio, publishes a verification
    *  URL — and for Codex a device code — accepts one short-lived authorization code straight into that
@@ -439,6 +443,10 @@ export function mountedDaemonRoutes(base: DaemonApiDependencies, subsystems: Mou
         // neither shadow nor be shadowed. It is authenticated rather than operator-scoped — the remote
         // device is the reader, and nothing here is a secret. See the mount's own header.
         ...carrierRoutes(subsystems.carriers),
+        // The second way to reach this daemon is asked for inside the first, which is why it sits beside
+        // the carrier refresh: a paired device that reached it over the relay offers a peer-to-peer path
+        // here. `/v1/webrtc` is used by nothing else, so it can neither shadow nor be shadowed.
+        ...webrtcRoutes(subsystems.webrtc),
         // The daemon's own health sits with the base feeds it completes: `/healthz` is the public
         // liveness answer, and this is the scoped report the protocol declares under the same subject.
         // Both are fixed literals, so neither can shadow or be shadowed by a subsystem pattern.

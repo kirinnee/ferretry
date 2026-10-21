@@ -168,7 +168,6 @@ import {
   GitHubLatestRelease,
   HostedModelCatalog,
   HostedRelayDirectory,
-  NodeDataChannelEngine,
   HostHarnessFacts,
   HostHarnessProbe,
   HostInstallFacts,
@@ -182,6 +181,7 @@ import {
   NodeCatalog,
   NodeConversationFiles,
   NodeConversationLinker,
+  NodeDataChannelEngine,
   NodeForeignHistoryFiles,
   NodePairingCryptography,
   NodeSessionBrowserLauncher,
@@ -500,6 +500,7 @@ import {
   type DecodedInitialAttachment,
   type DeliveredAttachment,
   DeviceGrantService,
+  DirectSession,
   DONE_MARKER_FILENAME,
   declaredModel,
   decodeInitialAttachments,
@@ -516,6 +517,7 @@ import {
   describeDaemonTimings,
   describeGrantPosture,
   describeRelayCarrierPosture,
+  describeWebRtcEngine,
   dialledRelayUrl,
   directCarrierSocketRoute,
   doneMarkerCertifiesTurn,
@@ -640,8 +642,6 @@ import {
   type RelayCarrierSource,
   type RelayDeviceDirectory,
   type RelayDirectoryPort,
-  describeWebRtcEngine,
-  type WebRtcEnginePort,
   type RelayPairingRedeemer,
   type RelayStreamDispatch,
   type ResumeAnswerAttention,
@@ -807,6 +807,12 @@ import {
   WardenSweepLoop,
   WardenSweepService,
   WatchedUsageFeed,
+  type WebRtcAvailability,
+  WebRtcCarrier,
+  type WebRtcEnginePort,
+  type WebRtcPeerEngine,
+  type WebRtcSessionFactory,
+  type WebRtcSignallingSubsystem,
   type WorkingDirectoryResolver,
   wardenEventTrigger,
   wardenTriggerEnabled,
@@ -1168,7 +1174,19 @@ export interface DaemonWorld {
     sockets: RelayStreamDispatch,
     devices: RelayDeviceDirectory,
     pairing: RelayPairingRedeemer,
-  ) => Promise<{ readonly route: SocketRoute } | { readonly refusal: string }>;
+  ) => Promise<
+    | {
+        readonly route: SocketRoute;
+        /**
+         * The same session the route opens per socket, for a carrier that is not a socket on this
+         * listener: a WebRTC data channel (`docs/relay-protocol.md` §16). One set of dependencies, so a
+         * peer-to-peer session is the direct session — same identity, lease and connections — and only
+         * its arrival differs.
+         */
+        readonly openSession: WebRtcSessionFactory;
+      }
+    | { readonly refusal: string }
+  >;
   /** The shape of one session: its name, parent, display model, context window
    *  and launch window. */
   readonly sessions: SessionPlanner;
@@ -1248,7 +1266,7 @@ export interface DaemonWorld {
    * one message — and a suite that is not about WebRTC should not have to load a native library to
    * ask whether a daemon would start.
    */
-  readonly webrtcEngine: WebRtcEnginePort;
+  readonly webrtcEngine: WebRtcEnginePort & WebRtcPeerEngine;
   /**
    * The subsystems mounted onto that surface. Every field the result carries is a capability the
    * running product actually has; a subsystem absent from it is one the daemon never constructs.
@@ -1336,6 +1354,8 @@ export interface DaemonWorld {
     security: SecuritySettingsService,
     /** The exact published set pairing redemption receives and authenticated refresh serves. */
     carriers: readonly DaemonCarrier[],
+    /** The peer-to-peer carrier's signalling, built by the boot because its sessions need the dispatcher. */
+    webrtc: WebRtcSignallingSubsystem,
     /**
      * Where this operator has said the harnesses are, passed IN for the same reason the usage feed
      * is: it is read from the configuration this boot loaded, and the doctor route must report the
@@ -7307,24 +7327,27 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         new WebCryptoRelayIdentityKeys(),
       );
       if (!identity.ok) return { refusal: identity.reason };
-      return {
-        route: directCarrierSocketRoute({
-          crypto: new WebCryptoRelayCrypto(),
-          identity: identity.identity,
-          dispatch,
-          sockets,
-          devices,
-          pairing,
-          scheduler: {
-            after: (milliseconds, action) => {
-              const handle = setTimeout(action, milliseconds);
-              return { cancel: () => clearTimeout(handle) };
-            },
+      const sessionDependencies = {
+        crypto: new WebCryptoRelayCrypto(),
+        identity: identity.identity,
+        dispatch,
+        sockets,
+        devices,
+        pairing,
+        scheduler: {
+          after: (milliseconds: number, action: () => void) => {
+            const handle = setTimeout(action, milliseconds);
+            return { cancel: () => clearTimeout(handle) };
           },
-          clock: { now: () => Date.now() },
-          lease: timings.lease,
-          connections: deviceConnections,
-        }),
+        },
+        clock: { now: () => Date.now() },
+        lease: timings.lease,
+        connections: deviceConnections,
+      };
+      return {
+        route: directCarrierSocketRoute(sessionDependencies),
+        openSession: (arrival, downstream, release) =>
+          new DirectSession(sessionDependencies, arrival, downstream, release),
       };
     },
     createRelayCarriers: async (sources, dispatch, sockets, devices, pairing) => {
@@ -7379,6 +7402,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       stepUp,
       security,
       carriers,
+      webrtc,
       harnessDiscovery,
       browserLauncher,
     ) => {
@@ -8495,6 +8519,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         stepUp,
         security,
         carriers,
+        webrtc,
         harnessLogin,
         mcpOAuth,
         // The logins list is a WATCHER: somebody has it on screen, so the environment logins' provider
@@ -9188,6 +9213,49 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
   const analyticsStore = await world.analyticsIndexes.open(opened.paths, opened.fileSystem);
   cleanups.push(() => analyticsStore.store.close());
   world.notices.step('analytics index opened', analyticsStore.rebuildRequired ? 'a rebuild is required' : undefined);
+  /**
+   * THE PEER-TO-PEER CARRIER (`docs/relay-protocol.md` §16), decided once and built before the subsystems
+   * because its signalling is a mounted route.
+   *
+   * Its SESSIONS are the direct carrier's, and the direct carrier needs the dispatcher this boot builds
+   * after the subsystems — so the carrier reads its session factory through a binding assigned once the
+   * direct carrier exists. Nothing reads it before then: a session opens only on a data channel, and a
+   * data channel exists only after an offer this daemon answered while serving. A daemon whose direct
+   * carrier is refused has no identity to sign a handshake with, so a channel is closed at once.
+   *
+   * The engine is proved, not assumed, with the same self-test `--check` runs, and an engine that fails
+   * it is an answer a device is told (`webrtc_unavailable`), never a boot that stops.
+   */
+  let openWebRtcSession: WebRtcSessionFactory | undefined;
+  const webrtcReport = config.webrtc.enabled ? await world.webrtcEngine.selfTest() : undefined;
+  const webrtcAvailability: WebRtcAvailability =
+    webrtcReport === undefined
+      ? {
+          kind: 'refused',
+          code: 'webrtc_disabled',
+          reason: `peer-to-peer connections are switched off in ${world.config.path}`,
+        }
+      : webrtcReport.kind === 'ready'
+        ? { kind: 'ready' }
+        : { kind: 'refused', code: 'webrtc_unavailable', reason: webrtcReport.reason };
+  world.notices.step(
+    'webrtc',
+    webrtcReport === undefined ? 'switched off in the configuration' : describeWebRtcEngine(webrtcReport),
+  );
+  const webrtc = new WebRtcCarrier({
+    availability: webrtcAvailability,
+    engine: world.webrtcEngine,
+    iceServers: config.webrtc.iceServers,
+    sessions: (arrival, downstream, release) => openWebRtcSession?.(arrival, downstream, release),
+    scheduler: {
+      after: (milliseconds, action) => {
+        const handle = setTimeout(action, milliseconds);
+        return { cancel: () => clearTimeout(handle) };
+      },
+    },
+    peerId: () => Buffer.from(crypto.getRandomValues(new Uint8Array(16))).toString('base64url'),
+  });
+  cleanups.push(() => webrtc.close());
   const subsystems = world.createSubsystems(
     opened.storage,
     world.terminalRuntime,
@@ -9220,6 +9288,7 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
     pairing.stepUp,
     pairing.security,
     carriers,
+    webrtc,
     harnessDiscovery,
     world.browserLauncher,
   );
@@ -9293,6 +9362,7 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
     pairing.subsystem,
   );
   if ('refusal' in direct) world.notices.state(`direct sessions unavailable — ${direct.refusal}`);
+  else openWebRtcSession = direct.openSession;
   const socketDispatcher = createMountedSocketDispatcher(base, subsystems, 'route' in direct ? [direct.route] : []);
   let server: ApiServerHandle;
   try {
@@ -9794,8 +9864,14 @@ export async function checkConfiguration(
   // The peer-to-peer engine, beside the carriers it will join. Proved rather than assumed — a native
   // library is the one dependency a build machine can have and a host can lack — and it never changes
   // the exit code: a daemon without it starts, and devices reach it directly or through the relay.
-  const webrtcEngine = await world.webrtcEngine.selfTest();
-  say(`webrtc       ${describeWebRtcEngine(webrtcEngine)}`);
+  if (config.webrtc.enabled) {
+    const webrtcEngine = await world.webrtcEngine.selfTest();
+    say(`webrtc       ${describeWebRtcEngine(webrtcEngine)}`);
+  } else {
+    say(
+      `webrtc       switched off in ${world.config.path} — devices reach this daemon directly or through the relay instead`,
+    );
+  }
   // Directly beneath the carrier, because this is the address that has to work on its own and whether
   // anybody but this machine can dial it. It DOES read the carrier above it now, through the one
   // derivation the boot uses, so this line and the QR `fy pair` draws for the same daemon agree. Two

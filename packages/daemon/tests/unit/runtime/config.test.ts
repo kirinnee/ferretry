@@ -1,6 +1,6 @@
 import { describe, it } from 'bun:test';
-import should from 'should';
 import { FY_DEFAULT_DAEMON_PORT, recordedBindAddress } from '@ferretry/protocol';
+import should from 'should';
 import { DISCOVERED_RELAY_CARRIER } from '../../../src/lib/runtime/carriers.ts';
 import {
   advertisesForeignAddress,
@@ -542,6 +542,42 @@ describe('the relay carrier block', () => {
     should(() => parseDaemonConfig({ relay: { url: 'https://relay.example?tenant=a' } })).throw();
     should(() => parseDaemonConfig({ relay: { url: 'https://relay.example', reconnectSeconds: 0 } })).throw();
     should(() => parseDaemonConfig({ relay: { url: 'https://relay.example', unknown: true } })).throw();
+  });
+});
+
+describe('the WebRTC carrier block', () => {
+  it('should be on by default, asking Cloudflare’s public STUN server and nobody else', () => {
+    // Assert — WebRTC is the default remote carrier, so an absent block is the carrier switched ON.
+    should(defaultDaemonConfig().webrtc).deepEqual({ enabled: true, iceServers: ['stun:stun.cloudflare.com:3478'] });
+  });
+
+  it.each([
+    [{ enabled: false }, { enabled: false, iceServers: ['stun:stun.cloudflare.com:3478'] }],
+    [
+      { iceServers: ['stun:stun.example.net:3478', 'stuns:stun.example.org'] },
+      { enabled: true, iceServers: ['stun:stun.example.net:3478', 'stuns:stun.example.org'] },
+    ],
+    [{ iceServers: [] }, { enabled: true, iceServers: [] }],
+  ])('should read %j as the operator wrote it', (input, expected) => {
+    // Act
+    const actual = parseDaemonConfig({ webrtc: input }).webrtc;
+
+    // Assert
+    should(actual).deepEqual(expected);
+  });
+
+  it.each([
+    [
+      'a TURN server, which would need a credential this document must never hold',
+      { iceServers: ['turn:turn.example.net'] },
+    ],
+    ['a URL shape that is not a STUN address', { iceServers: ['https://stun.example.net'] }],
+    ['a credential in the address', { iceServers: ['stun:user@stun.example.net'] }],
+    ['more than four servers', { iceServers: ['stun:a', 'stun:b', 'stun:c', 'stun:d', 'stun:e'] }],
+    ['a key this block does not define', { enabled: true, turn: 'x' }],
+  ])('should refuse %s', (_name, input) => {
+    // Act + Assert
+    should(() => parseDaemonConfig({ webrtc: input })).throw();
   });
 });
 
