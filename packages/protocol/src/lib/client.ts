@@ -19,6 +19,8 @@ import type {
   UsageFeedView,
 } from './service.ts';
 import type {
+  ComposerDraftRequest,
+  ComposerDraftResult,
   ConversionPreview,
   FyEvent,
   FyEventStreamIdle,
@@ -152,6 +154,11 @@ export interface IFyApiClient {
   cancelSend(id: string, sendId: string): Promise<SendRecord>;
   /** Presses Enter once for a send that is sitting typed, and not sent, in the agent's composer. */
   submitSend(id: string, sendId: string): Promise<SendRecord>;
+  /**
+   * Presses Enter on, or erases, the person's own draft in the agent's composer — the text a
+   * `composer_occupied` refusal quoted back — and only while the composer still holds exactly that.
+   */
+  resolveComposerDraft(id: string, request: ComposerDraftRequest): Promise<ComposerDraftResult>;
   answer(
     id: string,
     toolUseId: string,

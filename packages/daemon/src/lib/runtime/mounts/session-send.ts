@@ -1,4 +1,8 @@
 import {
+  COMPOSER_OCCUPIED_CODE,
+  type ComposerDraftRequest,
+  ComposerDraftRequestSchema,
+  type ComposerDraftResult,
   FY_REQUEST_ID_HEADER,
   InterruptSessionRequestSchema,
   SendCancelRequestSchema,
@@ -66,6 +70,11 @@ export class SessionSendError extends Error {
   constructor(
     readonly failure: SessionSendFailure,
     message: string,
+    /**
+     * The person's own text the agent's composer is holding, when that is why the send was refused:
+     * answered as `composer_occupied` with this draft, so the app can offer to send or clear it.
+     */
+    readonly draft?: string,
   ) {
     super(message);
     this.name = 'SessionSendError';
@@ -86,6 +95,8 @@ export interface SessionSendSubsystem {
   cancel(sessionId: string, sendId: string): Promise<SendRecord>;
   /** Presses Enter once for a send sitting typed, and not sent, in the agent's composer. */
   submit(sessionId: string, sendId: string): Promise<SendRecord>;
+  /** Presses Enter on, or erases, the person's own draft — only while the composer holds exactly it. */
+  composer(sessionId: string, request: ComposerDraftRequest): Promise<ComposerDraftResult>;
   /** What the person sent in one hand-off document (`turn-008`, `queued-<send id>`). */
   handoff(sessionId: string, name: string): Promise<SessionHandoff>;
 }
@@ -116,6 +127,10 @@ const REFUSALS: Readonly<Record<SessionSendFailure, { readonly status: number; r
 /** Restates a send refusal in the HTTP vocabulary. */
 function refuse(error: unknown): never {
   if (error instanceof SessionSendError) {
+    // The person's draft rides in the body so the app can act on exactly that text; the message alone
+    // quotes only its start.
+    if (error.failure === 'refused' && error.draft !== undefined)
+      throw new ApiError(409, error.message, COMPOSER_OCCUPIED_CODE, undefined, { draft: error.draft });
     const refusal = REFUSALS[error.failure];
     throw new ApiError(refusal.status, error.message, refusal.code);
   }
@@ -311,6 +326,22 @@ function sendLedgerRoutes(subsystem: SessionSendSubsystem): readonly ApiRoute[] 
         const sendId = pathSendId(context);
         await parseBody(context.request, SendSubmitRequestSchema);
         return jsonResponse(await subsystem.submit(id, sendId).catch(refuse));
+      },
+    },
+    // The person's own draft is not a send: no ledger row is behind it, and Enter or an erase is a key
+    // into the agent's pane on text Ferretry did not type. So it is governed as every other key into
+    // that pane is — `terminal.use` (docs/grants.md) — and audited as `terminal.input`, never with
+    // the text. The service acts only while the composer still holds exactly `draft`.
+    {
+      method: 'POST',
+      path: '/v1/sessions/:sessionId/composer',
+      minimum: 'operator',
+      capability: { capability: 'terminal', axis: 'use' },
+      noStore: true,
+      handle: async context => {
+        const id = pathSessionId(context);
+        const request = await parseBody(context.request, ComposerDraftRequestSchema);
+        return jsonResponse(await subsystem.composer(id, request).catch(refuse));
       },
     },
   ];

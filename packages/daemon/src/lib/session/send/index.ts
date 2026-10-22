@@ -3,6 +3,7 @@ export * from './notifier.ts';
 export * from './policy.ts';
 export * from './service.ts';
 export * from './settings.ts';
+export * from './stranded.ts';
 export * from './tracker.ts';
 export * from './tracking.ts';
 export * from './types.ts';

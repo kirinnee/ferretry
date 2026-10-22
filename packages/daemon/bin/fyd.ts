@@ -758,6 +758,7 @@ import {
   SecretVault,
   SecuritySettingsService,
   SelfRestartCoordinator,
+  SendDraftRefused,
   type SendLedger,
   SendPending,
   SendRefused,
@@ -2826,8 +2827,9 @@ function createResumeAnswerAttention(storage: DaemonStorage, answerLedger: FileA
  * plan. Collapsing them would tell an operator to fix something that is merely not ready yet.
  */
 function sendRefusal(error: unknown): never {
-  // The subclasses first: both extend `SendRefused`, and a plain refusal is the base.
+  // The subclasses first: each extends `SendRefused`, and a plain refusal is the base.
   if (error instanceof SendPending) throw new SessionSendError('pending', error.message);
+  if (error instanceof SendDraftRefused) throw new SessionSendError('refused', error.message, error.draft);
   if (error instanceof SendRefused) throw new SessionSendError('refused', error.message);
   // Acted on and failed: the keystroke, the relaunch or a document write. Whatever got as far as
   // being recorded is in the session's own journal and its send ledger.
@@ -2942,6 +2944,13 @@ function createSessionSendSubsystem(
       const id = require(reference);
       const record = await service.submit(id, sendId).catch((error: unknown) => sendRefusal(error));
       return sendRecordView(record);
+    },
+    composer: async (reference, request) => {
+      const id = require(reference);
+      const outcome = await service
+        .resolveDraft(id, request.action, request.draft)
+        .catch((error: unknown) => sendRefusal(error));
+      return { action: request.action, outcome };
     },
     handoff: async (reference, name) => {
       const id = require(reference);
@@ -7886,7 +7895,10 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           }, sendTranscripts),
           terminal: sendTerminal,
           repository: sendRepository,
-          attempts: { reattempt: async (id, sendId) => await sends.reattempt(id, sendId, { by: 'daemon' }) },
+          attempts: {
+            reattempt: async (id, sendId) => await sends.reattempt(id, sendId, { by: 'daemon' }),
+            resubmit: async (id, sendId) => await sends.resubmit(id, sendId),
+          },
           notifier: {
             notify: async (sender, recipient, record) => await sendNotices.notify(sender, recipient, record),
           },

@@ -1,0 +1,47 @@
+/* ============================================================================
+   The occupied-composer notice — under the composer, when the agent's own box holds the person's unsent
+   text. The dialog card's footprint in the warning tone: a sentence, the text quoted, two buttons that
+   wrap on a phone. Theme tokens only.
+   ========================================================================== */
+
+.fy-occupied-composer {
+  display: grid;
+  gap: 6px;
+  margin: 8px 0 0;
+  padding: 10px 12px;
+  border: var(--stroke-panel) solid var(--warn-border, var(--border));
+  border-radius: var(--radius-panel);
+  background: var(--warn-bg, var(--surface));
+  color: var(--fg);
+  font-family: var(--font-ui);
+  font-size: var(--text-sm);
+  min-width: 0;
+}
+.fy-occupied-composer__ask {
+  margin: 0;
+  font-weight: var(--weight-strong);
+  overflow-wrap: anywhere;
+}
+/* The person's own words, kept recognisable but clearly theirs rather than the app's. */
+.fy-occupied-composer__draft {
+  margin: 0;
+  color: var(--muted);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: var(--text-xs);
+  overflow-wrap: anywhere;
+}
+.fy-occupied-composer__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.fy-occupied-composer__hint {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--text-xs);
+}
+.fy-occupied-composer__failure {
+  margin: 0;
+  color: var(--err);
+  font-size: var(--text-xs);
+}

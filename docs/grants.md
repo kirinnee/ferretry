@@ -128,6 +128,14 @@ proved pane, so it is declared `terminal` / `use` and governed exactly as the Co
 `terminal.input` with `detail.mode: 'dialog'`, never with the choice. See
 [docs/harness-dialogs.md](harness-dialogs.md).
 
+**So is acting on the person's own draft.** `POST /v1/sessions/:sessionId/composer` presses Enter on, or
+erases, text a person left typed in the agent's composer — the "Send it" / "Clear it" a refused send
+offers. It is not a send (no ledger row, and the text is not Ferretry's), so it is declared `terminal` /
+`use` and governed exactly as the Console is, unlike the send-ledger routes, which stay `operator` with no
+capability. It acts only while the composer holds exactly the quoted draft, and is audited as
+`terminal.input` with `detail.mode: 'composer'`, never with the text. See
+[docs/message-delivery.md](message-delivery.md).
+
 Each has two axes, and they are different questions:
 
 - **use** — may the caller exercise the capability at all?
