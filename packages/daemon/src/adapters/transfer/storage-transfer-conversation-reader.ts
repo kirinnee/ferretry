@@ -48,7 +48,7 @@ export class StorageTransferConversationReader implements TransferConversationRe
   constructor(
     private readonly sources: readonly TranscriptSource[],
     private readonly journal: TranscriptDigestJournal,
-    private readonly redactor: Pick<TextRedactor, 'redact'>,
+    private readonly redactor: Pick<TextRedactor, 'batch'>,
   ) {}
 
   /**
@@ -83,8 +83,9 @@ export class StorageTransferConversationReader implements TransferConversationRe
     if (!scrub || digest === undefined) return digest;
     return {
       ...digest,
-      messages: await Promise.all(
-        digest.messages.map(async message => ({ ...message, text: await this.redactor.redact(message.text) })),
+      // One vault open for the whole digest, not one per message.
+      messages: await this.redactor.batch(scrub =>
+        digest.messages.map(message => ({ ...message, text: scrub.text(message.text) })),
       ),
     };
   }

@@ -237,7 +237,13 @@ describe('StorageTransferConversationReader', () => {
         recordingSource('codex', () => [message(0, 'somebody else conversation')], opened),
       ],
       journal(),
-      { redact: async text => text.replace('the message the fork is cut at', '[redacted:cut]') },
+      {
+        batch: async work =>
+          work({
+            text: text => text.replace('the message the fork is cut at', '[redacted:cut]'),
+            data: value => value,
+          }),
+      },
     );
 
     // Act

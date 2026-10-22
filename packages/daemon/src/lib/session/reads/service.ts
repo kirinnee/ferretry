@@ -56,21 +56,33 @@ import {
 } from '../transcript/message-token.ts';
 
 /**
+ * One opened set of values, as `batch` hands it over: pure, and valid only while that batch runs.
+ * Structurally `lib/secrets`'s `Scrub`, declared here for the reason the redactor is.
+ */
+export interface OperatorReadScrub {
+  text(text: string): string;
+  data(value: unknown): unknown;
+}
+
+/**
  * Scrubbing, as this surface needs it.
  *
- * Structurally identical to `lib/secrets`'s `TextRedactor` and deliberately declared here: the read
+ * The part of `lib/secrets`'s `TextRedactor` this surface uses, deliberately declared here: the read
  * surface must not depend on the secret subsystem to serve a transcript, and a daemon that has no
  * secret store still has all three reads.
+ *
+ * A page of many strings goes through `batch`, never `redact` per string: each call is a vault open,
+ * which is a read of the key file and the ciphertext from disk.
  */
 export interface OperatorReadRedactor {
   redact(text: string): Promise<string>;
-  redactData(value: unknown): Promise<unknown>;
+  batch<T>(work: (scrub: OperatorReadScrub) => T): Promise<T>;
 }
 
 /** A daemon with nothing to scrub. Its input is its output — a fact, not a fallback. */
 export const UNREDACTED: OperatorReadRedactor = {
   redact: async text => text,
-  redactData: async value => value,
+  batch: async work => work({ text: text => text, data: value => value }),
 };
 
 /** Why a read could not be answered. */
@@ -430,10 +442,10 @@ export class OperatorReadService {
     });
     // Only `data` is scrubbed. The envelope is this daemon's own — a sequence, an instant, a session
     // id and a type it minted — so nothing in it can hold a value, and passing it through redaction
-    // would be spending the work on fields that cannot carry the risk.
-    return await Promise.all(
-      page_.map(async event => ({ ...event, data: await this.redactor.redactData(event.data) })),
-    );
+    // would be spending the work on fields that cannot carry the risk. One vault open for the page, and
+    // none for an empty one: "nothing after N" is the answer an idle poll gets almost every time.
+    if (page_.length === 0) return page_;
+    return await this.redactor.batch(scrub => page_.map(event => ({ ...event, data: scrub.data(event.data) })));
   }
 
   /**
@@ -524,8 +536,9 @@ export class OperatorReadService {
    * conversation onto another.
    *
    * WHAT IT COSTS. One complete read per page — the source's own O(n) pass — plus one fixed-size MAC
-   * per served row and one for the cursor. There is deliberately no second incremental parser and no
-   * re-hashing of whole prefixes per row, which is what a chained commitment buys.
+   * per served row and one for the cursor, and ONE vault open for the page's scrub. There is
+   * deliberately no second incremental parser and no re-hashing of whole prefixes per row, which is
+   * what a chained commitment buys.
    */
   async messages(
     sessionId: string,
@@ -574,8 +587,8 @@ export class OperatorReadService {
     // `nextCursor` is null EXACTLY at the current end, so a client that reaches it, waits and asks
     // again with the previous cursor is asking a question this daemon can answer.
     const last = start + served.length < read.rows.length ? served[served.length - 1] : undefined;
-    const [messages, nextCursor] = await Promise.all([
-      Promise.all(served.map(async row => await this.servedRow(read.context, row))),
+    const [bound, nextCursor] = await Promise.all([
+      Promise.all(served.map(async row => await this.boundRow(read.context, row))),
       last === undefined
         ? null
         : issueSessionTranscriptMessageToken(
@@ -586,6 +599,16 @@ export class OperatorReadService {
             last.rawPrefix,
           ),
     ]);
+    // The whole page under ONE vault open, and none for an empty page. Order and cardinality are the
+    // caller's slice, and nothing here adds, drops or reorders a row.
+    const messages =
+      bound.length === 0
+        ? []
+        : await this.redactor.batch(scrub =>
+            bound.map(({ row, point, selectionBinding }) =>
+              servedRow(row, point, scrub.text(row.text), selectionBinding),
+            ),
+          );
     return { v: 1, sessionId, messages, nextCursor };
   }
 
@@ -623,42 +646,54 @@ export class OperatorReadService {
   }
 
   /**
-   * One served row: the durable facts unchanged, the display scrubbed, and the binding issued over the
-   * RAW content.
+   * One row's binding, issued over the RAW content.
    *
-   * The two happen independently and neither depends on the other's result. Issuing over redacted
-   * text would bind evidence to whatever the redactor happens to mask today, so a configuration
-   * change would stale every outstanding selection; scrubbing after issuance keeps the binding a
-   * statement about the transcript and the text a statement about what this reader may see. Order and
-   * cardinality are the caller's slice, and nothing here adds, drops or reorders a row.
+   * It is issued independently of the scrub and neither depends on the other's result. Issuing over
+   * redacted text would bind evidence to whatever the redactor happens to mask today, so a
+   * configuration change would stale every outstanding selection; scrubbing separately keeps the
+   * binding a statement about the transcript and the text a statement about what this reader may see.
    */
-  private async servedRow(
+  private async boundRow(
     context: SessionTranscriptMessageTokenContext,
     row: PortableConversationRow,
-  ): Promise<SessionTranscriptMessage> {
+  ): Promise<BoundRow> {
     // The digest's portable row type remains optional for compatibility, but the addressable read
     // surface cannot honestly issue a token without an exact block: two blocks in one record would
     // otherwise share it.
     const point = ExactConversationMessagePointSchema.safeParse(row.point);
     if (!point.success) throw new OperatorReadError('transcript_unreadable', 'transcript row has no exact block point');
-    const [selectionBinding, text] = await Promise.all([
-      issueSessionTranscriptMessageToken(
-        this.messageTokens,
-        SESSION_TRANSCRIPT_MESSAGE_TOKEN_SELECTION_DOMAIN,
-        context,
-        point.data,
-        row.rawPrefix,
-      ),
-      this.redactor.redact(row.text),
-    ]);
-    return {
-      point: point.data,
-      role: row.role,
-      text,
-      // Omitted rather than sent as null: a row the harness stamped no time on has no time, and
-      // inventing one would be a claim about when the agent said it.
-      ...(row.timestamp === undefined ? {} : { timestamp: row.timestamp }),
-      selectionBinding,
-    };
+    const selectionBinding = await issueSessionTranscriptMessageToken(
+      this.messageTokens,
+      SESSION_TRANSCRIPT_MESSAGE_TOKEN_SELECTION_DOMAIN,
+      context,
+      point.data,
+      row.rawPrefix,
+    );
+    return { row, point: point.data, selectionBinding };
   }
+}
+
+/** A row whose binding is issued and whose display is not yet scrubbed. */
+interface BoundRow {
+  readonly row: PortableConversationRow;
+  readonly point: SessionTranscriptMessage['point'];
+  readonly selectionBinding: string;
+}
+
+/** One served row: the durable facts unchanged, the display already scrubbed, the binding as issued. */
+function servedRow(
+  row: PortableConversationRow,
+  point: SessionTranscriptMessage['point'],
+  text: string,
+  selectionBinding: string,
+): SessionTranscriptMessage {
+  return {
+    point,
+    role: row.role,
+    text,
+    // Omitted rather than sent as null: a row the harness stamped no time on has no time, and
+    // inventing one would be a claim about when the agent said it.
+    ...(row.timestamp === undefined ? {} : { timestamp: row.timestamp }),
+    selectionBinding,
+  };
 }

@@ -49,16 +49,20 @@ const addressable = (text: string, byteOffset: number): PortableConversationRow 
   rawPrefix: new Uint8Array(32).fill(byteOffset),
 });
 
+const maskText = (text: string): string => text.split(SECRET).join('[redacted:TOKEN]');
+const maskData = (value: unknown): unknown =>
+  JSON.parse(JSON.stringify(value).split(SECRET).join('[redacted:TOKEN]')) as unknown;
+
 /** Masks the literal, and refuses everything when `damaged` — a vault that cannot be opened is a
  *  daemon that does not know what to scrub. */
 const masking = (damaged = false): OperatorReadRedactor => ({
   redact: async text => {
     if (damaged) throw new Error('the vault could not be opened');
-    return text.split(SECRET).join('[redacted:TOKEN]');
+    return maskText(text);
   },
-  redactData: async value => {
+  batch: async work => {
     if (damaged) throw new Error('the vault could not be opened');
-    return JSON.parse(JSON.stringify(value).split(SECRET).join('[redacted:TOKEN]')) as unknown;
+    return work({ text: maskText, data: maskData });
   },
 });
 
@@ -209,5 +213,128 @@ describe('operator reads are scrubbed', () => {
     // Assert
     should(text).containEql('[redacted:TOKEN]');
     should(text).not.containEql(SECRET);
+  });
+});
+
+/**
+ * Every call into the redactor is one vault open — a read of the key file and the ciphertext from
+ * disk — so the count of calls IS the count of opens, and a read that scrubbed string by string paid
+ * one per row of the page.
+ */
+const counting = (): { readonly redactor: OperatorReadRedactor; readonly opens: () => number } => {
+  let opens = 0;
+  return {
+    redactor: {
+      redact: async text => {
+        opens += 1;
+        return maskText(text);
+      },
+      batch: async work => {
+        opens += 1;
+        return work({ text: maskText, data: maskData });
+      },
+    },
+    opens: () => opens,
+  };
+};
+
+const ROWS = 50;
+
+const busy = (redactor: OperatorReadRedactor): OperatorReadService =>
+  new OperatorReadService(
+    {
+      replay: async () =>
+        Array.from({ length: ROWS }, (_, index) => ({
+          sequence: index + 1,
+          sessionId: 's1',
+          time: INSTANT,
+          type: 'tool.result',
+          data: { output: `row ${index} got ${SECRET}` },
+        })),
+    },
+    { capture: async () => ({ alive: true, dead: false, text: `screen ${SECRET}` }) },
+    {
+      tail: async () => ({
+        kind: 'read',
+        events: Array.from({ length: ROWS }, (_, index) => message(`turn ${index} with ${SECRET}`)),
+      }),
+    },
+    {
+      read: async () => ({
+        kind: 'read',
+        context: CONTEXT,
+        rows: Array.from({ length: ROWS }, (_, index) => addressable(`row ${index} with ${SECRET}`, index + 1)),
+      }),
+    },
+    CODEC,
+    { read: async () => ({ kind: 'read', text: `final frame ${SECRET}` }) },
+    redactor,
+  );
+
+describe('operator reads open the vault once per read', () => {
+  it('should scrub a whole journal page under one open', async () => {
+    // Arrange
+    const { redactor, opens } = counting();
+
+    // Act
+    const page = await busy(redactor).events('s1', 0, ROWS);
+
+    // Assert — every row scrubbed, in order, for one open.
+    should(opens()).equal(1);
+    should(page.map(event => event.sequence)).eql(Array.from({ length: ROWS }, (_, index) => index + 1));
+    should(page.map(event => event.data)).eql(
+      Array.from({ length: ROWS }, (_, index) => ({ output: `row ${index} got [redacted:TOKEN]` })),
+    );
+  });
+
+  it('should scrub a whole page of addressable rows under one open', async () => {
+    // Arrange
+    const { redactor, opens } = counting();
+
+    // Act
+    const page = await busy(redactor).messages('s1', undefined, ROWS);
+
+    // Assert
+    should(opens()).equal(1);
+    should(page.messages.map(row => row.text)).eql(
+      Array.from({ length: ROWS }, (_, index) => `row ${index} with [redacted:TOKEN]`),
+    );
+    should(page.messages.map(row => row.point.byteOffset)).eql(Array.from({ length: ROWS }, (_, index) => index + 1));
+  });
+
+  it('should open once for the transcript, the screen and the final frame', async () => {
+    // Arrange
+    const { redactor, opens } = counting();
+    const reads = busy(redactor);
+
+    // Act
+    await reads.logs('s1', ROWS);
+    await reads.snapshot('s1');
+    await reads.snapshot('s1', false);
+
+    // Assert
+    should(opens()).equal(3);
+  });
+
+  it('should not open the vault for an empty page, so an idle poll costs nothing', async () => {
+    // Arrange — a damaged vault, so an open would be a refusal rather than merely a cost.
+    const empty = new OperatorReadService(
+      { replay: async () => [] },
+      { capture: async () => undefined },
+      { tail: async () => ({ kind: 'read', events: [] }) },
+      { read: async () => ({ kind: 'read', context: CONTEXT, rows: [] }) },
+      CODEC,
+      { read: async () => ({ kind: 'absent' }) },
+      masking(true),
+    );
+
+    // Act
+    const events = await empty.events('s1', 7, undefined);
+    const page = await empty.messages('s1', undefined, undefined);
+
+    // Assert
+    should(events).eql([]);
+    should(page.messages).eql([]);
+    should(page.nextCursor).be.null();
   });
 });

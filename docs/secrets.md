@@ -61,6 +61,10 @@ did hold the value; what came back is a mask.
 A vault the daemon cannot open **refuses** those reads rather than serving unscrubbed text. Text it
 cannot scrub is text it must not serve.
 
+Each read opens the vault **once**: a whole page of a journal or a transcript is scrubbed under one
+open (`SecretRedactor.batch`), and the opened values are let go when that read returns. Nothing
+caches them between reads, so plaintext lives no longer than the read that needed it.
+
 ## Threat model
 
 ### What this protects against

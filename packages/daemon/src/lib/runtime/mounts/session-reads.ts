@@ -145,7 +145,9 @@ async function snapshot(
  *
  * CONDITIONAL, because the chat page polls it every few seconds and a quiet session's tail is the same
  * answer each time — up to hundreds of kilobytes on a metered relay, for nothing. The tag is taken over
- * the scrubbed text the service returns, never over the transcript itself (see `entityTag`).
+ * the scrubbed text the service returns, never over the transcript itself (see `entityTag`). So a
+ * `304` still costs one vault open: the tag cannot be known without the scrub, and a tag over the raw
+ * text would tell a client that something a mask hides had changed.
  */
 async function logs(
   reads: OperatorReadService,

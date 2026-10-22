@@ -324,7 +324,8 @@ export function triageSnapshotOf(anomaly: WardenAnomaly, evidence: WardenTriageE
 
 /** The vault redactor, as narrow as the snapshot needs. It THROWS when the vault cannot be opened. */
 export interface WardenTextRedactor {
-  redact(text: string): Promise<string>;
+  /** Every string of one snapshot under ONE vault open; `scrub` is valid only while `work` runs. */
+  batch<T>(work: (scrub: { text(text: string): string }) => T): Promise<T>;
 }
 
 /**
@@ -336,18 +337,18 @@ export async function redactTriageSnapshot(
   snapshot: TriageSnapshot,
   redactor: WardenTextRedactor,
 ): Promise<TriageSnapshot> {
-  const facts: Record<string, string | number | boolean> = {};
-  for (const [key, value] of Object.entries(snapshot.facts))
-    facts[key] = typeof value === 'string' ? await redactor.redact(value) : value;
-  const recentTurns: string[] = [];
-  for (const turn of snapshot.recentTurns) recentTurns.push(await redactor.redact(turn));
-  return {
-    anomaly: snapshot.anomaly,
-    summary: await redactor.redact(snapshot.summary),
-    facts,
-    recentTurns,
-    ...(snapshot.paneTail === undefined ? {} : { paneTail: await redactor.redact(snapshot.paneTail) }),
-  };
+  return await redactor.batch(scrub => {
+    const facts: Record<string, string | number | boolean> = {};
+    for (const [key, value] of Object.entries(snapshot.facts))
+      facts[key] = typeof value === 'string' ? scrub.text(value) : value;
+    return {
+      anomaly: snapshot.anomaly,
+      summary: scrub.text(snapshot.summary),
+      facts,
+      recentTurns: snapshot.recentTurns.map(turn => scrub.text(turn)),
+      ...(snapshot.paneTail === undefined ? {} : { paneTail: scrub.text(snapshot.paneTail) }),
+    };
+  });
 }
 
 // ── Flags Jev passed on ──────────────────────────────────────────────────────────────────────────

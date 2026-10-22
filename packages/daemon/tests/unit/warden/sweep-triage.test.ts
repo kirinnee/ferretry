@@ -125,7 +125,7 @@ describe('the Jev guard', () => {
       config: jev({ guard: { threshold: 0.9, model: 'jev-2', usdPerMillionInputTokens: 1 } }),
       fleet: [unattended('s1')],
       evidence: async () => ({ recentTurns: ['token sk-live-1'], paneTail: 'sk-live-1' }),
-      redact: async text => text.replaceAll('sk-live-1', '[redacted:KEY]'),
+      redact: text => text.replaceAll('sk-live-1', '[redacted:KEY]'),
     });
 
     // Act
@@ -167,7 +167,7 @@ describe('the Jev guard', () => {
     const subject = harness({
       config: jev(),
       fleet: [unattended('s1')],
-      redact: async () => {
+      redact: () => {
         throw new Error('vault damaged');
       },
     });
