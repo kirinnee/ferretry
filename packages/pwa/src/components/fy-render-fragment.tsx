@@ -27,9 +27,14 @@
  * (`lib/trusted-types.ts`), and this file never assigns markup to a sink at all.
  *
  * IT HOLDS NO CREDENTIAL — the same narrow `readWorkspaceMedia` capability every media block gets.
+ *
+ * ITS LINKS OPEN WHERE EVERY OTHER LINK DOES. The anchors are inert DOM, not `ExternalLink`s, so one
+ * click listener on the shadow root hands an ordinary tap on any of them to `useLinkBehaviour` —
+ * Settings › Appearance › "Open links in" — and leaves a modified click to the anchor's own new tab.
  */
 import createDOMPurify, { type Config, type DOMPurify } from 'dompurify';
 import { useEffect, useRef } from 'react';
+import { useLinkBehaviour } from '../features/browser/external-link.tsx';
 import {
   type FyRenderImageMime,
   type FyRenderWorkspaceReader,
@@ -192,6 +197,10 @@ export function FyRenderFragment({ source, alt, readWorkspaceMedia }: FyRenderFr
   const hostRef = useRef<HTMLElement | null>(null);
   /** CLOSED: no script — there is none — and no app code reaches in through `host.shadowRoot`. */
   const rootRef = useRef<ShadowRoot | null>(null);
+  const links = useLinkBehaviour();
+  // The latest handler, read at click time: the listener is attached once per root, not per render.
+  const activate = useRef(links.activate);
+  activate.current = links.activate;
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: the source is the identity; the reader is a stable capability
   useEffect(() => {
@@ -229,5 +238,27 @@ export function FyRenderFragment({ source, alt, readWorkspaceMedia }: FyRenderFr
     };
   }, [source]);
 
-  return <section aria-label={alt} className="fy-render-fragment" data-fy-render-fragment="true" ref={hostRef} />;
+  useEffect(() => {
+    const root = rootRef.current;
+    if (root === null) return;
+    const click = (event: Event): void => {
+      if (!(event instanceof MouseEvent)) return;
+      const anchor = event.target instanceof Element ? event.target.closest('a[href]') : null;
+      if (!(anchor instanceof HTMLAnchorElement)) return;
+      activate.current(event, {
+        href: anchor.getAttribute('href') ?? undefined,
+        ...(anchor.hasAttribute('download') ? { download: anchor.getAttribute('download') ?? true } : {}),
+        element: anchor,
+      });
+    };
+    root.addEventListener('click', click);
+    return () => root.removeEventListener('click', click);
+  }, []);
+
+  return (
+    <>
+      <section aria-label={alt} className="fy-render-fragment" data-fy-render-fragment="true" ref={hostRef} />
+      {links.sheet}
+    </>
+  );
 }

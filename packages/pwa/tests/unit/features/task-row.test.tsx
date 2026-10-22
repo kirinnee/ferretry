@@ -153,7 +153,7 @@ describe('TaskRow', () => {
     });
     const link = container.querySelector('a[target="_blank"]');
 
-    expect(link?.getAttribute('rel')).toBe('noreferrer');
+    expect(link?.getAttribute('rel')).toBe('noopener noreferrer');
     expect(link?.textContent).toBe('ferretry#49');
     expect(link?.getAttribute('aria-label')).toBe('Open kirinnee/ferretry pull request 49');
   });

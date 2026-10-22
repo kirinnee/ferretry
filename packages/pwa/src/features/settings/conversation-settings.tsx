@@ -1,18 +1,26 @@
 /**
  * Small browser-local choices: whether this device always reduces motion (from the session redesign),
- * and whether the session list shows every paired machine or only the one on screen.
+ * where an external link opens, and whether the session list shows every paired machine or only the
+ * one on screen.
  *
  * The values live in `lib/controls.ts`; this surface holds no state of its own. (It once shared the
  * file with "Show details", which went when the transcript stopped showing daemon bookkeeping.)
  */
 
 import { cn } from '../../lib/class-names.ts';
-import { type MotionPreference, SESSIONS_LIST_SCOPES, type SessionsListScope } from '../../lib/controls.ts';
+import {
+  type MotionPreference,
+  OPEN_LINKS_IN,
+  type OpenLinksIn,
+  SESSIONS_LIST_SCOPES,
+  type SessionsListScope,
+} from '../../lib/controls.ts';
 
 interface Choice<Value extends string> {
   readonly value: Value;
   readonly label: string;
-  readonly detail: string;
+  /** Absent: the label says it all. */
+  readonly detail?: string;
 }
 
 function ChoiceGroup<Value extends string>({
@@ -51,7 +59,9 @@ function ChoiceGroup<Value extends string>({
           />
           <span className="min-w-0">
             <span className="block text-ui font-semibold text-fg">{choice.label}</span>
-            <span className="mt-0.5 block text-meta leading-base text-muted">{choice.detail}</span>
+            {choice.detail === undefined ? null : (
+              <span className="mt-0.5 block text-meta leading-base text-muted">{choice.detail}</span>
+            )}
           </span>
         </label>
       ))}
@@ -73,6 +83,30 @@ export function MotionSetting({
 }) {
   return (
     <ChoiceGroup choices={MOTION} legend="Motion" name="appearance-motion" onSelect={onChange} selected={motion} />
+  );
+}
+
+/** Plain on purpose: the owner's copy is the two places, and the row's hint says what never changes. */
+const OPEN_LINKS: Readonly<Record<OpenLinksIn, Choice<OpenLinksIn>>> = {
+  browser: { value: 'browser', label: 'Your browser' },
+  panel: { value: 'panel', label: 'Ferretry side panel' },
+};
+
+export function OpenLinksInSetting({
+  openLinksIn,
+  onChange,
+}: {
+  readonly openLinksIn: OpenLinksIn;
+  readonly onChange: (openLinksIn: OpenLinksIn) => void;
+}) {
+  return (
+    <ChoiceGroup
+      choices={OPEN_LINKS_IN.map(value => OPEN_LINKS[value])}
+      legend="Open links in"
+      name="appearance-open-links-in"
+      onSelect={onChange}
+      selected={openLinksIn}
+    />
   );
 }
 

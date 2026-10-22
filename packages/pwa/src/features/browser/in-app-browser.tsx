@@ -290,8 +290,8 @@ export const InAppBrowserWorkspace = ({ compact, children }: InAppBrowserWorkspa
 
   return (
     <InAppBrowserContext.Provider value={host}>
-      <div className="flex h-full min-h-0 w-full min-w-0 gap-2">
-        <div className="min-h-0 min-w-0 flex-1">{children}</div>
+      <div className="flex h-full min-h-0 w-full min-w-0 flex-1 gap-2" data-in-app-browser-workspace="">
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col">{children}</div>
         {!compact && open && destination && <InAppBrowserPane id={paneId} destination={destination} onClose={close} />}
       </div>
       <div className="sr-only" role="status" aria-live="polite" aria-atomic="true">

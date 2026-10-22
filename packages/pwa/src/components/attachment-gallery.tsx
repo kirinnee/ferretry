@@ -38,6 +38,7 @@ import {
   useRef,
   useState,
 } from 'react';
+import { ExternalLink as ExternalAnchor } from '../features/browser/external-link.tsx';
 import { useDialogFocus } from '../hooks/use-dialog-focus.ts';
 import {
   type AttachmentBlobUrlPort,
@@ -252,15 +253,9 @@ const AttachmentDocumentCard = ({ daemon, attachment }: AttachmentCardProps) => 
             <span className="mt-1 flex flex-wrap gap-1">
               {isBrowserOpenableAttachment(attachment.mime) &&
                 (src ? (
-                  <a
-                    href={src}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className={ACTION_CLASS}
-                    aria-label={`Open ${attachment.filename}`}
-                  >
+                  <ExternalAnchor href={src} className={ACTION_CLASS} aria-label={`Open ${attachment.filename}`}>
                     <ExternalLink size={14} aria-hidden="true" /> Open
-                  </a>
+                  </ExternalAnchor>
                 ) : (
                   <button type="button" disabled className={ACTION_CLASS} aria-label={`Open ${attachment.filename}`}>
                     <ExternalLink size={14} aria-hidden="true" /> Open

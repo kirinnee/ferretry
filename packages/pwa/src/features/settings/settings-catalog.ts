@@ -17,6 +17,7 @@ export type SettingId =
   | 'theme'
   | 'chat-width'
   | 'motion'
+  | 'open-links-in'
   | 'message-marks'
   | 'composer-markdown'
   | 'composer-enter-key'
@@ -413,6 +414,26 @@ export const SETTINGS_DEFINITIONS: readonly SettingDefinition[] = [
     keywords: ['motion', 'animation', 'reduced', 'reduce', 'spinner', 'accessibility', 'vestibular'],
   },
   {
+    id: 'open-links-in',
+    label: 'Open links in',
+    description: 'Cmd/Ctrl-click always opens a new tab.',
+    keywords: [
+      'links',
+      'link',
+      'url',
+      'open',
+      'browser',
+      'safari',
+      'new tab',
+      'tab',
+      'side panel',
+      'panel',
+      'preview',
+      'in-app',
+      'external',
+    ],
+  },
+  {
     id: 'message-marks',
     label: 'Message marks',
     description:
@@ -444,7 +465,7 @@ export const SETTINGS_SECTIONS: readonly SettingsSectionDefinition[] = [
     id: 'appearance',
     label: 'Appearance',
     description: 'Text, colour, density, and conversation layout on this device.',
-    settingIds: ['text-size', 'theme', 'motion', 'density', 'chat-width', 'message-marks'],
+    settingIds: ['text-size', 'theme', 'motion', 'density', 'chat-width', 'open-links-in', 'message-marks'],
   },
   {
     id: 'behaviour',

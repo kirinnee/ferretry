@@ -40,6 +40,7 @@ describe('shared settings catalog', () => {
       'speedup-keys',
       'sessions-list',
       'motion',
+      'open-links-in',
       'message-marks',
     ]);
     expect(new Set(SETTINGS_DEFINITIONS.map(setting => setting.id)).size).toBe(SETTINGS_DEFINITIONS.length);
@@ -59,7 +60,7 @@ describe('shared settings catalog', () => {
       'Machines',
     ]);
     expect(SETTINGS_SECTIONS.map(section => section.settingIds)).toEqual([
-      ['text-size', 'theme', 'motion', 'density', 'chat-width', 'message-marks'],
+      ['text-size', 'theme', 'motion', 'density', 'chat-width', 'open-links-in', 'message-marks'],
       [
         'sessions-list',
         'composer-markdown',

@@ -10,6 +10,9 @@
 import { afterAll, afterEach, describe, test } from 'bun:test';
 import should from 'should';
 import { FyRenderFragment, neutraliseCss, sanitizeFyRenderFragment } from '../../src/components/fy-render-fragment.tsx';
+import { LinkBehaviourProvider, type LinkOpener } from '../../src/features/browser/external-link.tsx';
+import { InAppBrowserWorkspace } from '../../src/features/browser/in-app-browser.tsx';
+import type { OpenLinksIn } from '../../src/lib/controls.ts';
 import type { FyRenderWorkspaceReader } from '../../src/lib/fy-render.ts';
 import { interact, mount } from '../support/dom.ts';
 
@@ -336,6 +339,100 @@ describe('FyRenderFragment', () => {
 
     // Assert
     should((roots[0] as ShadowRoot).querySelector('img')?.hasAttribute('src')).be.false();
+  });
+
+  describe('links inside the fragment', () => {
+    const DOC = 'https://example.com/doc';
+    const handedOff: string[] = [];
+    const opener: LinkOpener = {
+      iosStandalone: () => true,
+      handOff: href => handedOff.push(href),
+      openTab: () => {},
+      unlessLeft: () => () => {},
+    };
+    /** Our handler's verdict, read on the host before this suite's own navigation guard. */
+    const verdicts: boolean[] = [];
+    const record = (event: Event): void => {
+      verdicts.push(event.defaultPrevented);
+    };
+    const guard = (event: Event): void => event.preventDefault();
+    let realFetch: typeof fetch;
+
+    const scene = (openLinksIn: OpenLinksIn) => (
+      <LinkBehaviourProvider openLinksIn={openLinksIn} opener={opener}>
+        <InAppBrowserWorkspace compact={false}>
+          <FyRenderFragment alt="links" source={`<p>See <a href="${DOC}"><b>the doc</b></a>.</p>`} />
+        </InAppBrowserWorkspace>
+      </LinkBehaviourProvider>
+    );
+
+    /** Clicks the bold text INSIDE the anchor, so the handler has to find its link. */
+    const clickLink = async (init: MouseEventInit = {}): Promise<void> => {
+      const root = roots[0] as ShadowRoot;
+      root.addEventListener('click', record);
+      root.addEventListener('click', guard);
+      await interact(() =>
+        (root.querySelector('b') as HTMLElement).dispatchEvent(
+          new MouseEvent('click', { bubbles: true, cancelable: true, ...init }),
+        ),
+      );
+      root.removeEventListener('click', record);
+      root.removeEventListener('click', guard);
+    };
+
+    afterEach(() => {
+      verdicts.length = 0;
+      handedOff.length = 0;
+      globalThis.fetch = realFetch;
+    });
+
+    test('should open an ordinary tap in the side panel when it is chosen', async () => {
+      // Arrange
+      capture();
+      realFetch = globalThis.fetch;
+      globalThis.fetch = (async () => new Response('fixture')) as unknown as typeof fetch;
+      const page = await mount(scene('panel'));
+
+      // Act
+      await clickLink();
+
+      // Assert
+      should(verdicts).eql([true]);
+      should(page.container.querySelector('aside')?.textContent).containEql(DOC);
+      await page.unmount();
+    });
+
+    test('should hand an ordinary tap to Safari from the installed iOS app by default', async () => {
+      // Arrange
+      capture();
+      realFetch = globalThis.fetch;
+      const page = await mount(scene('browser'));
+
+      // Act
+      await clickLink();
+
+      // Assert
+      should(verdicts).eql([true]);
+      should(handedOff).eql([`x-safari-${DOC}`]);
+      should(page.container.querySelector('aside')).be.null();
+      await page.unmount();
+    });
+
+    test('should leave a Cmd-click to the anchor’s own new tab whatever the setting', async () => {
+      // Arrange
+      capture();
+      realFetch = globalThis.fetch;
+      const page = await mount(scene('panel'));
+
+      // Act
+      await clickLink({ metaKey: true });
+
+      // Assert
+      should(verdicts).eql([false]);
+      should(handedOff).eql([]);
+      should(page.container.querySelector('aside')).be.null();
+      await page.unmount();
+    });
   });
 
   test('should render nothing where the host cannot carry a shadow root', async () => {

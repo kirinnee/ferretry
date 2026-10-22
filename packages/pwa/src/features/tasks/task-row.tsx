@@ -26,6 +26,7 @@
 import type { TaskBoardLane, TaskSummary } from '@ferretry/protocol';
 import { Bot, FileText, GitPullRequest, TriangleAlert } from 'lucide-react';
 import { cn } from '../../lib/class-names.ts';
+import { ExternalLink } from '../browser/external-link.tsx';
 import type { DaemonId } from '../../lib/daemon-connection.ts';
 import { parseGithubPr } from '../../lib/github-pr.ts';
 import { Badge, Label } from '../../shell/primitives.tsx';
@@ -196,17 +197,15 @@ export function TaskRow({
             />
           )}
           {pr !== null && (
-            <a
+            <ExternalLink
               href={pr.url}
-              target="_blank"
-              rel="noreferrer"
               title={`Open ${pr.org}/${pr.repo} PR #${pr.number}`}
               aria-label={`Open ${pr.org}/${pr.repo} pull request ${pr.number}`}
               className="ml-auto hidden shrink-0 items-center gap-1 rounded-control border border-border-soft px-1.5 py-1 text-xs text-muted hover:text-fg sm:inline-flex"
             >
               <GitPullRequest size={13} aria-hidden="true" />
               {pr.repo}#{pr.number}
-            </a>
+            </ExternalLink>
           )}
         </div>
       )}
