@@ -1,6 +1,7 @@
 import {
   type IFyApiClient,
   PACK_NEW_PATH,
+  PACK_PATH,
   PACK_RECOMMEND_PATH,
   type PackNewOutcome,
   PackNewOutcomeSchema,
@@ -8,12 +9,16 @@ import {
   type PackRecommendation,
   PackRecommendationSchema,
   type PackRecommendRequest,
+  type PackView,
+  PackViewSchema,
   type SessionResult,
   SessionResultSchema,
 } from '@ferretry/protocol';
 
 /** The daemon calls the Pack commands make, and nothing else. */
 export interface IPackGateway {
+  /** The settings, the models guide in effect and every model the fleet knows (`GET /v1/pack`). */
+  view(): Promise<PackView>;
   recommend(request: PackRecommendRequest): Promise<PackRecommendation>;
   newChild(request: PackNewRequest): Promise<PackNewOutcome>;
   result(id: string): Promise<SessionResult>;
@@ -32,6 +37,10 @@ const json = (body: unknown): RequestInit => ({
 /** Speaks the Pack routes through the protocol client, parsing every answer. */
 export class ProtocolPackGateway implements IPackGateway {
   constructor(private readonly client: Pick<IFyApiClient, 'request' | 'stop'>) {}
+
+  async view(): Promise<PackView> {
+    return await this.client.request(PACK_PATH, PackViewSchema);
+  }
 
   async recommend(request: PackRecommendRequest): Promise<PackRecommendation> {
     return await this.client.request(PACK_RECOMMEND_PATH, PackRecommendationSchema, json(request));

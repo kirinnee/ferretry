@@ -45,7 +45,7 @@ export type PackLimits = z.infer<typeof PackLimitsSchema>;
 export const PackProbeSchema = z.strictObject({
   /** How long one probe may take before it counts as failed. */
   timeoutSeconds: z.number().int().min(5).max(300),
-  /** How long a passed probe is trusted for, per runtime and model, so a burst probes once. */
+  /** How long a PASSED probe is trusted for, per runtime, model and effort, so a burst probes once. */
   cacheSeconds: z.number().int().min(0).max(3_600),
 });
 export type PackProbe = z.infer<typeof PackProbeSchema>;
@@ -71,7 +71,7 @@ export const DEFAULT_PACK_CONFIG: PackConfig = {
   enabled: true,
   decision: 'agent',
   limits: { interactiveChildren: 20, autoChildren: 4, maxDepth: 2 },
-  probe: { timeoutSeconds: 45, cacheSeconds: 60 },
+  probe: { timeoutSeconds: 45, cacheSeconds: 180 },
   jev: { usdPerDay: 0.25 },
 };
 
@@ -135,6 +135,47 @@ export const GuideUseCaseSchema = z.strictObject({
 });
 export type GuideUseCase = z.infer<typeof GuideUseCaseSchema>;
 
+export const MAX_ROUTING_PROMPT_CHARS = 6_000;
+/**
+ * The short form rides in every Pack ferret's system prompt, whose whole is held under 4.5 KB with every
+ * section on (docs/pack-mode.md), so it is one short line.
+ */
+export const MAX_ROUTING_SHORT_CHARS = 150;
+
+/**
+ * How to pick a sub-ferret's model and effort, in plain words. `prompt` is the whole of it — printed by
+ * `fy recommend` and given to Jev as its guidance; `short` is one line for the Pack section of every
+ * ferret's system prompt, with no quote, backslash or control character, so it sits inside any harness's
+ * quoting unchanged.
+ */
+export const GuideRoutingSchema = z.strictObject({
+  prompt: z.string().trim().min(1).max(MAX_ROUTING_PROMPT_CHARS),
+  short: z
+    .string()
+    .trim()
+    .min(1)
+    .max(MAX_ROUTING_SHORT_CHARS)
+    // biome-ignore lint/suspicious/noControlCharactersInRegex: control characters are what it refuses
+    .regex(/^[^"\\\u0000-\u001f\u007f]*$/u, 'the short routing line is one line, without a quote or a backslash'),
+});
+export type GuideRouting = z.infer<typeof GuideRoutingSchema>;
+
+/**
+ * Where an accepted guide came from: the model that drafted it, what ran that model, and when it was
+ * suggested and accepted. Pack mode only reports it (`fy recommend`); a hand-written guide has none.
+ */
+export const GuideSuggestedSchema = z.strictObject({
+  /** The model that drafted it, as its runtime named it. */
+  by: NonEmpty.max(128),
+  /** What ran it: the runtime on this machine. */
+  via: NonEmpty.max(128),
+  at: InstantSchema,
+  acceptedAt: InstantSchema,
+  /** Some of its use cases were accepted and the rest kept as they were. */
+  partial: z.boolean().optional(),
+});
+export type GuideSuggested = z.infer<typeof GuideSuggestedSchema>;
+
 /**
  * `models-guide.yaml`. `useCases` absent means the DERIVED guide; present (even empty) is the owner's.
  * Duplicate use case ids are refused: a ferret names one by id.
@@ -142,6 +183,9 @@ export type GuideUseCase = z.infer<typeof GuideUseCaseSchema>;
 export const ModelsGuideFileSchema = z
   .strictObject({
     useCases: z.array(GuideUseCaseSchema).max(MAX_GUIDE_USE_CASES).optional(),
+    /** How to pick a model, in words; absent means the one rendered from the use cases. */
+    routing: GuideRoutingSchema.optional(),
+    suggested: GuideSuggestedSchema.optional(),
   })
   .superRefine((value, context) => {
     const seen = new Set<string>();
@@ -164,6 +208,13 @@ export const ModelsGuideSchema = z.strictObject({
   /** `file`: the owner's `models-guide.yaml`. `derived`: built from the model catalogs in effect. */
   source: z.enum(['file', 'derived']),
   useCases: z.array(GuideUseCaseSchema).readonly(),
+  /**
+   * How to pick a model, in words: the file's (`file`), or rendered from the use cases in effect
+   * (`derived`). Absent from a daemon that predates it.
+   */
+  routing: GuideRoutingSchema.extend({ source: z.enum(['file', 'derived']) }).optional(),
+  /** The suggestion the file's guide was accepted from, when it says. */
+  suggested: GuideSuggestedSchema.optional(),
 });
 export type ModelsGuide = z.infer<typeof ModelsGuideSchema>;
 
@@ -243,6 +294,42 @@ export const PackRefusalSchema = z.strictObject({
 });
 export type PackRefusal = z.infer<typeof PackRefusalSchema>;
 
+// ── Quota headroom ───────────────────────────────────────────────────────────────────────────────
+
+/**
+ * How much of a login's quota is left, in bands (docs/pack-mode.md § Quota). The TIGHTEST window
+ * measured decides: `plenty` half or more left, `some` a fifth to a half, `low` less than a fifth,
+ * `exhausted` a window full or the provider says no, `unknown` nothing measured it — never read as full
+ * or as empty.
+ */
+export const PACK_QUOTA_STATES = ['plenty', 'some', 'low', 'exhausted', 'unknown'] as const;
+export const PackQuotaStateSchema = z.enum(PACK_QUOTA_STATES);
+export type PackQuotaState = z.infer<typeof PackQuotaStateSchema>;
+
+/** One quota window, with what is used and what is left. */
+export const PackQuotaWindowSchema = z.strictObject({
+  label: z.enum(['5h', 'week', 'month', 'key', 'tools']),
+  usedPercent: z.number().finite().min(0).optional(),
+  leftPercent: z.number().finite().min(0).max(100).optional(),
+  resetsAt: InstantSchema.optional(),
+  /** Its reset time has passed since it was measured, so it counts as fresh. */
+  reset: z.boolean().optional(),
+});
+export type PackQuotaWindow = z.infer<typeof PackQuotaWindowSchema>;
+
+/** A login's quota headroom as Pack mode reads it. */
+export const PackQuotaSchema = z.strictObject({
+  state: PackQuotaStateSchema,
+  /** The tightest window's share left. */
+  leftPercent: z.number().finite().min(0).max(100).optional(),
+  tightest: PackQuotaWindowSchema.shape.label.optional(),
+  windows: z.array(PackQuotaWindowSchema).readonly(),
+  measuredAt: InstantSchema.optional(),
+  /** One plain phrase: "5h 2% · week 46%", "out of quota until 18:00Z", "not measured". */
+  summary: NonEmpty,
+});
+export type PackQuota = z.infer<typeof PackQuotaSchema>;
+
 // ── Recommend ────────────────────────────────────────────────────────────────────────────────────
 
 export const PackRecommendRequestSchema = z.strictObject({
@@ -266,6 +353,10 @@ export const PackCandidateSchema = z.strictObject({
   ready: z.boolean(),
   /** Present exactly when `ready` is false. */
   refusal: PackRefusalSchema.optional(),
+  /** The quota headroom of the login of the runtime it resolved to. */
+  quota: PackQuotaSchema.optional(),
+  /** Why live quota put this candidate below the guide's place for it ("91% of the week used"). */
+  movedDown: NonEmpty.optional(),
 });
 export type PackCandidate = z.infer<typeof PackCandidateSchema>;
 
@@ -277,7 +368,11 @@ export const PackRecommendationSchema = z.strictObject({
     matchedBy: z.enum(['named', 'words', 'fallback']),
   }),
   guideSource: z.enum(['file', 'derived']),
-  /** Ready ones first, each group in the guide's order. */
+  /** The suggestion the guide was accepted from, when it says. */
+  guideSuggested: GuideSuggestedSchema.optional(),
+  /** How to pick, in the guide's words: the whole routing prompt, current as of this answer. */
+  routing: NonEmpty.optional(),
+  /** Ready ones first, then by quota headroom, each group in the guide's order. */
   candidates: z.array(PackCandidateSchema).readonly(),
   /** The command that starts the first ready candidate, so a ferret can copy it. */
   next: NonEmpty.optional(),

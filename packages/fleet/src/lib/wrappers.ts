@@ -21,11 +21,13 @@
  */
 import { type SecretName, secretReferencesIn } from '@ferretry/protocol';
 import {
+  binaryName,
   CLAUDE_NO_QUESTIONS_FLAG,
   CLAUDE_PROMPTS_SEEN,
   CODEX_QUESTIONS_FEATURE,
-  binaryName,
   FERRET_SECTIONS,
+  PACK_ENV,
+  PACK_ROUTING_ENV,
   SESSION_MODE_ENV,
   tomlString,
 } from './account/fixed-layer.ts';
@@ -508,10 +510,21 @@ function ferretSectionLines(harness: HarnessKind, fyCommand: string): string[] {
     '',
     "# This ferret's own sections of the appended system prompt: each switch the daemon set to 1.",
     `${SECTIONS_VARIABLE}=''`,
-    ...FERRET_SECTIONS(fy).map(
-      section =>
-        `if [ "\${${section.env}:-0}" = 1 ]; then ${SECTIONS_VARIABLE}="$${SECTIONS_VARIABLE}"${quoted(`\n\n${section.text}`)}; fi`,
-    ),
+    ...FERRET_SECTIONS(fy).flatMap(section => [
+      `if [ "\${${section.env}:-0}" = 1 ]; then ${SECTIONS_VARIABLE}="$${SECTIONS_VARIABLE}"${quoted(`\n\n${section.text}`)}; fi`,
+      ...(section.env === PACK_ENV ? packRoutingLines(quoted) : []),
+    ]),
+  ];
+}
+
+/**
+ * The models guide's routing line (`PACK_ROUTING_ENV`), on its own line at the end of the Pack section.
+ * Quotes, backslashes and control characters are deleted first: the value is joined inside Codex's TOML
+ * string and Claude's argument, and a value nobody checked must never break either.
+ */
+function packRoutingLines(quoted: (text: string) => string): string[] {
+  return [
+    `if [ "\${${PACK_ENV}:-0}" = 1 ] && [ -n "\${${PACK_ROUTING_ENV}:-}" ]; then _fy_routing="$(printf '%s' "$${PACK_ROUTING_ENV}" | tr -d '"\\\\\\000-\\037\\177')"; ${SECTIONS_VARIABLE}="$${SECTIONS_VARIABLE}"${quoted('\n')}"$_fy_routing"; fi`,
   ];
 }
 

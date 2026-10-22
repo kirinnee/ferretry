@@ -4,9 +4,13 @@
  * that does not answer OK in time is refused `probe_failed` and nothing is started — in both decision
  * modes, because a ferret that cannot answer one line will not do the work either.
  *
- * A probe spends a token or two, and only when a ferret asked for a start. Its answer is kept for
- * `cacheSeconds` per runtime and model, and probes already running are shared, so twenty sub-ferrets
- * started at once probe once.
+ * It is a REAL round trip — the runtime's own wrapper, with its login's environment, asking the model
+ * itself — so quota, sign-in and a missing model all fail it, not only a missing CLI. A failure's output is
+ * read for which of those it was (`classifyProbeFailure`), so the refusal names it.
+ *
+ * A probe spends a token or two, and only when a ferret asked for a start. A PASS is kept for
+ * `cacheSeconds` per runtime, model and effort, and probes already running are shared, so twenty
+ * sub-ferrets started at once probe once. A failure is not kept: the next start asks again.
  */
 
 /** What one probe asks. */
@@ -25,9 +29,12 @@ export interface PackProbeRequest {
   readonly timeoutMs: number;
 }
 
+/** What a failed probe's output says went wrong, when it says; otherwise it is only `probe_failed`. */
+export type ProbeFailureCode = 'out_of_quota' | 'not_logged_in' | 'model_unavailable';
+
 export type PackProbeOutcome =
   | { readonly ok: true; readonly ms: number }
-  | { readonly ok: false; readonly ms: number; readonly reason: string };
+  | { readonly ok: false; readonly ms: number; readonly reason: string; readonly code?: ProbeFailureCode };
 
 /** Runs one probe. The adapter starts the runtime's CLI in its one-shot mode. */
 export interface PackProbePort {
@@ -48,7 +55,31 @@ export function probeAnswered(output: string): boolean {
   return output.split(/\r?\n/u).some(line => /^\W*ok\W*$/iu.test(line.trim()));
 }
 
-/** Probes through `port`, keeping each answer for `ttlMs` per runtime and model. */
+const FAILURE_PATTERNS: readonly (readonly [ProbeFailureCode, RegExp])[] = [
+  [
+    'out_of_quota',
+    /usage limit|quota|rate[ -]?limit|limit reached|too many requests|\b429\b|insufficient (credit|balance|funds)|credit balance/iu,
+  ],
+  [
+    'not_logged_in',
+    /not logged in|please (log|sign) ?in|\/login|unauthori[sz]ed|\b401\b|invalid (api )?key|authentication (failed|error)|expired token/iu,
+  ],
+  [
+    'model_unavailable',
+    /model\b.{0,80}\b(not found|does not exist|not available|not supported|unsupported|invalid)|unknown model|invalid model|no such model/iu,
+  ],
+];
+
+/**
+ * Which known failure a probe's output reports — quota, sign-in, or a model the provider does not serve —
+ * read from the CLI's own words. `undefined` when it names none of them. The output itself is never
+ * repeated anywhere: only the code is kept.
+ */
+export function classifyProbeFailure(output: string): ProbeFailureCode | undefined {
+  return FAILURE_PATTERNS.find(([, pattern]) => pattern.test(output))?.[0];
+}
+
+/** Probes through `port`, keeping each PASS for `ttlMs` per runtime, model and effort. */
 export class ProbeCache {
   private readonly answers = new Map<string, { readonly at: number; readonly outcome: PackProbeOutcome }>();
   private readonly running = new Map<string, Promise<PackProbeOutcome>>();
@@ -67,7 +98,8 @@ export class ProbeCache {
     const pending = this.port.probe(request).finally(() => this.running.delete(key));
     this.running.set(key, pending);
     const outcome = await pending;
-    this.answers.set(key, { at: this.nowMs(), outcome });
+    if (outcome.ok) this.answers.set(key, { at: this.nowMs(), outcome });
+    else this.answers.delete(key);
     return { outcome, cached: false };
   }
 }

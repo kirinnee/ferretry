@@ -1,4 +1,5 @@
 import { describe, it } from 'bun:test';
+import { GuideRoutingSchema, MAX_ROUTING_SHORT_CHARS } from '@ferretry/protocol';
 import should from 'should';
 import {
   DERIVED_CANDIDATES,
@@ -6,6 +7,7 @@ import {
   effectiveGuide,
   fleetModels,
   PROVIDER_PREFERENCE,
+  renderRouting,
 } from '../../../src/lib/pack/guide.ts';
 import { catalog, choice, entry, runtime } from './support.ts';
 
@@ -185,8 +187,94 @@ describe('effectiveGuide', () => {
     const empty = effectiveGuide({ useCases: [] }, [ANTHROPIC]);
 
     // Assert
-    should(named).deepEqual({ source: 'file', useCases: [mine] });
-    should(empty).deepEqual({ source: 'file', useCases: [] });
+    should(named.source).equal('file');
+    should(named.useCases).deepEqual([mine]);
+    should(named.routing?.source).equal('derived');
+    should(empty.source).equal('file');
+    should(empty.useCases).deepEqual([]);
+  });
+});
+
+describe('renderRouting', () => {
+  const useCases = [
+    {
+      id: 'plan-review',
+      title: 'Planning and review',
+      description: 'Hard work.',
+      candidates: [
+        { provider: 'anthropic', model: 'opus', effort: 'high', why: 'Strongest.' },
+        { provider: 'openai', model: 'gpt-5', harness: 'codex' as const, why: 'Second family.' },
+        { provider: 'anthropic', model: 'sonnet', why: 'Third.' },
+        { provider: 'anthropic', model: 'haiku', why: 'Fourth, never named.' },
+      ],
+    },
+    { id: 'empty', title: 'Nothing yet', description: 'None.', candidates: [] },
+  ];
+
+  it('should name each use case and its first candidates in order, and how to fall back', () => {
+    // Act
+    const routing = renderRouting(useCases, candidate => (candidate.model === 'opus' ? 'Opus' : undefined), 'fy');
+
+    // Assert
+    should(routing.prompt.split('\n')).deepEqual([
+      "Pick a sub-ferret's model by the kind of work, best first:",
+      '- Planning and review (plan-review): Opus at high effort, then gpt-5 (codex), then sonnet.',
+      '- Nothing yet (empty): no model named.',
+      'Prefer a login with quota left: `fy recommend` ranks by live quota and checks each model answers before starting it. When a candidate is refused, take the next.',
+    ]);
+    should(routing.short).equal('Routing: plan-review → opus high.');
+  });
+
+  it('should keep the short line within its limit at a whole use case, and free of quotes and backslashes', () => {
+    // Arrange
+    const many = Array.from({ length: 20 }, (_, index) => ({
+      id: `use-case-${String(index)}`,
+      title: 'T',
+      description: 'D',
+      candidates: [{ provider: 'p', model: `model-"\\${String(index)}`, why: 'w' }],
+    }));
+
+    // Act
+    const short = renderRouting(many, () => undefined, 'fy').short;
+
+    // Assert
+    should(short.length).be.belowOrEqual(MAX_ROUTING_SHORT_CHARS);
+    should(short).match(/^Routing: use-case-0 → model- 0; .*\.$/u);
+    should(short).not.match(/["\\]/u);
+    should(GuideRoutingSchema.shape.short.safeParse(short).success).be.true();
+  });
+
+  it('should say only how to pick when no use case names a model', () => {
+    // Act + Assert
+    should(renderRouting([], () => undefined, 'fy').short).equal('Routing: pick a model per job with recommend.');
+  });
+});
+
+describe('effectiveGuide routing', () => {
+  it("should use the file's routing and provenance when it has them, else render it from the use cases", () => {
+    // Arrange
+    const routing = { prompt: 'Opus for everything.', short: 'Routing: all → opus.' };
+    const suggested = {
+      by: 'gpt-oss-120b',
+      via: 'claude-work',
+      at: '2026-10-22T09:00:00.000Z',
+      acceptedAt: '2026-10-22T10:00:00.000Z',
+    };
+    const mine = { id: 'mine', title: 'Mine', description: 'My own.', candidates: [] };
+
+    // Act
+    const written = effectiveGuide({ useCases: [mine], routing, suggested }, [ANTHROPIC]);
+    const derived = effectiveGuide({ routing }, [ANTHROPIC], 'foo');
+    const rendered = effectiveGuide({}, [ANTHROPIC], 'foo');
+
+    // Assert
+    should(written).deepEqual({ source: 'file', useCases: [mine], routing: { ...routing, source: 'file' }, suggested });
+    should(derived.routing).deepEqual({ ...routing, source: 'file' });
+    should(rendered.routing?.source).equal('derived');
+    should(rendered.routing?.prompt).containEql(
+      'Hard planning, review and critical code (plan-review): Opus at high effort',
+    );
+    should(rendered.routing?.prompt).containEql('`foo recommend`');
   });
 });
 

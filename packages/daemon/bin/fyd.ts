@@ -26,6 +26,7 @@ import {
   type ModelCatalog,
   manifestRuntimes,
   PACK_ENV,
+  PACK_ROUTING_ENV,
   PASSIVE_LEARNING_ENV,
   resolveDefaultRuntime,
   runtimeIdsPath,
@@ -3443,7 +3444,10 @@ interface SessionPackHooks {
   admit(parent: string): Promise<PackRefusal | undefined>;
   /** Records the new ferret's switch and writes `FY_PACK` into its launch environment. */
   adopt(id: SessionId, eligible: boolean, parent: string | undefined): Promise<void>;
-  /** The `FY_PACK` a launch derives from the session's record, for an environment that never stored one. */
+  /**
+   * The `FY_PACK` a launch derives from the session's record, for an environment that never stored one,
+   * and — for a ferret Pack mode is on for — the models guide's routing line, derived fresh at every launch.
+   */
   launchDefault: LaunchSwitchDefaults;
 }
 
@@ -3536,6 +3540,7 @@ function createSessionPackHooks(
   environments: FileSessionEnvironmentStore,
   serial: KeyedSerialExecutor,
   packConfig: () => Promise<PackConfig>,
+  routing: () => Promise<string | undefined>,
 ): SessionPackHooks {
   return {
     launchDefault: async (id): Promise<Readonly<Record<string, string>>> => {
@@ -3545,7 +3550,10 @@ function createSessionPackHooks(
       const { config } = view;
       const depth = config.parent === undefined ? 0 : (await tree.depth(config.parent)) + 1;
       const eligible = config.label !== LEARNING_MINER_LABEL && config.provenance?.wardenLineage !== true;
-      return { [PACK_ENV]: packLaunchDefault(await packConfig(), { eligible, ownSwitch: config.pack, depth }) };
+      const pack = packLaunchDefault(await packConfig(), { eligible, ownSwitch: config.pack, depth });
+      // Never stored, so every launch hears the guide saved now; the wrapper adds it only when FY_PACK is 1.
+      const line = eligible ? await routing().catch(() => undefined) : undefined;
+      return { [PACK_ENV]: pack, ...(line === undefined ? {} : { [PACK_ROUTING_ENV]: line }) };
     },
     admit: async parent => {
       const facts = await tree.parent(parent);
@@ -8268,7 +8276,16 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       // Pack mode (docs/pack-mode.md): read fresh per use, so a saved pack.yaml applies to the next start.
       const packConfig = async (): Promise<PackConfig> => (await configFiles.load()).evaluation.effective.pack;
       const packTree = createPackTree(sessions);
-      const packHooks = createSessionPackHooks(packTree, sessions, sessionEnvironments, sessionMutations, packConfig);
+      // The routing line comes from Pack's service, composed further down; until then a launch carries none.
+      let packRouting = async (): Promise<string | undefined> => undefined;
+      const packHooks = createSessionPackHooks(
+        packTree,
+        sessions,
+        sessionEnvironments,
+        sessionMutations,
+        packConfig,
+        async () => await packRouting(),
+      );
       launchSwitchDefaults = async id => await packHooks.launchDefault(id);
       // ONE claim surface over the ledger for the start and the rename, so both take names through the
       // same allocator and the same file.
@@ -9004,6 +9021,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
             credentials: credentials.credentials,
             tools: machine.tools,
             unlaunchable,
+            now: clock.now(),
           };
         },
         parent: async id => await packTree.parent(id),
@@ -9061,6 +9079,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         })(),
         bin: CLIENT_NAME,
       });
+      packRouting = async () => await packService.routingShort();
       const mounted: Omit<MountedSubsystems, 'sessionMcp'> = {
         pack: {
           service: packService,

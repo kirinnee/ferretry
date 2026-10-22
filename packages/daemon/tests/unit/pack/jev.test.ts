@@ -63,6 +63,54 @@ describe('buildPackJevBody', () => {
   });
 });
 
+describe('buildPackJevBody with the guide', () => {
+  it("should give Jev the owner's routing guidance, the use case and each candidate's quota", () => {
+    // Arrange
+    const candidates: readonly RankableCandidate[] = [
+      { model: 'opus', runtime: 'claude-kirin', why: 'The strongest.', quota: '5h 10% · wk 91%' },
+      { model: 'sonnet', runtime: 'claude-atomi', why: 'Balanced.' },
+    ];
+
+    // Act
+    const body = buildPackJevBody('review the diff', candidates, 'jev', {
+      routing: 'Reviews on Opus; Sonnet when Opus is low.',
+      useCase: { title: 'Review', description: 'Reviewing a change.' },
+    });
+
+    // Assert
+    should(body).deepEqual({
+      model: 'jev',
+      state: {
+        task: 'review the diff',
+        guidance: 'Reviews on Opus; Sonnet when Opus is low.',
+        useCase: 'Review: Reviewing a change.',
+      },
+      questions: {
+        model: {
+          type: 'choice',
+          instructions: PACK_JEV_INSTRUCTIONS,
+          criteria: {
+            c1: 'opus on claude-kirin (quota used: 5h 10% · wk 91%): The strongest.',
+            c2: 'sonnet on claude-atomi: Balanced.',
+          },
+        },
+      },
+    });
+    should(PACK_JEV_INSTRUCTIONS).containEql("Follow the owner's routing guidance");
+    should(PACK_JEV_INSTRUCTIONS).containEql('quota left');
+  });
+
+  it('should bound the guidance', () => {
+    // Act
+    const body = buildPackJevBody('t', CANDIDATES, 'jev', {
+      routing: 'g'.repeat(PACK_JEV_LIMITS.maxGuidanceChars + 10),
+    }) as { state: { guidance: string } };
+
+    // Assert
+    should(body.state.guidance).have.length(PACK_JEV_LIMITS.maxGuidanceChars);
+  });
+});
+
 describe('parsePackJevReply', () => {
   it('should put the chosen candidate first and order the rest by probability', () => {
     // Arrange
