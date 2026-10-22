@@ -3585,7 +3585,24 @@ const WARDEN_LIVENESS_TAIL = 20;
 const livenessDigest = (text: string): string => createHash('sha256').update(text, 'utf8').digest('hex');
 
 /** The collaborators a warden subsystem needs from the rest of the root. */
+/**
+ * `tick`, run as the labelled activity `name`, so `fy daemon profile` and a stall can name the timer
+ * that did the work. The tick's own errors stay its own: a rejection is swallowed here exactly as each
+ * timer already swallowed it. Without a ledger the tick runs as it always did.
+ */
+function asActivity(activities: ActivityLedger | undefined, name: string, tick: () => unknown): () => void {
+  return () => {
+    if (activities === undefined) {
+      void tick();
+      return;
+    }
+    void activities.run(name, async () => await tick()).catch(() => undefined);
+  };
+}
+
 interface WardenParts {
+  /** The named work in flight, so the sweep and the liveness tick are attributed in a profile. */
+  readonly activities?: ActivityLedger;
   readonly sessions: SessionDirectorySubsystem;
   readonly control: SessionControlSubsystem;
   /**
@@ -3896,11 +3913,11 @@ function createWardenSubsystem(parts: WardenParts): WardenSubsystem {
     },
     {
       every: (intervalMs, tick) => {
-        const handle = setInterval(tick, intervalMs);
+        const handle = setInterval(asActivity(parts.activities, 'warden sweep', tick), intervalMs);
         return () => clearInterval(handle);
       },
       after: (delayMs, action) => {
-        const handle = setTimeout(action, delayMs);
+        const handle = setTimeout(asActivity(parts.activities, 'warden sweep', action), delayMs);
         return () => clearTimeout(handle);
       },
       nowMs: () => Date.now(),
@@ -3957,21 +3974,24 @@ function createWardenSubsystem(parts: WardenParts): WardenSubsystem {
       // it finds is acted on inside the sweep chain, and a ferret that froze brings the next sweep forward.
       liveness.arm();
       let looking = false;
-      const look = setInterval(() => {
-        if (looking) return;
-        looking = true;
-        void service
-          .currentConfig()
-          .then(async config => await liveness.tick({ nudgeAllowed: config.enabled && config.mayActAlone.nudge }))
-          .then(async events => await loop.exclusive(async () => await service.reflex(events)))
-          .then(result => {
-            if (result.frozen) loop.trigger();
-          })
-          .catch(() => undefined)
-          .finally(() => {
-            looking = false;
-          });
-      }, WARDEN_LIVENESS_TICK_SECONDS * 1000);
+      const look = setInterval(
+        asActivity(parts.activities, 'warden liveness', async () => {
+          if (looking) return;
+          looking = true;
+          await service
+            .currentConfig()
+            .then(async config => await liveness.tick({ nudgeAllowed: config.enabled && config.mayActAlone.nudge }))
+            .then(async events => await loop.exclusive(async () => await service.reflex(events)))
+            .then(result => {
+              if (result.frozen) loop.trigger();
+            })
+            .catch(() => undefined)
+            .finally(() => {
+              looking = false;
+            });
+        }),
+        WARDEN_LIVENESS_TICK_SECONDS * 1000,
+      );
       return () => {
         clearInterval(look);
         liveness.disarm();
@@ -5384,6 +5404,8 @@ function agentIdentities(storage: DaemonStorage): CredentialAgentIdentities {
  * home — and the watcher keeps loading after that whenever a file changes.
  */
 function createConfigFilesSubsystem(input: {
+  /** The named work in flight, so a reload is attributed in a profile. */
+  readonly activities?: ActivityLedger;
   readonly service: ConfigFilesService;
   readonly agentControl: AgentControlPolicy;
   readonly identities: CredentialAgentIdentities;
@@ -5414,9 +5436,9 @@ function createConfigFilesSubsystem(input: {
           input.notices.state(`config watcher: ${error instanceof Error ? error.message : String(error)}`),
         ...(input.events === undefined ? {} : { events: input.events }),
         timers: {
-          setInterval: (callback, ms) => setInterval(callback, ms),
+          setInterval: (callback, ms) => setInterval(asActivity(input.activities, 'config watcher', callback), ms),
           clearInterval: handle => clearInterval(handle as ReturnType<typeof setInterval>),
-          setTimeout: (callback, ms) => setTimeout(callback, ms),
+          setTimeout: (callback, ms) => setTimeout(asActivity(input.activities, 'config watcher', callback), ms),
           clearTimeout: handle => clearTimeout(handle as ReturnType<typeof setTimeout>),
         },
       });
@@ -9116,7 +9138,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         // has not advanced, which is the honest reading of a supervision failure.
         handoverReconcile: new HandoverReconcileLoop(handover, handoverReceipts, {
           every: (intervalMs, tick) => {
-            const handle = setInterval(tick, intervalMs);
+            const handle = setInterval(asActivity(activities, 'handover reconcile', tick), intervalMs);
             return () => clearInterval(handle);
           },
         }),
@@ -9136,6 +9158,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           policy: agentControl,
         }),
         configFiles: createConfigFilesSubsystem({
+          activities,
           service: configFiles,
           events: {
             directories: async () => await configDirectory.directories(),
@@ -9223,7 +9246,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
             },
             {
               every: (intervalMs, tick) => {
-                const handle = setInterval(tick, intervalMs);
+                const handle = setInterval(asActivity(activities, 'update check', tick), intervalMs);
                 return () => clearInterval(handle);
               },
             },
@@ -9254,6 +9277,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         scratchGc,
         secrets,
         warden: createWardenSubsystem({
+          activities,
           sessions,
           control: sessionControl,
           attention,
@@ -10173,7 +10197,7 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
   // The security log's fold windows close on this tick too, not only on the next record like them: a
   // burst that STOPS must still be written down with its count. Writes a line at most; spawns nothing.
   const auditFlushTicks = setInterval(() => {
-    void subsystems.audit.flush().catch(() => undefined);
+    void activities.run('audit flush', () => subsystems.audit.flush()).catch(() => undefined);
   }, AUDIT_FOLD_WINDOW_MS);
   cleanups.push(() => {
     clearInterval(auditFlushTicks);
