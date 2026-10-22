@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { afterEach, describe, expect, test } from 'bun:test';
 import type { ReactTestInstance, ReactTestRenderer } from 'react-test-renderer';
 import {
   LedgerMessage,
@@ -19,8 +19,17 @@ import { peerFrom } from '../../src/lib/peer-message.ts';
 import { sendBadge } from '../../src/lib/send-badge.ts';
 import type { LedgerSendRecord } from '../../src/lib/send-ledger.ts';
 import { absoluteTime, type TranscriptEntry } from '../../src/lib/session-screens.ts';
-import { actionKeys, actionsButton, chooseAction, hasActionsButton, openActions } from '../support/ledger-menu.ts';
+import {
+  actionKeys,
+  actionsButton,
+  chooseAction,
+  hasActionsButton,
+  openActions,
+  closeOpenMenus,
+} from '../support/ledger-menu.ts';
 import { render, runAsync } from '../support/react.ts';
+
+afterEach(closeOpenMenus);
 
 const record = (overrides: Partial<LedgerSendRecord> = {}): LedgerSendRecord => ({
   sendId: 'send-1',

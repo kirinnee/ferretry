@@ -1,6 +1,15 @@
 import './dom.ts';
+import { act } from 'react';
 import type { ReactTestInstance, ReactTestRenderer } from 'react-test-renderer';
 import { runAsync } from './react.ts';
+
+// An open menu holds a document-wide Escape layer; leaving its tree mounted would starve the next test's Escape.
+// Each test file registers this in its own afterEach — a hook in this shared module would only reach the first importer.
+const opened = new Set<ReactTestRenderer>();
+export const closeOpenMenus = (): void => {
+  for (const renderer of opened) act(() => renderer.unmount());
+  opened.clear();
+};
 
 /** The "⋯" button on a message's status line. */
 export const actionsButton = (renderer: ReactTestRenderer): ReactTestInstance =>
@@ -11,6 +20,7 @@ export const hasActionsButton = (renderer: ReactTestRenderer): boolean =>
 
 /** Taps the "⋯" button, which opens the menu. */
 export const openActions = async (renderer: ReactTestRenderer): Promise<void> => {
+  opened.add(renderer);
   await runAsync(async () => {
     actionsButton(renderer).props.onClick();
   });
