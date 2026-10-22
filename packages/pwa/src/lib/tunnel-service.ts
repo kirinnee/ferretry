@@ -55,6 +55,9 @@ export const TUNNEL_NOT_SET_UP = 'not set up by the operator';
 /** Said when the service is up but this machine published no tunnel. */
 export const TUNNEL_NOT_YET = 'this machine has no tunnel yet';
 
+/** Said when the machine itself says its tunnel is switched off — tunnels are opt-in per machine (§15). */
+export const TUNNEL_SWITCHED_OFF = 'this machine’s tunnel is off (opt-in) — turn it on in Settings › Connection';
+
 /** Why there is no tunnel to dial for a machine that published none. */
 export const noTunnelReason = (service: TunnelServiceState): string =>
   service === 'available' ? TUNNEL_NOT_YET : TUNNEL_NOT_SET_UP;

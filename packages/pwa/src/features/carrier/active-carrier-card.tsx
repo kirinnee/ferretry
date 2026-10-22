@@ -224,6 +224,13 @@ export function ActiveCarrierCard({
           Why not a faster carrier: {measured.fallbackReason}
         </p>
       )}
+      {/* The machine's own line about its tunnel — "Tunnel: off (opt-in) — turn on with …" — because a
+          tunnel is opt-in per machine (§15) and "Tunnel only" without one otherwise reads as broken. */}
+      {preference?.availability.tunnel === undefined ? null : (
+        <p className="mb-0 mt-2 text-meta leading-base text-muted" data-tunnel-status="">
+          {preference.availability.tunnel.sentence}
+        </p>
+      )}
       {preference === undefined ? null : (
         <div className="mt-4" data-carrier-preference-control="">
           <CarrierPreferenceSelector

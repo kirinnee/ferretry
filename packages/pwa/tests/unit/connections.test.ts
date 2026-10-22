@@ -274,6 +274,22 @@ describe('DaemonConnectionStore', () => {
     should(reprovisioned?.carriers).deepEqual([direct, moved, relay]);
   });
 
+  it('should keep or forget the tunnel on the daemon’s own word, for the pairing that asked', () => {
+    const store = new DaemonConnectionStore();
+    const paired = store.add(connection('a'));
+    const direct = { kind: 'direct' as const, daemonUrl: paired.baseUrl };
+    const tunnel = { kind: 'tunnel' as const, tunnelUrl: 'https://k3x9.tunnels.example.test' };
+
+    const on = store.replaceTunnel(paired, tunnel);
+    should(on?.carriers).deepEqual([direct, tunnel]);
+    should(store.replaceTunnel(paired, tunnel)).equal(on);
+    // Another pairing's late answer changes nothing; an unknown daemon has nothing to change.
+    should(store.replaceTunnel(daemonConnection({ ...paired, deviceId: 'token-rotated' }), undefined)).equal(on);
+    should(store.replaceTunnel(connection('nobody'), undefined)).be.undefined();
+
+    should(store.replaceTunnel(paired, undefined)?.carriers).deepEqual([direct]);
+  });
+
   it('loads tolerantly and keeps saving after a repository failure', async () => {
     const repository = new MemoryRepository(persisted([row('saved', 4)], 'saved'), false, true);
     const store = await DaemonConnectionStore.open({ repository, now: () => 9 });

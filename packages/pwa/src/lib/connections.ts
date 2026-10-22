@@ -10,6 +10,7 @@ import {
   daemonTunnelCarrier,
   sameDaemonCarriers,
   sameDaemonConnection,
+  type TunnelCarrier,
 } from './daemon-connection.ts';
 
 /**
@@ -437,7 +438,27 @@ export class DaemonConnectionStore {
     const kept = carriers.some(carrier => carrier.kind === 'tunnel')
       ? []
       : existing.carriers.filter(carrier => carrier.kind === 'tunnel');
-    const updated = daemonConnection({ ...existing, carriers: [...carriers, ...kept] });
+    return this.#replace(existing, [...carriers, ...kept]);
+  }
+
+  /**
+   * Keeps — or forgets — this machine's tunnel on what the DAEMON said about its switch
+   * (`GET`/`PUT /v1/tunnel`, §15): a tunnel that is up at a hostname is kept, and one switched off or
+   * unable to run is forgotten. This is the re-check {@link replaceCarriers} defers to: a refresh that
+   * names no tunnel cannot tell "reconnecting" from "gone", and this answer can. Fenced to the pairing
+   * that asked, exactly as a refresh is.
+   */
+  replaceTunnel(daemon: DaemonConnection, tunnel: TunnelCarrier | undefined): DaemonConnectionRecord | undefined {
+    const existing = this.get(daemon.daemonId);
+    if (existing === undefined) return undefined;
+    if (existing.baseUrl !== daemon.baseUrl || existing.deviceId !== daemon.deviceId) return existing;
+    const others = existing.carriers.filter(carrier => carrier.kind !== 'tunnel');
+    return this.#replace(existing, tunnel === undefined ? others : [...others, tunnel]);
+  }
+
+  /** Writes a new carrier set into one record, keeping everything this browser owns about it. */
+  #replace(existing: DaemonConnectionRecord, carriers: readonly ConnectionMethod[]): DaemonConnectionRecord {
+    const updated = daemonConnection({ ...existing, carriers });
     if (sameDaemonCarriers(existing.carriers, updated.carriers)) return existing;
     const record: DaemonConnectionRecord = {
       ...updated,
@@ -446,7 +467,7 @@ export class DaemonConnectionStore {
       lastSelectedAt: existing.lastSelectedAt,
     };
     const connections = this.#snapshot.connections.map(candidate =>
-      candidate.daemonId === daemon.daemonId ? record : candidate,
+      candidate.daemonId === existing.daemonId ? record : candidate,
     );
     this.#publish({ connections, selectedDaemonId: this.#snapshot.selectedDaemonId });
     return record;
