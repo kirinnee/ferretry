@@ -185,6 +185,56 @@ export type SendCancelRequest = z.infer<typeof SendCancelRequestSchema>;
 export const SendSubmitRequestSchema = z.strictObject({});
 export type SendSubmitRequest = z.infer<typeof SendSubmitRequestSchema>;
 
+/**
+ * The code a send answers with when the agent's composer already holds a PERSON's unsent text.
+ *
+ * A pointer Ferretry typed itself and never submitted is finished by the daemon rather than refused;
+ * this is what is left — text only the person can decide about. The body carries that `draft` exactly
+ * as the composer reads, so the app can offer "Send it" and "Clear it" for exactly that text.
+ */
+export const COMPOSER_OCCUPIED_CODE = 'composer_occupied';
+
+/** Longest draft the composer routes will act on; a composer holding more is not a draft to tap away. */
+export const COMPOSER_DRAFT_MAX_CHARS = 20_000;
+
+const ComposerOccupiedBodySchema = z.object({
+  code: z.literal(COMPOSER_OCCUPIED_CODE),
+  draft: z.string().min(1).max(COMPOSER_DRAFT_MAX_CHARS),
+});
+
+/** The draft a `composer_occupied` refusal carries, or `undefined` for any other body. */
+export function composerOccupiedDraft(body: unknown): string | undefined {
+  const parsed = ComposerOccupiedBodySchema.safeParse(body);
+  return parsed.success ? parsed.data.draft : undefined;
+}
+
+/**
+ * Pressing Enter on, or erasing, the person's own draft in the agent's composer.
+ *
+ * `draft` is the text the refusal quoted back. The daemon acts ONLY while the composer still holds
+ * exactly that, so a draft the person has since changed in the terminal is never sent or wiped from
+ * here.
+ */
+export const ComposerDraftRequestSchema = z.strictObject({
+  action: z.enum(['submit', 'clear']),
+  draft: z.string().min(1).max(COMPOSER_DRAFT_MAX_CHARS),
+});
+export type ComposerDraftRequest = z.infer<typeof ComposerDraftRequestSchema>;
+
+/**
+ * What acting on the draft did. `submitted` and `cleared` free the composer; `holding` is an Enter the
+ * harness did not take; `absent` is a composer that is already empty; `changed` is a composer that no
+ * longer holds exactly that draft, so nothing was pressed; `stuck` is an erase that stopped responding.
+ */
+export const ComposerDraftOutcomeSchema = z.enum(['submitted', 'holding', 'cleared', 'absent', 'changed', 'stuck']);
+export type ComposerDraftOutcome = z.infer<typeof ComposerDraftOutcomeSchema>;
+
+export const ComposerDraftResultSchema = z.object({
+  action: z.enum(['submit', 'clear']),
+  outcome: ComposerDraftOutcomeSchema,
+});
+export type ComposerDraftResult = z.infer<typeof ComposerDraftResultSchema>;
+
 export const RuntimeModelOptionSchema = z.object({
   value: z.string().min(1),
   label: z.string().min(1),

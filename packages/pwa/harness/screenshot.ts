@@ -203,7 +203,7 @@ const WALKS_SETTINGS = !(
  * chose over committed golden images: one integer per intentional change, versus a re-baselined
  * directory of PNGs whose diff nobody can review.
  */
-const SETTINGS_SIDEWAYS_CHECKS = 175;
+const SETTINGS_SIDEWAYS_CHECKS = 179;
 
 /**
  * HOW MANY MACHINES GEOMETRY CHECKS A RUN THAT WALKS SETTINGS OWES (`assertMachinesGeometry`): one per
@@ -2570,8 +2570,8 @@ try {
           // The fixture is only evidence about the real frame if it carries the panels the composition
           // root supplies: every app panel but Model pricing, Speed-ups and Learning, which it has never mounted.
           const daemonPanels = await wardenFrame.locator('[data-daemon-panel]').count();
-          if (daemonPanels !== 13)
-            fail(`settings fixture listed ${daemonPanels} connection and security panels instead of the 13 it mounts`);
+          if (daemonPanels !== 14)
+            fail(`settings fixture listed ${daemonPanels} connection and security panels instead of the 14 it mounts`);
           await wardenFrame.scrollIntoViewIfNeeded();
           // Ten rows with a sentence each is the longest list in Settings; if one row widens a phone, it is here.
           await assertNoSidewaysScroll(page, `the connection and security list at ${viewport.name}`);
@@ -2600,6 +2600,8 @@ try {
             ['Security', 'security', '[data-security-card]'],
             ['Resource limits', 'resource-limits', '[data-testid="cgroup-config-card"]'],
             ['Doctor', 'doctor', '[data-doctor-daemon="harness-daemon"]'],
+            // The performance report, recorded: the broken budget first, then both reports as text.
+            ['Performance', 'performance', '[data-performance]'],
             // The security log, with a gap warning, both badges and "Show older" on it: its widest rows.
             ['Security log', 'security-log', '[data-security-log-panel]'],
             // The configuration files: an invalid file, a held loosening and a login naming its key by reference.
@@ -2664,6 +2666,18 @@ try {
                 warningBox.y + warningBox.height > frameHeight
               )
                 throw new Error(`resource-limit evidence does not fit in the ${viewport.name} viewport`);
+            }
+            if (slug === 'performance') {
+              // Idle first (the one button), then a recording run to its report: the report text is the widest
+              // thing the panel shows, and it must scroll inside its box rather than widen a phone.
+              const idleTarget = join(outDir, `settings-daemon-performance-idle-${viewport.name}.png`);
+              await page.screenshot({ path: idleTarget });
+              process.stdout.write(`📸 Settings daemon Performance idle ${viewport.name} -> ${idleTarget}\n`);
+              await readySurface.locator('[data-performance-record]').click();
+              const report = readySurface.locator('[data-performance-report]');
+              await report.waitFor({ state: 'visible' });
+              await assertNoSidewaysScroll(page, `the Performance report at ${viewport.name}`);
+              await readySurface.evaluate(element => element.scrollIntoView({ block: 'start' }));
             }
             // The Files panel's evidence is its head — where the files are, what waits and what is wrong — so
             // its frame starts there rather than wherever the previous panel left the page scrolled.

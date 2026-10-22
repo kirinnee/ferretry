@@ -73,6 +73,10 @@ import {
 import {
   type AnswerSessionRequest,
   AnswerSessionRequestSchema,
+  type ComposerDraftRequest,
+  ComposerDraftRequestSchema,
+  type ComposerDraftResult,
+  ComposerDraftResultSchema,
   type ConversionPreview,
   ConversionPreviewRequestSchema,
   ConversionPreviewSchema,
@@ -870,6 +874,10 @@ export class FyApiClient implements IFyApiClient {
       {},
       SendRecordSchema,
     );
+  }
+
+  resolveComposerDraft(id: string, request: ComposerDraftRequest): Promise<ComposerDraftResult> {
+    return this.#post(id, 'composer', ComposerDraftRequestSchema, request, ComposerDraftResultSchema);
   }
 
   answer(

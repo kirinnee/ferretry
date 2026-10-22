@@ -126,6 +126,17 @@ const sessionCases: SchemaCase[] = [
   { name: 'send retry', schema: session.SendRetryRequestSchema, value: { force: true } },
   { name: 'send cancel', schema: session.SendCancelRequestSchema, value: {} },
   { name: 'send submit', schema: session.SendSubmitRequestSchema, value: {} },
+  {
+    name: 'composer draft request',
+    schema: session.ComposerDraftRequestSchema,
+    value: { action: 'clear', draft: 'fix the login bug' },
+  },
+  { name: 'composer draft outcome', schema: session.ComposerDraftOutcomeSchema, value: 'changed' },
+  {
+    name: 'composer draft result',
+    schema: session.ComposerDraftResultSchema,
+    value: { action: 'submit', outcome: 'submitted' },
+  },
   { name: 'send cancel effect', schema: session.SendCancelEffectSchema, value: 'left_in_queue' },
   { name: 'send evidence', schema: session.SendEvidenceSchema, value: sendEvidence },
   { name: 'send record', schema: session.SendRecordSchema, value: sendRecord },
@@ -468,6 +479,21 @@ describe('session schemas', () => {
     // Act + Assert
     assertRoundTrips(cases);
     assertCoversEverySchema(session, cases);
+  });
+
+  it('should read the draft back out of a composer_occupied refusal, and out of nothing else', () => {
+    // Arrange
+    const refusal = { error: 'occupied', code: session.COMPOSER_OCCUPIED_CODE, draft: 'fix the login bug' };
+
+    // Act + Assert
+    should(session.composerOccupiedDraft(refusal)).equal('fix the login bug');
+    should(session.composerOccupiedDraft({ ...refusal, code: 'send_refused' })).be.undefined();
+    should(session.composerOccupiedDraft({ ...refusal, draft: '' })).be.undefined();
+    should(session.composerOccupiedDraft('occupied')).be.undefined();
+    should(session.ComposerDraftRequestSchema.safeParse({ action: 'clear', draft: '' }).success).be.false();
+    should(
+      session.ComposerDraftRequestSchema.safeParse({ action: 'clear', draft: 'x'.repeat(20_001) }).success,
+    ).be.false();
   });
 
   /**

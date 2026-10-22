@@ -230,6 +230,14 @@ export const AUDITED_ROUTES: readonly AuditedRouteRule[] = [
     subject: 'sessionId',
     detail: { mode: 'dialog' },
   },
+  // Enter on, or an erase of, the person's own draft in the agent's composer — never with the text.
+  {
+    method: 'POST',
+    path: '/v1/sessions/:sessionId/composer',
+    event: 'terminal.input',
+    subject: 'sessionId',
+    detail: { mode: 'composer' },
+  },
   { method: 'POST', path: '/v1/secrets/use', event: 'secrets.used', responseNames: 'used' },
   // A speed-up Test spends one provider key on the operator's account; the secret's NAME is the subject.
   {

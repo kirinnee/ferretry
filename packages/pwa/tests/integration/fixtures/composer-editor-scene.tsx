@@ -20,14 +20,25 @@
  *                         transcript, terminal list, task row and skills surface, each delivering
  *                         through its own production path, inside a reference surface that proves
  *                         the tokens they add (so a chip is a link, as in the app)
+ *   ?occupied=<text>      the agent's own box already holds the person's unsent <text>: the first send is
+ *                         refused `composer_occupied` with it, exactly as the daemon answers, and
+ *                         `api.resolveComposerDraft` records each tap on `window.__drafts` and frees the
+ *                         box, so the retried send lands on `window.__sent`
  */
-import type { SessionView, TerminalListView } from '@ferretry/protocol';
+import {
+  COMPOSER_OCCUPIED_CODE,
+  type ComposerDraftRequest,
+  type ComposerDraftResult,
+  type SessionView,
+  type TerminalListView,
+} from '@ferretry/protocol';
+import { FyHttpError } from '@ferretry/protocol/client';
 import { type ReactNode, StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { Composer } from '../../../src/components/composer.tsx';
 import { ComposerRuntime } from '../../../src/components/composer-runtime.tsx';
-import { isPromptKnownBusy, RuntimeModelControls } from '../../../src/components/runtime-controls.tsx';
 import { ReferenceSurfaceProvider, sessionReferenceSurface } from '../../../src/components/reference-surface.tsx';
+import { isPromptKnownBusy, RuntimeModelControls } from '../../../src/components/runtime-controls.tsx';
 import { SessionSurfaceReferences } from '../../../src/components/session-surface-references.tsx';
 import { Transcript } from '../../../src/components/transcript.tsx';
 import { SessionSkillsSurface } from '../../../src/features/skills/session-skills-surface.tsx';
@@ -37,8 +48,8 @@ import { addReferenceToComposer } from '../../../src/lib/composer-references.ts'
 import { daemonConnection } from '../../../src/lib/daemon-connection.ts';
 import { daemonSessionScope } from '../../../src/lib/daemon-scope.ts';
 import { DaemonDraftStore } from '../../../src/lib/drafts.ts';
-import type { RuntimeModelCatalog } from '../../../src/lib/runtime-models.ts';
 import { writeMdComposePref } from '../../../src/lib/md-compose.ts';
+import type { RuntimeModelCatalog } from '../../../src/lib/runtime-models.ts';
 import { taskSummary } from '../../support/tasks.ts';
 
 const parameters = new URLSearchParams(location.search);
@@ -184,10 +195,32 @@ const runtimeSlot =
     />
   );
 
+/** `?occupied=<text>`: the agent's box holds the person's text until a tap frees it. */
+let occupiedDraft = parameters.get('occupied');
+const draftTaps: unknown[] = [];
+(window as unknown as { __drafts: unknown[] }).__drafts = draftTaps;
+const occupiedApi = {
+  resolveComposerDraft: async (_id: string, request: ComposerDraftRequest): Promise<ComposerDraftResult> => {
+    draftTaps.push(request);
+    occupiedDraft = null;
+    return { action: request.action, outcome: request.action === 'submit' ? 'submitted' : 'cleared' };
+  },
+};
+const refuseWhileOccupied = (): void => {
+  if (occupiedDraft === null) return;
+  throw new FyHttpError('the agent’s composer already holds unsent text', 409, COMPOSER_OCCUPIED_CODE, {
+    error: 'the agent’s composer already holds unsent text',
+    code: COMPOSER_OCCUPIED_CODE,
+    draft: occupiedDraft,
+  });
+};
+
 const composer = (
   <Composer
     api={{
+      ...occupiedApi,
       send: async (_id, body) => {
+        refuseWhileOccupied();
         sent.push(body);
         return { disposition: 'queued' } as never;
       },

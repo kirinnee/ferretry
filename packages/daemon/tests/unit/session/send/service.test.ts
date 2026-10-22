@@ -1,4 +1,5 @@
 import { describe, it } from 'bun:test';
+import { queuedMessageInstruction, turnFileInstruction } from '@ferretry/protocol';
 import should from 'should';
 import { type ClockPort, parseSessionId, type SerialExecutor, type SessionId } from '../../../../src/lib/index.ts';
 import {
@@ -11,6 +12,7 @@ import {
   ReviveRefusedForSend,
   type SendChannel,
   SendComposerOccupied,
+  SendDraftRefused,
   type SendHeldAt,
   type SendLaunchGate,
   type SendLedger,
@@ -907,7 +909,7 @@ describe('a composer that already holds unsent text', () => {
 
     should(refused).be.instanceof(SendRefused);
     should((refused as Error).message).match(
-      /already holds unsent text \("hi"\).*Press Enter on it or cancel it first/u,
+      /already holds unsent text \("hi"\).*Press Enter on it or clear it first/u,
     );
     should(ledger.records.size).equal(0);
     should(terminal.typed).be.empty();
@@ -1191,5 +1193,264 @@ describe('delivering held messages after a revive', () => {
       return calls === 1 ? records : records.map(record => ({ ...record, held: false }));
     };
     should(await raced.service.releaseHeld(ID)).equal(0);
+  });
+});
+
+describe('a pointer of ours left typed in the composer — the owner’s stuck turn', () => {
+  /** The pointer an earlier send typed for turn 4, whose Enter the harness never took. */
+  const POINTER = turnFileInstruction('/state/turns/turn-004.md');
+
+  function stranded(overrides: Partial<SendRecord> = {}): SendRecord {
+    return {
+      sendId: 'send-0',
+      acceptedAt: '2026-08-01T11:00:00.000Z',
+      acceptedTurn: 3,
+      path: 'turn-file',
+      message: 'the long message from before',
+      matchText: POINTER,
+      turn: 4,
+      fate: 'unaccounted',
+      unaccountedReason: 'timeout',
+      typedNotSent: true,
+      attempt: 1,
+      attemptAt: '2026-08-01T11:00:00.000Z',
+      senderKind: 'human',
+      ...overrides,
+    };
+  }
+
+  function stuck(frames: SendPaneObservation[], record: SendRecord = stranded()): Parts {
+    const built = parts(target({ status: 'awaiting_user' }), frames);
+    built.ledger.records.set(record.sendId, record);
+    return built;
+  }
+
+  it('finishes it, starts the turn it carried, and sends the new message behind it', async () => {
+    const built = stuck([
+      pane({
+        promptReady: false,
+        draft: `Read the file /state/turns/\n  turn-004.md${POINTER.slice(POINTER.indexOf('.md') + 3)}`,
+      }),
+      pane({ activeWork: true }),
+    ]);
+
+    const outcome = await built.service.send(request({ message: 'and one more thing' }));
+
+    should(built.terminal.calls).eql(['observe', 'submitComposer', 'observe', 'observe', 'queue']);
+    should(built.terminal.typed).eql(['and one more thing']);
+    should(outcome.disposition).equal('queued');
+    should(built.ledger.records.get('send-0')).match({ fate: 'accepted', attemptAt: NOW, typedNotSent: undefined });
+    should(built.ledger.records.get('send-0')?.unaccountedReason).be.undefined();
+    should(built.repository.journal_.find(entry => entry.event === 'control.send_resubmitted')?.data).eql({
+      sendId: 'send-0',
+      outcome: 'submitted',
+      by: 'send',
+      reason: 'pointer typed but not submitted',
+    });
+    // The turn the pointer carried starts now, so the new send does not claim turn 4 a second time.
+    should(built.repository.transitions).match([{ event: 'turn.started', turn: 4 }]);
+    should(built.channel.inbound[0]).match({ message: 'the long message from before', turn: 4 });
+    should(built.turns.calls).eql(['clearMarkers']);
+    should(built.ledger.records.get('send-1')).match({ path: 'native-inline' });
+    should(built.tracked).containEql(ID);
+  });
+
+  it('delivers the new message as the next turn when the pane comes straight back to a prompt', async () => {
+    const built = stuck([pane({ draft: POINTER }), pane({ promptReady: true })], stranded({ fate: 'accepted' }));
+
+    await built.service.send(request());
+
+    should(built.terminal.typed).eql(['ship it']);
+    should(built.repository.transitions.map(change => change.turn)).eql([4, 5]);
+  });
+
+  it('starts no turn of its own for a queued pointer, or one the session has already moved past', async () => {
+    const queuedPointer = queuedMessageInstruction('/state/channel/queued-send-0.md');
+    const queued = stuck(
+      [pane({ draft: queuedPointer }), pane({ activeWork: true })],
+      stranded({ path: 'native-file', matchText: queuedPointer, turn: undefined, fate: 'accepted' }),
+    );
+    const past = parts(target({ status: 'awaiting_user', turn: 6 }), [
+      pane({ draft: POINTER }),
+      pane({ activeWork: true }),
+    ]);
+    past.ledger.records.set('send-0', stranded());
+
+    await queued.service.send(request());
+    await past.service.send(request());
+
+    should(queued.repository.transitions.map(change => change.turn)).eql([4]);
+    should(queued.channel.inbound.map(entry => entry.message)).eql(['ship it']);
+    should(past.repository.transitions.map(change => change.turn)).eql([7]);
+    should(queued.ledger.records.get('send-0')?.fate).equal('accepted');
+  });
+
+  it('refuses as before, pressing nothing, when the draft is a person’s or an edited pointer', async () => {
+    for (const draft of ['hi there', `${POINTER} also fix the tests`]) {
+      const built = stuck([pane({ draft })]);
+
+      const refused = await built.service.send(request()).catch((error: unknown) => error);
+
+      should(refused).be.instanceof(SendDraftRefused);
+      should((refused as SendDraftRefused).draft).equal(draft);
+      should(built.terminal.calls).not.containEql('submitComposer');
+      should(built.ledger.records.has('send-1')).be.false();
+    }
+  });
+
+  it('refuses, pressing nothing, at a pane mid-turn or behind a dialog, where Enter means something else', async () => {
+    const busy = stuck([pane({ draft: POINTER, activeWork: true })]);
+    const dialog = stuck([pane({ draft: POINTER, blockingPrompt: 'Trust this folder?' })]);
+
+    should(await busy.service.send(request()).catch((error: unknown) => error)).be.instanceof(SendDraftRefused);
+    should(await dialog.service.send(request()).catch((error: unknown) => error)).be.instanceof(SendDraftRefused);
+    should([...busy.terminal.calls, ...dialog.terminal.calls]).not.containEql('submitComposer');
+  });
+
+  it('refuses when the Enter does not take, leaving the earlier send as it was', async () => {
+    const built = stuck([pane({ draft: POINTER })]);
+    built.terminal.submitOutcome = 'holding';
+
+    const refused = await built.service.send(request()).catch((error: unknown) => error);
+
+    should(refused).be.instanceof(SendDraftRefused);
+    should(built.ledger.records.get('send-0')).match({ fate: 'unaccounted', typedNotSent: true });
+    should(built.repository.journal_.at(-1)).match({ event: 'control.send_resubmitted', data: { outcome: 'holding' } });
+    should(built.repository.transitions).be.empty();
+  });
+
+  it('finishes another send’s pointer before a retry, but never the retried send’s own', async () => {
+    const other = stuck([pane({ draft: POINTER }), pane({ promptReady: true })]);
+    other.ledger.records.set('send-1', {
+      ...stranded({ sendId: 'send-1', fate: 'timed_out', retryable: true }),
+      path: 'direct',
+      matchText: 'ship it',
+      message: 'ship it',
+    });
+    const own = stuck([pane({ draft: POINTER })], stranded({ fate: 'accepted' }));
+
+    await other.service.reattempt(ID, 'send-1', { by: 'person' });
+    const refused = await own.service.reattempt(ID, 'send-0', { by: 'daemon' }).catch((error: unknown) => error);
+
+    should(other.terminal.calls.filter(call => call === 'submitComposer')).have.length(1);
+    should(other.terminal.typed).eql(['ship it']);
+    should(refused).be.instanceof(SendDraftRefused);
+    should(own.terminal.calls).not.containEql('submitComposer');
+  });
+});
+
+describe('the tracker nudging a pointer of ours with one more Enter', () => {
+  const POINTER = turnFileInstruction('/state/turns/turn-004.md');
+
+  function typed(overrides: Partial<SendRecord> = {}, frames: SendPaneObservation[] = [pane({ draft: POINTER })]) {
+    const built = parts(target({ status: 'awaiting_user' }), frames);
+    built.ledger.records.set('send-0', {
+      sendId: 'send-0',
+      acceptedAt: '2026-08-01T11:59:50.000Z',
+      acceptedTurn: 3,
+      path: 'turn-file',
+      message: 'the long message',
+      matchText: POINTER,
+      turn: 4,
+      fate: 'accepted',
+      attempt: 1,
+      attemptAt: '2026-08-01T11:59:50.000Z',
+      ...overrides,
+    });
+    return built;
+  }
+
+  it('counts the nudge before the key, presses once, and starts the turn when it takes', async () => {
+    const built = typed();
+
+    const record = await built.service.resubmit(ID, 'send-0');
+
+    should(record).match({ submitNudges: 1, attemptAt: NOW, fate: 'accepted' });
+    should(built.terminal.calls).eql(['observe', 'submitComposer']);
+    should(built.repository.journal_.at(0)).match({ event: 'control.send_resubmitted', data: { by: 'daemon' } });
+    should(built.repository.transitions).match([{ turn: 4 }]);
+    should(built.tracked).eql([ID]);
+  });
+
+  it('keeps counting when the Enter does not take, and starts nothing', async () => {
+    const built = typed({ submitNudges: 1 });
+    built.terminal.submitOutcome = 'holding';
+
+    should(await built.service.resubmit(ID, 'send-0')).match({
+      submitNudges: 2,
+      attemptAt: '2026-08-01T11:59:50.000Z',
+    });
+    should(built.repository.transitions).be.empty();
+  });
+
+  it('presses nothing for a send that is not a stranded pointer, or a pane that does not show it idle', async () => {
+    const cases = [
+      typed({ fate: 'delivered' }),
+      typed({ path: 'direct', matchText: 'ship it' }),
+      typed({}, [pane({ draft: 'a person’s words' })]),
+      typed({}, [pane({})]),
+      typed({}, [pane({ draft: POINTER, activeWork: true })]),
+      typed({}, [pane({ alive: false, draft: POINTER })]),
+    ];
+
+    for (const built of cases) {
+      const before = built.ledger.records.get('send-0');
+      should(await built.service.resubmit(ID, 'send-0')).equal(before);
+      should(built.terminal.calls).not.containEql('submitComposer');
+    }
+    should(await typed().service.resubmit(ID, 'send-9')).be.undefined();
+  });
+});
+
+describe('a person’s own draft in the composer', () => {
+  it('presses Enter on exactly that draft, however the TUI wrapped it, and journals no text', async () => {
+    const built = parts(target(), [pane({ draft: 'fix the\n  login bug' })]);
+
+    should(await built.service.resolveDraft(ID, 'submit', 'fix the login bug')).equal('submitted');
+    should(built.terminal.calls).eql(['observe', 'submitComposer']);
+    should(built.repository.journal_).eql([{ event: 'control.composer_submitted', data: { outcome: 'submitted' } }]);
+    should(built.tracked).eql([ID]);
+  });
+
+  it('erases exactly that draft, and says when the erase stopped', async () => {
+    const cleared = parts(target(), [pane({ draft: 'fix the login bug' })]);
+    const stalled = parts(target(), [pane({ draft: 'fix the login bug' })]);
+    stalled.terminal.clearOutcome = 'stuck';
+
+    should(await cleared.service.resolveDraft(ID, 'clear', 'fix the login bug')).equal('cleared');
+    should(await stalled.service.resolveDraft(ID, 'clear', 'fix the login bug')).equal('stuck');
+    should(cleared.repository.journal_).eql([{ event: 'control.composer_cleared', data: { outcome: 'cleared' } }]);
+    should(cleared.tracked).be.empty();
+  });
+
+  it('touches nothing once the draft has changed or gone, and says which', async () => {
+    const changed = parts(target(), [pane({ draft: 'fix the login bug please' })]);
+    const empty = parts(target(), [pane({})]);
+    const foreign = parts(target(), [pane({ draft: 'fix the login bug' })]);
+    foreign.terminal.clearOutcome = 'foreign';
+    const vanished = parts(target(), [pane({ draft: 'fix the login bug' })]);
+    vanished.terminal.submitOutcome = 'absent';
+
+    should(await changed.service.resolveDraft(ID, 'submit', 'fix the login bug')).equal('changed');
+    should(await empty.service.resolveDraft(ID, 'clear', 'fix the login bug')).equal('absent');
+    should(await foreign.service.resolveDraft(ID, 'clear', 'fix the login bug')).equal('changed');
+    should(await vanished.service.resolveDraft(ID, 'submit', 'fix the login bug')).equal('changed');
+    should([...changed.terminal.calls, ...empty.terminal.calls]).eql(['observe', 'observe']);
+  });
+
+  it('refuses a session that cannot take keys: gone, behind a dialog, or not its agent’s', async () => {
+    const gone = parts(target(), [pane({ alive: false, draft: 'x' })]);
+    const dialog = parts(target(), [pane({ draft: 'x', blockingPrompt: 'Allow this tool?' })]);
+    const killed = parts(target({ status: 'kill_failed' }), [pane({ draft: 'x' })]);
+
+    should(
+      ((await gone.service.resolveDraft(ID, 'submit', 'x').catch((error: unknown) => error)) as Error).message,
+    ).match(/is gone/u);
+    should(
+      ((await dialog.service.resolveDraft(ID, 'clear', 'x').catch((error: unknown) => error)) as Error).message,
+    ).match(/answer it first/u);
+    should(await killed.service.resolveDraft(ID, 'submit', 'x').catch((error: unknown) => error)).be.instanceof(
+      SendRefused,
+    );
   });
 });

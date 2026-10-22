@@ -39,6 +39,13 @@ export interface SendTrackerSettings {
    * looks exactly like a stuck message — saying so then flips the row to delivered a second later.
    */
   readonly typedStableMs: number;
+  /**
+   * When the daemon presses Enter AGAIN for a pointer of its own still sitting typed in the composer,
+   * measured from the attempt that typed it: one entry per extra Enter, so the LENGTH bounds them. A
+   * pointer is only said to be "typed, not sent" once the last of these has had `typedStableMs` to
+   * take, because until then the daemon is still finishing its own job.
+   */
+  readonly submitNudgesMs: readonly number[];
   /** Harness and daemon clocks disagree slightly; a proof this far before acceptance still counts. */
   readonly matchSlackMs: number;
 }
@@ -55,6 +62,7 @@ export const defaultSendTrackerSettings: SendTrackerSettings = {
   repairLimitMs: 3 * 24 * 60 * 60_000,
   matchSlackMs: 5_000,
   typedStableMs: 4_000,
+  submitNudgesMs: [4_000, 12_000, 30_000],
 };
 
 /** Fates still being looked for. */

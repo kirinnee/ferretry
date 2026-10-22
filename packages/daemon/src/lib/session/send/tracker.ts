@@ -2,6 +2,7 @@ import type { SendUnaccountedReason } from '@ferretry/protocol';
 import type { ClockPort, SerialExecutor } from '../../ports.ts';
 import type { SessionId } from '../../session-id.ts';
 import type { ObservedHumanInput } from '../../transcript/types.ts';
+import { strandablePointer } from './stranded.ts';
 import {
   attemptsAllowed,
   deadlineOf,
@@ -64,9 +65,14 @@ export interface SendScheduler {
   cancelAll(): void;
 }
 
-/** Types a send again under its original id. Implemented by the send service. */
+/** Types a send again under its original id, or presses Enter again for its stranded pointer. */
 export interface SendReattempter {
   reattempt(id: SessionId, sendId: string): Promise<SendRecord>;
+  /**
+   * One more verified Enter for this send's own pointer, still typed in the composer. Answers the
+   * record as it then stands; every condition is the implementer's to re-check under its lock.
+   */
+  resubmit(id: SessionId, sendId: string): Promise<SendRecord | undefined>;
 }
 
 /** Tells an agent that its message did not arrive. */
@@ -205,8 +211,8 @@ export class SendTracker implements SendTracking, SendTrackingLoop {
         verdict?.queuedAt !== undefined && record.fate === 'accepted'
           ? await this.queued(id, record, verdict.queuedAt, 'transcript')
           : record;
-      const hold = await this.paneHold(id, proven);
-      const current = await this.observed(id, proven, hold, now);
+      const { record: nudged, hold } = await this.nudged(id, proven, await this.paneHold(id, proven), now);
+      const current = await this.observed(id, nudged, hold, now);
       const deadline = deadlineOf(current, this.settings);
       const after = now < deadline ? current : await this.expire(id, current, reading, verdict, hold, now);
       if (!isOpenSend(after)) continue;
@@ -216,7 +222,7 @@ export class SendTracker implements SendTracking, SendTrackingLoop {
         after.attempt !== current.attempt
           ? now + this.settings.firstCheckMs
           : hold === 'composer' && after.typedNotSent !== true
-            ? Math.min(due, this.typedSince(after) + this.settings.typedStableMs)
+            ? Math.min(due, this.composerLookAt(after, now))
             : due;
       next = next === undefined ? at : Math.min(next, at);
     }
@@ -284,7 +290,7 @@ export class SendTracker implements SendTracking, SendTrackingLoop {
     // flips to "delivered" a second later. Once raised it stays for as long as the pane shows the text.
     const typed =
       hold === 'composer' &&
-      (record.typedNotSent === true || now - this.typedSince(record) >= this.settings.typedStableMs);
+      (record.typedNotSent === true || now - this.typedSince(record) >= this.typedAfterMs(record));
     if (hold === 'unreadable' || typed === (record.typedNotSent === true)) return record;
     const next = await this.ports.ledger.settle(id, record.sendId, { typedNotSent: typed ? true : undefined });
     if (typed) await this.ports.repository.journal(id, 'control.send_typed_not_sent', { sendId: record.sendId });
@@ -294,6 +300,52 @@ export class SendTracker implements SendTracking, SendTrackingLoop {
   /** When the current attempt put this send in the composer, in epoch milliseconds. */
   private typedSince(record: SendRecord): number {
     return Date.parse(record.attemptAt ?? record.acceptedAt);
+  }
+
+  /**
+   * Presses Enter again for a POINTER of ours left typed in the composer, when its next nudge is due.
+   *
+   * A swallowed Enter used to end the daemon's part: the pointer sat in the composer, the row read
+   * "typed, not sent", and every later send was refused over a draft the person never wrote. Only a
+   * pointer is nudged — its text is the daemon's own, so it can never be a person's draft — and only
+   * `submitNudgesMs.length` times an attempt. The pane is read again afterwards, since a nudge that
+   * took leaves nothing in the composer to report.
+   */
+  private async nudged(
+    id: SessionId,
+    record: SendRecord,
+    hold: PaneHold,
+    now: number,
+  ): Promise<{ readonly record: SendRecord; readonly hold: PaneHold }> {
+    const due = this.nudgeDue(record);
+    if (hold !== 'composer' || record.typedNotSent === true || due === undefined || now < due) return { record, hold };
+    const after = await this.ports.attempts.resubmit(id, record.sendId).catch(() => undefined);
+    if (after === undefined) return { record, hold };
+    return { record: after, hold: await this.paneHold(id, after) };
+  }
+
+  /** When this send's next Enter nudge is due, or `undefined` when it is not a pointer or has none left. */
+  private nudgeDue(record: SendRecord): number | undefined {
+    if (strandablePointer(record) === undefined) return undefined;
+    const offset = this.settings.submitNudgesMs[record.submitNudges ?? 0];
+    return offset === undefined ? undefined : this.typedSince(record) + offset;
+  }
+
+  /** How long text must sit in the composer before it is said to be typed and not sent. */
+  private typedAfterMs(record: SendRecord): number {
+    if (strandablePointer(record) === undefined) return this.settings.typedStableMs;
+    return (this.settings.submitNudgesMs.at(-1) ?? 0) + this.settings.typedStableMs;
+  }
+
+  /**
+   * The next look a send still in the composer needs: its next nudge, or the moment it becomes typed
+   * and not sent. A nudge already due — one the pane deferred, mid-turn or behind a dialog — is looked
+   * at again no sooner than a first check would be, so a pane that stays busy is not polled hot.
+   */
+  private composerLookAt(record: SendRecord, now: number): number {
+    const typed = this.typedSince(record) + this.typedAfterMs(record);
+    const nudge = this.nudgeDue(record);
+    return nudge === undefined ? typed : Math.min(typed, Math.max(nudge, now + this.settings.firstCheckMs));
   }
 
   /**
