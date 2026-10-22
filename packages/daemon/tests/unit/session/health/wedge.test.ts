@@ -135,6 +135,79 @@ describe('self-check wedge detection', () => {
   });
 });
 
+describe('a self-check tick the whole event loop delayed', () => {
+  it('should not call a gap the blocked loop explains a wedge, and run no deep pass for it', () => {
+    // Arrange — the 17.7 s Mac shape: the loop was blocked for most of a long gap.
+    const previous = ledger({ lastLoopBlockedMs: 5_000 });
+    const gap = SETTINGS.wedgeGapMs + 60_000;
+
+    // Act
+    const actual = classifySelfCheckTick(
+      previous,
+      { elapsedMs: 1_000_000 + gap, at: AT, loopBlockedMs: 5_000 + gap - SETTINGS.selfCheckIntervalMs },
+      SETTINGS,
+    );
+
+    // Assert — still reported as lag, never as a wedge.
+    should(actual).deepEqual({
+      freshness: 'fresh',
+      gapMs: gap,
+      lagMs: gap - SETTINGS.selfCheckIntervalMs,
+      deepPass: false,
+      since: undefined,
+    });
+  });
+
+  it('should still call the part of a gap the blocked loop does not explain a wedge', () => {
+    // Arrange — the loop was blocked for a minute, but the check stopped happening for longer.
+    const previous = ledger({ lastLoopBlockedMs: 0 });
+
+    // Act
+    const actual = classifySelfCheckTick(
+      previous,
+      { elapsedMs: 1_000_000 + SETTINGS.wedgeGapMs + 60_000, at: AT, loopBlockedMs: 60_000 },
+      SETTINGS,
+    );
+    const short = classifySelfCheckTick(
+      previous,
+      { elapsedMs: 1_000_000 + SETTINGS.wedgeGapMs + 60_000, at: AT, loopBlockedMs: 60_001 },
+      SETTINGS,
+    );
+
+    // Assert
+    should(actual).match({ freshness: 'wedged', deepPass: true });
+    should(short.freshness).equal('fresh');
+  });
+
+  it('should count the whole gap when the loop reading cannot be trusted', () => {
+    // Arrange
+    const gap = { elapsedMs: 1_000_000 + SETTINGS.wedgeGapMs, at: AT };
+
+    // Act — no meter at all, a meter that went backwards, and a meter with no earlier reading.
+    const actual = [
+      classifySelfCheckTick(ledger({ lastLoopBlockedMs: 0 }), gap, SETTINGS),
+      classifySelfCheckTick(ledger({ lastLoopBlockedMs: 9_000_000 }), { ...gap, loopBlockedMs: 0 }, SETTINGS),
+      classifySelfCheckTick(ledger(), { ...gap, loopBlockedMs: SETTINGS.wedgeGapMs }, SETTINGS),
+    ];
+
+    // Assert
+    should(actual.map(verdict => verdict.freshness)).deepEqual(['wedged', 'wedged', 'wedged']);
+  });
+
+  it('should carry the loop reading forward with the tick, and drop one it cannot use', () => {
+    // Arrange / Act
+    const usable = recordSelfCheckTick(ledger(), { elapsedMs: 1_060_000, at: AT, loopBlockedMs: 42 }, SETTINGS);
+    const broken = recordSelfCheckTick(
+      ledger({ lastLoopBlockedMs: 42 }),
+      { elapsedMs: 1_060_000, at: AT, loopBlockedMs: Number.NaN },
+      SETTINGS,
+    );
+
+    // Assert
+    should([usable.ledger.lastLoopBlockedMs, broken.ledger.lastLoopBlockedMs]).deepEqual([42, undefined]);
+  });
+});
+
 describe('self-check ledger', () => {
   it('should count only proven wedges and carry the newest readings forward', () => {
     // Arrange
@@ -148,6 +221,7 @@ describe('self-check ledger', () => {
       ticks: 2,
       wedges: 3,
       lastElapsedMs: 1_000_000 + SETTINGS.wedgeGapMs,
+      lastLoopBlockedMs: undefined,
       lastAt: AT,
       lastFreshness: 'wedged',
       eventLoopLagMs: SETTINGS.wedgeGapMs - SETTINGS.selfCheckIntervalMs,
@@ -305,6 +379,31 @@ describe('skipped self-check tick', () => {
 
     // Assert
     should(actual.verdict?.since).be.undefined();
+  });
+});
+
+describe('a stuck check the whole event loop delayed', () => {
+  it('should not count the time the loop was blocked as time the check was stuck', () => {
+    // Arrange
+    const since = { elapsedMs: 1_000_000, at: AT, loopBlockedMs: 0 };
+    const tick = { elapsedMs: 1_000_000 + SETTINGS.wedgeGapMs, at: AT };
+
+    // Act
+    const blocked = recordSkippedTick(
+      ledger(),
+      { tick: { ...tick, loopBlockedMs: 1 }, running: { since, counted: false } },
+      SETTINGS,
+    );
+    const free = recordSkippedTick(
+      ledger(),
+      { tick: { ...tick, loopBlockedMs: 0 }, running: { since, counted: false } },
+      SETTINGS,
+    );
+
+    // Assert
+    should(blocked.verdict).be.undefined();
+    should(blocked.ledger.lastLoopBlockedMs).equal(1);
+    should(free.verdict?.freshness).equal('wedged');
   });
 });
 

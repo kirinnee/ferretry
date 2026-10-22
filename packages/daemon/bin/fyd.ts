@@ -642,6 +642,7 @@ import {
   type LivenessTarget,
   LocalModelsService,
   type LogLevel,
+  type LoopBlockedClockPort,
   type LoopWatchdogPort,
   launchGuardActive,
   launchReasoningEffort,
@@ -1181,8 +1182,16 @@ export interface DaemonWorld {
    * (`healthIntervalSeconds`) and it is only known once configuration has loaded. The service, its
    * consistency pass and the timer must all read the same object — a detector measuring lateness
    * against a period the timer does not fire on is a detector measuring nothing.
+   *
+   * `loop` is the event-loop lag meter `start` arms before anything else, passed in for the same
+   * reason: a tick the whole loop was too blocked to fire is not a wedge of the self-check, and only
+   * that meter knows how long the loop was blocked.
    */
-  readonly createSessionHealth: (storage: DaemonStorage, settings: SessionHealthSettings) => SessionHealthService;
+  readonly createSessionHealth: (
+    storage: DaemonStorage,
+    settings: SessionHealthSettings,
+    loop: LoopBlockedClockPort,
+  ) => SessionHealthService;
   /**
    * Brings back the sessions a host restart took down (docs/cli.md, `fy daemon`).
    *
@@ -7358,7 +7367,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         run: async () => await service.run(),
       };
     },
-    createSessionHealth: (storage, settings) =>
+    createSessionHealth: (storage, settings, loop) =>
       new SessionHealthService(
         {
           inventory: new StorageSessionHealthInventory(storage, {
@@ -7406,6 +7415,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           clock,
           wallClock: { nowMs: () => Date.now() },
           monotonic: new SystemMonotonicClock(),
+          loop,
           // The same ledger every timer reports into: a check runs as `self-check` and names each stage
           // inside it — `self-check › reconcile › reindex` — so a profile splits the check's time.
           activities,
@@ -9702,7 +9712,7 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
   // three minutes. One settings object serves the service, its consistency pass and the timer below,
   // so the period the daemon fires on cannot drift from the period the detector measures against.
   const healthSettings = sessionHealthSettingsAt(config.healthIntervalSeconds * 1_000);
-  const health = world.createSessionHealth(opened.storage, healthSettings);
+  const health = world.createSessionHealth(opened.storage, healthSettings, meter);
   const skills = new NodeCatalog({ home: world.userHome });
   const projects = new FileProjectCatalog(join(opened.paths.state, 'projects.json'));
   const catalogs = {

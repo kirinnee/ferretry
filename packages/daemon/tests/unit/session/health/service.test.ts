@@ -57,6 +57,8 @@ class Harness {
   rearms = 0;
   restarts = 0;
   elapsed = 1_000_000;
+  /** The lag meter's running total of time the whole event loop was blocked. */
+  blocked = 0;
   /** Every stage the service named, in the order it ran them. */
   readonly stages: string[] = [];
   /** The walk the survey port answers with, or the error it fails with. */
@@ -146,6 +148,7 @@ class Harness {
       clock: { now: () => AT },
       wallClock: { nowMs: () => NOW_MS },
       monotonic: { elapsedMs: () => this.elapsed },
+      loop: { blockedMs: () => this.blocked },
       activities: {
         run: async (name, work) => {
           this.stages.push(name);
@@ -537,6 +540,73 @@ describe('session health service', () => {
           since: AT,
         },
       });
+    });
+  });
+
+  describe('when the whole event loop was blocked', () => {
+    it('should not take a tick the blocked loop delayed for a wedge, so no deep pass feeds the stall', async () => {
+      // Arrange — the Mac shape: every tick late by more than the wedge threshold, every time because
+      // the loop could run nothing.
+      const harness = new Harness(snapshot());
+      const service = harness.service();
+      await service.tick();
+
+      // Act
+      const ticks: (SelfCheckOutcome | undefined)[] = [];
+      for (const _ of [1, 2, 3]) {
+        harness.elapsed += SETTINGS.selfCheckIntervalMs + SETTINGS.wedgeGapMs;
+        harness.blocked += SETTINGS.wedgeGapMs;
+        ticks.push(await service.tick());
+      }
+      const report = await service.report();
+
+      // Assert — the lateness is still reported, as lag; nothing else changes.
+      should(ticks.map(outcome => outcome?.plan.verdict.freshness)).deepEqual(['fresh', 'fresh', 'fresh']);
+      should(harness.depths).deepEqual([true, false, false, false]);
+      should(harness.events).deepEqual([]);
+      should(report).match({ ok: true, wedgeCount: 0, eventLoopLagMs: SETTINGS.wedgeGapMs });
+    });
+
+    it('should still take a gap the blocked loop does not explain for a wedge', async () => {
+      // Arrange
+      const harness = new Harness(snapshot());
+      const service = harness.service();
+      await service.tick();
+      harness.elapsed += SETTINGS.wedgeGapMs + SETTINGS.selfCheckIntervalMs;
+      harness.blocked += SETTINGS.selfCheckIntervalMs;
+
+      // Act
+      const actual = await service.tick();
+
+      // Assert
+      should(actual?.plan).match({ deepPass: true, verdict: { freshness: 'wedged' } });
+      should(harness.events.map(event => event.type)).deepEqual(['fleet.daemon_wedge']);
+    });
+
+    it('should not count a check as stuck for the time the loop was blocked under it', async () => {
+      // Arrange
+      const harness = new Harness(snapshot());
+      const service = harness.service();
+      await service.tick();
+      let release: () => void = () => undefined;
+      harness.hold = new Promise<void>(resolve => {
+        release = resolve;
+      });
+      const slow = service.tick();
+      await new Promise(resolve => setTimeout(resolve, 0));
+      harness.elapsed += SETTINGS.wedgeGapMs;
+      harness.blocked += SETTINGS.selfCheckIntervalMs;
+
+      // Act
+      const skipped = await service.tick();
+      harness.hold = undefined;
+      release();
+      await slow;
+
+      // Assert
+      should(skipped).be.undefined();
+      should(harness.events).deepEqual([]);
+      should((await service.report()).wedgeCount).equal(0);
     });
   });
 

@@ -9,6 +9,7 @@ import { classifyWardenSweep } from './sweep.ts';
 import type {
   IncoherenceLedger,
   IncoherencePass,
+  LoopBlockedClockPort,
   MonotonicClockPort,
   RunningSelfCheck,
   SelfCheckActivityPort,
@@ -97,6 +98,8 @@ export interface SessionHealthPorts {
   readonly wallClock: { nowMs(): number };
   /** The gap between two ticks is a duration, so it is never read off the wall clock. */
   readonly monotonic: MonotonicClockPort;
+  /** How long the whole event loop was blocked, so a stalled loop is not mistaken for a stuck check. */
+  readonly loop: LoopBlockedClockPort;
   /** Where each stage of a check is named, so a profile can say which one the time went to. */
   readonly activities: SelfCheckActivityPort;
   readonly restarts: SelfRestartCoordinator;
@@ -232,9 +235,13 @@ export class SessionHealthService {
     if (event !== undefined) await this.emit(event);
   }
 
-  /** Where the self-check timer is now: a monotonic reading for gaps, a wall instant to report. */
+  /** Where the self-check timer is now: monotonic and loop-blocked readings for gaps, a wall instant to report. */
   private reading(): SelfCheckTick {
-    return { elapsedMs: this.ports.monotonic.elapsedMs(), at: this.ports.clock.now() };
+    return {
+      elapsedMs: this.ports.monotonic.elapsedMs(),
+      at: this.ports.clock.now(),
+      loopBlockedMs: this.ports.loop.blockedMs(),
+    };
   }
 
   /** Each repair inside its own boundary, so one session that refuses cannot abandon the rest. */

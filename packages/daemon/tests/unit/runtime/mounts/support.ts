@@ -1282,6 +1282,7 @@ export function healthSubsystem(world: HealthWorld = {}): DaemonHealthSubsystem 
           return elapsedMs;
         },
       },
+      loop: { blockedMs: () => 0 },
       restarts: new SelfRestartCoordinator(
         {
           read: async () => stamp,

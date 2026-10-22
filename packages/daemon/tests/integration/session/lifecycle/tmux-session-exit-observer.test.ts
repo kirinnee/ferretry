@@ -178,6 +178,7 @@ function selfCheck(subject: ExitFixture): SessionHealthService {
       clock: { now: () => NOW },
       wallClock: { nowMs: () => Date.parse(NOW) },
       monotonic: { elapsedMs: () => 0 },
+      loop: { blockedMs: () => 0 },
       restarts: new SelfRestartCoordinator(
         { read: async () => undefined, write: async () => undefined, clear: async () => undefined },
         { restart: async () => false },

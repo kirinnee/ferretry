@@ -40,10 +40,26 @@ export interface SurveyedSession {
   readonly journalLost: boolean;
 }
 
-/** One firing of the self-check timer: a monotonic reading for the gap, a wall instant to report. */
+/**
+ * How long, in total, the event loop has been unable to run anything — the lag meter's running sum.
+ *
+ * A self-check timer is late for one of two reasons, and only one of them is the self-check's: the
+ * whole loop was blocked, so no timer could fire, or the check's own work did not let the next one
+ * start. Subtracting the first from a gap leaves the second. Only differences are meaningful.
+ */
+export interface LoopBlockedClockPort {
+  blockedMs(): number;
+}
+
+/**
+ * One firing of the self-check timer: a monotonic reading for the gap, a wall instant to report, and
+ * the loop's blocked total at that moment, so a gap can be told apart from a stalled loop.
+ */
 export interface SelfCheckTick {
   readonly elapsedMs: number;
   readonly at: string;
+  /** The {@link LoopBlockedClockPort} reading. Absent when nothing measures the loop. */
+  readonly loopBlockedMs?: number | undefined;
 }
 
 /**
@@ -76,6 +92,8 @@ export interface SelfCheckLedger {
   readonly ticks: number;
   readonly wedges: number;
   readonly lastElapsedMs: number | undefined;
+  /** The loop's blocked total at the same reading as `lastElapsedMs`, when it was measured. */
+  readonly lastLoopBlockedMs: number | undefined;
   readonly lastAt: string | undefined;
   readonly lastFreshness: SelfCheckFreshness | undefined;
   readonly eventLoopLagMs: number;
