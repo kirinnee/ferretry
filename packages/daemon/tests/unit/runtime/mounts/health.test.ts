@@ -1,10 +1,10 @@
-import { NO_GOVERNED_ROUTES_GUARD } from '../../../../src/lib/api/capability.ts';
 import { describe, it } from 'bun:test';
 import { HealthViewSchema } from '@ferretry/protocol';
 import should from 'should';
+import { NO_GOVERNED_ROUTES_GUARD } from '../../../../src/lib/api/capability.ts';
 import { ApiDispatcher } from '../../../../src/lib/api/dispatcher.ts';
 import { ApiRouter } from '../../../../src/lib/api/router.ts';
-import { daemonHealthRoutes, type DaemonHealthSubsystem } from '../../../../src/lib/runtime/mounts/health.ts';
+import { type DaemonHealthSubsystem, daemonHealthRoutes } from '../../../../src/lib/runtime/mounts/health.ts';
 import { request } from '../../api/support.ts';
 import { AT, CREDENTIALS, HEALTH_VERSION, healthObservation, healthSubsystem, human } from './support.ts';
 
@@ -216,5 +216,21 @@ describe('the daemon health mount', () => {
 
     // Assert
     should(response.headers.get('cache-control')).match(/no-store/u);
+  });
+});
+
+describe('the daemon health mount and the session-worker pool', () => {
+  it('should report the pool when the daemon has one, and leave it out otherwise', async () => {
+    // Arrange
+    const pool = { enabled: true, max: 2, threads: 2, sessionsPerThread: [3, 2] };
+    const withPool: DaemonHealthSubsystem = { ...healthSubsystem(), sessionWorkers: () => pool };
+
+    // Act
+    const reported = HealthViewSchema.parse(JSON.parse((await ask(withPool)).body));
+    const without = HealthViewSchema.parse(JSON.parse((await ask(healthSubsystem())).body));
+
+    // Assert
+    should(reported.sessionWorkers).deepEqual(pool);
+    should(without).not.have.property('sessionWorkers');
   });
 });

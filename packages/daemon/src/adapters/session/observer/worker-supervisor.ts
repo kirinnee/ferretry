@@ -138,6 +138,19 @@ export class WorkerSupervisor {
     return this.pending.size;
   }
 
+  /**
+   * The pool as `fy daemon status` and a performance report show it: the configured size, the threads
+   * running now, and how many sessions each observes, busiest first.
+   */
+  get pool(): { readonly max: number; readonly threads: number; readonly sessionsPerThread: readonly number[] } {
+    const running = [...this.threads.values()].filter(thread => !thread.ended);
+    return {
+      max: this.settings.cap,
+      threads: running.length,
+      sessionsPerThread: running.map(thread => thread.sessions.size).sort((a, b) => b - a),
+    };
+  }
+
   /** Threads running now. */
   get threadCount(): number {
     return [...this.threads.values()].filter(thread => !thread.ended).length;

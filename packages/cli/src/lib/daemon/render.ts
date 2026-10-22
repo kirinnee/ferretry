@@ -1,4 +1,4 @@
-import type { HealthView, LivenessView } from '@ferretry/protocol';
+import { describeSessionWorkerPool, type HealthView, type LivenessView } from '@ferretry/protocol';
 import type { DaemonSupervisorReport } from './ports.ts';
 import { launchdThrottled, servesOutsideSupervisor } from './probe.ts';
 import { LAUNCHD_PROCESS_TYPE } from './unit-file.ts';
@@ -143,6 +143,9 @@ function healthLines(health: HealthView): string[] {
     `  version ${health.version}   pid ${String(health.pid)}   ${bootstrap}`,
     `  sessions ${String(health.sessions)} (${String(health.running)} running, ${String(health.unmonitoredRunning)} unmonitored)`,
     `  event-loop lag ${health.eventLoopLagMs.toFixed(1)}ms   wedged ${String(health.wedgeCount)}`,
+    ...(health.sessionWorkers === undefined
+      ? []
+      : [`  session workers ${describeSessionWorkerPool(health.sessionWorkers)}`]),
   ];
 }
 

@@ -681,3 +681,16 @@ describe('the tunnel switch, as the document it writes', () => {
     should(appended).deepEqual({ carriers: [null, 'stray', bind, ON] });
   });
 });
+
+describe('the session-worker pool size', () => {
+  it('should pool the running sessions into two threads unless the operator chooses another size', () => {
+    // Act + Assert — the owner's "pool of X, default 2"; one thread per agent is a larger max.
+    should(defaultDaemonConfig().sessionWorkers).deepEqual({ enabled: true, max: 2 });
+    should(parseDaemonConfig({ sessionWorkers: { max: 8 } }).sessionWorkers).deepEqual({ enabled: true, max: 8 });
+    should(parseDaemonConfig({ sessionWorkers: { enabled: false } }).sessionWorkers).deepEqual({
+      enabled: false,
+      max: 2,
+    });
+    should(() => parseDaemonConfig({ sessionWorkers: { max: 0 } })).throw();
+  });
+});

@@ -186,6 +186,21 @@ describe('WorkerSupervisor', () => {
     should(workers[0]?.kinds()).deepEqual(['probe', 'attach', 'file', 'answers']);
   });
 
+  it('should show the pool as status and profiles do: its size, its threads and the sessions on each', () => {
+    // Arrange
+    const { subject, workers } = rig(2);
+    const empty = subject.pool;
+
+    // Act
+    subject.reconcile([wanted(A), wanted(B)]);
+    for (const worker of workers) worker.ready();
+    subject.reconcile([wanted(A), wanted(B), wanted(C)]);
+
+    // Assert
+    should(empty).deepEqual({ max: 2, threads: 0, sessionsPerThread: [] });
+    should(subject.pool).deepEqual({ max: 2, threads: 2, sessionsPerThread: [2, 1] });
+  });
+
   it('should start one thread per session, probe it, and host only once it answered', async () => {
     // Arrange
     const { subject, workers } = rig();

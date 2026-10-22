@@ -4,10 +4,10 @@ import should from 'should';
 import type { PerformanceBudget } from '../../../src/lib/performance/budgets.ts';
 import {
   PerformanceProfiler,
-  sampledShareLimitation,
-  sampleIntervalMs,
   type ProcessReading,
   type ProfileContextPort,
+  sampledShareLimitation,
+  sampleIntervalMs,
 } from '../../../src/lib/performance/profiler.ts';
 import { PerformanceRecorder } from '../../../src/lib/performance/recorder.ts';
 
@@ -77,6 +77,7 @@ function world(
     readonly workers?: { name: string; inFlight: () => number }[];
     readonly fleet?: ProfileContextPort['fleet'];
     readonly budgets?: readonly PerformanceBudget[];
+    readonly sessionWorkers?: ProfileContextPort['sessionWorkers'];
   } = {},
 ): World {
   const timers = new ManualTimers();
@@ -103,6 +104,7 @@ function world(
       uptimeSeconds: () => 3600.4,
       fleet: options.fleet ?? (async () => ({ sessions: 36, running: 5 })),
       limitations: () => ['no kernel tracing'],
+      ...(options.sessionWorkers === undefined ? {} : { sessionWorkers: options.sessionWorkers }),
     },
     budgets: options.budgets ?? [],
     newId: () => {
@@ -458,5 +460,21 @@ describe('sampleIntervalMs', () => {
 
     // Assert
     should(actual).startWith('The sampled stacks cover about 1000 ms of main-thread JavaScript, 17% of');
+  });
+});
+
+describe('PerformanceProfiler and the session-worker pool', () => {
+  it('should carry the pool as the window ends, and leave it out where the daemon has none', async () => {
+    // Arrange
+    const pool = { enabled: true, max: 2, threads: 1, sessionsPerThread: [5] };
+    const pooled = world({ sessionWorkers: () => pool });
+    const without = world();
+
+    // Act
+    const [withPool, withoutPool] = [await finish(pooled), await finish(without)];
+
+    // Assert
+    should(withPool.sessionWorkers).deepEqual(pool);
+    should(withoutPool).not.have.property('sessionWorkers');
   });
 });

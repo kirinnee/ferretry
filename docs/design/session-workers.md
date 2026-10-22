@@ -33,7 +33,7 @@ Paths are relative to `packages/daemon/` unless they start with `scripts/` or `d
 5. **The observer is a pure per-session fold with ports; the thread is a transport.** `InlineObserverHost`
    (main thread) and `WorkerObserverHost` (Bun Worker) implement one port; every existing test runs against
    both (§4).
-6. **Cap: one dedicated worker per running session up to 8, then 8 workers shared by least load.** A shipped
+6. **Pool: `sessionWorkers.max` threads, default 2 (owner decision, 2026-10-22), each running session on its own thread until there are `max`, then shared by least load; one thread per agent is `max` at or above the running count.** It was 8 dedicated when 3b shipped; A shipped
    lean worker measured **≈4 MB** each; one that drags zod/protocol in measured **15–19 MB** (§3.4).
 7. **Order is kept inside the worker.** Each observation step runs question reconcile before turn derivation
    and posts in that order; the main thread applies one session's patches serially — the #689 invariant per
@@ -377,8 +377,9 @@ Consequences:
 - **Estimate for the real worker**: lean + the observer + the control-protocol parser + a transcript window of up
   to 400 events ≈ **5–10 MB** shipped. From source (dev, tests) ≈ 60 MB, which is why integration tests share one
   worker across cases where they can.
-- **Cap: 8 dedicated workers** (`daemon.json` `sessionWorkers.max`, default 8, min 1). Up to 8 live sessions get one
-  thread each — the owner's "1 thread per agent". Above 8, no new threads: session 9+ is attached to the
+- **Pool: `sessionWorkers.max` threads, default 2** (owner decision 2026-10-22, "pool of X, default 2"; it shipped as 8 in
+  3b — measured after 3c: each thread carries ≈14 MB of engine, so 5 dedicated cost +72 MB and one pooled thread +18 MB with the
+  least CPU). Up to `max` live sessions get one thread each; one thread per agent is `max` at or above the running count. Above `max`, no new threads: session 9+ is attached to the
   least-loaded existing worker (load = hosted sessions, ties by recent parse ms). A worker hosts a
   `Map<session, ObserverState>`, so pooled and dedicated are the same program. When live sessions fall back to ≤ 8,
   the planner moves pooled sessions to fresh dedicated workers one at a time (a move is `detach` + `attach` with a
@@ -577,8 +578,8 @@ reviewer checks.
 
 ## 8. Open questions for the owner
 
-1. **Cap**: 8 dedicated threads then pooling into those 8 — or a higher cap now that a lean shipped worker is ≈4 MB
-   (16 would cost ≈ 130 MB worst case)?
+1. **Cap** — DECIDED 2026-10-22: a configurable pool, default `sessionWorkers.max: 2`; one thread per agent stays
+   reachable by config (docs/performance.md › "Session workers").
 2. **Exit detection speed**: 3d makes a dead pane settle within ~1 s (the attached client's `%exit`) instead of up to
    30 s. That is a visible behaviour change (faster `session.exited`, faster Warden `paneDied`). Accept it in 3d, or
    keep the 30 s cadence for parity and change it separately?

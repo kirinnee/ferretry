@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { InstantSchema, NonNegativeFiniteSchema, NonNegativeIntegerSchema, PositiveIntegerSchema } from './common.ts';
 import { ProviderQuotaBalanceSchema } from './fleet-credentials.ts';
+import { SessionWorkerPoolSchema } from './performance.ts';
 import { AccountAvailabilitySchema, AccountUnavailableReasonSchema } from './session.ts';
 
 export const HealthViewSchema = z.object({
@@ -24,6 +25,8 @@ export const HealthViewSchema = z.object({
   scratchReclaimedBytes: NonNegativeIntegerSchema,
   bootstrapErrors: NonNegativeIntegerSchema,
   bootstrapErrorMessages: z.array(z.string()).optional(),
+  /** How the running sessions are observed: the pool size and sessions per worker thread. Absent from an older daemon. */
+  sessionWorkers: SessionWorkerPoolSchema.optional(),
   time: InstantSchema,
 });
 export type HealthView = z.infer<typeof HealthViewSchema>;

@@ -1,4 +1,9 @@
-import { PERFORMANCE_REPORT_VERSION, type PerformanceProfileView, type PerformanceReport } from '@ferretry/protocol';
+import {
+  PERFORMANCE_REPORT_VERSION,
+  type PerformanceProfileView,
+  type PerformanceReport,
+  type SessionWorkerPool,
+} from '@ferretry/protocol';
 import type { MillisecondClockPort } from '../runtime/boot.ts';
 import { judgeBudgets, type PerformanceBudget } from './budgets.ts';
 import type { PerformanceRecorder, PerformanceWindow } from './recorder.ts';
@@ -41,6 +46,8 @@ export interface ProfileContextPort {
   uptimeSeconds(): number;
   /** The stack sampler's interval in milliseconds; absent means JavaScriptCore's default. */
   readonly sampleIntervalMs?: number;
+  /** The session-worker pool when the window ends; absent where the daemon has none. */
+  sessionWorkers?(): SessionWorkerPool;
   /** How big the fleet is right now; `undefined` where the index cannot be read. */
   fleet(): Promise<{ readonly sessions: number; readonly running: number } | undefined>;
   /** What this daemon's report cannot see, in sentences. */
@@ -261,6 +268,7 @@ export class PerformanceProfiler {
       windowMs,
       daemon: { ...context.daemon, uptimeSeconds: Math.round(context.uptimeSeconds()) },
       ...(fleet === undefined ? {} : { fleet }),
+      ...(context.sessionWorkers === undefined ? {} : { sessionWorkers: context.sessionWorkers() }),
       resources,
       ...tables,
       budgets: judgeBudgets({ resources, ...tables }, budgets),

@@ -241,10 +241,12 @@ export const DaemonConfigDocumentSchema = z
     healthIntervalSeconds: z.number().int().positive().default(30),
     transcriptReconcileSeconds: z.number().int().positive().default(2),
     /**
-     * ONE THREAD PER RUNNING SESSION (docs/design/session-workers.md, stage 3b): each running session's
-     * turn is observed on its own worker thread, through its own read-only attached tmux client, and
-     * written by this daemon's main thread as before. `enabled: false` observes every session on the main
-     * thread (stage 3a). `max` dedicated threads, then sessions are pooled into them.
+     * THE SESSION-WORKER POOL (docs/performance.md › "Session workers", docs/design/session-workers.md):
+     * every running session is observed off the main thread, through its own read-only attached tmux
+     * client, and written by this daemon's main thread as before. `max` threads (default 2), each running
+     * session on its own thread until there are `max`, then shared by the least-loaded one — set `max` at or
+     * above the running count for one thread per agent. `enabled: false` observes every session on the
+     * main thread (stage 3a).
      */
     sessionWorkers: z
       .object({
