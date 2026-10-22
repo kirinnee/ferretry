@@ -31,7 +31,9 @@ export interface PaneQueueOptions {
 }
 
 const DEFAULTS = {
-  composerAttempts: 2,
+  // One: after a typing, only a PERSON (a forced retry) types the same send into this pane again —
+  // the owner's Mac showed one message typed three times by fills that each read the composer empty.
+  composerAttempts: 1,
   windowMs: 6_000,
   stalledWindowMs: 12_000,
   settleMs: 2_000,

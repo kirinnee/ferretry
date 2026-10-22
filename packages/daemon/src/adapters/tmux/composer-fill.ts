@@ -96,7 +96,11 @@ export class ComposerUnconfirmedError extends Error {
 }
 
 export interface ComposerFillSettings extends LandingWindow {
-  /** Times the composer may be filled, each only into a composer proven empty again. */
+  /**
+   * Times the composer may be filled, each only into a composer proven empty again. The daemon's
+   * delivery adapters use ONE: a second fill trusts the composer reading to say the first never
+   * arrived, and a reading that is wrong for some harness build turns that into a copy.
+   */
   readonly composerAttempts: number;
   /** How long to wait between the reads that prove a composer empty before typing. */
   readonly pollMs: number;
@@ -195,9 +199,12 @@ async function watchLanding(
     deadline = landingDeadlineMs(settings, respondedAt);
     const read = composerLanding(last, text, paste);
     if (read === 'chars' || read === 'placeholder') return { kind: 'landed', evidence: read };
+    // A composer the reading cannot place — including Claude text with the cursor parked at the start of
+    // its row, which is no placeholder Claude draws — falls back to the payload newly on screen. A
+    // composer the cursor PROVES holds other text as well is never "landed": Enter would submit it too.
     if (read !== 'unreadable') continue;
     const proved = landingEvidence(baseline, composerEvidence(last.visible, text));
-    if (proved !== undefined) return { kind: 'landed', evidence: proved };
+    if (proved === 'chars' || (proved === 'placeholder' && paste)) return { kind: 'landed', evidence: proved };
   }
   // No NEW evidence, but a placeholder is nonetheless sitting in the composer: a paste of ours is in
   // there (a repaint can hide the counter bump, and re-pasting identical text may not move it). A
@@ -265,7 +272,9 @@ export async function fillComposer(
       );
   }
   throw new ComposerUnconfirmedError(
-    `the turn was typed into tmux session ${session} ${typings} times and the pane dropped it every time`,
+    typings === 1
+      ? `the turn was typed into tmux session ${session}, and the pane drew an empty composer after it; it was not typed again`
+      : `the turn was typed into tmux session ${session} ${typings} times and the pane dropped it every time`,
     typings,
   );
 }

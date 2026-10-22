@@ -257,7 +257,57 @@ describe('tmux pane delivery — landing proof', () => {
     should(slept.reduce((sum, wait) => sum + wait, 0)).equal(12_000);
   });
 
-  it('should type again only when a pane that visibly drew still shows an empty composer', async () => {
+  it('should type a send ONCE by default, even when a live pane drew an empty composer after it', async () => {
+    // Arrange — the shape a second fill would trust: the pane drew, and the composer reads empty. On the
+    // owner's Mac exactly that reading was wrong, and one message was typed three times.
+    const server = new FakeTmuxServer();
+    const underlying = server.execute.bind(server);
+    server.execute = async (argv, stdin) => {
+      if (argv.includes('-l')) {
+        server.calls.push(argv);
+        server.transcript = 'the last frame\n⎿ a status line ticked';
+        return { code: 0, stdout: '', stderr: '' };
+      }
+      return await underlying(argv, stdin);
+    };
+    const { subject } = delivery(server);
+
+    // Act
+    const refused = await subject.deliver(SESSION, 'continue').catch((error: unknown) => error);
+
+    // Assert
+    should(refused).be.instanceof(ComposerUnconfirmedError);
+    should((refused as ComposerUnconfirmedError).message).match(
+      /drew an empty composer after it; it was not typed again/u,
+    );
+    should(literals(server)).equal(1, 'only a person, with a forced retry, types it into this pane again');
+  });
+
+  it('should land a Claude payload whose cursor sits at the start of the composer, by its echo, and type it once', async () => {
+    // Arrange — a Claude pane (`❯`) that parks its cursor at the START of the composer while it holds
+    // text, as the owner's Mac pane was read: the cursor rule called the text a placeholder, so "empty"
+    // before AND after typing, and three copies of one message piled up. Claude draws no such
+    // placeholder, so the reading is unknown, and the echo on screen proves the landing.
+    const server = new (class extends FakeTmuxServer {
+      override async execute(argv: readonly string[], stdin?: string) {
+        const answer = await super.execute(argv, stdin);
+        if (argv[0] === 'capture-pane') return { ...answer, stdout: answer.stdout.replace(/^> /mu, '❯ ') };
+        return argv[0] === 'display-message'
+          ? { ...answer, stdout: answer.stdout.replace(/^(\d\|[^|]*\|)\d+/u, '$12') }
+          : answer;
+      }
+    })();
+    const { subject } = delivery(server);
+
+    // Act
+    await subject.deliver(SESSION, 'what is the status thus far?');
+
+    // Assert
+    should(literals(server)).equal(1);
+    should(server.submitted).deepEqual(['what is the status thus far?']);
+  });
+
+  it('should type again only when a pane that visibly drew still shows an empty composer, if allowed two fills', async () => {
     // Arrange — the first literal is dropped by a LIVE pane: it draws (a status line ticks) and its
     // composer stays empty, which is the one shape that proves the keys never arrived.
     const server = new FakeTmuxServer();
@@ -274,7 +324,7 @@ describe('tmux pane delivery — landing proof', () => {
       }
       return await underlying(argv, stdin);
     };
-    const { subject } = delivery(server);
+    const { subject } = delivery(server, { composerAttempts: 2 });
 
     // Act
     const actual = await subject.deliver(SESSION, 'continue');
@@ -298,7 +348,7 @@ describe('tmux pane delivery — landing proof', () => {
       }
       return await underlying(argv, stdin);
     };
-    const { subject } = delivery(server);
+    const { subject } = delivery(server, { composerAttempts: 2 });
 
     // Act
     const refused = await subject.deliver(SESSION, 'continue').catch((error: unknown) => error);

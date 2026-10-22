@@ -426,3 +426,51 @@ describe('the composer of a titled Claude Code session', () => {
     should(paneHoldOf(pileup.visible, {}, POINTER, false)).equal('composer');
   });
 });
+
+describe("the owner's Mac Claude pane: a draft, a titled rule, and an auto-compact line", () => {
+  /**
+   * `capture-pane` of the owner's Mac ferret (Claude Code 2.1.281, tmux 3.6a), trimmed to the composer
+   * and its status lines: the person's unsent `go ahead with all three` after a `❯` and a no-break
+   * space, the session title in the rule above, and a right-aligned `2% until auto-compact` under the
+   * status lines — the line a 200k-context session shows near compaction, and the 1M sessions this was
+   * first measured on never draw.
+   */
+  const MAC = readFileSync(join(FIXTURES, 'claude-2.1.281-mac-draft-autocompact.txt'), 'utf8');
+  const ROW = MAC.split('\n').findIndex(line => line.startsWith('❯'));
+  const at = (visible: string, cursorX?: number, cursorY?: number): DeliveryFrame => ({
+    alive: true,
+    dead: false,
+    promptReady: false,
+    visible,
+    ...(cursorX === undefined ? {} : { cursorX }),
+    ...(cursorY === undefined ? {} : { cursorY }),
+  });
+
+  it('should read the person’s draft as input, the status lines under it changing nothing', () => {
+    const frame = at(MAC, 25, ROW);
+
+    should(composerState(frame)).deepEqual({ kind: 'input', text: 'go ahead with all three' });
+    should(occupiedComposer(frame)).equal('go ahead with all three');
+  });
+
+  it('should hold for any status line Claude draws there instead', () => {
+    for (const line of ['14% until auto-compact', 'Context low · Run /compact to compact & continue', ''])
+      should(composerState(at(MAC.replace('2% until auto-compact', line), 25, ROW))).deepEqual({
+        kind: 'input',
+        text: 'go ahead with all three',
+      });
+  });
+
+  it('should never call that text a placeholder — EMPTY — when the cursor sits at the start of its row', () => {
+    // Claude draws only `Try "…"` and `Press up to edit queued messages` as placeholders. Read as
+    // empty, this draft would be typed onto, the send's own echo hidden the same way, and typed again.
+    for (const column of [0, 2]) {
+      should(composerState(at(MAC, column, ROW))).deepEqual({ kind: 'unreadable' });
+      should(composerLanding(at(MAC, column, ROW), 'go ahead with all three', false)).equal('unreadable');
+    }
+    // Its own suggestion is still a placeholder, cursor or not.
+    should(composerState(at(MAC.replace('go ahead with all three', 'Try "fix lint errors"'), 2, ROW))).deepEqual({
+      kind: 'empty',
+    });
+  });
+});

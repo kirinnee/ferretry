@@ -267,7 +267,7 @@ describe('tmux pane queue', () => {
       }
     })(true);
     pane.accepts = false;
-    const { subject } = queue(pane);
+    const { subject } = queue(pane, { composerAttempts: 2 });
 
     // Act
     const refused = await subject.queue(SESSION, 'read the queued brief').catch((error: unknown) => error);

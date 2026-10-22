@@ -155,9 +155,9 @@ and because landing was never proven Enter was never pressed. A second delivery 
 copy land beside a draft — a composer the cursor could not place, read as empty, or the person's keys
 arriving during the fill — is the one the rule above now refuses.
 
-So a fill types its payload into a proven-empty composer, and types again only into a composer proven
-empty AGAIN by a pane that has visibly drawn since the keys (they were dropped, not unread — see below).
-A composer holding anything after a fill — the payload, the
+So a fill types its payload into a proven-empty composer, ONCE. The delivery adapters allow no second
+fill (`composerAttempts: 1`): after a typing, only a person — a forced Retry — types that send into the
+pane again (see below for why). A composer holding anything after a fill — the payload, the
 payload beside a person's text, a clipped copy — is left exactly as it is, with no `C-u`: the send's
 fate stays open and the tracker reads it. A payload found ANYWHERE in the composer (`composerContains`,
 for a payload of 12 or more characters) is held there, never absent, so no deadline retypes it, and
@@ -179,9 +179,11 @@ So the landing wait is a window in time that stretches with the pane's own laten
 (`landingDeadlineMs`): 6 s for a pane that draws promptly, `settleMs` (2 s) past its first repaint for
 a slow one, and up to 12 s for one that draws nothing at all, backing off from 100 ms to 1 s between
 looks and never reading fewer than five frames. The clock counts only the waits, so a host whose
-captures are slow stretches the window rather than shrinking it. A second fill happens only when the
-pane has drawn since the first (`paneResponded`) and its composer is proven empty holding nothing, in
-the composer or the queue. Anything else is **unconfirmed**: the send is settled `unaccounted` with
+captures are slow stretches the window rather than shrinking it. Nothing short of proof leads to a
+second fill: a fill configured for more than one (the delivery adapters are not) types again only when
+the pane has drawn since the first (`paneResponded`) and its composer is proven empty holding nothing.
+That proof trusts the composer READING, and the owner's Mac showed one message typed three times by
+fills that each read the composer empty — so by default anything short of landing is **unconfirmed**: the send is settled `unaccounted` with
 reason `landing_unconfirmed`, never withdrawn and never typed again, and stays watched so a transcript
 record that turns up later still proves it delivered. The send answers `409 send_unconfirmed` with the
 send's id in the body's `sendId`; the app keeps the person's text in its composer and offers **Send it**
@@ -194,6 +196,16 @@ Measured with the soak (Claude Code 2.1.281, SIGSTOP 2 s / run 150 ms): see the 
 for the numbers; the recorded frames of one stalled send are
 `packages/daemon/tests/fixtures/composer/claude-2.1.281-stalled-echo.json`, replayed on a virtual clock by
 `packages/daemon/tests/integration/tmux/pane-delivery.test.ts`.
+
+**Claude's placeholders are its own two wordings.** The owner's Mac pane
+(`packages/daemon/tests/fixtures/composer/claude-2.1.281-mac-draft-autocompact.txt`) held the person's
+`go ahead with all three`, under a titled rule and above a right-aligned `2% until auto-compact` line.
+The status lines change nothing; the cursor does. The cursor rule calls a one-row composer whose cursor
+sits at its first column a placeholder, and for Claude that made the person's draft — and a send's own
+echo — read as an EMPTY composer: typed onto, never seen, typed again. A Claude composer (`❯`) draws
+only `Try "…"` and `Press up to edit queued messages`, so any other text in it is input or unknown,
+never a placeholder: a cursor at its start makes it unreadable (nothing typed; landing falls back to the
+payload newly on screen). Codex (`›`) rotates too many placeholders to list and keeps the cursor rule.
 
 A composer that cannot be read is refused before a key: a fresh send is withdrawn and answered `409`
 (`send_refused`: "nothing was typed; send it again in a moment"), a released held message goes back to
