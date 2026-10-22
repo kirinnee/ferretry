@@ -36,6 +36,7 @@
  * (`lib/install-prompt.ts`, `hooks/use-install-prompt.ts`).
  */
 
+import voskRuntimeUrl from '@lichess-org/vosk-browser/dist/vosk.wasm?url';
 import runtimeUrl from 'onnxruntime-web/ort-wasm-simd-threaded.wasm?url';
 import { StrictMode } from 'react';
 import sherpaRuntimeUrl from 'sherpa-runtime-wasm?url';
@@ -49,6 +50,7 @@ import { createBrowserInstallPrompt } from './lib/install-prompt.ts';
 import { browserLocationShareHost } from './lib/location-share.ts';
 import workerUrl from './worker/parakeet-worker.ts?worker&url';
 import sherpaWorkerUrl from './worker/sherpa-worker.ts?worker&url';
+import voskWorkerUrl from './worker/vosk-worker.ts?worker&url';
 import './styles/index.css';
 
 const host = document.getElementById('root');
@@ -71,6 +73,7 @@ createRoot(host).render(
               workerUrl,
               runtimeUrl,
               sherpa: { workerUrl: sherpaWorkerUrl, runtimeUrl: sherpaRuntimeUrl },
+              vosk: { workerUrl: voskWorkerUrl, runtimeUrl: voskRuntimeUrl },
             }}
           />
         </LocationShareContext.Provider>

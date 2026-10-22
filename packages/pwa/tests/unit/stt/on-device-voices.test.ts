@@ -16,6 +16,7 @@ import {
 } from '../../../src/lib/stt/on-device-voice.ts';
 import { browserOnDeviceVoices, OnDeviceVoices } from '../../../src/lib/stt/on-device-voices.ts';
 import { ParakeetVoice } from '../../../src/lib/stt/parakeet-voice.ts';
+import { VoskVoice } from '../../../src/lib/stt/vosk-voice.ts';
 
 const MOONSHINE = {
   ...PARAKEET_CATALOG_MODEL,
@@ -127,6 +128,28 @@ describe('OnDeviceVoices', () => {
     await moonshine.install();
     should(voices.runtimeInUse('onnxruntime-web', 'parakeet')).be.true();
     should(voices.runtimeInUse('onnxruntime-web', 'moonshine-test')).be.false();
+  });
+
+  it('builds Vosk’s voice from its own assets, unavailable in a build without them', () => {
+    const page = { setTimeout: () => 0, clearTimeout: () => undefined };
+    const vosk = browserOnDeviceVoices(page, null).get('vosk-small-en');
+    should(vosk).be.instanceOf(VoskVoice);
+    should(vosk?.support).eql({
+      available: false,
+      reason: 'This copy of Ferretry was built without the Vosk speech engine.',
+    });
+    const parakeetOnly = { workerUrl: '/assets/parakeet-worker-a.js', runtimeUrl: '/assets/ort.wasm' };
+    should(browserOnDeviceVoices(page, parakeetOnly).get('vosk-small-en')?.support.reason).equal(
+      'This copy of Ferretry was built without the Vosk speech engine.',
+    );
+    const withVosk = {
+      ...parakeetOnly,
+      vosk: { workerUrl: '/assets/vosk-worker-a.js', runtimeUrl: '/assets/vosk-a.wasm' },
+    };
+    // This fake page is not a secure one: the assets reached the voice, which now judges the page.
+    should(browserOnDeviceVoices(page, withVosk).get('vosk-small-en')?.support.reason).equal(
+      'Vosk needs a secure HTTPS page in this browser.',
+    );
   });
 
   it('builds every catalog model’s voice for this page, unavailable without the build’s assets, and never downloads', () => {

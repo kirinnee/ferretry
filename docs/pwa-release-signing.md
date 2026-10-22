@@ -36,9 +36,9 @@ and what to do when something goes wrong.
   file, checks every hash, writes them into a new cache, and only then moves one pointer to it. The
   pointer is one IndexedDB record written in one transaction, so a check interrupted halfway changes
   nothing.
-- **One file is listed but fetched later.** The speech runtime (`assets/ort-wasm-simd-threaded-*.wasm`,
-  12 MB) is used only by people who install on-device dictation ([voice.md](voice.md)), so the update
-  skips downloading it (`isDeferredReleaseFile`). It is still in the signed list: a request for it is
+- **Speech runtimes are listed but fetched later.** The speech runtimes (`assets/ort-wasm-simd-threaded-*.wasm`,
+  12 MB, and Vosk's `assets/vosk-*.wasm`, 3 MB) are used only by people who install an on-device
+  engine ([voice.md](voice.md)), so the update skips downloading them (`isDeferredReleaseFile`). It is still in the signed list: a request for it is
   answered only with bytes that hash to that list, fetched at that moment and not kept in the release
   cache.
 - **A failed check changes nothing.** The installed version keeps running, and the app says, in one

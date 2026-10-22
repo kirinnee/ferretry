@@ -4,6 +4,8 @@
  * themes. Review evidence; nothing compares the PNGs.
  *
  *   bun harness/engine-list-screenshot.tsx    # writes harness/out/engine-list-*.png
+ *   ENGINE_LIST_FOCUS=vosk-small-en bun harness/engine-list-screenshot.tsx
+ *                                             # that model installed, in use and tried: engine-list-vosk-small-en-*.png
  *
  * It renders the REAL `DictationSettings` and its REAL engine list. The installs and the trial's
  * session are fakes built on the page — nothing is downloaded, no microphone opens, and no request
@@ -13,6 +15,7 @@ import { spawnSync } from 'node:child_process';
 import { mkdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { chromium } from 'playwright-core';
+import { ON_DEVICE_MODELS } from '../src/lib/stt/model-catalog.ts';
 
 const harnessDir = import.meta.dir;
 const packageDir = resolve(harnessDir, '..');
@@ -27,6 +30,9 @@ const run = (command: string, args: readonly string[]): void => {
   const result = spawnSync(command, args, { cwd: packageDir, stdio: 'inherit' });
   if (result.status !== 0) fail(`${command} exited ${result.status}`);
 };
+
+/** A model to show installed, in use and tried, instead of the round-robin's first installed one. */
+const focus = process.env.ENGINE_LIST_FOCUS?.trim() ?? '';
 
 const PAGE_ENTRY = `
 import { createRoot } from 'react-dom/client';
@@ -46,10 +52,12 @@ const stateOf = (index: number, bytes: number, version: string): ModelStoreStatu
       ? { state: 'partial', downloadedBytes: Math.round(bytes * 0.4) }
       : { state: 'absent' };
 
+const FOCUS = ${JSON.stringify(focus)};
+
 const voices = new OnDeviceVoices(
   ON_DEVICE_MODELS.map((model, index) => {
     const totalBytes = modelDownloadBytes(model);
-    const status = stateOf(index, totalBytes, model.versionLabel);
+    const status = stateOf(model.id === FOCUS ? 0 : index, totalBytes, model.versionLabel);
     return new OnDeviceVoice({
       model,
       support: { available: true },
@@ -77,7 +85,7 @@ if (root === null) throw new Error('missing #root');
 createRoot(root).render(
   <div style={{ margin: '0 auto', maxWidth: 760, padding: 16 }}>
     <DictationSettings
-      settings={{ ...DEFAULT_STT_SETTINGS, engine: ON_DEVICE_MODELS[0]?.id ?? 'browser' }}
+      settings={{ ...DEFAULT_STT_SETTINGS, engine: ON_DEVICE_MODELS.find(model => model.id === FOCUS)?.id ?? ON_DEVICE_MODELS[0]?.id ?? 'browser' }}
       update={() => undefined}
       persisted
       recognitionSupport={AVAILABLE_RECOGNITION}
@@ -161,11 +169,15 @@ try {
         await section.waitFor({ state: 'visible' });
         const installed = page.locator('[data-model-phase="installed"]').first();
         await installed.waitFor({ state: 'visible' });
-        await page.getByRole('button', { name: /^Try / }).first().click();
+        const focused = ON_DEVICE_MODELS.find(model => model.id === focus);
+        await page
+          .getByRole('button', { name: focused === undefined ? /^Try / : `Try ${focused.shortName}` })
+          .first()
+          .click();
         await page.locator('[data-trial="done"]').first().waitFor({ state: 'visible' });
         const sideways = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
         if (sideways > 0) fail(`${scheme} ${viewport.name} scrolls sideways by ${sideways}px`);
-        const target = join(outDir, `engine-list-${viewport.name}-${scheme}.png`);
+        const target = join(outDir, `engine-list-${focus === '' ? '' : `${focus}-`}${viewport.name}-${scheme}.png`);
         await section.screenshot({ path: target });
         process.stdout.write(`📸 ${target}\n`);
       } finally {

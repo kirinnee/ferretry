@@ -96,6 +96,8 @@
         "harness/connection-drops-screenshot.tsx",
         "harness/parakeet-near-live-smoke.ts",
         "harness/parakeet-near-live-smoke-page.ts",
+        "harness/vosk-smoke.ts",
+        "harness/vosk-smoke-page.ts",
         "harness/fy-render-safari/probe.ts",
         "harness/fy-render-safari/parent.ts",
         "harness/fy-render-safari/probe-shell.ts",

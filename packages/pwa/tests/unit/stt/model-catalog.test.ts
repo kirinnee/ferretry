@@ -16,12 +16,15 @@ import {
   type OnDeviceModel,
   onDeviceModel,
   PARAKEET_CATALOG_MODEL,
+  type ParakeetCatalogModel,
   runtimeBundle,
   SPEECH_RUNTIMES,
   type SpeechRuntime,
+  VOSK_CATALOG_MODEL,
   validateModelCatalog,
 } from '../../../src/lib/stt/model-catalog.ts';
 import { PARAKEET_CACHE, PARAKEET_TOTAL_BYTES, PARAKEET_VERSION_LABEL } from '../../../src/lib/stt/parakeet-model.ts';
+import { VOSK_CACHE, VOSK_RUNTIME_FILE, VOSK_RUNTIME_VERSION } from '../../../src/lib/stt/vosk-model.ts';
 
 const COMMIT = 'a'.repeat(40);
 const SHA = 'b'.repeat(64);
@@ -83,6 +86,30 @@ describe('the shipped catalog', () => {
     should(onDeviceModel('nope')).be.null();
     should(onDeviceModel(null)).be.null();
     should(onDeviceModel(undefined)).be.null();
+  });
+
+  it('lists Vosk small English as the streaming light floor, on its own runtime', () => {
+    should(onDeviceModel('vosk-small-en')).equal(VOSK_CATALOG_MODEL);
+    should(VOSK_CATALOG_MODEL).match({
+      family: 'vosk',
+      licence: 'Apache-2.0',
+      languages: ['en'],
+      runtime: 'vosk-wasm',
+      streaming: true,
+      nearLive: false,
+      cache: VOSK_CACHE,
+    });
+    should(SPEECH_RUNTIMES['vosk-wasm']).eql({
+      id: 'vosk-wasm',
+      label: `Vosk WebAssembly ${VOSK_RUNTIME_VERSION}`,
+      version: VOSK_RUNTIME_VERSION,
+      licence: 'Apache-2.0',
+      file: VOSK_RUNTIME_FILE,
+      shared: null,
+    });
+    should(modelDownloadBytes(VOSK_CATALOG_MODEL)).equal(41_205_931 + VOSK_RUNTIME_FILE.bytes);
+    should(modelDownloadSize(VOSK_CATALOG_MODEL)).equal('44 MB');
+    should(modelDownloadBytes(VOSK_CATALOG_MODEL)).be.below(modelDownloadBytes(PARAKEET_CATALOG_MODEL));
   });
 
   it('names where the files come from, at the pinned commit', () => {
@@ -174,7 +201,7 @@ describe('validateModelCatalog', () => {
     const broken = model({
       id: 'browser' as OnDeviceModel['id'],
       cache: 'models',
-      runtime: 'nope' as OnDeviceModel['runtime'],
+      runtime: 'nope' as ParakeetCatalogModel['runtime'],
       languages: [],
       files: [],
     });

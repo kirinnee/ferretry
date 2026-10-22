@@ -214,4 +214,15 @@ describe('isDeferredReleaseFile', () => {
     ])
       should(isDeferredReleaseFile(path)).be.false();
   });
+
+  it('defers Vosk’s runtime binary too, and nothing else of Vosk’s', () => {
+    should(isDeferredReleaseFile('assets/vosk-Bit5K3ZQ.wasm')).be.true();
+    for (const path of [
+      'assets/vosk-worker-DonRcPBX.js',
+      'assets/vosk-.wasm',
+      'vosk-Bit5K3ZQ.wasm',
+      'assets/vosk-a.b.wasm',
+    ])
+      should(isDeferredReleaseFile(path)).be.false();
+  });
 });
