@@ -58,6 +58,8 @@ import { registerTaskBoardCommands } from '../src/adapters/tasks/task-board-comm
 import { registerTaskCommands } from '../src/adapters/tasks/task-commands';
 import { environmentBoardCredentials, environmentSessionId } from '../src/adapters/tasks/task-environment';
 import { ConsoleIo, type ICliIo } from '../src/adapters/terminal/console-io';
+import { chooseProgress, processProgressHost } from '../src/adapters/terminal/progress-factory';
+import { ProgressAwareIo } from '../src/adapters/terminal/progress-io';
 import { InquirerPrompt, type IPrompt } from '../src/adapters/terminal/prompt';
 import { type ISpinner, OraSpinner } from '../src/adapters/terminal/spinner';
 import { HostInstallFacts } from '../src/adapters/update/install-facts';
@@ -145,6 +147,7 @@ import { ProtocolPasskeyGateway } from '../src/lib/passkey/gateway';
 import { registerPinCommands } from '../src/lib/pins/commands';
 import { PinController } from '../src/lib/pins/controller';
 import { ProtocolPinGateway } from '../src/lib/pins/gateway';
+import type { IProgress } from '../src/lib/progress/index';
 import { registerReadsCommands } from '../src/lib/reads/commands';
 import { ReadsController } from '../src/lib/reads/controller';
 import { registerScratchCommands } from '../src/lib/scratch/commands';
@@ -247,6 +250,8 @@ function registerDoctorCommand(program: Command, environment: Record<string, str
 export interface CliWorld {
   readonly io: ICliIo;
   readonly spinner: ISpinner;
+  /** What a long command shows while it works: a spinner on a terminal, plain lines elsewhere. */
+  readonly progress: IProgress;
   readonly prompt: IPrompt;
   readonly interactive: boolean;
   /** The invocation directory, injected alongside the environment for hermetic in-process journeys. */
@@ -259,9 +264,17 @@ export interface CliWorld {
 
 /** The real production world: the shipped IO adapters. */
 export function buildWorld(): CliWorld {
-  const io = new ConsoleIo();
+  const progress = chooseProgress(
+    { stderrIsTty: Boolean(process.stderr.isTTY), environment: process.env },
+    line => {
+      console.error(line);
+    },
+    processProgressHost,
+  );
+  const io = new ProgressAwareIo(new ConsoleIo(), progress);
   return {
     io,
+    progress,
     spinner: new OraSpinner(),
     prompt: new InquirerPrompt(),
     interactive: io.interactive(),
@@ -566,7 +579,7 @@ function hostInstallFacts(world: CliWorld): HostInstallFacts {
 function buildProfileSwitch(world: CliWorld, processes: BunDaemonProcess): NixProfileSwitch {
   return new NixProfileSwitch({
     facts: hostInstallFacts(world),
-    packages: new CommandPackageManagers(argv => processes.run(argv)),
+    packages: new CommandPackageManagers((argv, onLine) => processes.runStreaming(argv, onLine)),
     lifecycle: { executable: isExecutableFile, versionOf: daemonBinaryVersion },
     out: world.io,
     prompt: world.prompt,
@@ -598,7 +611,7 @@ function buildDaemonUpdater(world: CliWorld, client: SharedDaemonClient): Daemon
   return new DaemonUpdater({
     facts: hostInstallFacts(world),
     latest: new GitHubLatestRelease(PRODUCT_NAME),
-    packages: new CommandPackageManagers(argv => processes.run(argv)),
+    packages: new CommandPackageManagers((argv, onLine) => processes.runStreaming(argv, onLine)),
     standalone: new StandaloneRelease({
       product: PRODUCT_NAME,
       clientName: BINARY_NAME,
@@ -612,7 +625,8 @@ function buildDaemonUpdater(world: CliWorld, client: SharedDaemonClient): Daemon
       installed: () => resolveDaemonBinary(environment, DAEMON_NAME),
       versionOf: daemonBinaryVersion,
       executable: isExecutableFile,
-      restart: () => controllerFor().restart({ midTurnSaid: true }),
+      restart: options =>
+        controllerFor().restart({ midTurnSaid: true, ferretsKeepRunning: options?.ferretsKeepRunning }),
       installAt: path => controllerFor(path).install(),
       staleDefinition: () => controllerFor().staleDefinition(),
       probe: () => health.probe(),
@@ -627,6 +641,7 @@ function buildDaemonUpdater(world: CliWorld, client: SharedDaemonClient): Daemon
     product: PRODUCT_NAME,
     clientName: BINARY_NAME,
     daemonName: DAEMON_NAME,
+    progress: world.progress,
   });
 }
 
@@ -703,6 +718,7 @@ function buildDaemonController(world: CliWorld, client: SharedDaemonClient): Dae
     nixShellOffer: buildProfileSwitch(world, processes),
     turns: { midTurn: async () => (await new ProtocolDaemonUpdateView(client).view())?.midTurn ?? 0 },
     restartMarker: new FileDaemonRestartMarker(restartMarkerPath(layout.stateHome)),
+    progress: world.progress,
   });
 }
 
@@ -816,7 +832,7 @@ const DOMAIN_REGISTRARS: ReadonlyArray<(wiring: DomainWiring) => void> = [
   ({ program, world, client }) =>
     registerMigrationCommands(
       program,
-      new MigrationController(client, new SessionPresenter(world.io, new SystemClock())),
+      new MigrationController(client, new SessionPresenter(world.io, new SystemClock()), world.progress),
     ),
   ({ program, world, client }) => registerScratchCommands(program, new ScratchController(client, world.io)),
   ({ program, world, client }) =>
@@ -1082,6 +1098,7 @@ const DOMAIN_REGISTRARS: ReadonlyArray<(wiring: DomainWiring) => void> = [
           gateway: new ProtocolProfileGateway(client),
           tracer: new PlatformSyscallTracer(),
           out: world.io,
+          progress: world.progress,
           sleep: async ms => await Bun.sleep(ms),
           now: () => Date.now(),
           writeFile: async (path, text) => {
@@ -1117,6 +1134,7 @@ const DOMAIN_REGISTRARS: ReadonlyArray<(wiring: DomainWiring) => void> = [
     const pack = new PackController({
       gateway: new ProtocolPackGateway(client),
       out: world.io,
+      progress: world.progress,
       parent: async () =>
         await ambientSession(world.environment, async argv => {
           const child = Bun.spawn({ cmd: [...argv], stdout: 'pipe', stderr: 'ignore', stdin: 'ignore' });

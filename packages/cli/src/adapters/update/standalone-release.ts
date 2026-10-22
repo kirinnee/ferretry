@@ -2,6 +2,7 @@ import { chmod, mkdtemp, rename, rm, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { releaseDownloadBase } from '@ferretry/protocol';
 import type { CommandOutcome } from '../../lib/daemon/ports.ts';
+import type { UpdateObserver } from '../../lib/update/activity.ts';
 import type { IStandaloneReleasePort, StagedRelease, StandaloneRefusal } from '../../lib/update/ports.ts';
 import {
   checksumFor,
@@ -56,7 +57,11 @@ export class StandaloneRelease implements IStandaloneReleasePort {
     this.timeoutMs = options.timeoutMs ?? DOWNLOAD_TIMEOUT_MS;
   }
 
-  async stage(version: string, directory: string): Promise<StagedRelease | StandaloneRefusal> {
+  async stage(
+    version: string,
+    directory: string,
+    observer?: UpdateObserver,
+  ): Promise<StagedRelease | StandaloneRefusal> {
     const { product, clientName } = this.options;
     const instead = `update with the installer instead: ${installerCommand(product)}`;
     if (this.options.keys.length === 0) {
@@ -69,13 +74,13 @@ export class StandaloneRelease implements IStandaloneReleasePort {
       return { refused: `no release archive is published for ${this.options.platform}/${this.options.arch}` };
     }
     const base = releaseDownloadBase(product, version);
-    const downloaded = await this.#download([
-      `${base}/checksums.txt`,
-      `${base}/checksums.txt.sig`,
-      `${base}/${archive}`,
-    ]);
+    const downloaded = await this.#download(
+      [`${base}/checksums.txt`, `${base}/checksums.txt.sig`, `${base}/${archive}`],
+      observer,
+    );
     if ('refused' in downloaded) return downloaded;
     const [checksums, signature, bytes] = downloaded.files as [Uint8Array, Uint8Array, Uint8Array];
+    observer?.({ phase: 'verifying' });
     const trusted = await this.#verifySignature(checksums, new TextDecoder().decode(signature));
     if (trusted !== undefined) return { refused: `${version} ${trusted}; nothing changed — ${instead}` };
     const expected = checksumFor(new TextDecoder().decode(checksums), archive);
@@ -83,6 +88,7 @@ export class StandaloneRelease implements IStandaloneReleasePort {
     if (expected === undefined || expected !== actual) {
       return { refused: `${archive} does not match its signed checksum; nothing changed` };
     }
+    observer?.({ phase: 'unpacking' });
     return await this.#unpack(bytes, directory);
   }
 
@@ -101,13 +107,17 @@ export class StandaloneRelease implements IStandaloneReleasePort {
     }
   }
 
-  async #download(urls: readonly string[]): Promise<{ readonly files: readonly Uint8Array[] } | StandaloneRefusal> {
+  async #download(
+    urls: readonly string[],
+    observer: UpdateObserver | undefined,
+  ): Promise<{ readonly files: readonly Uint8Array[] } | StandaloneRefusal> {
     const files: Uint8Array[] = [];
+    observer?.({ phase: 'downloading' });
     for (const url of urls) {
       try {
         const response = await this.fetcher(url, { signal: AbortSignal.timeout(this.timeoutMs) });
         if (!response.ok) return { refused: `${url} answered ${String(response.status)}; nothing changed` };
-        files.push(new Uint8Array(await response.arrayBuffer()));
+        files.push(await readBody(response, observer));
       } catch {
         return { refused: `could not download ${url}; nothing changed` };
       }
@@ -164,4 +174,20 @@ async function exists(path: string): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+/** The body of `response`, reporting bytes against `Content-Length` as they arrive when there is one to report against. */
+async function readBody(response: Response, observer: UpdateObserver | undefined): Promise<Uint8Array> {
+  const expected = Number(response.headers.get('content-length') ?? 0);
+  if (observer === undefined || response.body === null || !(expected > 0)) {
+    return new Uint8Array(await response.arrayBuffer());
+  }
+  const chunks: Uint8Array[] = [];
+  let done = 0;
+  for await (const chunk of response.body) {
+    chunks.push(chunk);
+    done += chunk.byteLength;
+    observer({ phase: 'downloading', bytes: { done, expected: Math.max(expected, done) } });
+  }
+  return Buffer.concat(chunks);
 }

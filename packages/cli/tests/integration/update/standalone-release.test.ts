@@ -176,3 +176,47 @@ describe('StandaloneRelease', () => {
     should(await subject.stage('1.3.0', r.install)).have.property('refused');
   });
 });
+
+describe('StandaloneRelease — watched', () => {
+  it('reports the download in bytes, then verifying and unpacking, in that order', async () => {
+    const r = await release();
+    const sized: ReleaseFetch = async input => {
+      const body = r.files[input];
+      if (body === undefined) return new Response('', { status: 404 });
+      return new Response(body, {
+        headers: { 'content-length': String(typeof body === 'string' ? body.length : body.byteLength) },
+      });
+    };
+    const seen: string[] = [];
+    const staged = await r.subject({ fetcher: sized }).stage('1.3.0', r.install, activity => {
+      seen.push(
+        activity.bytes === undefined
+          ? activity.phase
+          : `${activity.phase}:${String(activity.bytes.done)}/${String(activity.bytes.expected)}`,
+      );
+    });
+    should('refused' in staged).be.false();
+    should(seen[0]).equal('downloading');
+    const downloading = seen.filter(line => line.startsWith('downloading:'));
+    should(downloading.length).be.aboveOrEqual(3);
+    const last = downloading.at(-1)?.split(':')[1]?.split('/') ?? [];
+    should(last[0]).equal(last[1]);
+    should(seen.slice(-2)).deepEqual(['verifying', 'unpacking']);
+  });
+
+  it('still downloads when the server does not say how big the files are', async () => {
+    const r = await release();
+    const seen: string[] = [];
+    const staged = await r.subject().stage('1.3.0', r.install, activity => seen.push(activity.phase));
+    should('refused' in staged).be.false();
+    should(seen).deepEqual(['downloading', 'verifying', 'unpacking']);
+  });
+
+  it('stops at the download when a file is refused', async () => {
+    const r = await release();
+    const seen: string[] = [];
+    const staged = await r.subject().stage('9.9.9', r.install, activity => seen.push(activity.phase));
+    should(staged).have.property('refused');
+    should(seen).deepEqual(['downloading']);
+  });
+});

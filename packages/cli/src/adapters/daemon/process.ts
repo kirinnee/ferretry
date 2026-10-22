@@ -33,6 +33,29 @@ export class BunDaemonProcess implements IDaemonProcessPort {
   }
 
   /**
+   * `run`, with each line of output handed to `onLine` as it is written.
+   *
+   * A line ends at `\n` or `\r`, because a tool that redraws one terminal line (brew, curl) ends its
+   * updates with `\r`. The whole of both streams is still returned, so a caller that only wants the
+   * outcome reads it exactly as it would from `run`.
+   */
+  async runStreaming(argv: readonly string[], onLine?: (line: string) => void): Promise<CommandOutcome> {
+    const [command, ...args] = argv;
+    if (command === undefined) throw new Error('cannot run an empty command');
+    try {
+      const child = Bun.spawn([command, ...args], { stdin: 'ignore', stdout: 'pipe', stderr: 'pipe' });
+      const [stdout, stderr, code] = await Promise.all([
+        drain(child.stdout, onLine),
+        drain(child.stderr, onLine),
+        child.exited,
+      ]);
+      return { code, stdout, stderr };
+    } catch (error) {
+      return { code: 127, stdout: '', stderr: (error as Error).message };
+    }
+  }
+
+  /**
    * Starts the daemon detached, with both streams appended to the log.
    *
    * The log file descriptor is opened here rather than delegated to a `sh -c` redirect: kteam wrapped
@@ -121,4 +144,30 @@ async function holdsOpenPerProc(proc: string, pid: number, path: string): Promis
     if ((await readlink(`${directory}/${descriptor}`).catch(() => undefined)) === target) return true;
   }
   return false;
+}
+
+/** Read a stream to its end, calling `onLine` for each `\n`- or `\r`-terminated line, and answer all of it. */
+async function drain(
+  stream: ReadableStream<Uint8Array>,
+  onLine: ((line: string) => void) | undefined,
+): Promise<string> {
+  const decoder = new TextDecoder();
+  let all = '';
+  let pending = '';
+  const flush = (final: boolean): void => {
+    const parts = pending.split(/[\r\n]/u);
+    pending = final ? '' : (parts.pop() ?? '');
+    for (const part of parts) if (part !== '') onLine?.(part);
+  };
+  for await (const chunk of stream) {
+    const text = decoder.decode(chunk, { stream: true });
+    all += text;
+    pending += text;
+    flush(false);
+  }
+  const tail = decoder.decode();
+  all += tail;
+  pending += tail;
+  flush(true);
+  return all;
 }

@@ -1,11 +1,15 @@
 /**
- * ONE THREAD PER RUNNING SESSION, IN A REAL DAEMON — and the switch that turns it off.
+ * ONE THREAD PER RUNNING SESSION, IN A REAL DAEMON — pooled and dedicated.
  *
- * Boots a real `fyd` from source over a small fleet with REAL tmux panes for its running sessions, once
- * with `sessionWorkers.enabled` (the default) and once without, and asks the daemon's own profile what
- * ran. With workers on, each running session is looked at by its worker — the profile's workers table
- * names the session observer and its activity table counts the workers' looks, reported across the
- * thread boundary. With them off, nothing of the kind exists and the inline turn watcher does it all.
+ * Boots a real `fyd` from source over a small fleet with REAL tmux panes for its running sessions, and asks
+ * the daemon's own profile what ran: each running session is looked at by its worker — the profile's
+ * workers table names the session observer and its activity table counts the workers' looks, reported
+ * across the thread boundary — and only when something happened. It runs once with a thread per session
+ * and once with every session pooled on one, because the default cap is the owner's to choose.
+ *
+ * THE MEASURED WINDOW STARTS ONCE THE DAEMON IS QUIET. Each worker's first look is at attach, and on a
+ * loaded host attach can land inside the window: so short profiles are taken until one sees no look at
+ * all, and only then is the pane drawn on and counted.
  */
 import { afterAll, describe, it } from 'bun:test';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
@@ -23,8 +27,8 @@ afterAll(async () => {
   await cleanupTempDirectories();
 });
 
-async function profiled(enabled: boolean): Promise<PerformanceReport> {
-  const fleet = await scaledFleet(await tempDirectory(`fyd-session-workers-${String(enabled)}-`), {
+async function profiled(sessionWorkers: Record<string, unknown>): Promise<PerformanceReport> {
+  const fleet = await scaledFleet(await tempDirectory('fyd-session-workers-'), {
     sessions: 4,
     running: RUNNING,
     hugeTranscripts: 0,
@@ -54,7 +58,7 @@ async function profiled(enabled: boolean): Promise<PerformanceReport> {
       host: '127.0.0.1',
       port,
       relay: { url: 'ws://127.0.0.1:9', enabled: false },
-      sessionWorkers: { enabled },
+      sessionWorkers,
     }),
   );
   const daemon = Bun.spawn([process.execPath, FYD_ENTRY], {
@@ -70,29 +74,38 @@ async function profiled(enabled: boolean): Promise<PerformanceReport> {
         throw new Error(`the daemon never answered: ${await readFile(join(fleet.home, 'fyd.err'), 'utf8')}`);
       await Bun.sleep(100);
     }
-    // Long enough for the workers to start and answer their probes.
-    await Bun.sleep(3_000);
     const token = (await readFile(join(fleet.home, 'api-token'), 'utf8')).trim();
     const headers = { authorization: `Bearer ${token}`, 'content-type': 'application/json' };
-    const started = await fetch(`${base}/v1/diagnostics/profile`, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify({ seconds: 5 }),
-    });
-    should(started.status).equal(202);
-    // One pane draws once (the terminal echoes what is typed at it); the other stays idle throughout.
-    await Bun.sleep(1_000);
-    tmux(['send-keys', '-t', panes[0] ?? '', 'drawn']);
-    const { id } = (await started.json()) as PerformanceProfileView;
-    await Bun.sleep(5_000);
-    for (let attempt = 0; attempt < 40; attempt += 1) {
-      const view = (await (
-        await fetch(`${base}/v1/diagnostics/profile/${id}`, { headers })
-      ).json()) as PerformanceProfileView;
-      if (view.state === 'finished') return view.report;
-      await Bun.sleep(250);
+    const profile = async (seconds: number, during: () => Promise<void> = async () => undefined) => {
+      const started = await fetch(`${base}/v1/diagnostics/profile`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ seconds }),
+      });
+      should(started.status).equal(202);
+      const { id } = (await started.json()) as PerformanceProfileView;
+      await during();
+      await Bun.sleep(seconds * 1_000);
+      for (let attempt = 0; attempt < 40; attempt += 1) {
+        const view = (await (
+          await fetch(`${base}/v1/diagnostics/profile/${id}`, { headers })
+        ).json()) as PerformanceProfileView;
+        if (view.state === 'finished') return view.report;
+        await Bun.sleep(250);
+      }
+      throw new Error('the profile never finished');
+    };
+    // Quiet first: every worker attached and its first look made, so the window below counts only the draw.
+    for (let attempt = 0; ; attempt += 1) {
+      const warmup = await profile(5);
+      if (looksIn(warmup) === 0 && warmup.workers.some(worker => worker.name === 'session-observer')) break;
+      if (attempt > 12) throw new Error('the daemon never went quiet');
     }
-    throw new Error('the profile never finished');
+    // One pane draws once (the terminal echoes what is typed at it); the other stays idle throughout.
+    return await profile(5, async () => {
+      await Bun.sleep(1_000);
+      tmux(['send-keys', '-t', panes[0] ?? '', 'drawn']);
+    });
   } finally {
     daemon.kill();
     await daemon.exited;
@@ -100,28 +113,35 @@ async function profiled(enabled: boolean): Promise<PerformanceReport> {
   }
 }
 
+function looksIn(report: PerformanceReport): number {
+  return report.activities.find(activity => activity.name === 'session worker look')?.count ?? 0;
+}
+
 describe('session workers in a booted daemon', () => {
-  it('should look at a running session on its own worker only when its pane drew, and count those looks in the profile', async () => {
+  for (const [mode, max] of [
+    ['a thread per session', 8],
+    ['every session pooled on one thread', 1],
+  ] as const)
+    it(`should look at a running session only when its pane drew, with ${mode}`, async () => {
+      // Act
+      const report = await profiled({ max });
+
+      // Assert
+      should(report.fleet).deepEqual({ sessions: 4, running: RUNNING });
+      should(report.workers.map(worker => worker.name)).containEql('session-observer');
+      // Looks happen when something happened: the draw is looked at, the idle pane is not — no 2 s polling.
+      should(looksIn(report)).be.aboveOrEqual(1);
+      should(looksIn(report)).be.belowOrEqual(3);
+      // And this thread has no tick of its own: every running session is its worker's.
+      should(report.activities.find(activity => activity.name === 'turn watcher')?.count ?? 0).be.belowOrEqual(1);
+    }, 180_000);
+
+  it('should still observe on the workers when the retired switch says to turn them off', async () => {
     // Act
-    const report = await profiled(true);
+    const report = await profiled({ enabled: false });
 
     // Assert
-    should(report.fleet).deepEqual({ sessions: 4, running: RUNNING });
     should(report.workers.map(worker => worker.name)).containEql('session-observer');
-    // Looks happen when something happened: the draw is looked at, the idle pane is not — no 2 s polling.
-    const looks = report.activities.find(activity => activity.name === 'session worker look');
-    should(looks?.count ?? 0).be.aboveOrEqual(1);
-    should(looks?.count ?? 0).be.belowOrEqual(3);
-    should(report.activities.map(activity => activity.name)).containEql('turn watcher');
-  }, 120_000);
-
-  it('should observe every session on the main thread when the workers are switched off', async () => {
-    // Act
-    const report = await profiled(false);
-
-    // Assert
-    should(report.workers.map(worker => worker.name)).not.containEql('session-observer');
-    should(report.activities.map(activity => activity.name)).not.containEql('session worker look');
-    should(report.activities.map(activity => activity.name)).containEql('turn watcher');
-  }, 120_000);
+    should(looksIn(report)).be.aboveOrEqual(1);
+  }, 180_000);
 });

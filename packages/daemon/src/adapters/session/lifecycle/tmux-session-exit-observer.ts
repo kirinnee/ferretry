@@ -7,7 +7,7 @@ import {
   type SessionPaneExit,
 } from '../../../lib/session/health/exit.ts';
 import type { SessionExitPort } from '../../../lib/session/health/service.ts';
-import type { SurveyedSession } from '../../../lib/session/health/types.ts';
+import type { ExitObserveOptions, SurveyedSession } from '../../../lib/session/health/types.ts';
 import type { RegisteredTerminalPane } from '../../../lib/session/reap.ts';
 import { parseSessionId, type SessionId } from '../../../lib/session-id.ts';
 import {
@@ -127,7 +127,10 @@ export class TmuxSessionExitObserver implements SessionExitPort {
   private readonly missingStatus = new Map<string, number>();
 
   /** `survey` is the check's own walk of the session directories; without one, the scan takes its own. */
-  async observe(survey?: readonly SurveyedSession[]): Promise<readonly SessionExitObservation[]> {
+  async observe(
+    survey?: readonly SurveyedSession[],
+    options: ExitObserveOptions = {},
+  ): Promise<readonly SessionExitObservation[]> {
     if (this.daemonId.length === 0) return [];
     // The tolerant scan: one hand-edited registration must not hide every other exited session.
     const { registrations } =
@@ -150,7 +153,9 @@ export class TmuxSessionExitObserver implements SessionExitPort {
       if (unrecorded && !this.missedEnough(registration, stillMissing)) continue;
       observed.push({ id, status: current, registration, exit });
     }
-    for (const key of this.missingStatus.keys()) if (!stillMissing.has(key)) this.missingStatus.delete(key);
+    // Forgotten only by a check that looked at every pane: a partial look says nothing about the others.
+    if (options.partial !== true)
+      for (const key of this.missingStatus.keys()) if (!stillMissing.has(key)) this.missingStatus.delete(key);
     return observed;
   }
 

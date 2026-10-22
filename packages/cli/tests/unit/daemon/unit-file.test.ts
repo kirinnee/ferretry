@@ -1,5 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
+import { isBinaryPlist } from '../../../src/lib/daemon/plist';
 import {
   EXIT_ALREADY_RUNNING,
   InvalidUnitValueError,
@@ -208,7 +209,9 @@ describe('launch agent rendering', () => {
 
     // Act + Assert
     should(launchAgentProcessType(old)).be.undefined();
-    should(launchAgentProcessType('<key>ProcessType</key> <string>Background</string>')).equal('Background');
+    should(
+      launchAgentProcessType('<plist><dict><key>ProcessType</key> <string>Background</string></dict></plist>'),
+    ).equal('Background');
   });
 
   it('should throttle respawns, because launchd has no RestartPreventExitStatus', () => {
@@ -320,5 +323,123 @@ describe('reading the state home back out of a definition', () => {
     should(systemdUnitStateHome('Environment="FY_HOME=/inner"quote"\n')).be.undefined();
     should(systemdUnitStateHome('Environment="\n')).be.undefined();
     should(launchAgentStateHome('<dict><key>HOME</key><string>/Users/u</string></dict>')).be.undefined();
+  });
+});
+
+describe('reading a launchd plist that something else reformatted', () => {
+  const home = '/Users/erng/.ferretry';
+  const written = renderLaunchAgentPlist({ ...spec, label: 'com.ferretry.fyd', stateHome: home });
+
+  /** What `plutil -replace ProcessType -string Interactive` leaves: tabs and newlines between every tag. */
+  const prettyPrinted = `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+\t<key>AbandonProcessGroup</key>
+\t<true/>
+\t<key>EnvironmentVariables</key>
+\t<dict>
+\t\t<key>FY_HOME</key>
+\t\t<string>/Users/erng/.ferretry</string>
+\t\t<key>HOME</key>
+\t\t<string>/Users/erng</string>
+\t</dict>
+\t<key>Label</key>
+\t<string>com.ferretry.fyd</string>
+\t<key>ProcessType</key>
+\t<string>Interactive</string>
+\t<key>ProgramArguments</key>
+\t<array>
+\t\t<string>/opt/fy/bin/fyd</string>
+\t</array>
+</dict>
+</plist>
+`;
+
+  it('should read the state home and ProcessType from the plist exactly as this CLI writes it', () => {
+    // Act + Assert
+    should(launchAgentStateHome(written)).equal(home);
+    should(launchAgentProcessType(written)).equal(LAUNCHD_PROCESS_TYPE);
+  });
+
+  it('should read them from the plutil pretty-printed form, with tabs and newlines between tags', () => {
+    // Act + Assert
+    should(launchAgentStateHome(prettyPrinted)).equal(home);
+    should(launchAgentProcessType(prettyPrinted)).equal('Interactive');
+  });
+
+  it('should not care about key order', () => {
+    // Arrange — plutil sorts keys; the dictionary a job reads is the same whatever order they are in.
+    const reordered = `<plist version="1.0"><dict>
+<key>ProcessType</key><string>Interactive</string>
+<key>EnvironmentVariables</key><dict><key>PATH</key><string>/usr/bin</string><key>FY_HOME</key><string>${home}</string></dict>
+<key>Label</key><string>com.ferretry.fyd</string>
+</dict></plist>`;
+
+    // Act + Assert
+    should(launchAgentStateHome(reordered)).equal(home);
+    should(launchAgentProcessType(reordered)).equal('Interactive');
+  });
+
+  it('should read a CRLF file, as a Windows-style checkout or an editor writes it', () => {
+    // Act + Assert
+    should(launchAgentStateHome(prettyPrinted.replaceAll('\n', '\r\n'))).equal(home);
+    should(launchAgentStateHome(written.replaceAll('\n', '\r\n'))).equal(home);
+  });
+
+  it('should read through comments, a byte-order mark and CDATA', () => {
+    // Arrange
+    const odd = `\uFEFF<!-- edited by hand --><plist><dict><key>EnvironmentVariables</key><dict>
+<key>FY_HOME</key><string><![CDATA[/Users/a&b]]></string></dict></dict></plist>`;
+
+    // Act + Assert
+    should(launchAgentStateHome(odd)).equal('/Users/a&b');
+  });
+
+  it('should decode numeric character references', () => {
+    // Act + Assert
+    should(
+      launchAgentStateHome(
+        '<dict><key>EnvironmentVariables</key><dict><key>FY_HOME</key><string>/h&#x6f;me&#47;u</string></dict></dict>',
+      ),
+    ).equal('/home/u');
+  });
+
+  it('should name a binary plist, which no text reader can parse, instead of misreading it', () => {
+    // Act + Assert
+    should(isBinaryPlist('bplist00\u00d1\u0001\u0002')).be.true();
+    should(isBinaryPlist(written)).be.false();
+    should(launchAgentStateHome('bplist00\u00d1\u0001\u0002')).be.undefined();
+  });
+
+  it('should answer undefined, never throw, for anything that is not a well-formed plist', () => {
+    // Act + Assert
+    for (const garbage of [
+      '',
+      'not xml at all',
+      '<plist><dict><key>FY_HOME</key>',
+      '<plist><dict><key>A</key></dict></plist>',
+      '<plist><dict><string>x</string></dict></plist>',
+      '<plist><dict></plist>',
+      '<plist><dict/></plist><extra/>',
+      '<plist><dict><key>EnvironmentVariables</key><dict><key>FY_HOME</key><integer>x</integer></dict></dict></plist>',
+    ]) {
+      should(launchAgentStateHome(garbage)).be.undefined();
+    }
+  });
+
+  it('should read a FY_HOME that is not under EnvironmentVariables as no state home', () => {
+    // Act + Assert — only the variable the job hands the daemon says whose daemon it is.
+    should(launchAgentStateHome('<dict><key>FY_HOME</key><string>/x</string></dict>')).be.undefined();
+  });
+
+  it('should read typed values and empty elements without losing the strings around them', () => {
+    // Arrange
+    const typed = `<plist><dict><key>KeepAlive</key><true/><key>Nope</key><false/><key>N</key><integer>10</integer>
+<key>R</key><real>1.5</real><key>D</key><date>2020-01-01T00:00:00Z</date><key>B</key><data>AAEC</data>
+<key>E</key><string/><key>A</key><array/><key>M</key><dict/><key>ProcessType</key><string/></dict></plist>`;
+
+    // Act + Assert
+    should(launchAgentProcessType(typed)).equal('');
   });
 });

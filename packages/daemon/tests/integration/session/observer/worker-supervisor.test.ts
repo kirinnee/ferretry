@@ -19,6 +19,7 @@ import {
   type SessionBinding,
   type SessionId,
   type ToSessionWorker,
+  type WorkerLiveness,
 } from '../../../../src/lib/index.ts';
 
 /** A thread that records what it is sent and answers only when the test says so. */
@@ -81,6 +82,9 @@ interface Rig {
   readonly reports: WorkerLookReport[];
   readonly observed: [SessionId, readonly ObserverPatch[]][];
   readonly exited: SessionId[];
+  readonly livenesses: [SessionId, WorkerLiveness][];
+  /** How many times the supervisor said which sessions are hosted may have changed. */
+  readonly changes: { count: number };
   /** Runs every timer due by `ms` from the start. */
   readonly advance: (ms: number) => void;
 }
@@ -91,6 +95,8 @@ function rig(cap = 8, overrides: { lookTimeoutMs?: number; startConcurrency?: nu
   const reports: WorkerLookReport[] = [];
   const observed: [SessionId, readonly ObserverPatch[]][] = [];
   const exited: SessionId[] = [];
+  const livenesses: [SessionId, WorkerLiveness][] = [];
+  const changes = { count: 0 };
   let now = 1_000_000;
   let timers: { at: number; run: () => void; cancelled: boolean }[] = [];
   const subject = new WorkerSupervisor(
@@ -111,6 +117,10 @@ function rig(cap = 8, overrides: { lookTimeoutMs?: number; startConcurrency?: nu
       notice: (_session, message) => notices.push(message),
       report: report => reports.push(report),
       observed: (session, patches) => observed.push([session, patches]),
+      liveness: (session, liveness) => livenesses.push([session, liveness]),
+      changed: () => {
+        changes.count += 1;
+      },
       exited: session => exited.push(session),
     },
     {
@@ -127,6 +137,8 @@ function rig(cap = 8, overrides: { lookTimeoutMs?: number; startConcurrency?: nu
     reports,
     observed,
     exited,
+    livenesses,
+    changes,
     advance: ms => {
       now += ms;
       const due = timers.filter(timer => !timer.cancelled && timer.at <= now);
@@ -170,6 +182,36 @@ describe('WorkerSupervisor', () => {
     ]);
   });
 
+  it('should hand on a pushed liveness look for the current generation only', () => {
+    // Arrange
+    const { subject, workers, livenesses } = rig();
+    subject.reconcile([wanted(A)]);
+    workers[0]?.ready();
+
+    // Act
+    workers[0]?.answer({ kind: 'liveness', session: A, generation: 1, liveness: { screen: 'now' } });
+    workers[0]?.answer({ kind: 'liveness', session: A, generation: 9, liveness: { screen: 'stale' } });
+
+    // Assert
+    should(livenesses).deepEqual([[A, { screen: 'now' }]]);
+  });
+
+  it('should say hosting may have changed when a thread is ready, when it crashed, and when its back-off ran out', () => {
+    // Arrange
+    const { subject, workers, changes, advance } = rig();
+    subject.reconcile([wanted(A)]);
+
+    // Act
+    workers[0]?.ready();
+    const ready = changes.count;
+    workers[0]?.fail('segfault in a parser');
+    const crashed = changes.count;
+    advance(1_000);
+
+    // Assert
+    should([ready, crashed, changes.count]).deepEqual([1, 2, 3]);
+  });
+
   it('should tell a hosted session’s thread its transcript changed and its receipts, and nobody else', () => {
     // Arrange
     const { subject, workers } = rig();
@@ -184,6 +226,21 @@ describe('WorkerSupervisor', () => {
 
     // Assert
     should(workers[0]?.kinds()).deepEqual(['probe', 'attach', 'file', 'answers']);
+  });
+
+  it('should show the pool as status and profiles do: its size, its threads and the sessions on each', () => {
+    // Arrange
+    const { subject, workers } = rig(2);
+    const empty = subject.pool;
+
+    // Act
+    subject.reconcile([wanted(A), wanted(B)]);
+    for (const worker of workers) worker.ready();
+    subject.reconcile([wanted(A), wanted(B), wanted(C)]);
+
+    // Assert
+    should(empty).deepEqual({ max: 2, threads: 0, sessionsPerThread: [] });
+    should(subject.pool).deepEqual({ max: 2, threads: 2, sessionsPerThread: [2, 1] });
   });
 
   it('should start one thread per session, probe it, and host only once it answered', async () => {

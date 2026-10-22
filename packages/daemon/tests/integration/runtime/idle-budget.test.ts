@@ -44,16 +44,26 @@ const PROFILE_SECONDS = 30;
  * - Lowered after the Codex discovery window was anchored to each session's start
  *   (perf/codex-eager-window): measured locally, CPU 6% and 135 read/write system calls/s; the CI
  *   ceilings keep headroom over the CI figures above.
+ * - Lowered after stage 3d (session workers own every running session; the main thread runs no observation
+ *   loop): CI measured CPU 2.5% and 76 read/write system calls/s; locally 5.4% and 74/s. The read/write
+ *   ceiling now sits on its target.
  *
  * Lower a number here in the PR that earns it; never raise one.
  */
 const CEILINGS: Readonly<Record<string, number>> = {
-  'daemon CPU': 25,
+  'daemon CPU': 10,
   'child processes': 30,
   'longest event-loop block': 100,
   'file operations through the daemon’s ports': 100,
-  'read/write system calls': 2_500,
+  'read/write system calls': 1_000,
 };
+
+/**
+ * A main-thread frame that observes a session: a transcript read or parse, or a pane capture. Since stage 3d
+ * (docs/design/session-workers.md) each running session is observed on its own worker, and an idle main
+ * thread runs none of it — a document's own schema parse (zod) is not one of these.
+ */
+const OBSERVATION_FRAME = /transcript|Parser\b|parser\.ts|capture|pane-frames|PaneFrames/i;
 
 /** The report's own ranking, cut to what names the code to fix. */
 function ranking(report: PerformanceReport) {
@@ -158,6 +168,15 @@ describe('an idle daemon on a fleet the size of the owner’s Mac', () => {
     should(fleetRefresh?.count ?? 0).be.aboveOrEqual(2);
     should(usage.hits.get(ANTHROPIC_USAGE_PATH) ?? 0).be.aboveOrEqual(2);
     should(usage.hits.get(CODEX_USAGE_PATH) ?? 0).be.aboveOrEqual(1);
+    // What CI measured, so the next PR that earns a lower ceiling can read it from the log.
+    console.log(`idle budgets: ${report.budgets.map(budget => `${budget.name} ${String(budget.actual)}`).join('; ')}`);
+    const observing = [...report.cpuProfile.self, ...report.cpuProfile.inclusive]
+      .map(entry => entry.frame)
+      .filter(frame => OBSERVATION_FRAME.test(frame));
+    if (observing.length > 0)
+      throw new Error(
+        `the idle main thread observed a session itself: ${observing.join('; ')}\n\n${JSON.stringify(ranking(report), null, 2)}`,
+      );
     const over = report.budgets.filter(budget => budget.actual > (CEILINGS[budget.name] ?? budget.limit));
     if (over.length > 0)
       throw new Error(

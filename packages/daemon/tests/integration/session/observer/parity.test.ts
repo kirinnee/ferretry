@@ -282,6 +282,10 @@ async function pair(harness: 'claude' | 'codex', initialFrame: string, kind: Hos
       yieldToLoop: async () => undefined,
       paneState: async session => await hostPanes.paneState(session),
       sendEvidence: { read: async () => ({ readable: false, inputs: [] }) },
+      every: (intervalMs, tick) => {
+        const timer = setInterval(tick, intervalMs);
+        return () => clearInterval(timer);
+      },
     },
     fold,
   );
@@ -302,7 +306,9 @@ async function pair(harness: 'claude' | 'codex', initialFrame: string, kind: Hos
         report: () => {
           if (looks !== undefined) looks.answered += 1;
         },
-        observed: (session, patches) => workerHost?.observed(session, patches),
+        observed: (session, patches, transcript) => workerHost?.observed(session, patches, transcript),
+        liveness: (session, liveness) => workerHost?.livenessChanged(session, liveness),
+        changed: () => workerHost?.poke(),
         exited: () => undefined,
       },
       { ...DEFAULT_WORKER_SUPERVISOR_SETTINGS, cap: 8 },
@@ -328,6 +334,13 @@ async function pair(harness: 'claude' | 'codex', initialFrame: string, kind: Hos
       },
       clock,
       barrierMs: 5_000,
+      // Never "already seen": every read barrier asks the worker, as the scenario means it to.
+      stat: async () => undefined,
+      schedule: (delayMs, run) => {
+        const timer = setTimeout(run, delayMs);
+        return () => clearTimeout(timer);
+      },
+      activity: async work => await work(),
     });
     observer = workerHost;
     cleanups.add(async () => {

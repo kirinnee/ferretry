@@ -1,4 +1,4 @@
-import type { HealthView } from '@ferretry/protocol';
+import type { HealthView, SessionWorkerPool } from '@ferretry/protocol';
 import type { ApiResponse } from '../../api/http.ts';
 import { jsonResponse } from '../../api/responses.ts';
 import type { ApiRoute } from '../../api/route.ts';
@@ -62,6 +62,8 @@ export interface DaemonHealthSubsystem {
   /** This daemon's process id, so an operator can signal the process that is actually serving. */
   readonly pid: number;
   readonly scratch: ScratchReclamation;
+  /** The session-worker pool right now; absent where a daemon was built without one. */
+  readonly sessionWorkers?: () => SessionWorkerPool;
 }
 
 /**
@@ -74,7 +76,12 @@ export interface DaemonHealthSubsystem {
  * `wardenTimerArmed` is the daemon's `supervisesWarden` fact, not a guess: this daemon arms no sweep
  * timer, and reporting `true` would make a permanently missing sweep look like a broken one.
  */
-function view(report: DaemonHealthReport, pid: number, scratch: ScratchReclamation): HealthView {
+function view(
+  report: DaemonHealthReport,
+  pid: number,
+  scratch: ScratchReclamation,
+  sessionWorkers: SessionWorkerPool | undefined,
+): HealthView {
   return {
     ok: report.ok,
     bootstrapping: report.bootstrapping,
@@ -100,12 +107,13 @@ function view(report: DaemonHealthReport, pid: number, scratch: ScratchReclamati
     ...(report.bootstrapErrorMessages === undefined
       ? {}
       : { bootstrapErrorMessages: [...report.bootstrapErrorMessages] }),
+    ...(sessionWorkers === undefined ? {} : { sessionWorkers }),
     time: report.time,
   };
 }
 
 async function health(subsystem: DaemonHealthSubsystem): Promise<ApiResponse> {
-  return jsonResponse(view(await subsystem.report(), subsystem.pid, subsystem.scratch));
+  return jsonResponse(view(await subsystem.report(), subsystem.pid, subsystem.scratch, subsystem.sessionWorkers?.()));
 }
 
 /**

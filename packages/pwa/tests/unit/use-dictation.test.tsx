@@ -1510,6 +1510,86 @@ describe('useDictation — clean-up with a key this device holds', () => {
       await view.unmount();
     });
 
+    describe('the timeline of a dictation', () => {
+      /** Every read of the clock moves it on by 10 ms, so each measured span has a stable, non-zero length. */
+      const ticking = () => {
+        const reads = { at: 0 };
+        return () => {
+          reads.at += 10;
+          return reads.at;
+        };
+      };
+
+      it('records how long Stop took and how long the hosted cleanup took, for a device key', async () => {
+        const { options: base, r, provider } = await options(completion('Raw words.'), false);
+        const view = await harness({ ...base, monotonic: ticking(), recognition: provider });
+        await dictate(view, provider, r.clock);
+        const timeline = r.log.snapshot().entries[0]?.timeline;
+        expect(timeline?.speech.engine).toBe('web-speech');
+        expect(timeline?.speech.provider).toBe('browser');
+        expect(timeline?.speech.totalMs).toBeGreaterThan(0);
+        expect(timeline?.cleanup).toMatchObject({ provider: 'groq', via: 'device', outcome: 'cleaned', attempts: 1 });
+        expect(timeline?.cleanup?.totalMs).toBeGreaterThan(0);
+        expect(timeline?.totalMs).toBeGreaterThan(timeline?.cleanup?.totalMs ?? Number.POSITIVE_INFINITY);
+        expect(timeline?.insertMs).toBeUndefined();
+        await view.unmount();
+      });
+
+      it('adds the insertion time and the time in the review box when the words are inserted', async () => {
+        const { options: base, r, provider } = await options(completion('Raw words.'), true);
+        const view = await harness({ ...base, monotonic: ticking(), recognition: provider });
+        await dictate(view, provider, r.clock);
+        await interact(() => view.handle().insert('Raw words.'));
+        const timeline = r.log.snapshot().entries[0]?.timeline;
+        expect(timeline?.insertMs).toBeGreaterThan(0);
+        expect(timeline?.reviewMs).toBeGreaterThan(0);
+        expect(r.debug.snapshot().records[0]?.timeline).toEqual(timeline);
+        await view.unmount();
+      });
+
+      it('times a refused call as a failed one', async () => {
+        const { options: base, r, provider } = await options(() => new Response('{}', { status: 401 }), true);
+        const view = await harness({ ...base, monotonic: ticking(), recognition: provider });
+        await dictate(view, provider, r.clock);
+        const timeline = r.log.snapshot().entries[0]?.timeline;
+        expect(timeline?.cleanup).toMatchObject({ provider: 'groq', via: 'device', outcome: 'failed' });
+        expect(timeline?.cleanup?.totalMs).toBeGreaterThan(0);
+        await view.unmount();
+      });
+
+      it('times the daemon path and keeps the provider time it reported', async () => {
+        const { options: base, r, provider } = await options(completion('unused'), false);
+        const view = await harness({
+          ...base,
+          speedupKeys: null,
+          monotonic: ticking(),
+          recognition: provider,
+          enhancementFetch: async () => Response.json({ text: 'From the daemon.', latencyMs: 410 }),
+        });
+        await dictate(view, provider, r.clock);
+        const timeline = r.log.snapshot().entries[0]?.timeline;
+        expect(timeline?.cleanup).toMatchObject({ via: 'daemon', outcome: 'cleaned', providerMs: 410 });
+        await view.unmount();
+      });
+
+      it('times the on-device correction when no hosted cleanup is configured', async () => {
+        const r = rig(false);
+        const provider = fakeRecognitionProvider();
+        const view = await harness({
+          recognition: provider,
+          monotonic: ticking(),
+          dictationDebug: r.debug,
+          transcriptionLog: r.log,
+          now: () => r.clock.t,
+        });
+        await dictate(view, provider, r.clock);
+        const timeline = r.log.snapshot().entries[0]?.timeline;
+        expect(timeline?.speech.engine).toBe('web-speech');
+        expect(timeline?.cleanup).toMatchObject({ provider: 'local', via: 'local' });
+        await view.unmount();
+      });
+    });
+
     it('settles the entry as discarded on cancel, on a new start and when dictation is switched off', async () => {
       const { options: base, r, provider } = await options(completion('Raw words.'), false);
       const view = await harness({ ...base, recognition: provider });

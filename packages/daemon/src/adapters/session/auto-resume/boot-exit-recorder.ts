@@ -1,7 +1,7 @@
 import type { AutoResumeCandidate } from '../../../lib/session/auto-resume/types.ts';
 import type { ExitedSessionTransition, SessionExitObservation } from '../../../lib/session/health/exit.ts';
 import type { SessionExitPort } from '../../../lib/session/health/service.ts';
-import type { SurveyedSession } from '../../../lib/session/health/types.ts';
+import type { ExitObserveOptions, SurveyedSession } from '../../../lib/session/health/types.ts';
 
 /**
  * Remembers which sessions the FIRST self-check after boot settled because their terminal was gone.
@@ -24,8 +24,11 @@ export class BootExitRecorder implements SessionExitPort {
     private readonly clock: { now(): string },
   ) {}
 
-  observe(survey: readonly SurveyedSession[]): Promise<readonly SessionExitObservation[]> {
-    return this.inner.observe(survey);
+  observe(
+    survey: readonly SurveyedSession[],
+    options?: ExitObserveOptions,
+  ): Promise<readonly SessionExitObservation[]> {
+    return this.inner.observe(survey, options);
   }
 
   async settle(observation: SessionExitObservation, transition: ExitedSessionTransition): Promise<boolean> {

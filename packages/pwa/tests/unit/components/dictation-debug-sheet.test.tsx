@@ -119,7 +119,35 @@ const open = async (container: HTMLElement, title: string): Promise<void> => {
   await interact(() => toggle(container, title).click());
 };
 
+const timed: DictationDebugRecord = {
+  ...record(cleanedTrace),
+  timeline: {
+    totalMs: 1_200,
+    speech: { engine: 'parakeet', totalMs: 500 },
+    cleanup: { provider: 'groq', via: 'device', outcome: 'cleaned', attempts: 1, totalMs: 600, firstByteMs: 120 },
+    insertMs: 4,
+  },
+};
+
 describe('<DictationDebugSheet>', () => {
+  it('shows how long each stage took, with the slowest named, when the record carries a timeline', async () => {
+    const view = await mount(
+      <DictationDebugSheet record={timed} copy={async () => undefined} onClose={() => undefined} />,
+    );
+    const timeline = section(view.container, 'Timeline');
+    expect(toggle(view.container, 'Timeline').getAttribute('aria-expanded')).toBe('true');
+    expect(timeline.querySelector('[data-timeline-bar]')).not.toBeNull();
+    expect(timeline.textContent).toContain('Cleanup 600 ms · slowest');
+    expect(timeline.textContent).toContain('Stop to composer');
+    await view.unmount();
+  });
+
+  it('has no timeline section for a record without one', async () => {
+    const { view } = await showSheet(cleanedTrace);
+    expect(view.container.querySelector('[data-debug-section="Timeline"]')).toBeNull();
+    await view.unmount();
+  });
+
   it('says where the record lives and opens on the overview and the final text', async () => {
     const { view } = await showSheet(cleanedTrace);
     const text = view.container.textContent ?? '';

@@ -22,6 +22,7 @@
  * Home Screen refusal that constructor presence alone cannot prove.
  */
 
+import type { SessionTimings } from './dictation-timeline.ts';
 import type { CaptureMonitor } from './level-monitor.ts';
 
 type BrowserRecognitionImplementation = 'standard' | 'webkit';
@@ -317,6 +318,8 @@ export interface BrowserRecognitionSessionOptions {
 export interface BrowserRecognitionSessionLike {
   finish(): Promise<string>;
   cancel(): void;
+  /** What this session measured about its own last `finish`. Optional: a session that measures nothing omits it. */
+  timings?(): SessionTimings | undefined;
 }
 
 type SessionState = 'active' | 'finishing' | 'finished' | 'failed' | 'cancelled';

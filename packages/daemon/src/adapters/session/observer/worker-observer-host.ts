@@ -14,11 +14,13 @@ import {
   type SessionObserver,
   type SessionObserverHost,
   SessionTurnWatcher,
+  type TranscriptStamp,
   TURN_WATCH_INTERVAL_MS,
   type TurnStateChange,
   type TurnWatchLoop,
   type TurnWatchReport,
   type TurnWatchSession,
+  type WorkerLiveness,
 } from '../../../lib/index.ts';
 import type { InlineObserverHost } from './inline-observer-host.ts';
 import type { SessionObservationApplier } from './session-observation-applier.ts';
@@ -49,7 +51,21 @@ export interface WorkerObserverPorts {
   readonly clock: ClockPort;
   /** How long a read waits on its session's worker before it projects the session itself. */
   readonly barrierMs: number;
+  /** A transcript's size and modification time now, to tell whether a worker has read all of it. */
+  readonly stat: (file: string) => Promise<TranscriptStamp | undefined>;
+  /** Runs `run` after `delayMs` without holding the daemon open; answers how to cancel it. */
+  readonly schedule: (delayMs: number, run: () => void) => () => void;
+  /** Runs one reconcile as the profile's `turn watcher` activity. */
+  readonly activity: (work: () => Promise<unknown>) => Promise<unknown>;
 }
+
+/** How long after a change the host reconciles hosting: a burst of writes is one reconcile. */
+const RECONCILE_SETTLE_MS = 250;
+/**
+ * The slow backstop: hosting is reconciled at least this often, so what no write announces — a transcript
+ * proved after its session started, a pane renamed — still reaches the session's worker.
+ */
+const RECONCILE_BACKSTOP_MS = 30_000;
 
 /** `promise`, or a rejection once `ms` have passed. */
 async function within<T>(promise: Promise<T>, ms: number): Promise<T> {
@@ -89,17 +105,71 @@ export class WorkerObserverHost implements SessionObserverHost {
   private readonly applying = new Map<SessionId, Promise<void>>();
   /** The transcript each hosted session's worker is told about, by session. */
   private readonly watches = new Map<SessionId, { readonly file: string; readonly close: () => void }>();
+  /** The transcript bytes each session's worker last decided from. */
+  private readonly stamps = new Map<SessionId, TranscriptStamp>();
+  /** Each session's last pushed liveness look. */
+  private readonly pushed = new Map<SessionId, WorkerLiveness>();
+  private readonly loop: WorkerTurnLoop;
+  private armed = false;
+  private next: { readonly at: number; readonly cancel: () => void } | undefined;
+  private ticking = false;
+  private tickAgain = false;
 
   constructor(private readonly ports: WorkerObserverPorts) {
-    this.turns = new WorkerTurnLoop(ports, this);
-    // The worker decides from what this thread knows: every change is forwarded as it is learned.
+    this.loop = new WorkerTurnLoop(ports, this);
+    this.turns = this.loop;
+    // The worker decides from what this thread knows: every change is forwarded as it is learned — and a
+    // change may move a session into or out of the running set, so hosting is reconciled after it.
     this.unsubscribe = ports.inline.onFacts((id, facts) => {
       if (facts !== undefined) ports.supervisor.facts(id, facts);
+      this.poke(RECONCILE_SETTLE_MS);
     });
   }
 
+  /**
+   * Starts observing. There is no tick: hosting is reconciled now, after every change this thread learns
+   * of and whenever a worker becomes ready or a back-off ends, and on a 30 s backstop; and only while some
+   * session has no worker — starting, backing off, kept inline after five crashes, or ended with a turn
+   * still to clear — is it looked at here every 2 s, as stage 3a did.
+   */
+  arm(): void {
+    this.armed = true;
+    this.poke(0);
+  }
+
+  /** Reconcile (and look at what no worker has) after `delayMs`, unless that is already due sooner. */
+  poke(delayMs = RECONCILE_SETTLE_MS): void {
+    if (!this.armed) return;
+    const at = Date.parse(this.ports.clock.now()) + delayMs;
+    if (this.next !== undefined && this.next.at <= at) return;
+    this.next?.cancel();
+    const cancel = this.ports.schedule(delayMs, () => {
+      if (this.next?.cancel === cancel) this.next = undefined;
+      void this.tick();
+    });
+    this.next = { at, cancel };
+  }
+
+  private async tick(): Promise<void> {
+    if (this.ticking) {
+      this.tickAgain = true;
+      return;
+    }
+    this.ticking = true;
+    try {
+      await this.ports.activity(async () => await this.loop.run()).catch(() => undefined);
+    } finally {
+      this.ticking = false;
+    }
+    if (this.tickAgain) {
+      this.tickAgain = false;
+      this.poke();
+    } else this.poke(this.loop.needsInline ? TURN_WATCH_INTERVAL_MS : RECONCILE_BACKSTOP_MS);
+  }
+
   /** What a session's worker found, unasked: applied in order, after anything still being applied. */
-  observed(session: SessionId, patches: readonly ObserverPatch[]): void {
+  observed(session: SessionId, patches: readonly ObserverPatch[], transcript?: TranscriptStamp): void {
+    if (transcript !== undefined) this.stamps.set(session, transcript);
     if (patches.length === 0) return;
     const previous = this.applying.get(session) ?? Promise.resolve();
     const next = previous.then(async () => {
@@ -125,6 +195,11 @@ export class WorkerObserverHost implements SessionObserverHost {
     });
   }
 
+  /** A session's screen or transcript tail changed: what the Warden's next liveness look will use. */
+  livenessChanged(session: SessionId, liveness: WorkerLiveness): void {
+    this.pushed.set(session, liveness);
+  }
+
   /** The answer ledger grew: the session's worker decides its question from the receipts as they are now. */
   async answersChanged(session: SessionId): Promise<void> {
     if (!this.ports.supervisor.attached(session)) return;
@@ -136,6 +211,10 @@ export class WorkerObserverHost implements SessionObserverHost {
    * looks now and its patches are applied before this resolves; one that cannot is projected here.
    */
   async project(id: SessionId): Promise<void> {
+    if (this.ports.supervisor.hosts(id) && (await this.seenAll(id))) {
+      await this.applying.get(id);
+      return;
+    }
     if (this.ports.supervisor.hosts(id))
       try {
         await within(this.ports.supervisor.request(id, { kind: 'observe' }), this.ports.barrierMs);
@@ -145,6 +224,18 @@ export class WorkerObserverHost implements SessionObserverHost {
         // Fall through: the read gets the main thread's own projection, as before workers.
       }
     await this.ports.inline.project(id);
+  }
+
+  /**
+   * Whether the session's worker has decided from every byte its transcript holds now: one `stat` here,
+   * compared with the bytes its last look read. Then nothing is left for a barrier to show it.
+   */
+  private async seenAll(id: SessionId): Promise<boolean> {
+    const file = this.watches.get(id)?.file;
+    const stamp = this.stamps.get(id);
+    if (file === undefined || stamp === undefined) return false;
+    const now = await this.ports.stat(file).catch(() => undefined);
+    return now !== undefined && now.size === stamp.size && now.mtimeMs === stamp.mtimeMs;
   }
 
   /** The monitor's question pass, for the sessions no worker observes: the rest are their workers'. */
@@ -159,7 +250,9 @@ export class WorkerObserverHost implements SessionObserverHost {
   async liveness(target: LivenessTarget): Promise<LivenessSample> {
     const id = target.id as SessionId;
     if (!this.ports.supervisor.hosts(id)) return await this.ports.inline.liveness(target);
-    const looked = await this.ports.supervisor.request(id, { kind: 'liveness' }).catch(() => undefined);
+    // Pushed by the worker whenever it changed; asked for only when nothing has been pushed yet.
+    const looked =
+      this.pushed.get(id) ?? (await this.ports.supervisor.request(id, { kind: 'liveness' }).catch(() => undefined));
     if (looked === undefined) return await this.ports.inline.liveness(target);
     const screen =
       looked.screen === undefined ? undefined : await this.ports.liveness.redact(looked.screen).catch(() => undefined);
@@ -198,6 +291,9 @@ export class WorkerObserverHost implements SessionObserverHost {
   }
 
   close(): void {
+    this.armed = false;
+    this.next?.cancel();
+    this.next = undefined;
     this.unsubscribe();
     for (const watch of this.watches.values()) watch.close();
     this.watches.clear();
@@ -215,6 +311,8 @@ export class WorkerObserverHost implements SessionObserverHost {
       if (keep.get(id) === watch.file) continue;
       watch.close();
       this.watches.delete(id);
+      this.stamps.delete(id);
+      if (!keep.has(id)) this.pushed.delete(id);
     }
     for (const [id, file] of keep) {
       if (this.watches.has(id)) continue;
@@ -232,6 +330,11 @@ class WorkerTurnLoop implements TurnWatchLoop {
   readonly intervalMs = TURN_WATCH_INTERVAL_MS;
   /** The sessions this tick leaves to the main thread; read by the inline watcher's roster. */
   private local: readonly TurnWatchSession[] = [];
+
+  /** Whether the last tick left any session to this thread, which is then looked at again in 2 s. */
+  get needsInline(): boolean {
+    return this.local.length > 0;
+  }
   private readonly inlineWatcher: SessionTurnWatcher;
   private running = false;
 

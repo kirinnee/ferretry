@@ -17,6 +17,7 @@ import {
   type TranscriptionLogRecords,
   type TranscriptionLogStorage,
 } from '../../../src/lib/stt/transcription-log.ts';
+import type { DictationTimeline } from '../../../src/lib/stt/dictation-timeline.ts';
 
 const NOW = 1_800_000_000_000;
 
@@ -376,6 +377,51 @@ describe('TranscriptionLog', () => {
     should(Object.keys(log.snapshot().entries[0] ?? {}).sort()).deepEqual(
       ['at', 'cleaned', 'durationMs', 'engine', 'id', 'outcome', 'prompt', 'raw', 'sessionId', 'sessionLabel'].sort(),
     );
+  });
+});
+
+describe('TranscriptionLog timelines', () => {
+  const timeline: DictationTimeline = {
+    totalMs: 1_000,
+    speech: { engine: 'parakeet', totalMs: 600 },
+    cleanup: { provider: 'groq', via: 'device', outcome: 'cleaned', attempts: 1, totalMs: 300 },
+  };
+
+  it('should keep a dictation’s timeline, persist it, and add the insertion times when they are known', async () => {
+    // Arrange
+    const records = new FakeRecords();
+    const log = build(records);
+    const id = log.add(entry({ timeline })) as string;
+
+    // Act
+    log.update(id, { outcome: 'inserted', timeline: { ...timeline, insertMs: 12, reviewMs: 3_000 } });
+    await settle();
+
+    // Assert
+    should(log.snapshot().entries[0]?.timeline).eql({ ...timeline, insertMs: 12, reviewMs: 3_000 });
+    should((records.rows.get(id) as TranscriptionEntry).timeline?.insertMs).equal(12);
+  });
+
+  it('should read a timeline back from the device, and drop a row whose timeline has a stray field', async () => {
+    // Arrange
+    const records = new FakeRecords();
+    records.rows.set('good', { id: 'good', at: NOW, engine: 'parakeet', raw: 'a', outcome: 'inserted', timeline });
+    records.rows.set('bad', {
+      id: 'bad',
+      at: NOW,
+      engine: 'parakeet',
+      raw: 'b',
+      outcome: 'inserted',
+      timeline: { ...timeline, transcript: 'hello' },
+    });
+    const log = build(records);
+
+    // Act
+    await log.hydrate();
+
+    // Assert
+    should(log.snapshot().entries.map(item => item.id)).eql(['good']);
+    should(log.snapshot().entries[0]?.timeline).eql(timeline);
   });
 });
 

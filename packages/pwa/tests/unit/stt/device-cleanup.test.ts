@@ -15,7 +15,7 @@ import {
   requestDeviceCleanup,
   testDeviceKey,
 } from '../../../src/lib/stt/device-cleanup.ts';
-import { RemoteEnhancementError } from '../../../src/lib/stt/remote-enhancement.ts';
+import { RemoteEnhancementError, type RemoteEnhancementResult } from '../../../src/lib/stt/remote-enhancement.ts';
 import { DeviceSpeedupKeys, type SpeedupKeyRecords } from '../../../src/lib/stt/speedup-keys.ts';
 import { DEFAULT_VOICE_CLEANUP } from '../../../src/lib/stt/voice-cleanup.ts';
 
@@ -97,6 +97,23 @@ const rejection = async (work: Promise<unknown>): Promise<RemoteEnhancementError
   return outcome as RemoteEnhancementError;
 };
 
+/** The result as a caller reads it, leaving out how long the call took, which has its own tests. */
+const withoutTiming = (result: RemoteEnhancementResult | undefined) => {
+  if (result === undefined) return undefined;
+  const { timing: _timing, ...rest } = result;
+  return rest;
+};
+
+/** A monotonic clock that moves `step` ms every time it is read. */
+const ticking = (step: number) => {
+  let at = 0;
+  return () => {
+    const read = at;
+    at += step;
+    return read;
+  };
+};
+
 const userMessage = (call: Call | undefined): string =>
   String((call?.body?.messages as { content: string }[] | undefined)?.[1]?.content ?? '');
 
@@ -112,7 +129,11 @@ describe('clean-up with a key this device holds', () => {
     );
 
     // Assert
-    should(result).eql({ text: 'Hello world, this is the dictation.', provider: 'groq', model: 'openai/gpt-oss-120b' });
+    should(withoutTiming(result)).eql({
+      text: 'Hello world, this is the dictation.',
+      provider: 'groq',
+      model: 'openai/gpt-oss-120b',
+    });
     should(calls).have.length(1);
     should(calls[0]?.url).equal('https://api.groq.com/openai/v1/chat/completions');
     should(calls[0]?.body).containDeep({
@@ -152,7 +173,7 @@ describe('clean-up with a key this device holds', () => {
     const result = await requestDeviceCleanup(keys, input({ provider: 'cerebras', model: 'gpt-oss-120b' }));
 
     // Assert
-    should(result).eql({
+    should(withoutTiming(result)).eql({
       text: 'hello wold this is the dictation',
       provider: 'cerebras',
       model: 'gpt-oss-120b',
@@ -558,5 +579,76 @@ describe('the debug record of a call', () => {
     should(refusal.trace).be.undefined();
     should(badModel.trace).be.undefined();
     should(empty?.trace).be.undefined();
+  });
+});
+
+describe('timing a clean-up call with a key this device holds', () => {
+  it('should time the call, its first byte and the tokens the provider says it used', async () => {
+    // Arrange
+    const { keys } = await provider([
+      () =>
+        Response.json({
+          choices: [{ message: { content: 'Hello world, this is the dictation.' }, finish_reason: 'stop' }],
+          usage: { prompt_tokens: 120, completion_tokens: 9, total_tokens: 129 },
+        }),
+    ]);
+
+    // Act
+    const result = await requestDeviceCleanup(keys, input({ monotonic: ticking(10) }));
+
+    // Assert: reads are call start 0, attempt start 10, first byte 20, attempt end 30, call end 40
+    should(result?.timing).eql({ totalMs: 40, firstByteMs: 10, attempts: 1, promptTokens: 120, completionTokens: 9 });
+  });
+
+  it('should leave out the tokens when the provider does not say', async () => {
+    // Arrange
+    const { keys } = await provider([reply('Hello world, this is the dictation.')]);
+
+    // Act
+    const result = await requestDeviceCleanup(keys, input({ monotonic: ticking(1) }));
+
+    // Assert
+    should(result?.timing).not.have.property('promptTokens');
+    should(result?.timing).not.have.property('completionTokens');
+  });
+
+  it('should count the retry without the conversation as a second attempt inside one total', async () => {
+    // Arrange
+    const { keys } = await provider([status(413), reply('Hello world this is the dictation.')]);
+    const cleanup = { ...DEFAULT_VOICE_CLEANUP, useConversation: true };
+
+    // Act
+    const result = await requestDeviceCleanup(
+      keys,
+      input({ cleanup, context: ['an earlier message that is long enough to keep'], monotonic: ticking(5) }),
+    );
+
+    // Assert
+    should(result?.timing?.attempts).equal(2);
+    should(result?.timing?.retried).equal('without-context');
+    should(result?.timing?.totalMs).be.above(result?.timing?.firstByteMs ?? 0);
+  });
+
+  it('should time a call that failed too, since it still took its time', async () => {
+    // Arrange
+    const { keys } = await provider([status(429)]);
+
+    // Act
+    const failure = await rejection(requestDeviceCleanup(keys, input({ monotonic: ticking(7) })));
+
+    // Assert
+    should(failure.timing?.attempts).equal(1);
+    should(failure.timing?.totalMs).be.above(0);
+  });
+
+  it('should time nothing when this device holds no key', async () => {
+    // Arrange
+    const { keys } = await provider([reply('x')], { key: false });
+
+    // Act
+    const result = await requestDeviceCleanup(keys, input({ monotonic: ticking(1) }));
+
+    // Assert
+    should(result).be.undefined();
   });
 });

@@ -96,6 +96,40 @@ describe('DictationDebugLog', () => {
     should(log.snapshot().records[0]?.at).equal(2);
   });
 
+  it('should keep a call’s timeline beside its trace, and let the insertion times be added later', () => {
+    // Arrange
+    const log = new DictationDebugLog(new MemoryStorage());
+    log.setEnabled(true);
+    const timeline = { totalMs: 900, speech: { engine: 'parakeet' as const, totalMs: 500 } };
+    const id = log.record(traceOf('one'), 1, timeline) as string;
+    const other = log.record(traceOf('two'), 2) as string;
+
+    // Act
+    log.annotate(id, { ...timeline, insertMs: 8, reviewMs: 2_000 });
+
+    // Assert
+    should(log.snapshot().records.find(record => record.id === id)?.timeline).eql({
+      ...timeline,
+      insertMs: 8,
+      reviewMs: 2_000,
+    });
+    should(log.snapshot().records.find(record => record.id === other)).not.have.property('timeline');
+  });
+
+  it('should leave the ring alone when told about a call it no longer holds', () => {
+    // Arrange
+    const log = new DictationDebugLog(new MemoryStorage());
+    log.setEnabled(true);
+    log.record(traceOf('one'), 1);
+    const before = log.snapshot();
+
+    // Act
+    log.annotate('debug-gone', { totalMs: 1, speech: { engine: 'parakeet', totalMs: 1 } });
+
+    // Assert
+    should(log.snapshot()).equal(before);
+  });
+
   it('should hold at most the last ten calls, dropping the oldest', () => {
     // Arrange
     const log = new DictationDebugLog(new MemoryStorage());

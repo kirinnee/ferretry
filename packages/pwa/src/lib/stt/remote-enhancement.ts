@@ -24,6 +24,7 @@ import {
 } from '@ferretry/protocol';
 import type { DaemonConnection } from '../daemon-connection.ts';
 import { daemonRequest } from '../daemon-transport.ts';
+import type { CleanupCallDetail } from './dictation-timeline.ts';
 import type { DictionaryEntry } from './enhancement.ts';
 import type { RemoteEnhancementProviderId } from './stt-settings.ts';
 
@@ -54,6 +55,8 @@ export class RemoteEnhancementError extends Error {
   readonly status: number;
   /** The call's debug record, when one was asked for and the call got far enough to have one. */
   trace?: CleanupTrace;
+  /** How long this browser's own call took, set on a failure too: a call that failed still took its time. */
+  timing?: CleanupCallDetail;
 
   constructor(code: RemoteEnhancementErrorCode, message: string, status = 0) {
     super(message);
@@ -90,6 +93,8 @@ export interface RemoteEnhancementResult {
   readonly keptReason?: string;
   /** This call's debug record: present only when it was asked for. */
   readonly trace?: CleanupTrace;
+  /** How long the call took, when this browser made it with its own key. */
+  readonly timing?: CleanupCallDetail;
 }
 
 const errorCode = (status: number, code: unknown): RemoteEnhancementErrorCode => {

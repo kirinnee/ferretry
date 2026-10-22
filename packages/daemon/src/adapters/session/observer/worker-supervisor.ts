@@ -9,9 +9,11 @@ import {
   type SessionId,
   sessionWorkerRestart,
   type ToSessionWorker,
+  type TranscriptStamp,
   type WorkerAnswers,
   type WorkerAsk,
   type WorkerChild,
+  type WorkerLiveness,
 } from '../../../lib/index.ts';
 
 /** The part of a Worker the supervisor uses, so a test can stand in a thread that misbehaves on cue. */
@@ -42,10 +44,17 @@ export interface WorkerSupervisorPorts {
   notice(session: SessionId, message: string): void;
   /** Every look's report, so `fy daemon profile` still sees the work (design §6.5). */
   report(report: WorkerLookReport): void;
-  /** What a session's worker found, unasked, in the order it must be applied. */
-  observed(session: SessionId, patches: readonly ObserverPatch[]): void;
+  /**
+   * What a session's worker found, unasked, in the order it must be applied — and which transcript bytes
+   * it decided from, so a read can tell whether the worker has seen everything there is.
+   */
+  observed(session: SessionId, patches: readonly ObserverPatch[], transcript: TranscriptStamp | undefined): void;
+  /** A session's screen or transcript tail changed: its liveness look, pushed. */
+  liveness(session: SessionId, liveness: WorkerLiveness): void;
   /** A session's pane died, as its worker saw it. */
   exited(session: SessionId): void;
+  /** Which sessions are hosted may have changed — a thread answered its probe, crashed, or a back-off ran out. */
+  changed(): void;
 }
 
 export interface WorkerSupervisorSettings {
@@ -136,6 +145,19 @@ export class WorkerSupervisor {
   /** Looks waiting on a worker: the gauge `fy daemon profile` samples. */
   get inFlight(): number {
     return this.pending.size;
+  }
+
+  /**
+   * The pool as `fy daemon status` and a performance report show it: the configured size, the threads
+   * running now, and how many sessions each observes, busiest first.
+   */
+  get pool(): { readonly max: number; readonly threads: number; readonly sessionsPerThread: readonly number[] } {
+    const running = [...this.threads.values()].filter(thread => !thread.ended);
+    return {
+      max: this.settings.cap,
+      threads: running.length,
+      sessionsPerThread: running.map(thread => thread.sessions.size).sort((a, b) => b - a),
+    };
   }
 
   /** Threads running now. */
@@ -310,13 +332,18 @@ export class WorkerSupervisor {
     if (thread.ended) return;
     if ('probe' in message) {
       thread.ready = true;
+      this.ports.changed();
       return;
     }
     switch (message.kind) {
       case 'observed':
         this.ports.report({ kind: 'look', lookMs: message.lookMs, children: message.metrics.children });
         if (this.current(thread, message.session, message.generation))
-          this.ports.observed(message.session as SessionId, message.patches);
+          this.ports.observed(message.session as SessionId, message.patches, message.transcript);
+        return;
+      case 'liveness':
+        if (this.current(thread, message.session, message.generation))
+          this.ports.liveness(message.session as SessionId, message.liveness);
         return;
       case 'answered': {
         const pending = this.pending.get(message.request);
@@ -357,9 +384,14 @@ export class WorkerSupervisor {
           session,
           `${session} crashed its session worker ${String(history.length)} times in ten minutes and is observed on the main thread until the daemon restarts; the last failure: ${reason}`,
         );
-      } else this.retryAt.set(session, now + verdict.afterMs);
+      } else {
+        this.retryAt.set(session, now + verdict.afterMs);
+        // Nothing else would bring the session back to a worker: say so when its back-off is over.
+        this.ports.schedule(verdict.afterMs, () => this.ports.changed());
+      }
     }
     this.end(thread, new Error(reason));
+    this.ports.changed();
   }
 
   private end(thread: Thread, error: Error): void {

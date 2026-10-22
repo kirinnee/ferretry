@@ -21,6 +21,7 @@
  */
 
 import type { CleanupTrace } from '@ferretry/protocol';
+import type { DictationTimeline } from './dictation-timeline.ts';
 
 /** The sole browser-storage key for the debug switch. */
 export const DICTATION_DEBUG_KEY = 'fy-dictation-debug-v1';
@@ -34,6 +35,8 @@ export interface DictationDebugRecord {
   /** Wall-clock start of the call, epoch milliseconds. */
   readonly at: number;
   readonly trace: CleanupTrace;
+  /** How long each stage of the dictation took: numbers only, no text. */
+  readonly timeline?: DictationTimeline;
 }
 
 export interface DictationDebugSnapshot {
@@ -101,14 +104,28 @@ export class DictationDebugLog {
    * Keep one call's record, or nothing at all when the switch is off. Returns the record's id so the
    * dictation it belongs to can point at it.
    */
-  record(trace: CleanupTrace, at: number): string | undefined {
+  record(trace: CleanupTrace, at: number, timeline?: DictationTimeline): string | undefined {
     const { enabled, records } = this.snapshot();
     if (!enabled) return undefined;
     this.#issued += 1;
     const id = `debug-${String(this.#issued)}`;
-    this.#snapshot = { enabled, records: [{ id, at, trace }, ...records].slice(0, DICTATION_DEBUG_LIMIT) };
+    this.#snapshot = {
+      enabled,
+      records: [{ id, at, trace, ...(timeline === undefined ? {} : { timeline }) }, ...records].slice(
+        0,
+        DICTATION_DEBUG_LIMIT,
+      ),
+    };
     this.#publish();
     return id;
+  }
+
+  /** Replace a kept record's timeline once the stages after the call are known. A record that has rolled off is simply not there. */
+  annotate(id: string, timeline: DictationTimeline): void {
+    const { enabled, records } = this.snapshot();
+    if (!records.some(record => record.id === id)) return;
+    this.#snapshot = { enabled, records: records.map(record => (record.id === id ? { ...record, timeline } : record)) };
+    this.#publish();
   }
 
   /** Forget every record, keeping the switch where it is. */

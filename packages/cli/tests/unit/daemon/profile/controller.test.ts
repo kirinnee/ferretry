@@ -9,6 +9,7 @@ import {
   type SyscallTrace,
 } from '@ferretry/protocol';
 import should from 'should';
+import { minimalReport } from '../../../../../protocol/tests/performance-report-fixtures.ts';
 import {
   type IProfileGateway,
   type ISyscallTracer,
@@ -17,7 +18,8 @@ import {
   ProtocolProfileGateway,
   type SyscallTraceOutcome,
 } from '../../../../src/lib/daemon/profile/controller.ts';
-import { minimalReport } from '../../../../../protocol/tests/performance-report-fixtures.ts';
+import type { IProgress } from '../../../../src/lib/progress/index.ts';
+import { RecordingProgress } from '../../progress/fixtures.ts';
 
 const START = Date.parse('2026-10-21T10:00:00.000Z');
 
@@ -76,8 +78,11 @@ class Harness {
     },
   };
 
+  progress: IProgress | undefined;
+
   subject(): ProfileController {
     return new ProfileController({
+      ...(this.progress === undefined ? {} : { progress: this.progress }),
       gateway: this.gateway,
       tracer: this.tracer,
       out: {
@@ -346,5 +351,42 @@ describe('ProtocolProfileGateway', () => {
     // Assert
     should(actual).equal(expected);
     should(calls[0]?.path).equal('/healthz');
+  });
+});
+
+describe('ProfileController progress', () => {
+  it('should measure against the window it asked for, and complete the step', async () => {
+    // Arrange
+    const harness = new Harness();
+    const progress = new RecordingProgress();
+    harness.progress = progress;
+
+    // Act
+    await harness.subject().run({ seconds: '45' });
+
+    // Assert
+    should(progress.events).deepEqual(['start Measuring the daemon [45s]', 'succeed']);
+  });
+
+  it('should fail the step when the daemon never finishes the profile', async () => {
+    // Arrange
+    const harness = new Harness();
+    const progress = new RecordingProgress();
+    harness.progress = progress;
+    harness.startedView = running(30);
+    harness.viewAnswers = [];
+    harness.gateway.view = async () => {
+      throw new Error('gone');
+    };
+
+    // Act
+    await harness
+      .subject()
+      .run({})
+      .catch(() => undefined);
+
+    // Assert
+    should(progress.events[0]).equal('start Measuring the daemon [30s]');
+    should(progress.events.at(-1)).equal('fail');
   });
 });

@@ -16,6 +16,7 @@ import {
 } from '@ferretry/protocol';
 import type { InstalledDaemonBinary } from '../daemon/binary.ts';
 import type { IClockPort, IDaemonOutput, IDaemonPrompt, IServiceFilePort } from '../daemon/ports.ts';
+import { formatElapsed, type IProgress, NO_PROGRESS } from '../progress/index.ts';
 import { passMidTurn } from './mid-turn.ts';
 import type {
   IDaemonUpdateViewPort,
@@ -25,7 +26,8 @@ import type {
   IStandaloneReleasePort,
   IUpdateLifecyclePort,
 } from './ports.ts';
-import { isYes, lastLine, type NixProfileSwitch } from './profile-switch.ts';
+import { isYes, lastLine, lastLines, type NixProfileSwitch } from './profile-switch.ts';
+import { stepObserver } from './step-observer.ts';
 
 /** Flags `fy daemon update` accepts. */
 export interface DaemonUpdateOptions {
@@ -69,6 +71,8 @@ export interface DaemonUpdaterDeps {
   readonly healthTimeoutMs?: number;
   /** How often to look again while waiting: for idle, and for the new version. */
   readonly pollMs?: number;
+  /** What a long update shows while it works. Absent, it shows nothing. */
+  readonly progress?: IProgress;
 }
 
 /** Raised for an update refused before anything changed; the message is the whole story. */
@@ -90,6 +94,8 @@ interface UpdateIntent {
   readonly current: string;
   readonly target: string;
   readonly running: boolean;
+  /** When the command began, for the time the finished update reports. */
+  readonly startedAt: number;
 }
 
 /** How one method's upgrade went, and how to undo it. */
@@ -115,17 +121,21 @@ type Applied =
 export class DaemonUpdater {
   private readonly healthTimeoutMs: number;
   private readonly pollMs: number;
+  private readonly progress: IProgress;
 
   constructor(private readonly deps: DaemonUpdaterDeps) {
     this.healthTimeoutMs = deps.healthTimeoutMs ?? UPDATE_HEALTH_TIMEOUT_MS;
     this.pollMs = deps.pollMs ?? DEFAULT_POLL_MS;
+    this.progress = deps.progress ?? NO_PROGRESS;
   }
 
   async update(options: DaemonUpdateOptions): Promise<void> {
+    const startedAt = this.deps.clock.now();
     let from = '0.0.0';
     let target = options.to !== undefined && ProtocolVersionSchema.safeParse(options.to).success ? options.to : '0.0.0';
     try {
       const daemon = this.deps.lifecycle.installed();
+      this.progress.start('Checking for an update');
       const method = classifyInstallMethod(await this.deps.facts.facts(daemon));
       const plan = planUpdate(method, this.deps);
       const health = await this.deps.lifecycle.probe();
@@ -135,13 +145,14 @@ export class DaemonUpdater {
       }
       from = current;
       const latest = await this.#latest(options.to, method);
+      this.progress.succeed();
       if (options.check === true) {
         this.#reportCheck(daemon, method, plan, current, latest, options.json === true);
         return;
       }
       if ('failure' in latest) throw new DaemonUpdateRefusedError(latest.failure);
       target = latest.release.version;
-      const intent: UpdateIntent = { daemon, method, plan, current, target, running: health !== undefined };
+      const intent: UpdateIntent = { daemon, method, plan, current, target, running: health !== undefined, startedAt };
       const outcome = await this.#apply(intent, options);
       await this.#finish(options, { from, target, ...outcome });
     } catch (error: unknown) {
@@ -232,7 +243,7 @@ export class DaemonUpdater {
     }
     if (intent.running) await this.#passMidTurn(options);
     await this.#confirm(intent, options);
-    const applied = await this.#upgrade(intent, options);
+    const applied = await this.#upgradeStepped(intent, options);
     if (applied.kind === 'failed') return { outcome: 'failed', message: applied.message };
     return await this.#prove(intent, applied);
   }
@@ -311,6 +322,19 @@ export class DaemonUpdater {
     return `To recover by hand run: brew update && brew upgrade --cask ${cask} && ${client} daemon restart; if the tap is wedged: brew untap ${tap} && brew tap ${tap} ${releaseTapUrl(this.deps.product)} && brew reinstall --cask ${cask}`;
   }
 
+  /** `#upgrade`, with its steps settled whichever way it ended. */
+  async #upgradeStepped(intent: UpdateIntent, options: DaemonUpdateOptions): Promise<Applied> {
+    try {
+      const applied = await this.#upgrade(intent, options);
+      if (applied.kind === 'applied') this.progress.succeed();
+      else this.progress.fail();
+      return applied;
+    } catch (error: unknown) {
+      this.progress.fail();
+      throw error;
+    }
+  }
+
   /** Run the method's own upgrade. Answers how to undo it, or why it did not happen. */
   async #upgrade(intent: UpdateIntent, options: DaemonUpdateOptions): Promise<Applied> {
     const { method, daemon } = intent;
@@ -322,11 +346,12 @@ export class DaemonUpdater {
         if (options.json !== true) {
           this.deps.out.warn(`refreshing the Homebrew tap ${tap} so brew can see ${intent.target} (brew update)`);
         }
-        const refreshed = await packages.brewRefresh(tap, releaseTapUrl(this.deps.product));
+        const observe = stepObserver(this.progress, intent.target);
+        const refreshed = await packages.brewRefresh(tap, releaseTapUrl(this.deps.product), observe);
         if (refreshed.code !== 0) {
           return failedCommand('brew update', refreshed.stderr, refreshed.code, recovery);
         }
-        const outcome = await packages.brewUpgrade(method.cask);
+        const outcome = await packages.brewUpgrade(method.cask, observe);
         if (outcome.code !== 0) {
           return failedCommand(`brew upgrade --cask ${method.cask}`, outcome.stderr, outcome.code, recovery);
         }
@@ -338,7 +363,7 @@ export class DaemonUpdater {
         };
       }
       case 'nix-profile': {
-        const outcome = await packages.nixProfileUpgrade(method.element);
+        const outcome = await packages.nixProfileUpgrade(method.element, stepObserver(this.progress, intent.target));
         if (outcome.code !== 0) {
           return failedCommand(`nix profile upgrade ${method.element}`, outcome.stderr, outcome.code);
         }
@@ -354,8 +379,13 @@ export class DaemonUpdater {
         };
       }
       case 'standalone': {
-        const staged = await this.deps.standalone.stage(intent.target, method.directory);
+        const staged = await this.deps.standalone.stage(
+          intent.target,
+          method.directory,
+          stepObserver(this.progress, intent.target),
+        );
         if ('refused' in staged) return { kind: 'failed', message: staged.refused };
+        this.progress.start('Swapping in the new binaries');
         await this.deps.standalone.swap(staged);
         return {
           kind: 'applied',
@@ -368,6 +398,7 @@ export class DaemonUpdater {
       }
       default: {
         // Only `nix-shell` reaches here: every other method is `manual`, refused before this.
+        this.progress.start('Installing into the nix profile');
         const switched = await this.deps.switcher.install();
         if ('failure' in switched) return { kind: 'failed', message: switched.failure };
         return {
@@ -408,14 +439,16 @@ export class DaemonUpdater {
     }
     const failure = await this.#restartInto(intent, applied.daemonPath, installed);
     if (failure !== undefined) return await this.#rollBack(intent, applied, failure);
-    return { outcome: 'succeeded', message: `${name} updated ${intent.current} → ${installed}${newer} and serving` };
+    const took = formatElapsed(this.deps.clock.now() - intent.startedAt);
+    return { outcome: 'succeeded', message: `${name} updated ${intent.current} → ${installed}${newer} in ${took}` };
   }
 
   /** Restart onto the new executable and wait for it to report the target; answers why not. */
   async #restartInto(intent: UpdateIntent, daemonPath: string, installed: string): Promise<string | undefined> {
     try {
-      if (daemonPath === intent.daemon.path) await this.deps.lifecycle.restart();
-      else await this.deps.lifecycle.installAt(daemonPath);
+      if (daemonPath === intent.daemon.path) {
+        await this.deps.lifecycle.restart({ ferretsKeepRunning: await this.#midTurn() });
+      } else await this.deps.lifecycle.installAt(daemonPath);
     } catch (error: unknown) {
       return `the new ${this.deps.daemonName} did not start: ${errorText(error)}`;
     }
@@ -427,9 +460,17 @@ export class DaemonUpdater {
   /** Poll `/healthz` until it reports `version`, or the health deadline passes. */
   async #serves(version: string): Promise<boolean> {
     const deadline = this.deps.clock.now() + this.healthTimeoutMs;
+    if ((await this.deps.lifecycle.probe())?.version === version) return true;
+    this.progress.start(`Waiting for ${this.deps.daemonName} to report ${version}`);
     while (true) {
-      if ((await this.deps.lifecycle.probe())?.version === version) return true;
-      if (this.deps.clock.now() >= deadline) return false;
+      if ((await this.deps.lifecycle.probe())?.version === version) {
+        this.progress.succeed();
+        return true;
+      }
+      if (this.deps.clock.now() >= deadline) {
+        this.progress.fail();
+        return false;
+      }
       await this.deps.clock.sleep(this.pollMs);
     }
   }
@@ -439,6 +480,7 @@ export class DaemonUpdater {
     applied: Extract<Applied, { kind: 'applied' }>,
     why: string,
   ): Promise<Omit<UpdateReport, 'from' | 'target' | 'finishedAt'>> {
+    this.progress.start(`Rolling back to ${intent.current}`);
     const cannot = await applied.undo();
     if (cannot !== undefined) {
       return { outcome: 'failed', message: `${why}; ${cannot} — see ${this.deps.clientName} daemon logs` };
@@ -480,8 +522,10 @@ export class DaemonUpdater {
         this.deps.out.warn(`could not write the update report to ${options.report}: ${errorText(error)}`);
       }
     }
+    if (report.outcome === 'succeeded') this.progress.succeed();
+    else this.progress.fail();
     if (options.json === true) this.deps.out.success(JSON.stringify(report, null, 2));
-    else if (report.outcome === 'succeeded') this.deps.out.success(report.message);
+    else if (report.outcome === 'succeeded') this.deps.out.success(`✔ ${report.message}`);
     else this.deps.out.error(report.message);
     if (report.outcome !== 'succeeded') this.deps.out.setExitCode(1);
   }
@@ -498,7 +542,7 @@ export function renderPlan(plan: UpdatePlan, clientName: string): string[] {
 }
 
 function failedCommand(command: string, stderr: string, code: number, hint?: string): Applied {
-  const what = `${command} failed, and nothing changed: ${lastLine(stderr) ?? `exit ${String(code)}`}`;
+  const what = `${command} failed, and nothing changed: ${lastLines(stderr, 3) ?? `exit ${String(code)}`}`;
   return {
     kind: 'failed',
     message: hint === undefined ? what : `${what}. ${hint}`,

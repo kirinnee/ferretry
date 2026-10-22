@@ -243,6 +243,36 @@ copy from it, put an entry back into the open composer, and clear it with **Clea
 (what is kept stays until the log is cleared). If the browser refuses storage the log keeps working for the tab and says it
 is not saved. An entry links to its debug record while that record is still held.
 
+### Timing: which stage is slow
+
+"Is it transcription or the Groq call?" The two are different stages, and the **speech to text** step is not
+the Groq call at all: Parakeet and Browser speech run on this device, and Groq or Cerebras is the **cleanup**
+that follows. Every dictation therefore carries a **timeline** of numbers (`lib/stt/dictation-timeline.ts`, the
+owner of the shape and the arithmetic), measured on `performance.now()` from the moment you press Stop:
+
+- the recording's length and size, and the time to stop the recorder and decode it (Parakeet);
+- **speech to text**: engine, model, wall time, and the one-time model load on the dictation that paid for it;
+- reading the conversation a hosted cleanup may see;
+- **cleanup**: provider, model, wall time, when the response head arrived, how many attempts, and the tokens the
+  provider reported. A call through the daemon also carries the provider time the daemon reported, and its
+  attempts and tokens when the debug echo came back;
+- the time to put the words into the composer, and how long the review box stayed open.
+
+`Stop to review` is the pipeline's total; `Stop to composer` adds the insertion and leaves out the time you spent
+reading. The timeline holds **numbers only**: no words, no audio. It lives on the log entry (this device only,
+same switch as the log) and on the debug record while that is held, and is never sent anywhere.
+
+It is shown as a stacked bar (speech to text, cleanup, other) with the milliseconds beside it and the slowest
+stage named in words as well as outlined, on each log entry and in the debug sheet's **Timeline** section. The top
+of the transcription log summarises the newest 20 timed dictations: median and p90 for speech per engine and for
+cleanup per provider and path (nearest-rank percentiles).
+
+What it does **not** have, because it does not exist on these paths: time to first token (the cleanup request is
+not streamed, so "first byte" is the response head), key rotation or provider fallback (one provider is chosen per
+device), and a cooldown wait (a rate-limited call fails and keeps the raw words; nothing sleeps and retries). The
+one retry is the same call without the conversation after the provider found it too big, shown as two attempts.
+Browser speech cannot see inside the browser's recogniser, so it reports only how long Stop waited.
+
 ## Not built yet
 
 - **Parakeet on your machine** (kteam's daemon engine, sherpa-onnx `parakeet-tdt-0.6b-v2-int8`):

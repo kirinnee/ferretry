@@ -1,4 +1,17 @@
-import type { DurationStats, PerformanceReport } from './performance.ts';
+import type { DurationStats, PerformanceReport, SessionWorkerPool } from './performance.ts';
+
+/**
+ * The session-worker pool in one line, for `fy daemon status` and every performance report alike:
+ * `pool of 2 · 2 threads observing 3, 2 sessions`, or that the main thread observes them all.
+ */
+export function describeSessionWorkerPool(pool: SessionWorkerPool): string {
+  if (!pool.enabled)
+    return 'off — every running session is observed on the main thread (sessionWorkers.enabled: false)';
+  const size = `pool of ${String(pool.max)}`;
+  if (pool.threads === 0) return `${size} · no thread running (no session is running)`;
+  const spread = pool.sessionsPerThread.join(', ');
+  return `${size} · ${String(pool.threads)} thread${pool.threads === 1 ? '' : 's'} observing ${spread} session${pool.sessionsPerThread.length === 1 && pool.sessionsPerThread[0] === 1 ? '' : 's'}`;
+}
 
 /** How many rows of each table the text shows; `--json` carries all of them. */
 const ROWS = 12;
@@ -108,6 +121,9 @@ export function renderPerformanceReport(report: PerformanceReport): string {
     lines.push(
       `  ${num(entry.perSecond).padStart(7)}/s  ${entry.operation} ${entry.path} — p95 ${ms(entry.wall.p95Ms)}`,
     );
+
+  if (report.sessionWorkers !== undefined)
+    lines.push('', `Session workers  ${describeSessionWorkerPool(report.sessionWorkers)}`);
 
   if (report.workers.length > 0) {
     lines.push('', 'Workers — requests in flight');

@@ -7,6 +7,7 @@ import type { SelfRestartCoordinator } from './self-restart.ts';
 import type { SessionHealthSettings } from './settings.ts';
 import { classifyWardenSweep } from './sweep.ts';
 import type {
+  ExitObserveOptions,
   IncoherenceLedger,
   IncoherencePass,
   LoopBlockedClockPort,
@@ -74,7 +75,7 @@ export interface SessionExitPort {
    * Sessions whose status claims a live agent while their registered pane is proven dead or gone,
    * looked for among the sessions this check's `survey` found on disk.
    */
-  observe(survey: readonly SurveyedSession[]): Promise<readonly SessionExitObservation[]>;
+  observe(survey: readonly SurveyedSession[], options?: ExitObserveOptions): Promise<readonly SessionExitObservation[]>;
   /**
    * Records the transition, but only if the session still reads as it was observed. Resolves false
    * when anything moved in between — a resume that relaunched it wins, and is left alone.
@@ -306,6 +307,24 @@ export class SessionHealthService {
    * leave every other exited session reading `running`. A pass that could not observe at all is
    * simply retried by the next tick, which is at most one interval away.
    */
+  /**
+   * Settles ONE session whose pane was just seen to die, now rather than at the next check: the same
+   * observation and the same compare-and-set the check makes, over that session alone. Answers whether
+   * it settled; a pane not yet provably dead is left for the check.
+   */
+  async settleExitOf(id: SurveyedSession['id']): Promise<boolean> {
+    const observed = await this.ports.exits
+      .observe([{ id, journalLost: false }], { partial: true })
+      .catch(() => [] as readonly SessionExitObservation[]);
+    let settled = false;
+    for (const observation of observed) {
+      const transition = exitedSessionTransition(observation);
+      if (transition === undefined) continue;
+      if (await this.ports.exits.settle(observation, transition).catch(() => false)) settled = true;
+    }
+    return settled;
+  }
+
   private async settleExits(survey: readonly SurveyedSession[] | undefined): Promise<readonly string[]> {
     if (survey === undefined) return [];
     const observed = await this.ports.exits.observe(survey).catch(() => [] as readonly SessionExitObservation[]);

@@ -193,3 +193,12 @@ export interface SelfRestartStampStore {
 export interface SelfRestartHandler {
   restart(): Promise<boolean>;
 }
+
+/** How an exit observation reads its survey. */
+export interface ExitObserveOptions {
+  /**
+   * The survey names only some sessions — one whose pane was just seen to die — so what the observer
+   * remembers about every other pane (how many checks it has looked dead without a status) is kept.
+   */
+  readonly partial?: boolean;
+}
