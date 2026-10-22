@@ -8,14 +8,17 @@ import {
   composerContains,
   composerEvidence,
   composerHolds,
+  composerLanding,
   composerState,
   composerTransport,
+  frameCursor,
   type DeliveryFrame,
   harnessExitReason,
   landingDeadlineMs,
   landingEvidence,
   MAX_STARTUP_DIALOG_ATTEMPTS,
   nextReadinessStep,
+  occupiedComposer,
   PASTE_TRANSPORT_CHARS,
   paneResponded,
   paneShowsOpenPicker,
@@ -673,5 +676,100 @@ describe('tmux delivery — a pane that has not drawn since the keys', () => {
     should(landingDeadlineMs(window, 50)).equal(6_000, 'a prompt pane gets the ordinary window, never less');
     should(landingDeadlineMs(window, 5_000)).equal(7_000, 'a slow one gets settleMs past its first repaint');
     should(landingDeadlineMs(window, 11_500)).equal(12_000, 'and never past the ceiling');
+  });
+});
+
+describe('tmux delivery — a frame with the ink of its composer', () => {
+  const GHOST = '❯ go ahead with all three\n';
+  const frame = (composerInk?: 'dim' | 'plain'): DeliveryFrame => ({
+    alive: true,
+    dead: false,
+    promptReady: true,
+    visible: GHOST,
+    cursorX: 2,
+    cursorY: 0,
+    ...(composerInk === undefined ? {} : { composerInk }),
+  });
+
+  it('should hand the cursor and the ink to the composer reader together', () => {
+    should(frameCursor(frame('dim'))).deepEqual({ x: 2, y: 0, ink: 'dim' });
+    should(frameCursor(frame())).deepEqual({ x: 2, y: 0, ink: undefined });
+  });
+
+  it('should call the dim ghost empty and the plain twin a draft, though the cursor is identical', () => {
+    should(composerState(frame('dim'))).deepEqual({ kind: 'empty' });
+    should(composerState(frame('plain'))).deepEqual({ kind: 'input', text: 'go ahead with all three' });
+    should(occupiedComposer(frame('dim'))).be.undefined();
+    should(occupiedComposer(frame('plain'))).equal('go ahead with all three');
+  });
+
+  it('should keep reading the cursor when no ink was captured', () => {
+    should(composerState(frame())).deepEqual({ kind: 'empty' });
+  });
+
+  it('should not take a dim composer that contains the payload as proof it landed', () => {
+    // The `hi` bug, by ink: the suggestion holds the words, but nothing was typed.
+    should(composerLanding({ ...frame('dim'), visible: '❯ hi\n' }, 'hi', false)).be.undefined();
+    should(composerLanding({ ...frame('plain'), visible: '❯ hi\n' }, 'hi', false)).equal('chars');
+  });
+});
+
+describe('startup dialogs drawn without numbers', () => {
+  const fixture = (name: string): string =>
+    readFileSync(join(import.meta.dir, '../../fixtures/startup-dialogs', name), 'utf8');
+
+  it('should answer Claude 2.1.281’s folder-trust screen, its first option `No, exit`, with Down, Enter', () => {
+    // Arrange — captured from the real screen: `❯ No, exit` selected, `Yes, I trust this folder` below it.
+    const pane = fixture('claude-2.1.281-folder-trust.txt');
+
+    // Act
+    const actual = startupDialogAction(pane);
+
+    // Assert — never `No, exit`, which would end the session the person asked for.
+    should(actual).deepEqual({ kind: 'claude-trust', keys: ['Down', 'Enter'] });
+  });
+
+  it('should answer Claude 2.1.281’s API-key screen, `No (recommended)` selected, with Up, Enter', () => {
+    should(startupDialogAction(fixture('claude-2.1.281-api-key.txt'))).deepEqual({
+      kind: 'api-key',
+      keys: ['Up', 'Enter'],
+    });
+  });
+
+  it('should answer the folder-trust screen as a dialog before it can be mistaken for a draft', () => {
+    // Arrange
+    const frame: DeliveryFrame = {
+      alive: true,
+      dead: false,
+      promptReady: false,
+      visible: fixture('claude-2.1.281-folder-trust.txt'),
+      cursorX: 1,
+      cursorY: 14,
+    };
+
+    // Act
+    const step = nextReadinessStep(frame, noAttempts);
+
+    // Assert
+    should(step).deepEqual({
+      kind: 'answer_dialog',
+      action: { kind: 'claude-trust', keys: ['Down', 'Enter'] },
+      attempt: 1,
+    });
+  });
+
+  it('should leave the numbered dialogs exactly as they were', () => {
+    should(
+      startupDialogAction('Quick safety check: do you trust this folder?\n  1. Yes, I trust this folder\n❯ 2. No'),
+    ).deepEqual({
+      kind: 'claude-trust',
+      keys: ['Up', 'Enter'],
+    });
+  });
+
+  it('should find no Yes/No row to press in a trust dialog that offers none', () => {
+    should(
+      startupDialogAction('Quick safety check: is this a project you trust?\n\nPress Enter to continue'),
+    ).be.undefined();
   });
 });

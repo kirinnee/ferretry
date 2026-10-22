@@ -7,6 +7,7 @@ import {
   type ComposerCursor,
   composerInput,
   composerLanding,
+  composerRows,
   composerState,
   type DeliveryFrame,
   heldAt,
@@ -471,5 +472,39 @@ describe("the owner's Mac Claude pane: a ghost suggestion, a titled rule, and an
       should(composerState(at(MAC, column, ROW))).deepEqual({ kind: 'empty' });
       should(composerLanding(at(MAC, column, ROW), 'go ahead with all three', false)).be.undefined();
     }
+  });
+});
+
+describe('the ink of a composer outranks where its cursor sits', () => {
+  // The Home-key twin of the Mac ghost: the same words, the cursor at the same col 2, one of them typed.
+  const GHOST = '❯ go ahead with all three\n';
+  const at = (ink?: 'dim' | 'plain') => ({ x: 2, y: 0, ...(ink === undefined ? {} : { ink }) });
+
+  it('should read dim words as the placeholder and plain words as a draft, the cursor at col 2 in both', () => {
+    // Act
+    const dim = readComposer(GHOST, at('dim'));
+    const plain = readComposer(GHOST, at('plain'));
+
+    // Assert
+    should(dim?.placeholder).be.true();
+    should(plain?.placeholder).be.false();
+    should(composerInput(plain)).equal('go ahead with all three');
+  });
+
+  it('should fall back to the cursor and the wording when the ink could not be read', () => {
+    should(readComposer(GHOST, at())?.placeholder).be.true('col 2 on a single row is the placeholder rule');
+    should(readComposer(GHOST, { x: 9, y: 0 })?.placeholder).be.false();
+    should(readComposer(GHOST, {})?.placeholder).be.undefined();
+  });
+
+  it('should still call an empty prompt empty whatever the ink says', () => {
+    should(readComposer('❯ \n', at('plain'))?.placeholder).be.false();
+    should(composerInput(readComposer('❯ \n', at('plain')))).equal('');
+  });
+
+  it('should name the rows a composer occupies, or none when the frame has no prompt', () => {
+    should(composerRows('header\n❯ one\n  two\n\nfooter\n')).deepEqual({ first: 1, last: 2 });
+    should(composerRows('❯ one\n─────\n')).deepEqual({ first: 0, last: 0 });
+    should(composerRows('nothing to type into\n')).be.undefined();
   });
 });

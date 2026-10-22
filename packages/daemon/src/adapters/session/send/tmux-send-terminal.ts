@@ -15,6 +15,7 @@ import type { SessionId } from '../../../lib/session-id.ts';
 import {
   composerInput,
   composerTransport,
+  frameCursor,
   occupiedComposer,
   type PaneHold,
   paneBlockingDialog,
@@ -129,7 +130,7 @@ export class TmuxSendTerminal implements SendTerminal {
 
   private async hold(id: SessionId, text: string): Promise<PaneHold> {
     const frame = await captureFrame(this.tmux, await this.session(id));
-    return paneHoldOf(frame.visible, { x: frame.cursorX, y: frame.cursorY }, text, composerTransport(text) === 'paste');
+    return paneHoldOf(frame.visible, frameCursor(frame), text, composerTransport(text) === 'paste');
   }
 
   /**
@@ -149,7 +150,7 @@ export class TmuxSendTerminal implements SendTerminal {
     let rounds = 2 * text.split('\n').length + this.keys.clearMargin;
     for (let round = 0; round <= rounds; round += 1) {
       const frame = await captureFrame(this.tmux, session);
-      const composer = readComposer(frame.visible, { x: frame.cursorX, y: frame.cursorY });
+      const composer = readComposer(frame.visible, frameCursor(frame));
       if (composer?.placeholder === undefined) return 'stuck';
       if (round === 0)
         rounds = 2 * Math.max(text.split('\n').length, composer.text.split('\n').length) + this.keys.clearMargin;

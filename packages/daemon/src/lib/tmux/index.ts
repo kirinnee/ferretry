@@ -1,6 +1,7 @@
 export * from './address.ts';
 export * from './commands.ts';
 export * from './composer.ts';
+export * from './composer-ink.ts';
 export * from './composer-screen.ts';
 export * from './contracts.ts';
 export * from './control-protocol.ts';

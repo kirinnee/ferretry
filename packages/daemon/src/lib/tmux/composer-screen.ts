@@ -44,15 +44,27 @@
  *     leaves a clipped copy behind and appends a whole new one — the pile of six pointers on one
  *     person's draft, one of them cut at `This is your `.
  *
+ *   * The cursor is not proof, though: a person who typed the ghost's very words and pressed Home parks it
+ *     in the same place (`2|27` on `❯ plain typed words`, measured). The harnesses draw the difference
+ *     themselves — every placeholder is SGR 2 (dim) and typed text never is — so when the composer's
+ *     rows were also captured with attributes (`composer-ink.ts`) that INK decides, and the cursor and
+ *     the wording above are the fallback for a capture that has none.
+ *
  * Every function here is pure; the cursor comes from tmux beside the capture.
  */
 
 import { PASTE_PLACEHOLDER_PATTERN } from './composer.ts';
+import type { ComposerInk } from './composer-ink.ts';
 
-/** Where tmux says the cursor is, in the visible frame's own coordinates. */
+/**
+ * What tmux says beside a capture about the composer: where the cursor is, in the visible frame's own
+ * coordinates, and — when the composer's rows were captured with attributes — how they are inked.
+ */
 export interface ComposerCursor {
   readonly x?: number | undefined;
   readonly y?: number | undefined;
+  /** Whether the composer's glyphs are all dim (a placeholder) or not (input). Decides over the cursor. */
+  readonly ink?: ComposerInk | undefined;
 }
 
 /** What the composer line(s) show. */
@@ -60,9 +72,10 @@ export interface ComposerReading {
   /** The composer's text with the prompt glyph and wrap indentation removed, lines joined by `\n`. */
   readonly text: string;
   /**
-   * True when what is drawn is the harness's placeholder, not input: the composer is one line and the
-   * cursor sits at its first column. False only when the cursor proves the text is typed. `undefined`
-   * when tmux gave no cursor on the composer, which proves neither.
+   * True when what is drawn is the harness's placeholder, not input. When the composer's ink was read
+   * (`cursor.ink`) that decides: all dim is a placeholder, anything else is typed. Without it, the
+   * composer is one line and the cursor sits at its first column. False only when the ink or the cursor
+   * proves the text is typed. `undefined` when tmux gave neither, which proves nothing.
    */
   readonly placeholder: boolean | undefined;
   /** True when the composer holds a collapsed paste (`[Pasted Content …]`) rather than characters. */
@@ -97,12 +110,39 @@ const CLAUDE_QUEUE_ENTRY = /^[❯>](?:[\s ](.*))?$/u;
 /** A queued message's wrapped rows, and the blank rows between its paragraphs and between messages. */
 const CLAUDE_QUEUE_CONTINUATION = /^\s{2,}\S/u;
 
+/** The rows a composer occupies in a frame, `first` to `last` inclusive. */
+export interface ComposerRows {
+  readonly first: number;
+  readonly last: number;
+}
+
 function lineIndexOfComposer(lines: readonly string[]): number | undefined {
   for (let index = lines.length - 1; index >= 0; index -= 1) {
     const line = lines[index] as string;
     if (PROMPT_LINE.test(line) && !SELECTOR_ROW.test(line)) return index;
   }
   return undefined;
+}
+
+/** Where the composer ends: the indented rows under its prompt line, up to the first blank row or box closer. */
+function lastLineOfComposer(lines: readonly string[], at: number): number {
+  let end = at;
+  for (let index = at + 1; index < lines.length; index += 1) {
+    const line = lines[index] as string;
+    if (line.trim() === '' || CLOSER.test(line)) break;
+    end = index;
+  }
+  return end;
+}
+
+/**
+ * The rows the composer occupies, or `undefined` when the frame has no prompt line at all — the rows
+ * an attributed capture must cover for `composerInk` to describe them.
+ */
+export function composerRows(visible: string): ComposerRows | undefined {
+  const lines = visible.replaceAll('\r\n', '\n').split('\n');
+  const at = lineIndexOfComposer(lines);
+  return at === undefined ? undefined : { first: at, last: lastLineOfComposer(lines, at) };
 }
 
 /**
@@ -117,19 +157,15 @@ export function readComposer(visible: string, cursor: ComposerCursor = {}): Comp
   if (at === undefined) return undefined;
   const prompt = lines[at] as string;
   const match = PROMPT_LINE.exec(prompt) as RegExpExecArray;
+  const end = lastLineOfComposer(lines, at);
   const parts = [(match[2] ?? '').replace(BORDER, '').trim()];
-  let end = at;
-  for (let index = at + 1; index < lines.length; index += 1) {
-    const line = lines[index] as string;
-    if (line.trim() === '' || CLOSER.test(line)) break;
+  for (let index = at + 1; index <= end; index += 1)
     parts.push(
-      line
+      (lines[index] as string)
         .replace(/^\s*[│|]?/u, '')
         .replace(BORDER, '')
         .trim(),
     );
-    end = index;
-  }
   const text = parts.join('\n').trim();
   const pasted = new RegExp(PASTE_PLACEHOLDER_PATTERN, 'iu').test(text);
   return { text, placeholder: placeholderOf(prompt, match, at, end, text, cursor), pasted };
@@ -144,6 +180,8 @@ function placeholderOf(
   cursor: ComposerCursor,
 ): boolean | undefined {
   if (text === '') return false;
+  // The ink is the harness's own statement of what it drew, so it outranks everything inferred below.
+  if (cursor.ink !== undefined) return cursor.ink === 'dim';
   if (end === at && CLAUDE_QUEUED_PLACEHOLDER.test(text)) return true;
   // One row past the draft is still the composer: a draft ending in a newline — which is what a
   // swallowed Enter leaves — parks the cursor on the blank row it opened.

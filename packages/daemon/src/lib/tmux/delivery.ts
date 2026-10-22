@@ -14,6 +14,8 @@
 import { paneShowsOpenPicker } from '../session/harness/picker-screen.ts';
 import type { LandingEvidence } from './composer.ts';
 import { composerHolds } from './composer.ts';
+import type { ComposerInk } from './composer-ink.ts';
+import type { ComposerCursor } from './composer-screen.ts';
 import { composerContains, readComposer, showsPayload } from './composer-screen.ts';
 import { paneShowsActiveWork } from './pane.ts';
 import type { StartupDialogAction, StartupDialogOptions } from './startup.ts';
@@ -34,6 +36,16 @@ export interface DeliveryFrame {
   /** Where tmux put the cursor, which is what tells a composer's placeholder from typed input. */
   readonly cursorX?: number | undefined;
   readonly cursorY?: number | undefined;
+  /**
+   * Whether the composer's glyphs are dim (a placeholder) or plain (input), read from a capture of its
+   * rows with attributes. Absent when none could be taken or trusted; the cursor then decides.
+   */
+  readonly composerInk?: ComposerInk | undefined;
+}
+
+/** What a frame says about its composer beside the text: the cursor, and the ink when it was read. */
+export function frameCursor(frame: DeliveryFrame): ComposerCursor {
+  return { x: frame.cursorX, y: frame.cursorY, ink: frame.composerInk };
 }
 
 /**
@@ -175,7 +187,7 @@ export function classifySubmit(frame: DeliveryFrame, text: string, evidence: Lan
  * asked solely while the payload has not yet been seen to leave.
  */
 function stillComposed(frame: DeliveryFrame, text: string, evidence: LandingEvidence): boolean {
-  const composer = readComposer(frame.visible, { x: frame.cursorX, y: frame.cursorY });
+  const composer = readComposer(frame.visible, frameCursor(frame));
   if (composer === undefined || composer.placeholder === undefined) return composerHolds(frame.visible, text, evidence);
   if (composer.placeholder) return false;
   return evidence === 'placeholder' ? composer.pasted : composerContains(composer.text, text);
@@ -195,7 +207,7 @@ export type ComposerState =
   | { readonly kind: 'unreadable' };
 
 export function composerState(frame: DeliveryFrame): ComposerState {
-  const composer = readComposer(frame.visible, { x: frame.cursorX, y: frame.cursorY });
+  const composer = readComposer(frame.visible, frameCursor(frame));
   if (composer === undefined) return { kind: 'unreadable' };
   if (composer.text === '' || composer.placeholder === true) return { kind: 'empty' };
   return composer.placeholder === false ? { kind: 'input', text: composer.text } : { kind: 'unreadable' };
@@ -211,7 +223,7 @@ export function composerState(frame: DeliveryFrame): ComposerState {
  * whose cursor tmux did not report, is not a draft.
  */
 export function occupiedComposer(frame: DeliveryFrame): string | undefined {
-  const composer = readComposer(frame.visible, { x: frame.cursorX, y: frame.cursorY });
+  const composer = readComposer(frame.visible, frameCursor(frame));
   return composer?.placeholder === false && composer.text !== '' ? composer.text : undefined;
 }
 
@@ -228,7 +240,7 @@ export function composerLanding(
   text: string,
   paste: boolean,
 ): LandingEvidence | 'unreadable' | undefined {
-  const composer = readComposer(frame.visible, { x: frame.cursorX, y: frame.cursorY });
+  const composer = readComposer(frame.visible, frameCursor(frame));
   if (composer === undefined || composer.placeholder === undefined) return 'unreadable';
   if (composer.placeholder) return undefined;
   if (showsPayload(composer.text, text)) return 'chars';

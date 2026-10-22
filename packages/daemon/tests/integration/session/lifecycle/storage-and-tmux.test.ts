@@ -666,7 +666,8 @@ describe('TmuxSessionLifecycleLauncher', () => {
     // Assert — ready only polls after the awaited registration completes.
     should(slept).deepEqual([100]);
     should(port.commands().filter(command => command === 'display-message')).have.length(2);
-    should(port.commands().filter(command => command === 'capture-pane')).have.length(4);
+    // The plain captures; the composer's own row, read with attributes, is a separate look beside the last.
+    should(port.calls.filter(call => call[0] === 'capture-pane' && !call.includes('-e'))).have.length(4);
     should(port.commands()).not.containEql('send-keys');
   });
 

@@ -40,6 +40,16 @@ export function capturePaneArguments(session: string, history: boolean): readonl
     : ['capture-pane', '-p', '-t', sessionTarget(session)];
 }
 
+/**
+ * Rows `first` to `last` of the visible screen, WITH attributes (`-e`). Rows are counted from the top
+ * of the screen, 0-based, which is what `-S`/`-E` mean without `-` on a capture of the visible pane.
+ */
+export function captureRowsArguments(session: string, first: number, last: number): readonly string[] {
+  if (!Number.isSafeInteger(first) || !Number.isSafeInteger(last) || first < 0 || last < first)
+    throw new TmuxAddressError('capture rows are not usable');
+  return ['capture-pane', '-e', '-p', '-S', String(first), '-E', String(last), '-t', sessionTarget(session)];
+}
+
 export function paneMetadataArguments(session: string): readonly string[] {
   return ['display-message', '-p', '-t', sessionTarget(session), paneMetadataFormat];
 }
