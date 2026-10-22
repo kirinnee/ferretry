@@ -91,6 +91,8 @@ describe('dictationFailureCopy', () => {
     expect(dictationFailureCopy('recognition-network').title).toContain('Browser speech service');
     expect(dictationFailureCopy('recognition-failed').title).toBe('Browser recognition failed');
     expect(dictationFailureCopy('bad-audio').title).toBe("Didn't catch that");
+    expect(dictationFailureCopy('bad-audio', 'browser').hint).toContain('Parakeet');
+    expect(dictationFailureCopy('bad-audio', 'parakeet').hint).toBe('No usable audio was captured. Try again.');
     // The retired daemon vocabulary must not survive as unreachable copy.
     for (const retired of ['unauthorized', 'unavailable', 'busy', 'network']) {
       expect(dictationFailureCopy(retired).title).toBe('Dictation failed');
@@ -252,6 +254,38 @@ describe('<DictationSheet>', () => {
     await view.render(<DictationSheet {...sheetProps({ stage: 'error', errorCode: 'network' })} />);
     expect(labels(view.container)).toContain('Try again');
     expect(labels(view.container)).toContain('Cancel dictation');
+    await view.unmount();
+  });
+
+  it('offers the Parakeet switch only for a browser take that heard speech but returned no words', async () => {
+    let switched = 0;
+    const onSwitchEngine = (): void => {
+      switched += 1;
+    };
+    const switchButton = (container: HTMLElement): HTMLElement | undefined =>
+      [...container.querySelectorAll('button')].find(button => button.textContent?.includes('Use Parakeet')) as
+        | HTMLElement
+        | undefined;
+
+    const view = await mount(
+      <DictationSheet {...sheetProps({ stage: 'error', errorCode: 'bad-audio', engine: 'browser', onSwitchEngine })} />,
+    );
+    expect(view.container.textContent).toContain('switch to Parakeet in Settings › Voice');
+    await interact(() => switchButton(view.container)?.click());
+    expect(switched).toBe(1);
+
+    await view.render(
+      <DictationSheet
+        {...sheetProps({ stage: 'error', errorCode: 'bad-audio', engine: 'parakeet', onSwitchEngine })}
+      />,
+    );
+    expect(switchButton(view.container)).toBeUndefined();
+    await view.render(
+      <DictationSheet {...sheetProps({ stage: 'error', errorCode: 'recognition-network', onSwitchEngine })} />,
+    );
+    expect(switchButton(view.container)).toBeUndefined();
+    await view.render(<DictationSheet {...sheetProps({ stage: 'error', errorCode: 'bad-audio' })} />);
+    expect(switchButton(view.container)).toBeUndefined();
     await view.unmount();
   });
 

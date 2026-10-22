@@ -7,6 +7,7 @@ import {
   browserRecognitionErrorFrom,
   browserRecognitionProvider,
   joinRecognitionChunks,
+  mergeRecognitionChunks,
   readBrowserRecognitionSupport,
   type SpeechRecognitionErrorEventLike,
   type SpeechRecognitionLike,
@@ -62,6 +63,7 @@ interface FakeProvider extends BrowserRecognitionProvider {
   readonly recognition: FakeRecognition;
   hidden(): void;
   fireTimers(): void;
+  fireLatest(): void;
 }
 
 const fakeProvider = (): FakeProvider => {
@@ -88,6 +90,12 @@ const fakeProvider = (): FakeProvider => {
       timers.delete(handle as number);
     },
     hidden: () => hiddenListener?.(),
+    fireLatest: () => {
+      const latest = Math.max(...timers.keys());
+      const callback = timers.get(latest);
+      timers.delete(latest);
+      callback?.();
+    },
     fireTimers: () => {
       const pending = [...timers.values()];
       timers.clear();
@@ -96,8 +104,8 @@ const fakeProvider = (): FakeProvider => {
   };
 };
 
-const sessionHarness = () => {
-  const provider = fakeProvider();
+const sessionHarness = (platform: { readonly android?: boolean } = {}) => {
+  const provider = Object.assign(fakeProvider(), platform);
   const starts: number[] = [];
   const transcripts: string[] = [];
   const failures: { code: string; message: string }[] = [];
@@ -480,5 +488,286 @@ describe('BrowserRecognitionSession', () => {
 describe('joinRecognitionChunks', () => {
   it('keeps punctuation while normalising result-boundary whitespace', () => {
     should(joinRecognitionChunks(['  hello, ', '   world.'])).equal('hello, world.');
+  });
+});
+
+/**
+ * Replays of event sequences the three engine families produce, one session each. The Android shapes
+ * follow the reports cited in the PR: cumulative transcripts at growing indices, interim-only takes
+ * whose last hypothesis is never marked final, and errors that arrive after speech.
+ */
+describe('BrowserRecognitionSession on recorded engine sequences', () => {
+  type Chunk = { text: string; final?: boolean };
+  const cumulative = (provider: { recognition: FakeRecognition }, chunks: readonly Chunk[], resultIndex = 0): void =>
+    provider.recognition.result(chunks, resultIndex);
+
+  describe('Android Chrome', () => {
+    it('keeps interim-only speech when the take ends without any final result', async () => {
+      const { provider, session } = sessionHarness({ android: true });
+      session.start();
+      provider.recognition.onstart?.();
+      provider.recognition.onspeechstart?.();
+      cumulative(provider, [{ text: 'send the report' }]);
+      cumulative(provider, [{ text: 'send the report to Sam' }]);
+      const finished = session.finish();
+      provider.recognition.onend?.();
+      should(await finished).equal('send the report to Sam');
+    });
+
+    it('waits for a result that arrives after the end of a Stop, then settles on it', async () => {
+      const { provider, session, failures } = sessionHarness({ android: true });
+      session.start();
+      provider.recognition.onstart?.();
+      provider.recognition.onspeechstart?.();
+      const finished = session.finish();
+      provider.recognition.onend?.();
+      should(failures).deepEqual([]);
+
+      cumulative(provider, [{ text: 'late words', final: true }]);
+      provider.fireLatest();
+      should(await finished).equal('late words');
+      should(failures).deepEqual([]);
+    });
+
+    it('says what to do when speech was heard but the service returned no words at all', async () => {
+      const { provider, session, failures } = sessionHarness({ android: true });
+      session.start();
+      provider.recognition.onstart?.();
+      provider.recognition.onspeechstart?.();
+      const finished = session.finish();
+      provider.recognition.onend?.();
+      provider.fireLatest();
+      await should(finished).be.rejectedWith({ code: 'bad-audio' });
+      should(failures[0]?.message).equal("Android's speech service returned no words.");
+    });
+
+    it('collapses a cumulative transcript re-emitted at every growing index', async () => {
+      const { provider, session, transcripts } = sessionHarness({ android: true });
+      session.start();
+      provider.recognition.onstart?.();
+      cumulative(provider, [{ text: 'hello', final: true }]);
+      cumulative(
+        provider,
+        [
+          { text: 'hello', final: true },
+          { text: 'hello there', final: true },
+        ],
+        1,
+      );
+      cumulative(
+        provider,
+        [{ text: 'hello', final: true }, { text: 'hello there', final: true }, { text: 'hello there my friend' }],
+        2,
+      );
+      should(transcripts.at(-1)).equal('hello there my friend');
+      const finished = session.finish();
+      provider.recognition.onend?.();
+      should(await finished).equal('hello there my friend');
+    });
+
+    it('does not duplicate a cycle that the restarted engine replays in full', async () => {
+      const { provider, session } = sessionHarness({ android: true });
+      session.start();
+      provider.recognition.onstart?.();
+      cumulative(provider, [{ text: 'please book the flight', final: true }]);
+      provider.recognition.onend?.();
+      should(provider.recognition.starts).equal(2);
+
+      provider.recognition.onstart?.();
+      cumulative(provider, [{ text: 'please book the flight', final: true }]);
+      cumulative(provider, [{ text: 'please book the flight for Tuesday' }]);
+      const finished = session.finish();
+      provider.recognition.onend?.();
+      should(await finished).equal('please book the flight for Tuesday');
+    });
+
+    it('keeps genuinely new words across restart cycles', async () => {
+      const { provider, session } = sessionHarness({ android: true });
+      session.start();
+      provider.recognition.onstart?.();
+      cumulative(provider, [{ text: 'first thought here', final: true }]);
+      provider.recognition.onend?.();
+      provider.recognition.onstart?.();
+      cumulative(provider, [{ text: 'second thought' }]);
+      const finished = session.finish();
+      provider.recognition.onend?.();
+      should(await finished).equal('first thought here second thought');
+    });
+
+    it('keeps the words when aborted arrives after speech while a Stop is finishing', async () => {
+      const { provider, session, failures } = sessionHarness({ android: true });
+      session.start();
+      provider.recognition.onstart?.();
+      cumulative(provider, [{ text: 'before the drop' }]);
+      const finished = session.finish();
+      provider.recognition.onerror?.({ error: 'aborted' });
+      provider.recognition.onend?.();
+      should(await finished).equal('before the drop');
+      should(failures).deepEqual([]);
+    });
+
+    it('treats an abort while still recording as another recogniser taking the microphone', () => {
+      const { provider, session, failures } = sessionHarness({ android: true });
+      session.start();
+      provider.recognition.onstart?.();
+      cumulative(provider, [{ text: 'before the drop' }]);
+      provider.recognition.onerror?.({ error: 'aborted' });
+      should(failures[0]?.code).equal('aborted');
+    });
+
+    it('keeps the words when a network error and the end arrive while finishing', async () => {
+      const { provider, session, failures } = sessionHarness({ android: true });
+      session.start();
+      provider.recognition.onstart?.();
+      cumulative(provider, [{ text: 'what was said' }]);
+      const finished = session.finish();
+      provider.recognition.onerror?.({ error: 'network' });
+      provider.recognition.onend?.();
+      should(await finished).equal('what was said');
+      should(failures).deepEqual([]);
+    });
+
+    it('still fails a network error that left nothing to keep, and audio-capture always', async () => {
+      const network = sessionHarness({ android: true });
+      network.session.start();
+      network.provider.recognition.onstart?.();
+      network.provider.recognition.onerror?.({ error: 'network' });
+      should(network.failures[0]?.code).equal('recognition-network');
+
+      const capture = sessionHarness({ android: true });
+      capture.session.start();
+      capture.provider.recognition.onstart?.();
+      cumulative(capture.provider, [{ text: 'words' }]);
+      capture.provider.recognition.onerror?.({ error: 'audio-capture' });
+      should(capture.failures[0]?.code).equal('no-microphone');
+    });
+
+    it('rides out silence timeouts: no-speech then end restarts without failing', () => {
+      const { provider, session, failures } = sessionHarness({ android: true });
+      session.start();
+      provider.recognition.onstart?.();
+      provider.recognition.onerror?.({ error: 'no-speech' });
+      provider.recognition.onend?.();
+      should(provider.recognition.starts).equal(2);
+      should(failures).deepEqual([]);
+    });
+
+    it('stops with stop(), never abort(), when the reader finishes', async () => {
+      const { provider, session } = sessionHarness({ android: true });
+      session.start();
+      provider.recognition.onstart?.();
+      cumulative(provider, [{ text: 'words' }]);
+      const finished = session.finish();
+      provider.recognition.onend?.();
+      await finished;
+      should(provider.recognition.stops).equal(1);
+      should(provider.recognition.aborts).equal(0);
+    });
+
+    it('does not wait out a grace period when the engine reported no match', async () => {
+      const { provider, session } = sessionHarness({ android: true });
+      session.start();
+      provider.recognition.onstart?.();
+      provider.recognition.onnomatch?.({ resultIndex: 0, results: [] });
+      const finished = session.finish();
+      provider.recognition.onend?.();
+      await should(finished).be.rejectedWith({ code: 'bad-audio' });
+    });
+  });
+
+  describe('desktop Chrome', () => {
+    it('joins separate final segments and replaces an interim tail by resultIndex', async () => {
+      const { provider, session } = sessionHarness();
+      session.start();
+      provider.recognition.onstart?.();
+      cumulative(provider, [{ text: 'open the', final: false }]);
+      cumulative(provider, [{ text: 'open the file', final: true }]);
+      cumulative(
+        provider,
+        [
+          { text: 'open the file', final: true },
+          { text: ' and read', final: false },
+        ],
+        1,
+      );
+      cumulative(
+        provider,
+        [
+          { text: 'open the file', final: true },
+          { text: ' and read it', final: true },
+        ],
+        1,
+      );
+      const finished = session.finish();
+      provider.recognition.onend?.();
+      should(await finished).equal('open the file and read it');
+    });
+
+    it('keeps a deliberately repeated single word across finals', async () => {
+      const { provider, session } = sessionHarness();
+      session.start();
+      provider.recognition.onstart?.();
+      cumulative(provider, [{ text: 'no', final: true }]);
+      cumulative(
+        provider,
+        [
+          { text: 'no', final: true },
+          { text: ' no way', final: true },
+        ],
+        1,
+      );
+      const finished = session.finish();
+      provider.recognition.onend?.();
+      should(await finished).equal('no no way');
+    });
+
+    it('returns empty, not a failure, when nothing was heard', async () => {
+      const { provider, session, failures } = sessionHarness();
+      session.start();
+      provider.recognition.onstart?.();
+      const finished = session.finish();
+      provider.recognition.onend?.();
+      should(await finished).equal('');
+      should(failures).deepEqual([]);
+    });
+  });
+
+  describe('Safari', () => {
+    it('reads a single final result from a non-continuous-style take', async () => {
+      const { provider, session } = sessionHarness();
+      session.start();
+      provider.recognition.onstart?.();
+      provider.recognition.onspeechstart?.();
+      cumulative(provider, [{ text: 'Remind me at five', final: true }]);
+      const finished = session.finish();
+      provider.recognition.onend?.();
+      should(await finished).equal('Remind me at five');
+    });
+
+    it('treats a trailing-punctuation rewrite of the last phrase as the same phrase', async () => {
+      const { provider, session } = sessionHarness();
+      session.start();
+      provider.recognition.onstart?.();
+      cumulative(provider, [{ text: 'call mom' }]);
+      cumulative(provider, [{ text: 'Call mom.' }, { text: ' Then dinner' }]);
+      const finished = session.finish();
+      provider.recognition.onend?.();
+      should(await finished).equal('Call mom. Then dinner');
+    });
+  });
+});
+
+describe('mergeRecognitionChunks', () => {
+  it('replaces a word-wise prefix but never a partial word', () => {
+    should(
+      mergeRecognitionChunks([
+        { text: 'to my', final: true },
+        { text: 'to myself', final: true },
+      ]),
+    ).equal('to my to myself');
+  });
+
+  it('drops blank chunks', () => {
+    should(mergeRecognitionChunks([{ text: '  ', final: true }])).equal('');
   });
 });

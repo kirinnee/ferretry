@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import type { FyApiClient } from '@ferretry/protocol/client';
+import * as React from 'react';
 import {
   DictationControl,
   type DictationControlProps,
@@ -689,6 +690,59 @@ describe('<DictationControl> details of the clean-up call', () => {
     const view = await take(false);
 
     expect(detailsLink()).toBeUndefined();
+    await view.unmount();
+  });
+});
+
+describe('<DictationControl> inline engine switch', () => {
+  it('offers Parakeet after a browser take heard speech but returned no words, and writes the choice', async () => {
+    const updates: unknown[] = [];
+    const store = { stt: { update: (patch: unknown) => void updates.push(patch) } } as unknown as AppStore;
+    const provider = promptRecognition();
+    const view = await mount(
+      <StoreProvider store={store}>
+        <DictationControl {...controlProps({ recognition: provider })} />
+      </StoreProvider>,
+    );
+    await openAndBegin(view.container, provider);
+    await interact(() => provider.nomatch());
+    await stop(view.container);
+
+    const offer = [...view.container.querySelectorAll('button')].find(button =>
+      button.textContent?.includes('Use Parakeet'),
+    );
+    await interact(() => must(offer, 'the Use Parakeet button').click());
+    expect(updates).toEqual([{ engine: 'parakeet' }]);
+    await view.unmount();
+  });
+});
+
+describe('<DictationControl> inline engine switch restart', () => {
+  it('records again once the new engine arrives through settings', async () => {
+    const provider = promptRecognition();
+    const Host = (): React.ReactElement => {
+      const [engine, setEngine] = React.useState<SttSettings['engine']>('browser');
+      const store = { stt: { update: (patch: { engine: SttSettings['engine'] }) => setEngine(patch.engine) } };
+      return (
+        <StoreProvider store={store as unknown as AppStore}>
+          <DictationControl {...controlProps({ recognition: provider, settings: settingsWith({ engine }) })} />
+        </StoreProvider>
+      );
+    };
+    const view = await mount(<Host />);
+    await openAndBegin(view.container, provider);
+    await interact(() => provider.nomatch());
+    await stop(view.container);
+
+    const offer = [...view.container.querySelectorAll('button')].find(button =>
+      button.textContent?.includes('Use Parakeet'),
+    );
+    await interact(() => must(offer, 'the Use Parakeet button').click());
+
+    const stillOffered = [...view.container.querySelectorAll('button')].some(button =>
+      button.textContent?.includes('Use Parakeet'),
+    );
+    expect(stillOffered).toBe(false);
     await view.unmount();
   });
 });

@@ -1245,6 +1245,11 @@ export function useDictationDebugSnapshot(): DictationDebugSnapshot {
   return useSyncExternalStore(log?.subscribe ?? noSubscription, log?.snapshot ?? noDebugSnapshot);
 }
 
+/** This device's dictation settings store, or `null` outside a store. */
+export function useSttSettingsStore(): SttSettingsStore | null {
+  return useContext(StoreContext)?.stt ?? null;
+}
+
 /** This device's transcription log, or `null` outside a store. */
 export function useTranscriptionLog(): TranscriptionLog | null {
   return useContext(StoreContext)?.transcriptionLog ?? null;
