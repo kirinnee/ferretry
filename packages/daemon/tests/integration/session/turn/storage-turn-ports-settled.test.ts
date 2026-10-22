@@ -65,7 +65,7 @@ describe('StorageTurnPorts.sessions', () => {
       storage,
       { tail: async () => ({ kind: 'unresolved' }) },
       async () => undefined,
-      { state: async () => ({ alive: false, visible: '' }) as never },
+      { activity: async () => undefined, visible: async () => undefined },
       { now: () => '2026-10-21T00:00:00.000Z' },
     );
 

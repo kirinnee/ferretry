@@ -101,10 +101,10 @@ import {
 } from '../src/adapters/analytics/index.ts';
 import {
   decryptPdfInMemory,
-  probePdfDecryptWorker,
   FileAttachmentOriginals,
   FileSessionAttachmentStore,
   NodeRawDeflate,
+  probePdfDecryptWorker,
 } from '../src/adapters/attachments/index.ts';
 import { FileAttentionLedgerRepository } from '../src/adapters/attention/file-attention-ledger-repository.ts';
 import { FileAcceptedConfigStore, FileConfigDirectory } from '../src/adapters/config-files/files.ts';
@@ -149,8 +149,6 @@ import {
   BunSqliteIndexFactory,
   CachedUsageFeed,
   CliUpdateLauncher,
-  describeWorkerProbes,
-  probeBundledWorker,
   CloudflaredLocator,
   ConfigGrantDocument,
   ConfigSecretRecipes,
@@ -159,6 +157,7 @@ import {
   DaemonSecretsLoader,
   DaemonStorageFactory,
   daemonSecretSourceProgram,
+  describeWorkerProbes,
   ExplicitDaemonConfig,
   FetchEnhancementTransport,
   FileAuditJournal,
@@ -207,6 +206,7 @@ import {
   PerformanceStopwatch,
   ProcCgroupPlacements,
   ProjectMcpServers,
+  probeBundledWorker,
   quotaFailoverRoot,
   RegisteredCgroupPaneLedger,
   RuntimeEnvironment,
@@ -237,18 +237,10 @@ import {
   WebCryptoSecretCipher,
   WebPushFetchTransport,
   type WorkerClientOptions,
-  type WorkerProbeReport,
   WorkerLoopWatchdog,
+  type WorkerProbeReport,
   XvfbDisplay,
 } from '../src/adapters/index.ts';
-import {
-  AccountAutoResumeAvailability,
-  BootExitRecorder,
-  FileAutoResumeLedger,
-  FileAutoResumeSummaryStore,
-  RepositoryAutoResumeRoster,
-  StorageAutoResumeJournal,
-} from '../src/adapters/session/auto-resume/index.ts';
 import {
   CatalogPrices,
   ConfigFileLearningSettings,
@@ -274,6 +266,14 @@ import { bunProbeSpawn, CliPackProbe, FilePackSpendLedger, readSessionResult } f
 import { FilePinRepository, FilePinSessionDirectory } from '../src/adapters/pins/index.ts';
 import { HostCodexAppServerProcesses } from '../src/adapters/process/codex-app-server-stopper.ts';
 import { runPackageInstall } from '../src/adapters/process/package-install.ts';
+import {
+  AccountAutoResumeAvailability,
+  BootExitRecorder,
+  FileAutoResumeLedger,
+  FileAutoResumeSummaryStore,
+  RepositoryAutoResumeRoster,
+  StorageAutoResumeJournal,
+} from '../src/adapters/session/auto-resume/index.ts';
 import { FileSessionEffectLedger } from '../src/adapters/session/effects/index.ts';
 import { loadDirectorySyscalls } from '../src/adapters/session/filesystem/directory-syscalls.ts';
 import {
@@ -379,7 +379,12 @@ import {
   type TerminalStreamScheduler,
   TmuxTerminalRuntime,
 } from '../src/adapters/terminal/index.ts';
-import { BunTmuxProcess, RealHarnessLaunchGuard, TmuxPaneDelivery, TmuxPaneQueue } from '../src/adapters/tmux/index.ts';
+import {
+  ControlModeTmuxProcess,
+  RealHarnessLaunchGuard,
+  TmuxPaneDelivery,
+  TmuxPaneQueue,
+} from '../src/adapters/tmux/index.ts';
 import { CliConversionCheck, CliHarnessVersion } from '../src/adapters/transcript/conversion-check.ts';
 import { NodeTranscriptSource } from '../src/adapters/transcript/index.ts';
 import {
@@ -486,6 +491,8 @@ import {
   answerArguments,
   attachmentDirectory,
   authorizeSessionCommand,
+  BACKGROUND_DELAY_VARIABLE,
+  BackgroundLane,
   type BootNoticePort,
   BootProgress,
   type BootRefusal,
@@ -551,7 +558,6 @@ import {
   declaredModel,
   decodeInitialAttachments,
   defaultAutoResumeSettings,
-  type SessionExitPort,
   defaultManagedWorktreeRoot,
   defaultSendTrackerSettings,
   defaultSessionLifecycleSettings,
@@ -674,10 +680,10 @@ import {
   packageRole,
   paneShowsActiveWork,
   paneTextFor,
+  parseBackgroundDelay,
   parseDaemonTimings,
   parseSessionId,
   parseWardenConfigPatch,
-  parseBackgroundDelay,
   parseWatchdogLimit,
   passkeyVerifier,
   planConversationCarry,
@@ -757,6 +763,7 @@ import {
   type SessionControlSubsystem,
   SessionDialogService,
   type SessionDirectorySubsystem,
+  type SessionExitPort,
   SessionFilesystem,
   SessionHandoverService,
   SessionHealthService,
@@ -802,9 +809,9 @@ import {
   type SocketRoute,
   SpeedupsService,
   STRUCTURED_ANSWER_RELEASED_ATTENTION_KIND,
+  type StackSamplerPort,
   StagedApiSurface,
   StepUpRegistry,
-  type StackSamplerPort,
   StepUpService,
   StructuredAnswerCoordinator,
   StructuredQuestionAttemptFailed,
@@ -868,8 +875,6 @@ import {
   verifySessionTranscriptMessageToken,
   WARDEN_LABEL,
   WATCHDOG_VARIABLE,
-  BACKGROUND_DELAY_VARIABLE,
-  BackgroundLane,
   type WardenFleetSession,
   WardenLivenessMonitor,
   type WardenSubsystem,
@@ -3646,7 +3651,9 @@ function createWardenSubsystem(parts: WardenParts): WardenSubsystem {
       // and the transcript are the operator reads — already masked by the vault redactor — and only their
       // digests are kept; the screen itself is read for its work counters and then dropped.
       sample: async target => {
-        const pane = await parts.reads.snapshot(target.id).catch(() => undefined);
+        // The SCREEN, not the scrollback: the work counters and background-terminal footer live on it,
+        // and any change to the scrollback moves the screen too — at a fraction of the bytes per tick.
+        const pane = await parts.reads.snapshot(target.id, true, 'screen').catch(() => undefined);
         const transcript = await parts.reads.logs(target.id, WARDEN_LIVENESS_TAIL).catch(() => undefined);
         const observed =
           target.tmuxSession === undefined
@@ -6201,7 +6208,13 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
     intervalMs: 0,
     lastSweepAt: undefined,
   };
-  const tmux = new BunTmuxProcess(Bun.which('tmux') ?? FALLBACK_TMUX, join(paths.home, 'tmux.sock'));
+  /**
+   * EVERY tmux command this daemon sends, over one transport: reads answered in-band by a single
+   * long-lived control-mode client, everything else (and every read the client cannot take) a process
+   * of its own, as before. One instance for the whole daemon, because the point is one client — a
+   * second transport over the same socket would be a second client and a second set of processes.
+   */
+  const tmux = new ControlModeTmuxProcess(Bun.which('tmux') ?? FALLBACK_TMUX, join(paths.home, 'tmux.sock'));
   const launchGuard = testHarnessLaunchGuard(paths.home);
   const stateFiles = new StateFileSystem(paths, undefined, {
     hostCodexAuth: hostCodexCredentialFile(process.env.CODEX_HOME, userHome),
@@ -6984,10 +6997,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
     storage: DaemonStorage,
     relaunch: (id: SessionId) => Promise<readonly string[] | undefined>,
   ): ResumeLauncher => {
-    const controller = new TmuxController(
-      new BunTmuxProcess(resolveTmuxExecutable(), join(paths.home, 'tmux.sock')),
-      launchGuard,
-    );
+    const controller = new TmuxController(tmux, launchGuard);
     const registrar = new DurableTerminalPaneRegistrar(paths.home, controller, stateFiles, paths);
     return new TmuxResumeLauncher(
       controller,
@@ -7040,7 +7050,10 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
    * the SAME tmux server. Two controllers over the same socket would work; one is what makes it
    * impossible for a future edit to point delivery at a different pane than the launch created.
    */
-  const launchTmuxCommands = new BunTmuxProcess(resolveTmuxExecutable(), join(paths.home, 'tmux.sock'));
+  // Managing sessions still requires tmux on PATH, checked here as it always was; the commands
+  // themselves ride the daemon's one transport.
+  resolveTmuxExecutable();
+  const launchTmuxCommands = tmux;
   const launchTmux = new TmuxController(launchTmuxCommands, launchGuard);
   /**
    * The per-harness workarounds, held as a local because TWO things read them: the world publishes
@@ -7224,7 +7237,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         CLIENT_NAME,
       ),
       codexAppServers,
-      { text: async record => (await launchTmux.state(record.config.tmuxSession)).visible },
+      { text: async record => (await launchTmux.state(record.config.tmuxSession, { history: false })).visible },
     ),
     createSessionLifecycle,
     createTerminalReaper: storage => {
@@ -8525,7 +8538,9 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
               lifecycleConfigDocument(await storage.readConfig(id).catch(() => undefined)),
             );
             if (!lifecycle.success) return undefined;
-            const state = await launchTmux.state(lifecycle.data.tmuxSession);
+            // Only the frame the scope asks for: the scrollback is tens of kilobytes on a long session,
+            // and a `screen` reader would have had it captured and thrown away.
+            const state = await launchTmux.state(lifecycle.data.tmuxSession, { history: scope !== 'screen' });
             // The scrollback by default: an operator reading a snapshot is catching up on what
             // happened, and the visible 24 lines are whatever the harness last redrew. `screen` is for
             // a poller that reads only the frame's last lines, and costs a fraction of the bytes.
@@ -9156,10 +9171,16 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           migrate: sessionMigrate,
           analytics: analyticsIngestion,
           events: listener => storage.subscribeEvents(listener),
-          processes: new PaneProcessInventory(launchTmuxCommands, new BunProcessProbe(Bun.which('ps') ?? undefined), {
-            binaryName: CLIENT_NAME,
-            servers: new ProjectMcpServers(),
-          }),
+          // One liveness tick asks about every working ferret in turn. Where `ps` is how the tree is read
+          // (no procfs), one table answers the whole tick instead of one `ps` per ferret.
+          processes: new PaneProcessInventory(
+            launchTmuxCommands,
+            new BunProcessProbe(Bun.which('ps') ?? undefined, { tableTtlMs: 10_000 }),
+            {
+              binaryName: CLIENT_NAME,
+              servers: new ProjectMcpServers(),
+            },
+          ),
         }),
         sessionReads: operatorReads,
         sessionAttach,

@@ -6,7 +6,9 @@ import {
   type FoundationPaths,
   harnessExitReason,
   hasSafeTerminalPaneIdentity,
+  type PaneIdentity,
   parseSessionId,
+  resolveSessionTarget,
   type SessionId,
   type SessionLifecycleRecord,
   type TmuxController,
@@ -237,13 +239,26 @@ export class DurableTerminalPaneStore {
   }
 }
 
+/**
+ * Observes registered panes and kills one only when it still is exactly the registered incarnation.
+ *
+ * ONE LISTING PER SWEEP. A sweep asks about all of its registrations at once, and each used to be its
+ * own `display-message`; they now share a single `list-panes -a` read for the moment they were asked.
+ * The listing never finds a target — every lookup is BY a registration's own session name, resolved the
+ * way `-t <session>` resolves it — so no unregistered pane can become a candidate through it. It is
+ * dropped as soon as it settles, which is what keeps the kill's re-check a fresh look rather than the
+ * sweep's.
+ */
 export class ExactTmuxPaneReaper implements RegisteredPaneObserver, ExactTerminalReaper {
+  private listing: Promise<ReadonlyMap<string, PaneIdentity> | undefined> | undefined;
+
   constructor(
     private readonly tmux: TmuxController,
     private readonly incarnation: ProcessIncarnation = processIncarnationFor(),
   ) {}
+
   async observe(registration: RegisteredTerminalPane): Promise<ObservedTerminalPane | undefined> {
-    const identity = await this.tmux.paneIdentity(registration.tmuxSession);
+    const identity = await this.identity(registration.tmuxSession);
     if (identity === undefined) return undefined;
     const ticks = await this.incarnation.startOf(identity.pid);
     return ticks === undefined
@@ -260,5 +275,16 @@ export class ExactTmuxPaneReaper implements RegisteredPaneObserver, ExactTermina
     )
       return;
     await this.tmux.killPaneExact(target.paneId);
+  }
+
+  /** The pane `-t <session>` names, from the shared listing — or asked on its own when tmux will not list. */
+  private async identity(tmuxSession: string): Promise<PaneIdentity | undefined> {
+    this.listing ??= this.tmux.paneIdentities().finally(() => {
+      this.listing = undefined;
+    });
+    const table = await this.listing;
+    if (table === undefined) return await this.tmux.paneIdentity(tmuxSession);
+    const name = resolveSessionTarget(tmuxSession, table.keys());
+    return name === undefined ? undefined : table.get(name);
   }
 }

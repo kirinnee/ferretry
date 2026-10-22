@@ -1,19 +1,36 @@
+import { readdir, readFile, readlink } from 'node:fs/promises';
 import { isAbsolute, join } from 'node:path';
-import { readFile, readlink } from 'node:fs/promises';
-import type { ProcessObservation } from '../../lib/migrate/inflight-report.ts';
-import { configuredServersOf, type ConfiguredServersPort } from '../../lib/migrate/configured-servers.ts';
+import { type ConfiguredServersPort, configuredServersOf } from '../../lib/migrate/configured-servers.ts';
 import { identifyKnownProcesses } from '../../lib/migrate/harness-provenance.ts';
+import type { ProcessObservation } from '../../lib/migrate/inflight-report.ts';
+import type { PaneSnapshotPort } from '../../lib/migrate/preflight-service.ts';
 import type {
   ProcessInventoryPort,
   ProcessProbePort,
   ProcessTableRead,
 } from '../../lib/migrate/process-inventory-port.ts';
-import { descendantsOf, inventoryProcesses, parseProcessTable } from '../../lib/migrate/process-table.ts';
-import type { PaneSnapshotPort } from '../../lib/migrate/preflight-service.ts';
+import { descendantsOf, inventoryProcesses, type ProcRow, parseProcessTable } from '../../lib/migrate/process-table.ts';
 import { capturePaneArguments, hasSessionArguments, panePidArguments } from '../../lib/tmux/commands.ts';
 import type { TmuxCommandPort } from '../../lib/tmux/contracts.ts';
 
 const processTableArguments = ['-Ao', 'pid=,ppid=,etime=,args='] as const;
+
+/** `USER_HZ`: the unit of `/proc/<pid>/stat`'s start time. 100 on every Linux architecture userspace sees. */
+const CLOCK_TICKS_PER_SECOND = 100;
+
+export interface ProcessProbeOptions {
+  /**
+   * Where procfs is mounted, on a host whose kernel lists each task's children there; `undefined` where
+   * there is none. Linux defaults to `/proc`, every other platform to none.
+   */
+  readonly procRoot?: string;
+  /**
+   * How long one read of the full table answers every later ask. Zero — the default — reads it every
+   * time; a caller that asks about several panes in one pass, and can live with a table that old, sets it.
+   */
+  readonly tableTtlMs?: number;
+  readonly nowMs?: () => number;
+}
 
 function detail(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -23,11 +40,69 @@ function detail(error: unknown): string {
  * Bun-backed process probe. The `ps` executable must be an absolute path so the probe can never
  * resolve an attacker-planted binary from `$PATH`; an unresolved one is reported as a failed read
  * rather than assumed empty.
+ *
+ * WHERE PROCFS LISTS CHILDREN, NO `ps` RUNS AT ALL. `ps -Ao` reads three files for every process on
+ * the machine — eleven thousand opens a second on a busy box when the liveness monitor asked about each
+ * ferret — to answer a question about one pane's handful of descendants. {@link descendants} walks
+ * that subtree alone through `/proc/<pid>/task/<tid>/children`, in the order the table walk produced.
  */
 export class BunProcessProbe implements ProcessProbePort {
-  constructor(private readonly psExecutable: string | undefined) {}
+  private table: { readonly atMs: number; readonly read: ProcessTableRead } | undefined;
+  private readonly procRoot: string | undefined;
+
+  constructor(
+    private readonly psExecutable: string | undefined,
+    private readonly options: ProcessProbeOptions = {},
+  ) {
+    this.procRoot = 'procRoot' in options ? options.procRoot : process.platform === 'linux' ? '/proc' : undefined;
+  }
 
   async processTable(): Promise<ProcessTableRead> {
+    const nowMs = this.options.nowMs?.() ?? Date.now();
+    const ttl = this.options.tableTtlMs ?? 0;
+    if (this.table !== undefined && nowMs - this.table.atMs < ttl) return this.table.read;
+    const read = await this.readTable();
+    if (read.kind === 'read') this.table = { atMs: nowMs, read };
+    return read;
+  }
+
+  /**
+   * The subtree under `rootPid` from procfs, or `undefined` — so the caller reads the full table — when
+   * there is no procfs, the root cannot be read, or this kernel does not list children.
+   */
+  async descendants(rootPid: number): Promise<readonly ProcRow[] | undefined> {
+    const proc = this.procRoot;
+    if (proc === undefined) return undefined;
+    try {
+      const uptime = Number((await readFile(join(proc, 'uptime'), 'utf8')).split(' ')[0]);
+      if (!Number.isFinite(uptime)) return undefined;
+      const rows: ProcRow[] = [];
+      const queue = [rootPid];
+      const seen = new Set(queue);
+      for (let index = 0; index < queue.length; index++) {
+        const parent = queue[index] as number;
+        // The root must be readable — that is the whole question; a descendant that exited mid-walk
+        // simply has no children left, exactly as a table read a moment later would show.
+        const children = await childrenOf(proc, parent).catch(error => {
+          if (index === 0) throw error;
+          return [];
+        });
+        for (const pid of children) {
+          if (seen.has(pid)) continue;
+          seen.add(pid);
+          const row = await procRow(proc, pid, uptime);
+          if (row === undefined) continue;
+          rows.push(row);
+          queue.push(pid);
+        }
+      }
+      return rows;
+    } catch {
+      return undefined;
+    }
+  }
+
+  private async readTable(): Promise<ProcessTableRead> {
     if (this.psExecutable === undefined || !isAbsolute(this.psExecutable))
       return { kind: 'failed', reason: 'no absolute ps executable is available to read the process table' };
     try {
@@ -53,6 +128,47 @@ export class BunProcessProbe implements ProcessProbePort {
       // A process may exit, or belong to another user, between the table read and this call.
       return undefined;
     }
+  }
+}
+
+/** Every child of every thread of `pid`, ascending — the order a pid-sorted table lists them in. */
+async function childrenOf(proc: string, pid: number): Promise<readonly number[]> {
+  const tasks = await readdir(join(proc, String(pid), 'task'));
+  const children = new Set<number>();
+  for (const task of tasks) {
+    const listed = await readFile(join(proc, String(pid), 'task', task, 'children'), 'utf8');
+    for (const word of listed.split(' ')) if (/^\d+$/u.test(word)) children.add(Number(word));
+  }
+  return [...children].sort((left, right) => left - right);
+}
+
+/**
+ * One process as a `ps -o pid=,ppid=,etime=,args=` row: `args` is the command line with its NULs as
+ * spaces and control characters as `?`, and `[comm]` for a process with none, as procps prints them.
+ */
+async function procRow(proc: string, pid: number, uptime: number): Promise<ProcRow | undefined> {
+  try {
+    const stat = await readFile(join(proc, String(pid), 'stat'), 'utf8');
+    const close = stat.lastIndexOf(')');
+    const comm = stat.slice(stat.indexOf('(') + 1, close);
+    const fields = stat.slice(close + 2).split(' ');
+    const ppid = Number(fields[1]);
+    const startTicks = Number(fields[19]);
+    const cmdline = await readFile(join(proc, String(pid), 'cmdline'), 'utf8');
+    const words = cmdline.split('\0');
+    if (words.at(-1) === '') words.pop();
+    // biome-ignore lint/suspicious/noControlCharactersInRegex: procps prints every control character as `?`.
+    const argv = words.join(' ').replace(/[\u0000-\u001f\u007f]/gu, '?');
+    if (pid <= 1 || !Number.isSafeInteger(ppid) || !Number.isFinite(startTicks)) return undefined;
+    return {
+      pid,
+      ppid,
+      startedSecondsAgo: Math.max(0, Math.floor(uptime - startTicks / CLOCK_TICKS_PER_SECOND)),
+      argv: argv === '' ? `[${comm}]` : argv,
+    };
+  } catch {
+    // Exited between being listed and being read: a table read a moment later would not show it either.
+    return undefined;
   }
 }
 
@@ -85,9 +201,14 @@ export class PaneProcessInventory implements ProcessInventoryPort {
       const panePid = Number(pane.stdout.trim());
       if (!Number.isFinite(panePid) || panePid <= 1)
         return unobservable(`tmux reported an unusable pane pid ${JSON.stringify(pane.stdout.trim())}`);
-      const table = await this.probe.processTable();
-      if (table.kind === 'failed') return unobservable(`the process table could not be read: ${table.reason}`);
-      const rows = descendantsOf(panePid, parseProcessTable(table.stdout));
+      const subtree = await this.probe.descendants?.(panePid);
+      let rows: readonly ProcRow[];
+      if (subtree !== undefined) rows = subtree;
+      else {
+        const table = await this.probe.processTable();
+        if (table.kind === 'failed') return unobservable(`the process table could not be read: ${table.reason}`);
+        rows = descendantsOf(panePid, parseProcessTable(table.stdout));
+      }
       const cwdByPid = new Map<number, string | undefined>();
       for (const row of rows) cwdByPid.set(row.pid, await this.probe.workingDirectory(row.pid));
       // The project's own server list is read from the directory the pane runs in; where that is not

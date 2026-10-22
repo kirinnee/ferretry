@@ -1,8 +1,8 @@
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { describe, it } from 'bun:test';
 import { readFileSync } from 'node:fs';
+import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { describe, it } from 'bun:test';
 import should from 'should';
 import {
   BunProcessProbe,
@@ -12,6 +12,7 @@ import {
 } from '../../../src/adapters/migrate/bun-process-inventory.ts';
 import type { ConfiguredServer } from '../../../src/lib/migrate/harness-provenance.ts';
 import type { ProcessProbePort, ProcessTableRead } from '../../../src/lib/migrate/process-inventory-port.ts';
+import { descendantsOf, type ProcRow, parseProcessTable } from '../../../src/lib/migrate/process-table.ts';
 import type { TmuxCommandPort, TmuxCommandResult } from '../../../src/lib/tmux/contracts.ts';
 
 /**
@@ -236,6 +237,180 @@ describe('BunProcessProbe', () => {
     // Assert
     should(own).equal(globalThis.process.cwd());
     should(absent).be.undefined();
+  });
+});
+
+/** `/proc/<pid>/stat` with the fields a subtree read uses: comm, parent, start time in ticks. */
+const stat = (pid: number, comm: string, ppid: number | string, ticks: number): string =>
+  `${String(pid)} (${comm}) S ${String(ppid)} ${'0 '.repeat(17)}${String(ticks)} 0 0\n`;
+
+/** A procfs written by hand: every shape a live one can take between two reads. */
+async function fakeProc(root: string): Promise<void> {
+  const write = async (path: string, text: string): Promise<void> => {
+    await mkdir(join(root, path, '..'), { recursive: true });
+    await writeFile(join(root, path), text);
+  };
+  await write('uptime', '1000.50 999.00\n');
+  // Two threads of the root, listing one child twice and pid 1 once.
+  await write('100/task/100/children', '201 200 1 ');
+  await write('100/task/101/children', '300 200');
+  await write('200/stat', stat(200, 'node', 100, 50_000));
+  await write('200/cmdline', 'node\0x.js\0');
+  await write('200/task/200/children', '400 ');
+  // 400 exited between being listed and being read: no stat at all.
+  await write('201/stat', stat(201, 'kw)x', 100, 99_000));
+  await write('201/cmdline', '');
+  // 201 has no task directory: it went before its children could be listed.
+  await write('300/stat', stat(300, 'sh', 100, 100_000));
+  await write('300/cmdline', 'echo\0a\nb\0');
+  await write('300/task/300/children', '500');
+  await write('500/stat', stat(500, 'odd', 'not-a-pid', 1));
+  await write('500/cmdline', 'odd');
+}
+
+describe('BunProcessProbe, reading one subtree from procfs', () => {
+  it('should walk only the subtree, in table order, as `ps` would print each row', async () => {
+    // Arrange
+    const root = await mkdtemp(join(tmpdir(), 'fy-proc-'));
+    await fakeProc(root);
+    const subject = new BunProcessProbe(undefined, { procRoot: root });
+
+    try {
+      // Act
+      const actual = await subject.descendants(100);
+
+      // Assert
+      should(actual).deepEqual([
+        { pid: 200, ppid: 100, startedSecondsAgo: 500, argv: 'node x.js' },
+        { pid: 201, ppid: 100, startedSecondsAgo: 10, argv: '[kw)x]' },
+        { pid: 300, ppid: 100, startedSecondsAgo: 0, argv: 'echo a?b' },
+      ]);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('should hand the question back to the full table whenever procfs cannot answer it', async () => {
+    // Arrange
+    const root = await mkdtemp(join(tmpdir(), 'fy-proc-'));
+    await fakeProc(root);
+    const noUptime = await mkdtemp(join(tmpdir(), 'fy-proc-'));
+    const badUptime = await mkdtemp(join(tmpdir(), 'fy-proc-'));
+    await writeFile(join(badUptime, 'uptime'), 'soon\n');
+
+    try {
+      // Act + Assert — no procfs, an unreadable root, no uptime, an uptime that is not a number.
+      should(await new BunProcessProbe(undefined, { procRoot: undefined }).descendants(100)).be.undefined();
+      should(await new BunProcessProbe(undefined, { procRoot: root }).descendants(999)).be.undefined();
+      should(await new BunProcessProbe(undefined, { procRoot: noUptime }).descendants(100)).be.undefined();
+      should(await new BunProcessProbe(undefined, { procRoot: badUptime }).descendants(100)).be.undefined();
+    } finally {
+      for (const directory of [root, noUptime, badUptime]) await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it.skipIf(globalThis.process.platform !== 'linux')(
+    'should agree with the real ps about a real process tree',
+    async () => {
+      // Arrange — a shell with two children, and one grandchild under a second shell.
+      const ps = Bun.which('ps');
+      if (ps === null) throw new Error('ps executable is required for this integration test');
+      const tree = Bun.spawn(['/bin/sh', '-c', 'sleep 30 & sleep 31 & /bin/sh -c "sleep 32; :" & wait'], {
+        stdout: 'ignore',
+        stderr: 'ignore',
+      });
+      await Bun.sleep(300);
+      const subject = new BunProcessProbe(ps);
+
+      try {
+        // Act
+        const actual = await subject.descendants(tree.pid);
+        const table = await subject.processTable();
+
+        // Assert
+        if (table.kind !== 'read') throw new Error(table.reason);
+        const expected = descendantsOf(tree.pid, parseProcessTable(table.stdout));
+        const shape = (rows: readonly ProcRow[] | undefined) =>
+          rows?.map(({ pid, ppid, argv }) => ({ pid, ppid, argv }));
+        should(shape(actual)).deepEqual(shape(expected));
+        should(actual?.length).equal(4);
+        for (const [index, row] of (actual ?? []).entries())
+          should(Math.abs(row.startedSecondsAgo - (expected[index]?.startedSecondsAgo ?? -9))).be.belowOrEqual(1);
+      } finally {
+        tree.kill();
+      }
+    },
+  );
+
+  it('should let one table answer every ask inside its time-to-live, and never hold a failed read', async () => {
+    // Arrange
+    const root = await mkdtemp(join(tmpdir(), 'fy-ps-ttl-'));
+    const count = join(root, 'count');
+    const executable = join(root, 'ps.sh');
+    const failing = join(root, 'failing.sh');
+    await writeFile(executable, `#!/bin/sh\nprintf x >> '${count}'\nprintf '  2 1 00:01 init\\n'\n`);
+    await writeFile(failing, `#!/bin/sh\nprintf y >> '${count}'\nexit 1\n`);
+    await chmod(executable, 0o700);
+    await chmod(failing, 0o700);
+    let now = 0;
+    const cached = new BunProcessProbe(executable, { tableTtlMs: 1_000, nowMs: () => now, procRoot: undefined });
+    const uncached = new BunProcessProbe(failing, { tableTtlMs: 1_000, nowMs: () => now });
+
+    try {
+      // Act
+      const first = await cached.processTable();
+      now = 999;
+      const held = await cached.processTable();
+      now = 1_000;
+      await cached.processTable();
+      await uncached.processTable();
+      await uncached.processTable();
+
+      // Assert
+      should(held).equal(first);
+      should(await readFile(count, 'utf8')).equal('xxyy');
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('PaneProcessInventory, over a probe that reads one subtree', () => {
+  it('should not read the full table when the probe can read the subtree', async () => {
+    // Arrange
+    const tmux = new FakeTmux({ code: 0, stdout: '100\n', stderr: '' });
+    let tables = 0;
+    const probe: ProcessProbePort = {
+      processTable: async () => {
+        tables += 1;
+        return table('');
+      },
+      descendants: async () => [{ pid: 200, ppid: 100, startedSecondsAgo: 5, argv: 'sleep 30' }],
+      workingDirectory: async () => '/work',
+    };
+
+    // Act
+    const actual = await new PaneProcessInventory(tmux, probe, provenance).collect('fy-session');
+
+    // Assert
+    should(actual).match({ kind: 'observed', processes: [{ pid: 200, argv: 'sleep 30', cwd: '/work' }] });
+    should(tables).equal(0);
+  });
+
+  it('should read the full table when the probe cannot read the subtree', async () => {
+    // Arrange
+    const tmux = new FakeTmux({ code: 0, stdout: '100\n', stderr: '' });
+    const probe: ProcessProbePort = {
+      processTable: async () => table('  200   100 00:05 sleep 30\n  300     1 00:05 other\n'),
+      descendants: async () => undefined,
+      workingDirectory: async () => '/work',
+    };
+
+    // Act
+    const actual = await new PaneProcessInventory(tmux, probe, provenance).collect('fy-session');
+
+    // Assert
+    should(actual).match({ kind: 'observed', processes: [{ pid: 200, argv: 'sleep 30' }] });
   });
 });
 

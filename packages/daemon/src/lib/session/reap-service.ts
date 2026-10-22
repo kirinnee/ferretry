@@ -1,7 +1,8 @@
 import {
-  planTerminalReap,
   type DurableTerminalSession,
+  hasDurableTerminalEvidence,
   type ObservedTerminalPane,
+  planTerminalReap,
   type RegisteredTerminalPane,
   type TerminalReapTarget,
 } from './reap.ts';
@@ -55,7 +56,19 @@ export class TerminalReapService {
     // Observation is only ever requested for a registered record. A broad `list-panes` call would
     // turn an unregistered human shell into a candidate and is therefore not part of this design.
     const ownRegistrations = registrations.filter(registration => registration.daemonId === this.daemonId);
-    const observations = await Promise.all(ownRegistrations.map(registration => this.observer.observe(registration)));
+    // And only for a record whose session this daemon's documents already prove is over: the plan can
+    // target nothing else, so asking tmux about a running session's pane every five seconds — and, on a
+    // Mac, running `ps` for its incarnation — was work whose answer could never be used.
+    const finished = new Set(
+      durableSessions
+        .filter(session => session.daemonId === this.daemonId && hasDurableTerminalEvidence(session))
+        .map(session => session.sessionId),
+    );
+    const observations = await Promise.all(
+      ownRegistrations
+        .filter(registration => finished.has(registration.sessionId))
+        .map(registration => this.observer.observe(registration)),
+    );
     const plan = planTerminalReap({
       daemonId: this.daemonId,
       registrations: ownRegistrations,
