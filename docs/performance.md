@@ -30,6 +30,36 @@ Every number covers only the window it measured.
   path shape, plus every program started.
 - **What this report cannot see**, said out loud so a gap is never read as a zero.
 
+## Session workers
+
+Every running session is observed off the daemon's main thread by a **session worker**. The worker
+watches the session's pane through its own read-only tmux client, follows its transcript, and works out
+its turn, questions and liveness. The main thread only writes what the workers report and serves
+requests.
+
+The workers form a **pool**, set in `config/daemon.json`:
+
+```json
+{ "sessionWorkers": { "enabled": true, "max": 2 } }
+```
+
+- **`max`** is the number of worker threads. The default is **2**. Each running session gets its own
+  thread until there are `max` of them. After that, each new session joins the least-loaded thread.
+- **One thread per agent:** set `max` at or above the number of sessions you run at once (up to 64).
+- **`enabled: false`** observes every session on the main thread instead, as before session workers.
+
+Why 2 is the default: on the owner-scale fleet (36 sessions, 5 running), a thread per session cost +72 MB
+of memory over the main thread, because each thread carries about 14 MB of engine. One shared thread cost
++18 MB and the least CPU. Two keep one slow session from holding up all the others, at close to that cost.
+
+`fy daemon status` shows the pool, and so does every performance report:
+
+```
+  session workers pool of 2 · 2 threads observing 3, 2 sessions
+```
+
+Restart the daemon after changing the setting: `fy daemon restart`.
+
 ## Safe to share
 
 The report contains no session text, no command arguments, no file contents and no secrets. Each item

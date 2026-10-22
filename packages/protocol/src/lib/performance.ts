@@ -146,6 +146,22 @@ export const WorkerStatsSchema = z.object({
 });
 export type WorkerStats = z.infer<typeof WorkerStatsSchema>;
 
+/**
+ * The session-worker pool (docs/performance.md › "Session workers"): how many threads observe the running
+ * sessions and how the sessions are spread across them. `max` is the configured pool size
+ * (`sessionWorkers.max`, default 2); one thread per agent is `max` at or above the running count.
+ */
+export const SessionWorkerPoolSchema = z.object({
+  /** `false` when `sessionWorkers.enabled` is off and every session is observed on the main thread. */
+  enabled: z.boolean(),
+  max: z.number().int().positive(),
+  /** Threads running now. */
+  threads: z.number().int().nonnegative(),
+  /** Sessions each running thread observes, busiest first. */
+  sessionsPerThread: z.array(z.number().int().nonnegative()),
+});
+export type SessionWorkerPool = z.infer<typeof SessionWorkerPoolSchema>;
+
 /** One counted syscall shape from an outside tracer (`strace`, `fs_usage`). */
 export const TracedSyscallSchema = z.object({
   call: z.string().min(1),
@@ -249,6 +265,8 @@ export const PerformanceReportSchema = z.object({
     top: z.array(FileOperationStatsSchema),
   }),
   workers: z.array(WorkerStatsSchema),
+  /** The session-worker pool when the window ended; absent from a daemon that predates the pool. */
+  sessionWorkers: SessionWorkerPoolSchema.optional(),
   budgets: z.array(BudgetVerdictSchema),
   syscallTrace: SyscallTraceSchema.optional(),
   /** What this report cannot see, in sentences, so a reader does not mistake a gap for a zero. */

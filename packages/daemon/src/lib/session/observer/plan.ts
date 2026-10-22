@@ -1,7 +1,13 @@
 import type { SessionId } from '../../session-id.ts';
 
-/** How many dedicated session-worker threads a daemon starts before it pools sessions into them. */
-export const DEFAULT_SESSION_WORKER_CAP = 8;
+/**
+ * How many session-worker threads a daemon starts before it pools sessions into them — the owner's
+ * "pool of X, default 2". Measured on the owner-scale fleet (5 running): one thread per session cost +72 MB
+ * resident over observing on the main thread (about 14 MB of engine per thread), one pooled thread +18 MB
+ * and the least CPU; two keep a slow session from holding up every other while staying close to that.
+ * One thread per agent is `sessionWorkers.max` at or above the running count.
+ */
+export const DEFAULT_SESSION_WORKER_CAP = 2;
 
 /** A worker the plan does not have yet: the supervisor starts one and gives it the session. */
 export const NEW_WORKER = 'new';

@@ -62,6 +62,23 @@ describe('status exit code', () => {
 });
 
 describe('human status rendering', () => {
+  it('should name the session-worker pool when the daemon reports it, and nothing when it does not', () => {
+    // Act
+    const pooled = renderDaemonStatus(
+      decideDaemonStatus(
+        'fyd',
+        runningReport,
+        health({ sessionWorkers: { enabled: true, max: 2, threads: 2, sessionsPerThread: [3, 2] } }),
+      ),
+      'fy',
+    );
+    const older = renderDaemonStatus(decideDaemonStatus('fyd', runningReport, health()), 'fy');
+
+    // Assert
+    should(pooled).containEql('  session workers pool of 2 · 2 threads observing 3, 2 sessions');
+    should(older).not.containEql('session workers');
+  });
+
   it('should lead with the verdict and summarise the health the daemon reported', () => {
     // Act
     const actual = renderDaemonStatus(decideDaemonStatus('fyd', runningReport, health()), 'fy');

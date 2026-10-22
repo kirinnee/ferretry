@@ -1,7 +1,7 @@
 import { describe, it } from 'bun:test';
-import type { PerformanceReport } from '../../src/lib/performance.ts';
 import should from 'should';
-import { renderPerformanceReport } from '../../src/lib/performance-render.ts';
+import type { PerformanceReport } from '../../src/lib/performance.ts';
+import { describeSessionWorkerPool, renderPerformanceReport } from '../../src/lib/performance-render.ts';
 import { fullReport, minimalReport, wallStats } from '../performance-report-fixtures.ts';
 
 describe('renderPerformanceReport', () => {
@@ -175,5 +175,42 @@ describe('renderPerformanceReport', () => {
 
     // Assert
     should(actual).containEql(`Child processes  ${expected} (0/min)`);
+  });
+});
+
+describe('describeSessionWorkerPool', () => {
+  it.each([
+    [
+      { enabled: false, max: 2, threads: 0, sessionsPerThread: [] },
+      'off — every running session is observed on the main thread (sessionWorkers.enabled: false)',
+    ],
+    [
+      { enabled: true, max: 2, threads: 0, sessionsPerThread: [] },
+      'pool of 2 · no thread running (no session is running)',
+    ],
+    [{ enabled: true, max: 2, threads: 1, sessionsPerThread: [1] }, 'pool of 2 · 1 thread observing 1 session'],
+    [{ enabled: true, max: 2, threads: 1, sessionsPerThread: [3] }, 'pool of 2 · 1 thread observing 3 sessions'],
+    [{ enabled: true, max: 8, threads: 2, sessionsPerThread: [3, 2] }, 'pool of 8 · 2 threads observing 3, 2 sessions'],
+  ])('should describe %j', (input, expected) => {
+    // Act + Assert
+    should(describeSessionWorkerPool(input)).equal(expected);
+  });
+});
+
+describe('the session-worker pool in a report', () => {
+  it('should show the pool when the report carries it, and nothing when it does not', () => {
+    // Arrange
+    const input: PerformanceReport = {
+      ...minimalReport(),
+      sessionWorkers: { enabled: true, max: 2, threads: 2, sessionsPerThread: [3, 2] },
+    };
+
+    // Act
+    const withPool = renderPerformanceReport(input);
+    const without = renderPerformanceReport(minimalReport());
+
+    // Assert
+    should(withPool).containEql('Session workers  pool of 2 · 2 threads observing 3, 2 sessions');
+    should(without).not.containEql('Session workers');
   });
 });

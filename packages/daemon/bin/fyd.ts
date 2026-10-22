@@ -70,6 +70,7 @@ import {
   type SessionHandoff,
   SessionStateSchema,
   type SessionView,
+  type SessionWorkerPool,
   type SignalSessionRequest,
   type StartSessionRequest,
   sessionHypermediaEnabled,
@@ -5811,11 +5812,16 @@ function createLearningSubsystem(parts: LearningSubsystemParts): LearningSubsyst
  * a domain that read its own pid could not be driven from a test, and the whole point of the field
  * is that an operator can signal the process that is actually serving.
  */
-function createHealthSubsystem(health: SessionHealthService, scratch: ScratchReclamation): DaemonHealthSubsystem {
+function createHealthSubsystem(
+  health: SessionHealthService,
+  scratch: ScratchReclamation,
+  sessionWorkers: () => SessionWorkerPool,
+): DaemonHealthSubsystem {
   return {
     report: async () => await health.report(),
     pid: process.pid,
     scratch,
+    sessionWorkers,
   };
 }
 
@@ -7919,6 +7925,15 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
             { ...DEFAULT_WORKER_SUPERVISOR_SETTINGS, cap: sessionWorkers.max },
           )
         : undefined;
+      // The pool as `fy daemon status` and every performance report show it.
+      const sessionWorkerPool = (): SessionWorkerPool =>
+        sessionWorkerSupervisor === undefined
+          ? { enabled: false, max: sessionWorkers.max, threads: 0, sessionsPerThread: [] }
+          : {
+              enabled: true,
+              ...sessionWorkerSupervisor.pool,
+              sessionsPerThread: [...sessionWorkerSupervisor.pool.sessionsPerThread],
+            };
       const sessionObserver =
         sessionWorkerSupervisor === undefined
           ? inlineObserver
@@ -9031,7 +9046,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
             clock,
           ),
         },
-        health: createHealthSubsystem(health, scratch),
+        health: createHealthSubsystem(health, scratch, sessionWorkerPool),
         performance: {
           profiles: new PerformanceProfiler({
             recorder: profilerProbe,
@@ -9065,6 +9080,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
               },
               uptimeSeconds: () => process.uptime(),
               sampleIntervalMs: sampleIntervalMs(STARTED_SAMPLE_INTERVAL),
+              sessionWorkers: sessionWorkerPool,
               fleet: async () => {
                 const sessions = storage.listSessions();
                 return {
