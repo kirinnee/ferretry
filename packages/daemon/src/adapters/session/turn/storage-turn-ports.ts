@@ -1,5 +1,5 @@
 import { stat } from 'node:fs/promises';
-import { type SessionState, SessionStateSchema, type SessionStatus } from '@ferretry/protocol';
+import { SessionStateSchema, type SessionStatus } from '@ferretry/protocol';
 import {
   type CapturedFrame,
   type ClockPort,
@@ -17,14 +17,14 @@ import {
   type SessionTranscriptTail,
   type SessionTurnPorts,
   type TranscriptEvent,
+  TURN_TAIL_EVENTS,
   type TurnPaneEvidence,
   type TurnStateChange,
   type TurnWatchSession,
+  turnLeftToSettle,
 } from '../../../lib/index.ts';
 import type { DaemonStorage } from '../../storage/session-storage.ts';
-
-/** How much of a transcript's end a decision reads: the last turn boundary is always near the end. */
-const TAIL_EVENTS = 80;
+import { recordTurnChange } from '../observer/session-observation-applier.ts';
 
 /** The two terminal reads a tick makes of one tmux session, as `TmuxController` answers them. */
 export interface TurnPaneReader {
@@ -50,21 +50,12 @@ interface CachedTail {
  * stamp, and the screen is captured again only when that stamp says it may have changed (see
  * {@link capturedFrameIsCurrent}). The scrollback is never captured here: nothing a turn is decided
  * from reads it, and on a long session it was most of every tick's bytes.
+ *
+ * SINCE STAGE 3a the daemon reads only the pane through these ports: `InlineObserverHost` keeps the
+ * roster from what storage tells it and reads the transcript through the one shared tail. The roster
+ * and transcript halves stay as the pre-3a path the observer's parity suite holds the host to, until
+ * stage 3d deletes the inline loops (`docs/design/session-workers.md` §5).
  */
-/**
- * Whether a session that is not live leaves the watcher anything to decide. For such a session every
- * settle in `lib/session/turn/policy.ts` answers nothing, so the watcher writes exactly when one of these
- * four is still recorded — and once none is, it never will again until the session is live.
- */
-function nothingToSettle(state: SessionState): boolean {
-  return (
-    state.turnState === undefined &&
-    state.turnPrompt === undefined &&
-    state.permissionRequest === undefined &&
-    state.harnessDialog === undefined
-  );
-}
-
 export class StorageTurnPorts implements SessionTurnPorts {
   private readonly tails = new Map<SessionId, CachedTail>();
   /**
@@ -97,7 +88,7 @@ export class StorageTurnPorts implements SessionTurnPorts {
         .map(async ({ id }) => {
           const state = SessionStateSchema.safeParse(await this.storage.readState(id).catch(() => undefined));
           if (!state.success) return undefined;
-          if (!isTurnStatus(state.data.status) && nothingToSettle(state.data)) this.settled.add(id);
+          if (!turnLeftToSettle(state.data)) this.settled.add(id);
           return { id, state: state.data } satisfies TurnWatchSession;
         }),
     );
@@ -111,7 +102,7 @@ export class StorageTurnPorts implements SessionTurnPorts {
     if (stats === undefined) return undefined;
     const cached = this.tails.get(id);
     if (cached?.file === file && cached.size === stats.size && cached.mtimeMs === stats.mtimeMs) return cached.events;
-    const read = await this.tail.tail(id, TAIL_EVENTS);
+    const read = await this.tail.tail(id, TURN_TAIL_EVENTS);
     if (read.kind !== 'read') return undefined;
     this.tails.set(id, { file, size: stats.size, mtimeMs: stats.mtimeMs, events: read.events });
     return read.events;
@@ -157,43 +148,8 @@ export class StorageTurnPorts implements SessionTurnPorts {
   }
 
   async record(id: SessionId, change: TurnStateChange, at: string): Promise<boolean> {
-    let written = false;
-    await this.storage.updateState(id, raw => {
-      const current = SessionStateSchema.safeParse(raw);
-      if (!current.success || current.data.turnState !== change.from) return raw;
-      // Re-read under the lock: a stop that committed after the watcher looked has the last word.
-      if (change.to !== undefined && !isTurnStatus(current.data.status)) return raw;
-      const next: Record<string, unknown> = { ...(raw as Record<string, unknown>) };
-      if (change.to === undefined) {
-        delete next.turnState;
-        delete next.turnStateAt;
-      } else if (change.to !== change.from) {
-        // Only a CHANGED turn moves the boundary: a new dialog on the same `needs-input` is not one.
-        next.turnState = change.to;
-        next.turnStateAt = at;
-      }
-      if (change.prompt === undefined) delete next.turnPrompt;
-      else next.turnPrompt = change.prompt;
-      if (change.request === undefined) delete next.permissionRequest;
-      else next.permissionRequest = change.request;
-      if (change.dialog === undefined) delete next.harnessDialog;
-      else next.harnessDialog = change.dialog;
-      written = true;
-      return next as typeof raw;
-    });
-    if (!written) return false;
-    // Journaled, so the event stream wakes every open page at once rather than on its next poll.
-    // A new dialog on the same 'needs-input' is its own event: 'turn.state' is a turn boundary, and
-    // what reacts to one (the Warden, a notification) must not fire twice for the same boundary.
-    await this.storage.append(id, change.to === change.from ? 'turn.prompt' : 'turn.state', {
-      from: change.from ?? null,
-      to: change.to ?? null,
-      prompt: change.prompt ?? null,
-      // The request itself rides the feed, so a page shows the approval card from the event alone.
-      permissionRequest: change.request ?? null,
-      harnessDialog: change.dialog ?? null,
-    });
-    if (change.to === undefined) this.tails.delete(id);
-    return true;
+    const written = await recordTurnChange(this.storage, id, change, at);
+    if (written && change.to === undefined) this.tails.delete(id);
+    return written;
   }
 }
