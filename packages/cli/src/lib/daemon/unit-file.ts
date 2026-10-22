@@ -124,6 +124,30 @@ export function launchAgentStateHome(plist: string): string | undefined {
     .replaceAll('&amp;', '&');
 }
 
+/**
+ * The launchd `ProcessType` the daemon's job declares.
+ *
+ * launchd.plist(5): a job that names NONE gets "light resource limits … throttling its CPU usage and
+ * I/O bandwidth", and every child inherits them — the multiplexer, the agents and every `ps` or
+ * `security` the daemon runs. An owner's Mac showed what that costs an interactive daemon: 5.6% of a
+ * core used, 63,566 involuntary context switches against 132 voluntary ones, a 1 KB key file taking
+ * 650 ms to read and the event loop blocked 23 s of every 60. `Interactive` is "the same resource
+ * limitations as apps, that is to say, none", which is what a daemon a person is waiting on needs.
+ *
+ * It is also what keeps the job out of App Nap's reach: App Nap is an AppKit policy applied to apps
+ * through `NSProcessInfo`, and a launchd agent's scheduling class comes from this key, so there is
+ * nothing for the daemon itself to opt out of at runtime.
+ */
+export const LAUNCHD_PROCESS_TYPE = 'Interactive';
+
+/**
+ * The `ProcessType` a launchd plist declares, or `undefined` when it declares none — which is the
+ * throttled default, and what every plist rendered before {@link LAUNCHD_PROCESS_TYPE} existed says.
+ */
+export function launchAgentProcessType(plist: string): string | undefined {
+  return /<key>ProcessType<\/key>\s*<string>([^<]*)<\/string>/u.exec(plist)?.[1];
+}
+
 /** Tab, newline and carriage return are the only C0 characters XML 1.0 can represent at all. */
 function hasForbiddenControlCharacter(value: string): boolean {
   for (const character of value) {
@@ -238,7 +262,8 @@ export interface LaunchAgentSpec extends ServiceDefinitionSpec {
  * `AbandonProcessGroup` is what lets the multiplexer server outlive a daemon restart, mirroring
  * systemd's `KillMode=process`. launchd has no equivalent of `RestartPreventExitStatus`, so a
  * daemon that keeps finding an incumbent is re-spawned; `ThrottleInterval` bounds how fast, which is
- * the most launchd can express and more than kteam's plist said at all.
+ * the most launchd can express and more than kteam's plist said at all. `ProcessType` is
+ * {@link LAUNCHD_PROCESS_TYPE}, because leaving it out has macOS throttle the whole fleet.
  */
 export function renderLaunchAgentPlist(spec: LaunchAgentSpec): string {
   const log = xmlText(spec.logFile, 'the log path');
@@ -251,6 +276,7 @@ export function renderLaunchAgentPlist(spec: LaunchAgentSpec): string {
 <key>KeepAlive</key><true/>
 <key>ThrottleInterval</key><integer>10</integer>
 <key>AbandonProcessGroup</key><true/>
+<key>ProcessType</key><string>${LAUNCHD_PROCESS_TYPE}</string>
 <key>StandardOutPath</key><string>${log}</string>
 <key>StandardErrorPath</key><string>${log}</string>
 <key>EnvironmentVariables</key><dict><key>FY_HOME</key><string>${xmlText(spec.stateHome, 'the state home')}</string><key>HOME</key><string>${xmlText(spec.userHome, 'the user home')}</string><key>PATH</key><string>${xmlText(spec.searchPath, 'PATH')}</string>${plistEnvironment(spec.locale)}</dict>
