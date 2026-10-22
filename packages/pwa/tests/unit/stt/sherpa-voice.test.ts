@@ -14,7 +14,12 @@ import {
 import type { ModelCacheLike } from '../../../src/lib/stt/model-store.ts';
 import { readOnDeviceSupport } from '../../../src/lib/stt/on-device-host.ts';
 import { SherpaEngineError } from '../../../src/lib/stt/sherpa-engine.ts';
-import { SHERPA_RUNTIME, SHERPA_ZIPFORMER_20M_MODEL } from '../../../src/lib/stt/sherpa-models.ts';
+import { ParakeetRecognitionSession } from '../../../src/lib/stt/parakeet-session.ts';
+import {
+  MOONSHINE_TINY_MODEL,
+  SHERPA_RUNTIME,
+  SHERPA_ZIPFORMER_20M_MODEL,
+} from '../../../src/lib/stt/sherpa-models.ts';
 import { browserSherpaVoice, type SherpaGlobalLike, sherpaFailure } from '../../../src/lib/stt/sherpa-voice.ts';
 import { StreamingRecognitionSession } from '../../../src/lib/stt/streaming-session.ts';
 
@@ -179,6 +184,20 @@ describe('browserSherpaVoice', () => {
     session.cancel();
     voice.unload();
     should(FakeWorker.made[0]?.worker.terminated).be.true();
+  });
+});
+
+describe('a whole-take sherpa model', () => {
+  it('dictates through a batch session: records, then decodes once on Stop with no stream', async () => {
+    FakeWorker.made.length = 0;
+    const voice = browserSherpaVoice(MOONSHINE_TINY_MODEL, page(), ASSETS, () => false);
+    const session = voice.createSession({ ...sessionOptions(), liveWords: true });
+    should(session).be.instanceOf(ParakeetRecognitionSession);
+    session.start();
+    await flush();
+    should(FakeWorker.made[0]?.options).eql({ type: 'module', name: 'fy-moonshine-tiny-en' });
+    should(FakeWorker.made[0]?.worker.posted).eql([{ type: 'load', model: 'moonshine-tiny-en' }]);
+    session.cancel();
   });
 });
 

@@ -11,6 +11,9 @@ import { dirname, join } from 'node:path';
 import should from 'should';
 import { ON_DEVICE_MODELS, SPEECH_RUNTIMES, validateModelCatalog } from '../../../src/lib/stt/model-catalog.ts';
 import {
+  MOONSHINE_BASE_MODEL,
+  MOONSHINE_TINY_MODEL,
+  PARAKEET_CTC_110M_MODEL,
   SHERPA_MODELS,
   SHERPA_RUNTIME,
   SHERPA_RUNTIME_VERSION,
@@ -24,16 +27,38 @@ describe('the sherpa models', () => {
   it('keep every pinning rule and are listed first, as the owner asked', () => {
     should(validateModelCatalog(SHERPA_MODELS)).eql([]);
     should(ON_DEVICE_MODELS.slice(0, 2)).eql([SHERPA_ZIPFORMER_MODEL, SHERPA_ZIPFORMER_20M_MODEL]);
+    should(ON_DEVICE_MODELS.slice(0, SHERPA_MODELS.length)).eql([...SHERPA_MODELS]);
     should(SPEECH_RUNTIMES['sherpa-onnx']).equal(SHERPA_RUNTIME);
   });
 
   it('build a streaming transducer from an encoder, decoder, joiner and vocabulary, in capitals', () => {
-    for (const model of SHERPA_MODELS) {
+    for (const model of SHERPA_MODELS.filter(entry => entry.streaming)) {
       should(model.recognizer).eql({ kind: 'online-transducer' });
       should(model.streaming).be.true();
       should(model.textCase).equal('upper');
       should(model.files.map(file => file.role).sort()).eql(['decoder', 'encoder', 'joiner', 'tokens']);
     }
+  });
+
+  it('decode whole takes with the files each recognizer is built from, in their own casing', () => {
+    const roles = (model: (typeof SHERPA_MODELS)[number]) => model.files.map(file => file.role).sort();
+    for (const model of [MOONSHINE_TINY_MODEL, MOONSHINE_BASE_MODEL]) {
+      should(model.recognizer).eql({ kind: 'offline-moonshine' });
+      should(roles(model)).eql(['cached-decoder', 'encoder', 'preprocessor', 'tokens', 'uncached-decoder']);
+    }
+    should(PARAKEET_CTC_110M_MODEL.recognizer).eql({ kind: 'offline-nemo-ctc' });
+    should(roles(PARAKEET_CTC_110M_MODEL)).eql(['model', 'tokens']);
+    for (const model of [MOONSHINE_TINY_MODEL, MOONSHINE_BASE_MODEL, PARAKEET_CTC_110M_MODEL]) {
+      should(model.streaming).be.false();
+      should(model.textCase).equal('as-is');
+    }
+    should(SHERPA_MODELS.map(model => model.id)).eql([
+      'sherpa-zipformer-en',
+      'sherpa-zipformer-en-20m',
+      'moonshine-tiny-en',
+      'moonshine-base-en',
+      'parakeet-ctc-110m',
+    ]);
   });
 
   it('share one runtime bundle of their own', () => {

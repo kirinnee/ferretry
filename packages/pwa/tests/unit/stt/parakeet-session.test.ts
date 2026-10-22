@@ -635,3 +635,51 @@ describe('ParakeetRecognitionSession timings', () => {
     should(w.session.timings()).be.undefined();
   });
 });
+
+describe('ParakeetRecognitionSession — another whole-take engine', () => {
+  const ports = (failure: (error: unknown) => BrowserRecognitionError, open: Promise<AudioRecording>) => ({
+    capture: { start: () => open } as AudioCapturePort,
+    engine: { preload: () => undefined, transcribe: async () => 'Good morning.' },
+    model: 'Moonshine tiny en int8 · test',
+    failure,
+    watchHidden: () => () => undefined,
+    setTimeout: () => 0,
+    clearTimeout: () => undefined,
+    now: () => 0,
+  });
+  const options = (failures: BrowserRecognitionError[]) => ({
+    liveWords: true,
+    onStart: () => undefined,
+    onTranscript: () => undefined,
+    onFailure: (failure: BrowserRecognitionError) => failures.push(failure),
+    onAbort: () => undefined,
+    onLimit: () => undefined,
+  });
+
+  it('never runs near-live passes without timed words, and names its own model in the timings', async () => {
+    const recording = new FakeRecording();
+    const session = new ParakeetRecognitionSession(
+      ports(() => new BrowserRecognitionError('recognition-failed', 'x'), Promise.resolve(recording)),
+      options([]),
+    );
+    session.start();
+    await tick();
+    should(recording.peeks).equal(0);
+    should(await session.finish()).equal('Good morning.');
+    should(session.timings()?.model).equal('Moonshine tiny en int8 · test');
+  });
+
+  it('reads its failures through its own mapper', async () => {
+    const failures: BrowserRecognitionError[] = [];
+    const session = new ParakeetRecognitionSession(
+      ports(
+        () => new BrowserRecognitionError('model-not-installed', 'Install Moonshine.'),
+        Promise.reject(new Error('no')),
+      ),
+      options(failures),
+    );
+    session.start();
+    await tick();
+    should(failures.map(failure => failure.message)).eql(['Install Moonshine.']);
+  });
+});
