@@ -145,6 +145,34 @@ describe('the session document cache', () => {
     should(((await storage.readConfig(ID)) as Record<string, unknown>).name).equal('Written');
   });
 
+  it('should see its own upserts at once, and hand the next one what the last one wrote', async () => {
+    // Arrange: both documents are in the cache before the locked writes replace them.
+    const { storage } = await seeded();
+    await storage.upsertConfig(ID, () => ({ id: 'cached-1', name: 'Created' }));
+    await storage.readState(ID);
+    await storage.readConfig(ID);
+    const handed: unknown[] = [];
+
+    // Act
+    await storage.upsertState(ID, current => {
+      handed.push(current);
+      return { ...(current as Record<string, unknown>), turn: 2 };
+    });
+    await storage.upsertState(ID, current => {
+      handed.push(current);
+      return { ...(current as Record<string, unknown>), turnState: 'working' };
+    });
+    await storage.upsertConfig(ID, current => ({ ...(current as Record<string, unknown>), name: 'Renamed' }));
+
+    // Assert: no upsert merged over the copy the cache held before it.
+    should(handed).deepEqual([
+      { id: 'cached-1', status: 'running', turn: 1 },
+      { id: 'cached-1', status: 'running', turn: 2 },
+    ]);
+    should(await storage.readState(ID)).deepEqual({ id: 'cached-1', status: 'running', turn: 2, turnState: 'working' });
+    should(await storage.readConfig(ID)).deepEqual({ id: 'cached-1', name: 'Renamed' });
+  });
+
   it('should see another writer replace the file, and edit it in place at the same size', async () => {
     // Arrange
     const { storage, paths } = await seeded();

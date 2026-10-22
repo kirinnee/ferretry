@@ -30,14 +30,46 @@ const HEAD_BYTES = 32 * 1024;
 const TAIL_BYTES = 256 * 1024;
 /** A walk bound, so a home with a pathological number of rollouts cannot stall a discovery. */
 const MAX_ROLLOUTS = 4_000;
+/**
+ * How long a directory must have been left alone before its listing is trusted to stay current.
+ *
+ * A directory's modification time has a granularity, so an entry created in the same tick as the
+ * listing leaves the time unchanged and would hide behind it. A listing taken that close to the last
+ * change is used once and listed again on the next walk; one taken after the directory settled is
+ * reused until the directory's identity or time moves.
+ */
+const SETTLED_MS = 2_000;
+
+const SKIP_NOTHING: ReadonlySet<string> = new Set();
 
 /** What one rollout was found to be, valid for as long as its size and modification time hold. */
 interface RolloutFacts {
   readonly size: number;
   readonly mtimeMs: number;
   readonly id: string | undefined;
+  /**
+   * Whether the id came from the `session_meta` header. A header names its file for the life of the
+   * path, so a settled id is never read again; an id taken from the filename because the header was
+   * still partially flushed is read again the next time the file is found changed.
+   */
+  readonly settled: boolean;
   /** Each correlation token asked about, and whether this file's windows contain it. */
   readonly tokens: Map<string, boolean>;
+}
+
+/** One directory's entries, valid for as long as the directory's identity and modification time hold. */
+interface DirectoryListing {
+  readonly ino: number;
+  readonly mtimeMs: number;
+  /** Whether the directory had settled when it was listed, so an unchanged time proves an unchanged listing. */
+  readonly trusted: boolean;
+  readonly directories: readonly string[];
+  readonly files: readonly string[];
+}
+
+interface RolloutIdentity {
+  readonly id: string | undefined;
+  readonly settled: boolean;
 }
 
 interface RolloutMeta {
@@ -64,6 +96,12 @@ function metaFromHead(head: string): RolloutMeta {
   return {};
 }
 
+const sameEntries = (a: DirectoryListing, b: DirectoryListing): boolean =>
+  a.directories.length === b.directories.length &&
+  a.files.length === b.files.length &&
+  a.directories.every((name, index) => b.directories[index] === name) &&
+  a.files.every((name, index) => b.files[index] === name);
+
 export class NodeCodexRolloutIndex implements CodexRolloutIndex, CodexRolloutBaseline {
   /**
    * What each rollout was found to be, keyed by path and trusted only while its size and modification
@@ -72,25 +110,37 @@ export class NodeCodexRolloutIndex implements CodexRolloutIndex, CodexRolloutBas
    * A Codex session whose rollout is not attributed yet is discovered again on EVERY transcript read —
    * every session listing, turn tick and live sample — and each discovery read two windows of up to
    * four thousand files: about a gigabyte of reads and decoding per ask, the bulk of it for rollouts
-   * that had not changed in weeks. A walk now costs a `stat` per unchanged rollout and reads only the
-   * ones that changed. Entries for files a walk no longer finds are dropped with it.
+   * that had not changed in weeks. A walk now reads only the ones that changed, and never so much as
+   * `stat`s a rollout whose id the caller skips. Entries for files a walk no longer finds are dropped
+   * with it.
    */
   readonly #facts = new Map<string, RolloutFacts>();
+
   /**
-   * Each directory's rollout-relevant entries, trusted while the directory's own modification time is
-   * unchanged — which moves exactly when an entry is added, removed or renamed. A walk then costs one
-   * `stat` per directory instead of an open and a full listing of each.
+   * Each directory's last listing, keyed by path.
+   *
+   * The walk used to `readdir` every directory of the home on every discovery. A new rollout appears
+   * as a new entry in its dated directory, and a new dated directory as a new entry in its parent —
+   * both move the directory's modification time — so a walk now costs one `stat` per directory and
+   * lists again only the ones that moved, or that {@link invalidate} named.
    */
-  readonly #directories = new Map<
-    string,
-    { readonly mtimeMs: number; readonly directories: readonly string[]; readonly files: readonly string[] }
-  >();
+  readonly #listings = new Map<string, DirectoryListing>();
+
+  /** How many times each home's listing has been seen to change, for {@link changes}. */
+  readonly #changes = new Map<string, number>();
+
+  /** The walk in flight for each home, so concurrent askers share one pass over the directories. */
+  readonly #walking = new Map<string, Promise<readonly string[]>>();
+
+  /** `now` dates a listing against its directory's modification time; see {@link SETTLED_MS}. */
+  constructor(private readonly now: () => number = Date.now) {}
 
   /** Every rollout id this home already holds — the baseline a start records before launching. */
   async ids(home: string): Promise<readonly string[]> {
     const ids: string[] = [];
     for (const file of await this.files(home)) {
-      const id = (await this.facts(file)).id;
+      const known = this.#facts.get(file);
+      const id = known?.settled === true ? known.id : (await this.facts(file)).id;
       if (id !== undefined) ids.push(id);
     }
     return ids;
@@ -99,16 +149,17 @@ export class NodeCodexRolloutIndex implements CodexRolloutIndex, CodexRolloutBas
   async candidates(
     home: string,
     correlationToken: string,
-    skip: ReadonlySet<string> = new Set(),
+    skip: ReadonlySet<string> = SKIP_NOTHING,
   ): Promise<readonly CodexRolloutCandidate[]> {
     const candidates: CodexRolloutCandidate[] = [];
     for (const file of await this.files(home)) {
-      // A rollout already known to be one the caller can never choose is not `stat`ed again: on a
-      // home of thousands, the rollouts that existed before a session launched are nearly all of them.
-      const known = this.#facts.get(file)?.id;
-      if (known !== undefined && skip.has(known)) continue;
+      // A skipped rollout can never be chosen — the baseline was there before this session launched —
+      // so once its id is known it is neither `stat`ed nor read again, whatever it does next. On a home
+      // of thousands, the baseline is nearly all of them.
+      const known = this.#facts.get(file);
+      if (known?.id !== undefined && skip.has(known.id)) continue;
       const facts = await this.facts(file);
-      if (facts.id === undefined) continue;
+      if (facts.id === undefined || skip.has(facts.id)) continue;
       let correlated = facts.tokens.get(correlationToken);
       if (correlated === undefined) {
         correlated = await this.contains(file, facts.size, correlationToken);
@@ -119,22 +170,43 @@ export class NodeCodexRolloutIndex implements CodexRolloutIndex, CodexRolloutBas
     return candidates;
   }
 
+  /** How many times a walk has seen this home's listing change: a new or removed rollout or directory. */
+  changes(home: string): number {
+    return this.#changes.get(home) ?? 0;
+  }
+
+  /**
+   * Somebody saw this directory's entries change — a file-system watcher, say — so its listing is
+   * read again on the next walk however its modification time looks, and the home counts a change.
+   *
+   * The `stat` a walk spends per directory is how the index notices on its own; a caller that is
+   * told directly can say so here instead, and a later caller may stop the walk from needing to ask.
+   */
+  invalidate(directory: string): void {
+    const known = this.#listings.get(directory);
+    if (known !== undefined) this.#listings.set(directory, { ...known, trusted: false });
+    for (const home of this.#changes.keys()) {
+      const root = join(home, 'sessions');
+      if (directory === root || directory.startsWith(`${root}/`)) this.changed(home);
+    }
+  }
+
   /**
    * This rollout's facts, read again only when it changed. A rollout that vanished since the walk is
    * still reported by the id its filename carries, exactly as before, and remembered for nothing.
    */
   private async facts(file: string): Promise<RolloutFacts> {
     const info = await stat(file).catch(() => undefined);
+    const known = this.#facts.get(file);
     if (info === undefined) {
       this.#facts.delete(file);
-      return { size: 0, mtimeMs: 0, id: await this.identify(file), tokens: new Map() };
+      return { size: 0, mtimeMs: 0, ...(await this.identify(file)), tokens: new Map() };
     }
-    const known = this.#facts.get(file);
     if (known !== undefined && known.size === info.size && known.mtimeMs === info.mtimeMs) return known;
     const facts: RolloutFacts = {
       size: info.size,
       mtimeMs: info.mtimeMs,
-      id: await this.identify(file),
+      ...(known?.settled === true ? { id: known.id, settled: true } : await this.identify(file)),
       tokens: new Map(),
     };
     this.#facts.set(file, facts);
@@ -143,47 +215,64 @@ export class NodeCodexRolloutIndex implements CodexRolloutIndex, CodexRolloutBas
 
   /** Every `.jsonl` beneath `<home>/sessions`, bounded. */
   private async files(home: string): Promise<readonly string[]> {
+    const running = this.#walking.get(home);
+    if (running !== undefined) return await running;
+    const walk = this.walk(home).finally(() => this.#walking.delete(home));
+    this.#walking.set(home, walk);
+    return await walk;
+  }
+
+  private async walk(home: string): Promise<readonly string[]> {
+    const root = join(home, 'sessions');
     const found: string[] = [];
-    const pending = [join(home, 'sessions')];
+    const visited = new Set<string>();
+    const pending = [root];
+    let changed = !this.#changes.has(home);
     while (pending.length > 0 && found.length < MAX_ROLLOUTS) {
       const directory = pending.shift() as string;
-      const listing = await this.listing(directory);
-      pending.push(...listing.directories);
-      found.push(...listing.files);
+      visited.add(directory);
+      const { listing, moved } = await this.list(directory);
+      changed ||= moved;
+      for (const name of listing.directories) pending.push(join(directory, name));
+      for (const name of listing.files) found.push(join(directory, name));
     }
+    const inHome = (path: string): boolean => path === root || path.startsWith(`${root}/`);
+    for (const directory of this.#listings.keys())
+      if (inHome(directory) && !visited.has(directory)) this.#listings.delete(directory);
     const walked = new Set(found);
-    const root = join(home, 'sessions');
-    for (const file of this.#facts.keys())
-      if (file.startsWith(`${root}/`) && !walked.has(file)) this.#facts.delete(file);
+    for (const file of this.#facts.keys()) if (inHome(file) && !walked.has(file)) this.#facts.delete(file);
+    if (changed) this.changed(home);
     return found;
   }
 
-  /** One directory's subdirectories and rollouts, listed again only when the directory changed. */
-  private async listing(
-    directory: string,
-  ): Promise<{ readonly directories: readonly string[]; readonly files: readonly string[] }> {
-    const mtimeMs = (await stat(directory).catch(() => undefined))?.mtimeMs;
-    if (mtimeMs === undefined) {
-      this.#directories.delete(directory);
-      return { directories: [], files: [] };
-    }
-    const known = this.#directories.get(directory);
-    if (known?.mtimeMs === mtimeMs) return known;
-    const directories: string[] = [];
-    const files: string[] = [];
-    for (const entry of await readdir(directory, { withFileTypes: true }).catch(() => [])) {
-      const child = join(directory, entry.name);
-      if (entry.isDirectory()) directories.push(child);
-      else if (entry.isFile() && entry.name.endsWith('.jsonl')) files.push(child);
-    }
-    const listed = { mtimeMs, directories, files };
-    this.#directories.set(directory, listed);
-    return listed;
+  /** One directory's entries, from the last listing while the directory has not moved. */
+  private async list(directory: string): Promise<{ readonly listing: DirectoryListing; readonly moved: boolean }> {
+    const known = this.#listings.get(directory);
+    const info = await stat(directory).catch(() => undefined);
+    if (known?.trusted === true && info?.ino === known.ino && info.mtimeMs === known.mtimeMs)
+      return { listing: known, moved: false };
+    const entries =
+      info?.isDirectory() === true ? await readdir(directory, { withFileTypes: true }).catch(() => []) : [];
+    const listing: DirectoryListing = {
+      ino: info?.ino ?? 0,
+      mtimeMs: info?.mtimeMs ?? 0,
+      trusted: info !== undefined && this.now() - info.mtimeMs >= SETTLED_MS,
+      directories: entries.filter(entry => entry.isDirectory()).map(entry => entry.name),
+      files: entries.filter(entry => entry.isFile() && entry.name.endsWith('.jsonl')).map(entry => entry.name),
+    };
+    if (info === undefined) this.#listings.delete(directory);
+    else this.#listings.set(directory, listing);
+    return { listing, moved: known === undefined ? entries.length > 0 : !sameEntries(known, listing) };
   }
 
-  private async identify(file: string): Promise<string | undefined> {
+  private changed(home: string): void {
+    this.#changes.set(home, this.changes(home) + 1);
+  }
+
+  private async identify(file: string): Promise<RolloutIdentity> {
     const head = await this.window(file, 0, HEAD_BYTES);
-    return metaFromHead(head ?? '').id ?? idFromFilename(file);
+    const id = metaFromHead(head ?? '').id;
+    return id === undefined ? { id: idFromFilename(file), settled: false } : { id, settled: true };
   }
 
   /** Whether the rollout's head or tail contains the token. */
