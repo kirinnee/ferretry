@@ -189,7 +189,7 @@ describe('the hand-over, captured', () => {
             const context = await newContext(phone, mode);
             try {
               const tab = await open(context, `path=direct&pause=1&stuck=${stuck}&theme=studio-${mode}`);
-              await tab.waitForSelector('[data-ledger-actions]');
+              await tab.waitForSelector('[data-ledger-more]');
               await tab.screenshot({
                 path: join(shotsDir, `handover-stuck-${stuck}-${phone ? 'phone' : 'desktop'}-${mode}.png`),
               });

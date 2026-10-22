@@ -240,6 +240,10 @@ Every undelivered row (sending, queued, typed-not-sent, unconfirmed, not deliver
   copy was already typed into it mid-turn (see [Never two copies behind a running turn](#never-two-copies-behind-a-running-turn)).
 - **Copy text** — in the app only.
 
+In the app these are not a row of buttons: one small **⋯ "Message actions"** button beside the row's status mark opens a menu
+that lists exactly the actions valid for that state (plus **Hide** and **Dismiss**, which only change what this device shows).
+A retry that may make a second copy is still two steps — the menu item opens a warning, and only its own button sends.
+
 The session menu's **Clear stuck messages** cancels every undelivered row of that session, one by one.
 
 All three routes are `operator`, with no capability of their own — they finish or take back a send, and

@@ -627,8 +627,45 @@
 .fy-message-user > .mx-panel:last-child {
   margin-bottom: 0;
 }
-.fy-message-user > [data-ledger-actions] {
-  margin-top: 6px;
+/* A send's "⋯" actions button (`LedgerMoreMenu`): 28px to look at, 44px to hit — an invisible box laid over
+   it, as the transcript's other small controls do — and pulled in by negative margins so the receipt line
+   keeps the height it has without it. Scoped to the line so the coarse-pointer 44px box floor does not
+   grow it. The menu it opens is the shared context menu, which draws no motion. */
+.fy-receipt-line .fy-ledger-more {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-control, 8px);
+  color: var(--fy-muted);
+  cursor: pointer;
+  display: inline-flex;
+  flex: 0 0 auto;
+  height: 28px;
+  justify-content: center;
+  margin: -6px -6px -6px 0;
+  min-height: 0;
+  min-width: 0;
+  padding: 0;
+  position: relative;
+  width: 28px;
+}
+.fy-receipt-line .fy-ledger-more::after {
+  content: '';
+  height: 44px;
+  left: 50%;
+  position: absolute;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: 44px;
+}
+.fy-receipt-line .fy-ledger-more:hover,
+.fy-receipt-line .fy-ledger-more[aria-expanded='true'] {
+  background: var(--surface-2);
+  color: var(--fg);
+}
+.fy-receipt-line .fy-ledger-more[aria-busy='true'] {
+  cursor: progress;
+  opacity: 0.6;
 }
 /* A message handed to the agent through a file (`handoff-message.tsx`): the file's text as Markdown,
    its attachments under it, and a small faded "via turn file" line that explains on hover or tap. */
