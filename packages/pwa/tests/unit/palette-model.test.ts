@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+import { PACK_GUIDE_BUILDER_LABEL } from '@ferretry/protocol';
 import { daemonId } from '../../src/lib/daemon-connection.ts';
 import { APP_BAR_DESTINATIONS } from '../../src/shell/app-bar.tsx';
 import {
@@ -364,5 +365,15 @@ describe('paletteFocusPolicy', () => {
 
   it('gives a touch reader the dialog, so no keyboard covers the results', () => {
     expect(paletteFocusPolicy(true)).toEqual({ dialogAutoFocus: true, inputAutoFocus: false });
+  });
+});
+
+describe('guide-builder ferrets in the palette', () => {
+  it('are not offered as sessions to jump to', () => {
+    const entries = paletteSessionEntries([
+      sessionView('plain'),
+      sessionView('builder', { config: { label: PACK_GUIDE_BUILDER_LABEL } }),
+    ]);
+    expect(entries.map(entry => entry.id)).toEqual(['plain']);
   });
 });

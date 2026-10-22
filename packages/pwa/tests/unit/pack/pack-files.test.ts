@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'bun:test';
-import type { GuideUseCase } from '@ferretry/protocol';
+import { type GuideUseCase, ModelsGuideFileSchema } from '@ferretry/protocol';
+import { parse } from 'yaml';
 import {
   guideIssues,
   readPackFile,
+  routingIssues,
   useCaseForFile,
   withModelsGuide,
   withPackConfig,
@@ -109,5 +111,60 @@ describe('the models guide file', () => {
     expect(
       guideIssues(Array.from({ length: 25 }, (_, index) => ({ ...(GUIDE[1] as GuideUseCase), id: `u${index}` }))),
     ).toEqual([expect.stringContaining('24')]);
+  });
+});
+
+describe('routing preferences in pack.yaml', () => {
+  it('writes the owner’s words trimmed, and an empty string removes the key', () => {
+    const written = withPackConfig('', { routingPreferences: '  Prefer cheap models for chores.  ' });
+    expect(readPackFile(written ?? '')).toEqual({ routingPreferences: 'Prefer cheap models for chores.' });
+    const cleared = withPackConfig(written ?? '', { routingPreferences: '   ' });
+    expect(readPackFile(cleared ?? '')).toEqual({});
+    expect(cleared).not.toContain('routingPreferences');
+  });
+
+  it('leaves the other settings and a comment alone', () => {
+    const text = withPackConfig('# mine\nenabled: false\n', { routingPreferences: 'Cheap first.' });
+    expect(text).toContain('# mine');
+    expect(readPackFile(text ?? '')).toEqual({ enabled: false, routingPreferences: 'Cheap first.' });
+  });
+});
+
+describe('routing guidance in models-guide.yaml', () => {
+  const ROUTING = { prompt: 'Use Opus for hard work.', short: 'Opus for hard work' };
+  const read = (text: string | null) => ModelsGuideFileSchema.parse(parse(text ?? ''));
+
+  it('checks the two halves with the owner’s words', () => {
+    expect(routingIssues({ prompt: '', short: '' })).toEqual([]);
+    expect(routingIssues(ROUTING)).toEqual([]);
+    expect(routingIssues({ prompt: 'x'.repeat(6001), short: 'ok' })[0]).toContain('The routing guidance:');
+    expect(routingIssues({ prompt: 'ok', short: 'x'.repeat(151) })[0]).toContain('The one-line summary:');
+    expect(routingIssues({ prompt: 'only words', short: '' }).length).toBeGreaterThan(0);
+  });
+
+  it('writes a pair trimmed, removes it with null, and leaves the file’s own when not asked', () => {
+    const written = withModelsGuide('', GUIDE, { prompt: '  Use Opus for hard work. ', short: ' Opus for hard work ' });
+    expect(read(written).routing).toEqual(ROUTING);
+    expect(read(withModelsGuide(written ?? '', GUIDE)).routing).toEqual(ROUTING);
+    expect(read(withModelsGuide(written ?? '', GUIDE, null)).routing).toBeUndefined();
+    expect(read(withModelsGuide('', GUIDE)).routing).toBeUndefined();
+  });
+
+  it('refuses a routing pair the schema would not take', () => {
+    expect(withModelsGuide('', GUIDE, { prompt: 'x'.repeat(6001), short: 'ok' })).toBeNull();
+  });
+
+  it('drops the record of a suggestion when the owner saves their own edit', () => {
+    const suggested = [
+      'suggested:',
+      '  by: gpt-6-astra',
+      '  via: codex-main',
+      '  at: 2026-10-22T14:30:00.000Z',
+      '  acceptedAt: 2026-10-22T14:31:00.000Z',
+      '',
+    ].join('\n');
+    expect(read(suggested).suggested?.by).toBe('gpt-6-astra');
+    expect(read(withModelsGuide(suggested, GUIDE)).suggested).toBeUndefined();
+    expect(read(withModelsGuide(suggested, null)).suggested).toBeUndefined();
   });
 });

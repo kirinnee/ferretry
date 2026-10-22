@@ -13,6 +13,9 @@ const entries = (half: CatalogHalf): readonly ModelCatalogEntryView[] =>
     ...(model.context === undefined ? {} : { context: model.context }),
     efforts: [...model.efforts],
     default: model.default,
+    ...(model.note === undefined ? {} : { note: model.note }),
+    ...(model.price === undefined ? {} : { price: { input: model.price.input, output: model.price.output } }),
+    ...(model.retires === undefined ? {} : { retires: model.retires }),
   }));
 
 export interface PublishedCatalogState {

@@ -40,6 +40,7 @@ export * from './learning.ts';
 export * from './mcp-oauth.ts';
 export * from './models.ts';
 export * from './pack.ts';
+export * from './pack-guide.ts';
 export * from './pairing.ts';
 export * from './performance.ts';
 export * from './performance-redaction.ts';

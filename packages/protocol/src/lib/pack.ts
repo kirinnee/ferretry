@@ -56,6 +56,16 @@ export const PackJevSchema = z.strictObject({
 });
 export type PackJev = z.infer<typeof PackJevSchema>;
 
+/** The most an owner's routing preferences may say: a paragraph or two, never a document. */
+export const MAX_ROUTING_PREFERENCES_CHARS = 4_000;
+
+/**
+ * The owner's routing preferences, in their own words ("keep Opus for reviews; GLM for bulk work"). Read
+ * only by the guide builder (`fy guide suggest`), which drafts a guide with them; never a rule the
+ * daemon enforces.
+ */
+export const RoutingPreferencesSchema = z.string().trim().max(MAX_ROUTING_PREFERENCES_CHARS);
+
 export const PackConfigSchema = z.strictObject({
   /** The machine's switch. Off: no ferret is told about Pack mode and `fy new` refuses `pack_off`. */
   enabled: z.boolean(),
@@ -63,6 +73,7 @@ export const PackConfigSchema = z.strictObject({
   limits: PackLimitsSchema,
   probe: PackProbeSchema,
   jev: PackJevSchema,
+  routingPreferences: RoutingPreferencesSchema.optional(),
 });
 export type PackConfig = z.infer<typeof PackConfigSchema>;
 
@@ -82,6 +93,7 @@ export const PackFileSchema = z.strictObject({
   limits: PackLimitsSchema.partial().optional(),
   probe: PackProbeSchema.partial().optional(),
   jev: PackJevSchema.partial().optional(),
+  routingPreferences: RoutingPreferencesSchema.optional(),
 });
 export type PackFile = z.infer<typeof PackFileSchema>;
 
@@ -93,6 +105,9 @@ export function packConfigFromFile(file: PackFile): PackConfig {
     limits: { ...DEFAULT_PACK_CONFIG.limits, ...file.limits },
     probe: { ...DEFAULT_PACK_CONFIG.probe, ...file.probe },
     jev: { ...DEFAULT_PACK_CONFIG.jev, ...file.jev },
+    ...(file.routingPreferences === undefined || file.routingPreferences === ''
+      ? {}
+      : { routingPreferences: file.routingPreferences }),
   };
 }
 
@@ -160,6 +175,21 @@ export const GuideRoutingSchema = z.strictObject({
 });
 export type GuideRouting = z.infer<typeof GuideRoutingSchema>;
 
+/** The most models a guide may describe. */
+export const MAX_MODEL_DESCRIPTIONS = 400;
+
+/**
+ * The owner's description of one model, in their own words — strengths, weaknesses, what it costs, when to
+ * use or avoid it. The input a guide is built from (`fy guide describe`, Settings › Pack › Models). A model
+ * the owner never described is described by its catalog: its note, tier and context window.
+ */
+export const ModelDescriptionSchema = z.strictObject({
+  provider: NonEmpty.max(64),
+  model: NonEmpty.max(128),
+  description: z.string().trim().min(1).max(MAX_GUIDE_TEXT_CHARS),
+});
+export type ModelDescription = z.infer<typeof ModelDescriptionSchema>;
+
 /**
  * Where an accepted guide came from: the model that drafted it, what ran that model, and when it was
  * suggested and accepted. Pack mode only reports it (`fy recommend`); a hand-written guide has none.
@@ -185,9 +215,22 @@ export const ModelsGuideFileSchema = z
     useCases: z.array(GuideUseCaseSchema).max(MAX_GUIDE_USE_CASES).optional(),
     /** How to pick a model, in words; absent means the one rendered from the use cases. */
     routing: GuideRoutingSchema.optional(),
+    /** The owner's description of each model they described. */
+    models: z.array(ModelDescriptionSchema).max(MAX_MODEL_DESCRIPTIONS).optional(),
     suggested: GuideSuggestedSchema.optional(),
   })
   .superRefine((value, context) => {
+    const described = new Set<string>();
+    for (const [index, entry] of (value.models ?? []).entries()) {
+      const key = `${entry.provider}\u0000${entry.model}`;
+      if (described.has(key))
+        context.addIssue({
+          code: 'custom',
+          message: `${entry.provider} ${entry.model} is described twice`,
+          path: ['models', index, 'model'],
+        });
+      described.add(key);
+    }
     const seen = new Set<string>();
     for (const [index, useCase] of (value.useCases ?? []).entries()) {
       if (seen.has(useCase.id))
@@ -232,14 +275,59 @@ export const PackFleetModelSchema = z.strictObject({
   efforts: z.array(NonEmpty).readonly(),
   /** The runtimes on this machine that can run it, by name. Empty: nowhere here. */
   runtimes: z.array(NonEmpty).readonly(),
+  /** What the guide builder is told about it: the owner's words, else the catalog's. */
+  description: NonEmpty.optional(),
+  describedBy: z.enum(['owner', 'catalog']).optional(),
 });
 export type PackFleetModel = z.infer<typeof PackFleetModelSchema>;
+
+/** The guide an accept replaced, kept so `fy guide undo` (or Undo in the editor) can put it back. */
+export const GuideUndoSchema = z.strictObject({
+  savedAt: InstantSchema,
+  /** `derived`: there was no guide of the owner's, so undoing removes the use cases again. */
+  source: z.enum(['file', 'derived']),
+});
+export type GuideUndo = z.infer<typeof GuideUndoSchema>;
+
+/**
+ * One run of the guide builder: a short-lived, hidden ferret (`fy guide suggest`, Suggest a guide). It is
+ * `running` until its draft is written and read, then `suggested` or `failed`.
+ */
+export const PackGuideJobSchema = z.strictObject({
+  id: NonEmpty.max(64),
+  /** The builder ferret's session id. */
+  session: NonEmpty,
+  /** The name it shows under, like any ferret. */
+  name: NonEmpty,
+  runtime: NonEmpty,
+  model: NonEmpty.optional(),
+  startedAt: InstantSchema,
+  status: z.enum(['running', 'suggested', 'failed']),
+  /** `failed`: why, in one sentence. */
+  message: NonEmpty.optional(),
+});
+export type PackGuideJob = z.infer<typeof PackGuideJobSchema>;
+
+/** Whether a guide can be built here now, and on what: the ready agent runtimes, the best first. */
+export const PackGuideBuilderSchema = z.strictObject({
+  available: z.boolean(),
+  runtimes: z.array(NonEmpty).readonly(),
+  /** Why not, when it is not available. */
+  reason: NonEmpty.optional(),
+  /** The newest builder run, so a reopened page finds it. */
+  job: PackGuideJobSchema.optional(),
+});
+export type PackGuideBuilder = z.infer<typeof PackGuideBuilderSchema>;
 
 /** `GET /v1/pack`: the settings, the guide in effect and every model the fleet knows. */
 export const PackViewSchema = z.strictObject({
   config: PackConfigSchema,
   guide: ModelsGuideSchema,
   models: z.array(PackFleetModelSchema).readonly(),
+  /** Present while an accepted suggestion can be undone. */
+  undo: GuideUndoSchema.optional(),
+  /** Absent from a daemon that predates the guide builder. */
+  builder: PackGuideBuilderSchema.optional(),
 });
 export type PackView = z.infer<typeof PackViewSchema>;
 
