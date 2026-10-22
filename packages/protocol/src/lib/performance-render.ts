@@ -1,4 +1,4 @@
-import type { DurationStats, PerformanceReport, SessionWorkerPool } from './performance.ts';
+import type { DaemonServiceFacts, DurationStats, PerformanceReport, SessionWorkerPool } from './performance.ts';
 
 /**
  * The session-worker pool in one line, for `fy daemon status` and every performance report alike:
@@ -11,6 +11,14 @@ export function describeSessionWorkerPool(pool: SessionWorkerPool): string {
   if (pool.threads === 0) return `${size} · no thread running (no session is running)`;
   const spread = pool.sessionsPerThread.join(', ');
   return `${size} · ${String(pool.threads)} thread${pool.threads === 1 ? '' : 's'} observing ${spread} session${pool.sessionsPerThread.length === 1 && pool.sessionsPerThread[0] === 1 ? '' : 's'}`;
+}
+
+/** How the daemon is run: `launchd · ProcessType Interactive`, or what it means that it declares none. */
+export function describeDaemonService(service: DaemonServiceFacts): string {
+  if (service.manager !== 'launchd' || service.processType === undefined) return service.manager;
+  if (service.processType === null)
+    return 'launchd · declares no ProcessType, so macOS throttles the daemon — its next update or restart rewrites the job';
+  return `launchd · ProcessType ${service.processType}${service.processType === 'Interactive' ? '' : ', so macOS throttles the daemon — its next update or restart rewrites the job'}`;
 }
 
 /** How many rows of each table the text shows; `--json` carries all of them. */
@@ -121,6 +129,8 @@ export function renderPerformanceReport(report: PerformanceReport): string {
     lines.push(
       `  ${num(entry.perSecond).padStart(7)}/s  ${entry.operation} ${entry.path} — p95 ${ms(entry.wall.p95Ms)}`,
     );
+
+  if (report.service !== undefined) lines.push(`Service  ${describeDaemonService(report.service)}`);
 
   if (report.sessionWorkers !== undefined)
     lines.push('', `Session workers  ${describeSessionWorkerPool(report.sessionWorkers)}`);

@@ -1275,6 +1275,24 @@ describe('daemon status — a launchd job macOS is throttling', () => {
   });
 });
 
+describe('the service facts a performance report carries', () => {
+  it("should name the manager and the launchd job's ProcessType, and direct where no definition is installed", async () => {
+    // Arrange
+    const throttled: DaemonSupervisorReport = { manager: 'launchd', state: 'running', pid: 4242, processType: null };
+    const interactive = harness({ serviceFallback: { ...throttled, processType: 'Interactive' } });
+    const none = harness({ serviceFallback: throttled });
+    const systemd = harness({ serviceFallback: { manager: 'systemd', state: 'running', pid: 7 } });
+    const uninstalled = harness({ serviceFallback: throttled, serviceInstalled: false });
+
+    // Act + Assert
+    should(await interactive.controller.serviceFacts()).deepEqual({ manager: 'launchd', processType: 'Interactive' });
+    should(await none.controller.serviceFacts()).deepEqual({ manager: 'launchd', processType: null });
+    should(await systemd.controller.serviceFacts()).deepEqual({ manager: 'systemd' });
+    should(await uninstalled.controller.serviceFacts()).deepEqual({ manager: 'direct' });
+    should(await harness({ withoutService: true }).controller.serviceFacts()).deepEqual({ manager: 'direct' });
+  });
+});
+
 describe('daemon status', () => {
   it('should report a serving daemon as a human summary and succeed', async () => {
     // Arrange
