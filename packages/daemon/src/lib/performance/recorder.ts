@@ -8,6 +8,7 @@ import type {
   ReportedStall,
   RouteStats,
   WorkerStats,
+  WorkerWork,
 } from '@ferretry/protocol';
 import { describeFrame, type LoopStall, type StackSample } from '../runtime/liveness.ts';
 import { DurationSeries, GaugeSeries, percentile, rate, round } from './stats.ts';
@@ -37,6 +38,20 @@ export interface PerformanceProbe {
   loopTick(lagMs: number): void;
   stall(stall: LoopStall): void;
   samples(samples: readonly StackSample[]): void;
+  /**
+   * One job a worker thread finished, as the worker itself reported it; `activity` the main-thread work
+   * that asked for it. A worker's children and file reads are invisible to every other instrument here.
+   */
+  workerJob(name: string, job: WorkerJobReport, activity?: string): void;
+}
+
+/** What one worker job cost, as the worker reported it. Commands are already labelled by program. */
+export interface WorkerJobReport {
+  readonly wallMs: number;
+  readonly children: readonly { readonly command: string; readonly wallMs: number }[];
+  readonly fileReads: number;
+  readonly fetches: number;
+  readonly heapBytes: number;
 }
 
 /** A probe that records nothing, for tests and for a daemon built without a profiler. */
@@ -50,6 +65,7 @@ export const NO_PERFORMANCE_PROBE: PerformanceProbe = Object.freeze({
   loopTick: () => undefined,
   stall: () => undefined,
   samples: () => undefined,
+  workerJob: () => undefined,
 });
 
 /** A loop block this long or longer is counted, and the two thresholds the report names. */
@@ -71,6 +87,14 @@ interface ChildSeries {
   readonly by: Map<string, number>;
 }
 
+interface WorkerWorkSeries {
+  readonly wall: DurationSeries;
+  readonly children: Map<string, ChildSeries>;
+  fileReads: number;
+  fetches: number;
+  readonly heapMb: GaugeSeries;
+}
+
 interface RouteSeries {
   readonly wall: DurationSeries;
   errors: number;
@@ -90,6 +114,7 @@ export class PerformanceWindow {
   readonly #inclusive = new Map<string, number>();
   readonly #stacks = new Map<string, number>();
   readonly #workers = new Map<string, GaugeSeries>();
+  readonly #work = new Map<string, WorkerWorkSeries>();
   #samples = 0;
   #blocks100 = 0;
   #blocks250 = 0;
@@ -114,23 +139,14 @@ export class PerformanceWindow {
   }
 
   childStarted(command: string, synchronous: boolean, activity: string = UNLABELLED_ACTIVITY): void {
-    const entry = this.#child(command);
+    const entry = childOf(this.#children, command);
     entry.started += 1;
     if (synchronous) entry.synchronous += 1;
     bump(entry.by, activity);
   }
 
   childExited(command: string, wallMs: number): void {
-    this.#child(command).wall.add(wallMs);
-  }
-
-  #child(command: string): ChildSeries {
-    let entry = this.#children.get(command);
-    if (entry === undefined) {
-      entry = { started: 0, synchronous: 0, wall: new DurationSeries(), by: new Map() };
-      this.#children.set(command, entry);
-    }
-    return entry;
+    childOf(this.#children, command).wall.add(wallMs);
   }
 
   fileOperation(operation: string, path: string, wallMs: number): void {
@@ -162,6 +178,24 @@ export class PerformanceWindow {
     }
   }
 
+  workerJob(name: string, job: WorkerJobReport, activity: string = UNLABELLED_ACTIVITY): void {
+    let entry = this.#work.get(name);
+    if (entry === undefined) {
+      entry = { wall: new DurationSeries(), children: new Map(), fileReads: 0, fetches: 0, heapMb: new GaugeSeries() };
+      this.#work.set(name, entry);
+    }
+    entry.wall.add(job.wallMs);
+    for (const child of job.children) {
+      const series = childOf(entry.children, child.command);
+      series.started += 1;
+      bump(series.by, activity);
+      series.wall.add(child.wallMs);
+    }
+    entry.fileReads += job.fileReads;
+    entry.fetches += job.fetches;
+    entry.heapMb.add(job.heapBytes / 1_048_576);
+  }
+
   worker(name: string, inFlight: number): void {
     let entry = this.#workers.get(name);
     if (entry === undefined) {
@@ -174,8 +208,7 @@ export class PerformanceWindow {
   /** The window's tables, ranked, over `windowMs`. */
   tables(windowMs: number): WindowTables {
     const lags = [...this.#lags].sort((a, b) => a - b);
-    const childEntries = [...this.#children];
-    const childTotal = childEntries.reduce((sum, [, entry]) => sum + entry.started, 0);
+    const childTotal = [...this.#children.values()].reduce((sum, entry) => sum + entry.started, 0);
     const fileEntries = [...this.#files];
     const fileTotal = fileEntries.reduce((sum, [, entry]) => sum + entry.count, 0);
     return {
@@ -227,22 +260,7 @@ export class PerformanceWindow {
       childProcesses: {
         total: childTotal,
         perMinute: rate(childTotal, windowMs, 60_000),
-        commands: ranked(
-          childEntries.map(
-            ([command, entry]): ChildProcessStats => ({
-              command,
-              count: entry.started,
-              perMinute: rate(entry.started, windowMs, 60_000),
-              synchronous: entry.synchronous,
-              wall: entry.wall.stats(),
-              by: [...entry.by]
-                .sort(([a, x], [b, y]) => y - x || a.localeCompare(b))
-                .slice(0, STARTERS)
-                .map(([activity, count]) => ({ activity, count })),
-            }),
-          ),
-          entry => entry.count,
-        ),
+        commands: childStats(this.#children, windowMs),
       },
       fileOperations: {
         total: fileTotal,
@@ -261,9 +279,14 @@ export class PerformanceWindow {
           entry => entry.count,
         ),
       },
-      workers: [...this.#workers]
-        .sort(([a], [b]) => a.localeCompare(b))
-        .map(([name, gauge]): WorkerStats => ({ name, inFlight: gauge.stats() })),
+      workers: [...new Set([...this.#workers.keys(), ...this.#work.keys()])].sort().map((name): WorkerStats => {
+        const work = this.#work.get(name);
+        return {
+          name,
+          inFlight: (this.#workers.get(name) ?? new GaugeSeries()).stats(),
+          ...(work === undefined ? {} : { work: workStats(work, windowMs) }),
+        };
+      }),
     };
   }
 }
@@ -273,6 +296,46 @@ export type WindowTables = Pick<
   PerformanceReport,
   'eventLoop' | 'cpuProfile' | 'activities' | 'routes' | 'childProcesses' | 'fileOperations' | 'workers'
 >;
+
+function childOf(children: Map<string, ChildSeries>, command: string): ChildSeries {
+  let entry = children.get(command);
+  if (entry === undefined) {
+    entry = { started: 0, synchronous: 0, wall: new DurationSeries(), by: new Map() };
+    children.set(command, entry);
+  }
+  return entry;
+}
+
+function childStats(children: ReadonlyMap<string, ChildSeries>, windowMs: number): ChildProcessStats[] {
+  return ranked(
+    [...children].map(
+      ([command, entry]): ChildProcessStats => ({
+        command,
+        count: entry.started,
+        perMinute: rate(entry.started, windowMs, 60_000),
+        synchronous: entry.synchronous,
+        wall: entry.wall.stats(),
+        by: [...entry.by]
+          .sort(([a, x], [b, y]) => y - x || a.localeCompare(b))
+          .slice(0, STARTERS)
+          .map(([activity, count]) => ({ activity, count })),
+      }),
+    ),
+    entry => entry.count,
+  );
+}
+
+function workStats(work: WorkerWorkSeries, windowMs: number): WorkerWork {
+  return {
+    jobs: work.wall.count,
+    perMinute: rate(work.wall.count, windowMs, 60_000),
+    wall: work.wall.stats(),
+    childProcesses: childStats(work.children, windowMs),
+    fileReads: work.fileReads,
+    fetches: work.fetches,
+    heapMb: work.heapMb.stats(),
+  };
+}
 
 function series<K>(map: Map<K, DurationSeries>, key: K): DurationSeries {
   let entry = map.get(key);
@@ -361,5 +424,9 @@ export class PerformanceRecorder implements PerformanceProbe {
   samples(samples: readonly StackSample[]): void {
     if (samples.length === 0) return;
     for (const window of this.#windows) window.samples(samples);
+  }
+
+  workerJob(name: string, job: WorkerJobReport, activity?: string): void {
+    for (const window of this.#windows) window.workerJob(name, job, activity);
   }
 }

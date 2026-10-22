@@ -66,6 +66,10 @@ describe('probeBundledWorker', () => {
     should(await probeBundledWorker('session')).deepEqual({ name: 'session', ready: true });
   });
 
+  it('should start the real housekeeping worker and hear it answer', async () => {
+    should(await probeBundledWorker('housekeeping')).deepEqual({ name: 'housekeeping', ready: true });
+  });
+
   it('should report every way a worker can fail the probe, and end it each time', async () => {
     // Arrange
     const cases = [

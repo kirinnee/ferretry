@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import type { FleetManifest, FleetManifestAccount } from './manifest.ts';
-import { shellQuote } from './wrappers.ts';
+import { shellQuote } from './shell-quote.ts';
 
 const finiteNumber = z.number().refine(Number.isFinite, 'expected a finite number');
 const percentage = finiteNumber.min(0).max(100);

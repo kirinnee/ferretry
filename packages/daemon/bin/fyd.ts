@@ -34,16 +34,10 @@ import {
   wrapperNameOf,
 } from '@ferretry/fleet';
 import {
-  AnthropicUsageProbe,
-  CachedCredentialReads,
-  CodexUsageProbe,
   claudeKeychainAccount,
   credentialFileStamp,
   FileConversationLeaseStore,
-  FilePassiveUsageStore,
   type FleetBinaryLookup,
-  fetchQuota,
-  newestRolloutRateLimits,
   PlatformFleetCredentialStore,
   ProcessFleetTokenRefreshPort,
   resolveUserHome,
@@ -120,7 +114,6 @@ import { fileFleetSetupDeps } from '../src/adapters/fleet/setup-files.ts';
 import {
   CredentialEmailReader,
   ensurePrivateDirectory,
-  rolloutFiles,
   runCredentialHarness,
 } from '../src/adapters/fleet-credentials/credential-facts.ts';
 import { deliverCodexCallback } from '../src/adapters/fleet-login/callback-delivery.ts';
@@ -136,6 +129,12 @@ import {
 } from '../src/adapters/fork/index.ts';
 import { BunGitRunner } from '../src/adapters/git/index.ts';
 import { FileHandoverReceiptStore } from '../src/adapters/handover/file-handover-receipt-store.ts';
+import {
+  HOUSEKEEPING_WORKER,
+  InlineHousekeepingJobs,
+  WorkerCredentialPorts,
+  WorkerHousekeepingJobs,
+} from '../src/adapters/housekeeping/index.ts';
 import {
   AnalyticsTranscriptSpend,
   AsyncActivityScope,
@@ -440,11 +439,7 @@ import { FILE_EVENT_POLL_MS, FileEventHub } from '../src/lib/file-events/index.t
 import { AccountModelAgentControlPolicy, type AgentControlPolicy } from '../src/lib/fleet/agent-control.ts';
 import { FleetCatalogService } from '../src/lib/fleet/catalog-service.ts';
 import { CodexAppServerSupervisor } from '../src/lib/fleet/codex-runtime.ts';
-import {
-  createFleetCredentialsSubsystem,
-  credentialPassiveUsage,
-  FleetCredentialCatalog,
-} from '../src/lib/fleet/credentials-service.ts';
+import { createFleetCredentialsSubsystem, FleetCredentialCatalog } from '../src/lib/fleet/credentials-service.ts';
 import { createFleetSetupSubsystem } from '../src/lib/fleet/setup-service.ts';
 import { resolveStartAccount } from '../src/lib/fleet/start-resolution.ts';
 import { polledDirectoryLimitations } from '../src/lib/performance/fallbacks.ts';
@@ -627,6 +622,7 @@ import {
   HarnessUpdateService,
   type HarnessVersionPort,
   HOSTED_APP_ORIGIN,
+  type HousekeepingSettings,
   handoffFolders,
   handoffPointerPaths,
   handoffView,
@@ -6639,8 +6635,16 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
    * usage feed is built before them and lays these readings over its rows; until then it has none.
    */
   let providerQuota: ProviderQuotaService | undefined;
+  // Claude's own rule, never LOGNAME: under launchd or systemd USER can be unset, and Claude then
+  // names its item after the OS login name — which is what every keychain read must ask for too.
+  const claudeKeychain = claudeKeychainAccount(process.env.USER, () => userInfo().username);
+  // The home the harness reaches with no `CLAUDE_CONFIG_DIR`, whose keychain item carries no suffix.
+  // Spelled from `userHome` because the fleet layout owns the same join.
+  const defaultClaudeHome = join(userHome, '.claude');
   /**
-   * The one credential store the renewal, the credential status and the sign-in read through.
+   * The one credential store the renewal and the sign-in read through. The credential status reads the
+   * same stores by the same rules — this platform, this keychain account, this default home — on the
+   * housekeeping worker, which builds its own from `housekeepingSettings` below.
    *
    * A renewal classifies and then classifies again, which is what decides whether it fired and whether
    * it worked. Two stores would be two readings of one home, and the second reading is the whole of
@@ -6650,12 +6654,8 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
     platform: process.platform,
     command: new SpawnCredentialCommand(),
     now: () => millisecondClock.now(),
-    // Claude's own rule, never LOGNAME: under launchd or systemd USER can be unset, and Claude then
-    // names its item after the OS login name — which is what this must ask for too.
-    keychainAccount: claudeKeychainAccount(process.env.USER, () => userInfo().username),
-    // The home the harness reaches with no `CLAUDE_CONFIG_DIR`, whose keychain item carries no
-    // suffix. Spelled from `userHome` because the fleet layout owns the same join.
-    defaultClaudeHome: join(userHome, '.claude'),
+    keychainAccount: claudeKeychain,
+    defaultClaudeHome,
   });
   /**
    * Where this operator said the harnesses are, once this boot has read the configuration.
@@ -6671,6 +6671,12 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
    * the hosts that feature was written for, while the operator's own `harness` block named the file.
    */
   let harnessPolicy: HarnessDiscoveryPolicy | undefined;
+  /**
+   * Whether the fleet's credential and usage reads run on the housekeeping worker (`housekeeping.enabled`
+   * in `daemon.json`, on unless it says `false`). A LET for the reason `harnessPolicy` is one: it is
+   * configuration, read when the usage feed is built from it, before the subsystems that use it mount.
+   */
+  let housekeepingEnabled: boolean | undefined;
   const harnessBinary: FleetBinaryLookup = binary => {
     const kind = (['claude', 'codex'] as const satisfies readonly HarnessKind[]).find(
       candidate => HARNESS_BINARIES[candidate] === binary,
@@ -7451,6 +7457,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
     createSessionLaunch,
     createSessionResume,
     createUsageFeed: async config => {
+      housekeepingEnabled = config.housekeeping.enabled;
       // THIS HOST'S OWN CREDENTIALS FIRST: what the account model's usage pass already read, joined to
       // each published runtime. An external collector endpoint is optional and tried behind it; a
       // daemon configured without one and with no fleet serves an empty feed and says so rather than
@@ -7677,6 +7684,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
     probeWorkers: async () => [
       await probeBundledWorker('analytics-fold'),
       await probeBundledWorker('session'),
+      await probeBundledWorker('housekeeping'),
       { name: 'pdf-decrypt', ...(await probePdfDecryptWorker()) },
     ],
     createDirectCarrier: async (dispatch, sockets, devices, pairing) => {
@@ -8406,64 +8414,73 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       void declaredUsageRefreshMs().then(intervalMs => {
         credentialUsageIntervalMs = intervalMs;
       });
-      // The free reads, made with material `credentialReads` read itself: one store read per active read.
-      // `FY_USAGE_PROBE_ORIGIN` moves them to a fake usage server on this machine (the idle bench, the CI
-      // budget); anything but a loopback origin is refused, so a token only ever reaches its provider or
-      // this host.
+      // THE HOUSEKEEPING WORKER (docs/design/housekeeping-worker.md §2): every credential store read, every
+      // free usage read with its token, every passive usage read runs as a job on its own thread — or on
+      // this one when `housekeeping.enabled` is false, or after the thread kept crashing — and only facts
+      // come back. The token of a login is read, used and dropped inside one job, so it never exists in
+      // this heap. `FY_USAGE_PROBE_ORIGIN` moves the free reads to a fake usage server on this machine (the
+      // idle bench, the CI budget); anything but a loopback origin is refused, so a token only ever reaches
+      // its provider or this host.
       const probeUrls = usageProbeUrls(process.env.FY_USAGE_PROBE_ORIGIN);
-      const anthropicUsageProbe = new AnthropicUsageProbe({
-        fetch: fetchQuota,
-        credentials: harnessCredentials,
-        stored: harnessCredentials,
-        ...(probeUrls === undefined ? {} : { url: probeUrls.anthropic }),
-      });
-      const codexUsageProbe = new CodexUsageProbe({
-        fetch: fetchQuota,
-        stored: harnessCredentials,
-        now: () => millisecondClock.now(),
-        ...(probeUrls === undefined ? {} : { url: probeUrls.codex }),
-      });
+      const housekeepingSettings: HousekeepingSettings = {
+        type: 'settings',
+        platform: process.platform,
+        keychainAccount: claudeKeychain,
+        defaultClaudeHome,
+        fleetRoot: paths.fleet,
+        ...(probeUrls === undefined ? {} : { probeUrls }),
+      };
+      const inlineHousekeeping = new InlineHousekeepingJobs(housekeepingSettings, () => millisecondClock.now());
+      const housekeepingJobs =
+        housekeepingEnabled === false
+          ? inlineHousekeeping
+          : new WorkerHousekeepingJobs({
+              settings: housekeepingSettings,
+              inline: inlineHousekeeping,
+              probe: profilerProbe,
+              activity: () => activities.current(),
+              // Kept while the fleet refresh recurs, so each pass does not start a fresh thread.
+              idleMs: () => credentialUsageIntervalMs + 30_000,
+              retired: () =>
+                bootNotices.state(
+                  'the housekeeping worker kept failing, so credential and usage reads run on the main thread until the daemon restarts',
+                ),
+              now: () => millisecondClock.now(),
+            });
       // Each credential's store, read as rarely as its facts allow (housekeeping-worker.md §4 PR 1): a file
       // store's facts are kept while its stamp holds, a macOS keychain item's for one usage interval, and a
-      // free read refreshes them for nothing. Facts and a digest only — never material, never a token.
-      const credentialReads = new CachedCredentialReads({
-        store: harnessCredentials,
-        probe: async (resolution, material) =>
-          resolution.harness === 'claude'
-            ? await anthropicUsageProbe.probeMaterial(material)
-            : await codexUsageProbe.probeMaterial(material),
+      // free read refreshes them for nothing. The kept facts stay HERE; only a changed store becomes a job.
+      const credentialPorts = new WorkerCredentialPorts({
+        jobs: housekeepingJobs,
         stamp: credentialFileStamp,
         keychain: process.platform === 'darwin',
         keychainFreshMs: () => credentialUsageIntervalMs,
         now: () => millisecondClock.now(),
         cache: new Map(),
+        catalog: fleetCredentialCatalog,
+        sessions: async () =>
+          (
+            await Promise.all(
+              storage.listSessions().map(async session => {
+                const config = SessionConfigSchema.safeParse(
+                  await storage.readConfig(session.id).catch(() => undefined),
+                );
+                return config.success ? [{ agent: config.data.agent, transcript: config.data.transcript }] : [];
+              }),
+            )
+          ).flat(),
       });
       // A login's display email for the credentials list: a Codex one from the kept facts above, a Claude
       // one parsed from its account file only once that file's stamp moved.
       const credentialEmails = new CredentialEmailReader({
-        codexFacts: async resolution => await credentialReads.local(resolution),
+        codexFacts: async resolution => await credentialPorts.local(resolution),
         stamp: credentialFileStamp,
         kept: new Map(),
       });
       const credentialStatus = new CredentialStatusService({
-        local: async (resolution, options) => await credentialReads.local(resolution, options),
-        passiveUsage: credentialPassiveUsage({
-          catalog: fleetCredentialCatalog,
-          claude: async id => await new FilePassiveUsageStore(paths.fleet).read(id),
-          sessions: async () =>
-            (
-              await Promise.all(
-                storage.listSessions().map(async session => {
-                  const config = SessionConfigSchema.safeParse(
-                    await storage.readConfig(session.id).catch(() => undefined),
-                  );
-                  return config.success ? [{ agent: config.data.agent, transcript: config.data.transcript }] : [];
-                }),
-              )
-            ).flat(),
-          newestRollout: async files => await newestRolloutRateLimits(await rolloutFiles(files)),
-        }),
-        activeUsage: async resolution => await credentialReads.active(resolution),
+        local: async (resolution, options) => await credentialPorts.local(resolution, options),
+        passiveUsage: async subject => await credentialPorts.passiveUsage(subject),
+        activeUsage: async resolution => await credentialPorts.activeUsage(resolution),
         refresh: new ProcessFleetTokenRefreshPort({
           spawn: spawnFleetTokenRefreshProcess,
           environment: process.env,
@@ -8930,6 +8947,9 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
               ...(sessionWorkerSupervisor === undefined
                 ? []
                 : [{ name: 'session-observer', inFlight: () => sessionWorkerSupervisor.inFlight }]),
+              ...(housekeepingJobs instanceof WorkerHousekeepingJobs
+                ? [{ name: HOUSEKEEPING_WORKER, inFlight: () => housekeepingJobs.inFlight }]
+                : []),
             ],
             clock: millisecondClock,
             timers: {

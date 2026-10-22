@@ -111,8 +111,18 @@ export function renderPerformanceReport(report: PerformanceReport): string {
 
   if (report.workers.length > 0) {
     lines.push('', 'Workers — requests in flight');
-    for (const worker of report.workers)
+    for (const worker of report.workers) {
       lines.push(`  ${worker.name}: mean ${num(worker.inFlight.mean)} · max ${num(worker.inFlight.max)}`);
+      const work = worker.work;
+      if (work === undefined) continue;
+      lines.push(
+        `    ${num(work.jobs)} jobs (${num(work.perMinute)}/min) · ${wall(work.wall)} · ${num(work.fileReads)} files read · ${num(work.fetches)} requests · heap max ${num(work.heapMb.max)} MB`,
+      );
+      for (const entry of work.childProcesses.slice(0, ROWS))
+        lines.push(
+          `    ${num(entry.perMinute).padStart(7)}/min  ${entry.command}${starters(entry.by)} — p95 ${ms(entry.wall.p95Ms)}`,
+        );
+    }
   }
 
   const trace = report.syscallTrace;

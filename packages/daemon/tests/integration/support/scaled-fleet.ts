@@ -81,7 +81,7 @@ const FIXTURE_REVISION = 2;
  * Codex login, each in Ferretry's own file store, so the usage pass has real stores to read — on the
  * Mac this is the fleet refresh's whole cost, and a fixture with no logins measured none of it.
  */
-export const FIXTURE_LOGINS = Object.freeze({
+const FIXTURE_LOGINS = Object.freeze({
   claude: ['claude-work', 'claude-home'],
   codex: 'codex-main',
 } as const);
@@ -100,7 +100,7 @@ const RUNTIME_LOGIN: Readonly<Record<string, string>> = {
  * How often the usage pass runs, in seconds: the fleet's `usage.interval`, cut from 60 so a profile
  * window of half a minute holds more than one pass.
  */
-export const FIXTURE_USAGE_INTERVAL_SECONDS = 10;
+const FIXTURE_USAGE_INTERVAL_SECONDS = 10;
 
 /** Far beyond any test run, so no fake login ever reads as expired. */
 const TOKEN_EXPIRES_AT = Date.parse('2099-01-01T00:00:00.000Z');
@@ -320,7 +320,8 @@ export async function scaledFleet(root: string, shape: ScaledFleetShape = OWNER_
   const cached = existing === undefined ? undefined : (JSON.parse(existing) as ScaledFleet & { revision?: number });
   if (cached?.revision === FIXTURE_REVISION && JSON.stringify(cached.shape) === JSON.stringify(shape)) return cached;
   // A fixture built by an older revision or for another shape is built again from nothing, never patched.
-  if (cached !== undefined) await Promise.all([home, userHome, marker].map(path => rm(path, { recursive: true, force: true })));
+  if (cached !== undefined)
+    await Promise.all([home, userHome, marker].map(path => rm(path, { recursive: true, force: true })));
 
   await mkdir(userHome, { recursive: true });
   // The state home is claimed FIRST: its layout refuses a non-empty directory it did not mark.

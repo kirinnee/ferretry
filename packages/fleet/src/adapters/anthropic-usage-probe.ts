@@ -44,7 +44,8 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { chmod, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
-import { ferretryCredentialDirectory, type StoredCredentialResolution } from '../lib/account/credentials.ts';
+import { ferretryCredentialDirectory } from '../lib/account/credential-directory.ts';
+import type { StoredCredentialResolution } from '../lib/account/credentials.ts';
 import type { CredentialMaterial } from '../lib/identity.ts';
 import type { FleetManifestAccount, HarnessKind } from '../lib/manifest.ts';
 import {

@@ -9,6 +9,7 @@ function reportOf(overrides: {
   readonly lagMs?: number;
   readonly children?: number;
   readonly files?: number;
+  readonly workerChildren?: readonly number[];
 }): BudgetInput {
   return {
     resources: {
@@ -18,6 +19,13 @@ function reportOf(overrides: {
     eventLoop: { lag: { maxMs: overrides.lagMs ?? 1 } },
     childProcesses: { perMinute: overrides.children ?? 1 },
     fileOperations: { perSecond: overrides.files ?? 1 },
+    workers: [
+      { name: 'idle' },
+      ...(overrides.workerChildren ?? []).map(perMinute => ({
+        name: 'busy',
+        work: { childProcesses: [{ command: 'security find-generic-password', perMinute }] },
+      })),
+    ],
   } as unknown as BudgetInput;
 }
 
@@ -45,6 +53,17 @@ describe('IDLE_DAEMON_BUDGETS', () => {
     // Assert
     should(actual).equal(expected);
     should(subject.limit).equal(limit);
+  });
+
+  it('should count the children a worker reported with the main thread’s', () => {
+    // Arrange — a worker's spawn costs the machine what a main-thread one does.
+    const subject = byName('child processes');
+
+    // Act
+    const actual = subject.measure(reportOf({ children: 2, workerChildren: [3, 1.5] }));
+
+    // Assert
+    should(actual).equal(6.5);
   });
 
   it('should leave the system-call budget unmeasured when the report has no syscalls', () => {

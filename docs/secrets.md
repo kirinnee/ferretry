@@ -337,3 +337,18 @@ secret — listed by name, redacted, never returned — and, like every value a 
 readable by that runtime's agent. The refresh token and any client secret are NOT in this store: they
 rest in a separate sealed document only the sign-in service reads, so `use` and `${secret:…}` cannot
 reach them. **Sign out** deletes all of them.
+
+## Sign-in tokens the usage read sends
+
+A Claude Code or Codex sign-in is not a vault secret: it is the harness's own credential file or macOS
+keychain item, which Ferretry reads and never copies. The daemon reads one for a single purpose — the free
+usage read (`GET /api/oauth/usage`, `GET /backend-api/wham/usage`), which carries the login's bearer token —
+and it does that on its **housekeeping worker** ([housekeeping-worker.md](design/housekeeping-worker.md) §2.4):
+the store is read, its token is sent as one `Authorization` header and dropped, all inside one job. What
+crosses back to the main thread is facts — presence, expiry, a truncated digest, the usage windows — and the
+protocol between the two has no field a token could travel in (a type test holds that). A job that fails is
+answered with a fixed word, never with the error it caught, and the worker holds no `SecretVault`: the
+build fails if the worker's bundle carries the vault, its store or the redactor (a diet test), so it can never
+become a seventh holder. `housekeeping.enabled: false` in `daemon.json` runs the same job code on the main
+thread, as before the worker existed. The token reaches its provider or — for the idle bench and the CI budget,
+through `FY_USAGE_PROBE_ORIGIN` — a server on this machine; any other origin is refused.

@@ -26,6 +26,7 @@ export * from './fleet-refresh/index.ts';
 export * from './grants/index.ts';
 export * from './handover/index.ts';
 export * from './harness-update/index.ts';
+export * from './housekeeping/index.ts';
 export * from './imports/index.ts';
 export * from './instant.ts';
 export * from './iso-instant.ts';

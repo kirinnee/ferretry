@@ -10,7 +10,12 @@
       "project": ["src/**/*.ts", "bin/**/*.ts", "tests/**/*.ts"]
     },
     "packages/daemon": {
-      "entry": ["bin/*.ts", "tests/**/*.test.ts"],
+      "entry": [
+        "bin/*.ts",
+        "tests/**/*.test.ts",
+        "tests/integration/support/housekeeping-run.ts",
+        "tests/integration/support/worker-rss.ts"
+      ],
       "project": ["src/**/*.ts", "bin/**/*.ts", "tests/**/*.ts"]
     },
     "packages/fleet": {

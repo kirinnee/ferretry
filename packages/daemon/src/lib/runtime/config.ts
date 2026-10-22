@@ -252,6 +252,13 @@ export const DaemonConfigDocumentSchema = z
       })
       .prefault({}),
     usage: UsageFeedConfigSchema.prefault({}),
+    /**
+     * THE HOUSEKEEPING WORKER (docs/design/housekeeping-worker.md, stage 4): the fleet's credential reads,
+     * free usage reads and passive usage reads run on their own thread, and only facts come back — a
+     * login's token never exists on the main thread. `enabled: false` runs them on the main thread, as
+     * before the worker existed.
+     */
+    housekeeping: z.strictObject({ enabled: z.boolean().default(true) }).prefault({}),
     /** The rendezvous carrier, if this host has one. Absent means direct-only. */
     relay: DaemonRelayConfigSchema.optional(),
     /** The peer-to-peer carrier: on, with Cloudflare's public STUN server, unless the operator says otherwise. */

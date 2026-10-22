@@ -9,7 +9,8 @@
     "./harness": "./src/lib/harness.ts",
     "./adapters": "./src/adapters/index.ts",
     "./detect": "./src/lib/presets/detect.ts",
-    "./config-text": "./src/lib/config-files/yaml-text.ts"
+    "./config-text": "./src/lib/config-files/yaml-text.ts",
+    "./credential-worker": "./src/adapters/credential-worker.ts"
   },
   "types": "./src/lib/index.ts",
   "dependencies": {
