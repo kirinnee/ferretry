@@ -70,6 +70,7 @@ class World {
   readonly stamped: string[] = [];
   timer: { readonly callback: () => void; readonly ms: number } | undefined;
   timersArmed = 0;
+  pollsFeed = false;
 
   ports(): FleetReadingPorts {
     return {
@@ -114,6 +115,7 @@ class World {
       },
       now: () => this.now,
       intervalMs: () => MINUTE,
+      pollsFeed: () => this.pollsFeed,
       timers: {
         setTimeout: (callback, ms) => {
           this.timersArmed += 1;
@@ -394,9 +396,29 @@ describe('FleetReading', () => {
     world.release();
     await settle();
 
-    // Assert
+    // Assert — only the boot pass is left to run.
     should(subject.due()).deepEqual([]);
-    should(world.timer).be.undefined();
+    should(world.timer?.ms).equal(0);
+  });
+
+  it('should run the boot pass with no credential, and then nothing unless the feed is polled', async () => {
+    // Arrange
+    world.subjects = [];
+    const subject = new FleetReading(world.ports());
+
+    // Act
+    await subject.start(() => undefined);
+    const boot = world.timer?.ms;
+    subject.observed([]);
+    const quiet = world.timer;
+    world.pollsFeed = true;
+    subject.observed([]);
+    const polled = world.timer?.ms;
+
+    // Assert — an external collector keeps a pass every interval, as the fixed timer had it.
+    should(boot).equal(0);
+    should(quiet).be.undefined();
+    should(polled).equal(MINUTE);
   });
 
   it('should close every watch and the timer, and stay closed', async () => {

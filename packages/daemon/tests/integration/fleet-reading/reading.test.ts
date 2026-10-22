@@ -128,6 +128,7 @@ beforeEach(async () => {
     },
     now: () => Date.now(),
     intervalMs: () => 60_000,
+    pollsFeed: () => false,
     timers: { setTimeout: () => undefined, clearTimeout: () => undefined },
   });
   ports = new WorkerCredentialPorts({

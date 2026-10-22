@@ -19,6 +19,9 @@
  * - **Configuration.** {@link configLoaded}, from the config watcher's `afterLoad`: credentials added or
  *   removed open or close their watches.
  *
+ * The boot pass always runs, as it did at boot before; and a feed with a source only time refreshes — an
+ * external collector — keeps one pass an interval, whatever the credentials say.
+ *
  * A WATCH THAT IS NOT LIVE IS NEVER TRUSTED. Where the hub polls a directory — a name the platform does
  * not report, a watch that failed — or a read has not finished yet, the answer is read directly, exactly
  * as before; and the due time counts a passive reading only once it is current, so it errs early, never
@@ -70,6 +73,11 @@ export interface FleetReadingPorts {
   now(): number;
   /** The usage interval: how old a passive reading may be before the active read is due. */
   intervalMs(): number;
+  /**
+   * Whether the usage feed has a source only time can refresh — an external collector (`usage.url`) —
+   * so a pass is due at least once an interval whatever the credentials say, as the fixed timer had it.
+   */
+  pollsFeed(): boolean;
   readonly timers: FleetReadingTimers;
 }
 
@@ -105,6 +113,8 @@ export class FleetReading {
   readonly #stores = new Map<string, StoreWatch>();
   #timer: unknown;
   #due: (() => void) | undefined;
+  /** When the last pass finished; until the first, the boot pass is due. */
+  #lastPass: number | undefined;
   #closed = false;
 
   constructor(private readonly ports: FleetReadingPorts) {}
@@ -117,13 +127,15 @@ export class FleetReading {
 
   /**
    * The configuration was (re)loaded: open the watches of credentials it added, close those of credentials
-   * it removed. A configuration that cannot be read keeps the watches it had.
+   * it removed. A configuration that cannot be read — or a machine with no account model at all — keeps the
+   * watches it had, and the passes that are due without any credential still run.
    */
   async configLoaded(): Promise<void> {
     let subjects: readonly FleetReadingSubject[];
     try {
       subjects = await this.ports.credentials();
     } catch {
+      this.#reschedule();
       return;
     }
     if (this.#closed) return;
@@ -181,7 +193,8 @@ export class FleetReading {
 
   /** A pass observed `ids`: each one's next due time moves on from now. */
   observed(ids: readonly string[]): void {
-    this.#state = withObserved(this.#state, ids, this.ports.now());
+    this.#lastPass = this.ports.now();
+    this.#state = withObserved(this.#state, ids, this.#lastPass);
     this.#reschedule();
   }
 
@@ -309,8 +322,17 @@ export class FleetReading {
     this.#disarm();
     const due = this.#due;
     if (this.#closed || due === undefined) return;
-    const next = nextDueAt(this.#state, this.ports.intervalMs());
-    if (next === undefined) return;
+    const intervalMs = this.ports.intervalMs();
+    const pass =
+      this.#lastPass === undefined
+        ? Number.NEGATIVE_INFINITY
+        : this.ports.pollsFeed()
+          ? this.#lastPass + intervalMs
+          : undefined;
+    const credential = nextDueAt(this.#state, intervalMs);
+    const candidates = [pass, credential].filter((due): due is number => due !== undefined);
+    if (candidates.length === 0) return;
+    const next = Math.min(...candidates);
     this.#timer = this.ports.timers.setTimeout(
       () => {
         this.#timer = undefined;

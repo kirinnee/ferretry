@@ -6678,6 +6678,11 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
    * configuration, read when the usage feed is built from it, before the subsystems that use it mount.
    */
   let housekeepingEnabled: boolean | undefined;
+  /**
+   * Whether the usage feed has an external collector (`usage.url`), which only time refreshes: then the
+   * fleet refresh keeps one pass an interval whatever the credentials say. Read with the feed's config.
+   */
+  let usageCollector = false;
   const harnessBinary: FleetBinaryLookup = binary => {
     const kind = (['claude', 'codex'] as const satisfies readonly HarnessKind[]).find(
       candidate => HARNESS_BINARIES[candidate] === binary,
@@ -7459,6 +7464,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
     createSessionResume,
     createUsageFeed: async config => {
       housekeepingEnabled = config.housekeeping.enabled;
+      usageCollector = config.usage.url !== undefined;
       // THIS HOST'S OWN CREDENTIALS FIRST: what the account model's usage pass already read, joined to
       // each published runtime. An external collector endpoint is optional and tried behind it; a
       // daemon configured without one and with no fleet serves an empty feed and says so rather than
@@ -8513,6 +8519,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         stamp: credentialFileStamp,
         now: () => millisecondClock.now(),
         intervalMs: () => credentialUsageIntervalMs,
+        pollsFeed: () => usageCollector,
         timers: {
           // Fired outside every activity: the timer is armed by the pass before, and would otherwise
           // count the next pass inside it.
