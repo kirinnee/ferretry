@@ -955,21 +955,31 @@ export class DaemonStorage {
     return await this.readDocument(id, 'state');
   }
 
+  /**
+   * One locked read-modify-write of one session document.
+   *
+   * The read, the transform and the write all happen in the session's serial lane, so a writer queued
+   * behind this one reads what it wrote and a writer queued ahead of it is what it reads — neither can
+   * put back a copy the other has already replaced. A missing document is refused unless the caller
+   * says how to `create` it.
+   */
   private async updateDocument(
     id: SessionId,
     kind: 'config' | 'state',
-    transform: (current: JsonValue) => JsonValue | Promise<JsonValue>,
+    transform: (current: JsonValue) => unknown,
+    create?: () => unknown,
   ): Promise<JsonValue> {
     this.assertOpen();
     return await this.serial.run(id, async () => {
       const paths = createSessionPaths(this.paths, id);
       const current = await this.readDocument(id, kind);
-      if (current === undefined) throw new InvalidStateDocumentError(paths[kind], 'file is missing');
+      const compute = current === undefined ? create : () => transform(current);
+      if (compute === undefined) throw new InvalidStateDocumentError(paths[kind], 'file is missing');
       // The journal contract is settled BEFORE the transform runs and before any byte is written,
       // so a session that has lost its journal keeps its documents exactly as they were. The write
       // paths get the same gate from their own ensureSessionDirectory call.
       await this.ensureSessionDirectory(id);
-      const next = canonicalJsonValue(await transform(current));
+      const next = canonicalJsonValue(await compute());
       this.forgetDocument(paths[kind]);
       await this.fileSystem.writeTextAtomic(paths[kind], serializeJsonDocument(next));
       await this.syncSessionUnlocked(id);
@@ -989,6 +999,20 @@ export class DaemonStorage {
     transform: (current: JsonValue) => JsonValue | Promise<JsonValue>,
   ): Promise<JsonValue> {
     return await this.updateDocument(id, 'state', transform);
+  }
+
+  /**
+   * `updateConfig` for a document that may not exist yet: a missing one reaches the transform as
+   * `undefined` and its answer is written all the same. Only for the writer that CREATES the
+   * document — every other writer keeps `updateConfig`, which refuses to bring one back from nothing.
+   */
+  async upsertConfig(id: SessionId, transform: (current: JsonValue | undefined) => unknown): Promise<JsonValue> {
+    return await this.updateDocument(id, 'config', transform, () => transform(undefined));
+  }
+
+  /** `upsertConfig`, for the state document. */
+  async upsertState(id: SessionId, transform: (current: JsonValue | undefined) => unknown): Promise<JsonValue> {
+    return await this.updateDocument(id, 'state', transform, () => transform(undefined));
   }
 
   async append(id: SessionId, type: string, data: unknown): Promise<SessionEvent> {
