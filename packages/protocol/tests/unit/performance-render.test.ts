@@ -1,7 +1,11 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
 import type { PerformanceReport } from '../../src/lib/performance.ts';
-import { describeSessionWorkerPool, renderPerformanceReport } from '../../src/lib/performance-render.ts';
+import {
+  describeDaemonService,
+  describeSessionWorkerPool,
+  renderPerformanceReport,
+} from '../../src/lib/performance-render.ts';
 import { fullReport, minimalReport, wallStats } from '../performance-report-fixtures.ts';
 
 describe('renderPerformanceReport', () => {
@@ -212,5 +216,34 @@ describe('the session-worker pool in a report', () => {
     // Assert
     should(withPool).containEql('Session workers  pool of 2 · 2 threads observing 3, 2 sessions');
     should(without).not.containEql('Session workers');
+  });
+});
+
+describe('describeDaemonService', () => {
+  it.each([
+    [{ manager: 'systemd' as const }, 'systemd'],
+    [{ manager: 'direct' as const }, 'direct'],
+    [{ manager: 'launchd' as const }, 'launchd'],
+    [{ manager: 'launchd' as const, processType: 'Interactive' }, 'launchd · ProcessType Interactive'],
+    [
+      { manager: 'launchd' as const, processType: null },
+      'launchd · declares no ProcessType, so macOS throttles the daemon — its next update or restart rewrites the job',
+    ],
+    [
+      { manager: 'launchd' as const, processType: 'Background' },
+      'launchd · ProcessType Background, so macOS throttles the daemon — its next update or restart rewrites the job',
+    ],
+  ])('should describe %j', (input, expected) => {
+    // Act + Assert
+    should(describeDaemonService(input)).equal(expected);
+  });
+
+  it('should show the service line only when the report carries it', () => {
+    // Act
+    const withService = renderPerformanceReport({ ...minimalReport(), service: { manager: 'systemd' } });
+
+    // Assert
+    should(withService).containEql('Service  systemd');
+    should(renderPerformanceReport(minimalReport())).not.containEql('Service  ');
   });
 });
