@@ -72,3 +72,24 @@ describe('ActivityLedger observer', () => {
     should(told).deepEqual(['self-check']);
   });
 });
+
+describe('ActivityLedger current', () => {
+  it('should name the innermost running activity, with its nesting, and nothing outside any', async () => {
+    // Arrange
+    const subject = new ActivityLedger({ now: () => 0 }, stackScope());
+    const seen: (string | undefined)[] = [];
+
+    // Act
+    seen.push(subject.current());
+    await subject.run('fleet refresh', async () => {
+      seen.push(subject.current());
+      await subject.run('runtime homes', () => {
+        seen.push(subject.current());
+      });
+    });
+    seen.push(subject.current());
+
+    // Assert
+    should(seen).deepEqual([undefined, 'fleet refresh', `fleet refresh${ACTIVITY_NESTING}runtime homes`, undefined]);
+  });
+});

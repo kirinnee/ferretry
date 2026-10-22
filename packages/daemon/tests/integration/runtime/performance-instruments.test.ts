@@ -134,6 +134,28 @@ describe('instrumentChildProcesses', () => {
     should(host.spawn).equal(original);
   });
 
+  it('should attribute every real child to the labelled work running when it started', async () => {
+    // Arrange
+    const recorder = new PerformanceRecorder();
+    const host: SpawnHost = { spawn: Bun.spawn, spawnSync: Bun.spawnSync };
+    let running: string | undefined = 'turn watcher';
+    const restore = instrumentChildProcesses(recorder, clock, host, () => running);
+    const window = recorder.open(clock.now());
+
+    // Act
+    await host.spawn(['true']).exited;
+    running = undefined;
+    host.spawnSync(['true']);
+    recorder.close(window);
+    restore();
+
+    // Assert
+    should(window.tables(60_000).childProcesses.commands[0]?.by).deepEqual([
+      { activity: '(no named work)', count: 1 },
+      { activity: 'turn watcher', count: 1 },
+    ]);
+  });
+
   it('should leave a replacement installed after it in place when restoring', () => {
     // Arrange
     const host: SpawnHost = { spawn: Bun.spawn, spawnSync: Bun.spawnSync };

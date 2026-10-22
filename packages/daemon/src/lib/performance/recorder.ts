@@ -26,8 +26,11 @@ export interface PerformanceProbe {
   readonly recording: boolean;
   activity(name: string, wallMs: number): void;
   route(route: string, wallMs: number, status: number, bytes: number): void;
-  /** A child was started; `synchronous` when it held the loop until it exited. */
-  childStarted(command: string, synchronous: boolean): void;
+  /**
+   * A child was started; `synchronous` when it held the loop until it exited, `activity` the labelled
+   * work that started it.
+   */
+  childStarted(command: string, synchronous: boolean, activity?: string): void;
   childExited(command: string, wallMs: number): void;
   fileOperation(operation: string, path: string, wallMs: number): void;
   /** How late one lag tick fired. */
@@ -52,6 +55,10 @@ export const NO_PERFORMANCE_PROBE: PerformanceProbe = Object.freeze({
 /** A loop block this long or longer is counted, and the two thresholds the report names. */
 const BLOCK_100_MS = 100;
 const BLOCK_250_MS = 250;
+/** What a child started outside any labelled work is attributed to. */
+const UNLABELLED_ACTIVITY = '(no named work)';
+/** How many starters each child-process row names. */
+const STARTERS = 3;
 /** How many of each table a report carries: enough to rank, few enough to read. */
 export const REPORT_TOP = 25;
 const STALL_LIMIT = 10;
@@ -61,6 +68,7 @@ interface ChildSeries {
   started: number;
   synchronous: number;
   readonly wall: DurationSeries;
+  readonly by: Map<string, number>;
 }
 
 interface RouteSeries {
@@ -105,10 +113,11 @@ export class PerformanceWindow {
     entry.maxBytes = Math.max(entry.maxBytes, bytes);
   }
 
-  childStarted(command: string, synchronous: boolean): void {
+  childStarted(command: string, synchronous: boolean, activity: string = UNLABELLED_ACTIVITY): void {
     const entry = this.#child(command);
     entry.started += 1;
     if (synchronous) entry.synchronous += 1;
+    bump(entry.by, activity);
   }
 
   childExited(command: string, wallMs: number): void {
@@ -118,7 +127,7 @@ export class PerformanceWindow {
   #child(command: string): ChildSeries {
     let entry = this.#children.get(command);
     if (entry === undefined) {
-      entry = { started: 0, synchronous: 0, wall: new DurationSeries() };
+      entry = { started: 0, synchronous: 0, wall: new DurationSeries(), by: new Map() };
       this.#children.set(command, entry);
     }
     return entry;
@@ -226,6 +235,10 @@ export class PerformanceWindow {
               perMinute: rate(entry.started, windowMs, 60_000),
               synchronous: entry.synchronous,
               wall: entry.wall.stats(),
+              by: [...entry.by]
+                .sort(([a, x], [b, y]) => y - x || a.localeCompare(b))
+                .slice(0, STARTERS)
+                .map(([activity, count]) => ({ activity, count })),
             }),
           ),
           entry => entry.count,
@@ -325,8 +338,8 @@ export class PerformanceRecorder implements PerformanceProbe {
     for (const window of this.#windows) window.route(route, wallMs, status, bytes);
   }
 
-  childStarted(command: string, synchronous: boolean): void {
-    for (const window of this.#windows) window.childStarted(command, synchronous);
+  childStarted(command: string, synchronous: boolean, activity?: string): void {
+    for (const window of this.#windows) window.childStarted(command, synchronous, activity);
   }
 
   childExited(command: string, wallMs: number): void {

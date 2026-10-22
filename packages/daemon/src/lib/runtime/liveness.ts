@@ -122,6 +122,11 @@ export class ActivityLedger {
     };
   }
 
+  /** The label of the activity the running code belongs to, or `undefined` outside any. */
+  current(): string | undefined {
+    return this.scope.current()?.label;
+  }
+
   /** The labels running right now, oldest first, each named once. */
   inFlight(): readonly string[] {
     return labels([...this.#live]);

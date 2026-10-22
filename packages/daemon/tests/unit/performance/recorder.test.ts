@@ -108,12 +108,12 @@ describe('PerformanceWindow tables', () => {
     should(actual).equal(1);
   });
 
-  it('should rank child processes by how often they started, and count the synchronous ones', () => {
+  it('should rank child processes by how often they started, count the synchronous ones, and name who started them', () => {
     // Arrange
     const subject = new PerformanceWindow(0);
-    subject.childStarted('git', false);
+    subject.childStarted('git', false, 'fleet refresh');
     subject.childStarted('git', true);
-    for (let index = 0; index < 3; index += 1) subject.childStarted('tmux', false);
+    for (let index = 0; index < 3; index += 1) subject.childStarted('tmux', false, 'turn watcher');
     subject.childExited('git', 5);
     subject.childExited('ps', 8);
 
@@ -131,6 +131,7 @@ describe('PerformanceWindow tables', () => {
           perMinute: 1.8,
           synchronous: 0,
           wall: { totalMs: 0, p50Ms: 0, p95Ms: 0, maxMs: 0 },
+          by: [{ activity: 'turn watcher', count: 3 }],
         },
         {
           command: 'git',
@@ -138,10 +139,43 @@ describe('PerformanceWindow tables', () => {
           perMinute: 1.2,
           synchronous: 1,
           wall: { totalMs: 5, p50Ms: 5, p95Ms: 5, maxMs: 5 },
+          by: [
+            { activity: '(no named work)', count: 1 },
+            { activity: 'fleet refresh', count: 1 },
+          ],
         },
-        { command: 'ps', count: 0, perMinute: 0, synchronous: 0, wall: { totalMs: 8, p50Ms: 8, p95Ms: 8, maxMs: 8 } },
+        {
+          command: 'ps',
+          count: 0,
+          perMinute: 0,
+          synchronous: 0,
+          wall: { totalMs: 8, p50Ms: 8, p95Ms: 8, maxMs: 8 },
+          by: [],
+        },
       ],
     });
+  });
+
+  it('should name at most the three busiest starters of a command, busiest first', () => {
+    // Arrange
+    const subject = new PerformanceWindow(0);
+    for (const [activity, times] of [
+      ['self-check', 1],
+      ['turn watcher', 4],
+      ['warden', 2],
+      ['live readout', 2],
+    ] as const)
+      for (let index = 0; index < times; index += 1) subject.childStarted('tmux', false, activity);
+
+    // Act
+    const actual = subject.tables(WINDOW_MS).childProcesses.commands[0]?.by;
+
+    // Assert
+    should(actual).deepEqual([
+      { activity: 'turn watcher', count: 4 },
+      { activity: 'live readout', count: 2 },
+      { activity: 'warden', count: 2 },
+    ]);
   });
 
   it('should rank file operations by count and split each key into operation and path', () => {

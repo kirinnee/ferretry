@@ -9455,7 +9455,7 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
   const uncountChildren =
     world.boot.performance === undefined
       ? () => undefined
-      : instrumentChildProcesses(world.boot.performance, world.clock);
+      : instrumentChildProcesses(world.boot.performance, world.clock, Bun, () => activities.current());
   cleanups.push(() => {
     clearInterval(lagTicks);
     watchdog.stop();
