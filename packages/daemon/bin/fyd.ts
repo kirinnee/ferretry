@@ -918,7 +918,7 @@ import {
   packLaunchDefault,
 } from '../src/lib/pack/index.ts';
 import { IDLE_DAEMON_BUDGETS } from '../src/lib/performance/budgets.ts';
-import { PerformanceProfiler } from '../src/lib/performance/profiler.ts';
+import { PerformanceProfiler, sampleIntervalMs } from '../src/lib/performance/profiler.ts';
 import { NO_PERFORMANCE_PROBE, PerformanceRecorder } from '../src/lib/performance/recorder.ts';
 import { teeStackSampler } from '../src/lib/performance/sampler-tee.ts';
 import type { PackSubsystem } from '../src/lib/runtime/mounts/pack.ts';
@@ -8835,6 +8835,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
                 runtime: `bun ${Bun.version}`,
               },
               uptimeSeconds: () => process.uptime(),
+              sampleIntervalMs: sampleIntervalMs(process.env.BUN_JSC_sampleInterval),
               fleet: async () => {
                 const sessions = storage.listSessions();
                 return {
