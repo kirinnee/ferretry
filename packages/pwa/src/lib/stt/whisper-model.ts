@@ -23,6 +23,7 @@
  * the small JSON files are not in LFS and were downloaded at the commit and hashed.
  */
 
+import { RESEARCH } from './research-numbers.ts';
 import type { WhisperCatalogModel } from './model-catalog.ts';
 import type { PinnedFile } from './model-store.ts';
 
@@ -181,11 +182,7 @@ export const WHISPER_TINY_EN_CATALOG_MODEL: WhisperCatalogModel = {
   versionLabel: `Whisper tiny.en q8 · ${TINY_REVISION.slice(0, 7)}`,
   summary:
     'English only. The smallest download here, and quick, but it mishears more than the larger models. Expect about 600 MB of memory while it transcribes. Words appear after Stop. Runs on WebGPU where this browser has it, otherwise WebAssembly; Try it says which ran.',
-  measured: {
-    where: 'desktop Chrome on x64, WebAssembly, one thread, a 10 s LibriSpeech clip; accuracy from OpenAI’s model card',
-    speed: '10.4 s of audio in 2.2 s (4.6 s for the first take, which loads the model)',
-    accuracy: '8.4% WER on LibriSpeech test-clean, 14.9% on test-other',
-  },
+  measured: RESEARCH.whisperTinyEn,
 };
 
 export const WHISPER_BASE_EN_CATALOG_MODEL: WhisperCatalogModel = {
@@ -205,9 +202,5 @@ export const WHISPER_BASE_EN_CATALOG_MODEL: WhisperCatalogModel = {
   versionLabel: `Whisper base.en q8 · ${BASE_REVISION.slice(0, 7)}`,
   summary:
     'English only. About twice tiny’s download and time, for fewer mistakes. Expect about 750 MB of memory while it transcribes. Words appear after Stop. Runs on WebGPU where this browser has it, otherwise WebAssembly; Try it says which ran.',
-  measured: {
-    where: 'desktop Chrome on x64, WebAssembly, one thread, a 10 s LibriSpeech clip; accuracy from OpenAI’s model card',
-    speed: '10.4 s of audio in 4.2 s (7.5 s for the first take, which loads the model)',
-    accuracy: '12.8% WER on LibriSpeech test-other (tiny.en: 14.9%)',
-  },
+  measured: RESEARCH.whisperBaseEn,
 };

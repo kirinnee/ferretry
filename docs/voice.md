@@ -158,6 +158,23 @@ so it is **manual and never runs in CI**:
 cd packages/pwa && bunx vite build && bun harness/parakeet-smoke.ts
 ```
 
+## Which engine a device dictates with by default
+
+Every engine is offered side by side in **Settings › Voice**, each card carrying the numbers the on-device
+speech research measured for it (`lib/stt/research-numbers.ts`: headless Chrome with a 4× slower CPU,
+20 LibriSpeech clips and 10 synthetic technical dictations). Until a device picks one, it dictates with
+(`lib/stt/engine-defaults.ts`):
+
+1. the machine's default from `voice.yaml`, where `parakeet` means the Parakeet that suits this device;
+2. otherwise, on a **phone** (touch-first, or at most 4 GB of memory), **Parakeet TDT 110M** on the
+   sherpa runtime: 2.0% WER like Parakeet 0.6B, 149 MB, 0.87 GB of memory, text 1.7 s after Stop at 4×;
+3. otherwise, on a **computer**, **Parakeet TDT 0.6B v3**: the most accurate measured and multilingual.
+
+A default never downloads anything; until it is installed, the microphone says to install it.
+
+The streaming **Zipformer 20M** is not offered: in the research benchmark, and again through this app's
+own worker on the same 30 clips, it dropped the first second of 26 of 33 utterances.
+
 ## Whisper tiny.en and base.en on this device
 
 OpenAI's Whisper (MIT), English only, as the q8 ONNX exports

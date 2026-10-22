@@ -1,4 +1,7 @@
 import { describe, expect, it } from 'bun:test';
+import { ON_DEVICE_MODELS } from '../../src/lib/stt/model-catalog.ts';
+import type { OnDeviceVoice } from '../../src/lib/stt/on-device-voice.ts';
+import { OnDeviceVoices } from '../../src/lib/stt/on-device-voices.ts';
 import type { FyApiClient } from '@ferretry/protocol/client';
 import * as React from 'react';
 import {
@@ -491,14 +494,35 @@ describe('<DictationControl> names the engine that will listen', () => {
     await view.unmount();
   });
 
-  it('asks for a choice before any engine is picked', async () => {
-    const view = await mount(<DictationControl {...controlProps({ settings: settingsWith({ engine: null }) })} />);
-    expect(micButton(view.container).getAttribute('title')).toContain(
-      'Choose a voice engine in Settings › Voice first',
+  it('dictates with the default for a phone or a computer before any engine is picked', async () => {
+    const phone = await mount(
+      <StoreProvider store={voicesStore()}>
+        <DictationControl {...controlProps({ settings: settingsWith({ engine: null }), deviceClass: 'phone' })} />
+      </StoreProvider>,
     );
-    await view.unmount();
+    expect(micButton(phone.container).getAttribute('title')).toContain('Parakeet 110M transcribes on this device');
+    await phone.unmount();
+    const computer = await mount(
+      <StoreProvider store={voicesStore()}>
+        <DictationControl {...controlProps({ settings: settingsWith({ engine: null }), deviceClass: 'computer' })} />
+      </StoreProvider>,
+    );
+    expect(micButton(computer.container).getAttribute('title')).toContain('Parakeet transcribes on this device');
+    await computer.unmount();
   });
 });
+
+/** A store holding a voice for every on-device engine, each able to run here. */
+const voicesStore = (): AppStore => {
+  const voices = new OnDeviceVoices(
+    ON_DEVICE_MODELS.map(model => ({ model, support: { available: true } }) as unknown as OnDeviceVoice),
+  );
+  return {
+    voice: voices.get('parakeet'),
+    voices,
+    carrier: { fetch: async () => new Response() },
+  } as unknown as AppStore;
+};
 
 describe('<DictationControl> machine default engine', () => {
   const parakeetStore = () => {
@@ -547,17 +571,29 @@ describe('<DictationControl> machine default engine', () => {
     await view.unmount();
   });
 
-  it('still asks for a choice when the machine names no default', async () => {
+  it('falls back to the device default when the machine names none', async () => {
     const reads: string[] = [];
     const view = await mount(
-      <DaemonClientProvider client={machineClient('postProcessing:\n  provider: off\n', reads)}>
-        <DictationControl {...controlProps({ settings: settingsWith({ engine: null }) })} />
-      </DaemonClientProvider>,
+      <StoreProvider store={voicesStore()}>
+        <DaemonClientProvider client={machineClient('postProcessing:\n  provider: off\n', reads)}>
+          <DictationControl {...controlProps({ settings: settingsWith({ engine: null }), deviceClass: 'phone' })} />
+        </DaemonClientProvider>
+      </StoreProvider>,
     );
     await settleUntil(() => reads.length === 1, "the machine's voice.yaml to be read", interact);
-    expect(micButton(view.container).getAttribute('title')).toContain(
-      'Choose a voice engine in Settings › Voice first',
+    expect(micButton(view.container).getAttribute('title')).toContain('Parakeet 110M transcribes on this device');
+    await view.unmount();
+  });
+
+  it("reads a machine default of Parakeet as the phone's Parakeet on a phone", async () => {
+    const view = await mount(
+      <StoreProvider store={voicesStore()}>
+        <DaemonClientProvider client={machineClient('defaultEngine: parakeet\n', [])}>
+          <DictationControl {...controlProps({ settings: settingsWith({ engine: null }), deviceClass: 'phone' })} />
+        </DaemonClientProvider>
+      </StoreProvider>,
     );
+    expect(await settledTitle(view.container, 'Parakeet 110M transcribes on this device')).not.toContain('Choose');
     await view.unmount();
   });
 

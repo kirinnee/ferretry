@@ -15,11 +15,7 @@ import type { ModelCacheLike } from '../../../src/lib/stt/model-store.ts';
 import { readOnDeviceSupport } from '../../../src/lib/stt/on-device-host.ts';
 import { SherpaEngineError } from '../../../src/lib/stt/sherpa-engine.ts';
 import { ParakeetRecognitionSession } from '../../../src/lib/stt/parakeet-session.ts';
-import {
-  MOONSHINE_TINY_MODEL,
-  SHERPA_RUNTIME,
-  SHERPA_ZIPFORMER_20M_MODEL,
-} from '../../../src/lib/stt/sherpa-models.ts';
+import { MOONSHINE_TINY_MODEL, SHERPA_RUNTIME, SHERPA_ZIPFORMER_MODEL } from '../../../src/lib/stt/sherpa-models.ts';
 import { browserSherpaVoice, type SherpaGlobalLike, sherpaFailure } from '../../../src/lib/stt/sherpa-voice.ts';
 import { StreamingRecognitionSession } from '../../../src/lib/stt/streaming-session.ts';
 
@@ -129,17 +125,12 @@ describe('readOnDeviceSupport', () => {
 
 describe('browserSherpaVoice', () => {
   it('is unsupported, with the model’s name, where the page cannot run it or the build has no worker', () => {
-    const refused = browserSherpaVoice(
-      SHERPA_ZIPFORMER_20M_MODEL,
-      page({ isSecureContext: false }),
-      ASSETS,
-      () => false,
-    );
+    const refused = browserSherpaVoice(SHERPA_ZIPFORMER_MODEL, page({ isSecureContext: false }), ASSETS, () => false);
     should(refused.getSnapshot()).containEql({
       phase: 'unsupported',
-      reason: 'Sherpa Zipformer 20M needs a secure HTTPS page in this browser.',
+      reason: 'Sherpa Zipformer needs a secure HTTPS page in this browser.',
     });
-    should(browserSherpaVoice(SHERPA_ZIPFORMER_20M_MODEL, page(), null, () => false).getSnapshot().phase).equal(
+    should(browserSherpaVoice(SHERPA_ZIPFORMER_MODEL, page(), null, () => false).getSnapshot().phase).equal(
       'unsupported',
     );
   });
@@ -147,38 +138,38 @@ describe('browserSherpaVoice', () => {
   it('installs the shared runtime and the model as one download, from the build’s own runtime URL', async () => {
     const caches = cacheStorage();
     const requested: string[] = [];
-    const voice = browserSherpaVoice(SHERPA_ZIPFORMER_20M_MODEL, page({ caches: caches.storage }), ASSETS, () => false);
+    const voice = browserSherpaVoice(SHERPA_ZIPFORMER_MODEL, page({ caches: caches.storage }), ASSETS, () => false);
     await voice.refresh();
     const snapshot = voice.getSnapshot();
     should(snapshot.phase).equal('absent');
     should(snapshot.totalBytes).equal(
-      SHERPA_RUNTIME.file.bytes + SHERPA_ZIPFORMER_20M_MODEL.files.reduce((total, file) => total + file.bytes, 0),
+      SHERPA_RUNTIME.file.bytes + SHERPA_ZIPFORMER_MODEL.files.reduce((total, file) => total + file.bytes, 0),
     );
-    should([...caches.caches.keys()].sort()).eql([SHERPA_ZIPFORMER_20M_MODEL.cache, 'fy-stt-runtime-sherpa-v1'].sort());
+    should([...caches.caches.keys()].sort()).eql([SHERPA_ZIPFORMER_MODEL.cache, 'fy-stt-runtime-sherpa-v1'].sort());
     should(requested).eql([]);
     await voice.remove();
-    should(caches.deleted.sort()).eql([SHERPA_ZIPFORMER_20M_MODEL.cache, 'fy-stt-runtime-sherpa-v1'].sort());
+    should(caches.deleted.sort()).eql([SHERPA_ZIPFORMER_MODEL.cache, 'fy-stt-runtime-sherpa-v1'].sort());
   });
 
   it('keeps the shared runtime on Remove while another installed model needs it', async () => {
     const caches = cacheStorage();
-    const voice = browserSherpaVoice(SHERPA_ZIPFORMER_20M_MODEL, page({ caches: caches.storage }), ASSETS, () => true);
+    const voice = browserSherpaVoice(SHERPA_ZIPFORMER_MODEL, page({ caches: caches.storage }), ASSETS, () => true);
     await voice.remove();
-    should(caches.deleted).eql([SHERPA_ZIPFORMER_20M_MODEL.cache]);
+    should(caches.deleted).eql([SHERPA_ZIPFORMER_MODEL.cache]);
   });
 
   it('dictates through a streaming session, starting its own worker through Trusted Types once a take is open', async () => {
     FakeWorker.made.length = 0;
-    const voice = browserSherpaVoice(SHERPA_ZIPFORMER_20M_MODEL, page(), ASSETS, () => false);
+    const voice = browserSherpaVoice(SHERPA_ZIPFORMER_MODEL, page(), ASSETS, () => false);
     const session = voice.createSession(sessionOptions());
     should(session).be.instanceOf(StreamingRecognitionSession);
     should(FakeWorker.made).have.length(0);
     session.start();
     await flush();
     should(FakeWorker.made[0]?.url).equal(ASSETS.workerUrl);
-    should(FakeWorker.made[0]?.options).eql({ type: 'module', name: 'fy-sherpa-zipformer-en-20m' });
+    should(FakeWorker.made[0]?.options).eql({ type: 'module', name: 'fy-sherpa-zipformer-en' });
     should(FakeWorker.made[0]?.worker.posted.slice(0, 2)).eql([
-      { type: 'load', model: 'sherpa-zipformer-en-20m' },
+      { type: 'load', model: 'sherpa-zipformer-en' },
       { type: 'stream-open', id: 1 },
     ]);
     session.cancel();

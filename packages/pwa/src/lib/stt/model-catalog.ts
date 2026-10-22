@@ -16,6 +16,7 @@
  * only when the person presses Install.
  */
 
+import { RESEARCH } from './research-numbers.ts';
 import { formatMegabytes, type PinnedBundle, type PinnedFile } from './model-store.ts';
 import {
   ORT_RUNTIME_FILE,
@@ -51,12 +52,11 @@ import {
  */
 export const ON_DEVICE_MODEL_IDS = [
   'sherpa-zipformer-en',
-  'sherpa-zipformer-en-20m',
   'moonshine-tiny-en',
   'moonshine-base-en',
   'whisper-tiny-en',
   'whisper-base-en',
-  'parakeet-ctc-110m',
+  'parakeet-tdt-110m',
   'vosk-small-en',
   'parakeet',
 ] as const;
@@ -115,7 +115,7 @@ export const SPEECH_RUNTIMES: Readonly<Record<SpeechRuntimeId, SpeechRuntime>> =
  * What has been measured for a model, said with where it was measured. Settings shows these beside
  * the model so the person can compare without installing everything first.
  */
-interface MeasuredNumbers {
+export interface MeasuredNumbers {
   /** Where and on what: "Bun on x64, LibriSpeech clips". */
   readonly where: string;
   /** Word error rate, as published or measured, e.g. "6.1% (LibriSpeech test-clean)". */
@@ -191,6 +191,7 @@ export const PARAKEET_CATALOG_MODEL: ParakeetCatalogModel = {
   versionLabel: PARAKEET_VERSION_LABEL,
   summary:
     'The most accurate model here, and the largest: about 1 GB of memory while it transcribes, so it suits a laptop better than a phone. Words appear after Stop, or near-live with Live words on.',
+  measured: RESEARCH.parakeet06b,
 };
 
 export const VOSK_CATALOG_MODEL: VoskCatalogModel = {
@@ -210,19 +211,15 @@ export const VOSK_CATALOG_MODEL: VoskCatalogModel = {
   versionLabel: VOSK_VERSION_LABEL,
   summary:
     'The light floor: the smallest download and about 110 MB of memory, so it suits a phone. Words appear as you speak, and the text is ready the moment you stop. The least accurate here — fine for short, plain sentences, weaker on names and technical words. English only.',
-  measured: {
-    where: 'Bun on x64, one LibriSpeech clip',
-    speed: '10.4 s of audio in 2.4 s, fed while it was spoken; 1.1 s to load',
-    accuracy: '9.85% WER (LibriSpeech test-clean, published by Alpha Cephei)',
-  },
+  measured: RESEARCH.voskSmallEn,
 };
 
 /** Every model, in {@link ON_DEVICE_MODEL_IDS} order. */
 export const ON_DEVICE_MODELS: readonly OnDeviceModel[] = [
-  ...SHERPA_MODELS.slice(0, 4),
+  ...SHERPA_MODELS.slice(0, 3),
   WHISPER_TINY_EN_CATALOG_MODEL,
   WHISPER_BASE_EN_CATALOG_MODEL,
-  ...SHERPA_MODELS.slice(4),
+  ...SHERPA_MODELS.slice(3),
   VOSK_CATALOG_MODEL,
   PARAKEET_CATALOG_MODEL,
 ];

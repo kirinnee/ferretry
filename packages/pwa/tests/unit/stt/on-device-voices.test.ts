@@ -193,7 +193,7 @@ describe('OnDeviceVoices', () => {
       runtimeUrl: '/assets/ort.wasm',
       sherpa: { workerUrl: '/assets/sherpa-worker-a.js', runtimeUrl: '/assets/asr-a.wasm' },
     });
-    await voices.get('sherpa-zipformer-en-20m')?.remove();
-    should(deleted).eql(['fy-stt-runtime-sherpa-v1', 'fy-stt-sherpa-zipformer-en-20m-v1']);
+    await voices.get('sherpa-zipformer-en')?.remove();
+    should(deleted).eql(['fy-stt-runtime-sherpa-v1', 'fy-stt-sherpa-zipformer-en-v1']);
   });
 });

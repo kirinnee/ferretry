@@ -20,9 +20,9 @@ import {
   BROWSER_ACTIVE_NOTE,
   BROWSER_ENGINE_DISCLOSURE,
   BROWSER_ENGINE_LABEL,
-  NO_ENGINE_NOTE,
   PARAKEET_ACTIVE_NOTE,
 } from '../../../../src/features/settings/voice-engine-choice.tsx';
+import { defaultEngineNote } from '../../../../src/features/settings/engine-catalog-list.tsx';
 import { ON_DEVICE_MODELS } from '../../../../src/lib/stt/model-catalog.ts';
 import { DEFAULT_STT_SETTINGS, type SttSettings, type SttSettingsPatch } from '../../../../src/lib/stt/stt-settings.ts';
 import { AVAILABLE_RECOGNITION, UNSUPPORTED_RECOGNITION } from '../../../support/browser-recognition.ts';
@@ -68,17 +68,17 @@ const radio = (container: HTMLElement, value: string): HTMLInputElement =>
 
 describe('<DictationSettings>', () => {
   it('offers every catalog model and browser voice side by side, the browser one labelled with where its audio goes', async () => {
-    const view = await mount(<DictationSettings {...settingsProps()} />);
+    const view = await mount(<DictationSettings {...settingsProps({ deviceClass: 'computer' })} />);
     const section = engineSection(view.container);
     for (const model of ON_DEVICE_MODELS) {
       expect(section.textContent).toContain(model.label);
       expect(radio(view.container, model.id).checked).toBe(false);
     }
     expect(section.textContent).toContain(`${BROWSER_ENGINE_LABEL} (${BROWSER_ENGINE_DISCLOSURE})`);
-    // Nobody has chosen yet, so nothing is picked for them.
+    // Nobody has chosen yet: no radio is set, and the screen names what this device dictates with meanwhile.
     expect(radio(view.container, 'parakeet').checked).toBe(false);
     expect(radio(view.container, 'browser').checked).toBe(false);
-    expect(section.textContent).toContain(NO_ENGINE_NOTE);
+    expect(section.textContent).toContain(defaultEngineNote('computer'));
     await view.unmount();
   });
 

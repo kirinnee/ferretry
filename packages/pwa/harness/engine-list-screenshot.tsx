@@ -58,7 +58,7 @@ const stateOf = (index: number, bytes: number, version: string): ModelStoreStatu
       ? { state: 'partial', downloadedBytes: Math.round(bytes * 0.4) }
       : { state: 'absent' };
 
-const FOCUS = ${JSON.stringify(focus)};
+const FOCUS: string = ${JSON.stringify(focus)};
 
 const voices = new OnDeviceVoices(
   ON_DEVICE_MODELS.map((model, index) => {

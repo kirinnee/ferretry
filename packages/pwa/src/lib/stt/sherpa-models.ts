@@ -17,6 +17,7 @@
  * puts the text into sentence case (`sherpa-worker-core.ts`); a hosted clean-up can add punctuation.
  */
 
+import { RESEARCH } from './research-numbers.ts';
 import type { PinnedFile } from './model-store.ts';
 import type { OnDeviceModelBase, SpeechRuntime } from './model-catalog.ts';
 
@@ -43,9 +44,10 @@ type SherpaRecognizerSpec = {
    * `online-transducer` — a streaming transducer: roles `encoder`, `decoder`, `joiner`, `tokens`.
    * `offline-moonshine` — Moonshine, decoding a whole take: `preprocessor`, `encoder`,
    * `uncached-decoder`, `cached-decoder`, `tokens`.
-   * `offline-nemo-ctc` — a NeMo CTC model decoding a whole take: `model`, `tokens`.
+   * `offline-nemo-transducer` — a NeMo TDT transducer decoding a whole take: `encoder`, `decoder`,
+   * `joiner`, `tokens`.
    */
-  readonly kind: 'online-transducer' | 'offline-moonshine' | 'offline-nemo-ctc';
+  readonly kind: 'online-transducer' | 'offline-moonshine' | 'offline-nemo-transducer';
 };
 
 export interface SherpaCatalogModel extends OnDeviceModelBase {
@@ -62,11 +64,6 @@ const ZIPFORMER_REPOSITORY = 'csukuangfj/sherpa-onnx-streaming-zipformer-en-2023
 const ZIPFORMER_REVISION = '672fbf1b30579d6585301139bb363f42a0ad4a24';
 const zipformer = hf(ZIPFORMER_REPOSITORY, ZIPFORMER_REVISION);
 
-const ZIPFORMER_20M_REPOSITORY = 'csukuangfj/sherpa-onnx-streaming-zipformer-en-20M-2023-02-17';
-const ZIPFORMER_20M_REVISION = 'd42f2d9f7ca24806fb667456a18a9f1b60f70d16';
-const zipformer20m = hf(ZIPFORMER_20M_REPOSITORY, ZIPFORMER_20M_REVISION);
-
-/** Both Zipformers share one BPE vocabulary, byte for byte. */
 const ZIPFORMER_TOKENS = {
   role: 'tokens',
   label: 'Vocabulary',
@@ -99,31 +96,6 @@ const ZIPFORMER_FILES: readonly PinnedFile[] = [
   { ...ZIPFORMER_TOKENS, url: zipformer('tokens.txt') },
 ];
 
-const ZIPFORMER_20M_FILES: readonly PinnedFile[] = [
-  {
-    role: 'encoder',
-    label: 'Encoder',
-    url: zipformer20m('encoder-epoch-99-avg-1.int8.onnx'),
-    bytes: 42_845_182,
-    sha256: '3810755ce7c3ab26b42a8bcf39d191308fa27fb0f53358823ba46141d03b7eb3',
-  },
-  {
-    role: 'decoder',
-    label: 'Decoder',
-    url: zipformer20m('decoder-epoch-99-avg-1.int8.onnx'),
-    bytes: 539_499,
-    sha256: '21e2a2acd961b3ac72f55be2f10f1a285e1b0b0ba010d7c0b6eab141411b163c',
-  },
-  {
-    role: 'joiner',
-    label: 'Joiner',
-    url: zipformer20m('joiner-epoch-99-avg-1.int8.onnx'),
-    bytes: 259_572,
-    sha256: 'e085d73b593cf9b0707f370dbd656d58327d3fe36d80d849202ef81df02cb01e',
-  },
-  { ...ZIPFORMER_TOKENS, url: zipformer20m('tokens.txt') },
-];
-
 export const SHERPA_ZIPFORMER_MODEL: SherpaCatalogModel = {
   id: 'sherpa-zipformer-en',
   label: 'Sherpa streaming Zipformer (English)',
@@ -142,38 +114,8 @@ export const SHERPA_ZIPFORMER_MODEL: SherpaCatalogModel = {
   recognizer: { kind: 'online-transducer' },
   textCase: 'upper',
   summary:
-    'Words appear while you speak, and a phrase settles each time you pause. Accurate on clear speech, light on memory, and fine on a phone. English only, no punctuation.',
-  measured: {
-    where: 'Chrome on an x64 server, LibriSpeech clips streamed in real time',
-    speed: 'final text 0.09 s after Stop; first load 2.6 s',
-    accuracy: 'word-perfect on all three clips',
-  },
-};
-
-export const SHERPA_ZIPFORMER_20M_MODEL: SherpaCatalogModel = {
-  id: 'sherpa-zipformer-en-20m',
-  label: 'Sherpa streaming Zipformer 20M (English)',
-  shortName: 'Sherpa Zipformer 20M',
-  family: 'zipformer',
-  licence: 'Apache-2.0',
-  languages: ['en'],
-  runtime: 'sherpa-onnx',
-  streaming: true,
-  nearLive: false,
-  source: { repository: ZIPFORMER_20M_REPOSITORY, revision: ZIPFORMER_20M_REVISION },
-  files: ZIPFORMER_20M_FILES,
-  cache: 'fy-stt-sherpa-zipformer-en-20m-v1',
-  keyRoot: '/fy-stt/sherpa-zipformer-en-20m',
-  versionLabel: `Zipformer streaming en 20M 2023-02-17 int8 · ${ZIPFORMER_20M_REVISION.slice(0, 7)}`,
-  recognizer: { kind: 'online-transducer' },
-  textCase: 'upper',
-  summary:
-    'The smallest and fastest engine here, with words while you speak. It mishears more than the larger Zipformer; try it on an older phone. English only, no punctuation.',
-  measured: {
-    where: 'Chrome on an x64 server, LibriSpeech clips streamed in real time',
-    speed: 'final text 0.04 s after Stop; first load 1.2 s',
-    accuracy: 'one word misheard in 94 across three clips',
-  },
+    'Live words while you speak, and very fast, but weaker on technical terms: it caught 17 of 33 in the benchmark. English only, no punctuation.',
+  measured: RESEARCH.zipformerEn,
 };
 
 const MOONSHINE_TINY_REPOSITORY = 'csukuangfj/sherpa-onnx-moonshine-tiny-en-int8';
@@ -241,11 +183,7 @@ export const MOONSHINE_TINY_MODEL: SherpaCatalogModel = {
   textCase: 'as-is',
   summary:
     'Built for short, live speech: fast after Stop, with capitals and punctuation. Words appear after Stop, not while you speak. English only.',
-  measured: {
-    where: 'Chrome on an x64 server, a 10.4 s LibriSpeech clip',
-    speed: 'text about 1.0 s after Stop; first load 2.2 s',
-    accuracy: 'one word misheard, punctuated',
-  },
+  measured: RESEARCH.moonshineTiny,
 };
 
 export const MOONSHINE_BASE_MODEL: SherpaCatalogModel = {
@@ -297,26 +235,26 @@ export const MOONSHINE_BASE_MODEL: SherpaCatalogModel = {
   textCase: 'as-is',
   summary:
     'Moonshine’s larger model: more accurate than Tiny on hard audio, about twice the download and time. Punctuated; words appear after Stop. English only.',
-  measured: {
-    where: 'Chrome on an x64 server, a 10.4 s LibriSpeech clip',
-    speed: 'text about 1.9 s after Stop; first load 4.1 s',
-    accuracy: 'one word misheard, punctuated',
-  },
+  measured: RESEARCH.moonshineBase,
 };
 
-const PARAKEET_CTC_REPOSITORY = 'entropora/parakeet-ctc-110m-int8';
-const PARAKEET_CTC_REVISION = '5d9e8f5bf3663b6b79796e4fe94297ffb8a53ffb';
-const parakeetCtc = hf(PARAKEET_CTC_REPOSITORY, PARAKEET_CTC_REVISION);
+const PARAKEET_TDT_REPOSITORY = 'punitd/sherpa-onnx-nemo-parakeet_tdt_transducer_110m-en-36000-int8';
+const PARAKEET_TDT_REVISION = '66a4fa70643dc7ce25c9b38b2f87e1b35ddad33d';
+const parakeetTdt = hf(PARAKEET_TDT_REPOSITORY, PARAKEET_TDT_REVISION);
 
 /**
- * PARAKEET SMALL. NVIDIA's parakeet-tdt_ctc-110m, through its CTC head: k2-fsa's sherpa-onnx export,
- * quantised to int8 and republished (CC-BY-4.0) by Entropora. k2-fsa's own int8 export of it is
- * published only inside a release tarball, which a browser cannot download file by file; the file
- * here is pinned by SHA-256 like every other, so a republished copy cannot change under us.
+ * PARAKEET SMALL — the phone default (`engine-defaults.ts`). NVIDIA's parakeet-tdt_ctc-110m through its
+ * TDT (transducer) head: k2-fsa's sherpa-onnx int8 export, which k2-fsa publishes only inside a release
+ * tarball a browser cannot install file by file. These four files are a Hugging Face copy of that
+ * tarball's files, BYTE-IDENTICAL to them (checked against the copy the research benchmark measured), and
+ * pinned by SHA-256 like every other file, so a republished copy cannot change under us.
+ *
+ * The TDT head replaced the CTC head this entry first shipped with: on the research clips it is more
+ * accurate on general speech (2.0% against 3.4% WER) and about 1.5× faster, for the same download.
  */
-export const PARAKEET_CTC_110M_MODEL: SherpaCatalogModel = {
-  id: 'parakeet-ctc-110m',
-  label: 'Parakeet 110M CTC (English)',
+export const PARAKEET_TDT_110M_MODEL: SherpaCatalogModel = {
+  id: 'parakeet-tdt-110m',
+  label: 'Parakeet TDT 110M (English)',
   shortName: 'Parakeet 110M',
   family: 'parakeet',
   licence: 'CC-BY-4.0',
@@ -324,42 +262,51 @@ export const PARAKEET_CTC_110M_MODEL: SherpaCatalogModel = {
   runtime: 'sherpa-onnx',
   streaming: false,
   nearLive: false,
-  source: { repository: PARAKEET_CTC_REPOSITORY, revision: PARAKEET_CTC_REVISION },
+  source: { repository: PARAKEET_TDT_REPOSITORY, revision: PARAKEET_TDT_REVISION },
   files: [
     {
-      role: 'model',
-      label: 'Model',
-      url: parakeetCtc('encoder.int8.onnx'),
-      bytes: 131_652_072,
-      sha256: 'e83b7e578ead963691028b3d4719af7f7e5bd9260c39d398bd8489c69cb5a5ca',
+      role: 'encoder',
+      label: 'Encoder',
+      url: parakeetTdt('encoder.int8.onnx'),
+      bytes: 131_113_202,
+      sha256: '0f35509ddeb9b39002fb077d979a9fe74f06eb0bc4dd5c34f512f82e5111d657',
+    },
+    {
+      role: 'decoder',
+      label: 'Decoder',
+      url: parakeetTdt('decoder.int8.onnx'),
+      bytes: 3_955_863,
+      sha256: 'f7c331c5504c2e593c76ed22b728e3f554af6c4a383dde862e719ced08b1da19',
+    },
+    {
+      role: 'joiner',
+      label: 'Joiner',
+      url: parakeetTdt('joiner.int8.onnx'),
+      bytes: 1_411_403,
+      sha256: 'bf7dff69e9f2cdbe9943d70da358f38b361c115ba0105bae7e908e0d6ec782f6',
     },
     {
       role: 'tokens',
       label: 'Vocabulary',
-      url: parakeetCtc('tokens.txt'),
+      url: parakeetTdt('tokens.txt'),
       bytes: 9_953,
       sha256: '450e56bd2f036fe5b6aa821865838cc5aa9d8b0106134ce9a9ba0664abe6cd10',
     },
   ],
-  cache: 'fy-stt-parakeet-ctc-110m-v1',
-  keyRoot: '/fy-stt/parakeet-ctc-110m',
-  versionLabel: `Parakeet TDT-CTC 110M (CTC head) int8 · ${PARAKEET_CTC_REVISION.slice(0, 7)}`,
-  recognizer: { kind: 'offline-nemo-ctc' },
+  cache: 'fy-stt-parakeet-tdt-110m-v1',
+  keyRoot: '/fy-stt/parakeet-tdt-110m',
+  versionLabel: `Parakeet TDT 110M int8 · ${PARAKEET_TDT_REVISION.slice(0, 7)}`,
+  recognizer: { kind: 'offline-nemo-transducer' },
   textCase: 'as-is',
   summary:
-    'A fifth the size of Parakeet 0.6B and much lighter on memory, with punctuation and capitals; a little less accurate. Words appear after Stop. English only.',
-  measured: {
-    where: 'Chrome on an x64 server, a 10.4 s LibriSpeech clip',
-    speed: 'text about 2.1 s after Stop; first load 2.5 s',
-    accuracy: 'word-perfect, punctuated',
-  },
+    'The phone default: as accurate as Parakeet 0.6B on everyday speech at a fifth of the download and a third of the memory, with punctuation. A little weaker on technical terms. Words appear after Stop. English only.',
+  measured: RESEARCH.parakeetTdt110m,
 };
 
 /** In the order Settings lists them: streaming first, then whole-take models. */
 export const SHERPA_MODELS: readonly SherpaCatalogModel[] = [
   SHERPA_ZIPFORMER_MODEL,
-  SHERPA_ZIPFORMER_20M_MODEL,
   MOONSHINE_TINY_MODEL,
   MOONSHINE_BASE_MODEL,
-  PARAKEET_CTC_110M_MODEL,
+  PARAKEET_TDT_110M_MODEL,
 ];
