@@ -134,6 +134,47 @@ describe('CliPackProbe', () => {
     should(await probe.probe(request())).eql({ ok: false, ms: 250, reason: 'it answered, but not OK' });
   });
 
+  it('should name a failure the CLI reports — quota, sign-in, a missing model — without repeating its words', async () => {
+    // Arrange
+    const said = (stdout: string, stderr: string, code = 1) =>
+      build({ spawn: async () => ({ kind: 'exited', code, stdout, stderr }) }).probe(request());
+
+    // Act
+    const quota = await said('', 'Error: Claude AI usage limit reached|1761156000');
+    const login = await said('Invalid API key · Please run /login', '');
+    const model = await said('', 'API Error: 404 model: claude-nope does not exist');
+    const answered = await said("You've hit your rate limit.", '', 0);
+    const other = await said('', 'segfault');
+
+    // Assert
+    should(quota).eql({
+      ok: false,
+      ms: 250,
+      reason: 'it exited 1: its login is out of quota or rate-limited',
+      code: 'out_of_quota',
+    });
+    should(login).eql({
+      ok: false,
+      ms: 250,
+      reason: 'it exited 1: its login is not signed in or its key was refused',
+      code: 'not_logged_in',
+    });
+    should(model).eql({
+      ok: false,
+      ms: 250,
+      reason: 'it exited 1: the provider does not serve that model',
+      code: 'model_unavailable',
+    });
+    should(answered).eql({
+      ok: false,
+      ms: 250,
+      reason: 'it answered, but not OK: its login is out of quota or rate-limited',
+      code: 'out_of_quota',
+    });
+    should(other).eql({ ok: false, ms: 250, reason: 'it exited 1' });
+    should(JSON.stringify([quota, login, model])).not.containEql('1761156000');
+  });
+
   it('should fail with the exit code when the CLI exits non-zero', async () => {
     // Arrange
     const probe = build({ spawn: async () => ({ kind: 'exited', code: 3, stdout: 'OK' }) });
@@ -291,7 +332,7 @@ describe('bunProbeSpawn', () => {
       const outcome = await bunProbeSpawn({ cmd: [fake.path], cwd: fake.dir, env: {}, timeoutMs: 10_000 });
 
       // Assert
-      should(outcome).eql({ kind: 'exited', code: 7, stdout: 'nope\n' });
+      should(outcome).eql({ kind: 'exited', code: 7, stdout: 'nope\n', stderr: '' });
     } finally {
       await rm(fake.dir, { recursive: true, force: true });
     }

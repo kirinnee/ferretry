@@ -1,11 +1,12 @@
+import { launchEnvironment } from '../../lib/fleet/launch-environment.ts';
 import {
+  classifyProbeFailure,
   type PackProbeOutcome,
   type PackProbePort,
   type PackProbeRequest,
   PROBE_PROMPT,
   probeAnswered,
 } from '../../lib/pack/probe.ts';
-import { launchEnvironment } from '../../lib/fleet/launch-environment.ts';
 import { effortLaunchArguments } from '../../lib/session/launch/argv.ts';
 
 /** The launch environment a runtime's wrapper needs: its login's secrets, as a pane is given them. */
@@ -25,15 +26,25 @@ export interface ProbeLauncher {
   resolve(wrapper: string): Promise<string>;
 }
 
-/** Starts one process and hands back its output, or `timeout`; kills it when the time is up. */
+/**
+ * Starts one process and hands back its output, or `timeout`; kills it when the time is up. `stderr` is
+ * read only to say WHICH failure it was (quota, sign-in, model) — never repeated or logged.
+ */
 export type ProbeSpawn = (input: {
   readonly cmd: readonly string[];
   readonly cwd: string;
   readonly env: Readonly<Record<string, string>>;
   readonly timeoutMs: number;
 }) => Promise<
-  { readonly kind: 'exited'; readonly code: number; readonly stdout: string } | { readonly kind: 'timeout' }
+  | { readonly kind: 'exited'; readonly code: number; readonly stdout: string; readonly stderr?: string }
+  | { readonly kind: 'timeout' }
 >;
+
+const FAILURE_WORDS = {
+  out_of_quota: 'its login is out of quota or rate-limited',
+  not_logged_in: 'its login is not signed in or its key was refused',
+  model_unavailable: 'the provider does not serve that model',
+} as const;
 
 /**
  * The argv of one probe: the runtime's own launcher, at the absolute path a start runs — so the probe runs
@@ -94,9 +105,15 @@ export class CliPackProbe implements PackProbePort {
       return { ok: false, ms: elapsed(), reason: `it could not be started (${outcome.reason})` };
     if (outcome.kind === 'timeout')
       return { ok: false, ms: elapsed(), reason: `no answer within ${String(Math.round(request.timeoutMs / 1_000))}s` };
-    if (outcome.code !== 0) return { ok: false, ms: elapsed(), reason: `it exited ${String(outcome.code)}` };
-    if (!probeAnswered(outcome.stdout)) return { ok: false, ms: elapsed(), reason: 'it answered, but not OK' };
-    return { ok: true, ms: elapsed() };
+    if (outcome.code === 0 && probeAnswered(outcome.stdout)) return { ok: true, ms: elapsed() };
+    const code = classifyProbeFailure(`${outcome.stdout}\n${outcome.stderr ?? ''}`);
+    const what = outcome.code === 0 ? 'it answered, but not OK' : `it exited ${String(outcome.code)}`;
+    return {
+      ok: false,
+      ms: elapsed(),
+      reason: code === undefined ? what : `${what}: ${FAILURE_WORDS[code]}`,
+      ...(code === undefined ? {} : { code }),
+    };
   }
 }
 
@@ -108,16 +125,16 @@ export const bunProbeSpawn: ProbeSpawn = async input => {
     env: { ...input.env },
     stdin: 'ignore',
     stdout: 'pipe',
-    stderr: 'ignore',
+    stderr: 'pipe',
   });
   let timer: ReturnType<typeof setTimeout> | undefined;
   const deadline = new Promise<{ readonly kind: 'timeout' }>(resolve => {
     timer = setTimeout(() => resolve({ kind: 'timeout' }), input.timeoutMs);
   });
   const finished = (async () => {
-    const stdout = await new Response(child.stdout).text();
+    const [stdout, stderr] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text()]);
     const code = await child.exited;
-    return { kind: 'exited' as const, code, stdout };
+    return { kind: 'exited' as const, code, stdout, stderr };
   })();
   const outcome = await Promise.race([finished, deadline]);
   clearTimeout(timer);

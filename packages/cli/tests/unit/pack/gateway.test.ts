@@ -2,14 +2,16 @@ import { describe, it } from 'bun:test';
 import {
   type IFyApiClient,
   PACK_NEW_PATH,
+  PACK_PATH,
   PACK_RECOMMEND_PATH,
   PackNewOutcomeSchema,
   PackRecommendationSchema,
+  PackViewSchema,
   SessionResultSchema,
 } from '@ferretry/protocol';
 import should from 'should';
 import { PACK_NEW_TIMEOUT_MS, ProtocolPackGateway } from '../../../src/lib/pack/gateway.ts';
-import { recommendation, started } from './fixtures.ts';
+import { packView, recommendation, started } from './fixtures.ts';
 
 type Client = Pick<IFyApiClient, 'request' | 'stop'>;
 
@@ -32,6 +34,20 @@ function build(answer: unknown) {
 }
 
 describe('ProtocolPackGateway', () => {
+  it('should GET the Pack view and parse it with the view schema', async () => {
+    // Arrange
+    const { gateway, requests } = build(packView());
+
+    // Act
+    const answer = await gateway.view();
+
+    // Assert
+    should(answer).eql(packView());
+    should(requests[0]?.path).equal(PACK_PATH);
+    should(requests[0]?.schema).equal(PackViewSchema);
+    should(requests[0]?.init).be.undefined();
+  });
+
   it('should POST the recommend request as JSON and parse the answer with the recommendation schema', async () => {
     // Arrange
     const { gateway, requests } = build(recommendation());

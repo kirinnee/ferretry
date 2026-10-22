@@ -23,6 +23,7 @@ import {
   launchInstructions,
   PACK_ENV,
   PACK_INSTRUCTION,
+  PACK_ROUTING_ENV,
   PASSIVE_LEARNING_ENV,
   SESSION_MODE_ENV,
   SET_UP_FERRETRY_INSTRUCTION,
@@ -687,6 +688,21 @@ describe('launchInstructions', () => {
       mode: 'interactive',
       questions: true,
     });
+  });
+
+  it("should count the guide's routing line in the Pack section, and only while Pack mode is on", () => {
+    // Arrange
+    const line = 'Routing: everyday → opus.';
+
+    // Act
+    const on = launchInstructions('fy', { [PACK_ENV]: '1', [PACK_ROUTING_ENV]: line });
+    const off = launchInstructions('fy', { [PACK_ENV]: '0', [PACK_ROUTING_ENV]: line });
+
+    // Assert
+    should(on.sections.find(section => section.id === 'pack')?.chars).equal(
+      PACK_INSTRUCTION('fy').length + 1 + line.length,
+    );
+    should(off.sections.map(section => section.id)).deepEqual(['tools', 'settings']);
   });
 
   it('should carry only the always-on sections, and withhold questions, for a launch with no mode and no switch exactly 1', () => {

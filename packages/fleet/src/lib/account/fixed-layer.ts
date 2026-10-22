@@ -314,6 +314,15 @@ export const PACK_INSTRUCTION = (fy: string): string =>
     `Stop sub-ferrets you no longer need (\`${fy} stop children <your id> --yes\`).`,
   ].join('\n');
 
+/**
+ * The models guide's one-line routing guidance (docs/pack-mode.md), appended to the Pack section when Pack
+ * mode is on. The daemon derives it from the guide in effect at EVERY launch and never stores it, so a
+ * restart hears the latest saved guide; the whole guidance is in `recommend`. It carries no quote,
+ * backslash or control character, so it sits inside either harness's quoting unchanged — and the wrapper
+ * strips them anyway, so a hand-set value cannot break a launch.
+ */
+export const PACK_ROUTING_ENV = 'FY_PACK_ROUTING';
+
 /** One per-ferret section: the name a surface shows it by, the variable that turns it on, and its text. */
 export interface FerretSection {
   readonly id: Extract<LaunchInstructionSectionId, 'hypermedia' | 'pack' | 'learning'>;
@@ -415,7 +424,14 @@ export function launchInstructions(fy: string, env: Readonly<Record<string, stri
       { id: 'settings', chars: SET_UP_FERRETRY_INSTRUCTION(fy).length },
       ...FERRET_SECTIONS(fy)
         .filter(section => env[section.env] === '1')
-        .map(section => ({ id: section.id, chars: section.text.length })),
+        .map(section => ({
+          id: section.id,
+          chars:
+            section.text.length +
+            (section.env === PACK_ENV && (env[PACK_ROUTING_ENV] ?? '') !== ''
+              ? 1 + (env[PACK_ROUTING_ENV] ?? '').length
+              : 0),
+        })),
     ],
     mode,
     questions: mode === 'interactive',

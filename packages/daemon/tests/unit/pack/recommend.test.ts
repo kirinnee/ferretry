@@ -422,6 +422,7 @@ describe('recommend', () => {
           why: 'opus suits it.',
           runtime: 'claude-main',
           ready: true,
+          quota: { state: 'unknown', windows: [], summary: 'not measured' },
         },
       ],
       next: 'fy new --runtime claude-main --model opus --effort high "<complete brief>"',
@@ -561,5 +562,134 @@ describe('recommend', () => {
 
     // Assert
     should(answer?.candidates.map(row => row.model)).deepEqual(['sonnet', 'opus', 'gone-1', 'gone-2']);
+  });
+});
+
+describe('recommend by live quota', () => {
+  const NOW = '2026-10-22T12:00:00.000Z';
+  const RESET = '2026-10-22T18:00:00.000Z';
+  const opusOn = (name: string) => runtime(name, { catalogId: 'anthropic', choices: [choice('opus', 'Opus')] });
+  const sonnetOn = (name: string) => runtime(name, { catalogId: 'anthropic', choices: [choice('sonnet', 'Sonnet')] });
+  const usedWeek = (name: string, percent: number): FleetCredentialView =>
+    credential(`${name}-login`, {
+      usage: { fiveHour: { usedPercent: 10 }, weekly: { usedPercent: percent, resetsAt: RESET } },
+    });
+  const guide = (...models: string[]): ModelsGuide => ({
+    source: 'file',
+    useCases: [
+      useCase('everyday', 'Everyday coding', {
+        keywords: ['fix'],
+        candidates: models.map(model => ({ provider: 'anthropic', model, why: `${model} suits it.` })),
+      }),
+    ],
+    routing: { prompt: 'Opus first; Sonnet when Opus is low.', short: 'Routing: everyday → opus.', source: 'file' },
+    suggested: { by: 'gpt-oss-120b', via: 'claude-work', at: NOW, acceptedAt: NOW },
+  });
+  const input = { task: 'fix the bug', bin: 'fy' };
+
+  it('should move a candidate whose login is near its limit below one with headroom, and say why', () => {
+    // Arrange
+    const known = facts({
+      runtimes: [opusOn('claude-kirin'), sonnetOn('claude-atomi')],
+      credentials: [usedWeek('claude-kirin', 91), usedWeek('claude-atomi', 20)],
+      now: NOW,
+    });
+
+    // Act
+    const answer = recommend(input, guide('opus', 'sonnet'), known);
+
+    // Assert
+    should(answer?.candidates.map(row => [row.rank, row.model, row.runtime, row.movedDown])).deepEqual([
+      [1, 'sonnet', 'claude-atomi', undefined],
+      [2, 'opus', 'claude-kirin', 'claude-kirin, 91% of the week used, resets 18:00Z'],
+    ]);
+    should(answer?.candidates[1]?.quota?.state).equal('low');
+    should(answer?.next).equal('fy new --runtime claude-atomi --model sonnet "<complete brief>"');
+  });
+
+  it("should keep the guide's order when headroom is alike, and restore a demoted candidate once its window resets", () => {
+    // Arrange
+    const runtimes = [opusOn('claude-kirin'), sonnetOn('claude-atomi')];
+    const credentials = [usedWeek('claude-kirin', 95), usedWeek('claude-atomi', 30)];
+
+    // Act
+    const before = recommend(input, guide('opus', 'sonnet'), facts({ runtimes, credentials, now: NOW }));
+    const after = recommend(
+      input,
+      guide('opus', 'sonnet'),
+      facts({ runtimes, credentials, now: '2026-10-22T18:30:00.000Z' }),
+    );
+    const alike = recommend(
+      input,
+      guide('opus', 'sonnet'),
+      facts({ runtimes, credentials: [usedWeek('claude-kirin', 10), usedWeek('claude-atomi', 5)], now: NOW }),
+    );
+
+    // Assert
+    should(before?.candidates.map(row => row.model)).deepEqual(['sonnet', 'opus']);
+    should(after?.candidates.map(row => [row.model, row.movedDown])).deepEqual([
+      ['opus', undefined],
+      ['sonnet', undefined],
+    ]);
+    should(alike?.candidates.map(row => row.model)).deepEqual(['opus', 'sonnet']);
+  });
+
+  it('should not hold an unmeasured login against a candidate', () => {
+    // Arrange
+    const known = facts({
+      runtimes: [opusOn('claude-kirin'), sonnetOn('claude-atomi')],
+      credentials: [credential('claude-kirin-login'), usedWeek('claude-atomi', 5)],
+      now: NOW,
+    });
+
+    // Act + Assert
+    should(recommend(input, guide('opus', 'sonnet'), known)?.candidates.map(row => row.model)).deepEqual([
+      'opus',
+      'sonnet',
+    ]);
+  });
+
+  it('should start a model on the runtime with the most headroom among those that run it', () => {
+    // Arrange
+    const known = facts({
+      runtimes: [opusOn('claude-kirin'), opusOn('claude-atomi')],
+      credentials: [usedWeek('claude-kirin', 85), usedWeek('claude-atomi', 40)],
+      now: NOW,
+    });
+
+    // Act
+    const answer = recommend(input, guide('opus'), known);
+
+    // Assert
+    should(answer?.candidates.map(row => [row.runtime, row.quota?.summary])).deepEqual([
+      ['claude-atomi', '5h 10% · wk 40%'],
+    ]);
+  });
+
+  it('should refuse a login out of quota until its window resets, and offer it again after', () => {
+    // Arrange
+    const runtimes = [opusOn('claude-kirin')];
+    const credentials = [usedWeek('claude-kirin', 100)];
+
+    // Act
+    const out = recommend(input, guide('opus'), facts({ runtimes, credentials, now: NOW }));
+    const back = recommend(input, guide('opus'), facts({ runtimes, credentials, now: '2026-10-22T18:00:00.000Z' }));
+
+    // Assert
+    should(out?.candidates[0]?.refusal).deepEqual({
+      code: 'out_of_quota',
+      message: "claude-kirin's login (claude-kirin-login) is out of quota until 18:00Z.",
+      remedy: 'Pick another candidate.',
+    });
+    should(back?.candidates[0]?.ready).be.true();
+  });
+
+  it('should carry the guide routing prompt and where an accepted guide came from', () => {
+    // Act
+    const answer = recommend(input, guide('opus'), facts({ runtimes: [opusOn('claude-kirin')], now: NOW }));
+
+    // Assert
+    should(answer?.routing).equal('Opus first; Sonnet when Opus is low.');
+    should(answer?.guideSuggested).deepEqual({ by: 'gpt-oss-120b', via: 'claude-work', at: NOW, acceptedAt: NOW });
   });
 });

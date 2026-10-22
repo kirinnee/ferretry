@@ -10,6 +10,7 @@
 import type {
   FleetRuntimeView,
   GuideCandidate,
+  GuideRouting,
   GuideUseCase,
   ModelCatalogEntryView,
   ModelCatalogView,
@@ -17,6 +18,7 @@ import type {
   ModelsGuideFile,
   PackFleetModel,
 } from '@ferretry/protocol';
+import { MAX_ROUTING_PROMPT_CHARS, MAX_ROUTING_SHORT_CHARS } from '@ferretry/protocol';
 
 type Harness = PackFleetModel['harness'];
 type Tier = ModelCatalogEntryView['tier'];
@@ -190,11 +192,81 @@ export function deriveGuide(catalogs: readonly ModelCatalogView[]): readonly Gui
   ];
 }
 
-/** The guide in effect: the owner's use cases when the file names any list, else the derived one. */
-export function effectiveGuide(file: ModelsGuideFile, catalogs: readonly ModelCatalogView[]): ModelsGuide {
+/** How many candidates of each use case the rendered routing prompt names. */
+export const ROUTING_CANDIDATES = 3;
+
+/** A candidate as the routing prompt names it: its label (or id), its CLI when Codex, and its effort. */
+const spoken = (candidate: GuideCandidate, labelOf: (candidate: GuideCandidate) => string | undefined): string => {
+  const harness = candidate.harness === 'codex' ? ' (codex)' : '';
+  const effort = candidate.effort === undefined ? '' : ` at ${candidate.effort} effort`;
+  return `${labelOf(candidate) ?? candidate.model}${harness}${effort}`;
+};
+
+/** One line, with nothing that would need quoting in any harness's system prompt argument. */
+const oneLine = (text: string): string =>
+  text
+    // biome-ignore lint/suspicious/noControlCharactersInRegex: control characters are what it removes
+    .replaceAll(/["\\\u0000-\u001f\u007f]+/gu, ' ')
+    .replaceAll(/\s+/gu, ' ')
+    .trim();
+
+/** The short line: `Routing: plan-review → claude-opus-5-5 max; …`, cut at a whole use case to fit. */
+function shortRouting(useCases: readonly GuideUseCase[]): string {
+  const parts = useCases.flatMap(useCase => {
+    const top = useCase.candidates[0];
+    return top === undefined ? [] : [`${useCase.id} → ${top.model}${top.effort === undefined ? '' : ` ${top.effort}`}`];
+  });
+  let line = 'Routing:';
+  for (const part of parts) {
+    const next = `${line}${line === 'Routing:' ? ' ' : '; '}${part}`;
+    if (oneLine(`${next}.`).length > MAX_ROUTING_SHORT_CHARS) break;
+    line = next;
+  }
+  return oneLine(line === 'Routing:' ? 'Routing: pick a model per job with recommend.' : `${line}.`);
+}
+
+/**
+ * The routing prompt a guide with none of its own is given: each use case, what it covers and its first
+ * candidates in order, and how to fall back. Rendered from the guide, so it says nothing the guide does not.
+ */
+export function renderRouting(
+  useCases: readonly GuideUseCase[],
+  labelOf: (candidate: GuideCandidate) => string | undefined,
+  bin: string,
+): GuideRouting {
+  const lines = [
+    "Pick a sub-ferret's model by the kind of work, best first:",
+    ...useCases.map(useCase => {
+      const named = useCase.candidates.slice(0, ROUTING_CANDIDATES).map(candidate => spoken(candidate, labelOf));
+      return `- ${useCase.title} (${useCase.id}): ${named.length === 0 ? 'no model named' : named.join(', then ')}.`;
+    }),
+    `Prefer a login with quota left: \`${bin} recommend\` ranks by live quota and checks each model answers before starting it. When a candidate is refused, take the next.`,
+  ];
+  return { prompt: lines.join('\n').slice(0, MAX_ROUTING_PROMPT_CHARS), short: shortRouting(useCases) };
+}
+
+/** The label the catalogs give a candidate's model. */
+const catalogLabel =
+  (catalogs: readonly ModelCatalogView[]) =>
+  (candidate: GuideCandidate): string | undefined => {
+    const catalog = catalogs.find(entry => entry.id === candidate.provider);
+    return [...(catalog?.claude ?? []), ...(catalog?.codex ?? [])].find(entry => entry.id === candidate.model)?.label;
+  };
+
+/**
+ * The guide in effect: the owner's use cases when the file names any list, else the derived one; the
+ * file's routing prompt when it has one, else one rendered from those use cases. `bin` is the shipped
+ * command name the rendered prompt points at.
+ */
+export function effectiveGuide(file: ModelsGuideFile, catalogs: readonly ModelCatalogView[], bin = 'fy'): ModelsGuide {
+  const useCases = file.useCases ?? deriveGuide(catalogs);
+  const routing =
+    file.routing === undefined
+      ? { ...renderRouting(useCases, catalogLabel(catalogs), bin), source: 'derived' as const }
+      : { ...file.routing, source: 'file' as const };
   return file.useCases === undefined
-    ? { source: 'derived', useCases: deriveGuide(catalogs) }
-    : { source: 'file', useCases: file.useCases };
+    ? { source: 'derived', useCases, routing }
+    : { source: 'file', useCases, routing, ...(file.suggested === undefined ? {} : { suggested: file.suggested }) };
 }
 
 /** The runtimes here that offer `id` from `provider`'s catalog, by name. */

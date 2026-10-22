@@ -48,6 +48,14 @@ Pack mode: you may hand self-contained parts of your task to sub-ferrets — oth
 Stop sub-ferrets you no longer need (`fy stop children <your id> --yes`).
 ```
 
+When the models guide is in effect (always — its own, or one built from the catalogs), the Pack section ends
+with its **routing line** on a line of its own, e.g. `Routing: plan-review → claude-opus-5-5 max; everyday →
+claude-sonnet-5-5.` — the guide's `routing.short` ([The models guide](#the-models-guide)). The daemon puts it in
+`FY_PACK_ROUTING` at **every launch** and never stores it, so a restart hears the guide saved now; the wrapper
+appends it only when `FY_PACK=1`, and deletes any quote, backslash or control character first, so a value
+nobody checked cannot break either harness's quoting. The whole guidance is in `fy recommend` and
+`fy guide show`, read live.
+
 Built-in subagents are **discouraged, not blocked**: nothing is taken away from the harness.
 
 **Size.** Every Ferretry instruction together is about 4.4 KB (≈ 1,100 tokens) with every section on:
@@ -58,11 +66,12 @@ Built-in subagents are **discouraged, not blocked**: nothing is taken away from 
 | Ferretry settings (short "Set up" skill) | 478        | 120      | every agent runtime         |
 | Hypermedia                               | 1,597      | 399      | `FY_HYPERMEDIA=1`           |
 | Pack mode                                | 963        | 241      | `FY_PACK=1`                 |
+| Its routing line                         | ≤ 151      | ≤ 38     | `FY_PACK=1`, a guide        |
 | Lessons                                  | 413        | 104      | `FY_LEARNING_PASSIVE=1`     |
 | The tools server's MCP instructions      | 112        | 28       | always — one line, no rules |
 
 The full "Set up Ferretry" skill (4.2 KB) is no longer in any prompt; the settings section points at
-`fy config guide`, which prints it. A test keeps the whole prompt under 4.5 KB. The tools section grew from 620 characters when it began
+`fy config guide`, which prints it. A test keeps the whole prompt, with the longest routing line, under 4.5 KB. The tools section grew from 620 characters when it began
 telling agents to hand the owner a terminal or page for every step only they can do
 ([agent-tools.md](agent-tools.md#handing-a-surface-to-the-owner)).
 
@@ -103,6 +112,16 @@ useCases:
 - **A model the guide names that no runtime here offers is still listed**, flagged, never removed: a guide
   is portable between machines. A candidate is also served by a runtime whose catalog lists a model with the
   **same label** (Claude Opus 5.5 through Bedrock), so a guide written for `anthropic` works on a Bedrock login.
+- **Routing guidance.** `routing: {prompt, short}` says in plain words how to pick a model and effort for a
+  sub-ferret's job — "planning or review → …; mass chores → …; when X is low on quota → …". `prompt` (up to
+  6,000 characters) is printed by `fy recommend` and `fy guide show` and given to **Jev** as its guidance;
+  `short` (one line, up to 150 characters, no quote or backslash) rides in the Pack section of every ferret's
+  system prompt. A guide with no `routing` gets one **rendered from its use cases** — each use case and its
+  first three candidates — so it never says anything the guide does not. Hand-written, generated or derived,
+  Pack mode reads whatever is saved.
+- **Where it came from.** `suggested: {by, via, at, acceptedAt, partial?}` records the model that drafted an
+  accepted guide; `fy recommend` then says so ("your guide, suggested by gpt-oss-120b on 2026-10-22 and
+  accepted"). A hand-written guide has none.
 - **Tolerant read, strict write.** An unknown model is a warning in the editor and a `model_unavailable`
   candidate, never a broken file; a file that does not match the schema keeps its last good version.
   The guide never loosens anything (it widens nothing a ferret may do or spend), so an edit is never held.
@@ -124,9 +143,26 @@ candidates is resolved to a runtime on this machine and checked **now**, in the 
 | It can launch at all                | `not_logged_in`     |
 | It offers the model                 | `model_unavailable` |
 
-Ready candidates come first, each group in the guide's order, and `next` is the command that starts the
-first. `--json` prints the payload. (The older `fy fleet recommend` — a team recommender over a routing
-catalog an operator writes — is unchanged and separate.)
+Ready candidates come first, and `next` is the command that starts the first. The answer names the guide it
+used and ends with the guide's routing prompt. `--json` prints the payload. `fy guide show [--json]` prints the
+guide in effect: where it came from, its routing prompt and short line, and every use case.
+
+### Quota
+
+Quota changes hour by hour, so it is applied **at routing time**, from the fleet's own last reading of each
+login (the windows the app shows as "5h 2% · wk 46%", `packages/daemon/src/lib/pack/quota.ts`), with no LLM
+call and no extra request:
+
+- Each candidate carries its login's **headroom**, banded by the tightest window measured: _plenty_ (half or
+  more left), _some_ (a fifth to a half), _low_ (less than a fifth), _exhausted_ (refused `out_of_quota`).
+  A login nothing measured is _unknown_ and is not held against a candidate.
+- The ready candidates are **re-ranked** by band — plenty or unknown, then some, then low — the guide's order
+  breaking every tie, and a candidate that ends below one the guide put after it says why
+  (`moved down: claude-kirin, 91% of the week used, resets 18:00Z`).
+- Of the runtimes that could serve one candidate, the one with the most headroom is chosen.
+- A window whose **reset time has passed** since it was measured counts as fresh, so a login that ran out is
+  offered again once its window resets, without anybody reading its usage again. (The older `fy fleet recommend` — a team recommender over a routing
+  catalog an operator writes — is unchanged and separate.)
 
 ## `fy new`
 
@@ -150,14 +186,18 @@ fy new --auto --name "Fix Login Redirect" "<complete brief>"   # the decision mo
 1. **Admission**: Pack mode on for the machine and the parent; the parent's limits (below).
 2. **Order**: the named runtime — checked as `recommend` checks it — or, with `--auto`, the guide's ready
    candidates in the guide's order, or **Jev's** order when Jev decides.
-3. **Probe — always, in both modes.** Each candidate in turn is asked to "Reply with exactly: OK" through its
+3. **Probe — always, in both modes.** Each candidate in turn is asked to "Reply with exactly: OK" — a real round
+   trip to the model, not a check that a CLI exists — through its
    own wrapper — resolved exactly as the start resolves it, the published absolute launcher in
    `$FY_HOME/fleet/bin` and never a name looked up on `PATH`, with the same login environment — in its CLI's one-shot mode (`claude -p` with the start's own `--model` and `--effort`, `codex exec` at `low`
    effort), bounded by
    `probe.timeoutSeconds` (45 s). A probe spends a token or two, and only when a ferret asked for a start —
-   never on a timer. Its answer is kept per runtime, model and effort for `probe.cacheSeconds` (60 s) and probes
-   already running are shared, so twenty sub-ferrets started at once probe once. A failed probe refuses that
-   candidate `probe_failed` and the next is tried; nothing is launched for it.
+   never on a timer. A **pass** is kept per runtime, model and effort for `probe.cacheSeconds` (180 s) and probes
+   already running are shared, so twenty sub-ferrets started at once probe once; a failure is not kept, so the
+   next start asks again. A failed probe refuses that candidate and the next is tried; nothing is launched for
+   it. The CLI's own words say which failure it was — `out_of_quota`, `not_logged_in` or `model_unavailable` —
+   and anything else is `probe_failed`; the words themselves are never repeated. The start line shows the
+   check: `started claude-work (probe OK 640 ms)`, `(probe OK, cached)`, `refused … (probe failed 3436 ms)`.
 4. **Start**: the same session start every surface uses (callsign, launch, audit), with `parent` recorded and
    the brief followed by a footer telling the sub-ferret to finish with `fy signal done "<result>"`. A
    harness that exits before it is ready fails the start with its exit status **and its last output lines**
@@ -187,10 +227,10 @@ refusal (a failure of the command itself is 1).
 - **`agent`** (default) — the asking ferret picks, from `fy recommend`, and names `--runtime/--model/--effort`.
   `--auto` takes the guide's first ready candidate.
 - **`jev`** — `fy new --auto` asks Jev (TypeSafe AI's System One model, the Warden's guard) to rank the ready
-  candidates for the task: one cheap question per start, only when a ferret asks, within `jev.usdPerDay`
+  candidates for the task, **guided by the models guide**: one cheap question per start, only when a ferret asks, within `jev.usdPerDay`
   (default $0.25 per UTC day, counted at the Warden's `guard.usdPerMillionInputTokens`, separate from the
-  Warden's own cap). Jev sees the task text (bounded) and each candidate's model, runtime and reason —
-  nothing else. With one ready candidate Jev is not asked. When Jev cannot answer (no key, a refusal, a
+  Warden's own cap). Jev sees the task text (bounded), the guide's routing prompt and the use case the task
+  matched (bounded), and each candidate's model, runtime, reason and login quota — nothing else. With one ready candidate Jev is not asked. When Jev cannot answer (no key, a refusal, a
   timeout, an unreadable answer) or the cap is reached, the guide's order is used and the answer's `note`
   says why: a broken Jev never stops a sub-ferret starting. Switching to `jev` is a loosening, held for the
   owner's confirmation ([config-files.md](config-files.md)).
@@ -234,5 +274,7 @@ through the configuration-file routes, so a loosening is held exactly as an edit
   not its `--session-id`, hand-off `Read(...)` rules, fast-mode overlay or remote-control arguments, so a
   harness that refuses only one of those passes the probe and fails the start — with its own words on the card.
 - **A probe leaves a one-line conversation** in the runtime's history, as any one-shot run of the CLI does.
+- **No burn rate.** Headroom is what is left now; how fast a login is spending is not measured, so two logins
+  with the same share left rank alike however fast one is draining.
 - **Quota is what the fleet last read.** `recommend` and `new` do not ask a provider for fresh quota; an
   environment login whose quota nobody has watched reads as not exhausted, and the probe is what catches it.

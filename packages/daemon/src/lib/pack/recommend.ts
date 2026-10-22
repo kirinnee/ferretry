@@ -8,6 +8,10 @@
  * A candidate nobody here offers is still listed, last, with the reason, so a ferret (or its owner)
  * can see what the guide wanted.
  *
+ * Live quota re-ranks the ready ones (`./quota.ts`): a candidate whose login has less headroom is moved
+ * below one with more, the guide's order breaking every tie, and says why it moved. Of the runtimes that
+ * could serve one candidate, the one with the most headroom is chosen.
+ *
  * Pure: the guide and the fleet's facts in, a recommendation out.
  */
 import type {
@@ -18,9 +22,11 @@ import type {
   GuideUseCase,
   ModelsGuide,
   PackCandidate,
+  PackQuota,
   PackRecommendation,
   PackRefusal,
 } from '@ferretry/protocol';
+import { QUOTA_RANK, quotaOf, quotaReason } from './quota.ts';
 
 /** Everything recommend reads about this machine. */
 export interface PackFleetFacts {
@@ -32,6 +38,8 @@ export interface PackFleetFacts {
    * the published launcher, so "ready" here is a runtime `fy new` can actually launch. Absent: launchable.
    */
   readonly unlaunchable: Readonly<Record<string, string>>;
+  /** Now, so a quota window whose reset time has passed counts as fresh. Absent: no reset is assumed. */
+  readonly now?: string;
 }
 
 /** A use case chosen for a task, and how. */
@@ -74,12 +82,12 @@ const refusal = (code: PackRefusal['code'], message: string, remedy?: string): P
   ...(remedy === undefined ? {} : { remedy }),
 });
 
-/** Whether a runtime's login has run out: a provider said so, or a window it reports is full. */
-function exhausted(credential: FleetCredentialView): boolean {
-  const usage = credential.usage;
-  const full = (percent: number | undefined): boolean => percent !== undefined && percent >= 100;
-  return usage.provider?.exhausted === true || full(usage.fiveHour.usedPercent) || full(usage.weekly.usedPercent);
-}
+/** The quota headroom of a runtime's login now. */
+const runtimeQuota = (runtime: FleetRuntimeView, facts: PackFleetFacts): PackQuota =>
+  quotaOf(
+    facts.credentials.find((candidate: FleetCredentialView) => candidate.id === runtime.credential.id),
+    facts.now,
+  );
 
 /**
  * Why `runtime` cannot start a ferret on `model` now, or `undefined` when it can. Checked in the order
@@ -121,10 +129,11 @@ export function runtimeRefusal(
       `${name}'s login (${runtime.credential.id}) needs signing in.`,
       'Pick another candidate.',
     );
-  if (credential !== undefined && exhausted(credential))
+  const quota = credential === undefined ? undefined : quotaOf(credential, facts.now);
+  if (quota?.state === 'exhausted')
     return refusal(
       'out_of_quota',
-      `${name}'s login (${runtime.credential.id}) is out of quota.`,
+      `${name}'s login (${runtime.credential.id}) is ${quota.summary}.`,
       'Pick another candidate.',
     );
   if (!runtime.launch.available)
@@ -194,7 +203,13 @@ function resolve(
     why: candidate.why,
   };
   const options = servers(candidate, label, facts.runtimes);
-  const ready = options.find(option => runtimeRefusal(option.runtime, option.model, facts) === undefined);
+  // Of the runtimes that can run it now, the one with the most headroom; their order breaks a tie.
+  const ready = options
+    .filter(option => runtimeRefusal(option.runtime, option.model, facts) === undefined)
+    .map((option, index) => ({ ...option, index, quota: runtimeQuota(option.runtime, facts) }))
+    .toSorted(
+      (left, right) => QUOTA_RANK[left.quota.state] - QUOTA_RANK[right.quota.state] || left.index - right.index,
+    )[0];
   if (ready !== undefined)
     return {
       ...base,
@@ -203,6 +218,7 @@ function resolve(
       harness: ready.runtime.harness,
       runtime: ready.runtime.name,
       ready: true,
+      quota: ready.quota,
     };
   const first = options[0];
   if (first === undefined)
@@ -220,7 +236,27 @@ function resolve(
     runtime: first.runtime.name,
     ready: false,
     refusal: runtimeRefusal(first.runtime, first.model, facts) as PackRefusal,
+    quota: runtimeQuota(first.runtime, facts),
   };
+}
+
+type Row = Omit<PackCandidate, 'rank'>;
+
+/**
+ * The ready rows re-ranked by quota headroom — plenty (or unmeasured), then some, then low — each band in
+ * the guide's order; a row that ends below a row the guide put after it says why it moved.
+ */
+export function rankByQuota(rows: readonly Row[], now?: string): readonly Row[] {
+  const band = (row: Row): number => (row.quota === undefined ? 0 : QUOTA_RANK[row.quota.state]);
+  const ranked = rows
+    .map((row, index) => ({ row, index }))
+    .toSorted((left, right) => band(left.row) - band(right.row) || left.index - right.index);
+  return ranked.map(({ row, index }, at) => {
+    const overtaken = ranked.slice(0, at).some(earlier => earlier.index > index);
+    return overtaken && row.quota !== undefined && row.runtime !== undefined
+      ? { ...row, movedDown: quotaReason(row.runtime, row.quota, now) }
+      : row;
+  });
 }
 
 /** The labels every runtime's catalog gives each (provider, model), to recognise the same model resold. */
@@ -254,15 +290,20 @@ export function recommend(
   if (matched === undefined) return undefined;
   const known = new Map([...labels, ...catalogLabels(facts.runtimes)]);
   const rows = matched.useCase.candidates.map(candidate => resolve(candidate, known, facts));
-  const ordered = [...rows.filter(row => row.ready), ...rows.filter(row => !row.ready)].map((row, index) => ({
-    rank: index + 1,
-    ...row,
-  }));
+  const ordered = [
+    ...rankByQuota(
+      rows.filter(row => row.ready),
+      facts.now,
+    ),
+    ...rows.filter(row => !row.ready),
+  ].map((row, index) => ({ rank: index + 1, ...row }));
   const first = ordered.find(row => row.ready);
   return {
     task: input.task,
     useCase: { id: matched.useCase.id, title: matched.useCase.title, matchedBy: matched.matchedBy },
     guideSource: guide.source,
+    ...(guide.suggested === undefined ? {} : { guideSuggested: guide.suggested }),
+    ...(guide.routing === undefined ? {} : { routing: guide.routing.prompt }),
     candidates: ordered,
     ...(first === undefined ? {} : { next: newCommand(input.bin, first) }),
   };

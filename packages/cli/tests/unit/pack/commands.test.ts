@@ -1,8 +1,8 @@
 import { describe, it } from 'bun:test';
 import { Command } from 'commander';
 import should from 'should';
-import { registerRecommendCommand } from '../../../src/lib/pack/commands.ts';
-import type { PackController, PackRecommendOptions } from '../../../src/lib/pack/controller.ts';
+import { registerGuideCommand, registerRecommendCommand } from '../../../src/lib/pack/commands.ts';
+import type { PackController, PackGuideShowOptions, PackRecommendOptions } from '../../../src/lib/pack/controller.ts';
 
 function build(failure?: Error) {
   const calls: Array<{ words: readonly string[]; options: PackRecommendOptions }> = [];
@@ -58,6 +58,47 @@ describe('registerRecommendCommand', () => {
 
     // Act
     await program.parseAsync(['node', 'fy', 'recommend', 'x']);
+
+    // Assert
+    should(failures).eql([failure]);
+  });
+});
+
+describe('registerGuideCommand', () => {
+  function guide(failure?: Error) {
+    const calls: PackGuideShowOptions[] = [];
+    const failures: unknown[] = [];
+    const program = new Command().name('fy').exitOverride();
+    program.configureOutput({ writeOut: () => {}, writeErr: () => {} });
+    const controller = {
+      showGuide: async (options: PackGuideShowOptions) => {
+        calls.push(options);
+        if (failure !== undefined) throw failure;
+      },
+    } as unknown as PackController;
+    registerGuideCommand(program, controller, { fail: error => void failures.push(error) });
+    return { program, calls, failures };
+  }
+
+  it('should show the guide, with --json passed through', async () => {
+    // Arrange
+    const { program, calls } = guide();
+
+    // Act
+    await program.parseAsync(['node', 'fy', 'guide', 'show']);
+    await program.parseAsync(['node', 'fy', 'guide', 'show', '--json']);
+
+    // Assert
+    should(calls).eql([{}, { json: true }]);
+  });
+
+  it('should hand a failure to the reporter', async () => {
+    // Arrange
+    const failure = new Error('no daemon');
+    const { program, failures } = guide(failure);
+
+    // Act
+    await program.parseAsync(['node', 'fy', 'guide', 'show']);
 
     // Assert
     should(failures).eql([failure]);

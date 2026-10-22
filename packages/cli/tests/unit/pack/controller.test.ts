@@ -3,7 +3,7 @@ import should from 'should';
 import { PACK_REFUSED_EXIT_CODE, PackController } from '../../../src/lib/pack/controller.ts';
 import type { IPackGateway } from '../../../src/lib/pack/gateway.ts';
 import { RecordingProgress } from '../progress/fixtures.ts';
-import { CapturingPackIo, FakePackGateway, recommendation, refused, started } from './fixtures.ts';
+import { CapturingPackIo, FakePackGateway, packView, recommendation, refused, started } from './fixtures.ts';
 
 function build(options: { parent?: string; gateway?: IPackGateway; files?: Record<string, string> } = {}) {
   const gateway = (options.gateway ?? new FakePackGateway()) as FakePackGateway;
@@ -19,6 +19,22 @@ function build(options: { parent?: string; gateway?: IPackGateway; files?: Recor
   });
   return { controller, gateway, out };
 }
+
+describe('PackController.showGuide', () => {
+  it('should print the guide for a person, and the guide alone as JSON', async () => {
+    // Arrange
+    const { controller, out } = build();
+
+    // Act
+    await controller.showGuide({});
+    await controller.showGuide({ json: true });
+
+    // Assert
+    should(out.out[0]).startWith('Models guide: your models guide');
+    should(out.out[0]).containEql('Plan and review on Opus');
+    should(JSON.parse(out.out[1] ?? '')).eql(JSON.parse(JSON.stringify(packView().guide)));
+  });
+});
 
 describe('PackController.recommend', () => {
   it('should send the joined task and print the recommendation for a person', async () => {

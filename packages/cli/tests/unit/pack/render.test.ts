@@ -1,7 +1,19 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { renderPackNewOutcome, renderPackRecommendation } from '../../../src/lib/pack/render.ts';
-import { attempt, recommendation, refused, started, startedView } from './fixtures.ts';
+import {
+  guideWords,
+  renderGuide,
+  renderPackNewOutcome,
+  renderPackRecommendation,
+} from '../../../src/lib/pack/render.ts';
+import { attempt, packView, recommendation, refused, started, startedView } from './fixtures.ts';
+
+const SUGGESTED = {
+  by: 'gpt-oss-120b',
+  via: 'claude-work',
+  at: '2026-10-21T09:00:00.000Z',
+  acceptedAt: '2026-10-22T10:00:00.000Z',
+};
 
 describe('renderPackRecommendation', () => {
   it('should name the use case, its match and the guide, then each ready candidate and the start command', () => {
@@ -63,6 +75,75 @@ describe('renderPackRecommendation', () => {
     ]);
   });
 
+  it('should say the guide was suggested and accepted, show quota, why a candidate moved down, and the routing guidance', () => {
+    // Arrange
+    const text = renderPackRecommendation(
+      recommendation({
+        guideSource: 'file',
+        guideSuggested: SUGGESTED,
+        routing: 'Bulk work on Haiku.\nTake the next when one refuses.',
+        candidates: [
+          {
+            rank: 1,
+            provider: 'anthropic',
+            model: 'claude-haiku-4-5',
+            why: 'cheap and quick',
+            runtime: 'claude-atomi',
+            ready: true,
+            quota: { state: 'plenty', windows: [], leftPercent: 98, summary: '5h 2% · wk 46%' },
+          },
+          {
+            rank: 2,
+            provider: 'anthropic',
+            model: 'claude-haiku-4-5',
+            why: 'cheap and quick',
+            runtime: 'claude-kirin',
+            ready: true,
+            quota: { state: 'low', windows: [], leftPercent: 9, summary: '5h 10% · wk 91%' },
+            movedDown: 'claude-kirin, 91% of the week used',
+          },
+          {
+            rank: 3,
+            provider: 'anthropic',
+            model: 'claude-haiku-4-5',
+            why: 'cheap and quick',
+            runtime: 'claude-other',
+            ready: true,
+            quota: { state: 'unknown', windows: [], summary: 'not measured' },
+          },
+        ],
+      }),
+    );
+
+    // Assert
+    should(text.split('\n')).eql([
+      "Use case: Bulk edits (bulk, from the task's words; your guide, suggested by gpt-oss-120b on 2026-10-22 and accepted)",
+      '',
+      '1. ready   claude-haiku-4-5 on claude-atomi · quota 5h 2% · wk 46%',
+      '   cheap and quick',
+      '2. ready   claude-haiku-4-5 on claude-kirin · quota 5h 10% · wk 91%',
+      '   cheap and quick',
+      '   moved down: claude-kirin, 91% of the week used',
+      '3. ready   claude-haiku-4-5 on claude-other',
+      '   cheap and quick',
+      '',
+      'How to choose (the routing guidance):',
+      'Bulk work on Haiku.',
+      'Take the next when one refuses.',
+      '',
+      'Start the first: fy new --runtime claude-work --model claude-haiku-4-5 "<brief>"',
+    ]);
+  });
+
+  it('should word a partly accepted suggestion and both guides with none', () => {
+    // Assert
+    should(guideWords('file', { ...SUGGESTED, partial: true })).equal(
+      'your guide, suggested by gpt-oss-120b on 2026-10-22 and partly accepted',
+    );
+    should(guideWords('file', undefined)).equal('your models guide');
+    should(guideWords('derived', undefined)).equal('the built-in guide');
+  });
+
   it('should print an empty candidate list as nothing runnable', () => {
     // Arrange + Act
     const text = renderPackRecommendation(recommendation({ candidates: [], next: undefined }));
@@ -72,7 +153,69 @@ describe('renderPackRecommendation', () => {
   });
 });
 
+describe('renderGuide', () => {
+  it('should print where the guide came from, its routing guidance and short line, then each use case', () => {
+    // Arrange + Act
+    const text = renderGuide(packView({ suggested: SUGGESTED }));
+
+    // Assert
+    should(text.split('\n')).eql([
+      'Models guide: your guide, suggested by gpt-oss-120b on 2026-10-22 and accepted',
+      '',
+      'Routing guidance (written in models-guide.yaml):',
+      'Plan and review on Opus; take Astra when Opus is low.',
+      '',
+      "In every Pack ferret's system prompt: Routing: plan-review → claude-opus-5-5 max.",
+      '',
+      'Use cases (1):',
+      '- Hard planning and review (plan-review)',
+      '  1. anthropic/claude-opus-5-5 · effort max — The strongest planner.',
+      '  2. openai/gpt-6-astra (codex) — A second family.',
+    ]);
+  });
+
+  it('should say a rendered routing prompt was rendered, and print a guide with no routing at all', () => {
+    // Arrange
+    const derived = packView({ source: 'derived' });
+    const rendered = renderGuide({
+      ...derived,
+      guide: { ...derived.guide, routing: { prompt: 'Rendered.', short: 'Routing: x.', source: 'derived' } },
+    });
+    const { routing: _routing, ...bare } = derived.guide;
+
+    // Act
+    const none = renderGuide({ ...derived, guide: bare });
+
+    // Assert
+    should(rendered).containEql('Routing guidance (rendered from the use cases):');
+    should(none.split('\n').slice(0, 3)).eql(['Models guide: the built-in guide', '', 'Use cases (1):']);
+  });
+});
+
 describe('renderPackNewOutcome', () => {
+  it('should time a probe that passed and one that failed, and name a failed probe another start shared', () => {
+    // Arrange
+    const outcome = refused({
+      refusal: { code: 'out_of_quota', message: 'quota' },
+      attempts: [
+        attempt({
+          runtime: 'a',
+          outcome: 'refused',
+          probe: 'cached',
+          probeMs: 10,
+          refusal: { code: 'out_of_quota', message: 'q' },
+        }),
+      ],
+    });
+
+    // Act
+    const passed = renderPackNewOutcome(started({ attempts: [attempt({ probe: 'ran', probeMs: 640 })] }), 'fy');
+
+    // Assert
+    should(passed).containEql('  started claude-work (probe OK 640 ms)');
+    should(renderPackNewOutcome(outcome, 'fy')).containEql('  refused a (probe failed, shared) — out_of_quota: q');
+  });
+
   it('should say who started, on what, decided by whom, then how to wait', () => {
     // Arrange
     const outcome = started({ view: startedView({ model: 'claude-haiku-4-5' }), decidedBy: 'guide' });
@@ -128,9 +271,9 @@ describe('renderPackNewOutcome', () => {
     should(text.split('\n')).eql([
       'Started child-1 on claude-work — decided by jev.',
       'Jev could not decide, so the guide order was used.',
-      '  refused codex-work gpt-x (probe 1200ms) — probe_failed: no answer',
-      '  started claude-work opus (probe cached)',
-      '  started claude-work (probe 0ms)',
+      '  refused codex-work gpt-x (probe failed 1200 ms) — probe_failed: no answer',
+      '  started claude-work opus (probe OK, cached)',
+      '  started claude-work (probe OK)',
       '  refused claude-work — refused: ',
       'Wait for its result: fy wait child-1',
     ]);
