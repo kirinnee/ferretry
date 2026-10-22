@@ -28,6 +28,7 @@ import {
   ReviveRefusedForSend,
   type SendChannel,
   SendComposerOccupied,
+  SendComposerUnreadable,
   SendDraftRefused,
   type SendLaunchGate,
   type SendLedger,
@@ -129,6 +130,17 @@ export function composerOccupiedRefusal(draft: string): SendDraftRefused {
     `the agent's composer already holds unsent text ("${quoted}"); a message typed now would be sent ` +
       'joined to it. Press Enter on it or clear it first',
     draft,
+  );
+}
+
+/**
+ * Why nothing was typed when the agent's composer could not be read: it may hold a person's draft, and
+ * a message typed onto one is submitted joined to it. Usually a passing repaint, so trying again works.
+ */
+export function composerUnreadableRefusal(): SendRefused {
+  return new SendRefused(
+    "the agent's screen could not be read to prove its composer empty, so nothing was typed; send it again " +
+      'in a moment, or check the terminal for a half-written message',
   );
 }
 
@@ -322,10 +334,14 @@ export class SessionSendService {
         }
         return (await this.queued(id, next, await this.ports.terminal.queue(id, text))) ?? next;
       } catch (error) {
-        if (!(error instanceof SendComposerOccupied)) throw error;
+        if (!(error instanceof SendComposerOccupied) && !(error instanceof SendComposerUnreadable)) throw error;
         // Nothing was typed, so the record goes back to exactly what it said before this attempt.
         await this.ports.ledger.settle(id, sendId, restorable(current));
-        throw composerOccupiedRefusal(error.draft);
+        if (error instanceof SendComposerOccupied) throw composerOccupiedRefusal(error.draft);
+        throw new SendRetypeWithheld(
+          `the agent's composer could not be read to prove it empty, so send ${sendId} was not typed again`,
+          'unreadable',
+        );
       }
     });
     this.ports.tracking.track(id);
@@ -620,10 +636,17 @@ export class SessionSendService {
     try {
       return await transport();
     } catch (error) {
-      if (!(error instanceof SendComposerOccupied)) throw error;
-      if (release === undefined) await this.ports.ledger.withdraw(id, record.sendId, 'the composer held unsent text');
-      else await this.ports.ledger.settle(id, record.sendId, { held: true });
-      throw composerOccupiedRefusal(error.draft);
+      if (!(error instanceof SendComposerOccupied) && !(error instanceof SendComposerUnreadable)) throw error;
+      const occupied = error instanceof SendComposerOccupied;
+      if (release !== undefined) await this.ports.ledger.settle(id, record.sendId, { held: true });
+      else
+        await this.ports.ledger.withdraw(
+          id,
+          record.sendId,
+          occupied ? 'the composer held unsent text' : 'the composer could not be read',
+        );
+      if (occupied) throw composerOccupiedRefusal(error.draft);
+      throw composerUnreadableRefusal();
     }
   }
 

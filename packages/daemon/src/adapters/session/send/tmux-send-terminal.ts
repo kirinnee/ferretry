@@ -6,7 +6,7 @@ import type {
   SendQueueOutcome,
   SendTerminal,
 } from '../../../lib/session/send/types.ts';
-import { SendComposerOccupied } from '../../../lib/session/send/types.ts';
+import { SendComposerOccupied, SendComposerUnreadable } from '../../../lib/session/send/types.ts';
 import type { SessionId } from '../../../lib/session-id.ts';
 import {
   composerInput,
@@ -22,7 +22,12 @@ import {
   showsPayload,
   type TmuxController,
 } from '../../../lib/tmux/index.ts';
-import { ComposerOccupiedError, captureFrame, type DeliverySleep } from '../../tmux/composer-fill.ts';
+import {
+  ComposerOccupiedError,
+  ComposerUnreadableError,
+  captureFrame,
+  type DeliverySleep,
+} from '../../tmux/composer-fill.ts';
 import type { TmuxPaneDelivery } from '../../tmux/pane-delivery.ts';
 import type { TmuxPaneQueue } from '../../tmux/pane-queue.ts';
 
@@ -127,19 +132,22 @@ export class TmuxSendTerminal implements SendTerminal {
    *
    * `C-u` erases to the start of the line; on an already-empty line Codex (0.145–0.163, measured)
    * joins it onto the line above instead, so a draft of N lines takes 2N keys and a draft left with a
-   * trailing newline by a swallowed Enter takes two. `BSpace` is never sent: after such a join it
-   * deletes a real character. Between keys the composer must still be the payload or a shrinking
+   * trailing newline by a swallowed Enter takes two. Claude Code (2.1.281, measured) erases only the
+   * WRAPPED ROW the cursor is on, so its budget is counted in the rows the composer draws, not in the
+   * payload's lines. `BSpace` is never sent: after such a join it deletes a real character. Between keys the composer must still be the payload or a shrinking
    * prefix of it — the shape erasing from the end leaves — and anything else stops the clear, so a
    * person who typed beside it keeps their draft.
    */
   async clearComposer(id: SessionId, text: string): Promise<ComposerClearOutcome> {
     const session = await this.session(id);
     const paste = composerTransport(text) === 'paste';
-    const rounds = 2 * text.split('\n').length + this.keys.clearMargin;
+    let rounds = 2 * text.split('\n').length + this.keys.clearMargin;
     for (let round = 0; round <= rounds; round += 1) {
       const frame = await captureFrame(this.tmux, session);
       const composer = readComposer(frame.visible, { x: frame.cursorX, y: frame.cursorY });
       if (composer?.placeholder === undefined) return 'stuck';
+      if (round === 0)
+        rounds = 2 * Math.max(text.split('\n').length, composer.text.split('\n').length) + this.keys.clearMargin;
       const input = composerInput(composer);
       if (input === '') return round === 0 ? 'absent' : 'cleared';
       const ours = showsPayload(input, text) || (paste && composer.pasted);
@@ -187,6 +195,7 @@ export class TmuxSendTerminal implements SendTerminal {
       return await transport();
     } catch (error) {
       if (error instanceof ComposerOccupiedError) throw new SendComposerOccupied(error.draft);
+      if (error instanceof ComposerUnreadableError) throw new SendComposerUnreadable();
       throw error;
     }
   }

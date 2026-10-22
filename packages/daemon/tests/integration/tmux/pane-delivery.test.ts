@@ -244,7 +244,7 @@ describe('tmux pane delivery — landing proof', () => {
     should(server.calls.filter(call => call.at(-1) === 'Enter')).deepEqual([], 'Enter is never pressed on a guess');
   });
 
-  it('should clear the composer between retries only while nothing has landed', async () => {
+  it('should type again only into a composer proven empty, and never erase to make room', async () => {
     // Arrange — the first literal send is dropped; the second lands.
     const server = new FakeTmuxServer();
     let literals = 0;
@@ -266,7 +266,8 @@ describe('tmux pane delivery — landing proof', () => {
 
     // Assert
     should(actual).equal('turn-started');
-    should(server.calls.filter(call => call.at(-1) === 'C-u')).have.length(1, 'cleared once, before the retry');
+    should(server.calls.filter(call => call.at(-1) === 'C-u')).be.empty();
+    should(literals).equal(2, 'the dropped keys left the composer empty, so one more fill was safe');
     should(server.submitted).deepEqual(['continue']);
   });
 
