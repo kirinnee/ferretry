@@ -2,7 +2,8 @@
  * A SHERPA MODEL ON THIS DEVICE — the on-device voice (`on-device-voice.ts`) for one sherpa-onnx
  * catalog entry (`sherpa-models.ts`): its install is the shared runtime's bundle plus the model's own
  * (`bundle-set.ts`), it runs in its own sherpa worker (`sherpa-engine.ts`), and a streaming model
- * dictates through a streaming session (`streaming-session.ts`) that shows words while you speak.
+ * dictates through a streaming session (`streaming-session.ts`) that shows words while you speak; a
+ * whole-take model (Moonshine, Parakeet 110M) records and decodes once on Stop.
  */
 
 import { browserFetch } from '../runtime-models.ts';
@@ -13,6 +14,7 @@ import { modelBundle, runtimeBundle } from './model-catalog.ts';
 import { type ModelCacheStorage, type ModelStorageManager, PinnedModelStore } from './model-store.ts';
 import { browserSessionHost, type OnDeviceHostGlobalLike, readOnDeviceSupport } from './on-device-host.ts';
 import { OnDeviceVoice } from './on-device-voice.ts';
+import { ParakeetRecognitionSession } from './parakeet-session.ts';
 import { SherpaEngine, SherpaEngineError, type SherpaWorkerLike } from './sherpa-engine.ts';
 import { SHERPA_RUNTIME, type SherpaCatalogModel } from './sherpa-models.ts';
 import { StreamingRecognitionSession } from './streaming-session.ts';
@@ -78,7 +80,16 @@ export function browserSherpaVoice(
     support,
     store,
     openSession: options =>
-      new StreamingRecognitionSession({ ...host, engine, model: model.versionLabel, failure: sherpaFailure }, options),
+      model.streaming
+        ? new StreamingRecognitionSession(
+            { ...host, engine, model: model.versionLabel, failure: sherpaFailure },
+            options,
+          )
+        : // A whole-take model: record, then decode once on Stop — Parakeet's session, without near-live words.
+          new ParakeetRecognitionSession(
+            { ...host, engine, model: model.versionLabel, failure: sherpaFailure },
+            { ...options, liveWords: false },
+          ),
     unload: () => engine.unload(),
   });
 }

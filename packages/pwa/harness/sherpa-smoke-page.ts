@@ -59,6 +59,22 @@ page.__smoke = async () => {
     () => new Worker(trustedWorkerUrl(assets.workerUrl), { type: 'module', name: `fy-${model.id}` }),
     model.id,
   );
+  if (!model.streaming) {
+    // A whole-take model: decode the clip once, as Stop would.
+    engine.preload();
+    started = performance.now();
+    const text = await engine.transcribe(samples);
+    return {
+      text,
+      partials: 0,
+      firstWordsAfterMs: null,
+      installMs,
+      loadMs: engine.consumeLoadMs(),
+      streamMs: 0,
+      closeMs: performance.now() - started,
+      audioMs: (samples.length / 16_000) * 1000,
+    };
+  }
   const seen: StreamWords[] = [];
   let failure: unknown = null;
   let firstWordsAt: number | null = null;

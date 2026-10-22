@@ -30,7 +30,14 @@ import {
 import { SHERPA_MODELS, SHERPA_RUNTIME, type SherpaCatalogModel } from './sherpa-models.ts';
 
 /** Every on-device model id, in the order Settings lists them (sherpa first, as the owner asked). Each is also a dictation engine id. */
-export const ON_DEVICE_MODEL_IDS = ['sherpa-zipformer-en', 'sherpa-zipformer-en-20m', 'parakeet'] as const;
+export const ON_DEVICE_MODEL_IDS = [
+  'sherpa-zipformer-en',
+  'sherpa-zipformer-en-20m',
+  'moonshine-tiny-en',
+  'moonshine-base-en',
+  'parakeet-ctc-110m',
+  'parakeet',
+] as const;
 export type OnDeviceModelId = (typeof ON_DEVICE_MODEL_IDS)[number];
 
 /** The programs a model can run on. */

@@ -80,7 +80,7 @@ arch)
 
     set +e
     violations="$(rg -n \
-      -e 'console\.|process\.' \
+      -e '\bconsole\.|\bprocess\.' \
       -e "(from|import|require)[^\"']*[\"'](chalk|ora|cli-progress|inquirer)(/[^\"']*)?[\"']" \
       -e "(from|import|require)[^\"']*[\"'](\.[^\"']*/)?adapters(/[^\"']*)?[\"']" \
       -- "${lib_files[@]}")"

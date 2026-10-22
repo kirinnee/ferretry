@@ -16,7 +16,7 @@
  * aliases it to the file of the pinned version, and `sherpa-glue.d.ts` declares the slice used here.
  */
 
-import { createOnlineRecognizer, type OnlineRecognizer, type OnlineStream } from '@sherpaw/asr';
+import { createOnlineRecognizer, OfflineRecognizer, type OnlineRecognizer, type OnlineStream } from '@sherpaw/asr';
 import initSherpa from 'sherpa-glue';
 import { modelBundle, runtimeBundle } from '../lib/stt/model-catalog.ts';
 import { type ModelCacheStorage, PinnedModelStore } from '../lib/stt/model-store.ts';
@@ -71,7 +71,7 @@ const core = new SherpaWorkerCore({
     return { runtime, files: await storeOf(modelBundle(model)).read() };
   },
   runtime: {
-    load: async (_model, runtime, files): Promise<SherpaLoadedModel> => {
+    load: async (model, runtime, files): Promise<SherpaLoadedModel> => {
       const module = await initSherpa({
         wasmBinary: runtime,
         // Emscripten names the binary even when it is handed the bytes; nothing is fetched by that name.
@@ -81,6 +81,44 @@ const core = new SherpaWorkerCore({
       });
       module.FS_createPath('/', MODEL_DIR.slice(1), true, true);
       for (const [role, bytes] of files) module.FS_createDataFile(MODEL_DIR, role, bytes, true, false, true);
+      if (model.recognizer.kind !== 'online-transducer') {
+        const offline = new OfflineRecognizer(
+          {
+            featConfig: { sampleRate: SHERPA_SAMPLE_RATE, featureDim: 80 },
+            modelConfig: {
+              ...(model.recognizer.kind === 'offline-moonshine'
+                ? {
+                    moonshine: {
+                      preprocessor: path('preprocessor'),
+                      encoder: path('encoder'),
+                      uncachedDecoder: path('uncached-decoder'),
+                      cachedDecoder: path('cached-decoder'),
+                    },
+                  }
+                : { nemoCtc: { model: path('model') } }),
+              tokens: path('tokens'),
+              numThreads: 1,
+              provider: 'cpu',
+              debug: 0,
+            },
+            decodingMethod: 'greedy_search',
+          },
+          module,
+        );
+        return {
+          openStream: () => null,
+          transcribe: samples => {
+            const stream = offline.createStream();
+            try {
+              stream.acceptWaveform(SHERPA_SAMPLE_RATE, samples);
+              offline.decode(stream);
+              return String(offline.getResult(stream).text ?? '');
+            } finally {
+              stream.free();
+            }
+          },
+        };
+      }
       const recognizer = createOnlineRecognizer(module, {
         modelConfig: {
           transducer: { encoder: path('encoder'), decoder: path('decoder'), joiner: path('joiner') },

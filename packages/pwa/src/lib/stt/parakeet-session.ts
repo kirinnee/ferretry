@@ -29,13 +29,21 @@ const BYTES_PER_SAMPLE = 4;
 
 export interface ParakeetSessionPorts {
   readonly capture: AudioCapturePort;
-  readonly engine: Pick<ParakeetEngine, 'preload' | 'transcribe' | 'transcribeTimed'> &
-    Partial<Pick<ParakeetEngine, 'consumeLoadMs'>>;
+  /** `transcribeTimed` only for an engine that offers near-live words. */
+  readonly engine: Pick<ParakeetEngine, 'preload' | 'transcribe'> &
+    Partial<Pick<ParakeetEngine, 'transcribeTimed' | 'consumeLoadMs'>>;
   watchHidden(onHidden: () => void): () => void;
   setTimeout(callback: () => void, milliseconds: number): unknown;
   clearTimeout(handle: unknown): void;
   /** Milliseconds on a monotonic clock, for pacing near-live passes. */
   now(): number;
+  /**
+   * For another whole-take engine dictating through this session (a sherpa batch model,
+   * `sherpa-voice.ts`): what the timeline names its model, and how its failures read. Parakeet's own
+   * when omitted.
+   */
+  readonly model?: string;
+  failure?(error: unknown): BrowserRecognitionError;
 }
 
 /** What only an on-device session can do on top of the shared contract. */
@@ -45,6 +53,8 @@ export interface ParakeetSessionOptions extends BrowserRecognitionSessionOptions
   /** Committed and interim words as they change. Never the output seam: Stop's result is. */
   onLive?(state: NearLiveState): void;
 }
+
+type TimedTranscribe = NonNullable<ParakeetSessionPorts['engine']['transcribeTimed']>;
 
 type State = 'opening' | 'recording' | 'finishing' | 'finished' | 'failed' | 'cancelled';
 
@@ -106,9 +116,11 @@ export class ParakeetRecognitionSession implements BrowserRecognitionSessionLike
         } catch {
           // The same failure reaches `finish`, where the reader sees it.
         }
-        if (this.#options.liveWords === true) this.#startLive(opened);
+        const timed = this.#ports.engine.transcribeTimed;
+        if (this.#options.liveWords === true && timed !== undefined)
+          this.#startLive(opened, (samples, passSignal) => timed.call(this.#ports.engine, samples, passSignal));
       },
-      (error: unknown) => this.#fail(parakeetFailure(error)),
+      (error: unknown) => this.#fail(this.#failure(error)),
     );
   }
 
@@ -127,7 +139,7 @@ export class ParakeetRecognitionSession implements BrowserRecognitionSessionLike
         return text;
       },
       (error: unknown) => {
-        const failure = parakeetFailure(error);
+        const failure = this.#failure(error);
         if (this.#state === 'finishing') {
           this.#state = failure.code === 'aborted' ? 'cancelled' : 'failed';
           this.#cleanup();
@@ -175,7 +187,7 @@ export class ParakeetRecognitionSession implements BrowserRecognitionSessionLike
         audioBytes,
         prepareMs,
         transcribeMs,
-        model: PARAKEET_VERSION_LABEL,
+        model: this.#ports.model ?? PARAKEET_VERSION_LABEL,
         ...(loadMs === undefined ? {} : { loadMs }),
       };
     };
@@ -199,13 +211,17 @@ export class ParakeetRecognitionSession implements BrowserRecognitionSessionLike
     }
   }
 
+  #failure(error: unknown): BrowserRecognitionError {
+    return (this.#ports.failure ?? parakeetFailure)(error);
+  }
+
   /** Near-live passes over the open recording, until Stop or cancel. */
-  #startLive(recording: AudioRecording): void {
+  #startLive(recording: AudioRecording, transcribeTimed: TimedTranscribe): void {
     const { engine } = this.#ports;
     const signal = this.#abort.signal;
     const live = new NearLiveTranscriber({
       peek: () => recording.peek(),
-      transcribeTimed: (samples, passSignal) => engine.transcribeTimed(samples, passSignal),
+      transcribeTimed,
       // The final pass answers to the session's own cancel, like the single pass it replaces.
       transcribe: samples => engine.transcribe(samples, signal),
       now: () => this.#ports.now(),
