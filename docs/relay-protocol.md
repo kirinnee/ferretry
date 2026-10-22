@@ -2704,7 +2704,8 @@ and every session on it meets the same guard. Both bodies are strict objects who
 KiB (`packages/protocol/src/lib/webrtc.ts`). Its refusals are ordinary answers a device reads and
 states, each with a machine code: `404` from a daemon older than this carrier ("this daemon does not
 offer WebRTC yet"); `503 webrtc_disabled` when the operator switched the carrier off and `503
-webrtc_unavailable` when the daemon's engine did not pass its self-test, each with the sentence; `429
+webrtc_unavailable` when the daemon's engine would not start for this offer (the library would not load, or
+a hand-back of its threads did not finish), each with the sentence; `429
 webrtc_busy` at the peer bound below; `400 webrtc_offer_invalid` for an offer the engine could not
 use. None demotes the session the request arrived on.
 
@@ -2867,6 +2868,25 @@ and a remote-browser view (§14) needs more than 7.5 MB/s. Its cost is that it i
 - **It is loaded lazily and fails soft.** A host where the addon will not load starts normally,
   `--check` says the engine is unavailable and why, and devices reach the daemon directly or through
   the relay as before.
+- **It runs only while a peer needs it.** The serving daemon asks the engine nothing at boot: the
+  first offer loads the library and starts its threads, and once the last peer has ended and no offer
+  has arrived for 30 s (`WEBRTC_ENGINE_LINGER_MS`) the carrier hands it back and the library stops
+  them (its `cleanup`). That is the difference between one thread per core plus two SCTP threads for
+  the life of every daemon (33 + 2 on a 32-core host, measured) and none on a daemon no phone is using;
+  it also takes the library load off the boot (0.4 s on a Mac). A start costs the first offer about
+  20 ms on Linux (answered in 24 ms p50 against 6 ms with the engine already running, measured by
+  `scripts/local/bench-daemon-shutdown.ts --peer`), plus the library load on a Mac — and the
+  browser's 8-second deadline is counted from the answer, so none of it is spent from that budget.
+  The hand-back runs only when no peer the engine made is open, because the library's cleanup closes
+  every peer it holds; it blocks the daemon's thread while the library's threads join (2–8 ms
+  measured), bounded by the library at 10 s. A cleanup that hit that bound is still running on the
+  library's own thread holding the lock every new peer takes, so the engine is then marked broken
+  and every later offer is refused `webrtc_unavailable` until a restart, rather than letting the next
+  peer block the daemon for good. A stopping daemon closes its peers and does NOT hand the engine
+  back: the threads end with the process, and the one call that waits on the library has nothing to
+  give a stop. Proved by `packages/daemon/tests/integration/runtime/shutdown-time.test.ts` (a real
+  `fyd`: no library thread before an offer, a clean SIGTERM within 5 s idle and with a phone connected)
+  and the engine's own suite (the threads gone after a release, a second answer starting them again).
 - **Licence.** node-datachannel and libdatachannel are MPL-2.0: file-level copyleft that permits
   distributing them, unmodified, inside a differently licensed binary. Their source is public.
 

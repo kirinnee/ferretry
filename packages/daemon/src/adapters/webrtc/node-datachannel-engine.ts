@@ -12,6 +12,10 @@
  * its module body, and an import that throws at the top of the composition root is a daemon that
  * does not start — on a machine where the only thing missing was a peer-to-peer carrier the relay
  * already stands in for. Loading here turns that into the `unavailable` sentence instead.
+ *
+ * AND FIRST USE IS AN OFFER, NOT THE BOOT. A serving daemon asks this engine nothing until a phone offers
+ * (`fyd --check` still runs the self-test), and hands the library's threads back through `release` once
+ * no peer needs them — see `WebRtcPeerEngine` for what holding them cost.
  */
 
 import { WEBRTC_GATHER_CAP_MS, WEBRTC_GATHER_REFLEXIVE_GRACE_MS } from '@ferretry/protocol';
@@ -22,6 +26,7 @@ import {
   type WebRtcChannelPort,
   type WebRtcEnginePort,
   type WebRtcEngineReport,
+  WebRtcEngineUnavailable,
   WebRtcOfferRefused,
   type WebRtcPeerEngine,
   type WebRtcPeerPort,
@@ -60,6 +65,8 @@ export interface NodeDataChannelModule {
     config: { readonly iceServers: string[]; readonly bindAddress?: string },
   ) => EnginePeerConnection;
   getLibraryVersion(): string;
+  /** Stops the library's threads once no peer holds them; throws when they did not stop within its own bound. */
+  cleanup(): void;
 }
 
 export type NodeDataChannelLoader = () => Promise<NodeDataChannelModule>;
@@ -135,7 +142,7 @@ function channelPort(channel: EngineDataChannel): WebRtcChannelPort {
 
 /** A peer connection as the carrier drives it. `failed` and `closed` are its end; `disconnected` is
  *  not — ICE may recover it, and the session's own keepalive decides when a silent path is dead. */
-function peerPort(peer: EnginePeerConnection): WebRtcPeerPort {
+function peerPort(peer: EnginePeerConnection, close: () => void): WebRtcPeerPort {
   return {
     onChannel: listener => peer.onDataChannel(channel => listener(channelPort(channel))),
     onClosed: listener => {
@@ -144,14 +151,13 @@ function peerPort(peer: EnginePeerConnection): WebRtcPeerPort {
         if (state === 'failed' || state === 'closed') ended();
       });
     },
-    close: () => {
-      try {
-        peer.close();
-      } catch {
-        // Already gone on the native side; there is nothing left to release.
-      }
-    },
+    close,
   };
+}
+
+/** The sentence for a library that would not load, on this platform, with the first line it threw. */
+function loadFailure(error: unknown): string {
+  return `the WebRTC engine could not be loaded on ${process.platform}-${process.arch} (${firstLine(error)})`;
 }
 
 export class NodeDataChannelEngine implements WebRtcEnginePort, WebRtcPeerEngine {
@@ -161,6 +167,12 @@ export class NodeDataChannelEngine implements WebRtcEnginePort, WebRtcPeerEngine
   private readonly gatherCapMs: number;
   private readonly reflexiveGraceMs: number;
   #loaded: Promise<NodeDataChannelModule> | undefined;
+  /** The library once it has loaded — what {@link release} needs synchronously. */
+  #ready: NodeDataChannelModule | undefined;
+  /** Peers this engine made and has not closed: while any is open the library's threads are in use. */
+  #live = 0;
+  /** Why no further peer may be made, once a release did not finish. */
+  #broken: string | undefined;
 
   constructor(options: NodeDataChannelEngineOptions = {}) {
     this.load = options.load ?? loadNodeDataChannel;
@@ -172,11 +184,35 @@ export class NodeDataChannelEngine implements WebRtcEnginePort, WebRtcPeerEngine
 
   /** The library, loaded once. A failed load is not cached, so the next ask tries again. */
   #module(): Promise<NodeDataChannelModule> {
-    this.#loaded ??= this.load().catch(error => {
-      this.#loaded = undefined;
-      throw error;
-    });
+    this.#loaded ??= this.load().then(
+      module => {
+        this.#ready = module;
+        return module;
+      },
+      error => {
+        this.#loaded = undefined;
+        throw error;
+      },
+    );
     return this.#loaded;
+  }
+
+  /**
+   * A peer this engine made, counted until it is closed, and the one close that uncounts it.
+   *
+   * The count is what makes {@link release} safe to call at any moment: the library's cleanup closes
+   * EVERY peer it holds, so a release that ran under an open one would cut a phone off mid-session.
+   */
+  #counted(peer: EnginePeerConnection): () => void {
+    this.#live += 1;
+    return once(() => {
+      this.#live -= 1;
+      try {
+        peer.close();
+      } catch {
+        // Already gone on the native side; there is nothing left to release.
+      }
+    });
   }
 
   /**
@@ -186,10 +222,20 @@ export class NodeDataChannelEngine implements WebRtcEnginePort, WebRtcPeerEngine
    * background; this waits for the FIRST of gathering `complete`, a short grace after the first
    * server-reflexive candidate, or the cap, and then reads the description as it stands — so the answer
    * carries the host candidates and every public address found by then.
+   *
+   * The first answer is what loads the library and starts its threads (the boot does neither), and so is
+   * the first after a {@link release}; each start is tens of milliseconds, measured in §16.
    */
   async answer(offerSdp: string, iceServers: readonly string[]): Promise<WebRtcAnswer> {
-    const module = await this.#module();
+    if (this.#broken !== undefined) throw new WebRtcEngineUnavailable(this.#broken);
+    let module: NodeDataChannelModule;
+    try {
+      module = await this.#module();
+    } catch (error) {
+      throw new WebRtcEngineUnavailable(loadFailure(error));
+    }
     const peer = new module.PeerConnection('fy-webrtc-peer', { iceServers: [...iceServers] });
+    const close = this.#counted(peer);
     const gathered = new Promise<void>(resolve => {
       const cap = setTimeout(resolve, this.gatherCapMs);
       let grace: ReturnType<typeof setTimeout> | undefined;
@@ -208,16 +254,37 @@ export class NodeDataChannelEngine implements WebRtcEnginePort, WebRtcPeerEngine
     try {
       peer.setRemoteDescription(offerSdp, 'offer' as never);
     } catch (error) {
-      peerPort(peer).close();
+      close();
       throw new WebRtcOfferRefused(firstLine(error));
     }
     await gathered;
     const local = peer.localDescription();
     if (local === null || local.type !== 'answer') {
-      peerPort(peer).close();
+      close();
       throw new WebRtcOfferRefused('the engine produced no answer for that offer');
     }
-    return { sdp: local.sdp, peer: peerPort(peer) };
+    return { sdp: local.sdp, peer: peerPort(peer, close) };
+  }
+
+  /**
+   * Stop the library's threads — one worker per core, the SCTP timer and its poller — when no peer this
+   * engine made is open; the next {@link answer} starts them again.
+   *
+   * The library's cleanup BLOCKS this thread until its threads have joined: measured at 2–8 ms with no
+   * peer open, and bounded by the library at 10 s, after which it throws "cleanup timeout (possible
+   * deadlock)". A cleanup that timed out is still running on the library's own thread holding the lock
+   * every new peer takes, so a further peer would block this thread for good: the engine is marked broken
+   * instead, and every later offer is refused `webrtc_unavailable` with the sentence below — the relay
+   * still carries every session, and a restart brings peer-to-peer back.
+   */
+  release(): void {
+    const module = this.#ready;
+    if (module === undefined || this.#live > 0 || this.#broken !== undefined) return;
+    try {
+      module.cleanup();
+    } catch (error) {
+      this.#broken = `the WebRTC engine did not stop cleanly (${firstLine(error)}); restart the daemon to use peer-to-peer connections again`;
+    }
   }
 
   async selfTest(): Promise<WebRtcEngineReport> {
@@ -225,10 +292,7 @@ export class NodeDataChannelEngine implements WebRtcEnginePort, WebRtcPeerEngine
     try {
       module = await this.#module();
     } catch (error) {
-      return {
-        kind: 'unavailable',
-        reason: `the WebRTC engine could not be loaded on ${process.platform}-${process.arch} (${firstLine(error)})`,
-      };
+      return { kind: 'unavailable', reason: loadFailure(error) };
     }
     const started = this.now();
     const echoed = await this.#echoBetweenLoopbackPeers(module);
@@ -248,24 +312,16 @@ export class NodeDataChannelEngine implements WebRtcEnginePort, WebRtcPeerEngine
    */
   #echoBetweenLoopbackPeers(module: NodeDataChannelModule): Promise<true | string> {
     const config = { iceServers: [], bindAddress: '127.0.0.1' };
-    let offerer: EnginePeerConnection | undefined;
-    let answerer: EnginePeerConnection | undefined;
-    const closeAll = (): void => {
-      for (const peer of [offerer, answerer]) {
-        try {
-          peer?.close();
-        } catch {
-          // A peer that cannot close has nothing left to report; the verdict is already decided.
-        }
-      }
-    };
+    // Each peer's close is recorded the moment the peer exists, so one that is followed by a refused
+    // second is still closed rather than left holding a socket — and the engine — for the life of the process.
+    const closes: Array<() => void> = [];
     return new Promise<true | string>(resolve => {
       let settled = false;
       const settle = (verdict: true | string): void => {
         if (settled) return;
         settled = true;
         clearTimeout(timer);
-        closeAll();
+        for (const close of closes) close();
         resolve(verdict);
       };
       const timer = setTimeout(
@@ -273,12 +329,10 @@ export class NodeDataChannelEngine implements WebRtcEnginePort, WebRtcPeerEngine
         this.timeoutMs,
       );
       try {
-        // Each peer is recorded the moment it exists, so one that is followed by a refused second is
-        // still closed rather than left holding a socket for the life of the process.
         const local = new module.PeerConnection('fy-self-test-offer', config);
-        offerer = local;
+        closes.push(this.#counted(local));
         const remote = new module.PeerConnection('fy-self-test-answer', config);
-        answerer = remote;
+        closes.push(this.#counted(remote));
         local.onLocalDescription((sdp, type) => remote.setRemoteDescription(sdp, type as never));
         remote.onLocalDescription((sdp, type) => local.setRemoteDescription(sdp, type as never));
         local.onLocalCandidate((candidate, mid) => remote.addRemoteCandidate(candidate, mid));
