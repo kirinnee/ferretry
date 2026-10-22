@@ -17,6 +17,7 @@ import {
   StorageTranscriptClaims,
   StorageTranscriptProvenanceStore,
   SystemClock,
+  storedSessionStart,
   storedTranscriptProvenance,
 } from '../../../../src/adapters/index.ts';
 import { parseSessionId, selectCodexRollout } from '../../../../src/lib/index.ts';
@@ -353,5 +354,19 @@ describe('transcript provenance storage', () => {
     should(stored).be.undefined();
     should(claimed).be.empty();
     await storage.close();
+  });
+});
+
+describe('storedSessionStart', () => {
+  it('should prefer the state start, fall back to the configuration, and trust neither unparsed', () => {
+    // Arrange
+    const state = { startedAt: '2026-10-20T06:00:00+02:00' };
+    const config = { createdAt: '2026-10-19T00:00:00.000Z' };
+
+    // Act + Assert
+    should(storedSessionStart(state, config)).equal('2026-10-20T06:00:00+02:00');
+    should(storedSessionStart({}, config)).equal('2026-10-19T00:00:00.000Z');
+    should(storedSessionStart({ startedAt: 'yesterday' }, config)).equal('2026-10-19T00:00:00.000Z');
+    should(storedSessionStart(undefined, ['not', 'a', 'document'])).be.undefined();
   });
 });

@@ -3,6 +3,8 @@ import should from 'should';
 import {
   EXIT_ALREADY_RUNNING,
   InvalidUnitValueError,
+  LAUNCHD_PROCESS_TYPE,
+  launchAgentProcessType,
   launchAgentStateHome,
   renderLaunchAgentPlist,
   renderSystemdUnit,
@@ -185,6 +187,27 @@ describe('launch agent rendering', () => {
 
     // Assert
     should(actual).containEql('<key>AbandonProcessGroup</key><true/>');
+  });
+
+  it('should declare the Interactive ProcessType, because the default has macOS throttle the whole fleet', () => {
+    // Act
+    const actual = renderLaunchAgentPlist({ ...spec, label: 'com.ferretry.fyd' });
+
+    // Assert
+    should(actual).containEql('<key>ProcessType</key><string>Interactive</string>');
+    should(launchAgentProcessType(actual)).equal(LAUNCHD_PROCESS_TYPE);
+  });
+
+  it('should read no ProcessType from a plist written before it was declared', () => {
+    // Arrange — what every release before this one wrote.
+    const old = renderLaunchAgentPlist({ ...spec, label: 'com.ferretry.fyd' }).replace(
+      /<key>ProcessType<\/key><string>Interactive<\/string>\n/u,
+      '',
+    );
+
+    // Act + Assert
+    should(launchAgentProcessType(old)).be.undefined();
+    should(launchAgentProcessType('<key>ProcessType</key> <string>Background</string>')).equal('Background');
   });
 
   it('should throttle respawns, because launchd has no RestartPreventExitStatus', () => {

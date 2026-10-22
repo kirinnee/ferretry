@@ -337,6 +337,11 @@ export interface DaemonSupervisorReport {
   readonly pid?: number | undefined;
   /** Whatever the manager said, for a human reading a surprising verdict. */
   readonly detail?: string | undefined;
+  /**
+   * launchd only, and only when the plist is on disk: the `ProcessType` it declares, `null` when it
+   * declares none. `null` is the throttled default — see `LAUNCHD_PROCESS_TYPE`.
+   */
+  readonly processType?: string | null | undefined;
 }
 
 /** How a stop is pressed: politely first, then harder. */
