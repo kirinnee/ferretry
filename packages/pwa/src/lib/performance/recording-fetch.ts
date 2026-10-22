@@ -83,3 +83,17 @@ export const recordingFetch =
     );
     return response;
   };
+
+/**
+ * `open`, with every live stream it opens (an event feed, a terminal) counted on `recorder` by route
+ * pattern. Without a recorder it is `open` itself.
+ */
+export const recordingStreams =
+  <Daemon, Request extends { readonly path: string }, Opened>(
+    open: (daemon: Daemon, request: Request) => Promise<Opened>,
+    recorder: PerformanceRecorder | undefined,
+  ) =>
+  async (daemon: Daemon, request: Request): Promise<Opened> => {
+    recorder?.recordStream(routePattern('STREAM', request.path));
+    return await open(daemon, request);
+  };

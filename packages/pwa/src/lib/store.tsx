@@ -61,8 +61,7 @@ import { type PairingLegFailure, PairingUnreachableError } from './pairing-unrea
 import type { CredentialsPort } from './passkeys.ts';
 import { browserLongTaskObserver, type LongTaskObserverPort, observeLongTasks } from './performance/main-thread.ts';
 import { PerformanceRecorder } from './performance/recorder.ts';
-import { recordingFetch } from './performance/recording-fetch.ts';
-import { routePattern } from './performance/route-pattern.ts';
+import { recordingFetch, recordingStreams } from './performance/recording-fetch.ts';
 import { DaemonPinClient } from './pin-client.ts';
 import { browserPresenceEnvironment, PresenceTracker } from './presence.ts';
 import { DaemonProjectsStore, daemonProjectsPort } from './projects-store.ts';
@@ -693,10 +692,10 @@ export async function createAppStore(options: CreateAppStoreOptions = {}): Promi
       (async daemon =>
         await daemonApiClient(daemon, {
           transport: new DaemonHttpTransport(daemon, carried),
-          eventTransport: new DaemonEventTransport(daemon, async (paired, request) => {
-            performanceRecorder.recordStream(routePattern('STREAM', request.path));
-            return await carrier.openStream(paired, request);
-          }),
+          eventTransport: new DaemonEventTransport(
+            daemon,
+            recordingStreams(async (paired, request) => await carrier.openStream(paired, request), performanceRecorder),
+          ),
         })),
   );
   const sessionCache = new SessionCache(
@@ -1244,10 +1243,10 @@ export function useDaemonStreamOpener(): DaemonStreamOpener {
         ? async () => {
             throw new Error('no paired carrier is available to open this stream');
           }
-        : async (daemon, request) => {
-            store.performance?.recordStream(routePattern('STREAM', request.path));
-            return await store.carrier.openStream(daemon, request);
-          },
+        : recordingStreams(
+            async (daemon, request) => await store.carrier.openStream(daemon, request),
+            store.performance,
+          ),
     [store],
   );
 }

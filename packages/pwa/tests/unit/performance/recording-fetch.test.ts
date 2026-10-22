@@ -1,7 +1,7 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
 import { PerformanceRecorder } from '../../../src/lib/performance/recorder.ts';
-import { bodyBytes, recordingFetch } from '../../../src/lib/performance/recording-fetch.ts';
+import { bodyBytes, recordingFetch, recordingStreams } from '../../../src/lib/performance/recording-fetch.ts';
 
 const handClock = () => {
   let time = 0;
@@ -136,5 +136,30 @@ describe('bodyBytes', () => {
 
     // Assert — `a` 1, `€` 3, `😀` 4; `q=é` is `q=%C3%A9` once serialised.
     should(actual).eql([0, 0, 8, 8, 3, 5, 8, 0]);
+  });
+});
+
+describe('recordingStreams', () => {
+  it('should count each stream it opens by route, and open it the same with no recorder', async () => {
+    // Arrange
+    const clock = handClock();
+    const recorder = new PerformanceRecorder(clock);
+    const opened: string[] = [];
+    const open = async (daemon: string, request: { readonly path: string }): Promise<string> => {
+      opened.push(`${daemon} ${request.path}`);
+      return 'session';
+    };
+
+    // Act
+    const recorded = await recordingStreams(open, recorder)('alpha', {
+      path: '/v1/sessions/fy_s_1/terminals/dev/attach',
+    });
+    const plain = await recordingStreams(open, undefined)('alpha', { path: '/v1/events' });
+    clock.advance(60_000);
+
+    // Assert
+    should([recorded, plain]).eql(['session', 'session']);
+    should(opened).eql(['alpha /v1/sessions/fy_s_1/terminals/dev/attach', 'alpha /v1/events']);
+    should(recorder.report(60_000).streams).eql([{ route: 'STREAM /v1/sessions/:id/terminals/:id/attach', opened: 1 }]);
   });
 });
