@@ -55,6 +55,13 @@ import {
 } from '../lib/stt/browser-recognition.ts';
 import { DEVICE_KEYS_PLACE, requestDeviceCleanup } from '../lib/stt/device-cleanup.ts';
 import type { DictationDebugLog } from '../lib/stt/dictation-debug.ts';
+import {
+  type CleanupTiming,
+  cleanupDetailsOf,
+  type DictationTimeline,
+  DictationTimelineRecorder,
+  withInsertion,
+} from '../lib/stt/dictation-timeline.ts';
 import { insertTranscript, readSelection, type SelectionLike } from '../lib/stt/draft.ts';
 import { enhance } from '../lib/stt/enhancement.ts';
 import {
@@ -74,8 +81,8 @@ import {
 } from '../lib/stt/remote-enhancement.ts';
 import type { DeviceSpeedupKeys } from '../lib/stt/speedup-keys.ts';
 import { isRemoteEnhancementProvider, type SttSettings, sttDictionary } from '../lib/stt/stt-settings.ts';
-import { DEFAULT_VOICE_CLEANUP, type VoiceCleanup } from '../lib/stt/voice-cleanup.ts';
 import type { TranscriptionLog } from '../lib/stt/transcription-log.ts';
+import { DEFAULT_VOICE_CLEANUP, type VoiceCleanup } from '../lib/stt/voice-cleanup.ts';
 import { verifyWordOnly } from '../lib/stt/word-only-verifier.ts';
 import { readUserMessage } from '../lib/user-message.ts';
 
@@ -119,7 +126,20 @@ export interface DictationReview {
 interface CleanupNotes {
   trace?: CleanupTrace;
   prompt?: VoiceCleanup['style'];
+  /** What the call says about itself for the timeline; its wall time is the recorder's. */
+  cleanup?: Omit<CleanupTiming, 'totalMs'>;
 }
+
+/** The timeline of the take now in review, kept so insertion can finish it. */
+interface PendingTimeline {
+  readonly timeline: DictationTimeline;
+  readonly logId?: string;
+  readonly debugId?: string;
+  /** When the review opened, on the monotonic clock. */
+  readonly readyAt: number;
+}
+
+const defaultMonotonic = (): number => globalThis.performance.now();
 
 /**
  * How many events to ask for when mining vocabulary. Larger than the 5–10
@@ -258,6 +278,8 @@ export interface UseDictationOptions {
   readonly sessionLabel?: string;
   /** Wall clock for the transcription log and debug timings; a suite supplies its own. */
   readonly now?: () => number;
+  /** Monotonic clock (`performance.now`) for stage timings; a suite supplies a fake one. */
+  readonly monotonic?: () => number;
   /**
    * The session's conversation as the page already holds it, oldest first. When given, clean-up reads
    * this instead of fetching history from the daemon.
@@ -351,6 +373,7 @@ export function useDictation(options: UseDictationOptions): DictationHandle {
   const reviewIdRef = useRef(0);
   /** The transcription-log entry for the take now in review, until it is inserted or discarded. */
   const logEntryRef = useRef<{ readonly id: string; readonly cleaned: string } | null>(null);
+  const pendingTimelineRef = useRef<PendingTimeline | null>(null);
   /** When the take being recorded began, by generation, so a restarting mobile engine cannot move it. */
   const takeStartRef = useRef<{ readonly token: number; readonly at: number } | null>(null);
   const [live, setLive] = useState<LiveWords>(NO_LIVE_WORDS);
@@ -379,13 +402,31 @@ export function useDictation(options: UseDictationOptions): DictationHandle {
   const isCurrent = useCallback((token: number): boolean => generationRef.current === token, []);
 
   /** Settle the take in review in the transcription log: what became of its words. */
-  const settleLog = useCallback((outcome: 'inserted' | 'discarded', inserted?: string): void => {
-    const entry = logEntryRef.current;
-    logEntryRef.current = null;
-    if (entry === null) return;
-    const changed = inserted !== undefined && inserted.trim() !== entry.cleaned;
-    transcriptionLogRef.current?.update(entry.id, { outcome, ...(changed ? { inserted: inserted.trim() } : {}) });
-  }, []);
+  const settleLog = useCallback(
+    (
+      outcome: 'inserted' | 'discarded',
+      inserted?: string,
+      insertion?: { insertMs: number; reviewMs: number },
+    ): void => {
+      const entry = logEntryRef.current;
+      const pending = pendingTimelineRef.current;
+      logEntryRef.current = null;
+      pendingTimelineRef.current = null;
+      const timeline =
+        pending === null || insertion === undefined ? undefined : withInsertion(pending.timeline, insertion);
+      if (pending?.debugId !== undefined && timeline !== undefined) {
+        dictationDebugRef.current?.annotate(pending.debugId, timeline);
+      }
+      if (entry === null) return;
+      const changed = inserted !== undefined && inserted.trim() !== entry.cleaned;
+      transcriptionLogRef.current?.update(entry.id, {
+        outcome,
+        ...(changed ? { inserted: inserted.trim() } : {}),
+        ...(timeline === undefined ? {} : { timeline }),
+      });
+    },
+    [],
+  );
 
   /** Close the meter-only microphone, if one is open, and drop the tap. */
   const releaseMeter = useCallback((): void => {
@@ -472,6 +513,7 @@ export function useDictation(options: UseDictationOptions): DictationHandle {
       token: number,
       onFailure: (failure: DictationError) => void,
       notes: CleanupNotes,
+      timeline: DictationTimelineRecorder,
     ): Promise<string> => {
       const current = optionsRef.current;
       const active = current.settings;
@@ -483,9 +525,10 @@ export function useDictation(options: UseDictationOptions): DictationHandle {
       if (remote && cleanup.style === 'off') return raw;
       // A hosted provider sees the conversation only when the machine says so, and only the latest messages.
       let context: string[] = [];
-      if (!remote) context = await readContext(true);
-      else if (cleanup.useConversation) {
-        context = (await readContext(false)).slice(-cleanup.conversationMessages);
+      if (!remote || cleanup.useConversation) {
+        context = await timeline.measure('context', async () =>
+          remote ? (await readContext(false)).slice(-cleanup.conversationMessages) : await readContext(true),
+        );
       }
       if (!isCurrent(token)) return raw;
 
@@ -493,27 +536,30 @@ export function useDictation(options: UseDictationOptions): DictationHandle {
         const provider = active.enhancementProvider;
         const debug = dictationDebugRef.current?.snapshot().enabled === true;
         notes.prompt = cleanup.style;
+        const route = { via: 'device' as 'device' | 'daemon' };
         try {
           const signal = controllerRef.current?.signal;
           const keys = speedupKeysRef.current;
-          // This device's own key first: straight to the provider, no daemon round trip.
-          const direct: RemoteEnhancementResult | undefined =
-            keys === null
-              ? undefined
-              : await requestDeviceCleanup(keys, {
-                  provider,
-                  model: active.enhancementModel,
-                  text: raw,
-                  dictionary: entries,
-                  context,
-                  userContext: active.userContext,
-                  cleanup,
-                  ...(debug ? { debug } : {}),
-                  ...(signal ? { signal } : {}),
-                });
-          const result =
-            direct ??
-            (await requestRemoteEnhancement(current.daemon, {
+          const result = await timeline.measure('cleanup', async () => {
+            // This device's own key first: straight to the provider, no daemon round trip.
+            const direct: RemoteEnhancementResult | undefined =
+              keys === null
+                ? undefined
+                : await requestDeviceCleanup(keys, {
+                    provider,
+                    model: active.enhancementModel,
+                    text: raw,
+                    dictionary: entries,
+                    context,
+                    userContext: active.userContext,
+                    cleanup,
+                    ...(current.monotonic ? { monotonic: current.monotonic } : {}),
+                    ...(debug ? { debug } : {}),
+                    ...(signal ? { signal } : {}),
+                  });
+            if (direct !== undefined) return direct;
+            route.via = 'daemon';
+            return await requestRemoteEnhancement(current.daemon, {
               provider,
               model: active.enhancementModel,
               text: raw,
@@ -523,8 +569,18 @@ export function useDictation(options: UseDictationOptions): DictationHandle {
               ...(debug ? { debug } : {}),
               ...(signal ? { signal } : {}),
               fetchImpl: current.enhancementFetch ?? routedFetchRef.current,
-            }));
+            });
+          });
           notes.trace = result.trace;
+          notes.cleanup = cleanupDetailsOf({
+            provider,
+            model: result.model ?? active.enhancementModel,
+            via: route.via,
+            outcome: result.kept === 'raw' ? 'kept_raw' : 'cleaned',
+            device: result.timing,
+            providerMs: result.latencyMs,
+            trace: result.trace,
+          });
           if (result.kept === 'raw') {
             // The daemon refused the model's reply and sent the words back: say why instead of looking like a no-op.
             onFailure({
@@ -535,7 +591,16 @@ export function useDictation(options: UseDictationOptions): DictationHandle {
           return result.text;
         } catch (failure) {
           if (!isCurrent(token) || controllerRef.current?.signal.aborted === true) return raw;
-          notes.trace = (failure as Partial<RemoteEnhancementError> | null)?.trace;
+          const failed = failure as Partial<RemoteEnhancementError> | null;
+          notes.trace = failed?.trace;
+          notes.cleanup = cleanupDetailsOf({
+            provider,
+            model: active.enhancementModel,
+            via: route.via,
+            outcome: 'failed',
+            device: failed?.timing,
+            trace: failed?.trace,
+          });
           const notConfigured = (failure as { code?: unknown } | null)?.code === 'not-configured';
           onFailure(
             notConfigured
@@ -546,10 +611,17 @@ export function useDictation(options: UseDictationOptions): DictationHandle {
         }
       }
 
-      const candidate = enhance({ text: raw, dictionary: entries, context, userContext: active.userContext });
-      if (candidate.text === raw) return raw;
-      // Enhancement can improve recognition, never cost the original words.
-      return verifyWordOnly(raw, candidate.text).ok ? candidate.text : raw;
+      return timeline.measureSync('cleanup', () => {
+        const candidate = enhance({ text: raw, dictionary: entries, context, userContext: active.userContext });
+        // Enhancement can improve recognition, never cost the original words.
+        const kept = candidate.text !== raw && verifyWordOnly(raw, candidate.text).ok ? candidate.text : raw;
+        notes.cleanup = cleanupDetailsOf({
+          provider: 'local',
+          via: 'local',
+          outcome: kept === raw ? 'kept_raw' : 'cleaned',
+        });
+        return kept;
+      });
     },
     [isCurrent, readContext],
   );
@@ -564,10 +636,12 @@ export function useDictation(options: UseDictationOptions): DictationHandle {
       setPhase('transcribing');
       const stoppedAt = (optionsRef.current.now ?? Date.now)();
       const take = takeStartRef.current?.token === token ? takeStartRef.current : null;
+      const monotonic = optionsRef.current.monotonic ?? defaultMonotonic;
+      const timeline = new DictationTimelineRecorder(monotonic);
 
       let enhancementFailure: DictationError | null = null;
       try {
-        const raw = await session.finish();
+        const raw = await timeline.measure('speech', () => session.finish());
         if (!isCurrent(token)) return;
         if (raw.trim().length === 0) {
           setLive(NO_LIVE_WORDS);
@@ -584,15 +658,23 @@ export function useDictation(options: UseDictationOptions): DictationHandle {
             enhancementFailure = failure;
           },
           notes,
+          timeline,
         );
         if (!isCurrent(token)) return;
         reviewIdRef.current += 1;
         const current = optionsRef.current;
         const clock = current.now ?? Date.now;
+        const built = timeline.build({
+          engine: engine === 'parakeet' ? 'parakeet' : 'web-speech',
+          provider: engine === 'parakeet' ? 'on-device' : 'browser',
+          ...(session.timings?.() === undefined ? {} : { session: session.timings() }),
+          ...(take === null ? {} : { audioMs: Math.max(0, stoppedAt - take.at) }),
+          ...(notes.cleanup === undefined ? {} : { cleanup: notes.cleanup }),
+        });
         const debugId =
           notes.trace === undefined
             ? undefined
-            : dictationDebugRef.current?.record(notes.trace, notes.trace.startedAt ?? clock());
+            : dictationDebugRef.current?.record(notes.trace, notes.trace.startedAt ?? clock(), built);
         const cleaned = text.trim();
         const changed = cleaned !== raw.trim();
         const logged = transcriptionLogRef.current?.add({
@@ -606,8 +688,15 @@ export function useDictation(options: UseDictationOptions): DictationHandle {
           ...(notes.prompt === undefined || notes.prompt === 'off' ? {} : { prompt: notes.prompt }),
           outcome: 'pending',
           ...(debugId === undefined ? {} : { debugId }),
+          timeline: built,
         });
         logEntryRef.current = logged === undefined ? null : { id: logged, cleaned: changed ? cleaned : raw.trim() };
+        pendingTimelineRef.current = {
+          timeline: built,
+          ...(logged === undefined ? {} : { logId: logged }),
+          ...(debugId === undefined ? {} : { debugId }),
+          readyAt: monotonic(),
+        };
         setReview({
           id: reviewIdRef.current,
           raw: raw.trim(),
@@ -783,8 +872,12 @@ export function useDictation(options: UseDictationOptions): DictationHandle {
   const insert = useCallback(
     (text: string) => {
       if (phase !== 'review') return;
+      const monotonic = optionsRef.current.monotonic ?? defaultMonotonic;
+      const began = monotonic();
       commit(text);
-      settleLog('inserted', text);
+      const insertMs = monotonic() - began;
+      const readyAt = pendingTimelineRef.current?.readyAt ?? began;
+      settleLog('inserted', text, { insertMs, reviewMs: began - readyAt });
       setReview(null);
       setPhase('idle');
     },

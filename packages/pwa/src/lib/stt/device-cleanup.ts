@@ -34,6 +34,7 @@ import {
   readCleanupReply,
   TRACE_REDACTED,
 } from '@ferretry/protocol';
+import { type CleanupCallDetail, tokensOf } from './dictation-timeline.ts';
 import type { DictionaryEntry } from './enhancement.ts';
 import { RemoteEnhancementError, type RemoteEnhancementResult } from './remote-enhancement.ts';
 import type { DeviceSpeedupKeys, SpeedupKeyProvider, SpeedupKeySend } from './speedup-keys.ts';
@@ -57,7 +58,25 @@ export interface DeviceCleanupInput {
   readonly debug?: boolean;
   /** Wall clock in epoch milliseconds, for the record's timings; a suite supplies its own. */
   readonly now?: () => number;
+  /** Monotonic milliseconds, for how long the call took; `performance.now()` when omitted. */
+  readonly monotonic?: () => number;
 }
+
+/** How one attempt went, measured on the monotonic clock whether or not a debug record was asked for. */
+interface AttemptTimer {
+  readonly startedAt: number;
+  firstByteMs?: number;
+  totalMs?: number;
+  tokens?: ReturnType<typeof tokensOf>;
+}
+
+/** The attempts one call made, and the clock they are timed by. */
+interface CallTimer {
+  readonly now: () => number;
+  readonly attempts: AttemptTimer[];
+}
+
+const monotonicNow = (): number => globalThis.performance.now();
 
 /** The most of a provider's error body a record keeps. */
 const ERROR_BODY_CAP = 8_000;
@@ -140,15 +159,20 @@ async function attempt(
   signal: AbortSignal | undefined,
   timeoutMs: number,
   sink: TraceSink | undefined,
+  calls: CallTimer,
 ): Promise<RemoteEnhancementResult | undefined> {
   const probe: AttemptProbe | undefined = sink && { now: sink.now, startedAt: sink.now() };
+  const timer: AttemptTimer = { startedAt: calls.now() };
+  calls.attempts.push(timer);
   try {
-    const result = await run(keys, provider, request, signal, timeoutMs, probe);
+    const result = await run(keys, provider, request, signal, timeoutMs, probe, calls.now, timer);
     if (sink && probe && result !== undefined) record(sink, provider, request, probe);
     return result;
   } catch (failure) {
     if (sink && probe) record(sink, provider, request, probe, (failure as Error).message);
     throw failure;
+  } finally {
+    timer.totalMs = Math.max(0, calls.now() - timer.startedAt);
   }
 }
 
@@ -188,6 +212,8 @@ async function run(
   signal: AbortSignal | undefined,
   timeoutMs: number,
   probe: AttemptProbe | undefined,
+  now: () => number,
+  clock: AttemptTimer,
 ): Promise<RemoteEnhancementResult | undefined> {
   const controller = new AbortController();
   let timedOut = false;
@@ -216,6 +242,7 @@ async function run(
         signal: controller.signal,
       });
       if (sent.kind !== 'response') return sent.kind === 'missing' ? undefined : unreadableKey(provider);
+      clock.firstByteMs = Math.max(0, now() - clock.startedAt);
       if (probe) {
         probe.firstByteMs = Math.max(0, probe.now() - probe.startedAt);
         probe.status = sent.response.status;
@@ -243,6 +270,7 @@ async function run(
     try {
       if (body.length > CLEANUP_LIMITS.maxResponseBytes) throw new Error('oversized');
       payload = JSON.parse(body);
+      clock.tokens = tokensOf(payload);
       if (probe) probe.payload = payload;
     } catch {
       if (probe) probe.errorBody = body.slice(0, ERROR_BODY_CAP);
@@ -307,16 +335,36 @@ export async function requestDeviceCleanup(
   const timeoutMs = Math.max(1, input.timeoutMs ?? DEFAULT_CLEANUP_TIMEOUT_MS);
   const sink: TraceSink | undefined = input.debug === true ? { attempts: [], now: input.now ?? Date.now } : undefined;
   const startedAt = sink?.now() ?? 0;
+  const calls: CallTimer = { now: input.monotonic ?? monotonicNow, attempts: [] };
+  const callStartedAt = calls.now();
   try {
-    const result = await attemptWithRetry(keys, input.provider, prepared, input.signal, timeoutMs, sink);
-    if (sink === undefined || result === undefined) return result;
-    return { ...result, trace: traceOf(sink, input.provider, prepared.model, startedAt, result) };
+    const result = await attemptWithRetry(keys, input.provider, prepared, input.signal, timeoutMs, sink, calls);
+    if (result === undefined) return result;
+    const timed = { ...result, timing: timingOf(calls, callStartedAt) };
+    if (sink === undefined) return timed;
+    return { ...timed, trace: traceOf(sink, input.provider, prepared.model, startedAt, result) };
   } catch (failure) {
-    if (sink !== undefined && failure instanceof RemoteEnhancementError && sink.attempts.length > 0) {
-      failure.trace = traceOf(sink, input.provider, prepared.model, startedAt, failure);
+    if (failure instanceof RemoteEnhancementError) {
+      failure.timing = timingOf(calls, callStartedAt);
+      if (sink !== undefined && sink.attempts.length > 0) {
+        failure.trace = traceOf(sink, input.provider, prepared.model, startedAt, failure);
+      }
     }
     throw failure;
   }
+}
+
+/** The call as a whole: how long, when the last attempt's first byte came, how many attempts, the tokens. */
+function timingOf(calls: CallTimer, startedAt: number): CleanupCallDetail {
+  const last = calls.attempts.at(-1);
+  const retried = calls.attempts.length > 1;
+  return {
+    totalMs: Math.max(0, calls.now() - startedAt),
+    ...(last?.firstByteMs === undefined ? {} : { firstByteMs: last.firstByteMs }),
+    attempts: Math.min(2, Math.max(1, calls.attempts.length)),
+    ...(retried ? { retried: 'without-context' as const } : {}),
+    ...(last?.tokens ?? {}),
+  };
 }
 
 /** The first attempt, and — when the provider found the request too big — one more without the conversation. */
@@ -327,13 +375,14 @@ async function attemptWithRetry(
   signal: AbortSignal | undefined,
   timeoutMs: number,
   sink: TraceSink | undefined,
+  calls: CallTimer,
 ): Promise<RemoteEnhancementResult | undefined> {
   try {
-    return await attempt(keys, provider, prepared, signal, timeoutMs, sink);
+    return await attempt(keys, provider, prepared, signal, timeoutMs, sink, calls);
   } catch (failure) {
     const sized = failure instanceof RemoteEnhancementError && isContextSizedStatus(failure.status);
     if (!sized || prepared.context.length === 0) throw failure;
-    return await attempt(keys, provider, { ...prepared, context: [] }, signal, timeoutMs, sink);
+    return await attempt(keys, provider, { ...prepared, context: [] }, signal, timeoutMs, sink, calls);
   }
 }
 
