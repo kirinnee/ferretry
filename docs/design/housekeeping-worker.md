@@ -1,6 +1,6 @@
 # Housekeeping worker — stage 4 of the event-driven daemon
 
-Status: **proposed** · Date: 2026-10-22 · Parent: [event-driven-daemon.md](event-driven-daemon.md) (stage 4) ·
+Status: **in progress** — PR 0 and PR 1 merged, PR 2 built (§4.1), PR 3 and PR 4 proposed · Date: 2026-10-22 · Parent: [event-driven-daemon.md](event-driven-daemon.md) (stage 4) ·
 Sibling: [session-workers.md](session-workers.md) (stage 3, PR #701) · Owner directive, verbatim: _"use things
 like inotify, 1 thread per agent, fan into the daemon (daemon should just communicate)"_. Lead's ask: _"fleet
 refresh must be event-driven (only when runtime homes/config actually change) and run on the housekeeping
@@ -501,6 +501,81 @@ PR 2 therefore extends the fixture (below) before claiming numbers.
   uses hub subscriptions on attributed rollouts.
 - PR 4's reaper item is dropped if 3d has landed.
 - Stage 3 §8 Q3 (transcript resolution) and Q4 (one fleet `ps`) both land in PR 4.
+
+### 4.1 PR 2 as built
+
+What shipped, where it differs from the plan above, and what it measured.
+
+**The pieces**
+
+- `bin/housekeeping.worker.ts` — the worker program. It keeps nothing between jobs. It is told its
+  `settings` (platform, keychain account, default Claude home, fleet root, probe URLs) once per thread.
+- `src/adapters/runtime/bundled-worker-host.ts` — `BundledWorkerHost`, extracted from
+  `WorkerTranscriptFolds`. It handles the lazy start, a greeting per thread, the per-request timeout, the idle
+  end (read when the thread goes idle), stale-thread messages, back-off from 1 s doubling to 60 s, and
+  retirement after 5 failures in 10 minutes. The analytics folds use it with no restart policy, so their
+  behaviour is unchanged.
+- `src/adapters/housekeeping/job-runner.ts` — `runHousekeepingJob` and `hostHousekeepingPorts`. This is the
+  one job code, run by the worker and, as the fallback, by the main thread (`InlineHousekeepingJobs`).
+- `src/adapters/housekeeping/worker-housekeeping.ts` — `WorkerHousekeepingJobs`. Jobs go to the worker. While
+  it backs off, or once it is retired, they run inline. A job that was in flight when the thread failed is
+  refused, and the status service reads that as an unreadable store or an inconclusive check, as before.
+- `src/adapters/housekeeping/credential-ports.ts` — `WorkerCredentialPorts`, the status service's `local`,
+  `activeUsage` and `passiveUsage` by job. The kept facts and their stamps stay on main
+  (`CachedCredentialReads`), so a store whose stamp held sends no job.
+- In `packages/fleet`, `CachedCredentialReads` now asks a facts-only `CredentialStoreReads`.
+  `MaterialCredentialReads` is the one place material exists: read, facts or one bearer, dropped.
+- `housekeeping.enabled` in `daemon.json`, on by default. `false` runs every job inline (the PR 1 behaviour).
+- `fyd --check` probes `housekeeping`, and the release smoke requires it by name on the `workers` line.
+- `FY_USAGE_PROBE_ORIGIN` sends both free reads to a loopback server, for the fixture. It refuses anything that
+  is not a plain loopback origin.
+
+**Differences from the plan**
+
+- Protocol: no `cancel` and no `fault` message. Every job is bounded by the 30 s timeout, and a thread that
+  fails is ended. Its `onerror` is reported in a fixed sentence (`the housekeeping worker stopped`), never
+  the runtime's message. The failure enum is only what a worker can actually say: `internal` (the job
+  threw) and `unsettled` (a job before settings). A locked keychain, an HTTP status or bad JSON are already
+  answers (facts, a probe result), not job failures.
+- `codex.discover` is not here. It belongs to PR 4, as the job table says.
+- `metrics` crosses per job: the child argv, file reads, requests, wall time and the worker's own heap. Main
+  labels each child with `commandLabel`, so a keychain item's name never reaches a report, and attributes it to
+  the main-thread activity that asked (`fleet refresh`). The report's `workers[].work` carries it. The
+  `child processes` budget counts a worker's children with main's, because a spawn costs the machine the same
+  wherever it starts.
+- The process RSS cannot be split by thread. So the budget is a test: the bundled worker is started in a fresh
+  process and must add ≤ 25 MB (`housekeeping-worker-bundle.test.ts`). It measured 15–19 MB on Linux with
+  Bun 1.3.13.
+- To fit that budget, the worker imports `@ferretry/fleet/credential-worker`, a narrow entry. `fleet/lib/usage.ts`
+  and the Anthropic probe no longer import the wrapper generator and the account schema, by way of the new lean
+  modules `shell-quote.ts` and `account/credential-directory.ts`. That took the bundle from 888 KB to 629 KB
+  and the memory from about 46 MB to 15–19 MB. A diet test holds the bundle to no SQLite, session storage,
+  vault, redactor, protocol schemas or account schema. zod stays.
+
+**Open questions, as decided for PR 2:** Q1 keep 60 s. Q2 one housekeeping worker, separate from
+`analytics-fold`. Q3 no `Security.framework` FFI; a keychain item's facts are kept for one interval, as in
+PR 1. Q4 and Q7 are PR 3's. Q5 the self-check fixes are a separate PR.
+
+**Measured** (`scripts/local/bench-idle-daemon.ts --small --trace --syscall-summary`, Linux fixture with
+2 Claude and 1 Codex login in file stores, `usage.interval` 10 s, loopback usage server):
+
+|                         | PR 1 (inline) | PR 2 (worker)                                                |
+| ----------------------- | ------------- | ------------------------------------------------------------ |
+| Daemon CPU (own report) | 7.85 %        | 8.26 %                                                       |
+| Children                | 0/min         | 0/min                                                        |
+| Port file ops           | 9.5/s         | 9.5/s                                                        |
+| Read/write syscalls     | 192/s         | 200/s                                                        |
+| Longest block           | 4 ms          | 3 ms                                                         |
+| Fleet refresh           | 6/min, p50 16 | 6/min, p50 15                                                |
+| RSS mean                | 334 MB        | 348 MB (the worker)                                          |
+| Worker                  | —             | 66 jobs/min, 66 file reads/min, 18 requests/min, heap 4.2 MB |
+
+On Linux, with file stores and a loopback server, a pass is cheap. So the move shows as attribution, not
+as CPU: no credential, probe or rollout frame is on the main thread, and the worker's work appears under
+`workers`. Nothing changed on the idle-budget measures, so no CI ceiling is earned here. On the Mac the
+`security` children leave the main thread: they appear as the worker's children, `by: fleet refresh`.
+Verification item 7 (§3.3) will show whether that removes stalls. The jobs per pass, about 11, include passive reads
+that both `observe` and `view` make. PR 3's model reads each input once, on change.
 
 ## 5. Risks
 
