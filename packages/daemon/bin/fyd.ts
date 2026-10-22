@@ -358,6 +358,7 @@ import {
   StorageTranscriptDigestJournal,
   StorageTranscriptProvenanceStore,
   sessionMessageTokenKeyFile,
+  storedSessionStart,
   storedTranscriptProvenance,
 } from '../src/adapters/session/transcript/index.ts';
 import { StorageTurnPorts } from '../src/adapters/session/turn/index.ts';
@@ -6835,7 +6836,10 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         const id = tryParseSessionId(sessionId);
         if (id === undefined) return undefined;
         const config = await storage.readConfig(id).catch(() => undefined);
-        return await resolver.file(sessionId, storedTranscriptProvenance(config));
+        // The start anchors discovery pacing; the state is read only when a pace begins.
+        return await resolver.file(sessionId, storedTranscriptProvenance(config), async () =>
+          storedSessionStart(await storage.readState(id).catch(() => undefined), config),
+        );
       },
     };
   };
