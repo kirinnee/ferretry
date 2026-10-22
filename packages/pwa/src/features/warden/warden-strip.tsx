@@ -54,7 +54,7 @@ export function WardenStrip({ status, now = Date.now() }: WardenStripProps) {
   const accounts = status.failover?.accounts ?? [];
 
   return (
-    <div className="mb-4 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border border-border-strong bg-surface-2 px-3 py-2 text-meta">
+    <div className="mb-4 flex min-w-0 max-w-full flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border border-border-strong bg-surface-2 px-3 py-2 text-meta">
       <span className="inline-flex items-center gap-1.5 font-medium text-fg-soft">
         {healthy ? (
           <ShieldCheck size={14} className="text-ok" aria-hidden="true" />
@@ -76,7 +76,7 @@ export function WardenStrip({ status, now = Date.now() }: WardenStripProps) {
       {!digest.clean && (
         <>
           <Dot />
-          <span className="min-w-0 text-muted" title={digest.detail}>
+          <span className="min-w-0 max-w-full break-words text-muted" title={digest.detail}>
             {digest.summary}
           </span>
         </>

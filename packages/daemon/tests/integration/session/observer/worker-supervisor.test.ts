@@ -14,6 +14,7 @@ import {
 } from '../../../../src/adapters/index.ts';
 import {
   type FromSessionWorker,
+  type ObserverPatch,
   parseSessionId,
   type SessionBinding,
   type SessionId,
@@ -57,11 +58,11 @@ class ScriptedWorker implements ObserverWorker {
   }
 
   /** The last look this thread was asked for. */
-  lastLook(): Extract<ToSessionWorker, { kind: 'look' }> {
+  lastLook(): Extract<ToSessionWorker, { kind: 'request' }> {
     const look = this.sent
       .filter(
-        (message): message is Extract<ToSessionWorker, { kind: 'look' }> =>
-          'kind' in message && message.kind === 'look',
+        (message): message is Extract<ToSessionWorker, { kind: 'request' }> =>
+          'kind' in message && message.kind === 'request',
       )
       .at(-1);
     if (look === undefined) throw new Error('no look was asked for');
@@ -78,6 +79,8 @@ interface Rig {
   readonly workers: ScriptedWorker[];
   readonly notices: string[];
   readonly reports: WorkerLookReport[];
+  readonly observed: [SessionId, readonly ObserverPatch[]][];
+  readonly exited: SessionId[];
   /** Runs every timer due by `ms` from the start. */
   readonly advance: (ms: number) => void;
 }
@@ -86,6 +89,8 @@ function rig(cap = 8, overrides: { lookTimeoutMs?: number; startConcurrency?: nu
   const workers: ScriptedWorker[] = [];
   const notices: string[] = [];
   const reports: WorkerLookReport[] = [];
+  const observed: [SessionId, readonly ObserverPatch[]][] = [];
+  const exited: SessionId[] = [];
   let now = 1_000_000;
   let timers: { at: number; run: () => void; cancelled: boolean }[] = [];
   const subject = new WorkerSupervisor(
@@ -105,10 +110,12 @@ function rig(cap = 8, overrides: { lookTimeoutMs?: number; startConcurrency?: nu
       },
       notice: (_session, message) => notices.push(message),
       report: report => reports.push(report),
+      observed: (session, patches) => observed.push([session, patches]),
+      exited: session => exited.push(session),
     },
     {
       cap,
-      lookTimeoutMs: overrides.lookTimeoutMs ?? 10_000,
+      requestTimeoutMs: overrides.lookTimeoutMs ?? 10_000,
       drainMs: 2_000,
       startConcurrency: overrides.startConcurrency ?? 2,
     },
@@ -118,6 +125,8 @@ function rig(cap = 8, overrides: { lookTimeoutMs?: number; startConcurrency?: nu
     workers,
     notices,
     reports,
+    observed,
+    exited,
     advance: ms => {
       now += ms;
       const due = timers.filter(timer => !timer.cancelled && timer.at <= now);
@@ -138,6 +147,42 @@ const wanted = (id: SessionId, target = `fy-${id}`): WantedSession => ({
 const [A, B, C] = ['a', 'b', 'c'].map(name => parseSessionId(name)) as [SessionId, SessionId, SessionId];
 
 describe('WorkerSupervisor', () => {
+  it('should hand on what a thread found unasked and a pane that died, for the current generation only', () => {
+    // Arrange
+    const { subject, workers, reports, observed, exited } = rig();
+    const attached = subject.reconcile([wanted(A)]);
+    workers[0]?.ready();
+    const patches: readonly ObserverPatch[] = [{ kind: 'turn', change: { from: undefined, to: 'working' } }];
+
+    // Act
+    workers[0]?.answer({ kind: 'observed', session: A, generation: 1, patches, lookMs: 4, metrics: { children: [] } });
+    workers[0]?.answer({ kind: 'observed', session: A, generation: 9, patches, lookMs: 1, metrics: { children: [] } });
+    workers[0]?.answer({ kind: 'exited', session: A, generation: 1 });
+    workers[0]?.answer({ kind: 'exited', session: B, generation: 1 });
+
+    // Assert — the stale generation and the unknown session are counted for the profile, nothing more.
+    should(attached).deepEqual([A]);
+    should(observed).deepEqual([[A, patches]]);
+    should(exited).deepEqual([A]);
+    should(reports.map(report => report.lookMs)).deepEqual([4, 1]);
+  });
+
+  it('should tell a hosted session’s thread its transcript changed and its receipts, and nobody else', () => {
+    // Arrange
+    const { subject, workers } = rig();
+    subject.reconcile([wanted(A)]);
+    workers[0]?.ready();
+
+    // Act
+    subject.file(A);
+    subject.file(B);
+    subject.answers(A, []);
+    subject.answers(B, []);
+
+    // Assert
+    should(workers[0]?.kinds()).deepEqual(['probe', 'attach', 'file', 'answers']);
+  });
+
   it('should start one thread per session, probe it, and host only once it answered', async () => {
     // Arrange
     const { subject, workers } = rig();
@@ -169,7 +214,7 @@ describe('WorkerSupervisor', () => {
     should(workers.length).equal(3);
   });
 
-  it('should pool past the cap, and answer a look with the patch its thread sent', async () => {
+  it('should pool past the cap, and answer a request with what its thread sent', async () => {
     // Arrange
     const { subject, workers, reports } = rig(1);
     subject.reconcile([wanted(A), wanted(B)]);
@@ -177,22 +222,21 @@ describe('WorkerSupervisor', () => {
     subject.reconcile([wanted(A), wanted(B)]);
 
     // Act
-    const looking = subject.look(B);
+    const looking = subject.request(B, { kind: 'pane' });
     const look = workers[0]?.lastLook();
     workers[0]?.answer({
-      kind: 'looked',
+      kind: 'answered',
       session: B,
       generation: look?.generation ?? 0,
       request: look?.request ?? 0,
-      patch: { kind: 'turn', change: { from: undefined, to: 'working' } },
-      lookMs: 3,
+      value: { visible: 'frame' },
       metrics: { children: [{ argv: ['tmux', 'capture-pane'], wallMs: 2 }] },
     });
 
     // Assert
     should(workers.length).equal(1);
-    should(await looking).deepEqual({ kind: 'turn', change: { from: undefined, to: 'working' } });
-    should(reports).deepEqual([{ lookMs: 3, children: [{ argv: ['tmux', 'capture-pane'], wallMs: 2 }] }]);
+    should(await looking).deepEqual({ visible: 'frame' });
+    should(reports).deepEqual([{ lookMs: 0, children: [{ argv: ['tmux', 'capture-pane'], wallMs: 2 }] }]);
     should(subject.inFlight).equal(0);
   });
 
@@ -203,21 +247,20 @@ describe('WorkerSupervisor', () => {
     workers[0]?.ready();
 
     // Act
-    const looking = subject.look(A);
+    const looking = subject.request(A, { kind: 'pane' });
     const look = workers[0]?.lastLook();
     workers[0]?.answer({
-      kind: 'looked',
+      kind: 'answered',
       session: A,
       generation: look?.generation ?? 0,
       request: look?.request ?? 0,
       failure: 'the pane is gone',
-      lookMs: 1,
       metrics: { children: [] },
     });
 
     // Assert
     await should(looking).be.rejectedWith('the pane is gone');
-    await should(subject.look(B)).be.rejectedWith(/no worker observes/);
+    await should(subject.request(B, { kind: 'pane' })).be.rejectedWith(/no worker observes/);
   });
 
   it('should forward facts and a moved binding, and detach a session that stopped', () => {
@@ -263,7 +306,7 @@ describe('WorkerSupervisor', () => {
     const { subject, workers, advance } = rig();
     subject.reconcile([wanted(A)]);
     workers[0]?.ready();
-    const looking = subject.look(A);
+    const looking = subject.request(A, { kind: 'pane' });
     const stale = workers[0]?.lastLook();
 
     // Act
@@ -274,11 +317,10 @@ describe('WorkerSupervisor', () => {
     subject.reconcile([wanted(A)]);
     workers[1]?.ready();
     workers[0]?.answer({
-      kind: 'looked',
+      kind: 'answered',
       session: A,
       generation: stale?.generation ?? 0,
       request: stale?.request ?? 0,
-      lookMs: 1,
       metrics: { children: [] },
     });
 
@@ -299,7 +341,7 @@ describe('WorkerSupervisor', () => {
     workers[1]?.ready();
 
     // Act
-    const stuck = subject.look(A);
+    const stuck = subject.request(A, { kind: 'pane' });
     advance(500);
     workers[1]?.answer({ kind: 'fault', message: 'not fatal', fatal: false });
     const afterSoftFault = workers[1]?.terminated;
@@ -338,7 +380,7 @@ describe('WorkerSupervisor', () => {
     const { subject, workers } = rig();
     subject.reconcile([wanted(A)]);
     workers[0]?.ready();
-    const looking = subject.look(A);
+    const looking = subject.request(A, { kind: 'pane' });
 
     // Act
     subject.close();

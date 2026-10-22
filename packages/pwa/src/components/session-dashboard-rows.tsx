@@ -71,7 +71,7 @@ function AccountPrefix({
   const label = sessionAccountLabel(accounts, agent);
   return (
     <>
-      <span className="min-w-0 truncate" data-account={agent} title={label.id ?? label.name}>
+      <span className="min-w-0 max-w-[50%] shrink-0 truncate" data-account={agent} title={label.id ?? label.name}>
         {label.name}
       </span>
       <span aria-hidden="true" className="text-border">
@@ -296,7 +296,7 @@ export const SessionCard = memo(function SessionCard({
     <RouteLink
       to={sessionHref(daemonId, view)}
       onNavigate={onNavigate}
-      className="kt-panel group block p-panel transition-colors hover:border-accent active:bg-surface-2"
+      className="kt-panel group block min-w-0 max-w-full p-panel transition-colors hover:border-accent active:bg-surface-2"
     >
       <div className="flex items-center gap-sm">
         <StatusMark view={view} />
@@ -310,17 +310,31 @@ export const SessionCard = memo(function SessionCard({
         <TaskName name={sessionTaskName(cfg)} size="md" className="max-w-full" />
       </div>
       <div className="kt-chrome mono mt-0.5 flex flex-wrap items-center gap-x-sm gap-y-0.5">
-        <span className="truncate">{cfg.id}</span>
-        <span className="text-border">·</span>
-        <span className="inline-flex min-w-0 items-center gap-1 text-fg-soft">
-          {cfg.harness === 'claude' ? <Bot size={11} /> : <Sparkles size={11} />}
+        <span className="min-w-0 max-w-full truncate" title={cfg.id}>
+          {cfg.id}
+        </span>
+        <span aria-hidden="true" className="hidden text-border sm:inline">
+          ·
+        </span>
+        <span className="inline-flex min-w-0 max-w-full items-center gap-1 text-fg-soft">
+          {cfg.harness === 'claude' ? (
+            <Bot size={11} className="shrink-0" />
+          ) : (
+            <Sparkles size={11} className="shrink-0" />
+          )}
           <AccountPrefix accounts={accounts} agent={cfg.agent} />
-          {cfg.model || cfg.modelHint || 'default'}
+          <span className="min-w-0 flex-1 truncate" title={cfg.model || cfg.modelHint || 'default'}>
+            {cfg.model || cfg.modelHint || 'default'}
+          </span>
         </span>
         {cfg.label && (
           <>
-            <span className="text-border">·</span>
-            <span className="text-fg-soft">{cfg.label}</span>
+            <span aria-hidden="true" className="hidden text-border sm:inline">
+              ·
+            </span>
+            <span className="min-w-0 max-w-full truncate text-fg-soft" title={cfg.label}>
+              {cfg.label}
+            </span>
           </>
         )}
       </div>
@@ -451,8 +465,8 @@ export function ProjectHeading({
       className="mb-1 flex min-h-[44px] w-full min-w-0 items-center gap-sm overflow-hidden rounded-control px-0.5 py-1 text-left hover:bg-surface-2"
     >
       <FolderGit2 size={13} className="shrink-0 translate-y-0.5 text-faint" />
-      <span className="min-w-0 truncate text-ui font-semibold text-fg">{group.name}</span>
-      {group.path && <span className="mono min-w-0 truncate text-meta text-faint">{group.path}</span>}
+      <span className="min-w-0 max-w-[60%] shrink-0 truncate text-ui font-semibold text-fg">{group.name}</span>
+      {group.path && <span className="mono min-w-0 flex-1 truncate text-meta text-faint">{group.path}</span>}
       <span className="mono ml-auto shrink-0 pr-1 text-meta text-faint">{group.rows.length}</span>
     </button>
   );

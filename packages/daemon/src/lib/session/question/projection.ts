@@ -3,6 +3,7 @@ import type { TranscriptEvent, TranscriptQuestion } from '../../transcript/types
 import {
   type AnswerOperationRecord,
   answerEvidenceForQuestion,
+  type QuestionDocument,
   STRUCTURED_ANSWER_RELEASED_ATTENTION_KIND,
   STRUCTURED_ANSWER_UNCONFIRMED_ATTENTION_KIND,
 } from './answer-ledger.ts';
@@ -47,7 +48,7 @@ export function firstWriteReleasedAnswerAttention(toolUseId: string): string {
   return `an answer to ${toolUseId} may have reached the form and was never confirmed; the form was released, so prose may continue, but do not assume the original answer landed`;
 }
 
-const unconfirmedAttentionOwnedBy = (state: SessionState, record: AnswerOperationRecord): boolean =>
+const unconfirmedAttentionOwnedBy = (state: QuestionDocument, record: AnswerOperationRecord): boolean =>
   state.needsHumanKind === STRUCTURED_ANSWER_UNCONFIRMED_ATTENTION_KIND &&
   (state.needsHuman === unconfirmedBoundAnswerAttention(record) ||
     state.needsHuman === unconfirmedOrphanAnswerAttention(record));
@@ -63,7 +64,7 @@ const unconfirmedAttentionOwnedBy = (state: SessionState, record: AnswerOperatio
  * any non-empty tool or request id, whitespace and the message's own delimiter words included, and
  * answers false for every message this daemon would not have written.
  */
-export function releasedAnswerAttentionOwnedBy(state: SessionState, record: AnswerOperationRecord): boolean {
+export function releasedAnswerAttentionOwnedBy(state: QuestionDocument, record: AnswerOperationRecord): boolean {
   return (
     state.needsHumanKind === STRUCTURED_ANSWER_RELEASED_ATTENTION_KIND &&
     (state.needsHuman === releasedAnswerAttention(record) ||
@@ -71,7 +72,7 @@ export function releasedAnswerAttentionOwnedBy(state: SessionState, record: Answ
   );
 }
 
-const answerAttentionOwnedBy = (state: SessionState, record: AnswerOperationRecord): boolean =>
+const answerAttentionOwnedBy = (state: QuestionDocument, record: AnswerOperationRecord): boolean =>
   unconfirmedAttentionOwnedBy(state, record) || releasedAnswerAttentionOwnedBy(state, record);
 
 // The tool-level questions this projector asks are that same predicate over the records it holds,
@@ -84,10 +85,10 @@ const answerAttentionOwnedBy = (state: SessionState, record: AnswerOperationReco
 // more than one owner fails closed to NOT owned: nothing is cleared on ambiguous evidence, and the
 // projector re-asserts the attention for the record it is actually projecting.
 const attentionOwnedForTool = (
-  state: SessionState,
+  state: QuestionDocument,
   toolUseId: string | undefined,
   records: readonly AnswerOperationRecord[],
-  owned: (state: SessionState, record: AnswerOperationRecord) => boolean,
+  owned: (state: QuestionDocument, record: AnswerOperationRecord) => boolean,
 ): boolean => {
   if (toolUseId === undefined) return false;
   const owners = records.filter(record => owned(state, record));
@@ -95,19 +96,19 @@ const attentionOwnedForTool = (
 };
 
 const unresolvedAnswerAttentionFor = (
-  state: SessionState,
+  state: QuestionDocument,
   toolUseId: string | undefined,
   records: readonly AnswerOperationRecord[],
 ): boolean => attentionOwnedForTool(state, toolUseId, records, unconfirmedAttentionOwnedBy);
 
 const releasedAnswerAttentionFor = (
-  state: SessionState,
+  state: QuestionDocument,
   toolUseId: string | undefined,
   records: readonly AnswerOperationRecord[],
 ): boolean => attentionOwnedForTool(state, toolUseId, records, releasedAnswerAttentionOwnedBy);
 
 const ownedAnswerAttentionFor = (
-  state: SessionState,
+  state: QuestionDocument,
   toolUseId: string | undefined,
   records: readonly AnswerOperationRecord[],
 ): boolean => attentionOwnedForTool(state, toolUseId, records, answerAttentionOwnedBy);
@@ -126,7 +127,7 @@ const ownedAnswerAttentionFor = (
  * is this projector's whole job for an acknowledged tool (see `acknowledgedTool`); the clear is not.
  */
 const acknowledgementClears = (
-  state: SessionState,
+  state: QuestionDocument,
   toolUseId: string | undefined,
   records: readonly AnswerOperationRecord[],
 ): boolean => unresolvedAnswerAttentionFor(state, toolUseId, records);
@@ -188,7 +189,7 @@ export function projectStructuredQuestion(events: readonly TranscriptEvent[]): S
 
 /** State patch for a projection.  It is intentionally partial: storage keeps timestamps and other monitor evidence. */
 export function structuredQuestionStatePatch(
-  current: SessionState,
+  current: QuestionDocument,
   projection: StructuredQuestionProjection,
   answerRecords: Iterable<AnswerOperationRecord> = [],
 ): Partial<SessionState> {

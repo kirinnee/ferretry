@@ -1,10 +1,17 @@
 import {
+  type AnswerLedger,
   type ClockPort,
+  INITIAL_OBSERVER_STATE,
   isTurnStatus,
   type LivenessSample,
   type LivenessTarget,
+  type ObserverPatch,
+  type PaneState,
+  type ProcessObservation,
+  type SendEvidenceReading,
   type SessionBinding,
   type SessionId,
+  type SessionObserver,
   type SessionObserverHost,
   SessionTurnWatcher,
   TURN_WATCH_INTERVAL_MS,
@@ -17,66 +24,210 @@ import type { InlineObserverHost } from './inline-observer-host.ts';
 import type { SessionObservationApplier } from './session-observation-applier.ts';
 import type { WantedSession, WorkerSupervisor } from './worker-supervisor.ts';
 
+/** The piece of the file-event hub the host listens through (`FileEventHub` is one). */
+export interface ObserverFileEvents {
+  subscribe(path: string, listener: (path: string) => void): { close(): void };
+}
+
 export interface WorkerObserverPorts {
-  /** The observer on the main thread: the question and liveness parts, and every session no worker has. */
+  /** The observer on this thread: every session no worker has, and every answer a worker could not give. */
   readonly inline: InlineObserverHost;
   readonly supervisor: WorkerSupervisor;
   /** Where a session's evidence is — its tmux session and its proved transcript — resolved on this thread. */
   readonly binding: (id: SessionId) => Promise<SessionBinding | undefined>;
   readonly applier: Pick<SessionObservationApplier, 'apply'>;
+  /** The answer queue: a question patch is never written while an answer drive holds the session. */
+  readonly answerSerial: { runIfIdle<T>(key: string, work: () => Promise<T>): Promise<T | undefined> };
+  readonly answers: Pick<AnswerLedger, 'all'>;
+  readonly files: ObserverFileEvents;
+  readonly observer: SessionObserver;
+  /** What a worker's liveness look cannot do itself: mask the screen, and read the pane's processes. */
+  readonly liveness: {
+    redact(text: string): Promise<string>;
+    processes(tmuxSession: string): Promise<ProcessObservation>;
+  };
   readonly clock: ClockPort;
+  /** How long a read waits on its session's worker before it projects the session itself. */
+  readonly barrierMs: number;
 }
 
-const message = (error: unknown): string => (error instanceof Error ? error.message : String(error));
+/** `promise`, or a rejection once `ms` have passed. */
+async function within<T>(promise: Promise<T>, ms: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(() => reject(new Error(`no answer within ${String(ms)} ms`)), ms);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 /**
- * THE SESSION OBSERVER, ONE THREAD PER RUNNING SESSION (stage 3b of `docs/design/session-workers.md`).
+ * THE SESSION OBSERVER, ONE THREAD PER RUNNING SESSION — event-driven (stage 3c of
+ * `docs/design/session-workers.md`).
  *
- * The TURN part of every running session runs on that session's worker: the worker owns the session's
- * read-only attached tmux client and its parsed tail, looks on the same 2 s tick the turn watcher always
- * had, and answers the patch; this thread writes it through the one applier, so the session lock, the
- * journal and every listener are unchanged. The question and liveness parts stay on this thread (the
- * inline host) until stage 3c.
+ * A running session's worker observes it — its turn, its open question and observed runtime, its liveness
+ * look, its send evidence and its live frame — and posts what changed unasked, when something happened.
+ * This thread is the one writer: it applies a session's patches in the order they came, through the one
+ * applier (a question patch only while no answer drive holds the session), and it is the one that knows
+ * the transcript changed (the file-event hub) and that the answer ledger grew, and tells the worker.
  *
- * NOTHING IS LEFT UNOBSERVED. A session with no worker yet (starting, backing off after a crash, kept
- * inline after five), a session that is not running but still has a turn record to clear, and a look a
- * worker could not answer are all observed by the inline host's own turn path, exactly as in stage 3a.
+ * WHAT THIS THREAD STILL DOES. The 2 s tick decides which sessions get a worker and observes, as stage 3a
+ * did, every session that has none — starting, backing off, kept inline after five crashes, or not running
+ * but still recording a turn to clear. The monitor's question pass covers only those; for the rest, its
+ * parks pass is all that is left. A read that must reflect the transcript asks the worker for a barrier,
+ * and any answer a worker cannot give in time is worked out here instead — nothing is ever unobserved.
  */
 export class WorkerObserverHost implements SessionObserverHost {
   readonly turns: TurnWatchLoop;
   private readonly unsubscribe: () => void;
+  /** Each session's patches, applied one at a time in the order they arrived. */
+  private readonly applying = new Map<SessionId, Promise<void>>();
+  /** The transcript each hosted session's worker is told about, by session. */
+  private readonly watches = new Map<SessionId, { readonly file: string; readonly close: () => void }>();
 
   constructor(private readonly ports: WorkerObserverPorts) {
-    this.turns = new WorkerTurnLoop(ports);
-    // The worker decides from what the main thread knows: every change is forwarded as it is learned.
+    this.turns = new WorkerTurnLoop(ports, this);
+    // The worker decides from what this thread knows: every change is forwarded as it is learned.
     this.unsubscribe = ports.inline.onFacts((id, facts) => {
       if (facts !== undefined) ports.supervisor.facts(id, facts);
     });
   }
 
+  /** What a session's worker found, unasked: applied in order, after anything still being applied. */
+  observed(session: SessionId, patches: readonly ObserverPatch[]): void {
+    if (patches.length === 0) return;
+    const previous = this.applying.get(session) ?? Promise.resolve();
+    const next = previous.then(async () => {
+      for (const patch of patches) {
+        const at = this.ports.clock.now();
+        try {
+          if (patch.kind === 'turn') await this.ports.applier.apply(session, patch, at);
+          // Never written under a live answer drive: it owns the freshest state, and the facts it writes
+          // bring the question back to the worker.
+          else
+            await this.ports.answerSerial.runIfIdle(
+              session,
+              async () => await this.ports.applier.apply(session, patch, at),
+            );
+        } catch {
+          // A patch the document refused is the document's verdict; the next look decides again.
+        }
+      }
+    });
+    this.applying.set(session, next);
+    void next.then(() => {
+      if (this.applying.get(session) === next) this.applying.delete(session);
+    });
+  }
+
+  /** The answer ledger grew: the session's worker decides its question from the receipts as they are now. */
+  async answersChanged(session: SessionId): Promise<void> {
+    if (!this.ports.supervisor.attached(session)) return;
+    this.ports.supervisor.answers(session, [...(await this.ports.answers.all(session)).values()]);
+  }
+
+  /**
+   * A read barrier: what the transcript says is in the document a read then returns. The session's worker
+   * looks now and its patches are applied before this resolves; one that cannot is projected here.
+   */
   async project(id: SessionId): Promise<void> {
+    if (this.ports.supervisor.hosts(id))
+      try {
+        await within(this.ports.supervisor.request(id, { kind: 'observe' }), this.ports.barrierMs);
+        await this.applying.get(id);
+        return;
+      } catch {
+        // Fall through: the read gets the main thread's own projection, as before workers.
+      }
     await this.ports.inline.project(id);
   }
 
+  /** The monitor's question pass, for the sessions no worker observes: the rest are their workers'. */
   async questions(): Promise<ReadonlyMap<string, string>> {
-    return await this.ports.inline.questions();
+    return await this.ports.inline.questions(id => this.ports.supervisor.hosts(id));
   }
 
+  /**
+   * The Warden's liveness look: the screen and the transcript's fingerprint from the session's worker,
+   * the screen masked and the pane's processes read here — then the same sample a look here takes.
+   */
   async liveness(target: LivenessTarget): Promise<LivenessSample> {
-    return await this.ports.inline.liveness(target);
+    const id = target.id as SessionId;
+    if (!this.ports.supervisor.hosts(id)) return await this.ports.inline.liveness(target);
+    const looked = await this.ports.supervisor.request(id, { kind: 'liveness' }).catch(() => undefined);
+    if (looked === undefined) return await this.ports.inline.liveness(target);
+    const screen =
+      looked.screen === undefined ? undefined : await this.ports.liveness.redact(looked.screen).catch(() => undefined);
+    const observed =
+      target.tmuxSession === undefined
+        ? undefined
+        : await this.ports.liveness.processes(target.tmuxSession).catch(() => undefined);
+    const children = observed?.kind === 'observed' ? observed.processes.length > 0 : undefined;
+    const step = this.ports.observer.step(INITIAL_OBSERVER_STATE, {
+      kind: 'look',
+      liveness: { screen, transcript: looked.transcript, children },
+    });
+    return step.samples[0] ?? {};
   }
 
   async midTurn(): Promise<number> {
     return await this.ports.inline.midTurn();
   }
 
+  /** The live readout's frame: the worker's, captured only if the pane drew since; this thread's otherwise. */
+  async pane(id: SessionId): Promise<PaneState | undefined> {
+    if (this.ports.supervisor.hosts(id)) {
+      const pane = await this.ports.supervisor.request(id, { kind: 'pane' }).catch(() => undefined);
+      if (pane !== undefined) return pane ?? undefined;
+    }
+    return await this.ports.inline.pane(id);
+  }
+
+  /** The send tracker's evidence, read by the session's worker; by this thread when it cannot. */
+  async sendEvidence(id: SessionId, since: string): Promise<SendEvidenceReading> {
+    if (this.ports.supervisor.hosts(id)) {
+      const reading = await this.ports.supervisor.request(id, { kind: 'send-evidence', since }).catch(() => undefined);
+      if (reading !== undefined) return reading;
+    }
+    return await this.ports.inline.sendEvidence(id, since);
+  }
+
   close(): void {
     this.unsubscribe();
+    for (const watch of this.watches.values()) watch.close();
+    this.watches.clear();
     this.ports.supervisor.close();
+  }
+
+  /** Every hosted session's transcript, watched; a session no worker hosts any more, no longer. */
+  reconcileWatches(wanted: readonly WantedSession[]): void {
+    const keep = new Map<SessionId, string>();
+    for (const session of wanted) {
+      const file = session.binding.transcript?.file;
+      if (file !== undefined && this.ports.supervisor.hosts(session.id)) keep.set(session.id, file);
+    }
+    for (const [id, watch] of [...this.watches]) {
+      if (keep.get(id) === watch.file) continue;
+      watch.close();
+      this.watches.delete(id);
+    }
+    for (const [id, file] of keep) {
+      if (this.watches.has(id)) continue;
+      const subscription = this.ports.files.subscribe(file, () => this.ports.supervisor.file(id));
+      this.watches.set(id, { file, close: () => subscription.close() });
+    }
   }
 }
 
-/** The 2 s turn tick, split between the session workers and the main thread. */
+/**
+ * The 2 s tick, now only a reconciler: it hands running sessions to their workers and observes on this
+ * thread only what no worker has. A worker's looks are its own and arrive as `observed` messages.
+ */
 class WorkerTurnLoop implements TurnWatchLoop {
   readonly intervalMs = TURN_WATCH_INTERVAL_MS;
   /** The sessions this tick leaves to the main thread; read by the inline watcher's roster. */
@@ -84,7 +235,10 @@ class WorkerTurnLoop implements TurnWatchLoop {
   private readonly inlineWatcher: SessionTurnWatcher;
   private running = false;
 
-  constructor(private readonly ports: WorkerObserverPorts) {
+  constructor(
+    private readonly ports: WorkerObserverPorts,
+    private readonly host: WorkerObserverHost,
+  ) {
     this.inlineWatcher = new SessionTurnWatcher(ports.inline.turnPortsFor(async () => this.local));
   }
 
@@ -104,35 +258,13 @@ class WorkerTurnLoop implements TurnWatchLoop {
   private async tick(): Promise<TurnWatchReport> {
     const sessions = await this.ports.inline.turnRoster();
     const wanted = await this.wanted(sessions);
-    this.ports.supervisor.reconcile(wanted);
-    const changed = new Map<SessionId, TurnStateChange>();
-    const failures = new Map<SessionId, string>();
-    const hosted = sessions.filter(session => this.ports.supervisor.hosts(session.id));
-    const fallback = new Set<SessionId>();
-    // Each worker looks at its own session at once: that is what the threads are for. Writes are still one
-    // session at a time through the applier's own lane.
-    await Promise.all(
-      hosted.map(async session => {
-        const patch = await this.ports.supervisor.look(session.id).catch(() => {
-          fallback.add(session.id);
-          return undefined;
-        });
-        if (patch === undefined) return;
-        try {
-          if (await this.ports.applier.apply(session.id, patch, this.ports.clock.now()))
-            changed.set(session.id, patch.change);
-        } catch (error) {
-          failures.set(session.id, message(error));
-        }
-      }),
-    );
-    // Decided from the same snapshot the looks were sent from: a worker that became ready meanwhile does not
-    // take a session this tick, which would leave it looked at by nobody.
-    const sentToWorkers = new Set(hosted.map(session => session.id));
-    this.local = sessions.filter(session => !sentToWorkers.has(session.id) || fallback.has(session.id));
+    const attached = this.ports.supervisor.reconcile(wanted);
+    this.host.reconcileWatches(wanted);
+    for (const id of attached) void this.host.answersChanged(id).catch(() => undefined);
+    this.local = sessions.filter(session => !this.ports.supervisor.hosts(session.id));
     const inline = await this.inlineWatcher.tick();
-    for (const [id, change] of inline.changed) changed.set(id, change);
-    for (const [id, failure] of inline.failures) failures.set(id, failure);
+    const changed = new Map<SessionId, TurnStateChange>(inline.changed);
+    const failures = new Map<SessionId, string>(inline.failures);
     return { changed, failures };
   }
 

@@ -735,10 +735,14 @@
    groups, spaced like the groups themselves, so a machine reads as a chapter and a project as a
    section — no box around a machine, which would put a frame around Neo's frames. */
 .fy-machine-section {
+  grid-template-columns: minmax(0, 1fr);
+  min-width: 0;
   display: grid;
   gap: calc(var(--flow-3) + var(--fy-shadow-reach));
 }
 .fy-machine-groups {
+  grid-template-columns: minmax(0, 1fr);
+  min-width: 0;
   display: grid;
   gap: calc(var(--flow-4) + var(--fy-shadow-reach));
 }

@@ -1,7 +1,11 @@
 import type { SessionState } from '@ferretry/protocol';
 import type { TranscriptEvent } from '../../transcript/types.ts';
 import { type ObservedRuntime, observedRuntimeStatePatch, projectObservedRuntime } from '../harness/observation.ts';
-import { type AnswerOperationRecord, reconcileAnswerEvidence } from '../question/answer-ledger.ts';
+import {
+  type AnswerOperationRecord,
+  type QuestionDocument,
+  reconcileAnswerEvidence,
+} from '../question/answer-ledger.ts';
 import {
   projectStructuredQuestion,
   type StructuredQuestionProjection,
@@ -14,7 +18,10 @@ export const QUESTION_TAIL_EVENTS = DEFAULT_TRANSCRIPT_TAIL;
 
 /** What one question look found: the session's document, its transcript tail and its answer receipts. */
 export interface QuestionLook {
-  readonly state: SessionState;
+  /** The document's question and observed-runtime fields — the whole document on the main thread, the
+   *  pushed facts on a session worker. */
+  readonly state: QuestionDocument &
+    Pick<SessionState, 'observedModel' | 'observedModelAt' | 'observedReasoningEffort' | 'observedFast'>;
   readonly events: readonly TranscriptEvent[];
   /** The answer ledger, by request id. */
   readonly answers: ReadonlyMap<string, AnswerOperationRecord>;
