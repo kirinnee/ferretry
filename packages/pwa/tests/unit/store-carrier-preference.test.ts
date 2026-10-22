@@ -129,6 +129,61 @@ describe('the store’s connection preference', () => {
     await settle(5);
   });
 
+  it('forgets a kept tunnel the daemon switched off, and keeps the one it turns on', async () => {
+    // Arrange — the record still holds a tunnel; the daemon's set no longer names one, and its switch is off.
+    const TUNNEL = 'https://k3x9.tunnels.example.com';
+    const { identity, daemon, deviceKeys } = await keyedDaemon('https://alpha.example.test', [
+      { kind: 'direct', daemonUrl: 'https://alpha.example.test' },
+      { kind: 'tunnel', tunnelUrl: TUNNEL },
+    ]);
+    let tunnel = { enabled: false, explicit: false, state: 'off', tunnelUrl: null as string | null, sentence: 'off' };
+    const scripted = autoDial(identity, {
+      respond: request => {
+        if (request.path === '/v1/carriers')
+          return { body: { carriers: [{ kind: 'direct', url: 'https://alpha.example.test' }] } };
+        if (request.path === '/v1/tunnel') return { body: tunnel };
+        return { body: [] };
+      },
+    });
+    const preferences = memoryPreferences();
+    const store = await createAppStore({
+      repository: new MemoryRepository(),
+      connectClient: async () => ({}) as unknown as FyApiClient,
+      fetcher: async () => Response.json({}),
+      deviceKeys,
+      relayDial: url => (new URL(url).hostname === 'alpha.example.test' ? scripted.dial() : new ScriptedSocket()),
+      relayCrypto,
+      carrierPreferences: preferences,
+    });
+    store.connections.add(daemon);
+    const kept = () => store.connections.get(daemon.daemonId)?.carriers.some(method => method.kind === 'tunnel');
+
+    // Act — Auto connects direct; its refresh names no tunnel, so the daemon is asked about its switch.
+    preferences.set(daemon.daemonId, 'auto');
+    await settle(20);
+
+    // Assert
+    expect(store.tunnelSwitch.state(daemon.daemonId)).toEqual({ kind: 'known', view: tunnel as never });
+    expect(kept()).toBe(false);
+
+    // Act — Tunnel only, for a machine that said its tunnel is off.
+    preferences.set(daemon.daemonId, 'tunnel');
+    await settle(20);
+
+    // Assert — the reason is the one a person can act on.
+    expect(store.carrier.choice(daemon.daemonId)?.reason).toBe(
+      'Tunnel only: this machine’s tunnel is off (opt-in) — turn it on in Settings › Connection.',
+    );
+
+    // Act — the person turns it on and the daemon says it is up.
+    tunnel = { enabled: true, explicit: true, state: 'up', tunnelUrl: TUNNEL, sentence: 'on' };
+    await store.tunnelSwitch.set(daemon, true);
+
+    // Assert
+    expect(store.connections.get(daemon.daemonId)?.carriers).toContainEqual({ kind: 'tunnel', tunnelUrl: TUNNEL });
+    await settle(5);
+  });
+
   it('says whether this build can dial WebRTC, and reads the tunnel service once, only when asked', async () => {
     let asked = 0;
     const store = await createAppStore({

@@ -469,6 +469,25 @@ network type changes, so a phone that wakes with a dead socket learns so in seco
 changes the wire: a peer that pings only every thirty seconds is still conforming, and the
 rendezvous's eviction rule is unchanged.
 
+**A deadline that fired late measured the browser, not the carrier.** A phone that hides an installed
+app freezes the page or throttles its timers to about once a minute, and on the way back every overdue
+timer and every queued message is delivered in an order the browser does not promise — so a `fy-pong`
+that arrived during the freeze can be queued behind the deadline it answers. A browser deadline that
+fires more than **2 seconds** past its time is therefore forgiven **once**: instead of closing, the
+browser pings again with the 4-second liveness-check deadline on the now-running page. Answered, the
+session lives; silent again, it is closed `4408` exactly as before. Any evidence of life re-arms the
+forgiveness.
+
+**A drop is recovered before it is said.** A held session that ends under a browser is redialled on the
+same carrier at once: the connection model's first retry, a live feed's first reopen and a terminal's
+first reopen all wait **under 300 ms** (equal jitter where there is a schedule), and nothing tells the
+person "reconnecting" until the outage has lasted **1.5 seconds** (2 for a session's live chip). Every
+drop is still recorded on the device — the carrier, the close code, how long the session had lived and
+since it last heard anything, whether the page was hidden and for how long, the network type where the
+browser says, and how long the next session took to open — and shown with a Copy button under Settings ›
+Machine › Performance, so "it keeps reconnecting" arrives with evidence. Nothing in that record is a
+credential or an address, and it is never sent anywhere.
+
 #### What `fy-pong` cannot prove
 
 `fy-pong` is answered by the runtime holding the socket, not by the rendezvous: the auto-responder
@@ -2311,6 +2330,20 @@ tunnel yet" — never a silent fall back to a carrier the person excluded.
 **Pairing ignores the preference.** First contact is direct, then the hosted relay (§14), whatever is
 chosen: WebRTC needs a device key to signal and a tunnel is published only to a paired device.
 
+**A tunnel is opt-in per machine, so choosing one offers it.** A daemon runs a tunnel only when its
+operator or a paired device switched one on (`GET`/`PUT /v1/tunnel`, "The daemon end"). Choosing Tunnel
+only — or Auto, which walks a tunnel too — for a machine whose switch is off asks, under the choice,
+"Turn on a Cloudflare tunnel for this machine?"; the choice itself is kept either way, and Tunnel only's
+note says "Off for this machine — tunnels are opt-in." — as does the walk's stated failure, "Tunnel only:
+this machine's tunnel is off (opt-in)", ahead of the service's two reasons. The Connection status shows the daemon's own line
+about its tunnel ("Tunnel: off (opt-in) — …"). **Switching is carrier control, not a walk**: `GET` and
+`PUT /v1/tunnel` ride the daemon's direct address or a rendezvous — the introducers, with the hosted
+relay when the daemon authored none — whatever the preference, and never the tunnel or WebRTC, because
+under Tunnel only with the switch off nothing the preference allows could carry the request that turns
+it on, and switching a tunnel off over itself would end the connection carrying the answer. It remembers
+no winner, and a passkey it needs is asked for exactly as for any press. A daemon older than the switch
+answers `404`, and its tunnel was never opt-in, so nothing is offered.
+
 **A device keeps the tunnel it was told, and asks the daemon when that is not enough.** The tunnel is
 learned the way every carrier is — from the daemon's published set, at pairing and on each
 `GET /v1/carriers` refresh — and kept with the pairing in the device's own storage, so a reload or an
@@ -2323,7 +2356,9 @@ device a new one:
 2. **A refresh that names no tunnel does not erase the kept one.** The daemon publishes its tunnel only
    while `cloudflared` holds an edge connection, so a set read during a reconnect means "not right now",
    not "gone". The kept hostname is replaced when the daemon publishes a different one; a read that
-   fails changes nothing.
+   fails changes nothing. What tells the two apart is the daemon's switch: a device holding a tunnel the
+   set no longer names asks `GET /v1/tunnel`, and forgets the tunnel when the answer is `off` or
+   `unavailable` (it keeps one that is `up`, and leaves one that is `provisioning` or `connecting`).
 3. **When there is no tunnel to dial, or the kept one does not carry, the daemon is asked** — one
    `GET /v1/carriers` over its direct address or a rendezvous (the carriers that already introduce
    WebRTC, §16, with the hosted relay when the daemon authored none), inside an ordinary
@@ -2561,6 +2596,15 @@ partial one. The operator runbook is
   record exactly like `true`. A boot that could not get an answer keeps the record and asks once more
   on the next boot. Switching the entry off through `PUT /v1/tunnel` releases at once; an entry
   edited by hand in the file takes effect, and releases, on the next start.
+- **What the daemon logs about each tunnel session.** A tunnel that stays registered while a phone
+  "keeps reconnecting" is a per-session fact, so every session the tunnel listener carries logs one
+  `tunnel session opened` line and one `tunnel session closed` line: who ended it (the browser side, or
+  this daemon), the close code with what it means and the reason quoted on one line, how long it
+  lived, how long before the end the last client frame arrived (a `fy-ping` counts), the bytes each
+  way, and whether a device proved itself on it. A peer that vanished is `1006`; the reason a peer sends
+  is cut to one printable line so it cannot forge a second log line. No address, device or key is in
+  either line (`packages/daemon/src/lib/tunnel/session-log.ts`). Sessions on the direct listener are
+  not logged.
 - **`cloudflared` supervision.** Restarted 1 s after it exits, doubling to one minute with equal jitter,
   the backoff starting over once a connection registers; registration is the set of
   `Registered tunnel connection connIndex=N` lines minus `Unregistered …`, so one of four edge

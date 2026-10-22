@@ -36,7 +36,7 @@ import {
   type SessionId,
   sessionIdFromBytes,
 } from '@ferretry/relay';
-import type { SocketDownstream, SocketFrame, SocketHandler } from '../api/socket.ts';
+import type { SocketDownstream, SocketEnded, SocketFrame, SocketHandler } from '../api/socket.ts';
 import type { DeviceConnectionTracker } from '../pairing/index.ts';
 import {
   type AccessLeasePolicy,
@@ -96,6 +96,34 @@ export interface DirectCarrierDependencies {
   /** The lease and its cap; absent means the protocol's own (`DEFAULT_ACCESS_LEASE_POLICY`). */
   readonly lease?: AccessLeasePolicy;
   readonly connections: DeviceConnectionTracker;
+  /**
+   * Where a TUNNEL session's life is reported (`docs/relay-protocol.md` §15, "What the daemon logs").
+   * Absent means nothing is logged. Only a session whose arrival carries the tunnel marker is reported:
+   * a tab on the host opening and closing sessions all day is not news, and a phone behind Cloudflare
+   * dropping one is what an owner asks about.
+   */
+  readonly sessionLog?: DirectSessionLog;
+}
+
+/** One session's life, once it is over. Counts and timings only: never a key, a device or an address. */
+export interface DirectSessionEnd {
+  /** Who ended it: the far end (or the network, `1006`), or this daemon. */
+  readonly by: 'peer' | 'daemon';
+  /** The close code, when one is known. A peer that vanished is `1006`; a shutdown has none. */
+  readonly code: number | undefined;
+  readonly reason: string;
+  readonly durationMs: number;
+  /** How long before the end the last client frame arrived — a ping counts. */
+  readonly lastFrameAgeMs: number;
+  readonly bytesIn: number;
+  readonly bytesOut: number;
+  /** Whether a device proved itself on it: an unproven session is a probe, a refusal or a scan. */
+  readonly proved: boolean;
+}
+
+export interface DirectSessionLog {
+  opened(): void;
+  closed(end: DirectSessionEnd): void;
 }
 
 /** A frame as bytes, or `null` for one that is not binary — which only a heartbeat may be. */
@@ -111,6 +139,16 @@ export class DirectSession implements SocketHandler {
   readonly #link: RelayLink;
   #inbox: Promise<void> = Promise.resolve();
   #ended = false;
+  /** Where this session's life is reported — only for a tunnel arrival — and what is reported. */
+  readonly #log: DirectSessionLog | undefined;
+  readonly #clock: RelayLinkClock;
+  readonly #openedAt: number;
+  #lastFrameAt: number;
+  #bytesIn = 0;
+  #bytesOut = 0;
+  #proved = false;
+  /** Set when THIS daemon ended the socket, before the transport reports the close back. */
+  #endedHere: { readonly code: number; readonly reason: string } | undefined;
 
   constructor(
     deps: DirectCarrierDependencies,
@@ -123,6 +161,10 @@ export class DirectSession implements SocketHandler {
     const sessionId = sessionIdFromBytes(deps.crypto.randomBytes(SESSION_ID_BYTES));
     if (sessionId === null) throw new Error('the session identifier generator produced an unusable identifier');
     this.#sessionId = sessionId;
+    this.#log = arrival?.carrier === 'tunnel' ? deps.sessionLog : undefined;
+    this.#clock = deps.clock;
+    this.#openedAt = deps.clock.now();
+    this.#lastFrameAt = this.#openedAt;
     this.#link = new RelayLink({
       crypto: deps.crypto,
       identity: deps.identity,
@@ -132,7 +174,9 @@ export class DirectSession implements SocketHandler {
       socket: {
         send: bytes => this.#fromLink(bytes),
         sendText: text => {
-          if (!this.#ended) this.downstream.send(text);
+          if (this.#ended) return;
+          this.#bytesOut += text.length;
+          this.downstream.send(text);
         },
         close: (code, reason) => this.#end(code, reason),
       },
@@ -147,6 +191,7 @@ export class DirectSession implements SocketHandler {
       // socket stops being an unproven one.
       connections: {
         track: (deviceId, end, appSession, recheck, lapse) => {
+          this.#proved = true;
           onProved();
           return deps.connections.track(deviceId, end, appSession, recheck, lapse);
         },
@@ -165,6 +210,7 @@ export class DirectSession implements SocketHandler {
 
   /** Announce the session to the client, then open it on the link — the order a rendezvous uses. */
   async open(): Promise<void> {
+    this.#log?.opened();
     this.downstream.send(
       encodeFrame({
         kind: FRAME_KINDS.control,
@@ -185,6 +231,8 @@ export class DirectSession implements SocketHandler {
 
   fromClient(frame: SocketFrame): void {
     if (this.#ended) return;
+    this.#lastFrameAt = this.#clock.now();
+    this.#bytesIn += typeof frame === 'string' ? frame.length : frame.byteLength;
     if (typeof frame === 'string') {
       this.#link.receiveText(frame);
       return;
@@ -210,11 +258,32 @@ export class DirectSession implements SocketHandler {
     });
   }
 
-  close(): void {
+  close(ended?: SocketEnded): void {
     if (this.#ended) return;
     this.#ended = true;
     this.#link.close();
     this.release();
+    this.#report(ended);
+  }
+
+  /**
+   * The one line a tunnel session's end earns. A close with no report from the transport and none from
+   * this daemon is the daemon releasing the socket itself — a shutdown, or a peer gone before it attached.
+   */
+  #report(ended: SocketEnded | undefined): void {
+    if (this.#log === undefined) return;
+    const now = this.#clock.now();
+    const here = this.#endedHere;
+    this.#log.closed({
+      by: here !== undefined || ended === undefined ? 'daemon' : 'peer',
+      code: here?.code ?? ended?.code,
+      reason: here?.reason ?? ended?.reason ?? 'the daemon released this socket',
+      durationMs: now - this.#openedAt,
+      lastFrameAgeMs: now - this.#lastFrameAt,
+      bytesIn: this.#bytesIn,
+      bytesOut: this.#bytesOut,
+      proved: this.#proved,
+    });
   }
 
   /** Ends this socket to make room: it had not proved a device, and an honest arrival needs the slot. */
@@ -231,6 +300,7 @@ export class DirectSession implements SocketHandler {
    */
   #fromLink(bytes: Uint8Array): void {
     if (this.#ended) return;
+    this.#bytesOut += bytes.byteLength;
     this.downstream.send(bytes);
     const decoded = decodeFrame(bytes);
     if (!decoded.ok || decoded.frame.kind !== FRAME_KINDS.control) return;
@@ -240,6 +310,7 @@ export class DirectSession implements SocketHandler {
 
   #end(code: number, reason: string): void {
     if (this.#ended) return;
+    this.#endedHere = { code, reason };
     this.close();
     // A close frame's reason is capped at 123 bytes; the full sentence already crossed in `closed`.
     this.downstream.close(code, truncateUtf8(reason, 123));

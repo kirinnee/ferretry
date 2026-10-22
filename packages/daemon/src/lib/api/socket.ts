@@ -104,8 +104,19 @@ export interface SocketHandler {
   open(): Promise<void>;
   fromClient(frame: SocketFrame): void;
   /** The socket is gone — the peer closed it, it failed, or the daemon is shutting down. Called at
-   *  most once per socket, and required to release every timer and viewer the handler holds. */
-  close(): void;
+   *  most once per socket, and required to release every timer and viewer the handler holds.
+   *  `ended` is the close the transport saw arrive, when it saw one; absent when the daemon ended it. */
+  close(ended?: SocketEnded): void;
+}
+
+/**
+ * How a socket ended, as the transport reported it — `1006` with an empty reason when the peer went away
+ * without a close frame. A DIAGNOSTIC, never a decision: it is logged so a drop can be explained, and
+ * nothing a handler releases may depend on it.
+ */
+export interface SocketEnded {
+  readonly code: number;
+  readonly reason: string;
 }
 
 /** Binds an accepted upgrade to the socket it actually got. */

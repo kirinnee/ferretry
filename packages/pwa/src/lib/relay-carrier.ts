@@ -69,6 +69,7 @@ import {
   SESSION_PROTOCOL_ID,
   toBase64Url,
 } from '@ferretry/relay';
+import type { CarrierDropLog, CarrierSessionEnd } from './carrier-drops.ts';
 import {
   CARRIER_PREFERENCE_LABEL,
   type CarrierPreference,
@@ -103,7 +104,7 @@ import {
 } from './relay-session.ts';
 import { browserFetch, type DaemonFetch } from './runtime-models.ts';
 import type { PromptOrigin } from './step-up-gate.ts';
-import { noTunnelReason, type TunnelServiceState } from './tunnel-service.ts';
+import { noTunnelReason, TUNNEL_SWITCHED_OFF, type TunnelServiceState } from './tunnel-service.ts';
 
 /* ---------- the socket adapter seam --------------------------------------- */
 
@@ -186,6 +187,9 @@ const browserHeartbeat: RelayHeartbeatSchedule = (tick, interval) => {
   const handle = setInterval(tick, interval);
   return () => clearInterval(handle);
 };
+
+/** The page's monotonic clock, which a wall-clock change cannot make a deadline look late by. */
+const monotonicNow = (): number => globalThis.performance.now();
 
 /**
  * The code a browser uses for a socket that ended without a close frame.
@@ -404,6 +408,10 @@ export interface OpenRelaySessionOptions {
   readonly onData?: RelayClientSessionDependencies['onData'];
   /** How long the session may take to be accepted. The heartbeat grace by default. */
   readonly deadlineMs?: number;
+  /** Told when this session, once serving, is dropped under this browser. See {@link driveRelaySession}. */
+  readonly onDropped?: (end: CarrierSessionEnd) => void;
+  /** A monotonic clock for the keepalive and the drop report; the page's own by default. */
+  readonly clock?: () => number;
 }
 
 /**
@@ -462,6 +470,18 @@ export const KEEPALIVE_DEADLINE_MS = 10_000;
 export const LIVENESS_CHECK_DEADLINE_MS = 4_000;
 
 /**
+ * How late a heartbeat deadline may fire before the silence it measured is not believed.
+ *
+ * A TIMER THAT FIRED LATE DID NOT WATCH THE SOCKET. A phone that hides an installed app freezes the page
+ * or throttles its timers to once a minute; on the way back every overdue timer and every queued message
+ * is delivered, in an order the browser does not promise. A pong that arrived while the page was frozen
+ * can still be queued BEHIND the deadline it answers, so a deadline that fires well past its time has
+ * measured the freeze, not the carrier. It is forgiven ONCE: a fresh ping with the liveness-check
+ * deadline, now on a running page — answered, and the session lives; silent again, and it is dead.
+ */
+export const HEARTBEAT_LATE_TOLERANCE_MS = 2_000;
+
+/**
  * Asks one held session to prove it is alive within `deadlineMs`, or end. Registered by
  * {@link driveRelaySession} for every session it keeps alive; absent for one it does not.
  */
@@ -489,6 +509,8 @@ export const driveRelaySession = async <T>({
   settled,
   keepAlive,
   deadlineMs = HEARTBEAT_GRACE_SECONDS * 1_000,
+  clock = monotonicNow,
+  onDropped,
 }: {
   readonly socket: RelayCarrierSocket;
   readonly session: RelayClientSession;
@@ -497,17 +519,38 @@ export const driveRelaySession = async <T>({
   readonly keepAlive: boolean;
   /** How long the session may take to settle. The heartbeat grace by default; shorter for a probe. */
   readonly deadlineMs?: number;
+  /** A monotonic millisecond clock: how late a deadline fired, and how long the session lived. */
+  readonly clock?: () => number;
+  /**
+   * Told once when a session that was SERVING ends without this browser asking — the carrier closed
+   * under it, or its heartbeat went unanswered. Never for a dial that failed, a close this app made, or
+   * a stream the daemon concluded. What `carrier-drops.ts` keeps.
+   */
+  readonly onDropped?: (end: CarrierSessionEnd) => void;
 }): Promise<T> => {
   let opened = false;
+  /** When the session started serving, once it has; a close before that is a failed dial, not a drop. */
+  let servingSince: number | undefined;
+  let lastHeardAt = clock();
   const timers = new Set<() => void>();
   const stop = (): void => {
     for (const cancel of timers) cancel();
     timers.clear();
     livenessChecks.delete(session);
   };
+  /** A session that was serving ended under this browser: say so once, with what it measured. */
+  const dropped = (code: number, reason: string): void => {
+    if (servingSince === undefined) return;
+    const now = clock();
+    const since = servingSince;
+    servingSince = undefined;
+    onDropped?.({ code, reason, livedMs: now - since, lastHeardMs: now - lastHeardAt });
+  };
   // The one unanswered ping, if any. Any inbound message disarms it — that is the evidence of life —
   // so a deadline that fires has, by construction, heard nothing since it was armed.
   let pongDeadline: { readonly within: number; readonly cancel: () => void } | undefined;
+  /** Whether the last deadline was forgiven for firing late; cleared by any evidence of life. */
+  let forgiven = false;
   const armDeadline = (withinMs: number): void => {
     // A shorter wait replaces a longer one — a liveness check under the regular ping — and a longer
     // one never relaxes a shorter one already armed.
@@ -516,16 +559,23 @@ export const driveRelaySession = async <T>({
       pongDeadline.cancel();
       timers.delete(pongDeadline.cancel);
     }
+    const armedAt = clock();
     const cancel = heartbeat(() => {
       // A repeating schedule used once: the first tick is the deadline.
       cancel();
       timers.delete(cancel);
       pongDeadline = undefined;
+      // Fired long after its time: the page was frozen or throttled, so this silence is the browser's,
+      // not the carrier's. Ask again on a running page — see HEARTBEAT_LATE_TOLERANCE_MS.
+      if (!forgiven && clock() - armedAt - withinMs > HEARTBEAT_LATE_TOLERANCE_MS) {
+        forgiven = true;
+        ping(LIVENESS_CHECK_DEADLINE_MS);
+        return;
+      }
       stop();
-      session.carrierClosed(
-        RELAY_CLOSE_CODES.heartbeatTimeout,
-        `the carrier showed no sign of life for ${String(withinMs / 1_000)} s after a heartbeat`,
-      );
+      const reason = `the carrier showed no sign of life for ${String(withinMs / 1_000)} s after a heartbeat`;
+      dropped(RELAY_CLOSE_CODES.heartbeatTimeout, reason);
+      session.carrierClosed(RELAY_CLOSE_CODES.heartbeatTimeout, reason);
       socket.close(RELAY_CLOSE_CODES.heartbeatTimeout, 'no heartbeat');
     }, withinMs);
     timers.add(cancel);
@@ -536,6 +586,8 @@ export const driveRelaySession = async <T>({
     armDeadline(withinMs);
   };
   const alive = (): void => {
+    lastHeardAt = clock();
+    forgiven = false;
     if (pongDeadline === undefined) return;
     pongDeadline.cancel();
     timers.delete(pongDeadline.cancel);
@@ -561,6 +613,9 @@ export const driveRelaySession = async <T>({
   };
   socket.onClose = (code, reason) => {
     stop();
+    // Only a session still serving or streaming was dropped: one this browser closed, or whose stream
+    // the daemon concluded, has already left both states.
+    if (session.live() || session.streaming()) dropped(code, reason);
     session.carrierClosed(code, reason);
   };
   try {
@@ -569,6 +624,7 @@ export const driveRelaySession = async <T>({
       stop();
       return value;
     }
+    servingSince = clock();
     // The deadline covered getting here and nothing after it; the heartbeat covers
     // the rest. Leaving it armed would close a working session.
     deadline();
@@ -624,6 +680,8 @@ export const openSessionOnSocket = async ({
   mode,
   onData,
   deadlineMs,
+  onDropped,
+  clock,
 }: Omit<OpenRelaySessionOptions, 'dial' | 'method'> & {
   readonly socket: CarrierSocket;
 }): Promise<RelayClientSession> => {
@@ -641,6 +699,8 @@ export const openSessionOnSocket = async ({
     settled: session.ready(),
     keepAlive: true,
     ...(deadlineMs === undefined ? {} : { deadlineMs }),
+    ...(onDropped === undefined ? {} : { onDropped }),
+    ...(clock === undefined ? {} : { clock }),
   });
 };
 
@@ -951,8 +1011,19 @@ export interface DaemonCarrierRouterOptions {
    * walk a lookup of its own.
    */
   readonly learned?: (daemon: DaemonConnection, carriers: readonly ConnectionMethod[]) => void;
+  /**
+   * Where a held session this router opened is reported when it DROPS, and where the next session to
+   * the same machine says it reconnected (`carrier-drops.ts`). Diagnostics only: nothing here decides.
+   */
+  readonly drops?: Pick<CarrierDropLog, 'dropped' | 'reconnected'>;
   /** The clock {@link TUNNEL_LOOKUP_REUSE_MS} is measured on. */
   readonly now?: () => number;
+  /**
+   * Whether the machine itself said its tunnel is switched off (`GET /v1/tunnel`, §15) — the reason
+   * "Tunnel only" names before the service's, because it is the one a person can act on. Absent: nobody
+   * has asked, and the service's reason stands.
+   */
+  readonly tunnelSwitchedOff?: (daemonId: DaemonId) => boolean;
   /**
    * Asked when the daemon refuses a request for want of a passkey step-up (`grant_step_up_required`):
    * `true` once the person has confirmed, and the request is then sent again ONCE. Absent means
@@ -1029,6 +1100,10 @@ export const TUNNEL_LOOKUP_REUSE_MS = 30_000;
 
 /** The deadline on one lookup, so a walk waiting on it is never held by a question nobody answers. */
 export const TUNNEL_LOOKUP_TIMEOUT_MS = 10_000;
+
+/** Said when a carrier-control request has neither a direct address nor a relay to travel. */
+export const CONTROL_UNREACHABLE =
+  'neither this machine’s own address nor a relay reaches it, so its tunnel can only be switched at the machine';
 
 /** One tunnel lookup: when it was asked, and what it found — a tunnel, or nothing. */
 interface TunnelLookup {
@@ -1229,12 +1304,14 @@ export class DaemonCarrierRouter {
   readonly #dial: RelayDial;
   readonly #crypto: RelayClientSessionDependencies['crypto'];
   readonly #heartbeat: RelayHeartbeatSchedule | undefined;
+  readonly #drops: Pick<CarrierDropLog, 'dropped' | 'reconnected'> | undefined;
   readonly #hostedRelay: () => Promise<string | undefined>;
   readonly #preference: (daemonId: DaemonId) => CarrierPreference;
   readonly #dialers: CarrierDialers;
   readonly #tunnelService: () => Promise<TunnelServiceState>;
   readonly #learned: (daemon: DaemonConnection, carriers: readonly ConnectionMethod[]) => void;
   readonly #now: () => number;
+  readonly #tunnelSwitchedOff: (daemonId: DaemonId) => boolean;
   readonly #deviceKey: DeviceKeyResolver;
   readonly #appSession: string;
   readonly #stepUp: DaemonCarrierRouterOptions['stepUp'];
@@ -1273,6 +1350,7 @@ export class DaemonCarrierRouter {
     this.#dial = options.dial ?? browserRelayDial;
     this.#crypto = options.crypto;
     this.#heartbeat = options.heartbeat;
+    this.#drops = options.drops;
     // No provider is direct-only, which is what a build with no relay directory honestly is.
     this.#hostedRelay = options.hostedRelay ?? (async () => undefined);
     this.#preference = options.preference ?? (() => DEFAULT_CARRIER_PREFERENCE);
@@ -1280,6 +1358,7 @@ export class DaemonCarrierRouter {
     this.#tunnelService = options.tunnelService ?? (async () => 'unavailable');
     this.#learned = options.learned ?? (() => undefined);
     this.#now = options.now ?? Date.now;
+    this.#tunnelSwitchedOff = options.tunnelSwitchedOff ?? (() => false);
     this.#deviceKey = options.deviceKey;
     this.#appSession = options.appSession ?? toBase64Url(options.crypto.randomBytes(APP_SESSION_BYTES));
     this.#stepUp = options.stepUp;
@@ -1582,7 +1661,42 @@ export class DaemonCarrierRouter {
    * behaviour that can ever recover.
    */
   async send(daemon: DaemonConnection, url: string, init: RequestInit = {}): Promise<Response> {
-    let response = await this.#sendOnce(daemon, url, init);
+    return await this.#confirmed(daemon, init, async () => await this.#sendOnce(daemon, url, init));
+  }
+
+  /**
+   * A CARRIER-CONTROL REQUEST — `GET` or `PUT /v1/tunnel` (§15) — over the carriers that introduce,
+   * whatever this device's preference is, and never over the tunnel or WebRTC.
+   *
+   * Two reasons, both structural. Under "Tunnel only" with the tunnel switched off there is nothing the
+   * preference allows that could carry the request to switch it ON — the person would be asked to turn
+   * on a tunnel over the tunnel they are turning on. And switching it OFF over itself would end the
+   * connection carrying the answer. So these ride the daemon's direct address or a rendezvous, exactly as
+   * WebRTC signalling and the tunnel lookup do: one request about how this device reaches the machine,
+   * inside a device-authenticated session, never the person's own work. It decides nothing — no winner
+   * is remembered — and a passkey it needs is asked for as any press's is.
+   */
+  async control(daemon: DaemonConnection, url: string, init: RequestInit = {}): Promise<Response> {
+    return await this.#confirmed(daemon, init, async () => {
+      const entry = this.#entry(daemon);
+      if (entry.refused) throw new DeviceNotAcceptedError();
+      const target = new URL(url);
+      return await this.#introduce(
+        entry,
+        await this.#introducers(entry),
+        `${target.pathname}${target.search}`,
+        init,
+        CONTROL_UNREACHABLE,
+      );
+    });
+  }
+
+  /**
+   * One request, asked again once after the person gives the passkey the daemon wanted — an unlock on
+   * opening, then a step-up for the act. `once` is the whole attempt, so a resend travels as the first did.
+   */
+  async #confirmed(daemon: DaemonConnection, init: RequestInit, once: () => Promise<Response>): Promise<Response> {
+    let response = await once();
     // A READ IS THE PAGE'S OWN WORK, so a passkey it needs waits for its machine to be on screen; anything
     // else is a press, and asks at once.
     const origin = requestOrigin(init);
@@ -1596,7 +1710,7 @@ export class DaemonCarrierRouter {
       (await answersWithCode(response, UNLOCK_REQUIRED_CODE))
     ) {
       if (!(await confirmUnlock(daemon, origin))) return response;
-      response = await this.#sendOnce(daemon, url, init);
+      response = await once();
     }
     // A PASSKEY STEP-UP IS A PAUSE, NOT A FAILURE. The daemon allowed the act and wants its owner to
     // confirm; once they have, the same request is sent again exactly once — its body is text, so it
@@ -1608,7 +1722,7 @@ export class DaemonCarrierRouter {
     // The act the daemon NAMED, or nothing: an unparseable demand still asks, and the prompt says "this change".
     const act = demand === null ? undefined : stepUpAct(demand);
     if (!(await ask(daemon, act, origin))) return response;
-    return await this.#sendOnce(daemon, url, init);
+    return await once();
   }
 
   /**
@@ -1840,7 +1954,10 @@ export class DaemonCarrierRouter {
           yield { method: learned };
           continue;
         }
-        if (ofKind.length === 0) plan.why = noTunnelReason(await this.#tunnelService());
+        if (ofKind.length === 0)
+          plan.why = this.#tunnelSwitchedOff(daemon.daemonId)
+            ? TUNNEL_SWITCHED_OFF
+            : noTunnelReason(await this.#tunnelService());
         continue;
       }
       if (ofKind.length > 0 || kind === 'direct') continue;
@@ -2116,26 +2233,39 @@ export class DaemonCarrierRouter {
     onData?: RelayStreamRequest['onData'],
   ): Promise<RelayClientSession> {
     const device = await this.#claim(entry);
+    const daemonId = entry.connection.daemonId;
+    const drops = this.#drops;
     const open = async (claim: SessionDeviceClaim): Promise<RelayClientSession> => {
+      const sessionMode = mode(claim);
       const options = {
         crypto: this.#crypto,
         daemon: entry.connection,
         ...(this.#heartbeat === undefined ? {} : { heartbeat: this.#heartbeat }),
-        mode: mode(claim),
+        mode: sessionMode,
         ...(onData === undefined ? {} : { onData }),
+        ...(drops === undefined
+          ? {}
+          : {
+              onDropped: (end: CarrierSessionEnd) =>
+                drops.dropped(daemonId, method.kind, sessionMode.kind === 'stream' ? 'stream' : 'requests', end),
+            }),
         // Only a relay keeps the full heartbeat grace: it is the last resort. Every carrier before it
         // gets the direct acceptance deadline, so a carrier that neither answers nor refuses costs
         // seconds before the walk moves on (§15: a tunnel is dialled like a direct session).
         ...(method.kind === 'relay' ? {} : { deadlineMs: DIRECT_SESSION_DEADLINE_MS }),
       };
-      if (method.kind === 'webrtc') return await openSessionOnSocket({ ...options, socket: await this.#webrtc(entry) });
-      return await openRelaySession({ ...options, dial: this.#dial, method });
+      const session =
+        method.kind === 'webrtc'
+          ? await openSessionOnSocket({ ...options, socket: await this.#webrtc(entry) })
+          : await openRelaySession({ ...options, dial: this.#dial, method });
+      // A drop still waiting for its reconnect learns how long it waited (`carrier-drops.ts`).
+      drops?.reconnected(daemonId);
+      return session;
     };
     try {
       return await open(device);
     } catch (refused) {
       const rotation = this.#rotation;
-      const daemonId = entry.connection.daemonId;
       const pending = deviceRefusal(refused) ? await rotation?.pending(daemonId).catch(() => undefined) : undefined;
       if (rotation === undefined || pending === undefined) throw refused;
       try {
@@ -2224,9 +2354,10 @@ export class DaemonCarrierRouter {
     introducers: readonly ConnectionMethod[],
     path: string,
     init: RequestInit,
+    none = 'no carrier can introduce WebRTC to this machine',
   ): Promise<Response> {
     const url = new URL(path, entry.connection.baseUrl).toString();
-    let failure: unknown = new Error('no carrier can introduce WebRTC to this machine');
+    let failure: unknown = new Error(none);
     for (const method of introducers) {
       this.#assertCurrent(entry);
       try {

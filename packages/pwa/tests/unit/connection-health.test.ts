@@ -110,18 +110,20 @@ describe('reconnectDelayMs', () => {
     expect(reconnectDelayMs(0, 0.5)).toBe(RECONNECT_BASE_MS * 0.75);
   });
 
-  it('doubles per attempt from the 500 ms base', () => {
-    expect(reconnectDelayMs(1, 0)).toBe(500);
-    expect(reconnectDelayMs(1, 1)).toBe(1_000);
-    expect(reconnectDelayMs(2, 1)).toBe(2_000);
-    expect(reconnectDelayMs(3, 1)).toBe(4_000);
-    expect(reconnectDelayMs(4, 1)).toBe(8_000);
+  it('retries a drop inside 300 ms, then doubles per attempt from the 300 ms base', () => {
+    expect(reconnectDelayMs(0, 1)).toBeLessThanOrEqual(300);
+    expect(reconnectDelayMs(1, 0)).toBe(300);
+    expect(reconnectDelayMs(1, 1)).toBe(600);
+    expect(reconnectDelayMs(2, 1)).toBe(1_200);
+    expect(reconnectDelayMs(3, 1)).toBe(2_400);
+    expect(reconnectDelayMs(4, 1)).toBe(4_800);
+    expect(reconnectDelayMs(5, 1)).toBe(9_600);
   });
 
   it('never exceeds the ten second ceiling, whatever the attempt number', () => {
-    expect(reconnectDelayMs(5, 0)).toBe(RECONNECT_CEILING_MS / 2);
-    expect(reconnectDelayMs(5, 1)).toBe(RECONNECT_CEILING_MS);
-    for (const attempt of [6, 29, 30, 31, 1_000, 1_000_000]) {
+    expect(reconnectDelayMs(6, 0)).toBe(RECONNECT_CEILING_MS / 2);
+    expect(reconnectDelayMs(6, 1)).toBe(RECONNECT_CEILING_MS);
+    for (const attempt of [7, 29, 30, 31, 1_000, 1_000_000]) {
       expect(reconnectDelayMs(attempt, 0)).toBe(RECONNECT_CEILING_MS / 2);
       expect(reconnectDelayMs(attempt, 1)).toBe(RECONNECT_CEILING_MS);
     }
