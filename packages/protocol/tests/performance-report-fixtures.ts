@@ -1,4 +1,4 @@
-import type { DurationStats, PerformanceReport } from '@ferretry/protocol';
+import type { DurationStats, PerformanceReport } from '../src/lib/performance.ts';
 
 export const wallStats = (totalMs: number, p50Ms = 1, p95Ms = 2, maxMs = 3): DurationStats => ({
   totalMs,

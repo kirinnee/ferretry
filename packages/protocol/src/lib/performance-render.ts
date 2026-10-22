@@ -1,4 +1,4 @@
-import type { DurationStats, PerformanceReport } from '@ferretry/protocol';
+import type { DurationStats, PerformanceReport } from './performance.ts';
 
 /** How many rows of each table the text shows; `--json` carries all of them. */
 const ROWS = 12;

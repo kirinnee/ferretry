@@ -1,8 +1,8 @@
 import { describe, it } from 'bun:test';
-import type { PerformanceReport } from '@ferretry/protocol';
+import type { PerformanceReport } from '../../src/lib/performance.ts';
 import should from 'should';
-import { renderPerformanceReport } from '../../../../src/lib/daemon/profile/render.ts';
-import { fullReport, minimalReport, wallStats } from './report-fixtures.ts';
+import { renderPerformanceReport } from '../../src/lib/performance-render.ts';
+import { fullReport, minimalReport, wallStats } from '../performance-report-fixtures.ts';
 
 describe('renderPerformanceReport', () => {
   it('should lay out every section of a full report', () => {
