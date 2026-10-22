@@ -1,6 +1,11 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { ComposerOccupiedError, TmuxPaneQueue } from '../../../src/adapters/index.ts';
+import {
+  COMPOSER_READS,
+  ComposerOccupiedError,
+  ComposerUnreadableError,
+  TmuxPaneQueue,
+} from '../../../src/adapters/index.ts';
 import { type TmuxCommandPort, type TmuxCommandResult, TmuxController } from '../../../src/lib/index.ts';
 
 const SESSION = 'fy-session-1';
@@ -192,6 +197,52 @@ describe('tmux pane queue', () => {
     should(pane.calls.some(call => call[0] === 'send-keys')).be.false();
   });
 
+  it('should type nothing into a composer it cannot place, however long it looks', async () => {
+    // Arrange — text in the composer and no cursor from tmux: a draft or a placeholder, no frame says.
+    const pane = new (class extends BusyPane {
+      override async execute(argv: readonly string[]): Promise<TmuxCommandResult> {
+        if (argv[0] === 'display-message') {
+          this.calls.push(argv);
+          return ok('0||||24|80\n');
+        }
+        return await super.execute(argv);
+      }
+    })(true);
+    pane.composer = 'half a question';
+    const { subject, slept } = queue(pane);
+
+    // Act / Assert
+    await should(subject.queue(SESSION, 'read the queued brief')).be.rejectedWith(ComposerUnreadableError);
+    should(pane.calls.some(call => call[0] === 'send-keys')).be.false();
+    should(slept).have.length(COMPOSER_READS - 1, 'looked again a poll apart before refusing');
+    should(pane.composer).equal('half a question');
+  });
+
+  it('should type once a repaint caught halfway has passed and the composer reads empty', async () => {
+    // Arrange — the first frame is mid-repaint: text on the composer row and the cursor elsewhere.
+    let repainting = true;
+    const pane = new (class extends BusyPane {
+      override async execute(argv: readonly string[]): Promise<TmuxCommandResult> {
+        if (repainting && (argv[0] === 'display-message' || argv[0] === 'capture-pane')) {
+          this.calls.push(argv);
+          if (argv[0] === 'capture-pane' && !argv.includes('-S')) repainting = false;
+          return ok(
+            argv[0] === 'capture-pane' ? '✻ Lollygagging… (34s · ⚒ 2.1k tokens)\n> Lollyga\n' : '0||0|23|24|80\n',
+          );
+        }
+        return await super.execute(argv);
+      }
+    })(true);
+    const { subject } = queue(pane);
+
+    // Act
+    const outcome = await subject.queue(SESSION, 'read the queued brief');
+
+    // Assert
+    should(outcome).equal('held');
+    should(pane.calls.filter(call => call.includes('-l'))).have.length(1);
+  });
+
   it('should give up rather than keep typing into a composer that takes nothing', async () => {
     // Arrange
     const pane = new BusyPane(true);
@@ -200,9 +251,10 @@ describe('tmux pane queue', () => {
 
     // Act / Assert
     await should(subject.queue(SESSION, 'read the queued brief')).be.rejectedWith(/did not land in the composer/u);
-    // Cleared before a RETRY only — never before the first attempt, which would destroy a paste the
-    // harness had already taken.
-    should(pane.keysSent()).deepEqual(['C-u']);
+    // Typed again only into a composer proven empty, and nothing is ever erased to make room: Claude's
+    // `C-u` takes one wrapped row, so a clear-and-retype left a clipped copy and appended another.
+    should(pane.keysSent()).deepEqual([]);
+    should(pane.calls.filter(call => call.includes('-l'))).have.length(2);
   });
 
   it('should report a submit tmux itself refused', async () => {

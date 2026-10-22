@@ -30,6 +30,14 @@
  *   * Claude no longer writes a transcript `queue-operation` record for text typed into its queue,
  *     so this block is the ONLY proof a held message has. Missing it called the message lost, and
  *     the daemon typed it again — four copies in one queue, and the sender told it never arrived.
+ *   * A named session (`claude -n`) draws its name inside the rule ABOVE the composer
+ *     (`──── [Aime] MXO OCI Migration ─`). Nothing here reads that rule, so the title changes nothing.
+ *   * An empty idle composer suggests something to type, `Try "edit <filepath> to..."`, with the
+ *     cursor at its first column. That wording is a placeholder even when tmux reports no cursor.
+ *   * `C-u` erases back to the start of the WRAPPED ROW the cursor is on, not the whole message:
+ *     a pointer wrapped over three rows loses only its last one. A "clear and retype" therefore
+ *     leaves a clipped copy behind and appends a whole new one — the pile of six pointers on one
+ *     person's draft, one of them cut at `This is your `.
  *
  * Every function here is pure; the cursor comes from tmux beside the capture.
  */
@@ -73,6 +81,8 @@ const PENDING_HINT = /edit (?:the )?last queued message/iu;
 
 /** Claude's empty composer while messages wait in its queue. Never input, whatever the cursor says. */
 const CLAUDE_QUEUED_PLACEHOLDER = /^press\s+up\s+to\s+edit\s+queued\s+messages?$/iu;
+/** Claude's empty idle composer, suggesting a prompt. A placeholder by its wording when no cursor says. */
+const CLAUDE_SUGGESTION_PLACEHOLDER = /^try\s+"[^"\n]*"$/iu;
 /** The line that closes Claude's queued block, directly under its last message. */
 const CLAUDE_QUEUE_HINT = /^\s*ctrl\+x\s+ctrl\+s\s+to\s+send\s+now\s*$/iu;
 /** How far above the composer the hint may sit: the spinner, its tip and a todo list lie between. */
@@ -132,7 +142,9 @@ function placeholderOf(
   if (end === at && CLAUDE_QUEUED_PLACEHOLDER.test(text)) return true;
   // One row past the draft is still the composer: a draft ending in a newline — which is what a
   // swallowed Enter leaves — parks the cursor on the blank row it opened.
-  if (cursor.x === undefined || cursor.y === undefined || cursor.y < at || cursor.y > end + 1) return undefined;
+  if (cursor.x === undefined || cursor.y === undefined || cursor.y < at || cursor.y > end + 1)
+    // With no cursor to ask, only a harness's own placeholder wording proves nobody typed it.
+    return end === at && CLAUDE_SUGGESTION_PLACEHOLDER.test(text) ? true : undefined;
   const firstColumn = prompt.indexOf(match[1] as string) + GLYPH_GAP;
   return end === at && cursor.y === at && cursor.x <= firstColumn;
 }
@@ -263,6 +275,20 @@ export function showsPayload(drawn: string, text: string): boolean {
   return prefix.length >= CLIPPED_MATCH_MIN && wanted.startsWith(prefix);
 }
 
+/**
+ * Whether the composer's text holds this payload ANYWHERE — alone, or typed beside text that is not
+ * this send's: a person's draft it was appended to, or another copy of itself.
+ *
+ * Exact equality answered "not in the composer" for a pointer sitting after a person's draft, and
+ * "not in the composer" is what licenses typing it again. A payload too short to be told from a word
+ * of somebody's draft is held only when it is all the composer shows.
+ */
+export function composerContains(composer: string, text: string): boolean {
+  if (showsPayload(composer, text)) return true;
+  const wanted = squeezed(text);
+  return wanted.length >= CLIPPED_MATCH_MIN && squeezed(composer).includes(wanted);
+}
+
 /** Where a frame shows a payload being held, if anywhere. */
 export type HeldAt = 'composer' | 'queue';
 
@@ -287,7 +313,7 @@ export type PaneHold = HeldAt | 'absent' | 'unknown';
 export function paneHoldOf(visible: string, cursor: ComposerCursor, text: string, paste: boolean): PaneHold {
   const composer = readComposer(visible, cursor);
   if (composer !== undefined && composer.placeholder !== true) {
-    if (showsPayload(composer.text, text)) return 'composer';
+    if (composerContains(composer.text, text)) return 'composer';
     if (paste && composer.pasted) return 'composer';
   }
   const queue = readHarnessQueue(visible);

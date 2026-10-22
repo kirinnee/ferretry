@@ -14,7 +14,7 @@
 import { paneShowsOpenPicker } from '../session/harness/picker-screen.ts';
 import type { LandingEvidence } from './composer.ts';
 import { composerHolds } from './composer.ts';
-import { readComposer, showsPayload } from './composer-screen.ts';
+import { composerContains, readComposer, showsPayload } from './composer-screen.ts';
 import { paneShowsActiveWork } from './pane.ts';
 import type { StartupDialogAction, StartupDialogOptions } from './startup.ts';
 import { startupDialogAction } from './startup.ts';
@@ -166,7 +166,7 @@ export function classifySubmit(frame: DeliveryFrame, text: string, evidence: Lan
 }
 
 /**
- * Whether the composer itself still holds the payload.
+ * Whether the composer itself still holds the payload — alone, or beside other text.
  *
  * Read from the composer line and the cursor, not by finding the payload's words anywhere on screen:
  * once submitted, a message is echoed into the conversation above, so a whole-frame search keeps
@@ -178,7 +178,27 @@ function stillComposed(frame: DeliveryFrame, text: string, evidence: LandingEvid
   const composer = readComposer(frame.visible, { x: frame.cursorX, y: frame.cursorY });
   if (composer === undefined || composer.placeholder === undefined) return composerHolds(frame.visible, text, evidence);
   if (composer.placeholder) return false;
-  return evidence === 'placeholder' ? composer.pasted : showsPayload(composer.text, text);
+  return evidence === 'placeholder' ? composer.pasted : composerContains(composer.text, text);
+}
+
+/**
+ * What the composer holds before anything is typed, as far as one frame can PROVE it.
+ *
+ * `empty` — nothing, or a placeholder the cursor (or the harness's own wording) shows nobody typed.
+ * `input` — text the cursor proves is typed. `unreadable` — no composer line at all, or text the
+ * cursor cannot place, which may be a person's draft. Only `empty` may ever be typed into: treating
+ * "could not tell" as "empty" is how a turn pointer was typed onto a person's half-written question.
+ */
+export type ComposerState =
+  | { readonly kind: 'empty' }
+  | { readonly kind: 'input'; readonly text: string }
+  | { readonly kind: 'unreadable' };
+
+export function composerState(frame: DeliveryFrame): ComposerState {
+  const composer = readComposer(frame.visible, { x: frame.cursorX, y: frame.cursorY });
+  if (composer === undefined) return { kind: 'unreadable' };
+  if (composer.text === '' || composer.placeholder === true) return { kind: 'empty' };
+  return composer.placeholder === false ? { kind: 'input', text: composer.text } : { kind: 'unreadable' };
 }
 
 /**

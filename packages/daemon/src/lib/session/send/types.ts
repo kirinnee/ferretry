@@ -492,6 +492,17 @@ export class SendComposerOccupied extends Error {
   }
 }
 
+/**
+ * The agent's composer could not be read well enough to prove it empty, so nothing was typed. Thrown
+ * by the terminal BEFORE any keystroke: a composer that may hold a person's draft is never typed into.
+ */
+export class SendComposerUnreadable extends Error {
+  constructor() {
+    super("the agent's composer could not be read to prove it empty; nothing was typed");
+    this.name = 'SendComposerUnreadable';
+  }
+}
+
 /** The session cannot take input at all: a quarantine, an unconfirmed kill, an unanswered question. */
 export class SendUnavailable extends SendRefused {
   constructor(message: string) {

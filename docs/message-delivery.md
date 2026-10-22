@@ -30,8 +30,14 @@ stuck forever"):
    conversation the message had already been submitted into. `hello` was even reported **Queued**.
 
 The cursor is what tells a placeholder from input: an empty composer parks the cursor at its first
-column, typed text moves it past itself. A frame with no readable composer (no prompt line, or no cursor
-on it) falls back to the older character count, which is weaker but never claims a placeholder is input.
+column, typed text moves it past itself. Claude Code's idle suggestion (`Try "…"`) and its queued
+placeholder are placeholders by their wording, whatever the cursor says.
+
+**Nothing is typed into a composer that is not proven empty** (`composerState`, `fillComposer`). A
+frame with no prompt line, or text the cursor cannot place, is `unreadable` — it may be a person's
+draft — and a fill looks again a few frames apart (`COMPOSER_READS`), then types nothing. Only AFTER
+typing into a proven-empty composer may a frame with no cursor fall back to the older character count
+as proof of landing.
 
 ## Measured Codex behaviour
 
@@ -50,6 +56,8 @@ Responses API (fixtures: `packages/daemon/tests/fixtures/composer/`, each a `cap
 | Tab mid-turn holds it under `Queued follow-up inputs` (`↳`)      | yes      | —     | —     |
 | `C-u` on an empty line joins it onto the line above              | yes      | yes   | yes   |
 | One `C-u` erases a whole logical line, however it wraps          | yes      | yes   | yes   |
+
+Claude Code does NOT share that last row: see below.
 
 `—` is "not measured", never "no".
 
@@ -70,6 +78,13 @@ the tests check every cursor tmux could report).
   says** — read as input it refused every later send over a draft nobody typed.
 - **No transcript record is written** for text typed into that queue (no `queue-operation`), so the
   block on screen is the only proof the message is held until the turn ends and Claude submits it.
+- A named session (`claude -n`) draws its name inside the rule ABOVE the composer
+  (`──── [Aime] MXO OCI Migration ─`). The composer is read upward from its own prompt line, so the
+  title changes nothing (fixtures `claude-2.1.281-titled-*`, live at 82 columns, with their cursor).
+- The cursor sits after the last typed character, on the composer's last wrapped row; an empty composer
+  shows a `Try "…"` suggestion with the cursor at its first column.
+- **`C-u` erases back to the start of the wrapped ROW the cursor is on**, not the message: a pointer
+  wrapped over three rows loses only its last row (`claude-2.1.281-titled-draft-pointer-after-cu`).
 
 The incident: one `fy send` to a mid-turn Claude ferret was not recognised as held, so at each deadline
 (15 s, 30 s, 60 s) the tracker called it absent and typed it again — **four copies in one queue**, and
@@ -103,7 +118,29 @@ before the keys). Two places enforce it:
 An `unaccounted` send's notice to an agent sender says it **could not be confirmed** and may still have
 landed — not that it "did not reach" the recipient, which invited the sender to send the copy itself.
 
-## Never typing onto unsent text
+## Never typing onto unsent text — and never typing twice
+
+The owner's screenshot of a Claude ferret (`claude-pileup-screenshot`): the person's half-written
+question, then SIX copies of one turn pointer glued onto it, one of them cut at `This is your `, and
+nothing submitted. Each copy came from the composer fill's old retry: it could not prove its own
+landing — the composer held the draft as well, never exactly the pointer — so it sent `C-u` and typed
+again, three fills a delivery. `C-u` took only Claude's last wrapped row, which is the clipped copy,
+and because landing was never proven Enter was never pressed. A second delivery of the same turn
+(`turn-026` again: a failed delivery never started its turn) made six. The reading that let the first
+copy land beside a draft — a composer the cursor could not place, read as empty, or the person's keys
+arriving during the fill — is the one the rule above now refuses.
+
+So a fill types its payload into a proven-empty composer, and types again only into a composer proven
+empty AGAIN (the keys never arrived). A composer holding anything after a fill — the payload, the
+payload beside a person's text, a clipped copy — is left exactly as it is, with no `C-u`: the send's
+fate stays open and the tracker reads it. A payload found ANYWHERE in the composer (`composerContains`,
+for a payload of 12 or more characters) is held there, never absent, so no deadline retypes it, and
+Enter is pressed on it only when the composer holds exactly it.
+
+A composer that cannot be read is refused before a key: a fresh send is withdrawn and answered `409`
+(`send_refused`: "nothing was typed; send it again in a moment"), a released held message goes back to
+held, and a tracker re-attempt is withheld (`unreadable`) and settled `unaccounted`
+(`pane_unreadable`) — never retyped.
 
 A send first reads the composer. If it already holds input, **nothing is typed onto it**. What happens
 next depends on whose text it is.
@@ -148,15 +185,15 @@ typed the same words.
 
 ## What a message row can say
 
-| Row                         | Proof                                                                                                                         |
-| --------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
-| Sending                     | Accepted; nothing has proved where it is yet                                                                                  |
-| Typed, not sent             | `typedNotSent`: the composer still holds exactly this message ≥4 s after it was typed (a pointer: after its last Enter nudge) |
-| Queued                      | The harness holds it in its own queue (a Claude queue record or `❯` entry above the spinner, or Codex's `↳` entry)            |
-| Delivered                   | A user record in the transcript carries it — or carries it JOINED to its neighbours                                           |
-| Unconfirmed / Not delivered | As before: `unaccounted` / `timed_out`, with the reason                                                                       |
-| Cancelled                   | A person took it back; `cancelEffect` says what that did on the agent's screen                                                |
-| Status unknown              | THIS BROWSER could not read the ledger for 15 s; the row says since when, and why                                             |
+| Row                         | Proof                                                                                                                                                |
+| --------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Sending                     | Accepted; nothing has proved where it is yet                                                                                                         |
+| Typed, not sent             | `typedNotSent`: the composer still holds this message — alone or beside other text — ≥4 s after it was typed (a pointer: after its last Enter nudge) |
+| Queued                      | The harness holds it in its own queue (a Claude queue record or `❯` entry above the spinner, or Codex's `↳` entry)                                   |
+| Delivered                   | A user record in the transcript carries it — or carries it JOINED to its neighbours                                                                  |
+| Unconfirmed / Not delivered | As before: `unaccounted` / `timed_out`, with the reason                                                                                              |
+| Cancelled                   | A person took it back; `cancelEffect` says what that did on the agent's screen                                                                       |
+| Status unknown              | THIS BROWSER could not read the ledger for 15 s; the row says since when, and why                                                                    |
 
 `typedNotSent` is set by the tracker on **every** look (the first is ~2 s after the send), not only at a
 deadline, and is dropped when the composer no longer holds the message. **Queued** is set only when the

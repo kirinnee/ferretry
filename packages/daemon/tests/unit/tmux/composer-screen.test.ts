@@ -7,6 +7,7 @@ import {
   type ComposerCursor,
   composerInput,
   composerLanding,
+  composerState,
   type DeliveryFrame,
   heldAt,
   occupiedComposer,
@@ -334,5 +335,94 @@ describe('Claude Code 2.1.281 queue on real captures', () => {
     // 0.163.0 steered `hello` into the turn: absent from the queue, and provably so.
     const steered = capture('0.163.0', 'busy-pending');
     should(paneHoldOf(steered.visible, cursorOf(steered), 'hello', false)).equal('absent');
+  });
+});
+
+/**
+ * A NAMED Claude Code session — `claude -n "[Aime] MXO OCI Migration"` — read from live 2.1.281
+ * captures at the 82 columns of the incident pane, plus the incident's own frame rebuilt from the
+ * owner's screenshot: one person's question with SIX copies of one turn pointer typed onto it.
+ */
+describe('the composer of a titled Claude Code session', () => {
+  const POINTER =
+    'Read the file /Users/erng/.ferretry/state/sessions/mvgf1elu-2a90237a/turns/turn-026.md now, then ' +
+    'carefully follow every instruction inside it. This is your complete task for this turn.';
+  const DRAFT =
+    "before contiuing, i need to know -- for OCI's warpstream agent -- say they need to talk to OOS " +
+    "(OCI's s3), where do i get the permission?";
+
+  function titled(state: string): DeliveryFrame {
+    const name = state === 'screenshot' ? 'claude-pileup-screenshot' : `claude-2.1.281-titled-${state}`;
+    const visible = readFileSync(join(FIXTURES, `${name}.txt`), 'utf8');
+    const [x, y] = readFileSync(join(FIXTURES, `${name}.cursor`), 'utf8')
+      .trim()
+      .split('|');
+    return { alive: true, dead: false, promptReady: false, visible, cursorX: Number(x), cursorY: Number(y) };
+  }
+
+  const squeeze = (value: string): string => value.replace(/\s+/gu, '');
+  const withoutCursor = (frame: DeliveryFrame): DeliveryFrame => {
+    const { cursorX: _x, cursorY: _y, ...rest } = frame;
+    return rest;
+  };
+
+  it('should read past the title in the rule above it, to the suggestion an empty composer shows', () => {
+    const empty = titled('idle-empty');
+
+    should(empty.visible).containEql('[Aime] MXO OCI Migration');
+    should(readComposer(empty.visible, cursorOf(empty))?.placeholder).be.true();
+    should(composerState(empty)).deepEqual({ kind: 'empty' });
+    // The suggestion's own wording proves it is a placeholder when tmux reports no cursor.
+    should(composerState(withoutCursor(empty))).deepEqual({ kind: 'empty' });
+  });
+
+  it("should read the person's two-row question as their draft under the titled rule", () => {
+    const draft = titled('idle-draft');
+
+    should(squeeze(occupiedComposer(draft) ?? '')).equal(squeeze(DRAFT));
+    should(composerState(draft)).have.property('kind', 'input');
+  });
+
+  it('should call a composer whose cursor cannot place it unreadable, never empty', () => {
+    const draft = titled('idle-draft');
+    const elsewhere = { ...draft, cursorX: 0, cursorY: draft.visible.split('\n').length - 2 };
+
+    should(occupiedComposer(withoutCursor(draft))).be.undefined();
+    should(composerState(withoutCursor(draft))).deepEqual({ kind: 'unreadable' });
+    should(composerState(elsewhere)).deepEqual({ kind: 'unreadable' });
+  });
+
+  it('should find a pointer typed after a draft IN the composer, so it is never typed again', () => {
+    const typed = titled('draft-pointer');
+
+    should(squeeze(occupiedComposer(typed) ?? '')).equal(squeeze(DRAFT + POINTER));
+    // Exact equality said "absent" here, and absent is what licensed every retype.
+    should(paneHoldOf(typed.visible, cursorOf(typed), POINTER, false)).equal('composer');
+    should(paneHoldOf(typed.visible, {}, POINTER, false)).equal('composer');
+    should(heldAt(typed.visible, cursorOf(typed), POINTER, false)).equal('composer');
+    // A short payload that happens to be a word of the draft is not claimed.
+    should(paneHoldOf(typed.visible, cursorOf(typed), 'permission', false)).equal('absent');
+  });
+
+  it('should show that C-u erased only the last wrapped row, leaving a clipped pointer behind', () => {
+    // Measured live: one `C-u` took `for this turn.` and nothing else. A clear-and-retype on top of
+    // that is the screenshot's `This is your Read the file`.
+    const after = titled('draft-pointer-after-cu');
+    const text = occupiedComposer(after) ?? '';
+
+    should(squeeze(text)).equal(squeeze(`${DRAFT}${POINTER}`.replace(/for this turn\.$/u, '')));
+    should(paneHoldOf(after.visible, cursorOf(after), POINTER, false)).equal('absent');
+  });
+
+  it("should read the incident frame as the person's draft with the pointer held, from any cursor", () => {
+    const pileup = titled('screenshot');
+    const text = readComposer(pileup.visible, cursorOf(pileup))?.text ?? '';
+
+    should(squeeze(text).startsWith(squeeze(DRAFT))).be.true();
+    should(squeeze(text).split(squeeze(POINTER)).length - 1).equal(5, 'five whole copies, and one clipped');
+    should(composerState(pileup)).have.property('kind', 'input');
+    should(composerState(withoutCursor(pileup))).deepEqual({ kind: 'unreadable' });
+    should(paneHoldOf(pileup.visible, cursorOf(pileup), POINTER, false)).equal('composer');
+    should(paneHoldOf(pileup.visible, {}, POINTER, false)).equal('composer');
   });
 });

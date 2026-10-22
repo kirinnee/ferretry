@@ -6,7 +6,9 @@ import {
   classifySubmit,
   codexUpdateAction,
   composerEvidence,
+  composerContains,
   composerHolds,
+  composerState,
   composerTransport,
   type DeliveryFrame,
   harnessExitReason,
@@ -599,5 +601,46 @@ describe('submit classification read from the composer', () => {
       kind: 'delivered',
       outcome: 'turn-started',
     });
+  });
+});
+
+describe('the composer state a fill may type into', () => {
+  const POINTER =
+    'Read the file /Users/erng/.ferretry/state/sessions/s/turns/turn-026.md now, then carefully follow every ' +
+    'instruction inside it. This is your complete task for this turn.';
+  const at = (visible: string, cursorX?: number, cursorY?: number): DeliveryFrame => ({
+    alive: true,
+    dead: false,
+    promptReady: false,
+    visible,
+    ...(cursorX === undefined ? {} : { cursorX, cursorY }),
+  });
+
+  it('should be empty for a blank composer and for a placeholder the cursor or its wording proves', () => {
+    should(composerState(at('───\n❯ \n───', 2, 1))).deepEqual({ kind: 'empty' });
+    should(composerState(at('───\n❯ \n───'))).deepEqual({ kind: 'empty' }, 'nothing drawn is nothing typed');
+    should(composerState(at('❯ Try "fix lint errors"', 2, 0))).deepEqual({ kind: 'empty' });
+    should(composerState(at('❯ Try "fix lint errors"'))).deepEqual({ kind: 'empty' });
+  });
+
+  it('should be input only where the cursor proves the text typed', () => {
+    should(composerState(at('❯ my own words', 14, 0))).deepEqual({ kind: 'input', text: 'my own words' });
+  });
+
+  it('should be unreadable — never empty — for text no cursor places, or a frame with no composer', () => {
+    should(composerState(at('❯ my own words'))).deepEqual({ kind: 'unreadable' });
+    should(composerState(at('❯ my own words\n\n\n', 0, 3))).deepEqual({ kind: 'unreadable' });
+    // Somebody's draft that merely starts like a suggestion is not one: it runs onto a second row.
+    should(composerState(at('❯ Try "this" and then\n  that'))).deepEqual({ kind: 'unreadable' });
+    should(composerState(at('Loading model…'))).deepEqual({ kind: 'unreadable' });
+  });
+
+  it('should hold a submit while the pointer sits after other text, rather than call it consumed', () => {
+    const frame = at(`❯ my question?${POINTER}`, 30, 0);
+
+    should(classifySubmit(frame, POINTER, 'chars')).deepEqual({ kind: 'holding' });
+    should(composerContains(`my question?${POINTER}`, POINTER)).be.true();
+    should(composerContains('a hint of this', 'hint')).be.false();
+    should(composerContains('hint', 'hint')).be.true();
   });
 });

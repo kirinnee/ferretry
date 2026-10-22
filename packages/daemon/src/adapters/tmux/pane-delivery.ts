@@ -8,9 +8,9 @@
  * Enter without ever checking the payload had reached the composer.
  *
  * The invariant that governs the retry structure: the composer is filled at most `composerAttempts`
- * times and only ever RE-filled when nothing landed. Once landing is proven, Enter may be pressed
- * again, but the text is never typed again — the harness may have consumed it and performed a side
- * effect even when no turn started.
+ * times, each time only into a composer a fresh frame proves EMPTY (see `fillComposer`). Once landing
+ * is proven, Enter may be pressed again, but the text is never typed again — the harness may have
+ * consumed it and performed a side effect even when no turn started.
  */
 
 import {
