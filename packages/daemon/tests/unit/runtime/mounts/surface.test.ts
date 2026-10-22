@@ -4,6 +4,7 @@ import should from 'should';
 import { AUDITED_ROUTES, AUDITED_SOCKET_ROUTES } from '../../../../src/lib/audit/index.ts';
 import { DEFAULT_CAPABILITY_GRANTS } from '../../../../src/lib/grants/index.ts';
 import { HandoverReconcileLoop } from '../../../../src/lib/handover/index.ts';
+import { NO_PERFORMANCE_PROBE } from '../../../../src/lib/performance/recorder.ts';
 import {
   createMountedDispatcher,
   createMountedSocketDispatcher,
@@ -103,6 +104,19 @@ const stepUpSubsystem = (): StepUpService =>
 
 const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
   health: healthSubsystem(),
+  performance: {
+    profiles: {
+      start: () => ({
+        state: 'running',
+        id: 'p1',
+        startedAt: '2026-10-21T00:00:00.000Z',
+        endsAt: '2026-10-21T00:00:30.000Z',
+      }),
+      view: () => undefined,
+    },
+    probe: NO_PERFORMANCE_PROBE,
+    clock: { now: () => 0 },
+  },
   doctor: {
     report: async () => ({
       checks: [],
@@ -687,7 +701,8 @@ describe('the mounted daemon surface', () => {
       1 + // a cross-harness move's preview: what converting the conversation would carry (docs/migration-cross-harness.md)
       3 + // existing conversations kept as ferrets: the listing, one conversation's preview and the adoption
       3 + // the model catalogs: the list, a check for a newer published one, and a read of the models Ollama has installed (docs/model-catalog.md)
-      9; // lessons: the default's write, Apply's preview and write, the per-ferret switch and its list, and the scan's estimate, start, read and cancel (a ferret's own door is `none`)
+      9 + // lessons: the default's write, Apply's preview and write, the per-ferret switch and its list, and the scan's estimate, start, read and cancel (a ferret's own door is `none`)
+      2; // the performance profile: start one, and read it back by id (`fy daemon profile`)
     // `none` lost `POST /v1/pair`: redemption happens only inside a session now, so it is no route at all.
     // `authenticated` gained the Warden's "who needs you" feed, which a live warden reads like its status,
     // and the WebRTC offer: any paired device may ask for a shorter path to its own daemon (§16).
@@ -758,6 +773,8 @@ describe('the mounted daemon surface', () => {
       'POST /v1/webrtc/offer',
       'GET /v1/health',
       'GET /v1/doctor',
+      'POST /v1/diagnostics/profile',
+      'GET /v1/diagnostics/profile/:id',
       // The account model's credentials (docs/design/account-model.md §7). NOTE WHAT IS ABSENT: no
       // route returns a token, a refresh token or a digest — only status and usage — and there is no
       // sign-out or label route, because both are reviewed changes.
