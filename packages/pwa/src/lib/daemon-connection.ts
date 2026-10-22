@@ -25,6 +25,9 @@ export type DaemonId = string & { readonly daemonId: unique symbol };
 /** The relay half of a connection's carrier set. A daemon address is not one of these. */
 export type RelayCarrier = Extract<ConnectionMethod, { kind: 'relay' }>;
 
+/** The tunnel half (§15): a Cloudflare hostname dialled like a direct address. */
+export type TunnelCarrier = Extract<ConnectionMethod, { kind: 'tunnel' }>;
+
 export interface DaemonConnectionInput {
   daemonId: string;
   baseUrl: string;
@@ -109,6 +112,17 @@ export const daemonRelayCarrier = (value: RelayCarrier): RelayCarrier => {
 };
 
 /**
+ * Parses a tunnel carrier by the protocol's own rule — a bare `https` origin — or answers nothing.
+ *
+ * The same one-rule reason as {@link daemonRelayCarrier}, read tolerantly because its callers are a
+ * stored record and a refresh, neither of which should lose a pairing over one damaged address.
+ */
+export const daemonTunnelCarrier = (value: unknown): TunnelCarrier | undefined => {
+  const parsed = ConnectionMethodSchema.safeParse(value);
+  return parsed.success && parsed.data.kind === 'tunnel' ? parsed.data : undefined;
+};
+
+/**
  * Validates one cached carrier without changing the daemon's preference within its kind, or drops it.
  *
  * WEBRTC IS NEVER CACHED: it has no address and no daemon publishes one, so a stored entry of that kind
@@ -118,9 +132,9 @@ const daemonCarrier = (value: ConnectionMethod): ConnectionMethod | undefined =>
   if (value.kind === 'direct') return { kind: 'direct', daemonUrl: daemonBaseUrl(value.daemonUrl) };
   if (value.kind === 'webrtc') return undefined;
   if (value.kind === 'tunnel') {
-    const parsed = ConnectionMethodSchema.safeParse(value);
-    if (!parsed.success) throw new Error('tunnel carrier is not a bare https origin');
-    return parsed.data;
+    const tunnel = daemonTunnelCarrier(value);
+    if (tunnel === undefined) throw new Error('tunnel carrier is not a bare https origin');
+    return tunnel;
   }
   return daemonRelayCarrier(value);
 };

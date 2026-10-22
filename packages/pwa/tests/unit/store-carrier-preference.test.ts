@@ -83,6 +83,52 @@ describe('the store’s connection preference', () => {
     await settle(5);
   });
 
+  it('keeps the tunnel a "Tunnel only" walk learned by asking the daemon, so the next load dials it', async () => {
+    // Arrange — a record that lost its tunnel (the owner's defect), with only the daemon's address left.
+    const TUNNEL = 'https://k3x9.tunnels.example.com';
+    const { identity, daemon, deviceKeys } = await keyedDaemon('https://alpha.example.test', [
+      { kind: 'direct', daemonUrl: 'https://alpha.example.test' },
+    ]);
+    const scripted = autoDial(identity, {
+      respond: request =>
+        request.path === '/v1/carriers'
+          ? {
+              body: {
+                carriers: [
+                  { kind: 'direct', url: 'https://alpha.example.test' },
+                  { kind: 'tunnel', url: TUNNEL },
+                ],
+              },
+            }
+          : { body: [] },
+    });
+    const dialled: string[] = [];
+    const preferences = memoryPreferences();
+    const store = await createAppStore({
+      repository: new MemoryRepository(),
+      connectClient: async () => ({}) as unknown as FyApiClient,
+      fetcher: async () => Response.json({}),
+      deviceKeys,
+      relayCrypto,
+      relayDial: url => {
+        dialled.push(new URL(url).hostname);
+        return scripted.dial();
+      },
+      carrierPreferences: preferences,
+    });
+    store.connections.add(daemon);
+
+    // Act — Tunnel only, chosen for a machine whose record holds no tunnel.
+    preferences.set(daemon.daemonId, 'tunnel');
+    await settle(10);
+
+    // Assert — asked over the daemon's address, carried over the tunnel, and the tunnel is kept.
+    expect(dialled.slice(0, 2)).toEqual(['alpha.example.test', 'k3x9.tunnels.example.com']);
+    expect(store.carrier.choice(daemon.daemonId)?.reason).toBe('Connected over Cloudflare tunnel.');
+    expect(store.connections.get(daemon.daemonId)?.carriers).toContainEqual({ kind: 'tunnel', tunnelUrl: TUNNEL });
+    await settle(5);
+  });
+
   it('says whether this build can dial WebRTC, and reads the tunnel service once, only when asked', async () => {
     let asked = 0;
     const store = await createAppStore({

@@ -642,6 +642,11 @@ export async function createAppStore(options: CreateAppStoreOptions = {}): Promi
     preference: daemonId => carrierPreferences.preference(daemonId),
     dialers: carrierDialers,
     tunnelService,
+    // What a "Tunnel only" walk learned by asking the daemon over an introducer is kept exactly as an
+    // ordinary refresh's answer is, so the next reload dials the tunnel it found without asking again.
+    learned: (daemon, carriers) => {
+      connections.replaceCarriers(daemon, carriers);
+    },
     // The same one-per-load promise both other readers await; the router waits on it only after a
     // daemon's own carriers have all failed, so nothing on the ordinary path pays for the read.
     hostedRelay: async () => await hostedRelayUrl,
