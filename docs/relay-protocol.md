@@ -1668,6 +1668,13 @@ it sends a validator only for a path it holds, and treats any other `304` as an 
 empty transcript. An unchanged transcript costs its headers, a few hundred bytes. The same headers
 work on the direct path: `if-none-match` is an admitted CORS request header and `etag` an exposed one.
 
+`GET /v1/sessions` — the fleet list every open app re-reads on a beat, about 25 KB on a real fleet —
+is conditional the same way. Its tag is a digest of the exact JSON served, so it moves when any field
+of any session moves (a status, a name, a turn count, `journalSequence`), and is computed from the
+body the route already built. The client holds the one last list per connection and answers a `304`
+with a fresh copy of it. A daemon that predates the tag sends no `etag`, and the client holds
+nothing and reads in full as before.
+
 **A live feed starts where the reader already is**, for the same reason. A session view carries
 `journalSequence`, the journal's last sequence read just before its documents, and a reader that has
 the view opens `/v1/events?sessionId=…&after=<journalSequence>` rather than `after=0`: replaying a
@@ -1675,6 +1682,23 @@ long session's history was ~370 KB per 1000 events on every chat open, for event
 reads (its transcript and surfaces are read directly). A daemon that predates the field sends none,
 and the reader replays as before. Alongside it, the reference client sends an identical read that is
 already in flight once (`shared-reads.ts`): the answer is shared, never cached.
+
+**A live feed says it is live at once.** As soon as its replay (and any append that overlapped it)
+is delivered, `/v1/events` sends one `idle` frame — the ordinary proof, with the ordinary
+`idleSeconds` and the scope's current `after` or `followedSessions` — and then one per quiet window
+as before. A reader counts a feed as live once it has heard from it, and a quiet session used to say
+nothing for the first 30 s, so every reader ran its fast fallback polls for 30 s on every open. The
+frame also marks the edge: everything before it was replay, everything after it is live. It is the old
+frame rather than a new kind because the frame schema is strict, and an older reader would refuse an
+unknown kind or key, and with it the stream.
+
+**A fleet feed may skip its replay.** With no cursor, `/v1/events` without a `sessionId` replays the
+last 5000 events across the fleet on every connect — megabytes on a busy fleet. `?tail=N` (an integer
+from 0 to 5000, default 5000) bounds that, and `tail=0` replays nothing: the reader opens the feed,
+waits for its opening proof, reads `GET /v1/sessions` (conditionally), and from then on re-reads the
+list only when an event says something moved. `tail` on a session stream is refused
+(`tail_needs_fleet`); that stream resumes from `after`. A daemon that predates `tail` refuses it as
+an unknown parameter, so a reader decides from the daemon's version (`x-fy-version`) whether to send it.
 
 **A body larger than one record travels in ordered parts**, in both directions. §7 caps plaintext at
 65492 bytes with the envelope inside it, so a sender cuts the body with the shared rule

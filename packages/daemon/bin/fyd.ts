@@ -317,6 +317,7 @@ import {
   SendMonitorNudge,
   StorageMonitorWaits,
 } from '../src/adapters/session/monitor/index.ts';
+import { InlineObserverHost, SessionObservationApplier } from '../src/adapters/session/observer/index.ts';
 import { StorageSessionProvenanceStore } from '../src/adapters/session/provenance/index.ts';
 import { FileAnswerLedger, TmuxStructuredQuestionDriver } from '../src/adapters/session/question/index.ts';
 import {
@@ -512,7 +513,6 @@ import {
   type BrowserViewerHost,
   BrowserViewerStream,
   type BrowserWorkerProgram,
-  backgroundTerminalCount,
   buildLaunchArgv,
   CapabilityGrantService,
   type CatalogSubsystem,
@@ -636,6 +636,8 @@ import {
   type LearningSubsystem,
   LessonsService,
   LiveDeviceConnections,
+  type LivenessSample,
+  type LivenessTarget,
   LocalModelsService,
   type LogLevel,
   type LoopWatchdogPort,
@@ -670,7 +672,6 @@ import {
   type OperatorMessageSource,
   OperatorReadService,
   OutboundProviderAuthorizer,
-  observedRuntimeStatePatch,
   overriddenBy,
   PairedPushDevices,
   PairingDeviceRegistry,
@@ -678,7 +679,6 @@ import {
   PinService,
   type PlannedAttachmentFile,
   type PlannedInitialAttachments,
-  type ProcessInventoryPort,
   ProvedPaneCapture,
   ProviderPresetService,
   ProviderProbeService,
@@ -702,8 +702,6 @@ import {
   planInitialAttachments,
   portCandidates,
   previousConversation,
-  projectObservedRuntime,
-  projectStructuredQuestion,
   publishableDirectCarrier,
   type QuotaFailoverLoop,
   QuotaFailoverService,
@@ -728,7 +726,6 @@ import {
   readDaemonRelayIdentity,
   readDoctorReport,
   readHarnessPreflight,
-  reconcileAnswerEvidence,
   refuseExhaustedCandidates,
   refuseHeldStateHome,
   refuseOccupiedAddress,
@@ -792,6 +789,7 @@ import {
   type SessionMigrateFailure,
   type SessionMigrateSubsystem,
   SessionMonitorService,
+  SessionObserver,
   SessionPermissionService,
   SessionPlanner,
   SessionProvenanceRecorder,
@@ -816,7 +814,6 @@ import {
   SessionTranscriptReader,
   SessionTranscriptResolver,
   type SessionTranscriptTail,
-  SessionTurnWatcher,
   SignalRefused,
   type SocketRoute,
   SpeedupsService,
@@ -840,7 +837,6 @@ import {
   sessionHealthSettingsAt,
   sessionNameClaim,
   sessionScopedAttachments,
-  structuredQuestionStatePatch,
   suggestedOllamaModel,
   supersededCarrierKeys,
   type TaskAssigneeCandidate,
@@ -3587,14 +3583,25 @@ const WARDEN_TRIAGE_TAIL = 12;
 /** How often the liveness monitor looks at every working ferret: kteam's own tick. */
 const WARDEN_LIVENESS_TICK_SECONDS = 30;
 
-/** How many transcript lines the liveness digest covers: enough that a new line always changes it. */
-const WARDEN_LIVENESS_TAIL = 20;
-
-/** A digest of what the liveness monitor looked at: it keeps whether something changed, never the text. */
-const livenessDigest = (text: string): string => createHash('sha256').update(text, 'utf8').digest('hex');
-
 /** The collaborators a warden subsystem needs from the rest of the root. */
+/**
+ * `tick`, run as the labelled activity `name`, so `fy daemon profile` and a stall can name the timer
+ * that did the work. The tick's own errors stay its own: a rejection is swallowed here exactly as each
+ * timer already swallowed it. Without a ledger the tick runs as it always did.
+ */
+function asActivity(activities: ActivityLedger | undefined, name: string, tick: () => unknown): () => void {
+  return () => {
+    if (activities === undefined) {
+      void tick();
+      return;
+    }
+    void activities.run(name, async () => await tick()).catch(() => undefined);
+  };
+}
+
 interface WardenParts {
+  /** The named work in flight, so the sweep and the liveness tick are attributed in a profile. */
+  readonly activities?: ActivityLedger;
   readonly sessions: SessionDirectorySubsystem;
   readonly control: SessionControlSubsystem;
   /**
@@ -3635,8 +3642,11 @@ interface WardenParts {
   readonly analytics: Pick<AnalyticsIngestionService, 'read'>;
   /** The live journal append edge, for the events that bring a sweep forward. */
   readonly events: (listener: (event: { readonly type: string; readonly data: unknown }) => void) => () => void;
-  /** The processes under a ferret's pane, on this daemon's own tmux server: the liveness subprocess signal. */
-  readonly processes: ProcessInventoryPort;
+  /**
+   * One liveness look at a ferret — its screen, its transcript tail and the processes under its pane — as
+   * the session observer takes it (`InlineObserverHost.liveness`). The fold and the reflex stay here.
+   */
+  readonly livenessSample: (target: LivenessTarget) => Promise<LivenessSample>;
 }
 
 /**
@@ -3678,26 +3688,9 @@ function createWardenSubsystem(parts: WardenParts): WardenSubsystem {
             killAfterSeconds: view.config.killAfterSeconds,
             tmuxSession: sessionTmuxName(parseSessionId(view.config.id), defaultSessionLifecycleSettings),
           })),
-      // Three looks, each total: what cannot be read this tick is simply not evidence this tick. The screen
-      // and the transcript are the operator reads — already masked by the vault redactor — and only their
-      // digests are kept; the screen itself is read for its work counters and then dropped.
-      sample: async target => {
-        // The SCREEN, not the scrollback: the work counters and background-terminal footer live on it,
-        // and any change to the scrollback moves the screen too — at a fraction of the bytes per tick.
-        const pane = await parts.reads.snapshot(target.id, true, 'screen').catch(() => undefined);
-        const transcript = await parts.reads.logs(target.id, WARDEN_LIVENESS_TAIL).catch(() => undefined);
-        const observed =
-          target.tmuxSession === undefined
-            ? undefined
-            : await parts.processes.collect(target.tmuxSession).catch(() => undefined);
-        const children = observed?.kind === 'observed' ? observed.processes.length > 0 : undefined;
-        const background = pane !== undefined && backgroundTerminalCount(pane) > 0;
-        return {
-          ...(pane === undefined ? {} : { pane, paneHash: livenessDigest(pane) }),
-          ...(transcript === undefined ? {} : { transcriptHash: livenessDigest(transcript) }),
-          ...(children === undefined && !background ? {} : { subprocessAlive: children === true || background }),
-        };
-      },
+      // The session observer's look: three reads, each total, the screen and transcript through the operator
+      // reads (masked by the vault redactor), and only their digests kept.
+      sample: async target => await parts.livenessSample(target),
       nowMs: () => Date.now(),
     },
     WARDEN_LIVENESS_TICK_SECONDS,
@@ -3905,11 +3898,11 @@ function createWardenSubsystem(parts: WardenParts): WardenSubsystem {
     },
     {
       every: (intervalMs, tick) => {
-        const handle = setInterval(tick, intervalMs);
+        const handle = setInterval(asActivity(parts.activities, 'warden sweep', tick), intervalMs);
         return () => clearInterval(handle);
       },
       after: (delayMs, action) => {
-        const handle = setTimeout(action, delayMs);
+        const handle = setTimeout(asActivity(parts.activities, 'warden sweep', action), delayMs);
         return () => clearTimeout(handle);
       },
       nowMs: () => Date.now(),
@@ -3966,21 +3959,24 @@ function createWardenSubsystem(parts: WardenParts): WardenSubsystem {
       // it finds is acted on inside the sweep chain, and a ferret that froze brings the next sweep forward.
       liveness.arm();
       let looking = false;
-      const look = setInterval(() => {
-        if (looking) return;
-        looking = true;
-        void service
-          .currentConfig()
-          .then(async config => await liveness.tick({ nudgeAllowed: config.enabled && config.mayActAlone.nudge }))
-          .then(async events => await loop.exclusive(async () => await service.reflex(events)))
-          .then(result => {
-            if (result.frozen) loop.trigger();
-          })
-          .catch(() => undefined)
-          .finally(() => {
-            looking = false;
-          });
-      }, WARDEN_LIVENESS_TICK_SECONDS * 1000);
+      const look = setInterval(
+        asActivity(parts.activities, 'warden liveness', async () => {
+          if (looking) return;
+          looking = true;
+          await service
+            .currentConfig()
+            .then(async config => await liveness.tick({ nudgeAllowed: config.enabled && config.mayActAlone.nudge }))
+            .then(async events => await loop.exclusive(async () => await service.reflex(events)))
+            .then(result => {
+              if (result.frozen) loop.trigger();
+            })
+            .catch(() => undefined)
+            .finally(() => {
+              looking = false;
+            });
+        }),
+        WARDEN_LIVENESS_TICK_SECONDS * 1000,
+      );
       return () => {
         clearInterval(look);
         liveness.disarm();
@@ -5393,6 +5389,8 @@ function agentIdentities(storage: DaemonStorage): CredentialAgentIdentities {
  * home — and the watcher keeps loading after that whenever a file changes.
  */
 function createConfigFilesSubsystem(input: {
+  /** The named work in flight, so a reload is attributed in a profile. */
+  readonly activities?: ActivityLedger;
   readonly service: ConfigFilesService;
   readonly agentControl: AgentControlPolicy;
   readonly identities: CredentialAgentIdentities;
@@ -5423,9 +5421,9 @@ function createConfigFilesSubsystem(input: {
           input.notices.state(`config watcher: ${error instanceof Error ? error.message : String(error)}`),
         ...(input.events === undefined ? {} : { events: input.events }),
         timers: {
-          setInterval: (callback, ms) => setInterval(callback, ms),
+          setInterval: (callback, ms) => setInterval(asActivity(input.activities, 'config watcher', callback), ms),
           clearInterval: handle => clearInterval(handle as ReturnType<typeof setInterval>),
-          setTimeout: (callback, ms) => setTimeout(callback, ms),
+          setTimeout: (callback, ms) => setTimeout(asActivity(input.activities, 'config watcher', callback), ms),
           clearTimeout: handle => clearTimeout(handle as ReturnType<typeof setTimeout>),
         },
       });
@@ -7741,63 +7739,52 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       // own account of which model it is running are both recovered from the same 400 events, and
       // folding them into one patch is what keeps a session read at one transcript pass. Both are
       // additive over whatever the document already holds, so neither can erase the other's fields.
-      const projectSessionEvidence = async (id: SessionId): Promise<void> => {
-        await answerSerial.runIfIdle(id, async () => {
-          const transcript = await createSessionTranscriptTail(storage).tail(id, 400);
-          // A transcript that cannot be proved belongs to this session is not a
-          // benign empty transcript.  Leave the durable state untouched: its own
-          // parser will make a damaged session read fail rather than inventing an
-          // answerable absence from missing evidence.
-          if (transcript.kind !== 'read') return;
-          const current = SessionStateSchema.safeParse(await storage.readState(id));
-          if (!current.success) return;
-          const projection = projectStructuredQuestion(transcript.events);
-          const answerEvidence = reconcileAnswerEvidence(await answerLedger.all(id), current.data, {
-            ...(projection.kind === 'pending' ? { activeToolUseId: projection.question.toolUseId } : {}),
-            ...(projection.kind === 'resolved' ? { resolvedToolUseId: projection.toolUseId } : {}),
-          });
-          for (const settlement of answerEvidence.settlements) await answerLedger.append(id, settlement);
-          const answerRecords = [...answerEvidence.records.values()];
-          const observedRuntime = projectObservedRuntime(transcript.events);
-          const question = structuredQuestionStatePatch(current.data, projection, answerRecords);
-          // The model the harness SAID it was using, never the one the session was launched with.
-          // Nothing else in the daemon writes these three fields, so every surface that shows a
-          // running model — the composer chips, the context window, `fy ls` — is reading this.
-          const patch = {
-            ...question,
-            ...observedRuntimeStatePatch(current.data, observedRuntime),
-          };
-          if (Object.keys(patch).length === 0) return;
-          await storage.updateState(id, raw => {
-            const verified = SessionStateSchema.safeParse(raw);
-            if (!verified.success) return raw;
-            // Recompute under storage's session lock. A lifecycle stop can commit after the
-            // transcript read but before this transform; applying the stale patch would otherwise
-            // resurrect its `kill_failed` verdict as `awaiting_question`.
-            const currentQuestion = structuredQuestionStatePatch(verified.data, projection, answerRecords);
-            const currentPatch = {
-              ...currentQuestion,
-              ...observedRuntimeStatePatch(verified.data, observedRuntime),
-            };
-            if (Object.keys(currentPatch).length === 0) return raw;
-            const next = { ...(raw as Record<string, unknown>), ...currentPatch };
-            // Removals belong to the QUESTION projection alone and only when it explicitly names
-            // the field. A model observation must never erase a picker or answer quarantine.
-            if (Object.hasOwn(currentQuestion, 'pendingQuestion') && currentQuestion.pendingQuestion === undefined)
-              delete next.pendingQuestion;
-            if (Object.hasOwn(currentQuestion, 'needsHumanKind') && currentQuestion.needsHumanKind === undefined)
-              delete next.needsHumanKind;
-            if (Object.hasOwn(currentQuestion, 'needsHuman') && currentQuestion.needsHuman === undefined)
-              delete next.needsHuman;
-            return next as typeof raw;
-          });
-        });
-      };
+      //
+      // THE SESSION OBSERVER (docs/design/session-workers.md, stage 3a). What the turn watcher, the
+      // monitor's question pass, this read path and the Warden's liveness tick each derived about a live
+      // session is one pure fold now, and everything it derives is written by ONE applier through this
+      // storage's locked path — the session lock, the index, the journal and its listeners unchanged. The
+      // inline host runs the fold here, on the timers that already exist; a worker host replaces it in
+      // stage 3b. Storage tells it every state it writes, so the 2 s turn tick no longer re-reads every
+      // session's document to learn fields this daemon wrote itself.
+      //
+      // LATE-BOUND, the pane reader and the operator reads: both are built further down this root, and
+      // nothing asks the observer anything until the daemon serves.
+      const paneProcesses = new PaneProcessInventory(
+        launchTmuxCommands,
+        // One liveness tick asks about every working ferret in turn. Where `ps` is how the tree is read
+        // (no procfs), one table answers the whole tick instead of one `ps` per ferret.
+        new BunProcessProbe(Bun.which('ps') ?? undefined, { tableTtlMs: 10_000 }),
+        { binaryName: CLIENT_NAME, servers: new ProjectMcpServers() },
+      );
+      const sessionObserver = new InlineObserverHost(
+        {
+          storage,
+          questionRoster: () =>
+            storage
+              .listSessions()
+              .filter(session => session.status === undefined || !ENDED_SESSION_STATUSES.has(session.status))
+              .map(session => session.id),
+          tail: createSessionTranscriptTail(storage),
+          pane: async id => await turnPorts.pane(id),
+          answers: answerLedger,
+          answerSerial,
+          applier: new SessionObservationApplier(storage, answerLedger, new KeyedSerialExecutor()),
+          liveness: {
+            screen: async id => await operatorReads.snapshot(id, true, 'screen'),
+            transcript: async (id, lines) => await operatorReads.logs(id, lines),
+            processes: async tmuxSession => await paneProcesses.collect(tmuxSession),
+          },
+          clock,
+          yieldToLoop: () => new Promise(resolve => setImmediate(resolve)),
+        },
+        new SessionObserver(text => createHash('sha256').update(text, 'utf8').digest('hex')),
+      );
       // Ordinary reads contain projection damage per session: a broken answer ledger must not take
-      // the whole roster down. The monitor calls the raw projector below so it can report the exact
+      // the whole roster down. The monitor's pass calls the projector raw so it can report the exact
       // failing session instead of silently flattening missing evidence.
       const sessions = createSessionDirectorySubsystem(paths, storage, id =>
-        projectSessionEvidence(id).catch(() => undefined),
+        sessionObserver.project(id).catch(() => undefined),
       );
       // Originals are keyed by this daemon's durable pairing identity even
       // inside its private state home. A plaintext unlock is deliberately not a
@@ -7948,33 +7935,9 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           waits: new StorageMonitorWaits(storage, signalRepository, signals, defaultSessionMonitorSettings),
           heartbeats: new FileWaitHeartbeat(id => createSessionPaths(paths, id).directory),
           nudge: new SendMonitorNudge(sends),
-          questions: {
-            // LIVE SESSIONS ONLY, ONE AT A TIME, handing the loop back between them. Every session's
-            // tail at once was thirty-six transcript windows of up to 16 MiB parsed together on a Mac's
-            // first tick, and the loop stalled for seconds. A session the index says has ended asks no
-            // question anyone can answer here; its evidence is projected when it is next read.
-            reconcile: async () => {
-              const outcomes: (readonly [string, string | undefined])[] = [];
-              const live = storage
-                .listSessions()
-                .filter(session => session.status === undefined || !ENDED_SESSION_STATUSES.has(session.status));
-              for (const session of live) {
-                let failure: string | undefined;
-                try {
-                  await projectSessionEvidence(session.id);
-                } catch (error) {
-                  failure = error instanceof Error ? error.message : String(error);
-                }
-                outcomes.push([session.id, failure]);
-                await new Promise(resolve => setImmediate(resolve));
-              }
-              const failures = new Map<string, string>();
-              for (const [id, failure] of outcomes) {
-                if (failure !== undefined) failures.set(id, failure);
-              }
-              return failures;
-            },
-          },
+          // The session observer's question part over every live session, one at a time — see
+          // `InlineObserverHost.questions` for why it hands the loop back between them.
+          questions: { reconcile: async () => await sessionObserver.questions() },
           clock,
           wallClock: { nowMs: () => Date.now() },
           // A duration, so it is read off a clock that cannot step: a wall-clock jump would otherwise
@@ -8536,7 +8499,9 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           secrets: secrets.directory,
         }),
       );
-      credentialList = async () => await fleetCredentials.list();
+      // SETTLED: the feed caches this list for an interval, so a login being read right now is listed
+      // with its last known word rather than a "Checking" that would outlive the read.
+      credentialList = async () => await fleetCredentials.list({ settled: true });
       const terminalSubsystem = createTerminalSubsystem(storage, terminals, { now: () => Date.now() });
       // A session browser nobody watches or drives stops after this long, so a forgotten one does not
       // hold the one shared profile away from every other session.
@@ -8663,10 +8628,11 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       adoptLearning = async id => {
         await learning.transaction(async () => await learning.lessons.adopt(id));
       };
-      // Whose turn it is, from the transcript and the live pane — read through the SAME tmux server
-      // the launch path addresses, and the same proved transcript file every other read uses. The
-      // live readout (`?live=1` on a session's event stream) reads through these same ports, so the
-      // turn it times and the turn the watcher reports are one boundary.
+      // The live pane, read through the SAME tmux server the launch path addresses: the session observer
+      // reads its turn evidence through `turnPorts.pane`, and the live readout (`?live=1` on a session's
+      // event stream) its frames through `turnPorts.paneState`, so the turn it times and the turn the
+      // observer reports are one boundary. (Its roster and transcript halves are the pre-3a path, kept
+      // as the reference the observer's parity suite holds the host to.)
       const transcriptFileOf = (() => {
         const resolver = createTranscriptFileResolver(storage);
         return async (id: SessionId) => await resolver.file(id);
@@ -9109,7 +9075,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         // opened with. Two daemons on one host have two homes and therefore two records, so neither
         // can overwrite the other's account of its own loop.
         monitor: new MonitorTickRunner(monitor, join(paths.home, 'monitor.json'), defaultSessionMonitorSettings),
-        turns: new SessionTurnWatcher(turnPorts),
+        turns: sessionObserver.turns,
         sessionMigrate,
         sessionFork,
         quotaFailover: createQuotaFailoverSubsystem({
@@ -9128,7 +9094,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         // has not advanced, which is the honest reading of a supervision failure.
         handoverReconcile: new HandoverReconcileLoop(handover, handoverReceipts, {
           every: (intervalMs, tick) => {
-            const handle = setInterval(tick, intervalMs);
+            const handle = setInterval(asActivity(activities, 'handover reconcile', tick), intervalMs);
             return () => clearInterval(handle);
           },
         }),
@@ -9148,6 +9114,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           policy: agentControl,
         }),
         configFiles: createConfigFilesSubsystem({
+          activities,
           service: configFiles,
           events: {
             directories: async () => await configDirectory.directories(),
@@ -9226,8 +9193,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
                 environment: process.env,
               }),
               activity: {
-                midTurn: async () =>
-                  (await turnPorts.sessions()).filter(session => session.state.turnState === 'working').length,
+                midTurn: async () => await sessionObserver.midTurn(),
               },
               clock: millisecondClock,
               // A source run has no release to compare with, and an operator or a suite can switch it off.
@@ -9235,7 +9201,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
             },
             {
               every: (intervalMs, tick) => {
-                const handle = setInterval(tick, intervalMs);
+                const handle = setInterval(asActivity(activities, 'update check', tick), intervalMs);
                 return () => clearInterval(handle);
               },
             },
@@ -9266,6 +9232,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         scratchGc,
         secrets,
         warden: createWardenSubsystem({
+          activities,
           sessions,
           control: sessionControl,
           attention,
@@ -9298,16 +9265,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           migrate: sessionMigrate,
           analytics: analyticsIngestion,
           events: listener => storage.subscribeEvents(listener),
-          // One liveness tick asks about every working ferret in turn. Where `ps` is how the tree is read
-          // (no procfs), one table answers the whole tick instead of one `ps` per ferret.
-          processes: new PaneProcessInventory(
-            launchTmuxCommands,
-            new BunProcessProbe(Bun.which('ps') ?? undefined, { tableTtlMs: 10_000 }),
-            {
-              binaryName: CLIENT_NAME,
-              servers: new ProjectMcpServers(),
-            },
-          ),
+          livenessSample: async target => await sessionObserver.liveness(target),
         }),
         sessionReads: operatorReads,
         sessionAttach,
@@ -9355,7 +9313,8 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
               signal.throwIfAborted();
               const sessionIds = await storage.fleetSessionIds();
               signal.throwIfAborted();
-              const events = await storage.tailEvents(limit);
+              // `?tail=0` replays nothing, so it skips the tail's index proof as well as its read.
+              const events = limit === 0 ? [] : await storage.tailEvents(limit);
               signal.throwIfAborted();
               return { sessionIds, events };
             },
@@ -10185,7 +10144,7 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
   // The security log's fold windows close on this tick too, not only on the next record like them: a
   // burst that STOPS must still be written down with its count. Writes a line at most; spawns nothing.
   const auditFlushTicks = setInterval(() => {
-    void subsystems.audit.flush().catch(() => undefined);
+    void activities.run('audit flush', () => subsystems.audit.flush()).catch(() => undefined);
   }, AUDIT_FOLD_WINDOW_MS);
   cleanups.push(() => {
     clearInterval(auditFlushTicks);

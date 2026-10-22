@@ -1,5 +1,6 @@
 import type { SendRecord as SendRecordView } from '@ferretry/protocol';
-import type { ObservedHumanInput, TranscriptIssueCode, TranscriptWindow } from '../../transcript/types.ts';
+import type { ObservedHumanInput, TranscriptWindow } from '../../transcript/types.ts';
+import { foldSendEvidenceBatch, type SendEvidenceWatch } from '../observer/send-evidence.ts';
 import { drainTranscriptWindow, type SessionTranscriptReader, type TranscriptTarget } from '../transcript/reader.ts';
 import type { SendEvidenceReading, SendEvidenceSource } from './tracker.ts';
 import type { SendRecord } from './types.ts';
@@ -46,17 +47,6 @@ export function sendRecordView(record: SendRecord): SendRecordView {
 function optional<K extends string, V>(key: K, value: V | undefined): Partial<Record<K, V>> {
   return value === undefined ? {} : ({ [key]: value } as Record<K, V>);
 }
-
-/**
- * Issues that make a transcript read BLIND to its newest records — the only ones a send could be
- * proven by. A read with one of these can prove presence of what it did see, never absence.
- */
-const BLIND: ReadonlySet<TranscriptIssueCode> = new Set([
-  'source-missing',
-  'source-read-failed',
-  'source-truncated',
-  'oversized-record',
-]);
 
 /** How far before the oldest watched send a window starts: clocks and record order both drift. */
 const WINDOW_MARGIN_MS = 60_000;
@@ -112,17 +102,12 @@ export class TranscriptSendEvidence implements SendEvidenceSource {
       this.held.delete(id);
       return { readable: false, inputs: [] };
     }
-    let inputs = held.inputs;
-    let blind = held.partial;
-    let partial = held.partial;
+    let watch: SendEvidenceWatch = { inputs: held.inputs, blind: held.partial, partial: held.partial };
     const finished = await drainTranscriptWindow(held.window, batch => {
-      if (batch.reset) inputs = [];
-      inputs = [...inputs, ...batch.observedInputs];
-      if (batch.issues.some(issue => BLIND.has(issue.code))) blind = true;
-      if (batch.issues.some(issue => issue.code === 'source-truncated')) partial = true;
+      watch = foldSendEvidenceBatch(watch, batch);
     }).catch(() => false);
-    this.hold(id, { ...held, inputs: inputs.slice(-HELD_INPUTS), partial });
-    return { readable: finished && !blind, inputs };
+    this.hold(id, { ...held, inputs: watch.inputs.slice(-HELD_INPUTS), partial: watch.partial });
+    return { readable: finished && !watch.blind, inputs: watch.inputs };
   }
 
   private async open(target: TranscriptTarget, from: number): Promise<HeldWindow | undefined> {

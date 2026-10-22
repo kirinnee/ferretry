@@ -5,7 +5,7 @@ import { ApiRouter } from '../../../../src/lib/api/index.ts';
 import { ApiSocketDispatcher, type SocketDownstream, type SocketHandler } from '../../../../src/lib/api/socket.ts';
 import { fleetEventSocketRoutes } from '../../../../src/lib/runtime/index.ts';
 import type { FleetEventStreamSubsystem } from '../../../../src/lib/runtime/mounts/fleet-events.ts';
-import type { FleetEventStreamScope } from '../../../../src/lib/session/events/index.ts';
+import { FLEET_EVENT_BACKLOG_LIMIT, type FleetEventStreamScope } from '../../../../src/lib/session/events/index.ts';
 import { request } from '../../api/support.ts';
 import { CREDENTIALS, human, sessionDirectory, sessionView } from './support.ts';
 
@@ -231,6 +231,73 @@ describe('the mounted fleet event feed', () => {
     // Assert
     should(decision.outcome).equal('accepted');
     should(events.scopes).deepEqual([{ kind: 'fleet' }]);
+  });
+
+  it('should bound a fleet stream by the tail the caller named, zero and the ceiling included', async () => {
+    // Arrange — `tail=0` is the reader that has just read the list and wants only what happens next.
+    const { events, dispatcher } = fixture();
+
+    // Act
+    for (const tail of ['0', '25', String(FLEET_EVENT_BACKLOG_LIMIT)])
+      await attach(await dispatcher.upgrade(request({ path: '/v1/events', query: [['tail', tail]], headers: human })));
+
+    // Assert
+    should(events.scopes).deepEqual([
+      { kind: 'fleet', tail: 0 },
+      { kind: 'fleet', tail: 25 },
+      { kind: 'fleet', tail: FLEET_EVENT_BACKLOG_LIMIT },
+    ]);
+  });
+
+  it('should refuse a tail that is not a plain integer within the bound', async () => {
+    // Arrange
+    const { events, dispatcher } = fixture();
+
+    // Act
+    const decisions = [];
+    for (const value of ['', 'all', '-1', '1.5', '1e3', ' 4', String(FLEET_EVENT_BACKLOG_LIMIT + 1)])
+      decisions.push(
+        await dispatcher.upgrade(request({ path: '/v1/events', query: [['tail', value]], headers: human })),
+      );
+    decisions.push(
+      await dispatcher.upgrade(
+        request({
+          path: '/v1/events',
+          query: [
+            ['tail', '0'],
+            ['tail', '1'],
+          ],
+          headers: human,
+        }),
+      ),
+    );
+
+    // Assert — a tail past the bound would be a promise of history the daemon does not replay.
+    should(decisions.map(refusedStatus)).deepEqual([400, 400, 400, 400, 400, 400, 400, 400]);
+    should(new Set(decisions.map(refusedCode))).deepEqual(new Set(['invalid_query']));
+    should(events.scopes).be.empty();
+  });
+
+  it('should refuse a tail on a session stream, which resumes from its own cursor', async () => {
+    // Arrange
+    const { events, dispatcher } = fixture();
+
+    // Act
+    const decision = await dispatcher.upgrade(
+      request({
+        path: '/v1/events',
+        query: [
+          ['sessionId', 's1'],
+          ['tail', '0'],
+        ],
+        headers: human,
+      }),
+    );
+
+    // Assert
+    should(refusedStatus(decision)).equal(400);
+    should(refusedCode(decision)).equal('tail_needs_fleet');
+    should(events.scopes).be.empty();
   });
 
   it('should refuse a cursor that is not a plain non-negative integer', async () => {

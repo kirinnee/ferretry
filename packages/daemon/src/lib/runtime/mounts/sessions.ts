@@ -1,7 +1,7 @@
 import type { SessionList, SessionView } from '@ferretry/protocol';
 import { ApiError } from '../../api/error.ts';
-import { decodeParameter, type ApiResponse } from '../../api/http.ts';
-import { jsonResponse } from '../../api/responses.ts';
+import { type ApiResponse, decodeParameter } from '../../api/http.ts';
+import { conditional, jsonResponse } from '../../api/responses.ts';
 import type { ApiRoute, RouteContext } from '../../api/route.ts';
 
 /**
@@ -81,10 +81,19 @@ function refuse(error: unknown): never {
   throw error;
 }
 
-/** Every session the index holds, in the index's own order. */
-async function list(subsystem: SessionDirectorySubsystem): Promise<ApiResponse> {
+/**
+ * Every session the index holds, in the index's own order.
+ *
+ * CONDITIONAL, because every open app re-reads it on a beat — about 25 KB a read on a real fleet, and
+ * after the PWA stopped re-asking everything else it was most of an idle phone's metered bytes, for an
+ * answer that is usually the one it already holds. The tag is a digest of the exact body served, so it
+ * moves when ANY byte a client could render moves — a status, a name, a turn count, `journalSequence`
+ * — and an unchanged fleet costs its headers. It is taken over the JSON this route already built: one
+ * serialisation and one hash, never a second rendering kept only to compare.
+ */
+async function list(subsystem: SessionDirectorySubsystem, context: RouteContext): Promise<ApiResponse> {
   const sessions: SessionList = [...(await subsystem.list().catch(refuse))];
-  return jsonResponse(sessions);
+  return conditional(jsonResponse(sessions), context.request.headers.get('if-none-match'));
 }
 
 /** One session in full, or a stated refusal. */
@@ -113,7 +122,7 @@ export function sessionRoutes(subsystem: SessionDirectorySubsystem): readonly Ap
       path: '/v1/sessions',
       minimum: 'operator',
       noStore: true,
-      handle: async () => await list(subsystem),
+      handle: async context => await list(subsystem, context),
     },
     {
       method: 'GET',

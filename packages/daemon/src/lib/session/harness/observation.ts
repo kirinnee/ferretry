@@ -21,7 +21,8 @@
  *     knowing they differ.
  */
 
-import { InstantSchema, type SessionState } from '@ferretry/protocol';
+import type { SessionState } from '@ferretry/protocol';
+import { isIsoInstant } from '../../iso-instant.ts';
 import type { TranscriptEvent } from '../../transcript/types.ts';
 
 /** The harness-observed runtime, as the transcript last stated it. */
@@ -49,7 +50,7 @@ function stated(value: string | undefined): string | undefined {
  */
 function instant(value: string | undefined): string | undefined {
   const candidate = stated(value);
-  return candidate !== undefined && InstantSchema.safeParse(candidate).success ? candidate : undefined;
+  return candidate !== undefined && isIsoInstant(candidate) ? candidate : undefined;
 }
 
 /**

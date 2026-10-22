@@ -32,3 +32,19 @@ export function renderStreamIdle(sessionId: string, cursor: number, seconds: num
 export function renderFleetStreamIdle(followedSessions: number, seconds: number): string {
   return `no new fleet events in ${seconds}s (socket is live; following ${followedSessions} sessions)`;
 }
+
+/**
+ * The FIRST idle proof a stream hears, which says the replay is over rather than that time passed.
+ *
+ * A daemon sends it the moment its replay is done, so "no new events in 30s" would be false for it.
+ * A daemon that predates the opening proof sends its first one after a quiet window instead, and
+ * "caught up" is true of that one too — which is why the wording keys off "first", not off a version.
+ */
+export function renderStreamCaughtUp(sessionId: string, cursor: number): string {
+  return `caught up on ${sessionId} at #${cursor} (following live)`;
+}
+
+/** Fleet form of {@link renderStreamCaughtUp}. */
+export function renderFleetStreamCaughtUp(followedSessions: number): string {
+  return `caught up on the fleet (following ${followedSessions} sessions live)`;
+}
