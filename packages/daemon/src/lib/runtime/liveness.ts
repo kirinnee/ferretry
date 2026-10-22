@@ -71,9 +71,14 @@ export class ActivityLedger {
   readonly #live = new Set<ActivityRecord>();
   readonly #recent: ActivityRecord[] = [];
 
+  /**
+   * @param observer Told the label and wall time of every activity as it ends — how a performance
+   *   profile learns what each timer and job cost without each of them reporting it separately.
+   */
   constructor(
     private readonly clock: MillisecondClockPort,
     private readonly scope: ActivityScopePort<ActivityRecord> = FLAT_ACTIVITY_SCOPE,
+    private readonly observer: (label: string, wallMs: number) => void = () => undefined,
   ) {}
 
   /**
@@ -111,6 +116,7 @@ export class ActivityLedger {
     return () => {
       if (!this.#live.delete(record)) return;
       record.endedAtMs = this.clock.now();
+      this.observer(record.label, record.endedAtMs - record.startedAtMs);
       this.#recent.push(record);
       if (this.#recent.length > RECENT_ACTIVITY_LIMIT) this.#recent.shift();
     };
@@ -284,7 +290,8 @@ export function summariseStacks(samples: readonly StackSample[]): readonly Stall
     .map(([stack, count]) => ({ stack, share: Math.round((count / total) * 100) / 100 }));
 }
 
-function describeFrame(frame: StackFrame): string {
+/** One frame as a report names it: `name (daemon/src/lib/transcript/claude.ts:300)`. */
+export function describeFrame(frame: StackFrame): string {
   const name = frame.name === '' ? '(anonymous)' : frame.name;
   if (frame.url === undefined || frame.url === '') return name;
   const packages = frame.url.lastIndexOf('packages/');

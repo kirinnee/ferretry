@@ -1,4 +1,3 @@
-import type { PublishedCarrierView } from '../published-carriers.ts';
 import type { AgentToolService } from '../../agent-tools/service.ts';
 import type { AgentIdentityResolver } from '../../agent-tools/types.ts';
 import type { AnalyticsIngestionLoop } from '../../analytics/ingestion.ts';
@@ -17,6 +16,8 @@ import type { AgentControlPolicy } from '../../fleet/agent-control.ts';
 import type { FleetRefreshLoop } from '../../fleet-refresh/index.ts';
 import type { HandoverReconcileLoop } from '../../handover/index.ts';
 import type { HarnessUpdateSubsystem } from '../../harness-update/index.ts';
+import { observedRoutes } from '../../performance/observed-routes.ts';
+import type { PerformanceProbe } from '../../performance/recorder.ts';
 import type { PinService } from '../../pins/index.ts';
 import type { QuotaFailoverLoop } from '../../quota-failover/index.ts';
 import type { SecuritySettingsService } from '../../security/index.ts';
@@ -28,6 +29,8 @@ import type { SendTrackingLoop } from '../../session/send/tracker.ts';
 import type { TurnWatchLoop } from '../../session/turn/service.ts';
 import type { StepUpService } from '../../step-up/index.ts';
 import type { DaemonUpdateSubsystem } from '../../update/index.ts';
+import type { MillisecondClockPort } from '../boot.ts';
+import type { PublishedCarrierView } from '../published-carriers.ts';
 import { agentControlledRoutes, agentControlledSockets } from './agent-control.ts';
 import { agentToolRoutes } from './agent-tools.ts';
 import { type AnalyticsSubsystem, analyticsRoutes } from './analytics.ts';
@@ -61,6 +64,8 @@ import { type ModelsSubsystem, modelRoutes } from './models.ts';
 import { type NameSubsystem, nameRoutes } from './names.ts';
 import { type PackSubsystem, packRoutes } from './pack.ts';
 import { type DeviceGrantSubsystem, type PairingSubsystem, pairingRoutes } from './pairing.ts';
+import { type PerformanceSubsystem, performanceRoutes } from './performance.ts';
+
 import { pinRoutes } from './pins.ts';
 import { type PushSubscriptionSubsystem, pushRoutes } from './push.ts';
 import { type RecommendSubsystem, recommendRoutes } from './recommend.ts';
@@ -132,6 +137,15 @@ export interface MountedSubsystems {
   readonly health: DaemonHealthSubsystem;
   /** Host dependencies, diagnosed for this daemon's own machine. */
   readonly doctor: DoctorSubsystem;
+  /**
+   * The daemon's own performance profile (`fy daemon profile`), and the probe every route is timed
+   * into — the same recorder, so a profile sees every route the dispatcher below serves.
+   */
+  readonly performance: {
+    readonly profiles: PerformanceSubsystem;
+    readonly probe: PerformanceProbe;
+    readonly clock: MillisecondClockPort;
+  };
   /** Short-lived pairing codes, durable device grants and their host-local observation surface. */
   readonly pairing: PairingSubsystem;
   /** Each paired device's own grants, changed — `docs/design/zero-trust.md` B5. */
@@ -452,6 +466,9 @@ export function mountedDaemonRoutes(base: DaemonApiDependencies, subsystems: Mou
         // Both are fixed literals, so neither can shadow or be shadowed by a subsystem pattern.
         ...daemonHealthRoutes(subsystems.health),
         ...doctorRoutes(subsystems.doctor),
+        // The performance profile sits beside the doctor: both describe this machine to its owner.
+        // `/v1/diagnostics/profile` is used by nothing else, so it can neither shadow nor be shadowed.
+        ...performanceRoutes(subsystems.performance.profiles),
         // The account model's tables (docs/design/account-model.md §7). Fleet paths are fixed literals
         // under their own namespace, so they cannot shadow any session route below.
         ...fleetCredentialRoutes(subsystems.fleetCredentials),
@@ -620,7 +637,15 @@ export function createMountedDispatcher(base: DaemonApiDependencies, subsystems:
   return new ApiDispatcher(
     // A change a route makes without touching a file announces itself once the route has answered —
     // direct and relayed alike, since both dispatch here. See `ANNOUNCED_ROUTES`.
-    new ApiRouter(configAnnouncedRoutes(subsystems.configChanges, mountedDaemonRoutes(base, subsystems))),
+    // Every route is timed into the performance probe under its pattern; nothing is recorded unless a
+    // profile is open (see `observedRoutes`).
+    new ApiRouter(
+      observedRoutes(
+        configAnnouncedRoutes(subsystems.configChanges, mountedDaemonRoutes(base, subsystems)),
+        subsystems.performance.probe,
+        subsystems.performance.clock,
+      ),
+    ),
     base.credentials,
     subsystems.grants,
     undefined,

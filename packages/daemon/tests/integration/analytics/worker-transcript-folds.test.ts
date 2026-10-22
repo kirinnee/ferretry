@@ -91,13 +91,16 @@ describe('WorkerTranscriptFolds with the real worker', () => {
     const folds = new WorkerTranscriptFolds(async id => (id === 'a' ? claude : codex));
 
     // Act
-    const [first, second] = await Promise.all([
-      folds.foldFor('a', 'claude', ALIASES),
-      folds.foldFor('b', 'codex', ALIASES),
-    ]);
+    const idle = folds.inFlight;
+    const asked = Promise.all([folds.foldFor('a', 'claude', ALIASES), folds.foldFor('b', 'codex', ALIASES)]);
+    await Bun.sleep(0);
+    const held = folds.inFlight;
+    const [first, second] = await asked;
+    const settled = folds.inFlight;
     folds.close();
 
-    // Assert
+    // Assert — the queue depth a profile samples counts exactly the folds the thread holds.
+    should([idle, held, settled]).deepEqual([0, 2, 0]);
     should(first).deepEqual(await foldedHere(claude, 'claude'));
     should(second).deepEqual(await foldedHere(codex, 'codex'));
   });

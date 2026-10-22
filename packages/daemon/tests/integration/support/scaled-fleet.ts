@@ -175,7 +175,8 @@ async function writeClaudeTranscript(file: string, sessionId: string, bytes: num
   return written;
 }
 
-const sessionIdOf = (index: number): string => `scaled-${String(index).padStart(2, '0')}`;
+/** The id of the fixture's `index`th session; the first `running` of them are the running ones. */
+export const sessionIdOf = (index: number): string => `scaled-${String(index).padStart(2, '0')}`;
 
 /**
  * The fleet under `root`, built if it is not there yet. Sessions are written through the daemon's own

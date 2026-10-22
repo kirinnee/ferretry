@@ -443,6 +443,11 @@ interface AutoResumeBoot {
   run(): Promise<AutoResumeSummary | undefined>;
 }
 
+import {
+  countedFileOperations,
+  instrumentChildProcesses,
+  ProcessGauges,
+} from '../src/adapters/runtime/performance-instruments.ts';
 import { ToolInstallService } from '../src/lib/fleet/tool-install.ts';
 import { HarnessLoginService } from '../src/lib/fleet-login/service.ts';
 import {
@@ -906,6 +911,10 @@ import {
   packInstructed,
   packLaunchDefault,
 } from '../src/lib/pack/index.ts';
+import { IDLE_DAEMON_BUDGETS } from '../src/lib/performance/budgets.ts';
+import { PerformanceProfiler } from '../src/lib/performance/profiler.ts';
+import { NO_PERFORMANCE_PROBE, PerformanceRecorder } from '../src/lib/performance/recorder.ts';
+import { teeStackSampler } from '../src/lib/performance/sampler-tee.ts';
 import type { PackSubsystem } from '../src/lib/runtime/mounts/pack.ts';
 import type { SessionForkSubsystem } from '../src/lib/runtime/mounts/session-fork.ts';
 import { createSessionMcpSubsystem } from '../src/lib/runtime/mounts/session-mcp.ts';
@@ -1042,6 +1051,8 @@ export interface DaemonWorld {
      * stall names what was running. One ledger per world, because the stall meter reads all of it.
      */
     readonly activities: ActivityLedger;
+    /** The performance probe the lag meter, the stack sampler and the child-process counter report into. */
+    readonly performance?: PerformanceRecorder;
     /** Starts this boot's progress — the step `/healthz` reports — and makes it the one health reads. */
     readonly beginProgress: () => BootProgress;
     /** How long the loop may be silent before the watchdog ends the process; `0` is off. */
@@ -6178,7 +6189,15 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
    * so its elapsed time is the boot's; health reads whichever boot this world last began, and a world
    * no boot has begun is a world whose bootstrap has not finished.
    */
-  const activities = new ActivityLedger(millisecondClock, new AsyncActivityScope());
+  /**
+   * The performance probe every instrument reports into — activities, routes, child processes, the
+   * state home's file port, the lag meter and the stack sampler. It records nothing until a profile
+   * opens a window (`fy daemon profile`), so it stays wired in permanently.
+   */
+  const profilerProbe = new PerformanceRecorder();
+  const activities = new ActivityLedger(millisecondClock, new AsyncActivityScope(), (label, wallMs) =>
+    profilerProbe.activity(label, wallMs),
+  );
   let bootProgress: BootProgress | undefined;
   const environment = new RuntimeEnvironment(process.env, () => userHome);
   const paths = createFoundationPaths(resolveStateHome(environment.stateHomeInput()));
@@ -6216,9 +6235,15 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
    */
   const tmux = new ControlModeTmuxProcess(Bun.which('tmux') ?? FALLBACK_TMUX, join(paths.home, 'tmux.sock'));
   const launchGuard = testHarnessLaunchGuard(paths.home);
-  const stateFiles = new StateFileSystem(paths, undefined, {
-    hostCodexAuth: hostCodexCredentialFile(process.env.CODEX_HOME, userHome),
-  });
+  const stateFiles = countedFileOperations(
+    new StateFileSystem(paths, undefined, {
+      hostCodexAuth: hostCodexCredentialFile(process.env.CODEX_HOME, userHome),
+    }),
+    'state',
+    profilerProbe,
+    millisecondClock,
+    { home: userHome, stateHome: paths.home },
+  );
   /**
    * This boot's journal, held as a local because several things write to it.
    *
@@ -7162,6 +7187,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       binder: new DaemonBinder({ sleep: milliseconds => Bun.sleep(milliseconds) }, { now: () => Date.now() }),
       preferredPort: FY_DEFAULT_DAEMON_PORT,
       activities,
+      performance: profilerProbe,
       beginProgress: () => {
         bootProgress = new BootProgress(millisecondClock, activities);
         return bootProgress;
@@ -8159,19 +8185,21 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       // The model catalogs in effect, for their list prices. Read lazily: the catalog service is built
       // below, and nothing prices a session before the subsystems mount.
       const pricedModelCatalogs = async () => await modelCatalogService.catalogs();
+      // Read and folded on a worker thread: the event loop only resolves which file to read. Held here
+      // so a performance profile can sample how many folds the thread holds.
+      const transcriptFolds = new WorkerTranscriptFolds(
+        (
+          resolver => async (sessionId: string) =>
+            await resolver.file(sessionId)
+        )(createTranscriptFileResolver(storage)),
+      );
       const analyticsIngestion = createAnalyticsIngestion(
         storage,
         analyticsStore,
         daemonConfigStore,
         pricedModelCatalogs,
         createAnalyticsTranscriptEvidence(storage),
-        // Read and folded on a worker thread: the event loop only resolves which file to read.
-        new WorkerTranscriptFolds(
-          (
-            resolver => async (sessionId: string) =>
-              await resolver.file(sessionId)
-          )(createTranscriptFileResolver(storage)),
-        ),
+        transcriptFolds,
         clock,
       );
       const analyticsPricing = new AnalyticsPricingService(
@@ -8753,6 +8781,53 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           ),
         },
         health: createHealthSubsystem(health, scratch),
+        performance: {
+          profiles: new PerformanceProfiler({
+            recorder: profilerProbe,
+            gauges: new ProcessGauges(),
+            workers: [{ name: 'analytics-fold', inFlight: () => transcriptFolds.inFlight }],
+            clock: millisecondClock,
+            timers: {
+              every: (intervalMs, tick) => {
+                const handle = setInterval(tick, intervalMs);
+                return () => clearInterval(handle);
+              },
+              after: (delayMs, fire) => {
+                const handle = setTimeout(fire, delayMs);
+                return () => clearTimeout(handle);
+              },
+            },
+            context: {
+              daemon: {
+                version: daemonVersion,
+                platform: process.platform,
+                arch: process.arch,
+                runtime: `bun ${Bun.version}`,
+              },
+              uptimeSeconds: () => process.uptime(),
+              fleet: async () => {
+                const sessions = storage.listSessions();
+                return {
+                  sessions: sessions.length,
+                  running: sessions.filter(session => session.status === 'running').length,
+                };
+              },
+              limitations: () => [
+                'File operations count only calls through the daemon’s state-home port; a direct node:fs call shows in the CPU profile (as openSync, statSync, …) and in --trace-syscalls, not in that table.',
+                ...(process.platform === 'linux'
+                  ? []
+                  : ['System-call counts and children’s CPU are read from /proc and exist on Linux only.']),
+                ...(stackSamplerEnabled(process.env[STACK_SAMPLER_VARIABLE])
+                  ? []
+                  : ['The stack sampler is switched off (FYD_STACK_SAMPLER=0), so the CPU profile is empty.']),
+              ],
+            },
+            budgets: IDLE_DAEMON_BUDGETS,
+            newId: () => crypto.randomUUID(),
+          }),
+          probe: profilerProbe,
+          clock: millisecondClock,
+        },
         doctor: {
           report: async () => {
             let directorySyscalls = true;
@@ -9327,17 +9402,31 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
     world.clock,
     activities,
     DEFAULT_EVENT_LOOP_LAG_POLICY,
-    stall => world.notices.state(describeLoopStall(stall)),
-    (await world.boot.stackSampler?.()) ?? NO_STACK_SAMPLER,
+    stall => {
+      world.notices.state(describeLoopStall(stall));
+      world.boot.performance?.stall(stall);
+    },
+    teeStackSampler(
+      (await world.boot.stackSampler?.()) ?? NO_STACK_SAMPLER,
+      world.boot.performance ?? NO_PERFORMANCE_PROBE,
+    ),
   );
   const watchdog = world.boot.watchdogLimitMs > 0 ? world.boot.watchdog(world.boot.watchdogLimitMs) : NO_WATCHDOG;
   const lagTicks = setInterval(() => {
     meter.tick();
+    if (world.boot.performance?.recording === true) world.boot.performance.loopTick(meter.view().lagMs);
     watchdog.beat(activities.inFlight());
   }, DEFAULT_EVENT_LOOP_LAG_POLICY.intervalMs);
+  // Every child this daemon starts is counted by program and subcommand while a profile records. It is
+  // released with the heartbeat: both observe the whole process, and both are armed before anything else.
+  const uncountChildren =
+    world.boot.performance === undefined
+      ? () => undefined
+      : instrumentChildProcesses(world.boot.performance, world.clock);
   cleanups.push(() => {
     clearInterval(lagTicks);
     watchdog.stop();
+    uncountChildren();
   });
   const liveness: DaemonLivenessSource = {
     pid: process.pid,

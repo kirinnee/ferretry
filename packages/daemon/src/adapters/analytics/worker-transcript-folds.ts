@@ -71,6 +71,11 @@ export class WorkerTranscriptFolds implements AnalyticsTranscriptFoldSource {
     return await this.#ask({ id: this.#next++, file, sessionId, harness, aliasGroups });
   }
 
+  /** How many folds the thread holds right now: the queue depth a performance profile samples. */
+  get inFlight(): number {
+    return this.#pending.size;
+  }
+
   /** Ends the thread and refuses every fold still waiting on it. */
   close(): void {
     this.#discard(new Error('the analytics worker was closed'));

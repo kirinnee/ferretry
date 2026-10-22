@@ -38,6 +38,7 @@ import { FileDaemonRestartMarker, restartMarkerPath } from '../src/adapters/daem
 import { FileRetiredArtifacts } from '../src/adapters/daemon/retired-artifacts';
 import { FileServiceStore } from '../src/adapters/daemon/service-files';
 import { TmuxSessionTerminalServer } from '../src/adapters/daemon/session-terminals';
+import { PlatformSyscallTracer } from '../src/adapters/daemon/syscall-tracer';
 import { serveMcpOverStdio } from '../src/adapters/mcp/stdio';
 import { desktopBrowserOpener } from '../src/adapters/pair/browser-opener';
 import { QrCodeTerminal } from '../src/adapters/pair/qr-terminal';
@@ -89,6 +90,8 @@ import { registerDaemonCommands } from '../src/lib/daemon/commands';
 import { DaemonController } from '../src/lib/daemon/controller';
 import { type DaemonLayout, resolveDaemonLayout, resolveDaemonStateHome } from '../src/lib/daemon/layout';
 import type { IServiceDefinitionSupervisor } from '../src/lib/daemon/ports';
+import { registerProfileCommands } from '../src/lib/daemon/profile/commands';
+import { ProfileController, ProtocolProfileGateway } from '../src/lib/daemon/profile/controller';
 import { MachineSetupNotice } from '../src/lib/daemon/setup-notice';
 import { DirectSupervisor, LaunchdSupervisor, SystemdSupervisor } from '../src/lib/daemon/supervisor';
 import { registerDeviceCommands } from '../src/lib/device/commands';
@@ -1053,6 +1056,21 @@ const DOMAIN_REGISTRARS: ReadonlyArray<(wiring: DomainWiring) => void> = [
     registerAuditCommands(
       program,
       () => new AuditController({ gateway: new ProtocolAuditGateway(client), out: world.io }),
+    ),
+  ({ program, world, client }) =>
+    registerProfileCommands(
+      program,
+      () =>
+        new ProfileController({
+          gateway: new ProtocolProfileGateway(client),
+          tracer: new PlatformSyscallTracer(),
+          out: world.io,
+          sleep: async ms => await Bun.sleep(ms),
+          now: () => Date.now(),
+          writeFile: async (path, text) => {
+            await Bun.write(path, text);
+          },
+        }),
     ),
   // Pairing writes its screen through its own uncoloured writer rather than `world.io`: the screen is
   // mostly a QR, and tinting the one image the onboarding depends on is a risk with nothing to gain.
