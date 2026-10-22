@@ -27,6 +27,7 @@ import {
   type PaneDeliveryOptions,
   RuntimeEnvironment,
   SqliteHomeLockFactory,
+  StateFileSystem,
   StateFileSystemFactory,
   StateHomeLayout,
   StorageSessionLifecycleRepository,
@@ -50,6 +51,8 @@ import {
   createSessionPaths,
   createSessionRecord,
   defaultSessionLifecycleSettings,
+  type FoundationPaths,
+  type JsonValue,
   parseSessionId,
   type SessionEnvironmentStore,
   type SessionLifecycleRecord,
@@ -77,6 +80,59 @@ async function openTemporaryStorage(existingHome?: string) {
     () => new KeyedSerialExecutor(),
   );
   return await factory.open();
+}
+
+/**
+ * The real state filesystem, which runs `interleave` the first time anyone looks at `target` after it
+ * is armed — so another writer can be made to land at exactly the moment a reader has its copy.
+ */
+class InterleavingStateFileSystem extends StateFileSystem {
+  target: string | undefined;
+  interleave: () => void = () => undefined;
+
+  private observe(path: string): void {
+    if (path !== this.target) return;
+    this.target = undefined;
+    this.interleave();
+  }
+
+  override async identity(path: string): Promise<string | undefined> {
+    this.observe(path);
+    return await super.identity(path);
+  }
+
+  override async readTextIdentified(path: string) {
+    this.observe(path);
+    return await super.readTextIdentified(path);
+  }
+}
+
+async function openInterleavingStorage() {
+  const home = await mkdtemp(join(tmpdir(), 'ferretry-lifecycle-test-'));
+  homes.add(home);
+  let fileSystem: InterleavingStateFileSystem | undefined;
+  const factory = new DaemonStorageFactory(
+    new RuntimeEnvironment({ FY_HOME: home }, () => '/home-must-not-be-used'),
+    {
+      create: (paths: FoundationPaths) => {
+        fileSystem = new InterleavingStateFileSystem(paths);
+        return fileSystem;
+      },
+    },
+    new StateHomeLayout(),
+    new SqliteHomeLockFactory(),
+    new BunSqliteIndexFactory(),
+    new SystemClock(() => new Date(NOW)),
+    () => new KeyedSerialExecutor(),
+  );
+  const opened = await factory.open();
+  if (fileSystem === undefined) throw new Error('the storage built no filesystem');
+  return { ...opened, fileSystem };
+}
+
+/** A JSON document's fields, for merging a change over it the way every real writer does. */
+function documentFields(document: JsonValue): Record<string, JsonValue> {
+  return typeof document === 'object' && document !== null && !Array.isArray(document) ? { ...document } : {};
 }
 
 function record(id = 'stored-session', overrides: Record<string, unknown> = {}): SessionLifecycleRecord {
@@ -402,6 +458,51 @@ describe('StorageSessionLifecycleRepository', () => {
         .map(line => JSON.parse(line).type),
     ).deepEqual(['session.created', 'session.starting']);
     should((await subject.read(created.config.id))?.state.status).equal('starting');
+    await opened.storage.close();
+  });
+
+  it('should never revert a turn or configuration change that lands while a transition is being written', async () => {
+    // Arrange: a running session on turn 1. The turn watcher and the send repository change the state
+    // document through `updateState`, and the protocol half of the configuration changes through
+    // `updateConfig` — each a locked read-modify-write of its own.
+    const opened = await openInterleavingStorage();
+    const subject = new StorageSessionLifecycleRepository(opened.storage);
+    const created = record('raced-session');
+    const id = created.config.id;
+    await subject.write(created, { type: 'session.created', data: {} });
+    await opened.storage.updateState(id, current => ({ ...documentFields(current), turn: 1 }));
+    const starting = transitionSessionRecord(created, 'starting', '2026-07-31T10:01:00.000Z');
+    // Both concurrent writers fire the instant the transition first looks at the configuration: the
+    // moment its copy of the session is the newest one anybody has.
+    const concurrent: Promise<JsonValue>[] = [];
+    opened.fileSystem.target = createSessionPaths(opened.paths, id).config;
+    opened.fileSystem.interleave = () => {
+      concurrent.push(
+        opened.storage.updateState(id, current => ({
+          ...documentFields(current),
+          turn: 2,
+          turnState: 'working',
+          turnStateAt: '2026-07-31T10:01:30.000Z',
+        })),
+        opened.storage.updateConfig(id, current => ({ ...documentFields(current), label: 'renamed' })),
+      );
+    };
+
+    // Act
+    await subject.write(starting.record, starting.event);
+    await Promise.all(concurrent);
+
+    // Assert: the transition AND both concurrent changes are on disk. A transition that merged over a
+    // copy read outside the lock would put turn 1 back and drop the label — a silent revert.
+    should(concurrent).have.length(2);
+    should(await opened.storage.readState(id)).containDeep({
+      status: 'starting',
+      turn: 2,
+      turnState: 'working',
+      turnStateAt: '2026-07-31T10:01:30.000Z',
+    });
+    should(await opened.storage.readConfig(id)).containDeep({ name: created.config.name, label: 'renamed' });
+    should((await subject.read(id))?.state.status).equal('starting');
     await opened.storage.close();
   });
 });

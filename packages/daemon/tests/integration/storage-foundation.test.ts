@@ -411,6 +411,37 @@ describe('session documents', () => {
     should(await readdir(opened.paths.temporary)).deepEqual([]);
   });
 
+  it('should create a missing document through an upsert, and serialize it with every other update', async () => {
+    // Arrange
+    const home = await createTemporaryHome();
+    const opened = await openStorage(home);
+    const id = parseSessionId('upsert-session');
+    const seen: Array<JsonValue | undefined> = [];
+    const bump = (current: JsonValue | undefined) => {
+      seen.push(current);
+      return { count: current === undefined ? 1 : counter(current) + 1 };
+    };
+
+    // Act — the first upsert of each document finds nothing; every later writer, upsert or update,
+    // queues behind it and reads what the one before it wrote.
+    await opened.storage.upsertConfig(id, bump);
+    await Promise.all([
+      opened.storage.upsertState(id, bump),
+      opened.storage.updateState(id, bump),
+      opened.storage.upsertState(id, bump),
+    ]);
+    const refused = await capturedError(
+      async () => await opened.storage.updateState(parseSessionId('never-upserted'), bump),
+    );
+
+    // Assert — `updateState` still refuses to create; only an upsert may.
+    should(await opened.storage.readConfig(id)).deepEqual({ count: 1 });
+    should(await opened.storage.readState(id)).deepEqual({ count: 3 });
+    should(seen).deepEqual([undefined, undefined, { count: 1 }, { count: 2 }]);
+    should(refused).be.instanceOf(InvalidStateDocumentError);
+    should(await readdir(opened.paths.temporary)).deepEqual([]);
+  });
+
   it('should leave every document byte-for-byte unchanged when the journal is missing', async () => {
     // Arrange — the observed repro persisted config version 2 and then failed on the journal
     // append, leaving the documents a transition ahead of the history that justifies them.

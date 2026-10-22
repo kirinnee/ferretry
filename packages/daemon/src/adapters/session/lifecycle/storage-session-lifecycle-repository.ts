@@ -194,12 +194,15 @@ export class StorageSessionLifecycleRepository implements SessionLifecycleReposi
    * Both documents are MERGED over what is already on disk rather than replacing it, because this
    * record is only ever half of them: the protocol half was decided at the start and is not
    * reconstructible from a transition.
+   *
+   * EACH MERGE IS ONE LOCKED READ-MODIFY-WRITE. The turn watcher and the send repository change the
+   * state document through `updateState` at any moment; a merge over a copy read before the lock
+   * would write that copy back and silently revert whatever landed in between — a turn, a turn state.
    */
   async write(record: SessionLifecycleRecord, event: SessionLifecycleEvent): Promise<void> {
     const id = parseSessionId(record.config.id);
-    const [config, state] = await Promise.all([this.storage.readConfig(id), this.storage.readState(id)]);
-    await this.storage.writeConfig(id, this.configDocument(record, fields(config)));
-    await this.storage.writeState(id, this.stateDocument(record, fields(state)));
+    await this.storage.upsertConfig(id, config => this.configDocument(record, fields(config)));
+    await this.storage.upsertState(id, state => this.stateDocument(record, fields(state)));
     await this.storage.append(id, event.type, event.data);
   }
 
