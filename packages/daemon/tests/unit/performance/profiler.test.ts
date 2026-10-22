@@ -4,6 +4,7 @@ import should from 'should';
 import type { PerformanceBudget } from '../../../src/lib/performance/budgets.ts';
 import {
   PerformanceProfiler,
+  sampledShareLimitation,
   type ProcessReading,
   type ProfileContextPort,
 } from '../../../src/lib/performance/profiler.ts';
@@ -414,5 +415,24 @@ describe('PerformanceProfiler', () => {
       { name: 'daemon CPU', unit: '% of one core', limit: 5, actual: 10, ok: false },
       { name: 'window', unit: 'ms', limit: 60_000, actual: 3001, ok: true },
     ]);
+  });
+});
+
+describe('sampledShareLimitation', () => {
+  it.each([
+    [0, 1_000, undefined],
+    [100, 0, undefined],
+    [600, 1_000, undefined],
+    [
+      550,
+      6_000,
+      'The sampled stacks cover about 550 ms of main-thread JavaScript, 9% of the daemon’s 6000 ms of CPU; the rest is native work they cannot see — the I/O thread pool, the kernel, garbage collection, starting child processes.',
+    ],
+  ])('should say how much of %s samples over %s ms of CPU the stacks explain', (samples, cpuMs, expected) => {
+    // Act
+    const actual = sampledShareLimitation(samples, cpuMs);
+
+    // Assert
+    should(actual).equal(expected);
   });
 });

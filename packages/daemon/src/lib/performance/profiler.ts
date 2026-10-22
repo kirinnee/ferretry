@@ -78,6 +78,25 @@ interface RunningProfile {
 const MEGABYTE = 1_048_576;
 
 /**
+ * About how much main-thread JavaScript one stack sample stands for. JavaScriptCore's sampler takes
+ * about one sample per millisecond while JavaScript runs (measured: 912 a second in a busy loop, 6 a
+ * second idle), so the sample count is roughly the JavaScript time in milliseconds.
+ */
+const SAMPLE_MS = 1;
+
+/**
+ * The sentence that says how much of the CPU the stacks can explain, or nothing when they explain most
+ * of it. A daemon that spends its CPU starting processes and waiting on its I/O threads shows a few
+ * hundred samples against seconds of CPU, and a reader must not read the hot functions as the whole cost.
+ */
+export function sampledShareLimitation(samples: number, cpuMs: number): string | undefined {
+  if (samples === 0 || cpuMs <= 0) return undefined;
+  const share = Math.min(1, (samples * SAMPLE_MS) / cpuMs);
+  if (share >= 0.5) return undefined;
+  return `The sampled stacks cover about ${String(Math.round(samples * SAMPLE_MS))} ms of main-thread JavaScript, ${String(Math.round(share * 100))}% of the daemon’s ${String(Math.round(cpuMs))} ms of CPU; the rest is native work they cannot see — the I/O thread pool, the kernel, garbage collection, starting child processes.`;
+}
+
+/**
  * Opens a window onto the daemon's own counters for a number of seconds, and turns it into a report.
  *
  * ONE PROFILE RUNS AT A TIME, and asking for another while it runs joins it: two overlapping windows
@@ -228,7 +247,12 @@ export class PerformanceProfiler {
       resources,
       ...tables,
       budgets: judgeBudgets({ resources, ...tables }, budgets),
-      limitations: [...context.limitations()],
+      limitations: [
+        ...context.limitations(),
+        ...[sampledShareLimitation(tables.cpuProfile.samples, userMs + systemMs)].filter(
+          (line): line is string => line !== undefined,
+        ),
+      ],
     };
   }
 }
