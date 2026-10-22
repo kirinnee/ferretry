@@ -18,6 +18,7 @@ import {
   type DirectoryEntry,
   type DurableAppend,
   type DurableAppendOutcome,
+  type IdentifiedText,
   type FileInformation,
   type FileSystemFactory,
   type FileSystemPort,
@@ -81,6 +82,15 @@ export async function classifyDirectoryEntry(
 
 function namesSameFile(information: Stats, expected: JournalFingerprint): boolean {
   return information.dev.toString() === expected.device && information.ino.toString() === expected.inode;
+}
+
+/**
+ * Everything that changes when a file is replaced or rewritten: an atomic write is a new inode, an
+ * in-place write moves the size or the modification time, and the change time moves with any of them
+ * and cannot be set back by a caller.
+ */
+function identityOf(information: Stats): string {
+  return `${String(information.dev)}:${String(information.ino)}:${String(information.size)}:${String(information.mtimeMs)}:${String(information.ctimeMs)}`;
 }
 
 function fingerprintOf(information: Stats): JournalFingerprint {
@@ -235,6 +245,32 @@ export class StateFileSystem implements FileSystemPort {
   async readText(path: string): Promise<string | undefined> {
     try {
       return await readFile(await this.checked(path), 'utf8');
+    } catch (error) {
+      if (isMissing(error)) return undefined;
+      throw error;
+    }
+  }
+
+  async readTextIdentified(path: string): Promise<IdentifiedText | undefined> {
+    let handle: FileHandle;
+    try {
+      handle = await open(await this.checked(path), 'r');
+    } catch (error) {
+      if (isMissing(error)) return undefined;
+      throw error;
+    }
+    try {
+      // The identity of the DESCRIPTOR read, not of whatever the path names a moment later.
+      const identity = identityOf(await handle.stat());
+      return { text: await handle.readFile('utf8'), identity };
+    } finally {
+      await handle.close();
+    }
+  }
+
+  async identity(path: string): Promise<string | undefined> {
+    try {
+      return identityOf(await stat(this.contained(path)));
     } catch (error) {
       if (isMissing(error)) return undefined;
       throw error;

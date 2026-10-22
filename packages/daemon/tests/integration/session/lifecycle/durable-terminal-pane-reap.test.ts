@@ -359,6 +359,30 @@ describe('a registration ledger with one damaged document', () => {
     should(scanned.damaged.map(value => value.sessionId)).deepEqual([DAMAGED]);
   });
 
+  it('should survey once for two scans asked together, and see a registration change between scans', async () => {
+    // Arrange — a sweep asks for the registrations and the sessions in the same breath.
+    const subject = await fixture();
+    await subject.registrar.register(subject.record);
+    const survey = subject.storage.sessionIdsOnDisk.bind(subject.storage);
+    let surveys = 0;
+    subject.storage.sessionIdsOnDisk = async () => {
+      surveys += 1;
+      return await survey();
+    };
+
+    // Act
+    const [first, second] = await Promise.all([subject.store.scan(DAEMON), subject.store.scan(DAEMON)]);
+    const together = surveys;
+    await damage(subject, '{ not json at all');
+    const later = await subject.store.scan(DAEMON);
+
+    // Assert
+    should(together).equal(1);
+    should(second).equal(first);
+    should(later.damaged.map(value => value.sessionId)).deepEqual([DAMAGED]);
+    should(surveys).equal(2);
+  });
+
   it('should refuse the REAP view of that same ledger', async () => {
     // Arrange
     const subject = await fixture();
