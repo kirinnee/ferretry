@@ -2144,7 +2144,7 @@ export class FakeSecretCipher implements SecretCipherPort {
     return { iv: name, ciphertext: [...plaintext].reverse().join('') };
   }
 
-  async open(name: SecretName, sealed: { readonly iv: string; readonly ciphertext: string }): Promise<string> {
+  async #open(name: SecretName, sealed: { readonly iv: string; readonly ciphertext: string }): Promise<string> {
     if (sealed.iv !== name) throw new SecretStoreError('undecipherable', `${name} was filed under ${sealed.iv}`);
     return [...sealed.ciphertext].reverse().join('');
   }
@@ -2153,7 +2153,7 @@ export class FakeSecretCipher implements SecretCipherPort {
     entries: Readonly<Record<SecretName, { readonly iv: string; readonly ciphertext: string }>>,
   ): Promise<ReadonlyMap<SecretName, string>> {
     const opened = new Map<SecretName, string>();
-    for (const [name, sealed] of Object.entries(entries)) opened.set(name, await this.open(name, sealed));
+    for (const [name, sealed] of Object.entries(entries)) opened.set(name, await this.#open(name, sealed));
     return opened;
   }
 }

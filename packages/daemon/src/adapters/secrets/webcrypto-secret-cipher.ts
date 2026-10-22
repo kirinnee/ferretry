@@ -112,10 +112,6 @@ export class WebCryptoSecretCipher implements SecretCipherPort {
     return { iv: encode(iv), ciphertext: encode(new Uint8Array(sealed)) };
   }
 
-  async open(name: SecretName, sealed: { readonly iv: string; readonly ciphertext: string }): Promise<string> {
-    return await this.#openWith(await this.#key(name), name, sealed);
-  }
-
   /**
    * The key is read and imported once for the whole vault rather than once per entry. It lives only as
    * long as this call, exactly as it did per entry: nothing here outlives the open.
