@@ -1,5 +1,6 @@
 import { dirname, resolve } from 'node:path';
 import type { DaemonLayout } from './layout.ts';
+import { isBinaryPlist } from './plist.ts';
 import type {
   DaemonStartHandle,
   DaemonSupervisorReport,
@@ -10,8 +11,8 @@ import type {
   IStateHomeClaimPort,
   StopRequest,
 } from './ports.ts';
-import { DAEMON_RUNTIME_TUNING } from './runtime-tuning.ts';
 import { parseLaunchdPrint, parseSystemdProperties, readLaunchdReport, readSystemdReport } from './probe.ts';
+import { DAEMON_RUNTIME_TUNING } from './runtime-tuning.ts';
 import {
   launchAgentProcessType,
   launchAgentStateHome,
@@ -92,18 +93,19 @@ async function assertPidServes(
  * refused rather than guessed about.
  */
 async function assertDefinitionServes(
-  files: IServiceFilePort,
+  read: () => Promise<string | undefined>,
   layout: DaemonLayout,
   definitionPath: string,
   stateHomeOf: (definition: string) => string | undefined,
+  removal: string,
 ): Promise<void> {
-  const definition = await files.read(definitionPath);
+  const definition = await read();
   if (definition === undefined) return;
   const supervised = stateHomeOf(definition);
   if (supervised === undefined) {
     throw new DaemonOwnershipError(
       `${definitionPath} names no FY_HOME, so it cannot be tied to ${layout.stateHome}; it was not written by ` +
-        `this client — remove it, then install again`,
+        `this client — remove it, then install again: \`${removal}; rm ${definitionPath}; fy daemon install\``,
     );
   }
   if (resolve(supervised) === resolve(layout.stateHome)) return;
@@ -217,7 +219,13 @@ export class SystemdSupervisor implements IServiceDefinitionSupervisor {
   }
 
   async assertServes(pidHint: number | undefined): Promise<void> {
-    await assertDefinitionServes(this.files, this.layout, this.definitionPath, systemdUnitStateHome);
+    await assertDefinitionServes(
+      () => this.files.read(this.definitionPath),
+      this.layout,
+      this.definitionPath,
+      systemdUnitStateHome,
+      `systemctl --user disable --now ${this.layout.systemdUnitName}`,
+    );
     if (pidHint !== undefined) await assertPidServes(this.processes, this.layout, pidHint, true);
   }
 
@@ -297,6 +305,24 @@ export class LaunchdSupervisor implements IServiceDefinitionSupervisor {
     );
   }
 
+  /**
+   * The plist as XML text. `plutil` can leave a binary plist, which no text reader can parse, so one is
+   * converted by `plutil -convert xml1` — present on every macOS — and a conversion that fails is
+   * refused with its reason rather than read as "names no FY_HOME".
+   */
+  async #definitionText(): Promise<string | undefined> {
+    const text = await this.files.read(this.definitionPath);
+    if (text === undefined || !isBinaryPlist(text)) return text;
+    const converted = await this.processes.run(['plutil', '-convert', 'xml1', '-o', '-', this.definitionPath]);
+    if (converted.code === 0) return converted.stdout;
+    throw new DaemonOwnershipError(
+      `${this.definitionPath} is a binary property list and \`plutil -convert xml1\` could not read it` +
+        (converted.stderr.trim() === '' ? '' : ` (${converted.stderr.trim()})`) +
+        `; remove it, then install again: \`launchctl bootout ${this.layout.launchdServiceTarget}; rm ` +
+        `${this.definitionPath}; fy daemon install\``,
+    );
+  }
+
   async uninstall(): Promise<void> {
     await this.processes.run(['launchctl', 'bootout', this.layout.launchdServiceTarget]);
     await this.files.remove(this.layout.launchAgentFile);
@@ -316,7 +342,13 @@ export class LaunchdSupervisor implements IServiceDefinitionSupervisor {
   }
 
   async assertServes(pidHint: number | undefined): Promise<void> {
-    await assertDefinitionServes(this.files, this.layout, this.definitionPath, launchAgentStateHome);
+    await assertDefinitionServes(
+      () => this.#definitionText(),
+      this.layout,
+      this.definitionPath,
+      launchAgentStateHome,
+      `launchctl bootout ${this.layout.launchdServiceTarget}`,
+    );
     if (pidHint !== undefined) await assertPidServes(this.processes, this.layout, pidHint, true);
   }
 
@@ -326,7 +358,7 @@ export class LaunchdSupervisor implements IServiceDefinitionSupervisor {
    */
   async inspect(): Promise<DaemonSupervisorReport> {
     const present = await this.installed();
-    const plist = present ? await this.files.read(this.definitionPath) : undefined;
+    const plist = present ? await this.#definitionText().catch(() => undefined) : undefined;
     const declared = plist === undefined ? {} : { processType: launchAgentProcessType(plist) ?? null };
     const outcome = await this.processes.run(['launchctl', 'print', this.layout.launchdServiceTarget]);
     if (outcome.code !== 0) {
