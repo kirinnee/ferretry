@@ -9396,13 +9396,17 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
     if (world.boot.performance?.recording === true) world.boot.performance.loopTick(meter.view().lagMs);
     watchdog.beat(activities.inFlight());
   }, DEFAULT_EVENT_LOOP_LAG_POLICY.intervalMs);
+  // Every child this daemon starts is counted by program and subcommand while a profile records. It is
+  // released with the heartbeat: both observe the whole process, and both are armed before anything else.
+  const uncountChildren =
+    world.boot.performance === undefined
+      ? () => undefined
+      : instrumentChildProcesses(world.boot.performance, world.clock);
   cleanups.push(() => {
     clearInterval(lagTicks);
     watchdog.stop();
+    uncountChildren();
   });
-  // Every child this daemon starts is counted by program and subcommand while a profile records.
-  if (world.boot.performance !== undefined)
-    cleanups.push(instrumentChildProcesses(world.boot.performance, world.clock));
   const liveness: DaemonLivenessSource = {
     pid: process.pid,
     boot: () => progress.snapshot(),
