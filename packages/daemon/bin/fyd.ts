@@ -7886,9 +7886,10 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
               // Stage 3d settles a dead pane from this; until then the 30 s exit observer does, as before.
               exited: () => undefined,
               // A worker's own children and its look time, which no instrument on this thread can see.
-              report: ({ lookMs, children }) => {
+              report: ({ kind, lookMs, children }) => {
                 if (!profilerProbe.recording) return;
-                profilerProbe.activity('session worker look', lookMs);
+                // A look the worker chose to make, or an answer it gave because this thread asked.
+                profilerProbe.activity(kind === 'look' ? 'session worker look' : 'session worker answer', lookMs);
                 for (const child of children) {
                   const command = commandLabel(child.argv);
                   profilerProbe.childStarted(command, false, 'session worker');

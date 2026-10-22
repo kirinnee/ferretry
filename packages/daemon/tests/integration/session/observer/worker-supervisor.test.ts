@@ -164,7 +164,10 @@ describe('WorkerSupervisor', () => {
     should(attached).deepEqual([A]);
     should(observed).deepEqual([[A, patches]]);
     should(exited).deepEqual([A]);
-    should(reports.map(report => report.lookMs)).deepEqual([4, 1]);
+    should(reports.map(report => [report.kind, report.lookMs])).deepEqual([
+      ['look', 4],
+      ['look', 1],
+    ]);
   });
 
   it('should tell a hosted session’s thread its transcript changed and its receipts, and nobody else', () => {
@@ -236,7 +239,9 @@ describe('WorkerSupervisor', () => {
     // Assert
     should(workers.length).equal(1);
     should(await looking).deepEqual({ visible: 'frame' });
-    should(reports).deepEqual([{ lookMs: 0, children: [{ argv: ['tmux', 'capture-pane'], wallMs: 2 }] }]);
+    should(reports).deepEqual([
+      { kind: 'answer', lookMs: 0, children: [{ argv: ['tmux', 'capture-pane'], wallMs: 2 }] },
+    ]);
     should(subject.inFlight).equal(0);
   });
 

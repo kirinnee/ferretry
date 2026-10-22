@@ -24,8 +24,10 @@ export interface ObserverWorker {
   addEventListener?(type: 'close', listener: () => void): void;
 }
 
-/** What one look reported beside its answer, for the profile. */
+/** What a worker reported beside a look or an answer, for the profile. */
 export interface WorkerLookReport {
+  /** A look the worker made, or an answer it gave when asked. */
+  readonly kind: 'look' | 'answer';
   readonly lookMs: number;
   readonly children: readonly WorkerChild[];
 }
@@ -312,13 +314,13 @@ export class WorkerSupervisor {
     }
     switch (message.kind) {
       case 'observed':
-        this.ports.report({ lookMs: message.lookMs, children: message.metrics.children });
+        this.ports.report({ kind: 'look', lookMs: message.lookMs, children: message.metrics.children });
         if (this.current(thread, message.session, message.generation))
           this.ports.observed(message.session as SessionId, message.patches);
         return;
       case 'answered': {
         const pending = this.pending.get(message.request);
-        this.ports.report({ lookMs: 0, children: message.metrics.children });
+        this.ports.report({ kind: 'answer', lookMs: 0, children: message.metrics.children });
         if (pending === undefined || pending.generation !== message.generation) return;
         this.pending.delete(message.request);
         pending.cancel();
