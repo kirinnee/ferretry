@@ -497,9 +497,10 @@ export class FleetCredentialsService {
   /**
    * What the EXISTING usage pass runs: per credential, the passive reading and — only when it is older
    * than the pass interval — the one free usage read. Never a refresh, never a harness launch.
-   * Never rejects: a pass that could not read leaves each credential's last known word.
+   * Never rejects: a pass that could not read leaves each credential's last known word. `ids` limits
+   * the pass to the credentials due (the fleet reading's schedule); absent, every stored credential.
    */
-  async observeAll(): Promise<void> {
+  async observeAll(ids?: readonly string[]): Promise<void> {
     let entries: readonly CredentialEntry[];
     try {
       entries = (await this.deps.catalog.entries()).entries;
@@ -508,7 +509,7 @@ export class FleetCredentialsService {
     }
     await Promise.allSettled(
       entries
-        .filter(entry => stored(entry.resolution) !== undefined)
+        .filter(entry => stored(entry.resolution) !== undefined && (ids === undefined || ids.includes(entry.id)))
         .map(entry => this.deps.status.observe(subjectOf(entry))),
     );
   }

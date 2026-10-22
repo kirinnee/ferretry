@@ -598,6 +598,24 @@ export function needsActiveUsageRead(
   );
 }
 
+/**
+ * WHEN {@link needsActiveUsageRead} next turns true for a credential: the instant a scheduler must give it
+ * the active free read, so the read can be armed for that moment instead of asked about on a timer.
+ *
+ * A passive reading that measured something holds the read off until it is one interval old; with none,
+ * the last time a pass observed the credential does (`observedAt`), so a login no session uses is read
+ * once an interval, exactly as a fixed pass reads it. Never observed and no passive reading is due now
+ * (`-Infinity`).
+ */
+export function activeUsageReadDueAt(
+  passive: PassiveUsageRecord | undefined,
+  observedAt: number | undefined,
+  intervalMs: number,
+): number {
+  const measured = passive !== undefined && hasSignal(passiveUsageReading(passive)) ? passive.at : undefined;
+  return Math.max(measured ?? Number.NEGATIVE_INFINITY, observedAt ?? Number.NEGATIVE_INFINITY) + intervalMs;
+}
+
 /** The newest reading that measured something, or two unknown windows. */
 export function chooseCredentialUsage(readings: readonly (CredentialUsageReading | undefined)[]): CredentialUsage {
   const newest = readings.filter(hasSignal).sort((left, right) => right.at - left.at)[0];

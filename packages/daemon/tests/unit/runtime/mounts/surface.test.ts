@@ -284,7 +284,7 @@ const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
   },
   // Like the monitor and quota-failover loops, this serves no route. Its presence proves the daemon
   // constructs the unattended evidence pass rather than leaving its timer as unreachable code.
-  fleetRefresh: { run: async () => undefined },
+  fleetRefresh: { run: async () => undefined, arm: async () => () => undefined },
   conversationImport: {
     list: async () => ({ conversations: [], matched: 0, skipped: 0 }),
     preview: async () => undefined,

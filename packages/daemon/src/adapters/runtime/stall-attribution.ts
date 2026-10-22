@@ -15,6 +15,10 @@ export class AsyncActivityScope<T> implements ActivityScopePort<T> {
   within<R>(value: T, work: () => R): R {
     return this.#storage.run(value, work);
   }
+
+  outside<R>(work: () => R): R {
+    return this.#storage.exit(work);
+  }
 }
 
 /** The variable that switches the stack sampler off: `0` for a person who wants the loop unobserved. */

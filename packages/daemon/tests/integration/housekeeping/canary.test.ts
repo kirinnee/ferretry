@@ -220,12 +220,14 @@ describe('the housekeeping worker never lets a token out of the job that read it
         keychainFreshMs: () => 60_000,
         now: Date.now,
         cache: new Map(),
-        catalog: { entry: async () => ({ usedBy: ['codex-runtime'] }) } as never,
-        sessions: async () => [{ agent: 'codex-runtime', transcript: { home: root, file: rollout } }],
       });
       const status = new CredentialStatusService({
         local: async (resolution, options) => await ports.local(resolution, options),
-        passiveUsage: async subject => await ports.passiveUsage(subject),
+        // Each passive reading read straight through the worker, as a pass with no live watch reads it.
+        passiveUsage: async subject =>
+          (subject.resolution.harness === 'claude'
+            ? await jobs.run({ kind: 'usage.passive.claude', credential: subject.id })
+            : await jobs.run({ kind: 'usage.passive.codex', files: [rollout] })) ?? undefined,
         activeUsage: async resolution => await ports.activeUsage(resolution),
         refresh: { refresh: async () => ({ outcome: 'not_run' }) } as never,
         heads,

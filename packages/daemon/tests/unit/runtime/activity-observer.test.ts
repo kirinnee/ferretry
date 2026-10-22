@@ -15,6 +15,14 @@ function stackScope<T>(): ActivityScopePort<T> {
         stack.pop();
       }
     },
+    outside: <R>(work: () => R): R => {
+      const saved = stack.splice(0);
+      try {
+        return work();
+      } finally {
+        stack.push(...saved);
+      }
+    },
   };
 }
 
@@ -91,5 +99,27 @@ describe('ActivityLedger current', () => {
 
     // Assert
     should(seen).deepEqual([undefined, 'fleet refresh', `fleet refresh${ACTIVITY_NESTING}runtime homes`, undefined]);
+  });
+
+  it('should count work run outside every activity under its own name, wherever it was started', async () => {
+    // Arrange — a pass that arms the next pass: the next one must not be counted inside it.
+    const told: string[] = [];
+    const subject = new ActivityLedger({ now: () => 0 }, stackScope(), label => told.push(label));
+
+    // Act
+    await subject.run('fleet refresh', async () => {
+      await subject.outside(async () => await subject.run('fleet refresh', () => undefined));
+    });
+
+    // Assert
+    should(told).deepEqual(['fleet refresh', 'fleet refresh']);
+  });
+
+  it('should run work outside as it is when there is no scope to leave', () => {
+    // Arrange
+    const subject = new ActivityLedger({ now: () => 0 });
+
+    // Act / Assert
+    should(subject.outside(() => 'ran')).equal('ran');
   });
 });

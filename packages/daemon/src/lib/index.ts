@@ -22,6 +22,7 @@ export * from './core/index.ts';
 export * from './fleet/launch-environment.ts';
 export * from './fleet/launch-renewal.ts';
 export * from './fleet/secret-references.ts';
+export * from './fleet-reading/index.ts';
 export * from './fleet-refresh/index.ts';
 export * from './grants/index.ts';
 export * from './handover/index.ts';

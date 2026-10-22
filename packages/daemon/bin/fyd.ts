@@ -37,6 +37,7 @@ import {
   claudeKeychainAccount,
   credentialFileStamp,
   FileConversationLeaseStore,
+  FilePassiveUsageStore,
   type FleetBinaryLookup,
   PlatformFleetCredentialStore,
   ProcessFleetTokenRefreshPort,
@@ -602,6 +603,7 @@ import {
   FleetLaunchEnvironment,
   FleetLaunchRenewal,
   FleetManifestUnreadableError,
+  FleetReading,
   FleetRefreshService,
   FleetSecretReferences,
   ForeignHistoryImporter,
@@ -897,6 +899,7 @@ import {
   type WardenSubsystem,
   WardenSweepLoop,
   WardenSweepService,
+  WatchedDocument,
   WatchedUsageFeed,
   type WebRtcAvailability,
   WebRtcCarrier,
@@ -1259,8 +1262,6 @@ export interface DaemonWorld {
    *  period is the fleet's declared `usage.interval`, so it is built once both
    *  documents have been read — which is why it resolves rather than returns. */
   readonly createUsageFeed: (config: DaemonConfig) => Promise<UsageFeedPort>;
-  /** The fleet's declared `usage.interval` as a refresh period, or the shared default when there is none. */
-  readonly usageRefreshMs: () => Promise<number>;
   /**
    * Opens this daemon's durable identity and device grants before any remote route is served.
    *
@@ -7468,6 +7469,12 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       // that could run a command would be an arbitrary command run on a schedule on behalf of no
       // request. There used to be one, configured as argv. It is deleted, along with the field that
       // named it, rather than left unmounted behind a default.
+      // The published manifest, read again only when the file-event hub says it changed (an apply, a
+      // republish); while its watch is not live, every refresh reads it as before.
+      const manifestReading = new WatchedDocument(paths.fleetManifest, {
+        watch: (path, listener) => fileEvents.subscribe(path, () => listener()),
+        load: publishedManifest,
+      });
       // WATCHED, because a reader of this feed is somebody asking: a screen, the Warden, quota failover.
       // Each read lets the environment logins' provider quotas be read first, at most once a minute each;
       // the unattended refresh timer and the scrapes read its `unattended` half, which only reads the cache.
@@ -7476,7 +7483,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           [
             new CredentialUsageSource({
               enabled: async () => (await effectiveAccountModel())?.advanced.usage.enabled ?? true,
-              manifest: publishedManifest,
+              manifest: async () => await manifestReading.read(),
               credentials: async () => {
                 if (credentialList === undefined) throw new Error('the credentials surface is not mounted yet');
                 return await credentialList();
@@ -7491,7 +7498,6 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         () => providerQuota,
       );
     },
-    usageRefreshMs: declaredUsageRefreshMs,
     createPairing: async (config, pairingClock, carriers, discoveredRelayUrl) => {
       const cryptography = new NodePairingCryptography();
       const repository = new StatePairingRepository(paths, stateFiles, cryptography);
@@ -8475,17 +8481,18 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
                 ),
               now: () => millisecondClock.now(),
             });
-      // Each credential's store, read as rarely as its facts allow (housekeeping-worker.md §4 PR 1): a file
-      // store's facts are kept while its stamp holds, a macOS keychain item's for one usage interval, and a
-      // free read refreshes them for nothing. The kept facts stay HERE; only a changed store becomes a job.
-      const credentialPorts = new WorkerCredentialPorts({
-        jobs: housekeepingJobs,
-        stamp: credentialFileStamp,
-        keychain: process.platform === 'darwin',
-        keychainFreshMs: () => credentialUsageIntervalMs,
-        now: () => millisecondClock.now(),
-        cache: new Map(),
-        catalog: fleetCredentialCatalog,
+      // THE FLEET READING (housekeeping-worker.md §3): every input of a credential's row watched through the
+      // file-event hub and read only when it changes — its store file, its statusLine `usage.json` (renamed
+      // into place every few seconds while a session runs: ONE passive job, never a pass), its attributed
+      // rollouts — and the fleet refresh armed only for the moment a credential's active free read falls due.
+      const passiveUsageFiles = new FilePassiveUsageStore(paths.fleet);
+      const fleetReading = new FleetReading({
+        credentials: async () =>
+          (await fleetCredentialCatalog.entries()).entries.flatMap(entry =>
+            entry.resolution.store === 'environment' || 'unavailable' in entry.resolution
+              ? []
+              : [{ id: entry.id, resolution: entry.resolution, usedBy: entry.usedBy }],
+          ),
         sessions: async () =>
           (
             await Promise.all(
@@ -8497,6 +8504,37 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
               }),
             )
           ).flat(),
+        jobs: housekeepingJobs,
+        watch: (path, listener) => fileEvents.subscribe(path, () => listener()),
+        passiveFile: id => passiveUsageFiles.path(id),
+        refreshLocal: async resolution => {
+          await credentialPorts.local(resolution);
+        },
+        stamp: credentialFileStamp,
+        now: () => millisecondClock.now(),
+        intervalMs: () => credentialUsageIntervalMs,
+        timers: {
+          // Fired outside every activity: the timer is armed by the pass before, and would otherwise
+          // count the next pass inside it.
+          setTimeout: (callback, ms) => {
+            const handle = setTimeout(() => activities.outside(callback), ms);
+            handle.unref?.();
+            return handle;
+          },
+          clearTimeout: handle => clearTimeout(handle as ReturnType<typeof setTimeout>),
+        },
+      });
+      // Each credential's store, read as rarely as its facts allow (housekeeping-worker.md §4 PR 1): a file
+      // store's facts are kept while its stamp holds — the fleet reading's watch generation while that is
+      // live, so an unchanged store costs no system call — a macOS keychain item's for one usage interval,
+      // and a free read refreshes them for nothing. The kept facts stay HERE; only a changed store is a job.
+      const credentialPorts = new WorkerCredentialPorts({
+        jobs: housekeepingJobs,
+        stamp: async path => await fleetReading.stamp(path),
+        keychain: process.platform === 'darwin',
+        keychainFreshMs: () => credentialUsageIntervalMs,
+        now: () => millisecondClock.now(),
+        cache: new Map(),
       });
       // A login's display email for the credentials list: a Codex one from the kept facts above, a Claude
       // one parsed from its account file only once that file's stamp moved.
@@ -8507,7 +8545,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       });
       const credentialStatus = new CredentialStatusService({
         local: async (resolution, options) => await credentialPorts.local(resolution, options),
-        passiveUsage: async subject => await credentialPorts.passiveUsage(subject),
+        passiveUsage: async subject => await fleetReading.passiveUsage(subject),
         activeUsage: async resolution => await credentialPorts.activeUsage(resolution),
         refresh: new ProcessFleetTokenRefreshPort({
           spawn: spawnFleetTokenRefreshProcess,
@@ -9126,7 +9164,11 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         // another daemon can neither join nor delay it. It is deliberately NOT handed the fleet: the
         // health probe launches a wrapper and spends a real billable turn per account, which a timer
         // must never do. Health belongs where a person chose it.
-        fleetRefresh: new FleetRefreshService({ usage: unattendedUsageFeed(usage), credentials: fleetCredentials }),
+        fleetRefresh: new FleetRefreshService({
+          usage: unattendedUsageFeed(usage),
+          credentials: fleetCredentials,
+          schedule: fleetReading,
+        }),
         notifications,
         attention,
         pins: new PinService(
@@ -9313,6 +9355,8 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           // runtime's models, defaults and tier pins now rather than at the next change somebody makes.
           // No configuration file is written, and an identical manifest is left alone.
           afterLoad: async () => {
+            // Credentials the edit added or removed open or close their watches.
+            await fleetReading.configLoaded();
             await fleetCatalog.republish().then(
               outcome => {
                 if (outcome === 'applied')
@@ -10285,17 +10329,19 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
    * ONE CONFIGURATION NAME chooses the cadence. `usage.interval` is the fleet declaration that
    * builds the usage feed's freshness policy too. A daemon without a fleet configuration has made
    * no cadence choice, so `usageRefreshMs(undefined)` supplies the conservative shared default.
-   * The interval is read once per boot: re-arming it inside a tick can cancel a timer while it is
-   * running, and retrying immediately after a failure would spend the quota the loop measures.
+   *
+   * ARMED BY THE FLEET READING, NOT A FIXED TIMER (docs/design/housekeeping-worker.md §3.2): at once,
+   * then for the moment a credential's active free read falls due — its newest measured passive reading
+   * one interval old, the very rule the fixed timer applied — and never because another input changed,
+   * which arrives as an event instead. A login whose session is running writes a passive reading every
+   * few seconds, so it is never due; an idle one is read once an interval, as before. Each pass is
+   * queued for the housekeeping lane, so the first runs once the lane opens rather than at boot.
    */
-  const fleetRefreshIntervalMs = await world.usageRefreshMs();
-  // Queued for the housekeeping lane, so the first collection runs once the lane opens rather than at
-  // boot; a slow provider probe never delays readiness, and all failures remain in the existing feeds.
-  lane.submit('fleet refresh', () => subsystems.fleetRefresh.run());
-  const fleetRefreshTicks = setInterval(() => {
-    lane.submit('fleet refresh', () => subsystems.fleetRefresh.run());
-  }, fleetRefreshIntervalMs);
-  cleanups.push(() => clearInterval(fleetRefreshTicks));
+  cleanups.push(
+    await subsystems.fleetRefresh.arm(() => {
+      lane.submit('fleet refresh', () => subsystems.fleetRefresh.run());
+    }),
+  );
   /**
    * The analytics ingestion sweep.
    *
