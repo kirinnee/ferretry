@@ -7,14 +7,14 @@
  *
  * WHAT CHANGED FROM kteam (`ui/src/components/DictationSettings.tsx`), and WHY.
  *
- *   1. TWO ENGINES, CHOSEN PER DEVICE (`voice-engine-choice.tsx`). Parakeet runs
- *      in this browser after a one-time, explicit download (kteam's
- *      `parakeet-browser-v3`, pinned and hashed); phone/browser voice is the
- *      browser's own recognition. Neither is a fallback for the other. kteam's
- *      daemon-side engine (sherpa-onnx on the box) is not ported yet.
+ *   1. ENGINES CHOSEN PER DEVICE (`engine-catalog-list.tsx`). Every on-device
+ *      model in the catalog (`lib/stt/model-catalog.ts`) runs in this browser
+ *      after a one-time, explicit download, pinned and hashed; phone/browser
+ *      voice is the browser's own recognition. None is a fallback for another,
+ *      and each can be tried before it is chosen.
  *   2. PRIVACY COPY FOLLOWS THE ACTIVE ENGINE. Ferretry never uploads microphone
  *      audio to its daemon. "Audio never leaves this device" is said only while
- *      Parakeet is the active engine; while browser voice is, the screen says
+ *      an on-device engine is active; while browser voice is, the screen says
  *      the browser sends the audio to its vendor.
  *   3. ENHANCEMENT IS SEPARATE. Local word correction stays in this browser;
  *      optional Groq or Cerebras clean-up legitimately sends recognised TEXT
@@ -33,9 +33,15 @@
 import { useMemo } from 'react';
 import { cn } from '../../lib/class-names.ts';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
-import { useParakeetVoice } from '../../lib/store.tsx';
-import { type BrowserRecognitionSupport, browserRecognitionProvider } from '../../lib/stt/browser-recognition.ts';
+import { useOnDeviceVoices, useParakeetVoice } from '../../lib/store.tsx';
+import {
+  type BrowserRecognitionProvider,
+  type BrowserRecognitionSupport,
+  browserRecognitionProvider,
+} from '../../lib/stt/browser-recognition.ts';
 import { userContextVocabulary } from '../../lib/stt/enhancement.ts';
+import { onDeviceModel } from '../../lib/stt/model-catalog.ts';
+import type { OnDeviceVoices } from '../../lib/stt/on-device-voices.ts';
 import type { ParakeetVoice } from '../../lib/stt/parakeet-voice.ts';
 import {
   DEFAULT_ENHANCEMENT_MODELS,
@@ -53,9 +59,9 @@ import {
 } from '../../lib/stt/stt-settings.ts';
 import { Textarea } from '../../shell/primitives.tsx';
 import { DictationShortcutPicker } from './dictation-shortcut-picker.tsx';
+import { EngineCatalogList, type TrialClock } from './engine-catalog-list.tsx';
 import type { MachineVoiceCleanup } from './use-machine-voice-cleanup.ts';
 import { VoiceCleanupSettings } from './voice-cleanup-settings.tsx';
-import { VoiceEngineChoice } from './voice-engine-choice.tsx';
 
 export const DICTATION_SAFETY_NOTE =
   'Ferretry never sends microphone audio to your daemon. Stop settles the browser transcript, corrects it once, and inserts it at your current caret. Nothing is ever sent for you.';
@@ -144,8 +150,14 @@ export interface DictationSettingsProps {
   readonly persisted: boolean;
   /** Injected by tests and visual fixtures; production detects this page. */
   readonly recognitionSupport?: BrowserRecognitionSupport;
+  /** The browser engine, for its Try it. Injected by tests; production detects this page. */
+  readonly recognitionProvider?: BrowserRecognitionProvider;
   /** Parakeet on this device. Read from the app store when omitted. */
   readonly voice?: ParakeetVoice | null;
+  /** Every on-device model's voice. Read from the app store when omitted. */
+  readonly voices?: OnDeviceVoices | null;
+  /** The clock Try it runs on. Injected by tests; the page's otherwise. */
+  readonly trialClock?: TrialClock;
   /** The machine whose `voice.yaml` holds the cleanup prompts; the section is absent without one. */
   readonly daemon?: DaemonConnection;
   /** Test and harness seam: the machine's cleanup settings, instead of reading them through the app. */
@@ -157,14 +169,21 @@ export function DictationSettings({
   update,
   persisted,
   recognitionSupport,
+  recognitionProvider,
   voice,
+  voices,
+  trialClock,
   daemon,
   voiceCleanup,
 }: DictationSettingsProps) {
-  const detectedSupport = useMemo(() => browserRecognitionProvider().support, []);
-  const support = recognitionSupport ?? detectedSupport;
+  const detectedProvider = useMemo(() => browserRecognitionProvider(), []);
+  const provider = recognitionProvider ?? detectedProvider;
+  const support = recognitionSupport ?? provider.support;
   const contextVoice = useParakeetVoice();
-  const parakeet = voice === undefined ? contextVoice : voice;
+  // An explicit `voice` wins over the registry's Parakeet; with no registry the store's own is used.
+  const contextVoices = useOnDeviceVoices();
+  const allVoices = voices === undefined ? contextVoices : voices;
+  const parakeet = voice !== undefined ? voice : allVoices === null ? contextVoice : undefined;
   const choose = (engine: DictationEngineId): void => update({ engine });
   const dictionary = useMemo(() => sttDictionary(settings), [settings]);
   /**
@@ -199,11 +218,19 @@ export function DictationSettings({
         <>
           {/* ---- which engine, and Parakeet's install ---- */}
           <section aria-label="Voice engine" className="flex flex-col gap-2">
-            <VoiceEngineChoice value={settings.engine} onChange={choose} voice={parakeet} browserSupport={support} />
+            <EngineCatalogList
+              value={settings.engine}
+              onChange={choose}
+              voices={allVoices}
+              {...(parakeet === undefined ? {} : { parakeet })}
+              browserSupport={support}
+              browserProvider={provider}
+              {...(trialClock === undefined ? {} : { clock: trialClock })}
+            />
           </section>
 
-          {/* ---- Parakeet's near-live words ---- */}
-          {settings.engine === 'parakeet' && (
+          {/* ---- near-live words, for a model that re-reads a window (Parakeet) ---- */}
+          {onDeviceModel(settings.engine)?.nearLive === true && (
             <section aria-label="Live words (experimental)" className="flex flex-col gap-2">
               <button
                 type="button"

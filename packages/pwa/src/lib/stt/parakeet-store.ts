@@ -1,82 +1,36 @@
 /**
- * WHERE THE PARAKEET MODEL LIVES ON THIS DEVICE: download once, verify, keep, read back, remove.
+ * WHERE THE PARAKEET MODEL LIVES ON THIS DEVICE — the pinned store (`model-store.ts`) over Parakeet's
+ * one bundle: its three model files and the ONNX Runtime binary, in the `fy-stt-parakeet-v1` cache
+ * under `/fy-stt/parakeet`, exactly where every Parakeet install before the model catalog put them.
  *
- * EXPLICIT. Nothing here runs on its own. `install` is called from a button the person presses after
- * reading what it costs; dictation never downloads anything (`read` refuses a missing model instead).
- *
- * STORED IN PARTS, so it can be cancelled and resumed. Every file is cut into 32 MiB parts, each its
- * own Cache Storage entry, and after every part the store writes a small progress record holding the
- * SHA-256 state so far (`sha256.ts`). A cancelled, crashed or offline download therefore resumes with
- * an HTTP `Range` request from the first byte it does not have, and keeps hashing exactly where it
- * stopped. Hugging Face and its CDN answer ranges with `206`; a server that ignores one and answers
- * `200` restarts that file from zero rather than being trusted to line up.
- *
- * VERIFIED TWICE. A file is only marked complete when its bytes hash to the pinned value
- * (`parakeet-model.ts`); a mismatch deletes every part of it. `read` hashes again on the way out,
- * because any script on this origin can write Cache Storage and the runtime is code: a model that
- * changed on disk since it was installed is refused, not loaded.
- *
- * NEVER BUFFERED WHOLE ON INSTALL. The encoder is 652 MB; peak memory while downloading is one part.
+ * All of the download, resume, verify and remove rules are the generic store's. What is Parakeet's
+ * own is the shape `read` hands the worker: named bytes and the vocabulary as text.
  */
 
 import {
-  formatMegabytes,
-  PARAKEET_CACHE,
-  PARAKEET_TOTAL_BYTES,
-  PARAKEET_VERSION_LABEL,
-  type ParakeetFile,
-  type ParakeetFileRole,
-  parakeetFiles,
-} from './parakeet-model.ts';
-import { isSha256State, Sha256, type Sha256State } from './sha256.ts';
+  MODEL_PART_BYTES,
+  type ModelCacheLike,
+  type ModelCacheStorage,
+  type ModelFetch,
+  ModelInstallError,
+  type ModelInstallOptions,
+  type ModelInstallProgress,
+  type ModelStorageManager,
+  type ModelStoreStatus,
+  PinnedModelStore,
+} from './model-store.ts';
+import { PARAKEET_CACHE, PARAKEET_VERSION_LABEL, type ParakeetFile, parakeetFiles } from './parakeet-model.ts';
 
-/** 32 MiB: a multiple of the 64-byte hash block, small enough to hold, large enough to be few. */
-export const PARAKEET_PART_BYTES = 32 * 1024 * 1024;
+export const PARAKEET_PART_BYTES = MODEL_PART_BYTES;
 
-export interface ParakeetCacheLike {
-  put(key: string, response: Response): Promise<void>;
-  match(key: string): Promise<Response | undefined>;
-  delete(key: string): Promise<boolean>;
-}
-
-/** The slice of `CacheStorage` this store uses. */
-export interface ParakeetCacheStorage {
-  open(name: string): Promise<ParakeetCacheLike>;
-  delete(name: string): Promise<boolean>;
-}
-
-/** `navigator.storage`, narrowed. Optional: a browser without it is asked nothing. */
-export interface ParakeetStorageManager {
-  estimate(): Promise<{ readonly quota?: number; readonly usage?: number }>;
-  persist?(): Promise<boolean>;
-}
-
-export type ParakeetFetch = (input: string, init?: RequestInit) => Promise<Response>;
-
-export type ParakeetInstallErrorCode = 'no-storage' | 'quota' | 'network' | 'integrity' | 'cancelled' | 'not-installed';
-
-export class ParakeetInstallError extends Error {
-  readonly code: ParakeetInstallErrorCode;
-
-  constructor(code: ParakeetInstallErrorCode, message: string, options?: ErrorOptions) {
-    super(message, options);
-    this.name = 'ParakeetInstallError';
-    this.code = code;
-  }
-}
-
-export interface ParakeetInstallProgress {
-  /** The file in flight. */
-  readonly label: string;
-  /** Across every file, including what an earlier, interrupted install already stored. */
-  readonly downloadedBytes: number;
-  readonly totalBytes: number;
-}
-
-export type ParakeetStoreStatus =
-  | { readonly state: 'installed'; readonly version: string; readonly bytes: number; readonly installedAt: string }
-  | { readonly state: 'partial'; readonly downloadedBytes: number }
-  | { readonly state: 'absent' };
+/** Parakeet's names for the generic store's types, kept for the code that already spells them. */
+export type ParakeetCacheLike = ModelCacheLike;
+export type ParakeetCacheStorage = ModelCacheStorage;
+export type ParakeetStorageManager = ModelStorageManager;
+export type ParakeetFetch = ModelFetch;
+export type ParakeetInstallProgress = ModelInstallProgress;
+export type ParakeetStoreStatus = ModelStoreStatus;
+export { ModelInstallError as ParakeetInstallError };
 
 /** What the worker loads: verified bytes and the vocabulary text. */
 export interface ParakeetModelBytes {
@@ -100,156 +54,49 @@ export interface ParakeetModelStoreOptions {
   readonly files?: readonly ParakeetFile[];
 }
 
-interface ProgressRecord {
-  readonly sha256: string;
-  readonly parts: number;
-  readonly hash: Sha256State;
-}
-
-interface CompleteRecord {
-  readonly sha256: string;
-}
-
-interface InstalledRecord {
-  readonly version: string;
-  readonly bytes: number;
-  readonly installedAt: string;
-}
-
-const KEY_ROOT = '/fy-stt/parakeet';
-const INSTALLED_KEY = `${KEY_ROOT}/installed`;
-const fileKey = (role: ParakeetFileRole, leaf: string): string => `${KEY_ROOT}/${role}/${leaf}`;
-const partKey = (role: ParakeetFileRole, index: number): string =>
-  fileKey(role, `part-${String(index).padStart(4, '0')}`);
-
-const json = (value: unknown): Response =>
-  new Response(JSON.stringify(value), { headers: { 'content-type': 'application/json' } });
-
-const cancelled = (): ParakeetInstallError => new ParakeetInstallError('cancelled', 'The download was cancelled.');
-
-const nameOf = (error: unknown): string => {
-  const name = (error as { name?: unknown } | null)?.name;
-  return typeof name === 'string' ? name : '';
-};
-
 export class ParakeetModelStore {
-  readonly #options: ParakeetModelStoreOptions;
-  readonly #files: readonly ParakeetFile[];
-  readonly #partBytes: number;
+  readonly #store: PinnedModelStore;
 
   constructor(options: ParakeetModelStoreOptions) {
-    this.#options = options;
-    this.#files = options.files ?? parakeetFiles(options.runtimeUrl);
-    this.#partBytes = options.partBytes ?? PARAKEET_PART_BYTES;
+    this.#store = new PinnedModelStore({
+      bundle: {
+        name: 'Parakeet',
+        cache: PARAKEET_CACHE,
+        keyRoot: '/fy-stt/parakeet',
+        versionLabel: PARAKEET_VERSION_LABEL,
+        files: options.files ?? parakeetFiles(options.runtimeUrl),
+      },
+      caches: options.caches,
+      fetch: options.fetch,
+      ...(options.storage === undefined ? {} : { storage: options.storage }),
+      ...(options.now === undefined ? {} : { now: options.now }),
+      ...(options.partBytes === undefined ? {} : { partBytes: options.partBytes }),
+    });
   }
 
   /** Every byte a complete install holds. */
   get totalBytes(): number {
-    return this.#files.reduce((total, file) => total + file.bytes, 0);
+    return this.#store.totalBytes;
   }
 
-  async status(): Promise<ParakeetStoreStatus> {
-    const cache = await this.#open().catch(() => null);
-    if (cache === null) return { state: 'absent' };
-    const installed = await this.#record<InstalledRecord>(cache, INSTALLED_KEY);
-    let downloaded = 0;
-    let complete = true;
-    for (const file of this.#files) {
-      if (await this.#isComplete(cache, file)) {
-        downloaded += file.bytes;
-        continue;
-      }
-      complete = false;
-      downloaded += (await this.#progress(cache, file))?.hash.length ?? 0;
-    }
-    if (complete && installed !== null && typeof installed.installedAt === 'string')
-      return {
-        state: 'installed',
-        version: PARAKEET_VERSION_LABEL,
-        bytes: this.totalBytes,
-        installedAt: installed.installedAt,
-      };
-    return downloaded > 0 ? { state: 'partial', downloadedBytes: downloaded } : { state: 'absent' };
+  status(): Promise<ParakeetStoreStatus> {
+    return this.#store.status();
   }
 
-  /**
-   * Download whatever is missing, verify it, and mark the install complete. Resumes an earlier,
-   * interrupted install. Rejects with a {@link ParakeetInstallError}; a cancelled install keeps every
-   * part it finished.
-   */
-  async install(
-    options: { signal?: AbortSignal; onProgress?(progress: ParakeetInstallProgress): void } = {},
-  ): Promise<void> {
-    const cache = await this.#open();
-    const { signal, onProgress } = options;
-    const total = this.totalBytes;
-    let finished = 0;
-    for (const file of this.#files) {
-      if (await this.#isComplete(cache, file)) finished += file.bytes;
-    }
-    await this.#checkRoom(total - finished);
-    // Best effort: ask the browser not to evict a 680 MB download under storage pressure. A refusal
-    // changes nothing here; Settings says the browser may still reclaim it.
-    await this.#options.storage?.persist?.().catch(() => false);
-
-    let done = 0;
-    for (const file of this.#files) {
-      if (signal?.aborted) throw cancelled();
-      if (await this.#isComplete(cache, file)) {
-        done += file.bytes;
-        onProgress?.({ label: file.label, downloadedBytes: done, totalBytes: total });
-        continue;
-      }
-      const before = done;
-      await this.#installFile(cache, file, signal, bytes =>
-        onProgress?.({ label: file.label, downloadedBytes: before + bytes, totalBytes: total }),
-      );
-      done += file.bytes;
-    }
-    await this.#put(
-      cache,
-      INSTALLED_KEY,
-      json({
-        version: PARAKEET_VERSION_LABEL,
-        bytes: total,
-        installedAt: (this.#options.now?.() ?? new Date()).toISOString(),
-      } satisfies InstalledRecord),
-    );
+  /** Download (or resume) every missing file; see {@link PinnedModelStore.install}. */
+  install(options: ModelInstallOptions = {}): Promise<void> {
+    return this.#store.install(options);
   }
 
   /** Delete every stored byte, finished or not. */
-  async remove(): Promise<void> {
-    await this.#options.caches?.delete(PARAKEET_CACHE);
+  remove(): Promise<void> {
+    return this.#store.remove();
   }
 
   /** Read the installed model back, verifying every file again. */
   async read(): Promise<ParakeetModelBytes> {
-    const cache = await this.#open();
-    const bytes = new Map<ParakeetFileRole, Uint8Array>();
-    for (const file of this.#files) {
-      if (!(await this.#isComplete(cache, file)))
-        throw new ParakeetInstallError(
-          'not-installed',
-          'Parakeet is not installed on this device. Install it in Settings › Voice.',
-        );
-      const whole = new Uint8Array(file.bytes);
-      const hasher = new Sha256();
-      for (let index = 0, offset = 0; offset < file.bytes; index += 1) {
-        const part = await cache.match(partKey(file.role, index));
-        const chunk = part === undefined ? new Uint8Array() : new Uint8Array(await part.arrayBuffer());
-        if (chunk.length === 0 || offset + chunk.length > file.bytes) break;
-        whole.set(chunk, offset);
-        hasher.update(chunk);
-        offset += chunk.length;
-      }
-      if (hasher.length !== file.bytes || hasher.hex() !== file.sha256)
-        throw new ParakeetInstallError(
-          'integrity',
-          `${file.label} changed on this device since it was installed. Remove Parakeet and install it again.`,
-        );
-      bytes.set(file.role, whole);
-    }
-    const take = (role: ParakeetFileRole): Uint8Array => bytes.get(role) ?? new Uint8Array();
+    const bytes = await this.#store.read();
+    const take = (role: string): Uint8Array => bytes.get(role) ?? new Uint8Array();
     return {
       runtime: take('runtime'),
       encoder: take('encoder'),
@@ -257,177 +104,7 @@ export class ParakeetModelStore {
       vocabulary: new TextDecoder().decode(take('vocabulary')),
     };
   }
-
-  async #open(): Promise<ParakeetCacheLike> {
-    const caches = this.#options.caches;
-    if (caches === null)
-      throw new ParakeetInstallError('no-storage', 'This browser cannot keep the speech model on this device.');
-    return await caches.open(PARAKEET_CACHE);
-  }
-
-  async #record<T>(cache: ParakeetCacheLike, key: string): Promise<T | null> {
-    const hit = await cache.match(key).catch(() => undefined);
-    if (hit === undefined) return null;
-    const value: unknown = await hit.json().catch(() => null);
-    return typeof value === 'object' && value !== null ? (value as T) : null;
-  }
-
-  async #isComplete(cache: ParakeetCacheLike, file: ParakeetFile): Promise<boolean> {
-    return (await this.#record<CompleteRecord>(cache, fileKey(file.role, 'complete')))?.sha256 === file.sha256;
-  }
-
-  /** The resume point, or `null` when there is none this exact file can trust. */
-  async #progress(cache: ParakeetCacheLike, file: ParakeetFile): Promise<ProgressRecord | null> {
-    const record = await this.#record<ProgressRecord>(cache, fileKey(file.role, 'progress'));
-    if (record === null || record.sha256 !== file.sha256 || !isSha256State(record.hash)) return null;
-    const { length } = record.hash;
-    if (length > file.bytes || record.parts !== Math.ceil(length / this.#partBytes)) return null;
-    return record;
-  }
-
-  async #checkRoom(needed: number): Promise<void> {
-    const estimate = await this.#options.storage?.estimate().catch(() => null);
-    if (typeof estimate?.quota !== 'number' || typeof estimate.usage !== 'number') return;
-    const free = estimate.quota - estimate.usage;
-    if (free >= needed) return;
-    throw new ParakeetInstallError(
-      'quota',
-      `This browser can store about ${formatMegabytes(free)} more here, and Parakeet needs ${formatMegabytes(needed)}. Free some space on this device, then try again.`,
-    );
-  }
-
-  async #installFile(
-    cache: ParakeetCacheLike,
-    file: ParakeetFile,
-    signal: AbortSignal | undefined,
-    onBytes: (bytes: number) => void,
-  ): Promise<void> {
-    let progress = await this.#progress(cache, file);
-    // Every byte is already stored when an install stopped between its last part and marking the file
-    // complete. Verify what is there instead of asking for a range that starts at the file's end.
-    const stored = progress !== null && progress.hash.length === file.bytes;
-    const response = stored ? null : await this.#request(file, progress?.hash.length ?? 0, signal);
-    if (response !== null && progress !== null && progress.hash.length > 0 && response.status !== 206) {
-      // The server ignored the range and is sending the whole file. Start this file over rather
-      // than guess how its bytes line up with the ones already stored.
-      progress = null;
-    }
-    const hasher = new Sha256(progress?.hash);
-    let parts = progress?.parts ?? 0;
-    const part = new Uint8Array(Math.min(this.#partBytes, file.bytes));
-    let filled = 0;
-    onBytes(hasher.length);
-
-    const flush = async (): Promise<void> => {
-      await this.#put(cache, partKey(file.role, parts), new Response(part.slice(0, filled)));
-      parts += 1;
-      filled = 0;
-      await this.#put(
-        cache,
-        fileKey(file.role, 'progress'),
-        json({ sha256: file.sha256, parts, hash: hasher.state() } satisfies ProgressRecord),
-      );
-    };
-
-    const body =
-      response === null ? new ReadableStream<Uint8Array>({ start: controller => controller.close() }) : response.body;
-    if (body === null) throw new ParakeetInstallError('network', `${file.label} arrived without a body.`);
-    const reader = body.getReader();
-    try {
-      for (;;) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        let offset = 0;
-        while (offset < value.length) {
-          if (hasher.length >= file.bytes)
-            throw new ParakeetInstallError(
-              'integrity',
-              `${file.label} is larger than the pinned file. Nothing was kept.`,
-            );
-          const take = Math.min(part.length - filled, value.length - offset, file.bytes - hasher.length);
-          const piece = value.subarray(offset, offset + take);
-          part.set(piece, filled);
-          hasher.update(piece);
-          filled += take;
-          offset += take;
-          if (filled === part.length || hasher.length === file.bytes) await flush();
-        }
-        onBytes(hasher.length);
-      }
-    } catch (error) {
-      if (error instanceof ParakeetInstallError) {
-        if (error.code === 'integrity') await this.#forget(cache, file);
-        throw error;
-      }
-      if (signal?.aborted || nameOf(error) === 'AbortError') throw cancelled();
-      throw new ParakeetInstallError(
-        'network',
-        `${file.label} stopped downloading. Resume to carry on where it stopped.`,
-        {
-          cause: error,
-        },
-      );
-    }
-
-    if (hasher.length !== file.bytes)
-      throw new ParakeetInstallError(
-        'network',
-        `${file.label} stopped at ${formatMegabytes(hasher.length)} of ${formatMegabytes(file.bytes)}. Resume to carry on where it stopped.`,
-      );
-    if (hasher.hex() !== file.sha256) {
-      await this.#forget(cache, file);
-      throw new ParakeetInstallError(
-        'integrity',
-        `${file.label} did not match the pinned SHA-256, so it was deleted. Try again.`,
-      );
-    }
-    await this.#put(cache, fileKey(file.role, 'complete'), json({ sha256: file.sha256 } satisfies CompleteRecord));
-  }
-
-  async #request(file: ParakeetFile, offset: number, signal: AbortSignal | undefined): Promise<Response> {
-    let response: Response;
-    try {
-      response = await this.#options.fetch(file.url, {
-        ...(signal === undefined ? {} : { signal }),
-        ...(offset > 0 ? { headers: { range: `bytes=${offset}-` } } : {}),
-      });
-    } catch (error) {
-      if (signal?.aborted || nameOf(error) === 'AbortError') throw cancelled();
-      throw new ParakeetInstallError(
-        'network',
-        `${file.label} could not be downloaded. Check this device’s connection.`,
-        {
-          cause: error,
-        },
-      );
-    }
-    if (!response.ok)
-      throw new ParakeetInstallError('network', `${file.label} could not be downloaded (HTTP ${response.status}).`);
-    return response;
-  }
-
-  async #put(cache: ParakeetCacheLike, key: string, response: Response): Promise<void> {
-    try {
-      await cache.put(key, response);
-    } catch (error) {
-      if (nameOf(error) === 'QuotaExceededError')
-        throw new ParakeetInstallError(
-          'quota',
-          'This device ran out of room for the speech model. Free some space, then resume.',
-          { cause: error },
-        );
-      throw error;
-    }
-  }
-
-  /** Drop every stored byte of one file, so a bad file is downloaded again from the start. */
-  async #forget(cache: ParakeetCacheLike, file: ParakeetFile): Promise<void> {
-    const parts = Math.ceil(file.bytes / this.#partBytes);
-    for (let index = 0; index < parts; index += 1) await cache.delete(partKey(file.role, index));
-    await cache.delete(fileKey(file.role, 'progress'));
-    await cache.delete(fileKey(file.role, 'complete'));
-  }
 }
 
 /** For copy that names the download before anything is fetched. */
-export const PARAKEET_DOWNLOAD_SIZE = formatMegabytes(PARAKEET_TOTAL_BYTES);
+export { PARAKEET_DOWNLOAD_SIZE } from './parakeet-model.ts';

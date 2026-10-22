@@ -58,8 +58,9 @@ import { useDictationDebugSnapshot, useSttSettingsStore } from '../lib/store.tsx
 import type { BrowserRecognitionProvider } from '../lib/stt/browser-recognition.ts';
 import type { SelectionLike } from '../lib/stt/draft.ts';
 import type { MicMeterPort } from '../lib/stt/level-monitor.ts';
+import { onDeviceModel } from '../lib/stt/model-catalog.ts';
 import type { RemoteEnhancementFetch } from '../lib/stt/remote-enhancement.ts';
-import { isRemoteEnhancementProvider, type SttSettings } from '../lib/stt/stt-settings.ts';
+import { isOnDeviceEngine, isRemoteEnhancementProvider, type SttSettings } from '../lib/stt/stt-settings.ts';
 import { Button } from '../shell/primitives.tsx';
 import { DictationDebugSheet } from './dictation-debug-sheet.tsx';
 import { DictationSheet, type DictationStage, dictationStage } from './dictation-sheet.tsx';
@@ -136,7 +137,7 @@ export function dictationStatusCopy(
     case 'recording':
       return 'Recording…';
     case 'transcribing':
-      return engine === 'parakeet' ? 'Transcribing on this device…' : 'Finishing in your browser…';
+      return isOnDeviceEngine(engine) ? 'Transcribing on this device…' : 'Finishing in your browser…';
     case 'review':
       return 'Review the text, then insert it.';
     case 'error':
@@ -366,8 +367,8 @@ export function useDictationBundle(props: DictationControlProps): DictationBundl
           ? 'Show the active dictation recorder'
           : dictation.supported
             ? `Dictate — ${dictationShortcutLabel(settings.shortcut)}. ${
-                dictation.engine === 'parakeet'
-                  ? 'Parakeet transcribes on this device'
+                isOnDeviceEngine(dictation.engine)
+                  ? `${onDeviceModel(dictation.engine)?.shortName ?? 'The model'} transcribes on this device`
                   : dictation.engine === 'browser'
                     ? 'Your browser’s speech service transcribes it'
                     : 'Choose a voice engine in Settings › Voice first'

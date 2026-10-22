@@ -475,7 +475,7 @@ describe('ParakeetModelStore.install', () => {
     const { store, server } = makeStore({ files, storage });
     const error = await failure(store.install());
     should(error.code).equal('quota');
-    should(error.name).equal('ParakeetInstallError');
+    should(error.name).equal('ModelInstallError');
     should(error.message).equal(
       'This browser can store about 2 MB more here, and Parakeet needs 5 MB. Free some space on this device, then try again.',
     );
