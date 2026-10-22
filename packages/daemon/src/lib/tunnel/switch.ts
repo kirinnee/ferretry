@@ -88,8 +88,10 @@ export class TunnelCarrierSwitch implements TunnelSwitchPort {
 
   /**
    * Switches the tunnel on or off, writing the entry first. ON when already on keeps the running
-   * carrier, so asking twice never drops a working tunnel. OFF always replaces it with an off carrier
-   * and waits for that one's release, so asking again retries a release that found no answer.
+   * carrier, so asking twice never drops a working tunnel — unless that carrier is `unavailable`, when
+   * asking again is how somebody who has just installed `cloudflared` retries. OFF always replaces it
+   * with an off carrier and waits for that one's release, so asking again retries a release that found
+   * no answer.
    */
   async change(enabled: boolean): Promise<TunnelStatusView> {
     return await this.#serially(async () => {
@@ -99,7 +101,8 @@ export class TunnelCarrierSwitch implements TunnelSwitchPort {
       this.#entry = entry;
       this.#explicit = true;
       if (this.#create === undefined || this.#stopped) return this.view();
-      if (enabled && wasOn && this.#carrier !== undefined) return this.view();
+      const running = this.#carrier?.status.state;
+      if (enabled && wasOn && running !== undefined && running !== 'unavailable') return this.view();
       await this.#carrier?.stop();
       this.#replace();
       // An off carrier's whole work is the release; it is bounded by the provisioner's own timeout.

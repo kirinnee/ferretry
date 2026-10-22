@@ -176,6 +176,24 @@ describe('the tunnel switch', () => {
     should(tunnel.view().explicit).be.true();
   });
 
+  it('should replace an unavailable carrier when asked on again, so installing cloudflared then retrying works', async () => {
+    // Arrange
+    const tunnel = subject(ON, true);
+    tunnel.start(factory);
+    (world.carriers[0] as FakeCarrier).status = {
+      state: 'unavailable',
+      tunnelUrl: undefined,
+      reason: 'cloudflared is not on this daemon’s PATH',
+    };
+
+    // Act
+    const view = await tunnel.change(true);
+
+    // Assert
+    should(world.log).deepEqual(['start on', 'write on', 'stop on', 'start on']);
+    should(view.state).equal('provisioning');
+  });
+
   it('should replace an off carrier when asked off again, so a release that found no answer is retried', async () => {
     // Arrange
     const tunnel = subject(OFF, true);
