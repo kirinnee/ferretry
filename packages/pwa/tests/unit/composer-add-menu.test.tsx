@@ -121,6 +121,26 @@ describe('ComposerAddMenu', () => {
     await view.unmount();
   });
 
+  test('the dialog’s own cancel closes it, and a real close does too but a re-open’s stale one does not', async () => {
+    const { view, closed } = await setup('sheet');
+    const dialog = must(document.querySelector<HTMLDialogElement>('[data-testid="composer-add-menu"]'), 'the menu');
+    await interact(() => {
+      dialog.dispatchEvent(new Event('cancel', { cancelable: true }));
+    });
+    expect(closed()).toBe(1);
+    // StrictMode's close-then-reopen leaves a `close` event behind while the dialog is open: not a dismissal.
+    await interact(() => {
+      dialog.dispatchEvent(new Event('close'));
+    });
+    expect(closed()).toBe(1);
+    dialog.removeAttribute('open');
+    await interact(() => {
+      dialog.dispatchEvent(new Event('close'));
+    });
+    expect(closed()).toBe(2);
+    await view.unmount();
+  });
+
   test('Cancel closes without running anything', async () => {
     const { view, calls, closed } = await setup('sheet');
     const cancel = must(

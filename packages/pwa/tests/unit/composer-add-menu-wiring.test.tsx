@@ -30,12 +30,13 @@ class MemoryStorage implements DraftStorage {
 
 const host: LocationShareHost = { locate: () => new Promise<LocationFix>(() => undefined) };
 
-const mountComposer = async (compact: boolean, withHost = true): Promise<Mounted> => {
+const mountComposer = async (compact: boolean, withHost = true, offerCamera?: boolean): Promise<Mounted> => {
   const view = await mount(
     <LocationShareContext.Provider value={withHost ? host : null}>
       <Composer
         api={{ send: async () => ({}) as never }}
         compact={compact}
+        offerCamera={offerCamera}
         daemon={daemon}
         draftStore={new DaemonDraftStore(new MemoryStorage())}
         sessionId="s1"
@@ -153,24 +154,118 @@ describe('the composer plus menu on a tap', () => {
     await view.unmount();
   });
 
-  test('without a host the location is never offered, and plus reaches the picker', async () => {
-    const view = await mountComposer(false, false);
+  const fileInputs = (root: HTMLElement) => {
+    const all = [...root.querySelectorAll<HTMLInputElement>('input[type="file"]')];
+    return {
+      picker: must(
+        all.find(input => !input.hasAttribute('capture')),
+        'the file input',
+      ),
+      camera: all.find(input => input.hasAttribute('capture')),
+    };
+  };
+
+  test('with neither a camera nor a host there is one thing to do, so plus goes straight to the picker', async () => {
+    const view = await mountComposer(false, false, false);
+    const button = plus(view.container);
+    expect(button.hasAttribute('aria-haspopup')).toBe(false);
+    expect(button.getAttribute('aria-label')).toBe('Attach an image, audio or a file');
+    let picked = 0;
+    fileInputs(view.container).picker.click = () => {
+      picked += 1;
+    };
+    await interact(() => button.click());
+    expect(picked).toBe(1);
+    expect(menus()).toHaveLength(0);
+    await view.unmount();
+  });
+
+  test('a camera without a host still makes a menu, and it offers no location', async () => {
+    const view = await mountComposer(false, false, true);
+    await interact(() => plus(view.container).click());
+    expect(menus()).toHaveLength(1);
+    expect(menus()[0]?.textContent).toContain('Take photo');
+    expect(menus()[0]?.textContent).not.toContain('Share location');
+    await view.unmount();
+  });
+
+  test('Take photo hands over to the camera input, and what it returns joins the tray', async () => {
+    const created = URL.createObjectURL;
+    URL.createObjectURL = (() => 'blob:camera/1') as typeof URL.createObjectURL;
     try {
-      const button = plus(view.container);
-      // The camera row exists only on a touch device, which the shared input-modality store decides once
-      // per process: with it ＋ opens a menu of attach + camera, without it ＋ goes straight to the picker.
-      const offersMenu = button.hasAttribute('aria-haspopup');
-      await interact(() => button.click());
-      if (offersMenu) {
-        expect(menus()).toHaveLength(1);
-        expect(menus()[0]?.textContent).not.toContain('Share location');
-        expect(menus()[0]?.textContent).toContain('Attach files');
-      } else {
-        expect(button.getAttribute('aria-label')).toBe('Attach an image, audio or a file');
-        expect(menus()).toHaveLength(0);
-      }
-    } finally {
+      const view = await mountComposer(false, false, true);
+      const camera = must(fileInputs(view.container).camera, 'the camera input');
+      let opened = 0;
+      camera.click = () => {
+        opened += 1;
+      };
+      await interact(() => plus(view.container).click());
+      const row = must(
+        [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(item =>
+          item.textContent?.startsWith('Take photo'),
+        ),
+        'the camera row',
+      );
+      await interact(() => row.click());
+      expect(opened).toBe(1);
+
+      Object.defineProperty(camera, 'files', {
+        configurable: true,
+        value: [new File([new Uint8Array([1, 2])], 'snap.jpg', { type: 'image/jpeg' })],
+      });
+      await interact(() => {
+        camera.dispatchEvent(new Event('change', { bubbles: true }));
+      });
+      expect(view.container.querySelector('[aria-label="Remove snap.jpg"]')).not.toBeNull();
       await view.unmount();
+    } finally {
+      URL.createObjectURL = created;
+    }
+  });
+
+  test('a chosen document opens from the local file in a new tab, not from anywhere on the network', async () => {
+    const created = URL.createObjectURL;
+    const revoked = URL.revokeObjectURL;
+    const opener = window.open;
+    const setTimer = window.setTimeout;
+    const opened: unknown[][] = [];
+    const revocations: string[] = [];
+    const timers: Array<() => void> = [];
+    URL.createObjectURL = (() => 'blob:local/doc') as typeof URL.createObjectURL;
+    URL.revokeObjectURL = ((url: string) => {
+      revocations.push(url);
+    }) as typeof URL.revokeObjectURL;
+    window.open = ((...args: unknown[]) => {
+      opened.push(args);
+      return null;
+    }) as typeof window.open;
+    window.setTimeout = ((fn: () => void, ms?: number) => {
+      if (ms !== 60_000) return setTimer(fn, ms);
+      timers.push(fn);
+      return 0;
+    }) as unknown as typeof window.setTimeout;
+    try {
+      const view = await mountComposer(false, false, false);
+      const picker = fileInputs(view.container).picker;
+      Object.defineProperty(picker, 'files', {
+        configurable: true,
+        value: [new File([new Uint8Array([1])], 'plan.pdf', { type: 'application/pdf' })],
+      });
+      await interact(() => {
+        picker.dispatchEvent(new Event('change', { bubbles: true }));
+      });
+      await interact(() =>
+        must(view.container.querySelector<HTMLElement>('[aria-label="Open plan.pdf"]'), 'chip').click(),
+      );
+      expect(opened).toEqual([['blob:local/doc', '_blank', 'noopener,noreferrer']]);
+      for (const run of timers) run();
+      expect(revocations).toEqual(['blob:local/doc']);
+      await view.unmount();
+    } finally {
+      URL.createObjectURL = created;
+      URL.revokeObjectURL = revoked;
+      window.open = opener;
+      window.setTimeout = setTimer;
     }
   });
 });

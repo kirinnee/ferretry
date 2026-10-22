@@ -110,6 +110,8 @@ export interface ComposerProps {
   /** Phone chrome. The host already knows its presentation; the composer does
    * not re-derive it, it only picks the growth ceiling from it. */
   readonly compact?: boolean;
+  /** Whether "+" offers "Take photo". Defaults to touch-first devices, the ones with a camera hand-off. */
+  readonly offerCamera?: boolean | undefined;
   /** Browser-local bare Enter behaviour. null uses this device’s default. */
   readonly enterKeyPreference?: ComposerEnterKeyPreference | null;
   /** Browser-local return-key behaviour on a phone or other touch-first device. null = new line. */
@@ -321,6 +323,7 @@ export function Composer({
   onSent,
   connectionLive = false,
   compact = false,
+  offerCamera,
   enterKeyPreference = null,
   phoneEnterKeyPreference = null,
   dictationSettings,
@@ -982,7 +985,7 @@ export function Composer({
   // location host there is one thing to do, so "+" goes straight to the file chooser.
   const addActions = addMenuActions({
     attach: () => fileInput.current?.click(),
-    camera: inputModality.touchAffected ? () => cameraInput.current?.click() : undefined,
+    camera: (offerCamera ?? inputModality.touchAffected) ? () => cameraInput.current?.click() : undefined,
     location: locationHost === null ? undefined : shareLocation,
   });
   const addMenuUseful = addActions.length > 1;
