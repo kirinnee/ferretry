@@ -52,6 +52,7 @@ class FakeUpdate implements DaemonUpdateSubsystem {
   arm(): () => void {
     return () => undefined;
   }
+  activityChanged(): void {}
 }
 
 interface Caller {

@@ -2,5 +2,6 @@
 
 export * from './policy.ts';
 export * from './reconcile.ts';
+export * from './remembered-receipts.ts';
 export * from './service.ts';
 export * from './types.ts';

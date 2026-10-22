@@ -496,6 +496,7 @@ import {
   type AnalyticsIngestCandidate,
   type AnalyticsIngestCandidateSource,
   AnalyticsIngestionService,
+  ANALYTICS_BACKSTOP_MS,
   type AnalyticsSubsystem,
   type AnalyticsTranscriptEvidenceSource,
   type AnalyticsTranscriptFoldSource,
@@ -523,6 +524,12 @@ import {
   authorizeSessionCommand,
   BACKGROUND_DELAY_VARIABLE,
   BackgroundLane,
+  HANDOVER_RESCAN_INTERVAL_MS,
+  PassTrigger,
+  type PassTriggerTimers,
+  RememberedHandoverReceipts,
+  TERMINAL_ANALYTICS_STATUSES,
+  UPDATE_BACKSTOP_INTERVAL_MS,
   type BootNoticePort,
   BootProgress,
   type BootRefusal,
@@ -5245,7 +5252,7 @@ const ANALYTICS_FOLD_CONCURRENCY = 4;
 const ENDED_SESSION_STATUSES: ReadonlySet<string> = new Set(['completed', 'failed', 'stalled', 'stopped']);
 
 /**
- * How many transcripts one ingestion pass may read; the rest wait for the next pass, a minute later.
+ * How many transcripts one ingestion pass may read; the rest wait for the catch-up pass, a minute later.
  *
  * A rebuild used to read every finished transcript in one pass, every boot — on a large Mac fleet,
  * hundreds of megabytes parsed while the daemon was trying to answer its first requests.
@@ -5253,14 +5260,34 @@ const ENDED_SESSION_STATUSES: ReadonlySet<string> = new Set(['completed', 'faile
 const ANALYTICS_READS_PER_PASS = 8;
 
 /**
- * How often the ingestion sweep looks for sessions that have ended.
- *
- * A minute, because nothing waits on it: analytics is a read over history, and a session that ended
- * thirty seconds ago is not a question anyone is asking. A pass with nothing new to do reads no
- * transcripts at all — every already-ingested session with a proven total is skipped on its signature —
- * so the cost of a quiet tick is one listing of the state home.
+ * What a profile cannot attribute to an event: the slow backstops the event-driven housekeeping keeps,
+ * named so a pass that shows up with no event behind it is explained rather than suspected.
  */
-const ANALYTICS_INGEST_INTERVAL_MS = 60_000;
+function housekeepingBackstopLimitation(): string {
+  const minutes = (ms: number): string => `${String(ms / 60_000)} min`;
+  return (
+    'Housekeeping runs on events, with slow backstops that are timers: analytics ingest every ' +
+    `${minutes(ANALYTICS_BACKSTOP_MS)}, the terminal reaper every ${minutes(TERMINAL_REAP_BACKSTOP_MS)}, ` +
+    `a full handover rescan every ${minutes(HANDOVER_RESCAN_INTERVAL_MS)} and the update check every ` +
+    `${minutes(UPDATE_BACKSTOP_INTERVAL_MS)}.`
+  );
+}
+
+/**
+ * One-shot timers for a {@link PassTrigger}, fired OUTSIDE every activity: the timer is armed by the pass
+ * before, and would otherwise count the next pass inside it. Unreferenced, so a pending pass never holds
+ * the process open.
+ */
+function outsideActivityTimers(activities: ActivityLedger | undefined): PassTriggerTimers {
+  return {
+    setTimeout: (callback, ms) => {
+      const handle = setTimeout(() => (activities === undefined ? callback() : activities.outside(callback)), ms);
+      handle.unref?.();
+      return handle;
+    },
+    clearTimeout: handle => clearTimeout(handle as ReturnType<typeof setTimeout>),
+  };
+}
 
 /**
  * Every session the daemon holds durable documents for, as ingestion candidates.
@@ -5308,7 +5335,17 @@ function createAnalyticsCandidateSource(storage: DaemonStorage): AnalyticsIngest
     listCandidates: async () => {
       // Read in bounded batches rather than all at once. Each document read is small, but a fleet with
       // hundreds of sessions would hold every one of them resident under an unbounded `Promise.all`.
-      const ids = storage.listSessions().map(session => session.id);
+      //
+      // FROM THE INDEX FIRST. Its status is written with every state document, and a session it says is
+      // still running is one the gate refuses anyway — so only an ended session, or one whose status the
+      // index does not know, has its two documents read and parsed.
+      const ids = storage
+        .listSessions()
+        .filter(
+          session =>
+            session.status === undefined || (TERMINAL_ANALYTICS_STATUSES as ReadonlySet<string>).has(session.status),
+        )
+        .map(session => session.id);
       const candidates: AnalyticsIngestCandidate[] = [];
       for (let start = 0; start < ids.length; start += ANALYTICS_FOLD_CONCURRENCY) {
         const batch = await Promise.all(ids.slice(start, start + ANALYTICS_FOLD_CONCURRENCY).map(id => candidate(id)));
@@ -5346,6 +5383,7 @@ function createAnalyticsIngestion(
   evidence: AnalyticsTranscriptEvidenceSource,
   folds: AnalyticsTranscriptFoldSource,
   clock: ClockPort,
+  activities: ActivityLedger | undefined,
 ): AnalyticsIngestionService {
   return new AnalyticsIngestionService({
     candidates: createAnalyticsCandidateSource(storage),
@@ -5361,6 +5399,11 @@ function createAnalyticsIngestion(
     concurrency: ANALYTICS_FOLD_CONCURRENCY,
     readsPerPass: ANALYTICS_READS_PER_PASS,
     rebuildRequired: opened.rebuildRequired,
+    trigger: new PassTrigger({
+      backstopMs: ANALYTICS_BACKSTOP_MS,
+      timers: outsideActivityTimers(activities),
+      now: () => performance.now(),
+    }),
   });
 }
 
@@ -8470,9 +8513,22 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         createAnalyticsTranscriptEvidence(storage),
         transcriptFolds,
         clock,
+        activities,
       );
+      // A session that ends — or a revived one the index still holds — is what moves analytics, and
+      // storage says so as it writes (docs/design/housekeeping-worker.md §4 PR 4). For as long as the
+      // storage is open: closing it drops every listener, this one included.
+      storage.subscribeStates((id, state) => analyticsIngestion.stateWritten(id, state));
       const analyticsPricing = new AnalyticsPricingService(
-        daemonConfigStore,
+        // The operator's rates: a write through here re-prices what it moved at the next pass.
+        {
+          readPricing: async () => await daemonConfigStore.readPricing(),
+          writePricing: async input => {
+            const written = await daemonConfigStore.writePricing(input);
+            analyticsIngestion.pricingChanged();
+            return written;
+          },
+        },
         new HttpAnalyticsPricingFeed(),
         daemonConfigMutations,
         clock,
@@ -8544,7 +8600,9 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       // ONE receipt store for both readers of it: the service that writes a receipt and the loop that
       // rosters the ones which are not yet terminal. Two handles over one directory would be two
       // answers to "what is still in flight".
-      const handoverReceipts = new FileHandoverReceiptStore(paths.sessions);
+      // Remembering which receipts are open, so the reconciler reads them all only at boot and on its
+      // backstop, rather than every session directory every fifteen seconds.
+      const handoverReceipts = new RememberedHandoverReceipts(new FileHandoverReceiptStore(paths.sessions));
       // Hoisted for the reason the migration above is: the reconcile loop drives THIS service rather
       // than a second one of its own. Two would each hold their own per-session serialization chain
       // over one receipt document, and the whole point of that chain is that a begin and a reconciler
@@ -8695,8 +8753,10 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         cache: new FileModelCatalogCache(stateFiles, join(paths.state, 'model-catalog.json')),
         publicKeyPem: HOSTED_APP_RELEASE_KEY,
         nowMs: () => millisecondClock.now(),
-        // A newer catalog moves what every runtime offers now, not at the next change somebody makes.
+        // A newer catalog moves what every runtime offers now, not at the next change somebody makes —
+        // and the list prices analytics reads.
         onUpdated: async () => {
+          analyticsIngestion.pricingChanged();
           await fleetCatalog.republish().catch(() => undefined);
         },
       });
@@ -8722,6 +8782,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         suggested: async () => suggestedOllamaModel(await modelCatalogService.catalogs()),
         now: () => clock.now(),
         onChanged: async () => {
+          analyticsIngestion.pricingChanged();
           await fleetCatalog.republish().catch(() => undefined);
         },
       });
@@ -9223,6 +9284,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
                 ...(stackSamplerEnabled(process.env[STACK_SAMPLER_VARIABLE])
                   ? []
                   : ['The stack sampler is switched off (FYD_STACK_SAMPLER=0), so the CPU profile is empty.']),
+                housekeepingBackstopLimitation(),
                 ...polledDirectoryLimitations(
                   fileEvents.fallbacks(),
                   { home: userHome, stateHome: paths.home },
@@ -9526,6 +9588,8 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           // runtime's models, defaults and tier pins now rather than at the next change somebody makes.
           // No configuration file is written, and an identical manifest is left alone.
           afterLoad: async () => {
+            // A config/models/ file prices models too.
+            analyticsIngestion.pricingChanged();
             // Credentials the edit added or removed open or close their watches.
             await fleetReading.configLoaded();
             await fleetCatalog.republish().then(
@@ -10531,10 +10595,15 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
    * daemon that has just restarted is also exactly when the store is most likely to be behind: every
    * session that ended while the process was down went uningested, and the sweep is what catches up.
    *
-   * THE PASS IS A SWEEP, NOT A TRIGGER, and correctness does not depend on its cadence. What decides
-   * whether a session is ingested is the durable terminal-state gate, so a session that ends between
-   * two ticks is ingested by the next one with exactly the same result. A cheap pass is the common
-   * case: a session already ingested with a proven total has its transcript read once, ever.
+   * THE PASS IS A SWEEP, and correctness does not depend on when it runs. What decides whether a session
+   * is ingested is the durable terminal-state gate, so a session is ingested by whichever pass follows
+   * its end with exactly the same result. A cheap pass is the common case: a session already ingested
+   * with a proven total has its transcript read once, ever.
+   *
+   * IT RUNS ON EVENTS, NOT A MINUTE TIMER (docs/design/housekeeping-worker.md §4 PR 4): half a minute
+   * after a session ends or a revived one changes what the index holds, soon after the rates may have
+   * moved, a minute after a pass that stopped at its read cap — and on a fifteen-minute backstop for
+   * what has no event (`ANALYTICS_BACKSTOP_MS`).
    *
    * Errors are swallowed for the reason every other background timer swallows its own: an unhandled
    * rejection from a timer takes down a daemon whose fleet is fine. A pass that could not run leaves
@@ -10549,10 +10618,11 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
   lane.submit(analyticsStore.rebuildRequired ? 'analytics rebuild' : 'analytics ingest', () =>
     analyticsStore.rebuildRequired ? subsystems.analyticsIngest.rebuild() : subsystems.analyticsIngest.ingest(),
   );
-  const analyticsTicks = setInterval(() => {
-    lane.submit('analytics ingest', () => subsystems.analyticsIngest.ingest());
-  }, ANALYTICS_INGEST_INTERVAL_MS);
-  cleanups.push(() => clearInterval(analyticsTicks));
+  cleanups.push(
+    subsystems.analyticsIngest.arm(() => {
+      lane.submit('analytics ingest', () => subsystems.analyticsIngest.ingest());
+    }),
+  );
   // The registry, durable session reader, exact observer and exact reaper the earlier increment
   // stubbed. Identity is re-checked at the moment of the kill, not at planning time.
   //
@@ -10645,6 +10715,8 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
    * a boot — it is reported on the update view instead.
    */
   cleanups.push(subsystems.daemonUpdate.arm());
+  // A state write is how a turn ends, so it is when an update waiting for idle looks again.
+  cleanups.push(opened.storage.subscribeStates(() => subsystems.daemonUpdate.activityChanged()));
   /**
    * The send tracker, armed after the bind like every loop that can type into a pane: a send proven
    * absent is re-attempted. Arming re-derives every in-flight send from its transcript — a restart

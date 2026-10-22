@@ -26,7 +26,7 @@ import { type ScaledFleetShape, scaledFleet } from '../support/scaled-fleet.ts';
 const SPAWNS_PER_MINUTE_BUDGET = 30;
 /** How long the boot gets before counting starts: its one-off reads are not the idle cost. */
 const WARMUP_SECONDS = 12;
-/** The counted window: long enough for a liveness tick (30 s) and several reaper sweeps (5 s). */
+/** The counted window: long enough for a liveness tick (30 s) and the reaper sweep the lane opens with. */
 const MEASURE_SECONDS = 32;
 
 /** The owner's fleet as the brief measured it, without the 200 MB transcripts a boot test needs. */

@@ -44,3 +44,4 @@ export * from './published-carriers.ts';
 export * from './secrets.ts';
 export * from './staged-surface.ts';
 export * from './timings.ts';
+export * from './pass-trigger.ts';

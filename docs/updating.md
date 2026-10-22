@@ -81,7 +81,8 @@ as a switch, not as an update.
 - **Source**: the GitHub releases API, `GET /repos/<owner>/<product>/releases/latest` — the same
   release GoReleaser publishes (see [Semantic Release](standards/semantic-release/index.md)). Drafts
   and prereleases never count. The changelog link is the release page.
-- **When**: once at boot, then at most every six hours. A version compare only — nothing is
+- **When**: once at boot, then at most every six hours — at the daemon's first look after that, which is
+  never more than fifteen minutes late. A version compare only — nothing is
   downloaded until somebody asks for the update.
 - **Cache**: `<state home>/state/update/latest.json` (beside it: `config.json`, the setting; `report.json`, the last outcome; `update.log`, the client's output), so a restart inside the six hours does not ask again.
 - **Failure**: the check never fails a boot and never retries in a loop. A failed check is reported
