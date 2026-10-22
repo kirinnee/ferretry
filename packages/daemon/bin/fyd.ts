@@ -425,7 +425,7 @@ import {
   type ConfigTreeEvents,
   watchConfigFiles,
 } from '../src/lib/config-files/index.ts';
-import { FileEventHub } from '../src/lib/file-events/index.ts';
+import { FILE_EVENT_POLL_MS, FileEventHub } from '../src/lib/file-events/index.ts';
 import { AccountModelAgentControlPolicy, type AgentControlPolicy } from '../src/lib/fleet/agent-control.ts';
 import { FleetCatalogService } from '../src/lib/fleet/catalog-service.ts';
 import { CodexAppServerSupervisor } from '../src/lib/fleet/codex-runtime.ts';
@@ -436,6 +436,7 @@ import {
 } from '../src/lib/fleet/credentials-service.ts';
 import { createFleetSetupSubsystem } from '../src/lib/fleet/setup-service.ts';
 import { resolveStartAccount } from '../src/lib/fleet/start-resolution.ts';
+import { polledDirectoryLimitations } from '../src/lib/performance/fallbacks.ts';
 
 /** The ordinary revive a send uses, as the auto-resume pass sees it. */
 type AutoResumeRevive = (id: string, message: string | undefined) => Promise<void>;
@@ -8849,6 +8850,11 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
                 ...(stackSamplerEnabled(process.env[STACK_SAMPLER_VARIABLE])
                   ? []
                   : ['The stack sampler is switched off (FYD_STACK_SAMPLER=0), so the CPU profile is empty.']),
+                ...polledDirectoryLimitations(
+                  fileEvents.fallbacks(),
+                  { home: userHome, stateHome: paths.home },
+                  FILE_EVENT_POLL_MS,
+                ),
               ],
             },
             budgets: IDLE_DAEMON_BUDGETS,
