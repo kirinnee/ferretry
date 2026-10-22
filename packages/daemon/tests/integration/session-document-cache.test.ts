@@ -101,6 +101,14 @@ async function seeded(
   return opened;
 }
 
+/** A seeded storage whose state carries a nested array, so freezing is checked all the way down. */
+async function seededNested() {
+  const opened = await openStorage(paths => new CountingStateFileSystem(paths));
+  await opened.storage.writeState(ID, { id: 'cached-1', status: 'running', turn: 1, openTools: ['bash'] });
+  await opened.storage.append(ID, 'session.created', {});
+  return opened;
+}
+
 describe('the session document cache', () => {
   it('should answer an unchanged document from the cache, reading it once', async () => {
     // Arrange
@@ -118,17 +126,53 @@ describe('the session document cache', () => {
     should(fileSystem.identifiedReads.filter(path => path === state).length).be.belowOrEqual(1);
   });
 
-  it('should hand out copies, so one caller cannot change what the next one reads', async () => {
+  it('should hand out ONE frozen document, so no caller can change what the next one reads', async () => {
     // Arrange
-    const { storage } = await seeded();
+    const { storage } = await seededNested();
     const first = (await storage.readState(ID)) as Record<string, unknown>;
 
-    // Act
-    first.status = 'tampered';
+    // Act — this module is strict, so a write to a frozen object throws rather than failing silently.
+    const tamper = () => {
+      first.status = 'tampered';
+    };
+    const tamperNested = () => {
+      (first.openTools as unknown[]).push('tampered');
+    };
     const second = (await storage.readState(ID)) as Record<string, unknown>;
 
-    // Assert
+    // Assert — the same instance every time, frozen all the way down: nothing is cloned per read.
+    should(tamper).throw(TypeError);
+    should(tamperNested).throw(TypeError);
+    should(second).equal(first);
+    should(Object.isFrozen(first.openTools)).be.true();
     should(second.status).equal('running');
+  });
+
+  it('should hand out a new instance after a write, and leave the one already handed out as it was', async () => {
+    // Arrange
+    const { storage } = await seededNested();
+    const before = (await storage.readState(ID)) as Record<string, unknown>;
+
+    // Act
+    await storage.updateState(ID, raw => ({ ...(raw as Record<string, unknown>), status: 'stopped' }));
+    const after = (await storage.readState(ID)) as Record<string, unknown>;
+
+    // Assert
+    should(after).not.equal(before);
+    should(after.status).equal('stopped');
+    should(before.status).equal('running');
+    should(Object.isFrozen(after)).be.true();
+  });
+
+  it('should freeze what it reads on a filesystem without identities too, so a mutation fails the same way', async () => {
+    // Arrange
+    const { storage } = await seeded(paths => new PlainStateFileSystem(paths));
+    const read = (await storage.readState(ID)) as Record<string, unknown>;
+
+    // Act + Assert
+    should(() => {
+      read.status = 'tampered';
+    }).throw(TypeError);
   });
 
   it('should see its own writes at once', async () => {

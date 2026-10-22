@@ -31,15 +31,15 @@ import {
   findAccountByAgent,
   servableModels,
 } from '../../core/inventory.ts';
-import { jsonObject, type JsonValue } from '../../json.ts';
+import { type FrozenJsonValue, jsonObject } from '../../json.ts';
 import type { ClockPort, SerialExecutor } from '../../ports.ts';
 import type { SessionId } from '../../session-id.ts';
 import type { SessionEffectAdmission, SessionEffectKey, SessionEffectLedger } from '../effects/types.ts';
 import type { CodexRuntimeCatalogCache } from '../harness/codex-catalog-cache.ts';
+import { fastModeFacts } from '../harness/fast-mode.ts';
 import { claudeRuntimeCatalog, codexRuntimeCatalog, codexSwitchContext } from '../harness/model-catalog.ts';
 import { CodexModelPickerDriver, type PickerSleeper } from '../harness/picker-drive.ts';
 import { failureMessage } from '../harness/quarantine.ts';
-import { fastModeFacts } from '../harness/fast-mode.ts';
 import type { RuntimeSwitchPlan } from '../harness/runtime-switch.ts';
 import type { HarnessQuirkService } from '../harness/service.ts';
 import { runtimeRequestFingerprint } from './ledger.ts';
@@ -67,7 +67,7 @@ export const HARNESS_COMPACT_COMMAND = '/compact';
  * termination result, so runtime recovery may close its input gates and add diagnostics but may not
  * replace the status, reason, finish time, exit code, or any other terminal evidence.
  */
-export function runtimeQuarantineState(current: JsonValue, patch: RuntimeQuarantinePatch): JsonValue {
+export function runtimeQuarantineState(current: FrozenJsonValue, patch: RuntimeQuarantinePatch): FrozenJsonValue {
   const state = jsonObject(current) ?? {};
   if (state.status !== 'kill_failed') return { ...state, ...patch };
   return {
