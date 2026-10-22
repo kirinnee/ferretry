@@ -90,14 +90,36 @@ export async function tailTranscriptEvents(
   limit = DEFAULT_TRANSCRIPT_TAIL,
   bytes = DEFAULT_TRANSCRIPT_TAIL_BYTES,
 ): Promise<readonly TranscriptEvent[]> {
+  return (await openTail(source, file, sessionId, limit, bytes)).events;
+}
+
+/** One tail, as {@link tailTranscriptEvents} reads it, with the window it was read through. */
+interface OpenedTail {
+  readonly events: readonly TranscriptEvent[];
+  /** The last window tried, and how many bytes from the end it began. */
+  readonly window: TranscriptWindow;
+  readonly bytes: number;
+  readonly fromStart: boolean;
+  /** Whether the window was read to the end of the file, rather than stopped at its step limit. */
+  readonly complete: boolean;
+  /** How much of the file the window has read: its byte offset plus the partial line it carries. */
+  readonly offset: number;
+}
+
+async function openTail(
+  source: TranscriptSource,
+  file: string,
+  sessionId: string,
+  limit: number,
+  bytes: number,
+): Promise<OpenedTail> {
   const windows = [...TAIL_GROWTH_BYTES.filter(size => size < bytes), bytes];
-  let events: readonly TranscriptEvent[] = [];
+  let opened: OpenedTail | undefined;
   for (const size of windows) {
-    const read = await tailWindow(source, file, sessionId, limit, size);
-    events = read.events;
-    if (events.length >= limit || read.fromStart) break;
+    opened = await tailWindow(source, file, sessionId, limit, size);
+    if (opened.events.length >= limit || opened.fromStart) break;
   }
-  return events;
+  return opened as OpenedTail;
 }
 
 /** One tail window: its newest `limit` events, and whether it began at the start of the file. */
@@ -107,20 +129,110 @@ async function tailWindow(
   sessionId: string,
   limit: number,
   bytes: number,
-): Promise<{ readonly events: readonly TranscriptEvent[]; readonly fromStart: boolean }> {
+): Promise<OpenedTail> {
   const window = source.window(file, { sessionId, start: { at: 'tail', bytes } });
   let events: TranscriptEvent[] = [];
   // A window that began mid-file cannot number its lines, so a first batch that does began at byte
   // zero: there is nothing older for a wider window to find. No batch at all is an empty file.
   let fromStart: boolean | undefined;
+  let complete = false;
+  let offset = 0;
   for (let step = 0; step < WINDOW_STEP_LIMIT; step += 1) {
     const { batch, more } = await window.next();
     if (batch !== undefined && fromStart === undefined) fromStart = batch.cursor.nextLine !== undefined;
     if (batch?.reset === true) events = [];
-    if (batch !== undefined) events = [...events, ...batch.events].slice(-limit);
-    if (!more) break;
+    if (batch !== undefined) {
+      events = [...events, ...batch.events].slice(-limit);
+      offset = batch.cursor.byteOffset + batch.cursor.pendingBytes;
+    }
+    if (!more) {
+      complete = true;
+      break;
+    }
   }
-  return { events, fromStart: fromStart ?? true };
+  return { events, window, bytes, fromStart: fromStart ?? true, complete, offset };
+}
+
+/**
+ * A transcript's tail, KEPT CURRENT BY READING ONLY WHAT WAS APPENDED: the same events
+ * {@link tailTranscriptEvents} would read from the file as it is now, without re-reading its window.
+ *
+ * An agent that is working appends to its transcript before almost every look, and a fresh tail re-reads
+ * and re-parses its whole window — hundreds of kilobytes — each time. This holds the window the tail was
+ * read through and steps it: it remembers its byte offset and carries a partial last line until its
+ * newline arrives (see `TranscriptWindow`), and the new events slide into the newest `limit`.
+ *
+ * EXACTLY THE FRESH TAIL, OR A FRESH TAIL. Sliding is only the same answer while the window began
+ * mid-file, already held `limit` events, and still spans no more than the `bytes` bound: then every
+ * fresh window that finds `limit` events finds these, and a window that began at byte zero (whose events
+ * carry line numbers a mid-file one cannot) is never compared with one that did not. Anything else — a
+ * small or sparse transcript, a replaced or truncated file, a read that failed or did not reach the end,
+ * a window grown past its bound — reads the tail afresh, as before.
+ */
+export class IncrementalTranscriptTail {
+  private opened: OpenedTail | undefined;
+  /** How much of the file the window had read when it was opened. */
+  private openedAt = 0;
+  private events: readonly TranscriptEvent[] = [];
+
+  constructor(
+    private readonly source: TranscriptSource,
+    readonly file: string,
+    private readonly sessionId: string,
+    private readonly limit = DEFAULT_TRANSCRIPT_TAIL,
+    private readonly bytes = DEFAULT_TRANSCRIPT_TAIL_BYTES,
+  ) {}
+
+  /** The tail now. Throws when it cannot be read, as {@link tailTranscriptEvents} does. */
+  async read(): Promise<readonly TranscriptEvent[]> {
+    const opened = this.opened;
+    if (opened !== undefined && this.slides(opened)) {
+      const slid = await this.slide(opened).catch(() => undefined);
+      if (slid !== undefined) return slid;
+    }
+    return await this.reopen();
+  }
+
+  private slides(opened: OpenedTail): boolean {
+    return opened.complete && !opened.fromStart && this.events.length >= this.limit && this.bounded(opened.offset);
+  }
+
+  /** Whether a window that has read to `offset` still begins inside the widest window a fresh tail reads. */
+  private bounded(offset: number): boolean {
+    return offset - this.openedAt + (this.opened?.bytes ?? this.bytes) <= this.bytes;
+  }
+
+  /** The appended records, stepped through the held window; `undefined` when only a fresh tail will do. */
+  private async slide(opened: OpenedTail): Promise<readonly TranscriptEvent[] | undefined> {
+    let events = this.events;
+    let offset = opened.offset;
+    for (let step = 0; step < WINDOW_STEP_LIMIT; step += 1) {
+      const { batch, more } = await opened.window.next();
+      if (batch?.reset === true) return undefined;
+      if (batch !== undefined) {
+        events = [...events, ...batch.events].slice(-this.limit);
+        offset = batch.cursor.byteOffset + batch.cursor.pendingBytes;
+      }
+      if (!more) {
+        // Past its bound the window holds bytes a fresh tail would not read.
+        if (!this.bounded(offset)) return undefined;
+        this.opened = { ...opened, offset };
+        this.events = events;
+        return events;
+      }
+    }
+    return undefined;
+  }
+
+  private async reopen(): Promise<readonly TranscriptEvent[]> {
+    this.opened = undefined;
+    this.events = [];
+    const opened = await openTail(this.source, this.file, this.sessionId, this.limit, this.bytes);
+    this.opened = opened;
+    this.openedAt = opened.offset;
+    this.events = opened.events;
+    return opened.events;
+  }
 }
 
 /**

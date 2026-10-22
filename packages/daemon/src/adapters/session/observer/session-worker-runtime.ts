@@ -19,7 +19,7 @@ import { QUESTION_TAIL_EVENTS } from '../../../lib/session/observer/question.ts'
 import { TURN_TAIL_EVENTS } from '../../../lib/session/observer/turn.ts';
 import type { AnswerOperationRecord } from '../../../lib/session/question/answer-ledger.ts';
 import { TranscriptSendEvidence } from '../../../lib/session/send/view.ts';
-import { tailTranscriptEvents } from '../../../lib/session/transcript/reader.ts';
+import { IncrementalTranscriptTail } from '../../../lib/session/transcript/reader.ts';
 import { isTurnStatus } from '../../../lib/session/turn/policy.ts';
 import type { TmuxCommandPort } from '../../../lib/tmux/contracts.ts';
 import { parsePaneWatch } from '../../../lib/tmux/control-protocol.ts';
@@ -83,6 +83,8 @@ interface CachedTail {
   readonly size: number;
   readonly mtimeMs: number;
   readonly events: readonly TranscriptEvent[];
+  /** The tail kept current by reading only what the agent appended since. */
+  readonly cursor: IncrementalTranscriptTail;
 }
 
 /** One hosted session. Mutable on purpose: this is the worker's own per-session record. */
@@ -420,7 +422,9 @@ export class SessionWorkerRuntime {
 
   /**
    * The transcript's tail. Re-read only when the hub said it changed, or `fresh` asks (a backstop, a
-   * barrier) — and then only when a `stat` says its bytes did — so an idle session reads nothing.
+   * barrier) — and then only when a `stat` says its bytes did — so an idle session reads nothing. And then
+   * only what was appended: an agent that is writing grows its transcript before almost every look, and
+   * re-parsing the whole tail window each time was most of a look's cost (see {@link IncrementalTranscriptTail}).
    */
   private async transcript(hosted: Hosted, fresh: boolean): Promise<readonly TranscriptEvent[] | undefined> {
     const bound = hosted.binding.transcript;
@@ -432,14 +436,18 @@ export class SessionWorkerRuntime {
     if (stats === undefined) return undefined;
     if (cached?.file === bound.file && cached.size === stats.size && cached.mtimeMs === stats.mtimeMs)
       return cached.events;
-    const events = await tailTranscriptEvents(
-      this.deps.transcripts[bound.harness],
-      bound.file,
-      hosted.session,
-      QUESTION_TAIL_EVENTS,
-    ).catch(() => undefined);
+    const cursor =
+      cached?.file === bound.file
+        ? cached.cursor
+        : new IncrementalTranscriptTail(
+            this.deps.transcripts[bound.harness],
+            bound.file,
+            hosted.session,
+            QUESTION_TAIL_EVENTS,
+          );
+    const events = await cursor.read().catch(() => undefined);
     if (events === undefined) return undefined;
-    hosted.tail = { file: bound.file, size: stats.size, mtimeMs: stats.mtimeMs, events };
+    hosted.tail = { file: bound.file, size: stats.size, mtimeMs: stats.mtimeMs, events, cursor };
     return events;
   }
 

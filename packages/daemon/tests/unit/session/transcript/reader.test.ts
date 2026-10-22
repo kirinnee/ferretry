@@ -3,6 +3,7 @@ import should from 'should';
 import {
   DEFAULT_TRANSCRIPT_TAIL_BYTES,
   drainTranscriptWindow,
+  IncrementalTranscriptTail,
   SessionTranscriptReader,
   type TranscriptDigestJournal,
   type TranscriptFileResolver,
@@ -508,5 +509,138 @@ describe('reading a transcript from its end', () => {
     should(sourceless).be.undefined();
     should(nameless).be.undefined();
     should(failed).be.undefined();
+  });
+});
+
+describe('IncrementalTranscriptTail', () => {
+  const ids = (events: readonly TranscriptEvent[]) =>
+    events.map(each => (each.kind === 'tool-call' ? each.call.id : ''));
+  /** A step of a window that began mid-file and has read to `offset`, carrying `pending` bytes. */
+  const midStep = (
+    events: readonly TranscriptEvent[],
+    offset: number,
+    options: { more?: boolean; reset?: boolean; pending?: number } = {},
+  ): TranscriptWindowStep => ({
+    batch: {
+      ...batch('/t.jsonl', events),
+      reset: options.reset === true,
+      cursor: { byteOffset: offset, pendingBytes: options.pending ?? 0 },
+    },
+    more: options.more === true,
+  });
+  /** A source whose every window answers from one shared script, counting the windows it opened. */
+  const scriptedSource = (steps: TranscriptWindowStep[]) => {
+    const opened: TranscriptWindowStart[] = [];
+    const subject: TranscriptSource = {
+      ...source('claude', async () => batch('/t', [])),
+      window: (file, options) => {
+        opened.push(options.start);
+        return {
+          file,
+          next: async () => {
+            const step = steps.shift();
+            if (step instanceof Error) throw step;
+            return step ?? { more: false };
+          },
+        };
+      },
+    };
+    return { subject, opened };
+  };
+  const three = [event('a'), event('b'), event('c')];
+
+  it('should slide the held window over what was appended, opening no other', async () => {
+    // Arrange — the first window began mid-file and found the limit.
+    const steps = [midStep(three, 1_000), midStep([event('d')], 1_200, { pending: 30 })];
+    const { subject, opened } = scriptedSource(steps);
+    const tail = new IncrementalTranscriptTail(subject, '/t.jsonl', 'session-1', 3);
+
+    // Act
+    const first = await tail.read();
+    const slid = await tail.read();
+    const unchanged = await tail.read();
+
+    // Assert
+    should(ids(first)).eql(['a', 'b', 'c']);
+    should(ids(slid)).eql(['b', 'c', 'd']);
+    should(ids(unchanged)).eql(['b', 'c', 'd']);
+    should(opened).have.length(1);
+  });
+
+  it('should read afresh a window that began at the first byte, or that held fewer events than its limit', async () => {
+    // Arrange
+    const fromStart = scriptedSource([{ batch: batch('/t.jsonl', three), more: false }]);
+    const sparse = scriptedSource(Array.from({ length: 6 }, () => midStep([event('a')], 1_000)));
+    const smallTail = new IncrementalTranscriptTail(fromStart.subject, '/t.jsonl', 'session-1', 3);
+    const sparseTail = new IncrementalTranscriptTail(sparse.subject, '/t.jsonl', 'session-1', 3);
+
+    // Act
+    await smallTail.read();
+    await smallTail.read();
+    await sparseTail.read();
+    await sparseTail.read();
+
+    // Assert — every read opened a fresh tail (the sparse one through all three of its windows).
+    should(fromStart.opened).have.length(2);
+    should(sparse.opened).have.length(6);
+  });
+
+  it('should read afresh after the file restarted, a step failed, or a window could not reach the end', async () => {
+    // Arrange
+    const restarted = scriptedSource([midStep(three, 1_000), midStep([event('z')], 50, { reset: true })]);
+    const failing = scriptedSource([midStep(three, 1_000), new Error('EIO') as never]);
+    const unfinished = scriptedSource([
+      midStep(three, 1_000),
+      ...Array.from({ length: 64 }, () => midStep([event('d')], 1_100, { more: true })),
+    ]);
+    const tails = [restarted, failing, unfinished].map(
+      each => new IncrementalTranscriptTail(each.subject, '/t.jsonl', 'session-1', 3),
+    );
+
+    // Act
+    for (const tail of tails) await tail.read();
+    for (const tail of tails) await tail.read();
+
+    // Assert
+    should([restarted, failing, unfinished].map(each => each.opened.length)).eql([2, 2, 2]);
+  });
+
+  it('should read afresh a first window that stopped before the end, rather than slide it', async () => {
+    // Arrange
+    const steps = Array.from({ length: 64 }, () => midStep(three, 1_000, { more: true }));
+    const { subject, opened } = scriptedSource(steps);
+    const tail = new IncrementalTranscriptTail(subject, '/t.jsonl', 'session-1', 3);
+    await tail.read();
+
+    // Act
+    await tail.read();
+
+    // Assert
+    should(opened).have.length(2);
+  });
+
+  it('should read afresh once the held window would span more than the widest fresh tail', async () => {
+    // Arrange — a 600 KiB bound: the 512 KiB window may slide 88 KiB, no further.
+    const bound = 600 * 1024;
+    const { subject, opened } = scriptedSource([
+      midStep(three, 1_000_000),
+      midStep([event('d')], 1_000_000 + 80 * 1024),
+      midStep([event('e')], 1_000_000 + 100 * 1024),
+      midStep(three, 1_000_000 + 100 * 1024),
+    ]);
+    const tail = new IncrementalTranscriptTail(subject, '/t.jsonl', 'session-1', 3, bound);
+
+    // Act
+    await tail.read();
+    const within = await tail.read();
+    const beyond = await tail.read();
+
+    // Assert
+    should(ids(within)).eql(['b', 'c', 'd']);
+    should(ids(beyond)).eql(['a', 'b', 'c']);
+    should(opened).eql([
+      { at: 'tail', bytes: 512 * 1024 },
+      { at: 'tail', bytes: 512 * 1024 },
+    ]);
   });
 });
