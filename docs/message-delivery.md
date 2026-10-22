@@ -118,6 +118,31 @@ before the keys). Two places enforce it:
 An `unaccounted` send's notice to an agent sender says it **could not be confirmed** and may still have
 landed — not that it "did not reach" the recipient, which invited the sender to send the copy itself.
 
+## A message a revive carried
+
+A send to a session whose harness has exited (an auto ferret that finished its task) becomes the first
+turn of a **revive**: the message is written to the new turn file and the relaunched pane is typed a
+POINTER at it, so the transcript records the pointer — not the message — as what the user said.
+
+The incident: two peer messages to finished sub-ferrets were revived, read and acted on within seconds,
+and both senders were told "did not reach it … (not delivered) after 1 attempt(s)" at 15 s. The ledger
+kept only the message, so the tracker looked for text no transcript would ever hold; at the deadline it
+found nothing, could not re-type a revive, and settled `timed_out`.
+
+- **The relaunch says what it typed.** `SessionResumeService` reports `delivered` — the pointer, or the
+  message itself when it found a live pane and typed into it — and the send records it as `matchText`,
+  with the attempt clock restarted at that moment. The pointer proves it `delivered` at the
+  `turn-instruction` tier.
+- **Never judged mid-relaunch.** Until the relaunch has said what it typed, the send's first look is
+  `reviveLaunchMs` (90 s) after acceptance, not the agent window of 15 s: a relaunch waits for the new
+  harness to be ready before typing anything, about 45 s at the delivery adapter's worst.
+- **Unconfirmed, never "not delivered".** A revive send past its deadline without proof is never typed
+  again and never proven absent — the agent may have read the file and even finished. A pointer still
+  visibly typed or queued waits; otherwise it settles `unaccounted` with reason `revive_unconfirmed`
+  (`blocked_by_prompt` when a dialog is on screen), stays watched, and a pointer that turns up later
+  still proves it delivered. Its agent sender is told it was handed over as the relaunch's first turn
+  and most likely landed, and not to send it again unless the recipient stays silent.
+
 ## Never typing onto unsent text — and never typing twice
 
 The owner's screenshot of a Claude ferret (`claude-pileup-screenshot`): the person's half-written

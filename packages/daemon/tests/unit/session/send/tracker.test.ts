@@ -524,6 +524,78 @@ describe('an agent-to-agent send', () => {
   });
 });
 
+describe('a message a revive carried', () => {
+  const pointer = turnFileInstruction('/state/sessions/session-1/turns/turn-004.md');
+  const revived = (overrides: Partial<SendRecord> = {}) =>
+    record({ path: 'revive', senderKind: 'agent', from: SENDER, matchText: pointer, ...overrides });
+
+  it('is proven by the pointer the relaunch typed, at the turn-instruction tier', async () => {
+    const world = new World(revived());
+    world.evidence(new ClaudeObservedInputObserver(), [claude.user(pointer, 2_300)]);
+
+    await world.checkAt(2_000);
+
+    should(world.only).match({
+      fate: 'delivered',
+      evidence: { tier: 'turn-instruction', proof: 'normal-user-record' },
+    });
+  });
+
+  it('is not judged before the relaunch window ends while the relaunch has not said what it typed', async () => {
+    const world = new World(revived({ matchText: undefined }));
+    world.evidence(new ClaudeObservedInputObserver(), []);
+
+    await world.checkAt(60_000);
+
+    should(world.only.fate).equal('accepted');
+    should(world.scheduled.at(-1)?.delayMs).equal(defaultSendTrackerSettings.reviveLaunchMs - 60_000);
+  });
+
+  it('is unconfirmed — never re-typed, never "not delivered" — once its window passes unproven', async () => {
+    const world = new World(revived());
+    world.evidence(new ClaudeObservedInputObserver(), []);
+
+    await world.checkAt(15_000);
+
+    should(world.retyped).be.empty();
+    should(world.only).match({ fate: 'unaccounted', unaccountedReason: 'revive_unconfirmed', retryable: false });
+    should(world.notices[0]?.record).match({ fate: 'unaccounted', unaccountedReason: 'revive_unconfirmed' });
+  });
+
+  it('is unconfirmed even when the relaunched session has already finished', async () => {
+    // The agent read the turn and wrote its done marker before the look: not "session ended".
+    const world = new World(revived());
+    world.evidence(new ClaudeObservedInputObserver(), []);
+    world.target = { id: ID, status: 'completed', mode: 'auto', turn: 4 };
+    world.pane = pane({ alive: false, dead: true });
+
+    await world.checkAt(15_000);
+
+    should(world.only).match({ fate: 'unaccounted', unaccountedReason: 'revive_unconfirmed' });
+  });
+
+  it('waits while its pointer is still visibly typed in the composer', async () => {
+    const world = new World(revived());
+    world.evidence(new ClaudeObservedInputObserver(), []);
+    world.inPane = 'composer';
+
+    await world.checkAt(15_000);
+
+    should(world.only.fate).equal('accepted');
+    should(world.only.deadlineAt).equal(at(15_000 + defaultSendTrackerSettings.busyExtensionMs));
+  });
+
+  it('says a dialog is in the way when one is', async () => {
+    const world = new World(revived());
+    world.evidence(new ClaudeObservedInputObserver(), []);
+    world.pane = pane({ blockingPrompt: 'Do you trust the files in this folder?' });
+
+    await world.checkAt(15_000);
+
+    should(world.only).match({ fate: 'unaccounted', unaccountedReason: 'blocked_by_prompt' });
+  });
+});
+
 describe('the tracker as the daemon runs it', () => {
   it('looks soon after a transport, and re-derives every session at boot without re-typing', async () => {
     const world = new World(record({ fate: 'queued', queueProof: 'pane' }));

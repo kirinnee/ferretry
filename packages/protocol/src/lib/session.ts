@@ -65,6 +65,11 @@ export const SendUnaccountedReasonSchema = z.enum([
   'pane_unreadable',
   /** A dialog on the agent's screen was waiting for an answer, so the message could not be typed. */
   'blocked_by_prompt',
+  /**
+   * Carried by a revive — written to the turn file the relaunch started on — and never proven in the
+   * transcript. The agent may well have read it, so it is unconfirmed rather than not delivered.
+   */
+  'revive_unconfirmed',
   /** Proven absent after every attempt. */
   'not_delivered',
 ]);

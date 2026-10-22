@@ -892,6 +892,7 @@ import {
   tunnelListenerSurface,
   tunnelPeer,
   tunnelServiceOrigin,
+  tunnelSessionLog,
   UnknownPeerRefused,
   UnwatchedPaneExits,
   type UsageFeedPort,
@@ -910,6 +911,7 @@ import {
   WatchedDocument,
   WatchedPanes,
   WatchedUsageFeed,
+  WEBRTC_ENGINE_ON_DEMAND,
   type WebRtcAvailability,
   WebRtcCarrier,
   type WebRtcEnginePort,
@@ -7768,6 +7770,8 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         clock: { now: () => Date.now() },
         lease: timings.lease,
         connections: deviceConnections,
+        // Only a session that arrived through the tunnel listener reports here (§15).
+        sessionLog: tunnelSessionLog(bootNotices),
       };
       return {
         route: directCarrierSocketRoute(sessionDependencies),
@@ -9989,7 +9993,7 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
   const analyticsStore = await world.analyticsIndexes.open(opened.paths, opened.fileSystem);
   cleanups.push(() => analyticsStore.store.close());
   world.notices.step('analytics index opened', analyticsStore.rebuildRequired ? 'a rebuild is required' : undefined);
-  progress.enter('checking the WebRTC engine');
+  progress.enter('building the WebRTC carrier');
   /**
    * THE PEER-TO-PEER CARRIER (`docs/relay-protocol.md` §16), decided once and built before the subsystems
    * because its signalling is a mounted route.
@@ -10000,25 +10004,20 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
    * data channel exists only after an offer this daemon answered while serving. A daemon whose direct
    * carrier is refused has no identity to sign a handshake with, so a channel is closed at once.
    *
-   * The engine is proved, not assumed, with the same self-test `--check` runs, and an engine that fails
-   * it is an answer a device is told (`webrtc_unavailable`), never a boot that stops.
+   * THE BOOT ASKS THE ENGINE NOTHING. Proving it here loaded a native library on the startup path (0.4 s
+   * on a Mac) and left one thread per core running for the daemon's life with no phone in sight; the first
+   * offer starts it instead, `fyd --check` still proves it, and an engine that will not start is the same
+   * `webrtc_unavailable` answer a device was told before.
    */
   let openWebRtcSession: WebRtcSessionFactory | undefined;
-  const webrtcReport = config.webrtc.enabled ? await world.webrtcEngine.selfTest() : undefined;
-  const webrtcAvailability: WebRtcAvailability =
-    webrtcReport === undefined
-      ? {
-          kind: 'refused',
-          code: 'webrtc_disabled',
-          reason: `peer-to-peer connections are switched off in ${world.config.path}`,
-        }
-      : webrtcReport.kind === 'ready'
-        ? { kind: 'ready' }
-        : { kind: 'refused', code: 'webrtc_unavailable', reason: webrtcReport.reason };
-  world.notices.step(
-    'webrtc',
-    webrtcReport === undefined ? 'switched off in the configuration' : describeWebRtcEngine(webrtcReport),
-  );
+  const webrtcAvailability: WebRtcAvailability = config.webrtc.enabled
+    ? { kind: 'ready' }
+    : {
+        kind: 'refused',
+        code: 'webrtc_disabled',
+        reason: `peer-to-peer connections are switched off in ${world.config.path}`,
+      };
+  world.notices.step('webrtc', config.webrtc.enabled ? WEBRTC_ENGINE_ON_DEMAND : 'switched off in the configuration');
   const webrtc = new WebRtcCarrier({
     availability: webrtcAvailability,
     engine: world.webrtcEngine,

@@ -27,6 +27,7 @@ import { DaemonAccountPickerStore } from './account-picker-store.ts';
 import { DaemonHttpTransport, daemonApiClient } from './api-client.ts';
 import { DaemonAttentionClient } from './attention-client.ts';
 import { browserLoginPort, DaemonBrowserLoginStore } from './browser-login.ts';
+import { browserCarrierDropEnvironment, CarrierDropLog } from './carrier-drops.ts';
 import { CarrierPreferenceStore } from './carrier-preference.ts';
 import { DaemonConfigChangeStore } from './config-changes.ts';
 import {
@@ -103,6 +104,7 @@ import { SttSettingsStore } from './stt/stt-settings.ts';
 import { TranscriptionLog, type TranscriptionLogSnapshot } from './stt/transcription-log.ts';
 import { IndexedDbTranscriptionLogRecords } from './stt/transcription-log-records.ts';
 import { readTunnelService, type TunnelServiceState } from './tunnel-service.ts';
+import { keptTunnel, TunnelSwitchStore } from './tunnel-switch.ts';
 import { DaemonUsageStore, daemonUsagePort } from './usage-store.ts';
 import { browserWebRtcDialer, type WebRtcDialer } from './webrtc-carrier.ts';
 import { WorkspaceLayoutStore } from './workspace-layout-store.ts';
@@ -429,12 +431,19 @@ export interface AppStore {
    */
   readonly tunnelService: () => Promise<TunnelServiceState>;
   /**
+   * EACH MACHINE'S TUNNEL SWITCH (§15): whether its tunnel is on, and the write that turns it on or off —
+   * carried as carrier control, so it reaches a machine whose only allowed carrier is the tunnel itself.
+   */
+  readonly tunnelSwitch: TunnelSwitchStore;
+  /**
    * HOW WELL EACH DAEMON IS REACHED, as one fact per daemon — and the loop that recovers it.
    *
    * Fed by the carrier router; read by every surface through `useConnectionHealth`. A lost carrier is
    * said ONCE, here, instead of by every panel that happened to be polling when it went.
    */
   readonly connectionHealth: ConnectionHealth;
+  /** Every held session this browser lost, kept for Settings › Machine › Performance (`carrier-drops.ts`). */
+  readonly carrierDrops: CarrierDropLog;
   /**
    * WHAT THIS BROWSER SPENT ITS TIME ON — every daemon request by route, the live streams it opened,
    * long tasks and render timings — for the Performance report beside the daemon's own. Optional only
@@ -624,9 +633,23 @@ export async function createAppStore(options: CreateAppStoreOptions = {}): Promi
       await carrier.probe(daemon, request.url, request.init);
     },
   );
+  const carrierDrops = new CarrierDropLog(browserCarrierDropEnvironment());
+  /**
+   * The daemon's word on its own tunnel decides what this device keeps (§15): up at a hostname is kept,
+   * off or unable to run is forgotten — the one answer that can tell a withdrawn tunnel from one that is
+   * merely reconnecting. Its requests are carrier control, so they reach the router only when sent.
+   */
+  const tunnelSwitch = new TunnelSwitchStore({
+    control: async (daemon, url, init) => await carrier.control(daemon, url, init),
+    observed: (daemon, view) => {
+      const tunnel = keptTunnel(view);
+      if (tunnel !== undefined) connections.replaceTunnel(daemon, tunnel ?? undefined);
+    },
+  });
   const carrier = new DaemonCarrierRouter({
     network: fetcher,
     health: connectionHealth,
+    drops: carrierDrops,
     presence: () => presence.present(),
     stepUp: async (daemon, act, origin) => await stepUp.require(daemon, act, origin),
     unlockRequired: async (daemon, origin) => await unlockGate.require(daemon, undefined, origin),
@@ -646,6 +669,10 @@ export async function createAppStore(options: CreateAppStoreOptions = {}): Promi
     // ordinary refresh's answer is, so the next reload dials the tunnel it found without asking again.
     learned: (daemon, carriers) => {
       connections.replaceCarriers(daemon, carriers);
+    },
+    tunnelSwitchedOff: daemonId => {
+      const state = tunnelSwitch.state(daemonId);
+      return state.kind === 'known' && !state.view.enabled;
     },
     // The same one-per-load promise both other readers await; the router waits on it only after a
     // daemon's own carriers have all failed, so nothing on the ordinary path pays for the read.
@@ -781,6 +808,7 @@ export async function createAppStore(options: CreateAppStoreOptions = {}): Promi
       workspaceLayouts,
       carrier,
       connectionHealth,
+      carrierDrops,
       sessionCache,
     ],
     // The key goes with the pairing it proved, and only when the pairing goes for good — a re-pair in
@@ -837,7 +865,15 @@ export async function createAppStore(options: CreateAppStoreOptions = {}): Promi
       if (!response.ok) return;
       const view = DaemonCarriersViewSchema.safeParse(await response.json().catch(() => undefined));
       if (!view.success) return;
-      connections.replaceCarriers(daemon, publishedConnectionMethods(view.data.carriers, await hostedRelayUrl));
+      const published = publishedConnectionMethods(view.data.carriers, await hostedRelayUrl);
+      const record = connections.replaceCarriers(daemon, published);
+      // A tunnel kept through a set that no longer names one is checked with the daemon, which knows
+      // whether it was switched off or is only reconnecting.
+      if (
+        !published.some(method => method.kind === 'tunnel') &&
+        record?.carriers.some(method => method.kind === 'tunnel') === true
+      )
+        await tunnelSwitch.refresh(daemon);
     })().catch(() => undefined);
   });
 
@@ -848,7 +884,9 @@ export async function createAppStore(options: CreateAppStoreOptions = {}): Promi
     webrtcAvailable: carrierDialers.webrtc !== undefined,
     webrtcRttMs: async daemonId => await webrtc?.rttMs(daemonId),
     tunnelService,
+    tunnelSwitch,
     connectionHealth,
+    carrierDrops,
     stepUp,
     unlockGate,
     connections,

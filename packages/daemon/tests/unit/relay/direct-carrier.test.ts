@@ -54,6 +54,8 @@ import {
   DIRECT_UPGRADE_WINDOW_MS,
   DIRECT_UPGRADES_PER_PEER,
   type DirectSession,
+  type DirectSessionEnd,
+  type DirectSessionLog,
   EVICTED_REASON,
   MAX_DIRECT_SESSIONS,
   MAX_DIRECT_UNPROVEN_PER_PEER,
@@ -134,6 +136,7 @@ function carrier(
     readonly now?: () => number;
     readonly timers?: FakeTimer[];
     readonly connections?: LiveDeviceConnections;
+    readonly sessionLog?: DirectSessionLog;
   } = {},
 ) {
   const connections = options.connections ?? new LiveDeviceConnections();
@@ -170,6 +173,7 @@ function carrier(
     },
     clock: { now: options.now ?? (() => 0) },
     connections,
+    ...(options.sessionLog === undefined ? {} : { sessionLog: options.sessionLog }),
   });
   return { route, requests, pairings, connections };
 }
@@ -664,5 +668,106 @@ describe('a direct session ending for the reasons a relayed one does', () => {
     if (lease === undefined) throw new Error('no lease was armed');
     lease.fire();
     should(wire.closes.at(-1)?.code).equal(RELAY_ACCESS_LEASE_ENDED_CLOSE_CODE);
+  });
+});
+
+describe('what a tunnel session reports about its own life', () => {
+  /** A log that keeps what it was told, and a clock a case moves by hand. */
+  const recorder = () => {
+    const opened: number[] = [];
+    const ends: DirectSessionEnd[] = [];
+    const clock = { at: 1_000 };
+    const log: DirectSessionLog = { opened: () => opened.push(clock.at), closed: end => ends.push(end) };
+    return { opened, ends, clock, log };
+  };
+
+  it('should report a proved tunnel session the browser side cut, with the code, its age, the last frame and the bytes', async () => {
+    // Arrange
+    const seen = recorder();
+    const { route } = carrier({ sessionLog: seen.log, now: () => seen.clock.at });
+    const { handler, wire, sessionId } = await connect(route, { clientAddress: '203.0.113.9', carrier: 'tunnel' });
+    const { channel, transcript } = await handshake(handler, wire, sessionId);
+    const proof = await signDeviceProof(
+      crypto_,
+      deviceKey,
+      deviceAuthMessage(transcript, 'auth', DEVICE_ID, APP_SESSION),
+    );
+    await send(handler, channel, {
+      t: 'auth',
+      protocol: SESSION_PROTOCOL_ID,
+      deviceId: DEVICE_ID,
+      appSession: APP_SESSION,
+      proof,
+    });
+    seen.clock.at = 61_000;
+    handler.fromClient(HEARTBEAT_REQUEST);
+
+    // Act — ninety seconds after the last ping, the network drops the socket without a close frame.
+    seen.clock.at = 151_000;
+    handler.close({ code: 1006, reason: '' });
+
+    // Assert
+    should(seen.opened).eql([1_000]);
+    should(seen.ends).have.length(1);
+    const end = seen.ends[0] as DirectSessionEnd;
+    should(end).containDeep({
+      by: 'peer',
+      code: 1006,
+      reason: '',
+      durationMs: 150_000,
+      lastFrameAgeMs: 90_000,
+      proved: true,
+    });
+    should(end.bytesIn).be.above(0);
+    should(end.bytesOut).be.above(0);
+  });
+
+  it('should name this daemon as the end that closed it, with the code it sent, and not report twice when the transport echoes it', async () => {
+    // Arrange
+    const seen = recorder();
+    const { route } = carrier({ sessionLog: seen.log, now: () => seen.clock.at });
+    const { handler, wire } = await connect(route, { carrier: 'tunnel' });
+
+    // Act — a client that speaks for the rendezvous is refused, then the runtime reports that close back.
+    handler.fromClient(
+      encodeFrame({
+        kind: FRAME_KINDS.control,
+        sessionId: (wire.binary[0] as RelayFrame).sessionId,
+        sequence: 1,
+        payload: encodeControlMessage({ t: 'open' }),
+      }),
+    );
+    handler.close({ code: RELAY_CLOSE_CODES.protocolError, reason: 'echo' });
+
+    // Assert
+    should(seen.ends).have.length(1);
+    should(seen.ends[0]).containDeep({ by: 'daemon', code: RELAY_CLOSE_CODES.protocolError, proved: false });
+  });
+
+  it('should say the daemon released a socket the transport reported no close for', async () => {
+    // Arrange
+    const seen = recorder();
+    const { route } = carrier({ sessionLog: seen.log });
+    const { handler } = await connect(route, { carrier: 'tunnel' });
+
+    // Act — daemon shutdown ends every handler with no close report.
+    handler.close();
+
+    // Assert
+    should(seen.ends[0]).containDeep({ by: 'daemon', code: undefined, reason: 'the daemon released this socket' });
+  });
+
+  it('should report nothing for a session that did not arrive through the tunnel', async () => {
+    // Arrange
+    const seen = recorder();
+    const { route } = carrier({ sessionLog: seen.log });
+    const { handler } = await connect(route, { loopback: true, privilegedLoopback: true, clientAddress: '127.0.0.1' });
+
+    // Act
+    handler.close({ code: 1001, reason: 'tab closed' });
+
+    // Assert
+    should(seen.opened).eql([]);
+    should(seen.ends).eql([]);
   });
 });

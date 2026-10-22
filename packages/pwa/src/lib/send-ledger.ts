@@ -299,6 +299,7 @@ const REASONS: ReadonlySet<string> = new Set<SendUnaccountedReason>([
   'transcript_unbound',
   'pane_unreadable',
   'blocked_by_prompt',
+  'revive_unconfirmed',
   'not_delivered',
 ]);
 const CANCEL_EFFECTS: ReadonlySet<string> = new Set<SendCancelEffect>([

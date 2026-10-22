@@ -19,6 +19,7 @@ import {
   parseBody,
   SOCKET_MAX_PENDING_FRAMES,
   type SocketDownstream,
+  type SocketEnded,
   type SocketHandler,
   type SocketRoute,
   textResponse,
@@ -517,10 +518,12 @@ interface Recorded {
   readonly frames: string[];
   opened: number;
   closed: number;
+  /** The close the transport reported to each `close()`, when it reported one. */
+  readonly endings: Array<SocketEnded | undefined>;
 }
 
 function recorded(): Recorded {
-  return { frames: [], opened: 0, closed: 0 };
+  return { frames: [], opened: 0, closed: 0, endings: [] };
 }
 
 /**
@@ -558,8 +561,9 @@ function recordingSocket(
           fromClient: frame => {
             record.frames.push(typeof frame === 'string' ? frame : `binary:${frame.byteLength}`);
           },
-          close: () => {
+          close: ended => {
             record.closed += 1;
+            record.endings.push(ended);
           },
         };
       };
@@ -657,7 +661,7 @@ function connect(url: string): {
   readonly closes: Array<readonly [number, string]>;
   readonly opened: Promise<void>;
   send(data: string | Uint8Array): void;
-  close(): void;
+  close(code?: number, reason?: string): void;
   untilFrames(count: number): Promise<void>;
   untilClosed(): Promise<void>;
 } {
@@ -681,7 +685,7 @@ function connect(url: string): {
     closes,
     opened,
     send: data => socket.send(data),
-    close: () => socket.close(),
+    close: (code, reason) => socket.close(code, reason),
     untilFrames: async count => await settle(() => frames.length >= count),
     untilClosed: async () => await settle(() => closes.length > 0),
   };
@@ -916,6 +920,25 @@ describe('BunApiServer over a live socket', () => {
     // Assert — the handler was told exactly once, by the transport, with no write having failed.
     should(record.opened).equal(1);
     should(record.closed).equal(1);
+  });
+
+  it('should hand the handler the close code and reason the peer sent, so a drop can be explained', async () => {
+    // Arrange
+    const record = recorded();
+    const handle = await listen(recordingSocket({ record }));
+    const viewer = connect(streamUrl(handle));
+    await viewer.opened;
+    await viewer.untilFrames(1);
+
+    // Act
+    viewer.close(4321, 'the page went to the background');
+    await viewer.untilClosed();
+    for (let attempt = 0; attempt < 200 && record.closed === 0; attempt += 1) await Bun.sleep(10);
+
+    // Assert — the code always arrives; Bun 1.3 hands the server an empty reason for a client's close.
+    should(record.endings).have.length(1);
+    should(record.endings[0]?.code).equal(4321);
+    should(record.endings[0]?.reason).be.a.String();
   });
 
   /**

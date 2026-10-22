@@ -469,6 +469,25 @@ network type changes, so a phone that wakes with a dead socket learns so in seco
 changes the wire: a peer that pings only every thirty seconds is still conforming, and the
 rendezvous's eviction rule is unchanged.
 
+**A deadline that fired late measured the browser, not the carrier.** A phone that hides an installed
+app freezes the page or throttles its timers to about once a minute, and on the way back every overdue
+timer and every queued message is delivered in an order the browser does not promise — so a `fy-pong`
+that arrived during the freeze can be queued behind the deadline it answers. A browser deadline that
+fires more than **2 seconds** past its time is therefore forgiven **once**: instead of closing, the
+browser pings again with the 4-second liveness-check deadline on the now-running page. Answered, the
+session lives; silent again, it is closed `4408` exactly as before. Any evidence of life re-arms the
+forgiveness.
+
+**A drop is recovered before it is said.** A held session that ends under a browser is redialled on the
+same carrier at once: the connection model's first retry, a live feed's first reopen and a terminal's
+first reopen all wait **under 300 ms** (equal jitter where there is a schedule), and nothing tells the
+person "reconnecting" until the outage has lasted **1.5 seconds** (2 for a session's live chip). Every
+drop is still recorded on the device — the carrier, the close code, how long the session had lived and
+since it last heard anything, whether the page was hidden and for how long, the network type where the
+browser says, and how long the next session took to open — and shown with a Copy button under Settings ›
+Machine › Performance, so "it keeps reconnecting" arrives with evidence. Nothing in that record is a
+credential or an address, and it is never sent anywhere.
+
 #### What `fy-pong` cannot prove
 
 `fy-pong` is answered by the runtime holding the socket, not by the rendezvous: the auto-responder
@@ -2311,6 +2330,20 @@ tunnel yet" — never a silent fall back to a carrier the person excluded.
 **Pairing ignores the preference.** First contact is direct, then the hosted relay (§14), whatever is
 chosen: WebRTC needs a device key to signal and a tunnel is published only to a paired device.
 
+**A tunnel is opt-in per machine, so choosing one offers it.** A daemon runs a tunnel only when its
+operator or a paired device switched one on (`GET`/`PUT /v1/tunnel`, "The daemon end"). Choosing Tunnel
+only — or Auto, which walks a tunnel too — for a machine whose switch is off asks, under the choice,
+"Turn on a Cloudflare tunnel for this machine?"; the choice itself is kept either way, and Tunnel only's
+note says "Off for this machine — tunnels are opt-in." — as does the walk's stated failure, "Tunnel only:
+this machine's tunnel is off (opt-in)", ahead of the service's two reasons. The Connection status shows the daemon's own line
+about its tunnel ("Tunnel: off (opt-in) — …"). **Switching is carrier control, not a walk**: `GET` and
+`PUT /v1/tunnel` ride the daemon's direct address or a rendezvous — the introducers, with the hosted
+relay when the daemon authored none — whatever the preference, and never the tunnel or WebRTC, because
+under Tunnel only with the switch off nothing the preference allows could carry the request that turns
+it on, and switching a tunnel off over itself would end the connection carrying the answer. It remembers
+no winner, and a passkey it needs is asked for exactly as for any press. A daemon older than the switch
+answers `404`, and its tunnel was never opt-in, so nothing is offered.
+
 **A device keeps the tunnel it was told, and asks the daemon when that is not enough.** The tunnel is
 learned the way every carrier is — from the daemon's published set, at pairing and on each
 `GET /v1/carriers` refresh — and kept with the pairing in the device's own storage, so a reload or an
@@ -2323,7 +2356,9 @@ device a new one:
 2. **A refresh that names no tunnel does not erase the kept one.** The daemon publishes its tunnel only
    while `cloudflared` holds an edge connection, so a set read during a reconnect means "not right now",
    not "gone". The kept hostname is replaced when the daemon publishes a different one; a read that
-   fails changes nothing.
+   fails changes nothing. What tells the two apart is the daemon's switch: a device holding a tunnel the
+   set no longer names asks `GET /v1/tunnel`, and forgets the tunnel when the answer is `off` or
+   `unavailable` (it keeps one that is `up`, and leaves one that is `provisioning` or `connecting`).
 3. **When there is no tunnel to dial, or the kept one does not carry, the daemon is asked** — one
    `GET /v1/carriers` over its direct address or a rendezvous (the carriers that already introduce
    WebRTC, §16, with the hosted relay when the daemon authored none), inside an ordinary
@@ -2561,6 +2596,15 @@ partial one. The operator runbook is
   record exactly like `true`. A boot that could not get an answer keeps the record and asks once more
   on the next boot. Switching the entry off through `PUT /v1/tunnel` releases at once; an entry
   edited by hand in the file takes effect, and releases, on the next start.
+- **What the daemon logs about each tunnel session.** A tunnel that stays registered while a phone
+  "keeps reconnecting" is a per-session fact, so every session the tunnel listener carries logs one
+  `tunnel session opened` line and one `tunnel session closed` line: who ended it (the browser side, or
+  this daemon), the close code with what it means and the reason quoted on one line, how long it
+  lived, how long before the end the last client frame arrived (a `fy-ping` counts), the bytes each
+  way, and whether a device proved itself on it. A peer that vanished is `1006`; the reason a peer sends
+  is cut to one printable line so it cannot forge a second log line. No address, device or key is in
+  either line (`packages/daemon/src/lib/tunnel/session-log.ts`). Sessions on the direct listener are
+  not logged.
 - **`cloudflared` supervision.** Restarted 1 s after it exits, doubling to one minute with equal jitter,
   the backoff starting over once a connection registers; registration is the set of
   `Registered tunnel connection connIndex=N` lines minus `Unregistered …`, so one of four edge
@@ -2660,7 +2704,8 @@ and every session on it meets the same guard. Both bodies are strict objects who
 KiB (`packages/protocol/src/lib/webrtc.ts`). Its refusals are ordinary answers a device reads and
 states, each with a machine code: `404` from a daemon older than this carrier ("this daemon does not
 offer WebRTC yet"); `503 webrtc_disabled` when the operator switched the carrier off and `503
-webrtc_unavailable` when the daemon's engine did not pass its self-test, each with the sentence; `429
+webrtc_unavailable` when the daemon's engine would not start for this offer (the library would not load, or
+a hand-back of its threads did not finish), each with the sentence; `429
 webrtc_busy` at the peer bound below; `400 webrtc_offer_invalid` for an offer the engine could not
 use. None demotes the session the request arrived on.
 
@@ -2823,6 +2868,25 @@ and a remote-browser view (§14) needs more than 7.5 MB/s. Its cost is that it i
 - **It is loaded lazily and fails soft.** A host where the addon will not load starts normally,
   `--check` says the engine is unavailable and why, and devices reach the daemon directly or through
   the relay as before.
+- **It runs only while a peer needs it.** The serving daemon asks the engine nothing at boot: the
+  first offer loads the library and starts its threads, and once the last peer has ended and no offer
+  has arrived for 30 s (`WEBRTC_ENGINE_LINGER_MS`) the carrier hands it back and the library stops
+  them (its `cleanup`). That is the difference between one thread per core plus two SCTP threads for
+  the life of every daemon (33 + 2 on a 32-core host, measured) and none on a daemon no phone is using;
+  it also takes the library load off the boot (0.4 s on a Mac). A start costs the first offer about
+  20 ms on Linux (answered in 24 ms p50 against 6 ms with the engine already running, measured by
+  `scripts/local/bench-daemon-shutdown.ts --peer`), plus the library load on a Mac — and the
+  browser's 8-second deadline is counted from the answer, so none of it is spent from that budget.
+  The hand-back runs only when no peer the engine made is open, because the library's cleanup closes
+  every peer it holds; it blocks the daemon's thread while the library's threads join (2–8 ms
+  measured), bounded by the library at 10 s. A cleanup that hit that bound is still running on the
+  library's own thread holding the lock every new peer takes, so the engine is then marked broken
+  and every later offer is refused `webrtc_unavailable` until a restart, rather than letting the next
+  peer block the daemon for good. A stopping daemon closes its peers and does NOT hand the engine
+  back: the threads end with the process, and the one call that waits on the library has nothing to
+  give a stop. Proved by `packages/daemon/tests/integration/runtime/shutdown-time.test.ts` (a real
+  `fyd`: no library thread before an offer, a clean SIGTERM within 5 s idle and with a phone connected)
+  and the engine's own suite (the threads gone after a release, a second answer starting them again).
 - **Licence.** node-datachannel and libdatachannel are MPL-2.0: file-level copyleft that permits
   distributing them, unmodified, inside a differently licensed binary. Their source is public.
 

@@ -13,6 +13,12 @@
  * the network, and it never leaves the machine. Loading the library proves only that a file was
  * found; a channel that echoes proves the carrier could work.
  *
+ * THE PROOF IS `fyd --check`'s, AND NOT THE BOOT'S. A self-test starts the engine, and a started engine
+ * keeps its threads (see {@link WebRtcPeerEngine}); a serving daemon that proved it at boot paid a
+ * library load on its startup path and 35 threads for its whole life to learn something only an offer
+ * needs. So the serving daemon starts the engine on the first offer, and an engine that will not start
+ * then is the same `webrtc_unavailable` answer the boot used to give.
+ *
  * AN ENGINE THAT IS UNAVAILABLE IS AN ANSWER, NOT A FAILURE. Every carrier above WebRTC falls back to
  * the relay when WebRTC cannot be had, so a daemon without one starts perfectly and is reachable
  * exactly as it was before WebRTC existed. The report therefore never throws and never refuses a
@@ -53,6 +59,10 @@ export function describeWebRtcEngine(report: WebRtcEngineReport): string {
   return `engine unavailable — ${report.reason}; devices reach this daemon directly or through the relay instead`;
 }
 
+/** What the boot trail says after `webrtc` for a carrier that is switched on: nothing was started. */
+export const WEBRTC_ENGINE_ON_DEMAND =
+  'engine starts on the first peer-to-peer offer and stops once no peer needs it; `fyd --check` proves it on this machine';
+
 /**
  * One data channel, as the carrier sees it: frames in, frames out, and an end.
  *
@@ -89,11 +99,32 @@ export interface WebRtcAnswer {
 /** The engine could not use an offer: it did not parse, or it described nothing this side can answer. */
 export class WebRtcOfferRefused extends Error {}
 
-/** The engine, as the carrier drives it. */
+/**
+ * The engine could not be had when an offer asked for it: the library would not load, or it stopped in a
+ * state no further peer could be built on. The carrier answers it as `webrtc_unavailable`, with this
+ * sentence, exactly as it once answered a failed boot self-test.
+ */
+export class WebRtcEngineUnavailable extends Error {}
+
+/**
+ * The engine, as the carrier drives it.
+ *
+ * IT IS STARTED BY THE FIRST OFFER AND STOPPED WHEN NOTHING USES IT. A native WebRTC stack is not free to
+ * hold: libdatachannel starts one worker thread per core and two SCTP threads for its first peer and keeps
+ * them for the life of the process, which on a 32-core host was 35 idle threads in a daemon no phone had
+ * dialled. So nothing starts it at boot — the boot asks it nothing at all — and the carrier hands it back
+ * through {@link release} once no peer has needed it for a while, so a daemon between phones holds none.
+ */
 export interface WebRtcPeerEngine {
   /**
    * Answer one offer, non-trickle: the answer carries every candidate gathered within §16's bounds.
-   * Throws {@link WebRtcOfferRefused} for an offer the engine cannot use.
+   * Starts the engine when it is not started. Throws {@link WebRtcOfferRefused} for an offer the engine
+   * cannot use, and {@link WebRtcEngineUnavailable} when there is no engine to answer with.
    */
   answer(offerSdp: string, iceServers: readonly string[]): Promise<WebRtcAnswer>;
+  /**
+   * No peer needs the engine now: stop what it runs while idle, until the next {@link answer} starts it
+   * again. Does nothing while any peer it made is still open, so a late call can never cut one off.
+   */
+  release(): void;
 }

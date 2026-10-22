@@ -17,6 +17,7 @@ import {
   SOCKET_MAX_FRAME_BYTES,
   type SocketAttachment,
   type SocketDownstream,
+  type SocketEnded,
   type SocketFrame,
   type SocketHandler,
 } from '../../lib/api/index.ts';
@@ -54,7 +55,8 @@ export interface HostSocket {
 export interface HostSocketHandlers {
   open(socket: HostSocket): void;
   message(socket: HostSocket, frame: string | Uint8Array): void;
-  close(socket: HostSocket): void;
+  /** `code` and `reason` are what the runtime reports: the peer's close frame, or `1006` when none came. */
+  close(socket: HostSocket, code?: number, reason?: string): void;
 }
 
 /**
@@ -115,7 +117,7 @@ export class BunHttpServe implements HttpServePort {
         perMessageDeflate: false,
         open: socket => options.websocket.open(socket),
         message: (socket, frame) => options.websocket.message(socket, frame),
-        close: socket => options.websocket.close(socket),
+        close: (socket, code, reason) => options.websocket.close(socket, code, reason),
       },
     });
     return {
@@ -195,7 +197,8 @@ export class BunApiServer implements ApiServerPort {
       websocket: {
         open: socket => sockets.opened(socket),
         message: (socket, frame) => sockets.received(socket, frame),
-        close: socket => sockets.ended(socket),
+        close: (socket, code, reason) =>
+          sockets.ended(socket, code === undefined ? undefined : { code, reason: reason ?? '' }),
       },
     });
     // Bun's declared types make these optional for the unix-socket case; a TCP `serve` always
@@ -377,10 +380,10 @@ class HostSocketRegistry {
     state.pending.push(typeof frame === 'string' ? frame : frame.slice());
   }
 
-  /** The peer, or the runtime, ended this socket. */
-  ended(socket: HostSocket): void {
+  /** The peer, or the runtime, ended this socket — with the close it reported, when it reported one. */
+  ended(socket: HostSocket, ended?: SocketEnded): void {
     this.live.delete(socket);
-    finish(socket);
+    finish(socket, ended);
   }
 
   /** Ends every socket still attached, telling each handler to release what it holds first. */
@@ -415,12 +418,12 @@ class HostSocketRegistry {
 
 /** Ends the handler behind one socket. Idempotent, because `close` arrives once from the peer and
  *  once from daemon shutdown and a handler must not be told twice. */
-function finish(socket: HostSocket): void {
+function finish(socket: HostSocket, ended?: SocketEnded): void {
   const state = socket.data;
   if (state.closed) return;
   state.closed = true;
   state.pending.length = 0;
-  state.handler?.close();
+  state.handler?.close(ended);
 }
 
 /**

@@ -111,7 +111,7 @@ import { useAskWardenActions } from './features/warden/ask-warden.tsx';
 import { WardenOverviewSurface } from './features/warden/warden-overview-surface.tsx';
 import { useAccountPickerSlice } from './hooks/use-account-picker.ts';
 import { useActiveCarrier, useDeviceRefused } from './hooks/use-active-carrier.ts';
-import { useCarrierPreferences, useTunnelService } from './hooks/use-carrier-preferences.ts';
+import { useCarrierPreferences, useTunnelService, useTunnelSwitches } from './hooks/use-carrier-preferences.ts';
 import { useAppViewport } from './hooks/use-app-viewport.ts';
 import { useAttentionSession, useAttentionSnapshot } from './hooks/use-attention.ts';
 import { useConfigChangeFeed } from './hooks/use-config-change-feed.ts';
@@ -151,6 +151,7 @@ import type { DaemonConnectionRecord } from './lib/connections.ts';
 import { type DaemonConnection, type DaemonId, daemonCarriers } from './lib/daemon-connection.ts';
 import { DEFAULT_CARRIER_PREFERENCE } from './lib/carrier-preference.ts';
 import { tunnelNote } from './lib/tunnel-service.ts';
+import { tunnelSwitchOffer } from './features/carrier/carrier-preference-selector.tsx';
 import { daemonSessionKey, daemonSessionScope } from './lib/daemon-scope.ts';
 import { projectKeyFor } from './lib/fleet-grouping.ts';
 import { installBanner } from './lib/install-prompt.ts';
@@ -1547,6 +1548,8 @@ function SettingsRoute({ connection }: DaemonPageProps) {
    */
   const carrierPreferences = useCarrierPreferences(store.carrierPreferences);
   const tunnelService = useTunnelService(store.tunnelService);
+  // Each machine's own word on its tunnel switch (§15): tunnels are opt-in, so a selector offers one.
+  const tunnelSwitches = useTunnelSwitches(store.tunnelSwitch, connectionSnapshot.connections);
   const preferenceAvailability = useCallback(
     (daemon: DaemonConnection) => ({
       webrtc: store.webrtcAvailable,
@@ -1554,8 +1557,12 @@ function SettingsRoute({ connection }: DaemonPageProps) {
         daemonCarriers(daemon).some(method => method.kind === 'tunnel'),
         tunnelService,
       ),
+      tunnel: tunnelSwitchOffer(
+        tunnelSwitches[daemon.daemonId],
+        async () => await store.tunnelSwitch.set(daemon, true),
+      ),
     }),
-    [store.webrtcAvailable, tunnelService],
+    [store.webrtcAvailable, store.tunnelSwitch, tunnelService, tunnelSwitches],
   );
   // One identity per machine, so the Connection panel's poll restarts only when the machine changes.
   const measureCarrierRtt = useCallback(
@@ -1640,7 +1647,7 @@ function SettingsRoute({ connection }: DaemonPageProps) {
         ),
       },
       // Diagnostics beside the doctor: what this machine and this app spend their time on.
-      performanceSettingsTab(createDaemonClient, store.performance),
+      performanceSettingsTab(createDaemonClient, store.performance, store.carrierDrops),
       pricingSettingsTab(createDaemonClient),
       // Optional provider keys sit with the machine's other spend: pricing, then the keys that spend.
       speedupsSettingsTab(createDaemonClient),
@@ -1654,7 +1661,7 @@ function SettingsRoute({ connection }: DaemonPageProps) {
       // The agent CLIs its ferrets run, whether Ferretry verified them, and updating them (docs/updating.md).
       agentClisSettingsTab(createDaemonClient),
     ],
-    [createDaemonClient, store.clients, store.performance],
+    [createDaemonClient, store.clients, store.performance, store.carrierDrops],
   );
   // This device's copy of every machine's sessions and messages, and where each page was scrolled.
   const clearCachedData = useCallback(async (): Promise<void> => {
