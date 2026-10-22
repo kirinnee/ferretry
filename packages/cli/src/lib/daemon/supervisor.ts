@@ -10,6 +10,7 @@ import type {
   IStateHomeClaimPort,
   StopRequest,
 } from './ports.ts';
+import { DAEMON_RUNTIME_TUNING } from './runtime-tuning.ts';
 import { parseLaunchdPrint, parseSystemdProperties, readLaunchdReport, readSystemdReport } from './probe.ts';
 import {
   launchAgentProcessType,
@@ -175,6 +176,7 @@ export class SystemdSupervisor implements IServiceDefinitionSupervisor {
         logFile: this.layout.logFile,
         searchPath: this.layout.searchPath,
         locale: this.layout.locale,
+        runtime: DAEMON_RUNTIME_TUNING,
         description: description(this.layout.daemonName),
       }),
     );
@@ -289,6 +291,7 @@ export class LaunchdSupervisor implements IServiceDefinitionSupervisor {
         logFile: this.layout.logFile,
         searchPath: this.layout.searchPath,
         locale: this.layout.locale,
+        runtime: DAEMON_RUNTIME_TUNING,
         description: description(this.layout.daemonName),
       }),
     );
@@ -380,6 +383,7 @@ export class DirectSupervisor implements IDaemonSupervisor {
         HOME: this.layout.homeDirectory,
         PATH: this.layout.searchPath,
         ...this.layout.locale,
+        ...DAEMON_RUNTIME_TUNING,
       },
       logFile: this.layout.logFile,
     });

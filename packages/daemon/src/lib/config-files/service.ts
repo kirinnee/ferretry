@@ -2,14 +2,23 @@
  * This daemon's configuration files (docs/config-files.md): read, watched, put into effect file by file
  * with the last good version winning, and written by every editor through one door.
  *
- * ## One evaluation, three readers
+ * ## One evaluation, many readers
  *
- * Every reader — the fleet catalogue, the agent-control switches, the Warden, Learning, Voice — reads
- * {@link ConfigFilesService.load}, which scans the directory and evaluates it (`@ferretry/fleet`'s
- * `evaluateConfigFiles`): a broken file is reported and its last good version stays in effect, and an
- * edit that loosens spend or authority waits for the owner. The watcher only makes that happen
- * sooner: it loads on a change nobody has read yet, so a broken file is reported in the daemon log the
- * moment it is saved, not the next time something happens to read it.
+ * A load scans the directory and evaluates it (`@ferretry/fleet`'s `evaluateConfigFiles`): a broken
+ * file is reported and its last good version stays in effect, and an edit that loosens spend or
+ * authority waits for the owner.
+ *
+ * Every reader on a timer — the fleet catalogue, the provider presets and model catalogs, the Warden,
+ * Learning — reads {@link ConfigFilesService.inEffect}, which answers the LAST load and loads only
+ * when nothing has yet or the tree has reported a change. It used to load on every read: each one listed
+ * the whole tree, read and checked
+ * every file and evaluated them again, several times a second on a busy machine, for a directory that
+ * changes when a person saves a file. What moves the configuration is a short list, and each of them
+ * loads: the watcher on a change it sees (file events, with a slow backstop for one the platform lost),
+ * this daemon's own writes and confirmations, and the first read. A file event marks the last load
+ * stale at once, before the watcher's debounce, so the next reader loads; concurrent readers join one
+ * load. A decision about authority — an agent-control switch, Pack mode's limits — still calls
+ * {@link ConfigFilesService.load}, because "in effect the moment it is saved" cannot wait for an event.
  *
  * ## The accepted record
  *
@@ -153,6 +162,10 @@ export class ConfigFilesService {
   /** The last snapshot a LOAD made — never the empty stand-in `current` answers before one — so a
    *  change is always judged against something that was actually read. */
   #loaded: ConfigSnapshot | undefined;
+  /** The load the readers are waiting on, so they share one instead of queueing one each. */
+  #reloading: Promise<ConfigSnapshot> | undefined;
+  /** Whether the tree reported a change after the last load began. */
+  #changed = false;
   /** What the log has already been told, so a broken file is reported once, not on every read. */
   #reported = new Set<string>();
   /**
@@ -172,9 +185,31 @@ export class ConfigFilesService {
     return run;
   }
 
-  /** Scan, evaluate, remember. The way every reader gets the configuration in effect. */
+  /**
+   * Scan, evaluate, remember: what the watcher runs on a change, and what a caller about to edit a file
+   * reads so it starts from the bytes on disk. A reader that only wants the configuration in effect
+   * reads {@link inEffect}.
+   */
   async load(): Promise<ConfigSnapshot> {
     return await this.#serial(async () => await this.#load());
+  }
+
+  /**
+   * The configuration in effect: the last load's, without touching the directory. Loads first only
+   * when nothing has loaded yet or the tree has reported a change since ({@link invalidate}), and
+   * every reader that arrives meanwhile waits on that one load.
+   */
+  async inEffect(): Promise<ConfigSnapshot> {
+    if (this.#loaded !== undefined && !this.#changed) return this.#loaded;
+    this.#reloading ??= this.load().finally(() => {
+      this.#reloading = undefined;
+    });
+    return await this.#reloading;
+  }
+
+  /** The tree may have changed: the next {@link inEffect} loads rather than answering the last load. */
+  invalidate(): void {
+    this.#changed = true;
   }
 
   /**
@@ -193,6 +228,8 @@ export class ConfigFilesService {
   }
 
   async #load(): Promise<ConfigSnapshot> {
+    // Cleared BEFORE the scan, so a change reported while it runs makes the next reader load again.
+    this.#changed = false;
     const { files, unreadable } = await this.deps.directory.list();
     const stored = await this.deps.accepted.read();
     const accepted = { ...stored };

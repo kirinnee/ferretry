@@ -65,15 +65,17 @@ async function present(path: string): Promise<boolean> {
  * The configuration in effect, as the catalogue reads it: the account model the files hold — each at
  * its last good version — and the writes that would move them to another model. Throws
  * `RetiredFleetConfigError` while a retired `fleet/config.yaml` is still there: it is refused rather
- * than converted, and left exactly as it is.
+ * than converted, and left exactly as it is. `fresh` loads the directory first instead of answering
+ * the last load.
  */
 export async function readConfigAccountDocument(
-  config: Pick<ConfigFilesService, 'load'>,
+  config: Pick<ConfigFilesService, 'inEffect' | 'load'>,
   locations: ConfigAccountLocations,
+  fresh = false,
 ): Promise<AccountDocumentReading> {
   const retired = join(locations.fleetDirectory, RETIRED_FLEET_CONFIG_FILE);
   if (await present(retired)) throw new RetiredFleetConfigError(retired);
-  const { evaluation, files } = await config.load();
+  const { evaluation, files } = fresh ? await config.load() : await config.inEffect();
   const model = evaluation.effective.model;
   return {
     format: evaluation.fleetFiles === 0 ? 'none' : 'version-2',
@@ -90,12 +92,18 @@ export async function readConfigAccountDocument(
   };
 }
 
-/** The account model this machine declares, or `undefined` for a machine with no fleet files yet. */
+/**
+ * The account model this machine declares, or `undefined` for a machine with no fleet files yet.
+ * `fresh` (the default) loads the directory first — what a decision about authority needs, such as an
+ * agent-control switch that must be in effect the moment it is saved; `false` answers the last load,
+ * for a reader that runs on a timer.
+ */
 export async function readDeclaredAccountModel(
-  config: Pick<ConfigFilesService, 'load'>,
+  config: Pick<ConfigFilesService, 'inEffect' | 'load'>,
   locations: ConfigAccountLocations,
+  fresh = true,
 ): Promise<AccountModel | undefined> {
-  const reading = await readConfigAccountDocument(config, locations);
+  const reading = await readConfigAccountDocument(config, locations, fresh);
   return reading.format === 'none' ? undefined : reading.model;
 }
 
@@ -133,7 +141,7 @@ export interface FileFleetCatalogOptions {
   /** What a person types to run this binary: the wrapper's history claim and statusLine run it. */
   readonly clientName: string;
   /** The configuration files: read for the model in effect, and told about every file a change writes. */
-  readonly config: Pick<ConfigFilesService, 'load' | 'acknowledge'>;
+  readonly config: Pick<ConfigFilesService, 'inEffect' | 'load' | 'acknowledge'>;
   /** `<FY_HOME>/config`. */
   readonly configDirectory: string;
 }
@@ -143,20 +151,28 @@ export interface FileFleetCatalogOptions {
  * reviewed exactly that text, so it is in effect as soon as it lands rather than held as an edit
  * nobody confirmed. Acknowledging a text that a refused apply then never writes is harmless — it is
  * accepted only if those exact bytes appear.
+ *
+ * The configuration is loaded again once an apply that wrote configuration files returns, because
+ * readers answer from the last load: the catalogue reads the model straight after its own change, and
+ * must find the files it just wrote rather than wait for the watcher to settle on them.
  */
 function acknowledgingProvisioner(
   inner: FleetCatalogServiceDeps['provisioner'],
-  config: Pick<ConfigFilesService, 'acknowledge'>,
+  config: Pick<ConfigFilesService, 'acknowledge' | 'load'>,
   configDirectory: string,
 ): FleetCatalogServiceDeps['provisioner'] {
   return {
     preview: async plan => await inner.preview(plan),
     apply: async (plan, documents = []) => {
-      for (const document of documents) {
-        const path = relative(configDirectory, document.path);
-        if (document.remove !== true && !path.startsWith('..')) config.acknowledge(path, document.content);
+      const configFiles = documents.filter(document => !relative(configDirectory, document.path).startsWith('..'));
+      for (const document of configFiles) {
+        if (document.remove !== true) config.acknowledge(relative(configDirectory, document.path), document.content);
       }
-      return await inner.apply(plan, documents);
+      try {
+        return await inner.apply(plan, documents);
+      } finally {
+        if (configFiles.length > 0) await config.load();
+      }
     },
   };
 }
@@ -203,11 +219,12 @@ export function fileFleetCatalogDeps(options: FileFleetCatalogOptions): FleetCat
     return parseRuntimeIds(JSON.parse(text));
   };
   return {
-    document: async () =>
-      await readConfigAccountDocument(options.config, {
-        configDirectory: options.configDirectory,
-        fleetDirectory: paths.fleet,
-      }),
+    document: async fresh =>
+      await readConfigAccountDocument(
+        options.config,
+        { configDirectory: options.configDirectory, fleetDirectory: paths.fleet },
+        fresh,
+      ),
     readAsset: readComponentText,
     documentRevision,
     ids,

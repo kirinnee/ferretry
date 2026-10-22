@@ -39,6 +39,24 @@ function launchd(script: CommandScript = []): {
   return { supervisor: new LaunchdSupervisor(mac, processes, files, claims), processes, files, claims };
 }
 
+describe('the engine options every launch path hands the daemon', () => {
+  it('should write the stack sampler period into the systemd unit and the launchd plist alike', async () => {
+    // Arrange — JavaScriptCore reads it once at VM start, so the definition is the only place it works.
+    const linuxHost = systemd();
+    const macHost = launchd();
+
+    // Act
+    await linuxHost.supervisor.install(daemonBinary.path);
+    await macHost.supervisor.install(daemonBinary.path);
+
+    // Assert
+    should(linuxHost.files.written.get(linux.systemdUnitFile)).containEql('Environment="BUN_JSC_sampleInterval=10000"');
+    should(macHost.files.written.get(mac.launchAgentFile)).containEql(
+      '<key>BUN_JSC_sampleInterval</key><string>10000</string>',
+    );
+  });
+});
+
 describe('systemd supervisor install', () => {
   it('should write the unit, then reload, enable and restart in that order', async () => {
     // Arrange
@@ -497,7 +515,7 @@ describe('direct supervisor', () => {
     await should(supervisor.uninstall()).be.rejectedWith(/systemd user services on Linux/u);
   });
 
-  it('should launch the daemon detached with only FY_HOME, HOME, PATH and a UTF-8 locale in its environment', async () => {
+  it('should launch the daemon detached with only FY_HOME, HOME, PATH, a UTF-8 locale and its engine options', async () => {
     // Arrange
     const { supervisor, processes, files } = direct();
 
@@ -514,6 +532,7 @@ describe('direct supervisor', () => {
       HOME: linux.homeDirectory,
       PATH: linux.searchPath,
       LANG: 'C.UTF-8',
+      BUN_JSC_sampleInterval: '10000',
     });
     should(processes.launched[0]?.logFile).equal(linux.logFile);
     should(actual.pid).equal(9001);

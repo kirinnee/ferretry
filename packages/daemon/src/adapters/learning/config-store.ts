@@ -17,7 +17,7 @@ const LESSONS_COMPONENT_FILE: ConfigFileAddress = {
  * the owner's comments survive.
  */
 export class ConfigFileLearningSettings {
-  constructor(private readonly config: Pick<ConfigFilesService, 'load' | 'writeOwn'>) {}
+  constructor(private readonly config: Pick<ConfigFilesService, 'inEffect' | 'load' | 'writeOwn'>) {}
 
   /** The learning settings in effect, after writing `passiveDefault` when it changes. */
   async writePassiveDefault(passiveDefault: boolean): Promise<LearningConfig> {
@@ -32,7 +32,7 @@ export class ConfigFileLearningSettings {
 
   /** The account model in effect. */
   async model(): Promise<AccountModel> {
-    return (await this.config.load()).evaluation.effective.model;
+    return (await this.config.inEffect()).evaluation.effective.model;
   }
 
   /** Writes `components/instructions/lessons.yaml` pointing at `file`. */

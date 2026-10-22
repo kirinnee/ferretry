@@ -127,6 +127,7 @@ describe('the warden settings file', () => {
     const home = await configHome(await tempDirectory(label));
     const writes: string[] = [];
     const store = new ConfigFileWardenConfigStore({
+      inEffect: async () => await home.service.inEffect(),
       load: async () => await home.service.load(),
       writeOwn: async (file, text) => {
         writes.push(file);

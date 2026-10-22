@@ -198,6 +198,8 @@ export interface ServiceDefinitionSpec {
    * multiplexer every session runs in rewrites tabs and unicode as `_`.
    */
   readonly locale: Readonly<Record<string, string>>;
+  /** Engine options read once at VM start; see `DAEMON_RUNTIME_TUNING`. */
+  readonly runtime: Readonly<Record<string, string>>;
   /** Human description for the unit header. */
   readonly description: string;
 }
@@ -215,7 +217,7 @@ function systemdEnvironment(variables: Readonly<Record<string, string>>): string
 
 function plistEnvironment(variables: Readonly<Record<string, string>>): string {
   return sortedEntries(variables)
-    .map(([name, value]) => `<key>${xmlText(name, 'a locale name')}</key><string>${xmlText(value, name)}</string>`)
+    .map(([name, value]) => `<key>${xmlText(name, 'a variable name')}</key><string>${xmlText(value, name)}</string>`)
     .join('');
 }
 
@@ -242,7 +244,7 @@ KillMode=process
 Environment=${systemdQuote(`FY_HOME=${spec.stateHome}`)}
 Environment=${systemdQuote(`HOME=${spec.userHome}`)}
 Environment=${systemdQuote(`PATH=${spec.searchPath}`)}
-${systemdEnvironment(spec.locale)}StandardOutput=append:${logSpecifier}
+${systemdEnvironment(spec.locale)}${systemdEnvironment(spec.runtime)}StandardOutput=append:${logSpecifier}
 StandardError=append:${logSpecifier}
 
 [Install]
@@ -279,7 +281,7 @@ export function renderLaunchAgentPlist(spec: LaunchAgentSpec): string {
 <key>ProcessType</key><string>${LAUNCHD_PROCESS_TYPE}</string>
 <key>StandardOutPath</key><string>${log}</string>
 <key>StandardErrorPath</key><string>${log}</string>
-<key>EnvironmentVariables</key><dict><key>FY_HOME</key><string>${xmlText(spec.stateHome, 'the state home')}</string><key>HOME</key><string>${xmlText(spec.userHome, 'the user home')}</string><key>PATH</key><string>${xmlText(spec.searchPath, 'PATH')}</string>${plistEnvironment(spec.locale)}</dict>
+<key>EnvironmentVariables</key><dict><key>FY_HOME</key><string>${xmlText(spec.stateHome, 'the state home')}</string><key>HOME</key><string>${xmlText(spec.userHome, 'the user home')}</string><key>PATH</key><string>${xmlText(spec.searchPath, 'PATH')}</string>${plistEnvironment(spec.locale)}${plistEnvironment(spec.runtime)}</dict>
 </dict></plist>
 `;
 }

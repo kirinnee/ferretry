@@ -112,11 +112,38 @@ export class WebCryptoSecretCipher implements SecretCipherPort {
     return { iv: encode(iv), ciphertext: encode(new Uint8Array(sealed)) };
   }
 
-  async open(name: SecretName, sealed: { readonly iv: string; readonly ciphertext: string }): Promise<string> {
+  /**
+   * The key is read and imported once for the whole vault rather than once per entry. It lives only as
+   * long as this call, exactly as it did per entry: nothing here outlives the open.
+   */
+  async openAll(
+    entries: Readonly<Record<SecretName, { readonly iv: string; readonly ciphertext: string }>>,
+  ): Promise<ReadonlyMap<SecretName, string>> {
+    const opened = new Map<SecretName, string>();
+    const names = Object.keys(entries);
+    const first = names[0];
+    if (first === undefined) return opened;
+    const key = await this.#key(first);
+    for (const name of names) {
+      const sealed = entries[name];
+      if (sealed !== undefined) opened.set(name, await this.#openWith(key, name, sealed));
+    }
+    return opened;
+  }
+
+  /** The key, imported; `name` is only what the refusal names when the key file is gone. */
+  async #key(name: SecretName): Promise<CryptoKey> {
     const material = await this.keys.read();
     if (material === undefined)
       throw new SecretStoreError('key_missing', `the vault key is gone, so ${name} cannot be opened`);
-    const key = await this.importKey(material);
+    return await this.importKey(material);
+  }
+
+  async #openWith(
+    key: CryptoKey,
+    name: SecretName,
+    sealed: { readonly iv: string; readonly ciphertext: string },
+  ): Promise<string> {
     try {
       const opened = await crypto.subtle.decrypt(
         {

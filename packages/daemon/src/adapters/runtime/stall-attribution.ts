@@ -48,9 +48,11 @@ interface JscProfiler {
  *
  * THE PROFILER SAMPLES FROM ITS OWN THREAD, which is the whole reason it can see a stall: the event
  * loop cannot look at itself while it is the thing that is stuck, and a timer on it only learns, late,
- * THAT it was stuck. It samples about once a millisecond and only while JavaScript runs, so an idle
- * daemon pays nothing and a busy one a few percent. The meter drains it every tick, which keeps what it
- * holds to one tick's worth.
+ * THAT it was stuck. It samples only while JavaScript runs, at the period `BUN_JSC_sampleInterval` sets
+ * when the VM starts — every 10 ms under the service definitions `fy` writes, every millisecond
+ * otherwise — so an idle daemon pays nothing. Handing samples back costs JavaScriptCore about 13 µs
+ * each whatever is done with them, which is why the period matters more than anything here. The meter
+ * empties it every tick, which keeps what it holds to one tick's worth.
  *
  * `bun:jsc` is loaded lazily, so a runtime without it is a daemon without stacks rather than one that
  * cannot start.
@@ -81,6 +83,11 @@ export class JscStackSampler implements StackSamplerPort {
 
   drain(): readonly StackSample[] {
     return jscSamples(this.#profiler.samplingProfilerStackTraces());
+  }
+
+  /** JavaScriptCore has no cheaper way to forget its samples than handing them over, so they are dropped unread. */
+  discard(): void {
+    this.#profiler.samplingProfilerStackTraces();
   }
 }
 

@@ -130,9 +130,6 @@ export class SecretVault {
   async values(): Promise<ReadonlyMap<SecretName, string>> {
     const stored = await this.store.read();
     if (stored === undefined) return new Map();
-    const document = requireCipherMatch(stored, this.cipher.algorithm);
-    const opened = new Map<SecretName, string>();
-    for (const [name, entry] of Object.entries(document.entries)) opened.set(name, await this.cipher.open(name, entry));
-    return opened;
+    return await this.cipher.openAll(requireCipherMatch(stored, this.cipher.algorithm).entries);
   }
 }

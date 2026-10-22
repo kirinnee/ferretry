@@ -91,8 +91,15 @@ export interface SecretCipherPort {
   /** Names the algorithm for the document, so what sealed an entry is recorded beside it. */
   readonly algorithm: string;
   seal(name: SecretName, plaintext: string): Promise<{ readonly iv: string; readonly ciphertext: string }>;
-  /** Raises `SecretStoreError('undecipherable')` when the key does not open it. */
-  open(name: SecretName, sealed: { readonly iv: string; readonly ciphertext: string }): Promise<string>;
+  /**
+   * Every entry opened under ONE read of the key. Raises `SecretStoreError('undecipherable')` for the
+   * first entry the key does not open, and `'key_missing'` when there is no key.
+   * Opening a vault entry by entry read the key file once per entry, and the vault is opened on every
+   * masking of text the daemon serves — several times a second on a busy machine.
+   */
+  openAll(
+    entries: Readonly<Record<SecretName, { readonly iv: string; readonly ciphertext: string }>>,
+  ): Promise<ReadonlyMap<SecretName, string>>;
 }
 
 /**
