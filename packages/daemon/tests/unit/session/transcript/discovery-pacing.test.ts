@@ -236,4 +236,119 @@ describe('CodexDiscoveryPacer', () => {
     should(failure).be.instanceOf(Error);
     should(probe.runs).equal(0);
   });
+
+  describe('anchored to the session start', () => {
+    it('should look once and then pace a session that started long before the daemon looked', async () => {
+      // Arrange: a daemon restart finds a session that has been undiscovered for hours.
+      const clock = manualClock();
+      const subject = new CodexDiscoveryPacer(clock);
+      const probe = nothing();
+      const startedAt = async () => '2026-10-20T06:00:00.000Z';
+
+      // Act: a read every two seconds for the first minute after boot.
+      for (let read = 0; read < 30; read += 1) {
+        await subject.pace('session-1', undiscovered, undefined, probe.discover, startedAt);
+        clock.advance(2_000);
+      }
+
+      // Assert: the first read, then once 30 s later — no eager window re-opened by the restart.
+      should(probe.runs).equal(2);
+    });
+
+    it('should stay eager until two minutes after a recent start, not after the first look', async () => {
+      // Arrange: the session started 100 s before the daemon first looked.
+      const clock = manualClock();
+      const subject = new CodexDiscoveryPacer(clock);
+      const probe = nothing();
+      const startedAt = async () => new Date(START - 100_000).toISOString();
+
+      // Act: fifteen reads two seconds apart, crossing the 120 s mark after the start.
+      for (let read = 0; read < 15; read += 1) {
+        await subject.pace('session-1', undiscovered, undefined, probe.discover, startedAt);
+        clock.advance(2_000);
+      }
+
+      // Assert: reads at 100…118 s after the start are eager (10); 120…128 s are paced (none due).
+      should(probe.runs).equal(10);
+    });
+
+    it('should read the start once per pace, not on every read', async () => {
+      // Arrange
+      const clock = manualClock();
+      const subject = new CodexDiscoveryPacer(clock);
+      let asked = 0;
+      const startedAt = async () => {
+        asked += 1;
+        return '2026-10-20T06:00:00.000Z';
+      };
+
+      // Act
+      for (let read = 0; read < 5; read += 1) {
+        await subject.pace('session-1', undiscovered, undefined, nothing().discover, startedAt);
+        clock.advance(2_000);
+      }
+
+      // Assert
+      should(asked).equal(1);
+    });
+
+    it('should fall back to the first look when the start is unknown, unreadable or in the future', async () => {
+      // Arrange
+      const clock = manualClock();
+      const starts: Array<() => Promise<string | undefined>> = [
+        async () => undefined,
+        async () => {
+          throw new Error('the state could not be read');
+        },
+        async () => '2027-01-01T00:00:00.000Z',
+      ];
+
+      // Act
+      const runs: number[] = [];
+      for (const startedAt of starts) {
+        const subject = new CodexDiscoveryPacer(clock);
+        const probe = nothing();
+        for (let read = 0; read < 5; read += 1) {
+          await subject.pace('session-1', undiscovered, undefined, probe.discover, startedAt);
+          clock.advance(2_000);
+        }
+        runs.push(probe.runs);
+      }
+
+      // Assert: eager from the first look in every case.
+      should(runs).eql([5, 5, 5]);
+    });
+
+    it('should share a discovery that began while the start was being read', async () => {
+      // Arrange: one reader is still reading the start when another begins discovering.
+      const subject = new CodexDiscoveryPacer(manualClock());
+      let runs = 0;
+      let release: (value: string | undefined) => void = () => undefined;
+      const slowStart = () =>
+        new Promise<string | undefined>(resolve => {
+          release = resolve;
+        });
+      let finish: (value: TranscriptProvenance) => void = () => undefined;
+      const discover = () => {
+        runs += 1;
+        return new Promise<TranscriptProvenance>(resolve => {
+          finish = resolve;
+        });
+      };
+
+      // Act
+      const slow = subject.pace('session-1', undiscovered, undefined, discover, slowStart);
+      const quick = subject.pace('session-1', undiscovered, undefined, discover);
+      release(undefined);
+      // Every pending continuation runs before a timer, so the slow reader has resumed by now.
+      await new Promise(resolve => setTimeout(resolve, 0));
+      finish(resolved);
+      const [fast, late] = await Promise.all([quick, slow]);
+
+      // Assert: the slow reader was answered by the discovery the fast one ran.
+      should(fast).equal(resolved);
+      should(late).equal(resolved);
+      should(runs).equal(1);
+    });
+  });
 });

@@ -66,8 +66,14 @@ export class SessionTranscriptResolver {
    *
    * `undefined` means this session has no transcript the daemon can honestly name — never "look
    * again somewhere less certain".
+   *
+   * `startedAt` reads when the session started, for the pacer; it is asked only when a pace begins.
    */
-  async file(sessionId: string, provenance: TranscriptProvenance | undefined): Promise<string | undefined> {
+  async file(
+    sessionId: string,
+    provenance: TranscriptProvenance | undefined,
+    startedAt?: () => Promise<string | undefined>,
+  ): Promise<string | undefined> {
     if (provenance === undefined) return undefined;
     if (provenance.file !== undefined) return provenance.file;
     const resolve = async (): Promise<TranscriptProvenance | undefined> => {
@@ -83,6 +89,7 @@ export class SessionTranscriptResolver {
       provenance,
       changes === undefined ? undefined : () => changes(provenance.home),
       resolve,
+      startedAt,
     );
     return resolved?.file;
   }

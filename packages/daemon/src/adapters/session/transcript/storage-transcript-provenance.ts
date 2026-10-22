@@ -1,4 +1,4 @@
-import { type TranscriptProvenance, TranscriptProvenanceSchema } from '@ferretry/protocol';
+import { InstantSchema, type TranscriptProvenance, TranscriptProvenanceSchema } from '@ferretry/protocol';
 import { type SessionId, tryParseSessionId } from '../../../lib/index.ts';
 import type { TranscriptClaims, TranscriptProvenanceStore } from '../../../lib/session/transcript/index.ts';
 import type { DaemonStorage } from '../../storage/session-storage.ts';
@@ -21,6 +21,19 @@ function fields(document: unknown): Readonly<Record<string, unknown>> {
 export function storedTranscriptProvenance(config: unknown): TranscriptProvenance | undefined {
   const parsed = TranscriptProvenanceSchema.safeParse(fields(config).transcript);
   return parsed.success ? parsed.data : undefined;
+}
+
+/**
+ * When a session started, for pacing its rollout discovery: the state's `startedAt`, else the
+ * configuration's `createdAt` — the instant its provenance was captured. Parsed rather than trusted, and
+ * `undefined` when neither says.
+ */
+export function storedSessionStart(state: unknown, config: unknown): string | undefined {
+  for (const value of [fields(state).startedAt, fields(config).createdAt]) {
+    const parsed = InstantSchema.safeParse(value);
+    if (parsed.success) return parsed.data;
+  }
+  return undefined;
 }
 
 /** Merges a resolved record into the configuration without disturbing anything else in it. */

@@ -38,15 +38,18 @@ const PROFILE_SECONDS = 20;
  * - Lowered after #693 (document cache), #696 (tmux control mode), #697 (Codex discovery pacing) and
  *   #698 (file-event hub): CPU 15.5%, 0 child processes/min, 1,472 read/write system calls/s, longest
  *   block 5 ms, 9 state-port file operations/s.
+ * - Lowered after the Codex discovery window was anchored to each session's start
+ *   (perf/codex-eager-window): measured locally, CPU 6% and 135 read/write system calls/s; the CI
+ *   ceilings keep headroom over the CI figures above.
  *
  * Lower a number here in the PR that earns it; never raise one.
  */
 const CEILINGS: Readonly<Record<string, number>> = {
-  'daemon CPU': 30,
+  'daemon CPU': 25,
   'child processes': 30,
   'longest event-loop block': 100,
   'file operations through the daemon’s ports': 100,
-  'read/write system calls': 3_000,
+  'read/write system calls': 2_500,
 };
 
 /** The report's own ranking, cut to what names the code to fix. */
