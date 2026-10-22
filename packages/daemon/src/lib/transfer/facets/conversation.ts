@@ -52,15 +52,16 @@ function toOmission(omission: ConversationDigestOmission): TransferOmission {
   };
 }
 
-async function facetOf(digest: ConversationDigest, redactor: Pick<TextRedactor, 'redact'>): Promise<ConversationFacet> {
+async function facetOf(digest: ConversationDigest, redactor: Pick<TextRedactor, 'batch'>): Promise<ConversationFacet> {
   return {
-    messages: await Promise.all(
-      digest.messages.map(async message => ({
+    // One vault open for the whole conversation, not one per message.
+    messages: await redactor.batch(scrub =>
+      digest.messages.map(message => ({
         point: message.point,
         role: message.role,
         // The plan is the first durable copy that crosses a session boundary. Scrub here, before
         // the plan, receipt and rendered brief can disagree about the content that was carried.
-        text: await redactor.redact(message.text),
+        text: scrub.text(message.text),
         ...(message.timestamp === undefined ? {} : { timestamp: message.timestamp }),
       })),
     ),
@@ -72,7 +73,7 @@ export class ConversationFacetContributor implements TransferConversationContrib
 
   constructor(
     private readonly reader: TransferConversationReader,
-    private readonly redactor: Pick<TextRedactor, 'redact'>,
+    private readonly redactor: Pick<TextRedactor, 'batch'>,
   ) {}
 
   async contribute(input: TransferPrepareInput): Promise<TransferConversationContribution> {

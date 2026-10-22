@@ -3632,7 +3632,7 @@ interface WardenParts {
    */
   readonly reads: Pick<OperatorReadService, 'logs' | 'snapshot'>;
   /** The same redactor, for the strings of a Jev snapshot that are the Warden's own. */
-  readonly redactor: Pick<SecretRedactor, 'redact'>;
+  readonly redactor: Pick<SecretRedactor, 'batch'>;
   /** Jev behind the one outbound holder, built for the guard settings in effect. It holds no key. */
   readonly guard: (settings: WardenGuardConfig) => TriageGuardPort;
   /** What a verdict may do: the same send, resume, stop and migrate every other caller uses. */
@@ -6004,7 +6004,7 @@ interface ForkSubsystemParts {
   /** The one daemon-private codec shared with the operator message read surface. */
   readonly messageTokens: SessionTranscriptMessageTokenCodec;
   /** The same fail-closed redactor used by operator transcript reads. */
-  readonly redactor: Pick<SecretRedactor, 'redact'>;
+  readonly redactor: Pick<SecretRedactor, 'batch'>;
   readonly environment: Pick<FileSessionEnvironmentStore, 'read'>;
   /** The startup half only — the intermediate annotation must not erase it. */
   readonly runtime: SessionRuntimeStartupHeldPort;

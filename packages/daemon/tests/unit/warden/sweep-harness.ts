@@ -138,7 +138,7 @@ export function harness(
     readonly evidence?: (
       sessionId: string,
     ) => Promise<{ readonly recentTurns: readonly string[]; readonly paneTail?: string }>;
-    readonly redact?: (text: string) => Promise<string>;
+    readonly redact?: (text: string) => string;
     /** Make one remedy throw. */
     readonly remedyFails?: string;
     readonly cost?: (wardenId: string) => Promise<number | undefined>;
@@ -186,7 +186,7 @@ export function harness(
       evidence: async sessionId =>
         await (options.evidence?.(sessionId) ?? Promise.resolve({ recentTurns: ['turn one'], paneTail: 'screen' })),
     },
-    redactor: { redact: async text => await (options.redact?.(text) ?? Promise.resolve(text)) },
+    redactor: { batch: async work => work({ text: options.redact ?? (text => text) }) },
     remedies: {
       nudge: async (sessionId, message) => remedy('nudge', sessionId, message),
       resume: async sessionId => remedy('resume', sessionId, ''),

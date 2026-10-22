@@ -5,6 +5,7 @@ import {
   ConversationDigestError,
   type ConversationDigestFailure,
 } from '../../../src/lib/session/transcript/digest.ts';
+import { NO_REDACTION } from '../../../src/lib/secrets/redaction.ts';
 import { ConversationFacetContributor } from '../../../src/lib/transfer/facets/conversation.ts';
 import {
   type TransferConversationReadInput,
@@ -20,7 +21,7 @@ const point = (byteOffset: number, blockIndex = 0): ConversationMessagePoint => 
 });
 
 const rawPrefix = (fill: number): Uint8Array => new Uint8Array(32).fill(fill);
-const identityRedactor = { redact: async (text: string) => text };
+const identityRedactor = NO_REDACTION;
 
 const reader = (
   answer: (input: TransferConversationReadInput) => Promise<ConversationDigest | undefined>,
@@ -68,7 +69,8 @@ describe('ConversationFacetContributor', () => {
     const contributor = new ConversationFacetContributor(
       reader(async () => digest),
       {
-        redact: async text => text.replace('secret TOKEN', '[redacted:TOKEN]'),
+        batch: async work =>
+          work({ text: text => text.replace('secret TOKEN', '[redacted:TOKEN]'), data: value => value }),
       },
     );
 

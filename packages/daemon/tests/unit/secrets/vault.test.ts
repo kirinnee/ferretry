@@ -170,6 +170,109 @@ describe('the redactor', () => {
   it('should pass everything through when the daemon has no store wired', async () => {
     should(await NO_REDACTION.redact('untouched')).equal('untouched');
     should(await NO_REDACTION.redactData({ a: 1 })).deepEqual({ a: 1 });
+    should(await NO_REDACTION.batch(scrub => [scrub.text('untouched'), scrub.data({ a: 1 })])).deepEqual([
+      'untouched',
+      { a: 1 },
+    ]);
+  });
+});
+
+/** The memory store, counting how often the vault document is read — once per vault open. */
+class CountedDocuments extends MemorySecretDocuments {
+  reads = 0;
+
+  override async read(): Promise<SecretVaultDocument | undefined> {
+    this.reads += 1;
+    return await super.read();
+  }
+}
+
+describe('a batch of redactions', () => {
+  it('should open the vault ONCE for every string in the batch', async () => {
+    // Arrange
+    const documents = new CountedDocuments();
+    await directory(documents).put('TOKEN', TOKEN);
+    const redactor = new SecretRedactor(new SecretVault(documents, new FakeSecretCipher()));
+    const opensBefore = documents.reads;
+    const page = Array.from({ length: 50 }, (_, index) => `row ${index} ${TOKEN}`);
+
+    // Act
+    const scrubbed = await redactor.batch(scrub => [...page.map(text => scrub.text(text)), scrub.data({ a: TOKEN })]);
+
+    // Assert
+    should(documents.reads - opensBefore).equal(1);
+    should(scrubbed).have.length(51);
+    should(scrubbed[0]).equal('row 0 [redacted:TOKEN]');
+    should(scrubbed[49]).equal('row 49 [redacted:TOKEN]');
+    should(scrubbed[50]).deepEqual({ a: '[redacted:TOKEN]' });
+  });
+
+  it('should mask exactly what a redaction per string masks', async () => {
+    // Arrange — two values where one contains the other, so the longest-first order is observable.
+    const documents = new MemorySecretDocuments();
+    await directory(documents).put('TOKEN', TOKEN);
+    await directory(documents).put('SHORT', 'sk-live');
+    const redactor = new SecretRedactor(new SecretVault(documents, new FakeSecretCipher()));
+    const texts = [`a ${TOKEN} b sk-live c`, 'nothing here', ''];
+
+    // Act
+    const one = await Promise.all(texts.map(async text => await redactor.redact(text)));
+    const batched = await redactor.batch(scrub => texts.map(text => scrub.text(text)));
+
+    // Assert
+    should(batched).deepEqual(one);
+    should(batched[0]).equal('a [redacted:TOKEN] b [redacted:SHORT] c');
+  });
+
+  it('should revoke the scrub when the batch ends, so plaintext outlives no call', async () => {
+    // Arrange
+    const documents = new MemorySecretDocuments();
+    await directory(documents).put('TOKEN', TOKEN);
+    const redactor = new SecretRedactor(new SecretVault(documents, new FakeSecretCipher()));
+
+    // Act
+    const kept = await redactor.batch(scrub => scrub);
+
+    // Assert
+    should(() => kept.text(TOKEN)).throw(/after the batch that opened its values ended/u);
+    should(() => kept.data({ a: TOKEN })).throw(/after the batch that opened its values ended/u);
+  });
+
+  it('should refuse a scrub after an await inside the work, rather than mask with values let go', async () => {
+    // Arrange
+    const documents = new MemorySecretDocuments();
+    await directory(documents).put('TOKEN', TOKEN);
+    const redactor = new SecretRedactor(new SecretVault(documents, new FakeSecretCipher()));
+
+    // Act
+    const act = redactor.batch(async scrub => {
+      await Promise.resolve();
+      return scrub.text(TOKEN);
+    });
+
+    // Assert
+    await should(act).be.rejectedWith(/after the batch that opened its values ended/u);
+  });
+
+  it('should refuse before the work runs when the vault cannot be opened', async () => {
+    // Arrange
+    let ran = false;
+    const redactor = new SecretRedactor(
+      new SecretVault(
+        new MemorySecretDocuments(new SecretStoreError('undecipherable', 'wrong key')),
+        new FakeSecretCipher(),
+      ),
+    );
+
+    // Act
+    const act = redactor.batch(scrub => {
+      ran = true;
+      return scrub.text('anything');
+    });
+
+    // Assert
+    await should(act).be.rejectedWith(SecretStoreError);
+    should(ran).be.false();
   });
 });
 

@@ -386,7 +386,10 @@ describe('the snapshot Jev is shown', () => {
       recentTurns: ['used sk-1'],
       paneTail: 'export KEY=sk-1',
     });
-    const redactor = { redact: async (text: string) => text.replaceAll('sk-1', '[redacted:KEY]') };
+    const redactor = {
+      batch: async <T>(work: (scrub: { text(text: string): string }) => T) =>
+        work({ text: text => text.replaceAll('sk-1', '[redacted:KEY]') }),
+    };
 
     // Act
     const actual = await redactTriageSnapshot(snapshot, redactor);
@@ -400,7 +403,7 @@ describe('the snapshot Jev is shown', () => {
   it('should keep a snapshot with no screen without one', async () => {
     // Act
     const actual = await redactTriageSnapshot(triageSnapshotOf(anomaly(), { recentTurns: [] }), {
-      redact: async text => text,
+      batch: async work => work({ text: text => text }),
     });
 
     // Assert
@@ -410,7 +413,7 @@ describe('the snapshot Jev is shown', () => {
   it('should refuse to produce a snapshot it could not scrub', async () => {
     // Act
     const act = redactTriageSnapshot(triageSnapshotOf(anomaly(), { recentTurns: [] }), {
-      redact: async () => {
+      batch: async () => {
         throw new Error('the vault is damaged');
       },
     });

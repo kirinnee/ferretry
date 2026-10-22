@@ -496,7 +496,7 @@ describe('the session transcript route, read conditionally', () => {
     // Arrange
     const scrubbing: OperatorReadRedactor = {
       redact: async text => text.replaceAll('hunter2', '[redacted]'),
-      redactData: async value => value,
+      batch: async work => work({ text: text => text.replaceAll('hunter2', '[redacted]'), data: value => value }),
     };
     const scrubbed = await fixture({ tail: said('the key is hunter2'), redactor: scrubbing })({
       path: '/v1/sessions/s1/logs',

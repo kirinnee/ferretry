@@ -336,7 +336,7 @@ interface JourneyOptions {
   readonly loseRuntimeOutcomeOnce?: boolean;
   /** Loses the receipt advance after a complete import, leaving the target ahead of the receipt. */
   readonly loseImportStampOnce?: boolean;
-  readonly redact?: (text: string) => Promise<string>;
+  readonly redact?: (text: string) => string;
 }
 
 interface Journey {
@@ -447,7 +447,7 @@ async function journey(label: string, options: JourneyOptions = {}): Promise<Jou
     new StorageTransferConversationReader(
       [new NodeTranscriptSource(new ClaudeTranscriptParser()), new NodeTranscriptSource(new CodexTranscriptParser())],
       new StorageTranscriptDigestJournal(storage),
-      { redact: options.redact ?? (async text => text) },
+      { batch: async work => work({ text: options.redact ?? (text => text), data: value => value }) },
     );
 
   /** The composition root's own start-account resolution, over the two published accounts. */
@@ -527,7 +527,7 @@ async function journey(label: string, options: JourneyOptions = {}): Promise<Jou
       },
       contributors: {
         conversation: new ConversationFacetContributor(conversation, {
-          redact: options.redact ?? (async text => text),
+          batch: async work => work({ text: options.redact ?? (text => text), data: value => value }),
         }),
         attachments: new AttachmentFacetContributor(new SessionAttachmentTransferReader(attachments())),
         references: new ReferenceFacetContributor(),
@@ -1364,7 +1364,7 @@ describe('the fork journey over real storage', () => {
 
   it('redacts transcript text in the durable plan, receipt and imported opening document', async () => {
     const subject = await journey('redacted-artifacts', {
-      redact: async text => text.replace(CARRIED, '[redacted:SECRET]'),
+      redact: text => text.replace(CARRIED, '[redacted:SECRET]'),
     });
 
     const outcome = await subject.fork(key('redacted'), command(subject));
