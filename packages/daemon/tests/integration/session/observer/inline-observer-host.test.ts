@@ -149,6 +149,8 @@ function host(subject: World, overrides: Partial<InlineObserverPorts> = {}): Inl
       yieldToLoop: async () => {
         subject.yields.push(subject.yields.length);
       },
+      paneState: async () => undefined,
+      sendEvidence: { read: async () => ({ readable: true, inputs: [] }) },
       ...overrides,
     },
     new SessionObserver(text => `digest(${text})`),
@@ -363,5 +365,26 @@ describe('InlineObserverHost — liveness', () => {
 
     // Assert
     should(actual).deepEqual({});
+  });
+});
+
+describe('InlineObserverHost — the other reads', () => {
+  it('should answer the live frame and the send evidence through this thread, and skip what a worker observes', async () => {
+    // Arrange
+    const subject = await world();
+    const observer = host(subject);
+    await subject.storage.writeState(A, { id: A, status: 'running', turn: 1 });
+    subject.events.set(A, []);
+
+    // Act
+    const pane = await observer.pane(A);
+    const evidence = await observer.sendEvidence(A, '2026-10-22T08:00:00.000Z');
+    const failures = await observer.questions(id => id === A);
+
+    // Assert
+    should(pane).be.undefined();
+    should(evidence).deepEqual({ readable: true, inputs: [] });
+    should(failures.size).equal(0);
+    should(subject.yields).deepEqual([]);
   });
 });

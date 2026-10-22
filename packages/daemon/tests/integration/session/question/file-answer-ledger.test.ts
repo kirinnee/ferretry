@@ -252,3 +252,28 @@ describe('the durable answer ledger', () => {
     await should(ledger.all(ID)).be.rejected();
   });
 });
+
+describe('the answer ledger’s append hook', () => {
+  it('should say which session it appended to, after the receipt is durable', async () => {
+    // Arrange
+    const root = await mkdtemp(join(tmpdir(), 'fy-answer-ledger-'));
+    homes.add(root);
+    const told: string[] = [];
+    let ledger: FileAnswerLedger | undefined;
+    ledger = new FileAnswerLedger(
+      id => join(root, id),
+      { now: () => NOW },
+      async id => {
+        told.push(`${id}:${String((await ledger?.all(id))?.size)}`);
+      },
+    );
+
+    // Act
+    await ledger.append(ID, record());
+    await ledger.append(OTHER, record({ requestId: 'request-2' }));
+    await Bun.sleep(5);
+
+    // Assert
+    should(told).deepEqual([`${ID}:1`, `${OTHER}:1`]);
+  });
+});

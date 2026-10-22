@@ -6,6 +6,7 @@ import {
   controlCommandLine,
   controlNonceLine,
   controlReplyProgress,
+  controlSubscriptionLine,
   isControlAttachable,
   parseControlGuard,
   parseControlNotification,
@@ -232,6 +233,8 @@ export class ControlModeTmuxProcess implements TmuxCommandPort, TmuxEventSource 
     readonly listener: (notification: TmuxControlNotification) => void;
   }>();
   private readonly options: ResolvedControlModeOptions;
+  /** The subscriptions this client renews on every connection, by name. */
+  private readonly watches = new Map<string, string>();
 
   constructor(
     private readonly executable: string,
@@ -281,6 +284,25 @@ export class ControlModeTmuxProcess implements TmuxCommandPort, TmuxEventSource 
     return () => {
       this.listeners.delete(entry);
     };
+  }
+
+  /** Whether a control client is connected right now, so its notifications are arriving. */
+  get connected(): boolean {
+    return this.connection?.open === true;
+  }
+
+  /**
+   * Have tmux tell {@link subscribe}rs whenever `format` changes for any pane of the attached session — at
+   * most once a second, as `%subscription-changed <name>` — and renew it on every reconnection. Answers
+   * whether a connection took it now; one that did not is renewed when the next connection opens.
+   */
+  async watch(name: string, format: string): Promise<boolean> {
+    const line = controlSubscriptionLine(name, format);
+    if (line === undefined) throw new Error(`${JSON.stringify(name)} cannot be subscribed to that format`);
+    this.watches.set(name, line);
+    const connection = await this.connect();
+    const reply = connection === undefined ? undefined : await connection.ask(line);
+    return reply?.code === 0;
   }
 
   /** Disconnect for good: from here on every command keeps its own process. */
@@ -347,7 +369,11 @@ export class ControlModeTmuxProcess implements TmuxCommandPort, TmuxEventSource 
       this.options.nonce,
       this.options.replyTimeoutMs,
     );
-    if (connection.open) this.connection = connection;
+    if (connection.open) {
+      this.connection = connection;
+      // A new connection knows none of the old one's subscriptions.
+      for (const line of this.watches.values()) void connection.ask(line);
+    }
     return connection;
   }
 

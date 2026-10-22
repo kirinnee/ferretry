@@ -18,6 +18,7 @@ import { afterAll, describe, it } from 'bun:test';
 import { join, resolve } from 'node:path';
 import should from 'should';
 import { freeLoopbackPort } from '../support/booted-daemon.ts';
+import { startFleetPanes } from '../support/fleet-panes.ts';
 import { cleanupTempDirectories, tempDirectory } from '../support/repository.ts';
 import { type ScaledFleetShape, scaledFleet } from '../support/scaled-fleet.ts';
 
@@ -103,33 +104,6 @@ const program = (home: string, userHome: string, port: number): string => `
   process.exit(0);
 `;
 
-/** Five running panes on the daemon's own private server, as a live fleet has them. */
-async function startRunningPanes(home: string, shape: ScaledFleetShape): Promise<string> {
-  const tmux = Bun.which('tmux');
-  if (tmux === null) throw new Error('tmux is required for this test and was not found');
-  const socket = join(home, 'tmux.sock');
-  for (let index = 0; index < shape.running; index += 1) {
-    const session = `fy-scaled-${String(index).padStart(2, '0')}`;
-    const created = Bun.spawnSync([
-      tmux,
-      '-S',
-      socket,
-      'new-session',
-      '-d',
-      '-s',
-      session,
-      '-x',
-      '120',
-      '-y',
-      '40',
-      'sleep',
-      '600',
-    ]);
-    if (created.exitCode !== 0) throw new Error(`tmux could not start ${session}: ${created.stderr.toString()}`);
-  }
-  return socket;
-}
-
 afterAll(async () => {
   await cleanupTempDirectories();
 });
@@ -138,7 +112,13 @@ describe('an idle daemon over a fleet the size of the owner’s', () => {
   it(`should start no more than ${String(SPAWNS_PER_MINUTE_BUDGET)} child processes a minute`, async () => {
     // Arrange
     const fleet = await scaledFleet(await tempDirectory('fyd-idle-spawns'), OWNER_IDLE_FLEET);
-    const socket = await startRunningPanes(fleet.home, OWNER_IDLE_FLEET);
+    // The running sessions’ panes, named as `scaledFleet` names their tmux sessions.
+    const panes = await startFleetPanes(
+      fleet.home,
+      Array.from({ length: OWNER_IDLE_FLEET.running }, (_, index) => `fy-scaled-${String(index).padStart(2, '0')}`),
+      ['sleep', '600'],
+      { columns: 120, rows: 40 },
+    );
     const port = await freeLoopbackPort();
     const child = Bun.spawn([process.execPath, '-e', program(fleet.home, fleet.userHome, port)], {
       stdout: 'pipe',
@@ -166,7 +146,7 @@ describe('an idle daemon over a fleet the size of the owner’s', () => {
         `an idle daemon started ${String(perMinute)} child processes a minute: ${JSON.stringify(measured.spawns)}`,
       );
     } finally {
-      Bun.spawnSync([Bun.which('tmux') ?? '/usr/bin/tmux', '-S', socket, 'kill-server']);
+      await panes.close();
     }
   }, 240_000);
 });
