@@ -172,6 +172,51 @@ describe('the carrier drop log', () => {
     expect(told).toBe(1);
   });
 
+  it('should stop telling a listener that unsubscribed', () => {
+    // Arrange
+    const { environment } = page();
+    const log = new CarrierDropLog(environment, memoryStorage());
+    let told = 0;
+    const stop = log.subscribe(() => {
+      told += 1;
+    });
+
+    // Act
+    stop();
+    log.dropped(MACHINE, 'relay', 'requests', END);
+
+    // Assert
+    expect(told).toBe(0);
+  });
+
+  it('should fall back to keeping the log in this tab when the browser storage is missing, unusable or refuses access', () => {
+    // Arrange
+    const { environment } = page();
+    const descriptor = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
+    const logsWith = (value: PropertyDescriptor): number => {
+      Object.defineProperty(globalThis, 'localStorage', { configurable: true, ...value });
+      const log = new CarrierDropLog(environment);
+      log.dropped(MACHINE, 'relay', 'requests', END);
+      return log.snapshot().length;
+    };
+
+    try {
+      // Act + Assert
+      expect(logsWith({ value: undefined })).toBe(1);
+      expect(logsWith({ value: { getItem: 'not a function' } })).toBe(1);
+      expect(
+        logsWith({
+          get: () => {
+            throw new Error('SecurityError: storage is disabled');
+          },
+        }),
+      ).toBe(1);
+    } finally {
+      if (descriptor === undefined) Reflect.deleteProperty(globalThis, 'localStorage');
+      else Object.defineProperty(globalThis, 'localStorage', descriptor);
+    }
+  });
+
   it('should forget one machine’s drops and keep the others', () => {
     // Arrange
     const { environment } = page();
