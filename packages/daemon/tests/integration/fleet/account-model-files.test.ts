@@ -435,6 +435,36 @@ describe('a reviewed change applied by the real provisioner', () => {
     should(await readFile(file, 'utf8')).equal(text);
   });
 
+  it('should rename a runtime in one apply: its file with its comments, its id, its wrapper and the Warden login naming it', async () => {
+    // Arrange — published once, so the runtime has an id, a config directory and a wrapper.
+    const host = await machine();
+    await host.catalog.apply((await host.catalog.propose(SETTINGS)).id, LOCAL);
+    const runtimeFile = path.join(host.config, 'runtimes', 'codex-default.yaml');
+    await writeFile(runtimeFile, `# the Codex I launch\n${await readFile(runtimeFile, 'utf8')}`);
+    await writeFile(path.join(host.config, 'warden.yaml'), 'accounts:\n  - agent: codex-default\n');
+    await host.service.load();
+    const before = JSON.parse(await readFile(path.join(host.fleet, 'ids.json'), 'utf8')).runtimes['codex-default'];
+
+    // Act
+    const staged = await host.catalog.propose({ kind: 'runtime.rename', name: 'codex-default', to: 'codex-work' });
+    const outcome = await host.catalog.apply(staged.id, LOCAL);
+
+    // Assert
+    should(outcome).match({ outcome: 'applied', apply: { outcome: 'committed' } });
+    should(await readFile(path.join(host.config, 'runtimes', 'codex-work.yaml'), 'utf8')).startWith(
+      '# the Codex I launch\n',
+    );
+    should(await failure(stat(runtimeFile))).match({ code: 'ENOENT' });
+    const ids = JSON.parse(await readFile(path.join(host.fleet, 'ids.json'), 'utf8'));
+    should(ids.runtimes['codex-work']).deepEqual({ id: before.id, formerNames: ['codex-default'] });
+    should(ids.runtimes['codex-default']).be.undefined();
+    should((await stat(path.join(host.fleet, 'homes', before.id))).isDirectory()).be.true();
+    should((await stat(path.join(host.fleet, 'bin', 'codex-work'))).isFile()).be.true();
+    should(await failure(stat(path.join(host.fleet, 'bin', 'codex-default')))).match({ code: 'ENOENT' });
+    should(await readFile(path.join(host.config, 'warden.yaml'), 'utf8')).match(/agent: codex-work/);
+    should((await host.service.inEffect()).evaluation.effective.warden.accounts).deepEqual([{ agent: 'codex-work' }]);
+  });
+
   it('should refuse a change when ids.json exists and cannot be read, rather than minting new ids', async () => {
     // Arrange
     const host = await machine();

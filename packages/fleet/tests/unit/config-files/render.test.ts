@@ -1,11 +1,21 @@
 import { describe, it } from 'bun:test';
-import { type ConfigFileAddress, configFilePath, DEFAULT_WARDEN_CONFIG } from '@ferretry/protocol';
+import {
+  type ConfigFileAddress,
+  configFilePath,
+  DEFAULT_LEARNING_CONFIG,
+  DEFAULT_WARDEN_CONFIG,
+} from '@ferretry/protocol';
 import should from 'should';
 import { type AccountModel, parseAccountModel } from '../../../src/lib/account/schema.ts';
 import { checkConfigFile } from '../../../src/lib/config-files/check.ts';
 import { ABSENT_CONFIG_ETAG } from '../../../src/lib/config-files/evaluate.ts';
 import { SINGLETON_DEFAULTS } from '../../../src/lib/config-files/kinds.ts';
-import { type ConfigFileOnDisk, fleetFileEdits, renderConfigFile } from '../../../src/lib/config-files/render.ts';
+import {
+  type ConfigFileOnDisk,
+  fleetFileEdits,
+  renamedRuntimeMentions,
+  renderConfigFile,
+} from '../../../src/lib/config-files/render.ts';
 import { digest } from './support.ts';
 
 const MACHINE: ConfigFileAddress = { kind: 'machine' };
@@ -244,6 +254,31 @@ describe('fleetFileEdits', () => {
     should(actual).deepEqual([]);
   });
 
+  it('should move a renamed runtime’s file with its comments, and remove the old one', () => {
+    // Arrange
+    const before = model();
+    const disk = diskOf(before);
+    const old = disk.get('runtimes/main.yaml') as ConfigFileOnDisk;
+    disk.set('runtimes/main.yaml', { ...old, text: `# the one I launch\n${old.text}` });
+    const next = model({ runtimes: { primary: { credential: 'me', profile: 'default', agent: true } } });
+
+    // Act
+    const actual = fleetFileEdits(before, next, disk, new Map([['runtimes/primary.yaml', 'runtimes/main.yaml']]));
+
+    // Assert
+    const written = actual.find(edit => edit.path === 'runtimes/primary.yaml');
+    should(written?.expect).equal(ABSENT_CONFIG_ETAG);
+    should(written?.content).startWith('# the one I launch\n');
+    should(meaning('runtimes/primary.yaml', written?.content as string)).deepEqual(
+      meaning('runtimes/main.yaml', old.text),
+    );
+    should(actual.find(edit => edit.path === 'runtimes/main.yaml')).eql({
+      path: 'runtimes/main.yaml',
+      content: undefined,
+      expect: old.etag,
+    });
+  });
+
   it('should rewrite only the changed file, expecting the etag it has on disk', () => {
     // Arrange
     const before = model();
@@ -362,5 +397,35 @@ describe('fleetFileEdits', () => {
     // Assert
     should(actual.map(edit => edit.path)).deepEqual([configFilePath(MACHINE)]);
     should(actual[0]?.content).containEql('ferretrySettings: true');
+  });
+});
+
+describe('renamedRuntimeMentions', () => {
+  const warden = { ...DEFAULT_WARDEN_CONFIG, accounts: [{ agent: 'glm-b', model: 'glm-5' }, { agent: 'other' }] };
+  const learning = { ...DEFAULT_LEARNING_CONFIG, agent: 'glm-b' };
+
+  it('should re-point each Warden login and the lesson miner that name the old runtime, keeping comments', () => {
+    // Arrange
+    const wardenText = '# my order\naccounts:\n  - agent: glm-b\n    model: glm-5\n  - agent: other\n';
+    const onDisk = new Map([['warden.yaml', { text: wardenText, etag: digest(wardenText) }]]);
+
+    // Act
+    const edits = renamedRuntimeMentions({ warden, learning }, onDisk, { from: 'glm-b', to: 'glm-work' });
+
+    // Assert
+    should(edits.map(edit => [edit.path, edit.expect])).deepEqual([
+      ['warden.yaml', digest(wardenText)],
+      ['learning.yaml', ABSENT_CONFIG_ETAG],
+    ]);
+    should(edits[0]?.content).containEql('# my order\n');
+    should(meaning('warden.yaml', edits[0]?.content as string)).match({
+      accounts: [{ agent: 'glm-work', model: 'glm-5' }, { agent: 'other' }],
+    });
+    should(meaning('learning.yaml', edits[1]?.content as string)).match({ agent: 'glm-work' });
+  });
+
+  it('should write nothing when no other file names the runtime', () => {
+    // Act / Assert
+    should(renamedRuntimeMentions({ warden, learning }, new Map(), { from: 'nobody', to: 'someone' })).deepEqual([]);
   });
 });

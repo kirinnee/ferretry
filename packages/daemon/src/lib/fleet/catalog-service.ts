@@ -42,12 +42,15 @@ import {
   type FleetModelApplyPlan,
   type FleetProvisioner,
   type HarnessKind,
+  joinPath,
   type MaterialiseBodies,
   type ModelCatalogSources,
   materialiseFleet,
   type ProviderPreset,
   parseSettings,
   type RuntimeIds,
+  type RuntimeRename,
+  renameRuntimeId,
   type SettingsObject,
   skillFrontmatterKeys,
   skillSourceReference,
@@ -84,6 +87,7 @@ import {
 } from './catalog.ts';
 import { FleetCredentialRefusal, type FleetCredentialSignOutOutcome } from './credentials-service.ts';
 import {
+  type AccountChangeFacts,
   type AccountComponentFile,
   type AccountPlanChange,
   deriveAccountChange,
@@ -91,6 +95,12 @@ import {
   isAccountPlanChange,
 } from './mutations.ts';
 import { type FleetProposalRecord, FleetProposalRefusal, FleetProposalStore, redactProposal } from './proposals.ts';
+import {
+  type RuntimeSessionRecord,
+  runningSessionsOn,
+  type SessionRuntimeRename,
+  sessionRunning,
+} from './runtime-sessions.ts';
 import { applyFailureSummary, applyResultSummary, operationSummary } from './wire.ts';
 
 // ── Refusals ─────────────────────────────────────────────────────────────────────────────────────
@@ -152,9 +162,10 @@ export interface AccountDocumentReading {
   /**
    * The writes that move the configuration files from this model to `next` (docs/config-files.md):
    * each changed file rewritten key by key with its comments kept, each file `next` drops removed —
-   * every one carrying the revision it was composed against, which the provisioner checks.
+   * every one carrying the revision it was composed against, which the provisioner checks. A `rename`
+   * moves that runtime's file with its comments and re-points every other file that names it.
    */
-  documents(next: AccountModel): readonly FleetDocumentWrite[];
+  documents(next: AccountModel, rename?: RuntimeRename): readonly FleetDocumentWrite[];
 }
 
 /** A first-run import or a clone, carried out by its own executor (U15). */
@@ -193,6 +204,16 @@ export interface FleetCatalogServiceDeps {
   commandExists(command: string): boolean;
   /** Every session's status, to count the running ones (E20, E32). */
   sessionStatuses(): Promise<readonly SessionStatus[]>;
+  /**
+   * Every session's runtime facts, for the sessions a runtime removal or rename names. Absent means
+   * this daemon cannot say, and the confirm card says only what it knows.
+   */
+  sessionRecords?(): Promise<readonly RuntimeSessionRecord[]>;
+  /**
+   * Re-point every session record on a renamed runtime at its new name, once the rename has applied.
+   * Answers how many moved. A record it could not rewrite still resolves through `ids.json`.
+   */
+  renameSessions?(rename: SessionRuntimeRename): Promise<number>;
   machineName(): string;
   /** The credentials surface: its list for status words and sign-out sentences, its sign-out executor. */
   readonly credentials: {
@@ -231,33 +252,9 @@ export interface FleetCatalogServiceDeps {
 
 // ── Running sessions ─────────────────────────────────────────────────────────────────────────────
 
-/**
- * Whether a session with this status is still running, keyed exhaustively so a new status cannot
- * fall silently into either answer. A session that has ended — or whose kill failed and is being
- * reaped — keeps no setup a change could leave behind.
- */
-const SESSION_RUNNING: { readonly [K in SessionStatus]: boolean } = {
-  created: true,
-  starting: true,
-  running: true,
-  thinking: true,
-  tool_running: true,
-  awaiting_question: true,
-  awaiting_user: true,
-  interrupted: true,
-  rate_limited: true,
-  retrying: true,
-  waiting: true,
-  kill_failed: false,
-  completed: false,
-  failed: false,
-  stalled: false,
-  stopped: false,
-};
-
 /** How many of these sessions are still running. */
 export const countRunningSessions = (statuses: readonly SessionStatus[]): number =>
-  statuses.filter(status => SESSION_RUNNING[status]).length;
+  statuses.filter(sessionRunning).length;
 
 /**
  * Whether a planned manifest says what the published one already says, the moment it was made
@@ -651,6 +648,17 @@ export class FleetCatalogService {
     reading: AccountDocumentReading,
     change: AccountPlanChange,
   ): Promise<{ readonly payload: ChangePayload; readonly summary: string }> {
+    let ids: RuntimeIds;
+    try {
+      ids = (await this.deps.ids()) ?? EMPTY_RUNTIME_IDS;
+    } catch (error) {
+      throw new FleetCatalogRefusal(
+        'fleet_change_refused',
+        `the runtime ids could not be read: ${errorMessage(error)}`,
+      );
+    }
+    const named = change.kind === 'runtime.rename' || change.kind === 'runtime.remove';
+    const runtimeFacts = named ? await this.#runtimeFacts(change.name, ids) : {};
     let edit: ReturnType<typeof deriveAccountChange>;
     try {
       edit = deriveAccountChange(reading.model, change, {
@@ -660,6 +668,7 @@ export class FleetCatalogService {
         ...(change.kind === 'credential.add' || change.kind === 'credential.env'
           ? { presets: (await this.deps.presets?.()) ?? [] }
           : {}),
+        ...runtimeFacts,
       });
     } catch (error) {
       throw error instanceof FleetMutationRefusal
@@ -674,7 +683,9 @@ export class FleetCatalogService {
       plan = materialiseFleet({
         model: edit.model,
         layout,
-        ids: (await this.deps.ids()) ?? EMPTY_RUNTIME_IDS,
+        // A rename moves the runtime's id to its new name in this same apply, so its config directory,
+        // its sessions and its history stay exactly where they are.
+        ids: change.kind === 'runtime.rename' ? renameRuntimeId(ids, change.name, change.to) : ids,
         mint: () => this.deps.mint(),
         generatedAt: new Date(this.deps.now()).toISOString(),
         bodies,
@@ -689,7 +700,8 @@ export class FleetCatalogService {
     } catch (error) {
       throw error instanceof Error ? new FleetCatalogRefusal('fleet_change_refused', errorMessage(error)) : error;
     }
-    const documents: FleetDocumentWrite[] = [...reading.documents(edit.model)];
+    const rename = change.kind === 'runtime.rename' ? { from: change.name, to: change.to } : undefined;
+    const documents: FleetDocumentWrite[] = [...reading.documents(edit.model, rename)];
     for (const file of edit.files) {
       const path = assetPath(layout, file.file);
       documents.push({
@@ -714,9 +726,37 @@ export class FleetCatalogService {
             bytes: new TextEncoder().encode(document.content).length,
           })),
           runtimes: await this.#changedRuntimes(reading, edit.model, bodies, textUsers(reading.model, change)),
+          ...(runtimeFacts.runningOn === undefined || runtimeFacts.runningOn.length === 0
+            ? {}
+            : { runningSessions: runtimeFacts.runningOn }),
         },
       },
     };
+  }
+
+  /**
+   * What a removal or a rename of one runtime needs to know beyond the configuration: every other
+   * spelling `ids.json` resolves to a runtime (so a new name never takes one), and the sessions still
+   * running on this one, by any spelling a record may carry.
+   */
+  async #runtimeFacts(
+    name: string,
+    ids: RuntimeIds,
+  ): Promise<Pick<AccountChangeFacts, 'runtimeReferences' | 'runningOn'>> {
+    const runtimeReferences: Record<string, string> = {};
+    for (const [owner, entry] of Object.entries(ids.runtimes)) {
+      runtimeReferences[entry.id] = owner;
+      for (const former of entry.formerNames) runtimeReferences[former] = owner;
+    }
+    const records = await this.deps.sessionRecords?.().catch(() => undefined);
+    if (records === undefined) return { runtimeReferences };
+    const entry = ids.runtimes[name];
+    const runningOn = runningSessionsOn(records, {
+      name,
+      wrapper: joinPath(this.deps.layout.binDirectory, name),
+      ...(entry === undefined ? {} : { id: entry.id, formerNames: entry.formerNames }),
+    });
+    return { runtimeReferences, runningOn };
   }
 
   /**
@@ -810,6 +850,7 @@ export class FleetCatalogService {
     if (payload.kind === 'apply') {
       try {
         const result = await this.deps.provisioner.apply(payload.plan, payload.documents);
+        if (record.mutation.kind === 'runtime.rename') await this.#renameSessions(record.mutation);
         return { outcome: 'applied', apply: { outcome: 'committed', result: applyResultSummary(result) } };
       } catch (error) {
         if (error instanceof FleetApplyFailureError) return { outcome: 'applied', apply: applyFailureSummary(error) };
@@ -831,6 +872,23 @@ export class FleetCatalogService {
         : { outcome: 'sign-out-failed', reason: outcome.reason, credential: outcome.credential };
     }
     return { outcome: 'executed', executor: payload.preview.executor, summary: await payload.run() };
+  }
+
+  /**
+   * Re-point the session records on a renamed runtime, once the rename is on disk. Best effort, and
+   * never a reason to report the rename as failed: a record left on the old name still resolves
+   * through `ids.json`, and the next rename or restart finds it the same way.
+   */
+  async #renameSessions(change: Extract<FleetAccountChange, { kind: 'runtime.rename' }>): Promise<void> {
+    const bin = this.deps.layout.binDirectory;
+    await this.deps
+      .renameSessions?.({
+        from: change.name,
+        to: change.to,
+        fromWrapper: joinPath(bin, change.name),
+        toWrapper: joinPath(bin, change.to),
+      })
+      .catch(() => 0);
   }
 
   // ── Views ──────────────────────────────────────────────────────────────────────────────────────

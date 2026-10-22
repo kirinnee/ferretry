@@ -369,6 +369,123 @@ describe('deriveAccountChange: runtime.remove', () => {
   });
 });
 
+describe('deriveAccountChange: runtime.remove of the default and of a runtime with ferrets on it', () => {
+  it('should refuse the machine default runtime until another default is picked', () => {
+    // Arrange
+    const model = modelOf({ machine: { defaultRuntime: 'beta' } });
+
+    // Act + Assert
+    should(refusalOf({ kind: 'runtime.remove', name: 'beta' }, model)).equal(
+      "beta is this machine's default runtime for new agents. Pick another default first.",
+    );
+  });
+
+  it('should say how many ferrets keep running on it, and that a restart needs another runtime', () => {
+    // Act
+    const one = derive({ kind: 'runtime.remove', name: 'beta' }, modelOf(), {
+      ...FACTS,
+      runningOn: [{ id: 's-1', name: 'Fisher', harness: 'claude' }],
+    });
+    const two = derive({ kind: 'runtime.remove', name: 'beta' }, modelOf(), {
+      ...FACTS,
+      runningOn: [
+        { id: 's-1', name: 'Fisher', harness: 'claude' },
+        { id: 's-2', name: 'Otter', harness: 'claude' },
+      ],
+    });
+    const none = derive({ kind: 'runtime.remove', name: 'beta' }, modelOf(), { ...FACTS, runningOn: [] });
+
+    // Assert
+    should(one.consequences).deepEqual([
+      '1 ferret is running on it. It keeps running, but restarting it later needs another runtime. Its past sessions stay in history.',
+    ]);
+    should(two.consequences).deepEqual([
+      '2 ferrets are running on it. They keep running, but restarting them later needs another runtime. Its past sessions stay in history.',
+    ]);
+    should(none.consequences).deepEqual(['Nothing is running on it. Its past sessions stay in history.']);
+  });
+});
+
+describe('deriveAccountChange: runtime.rename', () => {
+  it('should move the runtime to its new name, with every command that runs it', () => {
+    // Act
+    const edit = derive({ kind: 'runtime.rename', name: 'alpha', to: 'alpha-main' });
+
+    // Assert
+    should(edit.summary).equal('Rename runtime alpha to alpha-main');
+    should(edit.model.runtimes.alpha).be.undefined();
+    should(edit.model.runtimes['alpha-main']).deepEqual(modelOf().runtimes.alpha);
+    should(edit.model.advanced.commands).deepEqual([
+      { wrapper: 'alpha-fast', runtime: 'alpha-main', flags: ['--fast'] },
+    ]);
+    should(edit.consequences).deepEqual([
+      'alpha-fast runs alpha-main from now on.',
+      'Running ferrets keep working — nothing restarts.',
+      'alpha keeps starting it: `--agent alpha` still works.',
+    ]);
+  });
+
+  it('should keep a renamed default runtime the default', () => {
+    // Arrange
+    const model = modelOf({ machine: { defaultRuntime: 'beta' } });
+
+    // Act
+    const edit = derive({ kind: 'runtime.rename', name: 'beta', to: 'beta-2' }, model);
+
+    // Assert
+    should(edit.model.machine.defaultRuntime).equal('beta-2');
+    should(edit.consequences[0]).equal("beta-2 stays this machine's default runtime for new agents.");
+  });
+
+  it('should refuse a runtime that does not exist, and a name it already has', () => {
+    // Act + Assert
+    should(refusalOf({ kind: 'runtime.rename', name: 'ghost', to: 'spirit' })).equal(
+      'no runtime ghost exists on this machine',
+    );
+    should(refusalOf({ kind: 'runtime.rename', name: 'alpha', to: 'alpha' })).equal('alpha is already called alpha.');
+  });
+
+  it('should refuse a name that clashes with another runtime or a command, offering a free one', () => {
+    // Act + Assert
+    should(refusalOf({ kind: 'runtime.rename', name: 'alpha', to: 'beta' })).equal(
+      'beta is already a runtime on studio. Use beta-2?',
+    );
+    should(refusalOf({ kind: 'runtime.rename', name: 'beta', to: 'alpha-fast' })).equal(
+      'alpha-fast is already a runtime on studio. Use alpha-fast-2?',
+    );
+  });
+
+  it('should refuse a name outside the runtime grammar, with the nearest one that fits', () => {
+    // Act + Assert
+    should(refusalOf({ kind: 'runtime.rename', name: 'alpha', to: 'My Alpha' })).equal(
+      'Use only letters, digits and dashes. Use My-Alpha?',
+    );
+  });
+
+  it('should refuse another runtime’s former name or id, and let a runtime take back its own', () => {
+    // Arrange
+    const facts: AccountChangeFacts = {
+      ...FACTS,
+      runtimeReferences: { 'old-beta': 'beta', 'first-alpha': 'alpha', '00000000-0000-4000-8000-00000000000b': 'beta' },
+    };
+
+    // Act + Assert
+    should(refusalOf({ kind: 'runtime.rename', name: 'alpha', to: 'old-beta' }, modelOf(), facts)).equal(
+      'old-beta is already a runtime on studio. Use old-beta-2?',
+    );
+    should(
+      refusalOf(
+        { kind: 'runtime.rename', name: 'alpha', to: '00000000-0000-4000-8000-00000000000b' },
+        modelOf(),
+        facts,
+      ),
+    ).match(/is already a runtime on studio/);
+    should(derive({ kind: 'runtime.rename', name: 'alpha', to: 'first-alpha' }, modelOf(), facts).summary).equal(
+      'Rename runtime alpha to first-alpha',
+    );
+  });
+});
+
 describe('deriveAccountChange: profile.put', () => {
   it('should add a profile', () => {
     // Act

@@ -14,8 +14,10 @@ import {
   checkConfigFile,
   type FleetDocumentWrite,
   fleetFileEdits,
+  type RuntimeRename,
   renderConfigFile,
 } from '@ferretry/fleet';
+import { runtimeFileMoves } from '../../src/adapters/fleet/account-model-files.ts';
 import type { AccountDocumentReading } from '../../src/lib/fleet/catalog-service.ts';
 
 /** Where a test machine's configuration directory is. */
@@ -42,8 +44,8 @@ export function configReading(
     format,
     model,
     revision,
-    documents: (next: AccountModel): readonly FleetDocumentWrite[] =>
-      fleetFileEdits(model, next, onDisk).map(edit => ({
+    documents: (next: AccountModel, rename?: RuntimeRename): readonly FleetDocumentWrite[] =>
+      fleetFileEdits(model, next, onDisk, runtimeFileMoves(rename)).map(edit => ({
         path: `${TEST_CONFIG_DIRECTORY}/${edit.path}`,
         content: edit.content ?? '',
         mode: 0o600,

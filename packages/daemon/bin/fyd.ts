@@ -112,6 +112,7 @@ import { platformFileEventSource } from '../src/adapters/file-events/platform.ts
 import { fileFleetCatalogDeps, readDeclaredAccountModel } from '../src/adapters/fleet/account-model-files.ts';
 import { readFleetManifest } from '../src/adapters/fleet/manifest-file.ts';
 import { RuntimeAwareAccountInventory, RuntimeIdsFile } from '../src/adapters/fleet/runtime-ids-file.ts';
+import { RuntimeSessionRecords } from '../src/adapters/fleet/runtime-session-records.ts';
 import { fileFleetSetupDeps } from '../src/adapters/fleet/setup-files.ts';
 import {
   CredentialEmailReader,
@@ -8747,6 +8748,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
             await Promise.all(
               storage.listSessions().map(async session => await storage.readState(session.id).catch(() => undefined)),
             ),
+          sessionRecords: new RuntimeSessionRecords(storage),
           credentials: fleetCredentials,
           locate: locateHarness,
           machineName: () => hostname(),
