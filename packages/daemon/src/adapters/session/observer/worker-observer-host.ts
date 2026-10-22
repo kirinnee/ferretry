@@ -61,6 +61,11 @@ export interface WorkerObserverPorts {
 
 /** How long after a change the host reconciles hosting: a burst of writes is one reconcile. */
 const RECONCILE_SETTLE_MS = 250;
+/**
+ * The slow backstop: hosting is reconciled at least this often, so what no write announces — a transcript
+ * proved after its session started, a pane renamed — still reaches the session's worker.
+ */
+const RECONCILE_BACKSTOP_MS = 30_000;
 
 /** `promise`, or a rejection once `ms` have passed. */
 async function within<T>(promise: Promise<T>, ms: number): Promise<T> {
@@ -123,9 +128,9 @@ export class WorkerObserverHost implements SessionObserverHost {
 
   /**
    * Starts observing. There is no tick: hosting is reconciled now, after every change this thread learns
-   * of and whenever a worker becomes ready or a back-off ends; and only while some session has no worker
-   * — starting, backing off, kept inline after five crashes, or ended with a turn still to clear — is it
-   * looked at here every 2 s, as stage 3a did.
+   * of and whenever a worker becomes ready or a back-off ends, and on a 30 s backstop; and only while some
+   * session has no worker — starting, backing off, kept inline after five crashes, or ended with a turn
+   * still to clear — is it looked at here every 2 s, as stage 3a did.
    */
   arm(): void {
     this.armed = true;
@@ -159,7 +164,7 @@ export class WorkerObserverHost implements SessionObserverHost {
     if (this.tickAgain) {
       this.tickAgain = false;
       this.poke();
-    } else if (this.loop.needsInline) this.poke(TURN_WATCH_INTERVAL_MS);
+    } else this.poke(this.loop.needsInline ? TURN_WATCH_INTERVAL_MS : RECONCILE_BACKSTOP_MS);
   }
 
   /** What a session's worker found, unasked: applied in order, after anything still being applied. */

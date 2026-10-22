@@ -466,7 +466,8 @@ false`, until 3d deletes the inline loops (the inline host stays tested as the f
 
 **3d as built.** `enabled` is retired (tolerated, with a boot notice). The turn `setInterval` is gone: the
 observer is armed and reconciles hosting when something changes (a state write, a worker ready or crashed,
-a back-off over), and looks on the main thread every 2 s only while some session has no worker. The
+a back-off over) and on a 30 s backstop, and looks on the main thread every 2 s only while some session has
+no worker. The
 self-check's exit pass skips every pane a worker watches; a worker says `exited` when `#{pane_dead}` turns 1
 **or** when its client has been down for three looks in a row (it can no longer say the pane is alive), and
 the 30 s check then proves and settles it — at once instead with `sessionWorkers.fastExit: true` (default

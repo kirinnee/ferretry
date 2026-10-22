@@ -555,9 +555,24 @@ describe('WorkerObserverHost — armed, with no tick', () => {
 
     // Assert
     should(beforeArm).deepEqual([]);
-    should(scheduled.slice(0, 2)).deepEqual([0, 250]);
+    should(scheduled[0]).equal(0);
+    should(scheduled).containEql(250);
     should(supervisor.attached(A)).be.true();
     should(activities.count).be.aboveOrEqual(2);
+  });
+
+  it('should reconcile on a 30 s backstop while every session has a worker', async () => {
+    // Arrange
+    const { storage, subject, scheduled } = await rig();
+    await storage.writeState(A, { id: A, status: 'running', turn: 1 });
+
+    // Act
+    subject.arm();
+    await until(() => scheduled.includes(30_000));
+
+    // Assert
+    should(scheduled).containEql(30_000);
+    should(scheduled).not.containEql(TURN_WATCH_INTERVAL_MS);
   });
 
   it('should look here again in 2 s only while some session is left to this thread', async () => {
