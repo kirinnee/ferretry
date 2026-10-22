@@ -16,8 +16,10 @@ import {
   type CodexAuthFacts,
   type CredentialStatusHead,
   type CredentialStatusPorts,
+  type LocalCredentialFacts,
   CredentialStatusService,
   chooseCredentialUsage,
+  codexEmailClaim,
   codexFileAdvanced,
   codexPlanType,
   decideClaudeStatus,
@@ -26,6 +28,8 @@ import {
   foldClaudeSignal,
   foldCodexRefresh,
   InMemoryCredentialStatusStore,
+  localCredentialFacts,
+  localReadingAt,
   needsActiveUsageRead,
   passiveUsageReading,
   readCodexAuthFacts,
@@ -100,6 +104,68 @@ describe('the four words', () => {
       checking: 'Checking',
     });
     should(Object.keys(CREDENTIAL_STATUS_SHAPES)).deepEqual(['ready', 'refresh_due', 'needs_sign_in', 'checking']);
+  });
+});
+
+describe('codexEmailClaim', () => {
+  it('should keep the id token email claim, trimmed, and nothing else', () => {
+    should(codexEmailClaim(fakeJwt({ email: ' person@example.com ' }))).equal('person@example.com');
+  });
+
+  it.each<[string, unknown]>([
+    ['no id token', undefined],
+    ['an id token with no payload', 'header'],
+    ['a payload that is not JSON', 'header.bm90LWpzb24.sig'],
+    ['an id token with no email', fakeJwt({ sub: 'someone' })],
+    ['a blank email', fakeJwt({ email: '  ' })],
+  ])('should show no email for %s', (_case, idToken) => {
+    should(codexEmailClaim(idToken)).be.undefined();
+  });
+
+  it('should ride on the auth.json facts', () => {
+    // Act
+    const facts = readCodexAuthFacts(found(codexBlob({}, { id_token: fakeJwt({ email: 'team@example.com' }) })));
+
+    // Assert
+    should(facts).match({ state: 'tokens', email: 'team@example.com' });
+  });
+});
+
+describe('localCredentialFacts and localReadingAt', () => {
+  it('should keep a digest and the shape, and judge expiry at the instant asked', () => {
+    // Arrange
+    const material = found(JSON.stringify({ claudeAiOauth: { accessToken: 'a-TESTONLY', expiresAt: NOW + MINUTE } }));
+
+    // Act
+    const facts = localCredentialFacts('claude', material, 'digest');
+
+    // Assert
+    should(facts).deepEqual({
+      shape: { kind: 'tokens', hasAccess: true, hasRefresh: false, expiresAt: NOW + MINUTE },
+      fingerprint: 'digest',
+    });
+    should(JSON.stringify(facts)).not.match(/TESTONLY/);
+    should(localReadingAt(facts, NOW - 10 * MINUTE)).deepEqual({
+      state: 'valid',
+      expiresAt: NOW + MINUTE,
+      fingerprint: 'digest',
+    });
+    should(localReadingAt(facts, NOW + 10 * MINUTE)).deepEqual({
+      state: 'missing',
+      expiresAt: NOW + MINUTE,
+      fingerprint: 'digest',
+    });
+  });
+
+  it('should carry Codex facts for a Codex store and no digest for nothing found', () => {
+    // Act
+    const codex = localCredentialFacts('codex', found(codexBlob()), 'digest');
+    const absent = localCredentialFacts('claude', { outcome: 'absent' }, undefined);
+
+    // Assert
+    should(codex.codex).match({ state: 'tokens', planType: 'pro' });
+    should(absent).deepEqual({ shape: { kind: 'decided', reading: { state: 'missing' } } });
+    should(localReadingAt(absent, NOW)).deepEqual({ state: 'missing' });
   });
 });
 
@@ -454,6 +520,8 @@ interface Harness {
   readonly ports: CredentialStatusPorts;
   readonly heads: InMemoryCredentialStatusStore;
   readonly calls: { active: number; refresh: number };
+  /** Every local read of the store the service asked for, `fresh` or not. Active reads are `calls.active`. */
+  readonly reads: { fresh: boolean }[];
   set(state: Partial<State>): void;
 }
 
@@ -483,30 +551,39 @@ function harness(initial: Partial<State> = {}): Harness {
       return await state.refresh(settled);
     },
   };
+  const reads: { fresh: boolean }[] = [];
+  // One read of the store, as the adapter reduces it: the reading's own fields as a decided shape (the
+  // clock is fixed here), Codex's facts from its material, and the reading's digest.
+  const facts = (resolution: StoredCredentialResolution): LocalCredentialFacts => {
+    if (state.local === 'throw' || state.material === 'throw') throw new Error('keychain locked');
+    const { fingerprint, ...reading } = state.local;
+    return {
+      shape: { kind: 'decided', reading },
+      ...(fingerprint === undefined ? {} : { fingerprint }),
+      ...(resolution.harness === 'codex' ? { codex: readCodexAuthFacts(state.material) } : {}),
+    };
+  };
   const ports: CredentialStatusPorts = {
-    classify: async () => {
-      if (state.local === 'throw') throw new Error('keychain locked');
-      return state.local;
-    },
-    material: async () => {
-      if (state.material === 'throw') throw new Error('io');
-      return state.material;
+    local: async (resolution, options) => {
+      reads.push({ fresh: options?.fresh === true });
+      return facts(resolution);
     },
     passiveUsage: async () => {
       if (state.passive === 'throw') throw new Error('io');
       return state.passive;
     },
-    activeUsage: async () => {
+    activeUsage: async resolution => {
       calls.active += 1;
       if (state.active === 'throw') throw new Error('offline');
-      return typeof state.active === 'function' ? await state.active() : state.active;
+      const local = facts(resolution);
+      return { result: typeof state.active === 'function' ? await state.active() : state.active, local };
     },
     refresh,
     heads,
     now: () => NOW,
     usageIntervalMs: MINUTE,
   };
-  return { ports, heads, calls, set: patch => Object.assign(state, patch) };
+  return { ports, heads, calls, reads, set: patch => Object.assign(state, patch) };
 }
 
 const subject = (resolution: CredentialStoreResolution, id = resolution.harness === 'codex' ? 'cx' : 'work') => ({
@@ -598,6 +675,51 @@ describe('CredentialStatusService', () => {
     should(world.calls.active).equal(0);
     should(view.status.reason).equal('passive_usage_seen');
     should(view.usage.source).equal('claude-statusline');
+    should(world.reads).deepEqual([{ fresh: false }]);
+  });
+
+  it('should read the store ONCE for an observe that makes the free read, and decide from that read', async () => {
+    // Arrange — the free read's material says the token expired; the store changes while the request is
+    // out, so a second read after it would say valid instead.
+    const world = harness({ local: { state: 'refreshable', expiresAt: NOW - MINUTE, fingerprint: 'f1' } });
+    const service = new CredentialStatusService(world.ports);
+    world.set({
+      active: async () => {
+        world.set({ local: { state: 'valid', expiresAt: NOW + 60 * MINUTE, fingerprint: 'f2' } });
+        return { usageBased: true, ok: true, credentialSignal: 'accepted' };
+      },
+    });
+
+    // Act
+    const view = await service.observe(subject(CLAUDE));
+
+    // Assert — one store read (the free read's), no classification before or after it.
+    should(world.calls.active).equal(1);
+    should(world.reads).deepEqual([]);
+    should(view.status).match({ word: 'refresh_due', reason: 'access_expired_refreshable' });
+  });
+
+  it('should pin a Claude answer to the digest of the very material whose token was sent', async () => {
+    // Arrange — the login is replaced between the kept facts and the free read.
+    const world = harness({ local: { state: 'valid', expiresAt: NOW + 60 * MINUTE, fingerprint: 'replaced' } });
+
+    // Act
+    await new CredentialStatusService(world.ports).observe(subject(CLAUDE));
+
+    // Assert
+    should((await world.heads.read('work'))?.conclusion).match({ word: 'ready', fingerprint: 'replaced' });
+  });
+
+  it('should decide from the kept facts when the free read itself throws', async () => {
+    // Arrange
+    const world = harness({ active: 'throw' });
+
+    // Act
+    const view = await new CredentialStatusService(world.ports).observe(subject(CLAUDE));
+
+    // Assert — the check is inconclusive; the word comes from one local read.
+    should(view.status).match({ word: 'ready', reason: 'not_checked_yet', lastCheckInconclusive: true });
+    should(world.reads).deepEqual([{ fresh: false }]);
   });
 
   it('should treat a throwing probe, classifier or passive reader as an inconclusive check', async () => {
@@ -678,6 +800,8 @@ describe('CredentialStatusService', () => {
     // Assert
     should(view.status).match({ word: 'ready', reason: 'refresh_accepted', since: NOW });
     should(world.calls).deepEqual({ active: 1, refresh: 1 });
+    // Before, twice inside the refresh, and after: every one FRESH, so no kept answer hides the write.
+    should(world.reads).deepEqual([{ fresh: true }, { fresh: true }, { fresh: true }, { fresh: true }]);
   });
 
   it('should record an expired refresh token as Needs sign-in', async () => {

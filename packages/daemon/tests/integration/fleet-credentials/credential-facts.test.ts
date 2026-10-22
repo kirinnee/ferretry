@@ -10,11 +10,11 @@ import { afterEach, describe, it } from 'bun:test';
 import { mkdir, mkdtemp, rm, stat, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { CredentialMaterial } from '@ferretry/fleet';
+import { credentialFileStamp } from '@ferretry/fleet/adapters';
 import should from 'should';
 import {
   CredentialEmailReader,
-  codexEmail,
+  type CredentialEmailReaderDeps,
   ensurePrivateDirectory,
   rolloutFiles,
   runCredentialHarness,
@@ -31,16 +31,6 @@ async function scratch(): Promise<string> {
   temporaryDirectories.push(root);
   return root;
 }
-
-/** A Codex `auth.json` whose id token carries these claims. The signature is never checked. */
-const codexAuth = (claims: Record<string, unknown>): string =>
-  JSON.stringify({
-    tokens: {
-      id_token: `e30.${Buffer.from(JSON.stringify(claims)).toString('base64url')}.c2ln`,
-      access_token: 'access-TESTONLY',
-      refresh_token: 'refresh-TESTONLY',
-    },
-  });
 
 const CODEX_RESOLUTION = {
   harness: 'codex',
@@ -61,36 +51,22 @@ describe('ensurePrivateDirectory', () => {
   });
 });
 
-describe('codexEmail', () => {
-  it('should keep the id token email claim and nothing else', () => {
-    // Act / Assert
-    should(codexEmail({ outcome: 'found', blob: codexAuth({ email: ' person@example.com ' }) })).equal(
-      'person@example.com',
-    );
-  });
-
-  it.each<[string, CredentialMaterial]>([
-    ['absent material', { outcome: 'absent' }],
-    ['unreadable material', { outcome: 'unreadable', reason: 'locked' }],
-    ['a blob that is not JSON', { outcome: 'found', blob: 'not json' }],
-    ['a login with no id token', { outcome: 'found', blob: JSON.stringify({ OPENAI_API_KEY: 'sk-TESTONLY' }) }],
-    ['an id token with no payload', { outcome: 'found', blob: JSON.stringify({ tokens: { id_token: 'header' } }) }],
-    ['an id token with no email', { outcome: 'found', blob: codexAuth({ sub: 'someone' }) }],
-  ])('should show no email for %s', (_case, material) => {
-    // Act / Assert
-    should(codexEmail(material)).be.undefined();
-  });
-});
-
 describe('CredentialEmailReader', () => {
+  const readerOf = (deps: Partial<CredentialEmailReaderDeps> = {}): CredentialEmailReader =>
+    new CredentialEmailReader({
+      codexFacts: async () => ({ shape: { kind: 'decided', reading: { state: 'missing' } } }),
+      stamp: credentialFileStamp,
+      kept: new Map(),
+      ...deps,
+    });
+
   it('should read the account Claude recorded in a config directory', async () => {
     // Arrange
     const accountFile = join(await scratch(), '.claude.json');
     await writeFile(accountFile, JSON.stringify({ oauthAccount: { emailAddress: 'person@example.com' } }));
-    const reader = new CredentialEmailReader({ storedMaterial: async () => ({ outcome: 'absent' }) });
 
     // Act / Assert
-    should(await reader.email({ harness: 'claude', accountFile })).equal('person@example.com');
+    should(await readerOf().email({ harness: 'claude', accountFile })).equal('person@example.com');
   });
 
   it('should show no Claude email when the account file is missing or damaged', async () => {
@@ -98,20 +74,55 @@ describe('CredentialEmailReader', () => {
     const root = await scratch();
     const damaged = join(root, '.claude.json');
     await writeFile(damaged, '{');
-    const reader = new CredentialEmailReader({ storedMaterial: async () => ({ outcome: 'absent' }) });
+    const reader = readerOf();
 
     // Act / Assert
     should(await reader.email({ harness: 'claude', accountFile: join(root, 'missing.json') })).be.undefined();
     should(await reader.email({ harness: 'claude', accountFile: damaged })).be.undefined();
   });
 
-  it('should read a Codex email from the store it names', async () => {
+  it('should parse a Claude account file again only once its stamp moved', async () => {
+    // Arrange — a stamp that never moves, then the real one.
+    const accountFile = join(await scratch(), '.claude.json');
+    await writeFile(accountFile, JSON.stringify({ oauthAccount: { emailAddress: 'first@example.com' } }));
+    const kept = new Map();
+    const frozen = readerOf({ stamp: async () => 'unchanged', kept });
+    await frozen.email({ harness: 'claude', accountFile });
+    await writeFile(accountFile, JSON.stringify({ oauthAccount: { emailAddress: 'second@example.com' } }));
+
+    // Act
+    const unchanged = await frozen.email({ harness: 'claude', accountFile });
+    const moved = await readerOf({ kept }).email({ harness: 'claude', accountFile });
+
+    // Assert
+    should(unchanged).equal('first@example.com');
+    should(moved).equal('second@example.com');
+  });
+
+  it('should keep nothing for a Claude account file it could not stamp', async () => {
+    // Arrange
+    const accountFile = join(await scratch(), '.claude.json');
+    await writeFile(accountFile, JSON.stringify({ oauthAccount: { emailAddress: 'person@example.com' } }));
+    const kept = new Map();
+
+    // Act
+    const actual = await readerOf({ stamp: async () => undefined, kept }).email({ harness: 'claude', accountFile });
+
+    // Assert
+    should(actual).equal('person@example.com');
+    should(kept.size).equal(0);
+  });
+
+  it('should read a Codex email from the store facts it names, with no read of its own', async () => {
     // Arrange
     const asked: string[] = [];
-    const reader = new CredentialEmailReader({
-      storedMaterial: async resolution => {
+    const reader = readerOf({
+      codexFacts: async resolution => {
         asked.push(resolution.canonicalFile);
-        return { outcome: 'found', blob: codexAuth({ email: 'team@example.com' }) };
+        return {
+          shape: { kind: 'tokens', hasAccess: true, hasRefresh: true },
+          codex: { state: 'tokens', hasAccess: true, hasRefresh: true, email: 'team@example.com' },
+        };
       },
     });
 
@@ -123,16 +134,17 @@ describe('CredentialEmailReader', () => {
     should(asked).deepEqual(['/fy/credentials/team/auth.json']);
   });
 
-  it('should show no Codex email when the store cannot be read', async () => {
+  it('should show no Codex email when the store cannot be read or holds no login', async () => {
     // Arrange
-    const reader = new CredentialEmailReader({
-      storedMaterial: async () => {
+    const failing = readerOf({
+      codexFacts: async () => {
         throw new Error('the keychain is locked');
       },
     });
 
     // Act / Assert
-    should(await reader.email({ harness: 'codex', resolution: CODEX_RESOLUTION })).be.undefined();
+    should(await failing.email({ harness: 'codex', resolution: CODEX_RESOLUTION })).be.undefined();
+    should(await readerOf().email({ harness: 'codex', resolution: CODEX_RESOLUTION })).be.undefined();
   });
 });
 

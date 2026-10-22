@@ -100,14 +100,8 @@ const isPresent = (value: unknown): boolean => typeof value === 'string' && valu
  * might already be dead. Neither providers write, which is why an unknown expiry is anomalous enough
  * to refuse rather than guess.
  */
-function classifyTokens(
-  accessToken: unknown,
-  refreshToken: unknown,
-  expiresAt: number | undefined,
-  now: number,
-): CredentialReading {
-  const hasAccess = isPresent(accessToken);
-  const hasRefresh = isPresent(refreshToken);
+function classifyTokens(shape: CredentialTokenShape, now: number): CredentialReading {
+  const { hasAccess, hasRefresh, expiresAt } = shape;
   if (!hasAccess && !hasRefresh) return { state: 'missing' };
   if (!hasAccess) return { state: 'refreshable' };
   if (expiresAt === undefined) {
@@ -115,6 +109,37 @@ function classifyTokens(
   }
   if (expiresAt > now + CREDENTIAL_EXPIRY_SKEW_MS) return { state: 'valid', expiresAt };
   return hasRefresh ? { state: 'refreshable', expiresAt } : { state: 'missing', expiresAt };
+}
+
+/** Which tokens a credential holds and when its access token expires. Presence flags, never a token. */
+export interface CredentialTokenShape {
+  readonly kind: 'tokens';
+  readonly hasAccess: boolean;
+  readonly hasRefresh: boolean;
+  readonly expiresAt?: number;
+}
+
+/**
+ * Everything a classification needs from the material, and nothing that changes with the clock — so
+ * it can be KEPT between reads of an unchanged store, where a {@link CredentialReading} cannot: its
+ * `valid` becomes `refreshable` as time passes with no byte of the credential changing.
+ *
+ * Either the material already decided the reading whatever the time (absent, unreadable, not the JSON
+ * this build expects), or it is a {@link CredentialTokenShape} that {@link classifyShape} judges at a
+ * given instant. Neither holds a token.
+ */
+export type CredentialShape = { readonly kind: 'decided'; readonly reading: CredentialReading } | CredentialTokenShape;
+
+const tokenShape = (accessToken: unknown, refreshToken: unknown, expiresAt: number | undefined): CredentialShape => ({
+  kind: 'tokens',
+  hasAccess: isPresent(accessToken),
+  hasRefresh: isPresent(refreshToken),
+  ...(expiresAt === undefined ? {} : { expiresAt }),
+});
+
+/** The reading a shape gives at `now`. {@link classifyCredential} is exactly this over {@link credentialShape}. */
+export function classifyShape(shape: CredentialShape, now: number): CredentialReading {
+  return shape.kind === 'decided' ? shape.reading : classifyTokens(shape, now);
 }
 
 /**
@@ -140,32 +165,47 @@ function parseMaterial(material: CredentialMaterial, label: string): Record<stri
 const isReading = (value: Record<string, unknown> | CredentialReading): value is CredentialReading =>
   typeof (value as CredentialReading).state === 'string';
 
-/** Classify a Claude Code OAuth credential blob. */
-export function classifyClaudeCredential(material: CredentialMaterial, now: number): CredentialReading {
+/** A Claude Code OAuth credential blob, reduced to its {@link CredentialShape}. */
+function claudeShape(material: CredentialMaterial): CredentialShape {
   const parsed = parseMaterial(material, 'the Claude credential');
-  if (isReading(parsed)) return parsed;
+  if (isReading(parsed)) return { kind: 'decided', reading: parsed };
   const nested = parsed.claudeAiOauth;
   const credential = (nested !== null && typeof nested === 'object' ? nested : parsed) as Record<string, unknown>;
   const expiresAt =
     typeof credential.expiresAt === 'number' && Number.isFinite(credential.expiresAt)
       ? Math.trunc(credential.expiresAt)
       : undefined;
-  return classifyTokens(credential.accessToken, credential.refreshToken, expiresAt, now);
+  return tokenShape(credential.accessToken, credential.refreshToken, expiresAt);
+}
+
+/** A Codex `auth.json`, reduced to its {@link CredentialShape}. Its access token carries its own expiry. */
+function codexShape(material: CredentialMaterial): CredentialShape {
+  const parsed = parseMaterial(material, 'the Codex credential');
+  if (isReading(parsed)) return { kind: 'decided', reading: parsed };
+  const tokens = parsed.tokens;
+  if (tokens === null || typeof tokens !== 'object') return { kind: 'decided', reading: { state: 'missing' } };
+  const { access_token: accessToken, refresh_token: refreshToken } = tokens as Record<string, unknown>;
+  return tokenShape(accessToken, refreshToken, decodeJwtExpiry(accessToken));
+}
+
+/** Whichever credential this harness keeps, reduced to the facts a classification needs at any instant. */
+export function credentialShape(kind: HarnessKind, material: CredentialMaterial): CredentialShape {
+  return kind === 'claude' ? claudeShape(material) : codexShape(material);
+}
+
+/** Classify a Claude Code OAuth credential blob. */
+export function classifyClaudeCredential(material: CredentialMaterial, now: number): CredentialReading {
+  return classifyShape(claudeShape(material), now);
 }
 
 /** Classify a Codex `auth.json`. Its access token carries its own expiry, as a JWT claim. */
 export function classifyCodexCredential(material: CredentialMaterial, now: number): CredentialReading {
-  const parsed = parseMaterial(material, 'the Codex credential');
-  if (isReading(parsed)) return parsed;
-  const tokens = parsed.tokens;
-  if (tokens === null || typeof tokens !== 'object') return { state: 'missing' };
-  const { access_token: accessToken, refresh_token: refreshToken } = tokens as Record<string, unknown>;
-  return classifyTokens(accessToken, refreshToken, decodeJwtExpiry(accessToken), now);
+  return classifyShape(codexShape(material), now);
 }
 
 /** Classify whichever credential shape this harness keeps. */
 export function classifyCredential(kind: HarnessKind, material: CredentialMaterial, now: number): CredentialReading {
-  return kind === 'claude' ? classifyClaudeCredential(material, now) : classifyCodexCredential(material, now);
+  return classifyShape(credentialShape(kind, material), now);
 }
 
 /** One account inside an identity: everything a credential store or a login needs, and nothing else. */

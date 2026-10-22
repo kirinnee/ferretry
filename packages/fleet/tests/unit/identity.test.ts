@@ -8,6 +8,8 @@ import {
   classifyClaudeCredential,
   classifyCodexCredential,
   classifyCredential,
+  classifyShape,
+  credentialShape,
   decideIdentity,
   decodeJwtExpiry,
   type FleetCredentialStore,
@@ -301,6 +303,45 @@ describe('classifyCredential', () => {
     should(classifyCredential('claude', claude, NOW).state).equal('valid');
     should(classifyCredential('codex', codex, NOW).state).equal('valid');
     should(classifyCredential('codex', claude, NOW).state).equal('missing');
+  });
+});
+
+describe('credentialShape and classifyShape', () => {
+  it('should keep no token and no clock, so one kept shape classifies differently as time passes', () => {
+    // Arrange
+    const material = found(
+      claudeBlob({ accessToken: 'access-TESTONLY', refreshToken: 'refresh-TESTONLY', expiresAt: NOW + HOUR }),
+    );
+
+    // Act
+    const shape = credentialShape('claude', material);
+
+    // Assert
+    should(shape).deepEqual({ kind: 'tokens', hasAccess: true, hasRefresh: true, expiresAt: NOW + HOUR });
+    should(JSON.stringify(shape)).not.match(/TESTONLY/);
+    should(classifyShape(shape, NOW)).deepEqual({ state: 'valid', expiresAt: NOW + HOUR });
+    should(classifyShape(shape, NOW + 2 * HOUR)).deepEqual({ state: 'refreshable', expiresAt: NOW + HOUR });
+  });
+
+  it.each<[string, HarnessKind, CredentialMaterial]>([
+    ['an absent Claude store', 'claude', { outcome: 'absent' }],
+    ['an unreadable Claude store', 'claude', { outcome: 'unreadable', reason: 'the keychain read failed (exit 36)' }],
+    ['a Claude blob that is not JSON', 'claude', found('{')],
+    ['a Claude blob with no tokens', 'claude', found(claudeBlob({}))],
+    ['a Claude token with no expiry', 'claude', found(claudeBlob({ accessToken: 'a' }))],
+    ['a Codex file with no tokens', 'codex', found(JSON.stringify({ tokens: null }))],
+    ['a Codex file with only a refresh token', 'codex', found(JSON.stringify({ tokens: { refresh_token: 'r' } }))],
+    [
+      'a Codex token expiring now',
+      'codex',
+      found(JSON.stringify({ tokens: { access_token: jwt({ exp: NOW / 1000 }) } })),
+    ],
+  ])('should classify %s exactly as classifyCredential does', (_case, kind, material) => {
+    // Act
+    const actual = classifyShape(credentialShape(kind, material), NOW);
+
+    // Assert
+    should(actual).deepEqual(classifyCredential(kind, material, NOW));
   });
 });
 

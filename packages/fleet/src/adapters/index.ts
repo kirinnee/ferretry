@@ -13,6 +13,7 @@ export {
 export * from './host-harness-scan.ts';
 export * from './mutation-journal.ts';
 export * from './credential-classifier.ts';
+export * from './credential-reads.ts';
 export * from './wrapper-source.ts';
 export * from './process-token-refresh.ts';
 export * from './rollout-rate-limits.ts';

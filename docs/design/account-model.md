@@ -696,6 +696,16 @@ read is given its last known word, because a cached "Checking" outlives the read
 this rule the usage pass, which lists and reads credentials at the same time, cached its own in-flight
 reads as "not known" for a whole interval.
 
+**How often a store is read.** A status needs only facts about the login — which tokens are there, when the
+access token expires, Codex's `last_refresh`, plan and email — plus the truncated digest the digest guard
+compares. The daemon keeps exactly those (`CachedCredentialReads`, never the material, never a token) and
+re-reads a store only when it may have changed: a file store when its stamp (inode, size, change and
+modification times) moves, a macOS keychain item after one `usage.interval`. Expiry is judged at the moment
+of each view from the kept expiry, so a kept login still turns **Refresh due** on time. A free usage read
+reads the store once, takes its digest and its bearer token from that one read, and refreshes the kept facts;
+Check now's Codex refresh always reads the file itself. So an idle Claude login costs one store read per
+interval (on macOS one `security` process), and listing logins costs none.
+
 #### 8.1.3 Usage
 
 1. **Passive (VERIFIED field, INFERRED plumbing):** Claude passes `rate_limits.five_hour` /
