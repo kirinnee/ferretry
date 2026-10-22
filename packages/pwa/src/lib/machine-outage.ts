@@ -72,18 +72,24 @@ const headlineFor = (reason: OutageReason, name: string): string => {
 export const NOT_ANSWERING_MARK = 'did not answer within';
 
 /**
- * This machine's outage, or `null` while it is answering. Reconnecting is an outage from its first
- * measurement — the list already greys on it — and a failed list read is one even on a machine whose
- * carrier is fine, because the rows on screen are then not what the machine holds now.
+ * This machine's outage, or `null` while it is answering. A failed list read is one even on a machine
+ * whose carrier is fine, because the rows on screen are then not what the machine holds now.
+ *
+ * Reconnecting alone is one only once it has STALLED, unless `immediate`: a socket that drops and is
+ * back in a moment is a blip, not news — the same rule the connection pill keeps. The all-machines list
+ * passes `immediate`, because its reach already greys a machine from the first measurement and its
+ * heading should say why.
  */
 export const machineOutage = (
   name: string,
   health: ConnectionHealthState,
   slice: Pick<DaemonFleetSlice, 'status' | 'error' | 'readAt'>,
+  { immediate = false }: { readonly immediate?: boolean } = {},
 ): MachineOutage | null => {
   const reconnecting = health.kind === 'reconnecting' ? health : null;
   const failed = slice.status === 'error' || (slice.status === 'loading' && slice.error !== null);
-  if (reconnecting === null && !failed) return null;
+  const down = reconnecting !== null && (immediate || reconnecting.stalled);
+  if (!down && !failed) return null;
   const listError = slice.error ?? '';
   const reason: OutageReason =
     reconnecting !== null

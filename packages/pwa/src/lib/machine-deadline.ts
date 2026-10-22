@@ -38,13 +38,16 @@ export class MachineDeadlineError extends Error {
 /**
  * `read`, or a {@link MachineDeadlineError} once `deadlineMs` has passed — whichever comes first. A late
  * settlement of `read` is swallowed here so it is never an unhandled rejection.
+ *
+ * The deadline's own rejection is also marked handled as it is made. It fires from a timer, and a CI run
+ * under fake timers reported it as unhandled though every caller catches it; the caller still receives it.
  */
 export const withDeadline = <T>(
   read: Promise<T>,
   deadlineMs: number = MACHINE_READ_DEADLINE_MS,
   schedule: DeadlineSchedule = realSchedule,
-): Promise<T> =>
-  new Promise<T>((resolve, reject) => {
+): Promise<T> => {
+  const bounded = new Promise<T>((resolve, reject) => {
     const cancel = schedule(() => reject(new MachineDeadlineError(deadlineMs)), deadlineMs);
     read.then(
       value => {
@@ -57,6 +60,9 @@ export const withDeadline = <T>(
       },
     );
   });
+  bounded.catch(() => undefined);
+  return bounded;
+};
 
 /**
  * A read sender whose plain reads (GET and HEAD) give up after `deadlineMs` when the caller set no

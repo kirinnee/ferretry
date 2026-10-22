@@ -151,7 +151,7 @@ const UNMEASURED: ConnectionHealthState = { kind: 'unknown' };
  * whose slice and health hold no failure to name still reads as unreachable, never as a bare heading.
  */
 const sectionOutage = (machine: MachineSource): MachineOutage =>
-  machineOutage(machine.name, machine.health ?? UNMEASURED, machine.slice) ??
+  machineOutage(machine.name, machine.health ?? UNMEASURED, machine.slice, { immediate: true }) ??
   unreachableOutage(machine.name, machine.slice);
 
 /** Can the reader act on this machine's rows now? Only a machine that answered. */

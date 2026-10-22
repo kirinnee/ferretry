@@ -87,3 +87,15 @@ describe('machineOutage', () => {
     );
   });
 });
+
+describe('machineOutage and a blip', () => {
+  it('says nothing about a reconnect that has not stalled, unless asked to say it at once', () => {
+    const blip = { ...reconnecting('relay-unreachable'), stalled: false };
+    expect(machineOutage('M', blip, { status: 'loading', error: null })).toBeNull();
+    expect(machineOutage('M', blip, { status: 'loading', error: null }, { immediate: true })?.chip).toBe(
+      'Relay down · retrying',
+    );
+    // A failed read is news whatever the carrier is doing.
+    expect(machineOutage('M', blip, { status: 'error', error: 'HTTP 500' })?.chip).toBe('Relay down · retrying');
+  });
+});

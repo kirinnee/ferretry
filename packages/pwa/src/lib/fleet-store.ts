@@ -296,6 +296,8 @@ export class DaemonFleetStore {
         if (entry.listInflight === request) entry.listInflight = null;
       });
 
+    // Every caller handles its own copy; this only keeps a timer-fired rejection from reading as unhandled.
+    request.catch(() => undefined);
     entry.listInflight = request;
     return request;
   }
