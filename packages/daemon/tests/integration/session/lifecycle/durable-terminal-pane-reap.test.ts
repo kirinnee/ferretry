@@ -2,6 +2,7 @@ import { afterEach, describe, it } from 'bun:test';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { processIncarnationFor } from '@ferretry/protocol/process-incarnation';
 import should from 'should';
 import {
   BunSqliteIndexFactory,
@@ -24,6 +25,7 @@ import {
   defaultSessionLifecycleSettings,
   parseSessionId,
   type RegisteredTerminalPane,
+  SessionAttachService,
   TerminalReapService,
   TmuxController,
 } from '../../../../src/lib/index.ts';
@@ -196,6 +198,25 @@ describe('durable terminal pane reap adapters', () => {
     should(actual).deepEqual([persisted]);
   });
 
+  it('should prove an attach target whose start identity is the one the CLI reads back from the live pane', async () => {
+    // Arrange
+    const subject = await fixture();
+    await subject.registrar.register(subject.record);
+    const attach = new SessionAttachService(
+      DAEMON,
+      '/run/user/1000/fy/tmux.sock',
+      { list: daemonId => subject.store.registrations(daemonId) },
+      subject.runtime,
+    );
+
+    // Act
+    const target = await attach.resolve(subject.record.config.id);
+
+    // Assert -- `fy attach` re-reads this value through `@ferretry/protocol/process-incarnation`;
+    // if the daemon wrote it any other way, every attach on that platform would be refused.
+    should(target.processStartTicks).equal(await processIncarnationFor().startOf(target.pid));
+  });
+
   it('should reap an exact terminal pane after its durable terminal state is recorded', async () => {
     // Arrange
     const subject = await fixture();
@@ -336,6 +357,30 @@ describe('a registration ledger with one damaged document', () => {
     // Assert
     should(scanned.registrations.map(value => value.sessionId)).deepEqual(['reap-session']);
     should(scanned.damaged.map(value => value.sessionId)).deepEqual([DAMAGED]);
+  });
+
+  it('should survey once for two scans asked together, and see a registration change between scans', async () => {
+    // Arrange — a sweep asks for the registrations and the sessions in the same breath.
+    const subject = await fixture();
+    await subject.registrar.register(subject.record);
+    const survey = subject.storage.sessionIdsOnDisk.bind(subject.storage);
+    let surveys = 0;
+    subject.storage.sessionIdsOnDisk = async () => {
+      surveys += 1;
+      return await survey();
+    };
+
+    // Act
+    const [first, second] = await Promise.all([subject.store.scan(DAEMON), subject.store.scan(DAEMON)]);
+    const together = surveys;
+    await damage(subject, '{ not json at all');
+    const later = await subject.store.scan(DAEMON);
+
+    // Assert
+    should(together).equal(1);
+    should(second).equal(first);
+    should(later.damaged.map(value => value.sessionId)).deepEqual([DAMAGED]);
+    should(surveys).equal(2);
   });
 
   it('should refuse the REAP view of that same ledger', async () => {

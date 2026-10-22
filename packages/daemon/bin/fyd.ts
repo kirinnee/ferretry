@@ -82,6 +82,7 @@ import {
   type TranscriptProvenance,
   type WardenGuardConfig,
 } from '@ferretry/protocol';
+import { processIncarnationFor } from '@ferretry/protocol/process-incarnation';
 // One WebCrypto binding of the relay's crypto port serves the daemon, the browser and the Worker that
 // verifies the claim. Two implementations that agree about a primitive and disagree about an encoding
 // is the class of bug this removes.
@@ -299,7 +300,6 @@ import {
   lifecycleConfigDocument,
   NodeSessionCredentialIssuer,
   NodeWorkingDirectoryResolver,
-  processIncarnationFor,
   type SessionProtocolEnvelope,
   StorageSessionLifecycleRepository,
   TimeSessionIdFactory,

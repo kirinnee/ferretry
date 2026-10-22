@@ -202,6 +202,9 @@ export async function scaledFleet(root: string, shape: ScaledFleetShape = OWNER_
 
   // Thousands of Codex rollouts, spread across day directories as Codex writes them.
   const rolloutFiles: string[] = [];
+  // Every rollout here predates every session, so each undiscovered session's baseline names them all —
+  // exactly what a real launch records before it starts the harness.
+  const rolloutIds: string[] = [];
   for (let index = 0; index < shape.rollouts; index += 1) {
     const day = String((index % 28) + 1).padStart(2, '0');
     const directory = join(codexHome, 'sessions', '2026', '10', day);
@@ -212,6 +215,7 @@ export async function scaledFleet(root: string, shape: ScaledFleetShape = OWNER_
     await writeFile(file, text);
     bytes += Buffer.byteLength(text);
     rolloutFiles.push(file);
+    rolloutIds.push(conversationId);
   }
 
   let hugeLeft = shape.hugeTranscripts;
@@ -269,7 +273,13 @@ export async function scaledFleet(root: string, shape: ScaledFleetShape = OWNER_
         const file = rolloutFiles[index % Math.max(1, rolloutFiles.length)];
         transcript =
           undiscovered || file === undefined
-            ? { v: 1, home: codexHome, identity: 'undiscovered', baseline: [], correlationToken: `fy-${sessionId}` }
+            ? {
+                v: 1,
+                home: codexHome,
+                identity: 'undiscovered',
+                baseline: rolloutIds,
+                correlationToken: `fy-${sessionId}`,
+              }
             : {
                 v: 1,
                 home: codexHome,

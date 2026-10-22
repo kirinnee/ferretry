@@ -60,11 +60,29 @@ export type DurableAppendOutcome =
   | { readonly kind: 'absent' }
   | { readonly kind: 'replaced' };
 
+/** Text, and the identity (device, inode, size, change times) of the file it came from. */
+export interface IdentifiedText {
+  readonly text: string;
+  readonly identity: string;
+}
+
 export interface FileSystemPort {
   ensureDirectory(path: string, mode: number): Promise<void>;
   setMode(path: string, mode: number): Promise<void>;
   listDirectory(path: string): Promise<readonly DirectoryEntry[]>;
   readText(path: string): Promise<string | undefined>;
+  /**
+   * A file's text together with the identity of the very file it was read from — what {@link identity}
+   * reports for that file until it is replaced or changed. Optional: a filesystem without it is read in
+   * full every time, which is always correct and only slower.
+   */
+  readTextIdentified?(path: string): Promise<IdentifiedText | undefined>;
+  /**
+   * The identity of what `path` names now, by ONE `stat` and no containment walk; `undefined` when it
+   * names nothing. Only ever compared with an identity {@link readTextIdentified} returned, which is what
+   * makes skipping the walk safe: an identity the walk once proved still names that same proved file.
+   */
+  identity?(path: string): Promise<string | undefined>;
   readChunks(path: string, chunkSize: number, offset?: number): AsyncIterable<Uint8Array>;
   readSlice(path: string, offset: number, length: number): Promise<Uint8Array | undefined>;
   information(path: string): Promise<FileInformation | undefined>;

@@ -42,6 +42,7 @@ export * from './models.ts';
 export * from './pack.ts';
 export * from './pairing.ts';
 export * from './pins.ts';
+export * from './process-incarnation.ts';
 export * from './push.ts';
 export * from './relay-session.ts';
 export * from './secret-clone.ts';

@@ -340,6 +340,62 @@ describe('the session file index inside a Git worktree', () => {
     should(pinner.roots).eql([]);
     should(git.cwds).eql([]);
   });
+
+  it('should prove tracked names through ONE probe, in bounded batches, and always close it', async () => {
+    // A batch is the longest the index holds the event loop on a platform whose probe is synchronous,
+    // so a tree larger than one batch must be asked in several — and the probe, which holds directory
+    // descriptors, must be closed however the read ends.
+    // Arrange
+    const paths = Array.from({ length: 600 }, (_unused, index) => `src/f${String(index).padStart(3, '0')}.ts`);
+    const { filesystem, pinner } = viewer(
+      { tree: gitTree(...paths) },
+      { listFiles: () => ({ paths, truncated: false }) },
+    );
+
+    // Act
+    const index = await filesystem.index(CWD);
+
+    // Assert
+    should(index.files).have.length(600);
+    should(index.coverage).eql('complete');
+    should(pinner.lastRoot.probesOpened).eql(1);
+    should(pinner.lastRoot.probesClosed).eql(1);
+    should(pinner.lastRoot.probeBatches.map(batch => batch.length)).eql([256, 256, 88]);
+    should(pinner.lastRoot.probeBatches.flat()).eql(paths);
+  });
+
+  it('should never ask the probe about a name a pure gate already refused', async () => {
+    // Arrange
+    const { filesystem, pinner } = viewer(
+      { tree: gitTree('src/a.ts', 'node_modules/x/index.js', '.env', 'src/b.ts') },
+      { listFiles: () => ({ paths: ['src/a.ts', 'node_modules/x/index.js', '.env', 'src/b.ts'], truncated: false }) },
+    );
+
+    // Act
+    const index = await filesystem.index(CWD);
+
+    // Assert
+    should(index.files.map(file => file.path)).eql(['src/a.ts', 'src/b.ts']);
+    should(pinner.lastRoot.probeBatches).eql([['src/a.ts', 'src/b.ts']]);
+  });
+
+  it('should count a batch the probe could not answer as unreadable and carry on with the next', async () => {
+    // Arrange
+    const { filesystem, pinner } = viewer(
+      { tree: gitTree('a.ts', 'b.ts'), probeError: new Error('the installed directory could not be proved') },
+      { listFiles: () => ({ paths: ['a.ts', 'b.ts'], truncated: false }) },
+    );
+
+    // Act
+    const index = await filesystem.index(CWD);
+
+    // Assert: a partial answer that says why, never a thrown read and never "no files" passed off as complete.
+    should(index.files).be.empty();
+    should(index.coverage).eql('partial');
+    should(index.skipped).eql([{ reason: 'unreadable', count: 2 }]);
+    should(pinner.lastRoot.probesClosed).eql(1);
+    should(pinner.lastRoot.closed).be.true();
+  });
 });
 
 describe('the session file index outside a Git worktree', () => {

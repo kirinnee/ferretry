@@ -161,8 +161,33 @@ function sameJournalFile(left: JournalFingerprint, right: JournalFingerprint): b
   return left.device === right.device && left.inode === right.inode;
 }
 
+/** How many session documents the identity cache holds before it starts again from empty. */
+const DOCUMENT_CACHE_LIMIT = 4_096;
+
+/** A document as last read: the identity of the file it came from, its text, and its parsed value. */
+interface CachedDocument {
+  readonly identity: string;
+  readonly text: string;
+  readonly value?: JsonValue;
+}
+
 export class DaemonStorage {
   private closed = false;
+  /**
+   * Session documents — markers, configs, states — by path, each with the identity of the file it was
+   * read from.
+   *
+   * WHY. Every background watcher reads every session's documents every few seconds. Each read walked
+   * the state home component by component (an `lstat` per directory), opened and read the marker and
+   * then the document, and parsed the JSON: on a 36-session Mac, about 350 file opens a second and a
+   * parse on the event loop for every one — under endpoint security, which inspects every open, that
+   * was most of what the daemon did. A document that has not changed is now answered by ONE `stat`,
+   * compared with the identity of the file that was proved and read; anything else — our own atomic
+   * write (a new inode), someone else's edit, a swap — is a different identity and a full, walked read.
+   *
+   * Values are handed out as copies, so no caller can change what another one is given.
+   */
+  private readonly documents = new Map<string, CachedDocument>();
   /** Live journal appends for sockets served by THIS opened daemon storage, never process-global. */
   private readonly eventListeners = new Set<(event: SessionEvent) => void>();
 
@@ -399,10 +424,12 @@ export class DaemonStorage {
 
   private async readObservation(id: SessionId, includeMissingMarker = false): Promise<SessionObservation | undefined> {
     const paths = createSessionPaths(this.paths, id);
+    // Through the identity cache: every journal append and every self-check observes the session, and
+    // re-reading three unchanged documents each time was most of what either of them cost.
     const [marker, config, state, journal] = await Promise.all([
-      this.fileSystem.readText(paths.marker),
-      this.fileSystem.readText(paths.config),
-      this.fileSystem.readText(paths.state),
+      this.readCachedText(paths.marker).then(document => document?.text),
+      this.readCachedText(paths.config).then(document => document?.text),
+      this.readCachedText(paths.state).then(document => document?.text),
       this.fileSystem.information(paths.events),
     ]);
     if (marker === undefined && !includeMissingMarker) {
@@ -849,6 +876,7 @@ export class DaemonStorage {
     const document = serializeJsonDocument(value);
     await this.serial.run(id, async () => {
       await this.ensureSessionDirectory(id);
+      this.forgetDocument(createSessionPaths(this.paths, id).config);
       await this.fileSystem.writeTextAtomic(createSessionPaths(this.paths, id).config, document);
       await this.syncSessionUnlocked(id);
     });
@@ -859,25 +887,62 @@ export class DaemonStorage {
     const document = serializeJsonDocument(value);
     await this.serial.run(id, async () => {
       await this.ensureSessionDirectory(id);
+      this.forgetDocument(createSessionPaths(this.paths, id).state);
       await this.fileSystem.writeTextAtomic(createSessionPaths(this.paths, id).state, document);
       await this.syncSessionUnlocked(id);
     });
   }
 
+  /** A document's text, from the identity cache when the file is still the one it holds. */
+  private async readCachedText(path: string): Promise<CachedDocument | undefined> {
+    const { identity, readTextIdentified } = this.fileSystem;
+    if (identity === undefined || readTextIdentified === undefined) {
+      const text = await this.fileSystem.readText(path);
+      return text === undefined ? undefined : { identity: '', text };
+    }
+    const cached = this.documents.get(path);
+    if (cached !== undefined && (await identity.call(this.fileSystem, path)) === cached.identity) return cached;
+    const read = await readTextIdentified.call(this.fileSystem, path);
+    if (read === undefined) {
+      this.documents.delete(path);
+      return undefined;
+    }
+    if (this.documents.size >= DOCUMENT_CACHE_LIMIT) this.documents.clear();
+    const fresh: CachedDocument = { identity: read.identity, text: read.text };
+    this.documents.set(path, fresh);
+    return fresh;
+  }
+
+  /** Whether `path` names something: one `stat` where the filesystem offers it, the walked read otherwise. */
+  private async presence(path: string): Promise<true | undefined> {
+    const present =
+      this.fileSystem.identity === undefined
+        ? await this.fileSystem.information(path)
+        : await this.fileSystem.identity(path);
+    return present === undefined ? undefined : true;
+  }
+
+  /** Forgets what the cache holds for `path`: called for every write this storage makes to it. */
+  private forgetDocument(path: string): void {
+    this.documents.delete(path);
+  }
+
   private async readDocument(id: SessionId, kind: 'config' | 'state'): Promise<JsonValue | undefined> {
     const paths = createSessionPaths(this.paths, id);
-    const marker = await this.fileSystem.readText(paths.marker);
+    const marker = (await this.readCachedText(paths.marker))?.text;
     if (marker === undefined) {
       await this.refuseUnrecoverableUnmarkedSession(id);
       return undefined;
     }
     if (decideSessionMarker(marker) === 'refuse') throw new SessionLayoutError(id, marker);
     const file = paths[kind];
-    const text = await this.fileSystem.readText(file);
-    if (text === undefined) return undefined;
-    const parsed = parseJsonDocument(text);
+    const document = await this.readCachedText(file);
+    if (document === undefined) return undefined;
+    if (document.value !== undefined) return structuredClone(document.value);
+    const parsed = parseJsonDocument(document.text);
     if (!parsed.ok) throw new InvalidStateDocumentError(file, parsed.message);
-    return parsed.value;
+    if (document.identity !== '') this.documents.set(file, { ...document, value: parsed.value });
+    return structuredClone(parsed.value);
   }
 
   async readConfig(id: SessionId): Promise<JsonValue | undefined> {
@@ -905,6 +970,7 @@ export class DaemonStorage {
       // paths get the same gate from their own ensureSessionDirectory call.
       await this.ensureSessionDirectory(id);
       const next = canonicalJsonValue(await transform(current));
+      this.forgetDocument(paths[kind]);
       await this.fileSystem.writeTextAtomic(paths[kind], serializeJsonDocument(next));
       await this.syncSessionUnlocked(id);
       return next;
@@ -1205,24 +1271,30 @@ export class DaemonStorage {
       const id = tryParseSessionId(entry.name);
       if (id === undefined) continue;
       const paths = createSessionPaths(this.paths, id);
-      const [marker, config, state, journal] = await Promise.all([
-        this.fileSystem.readText(paths.marker),
-        this.fileSystem.information(paths.config),
-        this.fileSystem.information(paths.state),
-        this.fileSystem.information(paths.events),
+      // Only PRESENCE is asked of the two documents here, so where the filesystem can answer it with one
+      // `stat` it does; every read of their bytes still walks the home. The reaper surveys every session
+      // twice a sweep, which made this the costliest loop on a large, mostly finished fleet.
+      const [marker, config, state, journalPresent] = await Promise.all([
+        this.readCachedText(paths.marker).then(document => document?.text),
+        this.presence(paths.config),
+        this.presence(paths.state),
+        this.presence(paths.events),
       ]);
       if (decideSessionMarker(marker) === 'refuse') continue;
+      // The journal's SIZE matters only to tell a bare reservation — no documents, an empty journal —
+      // from a session, so it is read only for a directory that has neither document.
       if (
+        config === undefined &&
+        state === undefined &&
+        journalPresent !== undefined &&
         isOnlySessionReservation({
-          config,
-          state,
-          ...(journal === undefined ? {} : { journal: { fingerprint: journal } }),
+          journal: { fingerprint: (await this.fileSystem.information(paths.events)) ?? { size: -1 } },
         })
       )
         continue;
       const indexed = this.index.findSession(id);
       const owesJournal = sessionJournalRequired(marker) || (indexed !== undefined && indexed.journal !== null);
-      const journalLost = owesJournal && journal === undefined;
+      const journalLost = owesJournal && journalPresent === undefined;
       survey.push({ id, journalLost });
     }
     return survey.sort((left, right) => left.id.localeCompare(right.id));

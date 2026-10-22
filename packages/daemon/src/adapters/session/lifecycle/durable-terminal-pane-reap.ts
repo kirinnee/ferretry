@@ -1,3 +1,5 @@
+import type { ProcessIncarnation } from '@ferretry/protocol';
+import { processIncarnationFor } from '@ferretry/protocol/process-incarnation';
 import {
   createSessionPaths,
   type FileSystemPort,
@@ -17,7 +19,6 @@ import type {
 } from '../../../lib/session/reap.ts';
 import type { ExactTerminalReaper, RegisteredPaneObserver } from '../../../lib/session/reap-service.ts';
 import type { DaemonStorage } from '../../storage/session-storage.ts';
-import { type ProcessIncarnation, processIncarnationFor } from './process-incarnation.ts';
 
 function fields(value: unknown): Readonly<Record<string, unknown>> | undefined {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -115,6 +116,23 @@ export interface TerminalPaneRegistrationScan {
 
 /** Reads registrations only from each durable session directory, never from a tmux name listing. */
 export class DurableTerminalPaneStore {
+  /**
+   * Registration texts by path, with the identity of the file each came from.
+   *
+   * The reaper scans every session's registration twice a sweep, every five seconds, and on a mostly
+   * finished fleet almost none of them changes between sweeps — or exists at all. A scan therefore
+   * asks each path for its identity (one `stat`), skips one that names nothing, and reads only a file
+   * that is not the one it read last time. {@link registration} never uses this: it must prove what is
+   * on disk at the moment of a write.
+   */
+  private readonly texts = new Map<string, { readonly identity: string; readonly text: string }>();
+  /**
+   * The scan in flight, shared by every caller that asks while it runs. A sweep asks for the
+   * registrations and the sessions in the same breath, and each used to survey every session directory
+   * on its own — two identical walks of the whole state home every five seconds.
+   */
+  private inFlight: { readonly daemonId: string; readonly scan: Promise<TerminalPaneRegistrationScan> } | undefined;
+
   constructor(
     private readonly storage: DaemonStorage,
     private readonly files: FileSystemPort,
@@ -132,10 +150,22 @@ export class DurableTerminalPaneStore {
    * from, so the two can never come to disagree about what is on disk.
    */
   async scan(daemonId: string): Promise<TerminalPaneRegistrationScan> {
+    if (this.inFlight?.daemonId === daemonId) return await this.inFlight.scan;
+    const scan = this.scanOnce(daemonId);
+    const shared = { daemonId, scan };
+    this.inFlight = shared;
+    try {
+      return await scan;
+    } finally {
+      if (this.inFlight === shared) this.inFlight = undefined;
+    }
+  }
+
+  private async scanOnce(daemonId: string): Promise<TerminalPaneRegistrationScan> {
     const registrations: RegisteredTerminalPane[] = [];
     const damaged: DamagedTerminalPaneRegistration[] = [];
     for (const id of await this.storage.sessionIdsOnDisk()) {
-      const text = await this.files.readText(createSessionPaths(this.paths, id).terminalPane);
+      const text = await this.scanned(createSessionPaths(this.paths, id).terminalPane);
       if (text === undefined) continue;
       try {
         const value = durableRegistration(text, daemonId, id);
@@ -145,6 +175,20 @@ export class DurableTerminalPaneStore {
       }
     }
     return { registrations, damaged };
+  }
+
+  /** A registration's text for a scan: from {@link texts} while the file is the one read last. */
+  private async scanned(path: string): Promise<string | undefined> {
+    const { identity, readTextIdentified } = this.files;
+    if (identity === undefined || readTextIdentified === undefined) return await this.files.readText(path);
+    const now = await identity.call(this.files, path);
+    const cached = this.texts.get(path);
+    if (now !== undefined && cached?.identity === now) return cached.text;
+    this.texts.delete(path);
+    if (now === undefined) return undefined;
+    const read = await readTextIdentified.call(this.files, path);
+    if (read !== undefined) this.texts.set(path, read);
+    return read?.text;
   }
 
   /**

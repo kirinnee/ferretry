@@ -137,6 +137,34 @@ describe('the parks this daemon holds', () => {
     await storage.close();
   });
 
+  it('should not read a session the index says has ended at all', async () => {
+    // Arrange — an ended session can hold no park this loop may service, so its documents are not read.
+    const { opened } = await openStorage();
+    const storage = opened.storage;
+    await storage.writeConfig(ONE, config('session-1'));
+    await storage.writeState(ONE, { id: 'session-1', status: 'completed', waiting: { since: NOW } });
+    await storage.writeConfig(TWO, config('session-2'));
+    await storage.writeState(TWO, { id: 'session-2', status: 'waiting', waiting: { since: NOW } });
+    const durable = new StorageSignalRepository(storage, clock);
+    const read: SessionId[] = [];
+    const counting: SignalRepository = {
+      read: async (id: SessionId) => {
+        read.push(id);
+        return await durable.read(id);
+      },
+      resolvePeer: async reference => await durable.resolvePeer(reference),
+      transition: async (id, change) => await durable.transition(id, change),
+    };
+
+    // Act
+    const parked = await new StorageMonitorWaits(storage, counting, signalsOver(counting), SETTINGS).parked();
+
+    // Assert
+    should(parked.map(session => session.id)).deepEqual([TWO]);
+    should(read).deepEqual([TWO]);
+    await storage.close();
+  });
+
   it('should skip a record it could not read rather than guess at its park', async () => {
     // Arrange
     const { opened } = await openStorage();

@@ -67,6 +67,39 @@ describe('SessionTranscriptResolver', () => {
     should(store.written).be.empty();
   });
 
+  it('should not ask for the claims when no rollout outside the baseline carries the token', async () => {
+    // Arrange — the claims are every other session's configuration; asking costs a read of each.
+    let asked = 0;
+    let skipped: ReadonlySet<string> | undefined;
+    const subject = new SessionTranscriptResolver(
+      {
+        candidates: async (_home, _token, skip) => {
+          skipped = skip;
+          return [
+            { id: 'rollout-old', file: '/old.jsonl', correlated: true },
+            { id: 'rollout-other', file: '/other.jsonl', correlated: false },
+          ];
+        },
+      },
+      {
+        claimed: async () => {
+          asked += 1;
+          return [];
+        },
+      },
+      recorder(),
+      clock,
+    );
+
+    // Act
+    const file = await subject.file('session-1', undiscovered);
+
+    // Assert — the only correlated rollout predates the session, so nothing could have been chosen.
+    should(file).be.undefined();
+    should(asked).equal(0);
+    should([...(skipped ?? [])]).deepEqual(['rollout-old']);
+  });
+
   it('should discover a correlated codex rollout and persist the completed record', async () => {
     // Arrange
     const store = recorder();

@@ -148,6 +148,47 @@ export interface PinnedOpenOptions {
 }
 
 /**
+ * What a {@link PinnedFileProbe} found at one name.
+ *
+ * - `file`: a regular file, reached by the pinned walk with no symlink at ANY component.
+ * - `unsupported`: nothing a read would serve — absent, a directory, a symlink anywhere on the way, or
+ *   a path no walk accepts. The same answer an `open` refusal with a domain code gives.
+ * - `unreadable`: the kernel refused for a reason that is not about the object's kind (`EACCES` on a
+ *   directory, `EIO`), so the name was not proved either way.
+ */
+export type PinnedFileKind = 'file' | 'unsupported' | 'unreadable';
+
+/**
+ * Many "is this a regular file?" questions against ONE pin, sharing every directory walk between them.
+ *
+ * WHY THIS EXISTS. An index proves tens of thousands of names. Asking each through {@link PinnedRoot.open}
+ * re-walked every component from the root, opened a descriptor per component and opened the leaf itself
+ * — on a host whose endpoint security intercepts every `open`, that was seconds of synchronous work in
+ * one turn of the event loop. A probe keeps the chain of directories it last walked OPEN, so siblings
+ * and cousins re-walk nothing, and it answers the leaf from the leaf's own metadata without opening it.
+ *
+ * WHAT IT STILL PROMISES. No symlink is followed: every directory on the chain was opened by the same
+ * refusing step a read uses, and the leaf's verdict is the leaf's OWN type, so a link at the leaf is
+ * `unsupported` rather than whatever it points at.
+ *
+ * WHAT IT IS NOT. A verdict about names, never a licence to serve: no bytes come from here, and every
+ * read re-walks through {@link PinnedRoot.open}. A probe is scoped to the one call that opened it and
+ * holds descriptors until closed, so a caller MUST close it.
+ */
+export interface PinnedFileProbe {
+  /**
+   * The kind of each of `rels`, in order, for a PREFIX of them.
+   *
+   * `budget` is asked once before each name; the first time it has expired the answer stops there and is
+   * shorter than `rels`, which is how a caller tells "not looked at" from any verdict. An implementation
+   * that works synchronously hands the event loop back before it starts, so a caller asking in batches
+   * never holds the loop for longer than one batch.
+   */
+  classify(rels: readonly string[], budget?: WorkBudget): Promise<readonly PinnedFileKind[]>;
+  close(): Promise<void>;
+}
+
+/**
  * A session root held OPEN, so nothing can be substituted underneath it.
  *
  * A resolved root STRING is only a claim about the past. Between validating a cwd and using it, the
@@ -172,6 +213,8 @@ export interface PinnedRoot {
   readonly policyCwd: GitWorkingDirectory;
   /** Walk `rel` component by component from the pin, refusing a symlink at ANY component. */
   open(rel: string, options?: PinnedOpenOptions): Promise<PinnedTarget>;
+  /** A batch of regular-file questions sharing one walk. Closing the root does not close it. */
+  probe(): PinnedFileProbe;
   close(): Promise<void>;
 }
 

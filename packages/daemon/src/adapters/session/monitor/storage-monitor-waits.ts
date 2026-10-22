@@ -1,3 +1,4 @@
+import type { SessionStatus } from '@ferretry/protocol';
 import { waitDeadline } from '../../../lib/session/monitor/policy.ts';
 import type { SessionMonitorSettings } from '../../../lib/session/monitor/settings.ts';
 import type { MonitorWaits, ParkedSession, WaitExpiry } from '../../../lib/session/monitor/types.ts';
@@ -40,6 +41,10 @@ export class StorageMonitorWaits implements MonitorWaits {
   async parked(): Promise<readonly ParkedSession[]> {
     const sessions: ParkedSession[] = [];
     for (const indexed of this.storage.listSessions()) {
+      // A session the index says has ended holds no park this loop may service — the same rule the
+      // document's own status is judged by below — so its documents are not read at all. Of 36 sessions
+      // on a real Mac, 31 had ended; reading every one of them every tick was most of this tick's cost.
+      if (indexed.status !== undefined && PROTECTED_SIGNAL_STATUSES.has(indexed.status as SessionStatus)) continue;
       // A record this daemon cannot read is not a park it can service. It is already reported by the
       // consistency pass, and guessing at its status here would be the same benign reading of missing
       // evidence that the signal repository refuses to make.
