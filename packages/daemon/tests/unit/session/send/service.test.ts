@@ -12,6 +12,7 @@ import {
   ReviveRefusedForSend,
   type SendChannel,
   SendComposerOccupied,
+  SendComposerUnreadable,
   SendDraftRefused,
   type SendHeldAt,
   type SendLaunchGate,
@@ -172,6 +173,7 @@ class FakeTerminal implements SendTerminal {
 
   async deliver(_id: SessionId, text: string): Promise<void> {
     if (this.occupied !== undefined) throw new SendComposerOccupied(this.occupied);
+    if (this.unreadable) throw new SendComposerUnreadable();
     this.calls.push('deliver');
     this.typed.push(text);
     if (this.deliverFailure !== undefined) throw this.deliverFailure;
@@ -179,6 +181,7 @@ class FakeTerminal implements SendTerminal {
 
   async queue(_id: SessionId, text: string): Promise<SendQueueOutcome> {
     if (this.occupied !== undefined) throw new SendComposerOccupied(this.occupied);
+    if (this.unreadable) throw new SendComposerUnreadable();
     this.calls.push('queue');
     this.typed.push(text);
     return this.queueOutcome;
@@ -191,6 +194,8 @@ class FakeTerminal implements SendTerminal {
   submitOutcome: ComposerSubmitOutcome = 'submitted';
   /** Thrown by a transport before any key, as the terminal does at an occupied composer. */
   occupied: string | undefined;
+  /** Thrown by a transport before any key, as the terminal does at a composer it cannot read. */
+  unreadable = false;
 
   async heldAt(_id: SessionId, text: string): Promise<SendHeldAt | undefined> {
     this.calls.push('heldAt');
@@ -939,6 +944,23 @@ describe('a composer that already holds unsent text', () => {
     should([...idle.ledger.withdrawn, ...busy.ledger.withdrawn]).eql(['send-1', 'send-1']);
   });
 
+  it('withdraws a fresh send the terminal could not read the composer for, typing nothing, on both transports', async () => {
+    const idle = parts(target(), [pane({ promptReady: true })]);
+    idle.terminal.unreadable = true;
+    const busy = parts(target(), [pane({ activeWork: true })]);
+    busy.terminal.unreadable = true;
+
+    const idleRefusal = await idle.service.send(request()).catch((error: unknown) => error);
+    const busyRefusal = await busy.service.send(request()).catch((error: unknown) => error);
+
+    should(idleRefusal).be.instanceof(SendRefused);
+    should((busyRefusal as Error).message).match(
+      /could not be read to prove its composer empty, so nothing was typed/u,
+    );
+    should([...idle.ledger.withdrawn, ...busy.ledger.withdrawn]).eql(['send-1', 'send-1']);
+    should([...idle.terminal.typed, ...busy.terminal.typed]).be.empty();
+  });
+
   it('passes a transport failure that is not a refusal straight through', async () => {
     const built = parts(target(), [pane({ promptReady: true })]);
     built.terminal.deliverFailure = new Error('tmux went away');
@@ -1134,6 +1156,18 @@ describe('a person retrying a send that is still open', () => {
     should(busy.ledger.only()).match({ fate: 'queued', attempt: 1 });
     should((failed as Error).message).equal('tmux went away');
   });
+
+  it('withholds a retype at a composer it cannot read, as unreadable, and puts the record back', async () => {
+    const during = await open('queued');
+    during.terminal.unreadable = true;
+
+    const withheld = await during.service.reattempt(ID, 'send-1', { by: 'daemon' }).catch((e: unknown) => e);
+
+    should(withheld).be.instanceof(SendRetypeWithheld);
+    should((withheld as SendRetypeWithheld).reason).equal('unreadable');
+    should(during.ledger.only()).match({ fate: 'queued', attempt: 1 });
+    should(during.terminal.typed).be.empty();
+  });
 });
 
 describe('delivering held messages after a revive', () => {
@@ -1178,6 +1212,17 @@ describe('delivering held messages after a revive', () => {
 
     should(await service.releaseHeld(ID)).equal(1);
     should(ledger.only()).match({ held: false, path: 'native-inline', fate: 'queued' });
+  });
+
+  it('keeps holding a released message the terminal could not read the composer for', async () => {
+    const { service, ledger, terminal } = await heldParts([pane({ promptReady: true })]);
+    terminal.unreadable = true;
+
+    const refused = await service.releaseHeld(ID).catch((error: unknown) => error);
+
+    should(refused).be.instanceof(SendRefused);
+    should(ledger.only()).match({ held: true, fate: 'accepted' });
+    should(ledger.withdrawn).be.empty();
   });
 
   it('keeps holding when there is still no live agent, and when the record moved under it', async () => {
