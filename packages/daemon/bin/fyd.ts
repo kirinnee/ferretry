@@ -7380,6 +7380,10 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       new BunSqliteIndexFactory(),
       clock,
       () => new KeyedSerialExecutor(),
+      // A session document asked for again is watched, so while its directory is watched live and quiet it
+      // is answered without the identity `stat` each read cost (an external edit is seen within the
+      // hub's settle).
+      { subscribe: (path, listener) => fileEvents.subscribe(path, () => listener()) },
     ),
     analyticsIndexes: new BunSqliteAnalyticsStoreFactory(),
     worktrees: new ManagedWorktreeAdapter(

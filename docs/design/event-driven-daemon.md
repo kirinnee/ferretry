@@ -99,6 +99,23 @@ what "read on event" invalidates). Stage 3 needs 1c and 2: a session worker is f
 events those stages produce, and carry's cache and tenley's prover slot into it as that worker's
 readers.
 
+**Session documents, read on event** (`perf/document-identity-on-events`). Stage 1a's identity cache answers an
+unchanged `session-version`, `config.json` or `state.json` with one `stat` per read. A document read more
+than once is now also watched through the file-event hub. While its watch is live and has heard nothing since
+the identity was taken, the read costs no system call. The `stat` stays whenever the watch cannot vouch: the
+directory is polled, or no hub is wired, as in the CLI. The daemon's own writes invalidate at once, before and
+after the rename, so a read that ran alongside a write cannot keep the old file. An edit from outside the
+daemon is seen once the hub hears it, within its 25 ms settle, where before it was seen on the next read. At
+most 1,024 documents are watched.
+On the idle fixture (`bench-idle-daemon.ts --small --trace --syscall-summary --seconds 60`), compared with
+`origin/main` `9e456c0f0`:
+
+- `statx` dropped from 55/s to 14/s: `session-version` from 16/s to 0, and `config.json` from 14.5/s to 1.8/s
+  (what is left is the hub re-checking a running session's directory on its own writes).
+- strace file calls dropped from 44.9/s to 14.7/s.
+- Read/write system calls dropped from 100.5/s to 69/s.
+- CPU did not change beyond noise.
+
 ## 4. Rules for every stage
 
 - **Behaviour is identical.** Every existing test passes unchanged; a test that changes says why.
