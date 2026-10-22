@@ -427,13 +427,15 @@ describe('the composer of a titled Claude Code session', () => {
   });
 });
 
-describe("the owner's Mac Claude pane: a draft, a titled rule, and an auto-compact line", () => {
+describe("the owner's Mac Claude pane: a ghost suggestion, a titled rule, and an auto-compact line", () => {
   /**
    * `capture-pane` of the owner's Mac ferret (Claude Code 2.1.281, tmux 3.6a), trimmed to the composer
-   * and its status lines: the person's unsent `go ahead with all three` after a `❯` and a no-break
-   * space, the session title in the rule above, and a right-aligned `2% until auto-compact` under the
-   * status lines — the line a 200k-context session shows near compaction, and the 1M sessions this was
-   * first measured on never draw.
+   * and its status lines: `go ahead with all three` after a `❯` and a no-break space, the session
+   * title in the rule above, and a right-aligned `2% until auto-compact` under the status lines — the
+   * line a 200k-context session shows near compaction. tmux reported the cursor at `2|17` (row 17 of the
+   * full 24-row pane; this fixture keeps its last nine rows): the first
+   * column of the composer row, which is where Claude parks it under its dim ghost SUGGESTION of the
+   * person's next prompt — the same shape as `❯ ok` captured with `capture-pane -e` in a soak here.
    */
   const MAC = readFileSync(join(FIXTURES, 'claude-2.1.281-mac-draft-autocompact.txt'), 'utf8');
   const ROW = MAC.split('\n').findIndex(line => line.startsWith('❯'));
@@ -446,7 +448,7 @@ describe("the owner's Mac Claude pane: a draft, a titled rule, and an auto-compa
     ...(cursorY === undefined ? {} : { cursorY }),
   });
 
-  it('should read the person’s draft as input, the status lines under it changing nothing', () => {
+  it('should read the same words as a typed draft when the cursor sits after them, status lines or not', () => {
     const frame = at(MAC, 25, ROW);
 
     should(composerState(frame)).deepEqual({ kind: 'input', text: 'go ahead with all three' });
@@ -461,16 +463,13 @@ describe("the owner's Mac Claude pane: a draft, a titled rule, and an auto-compa
       });
   });
 
-  it('should never call that text a placeholder — EMPTY — when the cursor sits at the start of its row', () => {
-    // Claude draws only `Try "…"` and `Press up to edit queued messages` as placeholders. Read as
-    // empty, this draft would be typed onto, the send's own echo hidden the same way, and typed again.
+  it('should read the frame tmux reported on the Mac, cursor 2|17, as the ghost suggestion it is — empty', () => {
+    // Any words at all, so no list of wordings could tell this from a draft; the cursor does. An empty
+    // reading is right — and is exactly why a send's own keys, unread by a stalled pane, leave the
+    // frame looking empty: the reason a fill types ONCE.
     for (const column of [0, 2]) {
-      should(composerState(at(MAC, column, ROW))).deepEqual({ kind: 'unreadable' });
-      should(composerLanding(at(MAC, column, ROW), 'go ahead with all three', false)).equal('unreadable');
+      should(composerState(at(MAC, column, ROW))).deepEqual({ kind: 'empty' });
+      should(composerLanding(at(MAC, column, ROW), 'go ahead with all three', false)).be.undefined();
     }
-    // Its own suggestion is still a placeholder, cursor or not.
-    should(composerState(at(MAC.replace('go ahead with all three', 'Try "fix lint errors"'), 2, ROW))).deepEqual({
-      kind: 'empty',
-    });
   });
 });

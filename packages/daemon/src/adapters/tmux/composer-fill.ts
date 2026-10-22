@@ -199,9 +199,8 @@ async function watchLanding(
     deadline = landingDeadlineMs(settings, respondedAt);
     const read = composerLanding(last, text, paste);
     if (read === 'chars' || read === 'placeholder') return { kind: 'landed', evidence: read };
-    // A composer the reading cannot place — including Claude text with the cursor parked at the start of
-    // its row, which is no placeholder Claude draws — falls back to the payload newly on screen. A
-    // composer the cursor PROVES holds other text as well is never "landed": Enter would submit it too.
+    // A composer the reading cannot place falls back to the payload newly on screen. A composer the
+    // cursor PROVES holds other text as well is never "landed": Enter would submit it too.
     if (read !== 'unreadable') continue;
     const proved = landingEvidence(baseline, composerEvidence(last.visible, text));
     if (proved === 'chars' || (proved === 'placeholder' && paste)) return { kind: 'landed', evidence: proved };

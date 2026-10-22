@@ -55,7 +55,8 @@ const DEFAULTS = {
   readinessAttempts: 30,
   dialogSettleMs: 750,
   // One: after a typing, only a PERSON (a forced retry) types the same send into this pane again —
-  // the owner's Mac showed one message typed three times by fills that each read the composer empty.
+  // the owner's Mac showed one message typed three times by fills that each read the composer empty
+  // over Claude's ghost suggestion while the stalled pane had not yet read the keys.
   composerAttempts: 1,
   windowMs: 6_000,
   stalledWindowMs: 12_000,

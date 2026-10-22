@@ -34,13 +34,11 @@
  *     (`──── [Aime] MXO OCI Migration ─`). Nothing here reads that rule, so the title changes nothing.
  *   * An empty idle composer suggests something to type, `Try "edit <filepath> to..."`, with the
  *     cursor at its first column. That wording is a placeholder even when tmux reports no cursor.
- *   * Those two wordings are the ONLY placeholders a Claude composer (`❯`) draws, so any other text in
- *     it is never called one, wherever the cursor is: a cursor at its first column then proves
- *     nothing. The owner's Mac pane (`claude-2.1.281-mac-draft-autocompact`) held the person's
- *     `go ahead with all three`, and with the cursor parked at the start of that row the cursor rule
- *     called it a placeholder — an EMPTY composer — so a send typed onto it, could not see its own
- *     echo, and typed again. Codex (`›`) rotates placeholders too many to list, so it keeps the cursor
- *     rule. The status lines under the composer (`2% until auto-compact`, right-aligned) change nothing.
+ *   * After a turn Claude also suggests the person's NEXT prompt as dim ghost text (SGR 2, seen with
+ *     `capture-pane -e`): `❯ ok` in a soak, `❯ go ahead with all three` on the owner's Mac
+ *     (`claude-2.1.281-mac-draft-autocompact`, cursor `2|17`). Any words at all, with the cursor at
+ *     the first column — which is why the cursor, not a list of wordings, decides. The status lines
+ *     under the composer (a right-aligned `2% until auto-compact`) change nothing.
  *   * `C-u` erases back to the start of the WRAPPED ROW the cursor is on, not the whole message:
  *     a pointer wrapped over three rows loses only its last one. A "clear and retype" therefore
  *     leaves a clipped copy behind and appends a whole new one — the pile of six pointers on one
@@ -77,8 +75,6 @@ const SELECTOR_ROW = /^\s*[│|]?\s*[>›❯»]\s*\d+[.)]/u;
 /** Box and rule rows that close a boxed composer. */
 const CLOSER = /^\s*(?:[╰└]|[─━]{3,})/u;
 const BORDER = /\s*[│|]\s*$/u;
-/** Claude Code's composer glyph. Codex draws `›`. */
-const CLAUDE_GLYPH = '❯';
 /** The first column a typed character occupies, relative to the glyph's column. */
 const GLYPH_GAP = 2;
 
@@ -155,11 +151,7 @@ function placeholderOf(
     // With no cursor to ask, only a harness's own placeholder wording proves nobody typed it.
     return end === at && CLAUDE_SUGGESTION_PLACEHOLDER.test(text) ? true : undefined;
   const firstColumn = prompt.indexOf(match[1] as string) + GLYPH_GAP;
-  const atStart = end === at && cursor.y === at && cursor.x <= firstColumn;
-  // A Claude composer's placeholder is only ever one of its own wordings; its other text is input or
-  // unknown, never a placeholder.
-  if (atStart && match[1] === CLAUDE_GLYPH && !CLAUDE_SUGGESTION_PLACEHOLDER.test(text)) return undefined;
-  return atStart;
+  return end === at && cursor.y === at && cursor.x <= firstColumn;
 }
 
 /** The composer's input, or `''` when it is empty or showing its placeholder. */

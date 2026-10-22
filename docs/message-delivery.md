@@ -182,8 +182,9 @@ looks and never reading fewer than five frames. The clock counts only the waits,
 captures are slow stretches the window rather than shrinking it. Nothing short of proof leads to a
 second fill: a fill configured for more than one (the delivery adapters are not) types again only when
 the pane has drawn since the first (`paneResponded`) and its composer is proven empty holding nothing.
-That proof trusts the composer READING, and the owner's Mac showed one message typed three times by
-fills that each read the composer empty — so by default anything short of landing is **unconfirmed**: the send is settled `unaccounted` with
+That proof trusts that an empty-looking composer after typing means dropped keys, and the owner's Mac
+showed one message typed three times by fills that each saw it empty — so by default anything short of
+landing is **unconfirmed**: the send is settled `unaccounted` with
 reason `landing_unconfirmed`, never withdrawn and never typed again, and stays watched so a transcript
 record that turns up later still proves it delivered. The send answers `409 send_unconfirmed` with the
 send's id in the body's `sendId`; the app keeps the person's text in its composer and offers **Send it**
@@ -197,15 +198,15 @@ for the numbers; the recorded frames of one stalled send are
 `packages/daemon/tests/fixtures/composer/claude-2.1.281-stalled-echo.json`, replayed on a virtual clock by
 `packages/daemon/tests/integration/tmux/pane-delivery.test.ts`.
 
-**Claude's placeholders are its own two wordings.** The owner's Mac pane
-(`packages/daemon/tests/fixtures/composer/claude-2.1.281-mac-draft-autocompact.txt`) held the person's
-`go ahead with all three`, under a titled rule and above a right-aligned `2% until auto-compact` line.
-The status lines change nothing; the cursor does. The cursor rule calls a one-row composer whose cursor
-sits at its first column a placeholder, and for Claude that made the person's draft — and a send's own
-echo — read as an EMPTY composer: typed onto, never seen, typed again. A Claude composer (`❯`) draws
-only `Try "…"` and `Press up to edit queued messages`, so any other text in it is input or unknown,
-never a placeholder: a cursor at its start makes it unreadable (nothing typed; landing falls back to the
-payload newly on screen). Codex (`›`) rotates too many placeholders to list and keeps the cursor rule.
+**What the owner's Mac showed.** Its pane
+(`packages/daemon/tests/fixtures/composer/claude-2.1.281-mac-draft-autocompact.txt`) drew
+`❯ go ahead with all three` under a titled rule and above a right-aligned `2% until auto-compact` line,
+with tmux reporting the cursor at `2|17` — the composer row's first column. That is Claude's dim ghost
+SUGGESTION of the person's next prompt (SGR 2 under `capture-pane -e`; `❯ ok` in a soak here), which
+can be any words, so the cursor rule rightly reads it as an empty composer and the status lines change
+nothing. It is also why one message was typed three times there: typed onto the suggestion, unread by a
+stalled pane, every look still showed the suggestion — empty — and each fill typed again. The one-fill
+rule and the stretching window above are the fix; the reader was right.
 
 A composer that cannot be read is refused before a key: a fresh send is withdrawn and answered `409`
 (`send_refused`: "nothing was typed; send it again in a moment"), a released held message goes back to

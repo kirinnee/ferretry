@@ -283,28 +283,30 @@ describe('tmux pane delivery — landing proof', () => {
     should(literals(server)).equal(1, 'only a person, with a forced retry, types it into this pane again');
   });
 
-  it('should land a Claude payload whose cursor sits at the start of the composer, by its echo, and type it once', async () => {
-    // Arrange — a Claude pane (`❯`) that parks its cursor at the START of the composer while it holds
-    // text, as the owner's Mac pane was read: the cursor rule called the text a placeholder, so "empty"
-    // before AND after typing, and three copies of one message piled up. Claude draws no such
-    // placeholder, so the reading is unknown, and the echo on screen proves the landing.
-    const server = new (class extends FakeTmuxServer {
-      override async execute(argv: readonly string[], stdin?: string) {
-        const answer = await super.execute(argv, stdin);
-        if (argv[0] === 'capture-pane') return { ...answer, stdout: answer.stdout.replace(/^> /mu, '❯ ') };
-        return argv[0] === 'display-message'
-          ? { ...answer, stdout: answer.stdout.replace(/^(\d\|[^|]*\|)\d+/u, '$12') }
-          : answer;
-      }
-    })();
-    const { subject } = delivery(server);
+  it("should type ONCE into a stalled pane showing a ghost suggestion — the owner's triple message", async () => {
+    // Arrange — the Mac: Claude's dim suggestion of the next prompt sat in the composer with the cursor at
+    // its first column (an EMPTY composer, rightly), and the pane did not read the keys for seconds, so
+    // every look still showed the suggestion. The old fill typed again at each look's end: three copies.
+    const late = new FakeTmuxServer();
+    late.placeholder = 'go ahead with all three';
+    late.stalledUntilMs = 9_000;
+    const never = new FakeTmuxServer();
+    never.placeholder = 'go ahead with all three';
+    never.stalledUntilMs = 60_000;
 
     // Act
-    await subject.deliver(SESSION, 'what is the status thus far?');
+    await delivery(late).subject.deliver(SESSION, "what's the status thusfar?");
+    const refused = await delivery(never)
+      .subject.deliver(SESSION, "what's the status thusfar?")
+      .catch((error: unknown) => error);
+    never.advance(60_000);
 
-    // Assert
-    should(literals(server)).equal(1);
-    should(server.submitted).deepEqual(['what is the status thus far?']);
+    // Assert — landed once when it woke; unconfirmed, and still one copy, when it never did in time.
+    should(late.submitted).deepEqual(["what's the status thusfar?"]);
+    should(literals(late)).equal(1);
+    should(refused).be.instanceof(ComposerUnconfirmedError);
+    should(literals(never)).equal(1);
+    should(never.composer).equal("what's the status thusfar?");
   });
 
   it('should type again only when a pane that visibly drew still shows an empty composer, if allowed two fills', async () => {
