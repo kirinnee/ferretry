@@ -760,3 +760,149 @@ describe('service supervisors refuse a definition or daemon belonging to another
     await should(supervisor.assertServes(4242)).be.rejectedWith(DaemonOwnershipError);
   });
 });
+
+describe('a launchd plist that plutil or Xcode reformatted', () => {
+  const prettyPlist = (stateHome: string): string =>
+    [
+      '<?xml version="1.0" encoding="UTF-8"?>',
+      '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">',
+      '<plist version="1.0">',
+      '<dict>',
+      '\t<key>EnvironmentVariables</key>',
+      '\t<dict>',
+      '\t\t<key>FY_HOME</key>',
+      `\t\t<string>${stateHome}</string>`,
+      '\t</dict>',
+      '\t<key>Label</key>',
+      '\t<string>com.ferretry.fyd</string>',
+      '\t<key>ProcessType</key>',
+      '\t<string>Interactive</string>',
+      '</dict>',
+      '</plist>',
+      '',
+    ].join('\n');
+
+  it('should be accepted as this state home’s own, as plutil leaves it', async () => {
+    // Arrange — the owner ran `plutil -replace ProcessType -string Interactive` by hand.
+    const { supervisor, files } = launchd();
+    await files.writePrivate(mac.launchAgentFile, prettyPlist(mac.stateHome));
+
+    // Act + Assert
+    await supervisor.assertServes(undefined);
+  });
+
+  it('should be accepted with CRLF line endings', async () => {
+    // Arrange
+    const { supervisor, files } = launchd();
+    await files.writePrivate(mac.launchAgentFile, prettyPlist(mac.stateHome).replaceAll('\n', '\r\n'));
+
+    // Act + Assert
+    await supervisor.assertServes(undefined);
+  });
+
+  it('should be rewritten canonically, not refused, when the daemon is restarted over it', async () => {
+    // Arrange
+    const { supervisor, files, processes } = launchd();
+    await files.writePrivate(mac.launchAgentFile, prettyPlist(mac.stateHome));
+    await supervisor.assertServes(undefined);
+
+    // Act
+    await supervisor.start(daemonBinary.path);
+
+    // Assert
+    should(files.written.get(mac.launchAgentFile)).containEql('<key>ProcessType</key><string>Interactive</string>');
+    should(files.written.get(mac.launchAgentFile)).not.containEql('\t');
+    should(processes.ran).containEql(`launchctl bootstrap ${mac.launchdDomain} ${mac.launchAgentFile}`);
+  });
+
+  it('should still report the ProcessType it declares', async () => {
+    // Arrange
+    const { supervisor, files } = launchd();
+    await files.writePrivate(mac.launchAgentFile, prettyPlist(mac.stateHome));
+
+    // Act
+    const actual = await supervisor.inspect();
+
+    // Assert
+    should(actual.processType).equal('Interactive');
+  });
+
+  it('should be converted with plutil when it is a binary plist, then judged by what it says', async () => {
+    // Arrange
+    const converted = { code: 0, stdout: prettyPlist(mac.stateHome), stderr: '' };
+    const { supervisor, files, processes } = launchd([['plutil -convert xml1', converted]]);
+    await files.writePrivate(mac.launchAgentFile, 'bplist00Ñ\u0001\u0002');
+
+    // Act
+    await supervisor.assertServes(undefined);
+
+    // Assert
+    should(processes.ran).containEql(`plutil -convert xml1 -o - ${mac.launchAgentFile}`);
+  });
+
+  it('should refuse a binary plist whose conversion names another state home', async () => {
+    // Arrange
+    const converted = { code: 0, stdout: prettyPlist('/srv/another-ferretry-home'), stderr: '' };
+    const { supervisor, files } = launchd([['plutil -convert xml1', converted]]);
+    await files.writePrivate(mac.launchAgentFile, 'bplist00Ñ\u0001\u0002');
+
+    // Act + Assert
+    await should(supervisor.assertServes(undefined)).be.rejectedWith(
+      /supervises the fyd for \/srv\/another-ferretry-home/u,
+    );
+  });
+
+  it('should say so clearly, with the commands to clear it, when a binary plist cannot be converted', async () => {
+    // Arrange
+    const failed = { code: 1, stdout: '', stderr: 'plutil: corrupt\n' };
+    const { supervisor, files } = launchd([['plutil -convert xml1', failed]]);
+    await files.writePrivate(mac.launchAgentFile, 'bplist00Ñ\u0001\u0002');
+
+    // Act + Assert
+    await should(supervisor.assertServes(undefined)).be.rejectedWith(
+      new RegExp(
+        `binary property list.*plutil: corrupt.*launchctl bootout ${mac.launchdServiceTarget}; rm ${mac.launchAgentFile}; fy daemon install`,
+        'u',
+      ),
+    );
+  });
+
+  it('should be refused, with the exact commands that clear it, when it names a different FY_HOME', async () => {
+    // Arrange
+    const { supervisor, files } = launchd();
+    await files.writePrivate(mac.launchAgentFile, prettyPlist('/srv/another-ferretry-home'));
+
+    // Act + Assert
+    await should(supervisor.assertServes(undefined)).be.rejectedWith(
+      new RegExp(`supervises the fyd for /srv/another-ferretry-home, not ${mac.stateHome}`, 'u'),
+    );
+  });
+
+  it('should be refused, with the exact commands that clear it, when it names no FY_HOME', async () => {
+    // Arrange
+    const { supervisor, files } = launchd();
+    await files.writePrivate(
+      mac.launchAgentFile,
+      '<plist version="1.0">\n<dict>\n\t<key>Label</key>\n\t<string>com.ferretry.fyd</string>\n</dict>\n</plist>\n',
+    );
+
+    // Act + Assert
+    await should(supervisor.assertServes(undefined)).be.rejectedWith(
+      new RegExp(
+        `names no FY_HOME.*launchctl bootout ${mac.launchdServiceTarget}; rm ${mac.launchAgentFile}; fy daemon install`,
+        'u',
+      ),
+    );
+  });
+
+  it('should name the systemd commands when a unit that names no FY_HOME is refused', async () => {
+    // Arrange
+    const { supervisor, files } = systemd();
+    await files.writePrivate(linux.systemdUnitFile, '[Service]\nExecStart=/usr/bin/fyd\n');
+
+    // Act + Assert
+    await should(supervisor.assertServes(undefined)).be.rejectedWith(
+      new RegExp(`systemctl --user disable --now fyd.service; rm ${linux.systemdUnitFile}; fy daemon install`, 'u'),
+    );
+  });
+});

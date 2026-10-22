@@ -54,3 +54,66 @@ describe('CommandPackageManagers', () => {
     should(ran).deepEqual(['brew tap', 'brew update']);
   });
 });
+
+describe('CommandPackageManagers — watched', () => {
+  const nix = (event: object): string => `@nix ${JSON.stringify(event)}`;
+
+  it('asks nix for its events only when someone is watching, and reports them as they arrive', async () => {
+    const argvs: string[][] = [];
+    const managers = new CommandPackageManagers(async (argv, onLine) => {
+      argvs.push([...argv]);
+      const lines = [
+        nix({ action: 'start', id: 1, type: 103, text: 'copying' }),
+        nix({ action: 'result', id: 1, type: 105, fields: [0, 3, 0, 0] }),
+        nix({ action: 'msg', level: 0, msg: 'error: attribute missing' }),
+        'trailing plain line',
+      ];
+      for (const line of lines) onLine?.(line);
+      return await Promise.resolve({ code: 1, stdout: '', stderr: `${lines.join('\n')}\n` });
+    });
+    const seen: string[] = [];
+    const outcome = await managers.nixProfileUpgrade('ferretry', activity => seen.push(JSON.stringify(activity)));
+    should(argvs[0]?.join(' ')).equal(
+      'nix --extra-experimental-features nix-command flakes profile upgrade --refresh --log-format internal-json -v ferretry',
+    );
+    should(seen[0]).equal('{"phase":"preparing"}');
+    should(seen.some(line => line.includes('"packages":{"done":0,"expected":3}'))).be.true();
+    should(outcome.code).equal(1);
+    should(outcome.stderr).equal('error: attribute missing\ntrailing plain line');
+    await managers.nixProfileInstall('github:kirinnee/ferretry', () => undefined);
+    should(argvs[1]?.join(' ')).containEql(
+      'profile install --refresh --log-format internal-json -v github:kirinnee/ferretry',
+    );
+  });
+
+  it("shows brew's last line as the detail of each phase, cleaned", async () => {
+    const managers = new CommandPackageManagers(async (argv, onLine) => {
+      const command = argv.join(' ');
+      if (command === 'brew tap') return { code: 0, stdout: `${TAP}\n`, stderr: '' };
+      onLine?.('\u001b[1m==> Upgrading ferretry\u001b[0m');
+      onLine?.('   ');
+      return await Promise.resolve({ code: 0, stdout: '', stderr: '' });
+    });
+    const seen: string[] = [];
+    await managers.brewRefresh(TAP, URL, activity => seen.push(`${activity.phase}:${activity.line ?? ''}`));
+    await managers.brewUpgrade('ferretry', activity => seen.push(`${activity.phase}:${activity.line ?? ''}`));
+    should(seen).deepEqual([
+      'refreshing:',
+      'refreshing:==> Upgrading ferretry',
+      'upgrading:',
+      'upgrading:==> Upgrading ferretry',
+    ]);
+  });
+
+  it('adds a tap with a refreshing step when watched', async () => {
+    const ran: string[] = [];
+    const managers = new CommandPackageManagers(argv => {
+      ran.push(argv.join(' '));
+      return Promise.resolve({ code: 0, stdout: '', stderr: '' });
+    });
+    const seen: string[] = [];
+    await managers.brewRefresh(TAP, URL, activity => seen.push(activity.phase));
+    should(ran).deepEqual(['brew tap', `brew tap ${TAP} ${URL}`, 'brew update']);
+    should(seen).deepEqual(['refreshing', 'refreshing']);
+  });
+});

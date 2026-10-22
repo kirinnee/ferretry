@@ -2,9 +2,12 @@ import { describe, it } from 'bun:test';
 import { UpdateReportSchema } from '@ferretry/protocol';
 import should from 'should';
 import type { IDaemonPrompt } from '../../../src/lib/daemon/ports';
+import type { IProgress } from '../../../src/lib/progress/index';
+import { PlainProgress } from '../../../src/lib/progress/index';
 import { NixProfileSwitch } from '../../../src/lib/update/profile-switch';
 import { type DaemonUpdateOptions, DaemonUpdater, renderPlan } from '../../../src/lib/update/updater';
 import { CapturedOutput, SteppingClock } from '../daemon/fixtures';
+import { RecordingProgress } from '../progress/fixtures';
 import {
   FakeFacts,
   FakeHost,
@@ -47,6 +50,7 @@ function harness(
     interactive?: boolean;
     answers?: string[];
     latest?: FakeLatest;
+    progress?: IProgress;
   } = {},
 ) {
   const daemonPath = DEFAULT_PATHS[kind] ?? '/usr/bin/fyd';
@@ -93,6 +97,7 @@ function harness(
     daemonName: 'fyd',
     healthTimeoutMs: 5_000,
     pollMs: 500,
+    ...(options.progress === undefined ? {} : { progress: options.progress }),
   });
   const run = (flags: DaemonUpdateOptions = { yes: true, report: '/r.json' }) => updater.update(flags);
   const report = () => UpdateReportSchema.parse(JSON.parse(reports.written.get('/r.json') ?? 'null'));
@@ -112,7 +117,7 @@ describe('DaemonUpdater — Homebrew', () => {
       'warn: refreshing the Homebrew tap kirinnee/ferretry so brew can see 1.3.0 (brew update)',
     );
     should(h.report()).match({ from: '1.2.3', target: '1.3.0', outcome: 'succeeded' });
-    should(h.out.lines.at(-1)).equal('ok: fyd updated 1.2.3 → 1.3.0 and serving');
+    should(h.out.lines.at(-1)).equal('ok: ✔ fyd updated 1.2.3 → 1.3.0 in 2.0s');
     should(h.out.exitCode).be.undefined();
   });
 
@@ -289,7 +294,7 @@ describe('DaemonUpdater — an install newer than the release offered', () => {
       from: '1.2.3',
       target: '1.3.0',
       outcome: 'succeeded',
-      message: `fyd updated 1.2.3 → 1.3.1 ${OFFERED} and serving`,
+      message: `fyd updated 1.2.3 → 1.3.1 ${OFFERED} in 2.0s`,
     });
     should(h.host.running).equal('1.3.1');
     should(h.out.exitCode).be.undefined();
@@ -299,12 +304,12 @@ describe('DaemonUpdater — an install newer than the release offered', () => {
     const brew = harness('homebrew');
     brew.packages.upgradeTo = '1.4.0';
     await brew.run();
-    should(brew.report().message).equal(`fyd updated 1.2.3 → 1.4.0 ${OFFERED} and serving`);
+    should(brew.report().message).equal(`fyd updated 1.2.3 → 1.4.0 ${OFFERED} in 2.0s`);
     const standalone = harness('standalone');
     standalone.standalone.delivers = '1.3.1';
     await standalone.run();
     should(standalone.host.trail).deepEqual(['stage:1.3.0:/opt/fy', 'swap:fy,fyd', 'restart']);
-    should(standalone.report().message).equal(`fyd updated 1.2.3 → 1.3.1 ${OFFERED} and serving`);
+    should(standalone.report().message).equal(`fyd updated 1.2.3 → 1.3.1 ${OFFERED} in 2.0s`);
   });
 
   it('accepts a newer build when the daemon was not running', async () => {
@@ -353,7 +358,7 @@ describe('DaemonUpdater — which version it offers', () => {
     should(h.report()).match({
       target: '1.3.1',
       outcome: 'succeeded',
-      message: 'fyd updated 1.2.3 → 1.3.1 and serving',
+      message: 'fyd updated 1.2.3 → 1.3.1 in 2.0s',
     });
     const shell = harness('nix-shell', { latest: new FakeLatest(release, tag('1.3.1')) });
     await shell.run({ check: true });
@@ -602,7 +607,7 @@ describe('DaemonUpdater — what it checks first', () => {
     h.reports.fails = true;
     await h.run();
     should(h.out.text).match(/could not write the update report to \/r\.json: read-only file system/u);
-    should(h.out.text).match(/ok: fyd updated/u);
+    should(h.out.text).match(/ok: ✔ fyd updated/u);
   });
 
   it('prints the report as JSON with --json, and writes nothing without --report', async () => {
@@ -653,7 +658,8 @@ describe('DaemonUpdater — consent', () => {
   it('waits for idle with --when-idle', async () => {
     const h = harness('homebrew', { midTurn: [2, 1, 0] });
     await h.run({ yes: true, whenIdle: true, report: '/r.json' });
-    should(h.view.looks).equal(3);
+    // three looks to wait for idle, one more to tell the restart how many ferrets keep running
+    should(h.view.looks).equal(4);
     should(h.out.text).match(/2 ferrets are mid-turn; waiting until every ferret is idle before updating/u);
     should(h.report().outcome).equal('succeeded');
   });
@@ -715,5 +721,106 @@ describe('DaemonUpdater — --check', () => {
 describe('renderPlan', () => {
   it('renders no steps for a plan with none', () => {
     should(renderPlan({ kind: 'manual', explanation: 'x', steps: [] }, 'fy')).deepEqual([]);
+  });
+});
+
+describe('DaemonUpdater — progress', () => {
+  const NIX_ACTIVITY = [
+    { phase: 'preparing' },
+    { phase: 'downloading', packages: { done: 23, expected: 41 }, bytes: { done: 48_000_000, expected: 120_000_000 } },
+    { phase: 'switching', packages: { done: 41, expected: 41 } },
+  ] as const;
+
+  it('names each phase of a nix profile update and ends on the one-line result', async () => {
+    const progress = new RecordingProgress();
+    const h = harness('nix-profile', { progress });
+    h.packages.activities = [...NIX_ACTIVITY];
+    await h.run();
+    should(progress.steps).deepEqual([
+      'Checking for an update',
+      'Preparing 1.3.0',
+      'Downloading 1.3.0',
+      'Switching the nix profile',
+    ]);
+    should(progress.events).containEql('detail 23/41 packages, 48/120 MB');
+    should(progress.events.at(-1)).equal('succeed');
+    should(h.out.lines.at(-1)).equal('ok: ✔ fyd updated 1.2.3 → 1.3.0 in 2.0s');
+  });
+
+  it('tells the restart how many ferrets keep running', async () => {
+    const h = harness('nix-profile', { midTurn: [3, 3] });
+    await h.run();
+    should(h.lifecycle.restarts).deepEqual([3]);
+  });
+
+  it('shows a brew update as refreshing and upgrading', async () => {
+    const progress = new RecordingProgress();
+    const h = harness('homebrew', { progress });
+    h.packages.activities = [{ phase: 'upgrading', line: '==> Upgrading ferretry' }];
+    await h.run();
+    should(progress.steps).containEql('Upgrading with Homebrew');
+    should(progress.events).containEql('detail ==> Upgrading ferretry');
+  });
+
+  it('shows a standalone update as downloading, verifying and unpacking, then swapping', async () => {
+    const progress = new RecordingProgress();
+    const h = harness('standalone', { progress });
+    h.standalone.activities = [
+      { phase: 'downloading', bytes: { done: 1_000_000, expected: 4_000_000 } },
+      { phase: 'verifying' },
+      { phase: 'unpacking' },
+    ];
+    await h.run();
+    should(progress.steps).deepEqual([
+      'Checking for an update',
+      'Downloading 1.3.0',
+      'Verifying the download',
+      'Unpacking 1.3.0',
+      'Swapping in the new binaries',
+    ]);
+    should(progress.events).containEql('detail 1.0/4.0 MB');
+  });
+
+  it('fails the step it was on, and says it is rolling back', async () => {
+    const progress = new RecordingProgress();
+    const h = harness('nix-profile', { progress });
+    h.host.restartFailures = 1;
+    await h.run();
+    should(progress.steps).containEql('Rolling back to 1.2.3');
+    should(progress.events).containEql('fail');
+  });
+
+  it('settles the step when the update is refused', async () => {
+    const progress = new RecordingProgress();
+    const h = harness('standalone', { progress });
+    h.standalone.refusal = 'no key';
+    await h.run();
+    should(progress.events.at(-1)).equal('fail');
+    should(h.out.exitCode).equal(1);
+  });
+
+  it('writes the same result for --json, with the progress left to stderr', async () => {
+    const progress = new RecordingProgress();
+    const h = harness('homebrew', { progress });
+    await h.run({ yes: true, json: true });
+    should(JSON.parse(h.out.lines.at(-1)?.replace('ok: ', '') ?? '')).match({ outcome: 'succeeded', target: '1.3.0' });
+  });
+
+  it('prints a fixture run the way a person reads it', async () => {
+    const lines: string[] = [];
+    const progress = new PlainProgress(line => lines.push(line));
+    const h = harness('nix-profile', { progress });
+    h.packages.activities = [...NIX_ACTIVITY];
+    await h.run();
+    const transcript = [...lines, ...h.out.lines].join('\n');
+    should(transcript).equal(
+      [
+        '- Checking for an update',
+        '- Preparing 1.3.0',
+        '- Downloading 1.3.0',
+        '- Switching the nix profile',
+        'ok: ✔ fyd updated 1.2.3 → 1.3.0 in 2.0s',
+      ].join('\n'),
+    );
   });
 });

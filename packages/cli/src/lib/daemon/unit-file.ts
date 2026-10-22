@@ -1,3 +1,5 @@
+import { parsePlist, plistString } from './plist.ts';
+
 /**
  * The exit code the daemon uses to say "another one of me already owns this address". It is a
  * published part of the daemon's boot contract; the CLI mirrors the constant rather than importing
@@ -114,14 +116,7 @@ export function systemdUnitStateHome(unit: string): string | undefined {
 
 /** The state home a launchd plist this CLI rendered hands its daemon, for the same reason. */
 export function launchAgentStateHome(plist: string): string | undefined {
-  const found = /<key>FY_HOME<\/key><string>([^<]*)<\/string>/u.exec(plist)?.[1];
-  if (found === undefined) return undefined;
-  return found
-    .replaceAll('&lt;', '<')
-    .replaceAll('&gt;', '>')
-    .replaceAll('&quot;', '"')
-    .replaceAll('&apos;', "'")
-    .replaceAll('&amp;', '&');
+  return plistString(parsePlist(plist), 'EnvironmentVariables', 'FY_HOME');
 }
 
 /**
@@ -145,7 +140,7 @@ export const LAUNCHD_PROCESS_TYPE = 'Interactive';
  * throttled default, and what every plist rendered before {@link LAUNCHD_PROCESS_TYPE} existed says.
  */
 export function launchAgentProcessType(plist: string): string | undefined {
-  return /<key>ProcessType<\/key>\s*<string>([^<]*)<\/string>/u.exec(plist)?.[1];
+  return plistString(parsePlist(plist), 'ProcessType');
 }
 
 /** Tab, newline and carriage return are the only C0 characters XML 1.0 can represent at all. */

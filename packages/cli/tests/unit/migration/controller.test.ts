@@ -1,6 +1,7 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
 import { MigrationController, renderConversionPreview } from '../../../src/lib/migration/controller.ts';
+import { RecordingProgress } from '../progress/fixtures.ts';
 import { migrationHarness, READY_PREVIEW, RecordingMigrationGateway } from './fixtures.ts';
 
 describe('session migration', () => {
@@ -193,5 +194,34 @@ describe('session migration', () => {
     ]);
     should(refused).deepEqual(["Can't convert onto claude-default: Too new."]);
     should(new RecordingMigrationGateway()).have.property('previews');
+  });
+});
+
+describe('session migration progress', () => {
+  it('should name the move, and leave the result for after the step', async () => {
+    // Arrange
+    const progress = new RecordingProgress();
+    const { gateway, io, presenter } = migrationHarness();
+    const subject = new MigrationController(gateway, presenter, progress);
+
+    // Act
+    await subject.execute('ses-1', { agent: 'codex-secondary' });
+
+    // Assert
+    should(progress.events).deepEqual(['start Moving ses-1 to codex-secondary', 'succeed']);
+    should(io.out.length).be.above(0);
+  });
+
+  it('should name the preview too', async () => {
+    // Arrange
+    const progress = new RecordingProgress();
+    const { gateway, presenter } = migrationHarness();
+    const subject = new MigrationController(gateway, presenter, progress);
+
+    // Act
+    await subject.execute('ses-1', { agent: 'codex-secondary', convert: true, preview: true });
+
+    // Assert
+    should(progress.events).deepEqual(['start Previewing the conversion', 'succeed']);
   });
 });

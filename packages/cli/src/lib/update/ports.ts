@@ -1,6 +1,7 @@
 import type { DaemonUpdateView, HealthView, InstallFacts, LatestRelease } from '@ferretry/protocol';
 import type { InstalledDaemonBinary } from '../daemon/binary.ts';
 import type { CommandOutcome } from '../daemon/ports.ts';
+import type { UpdateObserver } from './activity.ts';
 
 /**
  * The facts `classifyInstallMethod` reads, gathered from this host for one daemon executable.
@@ -33,11 +34,11 @@ export interface ILatestReleasePort {
  */
 export interface IPackageManagerPort {
   /** Bring the tap clone up to date, tapping it first when it is missing. */
-  brewRefresh(tap: string, url: string): Promise<CommandOutcome>;
-  brewUpgrade(cask: string): Promise<CommandOutcome>;
-  nixProfileUpgrade(element: string): Promise<CommandOutcome>;
+  brewRefresh(tap: string, url: string, observer?: UpdateObserver): Promise<CommandOutcome>;
+  brewUpgrade(cask: string, observer?: UpdateObserver): Promise<CommandOutcome>;
+  nixProfileUpgrade(element: string, observer?: UpdateObserver): Promise<CommandOutcome>;
   nixProfileRollback(): Promise<CommandOutcome>;
-  nixProfileInstall(flake: string): Promise<CommandOutcome>;
+  nixProfileInstall(flake: string, observer?: UpdateObserver): Promise<CommandOutcome>;
 }
 
 /** A release unpacked beside the current binaries, verified, and not yet in place. */
@@ -60,7 +61,7 @@ export interface StandaloneRefusal {
  * `<name>.previous`, which is what `rollback` puts back.
  */
 export interface IStandaloneReleasePort {
-  stage(version: string, directory: string): Promise<StagedRelease | StandaloneRefusal>;
+  stage(version: string, directory: string, observer?: UpdateObserver): Promise<StagedRelease | StandaloneRefusal>;
   swap(staged: StagedRelease): Promise<void>;
   rollback(directory: string): Promise<void>;
 }
@@ -80,7 +81,7 @@ export interface IUpdateLifecyclePort {
   /** Whether `path` is an executable file. */
   executable(path: string): boolean;
   /** `fy daemon restart`. */
-  restart(): Promise<void>;
+  restart(options?: { readonly ferretsKeepRunning?: number }): Promise<void>;
   /** `fy daemon install`, for this exact executable. */
   installAt(path: string): Promise<void>;
   /**

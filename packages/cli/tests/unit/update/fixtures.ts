@@ -1,6 +1,7 @@
 import type { DaemonUpdateView, HealthView, InstallFacts } from '@ferretry/protocol';
 import type { InstalledDaemonBinary } from '../../../src/lib/daemon/binary';
 import type { CommandOutcome } from '../../../src/lib/daemon/ports';
+import type { UpdateActivity, UpdateObserver } from '../../../src/lib/update/activity';
 import type {
   IDaemonUpdateViewPort,
   IInstallFactsPort,
@@ -117,6 +118,8 @@ export class FakePackages implements IPackageManagerPort {
   /** What each upgrade sets the daemon path to; `undefined` leaves it alone. */
   upgradeTo: string | undefined = '1.3.0';
   failures = new Set<string>();
+  /** What each command tells an observer, in order, before it finishes. */
+  activities: UpdateActivity[] = [];
 
   constructor(
     private readonly host: FakeHost,
@@ -132,6 +135,10 @@ export class FakePackages implements IPackageManagerPort {
 
   #previous: string | undefined;
 
+  #tell(observer: UpdateObserver | undefined): void {
+    for (const activity of this.activities) observer?.(activity);
+  }
+
   #upgrade(): void {
     this.#previous = this.host.versions.get(this.daemonPath);
     if (this.upgradeTo !== undefined) this.host.versions.set(this.daemonPath, this.upgradeTo);
@@ -141,11 +148,13 @@ export class FakePackages implements IPackageManagerPort {
     return this.#ran(`brew-refresh:${tap}:${url}`, () => undefined);
   }
 
-  brewUpgrade(cask: string): Promise<CommandOutcome> {
+  brewUpgrade(cask: string, observer?: UpdateObserver): Promise<CommandOutcome> {
+    this.#tell(observer);
     return this.#ran(`brew:${cask}`, () => this.#upgrade());
   }
 
-  nixProfileUpgrade(element: string): Promise<CommandOutcome> {
+  nixProfileUpgrade(element: string, observer?: UpdateObserver): Promise<CommandOutcome> {
+    this.#tell(observer);
     return this.#ran(`nix-upgrade:${element}`, () => this.#upgrade());
   }
 
@@ -170,7 +179,11 @@ export class FakeStandalone implements IStandaloneReleasePort {
   /** The version a swap leaves installed. */
   delivers = '1.3.0';
 
-  stage(version: string, directory: string): Promise<StagedRelease | StandaloneRefusal> {
+  /** What staging tells an observer, in order. */
+  activities: UpdateActivity[] = [];
+
+  stage(version: string, directory: string, observer?: UpdateObserver): Promise<StagedRelease | StandaloneRefusal> {
+    for (const activity of this.activities) observer?.(activity);
     this.host.trail.push(`stage:${version}:${directory}`);
     if (this.refusal !== undefined) return Promise.resolve({ refused: this.refusal });
     return Promise.resolve({ directory, names: ['fy', 'fyd'] });
@@ -215,7 +228,10 @@ export class FakeLifecycle implements IUpdateLifecyclePort {
     return this.executables.has(path);
   }
 
-  restart(): Promise<void> {
+  readonly restarts: (number | undefined)[] = [];
+
+  restart(options?: { readonly ferretsKeepRunning?: number }): Promise<void> {
+    this.restarts.push(options?.ferretsKeepRunning);
     this.host.trail.push('restart');
     this.host.bringUp();
     return Promise.resolve();

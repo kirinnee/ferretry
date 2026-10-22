@@ -1,4 +1,5 @@
 import { type ConversionPreview, type MigrationConversation, MigrationConversationSchema } from '@ferretry/protocol';
+import { type IProgress, NO_PROGRESS, withStep } from '../progress/index.ts';
 import type { SessionPresenter } from '../session/presenter.ts';
 import type { IMigrationGateway } from './ports.ts';
 
@@ -23,6 +24,7 @@ export class MigrationController {
   constructor(
     private readonly gateway: IMigrationGateway,
     private readonly presenter: SessionPresenter,
+    private readonly progress: IProgress = NO_PROGRESS,
   ) {}
 
   async execute(reference: string, options: MigrationCommandOptions): Promise<void> {
@@ -36,20 +38,29 @@ export class MigrationController {
     const conversation = conversationChoice(options.conversation, options.convert === true);
     if (options.preview === true) {
       if (conversation !== 'convert') throw new Error('--preview needs --convert: only a conversion has a preview');
-      const preview = await this.gateway.conversionPreview(id, agent, model);
+      const preview = await withStep(
+        this.progress,
+        'Previewing the conversion',
+        async () => await this.gateway.conversionPreview(id, agent, model),
+      );
       if (options.json === true) this.presenter.json(preview);
       else this.presenter.lines(renderConversionPreview(preview));
       return;
     }
 
-    const view = await this.gateway.migrate(
-      id,
-      agent,
-      model,
-      options.allowContextDowngrade === true,
-      requestId,
-      options.forceInflight === true,
-      ...(conversation === undefined ? [] : [conversation]),
+    const view = await withStep(
+      this.progress,
+      `Moving ${id} to ${agent}`,
+      async () =>
+        await this.gateway.migrate(
+          id,
+          agent,
+          model,
+          options.allowContextDowngrade === true,
+          requestId,
+          options.forceInflight === true,
+          ...(conversation === undefined ? [] : [conversation]),
+        ),
     );
     this.presenter.view(view, options.json === true);
   }

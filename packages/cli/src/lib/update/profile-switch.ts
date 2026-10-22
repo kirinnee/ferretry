@@ -92,6 +92,16 @@ export class NixProfileSwitch {
   }
 }
 
+/** The last `count` non-empty lines of a command's error output, joined for a sentence; `undefined` when it said nothing. */
+export function lastLines(text: string, count: number): string | undefined {
+  const lines = text
+    .split('\n')
+    .map(line => line.trim())
+    .filter(line => line !== '')
+    .slice(-count);
+  return lines.length === 0 ? undefined : lines.join('\n  ');
+}
+
 /** The last non-empty line of a command's error output: usually the sentence that explains it. */
 export function lastLine(text: string): string | undefined {
   const lines = text

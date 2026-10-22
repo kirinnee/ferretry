@@ -1,4 +1,5 @@
 import { type PackNewRequest, PackNewRequestSchema } from '@ferretry/protocol';
+import { type IProgress, NO_PROGRESS, withStep } from '../progress/index.ts';
 import { titleFromReferencedBrief } from '../tasks/task-title.ts';
 import type { IPackGateway } from './gateway.ts';
 import { renderPackNewOutcome, renderPackRecommendation } from './render.ts';
@@ -47,6 +48,8 @@ export interface PackControllerDeps {
   readonly cwd: string;
   readonly readFile: (path: string) => Promise<string>;
   readonly binaryName: string;
+  /** What the daemon's probing shows while `new` waits for it. Absent, nothing is shown. */
+  readonly progress?: IProgress;
 }
 
 const joined = (words: readonly string[]): string => words.join(' ').replaceAll(/\s+/gu, ' ').trim();
@@ -94,7 +97,11 @@ export class PackController {
       ...(name === undefined ? {} : { name }),
       ...(options.mode === undefined ? {} : { mode: options.mode }),
     });
-    const outcome = await this.deps.gateway.newChild(request);
+    const outcome = await withStep(
+      this.deps.progress ?? NO_PROGRESS,
+      options.runtime === undefined ? 'Choosing the best runtime' : `Checking ${options.runtime}`,
+      async () => await this.deps.gateway.newChild(request),
+    );
     if (options.json === true) this.deps.out.success(JSON.stringify(outcome, null, 2));
     else if (outcome.outcome === 'started') this.deps.out.success(renderPackNewOutcome(outcome, this.deps.binaryName));
     else this.deps.out.error(`${this.deps.binaryName} new: ${renderPackNewOutcome(outcome, this.deps.binaryName)}`);
