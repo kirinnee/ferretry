@@ -33,6 +33,9 @@ describe('tmux control-mode guards', () => {
 describe('tmux control-mode notifications', () => {
   it.each([
     ['%output %3 a\\033[31mred\\134x\\015\\012', { kind: 'output', paneId: '%3', data: 'a\u001b[31mred\\x\r\n' }],
+    ['%extended-output %3 120 : a\\012 : b', { kind: 'output', paneId: '%3', data: 'a\n : b' }],
+    ['%extended-output %3 120 future : x', { kind: 'output', paneId: '%3', data: 'x' }],
+    ['%extended-output %3 soon', { kind: 'other', name: 'extended-output', text: '%3 soon' }],
     ['%sessions-changed', { kind: 'sessions-changed' }],
     ['%session-changed $1 fy-work session', { kind: 'session-changed', sessionId: '$1', name: 'fy-work session' }],
     ['%window-close @4', { kind: 'window-close', windowId: '@4', unlinked: false }],
