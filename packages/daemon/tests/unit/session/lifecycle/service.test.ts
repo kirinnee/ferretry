@@ -1,6 +1,6 @@
 import { describe, it } from 'bun:test';
 import { createHash } from 'node:crypto';
-import type { SessionLaunchInstructions } from '@ferretry/protocol';
+import { type SessionLaunchInstructions, SessionStatusSchema } from '@ferretry/protocol';
 import should from 'should';
 import { type ClockPort, parseSessionId, type SerialExecutor, type SessionId } from '../../../../src/lib/index.ts';
 import type {
@@ -12,6 +12,7 @@ import type {
 import {
   type CreateSessionLifecycleRequest,
   defaultSessionLifecycleSettings,
+  lifecyclePhase,
   type SessionCredential,
   type SessionCredentialIssuer,
   type SessionEnvironmentStore,
@@ -980,6 +981,70 @@ describe('SessionLifecycleService', () => {
     should(repeated).deepEqual(stopped);
     should(launcher.calls.filter(call => call === 'snapshot' || call === 'stop')).deepEqual(['snapshot', 'stop']);
     should(repository.events.at(-1)).deepEqual({ type: 'session.stopped', data: { reason: 'work complete' } });
+  });
+
+  it('should stop a session in any status the protocol defines, ending the pane unless it already ended', async () => {
+    for (const status of SessionStatusSchema.options) {
+      // Arrange
+      const { repository, launcher, subject } = harness();
+      launcher.livenessFromLaunch = true;
+      await subject.createAndStart(input());
+      const running = repository.current();
+      repository.documents.set(ID, JSON.stringify({ ...running, state: { ...running.state, status } }));
+      const stopsBefore = launcher.calls.filter(call => call === 'stop').length;
+
+      // Act
+      const actual = await subject.stop(ID, 'owner pressed stop');
+
+      // Assert
+      const alreadyOver = status === 'stopped' || status === 'completed';
+      should(actual.state.status).equal(alreadyOver ? status : 'stopped');
+      should(launcher.calls.filter(call => call === 'stop').length - stopsBefore).equal(alreadyOver ? 0 : 1);
+    }
+  });
+
+  it('should stop a session whose turn was interrupted, keeping the rest of its state', async () => {
+    // Arrange
+    const { repository, launcher, subject } = harness();
+    launcher.livenessFromLaunch = true;
+    await subject.createAndStart(input());
+    const running = repository.current();
+    repository.documents.set(
+      ID,
+      JSON.stringify({
+        ...running,
+        state: { ...running.state, status: 'interrupted', reason: 'interrupted by client' },
+      }),
+    );
+
+    // Act
+    const stopped = await subject.stop(ID, 'owner pressed stop');
+
+    // Assert
+    should(stopped.state).containDeep({ status: 'stopped', reason: 'owner pressed stop' });
+    should(repository.events.at(-1)).deepEqual({ type: 'session.stopped', data: { reason: 'owner pressed stop' } });
+  });
+
+  it('should treat starting a session in any turn-level status as a no-op while its pane lives', async () => {
+    const turnLevel = SessionStatusSchema.options.filter(
+      option => lifecyclePhase(option) === 'running' && option !== 'running',
+    );
+    for (const status of turnLevel) {
+      // Arrange
+      const { repository, launcher, subject } = harness();
+      launcher.livenessFromLaunch = true;
+      await subject.createAndStart(input());
+      const running = repository.current();
+      const recorded = { ...running, state: { ...running.state, status } };
+      repository.documents.set(ID, JSON.stringify(recorded));
+
+      // Act
+      const actual = await subject.start(ID);
+
+      // Assert
+      should(actual).deepEqual(recorded);
+      should(launcher.launches()).equal(1);
+    }
   });
 
   it('should use the configured default reason when a client gives none', async () => {

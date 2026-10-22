@@ -14,6 +14,7 @@ import type { SessionLifecycleSettings } from './settings.ts';
 import {
   type CreateSessionLifecycleRequest,
   type LifecycleSessionStatus,
+  type RecordedSessionStatus,
   SESSION_ID_VARIABLE,
   SESSION_MEDIA_VARIABLE,
   type SessionLifecycleEvent,
@@ -232,6 +233,40 @@ export function withLaunchInstructions(
 }
 
 /**
+ * The lifecycle phase a recorded status implies.
+ *
+ * The six lifecycle statuses are their own phase. Every turn-level status the watcher writes while a
+ * pane is up (`thinking`, `awaiting_user`, `interrupted`, …) means the session is `running`. A
+ * `completed` session is over by its own verdict, which a stop must not overwrite with `stopped`, so
+ * it is the `stopped` phase; a `stalled` one has an ending nobody confirmed and may still hold a
+ * pane, so it is the `failed` phase — killable and retryable like any other failure.
+ */
+export function lifecyclePhase(status: RecordedSessionStatus): LifecycleSessionStatus {
+  switch (status) {
+    case 'created':
+    case 'starting':
+    case 'failed':
+    case 'kill_failed':
+    case 'stopped':
+      return status;
+    case 'completed':
+      return 'stopped';
+    case 'stalled':
+      return 'failed';
+    case 'running':
+    case 'thinking':
+    case 'tool_running':
+    case 'awaiting_question':
+    case 'awaiting_user':
+    case 'interrupted':
+    case 'rate_limited':
+    case 'retrying':
+    case 'waiting':
+      return 'running';
+  }
+}
+
+/**
  * `failed` is not terminal: a launch that lost a transient tmux error must be retryable, or one
  * flaky launch burns the session forever. `kill_failed` may repeat — a pane can refuse to die more
  * than once — and resolves to `stopped` when a later kill succeeds.
@@ -252,7 +287,7 @@ export function transitionSessionRecord(
   at: string,
   reason?: string,
 ): { readonly record: SessionLifecycleRecord; readonly event: SessionLifecycleEvent } {
-  if (!transitions[record.state.status].includes(status))
+  if (!transitions[lifecyclePhase(record.state.status)].includes(status))
     throw new Error(`cannot transition session ${record.config.id} from ${record.state.status} to ${status}`);
   const state: SessionLifecycleRecord['state'] = {
     ...record.state,
