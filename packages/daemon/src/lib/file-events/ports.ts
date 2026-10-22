@@ -62,6 +62,11 @@ export interface FileEventSource {
   watch(directory: string, onEvent: () => void, onError: (detail: string) => void): DirectoryWatchOpen;
   /** Whether a change to an entry with this name produces an event at all. */
   reports(name: string): boolean;
+  /**
+   * Whether a watch reports its OWN directory being deleted, moved or replaced as an event. When it does
+   * not, the hub also watches the parent to find out.
+   */
+  reportsRemoval(): boolean;
   /** The path's stamp, or `undefined` when nothing can be stat-ed there. Never rejects. */
   stamp(path: string): Promise<FileStamp | undefined>;
 }

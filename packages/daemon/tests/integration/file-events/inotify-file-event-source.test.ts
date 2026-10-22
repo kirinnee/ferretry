@@ -156,6 +156,7 @@ describe('InotifyFileEventSource', () => {
     // Assert
     should(fake.calls).deepEqual(['init', 'add 7 /a true', 'add 7 /b true', 'rm 7 1', 'rm 7 2', 'cancel', 'close 7']);
     should(source.reports()).be.true();
+    should(source.reportsRemoval()).be.true();
   });
 
   it('should tell each touched directory once per read, keeping a partial event for the next read', async () => {

@@ -77,6 +77,12 @@ class FakeSource implements FileEventSource {
     return !name.startsWith('.');
   }
 
+  selfReporting = false;
+
+  reportsRemoval(): boolean {
+    return this.selfReporting;
+  }
+
   async stamp(path: string): Promise<FileStamp | undefined> {
     this.stats += 1;
     await Promise.resolve();
@@ -221,6 +227,26 @@ describe('FileEventHub', () => {
 
       // Assert
       should(heard).deepEqual(['/h/a']);
+    });
+
+    it('should not watch the parent of a directory whose own watch reports its removal, until it is missing', async () => {
+      // Arrange
+      const source = new FakeSource('/', '/h', '/h/p');
+      source.selfReporting = true;
+      const timers = new FakeTimers();
+      const hub = new FileEventHub(source, timers);
+      const subscription = hub.subscribe('/h/p/a', () => {});
+      const whileWatching = source.open();
+
+      // Act: the directory goes, and its own watch says so.
+      source.remove('/h/p');
+      source.fire('/h/p');
+      await settle(timers);
+
+      // Assert
+      should(whileWatching).deepEqual(['/h/p']);
+      should(source.open()).deepEqual(['/h']);
+      should(subscription.live()).be.false();
     });
 
     it('should not watch above the filesystem root', () => {

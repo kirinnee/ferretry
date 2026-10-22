@@ -47,9 +47,11 @@ export const TRANSCRIPT_TAIL_CACHE_CAPACITY = 256;
 export const TRANSCRIPT_TAIL_CONCURRENCY = 2;
 /**
  * How long a tail verified under a live watch is answered without a `stat`. The watch is what keeps it
- * current; this bound is only the backstop for an event the platform lost.
+ * current; this bound is only the backstop for an event the platform lost, which inotify does only on a
+ * queue overflow (reported to every watch) and FSEvents coalesces rather than drops. It is longer than
+ * the slowest roster pass (the warden's 30 s) on purpose: a bound shorter than the asks re-stats every one.
  */
-export const TRANSCRIPT_TAIL_TRUST_MS = 10_000;
+export const TRANSCRIPT_TAIL_TRUST_MS = 300_000;
 
 const sameBytes = (a: TranscriptFingerprint, b: TranscriptFingerprint): boolean =>
   a.file === b.file && a.size === b.size && a.mtimeMs === b.mtimeMs;

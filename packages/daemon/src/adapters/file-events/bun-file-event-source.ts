@@ -70,6 +70,11 @@ export class BunFileEventSource implements FileEventSource {
     return name.length > 0 && !name.startsWith('.') && !name.startsWith('~');
   }
 
+  /** Bun reports nothing when the watched directory itself goes; the watch just stops. */
+  reportsRemoval(): boolean {
+    return false;
+  }
+
   async stamp(path: string): Promise<FileStamp | undefined> {
     return await stampAt(this.primitives, path);
   }

@@ -98,9 +98,10 @@ interface WatchedDirectory {
  *   only its temporary name, and names starting with `.` or `~` are never reported. So any event in a
  *   directory re-stats EVERY subscribed path in it, after a short settle that turns a burst into one
  *   pass, and a listener hears only of a path whose stamp really changed.
- * - **A dead watch is silent.** Deleting or renaming the watched directory itself produces no event and
- *   no error. Every subscribed directory therefore also watches its PARENT, re-checking its own identity
- *   (inode and birth time) on any event there, and re-opens its watch on the new directory.
+ * - **A dead watch may be silent.** Deleting or renaming the watched directory itself produces no event
+ *   and no error from Bun's watcher. Where the source does not report its own directory's removal, every
+ *   subscribed directory therefore also watches its PARENT, re-checking its own identity (inode and
+ *   birth time) on any event there, and re-opens its watch on the new directory. (inotify reports it.)
  * - **A missing directory is waited for, not polled.** The nearest existing ancestor is watched, and the
  *   chain re-opens as each level appears.
  * - **A poll is the fallback, and it says so.** Where a directory cannot be watched (a spent inotify limit,
@@ -272,9 +273,12 @@ export class FileEventHub {
     if (this.#directories.get(directory.path) !== directory) return;
     const subscribed = directory.files.size > 0 || directory.listeners.size > 0;
     const parentPath = dirname(directory.path);
-    // A directory with subscribers watches its parent to notice it was deleted or replaced; a missing one
-    // watches it to notice it appeared. A parent watched only on a child's behalf goes no further up.
-    const wantsParent = parentPath !== directory.path && (subscribed || directory.mode.kind === 'awaiting');
+    // A directory with subscribers watches its parent to notice it was deleted or replaced — unless its
+    // own watch reports that — and a missing one watches it to notice it appeared. A parent watched only
+    // on a child's behalf goes no further up.
+    const selfReporting = directory.mode.kind === 'watching' && this.source.reportsRemoval();
+    const wantsParent =
+      parentPath !== directory.path && ((subscribed && !selfReporting) || directory.mode.kind === 'awaiting');
     if (wantsParent && directory.parent === undefined) {
       const parent = this.#acquire(parentPath);
       const child = (): void => this.#schedule(directory);

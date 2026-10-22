@@ -153,6 +153,7 @@ describe('BunFileEventSource', () => {
 
     // Assert
     should(answers).deepEqual([true, false, false, false]);
+    should(source.reportsRemoval()).be.false();
     should(subscription.live()).be.false();
     should(hub.fallbacks().map(fallback => fallback.reason)).deepEqual(['unreported-name']);
   });

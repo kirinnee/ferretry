@@ -200,6 +200,11 @@ export class InotifyFileEventSource implements FileEventSource {
     return true;
   }
 
+  /** IN_DELETE_SELF, IN_MOVE_SELF and IN_IGNORED are events on the directory's own watch. */
+  reportsRemoval(): boolean {
+    return true;
+  }
+
   async stamp(path: string): Promise<FileStamp | undefined> {
     return await stampAt(this.primitives, path);
   }
