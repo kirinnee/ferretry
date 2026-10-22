@@ -55,7 +55,7 @@ import type {
 import type { ClockPort } from '../../lib/ports.ts';
 import { harnessQuirks } from '../../lib/session/harness/quirks.ts';
 import { startupModelArguments } from '../../lib/session/harness/startup.ts';
-import { assignedTaskDocument } from '../../lib/session/lifecycle/policy.ts';
+import { assignedTaskDocument, lifecyclePhase } from '../../lib/session/lifecycle/policy.ts';
 import { handoffReadArguments } from '../../lib/session/send/handoff.ts';
 import type { SessionRuntimeStartupHeldPort } from '../../lib/session/runtime-control/types.ts';
 import {
@@ -594,7 +594,7 @@ export class SessionForkTargetBinder implements SessionForkTargetBinderPort {
       agree('tmux session', held.tmuxSession, shape.tmuxSession),
       agree('opening prompt', held.prompt, shape.prompt),
       demand(
-        options.states.includes(record.state.status),
+        options.states.includes(lifecyclePhase(record.state.status)),
         `its lifecycle state is ${JSON.stringify(record.state.status)} rather than one of ` +
           `${JSON.stringify(options.states)}`,
       ),

@@ -1,5 +1,9 @@
 import { isAbsolute } from 'node:path';
-import { type SessionLaunchInstructions, SessionLaunchInstructionsSchema } from '@ferretry/protocol';
+import {
+  type SessionLaunchInstructions,
+  SessionLaunchInstructionsSchema,
+  SessionStatusSchema,
+} from '@ferretry/protocol';
 import { z } from 'zod';
 import { MAX_SESSION_TITLE_LENGTH } from '../../names/types.ts';
 import { type SessionId, SessionIdSchema } from '../../session-id.ts';
@@ -13,6 +17,18 @@ export const LifecycleSessionStatusSchema = z.enum([
   'stopped',
 ]);
 export type LifecycleSessionStatus = z.infer<typeof LifecycleSessionStatusSchema>;
+
+/**
+ * Every status a session's state document may carry — the protocol's, not the lifecycle's.
+ *
+ * ONE DOCUMENT, TWO WRITERS. The lifecycle owns six of these (`LifecycleSessionStatusSchema`), but the
+ * turn watcher, the send path and the signal path write the rest into the same `state.json` the moment
+ * a turn changes: `interrupted`, `awaiting_user`, `thinking`, `completed` and the others. A reader
+ * that accepts only the lifecycle's six declares every such session unusable, and a session nobody can
+ * stop, revive or fork is exactly what a person pressing Stop on an interrupted turn met.
+ */
+export const RecordedSessionStatusSchema = SessionStatusSchema;
+export type RecordedSessionStatus = z.infer<typeof RecordedSessionStatusSchema>;
 
 /**
  * The assigned task is durable in the record because that makes creation a single write: a torn
@@ -61,7 +77,7 @@ export type SessionLifecycleConfig = z.infer<typeof SessionLifecycleConfigSchema
 
 export const SessionLifecycleStateSchema = z.object({
   id: SessionIdSchema,
-  status: LifecycleSessionStatusSchema,
+  status: RecordedSessionStatusSchema,
   startedAt: z.iso.datetime({ offset: true }).optional(),
   finishedAt: z.iso.datetime({ offset: true }).optional(),
   reason: z.string().min(1).optional(),

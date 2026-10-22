@@ -687,6 +687,23 @@ describe('SessionForkTargetBinder', () => {
     should(observed.config.transcript?.harnessSessionId).equal('harness-target');
   });
 
+  it('should report a completed fork whose pane has moved on to a turn-level status', async () => {
+    // Arrange: the turn watcher rewrites the status the moment the target's turn changes.
+    const subject = await harness('turn-level');
+    await drive(subject);
+    await subject.storage.updateState(
+      subject.target,
+      current => ({ ...(current as Record<string, unknown>), status: 'awaiting_user' }) as JsonValue,
+    );
+
+    // Act
+    const observed = await subject.bind().lifecycle.view();
+
+    // Assert
+    should(observed.config.id).equal(TARGET_ID);
+    should(observed.state.status).equal('awaiting_user');
+  });
+
   it('should durably repair a single canonical creation event on an adopted target', async () => {
     // Arrange: the crash prefix — a record that reads as `created` whose journal is empty.
     const subject = await harness('repair-created');

@@ -14,6 +14,7 @@ import {
 } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { SessionStatusSchema } from '@ferretry/protocol';
 import should from 'should';
 import {
   BunSqliteIndexFactory,
@@ -438,6 +439,60 @@ describe('StorageSessionLifecycleRepository', () => {
     await should(subject.read(orphan)).be.rejectedWith(UnusableSessionRecordError);
     await should(subject.read(orphan)).be.rejectedWith(/configuration document is missing/u);
     await should(subject.read(invalid.config.id)).be.rejectedWith(/config\.command/u);
+    await opened.storage.close();
+  });
+
+  it('should read, and let a stop write, a session whose turn was interrupted by a client', async () => {
+    // Arrange — the exact state a person's Stop met: the send path wrote a turn-level status.
+    const opened = await openTemporaryStorage();
+    const subject = new StorageSessionLifecycleRepository(opened.storage);
+    const interrupted = record('interrupted-session');
+    await opened.storage.writeConfig(interrupted.config.id, interrupted.config);
+    await opened.storage.writeState(interrupted.config.id, {
+      id: interrupted.config.id,
+      status: 'interrupted',
+      turn: 2,
+      startedAt: '2026-10-22T09:07:17.045Z',
+      turnState: 'working',
+      turnStateAt: '2026-10-22T09:09:40.200Z',
+      health: 'idle',
+      promptReady: true,
+      turnCompleted: false,
+      reason: 'interrupted by client',
+    });
+
+    // Act
+    const read = await subject.read(interrupted.config.id);
+    if (read === undefined) throw new Error('the interrupted session was not read');
+    const stopped = transitionSessionRecord(read, 'stopped', '2026-10-22T09:12:00.000Z', 'stopped by client');
+    await subject.write(stopped.record, stopped.event);
+
+    // Assert — usable, and the stop merged over the turn fields it does not own.
+    should(read.state.status).equal('interrupted');
+    const state = await opened.storage.readState(interrupted.config.id);
+    should(state).containDeep({ status: 'stopped', reason: 'stopped by client', turn: 2, turnState: 'working' });
+    await opened.storage.close();
+  });
+
+  it('should read a session carrying any status the protocol defines', async () => {
+    // Arrange
+    const opened = await openTemporaryStorage();
+    const subject = new StorageSessionLifecycleRepository(opened.storage);
+    const held = record('every-status');
+    await opened.storage.writeConfig(held.config.id, held.config);
+
+    for (const status of SessionStatusSchema.options) {
+      await opened.storage.writeState(held.config.id, { id: held.config.id, status });
+
+      // Act + Assert
+      should((await subject.read(held.config.id))?.state.status).equal(status);
+    }
+    await should(
+      (async () => {
+        await opened.storage.writeState(held.config.id, { id: held.config.id, status: 'not-a-status' });
+        return await subject.read(held.config.id);
+      })(),
+    ).be.rejectedWith(/state\.status/u);
     await opened.storage.close();
   });
 

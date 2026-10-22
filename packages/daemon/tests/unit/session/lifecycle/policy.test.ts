@@ -1,4 +1,5 @@
 import { describe, it } from 'bun:test';
+import { SessionStatusSchema } from '@ferretry/protocol';
 import should from 'should';
 import type { CoreAccount } from '../../../../src/lib/core/inventory.ts';
 import { parseSessionId } from '../../../../src/lib/index.ts';
@@ -16,6 +17,7 @@ import {
   type SessionRecordContext,
   sessionPaneEnvironment,
   sessionTmuxName,
+  lifecyclePhase,
   transitionSessionRecord,
   unrunnableAccountRefusal,
 } from '../../../../src/lib/session/lifecycle/index.ts';
@@ -202,6 +204,61 @@ describe('session lifecycle policy', () => {
     should(() => transitionSessionRecord(stopped.record, 'running', NOW)).throw(
       'cannot transition session session-1 from stopped to running',
     );
+  });
+
+  it('should map every status the protocol defines onto a lifecycle phase', () => {
+    // Act
+    const phases = Object.fromEntries(SessionStatusSchema.options.map(status => [status, lifecyclePhase(status)]));
+
+    // Assert
+    should(phases).deepEqual({
+      created: 'created',
+      starting: 'starting',
+      running: 'running',
+      thinking: 'running',
+      tool_running: 'running',
+      awaiting_question: 'running',
+      awaiting_user: 'running',
+      interrupted: 'running',
+      rate_limited: 'running',
+      retrying: 'running',
+      waiting: 'running',
+      kill_failed: 'kill_failed',
+      completed: 'stopped',
+      failed: 'failed',
+      stalled: 'failed',
+      stopped: 'stopped',
+    });
+  });
+
+  it('should stop a session from every status that still has a pane to end', () => {
+    // Arrange
+    const created = createSessionRecord(request(), context()).record;
+    const stoppable = SessionStatusSchema.options.filter(status => lifecyclePhase(status) !== 'stopped');
+
+    for (const status of stoppable) {
+      // Act
+      const stopped = transitionSessionRecord(
+        { ...created, state: { ...created.state, status } },
+        'stopped',
+        '2026-07-31T10:03:00.000Z',
+        'stopped by client',
+      );
+
+      // Assert
+      should(stopped.record.state).containDeep({ status: 'stopped', reason: 'stopped by client' });
+    }
+  });
+
+  it('should refuse to stop again a session whose verdict is already final', () => {
+    // Arrange
+    const created = createSessionRecord(request(), context()).record;
+
+    // Act + Assert
+    for (const status of ['stopped', 'completed'] as const)
+      should(() => transitionSessionRecord({ ...created, state: { ...created.state, status } }, 'stopped', NOW)).throw(
+        `cannot transition session session-1 from ${status} to stopped`,
+      );
   });
 
   it('should support an early stop and a launch failure without inventing a running state', () => {

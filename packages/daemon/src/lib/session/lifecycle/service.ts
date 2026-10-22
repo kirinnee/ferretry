@@ -14,6 +14,7 @@ import {
   assignedTaskDocument,
   createSessionRecord,
   firstTurnInstruction,
+  lifecyclePhase,
   lifecycleSessionId,
   transitionSessionRecord,
   withLaunchInstructions,
@@ -124,7 +125,7 @@ export class SessionLifecycleService {
     return await this.ports.serial.run(parsed, async () => {
       const current = await this.require(parsed);
       const live = await this.ports.launcher.alive(current);
-      if (current.state.status === 'running') {
+      if (lifecyclePhase(current.state.status) === 'running') {
         // Idempotent by design: a retried start must never open a second pane for one session.
         if (live) return current;
         throw new Error(`session ${parsed} is running but its terminal is gone; stop it before starting it again`);
@@ -189,7 +190,7 @@ export class SessionLifecycleService {
     const parsed = lifecycleSessionId(id);
     return await this.ports.serial.run(parsed, async () => {
       const current = await this.require(parsed);
-      if (current.state.status === 'stopped') return current;
+      if (lifecyclePhase(current.state.status) === 'stopped') return current;
       try {
         await this.ports.launcher.snapshot(current);
         await this.ports.launcher.stop(current);
