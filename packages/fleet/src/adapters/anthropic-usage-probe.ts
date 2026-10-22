@@ -148,6 +148,8 @@ export interface AnthropicUsageProbeDeps {
   /** The account model's reader, by credential store rather than by home. */
   readonly stored?: StoredMaterialSource;
   readonly timeoutMs?: number;
+  /** Where the usage read goes: {@link ANTHROPIC_USAGE_URL} unless a loopback test server stands in. */
+  readonly url?: string;
 }
 
 const failure = (error: string, extra: Partial<FleetUsageProbeResult> = {}): FleetUsageProbeResult => ({
@@ -473,7 +475,7 @@ export class AnthropicUsageProbe implements FleetUsageProbe {
     let response: QuotaResponse;
     try {
       response = await this.deps.fetch({
-        url: ANTHROPIC_USAGE_URL,
+        url: this.deps.url ?? ANTHROPIC_USAGE_URL,
         method: 'GET',
         headers: { Authorization: `Bearer ${token}`, 'anthropic-version': ANTHROPIC_VERSION },
         timeoutMs: this.deps.timeoutMs ?? DEFAULT_TIMEOUT_MS,

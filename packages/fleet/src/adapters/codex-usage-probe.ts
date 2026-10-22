@@ -35,6 +35,8 @@ export interface CodexUsageProbeDeps {
   readonly stored: StoredMaterialSource;
   readonly now: () => number;
   readonly timeoutMs?: number;
+  /** Where the usage read goes: {@link CODEX_USAGE_URL} unless a loopback test server stands in. */
+  readonly url?: string;
 }
 
 const failure = (error: string): FleetUsageProbeResult => ({
@@ -80,7 +82,7 @@ export class CodexUsageProbe {
     let body: unknown;
     try {
       const response = await this.deps.fetch({
-        url: CODEX_USAGE_URL,
+        url: this.deps.url ?? CODEX_USAGE_URL,
         method: 'GET',
         headers: { Authorization: `Bearer ${bearer.token}`, 'ChatGPT-Account-Id': bearer.accountId },
         timeoutMs: this.deps.timeoutMs ?? DEFAULT_TIMEOUT_MS,

@@ -891,6 +891,7 @@ import {
   type UsageFeedPort,
   unattendedUsageFeed,
   unreadableManifestPreflight,
+  usageProbeUrls,
   usageRefreshMs,
   verifySessionTranscriptMessageToken,
   WARDEN_LABEL,
@@ -8406,15 +8407,21 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         credentialUsageIntervalMs = intervalMs;
       });
       // The free reads, made with material `credentialReads` read itself: one store read per active read.
+      // `FY_USAGE_PROBE_ORIGIN` moves them to a fake usage server on this machine (the idle bench, the CI
+      // budget); anything but a loopback origin is refused, so a token only ever reaches its provider or
+      // this host.
+      const probeUrls = usageProbeUrls(process.env.FY_USAGE_PROBE_ORIGIN);
       const anthropicUsageProbe = new AnthropicUsageProbe({
         fetch: fetchQuota,
         credentials: harnessCredentials,
         stored: harnessCredentials,
+        ...(probeUrls === undefined ? {} : { url: probeUrls.anthropic }),
       });
       const codexUsageProbe = new CodexUsageProbe({
         fetch: fetchQuota,
         stored: harnessCredentials,
         now: () => millisecondClock.now(),
+        ...(probeUrls === undefined ? {} : { url: probeUrls.codex }),
       });
       // Each credential's store, read as rarely as its facts allow (housekeeping-worker.md §4 PR 1): a file
       // store's facts are kept while its stamp holds, a macOS keychain item's for one usage interval, and a
