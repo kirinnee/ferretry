@@ -26,11 +26,12 @@ import {
   defaultSessionLifecycleSettings,
   parseSessionId,
   SelfRestartCoordinator,
-  SessionHealthService,
   type SessionExitObservation,
+  SessionHealthService,
   type SessionId,
   type TmuxCommandPort,
   TmuxController,
+  UNNAMED_SELF_CHECK_STAGES,
 } from '../../../../src/lib/index.ts';
 
 /**
@@ -170,6 +171,7 @@ function selfCheck(subject: ExitFixture): SessionHealthService {
         run: async () => ({ missingFromIndex: [], staleRows: [], zombies: [], repaired: [], unhealable: [] }),
       },
       repair: { startMonitor: async () => undefined, rearmWarden: async () => undefined },
+      activities: UNNAMED_SELF_CHECK_STAGES,
       exits: observer(subject),
       events: { emit: async () => undefined },
       clock: { now: () => NOW },

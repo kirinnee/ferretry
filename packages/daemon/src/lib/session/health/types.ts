@@ -13,6 +13,23 @@ export interface MonotonicClockPort {
   elapsedMs(): number;
 }
 
+/**
+ * Names one stage of a self-check, so a profile splits the check's time by stage —
+ * `self-check › survey`, `self-check › reconcile` — instead of reporting one opaque total.
+ *
+ * A PORT because a stage only nests inside the check when the runtime carries the enclosing activity
+ * across every `await`; the composition root hands in its activity ledger, and a test hands in a
+ * recorder.
+ */
+export interface SelfCheckActivityPort {
+  run<T>(name: string, work: () => Promise<T>): Promise<T>;
+}
+
+/** Runs every stage unnamed: what a caller with no activity ledger hands in. */
+export const UNNAMED_SELF_CHECK_STAGES: SelfCheckActivityPort = Object.freeze({
+  run: async <T>(_name: string, work: () => Promise<T>): Promise<T> => await work(),
+});
+
 /** One firing of the self-check timer: a monotonic reading for the gap, a wall instant to report. */
 export interface SelfCheckTick {
   readonly elapsedMs: number;

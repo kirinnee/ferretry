@@ -157,6 +157,7 @@ import {
   type SessionHealthEvent,
   type SessionHealthObservation,
   SessionHealthService,
+  UNNAMED_SELF_CHECK_STAGES,
 } from '../../../../src/lib/session/health/index.ts';
 import { ProvedPaneCapture, SessionPermissionService } from '../../../../src/lib/session/permission/index.ts';
 import type { StoredSessionEvent } from '../../../../src/lib/session/reads/index.ts';
@@ -1265,6 +1266,7 @@ export function healthSubsystem(world: HealthWorld = {}): DaemonHealthSubsystem 
       },
       consistency: { run: async () => clean },
       repair: { startMonitor: async () => {}, rearmWarden: async () => {} },
+      activities: UNNAMED_SELF_CHECK_STAGES,
       events: {
         emit: async event => {
           events.push(event);

@@ -2,14 +2,15 @@ import type { ClockPort } from '../../ports.ts';
 import { type ExitedSessionTransition, exitedSessionTransition, type SessionExitObservation } from './exit.ts';
 import { emptyIncoherenceLedger, recordIncoherencePass } from './incoherence.ts';
 import { buildDaemonHealthReport, type DaemonHealthReport } from './report.ts';
-import { SelfRestartCoordinator } from './self-restart.ts';
 import { planSelfCheck, type SelfCheckPlan, type WardenSweepInput } from './self-check.ts';
+import type { SelfRestartCoordinator } from './self-restart.ts';
 import type { SessionHealthSettings } from './settings.ts';
 import { classifyWardenSweep } from './sweep.ts';
 import type {
   IncoherenceLedger,
   IncoherencePass,
   MonotonicClockPort,
+  SelfCheckActivityPort,
   SelfCheckLedger,
   SessionHealthEvent,
   SessionHealthObservation,
@@ -77,6 +78,8 @@ export interface SessionHealthPorts {
   readonly wallClock: { nowMs(): number };
   /** The gap between two ticks is a duration, so it is never read off the wall clock. */
   readonly monotonic: MonotonicClockPort;
+  /** Where each stage of a check is named, so a profile can say which one the time went to. */
+  readonly activities: SelfCheckActivityPort;
   readonly restarts: SelfRestartCoordinator;
   readonly version: string;
 }
@@ -93,6 +96,10 @@ export interface SelfCheckOutcome {
   /** Sessions this check moved out of a running status because their agent had exited. */
   readonly exited: readonly string[];
 }
+
+type Repairs = Pick<SelfCheckOutcome, 'repaired' | 'failures' | 'wardenRearmed'>;
+
+const NO_REPAIRS: Repairs = { repaired: [], failures: new Map<string, string>(), wardenRearmed: false };
 
 function message(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -116,8 +123,14 @@ export class SessionHealthService {
     private readonly settings: SessionHealthSettings,
   ) {}
 
+  /**
+   * One check. Each stage runs as a named activity inside whatever activity the caller runs this in,
+   * so a profile of a slow check names the stage — the index read, the consistency pass, the exit
+   * observer or the repairs — rather than only the check around them.
+   */
   async selfCheck(): Promise<SelfCheckOutcome> {
-    const snapshot = await this.ports.inventory.observe();
+    const stage = this.ports.activities;
+    const snapshot = await stage.run('inventory', async () => await this.ports.inventory.observe());
     const nowMs = this.ports.wallClock.nowMs();
     const planned = planSelfCheck(
       this.selfChecks,
@@ -136,13 +149,23 @@ export class SessionHealthService {
     for (const event of planned.plan.events) await this.emit(event);
     // The consistency pass runs before repair: starting a monitor for a session the index does not
     // know about would write its observations into a row that is about to be replaced.
-    const escalated = await this.reconcile(planned.plan.deepPass, nowMs);
+    const escalated = await stage.run('reconcile', async () => await this.reconcile(planned.plan.deepPass, nowMs));
     // After the consistency pass for the same reason repair is: a row about to be replaced is not
     // one to write a terminal status into.
-    const exited = await this.settleExits();
+    const exited = await stage.run('exit observer', async () => await this.settleExits());
+    // Named only when there is something to repair, so a healthy tick adds no empty stage to a profile.
+    const repairs =
+      planned.plan.startMonitors.length === 0 && !planned.plan.rearmWarden
+        ? NO_REPAIRS
+        : await stage.run('repair', async () => await this.repair(planned.plan));
+    return { plan: planned.plan, ...repairs, escalated, exited };
+  }
+
+  /** Each repair inside its own boundary, so one session that refuses cannot abandon the rest. */
+  private async repair(plan: SelfCheckPlan): Promise<Repairs> {
     const repaired: string[] = [];
     const failures = new Map<string, string>();
-    for (const id of planned.plan.startMonitors) {
+    for (const id of plan.startMonitors) {
       try {
         await this.ports.repair.startMonitor(id);
         repaired.push(id);
@@ -150,15 +173,8 @@ export class SessionHealthService {
         failures.set(id, message(error));
       }
     }
-    const wardenRearmed = planned.plan.rearmWarden ? await this.rearmWarden() : false;
-    return {
-      plan: planned.plan,
-      repaired,
-      failures: failures as ReadonlyMap<string, string>,
-      wardenRearmed,
-      escalated,
-      exited,
-    };
+    const wardenRearmed = plan.rearmWarden ? await this.rearmWarden() : false;
+    return { repaired, failures: failures as ReadonlyMap<string, string>, wardenRearmed };
   }
 
   /** The health surface. Reports the ledgers this service maintains, never a fresh probe. */

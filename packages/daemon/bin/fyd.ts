@@ -7380,7 +7380,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
             bootstrapFinished: () => bootProgress?.finished ?? false,
             bootstrapErrors: () => [],
           }),
-          consistency: new StorageConsistencyPass(storage, stateFiles, paths, settings),
+          consistency: new StorageConsistencyPass(storage, stateFiles, paths, settings, activities),
           repair: new UnmountedSupervisionRepair(),
           // The same private server, registration ledger and launch gate the lifecycle and the revive
           // use, so an exit is only ever proven against a pane this daemon registered and never while
@@ -7403,6 +7403,9 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           clock,
           wallClock: { nowMs: () => Date.now() },
           monotonic: new SystemMonotonicClock(),
+          // The same ledger every timer reports into, so the timer's `self-check` activity is the parent of
+          // each stage the service names: `self-check › reconcile › reindex`.
+          activities,
           restarts: new SelfRestartCoordinator(
             new FileSelfRestartStampStore(stateFiles, join(paths.home, 'self-restart.json')),
             // Nothing supervises this process yet, so the honest answer is "no restart happened":

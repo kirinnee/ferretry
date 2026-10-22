@@ -1,19 +1,21 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
+import { AsyncActivityScope } from '../../../../src/adapters/runtime/stall-attribution.ts';
+import { ActivityLedger } from '../../../../src/lib/runtime/liveness.ts';
 import {
-  defaultSessionHealthSettings,
-  SelfRestartCoordinator,
-  SessionHealthService,
   type ConsistencyPassPort,
   type DaemonHealthSnapshot,
+  defaultSessionHealthSettings,
+  type ExitedSessionTransition,
   type IncoherencePass,
+  SelfRestartCoordinator,
   type SelfRestartHandler,
   type SelfRestartStamp,
   type SelfRestartStampStore,
   type SessionExitObservation,
   type SessionHealthEvent,
   type SessionHealthPorts,
-  type ExitedSessionTransition,
+  SessionHealthService,
 } from '../../../../src/lib/session/health/index.ts';
 
 const SETTINGS = defaultSessionHealthSettings;
@@ -52,6 +54,8 @@ class Harness {
   rearms = 0;
   restarts = 0;
   elapsed = 1_000_000;
+  /** Every stage the service named, in the order it ran them. */
+  readonly stages: string[] = [];
   exitObservations: readonly SessionExitObservation[] | Error = [];
   readonly settled: { readonly id: string; readonly transition: ExitedSessionTransition }[] = [];
   /** Sessions whose settle answers false (moved since), or throws when mapped to an Error. */
@@ -118,6 +122,12 @@ class Harness {
       clock: { now: () => AT },
       wallClock: { nowMs: () => NOW_MS },
       monotonic: { elapsedMs: () => this.elapsed },
+      activities: {
+        run: async (name, work) => {
+          this.stages.push(name);
+          return await work();
+        },
+      },
       restarts: new SelfRestartCoordinator(new NullStampStore(), this.handler, SETTINGS),
       version: '0.17.0',
     };
@@ -142,6 +152,47 @@ describe('session health service', () => {
     should(actual.wardenRearmed).be.false();
     should(actual.escalated).be.false();
     should(harness.events).deepEqual([]);
+  });
+
+  it('should name every stage of a healthy check, and no repair stage when nothing needs one', async () => {
+    // Arrange
+    const harness = new Harness(snapshot());
+
+    // Act
+    await harness.service().selfCheck();
+
+    // Assert
+    should(harness.stages).deepEqual(['inventory', 'reconcile', 'exit observer']);
+  });
+
+  it('should name the repair stage when the check has something to repair', async () => {
+    // Arrange
+    const harness = new Harness(snapshot({ sweep: { timerArmed: false, intervalMs: 60_000 } }));
+
+    // Act
+    await harness.service().selfCheck();
+
+    // Assert
+    should(harness.stages).deepEqual(['inventory', 'reconcile', 'exit observer', 'repair']);
+  });
+
+  it('should nest its stages inside the activity the check runs in, so a profile splits its time', async () => {
+    // Arrange — the composition root's own arrangement: one ledger, carried across awaits.
+    const labels: string[] = [];
+    const ledger = new ActivityLedger({ now: () => 0 }, new AsyncActivityScope(), label => labels.push(label));
+    const harness = new Harness(snapshot());
+    const service = new SessionHealthService({ ...harness.ports(), activities: ledger }, SETTINGS);
+
+    // Act
+    await ledger.run('self-check', async () => await service.selfCheck());
+
+    // Assert — each stage is reported as it ends, and the check itself last.
+    should(labels).deepEqual([
+      'self-check › inventory',
+      'self-check › reconcile',
+      'self-check › exit observer',
+      'self-check',
+    ]);
   });
 
   it('should restart the monitors of live sessions that lost theirs', async () => {
