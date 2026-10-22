@@ -518,6 +518,7 @@ import {
   ClaudeTranscriptParser,
   type ClockPort,
   type CloudflaredLocatorPort,
+  CodexDiscoveryPacer,
   CodexPickerCleanup,
   CodexRuntimeCatalogCache,
   CodexTranscriptParser,
@@ -6755,6 +6756,12 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
    */
   const codexRollouts = new NodeCodexRolloutIndex();
   /**
+   * How often an unresolved Codex session may walk that home — one pacer for the daemon, because the
+   * resolver below is built per storage and per reader and a pace kept in any one of them would be
+   * forgotten with it.
+   */
+  const codexDiscoveryPacer = new CodexDiscoveryPacer(clock);
+  /**
    * Transcript provenance, taken at creation.
    *
    * `process.env` is the environment this daemon will launch the wrapper with, which is what a
@@ -6803,6 +6810,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       new StorageTranscriptClaims(storage),
       new StorageTranscriptProvenanceStore(storage),
       clock,
+      codexDiscoveryPacer,
     );
     return {
       file: async sessionId => {
