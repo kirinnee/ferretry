@@ -58,6 +58,22 @@ const plus = (root: HTMLElement): HTMLButtonElement =>
   must(root.querySelector<HTMLButtonElement>('button[data-composer-attach]'), 'the plus button');
 const menus = (): Element[] => [...document.querySelectorAll('[data-testid="composer-add-menu"]')];
 
+const fileInputs = (root: HTMLElement) => {
+  const all = [...root.querySelectorAll<HTMLInputElement>('input[type="file"]')];
+  const plain = all.filter(input => !input.hasAttribute('capture'));
+  return {
+    photos: must(
+      plain.find(input => input.hasAttribute('accept')),
+      'the photo input',
+    ),
+    files: must(
+      plain.find(input => !input.hasAttribute('accept')),
+      'the file input',
+    ),
+    camera: all.find(input => input.hasAttribute('capture')),
+  };
+};
+
 /** Counts how many times a menu element is ADDED to the document, so a double mount cannot hide. */
 const countMounts = (): { readonly count: () => number; readonly stop: () => void } => {
   let added = 0;
@@ -129,54 +145,69 @@ describe('the composer plus menu on a tap', () => {
     await view.unmount();
   });
 
-  test('choosing Attach files opens the picker and closes the menu', async () => {
-    const view = await mountComposer(false);
-    const picker = must(
-      [...view.container.querySelectorAll<HTMLInputElement>('input[type="file"]')].find(
-        input => !input.hasAttribute('capture'),
+  const row = (label: string): HTMLElement =>
+    must(
+      [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(item =>
+        item.textContent?.startsWith(label),
       ),
-      'the file input',
+      `the ${label} row`,
     );
-    let picked = 0;
-    picker.click = () => {
-      picked += 1;
+
+  test('Photos & screenshots opens the image-only picker, Files the any-type one, and each closes the menu', async () => {
+    const view = await mountComposer(false, true, false);
+    const { photos, files } = fileInputs(view.container);
+    expect(photos.getAttribute('accept')).toBe('image/*');
+    expect(photos.multiple).toBe(true);
+    expect(files.hasAttribute('accept')).toBe(false);
+    expect(files.multiple).toBe(true);
+    const picked: string[] = [];
+    photos.click = () => {
+      picked.push('photos');
+    };
+    files.click = () => {
+      picked.push('files');
     };
     await interact(() => plus(view.container).click());
-    const attach = must(
-      [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(row =>
-        row.textContent?.startsWith('Attach files'),
-      ),
-      'the attach row',
-    );
-    await interact(() => attach.click());
-    expect(picked).toBe(1);
+    await interact(() => row('Photos & screenshots').click());
+    expect(picked).toEqual(['photos']);
+    expect(menus()).toHaveLength(0);
+    await interact(() => plus(view.container).click());
+    await interact(() => row('Files').click());
+    expect(picked).toEqual(['photos', 'files']);
     expect(menus()).toHaveLength(0);
     await view.unmount();
   });
 
-  const fileInputs = (root: HTMLElement) => {
-    const all = [...root.querySelectorAll<HTMLInputElement>('input[type="file"]')];
-    return {
-      picker: must(
-        all.find(input => !input.hasAttribute('capture')),
-        'the file input',
-      ),
-      camera: all.find(input => input.hasAttribute('capture')),
-    };
-  };
+  test('pictures chosen from the gallery join the tray', async () => {
+    const created = URL.createObjectURL;
+    URL.createObjectURL = (() => 'blob:gallery/1') as typeof URL.createObjectURL;
+    try {
+      const view = await mountComposer(false, false, false);
+      const { photos } = fileInputs(view.container);
+      Object.defineProperty(photos, 'files', {
+        configurable: true,
+        value: [new File([new Uint8Array([1, 2])], 'shot.png', { type: 'image/png' })],
+      });
+      await interact(() => {
+        photos.dispatchEvent(new Event('change', { bubbles: true }));
+      });
+      expect(view.container.querySelector('[aria-label="Remove shot.png"]')).not.toBeNull();
+      await view.unmount();
+    } finally {
+      URL.createObjectURL = created;
+    }
+  });
 
-  test('with neither a camera nor a host there is one thing to do, so plus goes straight to the picker', async () => {
+  test('with neither a camera nor a host the menu still splits pictures from files', async () => {
     const view = await mountComposer(false, false, false);
     const button = plus(view.container);
-    expect(button.hasAttribute('aria-haspopup')).toBe(false);
-    expect(button.getAttribute('aria-label')).toBe('Attach an image, audio or a file');
-    let picked = 0;
-    fileInputs(view.container).picker.click = () => {
-      picked += 1;
-    };
+    expect(button.getAttribute('aria-haspopup')).toBe('dialog');
     await interact(() => button.click());
-    expect(picked).toBe(1);
-    expect(menus()).toHaveLength(0);
+    expect(
+      [...document.querySelectorAll('[role="menuitem"]')].map(
+        item => item.textContent?.split(/(?=From|Documents)/u)[0],
+      ),
+    ).toEqual(['Photos & screenshots', 'Files']);
     await view.unmount();
   });
 
@@ -246,7 +277,7 @@ describe('the composer plus menu on a tap', () => {
     }) as unknown as typeof window.setTimeout;
     try {
       const view = await mountComposer(false, false, false);
-      const picker = fileInputs(view.container).picker;
+      const picker = fileInputs(view.container).files;
       Object.defineProperty(picker, 'files', {
         configurable: true,
         value: [new File([new Uint8Array([1])], 'plan.pdf', { type: 'application/pdf' })],

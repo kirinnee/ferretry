@@ -95,10 +95,10 @@ describe('composer attachments', () => {
     // ＋ clicks the hidden file input it owns.
     expect(clicked).toBe(0);
     run(() => composer.root.findByProps({ 'data-composer-attach': '' }).props.onClick());
-    // On a touch device ＋ offers a camera row too, so the picker is one row away rather than direct.
+    // ＋ opens a menu; its Files row is the any-type picker.
     const menus = composer.root.findAllByType(ComposerAddMenu);
-    const attach = menus[0]?.props.actions.find((entry: { key: string }) => entry.key === 'attach');
-    if (attach) run(() => attach.onSelect());
+    const files = menus[0]?.props.actions.find((entry: { key: string }) => entry.key === 'files');
+    run(() => files.onSelect());
     expect(clicked).toBe(1);
     const picker = composer.root.findByProps({ type: 'file', accept: undefined });
     const input = { files: [png()], value: 'C:\\fakepath\\shot.png' };

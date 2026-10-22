@@ -102,7 +102,7 @@ const picture = async (page: Page, name: string, hue: number) => ({
 const addPictures = async (page: Page, names: readonly string[]) => {
   const files = [];
   for (const [at, name] of names.entries()) files.push(await picture(page, name, 20 + at * 90));
-  await page.locator('input[type="file"]:not([capture])').setInputFiles(files);
+  await page.locator('input[type="file"][accept="image/*"]:not([capture])').setInputFiles(files);
   await page.waitForSelector(`[aria-label="Open ${names[names.length - 1]}"]`);
 };
 
@@ -122,7 +122,8 @@ describe('the composer add menu', () => {
 
       const rows = scene.page.locator(`${MENU} [role="menuitem"]`);
       expect(await rows.allTextContents()).toEqual([
-        'Attach filesPhotos, screenshots, documents',
+        'Photos & screenshotsFrom your gallery',
+        'FilesDocuments, logs, anything',
         'Share locationSend where you are, with a map',
       ]);
       for (const height of await rows.evaluateAll(nodes => nodes.map(node => node.getBoundingClientRect().height))) {
@@ -149,8 +150,10 @@ describe('the composer add menu', () => {
       await scene.page.locator(PLUS).tap();
       await scene.page.waitForSelector(MENU);
       expect(await scene.page.locator(MENU).getAttribute('data-variant')).toBe('sheet');
-      expect(await scene.page.locator(`${MENU} [role="menuitem"]`).count()).toBe(3);
-      expect(await scene.page.locator(`${MENU} [role="menuitem"]`).first().textContent()).toContain('Attach files');
+      expect(await scene.page.locator(`${MENU} [role="menuitem"]`).count()).toBe(4);
+      expect(await scene.page.locator(`${MENU} [role="menuitem"]`).first().textContent()).toContain(
+        'Photos & screenshots',
+      );
       expect(await scene.page.locator(`${MENU}`).textContent()).toContain('Take photo');
 
       await scene.page.waitForTimeout(300);

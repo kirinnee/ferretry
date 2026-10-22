@@ -16,7 +16,7 @@
  * It also mounts in one pass (no hidden measuring frame), so a tap opens it exactly once.
  */
 
-import { Camera, MapPin, Paperclip } from 'lucide-react';
+import { Camera, File as FileIcon, Image as ImageIcon, MapPin } from 'lucide-react';
 import {
   type KeyboardEvent as ReactKeyboardEvent,
   type ReactNode,
@@ -30,7 +30,7 @@ import {
 import { useDialogFocus } from '../hooks/use-dialog-focus.ts';
 import { cn } from '../lib/class-names.ts';
 
-type AddMenuActionKey = 'attach' | 'camera' | 'location';
+type AddMenuActionKey = 'photos' | 'files' | 'camera' | 'location';
 
 export interface AddMenuAction {
   readonly key: AddMenuActionKey;
@@ -40,18 +40,26 @@ export interface AddMenuAction {
   readonly onSelect: () => void;
 }
 
-/** The rows the menu can offer, in order. `camera` and `location` appear only where they work. */
+/** The rows the menu offers, in order: pictures apart from other files. `camera` and `location` appear only where they work. */
 export const addMenuActions = (handlers: {
-  readonly attach: () => void;
+  readonly photos: () => void;
+  readonly files: () => void;
   readonly camera?: (() => void) | undefined;
   readonly location?: (() => void) | undefined;
 }): readonly AddMenuAction[] => [
   {
-    key: 'attach',
-    label: 'Attach files',
-    hint: 'Photos, screenshots, documents',
-    icon: <Paperclip aria-hidden="true" size={20} />,
-    onSelect: handlers.attach,
+    key: 'photos',
+    label: 'Photos & screenshots',
+    hint: 'From your gallery',
+    icon: <ImageIcon aria-hidden="true" size={20} />,
+    onSelect: handlers.photos,
+  },
+  {
+    key: 'files',
+    label: 'Files',
+    hint: 'Documents, logs, anything',
+    icon: <FileIcon aria-hidden="true" size={20} />,
+    onSelect: handlers.files,
   },
   ...(handlers.camera === undefined
     ? []

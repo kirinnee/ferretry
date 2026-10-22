@@ -9,20 +9,22 @@ import {
 import { interact, mount, must, pressKey } from '../support/dom.ts';
 
 describe('addMenuActions', () => {
-  test('always offers attach, and adds camera and location only where they work', () => {
+  test('always offers photos and files apart, and adds camera and location only where they work', () => {
     const noop = () => {};
-    expect(addMenuActions({ attach: noop }).map(a => a.key)).toEqual(['attach']);
-    expect(addMenuActions({ attach: noop, camera: noop, location: noop }).map(a => a.key)).toEqual([
-      'attach',
+    expect(addMenuActions({ photos: noop, files: noop }).map(a => a.key)).toEqual(['photos', 'files']);
+    expect(addMenuActions({ photos: noop, files: noop, camera: noop, location: noop }).map(a => a.key)).toEqual([
+      'photos',
+      'files',
       'camera',
       'location',
     ]);
   });
 
   test('every row says what it is and what it takes', () => {
-    const rows = addMenuActions({ attach: () => {}, camera: () => {}, location: () => {} });
+    const rows = addMenuActions({ photos: () => {}, files: () => {}, camera: () => {}, location: () => {} });
     expect(rows.map(a => [a.label, a.hint])).toEqual([
-      ['Attach files', 'Photos, screenshots, documents'],
+      ['Photos & screenshots', 'From your gallery'],
+      ['Files', 'Documents, logs, anything'],
       ['Take photo', 'Use the camera'],
       ['Share location', 'Send where you are, with a map'],
     ]);
@@ -51,7 +53,8 @@ const setup = async (variant: 'sheet' | 'popover', open = true) => {
   const calls: string[] = [];
   let closed = 0;
   const actions: readonly AddMenuAction[] = addMenuActions({
-    attach: () => calls.push('attach'),
+    photos: () => calls.push('photos'),
+    files: () => calls.push('files'),
     camera: () => calls.push('camera'),
     location: () => calls.push('location'),
   });
@@ -88,7 +91,8 @@ describe('ComposerAddMenu', () => {
     expect(dialog.getAttribute('data-variant')).toBe('sheet');
     expect(dialog.getAttribute('aria-label')).toBe('Add to message');
     expect(items().map(row => row.textContent)).toEqual([
-      'Attach filesPhotos, screenshots, documents',
+      'Photos & screenshotsFrom your gallery',
+      'FilesDocuments, logs, anything',
       'Take photoUse the camera',
       'Share locationSend where you are, with a map',
     ]);
@@ -115,7 +119,7 @@ describe('ComposerAddMenu', () => {
 
   test('choosing a row runs it once and closes the menu', async () => {
     const { view, calls, closed } = await setup('sheet');
-    await interact(() => items()[2]?.click());
+    await interact(() => items()[3]?.click());
     expect(calls).toEqual(['location']);
     expect(closed()).toBe(1);
     await view.unmount();
@@ -173,15 +177,18 @@ describe('ComposerAddMenu', () => {
   test('arrows, Home and End rove focus and wrap', async () => {
     const { view } = await setup('popover');
     const rows = items();
-    await interact(() => pressKey(rows[0] as HTMLElement, 'ArrowDown'));
+    const last = rows.length - 1;
+    const press = (row: HTMLElement | undefined, key: string) => interact(() => pressKey(row as HTMLElement, key));
+    expect(last).toBe(3);
+    await press(rows[0], 'ArrowDown');
     expect(document.activeElement).toBe(rows[1] as HTMLElement);
-    await interact(() => pressKey(rows[1] as HTMLElement, 'End'));
-    expect(document.activeElement).toBe(rows[2] as HTMLElement);
-    await interact(() => pressKey(rows[2] as HTMLElement, 'ArrowDown'));
+    await press(rows[1], 'End');
+    expect(document.activeElement).toBe(rows[last] as HTMLElement);
+    await press(rows[last], 'ArrowDown');
     expect(document.activeElement).toBe(rows[0] as HTMLElement);
-    await interact(() => pressKey(rows[0] as HTMLElement, 'ArrowUp'));
-    expect(document.activeElement).toBe(rows[2] as HTMLElement);
-    await interact(() => pressKey(rows[2] as HTMLElement, 'Home'));
+    await press(rows[0], 'ArrowUp');
+    expect(document.activeElement).toBe(rows[last] as HTMLElement);
+    await press(rows[last], 'Home');
     expect(document.activeElement).toBe(rows[0] as HTMLElement);
     await view.unmount();
   });

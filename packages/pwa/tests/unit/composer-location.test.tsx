@@ -105,26 +105,24 @@ const hostWith = () => {
 };
 
 describe('composer share my location', () => {
-  test('without a host the ＋ button reaches the file picker and never offers the location', () => {
+  test('without a host the ＋ menu splits pictures from files and never offers the location', () => {
     const view = mountComposer(null);
     view.openMenu();
-    if (view.composer.root.findAllByType(ComposerAddMenu).length > 0) {
-      expect(view.labels()).toEqual(['Attach files']);
-      view.choose('attach');
-    }
+    expect(view.labels()).toEqual(['Photos & screenshots', 'Files']);
+    view.choose('files');
     expect(view.clicks()).toBe(1);
     run(() => view.composer.unmount());
   });
 
-  test('with a host the ＋ button opens a menu that offers both a file and the location', () => {
+  test('with a host the ＋ button opens a menu that offers pictures, files and the location', () => {
     const { host } = hostWith();
     const view = mountComposer(host);
     expect(view.menu().props.open).toBe(false);
     view.openMenu();
     expect(view.menu().props.open).toBe(true);
     expect(view.menu().props.variant).toBe('popover');
-    expect(view.labels()).toEqual(['Attach files', 'Share location']);
-    view.choose('attach');
+    expect(view.labels()).toEqual(['Photos & screenshots', 'Files', 'Share location']);
+    view.choose('files');
     expect(view.clicks()).toBe(1);
     run(() => view.menu().props.onClose());
     expect(view.menu().props.open).toBe(false);

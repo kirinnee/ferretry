@@ -348,6 +348,7 @@ export function Composer({
   );
   const attachments = useComposerAttachments(uploader, daemonSessionKey(scope));
   const fileInput = useRef<HTMLInputElement | null>(null);
+  const photoInput = useRef<HTMLInputElement | null>(null);
   const [dropping, setDropping] = useState(false);
   const locationHost = useLocationShareHost();
   const [location, setLocation] = useState<LocationDraft | null>(null);
@@ -981,27 +982,23 @@ export function Composer({
 
   // ONE attach control, placed by layout: before the field on a desktop, at the top of the phone's
   // left-hand column.
-  // The camera row exists only where a camera hand-off does: a touch device. Without it and without a
-  // location host there is one thing to do, so "+" goes straight to the file chooser.
+  // Pictures and other files are two rows, so a phone opens its photo picker and not a file browser.
+  // The camera row exists only where a camera hand-off does: a touch device.
   const addActions = addMenuActions({
-    attach: () => fileInput.current?.click(),
+    photos: () => photoInput.current?.click(),
+    files: () => fileInput.current?.click(),
     camera: (offerCamera ?? inputModality.touchAffected) ? () => cameraInput.current?.click() : undefined,
     location: locationHost === null ? undefined : shareLocation,
   });
-  const addMenuUseful = addActions.length > 1;
   const attachButton = (
     <button
-      aria-label={addMenuUseful ? 'Add a file, photo or location' : 'Attach an image, audio or a file'}
-      aria-expanded={addMenuUseful ? plusOpen : undefined}
-      aria-haspopup={addMenuUseful ? 'dialog' : undefined}
+      aria-expanded={plusOpen}
+      aria-haspopup="dialog"
+      aria-label="Add a photo, file or location"
       className="fy-composer-icon"
       data-composer-attach=""
       disabled={fieldDisabled}
       onClick={() => {
-        if (!addMenuUseful) {
-          fileInput.current?.click();
-          return;
-        }
         if (plusOpen) {
           setPlusOpen(false);
           return;
@@ -1143,6 +1140,20 @@ export function Composer({
             input.value = '';
           }}
           ref={cameraInput}
+          tabIndex={-1}
+          type="file"
+        />
+        <input
+          accept="image/*"
+          aria-hidden="true"
+          className="hidden"
+          multiple
+          onChange={event => {
+            const input = event.currentTarget as unknown as HTMLInputElement;
+            attachments.add(Array.from(input.files ?? []));
+            input.value = '';
+          }}
+          ref={photoInput}
           tabIndex={-1}
           type="file"
         />
@@ -1294,15 +1305,13 @@ export function Composer({
         </p>
       ) : null}
       {/* Outside the row: the row's own icon-button rules would otherwise size the menu's rows. */}
-      {addMenuUseful ? (
-        <ComposerAddMenu
-          actions={addActions}
-          anchorRef={plusButton}
-          onClose={() => setPlusOpen(false)}
-          open={plusOpen}
-          variant={compact ? 'sheet' : 'popover'}
-        />
-      ) : null}
+      <ComposerAddMenu
+        actions={addActions}
+        anchorRef={plusButton}
+        onClose={() => setPlusOpen(false)}
+        open={plusOpen}
+        variant={compact ? 'sheet' : 'popover'}
+      />
       {occupied === null ? null : (
         <OccupiedComposerNotice
           busy={occupied.busy || sending}
