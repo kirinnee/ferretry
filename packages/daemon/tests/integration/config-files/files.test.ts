@@ -5,7 +5,11 @@ import { join } from 'node:path';
 import { CONFIG_FILE_MAX_BYTES } from '@ferretry/protocol';
 import should from 'should';
 import { FileAcceptedConfigStore, FileConfigDirectory } from '../../../src/adapters/config-files/files.ts';
+import { unrefFileEventTimers } from '../../../src/adapters/file-events/bun-file-event-source.ts';
+import { platformFileEventSource } from '../../../src/adapters/file-events/platform.ts';
 import { StateFileSystem } from '../../../src/adapters/filesystem/state-file-system.ts';
+import { watchConfigFiles } from '../../../src/lib/config-files/watcher.ts';
+import { FileEventHub } from '../../../src/lib/file-events/hub.ts';
 import { createFoundationPaths } from '../../../src/lib/paths.ts';
 import { resolveStateHome } from '../../../src/lib/state-home.ts';
 
@@ -46,6 +50,73 @@ afterEach(async () => {
 });
 
 describe('FileConfigDirectory', () => {
+  it('should name every directory its walk reads, the root first, three levels deep at most', async () => {
+    // Arrange
+    const subject = await fixture();
+    await put(subject.config, 'components/mcp/deeper/too-deep.yaml', 'name: no\n');
+    await put(subject.config, 'logins/a.yaml', 'a: 1\n');
+    await put(subject.config, '.schema/machine.yaml', 'not a config\n');
+
+    // Act
+    const directories = await subject.directory.directories();
+
+    // Assert
+    should(directories[0]).equal(subject.config);
+    should(
+      directories
+        .slice(1)
+        .map(directory => directory.slice(subject.config.length + 1))
+        .toSorted(),
+    ).deepEqual(['components', 'components/mcp', 'logins']);
+  });
+
+  it('should hear a file in a directory created after the watch began, by file events alone', async () => {
+    // Arrange: events drive the watcher, and the backstop is far beyond the test.
+    const subject = await fixture();
+    const hub = new FileEventHub(platformFileEventSource(), unrefFileEventTimers, { settleMs: 10 });
+    let loads = 0;
+    const errors: unknown[] = [];
+    const stop = watchConfigFiles({
+      fingerprint: async () => await subject.directory.fingerprint(),
+      onChange: async () => {
+        loads += 1;
+      },
+      onError: error => errors.push(error),
+      timers: {
+        setInterval: (callback, ms) => setInterval(callback, ms),
+        clearInterval: handle => clearInterval(handle as ReturnType<typeof setInterval>),
+        setTimeout: (callback, ms) => setTimeout(callback, ms),
+        clearTimeout: handle => clearTimeout(handle as ReturnType<typeof setTimeout>),
+      },
+      events: {
+        directories: async () => await subject.directory.directories(),
+        subscribeDirectory: (path, listener) => hub.subscribeDirectory(path, listener),
+      },
+      debounceMs: 20,
+    });
+    try {
+      await Bun.sleep(50);
+
+      // Act: components/ and components/mcp/ do not exist when the watch begins.
+      await mkdir(join(subject.config, 'components', 'mcp'), { recursive: true });
+      await Bun.sleep(50);
+      await writeFile(join(subject.config, 'components', 'mcp', 'github.yaml'), 'name: github\n');
+      const deadline = Date.now() + 3_000;
+      while (loads === 0 && Date.now() < deadline) await Bun.sleep(10);
+      const afterFile = loads;
+      await writeFile(join(subject.config, 'components', 'mcp', 'github.yaml'), 'name: github-2\n');
+      while (loads === afterFile && Date.now() < deadline) await Bun.sleep(10);
+
+      // Assert
+      should(afterFile).be.aboveOrEqual(1);
+      should(loads).be.above(afterFile);
+      should(errors).deepEqual([]);
+    } finally {
+      stop();
+      hub.close();
+    }
+  });
+
   it('should list yaml files at most three levels deep, skipping hidden entries and the schema directory', async () => {
     // Arrange
     const subject = await fixture();

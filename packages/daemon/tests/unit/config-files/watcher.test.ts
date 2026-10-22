@@ -1,8 +1,10 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
 import {
+  CONFIG_WATCH_BACKSTOP_MS,
   CONFIG_WATCH_DEBOUNCE_MS,
   CONFIG_WATCH_INTERVAL_MS,
+  type ConfigTreeEvents,
   type ConfigWatchTimers,
   watchConfigFiles,
 } from '../../../src/lib/config-files/index.ts';
@@ -239,5 +241,175 @@ describe('watchConfigFiles', () => {
     // Assert
     should(whileBusy).equal(2);
     should(calls).equal(3);
+  });
+});
+
+/** A tree the test reshapes, whose directories' events the test fires. */
+class FakeTree implements ConfigTreeEvents {
+  directoriesNow: readonly string[] = ['/config'];
+  failure: Error | undefined;
+  readonly listeners = new Map<string, () => void>();
+  readonly closed: string[] = [];
+
+  async directories(): Promise<readonly string[]> {
+    if (this.failure !== undefined) throw this.failure;
+    return this.directoriesNow;
+  }
+
+  subscribeDirectory(path: string, listener: () => void): { close(): void } {
+    this.listeners.set(path, listener);
+    return {
+      close: () => {
+        this.listeners.delete(path);
+        this.closed.push(path);
+      },
+    };
+  }
+
+  fire(path: string): void {
+    this.listeners.get(path)?.();
+  }
+}
+
+const watchEvents = (tree: FakeTree, fingerprints: () => Promise<string>) => {
+  const timers = new FakeTimers();
+  const errors: unknown[] = [];
+  let changes = 0;
+  let reads = 0;
+  const stop = watchConfigFiles({
+    fingerprint: async () => {
+      reads += 1;
+      return await fingerprints();
+    },
+    onChange: async () => {
+      changes += 1;
+    },
+    onError: error => errors.push(error),
+    timers,
+    events: tree,
+  });
+  return { timers, errors, stop, changes: () => changes, reads: () => reads };
+};
+
+describe('watchConfigFiles, driven by file events', () => {
+  it('should read on the slow backstop, not every second, and watch every directory of the tree', async () => {
+    // Arrange
+    const tree = new FakeTree();
+    tree.directoriesNow = ['/config', '/config/logins'];
+
+    // Act
+    const { timers, reads } = watchEvents(tree, async () => 'a');
+    await flush();
+
+    // Assert
+    should([...timers.intervals.values()].map(interval => interval.ms)).eql([CONFIG_WATCH_BACKSTOP_MS]);
+    should([...tree.listeners.keys()]).eql(['/config', '/config/logins']);
+    should(reads()).equal(1);
+  });
+
+  it('should read on an event, load after the debounce, and watch a directory that appeared', async () => {
+    // Arrange
+    let fingerprint = 'a';
+    const tree = new FakeTree();
+    const { timers, changes } = watchEvents(tree, async () => fingerprint);
+    await flush();
+
+    // Act: components/mcp/ is created with a file in it; the root hears it.
+    tree.directoriesNow = ['/config', '/config/components', '/config/components/mcp'];
+    fingerprint = 'b';
+    tree.fire('/config');
+    await flush();
+    timers.settle();
+    await flush();
+
+    // Assert
+    should(changes()).equal(1);
+    should([...tree.listeners.keys()]).eql(['/config', '/config/components', '/config/components/mcp']);
+  });
+
+  it('should stop watching a directory that is gone', async () => {
+    // Arrange
+    const tree = new FakeTree();
+    tree.directoriesNow = ['/config', '/config/logins'];
+    watchEvents(tree, async () => 'a');
+    await flush();
+
+    // Act
+    tree.directoriesNow = ['/config'];
+    tree.fire('/config');
+    await flush();
+
+    // Assert
+    should(tree.closed).eql(['/config/logins']);
+    should([...tree.listeners.keys()]).eql(['/config']);
+  });
+
+  it('should read once more for an event that arrived during a read, but not for a backstop tick', async () => {
+    // Arrange
+    let release: (() => void) | undefined;
+    let hold = false;
+    const tree = new FakeTree();
+    const { timers, reads } = watchEvents(tree, async () => {
+      if (hold) {
+        hold = false;
+        await new Promise<void>(resolve => (release = resolve));
+      }
+      return 'a';
+    });
+    await flush();
+
+    // Act
+    hold = true;
+    tree.fire('/config');
+    await flush();
+    tree.fire('/config');
+    timers.tick();
+    await flush();
+    const whileBusy = reads();
+    release?.();
+    await flush();
+
+    // Assert
+    should(whileBusy).equal(2);
+    should(reads()).equal(3);
+  });
+
+  it('should report a tree it cannot list, and close every watch on stop', async () => {
+    // Arrange
+    const tree = new FakeTree();
+    const { errors, stop } = watchEvents(tree, async () => 'a');
+    await flush();
+
+    // Act
+    tree.failure = new Error('config directory unreadable');
+    tree.fire('/config');
+    await flush();
+    stop();
+
+    // Assert
+    should(errors.map(error => (error as Error).message)).eql(['config directory unreadable']);
+    should(tree.closed).eql(['/config']);
+    should(tree.listeners.size).equal(0);
+  });
+
+  it('should watch nothing new when stopped while the tree was being listed', async () => {
+    // Arrange
+    let release: (() => void) | undefined;
+    const tree = new FakeTree();
+    const listed = tree.directories.bind(tree);
+    tree.directories = async () => {
+      await new Promise<void>(resolve => (release = resolve));
+      return await listed();
+    };
+    const { stop } = watchEvents(tree, async () => 'a');
+    await flush();
+
+    // Act
+    stop();
+    release?.();
+    await flush();
+
+    // Assert
+    should(tree.listeners.size).equal(0);
   });
 });

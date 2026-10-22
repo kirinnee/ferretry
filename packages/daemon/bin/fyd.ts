@@ -100,13 +100,15 @@ import {
 } from '../src/adapters/analytics/index.ts';
 import {
   decryptPdfInMemory,
-  probePdfDecryptWorker,
   FileAttachmentOriginals,
   FileSessionAttachmentStore,
   NodeRawDeflate,
+  probePdfDecryptWorker,
 } from '../src/adapters/attachments/index.ts';
 import { FileAttentionLedgerRepository } from '../src/adapters/attention/file-attention-ledger-repository.ts';
 import { FileAcceptedConfigStore, FileConfigDirectory } from '../src/adapters/config-files/files.ts';
+import { unrefFileEventTimers } from '../src/adapters/file-events/bun-file-event-source.ts';
+import { platformFileEventSource } from '../src/adapters/file-events/platform.ts';
 // U12 launch policy: old runtime names, and what a Codex runtime leaves behind when its session ends.
 import { fileFleetCatalogDeps, readDeclaredAccountModel } from '../src/adapters/fleet/account-model-files.ts';
 import { readFleetManifest } from '../src/adapters/fleet/manifest-file.ts';
@@ -148,8 +150,6 @@ import {
   BunSqliteIndexFactory,
   CachedUsageFeed,
   CliUpdateLauncher,
-  describeWorkerProbes,
-  probeBundledWorker,
   CloudflaredLocator,
   ConfigGrantDocument,
   ConfigSecretRecipes,
@@ -158,6 +158,7 @@ import {
   DaemonSecretsLoader,
   DaemonStorageFactory,
   daemonSecretSourceProgram,
+  describeWorkerProbes,
   ExplicitDaemonConfig,
   FetchEnhancementTransport,
   FileAuditJournal,
@@ -206,6 +207,7 @@ import {
   PerformanceStopwatch,
   ProcCgroupPlacements,
   ProjectMcpServers,
+  probeBundledWorker,
   quotaFailoverRoot,
   RegisteredCgroupPaneLedger,
   RuntimeEnvironment,
@@ -236,18 +238,10 @@ import {
   WebCryptoSecretCipher,
   WebPushFetchTransport,
   type WorkerClientOptions,
-  type WorkerProbeReport,
   WorkerLoopWatchdog,
+  type WorkerProbeReport,
   XvfbDisplay,
 } from '../src/adapters/index.ts';
-import {
-  AccountAutoResumeAvailability,
-  BootExitRecorder,
-  FileAutoResumeLedger,
-  FileAutoResumeSummaryStore,
-  RepositoryAutoResumeRoster,
-  StorageAutoResumeJournal,
-} from '../src/adapters/session/auto-resume/index.ts';
 import {
   CatalogPrices,
   ConfigFileLearningSettings,
@@ -273,6 +267,14 @@ import { bunProbeSpawn, CliPackProbe, FilePackSpendLedger, readSessionResult } f
 import { FilePinRepository, FilePinSessionDirectory } from '../src/adapters/pins/index.ts';
 import { HostCodexAppServerProcesses } from '../src/adapters/process/codex-app-server-stopper.ts';
 import { runPackageInstall } from '../src/adapters/process/package-install.ts';
+import {
+  AccountAutoResumeAvailability,
+  BootExitRecorder,
+  FileAutoResumeLedger,
+  FileAutoResumeSummaryStore,
+  RepositoryAutoResumeRoster,
+  StorageAutoResumeJournal,
+} from '../src/adapters/session/auto-resume/index.ts';
 import { FileSessionEffectLedger } from '../src/adapters/session/effects/index.ts';
 import { loadDirectorySyscalls } from '../src/adapters/session/filesystem/directory-syscalls.ts';
 import {
@@ -415,8 +417,10 @@ import {
   ConfigChangeLedger,
   ConfigChangeStreamService,
   ConfigFilesService,
+  type ConfigTreeEvents,
   watchConfigFiles,
 } from '../src/lib/config-files/index.ts';
+import { FileEventHub } from '../src/lib/file-events/index.ts';
 import { AccountModelAgentControlPolicy, type AgentControlPolicy } from '../src/lib/fleet/agent-control.ts';
 import { FleetCatalogService } from '../src/lib/fleet/catalog-service.ts';
 import { CodexAppServerSupervisor } from '../src/lib/fleet/codex-runtime.ts';
@@ -486,6 +490,8 @@ import {
   answerArguments,
   attachmentDirectory,
   authorizeSessionCommand,
+  BACKGROUND_DELAY_VARIABLE,
+  BackgroundLane,
   type BootNoticePort,
   BootProgress,
   type BootRefusal,
@@ -551,7 +557,6 @@ import {
   declaredModel,
   decodeInitialAttachments,
   defaultAutoResumeSettings,
-  type SessionExitPort,
   defaultManagedWorktreeRoot,
   defaultSendTrackerSettings,
   defaultSessionLifecycleSettings,
@@ -674,10 +679,10 @@ import {
   packageRole,
   paneShowsActiveWork,
   paneTextFor,
+  parseBackgroundDelay,
   parseDaemonTimings,
   parseSessionId,
   parseWardenConfigPatch,
-  parseBackgroundDelay,
   parseWatchdogLimit,
   passkeyVerifier,
   planConversationCarry,
@@ -757,6 +762,7 @@ import {
   type SessionControlSubsystem,
   SessionDialogService,
   type SessionDirectorySubsystem,
+  type SessionExitPort,
   SessionFilesystem,
   SessionHandoverService,
   SessionHealthService,
@@ -802,9 +808,9 @@ import {
   type SocketRoute,
   SpeedupsService,
   STRUCTURED_ANSWER_RELEASED_ATTENTION_KIND,
+  type StackSamplerPort,
   StagedApiSurface,
   StepUpRegistry,
-  type StackSamplerPort,
   StepUpService,
   StructuredAnswerCoordinator,
   StructuredQuestionAttemptFailed,
@@ -868,8 +874,6 @@ import {
   verifySessionTranscriptMessageToken,
   WARDEN_LABEL,
   WATCHDOG_VARIABLE,
-  BACKGROUND_DELAY_VARIABLE,
-  BackgroundLane,
   type WardenFleetSession,
   WardenLivenessMonitor,
   type WardenSubsystem,
@@ -1110,6 +1114,11 @@ export interface DaemonWorld {
    * releasing them would leave a desktop on the machine that nothing is left to close.
    */
   readonly browserLogin: BrowserLoginWorld;
+  /**
+   * The one place file events enter the daemon: one OS watch per directory, shared by every reader that
+   * subscribes to a path in it. `close` releases the watches; `fallbacks` names any directory polled instead.
+   */
+  readonly fileEvents: FileEventHub;
   /**
    * Where a managed agent actually runs: a tmux pane on the daemon's own private socket.
    *
@@ -5364,6 +5373,8 @@ function createConfigFilesSubsystem(input: {
    * moved what its runtimes offer (docs/model-catalog.md). It must never throw.
    */
   readonly afterLoad?: () => Promise<void>;
+  /** The tree's directories and file events: the watcher then reads on an event, not every second. */
+  readonly events?: ConfigTreeEvents;
 }): MountedSubsystems['configFiles'] {
   return {
     service: input.service,
@@ -5381,6 +5392,7 @@ function createConfigFilesSubsystem(input: {
         },
         onError: error =>
           input.notices.state(`config watcher: ${error instanceof Error ? error.message : String(error)}`),
+        ...(input.events === undefined ? {} : { events: input.events }),
         timers: {
           setInterval: (callback, ms) => setInterval(callback, ms),
           clearInterval: handle => clearInterval(handle as ReturnType<typeof setInterval>),
@@ -6234,8 +6246,9 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
    * Learning — so none of them can disagree about which version of a file is in effect. A broken file
    * and a held loosening are said in this boot's journal, once each, when they are first seen.
    */
+  const configDirectory = new FileConfigDirectory(paths.config, stateFiles);
   const configFiles = new ConfigFilesService({
-    directory: new FileConfigDirectory(paths.config, stateFiles),
+    directory: configDirectory,
     accepted: new FileAcceptedConfigStore(join(paths.state, CONFIG_ACCEPTED_FILE), stateFiles),
     log: {
       issue: issue =>
@@ -6832,8 +6845,13 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
    * which is a claim the daemon has no basis for. So the file is resolved first and its absence is
    * reported as an absence; only a file this daemon can prove is the session's own is ever read.
    */
-  /** One memory of parsed tails for every reader this world builds, so no two of them re-parse alike. */
-  const transcriptTails = new TranscriptTailCache();
+  const fileEvents = new FileEventHub(platformFileEventSource(), unrefFileEventTimers);
+  /** One memory of parsed tails for every reader this world builds, so no two of them re-parse alike. A
+   *  watched tail is re-validated when its file changes rather than by a `stat` on every ask. */
+  const transcriptTails = new TranscriptTailCache(undefined, undefined, {
+    changes: fileEvents,
+    now: () => Date.parse(clock.now()),
+  });
   const createSessionTranscriptTail = (storage: DaemonStorage): SessionTranscriptTail => {
     const resolver = createTranscriptFileResolver(storage);
     return {
@@ -6850,12 +6868,14 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         // Read from the END: a tail of a capped read from byte zero described an old moment as now.
         const read = async () => await tailTranscriptEvents(source, file, sessionId, limit).catch(() => undefined);
         // Re-parsed only when the file changed, shared by concurrent asks, and throttled daemon-wide —
-        // see `TranscriptTailCache` for the minutes-long stall that an uncached tail per read caused.
-        const info = await stat(file).catch(() => undefined);
-        const events =
-          info === undefined
-            ? await read()
-            : await transcriptTails.events(sessionId, { file, size: info.size, mtimeMs: info.mtimeMs }, limit, read);
+        // see `TranscriptTailCache` for the minutes-long stall that an uncached tail per read caused. The
+        // `stat` is skipped while the file's watch vouches for the remembered tail.
+        const fingerprint = async () =>
+          await stat(file).then(
+            info => ({ file, size: info.size, mtimeMs: info.mtimeMs }),
+            () => undefined,
+          );
+        const events = await transcriptTails.tail(sessionId, file, limit, fingerprint, read);
         if (events === undefined) return { kind: 'unreadable' };
         return { kind: 'read', events };
       },
@@ -7618,6 +7638,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       };
     },
     browserLogin: createBrowserLoginWorld(paths, async () => await closeAgentBrowsers()),
+    fileEvents,
     createSubsystems: (
       storage,
       terminals,
@@ -9011,6 +9032,10 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         }),
         configFiles: createConfigFilesSubsystem({
           service: configFiles,
+          events: {
+            directories: async () => await configDirectory.directories(),
+            subscribeDirectory: (path, listener) => fileEvents.subscribeDirectory(path, listener),
+          },
           agentControl,
           identities: agentIdentities(storage),
           notices: bootNotices,
@@ -9649,6 +9674,7 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
   // be released whether the boot completes or fails part-way.
   cleanups.push(() => world.browserLogin.close());
   cleanups.push(() => world.agentBrowserDisplay.close());
+  cleanups.push(() => world.fileEvents.close());
   // A harness sign-in is a child this daemon launched, and a pending `codex login` holds this host's
   // `localhost:1455` while it lives. It ends with the daemon, or the next Codex sign-in finds the port
   // taken by a flow nobody can see any more.

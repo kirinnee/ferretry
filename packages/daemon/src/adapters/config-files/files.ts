@@ -28,9 +28,20 @@ export class FileConfigDirectory implements ConfigDirectoryPort {
 
   /** Every config-looking path under the directory, each with whether it may be read. */
   async #walk(): Promise<readonly { readonly path: string; readonly readable: boolean }[]> {
+    return (await this.#tree()).found;
+  }
+
+  /** The walk itself: the config-looking paths, and every directory it looked in, the root first. */
+  async #tree(): Promise<{
+    readonly found: readonly { readonly path: string; readonly readable: boolean }[];
+    readonly directories: readonly string[];
+  }> {
     const found: { path: string; readable: boolean }[] = [];
+    const directories: string[] = [];
     const visit = async (relative: string, depth: number): Promise<void> => {
-      const entries = await this.files.listDirectory(relative === '' ? this.directory : join(this.directory, relative));
+      const absolute = relative === '' ? this.directory : join(this.directory, relative);
+      directories.push(absolute);
+      const entries = await this.files.listDirectory(absolute);
       for (const entry of entries) {
         // A hidden entry is an editor's swap file or the schema directory (`.schema`), never a config file.
         if (entry.name.startsWith('.')) continue;
@@ -45,7 +56,12 @@ export class FileConfigDirectory implements ConfigDirectoryPort {
       }
     };
     await visit('', 1);
-    return found;
+    return { found, directories };
+  }
+
+  /** Every directory the walk reads, absolute, the root included: what the config watcher watches. */
+  async directories(): Promise<readonly string[]> {
+    return (await this.#tree()).directories;
   }
 
   async list(): Promise<{ readonly files: readonly ConfigFileText[]; readonly unreadable: readonly string[] }> {
