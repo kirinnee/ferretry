@@ -16,14 +16,20 @@ import {
   turnInstruction,
 } from './policy.ts';
 import type { SessionSendSettings } from './settings.ts';
+import { sameComposerText, showsOwnPointer, strandablePointer, strandedPointerSend } from './stranded.ts';
 import {
+  type ComposerDraftAction,
+  type ComposerDraftOutcome,
+  type ComposerSubmitOutcome,
   dispositionOf,
   type PeerWaitEnder,
   ReviveRefusedForSend,
   type SendChannel,
   SendComposerOccupied,
+  SendDraftRefused,
   type SendLaunchGate,
   type SendLedger,
+  type SendPaneObservation,
   type SendPath,
   SendPending,
   type SendQueueOutcome,
@@ -109,16 +115,17 @@ export interface ReattemptOptions {
 const DRAFT_QUOTE_CHARS = 40;
 
 /**
- * Why nothing was typed when the composer already held text.
+ * Why nothing was typed when the composer already held text that is not provably Ferretry's own.
  *
- * Quoted so a person can recognise it — it is usually their own earlier message that was typed and
- * never submitted — and the remedy named, because the obvious one (send again) is what made it worse.
+ * Quoted so a person can recognise it, and the remedy named, because the obvious one (send again) is
+ * what made it worse. The whole draft rides along, so the app can offer to send or clear exactly it.
  */
-export function composerOccupiedRefusal(id: SessionId, draft: string): SendRefused {
+export function composerOccupiedRefusal(draft: string): SendDraftRefused {
   const quoted = draft.length > DRAFT_QUOTE_CHARS ? `${draft.slice(0, DRAFT_QUOTE_CHARS)}…` : draft;
-  return new SendRefused(
-    `the composer in session ${id} already holds unsent text ("${quoted}"); a message typed now would be ` +
-      'sent joined to it. Press Enter on it or cancel it first',
+  return new SendDraftRefused(
+    `the agent's composer already holds unsent text ("${quoted}"); a message typed now would be sent ` +
+      'joined to it. Press Enter on it or clear it first',
+    draft,
   );
 }
 
@@ -179,6 +186,7 @@ function restorable(record: SendRecord): SendSettlement {
     retryable: record.retryable,
     queuedAt: record.queuedAt,
     queueProof: record.queueProof,
+    submitNudges: record.submitNudges,
   };
 }
 
@@ -243,9 +251,8 @@ export class SessionSendService {
         throw new SendRefused(`send ${sendId} rides a revive; revive the session to deliver it`);
       const target = await this.require(id);
       authorizeSend(target, []);
-      const pane = await this.ports.terminal.observe(id);
-      const routing = routeSend(target, pane);
-      if (routing === 'revive')
+      const observed = await this.ports.terminal.observe(id);
+      if (routeSend(target, observed) === 'revive')
         throw new SendRefused(`session ${id} has no live agent to retype ${sendId} into; revive it first`);
       const text = current.matchText ?? current.message;
       // A person's retry is checked against the pane as well as the ledger: a message still typed in
@@ -257,7 +264,12 @@ export class SessionSendService {
         if (where === 'queue')
           throw new SendRefused(`send ${sendId} is held in the agent's own queue and will be read at its next turn`);
       }
-      if (pane.draft !== undefined) throw composerOccupiedRefusal(id, pane.draft);
+      // Another send's pointer left typed is finished first; this one's own is never, because the
+      // checks above refused a person's retry of it and the tracker retries only what it proved absent.
+      const { target: ready, pane } = await this.withoutStrandedPointer(target, observed, sendId);
+      const routing = routeSend(ready, pane);
+      if (routing === 'revive')
+        throw new SendRefused(`session ${id} has no live agent to retype ${sendId} into; revive it first`);
       const attempt = (current.attempt ?? 1) + 1;
       const next = await this.ports.ledger.settle(id, sendId, {
         fate: 'accepted',
@@ -269,6 +281,7 @@ export class SessionSendService {
         retryable: undefined,
         queuedAt: undefined,
         queueProof: undefined,
+        submitNudges: undefined,
       });
       if (next === undefined) throw new SendRefused(`send ${sendId} could not be re-attempted`);
       await this.ports.repository.journal(id, 'control.send_retried', { sendId, attempt, by: options.by });
@@ -282,7 +295,7 @@ export class SessionSendService {
         if (!(error instanceof SendComposerOccupied)) throw error;
         // Nothing was typed, so the record goes back to exactly what it said before this attempt.
         await this.ports.ledger.settle(id, sendId, restorable(current));
-        throw composerOccupiedRefusal(id, error.draft);
+        throw composerOccupiedRefusal(error.draft);
       }
     });
     this.ports.tracking.track(id);
@@ -384,12 +397,15 @@ export class SessionSendService {
     payload: string,
     sender: SendTarget | undefined,
   ): Promise<LockedOutcome> {
-    const target = await this.require(request.id);
-    authorizeSend(target, request.attachmentIds ?? []);
-    const first = await this.ports.terminal.observe(request.id);
+    const current = await this.require(request.id);
+    authorizeSend(current, request.attachmentIds ?? []);
+    const observed = await this.ports.terminal.observe(request.id);
+    if (routeSend(current, observed) === 'revive') return { kind: 'revive' };
+    // A pointer of ours left typed is finished, and the session re-read: finishing a turn pointer
+    // starts that turn, so this send must not claim the same turn number again.
+    const { target, pane: first } = await this.withoutStrandedPointer(current, observed);
     const routing = routeSend(target, first);
     if (routing === 'revive') return { kind: 'revive' };
-    if (first.draft !== undefined) throw composerOccupiedRefusal(request.id, first.draft);
     if (routing === 'idle') return await this.deliver(target, request, payload, sender);
     // Busy, as of a frame captured before the lock was held. `--now` ends the active turn with the
     // same safe key the interrupt uses; either way the pane is read again, and a pane that has since
@@ -400,7 +416,7 @@ export class SessionSendService {
         : await this.ports.terminal.observe(request.id);
     const settled = routeSend(target, second);
     if (settled === 'revive') return { kind: 'revive' };
-    if (second.draft !== undefined) throw composerOccupiedRefusal(request.id, second.draft);
+    if (second.draft !== undefined) throw composerOccupiedRefusal(second.draft);
     if (settled === 'idle') return await this.deliver(target, request, payload, sender);
     return await this.queue(target, request, payload, sender);
   }
@@ -443,33 +459,64 @@ export class SessionSendService {
       release,
       async () => await this.ports.terminal.deliver(target.id, text),
     );
-    await this.ports.channel.recordInbound(target.id, {
-      at: this.ports.clock.now(),
+    await this.turnStarted(target.id, {
+      sendId: request.sendId,
       message: payload,
       turn,
+      direct,
+      replyExpected: request.replyExpected === true,
       ...this.attribution(sender),
+    });
+    return { kind: 'settled', path, applied: true, record: accepted.record, held: true };
+  }
+
+  /**
+   * Everything a turn's start owes once its prompt has demonstrably landed: the inbound record, the
+   * cleared completion markers, the journal and the state edge. Shared by a fresh send and by a
+   * stranded pointer finished later, whose own send never got this far.
+   */
+  private async turnStarted(
+    id: SessionId,
+    landed: {
+      readonly sendId: string;
+      readonly message: string;
+      readonly turn: number;
+      readonly direct: boolean;
+      readonly replyExpected: boolean;
+      readonly from?: string | undefined;
+      readonly fromName?: string | undefined;
+    },
+  ): Promise<void> {
+    const attribution = {
+      ...(landed.from === undefined ? {} : { from: landed.from }),
+      ...(landed.fromName === undefined ? {} : { fromName: landed.fromName }),
+    };
+    await this.ports.channel.recordInbound(id, {
+      at: this.ports.clock.now(),
+      message: landed.message,
+      turn: landed.turn,
+      ...attribution,
     });
     // Cleared now that the new prompt has demonstrably landed: a `done` written while this send was
     // in flight belongs to the turn that just ended.
-    await this.ports.turns.clearMarkers(target.id);
-    await this.ports.repository.journal(target.id, 'control.send', {
-      sendId: request.sendId,
-      turn,
-      direct,
-      ...(request.replyExpected === true ? { replyExpected: true } : {}),
-      ...this.attribution(sender),
+    await this.ports.turns.clearMarkers(id);
+    await this.ports.repository.journal(id, 'control.send', {
+      sendId: landed.sendId,
+      turn: landed.turn,
+      direct: landed.direct,
+      ...(landed.replyExpected ? { replyExpected: true } : {}),
+      ...attribution,
     });
-    await this.ports.repository.transition(target.id, {
+    await this.ports.repository.transition(id, {
       event: 'turn.started',
       status: 'running',
       health: 'healthy',
-      turn,
+      turn: landed.turn,
       promptReady: false,
       // Every user turn restarts the clock, or a healthy long-lived session is reaped the moment its
       // wall-clock AGE passes a timeout that was only ever meant to bound one turn of work.
       restartTurnClock: true,
     });
-    return { kind: 'settled', path, applied: true, record: accepted.record, held: true };
   }
 
   /**
@@ -546,7 +593,7 @@ export class SessionSendService {
       if (!(error instanceof SendComposerOccupied)) throw error;
       if (release === undefined) await this.ports.ledger.withdraw(id, record.sendId, 'the composer held unsent text');
       else await this.ports.ledger.settle(id, record.sendId, { held: true });
-      throw composerOccupiedRefusal(id, error.draft);
+      throw composerOccupiedRefusal(error.draft);
     }
   }
 
@@ -612,12 +659,151 @@ export class SessionSendService {
         throw new SendRefused(`send ${sendId} is not sitting in the agent's composer, so Enter was not pressed`);
       await this.ports.repository.journal(id, 'control.send_submitted', { sendId, outcome });
       if (outcome === 'holding') return current;
-      return (
-        (await this.ports.ledger.settle(id, sendId, { typedNotSent: undefined, deadlineAt: undefined })) ?? current
-      );
+      return await this.entered(await this.require(id), current);
     });
     this.ports.tracking.track(id);
     return record;
+  }
+
+  /**
+   * Presses Enter for this send's own POINTER, still sitting typed in the composer — the tracker's
+   * bounded nudge for an Enter the harness swallowed.
+   *
+   * Every condition is re-read under the session's lock, because the look that asked was not holding
+   * it: the record must still be unsettled, the pane idle and undialogued, and the composer must hold
+   * exactly this pointer. The nudge is counted BEFORE the key, as an attempt is, so a daemon that dies
+   * mid-press cannot come back and press without limit. Anything else answers the record unchanged.
+   */
+  async resubmit(id: SessionId, sendId: string): Promise<SendRecord | undefined> {
+    const record = await this.ports.serial.run(id, async () => {
+      const current = (await this.ports.ledger.list(id)).find(entry => entry.sendId === sendId);
+      const pointer = current === undefined ? undefined : strandablePointer(current);
+      if (current === undefined || pointer === undefined) return current;
+      const pane = await this.ports.terminal.observe(id);
+      if (!this.finishable(pane) || pane.draft === undefined || !showsOwnPointer(pane.draft, pointer)) return current;
+      const counted = await this.ports.ledger.settle(id, sendId, { submitNudges: (current.submitNudges ?? 0) + 1 });
+      const outcome = await this.finishStranded(await this.require(id), counted ?? current, 'daemon');
+      return outcome.record;
+    });
+    if (record !== undefined) this.ports.tracking.track(id);
+    return record;
+  }
+
+  /**
+   * Presses Enter on, or erases, the PERSON's own draft in the agent's composer — the one-tap way out
+   * of a `composer_occupied` refusal.
+   *
+   * `draft` is what that refusal quoted back, and nothing is pressed unless the composer still holds
+   * exactly it: a draft the person has since edited in the terminal answers `changed`. Clearing is the
+   * same verified erase a cancel uses, so it stops rather than wipe text that is not that draft. The
+   * journal records the act and its outcome, never the text.
+   */
+  async resolveDraft(id: SessionId, action: ComposerDraftAction, draft: string): Promise<ComposerDraftOutcome> {
+    const outcome = await this.ports.serial.run(id, async () => {
+      const target = await this.require(id);
+      authorizeSend(target, []);
+      const pane = await this.ports.terminal.observe(id);
+      if (!pane.alive || pane.dead)
+        throw new SendRefused(`the pane for session ${id} is gone; there is no composer to act on`);
+      if (pane.blockingPrompt !== undefined)
+        throw new SendRefused(`session ${id} is showing a prompt ("${pane.blockingPrompt}"); answer it first`);
+      if (pane.draft === undefined) return 'absent' as const;
+      if (!sameComposerText(pane.draft, draft)) return 'changed' as const;
+      const result: ComposerDraftOutcome =
+        action === 'submit'
+          ? await this.ports.terminal
+              .submitComposer(id, pane.draft)
+              .then(entered => (entered === 'absent' ? 'changed' : entered))
+          : await this.ports.terminal
+              .clearComposer(id, pane.draft)
+              .then(cleared => (cleared === 'foreign' ? 'changed' : cleared));
+      await this.ports.repository.journal(
+        id,
+        action === 'submit' ? 'control.composer_submitted' : 'control.composer_cleared',
+        { outcome: result },
+      );
+      return result;
+    });
+    // An Enter may have answered an open send whose text the person had typed; its fate is looked for.
+    if (outcome === 'submitted') this.ports.tracking.track(id);
+    return outcome;
+  }
+
+  /**
+   * The pane with any pointer of OURS cleared out of its composer, and the session as it then stands.
+   *
+   * A pointer this session's ledger proves the daemon typed, and whose Enter never took, is pressed
+   * once more with the usual verification, its send settled as entered, and the pane read again. Any
+   * other draft — a person's, an edited pointer, one that will not leave — is refused before a key,
+   * exactly as before. `except` is the send being retried, whose own text is never finished here.
+   */
+  private async withoutStrandedPointer(
+    target: SendTarget,
+    pane: SendPaneObservation,
+    except?: string,
+  ): Promise<{ readonly target: SendTarget; readonly pane: SendPaneObservation }> {
+    if (pane.draft === undefined) return { target, pane };
+    const draft = pane.draft;
+    const records = (await this.ports.ledger.list(target.id)).filter(record => record.sendId !== except);
+    const stranded = this.finishable(pane) ? strandedPointerSend(draft, records) : undefined;
+    if (stranded === undefined) throw composerOccupiedRefusal(draft);
+    const finished = await this.finishStranded(target, stranded, 'send');
+    if (finished.outcome !== 'submitted') throw composerOccupiedRefusal(draft);
+    this.ports.tracking.track(target.id);
+    return { target: await this.require(target.id), pane: await this.ports.terminal.observe(target.id) };
+  }
+
+  /** A pane where Enter submits the composer: alive, not mid-turn, and not parked on a dialog. */
+  private finishable(pane: SendPaneObservation): boolean {
+    return pane.alive && !pane.dead && !pane.activeWork && pane.blockingPrompt === undefined;
+  }
+
+  /** One verified Enter for a stranded pointer, journalled, and the send settled when it left. */
+  private async finishStranded(
+    target: SendTarget,
+    record: SendRecord,
+    by: 'send' | 'daemon',
+  ): Promise<{ readonly outcome: ComposerSubmitOutcome; readonly record: SendRecord }> {
+    const outcome = await this.ports.terminal.submitComposer(target.id, record.matchText ?? record.message);
+    await this.ports.repository.journal(target.id, 'control.send_resubmitted', {
+      sendId: record.sendId,
+      outcome,
+      by,
+      reason: 'pointer typed but not submitted',
+    });
+    return { outcome, record: outcome === 'submitted' ? await this.entered(target, record) : record };
+  }
+
+  /**
+   * A send whose text an Enter just took out of the composer, recorded as entered.
+   *
+   * NOT `delivered`: only the transcript proves that, and the tracker will look. What the Enter does
+   * prove is that the message is no longer typed-and-waiting, so that flag goes, an unconfirmed fate
+   * re-opens, and the attempt's clock restarts NOW — measured from the original typing, a deadline
+   * long past would call it absent before the harness had written its record, and retype it. A turn
+   * its own send never got to start is started here, so the next send does not claim the same number.
+   */
+  private async entered(target: SendTarget, record: SendRecord): Promise<SendRecord> {
+    const settled = await this.ports.ledger.settle(target.id, record.sendId, {
+      typedNotSent: undefined,
+      deadlineAt: undefined,
+      attemptAt: this.ports.clock.now(),
+      ...(record.fate === 'unaccounted'
+        ? { fate: 'accepted', fateAt: undefined, unaccountedReason: undefined, retryable: undefined }
+        : {}),
+    });
+    const turn = record.turn;
+    if (turn !== undefined && (record.path === 'turn-file' || record.path === 'direct') && target.turn < turn)
+      await this.turnStarted(target.id, {
+        sendId: record.sendId,
+        message: record.message,
+        turn,
+        direct: record.path === 'direct',
+        replyExpected: record.replyExpected === true,
+        from: record.from,
+        fromName: record.fromName,
+      });
+    return settled ?? record;
   }
 
   /** Records the pane's proof that the harness is holding a send, when it gave one. */

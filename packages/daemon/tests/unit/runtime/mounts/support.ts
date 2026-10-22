@@ -2,6 +2,8 @@ import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import {
   type CapabilityGrants,
+  type ComposerDraftRequest,
+  type ComposerDraftResult,
   type ConfigChangeKind,
   type ConversionPreview,
   type CreateTerminalRequest,
@@ -1438,6 +1440,14 @@ export class FakeSessionSend implements SessionSendSubsystem {
   async submit(sessionId: string, sendId: string): Promise<SendRecord> {
     this.submits.push([sessionId, sendId]);
     return await this.sendStatus(sessionId, sendId);
+  }
+
+  readonly drafts: Array<readonly [string, ComposerDraftRequest]> = [];
+
+  async composer(sessionId: string, request: ComposerDraftRequest): Promise<ComposerDraftResult> {
+    this.drafts.push([sessionId, request]);
+    this.refuse(sessionId);
+    return { action: request.action, outcome: request.action === 'submit' ? 'submitted' : 'cleared' };
   }
 
   /** Hand-off documents by name; a name not here is a document that is gone. */

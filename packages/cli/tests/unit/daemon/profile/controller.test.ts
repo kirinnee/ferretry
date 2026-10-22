@@ -5,6 +5,7 @@ import {
   type PerformanceProfileView,
   PerformanceProfileViewSchema,
   type PerformanceReport,
+  renderPerformanceReport,
   type SyscallTrace,
 } from '@ferretry/protocol';
 import should from 'should';
@@ -16,8 +17,7 @@ import {
   ProtocolProfileGateway,
   type SyscallTraceOutcome,
 } from '../../../../src/lib/daemon/profile/controller.ts';
-import { renderPerformanceReport } from '../../../../src/lib/daemon/profile/render.ts';
-import { minimalReport } from './report-fixtures.ts';
+import { minimalReport } from '../../../../../protocol/tests/performance-report-fixtures.ts';
 
 const START = Date.parse('2026-10-21T10:00:00.000Z');
 

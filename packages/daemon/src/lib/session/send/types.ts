@@ -140,6 +140,11 @@ export interface SendRecord {
   readonly retryable?: boolean | undefined;
   /** The pane shows it typed in the composer and not submitted, as of the last look. */
   readonly typedNotSent?: boolean | undefined;
+  /**
+   * Enters the daemon pressed for this attempt's pointer after it was left typed in the composer —
+   * bounded per attempt, and the daemon's own bookkeeping: it never leaves the daemon.
+   */
+  readonly submitNudges?: number | undefined;
   /** What a `cancelled` fate did to the agent's screen. */
   readonly cancelEffect?: SendCancelEffect | undefined;
 }
@@ -159,6 +164,7 @@ export type SendSettlement = Partial<
     | 'deadlineAt'
     | 'retryable'
     | 'typedNotSent'
+    | 'submitNudges'
     | 'cancelEffect'
     | 'held'
     | 'path'
@@ -427,6 +433,27 @@ export class SendRefused extends Error {
   }
 }
 
+/**
+ * The composer holds text that is not provably Ferretry's own, so nothing was typed.
+ *
+ * A refusal like any other, carrying the composer's text exactly as read so the person can be offered
+ * "Send it" and "Clear it" for that text and nothing else.
+ */
+export class SendDraftRefused extends SendRefused {
+  constructor(
+    message: string,
+    readonly draft: string,
+  ) {
+    super(message);
+    this.name = 'SendDraftRefused';
+  }
+}
+
+/** What a person asked to do with their own draft in the agent's composer. */
+export type ComposerDraftAction = 'submit' | 'clear';
+
+/** What acting on that draft did; see `ComposerDraftOutcomeSchema` in the protocol. */
+export type ComposerDraftOutcome = 'submitted' | 'holding' | 'cleared' | 'absent' | 'changed' | 'stuck';
 /**
  * The agent's composer already held unsent text, so nothing was typed — the new message would have
  * been submitted joined to it. Thrown by the terminal BEFORE any keystroke.

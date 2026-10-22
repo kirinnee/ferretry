@@ -176,6 +176,7 @@ async function rig(launchedWithCorrelationRoot: boolean) {
       repository,
       attempts: {
         reattempt: async (id, sendId) => await (service as SessionSendService).reattempt(id, sendId, { by: 'daemon' }),
+        resubmit: async (id, sendId) => await (service as SessionSendService).resubmit(id, sendId),
       },
       notifier: new AgentSendFailureNotifier(
         { send: async request => await (service as SessionSendService).send(request) },

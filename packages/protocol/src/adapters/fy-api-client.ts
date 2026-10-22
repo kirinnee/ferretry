@@ -73,6 +73,10 @@ import {
 import {
   type AnswerSessionRequest,
   AnswerSessionRequestSchema,
+  type ComposerDraftRequest,
+  ComposerDraftRequestSchema,
+  type ComposerDraftResult,
+  ComposerDraftResultSchema,
   type ConversionPreview,
   ConversionPreviewRequestSchema,
   ConversionPreviewSchema,
@@ -105,9 +109,9 @@ import {
   SessionViewSchema,
   type SignalKind,
   type SignalOptions,
+  SignalSessionRequestSchema,
   type SnapshotScope,
   SnapshotScopeSchema,
-  SignalSessionRequestSchema,
   type StartSessionRequestInput,
   StartSessionRequestSchema,
   StopSessionRequestSchema,
@@ -373,6 +377,12 @@ class ValidatedLogMemory {
   }
 }
 
+/** The fleet list a read last answered, and the `etag` that names it. */
+interface ValidatedSessions {
+  readonly etag: string;
+  readonly sessions: readonly SessionView[];
+}
+
 /** A successful answer's body: none for a `204`, parsed JSON when it says so, its text otherwise. */
 async function responsePayload(response: Response): Promise<unknown> {
   if (response.status === 204) return undefined;
@@ -398,6 +408,7 @@ export class FyApiClient implements IFyApiClient {
   readonly #onVersionSkew: ((skew: VersionSkew) => void) | undefined;
   readonly #failedSends: FailedSendMemory;
   readonly #validatedLogs = new ValidatedLogMemory();
+  #validatedSessions: ValidatedSessions | undefined;
   readonly #nowMs: () => number;
   readonly #restartPatience: DaemonRestartPatience | undefined;
   #reportedVersionSkew = false;
@@ -723,8 +734,29 @@ export class FyApiClient implements IFyApiClient {
     return this.request('/v1/gc', ScratchSweepViewSchema, jsonRequest('POST', ScratchSweepRequestSchema, { force }));
   }
 
-  list(): Promise<SessionView[]> {
-    return this.request('/v1/sessions', SessionListSchema);
+  /**
+   * Conditional, like {@link logs}: every open app re-reads the fleet on a beat, and an unchanged one
+   * answers `304` instead of its whole list again (about 25 KB on a real fleet, on a metered relay).
+   *
+   * One list is held per client, which is per daemon connection. A `304` answers a deep copy of it, so
+   * a caller gets a fresh value exactly as a full read would give one and cannot reach the held list
+   * through it. The held entry is captured BEFORE the request, as in {@link logs}, and a daemon that
+   * predates the tag (no `etag`) leaves nothing held, so the next read is an ordinary one.
+   */
+  async list(): Promise<SessionView[]> {
+    const held = this.#validatedSessions;
+    const response = await this.#exchange(
+      '/v1/sessions',
+      { method: 'GET', headers: held === undefined ? {} : { 'if-none-match': held.etag } },
+      FY_REQUEST_TIMEOUT_MS,
+      held !== undefined,
+    );
+    // Whatever is held now stays: a read that overlapped this one may already hold a newer list.
+    if (held !== undefined && response.status === 304) return structuredClone([...held.sessions]);
+    const sessions = SessionListSchema.parse(await responsePayload(response));
+    const etag = response.headers.get('etag');
+    this.#validatedSessions = etag === null ? undefined : { etag, sessions: structuredClone(sessions) };
+    return sessions;
   }
 
   suggestNames(count = 1): Promise<string[]> {
@@ -842,6 +874,10 @@ export class FyApiClient implements IFyApiClient {
       {},
       SendRecordSchema,
     );
+  }
+
+  resolveComposerDraft(id: string, request: ComposerDraftRequest): Promise<ComposerDraftResult> {
+    return this.#post(id, 'composer', ComposerDraftRequestSchema, request, ComposerDraftResultSchema);
   }
 
   answer(

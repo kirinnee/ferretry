@@ -59,23 +59,58 @@ pressed again — bounded, and only while that exact message is still there.
 
 ## Never typing onto unsent text
 
-A send first reads the composer. If it already holds input — a person's draft, or an earlier message
-that was typed and never submitted — **nothing is typed**: the send is refused (`409`) with the draft
-quoted and the remedy named ("Press Enter on it or cancel it first"). The terminal makes the same check
-again immediately before its first keystroke; a refusal there withdraws the just-accepted record, which
-is honest because nothing was typed.
+A send first reads the composer. If it already holds input, **nothing is typed onto it**. What happens
+next depends on whose text it is.
+
+**A pointer of Ferretry's own is finished, not refused.** A long message travels as one line — "Read the
+file …/turns/turn-008.md now, then …" — and when the Enter for that line was swallowed (a stalled daemon,
+a repaint) the line sat in the composer and every later send was refused over a "draft" the person never
+wrote. Now, when the composer holds exactly the pointer of one still-unsettled send in THIS session's own
+ledger (`accepted`, `queued` or `unaccounted`; path `turn-file` or `native-file`), the send presses Enter
+on it with the usual verification, journals `control.send_resubmitted` (`reason: pointer typed but not
+submitted`), re-reads the session and the pane, and then carries on — normally into the harness's queue,
+because the agent is now working on the turn it just received. The matcher (`lib/session/send/stranded.ts`)
+ignores whitespace, because a TUI re-wraps a long line, and accepts a `…`-clipped pointer only when the
+visible part runs past the whole turn-file path — a clip inside the path could be any session's pointer. A
+person's draft, an edited pointer, another session's pointer, a pane mid-turn or behind a dialog, and an
+Enter that does not take all end in the refusal below, with nothing pressed or wiped.
+
+The earlier send is recorded as **entered**, not `delivered` — only the transcript proves that, and the
+tracker looks. Its `typedNotSent` flag goes, an `unaccounted` fate re-opens to `accepted`, and its attempt
+clock restarts at the Enter, so a deadline long past cannot call it absent before the harness has written
+its record and retype it. A turn its own send never got to start (the stranded send threw before the
+turn bookkeeping) is started then, so the next send does not claim the same turn number.
+
+**Anything else is the person's, and is refused.** The send answers `409 composer_occupied` with the
+draft quoted in the message ("Press Enter on it or clear it first") and the whole draft in the body's
+`draft` field. The app shows that as a notice under its composer with **Send it** and **Clear it**; each
+calls `POST /v1/sessions/:id/composer` with `{ action: 'submit' | 'clear', draft }`, which acts only while
+the composer still holds exactly that draft (`changed` otherwise), and the app then re-sends the person's
+own message. The terminal makes the same occupied check again immediately before its first keystroke; a
+refusal there withdraws the just-accepted record, which is honest because nothing was typed.
+
+### The tracker presses Enter again for a pointer of ours
+
+The transport already presses Enter a bounded number of times while the payload is visibly still there.
+A pointer that outlives that is the tracker's: on a look where the composer still holds exactly the
+send's pointer, it asks the send service (`resubmit`) for one more verified Enter at each of
+`submitNudgesMs` (4 s, 12 s, 30 s after the attempt typed it). The service re-checks everything under the
+session's lock, counts the nudge on the record (`submitNudges`, daemon-only) BEFORE the key, and presses
+only at an idle, undialogued pane. A pointer is said to be **typed, not sent** only once the last nudge
+has had `typedStableMs` to take; a message typed as itself is never nudged, because a person may have
+typed the same words.
 
 ## What a message row can say
 
-| Row                         | Proof                                                                                 |
-| --------------------------- | ------------------------------------------------------------------------------------- |
-| Sending                     | Accepted; nothing has proved where it is yet                                          |
-| Typed, not sent             | `typedNotSent`: the composer still holds exactly this message ≥4 s after it was typed |
-| Queued                      | The harness shows it in its own queue (a Claude queue record, or Codex's `↳` entry)   |
-| Delivered                   | A user record in the transcript carries it — or carries it JOINED to its neighbours   |
-| Unconfirmed / Not delivered | As before: `unaccounted` / `timed_out`, with the reason                               |
-| Cancelled                   | A person took it back; `cancelEffect` says what that did on the agent's screen        |
-| Status unknown              | THIS BROWSER could not read the ledger for 15 s; the row says since when, and why     |
+| Row                         | Proof                                                                                                                         |
+| --------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| Sending                     | Accepted; nothing has proved where it is yet                                                                                  |
+| Typed, not sent             | `typedNotSent`: the composer still holds exactly this message ≥4 s after it was typed (a pointer: after its last Enter nudge) |
+| Queued                      | The harness shows it in its own queue (a Claude queue record, or Codex's `↳` entry)                                           |
+| Delivered                   | A user record in the transcript carries it — or carries it JOINED to its neighbours                                           |
+| Unconfirmed / Not delivered | As before: `unaccounted` / `timed_out`, with the reason                                                                       |
+| Cancelled                   | A person took it back; `cancelEffect` says what that did on the agent's screen                                                |
+| Status unknown              | THIS BROWSER could not read the ledger for 15 s; the row says since when, and why                                             |
 
 `typedNotSent` is set by the tracker on **every** look (the first is ~2 s after the send), not only at a
 deadline, and is dropped when the composer no longer holds the message. **Queued** is set only when the
@@ -126,6 +161,13 @@ All three routes are `operator`, with no capability of their own — they finish
 are governed exactly as the send and its retry are. Each is journalled (`control.send_cancelled`,
 `control.send_submitted`) and audited as `agent.prompted` (`send-cancel`, `send-enter`), never with the
 text.
+
+When a send is refused because the composer holds the person's OWN text, the notice under the app's
+composer offers **Send it** and **Clear it** — `POST /v1/sessions/:id/composer` with the quoted draft.
+That route is not a send: no ledger row is behind it and the text is not Ferretry's, so it is governed
+as every other key into the agent's pane is, `terminal` / `use` ([grants.md](grants.md)), journalled
+`control.composer_submitted` / `control.composer_cleared` with the outcome only, and audited as
+`terminal.input` (`mode: composer`), never with the text.
 
 **Dismissing is a view choice, never a daemon one.** A send that settled without arriving (cancelled, given
 up on, superseded, delivered elsewhere) sits in the timeline at its send time — never below the live

@@ -97,6 +97,7 @@ import {
 } from './features/settings/pair-phone.tsx';
 import { PasskeyNudge } from './features/settings/passkey-nudge.tsx';
 import { pricingSettingsTab } from './features/settings/pricing-settings.tsx';
+import { performanceSettingsTab } from './features/settings/performance-settings.tsx';
 import { securityLogSettingsTab } from './features/settings/security-log-settings.tsx';
 import { settingsPaletteEntries } from './features/settings/settings-catalog.ts';
 import { SettingsPage } from './features/settings/settings-page.tsx';
@@ -1633,6 +1634,8 @@ function SettingsRoute({ connection }: DaemonPageProps) {
           />
         ),
       },
+      // Diagnostics beside the doctor: what this machine and this app spend their time on.
+      performanceSettingsTab(createDaemonClient, store.performance),
       pricingSettingsTab(createDaemonClient),
       // Optional provider keys sit with the machine's other spend: pricing, then the keys that spend.
       speedupsSettingsTab(createDaemonClient),
@@ -1646,7 +1649,7 @@ function SettingsRoute({ connection }: DaemonPageProps) {
       // The agent CLIs its ferrets run, whether Ferretry verified them, and updating them (docs/updating.md).
       agentClisSettingsTab(createDaemonClient),
     ],
-    [createDaemonClient, store.clients],
+    [createDaemonClient, store.clients, store.performance],
   );
   // This device's copy of every machine's sessions and messages, and where each page was scrolled.
   const clearCachedData = useCallback(async (): Promise<void> => {

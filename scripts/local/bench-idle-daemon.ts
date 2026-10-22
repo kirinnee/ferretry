@@ -27,7 +27,7 @@ import { join, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 import type { PerformanceProfileView, PerformanceReport } from '../../packages/protocol/src/lib/index.ts';
 import { parseStraceTrace } from '../../packages/cli/src/lib/daemon/profile/syscall-trace.ts';
-import { renderPerformanceReport } from '../../packages/cli/src/lib/daemon/profile/render.ts';
+import { renderPerformanceReport } from '../../packages/protocol/src/lib/performance-render.ts';
 import { freeLoopbackPort } from '../../packages/daemon/tests/integration/support/booted-daemon.ts';
 import {
   OWNER_MAC_FLEET,

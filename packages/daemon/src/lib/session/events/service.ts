@@ -5,10 +5,13 @@ import {
   type SessionLiveActivity,
 } from '@ferretry/protocol';
 import type { SocketDownstream, SocketFrame, SocketHandler } from '../../api/socket.ts';
-import { journalEventToFyEvent, type StoredSessionEvent } from '../reads/service.ts';
 import { sameLiveReading } from '../live/policy.ts';
+import { journalEventToFyEvent, type StoredSessionEvent } from '../reads/service.ts';
 
-/** The source-compatible fleet backfill bound: recent tail, then live. */
+/**
+ * The source-compatible fleet backfill bound: recent tail, then live. It is also the default and the
+ * ceiling of `?tail=`, so a reader may ask for less history than an old reader got, never more.
+ */
 export const FLEET_EVENT_BACKLOG_LIMIT = 5_000;
 /** A quiet socket proves it is live after the same window the polling port established. */
 export const EVENT_STREAM_IDLE_MS = 30_000;
@@ -31,12 +34,19 @@ export const FLEET_EVENT_STREAM_CLOSES = {
 
 export type FleetEventStreamScope =
   | { readonly kind: 'session'; readonly sessionId: string; readonly after: number; readonly live?: boolean }
-  | { readonly kind: 'fleet' };
+  | {
+      readonly kind: 'fleet';
+      /**
+       * How many recent events to replay before going live; {@link FLEET_EVENT_BACKLOG_LIMIT} when
+       * absent. `0` starts at the instant the stream subscribed and replays nothing.
+       */
+      readonly tail?: number;
+    };
 
 export interface FleetEventBacklog {
   /** Every session this daemon currently holds, including sessions with no events in the tail. */
   readonly sessionIds: readonly string[];
-  /** At most {@link FLEET_EVENT_BACKLOG_LIMIT} recent events across those sessions. */
+  /** At most `limit` recent events across those sessions — none at all for a limit of `0`. */
   readonly events: readonly StoredSessionEvent[];
 }
 
@@ -144,7 +154,7 @@ class FleetEventSocketHandler implements SocketHandler {
     this.unsubscribe = unsubscribe;
     try {
       if (this.scope.kind === 'session') await this.replaySession();
-      else await this.replayFleet();
+      else await this.replayFleet(this.scope.tail ?? FLEET_EVENT_BACKLOG_LIMIT);
       if (this.closed) return;
       this.replaying = false;
       const queued = this.pending;
@@ -152,6 +162,7 @@ class FleetEventSocketHandler implements SocketHandler {
       for (const event of queued) {
         if (!this.deliver(event, true, false)) return;
       }
+      if (!this.send(this.idleFrame())) return;
       this.armIdle();
       this.armLive(0);
     } catch {
@@ -176,8 +187,8 @@ class FleetEventSocketHandler implements SocketHandler {
     }
   }
 
-  private async replayFleet(): Promise<void> {
-    const backlog = await this.source.fleetBacklog(FLEET_EVENT_BACKLOG_LIMIT, this.abort.signal);
+  private async replayFleet(tail: number): Promise<void> {
+    const backlog = await this.source.fleetBacklog(tail, this.abort.signal);
     this.abort.signal.throwIfAborted();
     for (const sessionId of backlog.sessionIds) this.knownSessions.add(sessionId);
     for (const event of orderFleetBacklog(backlog.events)) {
@@ -253,6 +264,25 @@ class FleetEventSocketHandler implements SocketHandler {
   }
 
   /**
+   * The proof that this socket is live, and where it stands.
+   *
+   * IT IS SENT ONCE AS SOON AS THE REPLAY IS DONE, and then once per quiet window ({@link armIdle}).
+   * A reader counts a feed as live only once it has heard from it, and a quiet session used to say
+   * nothing for the first thirty seconds — so every reader ran its fast fallback polls for those
+   * thirty seconds on every open, which on a phone is most of the reason for having a feed at all.
+   * The opening proof also marks the edge a reader needs: everything before it was replay, everything
+   * after it is live, and `after` is the session's sequence at that edge.
+   *
+   * IT IS THE OLD FRAME, NOT A NEW KIND, because the frame schema is strict: a reader that predates
+   * this would refuse an unknown kind or key, and with it the whole stream. `idleSeconds` keeps its
+   * meaning — the window this daemon promises a proof within — which is what a reader's watchdog reads
+   * it as. A reader that also prints it as "nothing for N seconds" says so once too early, on stderr.
+   */
+  private idleFrame(): FyEventStreamFrame {
+    return { kind: 'idle', idleSeconds: EVENT_STREAM_IDLE_MS / 1_000, scope: this.idleScope() };
+  }
+
+  /**
    * Keep proving this socket is alive for as long as it is quiet.
    *
    * EVERY QUIET WINDOW, NOT ONCE PER QUIET STRETCH. A single frame per silence was enough to tell a
@@ -276,7 +306,7 @@ class FleetEventSocketHandler implements SocketHandler {
     this.idle = this.scheduler.after(EVENT_STREAM_IDLE_MS, () => {
       this.idle = undefined;
       try {
-        if (!this.send({ kind: 'idle', idleSeconds: EVENT_STREAM_IDLE_MS / 1_000, scope: this.idleScope() })) return;
+        if (!this.send(this.idleFrame())) return;
         this.armIdle();
       } catch {
         this.fail(FLEET_EVENT_STREAM_CLOSES.evidence);

@@ -1,6 +1,8 @@
 import type { IFyApiClient, SessionView } from '@ferretry/protocol';
 import { ArrowUp, MapPin, Paperclip, Plus, Zap } from 'lucide-react';
 import { type ReactNode, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { OccupiedComposerNotice } from '../features/occupied-composer/occupied-composer-notice.tsx';
+import { draftResolved, draftStuckLine, occupiedDraftOf } from '../features/occupied-composer/occupied-draft.ts';
 import { readInputModality, useInputModality } from '../hooks/use-input-modality.ts';
 import { useKeyboardOpen } from '../hooks/use-keyboard-open.ts';
 import { useLocationShareHost } from '../hooks/use-location-share.ts';
@@ -19,7 +21,6 @@ import { type DaemonDraftStore, documentDraftStore } from '../lib/drafts.ts';
 import { applyFormat, type FormatCommand, formatShortcut } from '../lib/live-markdown.ts';
 import { asLocationError, formatLocationBlock } from '../lib/location-share.ts';
 import { useMdComposePref } from '../lib/md-compose.ts';
-import { REINSERT_TRANSCRIPTION_EVENT, reinsertTranscriptionText } from '../lib/stt/reinsert-transcription.ts';
 import { registerComposerQuoteTarget } from '../lib/quote.ts';
 import { findReferences } from '../lib/references.ts';
 import { carrierDelivery } from '../lib/relay-carrier.ts';
@@ -27,6 +28,7 @@ import type { DaemonFetch } from '../lib/runtime-models.ts';
 import { browserFetch } from '../lib/runtime-models.ts';
 import { canSubmitComposer } from '../lib/session-screens.ts';
 import type { BrowserRecognitionProvider } from '../lib/stt/browser-recognition.ts';
+import { REINSERT_TRANSCRIPTION_EVENT, reinsertTranscriptionText } from '../lib/stt/reinsert-transcription.ts';
 import type { SttSettings } from '../lib/stt/stt-settings.ts';
 import { ContextMenu, type MenuAnchor } from '../shell/context-menu.tsx';
 import { type ComposerAttachmentUploader, useComposerAttachments } from './composer-attachments.ts';
@@ -89,7 +91,8 @@ const sendFailure = (cause: unknown): SendFailure => {
 export interface ComposerProps {
   readonly daemon: DaemonConnection;
   readonly sessionId: string;
-  readonly api: Pick<IFyApiClient, 'send'> & Partial<Pick<IFyApiClient, 'history'>>;
+  /** `resolveComposerDraft` is what lets a person send or clear text stuck in the agent's own box. */
+  readonly api: Pick<IFyApiClient, 'send'> & Partial<Pick<IFyApiClient, 'history' | 'resolveComposerDraft'>>;
   readonly busy?: boolean;
   readonly disabled?: boolean;
   readonly placeholder?: string;
@@ -356,6 +359,12 @@ export function Composer({
   const setDraft = useCallback((text: string) => setDraftState({ key: daemonSessionKey(scope), text }), [scope]);
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<SendFailure | null>(null);
+  /** The person's own unsent text the agent's box held when this send was refused, and the last tap's fate. */
+  const [occupied, setOccupied] = useState<{
+    readonly draft: string;
+    readonly busy: boolean;
+    readonly failure?: string;
+  } | null>(null);
   // Once the machine answers again an outage line is cleared — or, for a send that may already have
   // arrived, replaced by one that points at the transcript, whose send row settles it under the original id.
   useEffect(() => {
@@ -555,6 +564,7 @@ export function Composer({
   useEffect(() => {
     setDraft(draftStore.load(scope));
     setError(null);
+    setOccupied(null);
     // A mode is a property of an editing session, not of the browser tab: the
     // reader who arrives at another session has not asked for normal mode there.
     setVim(initialVimState);
@@ -625,6 +635,7 @@ export function Composer({
     submitLock.current = true;
     setSending(true);
     setError(null);
+    setOccupied(null);
     try {
       const typed = draft.trim();
       // The block is plain text in the message: that is how an agent receives it, and how the sent
@@ -651,10 +662,41 @@ export function Composer({
       draftStore.clear(scope);
       onSent?.();
     } catch (cause) {
-      setError(sendFailure(cause));
+      const held = occupiedDraftOf(cause);
+      if (held === undefined) setError(sendFailure(cause));
+      else setOccupied({ draft: held, busy: false });
     } finally {
       submitLock.current = false;
       setSending(false);
+    }
+  };
+
+  const resolvingLock = useRef(false);
+  /**
+   * "Send it" or "Clear it" on the text stuck in the agent's box, then this message again.
+   *
+   * The daemon acts only while the box still holds exactly that text; whatever it finds, a freed box
+   * re-sends the person's message under a fresh request, which meets the box as it now is.
+   */
+  const resolveOccupied = async (action: 'submit' | 'clear'): Promise<void> => {
+    const held = occupied;
+    const resolve = api.resolveComposerDraft;
+    // A ref, not the state: a second tap in the same frame reads the state from before the first.
+    if (held === null || resolve === undefined || resolvingLock.current) return;
+    resolvingLock.current = true;
+    setOccupied({ draft: held.draft, busy: true });
+    try {
+      const result = await resolve.call(api, sessionId, { action, draft: held.draft });
+      if (!draftResolved(result.outcome)) {
+        setOccupied({ draft: held.draft, busy: false, failure: draftStuckLine(result.outcome) });
+        return;
+      }
+      setOccupied(null);
+      await submit();
+    } catch (cause) {
+      setOccupied({ draft: held.draft, busy: false, failure: sendFailure(cause).text });
+    } finally {
+      resolvingLock.current = false;
     }
   };
 
@@ -1203,6 +1245,14 @@ export function Composer({
           {error.text}
         </p>
       ) : null}
+      {occupied === null ? null : (
+        <OccupiedComposerNotice
+          busy={occupied.busy || sending}
+          draft={occupied.draft}
+          failure={occupied.failure}
+          onResolve={api.resolveComposerDraft === undefined ? undefined : action => void resolveOccupied(action)}
+        />
+      )}
     </form>
   );
 }

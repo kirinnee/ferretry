@@ -254,7 +254,10 @@ class Rig {
         },
         terminal,
         repository,
-        attempts: { reattempt: async (id, sendId) => await service().reattempt(id, sendId, { by: 'daemon' }) },
+        attempts: {
+          reattempt: async (id, sendId) => await service().reattempt(id, sendId, { by: 'daemon' }),
+          resubmit: async (id, sendId) => await service().resubmit(id, sendId),
+        },
         notifier: new AgentSendFailureNotifier(
           { send: async request => await service().send(request) },
           repository,
@@ -510,7 +513,7 @@ describe('a Codex message left typed and not sent — the owner’s stuck "hi" a
     should((first as Error).message).match(/stayed in the composer/u);
     should(early.typedNotSent).be.undefined();
     should(looked).match({ fate: 'accepted', typedNotSent: true });
-    should((second as Error).message).match(/already holds unsent text \("hi"\).*Press Enter on it or cancel it/u);
+    should((second as Error).message).match(/already holds unsent text \("hi"\).*Press Enter on it or clear it/u);
     should(await subject.record('send-2')).be.undefined();
     should(subject.harness.typed).eql(['hi']);
     should(cancelled).match({ fate: 'cancelled', cancelEffect: 'cleared' });

@@ -46,6 +46,7 @@ describe('FyApiClient construction and generic requests', () => {
       'remove',
       'rename',
       'request',
+      'resolveComposerDraft',
       'resume',
       'retrySend',
       'runtime',

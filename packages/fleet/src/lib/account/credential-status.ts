@@ -607,6 +607,16 @@ export interface CredentialStatusView {
   readonly usage: CredentialUsage;
 }
 
+/** How a read treats a check of the credential that is running right now. */
+export interface CredentialViewOptions {
+  /**
+   * Answer from what is already known, as if no check were running. For a reader that CACHES the
+   * answer: "Checking" is true only while the flight lasts, and a cached row outlives it, so the row
+   * would go on saying "not known" for its whole lifetime about a check that has long concluded.
+   */
+  readonly settled?: boolean;
+}
+
 /**
  * One credential's status and usage, observed on the existing schedule or checked by a person.
  *
@@ -628,8 +638,8 @@ export class CredentialStatusService {
   }
 
   /** The status and usage from what is already known. No network, no refresh. */
-  async view(subject: CredentialSubject): Promise<CredentialStatusView> {
-    return await this.#view(subject, this.busy(subject.id));
+  async view(subject: CredentialSubject, options: CredentialViewOptions = {}): Promise<CredentialStatusView> {
+    return await this.#view(subject, options.settled !== true && this.busy(subject.id));
   }
 
   /**

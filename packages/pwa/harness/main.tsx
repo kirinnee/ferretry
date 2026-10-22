@@ -186,6 +186,7 @@ import { type GrantClientFactory, GrantsCard, GrantsSurface } from '../src/featu
 import { MarkdownComposerSettings } from '../src/features/settings/markdown-composer-settings.tsx';
 import { NotificationSettingsView } from '../src/features/settings/notification-settings.tsx';
 import type { SecurityLogClient } from '../src/features/settings/security-api.ts';
+import { PerformanceSettings } from '../src/features/settings/performance-settings.tsx';
 import { SecurityLogSurface } from '../src/features/settings/security-log-settings.tsx';
 import type { PasskeyClientFactory } from '../src/features/settings/security-settings.tsx';
 import { settingsPaletteEntries } from '../src/features/settings/settings-catalog.ts';
@@ -315,6 +316,7 @@ import { machineSetupAnswer } from './machine-setup-fixture.ts';
 import { HARNESS_MACHINE_TABS } from './machine-tabs.tsx';
 import { McpSignInFrameHarness, mcpSignInFrame } from './mcp-sign-in.tsx';
 import { isPairFromMenuPage, PairFromMenuHarness } from './pair-from-menu.tsx';
+import { harnessPerformanceClient, harnessRecorder } from './performance-fixture.ts';
 import { isSessionContextMenuPage, SessionContextMenuHarness } from './session-context-menu.tsx';
 import {
   WARDEN_FIXTURE_ATTENTION,
@@ -858,6 +860,10 @@ const harnessCgroupClient = async (connection: DaemonConnection) => {
   };
 };
 
+/** The Performance panel's fixture machine and this page's recorder (`performance-fixture.ts`). */
+const HARNESS_PERFORMANCE_CLIENT = harnessPerformanceClient();
+const HARNESS_RECORDER = harnessRecorder();
+
 /** The Files panel's in-memory daemon (`config-files-fixture.ts`). */
 const HARNESS_CONFIG_FILES_CLIENT = harnessConfigFilesClient(unreachableDaemon.daemonId);
 
@@ -897,6 +903,19 @@ const HARNESS_DAEMON_SETTINGS_TABS: readonly DaemonSettingsTabDefinition[] = [
           if (target.daemonId === unreachableDaemon.daemonId) throw new Error('offline harness daemon');
           return HARNESS_DOCTOR;
         }}
+      />
+    ),
+  },
+  {
+    id: 'performance',
+    label: 'Performance',
+    description: 'Measure what this machine and this app spend their time on, and get a report safe to share.',
+    // A window of a second and a half, on a fixture machine and a recorder that already holds a minute of reads.
+    Surface: ({ connection }: { readonly connection: DaemonConnection }) => (
+      <PerformanceSettings
+        connection={connection}
+        createClient={HARNESS_PERFORMANCE_CLIENT}
+        recorder={HARNESS_RECORDER}
       />
     ),
   },
