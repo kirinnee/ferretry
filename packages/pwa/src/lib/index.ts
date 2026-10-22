@@ -508,3 +508,5 @@ export * from './workspace-layout.ts';
 export * from './workspace-layout-store.ts';
 export * from './workspace-rail-preferences.ts';
 export * from './qr-frame-decoder.ts';
+// The browser's half of the Performance report (Settings › Machine › Diagnostics), as text.
+export * from './performance/report-text.ts';

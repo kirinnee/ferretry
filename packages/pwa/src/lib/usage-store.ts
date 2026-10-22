@@ -44,8 +44,12 @@ import { daemonRequest } from './daemon-transport.ts';
 import { browserFetch, type DaemonFetch, DaemonResponseError } from './runtime-models.ts';
 import { DaemonUsageIndex, type ResolvedQuota } from './usage.ts';
 
-/** kteam's cadence, unchanged: the upstream feed is itself daemon-cached. */
-export const USAGE_POLL_MS = 60_000;
+/**
+ * Quota moves over minutes and the upstream feed is itself daemon-cached, so a meter two minutes old is
+ * still the right meter. It is read once per machine shown, which made kteam's sixty seconds a
+ * steady share of an idle page's traffic.
+ */
+export const USAGE_POLL_MS = 120_000;
 
 export type UsageLoadStatus = 'idle' | 'loading' | 'ready' | 'error';
 

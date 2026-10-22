@@ -47,7 +47,13 @@ export function parseControlGuard(line: string): ControlGuard | undefined {
  * a pane id outlives a rename, and a session NAME is reused by the next session given it.
  */
 export type TmuxControlNotification =
-  /** Bytes a pane wrote, decoded from tmux's octal escapes. Only for panes in the attached session. */
+  /**
+   * Bytes a pane wrote, decoded from tmux's octal escapes. Only for panes in the attached session.
+   * `%extended-output` — what a client attached with `pause-after` receives instead — arrives as this too.
+   *
+   * tmux (3.6a) has NO pane-exited notification: a pane kept by `remain-on-exit` dies silently, and a
+   * watcher learns of it from a `refresh-client -B` subscription on `#{pane_dead}`.
+   */
   | { readonly kind: 'output'; readonly paneId: string; readonly data: string }
   /** A session was created or destroyed anywhere on the server. */
   | { readonly kind: 'sessions-changed' }
@@ -77,6 +83,9 @@ export function decodeControlOutput(escaped: string): string {
   return escaped.replace(/\\([0-7]{3})/gu, (_, octal: string) => String.fromCharCode(Number.parseInt(octal, 8)));
 }
 
+/** `%extended-output %pane <age-ms> … : <data>`: the payload follows the first ` : `. */
+const EXTENDED_OUTPUT = /^(%\d+) \d+(?: [^:]*?)? : (.*)$/su;
+
 const SUBSCRIPTION = /^(\S+) (\$\d+) (@\d+) \d+ (%\d+)(?: .*?)? : (.*)$/su;
 
 /** The notification one line outside a block is, or `undefined` for a line that is not one. */
@@ -90,6 +99,11 @@ export function parseControlNotification(line: string): TmuxControlNotification 
   const id = text.split(' ', 1)[0] as string;
   const rest = text.slice(id.length + 1);
   if (name === 'output' && /^%\d+$/u.test(id)) return { kind: 'output', paneId: id, data: decodeControlOutput(rest) };
+  if (name === 'extended-output') {
+    const match = EXTENDED_OUTPUT.exec(text);
+    if (match !== null)
+      return { kind: 'output', paneId: match[1] as string, data: decodeControlOutput(match[2] as string) };
+  }
   if (name === 'sessions-changed') return { kind: 'sessions-changed' };
   if (name === 'session-changed' && /^\$\d+$/u.test(id)) return { kind: 'session-changed', sessionId: id, name: rest };
   if ((name === 'window-close' || name === 'unlinked-window-close') && /^@\d+$/u.test(id))

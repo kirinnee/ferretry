@@ -64,6 +64,11 @@ export const ChildProcessStatsSchema = z.object({
   synchronous: z.number().int().nonnegative(),
   /** From start to exit, for the ones that exited inside the window. */
   wall: DurationStatsSchema,
+  /**
+   * The labelled work that started them — the innermost timer or job in flight (`turn watcher`,
+   * `fleet refresh`) — busiest first. `(no named work)` counts children started outside any.
+   */
+  by: z.array(z.object({ activity: z.string().min(1), count: z.number().int().nonnegative() })).optional(),
 });
 export type ChildProcessStats = z.infer<typeof ChildProcessStatsSchema>;
 

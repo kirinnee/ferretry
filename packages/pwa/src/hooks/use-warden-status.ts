@@ -13,7 +13,7 @@
  *   2. Every in-flight read remembers which daemon asked. A response that
  *      arrives after a switch is DISCARDED, not applied.
  *
- * Kept from the original: the 30s cadence, the skip while the tab is hidden
+ * Kept from the original: the skip while the tab is hidden
  * (the perf budget), and self-hiding rather than erroring on a daemon too old
  * to serve the route — a failed first read leaves the status `null` and the
  * strip renders nothing.
@@ -23,7 +23,11 @@ import { useEffect, useState } from 'react';
 import type { WardenStatusView } from '@ferretry/protocol';
 import type { DaemonConnection, DaemonId } from '../lib/daemon-connection.ts';
 
-export const WARDEN_POLL_MS = 30_000;
+/**
+ * A sweep result changes on the warden's own schedule, minutes apart, and its configuration arrives on
+ * the config stream; kteam's thirty seconds re-read an unchanged strip twice a minute on an idle page.
+ */
+export const WARDEN_POLL_MS = 60_000;
 
 /**
  * Reads one daemon's warden status. The caller owns the transport — and must

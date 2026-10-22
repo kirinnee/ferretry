@@ -35,6 +35,8 @@ import {
   FRAME_KINDS,
   HANDSHAKE_FRAME_SEQUENCE,
   HANDSHAKE_SIGNATURE_LABEL,
+  HEARTBEAT_REQUEST,
+  HEARTBEAT_RESPONSE,
   handshakeTranscriptHash,
   NONCE_BYTES,
   openChannel,
@@ -303,6 +305,8 @@ export interface AutoDaemonAnswer {
   readonly closeOnRequest?: (index: number) => { readonly code: number; readonly reason: string } | undefined;
   /** Answer each request by what it asked for, the way a real daemon's route table would. */
   readonly respond?: (request: ScriptedRequest) => ScriptedAnswer | Promise<ScriptedAnswer>;
+  /** Answers every `fy-ping` with `fy-pong`, as the rendezvous auto-responder does, so a session outlives its keepalive. */
+  readonly answersHeartbeats?: boolean;
 }
 
 /** One `req` as a scripted daemon reads it. */
@@ -338,6 +342,13 @@ export const autoDial = (
     const daemon = new ScriptedDaemon(identity, sessionId);
     const socket = new ScriptedSocket();
     let queue: Promise<void> = Promise.resolve();
+    if (answer.answersHeartbeats === true) {
+      const text = socket.sendText.bind(socket);
+      socket.sendText = (sent: string): void => {
+        text(sent);
+        if (sent === HEARTBEAT_REQUEST) queueMicrotask(() => socket.onText?.(HEARTBEAT_RESPONSE));
+      };
+    }
     const original = socket.send.bind(socket);
     socket.send = (bytes: Uint8Array): void => {
       original(bytes);
@@ -529,6 +540,8 @@ export interface FetcherDaemon {
   readonly identity: DaemonIdentity;
   /** What a `pair` record on this daemon is answered with. */
   readonly paired?: unknown;
+  /** Answers keepalives, for a suite that holds sessions longer than the browser's keepalive interval. */
+  readonly answersHeartbeats?: boolean;
 }
 
 /**
@@ -558,6 +571,7 @@ export const fetcherDaemons = (
       daemon.host,
       autoDial(daemon.identity, {
         ...(daemon.paired === undefined ? {} : { paired: daemon.paired }),
+        ...(daemon.answersHeartbeats === true ? { answersHeartbeats: true } : {}),
         respond: async request => {
           const url = new URL(request.path, `https://${daemon.host}`);
           for (const [name, value] of request.query ?? []) url.searchParams.append(name, value);

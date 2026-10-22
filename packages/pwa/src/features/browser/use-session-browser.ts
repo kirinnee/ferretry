@@ -2,7 +2,8 @@
  * THIS SESSION'S BROWSER PAGES, as the daemon lists them — for the browser surface list, for proving
  * `%browser:` references, and for bringing a page's tab into the person's view.
  *
- * One read of `GET /v1/sessions/:id/browser`, again every {@link SESSION_BROWSER_POLL_MS}, through the
+ * One read of `GET /v1/sessions/:id/browser`, again on every surface or browser event of the session's live
+ * feed — or every {@link SESSION_BROWSER_POLL_MS} while there is none (`feed-aware-poll.ts`) — through the
  * daemon client (the store's pool, so direct and relay alike). The status lists every page that belongs
  * to the session — the agent's and the person's, popups included — and nothing of any other session's.
  *
@@ -25,14 +26,27 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
 import type { DaemonSessionScope } from '../../lib/daemon-scope.ts';
+import { type FeedAwarePollEnvironment, type LiveFeedSignal, startFeedAwarePoll } from '../../lib/feed-aware-poll.ts';
 
-/** How often the page list is re-read. */
+/** How often the page list is re-read while no live feed is saying what changed. */
 export const SESSION_BROWSER_POLL_MS = 10_000;
+
+/** The safety-net re-read while the feed is live, for a page closed or moved without a journal entry. */
+export const SESSION_BROWSER_LIVE_POLL_MS = 120_000;
+
+/** A feed event that may have changed the session's pages: a surface or a browser one. */
+export const movesBrowserPages = (event: { readonly type: string }): boolean =>
+  event.type.startsWith('surface.') || event.type.startsWith('browser.');
 
 export interface SessionBrowserDependencies {
   /** The daemon client for a connection — the store's pool in the app. */
   readonly client: (daemon: DaemonConnection) => Promise<Pick<IFyApiClient, 'request'>>;
   readonly pollMs?: number;
+  readonly livePollMs?: number;
+  /** The session's live feed: while it is live the list is re-read on its events, not on a timer. */
+  readonly events?: LiveFeedSignal;
+  /** The poll's timers and visibility; the browser's when absent. */
+  readonly pollEnvironment?: FeedAwarePollEnvironment;
 }
 
 export interface SessionBrowser {
@@ -95,6 +109,9 @@ export function useSessionBrowser(
   const [status, setStatus] = useState<BrowserStatus | null>(null);
   const client = dependencies?.client;
   const pollMs = dependencies?.pollMs ?? SESSION_BROWSER_POLL_MS;
+  const livePollMs = dependencies?.livePollMs ?? SESSION_BROWSER_LIVE_POLL_MS;
+  const events = dependencies?.events;
+  const pollEnvironment = dependencies?.pollEnvironment;
   const epoch = useRef(0);
 
   const read = useCallback(
@@ -116,10 +133,15 @@ export function useSessionBrowser(
     epoch.current += 1;
     const mine = epoch.current;
     setStatus(null);
-    read(mine);
-    const poll = setInterval(() => read(mine), pollMs);
-    return () => clearInterval(poll);
-  }, [read, pollMs]);
+    return startFeedAwarePoll({
+      read: () => read(mine),
+      everyMs: pollMs,
+      liveEveryMs: livePollMs,
+      relevant: movesBrowserPages,
+      ...(events === undefined ? {} : { feed: events }),
+      ...(pollEnvironment === undefined ? {} : { environment: pollEnvironment }),
+    });
+  }, [read, pollMs, livePollMs, events, pollEnvironment]);
 
   const act = useCallback(
     async (action: BrowserAction): Promise<BrowserStatus | null> => {

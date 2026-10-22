@@ -31,16 +31,22 @@ const SETTLE_SECONDS = 15;
 const PROFILE_SECONDS = 20;
 
 /**
- * CI's ceilings — the ratchet. Measured on this fixture at 4.66.3 (perf/profiler-and-budgets): CPU 20%
- * of a core, 660 child processes/min (all tmux and ps), 3,441 read/write system calls/s, longest
- * loop block 17 ms, 17 state-port file operations/s. Lower a number here in the PR that earns it.
+ * CI's ceilings — the ratchet. Each step records what this fixture measured when it was lowered.
+ *
+ * - First set (#694, 4.66.3): CPU 20% of a core, 660 child processes/min (all tmux and ps), 3,441
+ *   read/write system calls/s, longest loop block 17 ms, 17 state-port file operations/s.
+ * - Lowered after #693 (document cache), #696 (tmux control mode), #697 (Codex discovery pacing) and
+ *   #698 (file-event hub): CPU 15.5%, 0 child processes/min, 1,472 read/write system calls/s, longest
+ *   block 5 ms, 9 state-port file operations/s.
+ *
+ * Lower a number here in the PR that earns it; never raise one.
  */
 const CEILINGS: Readonly<Record<string, number>> = {
-  'daemon CPU': 45,
-  'child processes': 800,
+  'daemon CPU': 30,
+  'child processes': 30,
   'longest event-loop block': 100,
   'file operations through the daemon’s ports': 100,
-  'read/write system calls': 7_000,
+  'read/write system calls': 3_000,
 };
 
 /** The report's own ranking, cut to what names the code to fix. */
@@ -49,7 +55,10 @@ function ranking(report: PerformanceReport) {
     cpu: report.resources.cpu,
     childProcesses: report.childProcesses.commands
       .slice(0, 6)
-      .map(entry => `${String(entry.perMinute)}/min ${entry.command}`),
+      .map(
+        entry =>
+          `${String(entry.perMinute)}/min ${entry.command} by ${(entry.by ?? []).map(starter => `${starter.activity} ${String(starter.count)}`).join(', ')}`,
+      ),
     hotFunctions: report.cpuProfile.self.slice(0, 8).map(entry => `${String(entry.share)} ${entry.frame}`),
     activities: report.activities
       .slice(0, 6)

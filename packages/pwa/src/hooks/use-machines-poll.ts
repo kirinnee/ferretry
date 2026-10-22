@@ -27,13 +27,13 @@ import { useEffect, useRef } from 'react';
 import type { DaemonConnection, DaemonId } from '../lib/daemon-connection.ts';
 import type { DaemonFleetStore } from '../lib/fleet-store.ts';
 /** The machine on screen. */
-export const FLEET_POLL_MS = 15_000;
+export const FLEET_POLL_MS = 30_000;
 
 /** A machine that is not on screen, on a desktop. */
-export const BACKGROUND_POLL_MS = 30_000;
+export const BACKGROUND_POLL_MS = 120_000;
 
 /** A machine that is not on screen, on a phone: a slower beat, because every wake-up costs battery. */
-export const PHONE_BACKGROUND_POLL_MS = 60_000;
+export const PHONE_BACKGROUND_POLL_MS = 300_000;
 
 /** The interval for the machines that are not on screen. */
 export const backgroundPollMs = (phone: boolean): number => (phone ? PHONE_BACKGROUND_POLL_MS : BACKGROUND_POLL_MS);
