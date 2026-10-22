@@ -26,20 +26,21 @@ import { PARAKEET_CACHE, PARAKEET_TOTAL_BYTES, PARAKEET_VERSION_LABEL } from '..
 const COMMIT = 'a'.repeat(40);
 const SHA = 'b'.repeat(64);
 
-const model = (overrides: Partial<OnDeviceModel> = {}): OnDeviceModel => ({
-  ...PARAKEET_CATALOG_MODEL,
-  source: { repository: 'org/model', revision: COMMIT },
-  files: [
-    {
-      role: 'encoder',
-      label: 'Encoder',
-      url: `https://huggingface.co/org/model/resolve/${COMMIT}/encoder.onnx`,
-      bytes: 10,
-      sha256: SHA,
-    },
-  ],
-  ...overrides,
-});
+const model = (overrides: Partial<OnDeviceModel> = {}): OnDeviceModel =>
+  ({
+    ...PARAKEET_CATALOG_MODEL,
+    source: { repository: 'org/model', revision: COMMIT },
+    files: [
+      {
+        role: 'encoder',
+        label: 'Encoder',
+        url: `https://huggingface.co/org/model/resolve/${COMMIT}/encoder.onnx`,
+        bytes: 10,
+        sha256: SHA,
+      },
+    ],
+    ...overrides,
+  }) as OnDeviceModel;
 
 const sharedRuntime: SpeechRuntime = {
   id: 'onnxruntime-web',

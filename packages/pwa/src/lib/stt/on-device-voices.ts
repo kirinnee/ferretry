@@ -15,6 +15,7 @@ import {
   type ParakeetGlobalLike,
   type ParakeetVoice,
 } from './parakeet-voice.ts';
+import { browserSherpaVoice, type SherpaAssets, type SherpaGlobalLike } from './sherpa-voice.ts';
 
 export class OnDeviceVoices {
   readonly #voices: readonly OnDeviceVoice[];
@@ -48,19 +49,30 @@ export class OnDeviceVoices {
 }
 
 /** Where the build put every runtime's worker and binary (bound in `src/main.tsx`). */
-export type SpeechAssets = ParakeetAssets;
+export interface SpeechAssets extends ParakeetAssets {
+  readonly sherpa?: SherpaAssets;
+}
 
-/** Builds the voice for one model on its runtime. */
-type VoiceFactory = (model: OnDeviceModel) => OnDeviceVoice;
+/** Every global the on-device runtimes read. */
+export type SpeechGlobalLike = ParakeetGlobalLike & SherpaGlobalLike;
 
 /** The production registry, bound to this page. Parakeet's service is passed in so the store keeps one. */
 export function browserOnDeviceVoices(
-  global: ParakeetGlobalLike,
+  global: SpeechGlobalLike,
   assets: SpeechAssets | null,
   parakeet: ParakeetVoice = browserParakeetVoice(global, assets),
 ): OnDeviceVoices {
-  const factories: Readonly<Record<SpeechRuntimeId, VoiceFactory>> = {
-    'onnxruntime-web': () => parakeet,
-  };
-  return new OnDeviceVoices(ON_DEVICE_MODELS.map(model => factories[model.runtime](model)));
+  // A shared runtime asks the registry at Remove time, once every voice exists.
+  let registry: OnDeviceVoices | null = null;
+  const voiceFor = (model: OnDeviceModel): OnDeviceVoice =>
+    model.runtime === 'onnxruntime-web'
+      ? parakeet
+      : browserSherpaVoice(
+          model,
+          global,
+          assets?.sherpa ?? null,
+          () => registry?.runtimeInUse(model.runtime, model.id) ?? false,
+        );
+  registry = new OnDeviceVoices(ON_DEVICE_MODELS.map(voiceFor));
+  return registry;
 }

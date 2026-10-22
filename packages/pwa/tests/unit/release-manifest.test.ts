@@ -200,6 +200,8 @@ describe('isDeferredReleaseFile', () => {
   it('defers only the speech runtime binary the build emits under assets/', () => {
     should(isDeferredReleaseFile('assets/ort-wasm-simd-threaded-BjodUpCp.wasm')).be.true();
     should(isDeferredReleaseFile('assets/ort-wasm-simd-threaded.wasm')).be.true();
+    // The sherpa-onnx binary every sherpa model shares (`lib/stt/sherpa-models.ts`).
+    should(isDeferredReleaseFile('assets/asr-BAU4GBSr.wasm')).be.true();
     for (const path of [
       'ort-wasm-simd-threaded.wasm',
       'assets/ort-wasm-simd-threaded-x.mjs',
@@ -207,6 +209,8 @@ describe('isDeferredReleaseFile', () => {
       'assets/app-1.js',
       'index.html',
       'assets/nested/ort-wasm-simd-threaded.wasm',
+      'assets/asr-x.js',
+      'assets/sherpa-worker-abc.js',
     ])
       should(isDeferredReleaseFile(path)).be.false();
   });

@@ -7,7 +7,7 @@
 
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { type OnDeviceModel, PARAKEET_CATALOG_MODEL } from '../../../src/lib/stt/model-catalog.ts';
+import { ON_DEVICE_MODEL_IDS, type OnDeviceModel, PARAKEET_CATALOG_MODEL } from '../../../src/lib/stt/model-catalog.ts';
 import type { ModelInstaller, ModelStoreStatus } from '../../../src/lib/stt/model-store.ts';
 import {
   type OnDeviceSession,
@@ -129,11 +129,12 @@ describe('OnDeviceVoices', () => {
     should(voices.runtimeInUse('onnxruntime-web', 'moonshine-test')).be.false();
   });
 
-  it('builds Parakeet’s voice for this page, unavailable without the build’s assets, and never downloads', () => {
+  it('builds every catalog model’s voice for this page, unavailable without the build’s assets, and never downloads', () => {
     const voices = browserOnDeviceVoices({ setTimeout: () => 0, clearTimeout: () => undefined }, null);
-    const [voice] = voices.list();
-    should(voices.list()).have.length(1);
+    should(voices.list().map(voice => voice.model.id)).eql([...ON_DEVICE_MODEL_IDS]);
+    const voice = voices.get('parakeet');
     should(voice).be.instanceOf(ParakeetVoice);
+    for (const each of voices.list()) should(each.support.available).be.false();
     should(voice?.support).eql({
       available: false,
       reason: 'This copy of Ferretry was built without the on-device speech engine.',
@@ -142,5 +143,34 @@ describe('OnDeviceVoices', () => {
     should(
       browserOnDeviceVoices({ setTimeout: () => 0, clearTimeout: () => undefined }, null, given).get('parakeet'),
     ).equal(given);
+  });
+
+  it('removes a sherpa model’s shared runtime only when no other installed sherpa model needs it', async () => {
+    const deleted: string[] = [];
+    const caches = {
+      open: async () => ({ put: async () => undefined, match: async () => undefined, delete: async () => false }),
+      delete: async (name: string) => {
+        deleted.push(name);
+        return true;
+      },
+    };
+    const page = {
+      isSecureContext: true,
+      WebAssembly: {},
+      Worker: class {} as never,
+      caches,
+      navigator: { mediaDevices: { getUserMedia: () => Promise.reject(new Error('unused')) } },
+      MediaRecorder: class {} as never,
+      OfflineAudioContext: class {} as never,
+      setTimeout: () => 0,
+      clearTimeout: () => undefined,
+    };
+    const voices = browserOnDeviceVoices(page, {
+      workerUrl: '/assets/parakeet-worker-a.js',
+      runtimeUrl: '/assets/ort.wasm',
+      sherpa: { workerUrl: '/assets/sherpa-worker-a.js', runtimeUrl: '/assets/asr-a.wasm' },
+    });
+    await voices.get('sherpa-zipformer-en-20m')?.remove();
+    should(deleted).eql(['fy-stt-runtime-sherpa-v1', 'fy-stt-sherpa-zipformer-en-20m-v1']);
   });
 });

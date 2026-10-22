@@ -18,7 +18,9 @@
  * worker and returns its hashed URL as a STRING — what Trusted Types needs; a
  * `new Worker(new URL(…))` would hand the browser an object no policy made.
  * `?url` emits ONNX Runtime's WebAssembly binary under `/assets/`; only someone
- * who installs Parakeet ever downloads it.
+ * who installs Parakeet ever downloads it. The sherpa worker and the sherpa-onnx
+ * WebAssembly binary are bound the same way, for the sherpa models
+ * (`lib/stt/sherpa-voice.ts`); `sherpa-runtime-wasm` is a `vite.config.ts` alias.
  *
  * The CSS import is what pulls `styles/index.css` (and, through its `@import`s,
  * the theme tokens and every component stylesheet) into the build as a real
@@ -36,6 +38,7 @@
 
 import runtimeUrl from 'onnxruntime-web/ort-wasm-simd-threaded.wasm?url';
 import { StrictMode } from 'react';
+import sherpaRuntimeUrl from 'sherpa-runtime-wasm?url';
 import { createRoot } from 'react-dom/client';
 import { App } from './App.tsx';
 import { DevicePermissionsContext } from './hooks/use-device-permissions.ts';
@@ -45,6 +48,7 @@ import { windowPermissionsHost } from './lib/device-permissions.ts';
 import { createBrowserInstallPrompt } from './lib/install-prompt.ts';
 import { browserLocationShareHost } from './lib/location-share.ts';
 import workerUrl from './worker/parakeet-worker.ts?worker&url';
+import sherpaWorkerUrl from './worker/sherpa-worker.ts?worker&url';
 import './styles/index.css';
 
 const host = document.getElementById('root');
@@ -62,7 +66,13 @@ createRoot(host).render(
     <DevicePermissionsContext.Provider value={devicePermissions}>
       <InstallPromptContext.Provider value={installPrompt}>
         <LocationShareContext.Provider value={locationShare}>
-          <App speechAssets={{ workerUrl, runtimeUrl }} />
+          <App
+            speechAssets={{
+              workerUrl,
+              runtimeUrl,
+              sherpa: { workerUrl: sherpaWorkerUrl, runtimeUrl: sherpaRuntimeUrl },
+            }}
+          />
         </LocationShareContext.Provider>
       </InstallPromptContext.Provider>
     </DevicePermissionsContext.Provider>
