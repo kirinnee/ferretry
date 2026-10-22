@@ -158,6 +158,43 @@ so it is **manual and never runs in CI**:
 cd packages/pwa && bunx vite build && bun harness/parakeet-smoke.ts
 ```
 
+## Vosk small English on this device: the light floor
+
+`vosk-small-en` in the on-device catalog (`lib/stt/model-catalog.ts`): Alpha Cephei's
+`vosk-model-small-en-us-0.15` (Apache-2.0) on the Vosk/Kaldi WebAssembly runtime. It is the smallest
+install (about 44 MB) and the lightest on memory (about 110 MB while it listens), and it is a TRUE
+streaming recognizer, so Settings shows it with **Live words** and there is no opt-in: words appear while
+you speak, committed at each pause, and the text is ready about 0.1 s after Stop. It is the least
+accurate engine here (9.85% WER on LibriSpeech test-clean, as published) and English only.
+
+- **What is pinned.** One file: the OFFICIAL `vosk-model-small-en-us-0.15.zip` (41,205,931 bytes, SHA-256
+  `30f26242…0942498`, byte-identical to alphacephei.com's), served from
+  `tech-guy-1991-A/vosk-model-small-en-us-0.15` at one Hugging Face commit, plus the runtime binary
+  (`@lichess-org/vosk-browser@0.0.3`'s `vosk.wasm`, 3 MB), self-hosted and deferred like ONNX
+  Runtime's. Both live in the `fy-stt-vosk-small-en-v1` cache (`lib/stt/vosk-model.ts`).
+- **No network in the worker** (`src/worker/vosk-worker.ts`). It reads the verified bytes back from the
+  store, hands the runtime its binary as bytes (`wasmBinary`), writes the zip into the runtime's
+  in-memory file system, unpacks it with the runtime's own unpacker, and drops both copies once Kaldi
+  has read the model (`lib/stt/vosk-runtime.ts`). Nothing is kept in IndexedDB.
+- **No eval.** The package's Emscripten glue builds its embind invokers with `new Function`, which the
+  page's policy refuses (no `'unsafe-eval'`, Trusted Types). The build rewrites those two places into
+  eval-free closures and keeps only the glue, not the package's own downloading worker
+  (`voskEvalFreeGlue` in `vite.config.ts`); a package whose glue changed shape fails the build. The
+  same build without the rewrite is refused by Chrome with "Evaluating a string as JavaScript violates
+  the following Content Security Policy directive".
+- **Streaming.** `lib/stt/vosk-session.ts` reads the recording every 0.4 s and feeds the worker only the
+  audio it has not had; the worker (`lib/stt/vosk-worker-core.ts`) answers committed and interim words
+  through `onLive`. A failure to load ends the dictation at once rather than at Stop.
+
+`packages/pwa/harness/vosk-smoke.ts` is its end-to-end proof under the real `_headers` (manual, never
+in CI; it downloads ~41 MB): it installs the model, streams a LibriSpeech sample in recording-sized
+pieces, and fails on a policy violation, on no live words, or on any request after the install other
+than the worker's own script.
+
+```sh
+cd packages/pwa && bunx vite build && bun harness/vosk-smoke.ts
+```
+
 ## Phone/browser voice
 
 The browser's own `SpeechRecognition` (`lib/stt/browser-recognition.ts`). Nothing to download, live

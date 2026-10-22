@@ -81,6 +81,20 @@ describe('isWorkerScriptUrl', () => {
     }
   });
 
+  it('accepts the Vosk speech worker the build emits, and its dev-server address', () => {
+    expect(isWorkerScriptUrl('/assets/vosk-worker-DonRcPBX.js')).toBe(true);
+    expect(isWorkerScriptUrl('/src/worker/vosk-worker.ts?worker_file&type=module')).toBe(true);
+    for (const url of [
+      '/assets/vosk-worker-.js',
+      '/assets/vosk-worker-abc.js?x=1',
+      'https://evil.test/assets/vosk-worker-abc.js',
+      '/assets/vosk-abc.js',
+      '/src/worker/vosk-worker.ts',
+    ]) {
+      expect(isWorkerScriptUrl(url)).toBe(false);
+    }
+  });
+
   it('accepts only the app’s own worker, under its base path, with a machine label at most', () => {
     expect(isWorkerScriptUrl('/sw.verified.js')).toBe(true);
     expect(isWorkerScriptUrl('/app/sw.verified.js')).toBe(true);

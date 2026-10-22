@@ -28,6 +28,16 @@ import {
   PARAKEET_VERSION_LABEL,
 } from './parakeet-model.ts';
 import { SHERPA_MODELS, SHERPA_RUNTIME, type SherpaCatalogModel } from './sherpa-models.ts';
+import {
+  VOSK_CACHE,
+  VOSK_KEY_ROOT,
+  VOSK_MODEL_FILES,
+  VOSK_REPOSITORY,
+  VOSK_REVISION,
+  VOSK_RUNTIME_FILE,
+  VOSK_RUNTIME_VERSION,
+  VOSK_VERSION_LABEL,
+} from './vosk-model.ts';
 
 /** Every on-device model id, in the order Settings lists them (sherpa first, as the owner asked). Each is also a dictation engine id. */
 export const ON_DEVICE_MODEL_IDS = [
@@ -36,12 +46,13 @@ export const ON_DEVICE_MODEL_IDS = [
   'moonshine-tiny-en',
   'moonshine-base-en',
   'parakeet-ctc-110m',
+  'vosk-small-en',
   'parakeet',
 ] as const;
 export type OnDeviceModelId = (typeof ON_DEVICE_MODEL_IDS)[number];
 
 /** The programs a model can run on. */
-export type SpeechRuntimeId = 'onnxruntime-web' | 'sherpa-onnx';
+export type SpeechRuntimeId = 'onnxruntime-web' | 'sherpa-onnx' | 'vosk-wasm';
 
 export type SpeechModelFamily = 'parakeet' | 'zipformer' | 'moonshine' | 'whisper' | 'vosk';
 
@@ -70,6 +81,15 @@ export const SPEECH_RUNTIMES: Readonly<Record<SpeechRuntimeId, SpeechRuntime>> =
     shared: null,
   },
   'sherpa-onnx': SHERPA_RUNTIME,
+  'vosk-wasm': {
+    id: 'vosk-wasm',
+    label: `Vosk WebAssembly ${VOSK_RUNTIME_VERSION}`,
+    version: VOSK_RUNTIME_VERSION,
+    licence: 'Apache-2.0',
+    file: VOSK_RUNTIME_FILE,
+    // One Vosk model so far, so its binary lives in that model's bundle, like Parakeet's.
+    shared: null,
+  },
 };
 
 /**
@@ -121,7 +141,13 @@ export interface ParakeetCatalogModel extends OnDeviceModelBase {
   readonly family: 'parakeet';
 }
 
-export type OnDeviceModel = ParakeetCatalogModel | SherpaCatalogModel;
+/** Vosk small English on the Vosk/Kaldi WebAssembly runtime (`vosk-voice.ts`): true streaming. */
+export interface VoskCatalogModel extends OnDeviceModelBase {
+  readonly runtime: 'vosk-wasm';
+  readonly family: 'vosk';
+}
+
+export type OnDeviceModel = ParakeetCatalogModel | SherpaCatalogModel | VoskCatalogModel;
 
 export const PARAKEET_CATALOG_MODEL: ParakeetCatalogModel = {
   id: 'parakeet',
@@ -142,8 +168,36 @@ export const PARAKEET_CATALOG_MODEL: ParakeetCatalogModel = {
     'The most accurate model here, and the largest: about 1 GB of memory while it transcribes, so it suits a laptop better than a phone. Words appear after Stop, or near-live with Live words on.',
 };
 
+export const VOSK_CATALOG_MODEL: VoskCatalogModel = {
+  id: 'vosk-small-en',
+  label: 'Vosk small English 0.15',
+  shortName: 'Vosk',
+  family: 'vosk',
+  licence: 'Apache-2.0',
+  languages: ['en'],
+  runtime: 'vosk-wasm',
+  streaming: true,
+  nearLive: false,
+  source: { repository: VOSK_REPOSITORY, revision: VOSK_REVISION },
+  files: VOSK_MODEL_FILES,
+  cache: VOSK_CACHE,
+  keyRoot: VOSK_KEY_ROOT,
+  versionLabel: VOSK_VERSION_LABEL,
+  summary:
+    'The light floor: the smallest download and about 110 MB of memory, so it suits a phone. Words appear as you speak, and the text is ready the moment you stop. The least accurate here — fine for short, plain sentences, weaker on names and technical words. English only.',
+  measured: {
+    where: 'Bun on x64, one LibriSpeech clip',
+    speed: '10.4 s of audio in 2.4 s, fed while it was spoken; 1.1 s to load',
+    accuracy: '9.85% WER (LibriSpeech test-clean, published by Alpha Cephei)',
+  },
+};
+
 /** Every model, in {@link ON_DEVICE_MODEL_IDS} order. */
-export const ON_DEVICE_MODELS: readonly OnDeviceModel[] = [...SHERPA_MODELS, PARAKEET_CATALOG_MODEL];
+export const ON_DEVICE_MODELS: readonly OnDeviceModel[] = [
+  ...SHERPA_MODELS,
+  VOSK_CATALOG_MODEL,
+  PARAKEET_CATALOG_MODEL,
+];
 
 /** The catalog entry for an id, or `null` for anything else (including `browser`). */
 export const onDeviceModel = (id: string | null | undefined): OnDeviceModel | null =>
