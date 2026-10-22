@@ -108,7 +108,7 @@ describe('the reader’s own send', () => {
     expect(bubble.dataset['sendRow']).toBe('landed');
     // Its time is when it was SENT, so it does not change as it lands a minute later.
     expect(bubble.querySelector('time')?.textContent).toBe(clockOfInstant(SENT)?.short ?? '');
-    expect(bubble.querySelector('[data-ledger-actions]')).toBeNull();
+    expect(bubble.querySelector('[data-ledger-more]')).toBeNull();
 
     await view.render(
       inSession(null, [landed(record({ fate: 'delivered' })), { id: 'r', kind: 'assistant', text: 'on it' }]),
@@ -125,14 +125,16 @@ describe('the reader’s own send', () => {
         travelling(record({ acceptedAt: new Date(Date.now() - OPEN_SEND_SETTLE_MS + 60).toISOString() })),
       ]),
     );
-    expect(view.container.querySelector('[data-ledger-actions]')).toBeNull();
+    expect(view.container.querySelector('[data-ledger-more]')).toBeNull();
     await interact(() => new Promise(resolve => setTimeout(resolve, 120)));
-    const actions = must(view.container.querySelector('[data-ledger-actions]'), 'the controls');
+    const more = must(view.container.querySelector<HTMLElement>('[data-ledger-more]'), 'the actions button');
+    await interact(() => more.click());
     expect(
-      [...actions.querySelectorAll('[data-ledger-action]')].map(node => node.getAttribute('data-ledger-action')),
-    ).toEqual(['retry-open', 'cancel', 'copy']);
-    // They sit inside the same bubble, at its foot.
-    expect(actions.parentElement).toBe(bubbleOf(view));
+      [...view.container.querySelectorAll('[role="menuitem"]')].map(node => node.getAttribute('data-menu-key')),
+    ).toEqual(['send-again', 'cancel', 'copy']);
+    // The button sits inside the same bubble, on the status line.
+    expect(bubbleOf(view).contains(more)).toBe(true);
+    expect(more.closest('.fy-receipt-line')).not.toBeNull();
     await view.unmount();
   });
 
@@ -140,7 +142,9 @@ describe('the reader’s own send', () => {
     const view = await mount(
       inSession(null, [travelling(record({ acceptedAt: new Date().toISOString(), typedNotSent: true }))]),
     );
-    expect(view.container.querySelector('[data-ledger-action="enter"]')).not.toBeNull();
+    const more = must(view.container.querySelector<HTMLElement>('[data-ledger-more]'), 'the actions button');
+    await interact(() => more.click());
+    expect(view.container.querySelector('[data-menu-key="enter"]')).not.toBeNull();
     await view.unmount();
   });
 

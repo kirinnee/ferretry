@@ -29,9 +29,19 @@ export interface MessageFooterProps {
   readonly lead?: ReactNode;
   /** What the lead says when it is opened, shown under the line. */
   readonly leadDetail?: ReactNode;
+  /** A small control that ends the line, after the receipt mark — a send's "⋯" actions button. */
+  readonly trailing?: ReactNode;
 }
 
-export function MessageFooter({ clock, record, answered = false, side = 'own', lead, leadDetail }: MessageFooterProps) {
+export function MessageFooter({
+  clock,
+  record,
+  answered = false,
+  side = 'own',
+  lead,
+  leadDetail,
+  trailing,
+}: MessageFooterProps) {
   const [open, setOpen] = useState(false);
   if (record === undefined) {
     if (clock === undefined && lead === undefined) return null;
@@ -85,6 +95,7 @@ export function MessageFooter({ clock, record, answered = false, side = 'own', l
           {clock === undefined ? null : <time aria-hidden="true">{clock.short}</time>}
           <ReceiptMark className="fy-receipt-mark" kind={receipt.kind} />
         </button>
+        {trailing}
       </div>
       {leadDetail}
       {open ? (
