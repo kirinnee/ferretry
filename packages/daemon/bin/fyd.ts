@@ -7784,7 +7784,15 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       // reprojection. Observation never waits behind a live drive: that drive owns the freshest
       // state, and a later read/tick will project it after the key becomes idle. After a restart
       // there is no holder, so stranded evidence honestly becomes quarantine.
-      const answerLedger = new FileAnswerLedger(id => createSessionPaths(paths, id).directory, clock);
+      const answerLedger = new FileAnswerLedger(
+        id => createSessionPaths(paths, id).directory,
+        clock,
+        // Late-bound: a session's worker decides its question from the receipts, so it hears of each one.
+        id => {
+          if (sessionObserver instanceof WorkerObserverHost)
+            void sessionObserver.answersChanged(id).catch(() => undefined);
+        },
+      );
       // The answer, its monitor projection, released-advisory resume, and lifecycle mutation share
       // one session key. In particular, a stop that starts after answer keys land must wait for the
       // post-drive state commit; if the stop then records `kill_failed`, no later answer write can
@@ -7818,6 +7826,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       );
       // The ONE writer of everything the observer derives, on whichever host it runs.
       const observationApplier = new SessionObservationApplier(storage, answerLedger, new KeyedSerialExecutor());
+      const observerFold = new SessionObserver(text => createHash('sha256').update(text, 'utf8').digest('hex'));
       const inlineObserver = new InlineObserverHost(
         {
           storage,
@@ -7838,8 +7847,10 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           },
           clock,
           yieldToLoop: () => new Promise(resolve => setImmediate(resolve)),
+          paneState: async id => await turnPorts.paneState(id),
+          sendEvidence: { read: async (id, since) => await inlineSendEvidence.read(id, since) },
         },
-        new SessionObserver(text => createHash('sha256').update(text, 'utf8').digest('hex')),
+        observerFold,
       );
       // ONE THREAD PER RUNNING SESSION (stage 3b): the turn part of every running session is observed on
       // its own worker, through its own read-only attached tmux client on the daemon's server; this thread
@@ -7856,6 +7867,12 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
                 return () => clearTimeout(timer);
               },
               notice: (_session, message) => bootNotices.state(message),
+              // Late-bound to the host below, which is the one writer of what a worker found.
+              observed: (session, patches) => {
+                if (sessionObserver instanceof WorkerObserverHost) sessionObserver.observed(session, patches);
+              },
+              // Stage 3d settles a dead pane from this; until then the 30 s exit observer does, as before.
+              exited: () => undefined,
               // A worker's own children and its look time, which no instrument on this thread can see.
               report: ({ lookMs, children }) => {
                 if (!profilerProbe.recording) return;
@@ -7891,7 +7908,16 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
                 };
               },
               applier: observationApplier,
+              answerSerial,
+              answers: answerLedger,
+              files: fileEvents,
+              observer: observerFold,
+              liveness: {
+                redact: async text => await secretRedactor.redact(text),
+                processes: async tmuxSession => await paneProcesses.collect(tmuxSession),
+              },
               clock,
+              barrierMs: 3_000,
             });
       // Ordinary reads contain projection damage per session: a broken answer ledger must not take
       // the whole roster down. The monitor's pass calls the projector raw so it can report the exact
@@ -7984,15 +8010,17 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
        * handed the service back through two late-bound ports — a re-attempt and a failure notice are
        * both sends — so neither needs the other at construction.
        */
+      const inlineSendEvidence = new TranscriptSendEvidence(async sessionId => {
+        const id = tryParseSessionId(sessionId);
+        if (id === undefined) return undefined;
+        const config = SessionConfigSchema.safeParse(await storage.readConfig(id).catch(() => undefined));
+        return config.success ? { sessionId, harness: config.data.harness } : undefined;
+      }, sendTranscripts);
       const sendTracker = new SendTracker(
         {
           ledger: sendLedger,
-          evidence: new TranscriptSendEvidence(async sessionId => {
-            const id = tryParseSessionId(sessionId);
-            if (id === undefined) return undefined;
-            const config = SessionConfigSchema.safeParse(await storage.readConfig(id).catch(() => undefined));
-            return config.success ? { sessionId, harness: config.data.harness } : undefined;
-          }, sendTranscripts),
+          // A running session's worker reads its own transcript; the rest are read here, as before.
+          evidence: { read: async (id, since) => await sessionObserver.sendEvidence(id, since) },
           terminal: sendTerminal,
           repository: sendRepository,
           attempts: {
@@ -8796,7 +8824,8 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       const liveActivity = new StorageLiveActivitySource(
         {
           readState: async id => await storage.readState(id),
-          paneState: async id => await turnPorts.paneState(id),
+          // The worker's frame for a running session: no capture of its own every half second.
+          paneState: async id => await sessionObserver.pane(id),
           transcriptFile: transcriptFileOf,
         },
         createSessionTranscriptTail(storage),

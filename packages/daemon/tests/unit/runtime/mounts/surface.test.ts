@@ -449,6 +449,8 @@ const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
     questions: async () => new Map(),
     liveness: async () => ({}),
     midTurn: async () => 0,
+    pane: async () => undefined,
+    sendEvidence: async () => ({ readable: false, inputs: [] }),
     close: () => undefined,
   },
   sessionMigrate: new FakeSessionMigrate(),

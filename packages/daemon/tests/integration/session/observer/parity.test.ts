@@ -21,6 +21,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { type SessionState, SessionStateSchema } from '@ferretry/protocol';
 import should from 'should';
+import { unrefFileEventTimers } from '../../../../src/adapters/file-events/bun-file-event-source.ts';
+import { platformFileEventSource } from '../../../../src/adapters/file-events/platform.ts';
 import {
   BunSqliteIndexFactory,
   BunTmuxProcess,
@@ -42,6 +44,7 @@ import {
   WorkerSupervisor,
 } from '../../../../src/adapters/index.ts';
 import { NodeTranscriptSource } from '../../../../src/adapters/transcript/index.ts';
+import { FileEventHub } from '../../../../src/lib/file-events/hub.ts';
 import {
   ClaudeTranscriptParser,
   CodexTranscriptParser,
@@ -253,6 +256,8 @@ async function pair(harness: 'claude' | 'codex', initialFrame: string, kind: Hos
   // THE HOST UNDER TEST: the inline host, or the worker host over it with a real session-worker thread.
   const hostPanes = new StorageTurnPorts(host.storage, host.tail, async () => host.transcript, controller, clock);
   const applier = new SessionObservationApplier(host.storage, host.ledger, new KeyedSerialExecutor());
+  const fold = new SessionObserver(text => createHash('sha256').update(text, 'utf8').digest('hex'));
+  const answerSerial = new KeyedSerialExecutor();
   const inline = new InlineObserverHost(
     {
       storage: host.storage,
@@ -260,7 +265,7 @@ async function pair(harness: 'claude' | 'codex', initialFrame: string, kind: Hos
       tail: host.tail,
       pane: async session => await hostPanes.pane(session),
       answers: host.ledger,
-      answerSerial: new KeyedSerialExecutor(),
+      answerSerial,
       applier,
       liveness: {
         screen: async () => {
@@ -275,11 +280,14 @@ async function pair(harness: 'claude' | 'codex', initialFrame: string, kind: Hos
       },
       clock,
       yieldToLoop: async () => undefined,
+      paneState: async session => await hostPanes.paneState(session),
+      sendEvidence: { read: async () => ({ readable: false, inputs: [] }) },
     },
-    new SessionObserver(text => createHash('sha256').update(text, 'utf8').digest('hex')),
+    fold,
   );
   let observer: SessionObserverHost = inline;
   let looks: { answered: number; failed: number } | undefined;
+  let workerHost: WorkerObserverHost | undefined;
   if (kind === 'worker') {
     looks = { answered: 0, failed: 0 };
     const supervisor = new WorkerSupervisor(
@@ -294,6 +302,8 @@ async function pair(harness: 'claude' | 'codex', initialFrame: string, kind: Hos
         report: () => {
           if (looks !== undefined) looks.answered += 1;
         },
+        observed: (session, patches) => workerHost?.observed(session, patches),
+        exited: () => undefined,
       },
       { ...DEFAULT_WORKER_SUPERVISOR_SETTINGS, cap: 8 },
     );
@@ -301,17 +311,40 @@ async function pair(harness: 'claude' | 'codex', initialFrame: string, kind: Hos
       tmux: { executable: tmux, socket, target: tmuxSession },
       transcript: { file: host.transcript, harness },
     });
-    observer = new WorkerObserverHost({ inline, supervisor, binding, applier, clock });
-    cleanups.add(async () => observer.close());
+    // The real file-event hub, so a transcript append reaches the worker as it does in the daemon.
+    const files = new FileEventHub(platformFileEventSource(), unrefFileEventTimers);
+    workerHost = new WorkerObserverHost({
+      inline,
+      supervisor,
+      binding,
+      applier,
+      answerSerial,
+      answers: host.ledger,
+      files,
+      observer: fold,
+      liveness: {
+        redact: async text => text,
+        processes: async () => ({ kind: 'unobserved', reason: 'not looked at here' }) as never,
+      },
+      clock,
+      barrierMs: 5_000,
+    });
+    observer = workerHost;
+    cleanups.add(async () => {
+      observer.close();
+      files.close();
+    });
     // Hosted before the scenario starts, so both sides begin it with no previous observation.
     const [session] = await inline.turnRoster();
     if (session === undefined) throw new Error('the session is not on the roster');
-    supervisor.reconcile([{ id, facts: session.state, binding: await binding() }]);
+    const wanted = [{ id, facts: session.state, binding: await binding() }];
+    supervisor.reconcile(wanted);
     const started = Date.now();
     while (!supervisor.hosts(id)) {
       if (Date.now() - started > 15_000) throw new Error('the session worker never started');
       await Bun.sleep(20);
     }
+    workerHost.reconcileWatches(wanted);
   }
 
   return {
@@ -325,6 +358,9 @@ async function pair(harness: 'claude' | 'codex', initialFrame: string, kind: Hos
         await observer.questions();
       }
       await watcher.tick();
+      // A worker looks on its own when the pane draws or the transcript changes; the read barrier is
+      // what a tick is to the reference — a fresh look, applied before it returns.
+      if (kind === 'worker') await observer.project(id);
       await observer.turns.run();
     },
     frame: async text => {
@@ -348,11 +384,30 @@ const journal = async (side: Side, id: SessionId) =>
   (await side.storage.replay(id)).events.map(event => ({ type: event.type, data: event.data }));
 const state = async (side: Side, id: SessionId) => await side.storage.readState(id);
 
+/** A journaled transition by where it arrived — what it recorded — not where it came from. */
+const arrival = (entry: { readonly type: string; readonly data: unknown }): string => {
+  const { from: _from, ...arrived } = entry.data as Record<string, unknown>;
+  return JSON.stringify({ type: entry.type, ...arrived });
+};
+
+/** Whether every item of `needle` appears in `haystack`, in the same order. */
+function isSubsequence(needle: readonly string[], haystack: readonly string[]): boolean {
+  let at = 0;
+  for (const item of haystack) if (item === needle[at]) at += 1;
+  return at === needle.length;
+}
+
 async function shouldAgree(subject: Pair): Promise<void> {
   // The worker host really looked through its thread, not only through the inline fallback.
   const looks = subject.workerLooks();
   if (looks !== undefined) should(looks.answered).be.above(0);
-  should(await journal(subject.host, subject.id)).deepEqual(await journal(subject.reference, subject.id));
+  const recorded = await journal(subject.host, subject.id);
+  const expected = await journal(subject.reference, subject.id);
+  // The inline host samples on the same tick as the reference, so it journals exactly the same. A worker
+  // looks whenever the pane draws, so it may also see a state the reference's 2 s sampling never did — but
+  // never miss one: every transition the reference journaled appears in the worker's, in order.
+  if (looks === undefined) should(recorded).deepEqual(expected);
+  else should(isSubsequence(expected.map(arrival), recorded.map(arrival))).be.true();
   should(await state(subject.host, subject.id)).deepEqual(await state(subject.reference, subject.id));
   should(await subject.host.ledger.all(subject.id)).deepEqual(await subject.reference.ledger.all(subject.id));
 }
@@ -381,7 +436,7 @@ describe.each([['inline'], ['worker']] as const)(
       await subject.look({ questions: true });
 
       // Assert
-      const turns = (await journal(subject.host, subject.id)).filter(event => event.type.startsWith('turn.'));
+      const turns = (await journal(subject.reference, subject.id)).filter(event => event.type.startsWith('turn.'));
       should(turns.map(event => (event.data as { to: string | null }).to)).deepEqual([
         'your-turn',
         'working',

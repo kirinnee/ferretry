@@ -15,12 +15,15 @@ import { ControlModeTmuxProcess } from '../src/adapters/tmux/control-tmux-proces
 import { NodeTranscriptSource } from '../src/adapters/transcript/file-source.ts';
 import { SessionObserver } from '../src/lib/session/observer/observer.ts';
 import type { FromSessionWorker, ToSessionWorker } from '../src/lib/session/observer/protocol.ts';
+import { PANE_WATCH_FORMAT } from '../src/lib/tmux/control-protocol.ts';
 import { ClaudeTranscriptParser } from '../src/lib/transcript/claude.ts';
 import { CodexTranscriptParser } from '../src/lib/transcript/codex.ts';
 
 declare const self: { onmessage: ((event: MessageEvent<ToSessionWorker>) => void) | null };
 
 const post = (message: FromSessionWorker): void => postMessage(message);
+/** The one subscription each session's client holds. */
+const PANE_WATCH = 'fy-pane';
 const nowMs = (): number => performance.timeOrigin + performance.now();
 const children = countWorkerChildren(Bun, nowMs);
 
@@ -28,13 +31,26 @@ const runtime = new SessionWorkerRuntime({
   post,
   // READ-ONLY, ATTACHED, REFUSING: the session's own control client answers reads in-band, and anything
   // that is not an allowlisted read is refused without running — tmux's `read-only` does not stop an
-  // in-band `send-keys`. `no-output` until stage 3c reacts to `%output`.
+  // in-band `send-keys`. `no-output`: the pane's bytes are never streamed here; a subscription to its
+  // `#{pane_dead} #{window_activity}` says when it drew, at most once a second, which is all a look needs.
   tmux: ({ executable, socket, target }) => {
     const port = new ControlModeTmuxProcess(executable, socket, new BunTmuxProcess(executable, socket), {
       attach: { target, flags: 'ignore-size,read-only,no-output' },
       mutations: 'refuse',
     });
-    return { port, close: () => port.close() };
+    return {
+      port,
+      get connected() {
+        return port.connected;
+      },
+      watch: async () => await port.watch(PANE_WATCH, PANE_WATCH_FORMAT),
+      onPaneWatch: listener =>
+        port.subscribe(notification => {
+          if (notification.kind === 'subscription-changed' && notification.name === PANE_WATCH)
+            listener(notification.value);
+        }),
+      close: () => port.close(),
+    };
   },
   transcripts: {
     claude: new NodeTranscriptSource(new ClaudeTranscriptParser()),
@@ -46,6 +62,10 @@ const runtime = new SessionWorkerRuntime({
   },
   clock: { now: () => new Date().toISOString() },
   nowMs,
+  schedule: (delayMs, run) => {
+    const timer = setTimeout(run, delayMs);
+    return () => clearTimeout(timer);
+  },
   children,
   observer: new SessionObserver(text => createHash('sha256').update(text, 'utf8').digest('hex')),
 });

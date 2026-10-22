@@ -1,13 +1,16 @@
 import {
+  type AnswerOperationRecord,
   type FromSessionWorker,
   NEW_WORKER,
   type ObserverFacts,
+  type ObserverPatch,
   planSessionWorkers,
   type SessionBinding,
   type SessionId,
   sessionWorkerRestart,
   type ToSessionWorker,
-  type TurnPatch,
+  type WorkerAnswers,
+  type WorkerAsk,
   type WorkerChild,
 } from '../../../lib/index.ts';
 
@@ -37,13 +40,17 @@ export interface WorkerSupervisorPorts {
   notice(session: SessionId, message: string): void;
   /** Every look's report, so `fy daemon profile` still sees the work (design §6.5). */
   report(report: WorkerLookReport): void;
+  /** What a session's worker found, unasked, in the order it must be applied. */
+  observed(session: SessionId, patches: readonly ObserverPatch[]): void;
+  /** A session's pane died, as its worker saw it. */
+  exited(session: SessionId): void;
 }
 
 export interface WorkerSupervisorSettings {
   /** Dedicated threads before sessions are pooled into them. */
   readonly cap: number;
-  /** A look with no answer this long ends its worker as stuck. */
-  readonly lookTimeoutMs: number;
+  /** A request with no answer this long ends its worker as stuck. */
+  readonly requestTimeoutMs: number;
   /** How long an emptied worker is kept before its thread ends. */
   readonly drainMs: number;
   /** How many workers may be starting at once, so a boot does not start every thread together. */
@@ -51,7 +58,7 @@ export interface WorkerSupervisorSettings {
 }
 
 export const DEFAULT_WORKER_SUPERVISOR_SETTINGS: Omit<WorkerSupervisorSettings, 'cap'> = {
-  lookTimeoutMs: 10_000,
+  requestTimeoutMs: 10_000,
   drainMs: 2_000,
   startConcurrency: 2,
 };
@@ -63,11 +70,11 @@ export interface WantedSession {
   readonly binding: SessionBinding;
 }
 
-interface PendingLook {
+interface PendingRequest {
   readonly thread: number;
   readonly session: SessionId;
   readonly generation: number;
-  readonly resolve: (patch: TurnPatch | undefined) => void;
+  readonly resolve: (value: unknown) => void;
   readonly reject: (error: Error) => void;
   readonly cancel: () => void;
 }
@@ -114,7 +121,7 @@ export class WorkerSupervisor {
   private readonly crashes = new Map<SessionId, number[]>();
   private readonly retryAt = new Map<SessionId, number>();
   private readonly inline = new Set<SessionId>();
-  private readonly pending = new Map<number, PendingLook>();
+  private readonly pending = new Map<number, PendingRequest>();
   private nextThread = 1;
   private nextRequest = 1;
   private closed = false;
@@ -140,12 +147,19 @@ export class WorkerSupervisor {
     return placement !== undefined && this.threads.get(placement.thread)?.ready === true;
   }
 
+  /** Whether `session` has been handed to a worker, ready or still starting: messages to it are queued. */
+  attached(session: SessionId): boolean {
+    return this.placements.has(session);
+  }
+
   /**
    * Make hosting match `wanted`: detach what left, start or pool what arrived, rebind what moved.
-   * Sessions held back by a back-off or kept inline are left to the caller.
+   * Sessions held back by a back-off or kept inline are left to the caller. Answers the sessions it attached
+   * just now, whose answer receipts the caller then pushes.
    */
-  reconcile(wanted: readonly WantedSession[]): void {
-    if (this.closed) return;
+  reconcile(wanted: readonly WantedSession[]): readonly SessionId[] {
+    if (this.closed) return [];
+    const attached: SessionId[] = [];
     const now = this.ports.nowMs();
     const eligible = wanted.filter(
       session => !this.inline.has(session.id) && (this.retryAt.get(session.id) ?? 0) <= now,
@@ -169,6 +183,7 @@ export class WorkerSupervisor {
         starting += 1;
         this.attach(wantedSession, this.start().id);
       } else this.attach(wantedSession, worker);
+      attached.push(session);
     }
     for (const session of eligible) {
       const placement = this.placements.get(session.id);
@@ -181,6 +196,21 @@ export class WorkerSupervisor {
         binding: session.binding,
       });
     }
+    return attached;
+  }
+
+  /** The session's transcript changed: its worker looks again. */
+  file(session: SessionId): void {
+    const placement = this.placements.get(session);
+    if (placement !== undefined)
+      this.post(placement.thread, { kind: 'file', session, generation: placement.generation });
+  }
+
+  /** The session's answer receipts, after the answer ledger was appended to. */
+  answers(session: SessionId, rows: readonly AnswerOperationRecord[]): void {
+    const placement = this.placements.get(session);
+    if (placement !== undefined)
+      this.post(placement.thread, { kind: 'answers', session, generation: placement.generation, rows });
   }
 
   /** The main thread wrote this session's document: tell its worker what it now says. */
@@ -191,27 +221,33 @@ export class WorkerSupervisor {
   }
 
   /**
-   * One look by the session's worker: the turn change it implies, or `undefined` for none. Rejects when
-   * the worker could not answer — the caller then looks once itself.
+   * Ask the session's worker for an answer now. Rejects when it could not answer in time, or hosts no
+   * worker yet — the caller then does the work once itself, on this thread.
    */
-  async look(session: SessionId): Promise<TurnPatch | undefined> {
+  async request<K extends WorkerAsk['kind']>(
+    session: SessionId,
+    ask: Extract<WorkerAsk, { kind: K }>,
+  ): Promise<WorkerAnswers[K]> {
     const placement = this.placements.get(session);
     const thread = placement === undefined ? undefined : this.threads.get(placement.thread);
     if (placement === undefined || thread?.ready !== true) throw new Error(`no worker observes ${session}`);
     const request = this.nextRequest++;
-    return await new Promise<TurnPatch | undefined>((resolve, reject) => {
-      const cancel = this.ports.schedule(this.settings.lookTimeoutMs, () =>
-        this.crash(thread.id, `a look at ${session} had no answer within ${String(this.settings.lookTimeoutMs)} ms`),
+    return await new Promise<WorkerAnswers[K]>((resolve, reject) => {
+      const cancel = this.ports.schedule(this.settings.requestTimeoutMs, () =>
+        this.crash(
+          thread.id,
+          `a ${ask.kind} request for ${session} had no answer within ${String(this.settings.requestTimeoutMs)} ms`,
+        ),
       );
       this.pending.set(request, {
         thread: thread.id,
         session,
         generation: placement.generation,
-        resolve,
+        resolve: value => resolve(value as WorkerAnswers[K]),
         reject,
         cancel,
       });
-      this.post(thread.id, { kind: 'look', session, generation: placement.generation, request });
+      this.post(thread.id, { kind: 'request', session, generation: placement.generation, request, ask });
     });
   }
 
@@ -275,20 +311,34 @@ export class WorkerSupervisor {
       return;
     }
     switch (message.kind) {
-      case 'looked': {
-        const pending = this.pending.get(message.request);
+      case 'observed':
         this.ports.report({ lookMs: message.lookMs, children: message.metrics.children });
+        if (this.current(thread, message.session, message.generation))
+          this.ports.observed(message.session as SessionId, message.patches);
+        return;
+      case 'answered': {
+        const pending = this.pending.get(message.request);
+        this.ports.report({ lookMs: 0, children: message.metrics.children });
         if (pending === undefined || pending.generation !== message.generation) return;
         this.pending.delete(message.request);
         pending.cancel();
-        if (message.failure === undefined) pending.resolve(message.patch);
+        if (message.failure === undefined) pending.resolve(message.value);
         else pending.reject(new Error(message.failure));
         return;
       }
+      case 'exited':
+        if (this.current(thread, message.session, message.generation)) this.ports.exited(message.session as SessionId);
+        return;
       case 'fault':
         if (message.fatal) this.crash(thread.id, message.message);
         return;
     }
+  }
+
+  /** Whether a message names the session's current generation on this thread: anything else is stale. */
+  private current(thread: Thread, session: string, generation: number): boolean {
+    const placement = this.placements.get(session as SessionId);
+    return placement?.thread === thread.id && placement.generation === generation;
   }
 
   private crash(threadId: number, reason: string): void {
