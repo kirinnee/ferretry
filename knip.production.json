@@ -27,7 +27,8 @@
     },
     "packages/pwa": {
       "entry": ["src/main.tsx", "src/lib/index.ts"],
-      "project": ["src/**/*.{ts,tsx}"]
+      "project": ["src/**/*.{ts,tsx}"],
+      "ignoreDependencies": ["sherpa-glue", "sherpa-runtime-wasm"]
     }
   },
   "bun": false,

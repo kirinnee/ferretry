@@ -27,13 +27,14 @@ import {
   PARAKEET_REVISION,
   PARAKEET_VERSION_LABEL,
 } from './parakeet-model.ts';
+import { SHERPA_MODELS, SHERPA_RUNTIME, type SherpaCatalogModel } from './sherpa-models.ts';
 
-/** Every on-device model id, in the order Settings lists them. Each is also a dictation engine id. */
-export const ON_DEVICE_MODEL_IDS = ['parakeet'] as const;
+/** Every on-device model id, in the order Settings lists them (sherpa first, as the owner asked). Each is also a dictation engine id. */
+export const ON_DEVICE_MODEL_IDS = ['sherpa-zipformer-en', 'sherpa-zipformer-en-20m', 'parakeet'] as const;
 export type OnDeviceModelId = (typeof ON_DEVICE_MODEL_IDS)[number];
 
 /** The programs a model can run on. */
-export type SpeechRuntimeId = 'onnxruntime-web';
+export type SpeechRuntimeId = 'onnxruntime-web' | 'sherpa-onnx';
 
 export type SpeechModelFamily = 'parakeet' | 'zipformer' | 'moonshine' | 'whisper' | 'vosk';
 
@@ -61,6 +62,7 @@ export const SPEECH_RUNTIMES: Readonly<Record<SpeechRuntimeId, SpeechRuntime>> =
     file: ORT_RUNTIME_FILE,
     shared: null,
   },
+  'sherpa-onnx': SHERPA_RUNTIME,
 };
 
 /**
@@ -76,7 +78,7 @@ interface MeasuredNumbers {
   readonly speed?: string;
 }
 
-interface OnDeviceModelBase {
+export interface OnDeviceModelBase {
   readonly id: OnDeviceModelId;
   /** The full name: "Parakeet TDT 0.6B v3". */
   readonly label: string;
@@ -112,7 +114,7 @@ export interface ParakeetCatalogModel extends OnDeviceModelBase {
   readonly family: 'parakeet';
 }
 
-export type OnDeviceModel = ParakeetCatalogModel;
+export type OnDeviceModel = ParakeetCatalogModel | SherpaCatalogModel;
 
 export const PARAKEET_CATALOG_MODEL: ParakeetCatalogModel = {
   id: 'parakeet',
@@ -134,7 +136,7 @@ export const PARAKEET_CATALOG_MODEL: ParakeetCatalogModel = {
 };
 
 /** Every model, in {@link ON_DEVICE_MODEL_IDS} order. */
-export const ON_DEVICE_MODELS: readonly OnDeviceModel[] = [PARAKEET_CATALOG_MODEL];
+export const ON_DEVICE_MODELS: readonly OnDeviceModel[] = [...SHERPA_MODELS, PARAKEET_CATALOG_MODEL];
 
 /** The catalog entry for an id, or `null` for anything else (including `browser`). */
 export const onDeviceModel = (id: string | null | undefined): OnDeviceModel | null =>

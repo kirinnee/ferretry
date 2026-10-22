@@ -38,10 +38,24 @@
 import autoprefixer from 'autoprefixer';
 import { HOSTED_RELAY_DIRECTORY_ORIGIN } from '@ferretry/relay';
 import { readFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
+import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import tailwindcss from 'tailwindcss';
 import { defineConfig } from 'vite';
 import tailwindConfig from './tailwind.config.ts';
+
+/**
+ * `@sherpaw/asr`'s own files the sherpa worker needs and its exports map does not name: the Emscripten
+ * loader, which takes the WebAssembly binary as bytes, and the binary itself, emitted under `/assets/`
+ * and fetched only by an Install (`lib/stt/sherpa-models.ts`). Both are files of the exact version
+ * `package.json` pins; a version bump that renames the loader fails this build.
+ */
+const SHERPA_DIST = dirname(createRequire(import.meta.url).resolve('@sherpaw/asr'));
+const SHERPA_ALIASES = [
+  { find: /^sherpa-glue$/u, replacement: join(SHERPA_DIST, 'asr-B3QtWJoU.js') },
+  { find: /^sherpa-runtime-wasm/u, replacement: join(SHERPA_DIST, 'prebuilt', 'asr.wasm') },
+];
 
 /**
  * The default relay’s discovery ORIGIN, baked in at build time.
@@ -167,7 +181,7 @@ export default defineConfig({
    */
   worker: { format: 'es' },
   resolve: {
-    alias: [{ find: /^onnxruntime-web$/u, replacement: 'onnxruntime-web/wasm' }],
+    alias: [{ find: /^onnxruntime-web$/u, replacement: 'onnxruntime-web/wasm' }, ...SHERPA_ALIASES],
   },
   css: {
     postcss: {

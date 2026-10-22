@@ -10,11 +10,11 @@
 import { browserFetch } from '../runtime-models.ts';
 import { trustedWorkerUrl } from '../trusted-types.ts';
 import {
-  type AudioCaptureGlobalLike,
-  type AudioCapturePort,
-  browserAudioCapture,
-  canCaptureAudio,
-} from './audio-capture.ts';
+  browserSessionHost,
+  type OnDeviceHostGlobalLike,
+  type OnDeviceSessionHost,
+  readOnDeviceSupport,
+} from './on-device-host.ts';
 import { PARAKEET_CATALOG_MODEL } from './model-catalog.ts';
 import type { OnDeviceInstallSnapshot, OnDeviceSupport } from './on-device-voice.ts';
 import { OnDeviceVoice } from './on-device-voice.ts';
@@ -33,13 +33,7 @@ export type ParakeetSupport = OnDeviceSupport;
 export type ParakeetInstallSnapshot = OnDeviceInstallSnapshot;
 
 /** The parts a dictation session needs besides the model. */
-interface ParakeetSessionHost {
-  readonly capture: AudioCapturePort;
-  watchHidden(onHidden: () => void): () => void;
-  setTimeout(callback: () => void, milliseconds: number): unknown;
-  clearTimeout(handle: unknown): void;
-  now(): number;
-}
+type ParakeetSessionHost = OnDeviceSessionHost;
 
 export interface ParakeetVoiceOptions {
   readonly support: ParakeetSupport;
@@ -75,38 +69,15 @@ export class ParakeetVoice extends OnDeviceVoice {
 }
 
 /** The slice of the page the production service binds. */
-export interface ParakeetGlobalLike extends AudioCaptureGlobalLike {
-  readonly isSecureContext?: unknown;
+export interface ParakeetGlobalLike extends OnDeviceHostGlobalLike {
   readonly caches?: ParakeetCacheStorage;
-  readonly WebAssembly?: unknown;
   readonly Worker?: new (url: string, options: { type: 'module'; name: string }) => ParakeetWorkerLike;
-  readonly navigator?: AudioCaptureGlobalLike['navigator'] & { readonly storage?: ParakeetStorageManager };
-  readonly document?: {
-    readonly visibilityState?: string;
-    addEventListener(type: 'visibilitychange', listener: () => void): void;
-    removeEventListener(type: 'visibilitychange', listener: () => void): void;
-  };
-  readonly performance?: { now(): number };
-  setTimeout(callback: () => void, milliseconds: number): unknown;
-  clearTimeout(handle: unknown): void;
+  readonly navigator?: OnDeviceHostGlobalLike['navigator'] & { readonly storage?: ParakeetStorageManager };
 }
 
 /** Whether this page can run Parakeet, as data with the reason. */
 export function readParakeetSupport(global: ParakeetGlobalLike, assets: ParakeetAssets | null): ParakeetSupport {
-  if (assets === null)
-    return { available: false, reason: 'This copy of Ferretry was built without the on-device speech engine.' };
-  if (global.isSecureContext !== true)
-    return { available: false, reason: 'Parakeet needs a secure HTTPS page in this browser.' };
-  if (global.WebAssembly === undefined || typeof global.Worker !== 'function')
-    return { available: false, reason: 'This browser cannot run WebAssembly in a worker, which Parakeet needs.' };
-  if (global.caches === undefined)
-    return {
-      available: false,
-      reason: 'This browser will not keep the speech model on this device (no Cache Storage).',
-    };
-  if (!canCaptureAudio(global))
-    return { available: false, reason: 'This browser cannot record audio for on-device dictation.' };
-  return { available: true };
+  return readOnDeviceSupport(global, assets !== null, 'Parakeet');
 }
 
 /** The production service, bound to this page. */
@@ -125,20 +96,6 @@ export function browserParakeetVoice(global: ParakeetGlobalLike, assets: Parakee
   const engine = new ParakeetEngine(
     () => new Worker(trustedWorkerUrl(assets.workerUrl), { type: 'module', name: 'fy-parakeet' }),
   );
-  const host: ParakeetSessionHost = {
-    capture: browserAudioCapture(global),
-    watchHidden: onHidden => {
-      const document = global.document;
-      if (document === undefined) return () => undefined;
-      const listener = (): void => {
-        if (document.visibilityState === 'hidden') onHidden();
-      };
-      document.addEventListener('visibilitychange', listener);
-      return () => document.removeEventListener('visibilitychange', listener);
-    },
-    setTimeout: (callback, milliseconds) => global.setTimeout(callback, milliseconds),
-    clearTimeout: handle => global.clearTimeout(handle),
-    now: () => global.performance?.now() ?? Date.now(),
-  };
+  const host = browserSessionHost(global);
   return new ParakeetVoice({ support, store, engine, host });
 }

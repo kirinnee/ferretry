@@ -93,8 +93,13 @@ import {
 } from './step-up-ceremony.ts';
 import { StepUpGate } from './step-up-gate.ts';
 import { DictationDebugLog, type DictationDebugSnapshot } from './stt/dictation-debug.ts';
-import { browserOnDeviceVoices, OnDeviceVoices, type SpeechAssets } from './stt/on-device-voices.ts';
-import { browserParakeetVoice, type ParakeetGlobalLike, type ParakeetVoice } from './stt/parakeet-voice.ts';
+import {
+  browserOnDeviceVoices,
+  OnDeviceVoices,
+  type SpeechAssets,
+  type SpeechGlobalLike,
+} from './stt/on-device-voices.ts';
+import { browserParakeetVoice, type ParakeetVoice } from './stt/parakeet-voice.ts';
 import { DeviceSpeedupKeys, IndexedDbSpeedupKeyRecords } from './stt/speedup-keys.ts';
 import { SttSettingsStore } from './stt/stt-settings.ts';
 import { TranscriptionLog, type TranscriptionLogSnapshot } from './stt/transcription-log.ts';
@@ -775,7 +780,7 @@ export async function createAppStore(options: CreateAppStoreOptions = {}): Promi
   const transcriptionLog =
     options.transcriptionLog ?? new TranscriptionLog(new IndexedDbTranscriptionLogRecords(globalThis.indexedDB));
   void transcriptionLog.hydrate();
-  const speechGlobal = globalThis as unknown as ParakeetGlobalLike;
+  const speechGlobal = globalThis as unknown as SpeechGlobalLike;
   const voice = options.voice ?? browserParakeetVoice(speechGlobal, options.speechAssets ?? null);
   const voices =
     options.voices ??
