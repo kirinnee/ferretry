@@ -37,6 +37,7 @@ export * from './session/launch/index.ts';
 export * from './session/lifecycle/index.ts';
 export * from './session/live/index.ts';
 export * from './session/monitor/index.ts';
+export * from './session/observer/index.ts';
 export * from './session/provenance/index.ts';
 export * from './session/question/index.ts';
 export * from './session/resume/index.ts';

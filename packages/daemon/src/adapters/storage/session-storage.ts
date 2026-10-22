@@ -190,6 +190,15 @@ export class DaemonStorage {
   private readonly documents = new Map<string, CachedDocument>();
   /** Live journal appends for sockets served by THIS opened daemon storage, never process-global. */
   private readonly eventListeners = new Set<(event: SessionEvent) => void>();
+  /**
+   * Every state document THIS storage writes, as written — the `facts` hook.
+   *
+   * This storage is the only writer of `state.json`, so it knows every change the moment it lands.
+   * The session observer is told here instead of re-reading every session's document on every tick
+   * (`docs/design/session-workers.md` §2.2). Called inside the session's lane after the write and the
+   * index sync, so a listener sees writes to one session in the order they committed.
+   */
+  private readonly stateListeners = new Set<(id: SessionId, state: JsonValue) => void>();
 
   constructor(
     readonly paths: FoundationPaths,
@@ -890,6 +899,7 @@ export class DaemonStorage {
       this.forgetDocument(createSessionPaths(this.paths, id).state);
       await this.fileSystem.writeTextAtomic(createSessionPaths(this.paths, id).state, document);
       await this.syncSessionUnlocked(id);
+      if (this.stateListeners.size > 0) this.publishState(id, canonicalJsonValue(value));
     });
   }
 
@@ -983,6 +993,7 @@ export class DaemonStorage {
       this.forgetDocument(paths[kind]);
       await this.fileSystem.writeTextAtomic(paths[kind], serializeJsonDocument(next));
       await this.syncSessionUnlocked(id);
+      if (kind === 'state') this.publishState(id, next);
       return next;
     });
   }
@@ -1102,6 +1113,25 @@ export class DaemonStorage {
     this.assertOpen();
     this.eventListeners.add(listener);
     return () => this.eventListeners.delete(listener);
+  }
+
+  /** Tells every state listener what was just written. A listener cannot make the write fail. */
+  private publishState(id: SessionId, state: JsonValue): void {
+    for (const listener of this.stateListeners) {
+      try {
+        listener(id, state);
+      } catch {}
+    }
+  }
+
+  /**
+   * Subscribe to every state document this opened storage writes, with the value written. The value is
+   * shared with the writer and the other listeners: read it, never change it.
+   */
+  subscribeStates(listener: (id: SessionId, state: JsonValue) => void): () => void {
+    this.assertOpen();
+    this.stateListeners.add(listener);
+    return () => this.stateListeners.delete(listener);
   }
 
   private async resolvePointers(
@@ -1337,6 +1367,7 @@ export class DaemonStorage {
     if (this.closed) return;
     this.closed = true;
     this.eventListeners.clear();
+    this.stateListeners.clear();
     await this.serial.runExclusive(async () => {
       try {
         this.index.close();
