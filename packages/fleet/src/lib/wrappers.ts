@@ -30,6 +30,7 @@ import {
   tomlString,
 } from './account/fixed-layer.ts';
 import type { HarnessKind } from './manifest.ts';
+import { shellQuote } from './shell-quote.ts';
 
 /** A generated executable that runs one runtime's wrapper with flags prepended. */
 export interface ResolvedCommand {
@@ -75,13 +76,7 @@ export function envReferenceName(value: string): string | undefined {
   return match[1] ?? match[2];
 }
 
-/**
- * Quote a value for POSIX shell as an inert literal: wrap in single quotes and close/reopen around
- * any embedded single quote. Nothing inside the result is expanded.
- */
-export function shellQuote(value: string): string {
-  return `'${value.split("'").join(`'\\''`)}'`;
-}
+export { shellQuote };
 
 /**
  * Render a path that may be written relative to the user's home. `$HOME/x` and `~/x` become an

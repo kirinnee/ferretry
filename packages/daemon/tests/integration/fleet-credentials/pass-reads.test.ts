@@ -16,8 +16,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   type AccountModel,
-  CredentialStatusService,
   type CredentialMaterial,
+  CredentialStatusService,
   InMemoryCredentialStatusStore,
   type StoredCredentialResolution,
 } from '@ferretry/fleet';
@@ -26,6 +26,7 @@ import {
   CachedCredentialReads,
   CodexUsageProbe,
   credentialFileStamp,
+  MaterialCredentialReads,
   PlatformFleetCredentialStore,
   type QuotaFetch,
 } from '@ferretry/fleet/adapters';
@@ -128,9 +129,11 @@ async function machine(platform: 'linux' | 'darwin'): Promise<Machine> {
   const anthropic = new AnthropicUsageProbe({ fetch: fetchOf(), credentials: store });
   const codex = new CodexUsageProbe({ fetch: fetchOf(), stored: counted, now: () => world.clock });
   const credentialReads = new CachedCredentialReads({
-    store: counted,
-    probe: async (resolution, material) =>
-      resolution.harness === 'claude' ? await anthropic.probeMaterial(material) : await codex.probeMaterial(material),
+    reads: new MaterialCredentialReads({
+      store: counted,
+      probe: async (resolution, material) =>
+        resolution.harness === 'claude' ? await anthropic.probeMaterial(material) : await codex.probeMaterial(material),
+    }),
     stamp: credentialFileStamp,
     keychain: platform === 'darwin',
     keychainFreshMs: () => INTERVAL,

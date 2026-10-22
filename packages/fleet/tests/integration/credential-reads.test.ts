@@ -23,16 +23,18 @@ import {
   type CredentialCommand,
   credentialFileStamp,
   type KeptCredentialFacts,
+  MaterialCredentialReads,
+  type MaterialCredentialReadsDeps,
   PlatformFleetCredentialStore,
   type QuotaFetch,
   type QuotaResponse,
 } from '../../src/adapters/index.ts';
-import type { StoredCredentialResolution } from '../../src/lib/account/credentials.ts';
 import {
   type CredentialStatusPorts,
   CredentialStatusService,
   InMemoryCredentialStatusStore,
 } from '../../src/lib/account/credential-status.ts';
+import type { StoredCredentialResolution } from '../../src/lib/account/credentials.ts';
 import type { CredentialMaterial } from '../../src/lib/identity.ts';
 
 const NOW = 1_786_000_000_000;
@@ -103,8 +105,13 @@ interface World {
 }
 
 function worldOf(
-  overrides: Partial<CachedCredentialReadsDeps> & { platform?: 'linux' | 'darwin'; command?: CredentialCommand } = {},
+  overrides: Partial<Omit<CachedCredentialReadsDeps, 'reads'>> &
+    Partial<Pick<MaterialCredentialReadsDeps, 'probe'>> & {
+      platform?: 'linux' | 'darwin';
+      command?: CredentialCommand;
+    } = {},
 ): World {
+  const { probe, ...rest } = overrides;
   const store = storeOf(overrides.platform ?? 'linux', overrides.command);
   const kept = new Map<string, KeptCredentialFacts>();
   const world: World = {
@@ -115,23 +122,27 @@ function worldOf(
     reads: undefined as unknown as CachedCredentialReads,
   };
   (world as { reads: CachedCredentialReads }).reads = new CachedCredentialReads({
-    store: {
-      storedMaterial: async resolution => {
-        const material = await store.storedMaterial(resolution);
-        world.materials.push(material);
-        return material;
+    reads: new MaterialCredentialReads({
+      store: {
+        storedMaterial: async resolution => {
+          const material = await store.storedMaterial(resolution);
+          world.materials.push(material);
+          return material;
+        },
       },
-    },
-    probe: async (_resolution, material) => {
-      world.probed.push(material);
-      return { usageBased: true, ok: true, credentialSignal: 'accepted', shortWindow: { usedPercent: 5 } };
-    },
+      probe:
+        probe ??
+        (async (_resolution, material) => {
+          world.probed.push(material);
+          return { usageBased: true, ok: true, credentialSignal: 'accepted', shortWindow: { usedPercent: 5 } };
+        }),
+    }),
     stamp: credentialFileStamp,
     keychain: overrides.platform === 'darwin',
     keychainFreshMs: () => MINUTE,
     now: () => world.clock,
     cache: kept,
-    ...overrides,
+    ...rest,
   });
   return world;
 }
@@ -477,8 +488,10 @@ describe('the canary: no token reaches what is kept, returned or logged', () => 
           credentials: { material: async () => ({ outcome: 'absent' }) },
         });
         const reads = new CachedCredentialReads({
-          store: storeOf('linux'),
-          probe: async (_resolution, handed) => await anthropic.probeMaterial(handed),
+          reads: new MaterialCredentialReads({
+            store: storeOf('linux'),
+            probe: async (_resolution, handed) => await anthropic.probeMaterial(handed),
+          }),
           stamp: credentialFileStamp,
           keychain: false,
           keychainFreshMs: () => MINUTE,
@@ -519,11 +532,13 @@ describe('the canary: no token reaches what is kept, returned or logged', () => 
       credentials: { material: async () => ({ outcome: 'absent' }) },
     });
     const reads = new CachedCredentialReads({
-      store: storeOf(
-        'darwin',
-        keychain(() => ({ code: 36, stdout: '' })),
-      ),
-      probe: async (_resolution, handed) => await anthropic.probeMaterial(handed),
+      reads: new MaterialCredentialReads({
+        store: storeOf(
+          'darwin',
+          keychain(() => ({ code: 36, stdout: '' })),
+        ),
+        probe: async (_resolution, handed) => await anthropic.probeMaterial(handed),
+      }),
       stamp: credentialFileStamp,
       keychain: true,
       keychainFreshMs: () => MINUTE,
@@ -551,10 +566,12 @@ describe('the canary: no token reaches what is kept, returned or logged', () => 
     const kept = new Map<string, KeptCredentialFacts>();
     const heads = new InMemoryCredentialStatusStore();
     const reads = new CachedCredentialReads({
-      store: storeOf('linux'),
-      probe: async (_resolution, handed) => {
-        throw new Error(`probe failed on ${handed.outcome === 'found' ? handed.blob : ''}`);
-      },
+      reads: new MaterialCredentialReads({
+        store: storeOf('linux'),
+        probe: async (_resolution, handed) => {
+          throw new Error(`probe failed on ${handed.outcome === 'found' ? handed.blob : ''}`);
+        },
+      }),
       stamp: credentialFileStamp,
       keychain: false,
       keychainFreshMs: () => MINUTE,
@@ -596,8 +613,10 @@ describe('the canary: no token reaches what is kept, returned or logged', () => 
         now: () => NOW,
       });
       const reads = new CachedCredentialReads({
-        store: storeOf('linux'),
-        probe: async (_resolution, handed) => await codex.probeMaterial(handed),
+        reads: new MaterialCredentialReads({
+          store: storeOf('linux'),
+          probe: async (_resolution, handed) => await codex.probeMaterial(handed),
+        }),
         stamp: credentialFileStamp,
         keychain: false,
         keychainFreshMs: () => MINUTE,

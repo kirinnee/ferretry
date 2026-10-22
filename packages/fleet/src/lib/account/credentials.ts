@@ -36,6 +36,7 @@
  */
 import { isAbsolute, join } from 'node:path';
 import type { HarnessKind } from '../manifest.ts';
+import { CREDENTIALS_DIRECTORY, ferretryCredentialDirectory } from './credential-directory.ts';
 import {
   cloudCredentialEnvironment,
   codexProviderArgs,
@@ -45,8 +46,7 @@ import {
 import { credentialHalf } from './halves.ts';
 import type { Credential } from './schema.ts';
 
-/** The directory, under the fleet root, that holds every `store: ferretry` credential. */
-export const CREDENTIALS_DIRECTORY = 'credentials';
+export { CREDENTIALS_DIRECTORY, ferretryCredentialDirectory };
 
 /** The undocumented variable that moves Claude's credential store away from its config dir (§9.5). */
 export const CLAUDE_SECURE_STORAGE_VARIABLE = 'CLAUDE_SECURESTORAGE_CONFIG_DIR';
@@ -132,11 +132,6 @@ export type CredentialStoreResolution =
   | StoredCredentialResolution
   | EnvironmentStoreResolution
   | UnavailableStoreResolution;
-
-/** `<fleet>/credentials/<id>`, the one home of a `store: ferretry` credential. */
-export function ferretryCredentialDirectory(fleetRoot: string, id: string): string {
-  return join(fleetRoot, CREDENTIALS_DIRECTORY, id).normalize('NFC');
-}
 
 /**
  * The person's own Codex home, resolved the way Codex itself resolves it: `CODEX_HOME` when it is set

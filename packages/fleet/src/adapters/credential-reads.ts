@@ -13,9 +13,12 @@
  * and display email, and the truncated digest `credentialFingerprint` takes. None of it is a token, and
  * none of it can be turned back into one (docs/secrets.md).
  *
- * NEVER KEPT: the material, or any token in it. {@link CachedCredentialReads.active} reads the material,
- * takes its facts, hands it to the probe for the bearer, and drops it — all inside one call, exactly as
- * long as it lived before. A token is never cached to save a read (housekeeping-worker.md §2.4 rule 7).
+ * NEVER KEPT: the material, or any token in it. This class never even sees it: it asks a
+ * {@link CredentialStoreReads} for facts. {@link MaterialCredentialReads} is the one place material
+ * exists — it reads the store, takes the facts, hands the material to the probe for the bearer, and drops
+ * it, all inside one call — and the daemon runs it on its housekeeping worker, so the token is never in
+ * the main thread's heap at all (housekeeping-worker.md §2.4). A token is never cached to save a read
+ * (rule 7).
  *
  * ## When kept facts are answered
  *
@@ -30,15 +33,16 @@
  *
  * Every free read refreshes the kept facts for nothing, because it reads the material anyway.
  */
-import { lstat, stat } from 'node:fs/promises';
+
 import type { BigIntStats } from 'node:fs';
-import type { StoredCredentialResolution } from '../lib/account/credentials.ts';
+import { lstat, stat } from 'node:fs/promises';
 import {
   type ActiveUsageRead,
   type CredentialReadOptions,
   type LocalCredentialFacts,
   localCredentialFacts,
 } from '../lib/account/credential-status.ts';
+import type { StoredCredentialResolution } from '../lib/account/credentials.ts';
 import type { CredentialMaterial } from '../lib/identity.ts';
 import type { FleetUsageProbeResult } from '../lib/usage.ts';
 import { credentialFingerprint, type StoredCredentialMaterialReader } from './credential-classifier.ts';
@@ -58,7 +62,19 @@ export interface CredentialFactsCache {
   set(store: string, kept: KeptCredentialFacts): void;
 }
 
-export interface CachedCredentialReadsDeps {
+/**
+ * One read of a credential's store, answered as FACTS. Whoever implements it holds the material for the
+ * length of one call and returns none of it: {@link MaterialCredentialReads} in-process, or the daemon's
+ * housekeeping worker by job.
+ */
+export interface CredentialStoreReads {
+  /** The store, read once, as facts. */
+  facts(resolution: StoredCredentialResolution): Promise<LocalCredentialFacts>;
+  /** The free read, with a token from ONE read of the store, and that read's facts. */
+  active(resolution: StoredCredentialResolution): Promise<ActiveUsageRead>;
+}
+
+export interface MaterialCredentialReadsDeps {
   /** The one store read (`PlatformFleetCredentialStore.storedMaterial`). */
   readonly store: StoredCredentialMaterialReader;
   /**
@@ -66,6 +82,49 @@ export interface CachedCredentialReadsDeps {
    * inside the probe and goes nowhere else.
    */
   probe(resolution: StoredCredentialResolution, material: CredentialMaterial): Promise<FleetUsageProbeResult>;
+}
+
+/** What a free read answers when the probe itself threw: inconclusive, and no message kept. */
+const INCONCLUSIVE: FleetUsageProbeResult = { usageBased: true, ok: false, credentialSignal: 'inconclusive' };
+
+/**
+ * THE ONE PLACE A CREDENTIAL'S MATERIAL EXISTS on the status path: read, reduced to facts or used for one
+ * bearer, and dropped before the call returns. Nothing is kept between calls — no field, no closure.
+ */
+export class MaterialCredentialReads implements CredentialStoreReads {
+  constructor(private readonly deps: MaterialCredentialReadsDeps) {}
+
+  async facts(resolution: StoredCredentialResolution): Promise<LocalCredentialFacts> {
+    return factsOf(resolution, await this.deps.store.storedMaterial(resolution));
+  }
+
+  async active(resolution: StoredCredentialResolution): Promise<ActiveUsageRead> {
+    const material = await this.deps.store.storedMaterial(resolution);
+    const local = factsOf(resolution, material);
+    let result: FleetUsageProbeResult;
+    try {
+      result = await this.deps.probe(resolution, material);
+    } catch {
+      // A caught error's message could quote what it was handed. Nothing of it is kept.
+      result = INCONCLUSIVE;
+    }
+    return { result, local };
+  }
+}
+
+/** One read's material as facts, with the digest of what was found. The material is not kept. */
+function factsOf(resolution: StoredCredentialResolution, material: CredentialMaterial): LocalCredentialFacts {
+  return localCredentialFacts(
+    resolution.harness,
+    material,
+    // Only material that was actually found has a digest (see `credentialFingerprint`).
+    material.outcome === 'found' ? credentialFingerprint(material.blob) : undefined,
+  );
+}
+
+export interface CachedCredentialReadsDeps {
+  /** The store, read as facts. */
+  readonly reads: CredentialStoreReads;
   /** A file's stamp ({@link credentialFileStamp}): `undefined` when it cannot be taken. */
   stamp(path: string): Promise<string | undefined>;
   /** Whether a Claude login is read from the macOS keychain first, which no file stamp covers. */
@@ -75,9 +134,6 @@ export interface CachedCredentialReadsDeps {
   now(): number;
   readonly cache: CredentialFactsCache;
 }
-
-/** What a free read answers when the probe itself threw: inconclusive, and no message kept. */
-const INCONCLUSIVE: FleetUsageProbeResult = { usageBased: true, ok: false, credentialSignal: 'inconclusive' };
 
 /** The store a resolution names, as a key. Two credentials naming one store share its facts. */
 function storeKey(resolution: StoredCredentialResolution): string {
@@ -104,7 +160,7 @@ export class CachedCredentialReads {
       const kept = this.deps.cache.get(storeKey(resolution));
       if (kept !== undefined && kept.stamp === stamp && this.#inInterval(resolution, kept)) return kept.facts;
     }
-    return this.#keep(resolution, stamp, await this.deps.store.storedMaterial(resolution));
+    return this.#keep(resolution, stamp, await this.deps.reads.facts(resolution));
   }
 
   /**
@@ -113,16 +169,8 @@ export class CachedCredentialReads {
    */
   async active(resolution: StoredCredentialResolution): Promise<ActiveUsageRead> {
     const stamp = await this.deps.stamp(storeFile(resolution));
-    const material = await this.deps.store.storedMaterial(resolution);
-    const local = this.#keep(resolution, stamp, material);
-    let result: FleetUsageProbeResult;
-    try {
-      result = await this.deps.probe(resolution, material);
-    } catch {
-      // A caught error's message could quote what it was handed. Nothing of it is kept.
-      result = INCONCLUSIVE;
-    }
-    return { result, local };
+    const read = await this.deps.reads.active(resolution);
+    return { result: read.result, local: this.#keep(resolution, stamp, read.local) };
   }
 
   /** A keychain store's facts age out after one interval; a file store's only change with the file. */
@@ -135,14 +183,8 @@ export class CachedCredentialReads {
   #keep(
     resolution: StoredCredentialResolution,
     stamp: string | undefined,
-    material: CredentialMaterial,
+    facts: LocalCredentialFacts,
   ): LocalCredentialFacts {
-    const facts = localCredentialFacts(
-      resolution.harness,
-      material,
-      // Only material that was actually found has a digest (see `credentialFingerprint`).
-      material.outcome === 'found' ? credentialFingerprint(material.blob) : undefined,
-    );
     if (stamp !== undefined) this.deps.cache.set(storeKey(resolution), { stamp, at: this.deps.now(), facts });
     return facts;
   }

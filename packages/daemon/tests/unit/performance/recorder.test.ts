@@ -318,6 +318,67 @@ describe('PerformanceWindow tables', () => {
       { name: 'b', inFlight: { min: 1, mean: 2, max: 3 } },
     ]);
   });
+
+  it('should account each worker job as its worker reported it, beside the in-flight gauge', () => {
+    // Arrange
+    const subject = new PerformanceWindow(0);
+    subject.worker('housekeeping', 1);
+    subject.workerJob(
+      'housekeeping',
+      {
+        wallMs: 30,
+        children: [{ command: 'security find-generic-password', wallMs: 20 }],
+        fileReads: 1,
+        fetches: 1,
+        heapBytes: 1_048_576,
+      },
+      'fleet refresh',
+    );
+    subject.workerJob('housekeeping', { wallMs: 10, children: [], fileReads: 2, fetches: 0, heapBytes: 3_145_728 });
+    subject.workerJob('folds', { wallMs: 5, children: [], fileReads: 0, fetches: 0, heapBytes: 0 });
+
+    // Act
+    const actual = subject.tables(WINDOW_MS).workers;
+
+    // Assert — a worker that only reported work still has a (zero) gauge.
+    should(actual).deepEqual([
+      {
+        name: 'folds',
+        inFlight: { min: 0, mean: 0, max: 0 },
+        work: {
+          jobs: 1,
+          perMinute: 0.6,
+          wall: { totalMs: 5, p50Ms: 5, p95Ms: 5, maxMs: 5 },
+          childProcesses: [],
+          fileReads: 0,
+          fetches: 0,
+          heapMb: { min: 0, mean: 0, max: 0 },
+        },
+      },
+      {
+        name: 'housekeeping',
+        inFlight: { min: 1, mean: 1, max: 1 },
+        work: {
+          jobs: 2,
+          perMinute: 1.2,
+          wall: { totalMs: 40, p50Ms: 10, p95Ms: 30, maxMs: 30 },
+          childProcesses: [
+            {
+              command: 'security find-generic-password',
+              count: 1,
+              perMinute: 0.6,
+              synchronous: 0,
+              wall: { totalMs: 20, p50Ms: 20, p95Ms: 20, maxMs: 20 },
+              by: [{ activity: 'fleet refresh', count: 1 }],
+            },
+          ],
+          fileReads: 3,
+          fetches: 1,
+          heapMb: { min: 1, mean: 2, max: 3 },
+        },
+      },
+    ]);
+  });
 });
 
 describe('PerformanceRecorder', () => {
@@ -355,6 +416,7 @@ describe('PerformanceRecorder', () => {
       probe.loopTick(150);
       probe.stall(stall(150, 10));
       probe.samples([sample]);
+      probe.workerJob('w', { wallMs: 3, children: [], fileReads: 1, fetches: 0, heapBytes: 0 }, 'act');
     };
 
     // Act
@@ -412,6 +474,7 @@ describe('NO_PERFORMANCE_PROBE', () => {
       subject.loopTick(1),
       subject.stall(stall(1, 1)),
       subject.samples([]),
+      subject.workerJob('w', { wallMs: 1, children: [], fileReads: 0, fetches: 0, heapBytes: 0 }),
     ];
 
     // Assert

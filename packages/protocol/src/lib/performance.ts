@@ -117,11 +117,32 @@ export const GaugeStatsSchema = z.object({
 });
 export type GaugeStats = z.infer<typeof GaugeStatsSchema>;
 
-/** One worker thread's queue, sampled through the window. */
+/**
+ * The work one worker thread did in the window, AS IT REPORTED IT. The daemon's own instruments count the
+ * main thread's `Bun.spawn` and its file ports, and see nothing a worker does; a worker that starts
+ * children or reads files says so after each job, and this is that account.
+ */
+export const WorkerWorkSchema = z.object({
+  jobs: z.number().int().nonnegative(),
+  perMinute: z.number().nonnegative(),
+  wall: DurationStatsSchema,
+  /** Programs the worker started, by program and subcommand; `by` is the main-thread work that asked. */
+  childProcesses: z.array(ChildProcessStatsSchema),
+  fileReads: z.number().int().nonnegative(),
+  /** HTTP requests the worker made. */
+  fetches: z.number().int().nonnegative(),
+  /** The worker's own JavaScript heap after each job. The process's RSS cannot be split by thread. */
+  heapMb: GaugeStatsSchema,
+});
+export type WorkerWork = z.infer<typeof WorkerWorkSchema>;
+
+/** One worker thread's queue, sampled through the window, and what it reported doing. */
 export const WorkerStatsSchema = z.object({
   name: z.string().min(1),
   /** Requests waiting for or held by the worker. */
   inFlight: GaugeStatsSchema,
+  /** Absent for a worker that reports nothing of its own, or did no job in the window. */
+  work: WorkerWorkSchema.optional(),
 });
 export type WorkerStats = z.infer<typeof WorkerStatsSchema>;
 

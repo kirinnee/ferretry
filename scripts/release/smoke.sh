@@ -139,6 +139,9 @@ echo "✅ ${webrtc_line}"
 # notice until somebody unlocked a PDF; `--check` starts each worker for real on this target.
 workers_line="$(grep '^workers ' <<<"${check_out}" || true)"
 grep -q ' ready$' <<<"${workers_line}" || fail "a worker thread did not start in the compiled daemon: ${workers_line:-no workers line}"
+# The housekeeping worker reads every login's store: a release that dropped it would quietly run those
+# reads on the main thread, so it is named here rather than only counted among the ready.
+grep -q 'housekeeping' <<<"${workers_line}" || fail "the compiled daemon did not start its housekeeping worker: ${workers_line:-no workers line}"
 echo "✅ ${workers_line}"
 
 "${name}" daemon adopt </dev/null >/dev/null

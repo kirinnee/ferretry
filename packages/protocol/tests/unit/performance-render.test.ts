@@ -43,6 +43,10 @@ describe('renderPerformanceReport', () => {
     should(actual).containEql('readFile ~/.ferretry/state/index.json — p95 5.0 ms');
     should(actual).containEql('Workers — requests in flight');
     should(actual).containEql('scan-worker: mean 0.5 · max 2');
+    should(actual).containEql('housekeeping: mean 0.2 · max 1');
+    should(actual).containEql('6 jobs (12/min) · p50 5.0 ms');
+    should(actual).containEql('3 files read · 2 requests · heap max 2.5 MB');
+    should(actual).containEql('4/min  security find-generic-password · by fleet refresh 2 — p95 25 ms');
     should(actual).containEql('System calls (strace, 30 s)  3,000 (100/s)');
     should(actual).containEql('openat /etc/hosts');
     should(actual).containEql('programs started:');

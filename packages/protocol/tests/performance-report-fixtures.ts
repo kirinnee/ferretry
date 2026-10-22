@@ -121,7 +121,31 @@ export function fullReport(): PerformanceReport {
         },
       ],
     },
-    workers: [{ name: 'scan-worker', inFlight: { min: 0, mean: 0.5, max: 2 } }],
+    workers: [
+      { name: 'scan-worker', inFlight: { min: 0, mean: 0.5, max: 2 } },
+      {
+        name: 'housekeeping',
+        inFlight: { min: 0, mean: 0.2, max: 1 },
+        work: {
+          jobs: 6,
+          perMinute: 12,
+          wall: wallStats(60, 5, 20, 30),
+          childProcesses: [
+            {
+              command: 'security find-generic-password',
+              count: 2,
+              perMinute: 4,
+              synchronous: 0,
+              wall: wallStats(40, 15, 25, 25),
+              by: [{ activity: 'fleet refresh', count: 2 }],
+            },
+          ],
+          fileReads: 3,
+          fetches: 2,
+          heapMb: { min: 1.5, mean: 2, max: 2.5 },
+        },
+      },
+    ],
     budgets: [
       { name: 'idle cpu', unit: '%', limit: 1, actual: 0.4, ok: true },
       { name: 'stall', unit: 'ms', limit: 200, actual: 400, ok: false },

@@ -18,7 +18,21 @@ export interface PerformanceBudget {
 }
 
 /** The parts of a report a budget reads. */
-export type BudgetInput = Pick<PerformanceReport, 'resources' | 'eventLoop' | 'childProcesses' | 'fileOperations'>;
+export type BudgetInput = Pick<
+  PerformanceReport,
+  'resources' | 'eventLoop' | 'childProcesses' | 'fileOperations' | 'workers'
+>;
+
+/**
+ * Every child the daemon started, per minute: the main thread's and every worker's. A child a worker
+ * starts costs the machine exactly what one started on the main thread does — moving a spawn onto a
+ * thread changes where it blocks, not what endpoint security inspects.
+ */
+const childrenPerMinute = (report: BudgetInput): number =>
+  report.workers.reduce(
+    (sum, worker) => sum + (worker.work?.childProcesses ?? []).reduce((within, entry) => within + entry.perMinute, 0),
+    report.childProcesses.perMinute,
+  );
 
 export const IDLE_DAEMON_BUDGETS: readonly PerformanceBudget[] = Object.freeze([
   {
@@ -31,7 +45,7 @@ export const IDLE_DAEMON_BUDGETS: readonly PerformanceBudget[] = Object.freeze([
     name: 'child processes',
     unit: 'per minute',
     limit: 30,
-    measure: report => report.childProcesses.perMinute,
+    measure: childrenPerMinute,
   },
   {
     name: 'longest event-loop block',

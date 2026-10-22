@@ -583,6 +583,19 @@ describe('the WebRTC carrier block', () => {
   });
 });
 
+describe('the housekeeping worker switch', () => {
+  it('should run the fleet’s reads on the housekeeping worker unless the operator says otherwise', () => {
+    // Assert
+    should(defaultDaemonConfig().housekeeping).deepEqual({ enabled: true });
+    should(parseDaemonConfig({ housekeeping: { enabled: false } }).housekeeping).deepEqual({ enabled: false });
+  });
+
+  it('should refuse a key the switch does not define', () => {
+    // Act + Assert
+    should(() => parseDaemonConfig({ housekeeping: { enabled: true, threads: 2 } })).throw();
+  });
+});
+
 describe('the retired fleet block', () => {
   it('should no longer carry a fleet block, because starting a daemon imports nothing', () => {
     // Assert — there is nothing left to switch, so nothing to default and nothing a first boot writes.
