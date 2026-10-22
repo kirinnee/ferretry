@@ -937,12 +937,35 @@ const dialectNumber = (protocol: unknown): number | undefined => {
  * answers — is an old daemon. Anything else — no answer, a body that does not parse, the same dialect —
  * is `undefined`, because neither side is provably old.
  */
+/** `wait`, or `fallback` as soon as `signal` aborts — whichever comes first. */
+const untilAborted = <T>(wait: Promise<T>, signal: AbortSignal | null | undefined, fallback: T): Promise<T> => {
+  if (signal == null) return wait;
+  if (signal.aborted) return Promise.resolve(fallback);
+  return new Promise<T>((resolve, reject) => {
+    const abandon = (): void => resolve(fallback);
+    signal.addEventListener('abort', abandon, { once: true });
+    wait.then(
+      value => {
+        signal.removeEventListener('abort', abandon);
+        resolve(value);
+      },
+      (cause: unknown) => {
+        signal.removeEventListener('abort', abandon);
+        reject(cause);
+      },
+    );
+  });
+};
+
 export const outdatedSide = async (network: DaemonFetch, daemonUrl: string): Promise<OutdatedSide | undefined> => {
   let body: unknown;
   try {
+    // BOUNDED: the walk awaits this before trying the next carrier, and on a network that drops packets
+    // to a private address an unbounded fetch held this machine's relay fallback for a TCP timeout.
     const response = await network(new URL('/healthz', `${daemonUrl}/`).toString(), {
       cache: 'no-store',
       credentials: 'omit',
+      signal: AbortSignal.timeout(DIRECT_SESSION_DEADLINE_MS),
     });
     if (!response.ok) return undefined;
     body = await response.json();
@@ -1709,7 +1732,10 @@ export class DaemonCarrierRouter {
       response.status === 401 &&
       (await answersWithCode(response, UNLOCK_REQUIRED_CODE))
     ) {
-      if (!(await confirmUnlock(daemon, origin))) return response;
+      // The wait honours the caller's own signal: a background read for a machine that is not on screen
+      // waits for it to be opened, and a caller that stopped waiting (its deadline, an unmount) must get
+      // its refusal back rather than stay parked behind an unlock nobody is going to give.
+      if (!(await untilAborted(confirmUnlock(daemon, origin), init.signal, false))) return response;
       response = await once();
     }
     // A PASSKEY STEP-UP IS A PAUSE, NOT A FAILURE. The daemon allowed the act and wants its owner to

@@ -43,7 +43,7 @@ import {
 import { type WorkspaceRailPreferenceStore, workspaceRailPreferences } from '../lib/workspace-rail-preferences.ts';
 import { ContextMenu, type ContextMenuItem, type MenuAnchor } from './context-menu.tsx';
 import type { MoveMachine } from './machine-reorder.tsx';
-import { NewSessionMenu } from './new-session-menu.tsx';
+import { NewSessionMenu, withReach } from './new-session-menu.tsx';
 import { PALETTE_KEYSHORTCUTS, paletteShortcutLabel } from './palette-shortcut.ts';
 import { RouteLink } from './route-link.tsx';
 import { type OpenRowMenu, SessionMenuContext, type SessionMenuState } from './session-menu-context.ts';
@@ -470,7 +470,7 @@ function NewSessionControl({
       <NewSessionMenu
         className="fy-sbar__icon"
         current={props.daemonId}
-        machines={props.machines}
+        machines={withReach(props.machines, props.machineSources)}
         onNavigate={navigate}
       >
         <Plus aria-hidden="true" size={16} />

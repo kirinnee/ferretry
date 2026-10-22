@@ -7,12 +7,23 @@
  * contributed is assumed. Outcomes arrive one at a time, so a page can show the machines that answered
  * while a slow one — waiting for its unlock, say — is still out.
  *
+ * AND EVERY MACHINE IS BOUNDED ON ITS OWN. A machine that never answers — asleep behind a relay that
+ * still holds the socket, parked behind an unlock nobody will give — used to keep the merged answer, and
+ * so the whole Query page, on "querying" forever. Past {@link MACHINE_READ_DEADLINE_MS} its read is a
+ * failure like any other ("did not answer within 20s") and the machines that answered are shown.
+ *
  * Nothing here knows a transport: the caller hands in the function that reads one machine.
  */
 
 import { AnalyticsMergeError, type AnalyticsResponse, mergeAnalyticsResponses } from '@ferretry/protocol';
 
 import type { DaemonConnection, DaemonId } from '../../lib/daemon-connection.ts';
+import {
+  type DeadlineSchedule,
+  MACHINE_READ_DEADLINE_MS,
+  realSchedule,
+  withDeadline,
+} from '../../lib/machine-deadline.ts';
 import type { AnalyticsRequest } from './analytics-custom-query.tsx';
 import { analyticsErrorMessage } from './analytics-response-view.tsx';
 
@@ -26,18 +37,26 @@ export type MachineOutcome<T> =
   | { readonly machine: AnalyticsMachine; readonly status: 'answered'; readonly value: T }
   | { readonly machine: AnalyticsMachine; readonly status: 'failed'; readonly error: string };
 
+/** How long each machine may take, and the timer that says so; injected only by tests. */
+export interface MachineDeadline {
+  readonly deadlineMs?: number;
+  readonly schedule?: DeadlineSchedule;
+}
+
 /**
  * Reads every machine at once. `onOutcome` hears each machine as it settles; the promise resolves with
- * every outcome, in the machines' order, once the last one has.
+ * every outcome, in the machines' order, once the last one has — and the last one settles by its
+ * deadline at the latest, so no machine can hold the others' answer hostage.
  */
 export const readEveryMachine = async <T>(
   machines: readonly AnalyticsMachine[],
   read: (connection: DaemonConnection) => Promise<T>,
   onOutcome: (outcome: MachineOutcome<T>) => void = () => {},
+  { deadlineMs = MACHINE_READ_DEADLINE_MS, schedule = realSchedule }: MachineDeadline = {},
 ): Promise<readonly MachineOutcome<T>[]> =>
   await Promise.all(
     machines.map(async (machine): Promise<MachineOutcome<T>> => {
-      const outcome: MachineOutcome<T> = await read(machine.connection).then(
+      const outcome: MachineOutcome<T> = await withDeadline(read(machine.connection), deadlineMs, schedule).then(
         value => ({ machine, status: 'answered', value }),
         (reason: unknown) => ({ machine, status: 'failed', error: analyticsErrorMessage(reason) }),
       );
@@ -104,8 +123,14 @@ export const askEveryMachine = async (
   machines: readonly AnalyticsMachine[],
   request: AnalyticsRequest,
   query: string | undefined,
+  deadline: MachineDeadline = {},
 ): Promise<FleetAnswer> => {
-  const outcomes = await readEveryMachine(machines, async connection => await request(connection, query));
+  const outcomes = await readEveryMachine(
+    machines,
+    async connection => await request(connection, query),
+    () => {},
+    deadline,
+  );
   const failed: MachineFailure[] = outcomes.flatMap(outcome => (outcome.status === 'failed' ? [outcome] : []));
   const origin = new Map<string, DaemonId>();
   let merged: AnalyticsResponse | undefined;

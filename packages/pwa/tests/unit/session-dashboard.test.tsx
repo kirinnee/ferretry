@@ -160,8 +160,13 @@ describe('SessionDashboard', () => {
       ),
     );
     expect(JSON.stringify(view.toJSON())).toContain('No sessions in this folder match the filters.');
-    expect(text(view.root.findByProps({ role: 'status' }))).toContain('folder is no longer available');
-    expect(text(view.root.findByProps({ role: 'alert' }))).toBe('daemon unavailable');
+    const statuses = view.root.findAll(node => node.props.role === 'status' && typeof node.type === 'string');
+    expect(statuses.some(node => text(node).includes('folder is no longer available'))).toBe(true);
+    // The raw failure is never the page's words: the machine's status row says it for people.
+    const row = view.root.find(node => node.props['data-machine-status-row'] !== undefined);
+    expect(text(row)).toContain('This machine couldn’t refresh its sessions');
+    expect(text(row)).not.toContain('daemon unavailable');
+    expect(view.root.findAll(node => node.props.role === 'alert')).toHaveLength(0);
   });
 
   it('renders minimal grouped cards through the lean projection', () => {

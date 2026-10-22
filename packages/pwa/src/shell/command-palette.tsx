@@ -58,6 +58,7 @@ import { useLayoutMode } from '../hooks/use-layout-mode.ts';
 import type { DaemonId } from '../lib/daemon-connection.ts';
 import { daemonSessionPath } from '../lib/pages/routes.ts';
 import { APP_BAR_DESTINATIONS } from './app-bar.tsx';
+import { MachineChip } from './machine-chip.tsx';
 import type { AppBarDestinationLike, DestinationPaletteEntry } from './palette-destinations.ts';
 import {
   clampActiveIndex,
@@ -118,8 +119,16 @@ export interface CommandPaletteProps {
   readonly onClose: () => void;
   /** The daemon whose sessions and settings this palette is searching. */
   readonly daemon: DaemonId;
-  /** That daemon's fleet, already flattened by `paletteSessionEntries`. */
+  /**
+   * The sessions to search, already flattened by `paletteSessionEntries`: that daemon's fleet, or —
+   * across machines — every REACHABLE machine's, each entry naming its own machine.
+   */
   readonly sessions: readonly PaletteSession[];
+  /**
+   * Said beside the sessions when some machine's are missing from them: "Liftoff MBP isn't reachable
+   * right now, so its sessions aren't listed." A machine that is down never empties the others' results.
+   */
+  readonly sessionsNote?: string | null;
   readonly onNavigate: (href: string) => void;
   /**
    * Opens a settings section in place. Supplied only by a host that has a
@@ -146,6 +155,7 @@ export function CommandPalette({
   onClose,
   daemon,
   sessions,
+  sessionsNote = null,
   onNavigate,
   onOpenSetting,
   commands = NO_COMMANDS,
@@ -238,7 +248,7 @@ export function CommandPalette({
         return;
       }
       if (result.kind === 'session') {
-        onNavigate(daemonSessionPath(daemon, result.entry.id));
+        onNavigate(daemonSessionPath(result.entry.daemonId ?? daemon, result.entry.id));
         return;
       }
       // A link row (a daemon-global setting that lives on another page)
@@ -402,7 +412,7 @@ export function CommandPalette({
                   const resultIndex = groups.offsets.sessions + index;
                   return (
                     <SessionOption
-                      key={entry.id}
+                      key={`${entry.daemonId ?? ''}:${entry.id}`}
                       entry={entry}
                       selected={resultIndex === activeIndex}
                       onActivate={() => run({ kind: 'session', entry })}
@@ -411,6 +421,11 @@ export function CommandPalette({
                   );
                 })}
               </fieldset>
+            )}
+            {sessionsNote === null ? null : (
+              <p className="m-0 px-cell-x py-row-y text-meta text-muted" data-palette-sessions-note="" role="note">
+                {sessionsNote}
+              </p>
             )}
           </div>
 
@@ -611,6 +626,7 @@ function SessionOption({
         <span className="flex min-w-0 items-baseline gap-sm">
           <span className="shrink-0 font-semibold text-fg">{entry.headline}</span>
           {entry.task && <span className="min-w-0 flex-1 truncate text-cell text-fg-soft">{entry.task}</span>}
+          {entry.machine === undefined ? null : <MachineChip className="ml-auto shrink-0" name={entry.machine} />}
         </span>
         <span className="flex min-w-0 items-baseline gap-sm text-meta text-muted">
           {entry.folderName && <span className="min-w-0 truncate">{entry.folderName}</span>}

@@ -177,17 +177,22 @@ describe('one session list across two machines, one offline', () => {
       await tab.click('[data-machine-reach="offline"] [data-sbar-session="l-pim"]');
       expect((await evidence(tab)).navigations.at(-1)).toBe(`/d/${encodeURIComponent(seen.laptop)}/session/l-pim`);
 
-      // "+ New" asks which machine: this one first and marked, and the laptop starts on the laptop.
+      // "+ New" asks which machine: this one first and marked; the laptop is not answering, so it is
+      // listed but unavailable, saying why — a new session cannot start on a machine nobody can reach.
       await tab.click('[data-new-session-menu]');
       const menu = '[role="menu"][aria-label="New session on"]';
       await tab.waitForSelector(menu, { state: 'visible' });
       // Read as text content: the menu is mid-entry when it first turns visible.
-      const items = await tab.$$eval(`${menu} [role="menuitem"]`, nodes => nodes.map(node => node.textContent ?? ''));
-      expect(items[0]).toContain('studio');
-      expect(items[0]).toContain('this one');
-      expect(items[1]).toContain('laptop');
-      await tab.click(`${menu} [role="menuitem"]:nth-of-type(2)`);
-      expect((await evidence(tab)).navigations.at(-1)).toBe(`/d/${encodeURIComponent(seen.laptop)}/new`);
+      const items = await tab.$$eval(`${menu} [role="menuitem"]`, nodes =>
+        nodes.map(node => [node.textContent ?? '', (node as HTMLButtonElement).disabled] as const),
+      );
+      expect(items[0]?.[0]).toContain('studio');
+      expect(items[0]?.[0]).toContain('this one');
+      expect(items[0]?.[1]).toBe(false);
+      expect(items[1]?.[0]).toContain('laptop isn’t reachable right now');
+      expect(items[1]?.[1]).toBe(true);
+      await tab.click(`${menu} [role="menuitem"]:nth-of-type(1)`);
+      expect((await evidence(tab)).navigations.at(-1)).toBe(`/d/${encodeURIComponent(seen.studio)}/new`);
     } finally {
       await context.close();
     }
@@ -251,7 +256,15 @@ describe('one session list across two machines, one offline', () => {
       expect(pinned[0]).toContain('Hadi');
       expect(await texts(tab, '[data-needs-you-group] [data-machine-chip]')).toEqual(['studio', 'studio']);
       expect(await tab.$$eval('[data-machine-section]', nodes => nodes.length)).toBe(2);
-      expect((await texts(tab, '[data-machine-reach="offline"] h2'))[0]).toContain('offline · last seen 5m');
+      // The machine that stopped answering says so IN ITS OWN SECTION — its status line, with when its
+      // rows are from — and nothing about it reaches the page as a whole.
+      expect((await texts(tab, '[data-machine-reach="offline"] h2'))[0]).toContain('offline');
+      const status = (await texts(tab, '[data-machine-reach="offline"] [data-machine-status]'))[0] ?? '';
+      expect(status).toContain('Unreachable · retrying');
+      expect(status).toMatch(/as of \d\d:\d\d/);
+      expect(await tab.$$eval('[role="alert"], [data-machine-status-row], [data-cache-updating]', n => n.length)).toBe(
+        0,
+      );
       // Grouped under the machine already: no chip on a row there.
       expect(await tab.$$eval('[data-machine-section] [data-machine-chip]', nodes => nodes.length)).toBe(0);
     } finally {

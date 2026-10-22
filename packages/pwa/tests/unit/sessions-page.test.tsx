@@ -245,7 +245,10 @@ describe('SessionsPage', () => {
     const page = await mount(<SessionsPage {...props} />);
     expect(page.container.querySelectorAll('.animate-pulse')).toHaveLength(6);
     await interact(async () => reject(new Error('fleet offline')));
-    expect(page.container.textContent).toContain('fleet offline');
+    // The failure is said for people, in place; the raw text waits behind Details.
+    expect(page.container.textContent).toContain('This machine couldn’t refresh its sessions');
+    expect(page.container.textContent).not.toContain('fleet offline');
+    expect(page.container.querySelector('[data-machine-status-row="refresh-failed"]')).not.toBeNull();
     await page.unmount();
   });
 
@@ -490,11 +493,11 @@ describe('SessionsPage', () => {
 
     await interact(() => port.pending(beta.daemonId).reject(new Error('beta offline')));
     await settle();
-    expect(page.container.textContent).toContain('beta offline');
+    expect(page.container.textContent).toContain('couldn’t refresh its sessions');
 
     await interact(() => port.pending(alpha.daemonId).resolve(sessions('alpha')));
     await settle();
-    expect(page.container.textContent).toContain('beta offline');
+    expect(page.container.textContent).toContain('couldn’t refresh its sessions');
     expect(page.container.textContent).not.toContain('Alpha-Team');
     const slice = fleet.fleet(beta.daemonId);
     expect(slice.sessions).toBeNull();

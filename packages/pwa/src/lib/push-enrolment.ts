@@ -31,6 +31,7 @@
 import type { PushDeviceView } from '@ferretry/protocol';
 import type { DaemonConnection, DaemonId } from './daemon-connection.ts';
 import { daemonId } from './daemon-connection.ts';
+import { MACHINE_READ_DEADLINE_MS, withDeadline } from './machine-deadline.ts';
 import type { DaemonNotificationPreferences } from './notification-preferences.ts';
 import { pushMachineOf, pushScopePath, pushWorkerUrl } from './push-scope.ts';
 import {
@@ -279,23 +280,28 @@ export const enrolDaemonPushDevice = async (
  * every other machine's alerts until somebody did. A daemon whose delivery is on is enrolled on its own
  * registration; one whose delivery is off only has the device it issued for the shared endpoint revoked.
  * The shared subscription is dropped whatever happens, and nothing here throws.
+ *
+ * EVERY MACHINE AT ONCE, EACH BOUNDED. This used to walk the machines one after another, so a machine
+ * that never answered held every machine after it — and the unsubscribe — forever. Each machine now
+ * moves on its own and gives up after its deadline; the others are never waiting on it.
  */
-export const moveOffSharedPush = async (contexts: readonly PushEnrolmentContext[]): Promise<void> => {
+export const moveOffSharedPush = async (
+  contexts: readonly PushEnrolmentContext[],
+  deadlineMs: number = MACHINE_READ_DEADLINE_MS,
+): Promise<void> => {
   const enrolment = contexts.find(context => context.enrolment !== null)?.enrolment ?? null;
   if (enrolment === null) return;
   const shared = await sharedSubscription(enrolment);
   if (shared === null) return;
-  for (const context of contexts) {
+  const moveOne = async (context: PushEnrolmentContext): Promise<unknown> => {
     const daemon = context.connection.daemonId;
-    if (context.preferences.get(daemon).enabled) {
-      await enrolDaemonPushDevice(context, false, true).catch(() => null);
-      continue;
-    }
+    if (context.preferences.get(daemon).enabled) return await enrolDaemonPushDevice(context, false, true);
     const previous = context.devices.get(daemon);
-    if (previous === null) continue;
+    if (previous === null) return null;
     context.devices.remember(daemon, null);
-    await context.service.revoke(context.connection, previous).catch(() => null);
-  }
+    return await context.service.revoke(context.connection, previous);
+  };
+  await Promise.allSettled(contexts.map(context => withDeadline(moveOne(context), deadlineMs)));
   await shared.unsubscribe().catch(() => false);
 };
 

@@ -92,7 +92,15 @@ describe('the Sessions page across every machine', () => {
     expect(pinned.querySelector('[data-machine-chip]')?.textContent).toBe('studio');
     const sections = [...view.container.querySelectorAll('[data-machine-section]')];
     expect(sections.map(section => section.getAttribute('data-machine-reach'))).toEqual(['online', 'offline']);
-    expect(sections[1]?.querySelector('h2')?.textContent).toContain('offline · last seen 5m');
+    // The down machine says so IN ITS OWN SECTION: a status line under its heading, its rows read-only.
+    expect(sections[1]?.querySelector('h2')?.textContent).toContain('offline');
+    const status = sections[1]?.querySelector('[data-machine-status]');
+    expect(status?.textContent).toContain('Unreachable');
+    expect(status?.textContent).toMatch(/as of \d\d:\d\d/);
+    expect(sections[1]?.querySelector('[data-machine-read-only]')?.getAttribute('title')).toContain(
+      'laptop isn’t reachable right now',
+    );
+    expect(sections[0]?.querySelector('[data-machine-status]')).toBeNull();
     expect(view.container.querySelectorAll('[data-machine-section] [data-machine-chip]')).toHaveLength(0);
     // The count is what is drawn across machines; all three sessions are.
     expect(view.container.querySelector('[title="visible / total sessions"]')?.textContent).toBe('3/3');
@@ -105,9 +113,13 @@ describe('the Sessions page across every machine', () => {
 
     await click(view.container.querySelector('[data-new-session-menu]'), '+ New');
     const items = [...document.querySelectorAll<HTMLButtonElement>('[aria-label="New session on"] [role="menuitem"]')];
-    expect(items.map(item => item.textContent)).toEqual(['studiothis one', 'laptop']);
+    // laptop is offline: still listed, but disabled with its reason, so "+ New" never dead-ends on it.
+    expect(items.map(item => item.textContent)).toEqual(['studiothis one', 'laptoplaptop isn’t reachable right now']);
+    expect(items.map(item => item.disabled)).toEqual([false, true]);
     await interact(() => items[1]?.click());
-    expect(calls.at(-1)).toBe('navigate:/d/laptop/new');
+    expect(calls.at(-1)).not.toBe('navigate:/d/laptop/new');
+    await interact(() => items[0]?.click());
+    expect(calls.at(-1)).toBe('navigate:/d/studio/new');
   });
 
   test('full density draws the full rows per machine, and an emptied machine says where its sessions went', async () => {

@@ -11,14 +11,17 @@
  */
 
 import type { SessionView } from '@ferretry/protocol';
+import type { ReactNode } from 'react';
 import type { MachineLearners } from '../features/learning/passive-learning.tsx';
 import { type AllMachinesView, machineReachLabel } from '../lib/all-machines.ts';
 import { displayCallsign } from '../lib/callsign.ts';
 import type { DaemonId } from '../lib/daemon-connection.ts';
+import { readOnlyReason } from '../lib/machine-outage.ts';
 import { daemonSessionPath } from '../lib/pages/routes.ts';
 import { MachineReachDot, MachineReachWords } from './machine-chip.tsx';
 import { MachineHeadControls, type MoveMachine, useMachineReorder } from './machine-reorder.tsx';
 import { RouteLink } from './route-link.tsx';
+import { SessionMenuContext } from './session-menu-context.ts';
 import { sessionsBarSubline } from './sessions-bar-model.ts';
 import { SessionsBarRow } from './sessions-bar-row.tsx';
 import { sessionTree } from './sessions-bar-tree.ts';
@@ -105,7 +108,10 @@ export function SessionsBarMachines({
               {...(reorder.dragging === machine.daemonId ? { 'data-dragging': '' } : {})}
               {...(reorder.over?.id === machine.daemonId ? { 'data-drop-edge': reorder.over.edge } : {})}
             >
-              <h2 className="fy-sbar__machine-head">
+              <h2
+                className="fy-sbar__machine-head"
+                {...(machine.outage === null ? {} : { title: readOnlyReason(machine.outage) })}
+              >
                 {reorderable ? (
                   <MachineHeadControls id={machine.daemonId} name={machine.name} reorder={reorder} />
                 ) : null}
@@ -119,22 +125,26 @@ export function SessionsBarMachines({
                   {machine.needsYou > 0 ? 'Everything here is in Needs you.' : 'No sessions.'}
                 </p>
               ) : (
-                machine.groups.map(group => (
-                  <div className="fy-sbar__group" key={group.path || group.name}>
-                    <h3 className="fy-sbar__project">
-                      <span className="truncate">{group.name}</span>
-                      <span className="fy-sbar__count">{group.rows.length}</span>
-                    </h3>
-                    <SessionsBarTree
-                      activeSessionId={machine.daemonId === daemonId ? activeSessionId : null}
-                      daemonId={machine.daemonId}
-                      entries={sessionTree(group.rows, machine.sessions)}
-                      isActive={row => active(machine.daemonId, row)}
-                      learns={row => learns(machine.daemonId, row)}
-                      onNavigate={onNavigate}
-                    />
-                  </div>
-                ))
+                // A machine that is down keeps its last rows, openable but READ-ONLY: no row menu, because
+                // Stop, Rename or Migrate would only fail on a machine nobody can reach — and the title says why.
+                <OfflineRows offline={machine.outage !== null}>
+                  {machine.groups.map(group => (
+                    <div className="fy-sbar__group" key={group.path || group.name}>
+                      <h3 className="fy-sbar__project">
+                        <span className="truncate">{group.name}</span>
+                        <span className="fy-sbar__count">{group.rows.length}</span>
+                      </h3>
+                      <SessionsBarTree
+                        activeSessionId={machine.daemonId === daemonId ? activeSessionId : null}
+                        daemonId={machine.daemonId}
+                        entries={sessionTree(group.rows, machine.sessions)}
+                        isActive={row => active(machine.daemonId, row)}
+                        learns={row => learns(machine.daemonId, row)}
+                        onNavigate={onNavigate}
+                      />
+                    </div>
+                  ))}
+                </OfflineRows>
               )}
             </section>
           );
@@ -146,6 +156,14 @@ export function SessionsBarMachines({
       </div>
     </>
   );
+}
+
+/**
+ * Rows of a machine that is down: the row menu withheld (its heading's title says why). No wrapper
+ * element, so the rows keep exactly the layout every other machine's rows have.
+ */
+function OfflineRows({ offline, children }: { readonly offline: boolean; readonly children: ReactNode }) {
+  return offline ? <SessionMenuContext.Provider value={undefined}>{children}</SessionMenuContext.Provider> : children;
 }
 
 /** The collapsed rail's dots across every machine: Needs you first, then each machine's sessions. */

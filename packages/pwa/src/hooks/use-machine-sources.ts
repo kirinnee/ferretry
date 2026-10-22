@@ -37,8 +37,17 @@ const UNREAD: DaemonFleetSlice = Object.freeze({
   error: null,
 });
 
-/** Every listed machine's health fact, as one identity-stable array in the same order. */
-const useHealthStates = (health: ConnectionHealth, ids: readonly DaemonId[]): readonly ConnectionHealthState[] => {
+const UNMEASURED: ConnectionHealthState = { kind: 'unknown' };
+
+/**
+ * Every listed machine's health fact, as one identity-stable array in the same order. The shell's
+ * connection notice reads every paired machine through it too, so one machine's outage is counted
+ * wherever it is said.
+ */
+export const useHealthStates = (
+  health: ConnectionHealth,
+  ids: readonly DaemonId[],
+): readonly ConnectionHealthState[] => {
   const key = ids.join('\u0001');
   const cached = useRef<readonly ConnectionHealthState[]>([]);
   // biome-ignore lint/correctness/useExhaustiveDependencies: the joined ids are the deliberate key
@@ -93,12 +102,14 @@ export function useMachineSources(
       latest.current.map((machine, index): MachineSource => {
         const { daemonId } = machine.connection;
         const slice = fleetSnapshot.daemons.get(daemonId) ?? UNREAD;
+        const state = health[index] ?? UNMEASURED;
         return {
           daemonId,
           name: machine.name,
           slice,
           projects: projects.projects(daemonId),
-          reach: machineReach(health[index] ?? { kind: 'unknown' }, slice, locked.includes(daemonId)),
+          reach: machineReach(state, slice, locked.includes(daemonId)),
+          health: state,
         };
       }),
     [fleetSnapshot, projectsSnapshot, health, lockedKey, names, pairings, projects],

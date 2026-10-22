@@ -17,6 +17,8 @@ type Reconnecting = Extract<ConnectionHealthState, { kind: 'reconnecting' }>;
 const NOW = Date.parse('2026-10-18T12:00:00.000Z');
 const MACHINE = 'workbench';
 const DAEMON = daemonId('workbench-daemon');
+const OTHER = 'studio';
+const OTHER_DAEMON = daemonId('studio-daemon');
 
 const reconnecting = (overrides: Partial<Reconnecting> = {}): Reconnecting => ({
   kind: 'reconnecting',
@@ -32,8 +34,19 @@ const reconnecting = (overrides: Partial<Reconnecting> = {}): Reconnecting => ({
   ...overrides,
 });
 
-const view = (state: ConnectionHealthState, onRetryNow: () => void = () => {}) => (
-  <ConnectionHealthNoticeView state={state} machineName={MACHINE} now={NOW} onRetryNow={onRetryNow} />
+const view = (
+  state: ConnectionHealthState,
+  onRetryNow: (daemon: DaemonId) => void = () => {},
+  other: ConnectionHealthState | null = null,
+) => (
+  <ConnectionHealthNoticeView
+    machines={[
+      { daemonId: DAEMON, name: MACHINE, state },
+      ...(other === null ? [] : [{ daemonId: OTHER_DAEMON, name: OTHER, state: other }]),
+    ]}
+    now={NOW}
+    onRetryNow={onRetryNow}
+  />
 );
 
 const pill = (): HTMLButtonElement | null => document.querySelector('[data-connection-pill]');
@@ -52,10 +65,46 @@ describe('ConnectionHealthNoticeView', () => {
     }
   });
 
-  it('shows the stall banner whatever the outage age says', async () => {
+  it('names a stalled machine in the pill whatever the outage age says, and never draws a banner', async () => {
     const shown = await mount(view(reconnecting({ since: NOW, stalled: true })));
     try {
-      expect(shown.container.querySelector('[data-connection-stall]')).not.toBeNull();
+      expect(must(pill(), 'the pill').textContent).toBe(`${MACHINE} offline`);
+      expect(pill()?.getAttribute('data-connection-pill')).toBe('offline');
+      expect(shown.container.querySelector('[data-connection-stall]')).toBeNull();
+    } finally {
+      await shown.unmount();
+    }
+  });
+
+  it('counts every machine that is down, and says nothing about the one that is fine', async () => {
+    const shown = await mount(
+      view(reconnecting({ stalled: true }), () => {}, reconnecting({ stalled: true, cause: 'daemon-unreachable' })),
+    );
+    try {
+      expect(must(pill(), 'the pill').textContent).toBe('2 machines offline');
+      await shown.render(view({ kind: 'connected' }, () => {}, reconnecting({ stalled: true })));
+      expect(must(pill(), 'the pill').textContent).toBe(`${OTHER} offline`);
+      expect(shown.container.textContent).not.toContain(MACHINE);
+    } finally {
+      await shown.unmount();
+    }
+  });
+
+  it('hides on ×, stays hidden while the same machines are down, and returns when another goes down', async () => {
+    const shown = await mount(view(reconnecting({ stalled: true }), () => {}, { kind: 'connected' }));
+    try {
+      await interact(() =>
+        must(document.querySelector<HTMLButtonElement>('[data-connection-dismiss]'), 'dismiss').click(),
+      );
+      expect(pill()).toBeNull();
+      await shown.render(view(reconnecting({ stalled: true, attempt: 5 }), () => {}, { kind: 'connected' }));
+      expect(pill()).toBeNull();
+      await shown.render(view(reconnecting({ stalled: true }), () => {}, reconnecting({ stalled: true })));
+      expect(must(pill(), 'the pill').textContent).toBe('2 machines offline');
+      // Recovery forgets the dismissal, so the same machine's next outage is said again.
+      await shown.render(view({ kind: 'connected' }, () => {}, { kind: 'connected' }));
+      await shown.render(view(reconnecting({ stalled: true }), () => {}, { kind: 'connected' }));
+      expect(must(pill(), 'the pill').textContent).toBe(`${MACHINE} offline`);
     } finally {
       await shown.unmount();
     }
@@ -83,6 +132,7 @@ describe('ConnectionHealthNoticeView', () => {
       expect(button.tagName).toBe('BUTTON');
       expect(button.textContent).toBe('Reconnecting…· retrying in 4s');
       expect(button.closest('[role="status"]')).not.toBeNull();
+      expect(button.getAttribute('data-connection-pill')).toBe('reconnecting');
       // The theme's busy mark, which pulses rather than turns under reduced motion (spinner.css).
       expect(button.querySelector('svg')?.getAttribute('class')).toBe('fy-spinner');
       await shown.render(view(reconnecting({ attempt: 3 })));
@@ -106,7 +156,7 @@ describe('ConnectionHealthNoticeView', () => {
         { label: 'Direct', detail: 'direct was not reachable (1006)' },
       ],
     });
-    const shown = await mount(view(state, () => retries.push('retry')));
+    const shown = await mount(view(state, daemon => retries.push(String(daemon))));
     try {
       const button = must(pill(), 'the pill');
       expect(button.getAttribute('aria-expanded')).toBe('false');
@@ -116,6 +166,7 @@ describe('ConnectionHealthNoticeView', () => {
       expect(must(pill(), 'the pill').getAttribute('aria-expanded')).toBe('true');
       const body = must(sheet(), 'the sheet');
       expect(body.textContent).toContain(`Trying to reach ${MACHINE} again.`);
+      expect(body.textContent).toContain('The relay is unreachable.');
       expect(must(body.querySelector('[data-connection-meta]'), 'the meta line').textContent).toBe(
         'Lost 12 seconds ago · 2 automatic attempts',
       );
@@ -124,7 +175,7 @@ describe('ConnectionHealthNoticeView', () => {
       );
       expect(carriers).toEqual(['Direct', 'Hosted relay']);
       await interact(() => must(body.querySelector<HTMLButtonElement>('[data-connection-retry]'), 'Retry now').click());
-      expect(retries).toEqual(['retry']);
+      expect(retries).toEqual([String(DAEMON)]);
       await interact(() =>
         must(document.querySelector<HTMLButtonElement>('[aria-label="Close connection details"]'), 'close').click(),
       );
@@ -148,43 +199,31 @@ describe('ConnectionHealthNoticeView', () => {
     }
   });
 
-  it('becomes a plain banner only once stalled, with the cause’s words and both actions', async () => {
+  it('gives each machine that is down its own section in the sheet, with its own cause and Retry now', async () => {
     const retries: string[] = [];
     const shown = await mount(
-      view(reconnecting({ stalled: true, cause: 'daemon-unreachable' }), () => retries.push('x')),
+      view(
+        reconnecting({ stalled: true, cause: 'daemon-unreachable' }),
+        daemon => retries.push(String(daemon)),
+        reconnecting({ stalled: true, cause: 'device-offline', failures: [] }),
+      ),
     );
     try {
-      expect(pill()).toBeNull();
-      const banner = must(shown.container.querySelector('[data-connection-stall]'), 'the banner');
-      expect(banner.getAttribute('data-connection-stall')).toBe('daemon-unreachable');
-      expect(banner.textContent).toContain(`${MACHINE} is asleep or its daemon is stopped`);
-      expect(banner.textContent).toContain('Wake the machine, or start its daemon by running fyd on it.');
-      expect(banner.textContent).not.toContain('1006');
-      await interact(() => must(banner.querySelector<HTMLButtonElement>('[data-connection-retry]'), 'Retry').click());
-      expect(retries).toEqual(['x']);
+      await interact(() => must(pill(), 'the pill').click());
+      const sections = [...must(sheet(), 'the sheet').querySelectorAll('[data-connection-machine]')];
+      expect(sections.map(section => section.getAttribute('data-connection-machine'))).toEqual([
+        String(DAEMON),
+        String(OTHER_DAEMON),
+      ]);
+      expect(sections[0]?.textContent).toContain(`${MACHINE} is asleep or its daemon is stopped.`);
+      expect(sections[0]?.textContent).toContain('Wake the machine, or start its daemon by running fyd on it.');
+      expect(sections[1]?.textContent).toContain('This device is offline.');
       await interact(() =>
-        must(banner.querySelector<HTMLButtonElement>('[data-connection-details]'), 'Details').click(),
+        must(sections[1]?.querySelector<HTMLButtonElement>('[data-connection-retry]'), 'Retry').click(),
       );
-      expect(sheetOpen()).toBe(true);
-    } finally {
-      await shown.unmount();
-    }
-  });
-
-  it('words every cause in the banner', async () => {
-    const headings: Record<Reconnecting['cause'], string> = {
-      'device-offline': 'This device is offline',
-      'daemon-unreachable': `${MACHINE} is asleep or its daemon is stopped`,
-      'relay-unreachable': 'The relay is unreachable',
-      unknown: `Can’t reach ${MACHINE}`,
-    };
-    const shown = await mount(view({ kind: 'unknown' }));
-    try {
-      for (const [cause, heading] of Object.entries(headings)) {
-        await shown.render(view(reconnecting({ stalled: true, cause: cause as Reconnecting['cause'] })));
-        const banner = must(shown.container.querySelector('[data-connection-stall]'), `the ${cause} banner`);
-        expect(banner.querySelector('p')?.textContent).toBe(heading);
-      }
+      expect(retries).toEqual([String(OTHER_DAEMON)]);
+      await shown.render(view({ kind: 'connected' }, () => {}, { kind: 'connected' }));
+      expect(must(sheet(), 'the sheet').textContent).toContain('Every machine is connected.');
     } finally {
       await shown.unmount();
     }
@@ -216,13 +255,14 @@ describe('ConnectionHealthNotice', () => {
   it('reads the machine’s health, follows it, and retries that machine', async () => {
     const fake = fakeHealth({ kind: 'connected' });
     const shown = await mount(
-      <ConnectionHealthNotice health={fake.health} daemonId={DAEMON} machineName={MACHINE} now={() => NOW} />,
+      <ConnectionHealthNotice health={fake.health} machines={[{ daemonId: DAEMON, name: MACHINE }]} now={() => NOW} />,
     );
     try {
       expect(pill()).toBeNull();
       await interact(() => fake.publish(reconnecting({ stalled: true })));
-      const banner = must(shown.container.querySelector('[data-connection-stall]'), 'the banner');
-      await interact(() => must(banner.querySelector<HTMLButtonElement>('[data-connection-retry]'), 'Retry').click());
+      expect(must(pill(), 'the pill').textContent).toBe(`${MACHINE} offline`);
+      await interact(() => must(pill(), 'the pill').click());
+      await interact(() => must(document.querySelector<HTMLButtonElement>('[data-connection-retry]'), 'Retry').click());
       expect(fake.retried).toEqual([DAEMON]);
       await interact(() => fake.publish(reconnecting()));
       expect(must(pill(), 'the pill').textContent).toBe('Reconnecting…· retrying in 4s');

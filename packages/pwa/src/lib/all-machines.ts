@@ -35,6 +35,7 @@ import type { DaemonId } from './daemon-connection.ts';
 import { type FleetProject, groupByProject, type ModeCounts, type SessionGroup } from './fleet-grouping.ts';
 import type { DaemonFleetSlice } from './fleet-store.ts';
 import { reconcileMachineOrder } from './machine-order.ts';
+import { type MachineOutage, machineOutage, unreachableOutage } from './machine-outage.ts';
 
 /**
  * How one machine is reached right now, as its heading's dot says it.
@@ -80,6 +81,8 @@ export interface MachineSource {
   readonly slice: DaemonFleetSlice;
   readonly projects: readonly FleetProject[];
   readonly reach: ListReach;
+  /** Its connection health, so an offline heading can say why; absent reads as unmeasured. */
+  readonly health?: ConnectionHealthState;
 }
 
 /** A session in the pinned group, carrying the machine it belongs to. */
@@ -103,6 +106,14 @@ export interface MachineSection {
   readonly groups: readonly SessionGroup[];
   /** Everything the machine listed, so a row's parent can be named though the filter hid it. */
   readonly sessions: readonly SessionView[];
+  /** Why this machine's rows are not live — said in its own heading, never over the page. */
+  readonly outage: MachineOutage | null;
+  /**
+   * Set while THIS machine's rows are this device's cached copy and its live read is still out, so
+   * only its own heading says "Updating…". `null` once it answered, and for a machine that is down:
+   * a retrying machine is said by its outage, not by a spinner that waits on it.
+   */
+  readonly cachedAt: number | null;
 }
 
 export interface AllMachinesView {
@@ -132,6 +143,16 @@ export interface AllMachinesOptions {
 const SHOW_EVERYTHING: SessionsListFilter = { mode: 'all', showStopped: true };
 
 const everything = (sessions: readonly SessionView[]): readonly SessionView[] => sessions;
+
+const UNMEASURED: ConnectionHealthState = { kind: 'unknown' };
+
+/**
+ * An offline machine's outage. Its reach already said "offline", so one is always produced: a machine
+ * whose slice and health hold no failure to name still reads as unreachable, never as a bare heading.
+ */
+const sectionOutage = (machine: MachineSource): MachineOutage =>
+  machineOutage(machine.name, machine.health ?? UNMEASURED, machine.slice) ??
+  unreachableOutage(machine.name, machine.slice);
 
 /** Can the reader act on this machine's rows now? Only a machine that answered. */
 const actionable = (reach: ListReach): boolean => reach === 'online';
@@ -175,6 +196,8 @@ export const allMachinesView = (
       needsYou: moves.length,
       groups: groupByProject(stays, machine.projects, sortRows),
       sessions: pool,
+      outage: machine.reach === 'offline' ? sectionOutage(machine) : null,
+      cachedAt: machine.reach === 'offline' ? null : (machine.slice.cachedAt ?? null),
     });
   });
   pinned.sort(

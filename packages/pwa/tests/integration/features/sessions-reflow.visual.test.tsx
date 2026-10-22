@@ -7,7 +7,7 @@
  *    off the right edge. The page is rendered here WITHOUT the app's fixed, clipping shell, so any element
  *    wider than the window shows up as `document.scrollWidth > clientWidth`, and every card is also held
  *    inside the window by its own rectangle.
- * 2. THE CONNECTION NOTICE NEVER MOVES THE PAGE. The reconnect pill and the stall banner are overlays: the
+ * 2. THE CONNECTION NOTICE NEVER MOVES THE PAGE. The reconnect pill and the offline pill are overlays: the
  *    header's and the content's boxes are identical connected, reconnecting and stalled.
  *
  * Set `FY_REFLOW_SHOTS_DIR` to keep the captures (written BEFORE the assertions, so a failing run still
@@ -27,7 +27,7 @@ import { SessionDashboard } from '../../../src/components/session-dashboard.tsx'
 import { ConnectionHealthNoticeView } from '../../../src/features/connection/connection-health-notice.tsx';
 import { allMachinesView, type MachineSource } from '../../../src/lib/all-machines.ts';
 import type { ConnectionHealthState } from '../../../src/lib/connection-health.ts';
-import { type DaemonId, daemonConnection } from '../../../src/lib/daemon-connection.ts';
+import { type DaemonId, daemonConnection, daemonId } from '../../../src/lib/daemon-connection.ts';
 import { sessionView } from '../../support/sessions.ts';
 import { wardenAccount, wardenFailover, wardenStatus } from '../../support/warden.ts';
 import { sharedChromium } from '../support/chromium.ts';
@@ -138,7 +138,11 @@ const outage = (overrides: Partial<Reconnecting> = {}): Reconnecting => ({
 const sessionScene = (state: ConnectionHealthState): ReactElement => (
   <div className="flex min-h-dvh flex-col bg-bg text-fg">
     <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-      <ConnectionHealthNoticeView state={state} machineName="workbench" now={NOW} onRetryNow={() => {}} />
+      <ConnectionHealthNoticeView
+        machines={[{ daemonId: daemonId('workbench-daemon'), name: 'workbench', state }]}
+        now={NOW}
+        onRetryNow={() => {}}
+      />
       <header
         data-scene-header=""
         className="flex items-center gap-md border-b border-border-strong bg-[var(--bar-bg)] px-panel py-md font-ui text-ui"
@@ -273,7 +277,7 @@ describe('Sessions page and connection notice never reflow a phone', () => {
       const states: ReadonlyArray<readonly [string, ConnectionHealthState]> = [
         ['connected', { kind: 'connected' }],
         ['pill', outage()],
-        ['banner', outage({ stalled: true, since: NOW - 42_000 })],
+        ['offline', outage({ stalled: true, since: NOW - 42_000 })],
       ];
       const boxes = new Map<string, { header: string; main: string; fixed: boolean; passes: string }>();
       for (const [name, state] of states) {
@@ -303,7 +307,7 @@ describe('Sessions page and connection notice never reflow a phone', () => {
         );
       }
       const rest = must(boxes.get('connected'));
-      for (const name of ['pill', 'banner'] as const) {
+      for (const name of ['pill', 'offline'] as const) {
         const now = must(boxes.get(name));
         should(now.header).equal(rest.header, `${name} moved the header`);
         should(now.main).equal(rest.main, `${name} moved the content`);
