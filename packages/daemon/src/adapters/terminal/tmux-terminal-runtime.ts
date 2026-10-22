@@ -2,12 +2,15 @@ import type { TerminalSize } from '@ferretry/protocol';
 import type { TerminalRecord, TerminalRuntimePort } from '../../lib/terminal/contracts.ts';
 import { decodeTerminalOpener, encodeTerminalOpener } from '../../lib/terminal/ownership.ts';
 import { parseTerminalCapture, type TerminalCapture } from '../../lib/terminal/redraw.ts';
-import { hexInputChunks, terminalPaneTarget, terminalTmuxSessionName } from '../../lib/terminal/runtime-policy.ts';
+import {
+  hexInputChunks,
+  TERMINAL_OWNER_OPTION,
+  terminalPaneTarget,
+  terminalTmuxSessionName,
+} from '../../lib/terminal/runtime-policy.ts';
 import type { TmuxCommandPort } from '../../lib/tmux/contracts.ts';
 import { isTmuxServerAbsent } from '../../lib/tmux/server-absent.ts';
 
-/** The tmux option that marks a session as a terminal; other subsystems must not disturb one. */
-export const TERMINAL_OWNER_OPTION = '@fy_terminal_owner';
 const ID_OPTION = '@fy_terminal_id';
 const TITLE_OPTION = '@fy_terminal_title';
 const CREATED_OPTION = '@fy_terminal_created';

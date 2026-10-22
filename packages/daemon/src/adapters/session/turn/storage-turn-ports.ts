@@ -1,18 +1,9 @@
 import { stat } from 'node:fs/promises';
 import { SessionStateSchema, type SessionStatus } from '@ferretry/protocol';
 import {
-  type CapturedFrame,
   type ClockPort,
-  capturedFrameIsCurrent,
   isTurnStatus,
-  type PaneActivity,
   type PaneState,
-  paneBlockingPrompt,
-  paneShowsActiveWork,
-  paneShowsPermissionPrompt,
-  paneStateFrom,
-  parseHarnessDialog,
-  parsePermissionPrompt,
   type SessionId,
   type SessionTranscriptTail,
   type SessionTurnPorts,
@@ -22,17 +13,13 @@ import {
   type TurnStateChange,
   type TurnWatchSession,
   turnLeftToSettle,
+  turnPaneEvidenceOf,
 } from '../../../lib/index.ts';
 import type { DaemonStorage } from '../../storage/session-storage.ts';
 import { recordTurnChange } from '../observer/session-observation-applier.ts';
+import { PaneFrames, type TurnPaneReader } from './pane-frames.ts';
 
-/** The two terminal reads a tick makes of one tmux session, as `TmuxController` answers them. */
-export interface TurnPaneReader {
-  /** Metadata and activity stamp in one question; `undefined` when the session is not there. */
-  activity(tmuxSession: string): Promise<PaneActivity | undefined>;
-  /** The visible frame; `undefined` when tmux could not capture it. */
-  visible(tmuxSession: string): Promise<string | undefined>;
-}
+export type { TurnPaneReader } from './pane-frames.ts';
 
 interface CachedTail {
   readonly file: string;
@@ -66,8 +53,8 @@ export class StorageTurnPorts implements SessionTurnPorts {
    * stopped with, and the watcher is what clears it — so each one is read until that has happened.
    */
   private readonly settled = new Set<SessionId>();
-  /** The last frame captured of each running pane, by tmux session. */
-  private readonly frames = new Map<string, CapturedFrame>();
+  /** The live pane, captured only when it may have changed — the same reader a session worker uses. */
+  private readonly frames: PaneFrames;
 
   constructor(
     private readonly storage: DaemonStorage,
@@ -76,7 +63,9 @@ export class StorageTurnPorts implements SessionTurnPorts {
     private readonly transcriptFile: (id: SessionId) => Promise<string | undefined>,
     private readonly panes: TurnPaneReader,
     readonly clock: ClockPort,
-  ) {}
+  ) {
+    this.frames = new PaneFrames(this.panes, clock);
+  }
 
   async sessions(): Promise<readonly TurnWatchSession[]> {
     const listed = this.storage.listSessions();
@@ -117,34 +106,12 @@ export class StorageTurnPorts implements SessionTurnPorts {
         ? (raw as { tmuxSession?: unknown }).tmuxSession
         : undefined;
     if (typeof tmuxSession !== 'string' || tmuxSession === '') return undefined;
-    const activity = await this.panes.activity(tmuxSession).catch(() => undefined);
-    if (activity === undefined || activity.dead) {
-      this.frames.delete(tmuxSession);
-      return undefined;
-    }
-    const held = this.frames.get(tmuxSession);
-    if (held !== undefined && capturedFrameIsCurrent(held, activity)) return paneStateFrom(activity, held.visible);
-    const capturedAtSecond = Math.floor(Date.parse(this.clock.now()) / 1_000);
-    const visible = await this.panes.visible(tmuxSession).catch(() => undefined);
-    // A capture that failed reads as a blank live screen, as it always did — but is never held, so the
-    // next tick captures again instead of trusting a frame it never had.
-    if (visible === undefined) this.frames.delete(tmuxSession);
-    else this.frames.set(tmuxSession, { activity, visible, capturedAtSecond });
-    return paneStateFrom(activity, visible ?? '');
+    return await this.frames.state(tmuxSession);
   }
 
   async pane(id: SessionId): Promise<TurnPaneEvidence | undefined> {
     const pane = await this.paneState(id);
-    if (pane === undefined) return undefined;
-    const request = parsePermissionPrompt(pane.visible);
-    return {
-      working: paneShowsActiveWork(pane.visible),
-      atPrompt: pane.promptReady,
-      permission: request !== undefined || paneShowsPermissionPrompt(pane.visible),
-      prompt: paneBlockingPrompt(pane.visible),
-      request,
-      dialog: parseHarnessDialog(pane.visible),
-    };
+    return pane === undefined ? undefined : turnPaneEvidenceOf(pane);
   }
 
   async record(id: SessionId, change: TurnStateChange, at: string): Promise<boolean> {

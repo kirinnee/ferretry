@@ -57,6 +57,7 @@ import {
   CONFIG_ACCEPTED_FILE,
   type ConversionPreview,
   type ConversionSummary as ConversionSummaryView,
+  commandLabel,
   type FleetCredentialList,
   FY_DEFAULT_DAEMON_PORT,
   type Harness,
@@ -150,6 +151,7 @@ import {
   BunSecretChildRunner,
   BunSecretShell,
   BunSqliteIndexFactory,
+  bundledWorkerUrl,
   CachedUsageFeed,
   CliUpdateLauncher,
   CloudflaredLocator,
@@ -318,7 +320,13 @@ import {
   SendMonitorNudge,
   StorageMonitorWaits,
 } from '../src/adapters/session/monitor/index.ts';
-import { InlineObserverHost, SessionObservationApplier } from '../src/adapters/session/observer/index.ts';
+import {
+  DEFAULT_WORKER_SUPERVISOR_SETTINGS,
+  InlineObserverHost,
+  SessionObservationApplier,
+  WorkerObserverHost,
+  WorkerSupervisor,
+} from '../src/adapters/session/observer/index.ts';
 import { StorageSessionProvenanceStore } from '../src/adapters/session/provenance/index.ts';
 import { FileAnswerLedger, TmuxStructuredQuestionDriver } from '../src/adapters/session/question/index.ts';
 import {
@@ -632,6 +640,7 @@ import {
   harnessQuirks,
   InitialAttachmentError,
   InvalidDeadlineRefused,
+  isControlAttachable,
   isTaskBoardError,
   JevTriageGuard,
   jsonObject,
@@ -1528,6 +1537,11 @@ export interface DaemonWorld {
      * browser service, the agent tools and the routes exactly as production builds them.
      */
     browserLauncher: BrowserSessionLauncher,
+    /**
+     * Whether each running session is observed on its own worker thread, and how many threads at most —
+     * the document's `sessionWorkers`, read by `start` like every other configured value.
+     */
+    sessionWorkers: DaemonConfig['sessionWorkers'],
   ) => MountedSubsystems;
   /** The bearer tokens the API accepts, minted into the state home on first boot. */
   readonly credentials: StateApiCredentials;
@@ -6273,7 +6287,9 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
    * of its own, as before. One instance for the whole daemon, because the point is one client — a
    * second transport over the same socket would be a second client and a second set of processes.
    */
-  const tmux = new ControlModeTmuxProcess(Bun.which('tmux') ?? FALLBACK_TMUX, join(paths.home, 'tmux.sock'));
+  const tmuxExecutable = Bun.which('tmux') ?? FALLBACK_TMUX;
+  const tmuxSocket = join(paths.home, 'tmux.sock');
+  const tmux = new ControlModeTmuxProcess(tmuxExecutable, tmuxSocket);
   const launchGuard = testHarnessLaunchGuard(paths.home);
   const stateFiles = countedFileOperations(
     new StateFileSystem(paths, undefined, {
@@ -7659,6 +7675,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
     webrtcEngine: new NodeDataChannelEngine(),
     probeWorkers: async () => [
       await probeBundledWorker('analytics-fold'),
+      await probeBundledWorker('session'),
       { name: 'pdf-decrypt', ...(await probePdfDecryptWorker()) },
     ],
     createDirectCarrier: async (dispatch, sockets, devices, pairing) => {
@@ -7747,6 +7764,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       webrtc,
       harnessDiscovery,
       browserLauncher,
+      sessionWorkers,
     ) => {
       // Handed to `harnessBinary` above, which cannot be given it at construction: the declaration is
       // read from the configuration this boot loaded, and the adapters are built before that happens.
@@ -7789,7 +7807,9 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         new BunProcessProbe(Bun.which('ps') ?? undefined, { tableTtlMs: 10_000 }),
         { binaryName: CLIENT_NAME, servers: new ProjectMcpServers() },
       );
-      const sessionObserver = new InlineObserverHost(
+      // The ONE writer of everything the observer derives, on whichever host it runs.
+      const observationApplier = new SessionObservationApplier(storage, answerLedger, new KeyedSerialExecutor());
+      const inlineObserver = new InlineObserverHost(
         {
           storage,
           questionRoster: () =>
@@ -7801,7 +7821,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           pane: async id => await turnPorts.pane(id),
           answers: answerLedger,
           answerSerial,
-          applier: new SessionObservationApplier(storage, answerLedger, new KeyedSerialExecutor()),
+          applier: observationApplier,
           liveness: {
             screen: async id => await operatorReads.snapshot(id, true, 'screen'),
             transcript: async (id, lines) => await operatorReads.logs(id, lines),
@@ -7812,6 +7832,58 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         },
         new SessionObserver(text => createHash('sha256').update(text, 'utf8').digest('hex')),
       );
+      // ONE THREAD PER RUNNING SESSION (stage 3b): the turn part of every running session is observed on
+      // its own worker, through its own read-only attached tmux client on the daemon's server; this thread
+      // still writes every patch. `sessionWorkers.enabled: false` keeps every session on the inline host.
+      const observerTranscripts = createTranscriptFileResolver(storage);
+      const sessionWorkerSupervisor = sessionWorkers.enabled
+        ? new WorkerSupervisor(
+            {
+              spawn: () => new Worker(bundledWorkerUrl('session'), { type: 'module' }),
+              nowMs: () => Date.now(),
+              schedule: (delayMs, run) => {
+                const timer = setTimeout(run, delayMs);
+                timer.unref();
+                return () => clearTimeout(timer);
+              },
+              notice: (_session, message) => bootNotices.state(message),
+              // A worker's own children and its look time, which no instrument on this thread can see.
+              report: ({ lookMs, children }) => {
+                if (!profilerProbe.recording) return;
+                profilerProbe.activity('session worker look', lookMs);
+                for (const child of children) {
+                  const command = commandLabel(child.argv);
+                  profilerProbe.childStarted(command, false, 'session worker');
+                  profilerProbe.childExited(command, child.wallMs);
+                }
+              },
+            },
+            { ...DEFAULT_WORKER_SUPERVISOR_SETTINGS, cap: sessionWorkers.max },
+          )
+        : undefined;
+      const sessionObserver =
+        sessionWorkerSupervisor === undefined
+          ? inlineObserver
+          : new WorkerObserverHost({
+              inline: inlineObserver,
+              supervisor: sessionWorkerSupervisor,
+              // The pane by the name the lifecycle record gives it, and the transcript the resolver proves:
+              // both resolved here, so the worker never reads a document.
+              binding: async id => {
+                const config = jsonObject(await storage.readConfig(id).catch(() => undefined));
+                const target = config?.tmuxSession;
+                if (typeof target !== 'string' || !isControlAttachable(target)) return undefined;
+                const file = await observerTranscripts.file(id).catch(() => undefined);
+                return {
+                  tmux: { executable: tmuxExecutable, socket: tmuxSocket, target },
+                  ...(file === undefined
+                    ? {}
+                    : { transcript: { file, harness: config?.harness === 'codex' ? 'codex' : 'claude' } }),
+                };
+              },
+              applier: observationApplier,
+              clock,
+            });
       // Ordinary reads contain projection damage per session: a broken answer ledger must not take
       // the whole roster down. The monitor's pass calls the projector raw so it can report the exact
       // failing session instead of silently flattening missing evidence.
@@ -8846,7 +8918,12 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           profiles: new PerformanceProfiler({
             recorder: profilerProbe,
             gauges: new ProcessGauges(),
-            workers: [{ name: 'analytics-fold', inFlight: () => transcriptFolds.inFlight }],
+            workers: [
+              { name: 'analytics-fold', inFlight: () => transcriptFolds.inFlight },
+              ...(sessionWorkerSupervisor === undefined
+                ? []
+                : [{ name: 'session-observer', inFlight: () => sessionWorkerSupervisor.inFlight }]),
+            ],
             clock: millisecondClock,
             timers: {
               every: (intervalMs, tick) => {
@@ -9128,7 +9205,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         // opened with. Two daemons on one host have two homes and therefore two records, so neither
         // can overwrite the other's account of its own loop.
         monitor: new MonitorTickRunner(monitor, join(paths.home, 'monitor.json'), defaultSessionMonitorSettings),
-        turns: sessionObserver.turns,
+        observer: sessionObserver,
         sessionMigrate,
         sessionFork,
         quotaFailover: createQuotaFailoverSubsystem({
@@ -9817,6 +9894,7 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
     webrtc,
     harnessDiscovery,
     world.browserLauncher,
+    config.sessionWorkers,
   );
   // Registered BEFORE the address is bound, like every other acquisition: from here on the daemon can
   // be asked to put an X server, a Chrome and a VNC listener on this host, and whatever it took must
@@ -10097,12 +10175,16 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
   );
   // Whose turn it is: a local pane capture and a transcript stat per live session, every couple of
   // seconds, so a finished turn reads as finished — and notifies — within seconds. Spends no tokens.
-  void activities.run('turn watcher', () => subsystems.turns.run());
+  void activities.run('turn watcher', () => subsystems.observer.turns.run());
   const turnTicks = setInterval(
-    () => void activities.run('turn watcher', () => subsystems.turns.run()),
-    subsystems.turns.intervalMs,
+    () => void activities.run('turn watcher', () => subsystems.observer.turns.run()),
+    subsystems.observer.turns.intervalMs,
   );
-  cleanups.push(() => clearInterval(turnTicks));
+  cleanups.push(() => {
+    clearInterval(turnTicks);
+    // The session workers, and the tmux clients they hold, end with the tick that drove them.
+    subsystems.observer.close();
+  });
   cleanups.push(async () => {
     clearInterval(waitTicks);
     await subsystems.monitor.close();

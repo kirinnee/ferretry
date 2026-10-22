@@ -7,6 +7,8 @@ import {
   LIVENESS_TAIL_LINES,
   type LivenessSample,
   type LivenessTarget,
+  type ObserverFacts,
+  observerFactsOf,
   type ProcessObservation,
   QUESTION_TAIL_EVENTS,
   type SessionId,
@@ -16,11 +18,9 @@ import {
   type SessionTurnPorts,
   SessionTurnWatcher,
   TURN_TAIL_EVENTS,
-  type TurnFacts,
   type TurnPaneEvidence,
   type TurnWatchLoop,
   type TurnWatchSession,
-  turnFactsOf,
   turnLeftToSettle,
 } from '../../../lib/index.ts';
 import type { DaemonStorage } from '../../storage/session-storage.ts';
@@ -78,8 +78,9 @@ const message = (error: unknown): string => (error instanceof Error ? error.mess
  */
 export class InlineObserverHost implements SessionObserverHost {
   readonly turns: TurnWatchLoop;
-  /** What storage last told the host about each session's turn fields. */
-  private readonly facts = new Map<SessionId, TurnFacts>();
+  /** What storage last told the host about each session: its turn and question fields. */
+  private readonly facts = new Map<SessionId, ObserverFacts>();
+  private readonly listeners = new Set<(id: SessionId, facts: ObserverFacts | undefined) => void>();
   /** How many writes storage has told of per session, so a read taken before one never overwrites it. */
   private readonly told = new Map<SessionId, number>();
 
@@ -89,7 +90,20 @@ export class InlineObserverHost implements SessionObserverHost {
   ) {
     // For as long as the storage is open: closing it drops every listener, this one included.
     ports.storage.subscribeStates((id, state) => this.tell(id, state));
-    this.turns = new SessionTurnWatcher(this.turnPorts());
+    this.turns = new SessionTurnWatcher(this.turnPortsFor(async () => await this.turnRoster()));
+  }
+
+  /** Nothing to stop: the timers that drive this host are the composition root's. */
+  close(): void {}
+
+  /**
+   * Every change to what the host knows about a session, as it learns it — a write storage told of, or a
+   * document it read — and `undefined` when a document stopped parsing. A worker host forwards these to
+   * the session's worker, so a worker never reads a document either.
+   */
+  onFacts(listener: (id: SessionId, facts: ObserverFacts | undefined) => void): () => void {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
   }
 
   async project(id: SessionId): Promise<void> {
@@ -152,12 +166,16 @@ export class InlineObserverHost implements SessionObserverHost {
   }
 
   async midTurn(): Promise<number> {
-    return (await this.sessions()).filter(session => session.state.turnState === 'working').length;
+    return (await this.turnRoster()).filter(session => session.state.turnState === 'working').length;
   }
 
-  private turnPorts(): SessionTurnPorts {
+  /**
+   * The turn part's ports over the shared tail, the pane reader and the one writer, for the sessions
+   * `roster` names: this host's own watcher takes every one, a worker host only those no worker observes.
+   */
+  turnPortsFor(roster: () => Promise<readonly TurnWatchSession[]>): SessionTurnPorts {
     return {
-      sessions: async () => await this.sessions(),
+      sessions: roster,
       transcript: async id => {
         const read = await this.ports.tail.tail(id, QUESTION_TAIL_EVENTS);
         return read.kind === 'read' ? read.events.slice(-TURN_TAIL_EVENTS) : undefined;
@@ -172,7 +190,7 @@ export class InlineObserverHost implements SessionObserverHost {
    * Every indexed session with a turn left to decide — live, or not live but still recording a turn to
    * clear — from what storage told the host. A session it was never told about is read, once.
    */
-  private async sessions(): Promise<readonly TurnWatchSession[]> {
+  async turnRoster(): Promise<readonly TurnWatchSession[]> {
     const listed = this.ports.storage.listSessions();
     const roster = new Set(listed.map(session => session.id));
     for (const id of this.facts.keys()) if (!roster.has(id)) this.facts.delete(id);
@@ -188,25 +206,35 @@ export class InlineObserverHost implements SessionObserverHost {
   }
 
   /** A session storage has not told the host about: its document, read and remembered. */
-  private async read(id: SessionId): Promise<TurnFacts | undefined> {
+  private async read(id: SessionId): Promise<ObserverFacts | undefined> {
     const revision = this.revision(id);
     const state = SessionStateSchema.safeParse(await this.ports.storage.readState(id).catch(() => undefined));
     if (!state.success) return undefined;
     this.remember(id, revision, state.data);
-    return this.facts.get(id) ?? turnFactsOf(state.data);
+    return this.facts.get(id) ?? observerFactsOf(state.data);
   }
 
   /** Storage wrote a session's state: remember its turn fields, or forget a document that does not parse. */
   private tell(id: SessionId, raw: JsonValue): void {
     this.told.set(id, this.revision(id) + 1);
     const state = SessionStateSchema.safeParse(raw);
-    if (state.success) this.facts.set(id, turnFactsOf(state.data));
-    else this.facts.delete(id);
+    if (state.success) this.learn(id, observerFactsOf(state.data));
+    else this.learn(id, undefined);
   }
 
   /** Remembers a document read at `revision`, unless storage has told of a newer write since. */
   private remember(id: SessionId, revision: number, state: SessionState): void {
-    if (this.revision(id) === revision) this.facts.set(id, turnFactsOf(state));
+    if (this.revision(id) === revision) this.learn(id, observerFactsOf(state));
+  }
+
+  private learn(id: SessionId, facts: ObserverFacts | undefined): void {
+    if (facts === undefined) this.facts.delete(id);
+    else this.facts.set(id, facts);
+    for (const listener of this.listeners) {
+      try {
+        listener(id, facts);
+      } catch {}
+    }
   }
 
   private revision(id: SessionId): number {

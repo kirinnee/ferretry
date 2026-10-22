@@ -1,19 +1,17 @@
 import { isAbsolute } from 'node:path';
+import { TERMINAL_OWNER_OPTION } from '../../lib/terminal/runtime-policy.ts';
 import type { TmuxCommandPort, TmuxCommandResult, TmuxEventFilter, TmuxEventSource } from '../../lib/tmux/contracts.ts';
 import {
   type ControlReply,
   controlCommandLine,
   controlNonceLine,
   controlReplyProgress,
+  isControlAttachable,
   parseControlGuard,
   parseControlNotification,
   type TmuxControlNotification,
 } from '../../lib/tmux/control-protocol.ts';
-import { TERMINAL_OWNER_OPTION } from '../terminal/tmux-terminal-runtime.ts';
 import { BunTmuxProcess } from './bun-tmux-process.ts';
-
-/** A session name this client may attach to: the same alphabet `sessionTarget` admits. */
-const ATTACHABLE = /^[a-z0-9][a-z0-9_.-]{0,127}$/u;
 
 /** The parts of a child process a control client uses: its pipes, and a way to end it. */
 export interface ControlChild {
@@ -32,7 +30,23 @@ export interface ControlModeOptions {
   readonly nowMs?: () => number;
   /** Starts the long-lived client. Bun's spawn, unreferenced, unless a test substitutes a child. */
   readonly spawn?: (argv: readonly string[]) => ControlChild;
+  /**
+   * The ONE session this client attaches to, and how. Absent, it attaches to the first session that is
+   * not a terminal, `ignore-size,no-output` — the daemon's shared query client. A session worker names
+   * its own session and attaches `read-only` as well.
+   */
+  readonly attach?: { readonly target: string; readonly flags: string };
+  /**
+   * What a command that is not an allowlisted read does: `spawn` gives it its own child (the shared
+   * client); `refuse` answers it as a failure without running anything — a session worker observes and
+   * must never type into the agent it watches. tmux's `read-only` flag does NOT stop an in-band
+   * `send-keys` (it guards keyboard input, not control commands), so this is the guard.
+   */
+  readonly mutations?: 'spawn' | 'refuse';
 }
+
+/** The options with every default filled in; `attach` stays optional because absent is a mode. */
+type ResolvedControlModeOptions = Required<Omit<ControlModeOptions, 'attach'>> & Pick<ControlModeOptions, 'attach'>;
 
 interface Pending {
   readonly nonce: string;
@@ -217,7 +231,7 @@ export class ControlModeTmuxProcess implements TmuxCommandPort, TmuxEventSource 
     readonly filter: TmuxEventFilter;
     readonly listener: (notification: TmuxControlNotification) => void;
   }>();
-  private readonly options: Required<ControlModeOptions>;
+  private readonly options: ResolvedControlModeOptions;
 
   constructor(
     private readonly executable: string,
@@ -233,13 +247,23 @@ export class ControlModeTmuxProcess implements TmuxCommandPort, TmuxEventSource 
       retryAfterMs: options.retryAfterMs ?? 10_000,
       nowMs: options.nowMs ?? (() => Date.now()),
       spawn: options.spawn ?? spawnControlChild,
+      mutations: options.mutations ?? 'spawn',
+      ...(options.attach === undefined ? {} : { attach: options.attach }),
     };
+    if (options.attach !== undefined && !isControlAttachable(options.attach.target))
+      throw new Error(`${JSON.stringify(options.attach.target)} is not a session a control client may attach to`);
   }
 
   async execute(arguments_: readonly string[], stdin?: string): Promise<TmuxCommandResult> {
     const line =
       stdin === undefined && arguments_[0]?.startsWith('-') === false ? controlCommandLine(arguments_) : undefined;
     if (line === undefined) {
+      if (this.options.mutations === 'refuse')
+        return {
+          code: 1,
+          stdout: '',
+          stderr: `refused: this client only reads, and ${arguments_[0] ?? 'nothing'} is not a read\n`,
+        };
       const result = await this.spawned.execute(arguments_, stdin);
       // A command that changed the server may have started it, or given it a session to attach to.
       if (result.code === 0) this.retryAtMs = 0;
@@ -286,7 +310,7 @@ export class ControlModeTmuxProcess implements TmuxCommandPort, TmuxEventSource 
   }
 
   private async open(): Promise<ControlConnection | undefined> {
-    const target = await this.attachTarget();
+    const target = this.options.attach?.target ?? (await this.attachTarget());
     let child: ControlChild | undefined;
     if (target !== undefined && !this.closed)
       try {
@@ -300,7 +324,7 @@ export class ControlModeTmuxProcess implements TmuxCommandPort, TmuxEventSource 
           '-t',
           `=${target}`,
           '-f',
-          'ignore-size,no-output',
+          this.options.attach?.flags ?? 'ignore-size,no-output',
         ]);
       } catch {
         child = undefined;
@@ -335,7 +359,7 @@ export class ControlModeTmuxProcess implements TmuxCommandPort, TmuxEventSource 
     if (listed?.code !== 0) return undefined;
     for (const row of listed.stdout.split('\n')) {
       const [name = '', owner = ''] = row.split('\t');
-      if (owner === '' && ATTACHABLE.test(name)) return name;
+      if (owner === '' && isControlAttachable(name)) return name;
     }
     return undefined;
   }

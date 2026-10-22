@@ -18,6 +18,7 @@ import { SocketEndpointSchema } from '@ferretry/relay';
 import { z } from 'zod';
 import { HarnessDiscoveryDocumentSchema } from '../core/harness-readiness.ts';
 import { DEFAULT_CAPABILITY_GRANTS } from '../grants/policy.ts';
+import { DEFAULT_SESSION_WORKER_CAP } from '../session/observer/plan.ts';
 import type { RunOverrides } from './arguments.ts';
 import {
   type DaemonCarrierSet,
@@ -238,6 +239,18 @@ export const DaemonConfigDocumentSchema = z
     secretsFile: z.string().trim().min(1).optional(),
     healthIntervalSeconds: z.number().int().positive().default(30),
     transcriptReconcileSeconds: z.number().int().positive().default(2),
+    /**
+     * ONE THREAD PER RUNNING SESSION (docs/design/session-workers.md, stage 3b): each running session's
+     * turn is observed on its own worker thread, through its own read-only attached tmux client, and
+     * written by this daemon's main thread as before. `enabled: false` observes every session on the main
+     * thread (stage 3a). `max` dedicated threads, then sessions are pooled into them.
+     */
+    sessionWorkers: z
+      .object({
+        enabled: z.boolean().default(true),
+        max: z.number().int().min(1).max(64).default(DEFAULT_SESSION_WORKER_CAP),
+      })
+      .prefault({}),
     usage: UsageFeedConfigSchema.prefault({}),
     /** The rendezvous carrier, if this host has one. Absent means direct-only. */
     relay: DaemonRelayConfigSchema.optional(),

@@ -57,3 +57,10 @@ export function terminalMetadataIsSane(value: TerminalRuntimeMetadata): boolean 
     value.lastActivityAtMs >= value.createdAtMs
   );
 }
+
+/**
+ * The tmux option that marks a session as a terminal; other subsystems must not disturb one. Here, in a
+ * module with no value imports, so a lean session-worker thread can read it without loading the terminal
+ * runtime (and zod with it).
+ */
+export const TERMINAL_OWNER_OPTION = '@fy_terminal_owner';

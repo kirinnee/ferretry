@@ -24,8 +24,10 @@ import should from 'should';
 import {
   BunSqliteIndexFactory,
   BunTmuxProcess,
+  bundledWorkerUrl,
   type DaemonStorage,
   DaemonStorageFactory,
+  DEFAULT_WORKER_SUPERVISOR_SETTINGS,
   FileAnswerLedger,
   InlineObserverHost,
   KeyedSerialExecutor,
@@ -36,6 +38,8 @@ import {
   StateHomeLayout,
   StorageTurnPorts,
   SystemClock,
+  WorkerObserverHost,
+  WorkerSupervisor,
 } from '../../../../src/adapters/index.ts';
 import { NodeTranscriptSource } from '../../../../src/adapters/transcript/index.ts';
 import {
@@ -47,8 +51,10 @@ import {
   projectObservedRuntime,
   projectStructuredQuestion,
   reconcileAnswerEvidence,
+  type SessionBinding,
   type SessionId,
   SessionObserver,
+  type SessionObserverHost,
   type SessionTranscriptTail,
   SessionTurnWatcher,
   structuredQuestionStatePatch,
@@ -143,14 +149,18 @@ interface Pair {
   readonly frame: (text: string) => Promise<void>;
   readonly append: (text: string) => Promise<void>;
   readonly write: (fields: Partial<SessionState>) => Promise<void>;
+  /** Looks a session worker answered, failures included; `undefined` for the inline host. */
+  readonly workerLooks: () => { readonly answered: number; readonly failed: number } | undefined;
 }
 
-async function pair(harness: 'claude' | 'codex', initialFrame: string): Promise<Pair> {
+type HostKind = 'inline' | 'worker';
+
+async function pair(harness: 'claude' | 'codex', initialFrame: string, kind: HostKind): Promise<Pair> {
   const tmux = Bun.which('tmux');
   if (tmux === null) throw new Error('tmux is required for observer parity coverage');
   const root = await mkdtemp(join(tmpdir(), 'fy-observer-parity-'));
-  const id = parseSessionId(`parity-${harness}`);
-  const tmuxSession = `fy-parity-${harness}`;
+  const id = parseSessionId(`parity-${harness}-${kind}`);
+  const tmuxSession = `fy-parity-${harness}-${kind}`;
   const frameFile = join(root, 'frame.txt');
   await writeFile(frameFile, initialFrame);
   const player = join(root, 'player.sh');
@@ -240,9 +250,10 @@ async function pair(harness: 'claude' | 'codex', initialFrame: string): Promise<
     });
   };
 
-  // THE INLINE HOST.
+  // THE HOST UNDER TEST: the inline host, or the worker host over it with a real session-worker thread.
   const hostPanes = new StorageTurnPorts(host.storage, host.tail, async () => host.transcript, controller, clock);
-  const observer = new InlineObserverHost(
+  const applier = new SessionObservationApplier(host.storage, host.ledger, new KeyedSerialExecutor());
+  const inline = new InlineObserverHost(
     {
       storage: host.storage,
       questionRoster: () => host.storage.listSessions().map(session => session.id),
@@ -250,7 +261,7 @@ async function pair(harness: 'claude' | 'codex', initialFrame: string): Promise<
       pane: async session => await hostPanes.pane(session),
       answers: host.ledger,
       answerSerial: new KeyedSerialExecutor(),
-      applier: new SessionObservationApplier(host.storage, host.ledger, new KeyedSerialExecutor()),
+      applier,
       liveness: {
         screen: async () => {
           throw new Error('not looked at here');
@@ -267,6 +278,41 @@ async function pair(harness: 'claude' | 'codex', initialFrame: string): Promise<
     },
     new SessionObserver(text => createHash('sha256').update(text, 'utf8').digest('hex')),
   );
+  let observer: SessionObserverHost = inline;
+  let looks: { answered: number; failed: number } | undefined;
+  if (kind === 'worker') {
+    looks = { answered: 0, failed: 0 };
+    const supervisor = new WorkerSupervisor(
+      {
+        spawn: () => new Worker(bundledWorkerUrl('session'), { type: 'module' }),
+        nowMs: () => Date.now(),
+        schedule: (delayMs, run) => {
+          const timer = setTimeout(run, delayMs);
+          return () => clearTimeout(timer);
+        },
+        notice: () => undefined,
+        report: () => {
+          if (looks !== undefined) looks.answered += 1;
+        },
+      },
+      { ...DEFAULT_WORKER_SUPERVISOR_SETTINGS, cap: 8 },
+    );
+    const binding = async (): Promise<SessionBinding> => ({
+      tmux: { executable: tmux, socket, target: tmuxSession },
+      transcript: { file: host.transcript, harness },
+    });
+    observer = new WorkerObserverHost({ inline, supervisor, binding, applier, clock });
+    cleanups.add(async () => observer.close());
+    // Hosted before the scenario starts, so both sides begin it with no previous observation.
+    const [session] = await inline.turnRoster();
+    if (session === undefined) throw new Error('the session is not on the roster');
+    supervisor.reconcile([{ id, facts: session.state, binding: await binding() }]);
+    const started = Date.now();
+    while (!supervisor.hosts(id)) {
+      if (Date.now() - started > 15_000) throw new Error('the session worker never started');
+      await Bun.sleep(20);
+    }
+  }
 
   return {
     id,
@@ -290,6 +336,7 @@ async function pair(harness: 'claude' | 'codex', initialFrame: string): Promise<
       await appendFile(reference.transcript, text);
       await appendFile(host.transcript, text);
     },
+    workerLooks: () => looks,
     write: async fields => {
       for (const storage of [reference.storage, host.storage])
         await storage.updateState(id, raw => ({ ...(raw as Record<string, unknown>), ...fields }));
@@ -302,90 +349,96 @@ const journal = async (side: Side, id: SessionId) =>
 const state = async (side: Side, id: SessionId) => await side.storage.readState(id);
 
 async function shouldAgree(subject: Pair): Promise<void> {
+  // The worker host really looked through its thread, not only through the inline fallback.
+  const looks = subject.workerLooks();
+  if (looks !== undefined) should(looks.answered).be.above(0);
   should(await journal(subject.host, subject.id)).deepEqual(await journal(subject.reference, subject.id));
   should(await state(subject.host, subject.id)).deepEqual(await state(subject.reference, subject.id));
   should(await subject.host.ledger.all(subject.id)).deepEqual(await subject.reference.ledger.all(subject.id));
 }
 
-describe('the inline observer host against the pre-3a path, over real panes and transcripts', () => {
-  it('should journal and record the same Claude turn: idle, working, permission, ended', async () => {
-    // Arrange
-    const subject = await pair('claude', CLAUDE_IDLE);
-    await subject.frame(CLAUDE_IDLE);
+describe.each([['inline'], ['worker']] as const)(
+  'the %s observer host against the pre-3a path, over real panes and transcripts',
+  kind => {
+    it('should journal and record the same Claude turn: idle, working, permission, ended', async () => {
+      // Arrange
+      const subject = await pair('claude', CLAUDE_IDLE, kind);
+      await subject.frame(CLAUDE_IDLE);
 
-    // Act
-    await subject.look();
-    await subject.append(claudeUser('u1', 'go'));
-    await subject.frame(CLAUDE_WORKING);
-    await subject.look();
-    await subject.frame(CLAUDE_PERMISSION);
-    await subject.look();
-    await subject.look();
-    await subject.frame(CLAUDE_WORKING);
-    await subject.look();
-    await subject.append(claudeAnswer('a1', 'end_turn', [{ type: 'text', text: 'done' }]));
-    await subject.frame(CLAUDE_IDLE);
-    await subject.look({ questions: true });
-    await subject.look({ questions: true });
+      // Act
+      await subject.look();
+      await subject.append(claudeUser('u1', 'go'));
+      await subject.frame(CLAUDE_WORKING);
+      await subject.look();
+      await subject.frame(CLAUDE_PERMISSION);
+      await subject.look();
+      await subject.look();
+      await subject.frame(CLAUDE_WORKING);
+      await subject.look();
+      await subject.append(claudeAnswer('a1', 'end_turn', [{ type: 'text', text: 'done' }]));
+      await subject.frame(CLAUDE_IDLE);
+      await subject.look({ questions: true });
+      await subject.look({ questions: true });
 
-    // Assert
-    const turns = (await journal(subject.host, subject.id)).filter(event => event.type.startsWith('turn.'));
-    should(turns.map(event => (event.data as { to: string | null }).to)).deepEqual([
-      'your-turn',
-      'working',
-      'needs-input',
-      'working',
-      'your-turn',
-    ]);
-    await shouldAgree(subject);
-  });
+      // Assert
+      const turns = (await journal(subject.host, subject.id)).filter(event => event.type.startsWith('turn.'));
+      should(turns.map(event => (event.data as { to: string | null }).to)).deepEqual([
+        'your-turn',
+        'working',
+        'needs-input',
+        'working',
+        'your-turn',
+      ]);
+      await shouldAgree(subject);
+    });
 
-  it('should journal and record the same Codex turn and its observed runtime', async () => {
-    // Arrange
-    const subject = await pair('codex', CODEX_IDLE);
-    await subject.frame(CODEX_IDLE);
+    it('should journal and record the same Codex turn and its observed runtime', async () => {
+      // Arrange
+      const subject = await pair('codex', CODEX_IDLE, kind);
+      await subject.frame(CODEX_IDLE);
 
-    // Act
-    await subject.append(codexEvent('task_started'));
-    await subject.append(CODEX_CONTEXT);
-    await subject.frame(CODEX_WORKING);
-    await subject.look({ questions: true });
-    await subject.append(codexEvent('task_complete'));
-    await subject.frame(CODEX_IDLE);
-    await subject.look();
-    await subject.look();
+      // Act
+      await subject.append(codexEvent('task_started'));
+      await subject.append(CODEX_CONTEXT);
+      await subject.frame(CODEX_WORKING);
+      await subject.look({ questions: true });
+      await subject.append(codexEvent('task_complete'));
+      await subject.frame(CODEX_IDLE);
+      await subject.look();
+      await subject.look();
 
-    // Assert
-    const ended = (await state(subject.host, subject.id)) as Record<string, unknown>;
-    should(ended.observedModel).equal('gpt-5.5');
-    should(ended.turnState).equal('your-turn');
-    await shouldAgree(subject);
-  });
+      // Assert
+      const ended = (await state(subject.host, subject.id)) as Record<string, unknown>;
+      should(ended.observedModel).equal('gpt-5.5');
+      should(ended.turnState).equal('your-turn');
+      await shouldAgree(subject);
+    });
 
-  it('should project the same structured question, its answer, and the stop that ends the turn', async () => {
-    // Arrange
-    const subject = await pair('claude', CLAUDE_WORKING);
-    await subject.frame(CLAUDE_WORKING);
+    it('should project the same structured question, its answer, and the stop that ends the turn', async () => {
+      // Arrange
+      const subject = await pair('claude', CLAUDE_WORKING, kind);
+      await subject.frame(CLAUDE_WORKING);
 
-    // Act — asked: the question pass projects it, the turn reads needs-input.
-    await subject.append(claudeUser('u1', 'go'));
-    await subject.append(ASK);
-    await subject.look({ questions: true });
-    await subject.look({ questions: true });
-    const asked = (await state(subject.host, subject.id)) as Record<string, unknown>;
-    // Answered in the harness: the picker clears and the turn goes on.
-    await subject.append(ANSWER);
-    await subject.look({ questions: true });
-    await subject.look({ questions: true });
-    // Stopped: the turn record is cleared and never given back.
-    await subject.write({ status: 'stopped' });
-    await subject.look({ questions: true });
-    await subject.look();
+      // Act — asked: the question pass projects it, the turn reads needs-input.
+      await subject.append(claudeUser('u1', 'go'));
+      await subject.append(ASK);
+      await subject.look({ questions: true });
+      await subject.look({ questions: true });
+      const asked = (await state(subject.host, subject.id)) as Record<string, unknown>;
+      // Answered in the harness: the picker clears and the turn goes on.
+      await subject.append(ANSWER);
+      await subject.look({ questions: true });
+      await subject.look({ questions: true });
+      // Stopped: the turn record is cleared and never given back.
+      await subject.write({ status: 'stopped' });
+      await subject.look({ questions: true });
+      await subject.look();
 
-    // Assert
-    should(asked.status).equal('awaiting_question');
-    should(asked.turnState).equal('needs-input');
-    should(((await state(subject.host, subject.id)) as Record<string, unknown>).turnState).be.undefined();
-    await shouldAgree(subject);
-  });
-});
+      // Assert
+      should(asked.status).equal('awaiting_question');
+      should(asked.turnState).equal('needs-input');
+      should(((await state(subject.host, subject.id)) as Record<string, unknown>).turnState).be.undefined();
+      await shouldAgree(subject);
+    });
+  },
+);

@@ -23,10 +23,10 @@ import type { QuotaFailoverLoop } from '../../quota-failover/index.ts';
 import type { SecuritySettingsService } from '../../security/index.ts';
 import type { SessionFilesystem } from '../../session/filesystem/index.ts';
 import type { MonitorLoop } from '../../session/monitor/types.ts';
+import type { SessionObserverHost } from '../../session/observer/host.ts';
 import type { OperatorReadService } from '../../session/reads/index.ts';
 import type { SessionRuntimeSubsystem } from '../../session/runtime-control/types.ts';
 import type { SendTrackingLoop } from '../../session/send/tracker.ts';
-import type { TurnWatchLoop } from '../../session/turn/service.ts';
 import type { StepUpService } from '../../step-up/index.ts';
 import type { DaemonUpdateSubsystem } from '../../update/index.ts';
 import type { MillisecondClockPort } from '../boot.ts';
@@ -269,10 +269,11 @@ export interface MountedSubsystems {
    *  A background loop nothing constructs is the same absent capability as an unserved route, and
    *  before this field the daemon recorded every park and woke none of them. */
   readonly monitor: MonitorLoop;
-  /** The turn watcher: the ONE owner of whose turn it is in every live session — working, the
-   *  person's turn, or blocked on a person. It serves no route; the spinner, the status dots and the
-   *  notifications read the field it writes, and the journal event it appends wakes every open page. */
-  readonly turns: TurnWatchLoop;
+  /** The session observer: the ONE owner of whose turn it is in every live session — working, the
+   *  person's turn, or blocked on a person — on the main thread or one worker per running session. It
+   *  serves no route; the spinner, the status dots and the notifications read the field it writes, and
+   *  the journal event it appends wakes every open page. `turns` is the 2 s turn tick `start` arms. */
+  readonly observer: SessionObserverHost;
   /** Changing what a RUNNING session is running: which model, and how hard it thinks. Independent
    *  controls, because the browser offers them as two chips and the harnesses genuinely differ —
    *  one takes a native command, the other has only a modal picker to drive. It also serves the
