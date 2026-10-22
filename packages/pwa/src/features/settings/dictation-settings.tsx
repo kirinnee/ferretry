@@ -59,6 +59,7 @@ import {
 } from '../../lib/stt/stt-settings.ts';
 import { Textarea } from '../../shell/primitives.tsx';
 import { DictationShortcutPicker } from './dictation-shortcut-picker.tsx';
+import { type DeviceClass, type DeviceClassGlobalLike, deviceClassOf } from '../../lib/stt/engine-defaults.ts';
 import { EngineCatalogList, type TrialClock } from './engine-catalog-list.tsx';
 import type { MachineVoiceCleanup } from './use-machine-voice-cleanup.ts';
 import { VoiceCleanupSettings } from './voice-cleanup-settings.tsx';
@@ -158,6 +159,8 @@ export interface DictationSettingsProps {
   readonly voices?: OnDeviceVoices | null;
   /** The clock Try it runs on. Injected by tests; the page's otherwise. */
   readonly trialClock?: TrialClock;
+  /** Phone or computer, for the default engine. Read from the page when omitted. */
+  readonly deviceClass?: DeviceClass;
   /** The machine whose `voice.yaml` holds the cleanup prompts; the section is absent without one. */
   readonly daemon?: DaemonConnection;
   /** Test and harness seam: the machine's cleanup settings, instead of reading them through the app. */
@@ -173,10 +176,12 @@ export function DictationSettings({
   voice,
   voices,
   trialClock,
+  deviceClass,
   daemon,
   voiceCleanup,
 }: DictationSettingsProps) {
   const detectedProvider = useMemo(() => browserRecognitionProvider(), []);
+  const pageDeviceClass = useMemo(() => deviceClassOf(globalThis as DeviceClassGlobalLike), []);
   const provider = recognitionProvider ?? detectedProvider;
   const support = recognitionSupport ?? provider.support;
   const contextVoice = useParakeetVoice();
@@ -226,6 +231,7 @@ export function DictationSettings({
               browserSupport={support}
               browserProvider={provider}
               {...(trialClock === undefined ? {} : { clock: trialClock })}
+              deviceClass={deviceClass ?? pageDeviceClass}
             />
           </section>
 

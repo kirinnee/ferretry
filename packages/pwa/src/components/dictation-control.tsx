@@ -58,6 +58,12 @@ import { useDictationDebugSnapshot, useSttSettingsStore } from '../lib/store.tsx
 import type { BrowserRecognitionProvider } from '../lib/stt/browser-recognition.ts';
 import type { SelectionLike } from '../lib/stt/draft.ts';
 import type { MicMeterPort } from '../lib/stt/level-monitor.ts';
+import {
+  type DeviceClass,
+  type DeviceClassGlobalLike,
+  deviceClassOf,
+  effectiveEngine,
+} from '../lib/stt/engine-defaults.ts';
 import { onDeviceModel } from '../lib/stt/model-catalog.ts';
 import type { RemoteEnhancementFetch } from '../lib/stt/remote-enhancement.ts';
 import { isOnDeviceEngine, isRemoteEnhancementProvider, type SttSettings } from '../lib/stt/stt-settings.ts';
@@ -107,6 +113,8 @@ export interface DictationControlProps {
    * marked `aria-hidden`, so only the visible one can start a microphone.
    */
   readonly composerRef?: { current: HTMLElement | null };
+  /** Phone or computer, for the default engine (`lib/stt/engine-defaults.ts`). Read from the page when omitted. */
+  readonly deviceClass?: DeviceClass;
   readonly disabled?: boolean;
   /**
    * `compact` keeps the 44px square icon-only, for the mobile action column.
@@ -197,17 +205,20 @@ export function useDictationBundle(props: DictationControlProps): DictationBundl
     now = () => performance.now(),
     clockIntervalMs = 250,
   } = props;
-  // A device that has not picked an engine dictates with its machine's default (voice.yaml), if it names one.
+  // A device that has not picked an engine dictates with its machine's default (voice.yaml), if it names
+  // one, and otherwise with the default for a phone or a computer (`lib/stt/engine-defaults.ts`).
   const machineEngine = useMachineVoiceEngine(deviceSettings.engine === null ? props.daemon : undefined);
+  const pageDeviceClass = useMemo(() => deviceClassOf(globalThis as DeviceClassGlobalLike), []);
+  const deviceClass = props.deviceClass ?? pageDeviceClass;
   const voiceCleanup = useMachineVoiceCleanup(
     isRemoteEnhancementProvider(deviceSettings.enhancementProvider) ? props.daemon : undefined,
   ).cleanup;
   const settings = useMemo(
     () =>
-      deviceSettings.engine === null && machineEngine !== null
-        ? { ...deviceSettings, engine: machineEngine }
+      deviceSettings.engine === null
+        ? { ...deviceSettings, engine: effectiveEngine(null, machineEngine, deviceClass) }
         : deviceSettings,
-    [deviceSettings, machineEngine],
+    [deviceSettings, machineEngine, deviceClass],
   );
 
   const [open, setOpen] = useState(false);

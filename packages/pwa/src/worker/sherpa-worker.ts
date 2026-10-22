@@ -95,7 +95,11 @@ const core = new SherpaWorkerCore({
                       cachedDecoder: path('cached-decoder'),
                     },
                   }
-                : { nemoCtc: { model: path('model') } }),
+                : {
+                    // NeMo's TDT transducer: sherpa reads the duration head from the model type.
+                    transducer: { encoder: path('encoder'), decoder: path('decoder'), joiner: path('joiner') },
+                    modelType: 'nemo_transducer',
+                  }),
               tokens: path('tokens'),
               numThreads: 1,
               provider: 'cpu',

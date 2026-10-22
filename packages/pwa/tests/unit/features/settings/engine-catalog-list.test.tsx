@@ -8,6 +8,8 @@
 import { describe, expect, it } from 'bun:test';
 import {
   activeEngineNote,
+  defaultEngineBadge,
+  defaultEngineNote,
   EngineCatalogList,
   type EngineCatalogListProps,
   INSTALL_FOOTNOTE,
@@ -393,5 +395,19 @@ describe('activeEngineNote', () => {
     expect(activeEngineNote('browser')).toBe(BROWSER_ACTIVE_NOTE);
     expect(activeEngineNote('parakeet')).toBe(PARAKEET_ACTIVE_NOTE);
     expect(activeEngineNote('unknown' as never)).toBe('This engine is active: audio never leaves this device.');
+  });
+});
+
+describe('the default engine', () => {
+  it('marks the engine this device dictates with until it chooses, and says so while nothing is chosen', async () => {
+    const view = await mount(<EngineCatalogList {...props({ deviceClass: 'phone' })} />);
+    expect(row(view.container, 'parakeet-tdt-110m').textContent).toContain(defaultEngineBadge('phone'));
+    expect(row(view.container, 'parakeet').textContent).not.toContain('Default on this');
+    expect(view.container.textContent).toContain(defaultEngineNote('phone'));
+    expect(defaultEngineNote('phone')).toContain('Parakeet 110M');
+    await view.render(<EngineCatalogList {...props({ deviceClass: 'computer', value: 'browser' })} />);
+    expect(row(view.container, 'parakeet').textContent).toContain(defaultEngineBadge('computer'));
+    expect(view.container.textContent).not.toContain('Nothing chosen yet');
+    await view.unmount();
   });
 });

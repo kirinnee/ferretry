@@ -50,6 +50,7 @@ import type {
   OnDeviceVoice,
 } from '../../lib/stt/on-device-voice.ts';
 import type { OnDeviceVoices } from '../../lib/stt/on-device-voices.ts';
+import { DEFAULT_ON_DEVICE_ENGINE, type DeviceClass } from '../../lib/stt/engine-defaults.ts';
 import { type DictationEngineId, isOnDeviceEngine } from '../../lib/stt/stt-settings.ts';
 import { Button } from '../../shell/primitives.tsx';
 import {
@@ -87,8 +88,17 @@ const languagesOf = (model: OnDeviceModel): string =>
     : `${model.languages.length} languages`;
 
 /** The active-engine sentence. The on-device one is the only place the promise is made. */
-export const activeEngineNote = (engine: DictationEngineId | null): string => {
-  if (engine === null) return NO_ENGINE_NOTE;
+/** What a device dictates with until it chooses, when it has a default. */
+export const defaultEngineNote = (device: DeviceClass): string => {
+  const model = ON_DEVICE_MODELS.find(entry => entry.id === DEFAULT_ON_DEVICE_ENGINE[device]);
+  return `Nothing chosen yet, so this ${device} dictates with ${model?.shortName ?? 'its default'}, after you install it. Choose another any time.`;
+};
+
+/** The badge on the engine a device dictates with by default. */
+export const defaultEngineBadge = (device: DeviceClass): string => `Default on this ${device}`;
+
+export const activeEngineNote = (engine: DictationEngineId | null, device?: DeviceClass): string => {
+  if (engine === null) return device === undefined ? NO_ENGINE_NOTE : defaultEngineNote(device);
   if (engine === 'browser') return BROWSER_ACTIVE_NOTE;
   const model = ON_DEVICE_MODELS.find(entry => entry.id === engine);
   return `${model?.shortName ?? 'This engine'} is active: audio never leaves this device.`;
@@ -450,6 +460,7 @@ function ModelRow({
   group,
   onChoose,
   clock,
+  defaultBadge,
 }: {
   readonly model: OnDeviceModel;
   readonly voice: OnDeviceVoice | null;
@@ -457,6 +468,8 @@ function ModelRow({
   readonly group: string;
   onChoose(engine: DictationEngineId): void;
   readonly clock: TrialClock;
+  /** Set on the engine this device dictates with by default. */
+  readonly defaultBadge?: string;
 }) {
   const facts = [
     FAMILY_LABELS[model.family],
@@ -474,6 +487,7 @@ function ModelRow({
       onChoose={onChoose}
     >
       <div className="flex flex-wrap gap-1">
+        {defaultBadge === undefined ? null : <Badge tone="accent">{defaultBadge}</Badge>}
         <Badge tone="ok">{ON_DEVICE_BADGE}</Badge>
         {model.streaming ? <Badge tone="accent">{LIVE_WORDS_BADGE}</Badge> : null}
         {!model.streaming && model.nearLive ? <Badge tone="muted">{NEAR_LIVE_BADGE}</Badge> : null}
@@ -526,6 +540,8 @@ export interface EngineCatalogListProps {
   readonly clock?: TrialClock;
   /** The models to list. The catalog by default; suites list their own. */
   readonly models?: readonly OnDeviceModel[];
+  /** Phone or computer: marks the engine this device dictates with until it chooses one. */
+  readonly deviceClass?: DeviceClass;
   readonly className?: string;
 }
 
@@ -538,6 +554,7 @@ export function EngineCatalogList({
   browserProvider,
   clock = pageClock,
   models = ON_DEVICE_MODELS,
+  deviceClass,
   className,
 }: EngineCatalogListProps) {
   const group = useId();
@@ -559,6 +576,9 @@ export function EngineCatalogList({
             group={group}
             onChoose={onChange}
             clock={clock}
+            {...(deviceClass !== undefined && DEFAULT_ON_DEVICE_ENGINE[deviceClass] === model.id
+              ? { defaultBadge: defaultEngineBadge(deviceClass) }
+              : {})}
           />
         ))}
         <RowFrame
@@ -598,7 +618,7 @@ export function EngineCatalogList({
       >
         {onDevice ? <ShieldCheck size={14} aria-hidden="true" className="mt-0.5 shrink-0" /> : null}
         {value === 'browser' ? <Radio size={14} aria-hidden="true" className="mt-0.5 shrink-0" /> : null}
-        <span>{activeEngineNote(value)}</span>
+        <span>{activeEngineNote(value, deviceClass)}</span>
       </p>
     </fieldset>
   );
