@@ -561,6 +561,32 @@ describe('CredentialStatusService', () => {
     should((await world.heads.read('work'))?.conclusion?.fingerprint).equal('f1');
   });
 
+  it('should answer the last known word to a settled view while an observe is in flight', async () => {
+    // Arrange — one conclusion is already known, and a second read is out.
+    let gate: Promise<void> = Promise.resolve();
+    const world = harness({
+      active: async () => {
+        await gate;
+        return { usageBased: true, ok: true, credentialSignal: 'accepted' };
+      },
+    });
+    const service = new CredentialStatusService(world.ports);
+    await service.observe(subject(CLAUDE));
+    const release = Promise.withResolvers<void>();
+    gate = release.promise;
+    const running = service.observe(subject(CLAUDE));
+
+    // Act
+    const settled = await service.view(subject(CLAUDE), { settled: true });
+    const live = await service.view(subject(CLAUDE));
+    release.resolve();
+    await running;
+
+    // Assert — a cache gets the conclusion; a person looking now still sees Checking.
+    should(settled.status).match({ word: 'ready', reason: 'provider_accepted', since: NOW });
+    should(live.status.word).equal('checking');
+  });
+
   it('should skip the active read when a passive reading is fresh', async () => {
     // Arrange
     const world = harness({ passive: passive(NOW - 1000) });
