@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from 'bun:test';
 import type { FleetMachineView, FleetRunningSession, IFyApiClient } from '@ferretry/protocol';
 import type { FleetClient } from '../../../../../src/features/fleet/fleet-client.ts';
 import { RuntimesTab } from '../../../../../src/features/fleet/runtimes/runtimes-tab.tsx';
-import { interact, mount, must, pressKey } from '../../../../support/dom.ts';
+import { interact, type Mounted, mount as mountView, must, pressKey } from '../../../../support/dom.ts';
 import {
   type Call,
   CHANGE_ID,
@@ -25,7 +25,17 @@ const COMMITTED = {
   },
 };
 
-afterEach(() => {
+/** Every view a test mounted: an open dialog left behind would answer a later test's Escape or Close. */
+const mounted: Mounted[] = [];
+
+const mount = async (element: Parameters<typeof mountView>[0]): Promise<Mounted> => {
+  const view = await mountView(element);
+  mounted.push(view);
+  return view;
+};
+
+afterEach(async () => {
+  for (const view of mounted.splice(0)) await view.unmount();
   window.location.hash = '';
   window.history.pushState({}, '', '/');
 });
@@ -180,6 +190,7 @@ describe('Runtime actions: the buttons', () => {
     expect(rename.title.length).toBeGreaterThan(0);
     expect(text(list.container, '[data-runtime-actions-refused]')).toStartWith('Rename and Remove are off here: ');
     await list.unmount();
+    mounted.splice(mounted.indexOf(list), 1);
     const detail = await page('claude-agent', { routes: refused });
     expect(must(detail.container.querySelector<HTMLButtonElement>('[data-runtime-remove]'), 'remove').disabled).toBe(
       true,

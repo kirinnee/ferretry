@@ -117,7 +117,7 @@ function RuntimeDialog({ title, name, busy, onClose, children }: RuntimeDialogPr
     >
       <button
         type="button"
-        aria-label="Close"
+        aria-label={name === 'rename' ? 'Close without renaming' : 'Close without removing'}
         disabled={busy}
         onClick={dismiss}
         className="absolute inset-0"
