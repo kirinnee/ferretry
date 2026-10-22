@@ -3,7 +3,7 @@
  *
  * A dropped relay socket used to paint the carrier walk's whole sentence on every panel that noticed it:
  * the transcript, the session, then the composer, in yellow and red. The fact is one per machine
- * (`connection-health.ts`), so it is said once, here, under the top chrome on every page:
+ * (`connection-health.ts`), so it is said once, here, as an overlay over the top chrome on every page:
  *
  * - nothing for the first {@link RECONNECTING_GRACE_MS}: a blip the loop recovers from is not news;
  * - while the reconnect loop works, a small pill — a spinner and "Reconnecting…", the attempt count once
@@ -18,6 +18,11 @@
  * WHY HERE AND NOT IN THE APP BAR: the app bar is drawn on a phone's non-session pages only. A desktop
  * has none, and a phone's session page carries the session's own header, which is exactly where the
  * outage that prompted this was seen. The shell mounts this once in its content column instead.
+ *
+ * IT NEVER MOVES THE PAGE. Connection status is an OVERLAY: the live region is `position: fixed` at the
+ * top of the window, below the status-bar inset, and takes no pointer events except on the pill or banner
+ * itself. It once was a block in the column, so an outage pushed the app bar, the header and the whole
+ * transcript down and the recovery pulled them back up — a reflow under the reader's thumb.
  */
 
 import { CircleAlert, CloudOff, PowerOff, RefreshCw, WifiOff } from 'lucide-react';
@@ -75,12 +80,12 @@ function ConnectionPill({ state, now, sheetId, sheetOpen, onOpen }: ConnectionPi
       aria-controls={sheetId}
       title="Show connection details"
       data-connection-pill=""
-      className="kt-btn kt-btn--sm min-h-control max-w-full items-center gap-xs text-muted"
+      className="kt-btn kt-btn--sm pointer-events-auto min-h-control max-w-full items-center gap-xs bg-surface text-muted shadow-panel"
     >
       <Spinner size={13} />
       <span className="truncate text-fg">{RECONNECTING_LABEL}</span>
       {detail === null ? null : (
-        <span className="truncate text-meta" data-connection-pill-detail="">
+        <span className="hidden truncate text-meta min-[480px]:inline" data-connection-pill-detail="">
           · {detail}
         </span>
       )}
@@ -110,7 +115,7 @@ function ConnectionStallBanner({
   return (
     <div
       data-connection-stall={state.cause}
-      className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2 rounded-control border border-warn-border bg-warn-bg px-3 py-2 text-ui leading-base text-warn"
+      className="pointer-events-auto flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2 rounded-control border border-warn-border bg-surface px-3 py-2 text-ui leading-base text-warn shadow-popover"
     >
       <div className="flex min-w-0 flex-[1_1_16rem] items-start gap-2">
         {CAUSE_ICON[state.cause]}
@@ -234,11 +239,16 @@ export function ConnectionHealthNoticeView({ state, machineName, now, onRetryNow
   return (
     <>
       {/* ONE live region that outlives the pill: it is polite, and it is there before the words are. */}
-      <div role="status" aria-live="polite" data-connection-health={state.kind}>
+      <div
+        role="status"
+        aria-live="polite"
+        data-connection-health={state.kind}
+        className="pointer-events-none fixed inset-x-0 top-[calc(var(--inset-top,0px)+0.5rem)] z-[56] flex justify-center px-4"
+      >
         {state.kind !== 'reconnecting' || (!state.stalled && now - state.since < RECONNECTING_GRACE_MS) ? null : (
-          <div className="flex min-w-0 justify-center px-4 pt-2 sm:px-3" data-kb-hide="">
+          <div className="flex min-w-0 max-w-full justify-center" data-kb-hide="">
             {state.stalled ? (
-              <div className="w-full">
+              <div className="w-full max-w-[40rem]">
                 <ConnectionStallBanner
                   state={state}
                   machineName={machineName}
