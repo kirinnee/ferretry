@@ -101,6 +101,7 @@ async function install(scenario: Scenario): Promise<string> {
     logFile: `${HOME}/.ferretry/logs/fyd.log`,
     searchPath: scenario.path.join(':'),
     locale: { LANG: 'C.UTF-8' },
+    runtime: {},
     description: 'fyd',
   };
   if (scenario.platform === 'darwin') {

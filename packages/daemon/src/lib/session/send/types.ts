@@ -145,6 +145,11 @@ export interface SendRecord {
    * bounded per attempt, and the daemon's own bookkeeping: it never leaves the daemon.
    */
   readonly submitNudges?: number | undefined;
+  /**
+   * A re-attempt typed it into a BUSY pane. With a first transport that rode a harness queue, this
+   * is what `typedIntoBusyPane` reads, and the daemon's own bookkeeping: it never leaves the daemon.
+   */
+  readonly busyTyped?: boolean | undefined;
   /** What a `cancelled` fate did to the agent's screen. */
   readonly cancelEffect?: SendCancelEffect | undefined;
 }
@@ -165,6 +170,7 @@ export type SendSettlement = Partial<
     | 'retryable'
     | 'typedNotSent'
     | 'submitNudges'
+    | 'busyTyped'
     | 'cancelEffect'
     | 'held'
     | 'path'
@@ -430,6 +436,24 @@ export class SendRefused extends Error {
   constructor(message: string) {
     super(message);
     this.name = 'SendRefused';
+  }
+}
+
+/** Why the pane said not to type a re-attempt. */
+export type SendRetypeWithholding = 'held' | 'busy' | 'unreadable';
+
+/**
+ * A re-attempt the PANE refused, before a single key: the message is still held there (`held`), the
+ * pane is mid-turn and this send was typed into a mid-turn pane once already (`busy`), or the pane
+ * could not be read to rule a held copy out (`unreadable`). Each is a reason a retype would be a copy.
+ */
+export class SendRetypeWithheld extends SendRefused {
+  constructor(
+    message: string,
+    readonly reason: SendRetypeWithholding,
+  ) {
+    super(message);
+    this.name = 'SendRetypeWithheld';
   }
 }
 

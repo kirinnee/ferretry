@@ -1,6 +1,7 @@
 import type { HealthView } from '@ferretry/protocol';
 import type { DaemonSupervisorReport } from './ports.ts';
 import type { DaemonLiveness } from './readiness.ts';
+import { LAUNCHD_PROCESS_TYPE } from './unit-file.ts';
 
 /** The fields `systemctl show` is asked for, parsed out of its `key=value` lines. */
 export interface SystemdUnitProperties {
@@ -135,4 +136,14 @@ export function livenessOf(report: DaemonSupervisorReport): DaemonLiveness {
   if (report.state === 'running') return 'alive';
   if (report.state === 'failed') return 'dead';
   return 'absent';
+}
+
+/**
+ * Is macOS throttling the daemon, by the job's own definition?
+ *
+ * Only a plist that was READ can say so: `processType` is absent for every other manager and for a
+ * launchd job with no plist on disk, and neither is a throttle this CLI can see or remove.
+ */
+export function launchdThrottled(report: DaemonSupervisorReport): boolean {
+  return report.processType !== undefined && report.processType !== LAUNCHD_PROCESS_TYPE;
 }

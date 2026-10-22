@@ -3,6 +3,8 @@ import should from 'should';
 import {
   EXIT_ALREADY_RUNNING,
   InvalidUnitValueError,
+  LAUNCHD_PROCESS_TYPE,
+  launchAgentProcessType,
   launchAgentStateHome,
   renderLaunchAgentPlist,
   renderSystemdUnit,
@@ -19,6 +21,7 @@ const spec = {
   logFile: '/tmp/fy-home/.ferretry/logs/fyd.log',
   searchPath: '/usr/bin:/bin',
   locale: { LANG: 'C.UTF-8' },
+  runtime: { BUN_JSC_sampleInterval: '10000' },
   description: 'fyd — per-host agent daemon',
 };
 
@@ -187,6 +190,27 @@ describe('launch agent rendering', () => {
     should(actual).containEql('<key>AbandonProcessGroup</key><true/>');
   });
 
+  it('should declare the Interactive ProcessType, because the default has macOS throttle the whole fleet', () => {
+    // Act
+    const actual = renderLaunchAgentPlist({ ...spec, label: 'com.ferretry.fyd' });
+
+    // Assert
+    should(actual).containEql('<key>ProcessType</key><string>Interactive</string>');
+    should(launchAgentProcessType(actual)).equal(LAUNCHD_PROCESS_TYPE);
+  });
+
+  it('should read no ProcessType from a plist written before it was declared', () => {
+    // Arrange — what every release before this one wrote.
+    const old = renderLaunchAgentPlist({ ...spec, label: 'com.ferretry.fyd' }).replace(
+      /<key>ProcessType<\/key><string>Interactive<\/string>\n/u,
+      '',
+    );
+
+    // Act + Assert
+    should(launchAgentProcessType(old)).be.undefined();
+    should(launchAgentProcessType('<key>ProcessType</key> <string>Background</string>')).equal('Background');
+  });
+
   it('should throttle respawns, because launchd has no RestartPreventExitStatus', () => {
     // Act
     const actual = renderLaunchAgentPlist({ ...spec, label: 'com.ferretry.fyd' });
@@ -215,8 +239,18 @@ describe('launch agent rendering', () => {
 
     // Assert
     should(actual).containEql(
-      '<key>LANG</key><string>de_DE.UTF-8</string><key>LC_ALL</key><string>en_US.UTF-8</string></dict>',
+      '<key>LANG</key><string>de_DE.UTF-8</string><key>LC_ALL</key><string>en_US.UTF-8</string><key>BUN_JSC_sampleInterval</key>',
     );
+  });
+
+  it('should pass the engine options after the locale, in both definitions', () => {
+    // Act
+    const plist = renderLaunchAgentPlist({ ...spec, label: 'com.ferretry.fyd' });
+    const unit = renderSystemdUnit(spec);
+
+    // Assert
+    should(plist).containEql('<key>BUN_JSC_sampleInterval</key><string>10000</string></dict>');
+    should(unit).containEql('Environment="LANG=C.UTF-8"\nEnvironment="BUN_JSC_sampleInterval=10000"\nStandardOutput=');
   });
 
   it('should escape a path that would otherwise break the XML', () => {

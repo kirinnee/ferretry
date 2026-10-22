@@ -73,3 +73,29 @@ describe('queuedWhere', () => {
     should(queuedWhere(bare('❯ '), TEXT, 'chars')).be.undefined();
   });
 });
+
+describe('queuedWhere on a real Claude Code 2.1.281 queue', () => {
+  const CLAUDE = readFileSync(join(FIXTURES, 'claude-2.1.281-busy-queued-copies.txt'), 'utf8');
+  /** The resend, exactly as the daemon typed it: a peer envelope and the message under it. */
+  const RESEND =
+    '[message from ferret lizzette (session mvgt2oz9-04e28935) — not from the owner]\n' +
+    'No reply needed. To reply: fy send lizzette "<reply>"\n\n' +
+    'lizzette (resend): QoS CONFIRMED as the Mac root cause — ProcessType=Interactive took the ' +
+    "owner's 4.67.0 from 381 stalls/lag 3.1s to lag 0.1ms. I told rozanne to ship the plist fix first.";
+
+  it('should prove the payload held in the queue above the spinner — the copy the daemon kept retyping', () => {
+    should(queuedWhere({ ...bare(CLAUDE), cursorX: 2, cursorY: 77 }, RESEND, 'placeholder')).equal('queue');
+  });
+
+  it('should read the queue before the whole-frame fallback, which called a queued message "typed"', () => {
+    // A composer with no cursor on it cannot be told from a placeholder, so the fallback runs — and the
+    // payload's words ARE on screen, in the queue.
+    const drafted = CLAUDE.replace('Press up to edit queued messages', 'a note somebody is typing');
+    should(queuedWhere(bare(drafted), RESEND, 'chars')).equal('queue');
+    should(queuedWhere(bare(CLAUDE), RESEND, 'chars')).equal('queue');
+  });
+
+  it('should never ask Claude for a queue key it does not have', () => {
+    should(needsQueueKey(bare(CLAUDE), RESEND, 'chars')).be.false();
+  });
+});

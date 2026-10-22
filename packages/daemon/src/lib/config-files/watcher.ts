@@ -45,6 +45,11 @@ export interface ConfigTreeEvents {
 export interface ConfigWatchOptions {
   /** A value that changes whenever any file in the tree does. */
   fingerprint(): Promise<string>;
+  /**
+   * Told the moment the tree may have changed — a directory's file event, or a fingerprint that moved —
+   * before the debounce, so a reader can stop trusting the last load straight away.
+   */
+  onEvent?(): void;
   /** Called once the tree has changed and then been quiet. */
   onChange(): Promise<void>;
   /** Told when a fingerprint or a load fails; the watcher keeps going. */
@@ -83,7 +88,10 @@ export function watchConfigFiles(options: ConfigWatchOptions): () => void {
       if (!watched.has(directory))
         watched.set(
           directory,
-          tree.subscribeDirectory(directory, () => void poll(true)),
+          tree.subscribeDirectory(directory, () => {
+            options.onEvent?.();
+            void poll(true);
+          }),
         );
   };
   // An event during a read is not dropped: it runs one more read once this one is done.
@@ -97,6 +105,7 @@ export function watchConfigFiles(options: ConfigWatchOptions): () => void {
       if (events !== undefined) await renew(events);
       const now = await options.fingerprint();
       if (last !== undefined && now !== last && !stopped) {
+        options.onEvent?.();
         if (pending !== undefined) timers.clearTimeout(pending);
         pending = timers.setTimeout(settle, options.debounceMs ?? CONFIG_WATCH_DEBOUNCE_MS);
       }

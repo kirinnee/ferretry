@@ -7,6 +7,7 @@ import {
   endsPeerWait,
   isDirectPayload,
   isFileBackedQueue,
+  paneMidTurn,
   peerMessageKind,
   peerPreamble,
   queuedPayloadInstruction,
@@ -14,6 +15,7 @@ import {
   sendPayload,
   shouldPressStopKey,
   turnInstruction,
+  typedIntoBusyPane,
 } from './policy.ts';
 import type { SessionSendSettings } from './settings.ts';
 import { sameComposerText, showsOwnPointer, strandablePointer, strandedPointerSend } from './stranded.ts';
@@ -36,6 +38,7 @@ import {
   type SendRecord,
   SendRefused,
   type SendRepository,
+  SendRetypeWithheld,
   type SendReviver,
   type SendSettlement,
   type SendTarget,
@@ -187,6 +190,7 @@ function restorable(record: SendRecord): SendSettlement {
     queuedAt: record.queuedAt,
     queueProof: record.queueProof,
     submitNudges: record.submitNudges,
+    busyTyped: record.busyTyped,
   };
 }
 
@@ -255,21 +259,45 @@ export class SessionSendService {
       if (routeSend(target, observed) === 'revive')
         throw new SendRefused(`session ${id} has no live agent to retype ${sendId} into; revive it first`);
       const text = current.matchText ?? current.message;
-      // A person's retry is checked against the pane as well as the ledger: a message still typed in
-      // the composer, or held in the harness's queue, is not lost, and retyping it would be the copy.
-      if (options.by === 'person') {
-        const where = await this.ports.terminal.heldAt(id, text).catch(() => undefined);
-        if (where === 'composer')
-          throw new SendRefused(`send ${sendId} is typed in the agent's composer and not sent; press Enter instead`);
-        if (where === 'queue')
-          throw new SendRefused(`send ${sendId} is held in the agent's own queue and will be read at its next turn`);
+      // EVERY retry is checked against the pane, the daemon's as well as a person's: a message still
+      // typed in the composer, or held in the harness's queue, is not lost, and retyping it would be the
+      // copy. The tracker proved it absent a moment ago — but not under this lock, and a queue it did not
+      // recognise is exactly how one message became four. A pane that cannot be read rules nothing out.
+      const where = await this.ports.terminal.heldAt(id, text).then(
+        held => held ?? 'absent',
+        () => 'unreadable' as const,
+      );
+      if (where === 'queue') {
+        if (options.by === 'daemon') return await this.provenHeld(id, current);
+        throw new SendRetypeWithheld(
+          `send ${sendId} is held in the agent's own queue and will be read at its next turn`,
+          'held',
+        );
       }
+      if (where === 'composer')
+        throw new SendRetypeWithheld(
+          `send ${sendId} is typed in the agent's composer and not sent; press Enter instead`,
+          'held',
+        );
+      if (where === 'unreadable' && options.force !== true)
+        throw new SendRetypeWithheld(
+          `the agent's screen could not be read to rule out a held copy of send ${sendId}; send it again anyway to retry it`,
+          'unreadable',
+        );
       // Another send's pointer left typed is finished first; this one's own is never, because the
-      // checks above refused a person's retry of it and the tracker retries only what it proved absent.
+      // checks above refused a retry of it while the composer shows it.
       const { target: ready, pane } = await this.withoutStrandedPointer(target, observed, sendId);
       const routing = routeSend(ready, pane);
       if (routing === 'revive')
         throw new SendRefused(`session ${id} has no live agent to retype ${sendId} into; revive it first`);
+      // The hard guard (`typedIntoBusyPane`): never a second copy behind a running turn unless forced.
+      const midTurn = paneMidTurn(ready, pane);
+      if (midTurn && typedIntoBusyPane(current) && options.force !== true)
+        throw new SendRetypeWithheld(
+          `send ${sendId} was already typed into this agent mid-turn, so it is typed again only once the turn ` +
+            'ends; send it again anyway to queue another copy now',
+          'busy',
+        );
       const attempt = (current.attempt ?? 1) + 1;
       const next = await this.ports.ledger.settle(id, sendId, {
         fate: 'accepted',
@@ -282,6 +310,8 @@ export class SessionSendService {
         queuedAt: undefined,
         queueProof: undefined,
         submitNudges: undefined,
+        // Marked BEFORE the keys, like the attempt itself: a crash mid-retype must still count it.
+        ...(midTurn ? { busyTyped: true } : {}),
       });
       if (next === undefined) throw new SendRefused(`send ${sendId} could not be re-attempted`);
       await this.ports.repository.journal(id, 'control.send_retried', { sendId, attempt, by: options.by });
@@ -804,6 +834,17 @@ export class SessionSendService {
         fromName: record.fromName,
       });
     return settled ?? record;
+  }
+
+  /**
+   * The daemon's retry found the send already held in the harness's queue: that is the proof the
+   * tracker was looking for, so the send becomes `queued` on it instead of being typed again.
+   */
+  private async provenHeld(id: SessionId, record: SendRecord): Promise<SendRecord> {
+    if (record.fate === 'queued') return record;
+    const settled = (await this.queued(id, record, 'held')) ?? record;
+    await this.ports.repository.journal(id, 'control.send_queued', { sendId: record.sendId, proof: 'pane' });
+    return settled;
   }
 
   /** Records the pane's proof that the harness is holding a send, when it gave one. */

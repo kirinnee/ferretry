@@ -114,6 +114,17 @@ Every self-update is the same transaction:
 Homebrew keeps no previous cask version, so a failed Homebrew update cannot be rolled back
 automatically. That is a declared GAP: the outcome says so and names `fy daemon logs`.
 
+### An up-to-date daemon on a stale service definition
+
+`install`, `start` and `restart` rewrite the service definition every time, but a daemon its service
+manager respawned onto a newer executable never passed through any of them. The one such definition
+that matters is a launchd plist with no `ProcessType`, which macOS answers by throttling the daemon's
+CPU and I/O — and every agent's, because children inherit it. The plist now declares `Interactive`,
+`fy daemon status` names the job's `ProcessType` and warns "macOS is throttling the daemon — run
+`fy daemon update`" when it is anything else, and `fy daemon update` on an up-to-date daemon with
+such a plist restarts it (behind the same `--yes` or prompt an update asks for) so the plist is
+rewritten. A stopped daemon is left alone: its next start rewrites the plist.
+
 ### Homebrew refreshes its tap first
 
 Homebrew only auto-updates its taps about once a day (and never with `HOMEBREW_NO_AUTO_UPDATE`), so a

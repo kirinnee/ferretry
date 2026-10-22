@@ -39,6 +39,24 @@ function launchd(script: CommandScript = []): {
   return { supervisor: new LaunchdSupervisor(mac, processes, files, claims), processes, files, claims };
 }
 
+describe('the engine options every launch path hands the daemon', () => {
+  it('should write the stack sampler period into the systemd unit and the launchd plist alike', async () => {
+    // Arrange — JavaScriptCore reads it once at VM start, so the definition is the only place it works.
+    const linuxHost = systemd();
+    const macHost = launchd();
+
+    // Act
+    await linuxHost.supervisor.install(daemonBinary.path);
+    await macHost.supervisor.install(daemonBinary.path);
+
+    // Assert
+    should(linuxHost.files.written.get(linux.systemdUnitFile)).containEql('Environment="BUN_JSC_sampleInterval=10000"');
+    should(macHost.files.written.get(mac.launchAgentFile)).containEql(
+      '<key>BUN_JSC_sampleInterval</key><string>10000</string>',
+    );
+  });
+});
+
 describe('systemd supervisor install', () => {
   it('should write the unit, then reload, enable and restart in that order', async () => {
     // Arrange
@@ -381,6 +399,35 @@ describe('launchd supervisor stop and inspection', () => {
     should(actual.state).equal('failed');
   });
 
+  it('should report the ProcessType the installed plist declares, read from the plist itself', async () => {
+    // Arrange
+    const { supervisor } = launchd([['print', { code: 0, stdout: '\tstate = running\n\tpid = 812\n', stderr: '' }]]);
+    await supervisor.install(daemonBinary.path);
+
+    // Act
+    const actual = await supervisor.inspect();
+
+    // Assert
+    should(actual).match({ manager: 'launchd', state: 'running', pid: 812, processType: 'Interactive' });
+  });
+
+  it('should report null for a plist an older client wrote with no ProcessType, running or not', async () => {
+    // Arrange
+    const old = '<plist><dict><key>Label</key><string>com.ferretry.fyd</string></dict></plist>';
+    const up = launchd([['print', { code: 0, stdout: '\tstate = running\n\tpid = 812\n', stderr: '' }]]);
+    const down = launchd([['print', { code: 113, stdout: '', stderr: 'Could not find service\n' }]]);
+    up.files.written.set(mac.launchAgentFile, old);
+    down.files.written.set(mac.launchAgentFile, old);
+
+    // Act
+    const running = await up.supervisor.inspect();
+    const stopped = await down.supervisor.inspect();
+
+    // Assert
+    should(running.processType).be.null();
+    should(stopped).match({ state: 'stopped', processType: null });
+  });
+
   it('should report stopped when launchctl failed but the plist is installed', async () => {
     // Arrange
     const { supervisor, files } = launchd([['print', { code: 113, stdout: '', stderr: 'Could not find service\n' }]]);
@@ -468,7 +515,7 @@ describe('direct supervisor', () => {
     await should(supervisor.uninstall()).be.rejectedWith(/systemd user services on Linux/u);
   });
 
-  it('should launch the daemon detached with only FY_HOME, HOME, PATH and a UTF-8 locale in its environment', async () => {
+  it('should launch the daemon detached with only FY_HOME, HOME, PATH, a UTF-8 locale and its engine options', async () => {
     // Arrange
     const { supervisor, processes, files } = direct();
 
@@ -485,6 +532,7 @@ describe('direct supervisor', () => {
       HOME: linux.homeDirectory,
       PATH: linux.searchPath,
       LANG: 'C.UTF-8',
+      BUN_JSC_sampleInterval: '10000',
     });
     should(processes.launched[0]?.logFile).equal(linux.logFile);
     should(actual.pid).equal(9001);

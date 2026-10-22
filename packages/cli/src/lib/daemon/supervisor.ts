@@ -10,8 +10,15 @@ import type {
   IStateHomeClaimPort,
   StopRequest,
 } from './ports.ts';
+import { DAEMON_RUNTIME_TUNING } from './runtime-tuning.ts';
 import { parseLaunchdPrint, parseSystemdProperties, readLaunchdReport, readSystemdReport } from './probe.ts';
-import { launchAgentStateHome, renderLaunchAgentPlist, renderSystemdUnit, systemdUnitStateHome } from './unit-file.ts';
+import {
+  launchAgentProcessType,
+  launchAgentStateHome,
+  renderLaunchAgentPlist,
+  renderSystemdUnit,
+  systemdUnitStateHome,
+} from './unit-file.ts';
 
 /** Raised when a verb needs a service manager this host does not have. */
 export class UnsupportedServiceManagerError extends Error {
@@ -169,6 +176,7 @@ export class SystemdSupervisor implements IServiceDefinitionSupervisor {
         logFile: this.layout.logFile,
         searchPath: this.layout.searchPath,
         locale: this.layout.locale,
+        runtime: DAEMON_RUNTIME_TUNING,
         description: description(this.layout.daemonName),
       }),
     );
@@ -283,6 +291,7 @@ export class LaunchdSupervisor implements IServiceDefinitionSupervisor {
         logFile: this.layout.logFile,
         searchPath: this.layout.searchPath,
         locale: this.layout.locale,
+        runtime: DAEMON_RUNTIME_TUNING,
         description: description(this.layout.daemonName),
       }),
     );
@@ -311,13 +320,19 @@ export class LaunchdSupervisor implements IServiceDefinitionSupervisor {
     if (pidHint !== undefined) await assertPidServes(this.processes, this.layout, pidHint, true);
   }
 
+  /**
+   * The job's state, and — read from the plist rather than from `launchctl print`, whose wording is not
+   * a contract — the `ProcessType` it declares, so `status` can say when macOS is throttling it.
+   */
   async inspect(): Promise<DaemonSupervisorReport> {
     const present = await this.installed();
+    const plist = present ? await this.files.read(this.definitionPath) : undefined;
+    const declared = plist === undefined ? {} : { processType: launchAgentProcessType(plist) ?? null };
     const outcome = await this.processes.run(['launchctl', 'print', this.layout.launchdServiceTarget]);
     if (outcome.code !== 0) {
-      return { manager: 'launchd', state: present ? 'stopped' : 'absent', detail: outcome.stderr.trim() };
+      return { manager: 'launchd', state: present ? 'stopped' : 'absent', detail: outcome.stderr.trim(), ...declared };
     }
-    return readLaunchdReport(parseLaunchdPrint(outcome.stdout), present);
+    return { ...readLaunchdReport(parseLaunchdPrint(outcome.stdout), present), ...declared };
   }
 
   async #require(args: readonly string[]): Promise<void> {
@@ -368,6 +383,7 @@ export class DirectSupervisor implements IDaemonSupervisor {
         HOME: this.layout.homeDirectory,
         PATH: this.layout.searchPath,
         ...this.layout.locale,
+        ...DAEMON_RUNTIME_TUNING,
       },
       logFile: this.layout.logFile,
     });

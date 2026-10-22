@@ -169,8 +169,12 @@ type SetupChange = Extract<FleetAccountChange, { kind: 'setup.import' }>;
 type CloneChange = Extract<FleetAccountChange, { kind: 'clone.import' }>;
 
 export interface FleetCatalogServiceDeps {
-  /** The configuration, read fresh. Throws when it exists and cannot be read. */
-  document(): Promise<AccountDocumentReading>;
+  /**
+   * The configuration in effect. Throws when it exists and cannot be read. `fresh` loads it from disk
+   * first rather than answering the last load — what judging a change stale needs, because an edit
+   * saved a moment ago may not have been loaded yet.
+   */
+  document(fresh?: boolean): Promise<AccountDocumentReading>;
   /** One file a component names, by absolute path. `undefined` when it is absent or cannot be read. */
   readAsset(path: string): Promise<string | undefined>;
   /** What a document is now: its sha256, or `ABSENT_DOCUMENT_REVISION`. */
@@ -529,9 +533,9 @@ export class FleetCatalogService {
 
   // ── Reading ────────────────────────────────────────────────────────────────────────────────────
 
-  async #read(): Promise<AccountDocumentReading> {
+  async #read(fresh = false): Promise<AccountDocumentReading> {
     try {
-      return await this.deps.document();
+      return await this.deps.document(fresh);
     } catch (error) {
       throw new FleetCatalogRefusal(
         'fleet_catalog_unreadable',
@@ -791,7 +795,7 @@ export class FleetCatalogService {
   /** Refuses a change whose configuration moved since it was reviewed; otherwise answers the model
    *  AS IT IS RIGHT NOW, so `apply` never judges the fresh-step-up rule against a stale one. */
   async #assertCurrent(record: ChangeRecord): Promise<AccountModel> {
-    const reading = await this.#read();
+    const reading = await this.#read(true);
     if (reading.revision !== record.revision) {
       throw new FleetCatalogRefusal(
         'fleet_change_stale',

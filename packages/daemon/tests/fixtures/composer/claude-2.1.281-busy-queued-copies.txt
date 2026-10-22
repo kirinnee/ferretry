@@ -1,0 +1,84 @@
+❯ [message from ferret lizzette (session mvgt2oz9-04e28935) — not from the
+  owner]
+  No reply needed. To reply: fy send lizzette "<reply>"
+
+  lizzette: CONFIRMED on the owner's Mac — after manual ProcessType=Interactive
+  (spawn type = interactive (4)), 4.67.0: lag 0.1ms, 1 stall total (0.4s at
+  boot, dlopen of WebRTC lib) vs 381 stalls/worst 7.9s/lag 3.1s minutes earlier
+  on the same build. QoS was the root cause. Please make sure rozanne's plist
+  fix ships ASAP (and that update/restart never drops the key).
+
+❯ [message from ferret lizzette (session mvgt2oz9-04e28935) — not from the
+  owner]
+  No reply needed. To reply: fy send lizzette "<reply>"
+
+  lizzette: CONFIRMED on the owner's Mac — after manual ProcessType=Interactive
+  (spawn type = interactive (4)), 4.67.0: lag 0.1ms, 1 stall total (0.4s at
+  boot, dlopen of WebRTC lib) vs 381 stalls/worst 7.9s/lag 3.1s minutes earlier
+  on the same build. QoS was the root cause. Please make sure rozanne's plist
+  fix ships ASAP (and that update/restart never drops the key).
+
+❯ [message from ferret lizzette (session mvgt2oz9-04e28935) — not from the
+  owner]
+  No reply needed. To reply: fy send lizzette "<reply>"
+
+  lizzette: CONFIRMED on the owner's Mac — after manual ProcessType=Interactive
+  (spawn type = interactive (4)), 4.67.0: lag 0.1ms, 1 stall total (0.4s at
+  boot, dlopen of WebRTC lib) vs 381 stalls/worst 7.9s/lag 3.1s minutes earlier
+  on the same build. QoS was the root cause. Please make sure rozanne's plist
+  fix ships ASAP (and that update/restart never drops the key).
+
+❯ [message from ferret lizzette (session mvgt2oz9-04e28935) — not from the
+  owner]
+  No reply needed. To reply: fy send lizzette "<reply>"
+
+  lizzette: CONFIRMED on the owner's Mac — after manual ProcessType=Interactive
+  (spawn type = interactive (4)), 4.67.0: lag 0.1ms, 1 stall total (0.4s at
+  boot, dlopen of WebRTC lib) vs 381 stalls/worst 7.9s/lag 3.1s minutes earlier
+  on the same build. QoS was the root cause. Please make sure rozanne's plist
+  fix ships ASAP (and that update/restart never drops the key).
+
+❯ [message from ferret lizzette (session mvgt2oz9-04e28935) — not from the
+  owner]
+  No reply needed. To reply: fy send lizzette "<reply>"
+
+  lizzette (resend): QoS CONFIRMED as the Mac root cause —
+  ProcessType=Interactive took the owner's 4.67.0 from 381 stalls/lag 3.1s to
+  lag 0.1ms. I told rozanne to ship the plist fix first.
+
+❯ [message from ferret lizzette (session mvgt2oz9-04e28935) — not from the
+  owner]
+  No reply needed. To reply: fy send lizzette "<reply>"
+
+  lizzette (resend): QoS CONFIRMED as the Mac root cause —
+  ProcessType=Interactive took the owner's 4.67.0 from 381 stalls/lag 3.1s to
+  lag 0.1ms. I told rozanne to ship the plist fix first.
+
+❯ [message from ferret lizzette (session mvgt2oz9-04e28935) — not from the
+  owner]
+  No reply needed. To reply: fy send lizzette "<reply>"
+
+  lizzette (resend): QoS CONFIRMED as the Mac root cause —
+  ProcessType=Interactive took the owner's 4.67.0 from 381 stalls/lag 3.1s to
+  lag 0.1ms. I told rozanne to ship the plist fix first.
+
+❯ [message from ferret lizzette (session mvgt2oz9-04e28935) — not from the
+  owner]
+  No reply needed. To reply: fy send lizzette "<reply>"
+
+  lizzette (resend): QoS CONFIRMED as the Mac root cause —
+  ProcessType=Interactive took the owner's 4.67.0 from 381 stalls/lag 3.1s to
+  lag 0.1ms. I told rozanne to ship the plist fix first.
+  ctrl+x ctrl+s to send now
+
+✽ Puzzling… (2h 31m 59s · ↓ 304.7k tokens)
+  ⎿  Tip: Use /clear to start fresh when switching topics and free up context
+
+────────────────────────────────────────────────────────────────────────────────
+❯ Press up to edit queued messages
+────────────────────────────────────────────────────────────────────────────────
+  👤 kirinnee97 │ 🤖 Opus 5.5 │ 📂 ferretry
+  ⏱ 1s │ 📊 62% (615k/1M) │ 💰 $9.25
+  ⏳ 5h 18% │ 📅 wk 38%
+  ⏵⏵ bypass permissions on · 3 shells, 2 monitors · ← for agents
+

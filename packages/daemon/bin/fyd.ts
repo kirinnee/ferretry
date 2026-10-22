@@ -358,6 +358,7 @@ import {
   StorageTranscriptDigestJournal,
   StorageTranscriptProvenanceStore,
   sessionMessageTokenKeyFile,
+  storedSessionStart,
   storedTranscriptProvenance,
 } from '../src/adapters/session/transcript/index.ts';
 import { StorageTurnPorts } from '../src/adapters/session/turn/index.ts';
@@ -5414,6 +5415,8 @@ function createConfigFilesSubsystem(input: {
       await input.afterLoad?.();
       return watchConfigFiles({
         fingerprint: async () => await input.service.fingerprint(),
+        // At once, not after the debounce: readers stop answering from a load the tree has moved past.
+        onEvent: () => input.service.invalidate(),
         onChange: async () => {
           await input.service.load();
           await input.afterLoad?.();
@@ -6572,6 +6575,13 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
    * configuration that is absent is a host with no fleet; one in the old account format refuses.
    */
   const declaredAccountModel = async () => await readDeclaredAccountModel(configFiles, configLocations);
+  /**
+   * The same model as the last configuration load has it, without touching the directory: for the
+   * readers that run on a timer — the credential catalogue, the usage feed and its cadence, auto-resume —
+   * which each re-scanned the whole configuration tree on every pass. A change reaches them once the
+   * watcher has loaded it. Anything that decides what an agent or a launch may do reads the fresh one.
+   */
+  const effectiveAccountModel = async () => await readDeclaredAccountModel(configFiles, configLocations, false);
   // The agent browser's own private display for a Linux real window (see `DaemonWorld.agentBrowserDisplay`).
   // Nothing is spawned until a real-window launch asks for it; a host without Xvfb is told what to install.
   const agentBrowserDisplay = new XvfbDisplay({
@@ -6582,7 +6592,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
   /** The fleet's declared probe interval. A host with no readable configuration keeps the default. */
   const declaredUsageRefreshMs = async (): Promise<number> =>
     usageRefreshMs(
-      await declaredAccountModel().then(
+      await effectiveAccountModel().then(
         model => model?.advanced.usage.interval,
         () => undefined,
       ),
@@ -6691,7 +6701,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
    */
   const credentialHostCodexHome = hostCodexHome(process.env.CODEX_HOME, userHome);
   const fleetCredentialCatalog = new FleetCredentialCatalog({
-    document: declaredAccountModel,
+    document: effectiveAccountModel,
     paths: {
       fleetRoot: paths.fleet,
       userHome,
@@ -6835,7 +6845,10 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         const id = tryParseSessionId(sessionId);
         if (id === undefined) return undefined;
         const config = await storage.readConfig(id).catch(() => undefined);
-        return await resolver.file(sessionId, storedTranscriptProvenance(config));
+        // The start anchors discovery pacing; the state is read only when a pace begins.
+        return await resolver.file(sessionId, storedTranscriptProvenance(config), async () =>
+          storedSessionStart(await storage.readState(id).catch(() => undefined), config),
+        );
       },
     };
   };
@@ -7328,7 +7341,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           resumer: { resume },
           journal: new StorageAutoResumeJournal(storage),
           summary: autoResumeSummary,
-          setting: { enabled: async () => (await declaredAccountModel())?.machine.autoResume ?? true },
+          setting: { enabled: async () => (await effectiveAccountModel())?.machine.autoResume ?? true },
           clock: { now: () => clock.now(), nowMs: () => Date.now() },
           sleep: async milliseconds => await Bun.sleep(milliseconds),
         },
@@ -7416,7 +7429,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         new CachedUsageFeed(
           [
             new CredentialUsageSource({
-              enabled: async () => (await declaredAccountModel())?.advanced.usage.enabled ?? true,
+              enabled: async () => (await effectiveAccountModel())?.advanced.usage.enabled ?? true,
               manifest: publishedManifest,
               credentials: async () => {
                 if (credentialList === undefined) throw new Error('the credentials surface is not mounted yet');
@@ -8365,7 +8378,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       // own preset files laid over them, and a Test that spends a login's key once through the outbound
       // holder above — never handed a value, and only to where the login itself sends that key.
       const providerPresets = new ProviderPresetService(
-        { presets: async () => (await configFiles.load()).evaluation.effective.presets },
+        { presets: async () => (await configFiles.inEffect()).evaluation.effective.presets },
         undefined,
         async () => await modelCatalogService.catalogs(),
       );
@@ -8388,7 +8401,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       // Model catalogs (docs/model-catalog.md): this build's, the published one over them, then this
       // machine's own config/models/<id>.yaml over both. What every runtime on a login offers and pins.
       const modelCatalogService = new ModelCatalogService({
-        files: async () => (await configFiles.load()).evaluation.effective.modelCatalogs,
+        files: async () => (await configFiles.inEffect()).evaluation.effective.modelCatalogs,
         published: async () => {
           publishedModelCatalog.refreshIfDue();
           return await publishedModelCatalog.catalogs();

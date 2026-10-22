@@ -106,6 +106,7 @@ async function machine(model = MODEL): Promise<Machine> {
     machineName: () => 'studio',
     clientName: 'fy',
     config: {
+      inEffect: async () => await home.service.inEffect(),
       load: async () => await home.service.load(),
       acknowledge: (file, text) => {
         acknowledged.push({ path: file, text });

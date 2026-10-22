@@ -512,6 +512,53 @@ describe('DaemonUpdater — what it checks first', () => {
     should(h.report()).match({ outcome: 'succeeded', message: 'fyd 1.3.0 is already up to date' });
   });
 
+  it('restarts an up-to-date daemon whose service definition is stale, so the remedy status names works', async () => {
+    // Arrange — the plist an older client wrote declares no ProcessType, and launchd respawned the
+    // daemon onto the new executable without ever passing through the restart that rewrites it.
+    const h = harness('homebrew', { version: '1.3.0' });
+    h.lifecycle.stale = 'its launchd job declares no ProcessType, so macOS throttles it';
+
+    // Act
+    await h.run();
+
+    // Assert
+    should(h.host.trail).deepEqual(['restart']);
+    should(h.report()).match({
+      outcome: 'succeeded',
+      message:
+        'fyd 1.3.0 is already up to date; restarted it under a rewritten service definition (its launchd job declares no ProcessType, so macOS throttles it)',
+    });
+  });
+
+  it('asks before that restart, exactly as an update would', async () => {
+    // Arrange
+    const h = harness('homebrew', { version: '1.3.0', interactive: true, answers: ['n'] });
+    h.lifecycle.stale = 'its launchd job declares no ProcessType, so macOS throttles it';
+
+    // Act
+    await h.run({ report: '/r.json' });
+
+    // Assert
+    should(h.host.trail).be.empty();
+    should(h.prompt.asked[0]).match(/^Restart fyd to rewrite its service definition \(.*\)\? \[y\/N\]$/u);
+    should(h.report().outcome).equal('failed');
+  });
+
+  it('leaves a stale definition on a stopped daemon to the next start, which rewrites it', async () => {
+    // Arrange
+    const h = harness('homebrew', { version: '1.3.0', running: false });
+    h.lifecycle.stale = 'its launchd job declares no ProcessType, so macOS throttles it';
+
+    // Act
+    await h.run();
+
+    // Assert
+    should(h.host.trail).be.empty();
+    should(h.report().message).equal(
+      'fyd 1.3.0 is already up to date; its service definition is rewritten when it next starts',
+    );
+  });
+
   it('fails when the latest release cannot be learned', async () => {
     const h = harness('homebrew', { latest: new FakeLatest({ kind: 'failed', reason: 'could not reach GitHub' }) });
     await h.run();
