@@ -1,6 +1,14 @@
 import type { SessionState, StructuredQuestionAnswer } from '@ferretry/protocol';
 import type { SessionId } from '../../session-id.ts';
 
+/** The fields of a session document that decide what an answer receipt or a projected question means. */
+export type QuestionDocument = Pick<
+  SessionState,
+  'status' | 'pendingQuestion' | 'lastAnsweredQuestionToolUseId' | 'needsHuman' | 'needsHumanKind'
+> &
+  // The rest of whatever document it was read from: a whole state document is one, unchanged.
+  Readonly<Record<string, unknown>>;
+
 /**
  * THE DURABLE RECEIPT FOR ONE ANSWER OPERATION — the fact that had no owner.
  *
@@ -281,7 +289,7 @@ export function answerEvidenceForQuestion(
  */
 export function reconcileAnswerEvidence(
   records: ReadonlyMap<string, AnswerOperationRecord>,
-  state: SessionState,
+  state: QuestionDocument,
   observation: {
     readonly activeToolUseId?: string | undefined;
     readonly resolvedToolUseId?: string | undefined;
@@ -329,7 +337,7 @@ export function reconcileAnswerEvidence(
  */
 export function reconcileUnconfirmedAnswer(input: {
   readonly record: AnswerOperationRecord;
-  readonly state: SessionState | undefined;
+  readonly state: QuestionDocument | undefined;
 }): 'confirmed' | 'quarantine' {
   // An unreadable state document is missing evidence, never benign evidence of absence.
   if (input.state === undefined) return 'quarantine';

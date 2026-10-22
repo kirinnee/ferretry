@@ -4,10 +4,13 @@ import {
   controlCommandLine,
   controlNonceLine,
   controlReplyProgress,
+  controlSubscriptionLine,
   decodeControlOutput,
   isControlAttachable,
+  PANE_WATCH_FORMAT,
   parseControlGuard,
   parseControlNotification,
+  parsePaneWatch,
 } from '../../../src/lib/index.ts';
 
 const NONCE = '0123456789abcdef0123456789abcdef';
@@ -210,5 +213,30 @@ describe('isControlAttachable', () => {
   ])('should say whether %p can be attached to (%p)', (input, expected) => {
     // Act + Assert
     should(isControlAttachable(input)).equal(expected);
+  });
+});
+
+describe('controlSubscriptionLine', () => {
+  it('should subscribe this client to a quoted format for every pane, and refuse what a line cannot carry', () => {
+    // Act + Assert
+    should(controlSubscriptionLine('fy-pane', PANE_WATCH_FORMAT)).equal(
+      "refresh-client -B 'fy-pane:%*:#{pane_dead} #{window_activity}'",
+    );
+    should(controlSubscriptionLine('Bad Name', PANE_WATCH_FORMAT)).be.undefined();
+    should(controlSubscriptionLine('fy', "it's")).be.undefined();
+    should(controlSubscriptionLine('fy', 'a\nb')).be.undefined();
+  });
+});
+
+describe('parsePaneWatch', () => {
+  it.each([
+    ['0 1792644943', { dead: false, activityAt: 1792644943 }],
+    ['1 1792644948\n', { dead: true, activityAt: 1792644948 }],
+    ['2 1', undefined],
+    ['0', undefined],
+    ['', undefined],
+  ])('should read %p as %p', (input, expected) => {
+    // Act + Assert
+    should(parsePaneWatch(input)).deepEqual(expected);
   });
 });

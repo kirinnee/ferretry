@@ -1,7 +1,7 @@
 /**
- * THE WORKER HOST'S TURN TICK over real storage and a scripted thread: a hosted session is looked at by
- * its worker and written here; everything else — and any look the worker could not answer — is looked
- * at on this thread, so nothing is ever left unobserved.
+ * THE WORKER HOST over real storage and a scripted thread: it applies what a session's worker found, in
+ * order and through the one writer; it asks the worker when a read needs an answer now and works it out
+ * itself when the worker cannot; and its 2 s tick only hands sessions to workers and observes the rest.
  */
 import { afterEach, describe, it } from 'bun:test';
 import { mkdtemp, rm } from 'node:fs/promises';
@@ -27,11 +27,16 @@ import {
 } from '../../../../src/adapters/index.ts';
 import {
   type FromSessionWorker,
+  type ObserverPatch,
   parseSessionId,
+  projectStructuredQuestion,
   type SessionBinding,
+  type SessionId,
   SessionObserver,
   type ToSessionWorker,
+  type TranscriptEvent,
   type TurnPaneEvidence,
+  type WorkerAsk,
   type WorkerChild,
 } from '../../../../src/lib/index.ts';
 
@@ -45,6 +50,18 @@ afterEach(async () => {
 const A = parseSessionId('hosted-a');
 const B = parseSessionId('inline-b');
 const BUSY: TurnPaneEvidence = { working: true, atPrompt: false, permission: false };
+const question: TranscriptEvent = {
+  kind: 'tool-call',
+  harness: 'claude',
+  role: 'assistant',
+  timestamp: NOW,
+  call: {
+    id: 'tool-1',
+    name: 'AskUserQuestion',
+    input: {},
+    questions: [{ question: 'Ship?', options: [{ label: 'Yes' }, { label: 'No' }], multiple: false }],
+  },
+};
 
 async function openStorage(): Promise<DaemonStorage> {
   const home = await mkdtemp(join(tmpdir(), 'fy-worker-host-'));
@@ -64,65 +81,111 @@ async function openStorage(): Promise<DaemonStorage> {
   return opened.storage;
 }
 
-/** A thread that answers its probe at once and every look the way the test scripts. */
+type Ask = Extract<ToSessionWorker, { kind: 'request' }>;
+
+/** A thread that answers its probe at once and every request the way the test scripts. */
 class AnsweringWorker implements ObserverWorker {
   onmessage: ((event: MessageEvent<FromSessionWorker>) => void) | null = null;
   onerror: ((event: ErrorEvent) => void) | null = null;
   readonly sent: ToSessionWorker[] = [];
   terminated = false;
 
-  constructor(private readonly answer: (look: Extract<ToSessionWorker, { kind: 'look' }>) => FromSessionWorker) {}
+  constructor(private readonly answer: (request: Ask) => FromSessionWorker | undefined) {}
 
   postMessage(message: ToSessionWorker): void {
     this.sent.push(message);
     queueMicrotask(() => {
-      if ('probe' in message) this.onmessage?.({ data: { probe: true } } as MessageEvent<FromSessionWorker>);
-      else if (message.kind === 'look')
-        this.onmessage?.({ data: this.answer(message) } as MessageEvent<FromSessionWorker>);
+      if ('probe' in message) this.emit({ probe: true });
+      else if (message.kind === 'request') {
+        const answer = this.answer(message);
+        if (answer !== undefined) this.emit(answer);
+      }
     });
+  }
+
+  emit(message: FromSessionWorker): void {
+    this.onmessage?.({ data: message } as MessageEvent<FromSessionWorker>);
   }
 
   terminate(): void {
     this.terminated = true;
   }
+
+  kinds(): string[] {
+    return this.sent.map(message => ('kind' in message ? message.kind : 'probe'));
+  }
 }
 
-async function rig(options: {
-  readonly answer: (look: Extract<ToSessionWorker, { kind: 'look' }>) => FromSessionWorker;
-  readonly binding?: (id: string) => SessionBinding | undefined;
-  readonly applierFails?: boolean;
-}) {
+const answered = (request: Ask, value: unknown): FromSessionWorker => ({
+  kind: 'answered',
+  session: request.session,
+  generation: request.generation,
+  request: request.request,
+  value,
+  metrics: { children: [] },
+});
+
+async function rig(
+  options: {
+    readonly answer?: (request: Ask, worker: AnsweringWorker) => FromSessionWorker | undefined;
+    readonly binding?: (id: string) => SessionBinding | undefined;
+    readonly answerBusy?: boolean;
+    readonly barrierMs?: number;
+  } = {},
+) {
   const storage = await openStorage();
-  const answers = { all: async () => new Map(), append: async () => undefined };
+  const ledgerRows = new Map<string, never>();
+  const answers = { all: async () => ledgerRows, append: async () => undefined };
   const applier = new SessionObservationApplier(storage, answers, new KeyedSerialExecutor());
-  const inlinePanes: string[] = [];
+  const reads: string[] = [];
+  const serial = new KeyedSerialExecutor();
+  const answerSerial = {
+    runIfIdle: async <T>(key: string, work: () => Promise<T>) =>
+      options.answerBusy === true ? undefined : await serial.runIfIdle(key, work),
+  };
   const inline = new InlineObserverHost(
     {
       storage,
       questionRoster: () => storage.listSessions().map(session => session.id),
-      tail: { tail: async () => ({ kind: 'unresolved' }) },
+      tail: { tail: async () => ({ kind: 'read', events: [question] }) },
       pane: async id => {
-        inlinePanes.push(id);
+        reads.push(`pane ${id}`);
         return BUSY;
       },
       answers,
-      answerSerial: new KeyedSerialExecutor(),
+      answerSerial,
       applier,
       liveness: {
-        screen: async () => 'screen',
+        screen: async id => {
+          reads.push(`screen ${id}`);
+          return 'inline screen';
+        },
         transcript: async () => 'lines',
         processes: async () => ({ kind: 'observed', processes: [] }),
       },
       clock: { now: () => NOW },
       yieldToLoop: async () => undefined,
+      paneState: async id => {
+        reads.push(`paneState ${id}`);
+        return undefined;
+      },
+      sendEvidence: {
+        read: async id => {
+          reads.push(`evidence ${id}`);
+          return { readable: false, inputs: [] };
+        },
+      },
     },
     new SessionObserver(text => `digest(${text})`),
   );
   const workers: AnsweringWorker[] = [];
+  const watched: string[] = [];
+  const closedWatches: string[] = [];
+  let subject: WorkerObserverHost | undefined;
   const supervisor = new WorkerSupervisor(
     {
       spawn: () => {
-        const worker = new AnsweringWorker(options.answer);
+        const worker: AnsweringWorker = new AnsweringWorker(request => options.answer?.(request, worker));
         workers.push(worker);
         return worker;
       },
@@ -133,140 +196,277 @@ async function rig(options: {
       },
       notice: () => undefined,
       report: () => undefined,
+      observed: (session, patches) => subject?.observed(session, patches),
+      exited: () => undefined,
     },
-    { cap: 8, lookTimeoutMs: 1_000, drainMs: 10, startConcurrency: 2 },
+    { cap: 8, requestTimeoutMs: 1_000, drainMs: 10, startConcurrency: 2 },
   );
-  const subject = new WorkerObserverHost({
+  subject = new WorkerObserverHost({
     inline,
     supervisor,
     binding: async id =>
       options.binding === undefined
-        ? { tmux: { executable: '/usr/bin/tmux', socket: '/tmp/s', target: `fy-${id}` } }
+        ? {
+            tmux: { executable: '/usr/bin/tmux', socket: '/tmp/s', target: `fy-${id}` },
+            transcript: { file: `/t/${id}.jsonl`, harness: 'claude' },
+          }
         : options.binding(id),
-    applier: options.applierFails
-      ? {
-          apply: async () => {
-            throw new Error('the document is damaged');
-          },
-        }
-      : applier,
+    applier,
+    answerSerial,
+    answers,
+    files: {
+      subscribe: (path, listener) => {
+        watched.push(path);
+        queueMicrotask(() => listener(path));
+        return { close: () => closedWatches.push(path) };
+      },
+    },
+    observer: new SessionObserver(text => `digest(${text})`),
+    liveness: {
+      redact: async text => text.replaceAll('secret', '[redacted]'),
+      processes: async () => ({ kind: 'observed', processes: [{ pid: 1 }] }) as never,
+    },
     clock: { now: () => NOW },
+    barrierMs: options.barrierMs ?? 1_000,
   });
-  cleanups.push(async () => subject.close());
-  return { storage, subject, workers, inlinePanes };
+  const host = subject;
+  cleanups.push(async () => host.close());
+  /** One tick, then long enough for the thread to answer its probe, then another: hosted from here on. */
+  const hostAll = async () => {
+    await host.turns.run();
+    await Bun.sleep(5);
+    await host.turns.run();
+    await Bun.sleep(5);
+  };
+  return { storage, subject: host, workers, reads, watched, closedWatches, hostAll, supervisor, ledgerRows };
 }
 
-const looked = (
-  look: Extract<ToSessionWorker, { kind: 'look' }>,
-  fields: Partial<Extract<FromSessionWorker, { kind: 'looked' }>> = {},
-): FromSessionWorker => ({
-  kind: 'looked',
-  session: look.session,
-  generation: look.generation,
-  request: look.request,
-  lookMs: 1,
-  metrics: { children: [] },
-  ...fields,
+const stateOf = async (storage: DaemonStorage, id: SessionId) =>
+  (await storage.readState(id)) as Record<string, unknown>;
+
+describe('WorkerObserverHost — what a worker found', () => {
+  it('should apply a session’s patches in the order they came, question before turn', async () => {
+    // Arrange
+    const { storage, subject } = await rig();
+    await storage.writeState(A, { id: A, status: 'running', turn: 1 });
+    const patches: readonly ObserverPatch[] = [
+      {
+        kind: 'question',
+        projection: projectStructuredQuestion([question]),
+        records: [],
+        settlements: [],
+        runtime: {},
+        writes: true,
+      },
+      { kind: 'turn', change: { from: undefined, to: 'needs-input' } },
+    ];
+
+    // Act — the turn's compare-and-set would refuse if it ran first: the question flips the status.
+    subject.observed(A, patches);
+    subject.observed(A, []);
+    for (let wait = 0; wait < 100 && (await stateOf(storage, A)).turnState === undefined; wait += 1)
+      await Bun.sleep(10);
+
+    // Assert
+    const state = await stateOf(storage, A);
+    should(state.status).equal('awaiting_question');
+    should(state.turnState).equal('needs-input');
+  });
+
+  it('should never write a question patch while an answer drive holds the session, and survive a refused write', async () => {
+    // Arrange
+    const { storage, subject } = await rig({ answerBusy: true });
+    await storage.writeState(A, { id: A, status: 'running', turn: 1 });
+
+    // Act
+    subject.observed(A, [
+      {
+        kind: 'question',
+        projection: projectStructuredQuestion([question]),
+        records: [],
+        settlements: [],
+        runtime: {},
+        writes: true,
+      },
+    ]);
+    subject.observed(B, [{ kind: 'turn', change: { from: undefined, to: 'working' } }]);
+    await Bun.sleep(10);
+
+    // Assert — A untouched; B has no document, and the refusal stays in its own patch.
+    should(await stateOf(storage, A)).deepEqual({ id: A, status: 'running', turn: 1 });
+  });
 });
 
-const turnStateOf = async (storage: DaemonStorage, id: string) =>
-  ((await storage.readState(parseSessionId(id))) as Record<string, unknown>).turnState;
-
-describe('WorkerObserverHost', () => {
-  it('should write what a hosted session’s worker answers, and look at the rest on this thread', async () => {
-    // Arrange — B has no pane a worker could attach to, so it stays inline.
-    const { storage, subject, workers, inlinePanes } = await rig({
-      answer: look => looked(look, { patch: { kind: 'turn', change: { from: undefined, to: 'needs-input' } } }),
+describe('WorkerObserverHost — the tick', () => {
+  it('should hand running sessions to workers, push their receipts and watch their transcripts, and look at the rest here', async () => {
+    // Arrange — B has no pane a worker could attach to.
+    const { storage, workers, reads, watched, closedWatches, hostAll, supervisor, subject } = await rig({
       binding: id =>
-        id === B ? undefined : { tmux: { executable: '/usr/bin/tmux', socket: '/tmp/s', target: 'fy-a' } },
+        id === B
+          ? undefined
+          : {
+              tmux: { executable: '/usr/bin/tmux', socket: '/tmp/s', target: 'fy-a' },
+              transcript: { file: '/t/a.jsonl', harness: 'claude' },
+            },
     });
     await storage.writeState(A, { id: A, status: 'running', turn: 1 });
     await storage.writeState(B, { id: B, status: 'running', turn: 1 });
 
-    // Act — the first tick starts the worker; once it answered its probe, the next is its.
-    const first = await subject.turns.run();
-    await Bun.sleep(5);
-    inlinePanes.length = 0;
-    await storage.updateState(A, raw => {
-      const { turnState: _cleared, ...rest } = raw as Record<string, unknown>;
-      return rest as typeof raw;
-    });
-    const second = await subject.turns.run();
+    // Act
+    await hostAll();
+    reads.length = 0;
+    await subject.turns.run();
+    await storage.updateState(A, raw => ({ ...(raw as Record<string, unknown>), status: 'stopped' }));
+    await subject.turns.run();
 
     // Assert
-    should([...(first?.changed.keys() ?? [])].sort()).deepEqual([A, B].sort());
     should(workers.length).equal(1);
-    should(inlinePanes).deepEqual([B]);
-    should(second?.changed.get(A)).deepEqual({ from: undefined, to: 'needs-input' });
-    should(await turnStateOf(storage, A)).equal('needs-input');
-    should(await turnStateOf(storage, B)).equal('working');
-    // The worker is told what the writes did, so it decides from what the document says now.
-    should(workers[0]?.sent.some(message => 'kind' in message && message.kind === 'facts')).be.true();
+    should(reads).deepEqual([`pane ${B}`, `pane ${B}`]);
+    should(watched).deepEqual(['/t/a.jsonl']);
+    should(closedWatches).deepEqual(['/t/a.jsonl']);
+    should(supervisor.hosts(A)).be.false();
+    const kinds = workers[0]?.kinds() ?? [];
+    should(kinds.slice(0, 3)).deepEqual(['probe', 'attach', 'answers']);
+    should(kinds).containEql('file');
+    should(kinds).containEql('facts');
   });
 
-  it('should look once on this thread when the worker could not, and report a write that failed', async () => {
+  it('should rewatch a moved transcript, and push receipts when the ledger grows', async () => {
     // Arrange
-    const failing = await rig({ answer: look => looked(look, { failure: 'the pane is gone' }) });
-    await failing.storage.writeState(A, { id: A, status: 'running', turn: 1 });
-    await failing.subject.turns.run();
-    await Bun.sleep(5);
-    const damaged = await rig({
-      answer: look => looked(look, { patch: { kind: 'turn', change: { from: undefined, to: 'working' } } }),
-      applierFails: true,
+    let file = '/t/first.jsonl';
+    const { storage, workers, watched, closedWatches, hostAll, subject } = await rig({
+      binding: () => ({
+        tmux: { executable: '/usr/bin/tmux', socket: '/tmp/s', target: 'fy-a' },
+        transcript: { file, harness: 'claude' },
+      }),
     });
-    await damaged.storage.writeState(A, { id: A, status: 'running', turn: 1 });
-    await damaged.subject.turns.run();
-    await Bun.sleep(5);
+    await storage.writeState(A, { id: A, status: 'running', turn: 1 });
+    await hostAll();
 
     // Act
-    failing.inlinePanes.length = 0;
-    const fellBack = await failing.subject.turns.run();
-    const refused = await damaged.subject.turns.run();
+    file = '/t/second.jsonl';
+    await subject.turns.run();
+    await subject.answersChanged(A);
+    await subject.answersChanged(B);
 
     // Assert
-    should(failing.inlinePanes).deepEqual([A]);
-    should(fellBack?.failures.size).equal(0);
-    should(refused?.failures.get(A)).equal('the document is damaged');
+    should(watched).deepEqual(['/t/first.jsonl', '/t/second.jsonl']);
+    should(closedWatches).deepEqual(['/t/first.jsonl']);
+    should(workers[0]?.kinds().filter(kind => kind === 'answers').length).equal(2);
   });
 
-  it('should never overlap itself, and hand every other part to the inline host', async () => {
+  it('should never overlap itself, and answer nothing for a tick whose roster could not be read', async () => {
     // Arrange
-    const { storage, subject } = await rig({ answer: look => looked(look) });
-    await storage.writeState(A, { id: A, status: 'running', turn: 1, turnState: 'working' });
-
-    // Act
-    const [one, two] = await Promise.all([subject.turns.run(), subject.turns.run()]);
-    const sample = await subject.liveness({ id: A, status: 'running', turn: 1, mode: 'auto', waiting: false });
-    const failures = await subject.questions();
-    await subject.project(A);
-
-    // Assert
-    should(two).be.undefined();
-    should(one).not.be.undefined();
-    should(subject.turns.intervalMs).equal(2_000);
-    should(sample.paneHash).equal('digest(screen)');
-    should(failures.size).equal(0);
-    should(await subject.midTurn()).equal(1);
-  });
-
-  it('should answer a tick whose roster could not be read with nothing, and still look next time', async () => {
-    // Arrange
-    const { storage, subject } = await rig({ answer: look => looked(look) });
+    const { storage, subject } = await rig();
     const listSessions = storage.listSessions.bind(storage);
-    let broken = true;
+    let broken = false;
     storage.listSessions = () => {
       if (broken) throw new Error('the index is locked');
       return listSessions();
     };
 
     // Act
+    const [one, two] = await Promise.all([subject.turns.run(), subject.turns.run()]);
+    broken = true;
     const failed = await subject.turns.run();
-    broken = false;
-    const next = await subject.turns.run();
 
     // Assert
+    should(one).not.be.undefined();
+    should(two).be.undefined();
     should(failed).be.undefined();
-    should(next).not.be.undefined();
+    should(subject.turns.intervalMs).equal(2_000);
+  });
+});
+
+describe('WorkerObserverHost — reads that need an answer now', () => {
+  it('should ask a hosted session’s worker, and use what it answered', async () => {
+    // Arrange
+    const { storage, subject, hostAll, reads } = await rig({
+      answer: request => {
+        const ask: WorkerAsk = request.ask;
+        if (ask.kind === 'pane')
+          return answered(request, { visible: 'worker frame', alive: true, promptReady: false, history: '' });
+        if (ask.kind === 'liveness') return answered(request, { screen: 'a secret screen', transcript: 'fingerprint' });
+        if (ask.kind === 'send-evidence') return answered(request, { readable: true, inputs: [] });
+        return answered(request, null);
+      },
+    });
+    await storage.writeState(A, { id: A, status: 'running', turn: 1, turnState: 'working' });
+    await hostAll();
+    reads.length = 0;
+
+    // Act
+    await subject.project(A);
+    const pane = await subject.pane(A);
+    const sample = await subject.liveness({
+      id: A,
+      status: 'running',
+      turn: 1,
+      mode: 'auto',
+      waiting: false,
+      tmuxSession: 'fy-a',
+    });
+    const evidence = await subject.sendEvidence(A, NOW);
+    const failures = await subject.questions();
+
+    // Assert — nothing was read on this thread, and the screen was masked here before it was digested.
+    should(reads).deepEqual([]);
+    should(pane?.visible).equal('worker frame');
+    should(sample).deepEqual({
+      pane: 'a [redacted] screen',
+      paneHash: 'digest(a [redacted] screen)',
+      transcriptHash: 'digest(fingerprint)',
+      subprocessAlive: true,
+    });
+    should(evidence).deepEqual({ readable: true, inputs: [] });
+    should(failures.size).equal(0);
+    should(await subject.midTurn()).equal(1);
+  });
+
+  it('should work it out on this thread when the worker cannot answer, or answers too late', async () => {
+    // Arrange — every request fails, except a barrier the worker never answers.
+    const { storage, subject, hostAll, reads } = await rig({
+      barrierMs: 20,
+      answer: request =>
+        request.ask.kind === 'observe'
+          ? undefined
+          : {
+              ...(answered(request, undefined) as Extract<FromSessionWorker, { kind: 'answered' }>),
+              value: undefined,
+              failure: 'gone',
+            },
+    });
+    await storage.writeState(A, { id: A, status: 'running', turn: 1 });
+    await hostAll();
+    reads.length = 0;
+
+    // Act
+    await subject.project(A);
+    await subject.pane(A);
+    await subject.liveness({ id: A, status: 'running', turn: 1, mode: 'auto', waiting: false });
+    await subject.sendEvidence(A, NOW);
+
+    // Assert
+    should(reads).deepEqual([`paneState ${A}`, `screen ${A}`, `evidence ${A}`]);
+    should((await stateOf(storage, A)).status).equal('awaiting_question');
+  });
+
+  it('should treat a worker’s answer of no pane as none, and read a session no worker hosts here', async () => {
+    // Arrange
+    const { storage, subject, hostAll, reads } = await rig({ answer: request => answered(request, null) });
+    await storage.writeState(A, { id: A, status: 'running', turn: 1 });
+    await hostAll();
+    reads.length = 0;
+
+    // Act
+    const pane = await subject.pane(A);
+    await subject.pane(B);
+    await subject.sendEvidence(B, NOW);
+    await subject.liveness({ id: B, status: 'running', turn: 1, mode: 'auto', waiting: false });
+
+    // Assert
+    should(pane).be.undefined();
+    should(reads).deepEqual([`paneState ${B}`, `evidence ${B}`, `screen ${B}`]);
   });
 });
 

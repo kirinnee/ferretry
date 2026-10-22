@@ -31,6 +31,8 @@ export class FileAnswerLedger implements AnswerLedger {
   constructor(
     private readonly sessionDirectory: (id: SessionId) => string,
     private readonly clock: ClockPort,
+    /** Told after every append, so a session worker can decide its question from the receipts as they are. */
+    private readonly appended: (id: SessionId) => void = () => undefined,
   ) {}
 
   file(id: SessionId): string {
@@ -53,6 +55,7 @@ export class FileAnswerLedger implements AnswerLedger {
         ? { ...record, outcome: 'accepted', resolution: record.outcome }
         : record;
     await appendFile(file, `${JSON.stringify({ ...durable, at: this.clock.now() })}\n`, { mode: 0o600 });
+    this.appended(id);
   }
 
   /** Every answer this session has a receipt for, keyed by request id, latest line winning. */

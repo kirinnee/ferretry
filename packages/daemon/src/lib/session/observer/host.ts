@@ -1,6 +1,8 @@
 import type { SessionId } from '../../session-id.ts';
+import type { PaneState } from '../../tmux/contracts.ts';
 import type { LivenessSample } from '../../warden/liveness.ts';
 import type { LivenessTarget } from '../../warden/liveness-monitor.ts';
+import type { SendEvidenceReading } from '../send/tracker.ts';
 import type { TurnWatchLoop } from '../turn/service.ts';
 
 /**
@@ -26,6 +28,10 @@ export interface SessionObserverHost {
   liveness(target: LivenessTarget): Promise<LivenessSample>;
   /** How many sessions the observer last saw mid-turn — what an update waits out. */
   midTurn(): Promise<number>;
+  /** The session's pane as last captured, for the live readout; `undefined` when it has none. */
+  pane(id: SessionId): Promise<PaneState | undefined>;
+  /** The send tracker's transcript evidence for a session since `since`. */
+  sendEvidence(id: SessionId, since: string): Promise<SendEvidenceReading>;
   /** Ends whatever the host started (worker threads); the timers that drive it are the root's to stop. */
   close(): void;
 }
