@@ -21,6 +21,12 @@ export const ModelCatalogEntryViewSchema = z.strictObject({
   context: z.number().int().positive().optional(),
   efforts: z.array(NonEmpty).readonly(),
   default: z.boolean(),
+  /** The catalog's one sentence about it, when it has one. */
+  note: NonEmpty.optional(),
+  /** List price, USD per million input and output tokens, when the catalog states one. */
+  price: z.strictObject({ input: z.number().finite().min(0), output: z.number().finite().min(0) }).optional(),
+  /** The day (YYYY-MM-DD) its provider retires it, when the catalog says. */
+  retires: NonEmpty.optional(),
 });
 export type ModelCatalogEntryView = z.infer<typeof ModelCatalogEntryViewSchema>;
 
