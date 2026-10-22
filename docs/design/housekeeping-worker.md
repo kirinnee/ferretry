@@ -596,7 +596,9 @@ that both `observe` and `view` make. PR 3's model reads each input once, on chan
   at once. While the watch is live, the generation is the stamp `CachedCredentialReads` compares, so an
   unchanged store costs no system call. A watch that is not live, or a passive reading that is not
   current, is never trusted: the answer is read directly, as before. It also implements
-  `FleetRefreshSchedule`: it arms one timer for the earliest due credential.
+  `FleetRefreshSchedule`: it arms one timer for the earliest due credential. The boot pass always
+  runs, and a feed with an external collector (`usage.url`), which only time refreshes, keeps one pass an
+  interval, as before.
 
 - `FleetRefreshService.arm` replaces the fixed `setInterval`. A pass observes only the credentials that are
   due (`observeAll(ids)`) and then tells the reading. The timer fires outside every activity
