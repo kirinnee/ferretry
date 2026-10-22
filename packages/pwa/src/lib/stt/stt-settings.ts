@@ -42,6 +42,7 @@ import {
   type DictationShortcutBinding,
 } from '../../features/settings/dictation-shortcut.ts';
 import { type DictionaryParse, MAX_USER_CONTEXT_CHARS, parseDictionary } from './enhancement.ts';
+import { ON_DEVICE_MODEL_IDS, type OnDeviceModelId } from './model-catalog.ts';
 
 export const STT_SETTINGS_KEY = 'fy-stt-v1';
 export const STT_SETTINGS_VERSION = 1;
@@ -79,16 +80,20 @@ export const DEFAULT_ENHANCEMENT_MODELS: Readonly<Record<RemoteEnhancementProvid
 };
 
 /**
- * The two ways to turn speech into text. Neither is a fallback for the other: the person picks one
- * per device, knowing what each costs.
+ * The ways to turn speech into text. None is a fallback for another: the person picks one per device,
+ * knowing what each costs.
  *
- * - `parakeet` runs the Parakeet model in this browser (`parakeet-voice.ts`): a one-time download,
- *   and the audio never leaves the device.
+ * - Every on-device model in the catalog (`model-catalog.ts`) — `parakeet` first — runs in this
+ *   browser after a one-time download, and the audio never leaves the device.
  * - `browser` is the browser's or phone's own speech recognition (`browser-recognition.ts`): nothing
  *   to download, but Chrome, Android and Safari send the audio to their vendor's servers.
  */
-export const DICTATION_ENGINES = ['parakeet', 'browser'] as const;
+export const DICTATION_ENGINES = [...ON_DEVICE_MODEL_IDS, 'browser'] as const;
 export type DictationEngineId = (typeof DICTATION_ENGINES)[number];
+
+/** Whether an engine runs a model on this device (so the audio never leaves it). */
+export const isOnDeviceEngine = (engine: DictationEngineId | null | undefined): engine is OnDeviceModelId =>
+  engine !== null && engine !== undefined && engine !== 'browser';
 
 export const isRemoteEnhancementProvider = (id: EnhancementProviderId): id is RemoteEnhancementProviderId =>
   id !== 'local';

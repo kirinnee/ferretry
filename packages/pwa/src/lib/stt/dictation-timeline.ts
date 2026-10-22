@@ -33,6 +33,7 @@
  * when the provider found the request too big — shows as `attempts: 2, retried: 'without-context'`.
  */
 
+import { ON_DEVICE_MODEL_IDS } from './model-catalog.ts';
 import type { CleanupTrace } from '@ferretry/protocol';
 import { z } from 'zod';
 
@@ -65,7 +66,8 @@ const CleanupTimingSchema = CleanupCallDetailSchema.extend({
 export type CleanupTiming = z.infer<typeof CleanupTimingSchema>;
 
 const SpeechTimingSchema = z.strictObject({
-  engine: z.enum(['parakeet', 'web-speech']),
+  /** `web-speech`, or the on-device model's catalog id (`model-catalog.ts`). */
+  engine: z.enum(['web-speech', ...ON_DEVICE_MODEL_IDS]),
   /** `on-device` for Parakeet, `browser` for the browser's own speech service. */
   provider: z.string().min(1).max(32).optional(),
   model: z.string().min(1).max(128).optional(),

@@ -1,11 +1,13 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
 import { DEFAULT_DICTATION_SHORTCUT } from '../../../src/features/settings/dictation-shortcut.ts';
+import { ON_DEVICE_MODEL_IDS } from '../../../src/lib/stt/model-catalog.ts';
 import {
   DEFAULT_GROQ_ENHANCEMENT_MODEL,
   DEFAULT_STT_SETTINGS,
   ENHANCEMENT_PROVIDERS,
   GROQ_FASTER_ENHANCEMENT_MODEL,
+  isOnDeviceEngine,
   MAX_DICTIONARY_LINE_LENGTH,
   MAX_DICTIONARY_LINES,
   MAX_ENHANCEMENT_MODEL_CHARS,
@@ -137,6 +139,16 @@ describe('parseSttSettings', () => {
     should(parseSttSettings(stored({ liveWordsOptIn: 'yes' })).liveWordsOptIn).be.false();
     // A choice made after this shipped is honoured, and survives a round trip through storage.
     should(parseSttSettings(stored({ liveWordsOptIn: true })).liveWordsOptIn).be.true();
+  });
+
+  it('reads every catalog model as an engine, and only those and browser voice', () => {
+    for (const id of ON_DEVICE_MODEL_IDS) {
+      should(parseSttSettings(stored({ engine: id })).engine).equal(id);
+      should(isOnDeviceEngine(id)).be.true();
+    }
+    should(isOnDeviceEngine('browser')).be.false();
+    should(isOnDeviceEngine(null)).be.false();
+    should(isOnDeviceEngine(undefined)).be.false();
   });
 
   it('reads the voice engine, and leaves an unknown or absent one unchosen', () => {

@@ -257,6 +257,7 @@ import {
 } from '../src/lib/stt/browser-recognition.ts';
 import type { CaptureMonitor } from '../src/lib/stt/level-monitor.ts';
 import { PARAKEET_TOTAL_BYTES, PARAKEET_VERSION_LABEL } from '../src/lib/stt/parakeet-model.ts';
+import { PARAKEET_CATALOG_MODEL } from '../src/lib/stt/model-catalog.ts';
 import type { ParakeetInstallSnapshot, ParakeetVoice } from '../src/lib/stt/parakeet-voice.ts';
 import { DEFAULT_STT_SETTINGS, type SttSettings } from '../src/lib/stt/stt-settings.ts';
 import { DaemonUsageIndex } from '../src/lib/usage.ts';
@@ -649,6 +650,7 @@ const HARNESS_RECOGNITION_IOS_HOME_SCREEN: BrowserRecognitionSupport = {
  */
 const harnessParakeetVoice = (snapshot: ParakeetInstallSnapshot): ParakeetVoice =>
   ({
+    model: PARAKEET_CATALOG_MODEL,
     support: { available: snapshot.phase !== 'unsupported' },
     getSnapshot: () => snapshot,
     subscribe: () => () => undefined,

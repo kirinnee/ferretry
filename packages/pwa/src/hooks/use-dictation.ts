@@ -8,13 +8,15 @@
  * out: it calls `onDraft` once with the COMPLETE next draft and caret, placed where the caret
  * is at THAT moment (so typing while the box was open is preserved). `discard()` drops it.
  *
- * TWO ENGINES, CHOSEN BY THE PERSON (`settings.engine`), neither a fallback for
- * the other:
+ * ENGINES CHOSEN BY THE PERSON (`settings.engine`), none a fallback for
+ * another:
  *
- *   - `parakeet` records with this page's microphone and transcribes in the
- *     speech worker (`lib/stt/parakeet-session.ts`). Audio never leaves the
- *     device. It needs the model installed first, and says so rather than
- *     downloading anything.
+ *   - an ON-DEVICE model (`parakeet`, or any other catalog entry in
+ *     `lib/stt/model-catalog.ts`) records with this page's microphone and
+ *     transcribes in its speech worker, through the voice the registry holds
+ *     for it (`lib/stt/on-device-voices.ts`). Audio never leaves the device.
+ *     It needs the model installed first, and says so rather than downloading
+ *     anything.
  *   - `browser` hands the microphone to the browser's own SpeechRecognition
  *     (`lib/stt/browser-recognition.ts`), which on Chrome, Android and Safari
  *     sends the audio to the browser vendor's servers.
@@ -40,6 +42,7 @@ import type { DaemonConnection } from '../lib/daemon-connection.ts';
 import {
   useDaemonFetch,
   useDictationDebug,
+  useOnDeviceVoices,
   useParakeetVoice,
   useSpeedupKeys,
   useTranscriptionLog,
@@ -71,7 +74,10 @@ import {
   type MicMeterGlobalLike,
   type MicMeterPort,
 } from '../lib/stt/level-monitor.ts';
+import { onDeviceModel } from '../lib/stt/model-catalog.ts';
 import { joinWords, type NearLiveState } from '../lib/stt/near-live.ts';
+import type { OnDeviceVoice } from '../lib/stt/on-device-voice.ts';
+import type { OnDeviceVoices } from '../lib/stt/on-device-voices.ts';
 import type { ParakeetVoice } from '../lib/stt/parakeet-voice.ts';
 import {
   type RemoteEnhancementError,
@@ -80,7 +86,12 @@ import {
   requestRemoteEnhancement,
 } from '../lib/stt/remote-enhancement.ts';
 import type { DeviceSpeedupKeys } from '../lib/stt/speedup-keys.ts';
-import { isRemoteEnhancementProvider, type SttSettings, sttDictionary } from '../lib/stt/stt-settings.ts';
+import {
+  isOnDeviceEngine,
+  isRemoteEnhancementProvider,
+  type SttSettings,
+  sttDictionary,
+} from '../lib/stt/stt-settings.ts';
 import type { TranscriptionLog } from '../lib/stt/transcription-log.ts';
 import { DEFAULT_VOICE_CLEANUP, type VoiceCleanup } from '../lib/stt/voice-cleanup.ts';
 import { verifyWordOnly } from '../lib/stt/word-only-verifier.ts';
@@ -264,6 +275,8 @@ export interface UseDictationOptions {
   readonly meter?: MicMeterPort | null;
   /** Parakeet on this device. Read from the app store when omitted; `null` means not available here. */
   readonly parakeet?: ParakeetVoice | null;
+  /** Every on-device model's voice. Read from the app store when omitted; `null` means none here. */
+  readonly voices?: OnDeviceVoices | null;
   /** The machine's cleanup settings (voice.yaml); the defaults when absent. Only the hosted providers read them. */
   readonly voiceCleanup?: VoiceCleanup;
   /** Optional text-only correction transport through the paired daemon. */
@@ -342,7 +355,8 @@ export function useDictation(options: UseDictationOptions): DictationHandle {
   const ambientRecognition = useMemo(() => browserRecognitionProvider(), []);
   const recognition = options.recognition ?? ambientRecognition;
   const contextVoice = useParakeetVoice();
-  const voice = options.parakeet === undefined ? contextVoice : options.parakeet;
+  const contextVoices = useOnDeviceVoices();
+  const voices = options.voices === undefined ? contextVoices : options.voices;
   const contextKeys = useSpeedupKeys();
   const speedupKeysRef = useRef<DeviceSpeedupKeys | null>(null);
   speedupKeysRef.current = options.speedupKeys === undefined ? contextKeys : options.speedupKeys;
@@ -353,13 +367,17 @@ export function useDictation(options: UseDictationOptions): DictationHandle {
   const transcriptionLogRef = useRef<TranscriptionLog | null>(null);
   transcriptionLogRef.current = options.transcriptionLog === undefined ? contextLog : options.transcriptionLog;
   const engine = options.settings.engine;
+  const voice: OnDeviceVoice | null = !isOnDeviceEngine(engine)
+    ? null
+    : engine === 'parakeet' && options.parakeet !== undefined
+      ? options.parakeet
+      : (voices?.get(engine) ?? (engine === 'parakeet' ? contextVoice : null));
   // Unchosen counts as supported: the mic stays live so pressing it can ask the person to choose.
-  const supported =
-    engine === 'parakeet'
-      ? voice?.support.available === true
-      : engine === 'browser'
-        ? recognition.support.available
-        : true;
+  const supported = isOnDeviceEngine(engine)
+    ? voice?.support.available === true
+    : engine === 'browser'
+      ? recognition.support.available
+      : true;
   const ambientMeter = useMemo(() => browserMicMeter(globalThis as unknown as MicMeterGlobalLike), []);
   const meterPort = options.meter === undefined ? ambientMeter : options.meter;
   const meterPortRef = useRef(meterPort);
@@ -665,8 +683,8 @@ export function useDictation(options: UseDictationOptions): DictationHandle {
         const current = optionsRef.current;
         const clock = current.now ?? Date.now;
         const built = timeline.build({
-          engine: engine === 'parakeet' ? 'parakeet' : 'web-speech',
-          provider: engine === 'parakeet' ? 'on-device' : 'browser',
+          engine: isOnDeviceEngine(engine) ? engine : 'web-speech',
+          provider: isOnDeviceEngine(engine) ? 'on-device' : 'browser',
           ...(session.timings?.() === undefined ? {} : { session: session.timings() }),
           ...(take === null ? {} : { audioMs: Math.max(0, stoppedAt - take.at) }),
           ...(notes.cleanup === undefined ? {} : { cleanup: notes.cleanup }),
@@ -681,7 +699,7 @@ export function useDictation(options: UseDictationOptions): DictationHandle {
           at: stoppedAt,
           ...(current.sessionId === undefined ? {} : { sessionId: current.sessionId }),
           ...(current.sessionLabel === undefined ? {} : { sessionLabel: current.sessionLabel }),
-          engine: engine === 'parakeet' ? 'parakeet' : 'web-speech',
+          engine: isOnDeviceEngine(engine) ? engine : 'web-speech',
           ...(take === null ? {} : { durationMs: Math.max(0, stoppedAt - take.at) }),
           raw: raw.trim(),
           ...(changed ? { cleaned } : {}),
@@ -827,14 +845,14 @@ export function useDictation(options: UseDictationOptions): DictationHandle {
           if (session !== null) void finish(token, session);
         },
       };
-      if (engine === 'parakeet') {
-        const parakeet = voiceRef.current;
-        if (parakeet === null)
+      if (isOnDeviceEngine(engine)) {
+        const onDevice = voiceRef.current;
+        if (onDevice === null)
           throw new BrowserRecognitionError(
             'recognition-unavailable',
-            'Parakeet is not available in this copy of Ferretry.',
+            `${onDeviceModel(engine)?.shortName ?? 'This engine'} is not available in this copy of Ferretry.`,
           );
-        session = parakeet.createSession({
+        session = onDevice.createSession({
           ...callbacks,
           liveWords: optionsRef.current.settings.liveWordsOptIn,
           onLive: state => {
