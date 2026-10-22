@@ -27,7 +27,8 @@ describe('the sherpa models', () => {
   it('keep every pinning rule and are listed first, as the owner asked', () => {
     should(validateModelCatalog(SHERPA_MODELS)).eql([]);
     should(ON_DEVICE_MODELS.slice(0, 2)).eql([SHERPA_ZIPFORMER_MODEL, SHERPA_ZIPFORMER_20M_MODEL]);
-    should(ON_DEVICE_MODELS.slice(0, SHERPA_MODELS.length)).eql([...SHERPA_MODELS]);
+    // Sherpa streaming and Moonshine first; Whisper sits between Moonshine and Parakeet small.
+    should(ON_DEVICE_MODELS.slice(0, 4)).eql([...SHERPA_MODELS.slice(0, 4)]);
     should(SPEECH_RUNTIMES['sherpa-onnx']).equal(SHERPA_RUNTIME);
   });
 

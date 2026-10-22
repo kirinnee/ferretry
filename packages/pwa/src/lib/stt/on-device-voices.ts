@@ -17,6 +17,7 @@ import {
 } from './parakeet-voice.ts';
 import { browserSherpaVoice, type SherpaAssets, type SherpaGlobalLike } from './sherpa-voice.ts';
 import { browserVoskVoice, type VoskAssets } from './vosk-voice.ts';
+import { browserWhisperVoice, type WhisperAssets } from './whisper-voice.ts';
 
 export class OnDeviceVoices {
   readonly #voices: readonly OnDeviceVoice[];
@@ -54,6 +55,8 @@ export interface SpeechAssets extends ParakeetAssets {
   readonly sherpa?: SherpaAssets;
   /** Vosk's worker and WebAssembly runtime; absent from a build without them. */
   readonly vosk?: VoskAssets;
+  /** The Whisper worker and the transformers.js runtime binary; absent from a build without them. */
+  readonly whisper?: WhisperAssets;
 }
 
 /** Every global the on-device runtimes read. */
@@ -67,15 +70,14 @@ export function browserOnDeviceVoices(
 ): OnDeviceVoices {
   // A shared runtime asks the registry at Remove time, once every voice exists.
   let registry: OnDeviceVoices | null = null;
+  const runtimeInUse = (model: OnDeviceModel) => (): boolean =>
+    registry?.runtimeInUse(model.runtime, model.id) ?? false;
   const voiceFor = (model: OnDeviceModel): OnDeviceVoice => {
     if (model.runtime === 'onnxruntime-web') return parakeet;
     if (model.runtime === 'vosk-wasm') return browserVoskVoice(global, assets?.vosk ?? null);
-    return browserSherpaVoice(
-      model,
-      global,
-      assets?.sherpa ?? null,
-      () => registry?.runtimeInUse(model.runtime, model.id) ?? false,
-    );
+    if (model.runtime === 'transformers-js')
+      return browserWhisperVoice(global, assets?.whisper, model, runtimeInUse(model));
+    return browserSherpaVoice(model, global, assets?.sherpa ?? null, runtimeInUse(model));
   };
   registry = new OnDeviceVoices(ON_DEVICE_MODELS.map(voiceFor));
   return registry;

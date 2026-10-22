@@ -4,6 +4,8 @@
  * themes. Review evidence; nothing compares the PNGs.
  *
  *   bun harness/engine-list-screenshot.tsx    # writes harness/out/engine-list-*.png
+ *   ENGINE_LIST_TRY=whisper-tiny-en bun harness/engine-list-screenshot.tsx
+ *                                             # that engine installed and tried: engine-list-<id>-*.png
  *   ENGINE_LIST_FOCUS=vosk-small-en bun harness/engine-list-screenshot.tsx
  *                                             # that model installed, in use and tried: engine-list-vosk-small-en-*.png
  *
@@ -31,8 +33,11 @@ const run = (command: string, args: readonly string[]): void => {
   if (result.status !== 0) fail(`${command} exited ${result.status}`);
 };
 
-/** A model to show installed, in use and tried, instead of the round-robin's first installed one. */
-const focus = process.env.ENGINE_LIST_FOCUS?.trim() ?? '';
+/**
+ * A model to show installed, in use and tried, instead of the round-robin's first installed one.
+ * `ENGINE_LIST_TRY` is the older spelling of the same switch.
+ */
+const focus = (process.env.ENGINE_LIST_FOCUS ?? process.env.ENGINE_LIST_TRY ?? '').trim();
 
 const PAGE_ENTRY = `
 import { createRoot } from 'react-dom/client';
@@ -43,6 +48,7 @@ import { OnDeviceVoice } from '../../src/lib/stt/on-device-voice.ts';
 import { OnDeviceVoices } from '../../src/lib/stt/on-device-voices.ts';
 import { DEFAULT_STT_SETTINGS } from '../../src/lib/stt/stt-settings.ts';
 import { AVAILABLE_RECOGNITION, fakeRecognitionProvider } from '../../tests/support/browser-recognition.ts';
+
 
 /** Installed, part-way down, not installed — round-robin over the catalog. */
 const stateOf = (index: number, bytes: number, version: string): ModelStoreStatus =>
@@ -74,6 +80,11 @@ const voices = new OnDeviceVoices(
         },
         finish: () => new Promise(done => setTimeout(() => done('Restart the daemon on the build box.'), 80)),
         cancel: () => undefined,
+        // What a real session reports: Whisper names the backend that ran the take.
+        timings: () => ({
+          loadMs: 1_200,
+          model: model.runtime === 'transformers-js' ? \`\${model.versionLabel} · WebGPU\` : model.versionLabel,
+        }),
       }),
     });
   }),

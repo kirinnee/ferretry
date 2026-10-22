@@ -38,13 +38,24 @@ import {
   VOSK_RUNTIME_VERSION,
   VOSK_VERSION_LABEL,
 } from './vosk-model.ts';
+import {
+  TRANSFORMERS_JS_VERSION,
+  WHISPER_BASE_EN_CATALOG_MODEL,
+  WHISPER_RUNTIME_FILE,
+  WHISPER_TINY_EN_CATALOG_MODEL,
+} from './whisper-model.ts';
 
-/** Every on-device model id, in the order Settings lists them (sherpa first, as the owner asked). Each is also a dictation engine id. */
+/**
+ * Every on-device model id, in the order Settings lists them — sherpa first, as the owner asked, then
+ * Moonshine, Whisper, Parakeet small, Vosk, and Parakeet 0.6B. Each is also a dictation engine id.
+ */
 export const ON_DEVICE_MODEL_IDS = [
   'sherpa-zipformer-en',
   'sherpa-zipformer-en-20m',
   'moonshine-tiny-en',
   'moonshine-base-en',
+  'whisper-tiny-en',
+  'whisper-base-en',
   'parakeet-ctc-110m',
   'vosk-small-en',
   'parakeet',
@@ -52,7 +63,7 @@ export const ON_DEVICE_MODEL_IDS = [
 export type OnDeviceModelId = (typeof ON_DEVICE_MODEL_IDS)[number];
 
 /** The programs a model can run on. */
-export type SpeechRuntimeId = 'onnxruntime-web' | 'sherpa-onnx' | 'vosk-wasm';
+export type SpeechRuntimeId = 'onnxruntime-web' | 'sherpa-onnx' | 'vosk-wasm' | 'transformers-js';
 
 export type SpeechModelFamily = 'parakeet' | 'zipformer' | 'moonshine' | 'whisper' | 'vosk';
 
@@ -89,6 +100,14 @@ export const SPEECH_RUNTIMES: Readonly<Record<SpeechRuntimeId, SpeechRuntime>> =
     file: VOSK_RUNTIME_FILE,
     // One Vosk model so far, so its binary lives in that model's bundle, like Parakeet's.
     shared: null,
+  },
+  'transformers-js': {
+    id: 'transformers-js',
+    label: `transformers.js ${TRANSFORMERS_JS_VERSION} on ONNX Runtime Web ${ORT_RUNTIME_VERSION}`,
+    version: TRANSFORMERS_JS_VERSION,
+    licence: 'Apache-2.0 (transformers.js), MIT (ONNX Runtime)',
+    file: WHISPER_RUNTIME_FILE,
+    shared: { cache: 'fy-stt-transformers-js-v1', keyRoot: '/fy-stt/runtime/transformers-js' },
   },
 };
 
@@ -147,7 +166,13 @@ export interface VoskCatalogModel extends OnDeviceModelBase {
   readonly family: 'vosk';
 }
 
-export type OnDeviceModel = ParakeetCatalogModel | SherpaCatalogModel | VoskCatalogModel;
+/** Whisper tiny.en and base.en on transformers.js (`whisper-voice.ts`), entries in `whisper-model.ts`. */
+export interface WhisperCatalogModel extends OnDeviceModelBase {
+  readonly runtime: 'transformers-js';
+  readonly family: 'whisper';
+}
+
+export type OnDeviceModel = ParakeetCatalogModel | SherpaCatalogModel | VoskCatalogModel | WhisperCatalogModel;
 
 export const PARAKEET_CATALOG_MODEL: ParakeetCatalogModel = {
   id: 'parakeet',
@@ -194,7 +219,10 @@ export const VOSK_CATALOG_MODEL: VoskCatalogModel = {
 
 /** Every model, in {@link ON_DEVICE_MODEL_IDS} order. */
 export const ON_DEVICE_MODELS: readonly OnDeviceModel[] = [
-  ...SHERPA_MODELS,
+  ...SHERPA_MODELS.slice(0, 4),
+  WHISPER_TINY_EN_CATALOG_MODEL,
+  WHISPER_BASE_EN_CATALOG_MODEL,
+  ...SHERPA_MODELS.slice(4),
   VOSK_CATALOG_MODEL,
   PARAKEET_CATALOG_MODEL,
 ];

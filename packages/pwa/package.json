@@ -33,7 +33,8 @@
     "./worker": "./src/worker/service-worker.ts",
     "./parakeet-worker": "./src/worker/parakeet-worker.ts",
     "./sherpa-worker": "./src/worker/sherpa-worker.ts",
-    "./vosk-worker": "./src/worker/vosk-worker.ts"
+    "./vosk-worker": "./src/worker/vosk-worker.ts",
+    "./whisper-worker": "./src/worker/whisper-worker.ts"
   },
   "types": "./src/lib/index.ts",
   "scripts": {
@@ -46,6 +47,7 @@
     "@ferretry/fleet": "workspace:*",
     "@ferretry/protocol": "workspace:*",
     "@ferretry/relay": "workspace:*",
+    "@huggingface/transformers": "4.3.1",
     "@lichess-org/vosk-browser": "0.0.3",
     "@sherpaw/asr": "0.3.0",
     "@xterm/addon-fit": "^0.11.0",

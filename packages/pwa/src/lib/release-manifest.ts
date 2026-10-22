@@ -62,6 +62,11 @@ export const UNLISTED_RELEASE_FILES: readonly string[] = [
  * Deferring it changes WHEN it is fetched, never whether it is checked: the keeper still answers a request for it only with bytes that hash to the
  * signed list, it just fetches them on that request instead of at install, and does not keep a second
  * copy (`lib/stt/parakeet-store.ts` keeps the one the speech engine uses).
+ *
+ * The same pattern covers the WebGPU-capable build of that runtime (`ort-wasm-simd-threaded.asyncify`,
+ * ~27 MB), which only someone who installs a Whisper model uses (`lib/stt/whisper-model.ts`). The
+ * workers' own scripts are NOT deferred: a deferred file is never kept, so a worker script deferred here
+ * could not start offline, and dictation with an installed model must work without a connection.
  */
 const DEFERRED_RELEASE_FILE = /^assets\/(?:ort-wasm-simd-threaded|asr)[A-Za-z0-9._-]*\.wasm$/u;
 /** Vosk's WebAssembly runtime (~3 MB), deferred for the same reason: only a Vosk install fetches it. */

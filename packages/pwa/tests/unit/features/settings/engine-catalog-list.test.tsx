@@ -80,8 +80,8 @@ class Session implements OnDeviceSession {
   readonly options: OnDeviceSessionOptions;
   finished: ((text: string) => void) | null = null;
   cancelled = 0;
-  timings(): { readonly loadMs?: number } {
-    return { loadMs: 1_800 };
+  timings(): { readonly loadMs?: number; readonly model?: string } {
+    return { loadMs: 1_800, model: 'Zipformer test · WebAssembly' };
   }
   constructor(options: OnDeviceSessionOptions) {
     this.options = options;
@@ -326,6 +326,7 @@ describe('<EngineCatalogList>', () => {
     expect(result.textContent).toContain('0.7 s in');
     expect(result.textContent).toContain('0.4 s');
     expect(result.textContent).toContain('Model load (first take only)1.8 s');
+    expect(result.textContent).toContain('Ran onZipformer test · WebAssembly');
     expect(chosen).toEqual([]);
 
     await interact(() => button(model, 'Try again').click());
