@@ -7,6 +7,7 @@ import {
   daemonConnection,
   daemonId,
   daemonRelayCarrier,
+  daemonTunnelCarrier,
   sameDaemonCarriers,
   sameDaemonConnection,
 } from './daemon-connection.ts';
@@ -76,7 +77,14 @@ const label = (value: unknown): string | undefined => {
   return normalized === '' ? undefined : normalized;
 };
 
-/** One stored carrier, read tolerantly so one damaged address does not erase the pairing. */
+/**
+ * One stored carrier, read tolerantly so one damaged address does not erase the pairing.
+ *
+ * EVERY KIND THE CACHE MAY HOLD IS READ BACK, A TUNNEL INCLUDED. A tunnel used to be written and never
+ * read, so a reload — an installed app the phone put away and woke up — came back without it. Under
+ * "Tunnel only" that is unrecoverable from inside the walk: there is nothing left to dial, so no
+ * connection ever opens to carry the refresh that would teach it back (`relay-protocol.md` §15).
+ */
 const carrierFrom = (value: unknown): ConnectionMethod | undefined => {
   if (value === undefined) return undefined;
   if (value === null || typeof value !== 'object' || Array.isArray(value)) return undefined;
@@ -88,6 +96,7 @@ const carrierFrom = (value: unknown): ConnectionMethod | undefined => {
       return undefined;
     }
   }
+  if (raw.kind === 'tunnel') return daemonTunnelCarrier(raw);
   if (raw.kind !== 'relay' || typeof raw.relayUrl !== 'string') return undefined;
   if (raw.operator !== undefined && raw.operator !== 'self' && raw.operator !== 'hosted') return undefined;
   try {
@@ -408,6 +417,13 @@ export class DaemonConnectionStore {
    * with the schema default, or a view that lost its list on the way. Written
    * through, it would leave a reachable daemon with nothing to dial and no request
    * left that could ever learn otherwise, so the known-working cache stands.
+   *
+   * A TUNNEL IS THE ONE ENTRY A REFRESH DOES NOT WITHDRAW BY OMISSION (§15). The daemon publishes its
+   * tunnel only while `cloudflared` holds an edge connection, so a set read during a reconnect of the
+   * connector says "not right now", not "gone" — and under "Tunnel only" the hostname is the one thing
+   * this browser cannot learn back without it. So the last tunnel this daemon published is kept until
+   * the daemon publishes a different one; a hostname that really is gone fails to dial, which is what
+   * sends a "Tunnel only" walk to ask the daemon again (`DaemonCarrierRouter`'s tunnel lookup).
    */
   replaceCarriers(daemon: DaemonConnection, carriers: readonly ConnectionMethod[]): DaemonConnectionRecord | undefined {
     const existing = this.get(daemon.daemonId);
@@ -418,7 +434,10 @@ export class DaemonConnectionStore {
     // operation is the authoritative replacement of that cache.
     if (existing.baseUrl !== daemon.baseUrl || existing.deviceId !== daemon.deviceId) return existing;
     if (carriers.length === 0) return existing;
-    const updated = daemonConnection({ ...existing, carriers });
+    const kept = carriers.some(carrier => carrier.kind === 'tunnel')
+      ? []
+      : existing.carriers.filter(carrier => carrier.kind === 'tunnel');
+    const updated = daemonConnection({ ...existing, carriers: [...carriers, ...kept] });
     if (sameDaemonCarriers(existing.carriers, updated.carriers)) return existing;
     const record: DaemonConnectionRecord = {
       ...updated,

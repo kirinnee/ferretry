@@ -2299,7 +2299,7 @@ walks, and in what order.
 | --------------- | ------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Auto**        | direct → WebRTC → tunnel → relay            | Chosen, never the default. Direct stays first because it has the fewest parties; WebRTC is the first remote carrier. A tunnel is tried only when the daemon published one. A WebRTC attempt costs about 0.4 s when it works and is bounded by its ICE deadline when it does not (§16). |
 | **WebRTC only** | WebRTC                                      | The relay (or direct) session is still used to **introduce** the two ends — signalling only, never the session's bytes.                                                                                                                                                                |
-| **Tunnel only** | tunnel                                      | Says "not set up by the operator" when the hosted service advertises `available: false`, and "this machine has no tunnel yet" when the daemon published none.                                                                                                                          |
+| **Tunnel only** | tunnel                                      | Dials the tunnel this device kept; when there is none, or it does not carry, asks the daemon where it is (below). Says "not set up by the operator" when the hosted service advertises `available: false`, and "this machine has no tunnel yet" when the daemon still names none.      |
 | **Relay only**  | relay (published, then the hosted fallback) | **The default** for every device and machine that has not chosen — exactly the pre-choice relay behaviour.                                                                                                                                                                             |
 
 The walk's rules from §13 are unchanged inside each preference: the carrier is chosen by **trying**
@@ -2310,6 +2310,31 @@ tunnel yet" — never a silent fall back to a carrier the person excluded.
 
 **Pairing ignores the preference.** First contact is direct, then the hosted relay (§14), whatever is
 chosen: WebRTC needs a device key to signal and a tunnel is published only to a paired device.
+
+**A device keeps the tunnel it was told, and asks the daemon when that is not enough.** The tunnel is
+learned the way every carrier is — from the daemon's published set, at pairing and on each
+`GET /v1/carriers` refresh — and kept with the pairing in the device's own storage, so a reload or an
+installed app the phone woke up dials it at once. Three rules make that safe under "Tunnel only", where
+the tunnel is the only carrier the person allowed and so the only thing that could ever teach the
+device a new one:
+
+1. **A kept tunnel is dialled before anything is asked.** A connect never waits on a lookup while there
+   is an address to try.
+2. **A refresh that names no tunnel does not erase the kept one.** The daemon publishes its tunnel only
+   while `cloudflared` holds an edge connection, so a set read during a reconnect means "not right now",
+   not "gone". The kept hostname is replaced when the daemon publishes a different one; a read that
+   fails changes nothing.
+3. **When there is no tunnel to dial, or the kept one does not carry, the daemon is asked** — one
+   `GET /v1/carriers` over its direct address or a rendezvous (the carriers that already introduce
+   WebRTC, §16, with the hosted relay when the daemon authored none), inside an ordinary
+   device-authenticated session. The answer is the daemon's own, end to end: no relay operator can put a
+   hostname in it, which is why the device asks the daemon rather than a hosted lookup keyed by
+   fingerprint (that lookup would also be the very link between hostname and daemon this section keeps
+   out of DNS and certificate logs). A tunnel it names is dialled straight away and kept. The person's
+   own requests never ride the introducer, exactly as WebRTC signalling does not carry a session's bytes,
+   and a lookup's answer stands for 30 s, so an outage does not turn every panel's retry into a question
+   over the relay. Only when the daemon names no tunnel either does the walk end with the stated
+   failure.
 
 ### The hosted tunnel service
 
@@ -2424,7 +2449,8 @@ configuration) is deleted by the control object's daily alarm: its connections a
 tunnel's deletion does not remove its record. A step that fails is retried on the next alarm and the
 row is kept until every step has succeeded, so a half-deleted tunnel never loses the evidence needed
 to finish deleting it. A daemon that comes back after a reclaim provisions a new tunnel with a new
-hostname, and its devices learn it from the next `GET /v1/carriers` refresh.
+hostname, and its devices learn it from the next `GET /v1/carriers` refresh — a "Tunnel only" device
+from the lookup its failed dial of the old hostname starts ("The choice", above).
 
 A tunnel whose provisioning never finished is reclaimed after **one day**, not `reclaimAfterDays`:
 it serves nobody and still counts against its account. A reclaimed or released tunnel is first
