@@ -155,6 +155,9 @@ describe('the image viewer', () => {
 /** A 400x300 stage showing an 800x600 picture, so zoomed views have room to pan. */
 const withStage = async (images: readonly ViewerImage[], run: (view: Mounted) => Promise<void>): Promise<void> => {
   const proto = HTMLElement.prototype;
+  const originals = (['clientWidth', 'clientHeight'] as const).map(
+    name => [name, Object.getOwnPropertyDescriptor(proto, name)] as const,
+  );
   Object.defineProperty(proto, 'clientWidth', { configurable: true, get: () => 400 });
   Object.defineProperty(proto, 'clientHeight', { configurable: true, get: () => 300 });
   const view = await mount(<Harness images={images} />);
@@ -168,8 +171,10 @@ const withStage = async (images: readonly ViewerImage[], run: (view: Mounted) =>
     await run(view);
   } finally {
     await view.unmount();
-    Reflect.deleteProperty(proto, 'clientWidth');
-    Reflect.deleteProperty(proto, 'clientHeight');
+    for (const [name, original] of originals) {
+      if (original) Object.defineProperty(proto, name, original);
+      else Reflect.deleteProperty(proto, name);
+    }
   }
 };
 
