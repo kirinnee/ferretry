@@ -1,4 +1,5 @@
 import { describe, it } from 'bun:test';
+import type { LocalModels } from '@ferretry/protocol';
 import should from 'should';
 import { findRawSecrets } from '../../src/lib/config-files/secrets.ts';
 import { readConfigText } from '../../src/lib/config-files/yaml-text.ts';
@@ -15,7 +16,6 @@ import {
   parseModelCatalogText,
   SIGN_IN_MODEL_CATALOGS,
 } from '../../src/lib/models/catalog.ts';
-import type { LocalModels } from '@ferretry/protocol';
 import { runtimeModels } from '../../src/lib/models/runtime.ts';
 import {
   type CatalogHalf,
@@ -404,5 +404,18 @@ describe('runtimeModels', () => {
       should(zaiLogin.local).be.undefined();
       should(unread.local).be.undefined();
     });
+  });
+});
+
+describe('a model retirement day', () => {
+  it('should read a day the provider announced, and refuse one that is not a day', () => {
+    // Act
+    const read = catalogOf({ claude: { models: [model('old', { default: true, retires: '2027-01-31' })] } });
+
+    // Assert
+    should(read.claude?.models[0]?.retires).equal('2027-01-31');
+    should(problemOf({ claude: { models: [model('old', { default: true, retires: 'next spring' })] } })).containEql(
+      'write the date as YYYY-MM-DD',
+    );
   });
 });

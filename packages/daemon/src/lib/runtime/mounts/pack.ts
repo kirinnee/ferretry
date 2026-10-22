@@ -1,4 +1,11 @@
 import {
+  PackGuideAcceptRequestSchema,
+  PackGuideDescribeRequestSchema,
+  PackGuideJobResultSchema,
+  PackGuideSuggestRequestSchema,
+  PackGuideSuggestStartSchema,
+  PackGuideWriteResultSchema,
+  PackInventorySchema,
   PackNewOutcomeSchema,
   PackNewRequestSchema,
   PackRecommendationSchema,
@@ -10,11 +17,14 @@ import {
   SessionResultSchema,
   type SessionView,
 } from '@ferretry/protocol';
+import { isHumanAdminActor } from '../../api/actor.ts';
 import { parseBody } from '../../api/body.ts';
 import { ApiError } from '../../api/error.ts';
 import { type ApiResponse, decodeParameter } from '../../api/http.ts';
 import { jsonResponse } from '../../api/responses.ts';
 import type { ApiRoute, RouteContext } from '../../api/route.ts';
+import type { GuideBuilderService, GuideFileService } from '../../pack/builder/index.ts';
+import { GuideModelUnknownError } from '../../pack/builder/index.ts';
 import type { PackService } from '../../pack/service.ts';
 import { type PackSwitchOutcome, SessionPackError } from '../../session/pack/service.ts';
 
@@ -26,9 +36,19 @@ import { type PackSwitchOutcome, SessionPackError } from '../../session/pack/ser
  * start's own posture — `operator`, no capability — and the session start route's limits apply to it
  * inside the daemon. A folder chosen by a caller off this machine would be terminal access, so only a
  * caller AT the machine may name one; anyone else's sub-ferret runs in its parent's folder.
+ *
+ * The models-guide GENERATOR (docs/pack-mode.md § Suggesting a guide): the inventory is a `fleet.use` read;
+ * starting a builder ferret, accepting, undoing and describing are a PERSON's acts — a ferret's own
+ * credential is refused, so no agent spends a model run or rewrites the guide unasked — and the writes are
+ * `fleet.configure`, as any edit of the guide through the configuration routes is.
  */
 export interface PackSubsystem {
-  readonly service: Pick<PackService, 'view' | 'recommend' | 'newChild'>;
+  readonly service: Pick<PackService, 'view' | 'recommend' | 'newChild' | 'inventory'>;
+  /** The guide builder and the writes of what it drafts. */
+  readonly guide: {
+    readonly builder: Pick<GuideBuilderService, 'status' | 'start' | 'job'>;
+    readonly file: Pick<GuideFileService, 'undoable' | 'accept' | 'undo' | 'describe'>;
+  };
   /** `undefined` when there is no such session. */
   result(sessionId: string): Promise<SessionResult | undefined>;
   setSwitch(
@@ -38,6 +58,48 @@ export interface PackSubsystem {
 }
 
 const USE = { capability: 'fleet', axis: 'use' } as const;
+const CONFIGURE = { capability: 'fleet', axis: 'configure' } as const;
+
+/** Refuses a ferret's own credential: only a person (at the machine, or a paired device) does these. */
+function personOnly(context: RouteContext, act: string): void {
+  const agent =
+    context.credential !== undefined && context.credential.tokenClass !== 'device' && !isHumanAdminActor(context.actor);
+  if (agent) throw new ApiError(403, `only a person can ${act}; ask the owner`, 'forbidden');
+}
+
+async function view(subsystem: PackSubsystem): Promise<ApiResponse> {
+  const [base, undo, builder] = await Promise.all([
+    subsystem.service.view(),
+    subsystem.guide.file.undoable(),
+    subsystem.guide.builder.status(),
+  ]);
+  return jsonResponse(PackViewSchema.parse({ ...base, ...(undo === undefined ? {} : { undo }), builder }));
+}
+
+async function suggest(subsystem: PackSubsystem, context: RouteContext): Promise<ApiResponse> {
+  personOnly(context, 'start the models guide builder');
+  const request = await parseBody(context.request, PackGuideSuggestRequestSchema);
+  const started = await subsystem.guide.builder.start(request);
+  return jsonResponse(PackGuideSuggestStartSchema.parse(started), started.outcome === 'started' ? 201 : 200);
+}
+
+async function job(subsystem: PackSubsystem, context: RouteContext): Promise<ApiResponse> {
+  const id = decodeParameter(context.params.get('jobId') ?? '');
+  const found =
+    id === undefined || id === '' ? undefined : await subsystem.guide.builder.job(id).catch(() => undefined);
+  if (found === undefined) throw new ApiError(404, 'no such models guide builder run', 'not-found');
+  return jsonResponse(PackGuideJobResultSchema.parse(found));
+}
+
+async function write(context: RouteContext, act: string, run: () => Promise<unknown>): Promise<ApiResponse> {
+  personOnly(context, act);
+  try {
+    return jsonResponse(PackGuideWriteResultSchema.parse(await run()));
+  } catch (error) {
+    if (error instanceof GuideModelUnknownError) throw new ApiError(404, error.message, 'not-found');
+    throw error;
+  }
+}
 
 function sessionParameter(context: RouteContext): string {
   const decoded = decodeParameter(context.params.get('sessionId') ?? '');
@@ -92,7 +154,64 @@ export function packRoutes(subsystem: PackSubsystem): readonly ApiRoute[] {
       minimum: 'operator',
       capability: USE,
       noStore: true,
-      handle: async () => jsonResponse(PackViewSchema.parse(await subsystem.service.view())),
+      handle: async () => await view(subsystem),
+    },
+    {
+      method: 'GET',
+      path: '/v1/pack/inventory',
+      minimum: 'operator',
+      capability: USE,
+      noStore: true,
+      handle: async () => jsonResponse(PackInventorySchema.parse(await subsystem.service.inventory())),
+    },
+    {
+      method: 'POST',
+      path: '/v1/pack/guide/suggest',
+      minimum: 'operator',
+      capability: USE,
+      noStore: true,
+      handle: async context => await suggest(subsystem, context),
+    },
+    {
+      method: 'GET',
+      path: '/v1/pack/guide/jobs/:jobId',
+      minimum: 'operator',
+      capability: USE,
+      noStore: true,
+      handle: async context => await job(subsystem, context),
+    },
+    {
+      method: 'POST',
+      path: '/v1/pack/guide/accept',
+      minimum: 'operator',
+      capability: CONFIGURE,
+      noStore: true,
+      handle: async context =>
+        await write(context, 'accept a models guide', async () =>
+          subsystem.guide.file.accept(
+            await parseBody(context.request, PackGuideAcceptRequestSchema, { maxBytes: 512 * 1_024 }),
+          ),
+        ),
+    },
+    {
+      method: 'POST',
+      path: '/v1/pack/guide/undo',
+      minimum: 'operator',
+      capability: CONFIGURE,
+      noStore: true,
+      handle: async context =>
+        await write(context, 'undo an accepted models guide', async () => subsystem.guide.file.undo()),
+    },
+    {
+      method: 'POST',
+      path: '/v1/pack/guide/describe',
+      minimum: 'operator',
+      capability: CONFIGURE,
+      noStore: true,
+      handle: async context =>
+        await write(context, 'describe a model for the models guide', async () =>
+          subsystem.guide.file.describe(await parseBody(context.request, PackGuideDescribeRequestSchema)),
+        ),
     },
     {
       method: 'POST',

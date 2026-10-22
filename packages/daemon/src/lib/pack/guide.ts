@@ -14,6 +14,7 @@ import type {
   GuideUseCase,
   ModelCatalogEntryView,
   ModelCatalogView,
+  ModelDescription,
   ModelsGuide,
   ModelsGuideFile,
   PackFleetModel,
@@ -281,10 +282,45 @@ function runtimesOffering(runtimes: readonly FleetRuntimeView[], provider: strin
     .map(runtime => runtime.name);
 }
 
-/** Every model the fleet knows, for the editor: one row per catalog, CLI and id, with the runtimes here. */
+/**
+ * What a model is, in words, when its owner never described it: its tier, its context window and the
+ * catalog's own sentence about it. The owner's description replaces it whole.
+ */
+export function catalogDescription(entry: ModelCatalogEntryView, providerLabel: string): string {
+  const context = entry.context === undefined ? '' : `, reads ${String(Math.round(entry.context / 1_000))}k tokens`;
+  const efforts = entry.efforts.length === 0 ? '' : `, efforts ${entry.efforts.join('/')}`;
+  const note = entry.note === undefined ? '' : ` ${entry.note}`;
+  return `${entry.label}: ${TIER_WORDS[entry.tier]} on ${providerLabel}${context}${efforts}.${note}`;
+}
+
+/** The owner's description of a model, when they wrote one. */
+export const ownerDescription = (
+  described: readonly ModelDescription[],
+  provider: string,
+  id: string,
+): string | undefined => described.find(entry => entry.provider === provider && entry.model === id)?.description;
+
+/** A model's description and whose words it is: the owner's, else the catalog's. */
+export function describedAs(
+  described: readonly ModelDescription[],
+  provider: string,
+  entry: ModelCatalogEntryView,
+  providerLabel: string,
+): { readonly description: string; readonly describedBy: 'owner' | 'catalog' } {
+  const owner = ownerDescription(described, provider, entry.id);
+  return owner === undefined
+    ? { description: catalogDescription(entry, providerLabel), describedBy: 'catalog' }
+    : { description: owner, describedBy: 'owner' };
+}
+
+/**
+ * Every model the fleet knows, for the editor: one row per catalog, CLI and id, with the runtimes here and
+ * what the guide builder is told about it — the owner's words in `described`, else the catalog's.
+ */
 export function fleetModels(
   catalogs: readonly ModelCatalogView[],
   runtimes: readonly FleetRuntimeView[],
+  described: readonly ModelDescription[] = [],
 ): readonly PackFleetModel[] {
   return catalogModels(catalogs).map(({ provider, providerLabel, harness, entry }) => ({
     provider,
@@ -295,6 +331,7 @@ export function fleetModels(
     tier: entry.tier,
     ...(entry.context === undefined ? {} : { context: entry.context }),
     efforts: [...entry.efforts],
+    ...describedAs(described, provider, entry, providerLabel),
     runtimes: runtimesOffering(runtimes, provider, entry.id).filter(
       name => runtimes.find(runtime => runtime.name === name)?.harness === harness,
     ),
