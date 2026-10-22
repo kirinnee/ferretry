@@ -2330,6 +2330,20 @@ tunnel yet" — never a silent fall back to a carrier the person excluded.
 **Pairing ignores the preference.** First contact is direct, then the hosted relay (§14), whatever is
 chosen: WebRTC needs a device key to signal and a tunnel is published only to a paired device.
 
+**A tunnel is opt-in per machine, so choosing one offers it.** A daemon runs a tunnel only when its
+operator or a paired device switched one on (`GET`/`PUT /v1/tunnel`, "The daemon end"). Choosing Tunnel
+only — or Auto, which walks a tunnel too — for a machine whose switch is off asks, under the choice,
+"Turn on a Cloudflare tunnel for this machine?"; the choice itself is kept either way, and Tunnel only's
+note says "Off for this machine — tunnels are opt-in." — as does the walk's stated failure, "Tunnel only:
+this machine's tunnel is off (opt-in)", ahead of the service's two reasons. The Connection status shows the daemon's own line
+about its tunnel ("Tunnel: off (opt-in) — …"). **Switching is carrier control, not a walk**: `GET` and
+`PUT /v1/tunnel` ride the daemon's direct address or a rendezvous — the introducers, with the hosted
+relay when the daemon authored none — whatever the preference, and never the tunnel or WebRTC, because
+under Tunnel only with the switch off nothing the preference allows could carry the request that turns
+it on, and switching a tunnel off over itself would end the connection carrying the answer. It remembers
+no winner, and a passkey it needs is asked for exactly as for any press. A daemon older than the switch
+answers `404`, and its tunnel was never opt-in, so nothing is offered.
+
 **A device keeps the tunnel it was told, and asks the daemon when that is not enough.** The tunnel is
 learned the way every carrier is — from the daemon's published set, at pairing and on each
 `GET /v1/carriers` refresh — and kept with the pairing in the device's own storage, so a reload or an
@@ -2342,7 +2356,9 @@ device a new one:
 2. **A refresh that names no tunnel does not erase the kept one.** The daemon publishes its tunnel only
    while `cloudflared` holds an edge connection, so a set read during a reconnect means "not right now",
    not "gone". The kept hostname is replaced when the daemon publishes a different one; a read that
-   fails changes nothing.
+   fails changes nothing. What tells the two apart is the daemon's switch: a device holding a tunnel the
+   set no longer names asks `GET /v1/tunnel`, and forgets the tunnel when the answer is `off` or
+   `unavailable` (it keeps one that is `up`, and leaves one that is `provisioning` or `connecting`).
 3. **When there is no tunnel to dial, or the kept one does not carry, the daemon is asked** — one
    `GET /v1/carriers` over its direct address or a rendezvous (the carriers that already introduce
    WebRTC, §16, with the hosted relay when the daemon authored none), inside an ordinary

@@ -276,3 +276,33 @@ describe('the card on a Cloudflare tunnel or WebRTC (§15)', () => {
     should(text(card)).containEql('This machine has no tunnel yet.');
   });
 });
+
+describe('the machine’s tunnel line (tunnels are opt-in, §15)', () => {
+  const OFF = 'Tunnel: off (opt-in) — turn on with fy daemon tunnel on or Settings › Connection';
+  const preference = (tunnel?: { sentence: string; off: boolean; turnOn: () => Promise<void> }) => ({
+    value: 'tunnel' as const,
+    onChange: () => undefined,
+    availability: { webrtc: true, tunnel },
+  });
+
+  it('should say the machine’s own sentence about its tunnel beside the preference', () => {
+    const card = render(
+      <ActiveCarrierCard
+        choice={undefined}
+        relayAdvertised
+        preference={preference({ sentence: OFF, off: true, turnOn: async () => undefined })}
+      />,
+    );
+    should(card.root.findByProps({ 'data-tunnel-status': '' }).children.join('')).equal(OFF);
+  });
+
+  it('should say nothing about a tunnel the machine has not described', () => {
+    const card = render(<ActiveCarrierCard choice={undefined} relayAdvertised preference={preference()} />);
+    should(card.root.findAllByProps({ 'data-tunnel-status': '' })).have.length(0);
+    should(
+      render(<ActiveCarrierCard choice={undefined} relayAdvertised />).root.findAllByProps({
+        'data-tunnel-status': '',
+      }),
+    ).have.length(0);
+  });
+});

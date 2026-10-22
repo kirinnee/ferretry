@@ -104,7 +104,7 @@ import {
 } from './relay-session.ts';
 import { browserFetch, type DaemonFetch } from './runtime-models.ts';
 import type { PromptOrigin } from './step-up-gate.ts';
-import { noTunnelReason, type TunnelServiceState } from './tunnel-service.ts';
+import { noTunnelReason, TUNNEL_SWITCHED_OFF, type TunnelServiceState } from './tunnel-service.ts';
 
 /* ---------- the socket adapter seam --------------------------------------- */
 
@@ -1019,6 +1019,12 @@ export interface DaemonCarrierRouterOptions {
   /** The clock {@link TUNNEL_LOOKUP_REUSE_MS} is measured on. */
   readonly now?: () => number;
   /**
+   * Whether the machine itself said its tunnel is switched off (`GET /v1/tunnel`, §15) — the reason
+   * "Tunnel only" names before the service's, because it is the one a person can act on. Absent: nobody
+   * has asked, and the service's reason stands.
+   */
+  readonly tunnelSwitchedOff?: (daemonId: DaemonId) => boolean;
+  /**
    * Asked when the daemon refuses a request for want of a passkey step-up (`grant_step_up_required`):
    * `true` once the person has confirmed, and the request is then sent again ONCE. Absent means
    * nothing can ask, and the refusal is returned as it came. `origin` says whether a person started the
@@ -1094,6 +1100,10 @@ export const TUNNEL_LOOKUP_REUSE_MS = 30_000;
 
 /** The deadline on one lookup, so a walk waiting on it is never held by a question nobody answers. */
 export const TUNNEL_LOOKUP_TIMEOUT_MS = 10_000;
+
+/** Said when a carrier-control request has neither a direct address nor a relay to travel. */
+export const CONTROL_UNREACHABLE =
+  'neither this machine’s own address nor a relay reaches it, so its tunnel can only be switched at the machine';
 
 /** One tunnel lookup: when it was asked, and what it found — a tunnel, or nothing. */
 interface TunnelLookup {
@@ -1301,6 +1311,7 @@ export class DaemonCarrierRouter {
   readonly #tunnelService: () => Promise<TunnelServiceState>;
   readonly #learned: (daemon: DaemonConnection, carriers: readonly ConnectionMethod[]) => void;
   readonly #now: () => number;
+  readonly #tunnelSwitchedOff: (daemonId: DaemonId) => boolean;
   readonly #deviceKey: DeviceKeyResolver;
   readonly #appSession: string;
   readonly #stepUp: DaemonCarrierRouterOptions['stepUp'];
@@ -1347,6 +1358,7 @@ export class DaemonCarrierRouter {
     this.#tunnelService = options.tunnelService ?? (async () => 'unavailable');
     this.#learned = options.learned ?? (() => undefined);
     this.#now = options.now ?? Date.now;
+    this.#tunnelSwitchedOff = options.tunnelSwitchedOff ?? (() => false);
     this.#deviceKey = options.deviceKey;
     this.#appSession = options.appSession ?? toBase64Url(options.crypto.randomBytes(APP_SESSION_BYTES));
     this.#stepUp = options.stepUp;
@@ -1649,7 +1661,42 @@ export class DaemonCarrierRouter {
    * behaviour that can ever recover.
    */
   async send(daemon: DaemonConnection, url: string, init: RequestInit = {}): Promise<Response> {
-    let response = await this.#sendOnce(daemon, url, init);
+    return await this.#confirmed(daemon, init, async () => await this.#sendOnce(daemon, url, init));
+  }
+
+  /**
+   * A CARRIER-CONTROL REQUEST — `GET` or `PUT /v1/tunnel` (§15) — over the carriers that introduce,
+   * whatever this device's preference is, and never over the tunnel or WebRTC.
+   *
+   * Two reasons, both structural. Under "Tunnel only" with the tunnel switched off there is nothing the
+   * preference allows that could carry the request to switch it ON — the person would be asked to turn
+   * on a tunnel over the tunnel they are turning on. And switching it OFF over itself would end the
+   * connection carrying the answer. So these ride the daemon's direct address or a rendezvous, exactly as
+   * WebRTC signalling and the tunnel lookup do: one request about how this device reaches the machine,
+   * inside a device-authenticated session, never the person's own work. It decides nothing — no winner
+   * is remembered — and a passkey it needs is asked for as any press's is.
+   */
+  async control(daemon: DaemonConnection, url: string, init: RequestInit = {}): Promise<Response> {
+    return await this.#confirmed(daemon, init, async () => {
+      const entry = this.#entry(daemon);
+      if (entry.refused) throw new DeviceNotAcceptedError();
+      const target = new URL(url);
+      return await this.#introduce(
+        entry,
+        await this.#introducers(entry),
+        `${target.pathname}${target.search}`,
+        init,
+        CONTROL_UNREACHABLE,
+      );
+    });
+  }
+
+  /**
+   * One request, asked again once after the person gives the passkey the daemon wanted — an unlock on
+   * opening, then a step-up for the act. `once` is the whole attempt, so a resend travels as the first did.
+   */
+  async #confirmed(daemon: DaemonConnection, init: RequestInit, once: () => Promise<Response>): Promise<Response> {
+    let response = await once();
     // A READ IS THE PAGE'S OWN WORK, so a passkey it needs waits for its machine to be on screen; anything
     // else is a press, and asks at once.
     const origin = requestOrigin(init);
@@ -1663,7 +1710,7 @@ export class DaemonCarrierRouter {
       (await answersWithCode(response, UNLOCK_REQUIRED_CODE))
     ) {
       if (!(await confirmUnlock(daemon, origin))) return response;
-      response = await this.#sendOnce(daemon, url, init);
+      response = await once();
     }
     // A PASSKEY STEP-UP IS A PAUSE, NOT A FAILURE. The daemon allowed the act and wants its owner to
     // confirm; once they have, the same request is sent again exactly once — its body is text, so it
@@ -1675,7 +1722,7 @@ export class DaemonCarrierRouter {
     // The act the daemon NAMED, or nothing: an unparseable demand still asks, and the prompt says "this change".
     const act = demand === null ? undefined : stepUpAct(demand);
     if (!(await ask(daemon, act, origin))) return response;
-    return await this.#sendOnce(daemon, url, init);
+    return await once();
   }
 
   /**
@@ -1907,7 +1954,10 @@ export class DaemonCarrierRouter {
           yield { method: learned };
           continue;
         }
-        if (ofKind.length === 0) plan.why = noTunnelReason(await this.#tunnelService());
+        if (ofKind.length === 0)
+          plan.why = this.#tunnelSwitchedOff(daemon.daemonId)
+            ? TUNNEL_SWITCHED_OFF
+            : noTunnelReason(await this.#tunnelService());
         continue;
       }
       if (ofKind.length > 0 || kind === 'direct') continue;
@@ -2304,9 +2354,10 @@ export class DaemonCarrierRouter {
     introducers: readonly ConnectionMethod[],
     path: string,
     init: RequestInit,
+    none = 'no carrier can introduce WebRTC to this machine',
   ): Promise<Response> {
     const url = new URL(path, entry.connection.baseUrl).toString();
-    let failure: unknown = new Error('no carrier can introduce WebRTC to this machine');
+    let failure: unknown = new Error(none);
     for (const method of introducers) {
       this.#assertCurrent(entry);
       try {

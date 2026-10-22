@@ -20,7 +20,9 @@ import {
   type CarrierSocket,
   DaemonCarrierRouter,
   type DaemonCarrierRouterOptions,
+  DeviceNotAcceptedError,
   DIRECT_SESSION_DEADLINE_MS,
+  CONTROL_UNREACHABLE,
   RELAY_UNAVAILABLE,
   TUNNEL_LOOKUP_REUSE_MS,
   WEBRTC_UNAVAILABLE,
@@ -57,6 +59,8 @@ interface Setup {
   /** The set the daemon answers `GET /v1/carriers` with, after its direct address; absent answers no set. */
   readonly publishes?: readonly ConnectionMethod[];
   readonly now?: () => number;
+  readonly stepUp?: DaemonCarrierRouterOptions['stepUp'];
+  readonly tunnelSwitchedOff?: boolean;
 }
 
 /** The daemon's `GET /v1/carriers` view, in its own wire spelling. */
@@ -132,6 +136,8 @@ const setup = async (options: Setup = {}) => {
       learned.push(carriers);
     },
     ...(options.now === undefined ? {} : { now: options.now }),
+    ...(options.stepUp === undefined ? {} : { stepUp: options.stepUp }),
+    ...(options.tunnelSwitchedOff === undefined ? {} : { tunnelSwitchedOff: () => options.tunnelSwitchedOff === true }),
   });
   router.resolvePaired(() => [daemon]);
   const hosts = (): string[] => dialled.map(url => new URL(url).hostname);
@@ -306,6 +312,22 @@ describe('Tunnel only', () => {
     should(hosts()).eql([DIRECT_HOST]);
     should(paths()).eql(['/v1/carriers']);
     should(learned).eql([[DIRECT]]);
+  });
+
+  it('should say the machine’s tunnel is off, before the service’s reason, when the machine said so', async () => {
+    const { router, daemon, tunnelReads } = await setup({
+      reach: { [DIRECT_HOST]: 'live' },
+      preference: 'tunnel',
+      tunnelService: 'available',
+      publishes: [],
+      tunnelSwitchedOff: true,
+    });
+
+    await should(fetchProjects(router, daemon)).be.rejectedWith(
+      'Tunnel only: this machine’s tunnel is off (opt-in) — turn it on in Settings › Connection.',
+    );
+    should(tunnelReads()).equal(0);
+    await settle(5);
   });
 
   it('should read a build with no tunnel service as not set up by the operator', async () => {
@@ -809,6 +831,101 @@ describe('the reason a faster carrier is not carrying (WebRTC, docs/relay-protoc
     const choice = router.choice(daemon.daemonId);
     should(choice).match({ ok: true, method: { kind: 'direct' } });
     should(choice?.ok === true ? choice.fallbackReason : 'not ok').be.undefined();
+    await settle(5);
+  });
+});
+
+describe('carrier control (GET/PUT /v1/tunnel, §15)', () => {
+  const PUT = { method: 'PUT', headers: { 'content-type': 'application/json' }, body: '{"enabled":true}' };
+
+  it('should reach a "Tunnel only" machine whose tunnel is off over a relay, and remember no winner', async () => {
+    const { router, daemon, hosts, paths } = await setup({
+      published: [RELAY],
+      reach: { 'relay.example': 'live' },
+      preference: 'tunnel',
+      answer: { body: '{"enabled":true}' },
+    });
+
+    const response = await router.control(daemon, `${DAEMON_URL}/v1/tunnel`, PUT);
+
+    should(response.status).equal(200);
+    should(hosts()).eql([DIRECT_HOST, 'relay.example']);
+    should(paths()).eql(['/v1/tunnel']);
+    should(router.choice(daemon.daemonId)).be.undefined();
+    await settle(5);
+  });
+
+  it('should never ride the tunnel it may be switching off, nor WebRTC', async () => {
+    const webrtc: string[] = [];
+    const { router, daemon, hosts } = await setup({
+      published: [TUNNEL, RELAY],
+      reach: { [TUNNEL_HOST]: 'live', 'relay.example': 'live' },
+      preference: 'auto',
+      dialers: {
+        webrtc: async () => {
+          webrtc.push('dialled');
+          throw new Error('not here');
+        },
+      },
+    });
+
+    should((await router.control(daemon, `${DAEMON_URL}/v1/tunnel?x=1`)).status).equal(200);
+    should(hosts()).eql([DIRECT_HOST, 'relay.example']);
+    should(webrtc).eql([]);
+    await settle(5);
+  });
+
+  it('should ask for the passkey the daemon wants, then send the switch once more', async () => {
+    const asked: Array<string | undefined> = [];
+    let answered = 0;
+    const { router, daemon, paths } = await setup({
+      reach: { [DIRECT_HOST]: 'live' },
+      preference: 'tunnel',
+      answer: {
+        respond: () => {
+          answered += 1;
+          return answered === 1
+            ? {
+                status: 403,
+                body: { code: 'grant_step_up_required', message: 'Confirm with your passkey.' },
+              }
+            : { body: { ok: true } };
+        },
+      },
+      stepUp: async (_daemon, act) => {
+        asked.push(act);
+        return true;
+      },
+    });
+
+    should((await router.control(daemon, `${DAEMON_URL}/v1/tunnel`, PUT)).status).equal(200);
+    should(asked).have.length(1);
+    should(paths()).eql(['/v1/tunnel', '/v1/tunnel']);
+    await settle(5);
+  });
+
+  it('should say plainly when nothing but the tunnel could carry it', async () => {
+    const { router, daemon } = await setup({ reach: { [TUNNEL_HOST]: 'live' }, preference: 'tunnel' });
+    const tunnelOnly = daemonConnection({ ...daemon, carriers: [TUNNEL] });
+    router.resolvePaired(() => [tunnelOnly]);
+
+    await should(router.control(tunnelOnly, `${DAEMON_URL}/v1/tunnel`)).be.rejectedWith(CONTROL_UNREACHABLE);
+  });
+
+  it('should send nothing for a device the daemon refused', async () => {
+    const refused = await setup({ reach: { [DIRECT_HOST]: 'live' } });
+    const rejecting = autoDial(refused.identity, { rejectDevice: true });
+    const router = new DaemonCarrierRouter({
+      crypto: relayCrypto,
+      deviceKey: async () => device.claim.key,
+      dial: () => rejecting.dial(),
+      preference: () => 'auto',
+      heartbeat: () => () => undefined,
+    });
+    router.resolvePaired(() => [refused.daemon]);
+    await should(router.send(refused.daemon, `${DAEMON_URL}/v1/projects`)).be.rejected();
+
+    await should(router.control(refused.daemon, `${DAEMON_URL}/v1/tunnel`)).be.rejectedWith(DeviceNotAcceptedError);
     await settle(5);
   });
 });
