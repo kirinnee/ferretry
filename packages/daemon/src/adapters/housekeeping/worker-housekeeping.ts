@@ -36,6 +36,7 @@ import {
   type HostedWorker,
   type WorkerRestartPolicy,
 } from '../runtime/bundled-worker-host.ts';
+import type { NodeCodexRolloutIndex } from '../session/transcript/node-codex-rollout-index.ts';
 import { HousekeepingCounters, hostHousekeepingPorts, runHousekeepingJob } from './job-runner.ts';
 
 /** The worker's name, in a profile and in `fyd --check`. */
@@ -44,16 +45,23 @@ export const HOUSEKEEPING_WORKER = 'housekeeping';
 /** The part of a Worker this adapter uses. */
 export type HousekeepingWorker = HostedWorker<HousekeepingRequest, HousekeepingResponse>;
 
-/** Housekeeping jobs on the main thread: the code the worker runs, run here. */
+/**
+ * Housekeeping jobs on the main thread: the code the worker runs, run here. `rollouts` is the main
+ * thread's own rollout index, so a walk run here shares the cache the start's baseline read fills.
+ */
 export class InlineHousekeepingJobs implements HousekeepingJobs {
   constructor(
     private readonly settings: HousekeepingSettings,
     private readonly now: () => number = Date.now,
+    private readonly rollouts?: NodeCodexRolloutIndex,
   ) {}
 
   async run<J extends HousekeepingJob>(job: J): Promise<HousekeepingJobValues[J['kind']]> {
     return await runHousekeepingJob(
-      hostHousekeepingPorts(this.settings, new HousekeepingCounters(), { now: this.now }),
+      hostHousekeepingPorts(this.settings, new HousekeepingCounters(), {
+        now: this.now,
+        ...(this.rollouts === undefined ? {} : { rollouts: this.rollouts }),
+      }),
       job,
     );
   }

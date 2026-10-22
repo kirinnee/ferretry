@@ -65,13 +65,18 @@ const CEILINGS: Readonly<Record<string, number>> = {
  *
  * Matched by WHERE the frame's code lives, not by a word in its name: a transcript is read and parsed only
  * in `src/adapters/transcript/` (the file source) and `src/lib/transcript/` (JSONL and the parsers).
- * Two things that merely NAME transcripts are not observation and must not fail this: Codex rollout
- * discovery and the transcript resolver under `session/transcript/` (which file a session writes to, paced
- * to once per 30 s by #697 until stage 4 moves it to the housekeeping worker), and the fleet's
- * `attributedTranscripts`, which lists file names from session records. A document's own schema parse (zod)
- * is not observation either.
+ * Two things that merely NAME transcripts are not observation and must not fail this: the transcript
+ * resolver under `lib/session/transcript/` (which file a session writes to — a lookup in memory, its walk
+ * now a job on the housekeeping worker), and the fleet's `attributedTranscripts`, which lists file names
+ * from session records. A document's own schema parse (zod) is not observation either.
+ *
+ * Codex rollout DISCOVERY — the walk of a Codex home — is held separately: it is the `codex.discover` job
+ * on the housekeeping worker, so the rollout index has no frame on an idle main thread at all, though the
+ * fixture keeps two Codex sessions undiscovered on purpose.
  */
 const OBSERVATION_FRAME = /src\/(?:adapters|lib)\/transcript\/|Parser\b|parser\.ts|capture|pane-frames|PaneFrames/i;
+/** A main-thread frame of the Codex rollout walk, which runs on the housekeeping worker. */
+const DISCOVERY_FRAME = /node-codex-rollout-index/;
 
 /** The report's own ranking, cut to what names the code to fix. */
 function ranking(report: PerformanceReport) {
@@ -184,6 +189,13 @@ describe('an idle daemon on a fleet the size of the owner’s Mac', () => {
     if (observing.length > 0)
       throw new Error(
         `the idle main thread observed a session itself: ${observing.join('; ')}\n\n${JSON.stringify(ranking(report), null, 2)}`,
+      );
+    const discovering = [...report.cpuProfile.self, ...report.cpuProfile.inclusive]
+      .map(entry => entry.frame)
+      .filter(frame => DISCOVERY_FRAME.test(frame));
+    if (discovering.length > 0)
+      throw new Error(
+        `the idle main thread walked a Codex home itself: ${discovering.join('; ')}\n\n${JSON.stringify(ranking(report), null, 2)}`,
       );
     const over = report.budgets.filter(budget => budget.actual > (CEILINGS[budget.name] ?? budget.limit));
     if (over.length > 0)

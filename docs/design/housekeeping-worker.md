@@ -1,6 +1,6 @@
 # Housekeeping worker — stage 4 of the event-driven daemon
 
-Status: **in progress** — PR 0 and PR 1 merged, PR 2, PR 3 and PR 4 built (§4.1–§4.3) · Date: 2026-10-22 · Parent: [event-driven-daemon.md](event-driven-daemon.md) (stage 4) ·
+Status: **in progress** — PR 0 and PR 1 merged, PR 2, PR 3 and PR 4 built, and Codex discovery moved after them (§4.1–§4.4) · Date: 2026-10-22 · Parent: [event-driven-daemon.md](event-driven-daemon.md) (stage 4) ·
 Sibling: [session-workers.md](session-workers.md) (stage 3, PR #701) · Owner directive, verbatim: _"use things
 like inotify, 1 thread per agent, fan into the daemon (daemon should just communicate)"_. Lead's ask: _"fleet
 refresh must be event-driven (only when runtime homes/config actually change) and run on the housekeeping
@@ -674,7 +674,7 @@ moved, because the process-level measures are flat on Linux, so none is earned.
 - **Codex discovery.** It has no fixed timer: it is paced per read (a 2 min eager window from the session's
   start, then 30 s). The event that would replace the pace is a watch on the home's dated rollout directory,
   and the move of the walk to the worker (`codex.discover`) needs the walk's caches, which live on main while
-  the worker keeps nothing between jobs. Both are left for a follow-up.
+  the worker keeps nothing between jobs. Both were left for a follow-up, built in §4.4.
 - No Mac fleet `ps` job: stage 3 Q4 has not chosen it.
 
 **Behaviour differences, all toward sooner:** an ended session is ingested 30 s after it ends (it was up to
@@ -704,6 +704,58 @@ none until an event or the backstop. No CI ceiling moved: port file operations a
 that equals the product target (100), which a ceiling may not go below, and CPU is within noise. The
 `session-version` and `config.json` `statx` left (about 16/s and 14/s) come from per-read document identity
 checks by the transcript resolver and the fleet reading's Codex attribution, not from a housekeeping timer.
+
+### 4.4 Codex discovery as built (`codex.discover`)
+
+**The pieces**
+
+- **The job.** `codex.discover` carries the Codex home, the session's correlation token and its baseline ids
+  (`skip`), and answers `{candidates, changed, frontier}`: what each rollout outside the baseline is and whether
+  it carries the token, how many listing changes the walk saw, and the directories a new rollout would appear
+  in. Main keeps everything else, as §2.1 said: `CodexDiscoveryPacer` (#697, #703), the claims, the selection
+  and the `updateConfig` that binds the rollout. `HousekeepingCodexRollouts`
+  (`src/adapters/housekeeping/codex-rollout-jobs.ts`) is the resolver's `CodexRolloutIndex` on main: it sends
+  the job and keeps the change count the pacer reads.
+- **The cache the worker keeps.** The worker still keeps no state, but it does keep one cache: a
+  `NodeCodexRolloutIndex` per thread, with its per-file facts and per-directory listings (#693, #697). Without
+  it every walk would re-identify every rollout, about 2,000 header reads on the fixture. Losing it costs one
+  cold walk, so a crash or a retired thread still loses nothing (§2.5). On main, the inline runner (switched off,
+  or retired) walks with main's own index, the one the start's baseline read fills.
+- **The watch.** The answer's `frontier` is `sessions`, its newest year and month, and its two newest day
+  directories (two, so a session launched just before midnight is still heard). Codex files a rollout under the
+  date its session started, so a new rollout, its first turn, a new day or a new month all land there. Main
+  watches the frontier through the file-event hub (`subscribeDirectory`), follows it as it moves, and counts
+  the events (`heard`). A newly watched directory counts as one event, so a change made while the walk was
+  listing it is looked at once more under the watch.
+- **The pace.** The pacer is unchanged, with one rule added. While every frontier directory is watched live, a
+  discovery that is due by the clock alone (the eager window, or the 30 s interval) is skipped if no event has
+  arrived since the last discovery **started**. A walk then could only find what the last one found. An event
+  never makes discovery more frequent than #697 allowed. A listing change that another session's walk saw (it
+  may be in an old day directory) is never treated as quiet. Without an event, the walk runs once every
+  `CODEX_DISCOVERY_BACKSTOP_MS` (5 min), for a change no watch could hear. While any frontier directory is
+  polled or missing, the clock decides, exactly as before. The profile's limitations name this backstop.
+
+**Behaviour differences.** A session found quickly is found as before: its rollout's creation and first turn
+are events in a watched directory, and the next read looks. **Later**, only for a change no watch can hear:
+a rollout of an undiscovered session written into a day directory outside the frontier, say a resumed old
+conversation that carries the new session's token, is found within 5 min, where it was within 30 s.
+
+**Measured** (`scripts/local/bench-idle-daemon.ts --small --trace --syscall-summary --seconds 60`, the §4.1
+fixture, which keeps two Codex sessions undiscovered; before = `origin/main` at `0c9f78cf1`, 4.75.1):
+
+|                                                       | Before                       | After   |
+| ----------------------------------------------------- | ---------------------------- | ------- |
+| Main-thread CPU samples in `node-codex-rollout-index` | 1 % (`candidates`)           | none    |
+| `codex.discover` jobs in the window                   | — (walks on main every 30 s) | 0       |
+| `statx` of Codex dated directories                    | 1.0/s                        | 0       |
+| strace file calls                                     | 44.9/s                       | 43.8/s  |
+| Read/write syscalls                                   | 100.5/s                      | 100.4/s |
+| Daemon CPU (outside)                                  | 4.7 %                        | 4.6 %   |
+
+The two undiscovered sessions started long before the window, so before this they walked the home every 30 s
+each, on the main thread; now each walked once after boot on the worker, once more under its new watch, and
+then waits for an event or the 5 min backstop. The idle-budget test now fails on any main-thread frame of the
+rollout index. No ceiling moved: CPU and read/write calls are within noise, and the walk was already paced.
 
 ## 5. Risks
 

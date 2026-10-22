@@ -63,13 +63,14 @@ describe('the bundled housekeeping worker', () => {
     });
   }
 
-  it('should carry the store reader and both probes, so the diet is of the real program', () => {
+  it('should carry the store reader, both probes and the rollout index, so the diet is of the real program', () => {
     // Assert
     for (const needed of [
       'credential-store.ts',
       'anthropic-usage-probe.ts',
       'codex-usage-probe.ts',
       'credential-reads.ts',
+      'node-codex-rollout-index.ts',
     ])
       should(modules.some(module => module.endsWith(needed))).be.true(needed);
   });

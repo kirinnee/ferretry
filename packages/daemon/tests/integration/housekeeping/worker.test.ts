@@ -3,11 +3,12 @@
  * §2.1, §4 PR 2).
  *
  * The real worker program, over a real temporary fleet — two Claude logins in Ferretry's file store, one
- * Codex `auth.json`, a statusLine `usage.json`, two attributed rollouts — and a loopback stand-in for both
- * usage endpoints. Every job kind is answered twice, by the worker and by the same job code on this
+ * Codex `auth.json`, a statusLine `usage.json`, two attributed rollouts, a Codex home with an undiscovered
+ * session's rollout — and a loopback stand-in for both usage endpoints. Every job kind is answered twice, by the worker and by the same job code on this
  * thread, and the answers must agree. Then: what a job costs reaches the profiler (children, files,
  * requests), attributed to the work that asked; a Mac's keychain read is a counted child of the worker,
- * not of the main thread; and a job sent before the settings is refused with the closed word.
+ * not of the main thread; the thread keeps its Codex rollout index between jobs, so a second walk of a
+ * quiet home opens nothing; and a job sent before the settings is refused with the closed word.
  */
 import { afterAll, beforeAll, describe, it } from 'bun:test';
 import { chmod, mkdir, writeFile } from 'node:fs/promises';
@@ -39,7 +40,11 @@ interface Fleet {
   readonly empty: ClaudeStoreResolution;
   readonly codex: CodexStoreResolution;
   readonly rollouts: readonly string[];
+  /** A Codex home: one rollout from before the session (its baseline), and the session's own. */
+  readonly codexHome: string;
 }
+
+const CODEX_TOKEN = '/state/sessions/20261022-codex';
 
 let server: FakeUsageServer;
 let fleet: Fleet;
@@ -93,7 +98,13 @@ async function fleetAt(root: string): Promise<Fleet> {
   await writeFile(rollouts[0] as string, tokenCount(3));
   await Bun.sleep(5);
   await writeFile(rollouts[1] as string, tokenCount(21));
-  return { root, work, empty, codex, rollouts };
+  const codexHome = join(root, 'codex-home');
+  const day = join(codexHome, 'sessions', '2026', '10', '22');
+  await mkdir(day, { recursive: true });
+  const meta = (id: string) => JSON.stringify({ type: 'session_meta', payload: { id } });
+  await writeFile(join(day, 'rollout-old.jsonl'), `${meta('old')}\n`);
+  await writeFile(join(day, 'rollout-mine.jsonl'), `${meta('mine')}\n${JSON.stringify({ text: CODEX_TOKEN })}\n`);
+  return { root, work, empty, codex, rollouts, codexHome };
 }
 
 const settingsOf = (overrides: Partial<HousekeepingSettings> = {}): HousekeepingSettings => ({
@@ -150,6 +161,8 @@ describe('the housekeeping worker', () => {
       { kind: 'usage.passive.claude', credential: 'empty' },
       { kind: 'usage.passive.codex', files: fleet.rollouts },
       { kind: 'usage.passive.codex', files: [join(fleet.root, 'gone.jsonl')] },
+      { kind: 'codex.discover', home: fleet.codexHome, correlationToken: CODEX_TOKEN, skip: ['old'] },
+      { kind: 'codex.discover', home: join(fleet.root, 'no-codex'), correlationToken: CODEX_TOKEN, skip: [] },
     ];
 
     // Act
@@ -165,6 +178,36 @@ describe('the housekeeping worker', () => {
     should(there[6]).match({ source: 'claude-statusline', fiveHour: { usedPercent: 7 } });
     should(there[7]).be.null();
     should(there[8]).match({ source: 'codex-rollout', fiveHour: { usedPercent: 21 } });
+    should(there[10]).match({ candidates: [{ id: 'mine', correlated: true }] });
+    should(there[11]).match({ candidates: [], frontier: [join(fleet.root, 'no-codex', 'sessions')] });
+  });
+
+  it('should keep its rollout index between jobs, so a second walk of a quiet home opens nothing', async () => {
+    // Arrange
+    const job: HousekeepingJob = {
+      kind: 'codex.discover',
+      home: fleet.codexHome,
+      correlationToken: CODEX_TOKEN,
+      skip: [],
+    };
+
+    // Act — two walks, one after the other, on one thread.
+    const run = await runHousekeepingProcess({ settings: settingsOf(), jobs: [job, job] }, fleet.root);
+    const opened = run.messages.flatMap(message => {
+      const received = (message as { received?: { type?: string; kind?: string; fileReads?: number } }).received;
+      return received?.type === 'metrics' && received.kind === 'codex.discover' ? [received.fileReads] : [];
+    });
+
+    // Assert: both walks find the same candidates, and only the first saw the home's listing as new; the
+    // first identified both rollouts and read each for the token, the second found both unchanged.
+    const [first, second] = run.answers as { candidates: { id: string; correlated: boolean }[]; changed: number }[];
+    should(second?.candidates).deepEqual(first?.candidates);
+    should(first?.candidates.map(({ id, correlated }) => [id, correlated]).sort()).deepEqual([
+      ['mine', true],
+      ['old', false],
+    ]);
+    should([first?.changed, second?.changed]).deepEqual([1, 0]);
+    should(opened).deepEqual([4, 0]);
   });
 
   it('should report what each job cost to the profiler, by the main-thread work that asked', async () => {

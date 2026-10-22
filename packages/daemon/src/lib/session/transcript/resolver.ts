@@ -31,6 +31,11 @@ export interface CodexRolloutIndex {
   ): Promise<readonly CodexRolloutCandidate[]>;
   /** How many times the home's listing has been seen to change, when the index can tell. */
   changes?(home: string): number;
+  /**
+   * How many file events have been heard in the directories a new rollout of `home` would appear in, or
+   * `undefined` while any of them is not watched live — so an unchanged count proves the home quiet.
+   */
+  heard?(home: string): number | undefined;
 }
 
 /** Persists a resolution back onto the session's own configuration document. */
@@ -84,12 +89,14 @@ export class SessionTranscriptResolver {
     // A record with no token is answered without looking, so it is never paced either.
     if (this.pacer === undefined || provenance.correlationToken === undefined) return (await resolve())?.file;
     const changes = this.rollouts.changes?.bind(this.rollouts);
+    const heard = this.rollouts.heard?.bind(this.rollouts);
     const resolved = await this.pacer.pace(
       sessionId,
       provenance,
       changes === undefined ? undefined : () => changes(provenance.home),
       resolve,
       startedAt,
+      heard === undefined ? undefined : () => heard(provenance.home),
     );
     return resolved?.file;
   }

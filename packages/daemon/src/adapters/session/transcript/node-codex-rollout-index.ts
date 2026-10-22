@@ -39,6 +39,11 @@ const MAX_ROLLOUTS = 4_000;
  * reused until the directory's identity or time moves.
  */
 const SETTLED_MS = 2_000;
+/**
+ * How many of the newest day directories {@link NodeCodexRolloutIndex.frontier} names. Two, so a session
+ * that launched just before midnight is still heard while its first turn lands in yesterday's directory.
+ */
+const FRONTIER_DAYS = 2;
 
 const SKIP_NOTHING: ReadonlySet<string> = new Set();
 
@@ -132,6 +137,9 @@ export class NodeCodexRolloutIndex implements CodexRolloutIndex, CodexRolloutBas
   /** The walk in flight for each home, so concurrent askers share one pass over the directories. */
   readonly #walking = new Map<string, Promise<readonly string[]>>();
 
+  /** Rollouts opened to be read, for a caller that accounts for what a walk cost. */
+  #opened = 0;
+
   /** `now` dates a listing against its directory's modification time; see {@link SETTLED_MS}. */
   constructor(private readonly now: () => number = Date.now) {}
 
@@ -173,6 +181,37 @@ export class NodeCodexRolloutIndex implements CodexRolloutIndex, CodexRolloutBas
   /** How many times a walk has seen this home's listing change: a new or removed rollout or directory. */
   changes(home: string): number {
     return this.#changes.get(home) ?? 0;
+  }
+
+  /** How many rollouts this index has opened to read, ever. */
+  get opened(): number {
+    return this.#opened;
+  }
+
+  /**
+   * The directories a new rollout of this home would appear in, as the last walk found them: `sessions`
+   * itself, then each directory on the way to the {@link FRONTIER_DAYS} newest day directories, and those.
+   *
+   * Codex files a rollout under the date its session started (`sessions/YYYY/MM/DD`), so a session
+   * launched now writes into today's directory, or into a new one that appears in its month's — or a new
+   * month in its year's, a new year in `sessions`. A watch on exactly these hears every one of those
+   * arrivals, and none of the hundreds of older days that only ever grow by an old session resuming.
+   * Before any walk, only `sessions` is named.
+   */
+  frontier(home: string): readonly string[] {
+    const root = join(home, 'sessions');
+    const inHome = (path: string): boolean => path.startsWith(`${root}/`);
+    const days = [...this.#listings.entries()]
+      .filter(([directory, listing]) => inHome(directory) && listing.directories.length === 0)
+      .map(([directory]) => directory)
+      .sort()
+      .slice(-FRONTIER_DAYS);
+    const frontier = new Set([root]);
+    for (const day of days) {
+      const parts = day.slice(root.length + 1).split('/');
+      for (let depth = 1; depth <= parts.length; depth += 1) frontier.add(join(root, ...parts.slice(0, depth)));
+    }
+    return [...frontier];
   }
 
   /**
@@ -294,6 +333,7 @@ export class NodeCodexRolloutIndex implements CodexRolloutIndex, CodexRolloutBas
    * as "present and containing nothing", which is a claim the daemon has not earned.
    */
   private async window(file: string, offset: number, length: number): Promise<string | undefined> {
+    this.#opened += 1;
     const handle = await open(file, 'r').catch(() => undefined);
     if (handle === undefined) return undefined;
     try {
