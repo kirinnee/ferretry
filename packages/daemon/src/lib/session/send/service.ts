@@ -903,8 +903,9 @@ export class SessionSendService {
       });
     });
     if (!accepted.created) return this.settledAs(accepted.record, false);
+    let delivered: string | undefined;
     try {
-      await this.ports.reviver.revive(request.id, payload);
+      delivered = await this.ports.reviver.revive(request.id, payload);
     } catch (error) {
       // A refusal is a policy decision about the RELAUNCH, not about the message. Turning it into a
       // lost message would make a safety check into data loss, so the send is held durably and an
@@ -912,13 +913,34 @@ export class SessionSendService {
       if (error instanceof ReviveRefusedForSend) return await this.hold(request, payload, sender, error);
       throw error;
     }
+    const record = await this.carried(request.id, accepted.record, delivered);
     await this.ports.channel.recordInbound(request.id, {
       at: this.ports.clock.now(),
       message: payload,
       turn: accepted.record.turn,
       ...this.attribution(sender),
     });
-    return { kind: 'settled', path: 'revive', applied: true, record: accepted.record, held: true };
+    return { kind: 'settled', path: 'revive', applied: true, record, held: true };
+  }
+
+  /**
+   * Records what the relaunch TYPED for a revive-carried send, and starts its attempt from then.
+   *
+   * A revive does not type the message: it writes it to the new turn's file and types a pointer at
+   * it, so the transcript records the pointer as what the user said. The record used to keep only the
+   * message, the tracker looked for text no transcript would ever hold, and every revive-delivered
+   * message — read and acted on by the agent seconds later — was told to its sender as "not delivered"
+   * at the first deadline. The deadline is also counted from the typing, not the acceptance: the
+   * relaunch before it can take longer than an agent send's whole first window.
+   */
+  private async carried(id: SessionId, record: SendRecord, delivered: string | undefined): Promise<SendRecord> {
+    if (delivered === undefined) return record;
+    const settled = await this.ports.serial.run(
+      id,
+      async () =>
+        await this.ports.ledger.settle(id, record.sendId, { matchText: delivered, attemptAt: this.ports.clock.now() }),
+    );
+    return settled ?? record;
   }
 
   /** Retains a message the reviver would not carry, so an explicit revive can still deliver it. */

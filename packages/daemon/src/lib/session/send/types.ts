@@ -97,8 +97,9 @@ export function dispositionOf(path: SendPath, held = true): SendDisposition {
  * One send, durably, from the instant it was accepted.
  *
  * `matchText` is what the tracker looks for in the transcript — the composer text for a direct send,
- * the turn instruction for a turn-file one. It is recorded by the only code that knows which of the
- * two was typed, so the tracker does not have to re-derive it.
+ * the turn instruction for a turn-file one, and whatever the relaunch typed for a revive — which the
+ * reviver reports once it has typed it, so a revive still relaunching has none yet. It is recorded by
+ * the only code that knows what was typed, so the tracker does not have to re-derive it.
  */
 export interface SendRecord {
   /** The caller's idempotency key. A retry with the same one must never become a second message. */
@@ -417,7 +418,12 @@ export interface SendLaunchGate {
  * and depending on the whole service would couple two domains that have no other reason to meet.
  */
 export interface SendReviver {
-  revive(id: SessionId, message: string): Promise<void>;
+  /**
+   * Answers exactly what the relaunch typed into the replacement pane — the pointer to the turn the
+   * message was written to, usually — because that line, not the message, is what the transcript
+   * records the agent receiving. `undefined` when the revive cannot say what it typed.
+   */
+  revive(id: SessionId, message: string): Promise<string | undefined>;
 }
 
 /**

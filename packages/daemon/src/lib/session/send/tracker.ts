@@ -379,6 +379,7 @@ export class SendTracker implements SendTracking, SendTrackingLoop {
             : 'transcript_unreadable';
       return await this.settle(id, record, 'unaccounted', reason);
     }
+    if (record.path === 'revive') return await this.unprovenRevive(id, record, verdict, hold, now);
     const target = await this.ports.repository.read(id);
     if (target === undefined || TERMINAL_SEND_STATUSES.has(target.status))
       return await this.settle(id, record, 'timed_out', 'session_ended');
@@ -413,6 +414,30 @@ export class SendTracker implements SendTracking, SendTrackingLoop {
         return retried.attempt === record.attempt ? await this.wait(id, retried, now) : retried;
     }
     return await this.settle(id, record, 'timed_out', reason);
+  }
+
+  /**
+   * A revive-carried send past its deadline with no proof: UNCONFIRMED, NEVER "NOT DELIVERED".
+   *
+   * Its message was written to the turn file the relaunch started on, and the pointer typed at that
+   * file is all a transcript can show. So a missing pointer is missing PROOF — the agent may have read
+   * the file, worked, and even finished before this look — and a sender told "it did not reach it"
+   * sends the copy that lands twice. Nor is it ever typed again: the relaunch is not the tracker's to
+   * repeat. A pointer still visibly held on screen is waiting; anything else is said as unconfirmed,
+   * and stays watched, so a pointer that turns up later still proves it delivered.
+   */
+  private async unprovenRevive(
+    id: SessionId,
+    record: SendRecord,
+    verdict: SendVerdict | undefined,
+    hold: PaneHold,
+    now: number,
+  ): Promise<SendRecord> {
+    if (verdict?.holding === true || hold === 'composer' || hold === 'queue') return await this.wait(id, record, now);
+    const pane = await this.ports.terminal.observe(id).catch(() => undefined);
+    const reason: SendUnaccountedReason =
+      pane?.blockingPrompt !== undefined ? 'blocked_by_prompt' : 'revive_unconfirmed';
+    return await this.settle(id, record, 'unaccounted', reason);
   }
 
   /** Pushes the look out rather than counting it against an attempt, up to the hold ceiling. */

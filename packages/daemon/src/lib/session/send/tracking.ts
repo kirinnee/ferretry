@@ -1,4 +1,4 @@
-import { ferretryNotice, type SendEvidence } from '@ferretry/protocol';
+import { ferretryNotice, parseHandoffPointer, type SendEvidence } from '@ferretry/protocol';
 import type { ObservedHumanInput } from '../../transcript/types.ts';
 import type { SendRecord, SendSenderKind } from './types.ts';
 
@@ -23,6 +23,13 @@ export interface SendTrackerSettings {
    * ~15 s, ~30 s and ~60 s after the send, the whole window about a minute; a daemon notice gets one.
    */
   readonly deadlinesMs: Readonly<Record<SendSenderKind, readonly number[]>>;
+  /**
+   * How long a REVIVE-carried send waits before its first look can judge it, from acceptance, while the
+   * relaunch has not yet said what it typed. A relaunch waits for the new harness to be ready and then
+   * types its turn pointer — about 45 s at the delivery adapter's worst — and nothing can prove the
+   * message before that, so the ordinary first deadline would judge it mid-relaunch.
+   */
+  readonly reviveLaunchMs: number;
   /** How long a re-check is pushed out when the harness is still visibly holding the message. */
   readonly busyExtensionMs: number;
   /** The ceiling on waiting behind a busy agent, after which a held send is reported unconfirmed. */
@@ -57,6 +64,7 @@ export const defaultSendTrackerSettings: SendTrackerSettings = {
     agent: [15_000, 15_000, 30_000, 15_000],
     daemon: [60_000],
   },
+  reviveLaunchMs: 90_000,
   busyExtensionMs: 60_000,
   holdLimitMs: 2 * 60 * 60_000,
   repairLimitMs: 3 * 24 * 60 * 60_000,
@@ -123,6 +131,10 @@ export function attemptsAllowed(record: SendRecord, settings: SendTrackerSetting
 /** The instant this send is next looked at, in epoch milliseconds. */
 export function deadlineOf(record: SendRecord, settings: SendTrackerSettings): number {
   if (record.deadlineAt !== undefined) return Date.parse(record.deadlineAt);
+  // A revive that has not reported what it typed is still relaunching, or cannot say: either way the
+  // first attempt's window cannot have started yet.
+  if (record.path === 'revive' && record.matchText === undefined)
+    return Date.parse(record.acceptedAt) + settings.reviveLaunchMs;
   const schedule = settings.deadlinesMs[record.senderKind ?? 'human'];
   const attempt = Math.max(1, record.attempt ?? 1);
   const index = Math.min(attempt, schedule.length) - 1;
@@ -158,6 +170,9 @@ const ENTERED = new Set(['normal-user-record', 'native-queue-drain']);
 
 function tierOf(record: SendRecord): SendEvidence['tier'] {
   if (record.path === 'turn-file') return 'turn-instruction';
+  // A revive types its turn pointer, or — into a pane that turned out live — the message itself.
+  if (record.path === 'revive' && record.matchText !== undefined && parseHandoffPointer(record.matchText) !== null)
+    return 'turn-instruction';
   if (record.path === 'native-file') return 'queue-file-id';
   return 'exact-text';
 }
@@ -299,6 +314,14 @@ export function sendFailureNotice(recipient: string, record: SendRecord, clientN
         `no transcript Ferretry can prove is ${recipient}’s, so whether ${recipient} read it cannot be confirmed. ` +
         `Do not send it again — it most likely arrived. Ask the owner to restart ${recipient}’s CLI, which gives ` +
         'it a transcript Ferretry can read.',
+    );
+  // A revive handed the message over as the relaunched agent's next turn, so "may still have landed"
+  // undersells it: the agent was started on it. What is missing is only the transcript's word.
+  if (record.fate === 'unaccounted' && record.unaccountedReason === 'revive_unconfirmed')
+    return ferretryNotice(
+      `Your message to ${recipient} (send ${record.sendId}) was handed to ${recipient} as the first turn of ` +
+        `its relaunch, but its transcript never showed it arriving, so delivery cannot be confirmed. It most ` +
+        `likely landed — do not send it again unless ${recipient} stays silent.`,
     );
   const resend = `Decide whether to send it again with \`${clientName} send ${recipient} …\`.`;
   // An unconfirmed message is not one that "did not reach it": it may be sitting in the recipient's

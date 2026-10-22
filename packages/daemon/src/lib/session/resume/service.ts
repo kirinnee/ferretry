@@ -3,29 +3,29 @@ import type { SerialExecutor } from '../../ports.ts';
 import type { SessionId } from '../../session-id.ts';
 import {
   authorizeResume,
+  type PaneDisposition,
   planResume,
+  type ResumeAction,
   resolveResumePolicy,
   resumeTurnDocument,
   resumeTurnInstruction,
-  type PaneDisposition,
-  type ResumeAction,
 } from './policy.ts';
 import { planRetry } from './retry.ts';
 import type { SessionResumeSettings } from './settings.ts';
 import {
-  ResumeAcknowledgementFailed,
-  ResumeRefused,
-  UnregisteredResumeReplacement,
   type LaunchGate,
   type PaneObservation,
+  ResumeAcknowledgementFailed,
   type ResumeActor,
   type ResumeAnswerAttention,
   type ResumeLauncher,
   type ResumeMonitorControl,
   type ResumePolicy,
+  ResumeRefused,
   type ResumeRepository,
   type ResumeTarget,
   type ResumeTurnStore,
+  UnregisteredResumeReplacement,
 } from './types.ts';
 
 export interface SessionResumePorts {
@@ -76,6 +76,14 @@ export interface ResumeOutcome {
   readonly disposition: 'sent' | 'revived' | 'retry-scheduled' | 'preserved';
   /** Set when a retry was scheduled, so the caller knows when to fire it. */
   readonly retryDelayMs?: number | undefined;
+  /**
+   * Exactly what was typed into the pane for the request's message: the message itself when it was
+   * sent to a live agent, or the pointer to the turn it was written to when a relaunch carried it.
+   * The transcript records THIS text as what the user said, so a caller proving the message arrived
+   * must look for it rather than for the message. Absent when nothing was typed, or when a failed
+   * relaunch leaves it unknown.
+   */
+  readonly delivered?: string | undefined;
 }
 
 function failureMessage(error: unknown): string {
@@ -194,7 +202,7 @@ export class SessionResumeService {
     const action = planResume(target, pane, request.message, policy, this.settings);
     if (action.kind === 'send') {
       await this.ports.launcher.deliver(request.id, action.message);
-      return { target, disposition: 'sent' };
+      return { target, disposition: 'sent', delivered: action.message };
     }
     return await this.relaunch(target, action, policy, request.actor ?? 'unknown', attempt);
   }
@@ -269,7 +277,7 @@ export class SessionResumeService {
       launchInstructions,
       ...(action.clearNeedsHuman ? { clearNeedsHuman: true } : {}),
     });
-    return { target: revived, disposition: 'revived' };
+    return { target: revived, disposition: 'revived', delivered: instruction };
   }
 
   private async clearPane(target: ResumeTarget, disposition: PaneDisposition): Promise<void> {

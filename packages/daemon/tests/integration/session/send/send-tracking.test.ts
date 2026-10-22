@@ -2,6 +2,7 @@ import { afterEach, describe, it } from 'bun:test';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { turnFileInstruction } from '@ferretry/protocol';
 import should from 'should';
 import { FileSendLedger } from '../../../../src/adapters/index.ts';
 import {
@@ -168,6 +169,11 @@ class FakeHarness implements SendTerminal {
     this.userTurn(text);
   }
 
+  /** The harness records `text` as the user's words late — a transcript write that lagged the deadline. */
+  recordsLate(text: string): void {
+    this.userTurn(text);
+  }
+
   /** The turn ends: the harness submits everything it was holding, in order. */
   finishTurn(): void {
     this.busy = false;
@@ -207,6 +213,12 @@ class Rig {
   /** Whether the reader sees the records at all — false is a read that saw nothing, not a partial one. */
   visible = true;
   refuseRevive = false;
+  /** How long a relaunch takes before it types its turn pointer — the incident's took 2.6 s. */
+  relaunchMs = 2_600;
+  /** Held open to look at the send while the relaunch is still running. */
+  relaunching: Promise<void> = Promise.resolve();
+  /** Whether the relaunch reports the pointer it typed — a daemon from before the fix did not. */
+  reportsPointer = true;
   readonly ledger: FileSendLedger;
   readonly service: SessionSendService;
   readonly tracker: SendTracker;
@@ -257,8 +269,9 @@ class Rig {
         channel: { recordInbound: async () => undefined, recordOutbound: async () => undefined },
         gate: { launching: () => false, awaitSettled: async () => true },
         reviver: {
-          revive: async () => {
+          revive: async id => {
             if (this.refuseRevive) throw new ReviveRefusedForSend('a duplicate session holds this checkout');
+            return await this.relaunch(id);
           },
         },
         peerWaits: { endPeerWait: async () => undefined },
@@ -314,6 +327,22 @@ class Rig {
       },
       defaultSendTrackerSettings,
     );
+  }
+
+  /**
+   * What `SessionResumeService` does for a send: the session comes back, and once its harness is ready
+   * the replacement pane is typed a POINTER at the turn file — never the message — which the harness
+   * records as the user's words.
+   */
+  private async relaunch(id: SessionId): Promise<string | undefined> {
+    await this.relaunching;
+    const target = this.targets.get(id) as SendTarget;
+    const turn = target.turn + 1;
+    this.targets.set(id, { ...target, status: 'running', turn });
+    this.nowMs += this.relaunchMs;
+    const pointer = turnFileInstruction(`/state/sessions/${id}/turns/turn-${String(turn).padStart(3, '0')}.md`);
+    await this.harness.deliver(id, pointer);
+    return this.reportsPointer ? pointer : undefined;
   }
 
   private harnessKind(): 'claude' | 'codex' {
@@ -495,6 +524,99 @@ describe('a message held for a revive', () => {
     should(released).eql([1, 0]);
     should(subject.harness.typed).eql(['pick this up when back']);
     should(record).match({ fate: 'delivered', held: false });
+  });
+});
+
+describe('a message carried by a revive — a finished sub-ferret sent a peer message', () => {
+  /** The incident: an agent's message to an auto session whose harness exited after its task. */
+  async function finished(): Promise<Rig> {
+    const subject = await rig('claude');
+    subject.targets.set(ID, { id: ID, status: 'completed', mode: 'auto', turn: 1 });
+    subject.harness.alive = false;
+    return subject;
+  }
+  const message = 'PR #734 now CONFLICTS with main. Please rebase on origin/main, resolve, re-run the gates, push.';
+
+  it('is delivered by the pointer the relaunch typed, where it used to be "not delivered" at 15 s', async () => {
+    // Arrange
+    const subject = await finished();
+
+    // Act — accepted at T0, the relaunch types its pointer 2.6 s later, then the looks it always got.
+    const outcome = await subject.service.send({ id: ID, sendId: 'send-1', message, senderReference: SENDER });
+    subject.harness.alive = true;
+    const first = await subject.at(4_600);
+    const deadline = await subject.at(15_039);
+
+    // Assert
+    should(outcome.disposition).equal('revived');
+    should(subject.harness.typed).eql([turnFileInstruction('/state/sessions/session-1/turns/turn-002.md')]);
+    should(first).match({ fate: 'delivered', evidence: { tier: 'turn-instruction' }, attempt: 1 });
+    should(deadline.fate).equal('delivered');
+    should(subject.sender.typed).be.empty();
+  });
+
+  it('is never judged while the relaunch is still starting the harness', async () => {
+    // Arrange — a relaunch slower than an agent send's whole first window.
+    const subject = await finished();
+    let release = (): void => undefined;
+    subject.relaunching = new Promise(resolve => (release = resolve));
+
+    // Act — somebody reads the ledger at 16 s and 60 s, mid-relaunch.
+    const sent = subject.service.send({ id: ID, sendId: 'send-1', message, senderReference: SENDER });
+    while ((await subject.ledger.list(ID)).length === 0) await Bun.sleep(1);
+    const early = await subject.at(16_000);
+    const later = await subject.at(60_000);
+    subject.harness.alive = true;
+    release();
+    await sent;
+    const proven = await subject.at(subject.nowMs - T0 + 2_000);
+
+    // Assert
+    should(early).match({ fate: 'accepted', path: 'revive' });
+    should(later.fate).equal('accepted');
+    should(proven.fate).equal('delivered');
+    should(subject.sender.typed).be.empty();
+  });
+
+  it('is unconfirmed — never "not delivered" — when the record cannot name what the relaunch typed', async () => {
+    // Arrange — the record keeps only the message, as every revive's did before the fix.
+    const subject = await finished();
+    subject.reportsPointer = false;
+
+    // Act
+    await subject.service.send({ id: ID, sendId: 'send-1', message, senderReference: SENDER });
+    subject.harness.alive = true;
+    const relaunching = await subject.at(15_039);
+    const settled = await subject.at(90_000);
+    await subject.at(92_000, SENDER);
+    const notice = subject.sender.typed[0] ?? '';
+
+    // Assert
+    should(relaunching.fate).equal('accepted');
+    should(settled).match({ fate: 'unaccounted', unaccountedReason: 'revive_unconfirmed', retryable: false });
+    should(subject.harness.typed).have.length(1);
+    should(notice).match(/was handed to session-1 as the first turn of its relaunch/u);
+    should(notice).match(/do not send it again/u);
+    should(notice).not.match(/did not reach it/u);
+  });
+
+  it('is unconfirmed after its window when the pointer never reached the transcript, and corrected when it does', async () => {
+    // Arrange — the pointer was typed, but the transcript has not shown it by the deadline.
+    const subject = await finished();
+    subject.harness.drops = true;
+
+    // Act
+    await subject.service.send({ id: ID, sendId: 'send-1', message, senderReference: SENDER });
+    subject.harness.alive = true;
+    const settled = await subject.at(17_700);
+    subject.harness.drops = false;
+    subject.harness.recordsLate(turnFileInstruction('/state/sessions/session-1/turns/turn-002.md'));
+    const repaired = await subject.at(30_000);
+
+    // Assert — never re-typed: the relaunch is not the tracker's to repeat.
+    should(settled).match({ fate: 'unaccounted', unaccountedReason: 'revive_unconfirmed' });
+    should(subject.harness.typed).have.length(1);
+    should(repaired.fate).equal('delivered');
   });
 });
 
