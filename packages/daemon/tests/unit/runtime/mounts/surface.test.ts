@@ -443,7 +443,14 @@ const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
   // mounted subsystem because a background loop the daemon never constructs is the same absent
   // capability as an unserved route — see the field's own comment.
   monitor: { intervalMs: 15_000, arm: () => {}, run: async () => undefined, close: async () => {} },
-  turns: { intervalMs: 2_000, run: async () => undefined },
+  observer: {
+    turns: { intervalMs: 2_000, run: async () => undefined },
+    project: async () => undefined,
+    questions: async () => new Map(),
+    liveness: async () => ({}),
+    midTurn: async () => 0,
+    close: () => undefined,
+  },
   sessionMigrate: new FakeSessionMigrate(),
   // The quota-failover loop serves no route either, and for the same reason the declared-wait loop
   // does not: a background tick is ended by a timer, not by a request.

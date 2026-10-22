@@ -225,3 +225,9 @@ function spawnedErrorText(output: readonly string[]): readonly string[] {
   const [first, ...rest] = output;
   return first?.startsWith(PARSE_ERROR) === true ? [first.slice(PARSE_ERROR.length), ...rest] : output;
 }
+
+/** A session name a control client may attach to: the same alphabet `sessionTarget` admits. */
+const ATTACHABLE = /^[a-z0-9][a-z0-9_.-]{0,127}$/u;
+
+/** Whether a control client may attach to the session `name`. */
+export const isControlAttachable = (name: string): boolean => ATTACHABLE.test(name);

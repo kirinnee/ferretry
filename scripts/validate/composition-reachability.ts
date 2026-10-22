@@ -569,10 +569,18 @@ function compositionRoots(root: string, packageDir: string): string[] {
   const manifestPath = join(packageDir, 'package.json');
   const manifest = JSON.parse(readFileSync(resolve(root, manifestPath), 'utf8')) as Manifest;
   const entries = Object.keys(manifest.bin ?? {}).length > 0 ? manifest.bin : manifest.exports;
-  const roots = Object.values(entries ?? {})
+  const declared = Object.values(entries ?? {})
     .filter(entry => typeof entry === 'string' && entry.endsWith('.ts'))
     .map(entry => join(packageDir, entry));
-  if (roots.length === 0) fail(`${manifestPath} declares no bin or exports entry to use as a composition root`);
+  if (declared.length === 0) fail(`${manifestPath} declares no bin or exports entry to use as a composition root`);
+  // A worker-thread program beside a bin entry is compiled into the same binary as an entry of its own
+  // (`scripts/release/compile-executable.ts` embeds every `bin/*.worker.ts`), so what it imports ships
+  // and runs even though no bin entry imports it.
+  const workers =
+    Object.keys(manifest.bin ?? {}).length === 0
+      ? []
+      : trackedFiles(root, join(packageDir, 'bin')).filter(file => file.endsWith('.worker.ts'));
+  const roots = [...declared, ...workers.filter(file => !declared.includes(file))];
   for (const file of roots) {
     if (!existsSync(resolve(root, file))) fail(`${manifestPath} points at a missing composition root: ${file}`);
   }

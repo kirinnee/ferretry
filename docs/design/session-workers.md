@@ -1,6 +1,6 @@
 # Session workers — stage 3 of the event-driven daemon
 
-Status: **proposed** · Date: 2026-10-22 · Parent: [event-driven-daemon.md](event-driven-daemon.md) (stage 3) ·
+Status: **in progress** — 3a shipped (#712); 3b adds the workers (turn part only) · Date: 2026-10-22 · Parent: [event-driven-daemon.md](event-driven-daemon.md) (stage 3) ·
 Owner directive, verbatim: _"use things like inotify, 1 thread per agent, fan into the daemon (daemon should
 just communicate)"_.
 
@@ -467,6 +467,25 @@ Baseline arithmetic for the table: today a running session costs, every 2 s, `ha
 2 `capture-pane` = 120 children/min, ×5 = 600/min from the turn watcher alone, plus 1 `ps` per working session per
 30 s, plus the reaper's per-registration `display-message` every 5 s. 1c removes the scrollback capture and most of
 the rest; 3b removes the remainder for running sessions by making captures in-band on a client that already exists.
+
+### 5.1 What 3b shipped, and where it differs from the table
+
+- `bin/session.worker.ts` (≈160 KB unminified, ≈83 KB minified; no zod, protocol schemas, storage, vault or
+  redactor — held by `tests/integration/session/observer/worker-diet.test.ts`), `WorkerSupervisor` (cap 8 then
+  least-load pooling, probe-ready, generations, 1 s → 60 s back-off, five crashes in ten minutes → inline) and
+  `WorkerObserverHost` over the 3a inline host. `sessionWorkers: { enabled: true, max: 8 }` in `daemon.json`.
+- **Which sessions get a worker**: the turn statuses (running, thinking, tool_running, awaiting_user,
+  awaiting_question, interrupted) with an attachable tmux session — not yet the wider live set of §3.1, which
+  matters only once the question part moves (3c).
+- **The attached client is `ignore-size,read-only,no-output`** and refuses every non-read command itself
+  (`ControlModeTmuxProcess` with `mutations: 'refuse'`). `no-output` until 3c reacts to `%output`.
+- **The turn tick still drives the workers** (main sends one `look` per hosted session per 2 s tick and writes
+  the answers); the worker owns the pane client, the frame cache, the parsed tail and the two-frame state.
+- **Per-worker memory is not attributable in Bun**: `heapStats()` is shared across worker VMs and `rss` is
+  process-wide (measured). The memory budget is therefore on the shipped bundle — five bundled workers add
+  ≈7.4 MB each (≤ 15 MB held by the diet test); run from source a worker costs ≈67 MB.
+- Not in 3b: the `fyd --check` synthetic-attach smoke (§4.4), a per-worker CPU reading (§8 Q6), the read-path
+  barrier and `%output` settle (3c).
 
 ## 6. Risks
 

@@ -5,6 +5,7 @@ import {
   controlNonceLine,
   controlReplyProgress,
   decodeControlOutput,
+  isControlAttachable,
   parseControlGuard,
   parseControlNotification,
 } from '../../../src/lib/index.ts';
@@ -192,5 +193,22 @@ describe('tmux control-mode reply framing', () => {
 
     // Assert
     should(actual.kind).equal('violation');
+  });
+});
+
+describe('isControlAttachable', () => {
+  it.each([
+    ['fy-session-1', true],
+    ['a', true],
+    ['work_2.b', true],
+    ['', false],
+    ['-leading', false],
+    ['=exact', false],
+    ['Upper', false],
+    ['has space', false],
+    ['x'.repeat(129), false],
+  ])('should say whether %p can be attached to (%p)', (input, expected) => {
+    // Act + Assert
+    should(isControlAttachable(input)).equal(expected);
   });
 });

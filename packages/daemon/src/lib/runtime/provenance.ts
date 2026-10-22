@@ -45,6 +45,7 @@ const REPORTED_KEYS = [
   'secretsFile',
   'healthIntervalSeconds',
   'transcriptReconcileSeconds',
+  'sessionWorkers',
   'usage',
   'analyticsPricing',
   'projectRoots',

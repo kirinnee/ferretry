@@ -26,4 +26,6 @@ export interface SessionObserverHost {
   liveness(target: LivenessTarget): Promise<LivenessSample>;
   /** How many sessions the observer last saw mid-turn — what an update waits out. */
   midTurn(): Promise<number>;
+  /** Ends whatever the host started (worker threads); the timers that drive it are the root's to stop. */
+  close(): void;
 }
