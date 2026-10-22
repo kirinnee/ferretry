@@ -272,8 +272,8 @@ So:
 - _A pre-existing lost-update window._ `StorageSessionLifecycleRepository.write`
   (`storage-session-lifecycle-repository.ts:200-203`) reads config+state, then `writeConfig`/`writeState` a
   merge **outside one locked read-modify-write**. A turn write that lands between the read and the write is
-  reverted. Workers make patch arrival asynchronous and widen that window. **Fix it before 3c** (one
-  `updateDocument` per document), as its own small PR.
+  reverted. Workers make patch arrival asynchronous and widen that window. **Fixed in #700**: `write` now goes through locked `upsertConfig`/`upsertState` (was: fix it before 3c, one
+  `updateDocument` per document).
 
 ### 2.5 How the main thread stays the single source for clients
 
