@@ -22,6 +22,7 @@
 
 import { z } from 'zod';
 import { DictationTimelineSchema } from './dictation-timeline.ts';
+import { ON_DEVICE_MODEL_IDS, ON_DEVICE_MODELS, type OnDeviceModelId } from './model-catalog.ts';
 
 /** The sole browser-storage key for the recording switch. */
 export const TRANSCRIPTION_LOG_KEY = 'fy-transcription-log-v1';
@@ -36,7 +37,8 @@ const TranscriptionEntrySchema = z.strictObject({
   /** The conversation it was dictated for, so an entry can go back where it was meant to. */
   sessionId: z.string().min(1).max(256).optional(),
   sessionLabel: z.string().max(256).optional(),
-  engine: z.enum(['parakeet', 'web-speech']),
+  /** `web-speech`, or the on-device model's catalog id (`model-catalog.ts`). */
+  engine: z.enum(['web-speech', ...ON_DEVICE_MODEL_IDS]),
   durationMs: z.number().finite().nonnegative().optional(),
   raw: z.string(),
   cleaned: z.string().optional(),
@@ -246,7 +248,10 @@ export class TranscriptionLog {
 
 /** The label a person reads for an engine. */
 export const TRANSCRIPTION_ENGINE_LABELS: Readonly<Record<TranscriptionEntry['engine'], string>> = {
-  parakeet: 'Parakeet in-browser',
+  ...(Object.fromEntries(ON_DEVICE_MODELS.map(model => [model.id, `${model.shortName} in-browser`])) as Record<
+    OnDeviceModelId,
+    string
+  >),
   'web-speech': 'Web Speech',
 };
 

@@ -19,6 +19,8 @@
  * engine runs on WebAssembly. That is a decision, not a missing branch.
  */
 
+import { formatMegabytes, type PinnedFile } from './model-store.ts';
+
 /** Where the model is fetched from: the one origin this feature adds to the network the app reaches. */
 export const PARAKEET_MODEL_ORIGIN = 'https://huggingface.co';
 export const PARAKEET_REPOSITORY = 'ysdede/parakeet-tdt-0.6b-v3-onnx';
@@ -30,14 +32,8 @@ const MODEL_BASE = `${PARAKEET_MODEL_ORIGIN}/${PARAKEET_REPOSITORY}/resolve/${PA
 
 export type ParakeetFileRole = 'encoder' | 'decoder' | 'vocabulary' | 'runtime';
 
-export interface ParakeetFile {
+export interface ParakeetFile extends PinnedFile {
   readonly role: ParakeetFileRole;
-  /** Shown while it downloads. */
-  readonly label: string;
-  readonly url: string;
-  readonly bytes: number;
-  /** Lowercase hex. */
-  readonly sha256: string;
 }
 
 export const PARAKEET_MODEL_FILES: readonly ParakeetFile[] = [
@@ -91,8 +87,10 @@ export const parakeetFiles = (runtimeUrl: string): readonly ParakeetFile[] => [
 export const PARAKEET_TOTAL_BYTES =
   PARAKEET_MODEL_FILES.reduce((total, file) => total + file.bytes, 0) + ORT_RUNTIME_FILE.bytes;
 
-/** Decimal megabytes, the unit storage settings on phones and browsers report. */
-export const formatMegabytes = (bytes: number): string => `${Math.max(0, Math.round(bytes / 1_000_000))} MB`;
+export { formatMegabytes };
+
+/** For copy that names the download before anything is fetched. */
+export const PARAKEET_DOWNLOAD_SIZE = formatMegabytes(PARAKEET_TOTAL_BYTES);
 
 /**
  * The Cache Storage cache the files live in. Not prefixed like the signed release's own caches, so
