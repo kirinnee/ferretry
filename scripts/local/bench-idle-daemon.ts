@@ -11,7 +11,8 @@
  *   1. its own `fy daemon profile` report, when the build serves `/v1/diagnostics/profile`;
  *   2. `/proc/<pid>/stat` for CPU, its children's included, over a second window of the same length;
  *   3. with `--trace`, `sudo strace -f` over a third window: file system calls by path shape and the
- *      programs started by program and subcommand (strace slows the daemon, so it gets its own window).
+ *      programs started by program and subcommand (strace slows the daemon, so it gets its own window);
+ *   4. with `--syscall-summary`, `sudo strace -f -c` over a fourth: every kind of system call, counted.
  *
  * Manual only, never CI (the CI budget is `tests/integration/runtime/idle-budget.test.ts`). Linux only.
  *
@@ -41,6 +42,7 @@ const { values } = parseArgs({
     seconds: { type: 'string', default: '30' },
     settle: { type: 'string', default: '40' },
     trace: { type: 'boolean', default: false },
+    'syscall-summary': { type: 'boolean', default: false },
     fixture: { type: 'string', default: '/tmp/fy-idle-fixture' },
     small: { type: 'boolean', default: false },
     out: { type: 'string' },
@@ -98,6 +100,7 @@ const base = `http://127.0.0.1:${String(port)}`;
 let report: PerformanceReport | undefined;
 let external: { cpuPercent: number; childrenPercent: number } | undefined;
 let trace: ReturnType<typeof parseStraceTrace> | undefined;
+let syscallSummary: string | undefined;
 try {
   for (let attempt = 0; ; attempt += 1) {
     if ((await fetch(`${base}/healthz`).catch(() => undefined))?.ok === true) break;
@@ -160,13 +163,27 @@ try {
       stateHome: home,
     });
   }
+
+  // 4. Every kind of system call, counted.
+  if (values['syscall-summary']) {
+    const file = join(run, 'strace-summary.txt');
+    log(`counting every system call for ${String(seconds)} s (sudo strace -c)`);
+    const tracer = Bun.spawn(['sudo', '-n', 'strace', '-f', '-c', '-o', file, '-p', String(pid)], {
+      stdout: 'ignore',
+      stderr: 'pipe',
+    });
+    await Bun.sleep(seconds * 1_000);
+    Bun.spawnSync(['sudo', '-n', 'kill', '-INT', String(tracer.pid)]);
+    await tracer.exited;
+    syscallSummary = await readFile(file, 'utf8').catch(() => '');
+  }
 } finally {
   daemon.kill();
   await daemon.exited;
   tmux(['kill-server']);
 }
 
-const summary = { fyd: fyd.join(' '), shape, seconds, external, trace, report };
+const summary = { fyd: fyd.join(' '), shape, seconds, external, trace, syscallSummary, report };
 if (values.out !== undefined) await writeFile(values.out, `${JSON.stringify(summary, null, 2)}\n`);
 await rm(run, { recursive: true, force: true });
 
@@ -186,5 +203,7 @@ if (trace !== undefined) {
   for (const entry of trace.top.slice(0, 20))
     lines.push(`    ${String(entry.perSecond).padStart(8)}/s  ${entry.call} ${entry.path}`);
 }
+if (syscallSummary !== undefined)
+  lines.push('', `strace -c (${String(seconds)} s):`, ...syscallSummary.split('\n').slice(0, 30));
 if (report !== undefined) lines.push('', renderPerformanceReport(report));
 process.stdout.write(`${lines.join('\n')}\n`);
