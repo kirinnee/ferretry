@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import type { ConnectionChoice } from '@ferretry/relay';
 import { type ReactNode, useLayoutEffect, useState } from 'react';
-import type { ReactTestRenderer } from 'react-test-renderer';
+import type { ReactTestInstance, ReactTestRenderer } from 'react-test-renderer';
 import type { FleetClientFactory } from '../../../../src/features/fleet/fleet-client.ts';
 import { useSettingsFlow } from '../../../../src/features/fleet/setup/settings-route.ts';
 import type { MachineTabProps, MachineTabSurfaces } from '../../../../src/features/fleet/shell/machines-surface.tsx';
@@ -219,7 +219,15 @@ describe('SettingsPage sections', () => {
       'device',
     ]);
     expect(sidebarChoices.map(choice => choice.props['aria-current'])).toEqual(['page', undefined, undefined]);
-    expect(settingIds(view)).toEqual(['text-size', 'theme', 'motion', 'density', 'chat-width', 'message-marks']);
+    expect(settingIds(view)).toEqual([
+      'text-size',
+      'theme',
+      'motion',
+      'density',
+      'chat-width',
+      'open-links-in',
+      'message-marks',
+    ]);
     expect(view.root.findByProps({ 'data-settings-section': 'appearance' }).props.id).toBe('settings-section-panel');
 
     run(() => view.unmount());
@@ -406,6 +414,34 @@ describe('SettingsPage sections', () => {
     const reloaded = new DaemonControlsStore(storage);
     expect(reloaded.controls(beta.daemonId).suggestionKeys).toBe('symbols');
     expect(reloaded.controls(beta.daemonId).composerVimMode).toBe(true);
+
+    run(() => view.unmount());
+  });
+
+  it('keeps where links open as a plain two-way device choice, Your browser by default', () => {
+    window.history.replaceState({}, '', '/d/daemon-alpha/settings#appearance');
+    const storage = memoryStorage();
+    const controls = new DaemonControlsStore(storage);
+    const view = render(page({ controls }));
+
+    const row = view.root.findByProps({ 'data-setting-id': 'open-links-in' });
+    const choices = () => row.findAll(node => node.type === 'input' && node.props.name === 'appearance-open-links-in');
+    const text = (node: ReactTestInstance): string =>
+      node.children.map(child => (typeof child === 'string' ? child : text(child))).join('');
+    expect(text(row)).toContain('Open links in');
+    expect(text(row)).toContain('Your browser');
+    expect(text(row)).toContain('Ferretry side panel');
+    expect(text(row)).toContain('Cmd/Ctrl-click always opens a new tab.');
+    expect(choices().map(radio => [radio.props.value, radio.props.checked])).toEqual([
+      ['browser', true],
+      ['panel', false],
+    ]);
+
+    run(() => choices()[1]?.props.onChange());
+    expect(controls.snapshot().device.openLinksIn).toBe('panel');
+    expect(choices().map(radio => radio.props.checked)).toEqual([false, true]);
+    // A property of this screen: it survives a reload.
+    expect(new DaemonControlsStore(storage).snapshot().device.openLinksIn).toBe('panel');
 
     run(() => view.unmount());
   });

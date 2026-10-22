@@ -38,6 +38,7 @@ import { SessionsPage } from './components/sessions-page.tsx';
 import type { SendDismiss, SendExpand } from './components/settled-send-note.tsx';
 import { GlobalAnalyticsPage } from './features/analytics/global-analytics-page.tsx';
 import { configFilesSettingsTab } from './features/config-files/config-files-settings.tsx';
+import { LinkBehaviourProvider } from './features/browser/external-link.tsx';
 import { ConnectionHealthNotice } from './features/connection/connection-health-notice.tsx';
 import { NewDeviceNotices } from './features/device-notice/new-device-notice.tsx';
 import { ComponentsSurface } from './features/fleet/components/components-tab.tsx';
@@ -2495,7 +2496,7 @@ export function AppShell() {
         >
           {routeAnnouncement(effectiveRoute)}
         </p>
-        {content}
+        <StoreLinkBehaviour>{content}</StoreLinkBehaviour>
         {/* One passkey prompt for the whole app: any daemon request refused for want of a step-up raises
           it, and it names which machine is asking. */}
         <StepUpDialog gate={store.stepUp} machineName={promptMachineName} />
@@ -2559,6 +2560,19 @@ function MotionFollower() {
     else delete root.dataset.motion;
   }, [motion]);
   return null;
+}
+
+/**
+ * Binds every external link under it to Settings › Appearance › "Open links in", read from this
+ * device's controls (`features/browser/external-link.tsx`).
+ */
+function StoreLinkBehaviour({ children }: { readonly children: ReactNode }) {
+  const store = useAppStore();
+  const openLinksIn = useSyncExternalStore(
+    store.controls.subscribe,
+    () => store.controls.snapshot().device.openLinksIn,
+  );
+  return <LinkBehaviourProvider openLinksIn={openLinksIn}>{children}</LinkBehaviourProvider>;
 }
 
 export interface AppProps {

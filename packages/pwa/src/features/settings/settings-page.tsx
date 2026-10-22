@@ -45,7 +45,7 @@ import type { PairingClientFactory } from './add-device-settings.tsx';
 import { ClearCachedDataSetting } from './clear-cached-data.tsx';
 import { ComposerEnterKeySettings } from './composer-enter-key-settings.tsx';
 import { ComposerSuggestionsSettings } from './composer-suggestions-settings.tsx';
-import { MotionSetting, SessionsListSetting } from './conversation-settings.tsx';
+import { MotionSetting, OpenLinksInSetting, SessionsListSetting } from './conversation-settings.tsx';
 import { type DaemonReachabilityProbe, daemonDisplayName, distinctDaemonName } from './daemon-settings.tsx';
 import { DaemonSettingsFrame, type DaemonSettingsTabDefinition } from './daemon-settings-frame.tsx';
 import { DevicePermissionsSetting } from './device-permissions-settings.tsx';
@@ -479,6 +479,12 @@ export function SettingsPage({
         <ChatWidthControl value={device.chatWidth} onChange={chatWidth => controls.setDeviceControls({ chatWidth })} />
       ),
       motion: <MotionSetting motion={device.motion} onChange={motion => controls.setDeviceControls({ motion })} />,
+      'open-links-in': (
+        <OpenLinksInSetting
+          openLinksIn={device.openLinksIn}
+          onChange={openLinksIn => controls.setDeviceControls({ openLinksIn })}
+        />
+      ),
       'sessions-list': (
         <SessionsListSetting
           scope={device.sessionsList}

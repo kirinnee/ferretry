@@ -68,6 +68,19 @@ export const DEFAULT_SUGGESTION_KEYS: SuggestionKeys = 'ladder';
 /** Settings › Appearance › Motion. `system` follows prefers-reduced-motion; `reduced` always reduces. */
 export type MotionPreference = 'system' | 'reduced';
 
+/**
+ * WHERE AN ORDINARY LINK OPENS — Settings › Appearance › "Open links in".
+ *
+ *   browser  outside Ferretry: a new tab, or the real Safari app from the installed app on iOS (the default);
+ *   panel    Ferretry's in-app preview, beside the conversation or as a sheet on a phone.
+ *
+ * A modified click (Cmd/Ctrl/Shift, a middle click) and a long press keep the browser's own new-tab
+ * behaviour whichever is chosen (`features/browser/link-behaviour-model.ts`).
+ */
+export type OpenLinksIn = 'browser' | 'panel';
+
+export const OPEN_LINKS_IN: readonly OpenLinksIn[] = ['browser', 'panel'];
+
 /** The sole browser-storage key for persisted UI controls. */
 export const CONTROLS_KEY = 'fy-controls-v1';
 export const CONTROLS_VERSION = 1;
@@ -147,6 +160,8 @@ export interface DeviceControls {
    * mean what, never which element holds the draft, the selection or dictation.
    */
   readonly composerVimMode: boolean;
+  /** Where an ordinary tap on an external link opens (`OpenLinksIn`). */
+  readonly openLinksIn: OpenLinksIn;
 }
 
 /** What a screen renders: device preferences plus THIS daemon's project scope. */
@@ -176,6 +191,7 @@ export const DEFAULT_DEVICE_CONTROLS: DeviceControls = Object.freeze({
   suggestionKeys: DEFAULT_SUGGESTION_KEYS,
   skillSuggestions: true,
   composerVimMode: false,
+  openLinksIn: 'browser',
 });
 
 /**
@@ -287,6 +303,7 @@ const readDeviceControls = (value: unknown): DeviceControls => {
         ? fields.composerPhoneEnterKey
         : null,
     motion: fields.motion === 'reduced' ? 'reduced' : 'system',
+    openLinksIn: fields.openLinksIn === 'panel' ? 'panel' : DEFAULT_DEVICE_CONTROLS.openLinksIn,
   };
 };
 

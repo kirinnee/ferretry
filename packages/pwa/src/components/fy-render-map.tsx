@@ -20,6 +20,7 @@
 
 import { Minus, Plus } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
+import { ExternalLink } from '../features/browser/external-link.tsx';
 import type { MapSpec, readMap as ReadMap } from '../lib/fy-render-map.ts';
 import { MAP_ATTRIBUTION } from '../lib/fy-render-map-tiles.ts';
 import type { MapHandle } from './fy-render-map-engine.ts';
@@ -127,9 +128,9 @@ export function FyRenderMap({ alt, payload, mode, fullscreen, onListing, load = 
           <Minus aria-hidden="true" size={14} />
         </button>
       </div>
-      <a className="fy-render-map-attribution" href={MAP_ATTRIBUTION.href} rel="noopener noreferrer" target="_blank">
+      <ExternalLink className="fy-render-map-attribution" href={MAP_ATTRIBUTION.href}>
         {MAP_ATTRIBUTION.text}
-      </a>
+      </ExternalLink>
     </div>
   );
 }

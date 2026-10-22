@@ -28,9 +28,11 @@
  * `navigate('/session/' + id)` — the single-daemon destination the survey flagged
  * (`pwa-shape.md:115`).
  *
- * NOT PORTED: kteam wrapped external links in `InAppBrowserLink`, part of its
- * in-app browser surface. That surface is not ported, so an external link is an
- * ordinary anchor that opens in a new tab.
+ * EXTERNAL LINKS are `ExternalLink` (`features/browser/external-link.tsx`), the
+ * same anchor every other outside link in the app is, so Settings › Appearance ›
+ * "Open links in" decides where a tap goes: the reader's browser (the default)
+ * or Ferretry's side panel. kteam wrapped them in `InAppBrowserLink` for the same
+ * surface, with no choice.
  *
  * Ported from kteam's `src/components/Markdown.tsx`.
  */
@@ -46,6 +48,7 @@ import {
   parseFyRender,
   remarkFyRenderFences,
 } from '../lib/fy-render.ts';
+import { ExternalLink } from '../features/browser/external-link.tsx';
 import { fenceLanguage, highlightToHtml } from '../lib/highlight.ts';
 import { LOCATION_FENCE_LANGUAGE, parseLocationBlock } from '../lib/location-share.ts';
 import { daemonSessionPath } from '../lib/pages/routes.ts';
@@ -391,9 +394,9 @@ export const Markdown = memo(function Markdown({
             const parsed = parseReferenceHref(href);
             if (parsed === null) {
               return (
-                <a href={href} onClick={onClick} rel="noreferrer noopener" target="_blank" {...rest}>
+                <ExternalLink href={href} onClick={onClick} {...rest}>
                   {children}
-                </a>
+                </ExternalLink>
               );
             }
             const target = referenceHasTrustedOrigin(node, parsed, trustedResolvers);

@@ -76,6 +76,7 @@ const ALTERED_DEVICE_CONTROLS: DeviceControls = {
   suggestionKeys: 'both',
   skillSuggestions: false,
   composerVimMode: true,
+  openLinksIn: 'panel',
 };
 
 const scopeRecord = (entries: readonly (readonly [string, string, number])[]): ControlsRecord => {
@@ -129,6 +130,8 @@ describe('parseControlsRecord — kteam controls cases, on the new nested shape'
       skillSuggestions: true,
       machineOrder: [],
       composerVimMode: false,
+      // A payload written before links had a home opens them in the reader's browser.
+      openLinksIn: 'browser',
     });
     // The old shape had no daemon scopes at all.
     should(Object.keys(record.scopes)).be.empty();
@@ -209,6 +212,15 @@ describe('parseControlsRecord — kteam controls cases, on the new nested shape'
     should(Object.keys(read({ showDetails: true }))).not.containEql('showDetails');
     should(read({ motion: 'reduced' }).motion).equal('reduced');
     should(read({ motion: 'none' }).motion).equal('system');
+  });
+
+  it('opens links in the reader’s browser unless the side panel was explicitly chosen', () => {
+    const read = (device: Record<string, unknown>) =>
+      parseControlsRecord(stored({ v: CONTROLS_VERSION, device })).device.openLinksIn;
+    should(read({ openLinksIn: 'panel' })).equal('panel');
+    should(read({ openLinksIn: 'browser' })).equal('browser');
+    should(read({ openLinksIn: 'safari' })).equal('browser');
+    should(read({})).equal('browser');
   });
 
   it('keeps Vim-style composer editing off unless it was explicitly turned on', () => {

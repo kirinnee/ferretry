@@ -97,6 +97,7 @@
         "tests/integration/fixtures/settings-typing-scene.tsx",
         "tests/integration/fixtures/send-handover-scene.tsx",
         "tests/integration/fixtures/cancelled-rows-scene.tsx",
+        "tests/integration/fixtures/open-links-scene.tsx",
         "scripts/fy-render-shell/bootstrap.ts",
         "scripts/fy-render-shell/mermaid-entry.ts",
         "scripts/fy-render-shell/lottie-entry.ts",

@@ -32,6 +32,7 @@
  */
 import { Download, ExternalLink, FileText, FileWarning } from 'lucide-react';
 import { type ReactNode, useEffect, useState } from 'react';
+import { ExternalLink as ExternalAnchor } from '../features/browser/external-link.tsx';
 import {
   FY_RENDER_LIMITS,
   type FyRenderImageMime,
@@ -249,15 +250,9 @@ export function FyRenderMedia({ block, readWorkspaceMedia, onShape }: FyRenderMe
   );
 
   const openAction = (href: string, label: string) => (
-    <a
-      aria-label={`${label} ${fileName(block)}`}
-      className={ROW_ACTION}
-      href={href}
-      rel="noopener noreferrer"
-      target="_blank"
-    >
+    <ExternalAnchor aria-label={`${label} ${fileName(block)}`} className={ROW_ACTION} href={href}>
       <ExternalLink aria-hidden="true" size={14} /> {label}
-    </a>
+    </ExternalAnchor>
   );
 
   if (stage.phase === 'loading')

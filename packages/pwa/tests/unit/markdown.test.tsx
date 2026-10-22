@@ -78,7 +78,7 @@ describe('Markdown prose', () => {
     const anchor = anchorsOf(tree.root)[0];
     should(anchor?.props.href).equal('https://example.test/docs');
     should(anchor?.props.target).equal('_blank');
-    should(anchor?.props.rel).equal('noreferrer noopener');
+    should(anchor?.props.rel).equal('noopener noreferrer');
   });
 });
 

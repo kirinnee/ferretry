@@ -21,6 +21,7 @@
 
 import { Download, ExternalLink } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { ExternalLink as ExternalAnchor } from '../features/browser/external-link.tsx';
 import type { DaemonConnection } from '../lib/daemon-connection.ts';
 import { type DaemonSessionScope, daemonSessionKey } from '../lib/daemon-scope.ts';
 import { useDaemonFetch } from '../lib/store.tsx';
@@ -151,10 +152,10 @@ export const parsePreviewCsv = (text: string): CsvTable => {
 const PreviewActions = ({ href, filename, canOpen }: { href: string; filename: string; canOpen: boolean }) => (
   <div className="kt-rich-file-actions">
     {canOpen && (
-      <a className="kt-btn kt-btn--sm" href={href} target="_blank" rel="noopener noreferrer">
+      <ExternalAnchor className="kt-btn kt-btn--sm" href={href}>
         <ExternalLink size={14} aria-hidden="true" />
         Open
-      </a>
+      </ExternalAnchor>
     )}
     <a className="kt-btn kt-btn--sm" href={href} download={filename}>
       <Download size={14} aria-hidden="true" />

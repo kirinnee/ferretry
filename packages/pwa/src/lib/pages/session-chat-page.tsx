@@ -38,6 +38,7 @@ import { analyticsIdQuery } from '../../features/analytics/session-analytics-que
 import { SessionAnalyticsSurface } from '../../features/analytics/session-analytics-surface.tsx';
 import { type AttentionActionClient, AttentionActionModal } from '../../features/attention/attention-action-modal.tsx';
 import { browserPageLabel } from '../../features/browser/browser-surface-list.tsx';
+import { InAppBrowserWorkspace } from '../../features/browser/in-app-browser.tsx';
 import type { UnifiedBrowserDependencies } from '../../features/browser/unified-browser-surface.tsx';
 import { browserPageForKey, useSessionBrowser } from '../../features/browser/use-session-browser.ts';
 import { scopedMcpServers } from '../../features/context-rail/context-rail-model.ts';
@@ -1426,7 +1427,10 @@ export function SessionChatPage({
           >
             <SessionWorkspace
               agentSurfaces={agentSurfaces}
-              chat={chat}
+              // The in-app browser host around the chat: under Settings › Appearance › "Open links in" ›
+              // Ferretry side panel, a tapped link opens BESIDE the conversation on a desktop, and as a
+              // sheet over it on a tablet or phone, where two columns would leave the chat unreadable.
+              chat={<InAppBrowserWorkspace compact={formFactor !== 'desktop'}>{chat}</InAppBrowserWorkspace>}
               connection={connection}
               driving={driving}
               formFactor={formFactor}
