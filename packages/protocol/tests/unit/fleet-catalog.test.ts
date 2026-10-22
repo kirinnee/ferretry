@@ -264,9 +264,25 @@ const cases: readonly SchemaCase[] = [
     value: view.preview.runtimes[0],
   },
   {
+    name: 'FleetRunningSessionSchema',
+    schema: catalog.FleetRunningSessionSchema,
+    value: { id: 'ms0v8vgc-d445a669', name: 'Fisher', harness: 'codex' },
+  },
+  {
     name: 'FleetAccountChangePreviewSchema',
     schema: catalog.FleetAccountChangePreviewSchema,
     value: { kind: 'sign-out', credential: 'codex-work', runtimesAffected: 2, signsOutTerminal: false },
+  },
+  {
+    name: 'FleetAccountChangePreviewSchema',
+    schema: catalog.FleetAccountChangePreviewSchema,
+    value: {
+      kind: 'apply',
+      operations: [],
+      documents: [],
+      runtimes: [],
+      runningSessions: [{ id: 'ms0v8vgc-d445a669', name: 'Fisher', harness: 'codex' }],
+    },
   },
   { name: 'FleetAccountChangeViewSchema', schema: catalog.FleetAccountChangeViewSchema, value: view },
   {
@@ -356,6 +372,7 @@ describe('the account-model catalogue wire contract', () => {
         create: true,
       },
       { kind: 'runtime.remove', name: 'claude-review' },
+      { kind: 'runtime.rename', name: 'claude-review', to: 'claude-reviewer' },
       { kind: 'profile.put', name: 'agent', layers: ['profile/default', 'settings/claude'], create: false },
       { kind: 'profile.remove', name: 'agent', switchRuntimesTo: 'default', removeFromProfiles: true },
       {

@@ -46,6 +46,9 @@ codex: # what Codex is given, the same shape without tiers
   it is part of the value the picker sends and the wrapper passes (`--model deepseek-flash[1m]`).
 - A tier slot holds a model id, optionally with a context suffix, and must name one of the half's models.
 - `detect: ollama` marks a local server whose own model list the daemon reads (§ Local models).
+- `retires: '2027-01-31'` on a model is the day its provider retires it, when the provider has announced one.
+  `GET /v1/models` carries it, with the model's `note` and its list price (input and output, USD per million
+  tokens), so the models-guide builder can weigh them ([pack-mode.md](pack-mode.md#suggesting-a-guide)).
 
 The check is the fleet library's zod schema (`packages/fleet/src/lib/models/schema.ts`), the same one
 `fy config schema models` prints. The test suite refuses a build in which any provider preset lacks a

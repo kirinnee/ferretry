@@ -12,8 +12,15 @@
  * machine's — and the candidate's model field completes from the same list and fills its provider.
  */
 
-import type { GuideCandidate, GuideUseCase, ModelsGuide, PackFleetModel } from '@ferretry/protocol';
-import { MAX_GUIDE_TEXT_CHARS } from '@ferretry/protocol';
+import type {
+  GuideCandidate,
+  GuideRouting,
+  GuideUndo,
+  GuideUseCase,
+  ModelsGuide,
+  PackFleetModel,
+} from '@ferretry/protocol';
+import { MAX_GUIDE_TEXT_CHARS, MAX_ROUTING_PROMPT_CHARS, MAX_ROUTING_SHORT_CHARS } from '@ferretry/protocol';
 import { ArrowDown, ArrowUp, ChevronDown, ChevronRight, Plus, Trash2 } from 'lucide-react';
 import { type ReactNode, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { cn } from '../../lib/class-names.ts';
@@ -31,17 +38,85 @@ import {
   replaceItem,
 } from '../../lib/pack/guide-draft.ts';
 import { type ModelVocabulary, modelNamed, modelVocabulary } from '../../lib/pack/model-mentions.ts';
-import { guideIssues } from '../../lib/pack/pack-files.ts';
+import { guideIssues, type RoutingDraft, type RoutingEdit, routingIssues } from '../../lib/pack/pack-files.ts';
+import { absoluteTime } from '../../lib/session-screens.ts';
 import { Badge, Button } from '../../shell/primitives.tsx';
 import { ModelMentionField, NOT_HERE } from './model-mention-field.tsx';
-import type { PackSave } from './use-machine-pack.ts';
+import type { GuideWrite, PackSave } from './use-machine-pack.ts';
 
 export interface ModelsGuideEditorProps {
   readonly guide: ModelsGuide;
   readonly models: readonly PackFleetModel[];
-  readonly onSave: (useCases: readonly GuideUseCase[] | null) => Promise<PackSave>;
+  /** `routing` is given only when the owner edited it: a pair writes it, `null` removes it. */
+  readonly onSave: (useCases: readonly GuideUseCase[] | null, routing?: RoutingEdit) => Promise<PackSave>;
+  /** Present while an accepted suggestion can be undone. */
+  readonly undo?: GuideUndo;
+  readonly onUndo?: () => Promise<GuideWrite>;
+  /** A reviewed suggestion to edit: loaded into the draft, never saved until Save guide. `key` is new each time. */
+  readonly incoming?: {
+    readonly key: number;
+    readonly useCases: readonly GuideUseCase[];
+    readonly routing?: GuideRouting;
+  };
   /** Use cases open for editing when the editor first draws (harness, tests). */
   readonly initiallyOpen?: readonly number[];
+}
+
+const NO_ROUTING: RoutingDraft = { prompt: '', short: '' };
+
+/** The routing guidance in effect, as the editor's two plain strings. */
+const routingDraftOf = (routing: RoutingDraft | undefined): RoutingDraft =>
+  routing === undefined ? NO_ROUTING : { prompt: routing.prompt, short: routing.short };
+
+const sameRouting = (left: RoutingDraft, right: RoutingDraft): boolean =>
+  left.prompt === right.prompt && left.short === right.short;
+
+function RoutingEditor({
+  draft,
+  source,
+  onChange,
+}: {
+  readonly draft: RoutingDraft;
+  readonly source: 'file' | 'derived' | undefined;
+  readonly onChange: (draft: RoutingDraft) => void;
+}) {
+  const base = useId().replace(/:/gu, '');
+  return (
+    <div
+      className="flex min-w-0 flex-col gap-2 rounded-control border border-border-strong bg-surface-2 p-3"
+      data-guide-routing=""
+    >
+      <h4 className="m-0 text-ui font-semibold">Routing guidance</h4>
+      <p className="m-0 text-meta leading-base text-muted">
+        How a ferret picks a model, in words, next to the use cases.
+        {source === 'derived' ? ' This is rendered from the use cases now; editing it writes your own.' : ''}
+      </p>
+      <div className="flex min-w-0 flex-col gap-1">
+        <label htmlFor={`${base}-prompt`} className="text-meta font-semibold text-fg-soft">
+          Guidance{' '}
+          <span className="font-normal text-muted">
+            ({draft.prompt.length}/{MAX_ROUTING_PROMPT_CHARS})
+          </span>
+        </label>
+        <textarea
+          id={`${base}-prompt`}
+          className="kt-input min-h-[44px] w-full resize-y"
+          rows={6}
+          maxLength={MAX_ROUTING_PROMPT_CHARS}
+          value={draft.prompt}
+          onChange={event => onChange({ ...draft, prompt: event.currentTarget.value })}
+          data-routing-prompt=""
+        />
+      </div>
+      <TextField
+        id={`${base}-short`}
+        label="One-line summary"
+        maxLength={MAX_ROUTING_SHORT_CHARS}
+        value={draft.short}
+        onChange={short => onChange({ ...draft, short })}
+      />
+    </div>
+  );
 }
 
 function IconButton({
@@ -424,15 +499,33 @@ function UseCaseEditor({
   );
 }
 
-export function ModelsGuideEditor({ guide, models, onSave, initiallyOpen = [] }: ModelsGuideEditorProps) {
+export function ModelsGuideEditor({
+  guide,
+  models,
+  onSave,
+  undo,
+  onUndo,
+  incoming,
+  initiallyOpen = [],
+}: ModelsGuideEditorProps) {
   const vocabulary = useMemo(() => modelVocabulary(models), [models]);
   const saved = guide.useCases;
   const [draft, setDraft] = useState<readonly GuideUseCase[]>(saved);
   const [openSet, setOpenSet] = useState<ReadonlySet<number>>(() => new Set(initiallyOpen));
   const [busy, setBusy] = useState(false);
   const [outcome, setOutcome] = useState<PackSave | null>(null);
-  const changed = guideChanged(draft, saved);
-  const issues = useMemo(() => (changed ? guideIssues(draft) : []), [changed, draft]);
+  const savedRouting = useMemo(() => routingDraftOf(guide.routing), [guide.routing]);
+  const [routingDraft, setRoutingDraft] = useState<RoutingDraft>(savedRouting);
+  const routingEdited = !sameRouting(routingDraft, savedRouting);
+  const changed = guideChanged(draft, saved) || routingEdited;
+  const issues = useMemo(
+    () => [
+      ...(guideChanged(draft, saved) || routingEdited ? guideIssues(draft) : []),
+      ...(routingEdited ? routingIssues(routingDraft) : []),
+    ],
+    [draft, saved, routingEdited, routingDraft],
+  );
+  const [undoOutcome, setUndoOutcome] = useState<GuideWrite | null>(null);
   const headingId = useId();
 
   // The guide moved under an untouched editor (another device, `fy`, a hand edit): show the new one.
@@ -444,13 +537,50 @@ export function ModelsGuideEditor({ guide, models, onSave, initiallyOpen = [] }:
     drawnFrom.current = saved;
   }, [saved]);
 
+  // The routing guidance moved under an untouched editor: show the new words.
+  const routingDrawnFrom = useRef(savedRouting);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: only a new saved routing resets its draft
+  useEffect(() => {
+    if (sameRouting(routingDraft, routingDrawnFrom.current)) setRoutingDraft(savedRouting);
+    routingDrawnFrom.current = savedRouting;
+  }, [savedRouting]);
+
+  // A reviewed suggestion sent here to be edited replaces the draft; saving it is still the owner's to do.
+  const loaded = useRef<number | undefined>(undefined);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: only a new `incoming.key` loads
+  useEffect(() => {
+    if (incoming === undefined || loaded.current === incoming.key) return;
+    loaded.current = incoming.key;
+    setDraft(incoming.useCases);
+    if (incoming.routing !== undefined) setRoutingDraft(routingDraftOf(incoming.routing));
+    setOpenSet(new Set());
+    setOutcome(null);
+  }, [incoming?.key]);
+
+  const routingEdit = (): RoutingEdit => {
+    if (!routingEdited) return undefined;
+    return routingDraft.prompt.trim() === '' && routingDraft.short.trim() === '' ? null : routingDraft;
+  };
   const commit = (useCases: readonly GuideUseCase[] | null): void => {
     setBusy(true);
     setOutcome(null);
-    void onSave(useCases).then(result => {
+    const edit = useCases === null ? undefined : routingEdit();
+    void onSave(useCases, edit).then(result => {
       // A written draft is what the next guide read is drawn from, so it replaces the draft.
-      if (result.kind === 'applied') drawnFrom.current = draft;
+      if (result.kind === 'applied') {
+        drawnFrom.current = draft;
+        routingDrawnFrom.current = edit === undefined ? routingDrawnFrom.current : (edit ?? NO_ROUTING);
+      }
       setOutcome(result);
+      setBusy(false);
+    });
+  };
+  const undoLast = (): void => {
+    if (onUndo === undefined) return;
+    setBusy(true);
+    setUndoOutcome(null);
+    void onUndo().then(result => {
+      setUndoOutcome(result);
       setBusy(false);
     });
   };
@@ -531,6 +661,7 @@ export function ModelsGuideEditor({ guide, models, onSave, initiallyOpen = [] }:
           <Plus size={14} aria-hidden="true" /> Add use case
         </Button>
       </div>
+      <RoutingEditor draft={routingDraft} source={guide.routing?.source} onChange={setRoutingDraft} />
       {issues.length > 0 ? (
         <ul className="m-0 flex flex-col gap-1 pl-5 text-meta text-err" data-guide-issues="">
           {issues.map(issue => (
@@ -547,9 +678,21 @@ export function ModelsGuideEditor({ guide, models, onSave, initiallyOpen = [] }:
         >
           Save guide
         </Button>
-        <Button className="min-h-[44px]" disabled={busy || !changed} onClick={() => setDraft(saved)}>
+        <Button
+          className="min-h-[44px]"
+          disabled={busy || !changed}
+          onClick={() => {
+            setDraft(saved);
+            setRoutingDraft(savedRouting);
+          }}
+        >
           Discard changes
         </Button>
+        {undo !== undefined && onUndo !== undefined ? (
+          <Button className="min-h-[44px]" disabled={busy} onClick={undoLast} data-guide-undo-last="">
+            Undo last accepted suggestion (saved {absoluteTime(undo.savedAt)})
+          </Button>
+        ) : null}
         {guide.source === 'file' ? (
           <Button className="min-h-[44px]" disabled={busy} onClick={() => commit(null)}>
             Reset to the built-in guide
@@ -561,6 +704,14 @@ export function ModelsGuideEditor({ guide, models, onSave, initiallyOpen = [] }:
           Saving writes every use case to <code>models-guide.yaml</code>, so the guide stops following the catalogs.
         </p>
       ) : null}
+      {undoOutcome === null ? null : (
+        <p
+          role="status"
+          className={cn('m-0 text-meta leading-base', undoOutcome.kind === 'refused' ? 'text-err' : 'text-muted')}
+        >
+          {undoOutcome.message}
+        </p>
+      )}
       {outcome !== null && outcome.kind !== 'applied' ? (
         <p
           role="status"

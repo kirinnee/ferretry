@@ -279,6 +279,21 @@ describe('effectiveGuide routing', () => {
 });
 
 describe('fleetModels', () => {
+  it("should describe a model in the owner's words when they wrote some, else the catalog's", () => {
+    // Act
+    const models = fleetModels(
+      [OPENAI],
+      [],
+      [{ provider: 'openai', model: 'gpt-mini', description: 'Cheap; for chores.' }],
+    );
+
+    // Assert
+    should(models.map(model => [model.id, model.describedBy, model.description])).deepEqual([
+      ['gpt-5', 'catalog', 'GPT-5: the strongest tier on OpenAI, efforts minimal/xhigh.'],
+      ['gpt-mini', 'owner', 'Cheap; for chores.'],
+    ]);
+  });
+
   it('should list every model of every catalog and CLI with the runtimes here that run it', () => {
     // Arrange
     const claudeRuntime = runtime('claude-main', {
@@ -311,6 +326,8 @@ describe('fleetModels', () => {
       tier: 'best',
       context: 1_000_000,
       efforts: ['low', 'high'],
+      description: 'Opus: the strongest tier on Anthropic, reads 1000k tokens, efforts low/high.',
+      describedBy: 'catalog',
       runtimes: ['claude-main'],
     });
     should(models[3]?.context).be.undefined();

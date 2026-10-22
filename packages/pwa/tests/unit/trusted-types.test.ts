@@ -67,6 +67,8 @@ describe('isWorkerScriptUrl', () => {
   it('accepts the speech worker the build emits, and its dev-server address', () => {
     expect(isWorkerScriptUrl('/assets/parakeet-worker-D-Ue--TH.js')).toBe(true);
     expect(isWorkerScriptUrl('/src/worker/parakeet-worker.ts?worker_file&type=module')).toBe(true);
+    expect(isWorkerScriptUrl('/assets/sherpa-worker-BxnMm6wE.js')).toBe(true);
+    expect(isWorkerScriptUrl('/src/worker/sherpa-worker.ts?worker_file&type=module')).toBe(true);
     for (const url of [
       '/assets/parakeet-worker-.js',
       '/assets/parakeet-worker-abc.js?x=1',

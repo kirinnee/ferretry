@@ -414,6 +414,36 @@ const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
       newChild: async () => {
         throw new Error('not exercised by the surface inventory');
       },
+      inventory: async () => {
+        throw new Error('not exercised by the surface inventory');
+      },
+    },
+    guide: {
+      builder: {
+        status: async () => {
+          throw new Error('not exercised by the surface inventory');
+        },
+        start: async () => {
+          throw new Error('not exercised by the surface inventory');
+        },
+        job: async () => {
+          throw new Error('not exercised by the surface inventory');
+        },
+      },
+      file: {
+        undoable: async () => {
+          throw new Error('not exercised by the surface inventory');
+        },
+        accept: async () => {
+          throw new Error('not exercised by the surface inventory');
+        },
+        undo: async () => {
+          throw new Error('not exercised by the surface inventory');
+        },
+        describe: async () => {
+          throw new Error('not exercised by the surface inventory');
+        },
+      },
     },
     result: async () => {
       throw new Error('not exercised by the surface inventory');
@@ -710,6 +740,7 @@ describe('the mounted daemon surface', () => {
       1 + // an agent's rename: a new first name or task title
       1 + // a ferret's hypermedia switch, from its next launch (docs/hypermedia.md)
       5 + // Pack mode: its view, recommend, a sub-ferret start, a result and a ferret's switch (docs/pack-mode.md)
+      6 + // the models-guide generator: the inventory, a builder start and its run, accept, undo and a model's description
       5 + // adding an MCP server for one ferret: its listing, and a preview and an add for each of the project and the login
       6 + // a person's agent tools: terminal and browser tool calls, their control changes, and each kind's control read
       2 + // the speed-up keys: their status read and one provider's Test
@@ -902,6 +933,12 @@ describe('the mounted daemon surface', () => {
       'POST /v1/sessions/:sessionId/rename',
       'PATCH /v1/sessions/:sessionId/hypermedia',
       'GET /v1/pack',
+      'GET /v1/pack/inventory',
+      'POST /v1/pack/guide/suggest',
+      'GET /v1/pack/guide/jobs/:jobId',
+      'POST /v1/pack/guide/accept',
+      'POST /v1/pack/guide/undo',
+      'POST /v1/pack/guide/describe',
       'POST /v1/pack/recommend',
       'POST /v1/pack/new',
       'GET /v1/sessions/:sessionId/result',

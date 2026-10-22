@@ -31,6 +31,7 @@ import {
   destinationPaletteEntries,
 } from './palette-destinations.ts';
 import { MAX_SESSION_RESULTS, rankSessions, recentSessions, type SessionEntry } from './palette-ranking.ts';
+import { isGuideBuilder } from './sessions-bar-model.ts';
 import { statusMark, TERMINAL_STATUSES } from './status-mark.tsx';
 import { parseTaskName } from './task-name.ts';
 
@@ -161,27 +162,29 @@ export const paletteGroupHeading = (group: PaletteGroup, searching: boolean): st
  * string.
  */
 export const paletteSessionEntries = (views: readonly SessionView[]): PaletteSession[] =>
-  views.map(view => {
-    const { config, state } = view;
-    const folderName = config.cwd ? baseName(config.cwd) : '';
-    const teammate = (config.teammate ?? '').trim();
-    return {
-      id: config.id,
-      teammate,
-      task: parseTaskName(config.name).task,
-      label: (config.label ?? '').trim(),
-      // The group name AND the path: readers hunt by either, and the ranker
-      // finds the tightest window inside whichever one hit.
-      folder: [folderName, config.cwd].filter(Boolean).join(' '),
-      activityAt: Date.parse(state.lastActivityAt ?? config.updatedAt ?? '') || 0,
-      active: statusMark(view).klass === 'active',
-      finished: TERMINAL_STATUSES.has(state.status),
-      view,
-      folderName,
-      headline: displayCallsign(teammate) || config.name || shortSessionId(config.id),
-      shortId: shortSessionId(config.id),
-    };
-  });
+  views
+    .filter(view => !isGuideBuilder(view))
+    .map(view => {
+      const { config, state } = view;
+      const folderName = config.cwd ? baseName(config.cwd) : '';
+      const teammate = (config.teammate ?? '').trim();
+      return {
+        id: config.id,
+        teammate,
+        task: parseTaskName(config.name).task,
+        label: (config.label ?? '').trim(),
+        // The group name AND the path: readers hunt by either, and the ranker
+        // finds the tightest window inside whichever one hit.
+        folder: [folderName, config.cwd].filter(Boolean).join(' '),
+        activityAt: Date.parse(state.lastActivityAt ?? config.updatedAt ?? '') || 0,
+        active: statusMark(view).klass === 'active',
+        finished: TERMINAL_STATUSES.has(state.status),
+        view,
+        folderName,
+        headline: displayCallsign(teammate) || config.name || shortSessionId(config.id),
+        shortId: shortSessionId(config.id),
+      };
+    });
 
 /** Does this command answer the query? An empty query offers all of them. */
 export const matchesPaletteCommand = (command: PaletteCommand, query: string): boolean => {

@@ -1152,6 +1152,7 @@ const DOMAIN_REGISTRARS: ReadonlyArray<(wiring: DomainWiring) => void> = [
       absolute: path => (isAbsolute(path) ? path : join(world.cwd, path)),
       readFile: async path => await Bun.file(isAbsolute(path) ? path : join(world.cwd, path)).text(),
       binaryName: BINARY_NAME,
+      sleep: async ms => await Bun.sleep(ms),
     });
     registerRecommendCommand(program, pack, new SessionPresenter(world.io, new SystemClock()));
     registerGuideCommand(program, pack, new SessionPresenter(world.io, new SystemClock()));

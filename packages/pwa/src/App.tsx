@@ -215,7 +215,7 @@ import {
   useDaemonFetch,
   useLockedMachines,
 } from './lib/store.tsx';
-import type { ParakeetAssets } from './lib/stt/parakeet-voice.ts';
+import type { SpeechAssets } from './lib/stt/on-device-voices.ts';
 import { createSurfaceEventHub } from './lib/surface-control.ts';
 import {
   AppBar,
@@ -2601,7 +2601,7 @@ function StoreLinkBehaviour({ children }: { readonly children: ReactNode }) {
 
 export interface AppProps {
   /** Where the build put on-device dictation's worker and runtime; only `main.tsx` knows. */
-  readonly speechAssets?: ParakeetAssets;
+  readonly speechAssets?: SpeechAssets;
 }
 
 /** Public client-only root. Providers live here; `main.tsx` only calls `createRoot`. */

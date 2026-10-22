@@ -2,7 +2,7 @@ import { describe, it } from 'bun:test';
 import { Command } from 'commander';
 import should from 'should';
 import { registerGuideCommand, registerRecommendCommand } from '../../../src/lib/pack/commands.ts';
-import type { PackController, PackGuideShowOptions, PackRecommendOptions } from '../../../src/lib/pack/controller.ts';
+import type { PackController, PackRecommendOptions } from '../../../src/lib/pack/controller.ts';
 
 function build(failure?: Error) {
   const calls: Array<{ words: readonly string[]; options: PackRecommendOptions }> = [];
@@ -66,30 +66,75 @@ describe('registerRecommendCommand', () => {
 
 describe('registerGuideCommand', () => {
   function guide(failure?: Error) {
-    const calls: PackGuideShowOptions[] = [];
+    const calls: Array<readonly [string, ...unknown[]]> = [];
     const failures: unknown[] = [];
     const program = new Command().name('fy').exitOverride();
     program.configureOutput({ writeOut: () => {}, writeErr: () => {} });
-    const controller = {
-      showGuide: async (options: PackGuideShowOptions) => {
-        calls.push(options);
+    const record =
+      (name: string) =>
+      async (...args: unknown[]) => {
+        calls.push([name, ...args]);
         if (failure !== undefined) throw failure;
-      },
+      };
+    const controller = {
+      showGuide: record('show'),
+      showInventory: record('inventory'),
+      suggest: record('suggest'),
+      accept: record('accept'),
+      undo: record('undo'),
+      describe: record('describe'),
     } as unknown as PackController;
     registerGuideCommand(program, controller, { fail: error => void failures.push(error) });
     return { program, calls, failures };
   }
+  const parse = async (program: Command, ...args: string[]) =>
+    await program.parseAsync(['node', 'fy', 'guide', ...args]);
 
-  it('should show the guide, with --json passed through', async () => {
+  it('should hand every subcommand its arguments and options', async () => {
     // Arrange
     const { program, calls } = guide();
 
     // Act
-    await program.parseAsync(['node', 'fy', 'guide', 'show']);
-    await program.parseAsync(['node', 'fy', 'guide', 'show', '--json']);
+    await parse(program, 'show');
+    await parse(program, 'show', '--json');
+    await parse(program, 'inventory', '--json');
+    await parse(
+      program,
+      'suggest',
+      '--runtime',
+      'claude-work',
+      '--model',
+      'opus',
+      '--prefs',
+      'Opus first.',
+      '-y',
+      '--json',
+    );
+    await parse(program, 'accept', 'run-1', '--only', 'bulk,plan', '--keep-routing');
+    await parse(program, 'undo');
+    await parse(program, 'describe', 'glm-5', 'Cheap', 'and', 'fast.', '--provider', 'zai');
+    await parse(program, 'describe', 'glm-5', '--clear');
 
     // Assert
-    should(calls).eql([{}, { json: true }]);
+    should(calls.map(call => [call[0], ...call.slice(1).filter(arg => !(arg instanceof Command))])).eql([
+      ['show', {}],
+      ['show', { json: true }],
+      ['inventory', { json: true }],
+      ['suggest', { runtime: 'claude-work', model: 'opus', prefs: 'Opus first.', apply: true, json: true }],
+      ['accept', 'run-1', { only: 'bulk,plan', keepRouting: true }],
+      ['undo'],
+      ['describe', 'glm-5', ['Cheap', 'and', 'fast.'], { provider: 'zai' }],
+      ['describe', 'glm-5', [], { clear: true }],
+    ]);
+  });
+
+  it('should refuse accept without a run before the controller is asked', async () => {
+    // Arrange
+    const { program, calls } = guide();
+
+    // Act + Assert
+    await should(parse(program, 'accept')).be.rejected();
+    should(calls).be.empty();
   });
 
   it('should hand a failure to the reporter', async () => {
@@ -98,9 +143,10 @@ describe('registerGuideCommand', () => {
     const { program, failures } = guide(failure);
 
     // Act
-    await program.parseAsync(['node', 'fy', 'guide', 'show']);
+    await parse(program, 'show');
+    await parse(program, 'undo');
 
     // Assert
-    should(failures).eql([failure]);
+    should(failures).eql([failure, failure]);
   });
 });

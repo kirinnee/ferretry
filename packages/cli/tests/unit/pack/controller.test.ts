@@ -1,9 +1,18 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { PACK_REFUSED_EXIT_CODE, PackController } from '../../../src/lib/pack/controller.ts';
+import { GUIDE_POLL, PACK_REFUSED_EXIT_CODE, PackController } from '../../../src/lib/pack/controller.ts';
 import type { IPackGateway } from '../../../src/lib/pack/gateway.ts';
 import { RecordingProgress } from '../progress/fixtures.ts';
-import { CapturingPackIo, FakePackGateway, packView, recommendation, refused, started } from './fixtures.ts';
+import {
+  CapturingPackIo,
+  FakePackGateway,
+  JOB,
+  packView,
+  recommendation,
+  refused,
+  SUGGESTION,
+  started,
+} from './fixtures.ts';
 
 function build(options: { parent?: string; gateway?: IPackGateway; files?: Record<string, string> } = {}) {
   const gateway = (options.gateway ?? new FakePackGateway()) as FakePackGateway;
@@ -286,5 +295,207 @@ describe('PackController progress', () => {
 
     // Assert
     should(progress.events).deepEqual(['start Choosing the best runtime', 'fail']);
+  });
+});
+
+describe('PackController guide generator', () => {
+  function generator(setup: (gateway: FakePackGateway) => void = () => undefined) {
+    const gateway = new FakePackGateway();
+    setup(gateway);
+    const out = new CapturingPackIo();
+    const sleeps: number[] = [];
+    const progress = new RecordingProgress();
+    const controller = new PackController({
+      gateway,
+      out,
+      parent: async () => undefined,
+      cwd: '/here',
+      absolute: path => path,
+      readFile: async () => '',
+      binaryName: 'foo',
+      progress,
+      sleep: async ms => void sleeps.push(ms),
+    });
+    return { controller, gateway, out, sleeps, progress };
+  }
+
+  it('should print the inventory for a person, or as JSON', async () => {
+    // Arrange
+    const { controller, out } = generator();
+
+    // Act
+    await controller.showInventory({});
+    await controller.showInventory({ json: true });
+
+    // Assert
+    should(out.out[0]).startWith('Runtimes (2):');
+    should(JSON.parse(out.out[1] ?? '').models).have.length(2);
+  });
+
+  it('should start the builder with the options given, wait on its run, and print the draft as a diff', async () => {
+    // Arrange
+    const { controller, gateway, out, sleeps, progress } = generator(fake => {
+      fake.runs = [{ job: JOB }, { job: JOB }, { job: { ...JOB, status: 'suggested' }, suggestion: SUGGESTION }];
+    });
+
+    // Act
+    await controller.suggest({ runtime: 'claude-work', model: 'opus', prefs: 'Opus for reviews.' });
+
+    // Assert
+    should(gateway.suggestCalls).deepEqual([
+      { runtime: 'claude-work', model: 'opus', preferences: 'Opus for reviews.' },
+    ]);
+    should(gateway.jobCalls).deepEqual(['run-1', 'run-1', 'run-1']);
+    should(sleeps).deepEqual([GUIDE_POLL.intervalMs, GUIDE_POLL.intervalMs]);
+    should(progress.events).deepEqual([
+      'start Checking claude-work',
+      'succeed',
+      'start gonzalo is drafting a guide on claude-work',
+      'succeed',
+    ]);
+    should(out.out[0]).startWith('Suggested by claude-opus-5-5 on claude-work');
+    should(gateway.acceptCalls).be.empty();
+    should(out.exitCode).be.undefined();
+  });
+
+  it('should accept the whole draft with --apply, against the guide in effect now, and print the run as JSON with --json', async () => {
+    // Arrange
+    const { controller, gateway, out } = generator();
+
+    // Act
+    await controller.suggest({ apply: true, json: true });
+
+    // Assert
+    should(gateway.suggestCalls).deepEqual([{}]);
+    should(JSON.parse(out.out[0] ?? '').suggestion.suggested.by).equal('claude-opus-5-5');
+    should(gateway.acceptCalls).deepEqual([
+      { useCases: SUGGESTION.useCases, routing: SUGGESTION.routing, suggested: SUGGESTION.suggested },
+    ]);
+    should(out.out[1]).equal('Accepted.');
+  });
+
+  it('should exit 2 when no builder could be started, and 1 when it failed or is still drafting', async () => {
+    // Arrange
+    const refused = generator(fake => {
+      fake.started = { outcome: 'refused', message: 'No runtime can start a ferret now.' };
+    });
+    const failed = generator(fake => {
+      fake.runs = [{ job: { ...JOB, status: 'failed', message: 'The builder failed without writing a guide.' } }];
+    });
+    const quiet = generator(fake => {
+      fake.runs = [{ job: { ...JOB, status: 'failed' } }];
+    });
+    const slow = generator(fake => {
+      fake.runs = [{ job: JOB }];
+    });
+
+    // Act
+    await refused.controller.suggest({});
+    await failed.controller.suggest({});
+    await quiet.controller.suggest({});
+    await slow.controller.suggest({});
+
+    // Assert
+    should([refused.out.exitCode, failed.out.exitCode, quiet.out.exitCode, slow.out.exitCode]).deepEqual([2, 1, 1, 1]);
+    should(refused.out.err).deepEqual(['foo guide suggest: No runtime can start a ferret now.']);
+    should(failed.out.err).deepEqual(['foo guide suggest: The builder failed without writing a guide.']);
+    should(quiet.out.err).deepEqual(['foo guide suggest: the builder failed']);
+    should(slow.out.err[0]).equal(
+      'foo guide suggest: it is still drafting; look again with `foo guide accept run-1` once it is done',
+    );
+    should(slow.sleeps).have.length(GUIDE_POLL.attempts - 1);
+  });
+
+  it('should accept only the use cases named, keep the routing when asked, and mark it partial', async () => {
+    // Arrange
+    const { controller, gateway } = generator();
+
+    // Act
+    await controller.accept('run-1', { only: ' bulk ,', keepRouting: true });
+
+    // Assert
+    should(gateway.acceptCalls).deepEqual([
+      {
+        useCases: [packView().guide.useCases[0], SUGGESTION.useCases[1]],
+        suggested: SUGGESTION.suggested,
+        partial: true,
+      },
+    ]);
+  });
+
+  it('should refuse a use case the draft does not change, and a run with no draft', async () => {
+    // Arrange
+    const unknown = generator();
+    const empty = generator(fake => {
+      fake.runs = [{ job: { ...JOB, status: 'failed', message: 'It stopped.' } }];
+    });
+    const running = generator(fake => {
+      fake.runs = [{ job: JOB }];
+    });
+
+    // Act
+    const refusal = await unknown.controller.accept('run-1', { only: 'nope' }).catch((error: unknown) => error);
+    await empty.controller.accept('run-1', {});
+    await running.controller.accept('run-1', {});
+
+    // Assert
+    should((refusal as Error).message).equal('no change to accept for nope; the draft changes plan-review, bulk');
+    should(unknown.gateway.acceptCalls).be.empty();
+    should(empty.out.err).deepEqual(['foo guide accept: run run-1 is failed (It stopped.), with no draft to accept']);
+    should(running.out.err).deepEqual(['foo guide accept: run run-1 is running, with no draft to accept']);
+    should([empty.out.exitCode, running.out.exitCode]).deepEqual([1, 1]);
+  });
+
+  it('should say a draft changing nothing changes nothing', async () => {
+    // Arrange
+    const { controller, gateway } = generator(fake => {
+      fake.runs = [
+        { job: { ...JOB, status: 'suggested' }, suggestion: { ...SUGGESTION, useCases: packView().guide.useCases } },
+      ];
+    });
+
+    // Act
+    const refusal = await controller.accept('run-1', { only: 'plan-review' }).catch((error: unknown) => error);
+
+    // Assert
+    should((refusal as Error).message).equal('no change to accept for plan-review; the draft changes no use case');
+    should(gateway.acceptCalls).be.empty();
+  });
+
+  it('should undo, and describe a model in words or clear it, refusing an empty description', async () => {
+    // Arrange
+    const { controller, gateway, out } = generator();
+
+    // Act
+    await controller.undo();
+    await controller.describe('glm-5', ['Cheap', 'and', 'fast.'], { provider: 'zai' });
+    await controller.describe('glm-5', [], { clear: true });
+    const refusal = await controller.describe('glm-5', ['  '], {}).catch((error: unknown) => error);
+
+    // Assert
+    should(out.out).deepEqual(['There is no accepted suggestion to undo.', 'Saved.', 'Saved.']);
+    should(gateway.describeCalls).deepEqual([
+      { model: 'glm-5', provider: 'zai', description: 'Cheap and fast.' },
+      { model: 'glm-5', description: null },
+    ]);
+    should((refusal as Error).message).equal(
+      'say what glm-5 is good for: foo guide describe glm-5 "<text>" (or --clear)',
+    );
+  });
+});
+
+describe('PackController guide generator with no sleep given', () => {
+  it('should look at the run again at once', async () => {
+    // Arrange
+    const gateway = new FakePackGateway();
+    gateway.runs = [{ job: JOB }, { job: { ...JOB, status: 'suggested' }, suggestion: SUGGESTION }];
+    const { controller, out } = build({ gateway });
+
+    // Act
+    await controller.suggest({});
+
+    // Assert
+    should(gateway.jobCalls).have.length(2);
+    should(out.out[0]).startWith('Suggested by');
   });
 });

@@ -618,6 +618,11 @@ export const FleetAccountChangeSchema = z.discriminatedUnion('kind', [
     addAnother: z.boolean().optional(),
   }),
   z.strictObject({ kind: z.literal('runtime.remove'), name: NonEmptyStringSchema }),
+  /**
+   * Give a runtime a new name. Its id stays, so its sessions, history and config directory stay with
+   * it, and the old name keeps resolving as a former name (docs/account-model.md "Renaming a runtime").
+   */
+  z.strictObject({ kind: z.literal('runtime.rename'), name: NonEmptyStringSchema, to: TypedNameSchema }),
   z.strictObject({
     kind: z.literal('profile.put'),
     name: FleetComponentNameSchema,
@@ -752,6 +757,15 @@ export const FleetChangedRuntimeSchema = z.strictObject({
   launch: FleetCatalogActSchema,
 });
 
+/** A session still running on a runtime a change removes or renames, as the confirm card lists it. */
+export const FleetRunningSessionSchema = z.strictObject({
+  id: NonEmptyStringSchema,
+  /** What the person calls it: its teammate name, else its own name, else its id. */
+  name: NonEmptyStringSchema,
+  harness: HarnessKindSchema,
+});
+export type FleetRunningSession = z.infer<typeof FleetRunningSessionSchema>;
+
 /** What applying the change would do, for the person approving it. */
 export const FleetAccountChangePreviewSchema = z.discriminatedUnion('kind', [
   z.strictObject({
@@ -759,6 +773,11 @@ export const FleetAccountChangePreviewSchema = z.discriminatedUnion('kind', [
     operations: z.array(FleetWriteOperationSchema).readonly(),
     documents: z.array(FleetDocumentSummarySchema).readonly(),
     runtimes: z.array(FleetChangedRuntimeSchema).readonly(),
+    /**
+     * The sessions still running on the runtime a `runtime.remove` or `runtime.rename` names, so the
+     * confirm card can list them and offer to move them first. Present only when there are some.
+     */
+    runningSessions: z.array(FleetRunningSessionSchema).readonly().optional(),
   }),
   z.strictObject({
     /** Sign-out runs the harness's own logout against the one store; it writes no plan. */
