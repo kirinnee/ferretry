@@ -4,12 +4,16 @@
  * an ambient daemon, a second grouping projection, or another usage poll.
  * Survey D rows 10/105/246: dashboard, static multi-daemon transport, and
  * the legacy single-daemon state seam this page must not recreate.
+ *
+ * Retry now on any machine's status line skips that machine's reconnect backoff and reads its list
+ * again — through that machine's own pairing, so it never waits on, or for, any other machine.
  */
 
-import { useEffect, useMemo } from 'react';
+import { useCallback, useEffect, useMemo } from 'react';
 
 import type { WardenReportRequest } from '../features/warden/warden-verdicts.tsx';
 import { useAccountPickerSlice, useMachineRosters } from '../hooks/use-account-picker.ts';
+import { useConnectionHealth } from '../hooks/use-connection-health.ts';
 import { useDensity } from '../hooks/use-density.ts';
 import { useFleetView } from '../hooks/use-fleet-view.ts';
 import { type LiveClockOptions, useLiveClock } from '../hooks/use-live-clock.ts';
@@ -26,10 +30,12 @@ import { useMachinesUsage, useUsage } from '../hooks/use-usage.ts';
 import { useWardenStatus, type WardenStatusReader } from '../hooks/use-warden-status.ts';
 import type { DaemonAccountPickerStore } from '../lib/account-picker-store.ts';
 import { allMachinesView, type MachineSource } from '../lib/all-machines.ts';
+import type { ConnectionHealth, ConnectionHealthState } from '../lib/connection-health.ts';
 import type { DaemonControlsStore } from '../lib/controls.ts';
 import type { DaemonConnection, DaemonId } from '../lib/daemon-connection.ts';
 import { filterSessions, projectKeyFor } from '../lib/fleet-grouping.ts';
 import type { DaemonFleetStore } from '../lib/fleet-store.ts';
+import { machineOutage } from '../lib/machine-outage.ts';
 import type { DaemonProjectsStore } from '../lib/projects-store.ts';
 import type { DaemonUsageStore } from '../lib/usage-store.ts';
 import type { NewSessionMachine } from '../shell/new-session-menu.tsx';
@@ -65,7 +71,24 @@ export interface SessionsPageProps {
    * machine's own quota and roster, through that machine's own pairing.
    */
   readonly machineConnections?: readonly DaemonConnection[];
+  /**
+   * How this browser reaches each machine: this machine's outage is then said with its cause, and Retry
+   * now skips its backoff. Absent, only a failed list read is said, and Retry now only reads again.
+   */
+  readonly connectionHealth?: ConnectionHealth;
+  /** The name this machine's outage sentence uses. */
+  readonly machineName?: string;
 }
+
+const UNMEASURED: ConnectionHealthState = { kind: 'unknown' };
+
+/** Health for a host that measures none: every machine unmeasured (one stable object), nothing to retry. */
+const UNMEASURED_HEALTH: ConnectionHealth = {
+  state: () => UNMEASURED,
+  subscribe: () => () => {},
+  retryNow: () => {},
+  onRecovered: () => () => {},
+};
 
 interface DashboardContentProps extends Omit<SessionsPageProps, 'scopeNavigation' | 'clock' | 'narrow'> {
   readonly now: number;
@@ -131,8 +154,12 @@ function DashboardContent({
   machineSources,
   newSessionMachines,
   machineConnections,
+  connectionHealth,
+  machineName,
 }: DashboardContentProps) {
   const projectList = useProjects(projects, connection);
+  const health = connectionHealth ?? UNMEASURED_HEALTH;
+  const healthState = useConnectionHealth(health, connection.daemonId);
   const view = useFleetView({ fleet, controls, daemonId: connection.daemonId, projects: projectList });
   const { density } = useDensity(controls);
   const status = useWardenStatus(connection, wardenStatus);
@@ -152,11 +179,28 @@ function DashboardContent({
     scopeRecovered: view.scopeRecovered,
   });
 
+  const name = machineName ?? 'This machine';
+  const outage = useMemo(() => machineOutage(name, healthState, view.slice), [name, healthState, view.slice]);
+  const retryMachine = useCallback(
+    (daemonId: DaemonId) => {
+      health.retryNow(daemonId);
+      const target =
+        daemonId === connection.daemonId
+          ? connection
+          : machineConnections?.find(candidate => candidate.daemonId === daemonId);
+      if (target !== undefined) void fleet.hydrate(target).catch(() => undefined);
+    },
+    [health, connection, machineConnections, fleet],
+  );
+
   const dashboard = {
     connection,
     dashboardView: view.controls.dashboardView,
     density,
     error: view.slice.error,
+    outage,
+    machineName: name,
+    onRetryMachine: retryMachine,
     updating: view.slice.cachedAt !== undefined,
     groups: view.groups,
     narrow,

@@ -831,6 +831,29 @@ describe('moveOffSharedPush: every machine off the shared subscription at start 
     expect(sharedGone.length).toBeGreaterThan(0);
   });
 
+  it('ONE MACHINE THAT NEVER ANSWERS holds nobody: the others move over and the shared one still goes', async () => {
+    const sharedGone: string[] = [];
+    const preferences = new DaemonNotificationPreferences();
+    preferences.set(daemonA.daemonId, { enabled: true });
+    preferences.set(daemonB.daemonId, { enabled: true });
+    const hung = service({ register: () => new Promise(() => {}) });
+    const fine = service();
+    const subscribed: PushSubscriptionHandle[] = [];
+    const browser = enrolment(null, { unregistered: true, shared: subscriptionHandle(sharedGone), subscribed });
+    const devices = new DaemonPushDevices();
+
+    await moveOffSharedPush(
+      [
+        { connection: daemonA, service: hung.service, devices, preferences, enrolment: browser },
+        { connection: daemonB, service: fine.service, devices, preferences, enrolment: browser },
+      ],
+      20,
+    );
+
+    expect(fine.log.registered.map(entry => entry.daemonId)).toEqual(['daemon-b']);
+    expect(sharedGone.length).toBeGreaterThan(0);
+  });
+
   it('does nothing without Web Push, without a shared subscription, or for a machine it never enrolled', async () => {
     await moveOffSharedPush([context({ enrolment: null })]);
     const quiet = service();

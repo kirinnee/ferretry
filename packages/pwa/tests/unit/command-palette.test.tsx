@@ -491,3 +491,24 @@ const settingSource =
   (...entries: readonly PaletteSettingsEntry[]): PaletteSettingsSource =>
   () =>
     entries;
+
+describe('Find across machines', () => {
+  it('names each session’s machine, opens it on that machine, and says which machines are missing', async () => {
+    const studio = daemonId('studio');
+    const across = paletteSessionEntries([sessionView('s9', { config: { teammate: 'ivo', cwd: '/work/site' } })], {
+      daemonId: studio,
+      machine: 'studio',
+    });
+    const harness = await open({
+      sessions: across,
+      sessionsNote: 'laptop isn’t reachable right now, so its sessions aren’t listed.',
+    });
+    expect(document.querySelector('[data-palette-sessions-note]')?.textContent).toBe(
+      'laptop isn’t reachable right now, so its sessions aren’t listed.',
+    );
+    const row = document.querySelector<HTMLElement>('[id="fy-palette-option-session-studio-s9"]');
+    expect(row?.querySelector('[data-machine-chip]')?.textContent).toBe('studio');
+    await pressRow('fy-palette-option-session-studio-s9');
+    expect(harness.navigated).toEqual(['/d/studio/session/s9']);
+  });
+});

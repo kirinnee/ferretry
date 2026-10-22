@@ -80,6 +80,7 @@
 import type { SessionState, SessionView } from '@ferretry/protocol';
 import type { DaemonConnection, DaemonId } from './daemon-connection.ts';
 import { type DaemonSessionScope, daemonSessionKey } from './daemon-scope.ts';
+import { type DeadlineSchedule, MachineDeadlineError, realSchedule, withDeadline } from './machine-deadline.ts';
 
 /** Whether one daemon's session list has been read, and how that read ended. */
 export type FleetLoadStatus = 'idle' | 'loading' | 'ready' | 'error';
@@ -152,6 +153,26 @@ interface DaemonEntry {
   readonly deviceId: string;
   listInflight: Promise<readonly SessionView[]> | null;
   readonly sessionInflight: Map<string, Promise<SessionView>>;
+  /** How many list reads this connection has started, and the newest one whose answer was published. */
+  listStarted: number;
+  listCommitted: number;
+}
+
+/**
+ * How long one machine's list read may stay unanswered before the store stops waiting for it.
+ *
+ * A machine that never answers — asleep behind a relay that holds the socket open, a daemon wedged
+ * mid-request — used to pin its `listInflight` forever: every later poll coalesced onto the same dead
+ * promise, so the machine could never be read again, and its slice said "loading" for good. The read is
+ * abandoned instead: the slice says the machine did not answer, the coalescing slot is released so the
+ * next poll asks again, and a late answer is still published if nothing newer has been.
+ */
+export const FLEET_LIST_TIMEOUT_MS = 15_000;
+
+export interface DaemonFleetStoreOptions {
+  readonly listTimeoutMs?: number;
+  /** The timer, injected so no suite waits on a real clock. */
+  readonly schedule?: DeadlineSchedule;
 }
 
 /**
@@ -199,12 +220,16 @@ export class DaemonFleetStore {
   readonly #listeners = new Set<() => void>();
   readonly #entries = new Map<DaemonId, DaemonEntry>();
   readonly #now: () => number;
+  readonly #listTimeoutMs: number;
+  readonly #schedule: DeadlineSchedule;
   #snapshot: FleetSnapshot = { daemons: new Map() };
 
   /** `now` stamps each good read's `readAt`; the real clock unless a suite fixes one. */
-  constructor(port: DaemonFleetPort, now: () => number = Date.now) {
+  constructor(port: DaemonFleetPort, now: () => number = Date.now, options: DaemonFleetStoreOptions = {}) {
     this.#port = port;
     this.#now = now;
+    this.#listTimeoutMs = options.listTimeoutMs ?? FLEET_LIST_TIMEOUT_MS;
+    this.#schedule = options.schedule ?? realSchedule;
   }
 
   subscribe(listener: () => void): () => void {
@@ -241,24 +266,38 @@ export class DaemonFleetStore {
     if (existing !== null) return existing;
 
     this.#patchSlice(entry.daemonId, { status: 'loading' });
-    const request = this.#port
-      .list(daemon)
-      .then(
-        list => {
-          if (this.#isCurrent(entry)) this.#commitList(entry.daemonId, list);
-          return list;
-        },
-        (cause: unknown) => {
-          // The rows that were already correct stay. Only the status and the
-          // message change, so a transient failure cannot read as an empty fleet.
-          if (this.#isCurrent(entry)) this.#patchSlice(entry.daemonId, { status: 'error', error: messageOf(cause) });
-          throw cause;
-        },
-      )
+    entry.listStarted += 1;
+    const sequence = entry.listStarted;
+    // Only the newest read may publish, so a late answer never replaces a fresher one.
+    const publishes = (): boolean => this.#isCurrent(entry) && sequence > entry.listCommitted;
+    const read = this.#port.list(daemon).then(
+      list => {
+        if (publishes()) {
+          entry.listCommitted = sequence;
+          this.#commitList(entry.daemonId, list);
+        }
+        return list;
+      },
+      (cause: unknown) => {
+        // The rows that were already correct stay. Only the status and the
+        // message change, so a transient failure cannot read as an empty fleet.
+        if (publishes()) this.#patchSlice(entry.daemonId, { status: 'error', error: messageOf(cause) });
+        throw cause;
+      },
+    );
+    // The read is not cancelled — the port owns its transport — so a late answer can still publish.
+    const request = withDeadline(read, this.#listTimeoutMs, this.#schedule)
+      .catch((cause: unknown) => {
+        if (cause instanceof MachineDeadlineError && publishes())
+          this.#patchSlice(entry.daemonId, { status: 'error', error: `the machine ${cause.message}` });
+        throw cause;
+      })
       .finally(() => {
-        entry.listInflight = null;
+        if (entry.listInflight === request) entry.listInflight = null;
       });
 
+    // Every caller handles its own copy; this only keeps a timer-fired rejection from reading as unhandled.
+    request.catch(() => undefined);
     entry.listInflight = request;
     return request;
   }
@@ -368,6 +407,8 @@ export class DaemonFleetStore {
       deviceId: daemon.deviceId,
       listInflight: null,
       sessionInflight: new Map(),
+      listStarted: 0,
+      listCommitted: 0,
     };
     this.#entries.set(daemon.daemonId, entry);
     return entry;

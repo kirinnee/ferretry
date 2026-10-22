@@ -109,6 +109,7 @@
         "scripts/build-composer-integration-fixture.ts",
         "tests/integration/fixtures/composer-editor-scene.tsx",
         "tests/integration/fixtures/all-machines-scene.tsx",
+        "tests/integration/fixtures/one-machine-down-scene.tsx",
         "tests/integration/fixtures/machine-reorder-scene.tsx",
         "tests/integration/fixtures/nav-cache-scene.tsx",
         "tests/integration/fixtures/sessions-list-scene.tsx",

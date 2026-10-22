@@ -54,6 +54,7 @@ import { documentDraftStore } from './drafts.ts';
 import { DaemonEventTransport, type DaemonStreamOpener } from './event-transport.ts';
 import { type DaemonFleetPort, DaemonFleetStore } from './fleet-store.ts';
 import { KeyRotation } from './key-rotation.ts';
+import { boundedReads } from './machine-deadline.ts';
 import { DeviceNotificationFilterStore } from './notification-filter.ts';
 import { browserNotificationFilterMirror } from './notification-filter-mirror.ts';
 import { DaemonNotificationPreferences } from './notification-preferences.ts';
@@ -694,8 +695,12 @@ export async function createAppStore(options: CreateAppStoreOptions = {}): Promi
    * in flight to the same daemon joined rather than sent twice (`shared-reads.ts`): several surfaces
    * read the usage feed, the projects and a session's board in the same instant. Scoped by the
    * daemon the request is bound to, because two paired machines may announce one address.
+   *
+   * Each plain read is BOUNDED (`machine-deadline.ts`): a machine that never answers fails its own
+   * read after the deadline instead of holding that machine's projects, attention or usage on
+   * "loading" until its relay session dies.
    */
-  const sharedReads = sharingIdenticalReads(carried, init => boundDaemonId(init) ?? '');
+  const sharedReads = boundedReads(sharingIdenticalReads(carried, init => boundDaemonId(init) ?? ''));
   /**
    * THE TYPED CLIENT TRAVELS THE CARRIER TOO, and it did not used to.
    *

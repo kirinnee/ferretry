@@ -37,8 +37,9 @@ import {
 import { SessionsPage } from './components/sessions-page.tsx';
 import type { SendDismiss, SendExpand } from './components/settled-send-note.tsx';
 import { GlobalAnalyticsPage } from './features/analytics/global-analytics-page.tsx';
-import { configFilesSettingsTab } from './features/config-files/config-files-settings.tsx';
 import { LinkBehaviourProvider } from './features/browser/external-link.tsx';
+import { tunnelSwitchOffer } from './features/carrier/carrier-preference-selector.tsx';
+import { configFilesSettingsTab } from './features/config-files/config-files-settings.tsx';
 import { ConnectionHealthNotice } from './features/connection/connection-health-notice.tsx';
 import { NewDeviceNotices } from './features/device-notice/new-device-notice.tsx';
 import { ComponentsSurface } from './features/fleet/components/components-tab.tsx';
@@ -84,6 +85,7 @@ import { SessionSearchControl, SessionSearchProvider } from './features/session-
 import { aboutSettingsTab } from './features/settings/about-machine.tsx';
 import { agentClisSettingsTab } from './features/settings/agent-clis.tsx';
 import { CgroupConfigSurface } from './features/settings/cgroup-settings.tsx';
+import { ConnectionPreferenceSettings } from './features/settings/connection-preference-settings.tsx';
 import { daemonDisplayName, distinctDaemonName } from './features/settings/daemon-settings.tsx';
 import { dictationShortcutLabel } from './features/settings/dictation-shortcut.ts';
 import { DoctorSettings } from './features/settings/doctor-settings.tsx';
@@ -97,12 +99,11 @@ import {
   usePairPhoneAllowed,
 } from './features/settings/pair-phone.tsx';
 import { PasskeyNudge } from './features/settings/passkey-nudge.tsx';
-import { pricingSettingsTab } from './features/settings/pricing-settings.tsx';
 import { performanceSettingsTab } from './features/settings/performance-settings.tsx';
+import { pricingSettingsTab } from './features/settings/pricing-settings.tsx';
 import { securityLogSettingsTab } from './features/settings/security-log-settings.tsx';
 import { settingsPaletteEntries } from './features/settings/settings-catalog.ts';
 import { SettingsPage } from './features/settings/settings-page.tsx';
-import { ConnectionPreferenceSettings } from './features/settings/connection-preference-settings.tsx';
 import { ViewportOverlay } from './features/settings/viewport-details.tsx';
 import { speedupsSettingsTab } from './features/speedups/speedups-surface.tsx';
 import { StepUpDialog, UNLOCK_COPY } from './features/step-up/step-up-dialog.tsx';
@@ -111,9 +112,9 @@ import { useAskWardenActions } from './features/warden/ask-warden.tsx';
 import { WardenOverviewSurface } from './features/warden/warden-overview-surface.tsx';
 import { useAccountPickerSlice } from './hooks/use-account-picker.ts';
 import { useActiveCarrier, useDeviceRefused } from './hooks/use-active-carrier.ts';
-import { useCarrierPreferences, useTunnelService, useTunnelSwitches } from './hooks/use-carrier-preferences.ts';
 import { useAppViewport } from './hooks/use-app-viewport.ts';
 import { useAttentionSession, useAttentionSnapshot } from './hooks/use-attention.ts';
+import { useCarrierPreferences, useTunnelService, useTunnelSwitches } from './hooks/use-carrier-preferences.ts';
 import { useConfigChangeFeed } from './hooks/use-config-change-feed.ts';
 import { useConnectionHealth } from './hooks/use-connection-health.ts';
 import { useInputModality } from './hooks/use-input-modality.ts';
@@ -147,11 +148,9 @@ import {
 import { useSttSettings } from './hooks/use-stt-settings.ts';
 import { useTheme } from './hooks/use-theme.ts';
 import { type MachineSource, machineDisplayOrder } from './lib/all-machines.ts';
+import { DEFAULT_CARRIER_PREFERENCE } from './lib/carrier-preference.ts';
 import type { DaemonConnectionRecord } from './lib/connections.ts';
 import { type DaemonConnection, type DaemonId, daemonCarriers } from './lib/daemon-connection.ts';
-import { DEFAULT_CARRIER_PREFERENCE } from './lib/carrier-preference.ts';
-import { tunnelNote } from './lib/tunnel-service.ts';
-import { tunnelSwitchOffer } from './features/carrier/carrier-preference-selector.tsx';
 import { daemonSessionKey, daemonSessionScope } from './lib/daemon-scope.ts';
 import { projectKeyFor } from './lib/fleet-grouping.ts';
 import { installBanner } from './lib/install-prompt.ts';
@@ -217,6 +216,7 @@ import {
 } from './lib/store.tsx';
 import type { SpeechAssets } from './lib/stt/on-device-voices.ts';
 import { createSurfaceEventHub } from './lib/surface-control.ts';
+import { tunnelNote } from './lib/tunnel-service.ts';
 import {
   AppBar,
   AppTabBar,
@@ -232,7 +232,7 @@ import { CommandPalette, type PaletteSettingsSource } from './shell/command-pale
 import { InsightsFrame } from './shell/insights-frame.tsx';
 import { PageScrollRegion } from './shell/page-scroll-region.tsx';
 import { pairPhonePaletteCommand } from './shell/palette-destinations.ts';
-import { paletteSessionEntries } from './shell/palette-model.ts';
+import { machinePaletteSessions, paletteSessionEntries } from './shell/palette-model.ts';
 import { PullToPaletteRegion } from './shell/pull-to-palette-region.tsx';
 import { ReleaseNoticeBanner } from './shell/release-notice.tsx';
 import {
@@ -682,6 +682,8 @@ function SessionsRoute({ connection }: DaemonPageProps) {
   useRenderTiming(store.performance, 'fleet');
   const { navigate } = useRouter();
   const allMachines = useContext(AllMachinesContext);
+  const { connections } = useConnectionSnapshot();
+  const record = connections.find(candidate => candidate.daemonId === connection.daemonId);
   const readWardenStatus = useCallback(
     async (daemon: DaemonConnection) => await (await store.clients.client(daemon)).wardenStatus(),
     [store.clients],
@@ -689,6 +691,8 @@ function SessionsRoute({ connection }: DaemonPageProps) {
   return (
     <SessionsPage
       connection={connection}
+      connectionHealth={store.connectionHealth}
+      machineName={record === undefined ? daemonDisplayName(connection) : distinctDaemonName(record, connections)}
       fleet={store.fleet}
       controls={store.controls}
       projects={store.projects}
@@ -2355,6 +2359,17 @@ export function AppShell() {
   } else {
     const sessions = fleet.daemons.get(connection.daemonId)?.sessions ?? [];
     const phone = layout === 'drawer';
+    // Find searches every reachable machine when the list shows them all; a machine that is down is named,
+    // never allowed to empty the rest. One machine at a time, it is that machine's own fleet.
+    const paletteSearch =
+      allMachines === undefined
+        ? { sessions: paletteSessionEntries(sessions), note: null }
+        : machinePaletteSessions(allMachines.sources);
+    // Every paired machine, so one that is down is counted whichever machine's page is open.
+    const noticeMachines = machineDisplayOrder(connectionSnapshot.connections, savedMachineOrder).map(record => ({
+      daemonId: record.daemonId,
+      name: distinctDaemonName(record, connectionSnapshot.connections),
+    }));
     const machineRecord = connectionSnapshot.connections.find(candidate => candidate.daemonId === connection.daemonId);
     const machineName =
       machineRecord === undefined
@@ -2399,11 +2414,7 @@ export function AppShell() {
                   tabBarShown={showsTabBar(pageRoute)}
                 />
               ) : null}
-              <ConnectionHealthNotice
-                health={store.connectionHealth}
-                daemonId={connection.daemonId}
-                machineName={machineName}
-              />
+              <ConnectionHealthNotice health={store.connectionHealth} machines={noticeMachines} />
               <NewDeviceNotices connections={connectionSnapshot.connections} clients={store.clients} />
               {pageRoute.kind === 'settings' ? null : (
                 <PasskeyNudge
@@ -2448,7 +2459,8 @@ export function AppShell() {
               focusSignal={palette.focusSignal}
               onClose={closePalette}
               daemon={connection.daemonId}
-              sessions={paletteSessionEntries(sessions)}
+              sessions={paletteSearch.sessions}
+              sessionsNote={paletteSearch.note}
               onNavigate={navigate}
               settings={paletteSettings}
               touchAffected={touchAffected}

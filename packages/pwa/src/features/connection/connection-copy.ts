@@ -2,14 +2,18 @@
  * EVERY WORD THE CONNECTION SURFACES SAY, in one place so a test pins them.
  *
  * A lost carrier used to reach the reader as the whole carrier walk's sentence — addresses, close codes,
- * both carriers — once per panel. These are the only sentences the pill, the details sheet and the stall
- * banner may show; the walk's technical text appears in the details sheet alone, one line per carrier.
+ * both carriers — once per panel. These are the only sentences the pill and the details sheet may show;
+ * the walk's technical text appears in the details sheet alone, one line per carrier.
  */
 
 import type { CarrierFailure, ConnectionHealthState, LikelyCause } from '../../lib/connection-health.ts';
 
 /** The pill's one word while the reconnect loop is working. */
 export const RECONNECTING_LABEL = 'Reconnecting…';
+
+/** The pill once a machine has stalled: its name for one, a count for more — never a sentence. */
+export const offlineLabel = (names: readonly string[]): string =>
+  names.length === 1 ? `${names[0]} offline` : `${names.length} machines offline`;
 
 type Reconnecting = Extract<ConnectionHealthState, { kind: 'reconnecting' }>;
 
@@ -40,7 +44,8 @@ export const outageDuration = (since: number, now: number): string => {
 export const DETAILS_COPY = {
   title: 'Connection',
   reconnecting: (machine: string): string => `Trying to reach ${machine} again. What you see is kept until it answers.`,
-  connected: (machine: string): string => `Connected to ${machine}.`,
+  connected: (machines: readonly string[]): string =>
+    machines.length === 1 ? `Connected to ${machines[0]}.` : 'Every machine is connected.',
   lostFor: (duration: string): string => `Lost ${duration} ago`,
   attempts: (attempt: number): string => (attempt === 1 ? '1 automatic attempt' : `${attempt} automatic attempts`),
   technical: 'What each route said',
@@ -48,14 +53,14 @@ export const DETAILS_COPY = {
   close: 'Close connection details',
 } as const;
 
-/** The stall banner's heading and one sentence per likely cause. */
+/** A stalled machine's heading and one sentence per likely cause. */
 export interface StallCopy {
   readonly heading: string;
   readonly advice: string;
 }
 
 /**
- * The 30-second banner, by cause. "This device", not "your phone": the same banner shows on a laptop.
+ * Why a stalled machine is not answering, by cause — the details sheet's heading for that machine. "This device", not "your phone": the same banner shows on a laptop.
  * Each one says what most likely happened and the one thing the reader can do about it.
  */
 export const stallCopy = (cause: LikelyCause, machine: string): StallCopy => {
@@ -79,9 +84,6 @@ export const stallCopy = (cause: LikelyCause, machine: string): StallCopy => {
       return { heading: `Can’t reach ${machine}`, advice: 'Still retrying on its own.' };
   }
 };
-
-/** The stall banner's actions. */
-export const STALL_ACTIONS = { retryNow: 'Retry now', details: 'Details' } as const;
 
 /**
  * One line per carrier, whatever the caller handed in. The contract already deduplicates, but a carrier

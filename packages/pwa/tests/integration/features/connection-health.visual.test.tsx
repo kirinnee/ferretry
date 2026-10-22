@@ -21,6 +21,7 @@ import {
   ConnectionHealthNoticeView,
 } from '../../../src/features/connection/connection-health-notice.tsx';
 import type { ConnectionHealthState } from '../../../src/lib/connection-health.ts';
+import { daemonId } from '../../../src/lib/daemon-connection.ts';
 import { sharedChromium } from '../support/chromium.ts';
 
 type Reconnecting = Extract<ConnectionHealthState, { kind: 'reconnecting' }>;
@@ -64,8 +65,11 @@ const scene = (notice: ReactElement): string =>
     </div>,
   );
 
-const view = (state: ConnectionHealthState): ReactElement => (
-  <ConnectionHealthNoticeView state={state} machineName={MACHINE} now={NOW} onRetryNow={() => {}} />
+const machine = (state: ConnectionHealthState) => ({ daemonId: daemonId('workbench-daemon'), name: MACHINE, state });
+const second = (state: ConnectionHealthState) => ({ daemonId: daemonId('studio-daemon'), name: 'studio', state });
+
+const view = (state: ConnectionHealthState, other: ConnectionHealthState = { kind: 'connected' }): ReactElement => (
+  <ConnectionHealthNoticeView machines={[machine(state), second(other)]} now={NOW} onRetryNow={() => {}} />
 );
 
 const sheet = renderToStaticMarkup(
@@ -73,8 +77,7 @@ const sheet = renderToStaticMarkup(
     id="connection-sheet"
     open={true}
     onClose={() => {}}
-    state={outage()}
-    machineName={MACHINE}
+    machines={[machine(outage()), second({ kind: 'connected' })]}
     now={NOW}
     onRetryNow={() => {}}
   />,
@@ -101,7 +104,9 @@ interface Capture {
 }
 
 const pill = scene(view(outage()));
-const banner = scene(view(outage({ stalled: true, since: NOW - 42_000 })));
+// Stalled: the SAME compact pill, now naming the machine — there is no banner any more.
+const offline = scene(view(outage({ stalled: true, since: NOW - 42_000, cause: 'daemon-unreachable' })));
+const twoOffline = scene(view(outage({ stalled: true, since: NOW - 42_000 }), outage({ stalled: true })));
 const withSheet = `${scene(view(outage()))}${sheet}`;
 
 const captures: readonly Capture[] = [
@@ -111,9 +116,11 @@ const captures: readonly Capture[] = [
   { name: 'pill-desktop-dark', body: pill, device: 'desktop', mode: 'dark', technical: false },
   { name: 'sheet-phone-light', body: withSheet, device: 'phone', mode: 'light', technical: true },
   { name: 'sheet-phone-dark', body: withSheet, device: 'phone', mode: 'dark', technical: true },
-  { name: 'banner-phone-light', body: banner, device: 'phone', mode: 'light', technical: false },
-  { name: 'banner-phone-dark', body: banner, device: 'phone', mode: 'dark', technical: false },
-  { name: 'banner-desktop-light', body: banner, device: 'desktop', mode: 'light', technical: false },
+  { name: 'offline-phone-light', body: offline, device: 'phone', mode: 'light', technical: false },
+  { name: 'offline-phone-dark', body: offline, device: 'phone', mode: 'dark', technical: false },
+  { name: 'offline-desktop-light', body: offline, device: 'desktop', mode: 'light', technical: false },
+  { name: 'offline-desktop-dark', body: offline, device: 'desktop', mode: 'dark', technical: false },
+  { name: 'two-offline-phone-light', body: twoOffline, device: 'phone', mode: 'light', technical: false },
 ];
 
 let browser: Browser;
@@ -179,7 +186,7 @@ describe('Connection notice visual contract', () => {
             smallest: number;
             technical: boolean;
           }>(`(() => {
-            const controls = [...document.querySelectorAll('[data-connection-pill], [data-connection-retry], [data-connection-details]')];
+            const controls = [...document.querySelectorAll('[data-connection-pill], [data-connection-dismiss], [data-connection-retry]')];
             const heights = controls.map(control => control.getBoundingClientRect().height);
             return {
               inner: innerWidth,

@@ -762,6 +762,50 @@
   color: var(--muted);
   font-size: var(--text-sm);
 }
+/* One machine's own "Updating…", in its heading: only the machine being refreshed says it. */
+.fy-machine-section__updating {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--muted);
+  font-family: var(--font-ui);
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-normal);
+}
+/* A machine that is down says so UNDER ITS OWN HEADING, in the flow: it moves nothing but its own
+   section and covers nothing. Full opacity, unlike the greyed rows below it — it is live news. */
+.fy-machine-status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--gap-xs) var(--gap-sm);
+  min-width: 0;
+  color: var(--muted);
+  font-size: var(--text-sm);
+}
+.fy-machine-status__chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  max-width: 100%;
+  padding: 1px 8px;
+  border: var(--stroke-control) solid var(--warn-border);
+  border-radius: var(--radius-badge);
+  background: var(--warn-bg);
+  color: var(--warn);
+  font-weight: var(--weight-medium);
+}
+.fy-machine-status__asof {
+  color: var(--faint);
+  font-size: var(--text-2xs);
+}
+.fy-machine-status__actions {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--gap-xs);
+  margin-left: auto;
+}
 .fy-needs-you__head {
   color: var(--warn);
 }

@@ -8,6 +8,12 @@
  * TranscriptResults/highlight is NOT PORTED: IFyApiClient has no
  * transcript-search route and this PWA has no results-panel owner. Keeping the
  * omission explicit prevents a search gesture from implying unavailable data.
+ *
+ * ONE MACHINE'S TROUBLE IS NEVER THE PAGE'S. Across machines the page draws no error and no "Updating…"
+ * of its own: each machine's section says its own (`session-dashboard-machines.tsx`), so a machine that
+ * is asleep cannot paint a red box over a healthy one's sessions or hold a spinner over the list. On one
+ * machine's own page its outage is the plain sentence ("Liftoff MBP isn't reachable right now"), with the
+ * transport's raw text behind Details — never the transport’s "could not reach fyd at <loopback address>".
  */
 
 import type { SessionView, WardenStatusView } from '@ferretry/protocol';
@@ -28,12 +34,15 @@ import { cn } from '../lib/class-names.ts';
 import type { DashboardView, Density } from '../lib/controls.ts';
 import type { DaemonConnection, DaemonId } from '../lib/daemon-connection.ts';
 import type { SessionGroup } from '../lib/fleet-grouping.ts';
+import { type MachineOutage, machineOutage } from '../lib/machine-outage.ts';
+import type { ClockEnvironment } from '../lib/message-clock.ts';
 import { daemonNewSessionPath, daemonSessionsPath } from '../lib/pages/routes.ts';
 import type { SessionQuotaResolver } from '../lib/usage.ts';
-import { type NewSessionMachine, NewSessionMenu } from '../shell/new-session-menu.tsx';
+import { type NewSessionMachine, NewSessionMenu, withReach } from '../shell/new-session-menu.tsx';
 import { RouteLink } from '../shell/route-link.tsx';
 import { ViewTabs } from '../shell/view-tabs.tsx';
 import { CacheUpdating } from './cache-updating.tsx';
+import { MachineStatusRow } from './machine-status.tsx';
 import { FullDensityGroups, LeanDensityGroups } from './session-dashboard-groups.tsx';
 import { AllMachinesGroups } from './session-dashboard-machines.tsx';
 import {
@@ -58,7 +67,19 @@ export interface SessionDashboardProps {
   readonly scope: string | null;
   readonly scopeName: string;
   readonly scopeRecovered: boolean;
+  /**
+   * This machine's last list failure, raw. It is never printed as it is: with no `outage` it is turned
+   * into the plain sentence for `machineName`, and across machines the page does not show it at all.
+   */
   readonly error: string | null;
+  /** This machine's outage, when the host measured one: said in place of `error`. */
+  readonly outage?: MachineOutage | null;
+  /** The name this machine's outage sentence uses. */
+  readonly machineName?: string;
+  /** Retry now on a machine's status line: skip its backoff and read its list again. */
+  readonly onRetryMachine?: (daemonId: DaemonId) => void;
+  /** Pinned only by tests and captures; production reads the device's clock. */
+  readonly clock?: ClockEnvironment;
   /** The rows are this device's cached copy and the live read has not answered: say "Updating…". */
   readonly updating?: boolean;
   readonly dashboardView: DashboardView | null;
@@ -98,6 +119,8 @@ export interface SessionDashboardProps {
   readonly machineAccounts?: MachineRosters;
 }
 
+const UNMEASURED = { kind: 'unknown' } as const;
+
 /** How many rows the all-machines list draws: Needs you, plus every machine's groups. */
 const allMachinesShown = (view: AllMachinesView): number =>
   view.needsYou.length +
@@ -132,6 +155,10 @@ export function SessionDashboard({
   newSessionMachines,
   machineAccounts,
   updating = false,
+  outage = null,
+  machineName = 'This machine',
+  onRetryMachine,
+  clock,
 }: SessionDashboardProps) {
   const headingId = useId();
   const viewportNarrow = useDashboardNarrow();
@@ -145,6 +172,12 @@ export function SessionDashboard({
   // Across machines the list is "read" once any machine has answered; one machine at a time, once it has.
   const read = allMachines === undefined ? sessions !== null : allMachines.loaded;
   const pullMarker = { [PULL_TO_PALETTE_ATTR]: '' };
+  // Across machines every machine speaks for itself, so the page has no outage of its own.
+  const pageOutage =
+    allMachines !== undefined
+      ? null
+      : (outage ?? (error ? machineOutage(machineName, UNMEASURED, { status: 'error', error }) : null));
+  const retryThis = onRetryMachine === undefined ? {} : { onRetry: () => onRetryMachine(connection.daemonId) };
 
   const leaveScope = (path: string): void => {
     onExitScope();
@@ -218,7 +251,7 @@ export function SessionDashboard({
             <NewSessionMenu
               className="kt-btn kt-btn--sm fy-new-session"
               current={connection.daemonId}
-              machines={newSessionMachines}
+              machines={withReach(newSessionMachines, allMachines?.machines)}
               onNavigate={onNavigate}
               variant="primary"
             >
@@ -254,17 +287,14 @@ export function SessionDashboard({
         </p>
       ) : null}
 
-      {error ? (
-        <p
-          className="mb-3 rounded-panel border border-err-border bg-err-bg px-panel py-row-y text-row text-err"
-          role="alert"
-        >
-          {error}
-        </p>
-      ) : null}
+      {pageOutage === null ? null : (
+        <MachineStatusRow outage={pageOutage} now={now} {...retryThis} {...(clock === undefined ? {} : { clock })} />
+      )}
 
-      {/* A zero-height row, so the pill overlays the list's top edge without moving a row of it. */}
-      {updating && read ? (
+      {/* A zero-height row, so the pill overlays the list's top edge without moving a row of it. Only on
+          one machine's own page, and only while that machine is answering: a machine that is down is
+          said by its status row, not by a spinner that waits on it. */}
+      {updating && read && allMachines === undefined && pageOutage === null ? (
         <div className="relative h-0">
           <CacheUpdating className="absolute left-1/2 top-1 z-10 -translate-x-1/2" />
         </div>
@@ -289,6 +319,8 @@ export function SessionDashboard({
             onNavigate={onNavigate}
             usage={usage}
             view={allMachines}
+            {...(onRetryMachine === undefined ? {} : { onRetryMachine })}
+            {...(clock === undefined ? {} : { clock })}
           />
         ) : null}
         {allMachines === undefined && sessions !== null && visibleCount === 0 ? (

@@ -18,6 +18,7 @@
 
 import type { SessionView } from '@ferretry/protocol';
 import type { LucideIcon } from 'lucide-react';
+import type { MachineSource } from '../lib/all-machines.ts';
 import { displayCallsign, shortSessionId } from '../lib/callsign.ts';
 import type { DaemonId } from '../lib/daemon-connection.ts';
 // The palette names a folder exactly as the sidebar and dashboard do. Sharing
@@ -44,6 +45,18 @@ export interface PaletteSession extends SessionEntry {
   readonly headline: string;
   /** The short id rendered on the right of the row. */
   readonly shortId: string;
+  /**
+   * The machine the session runs on, when the palette lists more than one: the row names it, and
+   * opening it goes to THAT machine — session ids collide across machines. Absent: the palette's own.
+   */
+  readonly daemonId?: DaemonId;
+  readonly machine?: string;
+}
+
+/** Where a session entry came from, when the palette searches every reachable machine. */
+export interface PaletteSessionOrigin {
+  readonly daemonId: DaemonId;
+  readonly machine: string;
 }
 
 /**
@@ -125,7 +138,10 @@ export const paletteResultId = (result: PaletteResult): string => {
     case 'settings':
       return `fy-palette-option-${result.entry.id}`;
     default:
-      return `fy-palette-option-session-${result.entry.id}`;
+      // Two machines can hold the same session id, so a listed machine is part of the option's id.
+      return result.entry.daemonId === undefined
+        ? `fy-palette-option-session-${result.entry.id}`
+        : `fy-palette-option-session-${result.entry.daemonId}-${result.entry.id}`;
   }
 };
 
@@ -161,7 +177,7 @@ export const paletteGroupHeading = (group: PaletteGroup, searching: boolean): st
  * object is what stops a later edit from accidentally ranking over the rendered
  * string.
  */
-export const paletteSessionEntries = (views: readonly SessionView[]): PaletteSession[] =>
+export const paletteSessionEntries = (views: readonly SessionView[], origin?: PaletteSessionOrigin): PaletteSession[] =>
   views
     .filter(view => !isGuideBuilder(view))
     .map(view => {
@@ -183,8 +199,42 @@ export const paletteSessionEntries = (views: readonly SessionView[]): PaletteSes
         folderName,
         headline: displayCallsign(teammate) || config.name || shortSessionId(config.id),
         shortId: shortSessionId(config.id),
+        ...(origin === undefined ? {} : { daemonId: origin.daemonId, machine: origin.machine }),
       };
     });
+
+/** What the palette searches across machines: every reachable machine's sessions, and who is missing. */
+export interface MachinePaletteSessions {
+  readonly sessions: readonly PaletteSession[];
+  readonly note: string | null;
+}
+
+const listNames = (names: readonly string[]): string =>
+  names.length <= 1 ? (names[0] ?? '') : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
+
+/**
+ * Find across every listed machine. A machine that is down is LEFT OUT and named in a note, never
+ * allowed to empty or delay the rest: its rows are only what it last said, and a result that opens onto
+ * a machine nobody can reach is not a result. Every entry names its machine, because ids collide.
+ */
+export const machinePaletteSessions = (
+  machines: readonly Pick<MachineSource, 'daemonId' | 'name' | 'reach' | 'slice'>[],
+): MachinePaletteSessions => {
+  const down = machines.filter(machine => machine.reach === 'offline');
+  const sessions = machines
+    .filter(machine => machine.reach !== 'offline')
+    .flatMap(machine =>
+      paletteSessionEntries(machine.slice.sessions ?? [], { daemonId: machine.daemonId, machine: machine.name }),
+    );
+  const names = listNames(down.map(machine => machine.name));
+  const note =
+    down.length === 0
+      ? null
+      : down.length === 1
+        ? `${names} isn’t reachable right now, so its sessions aren’t listed.`
+        : `${names} aren’t reachable right now, so their sessions aren’t listed.`;
+  return { sessions, note };
+};
 
 /** Does this command answer the query? An empty query offers all of them. */
 export const matchesPaletteCommand = (command: PaletteCommand, query: string): boolean => {
