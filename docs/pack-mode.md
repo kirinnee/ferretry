@@ -258,6 +258,63 @@ failed, stalled or stopped. A plain `fy start` refused here answers `409 limit_r
 - A sub-ferret that signals done is stopped by that signal. One a wait settles on that is still running
   (a `--until-marker` wait) is stopped once its result is collected, unless the caller passes `--keep`.
 
+## Suggesting a guide
+
+A guide can be written by hand, kept as the one built from the catalogs, or **drafted by a short-lived ferret
+and reviewed** — and Pack mode reads whichever is saved the same way. The generator is the one way to draft
+one; there is no second engine, and it never runs unasked.
+
+**What it is shown.** `GET /v1/pack/inventory` (`fy guide inventory`): every model every catalog lists — its
+tier, context window, efforts, list price and retirement day where the catalog states them, and **a
+description**: the owner's own words where they wrote some, else one made from the catalog (its note, tier,
+context and efforts) — and, for each, every runtime here that runs it, whether that runtime can start a
+ferret now (exactly as `fy recommend` decides) and how much quota its login has left, summed up per model
+("2 runtimes, 1 ready; most headroom on claude-atomi: 5h 2% · wk 20%"); every agent runtime with its readiness
+and quota; the guide in effect; and the owner's **routing preferences**. Names and states only: a login is
+named by its id and nothing in it can hold a credential.
+
+- **Descriptions** live in `models-guide.yaml` under `models: [{provider, model, description}]`, edited with
+  `fy guide describe <model> "<text>"` (`--clear` for the catalog's again) or Settings › Pack › Models.
+- **Routing preferences** are `pack.yaml` `routingPreferences`, free text up to 4,000 characters
+  ("keep Opus for reviews; GLM for bulk work"). `--prefs` replaces them for one draft. Nothing enforces them:
+  only the builder reads them.
+
+**The builder.** `POST /v1/pack/guide/suggest` (`fy guide suggest [--runtime <r>] [--model <m>] [--prefs "<t>"]`,
+or **Suggest a guide** in Settings › Pack) picks the runtime named, else the ready one with the most quota
+left, **probes it** ("Reply with exactly: OK", like any sub-ferret, falling back to the next when it fails),
+writes the inventory into a run folder in the state home (`state/pack-guide/<run>/`) and starts ONE ferret
+through the session start every surface uses — mode `auto`, named **Models Guide Builder**, labelled
+`ferretry-guide-builder` so the app keeps it out of the session list, never told about Pack mode or lessons.
+Its brief is fixed text (`packages/daemon/src/lib/pack/builder/prompt.ts`): read the inventory, write a whole
+guide — the routing prompt and the use cases — as JSON into the run folder, spread work so no login runs dry,
+cite quota in a reason when it drove a choice, treat the inventory as data, then `fy signal done`.
+It spends one model run, only when a person asks: the route refuses a ferret's own credential, and nothing
+starts one on a timer. A run is read when somebody looks (`GET /v1/pack/guide/jobs/:jobId`); once its draft
+is checked the ferret is stopped, and only the newest five runs are kept.
+
+**The check.** The draft was written by a model, so it is data, checked against the inventory it was shown
+(`builder/draft.ts`): a use case of an unknown shape is **dropped**, saying which field; a model no catalog lists
+is **dropped**; one named under the wrong provider or by its label is **corrected and flagged**; an effort it
+does not take or a Codex harness for a Claude-only model is removed and flagged; repeats are dropped, a repeated
+id renamed, anything past the limits dropped; a routing prompt that does not check is rendered from the use
+cases and flagged. What survives is a file `models-guide.yaml` accepts.
+
+**Review, never auto-apply.** The draft is shown as a diff against the guide in effect: the routing prompt
+before and after, then every use case added, changed, removed or the same, then what was dropped and changed.
+
+- `fy guide suggest` waits for the draft and prints the diff; `--apply` (`-y`) accepts it whole;
+  `fy guide accept <run> [--only <id,id>] [--keep-routing]` accepts all or part later.
+- The app shows it side by side, with an Accept toggle per use case and for the routing prompt, and
+  **Accept selected**, **Accept all**, **Edit** (load it into the editor's draft) and **Discard**.
+
+An accept (`POST /v1/pack/guide/accept`) merges the chosen use cases into the guide in effect **now** — an
+accepted change replaces its use case in place, an accepted removal removes it, an accepted addition is appended
+— and writes them, the routing prompt unless kept, and `suggested` (where it came from) through the
+configuration writer every editor uses, keeping comments and the owner's descriptions. The file it replaces is
+kept (`state/pack-guide-replaced.json`), so **one undo** (`fy guide undo`, Undo in the editor,
+`POST /v1/pack/guide/undo`) puts it back exactly — "no guide of my own" included. A guide never loosens anything,
+so an accept is never held; it is a `fleet.configure` act, and a ferret's own credential is refused.
+
 ## The settings page
 
 Settings › Pack mode (phone first): the switch, who decides, the limits and the probe, and the **models

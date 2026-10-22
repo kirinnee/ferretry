@@ -60,6 +60,37 @@ const cases: SchemaCase[] = [
     value: { useCases: [useCase], routing, suggested },
   },
   { name: 'routing', schema: pack.GuideRoutingSchema, value: routing },
+  { name: 'routing preferences', schema: pack.RoutingPreferencesSchema, value: 'Opus for reviews; GLM for bulk.' },
+  {
+    name: 'model description',
+    schema: pack.ModelDescriptionSchema,
+    value: { provider: 'zai', model: 'glm-5.3', description: 'Cheap and fast; weak at long plans.' },
+  },
+  {
+    name: 'guide file with descriptions',
+    schema: pack.ModelsGuideFileSchema,
+    value: { models: [{ provider: 'zai', model: 'glm-5.3', description: 'Cheap.' }] },
+  },
+  { name: 'undo', schema: pack.GuideUndoSchema, value: { savedAt: INSTANT, source: 'derived' } },
+  {
+    name: 'builder job',
+    schema: pack.PackGuideJobSchema,
+    value: {
+      id: 'run-1',
+      session: 's9',
+      name: 'gonzalo',
+      runtime: 'claude-auto-x',
+      model: 'claude-opus-5-5',
+      startedAt: INSTANT,
+      status: 'failed',
+      message: 'The builder stopped without writing a guide.',
+    },
+  },
+  {
+    name: 'builder',
+    schema: pack.PackGuideBuilderSchema,
+    value: { available: false, runtimes: [], reason: 'No runtime can start a ferret now.' },
+  },
   { name: 'suggested', schema: pack.GuideSuggestedSchema, value: suggested },
   { name: 'guide', schema: pack.ModelsGuideSchema, value: { source: 'derived', useCases: [useCase] } },
   {
@@ -89,6 +120,17 @@ const cases: SchemaCase[] = [
     name: 'view',
     schema: pack.PackViewSchema,
     value: { config: pack.DEFAULT_PACK_CONFIG, guide: { source: 'file', useCases: [] }, models: [] },
+  },
+  {
+    name: 'view with undo and the builder',
+    schema: pack.PackViewSchema,
+    value: {
+      config: { ...pack.DEFAULT_PACK_CONFIG, routingPreferences: 'Opus for reviews.' },
+      guide: { source: 'file', useCases: [] },
+      models: [],
+      undo: { savedAt: INSTANT, source: 'file' },
+      builder: { available: true, runtimes: ['claude-auto-x'] },
+    },
   },
   { name: 'refusal code', schema: pack.PackRefusalCodeSchema, value: 'probe_failed' },
   { name: 'refusal', schema: pack.PackRefusalSchema, value: refusal },
@@ -221,6 +263,17 @@ describe('pack schemas', () => {
         value: { ...routing, short: 'x'.repeat(pack.MAX_ROUTING_SHORT_CHARS + 1) },
       },
       { name: 'an unknown quota state', schema: pack.PackQuotaStateSchema, value: 'full' },
+      {
+        name: 'a model described twice',
+        schema: pack.ModelsGuideFileSchema,
+        value: {
+          models: [
+            { provider: 'zai', model: 'glm-5.3', description: 'a' },
+            { provider: 'zai', model: 'glm-5.3', description: 'b' },
+          ],
+        },
+      },
+      { name: 'preferences too long', schema: pack.RoutingPreferencesSchema, value: 'x'.repeat(4_001) },
       { name: 'more than all left', schema: pack.PackQuotaWindowSchema, value: { label: '5h', leftPercent: 101 } },
     ]);
   });
@@ -260,6 +313,13 @@ describe('packConfigFromFile', () => {
       probe: { timeoutSeconds: 45, cacheSeconds: 0 },
       jev: { usdPerDay: 1 },
     });
+  });
+
+  it('should carry routing preferences that say something, and leave out empty ones', () => {
+    should(pack.packConfigFromFile({ routingPreferences: 'Opus for reviews.' }).routingPreferences).equal(
+      'Opus for reviews.',
+    );
+    should(pack.packConfigFromFile({ routingPreferences: '' })).deepEqual(pack.DEFAULT_PACK_CONFIG);
   });
 
   it('should start from a guide file that names no use case, so the derived guide is in effect', () => {

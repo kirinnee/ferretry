@@ -1,6 +1,11 @@
 import {
   DEFAULT_PACK_CONFIG,
   type PackAttempt,
+  type PackGuideJobResult,
+  type PackGuideSuggestion,
+  type PackGuideSuggestStart,
+  type PackGuideWriteResult,
+  type PackInventory,
   type PackNewOutcome,
   type PackRecommendation,
   type PackView,
@@ -105,9 +110,99 @@ export class CapturingPackIo implements IPackIo {
   }
 }
 
+export const INVENTORY: PackInventory = {
+  at: '2026-10-22T12:00:00.000Z',
+  models: [
+    {
+      provider: 'anthropic',
+      providerLabel: 'Anthropic',
+      harness: 'claude',
+      id: 'claude-opus-5-5',
+      label: 'Claude Opus 5.5',
+      tier: 'best',
+      efforts: ['max'],
+      description: 'Strongest; slow.',
+      describedBy: 'owner',
+      retires: '2027-06-01',
+      runtimes: [{ name: 'claude-work', ready: true }],
+      headroom: { runtimes: 1, ready: 1, summary: '1 runtime, 1 ready; most headroom on claude-work: 5h 2% · wk 46%' },
+    },
+    {
+      provider: 'openai',
+      providerLabel: 'OpenAI',
+      harness: 'codex',
+      id: 'gpt-6-astra',
+      label: 'GPT-6 Astra',
+      tier: 'best',
+      efforts: [],
+      description: 'GPT-6 Astra: the strongest tier on OpenAI.',
+      describedBy: 'catalog',
+      runtimes: [],
+      headroom: { runtimes: 0, ready: 0, summary: 'no runtime here runs it' },
+    },
+  ],
+  runtimes: [
+    {
+      name: 'claude-work',
+      harness: 'claude',
+      provider: 'anthropic',
+      login: 'claude-work',
+      ready: true,
+      quota: { state: 'plenty', windows: [], summary: '5h 2% · wk 46%' },
+    },
+    {
+      name: 'codex-off',
+      harness: 'codex',
+      login: 'codex-off',
+      ready: false,
+      refusal: { code: 'not_logged_in', message: 'codex-off needs signing in.' },
+      quota: { state: 'unknown', windows: [], summary: 'not measured' },
+    },
+  ],
+  guide: { source: 'derived', useCases: [] },
+  preferences: 'Opus for reviews.\nGLM for bulk.',
+};
+
+const PLAN = packView().guide.useCases[0] as PackView['guide']['useCases'][number];
+
+export const SUGGESTION: PackGuideSuggestion = {
+  suggested: { by: 'claude-opus-5-5', via: 'claude-work', at: '2026-10-22T12:05:00.000Z' },
+  routing: { prompt: 'Plan on Opus.\nBulk on GLM.', short: 'Routing: plan-review → opus max.' },
+  useCases: [
+    { ...PLAN, title: 'Planning and review' },
+    {
+      id: 'bulk',
+      title: 'Bulk edits',
+      description: 'Renames.',
+      candidates: [{ provider: 'zai', model: 'glm-5', why: 'Cheap: claude-work is at 46% of the week.' }],
+    },
+  ],
+  dropped: [{ useCase: 'bulk', provider: 'x', model: 'ghost', message: 'x ghost is not in any catalog' }],
+  flagged: [{ message: 'its routing guidance did not check, so it was rendered from the use cases' }],
+  current: packView().guide,
+};
+
+export const JOB = {
+  id: 'run-1',
+  session: 's9',
+  name: 'gonzalo',
+  runtime: 'claude-work',
+  startedAt: '2026-10-22T12:00:00.000Z',
+  status: 'running',
+} as const;
+
 export class FakePackGateway implements IPackGateway {
   readonly recommendCalls: Array<Parameters<IPackGateway['recommend']>[0]> = [];
   readonly newCalls: Array<Parameters<IPackGateway['newChild']>[0]> = [];
+  readonly suggestCalls: Array<Parameters<IPackGateway['suggest']>[0]> = [];
+  readonly acceptCalls: Array<Parameters<IPackGateway['accept']>[0]> = [];
+  readonly describeCalls: Array<Parameters<IPackGateway['describe']>[0]> = [];
+  readonly jobCalls: string[] = [];
+  /** What `suggest` answers. */
+  started: PackGuideSuggestStart = { outcome: 'started', job: JOB };
+  /** What each look at a run answers, in turn; the last repeats. */
+  runs: PackGuideJobResult[] = [{ job: { ...JOB, status: 'suggested' }, suggestion: SUGGESTION }];
+  written: PackGuideWriteResult = { outcome: 'applied', message: 'Accepted.' };
 
   constructor(
     private readonly recommended: PackRecommendation = recommendation(),
@@ -127,6 +222,34 @@ export class FakePackGateway implements IPackGateway {
   async newChild(request: Parameters<IPackGateway['newChild']>[0]): Promise<PackNewOutcome> {
     this.newCalls.push(request);
     return this.outcome;
+  }
+
+  async inventory(): Promise<PackInventory> {
+    return INVENTORY;
+  }
+
+  async suggest(request: Parameters<IPackGateway['suggest']>[0]): Promise<PackGuideSuggestStart> {
+    this.suggestCalls.push(request);
+    return this.started;
+  }
+
+  async job(id: string): Promise<PackGuideJobResult> {
+    this.jobCalls.push(id);
+    return (this.runs.length > 1 ? this.runs.shift() : this.runs[0]) as PackGuideJobResult;
+  }
+
+  async accept(request: Parameters<IPackGateway['accept']>[0]): Promise<PackGuideWriteResult> {
+    this.acceptCalls.push(request);
+    return this.written;
+  }
+
+  async undo(): Promise<PackGuideWriteResult> {
+    return { outcome: 'nothing', message: 'There is no accepted suggestion to undo.' };
+  }
+
+  async describe(request: Parameters<IPackGateway['describe']>[0]): Promise<PackGuideWriteResult> {
+    this.describeCalls.push(request);
+    return { outcome: 'applied', message: 'Saved.' };
   }
 
   async result(): Promise<never> {

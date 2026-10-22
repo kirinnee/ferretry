@@ -109,6 +109,7 @@ function build(options: Options = {}) {
       },
     },
     bin: 'fy',
+    now: () => '2026-10-22T12:00:00.000Z',
   };
   return { subject: new PackService(ports), probes, starts, ranks, recorded };
 }
@@ -145,6 +146,24 @@ describe('PackService.routingShort', () => {
     // Act + Assert
     should(await written.subject.routingShort()).equal('Routing: everyday → opus.');
     should(await rendered.subject.routingShort()).equal('Routing: everyday → opus high.');
+  });
+});
+
+describe('PackService.inventory', () => {
+  it("should show the builder every model, the guide in effect and this run's preferences, else pack.yaml's", async () => {
+    // Arrange
+    const { subject } = build({ config: { ...packConfig(), routingPreferences: 'Opus for reviews.' } });
+
+    // Act
+    const saved = await subject.inventory();
+    const asked = await subject.inventory('GLM for bulk.');
+
+    // Assert
+    should(saved.preferences).equal('Opus for reviews.');
+    should(asked.preferences).equal('GLM for bulk.');
+    should(saved.at).equal('2026-10-22T12:00:00.000Z');
+    should(saved.guide.useCases.map(useCase => useCase.id)).deepEqual(['everyday']);
+    should(saved.models.find(model => model.id === 'opus')?.runtimes).deepEqual([{ name: 'claude-main', ready: true }]);
   });
 });
 

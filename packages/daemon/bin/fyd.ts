@@ -9,7 +9,7 @@ import {
   statSync,
   writeSync,
 } from 'node:fs';
-import { mkdir, realpath, stat } from 'node:fs/promises';
+import { mkdir, realpath, rm, stat } from 'node:fs/promises';
 import { hostname, tmpdir, userInfo } from 'node:os';
 import { dirname, isAbsolute, join } from 'node:path';
 import {
@@ -54,12 +54,14 @@ import {
   type ConversionPreview,
   type ConversionSummary as ConversionSummaryView,
   commandLabel,
+  configFilePath,
   type FleetCredentialList,
   FY_DEFAULT_DAEMON_PORT,
   type Harness,
   type LearningConfig,
   localOnlyNotice,
   type MigrationConversation,
+  PACK_GUIDE_BUILDER_LABEL,
   type PackConfig,
   type PackRefusal,
   type RegisterProjectRequest,
@@ -269,7 +271,14 @@ import { FileConversationFiles } from '../src/adapters/migrate/file-conversation
 import { FileMigrationReportStore } from '../src/adapters/migrate/file-migration-report.ts';
 import { FileNameClaimStore } from '../src/adapters/names/index.ts';
 import { FileNotificationDeliveryLedger } from '../src/adapters/notifications/index.ts';
-import { bunProbeSpawn, CliPackProbe, FilePackSpendLedger, readSessionResult } from '../src/adapters/pack/index.ts';
+import {
+  bunProbeSpawn,
+  CliPackProbe,
+  FileGuideRunStore,
+  FilePackSpendLedger,
+  FileReplacedGuide,
+  readSessionResult,
+} from '../src/adapters/pack/index.ts';
 import { FilePinRepository, FilePinSessionDirectory } from '../src/adapters/pins/index.ts';
 import { HostCodexAppServerProcesses } from '../src/adapters/process/codex-app-server-stopper.ts';
 import { runPackageInstall } from '../src/adapters/process/package-install.ts';
@@ -929,9 +938,12 @@ import {
   admitChild,
   COMMON_SCRATCH_ROOTS,
   depthOf,
+  GuideBuilderService,
+  GuideFileService,
   isScratchPath,
   JevPackRanker,
   type PackParent,
+  type PackProbeRequest,
   PackService,
   PackStartRefused,
   ProbeCache,
@@ -2386,12 +2398,12 @@ function createSessionControlSubsystem(
           ...(request.parent === undefined ? {} : { parent: request.parent }),
         });
         if (opening.files.length > 0) await storeAttachments(lifecycle, attachments, id, opening.files);
-        if (stamped.label !== LEARNING_MINER_LABEL && !stamped.provenance.wardenLineage)
+        if (ordinaryFerret(stamped.label, stamped.provenance.wardenLineage))
           await adoptLearning(id).catch(() => undefined);
-        // A miner or a warden is never told about Pack mode; every other ferret is, unless the machine's
-        // switch is off or it sits too deep to start its own. A failure leaves it untold, never unstarted.
+        // A miner, a guide builder or a warden is never told about Pack mode; every other ferret is, unless the
+        // machine's switch is off or it sits too deep to start its own. A failure leaves it untold, never unstarted.
         await pack
-          .adopt(id, stamped.label !== LEARNING_MINER_LABEL && !stamped.provenance.wardenLineage, request.parent)
+          .adopt(id, ordinaryFerret(stamped.label, stamped.provenance.wardenLineage), request.parent)
           .catch(() => undefined);
         // AFTER the record and BEFORE the launch, which is the only window in which both halves are
         // true: the board's session directory reads the session's own documents, so the target must
@@ -3437,6 +3449,13 @@ function createSessionRenameSubsystem(
   };
 }
 
+/**
+ * Whether a session is an ordinary ferret — told about Pack mode and lessons — rather than one of the
+ * daemon's own workers: a learning miner, a models-guide builder, or a warden's lineage.
+ */
+const ordinaryFerret = (label: string | undefined, wardenLineage: boolean | undefined): boolean =>
+  label !== LEARNING_MINER_LABEL && label !== PACK_GUIDE_BUILDER_LABEL && wardenLineage !== true;
+
 /** Pack mode's hooks into a session start (docs/pack-mode.md). */
 interface SessionPackHooks {
   /** Why `parent` may not start another sub-ferret now, or `undefined` when it may. */
@@ -3548,7 +3567,7 @@ function createSessionPackHooks(
       if (view === undefined) return {};
       const { config } = view;
       const depth = config.parent === undefined ? 0 : (await tree.depth(config.parent)) + 1;
-      const eligible = config.label !== LEARNING_MINER_LABEL && config.provenance?.wardenLineage !== true;
+      const eligible = ordinaryFerret(config.label, config.provenance?.wardenLineage);
       const pack = packLaunchDefault(await packConfig(), { eligible, ownSwitch: config.pack, depth });
       // Never stored, so every launch hears the guide saved now; the wrapper adds it only when FY_PACK is 1.
       const line = eligible ? await routing().catch(() => undefined) : undefined;
@@ -8977,6 +8996,33 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
        * found by the start's own resolution — the published absolute launcher, never a name on `PATH` — so
        * a probe that passes is a start that can launch.
        */
+      // ONE probe cache for every start Pack mode makes — sub-ferrets and the guide builder alike.
+      const packProbe = (() => {
+        const cache = new ProbeCache(
+          new CliPackProbe(
+            {
+              resolve: async wrapper =>
+                (await resolveStartAccount(accounts, wrapper, executables, CLIENT_NAME)).executable,
+            },
+            accountLaunchEnvironment,
+            bunProbeSpawn,
+            Object.fromEntries(
+              Object.entries(sanitizeHarnessEnv(process.env)).filter(
+                (entry): entry is [string, string] => entry[1] !== undefined,
+              ),
+            ),
+            () => performance.now(),
+          ),
+          () => Date.parse(clock.now()),
+        );
+        return async (request: PackProbeRequest, ttlMs: number) => await cache.probe(request, ttlMs);
+      })();
+      const packCatalogs = async () =>
+        modelCatalogsView(await modelCatalogService.catalogs(), {
+          origin: modelCatalogOrigin,
+          enabled: publishedModelCatalog.enabled,
+          ...(await publishedModelCatalog.status()),
+        }).catalogs;
       const packService = new PackService({
         settings: async () => {
           const effective = (await configFiles.load()).evaluation.effective;
@@ -8986,12 +9032,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
             jevUsdPerMillionInputTokens: effective.warden.guard.usdPerMillionInputTokens,
           };
         },
-        catalogs: async () =>
-          modelCatalogsView(await modelCatalogService.catalogs(), {
-            origin: modelCatalogOrigin,
-            enabled: publishedModelCatalog.enabled,
-            ...(await publishedModelCatalog.status()),
-          }).catalogs,
+        catalogs: packCatalogs,
         facts: async () => {
           const [runtimes, credentials, machine] = await Promise.all([
             fleetCatalog.runtimes(),
@@ -9036,26 +9077,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           const roots = [...COMMON_SCRATCH_ROOTS, tmpdir(), ...(process.env.TMPDIR ? [process.env.TMPDIR] : [])];
           return isScratchPath(real(cwd), [...roots, ...roots.map(real)]);
         },
-        probe: (() => {
-          const cache = new ProbeCache(
-            new CliPackProbe(
-              {
-                resolve: async wrapper =>
-                  (await resolveStartAccount(accounts, wrapper, executables, CLIENT_NAME)).executable,
-              },
-              accountLaunchEnvironment,
-              bunProbeSpawn,
-              Object.fromEntries(
-                Object.entries(sanitizeHarnessEnv(process.env)).filter(
-                  (entry): entry is [string, string] => entry[1] !== undefined,
-                ),
-              ),
-              () => performance.now(),
-            ),
-            () => Date.parse(clock.now()),
-          );
-          return async (request, ttlMs) => await cache.probe(request, ttlMs);
-        })(),
+        probe: packProbe,
         start: async request => {
           try {
             return await sessionControl.start(request, crypto.randomUUID(), JSON.stringify(request));
@@ -9076,11 +9098,58 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           return { today: async () => await ledger.spent(), record: async usd => await ledger.record(usd) };
         })(),
         bin: CLIENT_NAME,
+        now: () => clock.now(),
       });
       packRouting = async () => await packService.routingShort();
+      /**
+       * The models-guide generator (docs/pack-mode.md § Suggesting a guide): ONE builder, a short-lived hidden
+       * ferret started through the session start every surface uses and probed like any sub-ferret, and the
+       * writes of what it drafts through the configuration writer every editor uses.
+       */
+      const guidePath = configFilePath({ kind: 'modelsGuide' });
+      const guideBuilder = new GuideBuilderService({
+        inventory: async preferences => await packService.inventory(preferences),
+        guide: async () => (await packService.view()).guide,
+        runtime: async name => {
+          const runtime = (await fleetCatalog.runtimes()).runtimes.find(row => row.name === name && row.agent);
+          return runtime === undefined
+            ? undefined
+            : { wrapper: runtime.wrapper, harness: runtime.harness, defaultModel: runtime.models?.default };
+        },
+        probeSettings: async () => (await configFiles.load()).evaluation.effective.pack.probe,
+        probe: packProbe,
+        start: async request => await sessionControl.start(request, crypto.randomUUID(), JSON.stringify(request)),
+        status: async reference => {
+          const id = tryParseSessionId(reference);
+          return id === undefined ? undefined : (await sessions.get(id))?.state.status;
+        },
+        stop: async (reference, reason) => {
+          await sessionControl.stop(reference, reason);
+        },
+        runs: new FileGuideRunStore(stateFiles, join(paths.state, 'pack-guide'), async path => {
+          await rm(path, { recursive: true, force: true });
+        }),
+        now: () => clock.now(),
+        newId: () => crypto.randomUUID(),
+        home: paths.home,
+        bin: CLIENT_NAME,
+      });
+      const guideFile = new GuideFileService({
+        read: async () => {
+          const file = await configFiles.file(guidePath);
+          return { exists: file.exists, text: file.exists ? file.text : '', etag: file.etag };
+        },
+        write: async (text, etag) => {
+          await configFiles.write(guidePath, text, etag, false);
+        },
+        replaced: new FileReplacedGuide(stateFiles, join(paths.state, 'pack-guide-replaced.json')),
+        catalogs: packCatalogs,
+        now: () => clock.now(),
+      });
       const mounted: Omit<MountedSubsystems, 'sessionMcp'> = {
         pack: {
           service: packService,
+          guide: { builder: guideBuilder, file: guideFile },
           result: async reference => {
             const id = tryParseSessionId(reference);
             const view = id === undefined ? undefined : await sessions.get(id);

@@ -13,6 +13,7 @@ import type {
   ModelsGuideFile,
   PackAttempt,
   PackConfig,
+  PackInventory,
   PackNewOutcome,
   PackNewRequest,
   PackRecommendation,
@@ -23,6 +24,7 @@ import type {
 } from '@ferretry/protocol';
 import { taskTitleFor } from '@ferretry/protocol';
 import { admitChild, type ParentFacts } from './admission.ts';
+import { buildInventory } from './builder/inventory.ts';
 import { effectiveGuide, fleetModels } from './guide.ts';
 import type { PackJevPort } from './jev.ts';
 import type { CachedProbe, PackProbeRequest } from './probe.ts';
@@ -68,6 +70,8 @@ export interface PackPorts {
   spend: { today(): Promise<number>; record(usd: number): Promise<void> };
   /** The shipped command name, so every command it prints exists after a rename. */
   readonly bin: string;
+  /** Now, as an instant: when an inventory was taken. */
+  now(): string;
 }
 
 /** What `start` is given: a candidate the service decided to try. */
@@ -101,8 +105,29 @@ export class PackService {
     return {
       config: settings.config,
       guide: effectiveGuide(settings.guideFile, catalogs, this.ports.bin),
-      models: fleetModels(catalogs, facts.runtimes),
+      models: fleetModels(catalogs, facts.runtimes, settings.guideFile.models ?? []),
     };
+  }
+
+  /**
+   * What the guide builder is shown (`./builder/inventory.ts`): every model with the owner's description,
+   * its runtimes here, their readiness and quota, the guide in effect and the routing preferences — this
+   * run's, else `pack.yaml`'s.
+   */
+  async inventory(preferences?: string): Promise<PackInventory> {
+    const [settings, catalogs, facts] = await Promise.all([
+      this.ports.settings(),
+      this.ports.catalogs(),
+      this.ports.facts(),
+    ]);
+    return buildInventory({
+      catalogs,
+      facts,
+      guide: effectiveGuide(settings.guideFile, catalogs, this.ports.bin),
+      described: settings.guideFile.models ?? [],
+      preferences: preferences ?? settings.config.routingPreferences,
+      now: facts.now ?? this.ports.now(),
+    });
   }
 
   /**
