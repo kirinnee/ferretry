@@ -46,6 +46,7 @@ import type {
   FleetAgentControl,
   FleetComponentInput,
   FleetEnvInput,
+  FleetRunningSession,
   FleetSettingsEntriesInput,
 } from '@ferretry/protocol';
 import {
@@ -117,6 +118,13 @@ export interface AccountChangeFacts {
   readonly settingsBodies?: Readonly<Record<string, SettingsObject>>;
   /** The provider presets this machine offers (docs/provider-presets.md), for a login made from one. */
   readonly presets?: readonly ProviderPreset[];
+  /**
+   * Every other spelling `ids.json` resolves to a runtime — each former name and each id — mapped to
+   * the runtime it reaches, so a rename never takes a name that already starts something else.
+   */
+  readonly runtimeReferences?: Readonly<Record<string, string>>;
+  /** The sessions still running on the runtime a `runtime.remove` or `runtime.rename` names, when known. */
+  readonly runningOn?: readonly FleetRunningSession[];
 }
 
 /** The document format each harness's settings file is in. */
@@ -376,10 +384,15 @@ function applyAccountChange(
       return putRuntime(model, draft, change, facts, consequences);
     case 'runtime.remove': {
       if (model.runtimes[change.name] === undefined) refuse(`no runtime ${change.name} exists on this machine`);
+      if (model.machine.defaultRuntime === change.name) {
+        refuse(`${change.name} is this machine's default runtime for new agents. Pick another default first.`);
+      }
       delete draft.runtimes[change.name];
-      consequences.push('Running sessions of it keep going until they end. Its past sessions stay in history.');
+      consequences.push(removalConsequence(facts.runningOn));
       return `Remove runtime ${change.name}`;
     }
+    case 'runtime.rename':
+      return renameRuntime(model, draft, change, facts, consequences);
     case 'profile.put':
       return putProfile(model, draft, change, facts, consequences);
     case 'profile.remove':
@@ -554,6 +567,63 @@ const AGENT_PERMISSION_WORDS: Readonly<Record<'auto' | 'skip', string>> = {
   auto: 'Auto mode',
   skip: 'Skip all permission checks',
 };
+
+/** What removing a runtime does to the sessions on it, as exactly as this daemon knows them. */
+function removalConsequence(running: readonly FleetRunningSession[] | undefined): string {
+  if (running === undefined)
+    return 'Running sessions of it keep going until they end. Its past sessions stay in history.';
+  if (running.length === 0) return 'Nothing is running on it. Its past sessions stay in history.';
+  return `${counted(running.length, 'ferret')} ${running.length === 1 ? 'is' : 'are'} running on it. ${running.length === 1 ? 'It keeps' : 'They keep'} running, but restarting ${running.length === 1 ? 'it' : 'them'} later needs another runtime. Its past sessions stay in history.`;
+}
+
+/**
+ * A new name for one runtime, and every place the configuration names it: the default runtime for new
+ * agents and each command that runs it. The id stays — `ids.json` moves it to the new name in the same
+ * apply — so nothing keyed by id moves, and nothing restarts.
+ */
+function renameRuntime(
+  model: AccountModel,
+  draft: Draft,
+  change: Extract<AccountPlanChange, { kind: 'runtime.rename' }>,
+  facts: AccountChangeFacts,
+  consequences: string[],
+): string {
+  const { name, to } = change;
+  const runtime = draft.runtimes[name];
+  if (runtime === undefined) return refuse(`no runtime ${name} exists on this machine`);
+  if (to === name) refuse(`${name} is already called ${name}.`);
+  const commands = new Set(model.advanced.commands.map(command => command.wrapper));
+  const references = facts.runtimeReferences ?? {};
+  // A name this runtime had before is its own to take back; any other runtime's spelling is not.
+  const claimedElsewhere = (candidate: string): boolean => {
+    const owner = references[candidate];
+    return owner !== undefined && owner !== name;
+  };
+  assertFreeRuntimeName(
+    to,
+    candidate => model.runtimes[candidate] !== undefined || commands.has(candidate) || claimedElsewhere(candidate),
+    'runtime',
+    facts.machineName,
+  );
+  delete draft.runtimes[name];
+  draft.runtimes[to] = runtime;
+  if (model.machine.defaultRuntime === name) {
+    draft.machine.defaultRuntime = to;
+    consequences.push(`${to} stays this machine's default runtime for new agents.`);
+  }
+  const running = model.advanced.commands.filter(command => command.runtime === name).map(command => command.wrapper);
+  if (running.length > 0) {
+    (draft.advanced as { commands: { runtime: string }[] }).commands.forEach(command => {
+      if (command.runtime === name) command.runtime = to;
+    });
+    consequences.push(`${listed(running)} ${running.length === 1 ? 'runs' : 'run'} ${to} from now on.`);
+  }
+  consequences.push(
+    'Running ferrets keep working — nothing restarts.',
+    `${name} keeps starting it: \`--agent ${name}\` still works.`,
+  );
+  return `Rename runtime ${name} to ${to}`;
+}
 
 function putRuntime(
   model: AccountModel,

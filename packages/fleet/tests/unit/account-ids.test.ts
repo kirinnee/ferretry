@@ -6,6 +6,7 @@ import {
   parseRuntimeIds,
   RuntimeIdExhaustedError,
   type RuntimeIds,
+  renameRuntimeId,
   resolveRuntimeReference,
   runtimeIdsPath,
   serializeRuntimeIds,
@@ -109,5 +110,34 @@ describe('runtime ids', () => {
     });
     should(resolveRuntimeReference(IDS, ID_B)).match({ name: 'codex-default', matched: 'id' });
     should(resolveRuntimeReference(IDS, 'nobody')).be.undefined();
+  });
+
+  it('should move a renamed runtime’s entry to its new name and keep the old one resolving', () => {
+    // Act
+    const renamed = renameRuntimeId(IDS, 'claude-default', 'claude-main');
+
+    // Assert
+    should(renamed.runtimes['claude-default']).be.undefined();
+    should(renamed.runtimes['claude-main']).eql({
+      id: ID_A,
+      formerNames: ['claude-auto-default', 'claude-default'],
+      home: 'claude-auto-default',
+    });
+    should(resolveRuntimeReference(renamed, 'claude-default')).match({ name: 'claude-main', matched: 'former-name' });
+    should(resolveRuntimeReference(renamed, 'claude-auto-default')).match({ name: 'claude-main' });
+  });
+
+  it('should take a name back out of the former names when a runtime is renamed back to it', () => {
+    // Act
+    const renamed = renameRuntimeId(IDS, 'claude-default', 'claude-auto-default');
+
+    // Assert
+    should(renamed.runtimes['claude-auto-default']).match({ id: ID_A, formerNames: ['claude-default'] });
+  });
+
+  it('should leave the ids as they are for a runtime never published, or a rename to the same name', () => {
+    // Act / Assert
+    should(renameRuntimeId(IDS, 'unpublished', 'other')).equal(IDS);
+    should(renameRuntimeId(IDS, 'codex-default', 'codex-default')).equal(IDS);
   });
 });

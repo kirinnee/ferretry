@@ -50,6 +50,13 @@ export function renderChangeView(view: FleetAccountChangeView): string {
         ),
       );
     }
+    const running = preview.runningSessions ?? [];
+    if (running.length > 0) {
+      lines.push(
+        'Running on it now:',
+        ...indent(running.map(session => `${session.name} (${HARNESS_LABEL[session.harness]}) · ${session.id}`)),
+      );
+    }
   } else if (preview.kind === 'sign-out') {
     lines.push(
       `Signs out ${preview.credential}: ${count(preview.runtimesAffected, 'runtime')} will need sign-in afterwards.`,

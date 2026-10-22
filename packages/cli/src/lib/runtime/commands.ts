@@ -98,6 +98,20 @@ export function registerRuntimeCommands(program: Command, deps: AccountCommandDe
   });
 
   writeOptions(
+    runtime
+      .command('rename')
+      .description('give a runtime a new name; the old one keeps starting it and nothing restarts')
+      .argument('<name>', 'the runtime')
+      .argument('<new-name>', 'its new name'),
+  ).action(async (name: string, to: string, options: Record<string, unknown>) => {
+    await runChange(deps, {
+      change: { kind: 'runtime.rename', name, to },
+      destructive: true,
+      options: writeFlags(options),
+    });
+  });
+
+  writeOptions(
     runtime.command('rm').alias('remove').description('remove a runtime').argument('<name>', 'the runtime'),
   ).action(async (name: string, options: Record<string, unknown>) => {
     await runChange(deps, {

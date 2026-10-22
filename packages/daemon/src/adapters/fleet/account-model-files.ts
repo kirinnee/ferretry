@@ -23,11 +23,13 @@ import {
   RETIRED_FLEET_CONFIG_FILE,
   RetiredFleetConfigError,
   type RuntimeIds,
+  type RuntimeRename,
+  renamedRuntimeMentions,
   runtimeIdsPath,
   SharedHistoryMigration,
 } from '@ferretry/fleet';
 import { FileFleetProvisioner, FileSharedHistoryFileSystem } from '@ferretry/fleet/adapters';
-import { SessionStateSchema } from '@ferretry/protocol';
+import { configFilePath, SessionStateSchema } from '@ferretry/protocol';
 import type { ConfigFilesService } from '../../lib/config-files/index.ts';
 import type { AccountDocumentReading, FleetCatalogServiceDeps } from '../../lib/fleet/catalog-service.ts';
 import type { FoundationPaths } from '../../lib/paths.ts';
@@ -81,8 +83,11 @@ export async function readConfigAccountDocument(
     format: evaluation.fleetFiles === 0 ? 'none' : 'version-2',
     model,
     revision: evaluation.fleetRevision,
-    documents: (next: AccountModel): readonly FleetDocumentWrite[] =>
-      fleetFileEdits(model, next, files).map(edit => ({
+    documents: (next: AccountModel, rename?: RuntimeRename): readonly FleetDocumentWrite[] =>
+      [
+        ...fleetFileEdits(model, next, files, runtimeFileMoves(rename)),
+        ...(rename === undefined ? [] : renamedRuntimeMentions(evaluation.effective, files, rename)),
+      ].map(edit => ({
         path: join(locations.configDirectory, edit.path),
         content: edit.content ?? '',
         mode: DOCUMENT_MODE,
@@ -91,6 +96,14 @@ export async function readConfigAccountDocument(
       })),
   };
 }
+
+/** A renamed runtime's file, new path → old path, so it moves with the owner's comments. */
+export const runtimeFileMoves = (rename: RuntimeRename | undefined): ReadonlyMap<string, string> =>
+  rename === undefined
+    ? new Map()
+    : new Map([
+        [configFilePath({ kind: 'runtime', name: rename.to }), configFilePath({ kind: 'runtime', name: rename.from })],
+      ]);
 
 /**
  * The account model this machine declares, or `undefined` for a machine with no fleet files yet.
@@ -135,6 +148,8 @@ export interface FileFleetCatalogOptions {
   readonly hostCodexHome?: string;
   /** Every session's state document, raw. */
   sessionStates(): Promise<readonly unknown[]>;
+  /** The session records a runtime removal or rename reads and re-points. Absent: neither is known. */
+  readonly sessionRecords?: Required<Pick<FleetCatalogServiceDeps, 'sessionRecords' | 'renameSessions'>>;
   readonly credentials: FleetCatalogServiceDeps['credentials'];
   readonly locate: FleetCatalogServiceDeps['locate'];
   readonly machineName: () => string;
@@ -194,7 +209,7 @@ async function wrappersCurrent(binDirectory: string, operations: FleetModelApply
  * beside the manifest, so two provisioners in one daemon still apply one at a time.
  */
 export function fileFleetCatalogDeps(options: FileFleetCatalogOptions): FleetCatalogServiceDeps {
-  const { paths, userHome } = options;
+  const { paths, userHome, sessionRecords: records } = options;
   const allowedRoots = [paths.home, userHome];
   const layout: FleetLayout = {
     stateHome: paths.home,
@@ -236,6 +251,12 @@ export function fileFleetCatalogDeps(options: FileFleetCatalogOptions): FleetCat
         const state = SessionStateSchema.safeParse(raw);
         return state.success ? [state.data.status] : [];
       }),
+    ...(records === undefined
+      ? {}
+      : {
+          sessionRecords: async () => await records.sessionRecords(),
+          renameSessions: async rename => await records.renameSessions(rename),
+        }),
     machineName: options.machineName,
     credentials: options.credentials,
     provisioner: acknowledgingProvisioner(

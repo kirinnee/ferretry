@@ -33,6 +33,25 @@ describe('account-model words', () => {
     should(text).equal('Add runtime claude-work');
   });
 
+  it('should list the sessions still running on a runtime a change removes', () => {
+    const text = renderChangeView(
+      changeView(
+        { kind: 'runtime.remove', name: 'x' },
+        {
+          consequences: [],
+          preview: {
+            kind: 'apply',
+            operations: [],
+            documents: [],
+            runtimes: [],
+            runningSessions: [{ id: 's-1', name: 'Fisher', harness: 'claude' }],
+          },
+        },
+      ),
+    );
+    should(text).match(/Running on it now:\n {2}Fisher \(Claude Code\) · s-1/);
+  });
+
   it('should say when a runtime cannot launch, and a sign-out that keeps the terminal signed in', () => {
     const apply = renderChangeView(
       changeView(

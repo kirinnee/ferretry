@@ -174,4 +174,22 @@ describe('registerRuntimeCommands', () => {
     should(world.gateway.called('stage')[0]?.args[0]).eql({ kind: 'runtime.remove', name: 'old' });
     should(world.gateway.called('apply')).have.length(1);
   });
+
+  it('should rename a runtime under --yes, and stop at a dry run', async () => {
+    const world = fakeWorld({ interactive: false });
+    await runCommand(registerRuntimeCommands, world, ['runtime', 'rename', 'old', 'new', '--yes']);
+    should(world.gateway.called('stage')[0]?.args[0]).eql({ kind: 'runtime.rename', name: 'old', to: 'new' });
+    should(world.gateway.called('apply')).have.length(1);
+
+    const dry = fakeWorld({ interactive: false });
+    await runCommand(registerRuntimeCommands, dry, ['runtime', 'rename', 'old', 'new', '--dry-run']);
+    should(dry.gateway.called('stage')).have.length(1);
+    should(dry.gateway.called('apply')).have.length(0);
+  });
+
+  it('should ask before renaming, and change nothing off a terminal without --yes', async () => {
+    const world = fakeWorld({ interactive: false });
+    await runCommand(registerRuntimeCommands, world, ['runtime', 'rename', 'old', 'new']);
+    should(world.gateway.called('apply')).have.length(0);
+  });
 });

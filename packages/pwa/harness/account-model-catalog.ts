@@ -359,17 +359,35 @@ const RUNTIMES = {
 const HARNESS_CHANGE_ID = 'fy_fprop_harnesspreviewchange00';
 
 /** Staging answers with the change it was sent, previewed as writing nothing: the harness has no disk. */
+/** The ferrets a removal's dry run finds still running on the runtime, as the daemon would list them. */
+const RUNNING_ON_REMOVED = [
+  { id: 'ms0v8vgc-d445a669', name: 'Fisher', harness: 'codex' },
+  { id: 'ms0v8vgc-77c1e2b0', name: 'Otter, fixing the onboarding inset on phones', harness: 'codex' },
+];
+
 const stagedView = (init: RequestInit | undefined) => {
-  const { change } = JSON.parse(String(init?.body ?? '{}')) as { change?: unknown };
+  const { change } = JSON.parse(String(init?.body ?? '{}')) as { change?: { kind?: string } };
+  // A removal says what it does to the ferrets on the runtime first, as the daemon's dry run does.
+  const removal = change?.kind === 'runtime.remove';
   return {
     id: HARNESS_CHANGE_ID,
     revision: 'harness',
     change,
     summary: 'Preview of this change on studio-mac',
-    consequences: [],
+    consequences: removal
+      ? [
+          '2 ferrets are running on it. They keep running, but restarting them later needs another runtime. Its past sessions stay in history.',
+        ]
+      : [],
     expiresAt: new Date(Date.now() + 15 * 60_000).toISOString(),
     state: 'pending',
-    preview: { kind: 'apply', operations: [], documents: [], runtimes: [] },
+    preview: {
+      kind: 'apply',
+      operations: [],
+      documents: [],
+      runtimes: [],
+      ...(removal ? { runningSessions: RUNNING_ON_REMOVED } : {}),
+    },
   };
 };
 
