@@ -469,6 +469,25 @@ network type changes, so a phone that wakes with a dead socket learns so in seco
 changes the wire: a peer that pings only every thirty seconds is still conforming, and the
 rendezvous's eviction rule is unchanged.
 
+**A deadline that fired late measured the browser, not the carrier.** A phone that hides an installed
+app freezes the page or throttles its timers to about once a minute, and on the way back every overdue
+timer and every queued message is delivered in an order the browser does not promise — so a `fy-pong`
+that arrived during the freeze can be queued behind the deadline it answers. A browser deadline that
+fires more than **2 seconds** past its time is therefore forgiven **once**: instead of closing, the
+browser pings again with the 4-second liveness-check deadline on the now-running page. Answered, the
+session lives; silent again, it is closed `4408` exactly as before. Any evidence of life re-arms the
+forgiveness.
+
+**A drop is recovered before it is said.** A held session that ends under a browser is redialled on the
+same carrier at once: the connection model's first retry, a live feed's first reopen and a terminal's
+first reopen all wait **under 300 ms** (equal jitter where there is a schedule), and nothing tells the
+person "reconnecting" until the outage has lasted **1.5 seconds** (2 for a session's live chip). Every
+drop is still recorded on the device — the carrier, the close code, how long the session had lived and
+since it last heard anything, whether the page was hidden and for how long, the network type where the
+browser says, and how long the next session took to open — and shown with a Copy button under Settings ›
+Machine › Performance, so "it keeps reconnecting" arrives with evidence. Nothing in that record is a
+credential or an address, and it is never sent anywhere.
+
 #### What `fy-pong` cannot prove
 
 `fy-pong` is answered by the runtime holding the socket, not by the rendezvous: the auto-responder
@@ -2561,6 +2580,15 @@ partial one. The operator runbook is
   record exactly like `true`. A boot that could not get an answer keeps the record and asks once more
   on the next boot. Switching the entry off through `PUT /v1/tunnel` releases at once; an entry
   edited by hand in the file takes effect, and releases, on the next start.
+- **What the daemon logs about each tunnel session.** A tunnel that stays registered while a phone
+  "keeps reconnecting" is a per-session fact, so every session the tunnel listener carries logs one
+  `tunnel session opened` line and one `tunnel session closed` line: who ended it (the browser side, or
+  this daemon), the close code with what it means and the reason quoted on one line, how long it
+  lived, how long before the end the last client frame arrived (a `fy-ping` counts), the bytes each
+  way, and whether a device proved itself on it. A peer that vanished is `1006`; the reason a peer sends
+  is cut to one printable line so it cannot forge a second log line. No address, device or key is in
+  either line (`packages/daemon/src/lib/tunnel/session-log.ts`). Sessions on the direct listener are
+  not logged.
 - **`cloudflared` supervision.** Restarted 1 s after it exits, doubling to one minute with equal jitter,
   the backoff starting over once a connection registers; registration is the set of
   `Registered tunnel connection connIndex=N` lines minus `Unregistered …`, so one of four edge

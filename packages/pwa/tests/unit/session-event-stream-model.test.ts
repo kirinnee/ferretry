@@ -189,8 +189,8 @@ describe('the live feed retry schedule', () => {
 
     // Assert — equal jitter: each delay lands in the UPPER HALF of its window, so the schedule can
     // neither collapse back to hammering a daemon that is still down nor run past the ceiling.
-    expect(floors).toEqual([500, 1_000, 2_000, 4_000, 5_000, 5_000, 5_000, 5_000]);
-    expect(ceilings).toEqual([1_000, 2_000, 4_000, 8_000, 10_000, 10_000, 10_000, 10_000]);
+    expect(floors).toEqual([150, 300, 600, 1_200, 2_400, 4_800, 5_000, 5_000]);
+    expect(ceilings).toEqual([300, 600, 1_200, 2_400, 4_800, 9_600, 10_000, 10_000]);
     for (const [index, middle] of middles.entries()) {
       expect(middle).toBeGreaterThanOrEqual(floors[index] ?? 0);
       expect(middle).toBeLessThanOrEqual(ceilings[index] ?? 0);
@@ -329,7 +329,7 @@ describe('the live feed subscription', () => {
     harness.transport.last.live(liveSample(900));
     harness.transport.last.fail();
     await settle();
-    harness.clock.fire(500);
+    harness.clock.fire(150);
 
     // Assert — the sample arrived whole, and the retry resumes after the last EVENT, not the sample.
     expect(samples).toEqual([liveSample(900)]);
@@ -394,7 +394,7 @@ describe('the live feed subscription', () => {
     // Assert — a resolved stream and a rejected one mean the same thing to a reader: the feed
     // stopped. Silently accepting the resolution is the original defect.
     expect(harness.statuses).toEqual(['reconnecting']);
-    expect(harness.clock.delays).toEqual([500]);
+    expect(harness.clock.delays).toEqual([150]);
     expect(harness.transport.attempts).toHaveLength(1);
     harness.control.stop();
   });
@@ -409,7 +409,7 @@ describe('the live feed subscription', () => {
 
     // Assert
     expect(harness.statuses).toEqual(['reconnecting']);
-    expect(harness.clock.delays).toEqual([500]);
+    expect(harness.clock.delays).toEqual([150]);
     harness.control.stop();
   });
 
@@ -421,7 +421,7 @@ describe('the live feed subscription', () => {
     // Act
     harness.transport.last.fail();
     await settle();
-    harness.clock.fire(500);
+    harness.clock.fire(150);
 
     // Assert — resuming from zero would replay the whole tail into the transcript on every flap.
     expect(harness.transport.attempts).toHaveLength(2);
@@ -444,7 +444,7 @@ describe('the live feed subscription', () => {
     }
 
     // Assert — one status change for the whole run: `reconnecting` is not re-announced every window.
-    expect(seen).toEqual([500, 1_000, 2_000, 4_000]);
+    expect(seen).toEqual([150, 300, 600, 1_200]);
     expect(harness.statuses).toEqual(['reconnecting']);
     expect(harness.transport.attempts).toHaveLength(5);
     harness.control.stop();
@@ -455,10 +455,10 @@ describe('the live feed subscription', () => {
     const harness = subject();
     harness.transport.last.fail();
     await settle();
-    harness.clock.fire(500);
+    harness.clock.fire(150);
     harness.transport.last.fail();
     await settle();
-    harness.clock.fire(1_000);
+    harness.clock.fire(300);
 
     // Act — the third attempt actually connects and the daemon proves it is merely quiet.
     harness.transport.last.idle(idleFrame(30));
@@ -469,7 +469,7 @@ describe('the live feed subscription', () => {
     // Assert — back to the first window. A stream that reconnects, sits quiet for an hour and then
     // flaps must not resume at the backoff it reached an hour ago.
     expect(harness.statuses).toEqual(['reconnecting', 'live', 'reconnecting']);
-    expect(harness.clock.delays).toEqual([500]);
+    expect(harness.clock.delays).toEqual([150]);
     harness.control.stop();
   });
 
@@ -480,10 +480,10 @@ describe('the live feed subscription', () => {
     // Act
     harness.transport.last.fail();
     await settle();
-    harness.clock.fire(500);
+    harness.clock.fire(150);
     harness.transport.last.fail();
     await settle();
-    harness.clock.fire(1_000);
+    harness.clock.fire(300);
     harness.transport.last.fail();
     await settle();
 
@@ -511,7 +511,7 @@ describe('the live feed silence watchdog', () => {
     // Assert — cancelled from this end, and then handled exactly like a close.
     expect(harness.transport.attempts[0]?.signal?.aborted).toBe(true);
     expect(harness.statuses).toEqual(['reconnecting']);
-    expect(harness.clock.delays).toEqual([500]);
+    expect(harness.clock.delays).toEqual([150]);
     harness.control.stop();
   });
 
@@ -526,8 +526,8 @@ describe('the live feed silence watchdog', () => {
     await settle();
 
     // Assert — one attempt has one end. Two would leave the browser holding two live streams.
-    expect(harness.clock.delays).toEqual([500]);
-    harness.clock.fire(500);
+    expect(harness.clock.delays).toEqual([150]);
+    harness.clock.fire(150);
     expect(harness.transport.attempts).toHaveLength(2);
     harness.control.stop();
   });
@@ -567,7 +567,7 @@ describe('the live feed silence watchdog', () => {
     // Act
     harness.transport.last.fail();
     await settle();
-    harness.clock.fire(500);
+    harness.clock.fire(150);
 
     // Assert — relearning from scratch would judge the reopened stream against a window three times
     // shorter than the one the daemon told it about. (The drop from `live` is still inside its quiet window.)
@@ -585,7 +585,7 @@ describe('the live feed silence watchdog', () => {
 
     // Assert — there is no socket to watch between attempts, and a watchdog left running over the
     // gap would fire against the reconnection it is not yet watching.
-    expect(harness.clock.delays).toEqual([500]);
+    expect(harness.clock.delays).toEqual([150]);
     harness.control.stop();
   });
 });
@@ -596,7 +596,7 @@ describe('the live feed manual reconnect', () => {
     const harness = subject({ attemptBudget: 1 });
     harness.transport.last.fail();
     await settle();
-    harness.clock.fire(500);
+    harness.clock.fire(150);
     harness.transport.last.fail();
     await settle();
     expect(harness.control.status()).toBe('disconnected');
@@ -610,7 +610,7 @@ describe('the live feed manual reconnect', () => {
     expect(harness.statuses).toEqual(['reconnecting', 'disconnected', 'connecting']);
     harness.transport.last.fail();
     await settle();
-    expect(harness.clock.delays).toEqual([500]);
+    expect(harness.clock.delays).toEqual([150]);
     harness.control.stop();
   });
 
@@ -619,7 +619,7 @@ describe('the live feed manual reconnect', () => {
     const harness = subject();
     harness.transport.last.fail();
     await settle();
-    expect(harness.clock.delays).toEqual([500]);
+    expect(harness.clock.delays).toEqual([150]);
 
     // Act
     harness.control.reconnect();
@@ -679,7 +679,7 @@ describe('the live feed teardown', () => {
     const harness = subject();
     harness.transport.last.fail();
     await settle();
-    expect(harness.clock.delays).toEqual([500]);
+    expect(harness.clock.delays).toEqual([150]);
 
     // Act
     harness.control.stop();
@@ -736,7 +736,7 @@ describe('the live feed teardown', () => {
     await settle();
     harness.clock.fire(SESSION_EVENT_STREAM_QUIET_MS);
     expect(harness.statuses).toEqual(['live', 'reconnecting']);
-    expect(harness.clock.delays).toEqual([500]);
+    expect(harness.clock.delays).toEqual([150]);
 
     // Act — the transport that already ended keeps talking.
     settled.emit(event(6));
@@ -750,16 +750,16 @@ describe('the live feed teardown', () => {
     expect(harness.statuses).toEqual(['live', 'reconnecting']);
     expect(harness.control.status()).toBe('reconnecting');
     expect(harness.events.map(value => value.sequence)).toEqual([5]);
-    expect(harness.clock.delays).toEqual([500]);
+    expect(harness.clock.delays).toEqual([150]);
 
     // And the budget really was not restored: the reconnection resumes at the cursor the live frame
     // reached, and the window after it is the SECOND one, not the first over again.
-    harness.clock.fire(500);
+    harness.clock.fire(150);
     expect(harness.transport.attempts).toHaveLength(2);
     expect(harness.transport.last.after).toBe(5);
     harness.transport.last.fail();
     await settle();
-    expect(harness.clock.delays).toEqual([1_000]);
+    expect(harness.clock.delays).toEqual([300]);
     harness.control.stop();
   });
 
@@ -904,7 +904,7 @@ describe('the live feed quiet window', () => {
     // Act — the socket drops, the retry reopens it, and a frame proves it before the window ends.
     harness.transport.last.fail();
     await settle();
-    harness.clock.fire(500);
+    harness.clock.fire(150);
     harness.transport.last.emit(event(2));
 
     // Assert
@@ -955,7 +955,7 @@ describe('the live feed quiet window', () => {
     harness.transport.last.emit(event(1));
     harness.transport.last.fail();
     await settle();
-    harness.clock.fire(500);
+    harness.clock.fire(150);
 
     // Act
     harness.transport.last.fail();

@@ -69,6 +69,7 @@ import {
   SESSION_PROTOCOL_ID,
   toBase64Url,
 } from '@ferretry/relay';
+import type { CarrierDropLog, CarrierSessionEnd } from './carrier-drops.ts';
 import {
   CARRIER_PREFERENCE_LABEL,
   type CarrierPreference,
@@ -186,6 +187,9 @@ const browserHeartbeat: RelayHeartbeatSchedule = (tick, interval) => {
   const handle = setInterval(tick, interval);
   return () => clearInterval(handle);
 };
+
+/** The page's monotonic clock, which a wall-clock change cannot make a deadline look late by. */
+const monotonicNow = (): number => globalThis.performance.now();
 
 /**
  * The code a browser uses for a socket that ended without a close frame.
@@ -404,6 +408,10 @@ export interface OpenRelaySessionOptions {
   readonly onData?: RelayClientSessionDependencies['onData'];
   /** How long the session may take to be accepted. The heartbeat grace by default. */
   readonly deadlineMs?: number;
+  /** Told when this session, once serving, is dropped under this browser. See {@link driveRelaySession}. */
+  readonly onDropped?: (end: CarrierSessionEnd) => void;
+  /** A monotonic clock for the keepalive and the drop report; the page's own by default. */
+  readonly clock?: () => number;
 }
 
 /**
@@ -462,6 +470,18 @@ export const KEEPALIVE_DEADLINE_MS = 10_000;
 export const LIVENESS_CHECK_DEADLINE_MS = 4_000;
 
 /**
+ * How late a heartbeat deadline may fire before the silence it measured is not believed.
+ *
+ * A TIMER THAT FIRED LATE DID NOT WATCH THE SOCKET. A phone that hides an installed app freezes the page
+ * or throttles its timers to once a minute; on the way back every overdue timer and every queued message
+ * is delivered, in an order the browser does not promise. A pong that arrived while the page was frozen
+ * can still be queued BEHIND the deadline it answers, so a deadline that fires well past its time has
+ * measured the freeze, not the carrier. It is forgiven ONCE: a fresh ping with the liveness-check
+ * deadline, now on a running page — answered, and the session lives; silent again, and it is dead.
+ */
+export const HEARTBEAT_LATE_TOLERANCE_MS = 2_000;
+
+/**
  * Asks one held session to prove it is alive within `deadlineMs`, or end. Registered by
  * {@link driveRelaySession} for every session it keeps alive; absent for one it does not.
  */
@@ -489,6 +509,8 @@ export const driveRelaySession = async <T>({
   settled,
   keepAlive,
   deadlineMs = HEARTBEAT_GRACE_SECONDS * 1_000,
+  clock = monotonicNow,
+  onDropped,
 }: {
   readonly socket: RelayCarrierSocket;
   readonly session: RelayClientSession;
@@ -497,17 +519,38 @@ export const driveRelaySession = async <T>({
   readonly keepAlive: boolean;
   /** How long the session may take to settle. The heartbeat grace by default; shorter for a probe. */
   readonly deadlineMs?: number;
+  /** A monotonic millisecond clock: how late a deadline fired, and how long the session lived. */
+  readonly clock?: () => number;
+  /**
+   * Told once when a session that was SERVING ends without this browser asking — the carrier closed
+   * under it, or its heartbeat went unanswered. Never for a dial that failed, a close this app made, or
+   * a stream the daemon concluded. What `carrier-drops.ts` keeps.
+   */
+  readonly onDropped?: (end: CarrierSessionEnd) => void;
 }): Promise<T> => {
   let opened = false;
+  /** When the session started serving, once it has; a close before that is a failed dial, not a drop. */
+  let servingSince: number | undefined;
+  let lastHeardAt = clock();
   const timers = new Set<() => void>();
   const stop = (): void => {
     for (const cancel of timers) cancel();
     timers.clear();
     livenessChecks.delete(session);
   };
+  /** A session that was serving ended under this browser: say so once, with what it measured. */
+  const dropped = (code: number, reason: string): void => {
+    if (servingSince === undefined) return;
+    const now = clock();
+    const since = servingSince;
+    servingSince = undefined;
+    onDropped?.({ code, reason, livedMs: now - since, lastHeardMs: now - lastHeardAt });
+  };
   // The one unanswered ping, if any. Any inbound message disarms it — that is the evidence of life —
   // so a deadline that fires has, by construction, heard nothing since it was armed.
   let pongDeadline: { readonly within: number; readonly cancel: () => void } | undefined;
+  /** Whether the last deadline was forgiven for firing late; cleared by any evidence of life. */
+  let forgiven = false;
   const armDeadline = (withinMs: number): void => {
     // A shorter wait replaces a longer one — a liveness check under the regular ping — and a longer
     // one never relaxes a shorter one already armed.
@@ -516,16 +559,23 @@ export const driveRelaySession = async <T>({
       pongDeadline.cancel();
       timers.delete(pongDeadline.cancel);
     }
+    const armedAt = clock();
     const cancel = heartbeat(() => {
       // A repeating schedule used once: the first tick is the deadline.
       cancel();
       timers.delete(cancel);
       pongDeadline = undefined;
+      // Fired long after its time: the page was frozen or throttled, so this silence is the browser's,
+      // not the carrier's. Ask again on a running page — see HEARTBEAT_LATE_TOLERANCE_MS.
+      if (!forgiven && clock() - armedAt - withinMs > HEARTBEAT_LATE_TOLERANCE_MS) {
+        forgiven = true;
+        ping(LIVENESS_CHECK_DEADLINE_MS);
+        return;
+      }
       stop();
-      session.carrierClosed(
-        RELAY_CLOSE_CODES.heartbeatTimeout,
-        `the carrier showed no sign of life for ${String(withinMs / 1_000)} s after a heartbeat`,
-      );
+      const reason = `the carrier showed no sign of life for ${String(withinMs / 1_000)} s after a heartbeat`;
+      dropped(RELAY_CLOSE_CODES.heartbeatTimeout, reason);
+      session.carrierClosed(RELAY_CLOSE_CODES.heartbeatTimeout, reason);
       socket.close(RELAY_CLOSE_CODES.heartbeatTimeout, 'no heartbeat');
     }, withinMs);
     timers.add(cancel);
@@ -536,6 +586,8 @@ export const driveRelaySession = async <T>({
     armDeadline(withinMs);
   };
   const alive = (): void => {
+    lastHeardAt = clock();
+    forgiven = false;
     if (pongDeadline === undefined) return;
     pongDeadline.cancel();
     timers.delete(pongDeadline.cancel);
@@ -561,6 +613,9 @@ export const driveRelaySession = async <T>({
   };
   socket.onClose = (code, reason) => {
     stop();
+    // Only a session still serving or streaming was dropped: one this browser closed, or whose stream
+    // the daemon concluded, has already left both states.
+    if (session.live() || session.streaming()) dropped(code, reason);
     session.carrierClosed(code, reason);
   };
   try {
@@ -569,6 +624,7 @@ export const driveRelaySession = async <T>({
       stop();
       return value;
     }
+    servingSince = clock();
     // The deadline covered getting here and nothing after it; the heartbeat covers
     // the rest. Leaving it armed would close a working session.
     deadline();
@@ -624,6 +680,8 @@ export const openSessionOnSocket = async ({
   mode,
   onData,
   deadlineMs,
+  onDropped,
+  clock,
 }: Omit<OpenRelaySessionOptions, 'dial' | 'method'> & {
   readonly socket: CarrierSocket;
 }): Promise<RelayClientSession> => {
@@ -641,6 +699,8 @@ export const openSessionOnSocket = async ({
     settled: session.ready(),
     keepAlive: true,
     ...(deadlineMs === undefined ? {} : { deadlineMs }),
+    ...(onDropped === undefined ? {} : { onDropped }),
+    ...(clock === undefined ? {} : { clock }),
   });
 };
 
@@ -951,6 +1011,11 @@ export interface DaemonCarrierRouterOptions {
    * walk a lookup of its own.
    */
   readonly learned?: (daemon: DaemonConnection, carriers: readonly ConnectionMethod[]) => void;
+  /**
+   * Where a held session this router opened is reported when it DROPS, and where the next session to
+   * the same machine says it reconnected (`carrier-drops.ts`). Diagnostics only: nothing here decides.
+   */
+  readonly drops?: Pick<CarrierDropLog, 'dropped' | 'reconnected'>;
   /** The clock {@link TUNNEL_LOOKUP_REUSE_MS} is measured on. */
   readonly now?: () => number;
   /**
@@ -1229,6 +1294,7 @@ export class DaemonCarrierRouter {
   readonly #dial: RelayDial;
   readonly #crypto: RelayClientSessionDependencies['crypto'];
   readonly #heartbeat: RelayHeartbeatSchedule | undefined;
+  readonly #drops: Pick<CarrierDropLog, 'dropped' | 'reconnected'> | undefined;
   readonly #hostedRelay: () => Promise<string | undefined>;
   readonly #preference: (daemonId: DaemonId) => CarrierPreference;
   readonly #dialers: CarrierDialers;
@@ -1273,6 +1339,7 @@ export class DaemonCarrierRouter {
     this.#dial = options.dial ?? browserRelayDial;
     this.#crypto = options.crypto;
     this.#heartbeat = options.heartbeat;
+    this.#drops = options.drops;
     // No provider is direct-only, which is what a build with no relay directory honestly is.
     this.#hostedRelay = options.hostedRelay ?? (async () => undefined);
     this.#preference = options.preference ?? (() => DEFAULT_CARRIER_PREFERENCE);
@@ -2116,26 +2183,39 @@ export class DaemonCarrierRouter {
     onData?: RelayStreamRequest['onData'],
   ): Promise<RelayClientSession> {
     const device = await this.#claim(entry);
+    const daemonId = entry.connection.daemonId;
+    const drops = this.#drops;
     const open = async (claim: SessionDeviceClaim): Promise<RelayClientSession> => {
+      const sessionMode = mode(claim);
       const options = {
         crypto: this.#crypto,
         daemon: entry.connection,
         ...(this.#heartbeat === undefined ? {} : { heartbeat: this.#heartbeat }),
-        mode: mode(claim),
+        mode: sessionMode,
         ...(onData === undefined ? {} : { onData }),
+        ...(drops === undefined
+          ? {}
+          : {
+              onDropped: (end: CarrierSessionEnd) =>
+                drops.dropped(daemonId, method.kind, sessionMode.kind === 'stream' ? 'stream' : 'requests', end),
+            }),
         // Only a relay keeps the full heartbeat grace: it is the last resort. Every carrier before it
         // gets the direct acceptance deadline, so a carrier that neither answers nor refuses costs
         // seconds before the walk moves on (§15: a tunnel is dialled like a direct session).
         ...(method.kind === 'relay' ? {} : { deadlineMs: DIRECT_SESSION_DEADLINE_MS }),
       };
-      if (method.kind === 'webrtc') return await openSessionOnSocket({ ...options, socket: await this.#webrtc(entry) });
-      return await openRelaySession({ ...options, dial: this.#dial, method });
+      const session =
+        method.kind === 'webrtc'
+          ? await openSessionOnSocket({ ...options, socket: await this.#webrtc(entry) })
+          : await openRelaySession({ ...options, dial: this.#dial, method });
+      // A drop still waiting for its reconnect learns how long it waited (`carrier-drops.ts`).
+      drops?.reconnected(daemonId);
+      return session;
     };
     try {
       return await open(device);
     } catch (refused) {
       const rotation = this.#rotation;
-      const daemonId = entry.connection.daemonId;
       const pending = deviceRefusal(refused) ? await rotation?.pending(daemonId).catch(() => undefined) : undefined;
       if (rotation === undefined || pending === undefined) throw refused;
       try {

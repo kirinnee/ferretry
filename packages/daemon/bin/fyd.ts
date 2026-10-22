@@ -892,6 +892,7 @@ import {
   tunnelListenerSurface,
   tunnelPeer,
   tunnelServiceOrigin,
+  tunnelSessionLog,
   UnknownPeerRefused,
   UnwatchedPaneExits,
   type UsageFeedPort,
@@ -7768,6 +7769,8 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         clock: { now: () => Date.now() },
         lease: timings.lease,
         connections: deviceConnections,
+        // Only a session that arrived through the tunnel listener reports here (§15).
+        sessionLog: tunnelSessionLog(bootNotices),
       };
       return {
         route: directCarrierSocketRoute(sessionDependencies),

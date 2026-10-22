@@ -1,8 +1,10 @@
 import { describe, expect, test } from 'bun:test';
 
 import { browserTerminalDeckDependencies, SessionTerminalDeck } from '../../src/components/session-terminal-deck.tsx';
+import { RECONNECTING_GRACE_MS } from '../../src/lib/connection-health.ts';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
 import { daemonSessionScope } from '../../src/lib/daemon-scope.ts';
+import { TERMINAL_REOPEN_BASE_MS } from '../../src/lib/terminal-co-control.ts';
 import { TerminalStreamRefused } from '../../src/lib/web-terminals.ts';
 import '../support/dom.ts';
 import { render, run, runAsync } from '../support/react.ts';
@@ -29,6 +31,14 @@ const settle = async (): Promise<void> => {
   await runAsync(async () => {
     for (let turn = 0; turn < 6; turn += 1) await Promise.resolve();
   });
+};
+
+/** Waits past the lamp's quiet window, so a drop that is still out is now said. */
+const outlastGrace = async (): Promise<void> => {
+  await runAsync(async () => {
+    await new Promise(resolve => setTimeout(resolve, RECONNECTING_GRACE_MS + 100));
+  });
+  await settle();
 };
 
 type Rendered = ReturnType<typeof render>;
@@ -394,6 +404,9 @@ describe('SessionTerminalDeck co-control', () => {
     await settle();
 
     expect(attempts).toBe(1);
+    // Said once the outage outlasts the grace, while the fast retries keep failing underneath.
+    await outlastGrace();
+    expect(attempts).toBeGreaterThan(1);
     expect(json(page)).toContain('reconnecting');
     run(() => page.unmount());
   });
@@ -528,6 +541,14 @@ describe('SessionTerminalDeck pane wiring', () => {
 
   test('reconnects after a transport failure and says so while it waits', async () => {
     const deck = fakeDeck(async () => terminalListing([terminalView(FIRST)]));
+    // The network stays down after the drop: every reopen fails, so the outage outlasts the grace.
+    const firstAttach = deck.dependencies.attach;
+    let attaches = 0;
+    deck.dependencies.attach = async (...args) => {
+      attaches += 1;
+      if (attaches > 1) throw new Error('the address did not answer');
+      return await firstAttach(...args);
+    };
     const page = mount(<SessionTerminalDeck connection={alpha} dependencies={deck.dependencies} scope={scopeAlpha} />);
     await settle();
     const socket = deck.sockets[0];
@@ -540,7 +561,41 @@ describe('SessionTerminalDeck pane wiring', () => {
       await Promise.resolve();
     });
 
+    // A drop is unsaid inside the grace — the lamp still says what it said — and said once it outlasts it.
+    expect(json(page)).not.toContain('reconnecting');
+    await outlastGrace();
     expect(json(page)).toContain('reconnecting');
+    run(() => page.unmount());
+  });
+
+  test('never says reconnecting for a drop its first fast reopen recovers', async () => {
+    const deck = fakeDeck(async () => terminalListing([terminalView(FIRST)]));
+    const page = mount(<SessionTerminalDeck connection={alpha} dependencies={deck.dependencies} scope={scopeAlpha} />);
+    await settle();
+    await runAsync(async () => {
+      deck.sockets[0]?.emit('open');
+      await Promise.resolve();
+    });
+
+    // Act — the socket drops, and the reopen that follows inside 300 ms opens.
+    await runAsync(async () => {
+      deck.sockets[0]?.emit('close', { code: 1006 });
+      await Promise.resolve();
+    });
+    await runAsync(async () => {
+      await new Promise(resolve => setTimeout(resolve, TERMINAL_REOPEN_BASE_MS + 50));
+    });
+    await settle();
+    expect(deck.sockets).toHaveLength(2);
+    await runAsync(async () => {
+      deck.sockets[1]?.emit('open');
+      await Promise.resolve();
+    });
+    await outlastGrace();
+
+    // Assert
+    expect(json(page)).toContain('live');
+    expect(json(page)).not.toContain('reconnecting');
     run(() => page.unmount());
   });
 
@@ -570,7 +625,8 @@ describe('SessionTerminalDeck pane wiring', () => {
       deck.sockets[0]?.emit('close', { code: 1006 });
       await Promise.resolve();
     });
-    expect(json(page)).toContain('reconnecting');
+    // Waiting out the backoff: no second stream yet.
+    expect(deck.sockets).toHaveLength(1);
 
     // Act — the connection model says the daemon answered again.
     await runAsync(async () => {

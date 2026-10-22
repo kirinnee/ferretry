@@ -60,15 +60,15 @@ export function shouldReopenTerminalStream(code: number): boolean {
   return code !== 1008 && code !== 1009;
 }
 
-/** How long before retry number `attempt` (1-based). */
-export const TERMINAL_REOPEN_BASE_MS = 1_200;
+/** How long before retry number `attempt` (1-based): the first well inside the lamp's quiet window. */
+export const TERMINAL_REOPEN_BASE_MS = 250;
 export const TERMINAL_REOPEN_MAX_MS = 15_000;
 
 /**
- * Backoff that starts where the original's fixed 1.2s did.
+ * Backoff that reopens a dropped shell at once and then slows down.
  *
- * The first retry keeps the original's feel — a shell that blinks and comes back
- * is what a reader expects — and later ones back off so a daemon that is down
+ * The first retry comes back inside the lamp's quiet window, so a socket that dropped and
+ * reopened never shows as reconnecting at all — and later ones back off so a daemon that is down
  * does not get hammered by a page left open on a desk.
  */
 export function terminalReopenDelayMs(attempt: number): number {

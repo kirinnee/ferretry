@@ -1640,7 +1640,7 @@ function SettingsRoute({ connection }: DaemonPageProps) {
         ),
       },
       // Diagnostics beside the doctor: what this machine and this app spend their time on.
-      performanceSettingsTab(createDaemonClient, store.performance),
+      performanceSettingsTab(createDaemonClient, store.performance, store.carrierDrops),
       pricingSettingsTab(createDaemonClient),
       // Optional provider keys sit with the machine's other spend: pricing, then the keys that spend.
       speedupsSettingsTab(createDaemonClient),
@@ -1654,7 +1654,7 @@ function SettingsRoute({ connection }: DaemonPageProps) {
       // The agent CLIs its ferrets run, whether Ferretry verified them, and updating them (docs/updating.md).
       agentClisSettingsTab(createDaemonClient),
     ],
-    [createDaemonClient, store.clients, store.performance],
+    [createDaemonClient, store.clients, store.performance, store.carrierDrops],
   );
   // This device's copy of every machine's sessions and messages, and where each page was scrolled.
   const clearCachedData = useCallback(async (): Promise<void> => {

@@ -125,7 +125,7 @@ describe('the store’s connection health', () => {
     await settle(2);
     // The attempt settled without a request, so the loop simply scheduled its next try.
     expect(health.state(nobody)).toMatchObject({ kind: 'reconnecting', attempt: 1 });
-    expect(timers.armed.filter(entry => !entry.cancelled).map(entry => entry.delayMs)).toEqual([30_000, 500]);
+    expect(timers.armed.filter(entry => !entry.cancelled).map(entry => entry.delayMs)).toEqual([30_000, 300]);
   });
 
   it('recovers from two outages back to back on one page, the feed resuming both times', async () => {
