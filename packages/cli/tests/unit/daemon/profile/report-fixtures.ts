@@ -94,8 +94,18 @@ export function fullReport(): PerformanceReport {
       total: 12,
       perMinute: 24,
       commands: [
-        { command: 'tmux capture-pane', count: 10, perMinute: 20, synchronous: 3, wall: wallStats(1_200) },
-        { command: 'git status', count: 2, perMinute: 4, synchronous: 0, wall: wallStats(2_400) },
+        {
+          command: 'tmux capture-pane',
+          count: 10,
+          perMinute: 20,
+          synchronous: 3,
+          wall: wallStats(1_200),
+          by: [
+            { activity: 'turn watcher', count: 8 },
+            { activity: 'live readout', count: 2 },
+          ],
+        },
+        { command: 'git status', count: 2, perMinute: 4, synchronous: 0, wall: wallStats(2_400), by: [] },
       ],
     },
     fileOperations: {

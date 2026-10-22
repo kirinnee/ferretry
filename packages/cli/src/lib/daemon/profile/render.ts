@@ -7,6 +7,11 @@ const ms = (value: number): string =>
   value >= 1_000 ? `${(value / 1_000).toFixed(1)} s` : `${value >= 10 ? Math.round(value) : value.toFixed(1)} ms`;
 const num = (value: number): string => (Number.isInteger(value) ? value.toLocaleString('en-US') : value.toFixed(1));
 const pct = (share: number): string => `${Math.round(share * 100)}%`;
+/** Who started a command's children: ` · by turn watcher 300, fleet refresh 12`; nothing when unknown. */
+const starters = (by: readonly { readonly activity: string; readonly count: number }[] | undefined): string =>
+  by === undefined || by.length === 0
+    ? ''
+    : ` · by ${by.map(entry => `${entry.activity} ${num(entry.count)}`).join(', ')}`;
 const wall = (stats: DurationStats): string =>
   `p50 ${ms(stats.p50Ms)} · p95 ${ms(stats.p95Ms)} · max ${ms(stats.maxMs)} · total ${ms(stats.totalMs)}`;
 
@@ -80,7 +85,7 @@ export function renderPerformanceReport(report: PerformanceReport): string {
   lines.push('', `Child processes  ${num(children.total)} (${num(children.perMinute)}/min)`);
   for (const entry of children.commands.slice(0, ROWS))
     lines.push(
-      `  ${num(entry.perMinute).padStart(7)}/min  ${entry.command}${entry.synchronous > 0 ? ` (${String(entry.synchronous)} synchronous)` : ''} — ${wall(entry.wall)}`,
+      `  ${num(entry.perMinute).padStart(7)}/min  ${entry.command}${entry.synchronous > 0 ? ` (${String(entry.synchronous)} synchronous)` : ''} — ${wall(entry.wall)}${starters(entry.by)}`,
     );
 
   if (report.activities.length > 0) {

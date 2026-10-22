@@ -29,7 +29,9 @@ describe('renderPerformanceReport', () => {
     should(actual).containEql('   80%  walk');
     should(actual).containEql('Hot stacks');
     should(actual).containEql('Child processes  12 (24/min)');
-    should(actual).containEql('tmux capture-pane (3 synchronous) — p50 1.0 ms · p95 2.0 ms · max 3.0 ms · total 1.2 s');
+    should(actual).containEql(
+      'tmux capture-pane (3 synchronous) — p50 1.0 ms · p95 2.0 ms · max 3.0 ms · total 1.2 s · by turn watcher 8, live readout 2',
+    );
     should(actual).containEql('  git status — p50');
     should(actual).containEql('Timers and background work — by total wall time');
     should(actual).containEql('tick — 120/min');

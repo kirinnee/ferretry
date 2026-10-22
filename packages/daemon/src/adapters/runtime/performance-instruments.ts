@@ -110,6 +110,8 @@ export function instrumentChildProcesses(
   probe: PerformanceProbe,
   clock: MillisecondClockPort,
   host: SpawnHost = Bun,
+  /** The labelled work running right now, so each child is attributed to the timer that started it. */
+  activity: () => string | undefined = () => undefined,
 ): () => void {
   const spawn = host.spawn;
   const spawnSync = host.spawnSync;
@@ -118,7 +120,7 @@ export function instrumentChildProcesses(
     if (!probe.recording) return child;
     const command = commandLabel(spawnedArgv(args[0]));
     const startedAt = clock.now();
-    probe.childStarted(command, false);
+    probe.childStarted(command, false, activity());
     void child.exited.then(
       () => probe.childExited(command, clock.now() - startedAt),
       () => undefined,
@@ -129,7 +131,7 @@ export function instrumentChildProcesses(
     if (!probe.recording) return spawnSync(...args);
     const command = commandLabel(spawnedArgv(args[0]));
     const startedAt = clock.now();
-    probe.childStarted(command, true);
+    probe.childStarted(command, true, activity());
     try {
       return spawnSync(...args);
     } finally {
