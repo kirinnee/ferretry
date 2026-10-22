@@ -1,14 +1,18 @@
 import { describe, it } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { peerEnvelopePreamble } from '@ferretry/protocol';
 import should from 'should';
 import {
+  type ComposerCursor,
   composerInput,
   composerLanding,
   type DeliveryFrame,
   heldAt,
   occupiedComposer,
+  paneHoldOf,
   readComposer,
+  readHarnessQueue,
   readPendingInputs,
   showsPayload,
 } from '../../../src/lib/index.ts';
@@ -206,5 +210,129 @@ describe('showsPayload', () => {
   it('should never match empty text', () => {
     should(showsPayload('', 'hi')).be.false();
     should(showsPayload('hi', ' ')).be.false();
+  });
+});
+
+/**
+ * Claude Code 2.1.281's queue, read from REAL pane captures of the incident: one `fy send` typed four
+ * times into a mid-turn Claude ferret, because the daemon did not recognise this rendering as holding
+ * it. The captures carry no cursor, so every claim is checked under each cursor tmux could report.
+ */
+describe('Claude Code 2.1.281 queue on real captures', () => {
+  const COMPOSER_ROW = 77;
+  const CURSORS: ReadonlyArray<{ readonly name: string; readonly cursor: ComposerCursor }> = [
+    { name: 'no cursor', cursor: {} },
+    { name: 'the cursor at the placeholder', cursor: { x: 2, y: COMPOSER_ROW } },
+    { name: 'the cursor past the placeholder', cursor: { x: 34, y: COMPOSER_ROW } },
+    { name: 'the cursor on the row below', cursor: { x: 0, y: COMPOSER_ROW + 1 } },
+  ];
+
+  const envelope = (name: string, session: string): string =>
+    peerEnvelopePreamble({ name, sessionId: session, kind: 'message', clientName: 'fy' });
+  const LIZZETTE = envelope('lizzette', 'mvgt2oz9-04e28935');
+  const CONFIRMED =
+    `${LIZZETTE}lizzette: CONFIRMED on the owner's Mac — after manual ProcessType=Interactive ` +
+    '(spawn type = interactive (4)), 4.67.0: lag 0.1ms, 1 stall total (0.4s at boot, dlopen of WebRTC lib) ' +
+    'vs 381 stalls/worst 7.9s/lag 3.1s minutes earlier on the same build. QoS was the root cause. Please make ' +
+    "sure rozanne's plist fix ships ASAP (and that update/restart never drops the key).";
+  const RESEND =
+    `${LIZZETTE}lizzette (resend): QoS CONFIRMED as the Mac root cause — ProcessType=Interactive took the ` +
+    "owner's 4.67.0 from 381 stalls/lag 3.1s to lag 0.1ms. I told rozanne to ship the plist fix first.";
+  const ROOT_CAUSE =
+    `${LIZZETTE}lizzette: CONFIRMED root cause on the owner's Mac — manual ProcessType=Interactive took ` +
+    '4.67.0 from 381 stalls / worst 7.9s / lag 3.1s to lag 0.1ms, 1 boot-only stall. Ship the plist fix ' +
+    "first (own PR if the cleanups aren't ready), and make sure update/restart/install never drop the key.";
+  const LEAD =
+    `${envelope('sheilah', 'mvir1r5g-90731a4e')}lead: thanks for #706 — good call keeping load() fresh for ` +
+    'authority. The per-string redaction follow-up is the biggest remaining secrets.key source on the live ' +
+    'box (6.1/s on the operator read path: events/messages rows, triage). Could you take it as your next PR ' +
+    '(one vault open per read batch/request, or an identity-keyed ciphertext cache — never plaintext)? ' +
+    "I'm at my sub-ferret limit. If you can't, tell me and I'll queue it.";
+
+  const claude = (state: string): string =>
+    readFileSync(join(FIXTURES, `claude-2.1.281-busy-queued-${state}.txt`), 'utf8');
+
+  it('should read every queued message above the spinner, in order, as the harness drew it', () => {
+    const queue = readHarnessQueue(claude('copies'));
+
+    should(queue.entries).have.length(8);
+    for (const entry of queue.entries.slice(0, 4)) should(showsPayload(entry, CONFIRMED)).be.true();
+    for (const entry of queue.entries.slice(4)) should(showsPayload(entry, RESEND)).be.true();
+    should(readPendingInputs(claude('copies'))).deepEqual(queue.entries);
+  });
+
+  for (const { name, cursor } of CURSORS) {
+    it(`should call the payload held in the queue, with ${name}`, () => {
+      should(heldAt(claude('copies'), cursor, CONFIRMED, true)).equal('queue');
+      should(paneHoldOf(claude('copies'), cursor, RESEND, true)).equal('queue');
+      should(paneHoldOf(claude('clipped'), cursor, ROOT_CAUSE, true)).equal('queue');
+      should(paneHoldOf(claude('clipped'), cursor, LEAD, true)).equal('queue');
+    });
+
+    it(`should never read "Press up to edit queued messages" as a typed draft, with ${name}`, () => {
+      const frame: DeliveryFrame = {
+        alive: true,
+        dead: false,
+        promptReady: false,
+        visible: claude('copies'),
+        ...(cursor.x === undefined ? {} : { cursorX: cursor.x, cursorY: cursor.y }),
+      };
+      const composer = readComposer(frame.visible, cursor);
+
+      should(composer?.text).equal('Press up to edit queued messages');
+      should(composer?.placeholder).be.true();
+      should(composerInput(composer)).equal('');
+      should(occupiedComposer(frame)).be.undefined();
+      should(composerLanding(frame, CONFIRMED, true)).be.undefined();
+    });
+  }
+
+  it('should say UNKNOWN, never absent, for a payload the clipped top of the queue could be hiding', () => {
+    // Both captures start inside the queue: whatever scrolled off above may be this payload.
+    const unseen = `${LIZZETTE}a message the pane does not show`;
+
+    should(readHarnessQueue(claude('clipped')).complete).be.false();
+    should(paneHoldOf(claude('clipped'), {}, unseen, true)).equal('unknown');
+    should(paneHoldOf(claude('copies'), {}, unseen, true)).equal('unknown');
+    should(heldAt(claude('clipped'), {}, unseen, true)).be.undefined();
+  });
+
+  it('should read a whole queue as complete, and the person’s past prompts above it as history', () => {
+    const tail = claude('copies').split('\n').slice(70).join('\n');
+    const frame = [
+      '❯ the old prompt this turn answers',
+      '',
+      '⏺ Working on it.',
+      '  ⎿  Read 3 files',
+      '',
+      '❯ check the queue too',
+      '  ctrl+x ctrl+s to send now',
+      '',
+      tail.slice(tail.indexOf('✽')),
+    ].join('\n');
+
+    should(readHarnessQueue(frame)).deepEqual({ entries: ['check the queue too'], complete: true });
+    should(paneHoldOf(frame, {}, 'check the queue too', false)).equal('queue');
+    should(paneHoldOf(frame, {}, 'the old prompt this turn answers', false)).equal('absent');
+  });
+
+  it('should say UNKNOWN when the composer says messages are queued but no queue can be read', () => {
+    // A rendering drift that moved or reworded the hint: the placeholder alone proves a queue exists.
+    const frame = claude('copies').replace('ctrl+x ctrl+s to send now', 'something new');
+
+    should(readHarnessQueue(frame)).deepEqual({ entries: [], complete: false });
+    should(paneHoldOf(frame, {}, CONFIRMED, true)).equal('unknown');
+  });
+
+  it('should leave Codex’s pending block exactly as it read before, and complete', () => {
+    for (const version of VERSIONS) {
+      const frame = capture(version, 'busy-pending');
+      should(readHarnessQueue(frame.visible).complete).be.true();
+      should(readHarnessQueue(frame.visible).entries).deepEqual(readPendingInputs(frame.visible));
+    }
+    should(paneHoldOf(capture('0.156.1', 'busy-pending').visible, {}, 'hello', false)).equal('queue');
+    // 0.163.0 steered `hello` into the turn: absent from the queue, and provably so.
+    const steered = capture('0.163.0', 'busy-pending');
+    should(paneHoldOf(steered.visible, cursorOf(steered), 'hello', false)).equal('absent');
   });
 });

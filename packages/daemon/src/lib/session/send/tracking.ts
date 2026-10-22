@@ -300,12 +300,18 @@ export function sendFailureNotice(recipient: string, record: SendRecord, clientN
         `Do not send it again — it most likely arrived. Ask the owner to restart ${recipient}’s CLI, which gives ` +
         'it a transcript Ferretry can read.',
     );
-  const why =
-    record.fate === 'timed_out'
-      ? `it was not delivered (${(record.unaccountedReason ?? 'not_delivered').replaceAll('_', ' ')}) after ${record.attempt ?? 1} attempt(s)`
-      : `it could not be confirmed (${(record.unaccountedReason ?? 'timeout').replaceAll('_', ' ')}) — it may still have landed`;
+  const resend = `Decide whether to send it again with \`${clientName} send ${recipient} …\`.`;
+  // An unconfirmed message is not one that "did not reach it": it may be sitting in the recipient's
+  // queue right now, and a sender told otherwise sends the copy the daemon itself refused to type.
+  if (record.fate !== 'timed_out')
+    return ferretryNotice(
+      `Your message to ${recipient} (send ${record.sendId}) could not be confirmed ` +
+        `(${(record.unaccountedReason ?? 'timeout').replaceAll('_', ' ')}) — it may still have landed, ` +
+        `so sending it again may deliver it twice. ${resend}`,
+    );
   return ferretryNotice(
-    `Your message to ${recipient} (send ${record.sendId}) did not reach it: ${why}. ` +
-      `Decide whether to send it again with \`${clientName} send ${recipient} …\`.`,
+    `Your message to ${recipient} (send ${record.sendId}) did not reach it: it was not delivered ` +
+      `(${(record.unaccountedReason ?? 'not_delivered').replaceAll('_', ' ')}) after ${record.attempt ?? 1} attempt(s). ` +
+      resend,
   );
 }

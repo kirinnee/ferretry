@@ -1,4 +1,5 @@
 import { afterEach, describe, it } from 'bun:test';
+import { readFileSync } from 'node:fs';
 import { appendFile, mkdtemp, readFile, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -756,6 +757,37 @@ describe('the tmux send terminal, as the tracker reads it', () => {
     // `hi` is inside `anything` and inside `› hihello` — neither is the composer.
     should(await subject([[pending, '2|4']]).heldAt(ID, 'hi')).be.undefined();
     should(await subject([['› [Pasted Content 900 chars]', '28|0']]).heldAt(ID, 'p'.repeat(900))).equal('composer');
+  });
+
+  it('should read a real Claude Code 2.1.281 queue, and THROW rather than rule out what runs off the pane', async () => {
+    // The incident's own capture: one peer message queued four times above the spinner.
+    const capture = (state: string) =>
+      [
+        readFileSync(
+          join(import.meta.dir, `../../../fixtures/composer/claude-2.1.281-busy-queued-${state}.txt`),
+          'utf8',
+        ),
+        '2|77',
+      ] as const;
+    const resend =
+      '[message from ferret lizzette (session mvgt2oz9-04e28935) — not from the owner]\n' +
+      'No reply needed. To reply: fy send lizzette "<reply>"\n\n' +
+      'lizzette (resend): QoS CONFIRMED as the Mac root cause — ProcessType=Interactive took the ' +
+      "owner's 4.67.0 from 381 stalls/lag 3.1s to lag 0.1ms. I told rozanne to ship the plist fix first.";
+
+    const unseen = await subject([capture('clipped')])
+      .heldAt(ID, 'a message scrolled off the top')
+      .catch((error: unknown) => error);
+
+    should(await subject([capture('copies')]).heldAt(ID, resend)).equal('queue');
+    should(unseen).be.instanceof(Error);
+    should((unseen as Error).message).match(/runs past what its pane shows/u);
+    // `Press up to edit queued messages` is a placeholder, so nothing is in the way of a send…
+    should(Object.hasOwn(await subject([capture('copies')]).observe(ID), 'draft')).be.false();
+    // …and Enter is never pressed for a payload the composer does not hold, unknown queue or not.
+    const tmux = new FrameTmux([capture('clipped')]);
+    should(await subject([capture('clipped')], 'held', tmux).submitComposer(ID, 'unseen')).equal('absent');
+    should(tmux.keys).be.empty();
   });
 
   it("should report a typed draft, and only a cursor-proven one, as the pane's draft", async () => {
