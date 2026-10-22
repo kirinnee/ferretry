@@ -1,7 +1,10 @@
 import { describe, expect, test } from 'bun:test';
+import { PACK_GUIDE_BUILDER_LABEL } from '@ferretry/protocol';
 import {
   DEFAULT_LIST_FILTER,
+  isGuideBuilder,
   isStopped,
+  listedBeforeMode,
   listTallies,
   matchesMode,
   needsYou,
@@ -213,5 +216,29 @@ describe('the question a waiting ferret asks', () => {
     expect(pendingQuestionPreview(asking(['   ']))).toBeUndefined();
     expect(pendingQuestionPreview(asking([]))).toBeUndefined();
     expect(pendingQuestionPreview(asking(['Still there?'], 'stopped' as never))).toBeUndefined();
+  });
+});
+
+describe('guide-builder ferrets', () => {
+  const builder = sessionView('builder', { config: { label: PACK_GUIDE_BUILDER_LABEL } });
+  const stoppedBuilder = sessionView('old-builder', {
+    config: { label: PACK_GUIDE_BUILDER_LABEL },
+    state: { status: 'completed' },
+  });
+  const ordinary = sessionView('plain', { config: { label: 'my-batch' } });
+
+  test('are not listed, whether live or stopped, and do not inflate the stopped tally', () => {
+    expect(isGuideBuilder(builder)).toBe(true);
+    expect(isGuideBuilder(ordinary)).toBe(false);
+    expect(listedBeforeMode(builder, SHOW_STOPPED)).toBe(false);
+    expect(listedBeforeMode(stoppedBuilder, SHOW_STOPPED)).toBe(false);
+    expect(listedBeforeMode(ordinary, SHOW_STOPPED)).toBe(true);
+    const tallies = listTallies([builder, stoppedBuilder, ordinary], ALL_KINDS);
+    expect(tallies.counts.all).toBe(1);
+    expect(tallies.hiddenStopped).toBe(0);
+  });
+
+  test('still show as the open session, so a direct link opens', () => {
+    expect(listedBeforeMode(builder, ALL_KINDS, view => view.config.id === 'builder')).toBe(true);
   });
 });

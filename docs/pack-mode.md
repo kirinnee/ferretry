@@ -325,12 +325,28 @@ offers every model across every runtime and provider. It reads `GET /v1/pack` (`
 guide in effect and every model the fleet knows, with the runtimes here that run each) and writes both files
 through the configuration-file routes, so a loosening is held exactly as an edit in a text editor would be.
 
+The editor also holds the **routing guidance** (the prompt and its one-line form; leaving both empty keeps the
+one rendered from the use cases). Saving the editor makes the guide the owner's own words again, so it drops
+`suggested`.
+
+Beside it: **Models** — every model, grouped by provider, with whether it runs here and its description (yours,
+or the catalog's), each saved on its own or put back to the catalog's; and **Suggest a guide** — a runtime
+picker (the ready ones, the one with the most headroom first), the routing preferences (prefilled from
+`pack.yaml`, with "Remember these preferences"), and the button, disabled with the reason when no runtime can
+start a ferret. A running builder shows its name, runtime and elapsed time with a link to its session; the page
+looks at the run every few seconds only while it is open. The draft opens as the review (§ Suggesting a guide),
+and an accepted one can be undone from the editor. Builder ferrets are kept out of the session list and the
+palette, though a link to one still opens it.
+
 ## Declared gaps
 
 - **The probe is one-shot, the start is interactive.** The probe carries the start's model and effort, but
   not its `--session-id`, hand-off `Read(...)` rules, fast-mode overlay or remote-control arguments, so a
   harness that refuses only one of those passes the probe and fails the start — with its own words on the card.
 - **A probe leaves a one-line conversation** in the runtime's history, as any one-shot run of the CLI does.
+- **A builder's session stays on record.** Once its draft is read the ferret is stopped and its run folder is
+  pruned after five newer runs, but the session itself is kept like any stopped ferret, only hidden from the
+  list.
 - **No burn rate.** Headroom is what is left now; how fast a login is spending is not measured, so two logins
   with the same share left rank alike however fast one is draining.
 - **Quota is what the fleet last read.** `recommend` and `new` do not ask a provider for fresh quota; an

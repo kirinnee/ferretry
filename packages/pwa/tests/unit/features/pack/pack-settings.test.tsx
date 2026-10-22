@@ -4,9 +4,10 @@ import { PACK_SETTINGS_TAB, PackSettingsSurface } from '../../../../src/features
 import type { MachinePack, PackRead, PackSave } from '../../../../src/features/pack/use-machine-pack.ts';
 import type { PackConfigPatch } from '../../../../src/lib/pack/pack-files.ts';
 import { DaemonClientProvider } from '../../../../src/lib/store.tsx';
-import { type Mounted, mount, must } from '../../../support/dom.ts';
+import { interact, type Mounted, mount, must } from '../../../support/dom.ts';
 import { byText, click, textOf, typeInto, waitFor, waitForText } from '../../../support/learning-dom.ts';
-import { PACK_VIEW } from '../../../support/pack.ts';
+import { IDLE_GUIDE_API, PACK_VIEW, RUNNING_JOB, SUGGESTION } from '../../../support/pack.ts';
+import { settleUntil } from '../../../support/settle.ts';
 import { alpha } from '../config-files/config-files-support.ts';
 
 let shown: Mounted | undefined;
@@ -24,6 +25,7 @@ const surface = async (read: PackRead, answer: PackSave = { kind: 'applied' }) =
       return answer;
     },
     saveGuide: async () => answer,
+    ...IDLE_GUIDE_API,
   };
   shown = await mount(<PackSettingsSurface connection={alpha} state={state} />);
   return { root: shown.container, patches };
@@ -115,4 +117,95 @@ describe('Settings › Pack mode', () => {
     );
     expect(textOf(shown.container)).toContain('Reading Pack mode…');
   });
+});
+
+describe('Settings › Pack mode › the guide generator', () => {
+  const generator = async (view: PackView, overrides: Partial<MachinePack> = {}) => {
+    const state: MachinePack = {
+      read: ready(view),
+      saveConfig: async () => ({ kind: 'applied' }),
+      saveGuide: async () => ({ kind: 'applied' }),
+      ...IDLE_GUIDE_API,
+      ...overrides,
+    };
+    shown = await mount(<PackSettingsSurface connection={alpha} state={state} />);
+    return shown.container;
+  };
+
+  it('lists the models closed, offers the generator and says when the daemon cannot build a guide', async () => {
+    const root = await generator(PACK_VIEW);
+    expect(root.querySelector('[data-models-panel]')).not.toBeNull();
+    expect(root.querySelector('[data-model-row]') === null).toBe(true);
+    expect(root.querySelector<HTMLButtonElement>('[data-guide-start]')?.disabled).toBe(true);
+    expect(textOf(root)).toContain('daemon is too old');
+    expect(root.querySelector('[data-guide-undo-last]') === null).toBe(true);
+  });
+
+  it('prefills the remembered preferences and sends a model description to the daemon', async () => {
+    const described: { model: string; description: string | null }[] = [];
+    const root = await generator(
+      {
+        ...PACK_VIEW,
+        config: { ...PACK_VIEW.config, routingPreferences: 'Cheap first.' },
+        builder: { available: true, runtimes: ['claude-main'] },
+      },
+      {
+        describeModel: async request => {
+          described.push(request);
+          return { kind: 'applied', message: 'Saved.' };
+        },
+      },
+    );
+    expect(must(root.querySelector<HTMLTextAreaElement>('[data-guide-preferences]'), 'preferences').value).toBe(
+      'Cheap first.',
+    );
+    expect(root.querySelector<HTMLButtonElement>('[data-guide-start]')?.disabled).toBe(false);
+    await click(must(root.querySelector('[data-models-panel] button[aria-expanded="false"]'), 'open models'));
+    await typeInto(must(root.querySelector<HTMLTextAreaElement>('[data-model-row] textarea'), 'description'), 'Words.');
+    await click(byText(root, 'button', 'Save description'));
+    await waitFor(() => described.length === 1, 'a description');
+    expect(described[0]?.description).toBe('Words.');
+  });
+
+  it('offers Undo in the editor while an accepted suggestion can be undone', async () => {
+    let undone = 0;
+    const root = await generator(
+      { ...PACK_VIEW, undo: { savedAt: '2026-10-22T14:35:00.000Z', source: 'file' } },
+      {
+        undoGuide: async () => {
+          undone += 1;
+          return { kind: 'applied', message: 'Put the old guide back.' };
+        },
+      },
+    );
+    await click(must(root.querySelector('[data-guide-undo-last]'), 'undo'));
+    await waitForText(root, 'Put the old guide back.');
+    expect(undone).toBe(1);
+  });
+
+  it('finds a run going on load, and sends the reviewed draft to the editor on Edit without saving it', async () => {
+    const saves: unknown[] = [];
+    const root = await generator(
+      { ...PACK_VIEW, builder: { available: true, runtimes: ['codex-main'], job: RUNNING_JOB } },
+      {
+        saveGuide: async useCases => {
+          saves.push(useCases);
+          return { kind: 'applied' };
+        },
+        readJob: async () => ({
+          kind: 'read',
+          result: { job: { ...RUNNING_JOB, status: 'suggested' }, suggestion: SUGGESTION },
+        }),
+      },
+    );
+    expect(root.querySelector('[data-guide-job]')?.getAttribute('data-guide-job')).toBe('running');
+    await settleUntil(() => root.querySelector('[data-guide-review]') !== null, 'the review', interact, 6_000);
+    await click(must(root.querySelector('[data-review-action="edit"]'), 'edit'));
+    expect(root.querySelector('[data-guide-review]') === null).toBe(true);
+    const ids = [...root.querySelectorAll('[data-guide-use-case]')].map(item =>
+      item.getAttribute('data-guide-use-case'),
+    );
+    expect(ids).toEqual(['hard', 'bulk', 'docs']);
+    expect(saves).toHaveLength(0);
+  }, 12_000);
 });

@@ -70,7 +70,7 @@ const guide = {
   ],
 };
 const view = { config: { ...DEFAULT_PACK_CONFIG, decision: 'jev' }, guide, models };
-const state = { read: { kind: 'ready', view }, saveConfig: async () => ({ kind: 'applied' }), saveGuide: async () => ({ kind: 'applied' }) };
+const state = { read: { kind: 'ready', view }, saveConfig: async () => ({ kind: 'applied' }), saveGuide: async () => ({ kind: 'applied' }), suggest: async () => ({ kind: 'refused', message: 'Not under test.' }), readJob: async () => ({ kind: 'failed', message: 'Not under test.' }), acceptGuide: async () => ({ kind: 'refused', message: 'Not under test.' }), undoGuide: async () => ({ kind: 'refused', message: 'Not under test.' }), describeModel: async () => ({ kind: 'refused', message: 'Not under test.' }) };
 const which = new URLSearchParams(location.search).get('state');
 const root = document.getElementById('root');
 if (root === null) throw new Error('missing #root');
