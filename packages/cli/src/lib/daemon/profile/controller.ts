@@ -7,10 +7,10 @@ import {
   type PerformanceProfileView,
   PerformanceProfileViewSchema,
   type PerformanceReport,
+  renderPerformanceReport,
   type SyscallTrace,
 } from '@ferretry/protocol';
 import { z } from 'zod';
-import { renderPerformanceReport } from './render.ts';
 
 /** Flags `fy daemon profile` accepts, as the shell gave them. */
 export interface ProfileCommandOptions {

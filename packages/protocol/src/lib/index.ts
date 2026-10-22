@@ -43,6 +43,7 @@ export * from './pack.ts';
 export * from './pairing.ts';
 export * from './performance.ts';
 export * from './performance-redaction.ts';
+export * from './performance-render.ts';
 export * from './pins.ts';
 export * from './process-incarnation.ts';
 export * from './push.ts';

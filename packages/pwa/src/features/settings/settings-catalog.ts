@@ -591,6 +591,15 @@ export const SETTINGS_LINKS: readonly SettingsLinkDefinition[] = [
     ],
   },
   {
+    // "Slow", "lag" and "profile" are what somebody types when the app or the machine feels sluggish.
+    id: 'performance',
+    label: 'Performance',
+    description:
+      'Record 30 seconds of what this machine and this app spend their time on, then copy or download a report that is safe to share. On this machine — opens its Machine tab.',
+    href: daemon => `${daemonSettingsPath(daemon)}#performance`,
+    keywords: ['performance', 'slow', 'lag', 'laggy', 'profile', 'diagnostics', 'report', 'cpu', 'requests', 'speed'],
+  },
+  {
     // "Who paired", "log" and "history" are what somebody types after a new-device notice they did not expect.
     id: 'security-log',
     label: 'Security log',
