@@ -1,4 +1,5 @@
 import {
+  type DaemonServiceFacts,
   type IFyApiClient,
   PERFORMANCE_PROFILE_DEFAULT_SECONDS,
   PERFORMANCE_PROFILE_MAX_SECONDS,
@@ -58,6 +59,8 @@ export interface ProfileControllerDeps {
   readonly sleep: (ms: number) => Promise<void>;
   readonly now: () => number;
   readonly writeFile: (path: string, text: string) => Promise<void>;
+  /** How the daemon is run on this machine (manager, launchd ProcessType); absent where this client cannot tell. */
+  readonly service?: () => Promise<DaemonServiceFacts>;
   /** The countdown shown while the window is open. Absent, nothing is shown. */
   readonly progress?: IProgress;
 }
@@ -112,12 +115,15 @@ export class ProfileController {
       this.deps.out.setExitCode(1);
       return;
     }
-    const complete: PerformanceReport =
+    const service = await this.deps.service?.().catch(() => undefined);
+    const withTrace: PerformanceReport =
       traced?.kind === 'traced'
         ? { ...report, syscallTrace: traced.trace }
         : traced?.kind === 'unavailable'
           ? { ...report, limitations: [...report.limitations, `No system-call trace: ${traced.reason}.`] }
           : report;
+    // The service definition is this machine's fact, not the daemon's, so this client adds it.
+    const complete: PerformanceReport = service === undefined ? withTrace : { ...withTrace, service };
     if (options.out !== undefined) await this.deps.writeFile(options.out, `${JSON.stringify(complete, null, 2)}\n`);
     this.deps.out.report(options.json === true ? JSON.stringify(complete) : renderPerformanceReport(complete));
     if (options.out !== undefined && options.json !== true)
