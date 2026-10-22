@@ -202,3 +202,18 @@ describe('the Sessions page across every machine', () => {
     expect(view.container.querySelector('[data-new-session-menu]')).toBeNull();
   });
 });
+
+test('"Updating…" is said in the heading of the one machine still being refreshed, not over the page', async () => {
+  const refreshing = SOURCES.map(machine =>
+    machine.daemonId === studio.daemonId
+      ? { ...machine, slice: { ...machine.slice, cachedAt: NOW - 60_000 } }
+      : machine,
+  );
+  view = await mount(dashboard({ allMachines: allMachinesView(refreshing), updating: true }).element);
+  const updating = [...view.container.querySelectorAll('[data-machine-updating]')];
+  expect(updating).toHaveLength(1);
+  expect(updating[0]?.closest('[data-machine-section]')?.getAttribute('data-machine-section')).toBe(
+    String(studio.daemonId),
+  );
+  expect(view.container.querySelector('[data-cache-updating]')).toBeNull();
+});
