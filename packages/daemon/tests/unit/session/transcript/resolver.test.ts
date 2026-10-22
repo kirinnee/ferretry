@@ -2,6 +2,8 @@ import { describe, it } from 'bun:test';
 import should from 'should';
 import type { TranscriptProvenance } from '@ferretry/protocol';
 import {
+  CODEX_DISCOVERY_EAGER_MS,
+  CodexDiscoveryPacer,
   SessionTranscriptResolver,
   type CodexRolloutCandidate,
   type CodexRolloutIndex,
@@ -194,5 +196,97 @@ describe('SessionTranscriptResolver', () => {
 
     // Assert
     should(file).be.undefined();
+  });
+
+  describe('with a discovery pacer', () => {
+    /** A clock the test moves by hand, shared by the resolver and its pacer. */
+    const manualClock = () => {
+      let now = Date.parse(NOW);
+      return {
+        now: () => new Date(now).toISOString(),
+        advance: (ms: number) => {
+          now += ms;
+        },
+      };
+    };
+
+    it('should resolve a rollout that is there on the first read, and persist it once', async () => {
+      // Arrange: the session that IS found quickly keeps today's behaviour.
+      const time = manualClock();
+      const store = recorder();
+      const subject = new SessionTranscriptResolver(
+        index([{ id: 'rollout-new', file: '/home/agent/.codex/sessions/new.jsonl', correlated: true }]),
+        noClaims,
+        store,
+        time,
+        new CodexDiscoveryPacer(time),
+      );
+
+      // Act
+      const file = await subject.file('session-1', undiscovered);
+
+      // Assert
+      should(file).equal('/home/agent/.codex/sessions/new.jsonl');
+      should(store.written).have.length(1);
+    });
+
+    it('should answer a record with no token without looking, paced or not', async () => {
+      // Arrange
+      const time = manualClock();
+      const subject = new SessionTranscriptResolver(
+        {
+          candidates: async () => {
+            throw new Error('nothing can be proven without a token, so nothing should be walked');
+          },
+        },
+        noClaims,
+        recorder(),
+        time,
+        new CodexDiscoveryPacer(time),
+      );
+
+      // Act
+      const file = await subject.file('session-1', { v: 1, home: '/home/agent/.codex', identity: 'undiscovered' });
+
+      // Assert
+      should(file).be.undefined();
+    });
+
+    it('should stop walking the home on every read once a session has looked for two minutes', async () => {
+      // Arrange: a Codex start that never wrote a rollout, read by the turn watcher every two seconds.
+      const time = manualClock();
+      let walks = 0;
+      let changes = 0;
+      const subject = new SessionTranscriptResolver(
+        {
+          candidates: async () => {
+            walks += 1;
+            return [];
+          },
+          changes: () => changes,
+        },
+        noClaims,
+        recorder(),
+        time,
+        new CodexDiscoveryPacer(time),
+      );
+      await subject.file('session-1', undiscovered);
+      time.advance(CODEX_DISCOVERY_EAGER_MS);
+      walks = 0;
+
+      // Act: a minute of reads, then a new rollout appears in the home.
+      for (let read = 0; read < 30; read += 1) {
+        time.advance(2_000);
+        await subject.file('session-1', undiscovered);
+      }
+      const pacedWalks = walks;
+      changes += 1;
+      time.advance(2_000);
+      await subject.file('session-1', undiscovered);
+
+      // Assert: thirty reads, two walks; the change is looked at on the very next read.
+      should(pacedWalks).equal(2);
+      should(walks).equal(3);
+    });
   });
 });

@@ -16,6 +16,7 @@
 import type { TranscriptProvenance } from '@ferretry/protocol';
 import type { CodexRolloutCandidate } from './codex-rollout.ts';
 import { selectCodexRollout } from './codex-rollout.ts';
+import type { CodexDiscoveryPacer } from './discovery-pacing.ts';
 
 /** Lists the rollouts under a home, saying which contain the caller's correlation token. */
 export interface CodexRolloutIndex {
@@ -28,6 +29,8 @@ export interface CodexRolloutIndex {
     correlationToken: string,
     skip?: ReadonlySet<string>,
   ): Promise<readonly CodexRolloutCandidate[]>;
+  /** How many times the home's listing has been seen to change, when the index can tell. */
+  changes?(home: string): number;
 }
 
 /** Persists a resolution back onto the session's own configuration document. */
@@ -46,11 +49,16 @@ export interface ResolverClock {
 }
 
 export class SessionTranscriptResolver {
+  /**
+   * `pacer` is daemon-wide, shared by every resolver, and decides how often an unresolved session may
+   * walk the home; without one every read discovers.
+   */
   constructor(
     private readonly rollouts: CodexRolloutIndex,
     private readonly claims: TranscriptClaims,
     private readonly store: TranscriptProvenanceStore,
     private readonly clock: ResolverClock,
+    private readonly pacer?: CodexDiscoveryPacer,
   ) {}
 
   /**
@@ -62,10 +70,21 @@ export class SessionTranscriptResolver {
   async file(sessionId: string, provenance: TranscriptProvenance | undefined): Promise<string | undefined> {
     if (provenance === undefined) return undefined;
     if (provenance.file !== undefined) return provenance.file;
-    const resolved = await this.discover(sessionId, provenance);
-    if (resolved === undefined) return undefined;
-    await this.store.record(sessionId, resolved);
-    return resolved.file;
+    const resolve = async (): Promise<TranscriptProvenance | undefined> => {
+      const resolved = await this.discover(sessionId, provenance);
+      if (resolved !== undefined) await this.store.record(sessionId, resolved);
+      return resolved;
+    };
+    // A record with no token is answered without looking, so it is never paced either.
+    if (this.pacer === undefined || provenance.correlationToken === undefined) return (await resolve())?.file;
+    const changes = this.rollouts.changes?.bind(this.rollouts);
+    const resolved = await this.pacer.pace(
+      sessionId,
+      provenance,
+      changes === undefined ? undefined : () => changes(provenance.home),
+      resolve,
+    );
+    return resolved?.file;
   }
 
   /** The rollout this session provably owns, as a completed provenance record. */
@@ -77,14 +96,15 @@ export class SessionTranscriptResolver {
     // selection is required to refuse. Not looking is the same answer, reached cheaply.
     if (provenance.correlationToken === undefined) return undefined;
     const baseline = provenance.baseline ?? [];
+    const skip = new Set(baseline);
     // The baseline is every rollout that existed before this session launched — never its own — so the
     // index need not look at those again; on a home of thousands, they are nearly all of them.
-    const candidates = await this.rollouts.candidates(provenance.home, provenance.correlationToken, new Set(baseline));
+    const candidates = await this.rollouts.candidates(provenance.home, provenance.correlationToken, skip);
     // The claims are every other session's configuration, read whole — asked for on every tick while a
     // Codex session is still undiscovered, which on a large fleet was most of the daemon's file reads.
     // With no correlated candidate outside the baseline the selection is empty whatever is claimed, so
     // they are asked only when a candidate could win.
-    if (!candidates.some(candidate => candidate.correlated && !baseline.includes(candidate.id))) return undefined;
+    if (!candidates.some(candidate => candidate.correlated && !skip.has(candidate.id))) return undefined;
     const chosen = selectCodexRollout(candidates, { baseline, claimed: await this.claims.claimed(sessionId) });
     if (chosen === undefined) return undefined;
     return {

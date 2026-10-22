@@ -1,0 +1,239 @@
+import { describe, it } from 'bun:test';
+import should from 'should';
+import type { TranscriptProvenance } from '@ferretry/protocol';
+import {
+  CODEX_DISCOVERY_EAGER_MS,
+  CODEX_DISCOVERY_INTERVAL_MS,
+  CodexDiscoveryPacer,
+} from '../../../../src/lib/session/transcript/index.ts';
+
+const START = Date.parse('2026-10-20T10:00:00.000Z');
+
+/** A clock the test moves by hand. */
+const manualClock = () => {
+  let now = START;
+  return {
+    now: () => new Date(now).toISOString(),
+    advance: (ms: number) => {
+      now += ms;
+    },
+  };
+};
+
+const undiscovered: TranscriptProvenance = {
+  v: 1,
+  home: '/home/agent/.codex',
+  identity: 'undiscovered',
+  baseline: ['rollout-old'],
+  correlationToken: '/state/sessions/session-1',
+};
+
+const resolved: TranscriptProvenance = {
+  ...undiscovered,
+  harnessSessionId: 'rollout-new',
+  identity: 'correlated',
+  file: '/home/agent/.codex/sessions/new.jsonl',
+  resolvedAt: '2026-10-20T10:00:00.000Z',
+};
+
+/** A discovery that never finds anything, counting how often it was asked. */
+const nothing = () => {
+  const counter = {
+    runs: 0,
+    discover: async (): Promise<TranscriptProvenance | undefined> => {
+      counter.runs += 1;
+      return undefined;
+    },
+  };
+  return counter;
+};
+
+describe('CodexDiscoveryPacer', () => {
+  it('should discover on every read while the eager window is open', async () => {
+    // Arrange: a session found quickly must not wait for anything.
+    const clock = manualClock();
+    const subject = new CodexDiscoveryPacer(clock);
+    const probe = nothing();
+
+    // Act
+    for (let read = 0; read < 10; read += 1) {
+      await subject.pace('session-1', undiscovered, undefined, probe.discover);
+      clock.advance(2_000);
+    }
+
+    // Assert
+    should(probe.runs).equal(10);
+  });
+
+  it('should answer a found rollout from the first read', async () => {
+    // Arrange
+    const subject = new CodexDiscoveryPacer(manualClock());
+
+    // Act
+    const answer = await subject.pace('session-1', undiscovered, undefined, async () => resolved);
+
+    // Assert
+    should(answer).equal(resolved);
+  });
+
+  it('should discover at most once an interval once the eager window has closed', async () => {
+    // Arrange: two minutes of finding nothing.
+    const clock = manualClock();
+    const subject = new CodexDiscoveryPacer(clock);
+    const probe = nothing();
+    await subject.pace('session-1', undiscovered, undefined, probe.discover);
+    clock.advance(CODEX_DISCOVERY_EAGER_MS);
+    await subject.pace('session-1', undiscovered, undefined, probe.discover);
+    const runsWhenTheWindowClosed = probe.runs;
+
+    // Act: a read every two seconds for one interval and a little more.
+    const answers = [];
+    for (let elapsed = 0; elapsed <= CODEX_DISCOVERY_INTERVAL_MS; elapsed += 2_000) {
+      clock.advance(2_000);
+      answers.push(await subject.pace('session-1', undiscovered, undefined, probe.discover));
+    }
+
+    // Assert: the reads in between answered "not yet" without discovering.
+    should(runsWhenTheWindowClosed).equal(2);
+    should(probe.runs).equal(3);
+    should(answers.every(answer => answer === undefined)).be.true();
+  });
+
+  it('should open the eager window again when the home listing changes', async () => {
+    // Arrange: the pace is long past eager when a new rollout appears.
+    const clock = manualClock();
+    const subject = new CodexDiscoveryPacer(clock);
+    const probe = nothing();
+    let changes = 0;
+    const changeCount = () => changes;
+    await subject.pace('session-1', undiscovered, changeCount, probe.discover);
+    clock.advance(CODEX_DISCOVERY_EAGER_MS + 1);
+    await subject.pace('session-1', undiscovered, changeCount, probe.discover);
+    clock.advance(2_000);
+    await subject.pace('session-1', undiscovered, changeCount, probe.discover);
+    const runsBeforeTheChange = probe.runs;
+
+    // Act
+    changes += 1;
+    for (let read = 0; read < 5; read += 1) {
+      clock.advance(2_000);
+      await subject.pace('session-1', undiscovered, changeCount, probe.discover);
+    }
+
+    // Assert: paced before the change, every read after it.
+    should(runsBeforeTheChange).equal(2);
+    should(probe.runs).equal(7);
+  });
+
+  it('should start afresh for a provenance the session recorded anew', async () => {
+    // Arrange: a relaunch records a new baseline, and its rollout is about to appear.
+    const clock = manualClock();
+    const subject = new CodexDiscoveryPacer(clock);
+    const probe = nothing();
+    await subject.pace('session-1', undiscovered, undefined, probe.discover);
+    clock.advance(CODEX_DISCOVERY_EAGER_MS + 1);
+    await subject.pace('session-1', undiscovered, undefined, probe.discover);
+    clock.advance(2_000);
+
+    // Act
+    await subject.pace(
+      'session-1',
+      { ...undiscovered, baseline: ['rollout-old', 'rollout-mid'] },
+      undefined,
+      probe.discover,
+    );
+
+    // Assert
+    should(probe.runs).equal(3);
+  });
+
+  it('should pace each session on its own', async () => {
+    // Arrange
+    const clock = manualClock();
+    const subject = new CodexDiscoveryPacer(clock);
+    const probe = nothing();
+    await subject.pace('session-1', undiscovered, undefined, probe.discover);
+    clock.advance(CODEX_DISCOVERY_EAGER_MS + 1);
+    await subject.pace('session-1', undiscovered, undefined, probe.discover);
+    clock.advance(2_000);
+
+    // Act
+    await subject.pace('session-1', undiscovered, undefined, probe.discover);
+    await subject.pace('session-2', undiscovered, undefined, probe.discover);
+
+    // Assert: session-1 is paced; session-2 has only just started looking.
+    should(probe.runs).equal(3);
+  });
+
+  it('should share one discovery between readers asking at once', async () => {
+    // Arrange
+    const subject = new CodexDiscoveryPacer(manualClock());
+    let runs = 0;
+    let finish: (value: TranscriptProvenance) => void = () => undefined;
+    const discover = () => {
+      runs += 1;
+      return new Promise<TranscriptProvenance>(resolve => {
+        finish = resolve;
+      });
+    };
+
+    // Act
+    const reads = [0, 1, 2].map(() => subject.pace('session-1', undiscovered, undefined, discover));
+    finish(resolved);
+    const answers = await Promise.all(reads);
+
+    // Assert
+    should(runs).equal(1);
+    should(answers).eql([resolved, resolved, resolved]);
+  });
+
+  it('should forget a session once it resolves', async () => {
+    // Arrange: resolved, then — a record that was overwritten, say — asked about again.
+    const clock = manualClock();
+    const subject = new CodexDiscoveryPacer(clock);
+    await subject.pace('session-1', undiscovered, undefined, async () => resolved);
+    clock.advance(CODEX_DISCOVERY_EAGER_MS + 1);
+    const probe = nothing();
+
+    // Act
+    await subject.pace('session-1', undiscovered, undefined, probe.discover);
+
+    // Assert: a fresh first look, not a paced one.
+    should(probe.runs).equal(1);
+  });
+
+  it('should discover again when the clock moves backwards', async () => {
+    // Arrange
+    const clock = manualClock();
+    const subject = new CodexDiscoveryPacer(clock, { eagerMs: 0, intervalMs: 60_000 });
+    const probe = nothing();
+    await subject.pace('session-1', undiscovered, undefined, probe.discover);
+
+    // Act
+    clock.advance(-1_000);
+    await subject.pace('session-1', undiscovered, undefined, probe.discover);
+
+    // Assert: an interval measured against a clock that went back would never end.
+    should(probe.runs).equal(2);
+  });
+
+  it('should let a failed discovery fail its readers and pace the next one', async () => {
+    // Arrange
+    const clock = manualClock();
+    const subject = new CodexDiscoveryPacer(clock, { eagerMs: 0, intervalMs: 60_000 });
+    const probe = nothing();
+
+    // Act
+    const failure = await subject
+      .pace('session-1', undiscovered, undefined, async () => {
+        throw new Error('the claims could not be read');
+      })
+      .catch((error: unknown) => error);
+    clock.advance(1_000);
+    await subject.pace('session-1', undiscovered, undefined, probe.discover);
+
+    // Assert
+    should(failure).be.instanceOf(Error);
+    should(probe.runs).equal(0);
+  });
+});
