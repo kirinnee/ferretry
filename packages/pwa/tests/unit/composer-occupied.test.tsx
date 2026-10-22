@@ -2,19 +2,19 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import { COMPOSER_OCCUPIED_CODE, type ComposerDraftRequest, type ComposerDraftResult } from '@ferretry/protocol';
 import { FyHttpError } from '@ferretry/protocol/client';
 import type { ReactTestRenderer } from 'react-test-renderer';
-import { Composer } from '../../../src/components/composer.tsx';
-import { OccupiedComposerNotice } from '../../../src/features/occupied-composer/occupied-composer-notice.tsx';
+import { Composer } from '../../src/components/composer.tsx';
+import { OccupiedComposerNotice } from '../../src/features/occupied-composer/occupied-composer-notice.tsx';
 import {
   draftQuote,
   draftResolved,
   draftStuckLine,
   occupiedDraftOf,
-} from '../../../src/features/occupied-composer/occupied-draft.ts';
-import { daemonConnection } from '../../../src/lib/daemon-connection.ts';
-import { DaemonDraftStore, type DraftStorage } from '../../../src/lib/drafts.ts';
-import { writeMdComposePref } from '../../../src/lib/md-compose.ts';
-import '../../support/dom.ts';
-import { render, run, runAsync } from '../../support/react.ts';
+} from '../../src/features/occupied-composer/occupied-draft.ts';
+import { daemonConnection } from '../../src/lib/daemon-connection.ts';
+import { DaemonDraftStore, type DraftStorage } from '../../src/lib/drafts.ts';
+import { writeMdComposePref } from '../../src/lib/md-compose.ts';
+import '../support/dom.ts';
+import { render, run, runAsync } from '../support/react.ts';
 
 /**
  * A send refused because the agent's own box holds the person's unsent text — the notice, and the one
