@@ -641,6 +641,7 @@ import {
   InitialAttachmentError,
   InvalidDeadlineRefused,
   isControlAttachable,
+  isReapTerminalStatus,
   isTaskBoardError,
   JevTriageGuard,
   jsonObject,
@@ -720,6 +721,7 @@ import {
   RELAY_DIRECTORY_NOT_ASKED,
   RETIRED_ACCOUNT_MODEL_NOTICE,
   RETIRED_FLEET_BLOCK_NOTICE,
+  RETIRED_SESSION_WORKERS_SWITCH_NOTICE,
   RecommendError,
   type RecommendSubsystem,
   type RelayApiDispatch,
@@ -891,6 +893,7 @@ import {
   tunnelPeer,
   tunnelServiceOrigin,
   UnknownPeerRefused,
+  UnwatchedPaneExits,
   type UsageFeedPort,
   unattendedUsageFeed,
   unreadableManifestPreflight,
@@ -905,6 +908,7 @@ import {
   WardenSweepLoop,
   WardenSweepService,
   WatchedDocument,
+  WatchedPanes,
   WatchedUsageFeed,
   type WebRtcAvailability,
   WebRtcCarrier,
@@ -1011,6 +1015,11 @@ function resolveTmuxExecutable(): string {
  *  name so no lookup can ever land on the machine's default socket, and an absent binary surfaces
  *  as a failed inspection, which the migration gate then refuses. */
 const FALLBACK_TMUX = '/usr/bin/tmux';
+
+/** How long after a session turned terminal the reaper sweeps: a burst of writes is one sweep. */
+const TERMINAL_REAP_SETTLE_MS = 1_000;
+/** The reaper's slow backstop, for a pane that became reapable without this daemon writing it so. */
+const TERMINAL_REAP_BACKSTOP_MS = 60_000;
 
 /**
  * The three things the managed-worktree surface cannot decide for itself.
@@ -3644,6 +3653,11 @@ interface WardenParts {
   readonly sessions: SessionDirectorySubsystem;
   readonly control: SessionControlSubsystem;
   /**
+   * The session documents as written, no transcript projected first: the liveness monitor's 30 s roster.
+   * Its own look reads the evidence, and each running session's worker keeps its document current.
+   */
+  readonly documents: Pick<SessionDirectorySubsystem, 'list'>;
+  /**
    * The ONE attention service every other caller uses, not a second one.
    *
    * A warden escalation lands on the flagged session's own board, through the
@@ -3715,7 +3729,7 @@ function createWardenSubsystem(parts: WardenParts): WardenSubsystem {
   const liveness = new WardenLivenessMonitor(
     {
       targets: async () =>
-        (await parts.sessions.list())
+        (await parts.documents.list())
           .filter(view => view.config.label !== WARDEN_LABEL)
           .map(view => ({
             id: view.config.id,
@@ -7245,6 +7259,11 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
   const resumeTurns = new FileResumeTurnStore(id => createSessionPaths(paths, id).directory);
   /** Set by `createSessionHealth`; read by `createAutoResume` — the two halves of one boot-time observation. */
   let bootExits: BootExitRecorder | undefined;
+  /**
+   * The running sessions whose pane a session worker watches: the self-check's exit pass leaves them to their
+   * workers' `exited` and asks tmux only about the rest. Hosting is bound once the supervisor exists.
+   */
+  const watchedPanes = new WatchedPanes();
   const recordBootExits = (exits: SessionExitPort): SessionExitPort => {
     bootExits = new BootExitRecorder(exits, clock);
     return bootExits;
@@ -7449,16 +7468,19 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           // one of its own launches is replacing it.
           // Wrapped so a settled exit also frees the conversations that session held (account model §9.3).
           exits: recordBootExits(
-            new LeaseReleasingSessionExits(
-              new TmuxSessionExitObserver(
-                paths.home,
-                storage,
-                new DurableTerminalPaneStore(storage, stateFiles, paths),
-                launchTmuxCommands,
-                launchGate,
-                clock,
+            new UnwatchedPaneExits(
+              new LeaseReleasingSessionExits(
+                new TmuxSessionExitObserver(
+                  paths.home,
+                  storage,
+                  new DurableTerminalPaneStore(storage, stateFiles, paths),
+                  launchTmuxCommands,
+                  launchGate,
+                  clock,
+                ),
+                conversationLeases(storage),
               ),
-              conversationLeases(storage),
+              watchedPanes,
             ),
           ),
           events: new FileSessionHealthEventSink(stateFiles, join(paths.home, 'health-events.jsonl'), clock),
@@ -7826,8 +7848,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         clock,
         // Late-bound: a session's worker decides its question from the receipts, so it hears of each one.
         id => {
-          if (sessionObserver instanceof WorkerObserverHost)
-            void sessionObserver.answersChanged(id).catch(() => undefined);
+          void sessionObserver.answersChanged(id).catch(() => undefined);
         },
       );
       // The answer, its monitor projection, released-advisory resume, and lifecycle mutation share
@@ -7886,86 +7907,96 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           yieldToLoop: () => new Promise(resolve => setImmediate(resolve)),
           paneState: async id => await turnPorts.paneState(id),
           sendEvidence: { read: async (id, since) => await inlineSendEvidence.read(id, since) },
+          every: (intervalMs, tick) => {
+            const timer = setInterval(tick, intervalMs);
+            timer.unref();
+            return () => clearInterval(timer);
+          },
         },
         observerFold,
       );
-      // ONE THREAD PER RUNNING SESSION (stage 3b): the turn part of every running session is observed on
-      // its own worker, through its own read-only attached tmux client on the daemon's server; this thread
-      // still writes every patch. `sessionWorkers.enabled: false` keeps every session on the inline host.
+      // ONE THREAD PER RUNNING SESSION (docs/design/session-workers.md): every running session is observed on
+      // its own worker, through its own read-only attached tmux client on the daemon's server, and only when
+      // something happened; this thread still writes every patch. The inline host above observes a session
+      // only while it has no worker — starting, backing off, or after its worker crashed five times.
       const observerTranscripts = createTranscriptFileResolver(storage);
-      const sessionWorkerSupervisor = sessionWorkers.enabled
-        ? new WorkerSupervisor(
-            {
-              spawn: () => new Worker(bundledWorkerUrl('session'), { type: 'module' }),
-              nowMs: () => Date.now(),
-              schedule: (delayMs, run) => {
-                const timer = setTimeout(run, delayMs);
-                timer.unref();
-                return () => clearTimeout(timer);
-              },
-              notice: (_session, message) => bootNotices.state(message),
-              // Late-bound to the host below, which is the one writer of what a worker found.
-              observed: (session, patches) => {
-                if (sessionObserver instanceof WorkerObserverHost) sessionObserver.observed(session, patches);
-              },
-              // Stage 3d settles a dead pane from this; until then the 30 s exit observer does, as before.
-              exited: () => undefined,
-              // A worker's own children and its look time, which no instrument on this thread can see.
-              report: ({ kind, lookMs, children }) => {
-                if (!profilerProbe.recording) return;
-                // A look the worker chose to make, or an answer it gave because this thread asked.
-                profilerProbe.activity(kind === 'look' ? 'session worker look' : 'session worker answer', lookMs);
-                for (const child of children) {
-                  const command = commandLabel(child.argv);
-                  profilerProbe.childStarted(command, false, 'session worker');
-                  profilerProbe.childExited(command, child.wallMs);
-                }
-              },
-            },
-            { ...DEFAULT_WORKER_SUPERVISOR_SETTINGS, cap: sessionWorkers.max },
-          )
-        : undefined;
+      const unrefTimer = (delayMs: number, run: () => void): (() => void) => {
+        const timer = setTimeout(run, delayMs);
+        timer.unref();
+        return () => clearTimeout(timer);
+      };
+      const sessionWorkerSupervisor = new WorkerSupervisor(
+        {
+          spawn: () => new Worker(bundledWorkerUrl('session'), { type: 'module' }),
+          nowMs: () => Date.now(),
+          schedule: unrefTimer,
+          notice: (_session, message) => bootNotices.state(message),
+          // Late-bound to the host below, which is the one writer of what a worker found.
+          observed: (session, patches, transcript) => sessionObserver.observed(session, patches, transcript),
+          liveness: (session, liveness) => sessionObserver.livenessChanged(session, liveness),
+          changed: () => sessionObserver.poke(),
+          // A pane its worker saw die (or can no longer watch) goes back to the self-check's exit pass, which
+          // settles it within 30 s as it always has — or at once, only when the owner turned that on (§8 Q2).
+          exited: session => {
+            watchedPanes.exited(session);
+            if (sessionWorkers.fastExit) void health.settleExitOf(session).catch(() => undefined);
+          },
+          // A worker's own children and its look time, which no instrument on this thread can see.
+          report: ({ kind, lookMs, children }) => {
+            if (!profilerProbe.recording) return;
+            // A look the worker chose to make, or an answer it gave because this thread asked.
+            profilerProbe.activity(kind === 'look' ? 'session worker look' : 'session worker answer', lookMs);
+            for (const child of children) {
+              const command = commandLabel(child.argv);
+              profilerProbe.childStarted(command, false, 'session worker');
+              profilerProbe.childExited(command, child.wallMs);
+            }
+          },
+        },
+        { ...DEFAULT_WORKER_SUPERVISOR_SETTINGS, cap: sessionWorkers.max },
+      );
       // The pool as `fy daemon status` and every performance report show it.
-      const sessionWorkerPool = (): SessionWorkerPool =>
-        sessionWorkerSupervisor === undefined
-          ? { enabled: false, max: sessionWorkers.max, threads: 0, sessionsPerThread: [] }
-          : {
-              enabled: true,
-              ...sessionWorkerSupervisor.pool,
-              sessionsPerThread: [...sessionWorkerSupervisor.pool.sessionsPerThread],
-            };
-      const sessionObserver =
-        sessionWorkerSupervisor === undefined
-          ? inlineObserver
-          : new WorkerObserverHost({
-              inline: inlineObserver,
-              supervisor: sessionWorkerSupervisor,
-              // The pane by the name the lifecycle record gives it, and the transcript the resolver proves:
-              // both resolved here, so the worker never reads a document.
-              binding: async id => {
-                const config = jsonObject(await storage.readConfig(id).catch(() => undefined));
-                const target = config?.tmuxSession;
-                if (typeof target !== 'string' || !isControlAttachable(target)) return undefined;
-                const file = await observerTranscripts.file(id).catch(() => undefined);
-                return {
-                  tmux: { executable: tmuxExecutable, socket: tmuxSocket, target },
-                  ...(file === undefined
-                    ? {}
-                    : { transcript: { file, harness: config?.harness === 'codex' ? 'codex' : 'claude' } }),
-                };
-              },
-              applier: observationApplier,
-              answerSerial,
-              answers: answerLedger,
-              files: fileEvents,
-              observer: observerFold,
-              liveness: {
-                redact: async text => await secretRedactor.redact(text),
-                processes: async tmuxSession => await paneProcesses.collect(tmuxSession),
-              },
-              clock,
-              barrierMs: 3_000,
-            });
+      const sessionWorkerPool = (): SessionWorkerPool => ({
+        enabled: true,
+        ...sessionWorkerSupervisor.pool,
+        sessionsPerThread: [...sessionWorkerSupervisor.pool.sessionsPerThread],
+      });
+      watchedPanes.hostedBy(id => sessionWorkerSupervisor.hosts(id as SessionId));
+      const sessionObserver = new WorkerObserverHost({
+        inline: inlineObserver,
+        supervisor: sessionWorkerSupervisor,
+        // The pane by the name the lifecycle record gives it, and the transcript the resolver proves: both
+        // resolved here, so the worker never reads a document.
+        binding: async id => {
+          const config = jsonObject(await storage.readConfig(id).catch(() => undefined));
+          const target = config?.tmuxSession;
+          if (typeof target !== 'string' || !isControlAttachable(target)) return undefined;
+          const file = await observerTranscripts.file(id).catch(() => undefined);
+          return {
+            tmux: { executable: tmuxExecutable, socket: tmuxSocket, target },
+            ...(file === undefined
+              ? {}
+              : { transcript: { file, harness: config?.harness === 'codex' ? 'codex' : 'claude' } }),
+          };
+        },
+        applier: observationApplier,
+        answerSerial,
+        answers: answerLedger,
+        files: fileEvents,
+        observer: observerFold,
+        liveness: {
+          redact: async text => await secretRedactor.redact(text),
+          processes: async tmuxSession => await paneProcesses.collect(tmuxSession),
+        },
+        clock,
+        barrierMs: 3_000,
+        stat: async file => {
+          const info = await stat(file);
+          return { size: info.size, mtimeMs: info.mtimeMs };
+        },
+        schedule: unrefTimer,
+        activity: async work => await activities.run('turn watcher', work),
+      });
       // Ordinary reads contain projection damage per session: a broken answer ledger must not take
       // the whole roster down. The monitor's pass calls the projector raw so it can report the exact
       // failing session instead of silently flattening missing evidence.
@@ -9053,9 +9084,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
             gauges: new ProcessGauges(),
             workers: [
               { name: 'analytics-fold', inFlight: () => transcriptFolds.inFlight },
-              ...(sessionWorkerSupervisor === undefined
-                ? []
-                : [{ name: 'session-observer', inFlight: () => sessionWorkerSupervisor.inFlight }]),
+              { name: 'session-observer', inFlight: () => sessionWorkerSupervisor.inFlight },
               ...(housekeepingJobs instanceof WorkerHousekeepingJobs
                 ? [{ name: HOUSEKEEPING_WORKER, inFlight: () => housekeepingJobs.inFlight }]
                 : []),
@@ -9508,6 +9537,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         warden: createWardenSubsystem({
           activities,
           sessions,
+          documents: createSessionDirectorySubsystem(paths, storage),
           control: sessionControl,
           attention,
           usage,
@@ -9887,6 +9917,7 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
   // it is still there, so the operator can delete it.
   if (config.retiredAccountModel) world.notices.state(RETIRED_ACCOUNT_MODEL_NOTICE);
   if (config.retiredFleetBlock) world.notices.state(RETIRED_FLEET_BLOCK_NOTICE);
+  if (config.sessionWorkers.enabled === false) world.notices.state(RETIRED_SESSION_WORKERS_SWITCH_NOTICE);
 
   progress.enter('opening the usage feed');
   const usage = await world.createUsageFeed(config);
@@ -10334,16 +10365,12 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
     () => void activities.run('declared-wait watcher', () => subsystems.monitor.run()),
     subsystems.monitor.intervalMs,
   );
-  // Whose turn it is: a local pane capture and a transcript stat per live session, every couple of
-  // seconds, so a finished turn reads as finished — and notifies — within seconds. Spends no tokens.
-  void activities.run('turn watcher', () => subsystems.observer.turns.run());
-  const turnTicks = setInterval(
-    () => void activities.run('turn watcher', () => subsystems.observer.turns.run()),
-    subsystems.observer.turns.intervalMs,
-  );
+  // Whose turn it is. No tick: each running session's worker looks when its pane draws or its transcript
+  // changes, and this thread reconciles which session has a worker when something changes — observing on a
+  // 2 s cadence only a session no worker has. Spends no tokens.
+  subsystems.observer.arm();
   cleanups.push(() => {
-    clearInterval(turnTicks);
-    // The session workers, and the tmux clients they hold, end with the tick that drove them.
+    // The session workers, and the tmux clients they hold, end with the observer.
     subsystems.observer.close();
   });
   cleanups.push(async () => {
@@ -10435,11 +10462,36 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
   cleanups.push(() => clearInterval(analyticsTicks));
   // The registry, durable session reader, exact observer and exact reaper the earlier increment
   // stubbed. Identity is re-checked at the moment of the kill, not at planning time.
+  //
+  // REAPED WHEN A PANE BECOMES REAPABLE, not every 5 s: a pane is reapable once its session is in a terminal
+  // status, which this daemon learns the moment it writes one (or journals `session.exited`). A sweep runs
+  // a second after that, on the lane, and a slow backstop catches anything else (a session finished while
+  // the daemon was down, a write another path made).
   const terminalReaper = world.createTerminalReaper(opened.storage);
-  const terminalReapTicks = setInterval(() => {
-    lane.submit('terminal reaper', () => terminalReaper.sweep());
-  }, 5_000);
-  cleanups.push(() => clearInterval(terminalReapTicks));
+  const reapNow = (): void => lane.submit('terminal reaper', () => terminalReaper.sweep());
+  let reapSoon: ReturnType<typeof setTimeout> | undefined;
+  const reapAfterChange = (): void => {
+    if (reapSoon !== undefined) return;
+    reapSoon = setTimeout(() => {
+      reapSoon = undefined;
+      reapNow();
+    }, TERMINAL_REAP_SETTLE_MS);
+    reapSoon.unref();
+  };
+  const unsubscribeReapStates = opened.storage.subscribeStates((_id, state) => {
+    if (isReapTerminalStatus(jsonObject(state)?.status)) reapAfterChange();
+  });
+  const unsubscribeReapEvents = opened.storage.subscribeEvents(event => {
+    if (event.type === 'session.exited') reapAfterChange();
+  });
+  reapNow();
+  const terminalReapTicks = setInterval(reapNow, TERMINAL_REAP_BACKSTOP_MS);
+  cleanups.push(() => {
+    clearInterval(terminalReapTicks);
+    if (reapSoon !== undefined) clearTimeout(reapSoon);
+    unsubscribeReapStates();
+    unsubscribeReapEvents();
+  });
   // The security log's fold windows close on this tick too, not only on the next record like them: a
   // burst that STOPS must still be written down with its count. Writes a line at most; spawns nothing.
   const auditFlushTicks = setInterval(() => {

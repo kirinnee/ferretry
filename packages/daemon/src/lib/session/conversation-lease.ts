@@ -22,7 +22,7 @@ import {
 import { type SessionId, tryParseSessionId } from '../session-id.ts';
 import type { ExitedSessionTransition, SessionExitObservation } from './health/exit.ts';
 import type { SessionExitPort } from './health/service.ts';
-import type { SurveyedSession } from './health/types.ts';
+import type { ExitObserveOptions, SurveyedSession } from './health/types.ts';
 import { type ResumableSessionStatus, TERMINAL_RESUME_STATUSES } from './resume/types.ts';
 
 /** What a launch path needs: claim before a pane exists, release once the session is over. */
@@ -123,8 +123,11 @@ export class LeaseReleasingSessionExits implements SessionExitPort {
     private readonly leases: Pick<SessionConversationLeases, 'release'>,
   ) {}
 
-  async observe(survey: readonly SurveyedSession[]): Promise<readonly SessionExitObservation[]> {
-    return await this.exits.observe(survey);
+  async observe(
+    survey: readonly SurveyedSession[],
+    options?: ExitObserveOptions,
+  ): Promise<readonly SessionExitObservation[]> {
+    return await this.exits.observe(survey, options);
   }
 
   async settle(observation: SessionExitObservation, transition: ExitedSessionTransition): Promise<boolean> {

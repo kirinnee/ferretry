@@ -151,6 +151,7 @@ function host(subject: World, overrides: Partial<InlineObserverPorts> = {}): Inl
       },
       paneState: async () => undefined,
       sendEvidence: { read: async () => ({ readable: true, inputs: [] }) },
+      every: () => () => undefined,
       ...overrides,
     },
     new SessionObserver(text => `digest(${text})`),
@@ -253,6 +254,36 @@ describe('InlineObserverHost — facts', () => {
 
     // Act + Assert
     should(await observer.midTurn()).equal(1);
+  });
+});
+
+describe('InlineObserverHost — armed', () => {
+  it('should observe the whole fleet on its own 2 s tick once armed, arm it once, and stop it on close', async () => {
+    // Arrange
+    const subject = await world();
+    await subject.storage.writeState(A, { id: A, status: 'running', turn: 1 });
+    const ticks: { readonly intervalMs: number; readonly tick: () => void; cancelled: boolean }[] = [];
+    const observer = host(subject, {
+      every: (intervalMs, tick) => {
+        const armed = { intervalMs, tick, cancelled: false };
+        ticks.push(armed);
+        return () => {
+          armed.cancelled = true;
+        };
+      },
+    });
+
+    // Act
+    observer.arm();
+    observer.arm();
+    ticks[0]?.tick();
+    for (let wait = 0; wait < 100 && (await turnStateOf(subject, A)) === undefined; wait += 1) await Bun.sleep(5);
+    observer.close();
+    observer.close();
+
+    // Assert
+    should(ticks.map(armed => [armed.intervalMs, armed.cancelled])).deepEqual([[observer.turns.intervalMs, true]]);
+    should(await turnStateOf(subject, A)).equal('working');
   });
 });
 

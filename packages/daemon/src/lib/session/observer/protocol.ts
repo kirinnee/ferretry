@@ -36,6 +36,18 @@ export interface SessionBinding {
   readonly transcript?: { readonly file: string; readonly harness: 'claude' | 'codex' } | undefined;
 }
 
+/** Which bytes of a transcript a look read: the main thread compares it with a `stat` of its own. */
+export interface TranscriptStamp {
+  readonly size: number;
+  readonly mtimeMs: number;
+}
+
+/** What the Warden's liveness fold needs from a worker: the screen, and a fingerprint of the tail. */
+export interface WorkerLiveness {
+  readonly screen?: string | undefined;
+  readonly transcript?: string | undefined;
+}
+
 /** A child the worker started, as the profile counts it. */
 export interface WorkerChild {
   readonly argv: readonly string[];
@@ -67,7 +79,7 @@ export type WorkerAsk =
 export interface WorkerAnswers {
   readonly observe: null;
   readonly pane: PaneState | null;
-  readonly liveness: { readonly screen?: string | undefined; readonly transcript?: string | undefined };
+  readonly liveness: WorkerLiveness;
   readonly 'send-evidence': {
     readonly readable: boolean;
     readonly unbound?: true;
@@ -111,8 +123,17 @@ export type FromSessionWorker =
       readonly session: string;
       readonly generation: number;
       readonly patches: readonly ObserverPatch[];
+      /** The transcript bytes this look decided from; absent when it read none. */
+      readonly transcript?: TranscriptStamp | undefined;
       readonly lookMs: number;
       readonly metrics: WorkerMetrics;
+    }
+  /** The screen or the transcript's tail changed: the Warden's liveness look, pushed instead of asked for. */
+  | {
+      readonly kind: 'liveness';
+      readonly session: string;
+      readonly generation: number;
+      readonly liveness: WorkerLiveness;
     }
   | {
       readonly kind: 'answered';
@@ -124,7 +145,10 @@ export type FromSessionWorker =
       readonly failure?: string | undefined;
       readonly metrics: WorkerMetrics;
     }
-  /** The session's pane died (its `#{pane_dead}` turned 1): stage 3d settles the exit from this. */
+  /**
+   * The session's pane died (its `#{pane_dead}` turned 1), or the worker's client has been down long enough
+   * that it can no longer say the pane is alive: the main thread proves the exit, and settles it (3d).
+   */
   | { readonly kind: 'exited'; readonly session: string; readonly generation: number }
   /** Something went wrong outside a look; `fatal` ends the worker and restarts what it hosted. */
   | {

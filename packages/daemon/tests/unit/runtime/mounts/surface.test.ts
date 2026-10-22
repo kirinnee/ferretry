@@ -453,6 +453,7 @@ const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
   monitor: { intervalMs: 15_000, arm: () => {}, run: async () => undefined, close: async () => {} },
   observer: {
     turns: { intervalMs: 2_000, run: async () => undefined },
+    arm: () => undefined,
     project: async () => undefined,
     questions: async () => new Map(),
     liveness: async () => ({}),

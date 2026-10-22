@@ -48,6 +48,11 @@ const TERMINAL_STATUSES: ReadonlySet<ReapTerminalStatus> = new Set([
   'kill_failed',
 ]);
 
+/** Whether a status is one a session's pane may be reaped in — what makes the reaper worth running. */
+export function isReapTerminalStatus(status: unknown): boolean {
+  return typeof status === 'string' && TERMINAL_STATUSES.has(status as ReapTerminalStatus);
+}
+
 function sessionKey(daemonId: string, sessionId: string): string {
   return `${daemonId}\n${sessionId}`;
 }

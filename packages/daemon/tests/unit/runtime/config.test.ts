@@ -10,9 +10,11 @@ import {
   mayTrustDirectLoopback,
   overriddenBy,
   parseDaemonConfig,
+  RETIRED_SESSION_WORKERS_SWITCH_NOTICE,
   recordedPortDocument,
   tunnelEntryDocument,
 } from '../../../src/lib/runtime/config.ts';
+import { DEFAULT_SESSION_WORKER_CAP } from '../../../src/lib/session/observer/plan.ts';
 
 const pricingRate = (patch: Record<string, unknown> = {}) => ({
   pricingKey: 'operator:model-a:2026-08',
@@ -597,6 +599,26 @@ describe('the housekeeping worker switch', () => {
   });
 });
 
+describe('the session workers', () => {
+  it('should observe on workers up to the default cap, and settle a dead pane at the self-check unless told otherwise', () => {
+    // Assert
+    should(defaultDaemonConfig().sessionWorkers).deepEqual({ max: DEFAULT_SESSION_WORKER_CAP, fastExit: false });
+    should(parseDaemonConfig({ sessionWorkers: { max: 2, fastExit: true } }).sessionWorkers).deepEqual({
+      max: 2,
+      fastExit: true,
+    });
+  });
+
+  it('should still boot a document that turns the retired switch off, and keep it to say so', () => {
+    // Act
+    const actual = parseDaemonConfig({ sessionWorkers: { enabled: false } }).sessionWorkers;
+
+    // Assert
+    should(actual.enabled).equal(false);
+    should(RETIRED_SESSION_WORKERS_SWITCH_NOTICE).match(/sessionWorkers\.enabled/);
+  });
+});
+
 describe('the retired fleet block', () => {
   it('should no longer carry a fleet block, because starting a daemon imports nothing', () => {
     // Assert — there is nothing left to switch, so nothing to default and nothing a first boot writes.
@@ -685,12 +707,8 @@ describe('the tunnel switch, as the document it writes', () => {
 describe('the session-worker pool size', () => {
   it('should pool the running sessions into two threads unless the operator chooses another size', () => {
     // Act + Assert — the owner's "pool of X, default 2"; one thread per agent is a larger max.
-    should(defaultDaemonConfig().sessionWorkers).deepEqual({ enabled: true, max: 2 });
-    should(parseDaemonConfig({ sessionWorkers: { max: 8 } }).sessionWorkers).deepEqual({ enabled: true, max: 8 });
-    should(parseDaemonConfig({ sessionWorkers: { enabled: false } }).sessionWorkers).deepEqual({
-      enabled: false,
-      max: 2,
-    });
+    should(defaultDaemonConfig().sessionWorkers).deepEqual({ max: 2, fastExit: false });
+    should(parseDaemonConfig({ sessionWorkers: { max: 8 } }).sessionWorkers).deepEqual({ max: 8, fastExit: false });
     should(() => parseDaemonConfig({ sessionWorkers: { max: 0 } })).throw();
   });
 });

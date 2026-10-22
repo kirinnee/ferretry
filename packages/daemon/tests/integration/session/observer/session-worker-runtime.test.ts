@@ -362,6 +362,68 @@ describe('SessionWorkerRuntime — when it looks', () => {
   });
 });
 
+describe('SessionWorkerRuntime — what it pushes unasked', () => {
+  const exitedOf = (posted: readonly FromSessionWorker[]) =>
+    posted.filter(message => 'kind' in message && message.kind === 'exited');
+  const livenessOf = (posted: readonly FromSessionWorker[]) =>
+    posted.flatMap(message => ('kind' in message && message.kind === 'liveness' ? [message.liveness.screen] : []));
+
+  it('should stop vouching for a pane only after three looks in a row with its client down', async () => {
+    // Arrange
+    const { attach, advance, pane, posted } = await rig();
+    pane.connected = false;
+    pane.watchTakes = false;
+    await attach();
+
+    // Act — looks at 0 and 2 s say nothing; the third, at 4 s, gives the pane back to the main thread.
+    await advance(2_000);
+    const twoLooks = exitedOf(posted).length;
+    await advance(2_000);
+
+    // Assert
+    should(twoLooks).equal(0);
+    should(exitedOf(posted)).deepEqual([{ kind: 'exited', session: 'a', generation: 1 }]);
+  });
+
+  it('should not count a client that was down only while it connected at attach', async () => {
+    // Arrange
+    const { attach, advance, pane, posted } = await rig();
+    pane.connected = false;
+    await attach();
+    await advance(0);
+
+    // Act
+    pane.connected = true;
+    for (let draw = 0; draw < 4; draw += 1) {
+      pane.drew();
+      await advance(2_000);
+    }
+
+    // Assert
+    should(exitedOf(posted)).deepEqual([]);
+  });
+
+  it('should push the Warden’s look when the screen moved, and not again while it has not', async () => {
+    // Arrange
+    const { attach, advance, pane, posted } = await rig();
+    pane.screen = WORKING;
+    await attach();
+    await advance(0);
+
+    // Act — a redraw that changed nothing, then one that changed the screen.
+    pane.drew();
+    await advance(2_000);
+    const unchanged = livenessOf(posted).length;
+    pane.screen = IDLE;
+    pane.drew();
+    await advance(2_000);
+
+    // Assert
+    should(unchanged).equal(1);
+    should(livenessOf(posted)).deepEqual([`${WORKING}\n`, `${IDLE}\n`]);
+  });
+});
+
 describe('SessionWorkerRuntime — the question part', () => {
   it('should decide the question again, without a read, when the facts or the receipts change, and not repeat itself', async () => {
     // Arrange

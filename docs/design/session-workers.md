@@ -464,6 +464,21 @@ by each PR with `fy daemon profile` (the parent doc's rule). "After 1c/2" is the
 Every PR keeps the full suite green against the default host, and 3b–3d also against `sessionWorkers.enabled:
 false`, until 3d deletes the inline loops (the inline host stays tested as the fallback).
 
+**3d as built.** `enabled` is retired (tolerated, with a boot notice). The turn `setInterval` is gone: the
+observer is armed and reconciles hosting when something changes (a state write, a worker ready or crashed,
+a back-off over) and on a 30 s backstop, and looks on the main thread every 2 s only while some session has
+no worker. The
+self-check's exit pass skips every pane a worker watches; a worker says `exited` when `#{pane_dead}` turns 1
+**or** when its client has been down for three looks in a row (it can no longer say the pane is alive), and
+the 30 s check then proves and settles it — at once instead with `sessionWorkers.fastExit: true` (default
+false, §8 Q2). The reaper sweeps a second after a terminal status or `session.exited`, with a 60 s backstop.
+The Warden keeps its 30 s fold and reflex on the main thread, but its roster reads documents without a
+projection and its samples are the ones workers push when the screen or tail changed. A read barrier is
+answered with one `stat` when the worker has read every byte. Two pieces stay, by design: the monitor's
+question pass still covers the sessions no worker hosts (parked, starting, crashed out), through the cached
+tail, so it parses nothing when nothing changed; and the live capture behind `?live=1` is request-driven
+and asks the worker first, so it costs nothing idle.
+
 Baseline arithmetic for the table: today a running session costs, every 2 s, `has-session` + `display-message` +
 2 `capture-pane` = 120 children/min, ×5 = 600/min from the turn watcher alone, plus 1 `ps` per working session per
 30 s, plus the reaper's per-registration `display-message` every 5 s. 1c removes the scrollback capture and most of

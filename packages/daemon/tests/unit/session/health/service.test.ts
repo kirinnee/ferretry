@@ -7,6 +7,7 @@ import {
   type DaemonHealthSnapshot,
   defaultSessionHealthSettings,
   type ExitedSessionTransition,
+  type ExitObserveOptions,
   type IncoherencePass,
   type SelfCheckOutcome,
   SelfRestartCoordinator,
@@ -65,7 +66,11 @@ class Harness {
   survey: readonly SurveyedSession[] | Error = [{ id: parseSessionId('alive'), journalLost: false }];
   surveys = 0;
   /** The walk each stage was handed, so a test can prove they shared one. */
-  readonly handed: { readonly stage: string; readonly survey: readonly SurveyedSession[] }[] = [];
+  readonly handed: {
+    readonly stage: string;
+    readonly survey: readonly SurveyedSession[];
+    readonly options?: ExitObserveOptions | undefined;
+  }[] = [];
   exitObservations: readonly SessionExitObservation[] | Error = [];
   readonly settled: { readonly id: string; readonly transition: ExitedSessionTransition }[] = [];
   /** Sessions whose settle answers false (moved since), or throws when mapped to an Error. */
@@ -117,8 +122,8 @@ class Harness {
       },
       consistency: this.consistency,
       exits: {
-        observe: async survey => {
-          this.handed.push({ stage: 'exits', survey });
+        observe: async (survey, options) => {
+          this.handed.push({ stage: 'exits', survey, options });
           if (this.exitObservations instanceof Error) throw this.exitObservations;
           return this.exitObservations;
         },
@@ -725,6 +730,43 @@ describe('session health service', () => {
 
       // Assert
       should(actual.exited).deepEqual(['exited']);
+    });
+
+    it('should settle one session at once, as a partial look, when its worker saw its pane die', async () => {
+      // Arrange
+      const harness = new Harness(snapshot());
+      harness.exitObservations = [exitedWith('exited', 0)];
+
+      // Act
+      const settled = await harness.service().settleExitOf(parseSessionId('exited'));
+
+      // Assert
+      should(settled).be.true();
+      should(harness.handed).deepEqual([
+        { stage: 'exits', survey: [{ id: parseSessionId('exited'), journalLost: false }], options: { partial: true } },
+      ]);
+      should(harness.settled.map(entry => entry.id)).deepEqual(['exited']);
+    });
+
+    it('should settle nothing at once when the pane is not proven dead, or the look or the settle fails', async () => {
+      // Arrange
+      const alive = new Harness(snapshot());
+      alive.exitObservations = [exitedWith('stopped-meanwhile', 0, 'stopped')];
+      const unobservable = new Harness(snapshot());
+      unobservable.exitObservations = new Error('tmux is not installed');
+      const refused = new Harness(snapshot());
+      refused.exitObservations = [exitedWith('broken', 1)];
+      refused.settleRefusals.set('broken', new Error('state is unwritable'));
+
+      // Act
+      const actual = [
+        await alive.service().settleExitOf(parseSessionId('stopped-meanwhile')),
+        await unobservable.service().settleExitOf(parseSessionId('exited')),
+        await refused.service().settleExitOf(parseSessionId('broken')),
+      ];
+
+      // Assert
+      should(actual).deepEqual([false, false, false]);
     });
 
     it('should finish the self-check when the exit observation itself fails', async () => {

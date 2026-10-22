@@ -1,9 +1,10 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
 import {
-  planTerminalReap,
   type DurableTerminalSession,
+  isReapTerminalStatus,
   type ObservedTerminalPane,
+  planTerminalReap,
   type RegisteredTerminalPane,
 } from '../../../src/lib/session/reap.ts';
 
@@ -107,5 +108,20 @@ describe('terminal reap policy', () => {
     should(plan({ sessions: [terminal(), terminal({ status: 'stopped' }), terminal()] }).targets).deepEqual([]);
     should(plan({ observations: [observed(), observed()] }).targets).deepEqual([]);
     should(plan({ observations: [observed(), observed({ pid: 902 }), observed()] }).targets).deepEqual([]);
+  });
+});
+
+describe('what makes the reaper worth running', () => {
+  it.each(['completed', 'failed', 'stalled', 'stopped', 'kill_failed'])(
+    'should reap after a session turned %s',
+    status => {
+      // Assert
+      should(isReapTerminalStatus(status)).be.true();
+    },
+  );
+
+  it.each([['running'], ['waiting'], [undefined], [3]])('should not reap after a session turned %p', status => {
+    // Assert
+    should(isReapTerminalStatus(status)).be.false();
   });
 });

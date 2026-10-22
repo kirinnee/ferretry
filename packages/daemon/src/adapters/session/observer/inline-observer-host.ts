@@ -59,6 +59,8 @@ export interface InlineObserverPorts {
   readonly paneState: (id: SessionId) => Promise<PaneState | undefined>;
   /** The send tracker's evidence, read on this thread. */
   readonly sendEvidence: SendEvidenceSource;
+  /** Runs `tick` every `intervalMs` until the answer is called. */
+  readonly every: (intervalMs: number, tick: () => void) => () => void;
 }
 
 const message = (error: unknown): string => (error instanceof Error ? error.message : String(error));
@@ -87,6 +89,7 @@ export class InlineObserverHost implements SessionObserverHost {
   readonly turns: TurnWatchLoop;
   /** What storage last told the host about each session: its turn and question fields. */
   private readonly facts = new Map<SessionId, ObserverFacts>();
+  private ticks: (() => void) | undefined;
   private readonly listeners = new Set<(id: SessionId, facts: ObserverFacts | undefined) => void>();
   /** How many writes storage has told of per session, so a read taken before one never overwrites it. */
   private readonly told = new Map<SessionId, number>();
@@ -100,8 +103,16 @@ export class InlineObserverHost implements SessionObserverHost {
     this.turns = new SessionTurnWatcher(this.turnPortsFor(async () => await this.turnRoster()));
   }
 
-  /** Nothing to stop: the timers that drive this host are the composition root's. */
-  close(): void {}
+  /** The 2 s turn tick, armed: the whole fleet is observed on this thread. */
+  arm(): void {
+    this.ticks ??= this.ports.every(this.turns.intervalMs, () => void this.turns.run());
+  }
+
+  /** Stops the tick, when one was armed. */
+  close(): void {
+    this.ticks?.();
+    this.ticks = undefined;
+  }
 
   /**
    * Every change to what the host knows about a session, as it learns it — a write storage told of, or a
