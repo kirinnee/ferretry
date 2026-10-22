@@ -1,14 +1,15 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import type { AttachmentView } from '@ferretry/protocol';
 import { Composer, type ComposerProps } from '../../src/components/composer.tsx';
+import { ComposerAddMenu } from '../../src/components/composer-add-menu.tsx';
 import type { ComposerAttachmentUploader } from '../../src/components/composer-attachments.ts';
 import { PendingAttachmentStrip } from '../../src/components/session-chat-parts.tsx';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
 import { DaemonDraftStore, type DraftStorage } from '../../src/lib/drafts.ts';
 import '../support/dom.ts';
+import { writeMdComposePref } from '../../src/lib/md-compose.ts';
 import { render, run, runAsync } from '../support/react.ts';
 import { settleUntil } from '../support/settle.ts';
-import { writeMdComposePref } from '../../src/lib/md-compose.ts';
 
 // The general composer behaviour is one key arbitration for every editor style; these suites drive it
 // through the Plain textarea. The live editor (Markdown and Rich text) has its own suites.
@@ -94,8 +95,12 @@ describe('composer attachments', () => {
     // ＋ clicks the hidden file input it owns.
     expect(clicked).toBe(0);
     run(() => composer.root.findByProps({ 'data-composer-attach': '' }).props.onClick());
+    // On a touch device ＋ offers a camera row too, so the picker is one row away rather than direct.
+    const menus = composer.root.findAllByType(ComposerAddMenu);
+    const attach = menus[0]?.props.actions.find((entry: { key: string }) => entry.key === 'attach');
+    if (attach) run(() => attach.onSelect());
     expect(clicked).toBe(1);
-    const picker = composer.root.findByProps({ type: 'file' });
+    const picker = composer.root.findByProps({ type: 'file', accept: undefined });
     const input = { files: [png()], value: 'C:\\fakepath\\shot.png' };
     run(() => picker.props.onChange({ currentTarget: input }));
     expect(input.value).toBe('');

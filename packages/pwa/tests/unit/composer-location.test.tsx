@@ -1,12 +1,12 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { Composer } from '../../src/components/composer.tsx';
+import { ComposerAddMenu } from '../../src/components/composer-add-menu.tsx';
 import { PendingLocationChip } from '../../src/components/location-chip.tsx';
 import { LocationShareContext } from '../../src/hooks/use-location-share.ts';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
 import { DaemonDraftStore, type DraftStorage } from '../../src/lib/drafts.ts';
 import { LocationError, type LocationFix, type LocationShareHost } from '../../src/lib/location-share.ts';
 import { writeMdComposePref } from '../../src/lib/md-compose.ts';
-import { ContextMenu } from '../../src/shell/context-menu.tsx';
 import '../support/dom.ts';
 import { render, run, runAsync } from '../support/react.ts';
 
@@ -65,13 +65,13 @@ const mountComposer = (host: LocationShareHost | null) => {
           };
         }
         if (element.type === 'button' && props['data-composer-attach'] !== undefined) {
-          return { getBoundingClientRect: () => ({ left: 12, top: 34 }) };
+          return { closest: () => null, getBoundingClientRect: () => ({ left: 12, top: 34 }) };
         }
         return null;
       },
     },
   );
-  const menu = () => composer.root.findByType(ContextMenu);
+  const menu = () => composer.root.findByType(ComposerAddMenu);
   const chips = () => composer.root.findAllByType(PendingLocationChip);
   const chip = () => {
     const found = chips()[0];
@@ -79,12 +79,17 @@ const mountComposer = (host: LocationShareHost | null) => {
     return found;
   };
   const choose = (key: string) => {
-    const item = menu().props.items.find((entry: { key: string }) => entry.key === key);
+    const item = menu().props.actions.find((entry: { key: string }) => entry.key === key);
     run(() => item.onSelect());
   };
   const openMenu = () => run(() => composer.root.findByProps({ 'data-composer-attach': '' }).props.onClick());
+  // The camera row exists only on a touch device, and that is decided once per process by the test order.
+  const labels = () =>
+    menu()
+      .props.actions.map((item: { label: string }) => item.label)
+      .filter((label: string) => label !== 'Take photo');
   const submit = () => runAsync(async () => composer.root.findByType('form').props.onSubmit({ preventDefault() {} }));
-  return { composer, sent, menu, chips, chip, choose, openMenu, submit, clicks: () => clicked };
+  return { composer, sent, menu, labels, chips, chip, choose, openMenu, submit, clicks: () => clicked };
 };
 
 const hostWith = () => {
@@ -100,11 +105,14 @@ const hostWith = () => {
 };
 
 describe('composer share my location', () => {
-  test('without a host the ＋ button still opens the file picker directly and offers no menu', () => {
+  test('without a host the ＋ button reaches the file picker and never offers the location', () => {
     const view = mountComposer(null);
     view.openMenu();
+    if (view.composer.root.findAllByType(ComposerAddMenu).length > 0) {
+      expect(view.labels()).toEqual(['Attach files']);
+      view.choose('attach');
+    }
     expect(view.clicks()).toBe(1);
-    expect(view.composer.root.findAllByType(ContextMenu)).toHaveLength(0);
     run(() => view.composer.unmount());
   });
 
@@ -114,11 +122,8 @@ describe('composer share my location', () => {
     expect(view.menu().props.open).toBe(false);
     view.openMenu();
     expect(view.menu().props.open).toBe(true);
-    expect(view.menu().props.anchor).toEqual({ x: 12, y: 34 });
-    expect(view.menu().props.items.map((item: { label: string }) => item.label)).toEqual([
-      'Attach a file',
-      'Share my location',
-    ]);
+    expect(view.menu().props.variant).toBe('popover');
+    expect(view.labels()).toEqual(['Attach files', 'Share location']);
     view.choose('attach');
     expect(view.clicks()).toBe(1);
     run(() => view.menu().props.onClose());

@@ -1,5 +1,5 @@
 import type { IFyApiClient, SessionView } from '@ferretry/protocol';
-import { ArrowUp, MapPin, Paperclip, Plus, Zap } from 'lucide-react';
+import { ArrowUp, Plus, Zap } from 'lucide-react';
 import { type ReactNode, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { OccupiedComposerNotice } from '../features/occupied-composer/occupied-composer-notice.tsx';
 import { draftResolved, draftStuckLine, occupiedDraftOf } from '../features/occupied-composer/occupied-draft.ts';
@@ -7,6 +7,7 @@ import { readInputModality, useInputModality } from '../hooks/use-input-modality
 import { useKeyboardOpen } from '../hooks/use-keyboard-open.ts';
 import { useLocationShareHost } from '../hooks/use-location-share.ts';
 import { uploadAttachment as uploadSessionAttachment } from '../lib/attachment-upload.ts';
+import { formatAttachmentSize } from '../lib/attachments.ts';
 import { continueList, type DraftEdit, insideCodeBlock } from '../lib/composer-editing.ts';
 import { useComposerHostWarmup } from '../lib/composer-host-warmup.ts';
 import {
@@ -30,7 +31,7 @@ import { canSubmitComposer } from '../lib/session-screens.ts';
 import type { BrowserRecognitionProvider } from '../lib/stt/browser-recognition.ts';
 import { REINSERT_TRANSCRIPTION_EVENT, reinsertTranscriptionText } from '../lib/stt/reinsert-transcription.ts';
 import type { SttSettings } from '../lib/stt/stt-settings.ts';
-import { ContextMenu, type MenuAnchor } from '../shell/context-menu.tsx';
+import { addMenuActions, ComposerAddMenu } from './composer-add-menu.tsx';
 import { type ComposerAttachmentUploader, useComposerAttachments } from './composer-attachments.ts';
 import {
   type ComposerField,
@@ -48,6 +49,7 @@ import {
 import { ComposerFormatToolbar } from './composer-format-toolbar.tsx';
 import { ComposerQuota, type ComposerQuotaProps } from './composer-quota.tsx';
 import { DictationControl } from './dictation-control.tsx';
+import { ImageViewer, type ViewerImage } from './image-viewer.tsx';
 import { LiveMarkdownEditor } from './live-markdown-editor.tsx';
 import { type LocationDraft, PendingLocationChip } from './location-chip.tsx';
 import { Markdown } from './markdown.tsx';
@@ -182,6 +184,13 @@ export interface ComposerProps {
  * row, so a lower ceiling would only add a scrollbar inside a box that is taller
  * anyway (the status line also steps aside then; see `.fy-composer-status-chrome`).
  */
+/** A chosen document, read in the browser's own tab from the local file — it has not been fetched from anywhere. */
+const openLocalFile = (file: File): void => {
+  const url = URL.createObjectURL(file);
+  window.open(url, '_blank', 'noopener,noreferrer');
+  window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+};
+
 const MAX_TEXTAREA_PX = 148;
 const COMPACT_MAX_TEXTAREA_PX = 240;
 const COMPACT_KEYBOARD_MAX_TEXTAREA_PX = 144;
@@ -339,8 +348,11 @@ export function Composer({
   const [dropping, setDropping] = useState(false);
   const locationHost = useLocationShareHost();
   const [location, setLocation] = useState<LocationDraft | null>(null);
-  const [plusAnchor, setPlusAnchor] = useState<MenuAnchor | null>(null);
+  const [plusOpen, setPlusOpen] = useState(false);
   const plusButton = useRef<HTMLButtonElement | null>(null);
+  const cameraInput = useRef<HTMLInputElement | null>(null);
+  /** The tray chip whose picture is open full screen, by its local id. */
+  const [viewing, setViewing] = useState<string | null>(null);
   const locating = useRef(0);
   /**
    * The draft is TAGGED with the session it belongs to, and read back through
@@ -939,6 +951,22 @@ export function Composer({
     setLocation(null);
   };
 
+  const viewerImages = attachments.entries.flatMap((entry): ViewerImage[] =>
+    entry.objectUrl
+      ? [
+          {
+            key: entry.localId,
+            src: entry.objectUrl,
+            failed: false,
+            alt: entry.file.name,
+            filename: entry.file.name,
+            meta: formatAttachmentSize(entry.file.size),
+          },
+        ]
+      : [],
+  );
+  const viewerAt = viewing === null ? -1 : viewerImages.findIndex(image => image.key === viewing);
+
   const modifierLabel = shortcutModifier();
   const sendKeyLabel = bareEnterAction === 'send' ? '↵' : '⇧↵';
   const sendLabel = sending ? 'Sending…' : 'Send';
@@ -950,21 +978,36 @@ export function Composer({
 
   // ONE attach control, placed by layout: before the field on a desktop, at the top of the phone's
   // left-hand column.
+  // The camera row exists only where a camera hand-off does: a touch device. Without it and without a
+  // location host there is one thing to do, so "+" goes straight to the file chooser.
+  const addActions = addMenuActions({
+    attach: () => fileInput.current?.click(),
+    camera: inputModality.touchAffected ? () => cameraInput.current?.click() : undefined,
+    location: locationHost === null ? undefined : shareLocation,
+  });
+  const addMenuUseful = addActions.length > 1;
   const attachButton = (
     <button
-      aria-label={locationHost === null ? 'Attach an image, audio or a file' : 'Add a file or share your location'}
-      aria-expanded={locationHost === null ? undefined : plusAnchor !== null}
-      aria-haspopup={locationHost === null ? undefined : 'menu'}
+      aria-label={addMenuUseful ? 'Add a file, photo or location' : 'Attach an image, audio or a file'}
+      aria-expanded={addMenuUseful ? plusOpen : undefined}
+      aria-haspopup={addMenuUseful ? 'dialog' : undefined}
       className="fy-composer-icon"
       data-composer-attach=""
       disabled={fieldDisabled}
       onClick={() => {
-        if (locationHost === null) {
+        if (!addMenuUseful) {
           fileInput.current?.click();
           return;
         }
-        const rect = plusButton.current?.getBoundingClientRect();
-        setPlusAnchor({ x: rect?.left ?? 0, y: rect?.top ?? 0 });
+        if (plusOpen) {
+          setPlusOpen(false);
+          return;
+        }
+        // The phone keyboard would cover a bottom sheet, so it goes down first; the sheet is built to
+        // stay put through the resize that causes.
+        const active = document.activeElement;
+        if (compact && active instanceof HTMLElement && active !== plusButton.current) active.blur();
+        setPlusOpen(true);
       }}
       ref={plusButton}
       title="Attach an image, audio or a file — or drop or paste one here"
@@ -1035,8 +1078,20 @@ export function Composer({
       {attachments.entries.length === 0 ? null : (
         <PendingAttachmentStrip
           entries={attachments.entries}
+          onOpen={entry => {
+            if (entry.objectUrl) setViewing(entry.localId);
+            else openLocalFile(entry.file);
+          }}
           onRemove={attachments.remove}
           onRetry={attachments.retry}
+        />
+      )}
+      {viewerAt < 0 ? null : (
+        <ImageViewer
+          images={viewerImages}
+          index={viewerAt}
+          onClose={() => setViewing(null)}
+          onIndexChange={next => setViewing(viewerImages[next]?.key ?? null)}
         />
       )}
       <ComposerReferenceStrip
@@ -1074,30 +1129,20 @@ export function Composer({
         ) : (
           attachButton
         )}
-        {locationHost === null ? null : (
-          <ContextMenu
-            anchor={plusAnchor ?? { x: 0, y: 0 }}
-            ariaLabel="Add to message"
-            items={[
-              {
-                key: 'attach',
-                label: 'Attach a file',
-                icon: <Paperclip size={16} aria-hidden="true" />,
-                onSelect: () => fileInput.current?.click(),
-              },
-              {
-                key: 'location',
-                label: 'Share my location',
-                icon: <MapPin size={16} aria-hidden="true" />,
-                onSelect: shareLocation,
-              },
-            ]}
-            onClose={() => setPlusAnchor(null)}
-            open={plusAnchor !== null}
-            touch={inputModality.touchAffected}
-            triggerRef={plusButton}
-          />
-        )}
+        <input
+          accept="image/*"
+          aria-hidden="true"
+          capture="environment"
+          className="hidden"
+          onChange={event => {
+            const input = event.currentTarget as unknown as HTMLInputElement;
+            attachments.add(Array.from(input.files ?? []));
+            input.value = '';
+          }}
+          ref={cameraInput}
+          tabIndex={-1}
+          type="file"
+        />
         <input
           aria-hidden="true"
           className="hidden"
@@ -1244,6 +1289,16 @@ export function Composer({
         <p className="fy-composer-error" role="alert">
           {error.text}
         </p>
+      ) : null}
+      {/* Outside the row: the row's own icon-button rules would otherwise size the menu's rows. */}
+      {addMenuUseful ? (
+        <ComposerAddMenu
+          actions={addActions}
+          anchorRef={plusButton}
+          onClose={() => setPlusOpen(false)}
+          open={plusOpen}
+          variant={compact ? 'sheet' : 'popover'}
+        />
       ) : null}
       {occupied === null ? null : (
         <OccupiedComposerNotice

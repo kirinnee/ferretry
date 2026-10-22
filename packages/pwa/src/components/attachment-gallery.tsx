@@ -4,9 +4,9 @@
  *
  * Three surfaces, all of them inherited from the original unchanged:
  *
- *  - a THUMBNAIL for anything that renders as an image, which expands into a
- *    real modal `<dialog>` (top layer, backdrop, focus trap) rather than a
- *    hand-rolled overlay;
+ *  - a THUMBNAIL for anything that renders as an image, which opens the shared
+ *    full-screen `ImageViewer` (a real modal `<dialog>`) over all of the
+ *    message's pictures;
  *  - a DOCUMENT CARD for everything else, stating the type, the size, whether
  *    text was extracted for the agent, and offering Open/Download once the
  *    bytes have actually arrived;
@@ -26,20 +26,9 @@
  * the gallery takes the connection as a prop.
  */
 
-import { Download, ExternalLink, FileText, ImageOff, X } from 'lucide-react';
-import {
-  createContext,
-  type ReactNode,
-  type RefObject,
-  useContext,
-  useEffect,
-  useLayoutEffect,
-  useMemo,
-  useRef,
-  useState,
-} from 'react';
+import { Download, ExternalLink, FileText, ImageOff } from 'lucide-react';
+import { createContext, type ReactNode, type RefObject, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { ExternalLink as ExternalAnchor } from '../features/browser/external-link.tsx';
-import { useDialogFocus } from '../hooks/use-dialog-focus.ts';
 import {
   type AttachmentBlobUrlPort,
   DaemonAttachmentBlobCache,
@@ -60,6 +49,7 @@ import { cn } from '../lib/class-names.ts';
 import type { DaemonConnection } from '../lib/daemon-connection.ts';
 import { daemonSessionScope } from '../lib/daemon-scope.ts';
 import { useDaemonFetch } from '../lib/store.tsx';
+import { ImageViewer, type ViewerImage } from './image-viewer.tsx';
 
 /** The browser's own object-URL pair, isolated so tests never touch it. */
 const browserBlobUrls: AttachmentBlobUrlPort = {
@@ -283,51 +273,62 @@ const AttachmentDocumentCard = ({ daemon, attachment }: AttachmentCardProps) => 
   );
 };
 
+/** The bytes of one stored image as an object URL, refused unless they really are an image. */
+const acquireImage = (
+  cache: DaemonAttachmentBlobCache,
+  load: AttachmentBlobLoader,
+  daemon: DaemonConnection,
+  scope: DaemonAttachmentScope,
+): Promise<string> =>
+  cache.acquire(scope, async () => {
+    const blob = await load(daemon, scope);
+    if (!isImageMime(blob.type)) throw new Error('attachment response was not an image');
+    return blob;
+  });
+
+/** The cache slot of a stored image, or null for an inline one that carries its own bytes. */
+const imageScope = (daemon: DaemonConnection, image: TranscriptImage): DaemonAttachmentScope | null =>
+  image.kind === 'attachment'
+    ? daemonAttachmentScope(daemonSessionScope(daemon, image.sessionId), image.attachmentId)
+    : null;
+
 interface AttachmentThumbnailProps {
   daemon: DaemonConnection;
   image: TranscriptImage;
+  onOpen: () => void;
 }
 
-const AttachmentThumbnail = ({ daemon, image }: AttachmentThumbnailProps) => {
+const AttachmentThumbnail = ({ daemon, image, onOpen }: AttachmentThumbnailProps) => {
   const { cache, load } = useAttachmentCache();
   const host = useRef<HTMLDivElement | null>(null);
   const visible = useNearViewport(host, image.kind === 'inline');
   const [src, setSrc] = useState(image.kind === 'inline' ? image.src : '');
   const [failed, setFailed] = useState(false);
-  const [expanded, setExpanded] = useState(false);
-  const dialogRef = useRef<HTMLDialogElement | null>(null);
 
-  // `open` on a <dialog> is modeless. showModal() supplies the real top layer,
-  // backdrop, pointer inertness and accessibility modality claimed below.
-  // Declared before useDialogFocus so the dialog enters the top layer before
-  // that hook moves focus into it.
-  useLayoutEffect(() => {
-    const dialog = dialogRef.current;
-    if (!expanded || !src || !dialog) return;
-    if (!dialog.open) dialog.showModal();
-    return () => {
-      if (dialog.open) dialog.close();
-    };
-  }, [expanded, src]);
-  const dialogFocus = useDialogFocus(expanded, dialogRef, () => setExpanded(false));
-
+  // The effect is keyed on WHAT the image is, never on the object that describes it: a parent that
+  // rebuilds its attachment objects on every render (the hand-off message does) would otherwise reset
+  // `src` and refetch on each of them, and the picture would sit on its skeleton for good.
+  const daemonRef = useRef(daemon);
+  daemonRef.current = daemon;
+  const imageRef = useRef(image);
+  imageRef.current = image;
+  const inlineSrc = image.kind === 'inline' ? image.src : '';
+  const sessionId = image.kind === 'attachment' ? image.sessionId : '';
+  const attachmentId = image.kind === 'attachment' ? image.attachmentId : '';
+  const kind = image.kind;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `kind`, `sessionId`, `attachmentId` and `inlineSrc` ARE the image's identity; the refs carry the rest.
   useEffect(() => {
-    setExpanded(false);
     setFailed(false);
-    if (image.kind === 'inline') {
-      setSrc(image.src);
+    if (kind === 'inline') {
+      setSrc(inlineSrc);
       return;
     }
     setSrc('');
     if (!visible) return;
-    const scope = daemonAttachmentScope(daemonSessionScope(daemon, image.sessionId), image.attachmentId);
+    const scope = imageScope(daemonRef.current, imageRef.current);
+    if (!scope) return;
     let active = true;
-    void cache
-      .acquire(scope, async () => {
-        const blob = await load(daemon, scope);
-        if (!isImageMime(blob.type)) throw new Error('attachment response was not an image');
-        return blob;
-      })
+    void acquireImage(cache, load, daemonRef.current, scope)
       .then(url => {
         if (active) setSrc(url);
       })
@@ -338,7 +339,7 @@ const AttachmentThumbnail = ({ daemon, image }: AttachmentThumbnailProps) => {
       active = false;
       cache.release(scope);
     };
-  }, [cache, daemon, image, load, visible]);
+  }, [cache, daemon.daemonId, inlineSrc, kind, load, sessionId, attachmentId, visible]);
 
   const filename = image.kind === 'attachment' ? image.filename : image.alt;
   const alt = image.kind === 'attachment' ? (image.alt ?? image.filename) : image.alt;
@@ -359,7 +360,7 @@ const AttachmentThumbnail = ({ daemon, image }: AttachmentThumbnailProps) => {
         <button
           type="button"
           className="block min-h-[44px] min-w-[44px] overflow-hidden rounded-control border border-border-soft bg-surface-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
-          onClick={() => setExpanded(true)}
+          onClick={onOpen}
           aria-label={`Expand ${alt}`}
         >
           <img
@@ -377,39 +378,78 @@ const AttachmentThumbnail = ({ daemon, image }: AttachmentThumbnailProps) => {
           aria-label={`Loading ${alt}`}
         />
       )}
-
-      {expanded && src && (
-        <dialog
-          ref={dialogRef}
-          tabIndex={-1}
-          aria-modal="true"
-          onKeyDown={dialogFocus.onKeyDown}
-          className="fixed inset-0 z-50 m-auto max-h-[96dvh] max-w-[96vw] overflow-auto rounded-panel border border-border bg-surface p-2 text-fg shadow-popover backdrop:bg-scrim"
-          aria-label={`Expanded image: ${alt}`}
-          onCancel={event => {
-            event.preventDefault();
-            setExpanded(false);
-          }}
-          onClose={() => setExpanded(false)}
-          onClick={event => {
-            if (event.currentTarget === event.target) setExpanded(false);
-          }}
-        >
-          <div className="relative min-h-[44px] min-w-[44px]">
-            <button
-              type="button"
-              className="absolute right-0 top-0 z-10 inline-flex min-h-[44px] min-w-[44px] items-center justify-center rounded-control border border-border bg-surface/90 text-fg shadow"
-              onClick={() => setExpanded(false)}
-              aria-label="Close expanded image"
-            >
-              <X size={18} aria-hidden="true" />
-            </button>
-            <img src={src} alt={alt} className="h-auto max-h-[90dvh] max-w-[92vw] object-contain" />
-          </div>
-        </dialog>
-      )}
     </div>
   );
+};
+
+interface GalleryViewerProps {
+  daemon: DaemonConnection;
+  /** Every viewable picture of the message, in order, with the stable key the gallery gave it. */
+  entries: readonly { readonly key: string; readonly image: TranscriptImage }[];
+  index: number;
+  onIndexChange: (index: number) => void;
+  onClose: () => void;
+}
+
+/**
+ * The viewer over a message's pictures. It asks the shared cache for the picture on screen and its two
+ * neighbours — the same slots the thumbnails already hold, so an opened picture costs no request and a
+ * swipe lands on one that is already there.
+ */
+const GalleryViewer = ({ daemon, entries, index, onIndexChange, onClose }: GalleryViewerProps) => {
+  const { cache, load } = useAttachmentCache();
+  const [resolved, setResolved] = useState<ReadonlyMap<string, string | null>>(new Map());
+  const daemonRef = useRef(daemon);
+  daemonRef.current = daemon;
+  const entriesRef = useRef(entries);
+  entriesRef.current = entries;
+  const wanted = [index - 1, index, index + 1].filter(at => at >= 0 && at < entries.length);
+  const wantedKeys = wanted.map(at => entries[at]?.key ?? '').join('|');
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `wantedKeys` encodes the window; the refs carry the entries.
+  useEffect(() => {
+    let active = true;
+    const held: DaemonAttachmentScope[] = [];
+    for (const at of wanted) {
+      const entry = entriesRef.current[at];
+      if (!entry) continue;
+      if (entry.image.kind === 'inline') {
+        const inline = entry.image.src;
+        setResolved(previous =>
+          previous.get(entry.key) === inline ? previous : new Map(previous).set(entry.key, inline),
+        );
+        continue;
+      }
+      const scope = imageScope(daemonRef.current, entry.image);
+      if (!scope) continue;
+      held.push(scope);
+      void acquireImage(cache, load, daemonRef.current, scope)
+        .then(url => {
+          if (active) setResolved(previous => new Map(previous).set(entry.key, url));
+        })
+        .catch(() => {
+          if (active) setResolved(previous => new Map(previous).set(entry.key, null));
+        });
+    }
+    return () => {
+      active = false;
+      for (const scope of held) cache.release(scope);
+    };
+  }, [cache, daemon.daemonId, load, wantedKeys]);
+
+  const images = entries.map<ViewerImage>(({ key, image }) => {
+    const src = resolved.get(key);
+    const attachment = image.kind === 'attachment';
+    return {
+      key,
+      src: src ?? null,
+      failed: src === null,
+      alt: attachment ? (image.alt ?? image.filename) : image.alt,
+      filename: attachment ? image.filename : image.alt,
+      ...(attachment && image.size !== undefined ? { meta: formatAttachmentSize(image.size) } : {}),
+    };
+  });
+  return <ImageViewer images={images} index={index} onClose={onClose} onIndexChange={onIndexChange} />;
 };
 
 export interface TranscriptAttachmentGalleryProps {
@@ -449,30 +489,54 @@ export const TranscriptAttachmentGallery = ({
   className,
 }: TranscriptAttachmentGalleryProps) => {
   const [showAll, setShowAll] = useState(false);
+  const [openKey, setOpenKey] = useState<string | null>(null);
   if (images.length === 0) return null;
   const visible = initialLimit && !showAll ? images.slice(0, initialLimit) : images;
   const hidden = images.length - visible.length;
-  const keys = galleryKeys(visible);
+  // Keys are numbered over the WHOLE list, so a picture keeps its key whichever prefix is on screen.
+  const allKeys = galleryKeys(images);
+  const keys = allKeys.slice(0, visible.length);
+  const viewable = images.flatMap((image, at) =>
+    image.kind === 'attachment' && !isImageAttachment(image) ? [] : [{ key: allKeys[at] ?? '', image }],
+  );
+  const openAt = openKey === null ? -1 : viewable.findIndex(entry => entry.key === openKey);
   return (
-    <div className={cn('min-w-0 space-y-1.5', className)}>
-      <div className="flex min-w-0 flex-wrap items-start gap-2">
-        {visible.map((image, index) =>
-          image.kind === 'attachment' && !isImageAttachment(image) ? (
-            <AttachmentDocumentCard key={keys[index]} daemon={daemon} attachment={image} />
-          ) : (
-            <AttachmentThumbnail key={keys[index]} daemon={daemon} image={image} />
-          ),
+    <>
+      <div className={cn('min-w-0 space-y-1.5', className)}>
+        <div className="flex min-w-0 flex-wrap items-start gap-2">
+          {visible.map((image, index) =>
+            image.kind === 'attachment' && !isImageAttachment(image) ? (
+              <AttachmentDocumentCard key={keys[index]} daemon={daemon} attachment={image} />
+            ) : (
+              <AttachmentThumbnail
+                key={keys[index]}
+                daemon={daemon}
+                image={image}
+                onOpen={() => setOpenKey(keys[index] ?? null)}
+              />
+            ),
+          )}
+        </div>
+        {hidden > 0 && (
+          <button
+            type="button"
+            className="inline-flex min-h-[44px] items-center rounded-control px-2 text-meta text-muted hover:bg-surface-2 hover:text-fg"
+            onClick={() => setShowAll(true)}
+          >
+            Show {hidden} more attachment{hidden === 1 ? '' : 's'}
+          </button>
         )}
       </div>
-      {hidden > 0 && (
-        <button
-          type="button"
-          className="inline-flex min-h-[44px] items-center rounded-control px-2 text-meta text-muted hover:bg-surface-2 hover:text-fg"
-          onClick={() => setShowAll(true)}
-        >
-          Show {hidden} more attachment{hidden === 1 ? '' : 's'}
-        </button>
+      {/* Outside the spaced column: a margin rule on its children would otherwise nudge the top-layer dialog. */}
+      {openAt >= 0 && (
+        <GalleryViewer
+          daemon={daemon}
+          entries={viewable}
+          index={openAt}
+          onClose={() => setOpenKey(null)}
+          onIndexChange={next => setOpenKey(viewable[next]?.key ?? null)}
+        />
       )}
-    </div>
+    </>
   );
 };

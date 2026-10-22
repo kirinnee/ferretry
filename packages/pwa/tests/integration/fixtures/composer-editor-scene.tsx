@@ -20,6 +20,10 @@
  *                         transcript, terminal list, task row and skills surface, each delivering
  *                         through its own production path, inside a reference surface that proves
  *                         the tokens they add (so a chip is a link, as in the app)
+ *   ?host=1              a location host is present, so "+" opens the add menu (attach, camera on touch, location)
+ *   ?upload=1            an uploader that accepts any file, so a chosen picture becomes a ready tray chip
+ *   ?messages=<n>        a delivered message with <n> pictures above the composer, loaded the way the app
+ *                        loads them (a blob per attachment), so the viewer opens from a message
  *   ?occupied=<text>      the agent's own box already holds the person's unsent <text>: the first send is
  *                         refused `composer_occupied` with it, exactly as the daemon answers, and
  *                         `api.resolveComposerDraft` records each tap on `window.__drafts` and frees the
@@ -35,6 +39,7 @@ import {
 import { FyHttpError } from '@ferretry/protocol/client';
 import { type ReactNode, StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
+import { AttachmentGalleryProvider, TranscriptAttachmentGallery } from '../../../src/components/attachment-gallery.tsx';
 import { Composer } from '../../../src/components/composer.tsx';
 import { ComposerRuntime } from '../../../src/components/composer-runtime.tsx';
 import { ReferenceSurfaceProvider, sessionReferenceSurface } from '../../../src/components/reference-surface.tsx';
@@ -44,10 +49,12 @@ import { Transcript } from '../../../src/components/transcript.tsx';
 import { SessionSkillsSurface } from '../../../src/features/skills/session-skills-surface.tsx';
 import { TaskRow } from '../../../src/features/tasks/task-row.tsx';
 import { useAppViewport } from '../../../src/hooks/use-app-viewport.ts';
+import { LocationShareContext } from '../../../src/hooks/use-location-share.ts';
 import { addReferenceToComposer } from '../../../src/lib/composer-references.ts';
 import { daemonConnection } from '../../../src/lib/daemon-connection.ts';
 import { daemonSessionScope } from '../../../src/lib/daemon-scope.ts';
 import { DaemonDraftStore } from '../../../src/lib/drafts.ts';
+import type { LocationFix, LocationShareHost } from '../../../src/lib/location-share.ts';
 import { writeMdComposePref } from '../../../src/lib/md-compose.ts';
 import type { RuntimeModelCatalog } from '../../../src/lib/runtime-models.ts';
 import { taskSummary } from '../../support/tasks.ts';
@@ -215,8 +222,67 @@ const refuseWhileOccupied = (): void => {
   });
 };
 
+/** A picture a test can see: a labelled gradient drawn on a canvas, as a real PNG. */
+const picturePng = (label: string, hue: number): Promise<Blob> => {
+  const canvas = document.createElement('canvas');
+  canvas.width = 1200;
+  canvas.height = 800;
+  const context = canvas.getContext('2d');
+  if (context === null) throw new Error('the scene has no 2d canvas');
+  const gradient = context.createLinearGradient(0, 0, 1200, 800);
+  gradient.addColorStop(0, `hsl(${hue} 70% 55%)`);
+  gradient.addColorStop(1, `hsl(${(hue + 70) % 360} 70% 35%)`);
+  context.fillStyle = gradient;
+  context.fillRect(0, 0, 1200, 800);
+  context.fillStyle = 'rgba(255,255,255,0.35)';
+  context.beginPath();
+  context.arc(900, 250, 120, 0, Math.PI * 2);
+  context.fill();
+  context.fillStyle = '#fff';
+  context.font = '96px sans-serif';
+  context.fillText(label, 80, 700);
+  return new Promise((resolve, reject) =>
+    canvas.toBlob(blob => (blob === null ? reject(new Error('no png')) : resolve(blob)), 'image/png'),
+  );
+};
+
+const host: LocationShareHost = { locate: () => new Promise<LocationFix>(() => undefined) };
+const uploadAttachment =
+  parameters.get('upload') === '1'
+    ? async (file: File) => ({
+        id: `att-${file.name}`,
+        filename: file.name,
+        mime: file.type,
+        size: file.size,
+        sha256: 'a'.repeat(64),
+        createdAt: '2026-10-22T00:00:00.000Z',
+      })
+    : undefined;
+
+const messageCount = Number(parameters.get('messages') ?? '0');
+const messagePictures = Array.from({ length: messageCount }, (_unused, at) => ({
+  kind: 'attachment' as const,
+  sessionId: scope.sessionId,
+  attachmentId: `pic-${at + 1}`,
+  filename: `photo-${at + 1}.png`,
+  mime: 'image/png',
+  size: 4_200 + at * 100,
+}));
+const messageGallery =
+  messageCount > 0 ? (
+    <AttachmentGalleryProvider
+      load={(_daemon, attachment) => picturePng(attachment.attachmentId, Number(attachment.attachmentId.slice(4)) * 80)}
+    >
+      <section className="scene-entries" data-scene-message="">
+        <p>Here are the screenshots from the failing run.</p>
+        <TranscriptAttachmentGallery daemon={daemon} images={messagePictures} />
+      </section>
+    </AttachmentGalleryProvider>
+  ) : null;
+
 const composer = (
   <Composer
+    {...(uploadAttachment === undefined ? {} : { uploadAttachment })}
     api={{
       ...occupiedApi,
       send: async (_id, body) => {
@@ -259,4 +325,11 @@ const scene =
     <main className="scene">{composer}</main>
   );
 
-createRoot(root).render(<StrictMode>{scene}</StrictMode>);
+const hosted = (
+  <LocationShareContext.Provider value={parameters.get('host') === '1' ? host : null}>
+    {messageGallery}
+    {scene}
+  </LocationShareContext.Provider>
+);
+
+createRoot(root).render(<StrictMode>{hosted}</StrictMode>);

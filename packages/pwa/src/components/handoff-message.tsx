@@ -174,18 +174,22 @@ export function HandoffView({
 }
 
 export function HandoffBody({ handoff, source }: { readonly handoff: SessionHandoff; readonly source: HandoffSource }) {
-  const stored = handoff.attachments.flatMap((attachment): StoredTranscriptAttachment[] =>
-    attachment.attachmentId === undefined
-      ? []
-      : [
-          {
-            kind: 'attachment',
-            sessionId: source.sessionId,
-            attachmentId: attachment.attachmentId,
-            filename: attachment.filename,
-            mime: attachment.mime,
-          },
-        ],
+  const stored = useMemo(
+    () =>
+      handoff.attachments.flatMap((attachment): StoredTranscriptAttachment[] =>
+        attachment.attachmentId === undefined
+          ? []
+          : [
+              {
+                kind: 'attachment',
+                sessionId: source.sessionId,
+                attachmentId: attachment.attachmentId,
+                filename: attachment.filename,
+                mime: attachment.mime,
+              },
+            ],
+      ),
+    [handoff.attachments, source.sessionId],
   );
   // A listed file that is not one of this session's stored attachments cannot be fetched, so it keeps
   // its name as a plain chip rather than becoming a thumbnail that would ask for somebody else's file.

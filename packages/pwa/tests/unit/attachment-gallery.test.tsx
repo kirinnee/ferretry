@@ -284,7 +284,7 @@ describe('the document card', () => {
 });
 
 describe('the image thumbnail', () => {
-  it('shows an inline image immediately and expands it into a modal dialog', async () => {
+  it('shows an inline image immediately and opens it in the full-screen viewer', async () => {
     const view = await mount(
       <TranscriptAttachmentGallery
         daemon={daemon}
@@ -295,13 +295,13 @@ describe('the image thumbnail', () => {
       await interact(() => {
         byLabel(view.container, 'Expand a rendered chart').click();
       });
-      const dialog = must(view.container.querySelector('dialog'), 'the expanded dialog');
-      expect(dialog.getAttribute('aria-label')).toBe('Expanded image: a rendered chart');
+      const dialog = must(view.container.querySelector('dialog'), 'the viewer dialog');
+      expect(dialog.getAttribute('aria-label')).toBe('Image viewer: a rendered chart');
       expect((dialog as HTMLDialogElement).open).toBe(true);
       // Tab is trapped inside the dialog rather than escaping to the page.
       pressKey(dialog, 'Tab');
       await interact(() => {
-        byLabel(view.container, 'Close expanded image').click();
+        byLabel(view.container, 'Close image viewer').click();
       });
       expect(view.container.querySelector('dialog')).toBeNull();
     } finally {
@@ -309,7 +309,7 @@ describe('the image thumbnail', () => {
     }
   });
 
-  it('closes on a backdrop click, on Escape and on the dialog’s own close event', async () => {
+  it('closes on Escape and on the dialog’s own cancel and close events', async () => {
     const view = await mount(
       <TranscriptAttachmentGallery
         daemon={daemon}
@@ -326,12 +326,6 @@ describe('the image thumbnail', () => {
 
       await expand();
       await interact(() => {
-        dialog().dispatchEvent(new MouseEvent('click', { bubbles: true }));
-      });
-      expect(view.container.querySelector('dialog')).toBeNull();
-
-      await expand();
-      await interact(() => {
         pressKey(document, 'Escape');
       });
       expect(view.container.querySelector('dialog')).toBeNull();
@@ -344,7 +338,9 @@ describe('the image thumbnail', () => {
 
       await expand();
       await interact(() => {
-        dialog().dispatchEvent(new Event('close', { bubbles: true }));
+        const closing = dialog();
+        closing.removeAttribute('open');
+        closing.dispatchEvent(new Event('close', { bubbles: true }));
       });
       expect(view.container.querySelector('dialog')).toBeNull();
     } finally {
@@ -429,7 +425,6 @@ describe('the image thumbnail', () => {
 
   it('loads eagerly in a DOM that has no IntersectionObserver at all', async () => {
     const original = globalThis.IntersectionObserver;
-    // biome-ignore lint/performance/noDelete: restoring the global requires removing it first.
     delete (globalThis as { IntersectionObserver?: unknown }).IntersectionObserver;
     try {
       const view = await mount(
@@ -460,7 +455,20 @@ describe('the image thumbnail', () => {
     }) as typeof URL.revokeObjectURL;
     const fetched = globalThis.fetch;
     globalThis.fetch = (async () =>
-      new Response('png', { headers: { 'content-type': 'image/png' } })) as unknown as typeof fetch;
+      new Response(
+        JSON.stringify({
+          attachment: {
+            id: 'att-1',
+            filename: 'diagram.png',
+            mime: 'image/png',
+            size: 3,
+            sha256: 'a'.repeat(64),
+            createdAt: '2026-10-22T00:00:00.000Z',
+          },
+          base64: btoa('png'),
+        }),
+        { headers: { 'content-type': 'application/json' } },
+      )) as unknown as typeof fetch;
     try {
       const view = await mount(<TranscriptAttachmentGallery daemon={daemon} images={[attachment()]} />);
       expect(created).toEqual(['blob:standalone/1']);
