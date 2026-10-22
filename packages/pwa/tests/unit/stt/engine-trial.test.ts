@@ -21,7 +21,7 @@ class FakeSession implements OnDeviceSession {
   started = 0;
   cancelled = 0;
   finishes = 0;
-  timings?: () => { readonly loadMs?: number } | undefined;
+  timings?: () => { readonly loadMs?: number; readonly model?: string } | undefined;
   resolveFinish: (text: string) => void = () => undefined;
   rejectFinish: (error: unknown) => void = () => undefined;
 
@@ -136,11 +136,12 @@ describe('startEngineTrial', () => {
     session.options.onLimit();
     should(session.finishes).equal(1);
     should(h.timers.size).equal(0);
-    session.timings = () => ({ loadMs: 2_500 });
+    session.timings = () => ({ loadMs: 2_500, model: 'Whisper tiny.en q8 · 2575352 · WebGPU' });
     session.resolveFinish('');
     const result = await trial.result;
     should(result.firstWordMs).be.null();
     should(result.loadMs).equal(2_500);
+    should(result.model).equal('Whisper tiny.en q8 · 2575352 · WebGPU');
   });
 
   it('ends with the session’s failure, or a plain one for anything else', async () => {

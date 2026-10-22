@@ -30,6 +30,8 @@ export interface EngineTrialResult {
   readonly finishMs: number;
   /** The one-time model load this take paid for, when the engine reports one. */
   readonly loadMs: number | null;
+  /** What ran the take, when the engine says — the model, and for Whisper the backend ("… · WebGPU"). */
+  readonly model?: string;
 }
 
 export interface EngineTrialPorts {
@@ -100,7 +102,8 @@ export function startEngineTrial(ports: EngineTrialPorts, onUpdate: (update: Eng
       text => {
         if (settled) return;
         settled = true;
-        const loadMs = active.timings?.()?.loadMs;
+        const timings = active.timings?.();
+        const loadMs = timings?.loadMs;
         resolveResult({
           text: text.trim(),
           openMs: Math.max(0, began - pressedAt),
@@ -108,6 +111,7 @@ export function startEngineTrial(ports: EngineTrialPorts, onUpdate: (update: Eng
           firstWordMs: firstWordAt === null ? null : Math.max(0, firstWordAt - began),
           finishMs: Math.max(0, ports.now() - stoppedAt),
           loadMs: loadMs === undefined ? null : Math.max(0, loadMs),
+          ...(timings?.model === undefined ? {} : { model: timings.model }),
         });
       },
       (error: unknown) =>
