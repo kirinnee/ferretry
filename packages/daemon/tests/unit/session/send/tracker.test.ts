@@ -1,4 +1,5 @@
 import { describe, it } from 'bun:test';
+import { turnFileInstruction } from '@ferretry/protocol';
 import should from 'should';
 import { type ClockPort, parseSessionId, type SerialExecutor, type SessionId } from '../../../../src/lib/index.ts';
 import {
@@ -106,6 +107,10 @@ class World {
   readonly journal: Array<{ event: string; data: Readonly<Record<string, unknown>> }> = [];
   readonly scheduled: Array<{ id: SessionId; delayMs: number; run: () => void }> = [];
   readonly retyped: string[] = [];
+  /** Sends the tracker asked to press Enter for again, and whether that Enter takes. */
+  readonly resubmitted: string[] = [];
+  enterTakes = false;
+  resubmitDeclines = false;
   readonly notices: Array<{ sender: string; recipient: string; record: SendRecord }> = [];
   reading: SendEvidenceReading = { readable: true, inputs: [] };
   readFails = false;
@@ -188,6 +193,16 @@ class World {
             delete (next as { deadlineAt?: string }).deadlineAt;
             this.records.set(sendId, next);
             return next;
+          },
+          // The service's own re-checks are its to test; here an Enter either takes or it does not.
+          resubmit: async (_id, sendId) => {
+            const current = this.records.get(sendId) as SendRecord;
+            if (this.resubmitDeclines) return current;
+            this.resubmitted.push(sendId);
+            const counted = { ...current, submitNudges: (current.submitNudges ?? 0) + 1 };
+            this.records.set(sendId, this.enterTakes ? { ...counted, attemptAt: clock.now() } : counted);
+            if (this.enterTakes) this.inPane = false;
+            return this.records.get(sendId);
           },
         },
         notifier: {
@@ -624,6 +639,71 @@ describe('what the pane shows, on every look', () => {
     await world.checkAt(2_000);
 
     should(world.only).match({ fate: 'queued', queueProof: 'pane', queuedAt: at(2_000) });
+  });
+});
+
+describe('a pointer of ours left typed in the composer', () => {
+  const POINTER = turnFileInstruction('/state/sessions/session-1/turns/turn-004.md');
+  const pointer = (overrides: Partial<SendRecord> = {}) =>
+    record({ path: 'turn-file', message: 'the long message', matchText: POINTER, ...overrides });
+
+  it('presses Enter again on a backoff, a bounded number of times, before calling it typed and not sent', async () => {
+    const world = new World(pointer());
+    world.inPane = 'composer';
+    world.evidence(new ClaudeObservedInputObserver(), []);
+
+    for (const ms of [2_000, 4_000, 6_000, 12_000, 30_000, 33_000]) await world.checkAt(ms);
+    const beforeTyped = world.only;
+    await world.checkAt(34_000);
+    await world.checkAt(90_000);
+
+    should(world.resubmitted).eql(['send-1', 'send-1', 'send-1']);
+    should(beforeTyped.typedNotSent).be.undefined();
+    should(world.only).match({ submitNudges: 3, typedNotSent: true });
+    should(world.retyped).be.empty();
+  });
+
+  it('stops nudging the moment one takes, and the send is then proven from the transcript as usual', async () => {
+    const world = new World(pointer());
+    world.inPane = 'composer';
+    world.enterTakes = true;
+    world.evidence(new ClaudeObservedInputObserver(), []);
+
+    await world.checkAt(4_000);
+    world.evidence(new ClaudeObservedInputObserver(), [claude.user(POINTER, 4_500)]);
+    await world.checkAt(6_000);
+
+    should(world.resubmitted).eql(['send-1']);
+    should(world.only).match({ fate: 'delivered', submitNudges: 1 });
+    should(world.events).not.containEql('control.send_typed_not_sent');
+  });
+
+  it('looks again when the next nudge is due, and no sooner than a first check once one is overdue', async () => {
+    const due = new World(pointer());
+    due.inPane = 'composer';
+    due.evidence(new ClaudeObservedInputObserver(), []);
+    const overdue = new World(pointer({ submitNudges: 1 }));
+    overdue.inPane = 'composer';
+    overdue.evidence(new ClaudeObservedInputObserver(), []);
+    // The service declined the press — a pane gone busy — so the nudge is still owed.
+    overdue.resubmitDeclines = true;
+
+    await due.checkAt(2_000);
+    await overdue.checkAt(20_000);
+
+    should(due.scheduled.at(-1)?.delayMs).equal(2_000);
+    should(overdue.scheduled.at(-1)?.delayMs).equal(defaultSendTrackerSettings.firstCheckMs);
+  });
+
+  it('never nudges a message typed as itself, which a person might equally have typed', async () => {
+    const world = new World(record({ message: 'hi', matchText: 'hi' }));
+    world.inPane = 'composer';
+    world.evidence(new CodexObservedInputObserver(), []);
+
+    for (const ms of [2_000, 4_000, 12_000, 30_000]) await world.checkAt(ms);
+
+    should(world.resubmitted).be.empty();
+    should(world.only.typedNotSent).be.true();
   });
 });
 

@@ -1,5 +1,8 @@
 import { describe, it } from 'bun:test';
 import {
+  COMPOSER_OCCUPIED_CODE,
+  ComposerDraftResultSchema,
+  composerOccupiedDraft,
   FY_REQUEST_ID_HEADER,
   SendListResponseSchema,
   type SendRecord,
@@ -14,7 +17,7 @@ import { ApiDispatcher } from '../../../../src/lib/api/dispatcher.ts';
 import { ApiRouter } from '../../../../src/lib/api/router.ts';
 import { SessionSendError, sessionSendRoutes } from '../../../../src/lib/runtime/mounts/session-send.ts';
 import { request } from '../../api/support.ts';
-import { agentIn, CREDENTIALS, FakeSessionSend, human } from './support.ts';
+import { agentIn, CREDENTIALS, FakeSessionSend, GRANTED, human } from './support.ts';
 
 /**
  * The surface a running session is spoken to through.
@@ -380,5 +383,92 @@ describe('the hand-off read', () => {
     should(unnamed.status).equal(400);
     should(elsewhere.status).equal(404);
     should(anonymous.status).equal(401);
+  });
+});
+
+describe('the person’s own draft in the composer', () => {
+  function governed(subsystem: FakeSessionSend): ApiDispatcher {
+    return new ApiDispatcher(new ApiRouter(sessionSendRoutes(subsystem)), CREDENTIALS, GRANTED);
+  }
+
+  it('should answer a refused send as composer_occupied, carrying the whole draft', async () => {
+    // Arrange — the message quotes only the start; the body is what the app acts on.
+    const draft = 'a draft long enough that the refusal message only quotes its start';
+    const sessions = new FakeSessionSend(['s1'], {
+      s1: new SessionSendError('refused', 'the agent’s composer already holds unsent text', draft),
+    });
+
+    // Act
+    const response = await dispatcher(sessions).dispatch(sendRequest('s1', JSON.stringify({ message: 'hi' })));
+
+    // Assert
+    should(response.status).equal(409);
+    const body = JSON.parse(response.body) as unknown;
+    should(body).match({ code: COMPOSER_OCCUPIED_CODE, draft });
+    should(composerOccupiedDraft(body)).equal(draft);
+  });
+
+  it('should keep every other refusal as it was, with no draft in the body', async () => {
+    // Arrange
+    const sessions = new FakeSessionSend(['s1'], { s1: new SessionSendError('refused', 'quarantined') });
+
+    // Act
+    const response = await dispatcher(sessions).dispatch(sendRequest('s1', JSON.stringify({ message: 'hi' })));
+
+    // Assert
+    should(response.status).equal(409);
+    should(composerOccupiedDraft(JSON.parse(response.body))).be.undefined();
+    should(JSON.parse(response.body)).match({ code: 'send_refused' });
+  });
+
+  it('should hand a submit or clear to the service and serve what it did', async () => {
+    // Arrange
+    const sessions = new FakeSessionSend();
+    const subject = governed(sessions);
+    const post = (body: unknown) =>
+      subject.dispatch(
+        request({
+          method: 'POST',
+          path: '/v1/sessions/s1/composer',
+          headers: human,
+          loopback: true,
+          body: JSON.stringify(body),
+        }),
+      );
+
+    // Act
+    const submitted = await post({ action: 'submit', draft: 'fix the login bug' });
+    const cleared = await post({ action: 'clear', draft: 'fix the login bug' });
+    const unknown = await post({ action: 'wipe', draft: 'x' });
+    const empty = await post({ action: 'clear', draft: '' });
+    const extra = await post({ action: 'clear', draft: 'x', all: true });
+
+    // Assert
+    should(ComposerDraftResultSchema.parse(JSON.parse(submitted.body))).deepEqual({
+      action: 'submit',
+      outcome: 'submitted',
+    });
+    should(ComposerDraftResultSchema.parse(JSON.parse(cleared.body))).match({ outcome: 'cleared' });
+    should([unknown.status, empty.status, extra.status]).deepEqual([400, 400, 400]);
+    should(sessions.drafts).deepEqual([
+      ['s1', { action: 'submit', draft: 'fix the login bug' }],
+      ['s1', { action: 'clear', draft: 'fix the login bug' }],
+    ]);
+  });
+
+  it('should be a governed terminal key, refused to a caller with no credential', async () => {
+    // Arrange
+    const sessions = new FakeSessionSend();
+    const route = sessionSendRoutes(sessions).find(entry => entry.path === '/v1/sessions/:sessionId/composer');
+
+    // Act
+    const anonymous = await governed(sessions).dispatch(
+      request({ method: 'POST', path: '/v1/sessions/s1/composer', headers: {}, body: '{}' }),
+    );
+
+    // Assert
+    should(route).match({ minimum: 'operator', capability: { capability: 'terminal', axis: 'use' } });
+    should(anonymous.status).equal(401);
+    should(sessions.drafts).be.empty();
   });
 });

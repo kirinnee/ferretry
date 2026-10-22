@@ -466,6 +466,15 @@ const CASES: readonly MethodCase[] = [
     expected: sendRecord,
   },
   {
+    name: 'press Enter on the person’s own draft in the composer',
+    invoke: client => client.resolveComposerDraft(SESSION_ID, { action: 'submit', draft: 'fix the login bug' }),
+    verb: 'POST',
+    path: '/v1/sessions/session-1/composer',
+    body: { action: 'submit', draft: 'fix the login bug' },
+    response: () => jsonResponse({ action: 'submit', outcome: 'submitted' }),
+    expected: { action: 'submit', outcome: 'submitted' },
+  },
+  {
     name: 'answer with labels only',
     invoke: client => client.answer(SESSION_ID, 'tool-1', ['yes']),
     verb: 'POST',
