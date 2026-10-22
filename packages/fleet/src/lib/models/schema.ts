@@ -141,6 +141,8 @@ export const CatalogModelSchema = z
     note: Text.optional(),
     /** What it costs at list price, when the provider publishes one (`CatalogPriceSchema`). */
     price: CatalogPriceSchema.optional(),
+    /** The day the provider retires it, when the provider has announced one. */
+    retires: z.string().regex(YYYY_MM_DD, { message: 'write the date as YYYY-MM-DD' }).optional(),
   })
   .check(ctx => {
     const model = ctx.value;
