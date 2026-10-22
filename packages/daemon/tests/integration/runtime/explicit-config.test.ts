@@ -67,6 +67,39 @@ describe('ExplicitDaemonConfig', () => {
     should(reloaded.bindUrl).equal('http://box.lan:9800');
   });
 
+  it('should switch the tunnel in the file `--config` named, superseding no legacy key', async () => {
+    // Arrange
+    const directory = await tempDirectory('fyd-explicit-tunnel');
+    const path = join(directory, 'daemon.json');
+    await writeFile(path, JSON.stringify({ port: 7_431, carriers: [{ kind: 'tunnel', source: 'discovery' }] }));
+    const store = new ExplicitDaemonConfig(path);
+
+    // Act
+    await store.writeTunnelEntry({ kind: 'tunnel', source: 'discovery', enabled: false });
+    const written = JSON.parse(await readFile(path, 'utf8')) as Record<string, unknown>;
+    const reloaded = await store.load();
+
+    // Assert
+    should(written).deepEqual({ port: 7_431, carriers: [{ kind: 'tunnel', source: 'discovery', enabled: false }] });
+    should(reloaded.carrierSet.tunnel.enabled).be.false();
+    should(reloaded.bindUrl).equal('http://127.0.0.1:7431');
+  });
+
+  it('should write the tunnel entry where `--config` points even before the file exists', async () => {
+    // Arrange
+    const directory = await tempDirectory('fyd-explicit-tunnel-absent');
+    const path = join(directory, 'daemon.json');
+
+    // Act
+    await new ExplicitDaemonConfig(path).writeTunnelEntry({ kind: 'tunnel', source: 'discovery', enabled: true });
+
+    // Assert
+    should(JSON.parse(await readFile(path, 'utf8'))).deepEqual({
+      carriers: [{ kind: 'tunnel', source: 'discovery', enabled: true }],
+    });
+    should((await stat(path)).mode & 0o777).equal(0o600);
+  });
+
   it('should refuse to record over a document it could not read as a configuration', async () => {
     // Writing the raw document plus one key must not become a way to persist a shape this daemon
     // would refuse to boot on: the parse boundary stays exactly where it was.

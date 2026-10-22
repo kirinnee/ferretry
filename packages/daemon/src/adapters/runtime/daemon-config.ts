@@ -12,11 +12,13 @@ import type {
 import {
   type DaemonConfig,
   DaemonConfigDocumentSchema,
+  type DaemonTunnelCarrierEntry,
   defaultDaemonConfigDocument,
   type FileSystemPort,
   type FoundationPaths,
   parseDaemonConfig,
   recordedPortDocument,
+  tunnelEntryDocument,
 } from '../../lib/index.ts';
 
 /**
@@ -263,6 +265,23 @@ export class FileDaemonConfig {
     await this.files.writeTextAtomic(
       this.paths.daemonConfig,
       `${JSON.stringify(recordedPortDocument(raw, port), null, 2)}\n`,
+    );
+  }
+
+  /**
+   * Records the tunnel switch: exactly the one `{ kind: 'tunnel' }` entry, inserted or replaced.
+   *
+   * Raw in, raw out, and the schema run only as the refusal, exactly as `record` does — and for the same
+   * reason: the switch must not plant a `host` key, or a filled-in `enabled` on somebody's relay entry,
+   * in a file only the operator writes. `tunnelEntryDocument` owns which entry changes.
+   */
+  async writeTunnelEntry(entry: DaemonTunnelCarrierEntry): Promise<void> {
+    const text = await this.files.readText(this.paths.daemonConfig);
+    const raw = this.raw(text);
+    this.checked(raw);
+    await this.files.writeTextAtomic(
+      this.paths.daemonConfig,
+      `${JSON.stringify(tunnelEntryDocument(raw, entry), null, 2)}\n`,
     );
   }
 

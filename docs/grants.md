@@ -396,6 +396,19 @@ The cost, stated: a thief holding an unlocked phone **and** its passkey (the per
 stretch that phone's unlock to a week. They could already do everything else that passkey buys; the week is
 bounded, journaled and undone at the machine or by revoking the device.
 
+## Turning the tunnel on or off
+
+Turning the tunnel on or off is `pairing.configure`. `PUT /v1/tunnel` ([relay-protocol.md](relay-protocol.md)
+§15) changes how OTHER devices reach this host — a public hostname on Cloudflare's edge in front of it —
+and how this host may be reached is the subject `pairing` already governs, beside `PATCH /v1/security`.
+So a governed caller (relay, tunnel, WebRTC, or a device on a loopback peer) needs that grant and a
+current step-up, the rule for every `configure` demand; the host's own `fy daemon tunnel on|off`, with
+the admin token over loopback, is ungoverned. It is not a host-only widen like the security settings:
+a tunnel reaches nobody who was not already paired — every session through it is the §6 handshake
+against the pinned identity, and pairing itself is refused on the tunnel listener — which is why the
+owner may switch it from the app. Reading it (`GET /v1/tunnel`) needs no capability, like
+`GET /v1/carriers`. A change is journaled as `security.changed` with the subject `tunnel`.
+
 ## Widening is a local act. There is no remote path to it.
 
 This section is about the DAEMON-WIDE document. One device's own grants have one more path: a remote

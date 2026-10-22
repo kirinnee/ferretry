@@ -3,7 +3,8 @@ import {
   ConfiguredRelayCarrierSchema,
   DaemonCarriersDocumentSchema,
   DISCOVERED_RELAY_CARRIER,
-  DISCOVERED_TUNNEL_CARRIER,
+  declaresTunnelCarrier,
+  IMPLIED_TUNNEL_CARRIER,
   MAX_RELAY_CARRIERS,
   MAX_TUNNEL_CARRIERS,
   relayCarrierIsConfigured,
@@ -23,7 +24,7 @@ describe('daemon carrier configuration', () => {
     expect(resolveDaemonCarriers(legacy)).toEqual({
       bind: { kind: 'bind', host: '127.0.0.1', port: 7431 },
       relays: [DISCOVERED_RELAY_CARRIER],
-      tunnel: DISCOVERED_TUNNEL_CARRIER,
+      tunnel: IMPLIED_TUNNEL_CARRIER,
     });
     expect(relayCarrierIsConfigured(DISCOVERED_RELAY_CARRIER)).toBe(false);
   });
@@ -50,7 +51,7 @@ describe('daemon carrier configuration', () => {
     ).toEqual({
       bind: { kind: 'bind', host: '127.0.0.1', port: 7431 },
       relays: [{ kind: 'relay', url: 'wss://new.example', enabled: true, reconnectSeconds: 5 }],
-      tunnel: DISCOVERED_TUNNEL_CARRIER,
+      tunnel: IMPLIED_TUNNEL_CARRIER,
     });
     expect(
       resolveDaemonCarriers({
@@ -60,7 +61,7 @@ describe('daemon carrier configuration', () => {
     ).toEqual({
       bind: { kind: 'bind', host: 'box.lan' },
       relays: [DISCOVERED_RELAY_CARRIER],
-      tunnel: DISCOVERED_TUNNEL_CARRIER,
+      tunnel: IMPLIED_TUNNEL_CARRIER,
     });
   });
 
@@ -135,10 +136,19 @@ describe('daemon carrier configuration', () => {
     ).toBe(false);
   });
 
-  it('implies the hosted tunnel like the hosted relay, and lets an explicit entry switch it off', () => {
-    // Nothing declared: the hosted tunnel is asked for, exactly as the hosted relay is.
-    expect(resolveDaemonCarriers(legacy).tunnel).toEqual(DISCOVERED_TUNNEL_CARRIER);
-    expect(DISCOVERED_TUNNEL_CARRIER).toEqual({ kind: 'tunnel', source: 'discovery', enabled: true });
+  it('implies NO tunnel, and lets an explicit entry switch it on or off', () => {
+    // Nothing declared: the tunnel is opt-in, so the implied entry is off — unlike the hosted relay.
+    expect(resolveDaemonCarriers(legacy).tunnel).toEqual(IMPLIED_TUNNEL_CARRIER);
+    expect(IMPLIED_TUNNEL_CARRIER).toEqual({ kind: 'tunnel', source: 'discovery', enabled: false });
+    expect(declaresTunnelCarrier(legacy.carriers)).toBe(false);
+    // An entry with no `enabled` key is ON: writing the entry is the decision.
+    const on = DaemonCarriersDocumentSchema.parse([{ kind: 'tunnel', source: 'discovery' }]);
+    expect(resolveDaemonCarriers({ ...legacy, carriers: on }).tunnel).toEqual({
+      kind: 'tunnel',
+      source: 'discovery',
+      enabled: true,
+    });
+    expect(declaresTunnelCarrier(on)).toBe(true);
     // "No tunnel, and I mean it" is a decision written down, and it wins.
     const off = DaemonCarriersDocumentSchema.parse([{ kind: 'tunnel', source: 'discovery', enabled: false }]);
     expect(resolveDaemonCarriers({ ...legacy, carriers: off }).tunnel).toEqual({
@@ -146,6 +156,7 @@ describe('daemon carrier configuration', () => {
       source: 'discovery',
       enabled: false,
     });
+    expect(declaresTunnelCarrier(off)).toBe(true);
     // A tunnel entry is neither a bind nor a relay: the legacy relay is still read beside it.
     const resolved = resolveDaemonCarriers({
       ...legacy,

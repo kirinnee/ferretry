@@ -75,6 +75,7 @@ export * from './task-boards.ts';
 export * from './task-title.ts';
 export * from './tasks.ts';
 export * from './terminal.ts';
+export * from './tunnel.ts';
 export * from './turn-handoff.ts';
 export * from './version-skew.ts';
 export * from './warden.ts';

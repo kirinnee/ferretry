@@ -214,6 +214,82 @@ describe('FileDaemonConfig', () => {
     should(await documents.store.writtenGrants()).containEql('warden');
   });
 
+  it('should switch the tunnel by adding one carriers entry that supersedes no legacy key', async () => {
+    // A document in the legacy spelling gains a `carriers` list holding ONLY the tunnel. Supersession is
+    // per kind, so `host`, `port` and `relay` must keep deciding where this daemon listens and dials.
+    // Arrange
+    const documents = documentStore(
+      JSON.stringify({
+        host: '0.0.0.0',
+        port: 7_431,
+        relay: { url: 'wss://mine.example/fy' },
+        corsOrigins: ['https://app.example'],
+      }),
+    );
+
+    // Act
+    await documents.store.writeTunnelEntry({ kind: 'tunnel', source: 'discovery', enabled: true });
+    const settled = await documents.store.peek();
+
+    // Assert
+    should(settled.document).deepEqual({
+      host: '0.0.0.0',
+      port: 7_431,
+      relay: { url: 'wss://mine.example/fy' },
+      corsOrigins: ['https://app.example'],
+      carriers: [{ kind: 'tunnel', source: 'discovery', enabled: true }],
+    });
+    should(supersededCarrierKeys({ rawDocument: settled.document ?? {}, carriers: settled.config.carriers })).deepEqual(
+      [],
+    );
+    should(settled.config.bindUrl).equal('http://0.0.0.0:7431');
+    should(settled.config.carrierSet.relays).deepEqual([
+      { kind: 'relay', url: 'wss://mine.example/fy', enabled: true, reconnectSeconds: 5 },
+    ]);
+    should(settled.config.carrierSet.tunnel).deepEqual({ kind: 'tunnel', source: 'discovery', enabled: true });
+  });
+
+  it('should replace the one tunnel entry in place, leaving every other entry exactly as written', async () => {
+    // Arrange
+    const documents = documentStore(
+      JSON.stringify({
+        carriers: [
+          { kind: 'bind', host: 'box.lan' },
+          { kind: 'tunnel', source: 'discovery' },
+          { kind: 'relay', source: 'discovery' },
+        ],
+      }),
+    );
+
+    // Act
+    await documents.store.writeTunnelEntry({ kind: 'tunnel', source: 'discovery', enabled: false });
+    const written = JSON.parse(documents.text() ?? '{}') as Record<string, unknown>;
+    const settled = await documents.store.peek();
+
+    // Assert — nothing manufactured: no `enabled` filled into the relay, no `host` at the top.
+    should(written).deepEqual({
+      carriers: [
+        { kind: 'bind', host: 'box.lan' },
+        { kind: 'tunnel', source: 'discovery', enabled: false },
+        { kind: 'relay', source: 'discovery' },
+      ],
+    });
+    should(settled.config.carrierSet.tunnel.enabled).be.false();
+  });
+
+  it('should write the tunnel entry into a state home that has no document yet', async () => {
+    // Arrange
+    const documents = documentStore();
+
+    // Act
+    await documents.store.writeTunnelEntry({ kind: 'tunnel', source: 'discovery', enabled: true });
+
+    // Assert
+    should(JSON.parse(documents.text() ?? '{}')).deepEqual({
+      carriers: [{ kind: 'tunnel', source: 'discovery', enabled: true }],
+    });
+  });
+
   it('should preserve both pricing and grants when their raw document writes interleave', async () => {
     // This is the production race in miniature. Pricing enters its read/decide/write transaction and
     // is held at the atomic rename. A grant write starts while that first writer is suspended. The
@@ -483,6 +559,20 @@ describe('a configuration document this daemon will not act on', () => {
       should((raised as Error).message).match(/\/state\/config\/daemon\.json could not be read/u);
     }
     should((peeked as DaemonConfigDocumentError).cause).not.be.undefined();
+  });
+
+  it('should refuse to switch the tunnel in a document it could not act on', async () => {
+    // Arrange
+    const documents = documentStore(JSON.stringify({ port: 'not a number' }));
+
+    // Act
+    const raised = await documents.store
+      .writeTunnelEntry({ kind: 'tunnel', source: 'discovery', enabled: true })
+      .catch((error: unknown) => error);
+
+    // Assert
+    should(raised).be.instanceOf(DaemonConfigDocumentError);
+    should(documents.text()).equal(JSON.stringify({ port: 'not a number' }));
   });
 
   it('should refuse to write grants over a document it could not read', async () => {

@@ -28,13 +28,14 @@ import type { ApiCredentials } from '../../../src/lib/api/authentication.ts';
 import { NO_GOVERNED_ROUTES_GUARD } from '../../../src/lib/api/capability.ts';
 import type { ApiRequest } from '../../../src/lib/api/http.ts';
 import type { SocketRoute } from '../../../src/lib/api/socket.ts';
-import { DISCOVERED_TUNNEL_CARRIER } from '../../../src/lib/runtime/carriers.ts';
+import { DaemonTunnelCarrierSchema, IMPLIED_TUNNEL_CARRIER } from '../../../src/lib/runtime/carriers.ts';
 import {
   CLOUDFLARED_ARGUMENTS,
   CONNECTOR_INHERITED_VARIABLES,
   connectorBaseEnvironment,
-  type TunnelCarrierDependencies,
   TunnelCarrier,
+  type TunnelCarrierDependencies,
+  TunnelCarrierSwitch,
   tunnelListenerSurface,
   tunnelPeer,
 } from '../../../src/lib/tunnel/index.ts';
@@ -47,6 +48,9 @@ import {
   tempDirectory,
   waitFor,
 } from './support.ts';
+
+/** The entry an operator writes to turn the tunnel on: no `enabled` key means on. */
+const TUNNEL_ON = DaemonTunnelCarrierSchema.parse({ kind: 'tunnel', source: 'discovery' });
 
 const crypto_ = new WebCryptoRelayCrypto();
 const CREDENTIALS: ApiCredentials = { admin: 'admin-secret-for-the-test' };
@@ -125,7 +129,8 @@ async function harness(): Promise<Harness> {
   const holdingFile = join(state, 'tunnel.json');
   const carrier = (overrides: Partial<TunnelCarrierDependencies> = {}) =>
     new TunnelCarrier({
-      entry: DISCOVERED_TUNNEL_CARRIER,
+      entry: TUNNEL_ON,
+      explicit: true,
       discoveryOrigin: service.origin,
       cloudflared: new CloudflaredLocator({ FY_CLOUDFLARED: fake.path, PATH: '' }),
       service: new HostedTunnelService(service.origin),
@@ -370,5 +375,65 @@ describe('the hosted tunnel carrier, with every production adapter', () => {
     should(world.steps).containEql(
       'tunnel released: https://quiet-otter.tunnels.example, because the tunnel carrier is switched off',
     );
+  });
+
+  it('should release on update a tunnel the old implied-on default provisioned, and say how to turn it on', async () => {
+    // Arrange — a boot from the release where an undeclared tunnel was implied on.
+    const world = await harness();
+    const first = world.carrier({ explicit: false });
+    first.start();
+    await first.idle();
+    await first.stop();
+
+    // Act — the same document after the update: no tunnel entry, which now means off.
+    const updated = world.carrier({ entry: IMPLIED_TUNNEL_CARRIER, explicit: false });
+    updated.start();
+    await updated.idle();
+
+    // Assert
+    should(world.service.releases).deepEqual([world.identity.daemonId]);
+    await should(readFile(world.holdingFile, 'utf8')).be.rejected();
+    should(world.stated).containEql(
+      'tunnel carrier off (opt-in) — released https://quiet-otter.tunnels.example; turn on with `fy daemon tunnel on`',
+    );
+  });
+
+  it('should switch on and off live: provision and publish, then withdraw, stop and release at once', async () => {
+    // Arrange — the opt-in default, with the switch's decisions recorded where a document would hold them.
+    const world = await harness();
+    const writes: boolean[] = [];
+    const tunnel = new TunnelCarrierSwitch({
+      entry: IMPLIED_TUNNEL_CARRIER,
+      explicit: false,
+      store: { write: async entry => void writes.push(entry.enabled) },
+    });
+    tunnel.start((entry, explicit) => world.carrier({ entry, explicit }));
+    cleanups.push(() => tunnel.stop());
+    const before = tunnel.view();
+
+    // Act — on, until the connector registers and the tunnel is published.
+    await tunnel.change(true);
+    await waitFor(() => tunnel.view().state === 'up', 'the tunnel to come up');
+    const up = tunnel.view();
+    const listenerPort = world.port();
+    // Off: the answer comes once the tunnel is back in the pool.
+    const off = await tunnel.change(false);
+
+    // Assert
+    should(before.state).equal('off');
+    should(world.service.provisions.length).equal(1);
+    should(up).deepEqual({
+      enabled: true,
+      explicit: true,
+      state: 'up',
+      tunnelUrl: 'https://quiet-otter.tunnels.example',
+      sentence: 'Tunnel: up — https://quiet-otter.tunnels.example',
+    });
+    should(world.published).deepEqual(['https://quiet-otter.tunnels.example', undefined]);
+    should(world.service.releases).deepEqual([world.identity.daemonId]);
+    await should(readFile(world.holdingFile, 'utf8')).be.rejected();
+    should(off.state).equal('off');
+    should(writes).deepEqual([true, false]);
+    should(await fetch(`http://127.0.0.1:${String(listenerPort)}/`).catch(() => 'refused')).equal('refused');
   });
 });

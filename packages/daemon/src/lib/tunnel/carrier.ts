@@ -3,8 +3,8 @@
  *
  * One object owns the whole life of this daemon's tunnel, in order:
  *
- * 1. **Plan.** The `{ kind: 'tunnel', source: 'discovery' }` entry switched off means release a held
- *    tunnel and stop. Otherwise `cloudflared` must be found (it is a dependency, never a download) and
+ * 1. **Plan.** The `{ kind: 'tunnel', source: 'discovery' }` entry switched off — written so, or implied
+ *    so because the tunnel is opt-in — means release a held tunnel and stop. Otherwise `cloudflared` must be found (it is a dependency, never a download) and
  *    the hosted service must advertise `available: true`; either missing turns the carrier off, said
  *    once with the reason and the remedy.
  * 2. **Listen.** A second listener on `127.0.0.1:0` serving only this daemon's session route, every
@@ -27,12 +27,13 @@
  * provisioned would be a worse product than one that says so and serves.
  */
 
+import type { TunnelState } from '@ferretry/protocol';
 import type { DaemonIdentity, RelayCrypto, TunnelProvision, TunnelRelease } from '@ferretry/relay';
 import type { DaemonTunnelCarrierEntry } from '../runtime/carriers.ts';
 import { type CloudflaredLocatorPort, cloudflaredRemedy } from './connector.ts';
 import {
-  provisionRetryDelayMs,
   type ProvisioningOutcome,
+  provisionRetryDelayMs,
   type TunnelProvisionerPort,
   TunnelProvisioningClient,
 } from './provisioning.ts';
@@ -75,8 +76,24 @@ export interface TunnelCarrierNotices {
   state(line: string): void;
 }
 
+/**
+ * Where one carrier is right now, for `GET /v1/tunnel` — never anything a provision answered but the
+ * hostname. `reason` is the last sentence that explains a state that is not `up`.
+ */
+export interface TunnelCarrierStatus {
+  readonly state: TunnelState;
+  readonly tunnelUrl: string | undefined;
+  readonly reason: string | undefined;
+}
+
 export interface TunnelCarrierDependencies {
   readonly entry: DaemonTunnelCarrierEntry;
+  /**
+   * Whether the operator's document names the entry, rather than the opt-in default implying it. Only
+   * the boot sentence differs: an implied-off carrier says how to turn the tunnel ON, because nobody
+   * decided it was off.
+   */
+  readonly explicit: boolean;
   /** The hosted origin this build discovers from, normalised (`tunnelServiceOrigin`), or none. */
   readonly discoveryOrigin: string | undefined;
   readonly cloudflared: CloudflaredLocatorPort;
@@ -98,6 +115,10 @@ export interface TunnelCarrierDependencies {
 /** The label every boot line about this carrier starts with, so a reader can find all of them. */
 const OFF = 'tunnel carrier off —';
 
+/** How the opt-in default says it is off, and how to turn it on. */
+const OPT_IN = 'tunnel carrier off (opt-in)';
+const TURN_ON = 'turn on with `fy daemon tunnel on`';
+
 export class TunnelCarrier {
   #stopped = false;
   #work: Promise<void> = Promise.resolve();
@@ -111,12 +132,26 @@ export class TunnelCarrier {
   #tunnelUrl: string | undefined;
   #published: string | undefined;
   #announced = false;
+  #state: TunnelState;
+  #reason: string | undefined;
 
-  constructor(private readonly deps: TunnelCarrierDependencies) {}
+  constructor(private readonly deps: TunnelCarrierDependencies) {
+    this.#state = deps.entry.enabled ? 'provisioning' : 'off';
+  }
 
   /** The address published right now, or nothing. */
   get published(): string | undefined {
     return this.#published;
+  }
+
+  /** Where this carrier is: off, unable to run, asking for a tunnel, waiting for the edge, or up. */
+  get status(): TunnelCarrierStatus {
+    const connected = this.#published === undefined ? 'connecting' : 'up';
+    return {
+      state: this.#state === 'connecting' ? connected : this.#state,
+      tunnelUrl: this.#state === 'off' || this.#state === 'unavailable' ? undefined : this.#tunnelUrl,
+      reason: this.#reason,
+    };
   }
 
   /**
@@ -125,13 +160,15 @@ export class TunnelCarrier {
    */
   start(): void {
     if (!this.deps.entry.enabled) {
-      this.deps.notices.step('tunnel carrier switched off', 'by its { "kind": "tunnel" } entry');
+      if (this.deps.explicit)
+        this.deps.notices.step('tunnel carrier switched off', 'by its { "kind": "tunnel" } entry');
+      else this.deps.notices.step(OPT_IN, TURN_ON);
       this.#track(this.#releaseHeld());
       return;
     }
     const location = this.deps.cloudflared.locate();
     if (location.kind === 'absent') {
-      this.deps.notices.state(`${OFF} ${cloudflaredRemedy(location.reason)}`);
+      this.#unavailable(cloudflaredRemedy(location.reason));
       return;
     }
     this.#track(this.#bringUp(location.path));
@@ -159,7 +196,7 @@ export class TunnelCarrier {
    */
   #track(work: Promise<void>): void {
     const guarded = work.catch((error: unknown) => {
-      this.deps.notices.state(`${OFF} ${error instanceof Error ? error.message : String(error)}`);
+      this.#unavailable(error instanceof Error ? error.message : String(error));
     });
     this.#work = this.#work.then(() => guarded);
   }
@@ -168,13 +205,13 @@ export class TunnelCarrier {
     const availability = await this.deps.service.read();
     if (this.#stopped) return;
     if (availability.kind === 'unavailable') {
-      this.deps.notices.state(`${OFF} ${availability.reason}`);
+      this.#unavailable(availability.reason);
       return;
     }
     const identity = await this.deps.identity();
     if (this.#stopped) return;
     if (!identity.ok) {
-      this.deps.notices.state(`${OFF} ${identity.reason}`);
+      this.#unavailable(identity.reason);
       return;
     }
     this.#origin = availability.origin;
@@ -221,11 +258,12 @@ export class TunnelCarrier {
     if (outcome.kind === 'retry') {
       const delay = provisionRetryDelayMs(this.#attempts, this.deps.random);
       this.#attempts += 1;
-      this.deps.notices.state(`tunnel provisioning failed — ${outcome.reason}; retrying in ${secondsPhrase(delay)}`);
+      this.#reason = `provisioning failed — ${outcome.reason}; retrying in ${secondsPhrase(delay)}`;
+      this.deps.notices.state(`tunnel ${this.#reason}`);
       this.#schedule(delay);
       return;
     }
-    this.deps.notices.state(`${OFF} ${outcome.reason}`);
+    this.#unavailable(outcome.reason);
     await this.#supervisor?.stop();
     this.#publishAs(undefined);
     await this.#listener?.close();
@@ -244,6 +282,8 @@ export class TunnelCarrier {
       );
     this.#announced = true;
     this.#tunnelUrl = provision.tunnelUrl;
+    this.#state = 'connecting';
+    this.#reason = undefined;
     // The token goes to the supervisor and is not kept here. A different token restarts the connector.
     (this.#supervisor as ConnectorSupervisor).run(provision.connectorToken);
     this.#publishCurrent();
@@ -273,6 +313,13 @@ export class TunnelCarrier {
   /** Published exactly while the connector is registered and a hostname is provisioned. */
   #publishCurrent(): void {
     this.#publishAs(this.#supervisor?.registered === true ? this.#tunnelUrl : undefined);
+  }
+
+  /** The carrier cannot run, said once with the reason, and reported as `unavailable` until replaced. */
+  #unavailable(reason: string): void {
+    this.#state = 'unavailable';
+    this.#reason = reason;
+    this.deps.notices.state(`${OFF} ${reason}`);
   }
 
   #publishAs(url: string | undefined): void {
@@ -314,6 +361,11 @@ export class TunnelCarrier {
     // Answered either way, so the record goes: `released: false` means the service held no tunnel for
     // this daemon (reclaimed, or released already), and an answered release is never repeated.
     await this.deps.holding.forget();
+    if (!this.deps.explicit && outcome.value.released) {
+      // The migration from the implied-on default: this daemon held a tunnel nobody turned on.
+      this.deps.notices.state(`${OPT_IN} — released ${held.tunnelUrl}; ${TURN_ON}`);
+      return;
+    }
     this.deps.notices.step(
       'tunnel released',
       outcome.value.released
@@ -331,12 +383,15 @@ export class TunnelCarrier {
  */
 export function describeTunnelPosture(input: {
   readonly entry: DaemonTunnelCarrierEntry;
+  /** Whether the document names the entry; an implied-off one is the opt-in default, not a decision. */
+  readonly explicit: boolean;
   readonly configFile: string;
   readonly location: ReturnType<CloudflaredLocatorPort['locate']> | undefined;
   readonly availability: Awaited<ReturnType<TunnelServicePort['read']>> | undefined;
 }): string {
   const label = 'tunnel      ';
-  if (!input.entry.enabled) return `${label} off — switched off in ${input.configFile}`;
+  if (!input.entry.enabled)
+    return input.explicit ? `${label} off — switched off in ${input.configFile}` : `${label} off (opt-in) — ${TURN_ON}`;
   if (input.location === undefined || input.location.kind === 'absent')
     return `${label} off — ${cloudflaredRemedy(input.location?.reason ?? 'cloudflared was not looked for')}`;
   if (input.availability === undefined || input.availability.kind === 'unavailable')

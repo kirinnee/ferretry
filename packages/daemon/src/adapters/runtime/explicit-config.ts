@@ -9,9 +9,11 @@ import {
   type DaemonConfig,
   DaemonConfigDocumentSchema,
   type DaemonConfigStore,
+  type DaemonTunnelCarrierEntry,
   defaultDaemonConfigDocument,
   parseDaemonConfig,
   recordedPortDocument,
+  tunnelEntryDocument,
 } from '../../lib/index.ts';
 import { prepareAnalyticsPricingWrite, readAnalyticsPricingConfiguration } from './daemon-config.ts';
 
@@ -63,6 +65,14 @@ export class ExplicitDaemonConfig implements DaemonConfigStore, AnalyticsPricing
     const raw = (text === undefined ? {} : JSON.parse(text)) as Record<string, unknown>;
     DaemonConfigDocumentSchema.parse(raw);
     await this.write(recordedPortDocument(raw, port));
+  }
+
+  /** Writes the one tunnel entry into the exact file `--config` named — see `tunnelEntryDocument`. */
+  async writeTunnelEntry(entry: DaemonTunnelCarrierEntry): Promise<void> {
+    const text = await this.read();
+    const raw = (text === undefined ? {} : JSON.parse(text)) as Record<string, unknown>;
+    DaemonConfigDocumentSchema.parse(raw);
+    await this.write(tunnelEntryDocument(raw, entry));
   }
 
   /** Reads the same pricing slice as the state-home adapter, from the exact file `--config` named. */

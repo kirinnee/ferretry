@@ -179,6 +179,9 @@ import { BulkStopController, registerStopCommands } from '../src/lib/stop';
 import { registerSttCommands } from '../src/lib/stt/commands';
 import { SttController } from '../src/lib/stt/controller';
 import { ProtocolSttGateway } from '../src/lib/stt/gateway';
+import { registerTunnelCommands } from '../src/lib/tunnel/commands';
+import { TunnelController } from '../src/lib/tunnel/controller';
+import { ProtocolTunnelGateway, ProtocolTunnelStatusReader } from '../src/lib/tunnel/gateway';
 import { NixProfileSwitch } from '../src/lib/update/profile-switch';
 import { DAEMON_RELEASE_KEYS } from '../src/lib/update/release-keys';
 import { DaemonUpdateStatusReader } from '../src/lib/update/status';
@@ -696,6 +699,7 @@ function buildDaemonController(world: CliWorld, client: SharedDaemonClient): Dae
       clientName: BINARY_NAME,
     }),
     updateStatus: new DaemonUpdateStatusReader(hostInstallFacts(world), new ProtocolDaemonUpdateView(client)),
+    tunnel: new ProtocolTunnelStatusReader(client),
     nixShellOffer: buildProfileSwitch(world, processes),
     turns: { midTurn: async () => (await new ProtocolDaemonUpdateView(client).view())?.midTurn ?? 0 },
     restartMarker: new FileDaemonRestartMarker(restartMarkerPath(layout.stateHome)),
@@ -1049,6 +1053,18 @@ const DOMAIN_REGISTRARS: ReadonlyArray<(wiring: DomainWiring) => void> = [
       () =>
         new SecurityController({
           gateway: new ProtocolSecurityGateway(client),
+          out: world.io,
+          clientName: BINARY_NAME,
+        }),
+    ),
+  // `fy daemon tunnel` switches this machine's opt-in Cloudflare tunnel through the running daemon, which
+  // applies it live. It mounts onto the same group, after it, with the shared client for the same reason.
+  ({ program, world, client }) =>
+    registerTunnelCommands(
+      program,
+      () =>
+        new TunnelController({
+          gateway: new ProtocolTunnelGateway(client),
           out: world.io,
           clientName: BINARY_NAME,
         }),

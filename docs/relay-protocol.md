@@ -2464,10 +2464,27 @@ partial one. The operator runbook is
 
 ### The daemon end
 
-- **The carrier entry.** The daemon's `carriers` list (§13) gains `{ "kind": "tunnel", "source":
-"discovery" }`, implied when the list declares no tunnel of its own, exactly as the hosted relay
-  entry is; `{ "kind": "tunnel", "source": "discovery", "enabled": false }` switches it off and a
-  daemon that held a tunnel then releases it. At most one tunnel.
+- **The carrier entry, and the tunnel is opt-in.** The daemon's `carriers` list (§13) gains
+  `{ "kind": "tunnel", "source": "discovery" }`. A list that declares no tunnel implies it **switched
+  off** — unlike the hosted relay entry, because a tunnel puts a public hostname on a third party's edge
+  in front of one machine, which is its owner's decision, never an update's. An explicit entry with no
+  `enabled` key is on (writing it is the decision); `"enabled": false` is off, and a daemon that held a
+  tunnel then releases it. At most one tunnel. **Migration:** a daemon updated from the implied-on
+  release, whose document names no tunnel, releases the tunnel it holds on its first boot and says
+  `tunnel carrier off (opt-in) — released <url>; turn on with fy daemon tunnel on`.
+- **Switching it, live.** `GET /v1/tunnel` (`authenticated`, no capability) answers
+  `TunnelStatusView` — `enabled`, `explicit`, `state` (`off` · `unavailable` · `provisioning` ·
+  `connecting` · `up`), `tunnelUrl` and one `sentence`; off by default it is
+  `Tunnel: off (opt-in) — turn on with fy daemon tunnel on or Settings › Connection`. `PUT /v1/tunnel`
+  with `{ "enabled": true | false }` (`pairing.configure`, so a remote caller needs a step-up — see
+  [grants.md](grants.md#turning-the-tunnel-on-or-off)) writes exactly that one entry into the document
+  the daemon booted from, under the barrier grant and pricing writes hold, and applies it **without a
+  restart**: on starts a new carrier; off withdraws the published tunnel, stops `cloudflared`, closes the
+  dedicated listener and releases the tunnel, and answers only once the release has. Changes are
+  serialised. A document with no `carriers` key gains one holding only the tunnel, which supersedes no
+  legacy `host`, `port` or `relay` key. `fy daemon tunnel on|off|status` is the host's door to the
+  same route, and `fy daemon status` prints its sentence. The contract is
+  `packages/protocol/src/lib/tunnel.ts`.
 - **`cloudflared` is a dependency, not a download.** The Nix package names the store's own binary
   through `FY_CLOUDFLARED` (a `--set-default` wrapper, so an operator's own value wins and agents'
   `PATH` is untouched); the Homebrew cask depends on the `cloudflared` formula; the deb and rpm
@@ -2516,8 +2533,8 @@ partial one. The operator runbook is
   token's boot shared. A release is asked once per boot and only of the origin the record names when
   that is the origin this build discovers; `{ released: false }` (nothing held any more) forgets the
   record exactly like `true`. A boot that could not get an answer keeps the record and asks once more
-  on the next boot. The `carriers` list is read at boot, so switching the entry off takes effect, and
-  releases, on the next start.
+  on the next boot. Switching the entry off through `PUT /v1/tunnel` releases at once; an entry
+  edited by hand in the file takes effect, and releases, on the next start.
 - **`cloudflared` supervision.** Restarted 1 s after it exits, doubling to one minute with equal jitter,
   the backoff starting over once a connection registers; registration is the set of
   `Registered tunnel connection connIndex=N` lines minus `Unregistered …`, so one of four edge

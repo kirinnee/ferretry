@@ -1,4 +1,4 @@
-import type { HealthView, LivenessView } from '@ferretry/protocol';
+import type { HealthView, LivenessView, TunnelStatusView } from '@ferretry/protocol';
 import { passMidTurn } from '../update/mid-turn.ts';
 import { type DaemonUpdateStatus, renderUpdateStatus } from '../update/status.ts';
 import type { InstalledDaemonBinary } from './binary.ts';
@@ -175,6 +175,11 @@ export interface DaemonControllerDeps {
    * process control need not stage an install method; the composition root always supplies it.
    */
   readonly updateStatus?: IDaemonUpdateStatusReader;
+  /**
+   * The `Tunnel:` line `status` adds, read only while the daemon serves; `undefined` from a daemon that
+   * has no `/v1/tunnel` yet, and the line is then left out. Optional for the reason `updateStatus` is.
+   */
+  readonly tunnel?: { read(): Promise<TunnelStatusView | undefined> };
   /** Offers a nix profile install when `install` finds a daemon running from a `nix shell`. */
   readonly nixShellOffer?: INixShellOffer;
   /**
@@ -613,16 +618,18 @@ export class DaemonController {
     const health = view.health;
     const supervisor = view.supervisor;
     const code = statusExitCode(view);
+    const tunnel = health === undefined ? undefined : await this.deps.tunnel?.read();
     const human = [
       renderDaemonStatus(view, this.deps.clientName),
+      ...(tunnel === undefined ? [] : [tunnel.sentence]),
       ...(update === undefined ? [] : renderUpdateStatus(update, this.deps.clientName)),
     ];
     if (options.json === true) {
       this.deps.out.success(
-        renderDaemonStatusJson(
-          view,
-          update === undefined ? {} : { install: update.install ?? null, update: update.update ?? null },
-        ),
+        renderDaemonStatusJson(view, {
+          ...(tunnel === undefined ? {} : { tunnel }),
+          ...(update === undefined ? {} : { install: update.install ?? null, update: update.update ?? null }),
+        }),
       );
     } else if (code === 0 && !view.orphan && !launchdThrottled(supervisor)) this.deps.out.success(human.join('\n'));
     else this.deps.out.warn(human.join('\n'));
