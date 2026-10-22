@@ -6,7 +6,8 @@ import { hexInputChunks, terminalPaneTarget, terminalTmuxSessionName } from '../
 import type { TmuxCommandPort } from '../../lib/tmux/contracts.ts';
 import { isTmuxServerAbsent } from '../../lib/tmux/server-absent.ts';
 
-const OWNER_OPTION = '@fy_terminal_owner';
+/** The tmux option that marks a session as a terminal; other subsystems must not disturb one. */
+export const TERMINAL_OWNER_OPTION = '@fy_terminal_owner';
 const ID_OPTION = '@fy_terminal_id';
 const TITLE_OPTION = '@fy_terminal_title';
 const CREATED_OPTION = '@fy_terminal_created';
@@ -54,7 +55,7 @@ export class TmuxTerminalRuntime implements TerminalRuntimePort {
   async list(): Promise<readonly TerminalRecord[]> {
     const format = [
       '#{session_name}',
-      `#{${OWNER_OPTION}}`,
+      `#{${TERMINAL_OWNER_OPTION}}`,
       `#{${ID_OPTION}}`,
       `#{${TITLE_OPTION}}`,
       `#{${CREATED_OPTION}}`,
@@ -144,7 +145,7 @@ export class TmuxTerminalRuntime implements TerminalRuntimePort {
       'set-option',
       '-t',
       tmuxSession,
-      OWNER_OPTION,
+      TERMINAL_OWNER_OPTION,
       input.ownerId,
       ';',
       'set-option',

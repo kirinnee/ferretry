@@ -1977,10 +1977,13 @@ active terminal, as "What a stream session costs" says).
 - **No compression.** The relay sees every record's size, and compressing a terminal's output before
   sealing it would make those sizes depend on what is ON the screen — the compress-then-encrypt length
   side channel. Deltas get most of the byte saving without giving an observer that oracle.
-- **The capture is still a poll, and each write and capture is still a tmux process** (about 2.3 ms
-  each, most of the daemon's remaining time). tmux's control mode would report output as it happens
-  and take commands over one long-lived connection; it also attaches a client that takes part in the
-  window's size, which is why it is a separate change rather than part of this one. — GAP.
+- **The capture is still a poll, and each write is still a tmux process** (about 2.3 ms each). A
+  capture — like every other READ the daemon asks tmux — now travels over one long-lived control-mode
+  client (`adapters/tmux/control-tmux-process.ts`), attached `ignore-size` so it takes no part in any
+  window's size, and costs no process. A write keeps its own: a connection that drops mid-command
+  cannot say whether tmux ran it, and a keystroke cannot be retried the way a read can. Reporting
+  output as it happens needs more than that one client, because tmux sends `%output` only for panes
+  in the session a client is attached to (measured on 3.6a) — a client per watched session. — GAP.
 - **Cloudflare itself is not measured here.** The Workers runtime is substituted (`rendezvous-process.ts`
   says how), so how long Cloudflare takes to confirm a write, what a Durable Object waking from
   hibernation costs the first keystroke after a pause, and how far the object sits from both ends are

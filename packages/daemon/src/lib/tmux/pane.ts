@@ -1,4 +1,4 @@
-import type { PaneMetadata } from './contracts.ts';
+import type { PaneActivity, PaneMetadata, PaneState } from './contracts.ts';
 import { parseHarnessDialog } from './harness-dialog.ts';
 import { parsePermissionPrompt } from './permission-prompt.ts';
 
@@ -187,6 +187,95 @@ export function promptIsReady(pane: string, cursorY?: number, cursorX?: number):
     return (cursorX === undefined || cursorX <= 2) && PROMPT.test(line) && !/^\s*[│|]?\s*[>›❯»]\s*\d+[.)]/u.test(line);
   }
   return lines.slice(-30).some(line => PROMPT.test(line));
+}
+
+/** Parse {@link paneActivityFormat}: the metadata fields, then the activity stamp, scrollback size and identity. */
+export function parsePaneActivity(value: string): PaneActivity {
+  const fields = value.trimEnd().split('|');
+  const metadata = parsePaneMetadata(fields.slice(0, 6).join('|'));
+  const whole = (field: string | undefined): number | undefined =>
+    field !== undefined && /^\d+$/u.test(field) ? Number(field) : undefined;
+  const identity = parsePaneIdentity(`${fields[8] ?? ''} ${fields[9] ?? ''}`);
+  return {
+    ...metadata,
+    ...(whole(fields[6]) === undefined ? {} : { activityAt: whole(fields[6]) }),
+    ...(whole(fields[7]) === undefined ? {} : { historySize: whole(fields[7]) }),
+    ...(identity === undefined ? {} : { paneId: identity.paneId, pid: identity.pid }),
+  };
+}
+
+/** A live pane's state, as `TmuxController.state` reports it, from its metadata and its captured frames. */
+export function paneStateFrom(metadata: PaneMetadata, visible: string, history = ''): PaneState {
+  return {
+    alive: true,
+    ...metadata,
+    promptReady: !metadata.dead && promptIsReady(visible, metadata.cursorY, metadata.cursorX),
+    history,
+    visible,
+  };
+}
+
+/** A frame captured earlier, with the activity it was captured under and the second the capture began. */
+export interface CapturedFrame {
+  readonly activity: PaneActivity;
+  readonly visible: string;
+  /** The UNIX second, by the same clock tmux stamps activity with, at which the capture was asked for. */
+  readonly capturedAtSecond: number;
+}
+
+/**
+ * Whether a frame captured earlier is certainly still the frame on screen — so it need not be captured
+ * again.
+ *
+ * Only when nothing that moves with a redraw has moved — cursor, size, scrollback, death — AND the
+ * window's last output came in a second that ENDED before the capture began. tmux stamps activity in
+ * whole seconds, so output later in the very second the frame was captured would leave the stamp
+ * unchanged; demanding the capture start in a later second than the stamp is what makes that
+ * impossible to miss. Anything unknown answers `false`, which costs one capture, never a stale screen.
+ */
+export function capturedFrameIsCurrent(frame: CapturedFrame | undefined, activity: PaneActivity): boolean {
+  if (frame === undefined || activity.activityAt === undefined || activity.historySize === undefined) return false;
+  const before = frame.activity;
+  return (
+    frame.capturedAtSecond > activity.activityAt &&
+    before.activityAt === activity.activityAt &&
+    before.historySize === activity.historySize &&
+    before.dead === activity.dead &&
+    before.cursorX === activity.cursorX &&
+    before.cursorY === activity.cursorY &&
+    before.height === activity.height &&
+    before.width === activity.width &&
+    before.paneId === activity.paneId
+  );
+}
+
+/**
+ * Resolve a session target the way tmux does for a plain name: the session of exactly that name, else
+ * the ONE session the name is a prefix of. Our names hold no glob characters (`sessionTarget` admits
+ * none), so tmux's pattern pass can never match anything the exact pass did not. `undefined` when tmux
+ * would refuse: nothing matches, or the prefix is ambiguous.
+ */
+export function resolveSessionTarget(target: string, names: Iterable<string>): string | undefined {
+  const candidates: string[] = [];
+  for (const name of names) {
+    if (name === target) return name;
+    if (name.startsWith(target)) candidates.push(name);
+  }
+  return candidates.length === 1 ? candidates[0] : undefined;
+}
+
+/**
+ * Parse {@link paneIdentityTableFormat}: each session's active pane, keyed by session name. A row that is
+ * not its window's active pane in its session's active window is not the pane `-t <session>` names.
+ */
+export function parsePaneIdentityTable(output: string): ReadonlyMap<string, PaneIdentity> {
+  const table = new Map<string, PaneIdentity>();
+  for (const row of output.split('\n')) {
+    const [session = '', active = '', paneId = '', pid = ''] = row.split('\t');
+    const identity = active === '11' ? parsePaneIdentity(`${paneId} ${pid}`) : undefined;
+    if (session !== '' && identity !== undefined) table.set(session, identity);
+  }
+  return table;
 }
 
 /** A pane's tmux id and the pid of the process it runs. */

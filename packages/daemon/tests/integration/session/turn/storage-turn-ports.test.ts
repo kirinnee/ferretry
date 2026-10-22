@@ -443,7 +443,7 @@ describe('the turn watcher over real panes and transcripts', () => {
       storage,
       { tail: async () => ({ kind: 'unreadable' }) },
       async () => file,
-      { state: async () => Promise.reject(new Error('unused')) },
+      { activity: async () => Promise.reject(new Error('unused')), visible: async () => undefined },
       { now: () => NOW },
     );
     should(await unreadable.transcript(subject.id)).be.undefined();
@@ -462,6 +462,88 @@ describe('the turn watcher over real panes and transcripts', () => {
     should(pane?.visible).containEql('Pontificating… (3s · ↓ 1.2k tokens');
   }, 30_000);
 
+  it('should capture the screen again only once the pane has drawn since the last capture', async () => {
+    // Arrange — the real controller, counted, under the real clock tmux stamps activity by.
+    const subject = await fixture('claude', CLAUDE_IDLE);
+    await subject.settle();
+    const controller = (subject.ports as unknown as { panes: TmuxController }).panes;
+    let captures = 0;
+    const counted = new StorageTurnPorts(
+      (subject.ports as unknown as { storage: never }).storage,
+      { tail: async () => ({ kind: 'unresolved' }) },
+      async () => undefined,
+      {
+        activity: async session => await controller.activity(session),
+        visible: async session => {
+          captures += 1;
+          return await controller.visible(session);
+        },
+      },
+      { now: () => new Date().toISOString() },
+    );
+    // Past the second the pane last drew in, so a capture now is certainly newer than its last output.
+    await Bun.sleep(1_100);
+
+    // Act
+    const first = await counted.paneState(subject.id);
+    const unchanged = await counted.paneState(subject.id);
+    await subject.frame(CLAUDE_WORKING);
+    await subject.settle();
+    const redrawn = await counted.paneState(subject.id);
+
+    // Assert — one capture for the first look, none for a pane that drew nothing, one for the redraw.
+    should(first?.visible).equal(unchanged?.visible);
+    should(unchanged?.alive).be.true();
+    should(redrawn?.visible).containEql('Pontificating… (3s · ↓ 1.2k tokens');
+    should(captures).equal(2);
+  }, 30_000);
+
+  it('should read a failed capture as a blank live screen and never hold it', async () => {
+    // Arrange
+    const subject = await fixture('claude', CLAUDE_IDLE);
+    let captures = 0;
+    const failing = new StorageTurnPorts(
+      (subject.ports as unknown as { storage: never }).storage,
+      { tail: async () => ({ kind: 'unresolved' }) },
+      async () => undefined,
+      {
+        activity: async () => ({ dead: false, activityAt: 1, historySize: 0, cursorX: 0, cursorY: 0 }),
+        visible: async () => {
+          captures += 1;
+          return undefined;
+        },
+      },
+      { now: () => new Date().toISOString() },
+    );
+
+    // Act
+    const first = await failing.paneState(subject.id);
+    const second = await failing.paneState(subject.id);
+
+    // Assert
+    should(first).match({ alive: true, visible: '' });
+    should(second).match({ alive: true, visible: '' });
+    should(captures).equal(2);
+  }, 30_000);
+
+  it('should forget a pane that died, and report none for it', async () => {
+    // Arrange
+    const subject = await fixture('claude', CLAUDE_IDLE);
+    const dying = new StorageTurnPorts(
+      (subject.ports as unknown as { storage: never }).storage,
+      { tail: async () => ({ kind: 'unresolved' }) },
+      async () => undefined,
+      {
+        activity: async () => ({ dead: true, exitCode: 1 }),
+        visible: async () => Promise.reject(new Error('never asked')),
+      },
+      { now: () => NOW },
+    );
+
+    // Act + Assert
+    should(await dying.paneState(subject.id)).be.undefined();
+  }, 30_000);
+
   it('should read no pane and no transcript for a session without either', async () => {
     const subject = await fixture('claude', CLAUDE_IDLE);
     const bare = new StorageTurnPorts(
@@ -469,7 +551,7 @@ describe('the turn watcher over real panes and transcripts', () => {
       (subject.ports as unknown as { storage: never }).storage,
       { tail: async () => ({ kind: 'unresolved' }) },
       async () => undefined,
-      { state: async () => Promise.reject(new Error('unreachable')) },
+      { activity: async () => Promise.reject(new Error('unreachable')), visible: async () => undefined },
       { now: () => NOW },
     );
     should(await bare.transcript(subject.id)).be.undefined();
@@ -477,7 +559,7 @@ describe('the turn watcher over real panes and transcripts', () => {
       (subject.ports as unknown as { storage: never }).storage,
       { tail: async () => ({ kind: 'unresolved' }) },
       async () => '/nonexistent/transcript.jsonl',
-      { state: async () => ({ alive: false, dead: true, promptReady: false, history: '', visible: '' }) },
+      { activity: async () => undefined, visible: async () => Promise.reject(new Error('never asked')) },
       { now: () => NOW },
     );
     should(await missing.transcript(subject.id)).be.undefined();
