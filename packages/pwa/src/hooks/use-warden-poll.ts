@@ -17,7 +17,12 @@
 
 import { useEffect, useState } from 'react';
 import type { DaemonConnection, DaemonId } from '../lib/daemon-connection.ts';
-import { WARDEN_POLL_MS } from './use-warden-status.ts';
+
+/**
+ * The Warden page's own beat: a person on it is watching the sweep, so it keeps the thirty seconds
+ * the fleet page's strip (`WARDEN_POLL_MS`) no longer spends.
+ */
+const WARDEN_PAGE_POLL_MS = 30_000;
 
 export type WardenReadState<T> =
   | { readonly status: 'loading' }
@@ -58,7 +63,7 @@ export function useWardenPoll<T>(
   read: (daemon: DaemonConnection) => Promise<T>,
   options: WardenPollOptions = {},
 ): WardenReadState<T> {
-  const { pollMs = WARDEN_POLL_MS, isHidden = documentHidden, revision = 0 } = options;
+  const { pollMs = WARDEN_PAGE_POLL_MS, isHidden = documentHidden, revision = 0 } = options;
   const [held, setHeld] = useState<Held<T>>({ daemonId: daemon.daemonId, state: { status: 'loading' } });
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: revision is the deliberate "read again now" trigger

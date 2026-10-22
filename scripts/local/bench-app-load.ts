@@ -29,6 +29,7 @@
  *
  *   bun scripts/local/bench-app-load.ts [--rtt 100] [--samples 3] [--transcript-mb 200] [--journal 2000]
  *     [--out report.json] [--shots <dir>] [--quick] [--profile-only]
+ *     [--idle] [--idle-seconds 60]
  *
  * `--quick` stops after the cold open, `--profile-only` after the daemon route profile (no browser),
  * and `--shots` writes the outage screenshots (desktop and phone, light and dark).
@@ -70,6 +71,9 @@ interface Options {
   readonly journal: number;
   /** Where to write the evidence screenshots; absent: none are taken. */
   readonly shots: string | undefined;
+  /** The idle run instead: the owner's fleet (2 machines, 36 sessions, 5 working), nothing touched. */
+  readonly idle: boolean;
+  readonly idleSeconds: number;
 }
 
 function parseOptions(argv: readonly string[]): Options {
@@ -87,6 +91,8 @@ function parseOptions(argv: readonly string[]): Options {
     profileOnly: argv.includes('--profile-only'),
     journal: Number(value('--journal') ?? 2_000),
     shots: value('--shots'),
+    idle: argv.includes('--idle'),
+    idleSeconds: Number(value('--idle-seconds') ?? 60),
   };
 }
 
@@ -187,6 +193,8 @@ async function seedMachine(
   bigSessionId: string,
   transcriptBytes: number,
   journal: number,
+  /** How many of the first sessions are mid-turn; the rest are waiting on their owner. */
+  working = 0,
 ): Promise<void> {
   const home = machine.environment.paths.fyHome;
   const transcripts = join(machine.environment.paths.root, 'transcripts');
@@ -199,7 +207,7 @@ async function seedMachine(
       sessionId: session.id,
       name: session.name,
       transcript: { file, harnessSessionId },
-      turnState: 'your-turn',
+      turnState: index < working ? 'working' : 'your-turn',
       journal: session.id === bigSessionId ? journal : 100,
     });
   }
@@ -583,6 +591,76 @@ async function evidence(
   }
 }
 
+interface IdleRoute {
+  readonly perMinute: number;
+  /** Request and answer bytes together, as sealed plaintext. */
+  readonly kb: number;
+}
+
+interface IdleSample {
+  readonly seconds: number;
+  readonly requestsPerMinute: number;
+  readonly streamsOpened: number;
+  readonly kbPerMinute: number;
+  /** Requests per minute and bytes by `METHOD route`, most first. */
+  readonly routes: Readonly<Record<string, IdleRoute>>;
+  /** The app's own recorder over the same window (`fyPerformanceReport`), to check it against the wire. */
+  readonly appReport: string | null;
+}
+
+/**
+ * A page left alone: settled first, then `seconds` of nothing, counted per route.
+ *
+ * An answer is charged to the route that asked for it by the record id, so a route's bytes are what it
+ * actually cost both ways rather than only what it sent.
+ */
+async function idleOn(browser: BrowserSession, url: string, ready: string, seconds: number): Promise<IdleSample> {
+  await browser.page.goto(url, { waitUntil: 'commit' });
+  await until(browser, `${ready} && ${NOT_UPDATING}`);
+  await Bun.sleep(10_000);
+  const from = await now(browser);
+  await Bun.sleep(seconds * 1_000);
+  const records = await recorded(browser, from, from + seconds * 1_000);
+  const appReport = await browser.page.evaluate<string | null>(
+    `globalThis.fyPerformanceReport?.(${String(seconds * 1_000)}) ?? null`,
+  );
+  const routeOf = new Map<number, string>();
+  const counts = new Map<string, { requests: number; bytes: number }>();
+  let streams = 0;
+  let bytes = 0;
+  for (const record of records) {
+    bytes += record.n;
+    if (record.t === 'stream') streams += 1;
+    if (record.t === 'req' || record.t === 'stream') {
+      const route = `${record.t === 'req' ? (record.method ?? '?') : 'STREAM'} ${normalise(record.path ?? '?')}`;
+      if (record.id !== undefined) routeOf.set(record.id, route);
+      const entry = counts.get(route) ?? { requests: 0, bytes: 0 };
+      counts.set(route, { requests: entry.requests + 1, bytes: entry.bytes + record.n });
+      continue;
+    }
+    const route = record.id === undefined ? undefined : routeOf.get(record.id);
+    if (route === undefined) continue;
+    const entry = counts.get(route) ?? { requests: 0, bytes: 0 };
+    counts.set(route, { requests: entry.requests, bytes: entry.bytes + record.n });
+  }
+  const perMinute = (count: number): number => Math.round((count * 600) / seconds) / 10;
+  const requests = records.filter(record => record.t === 'req').length;
+  return {
+    appReport,
+    seconds,
+    requestsPerMinute: perMinute(requests),
+    streamsOpened: streams,
+    kbPerMinute: Math.round((bytes * 60) / seconds / 1024),
+    routes: Object.fromEntries(
+      [...counts.entries()]
+        .sort((left, right) => right[1].requests - left[1].requests)
+        .map(([route, entry]) => [route, { perMinute: perMinute(entry.requests), kb: Math.round(entry.bytes / 1024) }]),
+    ),
+  };
+}
+
+const listUrlOf = (appOrigin: string, machine: SeededMachine): string => `${appOrigin}/d/${machine.fingerprint}`;
+
 function median(values: readonly (number | null)[]): number | null {
   const known = values.filter((value): value is number => value !== null).sort((left, right) => left - right);
   if (known.length === 0) return null;
@@ -625,15 +703,29 @@ async function main(): Promise<void> {
             name: `${prefix === 'st' ? 'Studio' : 'Laptop'} agent ${String(index + 1)}`,
           }));
         const machines: SeededMachine[] = [
-          { label: 'studio', environment: studio, sessions: sessions('st', 8), fingerprint: '', pairUrl: '' },
-          { label: 'laptop', environment: laptop, sessions: sessions('lp', 7), fingerprint: '', pairUrl: '' },
+          {
+            label: 'studio',
+            environment: studio,
+            sessions: sessions('st', options.idle ? 18 : 8),
+            fingerprint: '',
+            pairUrl: '',
+          },
+          {
+            label: 'laptop',
+            environment: laptop,
+            sessions: sessions('lp', options.idle ? 18 : 7),
+            fingerprint: '',
+            pairUrl: '',
+          },
         ];
         const [studioMachine] = machines as [SeededMachine, SeededMachine];
         const big = studioMachine.sessions[0];
         if (big === undefined) throw new Error('no sessions were planned');
         const started = Date.now();
         for (const machine of machines) {
-          await seedMachine(machine, big.id, options.transcriptMb * 1024 * 1024, options.journal);
+          // The idle fleet is the owner's: no outsized transcript, and five sessions mid-turn across the two.
+          if (options.idle) await seedMachine(machine, big.id, 400_000, 100, machine === studioMachine ? 3 : 2);
+          else await seedMachine(machine, big.id, options.transcriptMb * 1024 * 1024, options.journal);
           await bootMachine(machine, rendezvous, directory.origin, sinkhole.origin, appOrigin);
         }
         progress(`seeded and booted in ${String(Math.round((Date.now() - started) / 1000))} s`);
@@ -647,6 +739,25 @@ async function main(): Promise<void> {
         await (browser.page as unknown as { addInitScript(script: string): Promise<void> }).addInitScript(RECORDER);
         await browser.page.setViewportSize({ width: 1_440, height: 900 });
         for (const machine of machines) await pair(browser, machine);
+        if (options.idle) {
+          const second = studioMachine.sessions[5] ?? big;
+          progress('paired; idling on the fleet page');
+          report.idleFleet = await idleOn(
+            browser,
+            listUrlOf(appOrigin, studioMachine),
+            ROWS_SHOWN,
+            options.idleSeconds,
+          );
+          progress('idling on a session page');
+          report.idleSession = await idleOn(
+            browser,
+            `${listUrlOf(appOrigin, studioMachine)}/session/${second.id}`,
+            TRANSCRIPT_SHOWN,
+            options.idleSeconds,
+          );
+          report.pageErrors = browser.pageErrors;
+          return;
+        }
 
         progress(`paired; journal at ${String(report.journalEvents)} events`);
         const listUrl = `${appOrigin}/d/${studioMachine.fingerprint}`;

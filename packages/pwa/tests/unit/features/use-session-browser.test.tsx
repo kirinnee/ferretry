@@ -3,6 +3,7 @@ import type { BrowserPageSummary, BrowserStatus, IFyApiClient } from '@ferretry/
 import type { z } from 'zod';
 import {
   browserPageForKey,
+  SESSION_BROWSER_LIVE_POLL_MS,
   type SessionBrowser,
   type SessionBrowserDependencies,
   sessionBrowserIdentity,
@@ -10,6 +11,8 @@ import {
 } from '../../../src/features/browser/use-session-browser.ts';
 import { daemonConnection } from '../../../src/lib/daemon-connection.ts';
 import { type DaemonSessionScope, daemonSessionScope } from '../../../src/lib/daemon-scope.ts';
+import { FEED_EVENT_SETTLE_MS, type FeedAwarePollEnvironment } from '../../../src/lib/feed-aware-poll.ts';
+import { createSurfaceEventHub } from '../../../src/lib/surface-control.ts';
 import { render, run, runAsync } from '../../support/react.ts';
 
 const alpha = daemonConnection({ daemonId: 'alpha', baseUrl: 'https://alpha.example.test', deviceId: 'alpha-token' });
@@ -204,6 +207,53 @@ describe('useSessionBrowser', () => {
     await settle();
     release?.({ status: running([page('X')], 'X', 'sess-9') });
     expect(await crossed).toBeNull();
+    renderer.unmount();
+  });
+  test('should stand back while the feed is live, and re-read when a surface or browser event arrives', async () => {
+    // Arrange — timers the test fires by hand, and a feed that is live.
+    const timers: { readonly delay: number; readonly fire: () => void }[] = [];
+    const pollEnvironment: FeedAwarePollEnvironment = {
+      setTimeout: (callback, delay) => {
+        const timer = { delay, fire: callback };
+        timers.push(timer);
+        return timer;
+      },
+      clearTimeout: handle => {
+        timers.splice(timers.indexOf(handle as (typeof timers)[number]), 1);
+      },
+      hidden: () => false,
+      onVisible: () => () => undefined,
+    };
+    const hub = createSurfaceEventHub();
+    hub.setLive(true);
+    const { client, calls } = fakeClient(() => running([page('PAGE1')]));
+    const { renderer } = mount({ client, events: hub, pollEnvironment });
+    await settle();
+
+    // Act — only the safety net is armed; a turn event reads nothing, a browser event reads once.
+    const armed = timers.map(timer => timer.delay);
+    hub.publish({
+      sequence: 2,
+      time: '2026-10-21T00:00:00.000Z',
+      sessionId: 'sess-1',
+      type: 'turn.state',
+      source: 'daemon',
+      data: {},
+    });
+    hub.publish({
+      sequence: 3,
+      time: '2026-10-21T00:00:00.000Z',
+      sessionId: 'sess-1',
+      type: 'browser.opened',
+      source: 'daemon',
+      data: {},
+    });
+    run(() => timers.find(timer => timer.delay === FEED_EVENT_SETTLE_MS)?.fire());
+    await settle();
+
+    // Assert
+    expect(armed).toEqual([SESSION_BROWSER_LIVE_POLL_MS]);
+    expect(calls.map(call => call.path)).toEqual(['/v1/sessions/sess-1/browser', '/v1/sessions/sess-1/browser']);
     renderer.unmount();
   });
 });

@@ -25,6 +25,7 @@ import {
 } from './components/session-event-stream-model.ts';
 import { browserTerminalDeckDependencies } from './components/session-terminal-deck.tsx';
 import {
+  changesOnlyByJournal,
   type SessionWorkspaceRefreshControl,
   type SessionWorkspaceRefreshEnvironment,
   sendCanceller,
@@ -180,6 +181,8 @@ import { SessionChatPage } from './lib/pages/session-chat-page.tsx';
 import { WardenPage } from './lib/pages/warden-page.tsx';
 import { browserQrScanHost, type QrDetectorLike, type QrScanHost } from './lib/pair-scan.ts';
 import { type PairingArrival, pairingArrival } from './lib/pairing.ts';
+import { useRenderTiming } from './lib/performance/main-thread.ts';
+import { exposePerformanceReport } from './lib/performance/report-text.ts';
 import { clearForegroundPinScope, getForegroundPinScope, setForegroundPinScope } from './lib/pin-bridge.ts';
 import {
   type ContainerPushEnrolment,
@@ -669,6 +672,7 @@ function SetupGuide() {
 
 function SessionsRoute({ connection }: DaemonPageProps) {
   const store = useAppStore();
+  useRenderTiming(store.performance, 'fleet');
   const { navigate } = useRouter();
   const allMachines = useContext(AllMachinesContext);
   const readWardenStatus = useCallback(
@@ -943,6 +947,9 @@ const browserEventStreamEnvironment: SessionEventStreamEnvironment = {
 
 function SessionRoute({ connection, scope }: SessionChatPageProps) {
   const store = useAppStore();
+  // The router's fetch, recorded for the Performance report like every other daemon read.
+  const daemonFetch = useDaemonFetch();
+  useRenderTiming(store.performance, 'session');
   // Memoised on the router rather than rebuilt per render: the deck remounts when its dependencies
   // object changes identity, and a remount mid-session tears down a live shell. Every attach is a
   // stream session the router opens on whichever carrier reaches the daemon, so there is no measured
@@ -950,11 +957,11 @@ function SessionRoute({ connection, scope }: SessionChatPageProps) {
   const terminalDeck = useMemo(
     () =>
       browserTerminalDeckDependencies(
-        store.carrier.fetch,
+        daemonFetch,
         async (daemon, request) => await store.carrier.openStream(daemon, request),
         (daemon, listener) => store.connectionHealth.onRecovered(daemon.daemonId, listener),
       ),
-    [store.carrier, store.connectionHealth],
+    [daemonFetch, store.carrier, store.connectionHealth],
   );
   const { navigate, back } = useRouter();
   const layout = useLayoutMode();
@@ -1276,11 +1283,17 @@ function SessionRoute({ connection, scope }: SessionChatPageProps) {
       // Stamped with the owner, so a report can never be read by a later one. The model publishes
       // nothing after `stop()`, and even if it did, a report from a replaced owner is discarded at
       // render rather than believed.
-      onStatus: status => setReportedStream({ owner: streamOwner, status }),
+      onStatus: status => {
+        // The page's pollers stand back while the feed is live, and pick their old pace up when it is not.
+        surfaceEvents.setLive(status === 'live');
+        setReportedStream({ owner: streamOwner, status });
+      },
     });
     streamControl.current = stream;
+    surfaceEvents.setLive(stream.status() === 'live');
     setReportedStream({ owner: streamOwner, status: stream.status() });
     return () => {
+      surfaceEvents.setLive(false);
       stream.stop();
       if (streamControl.current === stream) streamControl.current = null;
     };
@@ -1370,8 +1383,7 @@ function SessionRoute({ connection, scope }: SessionChatPageProps) {
   const subscribed = streamOwner !== null;
   const ownedStatus: SessionEventStreamStatus =
     streamOwner !== null && reportedStream.owner === streamOwner ? reportedStream.status : 'connecting';
-  relaxedPoll.current =
-    ownedStatus === 'live' && (session?.state.turnState === 'your-turn' || session?.state.turnState === 'needs-input');
+  relaxedPoll.current = ownedStatus === 'live' && session !== undefined && changesOnlyByJournal(session.state);
   const liveStream = useMemo(
     () => ({
       status: liveStreamState(subscribed, measuredCarrier?.ok === false, ownedStatus),
@@ -1435,7 +1447,7 @@ function SessionRoute({ connection, scope }: SessionChatPageProps) {
           chatWidth={controls.chatWidth}
           composerEnterKey={controls.composerEnterKey}
           composerPhoneEnterKey={controls.composerPhoneEnterKey}
-          composerFetch={store.carrier.fetch}
+          composerFetch={daemonFetch}
           composerSuggestions={composerSuggestions}
           composerVimMode={controls.composerVimMode}
           connectionState={connectionHealth}
@@ -2554,10 +2566,12 @@ export interface AppProps {
 /** Public client-only root. Providers live here; `main.tsx` only calls `createRoot`. */
 export function App({ speechAssets }: AppProps = {}) {
   // One identity for the store's life: the provider reopens the store whenever this changes.
-  const createStore = useCallback(
-    async () => await createAppStore({ speechAssets: speechAssets ?? null }),
-    [speechAssets],
-  );
+  const createStore = useCallback(async () => {
+    const store = await createAppStore({ speechAssets: speechAssets ?? null });
+    // The browser's half of the Performance report, readable from the console until Settings shows it.
+    exposePerformanceReport(store.performance);
+    return store;
+  }, [speechAssets]);
   return (
     <RouterProvider>
       <StoreProvider createStore={createStore}>

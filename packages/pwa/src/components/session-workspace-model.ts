@@ -1,7 +1,7 @@
 import type { IFyApiClient, SessionView } from '@ferretry/protocol';
 import { projectPackCalls } from '../lib/pack-calls.ts';
 import { projectDeliveries } from '../lib/peer-delivery.ts';
-import type { TranscriptEntry } from '../lib/session-screens.ts';
+import { isTerminalSessionStatus, type TranscriptEntry } from '../lib/session-screens.ts';
 import { parseSlashCommandText, type SlashCommand, withCommandOutput } from '../lib/slash-commands.ts';
 import { classifySystemText } from '../lib/system-blocks.ts';
 import type { ToolResultData, ToolUseData } from '../lib/tool-extract.ts';
@@ -300,9 +300,20 @@ export interface SessionWorkspaceRefreshEnvironment {
  * at its prompt. Every journal append — a send, a turn starting, a question — arrives on the feed and
  * {@link SessionWorkspaceRefreshControl.nudge}s a read, so the three-second poll in that state only
  * re-read an unchanged transcript, session, ledger and board: four relay round trips every three
- * seconds for a page nobody is typing into. The slow poll stays as the safety net under the feed.
+ * seconds for a page nobody is typing into. The slow poll stays as the safety net under the feed, for
+ * what the journal cannot say (a transcript row written with no turn change). The feed proves itself
+ * alive every thirty seconds, so a dead one is noticed long before this poll would have to cover for it.
  */
-export const RELAXED_REFRESH_MS = 15_000;
+export const RELAXED_REFRESH_MS = 120_000;
+
+/**
+ * Whether nothing about this session can change without its journal saying so: the agent is idle at its
+ * prompt or waiting on a question, or the session is over. A FINISHED session has no turn state at all,
+ * and it used to keep the three-second poll for good — the most frequent poll on the page, for the one
+ * session that can never move again until something (journaled) resumes it.
+ */
+export const changesOnlyByJournal = (state: Pick<SessionView['state'], 'status' | 'turnState'>): boolean =>
+  state.turnState === 'your-turn' || state.turnState === 'needs-input' || isTerminalSessionStatus(state.status);
 
 /**
  * How long a nudge waits for the rest of its burst. A turn ending journals several events within a few
