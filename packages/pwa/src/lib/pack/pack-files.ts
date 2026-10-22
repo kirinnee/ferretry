@@ -1,12 +1,14 @@
 /**
  * PACK MODE'S TWO FILES AS TEXT: `pack.yaml` (the switch, who decides, the limits, the probe, Jev's
- * cap) and `models-guide.yaml` (the use cases and their candidates), read and edited the way Voice
+ * cap, the owner's routing preferences) and `models-guide.yaml` (the use cases, their candidates, the
+ * routing guidance and the `suggested` stamp of an accepted suggestion), read and edited the way Voice
  * cleanup edits `voice.yaml` — only the keys that change are rewritten, so the owner's comments and key
  * order survive (docs/config-files.md).
  *
  * A setting equal to its default is written only where the file already says something about it, so
  * an untouched machine keeps an empty `pack.yaml`. Saving the guide writes EVERY use case, which turns
- * the derived guide into the owner's; removing `useCases` is "Reset to the built-in guide".
+ * the derived guide into the owner's; removing `useCases` is "Reset to the built-in guide". An editor save
+ * always removes `suggested`: the guide is the owner's words now, not the builder's.
  *
  * Pure: text in, text out. `null` means the file does not check and cannot be edited here.
  */
@@ -16,6 +18,7 @@ import {
   configSchemaModeline,
   DEFAULT_PACK_CONFIG,
   type GuideCandidate,
+  GuideRoutingSchema,
   type GuideUseCase,
   ModelsGuideFileSchema,
   type PackConfig,
@@ -54,6 +57,8 @@ export interface PackConfigPatch {
   readonly limits?: Partial<PackConfig['limits']>;
   readonly probe?: Partial<PackConfig['probe']>;
   readonly jev?: Partial<PackConfig['jev']>;
+  /** The owner's routing preferences for the guide builder; an empty string removes the key. */
+  readonly routingPreferences?: string;
 }
 
 const SECTIONS = ['limits', 'probe', 'jev'] as const;
@@ -79,6 +84,10 @@ export function withPackConfig(text: string, patch: PackConfigPatch): string | n
       if (value !== undefined && (key in before || value !== defaults[key])) next = { ...next, [key]: value };
     }
     target = Object.keys(next).length === 0 ? withoutKey(target, section) : { ...target, [section]: next };
+  }
+  if (patch.routingPreferences !== undefined) {
+    const words = patch.routingPreferences.trim();
+    target = words === '' ? withoutKey(target, 'routingPreferences') : { ...target, routingPreferences: words };
   }
   const edited = editConfigText(text, target, raw, configSchemaModeline({ kind: 'pack' }));
   return readPackFile(edited) === null ? null : edited;
@@ -144,14 +153,52 @@ export function guideIssues(useCases: readonly GuideUseCase[]): readonly string[
   });
 }
 
+/** The routing guidance as the editor holds it: two plain strings, either may still be empty. */
+export interface RoutingDraft {
+  readonly prompt: string;
+  readonly short: string;
+}
+
+/** What is wrong with the routing guidance before it is written; empty when it checks, or when both are empty. */
+export function routingIssues(routing: RoutingDraft): readonly string[] {
+  if (routing.prompt.trim() === '' && routing.short.trim() === '') return [];
+  const checked = GuideRoutingSchema.safeParse({ prompt: routing.prompt, short: routing.short });
+  if (checked.success) return [];
+  return checked.error.issues.map(issue => {
+    const part = issue.path[0] === 'short' ? 'The one-line summary' : 'The routing guidance';
+    return `${part}: ${issue.message}`;
+  });
+}
+
+/**
+ * What to do with the file's `routing`: leave it (`undefined`), write the owner's (a pair), or remove it so
+ * the rendered one is in effect again (`null`).
+ */
+export type RoutingEdit = RoutingDraft | null | undefined;
+
 /**
  * `models-guide.yaml` with the guide written in full, or with `useCases` removed when `useCases` is
- * `null` (the built-in guide). `null` when the file does not parse or the result would not check.
+ * `null` (the built-in guide). Either way the file stops claiming a suggestion wrote it: `suggested` is the
+ * record of a guide accepted as drafted, and a saved edit makes it the owner's own words. `routing` is left
+ * as the file has it unless `routing` says otherwise. `null` when the file does not parse or the result
+ * would not check.
  */
-export function withModelsGuide(text: string, useCases: readonly GuideUseCase[] | null): string | null {
+export function withModelsGuide(
+  text: string,
+  useCases: readonly GuideUseCase[] | null,
+  routing: RoutingEdit = undefined,
+): string | null {
   const raw = rawOf(text);
   if (raw === null) return null;
-  const target = useCases === null ? withoutKey(raw, 'useCases') : { ...raw, useCases: useCases.map(useCaseForFile) };
+  const guide = withoutKey(raw, 'suggested');
+  const written =
+    useCases === null ? withoutKey(guide, 'useCases') : { ...guide, useCases: useCases.map(useCaseForFile) };
+  const target =
+    routing === undefined
+      ? written
+      : routing === null
+        ? withoutKey(written, 'routing')
+        : { ...written, routing: { prompt: routing.prompt.trim(), short: routing.short.trim() } };
   const edited = editConfigText(text, target, raw, configSchemaModeline({ kind: 'modelsGuide' }));
   const back = rawOf(edited);
   return back !== null && ModelsGuideFileSchema.safeParse(back).success ? edited : null;

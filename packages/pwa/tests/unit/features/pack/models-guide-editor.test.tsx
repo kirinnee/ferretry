@@ -2,9 +2,10 @@ import { afterEach, describe, expect, it } from 'bun:test';
 import type { GuideUseCase, ModelsGuide } from '@ferretry/protocol';
 import { ModelsGuideEditor } from '../../../../src/features/pack/models-guide-editor.tsx';
 import type { PackSave } from '../../../../src/features/pack/use-machine-pack.ts';
+import type { RoutingEdit } from '../../../../src/lib/pack/pack-files.ts';
 import { interact, type Mounted, mount, must, pressKey } from '../../../support/dom.ts';
-import { byText, choose, click, textOf, typeInto, waitForText } from '../../../support/learning-dom.ts';
-import { FLEET_MODELS, PACK_VIEW } from '../../../support/pack.ts';
+import { byText, choose, click, textOf, typeInto, waitFor, waitForText } from '../../../support/learning-dom.ts';
+import { FLEET_MODELS, PACK_VIEW, SUGGESTION } from '../../../support/pack.ts';
 
 let shown: Mounted | undefined;
 afterEach(async () => {
@@ -179,5 +180,169 @@ describe('ModelsGuideEditor', () => {
     await click(byText(root, 'button', 'Add use case'));
     await rerender(PACK_VIEW.guide);
     expect(useCaseIds(root)).toEqual(['bulk', 'use-case-2']);
+  });
+});
+
+describe('ModelsGuideEditor › routing guidance and the generator', () => {
+  const withRouting: ModelsGuide = {
+    ...PACK_VIEW.guide,
+    source: 'file',
+    routing: { source: 'file', prompt: 'Opus for hard work.', short: 'Opus for hard work' },
+  };
+
+  const routed = async (
+    guide: ModelsGuide = withRouting,
+    extra: Partial<React.ComponentProps<typeof ModelsGuideEditor>> = {},
+  ) => {
+    const saves: { useCases: readonly GuideUseCase[] | null; routing: RoutingEdit }[] = [];
+    shown = await mount(
+      <ModelsGuideEditor
+        guide={guide}
+        models={FLEET_MODELS}
+        onSave={async (useCases, routing) => {
+          saves.push({ useCases, routing });
+          return { kind: 'applied' };
+        }}
+        {...extra}
+      />,
+    );
+    return { root: shown.container, saves };
+  };
+  const prompt = (root: HTMLElement) =>
+    must(root.querySelector<HTMLTextAreaElement>('[data-routing-prompt]'), 'routing prompt');
+  const summary = (root: HTMLElement) =>
+    must(root.querySelector<HTMLInputElement>('[data-guide-routing] input[type="text"]'), 'routing summary');
+
+  it('shows the routing in effect, and leaves it alone on a save that did not touch it', async () => {
+    const { root, saves } = await routed();
+    expect(prompt(root).value).toBe('Opus for hard work.');
+    expect(summary(root).value).toBe('Opus for hard work');
+    expect(saveButton(root).disabled).toBe(true);
+    await click(button(root, 'Move use case Hard planning / review / critical code down'));
+    await click(saveButton(root));
+    await waitFor(() => saves.length === 1, 'save');
+    expect(saves[0]?.routing).toBeUndefined();
+  });
+
+  it('saves an edited routing with the guide', async () => {
+    const { root, saves } = await routed();
+    await typeInto(prompt(root), 'Sonnet first.');
+    await typeInto(summary(root), 'Sonnet first');
+    expect(saveButton(root).disabled).toBe(false);
+    await click(saveButton(root));
+    await waitFor(() => saves.length === 1, 'save');
+    expect(saves[0]?.routing).toEqual({ prompt: 'Sonnet first.', short: 'Sonnet first' });
+  });
+
+  it('removes the routing when both fields are cleared', async () => {
+    const { root, saves } = await routed();
+    await typeInto(prompt(root), '');
+    await typeInto(summary(root), '');
+    await click(saveButton(root));
+    await waitFor(() => saves.length === 1, 'save');
+    expect(saves[0]?.routing).toBeNull();
+  });
+
+  it('lists what is wrong with the routing and will not save it', async () => {
+    const { root } = await routed();
+    await typeInto(summary(root), 'He said "no"');
+    expect(textOf(must(root.querySelector('[data-guide-issues]'), 'issues')).toLowerCase()).toContain('summary');
+    expect(saveButton(root).disabled).toBe(true);
+    await typeInto(summary(root), '');
+    expect(textOf(must(root.querySelector('[data-guide-issues]'), 'issues')).toLowerCase()).toContain('summary');
+  });
+
+  it('says when the routing shown is rendered from the use cases', async () => {
+    const { root } = await routed({
+      ...PACK_VIEW.guide,
+      routing: { source: 'derived', prompt: 'Derived.', short: 'D' },
+    });
+    expect(textOf(must(root.querySelector('[data-guide-routing]'), 'routing'))).toContain(
+      'rendered from the use cases',
+    );
+  });
+
+  it('discards a routing edit with the rest of the draft', async () => {
+    const { root } = await routed();
+    await typeInto(prompt(root), 'Changed.');
+    await click(byText(root, 'button', 'Discard changes'));
+    expect(prompt(root).value).toBe('Opus for hard work.');
+  });
+
+  it('follows routing that moved under an untouched editor, and keeps an edit under a touched one', async () => {
+    const { root } = await routed();
+    const render = (routing: ModelsGuide['routing']) =>
+      shown?.render(
+        <ModelsGuideEditor
+          guide={{ ...withRouting, routing }}
+          models={FLEET_MODELS}
+          onSave={async () => ({ kind: 'applied' })}
+        />,
+      );
+    await render({ source: 'file', prompt: 'Moved.', short: 'Moved' });
+    expect(prompt(root).value).toBe('Moved.');
+    await typeInto(prompt(root), 'Mine.');
+    await render({ source: 'file', prompt: 'Moved again.', short: 'Moved again' });
+    expect(prompt(root).value).toBe('Mine.');
+  });
+
+  it('loads a suggestion sent to be edited into the draft, once per key, and saves nothing', async () => {
+    const { root, saves } = await routed(withRouting, {
+      incoming: { key: 1, useCases: SUGGESTION.useCases, routing: SUGGESTION.routing },
+    });
+    expect(useCaseIds(root)).toEqual(['hard', 'bulk', 'docs']);
+    expect(prompt(root).value).toContain('Use Opus for planning');
+    expect(saves).toHaveLength(0);
+    expect(saveButton(root).disabled).toBe(false);
+    await click(byText(root, 'button', 'Discard changes'));
+    expect(useCaseIds(root)).toEqual(['hard', 'bulk']);
+    await shown?.render(
+      <ModelsGuideEditor
+        guide={withRouting}
+        models={FLEET_MODELS}
+        onSave={async () => ({ kind: 'applied' })}
+        incoming={{ key: 1, useCases: SUGGESTION.useCases }}
+      />,
+    );
+    expect(useCaseIds(root)).toEqual(['hard', 'bulk']);
+    await shown?.render(
+      <ModelsGuideEditor
+        guide={withRouting}
+        models={FLEET_MODELS}
+        onSave={async () => ({ kind: 'applied' })}
+        incoming={{ key: 2, useCases: SUGGESTION.useCases }}
+      />,
+    );
+    expect(useCaseIds(root)).toEqual(['hard', 'bulk', 'docs']);
+    expect(prompt(root).value).toBe('Opus for hard work.');
+  });
+
+  it('offers to undo the last accepted suggestion, and says what came of it', async () => {
+    const undos: number[] = [];
+    const { root } = await routed(withRouting, {
+      undo: { savedAt: '2026-10-22T14:35:00.000Z', source: 'file' },
+      onUndo: async () => {
+        undos.push(1);
+        return { kind: 'applied', message: 'Put the old guide back.' };
+      },
+    });
+    const undo = byText<HTMLButtonElement>(root, 'button', 'Undo last accepted suggestion (saved ');
+    expect(undo.textContent).toContain('2026');
+    await click(undo);
+    await waitForText(root, 'Put the old guide back.');
+    expect(undos).toHaveLength(1);
+  });
+
+  it('shows an undo that was refused in the error colour, and no undo button without one', async () => {
+    const { root } = await routed(withRouting, {
+      undo: { savedAt: '2026-10-22T14:35:00.000Z', source: 'derived' },
+      onUndo: async () => ({ kind: 'refused', message: 'Nothing to undo.' }),
+    });
+    await click(byText(root, 'button', 'Undo last accepted suggestion'));
+    await waitForText(root, 'Nothing to undo.');
+    expect(byText(root, 'p', 'Nothing to undo.').className).toContain('text-err');
+    await shown?.unmount();
+    const plain = await routed();
+    expect(plain.root.querySelector('[data-guide-undo-last]') === null).toBe(true);
   });
 });

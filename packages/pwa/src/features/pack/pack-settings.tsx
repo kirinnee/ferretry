@@ -13,6 +13,8 @@
 
 import {
   DEFAULT_PACK_CONFIG,
+  type GuideRouting,
+  type GuideUseCase,
   PACK_MAX_DEPTH_CEILING,
   type PackConfig,
   type PackDecisionMode,
@@ -23,7 +25,9 @@ import { cn } from '../../lib/class-names.ts';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
 import type { PackConfigPatch } from '../../lib/pack/pack-files.ts';
 import { Button } from '../../shell/primitives.tsx';
+import { GuideSuggestPanel } from './guide-suggest-panel.tsx';
 import { ModelsGuideEditor } from './models-guide-editor.tsx';
+import { ModelsPanel } from './models-panel.tsx';
 import { type MachinePack, type PackSave, useMachinePack } from './use-machine-pack.ts';
 
 const DECISIONS: readonly { readonly id: PackDecisionMode; readonly label: string; readonly hint: string }[] = [
@@ -193,8 +197,23 @@ function NumbersForm({
   );
 }
 
-function PackPanel({ view, state }: { readonly view: PackView; readonly state: MachinePack }) {
+interface IncomingGuide {
+  readonly key: number;
+  readonly useCases: readonly GuideUseCase[];
+  readonly routing?: GuideRouting;
+}
+
+function PackPanel({
+  view,
+  state,
+  connection,
+}: {
+  readonly view: PackView;
+  readonly state: MachinePack;
+  readonly connection: DaemonConnection;
+}) {
   const { config } = view;
+  const [incoming, setIncoming] = useState<IncomingGuide | undefined>(undefined);
   const [busy, setBusy] = useState(false);
   const [outcome, setOutcome] = useState<PackSave | null>(null);
   const switchTitle = useId();
@@ -313,12 +332,34 @@ function PackPanel({ view, state }: { readonly view: PackView; readonly state: M
         </p>
       ) : null}
 
-      <ModelsGuideEditor guide={view.guide} models={view.models} onSave={state.saveGuide} />
+      <ModelsPanel models={view.models} onDescribe={state.describeModel} />
+
+      <GuideSuggestPanel
+        connection={connection}
+        state={state}
+        builder={view.builder}
+        preferences={config.routingPreferences ?? ''}
+        onEdit={guide => setIncoming({ key: (incoming?.key ?? 0) + 1, ...guide })}
+      />
+
+      <ModelsGuideEditor
+        guide={view.guide}
+        models={view.models}
+        onSave={state.saveGuide}
+        {...(view.undo === undefined ? {} : { undo: view.undo, onUndo: state.undoGuide })}
+        {...(incoming === undefined ? {} : { incoming })}
+      />
     </div>
   );
 }
 
-function PackSettingsView({ state }: { readonly state: MachinePack }) {
+function PackSettingsView({
+  state,
+  connection,
+}: {
+  readonly state: MachinePack;
+  readonly connection: DaemonConnection;
+}) {
   const { read } = state;
   if (read.kind === 'loading') return <p className="m-0 text-meta text-muted">Reading Pack mode…</p>;
   if (read.kind === 'failed')
@@ -327,11 +368,11 @@ function PackSettingsView({ state }: { readonly state: MachinePack }) {
         {read.message}
       </p>
     );
-  return <PackPanel view={read.view} state={state} />;
+  return <PackPanel view={read.view} state={state} connection={connection} />;
 }
 
 function ConnectedPackSettings({ connection }: { readonly connection: DaemonConnection }) {
-  return <PackSettingsView state={useMachinePack(connection)} />;
+  return <PackSettingsView state={useMachinePack(connection)} connection={connection} />;
 }
 
 /** The panel: an injected state (tests, harness) or the machine's own, read through the app's client pool. */
@@ -342,7 +383,11 @@ export function PackSettingsSurface({
   readonly connection: DaemonConnection;
   readonly state?: MachinePack;
 }) {
-  return state === undefined ? <ConnectedPackSettings connection={connection} /> : <PackSettingsView state={state} />;
+  return state === undefined ? (
+    <ConnectedPackSettings connection={connection} />
+  ) : (
+    <PackSettingsView state={state} connection={connection} />
+  );
 }
 
 /** The Machine tab's Pack mode panel, as `DaemonSettingsFrame` takes one. */

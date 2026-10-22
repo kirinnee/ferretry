@@ -28,7 +28,7 @@
  * a request storm on a fleet of fifty.
  */
 
-import type { SessionView } from '@ferretry/protocol';
+import { PACK_GUIDE_BUILDER_LABEL, type SessionView } from '@ferretry/protocol';
 import { displayCallsign } from '../lib/callsign.ts';
 import type { Density, ModeFilter } from '../lib/controls.ts';
 import { type FleetProject, groupByProject, type ModeCounts, type SessionGroup } from '../lib/fleet-grouping.ts';
@@ -87,15 +87,19 @@ export const isStopped = (view: SessionView): boolean => TERMINAL_STATUSES.has(v
 export const matchesMode = (view: SessionView, mode: ModeFilter): boolean =>
   mode === 'all' || view.config.mode === mode;
 
+/** A guide-builder ferret: started by Settings › Pack, shown there rather than among the owner's ferrets. */
+export const isGuideBuilder = (view: SessionView): boolean => view.config.label === PACK_GUIDE_BUILDER_LABEL;
+
 /**
  * Which sessions the bar draws before the kind is chosen: everything live, the stopped ones only when
  * ticked, and the open session always. `keep` names the open one — a caller that has none passes nothing.
+ * A guide builder is not listed unless it is the open one; its link still opens it.
  */
 export const listedBeforeMode = (
   view: SessionView,
   { showStopped }: SessionsListFilter,
   keep?: (view: SessionView) => boolean,
-): boolean => showStopped || !isStopped(view) || keep?.(view) === true;
+): boolean => keep?.(view) === true || (!isGuideBuilder(view) && (showStopped || !isStopped(view)));
 
 /** The tallies the filter controls print, from the sessions already past the stopped rule. */
 export interface ListTallies {
@@ -119,8 +123,9 @@ export const listTallies = (
       auto: listed.filter(view => view.config.mode === 'auto').length,
       interactive: listed.filter(view => view.config.mode === 'interactive').length,
     },
-    hiddenStopped: sessions.filter(view => !listedBeforeMode(view, filter, keep) && matchesMode(view, filter.mode))
-      .length,
+    hiddenStopped: sessions.filter(
+      view => !isGuideBuilder(view) && !listedBeforeMode(view, filter, keep) && matchesMode(view, filter.mode),
+    ).length,
   };
 };
 
