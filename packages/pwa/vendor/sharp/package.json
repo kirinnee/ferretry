@@ -1,0 +1,9 @@
+{
+  "name": "sharp",
+  "version": "0.0.0-ferretry-browser-only",
+  "private": true,
+  "description": "Stands in for the Node-only dependency @huggingface/transformers declares. The PWA runs transformers.js in a browser worker only (packages/pwa/src/worker/whisper-worker.ts); its web build never imports this. See docs/voice.md.",
+  "type": "module",
+  "main": "index.js",
+  "exports": "./index.js"
+}

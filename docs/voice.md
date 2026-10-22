@@ -158,6 +158,45 @@ so it is **manual and never runs in CI**:
 cd packages/pwa && bunx vite build && bun harness/parakeet-smoke.ts
 ```
 
+## Whisper tiny.en and base.en on this device
+
+OpenAI's Whisper (MIT), English only, as the q8 ONNX exports
+[`onnx-community/whisper-tiny.en`](https://huggingface.co/onnx-community/whisper-tiny.en) and
+[`onnx-community/whisper-base.en`](https://huggingface.co/onnx-community/whisper-base.en), run by
+[transformers.js](https://github.com/huggingface/transformers.js) 4.3.1 in a worker
+(`src/worker/whisper-worker.ts`, logic in `lib/stt/whisper-worker-core.ts`). Words appear after Stop;
+there are no live words.
+
+- **Installing** works like Parakeet's: explicit, pinned at one commit, hashed, resumable, removable
+  (`lib/stt/whisper-model.ts`). Every file transformers.js reads is pinned — the model and generation
+  configs, the feature-extractor config, the tokenizer and its config, and the two graphs.
+- **One shared runtime.** Both models run on ONNX Runtime Web's WebGPU-capable build
+  (`ort-wasm-simd-threaded.asyncify.wasm`, ~27 MB), kept once in `fy-stt-transformers-js-v1`
+  (`lib/stt/runtime-model-store.ts`). Installing the second model does not download it again; removing
+  one keeps it while the other is installed. It is the same `onnxruntime-web` 1.24.1 Parakeet runs: the
+  root `package.json` overrides transformers.js's own pin, and Vite's `onnxruntime-web` →
+  `onnxruntime-web/wasm` alias only matches the bare name, so Parakeet keeps its 12 MB build. Like that
+  binary, it is listed in the signed release but only downloaded on Install (`isDeferredReleaseFile`).
+- **The worker never fetches.** transformers.js is handed the verified bytes as its cache, keyed by the
+  pinned URL (the commit is fixed in `env.remotePathTemplate`, because some of its own lookups pass no
+  revision); its `fetch` answers `404` for anything not pinned; its browser and WASM caches are off; and
+  ONNX Runtime gets its binary as bytes with `wasmPaths` cleared, so it uses the glue embedded in the
+  bundle and never jsDelivr.
+- **WebGPU, then WebAssembly.** The worker builds the model on WebGPU when it can reach an adapter and
+  on WebAssembly otherwise, or when WebGPU fails to load or to decode. Both run under the page's CSP and
+  Trusted Types. Try it, and the dictation timing, say which ran (`Whisper tiny.en q8 · 2575352 ·
+WebGPU`). The q8 graphs serve both backends, so the download is the same either way; operators the
+  WebGPU provider lacks run on the CPU inside the same session.
+- **Measured** (`harness/whisper-smoke.ts`, desktop Chrome on x64, WebAssembly, one thread, a 10 s
+  LibriSpeech clip): tiny.en 2.2 s (4.6 s for the first take, which loads the model), base.en 4.2 s
+  (7.5 s); roughly 600 MB and 750 MB of memory while transcribing. WebGPU was proven on SwiftShader only,
+  so there is no real-GPU number yet.
+- **Not tested on Safari before 26.** transformers.js itself avoids the asyncify build on Safari < 26
+  without WebGPU; this app has one runtime build for Whisper, so such a Safari may fail to load it.
+- **Node-only dependencies are stubbed.** transformers.js declares `onnxruntime-node` (~300 MB) and
+  `sharp`, which only its Node build imports. The root `package.json` overrides both to the throwing
+  stubs in `packages/pwa/vendor/`, so neither is installed.
+
 ## Vosk small English on this device: the light floor
 
 `vosk-small-en` in the on-device catalog (`lib/stt/model-catalog.ts`): Alpha Cephei's

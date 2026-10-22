@@ -19,5 +19,10 @@
     "semantic-release": "^25.0.8",
     "should": "^13.2.3",
     "typescript": "^7.0.2"
+  },
+  "overrides": {
+    "onnxruntime-web": "1.24.1",
+    "onnxruntime-node": "file:./packages/pwa/vendor/onnxruntime-node",
+    "sharp": "file:./packages/pwa/vendor/sharp"
   }
 }

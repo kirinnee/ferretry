@@ -21,6 +21,9 @@
  * who installs Parakeet ever downloads it. The sherpa worker and the sherpa-onnx
  * WebAssembly binary are bound the same way, for the sherpa models
  * (`lib/stt/sherpa-voice.ts`); `sherpa-runtime-wasm` is a `vite.config.ts` alias.
+ * So are Vosk's worker and binary, and the Whisper worker
+ * (`worker/whisper-worker.ts`) with its WebGPU-capable runtime build (the
+ * asyncify binary); only someone who installs a model on a runtime downloads it.
  *
  * The CSS import is what pulls `styles/index.css` (and, through its `@import`s,
  * the theme tokens and every component stylesheet) into the build as a real
@@ -36,6 +39,7 @@
  * (`lib/install-prompt.ts`, `hooks/use-install-prompt.ts`).
  */
 
+import whisperRuntimeUrl from 'onnxruntime-web/ort-wasm-simd-threaded.asyncify.wasm?url';
 import voskRuntimeUrl from '@lichess-org/vosk-browser/dist/vosk.wasm?url';
 import runtimeUrl from 'onnxruntime-web/ort-wasm-simd-threaded.wasm?url';
 import { StrictMode } from 'react';
@@ -49,6 +53,7 @@ import { windowPermissionsHost } from './lib/device-permissions.ts';
 import { createBrowserInstallPrompt } from './lib/install-prompt.ts';
 import { browserLocationShareHost } from './lib/location-share.ts';
 import workerUrl from './worker/parakeet-worker.ts?worker&url';
+import whisperWorkerUrl from './worker/whisper-worker.ts?worker&url';
 import sherpaWorkerUrl from './worker/sherpa-worker.ts?worker&url';
 import voskWorkerUrl from './worker/vosk-worker.ts?worker&url';
 import './styles/index.css';
@@ -74,6 +79,7 @@ createRoot(host).render(
               runtimeUrl,
               sherpa: { workerUrl: sherpaWorkerUrl, runtimeUrl: sherpaRuntimeUrl },
               vosk: { workerUrl: voskWorkerUrl, runtimeUrl: voskRuntimeUrl },
+              whisper: { workerUrl: whisperWorkerUrl, runtimeUrl: whisperRuntimeUrl },
             }}
           />
         </LocationShareContext.Provider>

@@ -371,6 +371,12 @@ function EngineTrialControl({
                 <dd className="m-0 mono tabular-nums text-fg">{formatSeconds(state.result.loadMs)}</dd>
               </>
             )}
+            {state.result.model === undefined ? null : (
+              <>
+                <dt className="text-muted">Ran on</dt>
+                <dd className="m-0 min-w-0 break-words text-fg">{state.result.model}</dd>
+              </>
+            )}
           </dl>
         </div>
       ) : null}
