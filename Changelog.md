@@ -1,3 +1,5 @@
+## [4.75.2](https://github.com/kirinnee/ferretry/compare/v4.75.1...v4.75.2) (2026-10-22)
+
 ## [4.75.1](https://github.com/kirinnee/ferretry/compare/v4.75.0...v4.75.1) (2026-10-22)
 
 ## [4.75.0](https://github.com/kirinnee/ferretry/compare/v4.74.0...v4.75.0) (2026-10-22)
