@@ -1,21 +1,21 @@
 import { describe, it } from 'bun:test';
-import { FyEventStreamFrameSchema, type FyEventStreamFrame, type SessionLiveActivity } from '@ferretry/protocol';
+import { type FyEventStreamFrame, FyEventStreamFrameSchema, type SessionLiveActivity } from '@ferretry/protocol';
 import should from 'should';
 import type { SocketDownstream } from '../../../../src/lib/api/socket.ts';
 import {
   EVENT_STREAM_IDLE_MS,
   EVENT_STREAM_MAX_BUFFER_BYTES,
   EVENT_STREAM_MAX_PENDING,
-  FLEET_EVENT_BACKLOG_LIMIT,
-  FleetEventStreamService,
-  LIVE_SAMPLE_MS,
-  orderFleetBacklog,
   type EventStreamScheduler,
   type EventStreamTimer,
+  FLEET_EVENT_BACKLOG_LIMIT,
   type FleetEventBacklog,
   type FleetEventSource,
   type FleetEventStreamScope,
+  FleetEventStreamService,
+  LIVE_SAMPLE_MS,
   type LiveActivitySource,
+  orderFleetBacklog,
 } from '../../../../src/lib/session/events/index.ts';
 import type { StoredSessionEvent } from '../../../../src/lib/session/reads/index.ts';
 
@@ -253,10 +253,11 @@ describe('the per-session event stream', () => {
     await harness.handler.open();
     harness.source.emit(stored('s1', 7));
 
-    // Assert — every frame is a wrapped event, and the replay asked for exactly the caller's cursor.
+    // Assert — every event is a wrapped event, the replay asked for exactly the caller's cursor, and the
+    // one frame that is not an event is the opening proof at the replay/live edge.
     should(harness.downstream.events()).deepEqual(['s1/5', 's1/6', 's1/7']);
     should(harness.source.replayed).deepEqual([['s1', 4, 1_000]]);
-    should(harness.downstream.frames().every(frame => frame.kind === 'event')).be.true();
+    should(harness.downstream.frames().map(frame => frame.kind)).deepEqual(['event', 'event', 'idle', 'event']);
   });
 
   it('should carry the journal record through the protocol envelope unchanged', async () => {
@@ -295,7 +296,12 @@ describe('the per-session event stream', () => {
       ['s1', 0, 1_000],
       ['s1', 1_000, 1_000],
     ]);
-    should(harness.downstream.sent).have.length(1_001);
+    should(harness.downstream.events()).have.length(1_001);
+    should(harness.downstream.frames().at(-1)).deepEqual({
+      kind: 'idle',
+      idleSeconds: 30,
+      scope: { kind: 'session', sessionId: 's1', after: 1_001 },
+    });
   });
 
   it('should ignore live appends belonging to another session', async () => {
@@ -416,8 +422,10 @@ describe('the per-session event stream', () => {
     harness.scheduler.fire();
 
     // Assert — the proof names this session's OWN last delivered sequence, so a reader can tell a
-    // stream that is caught up from one that silently stalled at an older cursor.
+    // stream that is caught up from one that silently stalled at an older cursor. The first is the
+    // opening proof, sent with no window waited.
     should(harness.downstream.frames().filter(frame => frame.kind === 'idle')).deepEqual([
+      { kind: 'idle', idleSeconds: 30, scope: { kind: 'session', sessionId: 's1', after: 9 } },
       { kind: 'idle', idleSeconds: 30, scope: { kind: 'session', sessionId: 's1', after: 9 } },
       { kind: 'idle', idleSeconds: 30, scope: { kind: 'session', sessionId: 's1', after: 9 } },
       { kind: 'idle', idleSeconds: 30, scope: { kind: 'session', sessionId: 's1', after: 10 } },
@@ -442,9 +450,10 @@ describe('the per-session event stream', () => {
     harness.handler.close();
     harness.scheduler.fire();
 
-    // Assert — a recurring proof must not outlive the socket it is proving.
+    // Assert — a recurring proof must not outlive the socket it is proving: the opening one, the one
+    // fired before the close, and nothing after it.
     should(harness.scheduler.pending).be.false();
-    should(harness.downstream.frames().filter(frame => frame.kind === 'idle')).have.length(1);
+    should(harness.downstream.frames().filter(frame => frame.kind === 'idle')).have.length(2);
   });
 
   it('should stop re-arming once the transport refuses the proof', async () => {
@@ -473,7 +482,53 @@ describe('the per-session event stream', () => {
     // Assert — reporting zero here would tell the reader to replay the whole session.
     should(harness.downstream.frames()).deepEqual([
       { kind: 'idle', idleSeconds: 30, scope: { kind: 'session', sessionId: 's1', after: 12 } },
+      { kind: 'idle', idleSeconds: 30, scope: { kind: 'session', sessionId: 's1', after: 12 } },
     ]);
+  });
+
+  it('should prove it is live the moment its replay is done, with no window waited', async () => {
+    // Arrange — a quiet session: nothing to replay and nothing appending. A reader counts a feed as
+    // live once it has heard from it, and this one used to say nothing for thirty seconds.
+    const harness = subject({ kind: 'session', sessionId: 's1', after: 12 });
+
+    // Act
+    await harness.handler.open();
+
+    // Assert — the proof is sent before any timer fires, and the next window is armed behind it.
+    should(harness.downstream.frames()).deepEqual([
+      { kind: 'idle', idleSeconds: 30, scope: { kind: 'session', sessionId: 's1', after: 12 } },
+    ]);
+    should(harness.scheduler.armed).deepEqual([EVENT_STREAM_IDLE_MS]);
+  });
+
+  it('should send the opening proof after the replay and the overlap, at the edge they reached', async () => {
+    // Arrange — two replayed events and one live append that landed while the replay was in flight.
+    const harness = subject(SESSION, {
+      pages: [[stored('s1', 1), stored('s1', 2)]],
+      duringReplay: emit => emit(stored('s1', 3)),
+    });
+
+    // Act
+    await harness.handler.open();
+    harness.source.emit(stored('s1', 4));
+
+    // Assert — everything before the proof was history, everything after it is live.
+    should(harness.downstream.frames().map(frame => (frame.kind === 'event' ? frame.event.sequence : frame))).deepEqual(
+      [1, 2, 3, { kind: 'idle', idleSeconds: 30, scope: { kind: 'session', sessionId: 's1', after: 3 } }, 4],
+    );
+  });
+
+  it('should arm nothing when the transport refuses the opening proof', async () => {
+    // Arrange
+    const harness = subject(SESSION);
+    harness.downstream.result = -1;
+
+    // Act
+    await harness.handler.open();
+
+    // Assert — a refused write closed the handler; a window armed after it would hold a dead socket.
+    should(harness.scheduler.armed).be.empty();
+    should(harness.source.listening).be.false();
   });
 });
 
@@ -491,6 +546,44 @@ describe('the fleet event stream', () => {
     // Assert — the bound is asked for in the source, before a journal byte is read.
     should(harness.source.backfilled).deepEqual([FLEET_EVENT_BACKLOG_LIMIT]);
     should(harness.downstream.events()).deepEqual(['s2/1', 's1/1', 's3/1']);
+  });
+
+  it('should replay nothing for a tail of zero, prove the edge at once, and follow every session from it', async () => {
+    // Arrange — a reader that has just read the session list wants only what happens next. The source
+    // is asked for no events at all; the backlog the fake would hand back proves none is delivered.
+    const harness = subject(
+      { kind: 'fleet', tail: 0 },
+      {
+        backlog: { sessionIds: ['s1', 's2'], events: [] },
+        duringReplay: emit => emit(stored('s2', 8)),
+      },
+    );
+
+    // Act
+    await harness.handler.open();
+    harness.source.emit(stored('s1', 4));
+
+    // Assert — the append made after the subscription is kept, and the proof sits between it and the
+    // next one, counting the whole fleet.
+    should(harness.source.backfilled).deepEqual([0]);
+    should(
+      harness.downstream.frames().map(frame => (frame.kind === 'event' ? frame.event.sessionId : frame)),
+    ).deepEqual(['s2', { kind: 'idle', idleSeconds: 30, scope: { kind: 'fleet', followedSessions: 2 } }, 's1']);
+  });
+
+  it('should ask the source for exactly the tail a reader named', async () => {
+    // Arrange
+    const harness = subject(
+      { kind: 'fleet', tail: 25 },
+      { backlog: { sessionIds: ['s1'], events: [stored('s1', 1)] } },
+    );
+
+    // Act
+    await harness.handler.open();
+
+    // Assert
+    should(harness.source.backfilled).deepEqual([25]);
+    should(harness.downstream.events()).deepEqual(['s1/1']);
   });
 
   it('should count every session the daemon holds, not only the ones in the tail', async () => {
@@ -879,8 +972,9 @@ describe('the live readout on a per-session event stream', () => {
     const sentSoFar = harness.downstream.sent.length;
     await harness.sampleNow(LIVE_SAMPLE_MS);
 
-    // Assert — nothing reached the socket for the bad ones, the stream stayed open, the good one went.
-    should(sentSoFar).equal(0);
+    // Assert — nothing reached the socket for the bad ones (only the opening proof is there), the
+    // stream stayed open, the good one went.
+    should(sentSoFar).equal(1);
     should(harness.downstream.closes).be.empty();
     should(harness.liveFrames()).deepEqual([{ kind: 'live', live: good }]);
   });
@@ -918,8 +1012,8 @@ describe('the live readout on a per-session event stream', () => {
     release();
     await Bun.sleep(0);
 
-    // Assert
-    should(harness.downstream.sent).be.empty();
+    // Assert — the opening proof, and nothing from the late sample.
+    should(harness.downstream.frames().map(frame => frame.kind)).deepEqual(['idle']);
     should(harness.scheduler.waiting).be.empty();
     should(harness.scheduler.armed.filter(delay => delay === LIVE_SAMPLE_MS)).be.empty();
   });

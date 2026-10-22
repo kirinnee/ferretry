@@ -278,7 +278,6 @@ describe('a live event stream carried by a rendezvous', () => {
     // Assert — the upgrade was ACCEPTED. A refusal here would be a `stream-refused` carrying the
     // status, which is the answer that tells a viewer why rather than leaving it watching nothing.
     const accepted = await readRecords(sent, daemonToClient);
-    should(accepted).have.length(1);
     should(accepted[0]).containDeep({ t: 'stream-opened', protocol: SESSION_PROTOCOL_ID });
     should((accepted[0] as { accessExpiresAt?: string }).accessExpiresAt).be.a.String();
 
@@ -294,10 +293,17 @@ describe('a live event stream carried by a rendezvous', () => {
       }),
     );
 
-    // Assert — both events crossed, sealed, as `data` records carrying the feed's own frame shape.
+    // Assert — the opening proof crossed first, at once and sealed: a viewer is live before any event
+    // and without waiting out a quiet window.
     const delivered = await readRecords(sent, daemonToClient);
-    should(delivered).have.length(3);
-    should(delivered.slice(1)).matchEach((message: { t: string; text: string }) => {
+    should(delivered).have.length(4);
+    should(JSON.parse((delivered[1] as { text: string }).text)).deepEqual({
+      kind: 'idle',
+      idleSeconds: 30,
+      scope: { kind: 'session', sessionId: SESSION, after: 0 },
+    });
+    // Assert — both events crossed, sealed, as `data` records carrying the feed's own frame shape.
+    should(delivered.slice(2)).matchEach((message: { t: string; text: string }) => {
       should(message.t).equal('data');
       const frame = JSON.parse(message.text) as { kind: string; event: { sessionId: string; sequence: number } };
       should(frame.kind).equal('event');
