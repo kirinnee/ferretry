@@ -38,6 +38,7 @@ import { useLayoutMode } from '../../hooks/use-layout-mode.ts';
 
 import type { DaemonConnectionRecord } from '../../lib/connections.ts';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
+import { whileVisible } from '../../lib/feed-aware-poll.ts';
 import {
   allSeen,
   deviceLabel,
@@ -77,8 +78,9 @@ export const NEW_DEVICE_REFRESH_MS = 5 * 60_000;
  */
 export type NewDeviceSchedule = (read: () => void) => () => void;
 
+/** A hidden app skips its turn: nobody is there to be told, and the next visible turn reads. */
 const everyRefresh: NewDeviceSchedule = read => {
-  const timer = setInterval(read, NEW_DEVICE_REFRESH_MS);
+  const timer = setInterval(whileVisible(read), NEW_DEVICE_REFRESH_MS);
   return () => clearInterval(timer);
 };
 

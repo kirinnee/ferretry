@@ -8,6 +8,7 @@ import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import type { TerminalDeckDependencies } from '../../components/session-terminal-deck.tsx';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
 import type { DaemonSessionScope } from '../../lib/daemon-scope.ts';
+import { type FeedAwarePollEnvironment, type LiveFeedSignal, startFeedAwarePoll } from '../../lib/feed-aware-poll.ts';
 import { type WorkspaceFormFactor, workspaceFormFactor } from './phone/phone-tab.ts';
 
 const subscribeResize = (listener: () => void): (() => void) => {
@@ -21,8 +22,15 @@ export function useWorkspaceFormFactor(): WorkspaceFormFactor {
   return useSyncExternalStore(subscribeResize, readFormFactor, readFormFactor);
 }
 
-/** How often the transcript's `%terminal:` proof re-reads the daemon's listing. */
+/** How often the transcript's `%terminal:` proof re-reads the daemon's listing while no live feed is saying what changed. */
 export const SESSION_TERMINALS_POLL_MS = 10_000;
+
+/** The safety-net re-read while the feed is live, for a shell that exited without a journal entry. */
+export const SESSION_TERMINALS_LIVE_POLL_MS = 120_000;
+
+/** A feed event that may have changed the session's terminals: a surface or a terminal one. */
+export const movesTerminals = (event: { readonly type: string }): boolean =>
+  event.type.startsWith('surface.') || event.type.startsWith('terminal.');
 
 /**
  * This session's terminal listing, for proving `%terminal:` chips — or null until one has been read.
@@ -36,6 +44,9 @@ export function useSessionTerminals(
   deck: TerminalDeckDependencies | undefined,
   connection: DaemonConnection,
   scope: DaemonSessionScope,
+  /** The session's live feed: while it is live the listing is re-read on its events, not on a timer. */
+  events?: LiveFeedSignal,
+  pollEnvironment?: FeedAwarePollEnvironment,
 ): TerminalListView | null {
   const [listing, setListing] = useState<TerminalListView | null>(null);
   useEffect(() => {
@@ -52,13 +63,19 @@ export function useSessionTerminals(
           // An unread listing proves nothing either way, which is what null already says.
         });
     };
-    read();
-    const timer = setInterval(read, SESSION_TERMINALS_POLL_MS);
+    const stop = startFeedAwarePoll({
+      read,
+      everyMs: SESSION_TERMINALS_POLL_MS,
+      liveEveryMs: SESSION_TERMINALS_LIVE_POLL_MS,
+      relevant: movesTerminals,
+      ...(events === undefined ? {} : { feed: events }),
+      ...(pollEnvironment === undefined ? {} : { environment: pollEnvironment }),
+    });
     return () => {
       live = false;
-      clearInterval(timer);
+      stop();
     };
-  }, [deck, connection, scope]);
+  }, [deck, connection, scope, events, pollEnvironment]);
   const identity = listing === null ? null : `${listing.sessionId}:${listing.terminals.map(t => t.id).join(',')}`;
   // biome-ignore lint/correctness/useExhaustiveDependencies: identity is the stable key for listing
   return useMemo(() => listing, [identity]);

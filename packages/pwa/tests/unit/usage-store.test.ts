@@ -351,8 +351,8 @@ describe('DaemonUsageStore.watch', () => {
     expect(() => stop()).not.toThrow();
   });
 
-  it('defaults to the kteam cadence and the document’s own visibility', () => {
-    expect(USAGE_POLL_MS).toBe(60_000);
+  it('defaults to its two-minute cadence and the document’s own visibility', () => {
+    expect(USAGE_POLL_MS).toBe(120_000);
     const store = new DaemonUsageStore(portFor(new Map([[laptop.daemonId, async () => feed(1)]])));
     const stop = store.watch(laptop);
     stop();

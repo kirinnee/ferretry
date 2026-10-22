@@ -39,6 +39,8 @@ export interface ProfileContextPort {
     readonly runtime: string;
   };
   uptimeSeconds(): number;
+  /** The stack sampler's interval in milliseconds; absent means JavaScriptCore's default. */
+  readonly sampleIntervalMs?: number;
   /** How big the fleet is right now; `undefined` where the index cannot be read. */
   fleet(): Promise<{ readonly sessions: number; readonly running: number } | undefined>;
   /** What this daemon's report cannot see, in sentences. */
@@ -78,22 +80,37 @@ interface RunningProfile {
 const MEGABYTE = 1_048_576;
 
 /**
- * About how much main-thread JavaScript one stack sample stands for. JavaScriptCore's sampler takes
- * about one sample per millisecond while JavaScript runs (measured: 912 a second in a busy loop, 6 a
- * second idle), so the sample count is roughly the JavaScript time in milliseconds.
+ * JavaScriptCore's default sampling interval, in milliseconds: about one sample per millisecond while
+ * JavaScript runs (measured: 912 a second in a busy loop, 6 a second idle), so with it the sample count
+ * is roughly the JavaScript time in milliseconds.
  */
-const SAMPLE_MS = 1;
+const DEFAULT_SAMPLE_INTERVAL_MS = 1;
+
+/**
+ * The sampling interval this process runs with, in milliseconds, from `BUN_JSC_sampleInterval` (which
+ * JavaScriptCore reads in MICROseconds at start-up); the default when it is absent or not a positive
+ * number. A daemon launched with a coarser interval takes fewer, costlier-to-skip samples, and the
+ * share the stacks explain must be computed with the interval it really ran with.
+ */
+export function sampleIntervalMs(raw: string | undefined): number {
+  const micros = Number(raw?.trim());
+  return Number.isFinite(micros) && micros > 0 ? micros / 1_000 : DEFAULT_SAMPLE_INTERVAL_MS;
+}
 
 /**
  * The sentence that says how much of the CPU the stacks can explain, or nothing when they explain most
  * of it. A daemon that spends its CPU starting processes and waiting on its I/O threads shows a few
  * hundred samples against seconds of CPU, and a reader must not read the hot functions as the whole cost.
  */
-export function sampledShareLimitation(samples: number, cpuMs: number): string | undefined {
+export function sampledShareLimitation(
+  samples: number,
+  cpuMs: number,
+  intervalMs: number = DEFAULT_SAMPLE_INTERVAL_MS,
+): string | undefined {
   if (samples === 0 || cpuMs <= 0) return undefined;
-  const share = Math.min(1, (samples * SAMPLE_MS) / cpuMs);
+  const share = Math.min(1, (samples * intervalMs) / cpuMs);
   if (share >= 0.5) return undefined;
-  return `The sampled stacks cover about ${String(Math.round(samples * SAMPLE_MS))} ms of main-thread JavaScript, ${String(Math.round(share * 100))}% of the daemon’s ${String(Math.round(cpuMs))} ms of CPU; the rest is native work they cannot see — the I/O thread pool, the kernel, garbage collection, starting child processes.`;
+  return `The sampled stacks cover about ${String(Math.round(samples * intervalMs))} ms of main-thread JavaScript, ${String(Math.round(share * 100))}% of the daemon’s ${String(Math.round(cpuMs))} ms of CPU; the rest is native work they cannot see — the I/O thread pool, the kernel, garbage collection, starting child processes.`;
 }
 
 /**
@@ -249,7 +266,7 @@ export class PerformanceProfiler {
       budgets: judgeBudgets({ resources, ...tables }, budgets),
       limitations: [
         ...context.limitations(),
-        ...[sampledShareLimitation(tables.cpuProfile.samples, userMs + systemMs)].filter(
+        ...[sampledShareLimitation(tables.cpuProfile.samples, userMs + systemMs, context.sampleIntervalMs)].filter(
           (line): line is string => line !== undefined,
         ),
       ],

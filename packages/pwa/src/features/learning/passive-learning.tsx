@@ -11,11 +11,20 @@ import { GraduationCap } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { pairingKey } from '../../hooks/use-machines-poll.ts';
 import type { DaemonConnection, DaemonId } from '../../lib/daemon-connection.ts';
+import { startVisiblePoll } from '../../lib/feed-aware-poll.ts';
 import { fetchSessionLearning, patchSessionLearning } from '../../lib/learning-api.ts';
 import type { DaemonFetch } from '../../lib/runtime-models.ts';
 
-/** How often a list that shows the mark re-reads which ferrets learn. */
-export const PASSIVE_LEARNING_POLL_MS = 30_000;
+/**
+ * How often a list that shows the mark re-reads which ferrets learn, while the app is in view.
+ *
+ * The answer moves only when somebody switches a ferret: a switch made here is applied at once from its
+ * own answer, so this read is for a switch made elsewhere (the CLI, another device) — which can wait a
+ * few minutes to grow its mark. It is read on every machine the list shows, beside the sessions list
+ * itself, so a quick beat here was a steady share of an idle page's traffic for an answer that almost
+ * never changes.
+ */
+export const PASSIVE_LEARNING_POLL_MS = 300_000;
 
 export interface PassiveLearningState {
   /** `null` until the first read answers — and for a daemon that cannot answer it. */
@@ -52,9 +61,7 @@ export function usePassiveLearning(
   }, [connection, fetcher]);
 
   useEffect(() => {
-    void refresh();
-    const timer = setInterval(() => void refresh(), pollMs);
-    return () => clearInterval(timer);
+    return startVisiblePoll(() => void refresh(), pollMs);
   }, [refresh, pollMs]);
 
   const set = useCallback(
@@ -113,11 +120,10 @@ export function useMachinesPassiveLearning(
           () => undefined,
         );
     };
-    read();
-    const timer = setInterval(read, pollMs);
+    const stop = startVisiblePoll(read, pollMs);
     return () => {
       alive = false;
-      clearInterval(timer);
+      stop();
     };
   }, [key, fetcher, pollMs]);
   return learners;

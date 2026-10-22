@@ -5,6 +5,7 @@ import type { PerformanceBudget } from '../../../src/lib/performance/budgets.ts'
 import {
   PerformanceProfiler,
   sampledShareLimitation,
+  sampleIntervalMs,
   type ProcessReading,
   type ProfileContextPort,
 } from '../../../src/lib/performance/profiler.ts';
@@ -434,5 +435,28 @@ describe('sampledShareLimitation', () => {
 
     // Assert
     should(actual).equal(expected);
+  });
+});
+
+describe('sampleIntervalMs', () => {
+  it.each([
+    [undefined, 1],
+    ['', 1],
+    ['abc', 1],
+    ['0', 1],
+    ['-5', 1],
+    ['1000', 1],
+    [' 10000 ', 10],
+  ])('should read %j microseconds as %s ms', (input, expected) => {
+    // Act + Assert
+    should(sampleIntervalMs(input)).equal(expected);
+  });
+
+  it('should count each sample as one interval of JavaScript', () => {
+    // Act
+    const actual = sampledShareLimitation(100, 6_000, 10);
+
+    // Assert
+    should(actual).startWith('The sampled stacks cover about 1000 ms of main-thread JavaScript, 17% of');
   });
 });
