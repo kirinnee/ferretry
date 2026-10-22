@@ -1,4 +1,5 @@
 import {
+  captureRowsArguments,
   capturePaneArguments,
   deleteBufferArguments,
   hasSessionArguments,
@@ -75,6 +76,15 @@ export class TmuxController {
       visibleResult.code === 0 ? visibleResult.stdout : '',
       historyResult?.code === 0 ? historyResult.stdout : '',
     );
+  }
+
+  /**
+   * Rows `first` to `last` of the visible frame with their attributes, or `undefined` when tmux could
+   * not capture them — the second capture a composer's ink is read from, never a substitute for the first.
+   */
+  async rows(session: string, first: number, last: number): Promise<string | undefined> {
+    const result = await this.commands.execute(captureRowsArguments(session, first, last));
+    return result.code === 0 ? result.stdout : undefined;
   }
 
   /** The pane's metadata and activity stamp in one question, or `undefined` when the session is not there. */

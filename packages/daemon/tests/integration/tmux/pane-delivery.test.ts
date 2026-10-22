@@ -49,6 +49,22 @@ describe('tmux pane delivery — readiness', () => {
     );
   });
 
+  it("should answer Claude 2.1.281's folder-trust screen, whose first option is `No, exit`, with Down then Enter", async () => {
+    // Arrange — the screen as it draws: no numbers, the cursor on the option that ends the session.
+    const server = new FakeTmuxServer();
+    server.modal = (
+      await readFile(join(import.meta.dir, '../../fixtures/startup-dialogs/claude-2.1.281-folder-trust.txt'), 'utf8')
+    ).trimEnd();
+    const { subject } = delivery(server);
+
+    // Act
+    await subject.waitReady(SESSION);
+
+    // Assert — it was a dialog to answer, never a draft to refuse, and never `No, exit` by Enter alone.
+    const keys = server.calls.filter(call => call[0] === 'send-keys').map(call => call.at(-1));
+    should(keys).deepEqual(['Down', 'Enter']);
+  });
+
   it("should answer Claude's auto-mode dialog NO, keeping the mode the owner chose, then deliver", async () => {
     // Arrange — the dialog that parked a bypass agent with every message failing, cursor on Yes.
     const server = new FakeTmuxServer();
@@ -378,6 +394,94 @@ describe('tmux pane delivery — landing proof', () => {
     // Act / Assert
     await should(subject.deliver(SESSION, 'continue')).be.rejectedWith(/landed but stayed in the composer/u);
     should(server.calls.filter(call => call.at(-1) === 'Enter')).have.length(2);
+  });
+});
+
+describe('tmux pane delivery — the ink of the composer', () => {
+  const inkCaptures = (server: FakeTmuxServer) =>
+    server.calls.filter(call => call[0] === 'capture-pane' && call.includes('-e'));
+
+  it('should refuse a draft whose cursor is back at col 2, because its words are plain, not dim', async () => {
+    // Arrange — the ghost suggestion's twin: a person typed the same words and pressed Home.
+    const server = new FakeTmuxServer();
+    server.composer = 'go ahead with all three';
+    server.cursorHome = true;
+    const { subject } = delivery(server);
+
+    // Act
+    const refused = await subject.deliver(SESSION, 'hello').catch((error: unknown) => error);
+
+    // Assert — nothing typed onto the person's words.
+    should(refused).be.instanceof(ComposerOccupiedError);
+    should((refused as ComposerOccupiedError).draft).equal('go ahead with all three');
+    should(literals(server)).equal(0);
+  });
+
+  it('should read the same cursor over a dim ghost suggestion as empty, and type once', async () => {
+    // Arrange
+    const server = new FakeTmuxServer();
+    server.placeholder = 'go ahead with all three';
+    const { subject } = delivery(server);
+
+    // Act
+    await subject.deliver(SESSION, 'hello');
+
+    // Assert
+    should(server.submitted).deepEqual(['hello']);
+    should(literals(server)).equal(1);
+  });
+
+  it('should capture only the composer row with attributes, never the whole screen', async () => {
+    // Arrange
+    const server = new FakeTmuxServer();
+    server.placeholder = 'go ahead with all three';
+    const { subject } = delivery(server);
+
+    // Act
+    await subject.waitReady(SESSION);
+
+    // Assert — one row, `-S` equal to `-E`, and always a plain capture beside it.
+    const rows = inkCaptures(server);
+    should(rows.length).be.above(0);
+    for (const call of rows) should(call[call.indexOf('-S') + 1]).equal(call[call.indexOf('-E') + 1]);
+    should(server.calls.some(call => call[0] === 'capture-pane' && !call.includes('-e'))).be.true();
+  });
+
+  it('should fall back to the cursor when the harness drew no attributes at all', async () => {
+    // Arrange — started without a colour terminal: a ghost suggestion and a draft look alike, and the
+    // cursor rule that stood before the ink is what still decides.
+    const ghost = new FakeTmuxServer();
+    ghost.placeholder = 'go ahead with all three';
+    ghost.attributes = false;
+    const draft = new FakeTmuxServer();
+    draft.composer = 'go ahead with all three';
+    draft.attributes = false;
+
+    // Act
+    await delivery(ghost).subject.deliver(SESSION, 'hello');
+    const refused = await delivery(draft)
+      .subject.deliver(SESSION, 'hello')
+      .catch((error: unknown) => error);
+
+    // Assert
+    should(ghost.submitted).deepEqual(['hello']);
+    should(refused).be.instanceof(ComposerOccupiedError);
+  });
+
+  it('should keep a payload typed once and unconfirmed when the ink is unreadable and the pane stalls', async () => {
+    // Arrange — #756's invariant with no attributes available: a frozen pane gets one copy, not three.
+    const server = new FakeTmuxServer();
+    server.placeholder = 'go ahead with all three';
+    server.attributes = false;
+    server.stalledUntilMs = 60_000;
+    const { subject } = delivery(server);
+
+    // Act
+    const refused = await subject.deliver(SESSION, 'hello').catch((error: unknown) => error);
+
+    // Assert
+    should(refused).be.instanceof(ComposerUnconfirmedError);
+    should(literals(server)).equal(1);
   });
 });
 

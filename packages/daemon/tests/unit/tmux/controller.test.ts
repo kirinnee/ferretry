@@ -1,6 +1,7 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
 import {
+  captureRowsArguments,
   capturePaneArguments,
   deleteBufferArguments,
   hasSessionArguments,
@@ -419,5 +420,43 @@ describe('tmux bracketed paste', () => {
     should(killed.received).deepEqual([['kill-pane', '-t', '%12']]);
     await should(new TmuxController(refused).killPaneExact('%12')).rejectedWith("can't find pane: %12");
     await should(new TmuxController(silent).killPaneExact('%12')).rejectedWith('tmux could not kill the pane');
+  });
+});
+
+describe('capturing composer rows with attributes', () => {
+  it('should ask for exactly those rows of the visible pane, with attributes, as a plain capture', () => {
+    should(captureRowsArguments('work-1', 27, 28)).deepEqual([
+      'capture-pane',
+      '-e',
+      '-p',
+      '-S',
+      '27',
+      '-E',
+      '28',
+      '-t',
+      sessionTarget('work-1'),
+    ]);
+  });
+
+  it('should refuse rows that are negative, reversed, or not integers', () => {
+    should(() => captureRowsArguments('work-1', -1, 2)).throw(TmuxAddressError);
+    should(() => captureRowsArguments('work-1', 3, 2)).throw(TmuxAddressError);
+    should(() => captureRowsArguments('work-1', 0.5, 2)).throw(TmuxAddressError);
+    should(() => captureRowsArguments('work-1', 0, Number.POSITIVE_INFINITY)).throw(TmuxAddressError);
+  });
+
+  it('should hand back what tmux captured, and nothing when it could not', async () => {
+    // Arrange
+    const fake = new FakeTmux([ok('\u001b[2mhello\u001b[0m\n'), { code: 1, stdout: '', stderr: 'no pane' }]);
+    const subject = new TmuxController(fake);
+
+    // Act
+    const captured = await subject.rows('work', 1, 1);
+    const missing = await subject.rows('work', 1, 1);
+
+    // Assert
+    should(captured).equal('\u001b[2mhello\u001b[0m\n');
+    should(missing).be.undefined();
+    should(fake.received[0]).deepEqual([...captureRowsArguments('work', 1, 1)]);
   });
 });

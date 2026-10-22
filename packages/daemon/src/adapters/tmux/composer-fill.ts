@@ -29,12 +29,16 @@
  */
 
 import {
+  type ComposerInk,
   type ComposerState,
   composerEvidence,
+  composerInk,
   composerLanding,
+  composerRows,
   composerState,
   composerTransport,
   type DeliveryFrame,
+  frameCursor,
   type LandingEvidence,
   type LandingWindow,
   landingDeadlineMs,
@@ -126,9 +130,33 @@ export const LANDING_MIN_LOOKS = 5;
  */
 export const COMPOSER_READS = 4;
 
+/**
+ * How the composer's glyphs are inked, from a second capture of ONLY its rows with attributes
+ * (`capture-pane -e -S <row> -E <row>`), or `undefined` when that capture is not available or does
+ * not match the plain one. An empty composer has no glyphs to read, so it costs no second capture.
+ */
+async function readComposerInk(
+  tmux: TmuxController,
+  session: string,
+  visible: string,
+): Promise<ComposerInk | undefined> {
+  const rows = composerRows(visible);
+  if (rows === undefined) return undefined;
+  const attributed = await tmux.rows(session, rows.first, rows.last);
+  if (attributed === undefined) return undefined;
+  return composerInk(
+    attributed,
+    visible
+      .replaceAll('\r\n', '\n')
+      .split('\n')
+      .slice(rows.first, rows.last + 1),
+  );
+}
+
 /** One capture, shaped the way the decision layer reads a pane. */
 export async function captureFrame(tmux: TmuxController, session: string): Promise<DeliveryFrame> {
   const state = await tmux.state(session);
+  const ink = state.alive && !state.dead ? await readComposerInk(tmux, session, state.visible) : undefined;
   return {
     alive: state.alive,
     dead: state.dead,
@@ -138,6 +166,7 @@ export async function captureFrame(tmux: TmuxController, session: string): Promi
     ...(state.exitCode === undefined ? {} : { exitCode: state.exitCode }),
     ...(state.cursorX === undefined ? {} : { cursorX: state.cursorX }),
     ...(state.cursorY === undefined ? {} : { cursorY: state.cursorY }),
+    ...(ink === undefined ? {} : { composerInk: ink }),
   };
 }
 
@@ -213,7 +242,7 @@ async function watchLanding(
     return { kind: 'landed', evidence: 'placeholder' };
   const responded = respondedAt !== undefined;
   const empty = composerState(last).kind === 'empty';
-  const held = paneHoldOf(last.visible, { x: last.cursorX, y: last.cursorY }, text, paste);
+  const held = paneHoldOf(last.visible, frameCursor(last), text, paste);
   return responded && empty && held === 'absent'
     ? { kind: 'dropped' }
     : { kind: 'unproven', waitedMs: waited, responded };

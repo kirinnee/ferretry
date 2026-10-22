@@ -1,0 +1,30 @@
+
+ ▐▛███▛█   Claude Code v2.1.281
+▝▜██████▀  Haiku 4.5 · API Usage Billing
+  ▝▝ ▝▝    /tmp/claude-1000/claudeprobe/cwd
+
+
+❯ slowturn please
+
+● go ahead with all three
+
+✻ Brewed for 25s · done 11:42 AM
+
+❯ queued message one
+
+● go ahead with all three
+
+✻ Sautéed for 0s · done 11:42 AM
+
+
+
+
+
+
+
+
+
+────────────────────────────────────────────────────────────────────────────────────────────────────
+❯ go ahead with all three
+────────────────────────────────────────────────────────────────────────────────────────────────────
+  ⏸ manual mode on · ? for shortcuts · ← for agents

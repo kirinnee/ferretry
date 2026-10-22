@@ -33,6 +33,33 @@ The cursor is what tells a placeholder from input: an empty composer parks the c
 column, typed text moves it past itself. Claude Code's idle suggestion (`Try "…"`) and its queued
 placeholder are placeholders by their wording, whatever the cursor says.
 
+**The ink settles what the cursor cannot.** A person who types the ghost suggestion's very words and
+presses Home parks the cursor in exactly the place the ghost does (`2|27`, measured), so the cursor alone
+reads their draft as empty. Both harnesses draw the difference themselves: every placeholder — Claude's
+ghost suggestion, `Try "…"`, `Press up to edit queued messages`, Codex's `Ask Codex to do anything` — is
+SGR 2 (dim), and typed text, a collapsed paste chip included, never is. So `captureFrame` takes a second,
+tiny capture, `capture-pane -e -p -S <row> -E <last>` of ONLY the composer's rows through the in-band
+control client, and `composerInk` (`lib/tmux/composer-ink.ts`, pure) reads it: every non-blank glyph
+after the prompt dim → `dim` (a placeholder, empty); any glyph not dim → `plain` (input). Measured on
+Claude Code 2.1.281 and Codex 0.156.1; the frames are `tests/fixtures/composer/*-ink-*.{txt,ansi,cursor}`.
+
+- Dim ends at `22` or a reset, **not** `39`; a `2` inside `38;2;r;g;b` is a colour channel, not dim.
+- Claude fakes a cursor on its placeholder by drawing the first glyph in inverse video, outside the dim
+  run. Inverse cells are the cursor, not ink, and are skipped, as are blanks and the prompt glyph.
+- **The ink says "cannot say" (`undefined`) rather than guess**: a capture with no SGR at all (a harness
+  started without a colour terminal), one whose row count or text differs from the plain capture (a
+  repaint between the two), or a composer with no glyph to read. The cursor rule and the wording above
+  are then exactly what they were. The ink never makes a send riskier: the fallback is today's rule.
+- The two captures are not atomic, so the plain rows are compared with the attributed ones' text before
+  the ink is believed.
+
+The folder-trust screen is a dialog, not a draft. Claude Code 2.1.281's draws **unnumbered** rows —
+`❯ No, exit` selected first, then `  Yes, I trust this folder` — and `menuOptions` found nothing numbered,
+so `waitReady` saw a `❯` row with text after it and refused the pane as holding someone's draft.
+`startupDialogAction` now also reads `Yes`/`No` rows for the trust and API-key dialogs
+(`yesNoOptions`) and answers by moving to the affirmative row (Down, Enter here; Up, Enter for the
+API-key screen, whose `No (recommended)` is selected). Fixtures: `tests/fixtures/startup-dialogs/`.
+
 **Nothing is typed into a composer that is not proven empty** (`composerState`, `fillComposer`). A
 frame with no prompt line, or text the cursor cannot place, is `unreadable` — it may be a person's
 draft — and a fill looks again a few frames apart (`COMPOSER_READS`), then types nothing. Only AFTER
@@ -206,8 +233,8 @@ to 0.16–0.48 s each. The recorded frames of one stalled send are
 `❯ go ahead with all three` under a titled rule and above a right-aligned `2% until auto-compact` line,
 with tmux reporting the cursor at `2|17` — the composer row's first column. That is Claude's dim ghost
 SUGGESTION of the person's next prompt (SGR 2 under `capture-pane -e`; `❯ ok` in a soak here), which
-can be any words, so the cursor rule rightly reads it as an empty composer and the status lines change
-nothing. It is also why one message was typed three times there: typed onto the suggestion, unread by a
+can be any words; the dim ink (above) reads it as an empty composer, and so does the cursor rule when no
+attributes could be captured, and the status lines change nothing. It is also why one message was typed three times there: typed onto the suggestion, unread by a
 stalled pane, every look still showed the suggestion — empty — and each fill typed again. The one-fill
 rule and the stretching window above are the fix; the reader was right.
 

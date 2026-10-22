@@ -2,6 +2,7 @@ import type { LandingEvidence } from './composer.ts';
 import { composerHolds } from './composer.ts';
 import { type HeldAt, heldAt, readComposer, readPendingInputs, showsPayload } from './composer-screen.ts';
 import type { DeliveryFrame } from './delivery.ts';
+import { frameCursor } from './delivery.ts';
 
 /**
  * The decisions behind putting a message into a BUSY pane's own queue.
@@ -42,7 +43,7 @@ export function needsQueueKey(frame: DeliveryFrame, text: string, evidence: Land
  * the fallback would otherwise call a message sitting in Claude's queue "typed".
  */
 export function queuedWhere(frame: DeliveryFrame, text: string, evidence: LandingEvidence): HeldAt | undefined {
-  const cursor = { x: frame.cursorX, y: frame.cursorY };
+  const cursor = frameCursor(frame);
   if (readComposer(frame.visible, cursor)?.placeholder !== undefined)
     return heldAt(frame.visible, cursor, text, evidence === 'placeholder');
   if (readPendingInputs(frame.visible).some(entry => showsPayload(entry, text))) return 'queue';

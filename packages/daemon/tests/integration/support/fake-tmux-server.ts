@@ -11,6 +11,11 @@ import type { TmuxCommandPort, TmuxCommandResult } from '../../../src/lib/index.
  * So keys land in a composer, the cursor moves with them, a bracketed paste collapses into the
  * placeholder both harnesses render, and Enter submits whatever is there.
  *
+ * Asked for rows WITH attributes (`capture-pane -e -S n -E n`) it draws what a colour terminal does:
+ * the prompt glyph styled, an empty composer's placeholder in SGR 2 and typed text plain — or, with
+ * `attributes = false`, what a harness started without a colour terminal does: the same rows with no
+ * SGR at all.
+ *
  * It can also STALL, the way a throttled or napping host does: until `stalledUntilMs` on its virtual
  * clock the harness reads no input and draws nothing, so keys wait in the pty and every frame is the
  * one from before them; once the clock passes it, the waiting keys are read in order. A test drives
@@ -43,6 +48,10 @@ export class FakeTmuxServer implements TmuxCommandPort {
    * `Ask Codex to do anything`, whose words a short message can be made of.
    */
   placeholder = '';
+  /** Whether `capture-pane -e` carries SGR; false is a harness that drew without a colour terminal. */
+  attributes = true;
+  /** A person who typed a draft and pressed Home: the cursor sits at the composer's first column over text. */
+  cursorHome = false;
   /**
    * Enters to treat as a NEWLINE instead of a submit: what Codex does with an Enter that arrives
    * inside its paste-burst window, measured on 0.156.1.
@@ -106,6 +115,7 @@ export class FakeTmuxServer implements TmuxCommandPort {
       return result('');
     }
     if (command === 'display-message') return result(this.metadata());
+    if (command === 'capture-pane' && argv.includes('-e')) return result(this.rowsWithAttributes(argv));
     if (command === 'capture-pane') return result(this.frame());
     if (command === 'load-buffer') {
       this.buffers.set(String(argv[2]), stdin ?? '');
@@ -192,12 +202,30 @@ export class FakeTmuxServer implements TmuxCommandPort {
     return `${this.lines().join('\n')}\n`;
   }
 
+  /** Rows `-S` to `-E` of the screen, the way a colour terminal's attributes would draw them. */
+  private rowsWithAttributes(argv: readonly string[]): string {
+    const first = Number(argv[argv.indexOf('-S') + 1]);
+    const last = Number(argv[argv.indexOf('-E') + 1]);
+    const composerFrom = this.lines().length - 1;
+    const rows = this.lines()
+      .flatMap(line => line.split('\n'))
+      .map((row, index) => (this.attributes && index === composerFrom ? this.inked(row) : row));
+    return `${rows.slice(first, last + 1).join('\n')}\n`;
+  }
+
+  /** The composer's first row drawn with attributes: a styled glyph, then a dim placeholder or plain text. */
+  private inked(row: string): string {
+    const text = row.slice(2);
+    const body = this.composer === '' ? `\u001b[2m${text}\u001b[0m` : text;
+    return `\u001b[1m>\u001b[0m ${body}`;
+  }
+
   /** `#{pane_dead}|#{pane_dead_status}|#{cursor_x}|#{cursor_y}|#{pane_height}|#{pane_width}` */
   private metadata(): string {
     // The cursor sits after whatever the composer holds, which is exactly what keeps a pane with
     // text still in it from reading as an idle prompt.
     const row = this.lines().join('\n').split('\n').length - 1;
-    return `${this.dead ? 1 : 0}|${this.exitCode}|${2 + (this.composer.split('\n').at(-1) ?? '').length}|${row}|24|80\n`;
+    return `${this.dead ? 1 : 0}|${this.exitCode}|${this.cursorHome ? 2 : 2 + (this.composer.split('\n').at(-1) ?? '').length}|${row}|24|80\n`;
   }
 }
 

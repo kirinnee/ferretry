@@ -157,6 +157,26 @@ function dialogKind(lower: string): StartupDialogAction['kind'] | undefined {
   return undefined;
 }
 
+/** `❯ No, exit` / `  Yes, I trust this folder` — a yes/no row drawn with no number, the cursor mark optional. */
+const YES_NO_ROW = /^\s*[│|]?\s*([>›❯»])?\s*((?:yes|no)\b.{0,79})$/iu;
+
+/**
+ * The rows of a dialog that draws them without numbers.
+ *
+ * Claude Code 2.1.281 draws its folder-trust screen as `❯ No, exit` over `  Yes, I trust this folder` —
+ * the cancel row FIRST and selected — and its custom-API-key confirmation as `  Yes` over `❯ No
+ * (recommended)`. With only numbered rows read, neither had any, so the dialog was recognised, no keys
+ * were found, and `❯ No, exit` plus an indented `Yes…` row were read as a person's half-typed draft.
+ */
+function yesNoOptions(pane: string): readonly MenuOption[] {
+  return pane.split('\n').flatMap(line => {
+    const match = YES_NO_ROW.exec(line);
+    return match === null
+      ? []
+      : [{ selected: match[1] !== undefined, label: (match[2] as string).trim().toLowerCase() }];
+  });
+}
+
 /** The row a trust-style dialog wants: the first option that says yes. */
 function affirmativeRow(options: readonly MenuOption[]): number {
   return options.findIndex(option => /\b(yes|accept|continue|trust)\b/.test(option.label));
@@ -185,7 +205,8 @@ export function startupDialogAction(pane: string, options: StartupDialogOptions 
     return { kind: 'onboarding', keys: ['Enter'] };
   const kind = dialogKind(lower);
   if (kind === undefined) return undefined;
-  const rows = menuOptions(pane);
+  const numbered = menuOptions(pane);
+  const rows = numbered.length > 0 || (kind !== 'claude-trust' && kind !== 'api-key') ? numbered : yesNoOptions(pane);
   const keys = keysTo(rows, affirmativeRow(rows));
   return keys.length === 0 ? undefined : { kind, keys };
 }
