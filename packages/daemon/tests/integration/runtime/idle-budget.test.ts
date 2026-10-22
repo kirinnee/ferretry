@@ -59,11 +59,19 @@ const CEILINGS: Readonly<Record<string, number>> = {
 };
 
 /**
- * A main-thread frame that observes a session: a transcript read or parse, or a pane capture. Since stage 3d
+ * A main-thread frame that observes a session: a transcript READ or PARSE, or a pane capture. Since stage 3d
  * (docs/design/session-workers.md) each running session is observed on its own worker, and an idle main
- * thread runs none of it — a document's own schema parse (zod) is not one of these.
+ * thread runs none of it.
+ *
+ * Matched by WHERE the frame's code lives, not by a word in its name: a transcript is read and parsed only
+ * in `src/adapters/transcript/` (the file source) and `src/lib/transcript/` (JSONL and the parsers).
+ * Two things that merely NAME transcripts are not observation and must not fail this: Codex rollout
+ * discovery and the transcript resolver under `session/transcript/` (which file a session writes to, paced
+ * to once per 30 s by #697 until stage 4 moves it to the housekeeping worker), and the fleet's
+ * `attributedTranscripts`, which lists file names from session records. A document's own schema parse (zod)
+ * is not observation either.
  */
-const OBSERVATION_FRAME = /transcript|Parser\b|parser\.ts|capture|pane-frames|PaneFrames/i;
+const OBSERVATION_FRAME = /src\/(?:adapters|lib)\/transcript\/|Parser\b|parser\.ts|capture|pane-frames|PaneFrames/i;
 
 /** The report's own ranking, cut to what names the code to fix. */
 function ranking(report: PerformanceReport) {
