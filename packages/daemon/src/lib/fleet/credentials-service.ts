@@ -46,6 +46,7 @@ import {
   type CredentialStoreResolution,
   type CredentialSubject,
   type CredentialUsage,
+  type CredentialViewOptions,
   credentialHarnesses,
   type FleetUsageWindow,
   type HarnessKind,
@@ -97,7 +98,7 @@ export class FleetCredentialRefusal extends Error {
 
 /** What the status service offers, narrowed to the three calls this surface makes. */
 export interface CredentialStatusReader {
-  view(subject: CredentialSubject): Promise<CredentialStatusView>;
+  view(subject: CredentialSubject, options?: CredentialViewOptions): Promise<CredentialStatusView>;
   observe(subject: CredentialSubject): Promise<CredentialStatusView>;
   checkNow(subject: CredentialSubject): Promise<CredentialStatusView>;
 }
@@ -473,14 +474,22 @@ export type FleetCredentialSignOutOutcome =
 export class FleetCredentialsService {
   constructor(private readonly deps: FleetCredentialsServiceDeps) {}
 
-  /** Every credential on this machine, from what is already known. No network, no refresh. */
-  async list(): Promise<FleetCredentialList> {
+  /**
+   * Every credential on this machine, from what is already known. No network, no refresh.
+   *
+   * `settled` is for a reader that caches the list — the usage feed — and answers each credential's
+   * last known word instead of "Checking" for one being read right now (see `CredentialViewOptions`).
+   * The usage pass reads its credentials while the feed lists them, so without it the pass itself
+   * would cache a working login as "not known" for a whole interval.
+   */
+  async list(options: CredentialViewOptions = {}): Promise<FleetCredentialList> {
     const { format, entries } = await this.deps.catalog.entries();
     const emails = await this.#emails(entries);
     const environment = await this.#environmentFacts(entries);
     const credentials: FleetCredentialView[] = [];
     for (const entry of entries) {
-      credentials.push(this.#row(entry, await this.deps.status.view(subjectOf(entry)), emails, entries, environment));
+      const view = await this.deps.status.view(subjectOf(entry), options);
+      credentials.push(this.#row(entry, view, emails, entries, environment));
     }
     return FleetCredentialListSchema.parse({ format, machine: this.deps.machineName(), credentials });
   }

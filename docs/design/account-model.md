@@ -690,6 +690,12 @@ One probe per **credential**. The 15-minute horizon and the HTML/WAF `403` / bar
 rules carry over unchanged; an inconclusive check shows the last known word with its age, never a
 fifth word. Check now for Claude is the same free usage read (no refresh, no spend).
 
+`Checking` is a word for a person looking **now**. A reader that keeps the answer — the daemon's usage
+feed, which caches its rows for one `usage.interval` — lists credentials **settled**: a credential being
+read is given its last known word, because a cached "Checking" outlives the read it describes. Before
+this rule the usage pass, which lists and reads credentials at the same time, cached its own in-flight
+reads as "not known" for a whole interval.
+
 #### 8.1.3 Usage
 
 1. **Passive (VERIFIED field, INFERRED plumbing):** Claude passes `rate_limits.five_hour` /

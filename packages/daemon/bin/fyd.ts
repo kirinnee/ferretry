@@ -8524,7 +8524,9 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           secrets: secrets.directory,
         }),
       );
-      credentialList = async () => await fleetCredentials.list();
+      // SETTLED: the feed caches this list for an interval, so a login being read right now is listed
+      // with its last known word rather than a "Checking" that would outlive the read.
+      credentialList = async () => await fleetCredentials.list({ settled: true });
       const terminalSubsystem = createTerminalSubsystem(storage, terminals, { now: () => Date.now() });
       // A session browser nobody watches or drives stops after this long, so a forgotten one does not
       // hold the one shared profile away from every other session.

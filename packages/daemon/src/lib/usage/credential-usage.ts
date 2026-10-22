@@ -77,8 +77,11 @@ const resetAt = (window: FleetCredentialUsageWindow): number | undefined =>
  * One credential's reading as one runtime's row.
  *
  * `checking` states nothing about availability: a check in flight has not concluded, and saying
- * "available" for it would be the benign reading of absent evidence. `needs_sign_in` is a proven
- * unavailability for `auth`. An absent window is an absent field, never `0%`.
+ * "available" for it would be the benign reading of absent evidence. The daemon's feed lists its
+ * credentials SETTLED, so it does not meet one: a cached `checking` row outlived its check and said
+ * "not known" for a whole interval. A list that does say it is still answered honestly.
+ *
+ * `needs_sign_in` is a proven unavailability for `auth`. An absent window is an absent field, never `0%`.
  *
  * An environment login's provider quota (`usage.provider`) adds what only it can say — money left,
  * this month's transcript cost, and an at-limit the provider itself reported.
