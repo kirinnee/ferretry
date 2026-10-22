@@ -1,4 +1,5 @@
 import type { HealthView, LivenessView, TunnelStatusView } from '@ferretry/protocol';
+import { type IProgress, NO_PROGRESS, withStep } from '../progress/index.ts';
 import { passMidTurn } from '../update/mid-turn.ts';
 import { type DaemonUpdateStatus, renderUpdateStatus } from '../update/status.ts';
 import type { InstalledDaemonBinary } from './binary.ts';
@@ -78,6 +79,8 @@ export interface DaemonRestartOptions {
   readonly whenIdle?: boolean;
   /** The caller has already said what the restart means for ferrets mid-turn (`fy daemon update`). */
   readonly midTurnSaid?: boolean;
+  /** How many ferrets are mid-turn and will keep running through it, for the line the restart shows. */
+  readonly ferretsKeepRunning?: number;
 }
 
 /**
@@ -85,6 +88,15 @@ export interface DaemonRestartOptions {
  * never expires under one; short enough that a marker a killed `fy` left behind stops mattering.
  */
 const RESTART_MARKER_TTL_MS = 2 * 60_000;
+
+/** How often the boot step is read while waiting: often enough to move, rarely enough to be no load. */
+const BOOT_POLL_MS = 1_000;
+
+/** `" (3 ferrets keep running)"`, or nothing when none are mid-turn or the count is unknown. */
+function keepRunningNote(count: number | undefined): string {
+  if (count === undefined || count < 1) return '';
+  return ` (${String(count)} ${count === 1 ? 'ferret keeps' : 'ferrets keep'} running)`;
+}
 
 /** Flags `reset` accepts. */
 export interface DaemonResetOptions {
@@ -189,6 +201,8 @@ export interface DaemonControllerDeps {
   readonly turns?: { midTurn(): Promise<number> };
   /** Tells every `fy` on this host that a restart is underway, so their calls wait it out. */
   readonly restartMarker?: IDaemonRestartMarkerPort;
+  /** What a long verb shows while it works. Absent, it shows nothing. */
+  readonly progress?: IProgress;
 }
 
 /** Everything `status` concluded, unrendered. See `DaemonController.inspect`. */
@@ -241,10 +255,12 @@ interface IMachineSetupNotice {
 export class DaemonController {
   private readonly readiness: ReadinessPolicy;
   private readonly shutdown: ShutdownPolicy;
+  private readonly progress: IProgress;
 
   constructor(private readonly deps: DaemonControllerDeps) {
     this.readiness = deps.readiness ?? defaultReadinessPolicy();
     this.shutdown = deps.shutdown ?? defaultShutdownPolicy();
+    this.progress = deps.progress ?? NO_PROGRESS;
   }
 
   async install(): Promise<void> {
@@ -295,7 +311,7 @@ export class DaemonController {
         'restarting',
       );
     }
-    await this.#serialized('restart', () => this.#restart());
+    await this.#serialized('restart', () => this.#restart(keepRunningNote(options.ferretsKeepRunning)));
   }
 
   /**
@@ -327,7 +343,7 @@ export class DaemonController {
     if (orphan !== undefined) await this.#stopOrphan(service, orphan);
     // Before the definition is written, so a unit file never names a store path nothing is holding.
     await this.#holdDaemonClosure(daemon.path);
-    await service.install(daemon.path);
+    await this.#step(`Installing the ${this.#name} service`, () => service.install(daemon.path));
     const health = await this.#awaitReady(service, {});
     await this.#retireLegacyArtifacts();
     this.deps.out.success(renderInstalled(this.#name, service.definitionPath, health.pid));
@@ -380,7 +396,7 @@ export class DaemonController {
     }
     const daemon = this.deps.installedDaemon();
     await this.#holdDaemonClosure(daemon.path);
-    const handle = await owner.start(daemon.path);
+    const handle = await this.#step(`Starting ${this.#name}`, () => owner.start(daemon.path));
     const health = await this.#awaitReady(owner, handle);
     await this.#retireLegacyArtifacts();
     this.deps.out.success(`${this.#name} ready (pid ${String(health.pid)})`);
@@ -397,7 +413,7 @@ export class DaemonController {
     this.deps.out.success(`${this.#name} stopped`);
   }
 
-  async #restart(): Promise<void> {
+  async #restart(note: string): Promise<void> {
     // Locate the executable BEFORE stopping the incumbent. A host with no daemon on its PATH cannot
     // start one, and an operator must learn that while the healthy daemon is still serving — never
     // only after restart has already created downtime it cannot undo.
@@ -409,7 +425,7 @@ export class DaemonController {
     await marker?.mark(this.deps.clock.now() + RESTART_MARKER_TTL_MS);
     let ready: HealthView;
     try {
-      ready = await this.#restartUnder(owner, daemon.path, health);
+      ready = await this.#restartUnder(owner, daemon.path, health, note);
     } finally {
       await marker?.clear();
     }
@@ -430,18 +446,21 @@ export class DaemonController {
     owner: IDaemonSupervisor,
     executable: string,
     health: HealthView | undefined,
+    note: string,
   ): Promise<HealthView> {
     const service = this.deps.service;
     if (service === undefined || owner !== service || service.restartInPlace === undefined) {
-      if (!(await this.#bringDown(owner, health))) this.deps.out.warn(`${this.#name} was not running; starting it`);
+      if (!(await this.#bringDown(owner, health, note)))
+        this.deps.out.warn(`${this.#name} was not running; starting it`);
       await this.#holdDaemonClosure(executable);
-      return await this.#awaitReady(owner, await owner.start(executable));
+      const handle = await this.#step(`Starting ${this.#name}`, () => owner.start(executable));
+      return await this.#awaitReady(owner, handle);
     }
     const orphan = await this.#orphanOf(owner, health);
     if (orphan !== undefined) await this.#stopOrphan(owner, orphan);
     else if (!(await this.#running(owner, health))) this.deps.out.warn(`${this.#name} was not running; starting it`);
     await this.#holdDaemonClosure(executable);
-    await service.restartInPlace(executable);
+    await this.#step(`Restarting ${this.#name}${note}`, () => service.restartInPlace?.(executable));
     return await this.#awaitReady(owner, {});
   }
 
@@ -934,7 +953,7 @@ export class DaemonController {
    * An orphan is stopped directly, and then the manager too if it reports its own daemon running — a
    * launchd `KeepAlive` job can have respawned one the moment the orphan let go of the lock.
    */
-  async #bringDown(owner: IDaemonSupervisor, health: HealthView | undefined): Promise<boolean> {
+  async #bringDown(owner: IDaemonSupervisor, health: HealthView | undefined, note = ''): Promise<boolean> {
     const orphan = await this.#orphanOf(owner, health);
     if (orphan !== undefined) {
       await this.#stopOrphan(owner, orphan);
@@ -942,13 +961,32 @@ export class DaemonController {
       return true;
     }
     if (!(await this.#running(owner, health))) return false;
-    await this.#pressStop(owner, health?.pid);
+    await this.#pressStop(owner, health?.pid, note);
     return true;
   }
 
-  /** Poll until the daemon serves HTTP, it is observed to have died, or the deadline passes. */
+  /** Run `work` as one named step of the progress line. */
+  async #step<T>(label: string, work: () => T | Promise<T>): Promise<T> {
+    return await withStep(this.progress, label, async () => await work());
+  }
+
+  /** Wait for the daemon to serve, showing what it says it is booting. */
   async #awaitReady(owner: IDaemonSupervisor, handle: DaemonStartHandle, initiallyAlive = false): Promise<HealthView> {
+    this.progress.start(`Waiting for ${this.#name} to serve`);
+    try {
+      const health = await this.#pollReady(owner, handle, initiallyAlive);
+      this.progress.succeed();
+      return health;
+    } catch (error: unknown) {
+      this.progress.fail();
+      throw error;
+    }
+  }
+
+  /** Poll until the daemon serves HTTP, it is observed to have died, or the deadline passes. */
+  async #pollReady(owner: IDaemonSupervisor, handle: DaemonStartHandle, initiallyAlive: boolean): Promise<HealthView> {
     let state = beginReadinessWait(this.deps.clock.now());
+    let bootShownAt = Number.NEGATIVE_INFINITY;
     if (initiallyAlive) state = { ...state, sawAlive: true };
     while (true) {
       const health = await this.deps.health.probe();
@@ -981,12 +1019,28 @@ export class DaemonController {
           `${this.#name} starting — still initializing (${String(decision.elapsedSeconds)}s); waiting up to ${String(Math.round(this.readiness.deadlineMs / 1_000))}s…`,
         );
       }
+      if (this.deps.clock.now() - bootShownAt >= BOOT_POLL_MS) {
+        bootShownAt = this.deps.clock.now();
+        const boot = (await this.deps.health.liveness?.())?.boot;
+        if (boot !== undefined) this.progress.detail(boot.step);
+      }
       await this.deps.clock.sleep(this.readiness.cadenceMs);
     }
   }
 
   /** Ask the daemon to stop and confirm it actually did, escalating once a polite stop has had time. */
-  async #pressStop(owner: IDaemonSupervisor, pidHint: number | undefined): Promise<void> {
+  async #pressStop(owner: IDaemonSupervisor, pidHint: number | undefined, note = ''): Promise<void> {
+    this.progress.start(`Stopping ${this.#name}${note}`);
+    try {
+      await this.#stopAndWatch(owner, pidHint);
+      this.progress.succeed();
+    } catch (error: unknown) {
+      this.progress.fail();
+      throw error;
+    }
+  }
+
+  async #stopAndWatch(owner: IDaemonSupervisor, pidHint: number | undefined): Promise<void> {
     await owner.stop({ pidHint, escalate: false });
     const startedAtMs = this.deps.clock.now();
     let escalated = false;

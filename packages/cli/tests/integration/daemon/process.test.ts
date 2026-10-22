@@ -268,3 +268,27 @@ describe('bun daemon process', () => {
     should(answers).deepEqual([true, false, false, undefined]);
   });
 });
+
+describe('BunDaemonProcess.runStreaming', () => {
+  it('hands over each line as it is written, ending a line at \\n or \\r, and still returns everything', async () => {
+    const lines: string[] = [];
+    const outcome = await new BunDaemonProcess().runStreaming(
+      ['sh', '-c', "printf 'one\\ntwo\\r33%%\\r66%%\\n'; printf 'err\\n' >&2; printf 'tail'; exit 3"],
+      line => lines.push(line),
+    );
+    should(outcome.code).equal(3);
+    should(outcome.stdout).equal('one\ntwo\r33%\r66%\ntail');
+    should(outcome.stderr).equal('err\n');
+    should([...lines].sort()).deepEqual(['33%', '66%', 'err', 'one', 'tail', 'two'].sort());
+  });
+
+  it('works with nobody listening, and says 127 for a missing command', async () => {
+    const processes = new BunDaemonProcess();
+    should((await processes.runStreaming(['sh', '-c', 'echo hi'])).stdout).equal('hi\n');
+    should((await processes.runStreaming(['definitely-not-a-command-xyz'])).code).equal(127);
+    await processes.runStreaming([]).then(
+      () => should.fail(undefined, undefined, 'expected a throw'),
+      error => should((error as Error).message).containEql('empty command'),
+    );
+  });
+});
