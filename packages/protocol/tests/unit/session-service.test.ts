@@ -490,6 +490,11 @@ describe('session schemas', () => {
     should(session.composerOccupiedDraft({ ...refusal, code: 'send_refused' })).be.undefined();
     should(session.composerOccupiedDraft({ ...refusal, draft: '' })).be.undefined();
     should(session.composerOccupiedDraft('occupied')).be.undefined();
+    should(session.unconfirmedSendId({ code: session.SEND_UNCONFIRMED_CODE, sendId: 'send-7' })).equal('send-7');
+    should(session.unconfirmedSendId({ code: session.SEND_UNCONFIRMED_CODE, sendId: '' })).be.undefined();
+    should(session.unconfirmedSendId({ ...refusal, sendId: 'send-7' })).be.undefined();
+    should(session.unconfirmedSendId(undefined)).be.undefined();
+    should(session.SendUnaccountedReasonSchema.parse('landing_unconfirmed')).equal('landing_unconfirmed');
     should(session.ComposerDraftRequestSchema.safeParse({ action: 'clear', draft: '' }).success).be.false();
     should(
       session.ComposerDraftRequestSchema.safeParse({ action: 'clear', draft: 'x'.repeat(20_001) }).success,

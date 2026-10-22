@@ -16,8 +16,12 @@ import { captureFrame, type DeliverySleep, fillComposer } from './composer-fill.
 export interface PaneQueueOptions {
   /** Times the composer may be filled from scratch. */
   readonly composerAttempts?: number;
-  /** Frames to look at after each fill. */
-  readonly composerPolls?: number;
+  /** How long a fill looks for its payload when the pane draws promptly. */
+  readonly windowMs?: number;
+  /** The longest a fill looks for its payload, reached only by a pane that draws late or not at all. */
+  readonly stalledWindowMs?: number;
+  /** How long past the pane's first repaint a fill keeps looking. */
+  readonly settleMs?: number;
   /** How long to wait between observations. */
   readonly pollMs?: number;
   /** How long to let the submit key take effect before looking for the queue hint. */
@@ -27,8 +31,10 @@ export interface PaneQueueOptions {
 }
 
 const DEFAULTS = {
-  composerAttempts: 3,
-  composerPolls: 6,
+  composerAttempts: 2,
+  windowMs: 6_000,
+  stalledWindowMs: 12_000,
+  settleMs: 2_000,
   pollMs: 250,
   submitSettleMs: 500,
   queueKeySettleMs: 300,
@@ -92,13 +98,6 @@ export class TmuxPaneQueue {
   }
 
   private async fill(session: string, text: string): Promise<LandingEvidence> {
-    return await fillComposer(
-      this.tmux,
-      this.sleep,
-      this.settings,
-      session,
-      text,
-      () => new PaneQueueError(`the message did not land in the composer of tmux session ${session}`),
-    );
+    return await fillComposer(this.tmux, this.sleep, this.settings, session, text);
   }
 }

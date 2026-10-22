@@ -156,11 +156,44 @@ copy land beside a draft — a composer the cursor could not place, read as empt
 arriving during the fill — is the one the rule above now refuses.
 
 So a fill types its payload into a proven-empty composer, and types again only into a composer proven
-empty AGAIN (the keys never arrived). A composer holding anything after a fill — the payload, the
+empty AGAIN by a pane that has visibly drawn since the keys (they were dropped, not unread — see below).
+A composer holding anything after a fill — the payload, the
 payload beside a person's text, a clipped copy — is left exactly as it is, with no `C-u`: the send's
 fate stays open and the tracker reads it. A payload found ANYWHERE in the composer (`composerContains`,
 for a payload of 12 or more characters) is held there, never absent, so no deadline retypes it, and
 Enter is pressed on it only when the composer holds exactly it.
+
+### An empty composer after typing proves nothing until the pane has drawn
+
+The owner's phone, sending to a Claude ferret on their Mac: `the turn did not land in the composer of
+tmux session fy-mvgrig6j-51ec0eb3`, with the message still in the app's composer. Reproduced on Claude
+Code 2.1.281 by stalling the harness (`scripts/local/soak-composer-landing.ts`, `--stop-ms`): typed keys
+wait in the pty until the harness reads them, and a stalled harness — a throttled or napping host, a long
+synchronous render — reads and draws nothing for seconds. The fill looked six times, 250 ms apart, saw
+the composer still empty, decided the keys had never arrived, and typed again; three fills later it
+threw that error, and the woken pane drew all three copies, unsubmitted. Every capture was fresh — the
+delivery path reads `capture-pane` in-band through the control client and never the session worker's
+`PaneFrames` — so the frames were not stale: the PANE was.
+
+So the landing wait is a window in time that stretches with the pane's own latency
+(`landingDeadlineMs`): 6 s for a pane that draws promptly, `settleMs` (2 s) past its first repaint for
+a slow one, and up to 12 s for one that draws nothing at all, backing off from 100 ms to 1 s between
+looks and never reading fewer than five frames. The clock counts only the waits, so a host whose
+captures are slow stretches the window rather than shrinking it. A second fill happens only when the
+pane has drawn since the first (`paneResponded`) and its composer is proven empty holding nothing, in
+the composer or the queue. Anything else is **unconfirmed**: the send is settled `unaccounted` with
+reason `landing_unconfirmed`, never withdrawn and never typed again, and stays watched so a transcript
+record that turns up later still proves it delivered. The send answers `409 send_unconfirmed` with the
+send's id in the body's `sendId`; the app keeps the person's text in its composer and offers **Send it**
+(`submitSend`: Enter, only if the composer holds exactly that message), **Clear it** (`cancelSend`)
+and **Retry** (`retrySend` with `force`, which types only when the pane holds no copy). No tmux session
+name reaches the person. Enter follows the same rule: a pane that has drawn nothing since an Enter is
+watched up to the stalled window before the next one, which would only queue behind the first.
+
+Measured with the soak (Claude Code 2.1.281, SIGSTOP 2 s / run 150 ms): see the PR that introduced it
+for the numbers; the recorded frames of one stalled send are
+`packages/daemon/tests/fixtures/composer/claude-2.1.281-stalled-echo.json`, replayed on a virtual clock by
+`packages/daemon/tests/integration/tmux/pane-delivery.test.ts`.
 
 A composer that cannot be read is refused before a key: a fresh send is withdrawn and answered `409`
 (`send_refused`: "nothing was typed; send it again in a moment"), a released held message goes back to

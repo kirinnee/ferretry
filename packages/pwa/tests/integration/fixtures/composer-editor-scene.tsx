@@ -28,9 +28,14 @@
  *                         refused `composer_occupied` with it, exactly as the daemon answers, and
  *                         `api.resolveComposerDraft` records each tap on `window.__drafts` and frees the
  *                         box, so the retried send lands on `window.__sent`
+ *   ?unconfirmed=1        the first send is typed into the agent's box and never shown there: it is
+ *                         answered `send_unconfirmed`, exactly as the daemon answers, and each Send it /
+ *                         Clear it / Retry tap is recorded on `window.__unconfirmed`
  */
 import {
   COMPOSER_OCCUPIED_CODE,
+  SEND_UNCONFIRMED_CODE,
+  type SendRecord,
   type ComposerDraftRequest,
   type ComposerDraftResult,
   type SessionView,
@@ -222,6 +227,34 @@ const refuseWhileOccupied = (): void => {
   });
 };
 
+/** `?unconfirmed=1`: the first send was typed into the agent's box and never shown there. */
+let unconfirmedOnce = parameters.get('unconfirmed') === '1';
+const unconfirmedTaps: unknown[] = [];
+(window as unknown as { __unconfirmed: unknown[] }).__unconfirmed = unconfirmedTaps;
+const unconfirmedApi = {
+  submitSend: async (_id: string, sendId: string) => {
+    unconfirmedTaps.push({ action: 'submit', sendId });
+    return { sendId } as SendRecord;
+  },
+  cancelSend: async (_id: string, sendId: string) => {
+    unconfirmedTaps.push({ action: 'clear', sendId });
+    return { sendId } as SendRecord;
+  },
+  retrySend: async (_id: string, sendId: string, force?: boolean) => {
+    unconfirmedTaps.push({ action: 'retry', sendId, force });
+    return { sendId } as SendRecord;
+  },
+};
+const answerUnconfirmedOnce = (): void => {
+  if (!unconfirmedOnce) return;
+  unconfirmedOnce = false;
+  throw new FyHttpError('the message was typed into the agent’s box', 409, SEND_UNCONFIRMED_CODE, {
+    error: 'the message was typed into the agent’s box',
+    code: SEND_UNCONFIRMED_CODE,
+    sendId: 'scene-send-1',
+  });
+};
+
 /** A picture a test can see: a labelled gradient drawn on a canvas, as a real PNG. */
 const picturePng = (label: string, hue: number): Promise<Blob> => {
   const canvas = document.createElement('canvas');
@@ -285,8 +318,10 @@ const composer = (
     {...(uploadAttachment === undefined ? {} : { uploadAttachment })}
     api={{
       ...occupiedApi,
+      ...unconfirmedApi,
       send: async (_id, body) => {
         refuseWhileOccupied();
+        answerUnconfirmedOnce();
         sent.push(body);
         return { disposition: 'queued' } as never;
       },

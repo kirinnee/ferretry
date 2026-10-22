@@ -8,9 +8,9 @@
  * Enter without ever checking the payload had reached the composer.
  *
  * The invariant that governs the retry structure: the composer is filled at most `composerAttempts`
- * times, each time only into a composer a fresh frame proves EMPTY (see `fillComposer`). Once landing
- * is proven, Enter may be pressed again, but the text is never typed again — the harness may have
- * consumed it and performed a side effect even when no turn started.
+ * times, each time only into a composer a fresh frame proves EMPTY after a pane that visibly drew (see
+ * `fillComposer`). Once landing is proven, Enter may be pressed again, but the text is never typed
+ * again — the harness may have consumed it and performed a side effect even when no turn started.
  */
 
 import {
@@ -22,6 +22,7 @@ import {
   paneBlockingDialog,
   paneBlockingPermission,
   paneBlockingPrompt,
+  paneResponded,
   retryDelays,
   type StartupDialogAction,
   type StartupDialogOptions,
@@ -36,8 +37,12 @@ export interface PaneDeliveryOptions {
   readonly dialogSettleMs?: number;
   /** Times the composer may be filled from scratch. */
   readonly composerAttempts?: number;
-  /** Frames to look at for landing evidence after each fill. */
-  readonly composerPolls?: number;
+  /** How long a fill looks for its payload when the pane draws promptly. */
+  readonly windowMs?: number;
+  /** The longest a fill looks for its payload, reached only by a pane that draws late or not at all. */
+  readonly stalledWindowMs?: number;
+  /** How long past the pane's first repaint a fill keeps looking. */
+  readonly settleMs?: number;
   /** Times Enter may be pressed for one proven payload. */
   readonly submitAttempts?: number;
   /** Frames to look at after each Enter. */
@@ -49,8 +54,10 @@ export interface PaneDeliveryOptions {
 const DEFAULTS = {
   readinessAttempts: 30,
   dialogSettleMs: 750,
-  composerAttempts: 3,
-  composerPolls: 6,
+  composerAttempts: 2,
+  windowMs: 6_000,
+  stalledWindowMs: 12_000,
+  settleMs: 2_000,
   submitAttempts: 3,
   submitPolls: 12,
   pollMs: 250,
@@ -157,14 +164,7 @@ export class TmuxPaneDelivery {
   }
 
   private async fill(session: string, text: string): Promise<LandingEvidence> {
-    return await fillComposer(
-      this.tmux,
-      this.sleep,
-      this.settings,
-      session,
-      text,
-      message => new PaneDeliveryError(message),
-    );
+    return await fillComposer(this.tmux, this.sleep, this.settings, session, text);
   }
 
   /**
@@ -172,14 +172,31 @@ export class TmuxPaneDelivery {
    *
    * Enter can be swallowed by a repaint, so it is safe to press again — but ONLY while the original
    * payload is still visibly there. Once it is gone, delivery is final.
+   *
+   * A pane that has drawn NOTHING since an Enter has not read it yet: its frame still shows the payload
+   * because it is stalled, not because the key was lost. Such a pane is watched up to the stalled
+   * window before the next Enter, which would otherwise only queue behind the first and spend the
+   * bounded attempts on a pane that was always going to submit.
    */
   private async submit(session: string, text: string, evidence: LandingEvidence): Promise<InjectionOutcome> {
     for (let attempt = 0; attempt < this.settings.submitAttempts; attempt++) {
+      const before = await captureFrame(this.tmux, session);
       await this.tmux.sendKey(session, 'Enter');
-      for (let poll = 0; poll < this.settings.submitPolls; poll++) {
+      // Polls counted from the pane's first repaint after this Enter; until then, time against the ceiling.
+      let sinceResponse: number | undefined;
+      for (
+        let waited = 0;
+        sinceResponse === undefined
+          ? waited < this.settings.stalledWindowMs
+          : sinceResponse < this.settings.submitPolls;
+      ) {
         await this.sleep(this.settings.pollMs);
-        const step = classifySubmit(await captureFrame(this.tmux, session), text, evidence);
+        waited += this.settings.pollMs;
+        const frame = await captureFrame(this.tmux, session);
+        const step = classifySubmit(frame, text, evidence);
         if (step.kind === 'delivered') return step.outcome;
+        if (sinceResponse !== undefined) sinceResponse += 1;
+        else if (paneResponded(before, frame)) sinceResponse = 1;
       }
     }
     throw new PaneStrandedError(`the turn landed but stayed in the composer of tmux session ${session}`);

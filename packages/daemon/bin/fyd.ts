@@ -785,6 +785,7 @@ import {
   SendPending,
   SendRefused,
   SendTracker,
+  SendUnconfirmed,
   type SerialExecutor,
   type SessionAncestor,
   SessionAnswerError,
@@ -2889,6 +2890,8 @@ function createResumeAnswerAttention(storage: DaemonStorage, answerLedger: FileA
 function sendRefusal(error: unknown): never {
   // The subclasses first: each extends `SendRefused`, and a plain refusal is the base.
   if (error instanceof SendPending) throw new SessionSendError('pending', error.message);
+  if (error instanceof SendUnconfirmed)
+    throw new SessionSendError('unconfirmed', error.message, undefined, error.sendId);
   if (error instanceof SendDraftRefused) throw new SessionSendError('refused', error.message, error.draft);
   if (error instanceof SendRefused) throw new SessionSendError('refused', error.message);
   // Acted on and failed: the keystroke, the relaunch or a document write. Whatever got as far as

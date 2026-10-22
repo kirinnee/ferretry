@@ -70,6 +70,11 @@ export const SendUnaccountedReasonSchema = z.enum([
    * transcript. The agent may well have read it, so it is unconfirmed rather than not delivered.
    */
   'revive_unconfirmed',
+  /**
+   * Typed into the agent's composer, and the agent never showed it there in time: a stalled pane may
+   * still draw it, or the keys were lost. It was not typed again, so it is unconfirmed, never a copy.
+   */
+  'landing_unconfirmed',
   /** Proven absent after every attempt. */
   'not_delivered',
 ]);
@@ -211,6 +216,29 @@ const ComposerOccupiedBodySchema = z.object({
 export function composerOccupiedDraft(body: unknown): string | undefined {
   const parsed = ComposerOccupiedBodySchema.safeParse(body);
   return parsed.success ? parsed.data.draft : undefined;
+}
+
+/**
+ * The code a send answers with when its message WAS typed into the agent's composer and the agent
+ * never showed it there in time.
+ *
+ * Not a refusal — a key reached the pane — and not a loss: the message may be sitting in the agent's
+ * box, or on its way to it from a pane too slow to draw it. The send is settled `unaccounted` with
+ * `landing_unconfirmed` and still watched, and the body carries its `sendId` so the app can offer
+ * "Send it" (press Enter on it), "Clear it" (cancel it) and "Retry" (send it again, which the daemon
+ * types only when it can prove no copy is held) for exactly this send.
+ */
+export const SEND_UNCONFIRMED_CODE = 'send_unconfirmed';
+
+const SendUnconfirmedBodySchema = z.object({
+  code: z.literal(SEND_UNCONFIRMED_CODE),
+  sendId: z.string().min(1),
+});
+
+/** The send a `send_unconfirmed` answer names, or `undefined` for any other body. */
+export function unconfirmedSendId(body: unknown): string | undefined {
+  const parsed = SendUnconfirmedBodySchema.safeParse(body);
+  return parsed.success ? parsed.data.sendId : undefined;
 }
 
 /**

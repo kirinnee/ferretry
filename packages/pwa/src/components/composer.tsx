@@ -3,6 +3,12 @@ import { ArrowUp, Plus, Zap } from 'lucide-react';
 import { type ReactNode, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { OccupiedComposerNotice } from '../features/occupied-composer/occupied-composer-notice.tsx';
 import { draftResolved, draftStuckLine, occupiedDraftOf } from '../features/occupied-composer/occupied-draft.ts';
+import {
+  STILL_UNCONFIRMED_LINE,
+  type UnconfirmedAction,
+  unconfirmedSendOf,
+} from '../features/unconfirmed-send/unconfirmed-send.ts';
+import { UnconfirmedSendNotice } from '../features/unconfirmed-send/unconfirmed-send-notice.tsx';
 import { readInputModality, useInputModality } from '../hooks/use-input-modality.ts';
 import { useKeyboardOpen } from '../hooks/use-keyboard-open.ts';
 import { useLocationShareHost } from '../hooks/use-location-share.ts';
@@ -93,8 +99,12 @@ const sendFailure = (cause: unknown): SendFailure => {
 export interface ComposerProps {
   readonly daemon: DaemonConnection;
   readonly sessionId: string;
-  /** `resolveComposerDraft` is what lets a person send or clear text stuck in the agent's own box. */
-  readonly api: Pick<IFyApiClient, 'send'> & Partial<Pick<IFyApiClient, 'history' | 'resolveComposerDraft'>>;
+  /**
+   * `resolveComposerDraft` is what lets a person send or clear text stuck in the agent's own box;
+   * `submitSend`, `cancelSend` and `retrySend` finish a message the agent never showed as typed.
+   */
+  readonly api: Pick<IFyApiClient, 'send'> &
+    Partial<Pick<IFyApiClient, 'history' | 'resolveComposerDraft' | 'submitSend' | 'cancelSend' | 'retrySend'>>;
   readonly busy?: boolean;
   readonly disabled?: boolean;
   readonly placeholder?: string;
@@ -381,6 +391,12 @@ export function Composer({
     readonly busy: boolean;
     readonly failure?: string;
   } | null>(null);
+  /** This composer's send that was typed into the agent's box and never shown there, and the last tap's fate. */
+  const [unconfirmed, setUnconfirmed] = useState<{
+    readonly sendId: string;
+    readonly busy: boolean;
+    readonly failure?: string;
+  } | null>(null);
   // Once the machine answers again an outage line is cleared — or, for a send that may already have
   // arrived, replaced by one that points at the transcript, whose send row settles it under the original id.
   useEffect(() => {
@@ -581,6 +597,7 @@ export function Composer({
     setDraft(draftStore.load(scope));
     setError(null);
     setOccupied(null);
+    setUnconfirmed(null);
     // A mode is a property of an editing session, not of the browser tab: the
     // reader who arrives at another session has not asked for normal mode there.
     setVim(initialVimState);
@@ -646,12 +663,27 @@ export function Composer({
    * otherwise interrupt real work. Every ordinary send (Enter, the ↑ button, any send-key mode) is
    * queued behind a running turn instead.
    */
+  /** Everything a message that reached the agent leaves behind in this composer, cleared. */
+  const finishSent = (): void => {
+    setRecalled(false);
+    for (const provider of autocompleteProviders) provider.reset?.();
+    attachments.clear();
+    locating.current += 1;
+    setLocation(null);
+    setDraft('');
+    // The next message starts as text, not as commands.
+    setVim(initialVimState);
+    draftStore.clear(scope);
+    onSent?.();
+  };
+
   const submit = async (interrupt = false) => {
     if (!canSubmit || submitLock.current) return;
     submitLock.current = true;
     setSending(true);
     setError(null);
     setOccupied(null);
+    setUnconfirmed(null);
     try {
       const typed = draft.trim();
       // The block is plain text in the message: that is how an agent receives it, and how the sent
@@ -667,19 +699,14 @@ export function Composer({
       })) as { readonly disposition?: unknown } | undefined;
       // Remembered only while it waits in the agent's queue: ↑ in an empty box brings it back.
       lastQueued.current = isQueuedDisposition(sent?.disposition) ? { key: scopeKey, text: message } : null;
-      setRecalled(false);
-      for (const provider of autocompleteProviders) provider.reset?.();
-      attachments.clear();
-      locating.current += 1;
-      setLocation(null);
-      setDraft('');
-      // The next message starts as text, not as commands.
-      setVim(initialVimState);
-      draftStore.clear(scope);
-      onSent?.();
+      finishSent();
     } catch (cause) {
       const held = occupiedDraftOf(cause);
-      if (held === undefined) setError(sendFailure(cause));
+      const typed = unconfirmedSendOf(cause);
+      // Typed but never shown: the person's text, files and location stay exactly as they were, so the
+      // notice's taps — or an edit — start from what they wrote.
+      if (typed !== undefined) setUnconfirmed({ sendId: typed, busy: false });
+      else if (held === undefined) setError(sendFailure(cause));
       else setOccupied({ draft: held, busy: false });
     } finally {
       submitLock.current = false;
@@ -713,6 +740,47 @@ export function Composer({
       setOccupied({ draft: held.draft, busy: false, failure: sendFailure(cause).text });
     } finally {
       resolvingLock.current = false;
+    }
+  };
+
+  /** The taps this composer can make on an unconfirmed send: only the ones its client can perform. */
+  const unconfirmedActions: readonly UnconfirmedAction[] = [
+    ...(api.submitSend === undefined ? [] : (['submit'] as const)),
+    ...(api.cancelSend === undefined ? [] : (['clear'] as const)),
+    ...(api.retrySend === undefined ? [] : (['retry'] as const)),
+  ];
+  const unconfirmedLock = useRef(false);
+  /**
+   * "Send it", "Clear it" or "Retry" on the send the agent never showed as typed — each on that send's
+   * own id, so the daemon acts only on that message. Send it and a retry that went through finish the
+   * send here as any delivered one does; Clear it takes it out of the agent's box and leaves the
+   * person's text in the composer to edit or send again.
+   */
+  const actOnUnconfirmed = async (action: UnconfirmedAction): Promise<void> => {
+    const pending = unconfirmed;
+    if (pending === null || unconfirmedLock.current) return;
+    unconfirmedLock.current = true;
+    setUnconfirmed({ sendId: pending.sendId, busy: true });
+    try {
+      if (action === 'clear') {
+        await api.cancelSend?.(sessionId, pending.sendId);
+        setUnconfirmed(null);
+        return;
+      }
+      if (action === 'submit') await api.submitSend?.(sessionId, pending.sendId);
+      else await api.retrySend?.(sessionId, pending.sendId, true);
+      lastQueued.current = null;
+      setUnconfirmed(null);
+      finishSent();
+    } catch (cause) {
+      const again = unconfirmedSendOf(cause) !== undefined;
+      setUnconfirmed({
+        sendId: pending.sendId,
+        busy: false,
+        failure: again ? STILL_UNCONFIRMED_LINE : sendFailure(cause).text,
+      });
+    } finally {
+      unconfirmedLock.current = false;
     }
   };
 
@@ -1312,6 +1380,14 @@ export function Composer({
         open={plusOpen}
         variant={compact ? 'sheet' : 'popover'}
       />
+      {unconfirmed === null ? null : (
+        <UnconfirmedSendNotice
+          actions={unconfirmedActions}
+          busy={unconfirmed.busy || sending}
+          failure={unconfirmed.failure}
+          onAct={action => void actOnUnconfirmed(action)}
+        />
+      )}
       {occupied === null ? null : (
         <OccupiedComposerNotice
           busy={occupied.busy || sending}

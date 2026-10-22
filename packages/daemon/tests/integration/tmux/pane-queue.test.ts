@@ -3,6 +3,7 @@ import should from 'should';
 import {
   COMPOSER_READS,
   ComposerOccupiedError,
+  ComposerUnconfirmedError,
   ComposerUnreadableError,
   TmuxPaneQueue,
 } from '../../../src/adapters/index.ts';
@@ -27,6 +28,8 @@ class BusyPane implements TmuxCommandPort {
   pending = '';
   /** Whether the composer ever accepts the text at all. */
   accepts = true;
+  /** Seconds on the spinner, which a LIVE busy pane redraws as it ticks. */
+  spinnerSeconds = 34;
 
   constructor(
     private readonly enterSubmits: boolean,
@@ -71,7 +74,7 @@ class BusyPane implements TmuxCommandPort {
   }
 
   lines(): readonly string[] {
-    const lines = [this.working ? '✻ Lollygagging… (34s · ⚒ 2.1k tokens)' : 'idle'];
+    const lines = [this.working ? `✻ Lollygagging… (${this.spinnerSeconds}s · ⚒ 2.1k tokens)` : 'idle'];
     if (this.pending !== '') lines.push('', '• Queued follow-up inputs', `  ↳ ${this.pending}`, '');
     lines.push(`> ${this.composer}`);
     // The hint only appears while the composer is genuinely holding something.
@@ -243,16 +246,36 @@ describe('tmux pane queue', () => {
     should(pane.calls.filter(call => call.includes('-l'))).have.length(1);
   });
 
-  it('should give up rather than keep typing into a composer that takes nothing', async () => {
-    // Arrange
+  it('should never type twice into a busy pane that drew nothing since the keys', async () => {
+    // Arrange — a frozen pane: the spinner stopped, and the composer reads empty because nothing was read.
     const pane = new BusyPane(true);
     pane.accepts = false;
-    const { subject } = queue(pane, { composerAttempts: 2, composerPolls: 1 });
+    const { subject } = queue(pane);
 
     // Act / Assert
-    await should(subject.queue(SESSION, 'read the queued brief')).be.rejectedWith(/did not land in the composer/u);
-    // Typed again only into a composer proven empty, and nothing is ever erased to make room: Claude's
-    // `C-u` takes one wrapped row, so a clear-and-retype left a clipped copy and appended another.
+    await should(subject.queue(SESSION, 'read the queued brief')).be.rejectedWith(ComposerUnconfirmedError);
+    should(pane.keysSent()).deepEqual([], 'no Enter on a guess, and nothing erased to make room');
+    should(pane.calls.filter(call => call.includes('-l'))).have.length(1);
+  });
+
+  it('should give up after a second fill when a live busy pane drops both', async () => {
+    // Arrange — the spinner keeps ticking, so the pane is reading input, and the composer stays empty.
+    const pane = new (class extends BusyPane {
+      override async execute(argv: readonly string[]): Promise<TmuxCommandResult> {
+        if (argv[0] === 'capture-pane') this.spinnerSeconds += 1;
+        return await super.execute(argv);
+      }
+    })(true);
+    pane.accepts = false;
+    const { subject } = queue(pane);
+
+    // Act
+    const refused = await subject.queue(SESSION, 'read the queued brief').catch((error: unknown) => error);
+
+    // Assert — typed again only into a composer proven empty, and nothing is ever erased to make room:
+    // Claude's `C-u` takes one wrapped row, so a clear-and-retype left a clipped copy and appended another.
+    should(refused).be.instanceof(ComposerUnconfirmedError);
+    should((refused as ComposerUnconfirmedError).typings).equal(2);
     should(pane.keysSent()).deepEqual([]);
     should(pane.calls.filter(call => call.includes('-l'))).have.length(2);
   });
