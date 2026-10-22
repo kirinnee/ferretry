@@ -61,7 +61,7 @@ export function FullDensityGroups({
         <section key={group.path || group.name}>
           {!scoped && <ProjectHeading group={group} onFocus={onFocus} />}
           {mode === 'cards' ? (
-            <div className="grid gap-2.5 sm:gap-1.5">
+            <div className="grid grid-cols-[minmax(0,1fr)] gap-2.5 sm:gap-1.5">
               {group.rows.map(view => (
                 <SessionCard
                   daemonId={daemonId}
