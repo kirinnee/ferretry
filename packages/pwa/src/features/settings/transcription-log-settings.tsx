@@ -12,9 +12,10 @@
 import { Bug, Clipboard, CornerDownLeft, Search, Trash2 } from 'lucide-react';
 import { useState, useSyncExternalStore } from 'react';
 import { DictationDebugSheet } from '../../components/dictation-debug-sheet.tsx';
-import { requestReinsert } from '../../lib/stt/reinsert-transcription.ts';
+import { DictationTimelineBar, TimingSummary } from '../../components/dictation-timeline-bar.tsx';
 import { useDictationDebug, useTranscriptionLog } from '../../lib/store.tsx';
 import type { DictationDebugLog } from '../../lib/stt/dictation-debug.ts';
+import { requestReinsert } from '../../lib/stt/reinsert-transcription.ts';
 import {
   searchTranscriptionLog,
   TRANSCRIPTION_ENGINE_LABELS,
@@ -144,6 +145,8 @@ export function TranscriptionLogSettings({
         </p>
       )}
 
+      <TimingSummary entries={snapshot.entries} />
+
       <section className="flex min-w-0 flex-col gap-2" aria-label="Kept dictations">
         <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:items-center">
           <label className="relative min-w-0 flex-1">
@@ -237,6 +240,7 @@ function EntryCard({ entry, note, hasDebug, onCopy, onReinsert, onDebug }: Entry
         <span className="font-semibold">Heard: </span>
         {entry.raw}
       </p>
+      {entry.timeline !== undefined && <DictationTimelineBar timeline={entry.timeline} compact />}
       {entry.cleaned !== undefined && (
         <p className="m-0 min-w-0 whitespace-pre-wrap break-words text-cell leading-base text-fg">
           <span className="font-semibold">Cleaned: </span>

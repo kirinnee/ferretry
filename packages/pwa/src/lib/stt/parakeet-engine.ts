@@ -56,17 +56,34 @@ const isReply = (data: unknown): data is ParakeetWorkerReply =>
 
 export class ParakeetEngine {
   readonly #spawn: () => ParakeetWorkerLike;
+  readonly #now: () => number;
   #worker: ParakeetWorkerLike | null = null;
   readonly #pending = new Map<number, Pending>();
   #nextId = 1;
+  /** When the model began loading in the current worker, until the worker says it is ready. */
+  #loadStartedAt: number | null = null;
+  #loadMs: number | null = null;
 
-  constructor(spawn: () => ParakeetWorkerLike) {
+  constructor(spawn: () => ParakeetWorkerLike, now: () => number = () => globalThis.performance.now()) {
     this.#spawn = spawn;
+    this.#now = now;
   }
 
   /** Start loading the model now, so the first utterance does not wait for it. */
   preload(): void {
-    this.#ensure().postMessage({ type: 'load' });
+    const worker = this.#ensure();
+    this.#loadStartedAt ??= this.#now();
+    worker.postMessage({ type: 'load' });
+  }
+
+  /**
+   * How long the model took to load in the worker started most recently, once: the first dictation
+   * after a (re)load is the only one that paid it, so the next call answers `undefined`.
+   */
+  consumeLoadMs(): number | undefined {
+    const loaded = this.#loadMs;
+    this.#loadMs = null;
+    return loaded ?? undefined;
   }
 
   /** Decode one utterance. The samples are transferred to the worker, not copied. */
@@ -83,6 +100,7 @@ export class ParakeetEngine {
     const id = this.#nextId;
     this.#nextId += 1;
     const worker = this.#ensure();
+    this.#loadStartedAt ??= this.#now();
     return new Promise<TimedTranscript>((resolve, reject) => {
       const onAbort = (): void => {
         // ONNX cannot interrupt a decode in flight; the answer is simply not waited for.
@@ -114,6 +132,8 @@ export class ParakeetEngine {
   unload(): void {
     const worker = this.#worker;
     this.#worker = null;
+    this.#loadStartedAt = null;
+    this.#loadMs = null;
     worker?.terminate();
     this.#failAll(new ParakeetEngineError('cancelled', 'The speech model was unloaded.'));
   }
@@ -130,6 +150,7 @@ export class ParakeetEngine {
       // The worker script itself failed — refused by the page's policy, or a runtime that would not
       // start. Nothing it was asked will be answered, so every caller hears it now.
       this.#worker = null;
+      this.#loadStartedAt = null;
       worker.terminate();
       this.#failAll(
         new ParakeetEngineError('worker-failed', 'The on-device speech engine could not start in this browser.'),
@@ -139,7 +160,14 @@ export class ParakeetEngine {
   }
 
   #receive(data: unknown): void {
-    if (!isReply(data) || data.type === 'ready') return;
+    if (!isReply(data)) return;
+    if (data.type === 'ready') {
+      if (this.#loadStartedAt !== null) {
+        this.#loadMs = Math.max(0, this.#now() - this.#loadStartedAt);
+        this.#loadStartedAt = null;
+      }
+      return;
+    }
     if (data.type === 'result') {
       const pending = this.#pending.get(data.id);
       this.#pending.delete(data.id);

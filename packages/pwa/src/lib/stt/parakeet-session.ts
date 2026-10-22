@@ -18,14 +18,19 @@ import {
   type BrowserRecognitionSessionOptions,
   browserRecognitionErrorFrom,
 } from './browser-recognition.ts';
+import type { SessionTimings } from './dictation-timeline.ts';
 import { MIN_SPEECH_SAMPLES, type NearLiveState, NearLiveTranscriber } from './near-live.ts';
 import { type ParakeetEngine, ParakeetEngineError } from './parakeet-engine.ts';
+import { PARAKEET_VERSION_LABEL } from './parakeet-model.ts';
 
 const MAX_DICTATION_MS = 120_000;
+const SAMPLE_RATE_HZ = 16_000;
+const BYTES_PER_SAMPLE = 4;
 
 export interface ParakeetSessionPorts {
   readonly capture: AudioCapturePort;
-  readonly engine: Pick<ParakeetEngine, 'preload' | 'transcribe' | 'transcribeTimed'>;
+  readonly engine: Pick<ParakeetEngine, 'preload' | 'transcribe' | 'transcribeTimed'> &
+    Partial<Pick<ParakeetEngine, 'consumeLoadMs'>>;
   watchHidden(onHidden: () => void): () => void;
   setTimeout(callback: () => void, milliseconds: number): unknown;
   clearTimeout(handle: unknown): void;
@@ -63,6 +68,7 @@ export class ParakeetRecognitionSession implements BrowserRecognitionSessionLike
   #limitTimer: unknown = null;
   #unwatchHidden: (() => void) | null = null;
   #finishing: Promise<string> | null = null;
+  #timings: SessionTimings | undefined;
 
   constructor(ports: ParakeetSessionPorts, options: ParakeetSessionOptions) {
     this.#ports = ports;
@@ -132,6 +138,11 @@ export class ParakeetRecognitionSession implements BrowserRecognitionSessionLike
     return this.#finishing;
   }
 
+  /** What the last `finish` measured, on the same monotonic clock the near-live pacing reads. */
+  timings(): SessionTimings | undefined {
+    return this.#timings;
+  }
+
   cancel(): void {
     if (this.#state === 'finished' || this.#state === 'cancelled' || this.#state === 'failed') return;
     this.#state = 'cancelled';
@@ -149,11 +160,43 @@ export class ParakeetRecognitionSession implements BrowserRecognitionSessionLike
   async #transcribe(): Promise<string> {
     const recording = this.#recording;
     if (recording === null) return '';
-    const samples = await (await recording).stop();
+    const { now } = this.#ports;
+    const opened = await recording;
+    const preparedAt = now();
+    const samples = await opened.stop();
+    const prepareMs = now() - preparedAt;
+    // The take's buffer is transferred to the worker below, which empties it: read its size first.
+    const audioMs = (samples.length / SAMPLE_RATE_HZ) * 1000;
+    const audioBytes = samples.length * BYTES_PER_SAMPLE;
+    const measured = (transcribeMs: number): void => {
+      const loadMs = this.#ports.engine.consumeLoadMs?.();
+      this.#timings = {
+        audioMs,
+        audioBytes,
+        prepareMs,
+        transcribeMs,
+        model: PARAKEET_VERSION_LABEL,
+        ...(loadMs === undefined ? {} : { loadMs }),
+      };
+    };
+    const transcribingAt = now();
     const live = this.#live;
-    if (live !== null) return await live.finish(samples);
-    if (samples.length < MIN_SPEECH_SAMPLES) return '';
-    return await this.#ports.engine.transcribe(samples, this.#abort.signal);
+    if (live !== null) {
+      try {
+        return await live.finish(samples);
+      } finally {
+        measured(now() - transcribingAt);
+      }
+    }
+    if (samples.length < MIN_SPEECH_SAMPLES) {
+      measured(0);
+      return '';
+    }
+    try {
+      return await this.#ports.engine.transcribe(samples, this.#abort.signal);
+    } finally {
+      measured(now() - transcribingAt);
+    }
   }
 
   /** Near-live passes over the open recording, until Stop or cancel. */

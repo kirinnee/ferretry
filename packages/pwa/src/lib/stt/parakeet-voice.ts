@@ -77,7 +77,10 @@ export interface ParakeetVoiceOptions {
   readonly support: ParakeetSupport;
   /** `null` exactly when unsupported. */
   readonly store: Pick<ParakeetModelStore, 'status' | 'install' | 'remove' | 'totalBytes'> | null;
-  readonly engine: Pick<ParakeetEngine, 'preload' | 'transcribe' | 'transcribeTimed' | 'unload'> | null;
+  readonly engine:
+    | (Pick<ParakeetEngine, 'preload' | 'transcribe' | 'transcribeTimed' | 'unload'> &
+        Partial<Pick<ParakeetEngine, 'consumeLoadMs'>>)
+    | null;
   readonly host: ParakeetSessionHost | null;
 }
 

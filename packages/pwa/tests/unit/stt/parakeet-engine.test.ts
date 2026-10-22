@@ -38,13 +38,13 @@ class FakeWorker implements ParakeetWorkerLike {
   }
 }
 
-const setup = (): { engine: ParakeetEngine; workers: FakeWorker[] } => {
+const setup = (now?: () => number): { engine: ParakeetEngine; workers: FakeWorker[] } => {
   const workers: FakeWorker[] = [];
   const engine = new ParakeetEngine(() => {
     const worker = new FakeWorker();
     workers.push(worker);
     return worker;
-  });
+  }, now);
   return { engine, workers };
 };
 
@@ -269,5 +269,72 @@ describe('ParakeetEngine', () => {
     fresh.emit({ type: 'result', id: 1, text: 'live' });
     await tick();
     should(outcome.value).equal('live');
+  });
+});
+
+describe('ParakeetEngine model load time', () => {
+  it('measures from the first load request to the worker saying it is ready, once', () => {
+    // Arrange
+    let at = 1_000;
+    const { engine, workers } = setup(() => at);
+
+    // Act
+    engine.preload();
+    at = 3_400;
+    workers[0]?.emit({ type: 'ready' });
+
+    // Assert
+    should(engine.consumeLoadMs()).equal(2_400);
+    should(engine.consumeLoadMs()).be.undefined();
+  });
+
+  it('counts a load that began with the first transcription when nothing preloaded', async () => {
+    // Arrange
+    let at = 50;
+    const { engine, workers } = setup(() => at);
+    const heard = settle(engine.transcribe(new Float32Array(4)));
+
+    // Act
+    at = 650;
+    workers[0]?.emit({ type: 'ready' });
+    workers[0]?.emit({ type: 'result', id: idOf(workers[0] as FakeWorker), text: 'hi' });
+    await tick();
+
+    // Assert
+    should(heard.value).equal('hi');
+    should(engine.consumeLoadMs()).equal(600);
+  });
+
+  it('reports nothing for a worker that was already loaded', () => {
+    // Arrange
+    let at = 0;
+    const { engine, workers } = setup(() => at);
+    engine.preload();
+    at = 10;
+    workers[0]?.emit({ type: 'ready' });
+    engine.consumeLoadMs();
+
+    // Act
+    at = 500;
+    engine.preload();
+    workers[0]?.emit({ type: 'ready' });
+
+    // Assert: the second ready follows a second load request, so it is measured; a stray ready is not
+    workers[0]?.emit({ type: 'ready' });
+    should(engine.consumeLoadMs()).equal(0);
+  });
+
+  it('forgets a load that was unloaded before it finished', () => {
+    // Arrange
+    let at = 0;
+    const { engine } = setup(() => at);
+    engine.preload();
+
+    // Act
+    at = 900;
+    engine.unload();
+
+    // Assert
+    should(engine.consumeLoadMs()).be.undefined();
   });
 });
