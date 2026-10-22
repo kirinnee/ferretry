@@ -238,8 +238,7 @@ describe('the full-screen image viewer', () => {
   test('opens from a message picture, zooms with the wheel and pans, and fits again on double click', async () => {
     const scene = await open({ params: { messages: '3' } });
     try {
-      await scene.page.waitForSelector('[data-scene-message] img');
-      expect(await scene.page.locator('[data-scene-message] img').count()).toBe(3);
+      await scene.page.waitForFunction(() => document.querySelectorAll('[data-scene-message] img').length === 3);
       await scene.page.locator('[aria-label="Expand photo-1.png"], [aria-label^="Expand"]').first().click();
       await scene.page.waitForSelector(VIEWER);
       const transform = () =>
