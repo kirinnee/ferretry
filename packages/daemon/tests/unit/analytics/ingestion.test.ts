@@ -1,6 +1,10 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
 import {
+  ANALYTICS_BACKSTOP_MS,
+  ANALYTICS_CATCH_UP_MS,
+  ANALYTICS_ENDED_SETTLE_MS,
+  ANALYTICS_PRICING_SETTLE_MS,
   type AnalyticsIngestCandidate,
   type AnalyticsIngestionParts,
   AnalyticsIngestionService,
@@ -799,5 +803,99 @@ describe('AnalyticsIngestionService.rebuildRequired', () => {
       harness([], async () => ({ kind: 'unresolved' }), { rebuildRequired: true }).service.rebuildRequired,
     ).be.true();
     should(harness([], async () => ({ kind: 'unresolved' })).service.rebuildRequired).be.false();
+  });
+});
+
+/** Records what the service asks of its trigger. */
+class RecordingTrigger {
+  readonly nudges: number[] = [];
+  armed: (() => void) | undefined;
+  disarmed = 0;
+
+  arm(due: () => void): () => void {
+    this.armed = due;
+    return () => {
+      this.disarmed += 1;
+    };
+  }
+
+  nudge(withinMs: number): void {
+    this.nudges.push(withinMs);
+  }
+}
+
+describe('when an ingestion pass is owed', () => {
+  const evidence = async () => readEvidence([usageEvent('claude-opus-5', 10, 10)]);
+
+  it('should owe a pass for an ended session, and for a revived one the index holds — never for a running one', async () => {
+    // Arrange — one session ingested, then revived.
+    const trigger = new RecordingTrigger();
+    const test = harness([candidate({ id: 's1' })], evidence, { trigger });
+    await test.service.ingest();
+
+    // Act
+    test.service.stateWritten('s1', { status: 'running' });
+    test.service.stateWritten('s2', { status: 'running' });
+    test.service.stateWritten('s3', { status: 'stopped', finishedAt: '2026-08-01T01:00:00.000Z' });
+    test.service.stateWritten('s4', { status: 'kill_failed' });
+    test.service.stateWritten('s5', 'not a state document');
+    test.service.stateWritten('s6', { status: 7 });
+
+    // Assert
+    should(trigger.nudges).deepEqual([ANALYTICS_ENDED_SETTLE_MS, ANALYTICS_ENDED_SETTLE_MS]);
+    should(test.service.owes('s1', { status: 'running' })).be.true();
+    should(test.service.owes('s2', { status: 'running' })).be.false();
+  });
+
+  it('should owe a pass soon after the rates may have moved', () => {
+    // Arrange
+    const trigger = new RecordingTrigger();
+    const test = harness([], evidence, { trigger });
+
+    // Act
+    test.service.pricingChanged();
+
+    // Assert
+    should(trigger.nudges).deepEqual([ANALYTICS_PRICING_SETTLE_MS]);
+  });
+
+  it('should ask for a catch-up pass only while a pass leaves reads over', async () => {
+    // Arrange
+    const trigger = new RecordingTrigger();
+    const test = harness(
+      ['s1', 's2', 's3'].map(id => candidate({ id })),
+      evidence,
+      { readsPerPass: 2, trigger },
+    );
+
+    // Act
+    await test.service.ingest();
+    await test.service.ingest();
+
+    // Assert
+    should(trigger.nudges).deepEqual([ANALYTICS_CATCH_UP_MS]);
+  });
+
+  it('should hand its arming to the trigger, and arm nothing without one', () => {
+    // Arrange
+    const trigger = new RecordingTrigger();
+    const armed = harness([], evidence, { trigger }).service;
+    const bare = harness([], evidence).service;
+    let due = 0;
+
+    // Act
+    const disarm = armed.arm(() => {
+      due += 1;
+    });
+    trigger.armed?.();
+    disarm();
+    bare.arm(() => undefined)();
+    bare.stateWritten('s1', { status: 'completed' });
+    bare.pricingChanged();
+
+    // Assert
+    should(due).equal(1);
+    should(trigger.disarmed).equal(1);
+    should(ANALYTICS_BACKSTOP_MS).equal(REFUSAL_RETRY_MS);
   });
 });

@@ -1,6 +1,7 @@
 import type { AnalyticsIndexStatus, AnalyticsRawSession } from '@ferretry/protocol';
+import type { PassTrigger } from '../runtime/pass-trigger.ts';
 import type { TranscriptHarness } from '../transcript/types.ts';
-import { type AnalyticsIngestRefusal, gateAnalyticsIngest } from './ingest.ts';
+import { type AnalyticsIngestRefusal, analyticsStateEnded, gateAnalyticsIngest } from './ingest.ts';
 import { type AnalyticsPricingRate, analyticsCatalogAliasGroups } from './pricing.ts';
 import { deriveAnalyticsSessionRecord, type FinishedAnalyticsSession } from './session-record.ts';
 import {
@@ -97,7 +98,33 @@ export interface AnalyticsIngestionParts {
    * has simply never finished a session owes nothing. Both look like zero rows.
    */
   readonly rebuildRequired: boolean;
+  /**
+   * When a pass is due (docs/design/housekeeping-worker.md §4 PR 4): nudged by the events that change
+   * what a pass would write, with a slow backstop of its own. Absent, nothing is ever due on its own —
+   * passes run only when asked for.
+   */
+  readonly trigger?: Pick<PassTrigger, 'arm' | 'nudge'>;
 }
+
+/**
+ * How long after a session ends its pass runs: long enough for the harness's last transcript lines to
+ * land, so the one read of a finished transcript is of the finished one. The sweep this replaced ran
+ * once a minute, so a session waited thirty seconds on average for it anyway.
+ */
+export const ANALYTICS_ENDED_SETTLE_MS = 30_000;
+
+/** How long after the rates may have moved — a pricing edit, a config or catalog change — a pass runs. */
+export const ANALYTICS_PRICING_SETTLE_MS = 5_000;
+
+/** How soon a pass that stopped at its read cap is followed by the next, to keep catching up. */
+export const ANALYTICS_CATCH_UP_MS = 60_000;
+
+/**
+ * The backstop: a pass at least this often, whatever happened. It is what retries a refusal — which
+ * stands for exactly this long ({@link REFUSAL_RETRY_MS}) — and what notices a session whose documents
+ * were removed, or a pricing document edited behind the daemon's back: inputs with no event to hear.
+ */
+export const ANALYTICS_BACKSTOP_MS = 15 * 60_000;
 
 /**
  * The ingestion loop as the daemon process arms it.
@@ -111,6 +138,8 @@ export interface AnalyticsIngestionLoop {
   readonly rebuildRequired: boolean;
   ingest(): Promise<AnalyticsIngestSummary>;
   rebuild(): Promise<AnalyticsIngestSummary>;
+  /** Calls `due` whenever a pass is due, until the answer is called. */
+  arm(due: () => void): () => void;
 }
 
 /** What one ingestion pass did. Every number is a count of sessions. */
@@ -224,8 +253,41 @@ export class AnalyticsIngestionService implements AnalyticsIngestionLoop {
   private pending = 0;
   /** The tail of the pass chain. Always settled, never rejected. */
   private chain: Promise<void> = Promise.resolve();
+  /** The sessions the last pass admitted: every one the index holds a row for, or is about to. */
+  private admitted: ReadonlySet<string> = new Set();
 
   constructor(private readonly parts: AnalyticsIngestionParts) {}
+
+  arm(due: () => void): () => void {
+    return this.parts.trigger?.arm(due) ?? (() => undefined);
+  }
+
+  /** Storage wrote this session's state: a pass follows when the write {@link owes} one. */
+  stateWritten(sessionId: string, state: unknown): void {
+    if (this.owes(sessionId, state)) this.parts.trigger?.nudge(ANALYTICS_ENDED_SETTLE_MS);
+  }
+
+  /**
+   * The rates may have moved. Every row's signature carries the catalog's fingerprint, so a pass
+   * re-prices exactly the rows a real change touched, and costs nothing when none did.
+   */
+  pricingChanged(): void {
+    this.parts.trigger?.nudge(ANALYTICS_PRICING_SETTLE_MS);
+  }
+
+  /**
+   * Whether a state document just written for `sessionId` could change what the index holds, so a pass
+   * is owed for it.
+   *
+   * A session that has ENDED is owed one: it may be new to the index, or its row's evidence may have
+   * moved. A session that has not ended is owed one only when the index holds it — a revive, whose
+   * row the next pass must drop. Every other write — a running session's turn, its usage, its
+   * attention — changes nothing a pass would write, which is what lets ingestion wait for an event
+   * instead of sweeping every minute.
+   */
+  owes(sessionId: string, state: unknown): boolean {
+    return analyticsStateEnded(state) || this.admitted.has(sessionId);
+  }
 
   get rebuildRequired(): boolean {
     return this.parts.rebuildRequired;
@@ -337,6 +399,7 @@ export class AnalyticsIngestionService implements AnalyticsIngestionLoop {
      * ends for real.
      */
     const live = new Set(admitted.map(entry => entry.session.id));
+    this.admitted = live;
     const forgotten = [...stored.keys()].filter(id => !live.has(id));
     if (forgotten.length > 0) this.parts.store.forget(forgotten);
 
@@ -379,6 +442,8 @@ export class AnalyticsIngestionService implements AnalyticsIngestionLoop {
       }
     }
     if (rows.length > 0) this.parts.store.upsert(rows);
+    // A pass that stopped at its read cap is followed soon by the next, until the backlog is read.
+    if (pending.length > due.length) this.parts.trigger?.nudge(ANALYTICS_CATCH_UP_MS);
 
     return {
       examined: candidates.length,

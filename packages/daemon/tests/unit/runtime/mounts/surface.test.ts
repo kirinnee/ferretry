@@ -499,7 +499,7 @@ const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
         throw new Error('not exercised by the surface inventory');
       },
     },
-    { pendingSourceSessionIds: async () => [] },
+    { pendingSourceSessionIds: async () => [], anyOpen: () => false, onOpened: () => () => {}, forget: () => {} },
     { every: () => () => {} },
   ),
   sessionFork: {
@@ -539,6 +539,7 @@ const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
     rebuild: () => {
       throw new Error('not exercised by the surface inventory');
     },
+    arm: () => () => undefined,
   },
   terminals: new FakeTerminals(),
   browserLogin: new FakeBrowserLogin(),
@@ -603,6 +604,7 @@ const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
       throw new Error('not exercised by the surface inventory');
     },
     arm: () => () => undefined,
+    activityChanged: () => undefined,
   },
   harnessUpdate: {
     view: async () => {

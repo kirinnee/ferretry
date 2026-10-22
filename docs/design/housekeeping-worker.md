@@ -1,6 +1,6 @@
 # Housekeeping worker — stage 4 of the event-driven daemon
 
-Status: **in progress** — PR 0 and PR 1 merged, PR 2 and PR 3 built (§4.1, §4.2), PR 4 proposed · Date: 2026-10-22 · Parent: [event-driven-daemon.md](event-driven-daemon.md) (stage 4) ·
+Status: **in progress** — PR 0 and PR 1 merged, PR 2, PR 3 and PR 4 built (§4.1–§4.3) · Date: 2026-10-22 · Parent: [event-driven-daemon.md](event-driven-daemon.md) (stage 4) ·
 Sibling: [session-workers.md](session-workers.md) (stage 3, PR #701) · Owner directive, verbatim: _"use things
 like inotify, 1 thread per agent, fan into the daemon (daemon should just communicate)"_. Lead's ask: _"fleet
 refresh must be event-driven (only when runtime homes/config actually change) and run on the housekeeping
@@ -634,6 +634,76 @@ process CPU is within noise):
 What is left of a pass is the due active reads: 3 logins × 1 per interval on this fixture, whose logins have
 no running session. A login whose session is writing its statusLine is never due. No CI idle-budget ceiling
 moved, because the process-level measures are flat on Linux, so none is earned.
+
+### 4.3 PR 4 as built
+
+**The pieces**
+
+- `src/lib/runtime/pass-trigger.ts` — `PassTrigger`. One timer: the earlier of the next nudge and one backstop
+  after the last pass. A burst of nudges is one pass. It never runs the pass itself; the composition root
+  submits it to the housekeeping lane. Its timers fire outside every activity, as PR 3's do.
+- **Analytics ingest.** The 60 s `setInterval` is gone. A pass is nudged by:
+  - a state write that `owes` one (`AnalyticsIngestionService.stateWritten`, fed by `storage.subscribeStates`):
+    a session that has ended (30 s settle, `ANALYTICS_ENDED_SETTLE_MS`, so the transcript's last lines land),
+    or a session that has not ended but whose row the index holds — a revive, whose row must go;
+  - a change to the rates (5 s): a pricing write through `AnalyticsPricingService`, a config reload
+    (`afterLoad`), a newer published model catalog, a changed Ollama model list;
+  - a pass that stopped at its read cap (60 s, `ANALYTICS_CATCH_UP_MS`), until the backlog is read;
+  - the backstop, `ANALYTICS_BACKSTOP_MS` = 15 min = `REFUSAL_RETRY_MS`.
+
+  The boot pass is unchanged. Candidates come **from the index first**: a session whose indexed status is not
+  a terminal one is not read at all (the gate would refuse it), so a pass reads and parses only ended
+  sessions' documents.
+
+- **Terminal reaper: dropped from PR 4, as planned.** Stage 3d (#740) already sweeps it on a terminal state
+  write or `session.exited`, with a 60 s backstop. PR 4 keeps that.
+- **Handover reconcile.** `RememberedHandoverReceipts` wraps the file store. After one full read it keeps the
+  set of open receipts in memory and follows every write; a read that answers `null` drops one. Verified: the
+  handover service is the only writer of `handover.json`. The loop arms its 15 s tick only while a receipt is
+  open and drops it once a pass finds none. One backstop, `HANDOVER_RESCAN_INTERVAL_MS` = 15 min, reads
+  every receipt again. A write made during a full read is applied over its answer.
+- **Update check.** The 60 s loop is gone. Stage 3a had already made `midTurn()` a memory read. A pass now
+  runs at boot, on the backstop (`UPDATE_BACKSTOP_INTERVAL_MS` = 15 min, so GitHub is still asked at most every
+  6 h, at the first look after it falls due), and on `activityChanged()` — called for every state write, and
+  free unless the last pass was held back by a ferret mid-turn. Passes are serialized: a second ask joins the
+  running one, so two passes can never both launch.
+- The profile's limitations name the four backstops.
+
+**Not in PR 4**
+
+- **Codex discovery.** It has no fixed timer: it is paced per read (a 2 min eager window from the session's
+  start, then 30 s). The event that would replace the pace is a watch on the home's dated rollout directory,
+  and the move of the walk to the worker (`codex.discover`) needs the walk's caches, which live on main while
+  the worker keeps nothing between jobs. Both are left for a follow-up.
+- No Mac fleet `ps` job: stage 3 Q4 has not chosen it.
+
+**Behaviour differences, all toward sooner:** an ended session is ingested 30 s after it ends (it was up to
+60 s); a pricing edit re-prices within about 5 s; an update waiting for idle launches at the write that ends
+the last turn (it was up to 60 s); turning automatic updates on looks at once. **Toward later**, only for
+inputs with no event: a session directory removed by hand leaves its analytics row up to 15 min (was 60 s); a
+refused transcript read that only time clears is retried on the 15 min backstop, which is already how long a
+refusal stands; the six-hourly GitHub ask is up to 15 min late.
+
+**Measured** (`scripts/local/bench-idle-daemon.ts --small --trace --syscall-summary --seconds 60`, the §4.1
+fixture; before = `origin/main` at `c63f4840c`, which already has stage 3d's event-driven reaper):
+
+|                          | Before | After  |
+| ------------------------ | ------ | ------ |
+| strace file calls        | 53.6/s | 44.9/s |
+| `handover.json` `openat` | 2.4/s  | 0      |
+| `state.json` `statx`     | 3.9/s  | 3.3/s  |
+| Port file ops            | 2.5/s  | 2.5/s  |
+| Read/write syscalls      | 102/s  | 100/s  |
+| Daemon CPU (outside)     | 5.8 %  | 5.3 %  |
+| Longest block            | 25 ms  | 4 ms   |
+
+The handover roster's reads were raw `node:fs` calls, outside the counted port, so they show in strace and not in
+port file operations. Both windows hold one analytics pass: the boot rebuild catching up at its read cap, eight
+transcripts a pass, which runs once a minute either way until the backlog is read. After that, this branch runs
+none until an event or the backstop. No CI ceiling moved: port file operations are already far under a ceiling
+that equals the product target (100), which a ceiling may not go below, and CPU is within noise. The
+`session-version` and `config.json` `statx` left (about 16/s and 14/s) come from per-read document identity
+checks by the transcript resolver and the fleet reading's Codex attribution, not from a housekeeping timer.
 
 ## 5. Risks
 

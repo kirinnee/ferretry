@@ -8,7 +8,7 @@ import { FileHandoverReceiptStore } from '../../../src/adapters/handover/file-ha
 import { NO_GOVERNED_ROUTES_GUARD } from '../../../src/lib/api/capability.ts';
 import { ApiDispatcher } from '../../../src/lib/api/dispatcher.ts';
 import { ApiRouter } from '../../../src/lib/api/router.ts';
-import { HandoverReconcileLoop } from '../../../src/lib/handover/index.ts';
+import { HandoverReconcileLoop, RememberedHandoverReceipts } from '../../../src/lib/handover/index.ts';
 import { sessionHandoverRoutes } from '../../../src/lib/runtime/mounts/session-handover.ts';
 import { request } from '../../unit/api/support.ts';
 import { CODEX_ACCOUNT, planIdFor, REQUEST_ID, receiptAt, transferPlan } from '../../unit/handover/support.ts';
@@ -137,7 +137,7 @@ describe('the mounted handover surface', () => {
           advanced.push(sessionId);
         },
       },
-      store,
+      new RememberedHandoverReceipts(store),
       { every: () => () => {} },
     ).run();
 
@@ -157,7 +157,7 @@ describe('the mounted handover surface', () => {
     await store.write(receipt('source-1'));
     let tick: (() => void) | undefined;
     let cancelled = false;
-    const loop = new HandoverReconcileLoop({ advance: async () => {} }, store, {
+    const loop = new HandoverReconcileLoop({ advance: async () => {} }, new RememberedHandoverReceipts(store), {
       every: (_intervalMs, scheduled) => {
         tick = scheduled;
         return () => {
