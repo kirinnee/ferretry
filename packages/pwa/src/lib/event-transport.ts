@@ -34,7 +34,7 @@ const eventStreamTarget = (daemon: DaemonConnection, source: string): DaemonStre
 
   const query: (readonly [string, string])[] = [];
   for (const [name, value] of requested.searchParams) {
-    if (name !== 'after' && name !== 'sessionId' && name !== 'live' && name !== 'topic')
+    if (name !== 'after' && name !== 'sessionId' && name !== 'live' && name !== 'topic' && name !== 'tail')
       throw new Error(`unsupported event stream parameter: ${name}`);
     query.push([name, value]);
   }

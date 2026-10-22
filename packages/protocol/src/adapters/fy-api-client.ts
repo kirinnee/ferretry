@@ -1156,6 +1156,27 @@ export class FyApiClient implements IFyApiClient {
     });
   }
 
+  fleetEvents(
+    tail: number,
+    onEvent: (event: FyEvent) => void,
+    signal?: AbortSignal,
+    onIdle?: (idle: FyEventStreamIdle) => void,
+  ): Promise<void> {
+    const url = new URL(`${this.#baseUrl}/v1/events`);
+    url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
+    url.searchParams.set('tail', String(NonNegativeIntegerSchema.parse(tail)));
+    return this.#eventTransport.stream({
+      url: url.toString(),
+      token: this.#token,
+      ...(signal === undefined ? {} : { signal }),
+      onMessage: value => {
+        const frame = FyEventStreamFrameSchema.parse(value);
+        if (frame.kind === 'event') onEvent(frame.event);
+        else if (frame.kind === 'idle') onIdle?.(frame);
+      },
+    });
+  }
+
   configChanges(onFrame: (frame: ConfigChangeFrame) => void, signal?: AbortSignal): Promise<void> {
     const url = new URL(`${this.#baseUrl}/v1/events`);
     url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';

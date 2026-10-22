@@ -206,6 +206,25 @@ describe('DaemonEventTransport', () => {
     ]);
   });
 
+  it('should carry the fleet feed’s replay tail', async () => {
+    // Arrange
+    const streams = opener();
+    const transport = new DaemonEventTransport(daemon, streams.open);
+
+    // Act
+    const streaming = transport.stream({
+      ...streamInput(() => undefined),
+      url: 'wss://daemon.example.test/v1/events?tail=0',
+    });
+    await settle();
+    const session = streams.opened[0]?.session as FakeStreamSession;
+    session.daemonCloses({ code: 1000, reason: 'done' });
+    await streaming;
+
+    // Assert
+    should(session.request.query).deepEqual([['tail', '0']]);
+  });
+
   it('should refuse a query parameter the feed does not have, and so can never carry a ticket or token', async () => {
     // Arrange
     const streams = opener();

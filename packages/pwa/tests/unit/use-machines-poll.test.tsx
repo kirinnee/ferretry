@@ -5,10 +5,13 @@ import {
   browserFleetPollEnvironment,
   FLEET_POLL_MS,
   type FleetPollEnvironment,
+  FLEET_FEED_SAFETY_MS,
+  type MachineFleetFeedOpener,
   PHONE_BACKGROUND_POLL_MS,
   useMachinesPoll,
 } from '../../src/hooks/use-machines-poll.ts';
 import { type DaemonConnection, type DaemonId, daemonConnection } from '../../src/lib/daemon-connection.ts';
+import { FLEET_FEED_SETTLE_MS, type FleetFeedEnvironment } from '../../src/lib/fleet-feed.ts';
 import '../support/dom.ts';
 import { interact, type Mounted, mount } from '../support/dom.ts';
 
@@ -27,19 +30,24 @@ function Poller({
   current,
   phone = false,
   environment,
+  openFleetFeed,
+  feedEnvironment,
 }: {
   readonly fleet: { hydrate: (daemon: DaemonConnection) => Promise<readonly never[]> };
   readonly machines: readonly DaemonConnection[];
   readonly current: DaemonId | null;
   readonly phone?: boolean;
   readonly environment?: FleetPollEnvironment;
+  readonly openFleetFeed?: MachineFleetFeedOpener;
+  readonly feedEnvironment?: FleetFeedEnvironment;
 }) {
-  useMachinesPoll(fleet as never, machines, current, phone, environment);
+  useMachinesPoll(fleet as never, machines, current, phone, environment, openFleetFeed, feedEnvironment);
   return null;
 }
 
 const fakeEnvironment = () => {
   let visible = true;
+  let time = 0;
   const ticks = new Map<number, () => void>();
   let onShow: (() => void) | undefined;
   const log: string[] = [];
@@ -55,6 +63,7 @@ const fakeEnvironment = () => {
       onShow = callback;
       return () => log.push('released');
     },
+    now: () => time,
   };
   return {
     environment,
@@ -66,6 +75,9 @@ const fakeEnvironment = () => {
     },
     hide: () => {
       visible = false;
+    },
+    setTime: (milliseconds: number) => {
+      time = milliseconds;
     },
   };
 };
@@ -164,5 +176,160 @@ describe('useMachinesPoll', () => {
     document.dispatchEvent(new Event('visibilitychange'));
     expect(seen).toBe(1);
     expect(fired).toBe(0);
+  });
+});
+
+/** Feed timers the test moves by hand. */
+const feedTime = () => {
+  let time = 0;
+  let next = 0;
+  const timers: { id: number; at: number; run: () => void }[] = [];
+  const environment: FleetFeedEnvironment = {
+    setTimeout: (run, milliseconds) => {
+      next += 1;
+      timers.push({ id: next, at: time + milliseconds, run });
+      return next;
+    },
+    clearTimeout: handle => {
+      const index = timers.findIndex(timer => timer.id === handle);
+      if (index >= 0) timers.splice(index, 1);
+    },
+    now: () => time,
+    random: () => 0,
+  };
+  return {
+    environment,
+    advance: async (milliseconds: number) => {
+      const until = time + milliseconds;
+      for (;;) {
+        const due = timers.filter(timer => timer.at <= until).sort((left, right) => left.at - right.at)[0];
+        if (due === undefined) break;
+        timers.splice(timers.indexOf(due), 1);
+        time = due.at;
+        await interact(() => due.run());
+      }
+      time = until;
+    },
+  };
+};
+
+/** Each machine's fleet feed, held open for the test to speak for its daemon. */
+const feeds = () => {
+  const opened = new Map<
+    string,
+    { idle: () => void; event: () => void; fail: (reason: unknown) => void; signal: AbortSignal }
+  >();
+  const open: MachineFleetFeedOpener = (machine, onEvent, onIdle, signal) =>
+    new Promise<void>((_resolve, reject) => {
+      opened.set(String(machine.daemonId), {
+        idle: () => onIdle(30),
+        event: () =>
+          onEvent({
+            sequence: 1,
+            time: '2026-10-22T00:00:00.000Z',
+            sessionId: 's',
+            type: 'turn.state',
+            source: 'daemon',
+            data: {},
+          } as never),
+        fail: reject,
+        signal,
+      });
+    });
+  return { opened, open };
+};
+
+describe('useMachinesPoll with fleet feeds', () => {
+  test('a machine whose feed is live is read on its word, and on the beat only as a safety net', async () => {
+    // Arrange — alpha's daemon has the feed; beta's is too old for it.
+    const { reads, fleet } = recorder();
+    const fake = fakeEnvironment();
+    const time = feedTime();
+    const daemons = feeds();
+    view = await mount(
+      <Poller
+        current={alpha.daemonId}
+        environment={fake.environment}
+        fleet={fleet}
+        machines={[alpha, beta]}
+        openFleetFeed={daemons.open}
+        feedEnvironment={time.environment}
+      />,
+    );
+    await interact(async () => {
+      daemons.opened.get('alpha')?.idle();
+      daemons.opened.get('beta')?.fail(Object.assign(new Error('unknown parameter tail'), { status: 400 }));
+      await Promise.resolve();
+    });
+    const opening = reads.length;
+
+    // Act — both beats fire: alpha's is skipped while its feed is live, beta's reads as it always did.
+    fake.tick(FLEET_POLL_MS);
+    fake.tick(BACKGROUND_POLL_MS);
+    const afterBeats = reads.map(read => String(read.daemonId)).slice(opening);
+    // Alpha's daemon says something moved.
+    await interact(() => daemons.opened.get('alpha')?.event());
+    await time.advance(FLEET_FEED_SETTLE_MS);
+    const afterEvent = reads.map(read => String(read.daemonId)).slice(opening);
+    // Long enough without a read, the beat reads alpha once more as a safety net.
+    fake.setTime(FLEET_FEED_SAFETY_MS);
+    fake.tick(FLEET_POLL_MS);
+    const afterSafety = reads.length;
+    // Hidden, an event reads nothing.
+    fake.hide();
+    await interact(() => daemons.opened.get('alpha')?.event());
+    await time.advance(5_000);
+
+    // Assert
+    expect(opening).toBe(2);
+    expect(afterBeats).toEqual(['beta']);
+    expect(afterEvent).toEqual(['beta', 'alpha']);
+    expect(afterSafety).toBe(opening + 3);
+    expect(reads.length).toBe(afterSafety);
+    await view.unmount();
+    view = null;
+    expect(daemons.opened.get('alpha')?.signal.aborted).toBe(true);
+  });
+
+  test('a feed reads through the connection the pairing has now, without reopening', async () => {
+    // Arrange
+    const { reads, fleet } = recorder();
+    const fake = fakeEnvironment();
+    const time = feedTime();
+    const daemons = feeds();
+    const fresh = daemonConnection({
+      daemonId: 'alpha',
+      baseUrl: 'https://alpha.example.test',
+      deviceId: 'alpha-device',
+    });
+    view = await mount(
+      <Poller
+        current={null}
+        environment={fake.environment}
+        fleet={fleet}
+        machines={[alpha]}
+        openFleetFeed={daemons.open}
+        feedEnvironment={time.environment}
+      />,
+    );
+    const feed = daemons.opened.get('alpha');
+
+    // Act — the same pairing republished as a new object, then an event.
+    await view.render(
+      <Poller
+        current={null}
+        environment={fake.environment}
+        fleet={fleet}
+        machines={[fresh]}
+        openFleetFeed={daemons.open}
+        feedEnvironment={time.environment}
+      />,
+    );
+    await interact(() => feed?.event());
+    await time.advance(FLEET_FEED_SETTLE_MS);
+
+    // Assert — the feed was not reopened, and its read went through the new object.
+    expect(daemons.opened.get('alpha')).toBe(feed);
+    expect(reads.at(-1)).toBe(fresh);
   });
 });

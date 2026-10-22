@@ -42,10 +42,10 @@ import { mount } from '../support/dom.ts';
 import { fetcherDaemons, newDaemonIdentity, relayCrypto, type ScriptedSocket, testDevice } from '../support/relay.ts';
 import { sessionView } from '../support/sessions.ts';
 
-/** Requests a minute an idle fleet page may send. */
-const FLEET_PAGE_BUDGET = 6;
-/** Requests a minute an idle session page may send. */
-const SESSION_PAGE_BUDGET = 10;
+/** Requests a minute an idle fleet page may send: 3.1 measured with the fleet feed (5.3 without it). */
+const FLEET_PAGE_BUDGET = 4;
+/** Requests a minute an idle session page may send: 5.8 measured (6.3 to 7.6 before the opening proof). */
+const SESSION_PAGE_BUDGET = 8;
 
 const WARM_UP_MS = 30_000;
 const IDLE_MS = 10 * 60_000;
@@ -117,6 +117,25 @@ class RouteCounter {
   }
 }
 
+/**
+ * A feed held open until cancelled, proving itself the moment it opens and every thirty seconds after —
+ * as the daemon does since it sends an opening proof (#707).
+ */
+const heldFeed = async (signal: AbortSignal | undefined, prove: () => void): Promise<void> => {
+  queueMicrotask(prove);
+  const proof = setInterval(prove, FEED_IDLE_PROOF_MS);
+  await new Promise<void>(resolve =>
+    signal?.addEventListener(
+      'abort',
+      () => {
+        clearInterval(proof);
+        resolve();
+      },
+      { once: true },
+    ),
+  );
+};
+
 /** The typed client a machine is read through: a fake that counts each call by the route it stands for. */
 const countingClient = (daemonId: DaemonId, counter: RouteCounter): FyApiClient => {
   const fleet = FLEETS.get(daemonId) ?? [];
@@ -141,7 +160,7 @@ const countingClient = (daemonId: DaemonId, counter: RouteCounter): FyApiClient 
       counter.add('STREAM /v1/events?topic=config');
       await new Promise<void>(resolve => signal?.addEventListener('abort', () => resolve(), { once: true }));
     },
-    // The session's live feed: open until cancelled, proving itself every thirty seconds like the daemon.
+    // The session's live feed: open until cancelled, proving itself at once and every thirty seconds.
     stream: async (
       sessionId: string | undefined,
       _after: number,
@@ -150,24 +169,28 @@ const countingClient = (daemonId: DaemonId, counter: RouteCounter): FyApiClient 
       onIdle?: (frame: FyEventStreamIdle) => void,
     ) => {
       counter.add('STREAM /v1/events');
-      const proof = setInterval(
-        () =>
-          onIdle?.({
-            kind: 'idle',
-            idleSeconds: FEED_IDLE_PROOF_MS / 1_000,
-            scope: { kind: 'session', sessionId: sessionId ?? '', after: 100 },
-          }),
-        FEED_IDLE_PROOF_MS,
+      await heldFeed(signal, () =>
+        onIdle?.({
+          kind: 'idle',
+          idleSeconds: FEED_IDLE_PROOF_MS / 1_000,
+          scope: { kind: 'session', sessionId: sessionId ?? '', after: 100 },
+        }),
       );
-      await new Promise<void>(resolve =>
-        signal?.addEventListener(
-          'abort',
-          () => {
-            clearInterval(proof);
-            resolve();
-          },
-          { once: true },
-        ),
+    },
+    // The machine's fleet feed with no replay: the same proofs, and no event while nothing happens.
+    fleetEvents: async (
+      tail: number,
+      _onEvent: (event: FyEvent) => void,
+      signal?: AbortSignal,
+      onIdle?: (frame: FyEventStreamIdle) => void,
+    ) => {
+      counter.add(`STREAM /v1/events?tail=${String(tail)}`);
+      await heldFeed(signal, () =>
+        onIdle?.({
+          kind: 'idle',
+          idleSeconds: FEED_IDLE_PROOF_MS / 1_000,
+          scope: { kind: 'fleet', followedSessions: fleet.length },
+        }),
       );
     },
     request: async (path: string, _schema: unknown, init?: RequestInit) => {
