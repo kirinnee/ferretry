@@ -103,6 +103,26 @@ describe('AsyncActivityScope', () => {
     should(inside).equal('fleet refresh');
     should(scope.current()).be.undefined();
   });
+
+  it('should carry nothing into a timer run outside, though the timer was armed inside', async () => {
+    // Arrange
+    const scope = new AsyncActivityScope<string>();
+    const seen: (string | undefined)[] = [];
+
+    // Act — the pass arms the next one; the next one must not belong to it.
+    await scope.within('fleet refresh', async () => {
+      await new Promise<void>(resolve =>
+        setTimeout(() => {
+          seen.push(scope.current());
+          scope.outside(() => seen.push(scope.current()));
+          resolve();
+        }, 1),
+      );
+    });
+
+    // Assert
+    should(seen).deepEqual(['fleet refresh', undefined]);
+  });
 });
 
 describe('jscSamples', () => {

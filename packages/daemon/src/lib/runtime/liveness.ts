@@ -37,12 +37,15 @@ export const ACTIVITY_NESTING = ' › ';
 export interface ActivityScopePort<T> {
   current(): T | undefined;
   within<R>(value: T, work: () => R): R;
+  /** Runs `work`, and everything it goes on to, in no activity at all. */
+  outside<R>(work: () => R): R;
 }
 
 /** No scope at all: nothing nests. */
 export const FLAT_ACTIVITY_SCOPE: ActivityScopePort<never> = Object.freeze({
   current: () => undefined,
   within: <R>(_value: never, work: () => R): R => work(),
+  outside: <R>(work: () => R): R => work(),
 });
 
 interface ActivityRecord {
@@ -125,6 +128,15 @@ export class ActivityLedger {
   /** The label of the activity the running code belongs to, or `undefined` outside any. */
   current(): string | undefined {
     return this.scope.current()?.label;
+  }
+
+  /**
+   * Runs `work` outside every activity, whatever armed it. A timer armed by one pass for the next one
+   * inherits the arming pass's activity, so the next pass would be counted inside it — and the one after
+   * inside that — instead of under its own name.
+   */
+  outside<R>(work: () => R): R {
+    return this.scope.outside(work);
   }
 
   /** The labels running right now, oldest first, each named once. */

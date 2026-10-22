@@ -8,6 +8,7 @@ import { describe, it } from 'bun:test';
 import should from 'should';
 import type { CredentialStoreResolution, StoredCredentialResolution } from '../../src/lib/account/credentials.ts';
 import {
+  activeUsageReadDueAt,
   activeUsageReading,
   CODEX_LAST_REFRESH_MAX_AGE_MS,
   CREDENTIAL_NEGATIVE_FRESH_MS,
@@ -485,6 +486,26 @@ describe('usage', () => {
     should(needsActiveUsageRead(passive(NOW - 1000), NOW, MINUTE)).be.false();
     should(needsActiveUsageRead(passive(NOW - MINUTE), NOW, MINUTE)).be.true();
     should(needsActiveUsageRead({ version: 1, source: 'claude-statusline', at: NOW }, NOW, MINUTE)).be.true();
+  });
+
+  it('should name the instant the active read falls due, the moment needsActiveUsageRead turns true', () => {
+    // Arrange
+    const measured = passive(NOW - 1_000);
+    const unmeasured = { version: 1, source: 'claude-statusline', at: NOW } as const;
+
+    // Act
+    const dueAfterPassive = activeUsageReadDueAt(measured, undefined, MINUTE);
+    const dueAfterLaterPass = activeUsageReadDueAt(measured, NOW + 5_000, MINUTE);
+    const dueWithNothingMeasured = activeUsageReadDueAt(unmeasured, NOW - 2_000, MINUTE);
+    const neverSeen = activeUsageReadDueAt(undefined, undefined, MINUTE);
+
+    // Assert — and at each instant the rule itself agrees.
+    should(dueAfterPassive).equal(NOW - 1_000 + MINUTE);
+    should(needsActiveUsageRead(measured, dueAfterPassive - 1, MINUTE)).be.false();
+    should(needsActiveUsageRead(measured, dueAfterPassive, MINUTE)).be.true();
+    should(dueAfterLaterPass).equal(NOW + 5_000 + MINUTE);
+    should(dueWithNothingMeasured).equal(NOW - 2_000 + MINUTE);
+    should(neverSeen).equal(Number.NEGATIVE_INFINITY);
   });
 
   it('should turn a free read into a reading only when it measured something', () => {

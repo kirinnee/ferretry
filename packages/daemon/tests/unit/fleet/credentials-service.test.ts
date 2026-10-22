@@ -599,6 +599,18 @@ describe('the usage pass', () => {
     should(fake.calls).deepEqual(['observe:work', 'observe:codex']);
   });
 
+  it('should observe only the credentials it is told are due', async () => {
+    // Arrange
+    const fake = new FakeStatus();
+    const service = serviceOf(catalogOf(v2({ work: claudeFerretry, codex: codexFerretry })), fake);
+
+    // Act
+    await service.observeAll(['codex']);
+
+    // Assert
+    should(fake.calls).deepEqual(['observe:codex']);
+  });
+
   it('should leave every word as it was when the document cannot be read', async () => {
     // Arrange
     const fake = new FakeStatus();

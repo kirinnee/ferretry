@@ -257,7 +257,7 @@ describe('WorkerHousekeepingJobs', () => {
 });
 
 describe('WorkerCredentialPorts', () => {
-  it('should send no job for a store whose file stamp held, and one when it moved', async () => {
+  it('should send no job for a store whose file stamp held, and keep what a free read read', async () => {
     // Arrange
     const sent: HousekeepingJob[] = [];
     const inline = new InlineHousekeepingJobs(settingsOf());
@@ -265,6 +265,12 @@ describe('WorkerCredentialPorts', () => {
       jobs: {
         run: async job => {
           sent.push(job);
+          // The free read never leaves this machine here: its answer is canned, its facts are real.
+          if (job.kind === 'credential.active')
+            return {
+              result: { usageBased: true, ok: false, credentialSignal: 'inconclusive' },
+              local: await inline.run({ kind: 'credential.local', resolution: job.resolution }),
+            } as never;
           return await inline.run(job);
         },
       },
@@ -273,8 +279,6 @@ describe('WorkerCredentialPorts', () => {
       keychainFreshMs: () => 60_000,
       now: () => NOW,
       cache: new Map(),
-      catalog: { entry: async () => ({ usedBy: [] }) } as never,
-      sessions: async () => [],
     });
 
     // Act
@@ -282,13 +286,14 @@ describe('WorkerCredentialPorts', () => {
     const again = await ports.local(work);
     await writeFile(work.credentialFile, claudeBlob('rotated-TESTONLY'));
     const moved = await ports.local(work);
-    const passive = await ports.passiveUsage({ id: 'work', resolution: work });
+    const active = await ports.activeUsage(work);
+    const afterActive = await ports.local(work);
 
     // Assert
-    should(sent.map(job => job.kind)).deepEqual(['credential.local', 'credential.local', 'usage.passive.claude']);
+    should(sent.map(job => job.kind)).deepEqual(['credential.local', 'credential.local', 'credential.active']);
     should(again).equal(first);
     should(moved.fingerprint).not.equal(first.fingerprint);
-    should(passive).be.undefined();
+    should(afterActive).equal(active.local);
   });
 });
 

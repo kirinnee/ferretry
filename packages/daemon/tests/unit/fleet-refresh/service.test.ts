@@ -113,4 +113,70 @@ describe('the fleet refresh loop', () => {
     // Assert
     should(peak).equal(1);
   });
+
+  it('should observe only the credentials its schedule says are due, then tell it they were observed', async () => {
+    // Arrange
+    const observed: (readonly string[] | undefined)[] = [];
+    const told: (readonly string[])[] = [];
+    const service = new FleetRefreshService({
+      usage: { accounts: async () => [], snapshotAt: () => undefined, hasSnapshot: () => false },
+      credentials: {
+        observeAll: async ids => {
+          observed.push(ids);
+        },
+      },
+      schedule: {
+        start: async () => undefined,
+        due: () => ['idle-login'],
+        observed: ids => told.push(ids),
+        close: () => undefined,
+      },
+    });
+
+    // Act
+    await service.run();
+
+    // Assert — the login whose session is writing passive readings is not read at all.
+    should(observed).deepEqual([['idle-login']]);
+    should(told).deepEqual([['idle-login']]);
+  });
+
+  it('should arm its schedule, and close it with what arming answered', async () => {
+    // Arrange
+    const events: string[] = [];
+    const service = new FleetRefreshService({
+      usage: { accounts: async () => [], snapshotAt: () => undefined, hasSnapshot: () => false },
+      schedule: {
+        start: async due => {
+          events.push('start');
+          due();
+        },
+        due: () => [],
+        observed: () => undefined,
+        close: () => events.push('close'),
+      },
+    });
+
+    // Act
+    const stop = await service.arm(() => events.push('due'));
+    stop();
+
+    // Assert
+    should(events).deepEqual(['start', 'due', 'close']);
+  });
+
+  it('should arm nothing without a schedule', async () => {
+    // Arrange
+    const due: string[] = [];
+    const service = new FleetRefreshService({
+      usage: { accounts: async () => [], snapshotAt: () => undefined, hasSnapshot: () => false },
+    });
+
+    // Act
+    const stop = await service.arm(() => due.push('due'));
+    stop();
+
+    // Assert
+    should(due).deepEqual([]);
+  });
 });

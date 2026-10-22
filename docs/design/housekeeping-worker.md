@@ -1,6 +1,6 @@
 # Housekeeping worker — stage 4 of the event-driven daemon
 
-Status: **in progress** — PR 0 and PR 1 merged, PR 2 built (§4.1), PR 3 and PR 4 proposed · Date: 2026-10-22 · Parent: [event-driven-daemon.md](event-driven-daemon.md) (stage 4) ·
+Status: **in progress** — PR 0 and PR 1 merged, PR 2 and PR 3 built (§4.1, §4.2), PR 4 proposed · Date: 2026-10-22 · Parent: [event-driven-daemon.md](event-driven-daemon.md) (stage 4) ·
 Sibling: [session-workers.md](session-workers.md) (stage 3, PR #701) · Owner directive, verbatim: _"use things
 like inotify, 1 thread per agent, fan into the daemon (daemon should just communicate)"_. Lead's ask: _"fleet
 refresh must be event-driven (only when runtime homes/config actually change) and run on the housekeeping
@@ -576,6 +576,64 @@ as CPU: no credential, probe or rollout frame is on the main thread, and the wor
 `security` children leave the main thread: they appear as the worker's children, `by: fleet refresh`.
 Verification item 7 (§3.3) will show whether that removes stalls. The jobs per pass, about 11, include passive reads
 that both `observe` and `view` make. PR 3's model reads each input once, on change.
+
+### 4.2 PR 3 as built
+
+**The pieces**
+
+- `src/lib/fleet-reading/model.ts` — the pure part. For each stored credential it keeps the newest passive
+  reading (and whether that reading is current) and when a pass last observed it. It turns the unchanged
+  active-read rule into instants: `activeUsageReadDueAt`, in `packages/fleet` beside `needsActiveUsageRead`,
+  gives `max(measured passive at, observed at) + usage.interval`.
+- `src/lib/fleet-reading/service.ts` — `FleetReading`. It watches through the file-event hub:
+  - each store file (`.credentials.json`, canonical `auth.json`);
+  - each Claude statusLine `usage.json`;
+  - each Codex credential's attributed rollouts (hub subscriptions; Q7's session-worker `rateLimits` is not
+    needed for this).
+
+  A passive change is ONE coalesced passive job for that credential. It never reads a store, never asks a
+  provider and never starts a pass. A store change bumps that file's generation and re-reads its facts
+  at once. While the watch is live, the generation is the stamp `CachedCredentialReads` compares, so an
+  unchanged store costs no system call. A watch that is not live, or a passive reading that is not
+  current, is never trusted: the answer is read directly, as before. It also implements
+  `FleetRefreshSchedule`: it arms one timer for the earliest due credential. The boot pass always
+  runs, and a feed with an external collector (`usage.url`), which only time refreshes, keeps one pass an
+  interval, as before.
+
+- `FleetRefreshService.arm` replaces the fixed `setInterval`. A pass observes only the credentials that are
+  due (`observeAll(ids)`) and then tells the reading. The timer fires outside every activity
+  (`ActivityLedger.outside`, new). Otherwise each pass was counted inside the one that armed it
+  (`fleet refresh › fleet refresh › …`).
+- `WatchedDocument` keeps the parsed fleet manifest for the usage feed until its watch sees a change.
+- The config watcher's `afterLoad` calls `configLoaded()`, so added or removed credentials open or close
+  their watches.
+- `WorkerCredentialPorts` loses its passive half; the reading owns it now.
+
+**Not in PR 3, as decided:**
+
+- No keychain ladder (§3.3 K0/K1). Q3: a keychain item's facts are kept for one interval, as in PR 1.
+- No pure status-threshold timer. Views are decided when they are read, so a time-only change (an expiry)
+  shows up at the next read, exactly as before.
+- The Claude account email is still stamped per list. Re-reading `~/.claude.json` only on a fingerprint
+  change is left for later.
+
+Q1: 60 s is kept. Q4: a sign-in, sign-out or token refresh is now seen within about a second (accepted).
+
+**Measured** (same bench and fixture as §4.1; another worktree's bench ran on the box at the same time, so
+process CPU is within noise):
+
+|                     | PR 2                    | PR 3                    | PR 3 + one running session (`--statusline`)          |
+| ------------------- | ----------------------- | ----------------------- | ---------------------------------------------------- |
+| Housekeeping jobs   | 33 per 30 s             | 9 per 30 s              | 11 per 30 s (6 active reads, 5 passive)              |
+| Fleet refresh       | 6/min, p50 15           | 6/min, p50 10           | 6/min, p50 11                                        |
+| Free reads (run)    | Anthropic 32 · Codex 16 | Anthropic 32 · Codex 16 | Anthropic 10 · Codex 10: `claude-work` gets **none** |
+| Daemon CPU          | 8.26 %                  | 8.2 %                   | 7.75 %                                               |
+| Read/write syscalls | 200/s                   | 192/s                   | 195/s                                                |
+| strace file calls   | 160/s                   | 157/s                   | —                                                    |
+
+What is left of a pass is the due active reads: 3 logins × 1 per interval on this fixture, whose logins have
+no running session. A login whose session is writing its statusLine is never due. No CI idle-budget ceiling
+moved, because the process-level measures are flat on Linux, so none is earned.
 
 ## 5. Risks
 

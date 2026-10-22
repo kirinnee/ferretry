@@ -15,19 +15,24 @@
  *      programs started by program and subcommand (strace slows the daemon, so it gets its own window);
  *   4. with `--syscall-summary`, `sudo strace -f -c` over a fourth: every kind of system call, counted.
  *
+ * With `--statusline`, one Claude login (`claude-work`) gets a fresh `usage.json` every 6 s for the
+ * whole run, as `fy statusline` writes it while a session on that login runs — so the bench shows what a
+ * passive update costs, and that a login with a running session is never given an active read.
+ *
  * Manual only, never CI (the CI budget is `tests/integration/runtime/idle-budget.test.ts`). Linux only.
  *
  *   bun scripts/local/bench-idle-daemon.ts [--fyd "<command>"] [--seconds 30] [--settle 40] [--trace]
- *     [--fixture /tmp/fy-idle-fixture] [--small] [--out report.json]
+ *     [--fixture /tmp/fy-idle-fixture] [--small] [--statusline] [--out report.json]
  *
  * `--fyd` defaults to this checkout's `bun packages/daemon/bin/fyd.ts`; pass an installed or compiled
  * `fyd` to measure a release. `--small` builds 8 MiB transcripts instead of 200 MB ones.
  */
-import { cp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { cp, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 import type { PerformanceProfileView, PerformanceReport } from '../../packages/protocol/src/lib/index.ts';
 import { parseStraceTrace } from '../../packages/cli/src/lib/daemon/profile/syscall-trace.ts';
+import { FilePassiveUsageStore } from '../../packages/fleet/src/adapters/anthropic-usage-probe.ts';
 import { renderPerformanceReport } from '../../packages/protocol/src/lib/performance-render.ts';
 import { freeLoopbackPort } from '../../packages/daemon/tests/integration/support/booted-daemon.ts';
 import { startFakeUsageServer } from '../../packages/daemon/tests/integration/support/fake-usage-server.ts';
@@ -47,6 +52,7 @@ const { values } = parseArgs({
     'syscall-summary': { type: 'boolean', default: false },
     fixture: { type: 'string', default: '/tmp/fy-idle-fixture' },
     small: { type: 'boolean', default: false },
+    statusline: { type: 'boolean', default: false },
     out: { type: 'string' },
   },
 });
@@ -93,6 +99,18 @@ for (let index = 0; index < shape.running; index += 1) {
 
 // The fixture's logins are real stores, so the usage pass makes its free reads: here, never at a provider.
 const usage = startFakeUsageServer();
+// A running session's statusLine on one login: a temporary file, then a rename, every 6 s.
+const statusLineFile = new FilePassiveUsageStore(join(home, 'fleet')).path('claude-work');
+const writeStatusLine = async (): Promise<void> => {
+  const temporary = `${statusLineFile}.${String(process.pid)}.tmp`;
+  await writeFile(
+    temporary,
+    JSON.stringify({ version: 1, source: 'claude-statusline', at: Date.now(), fiveHour: { usedPercent: 12 } }),
+  );
+  await rename(temporary, statusLineFile);
+};
+if (values.statusline) await writeStatusLine();
+const statusLineTicks = values.statusline ? setInterval(() => void writeStatusLine(), 6_000) : undefined;
 log(`starting ${fyd.join(' ')}`);
 const daemon = Bun.spawn([...fyd], {
   env: {
@@ -188,6 +206,7 @@ try {
     syscallSummary = await readFile(file, 'utf8').catch(() => '');
   }
 } finally {
+  if (statusLineTicks !== undefined) clearInterval(statusLineTicks);
   daemon.kill();
   await daemon.exited;
   tmux(['kill-server']);
