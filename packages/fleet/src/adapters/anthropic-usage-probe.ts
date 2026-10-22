@@ -447,6 +447,15 @@ export class AnthropicUsageProbe implements FleetUsageProbe {
     return await this.#withMaterial(await this.deps.stored.storedMaterial(resolution));
   }
 
+  /**
+   * The same free read, with material the CALLER read from the credential's one store — so a caller
+   * that needs the store's facts too reads it once (`CachedCredentialReads.active`). Adapter to adapter:
+   * the token is taken here and goes nowhere else.
+   */
+  async probeMaterial(material: CredentialMaterial): Promise<FleetUsageProbeResult> {
+    return await this.#withMaterial(material);
+  }
+
   async #withMaterial(material: CredentialMaterial): Promise<FleetUsageProbeResult> {
     const token = bearerToken(material);
     if (token === undefined) {

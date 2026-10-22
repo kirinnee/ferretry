@@ -17,7 +17,7 @@
  * dropped. A failure message is built from statuses and fixed sentences, never from material or from
  * the provider's body.
  */
-import type { CodexStoreResolution, StoredCredentialResolution } from '../lib/account/credentials.ts';
+import type { StoredCredentialResolution } from '../lib/account/credentials.ts';
 import type { CredentialMaterial } from '../lib/identity.ts';
 import { parseCodexUsageBody } from '../lib/quota.ts';
 import type { FleetUsageProbeResult } from '../lib/usage.ts';
@@ -66,11 +66,16 @@ export class CodexUsageProbe {
     if (resolution.harness !== 'codex') {
       return { ...failure('no Codex usage read applies to a claude credential'), usageBased: false };
     }
-    return await this.#read(resolution);
+    return await this.probeMaterial(await this.deps.stored.storedMaterial(resolution));
   }
 
-  async #read(resolution: CodexStoreResolution): Promise<FleetUsageProbeResult> {
-    const bearer = codexBearer(await this.deps.stored.storedMaterial(resolution));
+  /**
+   * The same free read, with `auth.json` material the CALLER read from the credential's one store — so
+   * a caller that needs the store's facts too reads it once (`CachedCredentialReads.active`). Adapter to
+   * adapter: the token is taken here and goes nowhere else.
+   */
+  async probeMaterial(material: CredentialMaterial): Promise<FleetUsageProbeResult> {
+    const bearer = codexBearer(material);
     if (bearer === undefined) return failure('no readable ChatGPT access token and account id for this credential');
     let body: unknown;
     try {

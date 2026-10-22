@@ -35,8 +35,10 @@ import {
 } from '@ferretry/fleet';
 import {
   AnthropicUsageProbe,
+  CachedCredentialReads,
   CodexUsageProbe,
   claudeKeychainAccount,
+  credentialFileStamp,
   FileConversationLeaseStore,
   FilePassiveUsageStore,
   type FleetBinaryLookup,
@@ -46,7 +48,6 @@ import {
   ProcessFleetTokenRefreshPort,
   resolveUserHome,
   SpawnCredentialCommand,
-  StoredCredentialClassifier,
   spawnFleetTokenRefreshProcess,
 } from '@ferretry/fleet/adapters';
 import {
@@ -6688,10 +6689,6 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
    * and where each one's login lives, read from the configuration files on every call. Built here because a
    * sign-in by credential id resolves through it, and the credentials subsystem below reads it too.
    */
-  const credentialClassifier = new StoredCredentialClassifier({
-    credentials: harnessCredentials,
-    now: () => millisecondClock.now(),
-  });
   const credentialHostCodexHome = hostCodexHome(process.env.CODEX_HOME, userHome);
   const fleetCredentialCatalog = new FleetCredentialCatalog({
     document: declaredAccountModel,
@@ -8301,9 +8298,41 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       void declaredUsageRefreshMs().then(intervalMs => {
         credentialUsageIntervalMs = intervalMs;
       });
+      // The free reads, made with material `credentialReads` read itself: one store read per active read.
+      const anthropicUsageProbe = new AnthropicUsageProbe({
+        fetch: fetchQuota,
+        credentials: harnessCredentials,
+        stored: harnessCredentials,
+      });
+      const codexUsageProbe = new CodexUsageProbe({
+        fetch: fetchQuota,
+        stored: harnessCredentials,
+        now: () => millisecondClock.now(),
+      });
+      // Each credential's store, read as rarely as its facts allow (housekeeping-worker.md §4 PR 1): a file
+      // store's facts are kept while its stamp holds, a macOS keychain item's for one usage interval, and a
+      // free read refreshes them for nothing. Facts and a digest only — never material, never a token.
+      const credentialReads = new CachedCredentialReads({
+        store: harnessCredentials,
+        probe: async (resolution, material) =>
+          resolution.harness === 'claude'
+            ? await anthropicUsageProbe.probeMaterial(material)
+            : await codexUsageProbe.probeMaterial(material),
+        stamp: credentialFileStamp,
+        keychain: process.platform === 'darwin',
+        keychainFreshMs: () => credentialUsageIntervalMs,
+        now: () => millisecondClock.now(),
+        cache: new Map(),
+      });
+      // A login's display email for the credentials list: a Codex one from the kept facts above, a Claude
+      // one parsed from its account file only once that file's stamp moved.
+      const credentialEmails = new CredentialEmailReader({
+        codexFacts: async resolution => await credentialReads.local(resolution),
+        stamp: credentialFileStamp,
+        kept: new Map(),
+      });
       const credentialStatus = new CredentialStatusService({
-        classify: async resolution => await credentialClassifier.classify(resolution),
-        material: async resolution => await harnessCredentials.storedMaterial(resolution),
+        local: async (resolution, options) => await credentialReads.local(resolution, options),
         passiveUsage: credentialPassiveUsage({
           catalog: fleetCredentialCatalog,
           claude: async id => await new FilePassiveUsageStore(paths.fleet).read(id),
@@ -8320,18 +8349,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
             ).flat(),
           newestRollout: async files => await newestRolloutRateLimits(await rolloutFiles(files)),
         }),
-        activeUsage: async (harness, resolution) =>
-          harness === 'claude'
-            ? await new AnthropicUsageProbe({
-                fetch: fetchQuota,
-                credentials: harnessCredentials,
-                stored: harnessCredentials,
-              }).probeCredential(resolution)
-            : await new CodexUsageProbe({
-                fetch: fetchQuota,
-                stored: harnessCredentials,
-                now: () => millisecondClock.now(),
-              }).probeCredential(resolution),
+        activeUsage: async resolution => await credentialReads.active(resolution),
         refresh: new ProcessFleetTokenRefreshPort({
           spawn: spawnFleetTokenRefreshProcess,
           environment: process.env,
@@ -8426,7 +8444,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       const fleetCredentials = createFleetCredentialsSubsystem({
         catalog: fleetCredentialCatalog,
         status: credentialStatus,
-        email: async source => await new CredentialEmailReader(harnessCredentials).email(source),
+        email: async source => await credentialEmails.email(source),
         machineName: () => hostname(),
         locate: locateHarness,
         run: async spec => await runCredentialHarness(spec),

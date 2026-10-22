@@ -20,6 +20,7 @@ import {
   type FleetManifest,
   type FleetUsageProbeResult,
   InMemoryCredentialStatusStore,
+  type LocalCredentialFacts,
 } from '@ferretry/fleet';
 import type { AccountUsage } from '@ferretry/protocol';
 import should from 'should';
@@ -67,12 +68,17 @@ const ACCEPTED: FleetUsageProbeResult = {
   longWindow: { usedPercent: 30 },
 };
 
+/** A Claude login that is valid locally: its kept facts, and what every read of the store answers. */
+const VALID: LocalCredentialFacts = {
+  shape: { kind: 'tokens', hasAccess: true, hasRefresh: true, expiresAt: NOW + 3_600_000 },
+  fingerprint: 'digest-a',
+};
+
 /** The ports of a Claude login that is valid locally and has no passive reading, so every pass reads. */
-const portsOf = (activeUsage: CredentialStatusPorts['activeUsage']): CredentialStatusPorts => ({
-  classify: async () => ({ state: 'valid', fingerprint: 'digest-a' }),
-  material: async () => ({ outcome: 'absent' }),
+const portsOf = (answer: () => Promise<FleetUsageProbeResult>): CredentialStatusPorts => ({
+  local: async () => VALID,
   passiveUsage: async () => undefined,
-  activeUsage,
+  activeUsage: async () => ({ result: await answer(), local: VALID }),
   refresh: { refresh: async () => ({ outcome: 'skipped' }) } as unknown as CredentialStatusPorts['refresh'],
   heads: new InMemoryCredentialStatusStore(),
   now: () => NOW,

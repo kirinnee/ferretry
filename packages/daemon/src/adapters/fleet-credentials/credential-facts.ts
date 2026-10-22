@@ -4,12 +4,12 @@
  *
  * Everything here is a READ of a file the harness or Ferretry already wrote, except
  * {@link runCredentialHarness}, which the sign-out executor alone calls on an applied change. Nothing
- * returns credential material: the email reader parses a Codex id token and keeps only its `email`
- * claim.
+ * returns credential material: a Codex email comes from the store's kept facts, which carry its id
+ * token's `email` claim and no token.
  */
 
 import { mkdir, readFile, stat } from 'node:fs/promises';
-import type { CredentialMaterial } from '@ferretry/fleet';
+import type { CodexStoreResolution, LocalCredentialFacts } from '@ferretry/fleet';
 import type { RolloutFile } from '@ferretry/fleet/adapters';
 import type { CredentialEmailSource, CredentialHarnessRun } from '../../lib/fleet/credentials-service.ts';
 
@@ -26,19 +26,6 @@ const asRecord = (value: unknown): Readonly<Record<string, unknown>> | undefined
 const nonEmpty = (value: unknown): string | undefined =>
   typeof value === 'string' && value.trim().length > 0 ? value.trim() : undefined;
 
-/** The `email` claim of a Codex `auth.json`'s id token. The signature is not checked: display only. */
-export function codexEmail(material: CredentialMaterial): string | undefined {
-  if (material.outcome !== 'found') return undefined;
-  try {
-    const token = nonEmpty(asRecord(asRecord(JSON.parse(material.blob) as unknown)?.tokens)?.id_token);
-    const payload = token?.split('.')[1];
-    if (payload === undefined || payload.length === 0) return undefined;
-    return nonEmpty(asRecord(JSON.parse(Buffer.from(payload, 'base64url').toString('utf8')) as unknown)?.email);
-  } catch {
-    return undefined;
-  }
-}
-
 /** The account Claude recorded in a config directory's `.claude.json`. */
 async function claudeEmail(accountFile: string): Promise<string | undefined> {
   try {
@@ -49,11 +36,22 @@ async function claudeEmail(accountFile: string): Promise<string | undefined> {
   }
 }
 
+/** A Claude account file's email, and the file stamp it was read under. */
+interface KeptClaudeEmail {
+  readonly stamp: string;
+  readonly email: string | undefined;
+}
+
 export interface CredentialEmailReaderDeps {
-  /** The Codex store's raw material (`PlatformFleetCredentialStore.storedMaterial`). Read and dropped. */
-  storedMaterial(
-    resolution: Extract<CredentialEmailSource, { harness: 'codex' }>['resolution'],
-  ): Promise<CredentialMaterial>;
+  /**
+   * A Codex store's facts (`CachedCredentialReads.local`), which carry its id token's `email` claim — so
+   * listing logins reads no `auth.json` the usage pass has already read, and holds no token.
+   */
+  codexFacts(resolution: CodexStoreResolution): Promise<LocalCredentialFacts>;
+  /** A file's stamp (`credentialFileStamp`): a `.claude.json` is parsed again only once it changed. */
+  stamp(path: string): Promise<string | undefined>;
+  /** Claude emails by account file. A host `~/.claude.json` is large and rewritten by every running Claude. */
+  readonly kept: Map<string, KeptClaudeEmail>;
 }
 
 /** Reads the display email of one login. `undefined` when the harness recorded none. */
@@ -61,10 +59,18 @@ export class CredentialEmailReader {
   constructor(private readonly deps: CredentialEmailReaderDeps) {}
 
   async email(source: CredentialEmailSource): Promise<string | undefined> {
-    if (source.harness === 'claude') return await claudeEmail(source.accountFile);
-    return codexEmail(
-      await this.deps.storedMaterial(source.resolution).catch((): CredentialMaterial => ({ outcome: 'absent' })),
-    );
+    if (source.harness === 'claude') return await this.#claude(source.accountFile);
+    const facts = await this.deps.codexFacts(source.resolution).catch(() => undefined);
+    return facts?.codex?.state === 'tokens' ? facts.codex.email : undefined;
+  }
+
+  async #claude(accountFile: string): Promise<string | undefined> {
+    const stamp = await this.deps.stamp(accountFile);
+    const kept = this.deps.kept.get(accountFile);
+    if (stamp !== undefined && kept?.stamp === stamp) return kept.email;
+    const email = await claudeEmail(accountFile);
+    if (stamp !== undefined) this.deps.kept.set(accountFile, { stamp, email });
+    return email;
   }
 }
 

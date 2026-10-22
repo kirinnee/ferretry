@@ -47,7 +47,13 @@
 import { dirname } from 'node:path';
 import { z } from 'zod';
 import { FLEET_HEALTH_FRESH_MS, type LocalCredentialReading } from '../health.ts';
-import { type CredentialMaterial, decodeJwtExpiry } from '../identity.ts';
+import {
+  type CredentialMaterial,
+  type CredentialShape,
+  classifyShape,
+  credentialShape,
+  decodeJwtExpiry,
+} from '../identity.ts';
 import type { HarnessKind } from '../manifest.ts';
 import {
   type CodexRefreshFailure,
@@ -214,6 +220,8 @@ export type CodexAuthFacts =
       readonly lastRefreshAt?: number;
       /** From the id token's `https://api.openai.com/auth` claim `chatgpt_plan_type`. Display only. */
       readonly planType?: string;
+      /** The id token's `email` claim, trimmed. Display only. */
+      readonly email?: string;
     };
 
 const asRecord = (value: unknown): Readonly<Record<string, unknown>> | undefined =>
@@ -225,25 +233,36 @@ const present = (value: unknown): value is string => typeof value === 'string' &
 
 const OPENAI_AUTH_CLAIM = 'https://api.openai.com/auth';
 
-/** The plan type out of an id token's claims. The signature is not checked; it is display only. */
-export function codexPlanType(idToken: unknown): string | undefined {
+/** An id token's claims. The signature is not checked: everything read from them is display only. */
+function idTokenClaims(idToken: unknown): Readonly<Record<string, unknown>> | undefined {
   if (!present(idToken)) return undefined;
   const payload = idToken.split('.')[1];
   if (payload === undefined || payload.length === 0) return undefined;
   try {
-    const claims = asRecord(JSON.parse(Buffer.from(payload, 'base64url').toString('utf8')) as unknown);
-    const nested = asRecord(claims?.[OPENAI_AUTH_CLAIM])?.chatgpt_plan_type;
-    const flat = claims?.[`${OPENAI_AUTH_CLAIM}.chatgpt_plan_type`];
-    const plan = nested ?? flat;
-    return present(plan) ? plan : undefined;
+    return asRecord(JSON.parse(Buffer.from(payload, 'base64url').toString('utf8')) as unknown);
   } catch {
     return undefined;
   }
 }
 
+/** The plan type out of an id token's claims. The signature is not checked; it is display only. */
+export function codexPlanType(idToken: unknown): string | undefined {
+  const claims = idTokenClaims(idToken);
+  const nested = asRecord(claims?.[OPENAI_AUTH_CLAIM])?.chatgpt_plan_type;
+  const flat = claims?.[`${OPENAI_AUTH_CLAIM}.chatgpt_plan_type`];
+  const plan = nested ?? flat;
+  return present(plan) ? plan : undefined;
+}
+
+/** The `email` claim of an id token, trimmed. The signature is not checked; it is display only. */
+export function codexEmailClaim(idToken: unknown): string | undefined {
+  const email = idTokenClaims(idToken)?.email;
+  return typeof email === 'string' && email.trim().length > 0 ? email.trim() : undefined;
+}
+
 /**
  * Reduce Codex `auth.json` material to the facts the status needs. No token survives: expiry, the
- * `last_refresh` instant, presence flags and the plan word.
+ * `last_refresh` instant, presence flags, the plan word and the display email.
  */
 export function readCodexAuthFacts(material: CredentialMaterial): CodexAuthFacts {
   if (material.outcome === 'absent') return { state: 'missing' };
@@ -260,6 +279,7 @@ export function readCodexAuthFacts(material: CredentialMaterial): CodexAuthFacts
   const accessExpiresAt = decodeJwtExpiry(tokens.access_token);
   const lastRefresh = typeof root.last_refresh === 'string' ? Date.parse(root.last_refresh) : Number.NaN;
   const planType = codexPlanType(tokens.id_token);
+  const email = codexEmailClaim(tokens.id_token);
   return {
     state: 'tokens',
     hasAccess: present(tokens.access_token),
@@ -267,6 +287,51 @@ export function readCodexAuthFacts(material: CredentialMaterial): CodexAuthFacts
     ...(accessExpiresAt === undefined ? {} : { accessExpiresAt }),
     ...(Number.isFinite(lastRefresh) && lastRefresh >= 0 ? { lastRefreshAt: Math.trunc(lastRefresh) } : {}),
     ...(planType === undefined ? {} : { planType }),
+    ...(email === undefined ? {} : { email }),
+  };
+}
+
+// ── One read of a store, reduced to what may be kept ─────────────────────────────────────────────
+
+/**
+ * Everything ONE read of a credential's store says, with no token and no clock in it: what may be kept
+ * between reads of a store that has not changed. Derived facts and a truncated digest, never material
+ * (docs/secrets.md). What it means at an instant is {@link localReadingAt}.
+ */
+export interface LocalCredentialFacts {
+  readonly shape: CredentialShape;
+  /** The truncated digest of the material these facts came from. Absent when nothing was found. */
+  readonly fingerprint?: string;
+  /** Codex only: its `auth.json`, as facts. */
+  readonly codex?: CodexAuthFacts;
+}
+
+/** The facts of a store that could not be read at all. Unreadable condemns nothing. */
+export const UNREADABLE_CREDENTIAL_FACTS: LocalCredentialFacts = {
+  shape: { kind: 'decided', reading: { state: 'unreadable' } },
+  codex: { state: 'unreadable' },
+};
+
+/** One read's material as facts, given the digest the reader took of it. The material is not kept. */
+export function localCredentialFacts(
+  harness: HarnessKind,
+  material: CredentialMaterial,
+  fingerprint: string | undefined,
+): LocalCredentialFacts {
+  return {
+    shape: credentialShape(harness, material),
+    ...(fingerprint === undefined ? {} : { fingerprint }),
+    ...(harness === 'codex' ? { codex: readCodexAuthFacts(material) } : {}),
+  };
+}
+
+/** The local reading these facts give at `now`: a kept `valid` still turns `refreshable` on time. */
+export function localReadingAt(facts: LocalCredentialFacts, now: number): LocalCredentialReading {
+  const reading = classifyShape(facts.shape, now);
+  return {
+    state: reading.state,
+    ...(reading.expiresAt === undefined ? {} : { expiresAt: reading.expiresAt }),
+    ...(facts.fingerprint === undefined ? {} : { fingerprint: facts.fingerprint }),
   };
 }
 
@@ -582,15 +647,31 @@ export interface CredentialSubject {
   readonly resolution: CredentialStoreResolution;
 }
 
+/** How a local read treats facts kept from an earlier read of the same store. */
+export interface CredentialReadOptions {
+  /** Read the store itself. A Codex refresh judges itself by the file before and after, so it must. */
+  readonly fresh?: boolean;
+}
+
+/** The free read's answer, and the facts of the very material whose token it sent: ONE read of the store. */
+export interface ActiveUsageRead {
+  readonly result: FleetUsageProbeResult;
+  readonly local: LocalCredentialFacts;
+}
+
 export interface CredentialStatusPorts {
-  /** The local classification and digest (`StoredCredentialClassifier`). Never material. */
-  classify(resolution: StoredCredentialResolution): Promise<LocalCredentialReading>;
-  /** Raw material, reduced to Codex facts here and dropped (`PlatformFleetCredentialStore.storedMaterial`). */
-  material(resolution: StoredCredentialResolution): Promise<CredentialMaterial>;
+  /**
+   * The store's local facts (`CachedCredentialReads.local`): a classification's inputs and a digest,
+   * never material. It may answer facts kept from an earlier read of a store that has not changed.
+   */
+  local(resolution: StoredCredentialResolution, options?: CredentialReadOptions): Promise<LocalCredentialFacts>;
   /** The newest passive reading for a credential: its statusLine file, or its attributed rollouts. */
   passiveUsage(subject: CredentialSubject): Promise<PassiveUsageRecord | undefined>;
-  /** The free reads. Each is one bodyless GET, and the Codex one is never login evidence. */
-  activeUsage(harness: HarnessKind, resolution: StoredCredentialResolution): Promise<FleetUsageProbeResult>;
+  /**
+   * The free read — one bodyless GET, and the Codex one is never login evidence — made with a token from
+   * ONE read of the store, whose facts come back with the answer so nothing reads the store again.
+   */
+  activeUsage(resolution: StoredCredentialResolution): Promise<ActiveUsageRead>;
   /** The explicit Codex refresh (Check now only). */
   readonly refresh: FleetTokenRefreshPort;
   readonly heads: CredentialStatusStore;
@@ -645,17 +726,21 @@ export class CredentialStatusService {
   /**
    * What the EXISTING usage pass calls for each credential: the passive reading, then — only when it
    * is older than the pass interval — the one free read. Never a refresh.
+   *
+   * The store is read at most ONCE: the free read's own material gives the facts the view is decided
+   * from, and a pass with no free read decides from the facts kept for an unchanged store.
    */
   async observe(subject: CredentialSubject): Promise<CredentialStatusView> {
     return await this.#flight.run(subject.id, async () => {
       const resolution = stored(subject.resolution);
+      let local: LocalCredentialFacts | undefined;
       if (resolution !== undefined) {
         const passive = await this.#passive(subject);
         if (needsActiveUsageRead(passive, this.ports.now(), this.ports.usageIntervalMs)) {
-          await this.#activeRead(subject.id, resolution);
+          local = await this.#activeRead(subject.id, resolution);
         }
       }
-      return await this.#view(subject, false);
+      return await this.#view(subject, false, local);
     });
   }
 
@@ -668,45 +753,50 @@ export class CredentialStatusService {
     return await this.#flight.run(subject.id, async () => {
       const resolution = stored(subject.resolution);
       if (resolution?.harness === 'codex') await this.#codexRefresh(subject.id, resolution);
-      if (resolution !== undefined) await this.#activeRead(subject.id, resolution);
-      return await this.#view(subject, false);
+      const local = resolution === undefined ? undefined : await this.#activeRead(subject.id, resolution);
+      return await this.#view(subject, false, local);
     });
   }
 
-  async #activeRead(id: string, resolution: StoredCredentialResolution): Promise<void> {
-    // The digest is taken BEFORE the read, so a login replaced while it was in flight is not the one
-    // its answer is pinned to.
-    const fingerprint = resolution.harness === 'claude' ? (await this.#classify(resolution)).fingerprint : undefined;
-    let result: FleetUsageProbeResult;
+  /** The free read, folded into the head. The facts of the material it read, when the read happened. */
+  async #activeRead(id: string, resolution: StoredCredentialResolution): Promise<LocalCredentialFacts | undefined> {
+    let read: ActiveUsageRead | undefined;
     try {
-      result = await this.ports.activeUsage(resolution.harness, resolution);
+      read = await this.ports.activeUsage(resolution);
     } catch {
-      result = { usageBased: true, ok: false, credentialSignal: 'inconclusive' };
+      read = undefined;
     }
+    const result = read?.result ?? { usageBased: true, ok: false, credentialSignal: 'inconclusive' };
     const at = this.ports.now();
     const head = (await this.ports.heads.read(id)) ?? {};
     const usage = activeUsageReading(resolution.harness === 'claude' ? 'anthropic-usage' : 'codex-usage', result, at);
     let next: CredentialStatusHead = usage === undefined ? head : { ...head, activeUsage: usage };
     // Codex's usage read is NOT login evidence (it answers for a stale token): it never touches the
-    // conclusion. Claude's is the proof, measured against the digest of the credential it read.
-    if (resolution.harness === 'claude') next = foldClaudeSignal(next, result.credentialSignal, at, fingerprint);
+    // conclusion. Claude's is the proof, pinned to the digest of the very material whose token it sent —
+    // so a login replaced while the read was out is never the one its answer lands on.
+    if (resolution.harness === 'claude') {
+      next = foldClaudeSignal(next, result.credentialSignal, at, read?.local.fingerprint);
+    }
     await this.ports.heads.write(id, next);
+    return read?.local;
   }
 
   async #codexRefresh(id: string, resolution: StoredCredentialResolution): Promise<void> {
-    const before = await this.#codexLocal(resolution);
+    // Every read here is FRESH: the refresh is judged by the file before and after, and a kept answer
+    // could hide the very write that proves it worked.
+    const before = await this.#codexLocal(resolution, true);
     // The canonical file's directory IS a Codex home: the refresh rewrites the one file every runtime
     // links to, which is what makes an explicit refresh safe now (§9.1).
     const home = resolution.harness === 'codex' ? dirname(resolution.canonicalFile) : '';
     let attempt: Awaited<ReturnType<FleetTokenRefreshPort['refresh']>>;
     try {
       attempt = await this.ports.refresh.refresh({ accountId: id, kind: 'codex', home }, async () =>
-        codexFileAdvanced(before, await this.#codexLocal(resolution)),
+        codexFileAdvanced(before, await this.#codexLocal(resolution, true)),
       );
     } catch {
       attempt = { outcome: 'error', reason: 'the refresh could not be run' };
     }
-    const after = await this.#codexLocal(resolution);
+    const after = await this.#codexLocal(resolution, true);
     const observation: CodexRefreshObservation = codexFileAdvanced(before, after)
       ? { kind: 'advanced' }
       : attempt.outcome === 'ran'
@@ -719,7 +809,12 @@ export class CredentialStatusService {
     await this.ports.heads.write(id, foldCodexRefresh(head, observation, this.ports.now(), after));
   }
 
-  async #view(subject: CredentialSubject, checking: boolean): Promise<CredentialStatusView> {
+  /** The status and usage, decided from `known` facts when a read just produced them, else the port's. */
+  async #view(
+    subject: CredentialSubject,
+    checking: boolean,
+    known?: LocalCredentialFacts,
+  ): Promise<CredentialStatusView> {
     const harness = subject.resolution.harness;
     const resolution = stored(subject.resolution);
     if (resolution === undefined) {
@@ -732,17 +827,18 @@ export class CredentialStatusService {
     }
     const head = (await this.ports.heads.read(subject.id)) ?? {};
     const passive = await this.#passive(subject);
+    const local = known ?? (await this.#local(resolution, false));
     const now = this.ports.now();
     const decided =
       resolution.harness === 'claude'
         ? decideClaudeStatus({
-            local: await this.#classify(resolution),
+            local: localReadingAt(local, now),
             head,
             ...(passive === undefined ? {} : { passive }),
             checking,
             now,
           })
-        : decideCodexStatus({ ...(await this.#codexLocal(resolution)), head, checking, now });
+        : decideCodexStatus({ ...codexLocalOf(local), head, checking, now });
     return {
       id: subject.id,
       harness,
@@ -762,28 +858,28 @@ export class CredentialStatusService {
     }
   }
 
-  async #classify(resolution: StoredCredentialResolution): Promise<LocalCredentialReading> {
+  async #local(resolution: StoredCredentialResolution, fresh: boolean): Promise<LocalCredentialFacts> {
     try {
-      return await this.ports.classify(resolution);
+      return await this.ports.local(resolution, fresh ? { fresh } : {});
     } catch {
-      return { state: 'unreadable' };
+      return UNREADABLE_CREDENTIAL_FACTS;
     }
   }
 
   async #codexLocal(
     resolution: StoredCredentialResolution,
+    fresh: boolean,
   ): Promise<{ readonly facts: CodexAuthFacts; readonly fingerprint?: string }> {
-    const [material, reading] = await Promise.all([
-      this.ports
-        .material(resolution)
-        .catch((): CredentialMaterial => ({ outcome: 'unreadable', reason: 'read failed' })),
-      this.#classify(resolution),
-    ]);
-    return {
-      facts: readCodexAuthFacts(material),
-      ...(reading.fingerprint === undefined ? {} : { fingerprint: reading.fingerprint }),
-    };
+    return codexLocalOf(await this.#local(resolution, fresh));
   }
+}
+
+/** A Codex store's facts as its status needs them: the `auth.json` facts and the file's digest. */
+function codexLocalOf(local: LocalCredentialFacts): { readonly facts: CodexAuthFacts; readonly fingerprint?: string } {
+  return {
+    facts: local.codex ?? { state: 'unreadable' },
+    ...(local.fingerprint === undefined ? {} : { fingerprint: local.fingerprint }),
+  };
 }
 
 /** The resolution, when it names a store a login can be read from. */
