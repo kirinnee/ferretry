@@ -12,7 +12,7 @@ import {
   DaemonUpdateService,
   type DaemonUpdateServiceOptions,
   type LatestReleaseAnswer,
-  UPDATE_LOOP_INTERVAL_MS,
+  UPDATE_BACKSTOP_INTERVAL_MS,
   UPDATE_REPORT_TIMEOUT_MS,
   type UpdateDocumentName,
   type UpdateDocuments,
@@ -104,7 +104,7 @@ function world(
   };
   const service = new DaemonUpdateService(serviceOptions, {
     every: (intervalMs, tick) => {
-      should(intervalMs).equal(UPDATE_LOOP_INTERVAL_MS);
+      should(intervalMs).equal(UPDATE_BACKSTOP_INTERVAL_MS);
       ticks.push(tick);
       return () => {
         disarmed.count += 1;
@@ -402,13 +402,80 @@ describe('installing automatically when idle', () => {
 
   it('never retries a release the last attempt failed or rolled back', async () => {
     const { service, documents, launched } = world();
-    await service.setAutoInstall(true);
     documents.store.set('report', report({ outcome: 'rolled-back' }));
+    await service.setAutoInstall(true);
     await service.tick();
     should(launched).deepEqual([]);
     documents.store.set('report', report({ target: '4.28.5', outcome: 'failed' }));
     await service.tick();
     should(launched).deepEqual(['4.29.0']);
+  });
+});
+
+describe('looking again when a turn may have ended', () => {
+  it('launches a waiting update on the first state write after the last turn ends', async () => {
+    // Arrange — a release is known, and a ferret is mid-turn when the update is asked for.
+    const { service, launched, activity } = world();
+    await service.tick();
+    activity.midTurn = 1;
+    await service.start({ target: '4.29.0', when: 'when-idle' });
+
+    // Act — a write while still mid-turn, then the write that ends the turn.
+    service.activityChanged();
+    await service.tick();
+    should(launched).deepEqual([]);
+    activity.midTurn = 0;
+    service.activityChanged();
+    await service.tick();
+
+    // Assert
+    should(launched).deepEqual(['4.29.0']);
+  });
+
+  it('looks at nothing when no update is waiting on idle', async () => {
+    // Arrange
+    const { service, asked, launched } = world();
+    await service.tick();
+    const before = asked.count;
+
+    // Act
+    service.activityChanged();
+    await service.tick();
+
+    // Assert — no launch, and the joined pass asked nobody again inside the interval.
+    should(launched).deepEqual([]);
+    should(asked.count).equal(before);
+  });
+
+  it('installs automatically at the next idle moment once turned on', async () => {
+    // Arrange — mid-turn when the setting is turned on.
+    const { service, launched, activity } = world();
+    await service.tick();
+    activity.midTurn = 2;
+    await service.setAutoInstall(true);
+    await service.tick();
+    should(launched).deepEqual([]);
+
+    // Act
+    activity.midTurn = 0;
+    service.activityChanged();
+    await service.tick();
+
+    // Assert
+    should(launched).deepEqual(['4.29.0']);
+  });
+
+  it('joins a pass already running rather than starting a second', async () => {
+    // Arrange
+    const { service, asked } = world();
+
+    // Act
+    const first = service.tick();
+    const second = service.tick();
+    await Promise.all([first, second]);
+
+    // Assert
+    should(asked.count).equal(1);
   });
 });
 

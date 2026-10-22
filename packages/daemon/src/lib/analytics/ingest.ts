@@ -99,3 +99,15 @@ export function gateAnalyticsIngest(evidence: AnalyticsIngestEvidence): Analytic
   if (!readableInstant(createdAt)) return { kind: 'refused', reason: 'unreadable_creation_instant' };
   return { kind: 'ingest', status, createdAt, finishedAt };
 }
+
+/**
+ * Whether a state document says its session has ended, by the statuses the gate ingests.
+ *
+ * NOT THE GATE. It reads one field of a document storage just wrote, to decide whether that write is
+ * worth an ingestion pass at all; the pass still judges every session by {@link gateAnalyticsIngest}.
+ */
+export function analyticsStateEnded(state: unknown): boolean {
+  if (typeof state !== 'object' || state === null || !('status' in state)) return false;
+  const status = knownStatus(typeof state.status === 'string' ? state.status : null);
+  return status !== null && TERMINAL_ANALYTICS_STATUSES.has(status);
+}

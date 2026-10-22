@@ -27,11 +27,15 @@ import type {
 } from './ports.ts';
 
 /**
- * How often the loop looks again. NOT how often GitHub is asked — that is at most every
- * `UPDATE_CHECK_INTERVAL_MS`. A minute is how long an update waiting for idle may lag the moment the
- * last ferret finishes its turn.
+ * The backstop: how often the loop looks again with nothing to tell it to. NOT how often GitHub is
+ * asked — that is at most every `UPDATE_CHECK_INTERVAL_MS`, at the first look after it falls due.
+ *
+ * An update waiting for idle no longer waits on this. The daemon tells the service whenever a session's
+ * state is written ({@link DaemonUpdateService.activityChanged}), and a write is how the last ferret's
+ * turn ends; this cadence is left to what has no event — a settings document edited by hand, the
+ * six-hourly ask.
  */
-export const UPDATE_LOOP_INTERVAL_MS = 60_000;
+export const UPDATE_BACKSTOP_INTERVAL_MS = 15 * 60_000;
 
 /**
  * How long a started update may go without reporting back before it is called failed. Long enough
@@ -86,8 +90,10 @@ export interface DaemonUpdateSubsystem {
   view(): Promise<DaemonUpdateView>;
   start(request: DaemonUpdateStartRequest): Promise<DaemonUpdateView>;
   setAutoInstall(autoInstall: boolean): Promise<DaemonUpdateView>;
-  /** Arms the boot check and the loop; answers the disarm. */
+  /** Arms the boot check and the backstop; answers the disarm. */
   arm(): () => void;
+  /** A session's state was written: a turn may have ended, so an update waiting for idle may go now. */
+  activityChanged(): void;
 }
 
 /**
@@ -110,6 +116,10 @@ export class DaemonUpdateService implements DaemonUpdateSubsystem {
   #check: UpdateCheck | undefined;
   #checking: Promise<UpdateCheck> | undefined;
   #pending: Pending | undefined;
+  /** The last pass stopped only because a ferret was mid-turn: the next idle moment is worth a look. */
+  #idleWanted = false;
+  /** The pass running now, which every other ask joins: two passes could each launch the update. */
+  #passing: Promise<void> | undefined;
 
   constructor(
     options: DaemonUpdateServiceOptions,
@@ -121,31 +131,55 @@ export class DaemonUpdateService implements DaemonUpdateSubsystem {
 
   arm(): () => void {
     void this.tick();
-    return this.scheduler.every(UPDATE_LOOP_INTERVAL_MS, () => void this.tick());
+    return this.scheduler.every(UPDATE_BACKSTOP_INTERVAL_MS, () => void this.tick());
   }
 
-  /** One pass: ask for the latest release when it is due, then move a waiting or automatic update on. */
+  /**
+   * Looks again when, and only when, the last pass was held back by a ferret mid-turn. Every other write
+   * costs one comparison: this is called for every state document the daemon writes.
+   */
+  activityChanged(): void {
+    if (this.#idleWanted) void this.tick();
+  }
+
+  /**
+   * One pass: ask for the latest release when it is due, then move a waiting or automatic update on. An
+   * ask while a pass runs joins it.
+   */
   async tick(): Promise<void> {
+    this.#passing ??= this.#pass().finally(() => {
+      this.#passing = undefined;
+    });
+    await this.#passing;
+  }
+
+  async #pass(): Promise<void> {
+    this.#idleWanted = false;
     try {
       const check = await this.#refreshIfDue();
       const job = await this.#job();
       if (job?.state === 'running') return;
-      const midTurn = await this.#options.activity.midTurn();
-      if (midTurn > 0) return;
-      if (job?.state === 'waiting-for-idle') {
-        await this.#launch(job.target);
+      const target = job?.state === 'waiting-for-idle' ? job.target : await this.#automaticTarget(check, job);
+      if (target === undefined) return;
+      if ((await this.#options.activity.midTurn()) > 0) {
+        this.#idleWanted = true;
         return;
       }
-      const latest = knownLatestRelease(check);
-      if (!(await this.#autoInstall()) || latest === undefined) return;
-      if (!isUpdateAvailable(this.#options.current, latest)) return;
-      if ((await this.#plan()).kind !== 'self') return;
-      // Never retry the release the last automatic attempt already failed or rolled back.
-      if (job?.state === 'finished' && job.report.target === latest.version) return;
-      await this.#launch(latest.version);
+      await this.#launch(target);
     } catch {
       // A pass that failed changes nothing; the next one tries again and the view says what it knows.
     }
+  }
+
+  /** The release an automatic update would install now, if one is turned on and due. */
+  async #automaticTarget(check: UpdateCheck, job: UpdateJob | null): Promise<string | undefined> {
+    const latest = knownLatestRelease(check);
+    if (!(await this.#autoInstall()) || latest === undefined) return undefined;
+    if (!isUpdateAvailable(this.#options.current, latest)) return undefined;
+    if ((await this.#plan()).kind !== 'self') return undefined;
+    // Never retry the release the last automatic attempt already failed or rolled back.
+    if (job?.state === 'finished' && job.report.target === latest.version) return undefined;
+    return latest.version;
   }
 
   async view(): Promise<DaemonUpdateView> {
@@ -199,6 +233,7 @@ export class DaemonUpdateService implements DaemonUpdateSubsystem {
     // `confirmMidTurn` is not read: a daemon from before this one asked for it, and this one never refuses.
     if (request.when === 'when-idle' && (await this.#options.activity.midTurn()) > 0) {
       this.#pending = { state: 'waiting-for-idle', target: request.target, requestedAt: this.#nowIso() };
+      this.#idleWanted = true;
     } else {
       await this.#launch(request.target);
     }
@@ -207,6 +242,11 @@ export class DaemonUpdateService implements DaemonUpdateSubsystem {
 
   async setAutoInstall(autoInstall: boolean): Promise<DaemonUpdateView> {
     await this.#options.documents.write('settings', { autoInstall });
+    // Turned on, an available update installs at the next idle moment rather than the next backstop.
+    if (autoInstall) {
+      this.#idleWanted = true;
+      this.activityChanged();
+    }
     return await this.view();
   }
 
