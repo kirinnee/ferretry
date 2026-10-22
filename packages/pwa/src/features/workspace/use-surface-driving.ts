@@ -21,11 +21,12 @@
  * control, because a control the daemon would refuse is worse than none.
  */
 
-import type { FyEvent, IFyApiClient, SurfaceAsked, SurfaceKind, SurfaceOpened } from '@ferretry/protocol';
+import type { IFyApiClient, SurfaceAsked, SurfaceKind, SurfaceOpened } from '@ferretry/protocol';
 import { SurfaceControlViewSchema } from '@ferretry/protocol';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
 import type { DaemonSessionScope } from '../../lib/daemon-scope.ts';
+import { type FeedAwarePollEnvironment, type LiveFeedSignal, startFeedAwarePoll } from '../../lib/feed-aware-poll.ts';
 import {
   activeSurfaceDriving,
   applySurfaceEvent,
@@ -71,13 +72,17 @@ export const NO_SURFACE_DRIVING: SurfaceDriving = Object.freeze({
   asked: [],
 });
 
-/** How often the control views are re-read when no event has said anything. */
+/** How often the control views are re-read while no live feed is saying what changed. */
 export const SURFACE_CONTROL_POLL_MS = 10_000;
 
-/** A session's live journal, as the page's host already subscribes to it. */
-export interface SurfaceEventFeed {
-  readonly subscribe: (listener: (event: FyEvent) => void) => () => void;
-}
+/**
+ * The safety-net re-read while the feed is live: every control change is a journaled `surface.*` event,
+ * folded in as it arrives, so the read only catches what a missed frame could have left behind.
+ */
+export const SURFACE_CONTROL_LIVE_POLL_MS = 120_000;
+
+/** A session's live journal, as the page's host already subscribes to it, and whether it is live. */
+export type SurfaceEventFeed = LiveFeedSignal;
 
 /** A one-shot timer, injectable so a suite drives the lapse without waiting for it. */
 export type SurfaceTimer = (callback: () => void, delayMs: number) => () => void;
@@ -87,6 +92,9 @@ export interface SurfaceDrivingDependencies {
   readonly client: (daemon: DaemonConnection) => Promise<Pick<IFyApiClient, 'request'>>;
   readonly events?: SurfaceEventFeed;
   readonly pollMs?: number;
+  readonly livePollMs?: number;
+  /** The poll's timers and visibility; the browser's when absent. */
+  readonly pollEnvironment?: FeedAwarePollEnvironment;
   readonly now?: () => number;
   readonly timer?: SurfaceTimer;
 }
@@ -129,12 +137,15 @@ export function useSurfaceDriving(
   const client = dependencies?.client;
   const events = dependencies?.events;
   const pollMs = dependencies?.pollMs ?? SURFACE_CONTROL_POLL_MS;
+  const livePollMs = dependencies?.livePollMs ?? SURFACE_CONTROL_LIVE_POLL_MS;
+  const pollEnvironment = dependencies?.pollEnvironment;
   const now = dependencies?.now ?? Date.now;
   const timer = dependencies?.timer ?? defaultTimer;
   /** Bumped on every re-scope, so an answer for the previous session is dropped, not shown. */
   const epoch = useRef(0);
 
-  // Read both kinds now and on every poll; reset the moment the scope changes.
+  // Read both kinds now and on every poll; reset the moment the scope changes. The poll stands back
+  // while the feed is live (`feed-aware-poll.ts`), because the events below say every change.
   useEffect(() => {
     epoch.current += 1;
     const mine = epoch.current;
@@ -153,10 +164,14 @@ export function useSurfaceDriving(
             // Unread or refused (no grant) proves nothing, and stays unread: no marker, no control.
           });
     };
-    read();
-    const poll = setInterval(read, pollMs);
-    return () => clearInterval(poll);
-  }, [client, connection, scope, pollMs]);
+    return startFeedAwarePoll({
+      read,
+      everyMs: pollMs,
+      liveEveryMs: livePollMs,
+      ...(events === undefined ? {} : { feed: events }),
+      ...(pollEnvironment === undefined ? {} : { environment: pollEnvironment }),
+    });
+  }, [client, connection, scope, pollMs, livePollMs, events, pollEnvironment]);
 
   // Fold the session's own control events in as they arrive.
   useEffect(() => {

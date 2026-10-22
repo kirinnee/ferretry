@@ -449,7 +449,10 @@ export function SessionChatPage({
     opened: driving.opened,
     asked: driving.asked,
   });
-  const browserPages = useSessionBrowser(scope, connection, { client: daemonClient });
+  const browserPages = useSessionBrowser(scope, connection, {
+    client: daemonClient,
+    ...(surfaceEvents === undefined ? {} : { events: surfaceEvents }),
+  });
   const handoffs = useMemo(
     () => ({
       daemon: connection,
@@ -458,7 +461,7 @@ export function SessionChatPage({
     }),
     [connection, session.config.id, daemonClient],
   );
-  const terminals = useSessionTerminals(deck, connection, scope);
+  const terminals = useSessionTerminals(deck, connection, scope, surfaceEvents);
   const [utility, setUtility] = useState<SessionUtility | null>(null);
   const utilityId = useId();
   const search = useSessionSearch();

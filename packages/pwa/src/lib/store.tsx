@@ -59,6 +59,10 @@ import { DaemonNotificationPreferences } from './notification-preferences.ts';
 import { type PairingSeed, pairedDaemonConnection } from './pairing.ts';
 import { type PairingLegFailure, PairingUnreachableError } from './pairing-unreachable.ts';
 import type { CredentialsPort } from './passkeys.ts';
+import { browserLongTaskObserver, type LongTaskObserverPort, observeLongTasks } from './performance/main-thread.ts';
+import { PerformanceRecorder } from './performance/recorder.ts';
+import { recordingFetch } from './performance/recording-fetch.ts';
+import { routePattern } from './performance/route-pattern.ts';
 import { DaemonPinClient } from './pin-client.ts';
 import { browserPresenceEnvironment, PresenceTracker } from './presence.ts';
 import { DaemonProjectsStore, daemonProjectsPort } from './projects-store.ts';
@@ -433,6 +437,12 @@ export interface AppStore {
    */
   readonly connectionHealth: ConnectionHealth;
   /**
+   * WHAT THIS BROWSER SPENT ITS TIME ON — every daemon request by route, the live streams it opened,
+   * long tasks and render timings — for the Performance report beside the daemon's own. Optional only
+   * so a suite's partial store need not build one; the store this module opens always has one.
+   */
+  readonly performance?: PerformanceRecorder;
+  /**
    * The passkey prompt every daemon request shares: a refusal for want of a step-up raises it once,
    * and the request is sent again when the person has confirmed. Rendered by `StepUpDialog`.
    */
@@ -505,6 +515,10 @@ export interface CreateAppStoreOptions {
   readonly connectionHealthEnvironment?: ConnectionHealthEnvironment;
   /** `online`, foreground and network-change events by default. Injected so a suite fires them. */
   readonly connectionSignals?: ConnectionSignalEnvironment;
+  /** Where this document records what its daemon requests cost; a fresh recorder on the page clock by default. */
+  readonly performance?: PerformanceRecorder;
+  /** The browser's long-task reports by default; a suite hands in its own, or an unsupported one. */
+  readonly longTasks?: LongTaskObserverPort;
 }
 
 /** How long one reconnect probe may wait for its answer before the attempt counts as failed. */
@@ -633,7 +647,12 @@ export async function createAppStore(options: CreateAppStoreOptions = {}): Promi
     // daemon's own carriers have all failed, so nothing on the ordinary path pays for the read.
     hostedRelay: async () => await hostedRelayUrl,
   });
-  const carried = carrier.fetch;
+  const performanceRecorder =
+    options.performance ?? new PerformanceRecorder({ now: () => globalThis.performance.now() });
+  /** Every daemon-bound request, recorded as it leaves (`performance/recording-fetch.ts`). */
+  const carried = recordingFetch(carrier.fetch, performanceRecorder);
+  // Document-lifetime, like the recorder: a browser that reports no long tasks is recorded as such.
+  observeLongTasks(performanceRecorder, options.longTasks ?? browserLongTaskObserver());
   /**
    * The same carrier for the stores that read without the typed client, with an identical read still
    * in flight to the same daemon joined rather than sent twice (`shared-reads.ts`): several surfaces
@@ -674,10 +693,10 @@ export async function createAppStore(options: CreateAppStoreOptions = {}): Promi
       (async daemon =>
         await daemonApiClient(daemon, {
           transport: new DaemonHttpTransport(daemon, carried),
-          eventTransport: new DaemonEventTransport(
-            daemon,
-            async (paired, request) => await carrier.openStream(paired, request),
-          ),
+          eventTransport: new DaemonEventTransport(daemon, async (paired, request) => {
+            performanceRecorder.recordStream(routePattern('STREAM', request.path));
+            return await carrier.openStream(paired, request);
+          }),
         })),
   );
   const sessionCache = new SessionCache(
@@ -810,7 +829,7 @@ export async function createAppStore(options: CreateAppStoreOptions = {}): Promi
   carrier.onConnected(daemon => {
     void (async () => {
       const request = daemonRequest(daemon, '/v1/carriers', { cache: 'no-store' });
-      const response = await carrier.fetch(request.url, request.init);
+      const response = await carried(request.url, request.init);
       if (!response.ok) return;
       const view = DaemonCarriersViewSchema.safeParse(await response.json().catch(() => undefined));
       if (!view.success) return;
@@ -819,6 +838,7 @@ export async function createAppStore(options: CreateAppStoreOptions = {}): Promi
   });
 
   return {
+    performance: performanceRecorder,
     carrier,
     carrierPreferences,
     webrtcAvailable: carrierDialers.webrtc !== undefined,
@@ -1203,10 +1223,11 @@ export function useDaemonFetch(): DaemonFetch {
   // ONE identity per store, read through at call time. Effects list this fetch as a dependency, so a
   // carrier whose `fetch` member is re-read as a fresh function (a wrapped router hands out a new
   // bound one per read) would otherwise restart every read on every render, forever.
-  return useMemo<DaemonFetch>(
-    () => (store === null ? browserFetch : async (input, init) => await store.carrier.fetch(input, init)),
-    [store],
-  );
+  return useMemo<DaemonFetch>(() => {
+    if (store === null) return browserFetch;
+    const send: DaemonFetch = async (input, init) => await store.carrier.fetch(input, init);
+    return store.performance === undefined ? send : recordingFetch(send, store.performance);
+  }, [store]);
 }
 
 /**
@@ -1223,7 +1244,10 @@ export function useDaemonStreamOpener(): DaemonStreamOpener {
         ? async () => {
             throw new Error('no paired carrier is available to open this stream');
           }
-        : async (daemon, request) => await store.carrier.openStream(daemon, request),
+        : async (daemon, request) => {
+            store.performance?.recordStream(routePattern('STREAM', request.path));
+            return await store.carrier.openStream(daemon, request);
+          },
     [store],
   );
 }

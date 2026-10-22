@@ -233,14 +233,23 @@ export const drivingAgentName = (driving: SurfaceDriving): string => driving.age
 /**
  * A session page's share of its host's live feed: the host publishes every event it receives, and the
  * page's control seam subscribes. One subscription to `/v1/events` per session, however many readers.
+ *
+ * It also carries whether that feed is LIVE right now, because a reader that would otherwise poll can
+ * stand back while it is (`feed-aware-poll.ts`): the host says so as the feed's status moves.
  */
 export interface SurfaceEventHub {
   readonly subscribe: (listener: (event: FyEvent) => void) => () => void;
   readonly publish: (event: FyEvent) => void;
+  readonly isLive: () => boolean;
+  readonly subscribeLive: (listener: (live: boolean) => void) => () => void;
+  /** Says the feed is (or is no longer) live; telling it what it already knows tells nobody. */
+  readonly setLive: (live: boolean) => void;
 }
 
 export const createSurfaceEventHub = (): SurfaceEventHub => {
   const listeners = new Set<(event: FyEvent) => void>();
+  const liveListeners = new Set<(live: boolean) => void>();
+  let live = false;
   return {
     subscribe: listener => {
       listeners.add(listener);
@@ -250,6 +259,18 @@ export const createSurfaceEventHub = (): SurfaceEventHub => {
     },
     publish: event => {
       for (const listener of [...listeners]) listener(event);
+    },
+    isLive: () => live,
+    subscribeLive: listener => {
+      liveListeners.add(listener);
+      return () => {
+        liveListeners.delete(listener);
+      };
+    },
+    setLive: next => {
+      if (next === live) return;
+      live = next;
+      for (const listener of [...liveListeners]) listener(next);
     },
   };
 };
