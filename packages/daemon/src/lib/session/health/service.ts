@@ -14,6 +14,7 @@ import type {
   SelfCheckLedger,
   SessionHealthEvent,
   SessionHealthObservation,
+  SurveyedSession,
 } from './types.ts';
 import { emptySelfCheckLedger } from './wedge.ts';
 
@@ -34,11 +35,23 @@ export interface SessionHealthInventory {
 }
 
 /**
+ * One walk of the session directories.
+ *
+ * A check takes ONE and hands it to every stage that needs to know which sessions are on disk — the
+ * consistency pass and the exit observer each used to walk the whole state home for themselves, on
+ * every tick, which on a large fleet behind endpoint security is most of what a tick costs.
+ */
+export interface SessionSurveyPort {
+  survey(): Promise<readonly SurveyedSession[]>;
+}
+
+/**
  * Reconciling the disposable index against the authoritative session directories. `deep` asks it to
- * re-verify per-session state rather than only compare membership.
+ * re-verify per-session state rather than only compare membership; `survey` is this check's walk of
+ * the directories, so the pass compares against it rather than taking its own.
  */
 export interface ConsistencyPassPort {
-  run(deep: boolean): Promise<IncoherencePass>;
+  run(deep: boolean, survey: readonly SurveyedSession[]): Promise<IncoherencePass>;
 }
 
 /** The two repairs a self-check is allowed to perform. Both must be safe to run on a healthy fleet. */
@@ -54,8 +67,11 @@ export interface SessionHealthRepairPort {
  * may kill or launch anything — the whole pass must be free to run on a timer.
  */
 export interface SessionExitPort {
-  /** Sessions whose status claims a live agent while their registered pane is proven dead or gone. */
-  observe(): Promise<readonly SessionExitObservation[]>;
+  /**
+   * Sessions whose status claims a live agent while their registered pane is proven dead or gone,
+   * looked for among the sessions this check's `survey` found on disk.
+   */
+  observe(survey: readonly SurveyedSession[]): Promise<readonly SessionExitObservation[]>;
   /**
    * Records the transition, but only if the session still reads as it was observed. Resolves false
    * when anything moved in between — a resume that relaunched it wins, and is left alone.
@@ -69,6 +85,7 @@ export interface SessionHealthEventSink {
 
 export interface SessionHealthPorts {
   readonly inventory: SessionHealthInventory;
+  readonly survey: SessionSurveyPort;
   readonly consistency: ConsistencyPassPort;
   readonly repair: SessionHealthRepairPort;
   readonly exits: SessionExitPort;
@@ -147,12 +164,19 @@ export class SessionHealthService {
     );
     this.selfChecks = planned.ledger;
     for (const event of planned.plan.events) await this.emit(event);
+    // ONE walk of the session directories serves the consistency pass and the exit observer. A walk
+    // that failed proves nothing either would have read from it, so both are skipped exactly as if
+    // each had failed its own — the next tick, at most one interval away, walks again.
+    const survey = await stage.run('survey', async () => await this.ports.survey.survey().catch(() => undefined));
     // The consistency pass runs before repair: starting a monitor for a session the index does not
     // know about would write its observations into a row that is about to be replaced.
-    const escalated = await stage.run('reconcile', async () => await this.reconcile(planned.plan.deepPass, nowMs));
+    const escalated = await stage.run(
+      'reconcile',
+      async () => await this.reconcile(planned.plan.deepPass, nowMs, survey),
+    );
     // After the consistency pass for the same reason repair is: a row about to be replaced is not
     // one to write a terminal status into.
-    const exited = await stage.run('exit observer', async () => await this.settleExits());
+    const exited = await stage.run('exit observer', async () => await this.settleExits(survey));
     // Named only when there is something to repair, so a healthy tick adds no empty stage to a profile.
     const repairs =
       planned.plan.startMonitors.length === 0 && !planned.plan.rearmWarden
@@ -193,8 +217,13 @@ export class SessionHealthService {
     });
   }
 
-  private async reconcile(deep: boolean, nowMs: number): Promise<boolean> {
-    const pass = await this.ports.consistency.run(deep).catch(() => undefined);
+  private async reconcile(
+    deep: boolean,
+    nowMs: number,
+    survey: readonly SurveyedSession[] | undefined,
+  ): Promise<boolean> {
+    const pass =
+      survey === undefined ? undefined : await this.ports.consistency.run(deep, survey).catch(() => undefined);
     // A consistency pass that could not run proves nothing about the index, so it must not advance
     // the streak that ends in a restart — an unreachable store would otherwise restart the daemon.
     if (pass === undefined) return false;
@@ -218,8 +247,9 @@ export class SessionHealthService {
    * leave every other exited session reading `running`. A pass that could not observe at all is
    * simply retried by the next tick, which is at most one interval away.
    */
-  private async settleExits(): Promise<readonly string[]> {
-    const observed = await this.ports.exits.observe().catch(() => [] as readonly SessionExitObservation[]);
+  private async settleExits(survey: readonly SurveyedSession[] | undefined): Promise<readonly string[]> {
+    if (survey === undefined) return [];
+    const observed = await this.ports.exits.observe(survey).catch(() => [] as readonly SessionExitObservation[]);
     const exited: string[] = [];
     for (const observation of observed) {
       const transition = exitedSessionTransition(observation);

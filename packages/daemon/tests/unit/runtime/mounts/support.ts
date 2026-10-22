@@ -1264,6 +1264,7 @@ export function healthSubsystem(world: HealthWorld = {}): DaemonHealthSubsystem 
           supervisesWarden: world.supervisesWarden ?? false,
         }),
       },
+      survey: { survey: async () => [] },
       consistency: { run: async () => clean },
       repair: { startMonitor: async () => {}, rearmWarden: async () => {} },
       activities: UNNAMED_SELF_CHECK_STAGES,

@@ -5,6 +5,7 @@ import type { SessionHealthSettings } from '../../../lib/session/health/settings
 import {
   type IncoherencePass,
   type SelfCheckActivityPort,
+  type SurveyedSession,
   UNNAMED_SELF_CHECK_STAGES,
 } from '../../../lib/session/health/types.ts';
 import { detectZombies, type TerminalSessionActivity } from '../../../lib/session/health/zombie.ts';
@@ -32,8 +33,9 @@ export class StorageConsistencyPass implements ConsistencyPassPort {
     private readonly stages: SelfCheckActivityPort = UNNAMED_SELF_CHECK_STAGES,
   ) {}
 
-  async run(deep: boolean): Promise<IncoherencePass> {
-    const survey = await this.storage.surveySessionDirectories();
+  /** `survey` is the check's own walk of the directories; without one, the pass takes its own. */
+  async run(deep: boolean, surveyed?: readonly SurveyedSession[]): Promise<IncoherencePass> {
+    const survey = surveyed ?? (await this.storage.surveySessionDirectories());
     const onDisk = survey.map(session => session.id);
     // Journal existence is established BEFORE the membership early return. Nothing a reconcile can
     // do brings a deleted file back, so this is the one finding a normal tick must never miss:

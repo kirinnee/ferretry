@@ -353,6 +353,23 @@ describe('storage consistency pass', () => {
     await opened.storage.close();
   });
 
+  it('should compare the index against the walk it is handed rather than taking its own', async () => {
+    // Arrange — the session is on disk and indexed; only the handed walk says otherwise.
+    const home = await temporaryHome();
+    const opened = await openStorage(home);
+    await opened.storage.writeState(parseSessionId('known'), { id: 'known', status: 'running' });
+    const pass = new StorageConsistencyPass(opened.storage, new StateFileSystem(paths(home)), paths(home), SETTINGS);
+
+    // Act
+    const handed = await pass.run(false, []);
+    const own = await pass.run(false, await opened.storage.surveySessionDirectories());
+
+    // Assert
+    should(handed.staleRows).deepEqual(['known']);
+    should(own.staleRows).deepEqual([]);
+    await opened.storage.close();
+  });
+
   it('should not look for zombies on a shallow pass', async () => {
     // Arrange
     const home = await temporaryHome();

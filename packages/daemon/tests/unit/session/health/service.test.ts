@@ -16,7 +16,9 @@ import {
   type SessionHealthEvent,
   type SessionHealthPorts,
   SessionHealthService,
+  type SurveyedSession,
 } from '../../../../src/lib/session/health/index.ts';
+import { parseSessionId } from '../../../../src/lib/session-id.ts';
 
 const SETTINGS = defaultSessionHealthSettings;
 const AT = '2026-07-31T10:00:00.000Z';
@@ -56,6 +58,11 @@ class Harness {
   elapsed = 1_000_000;
   /** Every stage the service named, in the order it ran them. */
   readonly stages: string[] = [];
+  /** The walk the survey port answers with, or the error it fails with. */
+  survey: readonly SurveyedSession[] | Error = [{ id: parseSessionId('alive'), journalLost: false }];
+  surveys = 0;
+  /** The walk each stage was handed, so a test can prove they shared one. */
+  readonly handed: { readonly stage: string; readonly survey: readonly SurveyedSession[] }[] = [];
   exitObservations: readonly SessionExitObservation[] | Error = [];
   readonly settled: { readonly id: string; readonly transition: ExitedSessionTransition }[] = [];
   /** Sessions whose settle answers false (moved since), or throws when mapped to an Error. */
@@ -72,7 +79,8 @@ class Harness {
   private passIndex = 0;
 
   readonly consistency: ConsistencyPassPort = {
-    run: async () => {
+    run: async (_deep, survey) => {
+      this.handed.push({ stage: 'consistency', survey });
       const next = this.passes[Math.min(this.passIndex, this.passes.length - 1)] ?? pass();
       this.passIndex += 1;
       if (next instanceof Error) throw next;
@@ -90,9 +98,17 @@ class Harness {
   ports(): SessionHealthPorts {
     return {
       inventory: { observe: async () => this.snapshots },
+      survey: {
+        survey: async () => {
+          this.surveys += 1;
+          if (this.survey instanceof Error) throw this.survey;
+          return this.survey;
+        },
+      },
       consistency: this.consistency,
       exits: {
-        observe: async () => {
+        observe: async survey => {
+          this.handed.push({ stage: 'exits', survey });
           if (this.exitObservations instanceof Error) throw this.exitObservations;
           return this.exitObservations;
         },
@@ -162,7 +178,7 @@ describe('session health service', () => {
     await harness.service().selfCheck();
 
     // Assert
-    should(harness.stages).deepEqual(['inventory', 'reconcile', 'exit observer']);
+    should(harness.stages).deepEqual(['inventory', 'survey', 'reconcile', 'exit observer']);
   });
 
   it('should name the repair stage when the check has something to repair', async () => {
@@ -173,7 +189,7 @@ describe('session health service', () => {
     await harness.service().selfCheck();
 
     // Assert
-    should(harness.stages).deepEqual(['inventory', 'reconcile', 'exit observer', 'repair']);
+    should(harness.stages).deepEqual(['inventory', 'survey', 'reconcile', 'exit observer', 'repair']);
   });
 
   it('should nest its stages inside the activity the check runs in, so a profile splits its time', async () => {
@@ -189,10 +205,43 @@ describe('session health service', () => {
     // Assert — each stage is reported as it ends, and the check itself last.
     should(labels).deepEqual([
       'self-check › inventory',
+      'self-check › survey',
       'self-check › reconcile',
       'self-check › exit observer',
       'self-check',
     ]);
+  });
+
+  it('should walk the session directories once a check and hand that walk to every stage', async () => {
+    // Arrange
+    const harness = new Harness(snapshot());
+    const service = harness.service();
+
+    // Act
+    await service.selfCheck();
+    await service.selfCheck();
+
+    // Assert — one walk per check, and the same one for the consistency pass and the exit observer.
+    should(harness.surveys).equal(2);
+    should(harness.handed.map(handed => handed.stage)).deepEqual(['consistency', 'exits', 'consistency', 'exits']);
+    for (const handed of harness.handed) should(handed.survey).equal(harness.survey);
+  });
+
+  it('should skip both stages that need a walk when the walk fails, and not count it toward a restart', async () => {
+    // Arrange
+    const harness = new Harness(snapshot(), [pass({ unhealable: ['ghost'] })]);
+    harness.survey = new Error('the state home is unreadable');
+    harness.exitObservations = [];
+    const service = harness.service();
+
+    // Act
+    const actual = [await service.selfCheck(), await service.selfCheck(), await service.selfCheck()];
+
+    // Assert
+    should(harness.handed).deepEqual([]);
+    should(actual.map(outcome => outcome.escalated)).deepEqual([false, false, false]);
+    should(actual.map(outcome => outcome.exited)).deepEqual([[], [], []]);
+    should(harness.events).deepEqual([]);
   });
 
   it('should restart the monitors of live sessions that lost theirs', async () => {

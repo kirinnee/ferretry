@@ -7380,6 +7380,9 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
             bootstrapFinished: () => bootProgress?.finished ?? false,
             bootstrapErrors: () => [],
           }),
+          // One walk of the session directories a check, handed to the consistency pass and the exit
+          // observer alike — each used to take its own.
+          survey: { survey: async () => await storage.surveySessionDirectories() },
           consistency: new StorageConsistencyPass(storage, stateFiles, paths, settings, activities),
           repair: new UnmountedSupervisionRepair(),
           // The same private server, registration ledger and launch gate the lifecycle and the revive

@@ -19,10 +19,11 @@ import {
   conversationFromArguments,
   type HarnessKind,
 } from '@ferretry/fleet';
-import { tryParseSessionId, type SessionId } from '../session-id.ts';
+import { type SessionId, tryParseSessionId } from '../session-id.ts';
 import type { ExitedSessionTransition, SessionExitObservation } from './health/exit.ts';
 import type { SessionExitPort } from './health/service.ts';
-import { TERMINAL_RESUME_STATUSES, type ResumableSessionStatus } from './resume/types.ts';
+import type { SurveyedSession } from './health/types.ts';
+import { type ResumableSessionStatus, TERMINAL_RESUME_STATUSES } from './resume/types.ts';
 
 /** What a launch path needs: claim before a pane exists, release once the session is over. */
 export interface SessionConversationLeases {
@@ -122,8 +123,8 @@ export class LeaseReleasingSessionExits implements SessionExitPort {
     private readonly leases: Pick<SessionConversationLeases, 'release'>,
   ) {}
 
-  async observe(): Promise<readonly SessionExitObservation[]> {
-    return await this.exits.observe();
+  async observe(survey: readonly SurveyedSession[]): Promise<readonly SessionExitObservation[]> {
+    return await this.exits.observe(survey);
   }
 
   async settle(observation: SessionExitObservation, transition: ExitedSessionTransition): Promise<boolean> {

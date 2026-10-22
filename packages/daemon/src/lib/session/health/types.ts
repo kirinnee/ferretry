@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import type { SessionId } from '../../session-id.ts';
 
 /**
  * Elapsed time from a source that cannot move backwards.
@@ -29,6 +30,15 @@ export interface SelfCheckActivityPort {
 export const UNNAMED_SELF_CHECK_STAGES: SelfCheckActivityPort = Object.freeze({
   run: async <T>(_name: string, work: () => Promise<T>): Promise<T> => await work(),
 });
+
+/**
+ * One session directory as a walk of the state home found it: published, and whether the journal it
+ * owes has vanished. No document or journal bytes are read to know either.
+ */
+export interface SurveyedSession {
+  readonly id: SessionId;
+  readonly journalLost: boolean;
+}
 
 /** One firing of the self-check timer: a monotonic reading for the gap, a wall instant to report. */
 export interface SelfCheckTick {
