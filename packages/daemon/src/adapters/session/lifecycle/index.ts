@@ -6,5 +6,4 @@ export * from './storage-session-lifecycle-repository.ts';
 export * from './time-session-id-factory.ts';
 export * from './tmux-session-lifecycle-launcher.ts';
 export * from './durable-terminal-pane-reap.ts';
-export * from './process-incarnation.ts';
 export * from './tmux-session-exit-observer.ts';

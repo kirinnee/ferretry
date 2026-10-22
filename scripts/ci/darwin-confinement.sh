@@ -12,7 +12,9 @@ set -euo pipefail
 # this repository does not otherwise support on macOS, and a job that fails for those reasons would say
 # nothing about containment. The one tmux-driven file here is the pane registration, because a session
 # start on macOS reads its process identity through this kernel's `ps`, and only a Mac can say whether a
-# harness that dies at once is reported as the exit it was.
+# harness that dies at once is reported as the exit it was. The other is the attach adapter: `fy attach`
+# once compared a start identity read from `/proc`, which macOS lacks, against the daemon's `ps` value and
+# so refused every attach there; only a Mac can show the two sides now read the same number.
 
 root_dir="$(git rev-parse --show-toplevel)"
 cd "${root_dir}"
@@ -25,6 +27,8 @@ echo "🧪 Proving the process inventory reads this kernel's ps..."
 bun test --config=bunfig.int.toml packages/daemon/tests/integration/migrate/real-ps-inventory.test.ts
 echo "🧪 Proving a pane's process identity reads this kernel's ps, and a dead harness says why..."
 bun test --config=bunfig.int.toml \
-  packages/daemon/tests/integration/session/lifecycle/process-incarnation.test.ts \
+  packages/protocol/tests/integration/process-incarnation.test.ts \
   packages/daemon/tests/integration/session/lifecycle/durable-terminal-pane-reap.test.ts
-echo "✅ Containment, the process inventory and pane identity hold on $(uname -sm)"
+echo "🧪 Proving fy attach accepts the daemon's pane proof on this kernel (the CLI reads the same start identity)..."
+bun test --config=bunfig.int.toml packages/cli/tests/integration/reads/tmux-attacher.test.ts
+echo "✅ Containment, the process inventory, pane identity and the attach proof hold on $(uname -sm)"

@@ -1,3 +1,5 @@
+import type { ProcessIncarnation } from '@ferretry/protocol';
+import { processIncarnationFor } from '@ferretry/protocol/process-incarnation';
 import {
   createSessionPaths,
   type FileSystemPort,
@@ -17,7 +19,6 @@ import type {
 } from '../../../lib/session/reap.ts';
 import type { ExactTerminalReaper, RegisteredPaneObserver } from '../../../lib/session/reap-service.ts';
 import type { DaemonStorage } from '../../storage/session-storage.ts';
-import { type ProcessIncarnation, processIncarnationFor } from './process-incarnation.ts';
 
 function fields(value: unknown): Readonly<Record<string, unknown>> | undefined {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
