@@ -7000,7 +7000,9 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       file: async sessionId => {
         const id = tryParseSessionId(sessionId);
         if (id === undefined) return undefined;
-        const config = await storage.readConfig(id).catch(() => undefined);
+        // Asked on every transcript read of every session: as fresh as the last file event, so an unchanged
+        // config costs no `stat` while its directory is watched (the daemon's own writes are seen at once).
+        const config = await storage.readConfig(id, 'heard').catch(() => undefined);
         // The start anchors discovery pacing; the state is read only when a pace begins.
         return await resolver.file(sessionId, storedTranscriptProvenance(config), async () =>
           storedSessionStart(await storage.readState(id).catch(() => undefined), config),
@@ -7380,6 +7382,9 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       new BunSqliteIndexFactory(),
       clock,
       () => new KeyedSerialExecutor(),
+      // A session document a background reader asks for again (`heard`) is watched, so while its directory
+      // is watched live and quiet it is answered without the identity `stat` each read cost.
+      { subscribe: (path, listener) => fileEvents.subscribe(path, () => listener()) },
     ),
     analyticsIndexes: new BunSqliteAnalyticsStoreFactory(),
     worktrees: new ManagedWorktreeAdapter(
@@ -8673,7 +8678,8 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
             await Promise.all(
               storage.listSessions().map(async session => {
                 const config = SessionConfigSchema.safeParse(
-                  await storage.readConfig(session.id).catch(() => undefined),
+                  // Every session's config, on every reading: as fresh as the last file event.
+                  await storage.readConfig(session.id, 'heard').catch(() => undefined),
                 );
                 return config.success ? [{ agent: config.data.agent, transcript: config.data.transcript }] : [];
               }),

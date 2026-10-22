@@ -11,7 +11,7 @@ import {
   type SessionIndex,
   type SessionIndexFactory,
 } from '../../lib/index.ts';
-import { DaemonStorage } from './session-storage.ts';
+import { DaemonStorage, type DocumentChanges } from './session-storage.ts';
 import type { LayoutInitialization, StateHomeLayout } from './state-home-layout.ts';
 
 export interface OpenedDaemonStorage {
@@ -38,6 +38,8 @@ export class DaemonStorageFactory {
     private readonly indexes: SessionIndexFactory,
     private readonly clock: ClockPort,
     private readonly serial: () => SerialExecutor,
+    /** Where the storage hears its documents change, so an unchanged one costs no `stat` per read. */
+    private readonly changes?: DocumentChanges,
   ) {}
 
   async open(): Promise<OpenedDaemonStorage> {
@@ -58,7 +60,7 @@ export class DaemonStorageFactory {
       await homeLock.release();
       throw error;
     }
-    const storage = new DaemonStorage(paths, fileSystem, index, this.clock, this.serial(), homeLock);
+    const storage = new DaemonStorage(paths, fileSystem, index, this.clock, this.serial(), homeLock, this.changes);
     try {
       // Version-1 directories predate the journal contract, so they are migrated under the home
       // lock before anything reads them. A version-2 session whose journal is already gone is NOT

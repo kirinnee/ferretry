@@ -166,11 +166,51 @@ function sameJournalFile(left: JournalFingerprint, right: JournalFingerprint): b
 /** How many session documents the identity cache holds before it starts again from empty. */
 const DOCUMENT_CACHE_LIMIT = 4_096;
 
+/** How many session documents are watched for changes, at most; a document past it is `stat`ed per read. */
+const WATCHED_DOCUMENT_LIMIT = 1_024;
+
 /** A document as last read: the identity of the file it came from, its text, and its parsed value. */
 interface CachedDocument {
   readonly identity: string;
   readonly text: string;
   readonly value?: FrozenJsonValue;
+  /**
+   * How many changes the document's watch had reported when its identity was last taken — counted BEFORE
+   * the `stat` or the read, so a change that lands during either is still unseen. Absent while unwatched.
+   */
+  readonly heard?: number;
+}
+
+/**
+ * How fresh a read must be.
+ *
+ * - `proved` (every read's default): the file is proved by a `stat` on every read, so a change by ANY
+ *   writer — this daemon, another process, a person with an editor — is seen by the very next read.
+ * - `heard`: as fresh as the last file event. A watched document whose watch is live and quiet costs no
+ *   system call; a change from outside the daemon is seen once the hub has heard it, within its settle.
+ *   For background readers that ask about every session over and over, and act on nothing a person just
+ *   did — the transcript resolver, the fleet reading.
+ */
+export type DocumentFreshness = 'proved' | 'heard';
+
+/** A watch on one file: whether a change is reported by an event right now, and how to stop it. */
+export interface DocumentSubscription {
+  live(): boolean;
+  close(): void;
+}
+
+/**
+ * Hears when a session document may have changed — written, replaced or deleted, by this daemon or by
+ * anyone else. The file-event hub's `subscribe`.
+ */
+export interface DocumentChanges {
+  subscribe(path: string, listener: () => void): DocumentSubscription;
+}
+
+/** A document's watch, and how many changes it has reported. */
+interface WatchedDocument {
+  readonly subscription: DocumentSubscription;
+  changes: number;
 }
 
 export class DaemonStorage {
@@ -190,6 +230,20 @@ export class DaemonStorage {
    * Values are handed out as copies, so no caller can change what another one is given.
    */
   private readonly documents = new Map<string, CachedDocument>();
+  /**
+   * The documents a background reader read more than once (`heard` freshness), each watched through
+   * {@link DocumentChanges}.
+   *
+   * WHY. The identity cache made an unchanged document ONE `stat` per read — still about thirty a second
+   * on an idle 36-session fleet, nearly all of them `session-version` and `config.json` asked for again
+   * by the transcript resolver and the fleet reading. A watched document whose watch is live and has
+   * reported nothing since its identity was taken is provably the file that was read, so those readers are
+   * answered with no system call at all. Wherever the watch cannot vouch — the directory is polled, the
+   * platform never reports the name, or no watch is wired — the `stat` stays, exactly as before. Every
+   * other read still proves the file with a `stat`: a request acts on what a person may just have
+   * written, and must see it.
+   */
+  private readonly watched = new Map<string, WatchedDocument>();
   /** Live journal appends for sockets served by THIS opened daemon storage, never process-global. */
   private readonly eventListeners = new Set<(event: SessionEvent) => void>();
   /**
@@ -209,6 +263,7 @@ export class DaemonStorage {
     private readonly clock: ClockPort,
     private readonly serial: SerialExecutor,
     private readonly homeLock: HomeLockLease,
+    private readonly changes?: DocumentChanges,
   ) {}
 
   private assertOpen(): void {
@@ -269,7 +324,7 @@ export class DaemonStorage {
   private async completeSessionUpgrade(id: SessionId, paths: SessionPaths): Promise<JournalFingerprint> {
     const journal = await this.ensureJournalFile(id, paths);
     if (journal === undefined) throw new MissingSessionJournalError(id, paths.events);
-    await this.fileSystem.writeTextAtomic(paths.marker, `${CURRENT_SESSION_VERSION}\n`);
+    await this.writeDocument(paths.marker, `${CURRENT_SESSION_VERSION}\n`);
     return journal;
   }
 
@@ -339,7 +394,7 @@ export class DaemonStorage {
         const paths = createSessionPaths(this.paths, id);
         if (!sessionMarkerNeedsUpgrade(await this.fileSystem.readText(paths.marker))) continue;
         if ((await this.ensureJournalFile(id, paths)) === undefined) continue;
-        await this.fileSystem.writeTextAtomic(paths.marker, `${CURRENT_SESSION_VERSION}\n`);
+        await this.writeDocument(paths.marker, `${CURRENT_SESSION_VERSION}\n`);
         upgraded.push(id);
       }
       return upgraded;
@@ -887,8 +942,7 @@ export class DaemonStorage {
     const document = serializeJsonDocument(value);
     await this.serial.run(id, async () => {
       await this.ensureSessionDirectory(id);
-      this.forgetDocument(createSessionPaths(this.paths, id).config);
-      await this.fileSystem.writeTextAtomic(createSessionPaths(this.paths, id).config, document);
+      await this.writeDocument(createSessionPaths(this.paths, id).config, document);
       await this.syncSessionUnlocked(id);
     });
   }
@@ -898,31 +952,62 @@ export class DaemonStorage {
     const document = serializeJsonDocument(value);
     await this.serial.run(id, async () => {
       await this.ensureSessionDirectory(id);
-      this.forgetDocument(createSessionPaths(this.paths, id).state);
-      await this.fileSystem.writeTextAtomic(createSessionPaths(this.paths, id).state, document);
+      await this.writeDocument(createSessionPaths(this.paths, id).state, document);
       await this.syncSessionUnlocked(id);
       if (this.stateListeners.size > 0) this.publishState(id, canonicalJsonValue(value));
     });
   }
 
   /** A document's text, from the identity cache when the file is still the one it holds. */
-  private async readCachedText(path: string): Promise<CachedDocument | undefined> {
+  private async readCachedText(
+    path: string,
+    freshness: DocumentFreshness = 'proved',
+  ): Promise<CachedDocument | undefined> {
     const { identity, readTextIdentified } = this.fileSystem;
     if (identity === undefined || readTextIdentified === undefined) {
       const text = await this.fileSystem.readText(path);
       return text === undefined ? undefined : { identity: '', text };
     }
     const cached = this.documents.get(path);
-    if (cached !== undefined && (await identity.call(this.fileSystem, path)) === cached.identity) return cached;
+    // A document a background reader asks for again is watched from now on — before its `stat`, so a change
+    // between the two is caught by the `stat`, and any change after it is heard.
+    const watch = cached !== undefined && freshness === 'heard' ? this.watch(path) : this.watched.get(path);
+    const heard = watch?.changes;
+    const quiet = cached !== undefined && heard !== undefined && cached.heard === heard;
+    if (quiet && freshness === 'heard' && watch?.subscription.live() === true) return cached;
+    if (cached !== undefined && (await identity.call(this.fileSystem, path)) === cached.identity) {
+      if (heard === undefined || cached.heard === heard) return cached;
+      const proved: CachedDocument = { ...cached, heard };
+      this.documents.set(path, proved);
+      return proved;
+    }
     const read = await readTextIdentified.call(this.fileSystem, path);
     if (read === undefined) {
       this.documents.delete(path);
       return undefined;
     }
     if (this.documents.size >= DOCUMENT_CACHE_LIMIT) this.documents.clear();
-    const fresh: CachedDocument = { identity: read.identity, text: read.text };
+    const fresh: CachedDocument = {
+      identity: read.identity,
+      text: read.text,
+      ...(heard === undefined ? {} : { heard }),
+    };
     this.documents.set(path, fresh);
     return fresh;
+  }
+
+  /** This document's watch, opened now if there is room for it. */
+  private watch(path: string): WatchedDocument | undefined {
+    const known = this.watched.get(path);
+    if (known !== undefined || this.changes === undefined || this.watched.size >= WATCHED_DOCUMENT_LIMIT) return known;
+    const watched: WatchedDocument = {
+      changes: 0,
+      subscription: this.changes.subscribe(path, () => {
+        watched.changes += 1;
+      }),
+    };
+    this.watched.set(path, watched);
+    return watched;
   }
 
   /** Whether `path` names something: one `stat` where the filesystem offers it, the walked read otherwise. */
@@ -934,21 +1019,44 @@ export class DaemonStorage {
     return present === undefined ? undefined : true;
   }
 
-  /** Forgets what the cache holds for `path`: called for every write this storage makes to it. */
-  private forgetDocument(path: string): void {
-    this.documents.delete(path);
+  /**
+   * Writes a session document, forgetting what the cache holds for it before AND after.
+   *
+   * After, because a read running alongside may cache the old file between the first forget and the
+   * rename, and its watch hears the rename only a settle later: counting this write as a change of its
+   * own makes that copy's `heard` stale at once, so the next read `stat`s and sees the new file —
+   * read-your-own-write, as it was before the watch.
+   */
+  private async writeDocument(path: string, text: string): Promise<void> {
+    this.forgetDocument(path);
+    try {
+      await this.fileSystem.writeTextAtomic(path, text);
+    } finally {
+      this.forgetDocument(path);
+    }
   }
 
-  private async readDocument(id: SessionId, kind: 'config' | 'state'): Promise<FrozenJsonValue | undefined> {
+  /** Forgets what the cache holds for `path`, and counts a change on its watch. */
+  private forgetDocument(path: string): void {
+    this.documents.delete(path);
+    const watched = this.watched.get(path);
+    if (watched !== undefined) watched.changes += 1;
+  }
+
+  private async readDocument(
+    id: SessionId,
+    kind: 'config' | 'state',
+    freshness: DocumentFreshness = 'proved',
+  ): Promise<FrozenJsonValue | undefined> {
     const paths = createSessionPaths(this.paths, id);
-    const marker = (await this.readCachedText(paths.marker))?.text;
+    const marker = (await this.readCachedText(paths.marker, freshness))?.text;
     if (marker === undefined) {
       await this.refuseUnrecoverableUnmarkedSession(id);
       return undefined;
     }
     if (decideSessionMarker(marker) === 'refuse') throw new SessionLayoutError(id, marker);
     const file = paths[kind];
-    const document = await this.readCachedText(file);
+    const document = await this.readCachedText(file, freshness);
     if (document === undefined) return undefined;
     if (document.value !== undefined) return document.value;
     const parsed = parseJsonDocument(document.text);
@@ -958,9 +1066,10 @@ export class DaemonStorage {
     return value;
   }
 
-  async readConfig(id: SessionId): Promise<FrozenJsonValue | undefined> {
+  /** A session's configuration, proved on every read unless a background reader asks for `heard`. */
+  async readConfig(id: SessionId, freshness: DocumentFreshness = 'proved'): Promise<FrozenJsonValue | undefined> {
     this.assertOpen();
-    return await this.readDocument(id, 'config');
+    return await this.readDocument(id, 'config', freshness);
   }
 
   async readState(id: SessionId): Promise<FrozenJsonValue | undefined> {
@@ -993,8 +1102,7 @@ export class DaemonStorage {
       // paths get the same gate from their own ensureSessionDirectory call.
       await this.ensureSessionDirectory(id);
       const next = canonicalJsonValue(await compute());
-      this.forgetDocument(paths[kind]);
-      await this.fileSystem.writeTextAtomic(paths[kind], serializeJsonDocument(next));
+      await this.writeDocument(paths[kind], serializeJsonDocument(next));
       await this.syncSessionUnlocked(id);
       if (kind === 'state') this.publishState(id, next);
       return next;
@@ -1365,6 +1473,8 @@ export class DaemonStorage {
     this.closed = true;
     this.eventListeners.clear();
     this.stateListeners.clear();
+    for (const watched of this.watched.values()) watched.subscription.close();
+    this.watched.clear();
     await this.serial.runExclusive(async () => {
       try {
         this.index.close();
