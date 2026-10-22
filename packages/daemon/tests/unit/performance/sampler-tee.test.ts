@@ -14,7 +14,7 @@ describe('teeStackSampler', () => {
   it('should hand every drained sample to a recording probe and still return them', () => {
     // Arrange
     const seen: (readonly StackSample[])[] = [];
-    const subject = teeStackSampler({ drain: () => SAMPLES }, probeOf(true, seen));
+    const subject = teeStackSampler({ drain: () => SAMPLES, discard: () => undefined }, probeOf(true, seen));
 
     // Act
     const actual = subject.drain();
@@ -27,7 +27,7 @@ describe('teeStackSampler', () => {
   it('should return the samples without touching a probe that is not recording', () => {
     // Arrange
     const seen: (readonly StackSample[])[] = [];
-    const subject = teeStackSampler({ drain: () => SAMPLES }, probeOf(false, seen));
+    const subject = teeStackSampler({ drain: () => SAMPLES, discard: () => undefined }, probeOf(false, seen));
 
     // Act
     const actual = subject.drain();
@@ -46,6 +46,7 @@ describe('teeStackSampler', () => {
           drains += 1;
           return [];
         },
+        discard: () => undefined,
       },
       probeOf(true, []),
     );
@@ -56,5 +57,26 @@ describe('teeStackSampler', () => {
 
     // Assert
     should(drains).equal(2);
+  });
+
+  it('should fold a discarded window only while the probe records, and otherwise discard it unread', () => {
+    // Arrange
+    const calls: string[] = [];
+    const sampler = {
+      drain: () => {
+        calls.push('drain');
+        return SAMPLES;
+      },
+      discard: () => void calls.push('discard'),
+    };
+    const seen: (readonly StackSample[])[] = [];
+
+    // Act
+    teeStackSampler(sampler, probeOf(true, seen)).discard();
+    teeStackSampler(sampler, probeOf(false, seen)).discard();
+
+    // Assert — a profile wants every window; the meter alone wants none it discards.
+    should(calls).deepEqual(['drain', 'discard']);
+    should(seen).deepEqual([SAMPLES]);
   });
 });

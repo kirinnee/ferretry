@@ -56,6 +56,23 @@ describe('JscStackSampler', () => {
         .join('\n'),
     ).not.containEql('blockTheLoopForAWhile');
   });
+
+  it('should forget what it discarded too, so an on-time window never reaches a later stall', async () => {
+    // Arrange
+    const sampler = await JscStackSampler.start();
+    blockTheLoopForAWhile(30);
+
+    // Act
+    sampler?.discard();
+    const next = sampler?.drain() ?? [];
+
+    // Assert
+    should(
+      summariseStacks(next)
+        .map(stack => stack.stack)
+        .join('\n'),
+    ).not.containEql('blockTheLoopForAWhile');
+  });
 });
 
 describe('JscStackSampler.start', () => {

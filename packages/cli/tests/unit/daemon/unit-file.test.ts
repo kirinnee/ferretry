@@ -21,6 +21,7 @@ const spec = {
   logFile: '/tmp/fy-home/.ferretry/logs/fyd.log',
   searchPath: '/usr/bin:/bin',
   locale: { LANG: 'C.UTF-8' },
+  runtime: { BUN_JSC_sampleInterval: '10000' },
   description: 'fyd — per-host agent daemon',
 };
 
@@ -238,8 +239,18 @@ describe('launch agent rendering', () => {
 
     // Assert
     should(actual).containEql(
-      '<key>LANG</key><string>de_DE.UTF-8</string><key>LC_ALL</key><string>en_US.UTF-8</string></dict>',
+      '<key>LANG</key><string>de_DE.UTF-8</string><key>LC_ALL</key><string>en_US.UTF-8</string><key>BUN_JSC_sampleInterval</key>',
     );
+  });
+
+  it('should pass the engine options after the locale, in both definitions', () => {
+    // Act
+    const plist = renderLaunchAgentPlist({ ...spec, label: 'com.ferretry.fyd' });
+    const unit = renderSystemdUnit(spec);
+
+    // Assert
+    should(plist).containEql('<key>BUN_JSC_sampleInterval</key><string>10000</string></dict>');
+    should(unit).containEql('Environment="LANG=C.UTF-8"\nEnvironment="BUN_JSC_sampleInterval=10000"\nStandardOutput=');
   });
 
   it('should escape a path that would otherwise break the XML', () => {

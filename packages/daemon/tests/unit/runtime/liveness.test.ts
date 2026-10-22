@@ -350,7 +350,7 @@ describe('EventLoopLagMeter', () => {
         { frames: [{ name: 'parse' }] },
       ],
     ];
-    const sampler = { drain: () => batches.shift() ?? [] };
+    const sampler = { drain: () => batches.shift() ?? [], discard: () => void batches.shift() };
     const stalls: LoopStall[] = [];
     const meter = new EventLoopLagMeter(
       clock,
@@ -372,6 +372,37 @@ describe('EventLoopLagMeter', () => {
       { stack: 'readFileSync ← scan (fleet/src/homes.ts:88)', share: 0.67 },
       { stack: 'parse', share: 0.33 },
     ]);
+  });
+
+  it('should empty the sampler on every tick but fold only the window of a late tick', () => {
+    // Arrange — folding an on-time window into frames only to drop it was most of what attribution cost.
+    const clock = manualClock();
+    const calls: string[] = [];
+    const sampler = {
+      drain: () => {
+        calls.push('drain');
+        return [];
+      },
+      discard: () => void calls.push('discard'),
+    };
+    const meter = new EventLoopLagMeter(
+      clock,
+      new ActivityLedger(clock),
+      DEFAULT_EVENT_LOOP_LAG_POLICY,
+      () => undefined,
+      sampler,
+    );
+
+    // Act
+    clock.advance(250);
+    meter.tick();
+    clock.advance(260);
+    meter.tick();
+    clock.advance(900);
+    meter.tick();
+
+    // Assert
+    should(calls).deepEqual(['discard', 'discard', 'drain']);
   });
 
   it('should keep the worst stall beside the last one', () => {

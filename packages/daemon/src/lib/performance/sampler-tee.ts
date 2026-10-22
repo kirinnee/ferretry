@@ -16,5 +16,10 @@ export function teeStackSampler(sampler: StackSamplerPort, probe: PerformancePro
       if (probe.recording) probe.samples(samples);
       return samples;
     },
+    // A window the meter has no use for is still the profile's, so it is folded only while one records.
+    discard: () => {
+      if (probe.recording) probe.samples(sampler.drain());
+      else sampler.discard();
+    },
   };
 }

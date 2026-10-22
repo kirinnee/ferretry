@@ -252,15 +252,20 @@ export interface StackSample {
  *
  * A PORT because only the runtime can sample its own stack, and only from another thread — the loop
  * cannot look at itself while it is the thing that is stuck. `drain` hands back every sample taken since
- * the last drain and forgets them, so a meter that drains on every tick holds exactly the samples of the
- * window between two ticks: when a tick is late, the stall's own samples.
+ * the last drain and forgets them, so a meter that empties it on every tick holds exactly the samples of
+ * the window between two ticks: when a tick is late, the stall's own samples.
+ *
+ * `discard` empties it WITHOUT turning what it held into samples. Most ticks are on time, and their
+ * window's samples are thrown away; folding each into frames only to drop it was a large share of what
+ * the attribution itself cost.
  */
 export interface StackSamplerPort {
   drain(): readonly StackSample[];
+  discard(): void;
 }
 
 /** No sampler: a stall is attributed to its labelled work alone. */
-export const NO_STACK_SAMPLER: StackSamplerPort = Object.freeze({ drain: () => [] });
+export const NO_STACK_SAMPLER: StackSamplerPort = Object.freeze({ drain: () => [], discard: () => undefined });
 
 /** One distinct stack a stall spent its samples in, and the share of the samples it holds. */
 export interface StallStack {
@@ -373,14 +378,18 @@ export class EventLoopLagMeter {
   /** One tick of the timer. */
   tick(): void {
     const now = this.clock.now();
-    // Drained on EVERY tick, so the samples held when a tick is late are that window's and no other's.
-    const samples = this.sampler.drain();
     const lag = Math.max(0, now - this.#lastTickMs - this.policy.intervalMs);
     const previous = this.#lastTickMs;
     this.#lastTickMs = now;
     this.#lagMs = lag;
     this.#maxLagMs = Math.max(this.#maxLagMs, lag);
-    if (lag < this.policy.stallMs) return;
+    // Emptied on EVERY tick, so the samples held when a tick is late are that window's and no other's —
+    // but only a late tick's are folded into frames; an on-time window is thrown away as it stands.
+    if (lag < this.policy.stallMs) {
+      this.sampler.discard();
+      return;
+    }
+    const samples = this.sampler.drain();
     this.#stalls += 1;
     const stall: LoopStall = {
       atMs: now,
