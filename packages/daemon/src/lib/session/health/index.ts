@@ -7,5 +7,6 @@ export * from './service.ts';
 export * from './settings.ts';
 export * from './sweep.ts';
 export * from './types.ts';
+export * from './watched-panes.ts';
 export * from './wedge.ts';
 export * from './zombie.ts';

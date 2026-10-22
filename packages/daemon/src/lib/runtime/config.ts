@@ -162,6 +162,14 @@ export const RETIRED_FLEET_BLOCK_NOTICE =
   'config/daemon.json still has a fleet.prepareDefaults setting; it is no longer read — starting the daemon never imports anything, so set this machine up from the app or with `fy daemon setup`. Delete the key.';
 
 /**
+ * What the boot trail says, once, when `config/daemon.json` still turns session workers off. Since stage 3d
+ * every running session is observed on a worker; the main thread takes a session over only after its
+ * worker crashed five times in ten minutes. Tolerated rather than refused, like the two retired keys above.
+ */
+export const RETIRED_SESSION_WORKERS_SWITCH_NOTICE =
+  'config/daemon.json still has sessionWorkers.enabled: false; it is no longer read — every running session is observed on a worker thread, and one is observed on the main thread only after its worker crashed five times. Delete the key.';
+
+/**
  * What the operator has agreed the UI may do on this machine, per capability and per axis.
  *
  * EVERY FIELD HAS A DEFAULT, so a document that says nothing is a complete decision rather than an
@@ -245,13 +253,16 @@ export const DaemonConfigDocumentSchema = z
      * every running session is observed off the main thread, through its own read-only attached tmux
      * client, and written by this daemon's main thread as before. `max` threads (default 2), each running
      * session on its own thread until there are `max`, then shared by the least-loaded one — set `max` at or
-     * above the running count for one thread per agent. `enabled: false` observes every session on the
-     * main thread (stage 3a).
+     * above the running count for one thread per agent. `fastExit` settles a pane its worker saw die at once
+     * instead of at the next 30 s self-check — a visible behaviour change the owner has not chosen yet (§8 Q2),
+     * so it is off. `enabled` is RETIRED (stage 3d): the main thread observes a session only after its worker
+     * crashed five times; see {@link RETIRED_SESSION_WORKERS_SWITCH_NOTICE}.
      */
     sessionWorkers: z
       .object({
-        enabled: z.boolean().default(true),
+        enabled: z.boolean().optional(),
         max: z.number().int().min(1).max(64).default(DEFAULT_SESSION_WORKER_CAP),
+        fastExit: z.boolean().default(false),
       })
       .prefault({}),
     usage: UsageFeedConfigSchema.prefault({}),

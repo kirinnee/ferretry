@@ -35,6 +35,8 @@ import {
   SessionObserver,
   type ToSessionWorker,
   type TranscriptEvent,
+  type TranscriptStamp,
+  TURN_WATCH_INTERVAL_MS,
   type TurnPaneEvidence,
   type WorkerAsk,
   type WorkerChild,
@@ -131,6 +133,9 @@ async function rig(
     readonly binding?: (id: string) => SessionBinding | undefined;
     readonly answerBusy?: boolean;
     readonly barrierMs?: number;
+    readonly stat?: (file: string) => TranscriptStamp | undefined;
+    /** Holds every reconcile the host runs as an activity until it resolves. */
+    readonly activity?: () => Promise<void>;
   } = {},
 ) {
   const storage = await openStorage();
@@ -175,10 +180,16 @@ async function rig(
           return { readable: false, inputs: [] };
         },
       },
+      every: (intervalMs, tick) => {
+        const timer = setInterval(tick, intervalMs);
+        return () => clearInterval(timer);
+      },
     },
     new SessionObserver(text => `digest(${text})`),
   );
   const workers: AnsweringWorker[] = [];
+  const scheduled: number[] = [];
+  const activities = { count: 0 };
   const watched: string[] = [];
   const closedWatches: string[] = [];
   let subject: WorkerObserverHost | undefined;
@@ -196,7 +207,9 @@ async function rig(
       },
       notice: () => undefined,
       report: () => undefined,
-      observed: (session, patches) => subject?.observed(session, patches),
+      observed: (session, patches, transcript) => subject?.observed(session, patches, transcript),
+      liveness: (session, liveness) => subject?.livenessChanged(session, liveness),
+      changed: () => subject?.poke(),
       exited: () => undefined,
     },
     { cap: 8, requestTimeoutMs: 1_000, drainMs: 10, startConcurrency: 2 },
@@ -228,6 +241,17 @@ async function rig(
     },
     clock: { now: () => NOW },
     barrierMs: options.barrierMs ?? 1_000,
+    stat: async file => options.stat?.(file),
+    schedule: (delayMs, run) => {
+      scheduled.push(delayMs);
+      const timer = setTimeout(run, delayMs);
+      return () => clearTimeout(timer);
+    },
+    activity: async work => {
+      activities.count += 1;
+      await options.activity?.();
+      return await work();
+    },
   });
   const host = subject;
   cleanups.push(async () => host.close());
@@ -238,7 +262,19 @@ async function rig(
     await host.turns.run();
     await Bun.sleep(5);
   };
-  return { storage, subject: host, workers, reads, watched, closedWatches, hostAll, supervisor, ledgerRows };
+  return {
+    storage,
+    subject: host,
+    workers,
+    reads,
+    watched,
+    closedWatches,
+    hostAll,
+    supervisor,
+    ledgerRows,
+    scheduled,
+    activities,
+  };
 }
 
 const stateOf = async (storage: DaemonStorage, id: SessionId) =>
@@ -498,5 +534,118 @@ describe('countWorkerChildren', () => {
       ['ps', '-o', 'pid'],
     ]);
     should(second).deepEqual([]);
+  });
+});
+
+const until = async (done: () => boolean): Promise<void> => {
+  for (let wait = 0; wait < 200 && !done(); wait += 1) await Bun.sleep(5);
+};
+
+describe('WorkerObserverHost — armed, with no tick', () => {
+  it('should reconcile nothing before it is armed, then at once and after every change, as the turn watcher', async () => {
+    // Arrange
+    const { storage, subject, supervisor, scheduled, activities } = await rig();
+    await storage.writeState(A, { id: A, status: 'running', turn: 1 });
+    subject.poke(0);
+    const beforeArm = [...scheduled];
+
+    // Act — the worker becoming ready is itself a change: hosting is reconciled again, and A attached.
+    subject.arm();
+    await until(() => activities.count >= 2);
+
+    // Assert
+    should(beforeArm).deepEqual([]);
+    should(scheduled.slice(0, 2)).deepEqual([0, 250]);
+    should(supervisor.attached(A)).be.true();
+    should(activities.count).be.aboveOrEqual(2);
+  });
+
+  it('should look here again in 2 s only while some session is left to this thread', async () => {
+    // Arrange — B has no pane a worker could attach to.
+    const { storage, subject, scheduled, activities } = await rig({ binding: () => undefined });
+    await storage.writeState(B, { id: B, status: 'running', turn: 1 });
+
+    // Act
+    subject.arm();
+    await until(() => scheduled.includes(TURN_WATCH_INTERVAL_MS));
+
+    // Assert
+    should(scheduled).containEql(TURN_WATCH_INTERVAL_MS);
+    should(activities.count).be.aboveOrEqual(1);
+  });
+
+  it('should run a reconcile asked for during one once after it, never beside it', async () => {
+    // Arrange — the first reconcile is held until the second is asked for.
+    let release: () => void = () => undefined;
+    const held = new Promise<void>(resolve => {
+      release = resolve;
+    });
+    let first = true;
+    const { subject, scheduled, activities } = await rig({
+      activity: async () => {
+        if (!first) return;
+        first = false;
+        await held;
+      },
+    });
+    subject.arm();
+    await until(() => activities.count === 1);
+
+    // Act
+    subject.poke(0);
+    await Bun.sleep(10);
+    const during = activities.count;
+    release();
+    await until(() => activities.count === 2);
+
+    // Assert
+    should(during).equal(1);
+    should(activities.count).equal(2);
+    should(scheduled.slice(0, 3)).deepEqual([0, 0, 250]);
+  });
+
+  it('should answer a read barrier without asking once the worker has read every byte of the transcript', async () => {
+    // Arrange
+    let size = 10;
+    const { storage, subject, hostAll, workers } = await rig({
+      answer: request => answered(request, null),
+      stat: () => ({ size, mtimeMs: 5 }),
+    });
+    await storage.writeState(A, { id: A, status: 'running', turn: 1 });
+    await hostAll();
+    subject.observed(A, [], { size: 10, mtimeMs: 5 });
+    const asked = () =>
+      workers.flatMap(worker => worker.sent).filter(message => 'kind' in message && message.kind === 'request');
+
+    // Act
+    await subject.project(A);
+    const unchanged = asked().length;
+    size = 11;
+    await subject.project(A);
+
+    // Assert
+    should(unchanged).equal(0);
+    should(asked().length).equal(1);
+  });
+
+  it('should take the Warden’s look from what the worker pushed, asking nothing', async () => {
+    // Arrange
+    const { storage, subject, hostAll, workers, reads } = await rig({ answer: request => answered(request, null) });
+    await storage.writeState(A, { id: A, status: 'running', turn: 1 });
+    await hostAll();
+    reads.length = 0;
+
+    // Act
+    subject.livenessChanged(A, { screen: 'a secret screen', transcript: 'fingerprint' });
+    const sample = await subject.liveness({ id: A, status: 'running', turn: 1, mode: 'auto', waiting: false });
+
+    // Assert
+    should(workers.flatMap(worker => worker.kinds())).not.containEql('request');
+    should(reads).deepEqual([]);
+    should(sample).deepEqual({
+      pane: 'a [redacted] screen',
+      paneHash: 'digest(a [redacted] screen)',
+      transcriptHash: 'digest(fingerprint)',
+    });
   });
 });

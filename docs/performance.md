@@ -35,18 +35,22 @@ Every number covers only the window it measured.
 Every running session is observed off the daemon's main thread by a **session worker**. The worker
 watches the session's pane through its own read-only tmux client, follows its transcript, and works out
 its turn, questions and liveness. The main thread only writes what the workers report and serves
-requests.
+requests: it runs no observation loop of its own.
 
 The workers form a **pool**, set in `config/daemon.json`:
 
 ```json
-{ "sessionWorkers": { "enabled": true, "max": 2 } }
+{ "sessionWorkers": { "max": 2, "fastExit": false } }
 ```
 
 - **`max`** is the number of worker threads. The default is **2**. Each running session gets its own
   thread until there are `max` of them. After that, each new session joins the least-loaded thread.
 - **One thread per agent:** set `max` at or above the number of sessions you run at once (up to 64).
-- **`enabled: false`** observes every session on the main thread instead, as before session workers.
+- **`fastExit`** settles a session whose agent exited as soon as its worker sees the pane die. The default
+  is **false**: the exit is settled by the next 30-second self-check, as before session workers.
+- **`enabled`** is retired. Every running session has a worker. The main thread observes a session only
+  while it has none — starting, backing off, or after its worker crashed five times in ten minutes. A
+  daemon that still reads `enabled: false` boots normally and says once that the key can be deleted.
 
 Why 2 is the default: on the owner-scale fleet (36 sessions, 5 running), a thread per session cost +72 MB
 of memory over the main thread, because each thread carries about 14 MB of engine. One shared thread cost

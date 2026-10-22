@@ -492,6 +492,45 @@ describe('tmux session exit observer', () => {
     ]);
   }, 20_000);
 
+  it('should keep counting a missing status across a partial look that did not see the pane', async () => {
+    // Arrange
+    const subject = await fixture(0);
+    await exitHarness(subject);
+    const never = observer(
+      subject,
+      metadataAnswers(subject, () => ({ code: 0, stdout: '1||' })),
+    );
+    await never.observe();
+    await never.observe();
+
+    // Act — one session's own settle, about another session, between two whole checks.
+    const partial = await never.observe([], { partial: true });
+    const third = await never.observe();
+
+    // Assert
+    should(partial).deepEqual([]);
+    should(third.map(item => item.exit)).deepEqual([{ kind: 'exited', exitStatus: undefined, signal: undefined }]);
+  }, 20_000);
+
+  it('should forget a missing status after a whole check that did not see the pane', async () => {
+    // Arrange
+    const subject = await fixture(0);
+    await exitHarness(subject);
+    const never = observer(
+      subject,
+      metadataAnswers(subject, () => ({ code: 0, stdout: '1||' })),
+    );
+    await never.observe();
+    await never.observe();
+
+    // Act
+    await never.observe([]);
+    const third = await never.observe();
+
+    // Assert — the count started again, so the third look is only its first miss.
+    should(third).deepEqual([]);
+  }, 20_000);
+
   it('should start the missing-status count again for a pane that came back or was replaced', async () => {
     // Arrange
     const subject = await fixture(0);

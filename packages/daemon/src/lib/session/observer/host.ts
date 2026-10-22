@@ -15,6 +15,11 @@ import type { TurnWatchLoop } from '../turn/service.ts';
  * timer.
  */
 export interface SessionObserverHost {
+  /**
+   * Starts observing: the inline host arms its 2 s tick; the worker host has none, and reconciles hosting
+   * when something changes. Stopped by {@link close}.
+   */
+  arm(): void;
   /** The turn part, as the 2 s turn tick runs it. */
   readonly turns: TurnWatchLoop;
   /**

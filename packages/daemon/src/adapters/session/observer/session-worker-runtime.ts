@@ -6,6 +6,7 @@ import {
   type ObserverState,
   type SessionObserver,
 } from '../../../lib/session/observer/observer.ts';
+import { turnPaneEvidenceOf } from '../../../lib/session/observer/pane.ts';
 import type {
   FromSessionWorker,
   SessionBinding,
@@ -107,6 +108,10 @@ interface Hosted {
   lookAgain: boolean;
   questionPosted: { readonly key: string; readonly factsSeen: number } | undefined;
   exited: boolean;
+  /** Consecutive looks made with the client down, when no `#{pane_dead}` notice could arrive. */
+  unwatchedLooks: number;
+  /** The liveness look last pushed, so an unchanged one is not pushed again. */
+  livenessPosted: { readonly screen: string | undefined; readonly transcript: string | undefined } | undefined;
   sendEvidence: TranscriptSendEvidence | undefined;
 }
 
@@ -114,6 +119,13 @@ const message = (error: unknown): string => (error instanceof Error ? error.mess
 
 const sameTmux = (a: SessionBinding['tmux'], b: SessionBinding['tmux']): boolean =>
   a.executable === b.executable && a.socket === b.socket && a.target === b.target;
+
+/**
+ * How many looks in a row with the client down before the worker stops vouching for the pane: the first
+ * look at attach comes before the client connects, so one is not enough; a session tmux no longer has
+ * never connects again.
+ */
+const UNWATCHED_LOOKS_BEFORE_EXITED = 3;
 
 /** How many transcript events the liveness fingerprint covers: enough that a new one always changes it. */
 const LIVENESS_EVENTS = 20;
@@ -234,6 +246,8 @@ export class SessionWorkerRuntime {
       lookAgain: false,
       questionPosted: undefined,
       exited: false,
+      unwatchedLooks: 0,
+      livenessPosted: undefined,
       sendEvidence: undefined,
     };
     this.hosted.set(session, hosted);
@@ -255,11 +269,15 @@ export class SessionWorkerRuntime {
   private paneDrew(hosted: Hosted, value: string): void {
     if (this.hosted.get(hosted.session) !== hosted) return;
     const watched = parsePaneWatch(value);
-    if (watched?.dead === true && !hosted.exited) {
-      hosted.exited = true;
-      this.deps.post({ kind: 'exited', session: hosted.session, generation: hosted.generation });
-    }
+    if (watched?.dead === true) this.exited(hosted);
     this.wake(hosted);
+  }
+
+  /** The main thread settles the exit from here: once per hosting, however often the pane says so. */
+  private exited(hosted: Hosted): void {
+    if (hosted.exited) return;
+    hosted.exited = true;
+    this.deps.post({ kind: 'exited', session: hosted.session, generation: hosted.generation });
   }
 
   /** Something happened: look after the settle, but never sooner than the throttle allows. */
@@ -300,10 +318,11 @@ export class SessionWorkerRuntime {
     const started = this.deps.nowMs();
     const facts = hosted.facts;
     const live = isTurnStatus(facts.status);
-    const [events, pane] = await Promise.all([
+    const [events, frame] = await Promise.all([
       this.transcript(hosted, fresh),
-      live ? hosted.frames.evidence(hosted.binding.tmux.target).catch(() => undefined) : Promise.resolve(undefined),
+      live ? hosted.frames.state(hosted.binding.tmux.target).catch(() => undefined) : Promise.resolve(undefined),
     ]).catch(() => [undefined, undefined] as const);
+    const pane = frame === undefined ? undefined : turnPaneEvidenceOf(frame);
     // Detached or re-attached while it looked: what it found belongs to nobody.
     if (this.hosted.get(hosted.session) !== hosted) return;
     hosted.lastLookAt = this.deps.nowMs();
@@ -315,27 +334,57 @@ export class SessionWorkerRuntime {
     });
     hosted.state = step.state;
     patches.push(...step.patches);
+    const tail = hosted.tail;
     this.deps.post({
       kind: 'observed',
       session: hosted.session,
       generation: hosted.generation,
       patches,
+      ...(events === undefined || tail === undefined ? {} : { transcript: { size: tail.size, mtimeMs: tail.mtimeMs } }),
       lookMs: this.deps.nowMs() - started,
       metrics: { children: this.deps.children() },
     });
+    if (live) this.livenessChanged(hosted, frame?.visible, events);
     // An end seen on one frame only is confirmed by a second look, whether or not anything draws.
     const observation = step.state.turn;
     if (observation !== undefined && !observation.confirmed && observation.state !== facts.turnState)
       this.lookAt(hosted, hosted.lastLookAt + this.pacing.confirmMs);
     // Without a connection no notice can arrive: look on the old cadence, and try to subscribe again.
+    // And a pane it cannot watch is one it cannot say is alive: the main thread proves it either way.
     if (!hosted.tmux.connected) {
+      hosted.unwatchedLooks += 1;
+      if (hosted.unwatchedLooks >= UNWATCHED_LOOKS_BEFORE_EXITED) this.exited(hosted);
       void hosted.tmux.watch().catch(() => false);
       this.lookAt(hosted, hosted.lastLookAt + this.pacing.pollMs);
-    }
+    } else hosted.unwatchedLooks = 0;
     hosted.backstop?.();
     hosted.backstop = this.deps.schedule(this.pacing.backstopMs, () => {
       hosted.backstop = undefined;
       if (this.hosted.get(hosted.session) === hosted) void this.look(hosted, true);
+    });
+  }
+
+  /**
+   * The Warden's liveness look, pushed when it changed rather than asked for every 30 s: the main thread
+   * keeps the last one, and an unchanged screen and tail is exactly what "nothing moved" means to its fold.
+   */
+  private livenessChanged(
+    hosted: Hosted,
+    screen: string | undefined,
+    events: readonly TranscriptEvent[] | undefined,
+  ): void {
+    const transcript = events === undefined ? undefined : JSON.stringify(events.slice(-LIVENESS_EVENTS));
+    const posted = hosted.livenessPosted;
+    if (posted !== undefined && posted.screen === screen && posted.transcript === transcript) return;
+    hosted.livenessPosted = { screen, transcript };
+    this.deps.post({
+      kind: 'liveness',
+      session: hosted.session,
+      generation: hosted.generation,
+      liveness: {
+        ...(screen === undefined ? {} : { screen }),
+        ...(transcript === undefined ? {} : { transcript }),
+      },
     });
   }
 
