@@ -1,7 +1,7 @@
-import type { SessionId } from '../../../lib/session-id.ts';
 import type { SessionResumeService } from '../../../lib/session/resume/service.ts';
 import { ResumeRefused, ReviveDedupeConflict } from '../../../lib/session/resume/types.ts';
 import { ReviveRefusedForSend, type SendReviver } from '../../../lib/session/send/types.ts';
+import type { SessionId } from '../../../lib/session-id.ts';
 
 /**
  * The revive a send falls back to when there is no live agent to type into.
@@ -23,9 +23,9 @@ import { ReviveRefusedForSend, type SendReviver } from '../../../lib/session/sen
 export class ResumeSendReviver implements SendReviver {
   constructor(private readonly resume: SessionResumeService) {}
 
-  async revive(id: SessionId, message: string): Promise<void> {
+  async revive(id: SessionId, message: string): Promise<string | undefined> {
     try {
-      await this.resume.resume({ id, message, actor: 'peer' });
+      return (await this.resume.resume({ id, message, actor: 'peer' })).delivered;
     } catch (error) {
       if (error instanceof ReviveDedupeConflict) throw new ReviveRefusedForSend(error.message, error.conflict.id);
       if (error instanceof ResumeRefused) throw new ReviveRefusedForSend(error.message);

@@ -472,15 +472,16 @@ describe('the resume-backed reviver', () => {
     const subject = new ResumeSendReviver({
       resume: async (request: unknown) => {
         asked.push(request);
-        return { target: target(), disposition: 'revived' };
+        return { target: target(), disposition: 'revived', delivered: 'Read the file /s/turns/turn-002.md now' };
       },
     } as never);
 
     // Act
-    await subject.revive(ID, 'ship it');
+    const typed = await subject.revive(ID, 'ship it');
 
-    // Assert
+    // Assert — what the relaunch typed is handed back, because it is what the transcript will carry.
     should(asked).deepEqual([{ id: ID, message: 'ship it', actor: 'peer' }]);
+    should(typed).equal('Read the file /s/turns/turn-002.md now');
   });
 
   it('should restate a policy refusal in the send domain, naming the conflicting session', async () => {

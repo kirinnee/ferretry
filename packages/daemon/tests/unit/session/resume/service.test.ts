@@ -10,22 +10,22 @@ import {
 } from '../../../../src/lib/index.ts';
 import {
   defaultSessionResumeSettings,
-  ResumeAcknowledgementFailed,
-  ResumeCancelled,
-  ResumeRefused,
-  ReviveDedupeConflict,
-  SessionResumeService,
-  UnregisteredResumeReplacement,
   type LaunchGate,
   type PaneObservation,
+  ResumeAcknowledgementFailed,
   type ResumeActor,
   type ResumeAnswerAttention,
+  ResumeCancelled,
   type ResumeLauncher,
   type ResumeMonitorControl,
+  ResumeRefused,
   type ResumeRepository,
   type ResumeTarget,
   type ResumeTransition,
   type ResumeTurnStore,
+  ReviveDedupeConflict,
+  SessionResumeService,
+  UnregisteredResumeReplacement,
 } from '../../../../src/lib/session/resume/index.ts';
 
 /** The advisory a bare human relaunch may dismiss, and the blocking one it may never touch. */
@@ -261,6 +261,19 @@ describe('session resume service', () => {
     should(world.repository.events).deepEqual(['session.resuming', 'session.resumed']);
   });
 
+  it('should report the pointer it typed, which is what the transcript will record', async () => {
+    // Arrange
+    const world = build(target(), NO_PANE);
+
+    // Act
+    const actual = await world.service.resume({ id: ID, message: 'carry on', actor: 'peer' });
+
+    // Assert — the message went to the turn file; the pane was typed the pointer at it.
+    should(world.launcher.delivered).have.length(1);
+    should(actual.delivered).equal(world.launcher.delivered[0]);
+    should(actual.delivered).not.equal('carry on');
+  });
+
   it('should record what the replacement pane was told on the resumed transition', async () => {
     // Arrange
     const world = build(target(), NO_PANE);
@@ -316,6 +329,7 @@ describe('session resume service', () => {
     should(actual.disposition).equal('sent');
     should(world.launcher.calls).deepEqual(['deliver']);
     should(world.launcher.delivered).deepEqual(['one more thing']);
+    should(actual.delivered).equal('one more thing');
     should(world.monitors.calls).deepEqual([]);
   });
 
@@ -331,6 +345,7 @@ describe('session resume service', () => {
     should(world.turns.written).deepEqual([]);
     should(world.launcher.calls).deepEqual(['relaunch']);
     should(actual.target.turn).equal(3);
+    should(actual.delivered).be.undefined();
   });
 
   it('should cancel an abandoned question on the record before the relaunch clears it', async () => {

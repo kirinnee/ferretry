@@ -295,6 +295,19 @@ describe('telling an agent its message did not arrive', () => {
     should(notice).not.match(/did not reach it/);
   });
 
+  it('says a revive-carried message was handed over as the relaunch’s first turn, and not to resend', () => {
+    const notice = sendFailureNotice(
+      'hank',
+      record({ path: 'revive', fate: 'unaccounted', unaccountedReason: 'revive_unconfirmed' }),
+      'fy',
+    );
+
+    should(notice).match(/was handed to hank as the first turn of its relaunch/);
+    should(notice).match(/delivery cannot be confirmed/);
+    should(notice).match(/do not send it again unless hank stays silent/);
+    should(notice).not.match(/did not reach it/);
+  });
+
   it('sends the notice into the sender’s own session, as the daemon, keyed by the failed send', async () => {
     const sent: unknown[] = [];
     const sender: SendTarget = { id: parseSessionId('session-2'), status: 'running', mode: 'auto', turn: 1 };

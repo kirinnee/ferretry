@@ -279,10 +279,13 @@ class FakeGate implements SendLaunchGate {
 class FakeReviver implements SendReviver {
   readonly messages: string[] = [];
   failure: Error | undefined;
+  /** What the relaunch reports having typed into the replacement pane. */
+  typed: string | undefined;
 
-  async revive(_id: SessionId, message: string): Promise<void> {
+  async revive(_id: SessionId, message: string): Promise<string | undefined> {
     this.messages.push(message);
     if (this.failure !== undefined) throw this.failure;
+    return this.typed;
   }
 }
 
@@ -538,6 +541,26 @@ describe('send to a terminal or dead session', () => {
     should(reviver.messages).eql(['ship it']);
     should(ledger.only()).match({ path: 'revive', turn: 4 });
     should(channel.inbound).eql([{ at: NOW, message: 'ship it', turn: 4 }]);
+  });
+
+  it('records the pointer the relaunch typed as what the transcript will carry', async () => {
+    // Arrange — a relaunch types a pointer at the turn file, never the message itself.
+    const pointer = 'Read the file /state/turns/turn-004.md now, then follow it.';
+    const { service, ledger, reviver } = parts(target({ status: 'completed' }));
+    reviver.typed = pointer;
+
+    // Act
+    const outcome = await service.send(request());
+
+    // Assert
+    should(ledger.only()).match({ path: 'revive', message: 'ship it', matchText: pointer, attemptAt: NOW });
+    should(outcome.record).match({ matchText: pointer });
+  });
+
+  it('leaves the match text unset when the relaunch cannot say what it typed', async () => {
+    const { service, ledger } = parts(target({ status: 'completed' }));
+    await service.send(request());
+    should(ledger.only().matchText).be.undefined();
   });
 
   it('holds the message durably when the reviver refuses, rather than losing it', async () => {

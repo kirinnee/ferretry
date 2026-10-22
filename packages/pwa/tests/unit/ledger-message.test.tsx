@@ -23,9 +23,9 @@ import {
   actionKeys,
   actionsButton,
   chooseAction,
+  closeOpenMenus,
   hasActionsButton,
   openActions,
-  closeOpenMenus,
 } from '../support/ledger-menu.ts';
 import { render, runAsync } from '../support/react.ts';
 
@@ -95,6 +95,12 @@ describe('sendBadge', () => {
     const blocked = sendBadge(record({ fate: 'unaccounted', unaccountedReason: 'blocked_by_prompt' })).detail;
     expect(blocked).toContain('a prompt on the agent’s screen is waiting for an answer');
     expect(blocked).not.toContain('transcript');
+    // A revive-carried message is said as handed over and unproven, never as held or lost.
+    const revived = sendBadge(record({ fate: 'unaccounted', unaccountedReason: 'revive_unconfirmed' }));
+    expect(revived.label).toBe('unconfirmed');
+    expect(revived.detail).toContain('revived to hand it over');
+    expect(revived.detail).not.toContain('holding');
+    expect(revived.detail).not.toContain('never reached');
   });
 });
 

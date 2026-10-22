@@ -26,7 +26,7 @@ const SCENE_CSS = `
   .scene-chat .fy-transcript-shell { flex: 1 1 auto; margin: 0 auto; max-width: 760px; padding: 0 16px; width: 100%; box-sizing: border-box; }
 `;
 
-const STATES = ['sending', 'typed', 'unconfirmed', 'failed', 'cancelled'] as const;
+const STATES = ['sending', 'typed', 'unconfirmed', 'revived', 'failed', 'cancelled'] as const;
 const VIEWPORTS = [
   { name: 'phone-390', width: 390, height: 844, phone: true },
   { name: 'phone-412', width: 412, height: 915, phone: true },

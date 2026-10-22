@@ -101,6 +101,8 @@ describe('send ledger read model', () => {
     });
     const unknown = parseLedgerSendRecord({ sendId: 's', acceptedAt: at(0), unaccountedReason: 'gremlins' });
     expect(blocked?.unaccountedReason).toBe('blocked_by_prompt');
+    const revived = parseLedgerSendRecord({ sendId: 's', acceptedAt: at(0), unaccountedReason: 'revive_unconfirmed' });
+    expect(revived?.unaccountedReason).toBe('revive_unconfirmed');
     expect(Object.hasOwn(unknown ?? {}, 'unaccountedReason')).toBe(false);
   });
 
