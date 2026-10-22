@@ -54,6 +54,10 @@ describe('the engine options every launch path hands the daemon', () => {
     should(macHost.files.written.get(mac.launchAgentFile)).containEql(
       '<key>BUN_JSC_sampleInterval</key><string>10000</string>',
     );
+    should(linuxHost.files.written.get(linux.systemdUnitFile)).containEql('Environment="BUN_JSC_numberOfGCMarkers=2"');
+    should(macHost.files.written.get(mac.launchAgentFile)).containEql(
+      '<key>BUN_JSC_numberOfGCMarkers</key><string>2</string>',
+    );
   });
 });
 
@@ -533,6 +537,7 @@ describe('direct supervisor', () => {
       PATH: linux.searchPath,
       LANG: 'C.UTF-8',
       BUN_JSC_sampleInterval: '10000',
+      BUN_JSC_numberOfGCMarkers: '2',
     });
     should(processes.launched[0]?.logFile).equal(linux.logFile);
     should(actual.pid).equal(9001);
