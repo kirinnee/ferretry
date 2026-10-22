@@ -74,7 +74,10 @@ interface Machine extends ConfigHome {
 
 const locations = (home: ConfigHome) => ({ configDirectory: home.paths.config, fleetDirectory: home.paths.fleet });
 
-async function machine(model = MODEL): Promise<Machine> {
+async function machine(
+  model = MODEL,
+  sessionRecords?: Required<Pick<FleetCatalogServiceDeps, 'sessionRecords' | 'renameSessions'>>,
+): Promise<Machine> {
   const root = await temporary();
   const home = await configHome(path.join(root, 'state'));
   const userHome = path.join(root, 'person');
@@ -114,6 +117,7 @@ async function machine(model = MODEL): Promise<Machine> {
       },
     },
     configDirectory: home.paths.config,
+    ...(sessionRecords === undefined ? {} : { sessionRecords }),
   });
   return Object.assign(handle, { catalog: new FleetCatalogService(deps), deps });
 }
@@ -437,7 +441,16 @@ describe('a reviewed change applied by the real provisioner', () => {
 
   it('should rename a runtime in one apply: its file with its comments, its id, its wrapper and the Warden login naming it', async () => {
     // Arrange — published once, so the runtime has an id, a config directory and a wrapper.
-    const host = await machine();
+    const renames: unknown[] = [];
+    const host = await machine(MODEL, {
+      sessionRecords: async () => [
+        { id: 's-1', name: 'Fisher', harness: 'codex', agent: 'codex-default', status: 'running' },
+      ],
+      renameSessions: async rename => {
+        renames.push(rename);
+        return 1;
+      },
+    });
     await host.catalog.apply((await host.catalog.propose(SETTINGS)).id, LOCAL);
     const runtimeFile = path.join(host.config, 'runtimes', 'codex-default.yaml');
     await writeFile(runtimeFile, `# the Codex I launch\n${await readFile(runtimeFile, 'utf8')}`);
@@ -450,6 +463,15 @@ describe('a reviewed change applied by the real provisioner', () => {
     const outcome = await host.catalog.apply(staged.id, LOCAL);
 
     // Assert
+    should(staged.preview).match({ runningSessions: [{ id: 's-1', name: 'Fisher', harness: 'codex' }] });
+    should(renames).deepEqual([
+      {
+        from: 'codex-default',
+        to: 'codex-work',
+        fromWrapper: path.join(host.fleet, 'bin', 'codex-default'),
+        toWrapper: path.join(host.fleet, 'bin', 'codex-work'),
+      },
+    ]);
     should(outcome).match({ outcome: 'applied', apply: { outcome: 'committed' } });
     should(await readFile(path.join(host.config, 'runtimes', 'codex-work.yaml'), 'utf8')).startWith(
       '# the Codex I launch\n',

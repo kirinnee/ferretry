@@ -22,6 +22,8 @@ import { useAccountChanges } from '../shell/apply-change-panel.tsx';
 import type { MachineTabProps } from '../shell/machines-surface.tsx';
 import { AddRuntime } from './add-runtime.tsx';
 import { type MachineData, machineDetailHash, useMachineData, useMachineDetail } from './machine-data.ts';
+import { RemoveRuntimeDialog, RenameRuntimeDialog, RuntimeActionButtons } from './runtime-actions.tsx';
+import { runtimeActionRefusal } from './runtime-actions-model.ts';
 import {
   harnessInstalled,
   launchLabel,
@@ -88,9 +90,22 @@ interface RuntimePageProps {
   readonly online: boolean;
   readonly connection: DaemonConnection;
   readonly onBack: () => void;
+  /** Why this browser may not rename or remove it, or `null`. */
+  readonly refusal: string | null;
+  readonly onAct: (act: RuntimeAct) => void;
 }
 
-function RuntimePage({ runtime, data, machine, machineName, online, connection, onBack }: RuntimePageProps) {
+function RuntimePage({
+  runtime,
+  data,
+  machine,
+  machineName,
+  online,
+  connection,
+  onBack,
+  refusal,
+  onAct,
+}: RuntimePageProps) {
   const installed = harnessInstalled(machine, runtime.harness);
   const word = runtimeWord(runtime);
   const profile = data.profiles.profiles.find(item => item.name === runtime.profile);
@@ -116,6 +131,19 @@ function RuntimePage({ runtime, data, machine, machineName, online, connection, 
           <AccountStatus word={word} showLabel />
           {runtime.agent ? <span>· Agent runtime</span> : null}
         </p>
+        <div className="mt-3 flex flex-col gap-1">
+          <RuntimeActionButtons
+            runtime={runtime}
+            refusal={refusal}
+            onRename={() => onAct({ kind: 'rename', name: runtime.name })}
+            onRemove={() => onAct({ kind: 'remove', name: runtime.name })}
+          />
+          {refusal === null ? null : (
+            <p className="m-0 text-meta leading-base text-warn" data-runtime-actions-refused="">
+              {refusal}
+            </p>
+          )}
+        </div>
       </div>
 
       {installed ? null : (
@@ -303,39 +331,62 @@ function RuntimeRow({
   data,
   machine,
   machineName,
+  refusal,
+  onAct,
 }: {
   readonly runtime: FleetRuntimeView;
   readonly data: MachineData;
   readonly machine: FleetMachineView | null;
   readonly machineName: string;
+  readonly refusal: string | null;
+  readonly onAct: (act: RuntimeAct) => void;
 }) {
   return (
     <div className="flex flex-col gap-1">
-      <a
-        href={machineDetailHash(machineName, 'runtimes', runtime.name)}
-        className="kt-panel flex min-h-control min-w-0 items-start gap-3 p-panel text-left no-underline hover:border-accent hover:no-underline"
-        data-runtime-row={runtime.name}
+      <div
+        className="kt-panel flex min-w-0 flex-col gap-2 p-panel has-[a:hover]:border-accent"
+        data-runtime-card={runtime.name}
       >
-        <AccountStatus word={runtimeWord(runtime)} className="mt-1" />
-        <span className="flex min-w-0 flex-1 flex-col gap-1">
-          <span className="truncate font-mono text-row font-semibold text-fg">{runtime.name}</span>
-          <span className="break-words text-cell text-muted">
-            <span className="font-mono">{loginLine(runtime, data)}</span> · {runtime.profile} profile ·{' '}
-            {runtimeDefaultModel(runtime)}
-          </span>
-          {runtime.agent ? (
-            <span>
-              <Badge tone="accent">Agent</Badge>
+        <a
+          href={machineDetailHash(machineName, 'runtimes', runtime.name)}
+          className="flex min-h-control min-w-0 items-start gap-3 text-left no-underline hover:no-underline"
+          data-runtime-row={runtime.name}
+        >
+          <AccountStatus word={runtimeWord(runtime)} className="mt-1" />
+          <span className="flex min-w-0 flex-1 flex-col gap-1">
+            <span className="truncate font-mono text-row font-semibold text-fg">{runtime.name}</span>
+            <span className="break-words text-cell text-muted">
+              <span className="font-mono">{loginLine(runtime, data)}</span> · {runtime.profile} profile ·{' '}
+              {runtimeDefaultModel(runtime)}
             </span>
-          ) : null}
-        </span>
-        <ChevronRight size={16} aria-hidden="true" className="mt-1 shrink-0 text-muted" />
-      </a>
+            {runtime.agent ? (
+              <span>
+                <Badge tone="accent">Agent</Badge>
+              </span>
+            ) : null}
+          </span>
+          <ChevronRight size={16} aria-hidden="true" className="mt-1 shrink-0 text-muted" />
+        </a>
+        <div className="flex justify-end border-t border-border-soft pt-2">
+          <RuntimeActionButtons
+            runtime={runtime}
+            refusal={refusal}
+            onRename={() => onAct({ kind: 'rename', name: runtime.name })}
+            onRemove={() => onAct({ kind: 'remove', name: runtime.name })}
+          />
+        </div>
+      </div>
       {harnessInstalled(machine, runtime.harness) ? null : (
         <MissingHarness runtime={runtime} machineName={machineName} />
       )}
     </div>
   );
+}
+
+/** A rename or a removal the person opened, by the runtime's name. */
+interface RuntimeAct {
+  readonly kind: 'rename' | 'remove';
+  readonly name: string;
 }
 
 export interface RuntimesTabOptions {
@@ -350,12 +401,16 @@ export function RuntimesTab({
   online,
   createClient,
   pollMs,
+  onRetry,
+  onRefresh,
 }: MachineTabProps & RuntimesTabOptions) {
   const { state, data, reload } = useMachineData(connection, createClient);
   const changes = useAccountChanges({ connection, createClient });
   const [detail, openDetail] = useMachineDetail(machineName, 'runtimes');
   const [adding, setAdding] = useState(false);
   const [importing, setImporting] = useState(false);
+  const [act, setAct] = useState<RuntimeAct | null>(null);
+  const refusal = runtimeActionRefusal(changes.authority);
 
   // M3: a machine that is not set up has no runtimes; the banner above the tabs resumes its setup.
   if (machine !== null && !machine.setUp)
@@ -413,18 +468,63 @@ export function RuntimesTab({
     setAdding(true);
   };
 
+  const open = (next: RuntimeAct): void => {
+    changes.clear();
+    setAct(next);
+  };
+
+  const acting = act === null ? undefined : data.runtimes.runtimes.find(item => item.name === act.name);
+  const dialog =
+    act === null || acting === undefined ? null : act.kind === 'rename' ? (
+      <RenameRuntimeDialog
+        runtime={acting}
+        runtimes={data.runtimes.runtimes}
+        machineName={machineName}
+        changes={changes}
+        onClose={() => setAct(null)}
+        onRenamed={name => {
+          setAct(null);
+          // The page follows the runtime to its new name; the list simply reads again.
+          if (detail === acting.name) openDetail(name);
+          void reload();
+        }}
+      />
+    ) : (
+      <RemoveRuntimeDialog
+        runtime={acting}
+        runtimes={data.runtimes.runtimes}
+        machine={machine}
+        machineName={machineName}
+        changes={changes}
+        connection={connection}
+        createClient={createClient}
+        onClose={() => setAct(null)}
+        onMachineChanged={() => (onRefresh ?? onRetry)()}
+        onRemoved={() => {
+          setAct(null);
+          if (detail === acting.name) openDetail(null);
+          void reload();
+        }}
+      />
+    );
+
   const runtime = detail === null ? undefined : data.runtimes.runtimes.find(item => item.name === detail);
   if (runtime !== undefined)
     return (
-      <RuntimePage
-        runtime={runtime}
-        data={data}
-        machine={machine}
-        machineName={machineName}
-        online={online}
-        connection={connection}
-        onBack={() => openDetail(null)}
-      />
+      <>
+        <RuntimePage
+          runtime={runtime}
+          data={data}
+          machine={machine}
+          machineName={machineName}
+          online={online}
+          connection={connection}
+          onBack={() => openDetail(null)}
+          refusal={refusal}
+          onAct={open}
+        />
+        {dialog}
+      </>
     );
 
   const runtimes = data.runtimes.runtimes;
@@ -469,12 +569,25 @@ export function RuntimesTab({
           <ul className="m-0 flex list-none flex-col gap-2 p-0">
             {runtimes.map(item => (
               <li key={item.name}>
-                <RuntimeRow runtime={item} data={data} machine={machine} machineName={machineName} />
+                <RuntimeRow
+                  runtime={item}
+                  data={data}
+                  machine={machine}
+                  machineName={machineName}
+                  refusal={refusal}
+                  onAct={open}
+                />
               </li>
             ))}
           </ul>
+          {refusal === null ? null : (
+            <p className="m-0 text-meta leading-base text-warn" data-runtime-actions-refused="">
+              Rename and Remove are off here: {refusal}
+            </p>
+          )}
         </>
       )}
+      {dialog}
     </section>
   );
 }

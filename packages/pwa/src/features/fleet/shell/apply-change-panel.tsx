@@ -119,6 +119,8 @@ export interface ChangeApplyPanelProps {
   readonly onSubmit: () => void;
   /** Buttons that sit beside the submit button ("Keep signed in"). */
   readonly children?: ReactNode;
+  /** Extra classes for the submit button: a label long enough to need two lines on a phone wraps. */
+  readonly submitClassName?: string;
 }
 
 export function ChangeApplyPanel({
@@ -132,6 +134,7 @@ export function ChangeApplyPanel({
   disabled = false,
   onSubmit,
   children,
+  submitClassName,
 }: ChangeApplyPanelProps) {
   const ready = authority !== null && authority.kind !== 'refused' && !disabled && !busy;
 
@@ -158,7 +161,7 @@ export function ChangeApplyPanel({
         </p>
       )}
       <div className="flex flex-wrap gap-2">
-        <Button type="submit" variant={variant} disabled={!ready} data-change-submit="">
+        <Button type="submit" variant={variant} disabled={!ready} className={submitClassName} data-change-submit="">
           {busy ? busyLabel : submitLabel}
         </Button>
         {children}
