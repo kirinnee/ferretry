@@ -90,6 +90,7 @@ import { boundDaemonId } from './daemon-transport.ts';
 import { DeviceKeyMissingError, DeviceKeyUnreadableError } from './device-keys.ts';
 import { stepUpAct } from './grants.ts';
 import type { KeyRotation } from './key-rotation.ts';
+import { untilAborted } from './machine-deadline.ts';
 import {
   RelayClientSession,
   type RelayClientSessionDependencies,
@@ -937,26 +938,6 @@ const dialectNumber = (protocol: unknown): number | undefined => {
  * answers — is an old daemon. Anything else — no answer, a body that does not parse, the same dialect —
  * is `undefined`, because neither side is provably old.
  */
-/** `wait`, or `fallback` as soon as `signal` aborts — whichever comes first. */
-const untilAborted = <T>(wait: Promise<T>, signal: AbortSignal | null | undefined, fallback: T): Promise<T> => {
-  if (signal == null) return wait;
-  if (signal.aborted) return Promise.resolve(fallback);
-  return new Promise<T>((resolve, reject) => {
-    const abandon = (): void => resolve(fallback);
-    signal.addEventListener('abort', abandon, { once: true });
-    wait.then(
-      value => {
-        signal.removeEventListener('abort', abandon);
-        resolve(value);
-      },
-      (cause: unknown) => {
-        signal.removeEventListener('abort', abandon);
-        reject(cause);
-      },
-    );
-  });
-};
-
 export const outdatedSide = async (network: DaemonFetch, daemonUrl: string): Promise<OutdatedSide | undefined> => {
   let body: unknown;
   try {

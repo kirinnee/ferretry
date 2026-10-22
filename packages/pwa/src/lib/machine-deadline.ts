@@ -83,3 +83,27 @@ export const boundedReads =
     if (method !== 'GET' && method !== 'HEAD') return send(input, init);
     return send(input, { ...init, signal: timeout(deadlineMs) });
   };
+
+/**
+ * `wait`, or `fallback` as soon as `signal` aborts — whichever comes first. For a wait the caller does
+ * not own (an unlock prompt for a machine not on screen): a caller that stopped waiting gets its answer
+ * back instead of staying parked behind it. A failure of `wait` itself still reaches the caller.
+ */
+export const untilAborted = <T>(wait: Promise<T>, signal: AbortSignal | null | undefined, fallback: T): Promise<T> => {
+  if (signal == null) return wait;
+  if (signal.aborted) return Promise.resolve(fallback);
+  return new Promise<T>((resolve, reject) => {
+    const abandon = (): void => resolve(fallback);
+    signal.addEventListener('abort', abandon, { once: true });
+    wait.then(
+      value => {
+        signal.removeEventListener('abort', abandon);
+        resolve(value);
+      },
+      (cause: unknown) => {
+        signal.removeEventListener('abort', abandon);
+        reject(cause);
+      },
+    );
+  });
+};
