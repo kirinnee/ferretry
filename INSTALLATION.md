@@ -177,8 +177,12 @@ window instead — for an owner who browses and signs in through it — and on L
 ## cloudflared and the tunnel carrier
 
 The daemon can also be reached through a Cloudflare Tunnel that Ferretry's hosted service provisions
-for it ([docs/relay-protocol.md](docs/relay-protocol.md) §15). The daemon runs **`cloudflared`** for
-that, and `cloudflared` is a **dependency, never a download**: Ferretry never fetches a binary itself.
+for it ([docs/relay-protocol.md](docs/relay-protocol.md) §15). **The tunnel is opt-in, per machine:** a
+daemon runs none until you turn it on, with `fy daemon tunnel on` or in the app under Settings ›
+Connection. It applies at once, without a restart; `fy daemon tunnel off` turns it off and releases it,
+and `fy daemon tunnel status` (or `fy daemon status`) shows where it is. The daemon runs
+**`cloudflared`** for that, and `cloudflared` is a **dependency, never a download**: Ferretry never
+fetches a binary itself.
 
 | Install route      | How `cloudflared` arrives                                                                                                                                          |
 | ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
@@ -197,8 +201,10 @@ sessions are unaffected — and both the boot log and `fyd --check` say so in on
 tunnel       off — cloudflared is not on this daemon’s PATH, so this daemon has no tunnel carrier — install cloudflared (…) or set FY_CLOUDFLARED to its path, then restart. Ferretry never downloads it itself.
 ```
 
-To switch the carrier off, add `{ "kind": "tunnel", "source": "discovery", "enabled": false }` to the
-`carriers` list in `config/daemon.json`; a daemon that held a tunnel releases it on its next boot.
+`fy daemon tunnel on|off` writes `{ "kind": "tunnel", "source": "discovery", "enabled": true|false }`
+into the `carriers` list in `config/daemon.json` for you; it needs the daemon running, and adds nothing
+else to the file. A daemon updated from a release where the tunnel came on by itself, and whose file
+names no tunnel, releases the tunnel it held on its first boot and says how to turn it back on.
 
 ## Updating
 

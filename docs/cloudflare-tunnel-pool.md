@@ -9,6 +9,27 @@ only how to run it.
 a tunnel in Settings. This page is for whoever operates the hosted Worker
 (`ferretry-hosted-relay`, `.github/workflows/relay-hosted.yaml`).
 
+## Tunnels are opt-in
+
+A daemon asks this service for a tunnel **only when its owner turned the tunnel on for that machine**:
+`fy daemon tunnel on` at the machine, or Settings › Connection in the app (`PUT /v1/tunnel`, which a
+paired device needs `pairing.configure` and a passkey confirmation for — see
+[grants.md](grants.md#turning-the-tunnel-on-or-off)). Either writes
+`{ "kind": "tunnel", "source": "discovery", "enabled": true }` into the machine's `config/daemon.json`
+and applies it at once, without a restart. `fy daemon tunnel off` writes `"enabled": false`, stops the
+connector and **releases the tunnel back to this pool immediately** (the signed
+`POST /v1/tunnel/release`). `fy daemon tunnel status` and `fy daemon status` say which.
+
+A daemon whose document names no tunnel runs none. So the pool's size is the number of machines whose
+owners chose a tunnel, not the number of installs.
+
+**Migration.** Daemons released before the tunnel became opt-in asked for one whenever `cloudflared`
+was present. Once updated, a daemon with no explicit tunnel entry **releases the tunnel it holds on its
+first boot** and says ``tunnel carrier off (opt-in) — released <url>; turn on with `fy daemon tunnel on` ``.
+Expect the pool to shrink after a release; a machine whose owner wants its tunnel back runs
+`fy daemon tunnel on` and is given a new one. A daemon that cannot reach the service keeps its record
+and asks again on its next boot; one that never comes back is reclaimed below.
+
 ## What one pool entry is
 
 Each entry is one Cloudflare account **and one zone in that same account**. The pairing is not a

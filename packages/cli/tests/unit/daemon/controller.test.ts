@@ -1,5 +1,5 @@
 import { describe, it } from 'bun:test';
-import type { HealthView } from '@ferretry/protocol';
+import { type HealthView, TUNNEL_OFF_SENTENCE, type TunnelStatusView } from '@ferretry/protocol';
 import should from 'should';
 import {
   DaemonController,
@@ -1176,6 +1176,43 @@ describe('daemon status — install and update', () => {
       install: { kind: 'homebrew' },
       update: { available: true },
     });
+  });
+});
+
+describe('daemon status — the tunnel', () => {
+  const off: TunnelStatusView = {
+    enabled: false,
+    explicit: false,
+    state: 'off',
+    tunnelUrl: null,
+    sentence: TUNNEL_OFF_SENTENCE,
+  };
+
+  it('should add the daemon’s tunnel sentence to the human summary and the tunnel view to --json', async () => {
+    const reads: number[] = [];
+    const tunnel = { read: async () => (reads.push(1), off) };
+    const human = harness({ probes: [health()], overrides: { tunnel } });
+    await human.controller.status({});
+    should(human.out.text).containEql(TUNNEL_OFF_SENTENCE);
+    const json = harness({ probes: [health()], overrides: { tunnel } });
+    await json.controller.status({ json: true });
+    should(JSON.parse(json.out.lines[0]?.replace('ok: ', '') ?? '')).match({ tunnel: off });
+    should(reads.length).equal(2);
+  });
+
+  it('should leave the line out for a daemon without the route, and not ask a daemon that is not serving', async () => {
+    const reads: number[] = [];
+    const older = harness({ probes: [health()], overrides: { tunnel: { read: async () => undefined } } });
+    await older.controller.status({});
+    should(older.out.text).not.containEql('Tunnel:');
+    const stopped = harness({
+      probes: [undefined],
+      serviceFallback: stoppedReport,
+      overrides: { tunnel: { read: async () => (reads.push(1), off) } },
+    });
+    await stopped.controller.status({ json: true });
+    should(JSON.parse(stopped.out.lines[0]?.replace('ok: ', '') ?? '')).not.have.property('tunnel');
+    should(reads).deepEqual([]);
   });
 });
 

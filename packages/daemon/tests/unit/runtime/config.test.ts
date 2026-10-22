@@ -11,6 +11,7 @@ import {
   overriddenBy,
   parseDaemonConfig,
   recordedPortDocument,
+  tunnelEntryDocument,
 } from '../../../src/lib/runtime/config.ts';
 
 const pricingRate = (patch: Record<string, unknown> = {}) => ({
@@ -637,5 +638,46 @@ describe('the retired account model setting', () => {
     should(misspelled.retiredAccountModel).equal(true);
     should(enabled).not.have.property('accountModel');
     should(parseDaemonConfig({}).retiredAccountModel).equal(false);
+  });
+});
+
+describe('the tunnel switch, as the document it writes', () => {
+  const ON = { kind: 'tunnel', source: 'discovery', enabled: true } as const;
+
+  it('should add a carriers list holding only the tunnel, leaving the legacy keys in force', () => {
+    // Arrange
+    const legacy = { host: '0.0.0.0', port: 7_431, relay: { url: 'wss://mine.example/fy' } };
+
+    // Act
+    const written = tunnelEntryDocument(legacy, ON);
+    const config = parseDaemonConfig(written);
+
+    // Assert
+    should(written).deepEqual({ ...legacy, carriers: [ON] });
+    should(config.bindUrl).equal('http://0.0.0.0:7431');
+    should(config.carrierSet.relays.map(relay => ('url' in relay ? relay.url : 'discovery'))).deepEqual([
+      'wss://mine.example/fy',
+    ]);
+    should(config.carrierSet.tunnel).deepEqual(ON);
+  });
+
+  it('should replace the one tunnel entry in place and append one when the list has none', () => {
+    // Arrange
+    const bind = { kind: 'bind', host: 'box.lan' };
+    const relay = { kind: 'relay', source: 'discovery' };
+
+    // Act
+    const replaced = tunnelEntryDocument(
+      { carriers: [bind, { kind: 'tunnel', source: 'discovery' }, relay] },
+      {
+        ...ON,
+        enabled: false,
+      },
+    );
+    const appended = tunnelEntryDocument({ carriers: [null, 'stray', bind] }, ON);
+
+    // Assert — nothing else is touched, not even an entry this daemon could not read.
+    should(replaced).deepEqual({ carriers: [bind, { ...ON, enabled: false }, relay] });
+    should(appended).deepEqual({ carriers: [null, 'stray', bind, ON] });
   });
 });
