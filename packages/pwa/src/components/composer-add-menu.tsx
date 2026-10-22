@@ -216,7 +216,7 @@ export function ComposerAddMenu({ open, onClose, actions, anchorRef, variant }: 
         className={cn(
           'fy-add-menu absolute border border-border bg-surface shadow-popover',
           sheet
-            ? 'fy-add-menu-sheet inset-x-0 bottom-0 rounded-t-panel border-x-0 border-b-0 pb-[max(0.5rem,env(safe-area-inset-bottom))]'
+            ? 'fy-add-menu-sheet inset-x-0 bottom-0 rounded-t-panel border-x-0 border-b-0 pb-[max(0.5rem,var(--inset-bottom))]'
             : 'rounded-panel',
         )}
         style={

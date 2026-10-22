@@ -5,10 +5,16 @@ import { daemonConnection } from '../../src/lib/daemon-connection.ts';
 import { DaemonDraftStore, type DraftStorage } from '../../src/lib/drafts.ts';
 import type { LocationFix, LocationShareHost } from '../../src/lib/location-share.ts';
 import { writeMdComposePref } from '../../src/lib/md-compose.ts';
-import { interact, mount, must } from '../support/dom.ts';
+import { interact, type Mounted, mount, must } from '../support/dom.ts';
 
+// A failed assertion must not leave a mounted composer listening on the window for the next file.
+const live = new Set<Mounted>();
 beforeEach(() => writeMdComposePref('off'));
-afterEach(() => writeMdComposePref('on'));
+afterEach(async () => {
+  writeMdComposePref('on');
+  for (const view of live) await view.unmount();
+  live.clear();
+});
 
 const daemon = daemonConnection({ daemonId: 'plus', baseUrl: 'https://plus.example.test', deviceId: 'device' });
 
@@ -24,8 +30,8 @@ class MemoryStorage implements DraftStorage {
 
 const host: LocationShareHost = { locate: () => new Promise<LocationFix>(() => undefined) };
 
-const mountComposer = (compact: boolean, withHost = true) =>
-  mount(
+const mountComposer = async (compact: boolean, withHost = true): Promise<Mounted> => {
+  const view = await mount(
     <LocationShareContext.Provider value={withHost ? host : null}>
       <Composer
         api={{ send: async () => ({}) as never }}
@@ -36,6 +42,16 @@ const mountComposer = (compact: boolean, withHost = true) =>
       />
     </LocationShareContext.Provider>,
   );
+  const tracked: Mounted = {
+    ...view,
+    unmount: async () => {
+      live.delete(tracked);
+      await view.unmount();
+    },
+  };
+  live.add(tracked);
+  return tracked;
+};
 
 const plus = (root: HTMLElement): HTMLButtonElement =>
   must(root.querySelector<HTMLButtonElement>('button[data-composer-attach]'), 'the plus button');
@@ -137,13 +153,24 @@ describe('the composer plus menu on a tap', () => {
     await view.unmount();
   });
 
-  test('with nothing else to offer, plus goes straight to the picker and no menu exists', async () => {
+  test('without a host the location is never offered, and plus reaches the picker', async () => {
     const view = await mountComposer(false, false);
-    const button = plus(view.container);
-    expect(button.hasAttribute('aria-haspopup')).toBe(false);
-    expect(button.getAttribute('aria-label')).toBe('Attach an image, audio or a file');
-    await interact(() => button.click());
-    expect(menus()).toHaveLength(0);
-    await view.unmount();
+    try {
+      const button = plus(view.container);
+      // The camera row exists only on a touch device, which the shared input-modality store decides once
+      // per process: with it ＋ opens a menu of attach + camera, without it ＋ goes straight to the picker.
+      const offersMenu = button.hasAttribute('aria-haspopup');
+      await interact(() => button.click());
+      if (offersMenu) {
+        expect(menus()).toHaveLength(1);
+        expect(menus()[0]?.textContent).not.toContain('Share location');
+        expect(menus()[0]?.textContent).toContain('Attach files');
+      } else {
+        expect(button.getAttribute('aria-label')).toBe('Attach an image, audio or a file');
+        expect(menus()).toHaveLength(0);
+      }
+    } finally {
+      await view.unmount();
+    }
   });
 });
