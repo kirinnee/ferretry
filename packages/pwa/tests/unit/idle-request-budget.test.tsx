@@ -13,8 +13,9 @@
  * printing what it did ask, route by route, so the failure says which poller came back.
  *
  * WHAT IS REAL. The store, the carrier router and its sealed sessions to two in-memory daemons, every
- * poller, store and hook the shell mounts, and their timers — Bun's fake timers, advanced a second at a
- * time, with the real event loop let run between steps so the sessions' WebCrypto settles. The typed
+ * poller, store and hook the shell mounts, and their timers — Bun's fake timers, advanced two seconds at a
+ * time — with the real event loop let run between steps until the in-memory network is quiet, so the
+ * sessions' WebCrypto settles before the clock moves again. The typed
  * client is a fake that counts every call by route, like the shell suite's; every other daemon read
  * crosses the carrier and is counted where the in-memory daemon answers it. The session's live feed
  * proves itself every thirty seconds, as the daemon's does.
@@ -23,7 +24,7 @@
  * everything) and the feed's first proof are behind it. Opening a page is not idling on it.
  */
 
-import { afterAll, beforeAll, describe, it, jest } from 'bun:test';
+import { afterEach, beforeEach, describe, it, jest } from 'bun:test';
 import type { FyEvent, FyEventStreamIdle, SessionView } from '@ferretry/protocol';
 import type { FyApiClient } from '@ferretry/protocol/client';
 import { act } from 'react';
@@ -38,7 +39,7 @@ import { createAppStore, StoreProvider } from '../../src/lib/store.tsx';
 import { resetSidePaneTabsStates } from '../../src/shell/side-pane-tab-model.ts';
 import { MemoryDeviceKeyStore } from '../support/device-keys.ts';
 import { mount } from '../support/dom.ts';
-import { fetcherDaemons, newDaemonIdentity, relayCrypto, testDevice } from '../support/relay.ts';
+import { fetcherDaemons, newDaemonIdentity, relayCrypto, type ScriptedSocket, testDevice } from '../support/relay.ts';
 import { sessionView } from '../support/sessions.ts';
 
 /** Requests a minute an idle fleet page may send. */
@@ -48,7 +49,13 @@ const SESSION_PAGE_BUDGET = 10;
 
 const WARM_UP_MS = 30_000;
 const IDLE_MS = 10 * 60_000;
-const STEP_MS = 1_000;
+const STEP_MS = 2_000;
+/** A step is settled once the in-memory network has been quiet for this many rounds in a row. */
+const QUIET_ROUNDS = 4;
+/** And never waits longer than this many rounds for it. */
+const MAX_SETTLE_ROUNDS = 400;
+/** Generous: CI measures this with coverage on a two-core runner, several times slower than a laptop. */
+const CASE_TIMEOUT_MS = 600_000;
 /** The daemon's quiet-feed proof (`EVENT_STREAM_IDLE_MS`). */
 const FEED_IDLE_PROOF_MS = 30_000;
 
@@ -185,6 +192,7 @@ const openShell = async (path: string, counter: RouteCounter) => {
   for (const id of [alpha.daemonId, beta.daemonId]) await deviceKeys.save(id, DEVICE_KEY);
   // Everything that is not the typed client crosses the carrier and lands here, once per request.
   const daemonFetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+    traffic += 1;
     const url = new URL(String(input));
     counter.add(routePattern(init?.method ?? 'GET', url.toString()));
     const attention = url.pathname.match(/^\/v1\/sessions\/([^/]+)\/attention$/u)?.[1];
@@ -225,7 +233,7 @@ const openShell = async (path: string, counter: RouteCounter) => {
     connectClient: async connection => countingClient(connection.daemonId, counter),
     deviceKeys,
     relayCrypto,
-    relayDial: network.dial,
+    relayDial: watched(network.dial),
     fetcher: daemonFetch,
     longTasks: { supported: false, observe: () => () => undefined },
   });
@@ -233,33 +241,96 @@ const openShell = async (path: string, counter: RouteCounter) => {
   store.connections.add(alpha, { pairedAt: 1 });
   store.connections.add(beta, { pairedAt: 2 });
   window.history.replaceState({}, '', path);
-  return await mount(
+  const view = await mount(
     <RouterProvider>
       <StoreProvider store={store}>
         <AppShell />
       </StoreProvider>
     </RouterProvider>,
   );
+  return { view, store };
 };
+
+/**
+ * Every frame either way across the in-memory network, and every request a daemon answered: what a step
+ * waits to go quiet before the fake clock moves again (`settle`).
+ */
+let traffic = 0;
+
+/** The fixture's dial, with every frame through each socket it opens counted as traffic. */
+const watched =
+  (dial: (url: string) => ScriptedSocket) =>
+  (url: string): ScriptedSocket => {
+    const socket = dial(url);
+    const send = socket.send.bind(socket);
+    socket.send = (bytes: Uint8Array): void => {
+      traffic += 1;
+      send(bytes);
+    };
+    const sendText = socket.sendText.bind(socket);
+    socket.sendText = (text: string): void => {
+      traffic += 1;
+      sendText(text);
+    };
+    let deliver: ((bytes: Uint8Array) => void) | null = null;
+    Object.defineProperty(socket, 'onBinary', {
+      configurable: true,
+      get: () =>
+        deliver === null
+          ? null
+          : (bytes: Uint8Array): void => {
+              traffic += 1;
+              deliver?.(bytes);
+            },
+      set: (next: ((bytes: Uint8Array) => void) | null) => {
+        deliver = next;
+      },
+    });
+    return socket;
+  };
 
 /** Real event-loop turns, which fake timers leave alone: what a sealed session's WebCrypto settles on. */
 const turns = async (count: number): Promise<void> => {
   for (let turn = 0; turn < count; turn += 1) await new Promise(resolve => setImmediate(resolve));
 };
 
-/** Moves the fake clock by `milliseconds`, a second at a time, letting the app's work land after each. */
+/**
+ * Lets the app's work land before the fake clock moves again: rounds of event-loop turns with a
+ * millisecond of real time between them, for the WebCrypto a sealed session settles on, until the
+ * network has been quiet for {@link QUIET_ROUNDS} rounds. A fixed number of turns was not enough on a
+ * busy machine: a session still opening when the clock jumped past its deadline was redialled, and the
+ * recovery reads were counted against the app.
+ */
+const settle = async (): Promise<void> => {
+  let quiet = 0;
+  for (let round = 0; round < MAX_SETTLE_ROUNDS && quiet < QUIET_ROUNDS; round += 1) {
+    const before = traffic;
+    await turns(10);
+    Bun.sleepSync(1);
+    await turns(10);
+    quiet = traffic === before ? quiet + 1 : 0;
+  }
+};
+
+/**
+ * Set when a case ends, so a case that ran out of time stops moving a clock the next one owns rather
+ * than running on in the background with its shell still mounted.
+ */
+let abandoned = false;
+
+/** Moves the fake clock by `milliseconds`, a step at a time, letting the app's work land after each. */
 const idle = async (milliseconds: number): Promise<void> => {
-  for (let elapsed = 0; elapsed < milliseconds; elapsed += STEP_MS)
+  for (let elapsed = 0; elapsed < milliseconds && !abandoned; elapsed += STEP_MS)
     await act(async () => {
       jest.advanceTimersByTime(STEP_MS);
-      await turns(8);
+      await settle();
     });
 };
 
 /** Opens `path`, lets it settle, idles ten minutes and answers the counter and the rate. */
 const measure = async (path: string): Promise<{ readonly counter: RouteCounter; readonly perMinute: number }> => {
   const counter = new RouteCounter();
-  const view = await openShell(path, counter);
+  const { view, store } = await openShell(path, counter);
   try {
     await act(async () => {
       await turns(40);
@@ -270,6 +341,13 @@ const measure = async (path: string): Promise<{ readonly counter: RouteCounter; 
     return { counter, perMinute: counter.total() / (IDLE_MS / 60_000) };
   } finally {
     await view.unmount();
+    // Unpairing closes the carrier's held sessions and their keepalives: a store left holding them
+    // keeps pinging on the next case's clock, and a session it loses there is redialled on that case's count.
+    store.connections.remove(alpha.daemonId);
+    store.connections.remove(beta.daemonId);
+    await act(async () => {
+      await turns(40);
+    });
   }
 };
 
@@ -278,36 +356,46 @@ const verdict = (page: string, measured: { readonly counter: RouteCounter; reado
   measured.counter.table(IDLE_MS / 60_000);
 
 describe('the idle request budget', () => {
-  beforeAll(() => {
+  beforeEach(() => {
+    abandoned = false;
     jest.useFakeTimers();
   });
-  afterAll(() => {
+  afterEach(() => {
+    abandoned = true;
     jest.useRealTimers();
     window.history.replaceState({}, '', '/');
     localStorage.clear();
     resetSidePaneTabsStates();
   });
 
-  it(`should keep an idle fleet page to ${String(FLEET_PAGE_BUDGET)} requests a minute`, async () => {
-    // Act
-    const measured = await measure(`/d/${alpha.daemonId}`);
+  it(
+    `should keep an idle fleet page to ${String(FLEET_PAGE_BUDGET)} requests a minute`,
+    async () => {
+      // Act
+      const measured = await measure(`/d/${alpha.daemonId}`);
 
-    // Assert
-    console.info(verdict('fleet page', measured));
-    should(measured.perMinute).be.belowOrEqual(FLEET_PAGE_BUDGET, verdict('fleet page', measured));
-    should(measured.counter.counts.get('GET /v1/sessions') ?? 0).be.above(0);
-  }, 120_000);
+      // Assert
+      console.info(verdict('fleet page', measured));
+      should(measured.perMinute).be.belowOrEqual(FLEET_PAGE_BUDGET, verdict('fleet page', measured));
+      should(measured.counter.counts.get('GET /v1/sessions') ?? 0).be.above(0);
+    },
+    CASE_TIMEOUT_MS,
+  );
 
-  it(`should keep an idle session page to ${String(SESSION_PAGE_BUDGET)} requests a minute`, async () => {
-    // Arrange — a session at its prompt, on the machine on screen.
-    const session = FLEETS.get(alpha.daemonId)?.[5]?.config.id ?? '';
+  it(
+    `should keep an idle session page to ${String(SESSION_PAGE_BUDGET)} requests a minute`,
+    async () => {
+      // Arrange — a session at its prompt, on the machine on screen.
+      const session = FLEETS.get(alpha.daemonId)?.[5]?.config.id ?? '';
 
-    // Act
-    const measured = await measure(`/d/${alpha.daemonId}/session/${session}`);
+      // Act
+      const measured = await measure(`/d/${alpha.daemonId}/session/${session}`);
 
-    // Assert — the feed was opened and stayed open: one subscription, never a reconnection storm.
-    console.info(verdict('session page', measured));
-    should(measured.perMinute).be.belowOrEqual(SESSION_PAGE_BUDGET, verdict('session page', measured));
-    should(measured.counter.counts.get('GET /v1/sessions/:id/logs') ?? 0).be.above(0);
-  }, 120_000);
+      // Assert — the feed was opened and stayed open: one subscription, never a reconnection storm.
+      console.info(verdict('session page', measured));
+      should(measured.perMinute).be.belowOrEqual(SESSION_PAGE_BUDGET, verdict('session page', measured));
+      should(measured.counter.counts.get('GET /v1/sessions/:id/logs') ?? 0).be.above(0);
+    },
+    CASE_TIMEOUT_MS,
+  );
 });
