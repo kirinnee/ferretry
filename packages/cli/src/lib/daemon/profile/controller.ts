@@ -11,6 +11,7 @@ import {
   type SyscallTrace,
 } from '@ferretry/protocol';
 import { z } from 'zod';
+import { type IProgress, NO_PROGRESS } from '../../progress/index.ts';
 
 /** Flags `fy daemon profile` accepts, as the shell gave them. */
 export interface ProfileCommandOptions {
@@ -57,6 +58,8 @@ export interface ProfileControllerDeps {
   readonly sleep: (ms: number) => Promise<void>;
   readonly now: () => number;
   readonly writeFile: (path: string, text: string) => Promise<void>;
+  /** The countdown shown while the window is open. Absent, nothing is shown. */
+  readonly progress?: IProgress;
 }
 
 /** How often a finished window is asked for, and how long past its end before giving up. */
@@ -86,13 +89,24 @@ export class ProfileController {
     const started = await this.deps.gateway.start(seconds);
     if (options.json !== true)
       this.deps.out.warn(`profiling the daemon for ${String(seconds)} s — leave it idle for an idle profile…`);
-    const traced = !tracing
-      ? undefined
-      : (refused ??
-        (pid === undefined
-          ? ({ kind: 'unavailable', reason: 'the daemon did not report its process id' } as const)
-          : await this.deps.tracer.trace(pid, seconds)));
-    const report = await this.#collect(started);
+    const progress = this.deps.progress ?? NO_PROGRESS;
+    progress.start('Measuring the daemon', { expectedSeconds: seconds });
+    let traced: SyscallTraceOutcome | undefined;
+    let report: PerformanceReport | undefined;
+    try {
+      traced = !tracing
+        ? undefined
+        : (refused ??
+          (pid === undefined
+            ? ({ kind: 'unavailable', reason: 'the daemon did not report its process id' } as const)
+            : await this.deps.tracer.trace(pid, seconds)));
+      report = await this.#collect(started);
+    } catch (error: unknown) {
+      progress.fail();
+      throw error;
+    }
+    if (report === undefined) progress.fail();
+    else progress.succeed();
     if (report === undefined) {
       this.deps.out.error('the daemon did not finish the profile; is it still running? (fy daemon status)');
       this.deps.out.setExitCode(1);

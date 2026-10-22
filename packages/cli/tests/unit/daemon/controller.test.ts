@@ -12,6 +12,7 @@ import type { DaemonSupervisorReport } from '../../../src/lib/daemon/ports';
 import { ResetRefusedError } from '../../../src/lib/daemon/reset';
 import { DaemonOwnershipError, UnsupportedServiceManagerError } from '../../../src/lib/daemon/supervisor';
 import { DaemonUpdateStatusReader } from '../../../src/lib/update/status';
+import { RecordingProgress } from '../progress/fixtures';
 import { FakeFacts, FakeUpdateView } from '../update/fixtures';
 import {
   absentReport,
@@ -32,6 +33,7 @@ import {
   health,
   installedDaemon,
   layout,
+  liveness,
   RecordingSetupNotice,
   runningReport,
   SteppingClock,
@@ -2341,5 +2343,107 @@ describe('a daemon serving outside its service manager', () => {
     // Assert
     should(out.lines).have.length(1);
     should(JSON.parse(out.lines[0]?.replace('ok: ', '') ?? '')).have.property('orphan', true);
+  });
+});
+
+describe('daemon lifecycle progress', () => {
+  /** A health port whose liveness answer names the boot step the daemon is on. */
+  class BootingHealth extends FakeHealth {
+    liveness(): Promise<ReturnType<typeof liveness>> {
+      return Promise.resolve(liveness());
+    }
+  }
+
+  it('should name the steps of a start and show what the daemon is booting', async () => {
+    // Arrange
+    const progress = new RecordingProgress();
+    const { controller } = harness({
+      probes: [undefined, undefined, undefined, health()],
+      serviceReports: [stoppedReport],
+      overrides: { progress, health: new BootingHealth([undefined, undefined, undefined, health()]) },
+    });
+
+    // Act
+    await controller.start();
+
+    // Assert
+    should(progress.steps).deepEqual(['Starting fyd', 'Waiting for fyd to serve']);
+    should(progress.events).containEql('detail first self-check (reconciling the session index)');
+    should(progress.events.filter(event => event === 'succeed').length).equal(2);
+  });
+
+  it('should say how many ferrets keep running through a restart', async () => {
+    // Arrange
+    const progress = new RecordingProgress();
+    const { controller } = harness({
+      probes: [health(), undefined, health()],
+      serviceReports: [runningReport, stoppedReport],
+      overrides: { progress },
+    });
+
+    // Act
+    await controller.restart({ ferretsKeepRunning: 3 });
+
+    // Assert
+    should(progress.steps).containEql('Stopping fyd (3 ferrets keep running)');
+    should(progress.steps).containEql('Waiting for fyd to serve');
+  });
+
+  it('should use the singular, and say nothing when none are running', async () => {
+    // Arrange
+    const one = new RecordingProgress();
+    const none = new RecordingProgress();
+
+    // Act
+    await harness({
+      probes: [health(), undefined, health()],
+      serviceReports: [runningReport, stoppedReport],
+      overrides: { progress: one },
+    }).controller.restart({ ferretsKeepRunning: 1 });
+    await harness({
+      probes: [health(), undefined, health()],
+      serviceReports: [runningReport, stoppedReport],
+      overrides: { progress: none },
+    }).controller.restart({ ferretsKeepRunning: 0 });
+
+    // Assert
+    should(one.steps).containEql('Stopping fyd (1 ferret keeps running)');
+    should(none.steps).containEql('Stopping fyd');
+  });
+
+  it('should fail the waiting step when the daemon never serves', async () => {
+    // Arrange
+    const progress = new RecordingProgress();
+    const { controller } = harness({
+      probes: [undefined],
+      serviceReports: [stoppedReport, runningReport],
+      overrides: { progress },
+    });
+
+    // Act + Assert
+    await should(controller.start()).be.rejected();
+    should(progress.events.at(-1)).equal('fail');
+  });
+
+  it('should name the install and the stop', async () => {
+    // Arrange
+    const progress = new RecordingProgress();
+    const { controller } = harness({
+      probes: [undefined, health()],
+      overrides: { progress },
+    });
+
+    // Act
+    await controller.install();
+
+    // Assert
+    should(progress.steps[0]).equal('Installing the fyd service');
+    const stopping = new RecordingProgress();
+    await harness({
+      probes: [health(), undefined],
+      serviceReports: [runningReport, stoppedReport],
+      overrides: { progress: stopping },
+    }).controller.stop();
+    should(stopping.steps).deepEqual(['Stopping fyd']);
   });
 });

@@ -2,6 +2,7 @@ import { describe, it } from 'bun:test';
 import should from 'should';
 import { PACK_REFUSED_EXIT_CODE, PackController } from '../../../src/lib/pack/controller.ts';
 import type { IPackGateway } from '../../../src/lib/pack/gateway.ts';
+import { RecordingProgress } from '../progress/fixtures.ts';
 import { CapturingPackIo, FakePackGateway, recommendation, refused, started } from './fixtures.ts';
 
 function build(options: { parent?: string; gateway?: IPackGateway; files?: Record<string, string> } = {}) {
@@ -228,5 +229,46 @@ describe('PackController.newChild', () => {
     should(JSON.parse(no.out.out[0] ?? '')).have.property('outcome', 'refused');
     should(no.out.err).be.empty();
     should(no.out.exitCode).equal(2);
+  });
+});
+
+describe('PackController progress', () => {
+  function watched(progress: RecordingProgress) {
+    const gateway = new FakePackGateway();
+    const controller = new PackController({
+      gateway,
+      out: new CapturingPackIo(),
+      parent: async () => undefined,
+      cwd: '/here',
+      absolute: path => path,
+      readFile: async () => '',
+      binaryName: 'foo',
+      progress,
+    });
+    return { controller, gateway };
+  }
+
+  it('should name the runtime being checked while the probe runs', async () => {
+    // Arrange
+    const progress = new RecordingProgress();
+
+    // Act
+    await watched(progress).controller.newChild(['do it'], { runtime: 'claude-work' });
+
+    // Assert
+    should(progress.events).deepEqual(['start Checking claude-work', 'succeed']);
+  });
+
+  it('should say it is choosing when no runtime was named, and fail the step when the gateway throws', async () => {
+    // Arrange
+    const progress = new RecordingProgress();
+    const { controller, gateway } = watched(progress);
+    gateway.newChild = () => Promise.reject(new Error('daemon down'));
+
+    // Act
+    await controller.newChild(['do it'], { auto: true }).catch(() => undefined);
+
+    // Assert
+    should(progress.events).deepEqual(['start Choosing the best runtime', 'fail']);
   });
 });
