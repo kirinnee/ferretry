@@ -82,10 +82,10 @@ export class FileWardenStateStore implements WardenStateStore {
  * acknowledged and in effect at once rather than held.
  */
 export class ConfigFileWardenConfigStore implements WardenConfigStore {
-  constructor(private readonly config: Pick<ConfigFilesService, 'load' | 'writeOwn'>) {}
+  constructor(private readonly config: Pick<ConfigFilesService, 'inEffect' | 'load' | 'writeOwn'>) {}
 
   async read(): Promise<unknown> {
-    return (await this.config.load()).evaluation.effective.warden;
+    return (await this.config.inEffect()).evaluation.effective.warden;
   }
 
   async write(config: WardenConfig): Promise<void> {

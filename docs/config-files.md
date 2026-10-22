@@ -57,9 +57,17 @@ so a last good version survives a restart and a confirmed loosening is not asked
 unreadable record reads as empty — every file judged against the defaults — which holds back any loosening
 until it is confirmed again.
 
-The watcher polls a fingerprint of the tree (size, modification time and inode per file) once a second and
-loads after a 300 ms quiet period. A platform watcher that follows a tree misses a file created in a new
+The watcher reads a fingerprint of the tree (size, modification time and inode per file) when one of the
+tree's directories reports a file event, and every 30 seconds anyway for an event the platform lost — once
+a second where there are no file events — and loads after a 300 ms quiet period. Every directory is
+watched on its own, because a platform watcher that follows a tree misses a file created in a new
 directory, and a missed save is a broken file nobody is told about.
+
+Readers answer from the last load and never scan the directory themselves. A load happens on the first
+read, when the watcher settles on a change, and after this daemon's own writes and confirmations (a
+reviewed fleet change loads as soon as it is applied). Judging a reviewed change stale is the one read
+that loads first, so an edit saved a moment before it is applied is never missed. A saved file is
+therefore in effect a few hundred milliseconds after the save rather than at the very next read.
 
 A link is never followed — not by the daemon, not by `fy config check`. `GET /v1/config/file` returns a
 file's text to a caller off the machine, so a link planted in the directory would otherwise read any file

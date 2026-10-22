@@ -8066,8 +8066,9 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       let releaseBrowserSession: (sessionId: string) => Promise<void> = async () => undefined;
       // A new ferret's passive-learning default, assigned once the learning subsystem below exists.
       let adoptLearning: (sessionId: SessionId) => Promise<void> = async () => undefined;
-      // Pack mode (docs/pack-mode.md): read fresh per use, so a saved pack.yaml applies to the next start.
-      const packConfig = async (): Promise<PackConfig> => (await configFiles.load()).evaluation.effective.pack;
+      // Pack mode (docs/pack-mode.md): read per use, so a saved pack.yaml applies to the next start once the
+      // configuration watcher has loaded it.
+      const packConfig = async (): Promise<PackConfig> => (await configFiles.inEffect()).evaluation.effective.pack;
       const packTree = createPackTree(sessions);
       const packHooks = createSessionPackHooks(packTree, sessions, sessionEnvironments, sessionMutations, packConfig);
       launchSwitchDefaults = async id => await packHooks.launchDefault(id);
@@ -8372,7 +8373,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       // own preset files laid over them, and a Test that spends a login's key once through the outbound
       // holder above — never handed a value, and only to where the login itself sends that key.
       const providerPresets = new ProviderPresetService(
-        { presets: async () => (await configFiles.load()).evaluation.effective.presets },
+        { presets: async () => (await configFiles.inEffect()).evaluation.effective.presets },
         undefined,
         async () => await modelCatalogService.catalogs(),
       );
@@ -8395,7 +8396,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       // Model catalogs (docs/model-catalog.md): this build's, the published one over them, then this
       // machine's own config/models/<id>.yaml over both. What every runtime on a login offers and pins.
       const modelCatalogService = new ModelCatalogService({
-        files: async () => (await configFiles.load()).evaluation.effective.modelCatalogs,
+        files: async () => (await configFiles.inEffect()).evaluation.effective.modelCatalogs,
         published: async () => {
           publishedModelCatalog.refreshIfDue();
           return await publishedModelCatalog.catalogs();
@@ -8691,7 +8692,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
        */
       const packService = new PackService({
         settings: async () => {
-          const effective = (await configFiles.load()).evaluation.effective;
+          const effective = (await configFiles.inEffect()).evaluation.effective;
           return {
             config: effective.pack,
             guideFile: effective.modelsGuide,
