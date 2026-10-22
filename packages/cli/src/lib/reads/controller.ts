@@ -1,7 +1,13 @@
 import { FyTransportError } from '@ferretry/protocol/client';
 import { SessionCommandError } from '../session/errors.ts';
 import type { IMarkerProbe, IReadsClock, IReadsGateway, IReadsIo, ITerminalAttacher, IWaitResults } from './ports.ts';
-import { renderEvent, renderFleetStreamIdle, renderStreamIdle } from './render.ts';
+import {
+  renderEvent,
+  renderFleetStreamCaughtUp,
+  renderFleetStreamIdle,
+  renderStreamCaughtUp,
+  renderStreamIdle,
+} from './render.ts';
 import { decideWait, renderWaitOutcome, type WaitNotices, type WaitOutcome, waitExitCode } from './wait.ts';
 
 /**
@@ -129,6 +135,7 @@ export class ReadsController {
     if (signal.aborted) return;
     const positions = new Map<string, number>();
     if (sessionId !== undefined) positions.set(sessionId, after);
+    let caughtUp = false;
     await this.gateway.stream(
       sessionId,
       after,
@@ -148,15 +155,20 @@ export class ReadsController {
         if (sessionId === undefined) {
           if (idle.scope.kind !== 'fleet')
             throw new Error('the daemon returned a session idle proof for a fleet stream');
+          const followed = idle.scope.followedSessions;
           this.out.error(
-            `${this.binaryName} stream: ${renderFleetStreamIdle(idle.scope.followedSessions, idle.idleSeconds)}`,
+            `${this.binaryName} stream: ${caughtUp ? renderFleetStreamIdle(followed, idle.idleSeconds) : renderFleetStreamCaughtUp(followed)}`,
           );
+          caughtUp = true;
           return;
         }
         const position = positions.get(sessionId) ?? after;
         if (idle.scope.kind !== 'session' || idle.scope.sessionId !== sessionId || idle.scope.after !== position)
           throw new Error('the daemon returned an idle proof that contradicted the followed session cursor');
-        this.out.error(`${this.binaryName} stream: ${renderStreamIdle(sessionId, position, idle.idleSeconds)}`);
+        this.out.error(
+          `${this.binaryName} stream: ${caughtUp ? renderStreamIdle(sessionId, position, idle.idleSeconds) : renderStreamCaughtUp(sessionId, position)}`,
+        );
+        caughtUp = true;
       },
     );
   }

@@ -256,27 +256,36 @@ describe('fy stream', () => {
     should(gateway.streamCalls).eql([{ sessionId: undefined, after: 0 }]);
   });
 
-  it('should report the scoped idle proof the daemon sent, with its own cursor', async () => {
-    // Arrange
-    const { controller, io } = build({ frames: [eventFrame(4), sessionIdleFrame('s1', 4, 30)] });
+  it('should report the scoped idle proofs the daemon sent, with its own cursor', async () => {
+    // Arrange — the daemon's opening proof at the replay edge, then a quiet window's.
+    const { controller, io } = build({
+      frames: [eventFrame(4), sessionIdleFrame('s1', 4, 30), sessionIdleFrame('s1', 4, 30)],
+    });
 
     // Act
     await controller.stream('s1', { after: 3 }, new AbortController().signal);
 
-    // Assert — silence is the daemon's claim, on stderr, so stdout stays a pure event channel.
-    should(io.err).eql(['foo stream: no new events for s1 in 30s (still following from #4)']);
+    // Assert — silence is the daemon's claim, on stderr, so stdout stays a pure event channel. The
+    // first proof says the replay is over; claiming thirty quiet seconds for it would be false.
+    should(io.err).eql([
+      'foo stream: caught up on s1 at #4 (following live)',
+      'foo stream: no new events for s1 in 30s (still following from #4)',
+    ]);
     should(io.out).have.length(1);
   });
 
-  it('should report a fleet idle proof without inventing a global cursor', async () => {
+  it('should report fleet idle proofs without inventing a global cursor', async () => {
     // Arrange
-    const { controller, io } = build({ frames: [fleetIdleFrame(3, 45)] });
+    const { controller, io } = build({ frames: [fleetIdleFrame(3, 45), fleetIdleFrame(3, 45)] });
 
     // Act
     await controller.stream(undefined, {}, new AbortController().signal);
 
     // Assert
-    should(io.err).eql(['foo stream: no new fleet events in 45s (socket is live; following 3 sessions)']);
+    should(io.err).eql([
+      'foo stream: caught up on the fleet (following 3 sessions live)',
+      'foo stream: no new fleet events in 45s (socket is live; following 3 sessions)',
+    ]);
   });
 
   it('should refuse an idle proof that contradicts the followed scope', async () => {

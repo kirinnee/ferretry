@@ -9313,7 +9313,8 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
               signal.throwIfAborted();
               const sessionIds = await storage.fleetSessionIds();
               signal.throwIfAborted();
-              const events = await storage.tailEvents(limit);
+              // `?tail=0` replays nothing, so it skips the tail's index proof as well as its read.
+              const events = limit === 0 ? [] : await storage.tailEvents(limit);
               signal.throwIfAborted();
               return { sessionIds, events };
             },

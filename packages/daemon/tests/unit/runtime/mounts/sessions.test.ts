@@ -1,10 +1,10 @@
-import { NO_GOVERNED_ROUTES_GUARD } from '../../../../src/lib/api/capability.ts';
 import { describe, it } from 'bun:test';
-import { SessionListSchema, SessionViewSchema } from '@ferretry/protocol';
+import { SessionListSchema, type SessionView, SessionViewSchema } from '@ferretry/protocol';
 import should from 'should';
+import { NO_GOVERNED_ROUTES_GUARD } from '../../../../src/lib/api/capability.ts';
 import { ApiDispatcher } from '../../../../src/lib/api/dispatcher.ts';
 import { ApiRouter } from '../../../../src/lib/api/router.ts';
-import { sessionRoutes, type SessionDirectorySubsystem } from '../../../../src/lib/runtime/mounts/sessions.ts';
+import { type SessionDirectorySubsystem, sessionRoutes } from '../../../../src/lib/runtime/mounts/sessions.ts';
 import { jsonBody, request } from '../../api/support.ts';
 import { CREDENTIALS, human, sessionDirectory, sessionView } from './support.ts';
 
@@ -22,6 +22,21 @@ function dispatcher(subsystem: SessionDirectorySubsystem): ApiDispatcher {
 
 const FIRST = sessionView('s1', { name: 'Wire Subsystems' });
 const SECOND = sessionView('s2', { name: 'Mount The Boards' }, { status: 'completed' });
+
+/** One copy of `value` per primitive leaf, with only that leaf changed. */
+function* leafVariants<T>(value: T): Generator<T> {
+  if (typeof value === 'string') yield `${value}~` as T;
+  else if (typeof value === 'number') yield (value + 1) as T;
+  else if (typeof value === 'boolean') yield !value as T;
+  else if (Array.isArray(value)) {
+    for (const [index, item] of value.entries())
+      for (const changed of leafVariants(item)) yield value.map((other, at) => (at === index ? changed : other)) as T;
+    yield [...value, 'extra'] as T;
+  } else if (value !== null && typeof value === 'object') {
+    for (const [key, item] of Object.entries(value))
+      for (const changed of leafVariants(item)) yield { ...value, [key]: changed };
+  }
+}
 
 describe('the session read mount', () => {
   it('should answer the whole fleet in the wire shape the client parses', async () => {
@@ -122,6 +137,59 @@ describe('the session read mount', () => {
 
     // Assert
     should(response.status).equal(403);
+  });
+
+  it('should answer a fleet the client already holds with a bodyless 304 under the same tag', async () => {
+    // Arrange
+    const mount = dispatcher(sessionDirectory([FIRST, SECOND]));
+    const first = await mount.dispatch(request({ path: '/v1/sessions', headers: human }));
+    const etag = first.headers.get('etag');
+
+    // Act
+    const again = await mount.dispatch(
+      request({ path: '/v1/sessions', headers: { ...human, 'if-none-match': etag ?? '' } }),
+    );
+
+    // Assert
+    should(first.status).equal(200);
+    should(etag).match(/^"[A-Za-z0-9_-]+"$/u);
+    should(again.status).equal(304);
+    should(again.body).equal('');
+    should(again.headers.get('etag')).equal(etag);
+    // Still live state: a 304 confirms the bytes, it never licenses a cache to answer for them.
+    should(again.headers.get('cache-control')).match(/no-store/u);
+  });
+
+  it('should answer in full when the tag the client holds is not the current one', async () => {
+    // Arrange / Act
+    const response = await dispatcher(sessionDirectory([FIRST])).dispatch(
+      request({ path: '/v1/sessions', headers: { ...human, 'if-none-match': '"stale"' } }),
+    );
+
+    // Assert
+    should(response.status).equal(200);
+    should(SessionListSchema.parse(JSON.parse(response.body))).have.length(1);
+  });
+
+  it('should move the tag when any field a client could render moves', async () => {
+    // Every leaf of the view, changed one at a time, plus the optional cursor appearing: the tag is a
+    // digest of the served body, so no field can change behind a 304.
+    // Arrange
+    const tagOf = async (views: readonly SessionView[]): Promise<string | undefined> =>
+      (
+        await dispatcher(sessionDirectory(views)).dispatch(request({ path: '/v1/sessions', headers: human }))
+      ).headers.get('etag');
+    const base = await tagOf([FIRST, SECOND]);
+    const variants = [...leafVariants(FIRST)].map(view => [view, SECOND]);
+    variants.push([{ ...FIRST, journalSequence: 7 }, SECOND], [SECOND, FIRST], [FIRST]);
+
+    // Act
+    const tags = await Promise.all(variants.map(async views => await tagOf(views)));
+
+    // Assert
+    should(variants.length).be.above(30);
+    for (const tag of tags) should(tag).not.equal(base);
+    should(await tagOf([FIRST, SECOND])).equal(base);
   });
 
   it('should never let a cached view stand in for live session state', async () => {
