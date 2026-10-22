@@ -57,6 +57,52 @@ The daemon waits at least one poll (250 ms) between typing and Enter, which is o
 window, and if an Enter only opened a new line the composer still holds the message, so Enter is
 pressed again — bounded, and only while that exact message is still there.
 
+## Measured Claude Code behaviour
+
+Measured on **Claude Code 2.1.281** from live captures of the incident below (fixtures:
+`packages/daemon/tests/fixtures/composer/claude-2.1.281-busy-queued-*.txt`; they carry no cursor, so
+the tests check every cursor tmux could report).
+
+- Text submitted mid-turn is drawn **above the spinner**: each message a `❯ <text>` line, its wrapped
+  rows indented two columns, blank rows between messages, and the block closed by
+  `  ctrl+x ctrl+s to send now`.
+- The composer then shows `Press up to edit queued messages`. That is a **placeholder whatever the cursor
+  says** — read as input it refused every later send over a draft nobody typed.
+- **No transcript record is written** for text typed into that queue (no `queue-operation`), so the
+  block on screen is the only proof the message is held until the turn ends and Claude submits it.
+
+The incident: one `fy send` to a mid-turn Claude ferret was not recognised as held, so at each deadline
+(15 s, 30 s, 60 s) the tracker called it absent and typed it again — **four copies in one queue**, and
+the sender told "did not reach it: it was not delivered … after 4 attempt(s)".
+
+The queue is read only when anchored to that hint (`readHarnessQueue`), never from a `❯` line alone,
+because the conversation above draws the person's past prompts with the same glyph; the read goes up
+from the hint until a flush-left line that is not a queued message (the assistant's `⏺` output). A read
+that reaches the top of the pane first, or a composer showing the queued placeholder with no hint to be
+found, is **incomplete**: a payload found in it is held, but one not found is `unknown`, never absent
+(`paneHoldOf`), and the terminal's `heldAt` throws for it — an unread pane proves nothing.
+
+## Never two copies behind a running turn
+
+A queue is the one place a typed message can sit unseen, so a send is typed into a **mid-turn** pane at
+most once unless a person forces another (`typedIntoBusyPane`: its first transport rode the queue —
+path `native-inline` / `native-file` — or a re-attempt was typed behind a turn, recorded as `busyTyped`
+before the keys). Two places enforce it:
+
+- **The tracker** proves such a send absent only once the turn has ended. While the pane is mid-turn it
+  waits — pushing the deadline out, up to the hold ceiling, without spending an attempt — because at
+  the turn boundary the harness either submits what it held (and the transcript proves it) or holds
+  nothing at all.
+- **Every re-attempt**, the tracker's as well as a person's, re-reads the pane under the send lock first.
+  Shown held in the queue: the daemon's retry settles it `queued` on that proof and types nothing (a
+  person's is refused). Shown typed in the composer: refused. The pane cannot be read, or the queue runs
+  off it: refused unless forced, and the tracker settles the send `unaccounted` (`pane_unreadable`) —
+  never "not delivered". Mid-turn and already typed into a mid-turn pane once: refused unless forced
+  (`SendRetypeWithheld`, reason `held` / `busy` / `unreadable`).
+
+An `unaccounted` send's notice to an agent sender says it **could not be confirmed** and may still have
+landed — not that it "did not reach" the recipient, which invited the sender to send the copy itself.
+
 ## Never typing onto unsent text
 
 A send first reads the composer. If it already holds input, **nothing is typed onto it**. What happens
@@ -106,7 +152,7 @@ typed the same words.
 | --------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
 | Sending                     | Accepted; nothing has proved where it is yet                                                                                  |
 | Typed, not sent             | `typedNotSent`: the composer still holds exactly this message ≥4 s after it was typed (a pointer: after its last Enter nudge) |
-| Queued                      | The harness shows it in its own queue (a Claude queue record, or Codex's `↳` entry)                                           |
+| Queued                      | The harness holds it in its own queue (a Claude queue record or `❯` entry above the spinner, or Codex's `↳` entry)            |
 | Delivered                   | A user record in the transcript carries it — or carries it JOINED to its neighbours                                           |
 | Unconfirmed / Not delivered | As before: `unaccounted` / `timed_out`, with the reason                                                                       |
 | Cancelled                   | A person took it back; `cancelEffect` says what that did on the agent's screen                                                |
@@ -153,6 +199,8 @@ Every undelivered row (sending, queued, typed-not-sent, unconfirmed, not deliver
   draft; the tracker then proves delivery from the transcript.
 - **Retry** — the existing `POST …/retry`. A still-open message may now be retried with `force`, but is
   refused while the pane shows it typed in the composer ("press Enter instead") or held in the queue.
+  Without `force` it is also refused while the pane cannot be read, and while the agent is mid-turn if a
+  copy was already typed into it mid-turn (see [Never two copies behind a running turn](#never-two-copies-behind-a-running-turn)).
 - **Copy text** — in the app only.
 
 The session menu's **Clear stuck messages** cancels every undelivered row of that session, one by one.
@@ -179,9 +227,12 @@ transcript, the same row (`send:<id>`) becomes the ordinary delivered bubble in 
 
 ## Declared gaps
 
-- **Claude's on-screen queue is not measured.** For Claude the queued proof is its transcript's
-  `queue-operation` record, as before; the composer reading applies to Claude's `❯` composer but no
-  Claude queue display is parsed.
+- **Claude's on-screen queue is measured on 2.1.281 only.** An earlier or later rendering that moves or
+  rewords the `ctrl+x ctrl+s to send now` hint reads as `unknown` while the queued placeholder shows
+  (unconfirmed, never retyped), and as no queue at all once it does not — where the mid-turn guard above
+  still keeps a send from being typed behind the turn twice.
+- **A queue taller than the pane cannot prove absence.** The messages above its top could be this one, so
+  the send is settled unconfirmed rather than retyped.
 - **A message in Codex's own queue cannot be cancelled there.** Codex offers `alt + ↑` to edit its last
   queued message; driving that is not attempted.
 - **Rows older than the two-hour ceiling are not re-examined.** A row stuck before this fix stays stuck

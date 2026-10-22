@@ -11,11 +11,12 @@ import type { SessionId } from '../../../lib/session-id.ts';
 import {
   composerInput,
   composerTransport,
-  heldAt,
   occupiedComposer,
+  type PaneHold,
   paneBlockingDialog,
   paneBlockingPermission,
   paneBlockingPrompt,
+  paneHoldOf,
   paneShowsActiveWork,
   readComposer,
   showsPayload,
@@ -103,10 +104,22 @@ export class TmuxSendTerminal implements SendTerminal {
    * Read from those two places only. The whole-screen search this replaced answered "still held" for a
    * message whose words were anywhere in view — including the conversation it had already been
    * submitted into — so a row waited on "Sending" for the two-hour ceiling.
+   *
+   * A queue that runs past the top of the pane THROWS rather than answering "not held": the payload
+   * may be in the part that cannot be seen, and "not held" is what licenses typing it again.
    */
   async heldAt(id: SessionId, text: string): Promise<SendHeldAt | undefined> {
+    const hold = await this.hold(id, text);
+    if (hold === 'unknown')
+      throw new Error(
+        `the agent's queue in session ${id} runs past what its pane shows, so a held message cannot be ruled out`,
+      );
+    return hold === 'absent' ? undefined : hold;
+  }
+
+  private async hold(id: SessionId, text: string): Promise<PaneHold> {
     const frame = await captureFrame(this.tmux, await this.session(id));
-    return heldAt(frame.visible, { x: frame.cursorX, y: frame.cursorY }, text, composerTransport(text) === 'paste');
+    return paneHoldOf(frame.visible, { x: frame.cursorX, y: frame.cursorY }, text, composerTransport(text) === 'paste');
   }
 
   /**
@@ -141,11 +154,11 @@ export class TmuxSendTerminal implements SendTerminal {
   /** One Enter, for a composer holding exactly the payload, then watched until it leaves or does not. */
   async submitComposer(id: SessionId, text: string): Promise<ComposerSubmitOutcome> {
     const session = await this.session(id);
-    if ((await this.heldAt(id, text)) !== 'composer') return 'absent';
+    if ((await this.hold(id, text)) !== 'composer') return 'absent';
     await this.tmux.sendKey(session, 'Enter');
     for (let poll = 0; poll < this.keys.submitPolls; poll += 1) {
       await this.sleep(this.keys.pollMs);
-      if ((await this.heldAt(id, text)) !== 'composer') return 'submitted';
+      if ((await this.hold(id, text)) !== 'composer') return 'submitted';
     }
     return 'holding';
   }

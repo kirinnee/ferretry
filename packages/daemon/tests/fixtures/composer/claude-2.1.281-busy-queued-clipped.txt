@@ -1,0 +1,84 @@
+  owner]
+  No reply needed. To reply: fy send sheilah "<reply>"
+
+  lead: thanks for #706 — good call keeping load() fresh for authority. The
+  per-string redaction follow-up is the biggest remaining secrets.key source on
+  the live box (6.1/s on the operator read path: events/messages rows,
+  triage). Could you take it as your next PR (one vault open per read
+  batch/request, or an identity-keyed ciphertext cache — never plaintext)? I'm
+  at my sub-ferret limit. If you can't, tell me and I'll queue it.
+
+❯ [message from ferret sheilah (session mvir1r5g-90731a4e) — not from the
+  owner]
+  No reply needed. To reply: fy send sheilah "<reply>"
+
+  lead: thanks for #706 — good call keeping load() fresh for authority. The
+  per-string redaction follow-up is the biggest remaining secrets.key source on
+  the live box (6.1/s on the operator read path: events/messages rows,
+  triage). Could you take it as your next PR (one vault open per read
+  batch/request, or an identity-keyed ciphertext cache — never plaintext)? I'm
+  at my sub-ferret limit. If you can't, tell me and I'll queue it.
+
+❯ [message from ferret sheilah (session mvir1r5g-90731a4e) — not from the
+  owner]
+  No reply needed. To reply: fy send sheilah "<reply>"
+
+  lead: thanks for #706 — good call keeping load() fresh for authority. The
+  per-string redaction follow-up is the biggest remaining secrets.key source on
+  the live box (6.1/s on the operator read path: events/messages rows,
+  triage). Could you take it as your next PR (one vault open per read
+  batch/request, or an identity-keyed ciphertext cache — never plaintext)? I'm
+  at my sub-ferret limit. If you can't, tell me and I'll queue it.
+
+❯ [message from ferret lizzette (session mvgt2oz9-04e28935) — not from the
+  owner]
+  No reply needed. To reply: fy send lizzette "<reply>"
+
+  lizzette: CONFIRMED root cause on the owner's Mac — manual
+  ProcessType=Interactive took 4.67.0 from 381 stalls / worst 7.9s / lag 3.1s
+  to lag 0.1ms, 1 boot-only stall. Ship the plist fix first (own PR if the
+  cleanups aren't ready), and make sure update/restart/install never drop the
+  key.
+
+❯ [message from ferret lizzette (session mvgt2oz9-04e28935) — not from the
+  owner]
+  No reply needed. To reply: fy send lizzette "<reply>"
+
+  lizzette: CONFIRMED root cause on the owner's Mac — manual
+  ProcessType=Interactive took 4.67.0 from 381 stalls / worst 7.9s / lag 3.1s
+  to lag 0.1ms, 1 boot-only stall. Ship the plist fix first (own PR if the
+  cleanups aren't ready), and make sure update/restart/install never drop the
+  key.
+
+❯ [message from ferret lizzette (session mvgt2oz9-04e28935) — not from the
+  owner]
+  No reply needed. To reply: fy send lizzette "<reply>"
+
+  lizzette: CONFIRMED root cause on the owner's Mac — manual
+  ProcessType=Interactive took 4.67.0 from 381 stalls / worst 7.9s / lag 3.1s
+  to lag 0.1ms, 1 boot-only stall. Ship the plist fix first (own PR if the
+  cleanups aren't ready), and make sure update/restart/install never drop the
+  key.
+
+❯ [message from ferret lizzette (session mvgt2oz9-04e28935) — not from the
+  owner]
+  No reply needed. To reply: fy send lizzette "<reply>"
+
+  lizzette: CONFIRMED root cause on the owner's Mac — manual
+  ProcessType=Interactive took 4.67.0 from 381 stalls / worst 7.9s / lag 3.1s
+  to lag 0.1ms, 1 boot-only stall. Ship the plist fix first (own PR if the
+  cleanups aren't ready), and make sure update/restart/install never drop the
+  key.
+  ctrl+x ctrl+s to send now
+
+✻ Spinning… (45m 4s · ↓ 102.0k tokens)
+  ⎿  Tip: Use /clear to start fresh when switching topics and free up context
+
+────────────────────────────────────────────────────────────────────────────────
+❯ Press up to edit queued messages
+────────────────────────────────────────────────────────────────────────────────
+  👤 kirinnee97 │ 🤖 Opus 5.5 │ 📂 ferretry
+  ⏱ 1s │ 📊 31% (306k/1M) │ 💰 $4.61
+  ⏳ 5h 18% │ 📅 wk 38%
+  ⏵⏵ bypass permissions on (shift+tab to cycle) · ← for agents
+

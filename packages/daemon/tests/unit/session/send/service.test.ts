@@ -22,6 +22,7 @@ import {
   type SendRecord,
   SendRefused,
   type SendRepository,
+  SendRetypeWithheld,
   type SendReviver,
   type SendSettlement,
   type SendTarget,
@@ -1452,5 +1453,97 @@ describe('a person’s own draft in the composer', () => {
     should(await killed.service.resolveDraft(ID, 'submit', 'x').catch((error: unknown) => error)).be.instanceof(
       SendRefused,
     );
+  });
+});
+
+/**
+ * A retry is checked against the pane UNDER THE SEND LOCK, whoever asks — the daemon's tracker
+ * included. Its earlier look was not holding the lock, and a queue it did not recognise is how one
+ * message became four copies in Claude Code's queue.
+ */
+describe('a retry while the pane may still be holding the send', () => {
+  /** A send whose first copy was typed into a mid-turn pane, and rode the harness's queue. */
+  async function typedMidTurn(fate: SendRecord['fate'] = 'accepted', extra: Partial<SendRecord> = {}) {
+    const built = parts(target(), [pane({ activeWork: true })]);
+    await built.service.send(request());
+    built.ledger.records.set('send-1', { ...built.ledger.only(), fate, attempt: 1, ...extra });
+    built.terminal.typed.length = 0;
+    return built;
+  }
+  const textOf = (record: SendRecord): string => record.matchText ?? record.message;
+
+  it('proves the daemon’s retry queued, typing nothing, when the pane shows the send held', async () => {
+    const { service, ledger, terminal, repository } = await typedMidTurn();
+    terminal.held.set(textOf(ledger.only()), 'queue');
+
+    const record = await service.reattempt(ID, 'send-1', { by: 'daemon' });
+
+    should(record).match({ fate: 'queued', queueProof: 'pane', attempt: 1 });
+    should(terminal.typed).be.empty();
+    should(repository.journal_.at(-1)).match({ event: 'control.send_queued', data: { proof: 'pane' } });
+  });
+
+  it('withholds the daemon’s retry of one typed in the composer, or one it cannot check, typing nothing', async () => {
+    const composer = await typedMidTurn();
+    composer.terminal.held.set(textOf(composer.ledger.only()), 'composer');
+    const blind = await typedMidTurn();
+    blind.terminal.heldFailure = new Error('the queue runs past the top of the pane');
+
+    const typed = await composer.service.reattempt(ID, 'send-1', { by: 'daemon' }).catch((e: unknown) => e);
+    const unreadable = await blind.service.reattempt(ID, 'send-1', { by: 'daemon' }).catch((e: unknown) => e);
+
+    should(typed).be.instanceof(SendRetypeWithheld);
+    should((typed as SendRetypeWithheld).reason).equal('held');
+    should(unreadable).be.instanceof(SendRetypeWithheld);
+    should((unreadable as SendRetypeWithheld).reason).equal('unreadable');
+    should([...composer.terminal.typed, ...blind.terminal.typed]).be.empty();
+    should(composer.ledger.only()).match({ fate: 'accepted', attempt: 1 });
+  });
+
+  it('never types a send into a mid-turn pane twice unless a person forces it', async () => {
+    const daemon = await typedMidTurn();
+    const person = await typedMidTurn('timed_out', { retryable: true, unaccountedReason: 'not_delivered' });
+
+    const refusedDaemon = await daemon.service.reattempt(ID, 'send-1', { by: 'daemon' }).catch((e: unknown) => e);
+    const refusedPerson = await person.service.reattempt(ID, 'send-1', { by: 'person' }).catch((e: unknown) => e);
+    const forced = await person.service.reattempt(ID, 'send-1', { by: 'person', force: true });
+
+    should(refusedDaemon).be.instanceof(SendRetypeWithheld);
+    should((refusedDaemon as SendRetypeWithheld).reason).equal('busy');
+    should(daemon.terminal.typed).be.empty();
+    should(daemon.ledger.only()).match({ fate: 'accepted', attempt: 1 });
+    should((refusedPerson as Error).message).match(/already typed into this agent mid-turn.*send it again anyway/u);
+    should(forced).match({ fate: 'queued', attempt: 2, busyTyped: true });
+    should(person.terminal.typed).have.length(1);
+  });
+
+  it('marks a retry typed behind a running turn, so the next one waits for the turn to end', async () => {
+    // Its first copy went into an idle prompt: one copy behind the turn is allowed, a second is not.
+    const { service, ledger, terminal } = parts(target(), [pane({ promptReady: true }), pane({ activeWork: true })]);
+    await service.send(request());
+    ledger.records.set('send-1', { ...ledger.only(), fate: 'accepted', attempt: 1 });
+    terminal.typed.length = 0;
+
+    const first = await service.reattempt(ID, 'send-1', { by: 'daemon' });
+    ledger.records.set('send-1', { ...ledger.only(), fate: 'accepted' });
+    const second = await service.reattempt(ID, 'send-1', { by: 'daemon' }).catch((e: unknown) => e);
+
+    should(first).match({ attempt: 2, busyTyped: true });
+    should((second as SendRetypeWithheld).reason).equal('busy');
+    should(terminal.typed).eql(['ship it']);
+  });
+
+  it('refuses a person’s unforced retry it cannot check against the pane, and says how to send anyway', async () => {
+    const { service, terminal, ledger } = parts();
+    await service.send(request());
+    terminal.heldFailure = new Error('no pane');
+    ledger.records.set('send-1', { ...ledger.only(), fate: 'timed_out', retryable: true, attempt: 1 });
+    terminal.typed.length = 0;
+
+    const refused = await service.reattempt(ID, 'send-1', { by: 'person' }).catch((e: unknown) => e);
+
+    should((refused as SendRetypeWithheld).reason).equal('unreadable');
+    should((refused as Error).message).match(/could not be read.*send it again anyway/u);
+    should(terminal.typed).be.empty();
   });
 });

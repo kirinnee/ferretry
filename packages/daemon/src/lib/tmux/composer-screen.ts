@@ -21,6 +21,16 @@
  *     `• Messages to be submitted after next tool call` / `• Queued follow-up inputs`, each entry a
  *     `↳ <text>` line.
  *
+ * Measured on Claude Code 2.1.281 (the live captures under `tests/fixtures/composer/claude-*`):
+ *
+ *   * Text submitted mid-turn is drawn ABOVE the spinner, each message a `❯ <text>` line with its
+ *     wrapped rows indented two columns, and the block closed by `  ctrl+x ctrl+s to send now`.
+ *   * The composer then shows `Press up to edit queued messages`. That is a placeholder, whatever
+ *     the cursor says: read as input, it made every later send refuse over "a draft" nobody typed.
+ *   * Claude no longer writes a transcript `queue-operation` record for text typed into its queue,
+ *     so this block is the ONLY proof a held message has. Missing it called the message lost, and
+ *     the daemon typed it again — four copies in one queue, and the sender told it never arrived.
+ *
  * Every function here is pure; the cursor comes from tmux beside the capture.
  */
 
@@ -60,6 +70,17 @@ const PENDING_WINDOW_LINES = 25;
 const PENDING_ENTRY = /^\s*↳\s?(.*)$/u;
 const PENDING_HEADER = /^\s*[•◦]\s*(?:messages to be submitted|queued follow-up)/iu;
 const PENDING_HINT = /edit (?:the )?last queued message/iu;
+
+/** Claude's empty composer while messages wait in its queue. Never input, whatever the cursor says. */
+const CLAUDE_QUEUED_PLACEHOLDER = /^press\s+up\s+to\s+edit\s+queued\s+messages?$/iu;
+/** The line that closes Claude's queued block, directly under its last message. */
+const CLAUDE_QUEUE_HINT = /^\s*ctrl\+x\s+ctrl\+s\s+to\s+send\s+now\s*$/iu;
+/** How far above the composer the hint may sit: the spinner, its tip and a todo list lie between. */
+const CLAUDE_HINT_WINDOW_LINES = 40;
+/** One queued message's first row, flush left. History drawn by the assistant starts with `⏺`. */
+const CLAUDE_QUEUE_ENTRY = /^[❯>](?:[\s ](.*))?$/u;
+/** A queued message's wrapped rows, and the blank rows between its paragraphs and between messages. */
+const CLAUDE_QUEUE_CONTINUATION = /^\s{2,}\S/u;
 
 function lineIndexOfComposer(lines: readonly string[]): number | undefined {
   for (let index = lines.length - 1; index >= 0; index -= 1) {
@@ -108,6 +129,7 @@ function placeholderOf(
   cursor: ComposerCursor,
 ): boolean | undefined {
   if (text === '') return false;
+  if (end === at && CLAUDE_QUEUED_PLACEHOLDER.test(text)) return true;
   // One row past the draft is still the composer: a draft ending in a newline — which is what a
   // swallowed Enter leaves — parks the cursor on the blank row it opened.
   if (cursor.x === undefined || cursor.y === undefined || cursor.y < at || cursor.y > end + 1) return undefined;
@@ -121,15 +143,38 @@ export function composerInput(reading: ComposerReading | undefined): string {
 }
 
 /**
- * The messages a harness shows as waiting in its own queue, directly above the composer.
+ * What a harness shows waiting in its own queue, and whether that is ALL of it.
+ *
+ * `complete` is false when the frame cannot show the whole queue — Claude's block runs off the top
+ * of the pane, or its composer says messages are queued and no block could be read. A payload FOUND
+ * in `entries` is held either way; one NOT found is absent only when `complete` is true.
+ */
+export interface HarnessQueue {
+  readonly entries: readonly string[];
+  readonly complete: boolean;
+}
+
+/** The messages a harness shows as waiting in its own queue: Codex's pending block, then Claude's. */
+export function readPendingInputs(visible: string): readonly string[] {
+  return readHarnessQueue(visible).entries;
+}
+
+/** Both harnesses' queues as one reading. Neither shape can be mistaken for the other's. */
+export function readHarnessQueue(visible: string): HarnessQueue {
+  const lines = visible.replaceAll('\r\n', '\n').split('\n');
+  const at = lineIndexOfComposer(lines);
+  const claude = readClaudeQueue(lines, at);
+  return { entries: [...readCodexPending(lines, at ?? lines.length), ...claude.entries], complete: claude.complete };
+}
+
+/**
+ * Codex's pending block, directly above the composer.
  *
  * Only a block contiguous with the composer is read — blank rows, headers, `↳` entries, their wrapped
  * continuation rows and the edit hint — so an arrow that scrolled up with the conversation is history,
  * not a queue.
  */
-export function readPendingInputs(visible: string): readonly string[] {
-  const lines = visible.replaceAll('\r\n', '\n').split('\n');
-  const at = lineIndexOfComposer(lines) ?? lines.length;
+function readCodexPending(lines: readonly string[], at: number): readonly string[] {
   const entries: string[][] = [];
   let continuation: string[] = [];
   const floor = Math.max(0, at - PENDING_WINDOW_LINES);
@@ -153,6 +198,48 @@ export function readPendingInputs(visible: string): readonly string[] {
     break;
   }
   return entries.map(parts => parts.join(' '));
+}
+
+/**
+ * Claude's queued block: the `❯` messages directly above its `ctrl+x ctrl+s to send now` hint.
+ *
+ * Anchored to the hint, never to a `❯` line on its own, because the conversation above draws the
+ * person's past prompts with the same glyph. Read upward from the hint through each message's
+ * indented rows until a flush-left line that is not a queued message — the assistant's `⏺` output.
+ * Reaching the top of the frame first means more of the queue may sit above it, so the reading is
+ * incomplete; so is a composer that says messages are queued while no hint can be found.
+ */
+function readClaudeQueue(lines: readonly string[], at: number | undefined): HarnessQueue {
+  const hint = claudeQueueHint(lines, at);
+  if (hint === undefined) {
+    const composer = at === undefined ? '' : (PROMPT_LINE.exec(lines[at] as string)?.[2] ?? '').trim();
+    return { entries: [], complete: !CLAUDE_QUEUED_PLACEHOLDER.test(composer) };
+  }
+  const entries: string[] = [];
+  let body: string[] = [];
+  let index = hint - 1;
+  for (; index >= 0; index -= 1) {
+    const line = lines[index] as string;
+    const entry = CLAUDE_QUEUE_ENTRY.exec(line);
+    if (entry !== null) {
+      entries.unshift([(entry[1] ?? '').trim(), ...body].join(' ').trim());
+      body = [];
+      continue;
+    }
+    if (line.trim() === '' || CLAUDE_QUEUE_CONTINUATION.test(line)) {
+      body.unshift(line.trim());
+      continue;
+    }
+    break;
+  }
+  return { entries, complete: index >= 0 };
+}
+
+function claudeQueueHint(lines: readonly string[], at: number | undefined): number | undefined {
+  const from = (at ?? lines.length) - 1;
+  const floor = Math.max(0, from - CLAUDE_HINT_WINDOW_LINES);
+  for (let index = from; index >= floor; index -= 1) if (CLAUDE_QUEUE_HINT.test(lines[index] as string)) return index;
+  return undefined;
 }
 
 function squeezed(value: string): string {
@@ -186,10 +273,24 @@ export type HeldAt = 'composer' | 'queue';
  * then a placeholder in the composer is how it shows, and its characters never are.
  */
 export function heldAt(visible: string, cursor: ComposerCursor, text: string, paste: boolean): HeldAt | undefined {
+  const hold = paneHoldOf(visible, cursor, text, paste);
+  return hold === 'composer' || hold === 'queue' ? hold : undefined;
+}
+
+/**
+ * What a frame proves about `text`: held in the composer or the queue, `absent` from both, or
+ * `unknown` — not found, but the harness's queue runs past what the frame shows, so it may be there.
+ * Only `absent` may ever lead to typing the payload again.
+ */
+export type PaneHold = HeldAt | 'absent' | 'unknown';
+
+export function paneHoldOf(visible: string, cursor: ComposerCursor, text: string, paste: boolean): PaneHold {
   const composer = readComposer(visible, cursor);
   if (composer !== undefined && composer.placeholder !== true) {
     if (showsPayload(composer.text, text)) return 'composer';
     if (paste && composer.pasted) return 'composer';
   }
-  return readPendingInputs(visible).some(entry => showsPayload(entry, text)) ? 'queue' : undefined;
+  const queue = readHarnessQueue(visible);
+  if (queue.entries.some(entry => showsPayload(entry, text))) return 'queue';
+  return queue.complete ? 'absent' : 'unknown';
 }

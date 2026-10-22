@@ -9,6 +9,7 @@ import type { SessionSendSettings } from './settings.ts';
 import {
   IDLE_SEND_STATUSES,
   type SendPaneObservation,
+  type SendRecord,
   SendRefused,
   type SendTarget,
   SendUnavailable,
@@ -81,6 +82,28 @@ export function routeSend(target: SendTarget, pane: SendPaneObservation): SendRo
   if (TERMINAL_SEND_STATUSES.has(target.status) || !pane.alive || pane.dead) return 'revive';
   if (IDLE_SEND_STATUSES.has(target.status) || target.promptReady === true || pane.promptReady) return 'idle';
   return 'busy';
+}
+
+/**
+ * Whether anything typed into this pane now would land behind a running turn — the routing says busy,
+ * or the frame itself shows work under a status or document that says otherwise.
+ */
+export function paneMidTurn(target: SendTarget, pane: SendPaneObservation): boolean {
+  return pane.activeWork || routeSend(target, pane) === 'busy';
+}
+
+/**
+ * Whether this send has already been typed into a mid-turn pane: its first transport rode the
+ * harness's queue, or a re-attempt was typed behind a running turn.
+ *
+ * THE HARD GUARD. A queue is the one place a typed message can sit unseen — the daemon proves it held
+ * only by recognising the harness's rendering of it, and a rendering it did not recognise is how one
+ * message became four copies in Claude Code's queue. So a send is typed into a mid-turn pane at most
+ * ONCE unless a person forces another; the daemon instead waits for the turn boundary, where the
+ * harness either submits what it held (and the transcript proves it) or holds nothing.
+ */
+export function typedIntoBusyPane(record: Pick<SendRecord, 'path' | 'busyTyped'>): boolean {
+  return record.busyTyped === true || record.path === 'native-inline' || record.path === 'native-file';
 }
 
 /**

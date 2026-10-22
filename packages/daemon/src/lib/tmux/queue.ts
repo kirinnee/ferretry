@@ -1,6 +1,6 @@
 import type { LandingEvidence } from './composer.ts';
 import { composerHolds } from './composer.ts';
-import { type HeldAt, heldAt, readComposer } from './composer-screen.ts';
+import { type HeldAt, heldAt, readComposer, readPendingInputs, showsPayload } from './composer-screen.ts';
 import type { DeliveryFrame } from './delivery.ts';
 
 /**
@@ -33,15 +33,18 @@ export function needsQueueKey(frame: DeliveryFrame, text: string, evidence: Land
  * Where a busy pane is holding the payload: still typed in the composer, waiting in the harness's own
  * queue, or nowhere this frame can show.
  *
- * Read from the composer line and the pending block above it — Codex's `↳ <text>` entries under
- * `Messages to be submitted…` or `Queued follow-up inputs` — never from the payload's words appearing
- * somewhere on screen. That older search called a message "queued" because its text was visible in
- * the conversation it had ALREADY been submitted into (`hello` inside `› hihello`). A frame with no
- * readable composer falls back to it, as the only evidence there is.
+ * Read from the composer line and the queue block above it — Codex's `↳ <text>` entries under
+ * `Messages to be submitted…` or `Queued follow-up inputs`, Claude's `❯ <text>` messages over
+ * `ctrl+x ctrl+s to send now` — never from the payload's words appearing somewhere on screen. That
+ * older search called a message "queued" because its text was visible in the conversation it had
+ * ALREADY been submitted into (`hello` inside `› hihello`). A frame with no readable composer still
+ * reads the queue block first, and falls back to that search only when no block shows the payload:
+ * the fallback would otherwise call a message sitting in Claude's queue "typed".
  */
 export function queuedWhere(frame: DeliveryFrame, text: string, evidence: LandingEvidence): HeldAt | undefined {
   const cursor = { x: frame.cursorX, y: frame.cursorY };
-  if (readComposer(frame.visible, cursor)?.placeholder === undefined)
-    return composerHolds(frame.visible, text, evidence) ? 'composer' : undefined;
-  return heldAt(frame.visible, cursor, text, evidence === 'placeholder');
+  if (readComposer(frame.visible, cursor)?.placeholder !== undefined)
+    return heldAt(frame.visible, cursor, text, evidence === 'placeholder');
+  if (readPendingInputs(frame.visible).some(entry => showsPayload(entry, text))) return 'queue';
+  return composerHolds(frame.visible, text, evidence) ? 'composer' : undefined;
 }

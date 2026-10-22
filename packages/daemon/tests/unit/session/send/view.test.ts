@@ -275,6 +275,8 @@ describe('telling an agent its message did not arrive', () => {
     should(sendFailureNotice('hadi', record({ fate: 'unaccounted' }), 'fy')).match(
       /could not be confirmed \(timeout\) — it may still have landed/,
     );
+    // Unconfirmed is not "did not reach it": it may be in the recipient's queue right now.
+    should(sendFailureNotice('hadi', record({ fate: 'unaccounted' }), 'fy')).not.match(/did not reach it/);
     should(
       sendFailureNotice('hadi', record({ fate: 'unaccounted', unaccountedReason: 'pane_unreadable' }), 'fy'),
     ).match(/\(pane unreadable\)/);

@@ -10,6 +10,8 @@ import {
   type SendHeldAt,
   type SendPaneObservation,
   type SendRecord,
+  SendRetypeWithheld,
+  type SendRetypeWithholding,
   type SendSettlement,
   type SendTarget,
   SendTracker,
@@ -119,6 +121,10 @@ class World {
   pane: SendPaneObservation | undefined = pane();
   inPane: SendHeldAt | false | undefined = false;
   retypeFails = false;
+  /** The service, re-reading the pane under its lock, refuses to type — and why. */
+  withhold: SendRetypeWithholding | undefined;
+  /** The service's re-read finds the send held, and proves it queued instead of typing it. */
+  retypeFindsHeld = false;
   targetFails = false;
   cancelled = 0;
   nowMs = T0;
@@ -182,7 +188,18 @@ class World {
         attempts: {
           reattempt: async (_id, sendId) => {
             if (this.retypeFails) throw new Error('pane went away');
+            if (this.withhold !== undefined) throw new SendRetypeWithheld('the pane said no', this.withhold);
             const current = this.records.get(sendId) as SendRecord;
+            if (this.retypeFindsHeld) {
+              const queued = {
+                ...current,
+                fate: 'queued' as const,
+                queuedAt: clock.now(),
+                queueProof: 'pane' as const,
+              };
+              this.records.set(sendId, queued);
+              return queued;
+            }
             this.retyped.push(sendId);
             const next = {
               ...current,
@@ -897,5 +914,95 @@ describe('a conversation too large to read whole', () => {
     should(world.records.get('send-2')).match({ fate: 'delivered', evidence: { key: 'later' } });
     should(world.records.get('send-1')?.fate).equal('cancelled');
     should(world.records.get('send-3')).match({ fate: 'delivered', evidence: { key: 'earlier' } });
+  });
+});
+
+/**
+ * The incident: one `fy send` to a mid-turn Claude ferret, held in Claude Code 2.1.281's queue in a
+ * rendering the daemon did not recognise and with no transcript record for it — so it was called lost
+ * and typed again at 15 s, 30 s and 60 s, four copies in one queue, and the sender told it never came.
+ */
+describe('a message held in a queue the daemon cannot see', () => {
+  const busyPane = () => pane({ activeWork: true, promptReady: false });
+  const queuedSend = () =>
+    record({ path: 'native-inline', senderKind: 'agent', from: SENDER, fromName: 'lizzette', turn: undefined });
+
+  it('is never typed into the mid-turn pane again, however many deadlines pass, and is queued once seen', async () => {
+    // Arrange — typed into a busy pane, unrecognised in its queue, absent from the transcript.
+    const world = new World(queuedSend());
+    world.pane = busyPane();
+    world.evidence(new ClaudeObservedInputObserver(), []);
+
+    // Act — every deadline of the agent schedule, then the pane's queue recognised.
+    for (const ms of [15_000, 30_000, 60_000, 75_000, 600_000]) await world.checkAt(ms);
+    const waiting = world.only;
+    world.inPane = 'queue';
+    await world.checkAt(601_000);
+    const queued = world.only;
+    world.pane = pane();
+    world.inPane = false;
+    world.evidence(new ClaudeObservedInputObserver(), [claude.user('ship it now please', 602_000)]);
+    await world.checkAt(603_000);
+
+    // Assert
+    should(world.retyped).be.empty();
+    should(waiting).match({ fate: 'accepted', attempt: 1, deadlineAt: at(660_000) });
+    should(queued).match({ fate: 'queued', queueProof: 'pane', attempt: 1 });
+    should(world.only).match({ fate: 'delivered', attempt: 1 });
+    should(world.notices).be.empty();
+  });
+
+  it('is typed again once the turn has ended and it is proven absent — into an idle pane', async () => {
+    const world = new World(queuedSend());
+    world.pane = busyPane();
+    world.evidence(new ClaudeObservedInputObserver(), []);
+    await world.checkAt(15_000);
+    world.pane = pane();
+    await world.checkAt(75_000);
+
+    should(world.retyped).eql(['send-1']);
+    should(world.only).match({ fate: 'accepted', attempt: 2 });
+  });
+
+  it('is typed again once into a mid-turn pane when no copy of it was ever typed into one', async () => {
+    // Its first copy went into an idle pane, which leaves no queue a copy could be hiding in.
+    const world = new World(record({ senderKind: 'agent', from: SENDER }));
+    world.pane = busyPane();
+    world.evidence(new CodexObservedInputObserver(), []);
+    await world.checkAt(15_000);
+
+    should(world.retyped).eql(['send-1']);
+  });
+
+  it('waits when the pane, re-read under the send lock, shows it held or mid-turn — and never says lost', async () => {
+    const held = new World(record());
+    held.withhold = 'held';
+    await held.checkAt(60_000);
+    const midTurn = new World(record());
+    midTurn.withhold = 'busy';
+    await midTurn.checkAt(60_000);
+
+    for (const world of [held, midTurn]) {
+      should(world.only).match({ fate: 'accepted', attempt: 1, deadlineAt: at(120_000) });
+      should(world.events).be.empty();
+    }
+  });
+
+  it('is unconfirmed, not "not delivered", when the re-read could not rule a held copy out', async () => {
+    const world = new World(record({ senderKind: 'agent', from: SENDER }));
+    world.withhold = 'unreadable';
+    await world.checkAt(15_000);
+
+    should(world.only).match({ fate: 'unaccounted', unaccountedReason: 'pane_unreadable', retryable: false });
+    should(world.notices[0]?.record).match({ fate: 'unaccounted', unaccountedReason: 'pane_unreadable' });
+  });
+
+  it('is proven queued, and waits like a queued send, when the retry finds it held instead of typing it', async () => {
+    const world = new World(record());
+    world.retypeFindsHeld = true;
+    await world.checkAt(60_000);
+
+    should(world.only).match({ fate: 'queued', queueProof: 'pane', attempt: 1, deadlineAt: at(120_000) });
+    should(world.retyped).be.empty();
   });
 });

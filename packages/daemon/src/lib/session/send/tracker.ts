@@ -2,6 +2,7 @@ import type { SendUnaccountedReason } from '@ferretry/protocol';
 import type { ClockPort, SerialExecutor } from '../../ports.ts';
 import type { SessionId } from '../../session-id.ts';
 import type { ObservedHumanInput } from '../../transcript/types.ts';
+import { paneMidTurn, typedIntoBusyPane } from './policy.ts';
 import { strandablePointer } from './stranded.ts';
 import {
   attemptsAllowed,
@@ -17,6 +18,7 @@ import {
   type SendLedger,
   type SendRecord,
   type SendRepository,
+  SendRetypeWithheld,
   type SendTerminal,
   type SendTracking,
   TERMINAL_SEND_STATUSES,
@@ -67,6 +69,10 @@ export interface SendScheduler {
 
 /** Types a send again under its original id, or presses Enter again for its stranded pointer. */
 export interface SendReattempter {
+  /**
+   * Answers the record as it then stands — retyped, or proven `queued` when the pane showed it held.
+   * Throws `SendRetypeWithheld` when the pane said not to type at all.
+   */
   reattempt(id: SessionId, sendId: string): Promise<SendRecord>;
   /**
    * One more verified Enter for this send's own pointer, still typed in the composer. Answers the
@@ -382,23 +388,41 @@ export class SendTracker implements SendTracking, SendTrackingLoop {
     // Not delivered, and nothing will be until somebody answers the dialog: retyping would type into it.
     if (pane.blockingPrompt !== undefined) return await this.settle(id, record, 'unaccounted', 'blocked_by_prompt');
     if (hold === 'unreadable') return await this.settle(id, record, 'unaccounted', 'pane_unreadable');
-    if (verdict?.holding === true || hold !== 'nowhere') {
-      // Still held — behind a busy turn, or sitting in the composer. That is waiting, not loss, so
-      // the look is pushed out rather than counted against an attempt, up to a ceiling.
-      if (now - Date.parse(record.acceptedAt) >= this.settings.holdLimitMs)
-        return await this.settle(id, record, 'unaccounted', 'timeout');
-      const extended = await this.ports.ledger.settle(id, record.sendId, {
-        deadlineAt: new Date(now + this.settings.busyExtensionMs).toISOString(),
-      });
-      return extended ?? record;
-    }
+    // Still held — behind a busy turn, or sitting in the composer. That is waiting, not loss.
+    if (verdict?.holding === true || hold !== 'nowhere') return await this.wait(id, record, now);
+    // A mid-turn pane can hold a copy where no reading reaches: a queue rendering this daemon does not
+    // recognise is exactly that, and calling it lost is how one message became four copies. So a send
+    // already typed into a mid-turn pane is proven absent only once the turn ends — when the harness
+    // has either submitted what it held, and the transcript says so, or holds nothing at all.
+    if (paneMidTurn(target, pane) && typedIntoBusyPane(record)) return await this.wait(id, record, now);
     // PROVEN ABSENT: not in the transcript, not in the harness's queue, not on screen.
     const reason: SendUnaccountedReason = verdict?.released === true ? 'composer_discarded' : 'not_delivered';
     if ((record.attempt ?? 1) < attemptsAllowed(record, this.settings)) {
-      const retried = await this.ports.attempts.reattempt(id, record.sendId).catch(() => undefined);
-      if (retried !== undefined) return retried;
+      const retried = await this.ports.attempts.reattempt(id, record.sendId).then(
+        (next): SendRecord | SendRetypeWithheld | undefined => next,
+        (error: unknown) => (error instanceof SendRetypeWithheld ? error : undefined),
+      );
+      // The pane, re-read under the send lock, said not to type: held or mid-turn is waiting, and a
+      // pane that could not rule a held copy out is unconfirmed — never "not delivered".
+      if (retried instanceof SendRetypeWithheld)
+        return retried.reason === 'unreadable'
+          ? await this.settle(id, record, 'unaccounted', 'pane_unreadable')
+          : await this.wait(id, record, now);
+      // A retry that found the send held proved it `queued` instead of typing it, and waits like one.
+      if (retried !== undefined)
+        return retried.attempt === record.attempt ? await this.wait(id, retried, now) : retried;
     }
     return await this.settle(id, record, 'timed_out', reason);
+  }
+
+  /** Pushes the look out rather than counting it against an attempt, up to the hold ceiling. */
+  private async wait(id: SessionId, record: SendRecord, now: number): Promise<SendRecord> {
+    if (now - Date.parse(record.acceptedAt) >= this.settings.holdLimitMs)
+      return await this.settle(id, record, 'unaccounted', 'timeout');
+    const extended = await this.ports.ledger.settle(id, record.sendId, {
+      deadlineAt: new Date(now + this.settings.busyExtensionMs).toISOString(),
+    });
+    return extended ?? record;
   }
 
   /** A final fate, journalled, and handed back to an agent that sent it. */

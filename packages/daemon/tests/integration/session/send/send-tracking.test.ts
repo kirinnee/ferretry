@@ -4,7 +4,13 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import should from 'should';
 import { FileSendLedger } from '../../../../src/adapters/index.ts';
-import { type ClockPort, parseSessionId, type SerialExecutor, type SessionId } from '../../../../src/lib/index.ts';
+import {
+  type ClockPort,
+  paneHoldOf,
+  parseSessionId,
+  type SerialExecutor,
+  type SessionId,
+} from '../../../../src/lib/index.ts';
 import {
   AgentSendFailureNotifier,
   type ComposerClearOutcome,
@@ -55,6 +61,15 @@ class FakeHarness implements SendTerminal {
   strands = false;
   /** What sits typed in the composer and was never submitted. */
   composer = '';
+  /** Claude before 2.1.281 wrote a transcript record for text typed into its queue; 2.1.281 does not. */
+  writesQueueRecords = true;
+  /**
+   * Draw the queue as Claude Code 2.1.281 does and read it with the daemon's real screen reader,
+   * rather than answering from the list. `clipped` draws it scrolled past the top of the pane.
+   */
+  drawsQueue: 'no' | 'whole' | 'clipped' = 'no';
+  /** The pane shows the queue in a rendering the reader does not recognise — the incident. */
+  blindToQueue = false;
   /** What the harness is visibly holding in its own queue. */
   private held: string[] = [];
 
@@ -87,7 +102,8 @@ class FakeHarness implements SendTerminal {
     this.typed.push(text);
     if (this.drops) return 'unproven';
     this.held.push(text);
-    if (this.harness === 'claude')
+    if (this.blindToQueue) return 'unproven';
+    if (this.harness === 'claude' && this.writesQueueRecords)
       this.transcript.push({ type: 'queue-operation', operation: 'enqueue', timestamp: this.clock(), content: text });
     return 'held';
   }
@@ -100,7 +116,35 @@ class FakeHarness implements SendTerminal {
 
   async heldAt(_id: SessionId, text: string): Promise<SendHeldAt | undefined> {
     if (this.composer === text) return 'composer';
-    return this.held.includes(text) ? 'queue' : undefined;
+    if (this.blindToQueue) return undefined;
+    if (this.drawsQueue === 'no') return this.held.includes(text) ? 'queue' : undefined;
+    const hold = paneHoldOf(this.claudeFrame(), {}, text, false);
+    if (hold === 'unknown') throw new Error('the queue runs past the top of the pane');
+    return hold === 'absent' ? undefined : hold;
+  }
+
+  /** A busy Claude Code 2.1.281 pane: its queue above the spinner, then the composer's placeholder. */
+  private claudeFrame(): string {
+    const rule = '─'.repeat(80);
+    const entries = this.held.map(text =>
+      text
+        .split('\n')
+        .map((line, index) => (index === 0 ? `❯ ${line}` : line === '' ? '' : `  ${line}`))
+        .join('\n'),
+    );
+    const lines = ['⏺ Working on the auth task.', '', entries.join('\n\n'), '  ctrl+x ctrl+s to send now']
+      .join('\n')
+      .split('\n');
+    const shown = this.drawsQueue === 'clipped' ? lines.slice(3) : lines;
+    return [
+      ...shown,
+      '',
+      '✻ Spinning… (4s · ↓ 1.0k tokens)',
+      '',
+      rule,
+      '❯ Press up to edit queued messages',
+      rule,
+    ].join('\n');
   }
 
   async clearComposer(_id: SessionId, text: string): Promise<ComposerClearOutcome> {
@@ -128,7 +172,7 @@ class FakeHarness implements SendTerminal {
   finishTurn(): void {
     this.busy = false;
     for (const text of this.held.splice(0)) {
-      if (this.harness === 'claude')
+      if (this.harness === 'claude' && this.writesQueueRecords)
         this.transcript.push({ type: 'queue-operation', operation: 'dequeue', timestamp: this.clock() });
       this.userTurn(text);
     }
@@ -586,5 +630,70 @@ describe('a Codex message left typed and not sent — the owner’s stuck "hi" a
     should(queued).match({ fate: 'cancelled', cancelEffect: 'left_in_queue' });
     should(twice).eql(queued);
     should((missing as Error).message).match(/has no send send-9/u);
+  });
+});
+
+/**
+ * The incident, end to end: a peer message typed into a mid-turn Claude Code 2.1.281 ferret, which
+ * writes no transcript record for its queue and draws it in a shape the daemon did not recognise. The
+ * daemon called it lost at 15 s, 30 s and 60 s and typed it again each time — four copies in one queue,
+ * and a sender told it never arrived.
+ */
+describe('a peer message held in Claude Code 2.1.281’s queue', () => {
+  async function midTurn(): Promise<Rig> {
+    const subject = await rig('claude');
+    subject.harness.busy = true;
+    subject.harness.writesQueueRecords = false;
+    await subject.service.send({ id: ID, sendId: 'send-1', message: 'take the auth task', senderReference: SENDER });
+    return subject;
+  }
+
+  it('is typed ONCE while unrecognised, queued once the pane is read, and delivered at the turn boundary', async () => {
+    // Arrange — the rendering the daemon could not read, from the first keystroke on.
+    const subject = await rig('claude');
+    subject.harness.busy = true;
+    subject.harness.writesQueueRecords = false;
+    subject.harness.blindToQueue = true;
+    await subject.service.send({ id: ID, sendId: 'send-1', message: 'take the auth task', senderReference: SENDER });
+
+    // Act — every deadline the agent schedule has, then the queue recognised, then the turn ending.
+    const looks = [];
+    for (const ms of [15_000, 30_000, 60_000, 75_000, 140_000]) looks.push(await subject.at(ms));
+    subject.harness.blindToQueue = false;
+    subject.harness.drawsQueue = 'whole';
+    const queued = await subject.at(141_000);
+    subject.harness.finishTurn();
+    const delivered = await subject.at(142_000);
+
+    // Assert
+    should(subject.harness.typed).have.length(1);
+    for (const look of looks) should(look).match({ fate: 'accepted', attempt: 1 });
+    should(queued).match({ fate: 'queued', queueProof: 'pane', attempt: 1 });
+    should(delivered).match({ fate: 'delivered', attempt: 1 });
+    should(subject.sender.typed).be.empty();
+  });
+
+  it('is proven queued from the real screen reader at the first look', async () => {
+    const subject = await midTurn();
+    subject.harness.drawsQueue = 'whole';
+
+    should(await subject.at(1_000)).match({ fate: 'queued', queueProof: 'pane' });
+    should(await subject.at(75_000)).match({ fate: 'queued', attempt: 1 });
+    should(subject.harness.typed).have.length(1);
+  });
+
+  it('is unconfirmed — never "not delivered", never retyped — when the queue runs off the pane', async () => {
+    const subject = await midTurn();
+    subject.harness.drawsQueue = 'clipped';
+
+    const settled = await subject.at(15_000);
+    await subject.at(16_000, SENDER);
+    subject.harness.finishTurn();
+    const repaired = await subject.at(17_000);
+
+    should(settled).match({ fate: 'unaccounted', unaccountedReason: 'pane_unreadable' });
+    should(subject.harness.typed).have.length(1);
+    should(subject.sender.typed[0]).not.match(/did not reach it/u);
+    should(repaired).match({ fate: 'delivered', attempt: 1 });
   });
 });
