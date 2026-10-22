@@ -1,18 +1,18 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import {
-  TerminalReapService,
-  type ExactTerminalReaper,
-  type RegisteredPaneObserver,
-  type TerminalPaneRegistry,
-  type TerminalReapSessionDirectory,
-} from '../../../src/lib/session/reap-service.ts';
 import type {
   DurableTerminalSession,
   ObservedTerminalPane,
   RegisteredTerminalPane,
   TerminalReapTarget,
 } from '../../../src/lib/session/reap.ts';
+import {
+  type ExactTerminalReaper,
+  type RegisteredPaneObserver,
+  type TerminalPaneRegistry,
+  TerminalReapService,
+  type TerminalReapSessionDirectory,
+} from '../../../src/lib/session/reap-service.ts';
 
 const DAEMON = 'daemon-a';
 const PANE: RegisteredTerminalPane = {
@@ -107,6 +107,22 @@ describe('TerminalReapService', () => {
     should(result).deepEqual({ planned: 0, reaped: 0 });
     should(harness.observer.asked).deepEqual([]);
     should(harness.reaper.targets).deepEqual([]);
+  });
+
+  it.each([
+    ['running', { ...SESSION, status: 'running' }],
+    ['finished with no instant', { daemonId: DAEMON, sessionId: PANE.sessionId, status: 'completed' }],
+    ['owned by another daemon', { ...SESSION, daemonId: 'daemon-b' }],
+  ] as const)('should not even look at the pane of a session that is %s', async (_label, session) => {
+    // Arrange — a fleet of mostly running sessions is what the sweep meets every five seconds.
+    const harness = subject({ sessions: [session] });
+
+    // Act
+    const result = await harness.service.sweep();
+
+    // Assert — no plan could target it, so tmux (and `ps`, on a Mac) is never asked about it.
+    should(result).deepEqual({ planned: 0, reaped: 0 });
+    should(harness.observer.asked).deepEqual([]);
   });
 
   it('should not kill when durable state or the exact observed incarnation is missing', async () => {

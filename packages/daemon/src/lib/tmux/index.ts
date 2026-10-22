@@ -3,6 +3,7 @@ export * from './commands.ts';
 export * from './composer.ts';
 export * from './composer-screen.ts';
 export * from './contracts.ts';
+export * from './control-protocol.ts';
 export * from './controller.ts';
 export * from './delivery.ts';
 export * from './harness-dialog.ts';

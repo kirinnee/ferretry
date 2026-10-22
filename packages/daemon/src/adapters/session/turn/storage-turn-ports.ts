@@ -1,12 +1,16 @@
 import { stat } from 'node:fs/promises';
 import { type SessionState, SessionStateSchema, type SessionStatus } from '@ferretry/protocol';
 import {
+  type CapturedFrame,
   type ClockPort,
+  capturedFrameIsCurrent,
   isTurnStatus,
+  type PaneActivity,
   type PaneState,
   paneBlockingPrompt,
   paneShowsActiveWork,
   paneShowsPermissionPrompt,
+  paneStateFrom,
   parseHarnessDialog,
   parsePermissionPrompt,
   type SessionId,
@@ -22,9 +26,12 @@ import type { DaemonStorage } from '../../storage/session-storage.ts';
 /** How much of a transcript's end a decision reads: the last turn boundary is always near the end. */
 const TAIL_EVENTS = 80;
 
-/** A terminal read for one tmux session, as `TmuxController.state` answers it. */
+/** The two terminal reads a tick makes of one tmux session, as `TmuxController` answers them. */
 export interface TurnPaneReader {
-  state(tmuxSession: string): Promise<PaneState>;
+  /** Metadata and activity stamp in one question; `undefined` when the session is not there. */
+  activity(tmuxSession: string): Promise<PaneActivity | undefined>;
+  /** The visible frame; `undefined` when tmux could not capture it. */
+  visible(tmuxSession: string): Promise<string | undefined>;
 }
 
 interface CachedTail {
@@ -39,7 +46,10 @@ interface CachedTail {
  *
  * Every read is local. The transcript is re-parsed only when its file has CHANGED — size or
  * modification time — so a two-second tick over an idle fleet costs a `stat` per session, not a
- * parse. The pane read is the same capture the send path makes before it types.
+ * parse. The pane is treated the same way: ONE question a tick asks for its metadata and activity
+ * stamp, and the screen is captured again only when that stamp says it may have changed (see
+ * {@link capturedFrameIsCurrent}). The scrollback is never captured here: nothing a turn is decided
+ * from reads it, and on a long session it was most of every tick's bytes.
  */
 /**
  * Whether a session that is not live leaves the watcher anything to decide. For such a session every
@@ -65,6 +75,8 @@ export class StorageTurnPorts implements SessionTurnPorts {
    * stopped with, and the watcher is what clears it — so each one is read until that has happened.
    */
   private readonly settled = new Set<SessionId>();
+  /** The last frame captured of each running pane, by tmux session. */
+  private readonly frames = new Map<string, CapturedFrame>();
 
   constructor(
     private readonly storage: DaemonStorage,
@@ -114,8 +126,20 @@ export class StorageTurnPorts implements SessionTurnPorts {
         ? (raw as { tmuxSession?: unknown }).tmuxSession
         : undefined;
     if (typeof tmuxSession !== 'string' || tmuxSession === '') return undefined;
-    const pane = await this.panes.state(tmuxSession).catch(() => undefined);
-    return pane === undefined || !pane.alive || pane.dead ? undefined : pane;
+    const activity = await this.panes.activity(tmuxSession).catch(() => undefined);
+    if (activity === undefined || activity.dead) {
+      this.frames.delete(tmuxSession);
+      return undefined;
+    }
+    const held = this.frames.get(tmuxSession);
+    if (held !== undefined && capturedFrameIsCurrent(held, activity)) return paneStateFrom(activity, held.visible);
+    const capturedAtSecond = Math.floor(Date.parse(this.clock.now()) / 1_000);
+    const visible = await this.panes.visible(tmuxSession).catch(() => undefined);
+    // A capture that failed reads as a blank live screen, as it always did — but is never held, so the
+    // next tick captures again instead of trusting a frame it never had.
+    if (visible === undefined) this.frames.delete(tmuxSession);
+    else this.frames.set(tmuxSession, { activity, visible, capturedAtSecond });
+    return paneStateFrom(activity, visible ?? '');
   }
 
   async pane(id: SessionId): Promise<TurnPaneEvidence | undefined> {

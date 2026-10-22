@@ -1,0 +1,58 @@
+# Performance reports
+
+When a machine feels slow, measure it, then send the report.
+
+```bash
+fy daemon profile                       # 30 s, printed as a readable report
+fy daemon profile --seconds 60 --out report.json
+fy daemon profile --trace-syscalls      # also count system calls from outside (asks for sudo)
+```
+
+Leave the machine idle while it runs if the question is "why is it slow when nothing is happening".
+
+## What the report says
+
+Every number covers only the window it measured.
+
+- **Budgets.** What an idle daemon may cost, with each line marked `ok` or `OVER`.
+- **CPU, memory, system calls, context switches** for the daemon process. Children's CPU and read/write
+  system calls are measured on Linux only.
+- **Event loop.** How late its timer ticks fired (p50, p95, max), and the longest stalls with what was
+  running and where the sampled stack spent the time.
+- **Hot functions and stacks.** Where the main thread's samples went: what the CPU time was spent on.
+- **Child processes** per minute, by program and subcommand (`tmux capture-pane`, `ps`).
+- **Timers and background work** (the turn watcher, the declared-wait watcher, analytics, …): how often
+  each ran and how long it took.
+- **Routes**, by pattern (`GET /v1/sessions/:id`): count, latency, errors and bytes.
+- **File operations** through the daemon's state-home port, by path shape.
+- **Workers**: how many requests each worker thread held.
+- **System calls** (with `--trace-syscalls`): `strace` on Linux or `sudo fs_usage` on macOS, by call and
+  path shape, plus every program started.
+- **What this report cannot see**, said out loud so a gap is never read as a zero.
+
+## Safe to share
+
+The report contains no session text, no command arguments, no file contents and no secrets. Each item
+is reduced to its shape:
+
+- a file: `~/.ferretry/state/sessions/<session>/state.json`, or `~/…/.mcp.json` for a file in one of your
+  own folders;
+- a program: `tmux capture-pane`;
+- a route: `GET /v1/sessions/:id`;
+- a stack: function names and the workspace-relative file they are in.
+
+You can read the whole report before you send it.
+
+## The same report elsewhere
+
+- `GET`/`POST /v1/diagnostics/profile` is the route behind the command. It is operator-scoped, and the
+  profile is started first and read afterwards, so a dropped relay connection does not lose the window.
+  Schemas live in `packages/protocol/src/lib/performance.ts`.
+- `scripts/local/bench-idle-daemon.ts` builds the owner-scale fleet (36 sessions, 5 running in real tmux
+  panes, 2,000 Codex rollouts) and measures any `fyd` build from inside and outside. Use it for the
+  before/after table in a performance PR.
+- `packages/daemon/tests/integration/runtime/idle-budget.test.ts` holds the idle daemon to CI ceilings.
+  A PR that makes something cheaper lowers that ceiling in the same commit. Ceilings only go down,
+  towards the targets in `packages/daemon/src/lib/performance/budgets.ts`.
+
+The staged plan for meeting the targets is [docs/design/event-driven-daemon.md](design/event-driven-daemon.md).

@@ -4,6 +4,28 @@ import type { TmuxLaunch } from './contracts.ts';
 export const paneMetadataFormat =
   '#{pane_dead}|#{pane_dead_status}|#{cursor_x}|#{cursor_y}|#{pane_height}|#{pane_width}';
 
+/**
+ * Everything one turn-watch tick needs to know about a pane, in ONE question: what used to take a
+ * `has-session` and a metadata `display-message`, plus the activity stamp that says whether the screen
+ * has changed since it was last captured. A session that does not exist fails the question outright,
+ * exactly as `has-session` did.
+ */
+export const paneActivityFormat = `${paneMetadataFormat}|#{window_activity}|#{history_size}|#{pane_id}|#{pane_pid}`;
+
+export function paneActivityArguments(session: string): readonly string[] {
+  return ['display-message', '-p', '-t', sessionTarget(session), paneActivityFormat];
+}
+
+/**
+ * The active pane of every session's active window, in one listing: the pane `display-message -t
+ * <session>` would have answered for, for every session at once.
+ */
+export const paneIdentityTableFormat = '#{session_name}\t#{window_active}#{pane_active}\t#{pane_id}\t#{pane_pid}';
+
+export function paneIdentityTableArguments(): readonly string[] {
+  return ['list-panes', '-a', '-F', paneIdentityTableFormat];
+}
+
 export function hasSessionArguments(session: string): readonly string[] {
   return ['has-session', '-t', sessionTarget(session)];
 }

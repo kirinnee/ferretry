@@ -7,16 +7,26 @@ import {
   listSessionsArguments,
   loadBufferArguments,
   newSessionArguments,
-  paneMetadataArguments,
+  paneActivityArguments,
   paneIdentityArguments,
+  paneIdentityTableArguments,
+  paneMetadataArguments,
   pasteBufferArguments,
   remainOnExitArguments,
   sendKeyArguments,
   sendLiteralArguments,
 } from './commands.ts';
-import type { PaneState, TmuxCommandPort, TmuxLaunch } from './contracts.ts';
+import type { PaneActivity, PaneState, TmuxCommandPort, TmuxLaunch } from './contracts.ts';
 import type { TmuxLaunchGuard } from './harness-guard.ts';
-import { type PaneIdentity, parsePaneIdentity, parsePaneMetadata, promptIsReady } from './pane.ts';
+import {
+  type PaneIdentity,
+  paneStateFrom,
+  parsePaneActivity,
+  parsePaneIdentity,
+  parsePaneIdentityTable,
+  parsePaneMetadata,
+} from './pane.ts';
+import { isTmuxServerAbsent } from './server-absent.ts';
 
 /** Orchestrates only validated tmux commands; spawning remains in an injected adapter. */
 export class TmuxController {
@@ -47,22 +57,46 @@ export class TmuxController {
     return result.code === 0 ? result.stdout : '';
   }
 
-  async state(session: string): Promise<PaneState> {
+  /**
+   * The pane's state now. `history: false` skips the scrollback — the whole of it, tens of kilobytes on
+   * a long session — for a caller that reads only the screen; its `history` is then empty.
+   */
+  async state(session: string, options: { readonly history?: boolean } = {}): Promise<PaneState> {
     if (!(await this.alive(session))) return { alive: false, dead: true, promptReady: false, history: '', visible: '' };
+    const history = options.history ?? true;
     const [metadataResult, historyResult, visibleResult] = await Promise.all([
       this.commands.execute(paneMetadataArguments(session)),
-      this.commands.execute(capturePaneArguments(session, true)),
+      history ? this.commands.execute(capturePaneArguments(session, true)) : undefined,
       this.commands.execute(capturePaneArguments(session, false)),
     ]);
     const metadata = parsePaneMetadata(metadataResult.code === 0 ? metadataResult.stdout : '1|||||');
-    const visible = visibleResult.code === 0 ? visibleResult.stdout : '';
-    return {
-      alive: true,
-      ...metadata,
-      promptReady: !metadata.dead && promptIsReady(visible, metadata.cursorY, metadata.cursorX),
-      history: historyResult.code === 0 ? historyResult.stdout : '',
-      visible,
-    };
+    return paneStateFrom(
+      metadata,
+      visibleResult.code === 0 ? visibleResult.stdout : '',
+      historyResult?.code === 0 ? historyResult.stdout : '',
+    );
+  }
+
+  /** The pane's metadata and activity stamp in one question, or `undefined` when the session is not there. */
+  async activity(session: string): Promise<PaneActivity | undefined> {
+    const result = await this.commands.execute(paneActivityArguments(session));
+    return result.code === 0 ? parsePaneActivity(result.stdout) : undefined;
+  }
+
+  /** The visible frame, or `undefined` when tmux could not capture it — never an empty screen in its place. */
+  async visible(session: string): Promise<string | undefined> {
+    const result = await this.commands.execute(capturePaneArguments(session, false));
+    return result.code === 0 ? result.stdout : undefined;
+  }
+
+  /**
+   * Every session's active pane in ONE listing, keyed by session name, or `undefined` when tmux would
+   * not list them. A server with no sessions — or none at all — is an empty table: there is no pane.
+   */
+  async paneIdentities(): Promise<ReadonlyMap<string, PaneIdentity> | undefined> {
+    const result = await this.commands.execute(paneIdentityTableArguments());
+    if (result.code === 0) return parsePaneIdentityTable(result.stdout);
+    return isTmuxServerAbsent(result.stderr) ? new Map() : undefined;
   }
 
   async paneIdentity(session: string): Promise<PaneIdentity | undefined> {

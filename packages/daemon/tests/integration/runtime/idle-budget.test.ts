@@ -1,0 +1,147 @@
+/**
+ * WHAT AN IDLE DAEMON MAY COST, HELD IN CI.
+ *
+ * Boots a REAL `fyd` over the owner-scale fleet — 36 sessions, 5 of them running in REAL tmux panes on
+ * the daemon's private socket, 2,000 Codex rollouts, six runtime homes — lets its boot and first
+ * housekeeping settle, and then profiles it with its own `/v1/diagnostics/profile` while nobody touches
+ * it. The build fails when the idle daemon spends more than its ceiling on any measure, and the failure
+ * prints the report's own ranking, so it names the code to fix.
+ *
+ * TWO NUMBERS PER MEASURE. The product's TARGET (`IDLE_DAEMON_BUDGETS`, printed in every
+ * `fy daemon profile`) is where the event-driven daemon must land (docs/design/event-driven-daemon.md).
+ * The CEILING below is what CI holds today: the measured cost of the current daemon with headroom for
+ * a noisy runner. Every perf PR that lowers a cost lowers its ceiling in the same commit, and the
+ * ceilings may only move DOWN — towards the targets — so a regression fails the build the day it lands.
+ *
+ * The transcripts are 8 MiB rather than 200 MB: their size drives boot work (held by
+ * `boot-stalls.test.ts`), not idle work, and CI should not write 600 MB to measure nothing.
+ */
+import { afterAll, describe, it } from 'bun:test';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { join, resolve } from 'node:path';
+import type { PerformanceProfileView, PerformanceReport } from '@ferretry/protocol';
+import should from 'should';
+import { IDLE_DAEMON_BUDGETS } from '../../../src/lib/performance/budgets.ts';
+import { freeLoopbackPort } from '../support/booted-daemon.ts';
+import { cleanupTempDirectories, tempDirectory } from '../support/repository.ts';
+import { OWNER_MAC_FLEET, scaledFleet, sessionIdOf } from '../support/scaled-fleet.ts';
+
+const FYD_ENTRY = resolve(import.meta.dir, '../../../bin/fyd.ts');
+const SETTLE_SECONDS = 15;
+const PROFILE_SECONDS = 20;
+
+/**
+ * CI's ceilings — the ratchet. Measured on this fixture at 4.66.3 (perf/profiler-and-budgets): CPU 20%
+ * of a core, 660 child processes/min (all tmux and ps), 3,441 read/write system calls/s, longest
+ * loop block 17 ms, 17 state-port file operations/s. Lower a number here in the PR that earns it.
+ */
+const CEILINGS: Readonly<Record<string, number>> = {
+  'daemon CPU': 45,
+  'child processes': 800,
+  'longest event-loop block': 100,
+  'file operations through the daemon’s ports': 100,
+  'read/write system calls': 7_000,
+};
+
+/** The report's own ranking, cut to what names the code to fix. */
+function ranking(report: PerformanceReport) {
+  return {
+    cpu: report.resources.cpu,
+    childProcesses: report.childProcesses.commands
+      .slice(0, 6)
+      .map(entry => `${String(entry.perMinute)}/min ${entry.command}`),
+    hotFunctions: report.cpuProfile.self.slice(0, 8).map(entry => `${String(entry.share)} ${entry.frame}`),
+    activities: report.activities
+      .slice(0, 6)
+      .map(entry => `${entry.name} ${String(entry.perMinute)}/min p95 ${String(entry.wall.p95Ms)} ms`),
+    stalls: report.eventLoop.stalls.slice(0, 3),
+  };
+}
+
+afterAll(async () => {
+  await cleanupTempDirectories();
+});
+
+describe('an idle daemon on a fleet the size of the owner’s Mac', () => {
+  it('should stay under every CI ceiling while nobody touches it', async () => {
+    // Arrange — the fleet, a real pane per running session, a real daemon in its own process.
+    const fleet = await scaledFleet(await tempDirectory('fyd-idle-budget-'), {
+      ...OWNER_MAC_FLEET,
+      running: 5,
+      hugeTranscriptBytes: 8 * 1024 * 1024,
+      transcriptBytes: 1024 * 1024,
+    });
+    const socket = join(fleet.home, 'tmux.sock');
+    const tmux = (args: readonly string[]) => Bun.spawnSync(['tmux', '-u', '-S', socket, ...args]);
+    for (let index = 0; index < 5; index += 1) {
+      const config = JSON.parse(
+        await readFile(join(fleet.home, 'state', 'sessions', sessionIdOf(index), 'config.json'), 'utf8'),
+      ) as { tmuxSession: string };
+      const made = tmux(['new-session', '-d', '-s', config.tmuxSession, '-x', '200', '-y', '50', 'sleep 3600']);
+      should(made.exitCode).equal(0);
+    }
+    const port = await freeLoopbackPort();
+    await mkdir(join(fleet.home, 'config'), { recursive: true });
+    await writeFile(
+      join(fleet.home, 'config', 'daemon.json'),
+      JSON.stringify({ host: '127.0.0.1', port, relay: { url: 'ws://127.0.0.1:9', enabled: false } }),
+    );
+    const daemon = Bun.spawn([process.execPath, FYD_ENTRY], {
+      env: {
+        ...process.env,
+        FY_HOME: fleet.home,
+        HOME: fleet.userHome,
+        FYD_BACKGROUND_DELAY_SECONDS: '1',
+        FYD_WATCHDOG_SECONDS: '0',
+      },
+      stdin: 'ignore',
+      stdout: 'ignore',
+      stderr: Bun.file(join(fleet.home, 'fyd.err')),
+    });
+    const base = `http://127.0.0.1:${String(port)}`;
+    let report: PerformanceReport | undefined;
+    try {
+      for (let attempt = 0; (await fetch(`${base}/healthz`).catch(() => undefined))?.ok !== true; attempt += 1) {
+        if (attempt > 600)
+          throw new Error(`the daemon never answered: ${await readFile(join(fleet.home, 'fyd.err'), 'utf8')}`);
+        await Bun.sleep(100);
+      }
+      await Bun.sleep(SETTLE_SECONDS * 1_000);
+      const token = (await readFile(join(fleet.home, 'api-token'), 'utf8')).trim();
+      const headers = { authorization: `Bearer ${token}`, 'content-type': 'application/json' };
+
+      // Act — the daemon profiles itself while idle.
+      const started = await fetch(`${base}/v1/diagnostics/profile`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ seconds: PROFILE_SECONDS }),
+      });
+      should(started.status).equal(202);
+      const { id } = (await started.json()) as PerformanceProfileView;
+      await Bun.sleep(PROFILE_SECONDS * 1_000);
+      for (let attempt = 0; attempt < 30 && report === undefined; attempt += 1) {
+        const view = (await (
+          await fetch(`${base}/v1/diagnostics/profile/${id}`, { headers })
+        ).json()) as PerformanceProfileView;
+        if (view.state === 'finished') report = view.report;
+        else await Bun.sleep(500);
+      }
+    } finally {
+      daemon.kill();
+      await daemon.exited;
+      tmux(['kill-server']);
+    }
+
+    // Assert — every measure the report could see, against its ceiling; a failure prints the ranking.
+    if (report === undefined) throw new Error('the profile never finished');
+    should(report.fleet).deepEqual({ sessions: 36, running: 5 });
+    const over = report.budgets.filter(budget => budget.actual > (CEILINGS[budget.name] ?? budget.limit));
+    if (over.length > 0)
+      throw new Error(
+        `over the CI ceiling: ${over.map(budget => `${budget.name} ${String(budget.actual)} > ${String(CEILINGS[budget.name])}`).join('; ')}\n\n${JSON.stringify(ranking(report), null, 2)}`,
+      );
+    // Every ceiling is a real measure of the report, and none is looser than nothing at all.
+    should(Object.keys(CEILINGS).sort()).deepEqual(IDLE_DAEMON_BUDGETS.map(budget => budget.name).sort());
+    for (const budget of IDLE_DAEMON_BUDGETS) should(CEILINGS[budget.name]).be.aboveOrEqual(budget.limit);
+  }, 180_000);
+});

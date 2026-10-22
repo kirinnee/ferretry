@@ -280,6 +280,62 @@ describe('durable terminal pane reap adapters', () => {
     should(await subject.controller.alive(subject.record.config.tmuxSession)).be.true();
   });
 
+  it('should answer every observation asked for at once from ONE listing of the panes', async () => {
+    // Arrange
+    const subject = await fixture();
+    await subject.registrar.register(subject.record);
+    const original = await registration(subject);
+    const real = new BunTmuxProcess(subject.tmuxExecutable, join(subject.home, 'throwaway-tmux.sock'));
+    const asked: string[] = [];
+    const counted = new ExactTmuxPaneReaper(
+      new TmuxController({
+        execute: async (arguments_, stdin) => {
+          asked.push(arguments_[0] as string);
+          return await real.execute(arguments_, stdin);
+        },
+      }),
+    );
+
+    // Act
+    const observed = await Promise.all([
+      counted.observe(original),
+      counted.observe(original),
+      counted.observe(original),
+    ]);
+    const later = await counted.observe(original);
+
+    // Assert — one listing for the three asked together, a fresh one for the one asked after.
+    should(observed).deepEqual([original, original, original].map(({ daemonId: _d, sessionId: _s, ...pane }) => pane));
+    should(later).deepEqual(observed[0]);
+    should(asked).deepEqual(['list-panes', 'list-panes']);
+  });
+
+  it('should ask about the pane on its own when tmux will not list the panes', async () => {
+    // Arrange
+    const subject = await fixture();
+    await subject.registrar.register(subject.record);
+    const original = await registration(subject);
+    const real = new BunTmuxProcess(subject.tmuxExecutable, join(subject.home, 'throwaway-tmux.sock'));
+    const asked: string[] = [];
+    const refusing = new ExactTmuxPaneReaper(
+      new TmuxController({
+        execute: async (arguments_, stdin) => {
+          asked.push(arguments_[0] as string);
+          return arguments_[0] === 'list-panes'
+            ? { code: 1, stdout: '', stderr: 'server exited unexpectedly\n' }
+            : await real.execute(arguments_, stdin);
+        },
+      }),
+    );
+
+    // Act
+    const actual = await refusing.observe(original);
+
+    // Assert
+    should(actual).match({ paneId: original.paneId, pid: original.pid });
+    should(asked).deepEqual(['list-panes', 'display-message']);
+  });
+
   it('should not ask tmux to kill anything when this daemon has no registrations', async () => {
     // Arrange
     const subject = await fixture();
