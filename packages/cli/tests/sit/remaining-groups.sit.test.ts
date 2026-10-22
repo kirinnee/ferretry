@@ -179,6 +179,18 @@ describe(`remaining command groups (SIT, ${useInProcess ? 'in-process' : 'compil
     }
   });
 
+  it('mounts the models guide with show, which prints the guide in effect', async () => {
+    // Act
+    const actual = await cli(['guide', '--help']);
+    const show = await cli(['guide', 'show', '--help']);
+
+    // Assert
+    should(actual.code).equal(0);
+    should(actual.out).match(/^\s+show\b/mu);
+    should(show.code).equal(0);
+    should(show.out).containEql('--json');
+  });
+
   it('refuses a recommendation with no task described', async () => {
     // Act
     const actual = await cli(['fleet', 'recommend', '   ']);

@@ -2,7 +2,7 @@ import { type PackNewRequest, PackNewRequestSchema } from '@ferretry/protocol';
 import { type IProgress, NO_PROGRESS, withStep } from '../progress/index.ts';
 import { titleFromReferencedBrief } from '../tasks/task-title.ts';
 import type { IPackGateway } from './gateway.ts';
-import { renderPackNewOutcome, renderPackRecommendation } from './render.ts';
+import { renderGuide, renderPackNewOutcome, renderPackRecommendation } from './render.ts';
 
 /** Terminal output for the Pack commands. `success` is stdout; `error` is stderr. */
 export interface IPackIo {
@@ -17,6 +17,10 @@ export const PACK_REFUSED_EXIT_CODE = 2;
 export interface PackRecommendOptions {
   readonly json?: boolean;
   readonly useCase?: string;
+}
+
+export interface PackGuideShowOptions {
+  readonly json?: boolean;
 }
 
 export interface PackNewOptions {
@@ -68,6 +72,12 @@ export class PackController {
     this.deps.out.success(
       options.json === true ? JSON.stringify(recommendation, null, 2) : renderPackRecommendation(recommendation),
     );
+  }
+
+  /** `guide show`: the models guide in effect — where it came from, its routing guidance, its use cases. */
+  async showGuide(options: PackGuideShowOptions): Promise<void> {
+    const view = await this.deps.gateway.view();
+    this.deps.out.success(options.json === true ? JSON.stringify(view.guide, null, 2) : renderGuide(view));
   }
 
   async newChild(words: readonly string[], options: PackNewOptions): Promise<void> {

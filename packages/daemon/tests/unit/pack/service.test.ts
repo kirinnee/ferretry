@@ -9,7 +9,7 @@ import type {
 } from '@ferretry/protocol';
 import { briefHash } from '@ferretry/protocol';
 import should from 'should';
-import type { JevRanking, RankableCandidate } from '../../../src/lib/pack/jev.ts';
+import type { JevGuidance, JevRanking, RankableCandidate } from '../../../src/lib/pack/jev.ts';
 import type { PackProbeOutcome, PackProbeRequest } from '../../../src/lib/pack/probe.ts';
 import { SCRATCH_REMEDY, scratchMessage } from '../../../src/lib/pack/scratch.ts';
 import {
@@ -70,7 +70,7 @@ interface Options {
 function build(options: Options = {}) {
   const probes: Array<readonly [PackProbeRequest, number]> = [];
   const starts: StartSessionRequest[] = [];
-  const ranks: Array<readonly [string, readonly RankableCandidate[]]> = [];
+  const ranks: Array<readonly [string, readonly RankableCandidate[], JevGuidance | undefined]> = [];
   const recorded: number[] = [];
   let spent = options.spent ?? 0;
   const ports: PackPorts = {
@@ -96,8 +96,8 @@ function build(options: Options = {}) {
       return sessionView('child-1') satisfies SessionView;
     },
     jev: {
-      rank: async (task, candidates) => {
-        ranks.push([task, candidates]);
+      rank: async (task, candidates, guidance) => {
+        ranks.push([task, candidates, guidance]);
         return options.ranking ?? { kind: 'ranked', order: [1, 0], inputTokens: 500_000 };
       },
     },
@@ -131,6 +131,20 @@ describe('subFerretFooter', () => {
     should(byFerret).containEql('`fy signal done "<your result');
     should(byPerson).containEql('started with `new` (Pack mode)');
     should(byPerson).containEql('`ferret signal done');
+  });
+});
+
+describe('PackService.routingShort', () => {
+  it("should give the guide's own short routing line, else one rendered from its use cases", async () => {
+    // Arrange
+    const written = build({
+      guideFile: { ...GUIDE_FILE, routing: { prompt: 'Opus, then Haiku.', short: 'Routing: everyday → opus.' } },
+    });
+    const rendered = build();
+
+    // Act + Assert
+    should(await written.subject.routingShort()).equal('Routing: everyday → opus.');
+    should(await rendered.subject.routingShort()).equal('Routing: everyday → opus high.');
   });
 });
 
@@ -329,7 +343,7 @@ describe('PackService.newChild with a named runtime', () => {
           cwd: '/work/parent',
           timeoutMs: 45_000,
         },
-        60_000,
+        180_000,
       ],
     ]);
     should(starts).deepEqual([
@@ -484,6 +498,32 @@ describe('PackService.newChild with a named runtime', () => {
       attempts: [{ runtime: 'claude-main', model: 'opus', outcome: 'refused', refusal, probe: 'ran', probeMs: 45_000 }],
     });
     should(starts).be.empty();
+  });
+
+  it('should refuse with what the probe found — out of quota — and fall back to the next candidate in order', async () => {
+    // Arrange
+    const { subject, starts } = build({
+      parents: { p1: PARENT },
+      probes: {
+        'claude-main-wrapper': {
+          ok: false,
+          ms: 900,
+          reason: 'it exited 1: its login is out of quota or rate-limited',
+          code: 'out_of_quota',
+        },
+      },
+    });
+
+    // Act
+    const outcome = await subject.newChild(request({ auto: true }));
+
+    // Assert
+    should(outcome.outcome).equal('started');
+    should(outcome.attempts.map(attempt => [attempt.runtime, attempt.outcome, attempt.refusal?.code])).deepEqual([
+      ['claude-main', 'refused', 'out_of_quota'],
+      ['claude-fast', 'started', undefined],
+    ]);
+    should(starts.map(start => start.agent)).deepEqual(['claude-fast-wrapper']);
   });
 
   it('should word a failed probe without a model when none is known', async () => {
@@ -649,13 +689,16 @@ describe('PackService.newChild --auto with Jev deciding', () => {
 
     // Assert
     should(ranks).have.length(1);
-    should(ranks[0]).deepEqual([
+    should(ranks[0]?.slice(0, 2)).deepEqual([
       'fix the bug',
       [
         { model: 'opus', runtime: 'claude-main', why: 'Strong.' },
         { model: 'haiku', runtime: 'claude-fast', why: 'Cheap.' },
       ],
     ]);
+    // Jev decides WITH the guide: its routing prompt (rendered here, the file has none) and the use case.
+    should(ranks[0]?.[2]?.useCase).deepEqual({ title: 'Everyday coding', description: 'Ordinary work.' });
+    should(ranks[0]?.[2]?.routing).containEql('Everyday coding (everyday): Opus at high effort, then Haiku.');
     should(recorded).deepEqual([1]);
     should(starts[0]?.agent).equal('claude-fast-wrapper');
     should(outcome.outcome === 'started' && outcome.decidedBy).equal('jev');

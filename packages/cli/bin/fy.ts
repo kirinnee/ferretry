@@ -137,7 +137,13 @@ import { ModelsController } from '../src/lib/models/controller';
 import { registerOnboardCommands } from '../src/lib/onboard/commands';
 import { OnboardController } from '../src/lib/onboard/controller';
 import { ProtocolOnboardRelay } from '../src/lib/onboard/relay';
-import { ambientSession, PackController, ProtocolPackGateway, registerRecommendCommand } from '../src/lib/pack';
+import {
+  ambientSession,
+  PackController,
+  ProtocolPackGateway,
+  registerGuideCommand,
+  registerRecommendCommand,
+} from '../src/lib/pack';
 import { registerPairCommands } from '../src/lib/pair/commands';
 import { PairController } from '../src/lib/pair/controller';
 import { ProtocolPairingGateway } from '../src/lib/pair/gateway';
@@ -1147,6 +1153,7 @@ const DOMAIN_REGISTRARS: ReadonlyArray<(wiring: DomainWiring) => void> = [
       binaryName: BINARY_NAME,
     });
     registerRecommendCommand(program, pack, new SessionPresenter(world.io, new SystemClock()));
+    registerGuideCommand(program, pack, new SessionPresenter(world.io, new SystemClock()));
     registerNewCommand(
       program,
       new ContinueSessionController(gateway, world.io, world.prompt, { ...context, interactive: world.interactive }),

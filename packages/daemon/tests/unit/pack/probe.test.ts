@@ -1,10 +1,11 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
 import {
-  PROBE_PROMPT,
+  classifyProbeFailure,
   type PackProbeOutcome,
   type PackProbePort,
   type PackProbeRequest,
+  PROBE_PROMPT,
   ProbeCache,
   probeAnswered,
 } from '../../../src/lib/pack/probe.ts';
@@ -60,6 +61,21 @@ describe('probeAnswered', () => {
   it('should publish the exact words it asks for', () => {
     // Arrange / Act / Assert
     should(PROBE_PROMPT).equal('Reply with exactly: OK');
+  });
+});
+
+describe('classifyProbeFailure', () => {
+  it("should read quota, sign-in and model failures from a CLI's own words, and nothing from anything else", () => {
+    // Assert
+    should(classifyProbeFailure('Claude AI usage limit reached')).equal('out_of_quota');
+    should(classifyProbeFailure('429 Too Many Requests')).equal('out_of_quota');
+    should(classifyProbeFailure('Your credit balance is too low')).equal('out_of_quota');
+    should(classifyProbeFailure('Not logged in · Please run /login')).equal('not_logged_in');
+    should(classifyProbeFailure('401 Unauthorized')).equal('not_logged_in');
+    should(classifyProbeFailure('The model gpt-x does not exist or you do not have access')).equal('model_unavailable');
+    should(classifyProbeFailure('unknown model: glm-9')).equal('model_unavailable');
+    should(classifyProbeFailure('OK')).be.undefined();
+    should(classifyProbeFailure('')).be.undefined();
   });
 });
 
@@ -126,7 +142,7 @@ describe('ProbeCache', () => {
     should(answers[1]).deepEqual({ outcome: { ok: true, ms: 7 }, cached: true });
   });
 
-  it('should keep a failure for the ttl too, and never keep a ttl of zero', async () => {
+  it('should never keep a failure: the next start asks again', async () => {
     // Arrange
     const port = new FakeProbe({ ok: false, ms: 3, reason: 'timed out' });
     const cache = new ProbeCache(port, () => 0);
@@ -134,12 +150,24 @@ describe('ProbeCache', () => {
     // Act
     const first = await cache.probe(REQUEST, 60_000);
     const second = await cache.probe(REQUEST, 60_000);
-    const uncached = await cache.probe(REQUEST, 0);
 
     // Assert
     should(first.outcome).deepEqual({ ok: false, ms: 3, reason: 'timed out' });
-    should(second.cached).be.true();
-    should(uncached.cached).be.false();
+    should(second.cached).be.false();
+    should(port.calls).have.length(2);
+  });
+
+  it('should never keep a pass for a ttl of zero', async () => {
+    // Arrange
+    const port = new FakeProbe({ ok: true, ms: 3 });
+    const cache = new ProbeCache(port, () => 0);
+
+    // Act
+    await cache.probe(REQUEST, 0);
+    const again = await cache.probe(REQUEST, 0);
+
+    // Assert
+    should(again.cached).be.false();
     should(port.calls).have.length(2);
   });
 });

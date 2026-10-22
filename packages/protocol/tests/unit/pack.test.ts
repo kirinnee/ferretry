@@ -25,6 +25,23 @@ const ready = {
   ready: true,
 };
 const attempt = { runtime: 'claude-auto-x', model: 'claude-opus-5-5', outcome: 'started', probe: 'ran', probeMs: 812 };
+const routing = {
+  prompt: 'Plans and reviews on claude-opus-5-5; gpt-6-astra when it is low.',
+  short: 'Routing: plan-review → claude-opus-5-5 max; bulk → glm-5-air low.',
+};
+const suggested = { by: 'gpt-oss-120b', via: 'claude-auto-x', at: INSTANT, acceptedAt: INSTANT, partial: true };
+const quota = {
+  state: 'low',
+  leftPercent: 9,
+  tightest: 'week',
+  windows: [
+    { label: '5h', usedPercent: 10, leftPercent: 90 },
+    { label: 'week', usedPercent: 91, leftPercent: 9, resetsAt: INSTANT },
+    { label: 'month', usedPercent: 0, leftPercent: 100, reset: true },
+  ],
+  measuredAt: INSTANT,
+  summary: '5h 10% · wk 91% · mo 0%',
+};
 
 const cases: SchemaCase[] = [
   { name: 'decision mode', schema: pack.PackDecisionModeSchema, value: 'jev' },
@@ -37,7 +54,22 @@ const cases: SchemaCase[] = [
   { name: 'candidate', schema: pack.GuideCandidateSchema, value: candidate },
   { name: 'use case', schema: pack.GuideUseCaseSchema, value: useCase },
   { name: 'guide file', schema: pack.ModelsGuideFileSchema, value: { useCases: [useCase] } },
+  {
+    name: 'guide file with routing and where it came from',
+    schema: pack.ModelsGuideFileSchema,
+    value: { useCases: [useCase], routing, suggested },
+  },
+  { name: 'routing', schema: pack.GuideRoutingSchema, value: routing },
+  { name: 'suggested', schema: pack.GuideSuggestedSchema, value: suggested },
   { name: 'guide', schema: pack.ModelsGuideSchema, value: { source: 'derived', useCases: [useCase] } },
+  {
+    name: 'guide with routing',
+    schema: pack.ModelsGuideSchema,
+    value: { source: 'file', useCases: [useCase], routing: { ...routing, source: 'file' }, suggested },
+  },
+  { name: 'quota state', schema: pack.PackQuotaStateSchema, value: 'exhausted' },
+  { name: 'quota window', schema: pack.PackQuotaWindowSchema, value: quota.windows[1] },
+  { name: 'quota', schema: pack.PackQuotaSchema, value: quota },
   {
     name: 'fleet model',
     schema: pack.PackFleetModelSchema,
@@ -67,6 +99,11 @@ const cases: SchemaCase[] = [
   },
   { name: 'candidate view', schema: pack.PackCandidateSchema, value: ready },
   {
+    name: 'candidate moved down by quota',
+    schema: pack.PackCandidateSchema,
+    value: { ...ready, quota, movedDown: 'claude-auto-x, 91% of the week used' },
+  },
+  {
     name: 'recommendation',
     schema: pack.PackRecommendationSchema,
     value: {
@@ -75,6 +112,18 @@ const cases: SchemaCase[] = [
       guideSource: 'derived',
       candidates: [ready, { ...ready, rank: 2, runtime: undefined, ready: false, refusal }],
       next: 'fy new --runtime claude-auto-x --model claude-opus-5-5 "plan it"',
+    },
+  },
+  {
+    name: 'recommendation from an accepted suggestion',
+    schema: pack.PackRecommendationSchema,
+    value: {
+      task: 'plan it',
+      useCase: { id: 'plan-review', title: 'Planning', matchedBy: 'named' },
+      guideSource: 'file',
+      guideSuggested: suggested,
+      routing: routing.prompt,
+      candidates: [{ ...ready, quota }],
     },
   },
   {
@@ -155,6 +204,24 @@ describe('pack schemas', () => {
         value: { task: 'x', auto: true, runtime: 'r' },
       },
       { name: 'an unknown code', schema: pack.PackRefusalCodeSchema, value: 'busy' },
+      {
+        name: 'a routing line with a quote',
+        schema: pack.GuideRoutingSchema,
+        value: { ...routing, short: 'say "hi"' },
+      },
+      {
+        name: 'a routing line with a backslash',
+        schema: pack.GuideRoutingSchema,
+        value: { ...routing, short: 'a\\b' },
+      },
+      { name: 'a routing line of two lines', schema: pack.GuideRoutingSchema, value: { ...routing, short: 'a\nb' } },
+      {
+        name: 'a routing line too long for the system prompt',
+        schema: pack.GuideRoutingSchema,
+        value: { ...routing, short: 'x'.repeat(pack.MAX_ROUTING_SHORT_CHARS + 1) },
+      },
+      { name: 'an unknown quota state', schema: pack.PackQuotaStateSchema, value: 'full' },
+      { name: 'more than all left', schema: pack.PackQuotaWindowSchema, value: { label: '5h', leftPercent: 101 } },
     ]);
   });
 

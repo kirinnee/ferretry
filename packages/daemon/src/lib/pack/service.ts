@@ -9,6 +9,7 @@
 import type {
   FleetRuntimeView,
   ModelCatalogView,
+  ModelsGuide,
   ModelsGuideFile,
   PackAttempt,
   PackConfig,
@@ -99,9 +100,18 @@ export class PackService {
     ]);
     return {
       config: settings.config,
-      guide: effectiveGuide(settings.guideFile, catalogs),
+      guide: effectiveGuide(settings.guideFile, catalogs, this.ports.bin),
       models: fleetModels(catalogs, facts.runtimes),
     };
+  }
+
+  /**
+   * The one-line routing guidance a Pack ferret's system prompt carries (`FY_PACK_ROUTING`), from the
+   * guide in effect now — derived at every launch, so a restart hears the latest saved guide.
+   */
+  async routingShort(): Promise<string | undefined> {
+    const [settings, catalogs] = await Promise.all([this.ports.settings(), this.ports.catalogs()]);
+    return effectiveGuide(settings.guideFile, catalogs, this.ports.bin).routing?.short;
   }
 
   /** `undefined` for a guide with no use case at all. */
@@ -109,6 +119,14 @@ export class PackService {
     readonly task: string;
     readonly useCase?: string;
   }): Promise<PackRecommendation | undefined> {
+    return (await this.recommendWithGuide(input)).recommendation;
+  }
+
+  /** The recommendation, and the guide it was made from. */
+  private async recommendWithGuide(input: {
+    readonly task: string;
+    readonly useCase?: string;
+  }): Promise<{ readonly recommendation: PackRecommendation | undefined; readonly guide: ModelsGuide }> {
     const [settings, catalogs, facts] = await Promise.all([
       this.ports.settings(),
       this.ports.catalogs(),
@@ -121,7 +139,8 @@ export class PackService {
         ),
       ),
     );
-    return recommend({ ...input, bin: this.ports.bin }, effectiveGuide(settings.guideFile, catalogs), facts, labels);
+    const guide = effectiveGuide(settings.guideFile, catalogs, this.ports.bin);
+    return { recommendation: recommend({ ...input, bin: this.ports.bin }, guide, facts, labels), guide };
   }
 
   async newChild(request: PackNewRequest): Promise<PackNewOutcome> {
@@ -192,7 +211,7 @@ export class PackService {
     | { readonly choices: readonly Choice[]; readonly decidedBy: 'guide' | 'jev'; readonly note?: string }
     | { readonly refusal: PackRefusal }
   > {
-    const recommendation = await this.recommend({
+    const { recommendation, guide } = await this.recommendWithGuide({
       task: request.task,
       ...(request.useCase === undefined ? {} : { useCase: request.useCase }),
     });
@@ -221,9 +240,22 @@ export class PackService {
         decidedBy: 'guide',
         note: "Jev's daily cap for Pack mode is reached, so the guide's order was used.",
       };
+    // Jev decides WITH the owner's guide: its routing prompt, the use case matched, and each login's quota.
+    const useCase = guide.useCases.find(entry => entry.id === recommendation?.useCase.id);
     const ranking = await this.ports.jev.rank(
       request.task,
-      ready.map(candidate => ({ model: candidate.model, runtime: candidate.runtime ?? '', why: candidate.why })),
+      ready.map(candidate => ({
+        model: candidate.model,
+        runtime: candidate.runtime ?? '',
+        why: candidate.why,
+        ...(candidate.quota === undefined || candidate.quota.state === 'unknown'
+          ? {}
+          : { quota: candidate.quota.summary }),
+      })),
+      {
+        ...(guide.routing === undefined ? {} : { routing: guide.routing.prompt }),
+        ...(useCase === undefined ? {} : { useCase: { title: useCase.title, description: useCase.description } }),
+      },
     );
     if (ranking.kind === 'failed')
       return {
@@ -267,7 +299,7 @@ export class PackService {
       const probe = probed.cached ? ('cached' as const) : ('ran' as const);
       if (!probed.outcome.ok) {
         last = {
-          code: 'probe_failed',
+          code: probed.outcome.code ?? 'probe_failed',
           message: `${runtime} did not answer a "reply OK" check${model === undefined ? '' : ` on ${model}`}: ${probed.outcome.reason}.`,
           remedy: 'Try the next candidate.',
         };

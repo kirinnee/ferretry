@@ -2,6 +2,7 @@ import { describe, it } from 'bun:test';
 import { chmodSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { MAX_ROUTING_SHORT_CHARS } from '@ferretry/protocol';
 import should from 'should';
 import {
   AGENT_INSTRUCTION,
@@ -714,6 +715,47 @@ describe("each ferret's sections of the appended system prompt", () => {
     should(JSON.parse(value?.slice('developer_instructions='.length) ?? '')).containEql('\n\nPack mode: ');
   });
 
+  it("should end the Pack section with the guide's routing line, for Claude and inside Codex's TOML string", () => {
+    // Arrange
+    const line = 'Routing: plan-review → claude-opus-5-5 max; bulk → glm-5-air low.';
+    const claude = render(account({ flags: [`--append-system-prompt=${BASE}`] }));
+    const codex = render(account({ kind: 'codex', flags: ['-c', `developer_instructions="${BASE}"`] }));
+
+    // Act
+    const claudePrompt = launchArguments(claude, { FY_PACK: '1', FY_PACK_ROUTING: line }).find(arg =>
+      arg.startsWith('--append'),
+    );
+    const codexValue = launchArguments(codex, { FY_PACK: '1', FY_PACK_ROUTING: line }).find(arg =>
+      arg.startsWith('developer_instructions='),
+    );
+
+    // Assert
+    should(claudePrompt).endWith(`${PACK_INSTRUCTION('fy')}\n${line}`);
+    should(JSON.parse(codexValue?.slice('developer_instructions='.length) ?? '')).endWith(
+      `${PACK_INSTRUCTION('fy')}\n${line}`,
+    );
+  });
+
+  it('should carry no routing line with Pack mode off or no line set, and strip what would break the quoting', () => {
+    // Arrange
+    const codex = render(account({ kind: 'codex', flags: ['-c', `developer_instructions="${BASE}"`] }));
+    const claude = render(account({ flags: [`--append-system-prompt=${BASE}`] }));
+    const prompt = (env: Record<string, string>) =>
+      launchArguments(claude, env).find(arg => arg.startsWith('--append')) ?? '';
+
+    // Act
+    const hostile = launchArguments(codex, { FY_PACK: '1', FY_PACK_ROUTING: 'a"b\\c\nd\te' }).find(arg =>
+      arg.startsWith('developer_instructions='),
+    );
+
+    // Assert
+    should(prompt({ FY_PACK: '0', FY_PACK_ROUTING: 'Routing: x.' })).not.containEql('Routing: x.');
+    should(prompt({ FY_PACK: '1' })).endWith(PACK_INSTRUCTION('fy'));
+    should(prompt({ FY_PACK: '1', FY_PACK_ROUTING: '' })).endWith(PACK_INSTRUCTION('fy'));
+    should(hostile?.slice('developer_instructions='.length)).match(/^"(?:[^"\\]|\\.)*"$/u);
+    should(JSON.parse(hostile?.slice('developer_instructions='.length) ?? '')).endWith('\nabcde');
+  });
+
   it('should name the binary the runtime launches, and leave every other argument and a non-agent alone', () => {
     // Arrange
     const agent = {
@@ -795,8 +837,9 @@ describe('the appended system prompt of a real agent runtime, for every combinat
       lessons: LESSONS_INSTRUCTION('fy').length,
     };
 
-    // Assert — the whole prompt, every section on, stays under 4.5 KB (docs/pack-mode.md records the sizes)
-    should(Object.values(sizes).reduce((sum, size) => sum + size, 0)).be.below(4_608);
+    // Assert — the whole prompt, every section on and the longest routing line, stays under 4.5 KB
+    // (docs/pack-mode.md records the sizes)
+    should(Object.values(sizes).reduce((sum, size) => sum + size, 0) + 1 + MAX_ROUTING_SHORT_CHARS).be.below(4_608);
     should(sizes.tools).be.below(1_100);
     should(sizes.settings).be.below(600);
   });
