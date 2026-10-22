@@ -9,14 +9,20 @@
  */
 
 import { describe, it } from 'bun:test';
+import { readdirSync, readFileSync } from 'node:fs';
 import should from 'should';
 import {
   type EngineDataChannel,
   type EnginePeerConnection,
+  loadNodeDataChannel,
   NodeDataChannelEngine,
   type NodeDataChannelModule,
 } from '../../../src/adapters/webrtc/index.ts';
-import { WEBRTC_SELF_TEST_CHANNEL, WebRtcOfferRefused } from '../../../src/lib/webrtc/index.ts';
+import {
+  WEBRTC_SELF_TEST_CHANNEL,
+  WebRtcEngineUnavailable,
+  WebRtcOfferRefused,
+} from '../../../src/lib/webrtc/index.ts';
 
 /** A data channel that records what it was sent and lets a case decide what comes back. */
 class FakeChannel implements EngineDataChannel {
@@ -78,7 +84,7 @@ function fakeModule(
       if (options.closeThrows === true) throw new Error('already closed');
     }
   }
-  return { module: { PeerConnection: FakePeer, getLibraryVersion: () => '9.9.9' }, closed };
+  return { module: { PeerConnection: FakePeer, getLibraryVersion: () => '9.9.9', cleanup: () => undefined }, closed };
 }
 
 describe('the node-datachannel WebRTC engine', () => {
@@ -184,6 +190,7 @@ describe('the node-datachannel WebRTC engine', () => {
     let created = 0;
     const module: NodeDataChannelModule = {
       getLibraryVersion: base.getLibraryVersion,
+      cleanup: base.cleanup,
       PeerConnection: class extends base.PeerConnection {
         constructor(name: string, config: { readonly iceServers: string[]; readonly bindAddress?: string }) {
           super(name, config);
@@ -250,7 +257,7 @@ function scriptedModule(script: {
       throw new Error('already closed');
     }
   }
-  return { module: { PeerConnection: Peer, getLibraryVersion: () => '9.9.9' }, peers };
+  return { module: { PeerConnection: Peer, getLibraryVersion: () => '9.9.9', cleanup: () => undefined }, peers };
 }
 type ScriptedPeer = EnginePeerConnection & {
   gathering: ((state: string) => void) | undefined;
@@ -338,7 +345,7 @@ describe('the node-datachannel engine answering an offer', () => {
     should(peers[0]?.closed).equal(1);
   });
 
-  it('should load the library once, and try again after a load that failed', async () => {
+  it('should refuse an offer as unavailable while the library will not load, and load it once it does', async () => {
     // Arrange
     const { module } = scriptedModule({ onRemote: peer => peer.gathering?.('complete') });
     let loads = 0;
@@ -351,11 +358,15 @@ describe('the node-datachannel engine answering an offer', () => {
     });
 
     // Act
-    await should(subject.answer('offer', [])).be.rejectedWith('first load fails');
+    const refused: unknown = await subject.answer('offer', []).catch((error: unknown) => error);
     await subject.answer('offer', []);
     await subject.answer('offer', []);
 
     // Assert
+    should(refused).be.instanceOf(WebRtcEngineUnavailable);
+    should((refused as Error).message).equal(
+      `the WebRTC engine could not be loaded on ${process.platform}-${process.arch} (first load fails)`,
+    );
     should(loads).equal(2);
   });
 
@@ -437,5 +448,179 @@ describe('the node-datachannel engine answering an offer', () => {
     should(closedChannel).equal(1);
     should(ends).deepEqual(['ended']);
     should(native.closed).equal(1);
+  });
+});
+
+/** The library's own threads in this process — one worker per core, its poller and the SCTP pair — by name. */
+function libraryThreads(): number {
+  return readdirSync('/proc/self/task').filter(task => {
+    const name = readFileSync(`/proc/self/task/${task}/comm`, 'utf8').trim();
+    return name.startsWith('RTC') || name.startsWith('SCTP');
+  }).length;
+}
+
+/** A browser stand-in: a real peer on loopback with one channel, offering non-trickle. */
+async function loopbackOffer(): Promise<{
+  readonly sdp: string;
+  readonly accept: (answer: string) => Promise<void>;
+  readonly close: () => void;
+}> {
+  const module = await loadNodeDataChannel();
+  const peer = new module.PeerConnection('engine-test-browser', { iceServers: [], bindAddress: '127.0.0.1' });
+  const gathered = new Promise<void>(resolve =>
+    peer.onGatheringStateChange(state => state === 'complete' && resolve()),
+  );
+  const channel = peer.createDataChannel('fy-session');
+  const opened = new Promise<void>(resolve => channel.onOpen(() => resolve()));
+  await gathered;
+  const offer = peer.localDescription();
+  if (offer === null) throw new Error('the browser peer produced no offer');
+  return {
+    sdp: offer.sdp,
+    accept: async answer => {
+      peer.setRemoteDescription(answer, 'answer');
+      await opened;
+    },
+    close: () => peer.close(),
+  };
+}
+
+async function until(what: string, condition: () => boolean): Promise<void> {
+  for (let waited = 0; waited < 5_000; waited += 10) {
+    if (condition()) return;
+    await new Promise(resolve => setTimeout(resolve, 10));
+  }
+  throw new Error(`timed out waiting for ${what}`);
+}
+
+describe('the node-datachannel engine’s lifetime', () => {
+  it('should hand the library back only once no peer it made is open, and start it again for the next answer', async () => {
+    // Arrange
+    const real = await loadNodeDataChannel();
+    const cleanups: string[] = [];
+    const subject = new NodeDataChannelEngine({
+      load: async () => ({
+        PeerConnection: real.PeerConnection,
+        getLibraryVersion: real.getLibraryVersion,
+        cleanup: () => {
+          cleanups.push('cleanup');
+          real.cleanup();
+        },
+      }),
+    });
+    const browser = await loopbackOffer();
+
+    // Act
+    const answered = await subject.answer(browser.sdp, []);
+    await browser.accept(answered.sdp);
+    subject.release();
+    const whileOpen = [...cleanups];
+    answered.peer.close();
+    answered.peer.close();
+    browser.close();
+    subject.release();
+    const again = await loopbackOffer();
+    const reanswered = await subject.answer(again.sdp, []);
+    await again.accept(reanswered.sdp);
+    reanswered.peer.close();
+    again.close();
+    subject.release();
+
+    // Assert
+    should(whileOpen).be.empty();
+    should(cleanups).deepEqual(['cleanup', 'cleanup']);
+  });
+
+  it.if(process.platform === 'linux')(
+    'should stop every library thread on release and run none until the next answer',
+    async () => {
+      // Arrange
+      const subject = new NodeDataChannelEngine();
+      const browser = await loopbackOffer();
+      const answered = await subject.answer(browser.sdp, []);
+      await browser.accept(answered.sdp);
+      const started = libraryThreads();
+      answered.peer.close();
+      browser.close();
+
+      // Act
+      subject.release();
+      await until('the library threads to stop', () => libraryThreads() === 0);
+      const released = libraryThreads();
+
+      // Assert
+      should(started).be.above(2);
+      should(released).equal(0);
+    },
+  );
+
+  it('should count the self-test’s peers, and hand the library back once they closed', async () => {
+    // Arrange
+    const { module } = fakeModule(channel => {
+      channel.opened?.();
+      channel.received?.(channel.sent[0] ?? '');
+    });
+    let cleaned = 0;
+    const subject = new NodeDataChannelEngine({
+      load: async () => ({
+        ...module,
+        cleanup: () => {
+          cleaned += 1;
+        },
+      }),
+    });
+
+    // Act
+    await subject.selfTest();
+    subject.release();
+
+    // Assert
+    should(cleaned).equal(1);
+  });
+
+  it('should release nothing before the library was ever loaded', () => {
+    // Arrange
+    let loads = 0;
+    const subject = new NodeDataChannelEngine({
+      load: async () => {
+        loads += 1;
+        throw new Error('never asked');
+      },
+    });
+
+    // Act
+    subject.release();
+
+    // Assert
+    should(loads).equal(0);
+  });
+
+  it('should refuse every later offer once a release did not finish, and never release again', async () => {
+    // Arrange
+    const { module } = scriptedModule({ onRemote: peer => peer.gathering?.('complete') });
+    let cleaned = 0;
+    const subject = new NodeDataChannelEngine({
+      load: async () => ({
+        ...module,
+        cleanup: () => {
+          cleaned += 1;
+          throw new Error('libdatachannel error# cleanup timeout (possible deadlock)\n  at native');
+        },
+      }),
+    });
+    (await subject.answer('offer', [])).peer.close();
+
+    // Act
+    subject.release();
+    subject.release();
+
+    // Assert
+    const refused: unknown = await subject.answer('offer', []).catch((error: unknown) => error);
+    should(refused).be.instanceOf(WebRtcEngineUnavailable);
+    should((refused as Error).message).equal(
+      'the WebRTC engine did not stop cleanly (libdatachannel error# cleanup timeout (possible deadlock)); ' +
+        'restart the daemon to use peer-to-peer connections again',
+    );
+    should(cleaned).equal(1);
   });
 });

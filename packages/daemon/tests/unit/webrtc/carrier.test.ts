@@ -28,11 +28,13 @@ import {
   MAX_WEBRTC_CHANNELS_PER_PEER,
   MAX_WEBRTC_PEERS,
   MAX_WEBRTC_PEERS_PER_DEVICE,
+  WEBRTC_ENGINE_LINGER_MS,
   WEBRTC_PEER_IDLE_MS,
   type WebRtcAnswer,
   type WebRtcAvailability,
   WebRtcCarrier,
   type WebRtcChannelPort,
+  WebRtcEngineUnavailable,
   WebRtcOfferRefused,
   type WebRtcPeerEngine,
   type WebRtcPeerPort,
@@ -119,6 +121,7 @@ class FakePeer implements WebRtcPeerPort {
 
 class FakeEngine implements WebRtcPeerEngine {
   readonly peers: FakePeer[] = [];
+  released = 0;
   readonly asked: Array<{ readonly sdp: string; readonly iceServers: readonly string[] }> = [];
   next: ((offer: string) => Promise<WebRtcAnswer>) | undefined;
 
@@ -128,6 +131,10 @@ class FakeEngine implements WebRtcPeerEngine {
     const peer = new FakePeer();
     this.peers.push(peer);
     return { sdp: `answer to ${offerSdp}`, peer };
+  }
+
+  release(): void {
+    this.released += 1;
   }
 }
 
@@ -412,6 +419,116 @@ describe('the WebRTC carrier', () => {
       // Assert
       should(engine.peers.every(peer => peer.closed)).be.true();
       should(subject.peers).equal(0);
+    });
+  });
+
+  describe('the engine’s lifetime', () => {
+    /** The engine hand-backs still waiting to fire. */
+    const lingers = (scheduler: ManualScheduler) =>
+      scheduler.timers.filter(timer => !timer.cancelled && timer.ms === WEBRTC_ENGINE_LINGER_MS);
+
+    it('should ask the engine nothing before the first offer', () => {
+      // Arrange + Act
+      const { engine, scheduler } = harness();
+
+      // Assert
+      should(engine.asked).be.empty();
+      should(engine.released).equal(0);
+      should(scheduler.timers).be.empty();
+    });
+
+    it('should hand the engine back once its last peer has ended for the linger, and not before', async () => {
+      // Arrange
+      const { subject, engine, scheduler } = harness();
+      await subject.offer('o', device('a'));
+      await subject.offer('o', device('b'));
+      const [first, second] = engine.peers as [FakePeer, FakePeer];
+
+      // Act
+      first.fail();
+      const whileOneIsOpen = lingers(scheduler).length;
+      second.fail();
+      const armed = lingers(scheduler);
+      armed[0]?.action();
+
+      // Assert
+      should(whileOneIsOpen).equal(0);
+      should(armed).have.length(1);
+      should(engine.released).equal(1);
+    });
+
+    it('should keep the engine for an offer that arrives inside the linger', async () => {
+      // Arrange
+      const { subject, engine, scheduler } = harness();
+      await subject.offer('o', device('a', 'app-1'));
+      (engine.peers[0] as FakePeer).fail();
+      const armed = lingers(scheduler)[0];
+
+      // Act
+      await subject.offer('o', device('a', 'app-2'));
+
+      // Assert
+      should(armed?.cancelled).be.true();
+      should(lingers(scheduler)).be.empty();
+      should(engine.released).equal(0);
+    });
+
+    it('should not hand the engine back while an offer is still being answered', async () => {
+      // Arrange
+      const { subject, engine, scheduler } = harness();
+      await subject.offer('o', device('a', 'app-1'));
+      let answer: (() => void) | undefined;
+      engine.next = async () => {
+        await new Promise<void>(resolve => (answer = resolve));
+        throw new WebRtcOfferRefused('bad m-line');
+      };
+      const pending = subject.offer('o', device('a', 'app-2'));
+      (engine.peers[0] as FakePeer).fail();
+
+      // Act
+      const whileAnswering = lingers(scheduler).length;
+      answer?.();
+      await pending;
+
+      // Assert
+      should(whileAnswering).equal(0);
+      should(lingers(scheduler)).have.length(1);
+    });
+
+    it('should refuse an offer as `webrtc_unavailable` when the engine cannot start, saying why', async () => {
+      // Arrange
+      const { subject, engine, scheduler } = harness();
+      engine.next = async () => {
+        throw new WebRtcEngineUnavailable('the WebRTC engine could not be loaded on linux-riscv64 (no addon)');
+      };
+
+      // Act
+      const actual = await subject.offer('o', device('a'));
+
+      // Assert
+      should(actual).deepEqual({
+        kind: 'refused',
+        status: 503,
+        code: 'webrtc_unavailable',
+        reason: 'the WebRTC engine could not be loaded on linux-riscv64 (no addon)',
+      });
+      should(subject.peers).equal(0);
+      should(lingers(scheduler)).have.length(1);
+    });
+
+    it('should not hand the engine back when the daemon stops, nor arm anything after', async () => {
+      // Arrange
+      const { subject, engine, scheduler } = harness();
+      await subject.offer('o', device('a'));
+      (engine.peers[0] as FakePeer).fail();
+
+      // Act
+      subject.close();
+      subject.close();
+
+      // Assert
+      should(scheduler.live()).equal(0);
+      should(engine.released).equal(0);
     });
   });
 
