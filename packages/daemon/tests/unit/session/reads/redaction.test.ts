@@ -315,4 +315,26 @@ describe('operator reads open the vault once per read', () => {
     // Assert
     should(opens()).equal(3);
   });
+
+  it('should not open the vault for an empty page, so an idle poll costs nothing', async () => {
+    // Arrange — a damaged vault, so an open would be a refusal rather than merely a cost.
+    const empty = new OperatorReadService(
+      { replay: async () => [] },
+      { capture: async () => undefined },
+      { tail: async () => ({ kind: 'read', events: [] }) },
+      { read: async () => ({ kind: 'read', context: CONTEXT, rows: [] }) },
+      CODEC,
+      { read: async () => ({ kind: 'absent' }) },
+      masking(true),
+    );
+
+    // Act
+    const events = await empty.events('s1', 7, undefined);
+    const page = await empty.messages('s1', undefined, undefined);
+
+    // Assert
+    should(events).eql([]);
+    should(page.messages).eql([]);
+    should(page.nextCursor).be.null();
+  });
 });

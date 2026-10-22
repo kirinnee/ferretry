@@ -442,7 +442,9 @@ export class OperatorReadService {
     });
     // Only `data` is scrubbed. The envelope is this daemon's own — a sequence, an instant, a session
     // id and a type it minted — so nothing in it can hold a value, and passing it through redaction
-    // would be spending the work on fields that cannot carry the risk. One vault open for the page.
+    // would be spending the work on fields that cannot carry the risk. One vault open for the page, and
+    // none for an empty one: "nothing after N" is the answer an idle poll gets almost every time.
+    if (page_.length === 0) return page_;
     return await this.redactor.batch(scrub => page_.map(event => ({ ...event, data: scrub.data(event.data) })));
   }
 
@@ -597,11 +599,16 @@ export class OperatorReadService {
             last.rawPrefix,
           ),
     ]);
-    // The whole page under ONE vault open. Order and cardinality are the caller's slice, and nothing
-    // here adds, drops or reorders a row.
-    const messages = await this.redactor.batch(scrub =>
-      bound.map(({ row, point, selectionBinding }) => servedRow(row, point, scrub.text(row.text), selectionBinding)),
-    );
+    // The whole page under ONE vault open, and none for an empty page. Order and cardinality are the
+    // caller's slice, and nothing here adds, drops or reorders a row.
+    const messages =
+      bound.length === 0
+        ? []
+        : await this.redactor.batch(scrub =>
+            bound.map(({ row, point, selectionBinding }) =>
+              servedRow(row, point, scrub.text(row.text), selectionBinding),
+            ),
+          );
     return { v: 1, sessionId, messages, nextCursor };
   }
 
