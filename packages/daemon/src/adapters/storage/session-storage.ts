@@ -181,6 +181,18 @@ interface CachedDocument {
   readonly heard?: number;
 }
 
+/**
+ * How fresh a read must be.
+ *
+ * - `proved` (every read's default): the file is proved by a `stat` on every read, so a change by ANY
+ *   writer — this daemon, another process, a person with an editor — is seen by the very next read.
+ * - `heard`: as fresh as the last file event. A watched document whose watch is live and quiet costs no
+ *   system call; a change from outside the daemon is seen once the hub has heard it, within its settle.
+ *   For background readers that ask about every session over and over, and act on nothing a person just
+ *   did — the transcript resolver, the fleet reading.
+ */
+export type DocumentFreshness = 'proved' | 'heard';
+
 /** A watch on one file: whether a change is reported by an event right now, and how to stop it. */
 export interface DocumentSubscription {
   live(): boolean;
@@ -219,15 +231,17 @@ export class DaemonStorage {
    */
   private readonly documents = new Map<string, CachedDocument>();
   /**
-   * The documents read more than once, each watched through {@link DocumentChanges}.
+   * The documents a background reader read more than once (`heard` freshness), each watched through
+   * {@link DocumentChanges}.
    *
    * WHY. The identity cache made an unchanged document ONE `stat` per read — still about thirty a second
    * on an idle 36-session fleet, nearly all of them `session-version` and `config.json` asked for again
    * by the transcript resolver and the fleet reading. A watched document whose watch is live and has
-   * reported nothing since its identity was taken is provably the file that was read, so it is answered
-   * with no system call at all. Wherever the watch cannot vouch — the directory is polled, the platform
-   * never reports the name, or no watch is wired — the `stat` stays, exactly as before. An edit from
-   * outside the daemon is seen once the hub has heard it: within its settle.
+   * reported nothing since its identity was taken is provably the file that was read, so those readers are
+   * answered with no system call at all. Wherever the watch cannot vouch — the directory is polled, the
+   * platform never reports the name, or no watch is wired — the `stat` stays, exactly as before. Every
+   * other read still proves the file with a `stat`: a request acts on what a person may just have
+   * written, and must see it.
    */
   private readonly watched = new Map<string, WatchedDocument>();
   /** Live journal appends for sockets served by THIS opened daemon storage, never process-global. */
@@ -945,19 +959,22 @@ export class DaemonStorage {
   }
 
   /** A document's text, from the identity cache when the file is still the one it holds. */
-  private async readCachedText(path: string): Promise<CachedDocument | undefined> {
+  private async readCachedText(
+    path: string,
+    freshness: DocumentFreshness = 'proved',
+  ): Promise<CachedDocument | undefined> {
     const { identity, readTextIdentified } = this.fileSystem;
     if (identity === undefined || readTextIdentified === undefined) {
       const text = await this.fileSystem.readText(path);
       return text === undefined ? undefined : { identity: '', text };
     }
     const cached = this.documents.get(path);
-    // A document asked for again is watched from now on — before its `stat`, so a change between the two
-    // is caught by the `stat`, and any change after it is heard.
-    const watch = cached === undefined ? this.watched.get(path) : this.watch(path);
+    // A document a background reader asks for again is watched from now on — before its `stat`, so a change
+    // between the two is caught by the `stat`, and any change after it is heard.
+    const watch = cached !== undefined && freshness === 'heard' ? this.watch(path) : this.watched.get(path);
     const heard = watch?.changes;
-    if (cached !== undefined && heard !== undefined && cached.heard === heard && watch?.subscription.live() === true)
-      return cached;
+    const quiet = cached !== undefined && heard !== undefined && cached.heard === heard;
+    if (quiet && freshness === 'heard' && watch?.subscription.live() === true) return cached;
     if (cached !== undefined && (await identity.call(this.fileSystem, path)) === cached.identity) {
       if (heard === undefined || cached.heard === heard) return cached;
       const proved: CachedDocument = { ...cached, heard };
@@ -1026,16 +1043,20 @@ export class DaemonStorage {
     if (watched !== undefined) watched.changes += 1;
   }
 
-  private async readDocument(id: SessionId, kind: 'config' | 'state'): Promise<FrozenJsonValue | undefined> {
+  private async readDocument(
+    id: SessionId,
+    kind: 'config' | 'state',
+    freshness: DocumentFreshness = 'proved',
+  ): Promise<FrozenJsonValue | undefined> {
     const paths = createSessionPaths(this.paths, id);
-    const marker = (await this.readCachedText(paths.marker))?.text;
+    const marker = (await this.readCachedText(paths.marker, freshness))?.text;
     if (marker === undefined) {
       await this.refuseUnrecoverableUnmarkedSession(id);
       return undefined;
     }
     if (decideSessionMarker(marker) === 'refuse') throw new SessionLayoutError(id, marker);
     const file = paths[kind];
-    const document = await this.readCachedText(file);
+    const document = await this.readCachedText(file, freshness);
     if (document === undefined) return undefined;
     if (document.value !== undefined) return document.value;
     const parsed = parseJsonDocument(document.text);
@@ -1045,9 +1066,10 @@ export class DaemonStorage {
     return value;
   }
 
-  async readConfig(id: SessionId): Promise<FrozenJsonValue | undefined> {
+  /** A session's configuration, proved on every read unless a background reader asks for `heard`. */
+  async readConfig(id: SessionId, freshness: DocumentFreshness = 'proved'): Promise<FrozenJsonValue | undefined> {
     this.assertOpen();
-    return await this.readDocument(id, 'config');
+    return await this.readDocument(id, 'config', freshness);
   }
 
   async readState(id: SessionId): Promise<FrozenJsonValue | undefined> {

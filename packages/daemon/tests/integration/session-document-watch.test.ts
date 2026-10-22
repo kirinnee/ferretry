@@ -1,11 +1,12 @@
 /**
  * A WATCHED SESSION DOCUMENT THAT HAS NOT CHANGED COSTS NO SYSTEM CALL — AND ONE THAT HAS IS STILL SEEN.
  *
- * The identity cache answers an unchanged document with one `stat` per read. A document read more than
- * once is now also watched, and while its watch is live and has reported nothing since its identity was
- * taken, even that `stat` is skipped. These pin the saving, every case where the `stat` must stay (a
- * watch that cannot vouch, a change it reported), read-your-own-write against a read running alongside a
- * write, and — on the real file-event hub — an edit from outside the daemon seen within the hub's settle.
+ * The identity cache answers an unchanged document with one `stat` per read. A document a background
+ * reader asks for (`heard` freshness) more than once is now also watched, and while its watch is live and
+ * has reported nothing since its identity was taken, even that `stat` is skipped. These pin the saving,
+ * every case where the `stat` must stay (a read that must be proved, a watch that cannot vouch, a change
+ * it reported), read-your-own-write against a read running alongside a write, and — on the real file-event
+ * hub — an edit from outside the daemon seen within the hub's settle.
  */
 import { afterEach, describe, it } from 'bun:test';
 import { mkdtemp, rename, rm, writeFile } from 'node:fs/promises';
@@ -111,7 +112,7 @@ async function seeded(changes: DocumentChanges | undefined) {
   const opened = await factory.open();
   closers.push(async () => await opened.storage.close().catch(() => undefined));
   if (fileSystem === undefined) throw new Error('the storage built no filesystem');
-  await opened.storage.writeConfig(ID, { id: 'watched-1', name: 'Seeded' });
+  await opened.storage.writeConfig(ID, { id: 'watched-1', status: 'running', turn: 1 });
   await opened.storage.writeState(ID, { id: 'watched-1', status: 'running', turn: 1 });
   await opened.storage.append(ID, 'session.created', {});
   fileSystem.identities = [];
@@ -127,13 +128,13 @@ describe('a watched session document', () => {
     // Arrange
     const watch = scriptedChanges();
     const { storage, fileSystem, paths } = await seeded(watch.changes);
-    await storage.readConfig(ID);
-    await storage.readConfig(ID);
+    await storage.readConfig(ID, 'heard');
+    await storage.readConfig(ID, 'heard');
     const proving = [statsOf(fileSystem, paths.marker), statsOf(fileSystem, paths.config)];
     fileSystem.identities = [];
 
     // Act
-    for (let read = 0; read < 10; read += 1) await storage.readConfig(ID);
+    for (let read = 0; read < 10; read += 1) await storage.readConfig(ID, 'heard');
 
     // Assert: the second read watched both and proved them with a stat; ten more cost nothing.
     should(watch.watched().sort()).deepEqual([paths.config, paths.marker].sort());
@@ -141,42 +142,75 @@ describe('a watched session document', () => {
     should(fileSystem.identities).deepEqual([]);
   });
 
+  it('should still prove every read that does not ask for heard freshness, and see an unheard edit at once', async () => {
+    // Arrange: the config is watched and quiet for the background readers.
+    const watch = scriptedChanges();
+    const { storage, fileSystem, paths } = await seeded(watch.changes);
+    await storage.readConfig(ID, 'heard');
+    await storage.readConfig(ID, 'heard');
+    fileSystem.identities = [];
+
+    // Act — a person edits the file, and a request reads it before the hub has said anything.
+    await storage.readConfig(ID);
+    await writeFile(paths.config, JSON.stringify({ id: 'watched-1', status: 'stopped', turn: 1 }));
+    const requested = (await storage.readConfig(ID)) as Record<string, unknown>;
+
+    // Assert
+    should(statsOf(fileSystem, paths.config)).equal(2);
+    should(requested.status).equal('stopped');
+  });
+
+  it('should open no watch for reads that must be proved', async () => {
+    // Arrange
+    const watch = scriptedChanges();
+    const { storage } = await seeded(watch.changes);
+
+    // Act
+    for (let read = 0; read < 3; read += 1) {
+      await storage.readConfig(ID);
+      await storage.readState(ID);
+    }
+
+    // Assert
+    should(watch.watched()).deepEqual([]);
+  });
+
   it('should stat again once its watch reports a change, and read what changed', async () => {
     // Arrange
     const watch = scriptedChanges();
     const { storage, fileSystem, paths } = await seeded(watch.changes);
-    await storage.readState(ID);
-    await storage.readState(ID);
+    await storage.readConfig(ID, 'heard');
+    await storage.readConfig(ID, 'heard');
 
     // Act — another writer replaces the file, and the hub hears it.
-    await writeFile(paths.state, JSON.stringify({ id: 'watched-1', status: 'stopped', turn: 1 }));
-    watch.report(paths.state);
+    await writeFile(paths.config, JSON.stringify({ id: 'watched-1', status: 'stopped', turn: 1 }));
+    watch.report(paths.config);
     fileSystem.identities = [];
-    const changed = (await storage.readState(ID)) as Record<string, unknown>;
-    const again = (await storage.readState(ID)) as Record<string, unknown>;
+    const changed = (await storage.readConfig(ID, 'heard')) as Record<string, unknown>;
+    const again = (await storage.readConfig(ID, 'heard')) as Record<string, unknown>;
 
     // Assert: one stat proved the change, and the new file is trusted from then on.
     should(changed.status).equal('stopped');
     should(again.status).equal('stopped');
-    should(statsOf(fileSystem, paths.state)).equal(1);
+    should(statsOf(fileSystem, paths.config)).equal(1);
   });
 
   it('should keep the stat on every read while its watch cannot vouch for the directory', async () => {
     // Arrange: the hub falls back to polling the session directory.
     const watch = scriptedChanges();
     const { storage, fileSystem, paths } = await seeded(watch.changes);
-    await storage.readState(ID);
-    await storage.readState(ID);
+    await storage.readConfig(ID, 'heard');
+    await storage.readConfig(ID, 'heard');
     watch.polled();
     fileSystem.identities = [];
 
     // Act
-    for (let read = 0; read < 3; read += 1) await storage.readState(ID);
-    await writeFile(paths.state, JSON.stringify({ id: 'watched-1', status: 'stopped', turn: 1 }));
-    const edited = (await storage.readState(ID)) as Record<string, unknown>;
+    for (let read = 0; read < 3; read += 1) await storage.readConfig(ID, 'heard');
+    await writeFile(paths.config, JSON.stringify({ id: 'watched-1', status: 'stopped', turn: 1 }));
+    const edited = (await storage.readConfig(ID, 'heard')) as Record<string, unknown>;
 
     // Assert: a stat per read, and an unheard edit seen at once, as before the watch.
-    should(statsOf(fileSystem, paths.state)).equal(4);
+    should(statsOf(fileSystem, paths.config)).equal(4);
     should(edited.status).equal('stopped');
   });
 
@@ -185,18 +219,18 @@ describe('a watched session document', () => {
     const { storage, fileSystem, paths } = await seeded(undefined);
 
     // Act
-    for (let read = 0; read < 4; read += 1) await storage.readState(ID);
+    for (let read = 0; read < 4; read += 1) await storage.readConfig(ID, 'heard');
 
-    // Assert: the seeding's own sync already cached the state, so every read is one stat.
-    should(statsOf(fileSystem, paths.state)).equal(4);
+    // Assert: the seeding's own sync already cached the config, so every read is one stat.
+    should(statsOf(fileSystem, paths.config)).equal(4);
   });
 
   it('should see its own write at once, even when a read alongside cached the old file', async () => {
-    // Arrange: the state is watched and quiet.
+    // Arrange: the config is watched and quiet.
     const watch = scriptedChanges();
     const { storage, fileSystem } = await seeded(watch.changes);
-    await storage.readState(ID);
-    await storage.readState(ID);
+    await storage.readConfig(ID, 'heard');
+    await storage.readConfig(ID, 'heard');
     let entered: () => void = () => undefined;
     const blocked = new Promise<void>(resolve => {
       entered = resolve;
@@ -206,13 +240,13 @@ describe('a watched session document', () => {
 
     // Act — a write stops just before its rename; a read runs meanwhile and caches the old file; the
     // rename lands, and the hub has not heard it yet.
-    const write = storage.writeState(ID, { id: 'watched-1', status: 'running', turn: 2 });
+    const write = storage.writeConfig(ID, { id: 'watched-1', status: 'running', turn: 2 });
     await blocked;
-    const during = (await storage.readState(ID)) as Record<string, unknown>;
+    const during = (await storage.readConfig(ID, 'heard')) as Record<string, unknown>;
     fileSystem.writing = undefined;
     release();
     await write;
-    const after = (await storage.readState(ID)) as Record<string, unknown>;
+    const after = (await storage.readConfig(ID, 'heard')) as Record<string, unknown>;
 
     // Assert
     should(during.turn).equal(1);
@@ -223,8 +257,8 @@ describe('a watched session document', () => {
     // Arrange
     const watch = scriptedChanges();
     const { storage } = await seeded(watch.changes);
-    await storage.readConfig(ID);
-    await storage.readConfig(ID);
+    await storage.readConfig(ID, 'heard');
+    await storage.readConfig(ID, 'heard');
 
     // Act
     await storage.close();
@@ -240,24 +274,24 @@ describe('a watched session document', () => {
     const { storage, fileSystem, paths } = await seeded({
       subscribe: (path, listener) => hub.subscribe(path, () => listener()),
     });
-    await storage.readState(ID);
-    await storage.readState(ID);
+    await storage.readConfig(ID, 'heard');
+    await storage.readConfig(ID, 'heard');
     // The hub's first check reports a new subscription once; let it, so the quiet reads below are quiet.
     await writeFile(join(paths.directory, 'nudge'), 'x');
     await Bun.sleep(200);
-    await storage.readState(ID);
+    await storage.readConfig(ID, 'heard');
     fileSystem.identities = [];
-    for (let read = 0; read < 5; read += 1) await storage.readState(ID);
-    const quiet = statsOf(fileSystem, paths.state);
+    for (let read = 0; read < 5; read += 1) await storage.readConfig(ID, 'heard');
+    const quiet = statsOf(fileSystem, paths.config);
 
     // Act — an editor saves the file atomically, as most do.
-    const temporary = join(paths.directory, 'state.json.edit');
+    const temporary = join(paths.directory, 'config.json.edit');
     await writeFile(temporary, JSON.stringify({ id: 'watched-1', status: 'stopped', turn: 1 }));
-    await rename(temporary, paths.state);
+    await rename(temporary, paths.config);
     const started = Date.now();
     let seen: unknown;
     while (Date.now() - started < 2_000) {
-      seen = ((await storage.readState(ID)) as Record<string, unknown>).status;
+      seen = ((await storage.readConfig(ID, 'heard')) as Record<string, unknown>).status;
       if (seen === 'stopped') break;
       await Bun.sleep(5);
     }
