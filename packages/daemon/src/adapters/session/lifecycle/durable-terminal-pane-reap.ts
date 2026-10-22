@@ -164,9 +164,17 @@ export class DurableTerminalPaneStore {
   }
 
   private async scanOnce(daemonId: string): Promise<TerminalPaneRegistrationScan> {
+    return await this.scanSessions(daemonId, await this.storage.sessionIdsOnDisk());
+  }
+
+  /**
+   * The same tolerant scan over sessions a caller has already found on disk, for one that walked the
+   * session directories for its own reasons and would otherwise pay for a second walk here.
+   */
+  async scanSessions(daemonId: string, sessionIds: readonly SessionId[]): Promise<TerminalPaneRegistrationScan> {
     const registrations: RegisteredTerminalPane[] = [];
     const damaged: DamagedTerminalPaneRegistration[] = [];
-    for (const id of await this.storage.sessionIdsOnDisk()) {
+    for (const id of sessionIds) {
       const text = await this.scanned(createSessionPaths(this.paths, id).terminalPane);
       if (text === undefined) continue;
       try {

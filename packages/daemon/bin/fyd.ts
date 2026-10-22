@@ -642,6 +642,7 @@ import {
   type LivenessTarget,
   LocalModelsService,
   type LogLevel,
+  type LoopBlockedClockPort,
   type LoopWatchdogPort,
   launchGuardActive,
   launchReasoningEffort,
@@ -1181,8 +1182,16 @@ export interface DaemonWorld {
    * (`healthIntervalSeconds`) and it is only known once configuration has loaded. The service, its
    * consistency pass and the timer must all read the same object — a detector measuring lateness
    * against a period the timer does not fire on is a detector measuring nothing.
+   *
+   * `loop` is the event-loop lag meter `start` arms before anything else, passed in for the same
+   * reason: a tick the whole loop was too blocked to fire is not a wedge of the self-check, and only
+   * that meter knows how long the loop was blocked.
    */
-  readonly createSessionHealth: (storage: DaemonStorage, settings: SessionHealthSettings) => SessionHealthService;
+  readonly createSessionHealth: (
+    storage: DaemonStorage,
+    settings: SessionHealthSettings,
+    loop: LoopBlockedClockPort,
+  ) => SessionHealthService;
   /**
    * Brings back the sessions a host restart took down (docs/cli.md, `fy daemon`).
    *
@@ -7358,7 +7367,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         run: async () => await service.run(),
       };
     },
-    createSessionHealth: (storage, settings) =>
+    createSessionHealth: (storage, settings, loop) =>
       new SessionHealthService(
         {
           inventory: new StorageSessionHealthInventory(storage, {
@@ -7380,7 +7389,10 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
             bootstrapFinished: () => bootProgress?.finished ?? false,
             bootstrapErrors: () => [],
           }),
-          consistency: new StorageConsistencyPass(storage, stateFiles, paths, settings),
+          // One walk of the session directories a check, handed to the consistency pass and the exit
+          // observer alike — each used to take its own.
+          survey: { survey: async () => await storage.surveySessionDirectories() },
+          consistency: new StorageConsistencyPass(storage, stateFiles, paths, settings, activities),
           repair: new UnmountedSupervisionRepair(),
           // The same private server, registration ledger and launch gate the lifecycle and the revive
           // use, so an exit is only ever proven against a pane this daemon registered and never while
@@ -7403,6 +7415,10 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           clock,
           wallClock: { nowMs: () => Date.now() },
           monotonic: new SystemMonotonicClock(),
+          loop,
+          // The same ledger every timer reports into: a check runs as `self-check` and names each stage
+          // inside it — `self-check › reconcile › reindex` — so a profile splits the check's time.
+          activities,
           restarts: new SelfRestartCoordinator(
             new FileSelfRestartStampStore(stateFiles, join(paths.home, 'self-restart.json')),
             // Nothing supervises this process yet, so the honest answer is "no restart happened":
@@ -9696,7 +9712,7 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
   // three minutes. One settings object serves the service, its consistency pass and the timer below,
   // so the period the daemon fires on cannot drift from the period the detector measures against.
   const healthSettings = sessionHealthSettingsAt(config.healthIntervalSeconds * 1_000);
-  const health = world.createSessionHealth(opened.storage, healthSettings);
+  const health = world.createSessionHealth(opened.storage, healthSettings, meter);
   const skills = new NodeCatalog({ home: world.userHome });
   const projects = new FileProjectCatalog(join(opened.paths.state, 'projects.json'));
   const catalogs = {
@@ -10043,7 +10059,8 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
     lane.close();
   });
   const ticks = setInterval(() => {
-    void activities.run('self-check', () => health.selfCheck()).catch(() => undefined);
+    // `tick` runs as the `self-check` activity, and skips — never overlaps — a check still running.
+    void health.tick().catch(() => undefined);
   }, healthSettings.selfCheckIntervalMs);
   cleanups.push(() => clearInterval(ticks));
   // After the daemon is serving, never before: a revive that raced the boot would be a launch the

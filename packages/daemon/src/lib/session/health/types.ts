@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import type { SessionId } from '../../session-id.ts';
 
 /**
  * Elapsed time from a source that cannot move backwards.
@@ -13,10 +14,52 @@ export interface MonotonicClockPort {
   elapsedMs(): number;
 }
 
-/** One firing of the self-check timer: a monotonic reading for the gap, a wall instant to report. */
+/**
+ * Names one stage of a self-check, so a profile splits the check's time by stage —
+ * `self-check › survey`, `self-check › reconcile` — instead of reporting one opaque total.
+ *
+ * A PORT because a stage only nests inside the check when the runtime carries the enclosing activity
+ * across every `await`; the composition root hands in its activity ledger, and a test hands in a
+ * recorder.
+ */
+export interface SelfCheckActivityPort {
+  run<T>(name: string, work: () => Promise<T>): Promise<T>;
+}
+
+/** Runs every stage unnamed: what a caller with no activity ledger hands in. */
+export const UNNAMED_SELF_CHECK_STAGES: SelfCheckActivityPort = Object.freeze({
+  run: async <T>(_name: string, work: () => Promise<T>): Promise<T> => await work(),
+});
+
+/**
+ * One session directory as a walk of the state home found it: published, and whether the journal it
+ * owes has vanished. No document or journal bytes are read to know either.
+ */
+export interface SurveyedSession {
+  readonly id: SessionId;
+  readonly journalLost: boolean;
+}
+
+/**
+ * How long, in total, the event loop has been unable to run anything — the lag meter's running sum.
+ *
+ * A self-check timer is late for one of two reasons, and only one of them is the self-check's: the
+ * whole loop was blocked, so no timer could fire, or the check's own work did not let the next one
+ * start. Subtracting the first from a gap leaves the second. Only differences are meaningful.
+ */
+export interface LoopBlockedClockPort {
+  blockedMs(): number;
+}
+
+/**
+ * One firing of the self-check timer: a monotonic reading for the gap, a wall instant to report, and
+ * the loop's blocked total at that moment, so a gap can be told apart from a stalled loop.
+ */
 export interface SelfCheckTick {
   readonly elapsedMs: number;
   readonly at: string;
+  /** The {@link LoopBlockedClockPort} reading. Absent when nothing measures the loop. */
+  readonly loopBlockedMs?: number | undefined;
 }
 
 /**
@@ -49,9 +92,27 @@ export interface SelfCheckLedger {
   readonly ticks: number;
   readonly wedges: number;
   readonly lastElapsedMs: number | undefined;
+  /** The loop's blocked total at the same reading as `lastElapsedMs`, when it was measured. */
+  readonly lastLoopBlockedMs: number | undefined;
   readonly lastAt: string | undefined;
   readonly lastFreshness: SelfCheckFreshness | undefined;
   readonly eventLoopLagMs: number;
+  /**
+   * Whether the next check to plan must take the deep pass although its own tick is on time: a check
+   * that never finished was measured as a wedge while it was still running, so the deep pass its wedge
+   * calls for is owed to the first check that decides its depth after that.
+   */
+  readonly deepPassOwed: boolean;
+}
+
+/** The check still in flight when the timer fired again, as the service tracks it. */
+export interface RunningSelfCheck {
+  /** The reading taken when that check began. */
+  readonly since: SelfCheckTick;
+  /** Whether its wedge was already counted: one stuck check is ONE wedge, however many ticks it spans. */
+  readonly counted: boolean;
+  /** How many sessions it found monitored, once it had read the index. */
+  readonly monitors?: number | undefined;
 }
 
 /** What the daemon can observe about the warden's sweep timer. */

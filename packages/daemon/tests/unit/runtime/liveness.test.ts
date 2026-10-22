@@ -293,6 +293,26 @@ describe('EventLoopLagMeter', () => {
     should(stalls).deepEqual([]);
   });
 
+  it('should total the time the loop was blocked, a late tick that has not fired yet included', () => {
+    // Arrange
+    const clock = manualClock();
+    const meter = new EventLoopLagMeter(clock, new ActivityLedger(clock), DEFAULT_EVENT_LOOP_LAG_POLICY, () => 0);
+
+    // Act — one tick ten seconds late, one on time, then a stall still in progress.
+    const before = meter.blockedMs();
+    clock.advance(10_250);
+    meter.tick();
+    clock.advance(250);
+    meter.tick();
+    const fired = meter.blockedMs();
+    clock.advance(4_250);
+    const pending = meter.blockedMs();
+    meter.tick();
+
+    // Assert — the pending stall is counted once: no reading moves when its tick finally fires.
+    should([before, fired, pending, meter.blockedMs()]).deepEqual([0, 10_000, 14_000, 14_000]);
+  });
+
   it('should report a late tick as a stall naming the work that ran during it', () => {
     // Arrange
     const clock = manualClock();

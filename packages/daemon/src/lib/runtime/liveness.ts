@@ -361,6 +361,7 @@ export class EventLoopLagMeter {
   #lastTickMs: number;
   #lagMs = 0;
   #maxLagMs = 0;
+  #blockedMs = 0;
   #stalls = 0;
   #lastStall: LoopStall | undefined;
   #worstStall: LoopStall | undefined;
@@ -383,6 +384,7 @@ export class EventLoopLagMeter {
     this.#lastTickMs = now;
     this.#lagMs = lag;
     this.#maxLagMs = Math.max(this.#maxLagMs, lag);
+    this.#blockedMs += lag;
     // Emptied on EVERY tick, so the samples held when a tick is late are that window's and no other's —
     // but only a late tick's are folded into frames; an on-time window is thrown away as it stands.
     if (lag < this.policy.stallMs) {
@@ -401,6 +403,18 @@ export class EventLoopLagMeter {
     this.#lastStall = stall;
     if (this.#worstStall === undefined || stall.durationMs > this.#worstStall.durationMs) this.#worstStall = stall;
     this.onStall(stall);
+  }
+
+  /**
+   * How long, in total, the loop has been unable to run anything since this meter began — through
+   * NOW, so the lateness of a tick that has not fired yet is counted too. A timer that fires late
+   * because the loop was blocked may well run before the meter's own late tick does, and asking it
+   * then must not miss the stall that delayed it.
+   *
+   * Never decreasing, so the blocked time over any window is the difference of two readings.
+   */
+  blockedMs(): number {
+    return this.#blockedMs + Math.max(0, this.clock.now() - this.#lastTickMs - this.policy.intervalMs);
   }
 
   view(): EventLoopView {

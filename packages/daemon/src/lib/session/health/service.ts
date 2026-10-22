@@ -2,19 +2,24 @@ import type { ClockPort } from '../../ports.ts';
 import { type ExitedSessionTransition, exitedSessionTransition, type SessionExitObservation } from './exit.ts';
 import { emptyIncoherenceLedger, recordIncoherencePass } from './incoherence.ts';
 import { buildDaemonHealthReport, type DaemonHealthReport } from './report.ts';
-import { SelfRestartCoordinator } from './self-restart.ts';
 import { planSelfCheck, type SelfCheckPlan, type WardenSweepInput } from './self-check.ts';
+import type { SelfRestartCoordinator } from './self-restart.ts';
 import type { SessionHealthSettings } from './settings.ts';
 import { classifyWardenSweep } from './sweep.ts';
 import type {
   IncoherenceLedger,
   IncoherencePass,
+  LoopBlockedClockPort,
   MonotonicClockPort,
+  RunningSelfCheck,
+  SelfCheckActivityPort,
   SelfCheckLedger,
+  SelfCheckTick,
   SessionHealthEvent,
   SessionHealthObservation,
+  SurveyedSession,
 } from './types.ts';
-import { emptySelfCheckLedger } from './wedge.ts';
+import { emptySelfCheckLedger, recordSkippedTick, wedgeEvent } from './wedge.ts';
 
 /** Everything the self-check must be told, gathered by an adapter that knows where it all lives. */
 export interface DaemonHealthSnapshot {
@@ -33,11 +38,23 @@ export interface SessionHealthInventory {
 }
 
 /**
+ * One walk of the session directories.
+ *
+ * A check takes ONE and hands it to every stage that needs to know which sessions are on disk — the
+ * consistency pass and the exit observer each used to walk the whole state home for themselves, on
+ * every tick, which on a large fleet behind endpoint security is most of what a tick costs.
+ */
+export interface SessionSurveyPort {
+  survey(): Promise<readonly SurveyedSession[]>;
+}
+
+/**
  * Reconciling the disposable index against the authoritative session directories. `deep` asks it to
- * re-verify per-session state rather than only compare membership.
+ * re-verify per-session state rather than only compare membership; `survey` is this check's walk of
+ * the directories, so the pass compares against it rather than taking its own.
  */
 export interface ConsistencyPassPort {
-  run(deep: boolean): Promise<IncoherencePass>;
+  run(deep: boolean, survey: readonly SurveyedSession[]): Promise<IncoherencePass>;
 }
 
 /** The two repairs a self-check is allowed to perform. Both must be safe to run on a healthy fleet. */
@@ -53,8 +70,11 @@ export interface SessionHealthRepairPort {
  * may kill or launch anything — the whole pass must be free to run on a timer.
  */
 export interface SessionExitPort {
-  /** Sessions whose status claims a live agent while their registered pane is proven dead or gone. */
-  observe(): Promise<readonly SessionExitObservation[]>;
+  /**
+   * Sessions whose status claims a live agent while their registered pane is proven dead or gone,
+   * looked for among the sessions this check's `survey` found on disk.
+   */
+  observe(survey: readonly SurveyedSession[]): Promise<readonly SessionExitObservation[]>;
   /**
    * Records the transition, but only if the session still reads as it was observed. Resolves false
    * when anything moved in between — a resume that relaunched it wins, and is left alone.
@@ -68,6 +88,7 @@ export interface SessionHealthEventSink {
 
 export interface SessionHealthPorts {
   readonly inventory: SessionHealthInventory;
+  readonly survey: SessionSurveyPort;
   readonly consistency: ConsistencyPassPort;
   readonly repair: SessionHealthRepairPort;
   readonly exits: SessionExitPort;
@@ -77,6 +98,10 @@ export interface SessionHealthPorts {
   readonly wallClock: { nowMs(): number };
   /** The gap between two ticks is a duration, so it is never read off the wall clock. */
   readonly monotonic: MonotonicClockPort;
+  /** How long the whole event loop was blocked, so a stalled loop is not mistaken for a stuck check. */
+  readonly loop: LoopBlockedClockPort;
+  /** Where each stage of a check is named, so a profile can say which one the time went to. */
+  readonly activities: SelfCheckActivityPort;
   readonly restarts: SelfRestartCoordinator;
   readonly version: string;
 }
@@ -94,6 +119,10 @@ export interface SelfCheckOutcome {
   readonly exited: readonly string[];
 }
 
+type Repairs = Pick<SelfCheckOutcome, 'repaired' | 'failures' | 'wardenRearmed'>;
+
+const NO_REPAIRS: Repairs = { repaired: [], failures: new Map<string, string>(), wardenRearmed: false };
+
 function message(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
@@ -110,19 +139,57 @@ function message(error: unknown): string {
 export class SessionHealthService {
   private selfChecks: SelfCheckLedger = emptySelfCheckLedger;
   private incoherence: IncoherenceLedger = emptyIncoherenceLedger;
+  /** The check in flight, if one is: what a tick that fires before it finishes measures and skips. */
+  private running: RunningSelfCheck | undefined;
 
   constructor(
     private readonly ports: SessionHealthPorts,
     private readonly settings: SessionHealthSettings,
   ) {}
 
+  /**
+   * One firing of the timer: a check, or — while the previous check is still running — a skip.
+   *
+   * Overlapping checks are never started. They would queue behind the same exclusive storage lock and
+   * the same tmux server as the check they overlap, so a slow host would only pile more of the slowest
+   * work onto itself. A skip resolves `undefined`; what it measured is in the ledger.
+   */
+  async tick(): Promise<SelfCheckOutcome | undefined> {
+    const running = this.running;
+    if (running === undefined) return await this.selfCheck();
+    await this.ports.activities.run('self-check skipped', async () => await this.skip(running));
+    return undefined;
+  }
+
+  /**
+   * One check, run as the activity `self-check` with each stage named inside it, so a profile of a
+   * slow check names the stage — the index read, the walk, the consistency pass, the exit observer or
+   * the repairs — rather than only the check around them.
+   */
   async selfCheck(): Promise<SelfCheckOutcome> {
-    const snapshot = await this.ports.inventory.observe();
+    const since = this.reading();
+    this.running = { since, counted: false };
+    try {
+      return await this.ports.activities.run('self-check', async () => await this.check(since));
+    } finally {
+      // A check that overlapped this one — only ever a direct call, never the timer — owns the record.
+      if (this.running?.since === since) this.running = undefined;
+    }
+  }
+
+  private async check(since: SelfCheckTick): Promise<SelfCheckOutcome> {
+    const stage = this.ports.activities;
+    const snapshot = await stage.run('inventory', async () => await this.ports.inventory.observe());
+    if (this.running?.since === since)
+      this.running = { ...this.running, monitors: snapshot.sessions.filter(session => session.monitored).length };
     const nowMs = this.ports.wallClock.nowMs();
     const planned = planSelfCheck(
       this.selfChecks,
       {
-        tick: { elapsedMs: this.ports.monotonic.elapsedMs(), at: this.ports.clock.now() },
+        // Read AFTER the index, never at `since`: a tick skipped while this check waited on the index
+        // has moved the baseline past `since`, and a reading behind the baseline reads as a broken
+        // clock — an `unknown` verdict and a needless deep pass.
+        tick: this.reading(),
         nowMs,
         sessions: snapshot.sessions,
         sweep: snapshot.sweep,
@@ -134,15 +201,54 @@ export class SessionHealthService {
     );
     this.selfChecks = planned.ledger;
     for (const event of planned.plan.events) await this.emit(event);
+    // ONE walk of the session directories serves the consistency pass and the exit observer. A walk
+    // that failed proves nothing either would have read from it, so both are skipped exactly as if
+    // each had failed its own — the next tick, at most one interval away, walks again.
+    const survey = await stage.run('survey', async () => await this.ports.survey.survey().catch(() => undefined));
     // The consistency pass runs before repair: starting a monitor for a session the index does not
     // know about would write its observations into a row that is about to be replaced.
-    const escalated = await this.reconcile(planned.plan.deepPass, nowMs);
+    const escalated = await stage.run(
+      'reconcile',
+      async () => await this.reconcile(planned.plan.deepPass, nowMs, survey),
+    );
     // After the consistency pass for the same reason repair is: a row about to be replaced is not
     // one to write a terminal status into.
-    const exited = await this.settleExits();
+    const exited = await stage.run('exit observer', async () => await this.settleExits(survey));
+    // Named only when there is something to repair, so a healthy tick adds no empty stage to a profile.
+    const repairs =
+      planned.plan.startMonitors.length === 0 && !planned.plan.rearmWarden
+        ? NO_REPAIRS
+        : await stage.run('repair', async () => await this.repair(planned.plan));
+    return { plan: planned.plan, ...repairs, escalated, exited };
+  }
+
+  /**
+   * Measures the check still running when the timer fired, and moves the gap baseline past this tick.
+   * A check stuck long enough to be a wedge is counted once, here, because it cannot count itself.
+   */
+  private async skip(running: RunningSelfCheck): Promise<void> {
+    const recorded = recordSkippedTick(this.selfChecks, { tick: this.reading(), running }, this.settings);
+    this.selfChecks = recorded.ledger;
+    if (recorded.verdict === undefined) return;
+    if (this.running?.since === running.since) this.running = { ...this.running, counted: true };
+    const event = wedgeEvent(recorded.verdict, running.monitors);
+    if (event !== undefined) await this.emit(event);
+  }
+
+  /** Where the self-check timer is now: monotonic and loop-blocked readings for gaps, a wall instant to report. */
+  private reading(): SelfCheckTick {
+    return {
+      elapsedMs: this.ports.monotonic.elapsedMs(),
+      at: this.ports.clock.now(),
+      loopBlockedMs: this.ports.loop.blockedMs(),
+    };
+  }
+
+  /** Each repair inside its own boundary, so one session that refuses cannot abandon the rest. */
+  private async repair(plan: SelfCheckPlan): Promise<Repairs> {
     const repaired: string[] = [];
     const failures = new Map<string, string>();
-    for (const id of planned.plan.startMonitors) {
+    for (const id of plan.startMonitors) {
       try {
         await this.ports.repair.startMonitor(id);
         repaired.push(id);
@@ -150,15 +256,8 @@ export class SessionHealthService {
         failures.set(id, message(error));
       }
     }
-    const wardenRearmed = planned.plan.rearmWarden ? await this.rearmWarden() : false;
-    return {
-      plan: planned.plan,
-      repaired,
-      failures: failures as ReadonlyMap<string, string>,
-      wardenRearmed,
-      escalated,
-      exited,
-    };
+    const wardenRearmed = plan.rearmWarden ? await this.rearmWarden() : false;
+    return { repaired, failures: failures as ReadonlyMap<string, string>, wardenRearmed };
   }
 
   /** The health surface. Reports the ledgers this service maintains, never a fresh probe. */
@@ -177,8 +276,13 @@ export class SessionHealthService {
     });
   }
 
-  private async reconcile(deep: boolean, nowMs: number): Promise<boolean> {
-    const pass = await this.ports.consistency.run(deep).catch(() => undefined);
+  private async reconcile(
+    deep: boolean,
+    nowMs: number,
+    survey: readonly SurveyedSession[] | undefined,
+  ): Promise<boolean> {
+    const pass =
+      survey === undefined ? undefined : await this.ports.consistency.run(deep, survey).catch(() => undefined);
     // A consistency pass that could not run proves nothing about the index, so it must not advance
     // the streak that ends in a restart — an unreachable store would otherwise restart the daemon.
     if (pass === undefined) return false;
@@ -202,8 +306,9 @@ export class SessionHealthService {
    * leave every other exited session reading `running`. A pass that could not observe at all is
    * simply retried by the next tick, which is at most one interval away.
    */
-  private async settleExits(): Promise<readonly string[]> {
-    const observed = await this.ports.exits.observe().catch(() => [] as readonly SessionExitObservation[]);
+  private async settleExits(survey: readonly SurveyedSession[] | undefined): Promise<readonly string[]> {
+    if (survey === undefined) return [];
+    const observed = await this.ports.exits.observe(survey).catch(() => [] as readonly SessionExitObservation[]);
     const exited: string[] = [];
     for (const observation of observed) {
       const transition = exitedSessionTransition(observation);

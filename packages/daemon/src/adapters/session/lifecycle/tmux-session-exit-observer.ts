@@ -7,6 +7,7 @@ import {
   type SessionPaneExit,
 } from '../../../lib/session/health/exit.ts';
 import type { SessionExitPort } from '../../../lib/session/health/service.ts';
+import type { SurveyedSession } from '../../../lib/session/health/types.ts';
 import type { RegisteredTerminalPane } from '../../../lib/session/reap.ts';
 import { parseSessionId, type SessionId } from '../../../lib/session-id.ts';
 import {
@@ -125,10 +126,17 @@ export class TmuxSessionExitObserver implements SessionExitPort {
   /** Pane identity → consecutive ticks it has been dead with no exit status. */
   private readonly missingStatus = new Map<string, number>();
 
-  async observe(): Promise<readonly SessionExitObservation[]> {
+  /** `survey` is the check's own walk of the session directories; without one, the scan takes its own. */
+  async observe(survey?: readonly SurveyedSession[]): Promise<readonly SessionExitObservation[]> {
     if (this.daemonId.length === 0) return [];
     // The tolerant scan: one hand-edited registration must not hide every other exited session.
-    const { registrations } = await this.panes.scan(this.daemonId);
+    const { registrations } =
+      survey === undefined
+        ? await this.panes.scan(this.daemonId)
+        : await this.panes.scanSessions(
+            this.daemonId,
+            survey.map(session => session.id),
+          );
     const observed: SessionExitObservation[] = [];
     const stillMissing = new Set<string>();
     for (const registration of registrations) {

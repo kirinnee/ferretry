@@ -17,6 +17,7 @@ import {
   AutoResumeService,
   createFoundationPaths,
   type ExitedSessionTransition,
+  parseSessionId,
   type ResumeTarget,
   resolveStateHome,
   type SessionExitObservation,
@@ -179,16 +180,24 @@ describe('boot exit recorder', () => {
   const failed: ExitedSessionTransition = { status: 'failed', health: 'unknown', reason: 'gone' };
   const completed: ExitedSessionTransition = { status: 'completed', health: 'idle', reason: 'done', exitCode: 0 };
 
+  const SURVEY = [{ id: parseSessionId('a'), journalLost: false }];
+  /** Every survey the inner port was handed: the recorder must pass the check's own walk through. */
+  const surveys: unknown[] = [];
+
   function recorder(settled: (id: string) => boolean) {
     const inner: SessionExitPort = {
-      observe: async () => [observation('a', 'running', 'gone')],
+      observe: async survey => {
+        surveys.push(survey);
+        return [observation('a', 'running', 'gone')];
+      },
       settle: async o => settled(o.id),
     };
     return new BootExitRecorder(inner, { now: () => NOW });
   }
 
   it('should pass observation through to the real port', async () => {
-    should(await recorder(() => true).observe()).deepEqual([observation('a', 'running', 'gone')]);
+    should(await recorder(() => true).observe(SURVEY)).deepEqual([observation('a', 'running', 'gone')]);
+    should(surveys).deepEqual([SURVEY]);
   });
 
   it('should record only a settled gone failure, with the status it claimed', async () => {
@@ -310,7 +319,7 @@ describe('a host restart, end to end', () => {
     );
 
     // The first self-check after boot sees every terminal gone and settles the running claims.
-    for (const observed of await exits.observe()) {
+    for (const observed of await exits.observe([])) {
       const settled = machine.sessions.get(observed.id);
       if (settled !== undefined)
         await exits.settle(observed, { status: 'failed', health: 'unknown', reason: 'its terminal is gone' });

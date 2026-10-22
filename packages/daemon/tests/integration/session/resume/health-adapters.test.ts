@@ -328,6 +328,48 @@ describe('storage consistency pass', () => {
     await opened.storage.close();
   });
 
+  it('should name the zombie scan, the reindex and its verification as stages of a deep pass', async () => {
+    // Arrange
+    const home = await temporaryHome();
+    const opened = await openStorage(home);
+    await opened.storage.writeState(parseSessionId('known'), { id: 'known', status: 'running' });
+    const stages: string[] = [];
+    const pass = new StorageConsistencyPass(opened.storage, new StateFileSystem(paths(home)), paths(home), SETTINGS, {
+      run: async (name, work) => {
+        stages.push(name);
+        return await work();
+      },
+    });
+
+    // Act
+    await pass.run(true);
+    const deep = [...stages];
+    stages.length = 0;
+    await pass.run(false);
+
+    // Assert — a shallow pass over a coherent fleet has no stage worth naming.
+    should(deep).deepEqual(['zombies', 'reindex', 'verify']);
+    should(stages).deepEqual([]);
+    await opened.storage.close();
+  });
+
+  it('should compare the index against the walk it is handed rather than taking its own', async () => {
+    // Arrange — the session is on disk and indexed; only the handed walk says otherwise.
+    const home = await temporaryHome();
+    const opened = await openStorage(home);
+    await opened.storage.writeState(parseSessionId('known'), { id: 'known', status: 'running' });
+    const pass = new StorageConsistencyPass(opened.storage, new StateFileSystem(paths(home)), paths(home), SETTINGS);
+
+    // Act
+    const handed = await pass.run(false, []);
+    const own = await pass.run(false, await opened.storage.surveySessionDirectories());
+
+    // Assert
+    should(handed.staleRows).deepEqual(['known']);
+    should(own.staleRows).deepEqual([]);
+    await opened.storage.close();
+  });
+
   it('should not look for zombies on a shallow pass', async () => {
     // Arrange
     const home = await temporaryHome();

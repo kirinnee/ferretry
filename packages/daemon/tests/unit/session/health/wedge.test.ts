@@ -5,10 +5,11 @@ import {
   defaultSessionHealthSettings,
   emptySelfCheckLedger,
   parseSessionHealthSettings,
-  sessionHealthSettingsAt,
   recordSelfCheckTick,
-  wedgeEvent,
+  recordSkippedTick,
   type SelfCheckLedger,
+  sessionHealthSettingsAt,
+  wedgeEvent,
 } from '../../../../src/lib/session/health/index.ts';
 
 const SETTINGS = defaultSessionHealthSettings;
@@ -134,6 +135,79 @@ describe('self-check wedge detection', () => {
   });
 });
 
+describe('a self-check tick the whole event loop delayed', () => {
+  it('should not call a gap the blocked loop explains a wedge, and run no deep pass for it', () => {
+    // Arrange — the 17.7 s Mac shape: the loop was blocked for most of a long gap.
+    const previous = ledger({ lastLoopBlockedMs: 5_000 });
+    const gap = SETTINGS.wedgeGapMs + 60_000;
+
+    // Act
+    const actual = classifySelfCheckTick(
+      previous,
+      { elapsedMs: 1_000_000 + gap, at: AT, loopBlockedMs: 5_000 + gap - SETTINGS.selfCheckIntervalMs },
+      SETTINGS,
+    );
+
+    // Assert — still reported as lag, never as a wedge.
+    should(actual).deepEqual({
+      freshness: 'fresh',
+      gapMs: gap,
+      lagMs: gap - SETTINGS.selfCheckIntervalMs,
+      deepPass: false,
+      since: undefined,
+    });
+  });
+
+  it('should still call the part of a gap the blocked loop does not explain a wedge', () => {
+    // Arrange — the loop was blocked for a minute, but the check stopped happening for longer.
+    const previous = ledger({ lastLoopBlockedMs: 0 });
+
+    // Act
+    const actual = classifySelfCheckTick(
+      previous,
+      { elapsedMs: 1_000_000 + SETTINGS.wedgeGapMs + 60_000, at: AT, loopBlockedMs: 60_000 },
+      SETTINGS,
+    );
+    const short = classifySelfCheckTick(
+      previous,
+      { elapsedMs: 1_000_000 + SETTINGS.wedgeGapMs + 60_000, at: AT, loopBlockedMs: 60_001 },
+      SETTINGS,
+    );
+
+    // Assert
+    should(actual).match({ freshness: 'wedged', deepPass: true });
+    should(short.freshness).equal('fresh');
+  });
+
+  it('should count the whole gap when the loop reading cannot be trusted', () => {
+    // Arrange
+    const gap = { elapsedMs: 1_000_000 + SETTINGS.wedgeGapMs, at: AT };
+
+    // Act — no meter at all, a meter that went backwards, and a meter with no earlier reading.
+    const actual = [
+      classifySelfCheckTick(ledger({ lastLoopBlockedMs: 0 }), gap, SETTINGS),
+      classifySelfCheckTick(ledger({ lastLoopBlockedMs: 9_000_000 }), { ...gap, loopBlockedMs: 0 }, SETTINGS),
+      classifySelfCheckTick(ledger(), { ...gap, loopBlockedMs: SETTINGS.wedgeGapMs }, SETTINGS),
+    ];
+
+    // Assert
+    should(actual.map(verdict => verdict.freshness)).deepEqual(['wedged', 'wedged', 'wedged']);
+  });
+
+  it('should carry the loop reading forward with the tick, and drop one it cannot use', () => {
+    // Arrange / Act
+    const usable = recordSelfCheckTick(ledger(), { elapsedMs: 1_060_000, at: AT, loopBlockedMs: 42 }, SETTINGS);
+    const broken = recordSelfCheckTick(
+      ledger({ lastLoopBlockedMs: 42 }),
+      { elapsedMs: 1_060_000, at: AT, loopBlockedMs: Number.NaN },
+      SETTINGS,
+    );
+
+    // Assert
+    should([usable.ledger.lastLoopBlockedMs, broken.ledger.lastLoopBlockedMs]).deepEqual([42, undefined]);
+  });
+});
+
 describe('self-check ledger', () => {
   it('should count only proven wedges and carry the newest readings forward', () => {
     // Arrange
@@ -147,10 +221,24 @@ describe('self-check ledger', () => {
       ticks: 2,
       wedges: 3,
       lastElapsedMs: 1_000_000 + SETTINGS.wedgeGapMs,
+      lastLoopBlockedMs: undefined,
       lastAt: AT,
       lastFreshness: 'wedged',
       eventLoopLagMs: SETTINGS.wedgeGapMs - SETTINGS.selfCheckIntervalMs,
+      deepPassOwed: false,
     });
+  });
+
+  it('should take the deep pass a stuck check owed on an otherwise on-time tick, and then owe nothing', () => {
+    // Arrange
+    const previous = ledger({ deepPassOwed: true });
+
+    // Act
+    const actual = recordSelfCheckTick(previous, { elapsedMs: 1_060_000, at: AT }, SETTINGS);
+
+    // Assert
+    should(actual.verdict).match({ freshness: 'fresh', deepPass: true });
+    should(actual.ledger.deepPassOwed).be.false();
   });
 
   it('should not count an unknown tick as a wedge', () => {
@@ -191,7 +279,146 @@ describe('self-check ledger', () => {
   });
 });
 
+describe('skipped self-check tick', () => {
+  const SINCE = { elapsedMs: 1_000_000, at: AT };
+
+  it('should move the gap baseline without counting a tick, so the skip is never read as late', () => {
+    // Arrange
+    const previous = ledger();
+
+    // Act
+    const actual = recordSkippedTick(
+      previous,
+      { tick: { elapsedMs: 1_060_000, at: AT }, running: { since: SINCE, counted: false } },
+      SETTINGS,
+    );
+
+    // Assert
+    should(actual.verdict).be.undefined();
+    should(actual.ledger).deepEqual({ ...previous, lastElapsedMs: 1_060_000 });
+  });
+
+  it('should count a check running for the wedge threshold as one wedge dated from when it began', () => {
+    // Arrange
+    const previous = ledger({ wedges: 2 });
+
+    // Act
+    const actual = recordSkippedTick(
+      previous,
+      { tick: { elapsedMs: 1_000_000 + SETTINGS.wedgeGapMs, at: 'later' }, running: { since: SINCE, counted: false } },
+      SETTINGS,
+    );
+
+    // Assert
+    should(actual.verdict).deepEqual({
+      freshness: 'wedged',
+      gapMs: SETTINGS.wedgeGapMs,
+      lagMs: SETTINGS.wedgeGapMs - SETTINGS.selfCheckIntervalMs,
+      deepPass: true,
+      since: AT,
+    });
+    should(actual.ledger).match({
+      ticks: 1,
+      wedges: 3,
+      lastElapsedMs: 1_000_000 + SETTINGS.wedgeGapMs,
+      lastFreshness: 'wedged',
+      deepPassOwed: true,
+    });
+  });
+
+  it('should count a stuck check once, however many ticks it spans', () => {
+    // Arrange
+    const previous = ledger({ wedges: 1, lastFreshness: 'wedged', deepPassOwed: true });
+
+    // Act
+    const actual = recordSkippedTick(
+      previous,
+      { tick: { elapsedMs: 1_000_000 + 2 * SETTINGS.wedgeGapMs, at: AT }, running: { since: SINCE, counted: true } },
+      SETTINGS,
+    );
+
+    // Assert
+    should(actual.verdict).be.undefined();
+    should(actual.ledger.wedges).equal(1);
+    should(actual.ledger.lastElapsedMs).equal(1_000_000 + 2 * SETTINGS.wedgeGapMs);
+  });
+
+  it('should prove nothing from readings it cannot trust, and keep the last usable baseline', () => {
+    // Arrange
+    const previous = ledger();
+    const late = 1_000_000 + 10 * SETTINGS.wedgeGapMs;
+
+    // Act
+    const brokenTick = recordSkippedTick(
+      previous,
+      { tick: { elapsedMs: Number.NaN, at: AT }, running: { since: SINCE, counted: false } },
+      SETTINGS,
+    );
+    const brokenStart = recordSkippedTick(
+      previous,
+      { tick: { elapsedMs: late, at: AT }, running: { since: { elapsedMs: Number.NaN, at: AT }, counted: false } },
+      SETTINGS,
+    );
+
+    // Assert
+    should([brokenTick.verdict, brokenStart.verdict]).deepEqual([undefined, undefined]);
+    should(brokenTick.ledger).deepEqual(previous);
+    should(brokenStart.ledger).deepEqual({ ...previous, lastElapsedMs: late });
+  });
+
+  it('should leave the start out of a stuck check whose start instant is unusable', () => {
+    // Arrange / Act
+    const actual = recordSkippedTick(
+      ledger(),
+      {
+        tick: { elapsedMs: 1_000_000 + SETTINGS.wedgeGapMs, at: AT },
+        running: { since: { elapsedMs: 1_000_000, at: 'nope' }, counted: false },
+      },
+      SETTINGS,
+    );
+
+    // Assert
+    should(actual.verdict?.since).be.undefined();
+  });
+});
+
+describe('a stuck check the whole event loop delayed', () => {
+  it('should not count the time the loop was blocked as time the check was stuck', () => {
+    // Arrange
+    const since = { elapsedMs: 1_000_000, at: AT, loopBlockedMs: 0 };
+    const tick = { elapsedMs: 1_000_000 + SETTINGS.wedgeGapMs, at: AT };
+
+    // Act
+    const blocked = recordSkippedTick(
+      ledger(),
+      { tick: { ...tick, loopBlockedMs: 1 }, running: { since, counted: false } },
+      SETTINGS,
+    );
+    const free = recordSkippedTick(
+      ledger(),
+      { tick: { ...tick, loopBlockedMs: 0 }, running: { since, counted: false } },
+      SETTINGS,
+    );
+
+    // Assert
+    should(blocked.verdict).be.undefined();
+    should(blocked.ledger.lastLoopBlockedMs).equal(1);
+    should(free.verdict?.freshness).equal('wedged');
+  });
+});
+
 describe('wedge event', () => {
+  it('should leave out a monitor count nobody measured', () => {
+    // Arrange
+    const verdict = classifySelfCheckTick(ledger(), { elapsedMs: 1_000_000 + 200_000, at: AT }, SETTINGS);
+
+    // Act
+    const actual = wedgeEvent(verdict, undefined);
+
+    // Assert
+    should(actual?.data).not.have.property('monitors');
+  });
+
   it('should describe a measured wedge in operator-facing seconds', () => {
     // Arrange
     const verdict = classifySelfCheckTick(ledger(), { elapsedMs: 1_000_000 + 200_000, at: AT }, SETTINGS);

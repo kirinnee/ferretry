@@ -26,11 +26,12 @@ import {
   defaultSessionLifecycleSettings,
   parseSessionId,
   SelfRestartCoordinator,
-  SessionHealthService,
   type SessionExitObservation,
+  SessionHealthService,
   type SessionId,
   type TmuxCommandPort,
   TmuxController,
+  UNNAMED_SELF_CHECK_STAGES,
 } from '../../../../src/lib/index.ts';
 
 /**
@@ -169,12 +170,15 @@ function selfCheck(subject: ExitFixture): SessionHealthService {
       consistency: {
         run: async () => ({ missingFromIndex: [], staleRows: [], zombies: [], repaired: [], unhealable: [] }),
       },
+      survey: { survey: async () => await subject.storage.surveySessionDirectories() },
       repair: { startMonitor: async () => undefined, rearmWarden: async () => undefined },
+      activities: UNNAMED_SELF_CHECK_STAGES,
       exits: observer(subject),
       events: { emit: async () => undefined },
       clock: { now: () => NOW },
       wallClock: { nowMs: () => Date.parse(NOW) },
       monotonic: { elapsedMs: () => 0 },
+      loop: { blockedMs: () => 0 },
       restarts: new SelfRestartCoordinator(
         { read: async () => undefined, write: async () => undefined, clear: async () => undefined },
         { restart: async () => false },
@@ -329,6 +333,24 @@ describe('tmux session exit observer', () => {
 
     // Assert
     should([alive, launching, stopped]).deepEqual([[], [], []]);
+  }, 20_000);
+
+  it('should look for exits only among the sessions the check’s own survey found', async () => {
+    // Arrange — the pane-exit answer is fixed, so the only thing deciding the outcome is the survey.
+    const subject = await fixture(1);
+    await exitHarness(subject);
+    const dead = observer(
+      subject,
+      metadataAnswers(subject, () => ({ code: 0, stdout: '1|1|' })),
+    );
+
+    // Act
+    const surveyed = await dead.observe(await subject.storage.surveySessionDirectories());
+    const unsurveyed = await dead.observe([]);
+
+    // Assert
+    should(surveyed.map(observation => observation.id)).deepEqual([subject.id]);
+    should(unsurveyed).deepEqual([]);
   }, 20_000);
 
   it('should refuse to settle once the pane was re-registered, the status moved, or a launch began', async () => {

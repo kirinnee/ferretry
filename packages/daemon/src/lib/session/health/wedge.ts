@@ -1,15 +1,23 @@
 import { instantMs, isoFromMs } from '../../warden/time.ts';
 import type { SessionHealthSettings } from './settings.ts';
-import type { SelfCheckLedger, SelfCheckTick, SelfCheckVerdict, SessionHealthEvent } from './types.ts';
+import type {
+  RunningSelfCheck,
+  SelfCheckLedger,
+  SelfCheckTick,
+  SelfCheckVerdict,
+  SessionHealthEvent,
+} from './types.ts';
 
 /** A ledger that has seen nothing. Exported as a value so no caller has to know its shape. */
 export const emptySelfCheckLedger: SelfCheckLedger = {
   ticks: 0,
   wedges: 0,
   lastElapsedMs: undefined,
+  lastLoopBlockedMs: undefined,
   lastAt: undefined,
   lastFreshness: undefined,
   eventLoopLagMs: 0,
+  deepPassOwed: false,
 };
 
 function usableReading(value: number | undefined): value is number {
@@ -17,14 +25,34 @@ function usableReading(value: number | undefined): value is number {
 }
 
 /**
+ * How long the whole event loop was blocked between two readings of the lag meter.
+ *
+ * Zero whenever that cannot be shown — no meter, a broken reading, a total that went backwards —
+ * which leaves the whole gap counting toward a wedge: the wall-time rule this measurement refines,
+ * and the suspicious direction. The meter reads the wall clock and the gap the monotonic one, so a
+ * wall-clock step during a window can hide up to its own size of a real gap, never more.
+ */
+function loopBlockedBetween(from: number | undefined, to: number | undefined): number {
+  return usableReading(from) && usableReading(to) && to >= from ? to - from : 0;
+}
+
+/**
  * Decides how late a self-check tick was, and therefore whether the daemon's picture of the fleet
  * can still be trusted.
  *
  * Three outcomes are deliberately distinct. `fresh` is a proven on-time tick. `wedged` is a proven
- * multi-interval gap — the event loop stopped running and every belief the daemon holds is now
- * unverified. `unknown` is everything the daemon CANNOT prove either way: a monotonic reading that
- * went backwards or arrived non-finite, which means the clock source is broken rather than that the
- * daemon is healthy.
+ * multi-interval gap that a blocked event loop does NOT explain — the check itself stopped happening,
+ * and every belief the daemon holds is now unverified. `unknown` is everything the daemon CANNOT prove
+ * either way: a monotonic reading that went backwards or arrived non-finite, which means the clock
+ * source is broken rather than that the daemon is healthy.
+ *
+ * A BLOCKED LOOP IS NOT A WEDGE OF THE SELF-CHECK. Lateness was read off the gap alone, so a loop
+ * stalled by other work made the tick late, the late tick ran the deep pass, and the deep pass — the
+ * heaviest check there is — stalled the loop again: on a large Mac fleet, a 17.7 s check every tick.
+ * The lag meter measures how long the whole loop could run nothing, and that much of the gap is
+ * subtracted before it is compared with the threshold. The stall itself is still journalled, by the
+ * meter, against the work that caused it; and the shallow pass still compares the index with the
+ * directories on every tick, so drift after a stall is still found and repaired.
  *
  * The safe direction here is toward suspicion. The action a non-fresh tick triggers is a consistency
  * pass — reading state and repairing the index — which costs IO and disturbs no running agent. The
@@ -46,13 +74,14 @@ export function classifySelfCheckTick(
     return { freshness: 'unknown', gapMs: undefined, lagMs: 0, deepPass: true, since: undefined };
   const gapMs = tick.elapsedMs - previous;
   const lagMs = Math.max(0, gapMs - settings.selfCheckIntervalMs);
-  const wedged = gapMs >= settings.wedgeGapMs;
+  const wedged = gapMs - loopBlockedBetween(ledger.lastLoopBlockedMs, tick.loopBlockedMs) >= settings.wedgeGapMs;
   const startedAtMs = instantMs(tick.at);
   return {
     freshness: wedged ? 'wedged' : 'fresh',
     gapMs,
     lagMs,
-    deepPass: wedged,
+    // An on-time tick still owes the deep pass that a check measured stuck while running never ran.
+    deepPass: wedged || ledger.deepPassOwed,
     // Reported only when the wall instant itself parsed: a fabricated `since` is worse than none.
     since: wedged && startedAtMs !== undefined ? isoFromMs(startedAtMs - gapMs) : undefined,
   };
@@ -73,22 +102,73 @@ export function recordSelfCheckTick(
       // A reading that is not usable must not become the baseline for the NEXT gap, or one broken
       // sample poisons every measurement after it.
       lastElapsedMs: usableReading(tick.elapsedMs) ? tick.elapsedMs : ledger.lastElapsedMs,
+      // Not carried over when unusable: the next window then counts its whole gap, the safe direction.
+      lastLoopBlockedMs: usableReading(tick.loopBlockedMs) ? tick.loopBlockedMs : undefined,
       lastAt: instantMs(tick.at) === undefined ? ledger.lastAt : tick.at,
       lastFreshness: verdict.freshness,
       eventLoopLagMs: verdict.lagMs,
+      // Every verdict above that owed one runs the deep pass, so the debt is paid by this tick.
+      deepPassOwed: false,
     },
   };
 }
 
+/**
+ * Folds in a tick the timer fired while the previous check was still running — one the caller skips.
+ *
+ * A SKIP IS NOT A LATE TICK. The timer fired on time; it was the work that had not finished. So the
+ * skip moves the gap baseline exactly as a completed tick would, and the next check measures its
+ * lateness from here. Leaving the baseline behind would make every slow check read as late, and three
+ * slow ones as a wedge — and the wedge's deep pass is the slowest check there is, so a slow host would
+ * feed itself.
+ *
+ * A CHECK THAT NEVER FINISHES IS STILL A WEDGE, the one the detector exists for, and it cannot report
+ * itself. So the skip measures it: once the running check is as old as the wedge threshold, this
+ * counts ONE wedge for it, dated from when it began, and owes the deep pass to the next check that
+ * runs. Its age is measured like every gap here: on the monotonic clock, less the time the whole loop
+ * was blocked. A reading that cannot be trusted proves nothing either way and counts nothing.
+ */
+export function recordSkippedTick(
+  ledger: SelfCheckLedger,
+  skip: { readonly tick: SelfCheckTick; readonly running: RunningSelfCheck },
+  settings: SessionHealthSettings,
+): { readonly ledger: SelfCheckLedger; readonly verdict: SelfCheckVerdict | undefined } {
+  const { tick, running } = skip;
+  const baseline: SelfCheckLedger = {
+    ...ledger,
+    lastElapsedMs: usableReading(tick.elapsedMs) ? tick.elapsedMs : ledger.lastElapsedMs,
+    // Paired with the gap baseline, and dropped rather than carried over when it cannot be used.
+    lastLoopBlockedMs: usableReading(tick.loopBlockedMs) ? tick.loopBlockedMs : undefined,
+  };
+  if (running.counted || !usableReading(tick.elapsedMs) || !usableReading(running.since.elapsedMs))
+    return { ledger: baseline, verdict: undefined };
+  const runningMs = tick.elapsedMs - running.since.elapsedMs;
+  // Measured like a gap: time the whole loop was blocked is not time this check was stuck.
+  const stuckMs = runningMs - loopBlockedBetween(running.since.loopBlockedMs, tick.loopBlockedMs);
+  if (stuckMs < settings.wedgeGapMs) return { ledger: baseline, verdict: undefined };
+  const verdict: SelfCheckVerdict = {
+    freshness: 'wedged',
+    gapMs: runningMs,
+    lagMs: runningMs - settings.selfCheckIntervalMs,
+    deepPass: true,
+    since: instantMs(running.since.at) === undefined ? undefined : running.since.at,
+  };
+  return {
+    verdict,
+    ledger: { ...baseline, wedges: ledger.wedges + 1, lastFreshness: 'wedged', deepPassOwed: true },
+  };
+}
+
 /** The operator-facing record of a measured wedge. Only a proven gap produces one. */
-export function wedgeEvent(verdict: SelfCheckVerdict, monitors: number): SessionHealthEvent | undefined {
+export function wedgeEvent(verdict: SelfCheckVerdict, monitors: number | undefined): SessionHealthEvent | undefined {
   if (verdict.freshness !== 'wedged' || verdict.gapMs === undefined) return undefined;
   return {
     type: 'fleet.daemon_wedge',
     data: {
       gapSeconds: Math.round(verdict.gapMs / 1000),
       lagMs: verdict.lagMs,
-      monitors,
+      // Unknown only for a check stuck before it read the index; a guessed count would be a fabrication.
+      ...(monitors === undefined ? {} : { monitors }),
       ...(verdict.since === undefined ? {} : { since: verdict.since }),
     },
   };

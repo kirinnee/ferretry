@@ -15,6 +15,7 @@ import {
 } from '../../../src/lib/session/conversation-lease.ts';
 import type { SessionExitObservation } from '../../../src/lib/session/health/exit.ts';
 import type { SessionExitPort } from '../../../src/lib/session/health/service.ts';
+import { parseSessionId } from '../../../src/lib/session-id.ts';
 
 const SESSION = 'ms8-abcd1234';
 const HOLDER = 'ms8-holder01';
@@ -216,8 +217,17 @@ const TRANSITION = {
 } as const;
 
 describe('LeaseReleasingSessionExits', () => {
+  /** Every survey the wrapped port was handed: the decorator must pass the check's own walk through. */
+  const surveys: unknown[] = [];
+
   function exits(settled: boolean): SessionExitPort {
-    return { observe: async () => [OBSERVATION], settle: async () => settled };
+    return {
+      observe: async survey => {
+        surveys.push(survey);
+        return [OBSERVATION];
+      },
+      settle: async () => settled,
+    };
   }
 
   it('should release what an exited session held once its exit settles', async () => {
@@ -226,11 +236,13 @@ describe('LeaseReleasingSessionExits', () => {
     const subject = new LeaseReleasingSessionExits(exits(true), { release: async id => void released.push(id) });
 
     // Act
-    const observed = await subject.observe();
+    const survey = [{ id: parseSessionId(SESSION), journalLost: false }];
+    const observed = await subject.observe(survey);
     const settled = await subject.settle(OBSERVATION, TRANSITION);
 
     // Assert
     should(observed).eql([OBSERVATION]);
+    should(surveys.at(-1)).equal(survey);
     should(settled).be.true();
     should(released).eql([SESSION]);
   });
