@@ -692,3 +692,26 @@ describe('<DictationControl> details of the clean-up call', () => {
     await view.unmount();
   });
 });
+
+describe('<DictationControl> inline engine switch', () => {
+  it('offers Parakeet after a browser take heard speech but returned no words, and writes the choice', async () => {
+    const updates: unknown[] = [];
+    const store = { stt: { update: (patch: unknown) => void updates.push(patch) } } as unknown as AppStore;
+    const provider = promptRecognition();
+    const view = await mount(
+      <StoreProvider store={store}>
+        <DictationControl {...controlProps({ recognition: provider })} />
+      </StoreProvider>,
+    );
+    await openAndBegin(view.container, provider);
+    await interact(() => provider.nomatch());
+    await stop(view.container);
+
+    const offer = [...view.container.querySelectorAll('button')].find(button =>
+      button.textContent?.includes('Use Parakeet'),
+    );
+    await interact(() => must(offer, 'the Use Parakeet button').click());
+    expect(updates).toEqual([{ engine: 'parakeet' }]);
+    await view.unmount();
+  });
+});

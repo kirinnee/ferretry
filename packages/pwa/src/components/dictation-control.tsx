@@ -53,8 +53,8 @@ import {
 } from '../hooks/use-dictation.ts';
 import { browserShortcutHost, type ShortcutHost, useDictationShortcut } from '../hooks/use-dictation-shortcut.ts';
 import { cn } from '../lib/class-names.ts';
-import { useDictationDebugSnapshot } from '../lib/store.tsx';
 import type { DaemonConnection } from '../lib/daemon-connection.ts';
+import { useDictationDebugSnapshot, useSttSettingsStore } from '../lib/store.tsx';
 import type { BrowserRecognitionProvider } from '../lib/stt/browser-recognition.ts';
 import type { SelectionLike } from '../lib/stt/draft.ts';
 import type { MicMeterPort } from '../lib/stt/level-monitor.ts';
@@ -213,6 +213,8 @@ export function useDictationBundle(props: DictationControlProps): DictationBundl
   const [elapsedMs, setElapsedMs] = useState(0);
   const [wasCapturing, setWasCapturing] = useState(false);
   const [detailsFor, setDetailsFor] = useState<string | null>(null);
+  const [retryOnParakeet, setRetryOnParakeet] = useState(false);
+  const sttStore = useSttSettingsStore();
   const debug = useDictationDebugSnapshot();
   const startedAt = useRef(0);
   const nowRef = useRef(now);
@@ -299,6 +301,19 @@ export function useDictationBundle(props: DictationControlProps): DictationBundl
     dictation.dismissError();
     dictation.start();
   }, [dictation]);
+
+  // The inline engine switch: the store write re-renders with the new engine, and only then does the take restart.
+  useEffect(() => {
+    if (!retryOnParakeet || settings.engine !== 'parakeet') return;
+    setRetryOnParakeet(false);
+    beginRecording();
+  }, [beginRecording, retryOnParakeet, settings.engine]);
+
+  const switchToParakeet = useCallback(() => {
+    if (sttStore === null) return;
+    setRetryOnParakeet(true);
+    sttStore.update({ engine: 'parakeet' });
+  }, [sttStore]);
 
   const openAndRecord = useCallback(() => {
     if (effectiveDisabled) return;
@@ -393,6 +408,7 @@ export function useDictationBundle(props: DictationControlProps): DictationBundl
         onDiscard={reset}
         onCancel={reset}
         onRetry={beginRecording}
+        {...(sttStore === null ? {} : { onSwitchEngine: switchToParakeet })}
       />
       {debugRecord !== undefined && detailsFor === debugRecord.id ? (
         <DictationDebugSheet record={debugRecord} onClose={() => setDetailsFor(null)} />

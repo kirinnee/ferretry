@@ -150,7 +150,9 @@ export function dictationFailureCopy(code: string | undefined, engine: StripEngi
     case 'engine-not-chosen':
       return { title: 'Choose a voice engine' };
     case 'bad-audio':
-      return { title: "Didn't catch that", hint: 'No usable audio was captured. Try again.' };
+      return engine === 'browser'
+        ? { title: "Didn't catch that", hint: 'Try again, or switch to Parakeet in Settings › Voice.' }
+        : { title: "Didn't catch that", hint: 'No usable audio was captured. Try again.' };
     default:
       return { title: 'Dictation failed' };
   }
@@ -194,6 +196,8 @@ export interface DictationSheetProps {
   onCancel(): void;
   /** Start over from a fresh recording (empty, error). */
   onRetry(): void;
+  /** Offered beside a browser-voice take that heard speech but returned no words: change engine and record again. */
+  onSwitchEngine?(): void;
 }
 
 /** Every strip action is a 44px square: this panel is used one-handed. */
@@ -315,6 +319,7 @@ export function DictationSheet({
   onDiscard,
   onCancel,
   onRetry,
+  onSwitchEngine,
 }: DictationSheetProps) {
   const baseId = useId();
   const titleId = `${baseId}-title`;
@@ -459,6 +464,14 @@ export function DictationSheet({
             onClick={onDismiss}
           >
             <EyeOff size={15} aria-hidden="true" />
+          </Button>
+        </div>
+      )}
+
+      {stage === 'error' && errorCode === 'bad-audio' && engine === 'browser' && onSwitchEngine !== undefined && (
+        <div className="flex px-2 pb-1.5">
+          <Button type="button" variant="outline" size="sm" className="min-h-[44px]" onClick={onSwitchEngine}>
+            Use Parakeet and record again
           </Button>
         </div>
       )}

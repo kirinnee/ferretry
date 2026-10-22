@@ -172,6 +172,8 @@ export function readBrowserRecognitionSupport(global: BrowserRecognitionGlobalLi
 
 export interface BrowserRecognitionProvider {
   readonly support: BrowserRecognitionSupport;
+  /** True on Android, whose speech service gets its own wording when it returns no words. Absent means no. */
+  readonly android?: boolean;
   create(): SpeechRecognitionLike;
   watchHidden(onHidden: () => void): () => void;
   setTimeout(callback: () => void, milliseconds: number): unknown;
@@ -186,6 +188,7 @@ export function browserRecognitionProvider(
   const Recognition = support.implementation === 'standard' ? global.SpeechRecognition : global.webkitSpeechRecognition;
   return {
     support,
+    android: /Android/u.test(userAgentOf(global)),
     create: () => {
       if (!support.available || Recognition === undefined) {
         throw new BrowserRecognitionError(
@@ -285,6 +288,14 @@ export function browserRecognitionErrorFrom(failure: unknown): BrowserRecognitio
 
 const MAX_BROWSER_DICTATION_MS = 120_000;
 const RECOGNITION_STOP_TIMEOUT_MS = 10_000;
+/**
+ * How long a Stop that ended with speech heard but no words waits for a late `result`. Android Chrome's
+ * speech service is documented to deliver the last hypothesis after, or without, the `end` the page
+ * sees, so "empty at the first `end`" is not yet "nothing was recognised".
+ */
+const LATE_RESULT_GRACE_MS = 1_200;
+/** Once a late result lands, the quiet that must follow before the take settles (more may be on its way). */
+const LATE_RESULT_QUIET_MS = 300;
 
 export interface BrowserRecognitionSessionOptions {
   readonly language?: string;
@@ -316,6 +327,56 @@ const resultAt = (results: SpeechRecognitionResultListLike, index: number): Spee
 const alternativeAt = (result: SpeechRecognitionResultLike): SpeechRecognitionAlternativeLike | null =>
   result[0] ?? result.item?.(0) ?? null;
 
+interface RecognitionChunk {
+  readonly text: string;
+  readonly final: boolean;
+}
+
+const wordsOf = (text: string): string[] =>
+  text
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}'\s]/gu, ' ')
+    .split(/\s+/u)
+    .filter(Boolean);
+
+const startsWithWords = (words: readonly string[], prefix: readonly string[]): boolean =>
+  prefix.length > 0 && prefix.length <= words.length && prefix.every((word, index) => words[index] === word);
+
+/**
+ * Collapse the cumulative re-emission Android Chrome performs: each result repeats everything said so
+ * far, often at a new index and sometimes across a restart. A chunk that restates its predecessor
+ * (a word-wise prefix) replaces it. A lone-word FINAL predecessor is kept only when the next chunk
+ * opens with the whitespace that marks a new segment; everything else is treated as a rewrite.
+ * The whole of what came before is compared too, which catches a restarted cycle replaying it all.
+ */
+export const mergeRecognitionChunks = (chunks: readonly RecognitionChunk[]): string => {
+  const out: RecognitionChunk[] = [];
+  for (const chunk of chunks) {
+    const text = chunk.text.trim();
+    if (!text) continue;
+    const words = wordsOf(text);
+    const earlier = wordsOf(out.map(item => item.text).join(' '));
+    if (earlier.length >= 2 && startsWithWords(words, earlier)) {
+      out.length = 0;
+      out.push({ text, final: chunk.final });
+      continue;
+    }
+    const last = out[out.length - 1];
+    if (last !== undefined) {
+      const lastWords = wordsOf(last.text);
+      // A raw chunk that opens with whitespace is the engine marking a NEW segment, so a lone final
+      // word before it stays: "no" … " no way" are two utterances, "hello" … "hello there" is one.
+      const newSegment = /^\s/u.test(chunk.text);
+      if ((lastWords.length >= 2 || !last.final || !newSegment) && startsWithWords(words, lastWords)) {
+        out[out.length - 1] = { text, final: chunk.final };
+        continue;
+      }
+    }
+    out.push({ text, final: chunk.final });
+  }
+  return joinRecognitionChunks(out.map(item => item.text));
+};
+
 /** Result boundaries already carry whitespace in the spec; trim and join as a defensive fallback. */
 export const joinRecognitionChunks = (chunks: readonly string[]): string =>
   chunks
@@ -338,10 +399,12 @@ export class BrowserRecognitionSession implements BrowserRecognitionSessionLike 
   readonly #recognition: SpeechRecognitionLike;
   readonly #provider: BrowserRecognitionProvider;
   readonly #options: BrowserRecognitionSessionOptions;
-  readonly #segments = new Map<number, string>();
+  readonly #segments = new Map<number, RecognitionChunk>();
   readonly #settled: string[] = [];
   #state: SessionState = 'active';
   #heardSpeech = false;
+  #noMatch = false;
+  #graceTimer: unknown = null;
   #finishPromise: Promise<string> | null = null;
   #resolveFinish: ((text: string) => void) | null = null;
   #rejectFinish: ((failure: BrowserRecognitionError) => void) | null = null;
@@ -366,8 +429,10 @@ export class BrowserRecognitionSession implements BrowserRecognitionSessionLike 
     this.#recognition.onresult = event => this.#onResult(event);
     this.#recognition.onnomatch = () => {
       // Speech happened, but no hypothesis met the engine's threshold. This is
-      // a failed transcription, not an empty microphone.
+      // a failed transcription, not an empty microphone, and the engine has
+      // already said so: there is no late result to wait for.
       this.#heardSpeech = true;
+      this.#noMatch = true;
     };
     this.#recognition.onerror = event => this.#onError(event);
   }
@@ -475,16 +540,25 @@ export class BrowserRecognitionSession implements BrowserRecognitionSessionLike 
       const result = resultAt(event.results, index);
       const transcript = result === null ? '' : alternativeAt(result)?.transcript;
       if (typeof transcript === 'string' && transcript.trim()) {
-        this.#segments.set(index, transcript);
+        this.#segments.set(index, { text: transcript, final: result?.isFinal === true });
         this.#heardSpeech = true;
       }
     }
+    // A result landing in the grace window is the late hypothesis it was waiting for.
+    if (this.#graceTimer !== null && this.#segments.size > 0) this.#armGrace(LATE_RESULT_QUIET_MS);
     this.#options.onTranscript(this.#transcript());
   }
 
   #onError(event: SpeechRecognitionErrorEventLike): void {
     if (this.#state === 'cancelled' || this.#state === 'failed' || this.#state === 'finished') return;
     if (event.error === 'no-speech') return;
+    // Android reports `aborted` and `network` AFTER it has already heard the user, typically while
+    // it wraps up a Stop. A reader who pressed Stop keeps what was recognised: the `end` that follows
+    // settles it. While still recording, an abort is somebody else taking the microphone and stays a
+    // cancellation; only an error with nothing to keep fails a finishing take.
+    if (this.#state === 'finishing' && (event.error === 'aborted' || event.error === 'network') && this.#hasWords()) {
+      return;
+    }
     this.#fail(browserRecognitionErrorFrom(event));
   }
 
@@ -497,9 +571,10 @@ export class BrowserRecognitionSession implements BrowserRecognitionSessionLike 
     // currently reading. Terminal states are checked HERE rather than inside
     // `#settleCycle` so the restart below cannot be reached either.
     if (this.#state === 'finished' || this.#state === 'failed' || this.#state === 'cancelled') return;
+    if (this.#graceTimer !== null) return;
     this.#settleCycle();
     if (this.#state === 'finishing') {
-      this.#settleFinish();
+      this.#settleFinish(true);
       return;
     }
     if (this.#state !== 'active') return;
@@ -514,17 +589,36 @@ export class BrowserRecognitionSession implements BrowserRecognitionSessionLike 
   }
 
   #settleCycle(): void {
-    const current = joinRecognitionChunks([...this.#segments.values()]);
+    const current = mergeRecognitionChunks([...this.#segments.values()]);
     if (current) this.#settled.push(current);
     this.#segments.clear();
     this.#options.onTranscript(this.#transcript());
   }
 
-  #settleFinish(): void {
+  #armGrace(milliseconds: number): void {
+    if (this.#graceTimer !== null) this.#provider.clearTimeout(this.#graceTimer);
+    this.#graceTimer = this.#provider.setTimeout(() => {
+      this.#graceTimer = null;
+      if (this.#state !== 'finishing') return;
+      this.#settleCycle();
+      this.#settleFinish(false);
+    }, milliseconds);
+  }
+
+  #settleFinish(mayWait: boolean): void {
     const text = this.#transcript();
+    if (!text && this.#heardSpeech && !this.#noMatch && mayWait) {
+      this.#armGrace(LATE_RESULT_GRACE_MS);
+      return;
+    }
     if (!text && this.#heardSpeech) {
       this.#fail(
-        new BrowserRecognitionError('bad-audio', 'Speech was heard, but this browser could not turn it into words.'),
+        new BrowserRecognitionError(
+          'bad-audio',
+          this.#provider.android === true
+            ? "Android's speech service returned no words."
+            : 'Speech was heard, but this browser could not turn it into words.',
+        ),
       );
       return;
     }
@@ -560,8 +654,12 @@ export class BrowserRecognitionSession implements BrowserRecognitionSessionLike 
     this.#options.onFailure(failure);
   }
 
+  #hasWords(): boolean {
+    return this.#settled.length > 0 || this.#segments.size > 0;
+  }
+
   #transcript(): string {
-    return joinRecognitionChunks([...this.#settled, ...this.#segments.values()]);
+    return mergeRecognitionChunks([...this.#settled.map(text => ({ text, final: true })), ...this.#segments.values()]);
   }
 
   #clearLimitTimer(): void {
@@ -572,6 +670,10 @@ export class BrowserRecognitionSession implements BrowserRecognitionSessionLike 
 
   #clearTimers(): void {
     this.#clearLimitTimer();
+    if (this.#graceTimer !== null) {
+      this.#provider.clearTimeout(this.#graceTimer);
+      this.#graceTimer = null;
+    }
     if (this.#stopTimer === null) return;
     this.#provider.clearTimeout(this.#stopTimer);
     this.#stopTimer = null;
