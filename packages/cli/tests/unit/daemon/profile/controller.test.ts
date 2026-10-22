@@ -1,5 +1,6 @@
 import { describe, it } from 'bun:test';
 import {
+  type DaemonServiceFacts,
   type IFyApiClient,
   PERFORMANCE_PROFILE_PATH,
   type PerformanceProfileView,
@@ -79,10 +80,12 @@ class Harness {
   };
 
   progress: IProgress | undefined;
+  service: (() => Promise<DaemonServiceFacts>) | undefined;
 
   subject(): ProfileController {
     return new ProfileController({
       ...(this.progress === undefined ? {} : { progress: this.progress }),
+      ...(this.service === undefined ? {} : { service: this.service }),
       gateway: this.gateway,
       tracer: this.tracer,
       out: {
@@ -388,5 +391,27 @@ describe('ProfileController progress', () => {
     // Assert
     should(progress.events[0]).equal('start Measuring the daemon [30s]');
     should(progress.events.at(-1)).equal('fail');
+  });
+});
+
+describe('ProfileController and the service definition', () => {
+  it('should add how the daemon is run to the report, and leave the report as it is when that cannot be read', async () => {
+    // Arrange
+    const told = new Harness();
+    told.service = async () => ({ manager: 'launchd', processType: 'Interactive' });
+    const failing = new Harness();
+    failing.service = async () => {
+      throw new Error('no plist');
+    };
+
+    // Act
+    await told.subject().run({ json: true });
+    await failing.subject().run({ json: true });
+
+    // Assert
+    const [withService] = told.reports.map(text => JSON.parse(text) as PerformanceReport);
+    const [without] = failing.reports.map(text => JSON.parse(text) as PerformanceReport);
+    should(withService?.service).deepEqual({ manager: 'launchd', processType: 'Interactive' });
+    should(without).not.have.property('service');
   });
 });
