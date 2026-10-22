@@ -7406,8 +7406,8 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           clock,
           wallClock: { nowMs: () => Date.now() },
           monotonic: new SystemMonotonicClock(),
-          // The same ledger every timer reports into, so the timer's `self-check` activity is the parent of
-          // each stage the service names: `self-check › reconcile › reindex`.
+          // The same ledger every timer reports into: a check runs as `self-check` and names each stage
+          // inside it — `self-check › reconcile › reindex` — so a profile splits the check's time.
           activities,
           restarts: new SelfRestartCoordinator(
             new FileSelfRestartStampStore(stateFiles, join(paths.home, 'self-restart.json')),
@@ -10049,7 +10049,8 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
     lane.close();
   });
   const ticks = setInterval(() => {
-    void activities.run('self-check', () => health.selfCheck()).catch(() => undefined);
+    // `tick` runs as the `self-check` activity, and skips — never overlaps — a check still running.
+    void health.tick().catch(() => undefined);
   }, healthSettings.selfCheckIntervalMs);
   cleanups.push(() => clearInterval(ticks));
   // After the daemon is serving, never before: a revive that raced the boot would be a launch the

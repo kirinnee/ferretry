@@ -1238,9 +1238,10 @@ export interface HealthWorld {
  * are all production, so a case that passes here asserts the answer the daemon would actually give
  * rather than one the fixture composed.
  *
- * The monotonic clock advances by exactly one configured interval per reading, which is what an
- * on-time tick looks like: a fixture whose clock stood still would make the second tick a zero-gap
- * reading and the freshness a fiction.
+ * The monotonic clock advances by half a configured interval per reading. A check reads it twice —
+ * once as it starts and once as it measures its gap — so consecutive checks are exactly one interval
+ * apart, which is what an on-time tick looks like: a fixture whose clock stood still would make the
+ * second tick a zero-gap reading and the freshness a fiction.
  */
 export function healthSubsystem(world: HealthWorld = {}): DaemonHealthSubsystem {
   const clean: IncoherencePass = { missingFromIndex: [], staleRows: [], zombies: [], repaired: [], unhealable: [] };
@@ -1277,7 +1278,7 @@ export function healthSubsystem(world: HealthWorld = {}): DaemonHealthSubsystem 
       wallClock: { nowMs: () => AT_MS },
       monotonic: {
         elapsedMs: () => {
-          elapsedMs += defaultSessionHealthSettings.selfCheckIntervalMs;
+          elapsedMs += defaultSessionHealthSettings.selfCheckIntervalMs / 2;
           return elapsedMs;
         },
       },

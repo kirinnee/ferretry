@@ -10,13 +10,15 @@ import type {
   IncoherenceLedger,
   IncoherencePass,
   MonotonicClockPort,
+  RunningSelfCheck,
   SelfCheckActivityPort,
   SelfCheckLedger,
+  SelfCheckTick,
   SessionHealthEvent,
   SessionHealthObservation,
   SurveyedSession,
 } from './types.ts';
-import { emptySelfCheckLedger } from './wedge.ts';
+import { emptySelfCheckLedger, recordSkippedTick, wedgeEvent } from './wedge.ts';
 
 /** Everything the self-check must be told, gathered by an adapter that knows where it all lives. */
 export interface DaemonHealthSnapshot {
@@ -134,6 +136,8 @@ function message(error: unknown): string {
 export class SessionHealthService {
   private selfChecks: SelfCheckLedger = emptySelfCheckLedger;
   private incoherence: IncoherenceLedger = emptyIncoherenceLedger;
+  /** The check in flight, if one is: what a tick that fires before it finishes measures and skips. */
+  private running: RunningSelfCheck | undefined;
 
   constructor(
     private readonly ports: SessionHealthPorts,
@@ -141,18 +145,48 @@ export class SessionHealthService {
   ) {}
 
   /**
-   * One check. Each stage runs as a named activity inside whatever activity the caller runs this in,
-   * so a profile of a slow check names the stage — the index read, the consistency pass, the exit
-   * observer or the repairs — rather than only the check around them.
+   * One firing of the timer: a check, or — while the previous check is still running — a skip.
+   *
+   * Overlapping checks are never started. They would queue behind the same exclusive storage lock and
+   * the same tmux server as the check they overlap, so a slow host would only pile more of the slowest
+   * work onto itself. A skip resolves `undefined`; what it measured is in the ledger.
+   */
+  async tick(): Promise<SelfCheckOutcome | undefined> {
+    const running = this.running;
+    if (running === undefined) return await this.selfCheck();
+    await this.ports.activities.run('self-check skipped', async () => await this.skip(running));
+    return undefined;
+  }
+
+  /**
+   * One check, run as the activity `self-check` with each stage named inside it, so a profile of a
+   * slow check names the stage — the index read, the walk, the consistency pass, the exit observer or
+   * the repairs — rather than only the check around them.
    */
   async selfCheck(): Promise<SelfCheckOutcome> {
+    const since = this.reading();
+    this.running = { since, counted: false };
+    try {
+      return await this.ports.activities.run('self-check', async () => await this.check(since));
+    } finally {
+      // A check that overlapped this one — only ever a direct call, never the timer — owns the record.
+      if (this.running?.since === since) this.running = undefined;
+    }
+  }
+
+  private async check(since: SelfCheckTick): Promise<SelfCheckOutcome> {
     const stage = this.ports.activities;
     const snapshot = await stage.run('inventory', async () => await this.ports.inventory.observe());
+    if (this.running?.since === since)
+      this.running = { ...this.running, monitors: snapshot.sessions.filter(session => session.monitored).length };
     const nowMs = this.ports.wallClock.nowMs();
     const planned = planSelfCheck(
       this.selfChecks,
       {
-        tick: { elapsedMs: this.ports.monotonic.elapsedMs(), at: this.ports.clock.now() },
+        // Read AFTER the index, never at `since`: a tick skipped while this check waited on the index
+        // has moved the baseline past `since`, and a reading behind the baseline reads as a broken
+        // clock — an `unknown` verdict and a needless deep pass.
+        tick: this.reading(),
         nowMs,
         sessions: snapshot.sessions,
         sweep: snapshot.sweep,
@@ -183,6 +217,24 @@ export class SessionHealthService {
         ? NO_REPAIRS
         : await stage.run('repair', async () => await this.repair(planned.plan));
     return { plan: planned.plan, ...repairs, escalated, exited };
+  }
+
+  /**
+   * Measures the check still running when the timer fired, and moves the gap baseline past this tick.
+   * A check stuck long enough to be a wedge is counted once, here, because it cannot count itself.
+   */
+  private async skip(running: RunningSelfCheck): Promise<void> {
+    const recorded = recordSkippedTick(this.selfChecks, { tick: this.reading(), running }, this.settings);
+    this.selfChecks = recorded.ledger;
+    if (recorded.verdict === undefined) return;
+    if (this.running?.since === running.since) this.running = { ...this.running, counted: true };
+    const event = wedgeEvent(recorded.verdict, running.monitors);
+    if (event !== undefined) await this.emit(event);
+  }
+
+  /** Where the self-check timer is now: a monotonic reading for gaps, a wall instant to report. */
+  private reading(): SelfCheckTick {
+    return { elapsedMs: this.ports.monotonic.elapsedMs(), at: this.ports.clock.now() };
   }
 
   /** Each repair inside its own boundary, so one session that refuses cannot abandon the rest. */

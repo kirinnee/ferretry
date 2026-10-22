@@ -8,6 +8,7 @@ import {
   defaultSessionHealthSettings,
   type ExitedSessionTransition,
   type IncoherencePass,
+  type SelfCheckOutcome,
   SelfRestartCoordinator,
   type SelfRestartHandler,
   type SelfRestartStamp,
@@ -78,9 +79,16 @@ class Harness {
 
   private passIndex = 0;
 
+  /** While set, every consistency pass waits on it: a check held in flight. */
+  hold: Promise<void> | undefined;
+  /** Whether each consistency pass was asked to go deep, in order. */
+  readonly depths: boolean[] = [];
+
   readonly consistency: ConsistencyPassPort = {
-    run: async (_deep, survey) => {
+    run: async (deep, survey) => {
       this.handed.push({ stage: 'consistency', survey });
+      this.depths.push(deep);
+      if (this.hold !== undefined) await this.hold;
       const next = this.passes[Math.min(this.passIndex, this.passes.length - 1)] ?? pass();
       this.passIndex += 1;
       if (next instanceof Error) throw next;
@@ -178,7 +186,7 @@ describe('session health service', () => {
     await harness.service().selfCheck();
 
     // Assert
-    should(harness.stages).deepEqual(['inventory', 'survey', 'reconcile', 'exit observer']);
+    should(harness.stages).deepEqual(['self-check', 'inventory', 'survey', 'reconcile', 'exit observer']);
   });
 
   it('should name the repair stage when the check has something to repair', async () => {
@@ -189,10 +197,10 @@ describe('session health service', () => {
     await harness.service().selfCheck();
 
     // Assert
-    should(harness.stages).deepEqual(['inventory', 'survey', 'reconcile', 'exit observer', 'repair']);
+    should(harness.stages).deepEqual(['self-check', 'inventory', 'survey', 'reconcile', 'exit observer', 'repair']);
   });
 
-  it('should nest its stages inside the activity the check runs in, so a profile splits its time', async () => {
+  it('should run as the self-check activity with every stage nested inside it', async () => {
     // Arrange — the composition root's own arrangement: one ledger, carried across awaits.
     const labels: string[] = [];
     const ledger = new ActivityLedger({ now: () => 0 }, new AsyncActivityScope(), label => labels.push(label));
@@ -200,7 +208,7 @@ describe('session health service', () => {
     const service = new SessionHealthService({ ...harness.ports(), activities: ledger }, SETTINGS);
 
     // Act
-    await ledger.run('self-check', async () => await service.selfCheck());
+    await service.selfCheck();
 
     // Assert — each stage is reported as it ends, and the check itself last.
     should(labels).deepEqual([
@@ -359,6 +367,177 @@ describe('session health service', () => {
     // Assert
     should(actual.every(outcome => !outcome.escalated)).be.true();
     should(harness.restarts).equal(0);
+  });
+
+  describe('when the timer fires while a check is still running', () => {
+    /** Lets a check just started run on until it is waiting on the held consistency pass. */
+    async function settle(): Promise<void> {
+      await new Promise(resolve => setTimeout(resolve, 0));
+    }
+
+    /** A check held in flight until `release` is called. */
+    function holding(harness: Harness): () => void {
+      let release: () => void = () => undefined;
+      harness.hold = new Promise<void>(resolve => {
+        release = resolve;
+      });
+      return () => {
+        harness.hold = undefined;
+        release();
+      };
+    }
+
+    it('should skip that tick rather than start a second check beside the first', async () => {
+      // Arrange
+      const harness = new Harness(snapshot());
+      const service = harness.service();
+      await service.tick();
+      const release = holding(harness);
+      harness.elapsed += SETTINGS.selfCheckIntervalMs;
+      const slow = service.tick();
+      await settle();
+      harness.elapsed += SETTINGS.selfCheckIntervalMs;
+
+      // Act
+      const skipped = await service.tick();
+      release();
+      await slow;
+
+      // Assert
+      should(skipped).be.undefined();
+      should(harness.depths).deepEqual([true, false]);
+      should(harness.stages.filter(stage => stage === 'self-check skipped')).have.length(1);
+    });
+
+    it('should not count the skipped tick as late, so the next check reads on time', async () => {
+      // Arrange — a check that takes longer than one interval, but finishes.
+      const harness = new Harness(snapshot());
+      const service = harness.service();
+      await service.tick();
+      const release = holding(harness);
+      harness.elapsed += SETTINGS.selfCheckIntervalMs;
+      const slow = service.tick();
+      await settle();
+      harness.elapsed += SETTINGS.selfCheckIntervalMs;
+      await service.tick();
+      release();
+      await slow;
+      harness.elapsed += SETTINGS.selfCheckIntervalMs;
+
+      // Act
+      const actual = await service.tick();
+      const report = await service.report();
+
+      // Assert
+      should(actual?.plan.verdict).match({ freshness: 'fresh', gapMs: SETTINGS.selfCheckIntervalMs, lagMs: 0 });
+      should(actual?.plan.deepPass).be.false();
+      should(report.wedgeCount).equal(0);
+      should(report.selfChecks).equal(3);
+    });
+
+    it('should count a check that never finishes as one wedge, however many ticks it spans', async () => {
+      // Arrange
+      const harness = new Harness(snapshot());
+      const service = harness.service();
+      await service.tick();
+      const release = holding(harness);
+      const stuck = service.tick();
+      await settle();
+
+      // Act — the wedge threshold passes while the check is still running, then two more ticks.
+      const ticks: (SelfCheckOutcome | undefined)[] = [];
+      for (const _ of [1, 2, 3]) {
+        harness.elapsed += SETTINGS.wedgeGapMs / 3;
+        ticks.push(await service.tick());
+      }
+      harness.elapsed += SETTINGS.selfCheckIntervalMs;
+      ticks.push(await service.tick());
+      ticks.push(await service.tick());
+      const report = await service.report();
+      release();
+      await stuck;
+
+      // Assert — counted once, dated from when the stuck check began, and reported unhealthy.
+      should(ticks).deepEqual([undefined, undefined, undefined, undefined, undefined]);
+      should(harness.events).deepEqual([
+        {
+          type: 'fleet.daemon_wedge',
+          data: {
+            gapSeconds: SETTINGS.wedgeGapMs / 1000,
+            lagMs: SETTINGS.wedgeGapMs - SETTINGS.selfCheckIntervalMs,
+            monitors: 1,
+            since: AT,
+          },
+        },
+      ]);
+      should(report).match({ wedgeCount: 1, selfCheckFreshness: 'wedged', ok: false });
+    });
+
+    it('should owe the deep pass to the next check that runs, and only to that one', async () => {
+      // Arrange
+      const harness = new Harness(snapshot());
+      const service = harness.service();
+      await service.tick();
+      const release = holding(harness);
+      const stuck = service.tick();
+      await settle();
+      harness.elapsed += SETTINGS.wedgeGapMs;
+      await service.tick();
+      release();
+      await stuck;
+
+      // Act
+      harness.elapsed += SETTINGS.selfCheckIntervalMs;
+      const owed = await service.tick();
+      harness.elapsed += SETTINGS.selfCheckIntervalMs;
+      const after = await service.tick();
+
+      // Assert — the stuck check itself went shallow; the one after it pays the deep pass.
+      should(harness.depths).deepEqual([true, false, true, false]);
+      should(owed?.plan.verdict.freshness).equal('fresh');
+      should(after?.plan.deepPass).be.false();
+      should((await service.report()).ok).be.true();
+    });
+
+    it('should leave the monitor count out of the wedge of a check stuck before it read the index', async () => {
+      // Arrange
+      const harness = new Harness(snapshot());
+      let release: () => void = () => undefined;
+      const gate = new Promise<void>(resolve => {
+        release = resolve;
+      });
+      const ports = harness.ports();
+      const service = new SessionHealthService(
+        {
+          ...ports,
+          inventory: {
+            observe: async () => {
+              await gate;
+              return snapshot();
+            },
+          },
+        },
+        SETTINGS,
+      );
+      const stuck = service.tick();
+      await settle();
+      harness.elapsed += SETTINGS.wedgeGapMs;
+
+      // Act
+      await service.tick();
+      release();
+      await stuck;
+
+      // Assert
+      should(harness.events[0]).deepEqual({
+        type: 'fleet.daemon_wedge',
+        data: {
+          gapSeconds: SETTINGS.wedgeGapMs / 1000,
+          lagMs: SETTINGS.wedgeGapMs - SETTINGS.selfCheckIntervalMs,
+          since: AT,
+        },
+      });
+    });
   });
 
   it('should force the deep pass after a wedge and count it in the health report', async () => {

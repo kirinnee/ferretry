@@ -79,6 +79,22 @@ export interface SelfCheckLedger {
   readonly lastAt: string | undefined;
   readonly lastFreshness: SelfCheckFreshness | undefined;
   readonly eventLoopLagMs: number;
+  /**
+   * Whether the next check to plan must take the deep pass although its own tick is on time: a check
+   * that never finished was measured as a wedge while it was still running, so the deep pass its wedge
+   * calls for is owed to the first check that decides its depth after that.
+   */
+  readonly deepPassOwed: boolean;
+}
+
+/** The check still in flight when the timer fired again, as the service tracks it. */
+export interface RunningSelfCheck {
+  /** The reading taken when that check began. */
+  readonly since: SelfCheckTick;
+  /** Whether its wedge was already counted: one stuck check is ONE wedge, however many ticks it spans. */
+  readonly counted: boolean;
+  /** How many sessions it found monitored, once it had read the index. */
+  readonly monitors?: number | undefined;
 }
 
 /** What the daemon can observe about the warden's sweep timer. */
