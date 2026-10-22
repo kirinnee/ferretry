@@ -43,6 +43,7 @@ import {
   type FileSystemFactory,
   type FileSystemPort,
   type FoundationPaths,
+  type FrozenJsonValue,
   indexFiles,
   type JournalFingerprint,
   type JsonValue,
@@ -171,7 +172,7 @@ async function exists(path: string): Promise<boolean> {
   }
 }
 
-function counter(value: JsonValue): number {
+function counter(value: FrozenJsonValue): number {
   const result = jsonObject(value)?.count;
   if (typeof result !== 'number') throw new TypeError('test state has no numeric count');
   return result;
@@ -416,8 +417,8 @@ describe('session documents', () => {
     const home = await createTemporaryHome();
     const opened = await openStorage(home);
     const id = parseSessionId('upsert-session');
-    const seen: Array<JsonValue | undefined> = [];
-    const bump = (current: JsonValue | undefined) => {
+    const seen: Array<FrozenJsonValue | undefined> = [];
+    const bump = (current: FrozenJsonValue | undefined) => {
       seen.push(current);
       return { count: current === undefined ? 1 : counter(current) + 1 };
     };

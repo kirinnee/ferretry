@@ -1,4 +1,4 @@
-import { type JsonValue, jsonObject } from '../../../lib/json.ts';
+import { type FrozenJsonValue, jsonObject } from '../../../lib/json.ts';
 import type { ClockPort } from '../../../lib/ports.ts';
 import {
   claimsRunningAgent,
@@ -46,7 +46,7 @@ const isAbsentSession = (stderr: string): boolean => /can't find session/iu.test
  */
 const EXIT_STATUS_MISSING_TICK_LIMIT = 3;
 
-function status(state: JsonValue | undefined): string | undefined {
+function status(state: FrozenJsonValue | undefined): string | undefined {
   const value = jsonObject(state)?.status;
   return typeof value === 'string' ? value : undefined;
 }

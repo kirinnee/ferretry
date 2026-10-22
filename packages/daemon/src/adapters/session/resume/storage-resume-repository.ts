@@ -1,4 +1,4 @@
-import { type JsonValue, jsonObject } from '../../../lib/json.ts';
+import { type FrozenJsonValue, type JsonValue, jsonObject } from '../../../lib/json.ts';
 import {
   ResumableSessionStatusSchema,
   type ResumeRepository,
@@ -14,7 +14,7 @@ function record(value: unknown): Record<string, unknown> {
 
 /** The same narrowing, in the storage layer's own JSON vocabulary, so a document this repository
  *  rewrites stays a value the store can serialize rather than becoming `unknown`. */
-function jsonRecord(value: JsonValue): Record<string, JsonValue> {
+function jsonRecord(value: FrozenJsonValue): Record<string, FrozenJsonValue> {
   return { ...(jsonObject(value) ?? {}) };
 }
 

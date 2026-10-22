@@ -52,6 +52,7 @@ import {
   createSessionRecord,
   defaultSessionLifecycleSettings,
   type FoundationPaths,
+  type FrozenJsonValue,
   type JsonValue,
   parseSessionId,
   type SessionEnvironmentStore,
@@ -131,8 +132,10 @@ async function openInterleavingStorage() {
 }
 
 /** A JSON document's fields, for merging a change over it the way every real writer does. */
-function documentFields(document: JsonValue): Record<string, JsonValue> {
-  return typeof document === 'object' && document !== null && !Array.isArray(document) ? { ...document } : {};
+function documentFields(document: FrozenJsonValue): Record<string, FrozenJsonValue> {
+  return typeof document === 'object' && document !== null && !Array.isArray(document)
+    ? { ...(document as Readonly<Record<string, FrozenJsonValue>>) }
+    : {};
 }
 
 function record(id = 'stored-session', overrides: Record<string, unknown> = {}): SessionLifecycleRecord {

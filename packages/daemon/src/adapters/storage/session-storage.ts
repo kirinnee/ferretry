@@ -8,10 +8,12 @@ import {
   createSessionPaths,
   type DirectoryEntry,
   decideSessionMarker,
+  deepFreezeJson,
   type EventPointer,
   encodeSessionEvent,
   type FileSystemPort,
   type FoundationPaths,
+  type FrozenJsonValue,
   type HomeLockLease,
   type IndexedSession,
   type JournalFingerprint,
@@ -168,7 +170,7 @@ const DOCUMENT_CACHE_LIMIT = 4_096;
 interface CachedDocument {
   readonly identity: string;
   readonly text: string;
-  readonly value?: JsonValue;
+  readonly value?: FrozenJsonValue;
 }
 
 export class DaemonStorage {
@@ -937,7 +939,7 @@ export class DaemonStorage {
     this.documents.delete(path);
   }
 
-  private async readDocument(id: SessionId, kind: 'config' | 'state'): Promise<JsonValue | undefined> {
+  private async readDocument(id: SessionId, kind: 'config' | 'state'): Promise<FrozenJsonValue | undefined> {
     const paths = createSessionPaths(this.paths, id);
     const marker = (await this.readCachedText(paths.marker))?.text;
     if (marker === undefined) {
@@ -948,19 +950,20 @@ export class DaemonStorage {
     const file = paths[kind];
     const document = await this.readCachedText(file);
     if (document === undefined) return undefined;
-    if (document.value !== undefined) return structuredClone(document.value);
+    if (document.value !== undefined) return document.value;
     const parsed = parseJsonDocument(document.text);
     if (!parsed.ok) throw new InvalidStateDocumentError(file, parsed.message);
-    if (document.identity !== '') this.documents.set(file, { ...document, value: parsed.value });
-    return structuredClone(parsed.value);
+    const value = deepFreezeJson(parsed.value);
+    if (document.identity !== '') this.documents.set(file, { ...document, value });
+    return value;
   }
 
-  async readConfig(id: SessionId): Promise<JsonValue | undefined> {
+  async readConfig(id: SessionId): Promise<FrozenJsonValue | undefined> {
     this.assertOpen();
     return await this.readDocument(id, 'config');
   }
 
-  async readState(id: SessionId): Promise<JsonValue | undefined> {
+  async readState(id: SessionId): Promise<FrozenJsonValue | undefined> {
     this.assertOpen();
     return await this.readDocument(id, 'state');
   }
@@ -976,7 +979,7 @@ export class DaemonStorage {
   private async updateDocument(
     id: SessionId,
     kind: 'config' | 'state',
-    transform: (current: JsonValue) => unknown,
+    transform: (current: FrozenJsonValue) => unknown,
     create?: () => unknown,
   ): Promise<JsonValue> {
     this.assertOpen();
@@ -998,17 +1001,11 @@ export class DaemonStorage {
     });
   }
 
-  async updateConfig(
-    id: SessionId,
-    transform: (current: JsonValue) => JsonValue | Promise<JsonValue>,
-  ): Promise<JsonValue> {
+  async updateConfig(id: SessionId, transform: (current: FrozenJsonValue) => unknown): Promise<JsonValue> {
     return await this.updateDocument(id, 'config', transform);
   }
 
-  async updateState(
-    id: SessionId,
-    transform: (current: JsonValue) => JsonValue | Promise<JsonValue>,
-  ): Promise<JsonValue> {
+  async updateState(id: SessionId, transform: (current: FrozenJsonValue) => unknown): Promise<JsonValue> {
     return await this.updateDocument(id, 'state', transform);
   }
 
@@ -1017,12 +1014,12 @@ export class DaemonStorage {
    * `undefined` and its answer is written all the same. Only for the writer that CREATES the
    * document — every other writer keeps `updateConfig`, which refuses to bring one back from nothing.
    */
-  async upsertConfig(id: SessionId, transform: (current: JsonValue | undefined) => unknown): Promise<JsonValue> {
+  async upsertConfig(id: SessionId, transform: (current: FrozenJsonValue | undefined) => unknown): Promise<JsonValue> {
     return await this.updateDocument(id, 'config', transform, () => transform(undefined));
   }
 
   /** `upsertConfig`, for the state document. */
-  async upsertState(id: SessionId, transform: (current: JsonValue | undefined) => unknown): Promise<JsonValue> {
+  async upsertState(id: SessionId, transform: (current: FrozenJsonValue | undefined) => unknown): Promise<JsonValue> {
     return await this.updateDocument(id, 'state', transform, () => transform(undefined));
   }
 
