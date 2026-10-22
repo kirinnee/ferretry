@@ -23,12 +23,14 @@ import type { PerformanceProfileView, PerformanceReport } from '@ferretry/protoc
 import should from 'should';
 import { IDLE_DAEMON_BUDGETS } from '../../../src/lib/performance/budgets.ts';
 import { freeLoopbackPort } from '../support/booted-daemon.ts';
+import { ANTHROPIC_USAGE_PATH, CODEX_USAGE_PATH, startFakeUsageServer } from '../support/fake-usage-server.ts';
 import { cleanupTempDirectories, tempDirectory } from '../support/repository.ts';
 import { OWNER_MAC_FLEET, scaledFleet, sessionIdOf } from '../support/scaled-fleet.ts';
 
 const FYD_ENTRY = resolve(import.meta.dir, '../../../bin/fyd.ts');
 const SETTLE_SECONDS = 15;
-const PROFILE_SECONDS = 20;
+/** Half a minute: at the fixture's 10 s usage interval, at least two fleet passes land inside it. */
+const PROFILE_SECONDS = 30;
 
 /**
  * CI's ceilings — the ratchet. Each step records what this fixture measured when it was lowered.
@@ -92,6 +94,8 @@ describe('an idle daemon on a fleet the size of the owner’s Mac', () => {
       const made = tmux(['new-session', '-d', '-s', config.tmuxSession, '-x', '200', '-y', '50', 'sleep 3600']);
       should(made.exitCode).equal(0);
     }
+    // The providers' free usage reads, answered on this machine: the fixture's logins are real stores.
+    const usage = startFakeUsageServer();
     const port = await freeLoopbackPort();
     await mkdir(join(fleet.home, 'config'), { recursive: true });
     await writeFile(
@@ -105,6 +109,7 @@ describe('an idle daemon on a fleet the size of the owner’s Mac', () => {
         HOME: fleet.userHome,
         FYD_BACKGROUND_DELAY_SECONDS: '1',
         FYD_WATCHDOG_SECONDS: '0',
+        FY_USAGE_PROBE_ORIGIN: usage.origin,
       },
       stdin: 'ignore',
       stdout: 'ignore',
@@ -142,11 +147,17 @@ describe('an idle daemon on a fleet the size of the owner’s Mac', () => {
       daemon.kill();
       await daemon.exited;
       tmux(['kill-server']);
+      await usage.stop();
     }
 
     // Assert — every measure the report could see, against its ceiling; a failure prints the ranking.
     if (report === undefined) throw new Error('the profile never finished');
     should(report.fleet).deepEqual({ sessions: 36, running: 5 });
+    // The budget sees stage 4: the usage pass ran inside the window and read every login.
+    const fleetRefresh = report.activities.find(activity => activity.name === 'fleet refresh');
+    should(fleetRefresh?.count ?? 0).be.aboveOrEqual(2);
+    should(usage.hits.get(ANTHROPIC_USAGE_PATH) ?? 0).be.aboveOrEqual(2);
+    should(usage.hits.get(CODEX_USAGE_PATH) ?? 0).be.aboveOrEqual(1);
     const over = report.budgets.filter(budget => budget.actual > (CEILINGS[budget.name] ?? budget.limit));
     if (over.length > 0)
       throw new Error(
@@ -155,5 +166,5 @@ describe('an idle daemon on a fleet the size of the owner’s Mac', () => {
     // Every ceiling is a real measure of the report, and none is looser than nothing at all.
     should(Object.keys(CEILINGS).sort()).deepEqual(IDLE_DAEMON_BUDGETS.map(budget => budget.name).sort());
     for (const budget of IDLE_DAEMON_BUDGETS) should(CEILINGS[budget.name]).be.aboveOrEqual(budget.limit);
-  }, 180_000);
+  }, 240_000);
 });

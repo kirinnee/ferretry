@@ -3,7 +3,8 @@
  * before and an after side by side.
  *
  * The fleet is `scaledFleet` (36 sessions, 5 running, three 200 MB Claude transcripts, 2,000 Codex
- * rollouts, six runtime homes), built once and copied fresh for every run, with a REAL tmux pane on the
+ * rollouts, six runtime homes, two Claude logins and one Codex login in Ferretry's own store on a 10 s usage
+ * interval — their free usage reads answered by a loopback fake server), built once and copied fresh for every run, with a REAL tmux pane on the
  * daemon's private socket for each running session — without panes, every tmux question fails at once
  * and the child-process cost the Mac pays never shows. Nobody touches the daemon: it boots, its
  * housekeeping settles, and then it is measured twice, from outside and from inside:
@@ -29,6 +30,7 @@ import type { PerformanceProfileView, PerformanceReport } from '../../packages/p
 import { parseStraceTrace } from '../../packages/cli/src/lib/daemon/profile/syscall-trace.ts';
 import { renderPerformanceReport } from '../../packages/protocol/src/lib/performance-render.ts';
 import { freeLoopbackPort } from '../../packages/daemon/tests/integration/support/booted-daemon.ts';
+import { startFakeUsageServer } from '../../packages/daemon/tests/integration/support/fake-usage-server.ts';
 import {
   OWNER_MAC_FLEET,
   scaledFleet,
@@ -89,9 +91,17 @@ for (let index = 0; index < shape.running; index += 1) {
   if (made.exitCode !== 0) throw new Error(`tmux new-session failed: ${made.stderr.toString()}`);
 }
 
+// The fixture's logins are real stores, so the usage pass makes its free reads: here, never at a provider.
+const usage = startFakeUsageServer();
 log(`starting ${fyd.join(' ')}`);
 const daemon = Bun.spawn([...fyd], {
-  env: { ...process.env, FY_HOME: home, HOME: userHome, FYD_BACKGROUND_DELAY_SECONDS: '5' },
+  env: {
+    ...process.env,
+    FY_HOME: home,
+    HOME: userHome,
+    FYD_BACKGROUND_DELAY_SECONDS: '5',
+    FY_USAGE_PROBE_ORIGIN: usage.origin,
+  },
   stdin: 'ignore',
   stdout: Bun.file(join(run, 'fyd.out')),
   stderr: Bun.file(join(run, 'fyd.err')),
@@ -181,14 +191,23 @@ try {
   daemon.kill();
   await daemon.exited;
   tmux(['kill-server']);
+  await usage.stop();
 }
 
-const summary = { fyd: fyd.join(' '), shape, seconds, external, trace, syscallSummary, report };
+const usageReads = Object.fromEntries(usage.hits);
+const summary = { fyd: fyd.join(' '), shape, seconds, external, trace, syscallSummary, usageReads, report };
 if (values.out !== undefined) await writeFile(values.out, `${JSON.stringify(summary, null, 2)}\n`);
 await rm(run, { recursive: true, force: true });
 
 const lines: string[] = [];
 lines.push(`fyd: ${fyd.join(' ')}`);
+lines.push(
+  `free usage reads (whole run): ${
+    Object.entries(usageReads)
+      .map(([path, count]) => `${path} ${String(count)}`)
+      .join(' · ') || 'none'
+  }`,
+);
 if (external !== undefined)
   lines.push(
     `outside: daemon ${String(external.cpuPercent)}% of a core · reaped children ${String(external.childrenPercent)}%`,

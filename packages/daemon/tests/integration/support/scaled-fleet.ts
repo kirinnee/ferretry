@@ -11,8 +11,15 @@
  * Built once per root and reused: the transcripts are the expensive part, and a fixture that already
  * carries its marker is answered as it is.
  */
-import { mkdir, open, readFile, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { mkdir, open, readFile, rm, writeFile } from 'node:fs/promises';
+import { dirname, join } from 'node:path';
+import {
+  accountModelFiles,
+  buildFleetManifest,
+  ferretryCredentialDirectory,
+  parseAccountModel,
+  renderConfigFile,
+} from '@ferretry/fleet';
 import { SessionConfigSchema, SessionStateSchema } from '@ferretry/protocol';
 import { buildWorld } from '../../../bin/fyd.ts';
 import { parseSessionId } from '../../../src/lib/session-id.ts';
@@ -63,6 +70,129 @@ export interface ScaledFleet {
 const AT = '2026-10-20T09:00:00.000Z';
 const FINISHED = '2026-10-20T18:00:00.000Z';
 const MARKER = 'scaled-fleet.json';
+/**
+ * What a cached fixture must have been built by to be reused. Bumped whenever the fixture gains
+ * something a shape cannot name, so an old fixture on a developer's disk is rebuilt, not trusted.
+ */
+const FIXTURE_REVISION = 2;
+
+/**
+ * The logins the fleet's runtimes run on (docs/design/account-model.md): two Claude logins and one
+ * Codex login, each in Ferretry's own file store, so the usage pass has real stores to read — on the
+ * Mac this is the fleet refresh's whole cost, and a fixture with no logins measured none of it.
+ */
+export const FIXTURE_LOGINS = Object.freeze({
+  claude: ['claude-work', 'claude-home'],
+  codex: 'codex-main',
+} as const);
+
+/** Which login each runtime is on: the Claude runtimes split across the two Claude logins. */
+const RUNTIME_LOGIN: Readonly<Record<string, string>> = {
+  deepseek: 'claude-work',
+  'glm-a': 'claude-work',
+  kirin: 'claude-work',
+  'glm-b': 'claude-home',
+  minimax: 'claude-home',
+  [CODEX_RUNTIME]: 'codex-main',
+};
+
+/**
+ * How often the usage pass runs, in seconds: the fleet's `usage.interval`, cut from 60 so a profile
+ * window of half a minute holds more than one pass.
+ */
+export const FIXTURE_USAGE_INTERVAL_SECONDS = 10;
+
+/** Far beyond any test run, so no fake login ever reads as expired. */
+const TOKEN_EXPIRES_AT = Date.parse('2099-01-01T00:00:00.000Z');
+
+const segment = (value: unknown): string => Buffer.from(JSON.stringify(value)).toString('base64url');
+/** A JWT's shape with no signature anybody checks: the facts a Codex login is judged from. */
+const jwt = (payload: unknown): string => `${segment({ alg: 'none' })}.${segment(payload)}.TESTONLY`;
+
+/**
+ * The configuration, credential files and published manifest of {@link FIXTURE_LOGINS}, written the
+ * way an apply leaves them. Every token is a fake marked `TESTONLY`; none reaches a network — the free
+ * usage reads go to the loopback fake server (`fake-usage-server.ts`) through `FY_USAGE_PROBE_ORIGIN`.
+ */
+async function writeLogins(home: string): Promise<void> {
+  const config = join(home, 'config');
+  const fleet = join(home, 'fleet');
+  const model = parseAccountModel({
+    version: 2,
+    credentials: {
+      'claude-work': { harness: 'claude', store: 'ferretry' },
+      'claude-home': { harness: 'claude', store: 'ferretry' },
+      'codex-main': { harness: 'codex', store: 'ferretry' },
+    },
+    profiles: { default: { layers: [] } },
+    runtimes: Object.fromEntries(
+      Object.entries(RUNTIME_LOGIN).map(([runtime, credential]) => [
+        runtime,
+        { credential, profile: 'default', agent: true },
+      ]),
+    ),
+    advanced: { usage: { interval: FIXTURE_USAGE_INTERVAL_SECONDS } },
+  });
+  for (const [path, { address, value }] of accountModelFiles(model)) {
+    const text = renderConfigFile(path, address, value, undefined);
+    if (text === undefined) continue;
+    await mkdir(dirname(join(config, path)), { recursive: true });
+    await writeFile(join(config, path), text, { mode: 0o600 });
+  }
+
+  for (const id of FIXTURE_LOGINS.claude) {
+    const directory = ferretryCredentialDirectory(fleet, id);
+    await mkdir(directory, { recursive: true, mode: 0o700 });
+    await writeFile(
+      join(directory, '.credentials.json'),
+      JSON.stringify({
+        claudeAiOauth: {
+          accessToken: `sk-ant-oat-${id}-TESTONLY`,
+          refreshToken: `sk-ant-ort-${id}-TESTONLY`,
+          expiresAt: TOKEN_EXPIRES_AT,
+          scopes: ['user:inference', 'user:profile'],
+        },
+      }),
+      { mode: 0o600 },
+    );
+  }
+  const codex = ferretryCredentialDirectory(fleet, FIXTURE_LOGINS.codex);
+  await mkdir(codex, { recursive: true, mode: 0o700 });
+  await writeFile(
+    join(codex, 'auth.json'),
+    JSON.stringify({
+      OPENAI_API_KEY: null,
+      last_refresh: AT,
+      tokens: {
+        access_token: jwt({ exp: TOKEN_EXPIRES_AT / 1_000 }),
+        refresh_token: 'rt-codex-main-TESTONLY',
+        account_id: 'acct-fixture',
+        id_token: jwt({
+          email: 'fixture@example.com',
+          'https://api.openai.com/auth': { chatgpt_plan_type: 'pro' },
+        }),
+      },
+    }),
+    { mode: 0o600 },
+  );
+
+  const manifest = buildFleetManifest({
+    generatedAt: AT,
+    accounts: [],
+    runtimes: Object.entries(RUNTIME_LOGIN).map(([name, credential], index) => ({
+      id: `00000000-0000-4000-9000-${String(index).padStart(12, '0')}`,
+      name,
+      harness: name === CODEX_RUNTIME ? 'codex' : 'claude',
+      credential,
+      profile: 'default',
+      agent: true,
+      wrapper: join(fleet, 'bin', name),
+      models: [{ id: 'default', available: true }],
+      defaultModel: 'default',
+    })),
+  });
+  await writeFile(join(fleet, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`);
+}
 
 /** One Claude exchange: a prompt, a tool call, a priced reply. Every id is unique per `n`. */
 function claudeExchange(sessionId: string, n: number): string {
@@ -187,8 +317,10 @@ export async function scaledFleet(root: string, shape: ScaledFleetShape = OWNER_
   const userHome = join(root, 'user');
   const marker = join(root, MARKER);
   const existing = await readFile(marker, 'utf8').catch(() => undefined);
-  if (existing !== undefined && JSON.stringify((JSON.parse(existing) as ScaledFleet).shape) === JSON.stringify(shape))
-    return JSON.parse(existing) as ScaledFleet;
+  const cached = existing === undefined ? undefined : (JSON.parse(existing) as ScaledFleet & { revision?: number });
+  if (cached?.revision === FIXTURE_REVISION && JSON.stringify(cached.shape) === JSON.stringify(shape)) return cached;
+  // A fixture built by an older revision or for another shape is built again from nothing, never patched.
+  if (cached !== undefined) await Promise.all([home, userHome, marker].map(path => rm(path, { recursive: true, force: true })));
 
   await mkdir(userHome, { recursive: true });
   // The state home is claimed FIRST: its layout refuses a non-empty directory it did not mark.
@@ -312,7 +444,9 @@ export async function scaledFleet(root: string, shape: ScaledFleetShape = OWNER_
     await opened.storage.close();
   }
 
+  await writeLogins(home);
+
   const fleet: ScaledFleet = { home, userHome, shape, bytes };
-  await writeFile(marker, JSON.stringify(fleet));
+  await writeFile(marker, JSON.stringify({ ...fleet, revision: FIXTURE_REVISION }));
   return fleet;
 }
