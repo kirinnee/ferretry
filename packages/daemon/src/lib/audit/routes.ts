@@ -82,6 +82,9 @@ export const AUDITED_ROUTES: readonly AuditedRouteRule[] = [
     fixedSubject: 'security-settings',
     responseSettings: ['view', 'settings'],
   },
+  // A tunnel changes how other devices reach this machine — a hostname on Cloudflare's edge in front of it
+  // — so switching it is kept as a change to the machine's security, beside the settings above.
+  { method: 'PUT', path: '/v1/tunnel', event: 'security.changed', fixedSubject: 'tunnel' },
   // Updating this machine runs new code on it, and turning on automatic updates lets it do so unasked:
   // both are kept as changes to the machine's security, like its settings.
   { method: 'POST', path: '/v1/daemon/update', event: 'security.changed', fixedSubject: 'daemon-update' },

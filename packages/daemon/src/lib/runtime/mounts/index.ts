@@ -28,6 +28,7 @@ import type { OperatorReadService } from '../../session/reads/index.ts';
 import type { SessionRuntimeSubsystem } from '../../session/runtime-control/types.ts';
 import type { SendTrackingLoop } from '../../session/send/tracker.ts';
 import type { StepUpService } from '../../step-up/index.ts';
+import type { TunnelSwitchPort } from '../../tunnel/index.ts';
 import type { DaemonUpdateSubsystem } from '../../update/index.ts';
 import type { MillisecondClockPort } from '../boot.ts';
 import type { PublishedCarrierView } from '../published-carriers.ts';
@@ -99,6 +100,7 @@ import { type SttEnhancementSubsystem, sttEnhancementRoutes } from './stt.ts';
 import { type TaskBoardSubsystem, taskBoardRoutes } from './task-boards.ts';
 import { type TaskSubsystem, taskRoutes } from './tasks.ts';
 import { type TerminalSubsystem, terminalRoutes, terminalSocketRoutes } from './terminals.ts';
+import { tunnelRoutes } from './tunnel.ts';
 import { type WardenSubsystem, wardenRoutes } from './warden.ts';
 import { type WebRtcSignallingSubsystem, webrtcRoutes } from './webrtc.ts';
 import { type WorktreeSubsystem, worktreeRoutes } from './worktrees.ts';
@@ -166,6 +168,9 @@ export interface MountedSubsystems {
    *  connector is registered (`runtime/published-carriers.ts`). A daemon that published its carriers
    *  only at pairing time had no way to tell an already-paired phone that its reach had changed. */
   readonly carriers: PublishedCarrierView;
+  /** Whether this machine runs a Cloudflare tunnel, and the switch that turns it on or off without a
+   *  restart (`docs/relay-protocol.md` §15). The tunnel is opt-in. */
+  readonly tunnel: TunnelSwitchPort;
   /** The peer-to-peer carrier's signalling: a paired device's offer in, this daemon's answer out
    *  (`docs/relay-protocol.md` §16). */
   readonly webrtc: WebRtcSignallingSubsystem;
@@ -458,6 +463,10 @@ export function mountedDaemonRoutes(base: DaemonApiDependencies, subsystems: Mou
         // neither shadow nor be shadowed. It is authenticated rather than operator-scoped — the remote
         // device is the reader, and nothing here is a secret. See the mount's own header.
         ...carrierRoutes(subsystems.carriers),
+        // The tunnel switch sits beside the carrier refresh because it changes what that refresh answers:
+        // a tunnel switched on is published there once it connects. `/v1/tunnel` is a fixed literal no
+        // other subsystem uses, so it can neither shadow nor be shadowed. See the mount's own header.
+        ...tunnelRoutes(subsystems.tunnel),
         // The second way to reach this daemon is asked for inside the first, which is why it sits beside
         // the carrier refresh: a paired device that reached it over the relay offers a peer-to-peer path
         // here. `/v1/webrtc` is used by nothing else, so it can neither shadow nor be shadowed.

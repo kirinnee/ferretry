@@ -572,6 +572,7 @@ import {
   DirectSession,
   DONE_MARKER_FILENAME,
   declaredModel,
+  declaresTunnelCarrier,
   decodeInitialAttachments,
   defaultAutoResumeSettings,
   defaultManagedWorktreeRoot,
@@ -873,7 +874,10 @@ import {
   type TriageGuardPort,
   TunnelCarrier,
   type TunnelCarrierDependencies,
+  TunnelCarrierSwitch,
+  type TunnelEntryStorePort,
   type TunnelServicePort,
+  type TunnelSwitchPort,
   tailTranscriptEvents,
   taskBoardTaskActionAuthorizer,
   temporaryFilePath,
@@ -1417,9 +1421,15 @@ export interface DaemonWorld {
   readonly createTunnelCarrier: (
     input: Pick<
       TunnelCarrierDependencies,
-      'entry' | 'cloudflared' | 'service' | 'openListener' | 'publish' | 'notices'
+      'entry' | 'explicit' | 'cloudflared' | 'service' | 'openListener' | 'publish' | 'notices'
     >,
   ) => TunnelCarrier;
+  /**
+   * Where the tunnel switch writes its decision: the ONE `{ kind: 'tunnel' }` entry, in the document
+   * this daemon booted from, under the same barrier grant and pricing writes hold — so a toggle and a
+   * grant change made at once cannot each preserve a stale copy and erase the other's key.
+   */
+  readonly tunnelEntry: TunnelEntryStorePort;
   /**
    * The peer-to-peer carrier's native engine (`docs/relay-protocol.md` §16), asked only whether it works.
    *
@@ -1520,6 +1530,11 @@ export interface DaemonWorld {
     security: SecuritySettingsService,
     /** The one published set pairing redemption reads and authenticated refresh serves. */
     carriers: PublishedCarrierView,
+    /**
+     * The tunnel switch, built by the boot before the subsystems because `/v1/tunnel` is a mounted
+     * route, and started by it after the relays — see `TunnelCarrierSwitch`.
+     */
+    tunnel: TunnelSwitchPort,
     /** The peer-to-peer carrier's signalling, built by the boot because its sessions need the dispatcher. */
     webrtc: WebRtcSignallingSubsystem,
     /**
@@ -7657,6 +7672,9 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
     relayDirectory: new HostedRelayDirectory(environment.relayDirectoryOrigin()),
     tunnelService: new HostedTunnelService(environment.relayDirectoryOrigin()),
     cloudflared: new CloudflaredLocator(process.env),
+    tunnelEntry: {
+      write: async entry => await daemonConfigMutations.runExclusive(() => daemonConfigStore.writeTunnelEntry(entry)),
+    },
     createTunnelCarrier: input => {
       const directoryOrigin = environment.relayDirectoryOrigin();
       return new TunnelCarrier({
@@ -7770,6 +7788,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       stepUp,
       security,
       carriers,
+      tunnel,
       webrtc,
       harnessDiscovery,
       browserLauncher,
@@ -9029,6 +9048,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         stepUp,
         security,
         carriers,
+        tunnel,
         webrtc,
         harnessLogin,
         mcpOAuth,
@@ -9885,6 +9905,20 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
     peerId: () => Buffer.from(crypto.getRandomValues(new Uint8Array(16))).toString('base64url'),
   });
   cleanups.push(() => webrtc.close());
+  /**
+   * THE TUNNEL SWITCH (`docs/relay-protocol.md` §15), built before the subsystems because
+   * `/v1/tunnel` is a mounted route, and started below, after the relays. The tunnel is opt-in: a
+   * document that names no tunnel implies one switched off, and `fy daemon tunnel on` or a paired
+   * device's `PUT /v1/tunnel` turns it on without a restart.
+   */
+  const tunnel = new TunnelCarrierSwitch({
+    entry: config.carrierSet.tunnel,
+    explicit: declaresTunnelCarrier(config.carriers),
+    store: world.tunnelEntry,
+  });
+  // Registered before anything can start it: the listener and the child it may take must be released
+  // whether the boot completes or not.
+  cleanups.push(async () => await tunnel.stop());
   progress.enter('mounting subsystems');
   const subsystems = world.createSubsystems(
     opened.storage,
@@ -9918,6 +9952,7 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
     pairing.stepUp,
     pairing.security,
     carriers,
+    tunnel,
     webrtc,
     harnessDiscovery,
     world.browserLauncher,
@@ -10100,46 +10135,48 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
    *
    * IT NEVER HOLDS THE BOOT UP AND NEVER FAILS IT. Provisioning talks to a service off this machine;
    * it runs behind `start`, and every failure is a sentence and a carrier that is simply off.
+   *
+   * THE SWITCH BUILDS ONE CARRIER PER ENTRY: this one now, and a new one each time the tunnel is
+   * switched while the daemon runs, each with its own listener.
    */
-  const tunnel = world.createTunnelCarrier({
-    entry: config.carrierSet.tunnel,
-    cloudflared: world.cloudflared,
-    service: world.tunnelService,
-    openListener: async () => {
-      const route = await world.createDirectCarrier(
-        async request => await dispatcher.dispatch(request),
-        {
-          upgrade: async request => await socketDispatcher.upgrade(request),
-          reauthorize: request => socketDispatcher.reauthorize(request),
-        },
-        sessionDevices,
-        pairing.subsystem,
-      );
-      if ('refusal' in route) throw new Error(`there is no session route to serve — ${route.refusal}`);
-      const listener = await world.api.listen(
-        tunnelListenerSurface({
-          route: route.route,
-          credentials: base.credentials,
-          guard: subsystems.grants,
-          corsOrigins: browserOrigins(config),
-        }),
-        { host: '127.0.0.1', port: 0, directLoopbackIsPrivileged: false, remotePeer: tunnelPeer },
-      );
-      return {
-        port: listener.port,
-        close: async () => {
-          listener.closeSockets();
-          await listener.stop();
-        },
-      };
-    },
-    publish: url => carriers.tunnel(url),
-    notices: world.notices,
-  });
-  // Registered before it starts, like every other acquisition: the listener and the child it may take
-  // must be released whether the boot completes or not.
-  cleanups.push(async () => await tunnel.stop());
-  tunnel.start();
+  tunnel.start((entry, explicit) =>
+    world.createTunnelCarrier({
+      entry,
+      explicit,
+      cloudflared: world.cloudflared,
+      service: world.tunnelService,
+      openListener: async () => {
+        const route = await world.createDirectCarrier(
+          async request => await dispatcher.dispatch(request),
+          {
+            upgrade: async request => await socketDispatcher.upgrade(request),
+            reauthorize: request => socketDispatcher.reauthorize(request),
+          },
+          sessionDevices,
+          pairing.subsystem,
+        );
+        if ('refusal' in route) throw new Error(`there is no session route to serve — ${route.refusal}`);
+        const listener = await world.api.listen(
+          tunnelListenerSurface({
+            route: route.route,
+            credentials: base.credentials,
+            guard: subsystems.grants,
+            corsOrigins: browserOrigins(config),
+          }),
+          { host: '127.0.0.1', port: 0, directLoopbackIsPrivileged: false, remotePeer: tunnelPeer },
+        );
+        return {
+          port: listener.port,
+          close: async () => {
+            listener.closeSockets();
+            await listener.stop();
+          },
+        };
+      },
+      publish: url => carriers.tunnel(url),
+      notices: world.notices,
+    }),
+  );
   // The self-check tick, armed only once the daemon is actually serving. Its cadence IS the number
   // the wedge detector measures lateness against, so it comes from the same settings object the
   // service reasons with rather than a constant here — a timer that fired on a different period
@@ -10580,6 +10617,7 @@ export async function checkConfiguration(
     say(
       describeTunnelPosture({
         entry: tunnelEntry,
+        explicit: declaresTunnelCarrier(config.carriers),
         configFile: world.config.path,
         location: tunnelLocation,
         availability: tunnelAvailability,

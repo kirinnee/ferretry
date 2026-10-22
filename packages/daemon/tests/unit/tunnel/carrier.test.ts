@@ -6,7 +6,7 @@
 import { beforeAll, beforeEach, describe, it } from 'bun:test';
 import type { DaemonIdentity } from '@ferretry/relay';
 import should from 'should';
-import { DISCOVERED_TUNNEL_CARRIER } from '../../../src/lib/runtime/carriers.ts';
+import { DaemonTunnelCarrierSchema } from '../../../src/lib/runtime/carriers.ts';
 import {
   CLOUDFLARED_NOT_ON_PATH,
   type CloudflaredLocation,
@@ -26,7 +26,11 @@ import {
   RecordedNotices,
   registered,
   testCrypto,
+  unregistered,
 } from './support.ts';
+
+/** The entry an operator writes to turn the tunnel on: no `enabled` key means on. */
+const TUNNEL_ON = DaemonTunnelCarrierSchema.parse({ kind: 'tunnel', source: 'discovery' });
 
 const ORIGIN = 'https://ferretry-hosted-relay.example.workers.dev';
 const OFF = { kind: 'tunnel', source: 'discovery', enabled: false } as const;
@@ -84,7 +88,8 @@ beforeEach(() => {
 
 function carrier(overrides: Partial<TunnelCarrierDependencies> = {}): TunnelCarrier {
   return new TunnelCarrier({
-    entry: DISCOVERED_TUNNEL_CARRIER,
+    entry: TUNNEL_ON,
+    explicit: true,
     discoveryOrigin: ORIGIN,
     cloudflared: { locate: () => CLOUDFLARED },
     service: {
@@ -554,10 +559,121 @@ describe('switching the hosted tunnel off', () => {
   });
 });
 
+describe('the tunnel carrier’s status', () => {
+  it('should move provisioning → connecting → up → connecting as the connector registers and drops', async () => {
+    // Arrange
+    const subject = carrier();
+    const before = subject.status;
+
+    // Act
+    subject.start();
+    await subject.idle();
+    const provisioned = subject.status;
+    world.processes.latest.say(registered(0));
+    const published = subject.status;
+    world.processes.latest.say(unregistered(0));
+    const dropped = subject.status;
+
+    // Assert
+    should(before).deepEqual({ state: 'provisioning', tunnelUrl: undefined, reason: undefined });
+    should(provisioned).deepEqual({
+      state: 'connecting',
+      tunnelUrl: 'https://quiet-otter.tunnels.example',
+      reason: undefined,
+    });
+    should(published.state).equal('up');
+    should(dropped.state).equal('connecting');
+  });
+
+  it('should stay provisioning through a retry, with the retry as its reason', async () => {
+    // Arrange
+    world.provisioner.provisionAnswers = [
+      { kind: 'failed', reason: 'this daemon could not reach the hosted tunnel service' },
+    ];
+
+    // Act
+    const subject = await started();
+
+    // Assert
+    should(subject.status).deepEqual({
+      state: 'provisioning',
+      tunnelUrl: undefined,
+      reason: 'provisioning failed — this daemon could not reach the hosted tunnel service; retrying in 5s',
+    });
+  });
+
+  it('should be unavailable, with the reason and no hostname, when it cannot run', async () => {
+    // Act
+    const absent = await started({ cloudflared: { locate: () => CLOUDFLARED_NOT_ON_PATH } });
+    const unprovisioned = await started({ service: { read: async () => NO_TUNNEL_SERVICE } });
+
+    // Assert
+    should(absent.status.state).equal('unavailable');
+    should(absent.status.reason).match(/^cloudflared is not on this daemon’s PATH/u);
+    should(unprovisioned.status).deepEqual({
+      state: 'unavailable',
+      tunnelUrl: undefined,
+      reason: 'this build carries no hosted service to ask',
+    });
+  });
+
+  it('should be off when its entry is off', async () => {
+    // Act
+    const subject = await started({ entry: OFF });
+
+    // Assert
+    should(subject.status).deepEqual({ state: 'off', tunnelUrl: undefined, reason: undefined });
+  });
+});
+
+describe('the opt-in default', () => {
+  it('should say how to turn the tunnel on when nobody switched it off, and ask nothing', async () => {
+    // Act
+    await started({ entry: OFF, explicit: false });
+
+    // Assert
+    should(world.notices.steps).deepEqual(['tunnel carrier off (opt-in): turn on with `fy daemon tunnel on`']);
+    should(world.notices.stated).deepEqual([]);
+    should(world.serviceReads).deepEqual([]);
+    should(world.listener.opened).equal(0);
+  });
+
+  it('should release the tunnel the old implied-on default provisioned, and say why and how to turn it on', async () => {
+    // Arrange — a daemon updated from the release where an undeclared tunnel was implied on.
+    world.holding.held = { origin: ORIGIN, tunnelUrl: 'https://quiet-otter.tunnels.example' };
+
+    // Act
+    await started({ entry: OFF, explicit: false });
+
+    // Assert
+    should(world.provisioner.releases.length).equal(1);
+    should(world.provisioner.verdicts).deepEqual([true]);
+    should(world.holding.held).be.undefined();
+    should(world.notices.stated).deepEqual([
+      'tunnel carrier off (opt-in) — released https://quiet-otter.tunnels.example; turn on with `fy daemon tunnel on`',
+    ]);
+  });
+
+  it('should say the service held nothing in the ordinary words, even for the default', async () => {
+    // Arrange
+    world.holding.held = { origin: ORIGIN, tunnelUrl: 'https://quiet-otter.tunnels.example' };
+    world.provisioner.releaseAnswers = [{ kind: 'ok', value: { version: 1, released: false } }];
+
+    // Act
+    await started({ entry: OFF, explicit: false });
+
+    // Assert
+    should(world.notices.steps).containEql(
+      'tunnel released: the hosted service held no tunnel for this daemon any more (https://quiet-otter.tunnels.example)',
+    );
+  });
+});
+
 describe('the tunnel posture', () => {
   const posture = (input: Partial<Parameters<typeof describeTunnelPosture>[0]>) =>
     describeTunnelPosture({
-      entry: DISCOVERED_TUNNEL_CARRIER,
+      entry: TUNNEL_ON,
+      explicit: true,
       configFile: '/home/me/.ferretry/config/daemon.json',
       location: CLOUDFLARED,
       availability: { kind: 'available', origin: ORIGIN },
@@ -569,6 +685,10 @@ describe('the tunnel posture', () => {
       `tunnel       hosted — provisioned at boot from ${ORIGIN}, run by cloudflared at /usr/bin/cloudflared`,
     );
     should(posture({ entry: OFF })).equal('tunnel       off — switched off in /home/me/.ferretry/config/daemon.json');
+    // Nobody switched it off: the opt-in default says how to turn it on instead of naming a file.
+    should(posture({ entry: OFF, explicit: false })).equal(
+      'tunnel       off (opt-in) — turn on with `fy daemon tunnel on`',
+    );
     should(posture({ location: CLOUDFLARED_NOT_ON_PATH })).match(
       /^tunnel {7}off — cloudflared is not on this daemon’s PATH/u,
     );

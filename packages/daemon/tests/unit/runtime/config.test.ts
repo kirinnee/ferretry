@@ -1,7 +1,7 @@
 import { describe, it } from 'bun:test';
 import { FY_DEFAULT_DAEMON_PORT, recordedBindAddress } from '@ferretry/protocol';
 import should from 'should';
-import { DISCOVERED_RELAY_CARRIER, DISCOVERED_TUNNEL_CARRIER } from '../../../src/lib/runtime/carriers.ts';
+import { DISCOVERED_RELAY_CARRIER, IMPLIED_TUNNEL_CARRIER } from '../../../src/lib/runtime/carriers.ts';
 import {
   advertisesForeignAddress,
   configuredAt,
@@ -312,7 +312,7 @@ describe('the carriers a document declares', () => {
     should(legacy.carrierSet).deepEqual({
       bind: { kind: 'bind', host: 'box.lan', port: 9_100 },
       relays: [{ kind: 'relay', url: 'wss://relay.example', enabled: true, reconnectSeconds: 5 }],
-      tunnel: DISCOVERED_TUNNEL_CARRIER,
+      tunnel: IMPLIED_TUNNEL_CARRIER,
     });
     should(legacy.bindUrl).equal('http://box.lan:9100');
     // A document that names no rendezvous at all still asks the directory, because a daemon that
@@ -320,7 +320,7 @@ describe('the carriers a document declares', () => {
     should(defaultDaemonConfig().carrierSet).deepEqual({
       bind: { kind: 'bind', host: '127.0.0.1', port: FY_DEFAULT_DAEMON_PORT },
       relays: [DISCOVERED_RELAY_CARRIER],
-      tunnel: DISCOVERED_TUNNEL_CARRIER,
+      tunnel: IMPLIED_TUNNEL_CARRIER,
     });
     should(defaultDaemonConfig().portIsRecorded).be.false();
   });

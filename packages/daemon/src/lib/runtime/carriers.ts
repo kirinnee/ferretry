@@ -143,8 +143,9 @@ export function relayCarrierIsConfigured(
  * (it adds no address anybody on a network can reach) nor a relay (no rendezvous is involved).
  *
  * There is only `source: 'discovery'`: the tunnel is whatever Ferretry's hosted service provisions for
- * this fingerprint, and there is nothing an operator could write down instead. Saying "no tunnel, and I
- * mean it" is this entry with `enabled: false`, and a daemon that held a tunnel then releases it.
+ * this fingerprint, and there is nothing an operator could write down instead. An entry with no
+ * `enabled` key means ON — writing the entry is the decision — and `enabled: false` means "no tunnel,
+ * and I mean it"; a daemon that held a tunnel then releases it.
  */
 export const DaemonTunnelCarrierSchema = z.strictObject({
   kind: z.literal('tunnel'),
@@ -154,15 +155,26 @@ export const DaemonTunnelCarrierSchema = z.strictObject({
 export type DaemonTunnelCarrierEntry = z.output<typeof DaemonTunnelCarrierSchema>;
 
 /**
- * What a document that declares no tunnel means: ask the hosted service for one.
+ * What a document that declares no tunnel means: NO TUNNEL. The tunnel is opt-in.
  *
- * IMPLIED EXACTLY AS THE HOSTED RELAY ENTRY IS, for the same reason — a fresh install with nothing
- * configured should be reachable from somewhere else — and with the same escape: an explicit entry
- * switched off is a decision, which an omission can never be.
+ * THIS IS DELIBERATELY NOT HOW THE HOSTED RELAY ENTRY IS IMPLIED. A relay adds no new party to a
+ * daemon's reach that the default install did not already have, and a daemon that dialled nowhere was
+ * reachable from nothing but its own host. A tunnel puts a public hostname on a third party's edge in
+ * front of this machine and runs a third-party binary beside it; that is a decision somebody makes for
+ * one machine — `fy daemon tunnel on`, or Settings › Connection — never something an update does to
+ * every machine at once.
+ *
+ * A daemon that provisioned a tunnel under the old implied-on default boots with this entry, and so
+ * releases the tunnel it holds (`TunnelCarrier`), saying how to turn it back on.
  */
-export const DISCOVERED_TUNNEL_CARRIER: DaemonTunnelCarrierEntry = Object.freeze(
-  DaemonTunnelCarrierSchema.parse({ kind: 'tunnel', source: 'discovery' }),
+export const IMPLIED_TUNNEL_CARRIER: DaemonTunnelCarrierEntry = Object.freeze(
+  DaemonTunnelCarrierSchema.parse({ kind: 'tunnel', source: 'discovery', enabled: false }),
 );
+
+/** Whether the operator's list names a tunnel entry, as opposed to the opt-in default implying one. */
+export function declaresTunnelCarrier(carriers: readonly DaemonCarrierEntry[]): boolean {
+  return carriers.some(carrier => carrier.kind === 'tunnel');
+}
 
 export const DaemonCarrierEntrySchema = z.union([
   DaemonBindCarrierSchema,
@@ -240,7 +252,7 @@ export interface DaemonCarrierDocumentInput {
 export interface DaemonCarrierSet {
   readonly bind: DaemonBindCarrier;
   readonly relays: readonly DaemonRelayCarrierEntry[];
-  /** Always present: the declared entry, or the implied hosted one ({@link DISCOVERED_TUNNEL_CARRIER}). */
+  /** Always present: the declared entry, or the implied opt-in default ({@link IMPLIED_TUNNEL_CARRIER}), which is off. */
   readonly tunnel: DaemonTunnelCarrierEntry;
 }
 
@@ -270,7 +282,7 @@ export function resolveDaemonCarriers(input: DaemonCarrierDocumentInput): Daemon
   // There is no legacy spelling of a tunnel, so the only question is whether the list names one.
   const tunnel =
     input.carriers.find((carrier): carrier is DaemonTunnelCarrierEntry => carrier.kind === 'tunnel') ??
-    DISCOVERED_TUNNEL_CARRIER;
+    IMPLIED_TUNNEL_CARRIER;
   if (declaredRelays.length > 0) return { bind, relays: declaredRelays, tunnel };
   const legacy = input.relay;
   const relay =

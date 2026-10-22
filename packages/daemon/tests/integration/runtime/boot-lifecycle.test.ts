@@ -44,6 +44,8 @@ import {
   TerminalListViewSchema,
   TerminalViewSchema,
   TranscriptProvenanceSchema,
+  TUNNEL_OFF_SENTENCE,
+  TunnelStatusViewSchema,
   UNLOCK_REQUIRED_CODE,
   WILDCARD_BIND_HOST,
 } from '@ferretry/protocol';
@@ -65,8 +67,6 @@ import {
 } from '../../../src/adapters/session/transcript/file-message-token-codec.ts';
 import { NodeTranscriptSource } from '../../../src/adapters/transcript/index.ts';
 import { CloudflaredLocator } from '../../../src/adapters/tunnel/index.ts';
-import { CLOUDFLARED_NOT_ON_PATH, NO_TUNNEL_SERVICE } from '../../../src/lib/tunnel/index.ts';
-import { FakeHostedService, fakeCloudflared, removeTempDirectories } from '../tunnel/support.ts';
 import {
   type BootNoticePort,
   CodexTranscriptParser,
@@ -97,6 +97,7 @@ import {
   type TerminalRuntimePort,
   verifySessionTranscriptMessageToken,
 } from '../../../src/lib/index.ts';
+import { CLOUDFLARED_NOT_ON_PATH, NO_TUNNEL_SERVICE } from '../../../src/lib/tunnel/index.ts';
 import { daemonVersion } from '../../../src/lib/version.ts';
 import { docxBytes } from '../../fixtures/docx.ts';
 import { healthViewFixture } from '../../fixtures/health-view.ts';
@@ -110,6 +111,7 @@ import {
 } from '../../support/passkey-authenticator.ts';
 import { deviceSession, newTestDevice, pairOverSession, TestSession } from '../../support/session-client.ts';
 import { ABSENT_USER_HOME, cleanupTempDirectories, tempDirectory } from '../support/repository.ts';
+import { FakeHostedService, fakeCloudflared, removeTempDirectories } from '../tunnel/support.ts';
 
 /**
  * The daemon's boot lifecycle, driven through the real composition root.
@@ -1159,11 +1161,13 @@ describe('daemon boot lifecycle', () => {
     should(deviceDocument).not.containEql('tokenHash');
   });
 
-  it('should publish the hosted tunnel and serve it as a remote carrier through the production composition root', async () => {
+  it('should switch the hosted tunnel on live, serve it as a remote carrier, and release it when switched off', async () => {
     // `docs/relay-protocol.md` §15 "The daemon end", end to end: the production tunnel carrier against a
     // fake hosted service on loopback (which verifies each signature over its own host) and a fake
     // `cloudflared` executable. The test dials the dedicated listener directly, which is exactly where
-    // `cloudflared` forwards a tunnelled browser — from this host's loopback.
+    // `cloudflared` forwards a tunnelled browser — from this host's loopback. The tunnel is opt-in, so
+    // the document names none and it is switched on through `PUT /v1/tunnel` — what `fy daemon tunnel
+    // on` sends — with no restart.
     // Arrange
     const home = await tempDirectory('fyd-tunnel');
     const port = await freeLoopbackPort();
@@ -1181,6 +1185,10 @@ describe('daemon boot lifecycle', () => {
       tunnelService: { read: async () => ({ kind: 'available', origin: service.origin }) },
       cloudflared: new CloudflaredLocator({ FY_CLOUDFLARED: fake.path }),
     };
+    // The origin this build DISCOVERS, which a release is signed only for: the fake service, read live
+    // by the production carrier exactly as a daemon reads its own environment. Restored below.
+    const discovery = process.env.FY_RELAY_DIRECTORY_ORIGIN;
+    process.env.FY_RELAY_DIRECTORY_ORIGIN = service.origin;
     const exit = start(world, cleanups);
     const base = `http://127.0.0.1:${port}`;
     const origin = 'https://ferretry.pages.dev';
@@ -1199,6 +1207,17 @@ describe('daemon boot lifecycle', () => {
     if (pairing.kind !== 'paired') throw new Error('the direct session refused a fresh code');
     const direct = await deviceSession(base, minted.daemonId, pairing.response.deviceId, device, { origin });
     await unlockThroughTheDaemon(direct, await es256Authenticator());
+    const tunnelView = async () =>
+      TunnelStatusViewSchema.parse(JSON.parse((await direct.request('GET', '/v1/tunnel')).body));
+    const switchTunnel = async (enabled: boolean) =>
+      await fetch(`${base}/v1/tunnel`, {
+        method: 'PUT',
+        headers: { authorization: `Bearer ${adminToken}`, 'content-type': 'application/json' },
+        body: JSON.stringify({ enabled }),
+      });
+    const beforeOptIn = await tunnelView();
+    const provisionedBeforeOptIn = service.provisions.length;
+    const switchedOn = await switchTunnel(true);
     await waitUntil(() => service.provisions.length > 0, 'the tunnel to be provisioned');
     const originPort = service.provisions[0]?.originPort ?? 0;
     const tunnelBase = `http://127.0.0.1:${String(originPort)}`;
@@ -1245,18 +1264,59 @@ describe('daemon boot lifecycle', () => {
       'Second phone',
       await newTestDevice(),
     );
+    const upView = await tunnelView();
     tunnelled.close();
+    // Off, live: the answer comes once the tunnel is withdrawn, stopped and released back to the pool.
+    const switchedOff = await switchTunnel(false);
+    const offView = TunnelStatusViewSchema.parse(await switchedOff.json());
+    const carriersAfterOff = await carriersOf(direct);
+    const documentAfterOff = JSON.parse(await readFile(join(home, 'config', 'daemon.json'), 'utf8')) as Record<
+      string,
+      unknown
+    >;
+    const listenerAfterOff = await fetch(`${tunnelBase}/healthz`).catch(() => 'refused');
+    const holdingAfterOff = await readFile(join(home, 'state', 'tunnel.json'), 'utf8').catch(() => 'forgotten');
     direct.close();
     release();
     const code = await exit;
     await runCleanups(cleanups);
+    process.env.FY_RELAY_DIRECTORY_ORIGIN = discovery;
     const afterStop = await fetch(`${tunnelBase}/healthz`).catch(() => 'refused');
     await service.stop();
     await removeTempDirectories();
 
     // Assert
     should(code).equal(0);
-    should(service.verdicts).deepEqual([true]);
+    // Opt-in: nothing was asked of the hosted service until the switch was turned on.
+    should(beforeOptIn).deepEqual({
+      enabled: false,
+      explicit: false,
+      state: 'off',
+      tunnelUrl: null,
+      sentence: TUNNEL_OFF_SENTENCE,
+    });
+    should(provisionedBeforeOptIn).equal(0);
+    should(switchedOn.status).equal(200);
+    should(upView).deepEqual({
+      enabled: true,
+      explicit: true,
+      state: 'up',
+      tunnelUrl: 'https://quiet-otter.tunnels.example',
+      sentence: 'Tunnel: up — https://quiet-otter.tunnels.example',
+    });
+    // Off: withdrawn from the published set, the listener closed, the tunnel released and forgotten,
+    // and the decision written as one explicit entry beside the legacy keys it does not supersede.
+    should(offView.state).equal('off');
+    should(carriersAfterOff).deepEqual([{ kind: 'direct', url: base }]);
+    should(listenerAfterOff).equal('refused');
+    should(holdingAfterOff).equal('forgotten');
+    should(service.releases.length).equal(1);
+    should(documentAfterOff).deepEqual({
+      host: '127.0.0.1',
+      port,
+      carriers: [{ kind: 'tunnel', source: 'discovery', enabled: false }],
+    });
+    should(service.verdicts).deepEqual([true, true]);
     // Published after direct and before any relay, at the hostname the service provisioned.
     should(carriersThroughTunnel).deepEqual([
       { kind: 'direct', url: base },
@@ -1271,6 +1331,63 @@ describe('daemon boot lifecycle', () => {
     // Nothing but the session route is served on the tunnel's port, whatever credential is presented.
     should(plainHttp).deepEqual([404, 404, 404]);
     should(afterStop).equal('refused');
+  });
+
+  it('should release on update the tunnel the old implied-on default provisioned, and say how to turn it on', async () => {
+    // A daemon that provisioned a tunnel before the tunnel became opt-in, booting on the same document
+    // — which names no tunnel, and so now means none. Nothing is provisioned, and the held tunnel goes
+    // back to the pool with one line saying why and how to have it back.
+    // Arrange
+    const home = await tempDirectory('fyd-tunnel-migration');
+    const port = await freeLoopbackPort();
+    const service = new FakeHostedService();
+    const fake = await fakeCloudflared();
+    const said = recordingNotices();
+    const cleanups: Array<() => void | Promise<void>> = [];
+    let release = (): void => {};
+    const seeded = await worldAt(home, port, async () => {
+      await new Promise<void>(resolve => {
+        release = resolve;
+      });
+    });
+    await writeFile(
+      join(home, 'state', 'tunnel.json'),
+      `${JSON.stringify({ version: 1, origin: service.origin, tunnelUrl: 'https://quiet-otter.tunnels.example' })}\n`,
+      { mode: 0o600 },
+    );
+    const world: DaemonWorld = {
+      ...seeded,
+      notices: said.port,
+      tunnelService: { read: async () => ({ kind: 'available', origin: service.origin }) },
+      cloudflared: new CloudflaredLocator({ FY_CLOUDFLARED: fake.path }),
+    };
+    const discovery = process.env.FY_RELAY_DIRECTORY_ORIGIN;
+    process.env.FY_RELAY_DIRECTORY_ORIGIN = service.origin;
+
+    // Act
+    const exit = start(world, cleanups);
+    await waitUntil(() => service.releases.length > 0, 'the held tunnel to be released');
+    await waitUntil(
+      () => said.stated.some(line => line.startsWith('tunnel carrier off (opt-in) — released')),
+      'the release to be said',
+    );
+    const holding = await readFile(join(home, 'state', 'tunnel.json'), 'utf8').catch(() => 'forgotten');
+    release();
+    const code = await exit;
+    await runCleanups(cleanups);
+    process.env.FY_RELAY_DIRECTORY_ORIGIN = discovery;
+    await service.stop();
+    await removeTempDirectories();
+
+    // Assert
+    should(code).equal(0);
+    should(service.provisions).deepEqual([]);
+    should(service.verdicts).deepEqual([true]);
+    should(holding).equal('forgotten');
+    should(said.steps).containEql('tunnel carrier off (opt-in) — turn on with `fy daemon tunnel on`');
+    should(said.stated).containEql(
+      'tunnel carrier off (opt-in) — released https://quiet-otter.tunnels.example; turn on with `fy daemon tunnel on`',
+    );
   });
 
   it('should delete a stale operator-password verifier at boot and say so once', async () => {

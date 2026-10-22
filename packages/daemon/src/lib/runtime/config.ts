@@ -23,6 +23,7 @@ import type { RunOverrides } from './arguments.ts';
 import {
   type DaemonCarrierSet,
   DaemonCarriersDocumentSchema,
+  type DaemonTunnelCarrierEntry,
   HostSchema,
   PortSchema,
   resolveDaemonCarriers,
@@ -539,6 +540,37 @@ export function recordedPortDocument(
     carriers: (rawDocument.carriers as readonly unknown[]).map(entry =>
       entry === listener ? { ...listener, port } : entry,
     ),
+  };
+}
+
+/**
+ * The document with exactly one tunnel entry in it, as the tunnel switch writes it (`fy daemon tunnel
+ * on|off`, `PUT /v1/tunnel`).
+ *
+ * RAW IN, RAW OUT, for the reason `recordedPortDocument` is: a default on disk is indistinguishable
+ * from a line the operator typed. Every other entry and key stays exactly as written.
+ *
+ * A DOCUMENT WITH NO `carriers` KEY GAINS ONE HOLDING ONLY THE TUNNEL, and that supersedes nothing. A
+ * legacy key is superseded per KIND (`supersededCarrierKeys`, `declaredBind`), and a tunnel is neither
+ * a bind nor a relay, so `host`, `port` and `relay` keep deciding where this daemon listens and dials.
+ * Moving them into the list would be the switch rewriting the operator's file behind their back.
+ *
+ * An existing tunnel entry is REPLACED in place rather than appended to, because the list holds at most
+ * one and the second would refuse the next boot.
+ */
+export function tunnelEntryDocument(
+  rawDocument: Readonly<Record<string, unknown>>,
+  entry: DaemonTunnelCarrierEntry,
+): Record<string, unknown> {
+  const written = { kind: entry.kind, source: entry.source, enabled: entry.enabled };
+  const carriers: readonly unknown[] = Array.isArray(rawDocument.carriers) ? rawDocument.carriers : [];
+  const isTunnel = (candidate: unknown): boolean =>
+    typeof candidate === 'object' && candidate !== null && (candidate as { readonly kind?: unknown }).kind === 'tunnel';
+  return {
+    ...rawDocument,
+    carriers: carriers.some(isTunnel)
+      ? carriers.map(candidate => (isTunnel(candidate) ? written : candidate))
+      : [...carriers, written],
   };
 }
 

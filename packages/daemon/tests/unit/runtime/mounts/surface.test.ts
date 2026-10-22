@@ -145,6 +145,14 @@ const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
     { kind: 'direct', url: 'https://workstation.example.test' },
     { kind: 'relay', url: 'wss://rendezvous.example.test/fy' },
   ]),
+  tunnel: {
+    view: () => {
+      throw new Error('not exercised by the surface inventory');
+    },
+    change: async () => {
+      throw new Error('not exercised by the surface inventory');
+    },
+  },
   webrtc: {
     offer: async () => {
       throw new Error('not exercised by the surface inventory');
@@ -689,6 +697,7 @@ describe('the mounted daemon surface', () => {
       5 + // the passkey step-up: this device's passkeys, registration and step-up, each with its options (the owner's re-opened window is admin-token)
       1 + // one device's own grants, changed (B5)
       2 + // the machine's security settings: the read and the change (zero-trust B6)
+      1 + // switching the tunnel on or off (pairing.configure); its read is `authenticated`, like the carrier refresh
       2 + // the unlock: its options and the verified unlock (zero-trust B6)
       1 + // the Console's input: typing into a session's own pane, governed as `terminal.use`
       1 + // the permission prompt's answer: a digit or Escape into the same pane, governed the same way
@@ -713,7 +722,8 @@ describe('the mounted daemon surface', () => {
     // `none` lost `POST /v1/pair`: redemption happens only inside a session now, so it is no route at all.
     // `authenticated` gained the Warden's "who needs you" feed, which a live warden reads like its status,
     // and the WebRTC offer: any paired device may ask for a shorter path to its own daemon (§16).
-    should(minima).deepEqual({ none: 7, authenticated: 9, operator: operatorRoutes, 'admin-token': 1 });
+    // It gained the tunnel read too: whether a machine has a tunnel is not a secret (§15).
+    should(minima).deepEqual({ none: 7, authenticated: 10, operator: operatorRoutes, 'admin-token': 1 });
     should(
       routes.filter(route => route.privilegedOnly === true).map(route => `${route.method} ${route.path}`),
     ).deepEqual([
@@ -776,6 +786,10 @@ describe('the mounted daemon surface', () => {
       // there is no POST, PUT or DELETE here — a device may read where this daemon can be reached and
       // can never re-point it, because that is a change to the operator's own document.
       'GET /v1/carriers',
+      // The tunnel switch: whether this machine runs one, and on or off without a restart. NOTE WHAT IS
+      // ABSENT: no address in either direction — a device may switch the tunnel, never re-point it.
+      'GET /v1/tunnel',
+      'PUT /v1/tunnel',
       // The peer-to-peer carrier's signalling, asked for inside a session that already reached the daemon.
       'POST /v1/webrtc/offer',
       'GET /v1/health',

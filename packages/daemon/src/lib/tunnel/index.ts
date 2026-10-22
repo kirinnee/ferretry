@@ -5,3 +5,4 @@ export * from './provisioning.ts';
 export * from './schedule.ts';
 export * from './service.ts';
 export * from './supervisor.ts';
+export * from './switch.ts';
