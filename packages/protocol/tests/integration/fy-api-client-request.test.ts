@@ -26,6 +26,7 @@ describe('FyApiClient construction and generic requests', () => {
       'conversionPreview',
       'daemonUpdate',
       'events',
+      'fleetEvents',
       'foreignHistory',
       'foreignHistoryConversation',
       'fork',
