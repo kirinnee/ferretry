@@ -134,8 +134,9 @@ describe('cancelled and given-up sends sit in the timeline, not under it', () =>
     try {
       const tab = await open(context, 'theme=studio-light');
       await tab.locator('[data-settled-note] .fy-settled-open').last().click();
-      expect(await tab.locator('[data-ledger-action="collapse"]').count()).toBe(1);
-      await tab.locator('[data-ledger-action="collapse"]').click();
+      await tab.locator('[data-ledger-more]').click();
+      expect(await tab.locator('[data-menu-key="hide"]').count()).toBe(1);
+      await tab.locator('[data-menu-key="hide"]').click();
       expect(await tab.locator('[data-settled-note]').count()).toBe(2);
     } finally {
       await context.close();

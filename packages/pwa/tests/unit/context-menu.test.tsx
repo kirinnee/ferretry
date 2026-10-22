@@ -128,6 +128,21 @@ describe('ContextMenu', () => {
     await mounted.unmount();
   });
 
+  it('draws an item’s hint as a second line under its label, and a key the row can be found by', async () => {
+    const menu = await openMenu({
+      items: [
+        { key: 'plain', label: 'Plain', onSelect: () => {} },
+        { key: 'hinted', label: 'Hinted', hint: 'Says what it does', onSelect: () => {} },
+      ],
+    });
+
+    const [plain, hinted] = menu.rows();
+    expect(plain?.dataset['menuKey']).toBe('plain');
+    expect(plain?.querySelector('[data-menu-hint]')).toBeNull();
+    expect(hinted?.querySelector('[data-menu-hint]')?.textContent).toBe('Says what it does');
+    await menu.unmount();
+  });
+
   it('is a vertical menu that names itself, with one row per item', async () => {
     const menu = await openMenu();
 

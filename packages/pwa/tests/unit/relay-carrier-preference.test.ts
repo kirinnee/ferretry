@@ -22,6 +22,7 @@ import {
   type DaemonCarrierRouterOptions,
   DIRECT_SESSION_DEADLINE_MS,
   RELAY_UNAVAILABLE,
+  TUNNEL_LOOKUP_REUSE_MS,
   WEBRTC_UNAVAILABLE,
   type WebRtcDialContext,
 } from '../../src/lib/relay-carrier.ts';
@@ -53,7 +54,21 @@ interface Setup {
   readonly heartbeat?: DaemonCarrierRouterOptions['heartbeat'];
   /** How the scripted daemon answers what reaches it. */
   readonly answer?: Parameters<typeof autoDial>[1];
+  /** The set the daemon answers `GET /v1/carriers` with, after its direct address; absent answers no set. */
+  readonly publishes?: readonly ConnectionMethod[];
+  readonly now?: () => number;
 }
+
+/** The daemon's `GET /v1/carriers` view, in its own wire spelling. */
+const carriersView = (methods: readonly ConnectionMethod[]) => ({
+  carriers: methods.map(method =>
+    method.kind === 'direct'
+      ? { kind: 'direct', url: method.daemonUrl }
+      : method.kind === 'tunnel'
+        ? { kind: 'tunnel', url: method.tunnelUrl }
+        : { kind: 'relay', url: (method as RelayCarrier).relayUrl },
+  ),
+});
 
 const setup = async (options: Setup = {}) => {
   const identity = await newDaemonIdentity();
@@ -63,7 +78,18 @@ const setup = async (options: Setup = {}) => {
     deviceId: DEVICE_ID,
     carriers: [DIRECT, ...(options.published ?? [])],
   });
-  const live = autoDial(identity, { devicePublicKey: device.publicKey, ...options.answer });
+  const publishes = options.publishes;
+  const live = autoDial(identity, {
+    devicePublicKey: device.publicKey,
+    ...(publishes === undefined
+      ? {}
+      : {
+          respond: request =>
+            request.path === '/v1/carriers' ? { body: carriersView([DIRECT, ...publishes]) } : { body: {} },
+        }),
+    ...options.answer,
+  });
+  const learned: (readonly ConnectionMethod[])[] = [];
   const dialled: string[] = [];
   const dial = (url: string): ScriptedSocket => {
     dialled.push(url);
@@ -102,6 +128,10 @@ const setup = async (options: Setup = {}) => {
       hostedReads += 1;
       return options.hostedRelay;
     },
+    learned: (_daemon, carriers) => {
+      learned.push(carriers);
+    },
+    ...(options.now === undefined ? {} : { now: options.now }),
   });
   router.resolvePaired(() => [daemon]);
   const hosts = (): string[] => dialled.map(url => new URL(url).hostname);
@@ -114,6 +144,13 @@ const setup = async (options: Setup = {}) => {
     hosts,
     tunnelReads: () => tunnelReads,
     hostedReads: () => hostedReads,
+    learned,
+    /** The paths the daemon was asked for, over every carrier, in order. */
+    paths: (): string[] =>
+      live.requests.flatMap(request => {
+        const asked = (request as { readonly path?: unknown }).path;
+        return typeof asked === 'string' ? [asked] : [];
+      }),
   };
 };
 
@@ -236,7 +273,7 @@ describe('Tunnel only', () => {
   });
 
   it('should say "not set up by the operator" when there is no tunnel and the service is off', async () => {
-    const { router, daemon, hosts, tunnelReads, hostedReads } = await setup({
+    const { router, daemon, hosts, paths, tunnelReads, hostedReads } = await setup({
       published: [RELAY],
       reach: { [DIRECT_HOST]: 'live', 'relay.example': 'live' },
       preference: 'tunnel',
@@ -246,8 +283,10 @@ describe('Tunnel only', () => {
 
     await should(fetchProjects(router, daemon)).be.rejectedWith('Tunnel only: not set up by the operator.');
 
-    // A stated failure, never a fall back to a carrier the person excluded.
-    should(hosts()).eql([]);
+    // A stated failure, never a fall back to a carrier the person excluded: the one dial was the daemon
+    // being ASKED where its tunnel is, and the person's request never left this browser.
+    should(hosts()).eql([DIRECT_HOST]);
+    should(paths()).eql(['/v1/carriers']);
     should(tunnelReads()).equal(1);
     should(hostedReads()).equal(0);
     const choice = router.choice(daemon.daemonId);
@@ -256,14 +295,17 @@ describe('Tunnel only', () => {
   });
 
   it('should say "this machine has no tunnel yet" when the service is up but the daemon published none', async () => {
-    const { router, daemon, hosts } = await setup({
+    const { router, daemon, hosts, paths, learned } = await setup({
       reach: { [DIRECT_HOST]: 'live' },
       preference: 'tunnel',
       tunnelService: 'available',
+      publishes: [],
     });
 
     await should(fetchProjects(router, daemon)).be.rejectedWith('Tunnel only: this machine has no tunnel yet.');
-    should(hosts()).eql([]);
+    should(hosts()).eql([DIRECT_HOST]);
+    should(paths()).eql(['/v1/carriers']);
+    should(learned).eql([[DIRECT]]);
   });
 
   it('should read a build with no tunnel service as not set up by the operator', async () => {
@@ -277,7 +319,124 @@ describe('Tunnel only', () => {
     await should(fetchProjects(router, daemon)).be.rejectedWith(
       /^No configured connection worked: Cloudflare tunnel was not reachable/u,
     );
+    // The tunnel, then the daemon asked over its direct address, which did not answer either.
+    should(hosts()).eql([TUNNEL_HOST, DIRECT_HOST]);
+  });
+
+  it('should learn a tunnel it lost by asking the daemon over the relay, then carry the request on the tunnel', async () => {
+    // Arrange — the owner's defect: the tunnel was healthy, the browser had simply lost its address.
+    const { router, daemon, hosts, paths, learned } = await setup({
+      published: [RELAY],
+      reach: { 'relay.example': 'live', [TUNNEL_HOST]: 'live' },
+      preference: 'tunnel',
+      tunnelService: 'available',
+      publishes: [TUNNEL, RELAY],
+    });
+
+    // Act
+    const response = await fetchProjects(router, daemon);
+
+    // Assert — the relay carried the question and nothing else; the tunnel carried the request.
+    should(response.status).equal(200);
+    should(hosts()).eql([DIRECT_HOST, 'relay.example', TUNNEL_HOST]);
+    should(paths()).eql(['/v1/carriers', '/v1/projects']);
+    should(learned).eql([[DIRECT, TUNNEL, RELAY]]);
+    const choice = router.choice(daemon.daemonId);
+    if (choice?.ok !== true) throw new Error('the tunnel did not carry the request');
+    should(choice.method).eql(TUNNEL);
+    await settle(5);
+  });
+
+  it('should follow a re-provisioned hostname when the one it kept no longer answers', async () => {
+    const moved: ConnectionMethod = { kind: 'tunnel', tunnelUrl: 'https://n3w.tunnels.example.com' };
+    const { router, daemon, hosts, paths } = await setup({
+      published: [TUNNEL, RELAY],
+      reach: { 'relay.example': 'live', 'n3w.tunnels.example.com': 'live' },
+      preference: 'tunnel',
+      publishes: [moved, RELAY],
+    });
+
+    should((await fetchProjects(router, daemon)).status).equal(200);
+
+    should(hosts()).eql([TUNNEL_HOST, DIRECT_HOST, 'relay.example', 'n3w.tunnels.example.com']);
+    should(paths()).eql(['/v1/carriers', '/v1/projects']);
+    should(router.choice(daemon.daemonId)?.ok).be.true();
+    await settle(5);
+  });
+
+  it('should never hold up a connect on a lookup when the tunnel it kept answers', async () => {
+    const { router, daemon, hosts, paths, learned } = await setup({
+      published: [TUNNEL, RELAY],
+      reach: { [DIRECT_HOST]: 'live', [TUNNEL_HOST]: 'live', 'relay.example': 'live' },
+      preference: 'tunnel',
+      publishes: [TUNNEL, RELAY],
+    });
+
+    should((await fetchProjects(router, daemon)).status).equal(200);
+
     should(hosts()).eql([TUNNEL_HOST]);
+    should(paths()).eql(['/v1/projects']);
+    should(learned).eql([]);
+    await settle(5);
+  });
+
+  it('should not dial the kept tunnel twice when the daemon still names it', async () => {
+    const { router, daemon, hosts } = await setup({
+      published: [TUNNEL],
+      reach: { [DIRECT_HOST]: 'live' },
+      preference: 'tunnel',
+      publishes: [TUNNEL],
+    });
+
+    await should(fetchProjects(router, daemon)).be.rejectedWith(
+      /^No configured connection worked: Cloudflare tunnel was not reachable/u,
+    );
+    should(hosts()).eql([TUNNEL_HOST, DIRECT_HOST]);
+  });
+
+  it('should ask once per reuse window however many walks need the answer', async () => {
+    let clock = 1_000;
+    const { router, daemon, paths } = await setup({
+      reach: { [DIRECT_HOST]: 'live' },
+      preference: 'tunnel',
+      tunnelService: 'available',
+      publishes: [],
+      now: () => clock,
+    });
+
+    await should(fetchProjects(router, daemon)).be.rejected();
+    await should(fetchProjects(router, daemon)).be.rejected();
+    should(paths()).eql(['/v1/carriers']);
+
+    clock += TUNNEL_LOOKUP_REUSE_MS;
+    await should(fetchProjects(router, daemon)).be.rejected();
+    should(paths()).eql(['/v1/carriers', '/v1/carriers']);
+    await settle(5);
+  });
+
+  it('should treat an answer that is not a carrier set as finding nothing, and keep nothing', async () => {
+    const refused = await setup({
+      reach: { [DIRECT_HOST]: 'live' },
+      preference: 'tunnel',
+      tunnelService: 'available',
+      answer: { status: 503 },
+    });
+    await should(fetchProjects(refused.router, refused.daemon)).be.rejectedWith(
+      'Tunnel only: this machine has no tunnel yet.',
+    );
+    should(refused.learned).eql([]);
+
+    const garbled = await setup({
+      reach: { [DIRECT_HOST]: 'live' },
+      preference: 'tunnel',
+      tunnelService: 'available',
+      answer: { body: '{"carriers":"none"}' },
+    });
+    await should(fetchProjects(garbled.router, garbled.daemon)).be.rejectedWith(
+      'Tunnel only: this machine has no tunnel yet.',
+    );
+    should(garbled.learned).eql([]);
+    await settle(5);
   });
 
   it('should open a stream on the tunnel too, and refuse one with the same sentence when there is none', async () => {

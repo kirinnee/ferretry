@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { afterEach, describe, expect, test } from 'bun:test';
 import type { ReactTestInstance, ReactTestRenderer } from 'react-test-renderer';
 import {
   LedgerMessage,
@@ -19,7 +19,17 @@ import { peerFrom } from '../../src/lib/peer-message.ts';
 import { sendBadge } from '../../src/lib/send-badge.ts';
 import type { LedgerSendRecord } from '../../src/lib/send-ledger.ts';
 import { absoluteTime, type TranscriptEntry } from '../../src/lib/session-screens.ts';
+import {
+  actionKeys,
+  actionsButton,
+  chooseAction,
+  hasActionsButton,
+  openActions,
+  closeOpenMenus,
+} from '../support/ledger-menu.ts';
 import { render, runAsync } from '../support/react.ts';
+
+afterEach(closeOpenMenus);
 
 const record = (overrides: Partial<LedgerSendRecord> = {}): LedgerSendRecord => ({
   sendId: 'send-1',
@@ -335,7 +345,7 @@ describe('sends inside the transcript', () => {
     expect(textOf(transcript)).toContain('newer than the loaded transcript');
     expect(textOf(transcript)).not.toContain('a durable send attempt');
 
-    await click(buttonLabelled(transcript, 'Retry'));
+    await chooseAction(transcript, 'retry');
 
     expect(attempts).toEqual([['lost', false]]);
   });
@@ -391,24 +401,24 @@ describe('LedgerMessage', () => {
     expect(bodyless.root.findAllByProps({ className: expect.stringContaining('kt-user-copy') })).toHaveLength(0);
   });
 
-  test('offers no one-tap retry while a send is in flight, and no action at all once it was delivered', () => {
+  test('offers no one-tap retry while a send is in flight, and no action at all once it was delivered', async () => {
     for (const fate of ['accepted', 'queued'] as const) {
       const row = render(<LedgerMessage onRetry={async () => true} record={record({ fate })} />);
-      // The receipt, the guarded "Retry…" and Copy text — never a bare Retry that could send it twice.
-      expect(row.root.findAllByType('button').map(textOfNode).slice(1)).toEqual(['Retry…', 'Copy text']);
+      // The guarded "Send again" and Copy text — never a bare Retry that could send it twice.
+      expect(await actionKeys(row)).toEqual(['send-again', 'copy']);
     }
     const settled = render(<LedgerMessage onRetry={async () => true} record={record({ fate: 'delivered' })} />);
-    expect(settled.root.findAllByType('button')).toHaveLength(1);
+    expect(hasActionsButton(settled)).toBe(false);
     const unprovable = render(
       <LedgerMessage
         onRetry={async () => true}
         record={record({ fate: 'timed_out', unaccountedReason: 'session_ended' })}
       />,
     );
-    expect(unprovable.root.findAllByType('button').map(textOfNode).slice(1)).toEqual(['Copy text']);
+    expect(await actionKeys(unprovable)).toEqual(['copy']);
   });
 
-  test('retries a proven-absent send in one tap, under its own id, and says it is sending again', async () => {
+  test('retries a proven-absent send in one pick, under its own id, and says it is sending again', async () => {
     const attempts: Array<[string, boolean]> = [];
     const row = render(
       <LedgerMessage
@@ -420,14 +430,14 @@ describe('LedgerMessage', () => {
       />,
     );
 
-    await click(buttonLabelled(row, 'Retry'));
+    await chooseAction(row, 'retry');
 
     expect(attempts).toEqual([['send-1', false]]);
     expect(row.root.findByProps({ role: 'status' })).toBeDefined();
-    expect(row.root.findAll(node => node.type === 'button' && textOfNode(node) === 'Retry')).toHaveLength(0);
+    expect(await actionKeys(row)).not.toContain('retry');
   });
 
-  test('keeps "send again anyway" for an unconfirmed send behind a disclosure that says what it costs', async () => {
+  test('keeps "send again anyway" for an unconfirmed send behind a warning that says what it costs', async () => {
     const attempts: Array<[string, boolean]> = [];
     const row = render(
       <LedgerMessage
@@ -439,13 +449,16 @@ describe('LedgerMessage', () => {
       />,
     );
 
+    expect(textOf(row)).not.toContain(RESEND_RISK_COPY);
+    await chooseAction(row, 'send-again');
     expect(textOf(row)).toContain(RESEND_RISK_COPY);
+    expect(attempts).toEqual([]);
     await click(buttonLabelled(row, 'Send again anyway'));
 
     expect(attempts).toEqual([['send-1', true]]);
   });
 
-  test('offers no resend for a send whose session has no provable transcript, and says why', () => {
+  test('offers no resend for a send whose session has no provable transcript, and says why', async () => {
     // The owner's Codex session: the agent answered in its pane, and nothing could ever confirm it.
     const row = render(
       <LedgerMessage
@@ -456,12 +469,7 @@ describe('LedgerMessage', () => {
 
     expect(textOf(row)).toContain(UNBOUND_SEND_COPY);
     expect(textOf(row)).not.toContain(RESEND_RISK_COPY);
-    expect(
-      row.root
-        .findAll(node => node.type === 'button')
-        .map(textOfNode)
-        .slice(1),
-    ).toEqual(['Copy text']);
+    expect(await actionKeys(row)).toEqual(['copy']);
     expect(sendBadge(record({ fate: 'unaccounted', unaccountedReason: 'transcript_unbound' })).detail).toContain(
       'can’t find a transcript it can prove is this session’s',
     );
@@ -470,6 +478,7 @@ describe('LedgerMessage', () => {
   test('drops "Sending again" once the attempt it described has settled, so it never sticks', async () => {
     const first = record({ fate: 'unaccounted', unaccountedReason: 'timeout' });
     const row = render(<LedgerMessage onRetry={async () => true} record={first} />);
+    await chooseAction(row, 'send-again');
     await click(buttonLabelled(row, 'Send again anyway'));
     expect(textOf(row)).toContain('Sending again — this row updates');
 
@@ -484,11 +493,12 @@ describe('LedgerMessage', () => {
       row.update(<LedgerMessage onRetry={async () => true} record={{ ...first, attempt: 2 }} />);
     });
     expect(textOf(row)).not.toContain('Sending again — this row updates');
-    expect(textOf(row)).toContain(RESEND_RISK_COPY);
+    expect(await actionKeys(row)).toContain('send-again');
   });
 
-  test('reports a refused or thrown retry as an alert and leaves the control for another try', async () => {
+  test('reports a refused or thrown retry as an alert and leaves the action for another try', async () => {
     const refused = render(<LedgerMessage onRetry={async () => false} record={record({ fate: 'unaccounted' })} />);
+    await chooseAction(refused, 'send-again');
     await click(buttonLabelled(refused, 'Send again anyway'));
     const thrown = render(
       <LedgerMessage
@@ -498,14 +508,14 @@ describe('LedgerMessage', () => {
         record={record({ fate: 'timed_out', retryable: true })}
       />,
     );
-    await click(buttonLabelled(thrown, 'Retry'));
+    await chooseAction(thrown, 'retry');
 
     expect(refused.root.findByProps({ role: 'alert' })).toBeDefined();
     expect(thrown.root.findByProps({ role: 'alert' })).toBeDefined();
-    expect(buttonLabelled(thrown, 'Retry')).toBeDefined();
+    expect(await actionKeys(thrown)).toContain('retry');
   });
 
-  test('disables the control while a retry is in flight, so a double tap is one send', async () => {
+  test('marks the button busy while a retry is in flight, so a double pick is one send', async () => {
     let release: (accepted: boolean) => void = () => {};
     const pending = new Promise<boolean>(resolve => {
       release = resolve;
@@ -521,14 +531,18 @@ describe('LedgerMessage', () => {
       />,
     );
 
+    await openActions(row);
+    const again = row.root.find(node => node.type === 'button' && node.props['data-menu-key'] === 'retry').props
+      .onClick;
     await runAsync(async () => {
-      buttonLabelled(row, 'Retry').props.onClick();
+      again();
     });
 
-    expect(buttonLabelled(row, 'retrying…').props.disabled).toBe(true);
+    expect(actionsButton(row).props['aria-busy']).toBe(true);
+    expect(textOf(row)).toContain('Retrying…');
 
     await runAsync(async () => {
-      buttonLabelled(row, 'retrying…').props.onClick();
+      again();
       release(true);
     });
 
