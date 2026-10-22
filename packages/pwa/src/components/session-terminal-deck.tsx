@@ -55,6 +55,7 @@ import {
   useState,
 } from 'react';
 import { useDocumentVisible } from '../hooks/use-document-visible.ts';
+import { RECONNECTING_GRACE_MS } from '../lib/connection-health.ts';
 import type { DaemonConnection } from '../lib/daemon-connection.ts';
 import type { DaemonSessionScope } from '../lib/daemon-scope.ts';
 import { grantRefusalNotice } from '../lib/grants.ts';
@@ -331,7 +332,15 @@ function TerminalCanvas({
   const [readyVersion, setReadyVersion] = useState(0);
   const [reopenVersion, setReopenVersion] = useState(0);
   const attemptRef = useRef(0);
+  /**
+   * A live shell that dropped, while the drop is still UNSAID. The first reopen comes back well inside
+   * {@link RECONNECTING_GRACE_MS}, and a lamp that flashed amber for each of those read as a terminal
+   * that was always reconnecting; so the lamp keeps what it said until the outage outlasts the grace,
+   * and only then says `reconnecting`. Held across the effect re-runs a reopen is made of.
+   */
+  const quietRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const lastResizeRef = useRef<SentResize | null>(null);
+  useEffect(() => () => clearTimeout(quietRef.current), []);
 
   useEffect(() => {
     const host = hostRef.current;
@@ -448,17 +457,29 @@ function TerminalCanvas({
   useEffect(() => {
     const xterm = terminalRef.current;
     const fit = fitRef.current;
+    /** The drop is no longer unsaid: it recovered, was refused, or the pane went away. */
+    const endQuiet = (): void => {
+      clearTimeout(quietRef.current);
+      quietRef.current = undefined;
+    };
     if (!active || xterm === null || fit === null) {
+      endQuiet();
       onLinkRef.current('idle');
       return;
     }
     let disposed = false;
     let stream: TerminalStream | null = null;
     let reopenTimer: ReturnType<typeof setTimeout> | undefined;
-    onLinkRef.current('connecting');
+    // A reopen inside the quiet window keeps the lamp where it was.
+    if (quietRef.current === undefined) onLinkRef.current('connecting');
 
     const retryLater = (): void => {
-      onLinkRef.current('reconnecting');
+      if (attemptRef.current === 0 && quietRef.current === undefined)
+        quietRef.current = setTimeout(() => {
+          quietRef.current = undefined;
+          onLinkRef.current('reconnecting');
+        }, RECONNECTING_GRACE_MS);
+      else if (quietRef.current === undefined) onLinkRef.current('reconnecting');
       attemptRef.current += 1;
       reopenTimer = setTimeout(
         () => setReopenVersion(version => version + 1),
@@ -483,6 +504,7 @@ function TerminalCanvas({
         onOpen: () => {
           if (disposed) return;
           attemptRef.current = 0;
+          endQuiet();
           onLinkRef.current('live');
           globalThis.requestAnimationFrame(() => {
             if (disposed || stream === null) return;
@@ -508,6 +530,7 @@ function TerminalCanvas({
           if (!shouldReopenTerminalStream(code)) {
             // The daemon has judged this client. Retrying asks it the same
             // question, so the reader is told instead of watching a loop.
+            endQuiet();
             onLinkRef.current('refused');
             return;
           }
@@ -517,7 +540,9 @@ function TerminalCanvas({
           // §14 gives `stream-refused` a status so "it is gone" can be told from "the daemon broke".
           // It is final for this attempt, so it reaches the state that says so rather than the retry
           // that would ask a permanent 403 the same question at fifteen-second intervals forever.
-          if (!disposed) onLinkRef.current('refused');
+          if (disposed) return;
+          endQuiet();
+          onLinkRef.current('refused');
         },
       })
       .then(attached => {
@@ -546,7 +571,8 @@ function TerminalCanvas({
       // the taxonomy survives in both directions and a deliberate leave is never spelled the same as
       // a network failure". The port carries the same code and reason on either carrier.
       stream?.close(1000, 'terminal tab detached');
-      onLinkRef.current('idle');
+      // A reopen inside the quiet window is not a pane going idle: the next run decides what the lamp says.
+      if (quietRef.current === undefined) onLinkRef.current('idle');
     };
   }, [active, connection, dependencies, readyVersion, reopenVersion, scope, terminal.id]);
 

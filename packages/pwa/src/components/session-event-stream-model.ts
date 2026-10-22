@@ -28,8 +28,11 @@ export type SessionEventStreamStatus = 'connecting' | 'live' | 'reconnecting' | 
  * shipped app does not, because "it stopped trying" is not something a reader should have to repair.
  */
 export const SESSION_EVENT_STREAM_BACKOFF = {
-  /** The first window. Short enough that a socket blip is invisible. */
-  baseMs: 1_000,
+  /**
+   * The first window: a retry inside 150–300 ms, so a socket blip is back long before the chip's quiet
+   * window ({@link SESSION_EVENT_STREAM_QUIET_MS}) would say anything. It doubles from there.
+   */
+  baseMs: 300,
   factor: 2,
   /** No window is ever longer than this, jitter included — see {@link sessionEventStreamDelayMs}. */
   ceilingMs: 10_000,

@@ -86,6 +86,8 @@
         "harness/relay-terminal-bench.ts",
         "harness/relay-terminal-bench-page.ts",
         "harness/webrtc-engine-bench.ts",
+        "harness/carrier-soak.ts",
+        "harness/connection-drops-screenshot.tsx",
         "harness/parakeet-near-live-smoke.ts",
         "harness/parakeet-near-live-smoke-page.ts",
         "harness/fy-render-safari/probe.ts",

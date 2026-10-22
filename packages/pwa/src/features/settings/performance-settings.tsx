@@ -29,20 +29,22 @@ import {
 import { Activity, CircleAlert, Copy, Download, TriangleAlert } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
+import type { CarrierDropLog } from '../../lib/carrier-drops.ts';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
 import type { PerformanceRecorder } from '../../lib/performance/recorder.ts';
 import { renderPwaPerformanceReport } from '../../lib/performance/report-text.ts';
 import { Badge, Button } from '../../shell/primitives.tsx';
 import { browserClipboardWriter, type ClipboardWriter } from '../onboarding/copy-button.tsx';
+import { ConnectionDrops } from './connection-drops.tsx';
 import { type PerformanceClient, readDaemonProfile, startDaemonProfile } from './performance-api.ts';
 import {
   brokenBudgets,
   budgetWords,
+  type PerformanceRecording,
   PROFILE_REFUSED_INTRO,
   PROFILE_REFUSED_REMEDY,
   PROFILE_TOO_SLOW_SENTENCE,
   PWA_REPORT_UNAVAILABLE,
-  type PerformanceRecording,
   percentDone,
   performanceFileName,
   performanceReportJson,
@@ -370,12 +372,16 @@ function RecordingView({ recording }: { readonly recording: PerformanceRecording
 export const performanceSettingsTab = (
   createClient: PerformanceClientFactory,
   recorder: PerformanceRecorder | undefined,
+  drops?: CarrierDropLog,
 ) =>
   ({
     id: 'performance',
     label: 'Performance',
     description: 'Measure what this machine and this app spend their time on, and get a report safe to share.',
     Surface: ({ connection }: { readonly connection: DaemonConnection }) => (
-      <PerformanceSettings connection={connection} createClient={createClient} recorder={recorder} />
+      <div className="flex min-w-0 flex-col gap-4">
+        <PerformanceSettings connection={connection} createClient={createClient} recorder={recorder} />
+        {drops === undefined ? null : <ConnectionDrops connection={connection} drops={drops} />}
+      </div>
     ),
   }) as const;

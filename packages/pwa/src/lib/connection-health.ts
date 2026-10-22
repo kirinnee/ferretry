@@ -75,8 +75,15 @@ export interface ConnectionHealth {
 
 /* ---------- the implementation ---------------------------------------------- */
 
-/** The first retry waits around this long; each later one doubles it. */
-export const RECONNECT_BASE_MS = 500;
+/**
+ * The first retry waits between half of this and this; each later one doubles it.
+ *
+ * UNDER 300 MS, so a recoverable drop is back before anything says it left: the reconnecting line waits
+ * {@link RECONNECTING_GRACE_MS}, and a carrier that answers at once (a tunnel, a relay that is still
+ * there) is re-dialled and answering well inside it. The doubling still keeps a machine that is really
+ * gone from being asked more than once every ten seconds.
+ */
+export const RECONNECT_BASE_MS = 300;
 
 /** No retry ever waits longer than this, however long the outage. */
 export const RECONNECT_CEILING_MS = 10_000;
