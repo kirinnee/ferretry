@@ -10,6 +10,7 @@ import { BrowserRecognitionError } from '../../../src/lib/stt/browser-recognitio
 import type { CaptureMonitor } from '../../../src/lib/stt/level-monitor.ts';
 import type { NearLiveState, TimedTranscript } from '../../../src/lib/stt/near-live.ts';
 import { ParakeetEngineError } from '../../../src/lib/stt/parakeet-engine.ts';
+import { PARAKEET_VERSION_LABEL } from '../../../src/lib/stt/parakeet-model.ts';
 import {
   ParakeetRecognitionSession,
   type ParakeetSessionPorts,
@@ -96,7 +97,10 @@ interface World {
   preloadThrows: boolean;
 }
 
-const world = (options: { maxDurationMs?: number; liveWords?: boolean } = {}): World => {
+const world = (
+  options: { maxDurationMs?: number; liveWords?: boolean; now?: () => number; loadMs?: number | undefined } = {},
+): World => {
+  const { now = () => 0, loadMs, ...sessionOptions } = options;
   const recording = new FakeRecording();
   const open = deferred<AudioRecording>();
   const events: string[] = [];
@@ -131,6 +135,7 @@ const world = (options: { maxDurationMs?: number; liveWords?: boolean } = {}): W
       },
       transcribe: (samples, signal) => w.engine.transcribe(samples, signal),
       transcribeTimed: (samples, signal) => w.engine.transcribeTimed(samples, signal),
+      consumeLoadMs: () => loadMs,
     },
     watchHidden: onHidden => {
       hidden = onHidden;
@@ -146,10 +151,10 @@ const world = (options: { maxDurationMs?: number; liveWords?: boolean } = {}): W
       const timer = timers[handle as number];
       if (timer !== undefined) timer.cleared = true;
     },
-    now: () => 0,
+    now,
   };
   const session = new ParakeetRecognitionSession(ports, {
-    ...options,
+    ...sessionOptions,
     onStart: () => events.push('start'),
     onTranscript: text => events.push(`transcript:${text}`),
     onFailure: failure => {
@@ -178,7 +183,7 @@ const world = (options: { maxDurationMs?: number; liveWords?: boolean } = {}): W
 };
 
 /** Start the session and let the microphone open. */
-const recordingWorld = async (options: { maxDurationMs?: number; liveWords?: boolean } = {}): Promise<World> => {
+const recordingWorld = async (options: Parameters<typeof world>[0] = {}): Promise<World> => {
   const w = world(options);
   w.session.start();
   w.open.resolve(w.recording);
@@ -569,5 +574,64 @@ describe('ParakeetRecognitionSession — near-live words', () => {
     await tick();
     should(stopped.live).eql([]);
     should(outcome.value).equal('hello world');
+  });
+});
+
+describe('ParakeetRecognitionSession timings', () => {
+  /** A clock that reads `script[0]`, then `script[1]`, and so on. */
+  const scripted = (...script: number[]) => {
+    let read = 0;
+    return () => script[Math.min(read++, script.length - 1)] ?? 0;
+  };
+
+  it('times the recorder stop and the transcription, and sizes the take before it is transferred away', async () => {
+    // Arrange: stop begins at 100 and ends at 130; transcription begins at 130 and ends at 1130
+    const w = await recordingWorld({ now: scripted(100, 130, 130, 1130), loadMs: 2_500 });
+    w.recording.samples = new Float32Array(32_000);
+    w.engine.transcribe = async samples => {
+      w.transcribed.push({ samples, signal: undefined });
+      samples.fill(0);
+      return 'hello world';
+    };
+
+    // Act
+    await w.session.finish();
+
+    // Assert
+    should(w.session.timings()).eql({
+      audioMs: 2_000,
+      audioBytes: 128_000,
+      prepareMs: 30,
+      transcribeMs: 1_000,
+      model: PARAKEET_VERSION_LABEL,
+      loadMs: 2_500,
+    });
+  });
+
+  it('says nothing about a model load that this dictation did not pay for', async () => {
+    const w = await recordingWorld({ now: scripted(0, 1, 1, 2) });
+    await w.session.finish();
+    should(w.session.timings()).not.have.property('loadMs');
+  });
+
+  it('still reports the time of a transcription that failed', async () => {
+    const w = await recordingWorld({ now: scripted(0, 5, 5, 45) });
+    w.engine.transcribe = async () => {
+      throw new ParakeetEngineError('worker-failed', 'down');
+    };
+    await w.session.finish().catch(() => undefined);
+    should(w.session.timings()?.transcribeMs).equal(40);
+  });
+
+  it('reports no transcription time for a take too short to be speech', async () => {
+    const w = await recordingWorld({ now: scripted(0, 5, 5, 6) });
+    w.recording.samples = new Float32Array(100);
+    await w.session.finish();
+    should(w.session.timings()?.transcribeMs).equal(0);
+  });
+
+  it('has no timings before it has finished', async () => {
+    const w = await recordingWorld();
+    should(w.session.timings()).be.undefined();
   });
 });

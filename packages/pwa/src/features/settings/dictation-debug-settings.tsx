@@ -14,6 +14,7 @@ import type { CleanupTrace } from '@ferretry/protocol';
 import { Bug, Trash2 } from 'lucide-react';
 import { useState, useSyncExternalStore } from 'react';
 import { DictationDebugSheet } from '../../components/dictation-debug-sheet.tsx';
+import { timingDuration } from '../../components/dictation-timeline-bar.tsx';
 import { cn } from '../../lib/class-names.ts';
 import { clockOfInstant } from '../../lib/message-clock.ts';
 import { useDictationDebug } from '../../lib/store.tsx';
@@ -38,9 +39,7 @@ export function useDebugSnapshot(log: DictationDebugLog | null): DictationDebugS
   return useSyncExternalStore(log?.subscribe ?? noSubscription, log?.snapshot ?? nothingKept, nothingKept);
 }
 
-/** `1.2 s` from a second up, whole milliseconds below. */
-export const callDuration = (ms: number): string =>
-  ms >= 1_000 ? `${(ms / 1_000).toFixed(1)} s` : `${String(Math.round(ms))} ms`;
+export const callDuration = timingDuration;
 
 const OUTCOME_LABELS: Readonly<Record<CleanupTrace['outcome'], string>> = {
   cleaned: 'Cleaned',

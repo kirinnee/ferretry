@@ -17,11 +17,12 @@
 import type { CleanupTrace, CleanupTraceAttempt } from '@ferretry/protocol';
 import { Bug, Check, ChevronDown, ChevronRight, Copy, TriangleAlert, X } from 'lucide-react';
 import { type ReactNode, useId, useState } from 'react';
+import { browserClipboardWriter, type ClipboardWriter } from '../features/onboarding/copy-button.tsx';
 import { cn } from '../lib/class-names.ts';
 import type { DictationDebugRecord } from '../lib/stt/dictation-debug.ts';
-import { browserClipboardWriter, type ClipboardWriter } from '../features/onboarding/copy-button.tsx';
 import { BottomSheet } from '../shell/bottom-sheet.tsx';
 import { Button } from '../shell/primitives.tsx';
+import { DictationTimelineDetails, timelineText } from './dictation-timeline-bar.tsx';
 
 export interface DictationDebugSheetProps {
   readonly record: DictationDebugRecord;
@@ -272,6 +273,12 @@ export function DictationDebugSheet({ record, onClose, copy }: DictationDebugShe
               ))}
             </dl>
           </Section>
+
+          {record.timeline === undefined ? null : (
+            <Section title="Timeline" copyText={timelineText(record.timeline)} write={write} defaultOpen>
+              <DictationTimelineDetails timeline={record.timeline} />
+            </Section>
+          )}
 
           <Section title="Request" copyText={perAttempt(trace, requestText)} write={write}>
             {trace.attempts.map((attempt, index) => (

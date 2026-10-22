@@ -21,6 +21,7 @@
  */
 
 import { z } from 'zod';
+import { DictationTimelineSchema } from './dictation-timeline.ts';
 
 /** The sole browser-storage key for the recording switch. */
 export const TRANSCRIPTION_LOG_KEY = 'fy-transcription-log-v1';
@@ -45,6 +46,8 @@ const TranscriptionEntrySchema = z.strictObject({
   /** `pending` is a dictation still in the review box, or one the tab was closed on. */
   outcome: z.enum(['pending', 'inserted', 'discarded']),
   debugId: z.string().max(64).optional(),
+  /** How long each stage took: numbers only, so it is safe to keep beside the text. */
+  timeline: DictationTimelineSchema.optional(),
 });
 export type TranscriptionEntry = z.infer<typeof TranscriptionEntrySchema>;
 
@@ -53,7 +56,7 @@ export type NewTranscriptionEntry = Omit<TranscriptionEntry, 'id'>;
 
 /** The parts of an entry that change after it lands. */
 export type TranscriptionEntryPatch = Partial<
-  Pick<TranscriptionEntry, 'cleaned' | 'inserted' | 'prompt' | 'outcome' | 'debugId'>
+  Pick<TranscriptionEntry, 'cleaned' | 'inserted' | 'prompt' | 'outcome' | 'debugId' | 'timeline'>
 >;
 
 /** Where entries rest. Every row is untrusted until the log has parsed it. */

@@ -131,6 +131,38 @@ describe('textOf', () => {
   });
 });
 
+describe('TranscriptionLogSettings timings', () => {
+  const timed = (speechMs: number, cleanupMs: number): NewTranscriptionEntry['timeline'] => ({
+    totalMs: speechMs + cleanupMs + 50,
+    speech: { engine: 'parakeet', totalMs: speechMs },
+    cleanup: { provider: 'groq', via: 'device', outcome: 'cleaned', attempts: 1, totalMs: cleanupMs },
+  });
+
+  it('should put a median and p90 summary above the list, and a bar on each timed dictation', async () => {
+    // Arrange
+    const log = buildLog();
+    log.add(dictation({ raw: 'first', timeline: timed(100, 900) }));
+    log.add(dictation({ raw: 'second', timeline: timed(200, 1_000) }));
+    log.add(dictation({ raw: 'untimed' }));
+
+    // Act
+    const view = await show(<TranscriptionLogSettings log={log} debug={null} />);
+
+    // Assert
+    expect(view.querySelector('[data-timing-summary]')?.textContent).toContain('Last 2 timed dictations');
+    expect(view.querySelectorAll('[data-log-entry] [data-timeline-bar]')).toHaveLength(2);
+    expect(view.querySelector('[data-log-entry] [data-timeline-line]')?.textContent).toContain('slowest: cleanup');
+  });
+
+  it('should show no summary and no bar when nothing was timed', async () => {
+    const log = buildLog();
+    log.add(dictation());
+    const view = await show(<TranscriptionLogSettings log={log} debug={null} />);
+    expect(view.querySelector('[data-timing-summary]')).toBeNull();
+    expect(view.querySelector('[data-timeline-bar]')).toBeNull();
+  });
+});
+
 describe('TranscriptionLogSettings', () => {
   it('should be on by default and say what an empty log means', async () => {
     // Arrange
