@@ -356,6 +356,72 @@ describe('machine status rendering', () => {
   });
 });
 
+describe('status of a launchd job macOS is throttling', () => {
+  const throttled = { manager: 'launchd' as const, state: 'running' as const, pid: 4242, processType: null };
+
+  it('should warn, with the remedy, when the plist declares no ProcessType', () => {
+    // Act
+    const actual = renderDaemonStatus(decideDaemonStatus('fyd', throttled, health()), 'fy');
+
+    // Assert
+    should(actual).containEql(
+      '  macOS is throttling the daemon — run fy daemon update (its launchd job declares no ProcessType',
+    );
+  });
+
+  it('should warn about any ProcessType other than Interactive, naming the one it found', () => {
+    // Act
+    const actual = renderDaemonStatus(
+      decideDaemonStatus('fyd', { ...throttled, processType: 'Background' }, health()),
+      'fy',
+    );
+
+    // Assert
+    should(actual).containEql(
+      'macOS is throttling the daemon — run fy daemon update (its launchd job declares ProcessType Background',
+    );
+  });
+
+  it('should name the ProcessType on the supervisor line when it is Interactive', () => {
+    // Act
+    const actual = renderDaemonStatus(
+      decideDaemonStatus(
+        'fyd',
+        { ...throttled, processType: 'Interactive', detail: 'launchd reports running' },
+        health(),
+      ),
+      'fy',
+    );
+
+    // Assert
+    should(actual).containEql('  launchd: running (launchd reports running), ProcessType Interactive');
+    should(actual).not.containEql('throttling');
+  });
+
+  it('should say nothing about ProcessType when no plist was read, or on systemd', () => {
+    // Act
+    const launchd = renderDaemonStatus(
+      decideDaemonStatus('fyd', { manager: 'launchd', state: 'absent' }, undefined),
+      'fy',
+    );
+    const systemd = renderDaemonStatus(decideDaemonStatus('fyd', runningReport, health()), 'fy');
+
+    // Assert
+    should(launchd).not.containEql('ProcessType');
+    should(systemd).not.containEql('ProcessType');
+  });
+
+  it('should carry the ProcessType and the verdict in the machine status', () => {
+    // Act
+    const actual = JSON.parse(renderDaemonStatusJson(decideDaemonStatus('fyd', throttled, health()))) as {
+      supervisor: Record<string, unknown>;
+    };
+
+    // Assert
+    should(actual.supervisor).match({ processType: null, throttled: true });
+  });
+});
+
 describe('install rendering', () => {
   it('should name the file it wrote, so an operator can inspect it', () => {
     // Act

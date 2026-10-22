@@ -83,6 +83,11 @@ export interface IUpdateLifecyclePort {
   restart(): Promise<void>;
   /** `fy daemon install`, for this exact executable. */
   installAt(path: string): Promise<void>;
+  /**
+   * Why the installed service definition has to be rewritten for the daemon to run as intended — a
+   * launchd job with no `ProcessType` is throttled by macOS — or `undefined` when it does not.
+   */
+  staleDefinition(): Promise<string | undefined>;
   /** The local daemon's health, or `undefined` when it does not answer. */
   probe(): Promise<HealthView | undefined>;
 }

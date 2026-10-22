@@ -1,6 +1,7 @@
 import type { HealthView, LivenessView } from '@ferretry/protocol';
 import type { DaemonSupervisorReport } from './ports.ts';
-import { servesOutsideSupervisor } from './probe.ts';
+import { launchdThrottled, servesOutsideSupervisor } from './probe.ts';
+import { LAUNCHD_PROCESS_TYPE } from './unit-file.ts';
 
 /**
  * How far the daemon answered.
@@ -114,6 +115,21 @@ const pidOf = (view: DaemonStatusView): string => {
   return pid === undefined ? '' : ` (pid ${String(pid)})`;
 };
 
+/**
+ * The launchd job's `ProcessType`, appended to the supervisor line: named when it is the one this CLI
+ * writes, and a warning with the remedy when it is not — a throttled daemon looks exactly like a slow
+ * one from everywhere else, so this line is the only place the cause shows.
+ */
+function processTypeLine(supervisor: DaemonSupervisorReport, clientName: string): string {
+  if (supervisor.processType === undefined) return '';
+  if (!launchdThrottled(supervisor)) return `, ProcessType ${LAUNCHD_PROCESS_TYPE}`;
+  const declared =
+    supervisor.processType === null
+      ? 'its launchd job declares no ProcessType'
+      : `its launchd job declares ProcessType ${supervisor.processType}`;
+  return `\n  macOS is throttling the daemon — run ${clientName} daemon update (${declared}, so macOS limits its CPU and I/O and every agent's with it)`;
+}
+
 /** A status that is not `serving` is a failure for a script asking "can I use the daemon?". */
 export function statusExitCode(view: DaemonStatusView): number {
   return view.reachability === 'serving' ? 0 : 1;
@@ -141,7 +157,7 @@ export function renderDaemonStatus(view: DaemonStatusView, clientName: string): 
   const supervised =
     view.supervisor.manager === 'direct'
       ? '  not managed by a service manager'
-      : `  ${view.supervisor.manager}: ${view.supervisor.state}${view.supervisor.detail === undefined || view.supervisor.detail === '' ? '' : ` (${view.supervisor.detail})`}`;
+      : `  ${view.supervisor.manager}: ${view.supervisor.state}${view.supervisor.detail === undefined || view.supervisor.detail === '' ? '' : ` (${view.supervisor.detail})`}${processTypeLine(view.supervisor, clientName)}`;
 
   if (view.reachability === 'serving' && view.health !== undefined) {
     const headline = view.orphan
@@ -203,6 +219,9 @@ export function renderDaemonStatusJson(view: DaemonStatusView, extra: Readonly<R
         ...(view.supervisor.detail === undefined || view.supervisor.detail === ''
           ? {}
           : { detail: view.supervisor.detail }),
+        ...(view.supervisor.processType === undefined
+          ? {}
+          : { processType: view.supervisor.processType, throttled: launchdThrottled(view.supervisor) }),
       },
       ...(view.health === undefined ? {} : { health: view.health }),
       ...extra,

@@ -381,6 +381,35 @@ describe('launchd supervisor stop and inspection', () => {
     should(actual.state).equal('failed');
   });
 
+  it('should report the ProcessType the installed plist declares, read from the plist itself', async () => {
+    // Arrange
+    const { supervisor } = launchd([['print', { code: 0, stdout: '\tstate = running\n\tpid = 812\n', stderr: '' }]]);
+    await supervisor.install(daemonBinary.path);
+
+    // Act
+    const actual = await supervisor.inspect();
+
+    // Assert
+    should(actual).match({ manager: 'launchd', state: 'running', pid: 812, processType: 'Interactive' });
+  });
+
+  it('should report null for a plist an older client wrote with no ProcessType, running or not', async () => {
+    // Arrange
+    const old = '<plist><dict><key>Label</key><string>com.ferretry.fyd</string></dict></plist>';
+    const up = launchd([['print', { code: 0, stdout: '\tstate = running\n\tpid = 812\n', stderr: '' }]]);
+    const down = launchd([['print', { code: 113, stdout: '', stderr: 'Could not find service\n' }]]);
+    up.files.written.set(mac.launchAgentFile, old);
+    down.files.written.set(mac.launchAgentFile, old);
+
+    // Act
+    const running = await up.supervisor.inspect();
+    const stopped = await down.supervisor.inspect();
+
+    // Assert
+    should(running.processType).be.null();
+    should(stopped).match({ state: 'stopped', processType: null });
+  });
+
   it('should report stopped when launchctl failed but the plist is installed', async () => {
     // Arrange
     const { supervisor, files } = launchd([['print', { code: 113, stdout: '', stderr: 'Could not find service\n' }]]);

@@ -193,6 +193,8 @@ export class FakeStandalone implements IStandaloneReleasePort {
 /** A service manager over `FakeHost`: restart serves whatever the definition's path now reports. */
 export class FakeLifecycle implements IUpdateLifecyclePort {
   missing: string | undefined;
+  /** Why the installed definition is stale; `undefined` for one that is current. */
+  stale: string | undefined;
   readonly executables = new Set<string>();
 
   constructor(
@@ -224,6 +226,10 @@ export class FakeLifecycle implements IUpdateLifecyclePort {
     this.host.definition = path;
     this.host.bringUp();
     return Promise.resolve();
+  }
+
+  staleDefinition(): Promise<string | undefined> {
+    return Promise.resolve(this.stale);
   }
 
   probe(): Promise<HealthView | undefined> {
