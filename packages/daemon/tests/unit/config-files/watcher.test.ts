@@ -67,6 +67,34 @@ const watch = (fingerprints: () => Promise<string>, onChange: () => Promise<void
 };
 
 describe('watchConfigFiles', () => {
+  it('should say the tree may have changed as soon as a polled fingerprint moves', async () => {
+    // Arrange
+    let fingerprint = 'a';
+    const timers = new FakeTimers();
+    let told = 0;
+    watchConfigFiles({
+      fingerprint: async () => fingerprint,
+      onEvent: () => {
+        told += 1;
+      },
+      onChange: async () => undefined,
+      onError: () => undefined,
+      timers,
+    });
+    await flush();
+
+    // Act
+    timers.tick();
+    await flush();
+    fingerprint = 'b';
+    timers.tick();
+    await flush();
+
+    // Assert — the baseline and an unchanged tick say nothing; the move says so before any settle.
+    should(told).equal(1);
+    should(timers.timeouts.size).equal(1);
+  });
+
   it('should poll on the shipped interval and treat the first fingerprint as the baseline', async () => {
     // Arrange
     const { timers, changes } = watch(async () => 'a');
@@ -325,6 +353,34 @@ describe('watchConfigFiles, driven by file events', () => {
     // Assert
     should(changes()).equal(1);
     should([...tree.listeners.keys()]).eql(['/config', '/config/components', '/config/components/mcp']);
+  });
+
+  it('should say the tree may have changed the moment an event arrives, before the debounce', async () => {
+    // Arrange
+    const tree = new FakeTree();
+    const timers = new FakeTimers();
+    let told = 0;
+    let changes = 0;
+    watchConfigFiles({
+      fingerprint: async () => 'a',
+      onEvent: () => {
+        told += 1;
+      },
+      onChange: async () => {
+        changes += 1;
+      },
+      onError: () => undefined,
+      timers,
+      events: tree,
+    });
+    await flush();
+
+    // Act — the fingerprint has not moved, so nothing loads; readers are still told not to trust it.
+    tree.fire('/config');
+
+    // Assert
+    should(told).equal(1);
+    should(changes).equal(0);
   });
 
   it('should stop watching a directory that is gone', async () => {

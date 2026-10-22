@@ -257,6 +257,42 @@ describe('ConfigFilesService.inEffect', () => {
     should(directory.lists).equal(2);
   });
 
+  it('should load again on the next read once the tree has reported a change, and only once', async () => {
+    // Arrange
+    const { directory, service } = setup();
+    await service.inEffect();
+    directory.files.set('learning.yaml', LEARNING_OFF);
+
+    // Act
+    service.invalidate();
+    const [first, second] = await Promise.all([service.inEffect(), service.inEffect()]);
+    const settled = await service.inEffect();
+
+    // Assert
+    should(first.evaluation.effective.learning.enabled).be.false();
+    should(second).equal(first);
+    should(settled).equal(first);
+    should(directory.lists).equal(2);
+  });
+
+  it('should load again when a change is reported while a load is running', async () => {
+    // Arrange — the flag is cleared when a load BEGINS, so a change it may have missed is not lost.
+    const { directory, service } = setup();
+    const list = directory.list.bind(directory);
+    directory.list = async () => {
+      if (directory.lists === 0) service.invalidate();
+      return await list();
+    };
+    await service.inEffect();
+
+    // Act
+    await service.inEffect();
+    await service.inEffect();
+
+    // Assert — the change reported mid-scan costs exactly one more load.
+    should(directory.lists).equal(2);
+  });
+
   it("should answer this daemon's own write at once, with no watcher in between", async () => {
     // Arrange
     const { service } = setup();

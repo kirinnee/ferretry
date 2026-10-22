@@ -63,11 +63,13 @@ a second where there are no file events — and loads after a 300 ms quiet perio
 watched on its own, because a platform watcher that follows a tree misses a file created in a new
 directory, and a missed save is a broken file nobody is told about.
 
-Readers answer from the last load and never scan the directory themselves. A load happens on the first
-read, when the watcher settles on a change, and after this daemon's own writes and confirmations (a
-reviewed fleet change loads as soon as it is applied). Judging a reviewed change stale is the one read
-that loads first, so an edit saved a moment before it is applied is never missed. A saved file is
-therefore in effect a few hundred milliseconds after the save rather than at the very next read.
+Readers that run on a timer — the fleet and credential catalogues, presets, model catalogs, the usage
+feed, the Warden — answer from the last load and never scan the directory themselves. A load happens on
+their first read, after a file event in the tree (which marks the last load stale at once, before the
+watcher's debounce), when the watcher settles on a change, and after this daemon's own writes and
+confirmations (a reviewed fleet change loads as soon as it is applied). Decisions about authority still
+load first: an agent-control switch, Pack mode's limits, a launch, and judging a reviewed change stale —
+so a tightening is in effect the moment it is saved and an edit made just before an apply is never missed.
 
 A link is never followed — not by the daemon, not by `fy config check`. `GET /v1/config/file` returns a
 file's text to a caller off the machine, so a link planted in the directory would otherwise read any file

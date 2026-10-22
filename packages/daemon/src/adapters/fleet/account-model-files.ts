@@ -92,12 +92,18 @@ export async function readConfigAccountDocument(
   };
 }
 
-/** The account model this machine declares, or `undefined` for a machine with no fleet files yet. */
+/**
+ * The account model this machine declares, or `undefined` for a machine with no fleet files yet.
+ * `fresh` (the default) loads the directory first — what a decision about authority needs, such as an
+ * agent-control switch that must be in effect the moment it is saved; `false` answers the last load,
+ * for a reader that runs on a timer.
+ */
 export async function readDeclaredAccountModel(
   config: Pick<ConfigFilesService, 'inEffect' | 'load'>,
   locations: ConfigAccountLocations,
+  fresh = true,
 ): Promise<AccountModel | undefined> {
-  const reading = await readConfigAccountDocument(config, locations);
+  const reading = await readConfigAccountDocument(config, locations, fresh);
   return reading.format === 'none' ? undefined : reading.model;
 }
 

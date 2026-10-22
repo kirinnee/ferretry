@@ -5406,6 +5406,8 @@ function createConfigFilesSubsystem(input: {
       await input.afterLoad?.();
       return watchConfigFiles({
         fingerprint: async () => await input.service.fingerprint(),
+        // At once, not after the debounce: readers stop answering from a load the tree has moved past.
+        onEvent: () => input.service.invalidate(),
         onChange: async () => {
           await input.service.load();
           await input.afterLoad?.();
@@ -6564,6 +6566,13 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
    * configuration that is absent is a host with no fleet; one in the old account format refuses.
    */
   const declaredAccountModel = async () => await readDeclaredAccountModel(configFiles, configLocations);
+  /**
+   * The same model as the last configuration load has it, without touching the directory: for the
+   * readers that run on a timer — the credential catalogue, the usage feed and its cadence, auto-resume —
+   * which each re-scanned the whole configuration tree on every pass. A change reaches them once the
+   * watcher has loaded it. Anything that decides what an agent or a launch may do reads the fresh one.
+   */
+  const effectiveAccountModel = async () => await readDeclaredAccountModel(configFiles, configLocations, false);
   // The agent browser's own private display for a Linux real window (see `DaemonWorld.agentBrowserDisplay`).
   // Nothing is spawned until a real-window launch asks for it; a host without Xvfb is told what to install.
   const agentBrowserDisplay = new XvfbDisplay({
@@ -6574,7 +6583,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
   /** The fleet's declared probe interval. A host with no readable configuration keeps the default. */
   const declaredUsageRefreshMs = async (): Promise<number> =>
     usageRefreshMs(
-      await declaredAccountModel().then(
+      await effectiveAccountModel().then(
         model => model?.advanced.usage.interval,
         () => undefined,
       ),
@@ -6687,7 +6696,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
   });
   const credentialHostCodexHome = hostCodexHome(process.env.CODEX_HOME, userHome);
   const fleetCredentialCatalog = new FleetCredentialCatalog({
-    document: declaredAccountModel,
+    document: effectiveAccountModel,
     paths: {
       fleetRoot: paths.fleet,
       userHome,
@@ -7324,7 +7333,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           resumer: { resume },
           journal: new StorageAutoResumeJournal(storage),
           summary: autoResumeSummary,
-          setting: { enabled: async () => (await declaredAccountModel())?.machine.autoResume ?? true },
+          setting: { enabled: async () => (await effectiveAccountModel())?.machine.autoResume ?? true },
           clock: { now: () => clock.now(), nowMs: () => Date.now() },
           sleep: async milliseconds => await Bun.sleep(milliseconds),
         },
@@ -7412,7 +7421,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         new CachedUsageFeed(
           [
             new CredentialUsageSource({
-              enabled: async () => (await declaredAccountModel())?.advanced.usage.enabled ?? true,
+              enabled: async () => (await effectiveAccountModel())?.advanced.usage.enabled ?? true,
               manifest: publishedManifest,
               credentials: async () => {
                 if (credentialList === undefined) throw new Error('the credentials surface is not mounted yet');
@@ -8066,9 +8075,8 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       let releaseBrowserSession: (sessionId: string) => Promise<void> = async () => undefined;
       // A new ferret's passive-learning default, assigned once the learning subsystem below exists.
       let adoptLearning: (sessionId: SessionId) => Promise<void> = async () => undefined;
-      // Pack mode (docs/pack-mode.md): read per use, so a saved pack.yaml applies to the next start once the
-      // configuration watcher has loaded it.
-      const packConfig = async (): Promise<PackConfig> => (await configFiles.inEffect()).evaluation.effective.pack;
+      // Pack mode (docs/pack-mode.md): read fresh per use, so a saved pack.yaml applies to the next start.
+      const packConfig = async (): Promise<PackConfig> => (await configFiles.load()).evaluation.effective.pack;
       const packTree = createPackTree(sessions);
       const packHooks = createSessionPackHooks(packTree, sessions, sessionEnvironments, sessionMutations, packConfig);
       launchSwitchDefaults = async id => await packHooks.launchDefault(id);
@@ -8692,7 +8700,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
        */
       const packService = new PackService({
         settings: async () => {
-          const effective = (await configFiles.inEffect()).evaluation.effective;
+          const effective = (await configFiles.load()).evaluation.effective;
           return {
             config: effective.pack,
             guideFile: effective.modelsGuide,
