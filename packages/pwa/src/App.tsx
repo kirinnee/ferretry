@@ -121,7 +121,11 @@ import { useLayoutMode } from './hooks/use-layout-mode.ts';
 import { useLiveClock } from './hooks/use-live-clock.ts';
 import { useMachineOrder } from './hooks/use-machine-order.ts';
 import { type ListedMachine, useMachineSources } from './hooks/use-machine-sources.ts';
-import { useMachinesPoll } from './hooks/use-machines-poll.ts';
+import {
+  browserFleetPollEnvironment,
+  type MachineFleetFeedOpener,
+  useMachinesPoll,
+} from './hooks/use-machines-poll.ts';
 import { useNeedsRuntime } from './hooks/use-needs-runtime.ts';
 import { type NotificationOpenSource, useNotificationOpen } from './hooks/use-notification-open.ts';
 import {
@@ -1968,7 +1972,20 @@ export function AppShell() {
           : [connection],
     [connection, everyMachine, listedMachines, pageRoute.kind],
   );
-  useMachinesPoll(store.fleet, polled, connection?.daemonId ?? null, layoutPhone);
+  // Each machine's fleet feed, with no replay: the list is read when it says something moved.
+  const openFleetFeed = useCallback<MachineFleetFeedOpener>(
+    async (machine, onEvent, onIdle, signal) =>
+      await (await store.clients.client(machine)).fleetEvents(0, onEvent, signal, idle => onIdle(idle.idleSeconds)),
+    [store.clients],
+  );
+  useMachinesPoll(
+    store.fleet,
+    polled,
+    connection?.daemonId ?? null,
+    layoutPhone,
+    browserFleetPollEnvironment,
+    openFleetFeed,
+  );
   const lockedMachines = useLockedMachines(store.unlockGate);
   const machineSources = useMachineSources(store, listedMachines, lockedMachines);
   const allMachines = useMemo<AllMachinesList | undefined>(

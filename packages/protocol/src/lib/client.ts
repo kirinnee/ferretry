@@ -253,6 +253,18 @@ export interface IFyApiClient {
     onLive?: (live: SessionLiveActivity) => void,
   ): Promise<void>;
   /**
+   * The FLEET feed (`/v1/events` with no session) from now on: every session's events as they are
+   * journaled. `tail` is how many recent events to replay first, 0 to 5000; `0` replays nothing, which is
+   * what a reader that only wants to know WHEN to re-read wants. The daemon proves the stream live with an
+   * idle frame as soon as its replay is done. A daemon from before `tail` refuses the upgrade (400).
+   */
+  fleetEvents(
+    tail: number,
+    onEvent: (event: FyEvent) => void,
+    signal?: AbortSignal,
+    onIdle?: (idle: FyEventStreamIdle) => void,
+  ): Promise<void>;
+  /**
    * The configuration stream (`/v1/events?topic=config`): the revision in effect first, then every
    * change as it happens — which kinds of configuration moved. Resolves when the daemon ends it.
    */

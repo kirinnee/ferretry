@@ -687,3 +687,49 @@ describe('FyApiClient configuration stream', () => {
     should(error).be.instanceOf(z.ZodError);
   });
 });
+
+describe('FyApiClient fleet feed', () => {
+  it('should ask for the fleet feed with its replay tail and route events and idle proofs apart', async () => {
+    // Arrange — an opening proof, an event, then a quiet stretch.
+    const eventTransport = new QueuedEventTransport(
+      { kind: 'idle', idleSeconds: 30, scope: { kind: 'fleet', followedSessions: 2 } },
+      eventFrame(4),
+      { kind: 'idle', idleSeconds: 30, scope: { kind: 'fleet', followedSessions: 2 } },
+    );
+    const client = await connectClient(new QueuedHttpTransport(), { eventTransport });
+    const received: FyEvent[] = [];
+    const idles: unknown[] = [];
+    const controller = new AbortController();
+
+    // Act
+    await client.fleetEvents(
+      0,
+      event => received.push(event),
+      controller.signal,
+      idle => idles.push(idle),
+    );
+    await client.fleetEvents(25, () => undefined);
+
+    // Assert — no session and no cursor: a fleet feed has neither, only how much to replay.
+    should(eventTransport.calls.map(call => call.url)).deepEqual([
+      'ws://daemon.test/api/v1/events?tail=0',
+      'ws://daemon.test/api/v1/events?tail=25',
+    ]);
+    should(eventTransport.signals).deepEqual([controller.signal, undefined]);
+    should(received.map(event => event.sequence)).deepEqual([4]);
+    should(idles).have.length(2);
+  });
+
+  it('should refuse a negative tail before anything is dialled', async () => {
+    // Arrange
+    const eventTransport = new QueuedEventTransport();
+    const client = await connectClient(new QueuedHttpTransport(), { eventTransport });
+
+    // Act
+    const error = await captureError(async () => await client.fleetEvents(-1, () => undefined));
+
+    // Assert
+    should(error).be.instanceOf(z.ZodError);
+    should(eventTransport.calls).have.length(0);
+  });
+});
