@@ -325,9 +325,12 @@ export type ComposerSubmitOutcome = 'submitted' | 'holding' | 'absent';
 /** The terminal side of a send. Every address goes through the daemon's own isolated tmux socket. */
 export interface SendTerminal {
   observe(id: SessionId): Promise<SendPaneObservation>;
-  /** Types into a prompt-ready composer and submits, proving the payload left the composer. */
+  /**
+   * Types into a prompt-ready composer and submits, proving the payload left the composer. Throws
+   * `SendLandingUnconfirmed` when the payload was typed and no frame proved it landed.
+   */
   deliver(id: SessionId, text: string): Promise<void>;
-  /** Types into a BUSY composer so the harness holds it until the turn boundary. */
+  /** Types into a BUSY composer so the harness holds it until the turn boundary. Throws as `deliver` does. */
   queue(id: SessionId, text: string): Promise<SendQueueOutcome>;
   /** Sends the safe stop key, waits for the turn to wind down, and re-reads the pane. */
   stopActiveTurn(id: SessionId): Promise<SendPaneObservation>;
@@ -506,6 +509,33 @@ export class SendComposerUnreadable extends Error {
   constructor() {
     super("the agent's composer could not be read to prove it empty; nothing was typed");
     this.name = 'SendComposerUnreadable';
+  }
+}
+
+/**
+ * The payload WAS typed into the composer and no frame proved it landed, so it was not typed again.
+ * Thrown by the terminal AFTER a keystroke: the message may be in the composer now, or on its way to
+ * it from a pane too stalled to have drawn it, so it is neither withdrawn nor typed a second time.
+ */
+export class SendLandingUnconfirmed extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'SendLandingUnconfirmed';
+  }
+}
+
+/**
+ * A send that was typed but could not be proven to have landed, settled `unaccounted` and still
+ * watched. Not a refusal — a key reached the pane — and not a failure to report as one: its id rides
+ * along so the person can be offered "Send it", "Clear it" and "Retry" for exactly this send.
+ */
+export class SendUnconfirmed extends Error {
+  constructor(
+    message: string,
+    readonly sendId: string,
+  ) {
+    super(message);
+    this.name = 'SendUnconfirmed';
   }
 }
 

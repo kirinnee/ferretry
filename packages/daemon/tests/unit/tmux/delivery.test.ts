@@ -5,17 +5,19 @@ import should from 'should';
 import {
   classifySubmit,
   codexUpdateAction,
-  composerEvidence,
   composerContains,
+  composerEvidence,
   composerHolds,
   composerState,
   composerTransport,
   type DeliveryFrame,
   harnessExitReason,
+  landingDeadlineMs,
   landingEvidence,
   MAX_STARTUP_DIALOG_ATTEMPTS,
   nextReadinessStep,
   PASTE_TRANSPORT_CHARS,
+  paneResponded,
   paneShowsOpenPicker,
   resumeMenuAction,
   type StartupDialogAction,
@@ -642,5 +644,34 @@ describe('the composer state a fill may type into', () => {
     should(composerContains(`my question?${POINTER}`, POINTER)).be.true();
     should(composerContains('a hint of this', 'hint')).be.false();
     should(composerContains('hint', 'hint')).be.true();
+  });
+});
+
+describe('tmux delivery — a pane that has not drawn since the keys', () => {
+  const frame = (visible: string, cursorX?: number, cursorY?: number): DeliveryFrame => ({
+    alive: true,
+    dead: false,
+    promptReady: true,
+    visible,
+    ...(cursorX === undefined ? {} : { cursorX }),
+    ...(cursorY === undefined ? {} : { cursorY }),
+  });
+
+  it('should say a pane responded only when its screen or its cursor moved', () => {
+    const before = frame('❯ \n', 2, 0);
+
+    should(paneResponded(before, frame('❯ \n', 2, 0))).be.false('an identical frame is a pane that read nothing yet');
+    should(paneResponded(before, frame('❯ hi\n', 4, 0))).be.true();
+    should(paneResponded(before, frame('❯ \n', 3, 0))).be.true('the cursor moving is a repaint too');
+    should(paneResponded(before, frame('⎿ ticked\n❯ \n', 2, 1))).be.true();
+  });
+
+  it('should stretch the landing window with the pane’s own latency, up to the ceiling', () => {
+    const window = { windowMs: 6_000, stalledWindowMs: 12_000, settleMs: 2_000 };
+
+    should(landingDeadlineMs(window, undefined)).equal(12_000, 'a pane that drew nothing is waited on longest');
+    should(landingDeadlineMs(window, 50)).equal(6_000, 'a prompt pane gets the ordinary window, never less');
+    should(landingDeadlineMs(window, 5_000)).equal(7_000, 'a slow one gets settleMs past its first repaint');
+    should(landingDeadlineMs(window, 11_500)).equal(12_000, 'and never past the ceiling');
   });
 });

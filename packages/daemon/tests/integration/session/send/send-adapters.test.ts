@@ -7,6 +7,7 @@ import should from 'should';
 import {
   BunSqliteIndexFactory,
   ComposerOccupiedError,
+  ComposerUnconfirmedError,
   DaemonStorageFactory,
   FileResumeTurnStore,
   FileSendChannel,
@@ -30,6 +31,7 @@ import {
   ReviveDedupeConflict,
   ReviveRefusedForSend,
   SendComposerOccupied,
+  SendLandingUnconfirmed,
   type SendRecord,
   type SessionId,
   TmuxController,
@@ -823,6 +825,22 @@ describe('the tmux send terminal, as the tracker reads it', () => {
     should(occupied).be.instanceof(SendComposerOccupied);
     should((occupied as SendComposerOccupied).draft).equal('hi');
     should((broken as Error).message).equal('tmux went away');
+  });
+
+  it('should turn a typed-but-unproven fill into SendLandingUnconfirmed, on both transports', async () => {
+    const unproven = (): never => {
+      throw new ComposerUnconfirmedError('typed into tmux session fy-session-1; it drew nothing for 12 s', 1);
+    };
+    const terminal = new TmuxSendTerminal(
+      new TmuxController(new FrameTmux([PLACEHOLDER])),
+      async () => 'fy-session-1',
+      { deliver: async () => unproven() } as never,
+      { queue: async () => unproven() } as never,
+      async () => undefined,
+    );
+
+    should(await terminal.deliver(ID, 'x').catch((error: unknown) => error)).be.instanceof(SendLandingUnconfirmed);
+    should(await terminal.queue(ID, 'x').catch((error: unknown) => error)).be.instanceof(SendLandingUnconfirmed);
   });
 
   it('should erase a stranded payload one C-u at a time, verifying before each key', async () => {

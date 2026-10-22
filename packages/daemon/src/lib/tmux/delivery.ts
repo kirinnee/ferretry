@@ -234,3 +234,39 @@ export function composerLanding(
   if (showsPayload(composer.text, text)) return 'chars';
   return paste && composer.pasted ? 'placeholder' : undefined;
 }
+
+/**
+ * Whether the pane has drawn anything since `before` — the only sign a TUI has READ what was typed.
+ *
+ * Keys typed into a pane wait in its pty until the harness reads them, and a harness that is stalled —
+ * a throttled or napping host, a long synchronous render — reads nothing and draws nothing for
+ * seconds. Its composer then reads EMPTY while the keys are still on their way, and "empty after
+ * typing" was taken as "the keys never arrived": the daemon typed again, and again, and the stalled
+ * pane later drew all three copies (measured on Claude Code 2.1.281 frozen for 6 s). An empty
+ * composer proves the keys were dropped only once the pane has demonstrably drawn since they were sent.
+ */
+export function paneResponded(before: DeliveryFrame, after: DeliveryFrame): boolean {
+  return after.visible !== before.visible || after.cursorX !== before.cursorX || after.cursorY !== before.cursorY;
+}
+
+/** How long a fill waits for its payload to show, as the pane's own latency stretches it. */
+export interface LandingWindow {
+  /** The wait for a pane that drew promptly. */
+  readonly windowMs: number;
+  /** The ceiling, reached only by a pane that drew nothing at all, or drew late. */
+  readonly stalledWindowMs: number;
+  /** How long after the pane first drew to keep looking, since an echo can take a further repaint. */
+  readonly settleMs: number;
+}
+
+/**
+ * When a fill stops looking, given when (if ever) the pane first drew after the typing.
+ *
+ * A pane that has drawn nothing is stalled, not refusing, so it is waited on up to the ceiling. One
+ * that drew is given `settleMs` past its first repaint, and never less than the ordinary window: a slow
+ * host stretches the wait in proportion to how slow it measurably is, and a responsive one does not.
+ */
+export function landingDeadlineMs(window: LandingWindow, respondedAtMs: number | undefined): number {
+  if (respondedAtMs === undefined) return window.stalledWindowMs;
+  return Math.min(window.stalledWindowMs, Math.max(window.windowMs, respondedAtMs + window.settleMs));
+}

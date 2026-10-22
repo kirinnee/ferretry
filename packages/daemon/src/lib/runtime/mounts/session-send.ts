@@ -5,6 +5,7 @@ import {
   type ComposerDraftResult,
   FY_REQUEST_ID_HEADER,
   InterruptSessionRequestSchema,
+  SEND_UNCONFIRMED_CODE,
   SendCancelRequestSchema,
   type SendRecord,
   SendRequestSchema,
@@ -62,6 +63,11 @@ export type SessionSendFailure =
   | 'refused'
   /** A launch is still in flight. Pending rather than failed — the caller retries. */
   | 'pending'
+  /**
+   * It was typed into the agent's composer and nothing proved it landed. Neither refused nor failed:
+   * answered as `send_unconfirmed` with the send's id, so the app can act on exactly that send.
+   */
+  | 'unconfirmed'
   /** It was acted on, and the work it does — typing, reviving, journalling — failed. */
   | 'failed';
 
@@ -75,6 +81,8 @@ export class SessionSendError extends Error {
      * answered as `composer_occupied` with this draft, so the app can offer to send or clear it.
      */
     readonly draft?: string,
+    /** The send an `unconfirmed` answer is about. */
+    readonly sendId?: string,
   ) {
     super(message);
     this.name = 'SessionSendError';
@@ -121,6 +129,9 @@ const REFUSALS: Readonly<Record<SessionSendFailure, { readonly status: number; r
   // `503`, not `409`: the session is not refusing, it is not ready yet, and the difference is exactly
   // what tells a caller to retry rather than to change what they asked for.
   pending: { status: 503, code: 'session_launching' },
+  // `409` like a refusal, because the caller's next move is a decision about THIS send — press Enter on
+  // it, clear it, retry it — and never a blind re-post, which is what a `5xx` invites.
+  unconfirmed: { status: 409, code: SEND_UNCONFIRMED_CODE },
   failed: { status: 500, code: 'session_send_failed' },
 };
 
@@ -131,6 +142,8 @@ function refuse(error: unknown): never {
     // quotes only its start.
     if (error.failure === 'refused' && error.draft !== undefined)
       throw new ApiError(409, error.message, COMPOSER_OCCUPIED_CODE, undefined, { draft: error.draft });
+    if (error.failure === 'unconfirmed' && error.sendId !== undefined)
+      throw new ApiError(409, error.message, SEND_UNCONFIRMED_CODE, undefined, { sendId: error.sendId });
     const refusal = REFUSALS[error.failure];
     throw new ApiError(refusal.status, error.message, refusal.code);
   }

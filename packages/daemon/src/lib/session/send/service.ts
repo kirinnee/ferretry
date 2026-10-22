@@ -30,6 +30,7 @@ import {
   SendComposerOccupied,
   SendComposerUnreadable,
   SendDraftRefused,
+  SendLandingUnconfirmed,
   type SendLaunchGate,
   type SendLedger,
   type SendPaneObservation,
@@ -47,6 +48,7 @@ import {
   type SendTracking,
   type SendTurnStore,
   SendUnavailable,
+  SendUnconfirmed,
   TERMINAL_SEND_STATUSES,
 } from './types.ts';
 
@@ -334,6 +336,7 @@ export class SessionSendService {
         }
         return (await this.queued(id, next, await this.ports.terminal.queue(id, text))) ?? next;
       } catch (error) {
+        if (error instanceof SendLandingUnconfirmed) throw await this.unconfirmed(id, next);
         if (!(error instanceof SendComposerOccupied) && !(error instanceof SendComposerUnreadable)) throw error;
         // Nothing was typed, so the record goes back to exactly what it said before this attempt.
         await this.ports.ledger.settle(id, sendId, restorable(current));
@@ -621,7 +624,8 @@ export class SessionSendService {
   }
 
   /**
-   * Runs a transport, and undoes the record when the terminal refused before typing anything.
+   * Runs a transport, and undoes the record when the terminal refused before typing anything — or
+   * settles it unconfirmed when the terminal typed it and could not prove it landed.
    *
    * A composer that already held text is refused by the terminal before its first keystroke, so the
    * acceptance is the one thing to take back: a fresh send is withdrawn (its id may honestly start
@@ -636,6 +640,7 @@ export class SessionSendService {
     try {
       return await transport();
     } catch (error) {
+      if (error instanceof SendLandingUnconfirmed) throw await this.unconfirmed(id, record);
       if (!(error instanceof SendComposerOccupied) && !(error instanceof SendComposerUnreadable)) throw error;
       const occupied = error instanceof SendComposerOccupied;
       if (release !== undefined) await this.ports.ledger.settle(id, record.sendId, { held: true });
@@ -648,6 +653,36 @@ export class SessionSendService {
       if (occupied) throw composerOccupiedRefusal(error.draft);
       throw composerUnreadableRefusal();
     }
+  }
+
+  /**
+   * Settles a send whose keys reached the pane but whose landing no frame proved, and says so.
+   *
+   * `unaccounted`, never withdrawn and never typed again: the message may be in the agent's composer
+   * now, or still on its way there from a pane too stalled to draw it, and the next copy is how one
+   * message became three. It stays watched, so a transcript record that turns up later still proves it
+   * delivered. The answer carries its id, so the person is offered "Send it", "Clear it" and "Retry"
+   * for exactly this send rather than a terminal error naming a tmux session.
+   */
+  private async unconfirmed(id: SessionId, record: SendRecord): Promise<SendUnconfirmed> {
+    await this.ports.ledger.settle(id, record.sendId, {
+      fate: 'unaccounted',
+      fateAt: this.ports.clock.now(),
+      unaccountedReason: 'landing_unconfirmed',
+      deadlineAt: undefined,
+      retryable: undefined,
+    });
+    await this.ports.repository.journal(id, 'control.send_unaccounted', {
+      sendId: record.sendId,
+      reason: 'landing_unconfirmed',
+      attempt: record.attempt ?? 1,
+    });
+    this.ports.tracking.track(id);
+    return new SendUnconfirmed(
+      "the message was typed into the agent's box, but the agent has not shown it there yet, so it was not " +
+        'sent. It may still appear: press Enter on it, clear it, or retry',
+      record.sendId,
+    );
   }
 
   /**

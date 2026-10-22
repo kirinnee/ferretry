@@ -6,7 +6,11 @@ import type {
   SendQueueOutcome,
   SendTerminal,
 } from '../../../lib/session/send/types.ts';
-import { SendComposerOccupied, SendComposerUnreadable } from '../../../lib/session/send/types.ts';
+import {
+  SendComposerOccupied,
+  SendComposerUnreadable,
+  SendLandingUnconfirmed,
+} from '../../../lib/session/send/types.ts';
 import type { SessionId } from '../../../lib/session-id.ts';
 import {
   composerInput,
@@ -24,6 +28,7 @@ import {
 } from '../../../lib/tmux/index.ts';
 import {
   ComposerOccupiedError,
+  ComposerUnconfirmedError,
   ComposerUnreadableError,
   captureFrame,
   type DeliverySleep,
@@ -189,13 +194,17 @@ export class TmuxSendTerminal implements SendTerminal {
     await this.tmux.sendKey(await this.session(id), 'Escape');
   }
 
-  /** The terminal's refusal-before-typing, said in the send domain's own words. */
+  /**
+   * The terminal's refusal-before-typing, and its typed-but-unproven, said in the send domain's own
+   * words — the two outcomes the service must tell apart from a transport that simply failed.
+   */
   private async untyped<T>(transport: () => Promise<T>): Promise<T> {
     try {
       return await transport();
     } catch (error) {
       if (error instanceof ComposerOccupiedError) throw new SendComposerOccupied(error.draft);
       if (error instanceof ComposerUnreadableError) throw new SendComposerUnreadable();
+      if (error instanceof ComposerUnconfirmedError) throw new SendLandingUnconfirmed(error.message);
       throw error;
     }
   }

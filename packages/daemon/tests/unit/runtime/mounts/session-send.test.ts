@@ -4,12 +4,14 @@ import {
   ComposerDraftResultSchema,
   composerOccupiedDraft,
   FY_REQUEST_ID_HEADER,
+  SEND_UNCONFIRMED_CODE,
   SendListResponseSchema,
   type SendRecord,
   SendRecordSchema,
   SendResultSchema,
   SessionHandoffSchema,
   SessionViewSchema,
+  unconfirmedSendId,
 } from '@ferretry/protocol';
 import should from 'should';
 import { NO_GOVERNED_ROUTES_GUARD } from '../../../../src/lib/api/capability.ts';
@@ -406,6 +408,23 @@ describe('the person’s own draft in the composer', () => {
     const body = JSON.parse(response.body) as unknown;
     should(body).match({ code: COMPOSER_OCCUPIED_CODE, draft });
     should(composerOccupiedDraft(body)).equal(draft);
+  });
+
+  it('should answer a send typed but never shown as send_unconfirmed, carrying its id and no tmux words', async () => {
+    // Arrange — 409, not 5xx: the caller's next move is a decision about THIS send, never a blind re-post.
+    const sessions = new FakeSessionSend(['s1'], {
+      s1: new SessionSendError('unconfirmed', 'the message was typed into the agent’s box', undefined, 'send-7'),
+    });
+
+    // Act
+    const response = await dispatcher(sessions).dispatch(sendRequest('s1', JSON.stringify({ message: 'hi' })));
+
+    // Assert
+    should(response.status).equal(409);
+    const body = JSON.parse(response.body) as unknown;
+    should(body).match({ code: SEND_UNCONFIRMED_CODE, sendId: 'send-7' });
+    should(unconfirmedSendId(body)).equal('send-7');
+    should(response.body).not.match(/tmux/u);
   });
 
   it('should keep every other refusal as it was, with no draft in the body', async () => {

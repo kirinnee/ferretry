@@ -10,6 +10,11 @@ import type { TmuxCommandPort, TmuxCommandResult } from '../../../src/lib/index.
  *
  * So keys land in a composer, the cursor moves with them, a bracketed paste collapses into the
  * placeholder both harnesses render, and Enter submits whatever is there.
+ *
+ * It can also STALL, the way a throttled or napping host does: until `stalledUntilMs` on its virtual
+ * clock the harness reads no input and draws nothing, so keys wait in the pty and every frame is the
+ * one from before them; once the clock passes it, the waiting keys are read in order. A test drives
+ * the clock with `advance`, from the sleep it injects.
  */
 export class FakeTmuxServer implements TmuxCommandPort {
   readonly calls: Array<readonly string[]> = [];
@@ -43,13 +48,53 @@ export class FakeTmuxServer implements TmuxCommandPort {
    * inside its paste-burst window, measured on 0.156.1.
    */
   swallowEnters = 0;
+  /** The virtual clock, in milliseconds, which only `advance` moves. */
+  nowMs = 0;
+  /** Until this virtual time the harness reads nothing typed and draws nothing new. */
+  stalledUntilMs = 0;
 
   private captures = 0;
+  /** Keys sent while stalled, still unread in the pty, in the order they were sent. */
+  private readonly pty: Array<{ readonly argv: readonly string[] }> = [];
   private pasteCount = 0;
   private readonly buffers = new Map<string, string>();
 
+  /** Moves the virtual clock, and lets a pane that has woken read what was typed while it slept. */
+  advance(milliseconds: number): void {
+    this.nowMs += milliseconds;
+    if (this.nowMs < this.stalledUntilMs) return;
+    for (const waiting of this.pty.splice(0)) this.input(waiting.argv);
+  }
+
   async execute(argv: readonly string[], stdin?: string): Promise<TmuxCommandResult> {
     this.calls.push(argv);
+    const command = argv[0];
+    if ((command === 'send-keys' || command === 'paste-buffer') && this.nowMs < this.stalledUntilMs) {
+      // tmux took the keys; the stalled harness has not read them. A paste's buffer is resolved now,
+      // as tmux writes its bytes into the pty at once.
+      this.pty.push({ argv: command === 'paste-buffer' ? this.pasted(argv) : argv });
+      return result('');
+    }
+    return this.input(argv) ?? (await this.answer(argv, stdin));
+  }
+
+  /** What a pane does with keys it has READ: type, press, or paste. Anything else is not input. */
+  private input(argv: readonly string[]): TmuxCommandResult | undefined {
+    if (argv[0] === 'send-keys') return this.sendKeys(argv);
+    if (argv[0] === 'paste-buffer') return this.pasteBuffer(argv);
+    if (argv[0] === 'fy-pasted') return this.pastePayload(String(argv[1]));
+    return undefined;
+  }
+
+  /** A paste whose bytes are already in the pty, held as the payload rather than a buffer name. */
+  private pasted(argv: readonly string[]): readonly string[] {
+    const name = String(argv[argv.indexOf('-b') + 1]);
+    const payload = this.buffers.get(name) ?? '';
+    if (argv.includes('-d')) this.buffers.delete(name);
+    return ['fy-pasted', payload];
+  }
+
+  private async answer(argv: readonly string[], stdin?: string): Promise<TmuxCommandResult> {
     const command = argv[0];
     if (command === 'has-session') return result(this.alive ? '' : 'no such session', this.alive ? 0 : 1);
     if (command === 'new-session') {
@@ -62,12 +107,10 @@ export class FakeTmuxServer implements TmuxCommandPort {
     }
     if (command === 'display-message') return result(this.metadata());
     if (command === 'capture-pane') return result(this.frame());
-    if (command === 'send-keys') return this.sendKeys(argv);
     if (command === 'load-buffer') {
       this.buffers.set(String(argv[2]), stdin ?? '');
       return result('');
     }
-    if (command === 'paste-buffer') return this.pasteBuffer(argv);
     if (command === 'delete-buffer') {
       this.buffers.delete(String(argv[2]));
       return result('');
@@ -120,11 +163,15 @@ export class FakeTmuxServer implements TmuxCommandPort {
     const name = String(argv[argv.indexOf('-b') + 1]);
     const payload = this.buffers.get(name);
     if (payload === undefined) return { code: 1, stdout: '', stderr: 'no buffer' };
+    if (argv.includes('-d')) this.buffers.delete(name);
+    return this.pastePayload(payload);
+  }
+
+  private pastePayload(payload: string): TmuxCommandResult {
     // Both harnesses collapse a bracketed paste and render NONE of its characters.
     this.pasteCount += 1;
     this.composer = `[Pasted text #${this.pasteCount} +${payload.split('\n').length} lines]`;
     this.pastedPayloads.set(this.composer, payload);
-    if (argv.includes('-d')) this.buffers.delete(name);
     return result('');
   }
 

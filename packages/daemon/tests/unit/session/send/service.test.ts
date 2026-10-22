@@ -15,6 +15,7 @@ import {
   SendComposerUnreadable,
   SendDraftRefused,
   type SendHeldAt,
+  SendLandingUnconfirmed,
   type SendLaunchGate,
   type SendLedger,
   type SendPaneObservation,
@@ -32,6 +33,7 @@ import {
   type SendTransition,
   type SendTurnStore,
   SendUnavailable,
+  SendUnconfirmed,
   SessionSendService,
 } from '../../../../src/lib/session/send/index.ts';
 
@@ -156,6 +158,7 @@ class FakeTerminal implements SendTerminal {
   readonly typed: string[] = [];
   queueOutcome: SendQueueOutcome = 'held';
   deliverFailure: Error | undefined;
+  queueFailure: Error | undefined;
   observeFailure: Error | undefined;
   /** Which observe call starts failing, so a test can fail the SECOND look at a pane. */
   observeFailFrom = 0;
@@ -184,6 +187,7 @@ class FakeTerminal implements SendTerminal {
     if (this.unreadable) throw new SendComposerUnreadable();
     this.calls.push('queue');
     this.typed.push(text);
+    if (this.queueFailure !== undefined) throw this.queueFailure;
     return this.queueOutcome;
   }
 
@@ -982,6 +986,57 @@ describe('a composer that already holds unsent text', () => {
     );
     should([...idle.ledger.withdrawn, ...busy.ledger.withdrawn]).eql(['send-1', 'send-1']);
     should([...idle.terminal.typed, ...busy.terminal.typed]).be.empty();
+  });
+
+  it('settles a send typed but never shown as unconfirmed, still watched, and names it — on both transports', async () => {
+    const idle = parts(target(), [pane({ promptReady: true })]);
+    idle.terminal.deliverFailure = new SendLandingUnconfirmed('typed into tmux session fy-x; it drew nothing for 12 s');
+    const busy = parts(target(), [pane({ activeWork: true })]);
+    busy.terminal.queueFailure = new SendLandingUnconfirmed('typed into tmux session fy-x; it drew nothing for 12 s');
+
+    const answers = [
+      await idle.service.send(request()).catch((error: unknown) => error),
+      await busy.service.send(request()).catch((error: unknown) => error),
+    ];
+
+    for (const [built, answer] of [
+      [idle, answers[0]],
+      [busy, answers[1]],
+    ] as const) {
+      // Typed exactly once, never withdrawn: the message may be in the agent's box right now.
+      should(answer).be.instanceof(SendUnconfirmed);
+      should((answer as SendUnconfirmed).sendId).equal('send-1');
+      should((answer as SendUnconfirmed).message).not.match(
+        /tmux|fy-x/u,
+        'a person is never handed a tmux session name',
+      );
+      should(built.terminal.typed).have.length(1);
+      should(built.ledger.withdrawn).be.empty();
+      should(built.ledger.only()).match({ fate: 'unaccounted', unaccountedReason: 'landing_unconfirmed', fateAt: NOW });
+      should(built.tracked).eql([ID], 'still watched, so a transcript record that turns up later proves it delivered');
+      should(built.repository.journal_.at(-1)).match({
+        event: 'control.send_unaccounted',
+        data: { sendId: 'send-1', reason: 'landing_unconfirmed', attempt: 1 },
+      });
+    }
+    // No turn is claimed for a prompt that never proved it landed.
+    should(idle.repository.transitions).be.empty();
+  });
+
+  it('settles a forced retry that was typed but never shown as unconfirmed again, under the same id', async () => {
+    const built = parts(target(), [pane({ promptReady: true })]);
+    await built.service.send(request());
+    built.ledger.records.set('send-1', {
+      ...built.ledger.only(),
+      fate: 'unaccounted',
+      unaccountedReason: 'landing_unconfirmed',
+    });
+    built.terminal.deliverFailure = new SendLandingUnconfirmed('typed; drew nothing');
+
+    const answer = await built.service.reattempt(ID, 'send-1', { by: 'person', force: true }).catch((e: unknown) => e);
+
+    should(answer).be.instanceof(SendUnconfirmed);
+    should(built.ledger.only()).match({ fate: 'unaccounted', unaccountedReason: 'landing_unconfirmed', attempt: 2 });
   });
 
   it('passes a transport failure that is not a refusal straight through', async () => {

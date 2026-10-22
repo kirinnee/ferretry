@@ -4,27 +4,33 @@ import { join } from 'node:path';
 import should from 'should';
 import {
   ComposerOccupiedError,
+  ComposerUnconfirmedError,
   PaneDeliveryError,
   PaneStrandedError,
   TmuxPaneDelivery,
 } from '../../../src/adapters/index.ts';
 import { TmuxController } from '../../../src/lib/index.ts';
 import { FakeTmuxServer } from '../support/fake-tmux-server.ts';
+import { loadRecording, RecordedPane } from '../support/recorded-pane.ts';
 
 const SESSION = 'fy-session-1';
 
-/** No real waiting: the loops are bounded by attempts, not by a clock. */
-function delivery(server: FakeTmuxServer, options = {}) {
+/** No real waiting: every sleep moves the fake's virtual clock instead, which is all a stalled pane reads. */
+function delivery(server: FakeTmuxServer | RecordedPane, options = {}) {
   const slept: number[] = [];
   const subject = new TmuxPaneDelivery(
     new TmuxController(server),
     async milliseconds => {
       slept.push(milliseconds);
+      server.advance(milliseconds);
     },
     options,
   );
   return { subject, slept };
 }
+
+const literals = (server: FakeTmuxServer): number => server.calls.filter(call => call.includes('-l')).length;
+const enters = (server: FakeTmuxServer): number => server.calls.filter(call => call.at(-1) === 'Enter').length;
 
 describe('tmux pane delivery — readiness', () => {
   it('should answer the trust prompt a first launch in a new directory always shows', async () => {
@@ -227,8 +233,8 @@ describe('tmux pane delivery — landing proof', () => {
     should(server.submitted).deepEqual(['/status']);
   });
 
-  it('should refuse to claim delivery when nothing ever reaches the composer', async () => {
-    // Arrange — a pane that swallows every keystroke.
+  it('should call a payload no frame ever showed unconfirmed, typed once, with no Enter on a guess', async () => {
+    // Arrange — a pane that takes every keystroke and draws nothing, ever: it may be reading them yet.
     const server = new FakeTmuxServer();
     server.execute = async argv => {
       server.calls.push(argv);
@@ -237,29 +243,90 @@ describe('tmux pane delivery — landing proof', () => {
       if (argv[0] === 'capture-pane') return { code: 0, stdout: 'the last frame\n> \n', stderr: '' };
       return { code: 0, stdout: '', stderr: '' };
     };
-    const { subject } = delivery(server, { composerAttempts: 2, composerPolls: 1 });
+    const { subject, slept } = delivery(server);
 
-    // Act / Assert
-    await should(subject.deliver(SESSION, 'continue')).be.rejectedWith(/did not land in the composer/u);
-    should(server.calls.filter(call => call.at(-1) === 'Enter')).deepEqual([], 'Enter is never pressed on a guess');
+    // Act
+    const refused = await subject.deliver(SESSION, 'continue').catch((error: unknown) => error);
+
+    // Assert — the whole stalled window was given, then the composer was left exactly as it was.
+    should(refused).be.instanceof(ComposerUnconfirmedError);
+    should((refused as ComposerUnconfirmedError).message).match(/drew nothing for 12 s; it may still be reading it/u);
+    should((refused as ComposerUnconfirmedError).typings).equal(1);
+    should(literals(server)).equal(1, 'an empty composer on a pane that drew nothing proves nothing');
+    should(enters(server)).equal(0, 'Enter is never pressed on a guess');
+    should(slept.reduce((sum, wait) => sum + wait, 0)).equal(12_000);
   });
 
-  it('should type again only into a composer proven empty, and never erase to make room', async () => {
-    // Arrange — the first literal send is dropped; the second lands.
+  it('should type a send ONCE by default, even when a live pane drew an empty composer after it', async () => {
+    // Arrange — the shape a second fill would trust: the pane drew, and the composer reads empty. On the
+    // owner's Mac exactly that reading was wrong, and one message was typed three times.
     const server = new FakeTmuxServer();
-    let literals = 0;
     const underlying = server.execute.bind(server);
     server.execute = async (argv, stdin) => {
       if (argv.includes('-l')) {
-        literals += 1;
-        if (literals === 1) {
+        server.calls.push(argv);
+        server.transcript = 'the last frame\n⎿ a status line ticked';
+        return { code: 0, stdout: '', stderr: '' };
+      }
+      return await underlying(argv, stdin);
+    };
+    const { subject } = delivery(server);
+
+    // Act
+    const refused = await subject.deliver(SESSION, 'continue').catch((error: unknown) => error);
+
+    // Assert
+    should(refused).be.instanceof(ComposerUnconfirmedError);
+    should((refused as ComposerUnconfirmedError).message).match(
+      /drew an empty composer after it; it was not typed again/u,
+    );
+    should(literals(server)).equal(1, 'only a person, with a forced retry, types it into this pane again');
+  });
+
+  it("should type ONCE into a stalled pane showing a ghost suggestion — the owner's triple message", async () => {
+    // Arrange — the Mac: Claude's dim suggestion of the next prompt sat in the composer with the cursor at
+    // its first column (an EMPTY composer, rightly), and the pane did not read the keys for seconds, so
+    // every look still showed the suggestion. The old fill typed again at each look's end: three copies.
+    const late = new FakeTmuxServer();
+    late.placeholder = 'go ahead with all three';
+    late.stalledUntilMs = 9_000;
+    const never = new FakeTmuxServer();
+    never.placeholder = 'go ahead with all three';
+    never.stalledUntilMs = 60_000;
+
+    // Act
+    await delivery(late).subject.deliver(SESSION, "what's the status thusfar?");
+    const refused = await delivery(never)
+      .subject.deliver(SESSION, "what's the status thusfar?")
+      .catch((error: unknown) => error);
+    never.advance(60_000);
+
+    // Assert — landed once when it woke; unconfirmed, and still one copy, when it never did in time.
+    should(late.submitted).deepEqual(["what's the status thusfar?"]);
+    should(literals(late)).equal(1);
+    should(refused).be.instanceof(ComposerUnconfirmedError);
+    should(literals(never)).equal(1);
+    should(never.composer).equal("what's the status thusfar?");
+  });
+
+  it('should type again only when a pane that visibly drew still shows an empty composer, if allowed two fills', async () => {
+    // Arrange — the first literal is dropped by a LIVE pane: it draws (a status line ticks) and its
+    // composer stays empty, which is the one shape that proves the keys never arrived.
+    const server = new FakeTmuxServer();
+    let typed = 0;
+    const underlying = server.execute.bind(server);
+    server.execute = async (argv, stdin) => {
+      if (argv.includes('-l')) {
+        typed += 1;
+        if (typed === 1) {
           server.calls.push(argv);
+          server.transcript = 'the last frame\n⎿ a status line ticked';
           return { code: 0, stdout: '', stderr: '' };
         }
       }
       return await underlying(argv, stdin);
     };
-    const { subject } = delivery(server, { composerPolls: 1 });
+    const { subject } = delivery(server, { composerAttempts: 2 });
 
     // Act
     const actual = await subject.deliver(SESSION, 'continue');
@@ -267,8 +334,32 @@ describe('tmux pane delivery — landing proof', () => {
     // Assert
     should(actual).equal('turn-started');
     should(server.calls.filter(call => call.at(-1) === 'C-u')).be.empty();
-    should(literals).equal(2, 'the dropped keys left the composer empty, so one more fill was safe');
+    should(typed).equal(2, 'the pane drew and still showed an empty composer, so one more fill was safe');
     should(server.submitted).deepEqual(['continue']);
+  });
+
+  it('should stop after the second fill a live pane also dropped, and say it was typed twice', async () => {
+    // Arrange — every literal is dropped, and the pane draws after each one.
+    const server = new FakeTmuxServer();
+    const underlying = server.execute.bind(server);
+    server.execute = async (argv, stdin) => {
+      if (argv.includes('-l')) {
+        server.calls.push(argv);
+        server.transcript = `${server.transcript}\n⎿ tick`;
+        return { code: 0, stdout: '', stderr: '' };
+      }
+      return await underlying(argv, stdin);
+    };
+    const { subject } = delivery(server, { composerAttempts: 2 });
+
+    // Act
+    const refused = await subject.deliver(SESSION, 'continue').catch((error: unknown) => error);
+
+    // Assert
+    should(refused).be.instanceof(ComposerUnconfirmedError);
+    should((refused as ComposerUnconfirmedError).typings).equal(2);
+    should((refused as ComposerUnconfirmedError).message).match(/2 times and the pane dropped it every time/u);
+    should(enters(server)).equal(0);
   });
 
   it('should keep pressing Enter while the payload is visibly stuck, then refuse', async () => {
@@ -287,6 +378,144 @@ describe('tmux pane delivery — landing proof', () => {
     // Act / Assert
     await should(subject.deliver(SESSION, 'continue')).be.rejectedWith(/landed but stayed in the composer/u);
     should(server.calls.filter(call => call.at(-1) === 'Enter')).have.length(2);
+  });
+});
+
+describe('tmux pane delivery — a stalled pane', () => {
+  it('should land a recorded slow echo on its first typing and submit it once', async () => {
+    // Arrange — Claude Code 2.1.281 frozen by its host: the echo took 2.5 s and the Enter 4 s more. The
+    // old fill looked for 1.5 s, read the still-empty composer as dropped keys, and typed again.
+    const recording = await loadRecording('claude-2.1.281-stalled-echo.json');
+    const pane = new RecordedPane(recording);
+    const { subject } = delivery(pane);
+
+    // Act
+    await subject.deliver(SESSION, recording.payload);
+
+    // Assert
+    should(pane.typings()).equal(1, 'one message, typed once');
+    should(pane.enters()).equal(
+      1,
+      'the pane drew nothing after the Enter until it took it, so it was not pressed again',
+    );
+  });
+
+  it('should leave the recorded slow echo unconfirmed rather than retype it, when the window is too short', async () => {
+    // Arrange — the same recording under the old 1.5 s budget: what used to become a second copy.
+    const recording = await loadRecording('claude-2.1.281-stalled-echo.json');
+    const pane = new RecordedPane(recording);
+    const { subject } = delivery(pane, { windowMs: 1_000, stalledWindowMs: 1_500, settleMs: 0 });
+
+    // Act / Assert
+    await should(subject.deliver(SESSION, recording.payload)).be.rejectedWith(ComposerUnconfirmedError);
+    should(pane.typings()).equal(
+      1,
+      'the composer read empty because the pane had not read the keys — never a second copy',
+    );
+    should(pane.enters()).equal(0);
+  });
+
+  it('should wait out a pane frozen for 9 s and deliver exactly one copy', async () => {
+    // Arrange
+    const server = new FakeTmuxServer();
+    server.stalledUntilMs = 9_000;
+    const { subject } = delivery(server);
+
+    // Act
+    await subject.deliver(SESSION, 'continue');
+
+    // Assert
+    should(server.submitted).deepEqual(['continue']);
+    should(literals(server)).equal(1);
+    should(enters(server)).equal(1);
+  });
+
+  it('should wait out a frozen pane for a collapsed paste too, and land it on its placeholder', async () => {
+    // Arrange
+    const server = new FakeTmuxServer();
+    server.stalledUntilMs = 5_000;
+    const brief = 'Read the file /turns/turn-002.md now,\nthen follow every instruction inside it.';
+    const { subject } = delivery(server);
+
+    // Act
+    await subject.deliver(SESSION, brief);
+
+    // Assert
+    should(server.submitted).deepEqual([brief]);
+    should(server.calls.filter(call => call[0] === 'paste-buffer')).have.length(1);
+  });
+
+  it('should call a pane frozen past the ceiling unconfirmed, and leave one copy for when it wakes', async () => {
+    // Arrange
+    const server = new FakeTmuxServer();
+    server.stalledUntilMs = 20_000;
+    const { subject } = delivery(server);
+
+    // Act
+    const refused = await subject.deliver(SESSION, 'continue').catch((error: unknown) => error);
+    server.advance(20_000);
+
+    // Assert — the copy the frozen pane reads on waking is the only one there is, and it is not submitted.
+    should(refused).be.instanceof(ComposerUnconfirmedError);
+    should(literals(server)).equal(1);
+    should(enters(server)).equal(0);
+    should(server.composer).equal('continue');
+    should(server.submitted).be.empty();
+  });
+
+  it('should land on a Mac-like host where every capture costs half a second and the pane is slow too', async () => {
+    // Arrange — the owner's Mac: a pane capture takes 0.2–0.6 s, and the harness took 4 s to echo.
+    const server = new (class extends FakeTmuxServer {
+      override async execute(argv: readonly string[], stdin?: string) {
+        if (argv[0] === 'capture-pane') this.advance(500);
+        return await super.execute(argv, stdin);
+      }
+    })();
+    server.stalledUntilMs = 4_000;
+    const { subject } = delivery(server);
+
+    // Act
+    await subject.deliver(SESSION, 'continue');
+
+    // Assert
+    should(server.submitted).deepEqual(['continue']);
+    should(literals(server)).equal(1);
+  });
+
+  it('should read at least five fresh frames however short the configured window is', async () => {
+    // Arrange — a window shorter than one look, at a pane that echoes after 400 ms.
+    const server = new FakeTmuxServer();
+    server.stalledUntilMs = 400;
+    const { subject } = delivery(server, { windowMs: 50, stalledWindowMs: 50, settleMs: 0 });
+
+    // Act
+    await subject.deliver(SESSION, 'continue');
+
+    // Assert
+    should(server.submitted).deepEqual(['continue']);
+    should(literals(server)).equal(1);
+  });
+
+  it('should not press Enter again while a pane that froze after the echo has drawn nothing', async () => {
+    // Arrange — the echo lands, then the host freezes for 5 s right as Enter is pressed.
+    const server = new (class extends FakeTmuxServer {
+      private froze = false;
+      override async execute(argv: readonly string[], stdin?: string) {
+        if (!this.froze && argv[0] === 'send-keys' && argv.at(-1) === 'Enter') {
+          this.froze = true;
+          this.stalledUntilMs = this.nowMs + 5_000;
+        }
+        return await super.execute(argv, stdin);
+      }
+    })();
+    const { subject } = delivery(server);
+
+    // Act
+    await subject.deliver(SESSION, 'continue');
+
+    // Assert
+    should(server.submitted).deepEqual(['continue']);
+    should(enters(server)).equal(1, 'a second Enter would only have queued behind the first');
   });
 });
 

@@ -34,6 +34,11 @@
  *     (`──── [Aime] MXO OCI Migration ─`). Nothing here reads that rule, so the title changes nothing.
  *   * An empty idle composer suggests something to type, `Try "edit <filepath> to..."`, with the
  *     cursor at its first column. That wording is a placeholder even when tmux reports no cursor.
+ *   * After a turn Claude also suggests the person's NEXT prompt as dim ghost text (SGR 2, seen with
+ *     `capture-pane -e`): `❯ ok` in a soak, `❯ go ahead with all three` on the owner's Mac
+ *     (`claude-2.1.281-mac-draft-autocompact`, cursor `2|17`). Any words at all, with the cursor at
+ *     the first column — which is why the cursor, not a list of wordings, decides. The status lines
+ *     under the composer (a right-aligned `2% until auto-compact`) change nothing.
  *   * `C-u` erases back to the start of the WRAPPED ROW the cursor is on, not the whole message:
  *     a pointer wrapped over three rows loses only its last one. A "clear and retype" therefore
  *     leaves a clipped copy behind and appends a whole new one — the pile of six pointers on one
