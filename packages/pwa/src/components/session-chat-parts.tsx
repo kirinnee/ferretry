@@ -37,6 +37,7 @@ import {
   attachmentTypeLabel,
   formatAttachmentSize,
   isAttachmentEncryption,
+  isBrowserOpenableAttachment,
   isImageMime,
   type StoredTranscriptImage,
   textExtractionFailureCopy,
@@ -47,6 +48,8 @@ import { PENDING_BADGE, type PendingAttachment, type PendingStatus } from './ses
 export interface PendingAttachmentStripProps {
   readonly entries: readonly PendingAttachment[];
   readonly onRetry: (entry: PendingAttachment) => void;
+  /** Open the chip's file: a picture full screen, a document in its own tab. Not given, a chip is static. */
+  readonly onOpen?: (entry: PendingAttachment) => void;
   readonly onRemove: (entry: PendingAttachment) => void;
   /** Optional so the strip still renders where no unlock flow is wired. */
   readonly onUnlock?: (entry: PendingAttachment) => void;
@@ -56,6 +59,7 @@ export interface PendingAttachmentStripProps {
 export function PendingAttachmentStrip({
   entries,
   onForget,
+  onOpen,
   onRemove,
   onRetry,
   onUnlock,
@@ -75,17 +79,9 @@ export function PendingAttachmentStrip({
       {entries.map(entry => {
         const encryption = isAttachmentEncryption(entry.view?.encrypted) ? entry.view.encrypted : undefined;
         const mime = entry.view?.mime ?? entry.file.type;
-        return (
-          <li
-            className={cn(
-              'flex items-center gap-1.5 rounded-control border bg-surface-2 p-1',
-              entry.status === 'failed'
-                ? 'min-w-[252px] max-w-[320px] border-err-border'
-                : 'min-w-[230px] max-w-[320px] border-border-soft',
-            )}
-            key={entry.localId}
-            role={entry.status === 'failed' ? 'alert' : 'status'}
-          >
+        const openable = onOpen !== undefined && (entry.objectUrl !== undefined || isBrowserOpenableAttachment(mime));
+        const body = (
+          <>
             {entry.objectUrl ? (
               <img
                 alt=""
@@ -142,6 +138,32 @@ export function PendingAttachmentStrip({
                 </span>
               ) : null}
             </span>
+          </>
+        );
+        return (
+          <li
+            className={cn(
+              'flex items-center gap-1.5 rounded-control border bg-surface-2 p-1',
+              entry.status === 'failed'
+                ? 'min-w-[252px] max-w-[320px] border-err-border'
+                : 'min-w-[230px] max-w-[320px] border-border-soft',
+            )}
+            key={entry.localId}
+            role={entry.status === 'failed' ? 'alert' : 'status'}
+          >
+            {openable ? (
+              <button
+                aria-label={`Open ${entry.file.name}`}
+                className="flex min-h-[44px] min-w-0 flex-1 items-center gap-1.5 rounded-control text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+                onClick={() => onOpen?.(entry)}
+                title={entry.objectUrl ? 'View full screen' : 'Open in a new tab'}
+                type="button"
+              >
+                {body}
+              </button>
+            ) : (
+              <div className="flex min-w-0 flex-1 items-center gap-1.5">{body}</div>
+            )}
             {entry.status === 'ready' && encryption?.locked && onUnlock ? (
               <button
                 aria-label={`Unlock ${entry.file.name}`}
