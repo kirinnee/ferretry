@@ -1,5 +1,5 @@
 import { stat } from 'node:fs/promises';
-import { SessionStateSchema } from '@ferretry/protocol';
+import { type SessionState, SessionStateSchema, type SessionStatus } from '@ferretry/protocol';
 import {
   type ClockPort,
   isTurnStatus,
@@ -41,8 +41,30 @@ interface CachedTail {
  * modification time — so a two-second tick over an idle fleet costs a `stat` per session, not a
  * parse. The pane read is the same capture the send path makes before it types.
  */
+/**
+ * Whether a session that is not live leaves the watcher anything to decide. For such a session every
+ * settle in `lib/session/turn/policy.ts` answers nothing, so the watcher writes exactly when one of these
+ * four is still recorded — and once none is, it never will again until the session is live.
+ */
+function nothingToSettle(state: SessionState): boolean {
+  return (
+    state.turnState === undefined &&
+    state.turnPrompt === undefined &&
+    state.permissionRequest === undefined &&
+    state.harnessDialog === undefined
+  );
+}
+
 export class StorageTurnPorts implements SessionTurnPorts {
   private readonly tails = new Map<SessionId, CachedTail>();
+  /**
+   * Sessions that are not live and whose state holds no turn left to settle: the watcher would decide
+   * nothing about them, so they are not read again until the index says one is live once more.
+   *
+   * WHY NOT SKIP EVERY ENDED SESSION. A session that has just stopped still carries the turn state it
+   * stopped with, and the watcher is what clears it — so each one is read until that has happened.
+   */
+  private readonly settled = new Set<SessionId>();
 
   constructor(
     private readonly storage: DaemonStorage,
@@ -54,11 +76,18 @@ export class StorageTurnPorts implements SessionTurnPorts {
   ) {}
 
   async sessions(): Promise<readonly TurnWatchSession[]> {
+    const listed = this.storage.listSessions();
+    for (const { id, status } of listed)
+      if (status !== undefined && isTurnStatus(status as SessionStatus)) this.settled.delete(id);
     const sessions = await Promise.all(
-      this.storage.listSessions().map(async ({ id }) => {
-        const state = SessionStateSchema.safeParse(await this.storage.readState(id).catch(() => undefined));
-        return state.success ? ({ id, state: state.data } satisfies TurnWatchSession) : undefined;
-      }),
+      listed
+        .filter(({ id }) => !this.settled.has(id))
+        .map(async ({ id }) => {
+          const state = SessionStateSchema.safeParse(await this.storage.readState(id).catch(() => undefined));
+          if (!state.success) return undefined;
+          if (!isTurnStatus(state.data.status) && nothingToSettle(state.data)) this.settled.add(id);
+          return { id, state: state.data } satisfies TurnWatchSession;
+        }),
     );
     return sessions.filter(session => session !== undefined);
   }

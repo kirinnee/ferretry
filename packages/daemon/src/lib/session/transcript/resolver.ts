@@ -19,7 +19,15 @@ import { selectCodexRollout } from './codex-rollout.ts';
 
 /** Lists the rollouts under a home, saying which contain the caller's correlation token. */
 export interface CodexRolloutIndex {
-  candidates(home: string, correlationToken: string): Promise<readonly CodexRolloutCandidate[]>;
+  /**
+   * Every rollout under `home`, each marked with whether it carries `correlationToken`. A rollout whose
+   * id is in `skip` can never be chosen, so an index MAY leave it out rather than look at it again.
+   */
+  candidates(
+    home: string,
+    correlationToken: string,
+    skip?: ReadonlySet<string>,
+  ): Promise<readonly CodexRolloutCandidate[]>;
 }
 
 /** Persists a resolution back onto the session's own configuration document. */
@@ -68,11 +76,16 @@ export class SessionTranscriptResolver {
     // Without a token nothing can prove ownership, and the walk would only produce candidates the
     // selection is required to refuse. Not looking is the same answer, reached cheaply.
     if (provenance.correlationToken === undefined) return undefined;
-    const candidates = await this.rollouts.candidates(provenance.home, provenance.correlationToken);
-    const chosen = selectCodexRollout(candidates, {
-      baseline: provenance.baseline ?? [],
-      claimed: await this.claims.claimed(sessionId),
-    });
+    const baseline = provenance.baseline ?? [];
+    // The baseline is every rollout that existed before this session launched — never its own — so the
+    // index need not look at those again; on a home of thousands, they are nearly all of them.
+    const candidates = await this.rollouts.candidates(provenance.home, provenance.correlationToken, new Set(baseline));
+    // The claims are every other session's configuration, read whole — asked for on every tick while a
+    // Codex session is still undiscovered, which on a large fleet was most of the daemon's file reads.
+    // With no correlated candidate outside the baseline the selection is empty whatever is claimed, so
+    // they are asked only when a candidate could win.
+    if (!candidates.some(candidate => candidate.correlated && !baseline.includes(candidate.id))) return undefined;
+    const chosen = selectCodexRollout(candidates, { baseline, claimed: await this.claims.claimed(sessionId) });
     if (chosen === undefined) return undefined;
     return {
       ...provenance,

@@ -216,6 +216,50 @@ describe('NodeCodexRolloutIndex', () => {
   });
 });
 
+describe('NodeCodexRolloutIndex walks', () => {
+  it('should find a rollout added to a day it already listed, and one in a new day', async () => {
+    // Arrange — the listing of each directory is reused only while the directory itself is unchanged.
+    const home = await temporaryDirectory('ferretry-codex-listing-');
+    const token = '/state/sessions/20260801-listing';
+    await writeRollout(home, '2026/08/01', 'aaaaaaaa-1111-1111-1111-111111111111');
+    const index = new NodeCodexRolloutIndex();
+    const before = await index.candidates(home, token);
+
+    // Act
+    await writeRollout(home, '2026/08/01', 'bbbbbbbb-2222-2222-2222-222222222222', [
+      JSON.stringify({ type: 'response_item', payload: { text: token } }),
+    ]);
+    await writeRollout(home, '2026/08/02', 'cccccccc-3333-3333-3333-333333333333');
+    const after = await index.candidates(home, token);
+
+    // Assert
+    should(before.map(candidate => candidate.id)).eql(['aaaaaaaa-1111-1111-1111-111111111111']);
+    should(after.map(candidate => [candidate.id, candidate.correlated]).sort()).eql([
+      ['aaaaaaaa-1111-1111-1111-111111111111', false],
+      ['bbbbbbbb-2222-2222-2222-222222222222', true],
+      ['cccccccc-3333-3333-3333-333333333333', false],
+    ]);
+  });
+
+  it('should leave out a rollout the caller can never choose once it knows its id', async () => {
+    // Arrange
+    const home = await temporaryDirectory('ferretry-codex-skip-');
+    const token = '/state/sessions/20260801-skip';
+    await writeRollout(home, '2026/08/01', 'dddddddd-4444-4444-4444-444444444444');
+    await writeRollout(home, '2026/08/01', 'ffffffff-6666-6666-6666-666666666666', [
+      JSON.stringify({ type: 'response_item', payload: { text: token } }),
+    ]);
+    const index = new NodeCodexRolloutIndex();
+    await index.candidates(home, token);
+
+    // Act
+    const skipped = await index.candidates(home, token, new Set(['dddddddd-4444-4444-4444-444444444444']));
+
+    // Assert
+    should(skipped.map(candidate => candidate.id)).eql(['ffffffff-6666-6666-6666-666666666666']);
+  });
+});
+
 describe('transcript provenance storage', () => {
   it('should merge a resolved record into the configuration and read it back', async () => {
     // Arrange
