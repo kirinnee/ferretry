@@ -15,7 +15,14 @@ import {
   useHandoffReading,
 } from './handoff-message.tsx';
 import { HarnessEventRow } from './harness-event-row.tsx';
-import { LedgerControls, LedgerMessage, type SendCancel, type SendRetry, type SendSubmit } from './ledger-message.tsx';
+import {
+  type LedgerActions,
+  LedgerActionsHost,
+  LedgerMessage,
+  type SendCancel,
+  type SendRetry,
+  type SendSubmit,
+} from './ledger-message.tsx';
 import { Markdown } from './markdown.tsx';
 import { PackCallRow } from './pack-call.tsx';
 import { useReferenceSurface } from './reference-surface.tsx';
@@ -186,43 +193,44 @@ function OwnSendRow({
   const boundary = travelling ? ledgerPlacementCopy(entry.placement ?? 'chronological') : undefined;
   const viaFile = pointer !== undefined || draft !== undefined;
   return (
-    <OwnMessageRow
-      answered={answered}
-      controls={
-        travelling ? (
-          <LedgerControls
-            onCancel={onCancel}
-            onCollapse={onCollapse}
-            onDismiss={onDismiss}
-            onRetry={onRetry}
-            onSubmit={onSubmit}
-            record={record}
-          />
-        ) : undefined
-      }
-      entry={entry}
+    <LedgerActionsHost
+      enabled={travelling}
+      onCancel={onCancel}
+      onCollapse={onCollapse}
+      onDismiss={onDismiss}
+      onRetry={onRetry}
+      onSubmit={onSubmit}
       record={record}
-      rhythm={rhythm}
-      sendRow={travelling ? 'travelling' : 'landed'}
-      viaTurnFile={viaFile && (pointer === undefined || reading.state !== 'gone')}
     >
-      {viaFile ? (
-        <HandoffView
-          draft={draft}
-          pointer={pointer}
-          pointerText={entry.text}
-          reading={pointer === undefined ? ON_ITS_WAY : reading}
-          source={source}
-        />
-      ) : (
-        <p>{travelling ? record.message : entry.text}</p>
+      {actions => (
+        <OwnMessageRow
+          actions={actions}
+          answered={answered}
+          entry={entry}
+          record={record}
+          rhythm={rhythm}
+          sendRow={travelling ? 'travelling' : 'landed'}
+          viaTurnFile={viaFile && (pointer === undefined || reading.state !== 'gone')}
+        >
+          {viaFile ? (
+            <HandoffView
+              draft={draft}
+              pointer={pointer}
+              pointerText={entry.text}
+              reading={pointer === undefined ? ON_ITS_WAY : reading}
+              source={source}
+            />
+          ) : (
+            <p>{travelling ? record.message : entry.text}</p>
+          )}
+          {boundary === undefined ? null : (
+            <span className="sr-only" data-ledger-boundary>
+              {boundary}
+            </span>
+          )}
+        </OwnMessageRow>
       )}
-      {boundary === undefined ? null : (
-        <span className="sr-only" data-ledger-boundary>
-          {boundary}
-        </span>
-      )}
-    </OwnMessageRow>
+    </LedgerActionsHost>
   );
 }
 
@@ -291,7 +299,7 @@ function OwnMessageRow({
   children,
   viaTurnFile = false,
   record = entry.send,
-  controls,
+  actions,
   sendRow,
 }: {
   readonly entry: TranscriptEntry;
@@ -303,8 +311,8 @@ function OwnMessageRow({
   readonly viaTurnFile?: boolean;
   /** The send this message is. Its time is when it was SENT, so it reads the same before and after it lands. */
   readonly record?: LedgerSendRecord | undefined;
-  /** What a send still on its way offers under its foot. */
-  readonly controls?: ReactNode;
+  /** What a send still on its way offers: its "⋯" button on the foot, and its notes under it. */
+  readonly actions?: LedgerActions | undefined;
   /** Whether this bubble is a send on its way or the transcript row it became. */
   readonly sendRow?: 'travelling' | 'landed';
 }) {
@@ -326,8 +334,9 @@ function OwnMessageRow({
         leadDetail={viaTurnFile && viaOpen ? <HandoffViaDetail /> : undefined}
         record={record}
         side="own"
+        trailing={actions?.trigger}
       />
-      {controls}
+      {actions?.panels}
     </article>
   );
 }

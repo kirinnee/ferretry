@@ -222,6 +222,58 @@ describe('DaemonConnectionStore', () => {
     should(store.replaceCarriers(paired, replacement)?.carriers).deepEqual(replacement);
   });
 
+  it('should read a published tunnel back from storage, so a reload does not lose it', async () => {
+    // Arrange — the owner's defect: "Tunnel only" worked until the installed app was reloaded, then said
+    // "this machine has no tunnel yet" for good. The tunnel was saved and never read back, and under
+    // Tunnel only there was no other carrier left to learn it again over.
+    const repository = new MemoryRepository();
+    const store = new DaemonConnectionStore(undefined, { repository });
+    const paired = store.add(connection('a'));
+    const tunnel = { kind: 'tunnel' as const, tunnelUrl: 'https://ssxg3hqu5pkfmzjq.ferretry.stream' };
+    store.replaceCarriers(paired, [{ kind: 'direct', daemonUrl: paired.baseUrl }, tunnel]);
+
+    // Act
+    await store.flush();
+    const reloaded = parseDaemonConnections(repository.writes.at(-1)?.value ?? null);
+
+    // Assert
+    should(reloaded.connections[0]?.carriers).deepEqual([{ kind: 'direct', daemonUrl: paired.baseUrl }, tunnel]);
+    should(
+      parseDaemonConnections(
+        persisted([
+          row('b', 1, {
+            carriers: [
+              { kind: 'tunnel', tunnelUrl: 'http://plaintext.example.test' },
+              { kind: 'tunnel', tunnelUrl: 'https://with-path.example.test/x' },
+              { kind: 'tunnel' },
+            ],
+          }),
+        ]),
+      ).connections[0]?.carriers,
+    ).deepEqual([{ kind: 'direct', daemonUrl: 'https://b.example.test' }]);
+  });
+
+  it('should keep the last tunnel through a refresh that does not name one, and follow one that moved', () => {
+    // Arrange — a set read while cloudflared reconnects says "not right now", not "gone".
+    const store = new DaemonConnectionStore();
+    const paired = store.add(connection('a'));
+    const direct = { kind: 'direct' as const, daemonUrl: paired.baseUrl };
+    const relay = { kind: 'relay' as const, relayUrl: 'https://relay.example.test', operator: 'self' as const };
+    const tunnel = { kind: 'tunnel' as const, tunnelUrl: 'https://k3x9.tunnels.example.test' };
+    const moved = { kind: 'tunnel' as const, tunnelUrl: 'https://n3w.tunnels.example.test' };
+    store.replaceCarriers(paired, [direct, tunnel, relay]);
+
+    // Act
+    const withoutTunnel = store.replaceCarriers(paired, [direct, relay]);
+    const unchanged = store.replaceCarriers(paired, [direct, relay]);
+    const reprovisioned = store.replaceCarriers(paired, [direct, moved, relay]);
+
+    // Assert
+    should(withoutTunnel?.carriers).deepEqual([direct, tunnel, relay]);
+    should(unchanged).equal(withoutTunnel);
+    should(reprovisioned?.carriers).deepEqual([direct, moved, relay]);
+  });
+
   it('loads tolerantly and keeps saving after a repository failure', async () => {
     const repository = new MemoryRepository(persisted([row('saved', 4)], 'saved'), false, true);
     const store = await DaemonConnectionStore.open({ repository, now: () => 9 });

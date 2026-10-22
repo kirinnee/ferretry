@@ -40,6 +40,7 @@
  */
 
 import {
+  DaemonCarriersViewSchema,
   FY_REQUEST_ID_HEADER,
   OLDER_APP_SENTENCE,
   OLDER_DAEMON_SENTENCE,
@@ -63,6 +64,7 @@ import {
   HEARTBEAT_GRACE_SECONDS,
   type PrivateKeyHandle,
   parseDaemonId,
+  publishedConnectionMethods,
   RELAY_CLOSE_CODES,
   SESSION_PROTOCOL_ID,
   toBase64Url,
@@ -81,6 +83,7 @@ import {
   hostedRelayFallbackCarrier,
   sameDaemonCarrier,
   sameDaemonConnection,
+  type TunnelCarrier,
 } from './daemon-connection.ts';
 import { boundDaemonId } from './daemon-transport.ts';
 import { DeviceKeyMissingError, DeviceKeyUnreadableError } from './device-keys.ts';
@@ -942,6 +945,15 @@ export interface DaemonCarrierRouterOptions {
    */
   readonly tunnelService?: () => Promise<TunnelServiceState>;
   /**
+   * Told the carrier set a TUNNEL LOOKUP read (§15, "Tunnel only"): what the daemon published, asked over
+   * an introducer because no tunnel this browser knew could carry the question. The composition root
+   * keeps it exactly as it keeps an ordinary refresh's. Absent keeps nothing, which costs only the next
+   * walk a lookup of its own.
+   */
+  readonly learned?: (daemon: DaemonConnection, carriers: readonly ConnectionMethod[]) => void;
+  /** The clock {@link TUNNEL_LOOKUP_REUSE_MS} is measured on. */
+  readonly now?: () => number;
+  /**
    * Asked when the daemon refuses a request for want of a passkey step-up (`grant_step_up_required`):
    * `true` once the person has confirmed, and the request is then sent again ONCE. Absent means
    * nothing can ask, and the refusal is returned as it came. `origin` says whether a person started the
@@ -1007,6 +1019,24 @@ const WEBRTC: ConnectionMethod = { kind: 'webrtc' };
 const introducer = (method: ConnectionMethod): boolean => method.kind === 'direct' || method.kind === 'relay';
 
 /**
+ * How long one tunnel lookup's answer stands before a walk may ask again.
+ *
+ * Every panel of an open page walks on its own, and under "Tunnel only" with the tunnel down each of
+ * those walks would otherwise send its own question over the relay. One answer per half minute is
+ * enough to notice a re-provisioned hostname and few enough that an outage costs the relay nothing.
+ */
+export const TUNNEL_LOOKUP_REUSE_MS = 30_000;
+
+/** The deadline on one lookup, so a walk waiting on it is never held by a question nobody answers. */
+export const TUNNEL_LOOKUP_TIMEOUT_MS = 10_000;
+
+/** One tunnel lookup: when it was asked, and what it found — a tunnel, or nothing. */
+interface TunnelLookup {
+  readonly at: number;
+  readonly answer: Promise<TunnelCarrier | undefined>;
+}
+
+/**
  * One thing a walk may do next: try a carrier, or state why one was passed over without being tried.
  */
 interface WalkCandidate {
@@ -1038,6 +1068,8 @@ interface CarrierEntry {
    * the entry, which is the only thing that clears it, and a reload asks the daemon again.
    */
   refused: boolean;
+  /** The last tunnel lookup for this daemon, reused for {@link TUNNEL_LOOKUP_REUSE_MS}. */
+  tunnelLookup: TunnelLookup | undefined;
   /**
    * EVERY SESSION THIS ROUTER HOLDS FOR THIS DAEMON — request, stream, all of them.
    *
@@ -1201,6 +1233,8 @@ export class DaemonCarrierRouter {
   readonly #preference: (daemonId: DaemonId) => CarrierPreference;
   readonly #dialers: CarrierDialers;
   readonly #tunnelService: () => Promise<TunnelServiceState>;
+  readonly #learned: (daemon: DaemonConnection, carriers: readonly ConnectionMethod[]) => void;
+  readonly #now: () => number;
   readonly #deviceKey: DeviceKeyResolver;
   readonly #appSession: string;
   readonly #stepUp: DaemonCarrierRouterOptions['stepUp'];
@@ -1244,6 +1278,8 @@ export class DaemonCarrierRouter {
     this.#preference = options.preference ?? (() => DEFAULT_CARRIER_PREFERENCE);
     this.#dialers = options.dialers ?? {};
     this.#tunnelService = options.tunnelService ?? (async () => 'unavailable');
+    this.#learned = options.learned ?? (() => undefined);
+    this.#now = options.now ?? Date.now;
     this.#deviceKey = options.deviceKey;
     this.#appSession = options.appSession ?? toBase64Url(options.crypto.randomBytes(APP_SESSION_BYTES));
     this.#stepUp = options.stepUp;
@@ -1388,7 +1424,7 @@ export class DaemonCarrierRouter {
     let outdated: OutdatedSide | undefined;
     let refused = false;
     const plan = this.#plan(daemon);
-    for await (const { method, untried } of this.#candidates(daemon, plan)) {
+    for await (const { method, untried } of this.#candidates(entry, plan)) {
       this.#assertCurrent(entry);
       if (untried !== undefined) {
         probes.push(untriedProbe(method, untried));
@@ -1467,6 +1503,8 @@ export class DaemonCarrierRouter {
       retired: new AbortController(),
       choice: undefined,
       refused: entry.refused,
+      // A new preference asks afresh: a lookup made under the old one may have been skipped or stale.
+      tunnelLookup: undefined,
       sessions: new Map(),
     });
     this.#retire(entry, PREFERENCE_CHANGED_REASON);
@@ -1707,7 +1745,7 @@ export class DaemonCarrierRouter {
     let outdated: OutdatedSide | undefined;
     let refused = false;
     const plan = this.#plan(daemon);
-    for await (const { method, untried } of this.#candidates(daemon, plan)) {
+    for await (const { method, untried } of this.#candidates(entry, plan)) {
       // ASKED BEFORE EVERY ATTEMPT, not once at the top: a walk takes as long as its failures do, and
       // an unpair, a re-pair or a republish can land between any two of them. Every address below
       // would be dialled with THIS walk's `DaemonConnection` — the old base URL, the old device grant,
@@ -1772,12 +1810,17 @@ export class DaemonCarrierRouter {
    * the ordinary path. It is dialled and never written down; `hostedRelayFallbackCarrier` owns why,
    * and owns the fingerprint and address rules it is held to.
    *
-   * A TUNNEL IS TRIED ONLY WHEN THE DAEMON PUBLISHED ONE (§15). Under "Tunnel only" with none, the
-   * service advertisement is read to say which of the two reasons applies.
+   * A TUNNEL IS TRIED WHEN THE DAEMON PUBLISHED ONE (§15) — the last one this browser was told, kept
+   * across reloads. Under "Tunnel only", when there is none or the one kept did not carry, the daemon is
+   * ASKED ({@link #lookupTunnel}) before the walk gives up: a hostname re-provisioned since, or a tunnel
+   * this browser never heard of, is dialled straight away. Only when that finds nothing either is the
+   * service advertisement read, to say which of the two reasons applies. Nothing here is awaited
+   * before a kept tunnel is tried, so a lookup never holds up a connect that a cached address can make.
    *
    * WEBRTC WITH NO DIALER IS PASSED OVER, NOT HIDDEN: it is yielded `untried` so the choice names it.
    */
-  async *#candidates(daemon: DaemonConnection, plan: WalkPlan): AsyncGenerator<WalkCandidate> {
+  async *#candidates(entry: CarrierEntry, plan: WalkPlan): AsyncGenerator<WalkCandidate> {
+    const daemon = entry.connection;
     const authored = daemonCarriers(daemon);
     for (const kind of carrierOrder(plan.preference)) {
       if (kind === 'webrtc') {
@@ -1790,11 +1833,17 @@ export class DaemonCarrierRouter {
       }
       const ofKind = authored.filter(method => method.kind === kind);
       for (const method of ofKind) yield { method };
-      if (ofKind.length > 0 || kind === 'direct') continue;
       if (kind === 'tunnel') {
-        if (plan.preference === 'tunnel') plan.why = noTunnelReason(await this.#tunnelService());
+        if (plan.preference !== 'tunnel') continue;
+        const learned = await this.#lookupTunnel(entry);
+        if (learned !== undefined && !ofKind.some(method => sameDaemonCarrier(method, learned))) {
+          yield { method: learned };
+          continue;
+        }
+        if (ofKind.length === 0) plan.why = noTunnelReason(await this.#tunnelService());
         continue;
       }
+      if (ofKind.length > 0 || kind === 'direct') continue;
       const hosted = hostedRelayFallbackCarrier(daemon, await this.#hostedRelay());
       if (hosted !== undefined) yield { method: hosted };
       else plan.why = RELAY_UNAVAILABLE;
@@ -1825,6 +1874,7 @@ export class DaemonCarrierRouter {
       retired: new AbortController(),
       choice: undefined,
       refused: false,
+      tunnelLookup: undefined,
       sessions: new Map(),
     };
     this.#entries.set(daemon.daemonId, entry);
@@ -1898,6 +1948,7 @@ export class DaemonCarrierRouter {
       retired: current.retired,
       choice: kept,
       refused: current.refused,
+      tunnelLookup: current.tunnelLookup,
       sessions,
     };
     this.#entries.set(daemon.daemonId, entry);
@@ -2107,17 +2158,58 @@ export class DaemonCarrierRouter {
    */
   async #webrtc(entry: CarrierEntry): Promise<CarrierSocket> {
     const dialer = this.#dialers.webrtc as NonNullable<CarrierDialers['webrtc']>;
-    const authored = daemonCarriers(entry.connection).filter(introducer);
-    const hosted = authored.some(method => method.kind === 'relay')
-      ? undefined
-      : hostedRelayFallbackCarrier(entry.connection, await this.#hostedRelay());
-    const introducers = hosted === undefined ? authored : [...authored, hosted];
+    const introducers = await this.#introducers(entry);
     return await dialer({
       daemon: entry.connection,
       introducers,
       request: async (path, init = {}) => await this.#introduce(entry, introducers, path, init),
       signal: entry.retired.signal,
     });
+  }
+
+  /**
+   * WHERE IS THIS DAEMON'S TUNNEL NOW? Asked of the daemon itself, over an introducer (§15, "Tunnel only").
+   *
+   * "Tunnel only" has nothing else to ask: a tunnel this browser lost, or one the daemon re-provisioned
+   * under a new hostname, can only be learned from a connection, and the preference allows no other. So
+   * this is ONE `GET /v1/carriers` over the daemon's direct address or a rendezvous — the carriers that
+   * already introduce WebRTC — inside an ordinary device-authenticated session, and never the person's
+   * own requests. The answer is the daemon's, end to end: no relay can put a hostname in it.
+   *
+   * Asked once per {@link TUNNEL_LOOKUP_REUSE_MS}, joined while in flight, and never thrown: a lookup that
+   * fails answers nothing, and a tunnel this browser already keeps is not dropped because of it — what
+   * the read learned is handed to {@link DaemonCarrierRouterOptions.learned}, which owns what is kept.
+   */
+  async #lookupTunnel(entry: CarrierEntry): Promise<TunnelCarrier | undefined> {
+    const now = this.#now();
+    const held = entry.tunnelLookup;
+    if (held !== undefined && now - held.at < TUNNEL_LOOKUP_REUSE_MS) return await held.answer;
+    const answer = this.#readTunnel(entry).catch(() => undefined);
+    entry.tunnelLookup = { at: now, answer };
+    return await answer;
+  }
+
+  async #readTunnel(entry: CarrierEntry): Promise<TunnelCarrier | undefined> {
+    const introducers = await this.#introducers(entry);
+    const response = await this.#introduce(entry, introducers, '/v1/carriers', {
+      cache: 'no-store',
+      signal: AbortSignal.timeout(TUNNEL_LOOKUP_TIMEOUT_MS),
+    });
+    if (!response.ok) return undefined;
+    const view = DaemonCarriersViewSchema.safeParse(await response.json().catch(() => undefined));
+    if (!view.success) return undefined;
+    const carriers = publishedConnectionMethods(view.data.carriers, await this.#hostedRelay());
+    this.#learned(entry.connection, carriers);
+    return carriers.find((method): method is TunnelCarrier => method.kind === 'tunnel');
+  }
+
+  /** The walk's own addressed carriers minus the tunnel, with the hosted relay when the daemon authored none. */
+  async #introducers(entry: CarrierEntry): Promise<readonly ConnectionMethod[]> {
+    const authored = daemonCarriers(entry.connection).filter(introducer);
+    const hosted = authored.some(method => method.kind === 'relay')
+      ? undefined
+      : hostedRelayFallbackCarrier(entry.connection, await this.#hostedRelay());
+    return hosted === undefined ? authored : [...authored, hosted];
   }
 
   /**

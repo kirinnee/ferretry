@@ -46,6 +46,8 @@ export interface ContextMenuItem {
    * the label so a menu choice communicates its scope before activation.
    */
   readonly detail?: ReactNode;
+  /** One quiet line under the label saying what choosing it costs or does; it wraps rather than truncates. */
+  readonly hint?: ReactNode;
   readonly icon?: ReactNode;
   readonly onSelect: () => void;
   /** Destructive tone (Stop, Migrate). Colour is reinforcement — the word says it. */
@@ -324,13 +326,15 @@ export function ContextMenu({ open, anchor, items, onClose, ariaLabel, triggerRe
             <button
               type="button"
               role="menuitem"
+              data-menu-key={item.key}
               tabIndex={index === active ? 0 : -1}
               disabled={item.disabled}
               onClick={() => activate(item)}
               onPointerEnter={() => !item.disabled && setActive(index)}
               className={cn(
                 'flex w-full items-center gap-sm rounded-control px-cell-x text-left text-ui',
-                touch ? 'min-h-[44px]' : 'min-h-[34px] py-1',
+                touch ? 'min-h-[44px]' : 'min-h-[34px]',
+                (!touch || item.hint) && 'py-1',
                 'hover:bg-surface-2 focus:bg-surface-2 focus:outline-none',
                 // The ink is EXCLUSIVE, not layered. kteam wrote this as
                 // `text-fg-soft` plus `text-err` on a danger row, and which one
@@ -344,7 +348,16 @@ export function ContextMenu({ open, anchor, items, onClose, ariaLabel, triggerRe
               )}
             >
               {item.icon && <span className="shrink-0">{item.icon}</span>}
-              <span className="min-w-0 flex-1 truncate">{item.label}</span>
+              {item.hint ? (
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate">{item.label}</span>
+                  <span className="block text-meta font-normal leading-snug text-muted" data-menu-hint="">
+                    {item.hint}
+                  </span>
+                </span>
+              ) : (
+                <span className="min-w-0 flex-1 truncate">{item.label}</span>
+              )}
               {item.detail && <span className="mono shrink-0 text-meta text-muted">{item.detail}</span>}
             </button>
           </Fragment>

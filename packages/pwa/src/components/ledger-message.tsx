@@ -5,8 +5,9 @@
  * needs the reader.
  *
  * The mark is a button: tapping it reads out WHY, which is the part a reader needs when a send is
- * anything but plainly fine. Every undelivered, un-cancelled message also carries its own way out, so
- * a message that never lands is never something the reader has to live with:
+ * anything but plainly fine. Beside it sits ONE small "⋯" button (`fy-ledger-more`) that opens a menu of
+ * exactly the actions valid for the send's state, so a message that never lands is never something the
+ * reader has to live with and never grows a toolbar either:
  *
  *   * CANCEL — takes it back, one tap. The daemon says what that did on the agent's screen (erased from
  *     the composer, or left in the agent's own queue, which Ferretry cannot edit); the row then says so.
@@ -15,13 +16,13 @@
  *     exactly this message.
  *   * COPY TEXT — always, so cancelling never costs the words.
  *   * DISMISS — every message that is not delivered can be put away, on this device, with no question
- *     asked; and a settled one the reader opened can be folded back to its one-line note.
+ *     asked; and a settled one the reader opened can be hidden back to its one-line note.
  *   * RETRY, and every retry re-sends under the ORIGINAL id, so the daemon's ledger can never turn it
  *     into a second copy the agent reads without the reader being told:
  *       - NOT DELIVERED — the daemon proved it never arrived. Retry is one tap, because it cannot duplicate.
- *       - UNCONFIRMED — it could be proven neither way and may well have landed. "Send again anyway" is a
- *         two-step disclosure that says what a second copy costs before the button exists.
- *       - SENDING / QUEUED — it may already be on its way. "Retry…" opens the same warning first.
+ *       - UNCONFIRMED — it could be proven neither way and may well have landed. "Send again" opens a
+ *         warning that says what a second copy costs; nothing is sent until its own button is pressed.
+ *       - SENDING / QUEUED — it may already be on its way. "Send again" opens the same warning first.
  *       - UNCONFIRMABLE — the daemon can prove no transcript is this session's, so NOTHING it sends can be
  *         confirmed. Offering "send again" there only types another copy into an agent that most likely
  *         has the first; the row says so instead, and the workspace's notice carries the remedies.
@@ -31,14 +32,16 @@
  * the agent is holding it) and a generic "failed" would hide it.
  */
 
-import { Check, ChevronUp, Copy, CornerDownLeft, RotateCw, X } from 'lucide-react';
-import { useEffect, useRef, useState } from 'react';
+import { Ban, ChevronUp, Copy, CornerDownLeft, Ellipsis, RotateCw, X } from 'lucide-react';
+import { type ReactNode, useEffect, useRef, useState } from 'react';
 import { browserClipboardWriter, type ClipboardWriter } from '../features/onboarding/copy-button.tsx';
+import { useInputModality } from '../hooks/use-input-modality.ts';
 import { displayCallsign } from '../lib/callsign.ts';
 import { type LedgerBlockPlacement, ledgerPlacementCopy } from '../lib/ledger-placement.ts';
 import { clockOfInstant } from '../lib/message-clock.ts';
 import { peerFrom } from '../lib/peer-message.ts';
 import type { LedgerSendRecord } from '../lib/send-ledger.ts';
+import { ContextMenu, type ContextMenuItem, type MenuAnchor } from '../shell/context-menu.tsx';
 import { MessageFooter } from './send-receipt.tsx';
 import type { SendDismiss, SendExpand } from './settled-send-note.tsx';
 
@@ -102,8 +105,6 @@ interface Note {
 const refusal = (error: unknown): string | undefined =>
   error instanceof Error && error.message.trim().length > 0 ? error.message.trim() : undefined;
 
-const ACTION_BUTTON = 'kt-btn kt-btn--sm shrink-0 gap-1';
-
 export function LedgerMessage({
   record,
   placement = 'chronological',
@@ -135,10 +136,7 @@ export function LedgerMessage({
             {body}
           </div>
         ) : null}
-        <div className="px-panel pb-1">
-          <MessageFooter clock={clockOfInstant(record.acceptedAt)} record={record} />
-        </div>
-        <LedgerControls
+        <LedgerActionsHost
           onCancel={onCancel}
           onCollapse={onCollapse}
           onDismiss={onDismiss}
@@ -146,24 +144,36 @@ export function LedgerMessage({
           onSubmit={onSubmit}
           record={record}
           write={write}
-        />
+        >
+          {({ trigger, panels }) => (
+            <>
+              <div className="px-panel pb-1">
+                <MessageFooter clock={clockOfInstant(record.acceptedAt)} record={record} trailing={trigger} />
+              </div>
+              {panels}
+            </>
+          )}
+        </LedgerActionsHost>
       </div>
     </div>
   );
 }
 
 /**
- * How long a send still on its way keeps its Retry, Cancel and Copy out of sight. Almost every message
- * lands within a poll or two, and a toolbar that unfolds under the bubble only to fold away again a
- * second later is the jump a reader sees right after sending. A message still travelling after this
- * long is the one whose way out matters, and it gets it. A message typed into the agent's composer and
- * never submitted is not on its way at all, so its Press Enter shows at once.
+ * How long a send still on its way keeps its "⋯" actions button out of sight. Almost every message
+ * lands within a poll or two, and a control that appears beside the time only to vanish a second later
+ * is the flicker a reader sees right after sending. A message still travelling after this long is the
+ * one whose way out matters, and it gets it. A message typed into the agent's composer and never
+ * submitted is not on its way at all, so its Press Enter shows at once.
  */
 export const OPEN_SEND_SETTLE_MS = 8_000;
 
+/** How long "Copied" stays up before the line folds away. */
+const COPIED_NOTICE_MS = 2_500;
+
 /** True until `settleMs` after `since`, re-rendering once when that moment passes. */
-const useStillSettling = (since: number, settleMs: number): boolean => {
-  const remaining = Number.isFinite(since) ? since + settleMs - Date.now() : 0;
+const useStillSettling = (since: number, settleMs: number, enabled: boolean): boolean => {
+  const remaining = enabled && Number.isFinite(since) ? since + settleMs - Date.now() : 0;
   const [, settled] = useState(0);
   const settling = remaining > 0;
   useEffect(() => {
@@ -174,7 +184,7 @@ const useStillSettling = (since: number, settleMs: number): boolean => {
   return settling;
 };
 
-export interface LedgerControlsProps {
+export interface LedgerActionsProps {
   readonly record: LedgerSendRecord;
   readonly onRetry?: SendRetry | undefined;
   readonly onCancel?: SendCancel | undefined;
@@ -182,14 +192,86 @@ export interface LedgerControlsProps {
   readonly onDismiss?: SendDismiss | undefined;
   readonly onCollapse?: SendExpand | undefined;
   readonly write?: ClipboardWriter;
+  /** False draws nothing and keeps no timer — a send that is already in the conversation. */
+  readonly enabled?: boolean;
 }
 
+/** The two halves of a send's actions: the small button that goes on the message's foot, and everything that is drawn under it. */
+export interface LedgerActions {
+  /** The "⋯" button and the menu it opens; null when this send offers nothing. Goes in `MessageFooter`'s `trailing`. */
+  readonly trigger: ReactNode;
+  /** The warning that guards a second copy, and what each action came to. Goes under the foot. */
+  readonly panels: ReactNode;
+}
+
+const BUSY_COPY: Readonly<Record<ActionKind, string>> = {
+  retry: 'Retrying…',
+  cancel: 'Cancelling…',
+  enter: 'Pressing Enter…',
+};
+
 /**
- * Everything a send that is NOT in the conversation offers under its bubble — Retry, Cancel, Press Enter,
- * Copy text, the warnings that guard a second copy, and what each action came to. It is its own component
- * so the reader's own bubble and a teammate's draw the same controls, whichever shell carries them.
+ * Everything a send that is NOT in the conversation offers: Retry, Send again, Cancel, Press Enter, Copy
+ * text, Hide and Dismiss, plus the warnings that guard a second copy and what each action came to. The
+ * actions live in ONE small "⋯" menu beside the status mark, so a message keeps the height it has when
+ * nothing is wrong with it; the menu lists exactly the actions valid for the send's state. It is its own
+ * component so the reader's own bubble and a teammate's draw the same controls, whichever shell carries
+ * them: `children` receives the two halves and puts each where its shell wants it.
  */
-export function LedgerControls({
+export function LedgerActionsHost({
+  children,
+  ...props
+}: LedgerActionsProps & { readonly children: (actions: LedgerActions) => ReactNode }) {
+  return <>{children(useLedgerActions(props))}</>;
+}
+
+/** The "⋯" button and the menu it opens. Mounted only when a send has actions, so a row with none pays for nothing. */
+function LedgerMoreMenu({
+  items,
+  busy,
+  triggerRef,
+}: {
+  readonly items: readonly ContextMenuItem[];
+  readonly busy: boolean;
+  readonly triggerRef: { current: HTMLButtonElement | null };
+}) {
+  const modality = useInputModality();
+  const [anchor, setAnchor] = useState<MenuAnchor | null>(null);
+  const openMenu = (): void => {
+    if (busy) return;
+    const rect = triggerRef.current?.getBoundingClientRect();
+    setAnchor({ x: rect?.right ?? 0, y: (rect?.bottom ?? 0) + 4 });
+  };
+  return (
+    <>
+      <button
+        aria-busy={busy ? true : undefined}
+        aria-expanded={anchor !== null}
+        aria-haspopup="menu"
+        aria-label="Message actions"
+        className="fy-ledger-more"
+        data-ledger-more=""
+        onClick={openMenu}
+        ref={triggerRef}
+        title="Message actions"
+        type="button"
+      >
+        <Ellipsis aria-hidden="true" size={16} />
+      </button>
+      <ContextMenu
+        anchor={anchor ?? { x: 0, y: 0 }}
+        ariaLabel="Message actions"
+        items={items}
+        onClose={() => setAnchor(null)}
+        open={anchor !== null}
+        touch={modality.touchAffected}
+        triggerRef={triggerRef}
+      />
+    </>
+  );
+}
+
+function useLedgerActions({
   record,
   onRetry,
   onCancel,
@@ -197,9 +279,12 @@ export function LedgerControls({
   onDismiss,
   onCollapse,
   write = browserClipboardWriter(),
-}: LedgerControlsProps) {
+  enabled = true,
+}: LedgerActionsProps): LedgerActions {
   const { body } = peerFrom(record.message);
   const actionHeld = useRef(false);
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
+  const keepRef = useRef<HTMLButtonElement | null>(null);
   const [busy, setBusy] = useState<ActionKind | null>(null);
   const [confirming, setConfirming] = useState(false);
   const [copied, setCopied] = useState<'idle' | 'copied' | 'failed'>('idle');
@@ -221,18 +306,21 @@ export function LedgerControls({
   const delivered = record.fate === 'delivered';
   const open = (record.fate === 'accepted' || record.fate === 'queued') && record.held !== true;
   const typed = record.typedNotSent === true && open;
-  const settling = useStillSettling(Date.parse(record.acceptedAt), OPEN_SEND_SETTLE_MS) && open && !typed;
+  const settling = useStillSettling(Date.parse(record.acceptedAt), OPEN_SEND_SETTLE_MS, enabled && open && !typed);
   // Held for a revive is kept deliberately; delivered and cancelled are done. Everything else can be taken back.
   const actionable = open || ((record.fate === 'timed_out' || record.fate === 'unaccounted') && record.held !== true);
   const showCopy = !delivered && body.length > 0;
   const openRetry = open && !typed && onRetry !== undefined && result !== 'accepted';
-  const canEnter = typed && onSubmit !== undefined;
-  const canCancel = actionable && onCancel !== undefined;
+  const unconfirmedRetry = unconfirmed && onRetry !== undefined && result !== 'accepted';
+  const resendable = openRetry || unconfirmedRetry;
   const retryOnce = retryable && onRetry !== undefined && result !== 'accepted';
-  const canDismiss = onDismiss !== undefined && !delivered;
-  const canCollapse = onCollapse !== undefined && !delivered;
-  const toolbar =
-    !settling && (canEnter || canCancel || retryOnce || openRetry || showCopy || canDismiss || canCollapse);
+  const queuedCancel = record.fate === 'queued' && !typed;
+
+  // The warning is gone, so focus goes back to the button that opened the menu rather than to the page.
+  const closeConfirm = (): void => {
+    setConfirming(false);
+    triggerRef.current?.focus();
+  };
 
   const retry = async (force: boolean): Promise<void> => {
     if (!onRetry || actionHeld.current) return;
@@ -242,7 +330,7 @@ export function LedgerControls({
     try {
       const accepted = await runResendOnce(actionHeld, () => onRetry(record, force));
       if (accepted !== undefined) setOutcome({ result: accepted ? 'accepted' : 'error', attempt });
-      if (accepted === true) setConfirming(false);
+      if (accepted === true) closeConfirm();
     } catch (error) {
       setOutcome({ result: 'error', attempt, message: refusal(error) });
     } finally {
@@ -272,116 +360,96 @@ export function LedgerControls({
     );
   };
 
-  return (
+  useEffect(() => {
+    if (copied !== 'copied') return;
+    const timer = setTimeout(() => setCopied('idle'), COPIED_NOTICE_MS);
+    return () => clearTimeout(timer);
+  }, [copied]);
+
+  // The warning is a new place to be, so focus goes to its safe button: a stray Enter keeps waiting.
+  useEffect(() => {
+    if (confirming) keepRef.current?.focus();
+  }, [confirming]);
+
+  // An action that leaves the row in place hands focus back to the button that opened the menu, so a
+  // keyboard reader is never dropped at the top of the page. One that removes the row has nowhere to hand it.
+  const stay = (run: () => void) => (): void => {
+    triggerRef.current?.focus();
+    run();
+  };
+
+  const items: ContextMenuItem[] = [];
+  if (enabled && !settling) {
+    if (typed && onSubmit !== undefined)
+      items.push({
+        key: 'enter',
+        label: 'Press Enter',
+        hint: 'Submit it in the agent’s composer',
+        icon: <CornerDownLeft aria-hidden="true" size={16} />,
+        onSelect: stay(() => void act('enter', () => onSubmit(record))),
+      });
+    if (retryOnce)
+      items.push({
+        key: 'retry',
+        label: 'Retry',
+        hint: 'It never arrived, so this cannot send it twice',
+        icon: <RotateCw aria-hidden="true" size={16} />,
+        onSelect: stay(() => void retry(false)),
+      });
+    if (resendable)
+      items.push({
+        key: 'send-again',
+        label: 'Send again',
+        hint: 'May make a second copy',
+        icon: <RotateCw aria-hidden="true" size={16} />,
+        onSelect: () => setConfirming(true),
+      });
+    if (actionable && onCancel !== undefined)
+      items.push({
+        key: 'cancel',
+        label: 'Cancel',
+        hint: queuedCancel ? QUEUED_CANCEL_COPY : 'Take it back',
+        icon: <Ban aria-hidden="true" size={16} />,
+        onSelect: stay(() => void act('cancel', () => onCancel(record))),
+      });
+    if (showCopy)
+      items.push({
+        key: 'copy',
+        label: 'Copy text',
+        icon: <Copy aria-hidden="true" size={16} />,
+        onSelect: stay(copy),
+      });
+    if (onCollapse !== undefined && !delivered)
+      items.push({
+        key: 'hide',
+        label: 'Hide',
+        hint: 'Fold it back to one line',
+        icon: <ChevronUp aria-hidden="true" size={16} />,
+        separatorBefore: items.length > 0,
+        onSelect: () => onCollapse(record, false),
+      });
+    if (onDismiss !== undefined && !delivered)
+      items.push({
+        key: 'dismiss',
+        label: 'Dismiss',
+        hint: 'Put it away on this device',
+        icon: <X aria-hidden="true" size={16} />,
+        separatorBefore: items.length > 0 && onCollapse === undefined,
+        onSelect: () => onDismiss(record),
+      });
+  }
+
+  const trigger =
+    items.length === 0 ? null : <LedgerMoreMenu busy={busy !== null} items={items} triggerRef={triggerRef} />;
+
+  const panels = !enabled ? null : (
     <>
-      {toolbar ? (
-        <div
-          className="mx-panel mb-2 flex flex-wrap items-center gap-1.5 border-t border-border-soft pt-1.5 text-[11px] text-muted"
-          data-ledger-actions=""
-        >
-          {typed && onSubmit !== undefined ? (
-            <button
-              className={ACTION_BUTTON}
-              data-ledger-action="enter"
-              data-variant="primary"
-              disabled={busy !== null}
-              onClick={() => void act('enter', () => onSubmit(record))}
-              type="button"
-            >
-              <CornerDownLeft aria-hidden="true" size={14} />
-              {busy === 'enter' ? 'pressing…' : 'Press Enter'}
-            </button>
-          ) : null}
-          {retryOnce ? (
-            <button
-              className={ACTION_BUTTON}
-              data-ledger-action="retry"
-              disabled={busy !== null}
-              onClick={() => void retry(false)}
-              type="button"
-            >
-              <RotateCw aria-hidden="true" size={14} />
-              {busy === 'retry' ? 'retrying…' : 'Retry'}
-            </button>
-          ) : null}
-          {openRetry ? (
-            <button
-              aria-expanded={confirming}
-              className={ACTION_BUTTON}
-              data-ledger-action="retry-open"
-              disabled={busy !== null}
-              onClick={() => setConfirming(current => !current)}
-              type="button"
-            >
-              <RotateCw aria-hidden="true" size={14} />
-              Retry…
-            </button>
-          ) : null}
-          {actionable && onCancel !== undefined ? (
-            <button
-              className={ACTION_BUTTON}
-              data-ledger-action="cancel"
-              disabled={busy !== null}
-              onClick={() => void act('cancel', () => onCancel(record))}
-              type="button"
-            >
-              <X aria-hidden="true" size={14} />
-              {busy === 'cancel' ? 'cancelling…' : 'Cancel'}
-            </button>
-          ) : null}
-          {showCopy ? (
-            <button
-              className={ACTION_BUTTON}
-              data-copy-state={copied}
-              data-ledger-action="copy"
-              onClick={copy}
-              type="button"
-            >
-              {copied === 'copied' ? <Check aria-hidden="true" size={14} /> : <Copy aria-hidden="true" size={14} />}
-              {copied === 'copied' ? 'Copied' : 'Copy text'}
-            </button>
-          ) : null}
-          {canCollapse ? (
-            <button
-              className={ACTION_BUTTON}
-              data-ledger-action="collapse"
-              onClick={() => onCollapse(record, false)}
-              type="button"
-            >
-              <ChevronUp aria-hidden="true" size={14} />
-              Fold
-            </button>
-          ) : null}
-          {canDismiss ? (
-            <button
-              className={ACTION_BUTTON}
-              data-ledger-action="dismiss"
-              onClick={() => onDismiss(record)}
-              type="button"
-            >
-              <X aria-hidden="true" size={14} />
-              Dismiss
-            </button>
-          ) : null}
-          {retryOnce ? <span className="basis-full">it never arrived, so this cannot send it twice</span> : null}
-          {record.fate === 'queued' && !typed && canCancel ? (
-            <span className="basis-full" data-ledger-queued-cancel="">
-              {QUEUED_CANCEL_COPY}
-            </span>
-          ) : null}
-          {copied === 'failed' ? (
-            <span className="basis-full text-warn" role="status">
-              Copy was blocked — select the text instead
-            </span>
-          ) : null}
-        </div>
-      ) : null}
-      {openRetry && confirming ? (
+      {resendable && confirming ? (
         <div
           className="mx-panel mb-2 rounded-control border border-warn-border bg-warn-bg px-2 py-1.5 text-[11px] text-warn"
           data-ledger-retry-confirm=""
         >
-          <p>{OPEN_RESEND_RISK_COPY}</p>
+          <p>{openRetry ? OPEN_RESEND_RISK_COPY : RESEND_RISK_COPY}</p>
           <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
             <button
               className="kt-btn kt-btn--sm shrink-0"
@@ -392,31 +460,11 @@ export function LedgerControls({
             >
               {busy === 'retry' ? 'sending…' : 'Send again anyway'}
             </button>
-            <button className="kt-btn kt-btn--sm shrink-0" onClick={() => setConfirming(false)} type="button">
-              Keep waiting
+            <button className="kt-btn kt-btn--sm shrink-0" onClick={closeConfirm} ref={keepRef} type="button">
+              {openRetry ? 'Keep waiting' : 'Not now'}
             </button>
           </div>
         </div>
-      ) : null}
-      {unconfirmed && onRetry !== undefined && result !== 'accepted' ? (
-        <details className="mx-panel mb-2 border-t border-border-soft pt-1.5 text-[11px] text-muted">
-          <summary className="w-fit cursor-pointer select-none rounded-sm px-1.5 py-1 font-medium hover:bg-surface-2 hover:text-fg">
-            send again…
-          </summary>
-          <div className="mt-1.5 rounded-control border border-warn-border bg-warn-bg px-2 py-1.5 text-warn">
-            <p>{RESEND_RISK_COPY}</p>
-            <div className="mt-1.5 flex items-center gap-2">
-              <button
-                className="rounded-sm border border-warn-border px-2 py-1 font-semibold hover:bg-surface disabled:cursor-wait disabled:opacity-60"
-                disabled={busy !== null}
-                onClick={() => void retry(true)}
-                type="button"
-              >
-                {busy === 'retry' ? 'sending…' : 'Send again anyway'}
-              </button>
-            </div>
-          </div>
-        </details>
       ) : null}
       {unbound ? (
         <p
@@ -425,6 +473,21 @@ export function LedgerControls({
         >
           {UNBOUND_SEND_COPY}
         </p>
+      ) : null}
+      {busy !== null ? (
+        <div className="mx-panel mb-2 text-[11px] text-muted" data-ledger-busy="" role="status">
+          {BUSY_COPY[busy]}
+        </div>
+      ) : null}
+      {copied === 'copied' ? (
+        <div className="mx-panel mb-2 text-[11px] text-muted" role="status">
+          Copied
+        </div>
+      ) : null}
+      {copied === 'failed' ? (
+        <div className="mx-panel mb-2 text-[11px] text-warn" role="status">
+          Copy was blocked — select the text instead
+        </div>
       ) : null}
       {result === 'accepted' ? (
         <div className="mx-panel mb-2 text-[11px] text-muted" role="status">
@@ -451,4 +514,6 @@ export function LedgerControls({
       ) : null}
     </>
   );
+
+  return { trigger, panels };
 }

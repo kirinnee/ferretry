@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
-import { LedgerControls } from '../../src/components/ledger-message.tsx';
+import { LedgerActionsHost } from '../../src/components/ledger-message.tsx';
 import { SettledSendNote } from '../../src/components/settled-send-note.tsx';
 import { TranscriptRow } from '../../src/components/transcript-row.tsx';
 import { useSendView } from '../../src/hooks/use-send-view.ts';
@@ -23,6 +23,28 @@ const record = (overrides: Partial<LedgerSendRecord> = {}): LedgerSendRecord => 
 
 const click = (view: Mounted, selector: string): Promise<void> =>
   interact(() => must(view.container.querySelector<HTMLElement>(selector), selector).click());
+
+const openMenu = (view: Mounted): Promise<void> => click(view, '[data-ledger-more]');
+
+/** Opens the "⋯" menu and picks one item, the way a reader does. */
+const pick = async (view: Mounted, key: string): Promise<void> => {
+  await openMenu(view);
+  await click(view, `[data-menu-key="${key}"]`);
+};
+
+const menuKeys = (view: Mounted): string[] =>
+  Array.from(view.container.querySelectorAll<HTMLElement>('[role="menuitem"]')).map(item => item.dataset.menuKey ?? '');
+
+const Actions = (props: Omit<Parameters<typeof LedgerActionsHost>[0], 'children'>) => (
+  <LedgerActionsHost {...props}>
+    {({ trigger, panels }) => (
+      <>
+        <div>{trigger}</div>
+        {panels}
+      </>
+    )}
+  </LedgerActionsHost>
+);
 
 describe('the one-line note for a terminal send', () => {
   it('reads "Cancelled · hi there · 09:00" and opens or dismisses on a tap', async () => {
@@ -55,30 +77,27 @@ describe('the one-line note for a terminal send', () => {
   });
 });
 
-describe('Dismiss and Fold on a send that is not delivered', () => {
-  it('offers Dismiss for every undelivered send and Fold only when asked to, and never for a delivered one', async () => {
+describe('Dismiss and Hide on a send that is not delivered', () => {
+  it('offers Dismiss for every undelivered send and Hide only when asked to, and never for a delivered one', async () => {
     const dismissed: string[] = [];
     const folded: [string, boolean][] = [];
     const view = await mount(
-      <LedgerControls
+      <Actions
         onCollapse={(r, open) => void folded.push([r.sendId, open])}
         onDismiss={r => void dismissed.push(r.sendId)}
         record={record()}
       />,
     );
-    await click(view, '[data-ledger-action="dismiss"]');
-    await click(view, '[data-ledger-action="collapse"]');
+    await openMenu(view);
+    expect(menuKeys(view)).toEqual(['copy', 'hide', 'dismiss']);
+    await click(view, '[data-menu-key="dismiss"]');
+    await pick(view, 'hide');
     expect(dismissed).toEqual(['send-1']);
     expect(folded).toEqual([['send-1', false]]);
     await view.render(
-      <LedgerControls
-        onCollapse={() => undefined}
-        onDismiss={() => undefined}
-        record={record({ fate: 'delivered' })}
-      />,
+      <Actions onCollapse={() => undefined} onDismiss={() => undefined} record={record({ fate: 'delivered' })} />,
     );
-    expect(view.container.querySelector('[data-ledger-action="dismiss"]')).toBeNull();
-    expect(view.container.querySelector('[data-ledger-action="collapse"]')).toBeNull();
+    expect(view.container.querySelector('[data-ledger-more]')).toBeNull();
     await view.unmount();
   });
 });
@@ -93,7 +112,7 @@ describe('a terminal send in the transcript', () => {
     ...(settled === undefined ? {} : { settled }),
   });
 
-  it('is a one-line note when slim, the whole bubble with Dismiss when fresh, and with Fold once opened', async () => {
+  it('is a one-line note when slim, the whole bubble with Dismiss when fresh, and with Hide once opened', async () => {
     const dismissed: string[] = [];
     const expanded: [string, boolean][] = [];
     const row = (settled: TranscriptEntry['settled'], send?: LedgerSendRecord) => (
@@ -105,21 +124,21 @@ describe('a terminal send in the transcript', () => {
     );
     const view = await mount(row('slim'));
     expect(view.container.querySelector('[data-settled="slim"] [data-settled-note]')).not.toBeNull();
-    expect(view.container.querySelector('[data-ledger-actions]')).toBeNull();
+    expect(view.container.querySelector('[data-ledger-more]')).toBeNull();
 
     await view.render(row('fresh'));
     expect(view.container.querySelector('[data-settled-note]')).toBeNull();
-    expect(view.container.querySelector('[data-ledger-action="dismiss"]')).not.toBeNull();
-    expect(view.container.querySelector('[data-ledger-action="collapse"]')).toBeNull();
+    await openMenu(view);
+    expect(menuKeys(view)).toEqual(['copy', 'dismiss']);
 
     await view.render(row('expanded'));
-    await click(view, '[data-ledger-action="collapse"]');
+    await pick(view, 'hide');
     expect(expanded).toEqual([['send-1', false]]);
 
     // A teammate's cancelled message is not the reader's own bubble, and still folds and dismisses.
     const peer = record({ message: '[peer message from teammate nero (session x)]\nFYI\n\nhello' });
     await view.render(row('expanded', peer));
-    await click(view, '[data-ledger-action="dismiss"]');
+    await pick(view, 'dismiss');
     expect(dismissed).toEqual(['send-1']);
     await view.render(row('slim', peer));
     expect(view.container.textContent).toContain('hello');
