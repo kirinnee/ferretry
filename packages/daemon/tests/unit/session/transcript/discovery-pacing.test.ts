@@ -1,7 +1,8 @@
 import { describe, it } from 'bun:test';
-import should from 'should';
 import type { TranscriptProvenance } from '@ferretry/protocol';
+import should from 'should';
 import {
+  CODEX_DISCOVERY_BACKSTOP_MS,
   CODEX_DISCOVERY_EAGER_MS,
   CODEX_DISCOVERY_INTERVAL_MS,
   CodexDiscoveryPacer,
@@ -123,6 +124,151 @@ describe('CodexDiscoveryPacer', () => {
     // Assert: paced before the change, every read after it.
     should(runsBeforeTheChange).equal(2);
     should(probe.runs).equal(7);
+  });
+
+  describe('while the home is watched', () => {
+    /** A watch whose event count the test moves by hand; `undefined` is a watch that cannot vouch. */
+    const watch = () => {
+      let events: number | undefined = 0;
+      return {
+        heard: () => events,
+        event: () => {
+          events = (events ?? 0) + 1;
+        },
+        unknown: () => {
+          events = undefined;
+        },
+      };
+    };
+
+    it('should not walk a quiet home again, even inside the eager window', async () => {
+      // Arrange: a session that has just started, read every two seconds, in a home nothing touches.
+      const clock = manualClock();
+      const subject = new CodexDiscoveryPacer(clock);
+      const probe = nothing();
+      const home = watch();
+
+      // Act
+      for (let read = 0; read < 10; read += 1) {
+        await subject.pace('session-1', undiscovered, undefined, probe.discover, undefined, home.heard);
+        clock.advance(2_000);
+      }
+
+      // Assert: the first read looked; nothing since could have changed its answer.
+      should(probe.runs).equal(1);
+    });
+
+    it('should walk on the next read after an event, inside the window and the interval', async () => {
+      // Arrange
+      const clock = manualClock();
+      const subject = new CodexDiscoveryPacer(clock);
+      const probe = nothing();
+      const home = watch();
+      await subject.pace('session-1', undiscovered, undefined, probe.discover, undefined, home.heard);
+
+      // Act: a rollout appears inside the eager window, then another once it has closed.
+      clock.advance(2_000);
+      home.event();
+      await subject.pace('session-1', undiscovered, undefined, probe.discover, undefined, home.heard);
+      const eager = probe.runs;
+      clock.advance(CODEX_DISCOVERY_EAGER_MS);
+      home.event();
+      await subject.pace('session-1', undiscovered, undefined, probe.discover, undefined, home.heard);
+      clock.advance(2_000);
+      await subject.pace('session-1', undiscovered, undefined, probe.discover, undefined, home.heard);
+      clock.advance(2_000);
+      home.event();
+      await subject.pace('session-1', undiscovered, undefined, probe.discover, undefined, home.heard);
+      const paced = probe.runs;
+      clock.advance(CODEX_DISCOVERY_INTERVAL_MS);
+      await subject.pace('session-1', undiscovered, undefined, probe.discover, undefined, home.heard);
+
+      // Assert: at once while eager; once paced, the event waits out the interval and is never dropped.
+      should(eager).equal(2);
+      should(paced).equal(3);
+      should(probe.runs).equal(4);
+    });
+
+    it('should walk a quiet home once a backstop, for a change no watch could hear', async () => {
+      // Arrange
+      const clock = manualClock();
+      const subject = new CodexDiscoveryPacer(clock);
+      const probe = nothing();
+      const home = watch();
+      await subject.pace('session-1', undiscovered, undefined, probe.discover, undefined, home.heard);
+
+      // Act: ten minutes of reads every two seconds, and not one event.
+      for (let read = 0; read < 300; read += 1) {
+        clock.advance(2_000);
+        await subject.pace('session-1', undiscovered, undefined, probe.discover, undefined, home.heard);
+      }
+
+      // Assert: the first look, then one per backstop.
+      should(probe.runs).equal(1 + (300 * 2_000) / CODEX_DISCOVERY_BACKSTOP_MS);
+    });
+
+    it('should count an event that arrived during the walk as unseen', async () => {
+      // Arrange: the rollout lands while the first walk is listing the directory.
+      const clock = manualClock();
+      const subject = new CodexDiscoveryPacer(clock);
+      const home = watch();
+      let runs = 0;
+      const discover = async (): Promise<TranscriptProvenance | undefined> => {
+        runs += 1;
+        if (runs === 1) home.event();
+        return undefined;
+      };
+
+      // Act
+      await subject.pace('session-1', undiscovered, undefined, discover, undefined, home.heard);
+      clock.advance(2_000);
+      await subject.pace('session-1', undiscovered, undefined, discover, undefined, home.heard);
+      clock.advance(2_000);
+      await subject.pace('session-1', undiscovered, undefined, discover, undefined, home.heard);
+
+      // Assert: looked again for that event, then quiet.
+      should(runs).equal(2);
+    });
+
+    it('should let the clock decide while the watch cannot vouch for the home', async () => {
+      // Arrange: a directory the hub polls, or one that does not exist yet.
+      const clock = manualClock();
+      const subject = new CodexDiscoveryPacer(clock);
+      const probe = nothing();
+      const home = watch();
+      home.unknown();
+
+      // Act
+      for (let read = 0; read < 5; read += 1) {
+        await subject.pace('session-1', undiscovered, undefined, probe.discover, undefined, home.heard);
+        clock.advance(2_000);
+      }
+
+      // Assert: eager, every read, as without a watch.
+      should(probe.runs).equal(5);
+    });
+
+    it('should walk after a listing change another walk saw, which may lie outside the watch', async () => {
+      // Arrange: a quiet watched home, long past eager.
+      const clock = manualClock();
+      const subject = new CodexDiscoveryPacer(clock);
+      const probe = nothing();
+      const home = watch();
+      let changes = 0;
+      await subject.pace('session-1', undiscovered, () => changes, probe.discover, undefined, home.heard);
+      clock.advance(CODEX_DISCOVERY_EAGER_MS + 1);
+      await subject.pace('session-1', undiscovered, () => changes, probe.discover, undefined, home.heard);
+      const quiet = probe.runs;
+
+      // Act: some other session's walk found a new rollout in an old day directory.
+      changes += 1;
+      clock.advance(2_000);
+      await subject.pace('session-1', undiscovered, () => changes, probe.discover, undefined, home.heard);
+
+      // Assert
+      should(quiet).equal(1);
+      should(probe.runs).equal(2);
+    });
   });
 
   it('should start afresh for a provenance the session recorded anew', async () => {

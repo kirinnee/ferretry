@@ -1,8 +1,9 @@
 /**
  * WHAT CROSSES BETWEEN THE DAEMON AND ITS HOUSEKEEPING WORKER (docs/design/housekeeping-worker.md §2.3).
  *
- * The worker reads credential stores, makes the free usage reads and reads passive usage files. Main
- * keeps every lock, cache, head and write, and asks the worker by job. Both directions are closed
+ * The worker reads credential stores, makes the free usage reads, reads passive usage files and walks
+ * Codex homes for an undiscovered session's rollout. Main keeps every lock, head and write, and asks the
+ * worker by job. Both directions are closed
  * unions, and each side switches over them exhaustively.
  *
  * NOTHING HERE CAN CARRY CREDENTIAL MATERIAL. A job names a store — paths, a keychain service and
@@ -19,6 +20,7 @@ import type {
   PassiveUsageRecord,
   StoredCredentialResolution,
 } from '@ferretry/fleet';
+import type { CodexRolloutCandidate } from '../session/transcript/codex-rollout.ts';
 
 /** What every new worker thread is told before its first job: where things are on this host. */
 export interface HousekeepingSettings {
@@ -46,7 +48,17 @@ export type HousekeepingJob =
   /** A Claude credential's statusLine reading, `<fleet>/credentials/<id>/usage.json`. */
   | { readonly kind: 'usage.passive.claude'; readonly credential: string }
   /** The newest rate-limit reading across the rollouts main attributed to one Codex credential. */
-  | { readonly kind: 'usage.passive.codex'; readonly files: readonly string[] };
+  | { readonly kind: 'usage.passive.codex'; readonly files: readonly string[] }
+  /**
+   * The rollouts under a Codex home that could be one session's: every one outside `skip` (the session's
+   * baseline), each marked with whether it carries the session's correlation token.
+   */
+  | {
+      readonly kind: 'codex.discover';
+      readonly home: string;
+      readonly correlationToken: string;
+      readonly skip: readonly string[];
+    };
 
 export type HousekeepingJobKind = HousekeepingJob['kind'];
 
@@ -56,6 +68,22 @@ export interface HousekeepingJobValues {
   readonly 'credential.active': ActiveUsageRead;
   readonly 'usage.passive.claude': PassiveUsageRecord | null;
   readonly 'usage.passive.codex': PassiveUsageRecord | null;
+  readonly 'codex.discover': CodexDiscovery;
+}
+
+/**
+ * One walk of a Codex home. The CHOICE is main's: it holds the claims and writes the binding, so the
+ * worker only says what each candidate file is.
+ */
+export interface CodexDiscovery {
+  readonly candidates: readonly CodexRolloutCandidate[];
+  /** How many times this walk saw the home's listing change: a new or removed rollout or directory. */
+  readonly changed: number;
+  /**
+   * The directories a new rollout would appear in — `sessions`, its newest year and month, and its two
+   * newest day directories — for main to watch, so a quiet home needs no walk at all.
+   */
+  readonly frontier: readonly string[];
 }
 
 export type HousekeepingValue = HousekeepingJobValues[HousekeepingJobKind];

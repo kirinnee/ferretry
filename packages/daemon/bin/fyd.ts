@@ -137,6 +137,7 @@ import { BunGitRunner } from '../src/adapters/git/index.ts';
 import { FileHandoverReceiptStore } from '../src/adapters/handover/file-handover-receipt-store.ts';
 import {
   HOUSEKEEPING_WORKER,
+  HousekeepingCodexRollouts,
   InlineHousekeepingJobs,
   WorkerCredentialPorts,
   WorkerHousekeepingJobs,
@@ -549,6 +550,7 @@ import {
   ClaudeTranscriptParser,
   type ClockPort,
   type CloudflaredLocatorPort,
+  CODEX_DISCOVERY_BACKSTOP_MS,
   CodexDiscoveryPacer,
   CodexPickerCleanup,
   CodexRuntimeCatalogCache,
@@ -645,6 +647,7 @@ import {
   HarnessUpdateService,
   type HarnessVersionPort,
   HOSTED_APP_ORIGIN,
+  type HousekeepingJobs,
   type HousekeepingSettings,
   handoffFolders,
   handoffPointerPaths,
@@ -5268,8 +5271,9 @@ function housekeepingBackstopLimitation(): string {
   return (
     'Housekeeping runs on events, with slow backstops that are timers: analytics ingest every ' +
     `${minutes(ANALYTICS_BACKSTOP_MS)}, the terminal reaper every ${minutes(TERMINAL_REAP_BACKSTOP_MS)}, ` +
-    `a full handover rescan every ${minutes(HANDOVER_RESCAN_INTERVAL_MS)} and the update check every ` +
-    `${minutes(UPDATE_BACKSTOP_INTERVAL_MS)}.`
+    `a full handover rescan every ${minutes(HANDOVER_RESCAN_INTERVAL_MS)}, the update check every ` +
+    `${minutes(UPDATE_BACKSTOP_INTERVAL_MS)}, and an undiscovered Codex session's rollout walk every ` +
+    `${minutes(CODEX_DISCOVERY_BACKSTOP_MS)} while its home's newest directories are watched and quiet.`
   );
 }
 
@@ -6945,6 +6949,38 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
    * forgotten with it.
    */
   const codexDiscoveryPacer = new CodexDiscoveryPacer(clock);
+  /** The one hub every file watch in this daemon goes through (docs/design/event-driven-daemon.md stage 2). */
+  const fileEvents = new FileEventHub(platformFileEventSource(), unrefFileEventTimers);
+  /**
+   * The housekeeping jobs' settings and their main-thread runner, built here because the Codex discovery
+   * below runs as a job from the first read, before the worker is wired further down. The runner shares
+   * `codexRollouts`, so a walk on this thread reuses what the start's baseline read already learned.
+   */
+  const probeUrls = usageProbeUrls(process.env.FY_USAGE_PROBE_ORIGIN);
+  const housekeepingSettings: HousekeepingSettings = {
+    type: 'settings',
+    platform: process.platform,
+    keychainAccount: claudeKeychain,
+    defaultClaudeHome,
+    fleetRoot: paths.fleet,
+    ...(probeUrls === undefined ? {} : { probeUrls }),
+  };
+  const inlineHousekeeping = new InlineHousekeepingJobs(
+    housekeepingSettings,
+    () => millisecondClock.now(),
+    codexRollouts,
+  );
+  /** Where a discovery walk runs: this thread until the housekeeping worker is wired below. */
+  let discoveryJobs: HousekeepingJobs = inlineHousekeeping;
+  /**
+   * An undiscovered Codex session's walk, as a `codex.discover` job on the housekeeping worker
+   * (housekeeping-worker.md §2.1), and the home's newest directories watched, so a quiet home is not
+   * walked again until an event says it moved or the pacer's backstop falls due.
+   */
+  const codexDiscovery = new HousekeepingCodexRollouts({
+    jobs: () => discoveryJobs,
+    watch: (directory, listener) => fileEvents.subscribeDirectory(directory, () => listener()),
+  });
   /**
    * Transcript provenance, taken at creation.
    *
@@ -6990,7 +7026,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
    */
   const createTranscriptFileResolver = (storage: DaemonStorage): TranscriptFileResolver => {
     const resolver = new SessionTranscriptResolver(
-      codexRollouts,
+      codexDiscovery,
       new StorageTranscriptClaims(storage),
       new StorageTranscriptProvenanceStore(storage),
       clock,
@@ -7067,7 +7103,6 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
    * which is a claim the daemon has no basis for. So the file is resolved first and its absence is
    * reported as an absence; only a file this daemon can prove is the session's own is ever read.
    */
-  const fileEvents = new FileEventHub(platformFileEventSource(), unrefFileEventTimers);
   /** One memory of parsed tails for every reader this world builds, so no two of them re-parse alike. A
    *  watched tail is re-validated when its file changes rather than by a `stat` on every ask. */
   const transcriptTails = new TranscriptTailCache(undefined, undefined, {
@@ -8635,16 +8670,6 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       // this heap. `FY_USAGE_PROBE_ORIGIN` moves the free reads to a fake usage server on this machine (the
       // idle bench, the CI budget); anything but a loopback origin is refused, so a token only ever reaches
       // its provider or this host.
-      const probeUrls = usageProbeUrls(process.env.FY_USAGE_PROBE_ORIGIN);
-      const housekeepingSettings: HousekeepingSettings = {
-        type: 'settings',
-        platform: process.platform,
-        keychainAccount: claudeKeychain,
-        defaultClaudeHome,
-        fleetRoot: paths.fleet,
-        ...(probeUrls === undefined ? {} : { probeUrls }),
-      };
-      const inlineHousekeeping = new InlineHousekeepingJobs(housekeepingSettings, () => millisecondClock.now());
       const housekeepingJobs =
         housekeepingEnabled === false
           ? inlineHousekeeping
@@ -8661,6 +8686,8 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
                 ),
               now: () => millisecondClock.now(),
             });
+      // Codex discovery's walks go to the same thread from here on.
+      discoveryJobs = housekeepingJobs;
       // THE FLEET READING (housekeeping-worker.md §3): every input of a credential's row watched through the
       // file-event hub and read only when it changes — its store file, its statusLine `usage.json` (renamed
       // into place every few seconds while a session runs: ONE passive job, never a pass), its attributed

@@ -1,12 +1,12 @@
 import { describe, it } from 'bun:test';
-import should from 'should';
 import type { TranscriptProvenance } from '@ferretry/protocol';
+import should from 'should';
 import {
   CODEX_DISCOVERY_EAGER_MS,
   CodexDiscoveryPacer,
-  SessionTranscriptResolver,
   type CodexRolloutCandidate,
   type CodexRolloutIndex,
+  SessionTranscriptResolver,
   type TranscriptClaims,
   type TranscriptProvenanceStore,
 } from '../../../../src/lib/session/transcript/index.ts';
@@ -287,6 +287,44 @@ describe('SessionTranscriptResolver', () => {
       // Assert: thirty reads, two walks; the change is looked at on the very next read.
       should(pacedWalks).equal(2);
       should(walks).equal(3);
+    });
+
+    it('should hand the pacer what the index has heard of the home, and walk only on an event', async () => {
+      // Arrange: an index whose home is watched, read by the turn watcher every two seconds.
+      const time = manualClock();
+      let walks = 0;
+      let heard = 0;
+      const homes: string[] = [];
+      const subject = new SessionTranscriptResolver(
+        {
+          candidates: async () => {
+            walks += 1;
+            return [];
+          },
+          heard: home => {
+            homes.push(home);
+            return heard;
+          },
+        },
+        noClaims,
+        recorder(),
+        time,
+        new CodexDiscoveryPacer(time),
+      );
+
+      // Act: a quiet minute, then an event.
+      for (let read = 0; read < 30; read += 1) {
+        await subject.file('session-1', undiscovered);
+        time.advance(2_000);
+      }
+      const quietWalks = walks;
+      heard += 1;
+      await subject.file('session-1', undiscovered);
+
+      // Assert
+      should(quietWalks).equal(1);
+      should(walks).equal(2);
+      should(new Set(homes)).eql(new Set([undiscovered.home]));
     });
   });
 });

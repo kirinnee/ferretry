@@ -21,6 +21,14 @@
  * noticed it — re-opens the eager window, because that is the event a waiting session's rollout
  * arrives as.
  *
+ * AND ONLY WHEN SOMETHING HAPPENED, WHILE THAT CAN BE PROVED. Where the home's newest directories are
+ * watched with file events (`heard`), a discovery that is due by the clock alone is skipped when no
+ * event has arrived there since the last one started: the walk could only find what the last one found.
+ * A rollout is created in, and its first turn appended to, a watched directory, so either is an event and
+ * the next read looks — inside the window and the interval above, never more often. The walk still runs
+ * once every {@link CODEX_DISCOVERY_BACKSTOP_MS} without one, for a change no watch could hear; and while
+ * any of those directories is polled or missing, the clock alone decides, exactly as above.
+ *
  * WHY THE SESSION'S START AND NOT THE DAEMON'S FIRST LOOK. Measured from the first look, every daemon
  * restart re-opened two minutes of full walks for every unresolved session, however long ago it
  * started — on the owner-scale fixture, ~1,200 rollout `stat`s a second for exactly the minutes after a
@@ -38,16 +46,19 @@ import type { TranscriptProvenance } from '@ferretry/protocol';
 export const CODEX_DISCOVERY_EAGER_MS = 2 * 60 * 1_000;
 /** The least time between two discoveries for one session once the eager window has closed. */
 export const CODEX_DISCOVERY_INTERVAL_MS = 30 * 1_000;
+/** The most time between two discoveries for one session while its home is watched and quiet. */
+export const CODEX_DISCOVERY_BACKSTOP_MS = 5 * 60 * 1_000;
 
 /** A clock the pacer reads instants from. */
 export interface DiscoveryPacerClock {
   now(): string;
 }
 
-/** The two windows, overridable so a test can say them small. */
+/** The windows, overridable so a test can say them small. */
 export interface DiscoveryPacing {
   readonly eagerMs: number;
   readonly intervalMs: number;
+  readonly backstopMs?: number;
 }
 
 interface Pace {
@@ -59,6 +70,11 @@ interface Pace {
   readonly last: number | undefined;
   /** The home's change count after the last discovery, to notice a change since. */
   readonly changes: number | undefined;
+  /**
+   * How many events the home's watch had heard when the last discovery STARTED — so one arriving during
+   * the walk still counts as unseen — or `undefined` when the watch could not prove anything then.
+   */
+  readonly heard: number | undefined;
 }
 
 export class CodexDiscoveryPacer {
@@ -79,7 +95,8 @@ export class CodexDiscoveryPacer {
    *
    * `changes` reads the home's listing-change count; without it only the clock decides. `startedAt`
    * reads when the session started, asked once per new pace; without an answer the window opens at
-   * this first look.
+   * this first look. `heard` reads how many file events the home's watch has heard, or `undefined`
+   * while it cannot vouch for every directory a rollout would appear in.
    */
   async pace(
     sessionId: string,
@@ -87,6 +104,7 @@ export class CodexDiscoveryPacer {
     changes: (() => number) | undefined,
     discover: () => Promise<TranscriptProvenance | undefined>,
     startedAt?: () => Promise<string | undefined>,
+    heard?: () => number | undefined,
   ): Promise<TranscriptProvenance | undefined> {
     const running = this.#running.get(sessionId);
     if (running !== undefined) return await running;
@@ -99,16 +117,18 @@ export class CodexDiscoveryPacer {
       const raced = this.#running.get(sessionId);
       if (raced !== undefined) return await raced;
       known = this.#paces.get(sessionId);
-      if (known?.key !== key) known = { key, since, last: undefined, changes: undefined };
+      if (known?.key !== key) known = { key, since, last: undefined, changes: undefined, heard: undefined };
     }
     let pace: Pace = known;
-    if (pace.changes !== undefined && changes !== undefined && changes() !== pace.changes)
-      pace = { ...pace, since: now };
-    if (!this.due(pace, now)) {
+    const moved = pace.changes !== undefined && changes !== undefined && changes() !== pace.changes;
+    if (moved) pace = { ...pace, since: now };
+    const events = heard?.();
+    // A listing change some other walk saw may lie outside the watched directories, so it is never quiet.
+    if (!this.due(pace, now, moved ? undefined : events)) {
       this.#paces.set(sessionId, pace);
       return undefined;
     }
-    const started = pace;
+    const started: Pace = { ...pace, heard: events };
     const attempt = discover().finally(() => this.#running.delete(sessionId));
     this.#running.set(sessionId, attempt);
     this.#paces.set(sessionId, { ...started, last: now });
@@ -124,8 +144,13 @@ export class CodexDiscoveryPacer {
     return Number.isFinite(started) ? Math.min(started, now) : now;
   }
 
-  private due(pace: Pace, now: number): boolean {
+  private due(pace: Pace, now: number, heard: number | undefined): boolean {
     if (pace.last === undefined || now < pace.last) return true;
+    const quiet =
+      heard !== undefined &&
+      pace.heard === heard &&
+      now - pace.last < (this.pacing.backstopMs ?? CODEX_DISCOVERY_BACKSTOP_MS);
+    if (quiet) return false;
     return now - pace.since < this.pacing.eagerMs || now - pace.last >= this.pacing.intervalMs;
   }
 }
