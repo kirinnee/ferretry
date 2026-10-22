@@ -93,6 +93,14 @@ export interface SecretCipherPort {
   seal(name: SecretName, plaintext: string): Promise<{ readonly iv: string; readonly ciphertext: string }>;
   /** Raises `SecretStoreError('undecipherable')` when the key does not open it. */
   open(name: SecretName, sealed: { readonly iv: string; readonly ciphertext: string }): Promise<string>;
+  /**
+   * Every entry opened under ONE read of the key, raising as {@link open} does for the first that fails.
+   * Opening a vault entry by entry read the key file once per entry, and the vault is opened on every
+   * masking of text the daemon serves — several times a second on a busy machine.
+   */
+  openAll(
+    entries: Readonly<Record<SecretName, { readonly iv: string; readonly ciphertext: string }>>,
+  ): Promise<ReadonlyMap<SecretName, string>>;
 }
 
 /**

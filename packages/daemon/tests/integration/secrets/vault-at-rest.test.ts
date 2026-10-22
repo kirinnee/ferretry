@@ -196,6 +196,80 @@ describe('the vault at rest', () => {
   });
 });
 
+describe('opening the vault', () => {
+  /** The state filesystem, with every text read of the key file counted. */
+  class CountingFiles extends StateFileSystem {
+    keyReads = 0;
+
+    override async readText(path: string): Promise<string | undefined> {
+      if (path.endsWith(SECRETS_KEY)) this.keyReads += 1;
+      return await super.readText(path);
+    }
+  }
+
+  async function counted(label: string) {
+    const home = await tempDirectory(label);
+    const paths = createFoundationPaths(resolveStateHome({ fyHome: home, homeDirectory: home }));
+    const files = new CountingFiles(paths);
+    await files.ensureDirectory(paths.home, 0o700);
+    await files.ensureDirectory(paths.state, 0o700);
+    await files.ensureDirectory(paths.temporary, 0o700);
+    const documents = new FileSecretDocumentStore(paths, files);
+    const cipher = new WebCryptoSecretCipher(new FileSecretKey(documents.keyFile, files));
+    return {
+      paths,
+      files,
+      cipher,
+      directory: new SecretDirectory(documents, cipher, CLOCK),
+      vault: new SecretVault(documents, cipher),
+    };
+  }
+
+  it('should read the key once for the whole vault, not once per entry', async () => {
+    // Arrange — every masking of served text opens the vault, and each entry used to re-read the key.
+    const { files, directory, vault: opened } = await counted('vault-one-key-read');
+    for (const name of ['ONE', 'TWO', 'THREE', 'FOUR', 'FIVE', 'SIX']) await directory.put(name, `${name}-${TOKEN}`);
+    files.keyReads = 0;
+
+    // Act
+    const values = await opened.values();
+
+    // Assert — one for the document's own "is the key still there" check, one to open every entry.
+    should(values.size).equal(6);
+    should(values.get('FOUR')).equal(`FOUR-${TOKEN}`);
+    should(files.keyReads).equal(2);
+  });
+
+  it('should open nothing, and read no key, for a vault with no entries', async () => {
+    // Arrange
+    const { files, cipher } = await counted('vault-open-nothing');
+
+    // Act
+    const opened = await cipher.openAll({});
+
+    // Assert
+    should(opened.size).equal(0);
+    should(files.keyReads).equal(0);
+  });
+
+  it('should refuse to open entries whose key file has gone, naming one of them', async () => {
+    // Arrange
+    const { paths, cipher, directory } = await counted('vault-open-all-key-gone');
+    await directory.put('TOKEN', TOKEN);
+    const document = parseVaultDocument(await readFile(join(paths.state, SECRETS_DOCUMENT), 'utf8'));
+    await rm(join(paths.state, SECRETS_KEY));
+
+    // Act + Assert
+    await cipher.openAll(document.entries).then(
+      () => should.fail('', '', 'entries with no key must refuse'),
+      (error: unknown) => {
+        should((error as SecretStoreError).failure).equal('key_missing');
+        should((error as Error).message).containEql('TOKEN');
+      },
+    );
+  });
+});
+
 describe('reading a damaged document', () => {
   const cases: readonly [string, string][] = [
     ['not JSON at all', 'this is not json'],

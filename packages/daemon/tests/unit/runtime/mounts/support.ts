@@ -2148,6 +2148,14 @@ export class FakeSecretCipher implements SecretCipherPort {
     if (sealed.iv !== name) throw new SecretStoreError('undecipherable', `${name} was filed under ${sealed.iv}`);
     return [...sealed.ciphertext].reverse().join('');
   }
+
+  async openAll(
+    entries: Readonly<Record<SecretName, { readonly iv: string; readonly ciphertext: string }>>,
+  ): Promise<ReadonlyMap<SecretName, string>> {
+    const opened = new Map<SecretName, string>();
+    for (const [name, sealed] of Object.entries(entries)) opened.set(name, await this.open(name, sealed));
+    return opened;
+  }
 }
 
 /** A vault document held in memory. `undefined` until something writes, exactly like a fresh home. */
