@@ -62,7 +62,7 @@ export const AGENT_CONTROL_WORDS: Readonly<
 
 /** The three things a `machine.settings` change always carries, unchanged unless the caller means
  *  to change one of them — so a section that edits only one never clobbers the other two. */
-const machineSettings = (
+export const machineSettings = (
   machine: FleetMachineView,
   edit: Partial<{
     readonly agentPermissions: AgentPermissions;

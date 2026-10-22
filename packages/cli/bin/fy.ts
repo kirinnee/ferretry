@@ -1110,6 +1110,7 @@ const DOMAIN_REGISTRARS: ReadonlyArray<(wiring: DomainWiring) => void> = [
           writeFile: async (path, text) => {
             await Bun.write(path, text);
           },
+          service: async () => await buildDaemonController(world, client).serviceFacts(),
         }),
     ),
   // Pairing writes its screen through its own uncoloured writer rather than `world.io`: the screen is

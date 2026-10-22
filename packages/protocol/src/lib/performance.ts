@@ -162,6 +162,17 @@ export const SessionWorkerPoolSchema = z.object({
 });
 export type SessionWorkerPool = z.infer<typeof SessionWorkerPoolSchema>;
 
+/**
+ * How the daemon is run, as the service definition on this machine declares it. Added by
+ * `fy daemon profile` (the daemon cannot read its own service definition): on macOS the launchd job's
+ * `ProcessType`, `null` when it declares none — the throttled default.
+ */
+export const DaemonServiceFactsSchema = z.object({
+  manager: z.enum(['systemd', 'launchd', 'direct']),
+  processType: z.string().nullable().optional(),
+});
+export type DaemonServiceFacts = z.infer<typeof DaemonServiceFactsSchema>;
+
 /** One counted syscall shape from an outside tracer (`strace`, `fs_usage`). */
 export const TracedSyscallSchema = z.object({
   call: z.string().min(1),
@@ -269,6 +280,7 @@ export const PerformanceReportSchema = z.object({
   sessionWorkers: SessionWorkerPoolSchema.optional(),
   budgets: z.array(BudgetVerdictSchema),
   syscallTrace: SyscallTraceSchema.optional(),
+  service: DaemonServiceFactsSchema.optional(),
   /** What this report cannot see, in sentences, so a reader does not mistake a gap for a zero. */
   limitations: z.array(z.string()),
 });

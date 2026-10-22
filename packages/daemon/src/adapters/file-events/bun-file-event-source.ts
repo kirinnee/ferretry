@@ -33,13 +33,23 @@ const nodePrimitives: FsWatchPrimitives = {
  * What it does on Linux, which is where its tests run, and why the hub trusts so little of it:
  * Bun suppresses an event within a millisecond of the last one it emitted unless it differs in BOTH kind
  * and name (sixty appends across twenty files reported as ONE event), an atomic save can report only
- * its temporary name, and deleting the watched directory reports nothing. Names starting with `.` or `~`
- * are filtered out by Bun's directory event handling, so such a file is declared unreported and polled.
- * FSEvents latency and coalescing on macOS have NOT been measured; the hub's re-stat of every
- * subscribed path on any event is what makes coalescing safe.
+ * its temporary name, and deleting the watched directory reports nothing.
+ *
+ * WHICH NAMES IT REPORTS DEPENDS ON THE PLATFORM, and getting it wrong costs a 5 s poll (too cautious) or
+ * a file nobody hears about (too trusting). Bun 1.3's non-FSEvents directory path
+ * (`PathWatcherManager.onFileUpdate`, `path_watcher.zig`) skips every name starting with `.` or `~`, so
+ * off macOS such a file is declared unreported and polled. On macOS a directory is an FSEvents stream
+ * whose callback (`_events_cb`, `fs_events.zig`: 50 ms latency, `kFSEventStreamCreateFlagFileEvents`)
+ * filters nothing by name, and `onFileUpdate` skips FSEvents watchers — so there every name is
+ * reported, Claude's `.credentials.json` included. Declaring it unreported there polled `~/.claude` and
+ * the credential store every 5 s on the owner's Mac. The macOS CI job runs this adapter's tests on a
+ * real Mac (`scripts/ci/darwin-confinement.sh`), which is what holds that claim.
  */
 export class BunFileEventSource implements FileEventSource {
-  constructor(private readonly primitives: FsWatchPrimitives = nodePrimitives) {}
+  constructor(
+    private readonly primitives: FsWatchPrimitives = nodePrimitives,
+    private readonly platform: NodeJS.Platform = process.platform,
+  ) {}
 
   watch(directory: string, onEvent: () => void, onError: (detail: string) => void): DirectoryWatchOpen {
     const found = directoryIdentity(this.primitives, directory);
@@ -67,7 +77,8 @@ export class BunFileEventSource implements FileEventSource {
   }
 
   reports(name: string): boolean {
-    return name.length > 0 && !name.startsWith('.') && !name.startsWith('~');
+    if (name.length === 0) return false;
+    return this.platform === 'darwin' || (!name.startsWith('.') && !name.startsWith('~'));
   }
 
   /** Bun reports nothing when the watched directory itself goes; the watch just stops. */

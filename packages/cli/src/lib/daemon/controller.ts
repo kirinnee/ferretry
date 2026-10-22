@@ -1,4 +1,4 @@
-import type { HealthView, LivenessView, TunnelStatusView } from '@ferretry/protocol';
+import type { DaemonServiceFacts, HealthView, LivenessView, TunnelStatusView } from '@ferretry/protocol';
 import { type IProgress, NO_PROGRESS, withStep } from '../progress/index.ts';
 import { passMidTurn } from '../update/mid-turn.ts';
 import { type DaemonUpdateStatus, renderUpdateStatus } from '../update/status.ts';
@@ -616,6 +616,20 @@ export class DaemonController {
     const located = this.#locateDaemon();
     const update = await this.deps.updateStatus?.read('reason' in located ? undefined : located, health !== undefined);
     return { view, located, update, serviceManager: this.deps.service !== undefined };
+  }
+
+  /**
+   * How this daemon is run, for a performance report: its manager, and on macOS the launchd job's
+   * `ProcessType` read from the plist on disk. A direct daemon has no definition to read.
+   */
+  async serviceFacts(): Promise<DaemonServiceFacts> {
+    const service = this.deps.service;
+    if (service === undefined || !(await service.installed())) return { manager: 'direct' };
+    const report = await service.inspect();
+    return {
+      manager: report.manager,
+      ...(report.processType === undefined ? {} : { processType: report.processType }),
+    };
   }
 
   /**

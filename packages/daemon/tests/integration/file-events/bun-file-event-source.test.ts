@@ -1,7 +1,7 @@
 import { describe, it } from 'bun:test';
 import { EventEmitter } from 'node:events';
 import type { BigIntStats, FSWatcher } from 'node:fs';
-import { stat, writeFile } from 'node:fs/promises';
+import { rename, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import should from 'should';
 import {
@@ -9,6 +9,7 @@ import {
   type FsWatchPrimitives,
   unrefFileEventTimers,
 } from '../../../src/adapters/file-events/bun-file-event-source.ts';
+import { FileEventHub } from '../../../src/lib/file-events/hub.ts';
 import { describeRealFileEvents, hubOver, until, workspace } from './real-file-system.ts';
 
 describeRealFileEvents("Bun's fs.watch", () => new BunFileEventSource());
@@ -141,22 +142,68 @@ describe('BunFileEventSource', () => {
     should(missing).be.undefined();
   });
 
-  it('should declare the names Bun never reports, which the hub then polls and names', async () => {
+  it('should report every name on macOS, where FSEvents filters none, and drop . and ~ names elsewhere', () => {
+    // Arrange
+    const names = ['session.jsonl', '.credentials.json', '~lock', ''];
+
+    // Act
+    const mac = new BunFileEventSource(undefined, 'darwin');
+    const linux = new BunFileEventSource(undefined, 'linux');
+
+    // Assert
+    should(names.map(name => mac.reports(name))).deepEqual([true, true, true, false]);
+    should(names.map(name => linux.reports(name))).deepEqual([true, false, false, false]);
+    should(mac.reportsRemoval()).be.false();
+  });
+
+  it.if(process.platform !== 'darwin')('should poll a name Bun drops here, and name it as a limitation', async () => {
     // Arrange
     const source = new BunFileEventSource();
     const file = join(await workspace(), '~lock');
     const hub = hubOver(source);
 
     // Act
-    const answers = ['session.jsonl', '.hidden', '~lock', ''].map(name => source.reports(name));
     const subscription = hub.subscribe(file, () => {});
 
     // Assert
-    should(answers).deepEqual([true, false, false, false]);
-    should(source.reportsRemoval()).be.false();
     should(subscription.live()).be.false();
     should(hub.fallbacks().map(fallback => fallback.reason)).deepEqual(['unreported-name']);
   });
+
+  // ON A REAL MAC ONLY (the macOS CI job): the claim the owner's daemon rests on.
+  it.if(process.platform === 'darwin')(
+    "should hear Claude's .credentials.json refreshed in place and by a rename, within a second, polling nothing",
+    async () => {
+      // Arrange: no poll can fire inside this test, so only an FSEvents event can deliver.
+      const directory = await workspace();
+      const credentials = join(directory, '.credentials.json');
+      await writeFile(credentials, '{"token":1}');
+      const hub = new FileEventHub(new BunFileEventSource(), unrefFileEventTimers, { settleMs: 10, pollMs: 60_000 });
+      const heard: string[] = [];
+      const subscription = hub.subscribe(credentials, path => heard.push(path));
+      try {
+        await writeFile(join(directory, 'prime'), 'x');
+        await until(() => heard.length > 0, 'the first report');
+        await Bun.sleep(100);
+        heard.length = 0;
+
+        // Act
+        await writeFile(credentials, '{"token":2}');
+        await until(() => heard.length > 0, 'an in-place refresh', 1_000);
+        await Bun.sleep(100);
+        heard.length = 0;
+        await writeFile(join(directory, '.credentials.json.tmp'), '{"token":3}');
+        await rename(join(directory, '.credentials.json.tmp'), credentials);
+        await until(() => heard.length > 0, 'a refresh by rename', 1_000);
+
+        // Assert
+        should(subscription.live()).be.true();
+        should(hub.fallbacks()).deepEqual([]);
+      } finally {
+        hub.close();
+      }
+    },
+  );
 
   it('should run unreferenced timers that can be cleared', async () => {
     // Arrange

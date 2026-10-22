@@ -4,7 +4,7 @@
  * nothing but that directory (a shared temp directory holds sockets, which Bun's `fs.watch` dies on).
  */
 import { afterEach, describe, it } from 'bun:test';
-import { appendFile, mkdir, mkdtemp, rename, rm, writeFile } from 'node:fs/promises';
+import { appendFile, mkdir, mkdtemp, realpath, rename, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import should from 'should';
@@ -22,7 +22,9 @@ afterEach(async () => {
 
 /** A fresh, empty directory whose parent is private to the test. */
 export async function workspace(): Promise<string> {
-  const root = await mkdtemp(join(tmpdir(), 'ferretry-file-events-'));
+  // The real path: macOS's temporary directory is behind a symbolic link (/var → /private/var), and a
+  // watch should be asked for the path the daemon's own paths would name.
+  const root = await mkdtemp(join(await realpath(tmpdir()), 'ferretry-file-events-'));
   roots.push(root);
   const directory = join(root, 'w');
   await mkdir(directory);

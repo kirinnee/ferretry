@@ -86,12 +86,51 @@ Settings. The link is `#machines/<name>/<tab>`.
 | `fy daemon setup` / `fy daemon import claude\|codex [--name <runtime>]`                    | the first run and "import again", asked; or one tool, unasked              |
 | `fy machine` / `fy machine set agent-permissions auto\|skip` / `fy machine install <tool>` | facts, Agent permissions, installing Claude Code or Codex                  |
 | `fy machine export` / `fy machine clone <file> [--replace]`                                | copy a setup to another machine (a sign-in is never copied: an empty slot) |
-| `fy runtimes` / `fy runtime add\|show\|set\|rm`                                            | runtimes                                                                   |
+| `fy runtimes` / `fy runtime add\|show\|set\|rename\|rm`                                    | runtimes                                                                   |
 | `fy credentials` / `fy credential add\|check\|signin\|signout\|label\|rm`                  | logins, their status and usage (`fy logins` / `fy login …` too)            |
 | `fy profiles` / `fy profile ls\|show\|build\|edit\|rm`                                     | profiles, each with its scope                                              |
 | `fy components [kind]` / `fy component show\|add\|edit\|rm <kind>/<name>`                  | components                                                                 |
 | `fy start --agent <runtime>`                                                               | launch an agent runtime                                                    |
 | `fy fleet recommend <task…>`                                                               | which agent suits a piece of work (the only `fleet` verb)                  |
+
+## Renaming and removing a runtime
+
+**Browser:** each runtime's row and its own page carry **Rename** and **Remove**, both `fleet.configure`
+acts ([grants.md](grants.md)): a device that may not make them sees them disabled with the reason.
+**Terminal:** `fy runtime rename <name> <new-name>` and `fy runtime rm <name>`, each with `--dry-run`,
+`-y` and `--json`.
+
+### Renaming a runtime
+
+A rename is one reviewed `runtime.rename` change. **Nothing restarts**: a running ferret keeps its
+process, and its runtime label follows the runtime to the new name. The runtime's opaque id never
+changes (R6), so everything keyed by the id stays exactly where it is.
+
+| What                                                                  | On a rename                                                                                                                                                                    |
+| --------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `runtimes/<name>.yaml`                                                | moved to `runtimes/<new-name>.yaml`, with your comments                                                                                                                        |
+| `ids.json`                                                            | the same id under the new name; the old name is added to its `formerNames`, so `fy start --agent <old>` keeps starting it                                                      |
+| `machine.yaml` default runtime, `advanced.commands[].runtime`         | re-pointed, in the same apply                                                                                                                                                  |
+| `warden.yaml` Warden logins, `learning.yaml` lesson-miner runtime     | re-pointed, in the same apply (swapping the word loosens nothing, so nothing is held for confirmation)                                                                         |
+| the wrapper on `PATH` (`<FY_HOME>/fleet/bin/<name>`)                  | renamed: the old wrapper is removed and the new one written by the same apply                                                                                                  |
+| the config directory (`fleet/homes/<id>`), its login and history pool | **kept** — keyed by id                                                                                                                                                         |
+| every session record on it (`config.agent`, `command[0]`)             | re-pointed at the new name and wrapper once the apply lands, ended sessions included; a record that cannot be rewritten still resolves through `ids.json`                      |
+| usage and quota rows                                                  | follow it: they are built live from the published names and the re-pointed records                                                                                             |
+| a running process's `FY_RUNTIME`                                      | **kept** as the old name until it next starts; it is read only for a sentence                                                                                                  |
+| analytics history                                                     | **kept**: past sessions stay recorded under the name they ran as                                                                                                               |
+| Warden failover strikes, the quota-failover pool                      | **not renamed**: strikes start over under the new name, and a quota-failover pool (`<FY_HOME>/quota-failover/config.json`, hand-edited) that lists the old name must be edited |
+
+A new name follows the runtime-name rules and is refused when it is another runtime, a command, or a
+name or id another runtime is still known by. Renaming back to a name it had before is allowed.
+
+### Removing a runtime
+
+The dry run says what removing it does **first**: how many ferrets are running on it, by name. They
+keep running, but restarting one later needs another runtime. The app offers **Move them to …**,
+which restarts each one on the picked runtime with its conversation (resumed on the same CLI,
+converted across to the other) before removing; if any cannot be moved, nothing is removed. The
+machine's **default runtime for new agents** is refused until another default is picked, and the app
+offers that picker inline. Past sessions stay in history.
 
 ## Routes
 

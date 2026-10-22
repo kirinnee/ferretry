@@ -2199,6 +2199,10 @@ const HARNESS_MACHINE_CLIENT: FleetClientFactory = async connection => {
       path.startsWith('/v1/config/') && machineSetupAnswer(String(connection.daemonId), setUp, path, init) === undefined
         ? (await HARNESS_CONFIG_FILES_CLIENT(connection)).request(path, schema as never, init)
         : schema.parse(answer(path, init))) as Awaited<ReturnType<FleetClientFactory>>['request'],
+    // Offered so removing a runtime shows its "Move them to…" picker; the gallery never confirms a move.
+    migrate: async () => {
+      throw new Error('the harness moves no ferret');
+    },
   };
 };
 

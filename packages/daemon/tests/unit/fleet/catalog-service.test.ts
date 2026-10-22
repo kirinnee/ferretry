@@ -1112,3 +1112,187 @@ describe('the harness path a wrapper execs', () => {
     should(applied).have.length(2);
   });
 });
+
+describe('renaming and removing a runtime', () => {
+  const ID = '00000000-0000-4000-8000-0000000000aa';
+  const IDS = async (): Promise<RuntimeIds> => ({
+    version: 1,
+    runtimes: {
+      'claude-default': { id: ID, formerNames: ['claude-auto'] },
+      'codex-default': { id: '00000000-0000-4000-8000-0000000000bb', formerNames: [] },
+    },
+  });
+  const RECORDS: FleetCatalogServiceDeps['sessionRecords'] = async () => [
+    { id: 's-2', name: 'Otter', harness: 'claude', agent: 'claude-default', status: 'running' },
+    { id: 's-1', name: 'Fisher', harness: 'claude', agent: 'claude-auto', status: 'thinking' },
+    {
+      id: 's-3',
+      name: 'Badger',
+      harness: 'claude',
+      agent: 'other',
+      executable: '/state/fleet/bin/claude-default',
+      status: 'awaiting_user',
+    },
+    { id: 's-4', name: 'Done', harness: 'claude', agent: 'claude-default', status: 'completed' },
+    { id: 's-5', name: 'Elsewhere', harness: 'codex', agent: 'codex-default', status: 'running' },
+  ];
+
+  it('should move the runtime’s id, its file and its wrapper to the new name, and list who runs on it', async () => {
+    // Arrange
+    const { service } = world({ ids: IDS, sessionRecords: RECORDS });
+
+    // Act
+    const staged = FleetAccountChangeViewSchema.parse(
+      await service.propose({ kind: 'runtime.rename', name: 'claude-default', to: 'claude-main' }),
+    );
+
+    // Assert
+    should(staged.summary).equal('Rename runtime claude-default to claude-main');
+    should(staged.consequences).containEql('Running ferrets keep working — nothing restarts.');
+    const preview = staged.preview as Extract<typeof staged.preview, { kind: 'apply' }>;
+    should(preview.documents.map(document => document.path)).deepEqual([
+      '/state/config/runtimes/claude-main.yaml',
+      '/state/config/runtimes/claude-default.yaml',
+    ]);
+    should(preview.runningSessions).deepEqual([
+      { id: 's-3', name: 'Badger', harness: 'claude' },
+      { id: 's-1', name: 'Fisher', harness: 'claude' },
+      { id: 's-2', name: 'Otter', harness: 'claude' },
+    ]);
+  });
+
+  it('should write ids.json with the same id under the new name and the old one kept as a former name', async () => {
+    // Arrange
+    const { service, applied } = world({ ids: IDS });
+    const staged = await service.propose({ kind: 'runtime.rename', name: 'claude-default', to: 'claude-main' });
+
+    // Act
+    await service.apply(staged.id, governance);
+
+    // Assert
+    const plan = applied[0]?.plan as FleetModelApplyPlan;
+    const idsFile = plan.operations.find(
+      operation => operation.kind === 'file' && operation.path === '/state/fleet/ids.json',
+    ) as { content: string };
+    should(JSON.parse(idsFile.content).runtimes['claude-main']).deepEqual({
+      id: ID,
+      formerNames: ['claude-auto', 'claude-default'],
+    });
+    should(applied[0]?.plan.operations.some(operation => operation.path === '/state/fleet/bin/claude-main')).be.true();
+  });
+
+  it('should re-point the session records once the rename applied, and still report it applied if that fails', async () => {
+    // Arrange
+    const renames: unknown[] = [];
+    const recording = world({
+      ids: IDS,
+      renameSessions: async rename => {
+        renames.push(rename);
+        return 2;
+      },
+    });
+    const failing = world({
+      ids: IDS,
+      renameSessions: async () => {
+        throw new Error('a record could not be read');
+      },
+    });
+    const change = { kind: 'runtime.rename', name: 'claude-default', to: 'claude-main' } as const;
+
+    // Act
+    const outcome = await recording.service.apply((await recording.service.propose(change)).id, governance);
+    const despite = await failing.service.apply((await failing.service.propose(change)).id, governance);
+
+    // Assert
+    should(outcome.outcome).equal('applied');
+    should(despite.outcome).equal('applied');
+    should(renames).deepEqual([
+      {
+        from: 'claude-default',
+        to: 'claude-main',
+        fromWrapper: '/state/fleet/bin/claude-default',
+        toWrapper: '/state/fleet/bin/claude-main',
+      },
+    ]);
+  });
+
+  it('should not re-point any session when the apply rolled back', async () => {
+    // Arrange
+    const renames: unknown[] = [];
+    const { service, state } = world({
+      ids: IDS,
+      renameSessions: async rename => {
+        renames.push(rename);
+        return 0;
+      },
+    });
+    state.apply = async () => {
+      throw new FleetApplyFailureError({ kind: 'rolled-back', failedOperation: 'write /a', reason: 'disk full' });
+    };
+    const staged = await service.propose({ kind: 'runtime.rename', name: 'claude-default', to: 'claude-main' });
+
+    // Act
+    await service.apply(staged.id, governance);
+
+    // Assert
+    should(renames).deepEqual([]);
+  });
+
+  it('should refuse a new name that is another runtime’s former name', async () => {
+    // Arrange
+    const { service } = world({ ids: IDS });
+
+    // Act & Assert
+    const refused = await refusal(
+      service.propose({ kind: 'runtime.rename', name: 'codex-default', to: 'claude-auto' }),
+      'fleet_change_refused',
+    );
+    should(refused.message).equal('claude-auto is already a runtime on studio. Use claude-auto-2?');
+  });
+
+  it('should refuse a change when ids.json cannot be read', async () => {
+    // Arrange
+    const { service } = world({
+      ids: async () => {
+        throw new Error('ids.json is not JSON');
+      },
+    });
+
+    // Act & Assert
+    const refused = await refusal(
+      service.propose({ kind: 'runtime.rename', name: 'claude-default', to: 'claude-main' }),
+      'fleet_change_refused',
+    );
+    should(refused.message).equal('the runtime ids could not be read: ids.json is not JSON');
+  });
+
+  it('should list who runs on a runtime being removed, and fall back to the general sentence when it cannot tell', async () => {
+    // Arrange
+    const known = world({ ids: IDS, sessionRecords: RECORDS });
+    const unknown = world({
+      ids: IDS,
+      sessionRecords: async () => {
+        throw new Error('storage closed');
+      },
+    });
+    const change = { kind: 'runtime.remove', name: 'codex-default' } as const;
+
+    // Act
+    const [listed, general] = [
+      FleetAccountChangeViewSchema.parse(await known.service.propose(change)),
+      FleetAccountChangeViewSchema.parse(await unknown.service.propose(change)),
+    ];
+
+    // Assert
+    should(listed.consequences).deepEqual([
+      '1 ferret is running on it. It keeps running, but restarting it later needs another runtime. Its past sessions stay in history.',
+    ]);
+    should((listed.preview as { runningSessions?: unknown }).runningSessions).deepEqual([
+      { id: 's-5', name: 'Elsewhere', harness: 'codex' },
+    ]);
+    should(general.consequences).deepEqual([
+      'Running sessions of it keep going until they end. Its past sessions stay in history.',
+    ]);
+    should((general.preview as { runningSessions?: unknown }).runningSessions).be.undefined();
+  });
+});

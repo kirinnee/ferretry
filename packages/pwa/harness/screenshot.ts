@@ -170,9 +170,9 @@ const WALKS_SETTINGS = !(
  * shows, two are the Security settings block's loosening sentence and out-of-bounds sentence, and two
  * are the Files panel and its Edit as YAML sheet showing a refused save's located issues.
  *
- * MACHINES, fifty-seven per viewport: its section, four tab switches, five Settings-tab flows (Import
+ * MACHINES, sixty per viewport: its section, four tab switches, five Settings-tab flows (Import
  * again found + names, Clone source, Clone preview with what it runs, Install), the Machines list the switcher opens, eleven Runtimes and
- * Credentials pages, a sign-in picked up where it was left, four Codex sign-in screens (device code, link,
+ * Credentials pages, three runtime dialogs (Rename, Remove with ferrets to move, Remove the default runtime), a sign-in picked up where it was left, four Codex sign-in screens (device code, link,
  * its callback port held by another program, finishing), the old pairing a reset left, four Add a login frames (its tiles,
  * its sign-in, the provider tiles and a provider's key),
  * eighteen Profiles and Components pages (a profile page, a delete card, a refused mix, an override chip,
@@ -203,7 +203,7 @@ const WALKS_SETTINGS = !(
  * chose over committed golden images: one integer per intentional change, versus a re-baselined
  * directory of PNGs whose diff nobody can review.
  */
-const SETTINGS_SIDEWAYS_CHECKS = 179;
+const SETTINGS_SIDEWAYS_CHECKS = 185;
 
 /**
  * HOW MANY MACHINES GEOMETRY CHECKS A RUN THAT WALKS SETTINGS OWES (`assertMachinesGeometry`): one per
@@ -830,6 +830,33 @@ const assertCardFitsWithMargins = async (card: Locator, where: string): Promise<
   });
   if (problems.length > 0) throw new Error(`${where}: ${problems.join('; ')}`);
   process.stdout.write(`🧭 fits with margins: ${where}\n`);
+};
+
+/**
+ * A runtime's Rename or Remove dialog fits the screen: inside the viewport with a gutter on each side,
+ * never taller than it, and its confirm button wholly in view — on a phone that is the bottom sheet's
+ * thumb-reach promise, and a button below the fold is a dialog nobody can finish.
+ */
+const assertRuntimeDialogGeometry = async (page: Page, where: string): Promise<void> => {
+  const problems = await page.evaluate(() => {
+    const found: string[] = [];
+    const dialog = document.querySelector('[data-runtime-dialog]');
+    const submit = [...document.querySelectorAll('[data-runtime-dialog] [data-change-submit]')].at(-1);
+    if (dialog === null || submit === undefined) return ['no dialog with a confirm button is open'];
+    const box = dialog.getBoundingClientRect();
+    if (box.left < 8) found.push(`dialog ${Math.round(box.left)}px from the left edge`);
+    if (window.innerWidth - box.right < 8)
+      found.push(`dialog ${Math.round(window.innerWidth - box.right)}px from the right edge`);
+    if (box.top < 0 || box.bottom > window.innerHeight) found.push('dialog runs past the top or bottom of the screen');
+    const button = submit.getBoundingClientRect();
+    if (button.top < 0 || button.bottom > window.innerHeight || button.left < 0 || button.right > window.innerWidth)
+      found.push('confirm button is not wholly in view');
+    if (submit.scrollWidth > submit.clientWidth + 1)
+      found.push(`confirm button label is cut off: "${submit.textContent}"`);
+    return found;
+  });
+  if (problems.length > 0) throw new Error(`${where}: ${problems.join('; ')}`);
+  process.stdout.write(`🧭 dialog fits: ${where}\n`);
 };
 
 const assertNoSidewaysScroll = async (page: Page, where: string): Promise<void> => {
@@ -2908,6 +2935,30 @@ try {
           await runtimesPanel.locator('[data-runtime-models]').waitFor({ state: 'visible' });
           await accountShot('runtime-models', 'runtime page with unavailable models');
           await runtimesPanel.locator('[data-page-back]').click();
+          // RENAME AND REMOVE (docs/account-model.md "Renaming and removing a runtime"): each row's buttons open a
+          // dialog — a bottom sheet on a phone, centred on a desktop — that must fit with its confirm button in
+          // view: Rename with a new name typed, Remove listing the ferrets on it with a move picked, and the
+          // machine's default runtime, which asks for another default first.
+          const dialogShot = async (name: string, label: string): Promise<void> => {
+            await page.locator('[data-runtime-dialog]').waitFor({ state: 'visible' });
+            await assertNoSidewaysScroll(page, `the ${label} dialog at ${viewport.name}`);
+            await assertRuntimeDialogGeometry(page, `the ${label} dialog at ${viewport.name}`);
+            const target = join(outDir, `settings-machines-${name}-${viewport.name}.png`);
+            await settledShot(target);
+            process.stdout.write(`📸 Settings Machines ${label} ${viewport.name} -> ${target}\n`);
+            await page.locator('[data-runtime-dialog-cancel]').click();
+            await page.locator('[data-runtime-dialog]').waitFor({ state: 'detached' });
+          };
+          await runtimesPanel.locator('[data-runtime-rename="claude-work"]').click();
+          await page.locator('[data-runtime-rename-input]').fill('claude-office');
+          await dialogShot('runtime-rename', 'Rename runtime');
+          await runtimesPanel.locator('[data-runtime-remove="codex-default"]').click();
+          await page.locator('[data-runtime-running]').waitFor({ state: 'visible' });
+          await page.locator('[data-runtime-move-target]').selectOption('claude-agent');
+          await dialogShot('runtime-remove', 'Remove runtime');
+          await runtimesPanel.locator('[data-runtime-remove="claude-default"]').click();
+          await page.locator('[data-runtime-default-picker]').waitFor({ state: 'visible' });
+          await dialogShot('runtime-remove-default', 'Remove the default runtime');
           // ADD A RUNTIME IS ONE FORM: login, profile and name on one page, each frame scrolled to its part.
           const toPart = (part: string) => async (): Promise<void> => {
             await runtimesPanel

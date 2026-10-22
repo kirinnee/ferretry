@@ -119,6 +119,23 @@ export function assignRuntimeIds(names: readonly string[], existing: RuntimeIds,
   return parseRuntimeIds({ version: RUNTIME_IDS_VERSION, runtimes });
 }
 
+/**
+ * `ids` with runtime `from` known as `to` from now on: the SAME entry — so its id, and with it its
+ * config directory, every session record and every pricing row, stay — moved to the new name, with
+ * `from` appended to its former names so `fy start --agent <from>` keeps starting it. Renaming back
+ * to a name it had before takes that name out of the former names rather than claiming it twice.
+ *
+ * A runtime no apply has published yet has no entry, and the ids are answered unchanged: the apply
+ * that publishes it under `to` mints its id then.
+ */
+export function renameRuntimeId(ids: RuntimeIds, from: string, to: string): RuntimeIds {
+  const entry = ids.runtimes[from];
+  if (entry === undefined || from === to) return ids;
+  const { [from]: _moved, ...rest } = ids.runtimes;
+  const formerNames = [...entry.formerNames.filter(name => name !== to && name !== from), from];
+  return parseRuntimeIds({ ...ids, runtimes: { ...rest, [to]: { ...entry, formerNames } } });
+}
+
 /** A runtime found by {@link resolveRuntimeReference}, and which of its three spellings matched. */
 export interface ResolvedRuntimeReference {
   readonly name: string;
