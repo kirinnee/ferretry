@@ -6197,6 +6197,12 @@ export interface WorldSeams {
 }
 
 /** Builds the production adapter set. Subsystem units extend this as they land. */
+/**
+ * The stack sampler's interval this process was started with, read as the module loads: `main` drops every
+ * `BUN_JSC_*` variable before spawning anything, and the profile must still know the interval it ran at.
+ */
+const STARTED_SAMPLE_INTERVAL = process.env.BUN_JSC_sampleInterval;
+
 export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWorld {
   const userHome = seams.userHome;
   if (typeof userHome !== 'string' || !isAbsolute(userHome))
@@ -8844,7 +8850,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
                 runtime: `bun ${Bun.version}`,
               },
               uptimeSeconds: () => process.uptime(),
-              sampleIntervalMs: sampleIntervalMs(process.env.BUN_JSC_sampleInterval),
+              sampleIntervalMs: sampleIntervalMs(STARTED_SAMPLE_INTERVAL),
               fleet: async () => {
                 const sessions = storage.listSessions();
                 return {
@@ -10587,6 +10593,11 @@ async function execute(answer: ArgumentAnswer & { readonly kind: 'boot' | 'check
  * binary its version used to do all of that. Nothing below this branch runs for a query.
  */
 if (import.meta.main) {
+  // The engine options the service definition hands this process (`BUN_JSC_*`: the stack sampler's
+  // interval, the collector's marker threads) were read when the VM started. They are this process's
+  // alone: dropped here, before anything is spawned, so an agent — Claude Code runs on Bun too — starts
+  // on its own engine's defaults rather than on a daemon's tuning.
+  for (const name of Object.keys(process.env)) if (name.startsWith('BUN_JSC_')) delete process.env[name];
   const answer = answerArguments(process.argv.slice(2), {
     daemonName: DAEMON_NAME,
     clientName: CLIENT_NAME,
