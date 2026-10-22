@@ -49,8 +49,9 @@ import { useId } from 'react';
 import type { DictationPhase, DictationReview } from '../hooks/use-dictation.ts';
 import { cn } from '../lib/class-names.ts';
 import type { CaptureMonitor } from '../lib/stt/level-monitor.ts';
+import { onDeviceModel } from '../lib/stt/model-catalog.ts';
 import { NEAR_LIVE_PAUSED_COPY } from '../lib/stt/near-live.ts';
-import type { DictationEngineId } from '../lib/stt/stt-settings.ts';
+import { type DictationEngineId, isOnDeviceEngine } from '../lib/stt/stt-settings.ts';
 import { Button } from '../shell/primitives.tsx';
 import { DictationReviewBox } from './dictation-review-box.tsx';
 import { InputWaveform, type InputWaveformRuntime } from './input-waveform.tsx';
@@ -98,6 +99,9 @@ export interface DictationFailureCopy {
 /** The engine the strip is talking about. `null` (unchosen) reads like browser voice: it never promises privacy. */
 type StripEngine = DictationEngineId | null;
 
+/** The on-device model's name for sentences ("Parakeet transcribes…"). */
+const modelName = (engine: StripEngine): string => onDeviceModel(engine)?.shortName ?? 'The model';
+
 /**
  * A short, plain title for each failure, chosen from the error CODE (stable)
  * rather than the message (not). The message itself is shown underneath — this
@@ -136,15 +140,15 @@ export function dictationFailureCopy(code: string | undefined, engine: StripEngi
         hint: 'Check this device’s connection, then try again.',
       };
     case 'recognition-failed':
-      return engine === 'parakeet'
+      return isOnDeviceEngine(engine)
         ? {
             title: 'Transcription failed',
-            hint: 'Try again. If it keeps failing, remove Parakeet in Settings › Voice and install it again.',
+            hint: `Try again. If it keeps failing, remove ${modelName(engine)} in Settings › Voice and install it again.`,
           }
         : { title: 'Browser recognition failed', hint: 'Try again or use another supported browser.' };
     case 'model-not-installed':
       return {
-        title: 'Parakeet is not installed',
+        title: `${isOnDeviceEngine(engine) ? modelName(engine) : 'Parakeet'} is not installed`,
         hint: 'Install it in Settings › Voice, or choose phone/browser voice there.',
       };
     case 'engine-not-chosen':
@@ -232,13 +236,13 @@ export function dictationStripStatus(
   livePaused = false,
 ): string {
   const preview = liveText.trim();
-  const onDevice = engine === 'parakeet';
+  const onDevice = isOnDeviceEngine(engine);
   const paused = onDevice && livePaused;
   switch (stage) {
     case 'recording':
       if (preview) return paused ? `${preview} · ${NEAR_LIVE_PAUSED_COPY}` : preview;
       return onDevice
-        ? 'Speak, then press Stop. Parakeet transcribes on this device; audio never leaves it.'
+        ? `Speak, then press Stop. ${modelName(engine)} transcribes on this device; audio never leaves it.`
         : 'Speak, then press Stop. Your browser sends this audio to its vendor’s servers; Ferretry only shows you the text.';
     case 'transcribing':
       if (onDevice)
@@ -320,7 +324,7 @@ export function DictationSheet({
   const titleId = `${baseId}-title`;
   const safetyId = `${baseId}-safety`;
 
-  const onDevice = engine === 'parakeet';
+  const onDevice = isOnDeviceEngine(engine);
   const failure = dictationFailureCopy(errorCode, engine);
   const title =
     stage === 'transcribing'
@@ -495,7 +499,7 @@ export function DictationSheet({
       </span>
       <span id={safetyId} className="sr-only">
         {onDevice
-          ? 'Parakeet transcribes on this device: audio never leaves it, and Ferretry never sends it to your daemon.'
+          ? `${modelName(engine)} transcribes on this device: audio never leaves it, and Ferretry never sends it to your daemon.`
           : 'Ferretry never sends microphone audio to your daemon, but your browser sends it to its vendor’s servers to transcribe it.'}{' '}
         Nothing reaches your draft until you press Insert, and dictation is never sent automatically.
       </span>

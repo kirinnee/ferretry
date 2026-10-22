@@ -93,12 +93,8 @@ import {
 } from './step-up-ceremony.ts';
 import { StepUpGate } from './step-up-gate.ts';
 import { DictationDebugLog, type DictationDebugSnapshot } from './stt/dictation-debug.ts';
-import {
-  browserParakeetVoice,
-  type ParakeetAssets,
-  type ParakeetGlobalLike,
-  type ParakeetVoice,
-} from './stt/parakeet-voice.ts';
+import { browserOnDeviceVoices, OnDeviceVoices, type SpeechAssets } from './stt/on-device-voices.ts';
+import { browserParakeetVoice, type ParakeetGlobalLike, type ParakeetVoice } from './stt/parakeet-voice.ts';
 import { DeviceSpeedupKeys, IndexedDbSpeedupKeyRecords } from './stt/speedup-keys.ts';
 import { SttSettingsStore } from './stt/stt-settings.ts';
 import { TranscriptionLog, type TranscriptionLogSnapshot } from './stt/transcription-log.ts';
@@ -386,6 +382,8 @@ export interface AppStore {
    * per document, like the dictation settings, because the model belongs to the device.
    */
   readonly voice: ParakeetVoice;
+  /** Every on-device speech model this device can install and run, Parakeet's voice among them. */
+  readonly voices: OnDeviceVoices;
   /** Groq/Cerebras keys THIS device holds for direct dictation clean-up; never synced, never sent to a daemon. */
   readonly speedupKeys: DeviceSpeedupKeys;
   /** The opt-in dictation debug switch and its in-memory ring of recent cleanup calls; this tab only. */
@@ -478,9 +476,11 @@ export interface CreateAppStoreOptions {
    * Where the build put the speech worker and its runtime (bound in `src/main.tsx`), handed in
    * by `main.tsx` because only the bundler knows. Without it Parakeet reports itself unavailable.
    */
-  readonly speechAssets?: ParakeetAssets | null;
+  readonly speechAssets?: SpeechAssets | null;
   /** A ready-made on-device voice service. Injected by suites; built from `speechAssets` otherwise. */
   readonly voice?: ParakeetVoice;
+  /** Every on-device voice. Injected by suites; Parakeet's alone when only `voice` is, built otherwise. */
+  readonly voices?: OnDeviceVoices;
   /** Provider keys this device holds. Injected by suites; this browser's IndexedDB otherwise. */
   readonly speedupKeys?: DeviceSpeedupKeys;
   /** The dictation debug ring. Injected by suites; a fresh one reading this browser's switch otherwise. */
@@ -753,10 +753,16 @@ export async function createAppStore(options: CreateAppStoreOptions = {}): Promi
   const transcriptionLog =
     options.transcriptionLog ?? new TranscriptionLog(new IndexedDbTranscriptionLogRecords(globalThis.indexedDB));
   void transcriptionLog.hydrate();
-  const voice =
-    options.voice ?? browserParakeetVoice(globalThis as unknown as ParakeetGlobalLike, options.speechAssets ?? null);
+  const speechGlobal = globalThis as unknown as ParakeetGlobalLike;
+  const voice = options.voice ?? browserParakeetVoice(speechGlobal, options.speechAssets ?? null);
+  const voices =
+    options.voices ??
+    (options.voice === undefined
+      ? browserOnDeviceVoices(speechGlobal, options.speechAssets ?? null, voice)
+      : new OnDeviceVoices([voice]));
   // Reads what is already installed; it never downloads.
-  void voice.refresh();
+  void voices.refresh();
+  if (voices.get(voice.model.id) !== voice) void voice.refresh();
   const workspaceLayouts = new WorkspaceLayoutStore();
   const notificationPreferences = new DaemonNotificationPreferences(browserStorage);
   const notificationFilter = new DeviceNotificationFilterStore(browserStorage, browserNotificationFilterMirror());
@@ -871,6 +877,7 @@ export async function createAppStore(options: CreateAppStoreOptions = {}): Promi
     browserLogin,
     stt,
     voice,
+    voices,
     speedupKeys,
     dictationDebug,
     transcriptionLog,
@@ -1227,6 +1234,11 @@ export function useTranscriptionLogSnapshot(): TranscriptionLogSnapshot {
  */
 export function useParakeetVoice(): ParakeetVoice | null {
   return useContext(StoreContext)?.voice ?? null;
+}
+
+/** Every on-device speech model's voice, or `null` outside a store. Settings lists them; dictation uses one. */
+export function useOnDeviceVoices(): OnDeviceVoices | null {
+  return useContext(StoreContext)?.voices ?? null;
 }
 
 export function useDaemonFetch(): DaemonFetch {

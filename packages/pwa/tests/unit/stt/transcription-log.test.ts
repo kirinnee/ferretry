@@ -5,10 +5,12 @@
 
 import { describe, it } from 'bun:test';
 import should from 'should';
+import { ON_DEVICE_MODELS } from '../../../src/lib/stt/model-catalog.ts';
 import {
   type NewTranscriptionEntry,
   parseTranscriptionLogEnabled,
   searchTranscriptionLog,
+  TRANSCRIPTION_ENGINE_LABELS,
   TRANSCRIPTION_LOG_KEY,
   TRANSCRIPTION_LOG_MAX_AGE_MS,
   TRANSCRIPTION_LOG_MAX_ENTRIES,
@@ -452,5 +454,13 @@ describe('searchTranscriptionLog', () => {
     should(searchTranscriptionLog(entries, 'web speech').map(item => item.id)).deepEqual(['2']);
     should(searchTranscriptionLog(entries, 'sess-a fix').map(item => item.id)).deepEqual(['1']);
     should(searchTranscriptionLog(entries, 'discarded').map(item => item.id)).deepEqual(['2']);
+  });
+});
+
+describe('TRANSCRIPTION_ENGINE_LABELS', () => {
+  it('names browser voice and every catalog model', () => {
+    should(TRANSCRIPTION_ENGINE_LABELS['web-speech']).equal('Web Speech');
+    for (const model of ON_DEVICE_MODELS)
+      should(TRANSCRIPTION_ENGINE_LABELS[model.id]).equal(`${model.shortName} in-browser`);
   });
 });

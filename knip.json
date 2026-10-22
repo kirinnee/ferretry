@@ -36,6 +36,7 @@
         "vite.config.ts",
         "tests/**/*.test.{ts,tsx}",
         "harness/screenshot.ts",
+        "harness/engine-list-screenshot.tsx",
         "harness/name-grouping-screenshot.tsx",
         "harness/secret-copy-screenshot.tsx",
         "harness/clone-keys-screenshot.tsx",
