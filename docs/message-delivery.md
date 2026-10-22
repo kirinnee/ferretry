@@ -193,8 +193,11 @@ and **Retry** (`retrySend` with `force`, which types only when the pane holds no
 name reaches the person. Enter follows the same rule: a pane that has drawn nothing since an Enter is
 watched up to the stalled window before the next one, which would only queue behind the first.
 
-Measured with the soak (Claude Code 2.1.281, SIGSTOP 2 s / run 150 ms): see the PR that introduced it
-for the numbers; the recorded frames of one stalled send are
+Measured with the soak (Claude Code 2.1.281, SIGSTOP 2 s / run 150 ms, every tenth message a
+multi-line paste, paced by transcript arrival): echoes took p50 2.5 s and up to 4.3 s. Before this rule
+29 of 50 sends were delivered and every one of the 21 failures left two copies typed in the composer;
+after it, 200 of 200 were delivered exactly once with nothing retyped, and 50 of 50 with captures slowed
+to 0.16–0.48 s each. The recorded frames of one stalled send are
 `packages/daemon/tests/fixtures/composer/claude-2.1.281-stalled-echo.json`, replayed on a virtual clock by
 `packages/daemon/tests/integration/tmux/pane-delivery.test.ts`.
 
