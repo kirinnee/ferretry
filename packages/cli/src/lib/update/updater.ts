@@ -214,9 +214,8 @@ export class DaemonUpdater {
     intent: UpdateIntent,
     options: DaemonUpdateOptions,
   ): Promise<Omit<UpdateReport, 'from' | 'target' | 'finishedAt'>> {
-    if (compareProtocolVersions(intent.target, intent.current) !== 1) {
-      return { outcome: 'succeeded', message: `${this.deps.daemonName} ${intent.current} is already up to date` };
-    }
+    if (compareProtocolVersions(intent.target, intent.current) !== 1)
+      return await this.#refreshDefinition(intent, options);
     if (intent.plan.kind === 'manual') {
       throw new DaemonUpdateRefusedError(
         [`${intent.plan.explanation}`, ...renderPlan(intent.plan, this.deps.clientName)].join('\n'),
@@ -262,9 +261,42 @@ export class DaemonUpdater {
     return (await this.deps.updateView.view())?.midTurn ?? 0;
   }
 
+  /**
+   * An up-to-date daemon can still be running under a definition that needs rewriting: one written by
+   * an older client, then respawned by its manager onto a newer executable, never passes through the
+   * restart that would rewrite it. `status` tells that person to run `update`, so `update` is where it
+   * is fixed — behind the same consent an update asks for, because the fix is a restart.
+   *
+   * A daemon that is not running is left alone: the next start rewrites the definition anyway.
+   */
+  async #refreshDefinition(
+    intent: UpdateIntent,
+    options: DaemonUpdateOptions,
+  ): Promise<Omit<UpdateReport, 'from' | 'target' | 'finishedAt'>> {
+    const upToDate = `${this.deps.daemonName} ${intent.current} is already up to date`;
+    const stale = await this.deps.lifecycle.staleDefinition();
+    if (stale === undefined) return { outcome: 'succeeded', message: upToDate };
+    if (!intent.running) {
+      return { outcome: 'succeeded', message: `${upToDate}; its service definition is rewritten when it next starts` };
+    }
+    await this.#passMidTurn(options);
+    await this.#ask(`Restart ${this.deps.daemonName} to rewrite its service definition (${stale})?`, options);
+    await this.deps.lifecycle.restart();
+    return {
+      outcome: 'succeeded',
+      message: `${upToDate}; restarted it under a rewritten service definition (${stale})`,
+    };
+  }
+
   async #confirm(intent: UpdateIntent, options: DaemonUpdateOptions): Promise<void> {
+    await this.#ask(
+      `Update ${this.deps.daemonName} ${intent.current} → ${intent.target} via ${describeInstallMethod(intent.method)}?`,
+      options,
+    );
+  }
+
+  async #ask(question: string, options: DaemonUpdateOptions): Promise<void> {
     if (options.yes === true) return;
-    const question = `Update ${this.deps.daemonName} ${intent.current} → ${intent.target} via ${describeInstallMethod(intent.method)}?`;
     if (!this.deps.interactive())
       throw new DaemonUpdateRefusedError(`${question} Pass --yes to confirm off a terminal`);
     if (!isYes(await this.deps.prompt.ask(`${question} [y/N]`))) {

@@ -25,7 +25,7 @@ import type {
   IStateHomeClaimPort,
   RetiredArtifactOutcome,
 } from './ports.ts';
-import { livenessOf, servesOutsideSupervisor } from './probe.ts';
+import { launchdThrottled, livenessOf, servesOutsideSupervisor } from './probe.ts';
 import {
   beginReadinessWait,
   decideReadiness,
@@ -594,6 +594,20 @@ export class DaemonController {
     return { view, located, update, serviceManager: this.deps.service !== undefined };
   }
 
+  /**
+   * Why the installed service definition must be rewritten, or `undefined` when it need not be or
+   * none is installed. Read from the definition on disk, so it answers whether or not the daemon runs.
+   */
+  async staleDefinition(): Promise<string | undefined> {
+    const service = this.deps.service;
+    if (service === undefined || !(await service.installed())) return undefined;
+    const report = await service.inspect();
+    if (!launchdThrottled(report)) return undefined;
+    return report.processType === null
+      ? 'its launchd job declares no ProcessType, so macOS throttles it'
+      : `its launchd job declares ProcessType ${report.processType}, so macOS throttles it`;
+  }
+
   async status(options: DaemonCommandOptions): Promise<void> {
     const { view, update } = await this.inspect();
     const health = view.health;
@@ -610,7 +624,7 @@ export class DaemonController {
           update === undefined ? {} : { install: update.install ?? null, update: update.update ?? null },
         ),
       );
-    } else if (code === 0 && !view.orphan) this.deps.out.success(human.join('\n'));
+    } else if (code === 0 && !view.orphan && !launchdThrottled(supervisor)) this.deps.out.success(human.join('\n'));
     else this.deps.out.warn(human.join('\n'));
     // Still exit 0: an orphan serves, which is the question a script asks. The remedy is said instead.
     if (options.json !== true && view.orphan && health !== undefined) {

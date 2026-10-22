@@ -1200,6 +1200,42 @@ describe('daemon install — nix shell offer', () => {
   });
 });
 
+describe('daemon status — a launchd job macOS is throttling', () => {
+  const throttled: DaemonSupervisorReport = { manager: 'launchd', state: 'running', pid: 4242, processType: null };
+
+  it('should warn with the remedy, and still succeed because the daemon serves', async () => {
+    // Arrange
+    const { controller, out } = harness({ probes: [health()], serviceFallback: throttled });
+
+    // Act
+    await controller.status({});
+
+    // Assert
+    should(out.text).startWith('warn: fyd is serving');
+    should(out.text).containEql('macOS is throttling the daemon — run fy daemon update');
+    should(out.exitCode).be.undefined();
+  });
+
+  it('should name why the definition is stale, and nothing for one declaring Interactive', async () => {
+    // Arrange
+    const stale = harness({ serviceFallback: throttled });
+    const background = harness({ serviceFallback: { ...throttled, processType: 'Background' } });
+    const current = harness({ serviceFallback: { ...throttled, processType: 'Interactive' } });
+    const absent = harness({ serviceFallback: throttled, serviceInstalled: false });
+
+    // Act + Assert
+    should(await stale.controller.staleDefinition()).equal(
+      'its launchd job declares no ProcessType, so macOS throttles it',
+    );
+    should(await background.controller.staleDefinition()).equal(
+      'its launchd job declares ProcessType Background, so macOS throttles it',
+    );
+    should(await current.controller.staleDefinition()).be.undefined();
+    should(await absent.controller.staleDefinition()).be.undefined();
+    should(await harness({ withoutService: true }).controller.staleDefinition()).be.undefined();
+  });
+});
+
 describe('daemon status', () => {
   it('should report a serving daemon as a human summary and succeed', async () => {
     // Arrange

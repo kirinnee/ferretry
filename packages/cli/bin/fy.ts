@@ -611,6 +611,7 @@ function buildDaemonUpdater(world: CliWorld, client: SharedDaemonClient): Daemon
       executable: isExecutableFile,
       restart: () => controllerFor().restart({ midTurnSaid: true }),
       installAt: path => controllerFor(path).install(),
+      staleDefinition: () => controllerFor().staleDefinition(),
       probe: () => health.probe(),
     },
     updateView: new ProtocolDaemonUpdateView(client),
