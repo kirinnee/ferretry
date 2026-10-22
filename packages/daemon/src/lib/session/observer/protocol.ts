@@ -7,15 +7,20 @@
  * session moved between workers, is a new generation, and anything still in flight for the old one is
  * ignored.
  *
- * DIFFS, NEVER DERIVED EVENTS. A reply carries a patch for the one writer on the main thread; the
- * transcript, the frames and the parsed events stay in the worker (§2.3).
+ * DIFFS, NEVER DERIVED EVENTS. An `observed` message carries patches for the one writer on the main
+ * thread; the transcript, the frames and the parsed events stay in the worker (§2.3).
  *
- * Stage 3b runs the TURN part in workers; the question facts and the answer rows already travel so that
- * stage 3c can move the question part without changing the protocol's shape.
+ * EVENT-DRIVEN (stage 3c). A worker looks when its session's pane drew (a tmux subscription), when the main
+ * thread says the transcript changed (`file`), to confirm an unconfirmed turn end, and on a slow backstop —
+ * and posts what it found unasked. The main thread asks only when it needs an answer now: a read that
+ * must see what the transcript says (`observe`), the live readout's frame (`pane`), the Warden's liveness
+ * look (`liveness`) and the send tracker's evidence (`send-evidence`).
  */
+import type { PaneState } from '../../tmux/contracts.ts';
+import type { ObservedHumanInput } from '../../transcript/types.ts';
 import type { AnswerOperationRecord } from '../question/answer-ledger.ts';
 import type { ObserverFacts } from './facts.ts';
-import type { TurnPatch } from './observer.ts';
+import type { ObserverPatch } from './observer.ts';
 
 /** Where one session's evidence is: its tmux session on this daemon's server, and its transcript. */
 export interface SessionBinding {
@@ -47,6 +52,29 @@ export interface WorkerProbe {
   readonly probe: true;
 }
 
+/** What the main thread may ask a worker, and what each answers. */
+export type WorkerAsk =
+  /** Look now — the transcript re-checked — and post what changed before answering: a read barrier. */
+  | { readonly kind: 'observe' }
+  /** The pane as its worker last captured it, captured again only if it drew since. */
+  | { readonly kind: 'pane' }
+  /** The Warden's liveness look: the screen, and a fingerprint of the transcript's tail. */
+  | { readonly kind: 'liveness' }
+  /** The send tracker's transcript evidence since `since`. */
+  | { readonly kind: 'send-evidence'; readonly since: string };
+
+/** The answer to each {@link WorkerAsk}, by kind. */
+export interface WorkerAnswers {
+  readonly observe: null;
+  readonly pane: PaneState | null;
+  readonly liveness: { readonly screen?: string | undefined; readonly transcript?: string | undefined };
+  readonly 'send-evidence': {
+    readonly readable: boolean;
+    readonly unbound?: true;
+    readonly inputs: readonly ObservedHumanInput[];
+  };
+}
+
 export type ToSessionWorker =
   | WorkerProbe
   | {
@@ -64,24 +92,40 @@ export type ToSessionWorker =
       readonly generation: number;
       readonly rows: readonly AnswerOperationRecord[];
     }
-  /** Look at the session now and answer with the turn change it implies, if any. */
-  | { readonly kind: 'look'; readonly session: string; readonly generation: number; readonly request: number }
+  /** The session's transcript changed (the file-event hub said so): look at it again. */
+  | { readonly kind: 'file'; readonly session: string; readonly generation: number }
+  | {
+      readonly kind: 'request';
+      readonly session: string;
+      readonly generation: number;
+      readonly request: number;
+      readonly ask: WorkerAsk;
+    }
   | { readonly kind: 'detach'; readonly session: string; readonly generation: number };
 
 export type FromSessionWorker =
   | WorkerProbe
+  /** A look found these changes, in the order they must be applied (question before turn). */
   | {
-      readonly kind: 'looked';
+      readonly kind: 'observed';
       readonly session: string;
       readonly generation: number;
-      readonly request: number;
-      /** The change for the writer to compare-and-set; absent when the look implied none. */
-      readonly patch?: TurnPatch | undefined;
-      /** Why the look could not be made; the main thread looks once itself instead. */
-      readonly failure?: string | undefined;
+      readonly patches: readonly ObserverPatch[];
       readonly lookMs: number;
       readonly metrics: WorkerMetrics;
     }
+  | {
+      readonly kind: 'answered';
+      readonly session: string;
+      readonly generation: number;
+      readonly request: number;
+      /** The answer when it could be given; `undefined` with `failure` when it could not. */
+      readonly value?: unknown;
+      readonly failure?: string | undefined;
+      readonly metrics: WorkerMetrics;
+    }
+  /** The session's pane died (its `#{pane_dead}` turned 1): stage 3d settles the exit from this. */
+  | { readonly kind: 'exited'; readonly session: string; readonly generation: number }
   /** Something went wrong outside a look; `fatal` ends the worker and restarts what it hosted. */
   | {
       readonly kind: 'fault';

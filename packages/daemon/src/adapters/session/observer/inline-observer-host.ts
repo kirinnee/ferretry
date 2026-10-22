@@ -9,8 +9,11 @@ import {
   type LivenessTarget,
   type ObserverFacts,
   observerFactsOf,
+  type PaneState,
   type ProcessObservation,
   QUESTION_TAIL_EVENTS,
+  type SendEvidenceReading,
+  type SendEvidenceSource,
   type SessionId,
   type SessionObserver,
   type SessionObserverHost,
@@ -52,6 +55,10 @@ export interface InlineObserverPorts {
   readonly clock: ClockPort;
   /** Hands the event loop back between two sessions of a question pass. */
   readonly yieldToLoop: () => Promise<void>;
+  /** The session's live pane, captured through this thread's tmux client. */
+  readonly paneState: (id: SessionId) => Promise<PaneState | undefined>;
+  /** The send tracker's evidence, read on this thread. */
+  readonly sendEvidence: SendEvidenceSource;
 }
 
 const message = (error: unknown): string => (error instanceof Error ? error.message : String(error));
@@ -132,9 +139,10 @@ export class InlineObserverHost implements SessionObserverHost {
    * seconds. A session the index says has ended asks no question anyone can answer here; its evidence is
    * projected when it is next read.
    */
-  async questions(): Promise<ReadonlyMap<string, string>> {
+  async questions(skip: (id: SessionId) => boolean = () => false): Promise<ReadonlyMap<string, string>> {
     const failures = new Map<string, string>();
     for (const id of this.ports.questionRoster()) {
+      if (skip(id)) continue;
       try {
         await this.project(id);
       } catch (error) {
@@ -163,6 +171,14 @@ export class InlineObserverHost implements SessionObserverHost {
       liveness: { screen, transcript, children },
     });
     return step.samples[0] ?? {};
+  }
+
+  async pane(id: SessionId): Promise<PaneState | undefined> {
+    return await this.ports.paneState(id);
+  }
+
+  async sendEvidence(id: SessionId, since: string): Promise<SendEvidenceReading> {
+    return await this.ports.sendEvidence.read(id, since);
   }
 
   async midTurn(): Promise<number> {

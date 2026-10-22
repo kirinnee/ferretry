@@ -36,10 +36,12 @@ async function profiled(enabled: boolean): Promise<PerformanceReport> {
   });
   const socket = join(fleet.home, 'tmux.sock');
   const tmux = (args: readonly string[]) => Bun.spawnSync(['tmux', '-u', '-S', socket, ...args]);
+  const panes: string[] = [];
   for (let index = 0; index < RUNNING; index += 1) {
     const config = JSON.parse(
       await readFile(join(fleet.home, 'state', 'sessions', sessionIdOf(index), 'config.json'), 'utf8'),
     ) as { tmuxSession: string };
+    panes.push(config.tmuxSession);
     should(tmux(['new-session', '-d', '-s', config.tmuxSession, '-x', '120', '-y', '30', 'sleep 3600']).exitCode).equal(
       0,
     );
@@ -78,6 +80,9 @@ async function profiled(enabled: boolean): Promise<PerformanceReport> {
       body: JSON.stringify({ seconds: 5 }),
     });
     should(started.status).equal(202);
+    // One pane draws once (the terminal echoes what is typed at it); the other stays idle throughout.
+    await Bun.sleep(1_000);
+    tmux(['send-keys', '-t', panes[0] ?? '', 'drawn']);
     const { id } = (await started.json()) as PerformanceProfileView;
     await Bun.sleep(5_000);
     for (let attempt = 0; attempt < 40; attempt += 1) {
@@ -96,15 +101,17 @@ async function profiled(enabled: boolean): Promise<PerformanceReport> {
 }
 
 describe('session workers in a booted daemon', () => {
-  it('should look at each running session on its own worker, and count those looks in the profile', async () => {
+  it('should look at a running session on its own worker only when its pane drew, and count those looks in the profile', async () => {
     // Act
     const report = await profiled(true);
 
     // Assert
     should(report.fleet).deepEqual({ sessions: 4, running: RUNNING });
     should(report.workers.map(worker => worker.name)).containEql('session-observer');
+    // Looks happen when something happened: the draw is looked at, the idle pane is not — no 2 s polling.
     const looks = report.activities.find(activity => activity.name === 'session worker look');
-    should(looks?.count ?? 0).be.above(0);
+    should(looks?.count ?? 0).be.aboveOrEqual(1);
+    should(looks?.count ?? 0).be.belowOrEqual(3);
     should(report.activities.map(activity => activity.name)).containEql('turn watcher');
   }, 120_000);
 

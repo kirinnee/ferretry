@@ -231,3 +231,28 @@ const ATTACHABLE = /^[a-z0-9][a-z0-9_.-]{0,127}$/u;
 
 /** Whether a control client may attach to the session `name`. */
 export const isControlAttachable = (name: string): boolean => ATTACHABLE.test(name);
+
+const SUBSCRIPTION_NAME = /^[a-z][a-z0-9-]{0,31}$/u;
+
+/**
+ * The `refresh-client -B` line that subscribes THIS client to `format` for every pane of its session:
+ * tmux then writes `%subscription-changed <name> …` whenever the value changes, checked once a second.
+ *
+ * A CLIENT command, not a server mutation: it changes only what this client is told, which is why a
+ * client that refuses every mutation may still send it. The format is single-quoted — `#` would otherwise
+ * start a comment in tmux's command parser — and refused when it holds a line break or a quote it could
+ * not carry exactly.
+ */
+export function controlSubscriptionLine(name: string, format: string): string | undefined {
+  if (!SUBSCRIPTION_NAME.test(name) || /[\n\r\0']/u.test(format)) return undefined;
+  return `refresh-client -B '${name}:%*:${format}'`;
+}
+
+/** What a session worker watches each pane for: whether it died, and when its window last drew. */
+export const PANE_WATCH_FORMAT = '#{pane_dead} #{window_activity}';
+
+/** The value of a {@link PANE_WATCH_FORMAT} subscription, read; `undefined` for one that is not. */
+export function parsePaneWatch(value: string): { readonly dead: boolean; readonly activityAt: number } | undefined {
+  const match = /^([01]) (\d+)$/u.exec(value.trim());
+  return match === null ? undefined : { dead: match[1] === '1', activityAt: Number(match[2]) };
+}

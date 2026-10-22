@@ -24,6 +24,7 @@ import should from 'should';
 import { IDLE_DAEMON_BUDGETS } from '../../../src/lib/performance/budgets.ts';
 import { freeLoopbackPort } from '../support/booted-daemon.ts';
 import { ANTHROPIC_USAGE_PATH, CODEX_USAGE_PATH, startFakeUsageServer } from '../support/fake-usage-server.ts';
+import { startFleetPanes } from '../support/fleet-panes.ts';
 import { cleanupTempDirectories, tempDirectory } from '../support/repository.ts';
 import { OWNER_MAC_FLEET, scaledFleet, sessionIdOf } from '../support/scaled-fleet.ts';
 
@@ -85,15 +86,14 @@ describe('an idle daemon on a fleet the size of the owner’s Mac', () => {
       hugeTranscriptBytes: 8 * 1024 * 1024,
       transcriptBytes: 1024 * 1024,
     });
-    const socket = join(fleet.home, 'tmux.sock');
-    const tmux = (args: readonly string[]) => Bun.spawnSync(['tmux', '-u', '-S', socket, ...args]);
+    const sessions: string[] = [];
     for (let index = 0; index < 5; index += 1) {
       const config = JSON.parse(
         await readFile(join(fleet.home, 'state', 'sessions', sessionIdOf(index), 'config.json'), 'utf8'),
       ) as { tmuxSession: string };
-      const made = tmux(['new-session', '-d', '-s', config.tmuxSession, '-x', '200', '-y', '50', 'sleep 3600']);
-      should(made.exitCode).equal(0);
+      sessions.push(config.tmuxSession);
     }
+    const panes = await startFleetPanes(fleet.home, sessions);
     // The providers' free usage reads, answered on this machine: the fixture's logins are real stores.
     const usage = startFakeUsageServer();
     const port = await freeLoopbackPort();
@@ -146,7 +146,7 @@ describe('an idle daemon on a fleet the size of the owner’s Mac', () => {
     } finally {
       daemon.kill();
       await daemon.exited;
-      tmux(['kill-server']);
+      await panes.close();
       await usage.stop();
     }
 

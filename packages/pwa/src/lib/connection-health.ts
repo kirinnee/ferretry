@@ -21,7 +21,7 @@ export const CONNECTION_STALL_MS = 30_000;
  * data, and a pill that flashes on and off for every one of them taught the owner the app was "ALWAYS
  * reconnecting". Only an outage older than this is shown; the stall banner later is unaffected.
  */
-export const RECONNECTING_GRACE_MS = 2_000;
+export const RECONNECTING_GRACE_MS = 1_500;
 
 /** One carrier the last attempt tried and why it did not work — one entry per carrier, never per panel. */
 export interface CarrierFailure {

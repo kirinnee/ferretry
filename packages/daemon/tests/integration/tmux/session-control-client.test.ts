@@ -14,6 +14,7 @@ import { join } from 'node:path';
 import should from 'should';
 import { BunTmuxProcess, ControlModeTmuxProcess } from '../../../src/adapters/index.ts';
 import type { TmuxCommandPort, TmuxCommandResult } from '../../../src/lib/tmux/contracts.ts';
+import { PANE_WATCH_FORMAT, parsePaneWatch } from '../../../src/lib/tmux/control-protocol.ts';
 
 const TMUX = Bun.which('tmux');
 const cleanups: (() => Promise<void>)[] = [];
@@ -120,5 +121,49 @@ describe('a session worker’s attached control client', () => {
       () =>
         new ControlModeTmuxProcess('/usr/bin/tmux', '/tmp/s', undefined, { attach: { target: '=evil', flags: '' } }),
     ).throw(/is not a session a control client may attach to/);
+  });
+});
+
+describe('a session worker’s pane subscription', () => {
+  it('should hear its pane draw and die, with no pane bytes streamed, and refuse a name it cannot carry', async () => {
+    // Arrange
+    const { direct, subject } = await attached();
+    await direct.execute(['set-option', '-t', 'agent', 'remain-on-exit', 'on']);
+    const values: string[] = [];
+    subject.subscribe(notification => {
+      if (notification.kind === 'subscription-changed' && notification.name === 'fy-pane')
+        values.push(notification.value);
+      if (notification.kind === 'output') values.push('OUTPUT');
+    });
+
+    // Act
+    const took = await subject.watch('fy-pane', PANE_WATCH_FORMAT);
+    const connected = subject.connected;
+    await Bun.sleep(1_200);
+    await direct.execute(['send-keys', '-t', 'agent', 'drawn', 'Enter']);
+    await Bun.sleep(1_500);
+    await direct.execute(['send-keys', '-t', 'agent', 'C-d']);
+    for (let wait = 0; wait < 40 && !values.some(value => parsePaneWatch(value)?.dead === true); wait += 1)
+      await Bun.sleep(100);
+
+    // Assert
+    should(took).be.true();
+    should(connected).be.true();
+    should(values).not.containEql('OUTPUT');
+    should(values.some(value => parsePaneWatch(value)?.dead === false)).be.true();
+    should(values.some(value => parsePaneWatch(value)?.dead === true)).be.true();
+    await should(subject.watch('Not A Name', PANE_WATCH_FORMAT)).be.rejectedWith(/cannot be subscribed/);
+  }, 20_000);
+
+  it('should answer that a subscription did not take while no client can connect', async () => {
+    // Arrange — a session that does not exist cannot be attached to.
+    const { subject } = await attached('missing');
+
+    // Act
+    const took = await subject.watch('fy-pane', PANE_WATCH_FORMAT);
+
+    // Assert
+    should(took).be.false();
+    should(subject.connected).be.false();
   });
 });
