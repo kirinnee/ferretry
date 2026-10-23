@@ -12,10 +12,10 @@ import { displayCallsign } from './callsign.ts';
 import type { DaemonId } from './daemon-connection.ts';
 import { type DaemonSessionScope, daemonSessionKey, daemonSessionScope } from './daemon-scope.ts';
 import type { FleetSnapshot } from './fleet-store.ts';
+import { harnessDialogNotice } from './harness-dialogs.ts';
 import type { DeviceNotificationFilterPreferences } from './notification-filter.ts';
 import { shouldShowNotification } from './notification-filter.ts';
 import type { NotificationPreferences } from './notification-preferences.ts';
-import { harnessDialogNotice } from './harness-dialogs.ts';
 import { daemonSessionPath, daemonSessionsPath } from './pages/routes.ts';
 import { permissionSentence, shortPermissionWhat } from './permission-requests.ts';
 
@@ -30,13 +30,20 @@ export type SessionNotifyKind = Exclude<NotifyKind, 'device-paired'>;
 
 const FAILED_STATUSES: ReadonlySet<SessionStatus> = new Set(['failed', 'stalled', 'kill_failed']);
 
-/** First sight and non-notifying transitions deliberately remain silent. */
+/**
+ * NOTIFICATIONS ARE ATTENTION (docs/attention.md): a ferret that wants the owner raises an Attention
+ * item, and THAT is what pushes. So a ferret that is merely waiting — its turn ended, it is idle at its
+ * prompt (`awaiting_user`, `your-turn`) — or that finished (`completed`) notifies nothing here.
+ *
+ * Two transitions still notify, because the ferret CANNOT raise an item for them itself: its harness
+ * is parked on a blocking ask it owns (`awaiting_question`, `needs-input` — a permission prompt, a
+ * harness dialog, a structured question), or it died (`failed`, `stalled`, `kill_failed`).
+ * First sight and every other transition stay silent.
+ */
 export const classifyTransition = (prev: SessionStatus | undefined, next: SessionStatus): SessionNotifyKind | null => {
   if (prev === undefined || prev === next) return null;
   if (next === 'awaiting_question') return 'question';
-  if (next === 'awaiting_user') return 'attention';
-  if (FAILED_STATUSES.has(next)) return 'failed';
-  return next === 'completed' ? 'completed' : null;
+  return FAILED_STATUSES.has(next) ? 'failed' : null;
 };
 
 /** One recorded turn boundary: the daemon's `turnState` and the instant it last changed. */
@@ -66,8 +73,9 @@ export const turnBoundary = (view: SessionView): TurnBoundary | undefined => {
  *
  * The daemon's turn watcher is the one owner of whose turn it is, and `turnStateAt` moves exactly
  * when the value changes — so a boundary is notified once, however many times it is read, and a
- * working → your-turn → working cycle that fell between two polls still shows as a new `your-turn`
- * boundary rather than being missed. Never while working; never on first sight.
+ * needs-input that fell between two polls still shows as a new boundary rather than being missed. Never
+ * while working, never on first sight, and never for `your-turn`: a ferret waiting for its next message
+ * is not asking for anything.
  *
  * A NEW PERMISSION PROMPT OR HARNESS DIALOG is a new ask even on an unchanged boundary: a session that is
  * allowed one command and stops at the next one may never leave `needs-input` between two reads, so a
@@ -81,8 +89,8 @@ export const classifyTurnTransition = (
   const sameBoundary = prev.state === next.state && prev.at === next.at;
   const ask = next.permission ?? next.dialog;
   if (sameBoundary && (ask === undefined || ask === (prev.permission ?? prev.dialog))) return null;
-  if (next.state === 'needs-input') return 'question';
-  return next.state === 'your-turn' ? 'attention' : null;
+  // A your-turn boundary is the ferret waiting, which never notifies (see `classifyTransition`).
+  return next.state === 'needs-input' ? 'question' : null;
 };
 
 /**
@@ -90,7 +98,7 @@ export const classifyTurnTransition = (
  *
  * With a daemon turn fact, "your turn" and "needs input" come from it ALONE — the status words that
  * used to stand in for them (`awaiting_user`, `awaiting_question`) would otherwise notify the same
- * moment a second time. Endings that are not turns (finished, failed) still come from the status.
+ * moment a second time. A failure, which is not a turn, still comes from the status.
  */
 export const classifySessionNotification = (
   prevStatus: SessionStatus | undefined,
@@ -100,7 +108,7 @@ export const classifySessionNotification = (
   const next = turnBoundary(view);
   const byStatus = classifyTransition(prevStatus, view.state.status);
   if (next === undefined) return byStatus;
-  if (byStatus === 'failed' || byStatus === 'completed') return byStatus;
+  if (byStatus === 'failed') return byStatus;
   return classifyTurnTransition(prevTurn, next);
 };
 

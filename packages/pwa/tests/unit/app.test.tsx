@@ -68,6 +68,7 @@ import { CARRIER_PREFERENCE_KEY, CarrierPreferenceStore } from '../../src/lib/ca
 import type { DaemonConnectionRepository } from '../../src/lib/connections.ts';
 import { type DaemonConnection, type DaemonId, daemonConnection, daemonId } from '../../src/lib/daemon-connection.ts';
 import { daemonSessionScope } from '../../src/lib/daemon-scope.ts';
+import { notificationBrand } from '../../src/lib/notify.ts';
 import type { PageRoute } from '../../src/lib/pages/routes.ts';
 import { type DaemonCarrierRouter, DEVICE_NOT_ACCEPTED_SENTENCE } from '../../src/lib/relay-carrier.ts';
 import { RouterProvider } from '../../src/lib/router.tsx';
@@ -3249,7 +3250,12 @@ describe('browserNotificationSurface', () => {
     );
 
     const showOnPage = must(surface.showOnPage, 'the page-level fallback');
-    const notification = showOnPage('Alpha stopped', { body: 'body', tag: 'tag', renotify: false });
+    const notification = showOnPage('Alpha stopped', {
+      ...notificationBrand(),
+      body: 'body',
+      tag: 'tag',
+      renotify: false,
+    });
 
     expect(FakeNotification.shown).toEqual(['Alpha stopped']);
     surface.navigate(`/d/${ALPHA}/session/one`);

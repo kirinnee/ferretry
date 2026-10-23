@@ -1,10 +1,11 @@
 import { describe, it } from 'bun:test';
 import {
+  type AttentionItem,
   AttentionItemSchema,
   AttentionSnapshotSchema,
-  PushNotificationPayloadSchema,
-  type AttentionItem,
   type DirectNotificationRequest,
+  MAX_NOTIFICATION_TITLE_LENGTH,
+  PushNotificationPayloadSchema,
 } from '@ferretry/protocol';
 import should from 'should';
 import { DEVICE_PAIRED_EVENT_PREFIX, DEVICE_PAIRED_TITLE } from '../../../src/lib/audit/policy.ts';
@@ -19,10 +20,10 @@ import {
 } from '../../../src/lib/notifications/policy.ts';
 import {
   AttentionNotificationRequestedRecordSchema,
-  NotificationOutcomeRecordSchema,
-  NotificationRecordSchema,
   type DirectNotificationRequestedRecord,
   type NotificationLedgerEntry,
+  NotificationOutcomeRecordSchema,
+  NotificationRecordSchema,
 } from '../../../src/lib/notifications/types.ts';
 
 const AT = '2026-08-06T09:00:00.000Z';
@@ -188,7 +189,7 @@ describe('notification policy', () => {
       title: 'Deploy failed',
       kind: 'failed',
     });
-    const automatic = attentionNotificationPayload('session-1', item, snapshot);
+    const automatic = attentionNotificationPayload('session-1', 'Ada', item, snapshot);
 
     // Assert
     should(generic).containDeep({ kind: 'question', title: 'Agent “Release agent”', tag: 'notify-session-1' });
@@ -198,16 +199,49 @@ describe('notification policy', () => {
       tag: 'notify-session-1',
     });
     should(automatic).containDeep({
-      eventKey: 'attention-raised',
+      eventKey: 'attention-raised:A1',
       kind: 'attention',
-      title: item.subject,
+      title: '“Ada”: Choose a release window',
       body: item.why,
       tag: 'attention-session-1',
+      url: '/session/session-1?attention=A1',
       count: 1,
     });
     for (const payload of [generic, explicit, automatic]) {
       should(PushNotificationPayloadSchema.safeParse(payload).success).be.true();
     }
+  });
+
+  it('should title an attention push with its ferret first, carry its context and choices, and open the item', () => {
+    // Arrange
+    const rich = AttentionItemSchema.parse({
+      ...item,
+      id: 'A7',
+      subject: 'Rebase onto main now?',
+      context: 'I am finishing the relay PR; main moved under it and CI will fail until it is rebased.',
+      ask: { kind: 'multiple-choice', options: [{ label: 'Rebase now' }, { label: 'Wait' }, { label: 'Skip' }] },
+    });
+    const forged = AttentionItemSchema.parse({ ...item, id: 'A8', subject: DEVICE_PAIRED_TITLE });
+    const long = AttentionItemSchema.parse({ ...item, id: 'A9', subject: 'x'.repeat(240) });
+
+    // Act
+    const payload = attentionNotificationPayload('session 1', 'Ada', rich, snapshot);
+    const alert = attentionNotificationPayload('session-1', 'Ada', forged, snapshot);
+    const clipped = attentionNotificationPayload('session-1', 'Ada', long, snapshot);
+
+    // Assert
+    should(payload).containDeep({
+      eventKey: 'attention-raised:A7',
+      title: '“Ada”: Rebase onto main now?',
+      body: 'I am finishing the relay PR; main moved under it and CI will fail until it is rebased.\nRebase now · Wait · Skip',
+      url: '/session/session%201?attention=A7',
+    });
+    should(alert.title.startsWith(DEVICE_PAIRED_TITLE)).be.false();
+    should(alert.eventKey.startsWith(DEVICE_PAIRED_EVENT_PREFIX)).be.false();
+    should(clipped.title.length).equal(MAX_NOTIFICATION_TITLE_LENGTH);
+    should(clipped.title.endsWith('…')).be.true();
+    for (const each of [payload, alert, clipped])
+      should(PushNotificationPayloadSchema.safeParse(each).success).be.true();
   });
 
   it('should never let an agent payload read as the new-device alert', () => {

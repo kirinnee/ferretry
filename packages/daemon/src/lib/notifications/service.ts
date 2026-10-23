@@ -154,7 +154,7 @@ export class NotificationService implements AttentionRaisedObserver {
         if ((await this.options.ledger.find(key)) !== undefined) return;
         const session = await this.options.sessions.describe(sessionId);
         if (session === undefined) return;
-        const payload = attentionNotificationPayload(sessionId, item, snapshot);
+        const payload = attentionNotificationPayload(sessionId, session.name, item, snapshot);
         const enrolled = (await this.options.push.list()).length;
         await this.options.ledger.append(
           NotificationRecordSchema.parse({

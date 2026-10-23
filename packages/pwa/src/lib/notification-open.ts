@@ -94,3 +94,23 @@ export const openInWindow = async (
   await window.navigate(url);
   return 'navigated';
 };
+
+/** Pages on this site that are not the app: a popup a sign-in opened, a push worker's own scope. */
+const NOT_THE_APP = ['/oauth/', '/push/'];
+
+/**
+ * Which open window a tap should reuse, or `undefined` to open a new one.
+ *
+ * The worker asks for EVERY window on this site, not only the ones it controls: a machine's push worker
+ * is registered at `/push/<daemonId>/` and controls no page at all, so asking for its own clients found
+ * none and every tap opened a second copy of an app that was already open. A sign-in popup is never
+ * reused — routing the app inside it would strand the sign-in.
+ */
+export const notificationWindow = <T extends { readonly url: string }>(
+  windows: readonly T[],
+  origin: string,
+): T | undefined =>
+  windows.find(candidate => {
+    const url = URL.parse(candidate.url);
+    return url !== null && url.origin === origin && !NOT_THE_APP.some(prefix => url.pathname.startsWith(prefix));
+  });

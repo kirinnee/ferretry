@@ -74,7 +74,7 @@ HTML
   # that is not setuid root, and Chrome aborts rather than silently dropping the
   # sandbox — so the flag has to be explicit here.
   "${chrome}" --headless --no-sandbox --disable-gpu --hide-scrollbars \
-    --force-device-scale-factor=1 --window-size="${size},${size}" \
+    --force-device-scale-factor=1 --window-size="${size},${size}" --default-background-color=00000000 \
     --screenshot="${work_dir}/shot.png" "file://${work_dir}/page.html" >/dev/null 2>&1
   mv "${work_dir}/shot.png" "${target}"
   echo "🖼  ${target} ← ${brand_dir}/${source} at ${size}px"
@@ -95,5 +95,11 @@ render logomark-dark.svg 32 '#0b0b0d' "${out_dir}/favicon-32.png"
 render logomark-maskable.svg 180 '#0b0b0d' "${out_dir}/apple-touch-icon.png"
 render logomark-maskable.svg 192 '#0b0b0d' "${out_dir}/icon-192.png"
 render logomark-maskable.svg 512 '#0b0b0d' "${out_dir}/icon-512.png"
+
+# The notification BADGE: the small mark Android shows in the status bar and beside a notification's
+# title. Android paints a badge from its ALPHA alone — any colour in it is discarded — so it is the
+# mono logomark on a transparent page; an opaque tile would read as a plain white square. 96px is the
+# size Android asks for at its densest; it scales down cleanly on the 4-unit grid.
+render logomark-mono.svg 96 transparent "${out_dir}/badge-96.png"
 
 echo "✅ PWA icons rendered into ${out_dir}"

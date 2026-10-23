@@ -4,16 +4,18 @@ import type {
   AttentionResponse,
   AttentionSnapshot,
   AttentionSource,
+  ResolvedAttentionItem,
 } from '@ferretry/protocol';
 import {
+  type AttentionActor,
+  type AttentionChange,
+  type AttentionFailure,
+  type AttentionLedger,
+  type AttentionMutation,
   agentConfinedTo,
   applyAttentionCommandToSession,
   attentionSnapshot,
   emptyAttentionLedger,
-  type AttentionActor,
-  type AttentionFailure,
-  type AttentionLedger,
-  type AttentionMutation,
   type RaiseAttentionRequest,
 } from './state-machine.ts';
 
@@ -48,6 +50,29 @@ export interface AttentionRaisedObserver {
   raised(sessionId: string, item: AttentionItem, snapshot: AttentionSnapshot): Promise<void>;
 }
 
+/**
+ * Where a mutation came from: the board itself (a route, the CLI, the warden), or a person's chat message
+ * that referenced the item — whose own words already reached the ferret, so nothing re-tells it.
+ */
+export type AttentionVia = 'board' | 'conversation';
+
+/** One committed change to a board, as a change observer is told it. */
+export interface AttentionBoardChange {
+  readonly change: Exclude<AttentionChange, 'unchanged'>;
+  readonly actor: AttentionActor;
+  readonly via: AttentionVia;
+  readonly snapshot: AttentionSnapshot;
+  /** The raised item, on created and refreshed changes. */
+  readonly item?: AttentionItem;
+  /** The item as it was closed, on answered, resolved and dismissed changes. */
+  readonly addressed?: ResolvedAttentionItem;
+}
+
+/** Told after every mutation that changed a board has durably committed. Total: implementations never reject. */
+export interface AttentionChangeObserver {
+  changed(sessionId: string, change: AttentionBoardChange): Promise<void>;
+}
+
 export type AttentionQueryResult<T> =
   | { readonly ok: true; readonly value: T }
   | { readonly ok: false; readonly error: AttentionFailure };
@@ -62,6 +87,7 @@ export class AttentionService {
     private readonly clock: AttentionClock,
     private readonly sessions: AttentionSessionDirectory,
     private readonly observer: AttentionRaisedObserver,
+    private readonly changes: AttentionChangeObserver = { changed: async () => undefined },
   ) {}
 
   async list(sessionId: string): Promise<AttentionQueryResult<AttentionSnapshot>> {
@@ -89,8 +115,9 @@ export class AttentionService {
     response: AttentionResponse,
     actor: AttentionActor,
     note?: string | null,
+    via: AttentionVia = 'board',
   ): Promise<AttentionMutation> {
-    return this.apply(sessionId, { action: 'answer', actor, id, response, note, at: this.clock.now() });
+    return this.apply(sessionId, { action: 'answer', actor, id, response, note, at: this.clock.now() }, via);
   }
 
   async resolve(
@@ -98,8 +125,9 @@ export class AttentionService {
     id: AttentionId,
     actor: AttentionActor,
     note?: string | null,
+    via: AttentionVia = 'board',
   ): Promise<AttentionMutation> {
-    return this.apply(sessionId, { action: 'resolve', actor, id, note, at: this.clock.now() });
+    return this.apply(sessionId, { action: 'resolve', actor, id, note, at: this.clock.now() }, via);
   }
 
   async dismiss(
@@ -132,6 +160,7 @@ export class AttentionService {
   private async apply(
     sessionId: string,
     command: Parameters<typeof applyAttentionCommandToSession>[2],
+    via: AttentionVia = 'board',
   ): Promise<AttentionMutation> {
     const unauthorized = await this.authorize(sessionId, command.actor);
     if (unauthorized !== null) return { ok: false, error: unauthorized };
@@ -143,6 +172,20 @@ export class AttentionService {
         await this.observer.raised(sessionId, mutation.item, mutation.snapshot);
       } catch {
         // Persistence is primary: presentation can neither revise nor fail the committed mutation.
+      }
+    }
+    if (mutation.ok && mutation.changed && mutation.change !== 'unchanged') {
+      try {
+        await this.changes.changed(sessionId, {
+          change: mutation.change,
+          actor: command.actor,
+          via,
+          snapshot: mutation.snapshot,
+          ...(mutation.item === undefined ? {} : { item: mutation.item }),
+          ...(mutation.addressed === undefined ? {} : { addressed: mutation.addressed }),
+        });
+      } catch {
+        // The same rule: a projection or a delivery never revises a committed board.
       }
     }
     return mutation;

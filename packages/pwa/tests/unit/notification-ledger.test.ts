@@ -54,15 +54,15 @@ const fleetSnapshot = (
 });
 
 describe('notification classification and ledger', () => {
-  it('should keep first sight and silent statuses quiet while classifying exact transitions', () => {
+  it('should keep first sight, waiting, and finished quiet while classifying exact transitions', () => {
     should(classifyTransition(undefined, 'awaiting_user')).be.null();
     should(classifyTransition('awaiting_user', 'awaiting_user')).be.null();
     should(classifyTransition('running', 'awaiting_question')).equal('question');
-    should(classifyTransition('running', 'awaiting_user')).equal('attention');
+    should(classifyTransition('running', 'awaiting_user')).be.null();
     should(classifyTransition('running', 'failed')).equal('failed');
     should(classifyTransition('running', 'stalled')).equal('failed');
     should(classifyTransition('running', 'kill_failed')).equal('failed');
-    should(classifyTransition('running', 'completed')).equal('completed');
+    should(classifyTransition('running', 'completed')).be.null();
     should(classifyTransition('running', 'stopped')).be.null();
   });
 
@@ -150,7 +150,7 @@ describe('notification planning', () => {
     should(
       planNotifications(
         daemonA,
-        [view('s1', 'completed'), view('s2', 'awaiting_user')],
+        [view('s1', 'failed'), view('s2', 'awaiting_question')],
         ledger,
         disabled,
         allowAll,
@@ -162,14 +162,14 @@ describe('notification planning', () => {
   it('should defer to the device-wide filter for a category switched off', () => {
     const ledger = new DaemonNotificationLedger();
     planNotifications(daemonA, [view('s1', 'running'), view('s2', 'running')], ledger, enabledPrefs, allowAll, 1_000);
-    const noFinished = { ...allowAll, categories: { ...allowAll.categories, finished: false } };
+    const noFailed = { ...allowAll, categories: { ...allowAll.categories, failed: false } };
     should(
       planNotifications(
         daemonA,
-        [view('s1', 'completed'), view('s2', 'awaiting_user')],
+        [view('s1', 'failed'), view('s2', 'awaiting_question')],
         ledger,
         enabledPrefs,
-        noFinished,
+        noFailed,
         2_000,
       ),
     ).have.length(1);
@@ -179,25 +179,25 @@ describe('notification planning', () => {
     const ledger = new DaemonNotificationLedger();
     planNotifications(daemonA, [view('s1', 'running')], ledger, enabledPrefs, allowAll, 1_000);
     const muted = { ...allowAll, machines: { [daemonA]: false } };
-    should(planNotifications(daemonA, [view('s1', 'awaiting_user')], ledger, enabledPrefs, muted, 2_000)).have.length(
-      0,
-    );
+    should(
+      planNotifications(daemonA, [view('s1', 'awaiting_question')], ledger, enabledPrefs, muted, 2_000),
+    ).have.length(0);
   });
 
   it('should defer to the device-wide filter during quiet hours', () => {
     const ledger = new DaemonNotificationLedger();
     planNotifications(daemonA, [view('s1', 'running')], ledger, enabledPrefs, allowAll, 1_000);
     const quiet = { ...allowAll, quietHours: { enabled: true, startMinute: 0, endMinute: 0 } };
-    should(planNotifications(daemonA, [view('s1', 'awaiting_user')], ledger, enabledPrefs, quiet, 2_000)).have.length(
-      0,
-    );
+    should(
+      planNotifications(daemonA, [view('s1', 'awaiting_question')], ledger, enabledPrefs, quiet, 2_000),
+    ).have.length(0);
   });
 
   it('should fire a later real transition and collapse a burst into a daemon dashboard summary', () => {
     const ledger = new DaemonNotificationLedger();
     const many = Array.from({ length: NOTIFY_BURST_LIMIT + 2 }, (_, index) => view(`s${index}`, 'running'));
     should(planNotifications(daemonA, many, ledger, enabledPrefs, allowAll, 1_000)).have.length(0);
-    const changed = many.map(item => ({ ...item, state: { ...item.state, status: 'awaiting_user' as const } }));
+    const changed = many.map(item => ({ ...item, state: { ...item.state, status: 'awaiting_question' as const } }));
     const summary = planNotifications(daemonA, changed, ledger, enabledPrefs, allowAll, 2_000);
     should(summary).have.length(1);
     should(summary[0]?.tag).equal('fy-summary:daemon-a');
@@ -208,8 +208,8 @@ describe('notification planning', () => {
     const ledger = new DaemonNotificationLedger();
     planNotifications(daemonA, [view('shared', 'running')], ledger, enabledPrefs, allowAll, 1_000);
     planNotifications(daemonB, [view('shared', 'running')], ledger, enabledPrefs, allowAll, 1_000);
-    const a = planNotifications(daemonA, [view('shared', 'awaiting_user')], ledger, enabledPrefs, allowAll, 2_000);
-    const b = planNotifications(daemonB, [view('shared', 'awaiting_user')], ledger, enabledPrefs, allowAll, 2_000);
+    const a = planNotifications(daemonA, [view('shared', 'awaiting_question')], ledger, enabledPrefs, allowAll, 2_000);
+    const b = planNotifications(daemonB, [view('shared', 'awaiting_question')], ledger, enabledPrefs, allowAll, 2_000);
     should(a[0]?.tag).not.equal(b[0]?.tag);
     should(a[0]?.scope?.daemonId).equal(daemonA);
     should(b[0]?.scope?.daemonId).equal(daemonB);
@@ -242,7 +242,7 @@ describe('notification watch', () => {
     snapshot = fleetSnapshot([[daemonA, [view('shared', 'running'), view('other', 'running')]]]);
     for (const listener of listeners) listener();
     snapshot = fleetSnapshot([
-      [daemonA, [view('shared', 'awaiting_user', {}, 5), view('other', 'awaiting_user', {}, 5)]],
+      [daemonA, [view('shared', 'awaiting_question', {}, 5), view('other', 'awaiting_question', {}, 5)]],
     ]);
     for (const listener of listeners) listener();
     should(shown.map(spec => spec.scope?.sessionId)).deepEqual(['other']);
@@ -250,7 +250,7 @@ describe('notification watch', () => {
     hidden = true;
     snapshot = fleetSnapshot([[daemonA, [view('shared', 'running'), view('other', 'running')]]]);
     for (const listener of listeners) listener();
-    snapshot = fleetSnapshot([[daemonA, [view('shared', 'awaiting_user'), view('other', 'awaiting_user')]]]);
+    snapshot = fleetSnapshot([[daemonA, [view('shared', 'awaiting_question'), view('other', 'awaiting_question')]]]);
     for (const listener of listeners) listener();
     should(shown.length).equal(3);
     stop();
@@ -279,7 +279,7 @@ describe('notification watch', () => {
       show: spec => shown.push(spec),
       now: () => 2_000,
     });
-    snapshot = fleetSnapshot([[daemonA, [view('s1', 'awaiting_user')]]]);
+    snapshot = fleetSnapshot([[daemonA, [view('s1', 'awaiting_question')]]]);
     listener?.();
     hidden = true;
     listener?.();
@@ -309,8 +309,8 @@ describe('notification watch', () => {
       now: () => 2_000,
     });
     snapshot = fleetSnapshot([
-      [daemonA, [view('shared', 'awaiting_user')]],
-      [daemonB, [view('shared', 'awaiting_user')]],
+      [daemonA, [view('shared', 'awaiting_question')]],
+      [daemonB, [view('shared', 'awaiting_question')]],
     ]);
     listener?.();
     should(shown).have.length(1);
@@ -345,8 +345,8 @@ describe('notification watch', () => {
       ledger,
     );
     snapshot = fleetSnapshot([
-      [daemonA, [view('shared', 'awaiting_user')]],
-      [daemonB, [view('shared', 'awaiting_user')]],
+      [daemonA, [view('shared', 'awaiting_question')]],
+      [daemonB, [view('shared', 'awaiting_question')]],
     ]);
     listener?.();
     should(shown).have.length(2);
@@ -355,7 +355,7 @@ describe('notification watch', () => {
     should(ledger.status(daemonSessionScope({ daemonId: daemonA }, 'shared'))).be.undefined();
     should(ledger.status(daemonSessionScope({ daemonId: daemonB }, 'shared'))).equal('failed');
     snapshot = fleetSnapshot([
-      [daemonA, [view('shared', 'awaiting_user')]],
+      [daemonA, [view('shared', 'awaiting_question')]],
       [daemonB, [view('shared', 'failed')]],
     ]);
     listener?.();
@@ -377,15 +377,19 @@ describe('turn-boundary notifications', () => {
   const poll = (ledger: DaemonNotificationLedger, views: readonly SessionView[], at = 1_000) =>
     planNotifications(daemonA, views, ledger, enabledPrefs, allowAll, at);
 
-  it('classifies only a changed boundary, and only the two that mean a person is wanted', () => {
+  it('classifies only a changed boundary, and only needs-input, which means a person is wanted', () => {
     should(classifyTurnTransition(undefined, { state: 'your-turn', at: 'a' })).be.null();
     should(classifyTurnTransition({ state: 'working', at: 'a' }, undefined)).be.null();
     should(classifyTurnTransition({ state: 'your-turn', at: 'a' }, { state: 'your-turn', at: 'a' })).be.null();
     should(classifyTurnTransition({ state: 'your-turn', at: 'a' }, { state: 'working', at: 'b' })).be.null();
-    should(classifyTurnTransition({ state: 'working', at: 'a' }, { state: 'your-turn', at: 'b' })).equal('attention');
+    should(classifyTurnTransition({ state: 'working', at: 'a' }, { state: 'your-turn', at: 'b' })).be.null();
     should(classifyTurnTransition({ state: 'working', at: 'a' }, { state: 'needs-input', at: 'b' })).equal('question');
-    // A whole working stretch fell between two polls: a NEW your-turn boundary all the same.
-    should(classifyTurnTransition({ state: 'your-turn', at: 'a' }, { state: 'your-turn', at: 'c' })).equal('attention');
+    // A whole working stretch fell between two polls: a NEW needs-input boundary all the same.
+    should(classifyTurnTransition({ state: 'needs-input', at: 'a' }, { state: 'needs-input', at: 'c' })).equal(
+      'question',
+    );
+    // A ferret that is only waiting for its next message never asks for anything.
+    should(classifyTurnTransition({ state: 'your-turn', at: 'a' }, { state: 'your-turn', at: 'c' })).be.null();
     should(turnBoundary(sessionView('s', { state: { status: 'running', turn: 1 } }))).be.undefined();
     should(turnBoundary(turnView('working', 'x'))).deepEqual({ state: 'working', at: 'x' });
     should(turnBoundary(sessionView('s', { state: { status: 'running', turn: 1, turnState: 'working' } }))).deepEqual({
@@ -394,16 +398,21 @@ describe('turn-boundary notifications', () => {
     });
   });
 
-  it('notifies a turn end once, never while working, and never on first sight', () => {
+  it('never notifies a ferret that is only waiting for its next turn, nor on first sight or while working', () => {
     const ledger = new DaemonNotificationLedger();
+    should(poll(ledger, [turnView('your-turn', 't0')])).have.length(0);
     should(poll(ledger, [turnView('working', 't1')])).have.length(0);
     should(poll(ledger, [turnView('working', 't1')])).have.length(0);
-    const ended = poll(ledger, [turnView('your-turn', 't2')]);
-    should(kinds(ended)).deepEqual(['attention']);
-    should(ended[0]?.body).equal('Your turn — finished and waiting for you.');
     should(poll(ledger, [turnView('your-turn', 't2')], 2_000)).have.length(0);
     should(poll(ledger, [turnView('working', 't3')], 3_000)).have.length(0);
-    should(kinds(poll(ledger, [turnView('your-turn', 't4')], 4_000))).deepEqual(['attention']);
+    should(poll(ledger, [turnView('your-turn', 't4')], 4_000)).have.length(0);
+  });
+
+  it('notifies a needs-input boundary that fell between two polls, once, never on first sight', () => {
+    const ledger = new DaemonNotificationLedger();
+    should(poll(ledger, [turnView('needs-input', 't1')])).have.length(0);
+    should(kinds(poll(ledger, [turnView('needs-input', 't2')], 2_000))).deepEqual(['question']);
+    should(poll(ledger, [turnView('needs-input', 't2')], 3_000)).have.length(0);
   });
 
   it('notifies needs-input as a question, once per boundary', () => {
@@ -538,13 +547,15 @@ describe('turn-boundary notifications', () => {
     });
   });
 
-  it("does not notify the status word a second time beside the turn fact, but keeps a session's ending", () => {
+  it("does not notify the status word beside the turn fact, but keeps a session's failure", () => {
     const ledger = new DaemonNotificationLedger();
     poll(ledger, [turnView('working', 't1')]);
-    // The send path's own `awaiting_user` on an interrupt is the same moment the turn fact reports.
-    should(kinds(poll(ledger, [turnView('your-turn', 't2', 'awaiting_user')]))).deepEqual(['attention']);
+    // The send path's own `awaiting_user` on an interrupt is the ferret waiting, which is silent.
+    should(poll(ledger, [turnView('your-turn', 't2', 'awaiting_user')])).have.length(0);
     should(poll(ledger, [turnView('your-turn', 't2', 'awaiting_user')], 2_000)).have.length(0);
     should(kinds(poll(ledger, [turnView('your-turn', 't2', 'failed')], 3_000))).deepEqual(['failed']);
+    // A question status beside a needs-input turn fact is one notification, not two.
+    should(kinds(poll(ledger, [turnView('needs-input', 't4', 'awaiting_question')], 4_000))).deepEqual(['question']);
   });
 
   it('forgets the turn baseline with the session and with the daemon', () => {
@@ -559,7 +570,10 @@ describe('turn-boundary notifications', () => {
     should(ledger.turn(scope)).be.undefined();
   });
 
-  it('still notifies from the status alone for a daemon with no turn fact', () => {
-    should(classifySessionNotification('running', undefined, view('s', 'awaiting_user'))).equal('attention');
+  it('still notifies a question or failure from the status alone for a daemon with no turn fact', () => {
+    should(classifySessionNotification('running', undefined, view('s', 'awaiting_question'))).equal('question');
+    should(classifySessionNotification('running', undefined, view('s', 'failed'))).equal('failed');
+    should(classifySessionNotification('running', undefined, view('s', 'awaiting_user'))).be.null();
+    should(classifySessionNotification('running', undefined, view('s', 'completed'))).be.null();
   });
 });
