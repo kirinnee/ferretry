@@ -38,8 +38,8 @@
 import { isLoopbackHost, PushNotificationPayloadSchema } from '@ferretry/protocol';
 import { shouldShowNotification } from '../lib/notification-filter.ts';
 import { readMirroredNotificationFilter } from '../lib/notification-filter-mirror.ts';
-import { openInWindow } from '../lib/notification-open.ts';
-import { showGroupedNotification } from '../lib/notify.ts';
+import { notificationWindow, openInWindow } from '../lib/notification-open.ts';
+import { notificationBrand, showGroupedNotification } from '../lib/notify.ts';
 import {
   filteredPushNotification,
   machineNotification,
@@ -86,7 +86,7 @@ interface WorkerScope {
   readonly registration: Parameters<typeof showGroupedNotification>[0] & { readonly scope: string };
   readonly clients: {
     claim(): Promise<void>;
-    matchAll(options: { type: 'window' }): Promise<readonly WindowClientLike[]>;
+    matchAll(options: { type: 'window'; includeUncontrolled?: boolean }): Promise<readonly WindowClientLike[]>;
     openWindow(url: string): Promise<unknown>;
   };
   skipWaiting(): Promise<void>;
@@ -184,6 +184,7 @@ worker.addEventListener('push', event => {
         // push and shows nothing is penalised by the browser and eventually revoked. There is no
         // `kind` to filter on — this branch never reaches the decision below at all.
         await worker.registration.showNotification(unreadablePushTitle(machine), {
+          ...notificationBrand(),
           body: 'Something needs your attention.',
         });
         return;
@@ -222,8 +223,8 @@ worker.addEventListener('notificationclick', event => {
   // and one machine's notification can never open another machine's pages.
   const url = notificationUrl(data?.url, origin, machine);
   event.waitUntil(
-    worker.clients.matchAll({ type: 'window' }).then(async windows => {
-      const open = windows[0];
+    worker.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(async windows => {
+      const open = notificationWindow(windows, origin);
       if (open === undefined) return await worker.clients.openWindow(url);
       // Routed by the page itself when it answers (`lib/notification-open.ts`): a navigate here would
       // reload the whole app and make Back cross a document boundary.

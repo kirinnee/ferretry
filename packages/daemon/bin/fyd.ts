@@ -108,6 +108,7 @@ import {
   probePdfDecryptWorker,
 } from '../src/adapters/attachments/index.ts';
 import { FileAttentionLedgerRepository } from '../src/adapters/attention/file-attention-ledger-repository.ts';
+import { StorageSessionAttentionState } from '../src/adapters/attention/storage-session-attention-state.ts';
 import { FileAcceptedConfigStore, FileConfigDirectory } from '../src/adapters/config-files/files.ts';
 import { unrefFileEventTimers } from '../src/adapters/file-events/bun-file-event-source.ts';
 import { platformFileEventSource } from '../src/adapters/file-events/platform.ts';
@@ -493,11 +494,11 @@ import {
   ActivityLedger,
   AgentSendFailureNotifier,
   AgentToolService,
+  ANALYTICS_BACKSTOP_MS,
   type AnalyticsIndexStoreFactory,
   type AnalyticsIngestCandidate,
   type AnalyticsIngestCandidateSource,
   AnalyticsIngestionService,
-  ANALYTICS_BACKSTOP_MS,
   type AnalyticsSubsystem,
   type AnalyticsTranscriptEvidenceSource,
   type AnalyticsTranscriptFoldSource,
@@ -512,6 +513,9 @@ import {
   type ArgumentAnswer,
   type AssigneeObservation,
   type AttentionActor,
+  AttentionChangeFanout,
+  AttentionConversation,
+  AttentionReplyDelivery,
   AttentionService,
   AUDIT_FOLD_WINDOW_MS,
   AuditedPairingService,
@@ -525,12 +529,6 @@ import {
   authorizeSessionCommand,
   BACKGROUND_DELAY_VARIABLE,
   BackgroundLane,
-  HANDOVER_RESCAN_INTERVAL_MS,
-  PassTrigger,
-  type PassTriggerTimers,
-  RememberedHandoverReceipts,
-  TERMINAL_ANALYTICS_STATUSES,
-  UPDATE_BACKSTOP_INTERVAL_MS,
   type BootNoticePort,
   BootProgress,
   type BootRefusal,
@@ -636,6 +634,7 @@ import {
   firstWriteReleasedAnswerAttention,
   fleetManifestRefusal,
   foreignAdvertisementNotice,
+  HANDOVER_RESCAN_INTERVAL_MS,
   HARNESS_PICKER_COMMAND,
   HandoverError,
   type HandoverJournalAppend,
@@ -711,6 +710,8 @@ import {
   PairedPushDevices,
   PairingDeviceRegistry,
   type PairingService,
+  PassTrigger,
+  type PassTriggerTimers,
   PinService,
   type PlannedAttachmentFile,
   type PlannedInitialAttachments,
@@ -752,6 +753,7 @@ import {
   type RelayDirectoryPort,
   type RelayPairingRedeemer,
   type RelayStreamDispatch,
+  RememberedHandoverReceipts,
   type ResumeAnswerAttention,
   ResumeCancelled,
   type ResumeLauncher,
@@ -803,6 +805,7 @@ import {
   type SessionAnswerSubsystem,
   SessionAttachmentStore,
   SessionAttachService,
+  SessionAttentionProjection,
   SessionConsoleService,
   SessionControlError,
   type SessionControlFailure,
@@ -881,6 +884,7 @@ import {
   type TaskBoardTaskActionAuthorizer,
   TaskError,
   type TaskSubsystem,
+  TERMINAL_ANALYTICS_STATUSES,
   TEST_MODE_VARIABLE,
   TEST_TIMINGS_VARIABLE,
   TeamAdvisor,
@@ -918,6 +922,7 @@ import {
   tunnelSessionLog,
   UnknownPeerRefused,
   UnwatchedPaneExits,
+  UPDATE_BACKSTOP_INTERVAL_MS,
   type UsageFeedPort,
   unattendedUsageFeed,
   unreadableManifestPreflight,
@@ -2935,6 +2940,12 @@ function createSessionSendSubsystem(
   ) => Promise<readonly DeliveredAttachment[]>,
   /** One hand-off document as the person's message; `undefined` when it is gone. */
   readHandoff: (sessionId: SessionId, name: string) => Promise<SessionHandoff | undefined>,
+  /**
+   * A PERSON's message read against the ferret's open Attention (`AttentionConversation`): the words it
+   * receives, and the items it answered resolved once it was accepted. A teammate's message is never
+   * read this way — only the owner answers the owner's items.
+   */
+  conversation: Pick<AttentionConversation, 'prepare' | 'settle'>,
 ): SessionSendSubsystem {
   const require = (reference: string): SessionId => {
     const id = tryParseSessionId(reference);
@@ -2963,17 +2974,22 @@ function createSessionSendSubsystem(
                 `an attached file could not be handed to the agent: ${error instanceof Error ? error.message : String(error)}`,
               );
             });
+      const person = request.senderSessionId === undefined;
+      const turn = person ? await conversation.prepare(id, request.message) : { message: request.message, answers: [] };
       const outcome = await service
         .send({
           id,
           sendId: request.sendId,
-          message: messageWithAttachments(request.message, delivered),
+          message: messageWithAttachments(turn.message, delivered),
           ...(request.attachmentIds === undefined ? {} : { attachmentIds: request.attachmentIds }),
           ...(request.now === undefined ? {} : { now: request.now }),
           ...(request.replyExpected === undefined ? {} : { replyExpected: request.replyExpected }),
           ...(request.senderSessionId === undefined ? {} : { senderReference: request.senderSessionId }),
         })
         .catch((error: unknown) => sendRefusal(error));
+      // Resolved only once the words were accepted: an item must never read as answered by a message the
+      // ferret was not given.
+      if (turn.answers.length > 0) await conversation.settle(id, turn, request.message);
       return {
         ...(await view(id, 'took the message')),
         disposition: outcome.disposition,
@@ -8517,11 +8533,22 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       // ONE attention service for this opened store, shared by the route a person answers on and by
       // the warden sweep that raises and clears its own escalations. Two would each hold their own
       // idea of what a session is waiting for.
+      // The ledger repository is handed raw ids from the transport, so the id is parsed here rather than
+      // asserted: an id the layout would not accept must never become a directory path.
+      const attentionBoards = new FileAttentionLedgerRepository(
+        id => createSessionPaths(paths, parseSessionId(id)).directory,
+      );
+      const attentionProjection = new SessionAttentionProjection(
+        attentionBoards,
+        new StorageSessionAttentionState(storage),
+        new KeyedSerialExecutor(),
+        () => clock.now(),
+      );
+      // Boards that moved before summaries were kept (or while this daemon was down) are caught up once,
+      // in the background: a list served before it finishes is only missing an unread mark.
+      void attentionProjection.reconcile(storage.listSessions().map(session => session.id)).catch(() => undefined);
       const attention = new AttentionService(
-        // The ledger repository is handed raw ids from the transport, so the id is parsed here
-        // rather than asserted: an id the layout would not accept must never become a directory
-        // path.
-        new FileAttentionLedgerRepository(id => createSessionPaths(paths, parseSessionId(id)).directory),
+        attentionBoards,
         clock,
         {
           // A missing attention.json is an empty board only for a session the
@@ -8530,6 +8557,19 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           has: async id => (await sessions.get(id)) !== undefined,
         },
         notifications,
+        new AttentionChangeFanout([
+          // The session list's unread signal, kept true to the board.
+          attentionProjection,
+          // The owner's answer, told to the ferret that asked. DETACHED: a send may wait for a launch or
+          // revive a stopped ferret, and the person's answer must not wait on that; the send ledger is
+          // where its fate is recorded.
+          new AttentionReplyDelivery({
+            send: async (sessionId, message, sendId) => {
+              const id = tryParseSessionId(sessionId);
+              if (id !== undefined) void sends.send({ id, sendId, message }).catch(() => undefined);
+            },
+          }),
+        ]),
       );
       // ONE ingestion service for this opened store, shared by the loop that writes rows and the route
       // that reads them. Two would each hold their own account of whether a pass is in flight, and the
@@ -9544,6 +9584,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
                   attachmentRoot: attachmentOriginals(sessionId),
                 });
           },
+          new AttentionConversation(attention, CLIENT_NAME),
         ),
         sessionAnswer: createSessionAnswerSubsystem(
           storage,

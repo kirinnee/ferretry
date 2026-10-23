@@ -1,17 +1,17 @@
 import {
   ATTENTION_SCHEMA_VERSION,
-  AttentionItemSchema,
-  ResolvedAttentionItemSchema,
   type AttentionAsk,
   type AttentionErrorCode,
   type AttentionId,
   type AttentionItem,
+  AttentionItemSchema,
   type AttentionResponse,
   type AttentionSnapshot,
   type AttentionSource,
   MAX_ATTENTION_PER_SESSION,
   MAX_ATTENTION_RESOLUTIONS,
   type ResolvedAttentionItem,
+  ResolvedAttentionItemSchema,
 } from '@ferretry/protocol';
 
 /** Agent-raised requests are capped separately so automatic sources retain board capacity. */
@@ -112,6 +112,8 @@ export type AttentionMutation =
       readonly snapshot: AttentionSnapshot;
       /** The raised item on created and refreshed mutations; absent for every other change. */
       readonly item?: AttentionItem;
+      /** The item as it was closed, on answered, resolved and dismissed mutations; absent otherwise. */
+      readonly addressed?: ResolvedAttentionItem;
     };
 
 export function emptyAttentionLedger(sessionId: string, at: string): AttentionLedger {
@@ -375,12 +377,9 @@ function addressById(
       return failure('invalid', message);
     }
   }
-  if (command.action === 'resolve' && target.item.ask !== undefined) {
-    return failure(
-      'invalid',
-      `${command.id} has a structured ask; answer or dismiss it without discarding the response`,
-    );
-  }
+  // A structured ask may still be RESOLVED without its response: the owner can reply in words instead
+  // of picking (the note carries them to the ferret), and the raising ferret closes its own item once
+  // the matter settled some other way. An answer, when given, must still match the ask.
   return addressed(ledger, target, command.actor, command.note ?? null, command.at, disposition, change, response);
 }
 
@@ -473,7 +472,7 @@ function addressed(
     ),
   ].slice(0, MAX_ATTENTION_RESOLUTIONS);
   const next: AttentionLedger = { ...ledger, entries: [...active, ...history], updatedAt: at };
-  return success(next, true, change);
+  return success(next, true, change, undefined, item);
 }
 
 function canAddressAttention(actor: AttentionActor, entry: AttentionEntry): boolean {
@@ -557,6 +556,7 @@ function success(
   changed: boolean,
   change: AttentionChange,
   item?: AttentionItem,
+  addressed?: ResolvedAttentionItem,
 ): AttentionMutation {
   return {
     ok: true,
@@ -565,6 +565,7 @@ function success(
     ledger,
     snapshot: attentionSnapshot(ledger),
     ...(item === undefined ? {} : { item }),
+    ...(addressed === undefined ? {} : { addressed }),
   };
 }
 

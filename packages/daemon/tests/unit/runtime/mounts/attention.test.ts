@@ -155,9 +155,8 @@ describe('attention routes', () => {
     should(jsonBody(response)).have.property('code', 'invalid');
   });
 
-  it('should refuse to resolve an item whose ask would be discarded', async () => {
-    // A bare resolve on an item that asked a question would unblock the agent with no answer, so the
-    // domain sends the caller to `answer` or `dismiss` instead. The route reports that verbatim.
+  it('should resolve an item with a structured ask in words, keeping no invented answer', async () => {
+    // The owner may reply in words instead of picking; the note carries them to the ferret (docs/attention.md).
     // Arrange
     const dispatch = fixture();
     const raised = await dispatch(post(raise, agentIn('s1')));
@@ -167,9 +166,13 @@ describe('attention routes', () => {
     const resolved = await dispatch(post({ action: 'resolve', id, note: 'handled out of band' }));
 
     // Assert
-    should(resolved.status).equal(400);
-    should(jsonBody(resolved)).have.property('code', 'invalid');
-    should(String(jsonBody(resolved).error)).match(/answer or dismiss it/u);
+    should(resolved.status).equal(200);
+    should(jsonBody(resolved)).have.property('count', 0);
+    should((jsonBody(resolved).resolved as readonly Record<string, unknown>[])[0]).containDeep({
+      resolutionNote: 'handled out of band',
+      disposition: 'done',
+    });
+    should((jsonBody(resolved).resolved as readonly Record<string, unknown>[])[0]).not.have.property('response');
   });
 
   it('should dismiss an item', async () => {

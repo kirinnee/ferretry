@@ -3,10 +3,11 @@
  * say and open (docs/cross-daemon.md §4a–§4c).
  */
 import { describe, expect, it, test } from 'bun:test';
-import type { PushNotificationPayload } from '@ferretry/protocol';
+import { attentionNotificationPath, type PushNotificationPayload } from '@ferretry/protocol';
 import { daemonConnection, daemonId } from '../../src/lib/daemon-connection.ts';
 import { daemonSessionScope } from '../../src/lib/daemon-scope.ts';
 import { buildNotification } from '../../src/lib/notification-ledger.ts';
+import { NOTIFICATION_BADGE, NOTIFICATION_ICON } from '../../src/lib/notify.ts';
 import {
   FILTERED_PUSH_TAG_PREFIX,
   filteredPushNotification,
@@ -126,6 +127,23 @@ describe('notificationUrl (§4a: only this site; §4c: only this machine)', () =
     ]) {
       expect(notificationUrl(elsewhere, ORIGIN, WORK)).toBe(home);
     }
+  });
+
+  it('places a daemon’s machine-relative conversation link under THAT machine, item and all', () => {
+    const home = `${ORIGIN}/d/sha256%3Awork%2Fone`;
+    const link = attentionNotificationPath('session 1', 'A3');
+    expect(link).toBe('/session/session%201?attention=A3');
+    expect(notificationUrl(link, ORIGIN, WORK)).toBe(`${home}/session/session%201?attention=A3`);
+    // A climb out of the machine from a relative link is still caught by the machine check.
+    expect(notificationUrl('/session/../../d/other', ORIGIN, WORK)).toBe(home);
+    // The app-wide worker knows no machine, so a relative link opens nothing but the app.
+    expect(notificationUrl(link, ORIGIN, null)).toBe(`${ORIGIN}/session/session%201?attention=A3`);
+  });
+
+  it('carries the Ferretry mark on the quiet notification too', () => {
+    const shown = filteredPushNotification(WORK, ORIGIN);
+    expect(shown.options.icon).toBe(NOTIFICATION_ICON);
+    expect(shown.options.badge).toBe(NOTIFICATION_BADGE);
   });
 });
 

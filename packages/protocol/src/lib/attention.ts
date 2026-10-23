@@ -258,3 +258,32 @@ export const AttentionErrorCodeSchema = z.enum([
   'corrupt',
 ]);
 export type AttentionErrorCode = z.infer<typeof AttentionErrorCodeSchema>;
+
+/**
+ * A session's open Attention, as its list row carries it: what makes a conversation read as UNREAD
+ * until the owner has dealt with it. The daemon rewrites it after every board change that moves the
+ * open set, and removes it when nothing is open — so its absence means "nothing waits on the owner",
+ * never "unknown". The board itself (`GET /v1/sessions/:id/attention`) has every item in full.
+ */
+export const SessionAttentionSummarySchema = z.object({
+  /** How many items are open. */
+  open: PositiveIntegerSchema,
+  /** The oldest open item — the one a row opens to. */
+  first: AttentionIdSchema,
+  /** That item's one-line ask, for a row's preview. */
+  ask: singleLine(MAX_ATTENTION_SUBJECT_LENGTH),
+  /** When the NEWEST open item was raised: "newest needing you first" sorts by it. */
+  latestAt: InstantSchema,
+});
+export type SessionAttentionSummary = z.infer<typeof SessionAttentionSummarySchema>;
+
+/** The query parameter a conversation link names an Attention item by. */
+export const ATTENTION_LINK_PARAMETER = 'attention';
+
+/**
+ * Where an Attention notification opens, RELATIVE TO THE MACHINE'S OWN PAGES: the daemon names the
+ * session and the item, and the browser's per-machine push worker puts it under that machine — the
+ * daemon never names an origin or the browser's address for itself (`packages/pwa/src/lib/push-scope.ts`).
+ */
+export const attentionNotificationPath = (sessionId: string, id: AttentionId): string =>
+  `/session/${encodeURIComponent(sessionId)}?${ATTENTION_LINK_PARAMETER}=${encodeURIComponent(id)}`;

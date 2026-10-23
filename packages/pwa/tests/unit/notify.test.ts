@@ -6,13 +6,15 @@ import { daemonSessionScope } from '../../src/lib/daemon-scope.ts';
 import { buildNotification, summaryNotification } from '../../src/lib/notification-ledger.ts';
 import {
   groupedNotificationBody,
+  NOTIFICATION_BADGE,
+  NOTIFICATION_ICON,
   NOTIFICATION_PAYLOAD_VERSION,
   type NotificationDataLike,
   type NotificationPayload,
   type NotificationRegistrationLike,
   type NotificationSurface,
-  type PageNotificationLike,
   notificationPayload,
+  type PageNotificationLike,
   planNotificationPresentation,
   showGroupedNotification,
   showNotification,
@@ -193,6 +195,10 @@ describe('showGroupedNotification', () => {
     should(target.shown[0]?.title).equal(incoming.title);
     should(target.shown[0]?.options?.tag).equal(incoming.tag);
     should((target.shown[0]?.options as { renotify?: boolean } | undefined)?.renotify).be.false();
+    // The Ferretry mark: the icon beside the text, the mono badge Android paints from its alpha.
+    should(target.shown[0]?.options).containDeep({ icon: NOTIFICATION_ICON, badge: NOTIFICATION_BADGE });
+    should(NOTIFICATION_ICON).equal('/icons/icon-192.png');
+    should(NOTIFICATION_BADGE).equal('/icons/badge-96.png');
   });
 
   it('reports the duplicate rather than re-alerting', async () => {

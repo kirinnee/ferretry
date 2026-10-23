@@ -349,14 +349,28 @@ describe('useNotificationWatch', () => {
     store.set(daemonA.daemonId, { enabled: true });
     const probe = mount(watchHost(fleet.source, target.surface, { preferences: store }), 'granted');
 
-    run(() => fleet.publish(snapshot([view('s1', 'awaiting_user')])));
+    run(() => fleet.publish(snapshot([view('s1', 'awaiting_question')])));
     await settle();
 
     expect(target.shown).toHaveLength(1);
     expect(target.shown[0]?.data.daemonId).toBe(daemonA.daemonId);
     expect(target.shown[0]?.data.sessionId).toBe('s1');
     expect(target.shown[0]?.tag).toBe('fy-session:daemon-a:s1');
-    expect(target.shown[0]?.body).toBe('Waiting for you at the prompt.');
+    expect(target.shown[0]?.body).toBe('Asked you a question.');
+    probe.unmount();
+  });
+
+  it('never notifies a ferret that is only waiting or finished', async () => {
+    const fleet = sessionsSource(snapshot([view('s1', 'running'), view('s2', 'running')]));
+    const target = surface('granted');
+    const store = new DaemonNotificationPreferences();
+    store.set(daemonA.daemonId, { enabled: true });
+    const probe = mount(watchHost(fleet.source, target.surface, { preferences: store }), 'granted');
+
+    run(() => fleet.publish(snapshot([view('s1', 'awaiting_user'), view('s2', 'completed')])));
+    await settle();
+
+    expect(target.shown).toHaveLength(0);
     probe.unmount();
   });
 
@@ -377,7 +391,7 @@ describe('useNotificationWatch', () => {
     const target = brittleSurface('showNotification');
     const watch = brittleWatch(target);
 
-    run(() => watch.fleet.publish(snapshot([view('s1', 'awaiting_user')])));
+    run(() => watch.fleet.publish(snapshot([view('s1', 'awaiting_question')])));
     await settle();
 
     // Attempted, rejected, and never reported as delivered.
@@ -385,13 +399,13 @@ describe('useNotificationWatch', () => {
     expect(target.shown).toHaveLength(0);
 
     // The subscription survived the failure, so the next transition still lands.
-    run(() => watch.fleet.publish(snapshot([view('s1', 'completed')])));
+    run(() => watch.fleet.publish(snapshot([view('s1', 'failed')])));
     await settle();
 
     expect(target.shown).toHaveLength(1);
     // The ledger counted the attempt it planned, so this one carries the group
     // tail; the LINE it announces is the new transition, not the lost one.
-    expect(target.shown[0]?.data.latestBody).toBe('Finished its task.');
+    expect(target.shown[0]?.data.latestBody).toBe('Failed.');
     watch.probe.unmount();
   });
 
@@ -399,7 +413,7 @@ describe('useNotificationWatch', () => {
     const target = brittleSurface('getNotifications');
     const watch = brittleWatch(target);
 
-    run(() => watch.fleet.publish(snapshot([view('s1', 'awaiting_user')])));
+    run(() => watch.fleet.publish(snapshot([view('s1', 'awaiting_question')])));
     await settle();
 
     expect(target.failures()).toBe(1);
@@ -427,7 +441,7 @@ describe('useNotificationWatch', () => {
       'granted',
     );
 
-    run(() => fleet.publish(snapshot([view('s1', 'awaiting_user')])));
+    run(() => fleet.publish(snapshot([view('s1', 'awaiting_question')])));
     await settle();
 
     expect(target.shown).toHaveLength(0);
@@ -443,7 +457,7 @@ describe('useNotificationWatch', () => {
     filter.set({ categories: { 'needs-you': false } });
     const probe = mount(watchHost(fleet.source, target.surface, { preferences: store, filter }), 'granted');
 
-    run(() => fleet.publish(snapshot([view('s1', 'awaiting_user')])));
+    run(() => fleet.publish(snapshot([view('s1', 'awaiting_question')])));
     await settle();
 
     expect(target.shown).toHaveLength(0);

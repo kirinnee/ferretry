@@ -7,6 +7,7 @@ import {
   type NotificationWindow,
   notificationOpenMessage,
   notificationOpenPath,
+  notificationWindow,
   openInWindow,
 } from '../../src/lib/notification-open.ts';
 
@@ -192,5 +193,18 @@ describe('openInWindow', () => {
     // Assert
     expect(actual).toBe('routed');
     expect(calls).toEqual(['focus']);
+  });
+});
+
+describe('notificationWindow', () => {
+  it('reuses an open app window the worker does not control, never a sign-in popup or another site', () => {
+    const popup = { url: `${ORIGIN}/oauth/mcp-callback.html?code=x` };
+    const scope = { url: `${ORIGIN}/push/sha256%3Awork/` };
+    const foreign = { url: 'https://evil.test/d/x' };
+    const app = { url: `${ORIGIN}/d/sha256%3Awork/session/s1` };
+
+    expect(notificationWindow([popup, scope, foreign, app], ORIGIN)).toBe(app);
+    expect(notificationWindow([popup, scope, foreign, { url: 'not a url' }], ORIGIN)).toBeUndefined();
+    expect(notificationWindow([], ORIGIN)).toBeUndefined();
   });
 });
