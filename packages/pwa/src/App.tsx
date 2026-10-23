@@ -149,6 +149,7 @@ import {
 import { useSttSettings } from './hooks/use-stt-settings.ts';
 import { useTheme } from './hooks/use-theme.ts';
 import { type MachineSource, machineDisplayOrder } from './lib/all-machines.ts';
+import { attentionTargetFromSearch } from './lib/attention-inbox.ts';
 import { DEFAULT_CARRIER_PREFERENCE } from './lib/carrier-preference.ts';
 import type { DaemonConnectionRecord } from './lib/connections.ts';
 import { type DaemonConnection, type DaemonId, daemonCarriers } from './lib/daemon-connection.ts';
@@ -1458,6 +1459,8 @@ function SessionRoute({ connection, scope }: SessionChatPageProps) {
           }}
           browserLogin={store.browserLogin}
           attention={attention}
+          // A notification tap or an unread row names the item it opens at (`?attention=A3`).
+          attentionTarget={attentionTargetFromSearch(window.location.search)}
           chatWidth={controls.chatWidth}
           composerEnterKey={controls.composerEnterKey}
           composerPhoneEnterKey={controls.composerPhoneEnterKey}
