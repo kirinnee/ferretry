@@ -347,6 +347,11 @@ const attentionCases: SchemaCase[] = [
   { name: 'attention item', schema: attention.AttentionItemSchema, value: attentionItem },
   { name: 'resolved attention', schema: attention.ResolvedAttentionItemSchema, value: resolvedAttention },
   {
+    name: 'session attention summary',
+    schema: attention.SessionAttentionSummarySchema,
+    value: { open: 2, first: 'A1', ask: 'Rebase onto main now?', latestAt: '2026-10-23T10:00:00.000Z' },
+  },
+  {
     name: 'attention snapshot',
     schema: attention.AttentionSnapshotSchema,
     value: {
