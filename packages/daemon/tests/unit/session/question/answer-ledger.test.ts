@@ -3,6 +3,7 @@ import type { SessionState } from '@ferretry/protocol';
 import should from 'should';
 import {
   AnswerAcknowledged,
+  AnswerAlreadyAnswered,
   type AnswerOperationRecord,
   AnswerReleased,
   AnswerRequestConflict,
@@ -12,6 +13,7 @@ import {
   AnswerUnconfirmed,
   answerEvidenceForQuestion,
   answerFingerprint,
+  answerSummary,
   decideAnswerAdmission,
   reconcileAnswerEvidence,
   reconcileUnconfirmedAnswer,
@@ -323,5 +325,51 @@ describe('the answer refusals', () => {
     should(new AnswerReleased(record({ outcome: 'quarantined', reason: undefined })).message).match(
       /prose may continue/u,
     );
+  });
+});
+
+describe('answerSummary', () => {
+  it.each([
+    ['a selection', { toolUseId: 't', labels: ['Yes'] }, 'Yes'],
+    ['several selections', { toolUseId: 't', labels: ['A', 'B'] }, 'A, B'],
+    ['a legacy free-text answer', { toolUseId: 't', labels: [], other: 'my own words' }, 'my own words'],
+    [
+      'legacy per-question responses',
+      { toolUseId: 't', labels: [], responses: ['North', 'Ship now'] },
+      'North; Ship now',
+    ],
+    [
+      'the lossless answers list, free text included',
+      {
+        toolUseId: 't',
+        labels: [],
+        answers: [
+          { kind: 'selection' as const, labels: ['A', 'B'] },
+          { kind: 'other' as const, text: 'explain it' },
+        ],
+      },
+      'A, B; explain it',
+    ],
+  ])('reads %s back out of its fingerprint', (_name, payload, expected) => {
+    should(answerSummary(answerFingerprint(payload))).equal(expected);
+  });
+
+  it('truncates a long answer and survives an unreadable fingerprint', () => {
+    should(answerSummary(answerFingerprint({ toolUseId: 't', labels: [], other: 'x'.repeat(500) }))).equal(
+      `${'x'.repeat(200)}…`,
+    );
+    should(answerSummary('not json')).equal('an earlier answer');
+    should(answerSummary('{}')).equal('an earlier answer');
+  });
+});
+
+describe('AnswerAlreadyAnswered', () => {
+  it('says what was answered for a person and keeps the ownership explanation as detail', () => {
+    const actual = new AnswerAlreadyAnswered('tool-1', 'request-1', 'Yes');
+
+    should(actual).be.instanceOf(AnswerToolAlreadyHandled);
+    should(actual.message).equal('This question was already answered with «Yes».');
+    should(actual.detail).match(/already owned/u);
+    should(actual.answeredWith).equal('Yes');
   });
 });

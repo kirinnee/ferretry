@@ -3,6 +3,7 @@ import type { ClockPort, SerialExecutor } from '../../ports.ts';
 import type { SessionId } from '../../session-id.ts';
 import {
   AnswerAcknowledged,
+  AnswerAlreadyAnswered,
   type AnswerLedger,
   type AnswerOperationRecord,
   AnswerReleased,
@@ -13,6 +14,7 @@ import {
   AnswerUnconfirmed,
   answerEvidenceForQuestion,
   answerFingerprint,
+  answerSummary,
   decideAnswerAdmission,
   reconcileUnconfirmedAnswer,
 } from './answer-ledger.ts';
@@ -176,11 +178,34 @@ export class StructuredAnswerCoordinator {
       );
       if (prior.kind === 'unconfirmed') {
         await this.#reconcile(id, prior.record.requestId, prior.record);
-        throw new AnswerToolAlreadyHandled(request.toolUseId, prior.record.requestId, 'confirmed');
+        throw new AnswerAlreadyAnswered(
+          request.toolUseId,
+          prior.record.requestId,
+          answerSummary(prior.record.fingerprint),
+        );
       }
-      if (prior.kind !== 'none')
+      if (prior.kind === 'confirmed')
+        throw new AnswerAlreadyAnswered(
+          request.toolUseId,
+          prior.record.requestId,
+          answerSummary(prior.record.fingerprint),
+        );
+      // A released form is one an earlier drive PROVED sent no key and then released, so a new answer
+      // is not a second answer to anything. Both receipts stay in the ledger: the older one as `failed`,
+      // the new one naming it. Every other prior outcome may have typed into the form and stays refused.
+      if (prior.kind === 'none') {
+        await this.#drive(id, requestId, fingerprint, request);
+        return;
+      }
+      if (prior.kind !== 'released')
         throw new AnswerToolAlreadyHandled(request.toolUseId, prior.record.requestId, prior.record.outcome);
-      await this.#drive(id, requestId, fingerprint, request);
+      await this.#drive(
+        id,
+        requestId,
+        fingerprint,
+        request,
+        `supersedes request ${JSON.stringify(prior.record.requestId)}, which was released without sending an answer`,
+      );
     });
     // The session reader proactively projects transcript/ledger evidence under this SAME serial
     // queue. Reading the view while holding it would re-enter the key and deadlock; the operation is
@@ -211,13 +236,20 @@ export class StructuredAnswerCoordinator {
   }
 
   /** The only path that reaches a terminal, and the only one that writes an `accepted` receipt. */
-  async #drive(id: SessionId, requestId: string, fingerprint: string, request: AnswerRequestPayload): Promise<void> {
+  async #drive(
+    id: SessionId,
+    requestId: string,
+    fingerprint: string,
+    request: AnswerRequestPayload,
+    supersedes?: string,
+  ): Promise<void> {
     const accepted: AnswerOperationRecord = {
       requestId,
       toolUseId: request.toolUseId,
       fingerprint,
       acceptedAt: this.ports.clock.now(),
       outcome: 'accepted',
+      ...(supersedes === undefined ? {} : { reason: supersedes }),
     };
     await this.ports.ledger.append(id, accepted);
     try {
