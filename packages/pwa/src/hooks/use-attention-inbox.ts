@@ -12,7 +12,7 @@
  */
 
 import type { SessionView } from '@ferretry/protocol';
-import { createContext, useContext, useEffect, useMemo, useRef, useSyncExternalStore } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useSyncExternalStore } from 'react';
 import type { DaemonAttentionClient } from '../lib/attention-client.ts';
 import {
   attentionSummaryKey,
@@ -28,6 +28,7 @@ import {
 } from '../lib/attention-inbox.ts';
 import type { DaemonConnection, DaemonId } from '../lib/daemon-connection.ts';
 import { daemonSessionKey, daemonSessionScope } from '../lib/daemon-scope.ts';
+import type { DaemonFleetStore } from '../lib/fleet-store.ts';
 
 /** One paired machine, as the inbox reads it: its pairing, its name, its last session list. */
 export interface AttentionInboxMachine {
@@ -49,6 +50,35 @@ export interface AttentionInbox {
   readonly deferredState: DeferredAttentionState;
   readonly connectionFor: (daemonId: DaemonId) => DaemonConnection | undefined;
 }
+
+/** One paired machine to count Attention on: its pairing and the name the reader knows it by. */
+export interface InboxMachinePairing {
+  readonly connection: DaemonConnection;
+  readonly name: string;
+}
+
+/**
+ * Every paired machine with its last session list, from the fleet cache — identity-stable while no
+ * machine's list or pairing moved, so the inbox above it recomputes only when something did.
+ */
+export const useInboxMachines = (
+  fleet: DaemonFleetStore,
+  machines: readonly InboxMachinePairing[],
+): readonly AttentionInboxMachine[] => {
+  const snapshot = useSyncExternalStore(
+    useCallback(listener => fleet.subscribe(listener), [fleet]),
+    useCallback(() => fleet.getSnapshot(), [fleet]),
+  );
+  return useMemo(
+    () =>
+      machines.map(machine => ({
+        connection: machine.connection,
+        name: machine.name,
+        sessions: snapshot.daemons.get(machine.connection.daemonId)?.sessions ?? null,
+      })),
+    [machines, snapshot],
+  );
+};
 
 /** Sends one inbox answer through the ONE attention client, to the machine the card came from. */
 export const runInboxAction = async (

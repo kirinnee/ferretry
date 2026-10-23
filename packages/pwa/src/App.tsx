@@ -114,6 +114,7 @@ import { useAccountPickerSlice } from './hooks/use-account-picker.ts';
 import { useActiveCarrier, useDeviceRefused } from './hooks/use-active-carrier.ts';
 import { useAppViewport } from './hooks/use-app-viewport.ts';
 import { useAttentionSession, useAttentionSnapshot } from './hooks/use-attention.ts';
+import { AttentionInboxContext, useAttentionInboxModel, useInboxMachines } from './hooks/use-attention-inbox.ts';
 import { useCarrierPreferences, useTunnelService, useTunnelSwitches } from './hooks/use-carrier-preferences.ts';
 import { useConfigChangeFeed } from './hooks/use-config-change-feed.ts';
 import { useConnectionHealth } from './hooks/use-connection-health.ts';
@@ -1967,24 +1968,34 @@ export function AppShell() {
     .sessionsList;
   const savedMachineOrder = useMachineOrder(store.controls).saved;
   const everyMachine = sessionsList === 'all' && connectionSnapshot.connections.length > 1 && connection !== undefined;
-  const listedMachines = useMemo<readonly ListedMachine[]>(
+  /*
+   * EVERY PAIRED MACHINE IS READ, whichever list the reader chose: Attention is counted across all of
+   * them (the Attention tab, the sidebar's entry, the inbox), and an ask on a machine that is not on
+   * screen must still reach the badge. Each list is one cheap read on its own feed or slow beat — the
+   * Sessions list setting decides what the LIST shows, not what this browser is willing to hear about.
+   */
+  const everyPairedMachine = useMemo<readonly ListedMachine[]>(
     () =>
-      connection === undefined || !everyMachine
+      connection === undefined
         ? []
         : machineDisplayOrder(connectionSnapshot.connections, savedMachineOrder).map(record => ({
             connection: record,
             name: distinctDaemonName(record, connectionSnapshot.connections),
           })),
-    [connection, connectionSnapshot.connections, everyMachine, savedMachineOrder],
+    [connection, connectionSnapshot.connections, savedMachineOrder],
+  );
+  const listedMachines = useMemo<readonly ListedMachine[]>(
+    () => (everyMachine ? everyPairedMachine : []),
+    [everyMachine, everyPairedMachine],
   );
   const polled = useMemo<readonly DaemonConnection[]>(
     () =>
       connection === undefined || pageRoute.kind === 'machine-setup'
         ? []
-        : everyMachine
-          ? listedMachines.map(machine => machine.connection)
+        : everyPairedMachine.length > 1
+          ? everyPairedMachine.map(machine => machine.connection)
           : [connection],
-    [connection, everyMachine, listedMachines, pageRoute.kind],
+    [connection, everyPairedMachine, pageRoute.kind],
   );
   // Each machine's fleet feed, with no replay: the list is read when it says something moved.
   const openFleetFeed = useCallback<MachineFleetFeedOpener>(
@@ -2001,6 +2012,7 @@ export function AppShell() {
     openFleetFeed,
   );
   const lockedMachines = useLockedMachines(store.unlockGate);
+  const attentionInbox = useAttentionInboxModel(store.attention, useInboxMachines(store.fleet, everyPairedMachine));
   const machineSources = useMachineSources(store, listedMachines, lockedMachines);
   const allMachines = useMemo<AllMachinesList | undefined>(
     () =>
@@ -2500,6 +2512,7 @@ export function AppShell() {
   };
 
   return (
+    <AttentionInboxContext.Provider value={attentionInbox}>
     <AllMachinesContext.Provider value={allMachines}>
       <NotificationControlsContext.Provider value={notificationControlsHost}>
         <ThemeFollower />
@@ -2542,6 +2555,7 @@ export function AppShell() {
         <StepUpDialog gate={store.unlockGate} copy={UNLOCK_COPY} machineName={promptMachineName} />
       </NotificationControlsContext.Provider>
     </AllMachinesContext.Provider>
+    </AttentionInboxContext.Provider>
   );
 }
 
