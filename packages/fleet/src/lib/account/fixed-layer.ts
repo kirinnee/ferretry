@@ -306,8 +306,8 @@ export const PACK_ENV = 'FY_PACK';
 /** The Pack mode teaching. Short on purpose — it is in every prompt. */
 export const PACK_INSTRUCTION = (fy: string): string =>
   [
-    `Pack mode: you may hand self-contained parts of your task to sub-ferrets — other agents, each on the model that suits its part. Prefer them over your built-in subagents for real work; do small things yourself.`,
-    `1. \`${fy} recommend "<part>"\` lists the models usable now, best first, with the command to start each.`,
+    `Pack mode: you may hand self-contained parts of your task to sub-ferrets — other agents, each on the model that suits its part. Prefer them over your built-in subagents for real work; do small things yourself. Pick each model by the Routing line below.`,
+    `1. \`${fy} recommend\` lists the models usable now, most quota first, with the command to start each.`,
     `2. \`${fy} new --runtime <runtime> --model <model> [--effort <level>] --name "<short task title>" "<complete brief>"\` starts one (\`${fy} new --auto "<brief>"\` lets Ferretry choose). Always pass \`--name\` (2–5 Title Case words). The brief is all it knows: say what to do, where, and what to report.`,
     `3. If it refuses (out_of_quota, not_logged_in, cli_missing, probe_failed, …), read the reason and start the next candidate. limit_reached or depth_exceeded: do the work yourself.`,
     `4. \`${fy} wait <id>\` blocks until it finishes and prints its result. Check it, then combine the results yourself.`,
@@ -315,11 +315,11 @@ export const PACK_INSTRUCTION = (fy: string): string =>
   ].join('\n');
 
 /**
- * The models guide's one-line routing guidance (docs/pack-mode.md), appended to the Pack section when Pack
- * mode is on. The daemon derives it from the guide in effect at EVERY launch and never stores it, so a
- * restart hears the latest saved guide; the whole guidance is in `recommend`. It carries no quote,
- * backslash or control character, so it sits inside either harness's quoting unchanged — and the wrapper
- * strips them anyway, so a hand-set value cannot break a launch.
+ * The ONE routing prompt (docs/pack-mode.md § The routing prompt), whole, as one `Routing: …` line appended
+ * to the Pack section when Pack mode is on — the same text Jev decides with. The daemon renders it from the
+ * prompt in effect at EVERY launch and never stores it, so a restart hears the latest saved prompt. It
+ * carries no quote, backslash or control character, so it sits inside either harness's quoting unchanged —
+ * and the wrapper strips them anyway, so a hand-set value cannot break a launch.
  */
 export const PACK_ROUTING_ENV = 'FY_PACK_ROUTING';
 

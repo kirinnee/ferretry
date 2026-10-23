@@ -1,17 +1,7 @@
 import { describe, expect, it } from 'bun:test';
-import { type GuideUseCase, ModelsGuideFileSchema } from '@ferretry/protocol';
+import { MAX_ROUTING_PROMPT_CHARS, ModelsGuideFileSchema } from '@ferretry/protocol';
 import { parse } from 'yaml';
-import {
-  guideIssues,
-  readPackFile,
-  routingIssues,
-  useCaseForFile,
-  withModelsGuide,
-  withPackConfig,
-} from '../../../src/lib/pack/pack-files.ts';
-import { PACK_VIEW } from '../../support/pack.ts';
-
-const GUIDE = PACK_VIEW.guide.useCases;
+import { readPackFile, withPackConfig, withRoutingPrompt } from '../../../src/lib/pack/pack-files.ts';
 
 describe('readPackFile', () => {
   it('reads an empty file as nothing said, and refuses one that does not parse or check', () => {
@@ -57,114 +47,56 @@ describe('withPackConfig', () => {
     expect(withPackConfig('enabled: maybe\n', { enabled: true })).toBeNull();
     expect(withPackConfig('', { limits: { maxDepth: 99 } })).toBeNull();
   });
-});
 
-describe('the models guide file', () => {
-  it('writes every use case, trimmed, leaving out empty optional fields', () => {
-    const messy: GuideUseCase = {
-      id: ' bulk ',
-      title: ' Bulk ',
-      description: ' Renames. ',
-      keywords: [' rename ', ' '],
-      candidates: [{ provider: ' anthropic ', model: ' claude-haiku-4-5 ', effort: ' ', why: ' Cheap. ' }],
-    };
-    expect(useCaseForFile(messy)).toEqual({
-      id: 'bulk',
-      title: 'Bulk',
-      description: 'Renames.',
-      keywords: ['rename'],
-      candidates: [{ provider: 'anthropic', model: 'claude-haiku-4-5', why: 'Cheap.' }],
-    });
-    expect(useCaseForFile({ ...messy, keywords: undefined, candidates: [] })).not.toHaveProperty('keywords');
-    expect(
-      useCaseForFile({
-        ...messy,
-        candidates: [{ provider: 'openai', model: 'm', harness: 'codex', effort: 'high', why: 'w' }],
-      }).candidates,
-    ).toEqual([{ provider: 'openai', model: 'm', harness: 'codex', effort: 'high', why: 'w' }]);
-    const text = withModelsGuide('# my guide\n', GUIDE) ?? '';
-    expect(text).toContain('# my guide');
-    expect(text).toContain('id: hard');
-    expect(text).toContain('model: gpt-6-astra');
-  });
-
-  it('removes the use cases for the built-in guide', () => {
-    const text = withModelsGuide(withModelsGuide('', GUIDE) ?? '', null) ?? '';
-    expect(text).not.toContain('useCases');
-  });
-
-  it('refuses a file that does not parse, and a guide that would not check', () => {
-    expect(withModelsGuide('useCases: [', GUIDE)).toBeNull();
-    expect(withModelsGuide('', [{ ...GUIDE[0], id: 'Not An Id' } as GuideUseCase])).toBeNull();
-  });
-
-  it('says what is wrong in the editor’s words', () => {
-    expect(guideIssues(GUIDE)).toEqual([]);
-    const broken = [
-      { ...(GUIDE[0] as GuideUseCase), title: ' ', candidates: [{ provider: 'a', model: 'b', why: '' }] },
-      GUIDE[0] as GuideUseCase,
-    ];
-    const issues = guideIssues(broken);
-    expect(issues.some(issue => issue.startsWith('Use case 1 › title:'))).toBe(true);
-    expect(issues.some(issue => issue.startsWith('Use case 1 › candidate 1 › why:'))).toBe(true);
-    expect(issues.some(issue => issue.startsWith('Use case 2 › id:') && issue.includes('appears twice'))).toBe(true);
-    expect(
-      guideIssues(Array.from({ length: 25 }, (_, index) => ({ ...(GUIDE[1] as GuideUseCase), id: `u${index}` }))),
-    ).toEqual([expect.stringContaining('24')]);
-  });
-});
-
-describe('routing preferences in pack.yaml', () => {
-  it('writes the owner’s words trimmed, and an empty string removes the key', () => {
-    const written = withPackConfig('', { routingPreferences: '  Prefer cheap models for chores.  ' });
-    expect(readPackFile(written ?? '')).toEqual({ routingPreferences: 'Prefer cheap models for chores.' });
-    const cleared = withPackConfig(written ?? '', { routingPreferences: '   ' });
-    expect(readPackFile(cleared ?? '')).toEqual({});
-    expect(cleared).not.toContain('routingPreferences');
-  });
-
-  it('leaves the other settings and a comment alone', () => {
-    const text = withPackConfig('# mine\nenabled: false\n', { routingPreferences: 'Cheap first.' });
+  it('leaves an old routingPreferences key alone, still read so the daemon can migrate it', () => {
+    const text = withPackConfig('# mine\nroutingPreferences: Cheap first.\n', { enabled: false }) ?? '';
     expect(text).toContain('# mine');
-    expect(readPackFile(text ?? '')).toEqual({ enabled: false, routingPreferences: 'Cheap first.' });
+    expect(readPackFile(text)).toEqual({ enabled: false, routingPreferences: 'Cheap first.' });
   });
 });
 
-describe('routing guidance in models-guide.yaml', () => {
-  const ROUTING = { prompt: 'Use Opus for hard work.', short: 'Opus for hard work' };
-  const read = (text: string | null) => ModelsGuideFileSchema.parse(parse(text ?? ''));
+describe('withRoutingPrompt', () => {
+  const read = (text: string | null) => ModelsGuideFileSchema.parse(parse(text ?? '') ?? {});
+  const SUGGESTED = [
+    '# my routing',
+    'prompt: Opus for everything.',
+    'suggested:',
+    '  by: gpt-6-astra',
+    '  via: codex-main',
+    '  at: 2026-10-22T14:30:00.000Z',
+    '  acceptedAt: 2026-10-22T14:31:00.000Z',
+    '',
+  ].join('\n');
 
-  it('checks the two halves with the owner’s words', () => {
-    expect(routingIssues({ prompt: '', short: '' })).toEqual([]);
-    expect(routingIssues(ROUTING)).toEqual([]);
-    expect(routingIssues({ prompt: 'x'.repeat(6001), short: 'ok' })[0]).toContain('The routing guidance:');
-    expect(routingIssues({ prompt: 'ok', short: 'x'.repeat(151) })[0]).toContain('The one-line summary:');
-    expect(routingIssues({ prompt: 'only words', short: '' }).length).toBeGreaterThan(0);
+  it('writes the owner’s words trimmed, with the schema modeline, into an empty file', () => {
+    const text = withRoutingPrompt('', '  Hard work → claude-opus-5-5 at max.  ');
+    expect(text).toContain('# yaml-language-server: $schema=');
+    expect(read(text)).toEqual({ prompt: 'Hard work → claude-opus-5-5 at max.' });
   });
 
-  it('writes a pair trimmed, removes it with null, and leaves the file’s own when not asked', () => {
-    const written = withModelsGuide('', GUIDE, { prompt: '  Use Opus for hard work. ', short: ' Opus for hard work ' });
-    expect(read(written).routing).toEqual(ROUTING);
-    expect(read(withModelsGuide(written ?? '', GUIDE)).routing).toEqual(ROUTING);
-    expect(read(withModelsGuide(written ?? '', GUIDE, null)).routing).toBeUndefined();
-    expect(read(withModelsGuide('', GUIDE)).routing).toBeUndefined();
+  it('drops the record of a clean-up, because saved text is the owner’s again, and keeps a comment', () => {
+    expect(read(SUGGESTED).suggested?.by).toBe('gpt-6-astra');
+    const text = withRoutingPrompt(SUGGESTED, 'Opus for hard work, Haiku for chores.');
+    expect(text).toContain('# my routing');
+    expect(read(text)).toEqual({ prompt: 'Opus for hard work, Haiku for chores.' });
   });
 
-  it('refuses a routing pair the schema would not take', () => {
-    expect(withModelsGuide('', GUIDE, { prompt: 'x'.repeat(6001), short: 'ok' })).toBeNull();
+  it('removes the prompt for null or blank words, so the default applies', () => {
+    expect(read(withRoutingPrompt(SUGGESTED, null))).toEqual({});
+    expect(read(withRoutingPrompt(SUGGESTED, '   '))).toEqual({});
+    expect(withRoutingPrompt(SUGGESTED, null)).not.toContain('prompt:');
   });
 
-  it('drops the record of a suggestion when the owner saves their own edit', () => {
-    const suggested = [
-      'suggested:',
-      '  by: gpt-6-astra',
-      '  via: codex-main',
-      '  at: 2026-10-22T14:30:00.000Z',
-      '  acceptedAt: 2026-10-22T14:31:00.000Z',
-      '',
-    ].join('\n');
-    expect(read(suggested).suggested?.by).toBe('gpt-6-astra');
-    expect(read(withModelsGuide(suggested, GUIDE)).suggested).toBeUndefined();
-    expect(read(withModelsGuide(suggested, null)).suggested).toBeUndefined();
+  it('never writes the old keys, and leaves ones a file still carries for the migration', () => {
+    const legacy = 'useCases: []\n';
+    const text = withRoutingPrompt(legacy, 'Opus first.');
+    expect(read(text)).toEqual({ useCases: [], prompt: 'Opus first.' });
+    expect(withRoutingPrompt('', 'Opus first.')).not.toMatch(/useCases|routing:|models:/u);
+  });
+
+  it('refuses a file that does not parse, and a prompt over the limit', () => {
+    expect(withRoutingPrompt('prompt: [', 'Opus.')).toBeNull();
+    expect(withRoutingPrompt('', 'x'.repeat(MAX_ROUTING_PROMPT_CHARS + 1))).toBeNull();
+    expect(withRoutingPrompt('', 'x'.repeat(MAX_ROUTING_PROMPT_CHARS))).not.toBeNull();
   });
 });

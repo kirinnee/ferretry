@@ -518,7 +518,7 @@ function ferretSectionLines(harness: HarnessKind, fyCommand: string): string[] {
 }
 
 /**
- * The models guide's routing line (`PACK_ROUTING_ENV`), on its own line at the end of the Pack section.
+ * The routing prompt's line (`PACK_ROUTING_ENV`), on its own line at the end of the Pack section.
  * Quotes, backslashes and control characters are deleted first: the value is joined inside Codex's TOML
  * string and Claude's argument, and a value nobody checked must never break either.
  */

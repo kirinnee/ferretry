@@ -28,7 +28,7 @@
  * a request storm on a fleet of fifty.
  */
 
-import { PACK_GUIDE_BUILDER_LABEL, type SessionView } from '@ferretry/protocol';
+import { PACK_CLEAN_UP_LABEL, type SessionView } from '@ferretry/protocol';
 import { displayCallsign } from '../lib/callsign.ts';
 import type { Density, ModeFilter } from '../lib/controls.ts';
 import { type FleetProject, groupByProject, type ModeCounts, type SessionGroup } from '../lib/fleet-grouping.ts';
@@ -87,8 +87,8 @@ export const isStopped = (view: SessionView): boolean => TERMINAL_STATUSES.has(v
 export const matchesMode = (view: SessionView, mode: ModeFilter): boolean =>
   mode === 'all' || view.config.mode === mode;
 
-/** A guide-builder ferret: started by Settings › Pack, shown there rather than among the owner's ferrets. */
-export const isGuideBuilder = (view: SessionView): boolean => view.config.label === PACK_GUIDE_BUILDER_LABEL;
+/** A clean-up ferret: started by Settings › Pack (Clean up), shown there rather than among the owner’s ferrets. */
+export const isGuideBuilder = (view: SessionView): boolean => view.config.label === PACK_CLEAN_UP_LABEL;
 
 /**
  * Which sessions the bar draws before the kind is chosen: everything live, the stopped ones only when

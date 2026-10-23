@@ -81,17 +81,19 @@ const now = Date.UTC(2026, 9, 20, 2, 10, 0);
 const heredoc = (head, brief) => head + ' "$(cat <<\\'EOF\\'\\n' + brief + '\\nEOF\\n)"';
 const REVIEW = 'Review packages/daemon/src/lib/pack for races between concurrent starts.\\n\\nFocus on the probe cache and the admission count. Report each race as: where, how it happens, and a fix.';
 const ADVICE = [
-  "Use case: Hard planning, review and critical code (plan-review, from the task's words; the built-in guide)",
+  'Routing prompt (your routing prompt):',
+  'Planning and review go to claude-opus-5-5 at max; a second look at code Claude wrote goes to gpt-6-astra at high.',
+  'Chores go to claude-haiku-4-5 at low. When a login is low on quota, move down a tier.',
   '',
-  '1. ready   gpt-6-astra on codex-work · effort high',
-  '   A different family, for a second look at code Claude wrote.',
-  '2. ready   Claude Opus 5.5 (claude-opus-5-5) on claude-work · effort max',
-  '   The strongest planner and reviewer.',
-  '3. cannot  glm-5 · effort high',
-  '   Another family again.',
-  '   not_logged_in: zai-work needs signing in',
+  'Models usable here now (3):',
+  'ready  Claude Opus 5.5 (claude-opus-5-5) at max · claude-work · quota 5h 2% · week 46% · named 1st in the prompt',
+  '       fy new --runtime claude-work --model claude-opus-5-5 --effort max "<brief>"',
+  'ready  GPT 6 Astra (gpt-6-astra) at high · codex-work · quota 5h 31% · named 2nd in the prompt',
+  '       fy new --runtime codex-work --model gpt-6-astra --effort high "<brief>"',
+  'cannot GLM 5 (glm-5) · zai-work',
+  '       not_logged_in: zai-work needs signing in',
   '',
-  'Start the first: fy new --runtime codex-work --model gpt-6-astra --effort high "<brief>"',
+  'Start the first: fy new --runtime claude-work --model claude-opus-5-5 --effort max "<brief>"',
 ].join('\\n');
 const REFUSED = [
   'Exit code 2',
@@ -99,16 +101,16 @@ const REFUSED = [
   'Try the next candidate.',
   '',
   'Tried:',
-  '  refused codex-work gpt-6-astra (probe 45000ms) — probe_failed: codex-work did not answer a "reply OK" check on gpt-6-astra: timed out after 45s.',
+  '  refused codex-work gpt-6-astra (probe failed 45000 ms) — probe_failed: codex-work did not answer a "reply OK" check on gpt-6-astra: timed out after 45s.',
 ].join('\\n');
 const STARTED_NADIA = [
-  'Started nadia (' + NADIA + ') on claude-work, claude-opus-5-5 — decided by you.',
-  '  started claude-work claude-opus-5-5 (probe 812ms)',
+  'Started nadia (' + NADIA + ') on claude-work, claude-opus-5-5 — decided by the routing prompt.',
+  '  started claude-work claude-opus-5-5 (probe OK 812 ms)',
   'Wait for its result: fy wait ' + NADIA,
 ].join('\\n');
 const STARTED_TOMI = [
   'Started tomi (' + TOMI + ') on claude-fast, claude-haiku-4-5 — decided by you.',
-  '  started claude-fast claude-haiku-4-5 (probe cached)',
+  '  started claude-fast claude-haiku-4-5 (probe OK, cached)',
   'Wait for its result: fy wait ' + TOMI,
 ].join('\\n');
 const WAITED = [
@@ -262,8 +264,8 @@ try {
         const page = await context.newPage();
         await page.goto(`${server.url}?theme=studio-${scheme}`);
         await page.locator('[data-scene="chat"] [data-pack-state="started"]').first().waitFor({ state: 'visible' });
-        // The folds a reader would open: the ranked models and the working sub-ferret's brief.
-        await page.locator('[data-pack-kind="recommend"] summary').click();
+        // The folds a reader would open: the routing prompt, the models usable now and the working sub-ferret's brief.
+        for (const summary of await page.locator('[data-pack-kind="recommend"] summary').all()) await summary.click();
         await page.locator('[data-pack-state="started"]').last().locator('.fy-pack-fold summary').click();
         // A phone's bar draws no sub-ferret pill at all; the desktop's opens to the ACTIVE ones only.
         if (viewport.mobile) {

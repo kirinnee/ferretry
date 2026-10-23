@@ -1,11 +1,10 @@
 import '../../../support/dom.ts';
 import { afterEach, describe, expect, it } from 'bun:test';
 import {
-  PACK_GUIDE_ACCEPT_PATH,
-  PACK_GUIDE_DESCRIBE_PATH,
-  PACK_GUIDE_SUGGEST_PATH,
-  PACK_GUIDE_UNDO_PATH,
-  packGuideJobPath,
+  PACK_CLEAN_UP_JOBS_PATH,
+  PACK_CLEAN_UP_PATH,
+  PACK_ROUTING_ACCEPT_PATH,
+  PACK_ROUTING_UNDO_PATH,
 } from '@ferretry/protocol';
 import type { FyApiClient } from '@ferretry/protocol/client';
 import type { z } from 'zod';
@@ -29,15 +28,15 @@ const fake = ({
   view = (): unknown => PACK_VIEW,
   text = '',
   put = () => ({ path: 'pack.yaml', etag: 'e2', outcome: 'applied' }),
-  guide = (): unknown => {
-    throw new Error('no generator route served');
+  routing = (): unknown => {
+    throw new Error('no routing route served');
   },
 }: {
   readonly view?: () => unknown;
   readonly text?: string;
   readonly put?: () => unknown;
-  /** The answer to a generator route, by path. */
-  readonly guide?: (path: string) => unknown;
+  /** The answer to a Clean up, accept or undo route, by path. */
+  readonly routing?: (path: string) => unknown;
 } = {}) => {
   const wire: Wire[] = [];
   const client = {
@@ -45,7 +44,7 @@ const fake = ({
       const method = init?.method ?? 'GET';
       wire.push({ method, path, body: init?.body === undefined ? undefined : JSON.parse(init.body) });
       if (path === '/v1/pack') return schema.parse(view());
-      if (path.startsWith('/v1/pack/guide')) return schema.parse(guide(path));
+      if (path.startsWith('/v1/pack/routing')) return schema.parse(routing(path));
       if (method === 'PUT') return schema.parse(put());
       const file = decodeURIComponent(path.split('path=')[1] ?? '');
       return schema.parse(
@@ -84,6 +83,12 @@ const mounted = async (daemon: DaemonConnection | undefined, factory: ReturnType
   );
 };
 
+const remount = async (daemon: DaemonConnection | undefined, factory: ReturnType<typeof fake>['factory']) => {
+  await shown?.unmount();
+  shown = null;
+  await mounted(daemon, factory);
+};
+
 const readKind = (): string | null | undefined => shown?.container.querySelector('span')?.getAttribute('data-read');
 
 const run = async <T = PackSave,>(save: (pack: MachinePack) => Promise<T>): Promise<T> => {
@@ -95,6 +100,8 @@ const run = async <T = PackSave,>(save: (pack: MachinePack) => Promise<T>): Prom
   return result;
 };
 
+const putBodies = (wire: readonly Wire[]) => wire.filter(call => call.method === 'PUT').map(call => call.body);
+
 describe('useMachinePack', () => {
   it('reads nothing without a machine and refuses a save', async () => {
     const served = fake();
@@ -102,22 +109,23 @@ describe('useMachinePack', () => {
     expect(readKind()).toBe('failed');
     expect(served.wire).toEqual([]);
     expect((await run(pack => pack.saveConfig({ enabled: false }))).kind).toBe('refused');
+    expect((await run(pack => pack.savePrompt('Opus.'))).kind).toBe('refused');
   });
 
   it('reads the machine’s Pack view, and says why when it cannot', async () => {
     const served = fake();
     await mounted(alpha, served.factory);
     await settleUntil(() => readKind() === 'ready', 'the view to be read', runAsync);
-    expect(latest?.read.kind === 'ready' && latest.read.view.models).toHaveLength(PACK_VIEW.models.length);
+    expect(latest?.read.kind === 'ready' && latest.read.view.available).toHaveLength(PACK_VIEW.available.length);
 
-    await shown?.unmount();
-    shown = null;
-    const failing = fake({
-      view: () => {
-        throw new Error('unreachable');
-      },
-    });
-    await mounted(alpha, failing.factory);
+    await remount(
+      alpha,
+      fake({
+        view: () => {
+          throw new Error('unreachable');
+        },
+      }).factory,
+    );
     await settleUntil(() => readKind() === 'failed', 'the read to fail', runAsync);
   });
 
@@ -138,15 +146,26 @@ describe('useMachinePack', () => {
     await settleUntil(() => served.wire.filter(call => call.path === '/v1/pack').length === 2, 're-read', runAsync);
   });
 
-  it('writes the whole guide to models-guide.yaml, and removes it for the built-in one', async () => {
-    const served = fake();
+  it('writes the routing prompt to models-guide.yaml dropping `suggested`, and removes it for the default', async () => {
+    const suggested = [
+      'prompt: Opus for everything.',
+      'suggested:',
+      '  by: gpt-6-astra',
+      '  via: codex-main',
+      '  at: 2026-10-22T14:30:00.000Z',
+      '  acceptedAt: 2026-10-22T14:31:00.000Z',
+      '',
+    ].join('\n');
+    const served = fake({ text: suggested });
     await mounted(alpha, served.factory);
-    expect((await run(pack => pack.saveGuide(PACK_VIEW.guide.useCases))).kind).toBe('applied');
-    expect((await run(pack => pack.saveGuide(null))).kind).toBe('applied');
-    const puts = served.wire.filter(call => call.method === 'PUT');
-    expect(puts.map(call => (call.body as { path: string }).path)).toEqual(['models-guide.yaml', 'models-guide.yaml']);
-    expect(JSON.stringify(puts[0]?.body)).toContain('claude-opus-5-5');
-    expect(JSON.stringify(puts[1]?.body)).not.toContain('useCases');
+    expect((await run(pack => pack.savePrompt('Opus for hard work.'))).kind).toBe('applied');
+    expect((await run(pack => pack.savePrompt(null))).kind).toBe('applied');
+    const [saved, removed] = putBodies(served.wire) as { path: string; text: string }[];
+    expect(saved?.path).toBe('models-guide.yaml');
+    expect(saved?.text).toContain('prompt: Opus for hard work.');
+    expect(saved?.text).not.toContain('suggested');
+    expect(removed?.text).not.toContain('prompt');
+    expect(removed?.text).not.toContain('suggested');
   });
 
   it('says plainly when the daemon holds a loosening edit for the owner to confirm', async () => {
@@ -164,117 +183,93 @@ describe('useMachinePack', () => {
       kind: 'pending',
       message: 'Saved, but not in effect until you confirm it: Jev now decides.',
     });
-    const bare = fake({ put: () => ({ path: 'pack.yaml', etag: 'e2', outcome: 'pending' }) });
-    await shown?.unmount();
-    shown = null;
-    await mounted(alpha, bare.factory);
+    await remount(alpha, fake({ put: () => ({ path: 'pack.yaml', etag: 'e2', outcome: 'pending' }) }).factory);
     expect((await run(pack => pack.saveConfig({ decision: 'jev' }))).kind).toBe('pending');
   });
 
-  it('refuses a file that does not check, and a write the daemon rejects', async () => {
+  it('refuses a file that does not check, a prompt that would not, and a write the daemon rejects', async () => {
     const broken = fake({ text: 'enabled: maybe\n' });
     await mounted(alpha, broken.factory);
     const result = await run(pack => pack.saveConfig({ enabled: false }));
     expect(result).toEqual({ kind: 'refused', message: 'pack.yaml has a problem; fix it in the Files panel first.' });
+    expect((await run(pack => pack.savePrompt('x'.repeat(1_201)))).kind).toBe('refused');
     expect(broken.wire.some(call => call.method === 'PUT')).toBe(false);
 
-    await shown?.unmount();
-    shown = null;
-    const rejecting = fake({
-      put: () => {
-        throw new Error('boom');
-      },
-    });
-    await mounted(alpha, rejecting.factory);
-    expect((await run(pack => pack.saveGuide(null))).kind).toBe('refused');
+    await remount(
+      alpha,
+      fake({
+        put: () => {
+          throw new Error('boom');
+        },
+      }).factory,
+    );
+    expect((await run(pack => pack.savePrompt(null))).kind).toBe('refused');
   });
 });
 
-describe('useMachinePack › the guide generator', () => {
+describe('useMachinePack › Clean up', () => {
   const started = { outcome: 'started', job: RUNNING_JOB };
-  const written = { outcome: 'applied', message: 'Guide saved. Undo keeps the old one.' };
+  const written = { outcome: 'applied', message: 'Routing prompt saved. Undo keeps the old one.' };
 
-  it('starts a builder with exactly what was asked, and reads the view again to find it', async () => {
-    const served = fake({ guide: () => started });
+  it('starts a clean-up with exactly what was asked, and reads the view again to find it', async () => {
+    const served = fake({ routing: () => started });
     await mounted(alpha, served.factory);
     await settleUntil(() => readKind() === 'ready', 'the view', runAsync);
-    const result = await run(pack => pack.suggest({ runtime: 'codex-main', preferences: 'Cheap first.' }));
+    const result = await run(pack => pack.cleanUp({ prompt: 'opus for hard stuff' }));
     expect(result).toEqual({ kind: 'started', job: RUNNING_JOB });
-    const call = served.wire.find(wire => wire.path === PACK_GUIDE_SUGGEST_PATH);
-    expect(call).toMatchObject({ method: 'POST', body: { runtime: 'codex-main', preferences: 'Cheap first.' } });
+    const call = served.wire.find(wire => wire.path === PACK_CLEAN_UP_PATH);
+    expect(call).toMatchObject({ method: 'POST', body: { prompt: 'opus for hard stuff' } });
     await settleUntil(() => served.wire.filter(wire => wire.path === '/v1/pack').length === 2, 're-read', runAsync);
   });
 
   it('says why a start was refused, by the daemon’s answer and by its failure', async () => {
-    const refused = fake({ guide: () => ({ outcome: 'refused', message: 'No runtime is ready.' }) });
-    await mounted(alpha, refused.factory);
-    expect(await run(pack => pack.suggest({}))).toEqual({ kind: 'refused', message: 'No runtime is ready.' });
-    await shown?.unmount();
-    shown = null;
-    const failing = fake();
-    await mounted(alpha, failing.factory);
-    expect((await run(pack => pack.suggest({}))).kind).toBe('refused');
+    await mounted(alpha, fake({ routing: () => ({ outcome: 'refused', message: 'No runtime is ready.' }) }).factory);
+    expect(await run(pack => pack.cleanUp({}))).toEqual({ kind: 'refused', message: 'No runtime is ready.' });
+    await remount(alpha, fake().factory);
+    expect((await run(pack => pack.cleanUp({}))).kind).toBe('refused');
   });
 
   it('reads one run, and says when it cannot', async () => {
     const result = { job: { ...RUNNING_JOB, status: 'suggested' }, suggestion: SUGGESTION };
-    const served = fake({ guide: () => result });
+    const served = fake({ routing: () => result });
     await mounted(alpha, served.factory);
     const read = await run(pack => pack.readJob('job-1'));
     expect(read.kind === 'read' && read.result.suggestion?.suggested.by).toBe('gpt-6-astra');
-    expect(served.wire.some(wire => wire.path === packGuideJobPath('job-1') && wire.method === 'GET')).toBe(true);
-    await shown?.unmount();
-    shown = null;
-    await mounted(alpha, fake().factory);
+    expect(served.wire.some(wire => wire.path === `${PACK_CLEAN_UP_JOBS_PATH}/job-1` && wire.method === 'GET')).toBe(
+      true,
+    );
+    await remount(alpha, fake().factory);
     expect((await run(pack => pack.readJob('job-1'))).kind).toBe('failed');
   });
 
-  it('accepts, undoes and describes through their routes, and reads the view again after each', async () => {
-    const served = fake({ guide: () => written });
+  it('accepts and undoes through their routes, and reads the view again after each', async () => {
+    const served = fake({ routing: () => written });
     await mounted(alpha, served.factory);
     await settleUntil(() => readKind() === 'ready', 'the view', runAsync);
-    const accept = { useCases: [...PACK_VIEW.guide.useCases], suggested: SUGGESTION.suggested, partial: true };
-    expect(await run(pack => pack.acceptGuide(accept))).toEqual({ kind: 'applied', message: written.message });
-    expect((await run(pack => pack.undoGuide())).kind).toBe('applied');
-    expect((await run(pack => pack.describeModel({ model: 'glm-5.3', description: null }))).kind).toBe('applied');
-    const paths = served.wire.filter(wire => wire.path.startsWith('/v1/pack/guide'));
-    expect(paths.map(wire => wire.path)).toEqual([
-      PACK_GUIDE_ACCEPT_PATH,
-      PACK_GUIDE_UNDO_PATH,
-      PACK_GUIDE_DESCRIBE_PATH,
-    ]);
-    expect(paths[0]?.body).toEqual(accept);
-    expect(paths[1]).toMatchObject({ method: 'POST', body: undefined });
-    expect(paths[2]?.body).toEqual({ model: 'glm-5.3', description: null });
-    await settleUntil(() => served.wire.filter(wire => wire.path === '/v1/pack').length === 4, 're-reads', runAsync);
+    const accept = { prompt: SUGGESTION.after, suggested: SUGGESTION.suggested };
+    expect(await run(pack => pack.accept(accept))).toEqual({ kind: 'applied', message: written.message });
+    expect((await run(pack => pack.undo())).kind).toBe('applied');
+    const calls = served.wire.filter(wire => wire.path.startsWith('/v1/pack/routing'));
+    expect(calls.map(wire => wire.path)).toEqual([PACK_ROUTING_ACCEPT_PATH, PACK_ROUTING_UNDO_PATH]);
+    expect(calls[0]).toMatchObject({ method: 'POST', body: accept });
+    expect(calls[1]).toMatchObject({ method: 'POST', body: undefined });
+    await settleUntil(() => served.wire.filter(wire => wire.path === '/v1/pack').length === 3, 're-reads', runAsync);
   });
 
   it('passes on “nothing to do”, and refuses with the daemon’s words when a write fails', async () => {
-    const nothing = fake({ guide: () => ({ outcome: 'nothing', message: 'There is nothing to undo.' }) });
-    await mounted(alpha, nothing.factory);
-    expect(await run(pack => pack.undoGuide())).toEqual({ kind: 'nothing', message: 'There is nothing to undo.' });
-    await shown?.unmount();
-    shown = null;
-    await mounted(alpha, fake().factory);
-    expect((await run(pack => pack.undoGuide())).kind).toBe('refused');
-  });
-
-  it('refuses every generator call without a machine', async () => {
-    await mounted(undefined, fake().factory);
-    expect((await run(pack => pack.suggest({}))).kind).toBe('refused');
-    expect((await run(pack => pack.readJob('x'))).kind).toBe('failed');
-    expect((await run(pack => pack.acceptGuide({ useCases: [], suggested: SUGGESTION.suggested }))).kind).toBe(
-      'refused',
+    await mounted(
+      alpha,
+      fake({ routing: () => ({ outcome: 'nothing', message: 'There is nothing to undo.' }) }).factory,
     );
+    expect(await run(pack => pack.undo())).toEqual({ kind: 'nothing', message: 'There is nothing to undo.' });
+    await remount(alpha, fake().factory);
+    expect((await run(pack => pack.undo())).kind).toBe('refused');
   });
 
-  it('writes routing guidance with the guide only when asked', async () => {
-    const served = fake();
-    await mounted(alpha, served.factory);
-    await run(pack => pack.saveGuide(PACK_VIEW.guide.useCases, { prompt: 'Opus first.', short: 'Opus first' }));
-    await run(pack => pack.saveGuide(PACK_VIEW.guide.useCases));
-    const puts = served.wire.filter(call => call.method === 'PUT').map(call => JSON.stringify(call.body));
-    expect(puts[0]).toContain('Opus first.');
-    expect(puts[1]).not.toContain('routing');
+  it('refuses every Clean up call without a machine', async () => {
+    await mounted(undefined, fake().factory);
+    expect((await run(pack => pack.cleanUp({}))).kind).toBe('refused');
+    expect((await run(pack => pack.readJob('x'))).kind).toBe('failed');
+    expect((await run(pack => pack.accept({ prompt: 'Opus.', suggested: SUGGESTION.suggested }))).kind).toBe('refused');
   });
 });

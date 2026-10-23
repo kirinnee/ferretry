@@ -1658,7 +1658,7 @@ function SettingsRoute({ connection }: DaemonPageProps) {
       securityLogSettingsTab(createDaemonClient),
       configFilesSettingsTab(createDaemonClient),
       { ...LEARNING_SETTINGS_TAB, Surface: LearningSettingsTabSurface },
-      // Sub-ferrets, who picks their model, and the models guide (docs/pack-mode.md).
+      // Sub-ferrets, who picks their model, and the routing prompt (docs/pack-mode.md).
       PACK_SETTINGS_TAB,
       // What this machine runs and getting it up to date (docs/updating.md).
       aboutSettingsTab(createDaemonClient),

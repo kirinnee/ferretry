@@ -37,7 +37,7 @@ export const CONFIG_CHANGE_KINDS = [
   'learning',
   'voice',
   'presets',
-  /** `pack.yaml` and `models-guide.yaml`: Pack mode's settings and its models guide. */
+  /** `pack.yaml` and `models-guide.yaml`: Pack mode's settings and its routing prompt. */
   'pack',
 ] as const;
 export const ConfigChangeKindSchema = z.enum(CONFIG_CHANGE_KINDS);

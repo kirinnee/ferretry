@@ -13,15 +13,15 @@ const codex = (cmd: string, result?: ToolCall['result'], key?: string) => call('
 
 // What `packages/cli/src/lib/pack/render.ts` prints, captured from the renderer itself.
 const STARTED = [
-  'Started nadia (mvq1k2-7f3a) on claude-auto-work, claude-opus-5-5 — decided by you.',
-  '  refused codex-auto-work gpt-6-astra (probe 0ms) — out_of_quota: codex-auto-work has used its quota',
-  '  started claude-auto-work claude-opus-5-5 (probe 812ms)',
+  'Started nadia (mvq1k2-7f3a) on claude-auto-work, claude-opus-5-5 — decided by the routing prompt.',
+  '  refused codex-auto-work gpt-6-astra (probe failed 3436 ms) — out_of_quota: codex-auto-work has used its quota',
+  '  started claude-auto-work claude-opus-5-5 (probe OK 812 ms)',
   'Wait for its result: fy wait mvq1k2-7f3a',
 ].join('\n');
 const STARTED_BARE = [
   'Started mvq1k2-7f3a on claude-auto-work — decided by jev.',
-  'Jev could not answer, so the guide decided.',
-  '  started claude-auto-work (probe cached)',
+  'Jev could not answer, so the routing prompt decided.',
+  '  started claude-auto-work (probe OK, cached)',
   'Wait for its result: fy wait mvq1k2-7f3a',
 ].join('\n');
 const REFUSED = [
@@ -29,19 +29,44 @@ const REFUSED = [
   'Try the next candidate.',
   '',
   'Tried:',
-  '  refused codex-auto-work gpt-6-astra (probe 45000ms) — probe_failed: codex-auto-work did not answer a "reply OK" check on gpt-6-astra: timed out.',
+  '  refused codex-auto-work gpt-6-astra (probe failed 45000 ms) — probe_failed: codex-auto-work did not answer a "reply OK" check on gpt-6-astra: timed out.',
 ].join('\n');
 const ADVICE = [
-  "Use case: Hard planning, review and critical code (plan-review, from the task's words; the built-in guide)",
+  'Routing prompt (your routing prompt):',
+  'Planning and review → claude-opus-5-5 at max.',
   '',
-  '1. ready   Claude Opus 5.5 (claude-opus-5-5) on claude-auto-work · effort max',
-  '   The strongest planner and reviewer.',
-  '2. cannot  gpt-6-astra · effort high',
-  '   A different family.',
-  '   cli_missing: codex is not installed',
+  'Chores → claude-haiku-5-5 at low.',
+  '',
+  'Models usable here now (3):',
+  'ready  Claude Opus 5.5 (claude-opus-5-5) at max · claude-auto-work · quota 5h 2% · week 46% · named 1st in the prompt',
+  '       fy new --runtime claude-auto-work --model claude-opus-5-5 --effort max "<brief>"',
+  'ready  Claude Sonnet 5 (claude-sonnet-5) · claude-auto-work',
+  '       fy new --runtime claude-auto-work --model claude-sonnet-5 "<brief>"',
+  'cannot GPT 6 Astra (gpt-6-astra) · codex-work · quota not measured',
+  '       cli_missing: codex is not installed',
   '',
   'Start the first: fy new --runtime claude-auto-work --model claude-opus-5-5 --effort max "<brief>"',
 ].join('\n');
+const ADVICE_OPTIONS = [
+  {
+    ready: true,
+    model: 'Claude Opus 5.5',
+    id: 'claude-opus-5-5',
+    runtime: 'claude-auto-work',
+    effort: 'max',
+    named: 1,
+    quota: '5h 2% · week 46%',
+  },
+  { ready: true, model: 'Claude Sonnet 5', id: 'claude-sonnet-5', runtime: 'claude-auto-work' },
+  {
+    ready: false,
+    model: 'GPT 6 Astra',
+    id: 'gpt-6-astra',
+    runtime: 'codex-work',
+    quota: 'not measured',
+    refusal: 'cli_missing: codex is not installed',
+  },
+];
 
 const BRIEF = 'Review packages/daemon/src/lib/pack for races.\n\nReport findings as a list.';
 const NEW = `fy new --runtime claude-auto-work --model claude-opus-5-5 --effort high "$(cat <<'EOF'\n${BRIEF}\nEOF\n)"`;
@@ -83,7 +108,7 @@ const view = {
 const startedJson: PackNewOutcome = {
   outcome: 'started',
   view,
-  decidedBy: 'guide',
+  decidedBy: 'routing',
   attempts: [{ runtime: 'claude-auto-work', model: 'claude-opus-5-5', outcome: 'started', probe: 'ran', probeMs: 640 }],
 };
 const refusedJson: PackNewOutcome = {
@@ -95,28 +120,34 @@ const refusedJson: PackNewOutcome = {
   },
   attempts: [{ runtime: 'claude-auto-work', outcome: 'refused', probe: 'cached' }],
 };
+const quota = (summary: string, state: 'plenty' | 'unknown' = 'plenty') => ({ state, windows: [], summary });
 const adviceJson: PackRecommendation = {
   task: 'rename a helper',
-  useCase: { id: 'bulk', title: 'Mechanical bulk edits', matchedBy: 'words' },
-  guideSource: 'file',
-  candidates: [
+  routing: { text: 'Chores → claude-haiku-4-5 at low.', source: 'default' },
+  available: [
     {
-      rank: 1,
-      provider: 'anthropic',
       model: 'claude-haiku-4-5',
       modelLabel: 'Haiku 4.5',
-      effort: 'low',
-      why: 'Cheap and quick.',
+      harness: 'claude',
+      efforts: ['low', 'high'],
       runtime: 'claude-auto-work',
+      runtimes: 1,
       ready: true,
+      quota: quota('5h 10%'),
+      named: 1,
+      effort: 'low',
+      command: 'fy new --runtime claude-auto-work --model claude-haiku-4-5 --effort low "<brief>"',
     },
     {
-      rank: 2,
-      provider: 'zai',
       model: 'glm-5',
-      why: 'Another family.',
+      modelLabel: 'GLM 5',
+      harness: 'claude',
+      efforts: [],
+      runtime: 'zai-work',
+      runtimes: 1,
       ready: false,
       refusal: { code: 'not_logged_in', message: 'zai-work needs signing in' },
+      quota: quota('not measured', 'unknown'),
     },
   ],
 };
@@ -148,13 +179,13 @@ describe('readPackCall — new', () => {
       teammate: 'nadia',
       runtime: 'claude-auto-work',
       model: 'claude-opus-5-5',
-      decidedBy: 'you',
+      decidedBy: 'the routing prompt',
       attempts: [
         {
           runtime: 'codex-auto-work',
           model: 'gpt-6-astra',
           outcome: 'refused',
-          probe: 0,
+          probe: 3436,
           code: 'out_of_quota',
           message: 'codex-auto-work has used its quota',
         },
@@ -169,12 +200,51 @@ describe('readPackCall — new', () => {
       id: 'mvq1k2-7f3a',
       runtime: 'claude-auto-work',
       decidedBy: 'jev',
-      note: 'Jev could not answer, so the guide decided.',
+      note: 'Jev could not answer, so the routing prompt decided.',
       attempts: [{ runtime: 'claude-auto-work', outcome: 'started', probe: 'cached' }],
     });
     // No note: the line after the head is an attempt or the wait hint.
-    const plain = 'Started tomi (mvx) on claude-w — decided by guide.\nWait for its result: fy wait mvx';
+    const plain = 'Started tomi (mvx) on claude-w — decided by you.\nWait for its result: fy wait mvx';
     expect(done(readPackCall(bash('fy new --auto x', { text: plain }), 'fy'))).not.toHaveProperty('note');
+  });
+
+  test('reads a decider of several words as given, and the one-word ones', () => {
+    const decided = (who: string) =>
+      done(
+        readPackCall(bash('fy new --auto x', { text: `Started tomi (mvx) on claude-w — decided by ${who}.` }), 'fy'),
+      );
+    expect(decided('the routing prompt')).toMatchObject({
+      outcome: 'started',
+      id: 'mvx',
+      decidedBy: 'the routing prompt',
+    });
+    expect(decided('you')).toMatchObject({ decidedBy: 'you' });
+    expect(decided('jev')).toMatchObject({ decidedBy: 'jev' });
+  });
+
+  test('reads every way an attempt line words its probe', () => {
+    const text = [
+      'Started tomi (mvx) on claude-w — decided by you.',
+      '  started claude-w (probe OK)',
+      '  started claude-a m1 (probe OK 640 ms)',
+      '  refused claude-b (probe failed, shared) — probe_failed: x',
+      '  refused claude-c (probe failed 12 ms) — probe_failed: y',
+      '  started claude-d (probe 812ms)',
+    ].join('\n');
+    const outcome = done(readPackCall(bash('fy new --auto x', { text }), 'fy'));
+    expect(outcome).toMatchObject({
+      outcome: 'started',
+      attempts: [
+        { runtime: 'claude-w', outcome: 'started' },
+        { runtime: 'claude-a', model: 'm1', outcome: 'started', probe: 640 },
+        { runtime: 'claude-b', outcome: 'refused', code: 'probe_failed', message: 'x' },
+        { runtime: 'claude-c', outcome: 'refused', probe: 12, code: 'probe_failed', message: 'y' },
+        { runtime: 'claude-d', outcome: 'started', probe: 812 },
+      ],
+    });
+    // No attempt line is mistaken for the note.
+    expect(outcome).not.toHaveProperty('note');
+    expect((outcome as { attempts: readonly object[] }).attempts[0]).not.toHaveProperty('probe');
   });
 
   test('reads a Claude refusal (exit 2, on stderr) and a Codex one, each with its remedy and attempts', () => {
@@ -201,10 +271,10 @@ describe('readPackCall — new', () => {
     ).toEqual({ outcome: 'refused', code: 'depth_exceeded', message: 'too deep', attempts: [] });
     // A refusal whose next line is the attempt list has no remedy.
     const noRemedy =
-      'fy new: refused (no_candidate): nothing\nTried:\n  refused claude-w (probe cached) — not_agent: no';
+      'fy new: refused (no_candidate): nothing\nTried:\n  refused claude-w (probe failed, shared) — not_agent: no';
     expect(done(readPackCall(bash('fy new --auto x', { text: noRemedy }), 'fy'))).toMatchObject({
       code: 'no_candidate',
-      attempts: [{ runtime: 'claude-w', outcome: 'refused', probe: 'cached', code: 'not_agent', message: 'no' }],
+      attempts: [{ runtime: 'claude-w', outcome: 'refused', code: 'not_agent', message: 'no' }],
     });
   });
 
@@ -217,7 +287,7 @@ describe('readPackCall — new', () => {
       runtime: 'claude-auto-work',
       model: 'claude-opus-5-5',
       effort: 'high',
-      decidedBy: 'guide',
+      decidedBy: 'the routing prompt',
       attempts: [{ runtime: 'claude-auto-work', model: 'claude-opus-5-5', outcome: 'started', probe: 640 }],
     });
     const refused = readPackCall(
@@ -242,6 +312,15 @@ describe('readPackCall — new', () => {
       decidedBy: 'jev',
       note: 'n',
       attempts: [{ runtime: 'claude-auto-work', model: 'claude-opus-5-5', outcome: 'started', probe: 640 }],
+    });
+    const you = { ...startedJson, decidedBy: 'agent' };
+    expect(done(readPackCall(bash('fy new --json --auto x', { text: JSON.stringify(you) }), 'fy'))).toMatchObject({
+      decidedBy: 'you',
+    });
+    // The old decider ('guide') is not a valid answer any more: not invented into one.
+    const guide = { ...startedJson, decidedBy: 'guide' };
+    expect(readPackCall(bash('fy new --json --auto x', { text: JSON.stringify(guide) }), 'fy')?.progress).toEqual({
+      state: 'unread',
     });
     // JSON that does not parse falls back to the human lines.
     expect(done(readPackCall(bash('fy new --json --auto x', { text: `{oops}\n${STARTED}` }), 'fy'))).toMatchObject({
@@ -270,15 +349,11 @@ describe('readPackCall — new', () => {
 
   test('reads a brief from a file, from an expansion, every value option, and a binary named otherwise', () => {
     expect(
-      readPackCall(
-        bash('direnv exec . fy new --runtime w --use-case bulk --name "Rename" --mode auto --prompt-file /tmp/b.md'),
-        'fy',
-      ),
+      readPackCall(bash('direnv exec . fy new --runtime w --name "Rename" --mode auto --prompt-file /tmp/b.md'), 'fy'),
     ).toEqual({
       kind: 'new',
       runtime: 'w',
       auto: false,
-      useCase: 'bulk',
       name: 'Rename',
       brief: null,
       briefFile: '/tmp/b.md',
@@ -286,6 +361,10 @@ describe('readPackCall — new', () => {
     });
     expect(readPackCall(bash('fy new --auto "fix $FILE"'), 'fy')).toMatchObject({ brief: null });
     expect(readPackCall(bash('/opt/bin/ferret new --auto go'), 'ferret')).toMatchObject({ kind: 'new', brief: 'go' });
+    // An older ferret's `--use-case bulk` is not read as a field, and its value is not the brief.
+    const old = readPackCall(bash('fy new --auto --use-case bulk "go"'), 'fy');
+    expect(old).toMatchObject({ kind: 'new', brief: 'go' });
+    expect(old).not.toHaveProperty('useCase');
     // A value option at the very end, with its value missing, is still not the brief.
     expect(readPackCall(bash('fy new --auto x --cwd'), 'fy')).toMatchObject({ brief: 'x' });
   });
@@ -370,60 +449,110 @@ describe('readPackCall — wait', () => {
 });
 
 describe('readPackCall — recommend', () => {
-  test('reads the ranked list from the human lines', () => {
+  const expected = {
+    routing: 'Planning and review → claude-opus-5-5 at max.\n\nChores → claude-haiku-5-5 at low.',
+    source: 'your routing prompt',
+    options: ADVICE_OPTIONS,
+    next: 'fy new --runtime claude-auto-work --model claude-opus-5-5 --effort max "<brief>"',
+  };
+
+  test('reads the routing prompt and the models usable now from the human lines', () => {
     const pack = readPackCall(bash('fy recommend "review the auth change"', { text: ADVICE }), 'fy');
     expect(pack).toMatchObject({ kind: 'recommend', task: 'review the auth change' });
-    expect(done(pack)).toEqual({
-      useCase: 'Hard planning, review and critical code',
-      options: [
-        {
-          rank: 1,
-          ready: true,
-          model: 'Claude Opus 5.5 (claude-opus-5-5)',
-          runtime: 'claude-auto-work',
-          effort: 'max',
-          why: 'The strongest planner and reviewer.',
-        },
-        {
-          rank: 2,
-          ready: false,
-          model: 'gpt-6-astra',
-          effort: 'high',
-          why: 'A different family.',
-          refusal: 'cli_missing: codex is not installed',
-        },
-      ],
-      next: 'fy new --runtime claude-auto-work --model claude-opus-5-5 --effort max "<brief>"',
+    expect(done(pack)).toEqual(expected);
+    // A Codex result wraps the same lines in its header.
+    const wrapped = readPackCall(
+      codex('fy recommend x', { text: `Process exited with code 0\nOutput:\n${ADVICE}` }),
+      'fy',
+    );
+    expect(done(wrapped)).toEqual(expected);
+  });
+
+  test('reads a default prompt, a cleaned-up one, a machine where nothing can run, and a prompt with blank lines', () => {
+    const none = [
+      'Routing prompt (the default, rendered from the model catalogs):',
+      'Best for planning.',
+      '',
+      'No model can run here now.',
+    ].join('\n');
+    expect(done(readPackCall(bash('fy recommend x', { text: none }), 'fy'))).toEqual({
+      routing: 'Best for planning.',
+      source: 'the default, rendered from the model catalogs',
+      options: [],
     });
-    const none = 'Use case: Bulk (bulk, as named; your models guide)\n\n1. cannot  m\n\nNothing can run it here now.';
-    expect(done(readPackCall(bash('fy recommend --use-case bulk x', { text: none }), 'fy'))).toEqual({
-      useCase: 'Bulk',
-      options: [{ rank: 1, ready: false, model: 'm' }],
+    const cleaned = ADVICE.replace(
+      'Routing prompt (your routing prompt):',
+      'Routing prompt (cleaned up by gpt-oss-120b on 2026-10-22 and accepted):',
+    );
+    expect(done(readPackCall(bash('fy recommend x', { text: cleaned }), 'fy'))).toMatchObject({
+      source: 'cleaned up by gpt-oss-120b on 2026-10-22 and accepted',
     });
+    // Ordinals other than 1st: 2nd, 3rd, 11th.
+    const ordinals = [
+      'Routing prompt (your routing prompt):',
+      'p',
+      '',
+      'Models usable here now (3):',
+      'ready  A (a) · r · named 2nd in the prompt',
+      'ready  B (b) · r · named 3rd in the prompt',
+      'ready  C (c) · r · named 11th in the prompt',
+    ].join('\n');
+    expect(
+      (
+        done(readPackCall(bash('fy recommend x', { text: ordinals }), 'fy')) as {
+          options: readonly { named?: number }[];
+        }
+      ).options.map(model => model.named),
+    ).toEqual([2, 3, 11]);
   });
 
   test('reads the JSON payload, and fails or goes unread honestly', () => {
     expect(
       done(readPackCall(bash('fy recommend --json rename a helper', { text: JSON.stringify(adviceJson) }), 'fy')),
     ).toEqual({
-      useCase: 'Mechanical bulk edits',
+      routing: 'Chores → claude-haiku-4-5 at low.',
+      source: 'the default, rendered from the model catalogs',
       options: [
         {
-          rank: 1,
           ready: true,
           model: 'Haiku 4.5',
+          id: 'claude-haiku-4-5',
           runtime: 'claude-auto-work',
           effort: 'low',
-          why: 'Cheap and quick.',
+          named: 1,
+          quota: '5h 10%',
         },
         {
-          rank: 2,
           ready: false,
-          model: 'glm-5',
-          why: 'Another family.',
+          model: 'GLM 5',
+          id: 'glm-5',
+          runtime: 'zai-work',
           refusal: 'not_logged_in: zai-work needs signing in',
         },
       ],
+    });
+    // A prompt the owner wrote, and one cleaned up by a model, say so.
+    const own = { ...adviceJson, routing: { text: 'mine', source: 'file' as const }, next: 'fy new …' };
+    expect(done(readPackCall(bash('fy recommend --json x', { text: JSON.stringify(own) }), 'fy'))).toMatchObject({
+      routing: 'mine',
+      source: 'your routing prompt',
+      next: 'fy new …',
+    });
+    const suggested = {
+      ...adviceJson,
+      routing: {
+        text: 'mine',
+        source: 'file' as const,
+        suggested: {
+          by: 'gpt-oss-120b',
+          via: 'groq',
+          at: '2026-10-22T08:00:00.000Z',
+          acceptedAt: '2026-10-22T09:30:00.000Z',
+        },
+      },
+    };
+    expect(done(readPackCall(bash('fy recommend --json x', { text: JSON.stringify(suggested) }), 'fy'))).toMatchObject({
+      source: 'cleaned up by gpt-oss-120b on 2026-10-22 and accepted',
     });
     expect(readPackCall(bash('fy recommend --json x', { text: '{}' }), 'fy')?.progress).toEqual({ state: 'unread' });
     expect(
@@ -431,6 +560,35 @@ describe('readPackCall — recommend', () => {
         ?.progress,
     ).toEqual({ state: 'failed', reason: 'fy recommend: no route' });
     expect(readPackCall(bash('fy recommend "$TASK"'), 'fy')).toMatchObject({ task: null });
+  });
+
+  test('an answer it does not recognise is unread, never an invented list', () => {
+    const unread = (text: string) => readPackCall(bash('fy recommend x', { text }), 'fy')?.progress;
+    expect(unread('something else entirely')).toEqual({ state: 'unread' });
+    expect(unread('')).toEqual({ state: 'unread' });
+    // A routing prompt with no models section after it.
+    expect(unread('Routing prompt (your routing prompt):\nChores → haiku.')).toEqual({ state: 'unread' });
+    // A models section with no routing prompt before it.
+    expect(unread('Models usable here now (1):\nready  A (a) · r')).toEqual({ state: 'unread' });
+    expect(unread('Routing prompt (your routing prompt):\n\nNo model can run here now.')).toEqual({
+      state: 'unread',
+    });
+  });
+
+  test('the old use-case recommendation is not read: an older transcript degrades to unread', () => {
+    const old = [
+      "Use case: Hard planning, review and critical code (plan-review, from the task's words; the built-in guide)",
+      '',
+      '1. ready   Claude Opus 5.5 (claude-opus-5-5) on claude-auto-work · effort max',
+      '   The strongest planner and reviewer.',
+      '',
+      'Start the first: fy new --runtime claude-auto-work --model claude-opus-5-5 --effort max "<brief>"',
+    ].join('\n');
+    expect(readPackCall(bash('fy recommend --use-case plan-review x', { text: old }), 'fy')).toMatchObject({
+      kind: 'recommend',
+      task: 'x',
+      progress: { state: 'unread' },
+    });
   });
 });
 

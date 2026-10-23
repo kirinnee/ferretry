@@ -46,7 +46,7 @@ export type PackStartOutcome =
       readonly runtime: string;
       readonly model?: string;
       readonly effort?: string;
-      /** Who picked the model: `you` (the asking ferret), `guide` or `jev`. */
+      /** Who picked the model, in the CLI's words: `you`, `the routing prompt` or `jev`. */
       readonly decidedBy: string;
       readonly note?: string;
       readonly attempts: readonly PackTry[];
@@ -70,19 +70,29 @@ export interface PackWaitOutcome {
   readonly note?: string;
 }
 
-/** One ranked candidate of a recommendation. */
+/** One model a recommendation lists as usable (or not) here now, in the order the daemon sorted them. */
 export interface PackOption {
-  readonly rank: number;
   readonly ready: boolean;
+  /** Its label ("Claude Opus 5.5"). */
   readonly model: string;
-  readonly runtime?: string;
+  /** Its id, as `--model` takes it. */
+  readonly id: string;
+  readonly runtime: string;
+  /** The effort the routing prompt names right after it. */
   readonly effort?: string;
-  readonly why?: string;
+  /** Where the routing prompt first names it: 1 for the first model it names. */
+  readonly named?: number;
+  /** The quota headroom in a phrase, left out when it was not measured. */
+  readonly quota?: string;
+  /** `code: message`, when it cannot run. */
   readonly refusal?: string;
 }
 
 export interface PackAdvice {
-  readonly useCase: string;
+  /** The routing prompt in effect, whole. */
+  readonly routing: string;
+  /** Where it came from, in words ("your routing prompt", "the default, rendered from the model catalogs"). */
+  readonly source?: string;
   readonly options: readonly PackOption[];
   /** The command that starts the first ready one. */
   readonly next?: string;
@@ -105,7 +115,6 @@ export interface PackStartCall {
   readonly model?: string;
   readonly effort?: string;
   readonly auto: boolean;
-  readonly useCase?: string;
   /** Its task title, when one was given. */
   readonly name?: string;
   /** The brief; `null` when it came from a file or a shell expansion this reader did not run. */
@@ -138,6 +147,7 @@ export type PackCall = PackStartCall | PackWaitCall | PackRecommendCall;
 
 /** The options of each verb that take a value, so the value is not read as the brief. */
 const VALUE_OPTIONS: Readonly<Record<'new' | 'wait' | 'recommend', ReadonlySet<string>>> = {
+  // `--use-case` is gone from the CLI, but an older ferret's transcript still carries it: its value is not the brief.
   new: new Set([
     '--runtime',
     '--model',
@@ -247,6 +257,13 @@ const fromAttempt = (attempt: PackAttempt): PackTry => ({
   ...(attempt.refusal === undefined ? {} : { code: attempt.refusal.code, message: attempt.refusal.message }),
 });
 
+/** The words render.ts `renderPackNewOutcome` prints for who decided. */
+const DECIDED_BY: Readonly<Record<Extract<PackNewOutcome, { outcome: 'started' }>['decidedBy'], string>> = {
+  agent: 'you',
+  routing: 'the routing prompt',
+  jev: 'jev',
+};
+
 const fromOutcome = (outcome: PackNewOutcome): PackStartOutcome => {
   const attempts = outcome.attempts.map(fromAttempt);
   if (outcome.outcome === 'refused')
@@ -265,18 +282,25 @@ const fromOutcome = (outcome: PackNewOutcome): PackStartOutcome => {
     runtime: config.agent,
     ...(config.model === undefined ? {} : { model: config.model }),
     ...(config.launchReasoningEffort === undefined ? {} : { effort: config.launchReasoningEffort }),
-    decidedBy: outcome.decidedBy === 'agent' ? 'you' : outcome.decidedBy,
+    decidedBy: DECIDED_BY[outcome.decidedBy],
     ...(outcome.note === undefined ? {} : { note: outcome.note }),
     attempts,
   };
 };
 
-/** `  started <runtime> [<model>] [(probe <n>ms|probe cached)]` */
-const STARTED_TRY = /^ {2}started (\S+)(?: ([^\s(]\S*))?(?: \(probe (?:(\d+)ms|(cached))\))?$/u;
-/** `  refused <runtime> [<model>] [(probe …)] — <code>: <message>` */
-const REFUSED_TRY = /^ {2}refused (\S+)(?: ([^\s(]\S*))?(?: \(probe (?:(\d+)ms|(cached))\))? — ([a-z_]+): ?(.*)$/u;
-/** `Started <teammate> (<id>) on <runtime>, <model> — decided by <you|guide|jev>.` */
-const STARTED = /^Started (.+?) on (\S+?)(?:, (\S+))? — decided by (\S+)\.$/u;
+/** `  started <runtime> [<model>] [(probe OK 640 ms|probe OK, cached|probe OK)]` */
+const STARTED_TRY = /^ {2}started (\S+)(?: ([^\s(]\S*))?(?: \(probe ([^)]*)\))?$/u;
+/** `  refused <runtime> [<model>] [(probe failed 3436 ms|probe failed, shared)] — <code>: <message>` */
+const REFUSED_TRY = /^ {2}refused (\S+)(?: ([^\s(]\S*))?(?: \(probe ([^)]*)\))? — ([a-z_]+): ?(.*)$/u;
+/** `Started <teammate> (<id>) on <runtime>, <model> — decided by <you|the routing prompt|jev>.` */
+const STARTED = /^Started (.+?) on (\S+?)(?:, (\S+))? — decided by (.+)\.$/u;
+
+/** The milliseconds a probe took or `cached`; nothing when the line gave neither ("probe OK", "failed, shared"). */
+const probeOf = (words: string | undefined): PackTry['probe'] => {
+  const ms = /(\d+) ?ms/u.exec(words ?? '')?.[1];
+  if (ms !== undefined) return Number(ms);
+  return /cached/u.test(words ?? '') ? 'cached' : undefined;
+};
 /** `[fy new: ]refused (<code>): <message>` */
 const REFUSED = /^(?:\S+ new: )?refused \(([a-z_]+)\): (.*)$/u;
 
@@ -285,13 +309,14 @@ const tryOf = (line: string): PackTry | undefined => {
   const refused = started === null ? REFUSED_TRY.exec(line) : null;
   const match = started ?? refused;
   if (match === null) return undefined;
-  const [, runtime, model, ms, cached] = match;
+  const [, runtime, model, probeWords] = match;
+  const probe = probeOf(probeWords);
   return {
     runtime: runtime as string,
     ...(model === undefined ? {} : { model }),
     outcome: started === null ? 'refused' : 'started',
-    ...(cached === undefined ? (ms === undefined ? {} : { probe: Number(ms) }) : { probe: 'cached' as const }),
-    ...(refused === null ? {} : { code: refused[5] as string, message: refused[6] as string }),
+    ...(probe === undefined ? {} : { probe }),
+    ...(refused === null ? {} : { code: refused[4] as string, message: refused[5] as string }),
   };
 };
 
@@ -366,52 +391,78 @@ const readWait = (output: string, json: boolean, clientName: string): PackWaitOu
   return { status: head[2] as string, ...(summary === '' ? {} : { summary }), stopped, ...note };
 };
 
+/** The words render.ts `routingWords` prints for where the routing prompt came from. */
+const sourceWords = (routing: PackRecommendation['routing']): string => {
+  if (routing.source === 'default') return 'the default, rendered from the model catalogs';
+  if (routing.suggested === undefined) return 'your routing prompt';
+  return `cleaned up by ${routing.suggested.by} on ${routing.suggested.acceptedAt.slice(0, 10)} and accepted`;
+};
+
 const fromRecommendation = (recommendation: PackRecommendation): PackAdvice => ({
-  useCase: recommendation.useCase.title,
-  options: recommendation.candidates.map(candidate => ({
-    rank: candidate.rank,
-    ready: candidate.ready,
-    model: candidate.modelLabel ?? candidate.model,
-    ...(candidate.runtime === undefined ? {} : { runtime: candidate.runtime }),
-    ...(candidate.effort === undefined ? {} : { effort: candidate.effort }),
-    why: candidate.why,
-    ...(candidate.refusal === undefined ? {} : { refusal: `${candidate.refusal.code}: ${candidate.refusal.message}` }),
-  })),
+  routing: recommendation.routing.text,
+  source: sourceWords(recommendation.routing),
+  options: recommendation.available.map(
+    (model): PackOption => ({
+      ready: model.ready,
+      model: model.modelLabel,
+      id: model.model,
+      runtime: model.runtime,
+      ...(model.effort === undefined ? {} : { effort: model.effort }),
+      ...(model.named === undefined ? {} : { named: model.named }),
+      ...(model.quota.state === 'unknown' ? {} : { quota: model.quota.summary }),
+      ...(model.refusal === undefined ? {} : { refusal: `${model.refusal.code}: ${model.refusal.message}` }),
+    }),
+  ),
   ...(recommendation.next === undefined ? {} : { next: recommendation.next }),
 });
 
-/** `N. ready   <model>[ on <runtime>][ · effort <e>]` */
-const OPTION = /^(\d+)\. (ready|cannot)\s+(.+?)(?: on (\S+))?(?: · effort (\S+))?$/u;
+/** `Routing prompt (<where from>):` */
+const ROUTING_HEAD = /^Routing prompt \((.+)\):$/u;
+/** `Models usable here now (<n>):`, or the line that says there are none. */
+const MODELS_HEAD = /^(?:Models usable here now \(\d+\):|No model can run here now\.)$/u;
+/** `ready  <label> (<id>)[ at <effort>] · <runtime>[ · quota <summary>][ · named <n>th in the prompt]` */
+const OPTION =
+  /^(ready|cannot)\s+(.+?) \((\S+)\)(?: at (\S+))? · (\S+)(?: · quota (.+?))?(?: · named (\d+)(?:st|nd|rd|th) in the prompt)?$/u;
 
-/** `recommend`'s human lines (render.ts `renderPackRecommendation`). */
+/**
+ * `recommend`'s human lines (render.ts `renderPackRecommendation`).
+ *
+ * The OLD recommend ("Use case: …" and a numbered, ranked list) is deliberately not read: the use-case guide
+ * it came from no longer exists, so an older transcript's card degrades to "not recognised — see the
+ * command" rather than this reader keeping a second parser for a format nothing prints any more.
+ */
 const readAdviceLines = (output: string): PackAdvice | undefined => {
   const lines = output.split('\n');
-  const useCase = /^Use case: (.+?) \(/u.exec(lines[0] ?? '')?.[1];
-  if (useCase === undefined) return undefined;
+  const source = ROUTING_HEAD.exec(lines[0] ?? '')?.[1];
+  // The prompt is the owner's own text and may hold blank lines, so the models section is found from the end.
+  const modelsAt = lines.findLastIndex(line => MODELS_HEAD.test(line));
+  if (source === undefined || modelsAt === -1) return undefined;
+  const routing = lines.slice(1, modelsAt).join('\n').trim();
+  if (routing === '') return undefined;
   const options: PackOption[] = [];
   let next: string | undefined;
   for (const [index, line] of lines.entries()) {
+    if (index < modelsAt) continue;
     const start = /^Start the first: (.+)$/u.exec(line);
     if (start !== null) next = start[1];
     const match = OPTION.exec(line);
     if (match === null) continue;
-    // A candidate's own lines are indented under it: its reason, then — when it cannot run — why not.
-    const indented = (at: number): string | undefined =>
-      lines[at]?.startsWith('   ') === true ? lines[at]?.trim() : undefined;
-    const why = indented(index + 1);
-    const refusal = match[2] === 'cannot' ? indented(index + 2) : undefined;
-    const [, rank, ready, model, runtime, effort] = match;
+    const [, ready, model, id, effort, runtime, quota, named] = match;
+    // A model that cannot run says why on the indented line under it.
+    const refusal =
+      ready === 'cannot' && lines[index + 1]?.startsWith(' ') === true ? lines[index + 1]?.trim() : undefined;
     options.push({
-      rank: Number(rank),
       ready: ready === 'ready',
       model: model as string,
-      ...(runtime === undefined ? {} : { runtime }),
+      id: id as string,
+      runtime: runtime as string,
       ...(effort === undefined ? {} : { effort }),
-      ...(why === undefined ? {} : { why }),
+      ...(named === undefined ? {} : { named: Number(named) }),
+      ...(quota === undefined ? {} : { quota }),
       ...(refusal === undefined || refusal === '' ? {} : { refusal }),
     });
   }
-  return { useCase, options, ...(next === undefined ? {} : { next }) };
+  return { routing, source, options, ...(next === undefined ? {} : { next }) };
 };
 
 const readAdvice = (output: string, json: boolean): PackAdvice | undefined => {
@@ -466,7 +517,6 @@ export const readPackCall = (call: Pick<ToolCall, 'use' | 'result'>, clientName:
         ...option(parsed, '--model', 'model'),
         ...option(parsed, '--effort', 'effort'),
         auto: parsed.flags.has('--auto'),
-        ...option(parsed, '--use-case', 'useCase'),
         ...option(parsed, '--name', 'name'),
         brief: briefFile !== undefined && brief === '' ? null : brief,
         ...(briefFile === undefined ? {} : { briefFile }),

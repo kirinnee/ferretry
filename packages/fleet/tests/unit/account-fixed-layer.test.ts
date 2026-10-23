@@ -641,7 +641,7 @@ describe('Pack mode teaching', () => {
     should(sections[1]?.text).equal(teaching);
     should(PACK_ENV).equal('FY_PACK');
     for (const step of [
-      '`zz recommend "<part>"`',
+      '`zz recommend`',
       '`zz new --runtime',
       '`zz new --auto',
       '--name "<short task title>"',
@@ -726,9 +726,9 @@ describe('launchInstructions', () => {
     });
   });
 
-  it("should count the guide's routing line in the Pack section, and only while Pack mode is on", () => {
+  it("should count the routing prompt's line in the Pack section, and only while Pack mode is on", () => {
     // Arrange
-    const line = 'Routing: everyday → opus.';
+    const line = 'Routing: Everyday coding: claude-sonnet-5-5.';
 
     // Act
     const on = launchInstructions('fy', { [PACK_ENV]: '1', [PACK_ROUTING_ENV]: line });

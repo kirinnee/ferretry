@@ -31,23 +31,34 @@ describe('registerRecommendCommand', () => {
     should(calls).eql([{ words: ['rename', 'a', 'helper'], options: {} }]);
   });
 
-  it('should pass --use-case and --json through', async () => {
+  it('should pass --json through', async () => {
     // Arrange
     const { program, calls } = build();
 
     // Act
-    await program.parseAsync(['node', 'fy', 'recommend', 'x', '--use-case', 'bulk', '--json']);
+    await program.parseAsync(['node', 'fy', 'recommend', 'x', '--json']);
 
     // Assert
-    should(calls).eql([{ words: ['x'], options: { useCase: 'bulk', json: true } }]);
+    should(calls).eql([{ words: ['x'], options: { json: true } }]);
   });
 
-  it('should refuse a missing task before the controller is asked', async () => {
+  it('should ask with no task at all, the task being optional', async () => {
+    // Arrange
+    const { program, calls } = build();
+
+    // Act
+    await program.parseAsync(['node', 'fy', 'recommend']);
+
+    // Assert
+    should(calls).eql([{ words: [], options: {} }]);
+  });
+
+  it('should no longer know --use-case', async () => {
     // Arrange
     const { program, calls } = build();
 
     // Act + Assert
-    await should(program.parseAsync(['node', 'fy', 'recommend'])).be.rejected();
+    await should(program.parseAsync(['node', 'fy', 'recommend', 'x', '--use-case', 'bulk'])).be.rejected();
     should(calls).be.empty();
   });
 
@@ -79,10 +90,9 @@ describe('registerGuideCommand', () => {
     const controller = {
       showGuide: record('show'),
       showInventory: record('inventory'),
-      suggest: record('suggest'),
+      cleanUp: record('clean-up'),
       accept: record('accept'),
       undo: record('undo'),
-      describe: record('describe'),
     } as unknown as PackController;
     registerGuideCommand(program, controller, { fail: error => void failures.push(error) });
     return { program, calls, failures };
@@ -100,31 +110,29 @@ describe('registerGuideCommand', () => {
     await parse(program, 'inventory', '--json');
     await parse(
       program,
-      'suggest',
+      'clean-up',
+      '--prompt',
+      'Opus first.',
       '--runtime',
       'claude-work',
       '--model',
       'opus',
-      '--prefs',
-      'Opus first.',
       '-y',
       '--json',
     );
-    await parse(program, 'accept', 'run-1', '--only', 'bulk,plan', '--keep-routing');
+    await parse(program, 'clean-up', '--prompt-file', 'rough.md', '--apply');
+    await parse(program, 'accept', 'run-1');
     await parse(program, 'undo');
-    await parse(program, 'describe', 'glm-5', 'Cheap', 'and', 'fast.', '--provider', 'zai');
-    await parse(program, 'describe', 'glm-5', '--clear');
 
     // Assert
     should(calls.map(call => [call[0], ...call.slice(1).filter(arg => !(arg instanceof Command))])).eql([
       ['show', {}],
       ['show', { json: true }],
       ['inventory', { json: true }],
-      ['suggest', { runtime: 'claude-work', model: 'opus', prefs: 'Opus first.', apply: true, json: true }],
-      ['accept', 'run-1', { only: 'bulk,plan', keepRouting: true }],
+      ['clean-up', { prompt: 'Opus first.', runtime: 'claude-work', model: 'opus', apply: true, json: true }],
+      ['clean-up', { promptFile: 'rough.md', apply: true }],
+      ['accept', 'run-1'],
       ['undo'],
-      ['describe', 'glm-5', ['Cheap', 'and', 'fast.'], { provider: 'zai' }],
-      ['describe', 'glm-5', [], { clear: true }],
     ]);
   });
 
@@ -148,5 +156,32 @@ describe('registerGuideCommand', () => {
 
     // Assert
     should(failures).eql([failure, failure]);
+  });
+});
+
+describe('the old guide subcommands', () => {
+  it('should be gone: suggest, describe, --only, --keep-routing and --prefs', async () => {
+    // Arrange
+    const program = new Command().name('fy').exitOverride();
+    program.configureOutput({ writeOut: () => {}, writeErr: () => {} });
+    registerGuideCommand(program, {} as unknown as PackController, { fail: () => {} });
+    const guide = program.commands.find(command => command.name() === 'guide');
+
+    // Act
+    const names = guide?.commands.map(command => command.name());
+    const accept = guide?.commands.find(command => command.name() === 'accept');
+    const cleanUp = guide?.commands.find(command => command.name() === 'clean-up');
+
+    // Assert
+    should(names).eql(['show', 'inventory', 'clean-up', 'accept', 'undo']);
+    should(accept?.options.map(option => option.long)).eql([]);
+    should(cleanUp?.options.map(option => option.long)).eql([
+      '--prompt',
+      '--prompt-file',
+      '--runtime',
+      '--model',
+      '--apply',
+      '--json',
+    ]);
   });
 });

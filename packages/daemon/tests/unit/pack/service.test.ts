@@ -7,7 +7,7 @@ import type {
   SessionView,
   StartSessionRequest,
 } from '@ferretry/protocol';
-import { briefHash } from '@ferretry/protocol';
+import { briefHash, PackInventorySchema, PackViewSchema } from '@ferretry/protocol';
 import should from 'should';
 import type { JevGuidance, JevRanking, RankableCandidate } from '../../../src/lib/pack/jev.ts';
 import type { PackProbeOutcome, PackProbeRequest } from '../../../src/lib/pack/probe.ts';
@@ -22,30 +22,28 @@ import {
 import { sessionView } from '../runtime/mounts/support.ts';
 import { catalog, choice, entry, facts, packConfig, runtime } from './support.ts';
 
-const GUIDE_FILE: ModelsGuideFile = {
-  useCases: [
-    {
-      id: 'everyday',
-      title: 'Everyday coding',
-      description: 'Ordinary work.',
-      keywords: ['fix'],
-      candidates: [
-        { provider: 'anthropic', model: 'opus', effort: 'high', why: 'Strong.' },
-        { provider: 'anthropic', model: 'haiku', why: 'Cheap.' },
-      ],
-    },
-  ],
-};
+const PROMPT = 'Everyday work: opus at high; then haiku for chores.';
+const GUIDE_FILE: ModelsGuideFile = { prompt: PROMPT };
 
 const CLAUDE_MAIN = runtime('claude-main', {
   catalogId: 'anthropic',
-  choices: [choice('opus', 'Opus'), choice('sonnet', 'Sonnet')],
+  choices: [
+    choice('opus', 'Opus', { tier: 'best', efforts: ['low', 'high'] }),
+    choice('sonnet', 'Sonnet', { tier: 'balanced' }),
+  ],
 });
-const CLAUDE_FAST = runtime('claude-fast', { catalogId: 'anthropic', choices: [choice('haiku', 'Haiku')] });
+const CLAUDE_FAST = runtime('claude-fast', {
+  catalogId: 'anthropic',
+  choices: [choice('haiku', 'Haiku', { tier: 'fast' })],
+});
 
 const CATALOGS: readonly ModelCatalogView[] = [
   catalog('anthropic', 'Anthropic', {
-    claude: [entry('opus', 'Opus', 'best'), entry('haiku', 'Haiku', 'fast'), entry('sonnet', 'Sonnet', 'balanced')],
+    claude: [
+      entry('opus', 'Opus', 'best', { efforts: ['low', 'high'] }),
+      entry('haiku', 'Haiku', 'fast'),
+      entry('sonnet', 'Sonnet', 'balanced'),
+    ],
     codex: [entry('gpt-5', 'GPT-5', 'best')],
   }),
 ];
@@ -57,7 +55,7 @@ interface Options {
   guideFile?: ModelsGuideFile;
   runtimes?: readonly ReturnType<typeof runtime>[];
   parents?: Readonly<Record<string, PackParent>>;
-  /** What a probe answers, by wrapper; absent means OK. */
+  /** What a probe answers, by wrapper and model; absent means OK. */
   probes?: Readonly<Record<string, PackProbeOutcome>>;
   cached?: readonly string[];
   startError?: unknown;
@@ -86,7 +84,8 @@ function build(options: Options = {}) {
     probe: async (request, ttlMs) => {
       probes.push([request, ttlMs]);
       return {
-        outcome: options.probes?.[request.wrapper] ?? { ok: true, ms: 25 },
+        outcome: options.probes?.[`${request.wrapper}/${request.model ?? ''}`] ??
+          options.probes?.[request.wrapper] ?? { ok: true, ms: 25 },
         cached: options.cached?.includes(request.wrapper) === true,
       };
     },
@@ -135,54 +134,21 @@ describe('subFerretFooter', () => {
   });
 });
 
-describe('PackService.routingShort', () => {
-  it("should give the guide's own short routing line, else one rendered from its use cases", async () => {
+describe('PackService.routingLine', () => {
+  it("should give the whole routing prompt as one line, the file's or else the default", async () => {
     // Arrange
-    const written = build({
-      guideFile: { ...GUIDE_FILE, routing: { prompt: 'Opus, then Haiku.', short: 'Routing: everyday → opus.' } },
-    });
-    const rendered = build();
+    const own = build({ guideFile: { prompt: 'Plans: opus at high.\n- Chores: "haiku"' } });
+    const none = build({ guideFile: {} });
 
-    // Act + Assert
-    should(await written.subject.routingShort()).equal('Routing: everyday → opus.');
-    should(await rendered.subject.routingShort()).equal('Routing: everyday → opus high.');
-  });
-});
-
-describe('PackService.inventory', () => {
-  it("should show the builder every model, the guide in effect and this run's preferences, else pack.yaml's", async () => {
-    // Arrange
-    const { subject } = build({ config: { ...packConfig(), routingPreferences: 'Opus for reviews.' } });
-
-    // Act
-    const saved = await subject.inventory();
-    const asked = await subject.inventory('GLM for bulk.');
-
-    // Assert
-    should(saved.preferences).equal('Opus for reviews.');
-    should(asked.preferences).equal('GLM for bulk.');
-    should(saved.at).equal('2026-10-22T12:00:00.000Z');
-    should(saved.guide.useCases.map(useCase => useCase.id)).deepEqual(['everyday']);
-    should(saved.models.find(model => model.id === 'opus')?.runtimes).deepEqual([{ name: 'claude-main', ready: true }]);
+    // Act / Assert
+    should(await own.subject.routingLine()).equal("Routing: Plans: opus at high. Chores: 'haiku'");
+    should(await none.subject.routingLine()).startWith("Routing: Pick each sub-task's model by the kind of work: ");
+    should(await none.subject.routingLine()).not.containEql('\n');
   });
 });
 
 describe('PackService.view', () => {
-  it('should read the settings, the guide in effect and every model with the runtimes here', async () => {
-    // Arrange
-    const { subject } = build({ guideFile: {} });
-
-    // Act
-    const view = await subject.view();
-
-    // Assert
-    should(view.config).deepEqual(packConfig());
-    should(view.guide.source).equal('derived');
-    should(view.models.find(model => model.id === 'opus')?.runtimes).deepEqual(['claude-main']);
-    should(view.models.find(model => model.id === 'gpt-5')?.runtimes).deepEqual([]);
-  });
-
-  it('should show the owner’s guide when the file names use cases', async () => {
+  it('should read the settings, the routing prompt in effect, the vocabulary and the models usable now', async () => {
     // Arrange
     const { subject } = build();
 
@@ -190,54 +156,72 @@ describe('PackService.view', () => {
     const view = await subject.view();
 
     // Assert
-    should(view.guide.source).equal('file');
-    should(view.guide.useCases.map(useCase => useCase.id)).deepEqual(['everyday']);
+    should(view.config).deepEqual(packConfig());
+    should(view.routing).deepEqual({ text: PROMPT, source: 'file' });
+    should(view.models.map(model => model.id)).deepEqual(['opus', 'haiku', 'sonnet', 'gpt-5']);
+    should(view.available.map(option => [option.model, option.named ?? null])).deepEqual([
+      ['opus', 1],
+      ['haiku', 2],
+      ['sonnet', null],
+    ]);
+    should(PackViewSchema.safeParse({ ...view, cleanUp: { available: false, runtimes: [] } }).success).be.true();
+  });
+
+  it('should show the default, and say so, when the file has no prompt', async () => {
+    // Act
+    const view = await build({ guideFile: {} }).subject.view();
+
+    // Assert
+    should(view.routing.source).equal('default');
+    should(view.routing.text).containEql('critical code: opus at high');
+  });
+
+  it('should render the default from the catalogs whatever the file says', async () => {
+    should(await build().subject.defaultPrompt()).containEql('- Everyday coding: sonnet.');
+  });
+});
+
+describe('PackService.inventory', () => {
+  it('should show the clean-up ferret every runtime, every model and the prompt in effect, names and states only', async () => {
+    // Act
+    const inventory = await build().subject.inventory();
+
+    // Assert
+    should(PackInventorySchema.safeParse(inventory).success).be.true();
+    should(inventory.at).equal('2026-10-22T12:00:00.000Z');
+    should(inventory.runtimes.map(row => [row.name, row.login, row.ready, row.models])).deepEqual([
+      ['claude-main', 'claude-main-login', true, ['opus', 'sonnet']],
+      ['claude-fast', 'claude-fast-login', true, ['haiku']],
+    ]);
+    should(inventory.models.find(model => model.id === 'opus')?.runtimes).deepEqual([
+      { name: 'claude-main', ready: true },
+    ]);
+    should(inventory.routing.text).equal(PROMPT);
   });
 });
 
 describe('PackService.recommend', () => {
-  it('should resolve the guide’s candidates against the fleet and name models by their catalog label', async () => {
-    // Arrange
-    const guideFile: ModelsGuideFile = {
-      useCases: [
-        {
-          id: 'everyday',
-          title: 'Everyday coding',
-          description: 'Ordinary work.',
-          keywords: ['fix'],
-          candidates: [
-            { provider: 'anthropic', model: 'sonnet', why: 'Fine.' },
-            { provider: 'anthropic', model: 'haiku', why: 'Cheap.' },
-          ],
-        },
-      ],
-    };
-    const { subject } = build({ runtimes: [CLAUDE_FAST], guideFile });
-
+  it('should answer the routing prompt, the models usable now and what --auto would try first', async () => {
     // Act
-    const answer = await subject.recommend({ task: 'fix the bug' });
+    const answer = await build().subject.recommend({ task: 'fix the bug' });
 
     // Assert
-    should(answer?.useCase).deepEqual({ id: 'everyday', title: 'Everyday coding', matchedBy: 'words' });
-    should(answer?.candidates.map(row => [row.model, row.modelLabel, row.ready])).deepEqual([
-      ['haiku', 'Haiku', true],
-      ['sonnet', 'Sonnet', false],
-    ]);
-    should(answer?.next).equal('fy new --runtime claude-fast --model haiku "<complete brief>"');
+    should(answer.task).equal('fix the bug');
+    should(answer.routing.text).equal(PROMPT);
+    should(answer.available).have.length(3);
+    should(answer.next).equal(
+      'fy new --runtime claude-main --model opus --effort high --name "<short task title>" "<complete brief>"',
+    );
   });
 
-  it('should honour a named use case and answer nothing for a guide with none', async () => {
-    // Arrange
-    const named = build();
-    const empty = build({ guideFile: { useCases: [] } });
-
+  it('should answer without a task, and with no next when nothing can run', async () => {
     // Act
-    const byName = await named.subject.recommend({ task: 'zzz', useCase: 'everyday' });
-    const none = await empty.subject.recommend({ task: 'fix' });
+    const answer = await build({ runtimes: [] }).subject.recommend({});
 
     // Assert
-    should(byName?.useCase.matchedBy).equal('named');
-    should(none).be.undefined();
+    should(answer).not.have.property('task');
+    should(answer).not.have.property('next');
+    should(answer.available).be.empty();
   });
 });
 
@@ -403,7 +387,7 @@ describe('PackService.newChild with a named runtime', () => {
     should(starts[0]?.mode).equal('auto');
   });
 
-  it('should title an unnamed sub-ferret from its brief, else from its use case and a short hash', async () => {
+  it('should title an unnamed sub-ferret from its brief, else Sub Ferret and a short hash', async () => {
     // Arrange
     const { subject, starts } = build({ parents: { p1: PARENT } });
     const boilerplate = 'You are an implementer. Read /tmp/briefs/x.md and follow it exactly.';
@@ -411,14 +395,10 @@ describe('PackService.newChild with a named runtime', () => {
     // Act
     await subject.newChild(request({ runtime: 'claude-main', model: 'opus', task: 'Fix the login redirect bug now' }));
     await subject.newChild(request({ runtime: 'claude-main', model: 'opus', task: boilerplate }));
-    await subject.newChild(
-      request({ runtime: 'claude-main', model: 'opus', task: boilerplate, useCase: 'code-review' }),
-    );
 
     // Assert
     should(starts[0]?.name).equal('Fix the Login Redirect Bug');
     should(starts[1]?.name).equal(`Sub Ferret ${briefHash(boilerplate)}`);
-    should(starts[2]?.name).equal(`Code Review ${briefHash(boilerplate)}`);
   });
 
   it("should run a sub-ferret in its parent's folder even when that folder is temporary", async () => {
@@ -609,78 +589,91 @@ describe('PackService.newChild with a named runtime', () => {
 });
 
 describe('PackService.newChild --auto', () => {
-  it('should start the guide’s first ready candidate, at the candidate’s effort unless the request names one', async () => {
+  it('should start the first ready model the routing prompt names, at the effort it names unless the request names one', async () => {
     // Arrange
     const plain = build({ parents: { p1: PARENT } });
     const forced = build({ parents: { p1: PARENT } });
 
     // Act
-    const first = await plain.subject.newChild(request({ auto: true, useCase: 'everyday' }));
+    const first = await plain.subject.newChild(request({ auto: true }));
     await forced.subject.newChild(request({ auto: true, effort: 'low' }));
 
     // Assert
-    should(first.outcome === 'started' && first.decidedBy).equal('guide');
+    should(first.outcome === 'started' && first.decidedBy).equal('routing');
     should(plain.starts[0]).containEql({ agent: 'claude-main-wrapper', model: 'opus', effort: 'high' });
     should(plain.ranks).be.empty();
     should(forced.starts[0]?.effort).equal('low');
   });
 
-  it('should refuse no_candidate, saying why the first candidate cannot run, when nothing is ready', async () => {
+  it("should fall back down the prompt's order, then to the ready model with the most headroom it does not name", async () => {
     // Arrange
-    const { subject, starts } = build({ parents: { p1: PARENT }, runtimes: [] });
+    const { subject, starts, probes } = build({
+      parents: { p1: PARENT },
+      probes: {
+        'claude-main-wrapper/opus': { ok: false, ms: 9, reason: 'no OK', code: 'out_of_quota' },
+        'claude-fast-wrapper/haiku': { ok: false, ms: 8, reason: 'no OK' },
+      },
+    });
 
     // Act
     const outcome = await subject.newChild(request({ auto: true }));
+
+    // Assert
+    should(probes.map(([probe]) => probe.model)).deepEqual(['opus', 'haiku', 'sonnet']);
+    should(outcome.outcome).equal('started');
+    if (outcome.outcome !== 'started') return;
+    should(
+      outcome.attempts.map(attempt => [attempt.runtime, attempt.model, attempt.outcome, attempt.refusal?.code]),
+    ).deepEqual([
+      ['claude-main', 'opus', 'refused', 'out_of_quota'],
+      ['claude-fast', 'haiku', 'refused', 'probe_failed'],
+      ['claude-main', 'sonnet', 'started', undefined],
+    ]);
+    should(starts.map(start => start.model)).deepEqual(['sonnet']);
+  });
+
+  it('should try the ready model with the most headroom when the prompt names nothing that can run', async () => {
+    // Arrange
+    const { subject, starts } = build({ parents: { p1: PARENT }, guideFile: { prompt: 'Use glm-9 for everything.' } });
+
+    // Act
+    const outcome = await subject.newChild(request({ auto: true }));
+
+    // Assert
+    should(outcome.outcome === 'started' && outcome.attempts).have.length(1);
+    should(starts[0]?.model).equal('opus');
+  });
+
+  it('should refuse no_candidate, saying why the first model cannot run, when nothing is ready', async () => {
+    // Arrange
+    const off = runtime('claude-off', {
+      catalogId: 'anthropic',
+      choices: [choice('opus', 'Opus')],
+      launch: { available: false, reason: 'Sign in to launch' },
+    });
+    const { subject, starts } = build({ parents: { p1: PARENT }, runtimes: [off] });
+    const empty = build({ parents: { p1: PARENT }, runtimes: [] });
+
+    // Act
+    const outcome = await subject.newChild(request({ auto: true }));
+    const nothing = await empty.subject.newChild(request({ auto: true }));
 
     // Assert
     should(refusalOf(outcome)).deepEqual({
       code: 'no_candidate',
-      message: 'Nothing in the models guide can run here now: No runtime on this machine offers Opus (anthropic).',
+      message: 'No model a runtime here offers can run now: claude-off cannot launch: Sign in to launch',
       remedy: 'Do the work yourself, or ask the owner to sign a login in.',
     });
+    should(refusalOf(nothing)?.message).equal('No model a runtime here offers can run now');
     should(starts).be.empty();
-  });
-
-  it('should refuse no_candidate without a reason when the guide names no use case', async () => {
-    // Arrange
-    const { subject } = build({ parents: { p1: PARENT }, guideFile: { useCases: [] } });
-
-    // Act
-    const outcome = await subject.newChild(request({ auto: true }));
-
-    // Assert
-    should(refusalOf(outcome)?.message).equal('Nothing in the models guide can run here now');
-  });
-
-  it('should try the next ready candidate when the first fails its probe', async () => {
-    // Arrange
-    const { subject, starts } = build({
-      parents: { p1: PARENT },
-      probes: { 'claude-main-wrapper': { ok: false, ms: 9, reason: 'no OK' } },
-    });
-
-    // Act
-    const outcome = await subject.newChild(request({ auto: true }));
-
-    // Assert
-    should(outcome.outcome).equal('started');
-    if (outcome.outcome !== 'started') return;
-    should(outcome.attempts.map(attempt => [attempt.runtime, attempt.outcome, attempt.refusal?.code])).deepEqual([
-      ['claude-main', 'refused', 'probe_failed'],
-      ['claude-fast', 'started', undefined],
-    ]);
-    should(starts).have.length(1);
-    should(starts[0]?.agent).equal('claude-fast-wrapper');
   });
 
   it('should refuse with the last probe failure, keeping every attempt, when all fail', async () => {
     // Arrange
     const { subject, starts } = build({
       parents: { p1: PARENT },
-      probes: {
-        'claude-main-wrapper': { ok: false, ms: 9, reason: 'first' },
-        'claude-fast-wrapper': { ok: false, ms: 8, reason: 'second' },
-      },
+      runtimes: [CLAUDE_FAST],
+      probes: { 'claude-fast-wrapper/haiku': { ok: false, ms: 8, reason: 'second' } },
     });
 
     // Act
@@ -691,7 +684,7 @@ describe('PackService.newChild --auto', () => {
     if (outcome.outcome !== 'refused') return;
     should(outcome.refusal.message).containEql('claude-fast did not answer');
     should(outcome.refusal.message).containEql('second');
-    should(outcome.attempts).have.length(2);
+    should(outcome.attempts).have.length(1);
     should(starts).be.empty();
   });
 });
@@ -699,7 +692,7 @@ describe('PackService.newChild --auto', () => {
 describe('PackService.newChild --auto with Jev deciding', () => {
   const jev = packConfig({ decision: 'jev', jev: { usdPerDay: 0.25 } });
 
-  it('should try the candidates in Jev’s order and record what the answer cost', async () => {
+  it('should give Jev the same routing prompt and every ready model, and try them in its order', async () => {
     // Arrange
     const { subject, ranks, recorded, starts } = build({ config: jev, parents: { p1: PARENT } });
 
@@ -708,23 +701,21 @@ describe('PackService.newChild --auto with Jev deciding', () => {
 
     // Assert
     should(ranks).have.length(1);
-    should(ranks[0]?.slice(0, 2)).deepEqual([
-      'fix the bug',
-      [
-        { model: 'opus', runtime: 'claude-main', why: 'Strong.' },
-        { model: 'haiku', runtime: 'claude-fast', why: 'Cheap.' },
-      ],
+    should(ranks[0]?.[0]).equal('fix the bug');
+    should(ranks[0]?.[1]).deepEqual([
+      { model: 'opus', runtime: 'claude-main', why: 'Opus, best tier, named 1 in the routing prompt, at high effort' },
+      { model: 'haiku', runtime: 'claude-fast', why: 'Haiku, fast tier, named 2 in the routing prompt' },
+      { model: 'sonnet', runtime: 'claude-main', why: 'Sonnet, balanced tier' },
     ]);
-    // Jev decides WITH the guide: its routing prompt (rendered here, the file has none) and the use case.
-    should(ranks[0]?.[2]?.useCase).deepEqual({ title: 'Everyday coding', description: 'Ordinary work.' });
-    should(ranks[0]?.[2]?.routing).containEql('Everyday coding (everyday): Opus at high effort, then Haiku.');
+    // Jev decides with exactly the text the asking ferret reads.
+    should(ranks[0]?.[2]).deepEqual({ routing: PROMPT });
     should(recorded).deepEqual([1]);
     should(starts[0]?.agent).equal('claude-fast-wrapper');
     should(outcome.outcome === 'started' && outcome.decidedBy).equal('jev');
     should(outcome.outcome === 'started' && 'note' in outcome).be.false();
   });
 
-  it('should use the guide’s order, and say so, once Jev’s daily cap is reached', async () => {
+  it("should use the routing prompt's order, and say so, once Jev's daily cap is reached", async () => {
     // Arrange
     const { subject, ranks, recorded, starts } = build({ config: jev, parents: { p1: PARENT }, spent: 0.25 });
 
@@ -735,13 +726,13 @@ describe('PackService.newChild --auto with Jev deciding', () => {
     should(ranks).be.empty();
     should(recorded).be.empty();
     should(starts[0]?.agent).equal('claude-main-wrapper');
-    should(outcome.outcome === 'started' && outcome.decidedBy).equal('guide');
+    should(outcome.outcome === 'started' && outcome.decidedBy).equal('routing');
     should(outcome.outcome === 'started' && outcome.note).equal(
-      "Jev's daily cap for Pack mode is reached, so the guide's order was used.",
+      "Jev's daily cap for Pack mode is reached, so the routing prompt's order was used.",
     );
   });
 
-  it('should use the guide’s order, and say why, when Jev could not decide', async () => {
+  it("should use the routing prompt's order, and say why, when Jev could not decide", async () => {
     // Arrange
     const { subject, recorded, starts } = build({
       config: jev,
@@ -755,21 +746,21 @@ describe('PackService.newChild --auto with Jev deciding', () => {
     // Assert
     should(recorded).be.empty();
     should(starts[0]?.agent).equal('claude-main-wrapper');
-    should(outcome.outcome === 'started' && outcome.decidedBy).equal('guide');
+    should(outcome.outcome === 'started' && outcome.decidedBy).equal('routing');
     should(outcome.outcome === 'started' && outcome.note).equal(
-      "Jev could not decide (no Jev key is set), so the guide's order was used.",
+      "Jev could not decide (no Jev key is set), so the routing prompt's order was used.",
     );
   });
 
-  it('should not ask Jev to choose between one candidate', async () => {
+  it('should not ask Jev to choose between one model', async () => {
     // Arrange
-    const { subject, ranks } = build({ config: jev, parents: { p1: PARENT }, runtimes: [CLAUDE_MAIN] });
+    const { subject, ranks } = build({ config: jev, parents: { p1: PARENT }, runtimes: [CLAUDE_FAST] });
 
     // Act
     const outcome = await subject.newChild(request({ auto: true }));
 
     // Assert
     should(ranks).be.empty();
-    should(outcome.outcome === 'started' && outcome.decidedBy).equal('guide');
+    should(outcome.outcome === 'started' && outcome.decidedBy).equal('routing');
   });
 });

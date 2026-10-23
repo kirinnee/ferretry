@@ -1,8 +1,7 @@
 import { afterEach, describe, expect, it } from 'bun:test';
-import type { PackFleetModel } from '@ferretry/protocol';
+import { modelVocabulary, type PackFleetModel } from '@ferretry/protocol';
 import { useState } from 'react';
 import { completionKey, ModelMentionField } from '../../../../src/features/pack/model-mention-field.tsx';
-import { modelVocabulary } from '../../../../src/lib/pack/model-mentions.ts';
 import { interact, type Mounted, mount, must, pressKey } from '../../../support/dom.ts';
 import { textOf, typeInto } from '../../../support/learning-dom.ts';
 import { FLEET_MODELS, OPUS } from '../../../support/pack.ts';
