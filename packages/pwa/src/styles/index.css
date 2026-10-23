@@ -9,6 +9,7 @@
 @import '../features/tasks/task-dag-graph.css';
 @import '../features/attention/attention-board.css';
 @import '../features/attention/attention-card.css';
+@import '../features/attention/attention-panel.css';
 @import '../features/workspace/workspace.css';
 @import '../shell/sessions-bar.css';
 @import '../features/session-info/session-info.css';

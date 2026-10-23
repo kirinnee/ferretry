@@ -24,7 +24,7 @@ import type { RuntimeModelControls } from '../../src/components/runtime-controls
 import { SessionTopBar, sessionDisplayName } from '../../src/components/session-top-bar.tsx';
 import { Transcript } from '../../src/components/transcript.tsx';
 import { SessionAnalyticsSurface } from '../../src/features/analytics/session-analytics-surface.tsx';
-import { AttentionActionModal } from '../../src/features/attention/attention-action-modal.tsx';
+import { AttentionPanel } from '../../src/features/attention/attention-panel.tsx';
 import { ContextRailBody } from '../../src/features/context-rail/context-rail-body.tsx';
 import { DialogCard } from '../../src/features/harness-dialog/dialog-card.tsx';
 import { ApprovalCard } from '../../src/features/permission-request/approval-card.tsx';
@@ -2239,7 +2239,19 @@ describe('SessionChatPage', () => {
       raisedBySession: 'shared',
       raisedByName: 'zoe',
     };
-    const attentionModel = (items = [attentionItem]): SessionAttentionModel =>
+    const resolvedItem = {
+      ...attentionItem,
+      id: 'A2',
+      subject: 'Pick the release branch',
+      resolvedAt: '2026-07-31T11:20:00.000Z',
+      resolvedBy: 'human',
+      resolvedBySession: null,
+      resolvedByName: null,
+      resolutionNote: null,
+      disposition: 'resolved',
+      response: { kind: 'permission', decision: 'approve' },
+    };
+    const attentionModel = (items: readonly unknown[] = [attentionItem], resolved: readonly unknown[] = []) =>
       ({
         client: {
           respond: async () => undefined,
@@ -2250,7 +2262,7 @@ describe('SessionChatPage', () => {
           v: 1,
           sessionId: 'shared',
           items,
-          resolved: [],
+          resolved,
           count: items.length,
           parseErrors: 0,
           updatedAt: '2026-07-31T12:00:00.000Z',
@@ -2269,23 +2281,41 @@ describe('SessionChatPage', () => {
         {...props}
       />
     );
+    const panel = (root: ReactTestInstance) => root.findByType(AttentionPanel);
 
-    test('puts a counted Attention entry point and its focused modal in the mounted workspace', () => {
+    test('counts the open items in the header, and the count unfolds and folds the panel', () => {
       const page = renderSessionChatPage(chatPage({ attention: attentionModel() }));
 
       try {
         const [trigger] = needsYouButtons(page.root);
-        const sheet = page.root.findByType(AttentionActionModal);
         expect(trigger?.props['data-needs-you']).toBe(1);
+        expect(textOf(must(trigger))).toBe('1 needs you');
         expect(trigger?.props['aria-expanded']).toBe(false);
-        // The trigger names the sheet it controls, and the sheet answers to it.
-        expect(trigger?.props['aria-controls']).toBe(sheet.props.id);
-        expect(sheet.props.open).toBe(false);
+        // The count names the panel it controls, and the panel answers to it.
+        expect(trigger?.props['aria-controls']).toBe(panel(page.root).props.id);
+        expect(panel(page.root).props.expanded).toBe(false);
 
-        run(() => trigger?.props.onClick({ currentTarget: null }));
+        run(() => trigger?.props.onClick());
 
-        expect(page.root.findByType(AttentionActionModal).props.open).toBe(true);
+        expect(panel(page.root).props.expanded).toBe(true);
+        // The header's request is for the panel, not for one item.
+        expect(panel(page.root).props.focus).toEqual({ target: null, seq: 1 });
         expect(needsYouButtons(page.root)[0]?.props['aria-expanded']).toBe(true);
+
+        run(() => needsYouButtons(page.root)[0]?.props.onClick());
+        expect(panel(page.root).props.expanded).toBe(false);
+        expect(panel(page.root).props.focus).toBeNull();
+      } finally {
+        run(() => page.unmount());
+      }
+    });
+
+    test('says how many need you when more than one does', () => {
+      const page = renderSessionChatPage(
+        chatPage({ attention: attentionModel([attentionItem, { ...attentionItem, id: 'A4' }]) }),
+      );
+      try {
+        expect(textOf(must(needsYouButtons(page.root)[0]))).toBe('2 need you');
       } finally {
         run(() => page.unmount());
       }
@@ -2299,7 +2329,7 @@ describe('SessionChatPage', () => {
         // cannot make, because nothing has read the ledger.
         expect(needsYouButtons(page.root)).toHaveLength(0);
         expect(actionLabels(page.root)).not.toContain('Attention');
-        expect(page.root.findAllByType(AttentionActionModal)).toHaveLength(0);
+        expect(page.root.findAllByType(AttentionPanel)).toHaveLength(0);
         const surface = page.root.findByType(ReferenceSurfaceProvider).props.surface;
         expect(surface.attentionReferenceResolver).toBeUndefined();
         expect(surface.onAttentionOpen).toBeUndefined();
@@ -2308,22 +2338,76 @@ describe('SessionChatPage', () => {
       }
     });
 
-    test('proves only the ids on this session’s ledger, and opens that exact item', () => {
-      const page = renderSessionChatPage(chatPage({ attention: attentionModel() }));
+    test('proves every id on this session’s ledger — open and resolved — and opens the panel at it', () => {
+      const page = renderSessionChatPage(chatPage({ attention: attentionModel([attentionItem], [resolvedItem]) }));
 
       try {
         const surface = page.root.findByType(ReferenceSurfaceProvider).props.surface;
-        // Proved: unresolved and on THIS board.
+        // Proved: open, and on THIS board.
         expect(surface.attentionReferenceResolver('A3')).toBe(true);
-        // Unproved: resolved, absent, or another session's. Markdown leaves it
-        // as prose — the honest state, never a dead link.
+        // Proved too: answered, but still on the record — older chat keeps its link.
+        expect(surface.attentionReferenceResolver('A2')).toBe(true);
+        // Unproved: on no ledger here. Markdown leaves it as prose.
         expect(surface.attentionReferenceResolver('A9')).toBe(false);
 
-        run(() => surface.onAttentionOpen('A3', null));
+        run(() => surface.onAttentionOpen('A2', null));
 
-        const sheet = page.root.findByType(AttentionActionModal);
-        expect(sheet.props.open).toBe(true);
-        expect(sheet.props.targetId).toBe('A3');
+        expect(panel(page.root).props.expanded).toBe(true);
+        expect(panel(page.root).props.focus).toEqual({ target: 'A2', seq: 1 });
+
+        // The same reference pressed again is a NEW request, so it scrolls back to the item.
+        run(() => page.root.findByType(ReferenceSurfaceProvider).props.surface.onAttentionOpen('A2', null));
+        expect(panel(page.root).props.focus).toEqual({ target: 'A2', seq: 2 });
+      } finally {
+        run(() => page.unmount());
+      }
+    });
+
+    test('proves nothing while the board is unread: unread is not empty', () => {
+      const unread = { ...attentionModel(), snapshot: null, status: 'loading' } as unknown as SessionAttentionModel;
+      const page = renderSessionChatPage(chatPage({ attention: unread }));
+      try {
+        const surface = page.root.findByType(ReferenceSurfaceProvider).props.surface;
+        expect(surface.attentionReferenceResolver).toBeUndefined();
+        expect(surface.onAttentionOpen).toBeUndefined();
+      } finally {
+        run(() => page.unmount());
+      }
+    });
+
+    test('hands the panel the page’s one attention client, bound to this session', () => {
+      const model = attentionModel();
+      const page = renderSessionChatPage(chatPage({ attention: model }));
+      try {
+        const props = panel(page.root).props;
+        expect(props.client).toBe(model.client);
+        expect(props.connection).toBe(alpha);
+        expect(props.scope).toEqual(daemonSessionScope(alpha, 'shared'));
+        expect(props.snapshot).toBe(model.snapshot);
+      } finally {
+        run(() => page.unmount());
+      }
+    });
+
+    test('opens AT the item a link names, and re-targets when the link changes', () => {
+      const page = renderSessionChatPage(
+        chatPage({ attention: attentionModel([attentionItem], [resolvedItem]), attentionTarget: 'A3' }),
+      );
+      try {
+        expect(panel(page.root).props.expanded).toBe(true);
+        expect(panel(page.root).props.focus?.target).toBe('A3');
+
+        run(() =>
+          page.update(
+            withSessionSearch(
+              chatPage({
+                attention: attentionModel([attentionItem], [resolvedItem]),
+                attentionTarget: 'A2',
+              }) as ReactElement<ComponentProps<typeof SessionChatPage>>,
+            ),
+          ),
+        );
+        expect(panel(page.root).props.focus?.target).toBe('A2');
       } finally {
         run(() => page.unmount());
       }
@@ -2334,10 +2418,10 @@ describe('SessionChatPage', () => {
 
       try {
         run(() => page.root.findByType(ReferenceSurfaceProvider).props.surface.onAttentionOpen('A3', null));
-        expect(page.root.findByType(AttentionActionModal).props.open).toBe(true);
+        expect(panel(page.root).props.expanded).toBe(true);
 
-        // Navigate. The ask belongs to the session that raised it, so offering
-        // it over another session's board would be offering the wrong decision.
+        // Navigate. The ask belongs to the session that raised it, so ringing
+        // its id on another session's board would point at the wrong decision.
         run(() =>
           page.update(
             withSessionSearch(
@@ -2348,74 +2432,56 @@ describe('SessionChatPage', () => {
           ),
         );
 
-        const sheet = page.root.findByType(AttentionActionModal);
-        expect(sheet.props.open).toBe(false);
-        expect(sheet.props.targetId).toBeNull();
+        expect(panel(page.root).props.expanded).toBe(false);
+        expect(panel(page.root).props.focus).toBeNull();
       } finally {
         run(() => page.unmount());
       }
     });
 
-    test('returns focus to the reference that opened the sheet', () => {
-      // A real, connected element: the reader pressed a `!A3` link in the
-      // transcript, and closing must put them back on it rather than at the top
-      // of the document.
-      const link = document.createElement('button');
-      document.body.appendChild(link);
-      // Counted rather than read back off `document.activeElement`: this asserts
-      // that the PAGE restored focus, not that the DOM emulation honoured it.
-      let focused = 0;
-      link.focus = () => {
-        focused += 1;
-      };
+    test('a link into another session opens that session’s panel at its item', () => {
       const page = renderSessionChatPage(chatPage({ attention: attentionModel() }));
-
       try {
-        run(() => page.root.findByType(ReferenceSurfaceProvider).props.surface.onAttentionOpen('A3', link));
-        run(() => page.root.findByType(AttentionActionModal).props.onClose());
-
-        const sheet = page.root.findByType(AttentionActionModal);
-        expect(sheet.props.open).toBe(false);
-        expect(sheet.props.targetId).toBeNull();
-        expect(focused).toBe(1);
+        run(() =>
+          page.update(
+            withSessionSearch(
+              chatPage({
+                attention: attentionModel(),
+                attentionTarget: 'A3',
+                session: sessionView('other'),
+              }) as ReactElement<ComponentProps<typeof SessionChatPage>>,
+            ),
+          ),
+        );
+        // The reset for the new session runs first; the link's target wins.
+        expect(panel(page.root).props.expanded).toBe(true);
+        expect(panel(page.root).props.focus?.target).toBe('A3');
       } finally {
         run(() => page.unmount());
-        link.remove();
       }
     });
 
-    test('falls back to the trigger when the opener is gone, without failing', () => {
+    test('the `!` menu reads the live board, so a newly raised item is offered without a reload', () => {
       const page = renderSessionChatPage(chatPage({ attention: attentionModel() }));
-
       try {
-        // Opened from the trigger itself, which this renderer never puts in the
-        // document — so the fallback lookup finds nothing and must simply do
-        // nothing. A close path that can throw would trap the reader in a sheet.
-        run(() => needsYouButtons(page.root)[0]?.props.onClick({ currentTarget: null }));
-        expect(page.root.findByType(AttentionActionModal).props.open).toBe(true);
+        const offered = () =>
+          (page.root.findByType(Composer).props.autocompleteAttention as readonly { id: string }[]).map(
+            item => item.id,
+          );
+        expect(offered()).toEqual(['A3']);
 
-        run(() => page.root.findByType(AttentionActionModal).props.onClose());
-
-        expect(page.root.findByType(AttentionActionModal).props.open).toBe(false);
-        expect(needsYouButtons(page.root)[0]?.props['aria-expanded']).toBe(false);
+        run(() =>
+          page.update(
+            withSessionSearch(
+              chatPage({ attention: attentionModel([attentionItem, { ...attentionItem, id: 'A7' }]) }) as ReactElement<
+                ComponentProps<typeof SessionChatPage>
+              >,
+            ),
+          ),
+        );
+        expect(offered()).toEqual(['A3', 'A7']);
       } finally {
         run(() => page.unmount());
-      }
-    });
-
-    test('offers the swipe answers on a phone and the plain ones on a desktop', () => {
-      const phone = renderSessionChatPage(chatPage({ attention: attentionModel(), presentation: 'sheet' }));
-      try {
-        expect(phone.root.findByType(AttentionActionModal).props.swipeEnabled).toBe(true);
-      } finally {
-        run(() => phone.unmount());
-      }
-
-      const desktop = renderSessionChatPage(chatPage({ attention: attentionModel() }));
-      try {
-        expect(desktop.root.findByType(AttentionActionModal).props.swipeEnabled).toBe(false);
-      } finally {
-        run(() => desktop.unmount());
       }
     });
   });

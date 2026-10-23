@@ -3,8 +3,9 @@
  *
  * Tasks, Attention and skills are each daemon facts. A standalone reader can
  * hydrate all three once; the session page — the only production host today —
- * instead supplies tasks and skills from their existing workspace owners, so
- * this module reads only Attention for it. Either way, preview and autocomplete
+ * instead supplies tasks and skills from their existing workspace owners — and
+ * Attention too, when it subscribes to the session's LIVE board — so this module
+ * reads only the family no owner holds. Either way, preview and autocomplete
  * receive the same arrays. A failed family stays `undefined`: that is "not
  * proved", never an empty daemon fact.
  */
@@ -43,6 +44,15 @@ export interface ComposerReferenceCatalogSources {
   readonly skillFailure?: string;
   readonly waitForTasks: () => Promise<void> | undefined;
   readonly waitForSkills: () => Promise<void> | undefined;
+  /**
+   * The session's live Attention board, when the host subscribes to one: its open items, `undefined`
+   * until first read. Present, it is THE source — a newly raised item reaches the `!` menu the moment
+   * the board moves, where a one-shot read here would offer the board as it was when the page opened.
+   */
+  readonly attention?: {
+    readonly items: readonly AttentionItem[] | undefined;
+    readonly failure?: string;
+  };
 }
 
 const failureMessage = (reason: unknown): string => (reason instanceof Error ? reason.message : String(reason));
@@ -132,7 +142,7 @@ async function readComposerReferenceCatalogsIncrementally(
   };
 }
 
-/** Attention is the only family the session page has no existing owner for. */
+/** Attention, for a session page that supplies tasks and skills but subscribes to no live board. */
 async function readComposerAttentionIncrementally(
   client: ComposerReferenceCatalogReader,
   sessionId: string,
@@ -230,11 +240,13 @@ export function useComposerReferenceCatalogs(
     return waits.length === 0 ? undefined : Promise.allSettled(waits).then(() => undefined);
   }, []);
   const usesSharedSources = sources !== undefined;
+  // A host that owns the live board leaves this module nothing to read for the session page.
+  const ownsAttention = sources?.attention !== undefined;
 
   useEffect(() => {
     const controller = new AbortController();
     setSnapshot(null);
-    if (typeof client.request !== 'function') {
+    if (typeof client.request !== 'function' || (usesSharedSources && ownsAttention)) {
       pending.current = null;
       return () => controller.abort();
     }
@@ -271,17 +283,19 @@ export function useComposerReferenceCatalogs(
       controller.abort();
       pending.current = null;
     };
-  }, [client, sessionId, usesSharedSources]);
+  }, [client, sessionId, usesSharedSources, ownsAttention]);
 
   const owned = snapshot?.sessionId === sessionId ? snapshot.catalogs : EMPTY_CATALOGS;
   const catalogs = useMemo<ComposerReferenceCatalogs>(() => {
     if (sources === undefined) return owned;
+    const attention = sources.attention?.items ?? (sources.attention === undefined ? owned.attention : undefined);
+    const attentionFailure = sources.attention === undefined ? owned.failures.attention : sources.attention.failure;
     return {
       ...(sources.tasks === undefined ? {} : { tasks: sources.tasks }),
-      ...(owned.attention === undefined ? {} : { attention: owned.attention }),
+      ...(attention === undefined ? {} : { attention }),
       ...(sources.skills === undefined ? {} : { skills: sources.skills }),
       failures: {
-        ...(owned.failures.attention === undefined ? {} : { attention: owned.failures.attention }),
+        ...(attentionFailure === undefined ? {} : { attention: attentionFailure }),
         ...(sources.taskFailure === undefined ? {} : { tasks: sources.taskFailure }),
         ...(sources.skillFailure === undefined ? {} : { skills: sources.skillFailure }),
       },
