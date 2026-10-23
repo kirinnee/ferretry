@@ -67,7 +67,7 @@ Restart to apply", with the reason, and a one-tap Restart. It compares two thing
   the process was launched (a permission-mode, profile or fixed-layer change since).
 
 **Info › Runtime › Instructions** says what the running process was told: which Ferretry sections of its
-appended system prompt it carries (the tools, the settings rules, and each of Hypermedia, Pack mode and
+appended system prompt it carries (the tools, the settings rules, the Attention rule, and each of Hypermedia, Pack mode and
 Learning whose switch was on) with each one's size, its mode, and whether it may ask the owner a question.
 It reads `state.launchInstructions` (`SessionLaunchInstructionsSchema`), which the daemon records from the
 environment each pane is launched with — at every start, restart and revive — so a switch flipped since

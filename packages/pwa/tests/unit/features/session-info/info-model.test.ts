@@ -299,6 +299,13 @@ describe('launchInstructionFacts', () => {
     );
     expect(auto).toEqual({ sections: [], mode: 'Agent', questions: 'No' });
     expect(launchInstructionFacts(sessionView('s'))).toBeUndefined();
-    expect(Object.keys(LAUNCH_SECTION_LABEL)).toEqual(['tools', 'settings', 'hypermedia', 'pack', 'learning']);
+    expect(Object.keys(LAUNCH_SECTION_LABEL)).toEqual([
+      'tools',
+      'settings',
+      'attention',
+      'hypermedia',
+      'pack',
+      'learning',
+    ]);
   });
 });

@@ -495,7 +495,13 @@ describe('tmux resume launcher', () => {
     const untold = await launcher(port).relaunch(ID);
 
     // Assert
-    should(told?.sections.map(section => section.id)).deepEqual(['tools', 'settings', 'hypermedia', 'learning']);
+    should(told?.sections.map(section => section.id)).deepEqual([
+      'tools',
+      'settings',
+      'attention',
+      'hypermedia',
+      'learning',
+    ]);
     should(told?.mode).equal('interactive');
     should(told?.questions).be.true();
     should(untold).be.undefined();
