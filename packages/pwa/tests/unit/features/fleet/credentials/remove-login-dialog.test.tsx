@@ -193,6 +193,18 @@ describe('Remove a login · the buttons', () => {
     await detail.view.unmount();
   });
 
+  it('opens the same dialog from the login’s own page', async () => {
+    const { view } = await open(`${HASH}/kirin-old`);
+    await click(
+      view.container.querySelector('[data-credential-remove-zone] [data-credential-remove]'),
+      'the page’s Remove',
+    );
+    expect(text(dialog(view.container), '[data-login-remove-used]')).toBe(
+      'Used by 2 runtimes: claude-agent, claude-review',
+    );
+    await view.unmount();
+  });
+
   it('disables Remove, with the reason, when this device may not change the fleet', async () => {
     const refused = machineWith({ mayApply: false, applyRefusal: 'not-granted' });
     const list = await open(HASH, { machine: refused, routes: { 'GET /v1/fleet/machine': refused } });
@@ -468,6 +480,39 @@ describe('Remove a login · signing it out first', () => {
     );
     expect(bodies(calls).some(change => (change as { kind: string }).kind === 'credential.remove')).toBe(true);
     expect(calls.filter(call => call.path.endsWith('/apply'))).toHaveLength(1);
+    await view.unmount();
+  });
+
+  it('says what a signed-out login means for the ferrets still running on it', async () => {
+    const { view } = await open(HASH, { routes: { [CHANGES]: staged(FERRETS) } });
+    await openFor(view.container, 'kirin-old');
+    expect(dialog(view.container).querySelector('[data-login-remove-sign-out-warning]')).toBeNull();
+    await click(dialog(view.container).querySelector('[data-login-remove-sign-out]'), 'sign out first');
+    expect(text(dialog(view.container), '[data-login-remove-sign-out-warning]')).toContain(
+      '3 ferrets running on it may ask to sign in again',
+    );
+    await view.unmount();
+  });
+
+  it('says the login is signed out but kept when the removal itself is refused', async () => {
+    let applied = 0;
+    const { view } = await open(HASH, {
+      routes: {
+        [APPLY]: () => {
+          applied += 1;
+          return applied === 1
+            ? { outcome: 'signed-out', credential: { ...SPARE } }
+            : new FyHttpError('kirin-spare is in use.', 409, 'fleet_change_refused');
+        },
+      },
+    });
+    await openFor(view.container, 'kirin-spare');
+    await click(dialog(view.container).querySelector('[data-login-remove-sign-out]'), 'sign out first');
+    await click(submit(view.container), 'confirm');
+
+    expect(text(dialog(view.container), '[data-login-remove-note]')).toBe(
+      'kirin-spare is signed out, but it was not removed.',
+    );
     await view.unmount();
   });
 });
