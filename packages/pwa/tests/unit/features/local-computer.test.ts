@@ -42,6 +42,10 @@ describe('isLocalDirect', () => {
     expect(isLocalDirect(carrying({ kind: 'relay', relayUrl: 'wss://relay.example.test/v1' }))).toBe(false);
   });
 
+  it('is false for a direct carrier whose address cannot be read', () => {
+    expect(isLocalDirect(direct('not a url'))).toBe(false);
+  });
+
   it('is false before anything has been carried and when nothing is reachable', () => {
     expect(isLocalDirect(undefined)).toBe(false);
     expect(isLocalDirect({ ok: false, reason: 'nothing answered', passedOver: [] })).toBe(false);

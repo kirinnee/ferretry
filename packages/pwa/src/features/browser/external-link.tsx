@@ -241,11 +241,7 @@ const documentBase = (): string | undefined => (typeof document === 'undefined' 
  * the debug console; the address never does, because a link routinely carries a token in its query.
  */
 const handOffToComputer = (computer: ComputerLinkPort | undefined, browser: LinkOpener, href: string): void => {
-  if (computer === undefined) {
-    browser.openTab(href);
-    return;
-  }
-  computer(href).catch((error: unknown) => {
+  (computer?.(href) ?? Promise.reject(new Error('no daemon is on this computer'))).catch((error: unknown) => {
     console.debug('[links] the daemon could not open the link on this computer; opening a tab instead', {
       reason: error instanceof Error ? error.message : 'unknown',
     });
