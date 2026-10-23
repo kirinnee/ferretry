@@ -506,6 +506,7 @@ import {
   type AnalyticsTranscriptEvidenceSource,
   type AnalyticsTranscriptFoldSource,
   AnswerAcknowledged,
+  AnswerAlreadyAnswered,
   AnswerReleased,
   AnswerRequestConflict,
   AnswerTerminalFailure,
@@ -3334,7 +3335,15 @@ function createSessionAnswerSubsystem(
           // id, or go and look at the session. Collapsing them would tell a caller to retry in the
           // one case where retrying is the thing that must not happen.
           if (error instanceof StructuredQuestionRefused) throw new SessionAnswerError('refused', error.message);
-          if (error instanceof AnswerRequestConflict) throw new SessionAnswerError('conflict', error.message);
+          if (error instanceof AnswerRequestConflict)
+            throw new SessionAnswerError(
+              'conflict',
+              'A different answer was already sent for this question. Reload the session and check it before answering again.',
+              undefined,
+              error.message,
+            );
+          if (error instanceof AnswerAlreadyAnswered)
+            throw new SessionAnswerError('already_answered', error.message, error.answeredWith, error.detail);
           if (error instanceof AnswerToolAlreadyHandled) throw new SessionAnswerError('refused', error.message);
           if (error instanceof AnswerUnconfirmed) throw new SessionAnswerError('unconfirmed', error.message);
           if (

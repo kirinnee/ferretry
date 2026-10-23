@@ -1,4 +1,5 @@
 import type { PendingQuestion, StructuredQuestionAnswer } from '@ferretry/protocol';
+import { FyHttpError } from '@ferretry/protocol/client';
 import { useEffect, useId, useRef, useState } from 'react';
 import type { DaemonConnection } from '../lib/daemon-connection.ts';
 
@@ -71,6 +72,29 @@ const updateOther = (state: AnswerState, index: number, value: string): AnswerSt
   return { ...state, others };
 };
 
+const QUESTION_ALREADY_ANSWERED = 'question_already_answered';
+
+/** One attempt's identity: the question plus a digest of the exact answer, so only a repeat is a replay. */
+async function answerRequestId(
+  daemonId: string,
+  sessionId: string,
+  toolUseId: string,
+  answers: readonly StructuredQuestionAnswer[],
+): Promise<string> {
+  const body = JSON.stringify(
+    answers.map(answer => (answer.kind === 'other' ? ['other', answer.text] : ['selection', [...answer.labels]])),
+  );
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(body));
+  const hex = Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('');
+  return `question:${daemonId}:${sessionId}:${toolUseId}:${hex.slice(0, 32)}`;
+}
+
+const bodyField = (cause: unknown, field: string): string | undefined => {
+  if (!(cause instanceof FyHttpError) || typeof cause.body !== 'object' || cause.body === null) return undefined;
+  const value = (cause.body as Record<string, unknown>)[field];
+  return typeof value === 'string' && value !== '' ? value : undefined;
+};
+
 /**
  * Daemon-bound structured answer form. A multi-question request is paged only
  * on compact layouts, but both presentations share one answer state and one
@@ -83,7 +107,8 @@ export function QuestionForm({ api, daemon, sessionId, question, compact = false
   const [answers, setAnswers] = useState(() => initialAnswers(question.questions.length));
   const [page, setPage] = useState(0);
   const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<{ readonly sentence: string; readonly detail?: string } | null>(null);
+  const [alreadyAnswered, setAlreadyAnswered] = useState<string | null>(null);
   const submitLock = useRef(false);
   const paged = compact && question.questions.length > 1;
 
@@ -95,6 +120,7 @@ export function QuestionForm({ api, daemon, sessionId, question, compact = false
     setPage(0);
     setSubmitting(false);
     setError(null);
+    setAlreadyAnswered(null);
     submitLock.current = false;
   }, [daemon.daemonId, sessionId, question.toolUseId, question.questions.length]);
 
@@ -109,7 +135,7 @@ export function QuestionForm({ api, daemon, sessionId, question, compact = false
           ? { kind: 'other', text: (answers.others[index] ?? '').trim() }
           : { kind: 'selection', labels: [...(answers.picks[index] ?? [])] },
       );
-      const requestId = `question:${daemon.daemonId}:${sessionId}:${question.toolUseId}`;
+      const requestId = await answerRequestId(daemon.daemonId, sessionId, question.toolUseId, structuredAnswers);
       if (question.questions.length === 1) {
         await api.answer(
           daemon,
@@ -129,13 +155,23 @@ export function QuestionForm({ api, daemon, sessionId, question, compact = false
       }
       onAnswered?.();
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Answer could not be sent');
-      submitLock.current = false;
+      if (cause instanceof FyHttpError && cause.code === QUESTION_ALREADY_ANSWERED) {
+        // The daemon already delivered an answer to this exact form. Keep the lock: nothing more can be sent.
+        setAlreadyAnswered(bodyField(cause, 'answeredWith') ?? 'an earlier answer');
+      } else {
+        const detail = bodyField(cause, 'detail');
+        setError({
+          sentence: cause instanceof Error ? cause.message : 'Answer could not be sent',
+          ...(detail === undefined ? {} : { detail }),
+        });
+        submitLock.current = false;
+      }
     } finally {
       setSubmitting(false);
     }
   };
 
+  const locked = submitting || alreadyAnswered !== null;
   const visible = paged ? [page] : question.questions.map((_, index) => index);
   const lastPage = page === question.questions.length - 1;
 
@@ -160,7 +196,7 @@ export function QuestionForm({ api, daemon, sessionId, question, compact = false
                 <label className="fy-question-option" key={option.label}>
                   <input
                     checked={!other && (answers.picks[index] ?? []).includes(option.label)}
-                    disabled={submitting}
+                    disabled={locked}
                     name={`${formId}-${index}`}
                     onChange={() => setAnswers(current => toggleOption(current, index, option.label, multiple))}
                     type={multiple ? 'checkbox' : 'radio'}
@@ -174,7 +210,7 @@ export function QuestionForm({ api, daemon, sessionId, question, compact = false
               <label className="fy-question-option">
                 <input
                   checked={other}
-                  disabled={submitting}
+                  disabled={locked}
                   name={`${formId}-${index}`}
                   onChange={() => setAnswers(current => selectOther(current, index))}
                   type={multiple ? 'checkbox' : 'radio'}
@@ -184,7 +220,7 @@ export function QuestionForm({ api, daemon, sessionId, question, compact = false
               {other ? (
                 <textarea
                   aria-label={`Other answer for question ${index + 1}`}
-                  disabled={submitting}
+                  disabled={locked}
                   onChange={event => {
                     // Read BEFORE the updater: React clears `currentTarget` once the handler returns, and
                     // the updater runs later — reading it there throws and unmounts the whole page.
@@ -202,7 +238,7 @@ export function QuestionForm({ api, daemon, sessionId, question, compact = false
       {paged ? (
         <nav aria-label="Question progress" className="fy-question-nav">
           <button
-            disabled={page === 0 || submitting}
+            disabled={page === 0 || locked}
             onClick={() => setPage(current => Math.max(0, current - 1))}
             type="button"
           >
@@ -210,7 +246,7 @@ export function QuestionForm({ api, daemon, sessionId, question, compact = false
           </button>
           {lastPage ? (
             <button
-              disabled={!allAnswered(answers, question.questions.length) || submitting}
+              disabled={!allAnswered(answers, question.questions.length) || locked}
               onClick={() => void submit()}
               type="button"
             >
@@ -218,7 +254,7 @@ export function QuestionForm({ api, daemon, sessionId, question, compact = false
             </button>
           ) : (
             <button
-              disabled={!answered(answers, page) || submitting}
+              disabled={!answered(answers, page) || locked}
               onClick={() => setPage(current => current + 1)}
               type="button"
             >
@@ -229,14 +265,25 @@ export function QuestionForm({ api, daemon, sessionId, question, compact = false
       ) : (
         <button
           className="fy-question-submit"
-          disabled={!allAnswered(answers, question.questions.length) || submitting}
+          disabled={!allAnswered(answers, question.questions.length) || locked}
           onClick={() => void submit()}
           type="button"
         >
           {submitting ? 'Submitting…' : 'Submit answer'}
         </button>
       )}
-      {error ? <p role="alert">{error}</p> : null}
+      {alreadyAnswered === null ? null : (
+        <p data-question-answered="" role="status">
+          This question was already answered with «{alreadyAnswered}».
+        </p>
+      )}
+      {error ? <p role="alert">{error.sentence}</p> : null}
+      {error?.detail === undefined ? null : (
+        <details className="text-meta text-muted">
+          <summary>Details</summary>
+          <pre className="m-0 mt-1 whitespace-pre-wrap break-words font-mono">{error.detail}</pre>
+        </details>
+      )}
     </section>
   );
 }

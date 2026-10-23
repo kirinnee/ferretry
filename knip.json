@@ -55,6 +55,7 @@
         "harness/send-status-unknown-screenshot.tsx",
         "harness/convert-sheet-screenshot.tsx",
         "harness/approval-card-screenshot.tsx",
+        "harness/question-form-screenshot.tsx",
         "harness/dialog-card-screenshot.tsx",
         "harness/model-catalog-screenshot.tsx",
         "harness/local-models-screenshot.tsx",
