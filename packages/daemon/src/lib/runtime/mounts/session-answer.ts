@@ -19,6 +19,7 @@ export type SessionAnswerFailure =
   | 'not_found'
   | 'refused'
   | 'conflict'
+  | 'already_answered'
   | 'unconfirmed'
   | 'released'
   | 'failed';
@@ -27,6 +28,10 @@ export class SessionAnswerError extends Error {
   constructor(
     readonly failure: SessionAnswerFailure,
     message: string,
+    /** What was answered, for `already_answered`; the sentence in `message` already names it. */
+    readonly answeredWith?: string,
+    /** The technical explanation, kept out of `message` so a screen can show it as Details only. */
+    readonly detail?: string,
   ) {
     super(message);
     this.name = 'SessionAnswerError';
@@ -61,6 +66,10 @@ function requestId(context: RouteContext): string {
   return value;
 }
 
+function detailOf(error: SessionAnswerError): Record<string, string> {
+  return error.detail === undefined ? {} : { detail: error.detail };
+}
+
 function refuse(error: unknown): never {
   if (!(error instanceof SessionAnswerError)) throw error;
   switch (error.failure) {
@@ -71,7 +80,12 @@ function refuse(error: unknown): never {
     case 'refused':
       throw new ApiError(409, error.message, 'answer_refused');
     case 'conflict':
-      throw new ApiError(409, error.message, 'answer_request_id_reused');
+      throw new ApiError(409, error.message, 'answer_request_id_reused', undefined, detailOf(error));
+    case 'already_answered':
+      throw new ApiError(409, error.message, 'question_already_answered', undefined, {
+        ...detailOf(error),
+        ...(error.answeredWith === undefined ? {} : { answeredWith: error.answeredWith }),
+      });
     // The one refusal that must never be read as "try again": a retry is exactly what it forbids.
     case 'unconfirmed':
       throw new ApiError(409, error.message, 'answer_unconfirmed');

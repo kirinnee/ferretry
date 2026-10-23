@@ -160,12 +160,71 @@ export class AnswerAcknowledged extends Error {
 
 /** A different request already owns this exact rendered form, so a new id cannot authorize keys. */
 export class AnswerToolAlreadyHandled extends Error {
-  constructor(toolUseId: string, requestId: string, outcome: AnswerOutcome) {
+  constructor(
+    toolUseId: string,
+    requestId: string,
+    readonly outcome: AnswerOutcome,
+  ) {
     super(
       `structured question ${JSON.stringify(toolUseId)} is already owned by answer request ${JSON.stringify(requestId)} (${outcome}); a new request id cannot drive the same rendered form`,
     );
     this.name = 'AnswerToolAlreadyHandled';
   }
+}
+
+/**
+ * This exact rendered form was already answered, and the person asking is told what the answer was.
+ *
+ * A subclass of {@link AnswerToolAlreadyHandled} so every existing catch keeps refusing it; what it adds
+ * is a sentence a person can read (`message`) with the idempotency explanation kept apart as `detail`.
+ */
+export class AnswerAlreadyAnswered extends AnswerToolAlreadyHandled {
+  readonly detail: string;
+
+  constructor(
+    toolUseId: string,
+    requestId: string,
+    readonly answeredWith: string,
+  ) {
+    super(toolUseId, requestId, 'confirmed');
+    this.detail = this.message;
+    this.message = `This question was already answered with «${answeredWith}».`;
+    this.name = 'AnswerAlreadyAnswered';
+  }
+}
+
+/** Longest answer text a refusal repeats back; the full text stays in the ledger. */
+const ANSWER_SUMMARY_LIMIT = 200;
+
+/**
+ * The answer a fingerprint spells, as one short readable string.
+ *
+ * Reads the positional list {@link answerFingerprint} wrote and nothing else, so it never has to guess
+ * at a layout it does not own. An unreadable fingerprint yields an honest placeholder, not a throw: this
+ * runs while building a refusal, and a refusal that crashes tells the person nothing.
+ */
+export function answerSummary(fingerprint: string): string {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(fingerprint);
+  } catch {
+    return 'an earlier answer';
+  }
+  if (!Array.isArray(parsed)) return 'an earlier answer';
+  const [, labels, other, responses, answers] = parsed as [unknown, unknown, unknown, unknown, unknown];
+  const text = (value: unknown): string => (Array.isArray(value) ? value.map(String).join(', ') : String(value));
+  const summary = Array.isArray(answers)
+    ? answers
+        .map(answer => (Array.isArray(answer) ? text(answer[1]) : ''))
+        .filter(part => part !== '')
+        .join('; ')
+    : typeof other === 'string'
+      ? other
+      : Array.isArray(responses)
+        ? responses.map(String).join('; ')
+        : text(labels);
+  if (summary === '') return 'an earlier answer';
+  return summary.length > ANSWER_SUMMARY_LIMIT ? `${summary.slice(0, ANSWER_SUMMARY_LIMIT)}…` : summary;
 }
 
 /**

@@ -3,6 +3,7 @@ import type { SessionState, SessionView } from '@ferretry/protocol';
 import should from 'should';
 import { KeyedSerialExecutor } from '../../../../src/adapters/system/keyed-serial-executor.ts';
 import {
+  AnswerAlreadyAnswered,
   type AnswerLedger,
   type AnswerOperationRecord,
   AnswerReleased,
@@ -387,6 +388,90 @@ describe('the structured answer coordinator', () => {
     const retry = harness({ ledger });
 
     await should(answer(retry.subject, 'request-2')).be.rejectedWith(AnswerToolAlreadyHandled);
+    should(retry.performer.calls).deepEqual([]);
+  });
+
+  it('tells a changed answer, sent after the first was delivered, what the question was answered with', async () => {
+    const ledger = new MemoryLedger([
+      [
+        ID,
+        {
+          requestId: 'request-1',
+          toolUseId: 'tool-1',
+          fingerprint: answerFingerprint({ toolUseId: 'tool-1', labels: [], other: 'my own words' }),
+          acceptedAt: '2026-08-06T00:00:00.000Z',
+          outcome: 'confirmed',
+        },
+      ],
+    ]);
+    const retry = harness({ ledger });
+
+    const refusal = await answer(retry.subject, 'request-2', { toolUseId: 'tool-1', labels: ['No'] }).catch(
+      (error: unknown) => error,
+    );
+
+    should(refusal).be.instanceOf(AnswerAlreadyAnswered);
+    should((refusal as AnswerAlreadyAnswered).answeredWith).equal('my own words');
+    should((refusal as AnswerAlreadyAnswered).message).equal('This question was already answered with «my own words».');
+    should(retry.performer.calls).deepEqual([]);
+  });
+
+  it('delivers a changed answer when the earlier attempt proved it sent nothing, auditing both receipts', async () => {
+    const ledger = new MemoryLedger([
+      [
+        ID,
+        {
+          requestId: 'request-1',
+          toolUseId: 'tool-1',
+          fingerprint: answerFingerprint(REQUEST),
+          acceptedAt: '2026-08-06T00:00:00.000Z',
+          outcome: 'failed',
+          reason: 'released without sending a key',
+        },
+      ],
+    ]);
+    const retry = harness({ ledger });
+
+    await answer(retry.subject, 'request-2', { toolUseId: 'tool-1', labels: [], other: 'my own words' });
+
+    should(retry.performer.calls).have.length(1);
+    should(ledger.appended.map(([, record]) => [record.requestId, record.outcome])).deepEqual([
+      ['request-2', 'accepted'],
+      ['request-2', 'confirmed'],
+    ]);
+    should(ledger.appended[0]?.[1].reason).match(/supersedes request "request-1"/u);
+    should((await ledger.all(ID)).get('request-1')?.outcome).equal('failed');
+  });
+
+  it('delivers one answer once when the same free-text answer is retried under its own id', async () => {
+    const { subject, performer, ledger } = harness();
+    const other: AnswerRequestPayload = { toolUseId: 'tool-1', labels: [], other: 'my own words' };
+
+    await answer(subject, 'request-1', other);
+    await answer(subject, 'request-1', other);
+
+    should(performer.calls).have.length(1);
+    should(ledger.appended.map(([, record]) => record.outcome)).deepEqual(['accepted', 'confirmed']);
+  });
+
+  it('still refuses a changed answer while the earlier one may have reached the form', async () => {
+    const ledger = new MemoryLedger([
+      [
+        ID,
+        {
+          requestId: 'request-1',
+          toolUseId: 'tool-1',
+          fingerprint: answerFingerprint(REQUEST),
+          acceptedAt: '2026-08-06T00:00:00.000Z',
+          outcome: 'quarantined',
+        },
+      ],
+    ]);
+    const retry = harness({ ledger });
+
+    await should(
+      answer(retry.subject, 'request-2', { toolUseId: 'tool-1', labels: [], other: 'my own words' }),
+    ).be.rejectedWith(AnswerToolAlreadyHandled);
     should(retry.performer.calls).deepEqual([]);
   });
 
