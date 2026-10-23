@@ -30,6 +30,7 @@ import type { OpenLinksIn } from '../../lib/controls.ts';
 import { InAppBrowserContext, type InAppBrowserHost, InAppBrowserSheet } from './in-app-browser.tsx';
 import { type BrowserActivation, type BrowserDestination, browserDestination } from './in-app-browser-model.ts';
 import { decideLinkAction, isIosStandalone } from './link-behaviour-model.ts';
+import type { ComputerLinkPort } from './local-computer.ts';
 
 /** How long the iOS hand-off has to take the reader to Safari before a plain new tab is opened instead. */
 export const SAFARI_HANDOFF_MS = 500;
@@ -96,6 +97,8 @@ export const browserLinkOpener = (win: Window = window): LinkOpener => ({
 
 interface LinkBehaviourSettings {
   readonly openLinksIn: OpenLinksIn;
+  /** Hands a link to this computer's own browser; absent when no daemon on this computer is connected. */
+  readonly computer?: ComputerLinkPort;
   /** Absent: the real browser. */
   readonly opener?: LinkOpener;
 }
@@ -104,14 +107,19 @@ const LinkBehaviourContext = createContext<LinkBehaviourSettings>({ openLinksIn:
 
 export interface LinkBehaviourProviderProps {
   readonly openLinksIn: OpenLinksIn;
+  readonly computer?: ComputerLinkPort;
   readonly opener?: LinkOpener;
   readonly children: ReactNode;
 }
 
-export function LinkBehaviourProvider({ openLinksIn, opener, children }: LinkBehaviourProviderProps) {
+export function LinkBehaviourProvider({ openLinksIn, opener, computer, children }: LinkBehaviourProviderProps) {
   const value = useMemo<LinkBehaviourSettings>(
-    () => (opener === undefined ? { openLinksIn } : { openLinksIn, opener }),
-    [openLinksIn, opener],
+    () => ({
+      openLinksIn,
+      ...(opener === undefined ? {} : { opener }),
+      ...(computer === undefined ? {} : { computer }),
+    }),
+    [openLinksIn, opener, computer],
   );
   return <LinkBehaviourContext.Provider value={value}>{children}</LinkBehaviourContext.Provider>;
 }
@@ -137,7 +145,7 @@ export interface LinkBehaviour {
 }
 
 export function useLinkBehaviour(): LinkBehaviour {
-  const { openLinksIn, opener } = useContext(LinkBehaviourContext);
+  const { openLinksIn, opener, computer } = useContext(LinkBehaviourContext);
   const host = useContext(InAppBrowserContext);
   const [preview, setPreview] = useState<{ readonly destination: BrowserDestination; readonly open: boolean } | null>(
     null,
@@ -152,7 +160,8 @@ export function useLinkBehaviour(): LinkBehaviour {
         href: target.href,
         baseHref: target.element.ownerDocument.baseURI,
         ...(target.download === undefined ? {} : { download: target.download }),
-        iosStandalone: openLinksIn === 'browser' && browser.iosStandalone(),
+        iosStandalone: openLinksIn !== 'panel' && browser.iosStandalone(),
+        computerAvailable: computer !== undefined,
       });
       if (action.kind === 'native') return false;
       click.preventDefault();
@@ -161,11 +170,15 @@ export function useLinkBehaviour(): LinkBehaviour {
         else host.openDestination(action.destination, target.element);
         return true;
       }
+      if (action.kind === 'computer') {
+        handOffToComputer(computer, browser, action.href);
+        return true;
+      }
       browser.handOff(action.href);
       browser.unlessLeft(SAFARI_HANDOFF_MS, () => browser.openTab(action.fallback));
       return true;
     },
-    [host, openLinksIn, opener],
+    [computer, host, openLinksIn, opener],
   );
 
   const sheet =
@@ -220,3 +233,22 @@ export function ExternalLink({ href, onClick, download, children, ...rest }: Ext
 }
 
 const documentBase = (): string | undefined => (typeof document === 'undefined' ? undefined : document.baseURI);
+
+/**
+ * Gives one address to this computer's browser through the daemon, and opens an ordinary new tab if
+ * that goes wrong for ANY reason — refused, offline, rate limited, not actually local. The reader asked
+ * for a link to open, and a failed convenience must not be the reason it does not. The reason goes to
+ * the debug console; the address never does, because a link routinely carries a token in its query.
+ */
+const handOffToComputer = (computer: ComputerLinkPort | undefined, browser: LinkOpener, href: string): void => {
+  if (computer === undefined) {
+    browser.openTab(href);
+    return;
+  }
+  computer(href).catch((error: unknown) => {
+    console.debug('[links] the daemon could not open the link on this computer; opening a tab instead', {
+      reason: error instanceof Error ? error.message : 'unknown',
+    });
+    browser.openTab(href);
+  });
+};

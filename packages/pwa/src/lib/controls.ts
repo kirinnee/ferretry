@@ -72,14 +72,17 @@ export type MotionPreference = 'system' | 'reduced';
  * WHERE AN ORDINARY LINK OPENS — Settings › Appearance › "Open links in".
  *
  *   browser  outside Ferretry: a new tab, or the real Safari app from the installed app on iOS (the default);
- *   panel    Ferretry's in-app preview, beside the conversation or as a sheet on a phone.
+ *   panel    Ferretry's in-app preview, beside the conversation or as a sheet on a phone;
+ *   computer this computer's own default browser (so a router such as Finicky picks the browser and profile),
+ *            handed over by the daemon on this computer. Offered only while one is connected directly on
+ *            loopback; with none, a link opens as `browser` does.
  *
  * A modified click (Cmd/Ctrl/Shift, a middle click) and a long press keep the browser's own new-tab
  * behaviour whichever is chosen (`features/browser/link-behaviour-model.ts`).
  */
-export type OpenLinksIn = 'browser' | 'panel';
+export type OpenLinksIn = 'browser' | 'panel' | 'computer';
 
-export const OPEN_LINKS_IN: readonly OpenLinksIn[] = ['browser', 'panel'];
+export const OPEN_LINKS_IN: readonly OpenLinksIn[] = ['browser', 'panel', 'computer'];
 
 /** The sole browser-storage key for persisted UI controls. */
 export const CONTROLS_KEY = 'fy-controls-v1';
@@ -303,7 +306,10 @@ const readDeviceControls = (value: unknown): DeviceControls => {
         ? fields.composerPhoneEnterKey
         : null,
     motion: fields.motion === 'reduced' ? 'reduced' : 'system',
-    openLinksIn: fields.openLinksIn === 'panel' ? 'panel' : DEFAULT_DEVICE_CONTROLS.openLinksIn,
+    openLinksIn:
+      fields.openLinksIn === 'panel' || fields.openLinksIn === 'computer'
+        ? fields.openLinksIn
+        : DEFAULT_DEVICE_CONTROLS.openLinksIn,
   };
 };
 

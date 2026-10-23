@@ -386,6 +386,7 @@ import {
 import { StorageTurnPorts } from '../src/adapters/session/turn/index.ts';
 import { FileMcpProjectFiles } from '../src/adapters/session-mcp/project-files.ts';
 import type { DaemonStorage } from '../src/adapters/storage/session-storage.ts';
+import { BunDetachedLauncher } from '../src/adapters/system/detached-launcher.ts';
 import {
   FileTaskBoardRepository,
   NodeTaskBoardCredentialIssuer,
@@ -458,6 +459,7 @@ import { createFleetCredentialsSubsystem, FleetCredentialCatalog } from '../src/
 import { createFleetSetupSubsystem } from '../src/lib/fleet/setup-service.ts';
 import { resolveStartAccount } from '../src/lib/fleet/start-resolution.ts';
 import { polledDirectoryLimitations } from '../src/lib/performance/fallbacks.ts';
+import { OpenUrlService } from '../src/lib/system/open-url.ts';
 
 /** The ordinary revive a send uses, as the auto-resume pass sees it. */
 type AutoResumeRevive = (id: string, message: string | undefined) => Promise<void>;
@@ -493,11 +495,11 @@ import {
   ActivityLedger,
   AgentSendFailureNotifier,
   AgentToolService,
+  ANALYTICS_BACKSTOP_MS,
   type AnalyticsIndexStoreFactory,
   type AnalyticsIngestCandidate,
   type AnalyticsIngestCandidateSource,
   AnalyticsIngestionService,
-  ANALYTICS_BACKSTOP_MS,
   type AnalyticsSubsystem,
   type AnalyticsTranscriptEvidenceSource,
   type AnalyticsTranscriptFoldSource,
@@ -525,12 +527,6 @@ import {
   authorizeSessionCommand,
   BACKGROUND_DELAY_VARIABLE,
   BackgroundLane,
-  HANDOVER_RESCAN_INTERVAL_MS,
-  PassTrigger,
-  type PassTriggerTimers,
-  RememberedHandoverReceipts,
-  TERMINAL_ANALYTICS_STATUSES,
-  UPDATE_BACKSTOP_INTERVAL_MS,
   type BootNoticePort,
   BootProgress,
   type BootRefusal,
@@ -636,6 +632,7 @@ import {
   firstWriteReleasedAnswerAttention,
   fleetManifestRefusal,
   foreignAdvertisementNotice,
+  HANDOVER_RESCAN_INTERVAL_MS,
   HARNESS_PICKER_COMMAND,
   HandoverError,
   type HandoverJournalAppend,
@@ -711,6 +708,8 @@ import {
   PairedPushDevices,
   PairingDeviceRegistry,
   type PairingService,
+  PassTrigger,
+  type PassTriggerTimers,
   PinService,
   type PlannedAttachmentFile,
   type PlannedInitialAttachments,
@@ -752,6 +751,7 @@ import {
   type RelayDirectoryPort,
   type RelayPairingRedeemer,
   type RelayStreamDispatch,
+  RememberedHandoverReceipts,
   type ResumeAnswerAttention,
   ResumeCancelled,
   type ResumeLauncher,
@@ -881,6 +881,7 @@ import {
   type TaskBoardTaskActionAuthorizer,
   TaskError,
   type TaskSubsystem,
+  TERMINAL_ANALYTICS_STATUSES,
   TEST_MODE_VARIABLE,
   TEST_TIMINGS_VARIABLE,
   TeamAdvisor,
@@ -918,6 +919,7 @@ import {
   tunnelSessionLog,
   UnknownPeerRefused,
   UnwatchedPaneExits,
+  UPDATE_BACKSTOP_INTERVAL_MS,
   type UsageFeedPort,
   unattendedUsageFeed,
   unreadableManifestPreflight,
@@ -9728,6 +9730,14 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         // Derived from the session id alone — a caller asks for `scope=media`, never for a directory.
         sessionMediaRoot: id => createSessionPaths(paths, parseSessionId(id)).media,
         scratchGc,
+        // Constructed here: the service holds only a rate window, and the launcher starts nothing until a
+        // loopback caller asks.
+        systemOpen: new OpenUrlService({
+          launcher: new BunDetachedLauncher(),
+          audit: auditLog,
+          nowMs: () => millisecondClock.now(),
+          platform: process.platform,
+        }),
         secrets,
         warden: createWardenSubsystem({
           activities,

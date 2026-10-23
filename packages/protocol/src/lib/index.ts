@@ -39,6 +39,7 @@ export * from './harness-update.ts';
 export * from './learning.ts';
 export * from './mcp-oauth.ts';
 export * from './models.ts';
+export * from './open-url.ts';
 export * from './pack.ts';
 export * from './pack-guide.ts';
 export * from './pairing.ts';

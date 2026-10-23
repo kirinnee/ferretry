@@ -354,6 +354,15 @@ const CASES: readonly MethodCase[] = [
     expected: scratchSweepView,
   },
   {
+    name: 'openUrl',
+    invoke: client => client.openUrl('https://example.com/a?b=1'),
+    verb: 'POST',
+    path: '/v1/system/open-url',
+    body: { url: 'https://example.com/a?b=1' },
+    response: () => jsonResponse({ opened: true, host: 'example.com' }),
+    expected: { opened: true, host: 'example.com' },
+  },
+  {
     name: 'list',
     invoke: client => client.list(),
     verb: 'GET',

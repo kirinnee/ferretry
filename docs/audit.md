@@ -98,6 +98,7 @@ actor phrases (`this computer`, `a supervising agent`, …).
 | `fleet.configured`     | proposal create and apply, credential sign-in and its answer/cancel, tool install                                                     |
 | `terminal.opened`      | terminal create, and every stream attach (`detail.mode: 'attach'`)                                                                    |
 | `terminal.input`       | keystroke frames on a terminal stream — counted, never their bytes                                                                    |
+| `link.opened`          | `POST /v1/system/open-url` — a link handed to this computer's browser; the host only, never the path or query                         |
 | `browser.opened`       | browser sign-in window, browser control, and every browser stream attach                                                              |
 | `secrets.used`         | `POST /v1/secrets/use` — the `used` names only, never the output                                                                      |
 | `secrets.changed`      | secret put and delete — the name only                                                                                                 |

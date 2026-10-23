@@ -97,6 +97,7 @@ import { type SessionDirectorySubsystem, sessionRoutes } from './sessions.ts';
 import { type SpeedupsSubsystem, speedupRoutes } from './speedups.ts';
 import { stepUpRoutes } from './step-up.ts';
 import { type SttEnhancementSubsystem, sttEnhancementRoutes } from './stt.ts';
+import { type SystemOpenSubsystem, systemOpenRoutes } from './system-open.ts';
 import { type TaskBoardSubsystem, taskBoardRoutes } from './task-boards.ts';
 import { type TaskSubsystem, taskRoutes } from './tasks.ts';
 import { type TerminalSubsystem, terminalRoutes, terminalSocketRoutes } from './terminals.ts';
@@ -367,6 +368,8 @@ export interface MountedSubsystems {
   readonly sessionMediaRoot?: SessionMediaRoot;
   /** Expired session scratch, planned or reclaimed only after all safety gates pass. */
   readonly scratchGc: ScratchGcSubsystem;
+  /** Hands a web address to this computer's own browser, for a caller on this machine only. */
+  readonly systemOpen: SystemOpenSubsystem;
   /** The daemon's secret store, and the use-without-read primitive that is the point of it: an agent
    *  names a secret, the daemon spawns a child holding the value, and only that child's scrubbed
    *  output comes back. NOTHING here can project a value — see `mounts/secrets.ts` for why that is a
@@ -504,6 +507,7 @@ export function mountedDaemonRoutes(base: DaemonApiDependencies, subsystems: Mou
         ...foreignHistoryRoutes(subsystems.foreignHistory),
         ...conversationImportRoutes(subsystems.conversationImport),
         ...scratchGcRoutes(subsystems.scratchGc),
+        ...systemOpenRoutes(subsystems.systemOpen),
         // Every secret path is under `/v1/secrets`, which no other subsystem uses, so this table can
         // neither shadow nor be shadowed by anything around it. It registers with the daemon-wide
         // surfaces above rather than among the per-session ones because a secret belongs to the MACHINE:

@@ -49,6 +49,7 @@ export const AUDIT_EVENT_WORDS: Readonly<Record<AuditEvent, string>> = {
   'agent.prompted': 'An agent was given a message',
   'agent.tool': 'An agent drove a terminal or browser',
   'surface.control': 'A person took over or handed back a terminal or browser',
+  'link.opened': 'A link was opened in this computer’s browser',
 };
 
 /**

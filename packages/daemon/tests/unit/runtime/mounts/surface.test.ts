@@ -646,6 +646,7 @@ const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
   },
   sessionFilesystem: new SessionFilesystem(new FakeRootPinner(), new FakeSessionGit()),
   scratchGc: scratchGc ?? { plan: async () => [], sweep: async () => ({ sessions: 0, bytes: 0, failures: 0 }) },
+  systemOpen: { open: async () => ({ opened: true, host: 'example.com' }) },
   secrets: secretSubsystem(),
   warden: new FakeWarden(),
   sessionReads: new OperatorReadService(
@@ -754,7 +755,8 @@ describe('the mounted daemon surface', () => {
       3 + // existing conversations kept as ferrets: the listing, one conversation's preview and the adoption
       3 + // the model catalogs: the list, a check for a newer published one, and a read of the models Ollama has installed (docs/model-catalog.md)
       9 + // lessons: the default's write, Apply's preview and write, the per-ferret switch and its list, and the scan's estimate, start, read and cancel (a ferret's own door is `none`)
-      2; // the performance profile: start one, and read it back by id (`fy daemon profile`)
+      2 + // the performance profile: start one, and read it back by id (`fy daemon profile`)
+      1; // handing a web address to this computer's own browser (loopback caller only)
     // `none` lost `POST /v1/pair`: redemption happens only inside a session now, so it is no route at all.
     // `authenticated` gained the Warden's "who needs you" feed, which a live warden reads like its status,
     // and the WebRTC offer: any paired device may ask for a shorter path to its own daemon (§16).
@@ -764,6 +766,7 @@ describe('the mounted daemon surface', () => {
       routes.filter(route => route.privilegedOnly === true).map(route => `${route.method} ${route.path}`),
     ).deepEqual([
       'POST /v1/agent/config',
+      'POST /v1/system/open-url',
       'POST /v1/agent/tools',
       'POST /v1/agent/lessons',
       'GET /v1/sessions/:sessionId/attach',
@@ -897,6 +900,8 @@ describe('the mounted daemon surface', () => {
       'POST /v1/imports/conversations/adopt',
       'GET /v1/gc',
       'POST /v1/gc',
+      // Handing a web address to the OS opener. Operator + privileged arrival: a remote caller is refused.
+      'POST /v1/system/open-url',
       // The secret store. NOTE WHAT IS ABSENT: there is no `GET /v1/secrets/:name`, and this list is
       // the proof of it — no route returns a secret value. `use` is how a value is spent instead.
       'GET /v1/secrets',

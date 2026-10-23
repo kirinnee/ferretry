@@ -30,6 +30,7 @@ const EVENT_WORDS: Readonly<Record<AuditEvent, string>> = {
   'agent.prompted': 'An agent was given a message',
   'agent.tool': 'An agent drove a terminal or browser',
   'surface.control': 'A person took over or handed back a terminal or browser',
+  'link.opened': 'A link was opened in this computer’s browser',
 };
 
 const pad = (value: number): string => String(value).padStart(2, '0');
