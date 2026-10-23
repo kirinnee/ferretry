@@ -14,6 +14,7 @@ import {
   SAFARI_HANDOFF_MS,
 } from '../../../src/features/browser/external-link.tsx';
 import { InAppBrowserWorkspace } from '../../../src/features/browser/in-app-browser.tsx';
+import type { ComputerLinkPort } from '../../../src/features/browser/local-computer.ts';
 import type { OpenLinksIn } from '../../../src/lib/controls.ts';
 import { interact, mount, must } from '../../support/dom.ts';
 
@@ -395,5 +396,129 @@ describe('browserLinkOpener', () => {
     cancel();
     await wait(20);
     expect(late).toBe(0);
+  });
+});
+
+describe('ExternalLink — Your computer’s default browser', () => {
+  const waitForTabs = async (opener: FakeOpener, count: number): Promise<void> => {
+    for (let attempt = 0; attempt < 20 && opener.tabs.length < count; attempt += 1)
+      await interact(async () => {
+        await Promise.resolve();
+      });
+  };
+
+  const withComputer = (opener: LinkOpener, computer: ComputerLinkPort | undefined, children: ReactNode) => (
+    <LinkBehaviourProvider openLinksIn="computer" opener={opener} {...(computer === undefined ? {} : { computer })}>
+      {children}
+    </LinkBehaviourProvider>
+  );
+
+  it('asks the daemon on this computer to open an ordinary tap and takes the click', async () => {
+    const opener = fakeOpener(false);
+    const opened: string[] = [];
+    const view = await mount(
+      withComputer(
+        opener,
+        async href => {
+          opened.push(href);
+        },
+        <ExternalLink href={DOCS}>Docs</ExternalLink>,
+      ),
+    );
+    try {
+      await interact(() => must(view.container.querySelector('a'), 'the link').click());
+      expect(prevented).toEqual([true]);
+      expect(opened).toEqual([DOCS]);
+      expect(opener.tabs).toEqual([]);
+      expect(opener.handedOff).toEqual([]);
+    } finally {
+      await view.unmount();
+    }
+  });
+
+  it('opens a normal new tab, silently, when the daemon refuses or cannot be reached', async () => {
+    const opener = fakeOpener(false);
+    const debug = console.debug;
+    const logged: unknown[][] = [];
+    console.debug = (...args: unknown[]) => logged.push(args);
+    const view = await mount(
+      withComputer(
+        opener,
+        async () => {
+          throw new Error('forbidden');
+        },
+        <ExternalLink href={`${DOCS}?token=SECRET`}>Docs</ExternalLink>,
+      ),
+    );
+    try {
+      await interact(() => must(view.container.querySelector('a'), 'the link').click());
+      await waitForTabs(opener, 1);
+      expect(opener.tabs).toEqual([`${DOCS}?token=SECRET`]);
+      // The reason is logged to the debug console; the address, which may carry a token, never is.
+      expect(logged).toHaveLength(1);
+      expect(JSON.stringify(logged)).toContain('forbidden');
+      expect(JSON.stringify(logged)).not.toContain('SECRET');
+    } finally {
+      console.debug = debug;
+      await view.unmount();
+    }
+  });
+
+  it('is the browser’s own new tab when no local daemon is connected', async () => {
+    const opener = fakeOpener(false);
+    const view = await mount(withComputer(opener, undefined, <ExternalLink href={DOCS}>Docs</ExternalLink>));
+    try {
+      await interact(() => must(view.container.querySelector('a'), 'the link').click());
+      expect(prevented).toEqual([false]);
+      expect(opener.tabs).toEqual([]);
+    } finally {
+      await view.unmount();
+    }
+  });
+
+  it('leaves a Cmd-click and a Ctrl-click to the browser’s new tab without asking the daemon', async () => {
+    const opener = fakeOpener(false);
+    const opened: string[] = [];
+    const view = await mount(
+      withComputer(
+        opener,
+        async href => {
+          opened.push(href);
+        },
+        <ExternalLink href={DOCS}>Docs</ExternalLink>,
+      ),
+    );
+    try {
+      const link = must(view.container.querySelector('a'), 'the link');
+      await interact(() => link.dispatchEvent(modifiedClick({ metaKey: true })));
+      await interact(() => link.dispatchEvent(modifiedClick({ ctrlKey: true })));
+      expect(prevented).toEqual([false, false]);
+      expect(opened).toEqual([]);
+    } finally {
+      await view.unmount();
+    }
+  });
+
+  it('does not use the computer when a different setting is chosen, even with a local daemon', async () => {
+    const opener = fakeOpener(false);
+    const opened: string[] = [];
+    const view = await mount(
+      <LinkBehaviourProvider
+        openLinksIn="browser"
+        opener={opener}
+        computer={async href => {
+          opened.push(href);
+        }}
+      >
+        <ExternalLink href={DOCS}>Docs</ExternalLink>
+      </LinkBehaviourProvider>,
+    );
+    try {
+      await interact(() => must(view.container.querySelector('a'), 'the link').click());
+      expect(prevented).toEqual([false]);
+      expect(opened).toEqual([]);
+    } finally {
+      await view.unmount();
+    }
   });
 });

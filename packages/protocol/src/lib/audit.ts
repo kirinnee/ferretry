@@ -34,6 +34,7 @@ import { InstantSchema, NonNegativeIntegerSchema } from './common.ts';
  * are activity, folded per device and session per window. `agent.tool` is one agent tool call on a
  * terminal or browser page, named by tool and surface name with lengths only — never the typed text —
  * and `surface.control` a person taking a surface over from an agent or handing it back.
+ * `link.opened` is a web address handed to this computer’s own browser, named by host only.
  */
 export const AUDIT_EVENTS = [
   'device.paired',
@@ -62,6 +63,7 @@ export const AUDIT_EVENTS = [
   'agent.prompted',
   'agent.tool',
   'surface.control',
+  'link.opened',
 ] as const;
 export const AuditEventSchema = z.enum(AUDIT_EVENTS);
 export type AuditEvent = z.infer<typeof AuditEventSchema>;

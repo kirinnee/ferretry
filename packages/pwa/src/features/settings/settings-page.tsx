@@ -28,6 +28,7 @@ import { daemonMachineSetupPath, daemonSettingsPath } from '../../lib/pages/rout
 import { CHAT_WIDTH_OPTIONS, ChatWidthControl } from '../../shell/chat-width-control.tsx';
 import { Badge, Button } from '../../shell/primitives.tsx';
 import { ThemeSettings } from '../../shell/theme-toggle.tsx';
+import { useLocalComputer } from '../browser/use-local-computer.ts';
 import type { CarrierPreferenceControl } from '../carrier/active-carrier-card.tsx';
 import type { FleetClientFactory } from '../fleet/fleet-client.ts';
 import { machineItemHash } from '../fleet/setup/settings-route.ts';
@@ -49,6 +50,7 @@ import { MotionSetting, OpenLinksInSetting, SessionsListSetting } from './conver
 import { type DaemonReachabilityProbe, daemonDisplayName, distinctDaemonName } from './daemon-settings.tsx';
 import { DaemonSettingsFrame, type DaemonSettingsTabDefinition } from './daemon-settings-frame.tsx';
 import { DevicePermissionsSetting } from './device-permissions-settings.tsx';
+import { DictationDebugSettings } from './dictation-debug-settings.tsx';
 import { DictationSettings, type DictationSettingsProps } from './dictation-settings.tsx';
 import type { GrantClientFactory } from './grants-settings.tsx';
 import { useMachineUpdates } from './machine-updates.ts';
@@ -66,7 +68,6 @@ import {
   settingsSectionForSetting,
 } from './settings-catalog.ts';
 import { SettingsHome, type SettingsMachineEntry, SettingsSidebar } from './settings-navigation.tsx';
-import { DictationDebugSettings } from './dictation-debug-settings.tsx';
 import { SpeedupKeysSettings } from './speedup-keys-settings.tsx';
 import { TranscriptionLogSettings } from './transcription-log-settings.tsx';
 import { ViewportDetails } from './viewport-details.tsx';
@@ -362,6 +363,7 @@ export function SettingsPage({
     () => controls.snapshot(),
   );
   const device = record.device;
+  const computerAvailable = useLocalComputer() !== undefined;
   const densityState = useDensity(controls);
   const density = densityState.density;
   const theme = useTheme();
@@ -482,6 +484,7 @@ export function SettingsPage({
       'open-links-in': (
         <OpenLinksInSetting
           openLinksIn={device.openLinksIn}
+          computerAvailable={computerAvailable}
           onChange={openLinksIn => controls.setDeviceControls({ openLinksIn })}
         />
       ),
@@ -539,6 +542,7 @@ export function SettingsPage({
     // behind the next one that is added.
     [
       connectionPreferences,
+      computerAvailable,
       controls,
       density,
       densityState.explicit,

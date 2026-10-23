@@ -42,6 +42,7 @@ describe('FyApiClient construction and generic requests', () => {
       'logs',
       'messages',
       'migrate',
+      'openUrl',
       'projects',
       'pwaConfig',
       'remove',

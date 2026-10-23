@@ -44,6 +44,7 @@
         "harness/device-cleanup-screenshot.tsx",
         "harness/connection-status-screenshot.tsx",
         "harness/carrier-choice-screenshot.tsx",
+        "harness/open-links-in-screenshot.tsx",
         "harness/webrtc-connection-screenshot.tsx",
         "harness/tunnel-optin-screenshot.tsx",
         "harness/release-notice-screenshot.tsx",

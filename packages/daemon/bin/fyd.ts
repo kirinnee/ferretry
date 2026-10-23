@@ -387,6 +387,7 @@ import {
 import { StorageTurnPorts } from '../src/adapters/session/turn/index.ts';
 import { FileMcpProjectFiles } from '../src/adapters/session-mcp/project-files.ts';
 import type { DaemonStorage } from '../src/adapters/storage/session-storage.ts';
+import { BunDetachedLauncher } from '../src/adapters/system/detached-launcher.ts';
 import {
   FileTaskBoardRepository,
   NodeTaskBoardCredentialIssuer,
@@ -459,6 +460,7 @@ import { createFleetCredentialsSubsystem, FleetCredentialCatalog } from '../src/
 import { createFleetSetupSubsystem } from '../src/lib/fleet/setup-service.ts';
 import { resolveStartAccount } from '../src/lib/fleet/start-resolution.ts';
 import { polledDirectoryLimitations } from '../src/lib/performance/fallbacks.ts';
+import { OpenUrlService } from '../src/lib/system/open-url.ts';
 
 /** The ordinary revive a send uses, as the auto-resume pass sees it. */
 type AutoResumeRevive = (id: string, message: string | undefined) => Promise<void>;
@@ -9769,6 +9771,14 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         // Derived from the session id alone — a caller asks for `scope=media`, never for a directory.
         sessionMediaRoot: id => createSessionPaths(paths, parseSessionId(id)).media,
         scratchGc,
+        // Constructed here: the service holds only a rate window, and the launcher starts nothing until a
+        // loopback caller asks.
+        systemOpen: new OpenUrlService({
+          launcher: new BunDetachedLauncher(),
+          audit: auditLog,
+          nowMs: () => millisecondClock.now(),
+          platform: process.platform,
+        }),
         secrets,
         warden: createWardenSubsystem({
           activities,

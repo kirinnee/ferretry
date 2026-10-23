@@ -27,7 +27,7 @@ const MODIFIED: readonly (readonly [string, Partial<BrowserActivation>])[] = [
   ['a click another handler already took', { defaultPrevented: true }],
 ];
 
-const SETTINGS: readonly OpenLinksIn[] = ['browser', 'panel'];
+const SETTINGS: readonly OpenLinksIn[] = ['browser', 'panel', 'computer'];
 const PLATFORMS: readonly boolean[] = [false, true];
 
 const decide = (overrides: Partial<LinkDecisionInput>) =>
@@ -68,6 +68,36 @@ describe('decideLinkAction', () => {
           scope: 'cross-origin',
         });
     }
+  });
+
+  it('hands an ordinary tap to the daemon on this computer when it is chosen and one is connected', () => {
+    for (const iosStandalone of PLATFORMS)
+      expect(decide({ setting: 'computer', computerAvailable: true, iosStandalone })).toEqual({
+        kind: 'computer',
+        href: 'https://docs.example.test/a?b=1#c',
+      });
+  });
+
+  it('behaves as the browser does when the computer is chosen but no local daemon is connected', () => {
+    for (const computerAvailable of [false, undefined]) {
+      expect(decide({ setting: 'computer', computerAvailable })).toEqual({ kind: 'native' });
+      expect(decide({ setting: 'computer', computerAvailable, iosStandalone: true })).toEqual(
+        decide({ setting: 'browser', iosStandalone: true }),
+      );
+    }
+  });
+
+  it('never takes the computer hand-off for the other settings, even when a local daemon is connected', () => {
+    expect(decide({ setting: 'browser', computerAvailable: true })).toEqual({ kind: 'native' });
+    expect(decide({ setting: 'panel', computerAvailable: true }).kind).toBe('panel');
+  });
+
+  it('keeps Cmd/Ctrl-click, other modifiers, downloads and non-HTTP schemes native for the computer hand-off', () => {
+    const local = { setting: 'computer', computerAvailable: true } as const;
+    for (const [, modifier] of MODIFIED)
+      expect(decide({ ...local, activation: { ...PRIMARY, ...modifier } })).toEqual({ kind: 'native' });
+    expect(decide({ ...local, download: true })).toEqual({ kind: 'native' });
+    expect(decide({ ...local, href: 'mailto:someone@example.test' })).toEqual({ kind: 'native' });
   });
 
   it('keeps every modified click native, whatever the setting and the platform', () => {

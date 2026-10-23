@@ -106,6 +106,13 @@ act alone (turning automatic install off never needs one). See [updating.md](upd
 Updating an agent CLI is the same act and the same gate: `GET /v1/harnesses/update` is `use`, `POST
 /v1/harnesses/update` is `configure` plus the step-up, and a ferret may never start one.
 
+**Opening a link on this computer is local-only.** `POST /v1/system/open-url` hands one http(s) address to the
+operating system's own opener (macOS `open`, `xdg-open`, the Windows URL handler), so a router such as Finicky
+picks the browser. It is `privilegedOnly`, decided from the carrier like `/attach`: a relayed, tunnelled or
+WebRTC caller gets `403` before the handler runs, whatever it holds. The address is one argv element, never a
+shell string; credentials and every non-http(s) scheme are refused; ten openings per ten seconds. The security
+log records `link.opened` with the host only, never the path or query.
+
 **The Console is a terminal.** `POST /v1/sessions/:sessionId/console/input` types into the agent's own
 Claude / Codex pane and is declared `terminal` / `use` like every terminal route, so it is governed
 identically: ungoverned from loopback; for a paired device, a browser across the network or a relayed session,

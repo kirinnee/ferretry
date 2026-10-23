@@ -1104,6 +1104,11 @@ export function StoreProvider({ children, store, createStore = createAppStore }:
   );
 }
 
+/** The app store when there is one; null outside a provider, for a surface that degrades without it. */
+export function useOptionalAppStore(): AppStore | null {
+  return useContext(StoreContext);
+}
+
 export function useAppStore(): AppStore {
   const store = useContext(StoreContext);
   if (store === null) throw new Error('useAppStore must be rendered inside StoreProvider');

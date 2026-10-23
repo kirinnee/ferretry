@@ -38,6 +38,7 @@ import { SessionsPage } from './components/sessions-page.tsx';
 import type { SendDismiss, SendExpand } from './components/settled-send-note.tsx';
 import { GlobalAnalyticsPage } from './features/analytics/global-analytics-page.tsx';
 import { LinkBehaviourProvider } from './features/browser/external-link.tsx';
+import { useLocalComputer } from './features/browser/use-local-computer.ts';
 import { tunnelSwitchOffer } from './features/carrier/carrier-preference-selector.tsx';
 import { configFilesSettingsTab } from './features/config-files/config-files-settings.tsx';
 import { ConnectionHealthNotice } from './features/connection/connection-health-notice.tsx';
@@ -2608,7 +2609,12 @@ function StoreLinkBehaviour({ children }: { readonly children: ReactNode }) {
     store.controls.subscribe,
     () => store.controls.snapshot().device.openLinksIn,
   );
-  return <LinkBehaviourProvider openLinksIn={openLinksIn}>{children}</LinkBehaviourProvider>;
+  const computer = useLocalComputer();
+  return (
+    <LinkBehaviourProvider openLinksIn={openLinksIn} {...(computer === undefined ? {} : { computer })}>
+      {children}
+    </LinkBehaviourProvider>
+  );
 }
 
 export interface AppProps {

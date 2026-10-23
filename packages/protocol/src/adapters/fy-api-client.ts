@@ -47,6 +47,7 @@ import {
   type HarnessUpdateView,
   HarnessUpdateViewSchema,
 } from '../lib/harness-update.ts';
+import { OpenUrlRequestSchema, type OpenUrlView, OpenUrlViewSchema } from '../lib/open-url.ts';
 import {
   AttachmentUploadRequestSchema,
   type AttachmentView,
@@ -732,6 +733,11 @@ export class FyApiClient implements IFyApiClient {
 
   scratchSweep(force = false): Promise<ScratchSweepView> {
     return this.request('/v1/gc', ScratchSweepViewSchema, jsonRequest('POST', ScratchSweepRequestSchema, { force }));
+  }
+
+  /** Hands one web address to this computer's own browser; the daemon refuses it unless the call arrived on the host. */
+  openUrl(url: string): Promise<OpenUrlView> {
+    return this.request('/v1/system/open-url', OpenUrlViewSchema, jsonRequest('POST', OpenUrlRequestSchema, { url }));
   }
 
   /**
