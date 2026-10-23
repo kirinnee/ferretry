@@ -11,6 +11,7 @@ import {
   type DeferredTimers,
   DISMISS_ACTION,
   DONE_ACTION,
+  directionOfAction,
   type InboxCard,
   inboxCardKey,
   inboxCards,
@@ -199,6 +200,19 @@ describe('swipes', () => {
   test('the threshold is bounded for narrow and wide cards', () => {
     expect(swipeThreshold(100)).toBe(96);
     expect(swipeThreshold(2_000)).toBe(160);
+  });
+
+  test('finds the swipe an answer sits on by meaning, not by identity', () => {
+    const map = swipeMap({ ask: choice('Rebase now', 'Wait', 'Skip') });
+    const [first, second, third, none] = [...inboxOptions({ ask: choice('Rebase now', 'Wait', 'Skip') }), DONE_ACTION];
+    expect([first, second, third].map(option => option && directionOfAction(map, option))).toEqual([
+      'right',
+      'left',
+      'up',
+    ]);
+    // Done is no swipe on a card that has options of its own.
+    expect(directionOfAction(map, none ?? DONE_ACTION)).toBeNull();
+    expect(directionOfAction(swipeMap({}), DISMISS_ACTION)).toBe('left');
   });
 
   test('options follow the swipe order', () => {

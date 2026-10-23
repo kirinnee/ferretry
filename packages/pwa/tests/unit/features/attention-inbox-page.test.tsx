@@ -615,3 +615,35 @@ describe('AttentionCard swipe hints', () => {
     await bare.unmount();
   });
 });
+
+describe('AttentionCard context', () => {
+  it('shows a short context whole, and folds a long one behind Show more / Show less', async () => {
+    const short = await mount(
+      <AttentionCard item={attentionItem('A7', { context: 'Halfway through.' })} onAct={() => {}} />,
+    );
+    const shortContext = must(short.container.querySelector('.fy-attn-card__context'), 'the context');
+    expect(shortContext.textContent).toBe('Halfway through.');
+    expect(shortContext.hasAttribute('data-open')).toBe(true);
+    expect(short.container.querySelector('.fy-attn-card__more')).toBeNull();
+    await short.unmount();
+
+    const long = await mount(
+      <AttentionCard item={attentionItem('A6', { context: 'word '.repeat(80) })} onAct={() => {}} />,
+    );
+    const context = (): Element => must(long.container.querySelector('.fy-attn-card__context'), 'the long context');
+    const more = (): HTMLButtonElement =>
+      must(long.container.querySelector<HTMLButtonElement>('.fy-attn-card__more'), 'the fold toggle');
+    expect(context().hasAttribute('data-open')).toBe(false);
+    expect(more().textContent).toBe('Show more');
+    await interact(() => more().click());
+    expect(context().hasAttribute('data-open')).toBe(true);
+    expect(more().getAttribute('aria-expanded')).toBe('true');
+    expect(more().textContent).toBe('Show less');
+    await long.unmount();
+
+    // Blank context is no context at all.
+    const blank = await mount(<AttentionCard item={attentionItem('A5', { context: '   ' })} onAct={() => {}} />);
+    expect(blank.container.querySelector('.fy-attn-card__context')).toBeNull();
+    await blank.unmount();
+  });
+});
