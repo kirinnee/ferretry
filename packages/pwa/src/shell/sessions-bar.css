@@ -280,7 +280,7 @@
   place-items: center;
   width: 16px;
   height: 16px;
-  border-radius: var(--radius-pill, 9999px);
+  border-radius: var(--radius-pill);
   background: var(--surface-2);
   color: var(--muted);
   font-size: var(--text-2xs);
@@ -297,11 +297,124 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* The status-based "waiting" word is the QUIET signal: muted ink, no fill, no number. The loud one is the
+   accent count badge below (see sessions-bar-model.ts). */
 .fy-sbar__badge {
-  color: var(--warn);
+  color: var(--muted);
   font-size: var(--text-2xs);
-  font-weight: var(--weight-strong);
+  font-weight: var(--weight-medium);
   white-space: nowrap;
+}
+
+/* ---- UNREAD: a session with open Attention -------------------------------------------------------
+   Bold name, a filled accent pill with the count (Telegram/WhatsApp), and the ask under the name. The
+   pill uses the accent role pair, so it holds contrast in every theme family and in both schemes. */
+.fy-unread-badge {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 6px;
+  border-radius: var(--radius-pill);
+  background: var(--accent);
+  color: var(--accent-fg);
+  font-family: var(--font-ui, inherit);
+  font-size: var(--text-2xs);
+  font-variant-numeric: tabular-nums;
+  font-weight: var(--weight-strong);
+  line-height: 1;
+  white-space: nowrap;
+}
+/* On the open row the accent can BE the row's fill; the pill then takes the row's own inverse so it still reads. */
+.fy-sbar__session[aria-current='page'] .fy-unread-badge {
+  outline: var(--stroke) solid var(--surface);
+}
+.fy-sbar__marks {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+}
+.fy-sbar__session[data-sbar-unread] .fy-sbar__name {
+  color: var(--fg);
+  font-weight: var(--weight-strong);
+}
+.fy-sbar__question[data-sbar-ask]::before {
+  content: '! ';
+  color: var(--accent);
+}
+.fy-sbar__question[data-sbar-ask] {
+  color: var(--fg);
+}
+/* The collapsed rail: the pill sits on the dot's corner, smaller, with a ring cut out of the bar behind it. */
+.fy-sbar__dot,
+.fy-sbar__attention-icon {
+  position: relative;
+}
+.fy-unread-badge--dot {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  outline: var(--stroke) solid var(--surface);
+  pointer-events: none;
+}
+.fy-sbar__dot[data-sbar-unread] {
+  overflow: visible;
+}
+
+/* ---- THE ATTENTION ENTRY: a door to the inbox under the search, calm at zero --------------------- */
+.fy-sbar__attention-slot {
+  padding: 0 var(--gap-sm) var(--gap-xs);
+}
+.fy-sbar__attention {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 36px;
+  padding: 0 10px;
+  border: var(--stroke-control) solid var(--border);
+  border-radius: var(--radius-control);
+  color: var(--fg-soft);
+  font-size: var(--text-md);
+  font-weight: var(--weight-medium);
+  text-decoration: none;
+}
+.fy-sbar__attention:hover {
+  background: var(--nav-hover, var(--surface-2));
+  color: var(--fg);
+}
+.fy-sbar__attention[data-sbar-unread] {
+  border-color: var(--accent-border);
+  background: var(--accent-soft);
+  color: var(--fg);
+  font-weight: var(--weight-strong);
+}
+.fy-sbar__attention[aria-current='page'] {
+  border-color: var(--nav-sel-edge, var(--accent-border));
+  background: var(--nav-sel-bg, var(--accent-soft));
+  color: var(--nav-sel-fg, var(--accent));
+  font-weight: var(--weight-strong);
+}
+.fy-sbar__attention-name {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fy-sbar__attention-calm {
+  color: var(--muted);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+  white-space: nowrap;
+}
+.fy-sbar--drawer .fy-sbar__attention {
+  min-height: 44px;
 }
 .fy-sbar__sub {
   grid-column: 2 / 4;
@@ -523,7 +636,7 @@
   min-height: 22px;
   padding: 0 8px;
   border: var(--stroke) solid var(--warn-border);
-  border-radius: var(--radius-pill, 9999px);
+  border-radius: var(--radius-pill);
   background: var(--warn-bg);
   color: var(--warn);
   font-size: var(--text-xs);
@@ -1044,7 +1157,7 @@
   flex: 1 1 0;
 }
 [data-sbar-density='compact'] .fy-sbar__session:not([aria-current='page']) .fy-sbar__detail,
-[data-sbar-density='compact'] .fy-sbar__session:not([aria-current='page']) .fy-sbar__question {
+[data-sbar-density='compact'] .fy-sbar__session:not([aria-current='page']) .fy-sbar__question:not([data-sbar-ask]) {
   position: absolute;
   width: 1px;
   height: 1px;

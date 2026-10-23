@@ -2,7 +2,8 @@
  * THE SESSIONS BAR'S LIST, ACROSS EVERY PAIRED MACHINE (Settings › Behaviour › Sessions list: All
  * machines). The decisions are `allMachinesView`'s; this only draws them:
  *
- *   NEEDS YOU          — pinned, each row naming its machine;
+ *   NEEDS YOU          — pinned, each row naming its machine: the sessions with open Attention first
+ *                        (newest first, an accent count badge each), then the ones merely parked;
  *   ● machine name     — a reach dot, the name, "offline · last seen 5m" when it stopped answering;
  *     project · count  — that machine's project groups, with the bar's ordinary rows.
  *
@@ -14,19 +15,16 @@ import type { SessionView } from '@ferretry/protocol';
 import type { ReactNode } from 'react';
 import type { MachineLearners } from '../features/learning/passive-learning.tsx';
 import { type AllMachinesView, machineReachLabel } from '../lib/all-machines.ts';
-import { displayCallsign } from '../lib/callsign.ts';
+import { attentionFirst } from '../lib/attention-inbox.ts';
 import type { DaemonId } from '../lib/daemon-connection.ts';
 import { readOnlyReason } from '../lib/machine-outage.ts';
-import { daemonSessionPath } from '../lib/pages/routes.ts';
 import { MachineReachDot, MachineReachWords } from './machine-chip.tsx';
 import { MachineHeadControls, type MoveMachine, useMachineReorder } from './machine-reorder.tsx';
-import { RouteLink } from './route-link.tsx';
 import { SessionMenuContext } from './session-menu-context.ts';
-import { sessionsBarSubline } from './sessions-bar-model.ts';
-import { SessionsBarRow } from './sessions-bar-row.tsx';
+import { SessionsBarNeedsYou } from './sessions-bar-needs-you.tsx';
 import { sessionTree } from './sessions-bar-tree.ts';
 import { SessionsBarTree } from './sessions-bar-tree.tsx';
-import { StatusMark } from './status-mark.tsx';
+import { SessionsRailDot } from './sessions-bar-dot.tsx';
 
 const NO_MOVE: MoveMachine = () => undefined;
 
@@ -73,27 +71,16 @@ export function SessionsBarMachines({
     true;
   return (
     <>
-      {view.needsYou.length === 0 ? null : (
-        <section aria-label="Needs you" className="fy-sbar__group fy-sbar__needs" data-sbar-needs-you-group="">
-          <h2 className="fy-sbar__project">
-            <span className="truncate">Needs you</span>
-            <span className="fy-sbar__count">{view.needsYou.length}</span>
-          </h2>
-          <ul>
-            {view.needsYou.map(entry => (
-              <SessionsBarRow
-                active={active(entry.daemonId, entry.view)}
-                daemonId={entry.daemonId}
-                key={`${entry.daemonId}:${entry.view.config.id}`}
-                learningPassive={false}
-                machine={entry.machineName}
-                onNavigate={onNavigate}
-                view={entry.view}
-              />
-            ))}
-          </ul>
-        </section>
-      )}
+      <SessionsBarNeedsYou
+        isActive={row => active(row.daemonId, row.view)}
+        learns={() => false}
+        onNavigate={onNavigate}
+        rows={view.needsYou.map(entry => ({
+          daemonId: entry.daemonId,
+          view: entry.view,
+          machine: entry.machineName,
+        }))}
+      />
       {reorder.drawn
         .flatMap(id => byId.get(id) ?? [])
         .map(machine => {
@@ -166,40 +153,41 @@ function OfflineRows({ offline, children }: { readonly offline: boolean; readonl
   return offline ? <SessionMenuContext.Provider value={undefined}>{children}</SessionMenuContext.Provider> : children;
 }
 
-/** The collapsed rail's dots across every machine: Needs you first, then each machine's sessions. */
+/**
+ * The collapsed rail's dots across every machine: Needs you first (the unread ones lead, each with its
+ * count badge), then each machine's sessions.
+ */
 export function SessionsRailMachineDots({
   view,
   daemonId,
   activeSessionId,
   onNavigate,
 }: Omit<SessionsBarMachinesProps, 'learningPassive' | 'machineLearners' | 'now'>) {
-  const rows = [
-    ...view.needsYou.map(entry => ({ daemonId: entry.daemonId, machine: entry.machineName, view: entry.view })),
-    ...view.machines.flatMap(machine =>
-      machine.groups.flatMap(group =>
-        group.rows.map(row => ({ daemonId: machine.daemonId, machine: machine.name, view: row })),
+  // Unread dots lead whichever machine they are on (an offline machine's stay in its own group above).
+  const rows = attentionFirst(
+    [
+      ...view.needsYou.map(entry => ({ daemonId: entry.daemonId, machine: entry.machineName, view: entry.view })),
+      ...view.machines.flatMap(machine =>
+        machine.groups.flatMap(group =>
+          group.rows.map(row => ({ daemonId: machine.daemonId, machine: machine.name, view: row })),
+        ),
       ),
-    ),
-  ];
+    ],
+    row => row.view,
+  );
   return (
     <>
-      {rows.map(row => {
-        const name = displayCallsign(row.view.config.teammate) || row.view.config.label || row.view.config.id;
-        return (
-          <li key={`${row.daemonId}:${row.view.config.id}`}>
-            <RouteLink
-              aria-current={row.daemonId === daemonId && row.view.config.id === activeSessionId ? 'page' : undefined}
-              aria-label={`${name} on ${row.machine}`}
-              className="fy-sbar__dot"
-              onNavigate={onNavigate}
-              title={`${name} on ${row.machine} — ${sessionsBarSubline(row.view)}`}
-              to={daemonSessionPath(row.daemonId, row.view.config.id)}
-            >
-              <StatusMark view={row.view} />
-            </RouteLink>
-          </li>
-        );
-      })}
+      {rows.map(row => (
+        <li key={`${row.daemonId}:${row.view.config.id}`}>
+          <SessionsRailDot
+            active={row.daemonId === daemonId && row.view.config.id === activeSessionId}
+            daemonId={row.daemonId}
+            machine={row.machine}
+            onNavigate={onNavigate}
+            view={row.view}
+          />
+        </li>
+      ))}
     </>
   );
 }

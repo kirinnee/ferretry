@@ -83,7 +83,7 @@ describe('SessionsBar as a column', () => {
     const row = must(view.container.querySelector('[data-sbar-session="asker-1"]'), 'the asking row');
     expect(row.querySelector('[data-sbar-question]')?.textContent).toBe('Rebase onto main first?');
     expect(row.getAttribute('title')).toContain('Rebase onto main first?');
-    expect(row.querySelector('[data-sbar-needs-you]')).not.toBeNull();
+    expect(row.querySelector('[data-sbar-waiting]')).not.toBeNull();
   });
 
   test('lists sessions by project, marks the open one, and badges the one that needs the reader', async () => {
@@ -105,8 +105,8 @@ describe('SessionsBar as a column', () => {
     expect(nameless.querySelector('.fy-sbar__sub')).toBeNull();
     expect(nameless.querySelector('[data-sbar-ferret]')).toBeNull();
     expect(nameless.querySelector('[data-sbar-dir]')?.textContent).toBe('/work/home-manager');
-    expect(view.container.querySelector('[data-sbar-session="maryah-1"] [data-sbar-needs-you]')).not.toBeNull();
-    expect(view.container.querySelector('[data-sbar-session="hadi-1"] [data-sbar-needs-you]')).toBeNull();
+    expect(view.container.querySelector('[data-sbar-session="maryah-1"] [data-sbar-waiting]')).not.toBeNull();
+    expect(view.container.querySelector('[data-sbar-session="hadi-1"] [data-sbar-waiting]')).toBeNull();
     // Only a session that is actually waiting on a question echoes it.
     expect(view.container.querySelector('[data-sbar-question]')).toBeNull();
     // A session with no callsign and no label falls back to its id rather than an empty row.
@@ -621,13 +621,13 @@ describe('SessionsBar across every machine', () => {
       [...pinned.querySelectorAll('[data-sbar-session]')].map(node => node.getAttribute('data-sbar-session')),
     ).toEqual(['maryah-1']);
     expect(pinned.querySelector('[data-machine-chip]')?.textContent).toBe('work-mac');
-    expect(pinned.querySelector('[data-sbar-needs-you]')).toBeNull();
+    expect(pinned.querySelector('[data-sbar-waiting]')).toBeNull();
     const heads = [...view.container.querySelectorAll('.fy-sbar__machine-label')].map(node => node.textContent);
     expect(heads).toEqual(['work-mac', 'kirin-box']);
     const offline = must(view.container.querySelector('[data-machine-reach="offline"]'), 'the offline machine');
     expect(offline.querySelector('.fy-sbar__machine-reach')?.textContent).toBe('offline · last seen 5m');
     // The waiting session on the offline machine stays home with its badge.
-    expect(offline.querySelector('[data-sbar-session="ask-1"] [data-sbar-needs-you]')).not.toBeNull();
+    expect(offline.querySelector('[data-sbar-session="ask-1"] [data-sbar-waiting]')).not.toBeNull();
     // An online machine is said to be online without a word on screen.
     expect(view.container.querySelector('[data-sbar-machine-group="alpha"] .sr-only')?.textContent).toBe('online');
     // The same id on two machines: only this machine's is open, and only it reads this machine's learners.
