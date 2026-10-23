@@ -9,6 +9,7 @@
 import {
   type AccountModel,
   AccountModelSchema,
+  accountSecretReferences,
   type ComponentKind,
   type Credential,
   componentFilePath,
@@ -108,6 +109,8 @@ export interface AccountModelEdit {
   readonly summary: string;
   /** The sentences a confirm card shows (E15, E20, E21, E32). */
   readonly consequences: readonly string[];
+  /** A removed login's secret NAMES that nothing else refers to now: left in the store, said aloud. */
+  readonly orphanedSecrets?: readonly string[];
 }
 
 /** What a derivation needs to know about the machine that is not in its configuration. */
@@ -125,6 +128,8 @@ export interface AccountChangeFacts {
   readonly runtimeReferences?: Readonly<Record<string, string>>;
   /** The sessions still running on the runtime a `runtime.remove` or `runtime.rename` names, when known. */
   readonly runningOn?: readonly FleetRunningSession[];
+  /** The same, by runtime, for a change that touches several (removing a login that runtimes use). */
+  readonly runningByRuntime?: Readonly<Record<string, readonly FleetRunningSession[]>>;
 }
 
 /** The document format each harness's settings file is in. */
@@ -368,7 +373,8 @@ export function deriveAccountChange(
       `Runtime ${misfit.runtime} uses a ${HARNESS_DISPLAY_NAMES[misfit.harness]} login, and this change would make its profile ${misfit.profile} ${HARNESS_SCOPE_WORDS[misfit.scope]}. Move it to another profile first.`,
     );
   }
-  return { model: next, files, summary, consequences };
+  const orphanedSecrets = change.kind === 'credential.remove' ? orphanedSecretsOf(model, change.id) : [];
+  return { model: next, files, summary, consequences, ...(orphanedSecrets.length === 0 ? {} : { orphanedSecrets }) };
 }
 
 function applyAccountChange(
@@ -445,29 +451,132 @@ function applyAccountChange(
     }
     case 'credential.env':
       return putEnvironmentLogin(model, draft, change, facts, consequences);
-    case 'credential.remove': {
-      const credential = model.credentials[change.id];
-      if (credential === undefined) return refuse(`no login ${change.id} exists on this machine`);
-      // C10: a runtime on it would have nothing to launch with.
-      const users = runtimesUsingCredential(model, change.id);
-      if (users.length > 0) {
-        refuse(
-          `${counted(users.length, 'runtime')} still ${users.length === 1 ? 'uses' : 'use'} this login (${listed(users)}). Move ${users.length === 1 ? 'it' : 'them'} to another login first.`,
-        );
-      }
-      delete draft.credentials[change.id];
-      if (credential.store === 'host') {
-        consequences.push(
-          `Your own ${credential.harness} in your terminal keeps its login; Ferretry only stops using it.`,
-        );
-      } else if (credential.store === 'ferretry') {
-        consequences.push('Its saved login stays on this machine until you sign it out.');
-      }
-      return `Remove login ${change.id}`;
-    }
+    case 'credential.remove':
+      return removeCredential(model, draft, change, facts, consequences);
     default:
       return putMachineSettings(model, draft, change, facts, consequences);
   }
+}
+
+const secretsOfLogin = (id: string): ((reference: { readonly origin: string }) => boolean) => {
+  const prefix = `credential ${id} env `;
+  return reference => reference.origin.startsWith(prefix);
+};
+
+/** The secret names only login `id` refers to: removing the login leaves them in the store, unused. */
+function orphanedSecretsOf(model: AccountModel, id: string): readonly string[] {
+  const references = accountSecretReferences(model);
+  const own = secretsOfLogin(id);
+  const elsewhere = new Set(references.filter(reference => !own(reference)).map(reference => reference.name));
+  return [...new Set(references.filter(own).map(reference => reference.name))]
+    .filter(name => !elsewhere.has(name))
+    .toSorted();
+}
+
+/**
+ * `credential.remove`: the login goes, and — in the SAME apply, so a half-done removal can never be
+ * left — every runtime still on it is either switched to another login of the same CLI or removed (the
+ * rules of `runtime.remove`: the machine's default runtime needs another default first).
+ *
+ * What it does NOT delete, because each is another capability's to delete: the secret store's entries
+ * (docs/secrets.md) and a Ferretry-kept login's saved sign-in (it is signed out first, by the
+ * reviewed `credential.signout`). Both are said in the consequences, by name.
+ */
+function removeCredential(
+  model: AccountModel,
+  draft: Draft,
+  change: Extract<AccountPlanChange, { kind: 'credential.remove' }>,
+  facts: AccountChangeFacts,
+  consequences: string[],
+): string {
+  const credential = model.credentials[change.id];
+  if (credential === undefined) return refuse(`no login ${change.id} exists on this machine`);
+  const users = runtimesUsingCredential(model, change.id);
+  const switches = Object.entries(change.switchRuntimes ?? {});
+  const removals = [...new Set(change.removeRuntimes ?? [])];
+  for (const name of [...switches.map(([runtime]) => runtime), ...removals]) {
+    if (!users.includes(name)) refuse(`runtime ${name} does not use login ${change.id}, so this change cannot move it`);
+  }
+  const both = removals.find(name => change.switchRuntimes?.[name] !== undefined);
+  if (both !== undefined) refuse(`runtime ${both} cannot be both switched and removed`);
+
+  const byTarget = new Map<string, string[]>();
+  for (const [name, to] of switches) {
+    const target = model.credentials[to];
+    if (to === change.id) refuse(`runtime ${name} cannot switch to the login being removed`);
+    if (target === undefined) return refuse(`no login ${to} exists on this machine`);
+    const runtime = model.runtimes[name];
+    const harness = runtime === undefined ? undefined : runtimeHarness(model, runtime);
+    if (runtime === undefined || harness === undefined) return refuse(`no runtime ${name} exists on this machine`);
+    if (runtimeHarness(model, { ...runtime, credential: to }) !== harness) {
+      refuse(
+        `${name} runs ${HARNESS_DISPLAY_NAMES[harness]}, and login ${to} does not drive it. Pick a ${HARNESS_DISPLAY_NAMES[harness]} login.`,
+      );
+    }
+    (draft.runtimes[name] as Record<string, unknown>).credential = to;
+    byTarget.set(to, [...(byTarget.get(to) ?? []), name]);
+  }
+
+  const movesDefault = removals.includes(model.machine.defaultRuntime ?? '');
+  if (movesDefault && change.defaultRuntime === undefined) {
+    refuse(
+      `${model.machine.defaultRuntime} is this machine's default runtime for new agents. Pick another default first.`,
+    );
+  }
+  if (change.defaultRuntime !== undefined) {
+    if (removals.includes(change.defaultRuntime))
+      refuse(`${change.defaultRuntime} is being removed, so it cannot be the new default`);
+    draft.machine.defaultRuntime = change.defaultRuntime;
+  }
+  for (const name of removals) delete draft.runtimes[name];
+
+  const left = users.filter(name => !removals.includes(name) && change.switchRuntimes?.[name] === undefined);
+  // C10: a runtime on it would have nothing to launch with.
+  if (left.length > 0) {
+    refuse(
+      `${counted(left.length, 'runtime')} still ${left.length === 1 ? 'uses' : 'use'} this login (${listed(left)}). ${switches.length + removals.length === 0 ? `Move ${left.length === 1 ? 'it' : 'them'} to another login first.` : `Switch ${left.length === 1 ? 'it' : 'them'} to another login or remove ${left.length === 1 ? 'it' : 'them'} first.`}`,
+    );
+  }
+  delete draft.credentials[change.id];
+
+  for (const [to, names] of byTarget) {
+    consequences.push(
+      `${listed(names)} ${names.length === 1 ? 'moves' : 'move'} to login ${to}, starting with it the next time ${names.length === 1 ? 'it launches' : 'they launch'}.`,
+    );
+  }
+  if (removals.length > 0) {
+    consequences.push(
+      `Removes ${counted(removals.length, 'runtime')}: ${listed(removals)}. Their past sessions stay in history.`,
+    );
+  }
+  if (change.defaultRuntime !== undefined) {
+    consequences.push(`${change.defaultRuntime} becomes this machine's default runtime for new agents.`);
+  }
+  const running = Object.values(facts.runningByRuntime ?? {}).flat();
+  if (running.length > 0) {
+    consequences.push(
+      `${counted(running.length, 'ferret')} ${running.length === 1 ? 'is' : 'are'} running on ${users.length === 1 ? 'that runtime' : 'those runtimes'}. ${running.length === 1 ? 'It keeps' : 'They keep'} running${removals.length === 0 ? '' : ', but restarting one on a removed runtime later needs another runtime'}.`,
+    );
+  }
+  if (credential.store === 'host') {
+    consequences.push(`Your own ${credential.harness} in your terminal keeps its login; Ferretry only stops using it.`);
+  } else if (credential.store === 'ferretry') {
+    consequences.push('Its saved sign-in stays on this machine. To delete it, sign the login out before removing it.');
+  }
+  const orphaned = orphanedSecretsOf(model, change.id);
+  if (orphaned.length > 0) {
+    consequences.push(
+      `${counted(orphaned.length, 'saved secret')} (${listed(orphaned)}) ${orphaned.length === 1 ? 'is' : 'are'} used by nothing else now, and ${orphaned.length === 1 ? 'stays' : 'stay'} in the secret store until you delete ${orphaned.length === 1 ? 'it' : 'them'} there.`,
+    );
+  }
+
+  const parts = [
+    ...(switches.length === 0
+      ? []
+      : [`switching ${counted(switches.length, 'runtime')} to ${listed([...byTarget.keys()])}`]),
+    ...(removals.length === 0 ? [] : [`removing ${counted(removals.length, 'runtime')}`]),
+  ];
+  return parts.length === 0 ? `Remove login ${change.id}` : `Remove login ${change.id}, ${listed(parts)}`;
 }
 
 /** The four things "What agents may control" names, in the order a summary lists them. */

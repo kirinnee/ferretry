@@ -395,6 +395,13 @@ describe('the account-model catalogue wire contract', () => {
       { kind: 'credential.env', id: 'glm', env: { ANTHROPIC_AUTH_TOKEN: { keep: true } }, cloudCredential: null },
       { kind: 'credential.label', id: 'codex-work', label: null },
       { kind: 'credential.remove', id: 'codex-work' },
+      {
+        kind: 'credential.remove',
+        id: 'codex-work',
+        switchRuntimes: { alpha: 'codex-spare' },
+        removeRuntimes: ['beta'],
+        defaultRuntime: 'alpha',
+      },
       { kind: 'credential.signout', id: 'codex-work' },
       {
         kind: 'machine.settings',

@@ -697,7 +697,19 @@ export const FleetAccountChangeSchema = z.discriminatedUnion('kind', [
     id: NonEmptyStringSchema,
     label: NonEmptyStringSchema.nullable(),
   }),
-  z.strictObject({ kind: z.literal('credential.remove'), id: NonEmptyStringSchema }),
+  z.strictObject({
+    kind: z.literal('credential.remove'),
+    id: NonEmptyStringSchema,
+    /**
+     * "Switch to…": each runtime on this login mapped to the login it moves to, in the SAME apply as the
+     * removal. Without it a login a runtime still uses is refused (C10), as before.
+     */
+    switchRuntimes: z.record(NonEmptyStringSchema, NonEmptyStringSchema).optional(),
+    /** "Remove the runtime too": each runtime on this login deleted in the same apply (runtime.remove's rules). */
+    removeRuntimes: z.array(NonEmptyStringSchema).optional(),
+    /** The default runtime for new agents moves here in the same apply: required when a removed runtime was it. */
+    defaultRuntime: NonEmptyStringSchema.optional(),
+  }),
   z.strictObject({ kind: z.literal('credential.signout'), id: NonEmptyStringSchema }),
   z.strictObject({
     kind: z.literal('machine.settings'),
@@ -763,6 +775,8 @@ export const FleetRunningSessionSchema = z.strictObject({
   /** What the person calls it: its teammate name, else its own name, else its id. */
   name: NonEmptyStringSchema,
   harness: HarnessKindSchema,
+  /** The runtime it runs on, named when one change touches several (removing a login). */
+  runtime: NonEmptyStringSchema.optional(),
 });
 export type FleetRunningSession = z.infer<typeof FleetRunningSessionSchema>;
 
@@ -778,6 +792,11 @@ export const FleetAccountChangePreviewSchema = z.discriminatedUnion('kind', [
      * confirm card can list them and offer to move them first. Present only when there are some.
      */
     runningSessions: z.array(FleetRunningSessionSchema).readonly().optional(),
+    /**
+     * Secret NAMES (never values) that only the login a `credential.remove` deletes referred to. The
+     * secret store is a separate capability (docs/secrets.md), so they are listed, not deleted.
+     */
+    orphanedSecrets: z.array(NonEmptyStringSchema).readonly().optional(),
   }),
   z.strictObject({
     /** Sign-out runs the harness's own logout against the one store; it writes no plan. */
