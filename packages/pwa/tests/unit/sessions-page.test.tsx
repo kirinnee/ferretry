@@ -5,10 +5,12 @@ import type { SessionView, WardenStatusView } from '@ferretry/protocol';
 import type { ComponentType } from 'react';
 
 import { SessionsPage, type SessionsPageProps } from '../../src/components/sessions-page.tsx';
+import { AttentionInboxContext } from '../../src/hooks/use-attention-inbox.ts';
 import { projectScopePath, projectScopeState, type ScopeNavigation } from '../../src/hooks/use-project-scope.ts';
 import type { WardenStatusReader } from '../../src/hooks/use-warden-status.ts';
 import type { AccountPickerHealthCatalog } from '../../src/lib/account-picker-catalog.ts';
 import { DaemonAccountPickerStore } from '../../src/lib/account-picker-store.ts';
+import type { InboxCard } from '../../src/lib/attention-inbox.ts';
 import { type ControlsStorage, DaemonControlsStore } from '../../src/lib/controls.ts';
 import { type DaemonConnection, daemonConnection } from '../../src/lib/daemon-connection.ts';
 import type { FleetProject } from '../../src/lib/fleet-grouping.ts';
@@ -17,6 +19,14 @@ import { DaemonFleetStore } from '../../src/lib/fleet-store.ts';
 import { PageHost } from '../../src/lib/pages/page-host.tsx';
 import { type DaemonProjectsPort, DaemonProjectsStore } from '../../src/lib/projects-store.ts';
 import { type DaemonUsagePort, DaemonUsageStore } from '../../src/lib/usage-store.ts';
+import {
+  attentionItem,
+  choices,
+  type FakeInbox,
+  fakeInbox,
+  InboxHarness,
+  inboxCard,
+} from '../support/attention-inbox.tsx';
 import { interact, mount, must } from '../support/dom.ts';
 import { sessionView } from '../support/sessions.ts';
 import { wardenConfig, wardenStatus } from '../support/warden.ts';
@@ -727,5 +737,48 @@ describe('SessionsPage across every machine', () => {
     await interact(() => heads[0]?.click());
     expect(page.container.querySelectorAll('[data-machine-section]')).toHaveLength(2);
     await page.unmount();
+  });
+});
+
+describe('SessionsPage Needs you', () => {
+  const card = inboxCard(attentionItem('A4', { subject: 'Rebase onto main?', ask: choices('Rebase now', 'Wait') }));
+
+  const withInbox = (fake: FakeInbox, cards: readonly InboxCard[], props: SessionsPageProps) => (
+    <InboxHarness
+      cards={cards}
+      fake={fake}
+      render={inbox => (
+        <AttentionInboxContext.Provider value={inbox}>
+          <SessionsPage {...props} />
+        </AttentionInboxContext.Provider>
+      )}
+    />
+  );
+
+  it('puts the newest open Attention above the list, with See all into this machine’s inbox', async () => {
+    const navigated: string[] = [];
+    const page = await mount(withInbox(fakeInbox(), [card], pageProps({ onNavigate: to => navigated.push(to) })));
+    await settle();
+    const deck = must(page.container.querySelector('[data-attention-needs-you]'), 'the Needs you deck');
+    expect(deck.querySelector('[data-attention-card="A4"]')).not.toBeNull();
+    expect(deck.querySelector('[data-attention-see-all]')?.getAttribute('href')).toBe('/d/alpha/attention');
+    // Above the list, not inside or after it.
+    const list = must(page.container.querySelector('main'), 'the dashboard');
+    expect(deck.compareDocumentPosition(list) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(page.container.textContent).toContain('Alpha-Team');
+    await page.unmount();
+  });
+
+  it('draws no deck with nothing open, and none at all without a shell inbox', async () => {
+    const empty = await mount(withInbox(fakeInbox(), [], pageProps()));
+    await settle();
+    expect(empty.container.querySelector('[data-attention-needs-you]')).toBeNull();
+    await empty.unmount();
+
+    const bare = await mount(<SessionsPage {...pageProps()} />);
+    await settle();
+    expect(bare.container.querySelector('[data-attention-needs-you]')).toBeNull();
+    expect(bare.container.querySelector('[data-attention-undo]')).toBeNull();
+    await bare.unmount();
   });
 });

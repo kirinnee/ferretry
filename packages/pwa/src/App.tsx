@@ -37,6 +37,7 @@ import {
 import { SessionsPage } from './components/sessions-page.tsx';
 import type { SendDismiss, SendExpand } from './components/settled-send-note.tsx';
 import { GlobalAnalyticsPage } from './features/analytics/global-analytics-page.tsx';
+import { AttentionInboxPage } from './features/attention/attention-inbox-page.tsx';
 import { LinkBehaviourProvider } from './features/browser/external-link.tsx';
 import { tunnelSwitchOffer } from './features/carrier/carrier-preference-selector.tsx';
 import { configFilesSettingsTab } from './features/config-files/config-files-settings.tsx';
@@ -114,7 +115,12 @@ import { useAccountPickerSlice } from './hooks/use-account-picker.ts';
 import { useActiveCarrier, useDeviceRefused } from './hooks/use-active-carrier.ts';
 import { useAppViewport } from './hooks/use-app-viewport.ts';
 import { useAttentionSession, useAttentionSnapshot } from './hooks/use-attention.ts';
-import { AttentionInboxContext, useAttentionInboxModel, useInboxMachines } from './hooks/use-attention-inbox.ts';
+import {
+  AttentionInboxContext,
+  useAttentionInbox,
+  useAttentionInboxModel,
+  useInboxMachines,
+} from './hooks/use-attention-inbox.ts';
 import { useCarrierPreferences, useTunnelService, useTunnelSwitches } from './hooks/use-carrier-preferences.ts';
 import { useConfigChangeFeed } from './hooks/use-config-change-feed.ts';
 import { useConnectionHealth } from './hooks/use-connection-health.ts';
@@ -1846,6 +1852,17 @@ function LearningSettingsTabSurface({ connection }: { readonly connection: Daemo
   );
 }
 
+/**
+ * The Attention inbox. Its cards come from EVERY paired machine (the shell's one inbox), so the
+ * machine in the address only decides which machine's chrome surrounds it.
+ */
+function AttentionRoute(_: DaemonPageProps) {
+  const { navigate } = useRouter();
+  const inbox = useAttentionInbox();
+  const phone = useLayoutMode() === 'drawer';
+  return inbox === null ? null : <AttentionInboxPage inbox={inbox} onNavigate={navigate} phone={phone} />;
+}
+
 function ImportedHistoryRoute({ connection }: DaemonPageProps) {
   const store = useAppStore();
   return (
@@ -1908,6 +1925,7 @@ const PAGE_SLOTS: PageHostSlots = {
   Warden: WardenRoute,
   Analytics: AnalyticsRoute,
   Learning: LearningRoute,
+  Attention: AttentionRoute,
   ImportedHistory: ImportedHistoryRoute,
   MachineSetup: MachineSetupRoute,
 };
@@ -2429,6 +2447,7 @@ export function AppShell() {
                   active={appBarDestinationForRoute(pageRoute)}
                   onNavigate={navigate}
                   tabBarShown={showsTabBar(pageRoute)}
+                  attentionCount={attentionInbox.total}
                 />
               ) : null}
               <ConnectionHealthNotice health={store.connectionHealth} machines={noticeMachines} />
@@ -2464,6 +2483,7 @@ export function AppShell() {
               {phone && showsTabBar(pageRoute) ? (
                 <AppTabBar
                   daemon={connection.daemonId}
+                  attentionCount={attentionInbox.total}
                   active={appBarDestinationForRoute(pageRoute)}
                   onNavigate={navigate}
                   onOpenPalette={openPalette}
@@ -2516,48 +2536,48 @@ export function AppShell() {
 
   return (
     <AttentionInboxContext.Provider value={attentionInbox}>
-    <AllMachinesContext.Provider value={allMachines}>
-      <NotificationControlsContext.Provider value={notificationControlsHost}>
-        <ThemeFollower />
-        <MotionFollower />
-        <ViewportOverlay />
-        <AppUpdatedToast />
-        {/* The install offer shares the release notice's pinned dock, so the page starts below both
+      <AllMachinesContext.Provider value={allMachines}>
+        <NotificationControlsContext.Provider value={notificationControlsHost}>
+          <ThemeFollower />
+          <MotionFollower />
+          <ViewportOverlay />
+          <AppUpdatedToast />
+          {/* The install offer shares the release notice's pinned dock, so the page starts below both
           rather than under either. Phone only: a desktop browser keeps its own install control in the
           address bar, and Settings › This device carries the offer at every width. */}
-        {release.notice === null && !installDue ? null : (
-          <ReleaseNoticeDock>
-            {release.notice === null ? null : (
-              <ReleaseNoticeBanner notice={release.notice} onDismiss={release.dismiss} />
-            )}
-            <InstallBannerSlot phone={layout === 'drawer'} />
-          </ReleaseNoticeDock>
-        )}
-        {/*
+          {release.notice === null && !installDue ? null : (
+            <ReleaseNoticeDock>
+              {release.notice === null ? null : (
+                <ReleaseNoticeBanner notice={release.notice} onDismiss={release.dismiss} />
+              )}
+              <InstallBannerSlot phone={layout === 'drawer'} />
+            </ReleaseNoticeDock>
+          )}
+          {/*
         FIRST IN DOM ORDER, so the Tab that follows a route change lands on the
         new page's own chrome rather than back at the top of the old one.
         `tabIndex={-1}` makes it programmatically focusable without adding a tab
         stop of its own, and `sr-only` keeps it out of the visual design.
       */}
-        <p
-          ref={routeAnnouncer}
-          tabIndex={-1}
-          className="sr-only"
-          role="status"
-          aria-live="polite"
-          aria-atomic="true"
-          data-route={pageKey}
-        >
-          {routeAnnouncement(effectiveRoute)}
-        </p>
-        <StoreLinkBehaviour>{content}</StoreLinkBehaviour>
-        {/* One passkey prompt for the whole app: any daemon request refused for want of a step-up raises
+          <p
+            ref={routeAnnouncer}
+            tabIndex={-1}
+            className="sr-only"
+            role="status"
+            aria-live="polite"
+            aria-atomic="true"
+            data-route={pageKey}
+          >
+            {routeAnnouncement(effectiveRoute)}
+          </p>
+          <StoreLinkBehaviour>{content}</StoreLinkBehaviour>
+          {/* One passkey prompt for the whole app: any daemon request refused for want of a step-up raises
           it, and it names which machine is asking. */}
-        <StepUpDialog gate={store.stepUp} machineName={promptMachineName} />
-        {/* The same prompt, for a machine that asks for a passkey on opening (`unlock_required`). */}
-        <StepUpDialog gate={store.unlockGate} copy={UNLOCK_COPY} machineName={promptMachineName} />
-      </NotificationControlsContext.Provider>
-    </AllMachinesContext.Provider>
+          <StepUpDialog gate={store.stepUp} machineName={promptMachineName} />
+          {/* The same prompt, for a machine that asks for a passkey on opening (`unlock_required`). */}
+          <StepUpDialog gate={store.unlockGate} copy={UNLOCK_COPY} machineName={promptMachineName} />
+        </NotificationControlsContext.Provider>
+      </AllMachinesContext.Provider>
     </AttentionInboxContext.Provider>
   );
 }

@@ -10,6 +10,7 @@
 @import '../features/attention/attention-board.css';
 @import '../features/attention/attention-card.css';
 @import '../features/attention/attention-panel.css';
+@import '../features/attention/attention-inbox.css';
 @import '../features/workspace/workspace.css';
 @import '../shell/sessions-bar.css';
 @import '../features/session-info/session-info.css';
@@ -1624,10 +1625,12 @@ body {
   font-size: var(--text-2xs);
 }
 
-/* The phone's app bar: the four most-used places plus More, above the home indicator. */
+/* The phone's app bar: the five most-used places plus More, above the home indicator. */
 .kt-tabbar {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  /* One column per place, however many the bar carries (six with Attention). */
+  grid-auto-columns: minmax(0, 1fr);
+  grid-auto-flow: column;
   flex-shrink: 0;
   /* The phone's bottom-inset owner (`data-safe-bottom`, see THE BOTTOM INSET above): its surface reaches
      the screen edge and its buttons sit one inset above it. */

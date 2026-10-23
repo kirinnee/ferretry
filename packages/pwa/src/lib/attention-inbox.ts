@@ -48,7 +48,7 @@ const instant = (value: string): number => {
 };
 
 /** The session's open Attention, or `undefined` when nothing waits on the owner. */
-export const sessionAttention = (view: SessionView): SessionAttentionSummary | undefined => view.state.attention;
+const sessionAttention = (view: SessionView): SessionAttentionSummary | undefined => view.state.attention;
 
 /** How many open items a row's badge shows. */
 export const unreadCount = (view: SessionView): number => view.state.attention?.open ?? 0;
@@ -298,7 +298,7 @@ export interface DeferredTimers {
   readonly now: () => number;
 }
 
-export const browserDeferredTimers: DeferredTimers = {
+const browserDeferredTimers: DeferredTimers = {
   setTimeout: (callback, milliseconds) => globalThis.setTimeout(callback, milliseconds),
   clearTimeout: handle => globalThis.clearTimeout(handle as ReturnType<typeof globalThis.setTimeout>),
   now: () => Date.now(),

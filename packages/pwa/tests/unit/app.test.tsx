@@ -2243,7 +2243,7 @@ describe('AppShell', () => {
         expect(store.attention.store.count(scope)).toBe(1);
 
         const trigger = must(
-          view.container.querySelector<HTMLButtonElement>('button[aria-label="Needs you: 1 unanswered"]'),
+          view.container.querySelector<HTMLButtonElement>('button[aria-label="1 Attention item needs you"]'),
           'the refreshed "needs you" status',
         );
         expect(trigger.getAttribute('data-needs-you')).toBe('1');

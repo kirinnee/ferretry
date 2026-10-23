@@ -81,7 +81,7 @@ export const useInboxMachines = (
 };
 
 /** Sends one inbox answer through the ONE attention client, to the machine the card came from. */
-export const runInboxAction = async (
+const runInboxAction = async (
   client: Pick<DaemonAttentionClient, 'respond' | 'resolve' | 'dismiss'>,
   connection: DaemonConnection,
   card: InboxCard,
