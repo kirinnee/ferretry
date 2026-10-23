@@ -656,10 +656,17 @@ const DeclaredWaitSchema = z.object({
 
 /**
  * The named sections of the system prompt Ferretry appends to an agent, in the order a wrapper
- * composes them (`@ferretry/fleet` `launchInstructions`): the tools and the settings rules every agent
+ * composes them (`@ferretry/fleet` `launchInstructions`): the tools, the settings rules and the Attention rule every agent
  * gets, then each per-ferret section its launch switched on.
  */
-export const LaunchInstructionSectionIdSchema = z.enum(['tools', 'settings', 'hypermedia', 'pack', 'learning']);
+export const LaunchInstructionSectionIdSchema = z.enum([
+  'tools',
+  'settings',
+  'attention',
+  'hypermedia',
+  'pack',
+  'learning',
+]);
 export type LaunchInstructionSectionId = z.infer<typeof LaunchInstructionSectionIdSchema>;
 
 /** One appended section, by name and size. The text itself is never carried. */

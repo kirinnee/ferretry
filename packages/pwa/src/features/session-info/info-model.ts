@@ -169,6 +169,7 @@ export const packOn = (view: SessionView): boolean => view.config.pack !== false
 export const LAUNCH_SECTION_LABEL: Readonly<Record<LaunchInstructionSectionId, string>> = {
   tools: 'Ferretry tools',
   settings: 'Settings rules',
+  attention: 'Attention',
   hypermedia: 'Hypermedia',
   pack: 'Pack mode',
   learning: 'Learning',

@@ -7,6 +7,7 @@ import should from 'should';
 import {
   AGENT_INSTRUCTION,
   AGENT_TOOLS_INSTRUCTION,
+  ATTENTION_INSTRUCTION,
   CLAUDE_NO_QUESTIONS_FLAG,
   CODEX_QUESTIONS_FEATURE,
   fixedLayerFor,
@@ -819,6 +820,28 @@ describe('the appended system prompt of a real agent runtime, for every combinat
     },
   );
 
+  it.each(['claude', 'codex'] as const)(
+    'should give a %s ferret the attention section even with every switch off',
+    harness => {
+      // Arrange
+      const env = Object.fromEntries(SWITCHES.map(section => [section.env, '0']));
+
+      // Act
+      const args = launchArguments(wrapperFor(harness), env);
+      const prompt =
+        harness === 'claude'
+          ? args.find(arg => arg.startsWith('--append-system-prompt='))?.slice('--append-system-prompt='.length)
+          : JSON.parse(
+              args.find(arg => arg.startsWith('developer_instructions='))?.slice('developer_instructions='.length) ??
+                '""',
+            );
+
+      // Assert — the binary is named by the wrapper's own command, never a hard-coded name
+      should(prompt).containEql(ATTENTION_INSTRUCTION('fy'));
+      should(prompt).containEql('`fy attention add "<ask>"`');
+    },
+  );
+
   it('should keep every section out of the tools server, which says one line', () => {
     // Assert
     should(TOOLS_SERVER_INSTRUCTIONS).not.containEql('\n');
@@ -832,16 +855,18 @@ describe('the appended system prompt of a real agent runtime, for every combinat
     const sizes = {
       tools: AGENT_TOOLS_INSTRUCTION.length,
       settings: SET_UP_FERRETRY_INSTRUCTION('fy').length,
+      attention: ATTENTION_INSTRUCTION('fy').length,
       hypermedia: HYPERMEDIA_INSTRUCTION.length,
       pack: PACK_INSTRUCTION('fy').length,
       lessons: LESSONS_INSTRUCTION('fy').length,
     };
 
-    // Assert — the whole prompt, every section on and the longest routing line, stays under 4.5 KB
+    // Assert — the whole prompt, every section on and the longest routing line, stays under 5.25 KB
     // (docs/pack-mode.md records the sizes)
-    should(Object.values(sizes).reduce((sum, size) => sum + size, 0) + 1 + MAX_ROUTING_SHORT_CHARS).be.below(4_608);
+    should(Object.values(sizes).reduce((sum, size) => sum + size, 0) + 1 + MAX_ROUTING_SHORT_CHARS).be.below(5_376);
     should(sizes.tools).be.below(1_100);
     should(sizes.settings).be.below(600);
+    should(sizes.attention).be.below(700);
   });
 
   it('should tell every ferret to hand the owner a terminal or page, driven as far as it goes, rather than describe the step', () => {
