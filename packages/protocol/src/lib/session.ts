@@ -6,6 +6,7 @@ import {
   NonNegativeIntegerSchema,
   PositiveIntegerSchema,
 } from './common.ts';
+import { SessionAttentionSummarySchema } from './attention.ts';
 import { ProviderQuotaBalanceSchema } from './fleet-credentials.ts';
 import { HarnessSchema } from './session-base.ts';
 import { HarnessDialogSchema } from './session-dialog.ts';
@@ -713,6 +714,8 @@ export const SessionStateSchema = z.object({
   nudgedAt: InstantSchema.optional(),
   needsHuman: z.string().optional(),
   needsHumanKind: z.string().optional(),
+  /** The open Attention items waiting on the owner; absent when none is open. */
+  attention: SessionAttentionSummarySchema.optional(),
   contextPercent: z.number().finite().min(0).max(100).optional(),
   contextTokens: NonNegativeIntegerSchema.optional(),
   contextWindow: PositiveIntegerSchema.optional(),
