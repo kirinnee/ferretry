@@ -303,8 +303,13 @@ export const AUDITED_ROUTES: readonly AuditedRouteRule[] = [
   // A sub-ferret start goes through the same start (docs/pack-mode.md); its own action keeps it apart from
   // a plain start, so the two never fold into one record.
   { method: 'POST', path: '/v1/pack/new', event: 'session.opened', detail: { action: 'sub-ferret' } },
-  // The models-guide builder is a short-lived ferret a person started (docs/pack-mode.md § Suggesting a guide).
-  { method: 'POST', path: '/v1/pack/guide/suggest', event: 'session.opened', detail: { action: 'guide-builder' } },
+  // Clean up is a short-lived ferret a person started (docs/pack-mode.md § Clean up).
+  {
+    method: 'POST',
+    path: '/v1/pack/routing/clean-up',
+    event: 'session.opened',
+    detail: { action: 'routing-clean-up' },
+  },
   {
     method: 'POST',
     path: '/v1/sessions/:sessionId/fork',
@@ -359,9 +364,8 @@ export const AUDITED_ROUTES: readonly AuditedRouteRule[] = [
   // recorded: which file changed is the file's own business, and its text may be what was wrong.
   { method: 'PUT', path: '/v1/config/file', event: 'fleet.configured', detail: { action: 'config-write' } },
   // Each rewrites models-guide.yaml, as an edit through the configuration routes would.
-  { method: 'POST', path: '/v1/pack/guide/accept', event: 'fleet.configured', detail: { action: 'guide-accept' } },
-  { method: 'POST', path: '/v1/pack/guide/undo', event: 'fleet.configured', detail: { action: 'guide-undo' } },
-  { method: 'POST', path: '/v1/pack/guide/describe', event: 'fleet.configured', detail: { action: 'guide-describe' } },
+  { method: 'POST', path: '/v1/pack/routing/accept', event: 'fleet.configured', detail: { action: 'routing-accept' } },
+  { method: 'POST', path: '/v1/pack/routing/undo', event: 'fleet.configured', detail: { action: 'routing-undo' } },
   { method: 'POST', path: '/v1/config/confirm', event: 'fleet.configured', detail: { action: 'config-confirm' } },
   { method: 'POST', path: '/v1/agent/config', event: 'fleet.configured', detail: { action: 'agent-config' } },
   // Lessons (docs/learning.md): the machine default written into `learning.yaml`, and an Apply — the one

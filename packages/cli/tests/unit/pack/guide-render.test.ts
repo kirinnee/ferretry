@@ -1,102 +1,101 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { renderInventory, renderSuggestion } from '../../../src/lib/pack/guide-render.ts';
+import { renderCleanUp, renderInventory, renderTextDiff } from '../../../src/lib/pack/guide-render.ts';
 import { INVENTORY, JOB, SUGGESTION } from './fixtures.ts';
 
-describe('renderSuggestion', () => {
-  it('should show who drafted it, the routing before and after, each use case as a diff, the notes and how to accept', () => {
-    // Act
-    const text = renderSuggestion(JOB, SUGGESTION, 'fy');
+const RED = '\u001b[31m';
+const GREEN = '\u001b[32m';
+const RESET = '\u001b[39m';
+
+describe('renderTextDiff', () => {
+  it('should mark removed words [-like this-] and added words {+like this+}, whitespace outside the marks', () => {
+    // Arrange + Act
+    const text = renderTextDiff('Use opus for plans.', 'Use claude-opus-5-5 for plans.', false);
 
     // Assert
-    should(text.split('\n')).deepEqual([
-      'Suggested by claude-opus-5-5 on claude-work (2026-10-22 12:05Z), against your guide.',
+    should(text).equal('Use [-opus-] {+claude-opus-5-5+} for plans.');
+  });
+
+  it('should tint removed text red and added text green, brackets kept, on a terminal', () => {
+    // Arrange + Act
+    const text = renderTextDiff('Use opus now', 'Use haiku now', true);
+
+    // Assert
+    should(text).equal(`Use ${RED}[-opus-]${RESET} ${GREEN}{+haiku+}${RESET} now`);
+  });
+
+  it('should show an unchanged prompt as itself', () => {
+    // Arrange + Act + Assert
+    should(renderTextDiff('Same words.', 'Same words.', true)).equal('Same words.');
+  });
+
+  it('should keep a changed run of several words in one mark', () => {
+    // Arrange + Act
+    const text = renderTextDiff('A one two B', 'A three B', false);
+
+    // Assert
+    should(text).equal('A [-one two-] {+three+} B');
+  });
+
+  it('should drop a removed blank and keep an added one, so a reflow marks nothing', () => {
+    // Arrange + Act
+    const text = renderTextDiff('A B', 'A\n\nB', false);
+
+    // Assert
+    should(text).equal('A\n\nB');
+  });
+});
+
+describe('renderCleanUp', () => {
+  it('should say who rewrote it, show the diff, the notes, and how to accept it', () => {
+    // Arrange + Act
+    const text = renderCleanUp({ ...JOB, status: 'suggested' }, SUGGESTION, 'foo', false);
+
+    // Assert
+    should(text.split('\n')).eql([
+      'Cleaned up by claude-opus-5-5 on claude-work (2026-10-22 12:05Z). Removed text is [-like this-], added text is {+like this+}:',
       '',
-      'Routing guidance:',
-      '  - Plan and review on Opus; take Astra when Opus is low.',
-      '  + Plan on Opus.',
-      '  + Bulk on GLM.',
-      '  short line: Routing: plan-review → opus max.',
+      'Use [-opus-] {+claude-opus-5-5+} for plans. Use [-glm-] {+claude-haiku-5-5+} for chores.',
       '',
-      'Use cases:',
-      '  ~ changed plan-review — Planning and review',
-      '      title: "Hard planning and review" → "Planning and review"',
-      '      1. anthropic/claude-opus-5-5 @max — The strongest planner.',
-      '      2. openai/gpt-6-astra (codex) — A second family.',
-      '  + added   bulk — Bulk edits',
-      '      1. zai/glm-5 — Cheap: claude-work is at 46% of the week.',
+      'Notes (2):',
+      '  - absent_model: glm-5 is not run by any runtime here',
+      '  - suggestion: Add a Codex login for a second family.',
       '',
-      'Dropped (1):',
-      '  - bulk: x ghost is not in any catalog',
-      '',
-      'Changed by the check (1):',
-      '  - its routing guidance did not check, so it was rendered from the use cases',
-      '',
-      'Accept it all: fy guide accept run-1',
-      'Accept some:   fy guide accept run-1 --only <id,id> [--keep-routing]',
+      'Accept with: foo guide accept run-1',
     ]);
   });
 
-  it('should say when the routing is unchanged or new, and show a removed and an unchanged use case on one line', () => {
-    // Arrange
-    const current = SUGGESTION.current;
-    const same = {
-      ...SUGGESTION,
-      routing: { prompt: current.routing?.prompt ?? '', short: current.routing?.short ?? '' },
-      useCases: [],
-      dropped: [],
-      flagged: [],
-    };
-    const fresh = {
-      ...SUGGESTION,
-      useCases: current.useCases,
-      current: { source: 'derived' as const, useCases: current.useCases },
-    };
-
-    // Act
-    const unchanged = renderSuggestion(JOB, same, 'fy').split('\n');
-    const first = renderSuggestion(JOB, fresh, 'fy').split('\n');
+  it('should leave the notes out when there are none, and tint the diff on a terminal', () => {
+    // Arrange + Act
+    const text = renderCleanUp({ ...JOB, status: 'suggested' }, { ...SUGGESTION, notes: [] }, 'foo', true);
 
     // Assert
-    should(unchanged).containEql('Routing guidance: unchanged.');
-    should(unchanged).containEql('  - removed plan-review — Hard planning and review');
-    should(unchanged).not.containEql('Dropped (0):');
-    should(first[0]).endWith('against the built-in guide.');
-    should(first).containEql('  (none before)');
-    should(first).containEql('  = same    plan-review — Hard planning and review');
+    should(text).not.containEql('Notes');
+    should(text).containEql(`${RED}[-opus-]${RESET}`);
+    should(text).containEql(`${GREEN}{+claude-opus-5-5+}${RESET}`);
   });
 });
 
 describe('renderInventory', () => {
-  it('should list each runtime with its readiness and quota, each model with whose words and its headroom, then the preferences', () => {
-    // Act
+  it('should list each runtime with its models, then each model with where it runs', () => {
+    // Arrange + Act
     const text = renderInventory(INVENTORY);
 
     // Assert
-    should(text.split('\n')).deepEqual([
+    should(text.split('\n')).eql([
       'Runtimes (2):',
-      '  ready   claude-work (claude, anthropic) · quota 5h 2% · wk 46%',
-      '  cannot  codex-off (codex) · quota not measured — codex-off needs signing in.',
+      '  ready  claude-work (claude, anthropic) · quota 5h 2% · wk 46%',
+      '      models: claude-opus-5-5, claude-haiku-5-5',
+      '  cannot codex-off (codex) · quota not measured — codex-off needs signing in.',
+      '      models: (none)',
       '',
-      'Models (2):',
-      '  anthropic/claude-opus-5-5 — Claude Opus 5.5, best, retires 2027-06-01',
-      '      yours: Strongest; slow.',
-      '      1 runtime, 1 ready; most headroom on claude-work: 5h 2% · wk 46%',
+      'Models (3):',
+      '  anthropic/claude-opus-5-5 — Claude Opus 5.5, best, 200000 context',
+      '      runs on: claude-work',
       '  openai/gpt-6-astra (codex) — GPT-6 Astra, best',
-      '      catalog: GPT-6 Astra: the strongest tier on OpenAI.',
-      '      no runtime here runs it',
-      '',
-      'Your routing preferences:',
-      '  Opus for reviews.',
-      '  GLM for bulk.',
+      '      runs on: codex-off (cannot start now)',
+      '  zai/glm-5 — GLM 5, fast',
+      '      runs on: no runtime here',
     ]);
-  });
-
-  it('should leave out preferences nobody wrote', () => {
-    // Arrange
-    const { preferences: _preferences, ...bare } = INVENTORY;
-
-    // Act + Assert
-    should(renderInventory(bare)).not.containEql('preferences');
   });
 });

@@ -43,7 +43,7 @@ Run \`${bin} config path\` for the directory. Inside it:
 | \`learning.yaml\` | lesson mining |
 | \`voice.yaml\` | who cleans up dictated text: \`postProcessing\`: \`provider\` (\`off\`, \`groq\`, \`cerebras\`, \`login\`), \`style\` (\`off\`, \`fix\`, \`polish\`), your own \`prompts\` for each style, \`useConversation\` and \`conversationMessages\` |
 | \`pack.yaml\` | Pack mode: \`enabled\`, \`decision\` (\`agent\` or \`jev\`), \`limits\` (\`interactiveChildren\`, \`autoChildren\`, \`maxDepth\`), \`probe\`, \`jev\` |
-| \`models-guide.yaml\` | the models guide: \`useCases\`, each with \`id\`, \`title\`, \`description\` and \`candidates\` (\`provider\`, \`model\`, \`effort\`, \`why\`), best first |
+| \`models-guide.yaml\` | the routing prompt: \`prompt\` — plain words, at most 1,200 characters, naming model ids in the order to try them (\`fy guide clean-up\` rewrites a rough one) |
 
 Every file starts with a \`# yaml-language-server: $schema=…\` line. \`${bin} config schema <kind>\` prints the
 JSON Schema of a kind (\`${bin} config schema\` lists the kinds).

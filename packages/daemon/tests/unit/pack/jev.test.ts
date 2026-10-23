@@ -63,8 +63,8 @@ describe('buildPackJevBody', () => {
   });
 });
 
-describe('buildPackJevBody with the guide', () => {
-  it("should give Jev the owner's routing guidance, the use case and each candidate's quota", () => {
+describe('buildPackJevBody with the routing prompt', () => {
+  it("should give Jev the owner's routing prompt as guidance, and each candidate's quota", () => {
     // Arrange
     const candidates: readonly RankableCandidate[] = [
       { model: 'opus', runtime: 'claude-kirin', why: 'The strongest.', quota: '5h 10% · wk 91%' },
@@ -74,7 +74,6 @@ describe('buildPackJevBody with the guide', () => {
     // Act
     const body = buildPackJevBody('review the diff', candidates, 'jev', {
       routing: 'Reviews on Opus; Sonnet when Opus is low.',
-      useCase: { title: 'Review', description: 'Reviewing a change.' },
     });
 
     // Assert
@@ -83,7 +82,6 @@ describe('buildPackJevBody with the guide', () => {
       state: {
         task: 'review the diff',
         guidance: 'Reviews on Opus; Sonnet when Opus is low.',
-        useCase: 'Review: Reviewing a change.',
       },
       questions: {
         model: {
@@ -96,8 +94,17 @@ describe('buildPackJevBody with the guide', () => {
         },
       },
     });
-    should(PACK_JEV_INSTRUCTIONS).containEql("Follow the owner's routing guidance");
+    should((body.state as Record<string, unknown>).useCase).be.undefined();
+    should(PACK_JEV_INSTRUCTIONS).containEql("Follow the owner's routing prompt");
     should(PACK_JEV_INSTRUCTIONS).containEql('quota left');
+  });
+
+  it('should send no guidance when there is no routing prompt', () => {
+    // Act
+    const body = buildPackJevBody('t', CANDIDATES, 'jev', {}) as { state: Record<string, unknown> };
+
+    // Assert
+    should(Object.keys(body.state)).deepEqual(['task']);
   });
 
   it('should bound the guidance', () => {
@@ -108,6 +115,12 @@ describe('buildPackJevBody with the guide', () => {
 
     // Assert
     should(body.state.guidance).have.length(PACK_JEV_LIMITS.maxGuidanceChars);
+  });
+
+  it('should offer a bounded number of candidates for the caller to cut to', () => {
+    // Assert
+    should(PACK_JEV_LIMITS.maxCandidates).be.a.Number();
+    should(PACK_JEV_LIMITS.maxCandidates).be.within(1, 50);
   });
 });
 

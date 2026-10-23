@@ -2,11 +2,11 @@
 
 import {
   DEFAULT_PACK_CONFIG,
-  type GuideUseCase,
-  type ModelsGuide,
+  type PackCleanUpJob,
+  type PackCleanUpSuggestion,
   type PackFleetModel,
-  type PackGuideJob,
-  type PackGuideSuggestion,
+  type PackModelOption,
+  type PackQuota,
   type PackView,
 } from '@ferretry/protocol';
 import type { MachinePack } from '../../src/features/pack/use-machine-pack.ts';
@@ -27,17 +27,17 @@ export const OPUS = model({
   tier: 'best',
   efforts: ['low', 'high', 'max'],
 });
-export const SONNET = model({ id: 'claude-sonnet-5', label: 'Claude Sonnet 5' });
-export const HAIKU = model({ id: 'claude-haiku-4-5', label: 'Claude Haiku 4.5', tier: 'fast' });
-export const LATEST = model({ id: '~anthropic/claude-opus-latest', label: 'Opus (latest)', tier: 'best' });
-export const GLM = model({
+const SONNET = model({ id: 'claude-sonnet-5', label: 'Claude Sonnet 5' });
+const HAIKU = model({ id: 'claude-haiku-4-5', label: 'Claude Haiku 4.5', tier: 'fast' });
+const LATEST = model({ id: '~anthropic/claude-opus-latest', label: 'Opus (latest)', tier: 'best' });
+const GLM = model({
   provider: 'zai',
   providerLabel: 'z.ai',
   id: 'glm-5.3',
   label: 'GLM-5.3',
   runtimes: [],
 });
-export const ASTRA = model({
+const ASTRA = model({
   provider: 'openai',
   providerLabel: 'OpenAI',
   harness: 'codex',
@@ -47,14 +47,14 @@ export const ASTRA = model({
   efforts: ['medium', 'high'],
   runtimes: ['codex-main'],
 });
-export const OSS = model({
+const OSS = model({
   provider: 'ollama',
   providerLabel: 'Ollama',
   id: 'gpt-oss:20b',
   label: 'gpt-oss 20B',
   tier: 'fast',
 });
-export const FLASH = model({
+const FLASH = model({
   provider: 'deepseek',
   providerLabel: 'DeepSeek',
   id: 'deepseek-flash[1m]',
@@ -65,113 +65,115 @@ export const FLASH = model({
 
 export const FLEET_MODELS: readonly PackFleetModel[] = [OPUS, SONNET, HAIKU, LATEST, GLM, ASTRA, OSS, FLASH];
 
+const quota = (state: PackQuota['state'], summary: string, leftPercent?: number): PackQuota => ({
+  state,
+  ...(leftPercent === undefined ? {} : { leftPercent }),
+  windows: [],
+  summary,
+});
+
+/** What runtimes here can start now, as the daemon orders them: ready first, then by quota left. */
+const AVAILABLE: readonly PackModelOption[] = [
+  {
+    provider: 'anthropic',
+    model: OPUS.id,
+    modelLabel: OPUS.label,
+    harness: 'claude',
+    tier: 'best',
+    efforts: OPUS.efforts,
+    runtime: 'claude-main',
+    runtimes: 1,
+    ready: true,
+    quota: quota('plenty', '5h 12% · week 30%', 70),
+    named: 1,
+    effort: 'max',
+    command: 'fy new --runtime claude-main --model claude-opus-5-5 --effort max',
+  },
+  {
+    provider: 'openai',
+    model: ASTRA.id,
+    modelLabel: ASTRA.label,
+    harness: 'codex',
+    tier: 'best',
+    efforts: ASTRA.efforts,
+    runtime: 'codex-main',
+    runtimes: 1,
+    ready: true,
+    quota: quota('low', '5h 91% · week 64%', 9),
+    named: 2,
+  },
+  {
+    provider: 'anthropic',
+    model: HAIKU.id,
+    modelLabel: HAIKU.label,
+    harness: 'claude',
+    tier: 'fast',
+    efforts: [],
+    runtime: 'claude-spare',
+    runtimes: 2,
+    ready: false,
+    refusal: {
+      code: 'out_of_quota',
+      message: 'claude-spare is out of quota until 18:00Z.',
+      remedy: 'Wait for the reset, or add a login.',
+    },
+    quota: quota('exhausted', 'out of quota until 18:00Z', 0),
+  },
+];
+
+/** The default routing prompt, rendered from the catalogs: nothing written. */
+const DEFAULT_ROUTING = {
+  text: 'Planning, review and critical code → claude-opus-5-5 at max. Everyday work → claude-sonnet-5. Chores → claude-haiku-4-5.',
+  source: 'default',
+} as const;
+
 export const PACK_VIEW: PackView = {
   config: DEFAULT_PACK_CONFIG,
-  guide: {
-    source: 'derived',
-    useCases: [
-      {
-        id: 'hard',
-        title: 'Hard planning / review / critical code',
-        description: 'Plans, reviews and the code that must not break. Prefer claude-opus-5-5.',
-        keywords: ['plan', 'review'],
-        candidates: [
-          { provider: 'anthropic', model: 'claude-opus-5-5', effort: 'high', why: 'The strongest reasoning here.' },
-          { provider: 'openai', model: 'gpt-6-astra', why: 'A second family for a second opinion.' },
-        ],
-      },
-      {
-        id: 'bulk',
-        title: 'Mechanical bulk edits',
-        description: 'Renames and one-line chores across many files.',
-        candidates: [{ provider: 'anthropic', model: 'claude-haiku-4-5', why: 'Fast and cheap.' }],
-      },
-    ],
-  },
+  routing: DEFAULT_ROUTING,
   models: FLEET_MODELS,
+  available: AVAILABLE,
+  cleanUp: { available: false, runtimes: [], reason: 'No agent runtime here is ready to run a clean-up.' },
 };
 
-/** What a `MachinePack` does for the generator calls when a suite is not about them: nothing, and says so. */
-export const IDLE_GUIDE_API: Pick<MachinePack, 'suggest' | 'readJob' | 'acceptGuide' | 'undoGuide' | 'describeModel'> =
-  {
-    suggest: async () => ({ kind: 'refused', message: 'Not under test.' }),
-    readJob: async () => ({ kind: 'failed', message: 'Not under test.' }),
-    acceptGuide: async () => ({ kind: 'refused', message: 'Not under test.' }),
-    undoGuide: async () => ({ kind: 'refused', message: 'Not under test.' }),
-    describeModel: async () => ({ kind: 'refused', message: 'Not under test.' }),
-  };
+/** The owner's own words, which name a known, an absent and an unknown model. */
+export const OWNER_PROMPT = 'Hard work → claude-opus-5-5 at max, or glm-5.3. Never gpt-6-astra-mini.';
 
-const HARD = PACK_VIEW.guide.useCases[0] as GuideUseCase;
-const BULK = PACK_VIEW.guide.useCases[1] as GuideUseCase;
-const LEGACY: GuideUseCase = {
-  id: 'legacy',
-  title: 'Old shell chores',
-  description: 'Chores nobody asks for any more.',
-  candidates: [{ provider: 'ollama', model: 'gpt-oss:20b', why: 'Free and local.' }],
+export const OWNER_VIEW: PackView = {
+  ...PACK_VIEW,
+  routing: { text: OWNER_PROMPT, source: 'file' },
+  cleanUp: { available: true, runtimes: ['codex-main', 'claude-main'] },
 };
 
-/** The guide in effect when the builder drafted `SUGGESTION`: the owner's own, with a routing line. */
-export const CURRENT_GUIDE: ModelsGuide = {
-  source: 'file',
-  useCases: [HARD, BULK, LEGACY],
-  routing: {
-    source: 'file',
-    prompt: 'Use Opus for anything hard.\nUse Haiku for everything else.',
-    short: 'Opus for hard work, Haiku for the rest',
-  },
+/** What a `MachinePack` does for the routing calls when a suite is not about them: nothing, and says so. */
+export const IDLE_ROUTING_API: Pick<MachinePack, 'savePrompt' | 'cleanUp' | 'readJob' | 'accept' | 'undo'> = {
+  savePrompt: async () => ({ kind: 'refused', message: 'Not under test.' }),
+  cleanUp: async () => ({ kind: 'refused', message: 'Not under test.' }),
+  readJob: async () => ({ kind: 'failed', message: 'Not under test.' }),
+  accept: async () => ({ kind: 'refused', message: 'Not under test.' }),
+  undo: async () => ({ kind: 'refused', message: 'Not under test.' }),
 };
 
-/**
- * A realistic checked draft: the routing words changed; `hard` unchanged, `bulk` re-ranked, `docs` new and
- * `legacy` left out; one model dropped as listed nowhere and one effort flagged.
- */
-export const SUGGESTION: PackGuideSuggestion = {
-  suggested: { by: 'gpt-6-astra', via: 'codex-main', at: '2026-10-22T14:30:00.000Z' },
-  routing: {
-    prompt:
-      'Use Opus for planning, review and critical code.\nUse Sonnet for ordinary edits.\nUse Haiku for bulk chores.',
-    short: 'Opus plans, Sonnet edits, Haiku does chores',
-  },
-  useCases: [
-    HARD,
-    {
-      ...BULK,
-      description: 'Renames and one-line chores across many files; prefer the cheapest model that can do it.',
-      candidates: [
-        { provider: 'ollama', model: 'gpt-oss:20b', why: 'Runs here for free.' },
-        { provider: 'anthropic', model: 'claude-haiku-4-5', why: 'Fast and cheap when the local one is busy.' },
-      ],
-    },
-    {
-      id: 'docs',
-      title: 'Writing and docs',
-      description: 'READMEs, changelogs and explanations.',
-      candidates: [
-        { provider: 'anthropic', model: 'claude-sonnet-5', effort: 'high', why: 'Clear prose at a fair price.' },
-      ],
-    },
-  ],
-  dropped: [
-    { useCase: 'docs', provider: 'zai', model: 'glm-9', message: 'is not in any model catalog, so it was left out.' },
-  ],
-  flagged: [
-    {
-      useCase: 'hard',
-      provider: 'openai',
-      model: 'gpt-6-astra',
-      message: 'effort “ultra” is not one it takes; the default is used.',
-    },
-  ],
-  current: CURRENT_GUIDE,
-};
-
-/** A builder run as the daemon reports it. */
-export const RUNNING_JOB: PackGuideJob = {
+/** A clean-up run as the daemon reports it. */
+export const RUNNING_JOB: PackCleanUpJob = {
   id: 'job-1',
-  session: 'mvjcjssv-builder',
-  name: 'Guide Builder',
+  session: 'mvjcjssv-cleanup',
+  name: 'Routing Clean Up',
   runtime: 'codex-main',
   model: 'gpt-6-astra',
   startedAt: '2026-10-22T14:29:00.000Z',
   status: 'running',
+};
+
+/** A realistic checked rewrite of a rough prompt, with one note of each kind. */
+export const SUGGESTION: PackCleanUpSuggestion = {
+  suggested: { by: 'gpt-6-astra', via: 'codex-main', at: '2026-10-22T14:30:00.000Z' },
+  before: 'use opus for hard stuff and glm-9 for the rest, haiku for chores when theres quota',
+  after:
+    'Planning, review and critical code → claude-opus-5-5 at max. Chores → claude-haiku-4-5 low while its login has quota left. Everything else → claude-sonnet-5.',
+  notes: [
+    { kind: 'unknown_model', message: 'No catalog lists glm-9, so it was left out.', model: 'glm-9' },
+    { kind: 'absent_model', message: 'GLM-5.3 runs on no runtime here.', model: 'glm-5.3' },
+    { kind: 'cut', message: 'The rewrite was cut to fit 1,200 characters.' },
+    { kind: 'suggestion', message: 'Add a second Claude login so chores do not wait for quota.' },
+  ],
 };

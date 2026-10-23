@@ -163,13 +163,13 @@ export function editConfigText(
   if (document.errors.length > 0) document = parseDocument('', PARSE_OPTIONS);
   if (!isMap(document.contents)) document.contents = document.createNode({});
   editValue(document, [], target, current);
-  const header = document.commentBefore ?? '';
   // The parser attaches a comment directly above the first key to that key, not to the document, so
-  // the text itself is what says whether the file already starts with a modeline.
-  const hasModeline = (existing ?? '').split('\n', 5).some(line => line.includes(MODELINE_MARK));
-  if (!hasModeline && !header.includes(MODELINE_MARK)) {
-    const line = modeline.replace(/^#/u, '');
-    document.commentBefore = header === '' ? line : `${line}\n${header}`;
-  }
+  // the text itself is what says whether the file starts with a modeline — the EDITED text, because
+  // an edit that removes that first key removes the comment with it.
+  const edited = document.toString({ lineWidth: 0 });
+  if (edited.split('\n', 5).some(line => line.includes(MODELINE_MARK))) return edited;
+  const header = document.commentBefore ?? '';
+  const line = modeline.replace(/^#/u, '');
+  document.commentBefore = header === '' ? line : `${line}\n${header}`;
   return document.toString({ lineWidth: 0 });
 }

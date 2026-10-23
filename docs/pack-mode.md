@@ -40,25 +40,26 @@ far above a server's text. The runtime wrapper composes it per ferret at exec ti
 called `fy`:
 
 ```text
-Pack mode: you may hand self-contained parts of your task to sub-ferrets — other agents, each on the model that suits its part. Prefer them over your built-in subagents for real work; do small things yourself.
-1. `fy recommend "<part>"` lists the models usable now, best first, with the command to start each.
+Pack mode: you may hand self-contained parts of your task to sub-ferrets — other agents, each on the model that suits its part. Prefer them over your built-in subagents for real work; do small things yourself. Pick each model by the Routing line below.
+1. `fy recommend` lists the models usable now, most quota first, with the command to start each.
 2. `fy new --runtime <runtime> --model <model> [--effort <level>] --name "<short task title>" "<complete brief>"` starts one (`fy new --auto "<brief>"` lets Ferretry choose). Always pass `--name` (2–5 Title Case words). The brief is all it knows: say what to do, where, and what to report.
 3. If it refuses (out_of_quota, not_logged_in, cli_missing, probe_failed, …), read the reason and start the next candidate. limit_reached or depth_exceeded: do the work yourself.
 4. `fy wait <id>` blocks until it finishes and prints its result. Check it, then combine the results yourself.
 Stop sub-ferrets you no longer need (`fy stop children <your id> --yes`).
 ```
 
-When the models guide is in effect (always — its own, or one built from the catalogs), the Pack section ends
-with its **routing line** on a line of its own, e.g. `Routing: plan-review → claude-opus-5-5 max; everyday →
-claude-sonnet-5-5.` — the guide's `routing.short` ([The models guide](#the-models-guide)). The daemon puts it in
-`FY_PACK_ROUTING` at **every launch** and never stores it, so a restart hears the guide saved now; the wrapper
-appends it only when `FY_PACK=1`, and deletes any quote, backslash or control character first, so a value
-nobody checked cannot break either harness's quoting. The whole guidance is in `fy recommend` and
-`fy guide show`, read live.
+The Pack section then ends with the **whole routing prompt** ([The routing prompt](#the-routing-prompt)) as
+one line of its own, `Routing: …` — the same text Jev decides with. The daemon renders it into
+`FY_PACK_ROUTING` at **every launch** and never stores it, so a restart hears the prompt saved now: each line is
+trimmed and its bullet dropped, lines are joined with a space after a sentence's end and `; ` otherwise, a
+double quote becomes a single one, and a backslash or control character is deleted. The wrapper appends it
+only when `FY_PACK=1`, and deletes any quote, backslash or control character again first, so a value nobody
+checked cannot break either harness's quoting.
 
 Built-in subagents are **discouraged, not blocked**: nothing is taken away from the harness.
 
-**Size.** Every Ferretry instruction together is about 5.1 KB (≈ 1,290 tokens) with every section on:
+**Size.** Every Ferretry instruction together is at most about 6.1 KB (≈ 1,560 tokens) with every section on
+and the longest routing prompt:
 
 | Section                                  | Characters | ≈ tokens | When                        |
 | ---------------------------------------- | ---------- | -------- | --------------------------- |
@@ -66,72 +67,83 @@ Built-in subagents are **discouraged, not blocked**: nothing is taken away from 
 | Ferretry settings (short "Set up" skill) | 478        | 120      | every agent runtime         |
 | Attention (raise an ask, rich items)     | 559        | 140      | every agent runtime         |
 | Hypermedia                               | 1,585      | 396      | `FY_HYPERMEDIA=1`           |
-| Pack mode                                | 963        | 241      | `FY_PACK=1`                 |
-| Its routing line                         | ≤ 151      | ≤ 38     | `FY_PACK=1`, a guide        |
+| Pack mode                                | 1,003      | 251      | `FY_PACK=1`                 |
+| Its routing line                         | ≤ 1,210    | ≤ 303    | `FY_PACK=1`                 |
 | Lessons                                  | 413        | 104      | `FY_LEARNING_PASSIVE=1`     |
 | The tools server's MCP instructions      | 112        | 28       | always — one line, no rules |
 
 The full "Set up Ferretry" skill (4.2 KB) is no longer in any prompt; the settings section points at
-`fy config guide`, which prints it. A test keeps the whole prompt, with the longest routing line, under 4.5 KB. The tools section grew from 620 characters when it began
-telling agents to hand the owner a terminal or page for every step only they can do
-([agent-tools.md](agent-tools.md#handing-a-surface-to-the-owner)).
+`fy config guide`, which prints it. A test keeps the whole prompt, with the longest routing prompt, under
+6.25 KB and the Pack section itself under 1,050 characters. The routing line grew from a 150-character
+summary to the whole prompt when the use-case guide became one routing prompt, so the agent decides with
+exactly what Jev is told.
 
-## The models guide
+## The routing prompt
 
-`config/models-guide.yaml` maps **use cases** to the models that suit each, best first. It is a
-configuration file like any other ([config-files.md](config-files.md)): human-edited, checked, last good
-wins, live in every open app, and edited in Settings › Pack mode.
+ONE setting says which model runs which kind of sub-task: `prompt` in `config/models-guide.yaml`, plain text of
+at most **1,200 characters**. Both deciders read the same text, in either mode:
+
+- **The asking ferret** reads it whole in the Pack section of its system prompt, and again in `fy recommend`.
+- **Jev** is given it as its guidance when Jev decides.
+- **`fy new --auto`** tries the models it **names**, in the order it names them.
 
 ```yaml
 # yaml-language-server: $schema=.schema/modelsGuide.json
-useCases:
-  - id: plan-review
-    title: Hard planning, review and critical code
-    description: Designing an approach and reviewing a change. claude-opus-5-5 first, gpt-6-astra for a second family.
-    keywords: [plan, design, review, security]
-    candidates:
-      - provider: anthropic
-        model: claude-opus-5-5
-        effort: max
-        why: The strongest planner and reviewer.
-      - provider: openai
-        model: gpt-6-astra
-        harness: codex
-        effort: high
-        why: A different family, for a plan Claude wrote.
+prompt: |
+  Planning, review and security-sensitive code: claude-opus-5-5 at max; gpt-6-astra for a second opinion.
+  Everyday coding: claude-sonnet-5-5. Chores and bulk edits: claude-haiku-5-5 at low.
+  When claude-work is low on quota, prefer glm-5.3.
 ```
 
-- `provider` is a **model catalog** id (`anthropic`, `openai`, `zai`, `deepseek`, `kimi`, …,
-  [model-catalog.md](model-catalog.md)) and `model` an id that catalog lists, so a candidate may be any model
-  anywhere in the fleet. `harness` says which CLI when a catalog lists the model for both.
-- **No `useCases` key: the derived guide.** A machine that never wrote a guide gets five use cases built from
-  the catalogs in effect — _Hard planning, review and critical code_ (`best` tier, highest effort), _Everyday
-  coding_ (`balanced`), _Mechanical bulk edits_ (`fast`, lowest effort), _Second opinion_ (`best`, another
-  family), _Long-context reading_ (largest context) — so it moves with the catalogs without a release.
-  Providers are ordered Anthropic, OpenAI, Z.ai, DeepSeek, Kimi, MiniMax, Qwen, Ollama, then the rest, and the
-  same model resold by Bedrock, Vertex or a gateway is listed once.
-- **A model the guide names that no runtime here offers is still listed**, flagged, never removed: a guide
-  is portable between machines. A candidate is also served by a runtime whose catalog lists a model with the
-  **same label** (Claude Opus 5.5 through Bedrock), so a guide written for `anthropic` works on a Bedrock login.
-- **Routing guidance.** `routing: {prompt, short}` says in plain words how to pick a model and effort for a
-  sub-ferret's job — "planning or review → …; mass chores → …; when X is low on quota → …". `prompt` (up to
-  6,000 characters) is printed by `fy recommend` and `fy guide show` and given to **Jev** as its guidance;
-  `short` (one line, up to 150 characters, no quote or backslash) rides in the Pack section of every ferret's
-  system prompt. A guide with no `routing` gets one **rendered from its use cases** — each use case and its
-  first three candidates — so it never says anything the guide does not. Hand-written, generated or derived,
-  Pack mode reads whatever is saved.
-- **Where it came from.** `suggested: {by, via, at, acceptedAt, partial?}` records the model that drafted an
-  accepted guide; `fy recommend` then says so ("your guide, suggested by gpt-oss-120b on 2026-10-22 and
-  accepted"). A hand-written guide has none.
-- **Tolerant read, strict write.** An unknown model is a warning in the editor and a `model_unavailable`
-  candidate, never a broken file; a file that does not match the schema keeps its last good version.
-  The guide never loosens anything (it widens nothing a ferret may do or spend), so an edit is never held.
+- **A model is named** by its id or its catalog label, ignoring case — `claude-opus-5-5`, `Claude Opus 5.5` —
+  exactly as the editor highlights it (`packages/protocol/src/lib/pack-mentions.ts` is the one recogniser both
+  use), so the highlighter and the router never disagree about which word named which model. An **effort**
+  written right after a name — `claude-opus-5-5 at max`, `@max`, `(max)` — is that model's effort for
+  `--auto`, when it is one of the model's own.
+- **No `prompt`: the default.** A machine that never wrote one gets one rendered from the catalogs in effect:
+  the strongest tier at its highest effort for planning, review and the hardest code (with another family's
+  strongest for a second opinion), the balanced tier for everyday coding, the fast tier at its lowest effort
+  for chores — a model a runtime here runs before one nothing here runs, providers in the order Anthropic,
+  OpenAI, Z.ai, DeepSeek, Kimi, MiniMax, Qwen, Ollama, then the rest. It moves with the catalogs without a
+  release.
+- **A model the prompt names that nothing here runs is kept**, never removed: a prompt is portable between
+  machines. `--auto` skips it; the editor shows it muted, and an unknown model-like word red.
+- **Where it came from.** `suggested: {by, via, at, acceptedAt}` records the model that rewrote an accepted
+  clean-up; `fy recommend` and the settings page say so. Saving the prompt by hand drops it — the text is the
+  owner's own words again.
+- **Tolerant read, strict write.** A prompt longer than 1,200 characters does not check, and the last good
+  version stays in effect. A routing prompt never loosens anything (it widens nothing a ferret may do or
+  spend), so an edit is never held.
 
-## `fy recommend "<task>"`
+### Migration
 
-`POST /v1/pack/recommend {task, useCase?}` — `operator`, `fleet.use`. The use case is the one named
-(`--use-case`), else the one whose keywords and title words the task uses most, else `everyday`. Each of its
-candidates is resolved to a runtime on this machine and checked **now**, in the order a person would fix it:
+The prompt replaced a **models guide** of use cases (each with ranked candidates, keywords and reasons),
+per-model descriptions, the builder's `routingPreferences` in `pack.yaml` and a one-line `routing.short`. The
+first daemon start with this version renders an old guide into one prompt, **once**:
+
+1. Both files are copied whole, as they were, into `state/pack-routing-migration-<when>.json` — first, so
+   nothing is lost even if a write after it fails.
+2. `models-guide.yaml` gets `prompt`: the old use cases, each with its first three candidates and their
+   efforts, best first (a guide that named none ran on the catalogs' guide, so the default prompt stands in),
+   then the old routing prompt, then the routing preferences. When that is longer than 1,200 characters the
+   use cases are kept whole and the prose is cut at a sentence, and the daemon's log says so. The old keys
+   (`useCases`, `routing`, `models`) and the old `suggested` are removed.
+3. `pack.yaml` loses `routingPreferences`.
+
+Until it runs, an old file still loads (the old keys are read, never written) and is rendered the same way on
+the fly. A start that finds none of the old keys does nothing. An undo kept from an accepted use-case guide no
+longer reads and is dropped. Clean up turns a migrated prompt into a short one.
+
+## `fy recommend ["<task>"]`
+
+`POST /v1/pack/recommend {task?}` — `operator`, `fleet.use`. It prints the **routing prompt** in effect (and
+where it came from) and a **live list of the models usable now** — one row per model a runtime here offers:
+the runtime with the most headroom that could start it, whether it can (and why not), its quota, where the
+prompt names it and the effort it names, and the command that starts it. Nothing is matched against the task:
+the asking ferret decides with the prompt and the list. `next` is the command `--auto` would try first.
+`--json` prints the payload. `fy guide show [--json]` prints the prompt alone.
+
+Each runtime is checked **now**, in the order a person would fix it:
 
 | Check                               | Refusal code        |
 | ----------------------------------- | ------------------- |
@@ -144,9 +156,9 @@ candidates is resolved to a runtime on this machine and checked **now**, in the 
 | It can launch at all                | `not_logged_in`     |
 | It offers the model                 | `model_unavailable` |
 
-Ready candidates come first, and `next` is the command that starts the first. The answer names the guide it
-used and ends with the guide's routing prompt. `--json` prints the payload. `fy guide show [--json]` prints the
-guide in effect: where it came from, its routing prompt and short line, and every use case.
+What a runtime offers is its login's catalog's models, else its profile's model set's available ones; a
+runtime on the harness default offers no named model and is not listed. The same model resold by another
+catalog (Claude Opus 5.5 through Bedrock) is **one row**, served by whichever runtime has the most headroom.
 
 ### Quota
 
@@ -154,13 +166,12 @@ Quota changes hour by hour, so it is applied **at routing time**, from the fleet
 login (the windows the app shows as "5h 2% · wk 46%", `packages/daemon/src/lib/pack/quota.ts`), with no LLM
 call and no extra request:
 
-- Each candidate carries its login's **headroom**, banded by the tightest window measured: _plenty_ (half or
+- Each row carries its login's **headroom**, banded by the tightest window measured: _plenty_ (half or
   more left), _some_ (a fifth to a half), _low_ (less than a fifth), _exhausted_ (refused `out_of_quota`).
-  A login nothing measured is _unknown_ and is not held against a candidate.
-- The ready candidates are **re-ranked** by band — plenty or unknown, then some, then low — the guide's order
-  breaking every tie, and a candidate that ends below one the guide put after it says why
-  (`moved down: claude-kirin, 91% of the week used, resets 18:00Z`).
-- Of the runtimes that could serve one candidate, the one with the most headroom is chosen.
+  A login nothing measured is _unknown_ and is not held against a model.
+- The list is **sorted**: ready first, then by band (plenty or unknown, some, low), then by the share left;
+  the prompt's order, then the tier, then the label break a tie.
+- Of the runtimes that could serve one model, the one with the most headroom is chosen.
 - A window whose **reset time has passed** since it was measured counts as fresh, so a login that ran out is
   offered again once its window resets, without anybody reading its usage again. (The older `fy fleet recommend` — a team recommender over a routing
   catalog an operator writes — is unchanged and separate.)
@@ -185,8 +196,10 @@ fy new --auto --name "Fix Login Redirect" "<complete brief>"   # the decision mo
 ```
 
 1. **Admission**: Pack mode on for the machine and the parent; the parent's limits (below).
-2. **Order**: the named runtime — checked as `recommend` checks it — or, with `--auto`, the guide's ready
-   candidates in the guide's order, or **Jev's** order when Jev decides.
+2. **Order**: the named runtime — checked as `recommend` checks it — or, with `--auto`, the ready models the
+   routing prompt **names, in the order it names them** (each at the effort written after it, unless
+   `--effort` says otherwise), then the ready model with the most headroom it does not name — or **Jev's**
+   order when Jev decides.
 3. **Probe — always, in both modes.** Each candidate in turn is asked to "Reply with exactly: OK" — a real round
    trip to the model, not a check that a CLI exists — through its
    own wrapper — resolved exactly as the start resolves it, the published absolute launcher in
@@ -217,22 +230,23 @@ refusal (a failure of the command itself is 1).
 | `cli_missing` / `not_logged_in`       | the CLI or its launcher is missing / the login needs signing in       |
 | `out_of_quota` / `model_unavailable`  | quota used up / the runtime does not offer the model                  |
 | `probe_failed`                        | the "reply OK" check did not answer OK in time                        |
-| `no_candidate`                        | nothing in the guide can run here now                                 |
+| `no_candidate`                        | no model a runtime here offers can run now                            |
 | `scratch_cwd`                         | the named folder is temporary; leave `--cwd` out or `--allow-scratch` |
-| `jev_unavailable` / `jev_cap_reached` | reserved; today both fall back to the guide's order, with a note      |
+| `jev_unavailable` / `jev_cap_reached` | reserved; today both fall back to the prompt's order, with a note     |
 
 ## Who decides
 
 `pack.yaml` `decision`:
 
-- **`agent`** (default) — the asking ferret picks, from `fy recommend`, and names `--runtime/--model/--effort`.
-  `--auto` takes the guide's first ready candidate.
+- **`agent`** (default) — the asking ferret picks, reading the routing prompt in its system prompt and the live
+  list from `fy recommend`, and names `--runtime/--model/--effort`. `--auto` takes the routing prompt's order.
 - **`jev`** — `fy new --auto` asks Jev (TypeSafe AI's System One model, the Warden's guard) to rank the ready
-  candidates for the task, **guided by the models guide**: one cheap question per start, only when a ferret asks, within `jev.usdPerDay`
+  models for the task, **guided by the same routing prompt**: one cheap question per start, only when a ferret asks, within `jev.usdPerDay`
   (default $0.25 per UTC day, counted at the Warden's `guard.usdPerMillionInputTokens`, separate from the
-  Warden's own cap). Jev sees the task text (bounded), the guide's routing prompt and the use case the task
-  matched (bounded), and each candidate's model, runtime, reason and login quota — nothing else. With one ready candidate Jev is not asked. When Jev cannot answer (no key, a refusal, a
-  timeout, an unreadable answer) or the cap is reached, the guide's order is used and the answer's `note`
+  Warden's own cap). Jev sees the task text (bounded), the routing prompt, and up to twelve ready models — the prompt's
+  order first, then the most headroom — each with its runtime, label, tier, where the prompt names it and its
+  login quota; nothing else. With one ready model Jev is not asked. When Jev cannot answer (no key, a refusal, a
+  timeout, an unreadable answer) or the cap is reached, the routing prompt's order is used and the answer's `note`
   says why: a broken Jev never stops a sub-ferret starting. Switching to `jev` is a loosening, held for the
   owner's confirmation ([config-files.md](config-files.md)).
 
@@ -259,85 +273,74 @@ failed, stalled or stopped. A plain `fy start` refused here answers `409 limit_r
 - A sub-ferret that signals done is stopped by that signal. One a wait settles on that is still running
   (a `--until-marker` wait) is stopped once its result is collected, unless the caller passes `--keep`.
 
-## Suggesting a guide
+## Clean up
 
-A guide can be written by hand, kept as the one built from the catalogs, or **drafted by a short-lived ferret
-and reviewed** — and Pack mode reads whichever is saved the same way. The generator is the one way to draft
-one; there is no second engine, and it never runs unasked.
+The routing prompt is written by its owner — roughly, if they like — and **Clean up** is its only generator:
+it rewrites the owner's rough prompt against this machine's harness config, and a person reviews the result.
+There is no second engine, and it never runs unasked.
 
-**What it is shown.** `GET /v1/pack/inventory` (`fy guide inventory`): every model every catalog lists — its
-tier, context window, efforts, list price and retirement day where the catalog states them, and **a
-description**: the owner's own words where they wrote some, else one made from the catalog (its note, tier,
-context and efforts) — and, for each, every runtime here that runs it, whether that runtime can start a
-ferret now (exactly as `fy recommend` decides) and how much quota its login has left, summed up per model
-("2 runtimes, 1 ready; most headroom on claude-atomi: 5h 2% · wk 20%"); every agent runtime with its readiness
-and quota; the guide in effect; and the owner's **routing preferences**. Names and states only: a login is
-named by its id and nothing in it can hold a credential.
+**What it is shown.** `GET /v1/pack/inventory` (`fy guide inventory`): every agent runtime here — its CLI, the
+catalog its login reads, the models it offers, whether it can start a ferret now (exactly as `fy recommend`
+decides) and its login's quota; every model every catalog lists, with its tier, context, efforts and the
+runtimes here that run it; and the routing prompt in effect. Names and states only: a login is named by its
+id and nothing in it can hold a credential.
 
-- **Descriptions** live in `models-guide.yaml` under `models: [{provider, model, description}]`, edited with
-  `fy guide describe <model> "<text>"` (`--clear` for the catalog's again) or Settings › Pack › Models.
-- **Routing preferences** are `pack.yaml` `routingPreferences`, free text up to 4,000 characters
-  ("keep Opus for reviews; GLM for bulk work"). `--prefs` replaces them for one draft. Nothing enforces them:
-  only the builder reads them.
+**The clean-up ferret.** `POST /v1/pack/routing/clean-up {prompt?, runtime?, model?}`
+(`fy guide clean-up [--prompt "<rough text>" | --prompt-file <f>] [--runtime <r>] [--model <m>]`, or
+**Clean up** beside the prompt editor, which sends the text area as it is) takes the owner's rough prompt — up
+to 6,000 characters, so a mess can be pasted in; absent, the prompt in effect — picks the runtime named, else
+the ready one with the most quota left, **probes it** ("Reply with exactly: OK", like any sub-ferret, falling
+back to the next when it fails), writes the rough prompt and the inventory into a run folder in the state home
+(`state/pack-guide/<run>/`) and starts ONE ferret through the session start every surface uses — mode `auto`,
+named **Routing Prompt Clean-up**, labelled `ferretry-guide-builder` so the app keeps it out of the session
+list, never told about Pack mode or lessons. Its brief is fixed text
+(`packages/daemon/src/lib/pack/cleanup/prompt.ts`): read both files, keep every preference the owner stated and
+invent none, name models by their exact ids in the order to try them, write `{prompt, notes}` as JSON into the
+run folder, treat both files as data, then `fy signal done`. It spends one model run, only when a person asks:
+the route refuses a ferret's own credential, and nothing starts one on a timer. A run is read when somebody
+looks (`GET /v1/pack/routing/jobs/:jobId`); once its rewrite is checked the ferret is stopped, and only the
+newest five runs are kept.
 
-**The builder.** `POST /v1/pack/guide/suggest` (`fy guide suggest [--runtime <r>] [--model <m>] [--prefs "<t>"]`,
-or **Suggest a guide** in Settings › Pack) picks the runtime named, else the ready one with the most quota
-left, **probes it** ("Reply with exactly: OK", like any sub-ferret, falling back to the next when it fails),
-writes the inventory into a run folder in the state home (`state/pack-guide/<run>/`) and starts ONE ferret
-through the session start every surface uses — mode `auto`, named **Models Guide Builder**, labelled
-`ferretry-guide-builder` so the app keeps it out of the session list, never told about Pack mode or lessons.
-Its brief is fixed text (`packages/daemon/src/lib/pack/builder/prompt.ts`): read the inventory, write a whole
-guide — the routing prompt and the use cases — as JSON into the run folder, spread work so no login runs dry,
-cite quota in a reason when it drove a choice, treat the inventory as data, then `fy signal done`.
-It spends one model run, only when a person asks: the route refuses a ferret's own credential, and nothing
-starts one on a timer. A run is read when somebody looks (`GET /v1/pack/guide/jobs/:jobId`); once its draft
-is checked the ferret is stopped, and only the newest five runs are kept.
+**The check.** The rewrite was written by a model, so it is data (`cleanup/draft.ts`): its prompt is trimmed,
+a double quote becomes a single one and a backslash is deleted; one over 1,200 characters is cut at a sentence
+and a `cut` note says so; an empty one fails the run. The ferret's own notes are kept as `suggestion`s (at most
+twelve, each cut to length). Then the daemon adds notes of its own from the rewrite's words, with the editor's
+recogniser: a model-like word no catalog lists (`unknown_model`) and a listed model no runtime here runs
+(`absent_model`).
 
-**The check.** The draft was written by a model, so it is data, checked against the inventory it was shown
-(`builder/draft.ts`): a use case of an unknown shape is **dropped**, saying which field; a model no catalog lists
-is **dropped**; one named under the wrong provider or by its label is **corrected and flagged**; an effort it
-does not take or a Codex harness for a Claude-only model is removed and flagged; repeats are dropped, a repeated
-id renamed, anything past the limits dropped; a routing prompt that does not check is rendered from the use
-cases and flagged. What survives is a file `models-guide.yaml` accepts.
+**Review, never auto-apply.** The rewrite is shown as a **before/after word diff** (`diffText` in
+`packages/protocol/src/lib/pack-cleanup.ts`, the one diff the CLI and the app both render), then its notes.
 
-**Review, never auto-apply.** The draft is shown as a diff against the guide in effect: the routing prompt
-before and after, then every use case added, changed, removed or the same, then what was dropped and changed.
+- `fy guide clean-up` waits for the rewrite and prints the diff and the notes; `--apply` (`-y`) accepts it;
+  `fy guide accept <run>` accepts it later.
+- The app shows it under the editor with **Accept** and **Discard**.
 
-- `fy guide suggest` waits for the draft and prints the diff; `--apply` (`-y`) accepts it whole;
-  `fy guide accept <run> [--only <id,id>] [--keep-routing]` accepts all or part later.
-- The app shows it side by side, with an Accept toggle per use case and for the routing prompt, and
-  **Accept selected**, **Accept all**, **Edit** (load it into the editor's draft) and **Discard**.
-
-An accept (`POST /v1/pack/guide/accept`) merges the chosen use cases into the guide in effect **now** — an
-accepted change replaces its use case in place, an accepted removal removes it, an accepted addition is appended
-— and writes them, the routing prompt unless kept, and `suggested` (where it came from) through the
-configuration writer every editor uses, keeping comments and the owner's descriptions. The file it replaces is
-kept (`state/pack-guide-replaced.json`), so **one undo** (`fy guide undo`, Undo in the editor,
-`POST /v1/pack/guide/undo`) puts it back exactly — "no guide of my own" included. A guide never loosens anything,
-so an accept is never held; it is a `fleet.configure` act, and a ferret's own credential is refused.
+An accept (`POST /v1/pack/routing/accept {prompt, suggested}`) writes the prompt and `suggested` (where it came
+from) through the configuration writer every editor uses, keeping comments. The file it replaces is kept
+(`state/pack-guide-replaced.json`), so **one undo** (`fy guide undo`, Undo in the editor,
+`POST /v1/pack/routing/undo`) puts it back exactly — "no prompt of my own" included. A prompt never loosens
+anything, so an accept is never held; it is a `fleet.configure` act, and a ferret's own credential is refused.
 
 ## The settings page
 
-Settings › Pack mode (phone first): the switch, who decides, the limits and the probe, and the **models
-guide editor** — each use case's title, description, keywords and ranked candidates. In the description and
-every reason, model names are recognised as you type: a model any catalog in the fleet lists is highlighted
-(muted when no runtime here offers it), an unknown model-like word is red and underlined, and an autocomplete
-offers every model across every runtime and provider. It reads `GET /v1/pack` (`fleet.use`: the settings, the
-guide in effect and every model the fleet knows, with the runtimes here that run each) and writes both files
-through the configuration-file routes, so a loosening is held exactly as an edit in a text editor would be.
+Settings › Pack mode (phone first): the switch, who decides, the limits and the probe, then ONE card —
+**Routing prompt — ferrets use this to pick which model runs each sub-task**:
 
-The editor also holds the **routing guidance** (the prompt and its one-line form; leaving both empty keeps the
-one rendered from the use cases). Saving the editor makes the guide the owner's own words again, so it drops
-`suggested`.
+- where the prompt came from (your words, an accepted clean-up and by whom, or the default);
+- a text area in which model names are recognised as you type: a model any catalog in the fleet lists is
+  highlighted (muted when no runtime here offers it), an unknown model-like word is red and underlined, and an
+  autocomplete offers every model across every runtime and provider; a counter against 1,200 characters;
+- **Clean up** (sends the text area as it is; disabled with the reason when no runtime can start a ferret; a
+  running clean-up shows its name, runtime and elapsed time with a link to its session, and the page looks at
+  the run every few seconds only while it is open), **Save** (writes `prompt` through the configuration-file
+  routes and drops `suggested`; an empty text area removes `prompt`, so the default applies; disabled over the
+  limit, with the reason) and **Undo** (while an accepted clean-up can be undone);
+- the clean-up review (the diff, the notes, Accept and Discard), when one has arrived;
+- **Available now**, read-only: the live list `fy recommend` prints.
 
-Beside it: **Models** — every model, grouped by provider, with whether it runs here and its description (yours,
-or the catalog's), each saved on its own or put back to the catalog's; and **Suggest a guide** — a runtime
-picker (the ready ones, the one with the most headroom first), the routing preferences (prefilled from
-`pack.yaml`, with "Remember these preferences"), and the button, disabled with the reason when no runtime can
-start a ferret. A running builder shows its name, runtime and elapsed time with a link to its session; the page
-looks at the run every few seconds only while it is open. The draft opens as the review (§ Suggesting a guide),
-and an accepted one can be undone from the editor. Builder ferrets are kept out of the session list and the
-palette, though a link to one still opens it.
+It reads `GET /v1/pack` (`fleet.use`: the settings, the routing prompt in effect, every model the fleet knows
+with the runtimes here that run each, the models usable now, the undo and Clean up's state). Clean-up ferrets
+are kept out of the session list and the palette, though a link to one still opens it.
 
 ## Declared gaps
 
@@ -345,9 +348,12 @@ palette, though a link to one still opens it.
   not its `--session-id`, hand-off `Read(...)` rules, fast-mode overlay or remote-control arguments, so a
   harness that refuses only one of those passes the probe and fails the start — with its own words on the card.
 - **A probe leaves a one-line conversation** in the runtime's history, as any one-shot run of the CLI does.
-- **A builder's session stays on record.** Once its draft is read the ferret is stopped and its run folder is
-  pruned after five newer runs, but the session itself is kept like any stopped ferret, only hidden from the
+- **A clean-up's session stays on record.** Once its rewrite is read the ferret is stopped and its run folder
+  is pruned after five newer runs, but the session itself is kept like any stopped ferret, only hidden from the
   list.
+- **`--auto` reads names, not meaning.** It tries the models the prompt names in the order they first appear;
+  "never use claude-opus-5-5 for chores" still names Opus first. Write the prompt in the order to try, or let
+  Clean up reorder it; Jev and the asking ferret read the meaning.
 - **No burn rate.** Headroom is what is left now; how fast a login is spending is not measured, so two logins
   with the same share left rank alike however fast one is draining.
 - **Quota is what the fleet last read.** `recommend` and `new` do not ask a provider for fresh quota; an

@@ -77,7 +77,6 @@
         "harness/conversation-picker-screenshot.tsx",
         "harness/mobile-ui3-screenshot.tsx",
         "harness/pack-mode-screenshot.tsx",
-        "harness/guide-suggestion-screenshot.tsx",
         "harness/voice-cleanup-screenshot.tsx",
         "harness/device-permissions-screenshot.tsx",
         "harness/setup-import-screenshot.tsx",

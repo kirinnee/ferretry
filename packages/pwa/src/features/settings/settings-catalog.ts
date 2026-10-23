@@ -743,7 +743,7 @@ export const SETTINGS_LINKS: readonly SettingsLinkDefinition[] = [
     id: 'pack',
     label: 'Pack mode',
     description:
-      'Whether ferrets may start sub-ferrets and pick the model each runs on: the switch, who decides (the agent or Jev), how many may run and how deep, and the models guide. On this machine — opens its Machine tab.',
+      'Whether ferrets may start sub-ferrets and pick the model each runs on: the switch, who decides (the agent or Jev), how many may run and how deep, and the routing prompt. On this machine — opens its Machine tab.',
     href: daemon => `${daemonSettingsPath(daemon)}#pack`,
     keywords: [
       'pack',
@@ -761,7 +761,8 @@ export const SETTINGS_LINKS: readonly SettingsLinkDefinition[] = [
       'model guide',
       'which model',
       'pick model',
-      'use case',
+      'routing prompt',
+      'clean up',
       'jev',
       'depth',
       'limit',

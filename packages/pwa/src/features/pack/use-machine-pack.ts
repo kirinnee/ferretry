@@ -1,41 +1,33 @@
 /**
- * This machine's Pack mode (`GET /v1/pack`): the settings in effect, the models guide in effect and
- * every model the fleet knows — read once per machine and again whenever `pack.yaml`,
+ * This machine's Pack mode (`GET /v1/pack`): the settings in effect, the routing prompt in effect, every
+ * model the fleet knows and the models usable now — read once per machine and again whenever `pack.yaml`,
  * `models-guide.yaml` or a model catalog moves (the `pack` change kind).
  *
  * Writes go through the configuration-file routes against the etag just read, exactly as Voice cleanup
  * writes `voice.yaml`. An edit that LOOSENS what a ferret may do or spend — Pack on, Jev decides, a
  * limit or Jev's cap raised — is held by the daemon until the owner confirms it; the answer says so
- * rather than pretending it applied.
+ * rather than pretending it applied. Clean up, its accept and its undo go through their own routes.
  */
 
 import {
   type ConfigFileAddress,
   configFilePath,
-  type GuideUseCase,
   PACK_PATH,
-  type PackGuideAcceptRequest,
-  type PackGuideDescribeRequest,
-  type PackGuideJob,
-  type PackGuideJobResult,
-  type PackGuideSuggestRequest,
-  type PackGuideWriteResult,
+  type PackCleanUpJob,
+  type PackCleanUpJobResult,
+  type PackCleanUpRequest,
+  type PackRoutingAcceptRequest,
+  type PackRoutingWriteResult,
   type PackView,
   PackViewSchema,
 } from '@ferretry/protocol';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
-import { type PackConfigPatch, type RoutingEdit, withModelsGuide, withPackConfig } from '../../lib/pack/pack-files.ts';
+import { type PackConfigPatch, withPackConfig, withRoutingPrompt } from '../../lib/pack/pack-files.ts';
 import { useConfigChangeCounter, useDaemonClient } from '../../lib/store.tsx';
 import { readConfigFile, writeConfigFile } from '../config-files/config-files-api.ts';
 import { changeRefusalSentence } from '../fleet/shell/apply-change.ts';
-import {
-  acceptGuideSuggestion,
-  describeGuideModel,
-  readGuideJob,
-  startGuideSuggestion,
-  undoGuideSuggestion,
-} from './guide-api.ts';
+import { acceptRouting, readCleanUpJob, startCleanUp, undoRouting } from './routing-api.ts';
 
 export type PackSave =
   | { readonly kind: 'applied' }
@@ -47,37 +39,32 @@ export type PackRead =
   | { readonly kind: 'ready'; readonly view: PackView }
   | { readonly kind: 'failed'; readonly message: string };
 
-/** Starting the builder: a run that began, or why none did. */
-export type GuideStart =
-  | { readonly kind: 'started'; readonly job: PackGuideJob }
+/** Starting Clean up: a run that began, or why none did. */
+export type CleanUpStart =
+  | { readonly kind: 'started'; readonly job: PackCleanUpJob }
   | { readonly kind: 'refused'; readonly message: string };
 
-/** Reading one builder run: its state (and suggestion), or why it could not be read. */
-export type GuideJobRead =
-  | { readonly kind: 'read'; readonly result: PackGuideJobResult }
+/** Reading one clean-up run: its state (and rewrite), or why it could not be read. */
+export type CleanUpJobRead =
+  | { readonly kind: 'read'; readonly result: PackCleanUpJobResult }
   | { readonly kind: 'failed'; readonly message: string };
 
-/** A guide write (accept, undo, describe): what the daemon did, or why it did not. */
-export type GuideWrite =
-  | { readonly kind: 'applied' | 'nothing'; readonly message: string }
+/** An accept or an undo: what the daemon did, or why it did not. */
+export type RoutingWrite =
+  | { readonly kind: PackRoutingWriteResult['outcome']; readonly message: string }
   | { readonly kind: 'refused'; readonly message: string };
 
 export interface MachinePack {
   readonly read: PackRead;
   saveConfig(patch: PackConfigPatch): Promise<PackSave>;
-  /**
-   * Write the whole guide; `null` removes `useCases`, which puts the built-in guide back. `routing` is left
-   * as the file has it unless given: a pair writes it, `null` removes it.
-   */
-  saveGuide(useCases: readonly GuideUseCase[] | null, routing?: RoutingEdit): Promise<PackSave>;
-  /** Start a builder ferret. Spends one model run, so only a person's press calls it. */
-  suggest(request: PackGuideSuggestRequest): Promise<GuideStart>;
-  /** One builder run and its suggestion; read only while a person watches it. */
-  readJob(jobId: string): Promise<GuideJobRead>;
-  acceptGuide(request: PackGuideAcceptRequest): Promise<GuideWrite>;
-  undoGuide(): Promise<GuideWrite>;
-  /** Set the owner's description of one model; a `null` description gives the catalog's back. */
-  describeModel(request: PackGuideDescribeRequest): Promise<GuideWrite>;
+  /** Write the owner's routing prompt; `null` (or blank words) removes it so the default applies. */
+  savePrompt(prompt: string | null): Promise<PackSave>;
+  /** Start a clean-up ferret. Spends one model run, so only a person's press calls it. */
+  cleanUp(request: PackCleanUpRequest): Promise<CleanUpStart>;
+  /** One clean-up run and its rewrite; read only while a person watches it. */
+  readJob(jobId: string): Promise<CleanUpJobRead>;
+  accept(request: PackRoutingAcceptRequest): Promise<RoutingWrite>;
+  undo(): Promise<RoutingWrite>;
 }
 
 const PACK_FILE: ConfigFileAddress = { kind: 'pack' };
@@ -143,9 +130,8 @@ export function useMachinePack(daemon: DaemonConnection | undefined): MachinePac
     async (patch: PackConfigPatch) => await write(PACK_FILE, text => withPackConfig(text, patch)),
     [write],
   );
-  const saveGuide = useCallback(
-    async (useCases: readonly GuideUseCase[] | null, routing?: RoutingEdit) =>
-      await write(GUIDE_FILE, text => withModelsGuide(text, useCases, routing)),
+  const savePrompt = useCallback(
+    async (prompt: string | null) => await write(GUIDE_FILE, text => withRoutingPrompt(text, prompt)),
     [write],
   );
 
@@ -158,11 +144,11 @@ export function useMachinePack(daemon: DaemonConnection | undefined): MachinePac
     [createClient],
   );
 
-  const suggest = useCallback(
-    async (request: PackGuideSuggestRequest): Promise<GuideStart> => {
+  const cleanUp = useCallback(
+    async (request: PackCleanUpRequest): Promise<CleanUpStart> => {
       try {
-        const started = await withClient(async client => await startGuideSuggestion(client, request));
-        // A started run is shown on the view as `builder.job`, so the view is read again.
+        const started = await withClient(async client => await startCleanUp(client, request));
+        // A started run is shown on the view as `cleanUp.job`, so the view is read again.
         setReread(count => count + 1);
         return started.outcome === 'started'
           ? { kind: 'started', job: started.job }
@@ -174,19 +160,19 @@ export function useMachinePack(daemon: DaemonConnection | undefined): MachinePac
     [withClient],
   );
   const readJob = useCallback(
-    async (jobId: string): Promise<GuideJobRead> => {
+    async (jobId: string): Promise<CleanUpJobRead> => {
       try {
-        return { kind: 'read', result: await withClient(async client => await readGuideJob(client, jobId)) };
+        return { kind: 'read', result: await withClient(async client => await readCleanUpJob(client, jobId)) };
       } catch (cause) {
         return { kind: 'failed', message: changeRefusalSentence(cause) };
       }
     },
     [withClient],
   );
-  const writeGuide = useCallback(
+  const routingWrite = useCallback(
     async (
-      run: (client: Awaited<ReturnType<typeof createClient>>) => Promise<PackGuideWriteResult>,
-    ): Promise<GuideWrite> => {
+      run: (client: Awaited<ReturnType<typeof createClient>>) => Promise<PackRoutingWriteResult>,
+    ): Promise<RoutingWrite> => {
       try {
         const done = await withClient(run);
         setReread(count => count + 1);
@@ -197,20 +183,12 @@ export function useMachinePack(daemon: DaemonConnection | undefined): MachinePac
     },
     [withClient],
   );
-  const acceptGuide = useCallback(
-    async (request: PackGuideAcceptRequest) =>
-      await writeGuide(async client => await acceptGuideSuggestion(client, request)),
-    [writeGuide],
+  const accept = useCallback(
+    async (request: PackRoutingAcceptRequest) =>
+      await routingWrite(async client => await acceptRouting(client, request)),
+    [routingWrite],
   );
-  const undoGuide = useCallback(
-    async () => await writeGuide(async client => await undoGuideSuggestion(client)),
-    [writeGuide],
-  );
-  const describeModel = useCallback(
-    async (request: PackGuideDescribeRequest) =>
-      await writeGuide(async client => await describeGuideModel(client, request)),
-    [writeGuide],
-  );
+  const undo = useCallback(async () => await routingWrite(async client => await undoRouting(client)), [routingWrite]);
 
   const read: PackRead =
     daemonId === undefined
@@ -218,5 +196,5 @@ export function useMachinePack(daemon: DaemonConnection | undefined): MachinePac
       : state !== null && state.daemonId === daemonId
         ? state.read
         : { kind: 'loading' };
-  return { read, saveConfig, saveGuide, suggest, readJob, acceptGuide, undoGuide, describeModel };
+  return { read, saveConfig, savePrompt, cleanUp, readJob, accept, undo };
 }

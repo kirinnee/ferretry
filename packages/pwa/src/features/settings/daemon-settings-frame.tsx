@@ -32,12 +32,12 @@ import {
   Zap,
 } from 'lucide-react';
 import { type ComponentType, createContext, type ReactNode, useContext, useMemo } from 'react';
+import { useCarrierRtt } from '../../hooks/use-carrier-rtt.ts';
 import type { WardenStatusReader } from '../../hooks/use-warden-status.ts';
 import type { ConnectionHealthState } from '../../lib/connection-health.ts';
 import type { DaemonConnectionRecord } from '../../lib/connections.ts';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
 import { Button } from '../../shell/primitives.tsx';
-import { useCarrierRtt } from '../../hooks/use-carrier-rtt.ts';
 import { ActiveCarrierCard, type CarrierPreferenceControl } from '../carrier/active-carrier-card.tsx';
 import { type SecretClientFactory, SecretsSurface } from '../secrets/secrets-surface.tsx';
 import { type WardenClientFactory, WardenConfigSurface } from '../warden/warden-config-card.tsx';
@@ -98,7 +98,7 @@ const PANEL_ICONS: Readonly<Record<string, ReactNode>> = {
   files: <FileCode2 size={16} aria-hidden="true" />,
   // What new ferrets are instructed to learn, and each ferret's own switch.
   learning: <GraduationCap size={16} aria-hidden="true" />,
-  // A paw print: a ferret and its pack of sub-ferrets, and the models guide they are picked from.
+  // A paw print: a ferret and its pack of sub-ferrets, and the routing prompt they are picked by.
   pack: <PawPrint size={16} aria-hidden="true" />,
   // A bolt, because the panel holds the optional keys that make the Warden and dictation faster.
   speedups: <Zap size={16} aria-hidden="true" />,

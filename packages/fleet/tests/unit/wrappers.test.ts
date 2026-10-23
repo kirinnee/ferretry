@@ -2,7 +2,7 @@ import { describe, it } from 'bun:test';
 import { chmodSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { MAX_ROUTING_SHORT_CHARS } from '@ferretry/protocol';
+import { MAX_ROUTING_PROMPT_CHARS } from '@ferretry/protocol';
 import should from 'should';
 import {
   AGENT_INSTRUCTION,
@@ -716,9 +716,10 @@ describe("each ferret's sections of the appended system prompt", () => {
     should(JSON.parse(value?.slice('developer_instructions='.length) ?? '')).containEql('\n\nPack mode: ');
   });
 
-  it("should end the Pack section with the guide's routing line, for Claude and inside Codex's TOML string", () => {
+  it("should end the Pack section with the routing prompt's line, for Claude and inside Codex's TOML string", () => {
     // Arrange
-    const line = 'Routing: plan-review → claude-opus-5-5 max; bulk → glm-5-air low.';
+    const line =
+      'Routing: Planning and review: claude-opus-5-5 at max. Chores: claude-haiku-5-5 low; when it is low, glm-5-air.';
     const claude = render(account({ flags: [`--append-system-prompt=${BASE}`] }));
     const codex = render(account({ kind: 'codex', flags: ['-c', `developer_instructions="${BASE}"`] }));
 
@@ -861,9 +862,11 @@ describe('the appended system prompt of a real agent runtime, for every combinat
       lessons: LESSONS_INSTRUCTION('fy').length,
     };
 
-    // Assert — the whole prompt, every section on and the longest routing line, stays under 5.25 KB
-    // (docs/pack-mode.md records the sizes)
-    should(Object.values(sizes).reduce((sum, size) => sum + size, 0) + 1 + MAX_ROUTING_SHORT_CHARS).be.below(5_376);
+    // Assert — the whole prompt, every section on and the longest routing prompt as its one `Routing: ` line,
+    // stays under 6.25 KB (docs/pack-mode.md records the sizes)
+    const longestRouting = 1 + 'Routing: '.length + MAX_ROUTING_PROMPT_CHARS;
+    should(Object.values(sizes).reduce((sum, size) => sum + size, 0) + longestRouting).be.below(6_400);
+    should(sizes.pack).be.below(1_050);
     should(sizes.tools).be.below(1_100);
     should(sizes.settings).be.below(600);
     should(sizes.attention).be.below(700);

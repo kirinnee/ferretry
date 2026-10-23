@@ -114,8 +114,10 @@ export function registerNewCommand(
     .option('--since <duration>', SINCE_HELP, sinceArgument)
     .option('--model <model>', 'the model, as the runtime lists it')
     .option('--effort <level>', 'the reasoning effort')
-    .option('--auto', 'let Ferretry choose from the models guide (or Jev, when Jev decides)')
-    .option('--use-case <id>', 'with --auto: the models-guide use case to choose from')
+    .option(
+      '--auto',
+      'let Ferretry choose: the models the routing prompt names, in its order (or Jev, when Jev decides)',
+    )
     .option('--cwd <dir>', "its folder (defaults to its parent ferret's; a person's start runs here)")
     .option('--name <title>', 'its task title')
     .option('--allow-scratch', 'run it in a temporary or scratch folder anyway (refused otherwise)')

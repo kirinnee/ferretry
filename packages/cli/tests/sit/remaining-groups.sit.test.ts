@@ -179,14 +179,14 @@ describe(`remaining command groups (SIT, ${useInProcess ? 'in-process' : 'compil
     }
   });
 
-  it('mounts the models guide: show, and the generator (inventory, suggest, accept, undo, describe)', async () => {
+  it('mounts the routing prompt: show, and Clean up (inventory, clean-up, accept, undo)', async () => {
     // Act
     const actual = await cli(['guide', '--help']);
     const show = await cli(['guide', 'show', '--help']);
 
     // Assert
     should(actual.code).equal(0);
-    for (const sub of ['show', 'inventory', 'suggest', 'accept', 'undo', 'describe'])
+    for (const sub of ['show', 'inventory', 'clean-up', 'accept', 'undo'])
       should(actual.out).match(new RegExp(`^\\s+${sub}\\b`, 'mu'));
     should(show.code).equal(0);
     should(show.out).containEql('--json');

@@ -357,7 +357,7 @@ export const CONFIG_FILE_STARTERS: Readonly<Record<ConfigSchemaId, string>> = {
   learning: '# Lessons. Every setting is optional.\nenabled: true\n',
   pack: '# Pack mode: ferrets delegate to sub-ferrets (docs/pack-mode.md). Every setting is optional.\nenabled: true\ndecision: agent\n',
   modelsGuide:
-    '# The models guide (docs/pack-mode.md): use cases, and the models that suit each, best first.\n# Leave useCases out to use the guide built from the model catalogs.\nuseCases:\n  - id: everyday\n    title: Everyday coding\n    description: Ordinary features and fixes.\n    candidates:\n      - provider: anthropic\n        model: claude-sonnet-5-5\n        why: Strong and fast for everyday work.\n',
+    '# The routing prompt (docs/pack-mode.md): which model runs which kind of sub-task, in plain words.\n# Leave prompt out to use the one built from the model catalogs.\nprompt: |\n  Planning and review: claude-opus-5-5 at max. Everyday coding: claude-sonnet-5-5.\n  Chores and bulk edits: claude-haiku-5-5 at low. Prefer a login with quota left.\n',
   voice:
     '# Voice. Transcription is chosen on each device (Settings › Voice); this picks who cleans up the text.\npostProcessing:\n  provider: "off"\n',
   preset:

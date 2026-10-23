@@ -12,7 +12,8 @@
  *   - "Sub-ferret not started" — the refusal's code and message, every candidate tried, and whether the
  *     ferret tried again (the next start is a card of its own, below).
  *   - "Waited for :name" — a wait whose start is not in this transcript.
- *   - "Asked which model suits" — the task and the ranked models (folded).
+ *   - "Asked which model suits" — the task, the routing prompt in effect (folded) and the models usable here
+ *     now, with what the prompt names and what quota they have left (folded).
  *
  * The call it came from is one tap away under "Show command", as on "Sent to" (`pack-calls.ts` reads it).
  */
@@ -321,27 +322,51 @@ function WaitCard({ call }: { readonly call: PackWaitCall }) {
   );
 }
 
+/** 1 → "1st", 2 → "2nd", 11 → "11th": where the routing prompt first names a model (as the CLI says it). */
+const ordinal = (n: number): string => {
+  const teen = n % 100 >= 11 && n % 100 <= 13;
+  const suffix = teen ? 'th' : ({ 1: 'st', 2: 'nd', 3: 'rd' } as Record<number, string>)[n % 10];
+  return `${String(n)}${suffix ?? 'th'}`;
+};
+
+/** The routing prompt in effect, folded to its first line, and where it came from. */
+function RoutingPrompt({ advice }: { readonly advice: PackAdvice }) {
+  const surface = useReferenceSurface();
+  return (
+    <Fold label="Routing prompt" preview={firstLine(advice.routing)}>
+      {advice.source === undefined ? null : <p className="fy-pack-muted fy-pack-line">{advice.source}</p>}
+      <Markdown text={advice.routing} {...surface} />
+    </Fold>
+  );
+}
+
 function AdviceList({ advice }: { readonly advice: PackAdvice }) {
   return (
     <>
-      <p className="fy-pack-muted fy-pack-line">Use case: {advice.useCase}</p>
-      <ol className="fy-pack-options" data-pack-options="">
-        {advice.options.map(choice => (
-          <li data-pack-ready={choice.ready ? 'true' : 'false'} key={`${String(choice.rank)}:${choice.model}`}>
+      <ul className="fy-pack-options" data-pack-options="">
+        {advice.options.map((choice, index) => (
+          <li data-pack-ready={choice.ready ? 'true' : 'false'} key={`${String(index)}:${choice.id}:${choice.runtime}`}>
             <span className="fy-pack-option-head">
               <span className="fy-pack-mono">{choice.model}</span>
               <span className={choice.ready ? 'fy-pack-ready' : 'fy-pack-cannot'}>
                 {choice.ready ? 'ready' : 'cannot run'}
               </span>
             </span>
-            {choice.runtime === undefined && choice.effort === undefined ? null : (
-              <span className="fy-pack-muted fy-pack-mono"> {runsOn(choice.runtime, undefined, choice.effort)}</span>
+            <span className="fy-pack-muted fy-pack-mono"> {runsOn(choice.runtime, choice.id, choice.effort)}</span>
+            {choice.named === undefined && choice.quota === undefined ? null : (
+              <span className="fy-pack-option-why">
+                {[
+                  choice.named === undefined ? undefined : `named ${ordinal(choice.named)} in the prompt`,
+                  choice.quota === undefined ? undefined : `quota ${choice.quota}`,
+                ]
+                  .filter(Boolean)
+                  .join(' · ')}
+              </span>
             )}
-            {choice.why === undefined ? null : <span className="fy-pack-option-why">{choice.why}</span>}
             {choice.refusal === undefined ? null : <span className="fy-pack-refusal">{choice.refusal}</span>}
           </li>
         ))}
-      </ol>
+      </ul>
       {advice.next === undefined ? <p className="fy-pack-muted fy-pack-line">Nothing can run it here now.</p> : null}
     </>
   );
@@ -362,12 +387,15 @@ function RecommendCard({ call }: { readonly call: PackRecommendCall }) {
         <p className="fy-pack-muted fy-pack-line">Its answer was not recognised — see the command.</p>
       ) : null}
       {progress.state === 'done' ? (
-        <Fold
-          label={`${String(progress.value.options.length)} models, ${String(ready)} ready`}
-          preview={progress.value.options[0]?.model ?? ''}
-        >
-          <AdviceList advice={progress.value} />
-        </Fold>
+        <>
+          <RoutingPrompt advice={progress.value} />
+          <Fold
+            label={`${String(progress.value.options.length)} models, ${String(ready)} ready`}
+            preview={progress.value.options[0]?.model ?? ''}
+          >
+            <AdviceList advice={progress.value} />
+          </Fold>
+        </>
       ) : null}
     </>
   );
