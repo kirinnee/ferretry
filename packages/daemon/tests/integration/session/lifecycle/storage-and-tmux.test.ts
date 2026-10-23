@@ -1619,7 +1619,13 @@ describe('TmuxSessionLifecycleLauncher launch instructions', () => {
     const launched = await subject.launch(record('told-session', { mode: 'interactive' }));
 
     // Assert
-    should(launched?.sections.map(section => section.id)).deepEqual(['tools', 'settings', 'hypermedia', 'pack']);
+    should(launched?.sections.map(section => section.id)).deepEqual([
+      'tools',
+      'settings',
+      'attention',
+      'hypermedia',
+      'pack',
+    ]);
     should(launched?.sections.every(section => section.chars > 0)).be.true();
     should(launched?.mode).equal('interactive');
     should(launched?.questions).be.true();
@@ -1635,7 +1641,7 @@ describe('TmuxSessionLifecycleLauncher launch instructions', () => {
     const launched = await subject.launch(record('worker-session'));
 
     // Assert
-    should(launched?.sections.map(section => section.id)).deepEqual(['tools', 'settings', 'hypermedia']);
+    should(launched?.sections.map(section => section.id)).deepEqual(['tools', 'settings', 'attention', 'hypermedia']);
     should(launched?.questions).be.false();
   });
 

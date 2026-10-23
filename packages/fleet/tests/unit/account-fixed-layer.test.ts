@@ -3,6 +3,7 @@ import should from 'should';
 import {
   AGENT_INSTRUCTION,
   AGENT_TOOLS_INSTRUCTION,
+  ATTENTION_INSTRUCTION,
   applyFixedLayer,
   CLAUDE_NO_QUESTIONS_FLAG,
   CLAUDE_PROMPTS_SEEN,
@@ -662,6 +663,40 @@ describe('Pack mode teaching', () => {
   });
 });
 
+describe('ATTENTION_INSTRUCTION', () => {
+  it('should teach raising a rich item, never for progress, the answer message, and resolving, with the binary name given', () => {
+    // Act
+    const text = ATTENTION_INSTRUCTION('zz');
+
+    // Assert
+    should(text).startWith('Attention: when you need the human to decide or do something');
+    should(text).containEql('`zz attention add "<ask>"`');
+    should(text).containEql('Ask first, in one line.');
+    should(text).containEql('`--context "<what you are doing and why you need this>"`');
+    should(text).containEql('`--kind choice --option "<label>"`');
+    should(text).containEql('Never for progress updates or because you finished.');
+    should(text).containEql('"[answer to !A3 …]"');
+    should(text).containEql('`!A3`');
+    should(text).containEql('`zz attention done <id>`');
+    should(text).not.containEql('notify');
+    should(text).not.containEql('fy ');
+  });
+
+  it('should stay short: it is in every prompt', () => {
+    // Assert
+    should(ATTENTION_INSTRUCTION('fy').length).be.below(700);
+  });
+
+  it('should ride in the always-on instruction after the settings rules, not behind a switch', () => {
+    // Assert
+    should(AGENT_INSTRUCTION('fy')).endWith(`\n\n${ATTENTION_INSTRUCTION('fy')}`);
+    should(AGENT_INSTRUCTION('fy').indexOf(SET_UP_FERRETRY_INSTRUCTION('fy'))).be.below(
+      AGENT_INSTRUCTION('fy').indexOf(ATTENTION_INSTRUCTION('fy')),
+    );
+    should(FERRET_SECTIONS('fy').map(section => section.id)).not.containEql('attention');
+  });
+});
+
 describe('launchInstructions', () => {
   it('should name every section the wrapper would compose for an interactive ferret, with each size, and leave its question tool in', () => {
     // Arrange
@@ -681,6 +716,7 @@ describe('launchInstructions', () => {
       sections: [
         { id: 'tools', chars: AGENT_TOOLS_INSTRUCTION.length },
         { id: 'settings', chars: SET_UP_FERRETRY_INSTRUCTION(binary).length },
+        { id: 'attention', chars: ATTENTION_INSTRUCTION(binary).length },
         { id: 'hypermedia', chars: HYPERMEDIA_INSTRUCTION.length },
         { id: 'pack', chars: PACK_INSTRUCTION(binary).length },
         { id: 'learning', chars: LESSONS_INSTRUCTION(binary).length },
@@ -702,8 +738,26 @@ describe('launchInstructions', () => {
     should(on.sections.find(section => section.id === 'pack')?.chars).equal(
       PACK_INSTRUCTION('fy').length + 1 + line.length,
     );
-    should(off.sections.map(section => section.id)).deepEqual(['tools', 'settings']);
+    should(off.sections.map(section => section.id)).deepEqual(['tools', 'settings', 'attention']);
   });
+
+  it.each([
+    ['interactive', { [SESSION_MODE_ENV]: 'interactive' }],
+    ['auto', { [SESSION_MODE_ENV]: 'auto' }],
+    ['unset', {}],
+    ['every switch on', { [HYPERMEDIA_ENV]: '1', [PACK_ENV]: '1', [PASSIVE_LEARNING_ENV]: '1' }],
+    ['every switch off', { [HYPERMEDIA_ENV]: '0', [PACK_ENV]: '0', [PASSIVE_LEARNING_ENV]: '0' }],
+  ])(
+    'should report the attention section, between settings and the per-ferret sections, for a %s launch',
+    (_name, env) => {
+      // Act
+      const ids = launchInstructions('fy', env).sections.map(section => section.id);
+
+      // Assert
+      should(ids.slice(0, 3)).deepEqual(['tools', 'settings', 'attention']);
+      should(launchInstructions('fy', env).sections[2]?.chars).equal(ATTENTION_INSTRUCTION('fy').length);
+    },
+  );
 
   it('should carry only the always-on sections, and withhold questions, for a launch with no mode and no switch exactly 1', () => {
     // Arrange
@@ -713,7 +767,7 @@ describe('launchInstructions', () => {
     const launched = launchInstructions('fy', env);
 
     // Assert
-    should(launched.sections.map(section => section.id)).deepEqual(['tools', 'settings']);
+    should(launched.sections.map(section => section.id)).deepEqual(['tools', 'settings', 'attention']);
     should(launched.mode).equal('auto');
     should(launched.questions).be.false();
   });
