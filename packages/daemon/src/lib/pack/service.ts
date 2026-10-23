@@ -144,11 +144,6 @@ export class PackService {
     return { config: settings.config, routing, models, available };
   }
 
-  /** The routing prompt in effect. */
-  async routing(): Promise<RoutingPromptView> {
-    return (await this.snapshot()).routing;
-  }
-
   /** The default routing prompt, rendered from the catalogs in effect, whatever the file says. */
   async defaultPrompt(): Promise<string> {
     const [catalogs, facts] = await Promise.all([this.ports.catalogs(), this.ports.facts()]);
