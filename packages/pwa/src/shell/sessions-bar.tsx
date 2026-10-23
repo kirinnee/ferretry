@@ -6,9 +6,15 @@
  *
  *   - the machine this page belongs to, which is also the machine switcher, and ＋ for a new session;
  *   - ONE search: the finder (⌘K) everywhere, or this session's own file search on a session page;
+ *   - ATTENTION, a door to the inbox with the open-item count as an accent badge (always reachable, calm
+ *     at zero) — given by the host as `attentionHref` and `attentionTotal`, so it is the count across
+ *     EVERY machine;
  *   - Interactive · All · Agents, each with the count choosing it would show, and "Show stopped";
- *   - EVERY live session, grouped by project, each a status dot, the agent's name, a "needs you" badge, a
- *     line of what it is doing and the directory it runs in — the open one is a soft filled pill;
+ *   - "Needs you" first: every session with open Attention, newest first, each bold with an accent count
+ *     badge that opens the conversation at the item (see `sessions-bar-model.ts` for how that relates to the
+ *     quieter "waiting" word);
+ *   - EVERY live session, grouped by project, each a status dot, the agent's name, a line of what it is doing
+ *     and the directory it runs in — the open one is a soft filled pill;
  *   - Projects, Insights (Analytics, Warden, Learning) and Settings, at the bottom.
  *
  * THREE PRESENTATIONS, ONE CONTENT. A desktop column — expanded by default at every width above a phone,
@@ -27,7 +33,6 @@ import { RailDivider } from '../features/workspace/split-divider.tsx';
 import { useDialogFocus } from '../hooks/use-dialog-focus.ts';
 import { useInputModality } from '../hooks/use-input-modality.ts';
 import { allMachinesView, type MachineSource } from '../lib/all-machines.ts';
-import { displayCallsign } from '../lib/callsign.ts';
 import { cn } from '../lib/class-names.ts';
 import type { Density, ModeFilter } from '../lib/controls.ts';
 import type { DaemonId } from '../lib/daemon-connection.ts';
@@ -36,7 +41,6 @@ import {
   daemonAnalyticsPath,
   daemonNewSessionPath,
   daemonProjectsPath,
-  daemonSessionPath,
   daemonSessionsPath,
   daemonSettingsPath,
 } from '../lib/pages/routes.ts';
@@ -48,21 +52,20 @@ import { PALETTE_KEYSHORTCUTS, paletteShortcutLabel } from './palette-shortcut.t
 import { RouteLink } from './route-link.tsx';
 import { type OpenRowMenu, SessionMenuContext, type SessionMenuState } from './session-menu-context.ts';
 import { SessionsBarOptions } from './sessions-bar-density.tsx';
+import { SessionsBarAttention } from './sessions-bar-attention.tsx';
 import { SessionsBarFilters, sessionsBarEmptyMessage } from './sessions-bar-filters.tsx';
+import { SessionsRailDot } from './sessions-bar-dot.tsx';
 import { SessionsBarMachines, SessionsRailMachineDots } from './sessions-bar-machines.tsx';
-import {
-  DEFAULT_LIST_FILTER,
-  type SessionsListFilter,
-  sessionsBarSubline,
-  sessionsBarView,
-  sidebarCompact,
-} from './sessions-bar-model.ts';
+import { DEFAULT_LIST_FILTER, type SessionsListFilter, sessionsBarView, sidebarCompact } from './sessions-bar-model.ts';
+import { SessionsBarNeedsYou } from './sessions-bar-needs-you.tsx';
 import { sessionTree } from './sessions-bar-tree.ts';
 import { SessionsBarTree } from './sessions-bar-tree.tsx';
-import { StatusMark } from './status-mark.tsx';
 
-/** The places at the foot of the bar. Insights is Analytics, Warden and Learning together. */
-export type SessionsBarPlace = 'sessions' | 'projects' | 'insights' | 'settings';
+/**
+ * The places the bar marks as current. Insights is Analytics, Warden and Learning together; Attention is
+ * the inbox, whose door sits under the search rather than at the foot.
+ */
+export type SessionsBarPlace = 'sessions' | 'attention' | 'projects' | 'insights' | 'settings';
 
 export const SESSIONS_BAR_PLACES = [
   { id: 'projects', label: 'Projects', path: daemonProjectsPath, Icon: FolderKanban },
@@ -98,8 +101,15 @@ export interface SessionsBarProps {
   readonly projects: readonly FleetProject[];
   /** The session on screen, if the page is a session. */
   readonly activeSessionId: string | null;
-  /** The foot place the page belongs to, if any. */
+  /** The place the page belongs to, if any. Pass `'attention'` on the inbox page. */
   readonly active: SessionsBarPlace | null;
+  /**
+   * Open Attention items across EVERY paired machine: the badge on the bar's Attention entry. Absent
+   * is zero. The entry is drawn only when `attentionHref` is given too.
+   */
+  readonly attentionTotal?: number;
+  /** Where the Attention entry goes (the inbox route). Absent: the bar draws no such entry. */
+  readonly attentionHref?: string;
   readonly presentation: SessionsBarPresentation;
   readonly onNavigate: (to: string) => void;
   /** Opens the finder. */
@@ -364,6 +374,17 @@ function SessionsBarBody(props: SessionsBarProps & ListFilterProps & { readonly 
           </>
         )}
       </div>
+      {props.attentionHref === undefined ? null : (
+        <div className="fy-sbar__attention-slot">
+          <SessionsBarAttention
+            current={active === 'attention'}
+            href={props.attentionHref}
+            onNavigate={navigate}
+            rail={false}
+            total={props.attentionTotal ?? 0}
+          />
+        </div>
+      )}
       <SessionsBarFilters
         counts={counts}
         filter={listFilter}
@@ -394,7 +415,7 @@ function SessionsBarBody(props: SessionsBarProps & ListFilterProps & { readonly 
           <p className="fy-sbar__empty" role="status">
             Reading sessions…
           </p>
-        ) : view.groups.length === 0 ? (
+        ) : view.groups.length === 0 && view.needsYou.length === 0 ? (
           <div className="fy-sbar__empty">
             <p className="m-0">
               {listFilter.mode === 'all' && props.createRuntimeHref !== undefined
@@ -414,22 +435,30 @@ function SessionsBarBody(props: SessionsBarProps & ListFilterProps & { readonly 
             )}
           </div>
         ) : (
-          view.groups.map(group => (
-            <section aria-label={group.name} className="fy-sbar__group" key={group.path || group.name}>
-              <h2 className="fy-sbar__project">
-                <span className="truncate">{group.name}</span>
-                <span className="fy-sbar__count">{group.rows.length}</span>
-              </h2>
-              <SessionsBarTree
-                activeSessionId={activeSessionId}
-                daemonId={daemonId}
-                entries={sessionTree(group.rows, sessions ?? [])}
-                isActive={row => row.config.id === activeSessionId}
-                learns={row => props.learningPassive?.has(row.config.id) === true}
-                onNavigate={navigate}
-              />
-            </section>
-          ))
+          <>
+            <SessionsBarNeedsYou
+              isActive={row => row.view.config.id === activeSessionId}
+              learns={row => props.learningPassive?.has(row.view.config.id) === true}
+              onNavigate={navigate}
+              rows={view.needsYou.map(row => ({ daemonId, view: row }))}
+            />
+            {view.groups.map(group => (
+              <section aria-label={group.name} className="fy-sbar__group" key={group.path || group.name}>
+                <h2 className="fy-sbar__project">
+                  <span className="truncate">{group.name}</span>
+                  <span className="fy-sbar__count">{group.rows.length}</span>
+                </h2>
+                <SessionsBarTree
+                  activeSessionId={activeSessionId}
+                  daemonId={daemonId}
+                  entries={sessionTree(group.rows, sessions ?? [])}
+                  isActive={row => row.config.id === activeSessionId}
+                  learns={row => props.learningPassive?.has(row.config.id) === true}
+                  onNavigate={navigate}
+                />
+              </section>
+            ))}
+          </>
         )}
       </div>
       <nav aria-label="App" className="fy-sbar__foot">
@@ -547,6 +576,15 @@ function SessionsRail(props: SessionsBarProps & ListFilterProps) {
       )}
       <NewSessionControl marked={false} navigate={onNavigate} props={props} />
       <FindButton iconOnly onOpen={props.onOpenPalette} shortcut />
+      {props.attentionHref === undefined ? null : (
+        <SessionsBarAttention
+          current={active === 'attention'}
+          href={props.attentionHref}
+          onNavigate={onNavigate}
+          rail
+          total={props.attentionTotal ?? 0}
+        />
+      )}
       <ul className="fy-sbar__list fy-sbar__dots scroll-thin">
         {machineView !== null ? (
           <SessionsRailMachineDots
@@ -556,25 +594,17 @@ function SessionsRail(props: SessionsBarProps & ListFilterProps) {
             view={machineView}
           />
         ) : (
-          view.groups.flatMap(group =>
-            group.rows.map(row => {
-              const name = displayCallsign(row.config.teammate) || row.config.label || row.config.id;
-              return (
-                <li key={row.config.id}>
-                  <RouteLink
-                    aria-current={row.config.id === activeSessionId ? 'page' : undefined}
-                    aria-label={name}
-                    className="fy-sbar__dot"
-                    onNavigate={onNavigate}
-                    title={`${name} — ${sessionsBarSubline(row)}`}
-                    to={daemonSessionPath(daemonId, row.config.id)}
-                  >
-                    <StatusMark view={row} />
-                  </RouteLink>
-                </li>
-              );
-            }),
-          )
+          // Unread dots lead (`view.needsYou`), then the project groups' sessions.
+          [...view.needsYou, ...view.groups.flatMap(group => group.rows)].map(row => (
+            <li key={row.config.id}>
+              <SessionsRailDot
+                active={row.config.id === activeSessionId}
+                daemonId={daemonId}
+                onNavigate={onNavigate}
+                view={row}
+              />
+            </li>
+          ))
         )}
       </ul>
       <div className="fy-sbar__foot fy-sbar__foot--rail">

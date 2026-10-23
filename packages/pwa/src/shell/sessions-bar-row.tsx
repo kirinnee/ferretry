@@ -4,10 +4,17 @@
  *
  * Right-click, long-press, the Menu key and Shift+F10 open the bar's one row menu (`SessionMenuContext`).
  *
- * The mark on the right is the row's one exception: "needs you", else the switch marks — the graduation cap of a ferret
+ * UNREAD. A session with open Attention (`state.attention`) reads like an unread chat: its name is bold,
+ * an accent count badge sits on the right, and the row's link opens the conversation AT the first open
+ * item (`?attention=A3`). The WHOLE row links there rather than the badge alone — an anchor cannot hold
+ * a button, and one big target is the better thing to hit on a phone. The badge's number is spoken as
+ * "3 open Attention items" in the row's name, and it goes only when the items resolve.
+ *
+ * The mark on the right is the row's one exception: the unread badge, else a quiet "waiting" for a
+ * ferret parked on a person, else the switch marks — the graduation cap of a ferret
  * that learns, then Hypermedia and Pack mode while each is on (`switch-marks.tsx`) — or,
- * inside the all-machines Needs you group, the machine's name, because every row there needs you and
- * nothing else on the line says where it runs.
+ * inside the all-machines Needs you group, the machine's name (beside the badge, when there is one),
+ * because every row there needs you and nothing else on the line says where it runs.
  */
 
 import type { SessionView } from '@ferretry/protocol';
@@ -15,13 +22,21 @@ import { type ReactNode, useContext, useState } from 'react';
 import { hypermediaOn, packOn } from '../features/session-info/info-model.ts';
 import { SwitchMarks } from '../features/session-info/switch-marks.tsx';
 import type { DaemonId } from '../lib/daemon-connection.ts';
-import { daemonSessionPath } from '../lib/pages/routes.ts';
+import { unreadCount } from '../lib/attention-inbox.ts';
 import { MachineChip } from './machine-chip.tsx';
 import { RouteLink } from './route-link.tsx';
 import { useRowContextGesture } from './row-context-gesture.ts';
 import { SessionMenuContext } from './session-menu-context.ts';
-import { needsYou, pendingQuestionPreview, sessionsBarDirectory, sessionsBarNames } from './sessions-bar-model.ts';
+import {
+  attentionWords,
+  needsYou,
+  rowPreview,
+  sessionRowPath,
+  sessionsBarDirectory,
+  sessionsBarNames,
+} from './sessions-bar-model.ts';
 import { StatusMark } from './status-mark.tsx';
+import { UnreadBadge } from './unread-badge.tsx';
 
 export function SessionsBarRow({
   view,
@@ -49,7 +64,8 @@ export function SessionsBarRow({
   const { title: name, ferret } = sessionsBarNames(view);
   const waiting = needsYou(view);
   const directory = sessionsBarDirectory(view);
-  const question = pendingQuestionPreview(view);
+  const unread = unreadCount(view);
+  const preview = rowPreview(view);
   const openMenu = useContext(SessionMenuContext);
   const [pressing, setPressing] = useState(false);
   const gesture = useRowContextGesture<SessionView>(
@@ -65,25 +81,35 @@ export function SessionsBarRow({
         aria-haspopup={gesture === undefined ? undefined : 'menu'}
         data-sbar-pressing={pressing ? '' : undefined}
         data-sbar-session={view.config.id}
+        data-sbar-unread={unread > 0 ? '' : undefined}
         onNavigate={onNavigate}
         {...gesture}
-        title={`${name}${ferret === null ? '' : ` — ${ferret}`}${question === undefined ? '' : `\n${question}`}\n${view.config.cwd}`}
-        to={daemonSessionPath(daemonId, view.config.id)}
+        title={`${name}${ferret === null ? '' : ` — ${ferret}`}${unread > 0 ? `\n${attentionWords(unread)}` : ''}${preview === undefined ? '' : `\n${preview.text}`}\n${view.config.cwd}`}
+        to={sessionRowPath(daemonId, view)}
       >
         <StatusMark view={view} />
         <span className="fy-sbar__name">{name}</span>
-        {machine !== undefined ? (
+        {unread > 0 ? (
+          <span className="fy-sbar__marks">
+            {machine === undefined ? null : <MachineChip name={machine} />}
+            <UnreadBadge count={unread} />
+          </span>
+        ) : machine !== undefined ? (
           <MachineChip name={machine} />
         ) : waiting ? (
-          <span className="fy-sbar__badge" data-sbar-needs-you="">
-            needs you
+          <span className="fy-sbar__badge" data-sbar-waiting="">
+            waiting
           </span>
         ) : (
           <SwitchMarks hypermedia={hypermediaOn(view)} learning={learningPassive} pack={packOn(view)} />
         )}
-        {question === undefined ? null : (
-          <span className="fy-sbar__question" data-sbar-question="">
-            {question}
+        {preview === undefined ? null : (
+          <span
+            className="fy-sbar__question"
+            data-sbar-ask={preview.kind === 'attention' ? '' : undefined}
+            data-sbar-question=""
+          >
+            {preview.text}
           </span>
         )}
         {/* One wrapper so a compact bar can fold the ferret and the directory into the open row's

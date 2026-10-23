@@ -18,7 +18,7 @@
 
 import type { SessionView, WardenStatusView } from '@ferretry/protocol';
 import { FolderGit2, Folders, LayoutGrid, Plus, Rows3 } from 'lucide-react';
-import { useId } from 'react';
+import { useId, useMemo } from 'react';
 import { WardenStrip } from '../features/warden/warden-strip.tsx';
 import {
   type WardenReportRequest,
@@ -43,11 +43,12 @@ import { RouteLink } from '../shell/route-link.tsx';
 import { ViewTabs } from '../shell/view-tabs.tsx';
 import { CacheUpdating } from './cache-updating.tsx';
 import { MachineStatusRow } from './machine-status.tsx';
-import { FullDensityGroups, LeanDensityGroups } from './session-dashboard-groups.tsx';
+import { FullDensityGroups, LeanDensityGroups, NeedsYouGroup } from './session-dashboard-groups.tsx';
 import { AllMachinesGroups } from './session-dashboard-machines.tsx';
 import {
   dashboardEmptyMessage,
   dashboardMode,
+  pullDashboardNeedsYou,
   SCOPE_RECOVERY_MESSAGE,
   sessionCountLabel,
 } from './session-dashboard-model.ts';
@@ -168,6 +169,8 @@ export function SessionDashboard({
     allMachines === undefined
       ? groups.reduce((count, group) => count + group.rows.length, 0)
       : allMachinesShown(allMachines);
+  // Sessions with open Attention lead the page, lifted out of their folders; the rest keep their groups.
+  const lifted = useMemo(() => pullDashboardNeedsYou(groups), [groups]);
   const totalCount = allMachines?.total ?? sessions?.length ?? 0;
   // Across machines the list is "read" once any machine has answered; one machine at a time, once it has.
   const read = allMachines === undefined ? sessions !== null : allMachines.loaded;
@@ -329,30 +332,43 @@ export function SessionDashboard({
           </div>
         ) : null}
         {allMachines === undefined && sessions !== null && visibleCount > 0 ? (
-          density === 'full' ? (
-            <FullDensityGroups
-              daemonId={connection.daemonId}
-              groups={groups}
-              mode={mode}
-              now={now}
-              onFocus={onEnterScope}
-              onNavigate={onNavigate}
-              scoped={scope !== null}
-              usage={usage}
+          <div className="fy-session-groups">
+            <NeedsYouGroup
               accounts={accounts}
-            />
-          ) : (
-            <LeanDensityGroups
               daemonId={connection.daemonId}
               density={density}
-              groups={groups}
               mode={mode}
               now={now}
               onFocus={onEnterScope}
               onNavigate={onNavigate}
-              scoped={scope !== null}
+              rows={lifted.needsYou}
+              usage={usage}
             />
-          )
+            {density === 'full' ? (
+              <FullDensityGroups
+                daemonId={connection.daemonId}
+                groups={lifted.groups}
+                mode={mode}
+                now={now}
+                onFocus={onEnterScope}
+                onNavigate={onNavigate}
+                scoped={scope !== null}
+                usage={usage}
+                accounts={accounts}
+              />
+            ) : (
+              <LeanDensityGroups
+                daemonId={connection.daemonId}
+                density={density}
+                groups={lifted.groups}
+                mode={mode}
+                now={now}
+                onFocus={onEnterScope}
+                onNavigate={onNavigate}
+                scoped={scope !== null}
+              />
+            )}
+          </div>
         ) : null}
       </div>
     </main>

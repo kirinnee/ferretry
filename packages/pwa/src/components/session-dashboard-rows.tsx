@@ -12,12 +12,12 @@ import { Activity, Bot, FolderGit2, Sparkles } from 'lucide-react';
 import { memo, type ReactNode } from 'react';
 import { TaskName } from '../features/tasks/task-name.tsx';
 import type { PickerAccount } from '../lib/account-picker-catalog.ts';
+import { unreadCount } from '../lib/attention-inbox.ts';
 import { displayCallsign } from '../lib/callsign.ts';
 import { cn } from '../lib/class-names.ts';
 import type { Density } from '../lib/controls.ts';
 import type { DaemonId } from '../lib/daemon-connection.ts';
 import type { SessionGroup } from '../lib/fleet-grouping.ts';
-import { daemonSessionPath } from '../lib/pages/routes.ts';
 import { absoluteTime } from '../lib/session-screens.ts';
 import type { SessionQuotaResolver } from '../lib/usage.ts';
 import { MachineChip } from '../shell/machine-chip.tsx';
@@ -26,8 +26,9 @@ import { Badge } from '../shell/primitives.tsx';
 import { QuotaReadout } from '../shell/quota-readout.tsx';
 import { RcBadge } from '../shell/rc-badge.tsx';
 import { RouteLink } from '../shell/route-link.tsx';
-import { pendingQuestionPreview } from '../shell/sessions-bar-model.ts';
+import { hasAttention, rowPreview, sessionRowPath } from '../shell/sessions-bar-model.ts';
 import { nameToneClass, StatusMark } from '../shell/status-mark.tsx';
+import { UnreadBadge } from '../shell/unread-badge.tsx';
 import { sessionAccountLabel } from './daemon-picker-model.ts';
 import {
   activityLine,
@@ -160,7 +161,20 @@ export function ContextMeter({ value }: { readonly value: number }) {
   );
 }
 
-const sessionHref = (daemonId: DaemonId, view: SessionView): string => daemonSessionPath(daemonId, view.config.id);
+/**
+ * Where a row opens: the conversation, AT the first open Attention item when the session has some. The
+ * whole row (card) or the name cell (table) is the one link; an anchor cannot hold a button, so there is
+ * no second target to answer from — the answer lives on the page this opens.
+ */
+const sessionHref = sessionRowPath;
+
+/** The font weight of a session's name: bolder while it has open Attention, the way an unread chat is. */
+const nameWeight = (view: SessionView): string => (hasAttention(view) ? 'font-bold' : 'font-semibold');
+
+/** The accent count pill, or nothing: its sr-only words are the row link's "N open Attention items". */
+function Unread({ view, className }: { readonly view: SessionView; readonly className?: string }) {
+  return hasAttention(view) ? <UnreadBadge className={className} count={unreadCount(view)} /> : null;
+}
 
 /** Full-density fixed-table leaf. The parent supplies the six-column table only. */
 export const SessionRow = memo(function SessionRow({
@@ -176,11 +190,14 @@ export const SessionRow = memo(function SessionRow({
   const quota = usage?.quotaFor(daemonId, view) ?? null;
   const href = sessionHref(daemonId, view);
   return (
-    <tr className="kt-row group">
+    <tr className="kt-row group" {...(hasAttention(view) ? { 'data-session-unread': '' } : {})}>
       <td>
         <RouteLink to={href} onNavigate={onNavigate} className="block min-w-0" title={cfg.id}>
-          <div className="truncate text-row font-semibold text-fg group-hover:text-accent">
-            {displayCallsign(cfg.teammate) || cfg.id}
+          <div className="flex min-w-0 items-center gap-sm">
+            <span className={cn('min-w-0 truncate text-row text-fg group-hover:text-accent', nameWeight(view))}>
+              {displayCallsign(cfg.teammate) || cfg.id}
+            </span>
+            <Unread view={view} />
           </div>
           <div className="kt-chrome mono flex min-w-0 items-baseline gap-xs">
             <span className="truncate">{cfg.id}</span>
@@ -246,17 +263,18 @@ export const SessionRow = memo(function SessionRow({
 export const LeanSessionRow = memo(function LeanSessionRow({ view, density, daemonId, onNavigate }: LeanSessionProps) {
   const cfg = view.config;
   return (
-    <tr className="kt-row group">
+    <tr className="kt-row group" {...(hasAttention(view) ? { 'data-session-unread': '' } : {})}>
       <td>
         <RouteLink
           to={sessionHref(daemonId, view)}
           onNavigate={onNavigate}
-          className="flex min-w-0 items-center gap-sm text-row font-semibold"
+          className={cn('flex min-w-0 items-center gap-sm text-row', nameWeight(view))}
         >
           <StatusMark view={view} />
           <span className={cn('min-w-0 truncate group-hover:text-accent', nameToneClass(view))}>
             {displayCallsign(cfg.teammate) || cfg.id}
           </span>
+          <Unread view={view} />
         </RouteLink>
       </td>
       <td>
@@ -297,12 +315,14 @@ export const SessionCard = memo(function SessionCard({
       to={sessionHref(daemonId, view)}
       onNavigate={onNavigate}
       className="kt-panel group block min-w-0 max-w-full p-panel transition-colors hover:border-accent active:bg-surface-2"
+      {...(hasAttention(view) ? { 'data-session-unread': '' } : {})}
     >
       <div className="flex items-center gap-sm">
         <StatusMark view={view} />
-        <span className="min-w-0 truncate text-row font-semibold text-fg group-hover:text-accent">
+        <span className={cn('min-w-0 truncate text-row text-fg group-hover:text-accent', nameWeight(view))}>
           {displayCallsign(cfg.teammate) || cfg.id}
         </span>
+        <Unread view={view} />
         <span className="ml-auto" />
         <StatusWord status={state.status} />
       </div>
@@ -400,21 +420,25 @@ export const LeanSessionCard = memo(function LeanSessionCard({
   const cfg = view.config;
   const task = sessionTaskName(cfg);
   const preview = task === '' ? view.state.activity?.trim() : undefined;
-  const question = pendingQuestionPreview(view);
-  // A request for a human already says "you" louder than the word would.
-  const word = !statusHoisted && !view.state.waiting && !view.state.needsHuman;
+  const ask = rowPreview(view);
+  // A request for a human already says "you" louder than the word would. So does an unread count.
+  const word = !statusHoisted && !view.state.waiting && !view.state.needsHuman && !hasAttention(view);
   return (
     <RouteLink
       to={sessionHref(daemonId, view)}
       onNavigate={onNavigate}
       className="fy-dashboard-row group"
       data-session-row={cfg.id}
+      {...(hasAttention(view) ? { 'data-session-unread': '' } : {})}
     >
       <span className="flex min-w-0 items-center gap-sm">
         <StatusMark view={view} />
-        <span className={cn('min-w-0 truncate text-row font-semibold group-hover:text-accent', nameToneClass(view))}>
+        <span
+          className={cn('min-w-0 truncate text-row group-hover:text-accent', nameWeight(view), nameToneClass(view))}
+        >
           {displayCallsign(cfg.teammate) || cfg.id}
         </span>
+        <Unread view={view} />
         {density === 'compact' && (
           <span className="flex min-w-0 shrink-0 items-center gap-xs">
             {word && <StatusWord status={view.state.status} />}
@@ -439,9 +463,13 @@ export const LeanSessionCard = memo(function LeanSessionCard({
           {preview}
         </span>
       ) : null}
-      {question === undefined ? null : (
-        <span className="fy-dashboard-row__question truncate text-ui" data-session-question="" title={question}>
-          {question}
+      {ask === undefined ? null : (
+        <span
+          className="fy-dashboard-row__question truncate text-ui"
+          {...(ask.kind === 'attention' ? { 'data-session-ask': '' } : { 'data-session-question': '' })}
+          title={ask.text}
+        >
+          {ask.text}
         </span>
       )}
     </RouteLink>
