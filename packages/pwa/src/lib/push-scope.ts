@@ -25,6 +25,7 @@
 
 import type { PushNotificationPayload } from '@ferretry/protocol';
 import type { DaemonId } from './daemon-connection.ts';
+import { notificationBrand } from './notify.ts';
 import { daemonSessionsPath } from './pages/routes.ts';
 
 /** The path every per-machine push registration lives under. Never a page the app serves. */
@@ -115,14 +116,25 @@ export const unverifiedNotification = (payload: PushNotificationPayload, origin:
  * Where a notification click may go (docs/cross-daemon.md §4a, §4c): only this site, and — for a
  * machine's own worker — only that machine's pages. Anything else opens that machine's sessions, or
  * the app itself when the notification belongs to no machine.
+ *
+ * A daemon names a conversation RELATIVE TO ITS OWN PAGES — `/session/<id>?attention=A3`
+ * (`attentionNotificationPath`), since it never knows which name this browser files it under — so a
+ * machine's worker reads `/session/…` as under that machine. The app-wide worker knows no machine, and
+ * such a path falls through to the app itself.
  */
 export const notificationUrl = (raw: unknown, origin: string, machine: PushMachine | null): string => {
   const fallback = new URL(machine === null ? '/app/' : machinePath(machine), origin);
-  const target = typeof raw === 'string' ? URL.parse(raw, origin) : null;
+  const target = typeof raw === 'string' ? URL.parse(machineRelative(raw, machine), origin) : null;
   if (target === null || target.origin !== origin) return fallback.href;
   if (machine !== null && !withinMachine(target.pathname, machine)) return fallback.href;
   return target.href;
 };
+
+/** The page prefix a daemon names its own conversations by, relative to its machine's pages. */
+const SESSION_RELATIVE = '/session/';
+
+const machineRelative = (raw: string, machine: PushMachine | null): string =>
+  machine !== null && raw.startsWith(SESSION_RELATIVE) ? `${machinePath(machine)}${raw}` : raw;
 
 /** The fixed, per-machine tag every filtered push collapses into — see `filteredPushNotification`. */
 export const FILTERED_PUSH_TAG_PREFIX = 'fy-quiet:';
@@ -152,6 +164,7 @@ export const filteredPushNotification = (
 ): { readonly title: string; readonly options: NotificationOptions & { readonly renotify: boolean } } => ({
   title: `${machine === null ? UNVERIFIED : machine.label} · Notifications muted`,
   options: {
+    ...notificationBrand(),
     body: 'This device’s notification settings hid an update. Open the app to see what happened.',
     tag: `${FILTERED_PUSH_TAG_PREFIX}${machine === null ? 'app' : encodeURIComponent(machine.daemonId)}`,
     silent: true,

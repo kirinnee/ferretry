@@ -1,7 +1,10 @@
 import {
   type AttentionItem,
   type AttentionSnapshot,
+  attentionNotificationPath,
   type DirectNotificationRequest,
+  MAX_NOTIFICATION_BODY_LENGTH,
+  MAX_NOTIFICATION_TITLE_LENGTH,
   type PushNotificationPayload,
   PushNotificationPayloadSchema,
 } from '@ferretry/protocol';
@@ -144,23 +147,42 @@ export function directNotificationPayload(
   }) as SessionNotificationPayload;
 }
 
-/** Composes the automatic presentation of one newly created board item. */
+/**
+ * Composes the automatic presentation of one newly created board item: THE ONE PUSH A FERRET'S ASK
+ * MAKES (docs/attention.md). Waiting and finishing push nothing; this does.
+ *
+ * Titled with the ferret that asks — quoted, FIRST — and then the ask, so a lock screen alone says who
+ * wants what, and so an ask can never open with the daemon's own new-device alert title
+ * (`DEVICE_PAIRED_TITLE`): the ask is an agent's words, exactly as a direct notification's title is. The
+ * body is the context the ferret gave — what it is doing and why it needs this — falling back to its
+ * `why`, then the choices it offered. A tap opens that conversation at the item: the path is relative
+ * to the machine's own pages, which the browser's per-machine worker places under that machine.
+ */
 export function attentionNotificationPayload(
   sessionId: string,
+  sessionName: string,
   item: AttentionItem,
   snapshot: AttentionSnapshot,
 ): SessionNotificationPayload {
+  const context = item.context?.trim() || item.why;
+  const options =
+    item.ask?.kind === 'multiple-choice' ? `\n${item.ask.options.map(option => option.label).join(' · ')}` : '';
   return PushNotificationPayloadSchema.parse({
     version: 1,
-    eventKey: 'attention-raised',
+    eventKey: `attention-raised:${item.id}`,
     sessionId,
     kind: 'attention',
-    title: item.subject,
-    body: item.why,
+    title: clipped(`“${sessionName}”: ${item.subject}`, MAX_NOTIFICATION_TITLE_LENGTH),
+    body: clipped(`${context === item.subject ? '' : context}${options}`.trim(), MAX_NOTIFICATION_BODY_LENGTH),
     tag: `attention-${sessionId}`,
-    url: '/',
+    url: attentionNotificationPath(sessionId, item.id),
     count: snapshot.count,
   }) as SessionNotificationPayload;
+}
+
+/** One line of at most `limit` characters, ending in an ellipsis when it was cut. */
+function clipped(text: string, limit: number): string {
+  return text.length <= limit ? text : `${text.slice(0, limit - 1)}…`;
 }
 
 /** Server-derived attribution for a board item the daemon chose to announce. */

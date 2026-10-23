@@ -31,6 +31,21 @@ import type { NotificationSpec } from './notification-ledger.ts';
 export const NOTIFICATION_PAYLOAD_VERSION = 1;
 
 /**
+ * The Ferretry mark every notification carries, from the app's own committed icons: the full-colour
+ * icon beside the text, and the badge — the mono mark on transparent, which Android paints into the
+ * status bar from its alpha alone (`scripts/local/gen-pwa-icons.sh`). Same-origin paths, so a push
+ * never names an image service. Platforms without one of them (iOS has no badge) simply ignore it.
+ */
+export const NOTIFICATION_ICON = '/icons/icon-192.png';
+export const NOTIFICATION_BADGE = '/icons/badge-96.png';
+
+/** The mark, as notification options. */
+export const notificationBrand = (): { readonly icon: string; readonly badge: string } => ({
+  icon: NOTIFICATION_ICON,
+  badge: NOTIFICATION_BADGE,
+});
+
+/**
  * The OS-bound payload. It is deliberately a flat, transport-neutral record
  * rather than the `NotificationSpec` itself: a Web Push message crosses the
  * network as JSON and cannot carry the spec's `DaemonSessionScope` object, so
@@ -161,6 +176,7 @@ export const showGroupedNotification = async (
   const plan = planNotificationPresentation(payload, notifications.map(readData));
   if (plan.action === 'skip') return 'duplicate';
   const options: NotificationOptions & { renotify: boolean } = {
+    ...notificationBrand(),
     body: plan.body,
     tag: payload.tag,
     renotify: false,
@@ -180,6 +196,8 @@ export interface PageNotificationLike {
 }
 
 export interface PageNotificationOptions {
+  readonly icon: string;
+  readonly badge: string;
   readonly body: string;
   readonly tag: string;
   readonly renotify: boolean;
@@ -225,6 +243,7 @@ export const showNotification = async (
   if (showOnPage === null) return 'unavailable';
   try {
     const notification = showOnPage(payload.title, {
+      ...notificationBrand(),
       body: groupedNotificationBody(payload.body, payload.count),
       tag: payload.tag,
       renotify: false,

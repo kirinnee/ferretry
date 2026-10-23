@@ -354,7 +354,7 @@ describe('Attention state machine', () => {
     }
   });
 
-  it('should reject a missing, mismatched, or unlisted structured answer without hiding the item', () => {
+  it('should reject a mismatched or unlisted structured answer without hiding the item', () => {
     // Arrange
     const permission = raised();
     const choice = raised(AGENT, {
@@ -363,9 +363,6 @@ describe('Attention state machine', () => {
     const plain = raised(DAEMON, { source: 'task', sourceRef: 'F12', ask: undefined });
 
     // Act
-    const missing = failed(
-      applyAttentionCommand(permission.ledger, { action: 'resolve', actor: HUMAN, id: 'A1', at: SECOND }),
-    );
     const mismatch = failed(
       applyAttentionCommand(permission.ledger, {
         action: 'answer',
@@ -395,7 +392,7 @@ describe('Attention state machine', () => {
     );
 
     // Assert
-    for (const actual of [missing, mismatch, outside, noAsk]) should(actual.error.code).equal('invalid');
+    for (const actual of [mismatch, outside, noAsk]) should(actual.error.code).equal('invalid');
     should(permission.snapshot.count).equal(1);
     should(choice.snapshot.count).equal(1);
     should(plain.snapshot.count).equal(1);
@@ -500,13 +497,13 @@ describe('Attention state machine', () => {
     should(canDismissAttention(WARDEN, daemonEntry)).be.true();
   });
 
-  it('should resolve a plain item with the same exact-raiser guard', () => {
+  it('should resolve without a response under the same exact-raiser guard, structured ask or not', () => {
     // Arrange
     const own = raised(AGENT, { ask: { kind: 'permission' } });
     const plainOwn = raised(DAEMON, { source: 'task', sourceRef: 'F12', ask: undefined });
 
     // Act
-    const agentResolveAsked = failed(
+    const agentResolveAsked = succeeded(
       applyAttentionCommand(own.ledger, { action: 'resolve', actor: AGENT, id: 'A1', at: SECOND }),
     );
     const wrongDaemon = failed(
@@ -517,7 +514,9 @@ describe('Attention state machine', () => {
     );
 
     // Assert
-    should(agentResolveAsked.error.code).equal('invalid');
+    should(agentResolveAsked.snapshot.count).equal(0);
+    should(agentResolveAsked.snapshot.resolved[0]).containDeep({ disposition: 'done', resolvedBy: 'agent' });
+    should(agentResolveAsked.snapshot.resolved[0]?.response).be.undefined();
     should(wrongDaemon.error.code).equal('forbidden');
     should(daemonResolve.snapshot.count).equal(0);
     should(daemonResolve.snapshot.resolved[0]?.disposition).equal('done');
