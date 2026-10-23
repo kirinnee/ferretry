@@ -93,6 +93,36 @@ const runInboxAction = async (
   else await client.resolve(connection, scope, card.item.id, action.note);
 };
 
+/**
+ * The previous value while `key` holds still. The fleet is re-read every few seconds and every read is
+ * a new array of new views; the inbox's consumers (every badge, the sidebar entry, the decks) must not
+ * re-render for a read that changed nothing about Attention.
+ */
+const useStable = <T>(value: T, key: string): T => {
+  const held = useRef<{ readonly key: string; readonly value: T } | null>(null);
+  if (held.current === null || held.current.key !== key) held.current = { key, value };
+  return held.current.value;
+};
+
+/** What a card or row of the inbox draws from a session: its identity, names and open summary. */
+const unreadKey = (entries: readonly UnreadSession[]): string =>
+  entries
+    .map(entry =>
+      [
+        entry.daemonId,
+        entry.machineName,
+        entry.view.config.id,
+        entry.view.config.teammate ?? '',
+        entry.view.config.label ?? '',
+        entry.view.config.name ?? '',
+        attentionSummaryKey(entry.attention),
+      ].join('\u0000'),
+    )
+    .join('\u0001');
+
+const cardsKey = (cards: readonly InboxCard[]): string =>
+  cards.map(card => `${card.key}\u0000${JSON.stringify(card.item)}`).join('\u0001');
+
 export function useAttentionInboxModel(
   client: DaemonAttentionClient,
   machines: readonly AttentionInboxMachine[],
@@ -127,7 +157,7 @@ export function useAttentionInboxModel(
   }, [deferred]);
   const deferredState = useSyncExternalStore(deferred.subscribe, deferred.getSnapshot, deferred.getSnapshot);
 
-  const unread = useMemo(
+  const freshUnread = useMemo(
     () =>
       unreadSessions(
         machines.map(machine => ({
@@ -138,6 +168,7 @@ export function useAttentionInboxModel(
       ),
     [machines],
   );
+  const unread = useStable(freshUnread, unreadKey(freshUnread));
 
   // Read each unread conversation's board when its summary moved since the last read.
   const readKeys = useRef(new Map<string, string>());
@@ -157,12 +188,10 @@ export function useAttentionInboxModel(
     for (const id of [...readKeys.current.keys()]) if (!seen.has(id)) readKeys.current.delete(id);
   }, [client, connectionFor, unread]);
 
-  const boards = useSyncExternalStore(
-    client.store.subscribe.bind(client.store),
-    () => client.store.getSnapshot(),
-    () => client.store.getSnapshot(),
-  );
-  const cards = useMemo(
+  const subscribeBoards = useCallback((listener: () => void) => client.store.subscribe(listener), [client]);
+  const readBoards = useCallback(() => client.store.getSnapshot(), [client]);
+  const boards = useSyncExternalStore(subscribeBoards, readBoards, readBoards);
+  const freshCards = useMemo(
     () =>
       inboxCards(
         unread,
@@ -171,6 +200,7 @@ export function useAttentionInboxModel(
       ),
     [unread, boards, deferredState],
   );
+  const cards = useStable(freshCards, cardsKey(freshCards));
   const reading = unread.some(
     entry => !boards.snapshots.has(daemonSessionKey({ daemonId: entry.daemonId, sessionId: entry.view.config.id })),
   );

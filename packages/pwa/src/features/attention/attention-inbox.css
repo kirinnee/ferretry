@@ -14,7 +14,7 @@
   position: absolute;
   top: -6px;
   left: calc(100% - 8px);
-  outline: 2px solid var(--surface);
+  outline: var(--stroke-heavy) solid var(--surface);
 }
 /* SIX PLACES SHARE 390px (65px each), so a label is capped at 12px however large the family's phone
    ramp sets --text-xs: "Attention" in bold is the longest, and it must fit whole, never wrap or clip. */
@@ -213,7 +213,7 @@
   max-width: calc(100% - 28px);
   align-items: center;
   gap: 6px;
-  border: 2px solid var(--accent);
+  border: var(--stroke-heavy) solid var(--accent);
   border-radius: var(--radius-control);
   background: var(--surface);
   padding: 6px 10px;
