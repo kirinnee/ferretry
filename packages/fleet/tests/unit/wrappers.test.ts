@@ -718,7 +718,8 @@ describe("each ferret's sections of the appended system prompt", () => {
 
   it("should end the Pack section with the routing prompt's line, for Claude and inside Codex's TOML string", () => {
     // Arrange
-    const line = 'Routing: Planning and review: claude-opus-5-5 at max. Chores: claude-haiku-5-5 low; when it is low, glm-5-air.';
+    const line =
+      'Routing: Planning and review: claude-opus-5-5 at max. Chores: claude-haiku-5-5 low; when it is low, glm-5-air.';
     const claude = render(account({ flags: [`--append-system-prompt=${BASE}`] }));
     const codex = render(account({ kind: 'codex', flags: ['-c', `developer_instructions="${BASE}"`] }));
 
