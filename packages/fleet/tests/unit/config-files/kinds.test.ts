@@ -654,9 +654,9 @@ describe('configLoosening — pack.yaml and models-guide.yaml', () => {
     ).deepEqual([]);
   });
 
-  it('should never hold a models guide: it widens nothing a ferret may do or spend', () => {
+  it('should never hold a routing prompt: it widens nothing a ferret may do or spend', () => {
     // Act
-    const actual = configLoosening('modelsGuide', {}, { useCases: [] });
+    const actual = configLoosening('modelsGuide', {}, { prompt: 'Everything on claude-opus-5-5 at max.' });
 
     // Assert
     should(actual).deepEqual([]);

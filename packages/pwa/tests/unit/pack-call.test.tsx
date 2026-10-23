@@ -105,7 +105,7 @@ describe('a sub-ferret start in the parent’s chat', () => {
           state: 'done',
           value: started({
             decidedBy: 'jev',
-            note: 'Jev could not answer, so the guide decided.',
+            note: 'Jev could not answer, so the routing prompt decided.',
             model: undefined,
             effort: 'max',
             attempts: [
@@ -128,7 +128,7 @@ describe('a sub-ferret start in the parent’s chat', () => {
     expect(lines(card)).toEqual([
       'claude-auto-work · claude-opus-5-5 · effort max',
       'decided by jev · probe cached',
-      'Jev could not answer, so the guide decided.',
+      'Jev could not answer, so the routing prompt decided.',
     ]);
     const tried = must(card.querySelectorAll<HTMLDetailsElement>('.fy-pack-fold')[0], 'the attempts');
     expect(tried.querySelector('.fy-pack-fold-label')?.textContent).toBe('Tried 3 candidates');
@@ -140,6 +140,13 @@ describe('a sub-ferret start in the parent’s chat', () => {
     // Not in the session list read: no live line, and the name is plain text.
     expect(card.querySelector('[data-pack-live]')).toBeNull();
     expect(card.querySelector('header .fy-peer-name')?.textContent).toBe('Nadia');
+  });
+
+  test('renders who decided in the words it was given, a multi-word decider included', async () => {
+    const card = await show(
+      start({ progress: { state: 'done', value: started({ decidedBy: 'the routing prompt', attempts: [] }) } }),
+    );
+    expect(lines(card)).toContain('decided by the routing prompt');
   });
 
   test('a start with no probe on record says only who decided', async () => {
@@ -293,24 +300,32 @@ describe('a wait no card started, and a recommendation', () => {
     expect(card.querySelector('.fy-pack-section-title')?.textContent).toBe('Result collected');
   });
 
-  test('a recommendation folds its ranked list under the task, ready or not', async () => {
+  test('a recommendation folds the routing prompt and the models usable now under the task, ready or not', async () => {
     const card = await show({
       kind: 'recommend',
       task: 'review the auth change',
       progress: {
         state: 'done',
         value: {
-          useCase: 'Hard planning, review and critical code',
+          routing: 'Planning and review → **claude-opus-5-5** at max.\n\nChores → claude-haiku-5-5.',
+          source: 'your routing prompt',
           options: [
             {
-              rank: 1,
               ready: true,
               model: 'Claude Opus 5.5',
+              id: 'claude-opus-5-5',
               runtime: 'claude-auto-work',
               effort: 'max',
-              why: 'Strongest.',
+              named: 1,
+              quota: '5h 2% · week 46%',
             },
-            { rank: 2, ready: false, model: 'gpt-6-astra', refusal: 'cli_missing: codex is not installed' },
+            {
+              ready: false,
+              model: 'GPT 6 Astra',
+              id: 'gpt-6-astra',
+              runtime: 'codex-work',
+              refusal: 'cli_missing: codex is not installed',
+            },
           ],
           next: 'fy new …',
         },
@@ -319,12 +334,22 @@ describe('a wait no card started, and a recommendation', () => {
     expect(card.dataset['packKind']).toBe('recommend');
     expect(card.querySelector('header')?.textContent).toBe('Asked which model suits');
     expect(card.querySelector('.fy-pack-task')?.textContent).toBe('review the auth change');
-    const fold = must(card.querySelector('.fy-pack-fold'), 'the list');
+    const [routing, models] = [...card.querySelectorAll<HTMLDetailsElement>('.fy-pack-fold')];
+    // The prompt is folded to its first line, says where it came from, and opens to the whole as Markdown.
+    expect(must(routing, 'the routing prompt').open).toBe(false);
+    expect(routing?.querySelector('.fy-pack-fold-label')?.textContent).toBe('Routing prompt');
+    expect(routing?.querySelector('.fy-pack-fold-preview')?.textContent).toBe(
+      'Planning and review → **claude-opus-5-5** at max.',
+    );
+    expect(routing?.querySelector('.fy-pack-line')?.textContent).toBe('your routing prompt');
+    expect(routing?.querySelector('.fy-pack-fold-body strong')?.textContent).toBe('claude-opus-5-5');
+    expect(routing?.textContent).toContain('Chores → claude-haiku-5-5.');
+    const fold = must(models, 'the list');
     expect(fold.querySelector('.fy-pack-fold-label')?.textContent).toBe('2 models, 1 ready');
     expect(fold.querySelector('.fy-pack-fold-preview')?.textContent).toBe('Claude Opus 5.5');
     expect([...fold.querySelectorAll('[data-pack-options] li')].map(item => item.textContent)).toEqual([
-      'Claude Opus 5.5ready claude-auto-work · effort maxStrongest.',
-      'gpt-6-astracannot runcli_missing: codex is not installed',
+      'Claude Opus 5.5ready claude-auto-work · claude-opus-5-5 · effort maxnamed 1st in the prompt · quota 5h 2% · week 46%',
+      'GPT 6 Astracannot run codex-work · gpt-6-astracli_missing: codex is not installed',
     ]);
     expect(fold.textContent).not.toContain('Nothing can run it here now.');
   });
@@ -340,7 +365,7 @@ describe('a wait no card started, and a recommendation', () => {
     expect(await said({ state: 'running' })).toContain('Asking…');
     expect(await said({ state: 'failed', reason: 'no route' }, '')).toContain('no route');
     expect(await said({ state: 'unread' })).toContain('not recognised');
-    expect(await said({ state: 'done', value: { useCase: 'Bulk', options: [] } })).toContain(
+    expect(await said({ state: 'done', value: { routing: 'Chores → haiku.', options: [] } })).toContain(
       'Nothing can run it here now.',
     );
   });

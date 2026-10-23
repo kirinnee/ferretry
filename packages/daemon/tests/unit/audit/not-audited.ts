@@ -23,6 +23,8 @@ export const NOT_AUDITED: Readonly<Record<string, string>> = {
     'mints a one-time public key for a secret copy; the import that spends it is audited under its id',
   'PATCH /v1/cgroups/config': 'resource limits on the host’s own sessions; not who may reach the machine',
   'POST /v1/gc': 'scratch cleanup of state the daemon owns; reaches nobody',
+  'POST /v1/system/open-url':
+    'audited as link.opened by the service, which sees the address; the route decorator cannot read the body',
   'POST /v1/diagnostics/profile': 'opens a read-only window onto the daemon’s own counters; changes nothing',
   'POST /v1/projects':
     'registers a working directory; governed by filesystem.configure and listed in the project table',

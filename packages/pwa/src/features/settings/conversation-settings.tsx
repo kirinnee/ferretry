@@ -90,22 +90,32 @@ export function MotionSetting({
 const OPEN_LINKS: Readonly<Record<OpenLinksIn, Choice<OpenLinksIn>>> = {
   browser: { value: 'browser', label: 'Your browser' },
   panel: { value: 'panel', label: 'Ferretry side panel' },
+  computer: {
+    value: 'computer',
+    label: "Your computer's default browser",
+    detail: 'Opens links in whichever browser this computer picks, so a link router can choose the profile.',
+  },
 };
 
 export function OpenLinksInSetting({
   openLinksIn,
   onChange,
+  computerAvailable = false,
 }: {
   readonly openLinksIn: OpenLinksIn;
   readonly onChange: (openLinksIn: OpenLinksIn) => void;
+  /** A daemon on this computer is connected directly on loopback; without one the third choice is not offered. */
+  readonly computerAvailable?: boolean;
 }) {
+  // A saved "computer" with no local daemon behaves as the browser does, so that is what is shown selected.
+  const selected = openLinksIn === 'computer' && !computerAvailable ? 'browser' : openLinksIn;
   return (
     <ChoiceGroup
-      choices={OPEN_LINKS_IN.map(value => OPEN_LINKS[value])}
+      choices={OPEN_LINKS_IN.filter(value => value !== 'computer' || computerAvailable).map(value => OPEN_LINKS[value])}
       legend="Open links in"
       name="appearance-open-links-in"
       onSelect={onChange}
-      selected={openLinksIn}
+      selected={selected}
     />
   );
 }

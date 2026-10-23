@@ -1,17 +1,18 @@
 /**
- * Screenshots of Settings › Pack mode (the switch, who picks the model, the limits and the probe) and
- * of its models guide editor — a known model, one listed but not on this machine, an unknown red one,
- * and the model autocomplete open — at a 390px phone and a 1440px desktop, in the light and dark
- * studio themes. Review evidence for Pack mode; nothing compares the PNGs.
+ * Screenshots of Settings › Pack mode: the switch, who picks the model, the limits and the probe, and the
+ * ONE routing prompt card — a known model, one listed but not on this machine, an unknown red one, the
+ * Available-now list — plus the card with the model autocomplete open and the card reviewing a Clean up
+ * rewrite (a word diff and one note of each kind), at a 390px phone and a 1440px desktop, in the light and
+ * dark studio themes. Review evidence for Pack mode; nothing compares the PNGs.
  *
  *   bun harness/pack-mode-screenshot.tsx          # writes harness/out/pack-mode-*.png
  *
- * It renders the REAL `PackSettingsSurface` and `ModelsGuideEditor` with a machine's Pack view
- * injected, so nothing reaches a daemon. Like `voice-cleanup-screenshot.tsx` it drives the system
- * Chrome through playwright-core and aborts every request off the loopback origin.
+ * It renders the REAL `PackSettingsSurface` and `RoutingPromptCard` with a machine's Pack view injected,
+ * so nothing reaches a daemon. Like `voice-cleanup-screenshot.tsx` it drives the system Chrome through
+ * playwright-core and aborts every request off the loopback origin.
  */
 import { spawnSync } from 'node:child_process';
-import { mkdirSync } from 'node:fs';
+import { mkdirSync, rmSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { chromium } from 'playwright-core';
 
@@ -31,55 +32,65 @@ const run = (command: string, args: readonly string[]): void => {
 
 const PAGE_ENTRY = `
 import { createRoot } from 'react-dom/client';
-import { DEFAULT_PACK_CONFIG } from '@ferretry/protocol';
 import { PackSettingsSurface } from '../../src/features/pack/pack-settings.tsx';
-import { ModelsGuideEditor } from '../../src/features/pack/models-guide-editor.tsx';
+import { RoutingPromptCard } from '../../src/features/pack/routing-prompt-card.tsx';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
+import { AVAILABLE, OWNER_VIEW, RUNNING_JOB, SONNET, SUGGESTION } from '../../tests/support/pack.ts';
 
-const model = (overrides) => ({
-  provider: 'anthropic', providerLabel: 'Anthropic', harness: 'claude', tier: 'balanced', efforts: [],
-  runtimes: ['claude-main'], ...overrides,
-});
-const models = [
-  model({ id: 'claude-opus-5-5', label: 'Claude Opus 5.5', tier: 'best', efforts: ['low', 'medium', 'high', 'max'] }),
-  model({ id: 'claude-sonnet-5', label: 'Claude Sonnet 5', efforts: ['low', 'medium', 'high'] }),
-  model({ id: 'claude-haiku-4-5', label: 'Claude Haiku 4.5', tier: 'fast' }),
-  model({ id: '~anthropic/claude-opus-latest', label: 'Opus (latest)', tier: 'best' }),
-  model({ provider: 'zai', providerLabel: 'z.ai', id: 'glm-5.3', label: 'GLM-5.3', runtimes: [] }),
-  model({ provider: 'openai', providerLabel: 'OpenAI', harness: 'codex', id: 'gpt-6-astra', label: 'GPT-6 Astra', tier: 'best', efforts: ['medium', 'high', 'xhigh'], runtimes: ['codex-main'] }),
-  model({ provider: 'ollama', providerLabel: 'Ollama', id: 'gpt-oss:20b', label: 'gpt-oss 20B', tier: 'fast' }),
-  model({ provider: 'deepseek', providerLabel: 'DeepSeek', id: 'deepseek-flash[1m]', label: 'DeepSeek Flash 1M', tier: 'fast', runtimes: [] }),
+const connection = daemonConnection({ daemonId: 'harness', baseUrl: 'https://harness.invalid', deviceId: 'd' });
+const prompt = [
+  'Planning, review and critical code → claude-opus-5-5 at max; gpt-6-astra high for a second opinion.',
+  'Everyday edits → claude-sonnet-5.',
+  'Chores and renames → claude-haiku-4-5 low, or glm-5.3 on the other box. Never gpt-6-astra-mini.',
+].join('\\n');
+const available = [
+  AVAILABLE[0],
+  AVAILABLE[1],
+  {
+    provider: 'anthropic', model: SONNET.id, modelLabel: SONNET.label, harness: 'claude', tier: 'balanced',
+    efforts: [], runtime: 'claude-main', runtimes: 1, ready: true, named: 3,
+    quota: { state: 'some', leftPercent: 34, windows: [], summary: '5h 66% · week 40%' },
+  },
+  AVAILABLE[2],
 ];
-const guide = {
-  source: 'file',
-  useCases: [
-    {
-      id: 'hard',
-      title: 'Hard planning / review / critical code',
-      description: 'Plans, reviews and the code that must not break. Prefer claude-opus-5-5; GLM-5.3 is a good second opinion; never gpt-6-astra-mini.',
-      keywords: ['plan', 'review', 'architecture'],
-      candidates: [
-        { provider: 'anthropic', model: 'claude-opus-5-5', effort: 'high', why: 'The strongest reasoning here; Claude Sonnet 5 when it is out of quota.' },
-        { provider: 'openai', model: 'gpt-6-astra', effort: 'high', why: 'A second family for a second opinion.' },
-        { provider: 'zai', model: 'glm-5.3', why: 'Runs on the other box: good and cheap.' },
-      ],
-    },
-    { id: 'everyday', title: 'Everyday coding', description: 'Features and fixes of ordinary size.', candidates: [{ provider: 'anthropic', model: 'claude-sonnet-5', why: 'Quick and capable.' }] },
-    { id: 'bulk', title: 'Mechanical bulk edits', description: 'Renames and one-line chores across many files.', candidates: [{ provider: 'anthropic', model: 'claude-haiku-4-5', why: 'Fast and cheap.' }] },
-    { id: 'long-context', title: 'Long-context reading', description: 'Whole repositories and long logs.', candidates: [{ provider: 'deepseek', model: 'deepseek-flash[1m]', why: 'A million tokens of context.' }] },
-  ],
+const view = {
+  ...OWNER_VIEW,
+  routing: {
+    text: prompt,
+    source: 'file',
+    suggested: { by: 'gpt-6-astra', via: 'codex-main', at: '2026-10-22T14:30:00.000Z', acceptedAt: '2026-10-22T14:31:00.000Z' },
+  },
+  available,
+  undo: { savedAt: '2026-10-22T14:31:00.000Z', source: 'file' },
 };
-const view = { config: { ...DEFAULT_PACK_CONFIG, decision: 'jev' }, guide, models };
-const state = { read: { kind: 'ready', view }, saveConfig: async () => ({ kind: 'applied' }), saveGuide: async () => ({ kind: 'applied' }), suggest: async () => ({ kind: 'refused', message: 'Not under test.' }), readJob: async () => ({ kind: 'failed', message: 'Not under test.' }), acceptGuide: async () => ({ kind: 'refused', message: 'Not under test.' }), undoGuide: async () => ({ kind: 'refused', message: 'Not under test.' }), describeModel: async () => ({ kind: 'refused', message: 'Not under test.' }) };
+const never = () => new Promise(() => undefined);
+const routingState = { savePrompt: never, cleanUp: never, readJob: never, accept: never, undo: never };
+const state = { read: { kind: 'ready', view }, saveConfig: async () => ({ kind: 'applied' }), ...routingState };
 const which = new URLSearchParams(location.search).get('state');
 const root = document.getElementById('root');
 if (root === null) throw new Error('missing #root');
+const reviewView = { ...view, routing: { text: SUGGESTION.before, source: 'file' }, undo: undefined };
 createRoot(root).render(
-  <div className="kt-shell flex flex-col bg-bg p-4" style={{ maxWidth: 960, margin: '0 auto' }} data-shot="">
-    {which === 'guide' ? (
-      <ModelsGuideEditor guide={guide} models={models} initiallyOpen={[0]} onSave={async () => ({ kind: 'applied' })} />
+  <div className="flex flex-col bg-bg p-4 text-fg" style={{ maxWidth: 960, margin: '0 auto' }} data-shot="">
+    {which === 'settings' ? (
+      <PackSettingsSurface connection={connection} state={state} />
+    ) : which === 'review' ? (
+      <RoutingPromptCard
+        connection={connection}
+        view={reviewView}
+        state={routingState}
+        initial={{ job: { ...RUNNING_JOB, status: 'suggested' }, suggestion: SUGGESTION }}
+      />
+    ) : which === 'running' ? (
+      <RoutingPromptCard
+        connection={connection}
+        view={reviewView}
+        state={routingState}
+        clock={() => Date.parse(RUNNING_JOB.startedAt) + 47_000}
+        initial={{ job: RUNNING_JOB }}
+      />
     ) : (
-      <PackSettingsSurface connection={daemonConnection({ daemonId: 'harness', baseUrl: 'https://harness.invalid', deviceId: 'd' })} state={state} />
+      <RoutingPromptCard connection={connection} view={view} state={routingState} />
     )}
   </div>,
 );
@@ -98,6 +109,8 @@ const html = (theme: string) => `<!doctype html>
 mkdirSync(outDir, { recursive: true });
 await Bun.write(join(outDir, 'pack-mode-entry.tsx'), PAGE_ENTRY);
 run('bun', ['build', join(outDir, 'pack-mode-entry.tsx'), '--outdir', outDir, '--target', 'browser']);
+// The entry is bundled now; left behind, the workspace typecheck would check an untyped scratch file.
+rmSync(join(outDir, 'pack-mode-entry.tsx'));
 run('./node_modules/.bin/tailwindcss', [
   '--config',
   'tailwind.config.ts',
@@ -122,9 +135,11 @@ const server = Bun.serve({
 });
 
 const VIEWPORTS = [
-  { name: 'mobile', width: 390, height: 3_200 },
-  { name: 'desktop', width: 1_440, height: 2_400 },
+  { name: 'mobile', width: 390, height: 844 },
+  { name: 'desktop', width: 1_440, height: 900 },
 ] as const;
+
+const SCENES = ['settings', 'autocomplete', 'review', 'running'] as const;
 
 const shotsDir = process.env.PACK_MODE_SHOTS ?? outDir;
 mkdirSync(shotsDir, { recursive: true });
@@ -145,27 +160,29 @@ try {
           return await route.continue();
         });
         const page = await context.newPage();
-        for (const state of ['settings', 'guide'] as const) {
-          await page.goto(`${server.url}?theme=studio-${scheme}&state=${state}`);
+        for (const scene of SCENES) {
+          await page.goto(`${server.url}?theme=studio-${scheme}&state=${scene}`);
           const shot = page.locator('[data-shot]');
           await shot.waitFor({ state: 'visible' });
-          if (state === 'guide') {
-            // The autocomplete, open under the first candidate's "why" while a model name is half typed.
-            const why = page.locator('textarea[id$="-c1-why"]');
-            await why.click();
+          if (scene === 'autocomplete') {
+            // The autocomplete, open at the end of the prompt while a model name is half typed.
+            const field = page.locator('[data-routing-card] textarea');
+            await field.click();
             await page.keyboard.press('Control+End');
-            await page.keyboard.type(' Or cla');
+            await page.keyboard.type(' Docs → cla');
             await page.locator('[data-model-suggestions]').waitFor({ state: 'visible' });
             await page.keyboard.press('ArrowDown');
           }
           // A control wider than a phone would hide its own last words off-screen.
           const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
-          if (overflow > 0) fail(`${state} at ${viewport.name}/${scheme} scrolls sideways by ${overflow}px`);
-          const target = join(shotsDir, `pack-mode-${state}-${viewport.name}-${scheme}.png`);
-          const box = await shot.boundingBox();
-          if (box === null) fail(`${state} at ${viewport.name}/${scheme} has no box`);
-          const { x, y, width, height } = box ?? { x: 0, y: 0, width: 0, height: 0 };
-          await page.screenshot({ path: target, clip: { x, y, width, height: Math.min(height, viewport.height - y) } });
+          if (overflow > 0) fail(`${scene} at ${viewport.name}/${scheme} scrolls sideways by ${overflow}px`);
+          const target = join(shotsDir, `pack-mode-${scene}-${viewport.name}-${scheme}.png`);
+          // The whole scene in one capture: the page grows to fit it, at the same width.
+          const tall = await shot.evaluate(element => Math.ceil(element.getBoundingClientRect().bottom));
+          await page.setViewportSize({ width: viewport.width, height: Math.max(viewport.height, tall) });
+          const box = (await shot.boundingBox()) ?? fail(`${scene} at ${viewport.name}/${scheme} has no box`);
+          await page.screenshot({ path: target, clip: box });
+          await page.setViewportSize({ width: viewport.width, height: viewport.height });
           process.stdout.write(`📸 ${target}\n`);
         }
       } finally {

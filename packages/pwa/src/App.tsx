@@ -39,6 +39,7 @@ import type { SendDismiss, SendExpand } from './components/settled-send-note.tsx
 import { GlobalAnalyticsPage } from './features/analytics/global-analytics-page.tsx';
 import { AttentionInboxPage } from './features/attention/attention-inbox-page.tsx';
 import { LinkBehaviourProvider } from './features/browser/external-link.tsx';
+import { useLocalComputer } from './features/browser/use-local-computer.ts';
 import { tunnelSwitchOffer } from './features/carrier/carrier-preference-selector.tsx';
 import { configFilesSettingsTab } from './features/config-files/config-files-settings.tsx';
 import { ConnectionHealthNotice } from './features/connection/connection-health-notice.tsx';
@@ -1677,7 +1678,7 @@ function SettingsRoute({ connection }: DaemonPageProps) {
       securityLogSettingsTab(createDaemonClient),
       configFilesSettingsTab(createDaemonClient),
       { ...LEARNING_SETTINGS_TAB, Surface: LearningSettingsTabSurface },
-      // Sub-ferrets, who picks their model, and the models guide (docs/pack-mode.md).
+      // Sub-ferrets, who picks their model, and the routing prompt (docs/pack-mode.md).
       PACK_SETTINGS_TAB,
       // What this machine runs and getting it up to date (docs/updating.md).
       aboutSettingsTab(createDaemonClient),
@@ -2654,7 +2655,12 @@ function StoreLinkBehaviour({ children }: { readonly children: ReactNode }) {
     store.controls.subscribe,
     () => store.controls.snapshot().device.openLinksIn,
   );
-  return <LinkBehaviourProvider openLinksIn={openLinksIn}>{children}</LinkBehaviourProvider>;
+  const computer = useLocalComputer();
+  return (
+    <LinkBehaviourProvider openLinksIn={openLinksIn} {...(computer === undefined ? {} : { computer })}>
+      {children}
+    </LinkBehaviourProvider>
+  );
 }
 
 export interface AppProps {

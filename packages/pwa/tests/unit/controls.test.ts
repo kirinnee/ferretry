@@ -214,11 +214,12 @@ describe('parseControlsRecord — kteam controls cases, on the new nested shape'
     should(read({ motion: 'none' }).motion).equal('system');
   });
 
-  it('opens links in the reader’s browser unless the side panel was explicitly chosen', () => {
+  it('opens links in the reader’s browser unless the side panel or this computer’s browser was explicitly chosen', () => {
     const read = (device: Record<string, unknown>) =>
       parseControlsRecord(stored({ v: CONTROLS_VERSION, device })).device.openLinksIn;
     should(read({ openLinksIn: 'panel' })).equal('panel');
     should(read({ openLinksIn: 'browser' })).equal('browser');
+    should(read({ openLinksIn: 'computer' })).equal('computer');
     should(read({ openLinksIn: 'safari' })).equal('browser');
     should(read({})).equal('browser');
   });

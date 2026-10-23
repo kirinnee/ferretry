@@ -1,15 +1,14 @@
 import {
-  PackGuideAcceptRequestSchema,
-  PackGuideDescribeRequestSchema,
-  PackGuideJobResultSchema,
-  PackGuideSuggestRequestSchema,
-  PackGuideSuggestStartSchema,
-  PackGuideWriteResultSchema,
+  PackCleanUpJobResultSchema,
+  PackCleanUpRequestSchema,
+  PackCleanUpStartSchema,
   PackInventorySchema,
   PackNewOutcomeSchema,
   PackNewRequestSchema,
   PackRecommendationSchema,
   PackRecommendRequestSchema,
+  PackRoutingAcceptRequestSchema,
+  PackRoutingWriteResultSchema,
   PackViewSchema,
   type SessionPackPatchResult,
   SessionPackPatchSchema,
@@ -23,8 +22,7 @@ import { ApiError } from '../../api/error.ts';
 import { type ApiResponse, decodeParameter } from '../../api/http.ts';
 import { jsonResponse } from '../../api/responses.ts';
 import type { ApiRoute, RouteContext } from '../../api/route.ts';
-import type { GuideBuilderService, GuideFileService } from '../../pack/builder/index.ts';
-import { GuideModelUnknownError } from '../../pack/builder/index.ts';
+import type { CleanUpService, GuideFileService } from '../../pack/cleanup/index.ts';
 import type { PackService } from '../../pack/service.ts';
 import { type PackSwitchOutcome, SessionPackError } from '../../session/pack/service.ts';
 
@@ -37,17 +35,17 @@ import { type PackSwitchOutcome, SessionPackError } from '../../session/pack/ser
  * inside the daemon. A folder chosen by a caller off this machine would be terminal access, so only a
  * caller AT the machine may name one; anyone else's sub-ferret runs in its parent's folder.
  *
- * The models-guide GENERATOR (docs/pack-mode.md § Suggesting a guide): the inventory is a `fleet.use` read;
- * starting a builder ferret, accepting, undoing and describing are a PERSON's acts — a ferret's own
- * credential is refused, so no agent spends a model run or rewrites the guide unasked — and the writes are
- * `fleet.configure`, as any edit of the guide through the configuration routes is.
+ * CLEAN UP, the routing prompt's generator (docs/pack-mode.md § Clean up): the inventory is a `fleet.use`
+ * read; starting a clean-up ferret, accepting and undoing are a PERSON's acts — a ferret's own credential is
+ * refused, so no agent spends a model run or rewrites the prompt unasked — and the writes are
+ * `fleet.configure`, as any edit of `models-guide.yaml` through the configuration routes is.
  */
 export interface PackSubsystem {
   readonly service: Pick<PackService, 'view' | 'recommend' | 'newChild' | 'inventory'>;
-  /** The guide builder and the writes of what it drafts. */
-  readonly guide: {
-    readonly builder: Pick<GuideBuilderService, 'status' | 'start' | 'job'>;
-    readonly file: Pick<GuideFileService, 'undoable' | 'accept' | 'undo' | 'describe'>;
+  /** Clean up and the writes of what it rewrites. */
+  readonly routing: {
+    readonly cleanUp: Pick<CleanUpService, 'status' | 'start' | 'job'>;
+    readonly file: Pick<GuideFileService, 'undoable' | 'accept' | 'undo'>;
   };
   /** `undefined` when there is no such session. */
   result(sessionId: string): Promise<SessionResult | undefined>;
@@ -68,37 +66,32 @@ function personOnly(context: RouteContext, act: string): void {
 }
 
 async function view(subsystem: PackSubsystem): Promise<ApiResponse> {
-  const [base, undo, builder] = await Promise.all([
+  const [base, undo, cleanUp] = await Promise.all([
     subsystem.service.view(),
-    subsystem.guide.file.undoable(),
-    subsystem.guide.builder.status(),
+    subsystem.routing.file.undoable(),
+    subsystem.routing.cleanUp.status(),
   ]);
-  return jsonResponse(PackViewSchema.parse({ ...base, ...(undo === undefined ? {} : { undo }), builder }));
+  return jsonResponse(PackViewSchema.parse({ ...base, ...(undo === undefined ? {} : { undo }), cleanUp }));
 }
 
-async function suggest(subsystem: PackSubsystem, context: RouteContext): Promise<ApiResponse> {
-  personOnly(context, 'start the models guide builder');
-  const request = await parseBody(context.request, PackGuideSuggestRequestSchema);
-  const started = await subsystem.guide.builder.start(request);
-  return jsonResponse(PackGuideSuggestStartSchema.parse(started), started.outcome === 'started' ? 201 : 200);
+async function cleanUp(subsystem: PackSubsystem, context: RouteContext): Promise<ApiResponse> {
+  personOnly(context, 'start a routing prompt clean-up');
+  const request = await parseBody(context.request, PackCleanUpRequestSchema);
+  const started = await subsystem.routing.cleanUp.start(request);
+  return jsonResponse(PackCleanUpStartSchema.parse(started), started.outcome === 'started' ? 201 : 200);
 }
 
 async function job(subsystem: PackSubsystem, context: RouteContext): Promise<ApiResponse> {
   const id = decodeParameter(context.params.get('jobId') ?? '');
   const found =
-    id === undefined || id === '' ? undefined : await subsystem.guide.builder.job(id).catch(() => undefined);
-  if (found === undefined) throw new ApiError(404, 'no such models guide builder run', 'not-found');
-  return jsonResponse(PackGuideJobResultSchema.parse(found));
+    id === undefined || id === '' ? undefined : await subsystem.routing.cleanUp.job(id).catch(() => undefined);
+  if (found === undefined) throw new ApiError(404, 'no such routing prompt clean-up', 'not-found');
+  return jsonResponse(PackCleanUpJobResultSchema.parse(found));
 }
 
 async function write(context: RouteContext, act: string, run: () => Promise<unknown>): Promise<ApiResponse> {
   personOnly(context, act);
-  try {
-    return jsonResponse(PackGuideWriteResultSchema.parse(await run()));
-  } catch (error) {
-    if (error instanceof GuideModelUnknownError) throw new ApiError(404, error.message, 'not-found');
-    throw error;
-  }
+  return jsonResponse(PackRoutingWriteResultSchema.parse(await run()));
 }
 
 function sessionParameter(context: RouteContext): string {
@@ -110,10 +103,7 @@ function sessionParameter(context: RouteContext): string {
 
 async function recommend(subsystem: PackSubsystem, context: RouteContext): Promise<ApiResponse> {
   const request = await parseBody(context.request, PackRecommendRequestSchema);
-  const recommendation = await subsystem.service.recommend(request);
-  if (recommendation === undefined)
-    throw new ApiError(409, 'the models guide names no use case; add one in Settings › Pack mode', 'no_candidate');
-  return jsonResponse(PackRecommendationSchema.parse(recommendation));
+  return jsonResponse(PackRecommendationSchema.parse(await subsystem.service.recommend(request)));
 }
 
 async function newChild(subsystem: PackSubsystem, context: RouteContext): Promise<ApiResponse> {
@@ -166,15 +156,15 @@ export function packRoutes(subsystem: PackSubsystem): readonly ApiRoute[] {
     },
     {
       method: 'POST',
-      path: '/v1/pack/guide/suggest',
+      path: '/v1/pack/routing/clean-up',
       minimum: 'operator',
       capability: USE,
       noStore: true,
-      handle: async context => await suggest(subsystem, context),
+      handle: async context => await cleanUp(subsystem, context),
     },
     {
       method: 'GET',
-      path: '/v1/pack/guide/jobs/:jobId',
+      path: '/v1/pack/routing/jobs/:jobId',
       minimum: 'operator',
       capability: USE,
       noStore: true,
@@ -182,36 +172,23 @@ export function packRoutes(subsystem: PackSubsystem): readonly ApiRoute[] {
     },
     {
       method: 'POST',
-      path: '/v1/pack/guide/accept',
+      path: '/v1/pack/routing/accept',
       minimum: 'operator',
       capability: CONFIGURE,
       noStore: true,
       handle: async context =>
-        await write(context, 'accept a models guide', async () =>
-          subsystem.guide.file.accept(
-            await parseBody(context.request, PackGuideAcceptRequestSchema, { maxBytes: 512 * 1_024 }),
-          ),
+        await write(context, 'accept a cleaned-up routing prompt', async () =>
+          subsystem.routing.file.accept(await parseBody(context.request, PackRoutingAcceptRequestSchema)),
         ),
     },
     {
       method: 'POST',
-      path: '/v1/pack/guide/undo',
+      path: '/v1/pack/routing/undo',
       minimum: 'operator',
       capability: CONFIGURE,
       noStore: true,
       handle: async context =>
-        await write(context, 'undo an accepted models guide', async () => subsystem.guide.file.undo()),
-    },
-    {
-      method: 'POST',
-      path: '/v1/pack/guide/describe',
-      minimum: 'operator',
-      capability: CONFIGURE,
-      noStore: true,
-      handle: async context =>
-        await write(context, 'describe a model for the models guide', async () =>
-          subsystem.guide.file.describe(await parseBody(context.request, PackGuideDescribeRequestSchema)),
-        ),
+        await write(context, 'undo an accepted routing prompt', async () => subsystem.routing.file.undo()),
     },
     {
       method: 'POST',

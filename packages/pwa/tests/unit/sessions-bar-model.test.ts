@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { PACK_GUIDE_BUILDER_LABEL } from '@ferretry/protocol';
+import { PACK_CLEAN_UP_LABEL } from '@ferretry/protocol';
 import {
   DEFAULT_LIST_FILTER,
   isGuideBuilder,
@@ -220,9 +220,9 @@ describe('the question a waiting ferret asks', () => {
 });
 
 describe('guide-builder ferrets', () => {
-  const builder = sessionView('builder', { config: { label: PACK_GUIDE_BUILDER_LABEL } });
+  const builder = sessionView('builder', { config: { label: PACK_CLEAN_UP_LABEL } });
   const stoppedBuilder = sessionView('old-builder', {
-    config: { label: PACK_GUIDE_BUILDER_LABEL },
+    config: { label: PACK_CLEAN_UP_LABEL },
     state: { status: 'completed' },
   });
   const ordinary = sessionView('plain', { config: { label: 'my-batch' } });

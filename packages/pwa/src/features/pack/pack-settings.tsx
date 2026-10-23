@@ -1,9 +1,9 @@
 /**
  * SETTINGS › PACK MODE, on one machine (docs/pack-mode.md): whether ferrets here may delegate to
  * sub-ferrets, who picks the model each runs on, how many may run and how deep, the "reply OK" probe
- * that runs before each start, and the models guide those picks are made from.
+ * that runs before each start, and the one routing prompt those picks are made from.
  *
- * Every setting lives in `pack.yaml` and the guide in `models-guide.yaml`, written through the
+ * Every setting lives in `pack.yaml` and the routing prompt in `models-guide.yaml`, written through the
  * configuration-file routes. An edit that loosens what ferrets may do or spend — Pack on, Jev decides,
  * a limit or Jev's daily cap raised — is HELD until the owner confirms it, and this screen says so in
  * those words instead of showing the new value as if it were in effect.
@@ -13,8 +13,6 @@
 
 import {
   DEFAULT_PACK_CONFIG,
-  type GuideRouting,
-  type GuideUseCase,
   PACK_MAX_DEPTH_CEILING,
   type PackConfig,
   type PackDecisionMode,
@@ -25,21 +23,19 @@ import { cn } from '../../lib/class-names.ts';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
 import type { PackConfigPatch } from '../../lib/pack/pack-files.ts';
 import { Button } from '../../shell/primitives.tsx';
-import { GuideSuggestPanel } from './guide-suggest-panel.tsx';
-import { ModelsGuideEditor } from './models-guide-editor.tsx';
-import { ModelsPanel } from './models-panel.tsx';
+import { RoutingPromptCard } from './routing-prompt-card.tsx';
 import { type MachinePack, type PackSave, useMachinePack } from './use-machine-pack.ts';
 
 const DECISIONS: readonly { readonly id: PackDecisionMode; readonly label: string; readonly hint: string }[] = [
   {
     id: 'agent',
     label: 'Agent decides',
-    hint: 'The ferret reads the models guide and picks the model itself. Costs nothing extra.',
+    hint: 'The asking ferret reads the routing prompt and picks the model itself. Costs nothing extra.',
   },
   {
     id: 'jev',
     label: 'Jev decides',
-    hint: 'Jev ranks the guide’s candidates for each task. Jev spends money on every pick, up to its daily cap.',
+    hint: 'Jev reads the same routing prompt and ranks the models available now for each task. Jev spends money on every pick, up to its daily cap.',
   },
 ];
 
@@ -104,7 +100,7 @@ const JEV_CAP: NumberSetting = {
   section: 'jev',
   key: 'usdPerDay',
   label: 'Jev’s daily cap (USD)',
-  hint: 'Per UTC day, separate from the Warden’s own cap. When it is reached the guide’s order is used.',
+  hint: 'Per UTC day, separate from the Warden’s own cap. When it is reached, the routing prompt’s order is used.',
   min: 0,
   max: 100,
   step: 0.05,
@@ -197,12 +193,6 @@ function NumbersForm({
   );
 }
 
-interface IncomingGuide {
-  readonly key: number;
-  readonly useCases: readonly GuideUseCase[];
-  readonly routing?: GuideRouting;
-}
-
 function PackPanel({
   view,
   state,
@@ -213,7 +203,6 @@ function PackPanel({
   readonly connection: DaemonConnection;
 }) {
   const { config } = view;
-  const [incoming, setIncoming] = useState<IncomingGuide | undefined>(undefined);
   const [busy, setBusy] = useState(false);
   const [outcome, setOutcome] = useState<PackSave | null>(null);
   const switchTitle = useId();
@@ -332,23 +321,7 @@ function PackPanel({
         </p>
       ) : null}
 
-      <ModelsPanel models={view.models} onDescribe={state.describeModel} />
-
-      <GuideSuggestPanel
-        connection={connection}
-        state={state}
-        builder={view.builder}
-        preferences={config.routingPreferences ?? ''}
-        onEdit={guide => setIncoming({ key: (incoming?.key ?? 0) + 1, ...guide })}
-      />
-
-      <ModelsGuideEditor
-        guide={view.guide}
-        models={view.models}
-        onSave={state.saveGuide}
-        {...(view.undo === undefined ? {} : { undo: view.undo, onUndo: state.undoGuide })}
-        {...(incoming === undefined ? {} : { incoming })}
-      />
+      <RoutingPromptCard connection={connection} view={view} state={state} />
     </div>
   );
 }
@@ -394,6 +367,6 @@ export function PackSettingsSurface({
 export const PACK_SETTINGS_TAB = {
   id: 'pack',
   label: 'Pack mode',
-  description: 'Whether ferrets may start sub-ferrets, who picks their models, the limits, and the models guide.',
+  description: 'Whether ferrets may start sub-ferrets, who picks their models, the limits, and the routing prompt.',
   Surface: PackSettingsSurface,
 } as const;

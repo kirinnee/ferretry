@@ -4,32 +4,11 @@ import * as pack from '../../src/lib/pack.ts';
 import { INSTANT, sessionView } from '../fixtures.ts';
 import { assertCoversEverySchema, assertRejects, assertRoundTrips, type SchemaCase } from './schema-cases.ts';
 
-const candidate = { provider: 'anthropic', model: 'claude-opus-5-5', effort: 'high', why: 'The strongest planner.' };
-const useCase = {
-  id: 'plan-review',
-  title: 'Hard planning, review, critical code',
-  description: 'Plans and reviews; claude-opus-5-5 first.',
-  keywords: ['plan', 'review'],
-  candidates: [candidate, { provider: 'openai', model: 'gpt-6-astra', harness: 'codex', why: 'A second family.' }],
-};
 const refusal = { code: 'out_of_quota', message: 'claude-auto-x is out of quota.', remedy: 'Try the next candidate.' };
-const ready = {
-  rank: 1,
-  provider: 'anthropic',
-  model: 'claude-opus-5-5',
-  modelLabel: 'Claude Opus 5.5',
-  harness: 'claude',
-  effort: 'high',
-  why: 'The strongest planner.',
-  runtime: 'claude-auto-x',
-  ready: true,
-};
 const attempt = { runtime: 'claude-auto-x', model: 'claude-opus-5-5', outcome: 'started', probe: 'ran', probeMs: 812 };
-const routing = {
-  prompt: 'Plans and reviews on claude-opus-5-5; gpt-6-astra when it is low.',
-  short: 'Routing: plan-review → claude-opus-5-5 max; bulk → glm-5-air low.',
-};
-const suggested = { by: 'gpt-oss-120b', via: 'claude-auto-x', at: INSTANT, acceptedAt: INSTANT, partial: true };
+const prompt =
+  'Plans and reviews on claude-opus-5-5 at max; chores on claude-haiku-5-5 low; gpt-6-astra when Claude is low.';
+const suggested = { by: 'gpt-oss-120b', via: 'claude-auto-x', at: INSTANT, acceptedAt: INSTANT };
 const quota = {
   state: 'low',
   leftPercent: 9,
@@ -42,6 +21,33 @@ const quota = {
   measuredAt: INSTANT,
   summary: '5h 10% · wk 91% · mo 0%',
 };
+const option = {
+  provider: 'anthropic',
+  model: 'claude-opus-5-5',
+  modelLabel: 'Claude Opus 5.5',
+  harness: 'claude',
+  tier: 'best',
+  efforts: ['low', 'high', 'max'],
+  runtime: 'claude-auto-x',
+  runtimes: 2,
+  ready: true,
+  quota,
+  named: 1,
+  effort: 'max',
+  command:
+    'fy new --runtime claude-auto-x --model claude-opus-5-5 --effort max --name "<short task title>" "<complete brief>"',
+};
+const routing = { text: prompt, source: 'file', suggested };
+const job = {
+  id: 'run-1',
+  session: 's9',
+  name: 'gonzalo',
+  runtime: 'claude-auto-x',
+  model: 'claude-opus-5-5',
+  startedAt: INSTANT,
+  status: 'failed',
+  message: 'The clean-up stopped without writing a prompt.',
+};
 
 const cases: SchemaCase[] = [
   { name: 'decision mode', schema: pack.PackDecisionModeSchema, value: 'jev' },
@@ -50,53 +56,31 @@ const cases: SchemaCase[] = [
   { name: 'jev', schema: pack.PackJevSchema, value: { usdPerDay: 0.5 } },
   { name: 'config', schema: pack.PackConfigSchema, value: pack.DEFAULT_PACK_CONFIG },
   { name: 'file', schema: pack.PackFileSchema, value: { decision: 'jev', limits: { maxDepth: 3 } } },
-  { name: 'use case id', schema: pack.GuideUseCaseIdSchema, value: 'long-context' },
-  { name: 'candidate', schema: pack.GuideCandidateSchema, value: candidate },
-  { name: 'use case', schema: pack.GuideUseCaseSchema, value: useCase },
-  { name: 'guide file', schema: pack.ModelsGuideFileSchema, value: { useCases: [useCase] } },
   {
-    name: 'guide file with routing and where it came from',
+    name: 'a file not yet migrated, with the old preferences',
+    schema: pack.PackFileSchema,
+    value: { routingPreferences: 'Opus for reviews.' },
+  },
+  { name: 'routing prompt', schema: pack.RoutingPromptSchema, value: prompt },
+  { name: 'suggested', schema: pack.RoutingSuggestedSchema, value: suggested },
+  { name: 'guide file', schema: pack.ModelsGuideFileSchema, value: { prompt, suggested } },
+  {
+    name: 'a guide file not yet migrated, with the old keys',
     schema: pack.ModelsGuideFileSchema,
-    value: { useCases: [useCase], routing, suggested },
-  },
-  { name: 'routing', schema: pack.GuideRoutingSchema, value: routing },
-  { name: 'routing preferences', schema: pack.RoutingPreferencesSchema, value: 'Opus for reviews; GLM for bulk.' },
-  {
-    name: 'model description',
-    schema: pack.ModelDescriptionSchema,
-    value: { provider: 'zai', model: 'glm-5.3', description: 'Cheap and fast; weak at long plans.' },
-  },
-  {
-    name: 'guide file with descriptions',
-    schema: pack.ModelsGuideFileSchema,
-    value: { models: [{ provider: 'zai', model: 'glm-5.3', description: 'Cheap.' }] },
-  },
-  { name: 'undo', schema: pack.GuideUndoSchema, value: { savedAt: INSTANT, source: 'derived' } },
-  {
-    name: 'builder job',
-    schema: pack.PackGuideJobSchema,
     value: {
-      id: 'run-1',
-      session: 's9',
-      name: 'gonzalo',
-      runtime: 'claude-auto-x',
-      model: 'claude-opus-5-5',
-      startedAt: INSTANT,
-      status: 'failed',
-      message: 'The builder stopped without writing a guide.',
+      useCases: [{ id: 'bulk', title: 'Bulk', candidates: [] }],
+      routing: { prompt: 'Opus first.', short: 'Routing: x.' },
+      models: [{ provider: 'zai', model: 'glm-5.3', description: 'Cheap.' }],
+      suggested: { ...suggested, partial: true },
     },
   },
+  { name: 'routing view', schema: pack.RoutingPromptViewSchema, value: routing },
+  { name: 'undo', schema: pack.RoutingUndoSchema, value: { savedAt: INSTANT, source: 'default' } },
+  { name: 'clean-up job', schema: pack.PackCleanUpJobSchema, value: job },
   {
-    name: 'builder',
-    schema: pack.PackGuideBuilderSchema,
-    value: { available: false, runtimes: [], reason: 'No runtime can start a ferret now.' },
-  },
-  { name: 'suggested', schema: pack.GuideSuggestedSchema, value: suggested },
-  { name: 'guide', schema: pack.ModelsGuideSchema, value: { source: 'derived', useCases: [useCase] } },
-  {
-    name: 'guide with routing',
-    schema: pack.ModelsGuideSchema,
-    value: { source: 'file', useCases: [useCase], routing: { ...routing, source: 'file' }, suggested },
+    name: 'clean-up status',
+    schema: pack.PackCleanUpStatusSchema,
+    value: { available: false, runtimes: [], reason: 'No runtime can start a ferret now.', job },
   },
   { name: 'quota state', schema: pack.PackQuotaStateSchema, value: 'exhausted' },
   { name: 'quota window', schema: pack.PackQuotaWindowSchema, value: quota.windows[1] },
@@ -116,57 +100,57 @@ const cases: SchemaCase[] = [
       runtimes: [],
     },
   },
+  { name: 'model option', schema: pack.PackModelOptionSchema, value: option },
+  {
+    name: 'model option that cannot start',
+    schema: pack.PackModelOptionSchema,
+    value: {
+      model: 'glm-5.3',
+      modelLabel: 'GLM-5.3',
+      harness: 'claude',
+      efforts: [],
+      runtime: 'claude-zai',
+      runtimes: 1,
+      ready: false,
+      refusal,
+      quota,
+    },
+  },
   {
     name: 'view',
     schema: pack.PackViewSchema,
-    value: { config: pack.DEFAULT_PACK_CONFIG, guide: { source: 'file', useCases: [] }, models: [] },
+    value: {
+      config: pack.DEFAULT_PACK_CONFIG,
+      routing: { text: prompt, source: 'default' },
+      models: [],
+      available: [],
+      cleanUp: { available: true, runtimes: ['claude-auto-x'] },
+    },
   },
   {
-    name: 'view with undo and the builder',
+    name: 'view with undo',
     schema: pack.PackViewSchema,
     value: {
-      config: { ...pack.DEFAULT_PACK_CONFIG, routingPreferences: 'Opus for reviews.' },
-      guide: { source: 'file', useCases: [] },
+      config: pack.DEFAULT_PACK_CONFIG,
+      routing,
       models: [],
+      available: [option],
       undo: { savedAt: INSTANT, source: 'file' },
-      builder: { available: true, runtimes: ['claude-auto-x'] },
+      cleanUp: { available: true, runtimes: ['claude-auto-x'], job: { ...job, status: 'suggested' } },
     },
   },
   { name: 'refusal code', schema: pack.PackRefusalCodeSchema, value: 'probe_failed' },
   { name: 'refusal', schema: pack.PackRefusalSchema, value: refusal },
-  {
-    name: 'recommend request',
-    schema: pack.PackRecommendRequestSchema,
-    value: { task: 'rename a symbol', useCase: 'bulk' },
-  },
-  { name: 'candidate view', schema: pack.PackCandidateSchema, value: ready },
-  {
-    name: 'candidate moved down by quota',
-    schema: pack.PackCandidateSchema,
-    value: { ...ready, quota, movedDown: 'claude-auto-x, 91% of the week used' },
-  },
+  { name: 'recommend request', schema: pack.PackRecommendRequestSchema, value: { task: 'rename a symbol' } },
   {
     name: 'recommendation',
     schema: pack.PackRecommendationSchema,
-    value: {
-      task: 'plan it',
-      useCase: { id: 'plan-review', title: 'Planning', matchedBy: 'words' },
-      guideSource: 'derived',
-      candidates: [ready, { ...ready, rank: 2, runtime: undefined, ready: false, refusal }],
-      next: 'fy new --runtime claude-auto-x --model claude-opus-5-5 "plan it"',
-    },
+    value: { task: 'plan it', routing, available: [option], next: option.command },
   },
   {
-    name: 'recommendation from an accepted suggestion',
+    name: 'recommendation with nothing usable',
     schema: pack.PackRecommendationSchema,
-    value: {
-      task: 'plan it',
-      useCase: { id: 'plan-review', title: 'Planning', matchedBy: 'named' },
-      guideSource: 'file',
-      guideSuggested: suggested,
-      routing: routing.prompt,
-      candidates: [{ ...ready, quota }],
-    },
+    value: { routing: { text: prompt, source: 'default' }, available: [] },
   },
   {
     name: 'new request',
@@ -185,7 +169,7 @@ const cases: SchemaCase[] = [
   {
     name: 'automatic new request',
     schema: pack.PackNewRequestSchema,
-    value: { task: 'do it', auto: true, useCase: 'bulk', allowScratch: true },
+    value: { task: 'do it', auto: true, allowScratch: true },
   },
   { name: 'attempt', schema: pack.PackAttemptSchema, value: attempt },
   {
@@ -194,7 +178,7 @@ const cases: SchemaCase[] = [
     value: {
       outcome: 'started',
       view: sessionView,
-      decidedBy: 'guide',
+      decidedBy: 'routing',
       attempts: [attempt],
       note: 'Jev was over its cap.',
     },
@@ -232,59 +216,46 @@ describe('pack schemas', () => {
         value: { interactiveChildren: 1, autoChildren: 1, maxDepth: 0 },
       },
       { name: 'a probe too short', schema: pack.PackProbeSchema, value: { timeoutSeconds: 1, cacheSeconds: 0 } },
-      { name: 'an upper-case id', schema: pack.GuideUseCaseIdSchema, value: 'Bulk' },
-      { name: 'a blank why', schema: pack.GuideCandidateSchema, value: { ...candidate, why: '  ' } },
-      {
-        name: 'a use case twice',
-        schema: pack.ModelsGuideFileSchema,
-        value: { useCases: [useCase, { ...useCase, title: 'Again' }] },
-      },
       { name: 'neither runtime nor auto', schema: pack.PackNewRequestSchema, value: { task: 'x' } },
       {
         name: 'auto with a runtime',
         schema: pack.PackNewRequestSchema,
         value: { task: 'x', auto: true, runtime: 'r' },
       },
+      {
+        name: 'the old use-case pick',
+        schema: pack.PackNewRequestSchema,
+        value: { task: 'x', auto: true, useCase: 'bulk' },
+      },
       { name: 'an unknown code', schema: pack.PackRefusalCodeSchema, value: 'busy' },
+      { name: 'a blank prompt', schema: pack.RoutingPromptSchema, value: '   ' },
       {
-        name: 'a routing line with a quote',
-        schema: pack.GuideRoutingSchema,
-        value: { ...routing, short: 'say "hi"' },
+        name: 'a prompt too long for the system prompt',
+        schema: pack.RoutingPromptSchema,
+        value: 'x'.repeat(pack.MAX_ROUTING_PROMPT_CHARS + 1),
       },
-      {
-        name: 'a routing line with a backslash',
-        schema: pack.GuideRoutingSchema,
-        value: { ...routing, short: 'a\\b' },
-      },
-      { name: 'a routing line of two lines', schema: pack.GuideRoutingSchema, value: { ...routing, short: 'a\nb' } },
-      {
-        name: 'a routing line too long for the system prompt',
-        schema: pack.GuideRoutingSchema,
-        value: { ...routing, short: 'x'.repeat(pack.MAX_ROUTING_SHORT_CHARS + 1) },
-      },
+      { name: 'an unknown guide key', schema: pack.ModelsGuideFileSchema, value: { short: 'Routing: x.' } },
       { name: 'an unknown quota state', schema: pack.PackQuotaStateSchema, value: 'full' },
-      {
-        name: 'a model described twice',
-        schema: pack.ModelsGuideFileSchema,
-        value: {
-          models: [
-            { provider: 'zai', model: 'glm-5.3', description: 'a' },
-            { provider: 'zai', model: 'glm-5.3', description: 'b' },
-          ],
-        },
-      },
-      { name: 'preferences too long', schema: pack.RoutingPreferencesSchema, value: 'x'.repeat(4_001) },
       { name: 'more than all left', schema: pack.PackQuotaWindowSchema, value: { label: '5h', leftPercent: 101 } },
     ]);
   });
 
-  it('should name the duplicate use case where it is', () => {
-    // Act
-    const actual = pack.ModelsGuideFileSchema.safeParse({ useCases: [useCase, useCase] });
+  it('should hold the routing prompt to a paragraph that fits every system prompt', () => {
+    should(pack.MAX_ROUTING_PROMPT_CHARS).equal(1_200);
+    should(pack.MAX_ROUGH_PROMPT_CHARS).be.above(pack.MAX_ROUTING_PROMPT_CHARS);
+  });
+});
 
-    // Assert
-    should(actual.success).be.false();
-    should(actual.error?.issues[0]?.path).deepEqual(['useCases', 1, 'id']);
+describe('isLegacyModelsGuide', () => {
+  it('should say a file with any of the old keys still has a migration to run', () => {
+    should(pack.isLegacyModelsGuide({ useCases: [] })).be.true();
+    should(pack.isLegacyModelsGuide({ routing: { prompt: 'x', short: 'y' } })).be.true();
+    should(pack.isLegacyModelsGuide({ models: [] })).be.true();
+  });
+
+  it('should say a file of the one routing prompt, or none, has nothing to migrate', () => {
+    should(pack.isLegacyModelsGuide({})).be.false();
+    should(pack.isLegacyModelsGuide({ prompt, suggested })).be.false();
   });
 });
 
@@ -315,14 +286,11 @@ describe('packConfigFromFile', () => {
     });
   });
 
-  it('should carry routing preferences that say something, and leave out empty ones', () => {
-    should(pack.packConfigFromFile({ routingPreferences: 'Opus for reviews.' }).routingPreferences).equal(
-      'Opus for reviews.',
-    );
-    should(pack.packConfigFromFile({ routingPreferences: '' })).deepEqual(pack.DEFAULT_PACK_CONFIG);
+  it('should ignore the old routing preferences: only the migration reads them', () => {
+    should(pack.packConfigFromFile({ routingPreferences: 'Opus for reviews.' })).deepEqual(pack.DEFAULT_PACK_CONFIG);
   });
 
-  it('should start from a guide file that names no use case, so the derived guide is in effect', () => {
+  it('should start from a guide file with no prompt, so the rendered one is in effect', () => {
     should(pack.DEFAULT_MODELS_GUIDE_FILE).deepEqual({});
     should(pack.PACK_REFUSAL_CODES).containEql('limit_reached');
     should(pack.PACK_REFUSAL_CODES).containEql('scratch_cwd');

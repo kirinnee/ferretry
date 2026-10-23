@@ -61,7 +61,7 @@ import {
   type LearningConfig,
   localOnlyNotice,
   type MigrationConversation,
-  PACK_GUIDE_BUILDER_LABEL,
+  PACK_CLEAN_UP_LABEL,
   type PackConfig,
   type PackRefusal,
   type RegisterProjectRequest,
@@ -277,9 +277,10 @@ import { FileNotificationDeliveryLedger } from '../src/adapters/notifications/in
 import {
   bunProbeSpawn,
   CliPackProbe,
-  FileGuideRunStore,
+  FileCleanUpRunStore,
   FilePackSpendLedger,
   FileReplacedGuide,
+  FileRoutingMigrationBackup,
   readSessionResult,
 } from '../src/adapters/pack/index.ts';
 import { FilePinRepository, FilePinSessionDirectory } from '../src/adapters/pins/index.ts';
@@ -387,6 +388,7 @@ import {
 import { StorageTurnPorts } from '../src/adapters/session/turn/index.ts';
 import { FileMcpProjectFiles } from '../src/adapters/session-mcp/project-files.ts';
 import type { DaemonStorage } from '../src/adapters/storage/session-storage.ts';
+import { BunDetachedLauncher } from '../src/adapters/system/detached-launcher.ts';
 import {
   FileTaskBoardRepository,
   NodeTaskBoardCredentialIssuer,
@@ -459,6 +461,7 @@ import { createFleetCredentialsSubsystem, FleetCredentialCatalog } from '../src/
 import { createFleetSetupSubsystem } from '../src/lib/fleet/setup-service.ts';
 import { resolveStartAccount } from '../src/lib/fleet/start-resolution.ts';
 import { polledDirectoryLimitations } from '../src/lib/performance/fallbacks.ts';
+import { OpenUrlService } from '../src/lib/system/open-url.ts';
 
 /** The ordinary revive a send uses, as the auto-resume pass sees it. */
 type AutoResumeRevive = (id: string, message: string | undefined) => Promise<void>;
@@ -954,9 +957,9 @@ import {
 } from '../src/lib/index.ts';
 import {
   admitChild,
+  CleanUpService,
   COMMON_SCRATCH_ROOTS,
   depthOf,
-  GuideBuilderService,
   GuideFileService,
   isScratchPath,
   JevPackRanker,
@@ -967,6 +970,7 @@ import {
   ProbeCache,
   packInstructed,
   packLaunchDefault,
+  RoutingMigration,
 } from '../src/lib/pack/index.ts';
 import { IDLE_DAEMON_BUDGETS } from '../src/lib/performance/budgets.ts';
 import { PerformanceProfiler, sampleIntervalMs } from '../src/lib/performance/profiler.ts';
@@ -3482,10 +3486,10 @@ function createSessionRenameSubsystem(
 
 /**
  * Whether a session is an ordinary ferret — told about Pack mode and lessons — rather than one of the
- * daemon's own workers: a learning miner, a models-guide builder, or a warden's lineage.
+ * daemon's own workers: a learning miner, a routing prompt clean-up, or a warden's lineage.
  */
 const ordinaryFerret = (label: string | undefined, wardenLineage: boolean | undefined): boolean =>
-  label !== LEARNING_MINER_LABEL && label !== PACK_GUIDE_BUILDER_LABEL && wardenLineage !== true;
+  label !== LEARNING_MINER_LABEL && label !== PACK_CLEAN_UP_LABEL && wardenLineage !== true;
 
 /** Pack mode's hooks into a session start (docs/pack-mode.md). */
 interface SessionPackHooks {
@@ -3495,7 +3499,7 @@ interface SessionPackHooks {
   adopt(id: SessionId, eligible: boolean, parent: string | undefined): Promise<void>;
   /**
    * The `FY_PACK` a launch derives from the session's record, for an environment that never stored one,
-   * and — for a ferret Pack mode is on for — the models guide's routing line, derived fresh at every launch.
+   * and — for a ferret Pack mode is on for — the routing prompt as one line, derived fresh at every launch.
    */
   launchDefault: LaunchSwitchDefaults;
 }
@@ -9240,16 +9244,15 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         bin: CLIENT_NAME,
         now: () => clock.now(),
       });
-      packRouting = async () => await packService.routingShort();
+      packRouting = async () => await packService.routingLine();
       /**
-       * The models-guide generator (docs/pack-mode.md § Suggesting a guide): ONE builder, a short-lived hidden
-       * ferret started through the session start every surface uses and probed like any sub-ferret, and the
-       * writes of what it drafts through the configuration writer every editor uses.
+       * Clean up (docs/pack-mode.md § Clean up): the routing prompt's ONE generator, a short-lived hidden ferret
+       * started through the session start every surface uses and probed like any sub-ferret, and the writes of
+       * what it rewrites through the configuration writer every editor uses.
        */
       const guidePath = configFilePath({ kind: 'modelsGuide' });
-      const guideBuilder = new GuideBuilderService({
-        inventory: async preferences => await packService.inventory(preferences),
-        guide: async () => (await packService.view()).guide,
+      const cleanUp = new CleanUpService({
+        inventory: async () => await packService.inventory(),
         runtime: async name => {
           const runtime = (await fleetCatalog.runtimes()).runtimes.find(row => row.name === name && row.agent);
           return runtime === undefined
@@ -9266,7 +9269,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         stop: async (reference, reason) => {
           await sessionControl.stop(reference, reason);
         },
-        runs: new FileGuideRunStore(stateFiles, join(paths.state, 'pack-guide'), async path => {
+        runs: new FileCleanUpRunStore(stateFiles, join(paths.state, 'pack-guide'), async path => {
           await rm(path, { recursive: true, force: true });
         }),
         now: () => clock.now(),
@@ -9274,22 +9277,47 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         home: paths.home,
         bin: CLIENT_NAME,
       });
+      const configText = async (path: ReturnType<typeof configFilePath>) => {
+        const file = await configFiles.file(path);
+        return { exists: file.exists, text: file.exists ? file.text : '', etag: file.etag };
+      };
+      const writeConfigText = async (path: ReturnType<typeof configFilePath>, text: string, etag: string) => {
+        await configFiles.write(path, text, etag, false);
+      };
       const guideFile = new GuideFileService({
-        read: async () => {
-          const file = await configFiles.file(guidePath);
-          return { exists: file.exists, text: file.exists ? file.text : '', etag: file.etag };
-        },
-        write: async (text, etag) => {
-          await configFiles.write(guidePath, text, etag, false);
-        },
+        read: async () => await configText(guidePath),
+        write: async (text, etag) => await writeConfigText(guidePath, text, etag),
         replaced: new FileReplacedGuide(stateFiles, join(paths.state, 'pack-guide-replaced.json')),
-        catalogs: packCatalogs,
         now: () => clock.now(),
       });
+      // ONCE: an old use-case guide (and the old builder preferences) become one routing prompt, the old files
+      // kept in the state home. Every later start finds nothing to do. It never blocks the daemon's start.
+      const packPath = configFilePath({ kind: 'pack' });
+      void new RoutingMigration({
+        readGuide: async () => await configText(guidePath),
+        writeGuide: async (text, etag) => await writeConfigText(guidePath, text, etag),
+        readPack: async () => await configText(packPath),
+        writePack: async (text, etag) => await writeConfigText(packPath, text, etag),
+        defaultPrompt: async () => await packService.defaultPrompt(),
+        backup: async value => await new FileRoutingMigrationBackup(stateFiles, paths.state).write(value),
+        now: () => clock.now(),
+      })
+        .run()
+        .then(outcome => {
+          if (outcome.outcome === 'migrated')
+            process.stderr.write(
+              `pack: the models guide is now one routing prompt${outcome.cut ? ' (cut to fit)' : ''}; the old files are kept at ${outcome.backup}\n`,
+            );
+        })
+        .catch((error: unknown) => {
+          process.stderr.write(
+            `pack: the routing prompt migration did not run: ${error instanceof Error ? error.message : String(error)}\n`,
+          );
+        });
       const mounted: Omit<MountedSubsystems, 'sessionMcp'> = {
         pack: {
           service: packService,
-          guide: { builder: guideBuilder, file: guideFile },
+          routing: { cleanUp, file: guideFile },
           result: async reference => {
             const id = tryParseSessionId(reference);
             const view = id === undefined ? undefined : await sessions.get(id);
@@ -9769,6 +9797,14 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         // Derived from the session id alone — a caller asks for `scope=media`, never for a directory.
         sessionMediaRoot: id => createSessionPaths(paths, parseSessionId(id)).media,
         scratchGc,
+        // Constructed here: the service holds only a rate window, and the launcher starts nothing until a
+        // loopback caller asks.
+        systemOpen: new OpenUrlService({
+          launcher: new BunDetachedLauncher(),
+          audit: auditLog,
+          nowMs: () => millisecondClock.now(),
+          platform: process.platform,
+        }),
         secrets,
         warden: createWardenSubsystem({
           activities,

@@ -1,20 +1,19 @@
 import { describe, it } from 'bun:test';
 import {
   type IFyApiClient,
-  PACK_GUIDE_ACCEPT_PATH,
-  PACK_GUIDE_DESCRIBE_PATH,
-  PACK_GUIDE_SUGGEST_PATH,
-  PACK_GUIDE_UNDO_PATH,
+  PACK_CLEAN_UP_PATH,
   PACK_INVENTORY_PATH,
   PACK_NEW_PATH,
   PACK_PATH,
   PACK_RECOMMEND_PATH,
-  PackGuideJobResultSchema,
-  PackGuideSuggestStartSchema,
-  PackGuideWriteResultSchema,
+  PACK_ROUTING_ACCEPT_PATH,
+  PACK_ROUTING_UNDO_PATH,
+  PackCleanUpJobResultSchema,
+  PackCleanUpStartSchema,
   PackInventorySchema,
   PackNewOutcomeSchema,
   PackRecommendationSchema,
+  PackRoutingWriteResultSchema,
   PackViewSchema,
   SessionResultSchema,
 } from '@ferretry/protocol';
@@ -42,38 +41,36 @@ function build(answer: unknown) {
   return { gateway: new ProtocolPackGateway(client), requests, stops };
 }
 
-describe('ProtocolPackGateway guide generator', () => {
-  it('should read the inventory and a run, and post a suggest (waiting like a start), an accept, an undo and a description', async () => {
+describe('ProtocolPackGateway clean-up', () => {
+  it('should read the inventory and a run, and post a clean-up (waiting like a start), an accept and an undo', async () => {
     // Arrange
     const { gateway, requests } = build({});
     const suggested = { by: 'opus', via: 'claude-work', at: '2026-10-22T12:00:00.000Z' };
 
     // Act
     await gateway.inventory();
-    await gateway.suggest({ runtime: 'claude-work' });
+    await gateway.cleanUp({ prompt: 'rough', runtime: 'claude-work' });
     await gateway.job('run 1');
-    await gateway.accept({ useCases: [], suggested });
+    await gateway.accept({ prompt: 'clean', suggested });
     await gateway.undo();
-    await gateway.describe({ model: 'glm-5', description: null });
 
     // Assert
     should(requests.map(entry => [entry.path, entry.schema, entry.init?.body, entry.timeoutMs])).eql([
       [PACK_INVENTORY_PATH, PackInventorySchema, undefined, undefined],
       [
-        PACK_GUIDE_SUGGEST_PATH,
-        PackGuideSuggestStartSchema,
-        JSON.stringify({ runtime: 'claude-work' }),
+        PACK_CLEAN_UP_PATH,
+        PackCleanUpStartSchema,
+        JSON.stringify({ prompt: 'rough', runtime: 'claude-work' }),
         PACK_NEW_TIMEOUT_MS,
       ],
-      ['/v1/pack/guide/jobs/run%201', PackGuideJobResultSchema, undefined, undefined],
-      [PACK_GUIDE_ACCEPT_PATH, PackGuideWriteResultSchema, JSON.stringify({ useCases: [], suggested }), undefined],
-      [PACK_GUIDE_UNDO_PATH, PackGuideWriteResultSchema, '{}', undefined],
+      ['/v1/pack/routing/jobs/run%201', PackCleanUpJobResultSchema, undefined, undefined],
       [
-        PACK_GUIDE_DESCRIBE_PATH,
-        PackGuideWriteResultSchema,
-        JSON.stringify({ model: 'glm-5', description: null }),
+        PACK_ROUTING_ACCEPT_PATH,
+        PackRoutingWriteResultSchema,
+        JSON.stringify({ prompt: 'clean', suggested }),
         undefined,
       ],
+      [PACK_ROUTING_UNDO_PATH, PackRoutingWriteResultSchema, '{}', undefined],
     ]);
   });
 });
@@ -98,7 +95,7 @@ describe('ProtocolPackGateway', () => {
     const { gateway, requests } = build(recommendation());
 
     // Act
-    const answer = await gateway.recommend({ task: 'rename', useCase: 'bulk' });
+    const answer = await gateway.recommend({ task: 'rename' });
 
     // Assert
     should(answer).eql(recommendation());
@@ -108,7 +105,7 @@ describe('ProtocolPackGateway', () => {
     should(requests[0]?.init).eql({
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ task: 'rename', useCase: 'bulk' }),
+      body: JSON.stringify({ task: 'rename' }),
     });
     should(requests[0]?.timeoutMs).be.undefined();
   });

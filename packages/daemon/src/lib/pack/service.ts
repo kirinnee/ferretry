@@ -1,7 +1,10 @@
 /**
- * PACK MODE'S APPLICATION SERVICE (docs/pack-mode.md): the view the settings page reads, the
- * recommendation `fy recommend` prints, and `fy new` — admission, the candidate order (the asking
- * ferret's, the guide's, or Jev's), the probe, then the start.
+ * PACK MODE'S APPLICATION SERVICE (docs/pack-mode.md): the view the settings page reads, what `fy recommend`
+ * prints, the routing line a Pack ferret's system prompt carries, and `fy new` — admission, the candidate
+ * order (the asking ferret's, the routing prompt's, or Jev's), the probe, then the start.
+ *
+ * ONE routing prompt drives every decision: the ferret reads it in its system prompt and in `recommend`,
+ * `--auto` tries the models it names in its order, and Jev is given it as its guidance.
  *
  * A refusal is an ANSWER here, never an exception: a ferret reads the closed code and the attempts
  * from one value and falls back to its next candidate.
@@ -9,26 +12,28 @@
 import type {
   FleetRuntimeView,
   ModelCatalogView,
-  ModelsGuide,
   ModelsGuideFile,
   PackAttempt,
   PackConfig,
+  PackFleetModel,
   PackInventory,
+  PackModelOption,
   PackNewOutcome,
   PackNewRequest,
   PackRecommendation,
   PackRefusal,
   PackView,
+  RoutingPromptView,
   SessionView,
   StartSessionRequest,
 } from '@ferretry/protocol';
 import { taskTitleFor } from '@ferretry/protocol';
 import { admitChild, type ParentFacts } from './admission.ts';
-import { buildInventory } from './builder/inventory.ts';
-import { effectiveGuide, fleetModels } from './guide.ts';
-import type { PackJevPort } from './jev.ts';
+import { buildInventory } from './cleanup/inventory.ts';
+import { PACK_JEV_LIMITS, type PackJevPort } from './jev.ts';
 import type { CachedProbe, PackProbeRequest } from './probe.ts';
-import { type PackFleetFacts, recommend, runtimeRefusal } from './recommend.ts';
+import { automaticOrder, availableModels, type PackFleetFacts, runtimeRefusal } from './recommend.ts';
+import { defaultPrompt, effectiveRouting, fleetModels, routingLine } from './routing.ts';
 import { SCRATCH_REMEDY, scratchMessage } from './scratch.ts';
 
 /** The settings in effect, read fresh for every request. */
@@ -81,6 +86,15 @@ interface Choice {
   readonly effort: string | undefined;
 }
 
+/** Everything one decision reads, read once. */
+interface Snapshot {
+  readonly settings: PackSettings;
+  readonly facts: PackFleetFacts;
+  readonly models: readonly PackFleetModel[];
+  readonly routing: RoutingPromptView;
+  readonly available: readonly PackModelOption[];
+}
+
 const refused = (refusal: PackRefusal, attempts: readonly PackAttempt[]): PackNewOutcome => ({
   outcome: 'refused',
   refusal,
@@ -93,79 +107,78 @@ export function subFerretFooter(bin: string, parent: string | undefined): string
   return `\n\n---\nYou are a sub-ferret, started ${who} (Pack mode). When the work is done, finish with \`${bin} signal done "<your result: what you did, what you found, what is left>"\` — that message is what is handed back.`;
 }
 
+/** How Jev is told what a candidate is: its label and tier, and where the routing prompt names it. */
+const candidateWhy = (option: PackModelOption): string =>
+  [
+    option.modelLabel,
+    option.tier === undefined ? undefined : `${option.tier} tier`,
+    option.named === undefined ? undefined : `named ${String(option.named)} in the routing prompt`,
+    option.effort === undefined ? undefined : `at ${option.effort} effort`,
+  ]
+    .filter((part): part is string => part !== undefined)
+    .join(', ');
+
 export class PackService {
   constructor(private readonly ports: PackPorts) {}
 
-  async view(): Promise<PackView> {
+  private async snapshot(): Promise<Snapshot> {
     const [settings, catalogs, facts] = await Promise.all([
       this.ports.settings(),
       this.ports.catalogs(),
       this.ports.facts(),
     ]);
+    const models = fleetModels(catalogs, facts.runtimes);
+    const routing = effectiveRouting(settings.guideFile, catalogs, facts.runtimes, this.ports.bin);
     return {
-      config: settings.config,
-      guide: effectiveGuide(settings.guideFile, catalogs, this.ports.bin),
-      models: fleetModels(catalogs, facts.runtimes, settings.guideFile.models ?? []),
+      settings,
+      facts,
+      models,
+      routing,
+      available: availableModels(facts, models, routing.text, this.ports.bin),
     };
   }
 
+  /** The settings, the routing prompt in effect, the vocabulary and the models usable now. */
+  async view(): Promise<Omit<PackView, 'undo' | 'cleanUp'>> {
+    const { settings, models, routing, available } = await this.snapshot();
+    return { config: settings.config, routing, models, available };
+  }
+
+  /** The default routing prompt, rendered from the catalogs in effect, whatever the file says. */
+  async defaultPrompt(): Promise<string> {
+    const [catalogs, facts] = await Promise.all([this.ports.catalogs(), this.ports.facts()]);
+    return defaultPrompt(fleetModels(catalogs, facts.runtimes), this.ports.bin);
+  }
+
+  /** What the clean-up ferret is shown (`./cleanup/inventory.ts`): the harness config, names and states only. */
+  async inventory(): Promise<PackInventory> {
+    const { facts, models, routing } = await this.snapshot();
+    return buildInventory({ facts, models, routing, now: facts.now ?? this.ports.now() });
+  }
+
   /**
-   * What the guide builder is shown (`./builder/inventory.ts`): every model with the owner's description,
-   * its runtimes here, their readiness and quota, the guide in effect and the routing preferences — this
-   * run's, else `pack.yaml`'s.
+   * The routing prompt as the one line a Pack ferret's system prompt carries (`FY_PACK_ROUTING`), from the
+   * prompt in effect now — derived at every launch, so a restart hears the latest saved prompt.
    */
-  async inventory(preferences?: string): Promise<PackInventory> {
+  async routingLine(): Promise<string> {
     const [settings, catalogs, facts] = await Promise.all([
       this.ports.settings(),
       this.ports.catalogs(),
       this.ports.facts(),
     ]);
-    return buildInventory({
-      catalogs,
-      facts,
-      guide: effectiveGuide(settings.guideFile, catalogs, this.ports.bin),
-      described: settings.guideFile.models ?? [],
-      preferences: preferences ?? settings.config.routingPreferences,
-      now: facts.now ?? this.ports.now(),
-    });
+    return routingLine(effectiveRouting(settings.guideFile, catalogs, facts.runtimes, this.ports.bin).text);
   }
 
-  /**
-   * The one-line routing guidance a Pack ferret's system prompt carries (`FY_PACK_ROUTING`), from the
-   * guide in effect now — derived at every launch, so a restart hears the latest saved guide.
-   */
-  async routingShort(): Promise<string | undefined> {
-    const [settings, catalogs] = await Promise.all([this.ports.settings(), this.ports.catalogs()]);
-    return effectiveGuide(settings.guideFile, catalogs, this.ports.bin).routing?.short;
-  }
-
-  /** `undefined` for a guide with no use case at all. */
-  async recommend(input: {
-    readonly task: string;
-    readonly useCase?: string;
-  }): Promise<PackRecommendation | undefined> {
-    return (await this.recommendWithGuide(input)).recommendation;
-  }
-
-  /** The recommendation, and the guide it was made from. */
-  private async recommendWithGuide(input: {
-    readonly task: string;
-    readonly useCase?: string;
-  }): Promise<{ readonly recommendation: PackRecommendation | undefined; readonly guide: ModelsGuide }> {
-    const [settings, catalogs, facts] = await Promise.all([
-      this.ports.settings(),
-      this.ports.catalogs(),
-      this.ports.facts(),
-    ]);
-    const labels = new Map(
-      catalogs.flatMap(catalog =>
-        [...(catalog.claude ?? []), ...(catalog.codex ?? [])].map(
-          entry => [`${catalog.id}\u0000${entry.id}`, entry.label] as const,
-        ),
-      ),
-    );
-    const guide = effectiveGuide(settings.guideFile, catalogs, this.ports.bin);
-    return { recommendation: recommend({ ...input, bin: this.ports.bin }, guide, facts, labels), guide };
+  /** The routing prompt and the models usable now; `next` is what `--auto` would try first. */
+  async recommend(input: { readonly task?: string | undefined }): Promise<PackRecommendation> {
+    const { routing, available } = await this.snapshot();
+    const first = automaticOrder(available)[0];
+    return {
+      ...(input.task === undefined ? {} : { task: input.task }),
+      routing,
+      available,
+      ...(first?.command === undefined ? {} : { next: first.command }),
+    };
   }
 
   async newChild(request: PackNewRequest): Promise<PackNewOutcome> {
@@ -200,8 +213,8 @@ export class PackService {
     if (request.cwd !== undefined && request.allowScratch !== true && (await this.ports.scratch(request.cwd)))
       return refused({ code: 'scratch_cwd', message: scratchMessage(request.cwd), remedy: SCRATCH_REMEDY }, []);
 
-    const facts = await this.ports.facts();
-    const ordered = request.auto === true ? await this.automatic(request, settings, facts) : this.named(request, facts);
+    const ordered =
+      request.auto === true ? await this.automatic(request) : this.named(request, await this.ports.facts());
     if ('refusal' in ordered) return refused(ordered.refusal, []);
     return await this.tryInOrder(request, ordered, cwd, config, parent?.id);
   }
@@ -227,69 +240,62 @@ export class PackService {
     return { choices: [{ runtime, model: request.model, effort: request.effort }], decidedBy: 'agent' };
   }
 
-  /** The guide's ready candidates, in the guide's order or Jev's. */
+  /** The models usable now, in the routing prompt's order or Jev's. */
   private async automatic(
     request: PackNewRequest,
-    settings: PackSettings,
-    facts: PackFleetFacts,
   ): Promise<
-    | { readonly choices: readonly Choice[]; readonly decidedBy: 'guide' | 'jev'; readonly note?: string }
+    | { readonly choices: readonly Choice[]; readonly decidedBy: 'routing' | 'jev'; readonly note?: string }
     | { readonly refusal: PackRefusal }
   > {
-    const { recommendation, guide } = await this.recommendWithGuide({
-      task: request.task,
-      ...(request.useCase === undefined ? {} : { useCase: request.useCase }),
-    });
-    const ready = (recommendation?.candidates ?? []).filter(candidate => candidate.ready);
-    const choices = ready.flatMap(candidate => {
-      const runtime = facts.runtimes.find(row => row.name === candidate.runtime);
-      return runtime === undefined
-        ? []
-        : [{ runtime, model: candidate.model, effort: request.effort ?? candidate.effort }];
-    });
+    const { settings, facts, routing, available } = await this.snapshot();
+    const choiceOf = (option: PackModelOption): readonly Choice[] => {
+      const runtime = facts.runtimes.find(row => row.name === option.runtime);
+      return runtime === undefined ? [] : [{ runtime, model: option.model, effort: request.effort ?? option.effort }];
+    };
+    const ordered = automaticOrder(available);
+    const choices = ordered.flatMap(choiceOf);
     if (choices.length === 0) {
-      const why = recommendation?.candidates[0]?.refusal?.message;
+      const why = available[0]?.refusal?.message;
       return {
         refusal: {
           code: 'no_candidate',
-          message: `Nothing in the models guide can run here now${why === undefined ? '' : `: ${why}`}`,
+          message: `No model a runtime here offers can run now${why === undefined ? '' : `: ${why}`}`,
           remedy: 'Do the work yourself, or ask the owner to sign a login in.',
         },
       };
     }
-    if (settings.config.decision !== 'jev' || choices.length === 1) return { choices, decidedBy: 'guide' };
+    if (settings.config.decision !== 'jev') return { choices, decidedBy: 'routing' };
+    // Jev chooses among everything ready — the routing prompt's order first — guided by that same prompt.
+    const pool = [...ordered, ...available.filter(option => option.ready && !ordered.includes(option))].slice(
+      0,
+      PACK_JEV_LIMITS.maxCandidates,
+    );
+    if (pool.length === 1) return { choices, decidedBy: 'routing' };
     const spent = await this.ports.spend.today();
     if (spent >= settings.config.jev.usdPerDay)
       return {
         choices,
-        decidedBy: 'guide',
-        note: "Jev's daily cap for Pack mode is reached, so the guide's order was used.",
+        decidedBy: 'routing',
+        note: "Jev's daily cap for Pack mode is reached, so the routing prompt's order was used.",
       };
-    // Jev decides WITH the owner's guide: its routing prompt, the use case matched, and each login's quota.
-    const useCase = guide.useCases.find(entry => entry.id === recommendation?.useCase.id);
     const ranking = await this.ports.jev.rank(
       request.task,
-      ready.map(candidate => ({
-        model: candidate.model,
-        runtime: candidate.runtime ?? '',
-        why: candidate.why,
-        ...(candidate.quota === undefined || candidate.quota.state === 'unknown'
-          ? {}
-          : { quota: candidate.quota.summary }),
+      pool.map(option => ({
+        model: option.model,
+        runtime: option.runtime,
+        why: candidateWhy(option),
+        ...(option.quota.state === 'unknown' ? {} : { quota: option.quota.summary }),
       })),
-      {
-        ...(guide.routing === undefined ? {} : { routing: guide.routing.prompt }),
-        ...(useCase === undefined ? {} : { useCase: { title: useCase.title, description: useCase.description } }),
-      },
+      { routing: routing.text },
     );
     if (ranking.kind === 'failed')
       return {
         choices,
-        decidedBy: 'guide',
-        note: `Jev could not decide (${ranking.reason}), so the guide's order was used.`,
+        decidedBy: 'routing',
+        note: `Jev could not decide (${ranking.reason}), so the routing prompt's order was used.`,
       };
     await this.ports.spend.record((ranking.inputTokens / 1_000_000) * settings.jevUsdPerMillionInputTokens);
-    return { choices: ranking.order.map(index => choices[index] as Choice), decidedBy: 'jev' };
+    return { choices: ranking.order.flatMap(index => choiceOf(pool[index] as PackModelOption)), decidedBy: 'jev' };
   }
 
   /** Probes each choice in turn and starts the first that answers. */
@@ -297,7 +303,7 @@ export class PackService {
     request: PackNewRequest,
     ordered: {
       readonly choices: readonly Choice[];
-      readonly decidedBy: 'agent' | 'guide' | 'jev';
+      readonly decidedBy: 'agent' | 'routing' | 'jev';
       readonly note?: string;
     },
     cwd: string,
@@ -341,7 +347,7 @@ export class PackService {
           ...(parent === undefined ? {} : { parent }),
           ...(choice.model === undefined ? {} : { model: choice.model }),
           ...(choice.effort === undefined ? {} : { effort: choice.effort }),
-          name: request.name ?? taskTitleFor(request.task, request.useCase ?? 'Sub-ferret'),
+          name: request.name ?? taskTitleFor(request.task, 'Sub-ferret'),
         });
         attempts.push({ runtime, ...named, outcome: 'started', probe, probeMs: probed.outcome.ms });
         return {

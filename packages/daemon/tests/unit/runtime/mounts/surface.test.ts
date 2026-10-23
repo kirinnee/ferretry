@@ -418,8 +418,8 @@ const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
         throw new Error('not exercised by the surface inventory');
       },
     },
-    guide: {
-      builder: {
+    routing: {
+      cleanUp: {
         status: async () => {
           throw new Error('not exercised by the surface inventory');
         },
@@ -438,9 +438,6 @@ const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
           throw new Error('not exercised by the surface inventory');
         },
         undo: async () => {
-          throw new Error('not exercised by the surface inventory');
-        },
-        describe: async () => {
           throw new Error('not exercised by the surface inventory');
         },
       },
@@ -646,6 +643,7 @@ const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
   },
   sessionFilesystem: new SessionFilesystem(new FakeRootPinner(), new FakeSessionGit()),
   scratchGc: scratchGc ?? { plan: async () => [], sweep: async () => ({ sessions: 0, bytes: 0, failures: 0 }) },
+  systemOpen: { open: async () => ({ opened: true, host: 'example.com' }) },
   secrets: secretSubsystem(),
   warden: new FakeWarden(),
   sessionReads: new OperatorReadService(
@@ -740,7 +738,7 @@ describe('the mounted daemon surface', () => {
       1 + // an agent's rename: a new first name or task title
       1 + // a ferret's hypermedia switch, from its next launch (docs/hypermedia.md)
       5 + // Pack mode: its view, recommend, a sub-ferret start, a result and a ferret's switch (docs/pack-mode.md)
-      6 + // the models-guide generator: the inventory, a builder start and its run, accept, undo and a model's description
+      5 + // the routing prompt's Clean up: the inventory, a clean-up start and its run, accept and undo
       5 + // adding an MCP server for one ferret: its listing, and a preview and an add for each of the project and the login
       6 + // a person's agent tools: terminal and browser tool calls, their control changes, and each kind's control read
       2 + // the speed-up keys: their status read and one provider's Test
@@ -754,7 +752,8 @@ describe('the mounted daemon surface', () => {
       3 + // existing conversations kept as ferrets: the listing, one conversation's preview and the adoption
       3 + // the model catalogs: the list, a check for a newer published one, and a read of the models Ollama has installed (docs/model-catalog.md)
       9 + // lessons: the default's write, Apply's preview and write, the per-ferret switch and its list, and the scan's estimate, start, read and cancel (a ferret's own door is `none`)
-      2; // the performance profile: start one, and read it back by id (`fy daemon profile`)
+      2 + // the performance profile: start one, and read it back by id (`fy daemon profile`)
+      1; // handing a web address to this computer's own browser (loopback caller only)
     // `none` lost `POST /v1/pair`: redemption happens only inside a session now, so it is no route at all.
     // `authenticated` gained the Warden's "who needs you" feed, which a live warden reads like its status,
     // and the WebRTC offer: any paired device may ask for a shorter path to its own daemon (§16).
@@ -764,6 +763,7 @@ describe('the mounted daemon surface', () => {
       routes.filter(route => route.privilegedOnly === true).map(route => `${route.method} ${route.path}`),
     ).deepEqual([
       'POST /v1/agent/config',
+      'POST /v1/system/open-url',
       'POST /v1/agent/tools',
       'POST /v1/agent/lessons',
       'GET /v1/sessions/:sessionId/attach',
@@ -897,6 +897,8 @@ describe('the mounted daemon surface', () => {
       'POST /v1/imports/conversations/adopt',
       'GET /v1/gc',
       'POST /v1/gc',
+      // Handing a web address to the OS opener. Operator + privileged arrival: a remote caller is refused.
+      'POST /v1/system/open-url',
       // The secret store. NOTE WHAT IS ABSENT: there is no `GET /v1/secrets/:name`, and this list is
       // the proof of it — no route returns a secret value. `use` is how a value is spent instead.
       'GET /v1/secrets',
@@ -934,11 +936,10 @@ describe('the mounted daemon surface', () => {
       'PATCH /v1/sessions/:sessionId/hypermedia',
       'GET /v1/pack',
       'GET /v1/pack/inventory',
-      'POST /v1/pack/guide/suggest',
-      'GET /v1/pack/guide/jobs/:jobId',
-      'POST /v1/pack/guide/accept',
-      'POST /v1/pack/guide/undo',
-      'POST /v1/pack/guide/describe',
+      'POST /v1/pack/routing/clean-up',
+      'GET /v1/pack/routing/jobs/:jobId',
+      'POST /v1/pack/routing/accept',
+      'POST /v1/pack/routing/undo',
       'POST /v1/pack/recommend',
       'POST /v1/pack/new',
       'GET /v1/sessions/:sessionId/result',

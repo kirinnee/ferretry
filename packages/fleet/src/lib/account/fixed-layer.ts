@@ -306,8 +306,8 @@ export const PACK_ENV = 'FY_PACK';
 /** The Pack mode teaching. Short on purpose — it is in every prompt. */
 export const PACK_INSTRUCTION = (fy: string): string =>
   [
-    `Pack mode: you may hand self-contained parts of your task to sub-ferrets — other agents, each on the model that suits its part. Prefer them over your built-in subagents for real work; do small things yourself.`,
-    `1. \`${fy} recommend "<part>"\` lists the models usable now, best first, with the command to start each.`,
+    `Pack mode: you may hand self-contained parts of your task to sub-ferrets — other agents, each on the model that suits its part. Prefer them over your built-in subagents for real work; do small things yourself. Pick each model by the Routing line below.`,
+    `1. \`${fy} recommend\` lists the models usable now, most quota first, with the command to start each.`,
     `2. \`${fy} new --runtime <runtime> --model <model> [--effort <level>] --name "<short task title>" "<complete brief>"\` starts one (\`${fy} new --auto "<brief>"\` lets Ferretry choose). Always pass \`--name\` (2–5 Title Case words). The brief is all it knows: say what to do, where, and what to report.`,
     `3. If it refuses (out_of_quota, not_logged_in, cli_missing, probe_failed, …), read the reason and start the next candidate. limit_reached or depth_exceeded: do the work yourself.`,
     `4. \`${fy} wait <id>\` blocks until it finishes and prints its result. Check it, then combine the results yourself.`,
@@ -315,11 +315,11 @@ export const PACK_INSTRUCTION = (fy: string): string =>
   ].join('\n');
 
 /**
- * The models guide's one-line routing guidance (docs/pack-mode.md), appended to the Pack section when Pack
- * mode is on. The daemon derives it from the guide in effect at EVERY launch and never stores it, so a
- * restart hears the latest saved guide; the whole guidance is in `recommend`. It carries no quote,
- * backslash or control character, so it sits inside either harness's quoting unchanged — and the wrapper
- * strips them anyway, so a hand-set value cannot break a launch.
+ * The ONE routing prompt (docs/pack-mode.md § The routing prompt), whole, as one `Routing: …` line appended
+ * to the Pack section when Pack mode is on — the same text Jev decides with. The daemon renders it from the
+ * prompt in effect at EVERY launch and never stores it, so a restart hears the latest saved prompt. It
+ * carries no quote, backslash or control character, so it sits inside either harness's quoting unchanged —
+ * and the wrapper strips them anyway, so a hand-set value cannot break a launch.
  */
 export const PACK_ROUTING_ENV = 'FY_PACK_ROUTING';
 
@@ -399,11 +399,20 @@ export const SET_UP_FERRETRY_INSTRUCTION = (fy: string): string =>
   `Ferretry settings: this machine's logins, MCP servers, skills, profiles, runtimes and its Warden, Learning, Voice and Pack settings are YAML files (\`${fy} config path\`). Before changing any, read \`${fy} config guide\` and follow it: never write a secret value into a file (\`${fy} secret set NAME\`, then \${secret:NAME}), run \`${fy} config check\` after every edit, and an edit that loosens what the machine may spend or what agents may do waits for the owner — tell them; never work around it.`;
 
 /**
- * Everything every agent runtime is told, as ONE appended system prompt section: the tools, then the
- * settings rules. A ferret's own sections follow it (`FERRET_SECTIONS`), added by its wrapper.
+ * Attention — how an agent asks the human for something. Notifications ARE the Attention system, so the
+ * one command that raises an item is what reaches them. Every agent runtime gets it; `notify` is left
+ * out on purpose (an item notifies by being raised).
+ */
+export const ATTENTION_INSTRUCTION = (fy: string): string =>
+  `Attention: when you need the human to decide or do something, raise it with \`${fy} attention add "<ask>"\` — that is what notifies them. Ask first, in one line. Add \`--context "<what you are doing and why you need this>"\` (one or two sentences); for a few clear choices add \`--kind choice --option "<label>"\` per choice (2–4, short). Never for progress updates or because you finished. The answer arrives as a normal message ("[answer to !A3 …]"); you can mention an item as \`!A3\`. If it is settled some other way, resolve your own item: \`${fy} attention done <id>\`.`;
+
+/**
+ * Everything every agent runtime is told, as ONE appended system prompt section: the tools, the
+ * settings rules, then how to raise Attention. A ferret's own sections follow it (`FERRET_SECTIONS`),
+ * added by its wrapper.
  */
 export const AGENT_INSTRUCTION = (fy: string): string =>
-  `${AGENT_TOOLS_INSTRUCTION}\n\n${SET_UP_FERRETRY_INSTRUCTION(fy)}`;
+  `${AGENT_TOOLS_INSTRUCTION}\n\n${SET_UP_FERRETRY_INSTRUCTION(fy)}\n\n${ATTENTION_INSTRUCTION(fy)}`;
 
 /**
  * What an agent launched with `env` is told, by section name and size — never the text: the sections
@@ -411,7 +420,7 @@ export const AGENT_INSTRUCTION = (fy: string): string =>
  * tool is left in.
  *
  * Read off the same constants the wrapper renders (`../wrappers.ts`), so it cannot describe a prompt
- * the wrapper would not build: the tools and settings sections always, each {@link FERRET_SECTIONS}
+ * the wrapper would not build: the tools, settings and attention sections always, each {@link FERRET_SECTIONS}
  * entry whose variable is exactly `1`, and the question tool only for a launch whose
  * {@link SESSION_MODE_ENV} is `interactive` (O3) — the same rule for Claude and Codex. It describes an
  * AGENT runtime's wrapper, the only kind a session can be started on.
@@ -422,6 +431,7 @@ export function launchInstructions(fy: string, env: Readonly<Record<string, stri
     sections: [
       { id: 'tools', chars: AGENT_TOOLS_INSTRUCTION.length },
       { id: 'settings', chars: SET_UP_FERRETRY_INSTRUCTION(fy).length },
+      { id: 'attention', chars: ATTENTION_INSTRUCTION(fy).length },
       ...FERRET_SECTIONS(fy)
         .filter(section => env[section.env] === '1')
         .map(section => ({

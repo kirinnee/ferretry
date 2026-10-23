@@ -11,9 +11,6 @@
  * where a pointer finds "not on this machine", since nothing under the field can be hovered.
  */
 
-import type { PackFleetModel } from '@ferretry/protocol';
-import { type KeyboardEvent, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { cn } from '../../lib/class-names.ts';
 import {
   applyModelSuggestion,
   type MentionSegment,
@@ -22,9 +19,12 @@ import {
   mentionQueryAt,
   modelKey,
   modelMentions,
+  type PackFleetModel,
   suggestionsAreSettled,
   suggestModels,
-} from '../../lib/pack/model-mentions.ts';
+} from '@ferretry/protocol';
+import { type KeyboardEvent, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { cn } from '../../lib/class-names.ts';
 
 export const NOT_HERE = 'not on this machine';
 const UNKNOWN = 'no catalog lists this model';
@@ -90,6 +90,8 @@ export interface ModelMentionFieldProps {
   readonly disabled?: boolean;
   /** Field-level problem, shown under it and announced through `aria-describedby`. */
   readonly problem?: string | null;
+  /** More text that describes the field, drawn by the caller (a character counter): its element id. */
+  readonly describedBy?: string;
 }
 
 export function ModelMentionField({
@@ -105,6 +107,7 @@ export function ModelMentionField({
   placeholder,
   disabled = false,
   problem = null,
+  describedBy: extraDescription,
 }: ModelMentionFieldProps) {
   const listboxId = `${id}-models`;
   const hintId = `${id}-mentions`;
@@ -182,7 +185,11 @@ export function ModelMentionField({
   };
 
   const sync = (field: HTMLTextAreaElement | HTMLInputElement): void => setCaret(field.selectionStart);
-  const describedBy = [mentions.length > 0 ? hintId : null, problem === null ? null : problemId]
+  const describedBy = [
+    mentions.length > 0 ? hintId : null,
+    problem === null ? null : problemId,
+    extraDescription ?? null,
+  ]
     .filter(part => part !== null)
     .join(' ');
   const shared = {
@@ -195,7 +202,8 @@ export function ModelMentionField({
     'aria-describedby': describedBy === '' ? undefined : describedBy,
     'aria-invalid': problem === null ? undefined : true,
     autoComplete: 'off',
-    spellCheck: multiline,
+    // The browser's own red squiggle under a model id would read as the unknown-model mark.
+    spellCheck: false,
     disabled,
     maxLength,
     placeholder,

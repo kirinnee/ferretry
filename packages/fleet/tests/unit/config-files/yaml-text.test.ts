@@ -527,6 +527,19 @@ describe('editConfigText — the file itself', () => {
     should(meaningOf(actual)).deepEqual({ a: 2 });
   });
 
+  it('should keep the modeline when the edit removes the first key it sat above', () => {
+    // Arrange
+    const existing = `${MODELINE}\na: 1\nb: 2\n`;
+
+    // Act
+    const actual = editConfigText(existing, { b: 2, c: 3 }, { a: 1, b: 2 }, MODELINE);
+
+    // Assert
+    should(actual.startsWith(MODELINE)).be.true();
+    should(occurrences(actual, 'yaml-language-server:')).equal(1);
+    should(meaningOf(actual)).deepEqual({ b: 2, c: 3 });
+  });
+
   it('should find a modeline below a comment or two, within the first lines of the file', () => {
     // Arrange
     const existing = `# owner note\n# another\n${MODELINE}\na: 1\n`;

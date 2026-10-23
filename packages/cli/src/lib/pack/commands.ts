@@ -1,12 +1,5 @@
 import type { Command } from 'commander';
-import type {
-  PackController,
-  PackGuideAcceptOptions,
-  PackGuideDescribeOptions,
-  PackGuideShowOptions,
-  PackGuideSuggestOptions,
-  PackRecommendOptions,
-} from './controller.ts';
+import type { PackCleanUpOptions, PackController, PackGuideShowOptions, PackRecommendOptions } from './controller.ts';
 
 /** Reports a failure as one line and an exit code, never a stack trace. */
 export interface PackFailureReporter {
@@ -24,9 +17,8 @@ export function registerRecommendCommand(
 ): void {
   program
     .command('recommend')
-    .description('which models can run a piece of work here now, best first (Pack mode)')
-    .argument('<task...>', 'the part to hand to a sub-ferret')
-    .option('--use-case <id>', 'use this models-guide use case instead of matching the words')
+    .description('the routing prompt and the models that can run a piece of work here now (Pack mode)')
+    .argument('[task...]', 'the part to hand to a sub-ferret (echoed back; nothing is matched against it)')
     .option('--json', 'print the payload')
     .action(async (words: string[], options: PackRecommendOptions) => {
       try {
@@ -38,16 +30,16 @@ export function registerRecommendCommand(
 }
 
 /**
- * Mounts `fy guide` (docs/pack-mode.md): the models guide Pack mode routes with — show it, and the
- * generator: what a builder is shown, a suggestion drafted by a short-lived ferret, accepting it, undoing that,
- * and the owner's description of a model.
+ * Mounts `fy guide` (docs/pack-mode.md): the ONE routing prompt Pack mode picks sub-ferret models with — show
+ * it, what Clean up is shown, Clean up itself (a short-lived ferret rewrites the prompt; a person reviews the
+ * diff), accepting the rewrite and undoing that.
  */
 export function registerGuideCommand(
   program: Command,
   controller: PackController,
   reporter: PackFailureReporter,
 ): void {
-  const guide = program.command('guide').description('the models guide Pack mode picks sub-ferret models with');
+  const guide = program.command('guide').description('the routing prompt Pack mode picks sub-ferret models with');
   const run =
     <A extends unknown[]>(act: (...args: A) => Promise<void>) =>
     async (...args: A): Promise<void> => {
@@ -59,45 +51,33 @@ export function registerGuideCommand(
     };
   guide
     .command('show')
-    .description('the guide in effect: where it came from, its routing guidance and its use cases')
-    .option('--json', 'print the guide')
+    .description('the routing prompt in effect, where it came from, and whether a clean-up can be undone')
+    .option('--json', 'print the routing prompt')
     .action(run(async (options: PackGuideShowOptions) => await controller.showGuide(options)));
   guide
     .command('inventory')
-    .description('what a guide builder is shown: every model, its runtimes here, their readiness and quota')
+    .description('what Clean up is shown: every runtime, its models, readiness and quota, and every model')
     .option('--json', 'print the inventory')
     .action(run(async (options: PackGuideShowOptions) => await controller.showInventory(options)));
   guide
-    .command('suggest')
-    .description('have a short-lived ferret draft a whole guide (one model run), then show it as a diff')
-    .option('--runtime <runtime>', 'run the builder on this runtime (default: the ready one with the most quota left)')
-    .option('--model <model>', 'run the builder on this model (default: the runtime’s own)')
-    .option('--prefs <text>', 'routing preferences for this draft (default: pack.yaml’s routingPreferences)')
-    .option('-y, --apply', 'accept the whole draft as soon as it is checked')
-    .option('--json', 'print the run and its checked draft')
-    .action(run(async (options: PackGuideSuggestOptions) => await controller.suggest(options)));
+    .command('clean-up')
+    .description(
+      'have a short-lived ferret rewrite the routing prompt to fit (one model run), then review it as a diff',
+    )
+    .option('--prompt <text>', 'the rough prompt to clean up (default: the one in effect)')
+    .option('--prompt-file <file>', 'read the rough prompt from a file')
+    .option('--runtime <runtime>', 'run it on this runtime (default: the ready one with the most quota left)')
+    .option('--model <model>', 'run it on this model (default: the runtime’s own)')
+    .option('-y, --apply', 'accept the rewrite as soon as it is checked')
+    .option('--json', 'print the run and its checked rewrite')
+    .action(run(async (options: PackCleanUpOptions) => await controller.cleanUp(options)));
   guide
     .command('accept')
-    .description("write a builder's checked draft into models-guide.yaml, whole or in part (undo puts it back)")
-    .argument('<run>', 'the run id guide suggest printed')
-    .option('--only <ids>', 'accept only these use cases, comma-separated')
-    .option('--keep-routing', 'keep the routing guidance in effect')
-    .action(run(async (id: string, options: PackGuideAcceptOptions) => await controller.accept(id, options)));
+    .description('write a clean-up’s checked rewrite as the routing prompt (undo puts the old one back)')
+    .argument('<run>', 'the run id guide clean-up printed')
+    .action(run(async (id: string) => await controller.accept(id)));
   guide
     .command('undo')
-    .description('put back the guide the last accepted suggestion replaced')
+    .description('put back the routing prompt the last accepted clean-up replaced')
     .action(run(async () => await controller.undo()));
-  guide
-    .command('describe')
-    .description('describe a model in your own words; the guide builder reads it')
-    .argument('<model>', 'a model id or label any catalog lists')
-    .argument('[text...]', 'what it is good and bad at, what it costs, when to use or avoid it')
-    .option('--provider <provider>', 'the catalog, when more than one lists the model')
-    .option('--clear', "use the catalog's description again")
-    .action(
-      run(
-        async (model: string, words: string[], options: PackGuideDescribeOptions) =>
-          await controller.describe(model, words, options),
-      ),
-    );
 }

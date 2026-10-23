@@ -1,102 +1,76 @@
 /**
- * The models-guide generator as a person reads it in a terminal (docs/pack-mode.md § Suggesting a guide):
- * the inventory the builder is shown, and a builder's draft as a diff against the guide in effect — the
- * routing guidance before and after, then every use case added, changed, removed or left the same, then what
- * the check dropped or changed. Pure: values in, text out.
+ * Clean up as a person reads it in a terminal (docs/pack-mode.md § Clean up): the inventory the clean-up
+ * ferret is shown, and its rewrite as a before/after word diff, then its notes. Pure: values in, text out.
  */
 import {
-  diffGuide,
-  type GuideCandidate,
-  type GuideRouting,
-  type GuideUseCaseDiff,
-  type PackGuideJob,
-  type PackGuideSuggestion,
+  diffText,
+  type PackCleanUpJob,
+  type PackCleanUpSuggestion,
   type PackInventory,
-  routingChanged,
+  type TextDiffPart,
 } from '@ferretry/protocol';
 
-const candidateLine = (candidate: GuideCandidate, index: number): string => {
-  const harness = candidate.harness === undefined ? '' : ` (${candidate.harness})`;
-  const effort = candidate.effort === undefined ? '' : ` @${candidate.effort}`;
-  return `      ${String(index + 1)}. ${candidate.provider}/${candidate.model}${harness}${effort} — ${candidate.why}`;
-};
+const RED = '\u001b[31m';
+const GREEN = '\u001b[32m';
+const RESET = '\u001b[39m';
 
-const MARK: Readonly<Record<GuideUseCaseDiff['status'], string>> = {
-  added: '+ added  ',
-  changed: '~ changed',
-  removed: '- removed',
-  same: '= same   ',
-};
-
-/** One use case's row of the diff. */
-function diffRow(row: GuideUseCaseDiff): readonly string[] {
-  const useCase = row.after ?? row.before;
-  const head = `  ${MARK[row.status]} ${row.id} — ${useCase?.title ?? ''}`;
-  if (row.status === 'same' || row.status === 'removed') return [head];
-  return [head, ...row.changes.map(change => `      ${change}`), ...(row.after?.candidates ?? []).map(candidateLine)];
+/** One part of the diff: removed as `[-…-]`, added as `{+…+}`, tinted when `color`; whitespace stays outside. */
+function partText(part: TextDiffPart, color: boolean): string {
+  if (part.kind === 'same') return part.text;
+  const inner = part.text.trim();
+  if (inner === '') return part.kind === 'removed' ? '' : part.text;
+  const lead = part.text.slice(0, part.text.length - part.text.trimStart().length);
+  const trail = part.text.slice(part.text.trimEnd().length);
+  const [open, close, tint] = part.kind === 'removed' ? (['[-', '-]', RED] as const) : (['{+', '+}', GREEN] as const);
+  const marked = `${open}${inner}${close}`;
+  return `${lead}${color ? `${tint}${marked}${RESET}` : marked}${trail}`;
 }
 
-const indented = (text: string, prefix: string): readonly string[] => text.split('\n').map(line => `${prefix}${line}`);
+/** A rewrite against the prompt it was made from, as one running text with the changes marked. */
+export function renderTextDiff(before: string, after: string, color: boolean): string {
+  return diffText(before, after)
+    .map(part => partText(part, color))
+    .join('')
+    .trimEnd();
+}
 
-/** The routing guidance before and after, or that it is unchanged. */
-function routingLines(before: GuideRouting | undefined, after: GuideRouting): readonly string[] {
-  if (!routingChanged(before, after)) return ['Routing guidance: unchanged.'];
+/** A checked rewrite as a person reviews it: who wrote it, the diff, the notes, and how to accept it. */
+export function renderCleanUp(
+  job: PackCleanUpJob,
+  suggestion: PackCleanUpSuggestion,
+  bin: string,
+  color: boolean,
+): string {
+  const by = suggestion.suggested;
   return [
-    'Routing guidance:',
-    ...(before === undefined ? ['  (none before)'] : indented(before.prompt, '  - ')),
-    ...indented(after.prompt, '  + '),
-    `  short line: ${after.short}`,
-  ];
-}
-
-/** A draft as a diff against the guide in effect, with what the check took out or changed. */
-export function renderSuggestion(job: PackGuideJob, suggestion: PackGuideSuggestion, bin: string): string {
-  const diff = diffGuide(suggestion.current.useCases, suggestion.useCases);
-  const notes = (title: string, list: PackGuideSuggestion['dropped']): readonly string[] =>
-    list.length === 0
+    `Cleaned up by ${by.by} on ${by.via} (${by.at.slice(0, 16).replace('T', ' ')}Z). Removed text is [-like this-], added text is {+like this+}:`,
+    '',
+    renderTextDiff(suggestion.before, suggestion.after, color),
+    ...(suggestion.notes.length === 0
       ? []
       : [
           '',
-          `${title} (${String(list.length)}):`,
-          ...list.map(note => `  - ${note.useCase === undefined ? '' : `${note.useCase}: `}${note.message}`),
-        ];
-  return [
-    `Suggested by ${suggestion.suggested.by} on ${suggestion.suggested.via} (${suggestion.suggested.at.slice(0, 16).replace('T', ' ')}Z), against ${suggestion.current.source === 'file' ? 'your guide' : 'the built-in guide'}.`,
+          `Notes (${String(suggestion.notes.length)}):`,
+          ...suggestion.notes.map(n => `  - ${n.kind}: ${n.message}`),
+        ]),
     '',
-    ...routingLines(
-      suggestion.current.routing === undefined
-        ? undefined
-        : { prompt: suggestion.current.routing.prompt, short: suggestion.current.routing.short },
-      suggestion.routing,
-    ),
-    '',
-    'Use cases:',
-    ...diff.flatMap(diffRow),
-    ...notes('Dropped', suggestion.dropped),
-    ...notes('Changed by the check', suggestion.flagged),
-    '',
-    `Accept it all: ${bin} guide accept ${job.id}`,
-    `Accept some:   ${bin} guide accept ${job.id} --only <id,id> [--keep-routing]`,
+    `Accept with: ${bin} guide accept ${job.id}`,
   ].join('\n');
 }
 
-/** The inventory: every runtime with its readiness and quota, then every model with its headroom. */
+/** The inventory: every runtime with its readiness, quota and models, then every model with where it runs. */
 export function renderInventory(inventory: PackInventory): string {
   return [
     `Runtimes (${String(inventory.runtimes.length)}):`,
-    ...inventory.runtimes.map(
-      runtime =>
-        `  ${runtime.ready ? 'ready  ' : 'cannot '} ${runtime.name} (${runtime.harness}${runtime.provider === undefined ? '' : `, ${runtime.provider}`}) · quota ${runtime.quota.summary}${runtime.refusal === undefined ? '' : ` — ${runtime.refusal.message}`}`,
-    ),
+    ...inventory.runtimes.flatMap(runtime => [
+      `  ${runtime.ready ? 'ready ' : 'cannot'} ${runtime.name} (${runtime.harness}${runtime.provider === undefined ? '' : `, ${runtime.provider}`}) · quota ${runtime.quota.summary}${runtime.refusal === undefined ? '' : ` — ${runtime.refusal.message}`}`,
+      `      models: ${runtime.models.length === 0 ? '(none)' : runtime.models.join(', ')}`,
+    ]),
     '',
     `Models (${String(inventory.models.length)}):`,
     ...inventory.models.flatMap(model => [
-      `  ${model.provider}/${model.id}${model.harness === 'codex' ? ' (codex)' : ''} — ${model.label}, ${model.tier}${model.retires === undefined ? '' : `, retires ${model.retires}`}`,
-      `      ${model.describedBy === 'owner' ? 'yours' : 'catalog'}: ${model.description}`,
-      `      ${model.headroom.summary}`,
+      `  ${model.provider}/${model.id}${model.harness === 'codex' ? ' (codex)' : ''} — ${model.label}, ${model.tier}${model.context === undefined ? '' : `, ${String(model.context)} context`}`,
+      `      runs on: ${model.runtimes.length === 0 ? 'no runtime here' : model.runtimes.map(r => `${r.name}${r.ready ? '' : ' (cannot start now)'}`).join(', ')}`,
     ]),
-    ...(inventory.preferences === undefined
-      ? []
-      : ['', 'Your routing preferences:', ...indented(inventory.preferences, '  ')]),
   ].join('\n');
 }
