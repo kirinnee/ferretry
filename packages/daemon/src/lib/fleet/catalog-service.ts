@@ -71,6 +71,7 @@ import type {
   FleetMachineView,
   FleetProfileDraftRequest,
   FleetProfileDraftView,
+  FleetRunningSession,
   FleetRuntimeCatalog,
   SessionStatus,
 } from '@ferretry/protocol';
@@ -84,6 +85,7 @@ import {
   profileCatalog,
   profileDraftView,
   runtimeCatalog,
+  runtimesUsingCredential,
 } from './catalog.ts';
 import { FleetCredentialRefusal, type FleetCredentialSignOutOutcome } from './credentials-service.ts';
 import {
@@ -658,7 +660,12 @@ export class FleetCatalogService {
       );
     }
     const named = change.kind === 'runtime.rename' || change.kind === 'runtime.remove';
-    const runtimeFacts = named ? await this.#runtimeFacts(change.name, ids) : {};
+    const runtimeFacts =
+      change.kind === 'credential.remove'
+        ? await this.#loginRuntimeFacts(reading.model, change.id, ids)
+        : named
+          ? await this.#runtimeFacts(change.name, ids)
+          : {};
     let edit: ReturnType<typeof deriveAccountChange>;
     try {
       edit = deriveAccountChange(reading.model, change, {
@@ -729,6 +736,7 @@ export class FleetCatalogService {
           ...(runtimeFacts.runningOn === undefined || runtimeFacts.runningOn.length === 0
             ? {}
             : { runningSessions: runtimeFacts.runningOn }),
+          ...(edit.orphanedSecrets === undefined ? {} : { orphanedSecrets: edit.orphanedSecrets }),
         },
       },
     };
@@ -757,6 +765,24 @@ export class FleetCatalogService {
       ...(entry === undefined ? {} : { id: entry.id, formerNames: entry.formerNames }),
     });
     return { runtimeReferences, runningOn };
+  }
+
+  /**
+   * What removing a login needs to know about the runtimes on it: the ferrets running on each, by
+   * runtime, so the dry run can say how many keep running whichever way each runtime is moved.
+   */
+  async #loginRuntimeFacts(
+    model: AccountModel,
+    credential: string,
+    ids: RuntimeIds,
+  ): Promise<Pick<AccountChangeFacts, 'runningByRuntime' | 'runningOn'>> {
+    const byRuntime: Record<string, readonly FleetRunningSession[]> = {};
+    for (const name of runtimesUsingCredential(model, credential)) {
+      const { runningOn } = await this.#runtimeFacts(name, ids);
+      if (runningOn !== undefined) byRuntime[name] = runningOn.map(session => ({ ...session, runtime: name }));
+    }
+    const all = Object.values(byRuntime).flat();
+    return { runningByRuntime: byRuntime, ...(Object.keys(byRuntime).length === 0 ? {} : { runningOn: all }) };
   }
 
   /**

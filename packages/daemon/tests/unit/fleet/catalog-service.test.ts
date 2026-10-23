@@ -1296,3 +1296,59 @@ describe('renaming and removing a runtime', () => {
     should((general.preview as { runningSessions?: unknown }).runningSessions).be.undefined();
   });
 });
+
+describe('removing a login that runtimes use', () => {
+  const withSpare = (): AccountModel => {
+    const model = MODEL();
+    return parseAccountModel({
+      ...model,
+      credentials: { ...model.credentials, 'codex-spare': { harness: 'codex', store: 'ferretry' } },
+    });
+  };
+  const records: FleetCatalogServiceDeps['sessionRecords'] = async () => [
+    { id: 's-5', name: 'Elsewhere', harness: 'codex', agent: 'codex-default', status: 'running' },
+    { id: 's-6', name: 'Quiet', harness: 'codex', agent: 'codex-default', status: 'completed' },
+  ];
+  const ids = async (): Promise<RuntimeIds> => ({
+    version: 1,
+    runtimes: { 'codex-default': { id: '00000000-0000-4000-8000-0000000000bb', formerNames: [] } },
+  });
+
+  it('should stage a switch in one plan and say which ferrets keep running', async () => {
+    // Arrange
+    const { service, state } = world({ ids, sessionRecords: records });
+    state.reading = configReading(withSpare(), 'rev-1');
+
+    // Act
+    const staged = FleetAccountChangeViewSchema.parse(
+      await service.propose({
+        kind: 'credential.remove',
+        id: 'codex-slot',
+        switchRuntimes: { 'codex-default': 'codex-spare' },
+      }),
+    );
+
+    // Assert
+    should(staged.summary).equal('Remove login codex-slot, switching 1 runtime to codex-spare');
+    const preview = staged.preview as Extract<typeof staged.preview, { kind: 'apply' }>;
+    should(preview.runningSessions).deepEqual([
+      { id: 's-5', name: 'Elsewhere', harness: 'codex', runtime: 'codex-default' },
+    ]);
+    should(preview.orphanedSecrets).be.undefined();
+  });
+
+  it('should refuse while a runtime is left on the login', async () => {
+    // Arrange
+    const { service, state } = world({ ids });
+    state.reading = configReading(withSpare(), 'rev-1');
+
+    // Act
+    const refused = await refusal(
+      service.propose({ kind: 'credential.remove', id: 'codex-slot', switchRuntimes: {} }),
+      'fleet_change_refused',
+    );
+
+    // Assert
+    should(refused.message).containEql('still uses this login (codex-default)');
+  });
+});

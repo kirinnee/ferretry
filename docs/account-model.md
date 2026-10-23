@@ -132,6 +132,45 @@ converted across to the other) before removing; if any cannot be moved, nothing 
 machine's **default runtime for new agents** is refused until another default is picked, and the app
 offers that picker inline. Past sessions stay in history.
 
+## Removing a login
+
+**Browser:** every login's row and its own page carry a red **Remove**, a `fleet.configure` act
+([grants.md](grants.md)): a device that may not make it sees it disabled with the reason.
+**Terminal:** `fy login rm <id>`, refused while a runtime still uses the login.
+
+Both use one `credential.remove` change. **Sign out keeps the login but it needs sign-in again. Remove
+deletes it.** They are different acts and the app says so beside the button.
+
+The dry run says what removing it does **first**: which runtimes use the login (`Used by 2 runtimes: a, b`
+or `Not used by any runtime`) and how many ferrets are running on them — they keep running. For each
+runtime that uses it the app asks for a choice, and the choices go into the **same change**, so one apply
+does everything or nothing:
+
+| Choice                          | In the change                   | What the daemon checks                                                                                           |
+| ------------------------------- | ------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| **Switch to** another login     | `switchRuntimes: {runtime: id}` | the target exists, is not the login being removed, and drives the runtime's CLI (`runtimeHarness`)               |
+| **Remove the runtime too**      | `removeRuntimes: [runtime]`     | the same rules as removing a runtime above: its default runtime is refused unless `defaultRuntime` names another |
+| a new default, when one is lost | `defaultRuntime: runtime`       | it is an agent runtime that stays                                                                                |
+
+A runtime that uses the login and is in neither list is refused, so nothing is left pointing at a login
+that no longer exists. Ferrets running on a runtime that goes can be moved first (the app's **Move them
+to …**, as for a runtime removal); if one cannot be moved nothing is removed.
+
+### What removing deletes — and what it does not
+
+| What                                                           | On a removal                                                                                                                                                                               |
+| -------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `config/logins/<id>.yaml`                                      | **deleted**                                                                                                                                                                                |
+| its label and its place in each runtime's config               | **deleted** / re-pointed at the login picked                                                                                                                                               |
+| a `ferretry` login’s saved sign-in (`fleet/credentials/<id>/`) | **kept**, unless the app's **Sign it out first** box is ticked: that runs the existing sign-out, which deletes it, and only then removes. A sign-out the tool refuses stops the removal.   |
+| a `host` login (your own terminal's sign-in)                   | **never touched**: Ferretry only stops using it                                                                                                                                            |
+| an `environment` login's secrets (`${secret:NAME}`)            | **kept** in the secret store. The dry run lists the names that nothing else uses now; deleting a secret is a `secrets` act of its own ([secrets.md](secrets.md)), never a side effect here |
+| past sessions and analytics                                    | **kept**                                                                                                                                                                                   |
+
+No credential value is read, shown, copied or logged by any of this: the change names logins and secrets
+by id, the preview carries names only (`orphanedSecrets`), and the secret store keeps its _use, never
+read_ contract.
+
 ## Routes
 
 All under `/v1/fleet`. Reads need `fleet.use`; every write is `fleet.configure`, and a caller that is

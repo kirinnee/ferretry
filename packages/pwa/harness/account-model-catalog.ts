@@ -365,20 +365,68 @@ const RUNNING_ON_REMOVED = [
   { id: 'ms0v8vgc-77c1e2b0', name: 'Otter, fixing the onboarding inset on phones', harness: 'codex' },
 ];
 
+/** The ferrets running on the two runtimes that use claude-work, as a login removal's dry run lists them. */
+const RUNNING_ON_LOGIN = [
+  { id: 'ms0v8vgc-d445a669', name: 'Fisher', harness: 'claude', runtime: 'claude-review' },
+  {
+    id: 'ms0v8vgc-77c1e2b0',
+    name: 'Otter, fixing the onboarding inset on phones',
+    harness: 'claude',
+    runtime: 'claude-review',
+  },
+  { id: 'ms0v8vgc-5e0a31c9', name: 'Stoat', harness: 'claude', runtime: 'claude-work' },
+];
+
+interface HarnessChange {
+  readonly kind?: string;
+  readonly id?: string;
+  readonly switchRuntimes?: Record<string, string>;
+  readonly removeRuntimes?: readonly string[];
+}
+
+/** What removing a login says it does, in the daemon's words, for the choices made in the dialog. */
+const loginRemoval = (change: HarnessChange) => {
+  const used = change.id === 'claude-work';
+  const switches = Object.entries(change.switchRuntimes ?? {});
+  const removals = change.removeRuntimes ?? [];
+  const consequences: string[] = [];
+  for (const target of new Set(switches.map(([, to]) => to))) {
+    const names = switches.filter(([, to]) => to === target).map(([name]) => name);
+    consequences.push(
+      `${names.join(' and ')} ${names.length === 1 ? 'moves' : 'move'} to login ${target}, starting with it the next time ${names.length === 1 ? 'it launches' : 'they launch'}.`,
+    );
+  }
+  if (removals.length > 0)
+    consequences.push(
+      `Removes ${removals.length} ${removals.length === 1 ? 'runtime' : 'runtimes'}: ${removals.join(', ')}. Their past sessions stay in history.`,
+    );
+  if (used)
+    consequences.push(
+      '3 ferrets are running on those runtimes. They keep running, but restarting one on a removed runtime later needs another runtime.',
+    );
+  consequences.push('Its saved sign-in stays on this machine. To delete it, sign the login out before removing it.');
+  return { consequences, running: used ? RUNNING_ON_LOGIN : [] };
+};
+
 const stagedView = (init: RequestInit | undefined) => {
-  const { change } = JSON.parse(String(init?.body ?? '{}')) as { change?: { kind?: string } };
+  const { change } = JSON.parse(String(init?.body ?? '{}')) as { change?: HarnessChange };
   // A removal says what it does to the ferrets on the runtime first, as the daemon's dry run does.
   const removal = change?.kind === 'runtime.remove';
+  const login = change?.kind === 'credential.remove' ? loginRemoval(change) : null;
+  const running = login === null ? (removal ? RUNNING_ON_REMOVED : []) : login.running;
   return {
     id: HARNESS_CHANGE_ID,
     revision: 'harness',
     change,
     summary: 'Preview of this change on studio-mac',
-    consequences: removal
-      ? [
-          '2 ferrets are running on it. They keep running, but restarting them later needs another runtime. Its past sessions stay in history.',
-        ]
-      : [],
+    consequences:
+      login !== null
+        ? login.consequences
+        : removal
+          ? [
+              '2 ferrets are running on it. They keep running, but restarting them later needs another runtime. Its past sessions stay in history.',
+            ]
+          : [],
     expiresAt: new Date(Date.now() + 15 * 60_000).toISOString(),
     state: 'pending',
     preview: {
@@ -386,7 +434,7 @@ const stagedView = (init: RequestInit | undefined) => {
       operations: [],
       documents: [],
       runtimes: [],
-      ...(removal ? { runningSessions: RUNNING_ON_REMOVED } : {}),
+      ...(running.length > 0 ? { runningSessions: running } : {}),
     },
   };
 };

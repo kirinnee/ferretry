@@ -1291,16 +1291,18 @@ describe('deriveAccountChange: credential.remove', () => {
     ]);
   });
 
-  it('should remove a login Ferretry signed in and say it stays until signed out', () => {
+  it('should remove a login Ferretry signed in and say its sign-in stays unless signed out first', () => {
     // Act
     const edit = derive({ kind: 'credential.remove', id: 'spare' });
 
     // Assert
     should(edit.model.credentials.spare).be.undefined();
-    should(edit.consequences).deepEqual(['Its saved login stays on this machine until you sign it out.']);
+    should(edit.consequences).deepEqual([
+      'Its saved sign-in stays on this machine. To delete it, sign the login out before removing it.',
+    ]);
   });
 
-  it('should say nothing about a login kept in the environment', () => {
+  it('should say only the secrets a login kept in the environment leaves behind', () => {
     // Arrange
     const model = modelOf({
       credentials: {
@@ -1315,7 +1317,10 @@ describe('deriveAccountChange: credential.remove', () => {
 
     // Assert
     should(edit.model.credentials.keyed).be.undefined();
-    should(edit.consequences).deepEqual([]);
+    should(edit.orphanedSecrets).deepEqual(['KEY']);
+    should(edit.consequences).deepEqual([
+      '1 saved secret (KEY) is used by nothing else now, and stays in the secret store until you delete it there.',
+    ]);
   });
 
   it('should refuse a login that does not exist', () => {
@@ -1343,6 +1348,166 @@ describe('deriveAccountChange: credential.remove', () => {
     should(refusalOf({ kind: 'credential.remove', id: 'work' }, model)).equal(
       '2 runtimes still use this login (alpha and beta). Move them to another login first.',
     );
+  });
+});
+
+describe('deriveAccountChange: credential.remove with runtimes on the login', () => {
+  /** Two runtimes on `work`, a spare login of the same CLI, and a Codex login. */
+  const crowded = (extra: Record<string, unknown> = {}): AccountModel =>
+    modelOf({
+      machine: { ...modelOf().machine, defaultRuntime: 'beta' },
+      credentials: {
+        work: { harness: 'claude', store: 'ferretry', label: 'Work' },
+        home: { harness: 'claude', store: 'ferretry', label: 'Home' },
+        spare: { harness: 'claude', store: 'ferretry' },
+        'my-codex': { harness: 'codex', store: 'host' },
+      },
+      runtimes: {
+        alpha: { credential: 'work', profile: 'team', agent: false },
+        beta: { credential: 'work', profile: 'base', agent: true },
+        gamma: { credential: 'home', profile: 'base', agent: true },
+      },
+      advanced: { commands: [] },
+      ...extra,
+    });
+
+  const remove = (overrides: Record<string, unknown>): AccountPlanChange =>
+    ({ kind: 'credential.remove', id: 'work', ...overrides }) as AccountPlanChange;
+
+  it('should switch every runtime to another login of its CLI in the same plan as the removal', () => {
+    // Act
+    const edit = derive(remove({ switchRuntimes: { alpha: 'spare', beta: 'spare' } }), crowded());
+
+    // Assert
+    should(edit.model.credentials.work).be.undefined();
+    should(edit.model.runtimes.alpha?.credential).equal('spare');
+    should(edit.model.runtimes.beta?.credential).equal('spare');
+    should(edit.model.runtimes.gamma?.credential).equal('home');
+    should(edit.summary).equal('Remove login work, switching 2 runtimes to spare');
+    should(edit.consequences[0]).equal(
+      'alpha and beta move to login spare, starting with it the next time they launch.',
+    );
+  });
+
+  it('should remove a runtime with the login and keep the others', () => {
+    // Act
+    const edit = derive(
+      remove({ switchRuntimes: { alpha: 'spare' }, removeRuntimes: ['beta'], defaultRuntime: 'gamma' }),
+      crowded(),
+    );
+
+    // Assert
+    should(edit.model.runtimes.beta).be.undefined();
+    should(edit.model.runtimes.alpha?.credential).equal('spare');
+    should(edit.model.machine.defaultRuntime).equal('gamma');
+    should(edit.summary).equal('Remove login work, switching 1 runtime to spare and removing 1 runtime');
+    should(edit.consequences).containEql('Removes 1 runtime: beta. Their past sessions stay in history.');
+    should(edit.consequences).containEql("gamma becomes this machine's default runtime for new agents.");
+  });
+
+  it('should refuse to remove the default runtime until another default is named', () => {
+    // Act + Assert
+    should(refusalOf(remove({ switchRuntimes: { alpha: 'spare' }, removeRuntimes: ['beta'] }), crowded())).equal(
+      "beta is this machine's default runtime for new agents. Pick another default first.",
+    );
+  });
+
+  it('should refuse a new default that is itself being removed', () => {
+    // Act + Assert
+    should(
+      refusalOf(
+        remove({ switchRuntimes: { alpha: 'spare' }, removeRuntimes: ['beta'], defaultRuntime: 'beta' }),
+        crowded(),
+      ),
+    ).equal('beta is being removed, so it cannot be the new default');
+  });
+
+  it('should refuse a login of the other CLI as a switch target', () => {
+    // Act + Assert
+    should(refusalOf(remove({ switchRuntimes: { alpha: 'my-codex', beta: 'spare' } }), crowded())).equal(
+      'alpha runs Claude Code, and login my-codex does not drive it. Pick a Claude Code login.',
+    );
+  });
+
+  it.each([
+    [{ switchRuntimes: { alpha: 'ghost', beta: 'spare' } }, 'no login ghost exists on this machine'],
+    [{ switchRuntimes: { alpha: 'work', beta: 'spare' } }, 'runtime alpha cannot switch to the login being removed'],
+    [
+      { switchRuntimes: { gamma: 'spare', alpha: 'spare', beta: 'spare' } },
+      'runtime gamma does not use login work, so this change cannot move it',
+    ],
+    [{ removeRuntimes: ['ghost'] }, 'runtime ghost does not use login work, so this change cannot move it'],
+    [
+      { switchRuntimes: { alpha: 'spare', beta: 'spare' }, removeRuntimes: ['beta'], defaultRuntime: 'gamma' },
+      'runtime beta cannot be both switched and removed',
+    ],
+  ])('should refuse %j', (overrides, sentence) => {
+    // Act + Assert
+    should(refusalOf(remove(overrides), crowded())).equal(sentence);
+  });
+
+  it('should name the runtimes left on the login when the plan leaves one out', () => {
+    // Act + Assert
+    should(refusalOf(remove({ switchRuntimes: { alpha: 'spare' } }), crowded())).equal(
+      '1 runtime still uses this login (beta). Switch it to another login or remove it first.',
+    );
+  });
+
+  it('should count the ferrets running on the runtimes, whichever way each is moved', () => {
+    // Arrange
+    const running = [{ id: 's1', name: 'scout', harness: 'claude' as const, runtime: 'alpha' }];
+
+    // Act
+    const edit = derive(remove({ switchRuntimes: { alpha: 'spare', beta: 'spare' } }), crowded(), {
+      ...FACTS,
+      runningByRuntime: { alpha: running, beta: [] },
+    });
+
+    // Assert
+    should(edit.consequences).containEql('1 ferret is running on those runtimes. It keeps running.');
+  });
+
+  it('should say a removed runtime needs another runtime to restart its ferrets', () => {
+    // Arrange
+    const running = [
+      { id: 's1', name: 'scout', harness: 'claude' as const, runtime: 'alpha' },
+      { id: 's2', name: 'rook', harness: 'claude' as const, runtime: 'alpha' },
+    ];
+
+    // Act
+    const edit = derive(remove({ switchRuntimes: { beta: 'spare' }, removeRuntimes: ['alpha'] }), crowded(), {
+      ...FACTS,
+      runningByRuntime: { alpha: running, beta: [] },
+    });
+
+    // Assert
+    should(edit.consequences).containEql(
+      '2 ferrets are running on those runtimes. They keep running, but restarting one on a removed runtime later needs another runtime.',
+    );
+  });
+
+  it('should leave in the secret store the names only this login used, and say so', () => {
+    // Arrange
+    const model = modelOf({
+      credentials: {
+        keyed: {
+          harness: 'claude',
+          store: 'environment',
+          env: { ANTHROPIC_API_KEY: secretRef('KEY'), OTHER: secretRef('SEARCH') },
+        },
+      },
+      runtimes: {},
+      advanced: { commands: [] },
+    });
+
+    // Act
+    const edit = derive({ kind: 'credential.remove', id: 'keyed' }, model);
+
+    // Assert
+    should(edit.orphanedSecrets).deepEqual(['KEY']);
+    should(edit.consequences).deepEqual([
+      '1 saved secret (KEY) is used by nothing else now, and stays in the secret store until you delete it there.',
+    ]);
   });
 });
 

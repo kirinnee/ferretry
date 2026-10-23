@@ -170,9 +170,9 @@ const WALKS_SETTINGS = !(
  * shows, two are the Security settings block's loosening sentence and out-of-bounds sentence, and two
  * are the Files panel and its Edit as YAML sheet showing a refused save's located issues.
  *
- * MACHINES, sixty per viewport: its section, four tab switches, five Settings-tab flows (Import
+ * MACHINES, sixty-four per viewport: its section, four tab switches, five Settings-tab flows (Import
  * again found + names, Clone source, Clone preview with what it runs, Install), the Machines list the switcher opens, eleven Runtimes and
- * Credentials pages, three runtime dialogs (Rename, Remove with ferrets to move, Remove the default runtime), a sign-in picked up where it was left, four Codex sign-in screens (device code, link,
+ * Credentials pages, three runtime dialogs (Rename, Remove with ferrets to move, Remove the default runtime), three Remove-a-login dialogs (nobody uses it, two runtimes switched, a runtime removed too) and a login page's Remove, a sign-in picked up where it was left, four Codex sign-in screens (device code, link,
  * its callback port held by another program, finishing), the old pairing a reset left, four Add a login frames (its tiles,
  * its sign-in, the provider tiles and a provider's key),
  * eighteen Profiles and Components pages (a profile page, a delete card, a refused mix, an override chip,
@@ -203,7 +203,7 @@ const WALKS_SETTINGS = !(
  * chose over committed golden images: one integer per intentional change, versus a re-baselined
  * directory of PNGs whose diff nobody can review.
  */
-const SETTINGS_SIDEWAYS_CHECKS = 185;
+const SETTINGS_SIDEWAYS_CHECKS = 193;
 
 /**
  * HOW MANY MACHINES GEOMETRY CHECKS A RUN THAT WALKS SETTINGS OWES (`assertMachinesGeometry`): one per
@@ -218,7 +218,7 @@ const SETTINGS_SIDEWAYS_CHECKS = 185;
  * that stops being reached reads exactly like a check that passed — so a Machines frame added or removed
  * edits this, and the pull request says which frames the gate covers.
  */
-const MACHINES_GEOMETRY_CHECKS = 126;
+const MACHINES_GEOMETRY_CHECKS = 128;
 
 /**
  * HOW MANY TERMINAL GEOMETRY CHECKS A RUN THAT WALKS SETTINGS OWES (`assertTerminalGeometry`): one per
@@ -3052,6 +3052,42 @@ try {
           await credentialsPanel.locator('[data-credential-sign-out]').scrollIntoViewIfNeeded();
           await accountShot('credential-sign-out', 'sign-out confirmation');
           await credentialsPanel.locator('[data-sign-out-keep]').click();
+          await credentialsPanel.locator('[data-page-back]').click();
+          // REMOVE A LOGIN: the Remove button on a row opens a dialog that shows its impact first — a login nobody
+          // uses; one used by two runtimes with "switch to" chosen (the default); and the same with the
+          // runtime removed too, which lists the ferrets on it with a move picker. Each must fit with its confirm
+          // button whole and in view. The login's own page carries the same button beside the sign-out difference.
+          const loginDialogShot = async (name: string, label: string): Promise<void> => {
+            await page
+              .locator('[data-runtime-dialog="remove-login"] [data-login-remove-impact]')
+              .waitFor({ state: 'visible' });
+            await assertNoSidewaysScroll(page, `the ${label} dialog at ${viewport.name}`);
+            await assertRuntimeDialogGeometry(page, `the ${label} dialog at ${viewport.name}`);
+            const target = join(outDir, `settings-machines-${name}-${viewport.name}.png`);
+            await settledShot(target);
+            process.stdout.write(`📸 Settings Machines ${label} ${viewport.name} -> ${target}\n`);
+          };
+          const closeLoginDialog = async (): Promise<void> => {
+            await page.locator('[data-runtime-dialog-cancel]').click();
+            await page.locator('[data-runtime-dialog]').waitFor({ state: 'detached' });
+          };
+          await credentialsPanel.locator('[data-credential-remove="codex-team"]').click();
+          await loginDialogShot('login-remove-unused', 'Remove a login nobody uses');
+          await closeLoginDialog();
+          await credentialsPanel.locator('[data-credential-remove="claude-work"]').click();
+          await loginDialogShot('login-remove-switch', 'Remove a login used by two runtimes, switching them');
+          await page.locator('[data-login-remove-runtime-too="claude-review"]').click();
+          await page.locator('[data-login-remove-ferrets]').waitFor({ state: 'visible' });
+          await page.locator('[data-runtime-move-target]').selectOption('claude-default');
+          await loginDialogShot('login-remove-runtime', 'Remove a login, removing a runtime too');
+          await closeLoginDialog();
+          await credentialsPanel.locator('[data-credential-row="claude-work"]').click();
+          await credentialsPanel.locator('[data-credential-remove-zone]').waitFor({ state: 'visible' });
+          await accountShot('credential-remove-zone', 'login page Remove', async () => {
+            await credentialsPanel
+              .locator('[data-credential-remove-zone]')
+              .evaluate(element => element.scrollIntoView({ block: 'center', behavior: 'instant' }));
+          });
           await credentialsPanel.locator('[data-page-back]').click();
           // ADD A LOGIN (U21): ONE screen — every provider as tiles (the two sign-ins, then the API-key
           // providers under their headings, two to a row on a phone, with the search box thirteen providers

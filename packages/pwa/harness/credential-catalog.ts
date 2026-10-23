@@ -71,12 +71,12 @@ const CREDENTIALS = {
       label: 'personal',
       sharedWithTerminal: true,
       usage: usage(38, 61),
-      usedBy: ['claude-agent', 'claude-default', 'claude-review'],
+      usedBy: ['claude-agent', 'claude-default'],
       signOut: {
         available: true,
         sentence:
-          'Sign out of you@example.com (personal)? This also signs out claude in your terminal on studio-mac. 3 runtimes will need sign-in.',
-        runtimesAffected: 3,
+          'Sign out of you@example.com (personal)? This also signs out claude in your terminal on studio-mac. 2 runtimes will need sign-in.',
+        runtimesAffected: 2,
         signsOutTerminal: true,
       },
     }),
@@ -85,10 +85,10 @@ const CREDENTIALS = {
       word: 'refresh_due',
       label: 'work',
       usage: usage(71, 83),
-      usedBy: ['claude-work'],
+      usedBy: ['claude-review', 'claude-work'],
       signOut: {
         available: true,
-        sentence: 'Sign out of you@example.com (work)? 1 runtime will need sign-in.',
+        sentence: 'Sign out of you@example.com (work)? 2 runtimes will need sign-in.',
         runtimesAffected: 1,
         signsOutTerminal: false,
       },
@@ -594,7 +594,11 @@ const RUNTIMES = {
       },
     }),
     runtime({ name: 'claude-default', sameAs: [] }),
-    runtime({ name: 'claude-review', profile: 'Review' }),
+    runtime({
+      name: 'claude-review',
+      profile: 'Review',
+      credential: { id: 'claude-work', store: 'ferretry', label: 'work', status: 'refresh_due' },
+    }),
     runtime({
       name: 'claude-work',
       credential: { id: 'claude-work', store: 'ferretry', label: 'work', status: 'refresh_due' },

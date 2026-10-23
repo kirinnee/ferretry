@@ -7,7 +7,7 @@
  */
 
 import type { FleetCredentialView, FleetMachineView } from '@ferretry/protocol';
-import { ChevronLeft, ChevronRight, Plus } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Plus, Trash2 } from 'lucide-react';
 import { useState } from 'react';
 import { cn } from '../../../lib/class-names.ts';
 import type { DaemonConnection } from '../../../lib/daemon-connection.ts';
@@ -17,6 +17,7 @@ import { HARNESS_NAMES } from '../components/component-model.ts';
 import { checkFleetCredential } from '../credentials-api.ts';
 import type { FleetClientFactory } from '../fleet-client.ts';
 import { type MachineData, machineDetailHash, useMachineData, useMachineDetail } from '../runtimes/machine-data.ts';
+import { runtimeActionRefusal } from '../runtimes/runtime-actions-model.ts';
 import { AccountStatus, ProviderQuota } from '../shell/account-status.tsx';
 import { changeRefusalSentence } from '../shell/apply-change.ts';
 import { type AccountChanges, ChangeApplyPanel, useAccountChanges } from '../shell/apply-change-panel.tsx';
@@ -42,7 +43,9 @@ import {
   usageBarText,
 } from './credentials-model.ts';
 import { LocalModelsPanel } from './local-models-panel.tsx';
+import { SIGN_OUT_VERSUS_REMOVE } from './login-remove-model.ts';
 import { LoginScopeChip } from './login-scope-chip.tsx';
+import { RemoveLoginDialog } from './remove-login-dialog.tsx';
 import { useLocalModels } from './use-local-models.ts';
 
 export function UsageBars({ credential, now }: { readonly credential: FleetCredentialView; readonly now: number }) {
@@ -100,6 +103,33 @@ export function CredentialBadges({ credential }: { readonly credential: FleetCre
   );
 }
 
+/** Remove, in the destructive style. Disabled, with the reason, when the caller may not change the fleet. */
+function RemoveLoginButton({
+  credential,
+  refusal,
+  onRemove,
+}: {
+  readonly credential: FleetCredentialView;
+  readonly refusal: string | null;
+  readonly onRemove: () => void;
+}) {
+  return (
+    <Button
+      type="button"
+      size="sm"
+      variant="danger"
+      disabled={refusal !== null}
+      title={refusal ?? undefined}
+      aria-label={`Remove ${credential.id}`}
+      data-credential-remove={credential.id}
+      onClick={onRemove}
+    >
+      <Trash2 size={14} aria-hidden="true" />
+      Remove
+    </Button>
+  );
+}
+
 interface CredentialPageProps {
   readonly credential: FleetCredentialView;
   readonly data: MachineData;
@@ -111,6 +141,9 @@ interface CredentialPageProps {
   readonly changes: AccountChanges;
   readonly reload: () => Promise<MachineData | null>;
   readonly onBack: () => void;
+  /** Why this browser may not remove a login, or `null` when it may. */
+  readonly removeRefusal: string | null;
+  readonly onRemove: () => void;
   readonly now: number;
   readonly pollMs?: number;
 }
@@ -125,6 +158,8 @@ function CredentialPage({
   changes,
   reload,
   onBack,
+  removeRefusal,
+  onRemove,
   now,
   pollMs,
 }: CredentialPageProps) {
@@ -376,6 +411,7 @@ function CredentialPage({
                   <Button
                     type="button"
                     variant="ghost"
+                    className="kt-btn--flush-start"
                     data-credential-sign-out-ask=""
                     onClick={() => {
                       changes.clear();
@@ -390,6 +426,18 @@ function CredentialPage({
           )}
         </div>
       )}
+
+      <div className="flex flex-col items-start gap-2 border-t border-border pt-3" data-credential-remove-zone="">
+        <p className="m-0 text-meta leading-base text-muted" data-credential-remove-hint="">
+          {SIGN_OUT_VERSUS_REMOVE}
+        </p>
+        <RemoveLoginButton credential={credential} refusal={removeRefusal} onRemove={onRemove} />
+        {removeRefusal === null ? null : (
+          <p className="m-0 text-meta leading-base text-warn" data-credential-remove-refused="">
+            Remove is off here: {removeRefusal}
+          </p>
+        )}
+      </div>
     </section>
   );
 }
@@ -398,36 +446,48 @@ function CredentialRow({
   credential,
   href,
   now,
+  removeRefusal,
+  onRemove,
 }: {
   readonly credential: FleetCredentialView;
   readonly href: string;
   readonly now: number;
+  readonly removeRefusal: string | null;
+  readonly onRemove: () => void;
 }) {
   return (
-    <a
-      href={href}
-      className="kt-panel flex min-h-control min-w-0 items-start gap-3 p-panel text-left no-underline hover:border-accent hover:no-underline"
-      data-credential-row={credential.id}
+    <div
+      className="kt-panel flex min-w-0 flex-col gap-2 p-panel hover:border-accent"
+      data-credential-card={credential.id}
     >
-      <AccountStatus word={credential.status.word} className="mt-1" />
-      <span className="flex min-w-0 flex-1 flex-col gap-1">
-        <span className="truncate font-mono text-row text-fg">
-          {credential.store === 'environment' ? credential.id : credentialEmail(credential)}
+      <a
+        href={href}
+        className="flex min-h-control min-w-0 items-start gap-3 text-left no-underline hover:no-underline"
+        data-credential-row={credential.id}
+      >
+        <AccountStatus word={credential.status.word} className="mt-1" />
+        <span className="flex min-w-0 flex-1 flex-col gap-1">
+          <span className="truncate font-mono text-row text-fg">
+            {credential.store === 'environment' ? credential.id : credentialEmail(credential)}
+          </span>
+          <CredentialBadges credential={credential} />
+          <span className="text-cell text-muted">
+            {credential.status.label} · {credentialUse(credential)}
+          </span>
+          {credential.usage.provider === undefined ? (
+            credential.status.word === 'ready' ? (
+              <UsageBars credential={credential} now={now} />
+            ) : null
+          ) : (
+            <ProviderQuota reading={credential.usage.provider} now={now} />
+          )}
         </span>
-        <CredentialBadges credential={credential} />
-        <span className="text-cell text-muted">
-          {credential.status.label} · {credentialUse(credential)}
-        </span>
-        {credential.usage.provider === undefined ? (
-          credential.status.word === 'ready' ? (
-            <UsageBars credential={credential} now={now} />
-          ) : null
-        ) : (
-          <ProviderQuota reading={credential.usage.provider} now={now} />
-        )}
-      </span>
-      <ChevronRight size={16} aria-hidden="true" className="mt-1 shrink-0 text-muted" />
-    </a>
+        <ChevronRight size={16} aria-hidden="true" className="mt-1 shrink-0 text-muted" />
+      </a>
+      <div className="flex justify-end border-t border-border-soft pt-2">
+        <RemoveLoginButton credential={credential} refusal={removeRefusal} onRemove={onRemove} />
+      </div>
+    </div>
   );
 }
 
@@ -452,6 +512,8 @@ export function CredentialsTab({
   const changes = useAccountChanges({ connection, createClient });
   const [detail, openDetail] = useMachineDetail(machineName, 'credentials');
   const [adding, setAdding] = useState(false);
+  const [removing, setRemoving] = useState<string | null>(null);
+  const removeRefusal = runtimeActionRefusal(changes.authority);
 
   if (adding)
     return (
@@ -489,24 +551,57 @@ export function CredentialsTab({
       </p>
     );
 
+  const removingLogin = removing === null ? undefined : data.credentials.credentials.find(item => item.id === removing);
+  const removeDialog =
+    removingLogin === undefined ? null : (
+      <RemoveLoginDialog
+        credential={removingLogin}
+        credentials={data.credentials.credentials}
+        runtimes={data.runtimes.runtimes}
+        machine={machine}
+        machineName={machineName}
+        changes={changes}
+        connection={connection}
+        createClient={createClient}
+        onClose={() => {
+          changes.clear();
+          setRemoving(null);
+        }}
+        onRemoved={() => {
+          changes.clear();
+          setRemoving(null);
+          if (detail === removingLogin.id) openDetail(null);
+          void reload();
+        }}
+      />
+    );
+
   const credential = detail === null ? undefined : data.credentials.credentials.find(item => item.id === detail);
   if (credential !== undefined)
     return (
-      <CredentialPage
-        key={credential.id}
-        credential={credential}
-        data={data}
-        machine={machine}
-        machineName={machineName}
-        online={online}
-        connection={connection}
-        createClient={createClient}
-        changes={changes}
-        reload={reload}
-        onBack={() => openDetail(null)}
-        now={now()}
-        {...(pollMs === undefined ? {} : { pollMs })}
-      />
+      <>
+        <CredentialPage
+          key={credential.id}
+          credential={credential}
+          data={data}
+          machine={machine}
+          machineName={machineName}
+          online={online}
+          connection={connection}
+          createClient={createClient}
+          changes={changes}
+          reload={reload}
+          onBack={() => openDetail(null)}
+          removeRefusal={removeRefusal}
+          onRemove={() => {
+            changes.clear();
+            setRemoving(credential.id);
+          }}
+          now={now()}
+          {...(pollMs === undefined ? {} : { pollMs })}
+        />
+        {removeDialog}
+      </>
     );
 
   const startAdd = (): void => {
@@ -557,6 +652,11 @@ export function CredentialsTab({
                       credential={item}
                       href={machineDetailHash(machineName, 'credentials', item.id)}
                       now={now()}
+                      removeRefusal={removeRefusal}
+                      onRemove={() => {
+                        changes.clear();
+                        setRemoving(item.id);
+                      }}
                     />
                   </li>
                 ))}
@@ -570,6 +670,7 @@ export function CredentialsTab({
           ) : null}
         </>
       )}
+      {removeDialog}
     </section>
   );
 }
