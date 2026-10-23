@@ -262,6 +262,76 @@ describe('useComposerReferenceCatalogs', () => {
     run(() => view.unmount());
   });
 
+  test('reads nothing when the host owns the live Attention board, and offers that board as it moves', async () => {
+    const calls: string[] = [];
+    const client = reader(() => attentionListing(), calls);
+    const shared = (items: ComposerReferenceCatalogSources['attention']): ComposerReferenceCatalogSources => ({
+      tasks: taskListing().tasks,
+      skills: skillsListing,
+      waitForTasks: () => undefined,
+      waitForSkills: () => undefined,
+      ...(items === undefined ? {} : { attention: items }),
+    });
+    let latest: ReturnType<typeof useComposerReferenceCatalogs> | undefined;
+    const probe = (sources: ComposerReferenceCatalogSources) => (
+      <CatalogProbe
+        client={client}
+        onCatalogs={catalogs => {
+          latest = catalogs;
+        }}
+        sessionId="session-a"
+        sources={sources}
+      />
+    );
+    // Unread: the board has no items yet, so the family is unproved rather than empty.
+    const view = render(probe(shared({ items: undefined })));
+    await flushCatalogs();
+    expect(calls).toEqual([]);
+    expect(latest?.attention).toBeUndefined();
+    expect(latest?.settled()).toBeUndefined();
+
+    // The board is read, then a new item is raised: both reach the menu with no read of this module's own.
+    const first = attentionListing().items;
+    run(() => view.update(probe(shared({ items: first }))));
+    expect(latest?.attention).toBe(first);
+    const raised = [...first, { ...first[0], id: 'A7' }] as typeof first;
+    run(() => view.update(probe(shared({ items: raised }))));
+    expect(latest?.attention?.map(item => item.id)).toEqual(['A3', 'A7']);
+
+    // A board that could not be read says so, under the Attention family.
+    run(() => view.update(probe(shared({ items: undefined, failure: 'board refused' }))));
+    expect(latest?.failures.attention).toBe('board refused');
+    await flushCatalogs();
+    expect(calls).toEqual([]);
+    run(() => view.unmount());
+  });
+
+  test('a host with no live board still has its one Attention read, and a refusal is said under Attention', async () => {
+    const calls: string[] = [];
+    const client = reader(() => Promise.reject(new Error('attention refused')), calls);
+    let latest: ReturnType<typeof useComposerReferenceCatalogs> | undefined;
+    const view = render(
+      <CatalogProbe
+        client={client}
+        onCatalogs={catalogs => {
+          latest = catalogs;
+        }}
+        sessionId="session-a"
+        sources={{
+          tasks: taskListing().tasks,
+          skills: skillsListing,
+          waitForTasks: () => undefined,
+          waitForSkills: () => undefined,
+        }}
+      />,
+    );
+    await flushCatalogs();
+    expect(calls).toEqual(['/v1/sessions/session-a/attention']);
+    expect(latest?.attention).toBeUndefined();
+    expect(latest?.failures.attention).toBe('attention refused');
+    run(() => view.unmount());
+  });
+
   test('fences a late answer after session navigation', async () => {
     const pending: Array<(value: unknown) => void> = [];
     const slow = reader(path =>

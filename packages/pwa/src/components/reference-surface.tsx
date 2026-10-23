@@ -82,9 +82,12 @@ export interface SessionReferenceSurfaceOptions {
   readonly sessions?: readonly SessionView[];
   /** This session's task board, when the host already holds it. */
   readonly tasks?: readonly { readonly id: string }[];
-  /** This session's unresolved Attention ledger, when the host already holds it. */
+  /**
+   * This session's Attention LEDGER — open and resolved ids — when the host already holds it. An
+   * answered item is still on the record, so its `!A3` stays a link.
+   */
   readonly attentionIds?: readonly AttentionId[];
-  /** Opens one proved unresolved item in the session's focused action modal. */
+  /** Opens the session's Attention panel at one proved item, open or resolved. */
   readonly onAttentionOpen?: (id: AttentionId, opener?: HTMLElement | null) => void;
   /** This session's skills catalog names, when the host already holds it. */
   readonly skills?: readonly string[];
@@ -186,9 +189,9 @@ export function sessionReferenceSurface(options: SessionReferenceSurfaceOptions)
     },
     onTaskOpen: destinations.openTasks ?? (() => openSidePaneTab(scope, 'tasks')),
     // Attention is deliberately NOT a side-pane tab (handover #35). A proved
-    // unresolved id now opens the focused action modal; when either the ledger
-    // or opener is absent Markdown still leaves `!A3` as prose rather than
-    // manufacturing a dead link.
+    // id opens the Attention panel at the top of the conversation, at that item;
+    // when either the ledger or opener is absent Markdown still leaves `!A3` as
+    // prose rather than manufacturing a dead link.
     ...(attention === undefined || onAttentionOpen === undefined ? {} : { onAttentionOpen }),
     onSkillOpen: destinations.openSkills ?? (() => openSidePaneTab(scope, 'skills')),
     ...(onNavigate === undefined ? {} : { onNavigate }),

@@ -36,7 +36,12 @@ import { TranscriptUnboundNotice } from '../../components/transcript-unbound-not
 import { fetchSessionAnalytics } from '../../features/analytics/analytics-api.ts';
 import { analyticsIdQuery } from '../../features/analytics/session-analytics-query.ts';
 import { SessionAnalyticsSurface } from '../../features/analytics/session-analytics-surface.tsx';
-import { type AttentionActionClient, AttentionActionModal } from '../../features/attention/attention-action-modal.tsx';
+import {
+  type AttentionActionClient,
+  AttentionPanel,
+  type AttentionPanelFocus,
+  attentionLedgerIds,
+} from '../../features/attention/attention-panel.tsx';
 import { browserPageLabel } from '../../features/browser/browser-surface-list.tsx';
 import { InAppBrowserWorkspace } from '../../features/browser/in-app-browser.tsx';
 import type { UnifiedBrowserDependencies } from '../../features/browser/unified-browser-surface.tsx';
@@ -95,6 +100,7 @@ import { statusMark, TERMINAL_STATUSES } from '../../shell/status-mark.tsx';
 import type { DaemonAccountPickerStore } from '../account-picker-store.ts';
 import { agentReferenceIdentityKey } from '../agent-references.ts';
 import type { DaemonAttentionClient } from '../attention-client.ts';
+import { badgeText } from '../attention-inbox.ts';
 import type { AttentionLoadStatus } from '../attention-store.ts';
 import type { DaemonBrowserLoginStore } from '../browser-login.ts';
 import type { ComposerEnterKeyPreference } from '../composer-keybinding.ts';
@@ -243,6 +249,12 @@ export interface SessionChatPageProps {
   readonly onNavigate?: (to: string) => void;
   /** This session's live Attention, when the host has subscribed to it. */
   readonly attention?: SessionAttentionModel;
+  /**
+   * The item the conversation was opened AT (`?attention=A3`, from a notification or an unread row):
+   * the Attention panel opens, scrolls to it and rings it. A new value re-targets; a session change
+   * forgets it. Absent or `null`, the panel starts folded.
+   */
+  readonly attentionTarget?: AttentionId | null;
   /**
    * This session's live-feed state and the reader's manual reconnect.
    *
@@ -412,6 +424,7 @@ export function SessionChatPage({
   daemonSessions,
   onNavigate,
   attention,
+  attentionTarget = null,
   liveStream,
   project = null,
   onOpenSessions,
@@ -485,33 +498,22 @@ export function SessionChatPage({
   );
   const skills = useSessionSkills(connection, scope, referenceFetch);
   const attentionId = useId();
-  const [attentionOpen, setAttentionOpen] = useState(false);
-  const [attentionTarget, setAttentionTarget] = useState<AttentionId | null>(null);
-  const attentionOpener = useRef<HTMLElement | null>(null);
+  // THE ATTENTION PANEL'S TWO FACTS: whether it is unfolded, and the latest request to be shown
+  // somewhere in it (a `?attention=` link, a `!A3` click, the header's count). Both belong to this
+  // session and reset with it.
+  const [attentionExpanded, setAttentionExpanded] = useState(false);
+  const [attentionFocus, setAttentionFocus] = useState<AttentionPanelFocus | null>(null);
   const attentionItems = attention?.snapshot?.items ?? NO_ATTENTION_ITEMS;
-  const attentionIds = useMemo(() => attentionItems.map(item => item.id), [attentionItems]);
-  // The ledger's IDENTITY, not its array identity: a re-hydration that returns
-  // the same unresolved ids must not rebuild the reference surface and re-parse
-  // every Markdown block in the transcript.
-  const attentionKey = attentionIds.join(',');
-  const openAttention = useCallback((id: AttentionId | null, opener?: HTMLElement | null): void => {
-    attentionOpener.current = opener ?? null;
-    setAttentionTarget(id);
-    setAttentionOpen(true);
+  const showAttention = useCallback((target: AttentionId | null): void => {
+    setAttentionExpanded(true);
+    setAttentionFocus(current => ({ target, seq: (current?.seq ?? 0) + 1 }));
   }, []);
-  const closeAttention = useCallback((): void => {
-    setAttentionOpen(false);
-    setAttentionTarget(null);
-    // A reference link can be scrolled out of the transcript, or re-rendered
-    // into a different node, while the sheet is open — so the element that
-    // opened it may simply not be there to return to. The trigger always is.
-    const opener = attentionOpener.current;
-    attentionOpener.current = null;
-    if (opener?.isConnected) opener.focus();
-    // No document at all in a renderer or SSR pass: there is nothing to focus
-    // and nothing to fail about, so the fallback simply does not apply.
-    else if (typeof document !== 'undefined') document.getElementById(`${attentionId}-trigger`)?.focus();
-  }, [attentionId]);
+  const onAttentionExpandedChange = useCallback((expanded: boolean): void => {
+    setAttentionExpanded(expanded);
+    // Folding the panel puts the ring away too: the item the link pointed at has been seen.
+    if (!expanded) setAttentionFocus(null);
+  }, []);
+  const openAttentionReference = useCallback((id: AttentionId): void => showAttention(id), [showAttention]);
   // Dictation clean-up reads the conversation on screen instead of fetching the session's history again.
   const entriesRef = useRef(entries);
   entriesRef.current = entries;
@@ -522,6 +524,18 @@ export function SessionChatPage({
     waitForTasks: search.waitForTasks,
     waitForSkills: skills.settled,
     ...(search.taskState === 'unavailable' && search.taskError !== null ? { taskFailure: search.taskError } : {}),
+    // The `!` menu reads the SAME live board the panel draws, so an item raised a moment ago is offered
+    // without a reload — and the page asks the daemon for this board once, not twice.
+    ...(attention === undefined
+      ? {}
+      : {
+          attention: {
+            items: attention.snapshot?.items,
+            ...(attention.status === 'error' && attention.snapshot === null
+              ? { failure: 'this session’s Attention could not be read' }
+              : {}),
+          },
+        }),
   });
   /** Codex's native model picker is in the agent's own pane: the runtime sheet's way there is the Console. */
   const { showAgentTab, openFile, openSurface } = workspace;
@@ -559,6 +573,19 @@ export function SessionChatPage({
   // in the transcript (`agentReferenceIdentityKey`).
   const fleetIdentity =
     daemonSessions === undefined ? null : agentReferenceIdentityKey(connection.daemonId, daemonSessions);
+  // THE LEDGER proves a `!A3` — open AND resolved — so a reference in older chat stays a link after
+  // the item is answered and opens its resolved entry. A host with no live board falls back to the
+  // catalog's one read; a board not yet read proves nothing (unread is not empty).
+  const attentionProof =
+    attention === undefined
+      ? composerCatalogs.attention?.map(item => item.id)
+      : attention.snapshot === null
+        ? undefined
+        : attentionLedgerIds(attention.snapshot);
+  // The ledger's IDENTITY, not its array identity: a re-hydration that returns
+  // the same ids must not rebuild the reference surface and re-parse every
+  // Markdown block in the transcript.
+  const attentionKey = attentionProof?.join(',') ?? null;
   // biome-ignore lint/correctness/useExhaustiveDependencies: fleetIdentity and attentionKey are the stable memo keys for daemonSessions and the attention ledger
   const references = useMemo(
     () =>
@@ -569,9 +596,7 @@ export function SessionChatPage({
         ...(session.config.cwd === undefined ? {} : { cwd: session.config.cwd }),
         ...(daemonSessions === undefined ? {} : { sessions: daemonSessions }),
         ...(composerCatalogs.tasks === undefined ? {} : { tasks: composerCatalogs.tasks }),
-        ...(composerCatalogs.attention === undefined
-          ? {}
-          : { attentionIds: composerCatalogs.attention.map(item => item.id) }),
+        ...(attentionProof === undefined ? {} : { attentionIds: attentionProof }),
         ...(composerCatalogs.skills?.skills === undefined
           ? {}
           : { skills: composerCatalogs.skills.skills.map(skill => skill.name) }),
@@ -582,8 +607,9 @@ export function SessionChatPage({
         // Both halves or neither. The ledger alone proves `!A3` without giving
         // it anywhere to go, and an opener alone would link an unproved id — so
         // a host that has not subscribed leaves the token as prose, which the
-        // reference standard calls the only honest state.
-        ...(attention === undefined ? {} : { attentionIds, onAttentionOpen: openAttention }),
+        // reference standard calls the only honest state. A proved click opens
+        // the Attention panel at that item.
+        ...(attention === undefined ? {} : { onAttentionOpen: openAttentionReference }),
       }),
     [
       connection,
@@ -592,12 +618,11 @@ export function SessionChatPage({
       session.config.cwd,
       fleetIdentity,
       composerCatalogs.tasks,
-      composerCatalogs.attention,
       composerCatalogs.skills,
       onNavigate,
       attention === undefined,
       attentionKey,
-      openAttention,
+      openAttentionReference,
       terminals,
       browserPages.status,
       referenceDestinations,
@@ -637,14 +662,20 @@ export function SessionChatPage({
     setPendingAction(null);
     setActionError(null);
     setActionNotice(null);
-    // Attention belongs to the session that raised it. Carrying an open modal —
-    // or worse, a requested `!A3` — across a navigation would offer one
-    // session's ask over another session's board, so the whole trio resets with
-    // the pairing and the session id.
-    setAttentionOpen(false);
-    setAttentionTarget(null);
-    attentionOpener.current = null;
+    // Attention belongs to the session that raised it. Carrying an unfolded
+    // panel — or worse, a requested `!A3` — across a navigation would ring one
+    // session's id on another session's board, so both reset with the pairing
+    // and the session id.
+    setAttentionExpanded(false);
+    setAttentionFocus(null);
   }, [connection, session.config.id]);
+
+  // `?attention=A3` opens the conversation AT that item. Declared after the reset above so that, on a
+  // navigation that carries a target, the reset runs first and the new target wins.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the pairing and session id re-arm the same target on a new session
+  useEffect(() => {
+    if (attentionTarget !== null) showAttention(attentionTarget);
+  }, [attentionTarget, showAttention, connection, session.config.id]);
 
   const publish = useCallback(
     (view: SessionView): void => {
@@ -919,19 +950,20 @@ export function SessionChatPage({
       setActionError(`could not copy the session id: ${actionFailureMessage(reason)}`),
     );
   };
+  // The header's count: how many items wait on the reader, and the way to the panel that holds them.
   const needsYou =
     attention === undefined || attentionItems.length === 0 ? null : (
       <button
         aria-controls={attentionId}
-        aria-expanded={attentionOpen}
-        aria-label={`Needs you: ${attentionItems.length} unanswered`}
+        aria-expanded={attentionExpanded}
+        aria-label={`${attentionItems.length} Attention ${attentionItems.length === 1 ? 'item needs' : 'items need'} you`}
         className="fy-needs-you"
         data-needs-you={attentionItems.length}
         id={`${attentionId}-trigger`}
-        onClick={event => openAttention(null, event.currentTarget)}
+        onClick={() => (attentionExpanded ? onAttentionExpandedChange(false) : showAttention(null))}
         type="button"
       >
-        needs you
+        {`${badgeText(attentionItems.length)} ${attentionItems.length === 1 ? 'needs' : 'need'} you`}
       </button>
     );
 
@@ -1301,6 +1333,23 @@ export function SessionChatPage({
           <CacheUpdating className="absolute left-1/2 top-2 z-10 -translate-x-1/2" />
         </div>
       ) : null}
+      {/* THE ATTENTION PANEL, above the transcript: one line while folded, every item this ferret
+          raised when open. Inside the reference provider, so its prose reads the transcript's grammar.
+          Keyed on the scope, so a card's busy state or refusal never survives into another session. */}
+      {attention === undefined ? null : (
+        <AttentionPanel
+          client={attention.client}
+          connection={connection}
+          focus={attentionFocus}
+          id={attentionId}
+          key={`${connection.daemonId}:${session.config.id}`}
+          onExpandedChange={onAttentionExpandedChange}
+          expanded={attentionExpanded}
+          scope={scope}
+          snapshot={attention.snapshot}
+          status={attention.status}
+        />
+      )}
       <div className="fy-chat-log">
         <Transcript
           activity={pane.activity}
@@ -1460,23 +1509,6 @@ export function SessionChatPage({
                 {utility === 'analytics' ? <SessionAnalyticsSurface connection={connection} scope={scope} /> : null}
               </div>
             </BottomSheet>
-            {/* Inside the reference provider, so Attention prose reads the SAME
-            grammar the transcript does — including a `!A3` that re-targets
-            this very sheet. */}
-            {attention === undefined ? null : (
-              <AttentionActionModal
-                client={attention.client}
-                connection={connection}
-                id={attentionId}
-                onClose={closeAttention}
-                open={attentionOpen}
-                scope={scope}
-                snapshot={attention.snapshot}
-                status={attention.status}
-                swipeEnabled={compact}
-                targetId={attentionTarget}
-              />
-            )}
             {convert.sheet}
             <MigrateSheet
               {...(accountPicker === undefined ? {} : { accountPicker })}

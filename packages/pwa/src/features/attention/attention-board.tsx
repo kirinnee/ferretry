@@ -456,6 +456,6 @@ function ResolutionAudit({ items }: { readonly items: readonly ResolvedAttention
  * feeds the badge from the same store. Two definitions of one fact is the defect
  * `docs/standards/fact-ownership/index.md` exists to remove, so the wrapper and
  * its transport are gone rather than kept in sync. The live surface is
- * `attention-action-modal.tsx` over `DaemonAttentionClient`; this board stays a
+ * `attention-panel.tsx` over `DaemonAttentionClient`; this board stays a
  * pure, render-testable ledger with its data handed to it.
  */
