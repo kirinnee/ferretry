@@ -2148,18 +2148,17 @@ try {
             continue;
           }
           if (ATTENTION_ONLY) {
-            // The WHOLE viewport, not the card: the action modal is a fixed
-            // overlay, so an element capture would frame the trigger and miss
-            // the entire feature. Pressing the real trigger is also the point —
-            // this proves the journey, not just that the component renders.
-            const trigger = page.locator('#harness-attention-trigger');
-            await trigger.scrollIntoViewIfNeeded();
-            await trigger.click();
-            await page.locator('#harness-attention-sheet').waitFor({ state: 'visible' });
-            const target = join(outDir, `attention-modal-${viewport.name}.png`);
-            await page.screenshot({ path: target, animations: 'disabled' });
+            // Pressing the real strip is the point — this proves the journey (folded line → open
+            // panel), not just that the component renders.
+            const panel = page.locator('#harness-attention-panel');
+            const strip = panel.locator('[data-attention-strip]');
+            await strip.scrollIntoViewIfNeeded();
+            await strip.click();
+            await panel.locator('[data-attention-panel]').waitFor({ state: 'visible' });
+            const target = join(outDir, `attention-panel-${viewport.name}.png`);
+            await captureElement(page, panel, target);
             process.stdout.write(
-              `📸 attention modal ${viewport.name} ${viewport.width}x${viewport.height} -> ${target}\n`,
+              `📸 attention panel ${viewport.name} ${viewport.width}x${viewport.height} -> ${target}\n`,
             );
             continue;
           }

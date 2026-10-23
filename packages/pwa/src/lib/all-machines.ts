@@ -4,9 +4,11 @@
  * The reader asked to see "everything I need to respond to" without switching machines. So the list
  * (the desktop sessions bar and the phone's Sessions page) can show every paired machine at once:
  *
- *   1. NEEDS YOU, pinned at the top: every session on a machine this browser can reach that is parked
- *      on a person, the most urgent first and, within one urgency, the one that has waited longest.
- *      Each row names its machine, because nothing around it does.
+ *   1. NEEDS YOU, pinned at the top: every session on a machine this browser can reach that wants the
+ *      reader. The sessions with open Attention lead — the primary signal — newest `latestAt` first;
+ *      then the ones merely parked on a person (the quieter, status-based signal), the most urgent first
+ *      and, within one urgency, the one that has waited longest. Each row names its machine, because
+ *      nothing around it does.
  *   2. Then each machine under its own heading — a reach dot, its name, and for one that stopped
  *      answering "offline · last seen 5m" — and under it that machine's project groups.
  *
@@ -23,10 +25,12 @@
  */
 
 import type { SessionView } from '@ferretry/protocol';
+import { attentionFirst } from './attention-inbox.ts';
 import {
   listedBeforeMode,
   listTallies,
   matchesMode,
+  hasAttention,
   needsYou,
   type SessionsListFilter,
 } from '../shell/sessions-bar-model.ts';
@@ -184,9 +188,10 @@ export const allMachinesView = (
     };
     hiddenStopped += tallies.hiddenStopped;
     const shown = pool.filter(view => listedBeforeMode(view, filter, kept) && matchesMode(view, filter.mode));
-    const moves = actionable(machine.reach) ? shown.filter(needsYou) : [];
+    const wantsYou = (view: SessionView): boolean => hasAttention(view) || needsYou(view);
+    const moves = actionable(machine.reach) ? shown.filter(wantsYou) : [];
     for (const view of moves) pinned.push({ daemonId: machine.daemonId, machineName: machine.name, view, order });
-    const stays = moves.length === 0 ? shown : shown.filter(view => !needsYou(view));
+    const stays = moves.length === 0 ? shown : shown.filter(view => !wantsYou(view));
     sections.push({
       daemonId: machine.daemonId,
       name: machine.name,
@@ -207,8 +212,11 @@ export const allMachinesView = (
       left.order - right.order ||
       left.view.config.id.localeCompare(right.view.config.id),
   );
+  // Attention is the primary signal: its sessions lead, newest first (a stable sort, so equal instants
+  // keep the status order above), and the status-based ones follow in the order they always had.
+  const ordered = attentionFirst(pinned, entry => entry.view);
   return {
-    needsYou: pinned.map(({ order: _order, ...entry }) => entry),
+    needsYou: ordered.map(({ order: _order, ...entry }) => entry),
     // A kind other than All shows only the machines it found something on; All shows every machine,
     // so an offline one is still said to be offline.
     machines: filter.mode === 'all' ? sections : sections.filter(section => section.total > 0),

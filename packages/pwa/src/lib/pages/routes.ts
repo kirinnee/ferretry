@@ -60,6 +60,15 @@ export interface DaemonSessionRoute {
   readonly sessionId: string;
 }
 
+/**
+ * The Attention inbox: every open item, across every paired machine, newest first. Addressed under the
+ * machine on screen only because every page is — the deck itself is not one machine's.
+ */
+export interface DaemonAttentionRoute {
+  readonly kind: 'attention';
+  readonly daemonId: DaemonId;
+}
+
 export interface DaemonSettingsRoute {
   readonly kind: 'settings';
   readonly daemonId: DaemonId;
@@ -105,6 +114,7 @@ export type DaemonPageRoute =
   | DaemonProjectsRoute
   | DaemonProjectDetailRoute
   | DaemonSessionRoute
+  | DaemonAttentionRoute
   | DaemonSettingsRoute
   | DaemonWardenRoute
   | DaemonAnalyticsRoute
@@ -182,6 +192,9 @@ export const daemonSessionPath = (id: DaemonId, sessionId: string): string => {
   return `${daemonSessionsPath(id)}/session/${encodeURIComponent(scope.sessionId)}`;
 };
 
+/** Builds the Attention inbox pathname, under the machine on screen. */
+export const daemonAttentionPath = (id: DaemonId): string => `${daemonSessionsPath(id)}/attention`;
+
 /** Builds the canonical settings pathname for one daemon. */
 export const daemonSettingsPath = (id: DaemonId): string => `${daemonSessionsPath(id)}/settings`;
 
@@ -220,6 +233,7 @@ export const parseRoute = (pathname: string): Route => {
     if (destination === 'new') return { kind: 'new-session', daemonId: id };
     if (destination === 'projects') return { kind: 'projects', daemonId: id };
     if (destination === 'settings') return { kind: 'settings', daemonId: id };
+    if (destination === 'attention') return { kind: 'attention', daemonId: id };
     if (destination === 'warden') return { kind: 'warden', daemonId: id };
     if (destination === 'analytics') return { kind: 'analytics', daemonId: id };
     if (destination === 'learning') return { kind: 'learning', daemonId: id };
@@ -267,6 +281,8 @@ export const routePath = (route: Route): string => {
       return daemonProjectPath(route.daemonId, route.projectId);
     case 'session':
       return daemonSessionPath(route.daemonId, route.sessionId);
+    case 'attention':
+      return daemonAttentionPath(route.daemonId);
     case 'settings':
       return daemonSettingsPath(route.daemonId);
     case 'warden':

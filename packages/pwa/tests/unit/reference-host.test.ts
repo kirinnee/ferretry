@@ -4,7 +4,7 @@ import { daemonId } from '../../src/lib/daemon-connection.ts';
 import { sessionReferenceHost } from '../../src/lib/reference-host.ts';
 
 describe('sessionReferenceHost', () => {
-  it('falls back to the session on the daemon that owns every reference', () => {
+  it('falls back to the session on the daemon that owns every reference, at the Attention item', () => {
     const destinations: string[] = [];
     const host = sessionReferenceHost(daemonId('daemon-a'), 'same-session', to => destinations.push(to));
 
@@ -15,7 +15,7 @@ describe('sessionReferenceHost', () => {
     expect(destinations).toEqual([
       '/d/daemon-a/session/same-session',
       '/d/daemon-a/session/same-session',
-      '/d/daemon-a/session/same-session',
+      '/d/daemon-a/session/same-session?attention=A3',
     ]);
   });
 

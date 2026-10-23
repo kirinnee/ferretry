@@ -37,6 +37,7 @@ import {
 import { SessionsPage } from './components/sessions-page.tsx';
 import type { SendDismiss, SendExpand } from './components/settled-send-note.tsx';
 import { GlobalAnalyticsPage } from './features/analytics/global-analytics-page.tsx';
+import { AttentionInboxPage } from './features/attention/attention-inbox-page.tsx';
 import { LinkBehaviourProvider } from './features/browser/external-link.tsx';
 import { useLocalComputer } from './features/browser/use-local-computer.ts';
 import { tunnelSwitchOffer } from './features/carrier/carrier-preference-selector.tsx';
@@ -115,6 +116,12 @@ import { useAccountPickerSlice } from './hooks/use-account-picker.ts';
 import { useActiveCarrier, useDeviceRefused } from './hooks/use-active-carrier.ts';
 import { useAppViewport } from './hooks/use-app-viewport.ts';
 import { useAttentionSession, useAttentionSnapshot } from './hooks/use-attention.ts';
+import {
+  AttentionInboxContext,
+  useAttentionInbox,
+  useAttentionInboxModel,
+  useInboxMachines,
+} from './hooks/use-attention-inbox.ts';
 import { useCarrierPreferences, useTunnelService, useTunnelSwitches } from './hooks/use-carrier-preferences.ts';
 import { useConfigChangeFeed } from './hooks/use-config-change-feed.ts';
 import { useConnectionHealth } from './hooks/use-connection-health.ts';
@@ -149,6 +156,7 @@ import {
 import { useSttSettings } from './hooks/use-stt-settings.ts';
 import { useTheme } from './hooks/use-theme.ts';
 import { type MachineSource, machineDisplayOrder } from './lib/all-machines.ts';
+import { attentionTargetFromSearch } from './lib/attention-inbox.ts';
 import { DEFAULT_CARRIER_PREFERENCE } from './lib/carrier-preference.ts';
 import type { DaemonConnectionRecord } from './lib/connections.ts';
 import { type DaemonConnection, type DaemonId, daemonCarriers } from './lib/daemon-connection.ts';
@@ -176,6 +184,7 @@ import {
 } from './lib/pages/page-host.tsx';
 import {
   connectionPickerPath,
+  daemonAttentionPath,
   daemonLearningPath,
   daemonSessionsPath,
   daemonSettingsPath,
@@ -416,6 +425,8 @@ const pageCrumbs = (route: PageRoute): readonly Crumb[] => {
       ];
     case 'session':
       return [{ href: sessions, label: 'Sessions' }, { label: route.sessionId }];
+    case 'attention':
+      return [{ href: sessions, label: 'Sessions' }, { label: 'Attention' }];
     case 'settings':
       return [{ href: sessions, label: 'Sessions' }, { label: 'Settings' }];
     case 'warden':
@@ -806,6 +817,8 @@ export const sessionsBarPlace = (route: PageRoute): SessionsBarPlace | null => {
       return 'insights';
     case 'settings':
       return 'settings';
+    case 'attention':
+      return 'attention';
     default:
       return null;
   }
@@ -842,6 +855,7 @@ function ShellSessionsBar({
   const rowMenuRenderer = useMemo(() => sessionRowMenuRenderer(navigate), [navigate]);
   const { connections } = useConnectionSnapshot();
   const allMachines = useContext(AllMachinesContext);
+  const attentionInbox = useAttentionInbox();
   const now = useLiveClock({ intervalMs: MACHINE_CLOCK_MS });
   const fleet = useSyncExternalStore(
     listener => store.fleet.subscribe(listener),
@@ -875,6 +889,9 @@ function ShellSessionsBar({
   return (
     <SessionsBar
       active={sessionsBarPlace(route)}
+      // The inbox counts every paired machine, whichever list the bar shows.
+      attentionHref={daemonAttentionPath(connection.daemonId)}
+      attentionTotal={attentionInbox?.total ?? 0}
       activeSessionId={route.kind === 'session' ? route.sessionId : null}
       daemonId={connection.daemonId}
       machineName={machineName}
@@ -1456,6 +1473,8 @@ function SessionRoute({ connection, scope }: SessionChatPageProps) {
           }}
           browserLogin={store.browserLogin}
           attention={attention}
+          // A notification tap or an unread row names the item it opens at (`?attention=A3`).
+          attentionTarget={attentionTargetFromSearch(window.location.search)}
           chatWidth={controls.chatWidth}
           composerEnterKey={controls.composerEnterKey}
           composerPhoneEnterKey={controls.composerPhoneEnterKey}
@@ -1841,6 +1860,17 @@ function LearningSettingsTabSurface({ connection }: { readonly connection: Daemo
   );
 }
 
+/**
+ * The Attention inbox. Its cards come from EVERY paired machine (the shell's one inbox), so the
+ * machine in the address only decides which machine's chrome surrounds it.
+ */
+function AttentionRoute(_: DaemonPageProps) {
+  const { navigate } = useRouter();
+  const inbox = useAttentionInbox();
+  const phone = useLayoutMode() === 'drawer';
+  return inbox === null ? null : <AttentionInboxPage inbox={inbox} onNavigate={navigate} phone={phone} />;
+}
+
 function ImportedHistoryRoute({ connection }: DaemonPageProps) {
   const store = useAppStore();
   return (
@@ -1903,6 +1933,7 @@ const PAGE_SLOTS: PageHostSlots = {
   Warden: WardenRoute,
   Analytics: AnalyticsRoute,
   Learning: LearningRoute,
+  Attention: AttentionRoute,
   ImportedHistory: ImportedHistoryRoute,
   MachineSetup: MachineSetupRoute,
 };
@@ -1966,24 +1997,34 @@ export function AppShell() {
     .sessionsList;
   const savedMachineOrder = useMachineOrder(store.controls).saved;
   const everyMachine = sessionsList === 'all' && connectionSnapshot.connections.length > 1 && connection !== undefined;
-  const listedMachines = useMemo<readonly ListedMachine[]>(
+  /*
+   * EVERY PAIRED MACHINE IS READ, whichever list the reader chose: Attention is counted across all of
+   * them (the Attention tab, the sidebar's entry, the inbox), and an ask on a machine that is not on
+   * screen must still reach the badge. Each list is one cheap read on its own feed or slow beat — the
+   * Sessions list setting decides what the LIST shows, not what this browser is willing to hear about.
+   */
+  const everyPairedMachine = useMemo<readonly ListedMachine[]>(
     () =>
-      connection === undefined || !everyMachine
+      connection === undefined
         ? []
         : machineDisplayOrder(connectionSnapshot.connections, savedMachineOrder).map(record => ({
             connection: record,
             name: distinctDaemonName(record, connectionSnapshot.connections),
           })),
-    [connection, connectionSnapshot.connections, everyMachine, savedMachineOrder],
+    [connection, connectionSnapshot.connections, savedMachineOrder],
+  );
+  const listedMachines = useMemo<readonly ListedMachine[]>(
+    () => (everyMachine ? everyPairedMachine : []),
+    [everyMachine, everyPairedMachine],
   );
   const polled = useMemo<readonly DaemonConnection[]>(
     () =>
       connection === undefined || pageRoute.kind === 'machine-setup'
         ? []
-        : everyMachine
-          ? listedMachines.map(machine => machine.connection)
+        : everyPairedMachine.length > 1
+          ? everyPairedMachine.map(machine => machine.connection)
           : [connection],
-    [connection, everyMachine, listedMachines, pageRoute.kind],
+    [connection, everyPairedMachine, pageRoute.kind],
   );
   // Each machine's fleet feed, with no replay: the list is read when it says something moved.
   const openFleetFeed = useCallback<MachineFleetFeedOpener>(
@@ -2000,6 +2041,7 @@ export function AppShell() {
     openFleetFeed,
   );
   const lockedMachines = useLockedMachines(store.unlockGate);
+  const attentionInbox = useAttentionInboxModel(store.attention, useInboxMachines(store.fleet, everyPairedMachine));
   const machineSources = useMachineSources(store, listedMachines, lockedMachines);
   const allMachines = useMemo<AllMachinesList | undefined>(
     () =>
@@ -2413,6 +2455,7 @@ export function AppShell() {
                   active={appBarDestinationForRoute(pageRoute)}
                   onNavigate={navigate}
                   tabBarShown={showsTabBar(pageRoute)}
+                  attentionCount={attentionInbox.total}
                 />
               ) : null}
               <ConnectionHealthNotice health={store.connectionHealth} machines={noticeMachines} />
@@ -2448,6 +2491,7 @@ export function AppShell() {
               {phone && showsTabBar(pageRoute) ? (
                 <AppTabBar
                   daemon={connection.daemonId}
+                  attentionCount={attentionInbox.total}
                   active={appBarDestinationForRoute(pageRoute)}
                   onNavigate={navigate}
                   onOpenPalette={openPalette}
@@ -2499,48 +2543,50 @@ export function AppShell() {
   };
 
   return (
-    <AllMachinesContext.Provider value={allMachines}>
-      <NotificationControlsContext.Provider value={notificationControlsHost}>
-        <ThemeFollower />
-        <MotionFollower />
-        <ViewportOverlay />
-        <AppUpdatedToast />
-        {/* The install offer shares the release notice's pinned dock, so the page starts below both
+    <AttentionInboxContext.Provider value={attentionInbox}>
+      <AllMachinesContext.Provider value={allMachines}>
+        <NotificationControlsContext.Provider value={notificationControlsHost}>
+          <ThemeFollower />
+          <MotionFollower />
+          <ViewportOverlay />
+          <AppUpdatedToast />
+          {/* The install offer shares the release notice's pinned dock, so the page starts below both
           rather than under either. Phone only: a desktop browser keeps its own install control in the
           address bar, and Settings › This device carries the offer at every width. */}
-        {release.notice === null && !installDue ? null : (
-          <ReleaseNoticeDock>
-            {release.notice === null ? null : (
-              <ReleaseNoticeBanner notice={release.notice} onDismiss={release.dismiss} />
-            )}
-            <InstallBannerSlot phone={layout === 'drawer'} />
-          </ReleaseNoticeDock>
-        )}
-        {/*
+          {release.notice === null && !installDue ? null : (
+            <ReleaseNoticeDock>
+              {release.notice === null ? null : (
+                <ReleaseNoticeBanner notice={release.notice} onDismiss={release.dismiss} />
+              )}
+              <InstallBannerSlot phone={layout === 'drawer'} />
+            </ReleaseNoticeDock>
+          )}
+          {/*
         FIRST IN DOM ORDER, so the Tab that follows a route change lands on the
         new page's own chrome rather than back at the top of the old one.
         `tabIndex={-1}` makes it programmatically focusable without adding a tab
         stop of its own, and `sr-only` keeps it out of the visual design.
       */}
-        <p
-          ref={routeAnnouncer}
-          tabIndex={-1}
-          className="sr-only"
-          role="status"
-          aria-live="polite"
-          aria-atomic="true"
-          data-route={pageKey}
-        >
-          {routeAnnouncement(effectiveRoute)}
-        </p>
-        <StoreLinkBehaviour>{content}</StoreLinkBehaviour>
-        {/* One passkey prompt for the whole app: any daemon request refused for want of a step-up raises
+          <p
+            ref={routeAnnouncer}
+            tabIndex={-1}
+            className="sr-only"
+            role="status"
+            aria-live="polite"
+            aria-atomic="true"
+            data-route={pageKey}
+          >
+            {routeAnnouncement(effectiveRoute)}
+          </p>
+          <StoreLinkBehaviour>{content}</StoreLinkBehaviour>
+          {/* One passkey prompt for the whole app: any daemon request refused for want of a step-up raises
           it, and it names which machine is asking. */}
-        <StepUpDialog gate={store.stepUp} machineName={promptMachineName} />
-        {/* The same prompt, for a machine that asks for a passkey on opening (`unlock_required`). */}
-        <StepUpDialog gate={store.unlockGate} copy={UNLOCK_COPY} machineName={promptMachineName} />
-      </NotificationControlsContext.Provider>
-    </AllMachinesContext.Provider>
+          <StepUpDialog gate={store.stepUp} machineName={promptMachineName} />
+          {/* The same prompt, for a machine that asks for a passkey on opening (`unlock_required`). */}
+          <StepUpDialog gate={store.unlockGate} copy={UNLOCK_COPY} machineName={promptMachineName} />
+        </NotificationControlsContext.Provider>
+      </AllMachinesContext.Provider>
+    </AttentionInboxContext.Provider>
   );
 }
 

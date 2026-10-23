@@ -2243,7 +2243,7 @@ describe('AppShell', () => {
         expect(store.attention.store.count(scope)).toBe(1);
 
         const trigger = must(
-          view.container.querySelector<HTMLButtonElement>('button[aria-label="Needs you: 1 unanswered"]'),
+          view.container.querySelector<HTMLButtonElement>('button[aria-label="1 Attention item needs you"]'),
           'the refreshed "needs you" status',
         );
         expect(trigger.getAttribute('data-needs-you')).toBe('1');
@@ -2290,6 +2290,7 @@ describe('AppShell', () => {
       [`/d/${ALPHA}/warden`, 'Sessions, Warden'],
       [`/d/${ALPHA}/analytics`, 'Sessions, Analytics'],
       [`/d/${ALPHA}/learning`, 'Sessions, Learning'],
+      [`/d/${ALPHA}/attention`, 'Sessions, Attention'],
       [`/d/${ALPHA}/history`, 'Sessions, Imported history'],
       [`/d/${ALPHA}/session/one`, 'Sessions, one'],
     ] as const) {
@@ -4151,15 +4152,9 @@ describe('the sessions bar', () => {
 
   it('names the foot place every route belongs to', () => {
     const at = (kind: string) => sessionsBarPlace({ kind, daemonId: alpha.daemonId } as never);
-    expect(['projects', 'project-detail', 'analytics', 'warden', 'learning', 'settings', 'sessions'].map(at)).toEqual([
-      'projects',
-      'projects',
-      'insights',
-      'insights',
-      'insights',
-      'settings',
-      null,
-    ]);
+    expect(
+      ['projects', 'project-detail', 'analytics', 'warden', 'learning', 'settings', 'attention', 'sessions'].map(at),
+    ).toEqual(['projects', 'projects', 'insights', 'insights', 'insights', 'settings', 'attention', null]);
   });
 
   it('opens the Sessions bar on Interactive for a device that never chose, and remembers the kind it picks', async () => {

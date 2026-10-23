@@ -7,12 +7,19 @@
  *
  * Retry now on any machine's status line skips that machine's reconnect backoff and reads its list
  * again — through that machine's own pairing, so it never waits on, or for, any other machine.
+ *
+ * NEEDS YOU, ON TOP: when anything on any paired machine is waiting on the reader, the newest few
+ * Attention cards sit above the list (`AttentionNeedsYou`), answered into the shell's one undo window,
+ * with "See all" into the inbox. It reads the shell's inbox (`useAttentionInbox`) and draws nothing
+ * without one — a harness, a render test — or with nothing open.
  */
 
 import { useCallback, useEffect, useMemo } from 'react';
 
+import { AttentionNeedsYou } from '../features/attention/attention-inbox-page.tsx';
 import type { WardenReportRequest } from '../features/warden/warden-verdicts.tsx';
 import { useAccountPickerSlice, useMachineRosters } from '../hooks/use-account-picker.ts';
+import { useAttentionInbox } from '../hooks/use-attention-inbox.ts';
 import { useConnectionHealth } from '../hooks/use-connection-health.ts';
 import { useDensity } from '../hooks/use-density.ts';
 import { useFleetView } from '../hooks/use-fleet-view.ts';
@@ -242,10 +249,26 @@ function DashboardContent({
 export function SessionsPage({ scopeNavigation, clock, ...props }: SessionsPageProps) {
   const navigation = scopeNavigation ?? browserScopeNavigation();
   const now = useLiveClock(clock);
+  const inbox = useAttentionInbox();
 
   useEffect(() => {
     void props.fleet.hydrate(props.connection).catch(() => {});
   }, [props.connection, props.fleet]);
 
-  return <DashboardContent {...props} navigation={navigation} now={now} />;
+  const dashboard = <DashboardContent {...props} navigation={navigation} now={now} />;
+  if (inbox === null) return dashboard;
+  return (
+    <div className="flex h-full min-h-0 w-full flex-col">
+      <AttentionNeedsYou
+        daemonId={props.connection.daemonId}
+        inbox={inbox}
+        now={now}
+        onNavigate={props.onNavigate ?? navigateByDocument}
+      />
+      <div className="flex min-h-0 flex-1 flex-col">{dashboard}</div>
+    </div>
+  );
 }
+
+/** A host that commits no in-app navigation still lets a card's links go somewhere. */
+const navigateByDocument = (to: string): void => window.location.assign(to);

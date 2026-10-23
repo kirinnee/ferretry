@@ -1,0 +1,439 @@
+/* THE ATTENTION INBOX: the page, the phone's swipe deck, the Sessions page's Needs-you deck, the undo
+   toast, and where the count badge sits on each place. The card itself is attention-card.css; the
+   badge is the rows' own `.fy-unread-badge` (sessions-bar.css). */
+
+.kt-appnav__link .fy-unread-badge {
+  margin-left: 6px;
+}
+/* On the phone bar the badge rides the icon's top-right corner, ringed in the bar's own surface. */
+.kt-tabbar__icon {
+  position: relative;
+  display: inline-flex;
+}
+.kt-tabbar__badge {
+  position: absolute;
+  top: -6px;
+  left: calc(100% - 8px);
+  outline: var(--stroke-heavy) solid var(--surface);
+}
+/* SIX PLACES SHARE 390px (65px each), so a label is capped at 12px however large the family's phone
+   ramp sets --text-xs: "Attention" in bold is the longest, and it must fit whole, never wrap or clip. */
+.kt-tabbar__label {
+  max-width: 100%;
+  overflow: hidden;
+  font-size: min(var(--text-xs), 12px);
+  letter-spacing: 0;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* Below 360px a place is 53px wide: the labels step down once more rather than clip. */
+@media (max-width: 359.98px) {
+  .kt-tabbar .kt-tabbar__item {
+    padding-inline: 0;
+  }
+  .kt-tabbar__label {
+    font-size: min(var(--text-xs), 10.5px);
+  }
+}
+
+/* ---- The page ------------------------------------------------------------------------------------- */
+.fy-attn-inbox {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: var(--gap-md);
+  margin: 0 auto;
+  width: 100%;
+  max-width: 76rem;
+  padding: var(--gap-md) 12px calc(96px + var(--safe-bottom, 0px));
+}
+.fy-attn-inbox__head {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+.fy-attn-inbox__title {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--gap-sm);
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: var(--text-display);
+  font-weight: var(--weight-display, 700);
+  letter-spacing: var(--tracking-display);
+}
+.fy-attn-inbox__title .fy-attn-count {
+  min-width: 22px;
+  height: 22px;
+  font-size: 12px;
+}
+.fy-attn-inbox__sub,
+.fy-attn-inbox__hint,
+.fy-attn-inbox__keys {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--text-sm);
+}
+.fy-attn-inbox__hint {
+  text-align: center;
+  color: var(--faint);
+}
+.fy-attn-inbox__keys kbd {
+  border: var(--stroke-control, 1px) solid var(--border);
+  border-radius: var(--radius-xs, 3px);
+  padding: 0 4px;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+}
+.fy-attn-inbox__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 22rem), 1fr));
+  align-items: start;
+  gap: var(--gap-md);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.fy-attn-inbox__reading {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--gap-sm);
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--text-sm);
+}
+.fy-attn-inbox__empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--gap-sm);
+  margin-top: 12vh;
+  text-align: center;
+}
+.fy-attn-inbox__empty-mark {
+  display: inline-flex;
+  width: 56px;
+  height: 56px;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-pill);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.fy-attn-inbox__failures {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-xs);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.fy-attn-inbox__failure {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: var(--gap-sm);
+  border: var(--stroke-panel) solid var(--err-border);
+  border-radius: var(--radius-panel);
+  background: var(--err-bg);
+  padding: 6px 6px 6px 12px;
+  color: var(--err);
+  font-size: var(--text-sm);
+  overflow-wrap: anywhere;
+}
+.fy-attn-inbox__failure .kt-btn {
+  min-width: 44px;
+  min-height: 44px;
+  justify-content: center;
+}
+
+/* A focused card answers to its arrows; the ring says it is listening. */
+.fy-attn-frame {
+  border-radius: var(--radius-panel);
+  outline: none;
+}
+.fy-attn-frame:focus-visible {
+  box-shadow: var(--focus-shadow, 0 0 0 2px var(--accent));
+}
+
+/* ---- The phone's swipe deck ---------------------------------------------------------------------- */
+.fy-attn-deck {
+  position: relative;
+  isolation: isolate;
+  /* Room under the top card for the next ones to peek out. */
+  padding-bottom: 22px;
+}
+.fy-attn-deck__top {
+  position: relative;
+  z-index: 3;
+  user-select: none;
+  -webkit-user-select: none;
+  transition: transform 200ms cubic-bezier(0.2, 0.9, 0.3, 1.2);
+  will-change: transform;
+}
+.fy-attn-deck__top textarea {
+  user-select: text;
+  -webkit-user-select: text;
+}
+/* While the finger holds it, the card follows the finger exactly; on release it springs home. */
+.fy-attn-deck__top[data-dragging] {
+  transition: none;
+}
+.fy-attn-deck__peek {
+  position: absolute;
+  inset: 0 0 22px;
+  overflow: hidden;
+  border-radius: var(--radius-panel);
+  pointer-events: none;
+  transform-origin: 50% 100%;
+}
+.fy-attn-deck__peek[data-depth='1'] {
+  z-index: 2;
+  transform: translateY(10px) scale(0.96);
+}
+.fy-attn-deck__peek[data-depth='2'] {
+  z-index: 1;
+  transform: translateY(20px) scale(0.92);
+}
+.fy-attn-deck__peek > * {
+  height: 100%;
+}
+/* At rest a peek is only an edge: its text would show wherever the card under is taller than the top
+   one. While the top card is in the reader's hand, the next one is revealed under it. */
+.fy-attn-deck:not(:has(.fy-attn-deck__top[data-dragging])) .fy-attn-deck__peek .fy-attn-card > * {
+  visibility: hidden;
+}
+/* The option a drag would send, stamped on the card and growing with the drag. */
+.fy-attn-deck__stamp {
+  position: absolute;
+  z-index: 4;
+  top: 14px;
+  display: inline-flex;
+  max-width: calc(100% - 28px);
+  align-items: center;
+  gap: 6px;
+  border: var(--stroke-heavy) solid var(--accent);
+  border-radius: var(--radius-control);
+  background: var(--surface);
+  padding: 6px 10px;
+  color: var(--accent);
+  font-family: var(--font-display);
+  font-size: var(--text-lg);
+  font-weight: var(--weight-strong);
+  box-shadow: var(--shadow-popover);
+  pointer-events: none;
+}
+.fy-attn-deck__stamp > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fy-attn-deck__stamp[data-attention-stamp='right'] {
+  left: 14px;
+  transform-origin: 0 0;
+}
+.fy-attn-deck__stamp[data-attention-stamp='left'] {
+  right: 14px;
+  transform-origin: 100% 0;
+}
+.fy-attn-deck__stamp[data-attention-stamp='up'] {
+  left: 50%;
+  translate: -50% 0;
+  transform-origin: 50% 0;
+}
+/* Past the threshold: letting go sends it. */
+.fy-attn-deck__stamp[data-committed] {
+  background: var(--accent);
+  color: var(--accent-fg);
+}
+.fy-attn-deck__stamp[data-empty] {
+  border-color: var(--border-strong);
+  color: var(--faint);
+}
+/* A committed card flying off, from wherever the finger let go. Decoration: the answer is already held. */
+.fy-attn-deck__leaving {
+  position: absolute;
+  z-index: 5;
+  inset: 0 0 22px;
+  pointer-events: none;
+  animation: fy-attn-fly-right 220ms ease-in forwards;
+}
+.fy-attn-deck__leaving[data-direction='left'] {
+  animation-name: fy-attn-fly-left;
+}
+.fy-attn-deck__leaving[data-direction='up'] {
+  animation-name: fy-attn-fly-up;
+}
+@keyframes fy-attn-fly-right {
+  from {
+    transform: translate(var(--fly-x), var(--fly-y)) rotate(4deg);
+    opacity: 1;
+  }
+  to {
+    transform: translate(120vw, var(--fly-y)) rotate(16deg);
+    opacity: 0;
+  }
+}
+@keyframes fy-attn-fly-left {
+  from {
+    transform: translate(var(--fly-x), var(--fly-y)) rotate(-4deg);
+    opacity: 1;
+  }
+  to {
+    transform: translate(-120vw, var(--fly-y)) rotate(-16deg);
+    opacity: 0;
+  }
+}
+@keyframes fy-attn-fly-up {
+  from {
+    transform: translate(var(--fly-x), var(--fly-y));
+    opacity: 1;
+  }
+  to {
+    transform: translate(var(--fly-x), -110vh);
+    opacity: 0;
+  }
+}
+/* Reduced motion: no spring, no flight — the card is simply back, or simply gone. */
+.fy-attn-deck[data-reduced-motion] .fy-attn-deck__top {
+  transition: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .fy-attn-deck__top {
+    transition: none;
+  }
+  .fy-attn-deck__leaving {
+    display: none;
+  }
+}
+
+/* ---- The Sessions page's "Needs you" deck --------------------------------------------------------- */
+.fy-attn-needs {
+  display: flex;
+  min-width: 0;
+  flex-shrink: 0;
+  flex-direction: column;
+  gap: var(--gap-sm);
+  padding: var(--gap-sm) 12px var(--gap-md);
+}
+@media (min-width: 640px) {
+  .fy-attn-needs {
+    padding-inline: 0;
+  }
+}
+.fy-attn-needs__head {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--gap-sm);
+}
+.fy-attn-needs__title {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--gap-sm);
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: var(--text-lg);
+  font-weight: var(--weight-strong);
+}
+.fy-attn-needs__all {
+  display: inline-flex;
+  min-height: 44px;
+  align-items: center;
+  gap: 4px;
+  color: var(--accent);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  text-decoration: none;
+}
+.fy-attn-needs__all:hover {
+  text-decoration: underline;
+}
+.fy-attn-needs__cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 20rem), 1fr));
+  align-items: start;
+  gap: var(--gap-sm);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+/* A phone shows the newest one; the rest are a "See all" away. */
+@media (max-width: 767.98px) {
+  .fy-attn-needs__cards > li + li {
+    display: none;
+  }
+}
+
+/* ---- The undo toast ------------------------------------------------------------------------------- */
+.fy-attn-undo {
+  position: fixed;
+  z-index: 40;
+  bottom: calc(24px + var(--safe-bottom, 0px));
+  left: 50%;
+  display: flex;
+  align-items: center;
+  gap: var(--gap-sm);
+  width: max-content;
+  max-width: calc(100vw - 32px);
+  overflow: hidden;
+  border: var(--stroke-panel, 1px) solid var(--border-strong);
+  border-radius: var(--radius-panel);
+  background: var(--surface);
+  box-shadow: var(--shadow-popover);
+  padding: 6px 6px 6px 14px;
+  color: var(--fg);
+  font-family: var(--font-ui);
+  font-size: var(--text-sm);
+  transform: translateX(-50%);
+}
+/* A phone's bottom tab bar (52px) sits under every page that can hold an answer: float above it. */
+@media (max-width: 767.98px) {
+  .fy-attn-undo {
+    bottom: calc(52px + 12px + var(--safe-bottom, 0px));
+  }
+}
+.fy-attn-undo__text {
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fy-attn-undo__more,
+.fy-attn-undo__count {
+  flex-shrink: 0;
+  color: var(--faint);
+  font-size: var(--text-xs);
+}
+.fy-attn-undo__button {
+  min-height: 44px;
+  flex-shrink: 0;
+  color: var(--accent);
+  font-weight: var(--weight-strong);
+}
+.fy-attn-undo__drain {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  width: 100%;
+  height: 2px;
+  background: var(--accent);
+  transform-origin: 0 50%;
+  animation: fy-attn-drain linear forwards;
+}
+@keyframes fy-attn-drain {
+  from {
+    transform: scaleX(1);
+  }
+  to {
+    transform: scaleX(0);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .fy-attn-undo__drain {
+    display: none;
+  }
+}

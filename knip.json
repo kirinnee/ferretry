@@ -36,6 +36,8 @@
         "vite.config.ts",
         "tests/**/*.test.{ts,tsx}",
         "harness/screenshot.ts",
+        "harness/attention-screenshot.ts",
+        "harness/attention-page.tsx",
         "harness/engine-list-screenshot.tsx",
         "harness/name-grouping-screenshot.tsx",
         "harness/secret-copy-screenshot.tsx",

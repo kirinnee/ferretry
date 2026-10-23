@@ -106,7 +106,7 @@ never rewritten.
 | `:agent`     | That agent's session, **on the daemon the reference was proved against**      |
 | `@file`      | A file tab in the session workspace, scrolled to the referenced line or range |
 | `&task`      | The Tasks sheet for this session                                              |
-| `!attention` | The Attention pane for this session                                           |
+| `!attention` | The Attention panel at the top of this conversation, at that item             |
 | `/skill`     | The Skills tab of this session's "This folder" context                        |
 | `%terminal:` | That exact terminal instance's workspace tab, opened if it is not open        |
 | `%browser:`  | That page's workspace tab, opened if it is not open, with the page in view    |
@@ -206,7 +206,7 @@ What "proved" means per kind:
 | `agent`     | A session in **this daemon's** fleet slice holds that callsign |
 | `file`      | The session filesystem answers with a canonical, readable path |
 | `task`      | The id is in this session's task board                         |
-| `attention` | The id is in this session's Attention ledger                   |
+| `attention` | The id is in this session's Attention ledger, open or resolved |
 | `skill`     | The name is in this session's skills catalog                   |
 | `surface`   | The session's owner is holding that terminal or page right now |
 

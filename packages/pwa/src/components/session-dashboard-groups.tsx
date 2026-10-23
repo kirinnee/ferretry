@@ -1,5 +1,6 @@
 /** Group/table scaffolds for the sessions dashboard; leaf markup lives in the row module. */
 
+import type { SessionView } from '@ferretry/protocol';
 import { FolderGit2 } from 'lucide-react';
 import type { PickerAccount } from '../lib/account-picker-catalog.ts';
 import type { DashboardView, Density } from '../lib/controls.ts';
@@ -250,6 +251,48 @@ export function LeanGroupPanel({
           />
         ))}
       </div>
+    </section>
+  );
+}
+
+export interface NeedsYouGroupProps extends NavigationProps {
+  /** Sessions with open Attention, newest first (`pullDashboardNeedsYou`). Nothing renders when empty. */
+  readonly rows: readonly SessionView[];
+  readonly density: Density;
+  readonly mode: DashboardView;
+  readonly usage: SessionQuotaResolver | null;
+  readonly accounts?: readonly PickerAccount[] | null;
+  readonly now: number;
+}
+
+/**
+ * "NEEDS YOU" AT THE TOP OF ONE MACHINE'S PAGE: the sessions a ferret has filed Attention on, in the
+ * page's own density and view (cards or table), under a heading that is not a folder. It is drawn by
+ * the same group components as every project, as one unnamed folder, so a row here is the very row it
+ * would be in its project group. Each row opens its conversation at the first open item.
+ */
+export function NeedsYouGroup({ rows, density, mode, usage, accounts = null, now, ...navigation }: NeedsYouGroupProps) {
+  if (rows.length === 0) return null;
+  const groups: readonly SessionGroup[] = [{ name: 'Needs you', path: '', rows }];
+  return (
+    <section aria-label="Needs you" className="fy-session-group" data-needs-you-group="">
+      <h2 className="fy-session-group__head fy-needs-you__head">
+        <span className="min-w-0 truncate text-ui font-semibold">Needs you</span>
+        <span className="mono shrink-0 text-meta text-faint">{rows.length}</span>
+      </h2>
+      {density === 'full' ? (
+        <FullDensityGroups
+          {...navigation}
+          accounts={accounts}
+          groups={groups}
+          mode={mode}
+          now={now}
+          scoped
+          usage={usage}
+        />
+      ) : (
+        <LeanDensityGroups {...navigation} density={density} groups={groups} mode={mode} now={now} scoped />
+      )}
     </section>
   );
 }

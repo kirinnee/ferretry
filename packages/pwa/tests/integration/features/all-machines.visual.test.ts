@@ -159,9 +159,10 @@ describe('one session list across two machines, one offline', () => {
       expect(await texts(tab, '[data-machine-reach="offline"] .fy-sbar__machine-reach')).toEqual([
         'offline · last seen 5m',
       ]);
-      // Its waiting session stays home, greyed — nobody can answer a machine that is not answering.
+      // Its waiting session stays home, greyed, with the quiet "waiting" word — nobody can answer a machine
+      // that is not answering, and it filed no Attention item, so it carries no unread pill.
       const laptopRows = await texts(tab, '[data-machine-reach="offline"] [data-sbar-session]');
-      expect(laptopRows.some(row => row.includes('Pim') && row.includes('needs you'))).toBe(true);
+      expect(laptopRows.some(row => row.includes('Pim') && row.includes('waiting'))).toBe(true);
       const opacity = await tab.$eval(
         '[data-machine-reach="offline"] .fy-sbar__group',
         node => getComputedStyle(node).opacity,

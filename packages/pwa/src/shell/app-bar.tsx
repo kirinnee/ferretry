@@ -5,8 +5,12 @@
  * LEVEL ONE OF THE APP'S NAVIGATION HAS ITS OWN LOOK (the approved usability proposal): plain text
  * links with the current page underlined, never the outlined capital-letter buttons it used to be —
  * those looked exactly like the actions on every page under them. Find is a search box, because it
- * searches. On a phone the same places are a bottom bar — Sessions, Projects, Find, Settings and More
- * — above the home indicator, so the top of a phone screen is the page's own.
+ * searches. On a phone the same places are a bottom bar — Sessions, Attention, Projects, Find, Settings
+ * and More — above the home indicator, so the top of a phone screen is the page's own.
+ *
+ * ATTENTION IS A PLACE, NOT A SETTING. It carries a count badge wherever it is drawn (the phone bar, the
+ * wide row) — the number of open items across every paired machine, the same number every Attention
+ * badge shows — because the point of it is that the reader sees something is waiting before they look.
  *
  * Three deliberate departures from kteam, all forced by this app's shape:
  *
@@ -31,6 +35,7 @@ import {
   Ellipsis,
   FolderKanban,
   GraduationCap,
+  Inbox,
   LayoutList,
   RefreshCw,
   Search,
@@ -44,6 +49,7 @@ import { useLayoutMode } from '../hooks/use-layout-mode.ts';
 import type { DaemonId } from '../lib/daemon-connection.ts';
 import {
   daemonAnalyticsPath,
+  daemonAttentionPath,
   daemonLearningPath,
   daemonProjectsPath,
   daemonSessionsPath,
@@ -54,6 +60,7 @@ import {
 import { BottomSheet } from './bottom-sheet.tsx';
 import { PALETTE_KEYSHORTCUTS, paletteShortcutLabel } from './palette-shortcut.ts';
 import { RouteLink } from './route-link.tsx';
+import { UnreadBadge } from './unread-badge.tsx';
 
 /** Why the reload chip is offered. */
 export type UpdateReason = 'update' | 'recovery';
@@ -103,6 +110,10 @@ export const WARDEN_ENTRY = { label: 'Warden', title: 'Open fleet supervision an
 export const LEARNING_ENTRY = { label: 'Learning', title: 'Open fleet learning proposals' } as const;
 export const ANALYTICS_ENTRY = { label: 'Analytics', title: 'Query all sessions and graph daily usage' } as const;
 export const PROJECTS_ENTRY = { label: 'Projects', title: 'Open registered workspaces and folders' } as const;
+export const ATTENTION_ENTRY = {
+  label: 'Attention',
+  title: 'Everything your ferrets are waiting on you for, across every machine',
+} as const;
 
 /**
  * The app-level destinations appear in both the wide tab group and the phone
@@ -112,6 +123,7 @@ export const PROJECTS_ENTRY = { label: 'Projects', title: 'Open registered works
  * destination, and stays with the other right-side controls.
  */
 export const APP_BAR_DESTINATIONS = [
+  { id: 'attention', ...ATTENTION_ENTRY, path: daemonAttentionPath, Icon: Inbox },
   { id: 'projects', ...PROJECTS_ENTRY, path: daemonProjectsPath, Icon: FolderKanban },
   { id: 'analytics', ...ANALYTICS_ENTRY, path: daemonAnalyticsPath, Icon: ChartNoAxesCombined },
   { id: 'warden', ...WARDEN_ENTRY, path: daemonWardenPath, Icon: ShieldCheck },
@@ -139,7 +151,7 @@ type AppNavigationEntry = (typeof APP_NAVIGATION)[number];
 export type AppBarDestinationId = AppNavigationEntry['id'];
 
 /** The phone's bottom bar: the most-used places, with everything else under More. */
-const TAB_BAR_PLACES: readonly AppBarDestinationId[] = ['sessions', 'projects'];
+const TAB_BAR_PLACES: readonly AppBarDestinationId[] = ['sessions', 'attention', 'projects'];
 const TAB_BAR_TAIL: readonly AppBarDestinationId[] = ['settings'];
 export const MORE_PLACES: readonly AppBarDestinationId[] = ['analytics', 'warden', 'learning'];
 
@@ -161,6 +173,8 @@ export const appBarDestinationForRoute = (route: Route): AppBarDestinationId | n
     case 'session':
     case 'new-session':
       return 'sessions';
+    case 'attention':
+      return 'attention';
     case 'projects':
     case 'project-detail':
       return 'projects';
@@ -243,16 +257,26 @@ export function SidebarDrawerTrigger({ onOpen, sessionCount }: SidebarDrawerTrig
   );
 }
 
+/**
+ * The Attention count on a PLACE (a tab, a nav link, a heading): THE unread pill the rows draw
+ * (`UnreadBadge`), and nothing at zero — a calm place is the good news.
+ */
+export function AttentionCountBadge({ count, className }: { readonly count: number; readonly className?: string }) {
+  return count <= 0 ? null : <UnreadBadge count={count} {...(className === undefined ? {} : { className })} />;
+}
+
 function AppNavLink({
   destination,
   daemon,
   active,
   onNavigate,
+  attentionCount,
 }: {
   destination: AppNavigationEntry;
   daemon: DaemonId;
   active: boolean;
   onNavigate?: (to: string) => void;
+  attentionCount: number;
 }) {
   return (
     <RouteLink
@@ -264,6 +288,7 @@ function AppNavLink({
       className="kt-appnav__link"
     >
       {destination.label}
+      {destination.id === 'attention' ? <AttentionCountBadge count={attentionCount} /> : null}
     </RouteLink>
   );
 }
@@ -374,6 +399,8 @@ export interface AppBarProps {
    * the bar keeps a Find button of its own, so the app's search is never more than one tap away.
    */
   readonly tabBarShown?: boolean;
+  /** Open Attention items across every paired machine: the Attention place's badge. */
+  readonly attentionCount?: number;
 }
 
 export function AppBar({
@@ -390,6 +417,7 @@ export function AppBar({
   themeToggle,
   currentSessionSearch,
   tabBarShown = false,
+  attentionCount = 0,
 }: AppBarProps) {
   const layout = useLayoutMode();
   const statusVisible = connectionStatus !== 'open' || updateReady !== null;
@@ -485,6 +513,7 @@ export function AppBar({
                 daemon={daemon}
                 {...(onNavigate ? { onNavigate } : {})}
                 active={active === destination.id}
+                attentionCount={attentionCount}
               />
             ))}
           </nav>
@@ -518,10 +547,13 @@ export interface AppTabBarProps {
   readonly onNavigate?: (to: string) => void;
   /** Find opens the same palette as the desktop's search box. */
   readonly onOpenPalette: () => void;
+  /** Open Attention items across every paired machine: the Attention tab's badge. */
+  readonly attentionCount?: number;
 }
 
 const TAB_ICONS: Readonly<Record<AppBarDestinationId, ReactNode>> = {
   sessions: <LayoutList size={20} aria-hidden="true" />,
+  attention: <Inbox size={20} aria-hidden="true" />,
   projects: <FolderKanban size={20} aria-hidden="true" />,
   analytics: <ChartNoAxesCombined size={20} aria-hidden="true" />,
   warden: <ShieldCheck size={20} aria-hidden="true" />,
@@ -530,7 +562,7 @@ const TAB_ICONS: Readonly<Record<AppBarDestinationId, ReactNode>> = {
 };
 
 /**
- * The phone's level one: a bottom bar with the four most-used places plus More (Analytics, Warden,
+ * The phone's level one: a bottom bar with the five most-used places plus More (Analytics, Warden,
  * Learning), safe-area aware so it sits above the home indicator. Rendered by the shell only at drawer
  * widths, and not inside a session ({@link showsTabBar}).
  *
@@ -539,7 +571,7 @@ const TAB_ICONS: Readonly<Record<AppBarDestinationId, ReactNode>> = {
  * here that can be open, so it closes through its own dismissal path first, as the `data-kb-hide` contract
  * in index.css requires.
  */
-export function AppTabBar({ daemon, active = null, onNavigate, onOpenPalette }: AppTabBarProps) {
+export function AppTabBar({ daemon, active = null, onNavigate, onOpenPalette, attentionCount = 0 }: AppTabBarProps) {
   const [moreOpen, setMoreOpen] = useState(false);
   const moreId = useId();
   const keyboardOpen = useKeyboardOpen();
@@ -558,8 +590,11 @@ export function AppTabBar({ daemon, active = null, onNavigate, onOpenPalette }: 
         data-app-tab={id}
         className="kt-tabbar__item"
       >
-        {TAB_ICONS[id]}
-        <span>{destination.label}</span>
+        <span className="kt-tabbar__icon">
+          {TAB_ICONS[id]}
+          {id === 'attention' ? <AttentionCountBadge className="kt-tabbar__badge" count={attentionCount} /> : null}
+        </span>
+        <span className="kt-tabbar__label">{destination.label}</span>
       </RouteLink>
     );
   };

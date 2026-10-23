@@ -102,6 +102,11 @@ describe('appBarDestinationForRoute', () => {
     expect(appBarDestinationForRoute({ kind: 'imported-history', daemonId: DAEMON })).toBeNull();
   });
 
+  it('marks the Attention inbox as its own place', () => {
+    expect(appBarDestinationForRoute({ kind: 'attention', daemonId: DAEMON })).toBe('attention');
+    expect(showsTabBar({ kind: 'attention', daemonId: DAEMON })).toBe(true);
+  });
+
   it('files a session, and starting one, under Sessions, and a project under Projects', () => {
     expect(appBarDestinationForRoute({ kind: 'sessions', daemonId: DAEMON })).toBe('sessions');
     expect(appBarDestinationForRoute({ kind: 'session', daemonId: DAEMON, sessionId: 'abc' })).toBe('sessions');
@@ -130,6 +135,7 @@ describe('APP_NAVIGATION', () => {
     expect(APP_NAVIGATION.slice(1)).toEqual([...APP_BAR_DESTINATIONS]);
     expect(APP_NAVIGATION.map(place => place.id)).toEqual([
       'sessions',
+      'attention',
       'projects',
       'analytics',
       'warden',
@@ -152,6 +158,7 @@ describe('AppBar destinations', () => {
 
     expect(hrefs).toEqual([
       '/d/workshop',
+      '/d/workshop/attention',
       '/d/workshop/projects',
       '/d/workshop/analytics',
       '/d/workshop/warden',
@@ -171,6 +178,7 @@ describe('AppBar destinations', () => {
 
     expect(linksOf(mounted.container, 'Destinations').map(link => link.getAttribute('href'))).toEqual([
       '/d/laptop',
+      '/d/laptop/attention',
       '/d/laptop/projects',
       '/d/laptop/analytics',
       '/d/laptop/warden',
@@ -186,7 +194,7 @@ describe('AppBar destinations', () => {
     const mounted = await mount(bar({ active: 'warden' }));
     const links = linksOf(mounted.container, 'Destinations');
 
-    expect(links.map(link => link.getAttribute('aria-current'))).toEqual([null, null, null, 'page', null, null]);
+    expect(links.map(link => link.getAttribute('aria-current'))).toEqual([null, null, null, null, 'page', null, null]);
     expect(links.map(link => link.textContent)).toEqual(APP_NAVIGATION.map(destination => destination.label));
     expect(links.map(link => link.getAttribute('data-app-nav'))).toEqual(APP_NAVIGATION.map(place => place.id));
     expect(links.map(link => link.getAttribute('title'))).toEqual(APP_NAVIGATION.map(place => place.title));
@@ -195,7 +203,24 @@ describe('AppBar destinations', () => {
     await mounted.render(bar({ active: 'sessions' }));
     expect(
       linksOf(mounted.container, 'Destinations').map(link => link.getAttribute('aria-current') === 'page'),
-    ).toEqual([true, false, false, false, false, false]);
+    ).toEqual([true, false, false, false, false, false, false]);
+
+    await mounted.unmount();
+  });
+
+  it('badges Attention in the wide row with the same count, and only Attention', async () => {
+    setViewport(DESKTOP);
+    const mounted = await mount(bar({ attentionCount: 12 }));
+    const attention = linksOf(mounted.container, 'Destinations').find(
+      link => link.getAttribute('data-app-nav') === 'attention',
+    ) as HTMLAnchorElement;
+
+    expect(attention.querySelector('.fy-unread-badge [aria-hidden="true"]')?.textContent).toBe('12');
+    expect(attention.textContent).toBe('Attention1212 open Attention items');
+    expect(mounted.container.querySelectorAll('.fy-unread-badge')).toHaveLength(1);
+
+    await mounted.render(bar());
+    expect(mounted.container.querySelector('.fy-unread-badge')).toBeNull();
 
     await mounted.unmount();
   });
@@ -503,7 +528,7 @@ const primaryClick = (): Event => {
 };
 
 describe('AppTabBar', () => {
-  it('shows Sessions, Projects, Find, Settings and More, in that order, scoped to the daemon', async () => {
+  it('shows Sessions, Attention, Projects, Find, Settings and More, in that order, scoped to the daemon', async () => {
     setViewport(PHONE);
     const mounted = await mount(tabBar());
     const nav = mounted.container.querySelector('[data-app-tab-bar]') as HTMLElement;
@@ -511,6 +536,7 @@ describe('AppTabBar', () => {
     expect(nav.getAttribute('aria-label')).toBe('App');
     expect([...nav.querySelectorAll('[data-app-tab]')].map(item => item.getAttribute('data-app-tab'))).toEqual([
       'sessions',
+      'attention',
       'projects',
       'find',
       'settings',
@@ -518,6 +544,7 @@ describe('AppTabBar', () => {
     ]);
     expect([...nav.querySelectorAll('[data-app-tab]')].map(item => item.textContent)).toEqual([
       'Sessions',
+      'Attention',
       'Projects',
       'Find',
       'Settings',
@@ -525,6 +552,7 @@ describe('AppTabBar', () => {
     ]);
     expect([...nav.querySelectorAll('a')].map(link => link.getAttribute('href'))).toEqual([
       '/d/workshop',
+      '/d/workshop/attention',
       '/d/workshop/projects',
       '/d/workshop/settings',
     ]);
@@ -532,6 +560,7 @@ describe('AppTabBar', () => {
     await mounted.render(tabBar({ daemon: OTHER }));
     expect([...nav.querySelectorAll('a')].map(link => link.getAttribute('href'))).toEqual([
       '/d/laptop',
+      '/d/laptop/attention',
       '/d/laptop/projects',
       '/d/laptop/settings',
     ]);
@@ -545,13 +574,16 @@ describe('AppTabBar', () => {
     const current = (): (string | null)[] =>
       [...mounted.container.querySelectorAll('[data-app-tab]')].map(item => item.getAttribute('aria-current'));
 
-    expect(current()).toEqual([null, 'page', null, null, null]);
+    expect(current()).toEqual([null, null, 'page', null, null, null]);
 
     await mounted.render(tabBar({ active: 'warden' }));
-    expect(current()).toEqual([null, null, null, null, 'page']);
+    expect(current()).toEqual([null, null, null, null, null, 'page']);
+
+    await mounted.render(tabBar({ active: 'attention' }));
+    expect(current()).toEqual([null, 'page', null, null, null, null]);
 
     await mounted.render(tabBar());
-    expect(current()).toEqual([null, null, null, null, null]);
+    expect(current()).toEqual([null, null, null, null, null, null]);
 
     await mounted.unmount();
   });
@@ -573,6 +605,33 @@ describe('AppTabBar', () => {
     } finally {
       document.documentElement.removeAttribute('data-keyboard');
     }
+
+    await mounted.unmount();
+  });
+
+  it('badges the Attention tab with the open count, says it in words, and draws nothing at zero', async () => {
+    setViewport(PHONE);
+    const mounted = await mount(tabBar({ attentionCount: 3 }));
+    const tab = (): HTMLAnchorElement =>
+      mounted.container.querySelector('[data-app-tab="attention"]') as HTMLAnchorElement;
+    const badge = (): HTMLElement | null => tab().querySelector('[data-unread-badge] [aria-hidden="true"]');
+
+    expect(tab().getAttribute('href')).toBe('/d/workshop/attention');
+    expect(badge()?.textContent).toBe('3');
+    expect(badge()?.getAttribute('aria-hidden')).toBe('true');
+    expect(tab().textContent).toBe('33 open Attention itemsAttention');
+
+    await mounted.render(tabBar({ attentionCount: 250 }));
+    expect(badge()?.textContent).toBe('99+');
+    expect(tab().textContent).toContain('250 open Attention items');
+
+    await mounted.render(tabBar({ attentionCount: 0 }));
+    expect(badge()).toBeNull();
+    expect(tab().textContent).toBe('Attention');
+
+    // No other tab ever carries the badge.
+    await mounted.render(tabBar({ attentionCount: 5 }));
+    expect(mounted.container.querySelectorAll('[data-unread-badge]')).toHaveLength(1);
 
     await mounted.unmount();
   });

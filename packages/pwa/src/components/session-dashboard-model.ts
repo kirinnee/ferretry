@@ -10,7 +10,7 @@ import type { SessionView } from '@ferretry/protocol';
 import type { DashboardView, Density } from '../lib/controls.ts';
 import type { SessionGroup } from '../lib/fleet-grouping.ts';
 import type { BadgeTone } from '../shell/primitives.tsx';
-import { pendingQuestionPreview } from '../shell/sessions-bar-model.ts';
+import { pullNeedsYou, rowPreview } from '../shell/sessions-bar-model.ts';
 import { TERMINAL_STATUSES } from '../shell/status-mark.tsx';
 
 export const DENSITY_COLUMN_LABELS: Readonly<Record<Density, readonly string[]>> = {
@@ -163,13 +163,37 @@ export function activityLine(view: SessionView): ActivityLine {
     const until = wait.until ? ` (until ${new Date(wait.until).toLocaleTimeString()})` : '';
     return { text: `waiting: ${wait.condition ?? 'external condition'}${until}`, live: true };
   }
-  const question = pendingQuestionPreview(view);
-  if (question !== undefined) return { text: `asks: ${question}`, live: true };
+  const ask = rowPreview(view);
+  if (ask !== undefined) return { text: `asks: ${ask.text}`, live: true };
   const activity = view.state.activity?.trim();
   if (activity) return { text: activity, live: !TERMINAL_STATUSES.has(view.state.status) };
   return {
     text: TERMINAL_STATUSES.has(view.state.status) ? 'no activity recorded' : 'awaiting activity',
     live: false,
+  };
+}
+
+/**
+ * The Sessions page's "Needs you": every session with open Attention, newest `latestAt` first, lifted
+ * out of its project group (a row is listed once, never in both), and the groups that are left. A group
+ * whose every row was lifted is dropped rather than left as an empty heading. The status-based
+ * `needsYou()` does not move a row here: it stays the quiet "waiting" word (sessions-bar-model.ts).
+ */
+export function pullDashboardNeedsYou(groups: readonly SessionGroup[]): {
+  readonly needsYou: readonly SessionView[];
+  readonly groups: readonly SessionGroup[];
+} {
+  const { waiting } = pullNeedsYou(
+    groups.flatMap(group => group.rows),
+    view => view,
+  );
+  if (waiting.length === 0) return { needsYou: [], groups };
+  const lifted = new Set(waiting);
+  return {
+    needsYou: waiting,
+    groups: groups
+      .map(group => ({ ...group, rows: group.rows.filter(view => !lifted.has(view)) }))
+      .filter(group => group.rows.length > 0),
   };
 }
 
