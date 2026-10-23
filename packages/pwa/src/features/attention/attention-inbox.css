@@ -1,27 +1,8 @@
 /* THE ATTENTION INBOX: the page, the phone's swipe deck, the Sessions page's Needs-you deck, the undo
-   toast, and the count badge every Attention place shows. The card itself is attention-card.css. */
+   toast, and where the count badge sits on each place. The card itself is attention-card.css; the
+   badge is the rows' own `.fy-unread-badge` (sessions-bar.css). */
 
-/* ---- The count badge: a filled accent pill (Telegram/WhatsApp), on every Attention place ---------- */
-.fy-attn-count {
-  display: inline-flex;
-  min-width: 18px;
-  height: 18px;
-  flex-shrink: 0;
-  align-items: center;
-  justify-content: center;
-  border-radius: var(--radius-pill);
-  background: var(--accent);
-  padding: 0 5px;
-  color: var(--accent-fg);
-  font-family: var(--font-ui);
-  font-size: 11px;
-  font-variant-numeric: tabular-nums;
-  font-weight: var(--weight-strong);
-  line-height: 1;
-  letter-spacing: 0;
-  text-transform: none;
-}
-.kt-appnav__link .fy-attn-count {
+.kt-appnav__link .fy-unread-badge {
   margin-left: 6px;
 }
 /* On the phone bar the badge rides the icon's top-right corner, ringed in the bar's own surface. */
@@ -33,7 +14,7 @@
   position: absolute;
   top: -6px;
   left: calc(100% - 8px);
-  box-shadow: 0 0 0 2px var(--surface);
+  outline: 2px solid var(--surface);
 }
 /* SIX PLACES SHARE 390px (65px each), so a label is capped at 12px however large the family's phone
    ramp sets --text-xs: "Attention" in bold is the longest, and it must fit whole, never wrap or clip. */
@@ -217,6 +198,11 @@
 }
 .fy-attn-deck__peek > * {
   height: 100%;
+}
+/* At rest a peek is only an edge: its text would show wherever the card under is taller than the top
+   one. While the top card is in the reader's hand, the next one is revealed under it. */
+.fy-attn-deck:not(:has(.fy-attn-deck__top[data-dragging])) .fy-attn-deck__peek .fy-attn-card > * {
+  visibility: hidden;
 }
 /* The option a drag would send, stamped on the card and growing with the drag. */
 .fy-attn-deck__stamp {

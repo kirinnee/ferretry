@@ -26,6 +26,7 @@ import { type ReactNode, useId, useState } from 'react';
 import {
   DISMISS_ACTION,
   DONE_ACTION,
+  directionOfAction,
   type InboxAction,
   inboxOptions,
   replyAction,
@@ -39,6 +40,8 @@ import { attentionAge, attentionKindMeta, attentionReference, collapsesByDefault
 export interface AttentionCardOrigin {
   /** The ferret's name, as the sidebar shows it. */
   readonly ferret: string;
+  /** What it is working on, when that is not just its name. */
+  readonly task?: string;
   readonly machine: string;
   /** The conversation, opened at this item. */
   readonly href: string;
@@ -78,12 +81,6 @@ const SWIPE_WORD: Readonly<Record<SwipeDirection, string>> = {
 
 const plainProse = (text: string): ReactNode => <p className="m-0 whitespace-pre-wrap break-words">{text}</p>;
 
-/** Which swipe, if any, an action sits on. */
-const directionOf = (map: ReturnType<typeof swipeMap>, action: InboxAction): SwipeDirection | null => {
-  for (const direction of ['right', 'left', 'up'] as const) if (map[direction] === action) return direction;
-  return null;
-};
-
 export function AttentionCard({
   item,
   origin,
@@ -114,7 +111,7 @@ export function AttentionCard({
   };
   const hint = (action: InboxAction): ReactNode => {
     if (!swipeHints) return null;
-    const direction = directionOf(map, action);
+    const direction = directionOfAction(map, action);
     return direction === null ? null : (
       <span className="fy-attn-card__swipe" title={SWIPE_WORD[direction]}>
         {ARROWS[direction]}
@@ -145,15 +142,21 @@ export function AttentionCard({
           className="fy-attn-card__origin"
           data-attention-origin=""
           onNavigate={origin.onNavigate}
-          title={`Open ${origin.ferret}'s conversation on ${origin.machine}`}
+          title={`Open ${origin.ferret}'s conversation${origin.task === undefined ? '' : ` (${origin.task})`} on ${origin.machine}`}
           to={origin.href}
         >
           <span aria-hidden="true" className="fy-attn-card__initial">
             {origin.ferret.charAt(0).toUpperCase()}
           </span>
-          <span className="truncate font-semibold text-fg">{origin.ferret}</span>
+          <span className="shrink-0 font-semibold text-fg">{origin.ferret}</span>
+          {origin.task === undefined ? null : (
+            <>
+              <span aria-hidden="true">·</span>
+              <span className="truncate">{origin.task}</span>
+            </>
+          )}
           <span aria-hidden="true">·</span>
-          <span className="truncate">{origin.machine}</span>
+          <span className="shrink-0">{origin.machine}</span>
         </RouteLink>
       )}
       <h3 className="fy-attn-card__ask" id={`${replyId}-ask`}>

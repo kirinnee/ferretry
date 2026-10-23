@@ -46,7 +46,6 @@ import {
 import { type ReactNode, useEffect, useId, useState } from 'react';
 import { useKeyboardOpen } from '../hooks/use-keyboard-open.ts';
 import { useLayoutMode } from '../hooks/use-layout-mode.ts';
-import { badgeText } from '../lib/attention-inbox.ts';
 import type { DaemonId } from '../lib/daemon-connection.ts';
 import {
   daemonAnalyticsPath,
@@ -61,6 +60,7 @@ import {
 import { BottomSheet } from './bottom-sheet.tsx';
 import { PALETTE_KEYSHORTCUTS, paletteShortcutLabel } from './palette-shortcut.ts';
 import { RouteLink } from './route-link.tsx';
+import { UnreadBadge } from './unread-badge.tsx';
 
 /** Why the reload chip is offered. */
 export type UpdateReason = 'update' | 'recovery';
@@ -258,20 +258,11 @@ export function SidebarDrawerTrigger({ onOpen, sessionCount }: SidebarDrawerTrig
 }
 
 /**
- * The Attention count, as a badge: a filled accent pill wherever a place shows it. Zero draws nothing —
- * a calm place is the good news — and the number is said in words beside it, because a badge alone is
- * a decoration to a screen reader.
+ * The Attention count on a PLACE (a tab, a nav link, a heading): THE unread pill the rows draw
+ * (`UnreadBadge`), and nothing at zero — a calm place is the good news.
  */
 export function AttentionCountBadge({ count, className }: { readonly count: number; readonly className?: string }) {
-  if (count <= 0) return null;
-  return (
-    <>
-      <span aria-hidden="true" className={className === undefined ? 'fy-attn-count' : `fy-attn-count ${className}`}>
-        {badgeText(count)}
-      </span>
-      <span className="sr-only">, {count} open</span>
-    </>
-  );
+  return count <= 0 ? null : <UnreadBadge count={count} {...(className === undefined ? {} : { className })} />;
 }
 
 function AppNavLink({
@@ -601,14 +592,9 @@ export function AppTabBar({ daemon, active = null, onNavigate, onOpenPalette, at
       >
         <span className="kt-tabbar__icon">
           {TAB_ICONS[id]}
-          {id === 'attention' && attentionCount > 0 ? (
-            <span aria-hidden="true" className="fy-attn-count kt-tabbar__badge" data-attention-count="">
-              {badgeText(attentionCount)}
-            </span>
-          ) : null}
+          {id === 'attention' ? <AttentionCountBadge className="kt-tabbar__badge" count={attentionCount} /> : null}
         </span>
         <span className="kt-tabbar__label">{destination.label}</span>
-        {id === 'attention' && attentionCount > 0 ? <span className="sr-only">, {attentionCount} open</span> : null}
       </RouteLink>
     );
   };

@@ -215,12 +215,12 @@ describe('AppBar destinations', () => {
       link => link.getAttribute('data-app-nav') === 'attention',
     ) as HTMLAnchorElement;
 
-    expect(attention.querySelector('.fy-attn-count')?.textContent).toBe('12');
-    expect(attention.textContent).toBe('Attention12, 12 open');
-    expect(mounted.container.querySelectorAll('.fy-attn-count')).toHaveLength(1);
+    expect(attention.querySelector('.fy-unread-badge [aria-hidden="true"]')?.textContent).toBe('12');
+    expect(attention.textContent).toBe('Attention1212 open Attention items');
+    expect(mounted.container.querySelectorAll('.fy-unread-badge')).toHaveLength(1);
 
     await mounted.render(bar());
-    expect(mounted.container.querySelector('.fy-attn-count')).toBeNull();
+    expect(mounted.container.querySelector('.fy-unread-badge')).toBeNull();
 
     await mounted.unmount();
   });
@@ -614,16 +614,16 @@ describe('AppTabBar', () => {
     const mounted = await mount(tabBar({ attentionCount: 3 }));
     const tab = (): HTMLAnchorElement =>
       mounted.container.querySelector('[data-app-tab="attention"]') as HTMLAnchorElement;
-    const badge = (): HTMLElement | null => tab().querySelector('[data-attention-count]');
+    const badge = (): HTMLElement | null => tab().querySelector('[data-unread-badge] [aria-hidden="true"]');
 
     expect(tab().getAttribute('href')).toBe('/d/workshop/attention');
     expect(badge()?.textContent).toBe('3');
     expect(badge()?.getAttribute('aria-hidden')).toBe('true');
-    expect(tab().textContent).toBe('3Attention, 3 open');
+    expect(tab().textContent).toBe('33 open Attention itemsAttention');
 
     await mounted.render(tabBar({ attentionCount: 250 }));
     expect(badge()?.textContent).toBe('99+');
-    expect(tab().textContent).toContain(', 250 open');
+    expect(tab().textContent).toContain('250 open Attention items');
 
     await mounted.render(tabBar({ attentionCount: 0 }));
     expect(badge()).toBeNull();
@@ -631,7 +631,7 @@ describe('AppTabBar', () => {
 
     // No other tab ever carries the badge.
     await mounted.render(tabBar({ attentionCount: 5 }));
-    expect(mounted.container.querySelectorAll('[data-attention-count]')).toHaveLength(1);
+    expect(mounted.container.querySelectorAll('[data-unread-badge]')).toHaveLength(1);
 
     await mounted.unmount();
   });

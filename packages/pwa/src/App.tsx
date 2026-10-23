@@ -183,6 +183,7 @@ import {
 } from './lib/pages/page-host.tsx';
 import {
   connectionPickerPath,
+  daemonAttentionPath,
   daemonLearningPath,
   daemonSessionsPath,
   daemonSettingsPath,
@@ -815,6 +816,8 @@ export const sessionsBarPlace = (route: PageRoute): SessionsBarPlace | null => {
       return 'insights';
     case 'settings':
       return 'settings';
+    case 'attention':
+      return 'attention';
     default:
       return null;
   }
@@ -851,6 +854,7 @@ function ShellSessionsBar({
   const rowMenuRenderer = useMemo(() => sessionRowMenuRenderer(navigate), [navigate]);
   const { connections } = useConnectionSnapshot();
   const allMachines = useContext(AllMachinesContext);
+  const attentionInbox = useAttentionInbox();
   const now = useLiveClock({ intervalMs: MACHINE_CLOCK_MS });
   const fleet = useSyncExternalStore(
     listener => store.fleet.subscribe(listener),
@@ -884,6 +888,9 @@ function ShellSessionsBar({
   return (
     <SessionsBar
       active={sessionsBarPlace(route)}
+      // The inbox counts every paired machine, whichever list the bar shows.
+      attentionHref={daemonAttentionPath(connection.daemonId)}
+      attentionTotal={attentionInbox?.total ?? 0}
       activeSessionId={route.kind === 'session' ? route.sessionId : null}
       daemonId={connection.daemonId}
       machineName={machineName}

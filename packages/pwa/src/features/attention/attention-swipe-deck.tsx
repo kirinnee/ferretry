@@ -33,6 +33,7 @@ import {
   useState,
 } from 'react';
 import {
+  directionOfAction,
   type InboxAction,
   type InboxCard,
   SWIPE_SLOP_PX,
@@ -71,15 +72,6 @@ export const swipeKeyHint = (map: SwipeMap): string =>
       return action === undefined ? [] : [`Arrow ${DIRECTION_WORD[direction]}: ${action.label}.`];
     })
     .join(' ');
-
-/** Which direction, if any, an answer sits on. */
-export const directionOfAction = (map: SwipeMap, action: InboxAction): SwipeDirection | null => {
-  for (const direction of ['right', 'left', 'up'] as const) {
-    const mapped = map[direction];
-    if (mapped !== undefined && mapped.kind === action.kind && mapped.label === action.label) return direction;
-  }
-  return null;
-};
 
 /** Reduced motion from either source: the OS preference, or the app's own Motion setting. */
 const useReducedMotion = (override?: boolean): boolean => {

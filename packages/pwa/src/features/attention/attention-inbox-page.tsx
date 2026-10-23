@@ -41,13 +41,20 @@ import { AttentionCard, type AttentionCardOrigin } from './attention-card.tsx';
 import { AttentionCardFrame, AttentionSwipeDeck } from './attention-swipe-deck.tsx';
 import { AttentionUndoToast } from './attention-undo-toast.tsx';
 
-/** Where a card came from, as the sidebar names it: the row's own title, on its machine, linked at the item. */
-export const inboxCardOrigin = (card: InboxCard, onNavigate: (to: string) => void): AttentionCardOrigin => ({
-  ferret: sessionsBarNames(card.view).title,
-  machine: card.machineName,
-  href: attentionConversationPath(card.daemonId, card.view.config.id, card.item.id),
-  onNavigate,
-});
+/**
+ * Where a card came from: the FERRET that asked (its callsign, else the row's title), what it is working
+ * on when that differs, and its machine — linked to the conversation at the item.
+ */
+export const inboxCardOrigin = (card: InboxCard, onNavigate: (to: string) => void): AttentionCardOrigin => {
+  const names = sessionsBarNames(card.view);
+  return {
+    ferret: names.ferret ?? names.title,
+    ...(names.ferret === null ? {} : { task: names.title }),
+    machine: card.machineName,
+    href: attentionConversationPath(card.daemonId, card.view.config.id, card.item.id),
+    onNavigate,
+  };
+};
 
 /** The refusal a card carries, if its last answer did not land. */
 const failureFor = (failed: readonly FailedAttentionAction[], key: string): string | null =>

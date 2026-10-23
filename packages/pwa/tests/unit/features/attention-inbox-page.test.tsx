@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'bun:test';
+import { AttentionCard } from '../../../src/features/attention/attention-card.tsx';
 import {
   AttentionInboxPage,
   type AttentionInboxPageProps,
@@ -6,14 +7,15 @@ import {
   inboxCardOrigin,
   waitingWords,
 } from '../../../src/features/attention/attention-inbox-page.tsx';
-import {
-  attentionKeyAction,
-  directionOfAction,
-  dragOffset,
-  swipeKeyHint,
-} from '../../../src/features/attention/attention-swipe-deck.tsx';
+import { attentionKeyAction, dragOffset, swipeKeyHint } from '../../../src/features/attention/attention-swipe-deck.tsx';
 import { secondsLeft } from '../../../src/features/attention/attention-undo-toast.tsx';
-import { DISMISS_ACTION, DONE_ACTION, type InboxCard, swipeMap } from '../../../src/lib/attention-inbox.ts';
+import {
+  DISMISS_ACTION,
+  DONE_ACTION,
+  directionOfAction,
+  type InboxCard,
+  swipeMap,
+} from '../../../src/lib/attention-inbox.ts';
 import { daemonId } from '../../../src/lib/daemon-connection.ts';
 import {
   attentionItem,
@@ -171,7 +173,8 @@ describe('attention swipe helpers', () => {
 
   it("names a card's origin as the sidebar does, linked to the conversation at the item", () => {
     const origin = inboxCardOrigin(twoWay, () => undefined);
-    expect(origin.ferret).toBe('Release train');
+    expect(origin.ferret).toBe('Kai');
+    expect(origin.task).toBe('Release train');
     expect(origin.machine).toBe('Laptop');
     expect(origin.href).toBe('/d/laptop/session/sess-2?attention=A2');
     expect(inboxCardOrigin(bare, () => undefined).ferret).toBe('Moe');
@@ -199,13 +202,13 @@ describe('AttentionInboxPage states', () => {
     const mounted = await mount(page(fakeInbox(), [threeWay, twoWay, bare], {}, navigated));
     const cards = [...mounted.container.querySelectorAll('[data-attention-card]')];
     expect(cards.map(card => card.getAttribute('data-attention-card'))).toEqual(['A3', 'A2', 'A1']);
-    expect(mounted.container.querySelector('h1 .fy-attn-count')?.textContent).toBe('3');
+    expect(mounted.container.querySelector('h1 .fy-unread-badge [aria-hidden="true"]')?.textContent).toBe('3');
     expect(mounted.container.textContent).toContain('3 waiting on you');
     expect(mounted.container.querySelector('[data-attention-deck]')).toBeNull();
 
     const origin = must(cards[1]?.querySelector<HTMLAnchorElement>('[data-attention-origin]'), 'the origin link');
     expect(origin.getAttribute('href')).toBe('/d/laptop/session/sess-2?attention=A2');
-    expect(origin.textContent).toBe('RRelease train·Laptop');
+    expect(origin.textContent).toBe('KKai·Release train·Laptop');
     const click = new MouseEvent('click', { bubbles: true, cancelable: true, button: 0 });
     await interact(() => origin.dispatchEvent(click));
     expect(navigated).toEqual(['/d/laptop/session/sess-2?attention=A2']);
@@ -590,5 +593,25 @@ describe('AttentionNeedsYou', () => {
     await advance(fake, 10_000);
     expect(fake.commits).toEqual([]);
     await mounted.unmount();
+  });
+});
+
+describe('AttentionCard swipe hints', () => {
+  it('marks each of the first three options, and Done/Dismiss on a card with none, with its swipe', async () => {
+    const hinted = (mounted: Mounted): (string | null)[] =>
+      [...mounted.container.querySelectorAll('.fy-attn-card__swipe')].map(hint => hint.getAttribute('title'));
+    const options = await mount(
+      <AttentionCard
+        item={attentionItem('A9', { ask: choices('One', 'Two', 'Three', 'Four') })}
+        onAct={() => {}}
+        swipeHints
+      />,
+    );
+    expect(hinted(options)).toEqual(['swipe right', 'swipe left', 'swipe up']);
+    await options.unmount();
+
+    const bare = await mount(<AttentionCard item={attentionItem('A8')} onAct={() => {}} swipeHints />);
+    expect(hinted(bare)).toEqual(['swipe right', 'swipe left']);
+    await bare.unmount();
   });
 });

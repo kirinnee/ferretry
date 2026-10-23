@@ -48,7 +48,7 @@ const instant = (value: string): number => {
 };
 
 /** The session's open Attention, or `undefined` when nothing waits on the owner. */
-const sessionAttention = (view: SessionView): SessionAttentionSummary | undefined => view.state.attention;
+export const sessionAttention = (view: SessionView): SessionAttentionSummary | undefined => view.state.attention;
 
 /** How many open items a row's badge shows. */
 export const unreadCount = (view: SessionView): number => view.state.attention?.open ?? 0;
@@ -204,6 +204,18 @@ export const swipeMap = (item: Pick<AttentionItem, 'ask'>): SwipeMap => {
     left: second ?? DISMISS_ACTION,
     ...(third === undefined ? {} : { up: third }),
   };
+};
+
+/**
+ * Which swipe, if any, an answer sits on — matched by meaning, because `inboxOptions` builds its
+ * answers afresh on every call: the button and the gesture must agree on the SAME option.
+ */
+export const directionOfAction = (map: SwipeMap, action: InboxAction): SwipeDirection | null => {
+  for (const direction of ['right', 'left', 'up'] as const) {
+    const mapped = map[direction];
+    if (mapped !== undefined && mapped.kind === action.kind && mapped.label === action.label) return direction;
+  }
+  return null;
 };
 
 /** A drag must travel this far before it moves at all, so a scroll is never read as a swipe. */
