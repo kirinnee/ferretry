@@ -561,4 +561,36 @@ describe('NodeSessionBrowserLauncher', () => {
     await should(retry).be.rejectedWith(/leased by session agent-browser/u);
     should(await leasedChromePid(root)).equal(first);
   });
+
+  it('should say why Chrome did not start when it exits before exposing its debugging endpoint', async () => {
+    // Arrange — a Chrome that answers --version, then dies saying why on stderr.
+    const root = await mkdtemp(join(tmpdir(), 'ferretry-session-profile-'));
+    roots.push(root);
+    const chromeDir = await mkdtemp(join(tmpdir(), 'ferretry-session-browser-'));
+    roots.push(chromeDir);
+    const chrome = join(chromeDir, 'chrome');
+    await writeFile(
+      chrome,
+      `#!/bin/sh
+if [ "$1" = "--version" ]; then echo 'Google Chrome 150.0'; exit 0; fi
+echo 'Failed to move to new namespace' >&2
+exit 7
+`,
+    );
+    await chmod(chrome, 0o700);
+    const launcher = new NodeSessionBrowserLauncher(
+      new BrowserProfileStore(root),
+      INJECTED_WORKER,
+      process.execPath,
+      environment(chrome),
+      async () => {
+        throw new Error('the worker must not be reached');
+      },
+    );
+
+    // Act + Assert
+    await should(launcher.launch({ width: 800, height: 600 })).be.rejectedWith(
+      /debugging endpoint \(Chrome exited with code 7\): Failed to move to new namespace/u,
+    );
+  });
 });

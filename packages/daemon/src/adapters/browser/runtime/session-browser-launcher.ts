@@ -75,11 +75,12 @@ export class NodeSessionBrowserLauncher implements BrowserSessionLauncher {
         env: defined(browserEnvironment(display, this.environment)),
         stdin: 'ignore',
         stdout: 'ignore',
-        stderr: 'ignore',
+        stderr: 'pipe',
       });
+      const diagnostics = collectTail(chrome.stderr as ReadableStream<Uint8Array>);
       await lease.updateChromePid(chrome.pid, await chromeVersion(executable));
       const endpoint = `http://127.0.0.1:${port}`;
-      await waitForCdp(endpoint, chrome);
+      await waitForCdp(endpoint, chrome, diagnostics);
       const worker = await this.connectWorker({
         runtime: this.workerRuntime,
         workerEntry: this.worker.kind === 'executable' ? this.worker.path : this.worker.entry,
@@ -263,8 +264,13 @@ async function freePort(): Promise<number> {
     });
   });
 }
-async function waitForCdp(endpoint: string, chrome: ReturnType<typeof Bun.spawn>): Promise<void> {
+async function waitForCdp(
+  endpoint: string,
+  chrome: ReturnType<typeof Bun.spawn>,
+  diagnostics: () => string,
+): Promise<void> {
   const deadline = Date.now() + 20_000;
+  let exited = false;
   while (Date.now() < deadline) {
     if (
       await fetch(`${endpoint}/json/version`)
@@ -272,7 +278,32 @@ async function waitForCdp(endpoint: string, chrome: ReturnType<typeof Bun.spawn>
         .catch(() => false)
     )
       return;
-    if (await Promise.race([chrome.exited.then(() => true), Bun.sleep(100).then(() => false)])) break;
+    exited = await Promise.race([chrome.exited.then(() => true), Bun.sleep(100).then(() => false)]);
+    if (exited) break;
   }
-  throw new BrowserControlError('launch_failed', 'Chrome did not expose its private debugging endpoint');
+  const why = exited ? `Chrome exited with code ${chrome.exitCode ?? 'unknown'}` : 'Chrome was still running after 20s';
+  const said = diagnostics();
+  throw new BrowserControlError(
+    'launch_failed',
+    `Chrome did not expose its private debugging endpoint (${why})${said === '' ? '' : `: ${said}`}`,
+  );
+}
+
+const CHROME_STDERR_TAIL_BYTES = 2_048;
+
+/** Drains Chrome's stderr for the browser's whole life (an undrained pipe would eventually block it) and
+ *  keeps only the last bytes, so a launch failure can say WHY Chrome did not start. */
+function collectTail(stream: ReadableStream<Uint8Array>): () => string {
+  let tail = '';
+  void (async () => {
+    const decoder = new TextDecoder();
+    try {
+      for await (const chunk of stream) {
+        tail = (tail + decoder.decode(chunk, { stream: true })).slice(-CHROME_STDERR_TAIL_BYTES);
+      }
+    } catch {
+      // The pipe closing with the child is the normal end of this drain.
+    }
+  })();
+  return () => tail.trim().replace(/\s+/g, ' ');
 }
