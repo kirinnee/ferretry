@@ -17,7 +17,6 @@ import { FileInstanceSurface } from '../../src/components/file-instance-surface.
 import { FilesTab } from '../../src/components/files-tab.tsx';
 import { HandoffSourceProvider } from '../../src/components/handoff-message.tsx';
 import { MigrateSheet } from '../../src/components/migrate-sheet.tsx';
-import { ConvertSheet } from '../../src/features/session-actions/convert-sheet.tsx';
 import { QuestionForm } from '../../src/components/question-form.tsx';
 import { ReferenceSurfaceProvider } from '../../src/components/reference-surface.tsx';
 import type { RuntimeModelControls } from '../../src/components/runtime-controls.tsx';
@@ -31,6 +30,7 @@ import { ApprovalCard } from '../../src/features/permission-request/approval-car
 import { ActionToast } from '../../src/features/session-actions/action-toast.tsx';
 import { ActionsMenu } from '../../src/features/session-actions/actions-menu.tsx';
 import { AddMcpForm } from '../../src/features/session-actions/add-mcp-form.tsx';
+import { ConvertSheet } from '../../src/features/session-actions/convert-sheet.tsx';
 import type { CoreActionContext } from '../../src/features/session-actions/core-actions.ts';
 import { ForkForm } from '../../src/features/session-actions/fork-form.tsx';
 import type { SessionActionContribution } from '../../src/features/session-actions/registry.ts';
@@ -2408,6 +2408,32 @@ describe('SessionChatPage', () => {
           ),
         );
         expect(panel(page.root).props.focus?.target).toBe('A2');
+      } finally {
+        run(() => page.unmount());
+      }
+    });
+
+    test('a new navigation to the SAME item opens it again after the reader folded the panel', () => {
+      const props = { attention: attentionModel([attentionItem], [resolvedItem]), attentionTarget: 'A3' as const };
+      const page = renderSessionChatPage(chatPage({ ...props, attentionTargetKey: 'entry-1' }));
+      try {
+        // The reader folds the panel: the ring is put away.
+        run(() => panel(page.root).props.onExpandedChange(false));
+        expect(panel(page.root).props.expanded).toBe(false);
+
+        // The same notification is tapped again: the same `?attention=A3`, a new history entry.
+        run(() =>
+          page.update(
+            withSessionSearch(
+              chatPage({ ...props, attentionTargetKey: 'entry-2' }) as ReactElement<
+                ComponentProps<typeof SessionChatPage>
+              >,
+            ),
+          ),
+        );
+
+        expect(panel(page.root).props.expanded).toBe(true);
+        expect(panel(page.root).props.focus?.target).toBe('A3');
       } finally {
         run(() => page.unmount());
       }

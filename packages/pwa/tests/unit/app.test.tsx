@@ -68,8 +68,9 @@ import { CARRIER_PREFERENCE_KEY, CarrierPreferenceStore } from '../../src/lib/ca
 import type { DaemonConnectionRepository } from '../../src/lib/connections.ts';
 import { type DaemonConnection, type DaemonId, daemonConnection, daemonId } from '../../src/lib/daemon-connection.ts';
 import { daemonSessionScope } from '../../src/lib/daemon-scope.ts';
+import { NOTIFICATION_OPEN_MESSAGE } from '../../src/lib/notification-open.ts';
 import { notificationBrand } from '../../src/lib/notify.ts';
-import type { PageRoute } from '../../src/lib/pages/routes.ts';
+import { daemonSessionPath, type PageRoute } from '../../src/lib/pages/routes.ts';
 import { type DaemonCarrierRouter, DEVICE_NOT_ACCEPTED_SENTENCE } from '../../src/lib/relay-carrier.ts';
 import { RouterProvider } from '../../src/lib/router.tsx';
 import { SCROLL_MEMORY_KEY, type ScrollMemoryStorage } from '../../src/lib/scroll-memory.ts';
@@ -4893,6 +4894,81 @@ describe('the navigation cache', () => {
       expect(view.container.querySelector('[data-clear-cached-data="cleared"]')).not.toBeNull();
     } finally {
       await view.unmount();
+    }
+  });
+});
+
+/**
+ * A NOTIFICATION TAP, AS THE SHELL RECEIVES IT (the worker's half and every window case are proved in a
+ * real browser by `tests/integration/notification-open.test.ts`). The tap names a conversation on a
+ * machine that may not be the one on screen, and may land before the shell has mounted at all.
+ */
+describe('a notification tap', () => {
+  /** `navigator.serviceWorker`, holding a worker's message until something listens — as the browser does. */
+  const worker = () => {
+    const listeners = new Set<(event: MessageEvent) => void>();
+    const held: unknown[] = [];
+    const deliver = (listener: (event: MessageEvent) => void, data: unknown): void =>
+      listener({ data, ports: [] } as unknown as MessageEvent);
+    const restore = patchGlobal(navigator, 'serviceWorker', {
+      addEventListener: (_type: string, listener: (event: MessageEvent) => void) => {
+        listeners.add(listener);
+        for (const data of held.splice(0)) deliver(listener, data);
+      },
+      removeEventListener: (_type: string, listener: (event: MessageEvent) => void) => listeners.delete(listener),
+    });
+    const tap = (url: string): void => {
+      const data = { type: NOTIFICATION_OPEN_MESSAGE, url };
+      if (listeners.size === 0) held.push(data);
+      for (const listener of [...listeners]) deliver(listener, data);
+    };
+    return { tap, restore };
+  };
+
+  const shownSession = (container: Element): { daemon?: string; session?: string } | null => {
+    const host = container.querySelector<HTMLElement>('[data-session][data-daemon]');
+    return host === null ? null : { daemon: host.dataset.daemon, session: host.dataset.session };
+  };
+
+  it('switches to the machine the notification came from, and opens its conversation at the item', async () => {
+    const browser = worker();
+    try {
+      const { reads, view } = await renderShell(daemonSessionPath(alpha.daemonId, 'here'), [
+        alpha.daemonId,
+        beta.daemonId,
+      ]);
+      await settle();
+      expect(shownSession(view.container)).toEqual({ daemon: alpha.daemonId, session: 'here' });
+
+      await interact(() => browser.tap(`${daemonSessionPath(beta.daemonId, 'there')}?attention=A3`));
+      await settle();
+
+      expect(`${window.location.pathname}${window.location.search}`).toBe(
+        `${daemonSessionPath(beta.daemonId, 'there')}?attention=A3`,
+      );
+      // Beta's conversation, read through Beta's own pairing — not Alpha's session under Beta's address.
+      expect(shownSession(view.container)).toEqual({ daemon: beta.daemonId, session: 'there' });
+      expect(reads).toContain(`${beta.daemonId}:there`);
+      await view.unmount();
+    } finally {
+      browser.restore();
+    }
+  });
+
+  it('a tap the app was opened for wins over the start-up shortcut to the fleet', async () => {
+    const browser = worker();
+    try {
+      // The tap reached the window before the shell mounted at `/` — the picker, which a paired
+      // browser skips straight to its machine's sessions.
+      browser.tap(daemonSessionPath(beta.daemonId, 'there'));
+      const { view } = await renderShell('/', [alpha.daemonId, beta.daemonId]);
+      await settle();
+
+      expect(window.location.pathname).toBe(daemonSessionPath(beta.daemonId, 'there'));
+      expect(shownSession(view.container)).toEqual({ daemon: beta.daemonId, session: 'there' });
+      await view.unmount();
+    } finally {
+      browser.restore();
     }
   });
 });

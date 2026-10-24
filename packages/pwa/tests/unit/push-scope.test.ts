@@ -137,7 +137,30 @@ describe('notificationUrl (§4a: only this site; §4c: only this machine)', () =
     // A climb out of the machine from a relative link is still caught by the machine check.
     expect(notificationUrl('/session/../../d/other', ORIGIN, WORK)).toBe(home);
     // The app-wide worker knows no machine, so a relative link opens nothing but the app.
-    expect(notificationUrl(link, ORIGIN, null)).toBe(`${ORIGIN}/session/session%201?attention=A3`);
+    expect(notificationUrl(link, ORIGIN, null)).toBe(`${ORIGIN}/app/`);
+  });
+
+  it('opens the conversation a push is about when its daemon named no page (before #768, `fy attention notify`)', () => {
+    const home = `${ORIGIN}/d/sha256%3Awork%2Fone`;
+    // An older daemon's ask, and every push it sent: `url: '/'`, with the session it is about.
+    expect(notificationUrl('/', ORIGIN, WORK, 'session 1')).toBe(`${home}/session/session%201`);
+    // Off this site, or on another machine's pages: still this machine's copy of that conversation.
+    expect(notificationUrl('https://evil.test/', ORIGIN, WORK, 's1')).toBe(`${home}/session/s1`);
+    expect(notificationUrl('/d/other/session/s1', ORIGIN, WORK, 's1')).toBe(`${home}/session/s1`);
+    // A page it did name, and may open, wins over the session.
+    expect(notificationUrl('/session/s1?attention=A3', ORIGIN, WORK, 's1')).toBe(`${home}/session/s1?attention=A3`);
+    expect(notificationUrl(`${home}/settings`, ORIGIN, WORK, 's1')).toBe(`${home}/settings`);
+    // About no conversation (a blank id is none): the machine's sessions. The app-wide worker knows no
+    // machine to open a session on, so the id changes nothing there.
+    expect(notificationUrl('/', ORIGIN, WORK, ' ')).toBe(home);
+    expect(notificationUrl('/', ORIGIN, null, 's1')).toBe(notificationUrl('/', ORIGIN, null));
+  });
+
+  it('shows an older daemon’s session push pointing at its conversation', () => {
+    const home = `${ORIGIN}/d/sha256%3Awork%2Fone`;
+    const shown = machineNotification({ ...payload, sessionId: 's1', kind: 'failed', url: '/' }, WORK, ORIGIN);
+    expect(shown.url).toBe(`${home}/session/s1`);
+    expect(machineNotification({ ...payload, url: '/' }, WORK, ORIGIN).url).toBe(home);
   });
 
   it('carries the Ferretry mark on the quiet notification too', () => {

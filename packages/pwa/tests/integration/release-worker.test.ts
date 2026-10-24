@@ -22,15 +22,12 @@
  * allowance never decides their outcome; one scene asserts the allowance itself.
  */
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
-import { spawnSync } from 'node:child_process';
-import { copyFile, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join, relative, resolve, sep } from 'node:path';
+import { join } from 'node:path';
 import type { Browser, BrowserContext, Page } from 'playwright-core';
 import { sharedChromium } from './support/chromium.ts';
-
-const packageRoot = resolve(import.meta.dir, '../..');
-const repositoryRoot = resolve(packageRoot, '../..');
+import { type ReleaseKey, releaseKey, signedRelease } from './support/signed-release.ts';
 
 const PAGE = `<!doctype html><meta charset="utf-8"><title>release</title>
 <script src="/release.js"></script>`;
@@ -46,73 +43,25 @@ let served = new Map<string, Uint8Array>();
 /** Every request the server saw, as `<Sec-Fetch-Mode> <path>`: a page load is `navigate /…`. */
 const requests: string[] = [];
 
-const run = (command: string[], cwd = packageRoot, input?: Uint8Array): void => {
-  const result = spawnSync(command[0] ?? '', command.slice(1), { cwd, encoding: 'utf8', input });
-  if (result.status !== 0) throw new Error(`${command.join(' ')} failed:\n${result.stdout}\n${result.stderr}`);
-};
-
-const listFiles = async (directory: string): Promise<string[]> =>
-  (await readdir(directory, { recursive: true, withFileTypes: true }))
-    .filter(entry => entry.isFile())
-    .map(entry => relative(directory, join(entry.parentPath, entry.name)).split(sep).join('/'));
-
-const keyPair = async (name: string): Promise<{ pem: string; pub: string }> => {
-  const pem = join(workDirectory, `${name}.pem`);
-  const pub = join(workDirectory, `${name}.pub`);
-  run(['openssl', 'genpkey', '-algorithm', 'ed25519', '-out', pem], workDirectory);
-  run(['openssl', 'pkey', '-in', pem, '-pubout', '-out', pub], workDirectory);
-  return { pem, pub };
-};
-
 /** Builds and (optionally) signs one release of the fixture site; returns its files. */
 const release = async (
   name: string,
   label: string,
   identity: { readonly commit: string; readonly sequence: number },
-  key: { readonly pem: string; readonly pub: string },
+  key: ReleaseKey,
   sign = true,
-): Promise<Map<string, Uint8Array>> => {
-  const dist = join(workDirectory, name);
-  await mkdir(dist, { recursive: true });
-  await writeFile(join(dist, 'index.html'), PAGE);
-  // Pages configuration, as `vite build` copies it from `public/`; the signer checks it is the real one.
-  for (const config of ['_headers', '_redirects'])
-    await copyFile(join(packageRoot, 'public', config), join(dist, config));
-  await writeFile(join(dist, 'release.js'), SCRIPT(label));
-  run([
-    'bun',
-    'run',
-    'scripts/build-release.ts',
-    dist,
-    '--public-key',
-    key.pub,
-    '--commit',
-    identity.commit,
-    '--sequence',
-    String(identity.sequence),
-    '--created-at',
-    '2026-10-01T00:00:00Z',
-  ]);
-  if (sign) {
-    run(
-      [
-        join(repositoryRoot, 'scripts/ci/sign-pwa-release.sh'),
-        '--sequence',
-        String(identity.sequence),
-        '--commit',
-        identity.commit,
-        '--public-key',
-        key.pub,
-        dist,
-      ],
-      repositoryRoot,
-      new Uint8Array(await readFile(key.pem)),
-    );
-  }
-  const files = new Map<string, Uint8Array>();
-  for (const path of await listFiles(dist)) files.set(path, new Uint8Array(await readFile(join(dist, path))));
-  return files;
-};
+): Promise<Map<string, Uint8Array>> =>
+  await signedRelease({
+    directory: workDirectory,
+    name,
+    files: new Map([
+      ['index.html', PAGE],
+      ['release.js', SCRIPT(label)],
+    ]),
+    identity,
+    key,
+    sign,
+  });
 
 let first: Map<string, Uint8Array>;
 let second: Map<string, Uint8Array>;
@@ -121,11 +70,16 @@ let stranger: Map<string, Uint8Array>;
 
 beforeAll(async () => {
   workDirectory = await mkdtemp(join(tmpdir(), 'ferretry-release-worker-'));
-  const key = await keyPair('key');
+  const key = await releaseKey(workDirectory, 'key');
   first = await release('first', 'first', { commit: 'aaaaaaa', sequence: 1 }, key);
   second = await release('second', 'second', { commit: 'bbbbbbb', sequence: 2 }, key);
   unsigned = await release('unsigned', 'unsigned', { commit: 'ccccccc', sequence: 3 }, key, false);
-  stranger = await release('stranger', 'stranger', { commit: 'ddddddd', sequence: 9 }, await keyPair('stranger'));
+  stranger = await release(
+    'stranger',
+    'stranger',
+    { commit: 'ddddddd', sequence: 9 },
+    await releaseKey(workDirectory, 'stranger'),
+  );
 
   browser = await sharedChromium();
   server = Bun.serve({
@@ -677,7 +631,8 @@ describe('per-machine push workers', () => {
     expect(JSON.stringify(muted)).not.toContain('the real reason');
 
     expect(await shown('/push/home/')).toEqual([
-      { title: 'Home · Session finished', tag: 'fy-push:home:session-s2', url: `${origin()}/d/home` },
+      // `url: '/'` names no page, so the tap opens the session the push is about, on its machine.
+      { title: 'Home · Session finished', tag: 'fy-push:home:session-s2', url: `${origin()}/d/home/session/s2` },
     ]);
     await context.close();
   }, 120_000);

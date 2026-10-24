@@ -256,6 +256,11 @@ export interface SessionChatPageProps {
    */
   readonly attentionTarget?: AttentionId | null;
   /**
+   * Which navigation named `attentionTarget` (the router's entry key). A new key re-targets even the
+   * SAME item — tapping its notification a second time, after the panel was folded, opens it again.
+   */
+  readonly attentionTargetKey?: string;
+  /**
    * This session's live-feed state and the reader's manual reconnect.
    *
    * Absent means the host is not subscribed to a live feed at all, which is what every test mount
@@ -425,6 +430,7 @@ export function SessionChatPage({
   onNavigate,
   attention,
   attentionTarget = null,
+  attentionTargetKey,
   liveStream,
   project = null,
   onOpenSessions,
@@ -672,10 +678,10 @@ export function SessionChatPage({
 
   // `?attention=A3` opens the conversation AT that item. Declared after the reset above so that, on a
   // navigation that carries a target, the reset runs first and the new target wins.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: the pairing and session id re-arm the same target on a new session
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the pairing, the session id and the navigation re-arm the same target
   useEffect(() => {
     if (attentionTarget !== null) showAttention(attentionTarget);
-  }, [attentionTarget, showAttention, connection, session.config.id]);
+  }, [attentionTarget, attentionTargetKey, showAttention, connection, session.config.id]);
 
   const publish = useCallback(
     (view: SessionView): void => {

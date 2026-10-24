@@ -192,7 +192,13 @@ describe('notification policy', () => {
     const automatic = attentionNotificationPayload('session-1', 'Ada', item, snapshot);
 
     // Assert
-    should(generic).containDeep({ kind: 'question', title: 'Agent “Release agent”', tag: 'notify-session-1' });
+    should(generic).containDeep({
+      kind: 'question',
+      title: 'Agent “Release agent”',
+      tag: 'notify-session-1',
+      // The conversation the agent spoke from, never the app root.
+      url: '/session/session-1',
+    });
     should(explicit).containDeep({
       kind: 'failed',
       title: 'Agent “Release agent”: Deploy failed',
