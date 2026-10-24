@@ -200,8 +200,6 @@ describe('isDeferredReleaseFile', () => {
   it('defers only the speech runtime binary the build emits under assets/', () => {
     should(isDeferredReleaseFile('assets/ort-wasm-simd-threaded-BjodUpCp.wasm')).be.true();
     should(isDeferredReleaseFile('assets/ort-wasm-simd-threaded.wasm')).be.true();
-    // Whisper's WebGPU-capable build of the same runtime (`lib/stt/whisper-model.ts`).
-    should(isDeferredReleaseFile('assets/ort-wasm-simd-threaded.asyncify-DGj6wBfM.wasm')).be.true();
     // The sherpa-onnx binary every sherpa model shares (`lib/stt/sherpa-models.ts`).
     should(isDeferredReleaseFile('assets/asr-BAU4GBSr.wasm')).be.true();
     for (const path of [

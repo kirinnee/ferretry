@@ -22,8 +22,8 @@
  * WebAssembly binary are bound the same way, for the sherpa models
  * (`lib/stt/sherpa-voice.ts`); `sherpa-runtime-wasm` is a `vite.config.ts` alias.
  * So are Vosk's worker and binary, and the Whisper worker
- * (`worker/whisper-worker.ts`) with its WebGPU-capable runtime build (the
- * asyncify binary); only someone who installs a model on a runtime downloads it.
+ * (`worker/whisper-worker.ts`), which runs on that same ONNX Runtime binary;
+ * only someone who installs a model on a runtime downloads it.
  *
  * The CSS import is what pulls `styles/index.css` (and, through its `@import`s,
  * the theme tokens and every component stylesheet) into the build as a real
@@ -39,7 +39,6 @@
  * (`lib/install-prompt.ts`, `hooks/use-install-prompt.ts`).
  */
 
-import whisperRuntimeUrl from 'onnxruntime-web/ort-wasm-simd-threaded.asyncify.wasm?url';
 import voskRuntimeUrl from '@lichess-org/vosk-browser/dist/vosk.wasm?url';
 import runtimeUrl from 'onnxruntime-web/ort-wasm-simd-threaded.wasm?url';
 import { StrictMode } from 'react';
@@ -79,7 +78,8 @@ createRoot(host).render(
               runtimeUrl,
               sherpa: { workerUrl: sherpaWorkerUrl, runtimeUrl: sherpaRuntimeUrl },
               vosk: { workerUrl: voskWorkerUrl, runtimeUrl: voskRuntimeUrl },
-              whisper: { workerUrl: whisperWorkerUrl, runtimeUrl: whisperRuntimeUrl },
+              // Whisper runs on the same WebAssembly-only build (`worker/whisper-worker.ts`).
+              whisper: { workerUrl: whisperWorkerUrl, runtimeUrl },
             }}
           />
         </LocationShareContext.Provider>

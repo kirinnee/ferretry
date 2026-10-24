@@ -58,6 +58,16 @@ for page in index.html get-started/index.html; do
     exit 1
   fi
 done
+# Cloudflare Pages refuses to deploy ANY file over 25 MiB, and that refusal only shows up in the
+# post-merge deploy: from 2026-10-23 to 2026-10-24 every deploy failed on ONNX Runtime's 27 MB WebGPU
+# binary while every PR stayed green. 24 MiB leaves headroom, so a dependency that grows fails a PR.
+max_file_bytes=$((24 * 1024 * 1024))
+oversized="$(find packages/pwa/dist -type f -size "+${max_file_bytes}c" -printf '%s bytes  %p\n' | sort -rn)"
+[[ -z ${oversized} ]] || {
+  echo "❌ packages/pwa/dist has files over 24 MiB; Cloudflare Pages refuses any file over 25 MiB:" >&2
+  printf '%s\n' "${oversized}" >&2
+  exit 1
+}
 cmp packages/pwa/public/_headers packages/pwa/dist/_headers
 cmp packages/pwa/public/_redirects packages/pwa/dist/_redirects
 

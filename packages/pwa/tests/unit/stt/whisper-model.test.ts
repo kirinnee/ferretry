@@ -20,7 +20,7 @@ import {
   SPEECH_RUNTIMES,
   validateModelCatalog,
 } from '../../../src/lib/stt/model-catalog.ts';
-import { ORT_RUNTIME_VERSION } from '../../../src/lib/stt/parakeet-model.ts';
+import { ORT_RUNTIME_FILE, ORT_RUNTIME_VERSION } from '../../../src/lib/stt/parakeet-model.ts';
 import {
   TRANSFORMERS_JS_VERSION,
   WHISPER_BASE_EN_CATALOG_MODEL,
@@ -113,14 +113,16 @@ describe('the Whisper catalog entries', () => {
 describe('the transformers.js runtime', () => {
   const runtime = SPEECH_RUNTIMES['transformers-js'];
 
-  it('is shared, in its own cache, and pins the WebGPU-capable ONNX Runtime binary', () => {
+  it('is shared, in its own cache, and pins the WebAssembly-only ONNX Runtime binary Parakeet runs', () => {
     should(runtime.file).equal(WHISPER_RUNTIME_FILE);
     should(runtime.version).equal(TRANSFORMERS_JS_VERSION);
     should(runtime.label).containEql(ORT_RUNTIME_VERSION);
     should(runtime.shared).eql({ cache: 'fy-stt-transformers-js-v1', keyRoot: '/fy-stt/runtime/transformers-js' });
-    should(runtimeBundle(runtime, '/assets/ort-wasm-simd-threaded.asyncify-x.wasm')?.files).eql([
-      { ...WHISPER_RUNTIME_FILE, url: '/assets/ort-wasm-simd-threaded.asyncify-x.wasm' },
+    should(runtimeBundle(runtime, '/assets/ort-wasm-simd-threaded-x.wasm')?.files).eql([
+      { ...WHISPER_RUNTIME_FILE, url: '/assets/ort-wasm-simd-threaded-x.wasm' },
     ]);
+    // The same bytes as Parakeet's: the WebGPU build is over Cloudflare Pages' 25 MiB file limit.
+    should({ ...WHISPER_RUNTIME_FILE, label: '' }).eql({ ...ORT_RUNTIME_FILE, label: '' });
   });
 
   it('is the transformers.js version installed', () => {
@@ -138,7 +140,7 @@ describe('the transformers.js runtime', () => {
   });
 
   it('hashes to the size and SHA-256 recorded in WHISPER_RUNTIME_FILE', () => {
-    const bytes = readFileSync(Bun.resolveSync('onnxruntime-web/ort-wasm-simd-threaded.asyncify.wasm', PWA_DIR));
+    const bytes = readFileSync(Bun.resolveSync('onnxruntime-web/ort-wasm-simd-threaded.wasm', PWA_DIR));
     should(bytes.byteLength).equal(WHISPER_RUNTIME_FILE.bytes);
     should(createHash('sha256').update(bytes).digest('hex')).equal(WHISPER_RUNTIME_FILE.sha256);
   });

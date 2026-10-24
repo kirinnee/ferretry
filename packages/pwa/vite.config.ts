@@ -295,18 +295,19 @@ export default defineConfig({
    * because the pinned int8 encoder cannot run on WebGPU. The alias makes the library and the worker
    * share the one 12 MB build the worker configures.
    *
-   * WHISPER (`src/worker/whisper-worker.ts`) is NOT affected, and that is deliberate: transformers.js
-   * imports `onnxruntime-web/webgpu`, a subpath the alias (anchored on the bare name) never matches,
-   * so the Whisper worker gets the WebGPU-capable build (`ort-wasm-simd-threaded.asyncify.wasm`) and
-   * Parakeet keeps its 12 MB WebAssembly-only one. Both are the same `onnxruntime-web` version: the
-   * root `package.json` overrides transformers.js's own pin, so there is one runtime package, in two
-   * builds, each downloaded only by someone who installs a model that runs on it.
+   * WHISPER (`src/worker/whisper-worker.ts`) runs on that SAME build: transformers.js imports
+   * `onnxruntime-web/webgpu`, and the alias sends that subpath to `onnxruntime-web/wasm` too. The
+   * WebGPU build's binary (`ort-wasm-simd-threaded.asyncify.wasm`, 27,084,114 bytes) is over Cloudflare
+   * Pages' 25 MiB per-file limit, so a build that emitted it could not deploy at all (every Pages
+   * deploy failed from 2026-10-23 until this alias). The root `package.json` overrides
+   * transformers.js's own ONNX Runtime pin, so there is one runtime package, in one build, and
+   * `scripts/ci/build-pwa.sh` fails any build that emits a file Pages would refuse.
    * Workers are bundled by a build of their own, so a transform one of them needs is named HERE:
    * {@link voskEvalFreeGlue} makes the Vosk worker's Emscripten glue eval-free.
    */
   worker: { format: 'es', plugins: () => [voskEvalFreeGlue] },
   resolve: {
-    alias: [{ find: /^onnxruntime-web$/u, replacement: 'onnxruntime-web/wasm' }, ...SHERPA_ALIASES],
+    alias: [{ find: /^onnxruntime-web(?:\/webgpu)?$/u, replacement: 'onnxruntime-web/wasm' }, ...SHERPA_ALIASES],
   },
   css: {
     postcss: {

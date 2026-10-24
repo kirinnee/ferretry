@@ -15,7 +15,11 @@ import {
 import { ON_DEVICE_MODEL_IDS } from '../../../src/lib/stt/model-catalog.ts';
 import type { ModelInstaller, ModelStoreStatus } from '../../../src/lib/stt/model-store.ts';
 import { browserOnDeviceVoices, type SpeechGlobalLike } from '../../../src/lib/stt/on-device-voices.ts';
-import { WHISPER_BASE_EN_CATALOG_MODEL, WHISPER_TINY_EN_CATALOG_MODEL } from '../../../src/lib/stt/whisper-model.ts';
+import {
+  WHISPER_BASE_EN_CATALOG_MODEL,
+  WHISPER_RUNTIME_FILE,
+  WHISPER_TINY_EN_CATALOG_MODEL,
+} from '../../../src/lib/stt/whisper-model.ts';
 import { WhisperRecognitionSession } from '../../../src/lib/stt/whisper-session.ts';
 import {
   browserWhisperVoice,
@@ -25,7 +29,10 @@ import {
 } from '../../../src/lib/stt/whisper-voice.ts';
 
 const TINY = WHISPER_TINY_EN_CATALOG_MODEL;
-const ASSETS = { workerUrl: '/assets/whisper-worker-abc123.js', runtimeUrl: '/assets/ort.asyncify.wasm' };
+const ASSETS = {
+  workerUrl: '/assets/whisper-worker-abc123.js',
+  runtimeUrl: '/assets/ort-wasm-simd-threaded-abc123.wasm',
+};
 const INSTALLED: ModelStoreStatus = {
   state: 'installed',
   version: TINY.versionLabel,
@@ -325,7 +332,7 @@ describe('the registry’s Whisper voices', () => {
 /** The pinned digest the store expects in a file's `complete` record, found from the key. */
 function completeHash(cache: string, key: string): string {
   const role = key.split('/').at(-2) ?? '';
-  if (cache === 'fy-stt-transformers-js-v1') return '79dfc1d756e2dba03ad015ad84ba804583853bb567fddb669487abb4ee1bf273';
+  if (cache === 'fy-stt-transformers-js-v1') return WHISPER_RUNTIME_FILE.sha256;
   const model = cache === TINY.cache ? TINY : WHISPER_BASE_EN_CATALOG_MODEL;
   return model.files.find(file => file.role === role)?.sha256 ?? '';
 }
