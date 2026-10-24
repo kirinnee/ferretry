@@ -135,6 +135,18 @@ function environmentArgument(name: string, value: string): readonly string[] {
   return ['-e', `${name}=${value}`];
 }
 
+/**
+ * The size an agent's pane is created at.
+ *
+ * Nothing attached to an agent pane claims a size — the daemon's control clients attach with
+ * `ignore-size` on purpose — so without one tmux falls back to its 80×24 `default-size`, and a
+ * harness's question form with a few described options no longer fits: its question scrolls off the
+ * top. Taller is what a form needs. Wider is held back because a phone's Console fits the widest line
+ * to the screen, and every extra column shrinks that text; 100 columns still reads there. A terminal
+ * that attaches later resizes the window to itself as tmux always did (`window-size latest`).
+ */
+export const AGENT_PANE_SIZE = { width: 100, height: 50 } as const;
+
 export function newSessionArguments(launch: TmuxLaunch): readonly string[] {
   const args = ['new-session', '-d', '-s', sessionTarget(launch.session), '-c', launch.cwd];
   if (launch.width !== undefined) args.push('-x', String(launch.width));

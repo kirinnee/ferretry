@@ -246,6 +246,73 @@ describe('QuestionForm', () => {
     expect(form.root.findByType('pre').children.join('')).toMatch(/already used for a different answer/u);
   });
 
+  /** Submits "Yes" on a form whose answer is refused with `cause`, opening the Console through `opened`. */
+  async function refusedWith(cause: unknown, opened?: string[]) {
+    const form = render(
+      <QuestionForm
+        api={{
+          answer: async () => {
+            throw cause;
+          },
+        }}
+        daemon={daemonA}
+        {...(opened === undefined ? {} : { onOpenConsole: () => opened.push('console') })}
+        question={{ toolUseId: 'stuck', questions: [{ question: 'Proceed?', options: [{ label: 'Yes' }] }] }}
+        sessionId="stuck-session"
+      />,
+    );
+    run(() => form.root.findAllByType('input')[0]?.props.onChange());
+    await runAsync(async () => {
+      form.root.findByProps({ className: 'fy-question-submit' }).props.onClick();
+      await Promise.resolve();
+    });
+    return form;
+  }
+
+  const DRIVER_TEXT =
+    'the rendered form is not the exact pending question; no keys were sent\n\nAutomatic native cancellation was not confirmed';
+
+  test("turns an older daemon's raw driver text into a sentence a person can act on, keeping the text in Details", async () => {
+    const opened: string[] = [];
+    const form = await refusedWith(
+      new FyHttpError(DRIVER_TEXT, 409, 'answer_unconfirmed', { error: DRIVER_TEXT }),
+      opened,
+    );
+
+    expect(form.root.findByProps({ role: 'alert' }).children.join('')).toBe(
+      "Couldn't answer automatically — answer in the Console tab or type your choice in chat.",
+    );
+    expect(form.root.findByType('pre').children.join('')).toBe(DRIVER_TEXT);
+    run(() => form.root.findByProps({ className: 'fy-question-console' }).props.onClick());
+    expect(opened).toEqual(['console']);
+  });
+
+  test.each([
+    ['answer_unconfirmed', 409],
+    ['answer_released', 409],
+    ['session_answer_failed', 500],
+  ])('keeps a daemon-worded sentence for %s and still offers the Console', async (code, status) => {
+    const form = await refusedWith(
+      new FyHttpError("Couldn't answer automatically.", status, code, { error: 'x', detail: DRIVER_TEXT }),
+      [],
+    );
+
+    expect(form.root.findByProps({ role: 'alert' }).children.join('')).toBe("Couldn't answer automatically.");
+    expect(form.root.findByType('pre').children.join('')).toBe(DRIVER_TEXT);
+    expect(form.root.findAllByProps({ className: 'fy-question-console' })).toHaveLength(1);
+  });
+
+  test('offers no Console button where the host has none, or for a refusal that is not about the pane', async () => {
+    const hostless = await refusedWith(new FyHttpError(DRIVER_TEXT, 409, 'answer_unconfirmed'));
+    const refused = await refusedWith(new FyHttpError('Reload the app.', 409, 'answer_request_id_reused'), []);
+    const offline = await refusedWith(new Error('network down'), []);
+
+    expect(hostless.root.findAllByProps({ className: 'fy-question-console' })).toHaveLength(0);
+    expect(refused.root.findAllByProps({ className: 'fy-question-console' })).toHaveLength(0);
+    expect(refused.root.findByProps({ role: 'alert' }).children.join('')).toBe('Reload the app.');
+    expect(offline.root.findByProps({ role: 'alert' }).children.join('')).toBe('network down');
+  });
+
   test('makes Other exclusive, renders its text field, and submits its trimmed value', async () => {
     const calls: unknown[][] = [];
     const form = render(

@@ -6,8 +6,10 @@
  *
  * It renders the REAL `QuestionForm`, picks "Other…", types a reply and presses Submit against a fake
  * daemon that refuses the answer. Two states: `answered` (the daemon already delivered an answer — the
- * form turns read-only and says what it was answered with) and `error` (any other refusal — one plain
- * sentence, with the technical explanation behind Details). Every width is asserted to fit without
+ * form turns read-only and says what it was answered with), `error` (any other refusal — one plain
+ * sentence, with the technical explanation behind Details) and `undelivered` (the daemon could not drive
+ * the native form — the owner's real report, as an older daemon words it: the raw driver text moves
+ * behind Details and an Open Console button offers the pane itself). Every width is asserted to fit without
  * sideways scroll. Like `approval-card-screenshot.tsx` it drives the system Chrome through
  * playwright-core and aborts every request off the loopback origin.
  */
@@ -39,6 +41,7 @@ import { daemonConnection } from '../../src/lib/daemon-connection.ts';
 
 const daemon = daemonConnection({ daemonId: 'harness', baseUrl: 'http://127.0.0.1', deviceId: 'harness' });
 const state = new URLSearchParams(location.search).get('state');
+const UNDELIVERED = 'the rendered form is not the exact pending question; no keys were sent\\n\\nAutomatic native cancellation was not confirmed: the failed answer no longer has a positively bound question menu; refusing automatic Escape. The structured form remains bound; inspect the terminal before continuing.\\nPending question:\\nHow should this land?';
 const api = {
   answer: async () => {
     if (state === 'answered')
@@ -46,6 +49,8 @@ const api = {
         error: 'x',
         answeredWith: 'Ship it',
       });
+    if (state === 'undelivered')
+      throw new FyHttpError(UNDELIVERED, 409, 'answer_unconfirmed', { error: UNDELIVERED });
     throw new FyHttpError('A different answer was already sent for this question. Reload the session and check it before answering again.', 409, 'answer_request_id_reused', {
       error: 'x',
       detail: 'request id "question:fy_daemon_x:session:toolu_01" was already used for a different answer',
@@ -61,6 +66,7 @@ createRoot(root).render(
         <QuestionForm
           api={api}
           daemon={daemon}
+          onOpenConsole={() => {}}
           question={{
             toolUseId: 'toolu_01',
             questions: [{ question: 'How should this land?', options: [{ label: 'Ship it' }, { label: 'Hold' }] }],
@@ -135,7 +141,7 @@ try {
           return await route.continue();
         });
         const page = await context.newPage();
-        for (const state of ['answered', 'error'] as const) {
+        for (const state of ['answered', 'error', 'undelivered'] as const) {
           await page.goto(`${server.url}?theme=studio-${scheme}&state=${state}`);
           const form = page.locator('.fy-question-form');
           await form.waitFor({ state: 'visible' });

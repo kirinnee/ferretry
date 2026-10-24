@@ -4,7 +4,13 @@ import { join } from 'node:path';
 import { SessionConfigSchema, SessionStateSchema, SessionViewSchema } from '@ferretry/protocol';
 import should from 'should';
 import { buildWorld, type DaemonWorld, start } from '../../../bin/fyd.ts';
-import { createSessionPaths, firstWriteReleasedAnswerAttention, parseSessionId } from '../../../src/lib/index.ts';
+import {
+  ANSWER_NOT_DELIVERED,
+  createSessionPaths,
+  firstWriteReleasedAnswerAttention,
+  parseSessionId,
+  RELOAD_THE_APP,
+} from '../../../src/lib/index.ts';
 import { ABSENT_USER_HOME, cleanupTempDirectories, tempDirectory } from '../support/repository.ts';
 
 /**
@@ -53,7 +59,7 @@ const TMUX_SESSION = `fy-${SESSION_ID}`;
  */
 const FORM_SCRIPT = `#!/usr/bin/env bash
 log="$1"
-printf '  ${QUESTION}\\n\\n❯ Yes\\n  No\\n'
+printf '────────────────────────────────────────\\n  ${QUESTION}\\n\\n❯ 1. Yes\\n  2. No\\n'
 if read -r _; then printf 'submit\\n' >> "$log"; fi
 printf '\\033[2J\\033[H'
 printf 'Understood. Working on it now.\\n'
@@ -65,7 +71,7 @@ sleep 300
 const GATED_FORM_SCRIPT = `#!/usr/bin/env bash
 log="$1"
 gate="$2"
-printf '  ${QUESTION}\\n\\n❯ Yes\\n  No\\n'
+printf '────────────────────────────────────────\\n  ${QUESTION}\\n\\n❯ 1. Yes\\n  2. No\\n'
 if read -r _; then printf 'submit\\n' >> "$log"; fi
 while [[ ! -e "$gate" ]]; do sleep 0.01; done
 printf '\\033[2J\\033[H'
@@ -77,7 +83,7 @@ sleep 300
 /** Accept Enter without advancing, then advance only when recovery sends its one bounded Escape. */
 const FAILURE_SCRIPT = `#!/usr/bin/env bash
 log="$1"
-printf '  ${QUESTION}\\n\\n❯ Yes\\n  No\\n'
+printf '────────────────────────────────────────\\n  ${QUESTION}\\n\\n❯ 1. Yes\\n  2. No\\n'
 while IFS= read -r -s -n 1 key; do
   if [[ "$key" == $'\\e' ]]; then
     printf 'escape\\n' >> "$log"
@@ -214,7 +220,7 @@ async function livePane(home: string, scratch: string): Promise<string> {
       stderr: 'pipe',
     });
     const [text] = await Promise.all([new Response(child.stdout).text(), child.exited]);
-    if (text.includes(QUESTION) && text.includes('❯ Yes')) break;
+    if (text.includes(QUESTION) && text.includes('❯ 1. Yes')) break;
     await Bun.sleep(25);
   }
   return log;
@@ -238,7 +244,7 @@ async function gatedPane(home: string, scratch: string): Promise<{ readonly gate
       stderr: 'pipe',
     });
     const [text] = await Promise.all([new Response(child.stdout).text(), child.exited]);
-    if (text.includes(QUESTION) && text.includes('❯ Yes')) break;
+    if (text.includes(QUESTION) && text.includes('❯ 1. Yes')) break;
     await Bun.sleep(25);
   }
   return { gate, log };
@@ -261,7 +267,7 @@ async function failingPane(home: string, scratch: string): Promise<string> {
       stderr: 'pipe',
     });
     const [text] = await Promise.all([new Response(child.stdout).text(), child.exited]);
-    if (text.includes(QUESTION) && text.includes('❯ Yes')) break;
+    if (text.includes(QUESTION) && text.includes('❯ 1. Yes')) break;
     await Bun.sleep(25);
   }
   return log;
@@ -541,7 +547,8 @@ describe('the structured answer journey', () => {
     const conflict = await answerRequest(port, daemon, REQUEST_ID, ['No']);
     await statusOf(replay, 200);
     const refusal = await statusOf(conflict, 409);
-    should((JSON.parse(refusal) as { readonly code: string }).code).equal('answer_request_id_reused');
+    // This id is the one-per-question shape an app built before answer digests minted: reload it.
+    should(JSON.parse(refusal)).match({ code: 'answer_request_id_reused', error: RELOAD_THE_APP });
     should(await submits(log)).deepEqual(['submit']);
 
     // Act — the daemon goes away and comes back, and the client retries across the restart.
@@ -579,10 +586,15 @@ describe('the structured answer journey', () => {
     });
 
     const failed = await answerRequest(port, daemon, `${REQUEST_ID}:failure`, ['Yes']);
-    const failureBody = JSON.parse(await statusOf(failed, 409)) as { readonly code: string; readonly error: string };
+    const failureBody = JSON.parse(await statusOf(failed, 409)) as {
+      readonly code: string;
+      readonly error: string;
+      readonly detail: string;
+    };
 
     should(failureBody.code).equal('answer_released');
-    should(failureBody.error).match(/structured form was released/u);
+    should(failureBody.error).equal(ANSWER_NOT_DELIVERED);
+    should(failureBody.detail).match(/structured form was released/u);
     should(await submits(log)).deepEqual(['enter', 'escape']);
     should(await readFile(join(sessionDirectory, 'last-snapshot.txt'), 'utf8')).match(new RegExp(QUESTION, 'u'));
     const stateResponse = await fetch(`http://127.0.0.1:${port}/v1/sessions/${SESSION_ID}`, {
@@ -689,9 +701,14 @@ describe('the structured answer journey', () => {
       // same form for one Escape, and settles this operation as a proved failure.
       const requestId = `${REQUEST_ID}:colliding-${attention.label}`;
       const failed = await otherAnswerRequest(port, daemon, requestId, currentToolUseId, 'Explain in prose');
-      const failureBody = JSON.parse(await statusOf(failed, 409)) as { readonly code: string; readonly error: string };
+      const failureBody = JSON.parse(await statusOf(failed, 409)) as {
+        readonly code: string;
+        readonly error: string;
+        readonly detail: string;
+      };
       should(failureBody.code).equal('answer_released');
-      should(failureBody.error).match(/structured form was released/u);
+      should(failureBody.error).equal(ANSWER_NOT_DELIVERED);
+      should(failureBody.detail).match(/structured form was released/u);
       should(await submits(log)).deepEqual(['escape']);
 
       const response = await fetch(`http://127.0.0.1:${port}/v1/sessions/${SESSION_ID}`, {
@@ -872,12 +889,17 @@ describe('the structured answer journey', () => {
     });
 
     const failed = await answerRequest(port, daemon, `${REQUEST_ID}:dead`, ['Yes']);
-    const failureBody = JSON.parse(await statusOf(failed, 409)) as { readonly code: string; readonly error: string };
+    const failureBody = JSON.parse(await statusOf(failed, 409)) as {
+      readonly code: string;
+      readonly error: string;
+      readonly detail: string;
+    };
 
     should(failureBody.code).equal('answer_unconfirmed');
-    should(failureBody.error).match(/Automatic native cancellation was not confirmed/u);
-    should(failureBody.error).match(/structured form remains bound/u);
-    should(failureBody.error).match(new RegExp(QUESTION.replace('?', '\\?'), 'u'));
+    should(failureBody.error).equal(ANSWER_NOT_DELIVERED);
+    should(failureBody.detail).match(/Automatic native cancellation was not confirmed/u);
+    should(failureBody.detail).match(/structured form remains bound/u);
+    should(failureBody.detail).match(new RegExp(QUESTION.replace('?', '\\?'), 'u'));
     const stateResponse = await fetch(`http://127.0.0.1:${port}/v1/sessions/${SESSION_ID}`, {
       headers: daemon.headers,
     });

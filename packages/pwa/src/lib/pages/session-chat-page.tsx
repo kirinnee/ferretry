@@ -27,7 +27,6 @@ import {
 import type { TerminalDeckDependencies } from '../../components/session-terminal-deck.tsx';
 import { SessionTopBar, sessionDisplayName } from '../../components/session-top-bar.tsx';
 import type { SendDismiss, SendExpand } from '../../components/settled-send-note.tsx';
-import type { SwitchSection } from '../../features/session-info/switch-marks.tsx';
 import { SubFerretIndicator } from '../../components/sub-ferrets.tsx';
 import type { PaneSnapshotReader } from '../../components/terminal-snapshot.tsx';
 import { readPaneSnapshot } from '../../components/terminal-snapshot-model.ts';
@@ -69,15 +68,16 @@ import { type SessionActionContribution, sessionActionSections } from '../../fea
 import { RenameForm } from '../../features/session-actions/rename-form.tsx';
 import { useRestartRefusal } from '../../features/session-actions/restart-refusal.tsx';
 import { addSessionMcp, previewSessionMcp, readSessionMcp } from '../../features/session-actions/session-mcp-api.ts';
-import { useConvertAction } from '../../features/session-actions/use-convert-action.tsx';
 import {
   forkThroughLatest,
   restartOnEarlierConversation,
   restartWithResume,
 } from '../../features/session-actions/session-operations.ts';
+import { useConvertAction } from '../../features/session-actions/use-convert-action.tsx';
 import type { InfoTab } from '../../features/session-info/info-model.ts';
 import { readRelaunchSettings } from '../../features/session-info/relaunch-settings-api.ts';
 import { SessionInfo, type SessionInfoPorts } from '../../features/session-info/session-info.tsx';
+import type { SwitchSection } from '../../features/session-info/switch-marks.tsx';
 import { useInfoPlacement } from '../../features/session-info/use-info-placement.ts';
 import { SessionTasksSearchSurface, useSessionSearch } from '../../features/session-search/session-search.tsx';
 import { useSessionSkills } from '../../features/skills/session-skills-store.ts';
@@ -85,6 +85,7 @@ import { addSkillInvocationToComposer } from '../../features/skills/skills-compo
 import type { ConsoleTyper } from '../../features/workspace/console-surface.tsx';
 import type { WorkspaceFormFactor } from '../../features/workspace/phone/phone-tab.ts';
 import { type SessionInfoSlot, SessionWorkspace } from '../../features/workspace/session-workspace.tsx';
+import { useAgentSurfaceTabs } from '../../features/workspace/use-agent-surface-tabs.ts';
 import { useSessionWorkspace } from '../../features/workspace/use-session-workspace.ts';
 import { type SurfaceEventFeed, useSurfaceDriving } from '../../features/workspace/use-surface-driving.ts';
 import { useSessionTerminals, useWorkspaceFormFactor } from '../../features/workspace/use-workspace-environment.ts';
@@ -128,7 +129,6 @@ import type { DaemonUsageStore } from '../usage-store.ts';
 import { WorkspaceLayoutStore } from '../workspace-layout-store.ts';
 import { type WorkspaceRailPreferenceStore, workspaceRailPreferences } from '../workspace-rail-preferences.ts';
 import { daemonSessionPath } from './routes.ts';
-import { useAgentSurfaceTabs } from '../../features/workspace/use-agent-surface-tabs.ts';
 
 /** Only daemon operations this workspace can truthfully invoke. */
 export type SessionChatClient = Pick<IFyApiClient, 'answer' | 'interrupt' | 'resume' | 'send' | 'stop'> &
@@ -1400,6 +1400,7 @@ export function SessionChatPage({
               compact={compact}
               daemon={connection}
               key={`${connection.daemonId}:${session.config.id}:${question.toolUseId}`}
+              onOpenConsole={openConsole}
               question={question}
               sessionId={session.config.id}
             />

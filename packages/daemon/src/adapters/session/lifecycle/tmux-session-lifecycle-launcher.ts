@@ -10,7 +10,7 @@ import {
   type SessionLifecycleRecord,
 } from '../../../lib/session/lifecycle/index.ts';
 import type { LastSnapshotWriter } from '../../../lib/session/snapshot/index.ts';
-import type { TmuxController } from '../../../lib/tmux/index.ts';
+import { AGENT_PANE_SIZE, type TmuxController } from '../../../lib/tmux/index.ts';
 import type { TmuxPaneDelivery } from '../../tmux/pane-delivery.ts';
 
 export interface SessionPaneRegistrar {
@@ -112,6 +112,7 @@ export class TmuxSessionLifecycleLauncher implements SessionLifecycleLauncher {
       session: record.config.tmuxSession,
       cwd: record.config.cwd,
       command: [program, ...arguments_],
+      ...AGENT_PANE_SIZE,
       env,
     });
     await this.register(record);

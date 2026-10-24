@@ -25,6 +25,8 @@ export interface QuestionFormProps {
   /** Phones page multi-question asks; desktop keeps the complete request visible. */
   readonly compact?: boolean;
   readonly onAnswered?: () => void;
+  /** Where the person can still answer when the daemon could not: the agent's own pane. */
+  readonly onOpenConsole?: () => void;
 }
 
 interface AnswerState {
@@ -74,6 +76,34 @@ const updateOther = (state: AnswerState, index: number, value: string): AnswerSt
 
 const QUESTION_ALREADY_ANSWERED = 'question_already_answered';
 
+/**
+ * The refusals that mean the daemon tried the native form and could not answer it. The person can
+ * still answer — in the agent's own pane, or in prose — so that is what they are told.
+ */
+const UNDELIVERED = new Set(['answer_unconfirmed', 'answer_released', 'session_answer_failed']);
+const COULD_NOT_ANSWER = "Couldn't answer automatically — answer in the Console tab or type your choice in chat.";
+
+interface AnswerError {
+  readonly sentence: string;
+  readonly detail?: string;
+  /** The answer did not reach the form, so the Console is where it can still be given. */
+  readonly console?: true;
+}
+
+/**
+ * What a failed answer says. A daemon that words its own refusal sends the sentence plus a `detail`;
+ * an older one sends only its driver's evidence as the message, which is then kept for Details and
+ * replaced on screen by the sentence a person can act on.
+ */
+function answerError(cause: unknown): AnswerError {
+  const detail = bodyField(cause, 'detail');
+  const message = cause instanceof Error ? cause.message : 'Answer could not be sent';
+  if (!(cause instanceof FyHttpError) || cause.code === undefined || !UNDELIVERED.has(cause.code))
+    return { sentence: message, ...(detail === undefined ? {} : { detail }) };
+  if (detail !== undefined) return { sentence: message, detail, console: true };
+  return { sentence: COULD_NOT_ANSWER, detail: message, console: true };
+}
+
 /** One attempt's identity: the question plus a digest of the exact answer, so only a repeat is a replay. */
 async function answerRequestId(
   daemonId: string,
@@ -102,12 +132,20 @@ const bodyField = (cause: unknown, field: string): string | undefined => {
  * `answers` payload preserves all labels even when a multi-question set embeds
  * a multi-select question.
  */
-export function QuestionForm({ api, daemon, sessionId, question, compact = false, onAnswered }: QuestionFormProps) {
+export function QuestionForm({
+  api,
+  daemon,
+  sessionId,
+  question,
+  compact = false,
+  onAnswered,
+  onOpenConsole,
+}: QuestionFormProps) {
   const formId = useId();
   const [answers, setAnswers] = useState(() => initialAnswers(question.questions.length));
   const [page, setPage] = useState(0);
   const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState<{ readonly sentence: string; readonly detail?: string } | null>(null);
+  const [error, setError] = useState<AnswerError | null>(null);
   const [alreadyAnswered, setAlreadyAnswered] = useState<string | null>(null);
   const submitLock = useRef(false);
   const paged = compact && question.questions.length > 1;
@@ -159,11 +197,7 @@ export function QuestionForm({ api, daemon, sessionId, question, compact = false
         // The daemon already delivered an answer to this exact form. Keep the lock: nothing more can be sent.
         setAlreadyAnswered(bodyField(cause, 'answeredWith') ?? 'an earlier answer');
       } else {
-        const detail = bodyField(cause, 'detail');
-        setError({
-          sentence: cause instanceof Error ? cause.message : 'Answer could not be sent',
-          ...(detail === undefined ? {} : { detail }),
-        });
+        setError(answerError(cause));
         submitLock.current = false;
       }
     } finally {
@@ -278,6 +312,11 @@ export function QuestionForm({ api, daemon, sessionId, question, compact = false
         </p>
       )}
       {error ? <p role="alert">{error.sentence}</p> : null}
+      {error?.console === true && onOpenConsole !== undefined ? (
+        <button className="fy-question-console" onClick={onOpenConsole} type="button">
+          Open Console
+        </button>
+      ) : null}
       {error?.detail === undefined ? null : (
         <details className="text-meta text-muted">
           <summary>Details</summary>
