@@ -592,11 +592,6 @@ describe('TmuxSessionLifecycleLauncher', () => {
         'fy-tmux-session',
         '-c',
         '/workspace/project',
-        // Sized explicitly: nothing attached claims a size, and tmux's 80×24 fallback is too short for a form.
-        '-x',
-        '100',
-        '-y',
-        '50',
         '-e',
         'FY_HYPERMEDIA=0',
         '-e',

@@ -429,8 +429,6 @@ describe('tmux resume launcher', () => {
     should(launches[0]).containDeep(['-e', 'FY_SESSION_BOARD_CAPABILITY=stored-secret']);
     should(launches[0]).containDeep(['-e', `FY_SESSION_ID=${ID}`]);
     should(launches[1]).containDeep(['-e', `FY_SESSION_ID=${ID}`]);
-    // A revived pane is sized like a launched one, or its question forms would scroll off an 80×24 pane.
-    should(launches[1]).containDeep(['-x', '100', '-y', '50']);
     // `-e` is an option of new-session, so it has to precede the agent word to be an environment entry
     // at all rather than an argument handed to the agent.
     should(launches[1]?.indexOf('-e')).be.below(launches[1]?.indexOf('/opt/fleet/bin/agent') ?? -1);

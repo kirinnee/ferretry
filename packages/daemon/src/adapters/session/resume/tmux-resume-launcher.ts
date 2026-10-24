@@ -10,7 +10,7 @@ import {
 } from '../../../lib/session/resume/types.ts';
 import type { LastSnapshotWriter } from '../../../lib/session/snapshot/index.ts';
 import type { SessionId } from '../../../lib/session-id.ts';
-import { AGENT_PANE_SIZE, type TmuxController } from '../../../lib/tmux/index.ts';
+import type { TmuxController } from '../../../lib/tmux/index.ts';
 import type { TmuxPaneDelivery } from '../../tmux/pane-delivery.ts';
 import type { AgentLaunchWrapper } from '../lifecycle/tmux-session-lifecycle-launcher.ts';
 
@@ -156,13 +156,7 @@ export class TmuxResumeLauncher implements ResumeLauncher {
       spec.mode,
       await this.media?.(id),
     );
-    await this.tmux.launch({
-      session: spec.tmuxSession,
-      cwd: spec.cwd,
-      command: [program, ...arguments_],
-      ...AGENT_PANE_SIZE,
-      env,
-    });
+    await this.tmux.launch({ session: spec.tmuxSession, cwd: spec.cwd, command: [program, ...arguments_], env });
     // The process incarnation changed. Hot apply and terminal reap must address this replacement,
     // never the pid the revive just killed.
     await this.register(id, spec.tmuxSession);
