@@ -195,8 +195,21 @@ for candidate in "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" 
   [ -x "${candidate}" ] && chrome_found="${candidate}" && break
 done
 if [ -n "${chrome_found}" ]; then
-  "${name}" browser --session "${session}" open about:blank </dev/null ||
-    fail "the daemon could not open a browser through ${worker_name} (Chrome: ${chrome_found})"
+  # A hosted runner's first Chrome start is occasionally slow or wedged. A failed open reaps that Chrome and
+  # releases the profile, so a bounded retry is safe; every attempt and its error is printed, and the last
+  # error is what fails the smoke.
+  opened=""
+  open_error=""
+  for attempt in 1 2 3; do
+    if open_error="$("${name}" browser --session "${session}" open about:blank </dev/null 2>&1)"; then
+      opened="yes"
+      break
+    fi
+    echo "⚠️  browser open attempt ${attempt}/3 failed: ${open_error}"
+    [ "${attempt}" = "3" ] || sleep 2
+  done
+  [ -n "${opened}" ] ||
+    fail "the daemon could not open a browser through ${worker_name} (Chrome: ${chrome_found}) after 3 attempts: ${open_error}"
   "${name}" browser --session "${session}" screenshot "${root}/browser.png" </dev/null ||
     fail "the browser opened but produced no screenshot"
   [ -s "${root}/browser.png" ] || fail "the browser screenshot is empty"
