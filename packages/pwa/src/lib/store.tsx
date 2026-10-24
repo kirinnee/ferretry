@@ -76,6 +76,7 @@ import {
   outdatedRefusal,
   outdatedSide,
   type RelayDial,
+  type RelayHeartbeatSchedule,
 } from './relay-carrier.ts';
 import { PairingOutcomeUnknownError, pairingCandidates, redeemPairingInSession } from './relay-pairing.ts';
 import { RelayPairingRefusedError, RelaySessionError } from './relay-session.ts';
@@ -260,6 +261,8 @@ export interface ExchangePairingOptions {
   readonly relayDial?: RelayDial;
   /** `DIRECT_PAIRING_TIMEOUT_MS` by default. A parameter so a suite can prove the deadline in ms. */
   readonly directTimeoutMs?: number;
+  /** The browser timers by default. Injected so a suite fires the deadline instead of racing it. */
+  readonly heartbeat?: RelayHeartbeatSchedule;
   /**
    * The plain network, for ONE read: the daemon's public liveness route after the direct leg failed,
    * which is how an old daemon is told from an absent one. Absent means nobody can ask.
@@ -327,6 +330,7 @@ export async function exchangePairing(seed: PairingSeed, options: ExchangePairin
         publicKey: minted.publicKey,
         key,
         ...(options.relayDial === undefined ? {} : { dial: options.relayDial }),
+        ...(options.heartbeat === undefined ? {} : { heartbeat: options.heartbeat }),
         ...(method.kind === 'direct' ? { deadlineMs: options.directTimeoutMs ?? DIRECT_PAIRING_TIMEOUT_MS } : {}),
       });
     } catch (reason) {

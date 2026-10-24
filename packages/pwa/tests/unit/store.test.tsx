@@ -4,11 +4,12 @@ import type { FyApiClient } from '@ferretry/protocol/client';
 import { RELAY_CLOSE_CODES } from '@ferretry/relay';
 import { useState } from 'react';
 import { HOSTED_RELAY_PATH } from '../../src/features/onboarding/hosted-relay.ts';
+import type { ConnectionHealthEnvironment } from '../../src/lib/connection-health.ts';
 import type { DaemonConnectionRepository, DaemonConnectionStore } from '../../src/lib/connections.ts';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
 import { UNSUPPORTED_DEVICE_KEY_SENTENCE } from '../../src/lib/device-keys.ts';
 import { PairingUnreachableError } from '../../src/lib/pairing-unreachable.ts';
-import { DaemonOutdatedError } from '../../src/lib/relay-carrier.ts';
+import { DaemonOutdatedError, type RelayHeartbeatSchedule } from '../../src/lib/relay-carrier.ts';
 import { PairingOutcomeUnknownError } from '../../src/lib/relay-pairing.ts';
 import { RelayPairingRefusedError } from '../../src/lib/relay-session.ts';
 import {
@@ -37,6 +38,18 @@ import {
   ScriptedSocket,
   settle as settleTasks,
 } from '../support/relay.ts';
+
+/*
+ * A connection model that never retries. The cases that count dials must own every dial: the model's
+ * own reconnect probe (300 ms at the soonest) is a second, unrelated source that a slow runner reaches
+ * mid-test.
+ */
+const idleConnectionHealth: ConnectionHealthEnvironment = {
+  now: () => Date.now(),
+  schedule: () => () => undefined,
+  random: () => 0.5,
+  isOnline: () => true,
+};
 
 const RELAY_DIRECTORY = 'https://directory.example.test';
 const HOSTED_RELAY_URL = 'https://hosted-relay.example.test';
@@ -124,6 +137,25 @@ describe('DaemonApiPool', () => {
     expect(attempts).toBe(4);
   });
 });
+
+/*
+ * THE DIRECT DEADLINE, FIRED BY THE EVENT IT IS ABOUT. A wall-clock deadline of a few ms also covers the
+ * session handshake, so a slow runner can expire it before the `pair` record is even sent — and then
+ * the daemon was never heard and the outcome is not "unknown". This schedule holds every deadline and
+ * releases the first (the direct leg's) only once the scripted daemon has taken the `pair` record.
+ */
+const deadlineAfterPairTaken = (daemon: { readonly requests: readonly unknown[] }): RelayHeartbeatSchedule => {
+  const ticks: Array<() => void> = [];
+  void (async () => {
+    const giveUpAt = Date.now() + 10_000;
+    while (daemon.requests.length === 0 && Date.now() < giveUpAt) await new Promise(resolve => setTimeout(resolve, 1));
+    ticks[0]?.();
+  })();
+  return tick => {
+    ticks.push(tick);
+    return () => {};
+  };
+};
 
 describe('exchangePairing', () => {
   const DEVICE_ID = 'fy_device_id_pairedDevice0000000001';
@@ -308,7 +340,7 @@ describe('exchangePairing', () => {
           relayCrypto,
           relayDial: route.dial,
           hostedRelayUrl: RELAY,
-          directTimeoutMs: 40,
+          heartbeat: deadlineAfterPairTaken(direct),
         },
       ),
     ).rejects.toBeInstanceOf(PairingOutcomeUnknownError);
@@ -355,7 +387,7 @@ describe('exchangePairing', () => {
         relayCrypto,
         relayDial: route.dial,
         hostedRelayUrl: RELAY,
-        directTimeoutMs: 40,
+        heartbeat: deadlineAfterPairTaken(direct),
       },
     ).then(
       () => undefined,
@@ -869,6 +901,7 @@ describe('StoreProvider', () => {
         relayCrypto,
         relayDial: route.dial,
         fetcher: fetcher(HOSTED_RELAY_URL),
+        connectionHealthEnvironment: idleConnectionHealth,
       }),
     );
     store.connections.add(daemon);
@@ -897,6 +930,7 @@ describe('StoreProvider', () => {
         relayCrypto,
         relayDial: route.dial,
         fetcher: fetcher(null),
+        connectionHealthEnvironment: idleConnectionHealth,
       }),
     );
     await expect(withdrawn.carrier.fetch(`${daemon.baseUrl}/v1/projects`)).rejects.toThrow(
