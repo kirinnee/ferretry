@@ -218,6 +218,14 @@ class ControlConnection {
  * `no-output`, so no pane's bytes are streamed to it. When that session ends tmux detaches the client,
  * and the next read connects again.
  *
+ * IT NEVER STARTS A SERVER (`-N`). `attach-session` is a command tmux starts a server for, so a client
+ * dialling a socket nobody serves would bring up an empty one of its own — and a reader has nothing to
+ * read on a server it made. Nor is that server harmless: tmux writes a control client's answers into the
+ * client's own stdout and keeps the client until they are written, so a client whose reader is already
+ * gone — spawned as the daemon stops, by a session worker still loading — is never let go, and the server
+ * it started never empties. Both outlived the daemon for good (measured on 3.6a); CI's tmux sweep found
+ * the pair on a socket whose test never launched a pane. With `-N` such a client just fails to connect.
+ *
  * NOTIFICATIONS go to {@link subscribe}rs, filtered by pane or session id, so a watcher can react to a
  * session or window closing instead of asking about it. tmux scopes `%output` and `refresh-client -B`
  * subscriptions to the ATTACHED session — measured on 3.6a — so this one client sees the server-wide
@@ -339,6 +347,8 @@ export class ControlModeTmuxProcess implements TmuxCommandPort, TmuxEventSource 
         child = this.options.spawn([
           this.executable,
           '-u',
+          // Attach to a server that is running, never start one: see the class comment.
+          '-N',
           '-S',
           this.socketPath,
           '-C',
