@@ -38,15 +38,23 @@ export interface McpOAuthCrypto {
   sha256(text: string): Promise<Uint8Array>;
 }
 
-/** One MCP component, as far as signing in to it is concerned. */
+/**
+ * One MCP server, as far as signing in to it is concerned: a fleet component (`component` is its name),
+ * or a project's `.mcp.json` server (`component` is its subject, `mcpProjectSubject`).
+ */
 export interface McpOAuthServer {
   readonly component: string;
+  /**
+   * A server that MAY sign in rather than one that must: a project server, which nothing marks
+   * `auth: oauth`. It is listed among the connections only once it has a sign-in.
+   */
+  readonly optional?: true;
   /** Absent for a server Ferretry starts as a command: there is nothing to sign in to. */
   readonly url?: string;
   readonly auth?: 'oauth';
 }
 
-/** The configured MCP components. Read on every call: the configuration can change under the daemon. */
+/** The configured MCP servers that can sign in. Read on every call: the configuration can change under the daemon. */
 export interface McpOAuthServers {
   list(): Promise<readonly McpOAuthServer[]>;
 }

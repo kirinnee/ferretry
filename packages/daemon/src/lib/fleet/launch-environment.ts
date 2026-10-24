@@ -44,8 +44,19 @@ import { type SecretName, secretReferencesIn } from '@ferretry/protocol';
  * way, so an account is never located by a string somebody assembled.
  */
 export interface AccountLaunchEnvironment {
-  /** Empty when this executable is not a published account, or the account binds no secret. */
-  forWrapper(wrapper: string): Promise<Readonly<Record<string, string>>>;
+  /**
+   * Empty when this executable is not a published account, binds no secret, and — given the folder the
+   * pane starts in — that folder's project has signed in to none of its own MCP servers.
+   */
+  forWrapper(wrapper: string, cwd?: string): Promise<Readonly<Record<string, string>>>;
+}
+
+/**
+ * The variables a PROJECT's signed-in MCP servers need in one launch, after their local-scope entries are
+ * written (`lib/mcp-inventory/project-sign-in.ts`). Raises only for a fault, never for "nothing to do".
+ */
+export interface ProjectLaunchEnvironment {
+  forLaunch(agent: string, cwd: string): Promise<Readonly<Record<string, string>>>;
 }
 
 /** The published accounts, as the daemon's existing inventory already answers them. */
@@ -88,9 +99,19 @@ export class FleetLaunchEnvironment implements AccountLaunchEnvironment {
     private readonly inventory: LaunchAccountInventory,
     private readonly secrets: LaunchSecretValues,
     private readonly renewal?: LaunchSecretRenewal,
+    private readonly project?: ProjectLaunchEnvironment,
   ) {}
 
-  async forWrapper(wrapper: string): Promise<Readonly<Record<string, string>>> {
+  async forWrapper(wrapper: string, cwd?: string): Promise<Readonly<Record<string, string>>> {
+    const [own, project] = await Promise.all([
+      this.#account(wrapper),
+      cwd === undefined || this.project === undefined ? {} : this.project.forLaunch(wrapper, cwd),
+    ]);
+    // The profile's own bindings win a same-named variable: a project server's is derived, theirs is chosen.
+    return { ...project, ...own };
+  }
+
+  async #account(wrapper: string): Promise<Readonly<Record<string, string>>> {
     const name = wrapperNameOf(wrapper);
     const account = (await this.inventory.accounts()).find(
       published => wrapperNameOf(published.wrapper) === name || published.wrapper === wrapper,

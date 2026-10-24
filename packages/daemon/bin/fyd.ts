@@ -61,6 +61,7 @@ import {
   type LearningConfig,
   localOnlyNotice,
   type MigrationConversation,
+  mcpOAuthSecretNames,
   PACK_CLEAN_UP_LABEL,
   type PackConfig,
   type PackRefusal,
@@ -266,6 +267,11 @@ import {
   NodeLessonFiles,
   SessionPassiveChannel,
 } from '../src/adapters/learning/index.ts';
+import {
+  FileClaudeLocalScope,
+  FileMcpHarnessDocuments,
+  TransportMcpProbe,
+} from '../src/adapters/mcp-inventory/index.ts';
 import {
   AccountModelMcpServers,
   FetchMcpOAuthHttp,
@@ -575,6 +581,7 @@ import {
   chooseRelayCarrierSources,
   claimStartName,
   codexModelProvider,
+  combinedMcpOAuthServers,
   combinedReferences,
   computerConversationRoots,
   configuredAt,
@@ -691,6 +698,10 @@ import {
   type ManagedWorktreeOperations,
   type ManagedWorktreeRegistry,
   ManagedWorktreeService,
+  McpCheckService,
+  type McpInventoryAccount,
+  type McpInventoryFolder,
+  McpInventoryService,
   McpOAuthService,
   MigrationPreflight,
   type MigrationReportStore,
@@ -698,6 +709,8 @@ import {
   ModelCatalogService,
   type MountedSubsystems,
   mayTrustDirectLoopback,
+  mcpCheckBaseEnvironment,
+  mcpInventoryFolders,
   messageWithAttachments,
   modelCatalogPricingRates,
   modelCatalogsView,
@@ -724,6 +737,8 @@ import {
   PinService,
   type PlannedAttachmentFile,
   type PlannedInitialAttachments,
+  ProjectMcpLaunch,
+  ProjectMcpOAuthServers,
   ProvedPaneCapture,
   ProviderPresetService,
   ProviderProbeService,
@@ -6702,8 +6717,26 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
    * a refresh token at the provider that issued it. The launch environment asks it to refresh a token a
    * launch is about to use — that is the only refresh there is; no timer.
    */
+  /**
+   * The folders a ferret may work in, joined to their projects — read from the project catalogue and the
+   * worktree service, which mount with the subsystems below; until they do, there are none. Both the
+   * sign-in (a project's `.mcp.json` servers sign in too, docs/mcp-scopes.md) and a launch read it.
+   */
+  const mcpFolders: { read: () => Promise<readonly McpInventoryFolder[]> } = { read: async () => [] };
+  const mcpDocuments = new FileMcpHarnessDocuments();
+  /** The published runtimes, as the MCP inventory names them: by runtime name, harness and config directory. */
+  const mcpAccounts = async (): Promise<readonly McpInventoryAccount[]> =>
+    (await accounts.accounts()).map(account => ({
+      runtime: wrapperNameOf(account.wrapper),
+      harness: account.kind,
+      home: account.home,
+      wrapper: account.wrapper,
+    }));
   const mcpOAuth = new McpOAuthService({
-    servers: new AccountModelMcpServers(async () => await readDeclaredAccountModel(configFiles, configLocations)),
+    servers: combinedMcpOAuthServers(
+      new AccountModelMcpServers(async () => await readDeclaredAccountModel(configFiles, configLocations)),
+      new ProjectMcpOAuthServers(async () => await mcpFolders.read(), mcpDocuments),
+    ),
     http: new FetchMcpOAuthHttp(),
     crypto: webCryptoMcpOAuth,
     clock: millisecondClock,
@@ -6725,7 +6758,21 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       };
     })(),
   });
-  const accountLaunchEnvironment = new FleetLaunchEnvironment(accounts, secretVault, mcpOAuth);
+  const accountLaunchEnvironment = new FleetLaunchEnvironment(
+    accounts,
+    secretVault,
+    mcpOAuth,
+    // A project's signed-in MCP servers reach a Claude ferret in that project as local-scope entries in
+    // its runtime's own `.claude.json` (lib/mcp-inventory/project-sign-in.ts).
+    new ProjectMcpLaunch({
+      accounts: mcpAccounts,
+      folders: async () => await mcpFolders.read(),
+      documents: mcpDocuments,
+      secrets: secretVault,
+      renewal: mcpOAuth,
+      localScope: new FileClaudeLocalScope(),
+    }),
+  );
   /**
    * What this host can actually run: a published wrapper by its path, a harness command by name.
    *
@@ -9337,7 +9384,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
             `pack: the routing prompt migration did not run: ${error instanceof Error ? error.message : String(error)}\n`,
           );
         });
-      const mounted: Omit<MountedSubsystems, 'sessionMcp'> = {
+      const mounted: Omit<MountedSubsystems, 'sessionMcp' | 'mcpInventory'> = {
         pack: {
           service: packService,
           routing: { cleanUp, file: guideFile },
@@ -9952,6 +9999,46 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           files: new FileMcpProjectFiles(),
           fleet: mounted.fleetCatalog,
         }),
+        mcpInventory: (() => {
+          mcpFolders.read = mcpInventoryFolders(mounted.catalogs, mounted.worktrees);
+          const inventory = new McpInventoryService({
+            accounts: mcpAccounts,
+            components: async () =>
+              (await mounted.fleetCatalog.components()).kinds
+                .filter(group => group.kind === 'mcp')
+                .flatMap(group => group.components)
+                .map(component => ({
+                  name: component.name,
+                  runtimes: component.usedBy.runtimes,
+                  ...(component.detail.kind === 'mcp' && component.detail.auth === 'oauth'
+                    ? { auth: 'oauth' as const }
+                    : {}),
+                })),
+            folders: async () => await mcpFolders.read(),
+            connections: async () => await mcpOAuth.connections(),
+            documents: mcpDocuments,
+            sessions: mounted.sessions,
+          });
+          return {
+            inventory,
+            check: new McpCheckService({
+              inventory,
+              probe: new TransportMcpProbe(),
+              launchEnvironment: async runtime => {
+                const account = (await mcpAccounts()).find(candidate => candidate.runtime === runtime);
+                return account === undefined ? {} : await accountLaunchEnvironment.forWrapper(account.wrapper);
+              },
+              baseEnvironment: () => mcpCheckBaseEnvironment(process.env),
+              bearer: async (subject, url) => {
+                const names = mcpOAuthSecretNames(subject, url);
+                await mcpOAuth.refreshForLaunch([names.access]);
+                return (await secretVault.values()).get(names.access);
+              },
+              redactor: secretRedactor,
+              now: () => millisecondClock.now(),
+            }),
+          };
+        })(),
       };
     },
     credentials: new StateApiCredentials(paths, stateFiles),

@@ -36,6 +36,7 @@ export * from './json.ts';
 export * from './layout.ts';
 export * from './learning/index.ts';
 export * from './local-models/index.ts';
+export * from './mcp-inventory/index.ts';
 export * from './mcp-oauth/index.ts';
 export * from './migrate/background-terminals.ts';
 export * from './migrate/command-classifier.ts';

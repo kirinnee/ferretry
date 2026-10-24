@@ -37,6 +37,7 @@ export * from './handover.ts';
 export * from './harness-login.ts';
 export * from './harness-update.ts';
 export * from './learning.ts';
+export * from './mcp-inventory.ts';
 export * from './mcp-oauth.ts';
 export * from './models.ts';
 export * from './open-url.ts';

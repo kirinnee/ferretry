@@ -11,6 +11,7 @@ export * from './filesystem/state-file-system.ts';
 export * from './grants/index.ts';
 export * from './imports/index.ts';
 export * from './learning/index.ts';
+export * from './mcp-inventory/index.ts';
 export * from './mcp-oauth/index.ts';
 export * from './migrate/bun-process-inventory.ts';
 export * from './migrate/file-conversation-files.ts';

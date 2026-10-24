@@ -60,6 +60,7 @@ import { type GrantSubsystem, grantRoutes } from './grants.ts';
 import { harnessUpdateRoutes } from './harness-update.ts';
 import { type DaemonHealthSubsystem, daemonHealthRoutes } from './health.ts';
 import { type LearningSubsystem, learningRoutes } from './learning.ts';
+import { type McpInventorySubsystem, mcpInventoryRoutes } from './mcp-inventory.ts';
 import { type McpOAuthSubsystem, mcpOAuthRoutes } from './mcp-oauth.ts';
 import { type ModelsSubsystem, modelRoutes } from './models.ts';
 import { type NameSubsystem, nameRoutes } from './names.ts';
@@ -185,6 +186,8 @@ export interface MountedSubsystems {
    *  straight into the secret store and are used by launch variable name (docs/mcp-oauth.md). Every act
    *  is `fleet.configure`. */
   readonly mcpOAuth: McpOAuthSubsystem;
+  /** Every MCP server a ferret sees, from every scope, and checking one (docs/mcp-scopes.md). */
+  readonly mcpInventory: McpInventorySubsystem;
   /** The account model's credentials: one login stored once, its status and usage, Check now, and
    *  sign-in targeting a credential id (docs/design/account-model.md §7). */
   readonly fleetCredentials: FleetCredentialsSubsystem;
@@ -492,6 +495,9 @@ export function mountedDaemonRoutes(base: DaemonApiDependencies, subsystems: Mou
         // the fleet tables above.
         ...harnessLoginRoutes(subsystems.harnessLogin),
         ...mcpOAuthRoutes(subsystems.mcpOAuth),
+        // `/v1/mcp` and `/v1/mcp/check` are fixed literals no other route uses; the per-session list ends in
+        // `mcp/servers`, a literal pair the session MCP routes below do not use, so none can shadow another.
+        ...mcpInventoryRoutes(subsystems.mcpInventory),
         // Resource limits register beside the fleet they bound, and are governed by the same capability
         // for the same reason: this is a machine-wide setting about the agents this daemon runs. Both
         // paths are the one fixed literal `/v1/cgroups/config`, which no other subsystem uses, so this
