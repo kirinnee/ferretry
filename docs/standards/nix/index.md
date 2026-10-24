@@ -17,6 +17,7 @@ concern lives in its own file under `nix/`.
 ```
 nix/
 ├── packages.nix   # aggregate packages from registries
+├── bun.nix        # pin Bun ahead of nixpkgs (the one owner of its version)
 ├── ferretry.nix   # build the shipped fy and fyd Bun executables
 ├── env.nix        # group packages by purpose
 ├── shells.nix     # define dev environments
@@ -79,13 +80,43 @@ is deliberately **not** used for it — see
 consumes.
 
 Only `nixpkgs` is wired today, so the file is a single `inherit (pkgs) ...` block:
-`actionlint bash bun git go go-task goreleaser jq nodejs_24 pre-commit ripgrep
-shellcheck treefmt wrangler yq-go`. When more than one registry is in play, each registry gets its own group in a
+`actionlint bash git go go-task goreleaser jq nodejs_24 pre-commit ripgrep
+shellcheck treefmt wrangler yq-go`, plus `bun`, which comes from `nix/bun.nix` (below). When more
+than one registry is in play, each registry gets its own group in a
 `let all = { ... }` block and the groups merge with `//` in priority order — later groups win.
 
 The shipped executables are built in `nix/ferretry.nix`: a fixed-output Bun dependency derivation
 feeds native `bun build --compile` builds for `fy` and `fyd`. This keeps profile installs
-hermetic without adding product packages to development-shell package aggregation.
+hermetic without adding product packages to development-shell package aggregation. Both are built
+with the same pinned Bun the shells run: `flake.nix` passes `devPackages.bun` in, and
+`nix/ferretry.nix` never names `pkgs.bun`.
+
+### nix/bun.nix — the pinned Bun
+
+**Purpose**: own the one Bun version every shell, every CI job, the release build and the flake's
+own `fy`/`fyd` build run, when that version is ahead of the one `flake.lock`'s nixpkgs carries.
+
+It is nixpkgs' own `bun` recipe with `overrideAttrs` replacing only `version`, `src` and the
+per-system release archives in `passthru.sources` — one per `eachSystem` platform, hashed against
+the release's `SHASUMS256.txt`. The recipe downloads and patches a prebuilt binary, so the override
+costs one download and a patchelf (about 3 s), not a compile.
+
+- **A leaf, not an overlay.** Overriding `bun` where this flake uses it changes no nixpkgs
+  package's hash, so the rest of the closure still substitutes from cache.nixos.org (the comment
+  on `pkgs` in `flake.nix` is why that matters). `nix build --dry-run .#devShells.<system>.ci`
+  lists Bun (its archive and its package) and this flake's own derivations under "will be built",
+  and nothing else. A cold store downloads about what it did with the stock Bun: the archive
+  replaces the substituted binary, and autoPatchelf's build tools come from the cache.
+- **Not a second nixpkgs input.** A newer nixpkgs just for Bun would substitute, but only at the
+  version that nixpkgs happens to carry, and it adds a whole second nixpkgs to evaluate and to keep
+  current.
+- **Bumping it**: change `version` and the three hashes, then prove the dependency tree did not
+  move. `ferretry-bun-deps` is a fixed-output derivation, so a store that already holds its output
+  will NOT re-run `bun install` under the new Bun. Force it:
+  `nix build "$(nix-store -q --references "$(nix eval --raw .#packages.<system>.fy.drvPath)" | grep ferretry-bun-deps)^out" --rebuild`.
+  A hash mismatch there means a new `outputHash` and a new derivation `version`.
+- **Deleting it**: once `flake.lock`'s nixpkgs carries the pinned version or later, delete the
+  file and put `bun` back in the `inherit (pkgs)` block.
 
 ### nix/env.nix — environment groups
 
@@ -221,7 +252,7 @@ path.
 **Purpose**: load the default dev shell automatically and reload it when the nix files change.
 
 ```bash
-watch_file "./nix/env.nix" "./nix/ferretry.nix" "./nix/fmt.nix" "./nix/git-hooks.nix" "./nix/git-hooks/install.sh" "./nix/packages.nix" "./nix/shells.nix" "./nix/pre-commit.nix" "./flake.nix"
+watch_file "./nix/bun.nix" "./nix/env.nix" "./nix/ferretry.nix" "./nix/fmt.nix" "./nix/git-hooks.nix" "./nix/git-hooks/install.sh" "./nix/packages.nix" "./nix/shells.nix" "./nix/pre-commit.nix" "./flake.nix"
 use flake
 ```
 
@@ -446,6 +477,7 @@ from the task runner or hook — this repo's convention is the explicit
 Each file has a single responsibility:
 
 - `packages.nix` = what packages exist (aggregation)
+- `bun.nix` = which Bun every shell and build runs, while it is ahead of nixpkgs
 - `env.nix` = how packages are grouped (purpose)
 - `shells.nix` = which shells include which groups (composition)
 - `fmt.nix` = how files are formatted
