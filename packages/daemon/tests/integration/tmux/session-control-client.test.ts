@@ -8,6 +8,7 @@
  * never hands one to a spawned tmux either. This holds it to that, command by command.
  */
 import { afterEach, describe, it } from 'bun:test';
+import { existsSync } from 'node:fs';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -15,6 +16,7 @@ import should from 'should';
 import { BunTmuxProcess, ControlModeTmuxProcess } from '../../../src/adapters/index.ts';
 import type { TmuxCommandPort, TmuxCommandResult } from '../../../src/lib/tmux/contracts.ts';
 import { PANE_WATCH_FORMAT, parsePaneWatch } from '../../../src/lib/tmux/control-protocol.ts';
+import { isTmuxServerAbsent } from '../../../src/lib/tmux/server-absent.ts';
 
 const TMUX = Bun.which('tmux');
 const cleanups: (() => Promise<void>)[] = [];
@@ -165,5 +167,33 @@ describe('a session worker’s pane subscription', () => {
     // Assert
     should(took).be.false();
     should(subject.connected).be.false();
+  });
+
+  it('should start no tmux server where none runs, so nothing it dials can outlive the daemon', async () => {
+    // Arrange — the daemon's socket before any pane was launched: nothing serves it.
+    if (TMUX === null) throw new Error('tmux is required for this test and was not found');
+    const root = await mkdtemp(join(tmpdir(), 'fy-worker-ctl-'));
+    const socket = join(root, 's');
+    const direct = new BunTmuxProcess(TMUX, socket);
+    const subject = new ControlModeTmuxProcess(TMUX, socket, direct, {
+      attach: { target: 'agent', flags: 'ignore-size,read-only,no-output' },
+      mutations: 'refuse',
+    });
+    cleanups.push(async () => {
+      subject.close();
+      await direct.execute(['kill-server']);
+      await rm(root, { recursive: true, force: true });
+    });
+
+    // Act
+    const took = await subject.watch('fy-pane', PANE_WATCH_FORMAT);
+    const read = await subject.execute(['display-message', '-p', '-t', 'agent', '#{pane_id}']);
+
+    // Assert — tmux makes the socket file when a server starts and leaves it behind when that server
+    // exits, so a socket that never appeared is a server that never ran.
+    should(took).be.false();
+    should(read.code).equal(1);
+    should(isTmuxServerAbsent(read.stderr)).be.true();
+    should(existsSync(socket)).be.false();
   });
 });

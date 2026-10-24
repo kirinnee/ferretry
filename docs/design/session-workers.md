@@ -319,7 +319,7 @@ executes. Triggers:
 
 ### 3.2 Inside a worker: events first, a slow backstop always
 
-- **Pane**: the attached client (`tmux -C attach-session -t =<session> -f ignore-size,read-only`) delivers
+- **Pane**: the attached client (`tmux -N -C attach-session -t =<session> -f ignore-size,read-only`) delivers
   `%output` for that session's pane. A notice arms a **settle** (150 ms), then an in-band `activity` query
   and a visible `capture-pane` on the SAME client. Verified on tmux 3.6a (2026-10-22, private socket): in-band
   `capture-pane -p` and `display-message -p` answer on a `read-only` control client; `%output` arrives for the
@@ -352,6 +352,12 @@ Modelled on `WorkerTranscriptFolds` (`src/adapters/analytics/worker-transcript-f
   the daemon raises one notice naming the session and the last fault. Behaviour stays correct; only the cost
   moves back. A crash of a pooled worker restarts every session it hosted under the same policy.
 - A patch is applied at most once: `seq` is monotonic per generation and the applier drops a `seq` it has applied.
+- **Nothing a stopping daemon starts can outlive it.** A thread is sent nothing but the probe until it answers;
+  the supervisor holds what it is handed meanwhile. A thread ended while it still loads is ended late
+  (`LoadSafeWorker`), and would otherwise attach its session — spawn its tmux client — after the observer closed.
+  And the client is `-N`: `attach-session` starts a server wherever none runs, and tmux keeps a control client
+  whose stdout reader is gone before its answer is written, so such a client and the server it started both
+  outlived the daemon (CI run 40069028810, 2026-10-24; measured on tmux 3.6a).
 
 ### 3.4 Memory, cap and pooling — measured
 

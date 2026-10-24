@@ -259,6 +259,27 @@ describe('WorkerSupervisor', () => {
     should(subject.threadCount).equal(1);
   });
 
+  it('should tell a thread nothing but its probe until it answers, and one closed while it loads nothing', () => {
+    // Arrange
+    const { subject, workers } = rig();
+
+    // Act — the first thread is handed a session and its facts while it loads, then answers; the second is
+    // handed one and closed before it loads, and answers only after.
+    subject.reconcile([wanted(A)]);
+    subject.facts(A, { status: 'running', turn: 2 });
+    const whileLoading = workers[0]?.kinds();
+    workers[0]?.ready();
+    subject.reconcile([wanted(A), wanted(B)]);
+    subject.close();
+    workers[1]?.ready();
+
+    // Assert — held, then sent in the order handed; and a thread ended first never learns of its session.
+    should(whileLoading).deepEqual(['probe']);
+    should(workers[0]?.kinds()).deepEqual(['probe', 'attach', 'facts']);
+    should(workers[1]?.kinds()).deepEqual(['probe']);
+    should(workers[1]?.terminated).be.true();
+  });
+
   it('should start at most two threads at once and the rest on later passes', () => {
     // Arrange
     const { subject, workers } = rig();

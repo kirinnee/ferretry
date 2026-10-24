@@ -290,6 +290,7 @@ function scripted(options: ControlModeOptions & { readonly child?: () => Control
       should(argv).deepEqual([
         '/usr/bin/tmux',
         '-u',
+        '-N',
         '-S',
         '/tmp/fy-scripted.sock',
         '-C',

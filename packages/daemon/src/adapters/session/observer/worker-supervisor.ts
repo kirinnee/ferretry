@@ -94,6 +94,8 @@ interface Thread {
   readonly id: number;
   readonly worker: ObserverWorker;
   readonly sessions: Set<SessionId>;
+  /** What this thread is to be told once it has answered its probe, in order; until then it is told nothing. */
+  readonly held: ToSessionWorker[];
   ready: boolean;
   ended: boolean;
   drain: (() => void) | undefined;
@@ -118,6 +120,12 @@ const sameBinding = (a: SessionBinding, b: SessionBinding): boolean =>
  * One thread per running session up to the cap, then least-loaded pooling (`planSessionWorkers`). A
  * thread is started, asked the `fyd --check` probe, and hosts sessions only once it has answered — until
  * then, and whenever a session has no worker, the caller observes it on the main thread as stage 3a did.
+ *
+ * A THREAD IS TOLD NOTHING BUT THE PROBE UNTIL IT ANSWERS. What it is handed meanwhile is held here and
+ * sent, in order, with its answer. A thread ended while it still loads is not ended at once —
+ * `LoadSafeWorker` waits for it to open — and one already handed a session would attach it in that
+ * moment: start a tmux client for a daemon that has stopped, which nothing would ever end. Held here,
+ * it is ended knowing of no session at all.
  *
  * FAILURE IS A GENERATION. A thread that errors, closes, or leaves a look unanswered past the timeout is
  * ended; every look waiting on it is refused (its caller looks once itself), every session it hosted is
@@ -284,7 +292,7 @@ export class WorkerSupervisor {
   private start(): Thread {
     const id = this.nextThread++;
     const worker = this.ports.spawn();
-    const thread: Thread = { id, worker, sessions: new Set(), ready: false, ended: false, drain: undefined };
+    const thread: Thread = { id, worker, sessions: new Set(), held: [], ready: false, ended: false, drain: undefined };
     this.threads.set(id, thread);
     worker.unref?.();
     worker.onmessage = event => this.receive(thread, event.data);
@@ -332,6 +340,7 @@ export class WorkerSupervisor {
     if (thread.ended) return;
     if ('probe' in message) {
       thread.ready = true;
+      for (const held of thread.held.splice(0)) this.post(thread.id, held);
       this.ports.changed();
       return;
     }
@@ -398,6 +407,7 @@ export class WorkerSupervisor {
     if (thread.ended) return;
     thread.ended = true;
     thread.drain?.();
+    thread.held.splice(0);
     for (const session of thread.sessions) this.placements.delete(session);
     thread.sessions.clear();
     for (const [request, pending] of this.pending) {
@@ -417,6 +427,10 @@ export class WorkerSupervisor {
   private post(threadId: number, message: ToSessionWorker): void {
     const thread = this.threads.get(threadId);
     if (thread === undefined || thread.ended) return;
+    if (!thread.ready) {
+      thread.held.push(message);
+      return;
+    }
     try {
       thread.worker.postMessage(message);
     } catch (error) {
