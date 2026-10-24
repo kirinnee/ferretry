@@ -109,13 +109,13 @@ const neverReclaims = (holder: string): void => {
  * any other.
  */
 const CONTENDER = (adapters: string): string => `
-import { appendFileSync } from 'node:fs';
+import { appendFileSync, readFileSync } from 'node:fs';
 import { FileDaemonLifecycleLock } from '${adapters}/lifecycle-lock.ts';
 import { BunDaemonProcess } from '${adapters}/process.ts';
 import { HostProcessIncarnations } from '${adapters}/process-incarnation.ts';
 import { SystemMillisecondClock } from '${adapters}/clock.ts';
 
-const [lockPath, journal, name, holdMs, waitMs, rendezvous] = Bun.argv.slice(2);
+const [lockPath, journal, name, holdMs, waitMs, rendezvous, until] = Bun.argv.slice(2);
 const processes = new BunDaemonProcess();
 const lock = new FileDaemonLifecycleLock(processes, new HostProcessIncarnations(processes), new SystemMillisecondClock(), { pollMs: 5 });
 try {
@@ -127,7 +127,16 @@ try {
     reclaimed: holder => appendFileSync(journal, \`reclaimed \${name}: \${holder}\\n\`),
   });
   appendFileSync(journal, \`enter \${name}\\n\`);
-  if (rendezvous === undefined) {
+  if (until === 'queued') {
+    // Held until a rival is seen to be queued behind (or to have walked in beside), however late its
+    // process starts; the bound only stops a claim that excludes nothing from holding for ever.
+    const deadline = Date.now() + Number(holdMs);
+    const rivalSeen = () => {
+      const lines = readFileSync(journal, 'utf8').split('\\n');
+      return lines.some(line => line.startsWith('waiting')) || lines.filter(line => line.startsWith('enter')).length > 1;
+    };
+    while (Date.now() < deadline && !rivalSeen()) await Bun.sleep(5);
+  } else if (rendezvous === undefined) {
     await Bun.sleep(Number(holdMs));
   } else {
     // Held at the same time on purpose: two DIFFERENT daemons must not wait for each other, and only
@@ -171,8 +180,8 @@ async function journalOf(path: string): Promise<string[]> {
 
 describe('daemon lifecycle claim across invocations', () => {
   it('should let only one invocation at a time inside the claim', async () => {
-    // Arrange — two independent invocations, each holding for long enough that an unserialized pair
-    // would certainly overlap.
+    // Arrange — two independent invocations. Whoever gets in first holds until the other is seen
+    // queued, so the overlap this exists to forbid is always on offer, however the two start up.
     const root = await createTemporaryRoot();
     const script = await contenderScript(root);
     const lockPath = join(root, 'lifecycle', 'fyd.lock');
@@ -181,8 +190,8 @@ describe('daemon lifecycle claim across invocations', () => {
 
     // Act
     const [first, second] = await Promise.all([
-      contend(script, [lockPath, journal, 'first', '300', '30000']),
-      contend(script, [lockPath, journal, 'second', '300', '30000']),
+      contend(script, [lockPath, journal, 'first', '20000', '30000', '-', 'queued']),
+      contend(script, [lockPath, journal, 'second', '20000', '30000', '-', 'queued']),
     ]);
 
     // Assert — both got in, and neither entered while the other held it. The waiting notice proves
