@@ -360,6 +360,18 @@ interface Daemon {
   readonly headers: Record<string, string>;
 }
 
+type Started = Pick<Daemon, 'exit' | 'release' | 'cleanups'>;
+
+/**
+ * Every daemon a journey started and has not stopped, by its exit.
+ *
+ * `/healthz` answers while a boot is still running, so a journey that fails before its own `shutdown`
+ * leaves a daemon that is still writing its home. `afterEach` deletes that home, the daemon's next write
+ * fails, and the failure lands as an unhandled error on whichever journey runs next — one defect reported
+ * as two. So `afterEach` stops every daemon still here before it deletes anything.
+ */
+const started = new Map<Promise<number>, Started>();
+
 /** Boots the production world against the seeded home and waits for it to answer. */
 async function boot(home: string, port: number): Promise<Daemon> {
   process.env.FY_HOME = home;
@@ -370,6 +382,9 @@ async function boot(home: string, port: number): Promise<Daemon> {
   };
   const cleanups: Array<() => void | Promise<void>> = [];
   const exit = start(world, cleanups);
+  const daemon: Started = { exit, release: () => shutdownSignal.resolve(), cleanups };
+  // Before anything below can fail, so a boot this journey never finished waiting for is stopped too.
+  started.set(exit, daemon);
   for (let attempt = 0; attempt < 200; attempt += 1) {
     const health = await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined);
     if (health?.ok === true) break;
@@ -377,14 +392,13 @@ async function boot(home: string, port: number): Promise<Daemon> {
   }
   const token = (await readFile(join(home, 'api-token'), 'utf8')).trim();
   return {
-    exit,
-    release: () => shutdownSignal.resolve(),
-    cleanups,
+    ...daemon,
     headers: { authorization: `Bearer ${token}`, 'x-ferretry-client': 'cli', 'content-type': 'application/json' },
   };
 }
 
-async function shutdown(daemon: Daemon): Promise<void> {
+async function shutdown(daemon: Started): Promise<void> {
+  started.delete(daemon.exit);
   daemon.release();
   await daemon.exit;
   for (const cleanup of daemon.cleanups) await cleanup();
@@ -499,6 +513,8 @@ describe('the structured answer journey', () => {
   const previousHome = process.env.FY_HOME;
 
   afterEach(async () => {
+    // A journey that failed has already reported why; stopping what it left must not add a second story.
+    for (const daemon of [...started.values()]) await shutdown(daemon).catch(() => undefined);
     for (const socket of sockets) await tmuxCommand(socket, 'kill-server').catch(() => 0);
     sockets.clear();
     if (previousHome === undefined) delete process.env.FY_HOME;

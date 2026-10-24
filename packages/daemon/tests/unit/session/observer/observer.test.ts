@@ -6,7 +6,9 @@ import {
   INITIAL_OBSERVER_STATE,
   livenessSampleOf,
   type ObserverState,
+  type QuestionPatch,
   questionDocumentPatch,
+  questionReceipts,
   SessionObserver,
   stepQuestion,
   type TurnFacts,
@@ -197,6 +199,67 @@ describe('stepQuestion', () => {
     // Assert
     should(actual?.runtime).deepEqual({ model: 'claude-opus-5-5', at: NOW });
     should(actual?.writes).be.true();
+  });
+});
+
+describe('questionReceipts', () => {
+  // A look that found the answered form stamped while its copy of the ledger still said `accepted`.
+  const looked = (): QuestionPatch => {
+    const patch = stepQuestion({
+      state: state({ lastAnsweredQuestionToolUseId: 'tool-1' }),
+      events: [question, answered],
+      answers: new Map([[accepted.requestId, accepted]]),
+    });
+    if (patch === undefined) throw new Error('the look implied nothing');
+    return patch;
+  };
+
+  it('should keep a settlement whose receipt is still the accepted row it settles, and lay it over the ledger', () => {
+    // Arrange
+    const other: AnswerOperationRecord = { ...accepted, requestId: 'request-2', toolUseId: 'tool-2' };
+    const input = new Map([
+      [accepted.requestId, accepted],
+      [other.requestId, other],
+    ]);
+
+    // Act
+    const actual = questionReceipts(looked(), input);
+
+    // Assert
+    should(actual.settlements.map(record => [record.requestId, record.outcome])).deepEqual([
+      ['request-1', 'confirmed'],
+    ]);
+    should(actual.records.map(record => [record.requestId, record.outcome])).deepEqual([
+      ['request-1', 'confirmed'],
+      ['request-2', 'accepted'],
+    ]);
+  });
+
+  it.each([
+    ['settled since by the drive itself', { outcome: 'confirmed' }],
+    ['quarantined since', { outcome: 'quarantined' }],
+    ['re-admitted since under a later acceptance', { acceptedAt: '2026-10-22T08:00:01.000Z' }],
+    ['re-used since for another answer', { fingerprint: 'fingerprint-2' }],
+    ['bound since to another form', { toolUseId: 'tool-2' }],
+  ] as const)('should drop a settlement whose receipt was %s, and decide from that receipt', (_case, change) => {
+    // Arrange
+    const current: AnswerOperationRecord = { ...accepted, ...change };
+    const input = new Map([[accepted.requestId, current]]);
+
+    // Act
+    const actual = questionReceipts(looked(), input);
+
+    // Assert
+    should(actual.settlements).deepEqual([]);
+    should(actual.records).deepEqual([current]);
+  });
+
+  it('should drop a settlement for a request the ledger holds no receipt for', () => {
+    // Act
+    const actual = questionReceipts(looked(), new Map());
+
+    // Assert
+    should(actual).deepEqual({ settlements: [], records: [] });
   });
 });
 

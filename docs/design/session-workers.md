@@ -228,7 +228,7 @@ boundary in either direction.
 | ---------------- | --------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
 | `ready`          | `{generation}` / `{probe: true}`                                                                                      | marks the host live                                                                                                    |
 | `patch.turn`     | `{session, generation, seq, from, to, at, prompt?, permissionRequest?, harnessDialog?}`                               | runs today's `StorageTurnPorts.record` CAS verbatim, appends `turn.state`/`turn.prompt`, acks with fresh `facts`       |
-| `patch.question` | `{session, generation, seq, question, settlements[], runtime?}` — the exact patch `bin/fyd.ts:7688-7714` builds today | appends settlements to `answers.jsonl`, `updateState` with the same merge, acks                                        |
+| `patch.question` | `{session, generation, seq, question, settlements[], runtime?}` — the exact patch `bin/fyd.ts:7688-7714` builds today | appends the settlements the ledger still owes (§6.1) to `answers.jsonl`, `updateState` with the same merge, acks       |
 | `liveness`       | `{session, sample: {paneDigest, transcriptDigest, counters, subprocessAlive, sampledAt}}`                             | `foldLivenessSample` + `reflexStep` exactly as `WardenLivenessMonitor.tick` does with a collected sample               |
 | `exited` (3d)    | `{session, paneId, exitStatus?}`                                                                                      | runs the exit settle for this one session (`TmuxSessionExitObserver` logic), which then `detach`es                     |
 | `response`       | `{id, ok, value \| error}`                                                                                            | resolves the pending request (barrier, send evidence verdict, live sample)                                             |
@@ -519,6 +519,13 @@ over the same `state.json`, or a read just after an unconfirmed answer misses `n
   It keeps the boot-progress semantics (`progress.enter('declared-wait watcher')`) and the 200 ms boot-loop budget
   from #690, because the main thread only waits; it parses nothing.
 - The read barrier (§2.5) gives the CI read what the read-path projection gives it today.
+- A question patch can be one ledger append behind. An answer drive stamps the document (its facts reach the
+  worker), the worker settles the receipt its copy still holds `accepted`, and the drive appends its own `confirmed`
+  and releases the answer key before that patch arrives — `runIfIdle` only defers a patch, it does not re-check it.
+  So the applier re-reads the ledger under the key and appends a settlement only while its request's latest receipt
+  is still the `accepted` row it settles (`questionReceipts`), and decides the document from those receipts.
+  Without it the receipt was settled twice: a second `confirmed` (CI case `answer-journey.test.ts:509`), or a
+  stale `quarantined` over the `confirmed`, which turns the answer's own retry into `answer_released`.
 
 ### 6.2 Backpressure
 
