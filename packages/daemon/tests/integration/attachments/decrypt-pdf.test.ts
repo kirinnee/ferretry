@@ -30,34 +30,30 @@ class FakeWorker {
   }
 }
 
-async function withWorker<T>(outcome: WorkerOutcome, run: (worker: () => FakeWorker) => Promise<T>): Promise<T> {
-  const original = Object.getOwnPropertyDescriptor(globalThis, 'Worker');
+/** Runs `run` with a `spawn` that starts a fake thread answering `outcome`, and the first such thread. */
+async function withWorker<T>(
+  outcome: WorkerOutcome,
+  run: (worker: () => FakeWorker, spawn: () => Worker) => Promise<T>,
+): Promise<T> {
   const workers: FakeWorker[] = [];
-  class ControlledWorker extends FakeWorker {
-    constructor() {
-      if (outcome.kind === 'unconstructable') throw new Error('no such worker program');
-      super(outcome);
-      workers.push(this);
-    }
-  }
-  Object.defineProperty(globalThis, 'Worker', { configurable: true, writable: true, value: ControlledWorker });
-  try {
-    return await run(() => {
-      const worker = workers[0];
-      if (worker === undefined) throw new Error('the decryptor did not construct a worker');
-      return worker;
-    });
-  } finally {
-    if (original === undefined) delete (globalThis as { Worker?: unknown }).Worker;
-    else Object.defineProperty(globalThis, 'Worker', original);
-  }
+  const spawn = (): Worker => {
+    if (outcome.kind === 'unconstructable') throw new Error('no such worker program');
+    const worker = new FakeWorker(outcome);
+    workers.push(worker);
+    return worker as unknown as Worker;
+  };
+  return await run(() => {
+    const worker = workers[0];
+    if (worker === undefined) throw new Error('the decryptor did not construct a worker');
+    return worker;
+  }, spawn);
 }
 
 describe('decryptPdfInMemory', () => {
   it('returns worker output and terminates the disposable worker', async () => {
     const output = new Uint8Array([1, 2, 3]).buffer;
-    await withWorker({ kind: 'message', data: { ok: true, output } }, async worker => {
-      const actual = await decryptPdfInMemory(new Uint8Array([9]), 'use once');
+    await withWorker({ kind: 'message', data: { ok: true, output } }, async (worker, spawn) => {
+      const actual = await decryptPdfInMemory(new Uint8Array([9]), 'use once', { spawn });
 
       should([...actual]).deepEqual([1, 2, 3]);
       should(worker().terminated).be.true();
@@ -66,8 +62,8 @@ describe('decryptPdfInMemory', () => {
   });
 
   it('returns named worker failures without exposing a password', async () => {
-    await withWorker({ kind: 'message', data: { ok: false, failure: 'wrong_password' } }, async worker => {
-      await decryptPdfInMemory(new Uint8Array([9]), 'use once').then(
+    await withWorker({ kind: 'message', data: { ok: false, failure: 'wrong_password' } }, async (worker, spawn) => {
+      await decryptPdfInMemory(new Uint8Array([9]), 'use once', { spawn }).then(
         () => {
           throw new Error('wrong password must refuse');
         },
@@ -82,16 +78,16 @@ describe('decryptPdfInMemory', () => {
   });
 
   it('fails closed for malformed worker replies and worker errors', async () => {
-    await withWorker({ kind: 'message', data: { ok: true, output: 'not bytes' } }, async () => {
-      await decryptPdfInMemory(new Uint8Array([9]), 'use once').then(
+    await withWorker({ kind: 'message', data: { ok: true, output: 'not bytes' } }, async (_worker, spawn) => {
+      await decryptPdfInMemory(new Uint8Array([9]), 'use once', { spawn }).then(
         () => {
           throw new Error('malformed reply must refuse');
         },
         error => should(error).have.property('failure', 'unreadable_document'),
       );
     });
-    await withWorker({ kind: 'error' }, async worker => {
-      await decryptPdfInMemory(new Uint8Array([9]), 'use once').then(
+    await withWorker({ kind: 'error' }, async (worker, spawn) => {
+      await decryptPdfInMemory(new Uint8Array([9]), 'use once', { spawn }).then(
         () => {
           throw new Error('worker error must refuse');
         },
@@ -102,8 +98,8 @@ describe('decryptPdfInMemory', () => {
   });
 
   it('terminates a worker that does not answer before the deadline', async () => {
-    await withWorker({ kind: 'silent' }, async worker => {
-      await decryptPdfInMemory(new Uint8Array([9]), 'use once', { timeoutMs: 1 }).then(
+    await withWorker({ kind: 'silent' }, async (worker, spawn) => {
+      await decryptPdfInMemory(new Uint8Array([9]), 'use once', { timeoutMs: 1, spawn }).then(
         () => {
           throw new Error('timeout must refuse');
         },
@@ -116,35 +112,41 @@ describe('decryptPdfInMemory', () => {
 
 describe('probePdfDecryptWorker', () => {
   it('should call the worker ready only when it answers the probe', async () => {
-    await withWorker({ kind: 'message', data: { ok: true, probe: true } }, async worker => {
-      should(await probePdfDecryptWorker()).deepEqual({ ready: true });
+    await withWorker({ kind: 'message', data: { ok: true, probe: true } }, async (worker, spawn) => {
+      should(await probePdfDecryptWorker({ spawn })).deepEqual({ ready: true });
       should(worker().requests).deepEqual([{ probe: true }]);
       should(worker().terminated).be.true();
     });
   });
 
   it('should say the worker started but qpdf did not load for any other answer', async () => {
-    await withWorker({ kind: 'message', data: { ok: false, failure: 'unreadable_document' } }, async () => {
-      should(await probePdfDecryptWorker()).deepEqual({
-        ready: false,
-        reason: 'the worker started but qpdf did not load',
-      });
-    });
+    await withWorker(
+      { kind: 'message', data: { ok: false, failure: 'unreadable_document' } },
+      async (_worker, spawn) => {
+        should(await probePdfDecryptWorker({ spawn })).deepEqual({
+          ready: false,
+          reason: 'the worker started but qpdf did not load',
+        });
+      },
+    );
   });
 
   it('should report a worker that failed, never answered, or could not be created', async () => {
-    await withWorker({ kind: 'error' }, async () => {
-      should(await probePdfDecryptWorker()).deepEqual({ ready: false, reason: 'the worker failed: no detail' });
+    await withWorker({ kind: 'error' }, async (_worker, spawn) => {
+      should(await probePdfDecryptWorker({ spawn })).deepEqual({
+        ready: false,
+        reason: 'the worker failed: no detail',
+      });
     });
-    await withWorker({ kind: 'silent' }, async worker => {
-      should(await probePdfDecryptWorker({ timeoutMs: 1 })).deepEqual({
+    await withWorker({ kind: 'silent' }, async (worker, spawn) => {
+      should(await probePdfDecryptWorker({ timeoutMs: 1, spawn })).deepEqual({
         ready: false,
         reason: 'no answer within 1 ms — the worker did not start',
       });
       should(worker().terminated).be.true();
     });
-    await withWorker({ kind: 'unconstructable' }, async () => {
-      should(await probePdfDecryptWorker()).deepEqual({
+    await withWorker({ kind: 'unconstructable' }, async (_worker, spawn) => {
+      should(await probePdfDecryptWorker({ spawn })).deepEqual({
         ready: false,
         reason: 'the worker could not be created: no such worker program',
       });
@@ -152,8 +154,8 @@ describe('probePdfDecryptWorker', () => {
   });
 
   it('should refuse a probe answer handed back to a decryption', async () => {
-    await withWorker({ kind: 'message', data: { ok: true, probe: true } }, async () => {
-      await decryptPdfInMemory(new Uint8Array([9]), 'use once').then(
+    await withWorker({ kind: 'message', data: { ok: true, probe: true } }, async (_worker, spawn) => {
+      await decryptPdfInMemory(new Uint8Array([9]), 'use once', { spawn }).then(
         () => {
           throw new Error('a probe answer is not plaintext');
         },
