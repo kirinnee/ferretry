@@ -499,6 +499,8 @@ import {
   AgentSendFailureNotifier,
   AgentToolService,
   ANALYTICS_BACKSTOP_MS,
+  ANSWER_MAY_HAVE_LANDED,
+  ANSWER_NOT_DELIVERED,
   type AnalyticsIndexStoreFactory,
   type AnalyticsIngestCandidate,
   type AnalyticsIngestCandidateSource,
@@ -667,6 +669,7 @@ import {
   InitialAttachmentError,
   InvalidDeadlineRefused,
   isControlAttachable,
+  isQuestionScopedRequestId,
   isReapTerminalStatus,
   isTaskBoardError,
   JevTriageGuard,
@@ -747,6 +750,7 @@ import {
   type QuotaFailoverLoop,
   QuotaFailoverService,
   RELAY_DIRECTORY_NOT_ASKED,
+  RELOAD_THE_APP,
   RETIRED_ACCOUNT_MODEL_NOTICE,
   RETIRED_FLEET_BLOCK_NOTICE,
   RETIRED_SESSION_WORKERS_SWITCH_NOTICE,
@@ -3339,25 +3343,31 @@ function createSessionAnswerSubsystem(
           if (error instanceof AnswerRequestConflict)
             throw new SessionAnswerError(
               'conflict',
-              'A different answer was already sent for this question. Reload the session and check it before answering again.',
+              isQuestionScopedRequestId(request.requestId)
+                ? RELOAD_THE_APP
+                : 'A different answer was already sent for this question. Reload the session and check it before answering again.',
               undefined,
               error.message,
             );
           if (error instanceof AnswerAlreadyAnswered)
             throw new SessionAnswerError('already_answered', error.message, error.answeredWith, error.detail);
           if (error instanceof AnswerToolAlreadyHandled) throw new SessionAnswerError('refused', error.message);
-          if (error instanceof AnswerUnconfirmed) throw new SessionAnswerError('unconfirmed', error.message);
+          if (error instanceof AnswerUnconfirmed)
+            throw new SessionAnswerError('unconfirmed', ANSWER_MAY_HAVE_LANDED, undefined, error.message);
           if (
             error instanceof AnswerAcknowledged ||
             error instanceof AnswerReleased ||
             error instanceof AnswerTerminalFailure
           )
             throw new SessionAnswerError('released', error.message);
+          // The driver's sentences are evidence, not instructions: they travel as the detail, and the
+          // person is told how they can still answer.
           if (error instanceof StructuredQuestionAttemptFailed) {
-            if (error.receipt === 'accepted') throw new SessionAnswerError('unconfirmed', error.message);
+            if (error.receipt === 'accepted')
+              throw new SessionAnswerError('unconfirmed', ANSWER_NOT_DELIVERED, undefined, error.message);
             if (error.receipt === 'failed' || error.receipt === 'quarantined')
-              throw new SessionAnswerError('released', error.message);
-            throw new SessionAnswerError('failed', error.message);
+              throw new SessionAnswerError('released', ANSWER_NOT_DELIVERED, undefined, error.message);
+            throw new SessionAnswerError('failed', ANSWER_NOT_DELIVERED, undefined, error.message);
           }
           if (error instanceof SessionAnswerError) throw error;
           throw new SessionAnswerError('failed', error instanceof Error ? error.message : String(error));

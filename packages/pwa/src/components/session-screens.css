@@ -113,7 +113,8 @@
   justify-content: space-between;
 }
 .fy-question-nav button,
-.fy-question-submit {
+.fy-question-submit,
+.fy-question-console {
   min-height: 44px;
   min-width: 44px;
 }

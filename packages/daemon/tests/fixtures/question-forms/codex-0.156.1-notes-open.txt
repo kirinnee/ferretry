@@ -1,0 +1,12 @@
+                                        the pool keys and tell me what is
+                                        there.
+    3. Skip; test with jitter           Assume the library defaults and build
+                                        the next test with staggered
+                                        connection ages.
+  › 4. None of the above                Optionally, add details in notes
+                                        (tab).
+
+  › Add notes
+
+  tab or esc to clear notes | enter to submit answer
+

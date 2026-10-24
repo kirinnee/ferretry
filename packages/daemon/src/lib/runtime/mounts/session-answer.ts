@@ -88,13 +88,13 @@ function refuse(error: unknown): never {
       });
     // The one refusal that must never be read as "try again": a retry is exactly what it forbids.
     case 'unconfirmed':
-      throw new ApiError(409, error.message, 'answer_unconfirmed');
+      throw new ApiError(409, error.message, 'answer_unconfirmed', undefined, detailOf(error));
     // Recovery deliberately removed structured-question state. The next action is inspect the
     // terminal and use prose when safe, not retry a destructive selector drive.
     case 'released':
-      throw new ApiError(409, error.message, 'answer_released');
+      throw new ApiError(409, error.message, 'answer_released', undefined, detailOf(error));
     case 'failed':
-      throw new ApiError(500, error.message, 'session_answer_failed');
+      throw new ApiError(500, error.message, 'session_answer_failed', undefined, detailOf(error));
   }
 }
 

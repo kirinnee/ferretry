@@ -1,0 +1,16 @@
+❯ 1. Read one prod pod (Recommended)
+     I run a read-only command on one prod Jaeger pod that prints only the
+     pool-setting names and values (e.g. JAEGER_SHARED_REDIS_SECOND_*,
+     POOL/IDLE/AGE keys). Nothing is changed. No secrets are shown.
+  2. I'll check Vault
+     You look in Vault apps/ssp/jaeger for JAEGER_SHARED_REDIS_SECOND_* or bare
+     pool keys, and tell me what's there.
+  3. Skip; test with jitter
+     Don't confirm. Assume the library defaults and build the next test with
+     staggered connection ages (may need a new generator image).
+  4. Type something.
+────────────────────────────────────────────────────────────────────────────────
+  5. Chat about this
+
+Enter to select · ↑/↓ to navigate · Esc to cancel
+

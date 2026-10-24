@@ -35,6 +35,12 @@ class FakeAnswers implements SessionAnswerSubsystem {
       );
     if (id === 'unconfirmed') throw new SessionAnswerError('unconfirmed', 'an earlier attempt may have landed');
     if (id === 'released') throw new SessionAnswerError('released', 'the form was released; inspect the terminal');
+    if (id === 'undelivered')
+      throw new SessionAnswerError('unconfirmed', "Couldn't answer automatically.", undefined, 'driver evidence');
+    if (id === 'undelivered-released')
+      throw new SessionAnswerError('released', "Couldn't answer automatically.", undefined, 'released evidence');
+    if (id === 'undelivered-failed')
+      throw new SessionAnswerError('failed', "Couldn't answer automatically.", undefined, 'failed evidence');
     return sessionView(id);
   }
 }
@@ -130,6 +136,27 @@ describe('the session answer mount', () => {
       detail: 'request id was already used',
     });
   });
+
+  it.each([
+    ['undelivered', 409, 'answer_unconfirmed', 'driver evidence'],
+    ['undelivered-released', 409, 'answer_released', 'released evidence'],
+    ['undelivered-failed', 500, 'session_answer_failed', 'failed evidence'],
+  ] as const)(
+    'carries the driver evidence for an undelivered answer as detail, never as the sentence (%s)',
+    async (session, status, code, detail) => {
+      const actual = await dispatcher().dispatch(
+        request({
+          method: 'POST',
+          path: `/v1/sessions/${session}/answer`,
+          headers,
+          body: JSON.stringify({ toolUseId: 'tool-1', labels: ['one'] }),
+        }),
+      );
+
+      should(actual.status).equal(status);
+      should(JSON.parse(actual.body)).match({ code, error: "Couldn't answer automatically.", detail });
+    },
+  );
 
   it.each([
     ['reused', 'answer_request_id_reused'],
