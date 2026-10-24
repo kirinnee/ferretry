@@ -7,6 +7,7 @@ import {
 } from '../../../../src/features/settings/agent-clis.tsx';
 import { daemonConnection } from '../../../../src/lib/daemon-connection.ts';
 import { interact, type Mounted, mount, must } from '../../../support/dom.ts';
+import { waitFor } from '../../../support/learning-dom.ts';
 import { claudeCli, clisView, codexCli, VERIFIED_URL } from './agent-clis-support.ts';
 
 const connection = daemonConnection({ daemonId: 'alpha', baseUrl: 'https://alpha.example.test', deviceId: 'device-a' });
@@ -33,7 +34,22 @@ class FakeMachine implements AgentClisClient {
     this.reads = reads;
   }
 
+  /** Once set, every read after the first waits for `step`, so a test decides when a poll lands. */
+  gated = false;
+  private served = 0;
+  private readonly parked: Array<() => void> = [];
+
+  get parkedReads(): number {
+    return this.parked.length;
+  }
+
+  step(): void {
+    this.parked.shift()?.();
+  }
+
   async harnessUpdate(): Promise<HarnessUpdateView> {
+    if (this.gated && this.served > 0) await new Promise<void>(resolve => this.parked.push(resolve));
+    this.served += 1;
     const next = this.reads.length > 1 ? this.reads.shift() : this.reads[0];
     if (next === undefined || next instanceof Error) throw next ?? new Error('no answer');
     return next;
@@ -187,10 +203,18 @@ describe('AgentClisSurface', () => {
       new Error('blip'),
       clisView(claudeCli({ job: finished('failed', 'npm stopped.') })),
     );
+    machine.gated = true;
     const container = await show(machine);
-    expect(card(container, 'claude').querySelector('[data-agent-cli-job]')?.textContent).toBe('Updating — running npm');
-    await settle(40);
-    expect(card(container, 'claude').querySelector('[data-agent-cli-job]')?.textContent).toBe('npm stopped.');
+    const job = (): string | undefined => card(container, 'claude').querySelector('[data-agent-cli-job]')?.textContent;
+    expect(job()).toBe('Updating — running npm');
+
+    await waitFor(() => machine.parkedReads === 1, 'the first poll to be asked');
+    await interact(async () => machine.step());
+    await waitFor(() => machine.parkedReads === 1, 'the next poll to be asked after the failed one');
+    expect(job()).toBe('Updating — running npm');
+
+    await interact(async () => machine.step());
+    await waitFor(() => job() === 'npm stopped.', 'the finished view on screen');
   });
 
   it('draws the steps for a method Ferretry cannot update, an unreadable version, an unverified one and a missing harness', async () => {

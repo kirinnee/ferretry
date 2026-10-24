@@ -3,6 +3,7 @@ import type { WardenStatusView } from '@ferretry/protocol';
 import { useWardenStatus } from '../../src/hooks/use-warden-status.ts';
 import { type DaemonConnection, daemonConnection } from '../../src/lib/daemon-connection.ts';
 import { interact, mount } from '../support/dom.ts';
+import { manualInterval } from '../support/manual-interval.ts';
 import { wardenStatus } from '../support/warden.ts';
 
 const alpha = daemonConnection({
@@ -113,31 +114,38 @@ describe('useWardenStatus', () => {
   });
 
   it('keeps polling on its cadence and stops on unmount', async () => {
-    let reads = 0;
-    const view = await mount(
-      <Probe
-        daemon={alpha}
-        pollMs={5}
-        read={async () => {
-          reads += 1;
-          return wardenStatus({ fingerprint: `fp-${reads}` });
-        }}
-      />,
-    );
-    await settle();
-    expect(reads).toBe(1);
+    const interval = manualInterval(5);
+    try {
+      let reads = 0;
+      const view = await mount(
+        <Probe
+          daemon={alpha}
+          pollMs={5}
+          read={async () => {
+            reads += 1;
+            return wardenStatus({ fingerprint: `fp-${reads}` });
+          }}
+        />,
+      );
+      await settle();
+      expect(reads).toBe(1);
+      expect(interval.active()).toBe(1);
 
-    await interact(async () => {
-      await new Promise(resolve => setTimeout(resolve, 24));
-    });
-    const polled = reads;
-    expect(polled).toBeGreaterThan(1);
+      await interact(async () => interval.fire());
+      await settle();
+      expect(reads).toBe(2);
+      await interact(async () => interval.fire());
+      await settle();
+      expect(reads).toBe(3);
 
-    await view.unmount();
-    await interact(async () => {
-      await new Promise(resolve => setTimeout(resolve, 24));
-    });
+      await view.unmount();
+      expect(interval.active()).toBe(0);
+      await interact(async () => interval.fire());
+      await settle();
 
-    expect(reads).toBe(polled);
+      expect(reads).toBe(3);
+    } finally {
+      interval.restore();
+    }
   });
 });
