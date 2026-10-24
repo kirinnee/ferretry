@@ -1,12 +1,11 @@
 /**
  * THE END-TO-END PROOF of Whisper dictation — manual, and NEVER in CI: it downloads the real model
- * (tiny.en about 68 MB with its runtime, base.en about 104 MB) from Hugging Face.
+ * (tiny.en about 53 MB with its runtime, base.en about 89 MB) from Hugging Face.
  *
  *   cd packages/pwa && bunx vite build && bun harness/whisper-smoke.ts
  *
- * `WHISPER_SMOKE_MODEL=whisper-base-en` picks the model (tiny by default). `WHISPER_SMOKE_GPU=1` starts
- * Chrome with WebGPU on SwiftShader, so the WebGPU path runs even on a machine without a GPU (slowly:
- * it is a software GPU, so its timings say nothing about real hardware).
+ * `WHISPER_SMOKE_MODEL=whisper-base-en` picks the model (tiny by default). It runs on WebAssembly, the
+ * only backend the app ships for Whisper (`src/worker/whisper-worker.ts`).
  *
  * It serves the BUILT app's assets with the app's real `public/_headers` (the CSP with
  * `'wasm-unsafe-eval'`, Trusted Types, the permissions policy), opens a fresh Chrome profile, installs
@@ -26,7 +25,6 @@ const dist = join(packageDir, 'dist');
 /** Words LibriSpeech dev-clean 1.flac says, lower-cased. */
 const EXPECTED = 'he hoped there would be stew for dinner';
 const modelId = process.env.WHISPER_SMOKE_MODEL ?? 'whisper-tiny-en';
-const gpu = process.env.WHISPER_SMOKE_GPU === '1';
 
 const appHeaders = (): Record<string, string> => {
   const lines = readFileSync(join(packageDir, 'public/_headers'), 'utf8').split('\n');
@@ -47,7 +45,7 @@ const named = (prefix: string, suffix: string): string => {
 };
 const assets = {
   workerUrl: named('whisper-worker-', '.js'),
-  runtimeUrl: named('ort-wasm-simd-threaded.asyncify-', '.wasm'),
+  runtimeUrl: named('ort-wasm-simd-threaded-', '.wasm'),
 };
 
 const bundle = await Bun.build({ entrypoints: [join(harnessDir, 'whisper-smoke-page.ts')], target: 'browser' });
@@ -93,10 +91,9 @@ interface TabRun {
 }
 
 const executablePath = process.env.CHROME_PATH ?? 'google-chrome';
-const args = gpu ? ['--enable-unsafe-webgpu', '--enable-unsafe-swiftshader', '--use-webgpu-adapter=swiftshader'] : [];
 /** Renderers that are not this run's: any other Chrome on the machine. */
 const foreign = renderers();
-const browser = await chromium.launch({ executablePath, headless: true, args });
+const browser = await chromium.launch({ executablePath, headless: true });
 try {
   const context = await browser.newContext();
   const consoleLines: string[] = [];
@@ -154,7 +151,7 @@ try {
   const first = await runTab();
   const second = await runTab();
   const unpinned = consoleLines.filter(line => line.includes('not pinned'));
-  console.log(JSON.stringify({ modelId, gpu, assets, first, second, offMachine, consoleLines }, null, 2));
+  console.log(JSON.stringify({ modelId, assets, first, second, offMachine, consoleLines }, null, 2));
   const heard = (run: TabRun): string =>
     run.result.ok ? String((run.result.value as { text?: unknown }).text ?? '').toLowerCase() : '';
   const clean = (run: TabRun): boolean => heard(run).includes(EXPECTED) && run.violations.length === 0;

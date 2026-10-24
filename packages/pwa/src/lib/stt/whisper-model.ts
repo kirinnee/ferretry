@@ -15,38 +15,38 @@
  *
  * WHY q8. The `_quantized` (int8) graphs are the smallest export in both repositories by a wide margin:
  * tiny.en is 41 MB of graphs in q8 against 96 MB in q4, whose decoder keeps its 51 864-token embedding
- * in fp32. q8 runs on WebAssembly everywhere, and on WebGPU where the browser has it (operators the
- * WebGPU provider lacks run on the CPU provider inside the same session). One set of files therefore
- * serves every device, and Install downloads the same bytes whichever backend will run them.
+ * in fp32, and q8 runs on WebAssembly everywhere, which is the only backend the app ships for Whisper
+ * (see {@link WHISPER_RUNTIME_FILE}). One set of files therefore serves every device.
  *
  * Sizes and digests: Hugging Face's tree API at the pinned commit (`size`, `lfs.oid`) for the graphs;
  * the small JSON files are not in LFS and were downloaded at the commit and hashed.
  */
 
-import { RESEARCH } from './research-numbers.ts';
 import type { WhisperCatalogModel } from './model-catalog.ts';
 import type { PinnedFile } from './model-store.ts';
+import { ORT_RUNTIME_FILE } from './parakeet-model.ts';
+import { RESEARCH } from './research-numbers.ts';
 
 /** The transformers.js release the worker runs, pinned exactly in `package.json`. */
 export const TRANSFORMERS_JS_VERSION = '4.3.1';
 
 /**
- * ONNX Runtime Web's WebGPU-capable binary, `onnxruntime-web@1.24.1` `dist/ort-wasm-simd-threaded.asyncify.wasm`
- * — the one `onnxruntime-web/webgpu` (the entry transformers.js imports) instantiates, for its WebGPU
- * provider and its WebAssembly provider alike. It is the same package version Parakeet runs (the root
- * `package.json` overrides transformers.js's own dev build to it), so the app ships one ONNX Runtime,
- * in two builds: Parakeet's plain 12 MB one and this one.
+ * The runtime binary both Whisper models run on: ONNX Runtime Web's plain WebAssembly build,
+ * `onnxruntime-web@1.24.1` `dist/ort-wasm-simd-threaded.wasm` — the SAME bytes Parakeet runs
+ * ({@link ORT_RUNTIME_FILE}), because `vite.config.ts` resolves transformers.js's
+ * `onnxruntime-web/webgpu` to `onnxruntime-web/wasm`. The WebGPU-capable build
+ * (`ort-wasm-simd-threaded.asyncify.wasm`, 27,084,114 bytes) is over Cloudflare Pages' 25 MiB
+ * per-file limit, so the app cannot ship it, and Whisper runs on WebAssembly only.
  *
  * SELF-HOSTED and DEFERRED: the build emits it under `/assets/`, every visitor's copy of the app lists
- * and verifies it without downloading it (`isDeferredReleaseFile`), and only Install fetches it.
- * `tests/unit/stt/whisper-model.test.ts` re-hashes the installed package, so a version bump that forgets
- * this line fails there.
+ * and verifies it without downloading it (`isDeferredReleaseFile`), and only Install fetches it. It is
+ * kept in the transformers.js runtime's own cache, so a device with Parakeet and Whisper holds it
+ * twice. `tests/unit/stt/whisper-model.test.ts` re-hashes the installed package, so a version bump that
+ * forgets the pin fails there.
  */
 export const WHISPER_RUNTIME_FILE = {
-  role: 'runtime',
-  label: 'Speech runtime (WebGPU and WebAssembly)',
-  bytes: 27_084_114,
-  sha256: '79dfc1d756e2dba03ad015ad84ba804583853bb567fddb669487abb4ee1bf273',
+  ...ORT_RUNTIME_FILE,
+  label: 'Speech runtime (WebAssembly)',
 } as const satisfies Omit<PinnedFile, 'url'>;
 
 /** The commit a repository's files are pinned at, and the URL prefix every one of them lives under. */
@@ -181,7 +181,7 @@ export const WHISPER_TINY_EN_CATALOG_MODEL: WhisperCatalogModel = {
   keyRoot: '/fy-stt/whisper-tiny-en',
   versionLabel: `Whisper tiny.en q8 · ${TINY_REVISION.slice(0, 7)}`,
   summary:
-    'English only. The smallest download here, and quick, but it mishears more than the larger models. Expect about 600 MB of memory while it transcribes. Words appear after Stop. Runs on WebGPU where this browser has it, otherwise WebAssembly; Try it says which ran.',
+    'English only. The smallest download here, and quick, but it mishears more than the larger models. Expect about 600 MB of memory while it transcribes. Words appear after Stop. Runs on WebAssembly, on this device’s processor.',
   measured: RESEARCH.whisperTinyEn,
 };
 
@@ -201,6 +201,6 @@ export const WHISPER_BASE_EN_CATALOG_MODEL: WhisperCatalogModel = {
   keyRoot: '/fy-stt/whisper-base-en',
   versionLabel: `Whisper base.en q8 · ${BASE_REVISION.slice(0, 7)}`,
   summary:
-    'English only. About twice tiny’s download and time, for fewer mistakes. Expect about 750 MB of memory while it transcribes. Words appear after Stop. Runs on WebGPU where this browser has it, otherwise WebAssembly; Try it says which ran.',
+    'English only. About twice tiny’s download and time, for fewer mistakes. Expect about 750 MB of memory while it transcribes. Words appear after Stop. Runs on WebAssembly, on this device’s processor.',
   measured: RESEARCH.whisperBaseEn,
 };

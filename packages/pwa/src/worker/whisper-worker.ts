@@ -25,33 +25,28 @@
  *     `env.wasm.wasmPaths` is cleared: at import transformers.js points it at jsDelivr, and with it
  *     cleared ONNX Runtime uses the JavaScript glue embedded in this bundle and resolves no URL at all.
  *
- * ONE ONNX RUNTIME. `onnxruntime-web/webgpu` here is the same module transformers.js imports — the
+ * ONE ONNX RUNTIME, WEBASSEMBLY ONLY. `onnxruntime-web/wasm` here is the same module transformers.js
+ * imports: Vite aliases transformers.js's `onnxruntime-web/webgpu` to it (`vite.config.ts`), and the
  * root `package.json` overrides transformers.js's own ONNX Runtime dev build to the 1.24.1 Parakeet
- * runs, and Vite's global `onnxruntime-web` → `onnxruntime-web/wasm` alias only matches the bare name,
- * so Parakeet's 12 MB WebAssembly-only build is untouched.
+ * runs. So Whisper runs on Parakeet's 12 MB WebAssembly-only build, and the runtime binary it installs
+ * is that one file.
  *
- * WEBGPU, THEN WEBASSEMBLY. `onnxruntime-web/webgpu` runs its WebGPU provider and its WebAssembly one
- * from the same binary. The core builds the model on WebGPU when `navigator.gpu` hands this worker an
- * adapter and on WebAssembly otherwise, or when WebGPU fails. Single-threaded either way: the app sends
- * no cross-origin isolation headers, so there is no `SharedArrayBuffer`.
+ * NO WEBGPU. The WebGPU-capable build's binary (`ort-wasm-simd-threaded.asyncify.wasm`, ~27 MB) is over
+ * Cloudflare Pages' 25 MiB per-file limit, so the app cannot ship it. This runtime has no WebGPU
+ * provider, so the `gpu` port answers `false` and the core builds every model on WebAssembly.
+ * Single-threaded: the app sends no cross-origin isolation headers, so there is no `SharedArrayBuffer`.
  *
  * The page's policy must allow `'wasm-unsafe-eval'` for the runtime to compile (`public/_headers`).
  */
 
 import { env, pipeline } from '@huggingface/transformers';
-import * as ort from 'onnxruntime-web/webgpu';
+import * as ort from 'onnxruntime-web/wasm';
 import { onDeviceModel, type WhisperCatalogModel } from '../lib/stt/model-catalog.ts';
 import { WhisperModelStore } from '../lib/stt/whisper-store.ts';
-import {
-  type WhisperBackend,
-  type WhisperLoadedModel,
-  WhisperWorkerCore,
-  type WhisperWorkerReply,
-} from '../lib/stt/whisper-worker-core.ts';
+import { type WhisperLoadedModel, WhisperWorkerCore, type WhisperWorkerReply } from '../lib/stt/whisper-worker-core.ts';
 
 interface WorkerScope {
   readonly caches: CacheStorage;
-  readonly navigator: { readonly gpu?: { requestAdapter(): Promise<unknown> } };
   postMessage(message: WhisperWorkerReply): void;
   addEventListener(type: 'message', listener: (event: { readonly data: unknown }) => void): void;
 }
@@ -95,9 +90,10 @@ const core = new WhisperWorkerCore({
       fetch: refuse,
       runtimeInUse: () => true,
     }).readModel(),
-  gpu: async () => (await scope.navigator.gpu?.requestAdapter()) != null,
+  // This runtime has no WebGPU provider (see the header), so there is no adapter worth asking for.
+  gpu: async () => false,
   runtime: {
-    load: async (id, bytes, backend: WhisperBackend) => {
+    load: async (id, bytes) => {
       const model = whisperModel(id);
       ort.env.wasm.wasmBinary = bytes.runtime;
       (ort.env.wasm as { wasmPaths?: unknown }).wasmPaths = undefined;
@@ -118,7 +114,7 @@ const core = new WhisperWorkerCore({
       const asr = (await pipeline('automatic-speech-recognition', repository, {
         revision,
         dtype: 'q8',
-        device: backend === 'webgpu' ? 'webgpu' : 'wasm',
+        device: 'wasm',
       })) as unknown as SpeechPipeline;
       // Built: the verified bytes are inside the ONNX sessions now, so the map can be let go.
       env.customCache = verifiedCache(new Map());

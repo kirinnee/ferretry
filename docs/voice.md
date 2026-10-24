@@ -187,29 +187,33 @@ there are no live words.
 - **Installing** works like Parakeet's: explicit, pinned at one commit, hashed, resumable, removable
   (`lib/stt/whisper-model.ts`). Every file transformers.js reads is pinned — the model and generation
   configs, the feature-extractor config, the tokenizer and its config, and the two graphs.
-- **One shared runtime.** Both models run on ONNX Runtime Web's WebGPU-capable build
-  (`ort-wasm-simd-threaded.asyncify.wasm`, ~27 MB), kept once in `fy-stt-transformers-js-v1`
-  (`lib/stt/runtime-model-store.ts`). Installing the second model does not download it again; removing
-  one keeps it while the other is installed. It is the same `onnxruntime-web` 1.24.1 Parakeet runs: the
-  root `package.json` overrides transformers.js's own pin, and Vite's `onnxruntime-web` →
-  `onnxruntime-web/wasm` alias only matches the bare name, so Parakeet keeps its 12 MB build. Like that
-  binary, it is listed in the signed release but only downloaded on Install (`isDeferredReleaseFile`).
+- **One shared runtime.** Both models run on ONNX Runtime Web's plain WebAssembly build
+  (`ort-wasm-simd-threaded.wasm`, ~12 MB) — the same binary Parakeet runs — kept once in
+  `fy-stt-transformers-js-v1` (`lib/stt/runtime-model-store.ts`). Installing the second model does not
+  download it again; removing one keeps it while the other is installed. It is the same
+  `onnxruntime-web` 1.24.1 Parakeet runs: the root `package.json` overrides transformers.js's own pin,
+  and Vite aliases both `onnxruntime-web` and transformers.js's `onnxruntime-web/webgpu` to
+  `onnxruntime-web/wasm`. Like Parakeet's copy, it is listed in the signed release but only downloaded
+  on Install (`isDeferredReleaseFile`).
 - **The worker never fetches.** transformers.js is handed the verified bytes as its cache, keyed by the
   pinned URL (the commit is fixed in `env.remotePathTemplate`, because some of its own lookups pass no
   revision); its `fetch` answers `404` for anything not pinned; its browser and WASM caches are off; and
   ONNX Runtime gets its binary as bytes with `wasmPaths` cleared, so it uses the glue embedded in the
   bundle and never jsDelivr.
-- **WebGPU, then WebAssembly.** The worker builds the model on WebGPU when it can reach an adapter and
-  on WebAssembly otherwise, or when WebGPU fails to load or to decode. Both run under the page's CSP and
-  Trusted Types. Try it, and the dictation timing, say which ran (`Whisper tiny.en q8 · 2575352 ·
-WebGPU`). The q8 graphs serve both backends, so the download is the same either way; operators the
-  WebGPU provider lacks run on the CPU inside the same session.
+- **WebAssembly only, no WebGPU.** The WebGPU-capable build's binary
+  (`ort-wasm-simd-threaded.asyncify.wasm`, 27,084,114 bytes) is over Cloudflare Pages' 25 MiB per-file
+  limit: while the app shipped it, every Pages deploy failed (2026-10-23 to 2026-10-24). So the worker's
+  `gpu` port answers `false` and the core builds every model on WebAssembly, under the page's CSP and
+  Trusted Types; Try it, and the dictation timing, still name the backend
+  (`Whisper tiny.en q8 · 2575352 · WebAssembly`). The core's WebGPU-first path
+  (`lib/stt/whisper-worker-core.ts`) is kept, tested against fakes, for a WebGPU runtime that fits the
+  host. `scripts/ci/build-pwa.sh` fails any build that
+  emits a file over 24 MiB, so a runtime that does not fit fails the PR instead of the deploy.
 - **Measured** (`harness/whisper-smoke.ts`, desktop Chrome on x64, WebAssembly, one thread, a 10 s
   LibriSpeech clip): tiny.en 2.2 s (4.6 s for the first take, which loads the model), base.en 4.2 s
-  (7.5 s); roughly 600 MB and 750 MB of memory while transcribing. WebGPU was proven on SwiftShader only,
-  so there is no real-GPU number yet.
-- **Not tested on Safari before 26.** transformers.js itself avoids the asyncify build on Safari < 26
-  without WebGPU; this app has one runtime build for Whisper, so such a Safari may fail to load it.
+  (7.5 s); roughly 600 MB and 750 MB of memory while transcribing.
+- **Not tested on Safari before 26.** It is the build transformers.js itself picks for Safari < 26 without
+  WebGPU, so such a Safari should load it, but no run has proven it.
 - **Node-only dependencies are stubbed.** transformers.js declares `onnxruntime-node` (~300 MB) and
   `sharp`, which only its Node build imports. The root `package.json` overrides both to the throwing
   stubs in `packages/pwa/vendor/`, so neither is installed.
