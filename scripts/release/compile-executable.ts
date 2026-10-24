@@ -43,7 +43,7 @@
  * unlock shipped that way. `fyd --check` starts each worker, and the release smoke asserts it.
  */
 import { createRequire } from 'node:module';
-import { dirname, join } from 'node:path';
+import { dirname, join, normalize } from 'node:path';
 import type { BunPlugin } from 'bun';
 
 interface Rewrite {
@@ -180,12 +180,20 @@ function parse(argv: readonly string[]): Options {
 }
 
 const options = parse(Bun.argv.slice(2));
+/**
+ * The entry spelled the way `join` spells the workers beside it. Bun 1.4 lays a compiled binary's
+ * entrypoints out by their spelling: `./packages/daemon/bin/fyd.ts` (compile.sh's) beside
+ * `packages/daemon/bin/session.worker.ts` embeds the worker at `<root>/packages/daemon/bin/`, not at
+ * `<root>/session.worker.js`, so no worker starts (`ModuleNotFound resolving
+ * "/$bunfs/root/session.worker.js"`). Bun 1.3 normalised them itself.
+ */
+const entry = normalize(options.entry);
 /** Every worker program beside the entry, in a stable order. */
-const workers = [...new Bun.Glob('*.worker.ts').scanSync({ cwd: dirname(options.entry) })]
+const workers = [...new Bun.Glob('*.worker.ts').scanSync({ cwd: dirname(entry) })]
   .sort()
-  .map(name => join(dirname(options.entry), name));
+  .map(name => join(dirname(entry), name));
 const result = await Bun.build({
-  entrypoints: [options.entry, ...workers],
+  entrypoints: [entry, ...workers],
   compile: {
     outfile: options.outfile,
     ...(options.target === undefined ? {} : { target: options.target as Bun.Build.CompileTarget }),
