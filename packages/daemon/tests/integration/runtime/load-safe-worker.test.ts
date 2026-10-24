@@ -1,4 +1,8 @@
 import { describe, it } from 'bun:test';
+import { existsSync } from 'node:fs';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import should from 'should';
 import { type BundledWorkerName, bundledWorkerUrl } from '../../../src/adapters/runtime/bundled-worker.ts';
 import { LoadSafeWorker } from '../../../src/adapters/runtime/load-safe-worker.ts';
@@ -33,6 +37,52 @@ describe('LoadSafeWorker', () => {
 
     // Assert — a plain Worker would close without ever opening.
     should(seen.events).eql(['open', 'close']);
+  });
+
+  it('should deliver what was posted while it loaded, in order, once it opens', async () => {
+    // Arrange
+    const worker = new LoadSafeWorker(program('onmessage = event => postMessage(event.data);'));
+    const echoed: unknown[] = [];
+    const both = new Promise<void>(resolve => {
+      worker.onmessage = event => {
+        echoed.push(event.data);
+        if (echoed.length === 2) resolve();
+      };
+    });
+
+    // Act
+    worker.postMessage('first');
+    worker.postMessage({ second: true });
+    await both;
+    worker.terminate();
+
+    // Assert
+    should(echoed).eql(['first', { second: true }]);
+  });
+
+  it('should hand a thread ended while it loaded nothing that was posted to it', async () => {
+    // Arrange — the thread would leave a file behind for any message it got.
+    const scratch = await mkdtemp(join(tmpdir(), 'fy-load-safe-'));
+    const mark = join(scratch, 'ran');
+    try {
+      const worker = new LoadSafeWorker(
+        program(`onmessage = () => require('node:fs').writeFileSync(${JSON.stringify(mark)}, 'ran');`),
+      );
+      const seen = lifecycle(worker);
+
+      // Act
+      worker.postMessage('do the work');
+      worker.terminate();
+      // A stopping daemon is busy: the thread loads, and would run what it was sent, before `open` is heard.
+      Bun.sleepSync(300);
+      await seen.closed;
+
+      // Assert
+      should(seen.events).eql(['open', 'close']);
+      should(existsSync(mark)).be.false();
+    } finally {
+      await rm(scratch, { recursive: true, force: true });
+    }
   });
 
   it('should end a thread that has loaded at once', async () => {
