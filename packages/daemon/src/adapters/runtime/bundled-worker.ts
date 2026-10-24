@@ -13,6 +13,8 @@
  * starts each one, and the release smoke asserts it on every target.
  */
 
+import { LoadSafeWorker } from './load-safe-worker.ts';
+
 /** The bundled worker programs, by name: each is `packages/daemon/bin/<name>.worker.ts`. */
 export type BundledWorkerName = 'analytics-fold' | 'housekeeping' | 'pdf-decrypt' | 'session';
 
@@ -52,7 +54,7 @@ export async function probeBundledWorker(
   name: BundledWorkerName,
   {
     timeoutMs = 20_000,
-    spawn = () => new Worker(bundledWorkerUrl(name), { type: 'module' }),
+    spawn = () => new LoadSafeWorker(bundledWorkerUrl(name), { type: 'module' }),
   }: {
     readonly timeoutMs?: number;
     readonly spawn?: () => Worker;

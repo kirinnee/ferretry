@@ -33,7 +33,10 @@ cleanup() {
   trap - EXIT INT TERM
   set +e
   if [ -n "${run_tmp}" ] && [ -d "${run_tmp}" ]; then
-    bun "${root_dir}/scripts/test/tmux-sweep.ts" --fail-on-leak "${run_tmp}" || { [ "${status}" -eq 0 ] && status=1; }
+    # The command's own status goes along: a test process that died on a signal (a Bun crash) never ran
+    # its fixtures' teardown, so its leftovers are swept and named as the crash's, not as a leak.
+    bun "${root_dir}/scripts/test/tmux-sweep.ts" --fail-on-leak --exit-status "${status}" "${run_tmp}" ||
+      { [ "${status}" -eq 0 ] && status=1; }
     rm -rf -- "${run_tmp}"
   fi
   exit "${status}"

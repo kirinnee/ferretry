@@ -202,6 +202,7 @@ import {
   JournalGrantAudit,
   JscStackSampler,
   KeyedSerialExecutor,
+  LoadSafeWorker,
   ManifestAccountInventory,
   MCP_OAUTH_SECRETS_DOCUMENT,
   NodeBrowserLoginRuntime,
@@ -8075,7 +8076,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       };
       const sessionWorkerSupervisor = new WorkerSupervisor(
         {
-          spawn: () => new Worker(bundledWorkerUrl('session'), { type: 'module' }),
+          spawn: () => new LoadSafeWorker(bundledWorkerUrl('session'), { type: 'module' }),
           nowMs: () => Date.now(),
           schedule: unrefTimer,
           notice: (_session, message) => bootNotices.state(message),

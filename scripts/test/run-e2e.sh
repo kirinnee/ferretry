@@ -71,8 +71,9 @@ cleanup() {
     # By process, not by socket file: a journey's own cleanup removes its root, socket included, and a
     # server it never killed then survives every `kill-server` — which is how a daemon's private tmux,
     # and the real Claude Code in its pane, ran on for days. Every journey kills its own servers, so
-    # one still running here is a fixture bug and fails the tier.
-    bun scripts/test/tmux-sweep.ts --fail-on-leak "${run_root}" || { [ "${status}" -eq 0 ] && status=1; }
+    # one still running here is a fixture bug and fails the tier — unless the runner died on a signal,
+    # whose leftovers are the crash's and are only swept.
+    bun scripts/test/tmux-sweep.ts --fail-on-leak --exit-status "${status}" "${run_root}" || { [ "${status}" -eq 0 ] && status=1; }
     rm -rf -- "${run_root}"
   fi
 
