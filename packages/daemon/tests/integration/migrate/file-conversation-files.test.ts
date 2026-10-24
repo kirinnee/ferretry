@@ -153,13 +153,18 @@ describe('FileConversationFiles', () => {
     // Act
     await subject.write(file, 'converted\n');
     await subject.write(join(home, 'image.png'), new Uint8Array([1, 2, 3]));
-    const refused = subject.write(blocked, 'cannot replace a folder');
+    // Settled where it is made: a bare promise rejects while the reads below are still awaited, and a
+    // rejection nobody has caught yet is an unhandled one that fails the run on a slow machine.
+    const refusal = await subject.write(blocked, 'cannot replace a folder').then(
+      () => undefined,
+      (failure: unknown) => failure,
+    );
 
     // Assert
     should(await readFile(file, 'utf8')).equal('converted\n');
     should((await stat(file)).mode & 0o777).equal(0o600);
     should([...(await readFile(join(home, 'image.png')))]).deepEqual([1, 2, 3]);
-    await should(refused).be.rejected();
+    should(refusal).be.an.Error();
     should(await readdir(home)).not.containEql('.blocked.fixed.tmp');
   });
 });

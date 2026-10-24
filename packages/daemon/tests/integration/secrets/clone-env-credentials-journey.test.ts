@@ -122,6 +122,20 @@ async function testLogin(daemon: BootedDaemon, id: string) {
   return FleetCredentialTestResultSchema.parse(await answer.json());
 }
 
+/**
+ * The credential list once no check is in flight. The usage pass takes a per-credential flight over a
+ * login it has just learned of, and a list read while it is out answers "checking" for that row — true,
+ * and no answer about the sign-in's slot. Waiting is on the daemon's own word for "no read is running".
+ */
+async function settledCredentials(daemon: BootedDaemon) {
+  for (let attempt = 0; attempt < 400; attempt += 1) {
+    const listed = FleetCredentialListSchema.parse(await (await daemon.get('/v1/fleet/credentials')).json());
+    if (listed.credentials.every(credential => credential.status.word !== 'checking')) return listed;
+    await Bun.sleep(25);
+  }
+  throw new Error('a credential was still being checked ten seconds after the copy');
+}
+
 describe('cloning an API-key login between two booted daemons', () => {
   it('should copy the login with its key so it works, and leave the sign-in an empty slot', async () => {
     // Arrange — the source holds the key, a sign-in's tokens and an MCP sign-in token; the target holds nothing.
@@ -182,7 +196,7 @@ describe('cloning an API-key login between two booted daemons', () => {
     const importResponse = await target.post(`/v1/secrets/imports/${offer.importId}`, { bundle: sealed });
     const imported = SecretImportResultSchema.parse(await importResponse.json());
     const afterCopy = await testLogin(target, 'litellm-env');
-    const credentials = FleetCredentialListSchema.parse(await (await target.get('/v1/fleet/credentials')).json());
+    const credentials = await settledCredentials(target);
     const held = SecretListSchema.parse(await (await target.get('/v1/secrets')).json());
     const refusedMcp = await source.post(`/v1/secrets/exports/${offer.importId}`, { offer, names: [mcpToken] });
     const refusedMcpText = await refusedMcp.text();
