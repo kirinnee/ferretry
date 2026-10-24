@@ -7,6 +7,7 @@ import { selectionHeld, transcriptHeldStill, useLiveClock } from '../../src/hook
 import type { ToolCall } from '../../src/lib/session-screens.ts';
 import { extractToolSummary } from '../../src/lib/tool-extract.ts';
 import { manualScheduler } from '../support/live-scheduler.ts';
+import { manualInterval } from '../support/manual-interval.ts';
 import { render, run } from '../support/react.ts';
 
 const call = (key: string, name: string, input: unknown, overrides: Partial<ToolCall> = {}): ToolCall => ({
@@ -359,27 +360,35 @@ describe('useLiveClock', () => {
     expect(transcriptHeldStill(false, { isCollapsed: false, rangeCount: 1 })).toBeTrue();
   });
 
-  test('advances on its interval and stops when the transcript must hold still', async () => {
+  test('advances on its interval and stops when the transcript must hold still', () => {
     let ticks = 100;
     const now = () => {
       ticks += 10;
       return ticks;
     };
 
-    const ticking = render(<ClockProbe intervalMs={1} now={now} />);
-    const first = Number(ticking.root.findByType('span').children[0]);
-    await new Promise(resolve => setTimeout(resolve, 20));
-    const later = Number(ticking.root.findByType('span').children[0]);
-    ticking.unmount();
+    const interval = manualInterval(1);
+    try {
+      const ticking = render(<ClockProbe intervalMs={1} now={now} />);
+      const first = Number(ticking.root.findByType('span').children[0]);
+      expect(interval.active()).toBe(1);
+      run(() => interval.fire());
+      const later = Number(ticking.root.findByType('span').children[0]);
+      run(() => ticking.unmount());
 
-    expect(later).toBeGreaterThan(first);
+      expect(later).toBeGreaterThan(first);
+      expect(interval.active()).toBe(0);
 
-    const frozen = render(<ClockProbe hold intervalMs={1} now={now} />);
-    const held = Number(frozen.root.findByType('span').children[0]);
-    await new Promise(resolve => setTimeout(resolve, 20));
+      const frozen = render(<ClockProbe hold intervalMs={1} now={now} />);
+      const held = Number(frozen.root.findByType('span').children[0]);
+      expect(interval.active()).toBe(0);
+      run(() => interval.fire());
 
-    expect(Number(frozen.root.findByType('span').children[0])).toBe(held);
-    frozen.unmount();
+      expect(Number(frozen.root.findByType('span').children[0])).toBe(held);
+      run(() => frozen.unmount());
+    } finally {
+      interval.restore();
+    }
   });
 });
 
