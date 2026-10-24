@@ -39,6 +39,8 @@ export const NOT_AUDITED: Readonly<Record<string, string>> = {
   'POST /v1/sessions/:sessionId/signal': 'an agent reporting its own status',
   'POST /v1/sessions/:sessionId/rename':
     'a label, not an authority; the session journal records session.renamed with its actor',
+  'POST /v1/mcp/check':
+    'a read with a body: opens and closes one MCP session to list its tools; changes no configuration and grants nobody anything',
   'POST /v1/sessions/:sessionId/mcp/project/preview':
     'a read with a body: previews a .mcp.json change and writes nothing; the add is audited',
   'POST /v1/sessions/:sessionId/mcp/login/preview':

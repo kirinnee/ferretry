@@ -196,7 +196,7 @@ export const mcpEnvRefusal = (scope: SessionMcpScope, name: string, value: strin
 export const mcpServerRefusal = (scope: SessionMcpScope, server: SessionMcpServer): string | null => {
   if (server.transport === 'url')
     return scope === 'project' && server.oauth
-      ? 'Sign-in through Ferretry is for This login. Claude Code signs in to a project server itself, the first time it uses it.'
+      ? 'A project’s .mcp.json has no sign-in switch. Add the server, then sign in to it from its row in Tools: Ferretry keeps the token for this project and hands it to Claude Code.'
       : null;
   for (const [name, value] of Object.entries(server.env)) {
     const refusal = mcpEnvRefusal(scope, name, value);

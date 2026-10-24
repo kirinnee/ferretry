@@ -3,11 +3,11 @@ import type { SessionLaunchInstructions } from '@ferretry/protocol';
 import { type AccountLaunchEnvironment, launchEnvironment } from '../../../lib/fleet/launch-environment.ts';
 import type { AccountLaunchRenewal } from '../../../lib/fleet/launch-renewal.ts';
 import {
-  sessionPaneEnvironment,
-  type SessionMediaDirectory,
   type SessionEnvironmentStore,
   type SessionLifecycleLauncher,
   type SessionLifecycleRecord,
+  type SessionMediaDirectory,
+  sessionPaneEnvironment,
 } from '../../../lib/session/lifecycle/index.ts';
 import type { LastSnapshotWriter } from '../../../lib/session/snapshot/index.ts';
 import type { TmuxController } from '../../../lib/tmux/index.ts';
@@ -97,7 +97,7 @@ export class TmuxSessionLifecycleLauncher implements SessionLifecycleLauncher {
     const env = sessionPaneEnvironment(
       record.config.id,
       launchEnvironment(
-        (await this.accountEnvironment?.forWrapper(record.config.agent)) ?? {},
+        (await this.accountEnvironment?.forWrapper(record.config.agent, record.config.cwd)) ?? {},
         await this.environment.read(record.config.id),
       ),
       record.config.mode,

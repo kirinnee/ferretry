@@ -449,6 +449,21 @@ const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
       throw new Error('not exercised by the surface inventory');
     },
   },
+  mcpInventory: {
+    inventory: {
+      machine: async () => {
+        throw new Error('not exercised by the surface inventory');
+      },
+      session: async () => {
+        throw new Error('not exercised by the surface inventory');
+      },
+    },
+    check: {
+      check: async () => {
+        throw new Error('not exercised by the surface inventory');
+      },
+    },
+  },
   sessionMcp: {
     list: async () => {
       throw new Error('not exercised by the surface inventory');
@@ -720,6 +735,7 @@ describe('the mounted daemon surface', () => {
       115 + // the session table and everything that is not the account model (six of them the send ledger: its read, one send, a retry under the same id, a cancel, an Enter for one typed and not sent, and the hand-off document behind a pointer; one the Enter or erase for a person's own draft in the composer) (three socket-ticket counters gone: a device opens streams inside its session; the operator password's set and unlock routes gone: the passkey step-up replaced them)
       4 + // the credential sign-in family: start, then read, answer or cancel one flow
       5 + // the MCP sign-in family: its status read, start, finish, cancel and sign out (docs/mcp-oauth.md)
+      3 + // every MCP server a ferret sees, for the machine and for one ferret, and checking one (docs/mcp-scopes.md)
       2 + // the account model's credential list and its Check now
       3 + // copying secrets to another machine: open an import, seal for one, file one (docs/secrets.md)
       2 + // an environment login's Test, and the provider presets one is made from (docs/provider-presets.md)
@@ -872,6 +888,9 @@ describe('the mounted daemon surface', () => {
       'DELETE /v1/fleet/mcp-auth/:component',
       'POST /v1/fleet/mcp-auth/flows/:flowId',
       'DELETE /v1/fleet/mcp-auth/flows/:flowId',
+      'GET /v1/mcp',
+      'POST /v1/mcp/check',
+      'GET /v1/sessions/:sessionId/mcp/servers',
       // Resource limits, beside the fleet they bound. NOTE WHAT IS ABSENT: there is no POST and no
       // DELETE — an operator narrows or widens one saved document, and nothing here creates or
       // destroys a slice, because the units are transient and belong to the launches that made them.

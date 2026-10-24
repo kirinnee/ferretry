@@ -140,7 +140,8 @@ export class TmuxResumeLauncher implements ResumeLauncher {
    */
   async relaunch(id: SessionId): Promise<SessionLaunchInstructions | undefined> {
     const spec = await this.spec(id);
-    const account = spec.agent === undefined ? {} : ((await this.accountEnvironment?.forWrapper(spec.agent)) ?? {});
+    const account =
+      spec.agent === undefined ? {} : ((await this.accountEnvironment?.forWrapper(spec.agent, spec.cwd)) ?? {});
     // Resolve from the CURRENT saved resource-limit document, but never bake the transient wrapper
     // into the durable spec. A later relaunch after disabling must recover the same direct command.
     const command = spec.relaunch === undefined ? spec.command : await spec.relaunch();

@@ -9,15 +9,15 @@
  * where one goes rather than what it is.
  */
 import { describe, it } from 'bun:test';
-import should from 'should';
 import type { FleetManifestAccount } from '@ferretry/fleet';
 import { MissingFleetSecretsError } from '@ferretry/fleet';
 import type { SecretName } from '@ferretry/protocol';
+import should from 'should';
 import {
   FleetLaunchEnvironment,
-  launchEnvironment,
   type LaunchAccountInventory,
   type LaunchSecretValues,
+  launchEnvironment,
 } from '../../../src/lib/fleet/launch-environment.ts';
 
 const ID_ONE = '00000000-0000-4000-8000-000000000001';
@@ -118,6 +118,31 @@ describe('FleetLaunchEnvironment', () => {
     // Assert
     should(actual).deepEqual({});
     should(secrets.opened).equal(0);
+  });
+
+  it('should add a project’s signed-in MCP variables for the folder a pane starts in, the profile winning a clash', async () => {
+    // Arrange
+    const asked: { agent: string; cwd: string }[] = [];
+    const subject = new FleetLaunchEnvironment(
+      inventory(account({ secretEnv: { ANTHROPIC_API_KEY: '${secret:WORK_KEY}' } })),
+      store({ WORK_KEY: 'fixture-value' }),
+      undefined,
+      {
+        forLaunch: async (agent, cwd) => {
+          asked.push({ agent, cwd });
+          return { FY_MCP_DOCS_0A_TOKEN: 'project-token', ANTHROPIC_API_KEY: 'never-this' };
+        },
+      },
+    );
+
+    // Act
+    const withFolder = await subject.forWrapper('/state/fleet/bin/claude-auto-kirin', '/work/app');
+    const without = await subject.forWrapper('/state/fleet/bin/claude-auto-kirin');
+
+    // Assert
+    should(withFolder).deepEqual({ FY_MCP_DOCS_0A_TOKEN: 'project-token', ANTHROPIC_API_KEY: 'fixture-value' });
+    should(without).deepEqual({ ANTHROPIC_API_KEY: 'fixture-value' });
+    should(asked).deepEqual([{ agent: '/state/fleet/bin/claude-auto-kirin', cwd: '/work/app' }]);
   });
 
   it('should have no opinion about an executable this daemon does not publish', async () => {

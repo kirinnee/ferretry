@@ -168,7 +168,7 @@ export class McpOAuthService {
 
   // ── Reads ──────────────────────────────────────────────────────────────────────────────────────
 
-  /** Every MCP component that signs in, and every stored sign-in, with where each stands. */
+  /** Every MCP component that must sign in, and every stored sign-in (a project server's too), with where each stands. */
   async connections(): Promise<readonly McpOAuthConnection[]> {
     const [servers, document, stored, internal] = await Promise.all([
       this.deps.servers.list(),
@@ -179,7 +179,9 @@ export class McpOAuthService {
     const held = new Set([...stored, ...internal].map(summary => summary.name));
     const urls = new Map(servers.map(server => [server.component, server.url]));
     const components = new Set([
-      ...servers.filter(server => server.url !== undefined && server.auth === 'oauth').map(server => server.component),
+      ...servers
+        .filter(server => server.url !== undefined && server.auth === 'oauth' && server.optional !== true)
+        .map(server => server.component),
       ...Object.keys(document.connections),
     ]);
     return [...components]

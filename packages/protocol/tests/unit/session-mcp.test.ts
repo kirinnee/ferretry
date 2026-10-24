@@ -148,7 +148,7 @@ describe('the MCP environment rule both ends run', () => {
     should(mcp.mcpServerRefusal('project', COMMAND)).be.null();
     should(mcp.mcpServerRefusal('login', URL_SERVER)).be.null();
     should(mcp.mcpServerRefusal('project', { ...URL_SERVER, oauth: false })).be.null();
-    should(mcp.mcpServerRefusal('project', URL_SERVER)).match(/Sign-in through Ferretry is for This login/u);
+    should(mcp.mcpServerRefusal('project', URL_SERVER)).match(/has no sign-in switch/u);
     should(mcp.mcpServerRefusal('login', { ...COMMAND, env: { KEY: 'sk-live' } })).match(
       /KEY looks like a raw secret/u,
     );

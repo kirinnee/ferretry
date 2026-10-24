@@ -5,6 +5,11 @@ whole sign-in from the PWA — on a phone or a desktop — without opening a ter
 OAuth client. The access token it receives goes into the daemon's [secret store](secrets.md); the
 refresh token and any client secret go into a daemon-internal store nothing else can read.
 
+A **project's** `.mcp.json` server signs in through this same flow, under a subject naming the server and
+its project, and reaches Claude Code as a local-scope entry for that project — see
+[mcp-scopes.md](mcp-scopes.md#signing-in-to-a-project-server), which also lists every scope a ferret reads
+servers from and how a server is checked.
+
 Read [secrets.md](secrets.md) first, and the [threat model](#threat-model) below. The useful property
 here is narrower than "the agent never sees the token" — **an agent CAN read the access token.**
 
@@ -214,6 +219,9 @@ sign-in as needing a new one.
 | `POST /v1/fleet/mcp-auth/flows/:flowId`   | `fleet` / configure | `fleet.configured` `mcp-sign-in-finish`, + name   |
 | `DELETE /v1/fleet/mcp-auth/flows/:flowId` | `fleet` / configure | `fleet.configured` `mcp-sign-in-cancel`           |
 | `DELETE /v1/fleet/mcp-auth/:component`    | `fleet` / configure | `fleet.configured` `mcp-sign-out`, subject = name |
+
+`:component` is a component's name, or a project server's subject (`<name>..<project key>`,
+[mcp-scopes.md](mcp-scopes.md#signing-in-to-a-project-server)).
 
 Starting and finishing a sign-in binds this fleet to an account at a provider, which is the same risk
 the harness sign-in carries — account substitution — so it takes the same gate: `fleet`/`configure`,
