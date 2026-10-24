@@ -125,6 +125,14 @@ import {
 } from '../lib/session-fork.ts';
 import { SESSION_LIVE_STREAM_FLAG, type SessionLiveActivity } from '../lib/session-live.ts';
 import { type SessionTranscriptPage, SessionTranscriptPageSchema } from '../lib/session-transcript.ts';
+import {
+  type MachineSkillsInventory,
+  MachineSkillsInventorySchema,
+  type SessionSkillsInventory,
+  SessionSkillsInventorySchema,
+  type SkillFile,
+  SkillFileSchema,
+} from '../lib/skills-inventory.ts';
 import { TaskBoardChildGrantRequestSchema, TaskBoardGrantRequestViewSchema } from '../lib/task-boards.ts';
 import { type SessionHandoff, SessionHandoffNameSchema, SessionHandoffSchema } from '../lib/turn-handoff.ts';
 import {
@@ -706,6 +714,20 @@ export class FyApiClient implements IFyApiClient {
 
   sessionSkills(id: string): Promise<SessionSkills> {
     return this.request(`/v1/sessions/${encodeURIComponent(id)}/skills`, SessionSkillsSchema);
+  }
+
+  skillsInventory(): Promise<MachineSkillsInventory> {
+    return this.request('/v1/skills', MachineSkillsInventorySchema);
+  }
+
+  sessionSkillsInventory(id: string): Promise<SessionSkillsInventory> {
+    return this.request(`/v1/sessions/${encodeURIComponent(id)}/skills/inventory`, SessionSkillsInventorySchema);
+  }
+
+  skillFile(path: string, sessionId?: string): Promise<SkillFile> {
+    const search = new URLSearchParams({ path });
+    if (sessionId !== undefined) search.set('sessionId', sessionId);
+    return this.request(`/v1/skills/file?${search.toString()}`, SkillFileSchema);
   }
 
   analytics(query?: string): Promise<AnalyticsResponse> {

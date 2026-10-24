@@ -1,5 +1,4 @@
 import { describe, it } from 'bun:test';
-import should from 'should';
 import {
   decideAdvertisement,
   isLoopbackHost,
@@ -9,6 +8,7 @@ import {
   refusalNotice,
   WILDCARD_BIND_HOST,
 } from '@ferretry/protocol';
+import should from 'should';
 
 describe('the advertised address', () => {
   it('should hand out an address any device can dial when the bind names a real interface', () => {

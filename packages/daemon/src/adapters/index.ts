@@ -46,6 +46,7 @@ export * from './session/signal/index.ts';
 export * from './session/snapshot/index.ts';
 export * from './session/transcript/index.ts';
 export * from './session/turn/index.ts';
+export * from './skills/index.ts';
 export * from './speedups/index.ts';
 export * from './step-up/index.ts';
 export * from './storage/home-lock.ts';

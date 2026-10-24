@@ -280,6 +280,22 @@ const CASES: readonly MethodCase[] = [
     expected: { harness: 'codex', skills: [] },
   },
   {
+    name: 'skillsInventory',
+    invoke: client => client.skillsInventory(),
+    verb: 'GET',
+    path: '/v1/skills',
+    response: () => jsonResponse({ homes: [], projects: [], truncated: false }),
+    expected: { homes: [], projects: [], truncated: false },
+  },
+  {
+    name: 'sessionSkillsInventory with a percent-encoded session id',
+    invoke: client => client.sessionSkillsInventory('session 1/a'),
+    verb: 'GET',
+    path: '/v1/sessions/session%201%2Fa/skills/inventory',
+    response: () => jsonResponse({ sessionId: 'session 1/a', harness: 'codex', skills: [], truncated: false }),
+    expected: { sessionId: 'session 1/a', harness: 'codex', skills: [], truncated: false },
+  },
+  {
     name: 'analytics without a query',
     invoke: client => client.analytics(),
     verb: 'GET',

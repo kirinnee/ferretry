@@ -2,16 +2,16 @@ import { describe, it } from 'bun:test';
 import should from 'should';
 import type { ProjectInfo } from '../../src/lib/catalog.ts';
 import {
-  CreateWorktreeRequestSchema,
   CreatedWorktreeSchema,
-  ManagedWorktreeViewSchema,
+  CreateWorktreeRequestSchema,
   isProtocolAbsolutePath,
+  ManagedWorktreeViewSchema,
   projectForWorktree,
   RemovedWorktreeSchema,
   unclearedRemovalBlockers,
   WorktreeBaseSchema,
-  type WorktreeRemovalBlocker,
   WorktreeListResponseSchema,
+  type WorktreeRemovalBlocker,
   WorktreeRemovalDecisionSchema,
   WorktreeRemovalRequestSchema,
 } from '../../src/lib/worktrees.ts';

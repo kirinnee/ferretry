@@ -358,6 +358,14 @@ const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
       throw new Error('not used by this surface fixture');
     },
     skills: async session => ({ harness: session.config.harness, skills: [] }),
+    skillsInventory: async () => ({ homes: [], projects: [], truncated: false }),
+    sessionSkillsInventory: async session => ({
+      sessionId: session.config.id,
+      harness: session.config.harness,
+      skills: [],
+      truncated: false,
+    }),
+    skillFile: async () => undefined,
   },
   worktrees: {
     list: async () => ({ worktrees: [] }),
@@ -753,7 +761,8 @@ describe('the mounted daemon surface', () => {
       3 + // the model catalogs: the list, a check for a newer published one, and a read of the models Ollama has installed (docs/model-catalog.md)
       9 + // lessons: the default's write, Apply's preview and write, the per-ferret switch and its list, and the scan's estimate, start, read and cancel (a ferret's own door is `none`)
       2 + // the performance profile: start one, and read it back by id (`fy daemon profile`)
-      1; // handing a web address to this computer's own browser (loopback caller only)
+      1 + // handing a web address to this computer's own browser (loopback caller only)
+      3; // the skills inventory: the machine listing, one session's listing, and the Open read of a listed SKILL.md
     // `none` lost `POST /v1/pair`: redemption happens only inside a session now, so it is no route at all.
     // `authenticated` gained the Warden's "who needs you" feed, which a live warden reads like its status,
     // and the WebRTC offer: any paired device may ask for a shorter path to its own daemon (§16).
@@ -914,6 +923,9 @@ describe('the mounted daemon surface', () => {
       'GET /v1/projects',
       'POST /v1/projects',
       'GET /v1/sessions/:sessionId/skills',
+      'GET /v1/sessions/:sessionId/skills/inventory',
+      'GET /v1/skills',
+      'GET /v1/skills/file',
       'GET /v1/worktrees/removal',
       'POST /v1/worktrees/remove',
       'GET /v1/worktrees',

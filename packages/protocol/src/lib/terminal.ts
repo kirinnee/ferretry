@@ -1,6 +1,6 @@
 import { z } from 'zod';
-import { InstantSchema, NonNegativeIntegerSchema } from './common.ts';
 import { SurfaceNameSchema } from './agent-tools.ts';
+import { InstantSchema, NonNegativeIntegerSchema } from './common.ts';
 import { SurfaceOpenerSchema } from './surface.ts';
 
 export const TERMINAL_MAX_PER_SESSION = 6;

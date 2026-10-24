@@ -16,15 +16,15 @@ import {
   AnalyticsPricingRateApplicabilitySchema,
   AnalyticsPricingRateSchema,
   AnalyticsPricingRateSlotSchema,
-  AnalyticsPricingRateUnitSchema,
+  type AnalyticsPricingRates,
   AnalyticsPricingRatesSchema,
+  AnalyticsPricingRateUnitSchema,
   AnalyticsPricingSourceSchema,
   AnalyticsPricingSourceUrlSchema,
   analyticsPricingRateApplicability,
   analyticsPricingRateUnit,
   ConfiguredAnalyticsPricingSourceSchema,
   ConfiguredAnalyticsPricingSourcesSchema,
-  type AnalyticsPricingRates,
 } from '../../src/lib/index.ts';
 import { INSTANT } from '../fixtures.ts';
 import { assertCoversEverySchema, assertRejects, assertRoundTrips, type SchemaCase } from './schema-cases.ts';

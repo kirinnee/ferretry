@@ -2,6 +2,7 @@ import { describe, expect, it } from 'bun:test';
 import {
   MAX_SECRET_NAME_LENGTH,
   MIN_SECRET_VALUE_LENGTH,
+  malformedSecretReference,
   PutSecretRequestSchema,
   SECRET_SCHEMA_VERSION,
   SECRET_USE_DEFAULT_TIMEOUT_MS,
@@ -11,7 +12,6 @@ import {
   SecretUseRequestSchema,
   SecretUseResultSchema,
   SecretValueSchema,
-  malformedSecretReference,
   secretMask,
   secretReference,
   secretReferencePattern,

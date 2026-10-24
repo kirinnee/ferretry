@@ -1,25 +1,19 @@
-import { readdir, readFile } from 'node:fs/promises';
 import type { Dirent } from 'node:fs';
+import { readdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { AvailableSkill, SessionSkills, SessionView } from '@ferretry/protocol';
+import { skillFrontMatter } from '../../lib/skills/front-matter.ts';
 
 const MAX_SKILL_MANIFEST_BYTES = 256 * 1024;
 
 export interface NodeCatalogOptions {
+  /** The daemon's own home: the fallback for a session that runs no fleet account. */
   readonly home: string;
-}
-
-function frontmatter(markdown: string): { name: string; description: string } | undefined {
-  const match = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/.exec(markdown);
-  if (!match) return undefined;
-  const fields = new Map<string, string>();
-  for (const line of match[1]!.split(/\r?\n/u)) {
-    const field = /^([A-Za-z][A-Za-z0-9_-]*):\s*(.*?)\s*$/u.exec(line);
-    if (field) fields.set(field[1]!, field[2]!.replace(/^['"]|['"]$/gu, '').trim());
-  }
-  const name = fields.get('name')?.trim();
-  const description = fields.get('description')?.trim();
-  return name && description ? { name, description } : undefined;
+  /**
+   * The harness home of the fleet account a session runs as. A ferret runs against that home's skills, not the
+   * daemon user's, so a resolved home wins over `home`.
+   */
+  readonly runtimeHome?: (session: SessionView) => Promise<string | undefined>;
 }
 
 async function skillsIn(
@@ -40,7 +34,7 @@ async function skillsIn(
         const manifest = join(directory, entry.name, 'SKILL.md');
         const text = await readFile(manifest, 'utf8').catch(() => undefined);
         if (text === undefined || Buffer.byteLength(text) > MAX_SKILL_MANIFEST_BYTES) return undefined;
-        const parsed = frontmatter(text);
+        const parsed = skillFrontMatter(text);
         return parsed === undefined ? undefined : ({ ...parsed, scope, origin } satisfies AvailableSkill);
       }),
   );
@@ -53,7 +47,11 @@ export class NodeCatalog {
 
   async skills(session: SessionView): Promise<SessionSkills> {
     const { harness, cwd } = session.config;
-    const globalRoot = join(this.options.home, harness === 'claude' ? '.claude' : '.codex', 'skills');
+    const runtimeHome = await this.options.runtimeHome?.(session);
+    const globalRoot =
+      runtimeHome === undefined
+        ? join(this.options.home, harness === 'claude' ? '.claude' : '.codex', 'skills')
+        : join(runtimeHome, 'skills');
     const projectRoot = join(cwd, harness === 'claude' ? '.claude' : '.agents', 'skills');
     const origin: AvailableSkill['origin'] = harness;
     const global = await skillsIn(globalRoot, 'global', origin);

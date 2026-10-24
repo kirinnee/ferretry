@@ -65,6 +65,7 @@ export * from './session-permission.ts';
 export * from './session-search.ts';
 export * from './session-transcript.ts';
 export * from './session-transfer.ts';
+export * from './skills-inventory.ts';
 export * from './speedups.ts';
 export * from './state-home-layout.ts';
 export * from './step-up.ts';
