@@ -10,7 +10,7 @@ import {
   unrefFileEventTimers,
 } from '../../../src/adapters/file-events/bun-file-event-source.ts';
 import { FileEventHub } from '../../../src/lib/file-events/hub.ts';
-import { describeRealFileEvents, hubOver, until, workspace } from './real-file-system.ts';
+import { armed, describeRealFileEvents, hubOver, until, workspace } from './real-file-system.ts';
 
 describeRealFileEvents("Bun's fs.watch", () => new BunFileEventSource());
 
@@ -182,8 +182,7 @@ describe('BunFileEventSource', () => {
       const heard: string[] = [];
       const subscription = hub.subscribe(credentials, path => heard.push(path));
       try {
-        await writeFile(join(directory, 'prime'), 'x');
-        await until(() => heard.length > 0, 'the first report');
+        await armed(hub, directory);
         await Bun.sleep(100);
         heard.length = 0;
 
