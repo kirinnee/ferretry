@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { SessionAttentionSummarySchema } from './attention.ts';
 import {
   ApiErrorResponseSchema,
   InstantSchema,
@@ -6,7 +7,6 @@ import {
   NonNegativeIntegerSchema,
   PositiveIntegerSchema,
 } from './common.ts';
-import { SessionAttentionSummarySchema } from './attention.ts';
 import { ProviderQuotaBalanceSchema } from './fleet-credentials.ts';
 import { HarnessSchema } from './session-base.ts';
 import { HarnessDialogSchema } from './session-dialog.ts';

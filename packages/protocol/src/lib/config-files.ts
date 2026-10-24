@@ -2,7 +2,9 @@ import { z } from 'zod';
 import { InstantSchema, NonEmptyStringSchema, NonNegativeIntegerSchema, PositiveIntegerSchema } from './common.ts';
 import { type LearningConfig, LearningConfigSchema } from './learning.ts';
 import {
+  LegacyWardenTriageSchema,
   mergeWardenConfig,
+  migrateLegacyWardenSettings,
   ProviderOutageConfigSchema,
   WardenAccountSchema,
   WardenCapsSchema,
@@ -11,11 +13,9 @@ import {
   WardenFailoverConfigSchema,
   WardenGuardConfigSchema,
   WardenInvestigationConfigSchema,
+  WardenLayersSchema,
   WardenMayActAloneSchema,
   WardenSweepIntervalSchema,
-  LegacyWardenTriageSchema,
-  migrateLegacyWardenSettings,
-  WardenLayersSchema,
 } from './warden.ts';
 
 /**

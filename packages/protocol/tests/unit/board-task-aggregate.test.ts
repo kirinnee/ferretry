@@ -287,7 +287,7 @@ describe('the board task aggregate', () => {
 
       // Act & Assert
       for (const key of ['boardCapability', 'grantId', 'authorization']) {
-        should(Object.prototype.hasOwnProperty.call(parsed, key)).be.false();
+        should(Object.hasOwn(parsed, key)).be.false();
       }
     });
   });

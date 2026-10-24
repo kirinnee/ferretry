@@ -40,6 +40,7 @@ import type {
 import type { ForkSessionOutcome, ForkSessionRequest } from './session-fork.ts';
 import type { SessionLiveActivity } from './session-live.ts';
 import type { SessionTranscriptPage } from './session-transcript.ts';
+import type { MachineSkillsInventory, SessionSkillsInventory, SkillFile } from './skills-inventory.ts';
 import type { SessionHandoff } from './turn-handoff.ts';
 import type { VersionSkew } from './version-skew.ts';
 import type {
@@ -122,6 +123,9 @@ export interface IFyApiClient {
   usage(): Promise<UsageFeedView>;
   projects(): Promise<ProjectList>;
   sessionSkills(id: string): Promise<SessionSkills>;
+  skillsInventory(): Promise<MachineSkillsInventory>;
+  sessionSkillsInventory(id: string): Promise<SessionSkillsInventory>;
+  skillFile(path: string, sessionId?: string): Promise<SkillFile>;
   analytics(query?: string): Promise<AnalyticsResponse>;
   foreignHistory(): Promise<ForeignHistoryListing>;
   foreignHistoryConversation(id: string): Promise<ImportedConversationDetail>;

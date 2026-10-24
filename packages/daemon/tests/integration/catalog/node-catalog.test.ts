@@ -89,3 +89,20 @@ describe('catalogs', () => {
     await should(projects.projects()).be.rejectedWith('the project registry is damaged and cannot be read');
   });
 });
+
+describe('the session skills catalog home', () => {
+  it('reads the fleet account’s home for a ferret, not the daemon user’s', async () => {
+    root = await mkdtemp(join(tmpdir(), 'ferretry-catalog-home-'));
+    const daemonHome = join(root, 'owner');
+    const ferretHome = join(root, 'fleet-home');
+    await skill(join(daemonHome, '.claude', 'skills'), 'owners-own', 'the owner’s');
+    await skill(join(ferretHome, 'skills'), 'ferrets-own', 'the ferret’s');
+    const view = sessionView('s1', { harness: 'claude', cwd: join(root, 'cwd') });
+
+    const fleet = await new NodeCatalog({ home: daemonHome, runtimeHome: async () => ferretHome }).skills(view);
+    const fallback = await new NodeCatalog({ home: daemonHome, runtimeHome: async () => undefined }).skills(view);
+
+    should(fleet.skills.map(entry => entry.name)).deepEqual(['ferrets-own']);
+    should(fallback.skills.map(entry => entry.name)).deepEqual(['owners-own']);
+  });
+});

@@ -8,6 +8,7 @@ import {
   AnalyticsPricingPatchSchema,
   AnalyticsPricingPreviewIdSchema,
   AnalyticsPricingRateSchema,
+  type AnalyticsPricingRates,
   AnalyticsPricingSyncApplySchema,
   AnalyticsPricingSyncChangeSchema,
   AnalyticsPricingSyncPreviewRequestSchema,
@@ -15,7 +16,6 @@ import {
   AnalyticsPricingViewSchema,
   ManualAnalyticsPricingRateSchema,
   ModelCatalogAnalyticsPricingRateSchema,
-  type AnalyticsPricingRates,
 } from '../../src/lib/index.ts';
 import { INSTANT } from '../fixtures.ts';
 import { assertCoversEverySchema, assertRejects, assertRoundTrips, type SchemaCase } from './schema-cases.ts';

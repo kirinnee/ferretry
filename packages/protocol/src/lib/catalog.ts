@@ -2,7 +2,11 @@ import { z } from 'zod';
 import { InstantSchema } from './common.ts';
 import { HarnessSchema } from './session.ts';
 
-/** Display-safe metadata from a skill manifest. The daemon never returns SKILL.md contents. */
+/**
+ * Display-safe metadata from a skill manifest. This list never carries SKILL.md contents; the one exception
+ * is the skills inventory's Open route (`GET /v1/skills/file`), which serves only a path the inventory itself
+ * lists, because that file is the person's own and they asked to read it.
+ */
 export const AvailableSkillSchema = z.object({
   name: z.string().trim().min(1),
   description: z.string().trim().min(1),

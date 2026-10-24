@@ -1,5 +1,5 @@
-import { createHash } from 'node:crypto';
 import { describe, it } from 'bun:test';
+import { createHash } from 'node:crypto';
 import should from 'should';
 import {
   MCP_OAUTH_CALLBACK_PATH,

@@ -213,6 +213,7 @@ import {
   NodeForeignHistoryFiles,
   NodePairingCryptography,
   NodeSessionBrowserLauncher,
+  NodeSkillFiles,
   NpmHarnessLatest,
   type OpenedDaemonStorage,
   PaneProcessInventory,
@@ -864,6 +865,8 @@ import {
   SessionTranscriptResolver,
   type SessionTranscriptTail,
   SignalRefused,
+  type SkillRuntimeHome,
+  SkillsInventoryService,
   type SocketRoute,
   SpeedupsService,
   STRUCTURED_ANSWER_RELEASED_ATTENTION_KIND,
@@ -10257,12 +10260,54 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
   // so the period the daemon fires on cannot drift from the period the detector measures against.
   const healthSettings = sessionHealthSettingsAt(config.healthIntervalSeconds * 1_000);
   const health = world.createSessionHealth(opened.storage, healthSettings, meter);
-  const skills = new NodeCatalog({ home: world.userHome });
   const projects = new FileProjectCatalog(join(opened.paths.state, 'projects.json'));
+  /**
+   * A ferret runs against its runtime's own home under `fleet/homes`, not the daemon's, so the skills a ferret
+   * sees are read from the manifest's home for that wrapper. A manifest that is missing or unreadable is "no
+   * fleet account", which falls back to the daemon's home rather than refusing a skills list.
+   */
+  const runtimeHomes = async (): Promise<readonly SkillRuntimeHome[]> => {
+    const manifest = await readFleetManifest(opened.fileSystem, opened.paths.fleetManifest).catch(() => undefined);
+    if (manifest === undefined) return [];
+    return manifest.accounts.map(account => ({
+      harness: account.kind,
+      home: account.home,
+      runtimes: [
+        wrapperNameOf(account.wrapper),
+        ...manifestRuntimes(manifest)
+          .filter(runtime => runtime.id === account.id)
+          .map(runtime => wrapperNameOf(runtime.wrapper)),
+      ].filter((name, index, names) => names.indexOf(name) === index),
+    }));
+  };
+  const skillsInventory = new SkillsInventoryService({
+    files: new NodeSkillFiles(),
+    homes: runtimeHomes,
+    projects: async () => (await projects.projects()).map(({ id, name, path }) => ({ id, name, path })),
+    fleetDirectory: opened.paths.fleet,
+    assetsDirectory: join(opened.paths.fleet, 'assets'),
+    userHome: world.userHome,
+  });
+  const skills = new NodeCatalog({
+    home: world.userHome,
+    runtimeHome: async session => {
+      const name = wrapperNameOf(session.config.agent);
+      return (await runtimeHomes()).find(
+        entry => entry.harness === session.config.harness && entry.runtimes.includes(name),
+      )?.home;
+    },
+  });
   const catalogs = {
     projects: () => projects.projects(),
     registerProject: (request: RegisterProjectRequest) => projects.register(request),
     skills: (session: SessionView) => skills.skills(session),
+    skillsInventory: () => skillsInventory.machine(),
+    sessionSkillsInventory: (session: SessionView) => skillsInventory.session(session),
+    skillFile: async (path: string, session?: SessionView) =>
+      await skillsInventory.file(path, [
+        ...(await skillsInventory.machinePaths()),
+        ...(session === undefined ? [] : (await skillsInventory.session(session)).skills),
+      ]),
   };
   /**
    * The analytics materialization, opened under the lifetime lock this boot is already holding and

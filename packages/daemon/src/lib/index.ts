@@ -105,6 +105,7 @@ export * from './session/snapshot/index.ts';
 export * from './session/transcript/index.ts';
 export * from './session/turn/index.ts';
 export * from './session-id.ts';
+export * from './skills/inventory.ts';
 export * from './speedups/index.ts';
 export * from './state-home.ts';
 export * from './step-up/index.ts';

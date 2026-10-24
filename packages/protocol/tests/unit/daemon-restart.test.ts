@@ -2,11 +2,11 @@ import { describe, it } from 'bun:test';
 import should from 'should';
 import {
   classifyDaemonUnreachable,
-  DAEMON_STARTING_CODE,
-  DaemonStartingError,
   DAEMON_RESTART_PATIENCE_MS,
+  DAEMON_STARTING_CODE,
   type DaemonAttempt,
   type DaemonRestartPatience,
+  DaemonStartingError,
   daemonRestartBackoffMs,
   waitOutDaemonRestart,
 } from '../../src/lib/daemon-restart.ts';

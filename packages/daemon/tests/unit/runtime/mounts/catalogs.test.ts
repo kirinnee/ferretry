@@ -5,7 +5,7 @@ import { ApiDispatcher, ApiError, ApiRouter } from '../../../../src/lib/api/inde
 import { DEFAULT_CAPABILITY_GRANTS } from '../../../../src/lib/grants/index.ts';
 import { type CatalogSubsystem, catalogRoutes } from '../../../../src/lib/runtime/mounts/catalogs.ts';
 import { jsonBody, request } from '../../api/support.ts';
-import { CREDENTIALS, grantSubsystem, human, sessionDirectory } from './support.ts';
+import { CREDENTIALS, grantSubsystem, human, sessionDirectory, sessionView } from './support.ts';
 
 const PROJECT = {
   id: '11111111-1111-4111-8111-111111111111',
@@ -13,6 +13,13 @@ const PROJECT = {
   path: '/work/ferretry',
   source: 'existing-folder' as const,
   createdAt: '2026-08-04T00:00:00.000Z',
+};
+
+/** The inventory members a case about something else does not exercise. */
+const NO_INVENTORY = {
+  skillsInventory: async () => ({ homes: [], projects: [], truncated: false }),
+  sessionSkillsInventory: async () => ({ sessionId: 's1', harness: 'codex' as const, skills: [], truncated: false }),
+  skillFile: async () => undefined,
 };
 
 interface FilesystemGrant {
@@ -59,6 +66,7 @@ describe('the project catalog mount', () => {
           return PROJECT;
         },
         skills: async () => ({ harness: 'codex', skills: [] }),
+        ...NO_INVENTORY,
       })
     ).dispatch(
       request({
@@ -85,6 +93,7 @@ describe('the project catalog mount', () => {
           return PROJECT;
         },
         skills: async () => ({ harness: 'codex', skills: [] }),
+        ...NO_INVENTORY,
       },
       FILESYSTEM_DISABLED,
     );
@@ -113,6 +122,7 @@ describe('the project catalog mount', () => {
           return PROJECT;
         },
         skills: async () => ({ harness: 'codex', skills: [] }),
+        ...NO_INVENTORY,
       },
       FILESYSTEM_DISABLED,
     );
@@ -145,6 +155,7 @@ describe('the project catalog mount', () => {
         },
         registerProject: async () => PROJECT,
         skills: async () => ({ harness: 'codex', skills: [] }),
+        ...NO_INVENTORY,
       },
       FILESYSTEM_DISABLED,
     );
@@ -164,6 +175,7 @@ describe('the project catalog mount', () => {
         throw failure;
       },
       skills: async () => ({ harness: 'codex', skills: [] }),
+      ...NO_INVENTORY,
     });
     const requestProject = () =>
       surface.dispatch(
@@ -197,6 +209,7 @@ describe('the project catalog mount', () => {
           return PROJECT;
         },
         skills: async () => ({ harness: 'codex', skills: [] }),
+        ...NO_INVENTORY,
       })
     ).dispatch(
       request({
@@ -226,6 +239,7 @@ describe('the project catalog mount', () => {
           return PROJECT;
         },
         skills: async () => ({ harness: 'codex', skills: [] }),
+        ...NO_INVENTORY,
       })
     ).dispatch(
       request({
@@ -252,6 +266,7 @@ describe('the project catalog mount', () => {
           return PROJECT;
         },
         skills: async () => ({ harness: 'codex', skills: [] }),
+        ...NO_INVENTORY,
       })
     ).dispatch(
       request({
@@ -265,5 +280,69 @@ describe('the project catalog mount', () => {
     should(response.status).equal(400);
     should(jsonBody(response)).match({ code: 'invalid_request' });
     should(registered).be.empty();
+  });
+});
+
+describe('the skills inventory mounts', () => {
+  const view = sessionView('s1', { harness: 'codex', agent: 'codex-main' });
+  const inventory = {
+    ...NO_INVENTORY,
+    skillsInventory: async () => ({ homes: [], projects: [], truncated: false }),
+    sessionSkillsInventory: async () => ({
+      sessionId: 's1',
+      harness: 'codex' as const,
+      runtime: 'codex-main',
+      skills: [],
+      truncated: false,
+    }),
+    skillFile: async (path: string) => (path === '/home/skills/a/SKILL.md' ? '# a' : undefined),
+  };
+  const catalogs: CatalogSubsystem = {
+    projects: async () => [],
+    registerProject: async () => PROJECT,
+    skills: async () => ({ harness: 'codex', skills: [] }),
+    ...inventory,
+  };
+
+  async function ask(
+    path: string,
+    query: readonly (readonly [string, string])[] = [],
+    filesystem: FilesystemGrant = FILESYSTEM_GRANTED,
+    fleetUse = true,
+  ) {
+    const grants = grantSubsystem({
+      grants: {
+        ...DEFAULT_CAPABILITY_GRANTS,
+        filesystem,
+        fleet: { ...DEFAULT_CAPABILITY_GRANTS.fleet, use: fleetUse },
+      },
+    });
+    await grants.refresh();
+    const surface = new ApiDispatcher(
+      new ApiRouter(catalogRoutes(catalogs, sessionDirectory([view]))),
+      CREDENTIALS,
+      grants,
+    );
+    return await surface.dispatch(request({ path, query, headers: human }));
+  }
+
+  it('answers the machine inventory with no-store', async () => {
+    const response = await ask('/v1/skills');
+    should(response.status).equal(200);
+    should(response.headers.get('cache-control')).equal('no-store');
+    should(jsonBody(response)).deepEqual({ homes: [], projects: [], truncated: false });
+  });
+
+  it('answers one session its own inventory and 404s an unknown session', async () => {
+    should((await ask('/v1/sessions/s1/skills/inventory')).status).equal(200);
+    should((await ask('/v1/sessions/nope/skills/inventory')).status).equal(404);
+  });
+
+  it('serves a listed SKILL.md and refuses an unlisted path', async () => {
+    const listed = await ask('/v1/skills/file', [['path', '/home/skills/a/SKILL.md']]);
+    should(listed.status).equal(200);
+    should(jsonBody(listed)).deepEqual({ path: '/home/skills/a/SKILL.md', content: '# a' });
+    should((await ask('/v1/skills/file', [['path', '/etc/passwd']])).status).equal(404);
+    should((await ask('/v1/skills/file')).status).equal(400);
   });
 });
