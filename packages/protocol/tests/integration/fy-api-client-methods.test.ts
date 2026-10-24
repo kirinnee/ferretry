@@ -296,6 +296,22 @@ const CASES: readonly MethodCase[] = [
     expected: { sessionId: 'session 1/a', harness: 'codex', skills: [], truncated: false },
   },
   {
+    name: 'skillFile without a session',
+    invoke: client => client.skillFile('/h/skills/a b/SKILL.md'),
+    verb: 'GET',
+    path: '/v1/skills/file?path=%2Fh%2Fskills%2Fa+b%2FSKILL.md',
+    response: () => jsonResponse({ path: '/h/skills/a b/SKILL.md', content: 'x' }),
+    expected: { path: '/h/skills/a b/SKILL.md', content: 'x' },
+  },
+  {
+    name: 'skillFile with a session',
+    invoke: client => client.skillFile('/p/SKILL.md', 's 1'),
+    verb: 'GET',
+    path: '/v1/skills/file?path=%2Fp%2FSKILL.md&sessionId=s+1',
+    response: () => jsonResponse({ path: '/p/SKILL.md', content: 'y' }),
+    expected: { path: '/p/SKILL.md', content: 'y' },
+  },
+  {
     name: 'analytics without a query',
     invoke: client => client.analytics(),
     verb: 'GET',
