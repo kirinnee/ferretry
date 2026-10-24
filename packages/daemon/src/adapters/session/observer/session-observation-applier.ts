@@ -5,6 +5,7 @@ import {
   type ObserverPatch,
   type QuestionPatch,
   questionDocumentPatch,
+  questionReceipts,
   type SerialExecutor,
   type SessionId,
   type TurnStateChange,
@@ -77,11 +78,15 @@ export async function recordTurnChange(
  * ONE SESSION'S PATCHES ARE APPLIED ONE AT A TIME, in the order they are handed in, on this applier's
  * own per-session lane — so a question patch handed in before a turn patch lands before it (#689). The
  * lane is the applier's alone: nothing it calls re-enters it, and storage keeps its own lower lane.
+ *
+ * A QUESTION PATCH IS APPLIED UNDER THE SESSION'S ANSWER KEY, which every caller holds (`runIfIdle`): no
+ * answer drive and no other writer of the answer ledger runs meanwhile, so the ledger this reads is the
+ * ledger it appends to — the same read-modify-write argument `FileAnswerLedger` makes for the coordinator.
  */
 export class SessionObservationApplier {
   constructor(
     private readonly storage: ObservationStorage,
-    private readonly answers: Pick<AnswerLedger, 'append'>,
+    private readonly answers: Pick<AnswerLedger, 'all' | 'append'>,
     private readonly serial: SerialExecutor,
   ) {}
 
@@ -95,18 +100,22 @@ export class SessionObservationApplier {
   }
 
   /**
-   * The receipts reconciliation settled are appended first; then, when the look implied a change, the
-   * state patch is RE-DECIDED against the document under the lock — a lifecycle stop that committed
-   * after the look must not have its `kill_failed` resurrected as `awaiting_question`.
+   * The receipts reconciliation settled are appended first — only those the ledger, read now, still owes:
+   * a worker's look can be one append behind an answer drive that has since settled the same receipt
+   * itself ({@link questionReceipts}). Then, when the look implied a change, the state patch is
+   * RE-DECIDED against the document under the lock, from the receipts as they now stand — a lifecycle
+   * stop that committed after the look must not have its `kill_failed` resurrected as `awaiting_question`.
    */
   private async question(id: SessionId, patch: QuestionPatch): Promise<boolean> {
-    for (const settlement of patch.settlements) await this.answers.append(id, settlement);
+    const receipts = questionReceipts(patch, await this.answers.all(id));
+    for (const settlement of receipts.settlements) await this.answers.append(id, settlement);
     if (!patch.writes) return false;
+    const decidedFrom = { ...patch, records: receipts.records };
     let written = false;
     await this.storage.updateState(id, raw => {
       const verified = SessionStateSchema.safeParse(raw);
       if (!verified.success) return raw;
-      const decided = questionDocumentPatch(verified.data, patch);
+      const decided = questionDocumentPatch(verified.data, decidedFrom);
       if (decided === undefined) return raw;
       const next: Record<string, unknown> = { ...(raw as Record<string, unknown>), ...decided.fields };
       for (const field of decided.removals) delete next[field];

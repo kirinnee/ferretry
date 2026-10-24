@@ -3,10 +3,11 @@
  *
  * One session's patches are applied one at a time in the order they were handed in (#689: a question
  * patch handed in before a turn patch lands first), receipts are appended even when nothing else
- * changes, and a question patch is re-decided against the document it holds the lock on.
+ * changes — but only while the ledger still owes them — and a question patch is re-decided against the
+ * document it holds the lock on.
  */
 import { afterEach, describe, it } from 'bun:test';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { SessionState } from '@ferretry/protocol';
@@ -15,6 +16,7 @@ import {
   BunSqliteIndexFactory,
   type DaemonStorage,
   DaemonStorageFactory,
+  FileAnswerLedger,
   KeyedSerialExecutor,
   RuntimeEnvironment,
   SessionObservationApplier,
@@ -25,6 +27,7 @@ import {
 } from '../../../../src/adapters/index.ts';
 import {
   type AnswerOperationRecord,
+  createSessionPaths,
   parseSessionId,
   type QuestionPatch,
   stepQuestion,
@@ -97,6 +100,23 @@ const patchFor = (
   return patch;
 };
 
+/** The real receipt file beside the session, and what each of its lines says happened. */
+function ledgerFor(storage: DaemonStorage) {
+  const ledger = new FileAnswerLedger(
+    session => createSessionPaths(storage.paths, session).directory,
+    new SystemClock(() => new Date(NOW)),
+  );
+  const outcomes = async (): Promise<string[]> =>
+    (await readFile(ledger.file(ID), 'utf8'))
+      .split('\n')
+      .filter(Boolean)
+      .map(line => JSON.parse(line) as { readonly outcome: string; readonly resolution?: string })
+      .map(row => row.resolution ?? row.outcome);
+  return { ledger, outcomes };
+}
+
+const noReceipts = async () => new Map<string, AnswerOperationRecord>();
+
 describe('SessionObservationApplier', () => {
   it('should apply one session’s patches in the order handed in: the question before the turn', async () => {
     // Arrange
@@ -105,7 +125,7 @@ describe('SessionObservationApplier', () => {
     const appended: AnswerOperationRecord[] = [];
     const subject = new SessionObservationApplier(
       storage,
-      { append: async (_id, record) => void appended.push(record) },
+      { all: noReceipts, append: async (_id, record) => void appended.push(record) },
       new KeyedSerialExecutor(),
     );
 
@@ -131,7 +151,10 @@ describe('SessionObservationApplier', () => {
     const appended: AnswerOperationRecord[] = [];
     const subject = new SessionObservationApplier(
       storage,
-      { append: async (_id, record) => void appended.push(record) },
+      {
+        all: async () => new Map([[accepted.requestId, accepted]]),
+        append: async (_id, record) => void appended.push(record),
+      },
       new KeyedSerialExecutor(),
     );
     const patch = patchFor(
@@ -158,7 +181,7 @@ describe('SessionObservationApplier', () => {
     const storage = await openStorage();
     const subject = new SessionObservationApplier(
       storage,
-      { append: async () => undefined },
+      { all: noReceipts, append: async () => undefined },
       new KeyedSerialExecutor(),
     );
     const patch = patchFor({}, [question]);
@@ -178,5 +201,77 @@ describe('SessionObservationApplier', () => {
     should(decidedAgain).be.false();
     should(damaged).be.false();
     should(await storage.readState(ID)).deepEqual({ id: ID, status: 'not-a-status' });
+  });
+
+  it('should not settle again a receipt the answer drive settled after the look', async () => {
+    // Arrange — a worker looked between the drive stamping the document and the drive appending its own
+    // `confirmed`: its copy of the ledger still said `accepted`, so it settled the receipt itself.
+    const storage = await openStorage();
+    await storage.writeState(ID, { id: ID, status: 'running', turn: 1, lastAnsweredQuestionToolUseId: 'tool-1' });
+    const { ledger, outcomes } = ledgerFor(storage);
+    await ledger.append(ID, accepted);
+    const patch = patchFor({ lastAnsweredQuestionToolUseId: 'tool-1' }, [question], new Map([['request-1', accepted]]));
+    should(patch.settlements.map(record => record.outcome)).deepEqual(['confirmed']);
+    await ledger.append(ID, { ...accepted, outcome: 'confirmed' });
+    const subject = new SessionObservationApplier(storage, ledger, new KeyedSerialExecutor());
+
+    // Act — the patch reaches the writer only now, with the answer key idle again.
+    const written = await subject.apply(ID, patch, NOW);
+
+    // Assert — one settlement, and it is the drive's.
+    should(written).be.false();
+    should(await outcomes()).deepEqual(['accepted', 'confirmed']);
+    should(await ledger.read(ID, 'request-1')).deepEqual({ ...accepted, outcome: 'confirmed' });
+  });
+
+  it('should not lay a stale quarantine over the answer the drive confirmed, nor raise its advisory', async () => {
+    // Arrange — mid-drive, the transcript showed the form advance before the document was stamped, so the
+    // look quarantined the receipt and decided a released advisory. Then the drive confirmed the answer.
+    const storage = await openStorage();
+    const midDrive = {
+      status: 'awaiting_question',
+      pendingQuestion: { toolUseId: 'tool-1', questions: [] },
+    } satisfies Partial<SessionState>;
+    await storage.writeState(ID, { id: ID, turn: 1, ...midDrive });
+    const { ledger, outcomes } = ledgerFor(storage);
+    await ledger.append(ID, accepted);
+    const patch = patchFor(midDrive, [question, released], new Map([['request-1', accepted]]));
+    should(patch.settlements.map(record => record.outcome)).deepEqual(['quarantined']);
+    should(patch.writes).be.true();
+    const answered = { id: ID, status: 'running', turn: 1, lastAnsweredQuestionToolUseId: 'tool-1' } as const;
+    await storage.writeState(ID, answered);
+    await ledger.append(ID, { ...accepted, outcome: 'confirmed' });
+    const subject = new SessionObservationApplier(storage, ledger, new KeyedSerialExecutor());
+
+    // Act
+    const written = await subject.apply(ID, patch, NOW);
+
+    // Assert — the confirmed receipt stays the latest, so a retry of this request replays its answer
+    // instead of being refused as released, and the document is left as the drive wrote it.
+    should(written).be.false();
+    should(await outcomes()).deepEqual(['accepted', 'confirmed']);
+    should(await ledger.read(ID, 'request-1')).deepEqual({ ...accepted, outcome: 'confirmed' });
+    should(await storage.readState(ID)).deepEqual(answered);
+  });
+
+  it('should settle a receipt the ledger still holds open, and decide the document from it', async () => {
+    // Arrange — nothing settled the receipt since the look, so the monitor's settlement is the repair.
+    const storage = await openStorage();
+    await storage.writeState(ID, { id: ID, status: 'awaiting_question', turn: 1 });
+    const { ledger, outcomes } = ledgerFor(storage);
+    await ledger.append(ID, accepted);
+    const patch = patchFor({}, [question, released], new Map([['request-1', accepted]]));
+    const subject = new SessionObservationApplier(storage, ledger, new KeyedSerialExecutor());
+
+    // Act
+    const written = await subject.apply(ID, patch, NOW);
+
+    // Assert
+    should(written).be.true();
+    should(await outcomes()).deepEqual(['accepted', 'quarantined']);
+    should(await storage.readState(ID)).match({
+      status: 'awaiting_user',
+      needsHumanKind: 'structured-answer-released-unconfirmed',
+    });
   });
 });

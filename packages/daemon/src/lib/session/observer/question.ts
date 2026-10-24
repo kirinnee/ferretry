@@ -41,7 +41,8 @@ export interface QuestionPatch {
   readonly projection: StructuredQuestionProjection;
   /** The answer receipts after reconciliation, which the state patch is decided against. */
   readonly records: readonly AnswerOperationRecord[];
-  /** Receipts reconciliation promoted: appended to the ledger before the state is written. */
+  /** Receipts reconciliation promoted: appended to the ledger before the state is written — those of them
+   *  that still stand when it is ({@link questionReceipts}). */
   readonly settlements: readonly AnswerOperationRecord[];
   readonly runtime: ObservedRuntime;
   /** Whether the look implied any state change at all; when not, the document is not rewritten. */
@@ -74,6 +75,44 @@ export function stepQuestion(look: QuestionLook): QuestionPatch | undefined {
   if (!writes && answerEvidence.settlements.length === 0) return undefined;
   return { kind: 'question', projection, records, settlements: answerEvidence.settlements, runtime, writes };
 }
+
+/** A question patch's receipts as they stand against the ledger the writer reads under the answer key. */
+export interface QuestionReceipts {
+  /** The settlements still owed: each one's receipt is still the very `accepted` row the look settled. */
+  readonly settlements: readonly AnswerOperationRecord[];
+  /** The ledger once those are appended: what the document patch is then decided against. */
+  readonly records: readonly AnswerOperationRecord[];
+}
+
+/**
+ * The look's settlements that still stand against the ledger AS IT IS NOW, and the receipts the document
+ * patch is decided against.
+ *
+ * A SETTLEMENT IS A COMPARE-AND-SET on the receipt it settles. A look decides from the receipts it was
+ * handed, and a session worker is handed COPIES, which can be one append behind: it looks between an
+ * answer drive stamping the document and that drive appending its own `confirmed`, and its patch reaches
+ * the writer after the drive has released the answer key. Appended then, it would settle the receipt twice —
+ * a second `confirmed` at best, and at worst a `quarantined` laid over the `confirmed`, which turns the
+ * answer's own retry into `answer_released`. So a settlement stands only while its request's latest
+ * receipt is still the `accepted` row it settles — the same tool, fingerprint and acceptance; otherwise
+ * whoever settled it since held the key with fresher evidence, and that receipt is the one that counts.
+ */
+export function questionReceipts(
+  patch: Pick<QuestionPatch, 'settlements'>,
+  ledger: ReadonlyMap<string, AnswerOperationRecord>,
+): QuestionReceipts {
+  const settlements = patch.settlements.filter(settlement => settles(ledger.get(settlement.requestId), settlement));
+  const records = new Map(ledger);
+  for (const settlement of settlements) records.set(settlement.requestId, settlement);
+  return { settlements, records: [...records.values()] };
+}
+
+/** Whether `settlement` settles `current`: the open receipt it was decided from, and not a later one. */
+const settles = (current: AnswerOperationRecord | undefined, settlement: AnswerOperationRecord): boolean =>
+  current?.outcome === 'accepted' &&
+  current.toolUseId === settlement.toolUseId &&
+  current.fingerprint === settlement.fingerprint &&
+  current.acceptedAt === settlement.acceptedAt;
 
 /** The fields a question patch may remove from the document — and only when the projection names them. */
 type RemovableQuestionField = 'pendingQuestion' | 'needsHumanKind' | 'needsHuman';
