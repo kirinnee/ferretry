@@ -52,6 +52,28 @@ browser's per-machine push worker places the path under that machine, so it open
 `/d/<daemonId>/session/<id>?attention=A3` (`packages/pwa/src/lib/push-scope.ts`). It reuses an open app
 window when there is one, whichever worker controls it, and never a sign-in popup.
 
+Every push names a page, and the worker opens a page even when one does not:
+
+- **`fy attention notify`** opens the conversation it came from: `/session/<id>`
+  (`sessionNotificationPath`).
+- **A push that names no page it may open** opens the conversation its `sessionId` names, on its
+  machine. A daemon older than #768 sent every push with `url: '/'`, an ask included. A push about no
+  conversation (a new device, enrolment, a passkey) opens that machine's sessions.
+- **Which window.** An app window wins over the landing page, which has no router. Among app windows,
+  the one the reader is looking at wins.
+- **How the window gets there.** The worker brings the window forward and asks the app to route there
+  in place (`packages/pwa/src/lib/notification-open.ts`). The app's entry point listens before React
+  mounts, so a tap that lands while the app is still starting is routed once it is up. It moves the app
+  to the tapped machine, and the conversation opens at the item, again on every new tap.
+- **A window that never answers** (an app too old for the message) cannot be navigated by a machine's
+  worker, which controls no page. So the worker opens the conversation in a window of its own.
+- **Old workers.** The browser never re-checks a machine's push worker on its own, because no page loads
+  under `/push/<daemonId>/`. So the app asks for each machine's worker update at every start
+  (`containerPushEnrolment.reconcile`). Without that, a phone enrolled before a fix kept the old tap.
+
+`packages/pwa/tests/integration/notification-open.test.ts` proves each case in Chromium, through the
+built worker.
+
 Every notification carries the Ferretry mark: `icons/icon-192.png` as its icon, and `icons/badge-96.png`
 as its badge. The badge is the mono logomark on transparent, because Android paints a badge from its
 alpha alone. iOS has no badge and ignores it.
@@ -64,7 +86,7 @@ open with the daemon's new-device alert title.
 | Path                                           | Where                                    | Decision                                                                                                                                                         |
 | ---------------------------------------------- | ---------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | An Attention item is created                   | daemon `NotificationService`             | **The** notification. Once per item (the key is session + item).                                                                                                 |
-| `fy attention notify` (push without an item)   | daemon `POST …/notify`                   | Kept for compatibility. It is explicit and audited, and the prompt does not advertise it.                                                                        |
+| `fy attention notify` (push without an item)   | daemon `POST …/notify`                   | Kept for compatibility. It is explicit and audited, and the prompt does not advertise it. A tap opens the conversation it came from.                             |
 | Enrolment confirmation                         | daemon `PushService.register`            | Kept. One push, only to the browser that just enrolled.                                                                                                          |
 | A new device was paired                        | daemon audit log                         | Kept. This is a security alert.                                                                                                                                  |
 | A session starts, finishes or idles            | daemon                                   | Never pushed (unchanged).                                                                                                                                        |

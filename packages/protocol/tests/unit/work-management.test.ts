@@ -1246,6 +1246,18 @@ describe('attention schemas', () => {
   });
 });
 
+describe('where a push opens, relative to the machine’s own pages', () => {
+  it('names the conversation, and the item when there is one, escaping both', () => {
+    // Arrange / Act
+    const plain = attention.sessionNotificationPath('session 1/x');
+    const atItem = attention.attentionNotificationPath('session 1/x', 'A3');
+
+    // Assert
+    should(plain).equal('/session/session%201%2Fx');
+    should(atItem).equal('/session/session%201%2Fx?attention=A3');
+  });
+});
+
 describe('pin schemas', () => {
   it('should round-trip every public pin schema', () => {
     // Arrange

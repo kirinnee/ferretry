@@ -281,9 +281,13 @@ export type SessionAttentionSummary = z.infer<typeof SessionAttentionSummarySche
 export const ATTENTION_LINK_PARAMETER = 'attention';
 
 /**
- * Where an Attention notification opens, RELATIVE TO THE MACHINE'S OWN PAGES: the daemon names the
- * session and the item, and the browser's per-machine push worker puts it under that machine — the
- * daemon never names an origin or the browser's address for itself (`packages/pwa/src/lib/push-scope.ts`).
+ * Where a push about a conversation opens, RELATIVE TO THE MACHINE'S OWN PAGES: the daemon names the
+ * session, and the browser's per-machine push worker puts it under that machine — the daemon never
+ * names an origin or the browser's address for itself (`packages/pwa/src/lib/push-scope.ts`). A push
+ * with no item to point at (`fy attention notify`) opens here.
  */
+export const sessionNotificationPath = (sessionId: string): string => `/session/${encodeURIComponent(sessionId)}`;
+
+/** Where an Attention notification opens: its conversation, AT the item (`?attention=A3`). */
 export const attentionNotificationPath = (sessionId: string, id: AttentionId): string =>
-  `/session/${encodeURIComponent(sessionId)}?${ATTENTION_LINK_PARAMETER}=${encodeURIComponent(id)}`;
+  `${sessionNotificationPath(sessionId)}?${ATTENTION_LINK_PARAMETER}=${encodeURIComponent(id)}`;

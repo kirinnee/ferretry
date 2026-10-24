@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'bun:test';
 import {
+  attachNotificationOpens,
   NOTIFICATION_OPEN_ACK,
   NOTIFICATION_OPEN_ACK_MS,
   NOTIFICATION_OPEN_MESSAGE,
   type NotificationOpenEnvironment,
+  NotificationOpenInbox,
   type NotificationWindow,
   notificationOpenMessage,
   notificationOpenPath,
@@ -67,7 +69,15 @@ interface FakePort {
   closed: number;
 }
 
-const harness = (postMessage?: (message: unknown, transfer: Transferable[]) => void) => {
+interface HarnessOptions {
+  readonly postMessage?: (message: unknown, transfer: Transferable[]) => void;
+  /** The window refuses to come forward (the tap's gesture has lapsed). */
+  readonly focusRefused?: boolean;
+  /** The window refuses a navigate: the worker does not control it, as a machine's push worker never does. */
+  readonly navigateRefused?: boolean;
+}
+
+const harness = ({ postMessage, focusRefused = false, navigateRefused = false }: HarnessOptions = {}) => {
   const calls: string[] = [];
   const port1: FakePort = { onmessage: null, closed: 0 };
   const port2 = {};
@@ -97,9 +107,11 @@ const harness = (postMessage?: (message: unknown, transfer: Transferable[]) => v
   const window: NotificationWindow = {
     focus: async () => {
       calls.push('focus');
+      if (focusRefused) throw new Error('Not allowed to focus a window.');
     },
     navigate: async (url: string) => {
       calls.push(`navigate:${url}`);
+      if (navigateRefused) throw new TypeError("This service worker is not the client's active service worker.");
     },
     postMessage: (message, transfer) => {
       calls.push('post');
@@ -107,7 +119,22 @@ const harness = (postMessage?: (message: unknown, transfer: Transferable[]) => v
       posted.push({ message, transfer });
     },
   };
-  return { calls, cleared, delays, environment, port1, port2, posted, window, fire: () => timerCallback?.() };
+  const openWindow = async (url: string): Promise<unknown> => {
+    calls.push(`open:${url}`);
+    return null;
+  };
+  return {
+    calls,
+    cleared,
+    delays,
+    environment,
+    openWindow,
+    port1,
+    port2,
+    posted,
+    window,
+    fire: () => timerCallback?.(),
+  };
 };
 
 const tick = async (): Promise<void> => {
@@ -121,7 +148,7 @@ describe('openInWindow', () => {
     const subject = harness();
 
     // Act
-    const pending = openInWindow(subject.window, '/x', subject.environment);
+    const pending = openInWindow(subject.window, '/x', subject.openWindow, subject.environment);
     await tick();
     subject.port1.onmessage?.({ data: NOTIFICATION_OPEN_ACK });
     const actual = await pending;
@@ -142,7 +169,7 @@ describe('openInWindow', () => {
     const subject = harness();
 
     // Act
-    const pending = openInWindow(subject.window, '/x', subject.environment);
+    const pending = openInWindow(subject.window, '/x', subject.openWindow, subject.environment);
     await tick();
     subject.port1.onmessage?.({ data: 'something else' });
     const earlyCalls = [...subject.calls];
@@ -158,12 +185,14 @@ describe('openInWindow', () => {
 
   it('navigates when posting to the window throws', async () => {
     // Arrange
-    const subject = harness(() => {
-      throw new Error('detached');
+    const subject = harness({
+      postMessage: () => {
+        throw new Error('detached');
+      },
     });
 
     // Act
-    const actual = await openInWindow(subject.window, '/y', subject.environment);
+    const actual = await openInWindow(subject.window, '/y', subject.openWindow, subject.environment);
 
     // Assert
     expect(actual).toBe('navigated');
@@ -171,6 +200,35 @@ describe('openInWindow', () => {
     expect(subject.cleared).toEqual(['timer-1']);
   });
 
+  it('opens the page in a window of its own when the silent window refuses a navigate', async () => {
+    // Arrange: a machine's push worker controls no page, so the browser refuses its navigate.
+    const subject = harness({ navigateRefused: true });
+
+    // Act
+    const pending = openInWindow(subject.window, '/x', subject.openWindow, subject.environment);
+    await tick();
+    subject.fire();
+    const actual = await pending;
+
+    // Assert
+    expect(actual).toBe('opened');
+    expect(subject.calls).toEqual(['focus', 'post', 'navigate:/x', 'open:/x']);
+  });
+
+  it('still routes the page when the browser refuses to bring the window forward', async () => {
+    // Arrange
+    const subject = harness({ focusRefused: true });
+
+    // Act
+    const pending = openInWindow(subject.window, '/x', subject.openWindow, subject.environment);
+    await tick();
+    subject.port1.onmessage?.({ data: NOTIFICATION_OPEN_ACK });
+    const actual = await pending;
+
+    // Assert
+    expect(actual).toBe('routed');
+    expect(subject.calls).toEqual(['focus', 'post']);
+  });
   it('uses a real channel and timers by default, and routes when the window replies on the port', async () => {
     // Arrange
     const calls: string[] = [];
@@ -188,7 +246,7 @@ describe('openInWindow', () => {
     };
 
     // Act
-    const actual = await openInWindow(window, '/z');
+    const actual = await openInWindow(window, '/z', async () => calls.push('open'));
 
     // Assert
     expect(actual).toBe('routed');
@@ -206,5 +264,101 @@ describe('notificationWindow', () => {
     expect(notificationWindow([popup, scope, foreign, app], ORIGIN)).toBe(app);
     expect(notificationWindow([popup, scope, foreign, { url: 'not a url' }], ORIGIN)).toBeUndefined();
     expect(notificationWindow([], ORIGIN)).toBeUndefined();
+  });
+
+  it('prefers an app window over the landing page, then the one the reader is looking at', () => {
+    const landing = { url: `${ORIGIN}/`, focused: true, visibilityState: 'visible' };
+    const behind = { url: `${ORIGIN}/d/a/session/s1`, focused: false, visibilityState: 'hidden' };
+    const visible = { url: `${ORIGIN}/app/`, focused: false, visibilityState: 'visible' };
+    const focused = { url: `${ORIGIN}/d/b`, focused: true, visibilityState: 'visible' };
+
+    // The landing page has no router to take an open, even when it is the window in front.
+    expect(notificationWindow([landing, behind], ORIGIN)).toBe(behind);
+    expect(notificationWindow([landing, behind, visible], ORIGIN)).toBe(visible);
+    expect(notificationWindow([behind, visible, focused], ORIGIN)).toBe(focused);
+    // Ties keep the browser's own order: most recently focused first.
+    expect(notificationWindow([behind, { ...behind, url: `${ORIGIN}/setup` }], ORIGIN)).toBe(behind);
+    // With no app window at all, the landing page is still better than a second window.
+    expect(notificationWindow([landing], ORIGIN)).toBe(landing);
+  });
+});
+
+describe('NotificationOpenInbox', () => {
+  const event = (data: unknown, acks: unknown[] = []) => ({
+    data,
+    ports: [{ postMessage: (value: unknown) => acks.push(value) }] as unknown as readonly MessagePort[],
+  });
+
+  it('acknowledges an open at once and holds it until the router subscribes, keeping only the latest', () => {
+    // Arrange
+    const inbox = new NotificationOpenInbox(ORIGIN);
+    const acks: unknown[] = [];
+    const routed: string[] = [];
+
+    // Act
+    inbox.receive(event(notificationOpenMessage('/d/a/session/s1'), acks));
+    inbox.receive(event(notificationOpenMessage('/d/b/session/s2?attention=A3'), acks));
+    inbox.subscribe(path => routed.push(path));
+
+    // Assert
+    expect(acks).toEqual([NOTIFICATION_OPEN_ACK, NOTIFICATION_OPEN_ACK]);
+    expect(routed).toEqual(['/d/b/session/s2?attention=A3']);
+  });
+
+  it('routes through the latest subscriber, and holds again once it has gone', () => {
+    // Arrange
+    const inbox = new NotificationOpenInbox(ORIGIN);
+    const first: string[] = [];
+    const second: string[] = [];
+    const stopFirst = inbox.subscribe(path => first.push(path));
+    const stopSecond = inbox.subscribe(path => second.push(path));
+
+    // Act
+    stopFirst();
+    inbox.receive(event(notificationOpenMessage('/one')));
+    stopSecond();
+    inbox.receive(event(notificationOpenMessage('/two')));
+    const third: string[] = [];
+    inbox.subscribe(path => third.push(path));
+
+    // Assert
+    expect(first).toEqual([]);
+    expect(second).toEqual(['/one']);
+    expect(third).toEqual(['/two']);
+  });
+
+  it('ignores anything that is not an open on this site, and acknowledges none of it', () => {
+    // Arrange
+    const inbox = new NotificationOpenInbox(ORIGIN);
+    const acks: unknown[] = [];
+    const routed: string[] = [];
+    inbox.subscribe(path => routed.push(path));
+
+    // Act
+    inbox.receive(event({ type: 'fy-release-outcome' }, acks));
+    inbox.receive(event(notificationOpenMessage('https://evil.test/x'), acks));
+    inbox.receive({ data: notificationOpenMessage('/no-port'), ports: [] });
+
+    // Assert
+    expect(acks).toEqual([]);
+    expect(routed).toEqual(['/no-port']);
+  });
+
+  it('listens on the source it is attached to, from the moment it is attached', () => {
+    // Arrange
+    const listeners: ((event: MessageEvent) => void)[] = [];
+    const routed: string[] = [];
+
+    // Act
+    const inbox = attachNotificationOpens(new NotificationOpenInbox(ORIGIN), {
+      addEventListener: (_type, listener) => listeners.push(listener),
+    });
+    for (const listener of listeners) listener(event(notificationOpenMessage('/early')) as unknown as MessageEvent);
+    inbox.subscribe(path => routed.push(path));
+
+    // Assert
+    expect(listeners).toHaveLength(1);
+    expect(routed).toEqual(['/early']);
+    expect(attachNotificationOpens(new NotificationOpenInbox(ORIGIN), null)).toBeInstanceOf(NotificationOpenInbox);
   });
 });

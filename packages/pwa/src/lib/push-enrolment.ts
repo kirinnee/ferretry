@@ -477,6 +477,8 @@ interface RegistrationShape extends MachinePushRegistrationLike {
   readonly active: WorkerStateLike | null;
   readonly installing: WorkerStateLike | null;
   readonly waiting: WorkerStateLike | null;
+  /** Asks the browser to re-fetch the worker now; absent where the browser has no such call. */
+  update?(): Promise<unknown>;
 }
 
 const isRegistration = (value: unknown): value is RegistrationShape =>
@@ -523,8 +525,15 @@ export interface PairedPushMachine {
 /** {@link PushEnrolment} over a real service-worker container, plus the reconcile the app runs. */
 export interface ContainerPushEnrolment extends PushEnrolment {
   /**
-   * Drops the push registration of every daemon this browser is no longer paired with, and re-labels
-   * one whose label the reader changed. Best effort: a failure here leaves delivery as it was.
+   * Drops the push registration of every daemon this browser is no longer paired with, re-labels one
+   * whose label the reader changed, and asks the browser to bring every other one up to the app's
+   * current worker. Best effort: a failure here leaves delivery as it was.
+   *
+   * WHY THE UPDATE. A browser re-checks a worker when a page under its scope loads, or a day after its
+   * last check, and NO page ever loads under `/push/<daemonId>/`. So a machine's push worker kept the
+   * code it was enrolled with — the tap that opened a machine's session list in a second window, long
+   * after the app itself had been fixed. A machine's worker controls no page, so the new one takes over
+   * as soon as the old one is idle.
    */
   readonly reconcile: (paired: readonly PairedPushMachine[]) => Promise<void>;
 }
@@ -563,6 +572,9 @@ export const containerPushEnrolment = (deps: ContainerPushEnrolmentDeps): Contai
             await registration.unregister();
           } else if (label !== machine.label) {
             await register(machine.daemonId as DaemonId);
+          } else {
+            // Not awaited: one conditional request per machine, and none of them holds up the rest.
+            void registration.update?.().catch(() => undefined);
           }
         }
       } catch {

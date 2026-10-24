@@ -37,24 +37,31 @@
  * dialog. So the listener is attached HERE, before React mounts, and the store
  * that holds the event is handed to the app through context
  * (`lib/install-prompt.ts`, `hooks/use-install-prompt.ts`).
+ *
+ * The notification tap's inbox is attached here for the same reason: a tap that wakes or opens this
+ * window posts its "open this conversation" before the app's router has mounted — the router waits for
+ * the store — and a page with nobody listening left the reader where they were
+ * (`lib/notification-open.ts`, `hooks/use-notification-open.ts`).
  */
 
+import sherpaRuntimeUrl from 'sherpa-runtime-wasm?url';
 import voskRuntimeUrl from '@lichess-org/vosk-browser/dist/vosk.wasm?url';
 import runtimeUrl from 'onnxruntime-web/ort-wasm-simd-threaded.wasm?url';
 import { StrictMode } from 'react';
-import sherpaRuntimeUrl from 'sherpa-runtime-wasm?url';
 import { createRoot } from 'react-dom/client';
 import { App } from './App.tsx';
 import { DevicePermissionsContext } from './hooks/use-device-permissions.ts';
 import { InstallPromptContext } from './hooks/use-install-prompt.ts';
 import { LocationShareContext } from './hooks/use-location-share.ts';
+import { NotificationOpenContext } from './hooks/use-notification-open.ts';
 import { windowPermissionsHost } from './lib/device-permissions.ts';
 import { createBrowserInstallPrompt } from './lib/install-prompt.ts';
 import { browserLocationShareHost } from './lib/location-share.ts';
+import { attachNotificationOpens, NotificationOpenInbox } from './lib/notification-open.ts';
 import workerUrl from './worker/parakeet-worker.ts?worker&url';
-import whisperWorkerUrl from './worker/whisper-worker.ts?worker&url';
 import sherpaWorkerUrl from './worker/sherpa-worker.ts?worker&url';
 import voskWorkerUrl from './worker/vosk-worker.ts?worker&url';
+import whisperWorkerUrl from './worker/whisper-worker.ts?worker&url';
 import './styles/index.css';
 
 const host = document.getElementById('root');
@@ -66,22 +73,29 @@ if (!host) throw new Error('missing #root — the host document is not this app�
 const installPrompt = createBrowserInstallPrompt(window);
 const devicePermissions = windowPermissionsHost(window as unknown as Parameters<typeof windowPermissionsHost>[0]);
 const locationShare = browserLocationShareHost(navigator);
+// A notification tap can reach this page before the app's router exists; the inbox holds it until then.
+const notificationOpens = attachNotificationOpens(
+  new NotificationOpenInbox(window.location.origin),
+  'serviceWorker' in navigator ? navigator.serviceWorker : null,
+);
 
 createRoot(host).render(
   <StrictMode>
     <DevicePermissionsContext.Provider value={devicePermissions}>
       <InstallPromptContext.Provider value={installPrompt}>
         <LocationShareContext.Provider value={locationShare}>
-          <App
-            speechAssets={{
-              workerUrl,
-              runtimeUrl,
-              sherpa: { workerUrl: sherpaWorkerUrl, runtimeUrl: sherpaRuntimeUrl },
-              vosk: { workerUrl: voskWorkerUrl, runtimeUrl: voskRuntimeUrl },
-              // Whisper runs on the same WebAssembly-only build (`worker/whisper-worker.ts`).
-              whisper: { workerUrl: whisperWorkerUrl, runtimeUrl },
-            }}
-          />
+          <NotificationOpenContext.Provider value={notificationOpens}>
+            <App
+              speechAssets={{
+                workerUrl,
+                runtimeUrl,
+                sherpa: { workerUrl: sherpaWorkerUrl, runtimeUrl: sherpaRuntimeUrl },
+                vosk: { workerUrl: voskWorkerUrl, runtimeUrl: voskRuntimeUrl },
+                // Whisper runs on the same WebAssembly-only build (`worker/whisper-worker.ts`).
+                whisper: { workerUrl: whisperWorkerUrl, runtimeUrl },
+              }}
+            />
+          </NotificationOpenContext.Provider>
         </LocationShareContext.Provider>
       </InstallPromptContext.Provider>
     </DevicePermissionsContext.Provider>

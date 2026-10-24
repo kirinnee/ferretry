@@ -77,6 +77,8 @@ interface NotificationEvent extends ExtendableEvent {
 }
 interface WindowClientLike {
   readonly url: string;
+  readonly focused: boolean;
+  readonly visibilityState: string;
   focus(): Promise<unknown>;
   navigate(url: string): Promise<unknown>;
   postMessage(message: unknown, transfer: Transferable[]): void;
@@ -218,17 +220,24 @@ worker.addEventListener('push', event => {
 
 worker.addEventListener('notificationclick', event => {
   event.notification.close();
-  const data = event.notification.data as { readonly url?: unknown } | undefined;
+  const data = event.notification.data as { readonly url?: unknown; readonly sessionId?: unknown } | undefined;
   // Only this site's own pages, and only this machine's: a notification can never open another origin,
-  // and one machine's notification can never open another machine's pages.
-  const url = notificationUrl(data?.url, origin, machine);
+  // and one machine's notification can never open another machine's pages. One that names no page it
+  // may open still opens the conversation it is about, on this machine.
+  const url = notificationUrl(
+    data?.url,
+    origin,
+    machine,
+    typeof data?.sessionId === 'string' ? data.sessionId : undefined,
+  );
+  const openWindow = (target: string): Promise<unknown> => worker.clients.openWindow(target);
   event.waitUntil(
     worker.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(async windows => {
       const open = notificationWindow(windows, origin);
-      if (open === undefined) return await worker.clients.openWindow(url);
+      if (open === undefined) return await openWindow(url);
       // Routed by the page itself when it answers (`lib/notification-open.ts`): a navigate here would
       // reload the whole app and make Back cross a document boundary.
-      return await openInWindow(open, url);
+      return await openInWindow(open, url, openWindow);
     }),
   );
 });

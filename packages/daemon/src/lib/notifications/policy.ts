@@ -7,6 +7,7 @@ import {
   MAX_NOTIFICATION_TITLE_LENGTH,
   type PushNotificationPayload,
   PushNotificationPayloadSchema,
+  sessionNotificationPath,
 } from '@ferretry/protocol';
 import type { DirectNotificationRequestedRecord, NotificationLedgerEntry, NotificationResult } from './types.ts';
 
@@ -128,6 +129,9 @@ export function decideNotificationReplay(
  * THE TITLE ALWAYS SAYS WHICH AGENT SENT IT. An agent chooses its own words, so its title is printed
  * after `Agent “name”:` and can never open with the daemon's own new-device alert title (see
  * `DEVICE_PAIRED_TITLE`) — nor can its fixed eventKey and tag carry that alert's reserved prefix.
+ *
+ * A tap opens the agent's conversation (`sessionNotificationPath`), placed under the machine by the
+ * browser's push worker — it used to open the app root, which is a machine's session list.
  */
 export function directNotificationPayload(
   sessionId: string,
@@ -142,7 +146,7 @@ export function directNotificationPayload(
     title: `Agent “${sessionName}”${request.title === undefined ? '' : `: ${request.title}`}`,
     body: request.body,
     tag: `notify-${sessionId}`,
-    url: '/',
+    url: sessionNotificationPath(sessionId),
     count: 1,
   }) as SessionNotificationPayload;
 }

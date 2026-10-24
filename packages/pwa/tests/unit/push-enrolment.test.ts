@@ -641,9 +641,11 @@ interface FakeRegistration {
   waiting: FakeWorker | null;
   unsubscribed: number;
   unregistered: number;
+  updated: number;
   hasSubscription: boolean;
   pushManager: PushRegistrationLike['pushManager'];
   unregister(): Promise<boolean>;
+  update?(): Promise<unknown>;
 }
 
 const ORIGIN = 'https://app.example.test';
@@ -656,6 +658,7 @@ const fakeRegistration = (scope: string, active: FakeWorker | null, hasSubscript
     waiting: null,
     unsubscribed: 0,
     unregistered: 0,
+    updated: 0,
     hasSubscription,
     pushManager: {
       getSubscription: async () =>
@@ -673,6 +676,10 @@ const fakeRegistration = (scope: string, active: FakeWorker | null, hasSubscript
     unregister: async () => {
       registration.unregistered += 1;
       return true;
+    },
+    update: async () => {
+      registration.updated += 1;
+      return registration;
     },
   };
   return registration;
@@ -770,6 +777,25 @@ describe('containerPushEnrolment', () => {
     should([gone.unsubscribed, gone.unregistered]).deepEqual([1, 1]);
     should([silent.unsubscribed, silent.unregistered]).deepEqual([0, 1]);
     should([kept.unregistered, app.unregistered]).deepEqual([0, 0]);
+    // The kept machine's worker is brought up to the app's current one; nothing else is asked to.
+    should([kept.updated, renamed.updated, app.updated]).deepEqual([1, 0, 0]);
+  });
+
+  it('keeps reconciling past a worker update the browser refuses, or a browser with no update at all', async () => {
+    const refused = fakeRegistration('/push/daemon-a/', fakeWorker(`${ORIGIN}/sw.verified.js?machine=Work%20laptop`));
+    refused.update = async () => {
+      throw new Error('offline');
+    };
+    const ancient = fakeRegistration('/push/daemon-b/', fakeWorker(`${ORIGIN}/sw.verified.js?machine=Studio`));
+    delete ancient.update;
+    const gone = fakeRegistration('/push/daemon-c/', fakeWorker(`${ORIGIN}/sw.verified.js`));
+
+    await containerFor([refused, ancient, gone]).enrolment.reconcile([
+      { daemonId: daemonA.daemonId, label: 'Work laptop' },
+      { daemonId: daemonB.daemonId, label: 'Studio' },
+    ]);
+
+    should(gone.unregistered).equal(1);
   });
 
   it('swallows a reconcile the browser refuses', async () => {

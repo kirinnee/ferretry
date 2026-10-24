@@ -190,6 +190,7 @@ import {
   daemonSettingsPath,
   daemonWardenPath,
   type PageRoute,
+  parseRoute,
   routePageKey,
   setupPath,
 } from './lib/pages/routes.ts';
@@ -992,7 +993,7 @@ function SessionRoute({ connection, scope }: SessionChatPageProps) {
       ),
     [daemonFetch, store.carrier, store.connectionHealth],
   );
-  const { navigate, back } = useRouter();
+  const { navigate, back, entryKey } = useRouter();
   const layout = useLayoutMode();
   const dictation = useSttSettings(store.stt);
   // Actions › Warden: offered only where this caller's grants open the Warden (read once per machine).
@@ -1475,6 +1476,8 @@ function SessionRoute({ connection, scope }: SessionChatPageProps) {
           attention={attention}
           // A notification tap or an unread row names the item it opens at (`?attention=A3`).
           attentionTarget={attentionTargetFromSearch(window.location.search)}
+          // Each navigation that names one re-targets it, so tapping the same item's notification again rings it again.
+          attentionTargetKey={entryKey}
           chatWidth={controls.chatWidth}
           composerEnterKey={controls.composerEnterKey}
           composerPhoneEnterKey={controls.composerPhoneEnterKey}
@@ -2137,6 +2140,9 @@ export function AppShell() {
   });
   useEffect(() => {
     if (shortcut === null) return;
+    // A notification tap the app was started for (`useNotificationOpen`, whose effect runs first) has
+    // already moved it off the picker: that is where the reader asked to go, and it wins.
+    if (parseRoute(window.location.pathname).kind !== 'connection-picker') return;
     navigate(daemonSessionsPath(shortcut), { replace: true });
   }, [navigate, shortcut]);
   const effectiveRoute: PageRoute = pageRoute.kind === 'connection-picker' && setupJourney ? SETUP_ROUTE : pageRoute;

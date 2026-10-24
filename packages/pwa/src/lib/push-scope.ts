@@ -26,7 +26,7 @@
 import type { PushNotificationPayload } from '@ferretry/protocol';
 import type { DaemonId } from './daemon-connection.ts';
 import { notificationBrand } from './notify.ts';
-import { daemonSessionsPath } from './pages/routes.ts';
+import { daemonSessionPath, daemonSessionsPath } from './pages/routes.ts';
 
 /** The path every per-machine push registration lives under. Never a page the app serves. */
 export const PUSH_SCOPE_ROOT = '/push/';
@@ -90,7 +90,7 @@ export const machineNotification = (
   ...payload,
   title: `${machine.label} · ${payload.title}`,
   tag: `fy-push:${encodeURIComponent(machine.daemonId)}:${payload.tag}`,
-  url: notificationUrl(payload.url, origin, machine),
+  url: notificationUrl(payload.url, origin, machine, 'sessionId' in payload ? payload.sessionId : undefined),
 });
 
 /** What a push that reached the app-wide registration says it is: from no machine this browser can name. */
@@ -114,20 +114,39 @@ export const unverifiedNotification = (payload: PushNotificationPayload, origin:
 
 /**
  * Where a notification click may go (docs/cross-daemon.md §4a, §4c): only this site, and — for a
- * machine's own worker — only that machine's pages. Anything else opens that machine's sessions, or
- * the app itself when the notification belongs to no machine.
+ * machine's own worker — only that machine's pages. Anything else opens that machine's own copy of
+ * the conversation the push is about (`sessionId`), else its sessions, else — when the notification
+ * belongs to no machine — the app itself.
  *
  * A daemon names a conversation RELATIVE TO ITS OWN PAGES — `/session/<id>?attention=A3`
  * (`attentionNotificationPath`), since it never knows which name this browser files it under — so a
  * machine's worker reads `/session/…` as under that machine. The app-wide worker knows no machine, and
  * such a path falls through to the app itself.
+ *
+ * THE `sessionId` FALLBACK IS FOR DAEMONS THAT NAME NO PAGE. A daemon older than #768 sent every push —
+ * an ask included — with `url: '/'`, and `fy attention notify` still did: the tap opened the machine's
+ * session list and left the reader to find the conversation. The payload's own `sessionId` says which
+ * one it is about, so the tap opens it there.
  */
-export const notificationUrl = (raw: unknown, origin: string, machine: PushMachine | null): string => {
-  const fallback = new URL(machine === null ? '/app/' : machinePath(machine), origin);
+export const notificationUrl = (
+  raw: unknown,
+  origin: string,
+  machine: PushMachine | null,
+  sessionId?: string,
+): string => {
+  const fallback = new URL(fallbackPath(machine, sessionId), origin);
   const target = typeof raw === 'string' ? URL.parse(machineRelative(raw, machine), origin) : null;
   if (target === null || target.origin !== origin) return fallback.href;
+  if (machine === null && target.pathname.startsWith(SESSION_RELATIVE)) return fallback.href;
   if (machine !== null && !withinMachine(target.pathname, machine)) return fallback.href;
   return target.href;
+};
+
+/** Where a tap goes when the push named no page this worker may open. */
+const fallbackPath = (machine: PushMachine | null, sessionId: string | undefined): string => {
+  if (machine === null) return '/app/';
+  if (sessionId === undefined || sessionId.trim() === '') return machinePath(machine);
+  return daemonSessionPath(machine.daemonId as DaemonId, sessionId);
 };
 
 /** The page prefix a daemon names its own conversations by, relative to its machine's pages. */

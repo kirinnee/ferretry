@@ -1,6 +1,14 @@
 import { afterEach, describe, expect, it } from 'bun:test';
-import { type NotificationOpenSource, useNotificationOpen } from '../../src/hooks/use-notification-open.ts';
-import { NOTIFICATION_OPEN_ACK, NOTIFICATION_OPEN_MESSAGE } from '../../src/lib/notification-open.ts';
+import {
+  NotificationOpenContext,
+  type NotificationOpenSource,
+  useNotificationOpen,
+} from '../../src/hooks/use-notification-open.ts';
+import {
+  NOTIFICATION_OPEN_ACK,
+  NOTIFICATION_OPEN_MESSAGE,
+  NotificationOpenInbox,
+} from '../../src/lib/notification-open.ts';
 import { type Mounted, mount } from '../support/dom.ts';
 
 const ORIGIN = 'https://pwa.example.test';
@@ -101,6 +109,35 @@ describe('useNotificationOpen', () => {
 
     // Assert
     expect(before).toBe(1);
+    expect(listeners.size).toBe(0);
+  });
+
+  it('routes from the entry point’s inbox when one is provided — the open that arrived first included', async () => {
+    // Arrange: a tap reached the page before the app mounted.
+    const inbox = new NotificationOpenInbox(ORIGIN);
+    const acks: unknown[] = [];
+    inbox.receive({
+      data: message('/d/b/session/s2?attention=A3'),
+      ports: [{ postMessage: (value: unknown) => acks.push(value) }] as unknown as readonly MessagePort[],
+    });
+    const { source, listeners } = fakeSource();
+    const navigated: string[] = [];
+
+    // Act
+    mounted = await mount(
+      <NotificationOpenContext.Provider value={inbox}>
+        <Probe source={source} navigate={to => navigated.push(to)} />
+      </NotificationOpenContext.Provider>,
+    );
+    inbox.receive({ data: message('/later'), ports: [] });
+    await mounted.unmount();
+    mounted = null;
+    inbox.receive({ data: message('/after-unmount'), ports: [] });
+
+    // Assert
+    expect(acks).toEqual([NOTIFICATION_OPEN_ACK]);
+    expect(navigated).toEqual(['/d/b/session/s2?attention=A3', '/later']);
+    // The inbox already listens; the hook adds no second listener of its own.
     expect(listeners.size).toBe(0);
   });
 });
