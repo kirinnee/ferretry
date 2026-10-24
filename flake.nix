@@ -35,7 +35,9 @@
             run, and the source of the `Cannot build pre-commit-4.5.1.drv` failures. Those upstream
             tests are not this repository's to run; Hydra runs them. Do not override a package here
             without checking it still substitutes (`nix build --dry-run .#devShells.<system>.ci`
-            must list nothing under "will be built" beyond this flake's own derivations).
+            must list nothing under "will be built" beyond this flake's own derivations). The one
+            pinned leaf, Bun (nix/bun.nix), is one of those: a download and a patchelf, overridden
+            where this flake uses it rather than here, so no nixpkgs package changes hash with it.
           */
           pkgs = import nixpkgs { inherit system; };
           pre-commit-lib = pre-commit-hooks.lib.${system};
@@ -65,6 +67,7 @@
           };
           releasePackages = import ./nix/ferretry.nix {
             inherit pkgs;
+            inherit (devPackages) bun;
             lib = pkgs.lib;
             src = self;
           };

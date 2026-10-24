@@ -1,6 +1,8 @@
 {
   pkgs,
   lib,
+  # nix/bun.nix: the same pinned Bun the dev shells run, never `pkgs.bun`.
+  bun,
   src,
 }:
 let
@@ -15,7 +17,7 @@ let
     version = "0.109.0";
     inherit src;
 
-    nativeBuildInputs = [ pkgs.bun ];
+    nativeBuildInputs = [ bun ];
     outputHashMode = "recursive";
     outputHashAlgo = "sha256";
     outputHash = "sha256-U28VhuWoxrbYeoQi99vwckRx+OuQhzjz48r3oKUEOx0=";
@@ -65,7 +67,7 @@ let
       inherit pname src postInstall;
       version = releaseVersion;
       nativeBuildInputs = [
-        pkgs.bun
+        bun
         pkgs.makeWrapper
       ];
 
