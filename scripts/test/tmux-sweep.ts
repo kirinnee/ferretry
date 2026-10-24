@@ -12,10 +12,13 @@
  * ONLY UNDER THE ROOTS GIVEN. Several runs share one machine, so a sweep that killed every tmux
  * server under `/tmp` would end a sibling run's live journey. Every caller names the roots it owns.
  *
- * Usage: `tmux-sweep.ts [--fail-on-leak] <root>...` — prints one line per server it kills, exits 1
- * with `--fail-on-leak` when it killed any, and 0 otherwise.
+ * Usage: `tmux-sweep.ts [--fail-on-leak] [--exit-status <status>] <root>...` — prints one line per server
+ * it kills, exits 1 with `--fail-on-leak` when it killed any, and 0 otherwise. `--exit-status` is the
+ * test command's own status: one that died on a signal is already red, and its leftovers are reported as
+ * the crash's, not a fixture's.
  */
 import { realpathSync } from 'node:fs';
+import { constants } from 'node:os';
 import { basename, resolve, sep } from 'node:path';
 
 export interface LeakedTmuxServer {
@@ -121,20 +124,59 @@ export function sweepTmuxServers(roots: readonly string[]): readonly LeakedTmuxS
   return servers;
 }
 
+/** The signal a process that exited `status` died on, from a shell's `128 + n` convention; none for a normal exit. */
+export function deathSignal(status: number): string | undefined {
+  if (!Number.isInteger(status) || status <= 128 || status > 128 + 64) return undefined;
+  const number = status - 128;
+  const name = Object.entries(constants.signals).find(([, value]) => value === number)?.[0];
+  return name ?? `signal ${String(number)}`;
+}
+
+/**
+ * What the sweep says about the servers it killed. A run whose test process died on a signal — Bun
+ * crashing, a SIGKILL — never reached its fixtures' teardown, so whatever tmux it left is the crash's
+ * consequence, not a fixture that forgot to clean up: blaming a fixture there sent the reader hunting
+ * a leak that did not exist, past the crash that did.
+ */
+export function sweepVerdict(
+  swept: readonly LeakedTmuxServer[],
+  { failOnLeak, exitStatus }: { readonly failOnLeak: boolean; readonly exitStatus?: number },
+): { readonly lines: readonly string[]; readonly fail: boolean } {
+  const lines = swept.map(server => `🧹 killed leaked tmux server ${String(server.pid)} on ${server.socket}`);
+  if (swept.length === 0) return { lines, fail: false };
+  const signal = exitStatus === undefined ? undefined : deathSignal(exitStatus);
+  if (signal !== undefined) {
+    return {
+      lines: [
+        ...lines,
+        `⚠️ the test process died on ${signal} before its fixtures could tear down, so the sweep ended the ${String(swept.length)} tmux server(s) it left — read the crash above; this is not a fixture leak`,
+      ],
+      fail: false,
+    };
+  }
+  if (!failOnLeak) return { lines, fail: false };
+  return {
+    lines: [
+      ...lines,
+      `❌ the test run left ${String(swept.length)} tmux server(s) running; every fixture must kill its own`,
+    ],
+    fail: true,
+  };
+}
+
 if (import.meta.main) {
   const args = process.argv.slice(2);
   const failOnLeak = args.includes('--fail-on-leak');
-  const roots = args.filter(arg => arg !== '--fail-on-leak');
+  const statusAt = args.indexOf('--exit-status');
+  const exitStatus = statusAt === -1 ? undefined : Number(args[statusAt + 1]);
+  const roots = args.filter(
+    (arg, index) => arg !== '--fail-on-leak' && index !== statusAt && (statusAt === -1 || index !== statusAt + 1),
+  );
   if (roots.length === 0) {
-    console.error('usage: tmux-sweep.ts [--fail-on-leak] <root>...');
+    console.error('usage: tmux-sweep.ts [--fail-on-leak] [--exit-status <status>] <root>...');
     process.exit(2);
   }
-  const swept = sweepTmuxServers(roots);
-  for (const server of swept) console.error(`🧹 killed leaked tmux server ${String(server.pid)} on ${server.socket}`);
-  if (swept.length > 0 && failOnLeak) {
-    console.error(
-      `❌ the test run left ${String(swept.length)} tmux server(s) running; every fixture must kill its own`,
-    );
-    process.exit(1);
-  }
+  const verdict = sweepVerdict(sweepTmuxServers(roots), { failOnLeak, exitStatus });
+  for (const line of verdict.lines) console.error(line);
+  if (verdict.fail) process.exit(1);
 }

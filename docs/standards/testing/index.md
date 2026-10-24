@@ -530,7 +530,9 @@ by name against the host `PATH`. Three rules now hold, and each has a mechanism 
   `scripts/test/swept.sh`, which gives the run its own `TMPDIR`, exports `FERRETRY_TEST=1`, and kills
   — then fails on — any tmux server still running under that directory when the run ends. The e2e
   runner does the same for its run root. Killing is by process (`scripts/test/tmux-sweep.ts`), not by
-  socket, because a leaked server usually outlived the socket file its test deleted. A fixture that
+  socket, because a leaked server usually outlived the socket file its test deleted. A run whose test
+  process died on a signal (a Bun crash) is already red and never reached its teardown, so its
+  leftovers are swept and reported as the crash's, not as a fixture leak. A fixture that
   creates a tmux socket still kills its own server in `afterAll`/`finally`; the sweep is the net, not
   the cleanup.
 

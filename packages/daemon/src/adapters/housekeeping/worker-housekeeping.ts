@@ -36,6 +36,7 @@ import {
   type HostedWorker,
   type WorkerRestartPolicy,
 } from '../runtime/bundled-worker-host.ts';
+import { LoadSafeWorker } from '../runtime/load-safe-worker.ts';
 import type { NodeCodexRolloutIndex } from '../session/transcript/node-codex-rollout-index.ts';
 import { HousekeepingCounters, hostHousekeepingPorts, runHousekeepingJob } from './job-runner.ts';
 
@@ -93,7 +94,7 @@ export interface WorkerHousekeepingJobsOptions {
   readonly now?: () => number;
 }
 
-const spawnBundled = (): HousekeepingWorker => new Worker(bundledWorkerUrl('housekeeping'), { type: 'module' });
+const spawnBundled = (): HousekeepingWorker => new LoadSafeWorker(bundledWorkerUrl('housekeeping'), { type: 'module' });
 
 /** A result from the thread as an answer; a refusal says only the closed failure word. */
 function housekeepingAnswer(response: HousekeepingResponse): HostedAnswer<HousekeepingValue> | undefined {

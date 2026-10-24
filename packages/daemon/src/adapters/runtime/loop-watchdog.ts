@@ -4,6 +4,7 @@ import {
   watchdogShouldFire,
   watchdogSilenceFrom,
 } from '../../lib/runtime/liveness.ts';
+import { LoadSafeWorker } from './load-safe-worker.ts';
 
 /** How many bytes of "what was running" the watchdog can quote. Longer lists are cut, never refused. */
 const LABEL_BYTES = 2_048;
@@ -91,7 +92,7 @@ export class WorkerLoopWatchdog implements LoopWatchdogPort {
     this.#label = new Uint8Array(memory, LABEL_OFFSET, LABEL_BYTES);
     Atomics.store(this.#beat, 0, BigInt(Date.now()));
     const source = URL.createObjectURL(new Blob([watchdogSource()], { type: 'application/javascript' }));
-    this.#worker = new Worker(source);
+    this.#worker = new LoadSafeWorker(source);
     // The thread must never be the reason a finished daemon stays alive.
     this.#worker.unref();
     const start: WatchdogStart = {

@@ -5,6 +5,7 @@ import {
   type PdfDecryptWorkerResponse,
 } from '../../lib/attachments/pdf-decrypt-protocol.ts';
 import { bundledWorkerUrl } from '../runtime/bundled-worker.ts';
+import { LoadSafeWorker } from '../runtime/load-safe-worker.ts';
 
 /** A decryption's answer — never a probe's, which only `probePdfDecryptWorker` asks for. */
 type DecryptAnswer = Exclude<PdfDecryptWorkerResponse, { readonly probe: true }>;
@@ -33,7 +34,7 @@ export async function decryptPdfInMemory(
   password: string,
   { timeoutMs = 20_000, maxBytes = 40 * 1024 * 1024 }: { readonly timeoutMs?: number; readonly maxBytes?: number } = {},
 ): Promise<Uint8Array> {
-  const worker = new Worker(bundledWorkerUrl('pdf-decrypt'), { type: 'module' });
+  const worker = new LoadSafeWorker(bundledWorkerUrl('pdf-decrypt'), { type: 'module' });
   const input = encrypted.slice();
   try {
     return await new Promise<Uint8Array>((resolve, reject) => {
@@ -74,7 +75,7 @@ export async function probePdfDecryptWorker({
 }: { readonly timeoutMs?: number } = {}): Promise<PdfWorkerProbe> {
   let worker: Worker;
   try {
-    worker = new Worker(bundledWorkerUrl('pdf-decrypt'), { type: 'module' });
+    worker = new LoadSafeWorker(bundledWorkerUrl('pdf-decrypt'), { type: 'module' });
   } catch (error) {
     return {
       ready: false,

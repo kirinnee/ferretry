@@ -4,6 +4,7 @@ import { type AnalyticsTranscriptFold, foldAnalyticsTranscript } from '../../lib
 import type { TranscriptHarness } from '../../lib/transcript/types.ts';
 import { bundledWorkerUrl } from '../runtime/bundled-worker.ts';
 import { BundledWorkerHost, type HostedAnswer, type HostedWorker } from '../runtime/bundled-worker-host.ts';
+import { LoadSafeWorker } from '../runtime/load-safe-worker.ts';
 import type { TranscriptFoldRequest, TranscriptFoldResponse } from './transcript-fold-protocol.ts';
 
 /** The part of a Worker this adapter uses, so a test can stand in a thread that misbehaves on cue. */
@@ -17,7 +18,7 @@ export interface WorkerTranscriptFoldsOptions {
   readonly spawn?: () => FoldWorker;
 }
 
-const spawnBundled = (): FoldWorker => new Worker(bundledWorkerUrl('analytics-fold'), { type: 'module' });
+const spawnBundled = (): FoldWorker => new LoadSafeWorker(bundledWorkerUrl('analytics-fold'), { type: 'module' });
 
 /** A fold the worker made, or why it could not; a probe reply answers nothing. */
 function foldAnswer(response: TranscriptFoldResponse): HostedAnswer<AnalyticsTranscriptFold> | undefined {
