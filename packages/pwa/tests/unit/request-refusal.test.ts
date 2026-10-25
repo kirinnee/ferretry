@@ -14,6 +14,11 @@ describe('invalidRequestWords', () => {
     });
   });
 
+  it('says a minimum other than one as a count', () => {
+    const raw = 'the request body is invalid — prompt: Too small: expected string to have >=3 characters';
+    expect(invalidRequestWords(refused(raw), undefined)?.sentence).toBe('The prompt needs at least 3 characters.');
+  });
+
   it('says every issue when several are known', () => {
     const words = invalidRequestWords(
       refused(

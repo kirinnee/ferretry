@@ -56,6 +56,17 @@ describe('useDaemonHealth', () => {
     expect(latest?.kind === 'read' && latest.health.features).toBeUndefined();
   });
 
+  it('reads again when the page comes back to the foreground', async () => {
+    const machine = served(healthOf('4.84.0'));
+    await mounted(alpha, machine.factory);
+    await settleUntil(() => kind() === 'read', 'the health to be read', runAsync);
+    expect(machine.paths).toHaveLength(1);
+    await runAsync(async () => {
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+    await settleUntil(() => machine.paths.length === 2, 'the second read', runAsync);
+  });
+
   it('reads the features a newer machine lists', async () => {
     await mounted(alpha, served(healthOf('4.90.0', [DAEMON_FEATURES.packIdea4000])).factory);
     await settleUntil(() => kind() === 'read', 'the health to be read', runAsync);
