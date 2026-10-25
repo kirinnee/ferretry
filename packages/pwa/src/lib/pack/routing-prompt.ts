@@ -7,6 +7,8 @@
  */
 
 import {
+  DAEMON_FEATURES,
+  LEGACY_MAX_IDEA_CHARS,
   MAX_IDEA_CHARS,
   MAX_ROUGH_PROMPT_CHARS,
   MAX_ROUTING_PROMPT_CHARS,
@@ -15,6 +17,8 @@ import {
   type RoutingPromptView,
 } from '@ferretry/protocol';
 import type { BadgeTone } from '../../shell/primitives.tsx';
+import { type DaemonHealthRead, machineLacks, machineOffers } from '../daemon-health.ts';
+import { UPDATE_MACHINE_WHERE } from '../machine-update-words.ts';
 
 const count = (value: number): string => value.toLocaleString('en-US');
 
@@ -30,13 +34,40 @@ export function routingSourceWords(routing: RoutingPromptView, date: (instant: s
 export const routingCounter = (text: string): string =>
   `${count(text.trim().length)} / ${count(MAX_ROUTING_PROMPT_CHARS)}`;
 
+/**
+ * How much "your idea" may say on THIS machine, and the note that explains a shorter limit.
+ *
+ * The app ships before the daemon, so the raised 4,000 is only offered once the machine lists
+ * `pack.idea.4000`; until then the field keeps the 500 the machine still refuses past. The note is said
+ * only when the machine ANSWERED and lacks the feature — a read still going, or one that failed, keeps
+ * the shorter limit quietly rather than telling an owner to update a machine it could not question.
+ */
+export interface IdeaLimit {
+  readonly max: number;
+  readonly updateNote: string | null;
+}
+
+/** The limit when nothing gates it: the one constant the route, the CLI and the app share. */
+export const FULL_IDEA_LIMIT: IdeaLimit = { max: MAX_IDEA_CHARS, updateNote: null };
+
+export function ideaLimitFor(machine: DaemonHealthRead): IdeaLimit {
+  if (machineOffers(machine, DAEMON_FEATURES.packIdea4000)) return FULL_IDEA_LIMIT;
+  return {
+    max: LEGACY_MAX_IDEA_CHARS,
+    updateNote: machineLacks(machine, DAEMON_FEATURES.packIdea4000)
+      ? `This machine needs an update for ideas longer than ${count(LEGACY_MAX_IDEA_CHARS)} characters — ${UPDATE_MACHINE_WHERE}.`
+      : null,
+  };
+}
+
 /** The idea field's counter: characters typed against what Write it for me takes. */
-export const ideaCounter = (text: string): string => `${count(text.length)} / ${count(MAX_IDEA_CHARS)}`;
+export const ideaCounter = (text: string, limit: IdeaLimit = FULL_IDEA_LIMIT): string =>
+  `${count(text.length)} / ${count(limit.max)}`;
 
 /** How full the idea field is: `near` from nine tenths of the limit, `full` at it. */
-export function ideaFill(text: string): 'ok' | 'near' | 'full' {
-  if (text.length >= MAX_IDEA_CHARS) return 'full';
-  return text.length >= MAX_IDEA_CHARS * 0.9 ? 'near' : 'ok';
+export function ideaFill(text: string, limit: IdeaLimit = FULL_IDEA_LIMIT): 'ok' | 'near' | 'full' {
+  if (text.length >= limit.max) return 'full';
+  return text.length >= limit.max * 0.9 ? 'near' : 'ok';
 }
 
 /** Why the typed text cannot be saved as it is, or `null` when it can. Blank saves: it removes the prompt. */

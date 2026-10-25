@@ -414,6 +414,26 @@ describe('FyApiClient transport and HTTP failures', () => {
   });
 });
 
+it('should carry the daemon version a refusal came with, and none when the daemon sent none', async () => {
+  // Arrange
+  const transport = new QueuedHttpTransport(
+    jsonResponse({ error: 'invalid', code: 'invalid_request' }, { status: 400, headers: { 'x-fy-version': '4.84.0' } }),
+    jsonResponse({ error: 'invalid', code: 'invalid_request' }, { status: 400 }),
+    jsonResponse({ error: 'unknown', code: 'unknown_route' }, { status: 404, headers: { 'x-fy-version': '4.84.0' } }),
+  );
+  const client = await connect(transport);
+
+  // Act
+  const stamped = await captureError(() => client.request('/stamped', z.string()));
+  const bare = await captureError(() => client.request('/bare', z.string()));
+  const unknownRoute = await captureError(() => client.request('/unknown', z.string()));
+
+  // Assert
+  should((stamped as FyHttpError).daemonVersion).equal('4.84.0');
+  should((bare as FyHttpError).daemonVersion).be.undefined();
+  should((unknownRoute as FyHttpError).daemonVersion).equal('4.84.0');
+});
+
 describe('FyApiClient protocol version handling', () => {
   it('should report x-fy-version skew at most once and ignore the legacy alias', async () => {
     // Arrange

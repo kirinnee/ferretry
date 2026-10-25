@@ -96,6 +96,12 @@ export const RoughPromptSchema = z.string().trim().min(1).max(MAX_ROUGH_PROMPT_C
  */
 export const MAX_IDEA_CHARS = 4_000;
 
+/**
+ * What a daemon without the `pack.idea.4000` feature still refuses past. The app keeps this limit for
+ * such a machine, because the app deploys before the daemon does (`daemon-features.ts`).
+ */
+export const LEGACY_MAX_IDEA_CHARS = 500;
+
 /** The idea an owner hands Write it for me, line breaks kept; may be absent, which asks for a sensible default. */
 export const IdeaSchema = z.string().trim().min(1).max(MAX_IDEA_CHARS);
 

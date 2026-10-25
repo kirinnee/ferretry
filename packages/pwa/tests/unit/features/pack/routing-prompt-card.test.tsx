@@ -1,11 +1,15 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import {
+  DAEMON_FEATURES,
+  LEGACY_MAX_IDEA_CHARS,
   MAX_IDEA_CHARS,
   MAX_ROUTING_PROMPT_CHARS,
   type PackCleanUpRequest,
   type PackRoutingAcceptRequest,
 } from '@ferretry/protocol';
 import { RoutingPromptCard, type RoutingPromptCardProps } from '../../../../src/features/pack/routing-prompt-card.tsx';
+import { ideaLimitFor } from '../../../../src/lib/pack/routing-prompt.ts';
+import { healthOf } from '../../../support/health.ts';
 import { interact, type Mounted, mount, must, pressKey } from '../../../support/dom.ts';
 import { byText, click, textOf, typeInto, waitFor, waitForText } from '../../../support/learning-dom.ts';
 import {
@@ -207,6 +211,21 @@ describe('the routing prompt card', () => {
     expect(root.querySelector('[data-clean-up-job]') === null).toBe(true);
   });
 
+  it('keeps the daemon’s own text behind Details when it said a refusal in plain words', async () => {
+    const raw = 'the request body is invalid — idea: Too big: expected string to have <=500 characters';
+    const root = await card(OWNER_VIEW, {
+      cleanUp: async () => ({
+        kind: 'refused',
+        message: 'Your idea can hold at most 500 characters on this machine.',
+        details: raw,
+      }),
+    });
+    await click(action(root, 'clean-up'));
+    await waitForText(root, 'Your idea can hold at most 500 characters on this machine.');
+    const details = must(root.querySelector('[data-routing-outcome-details]'), 'the details');
+    expect(textOf(details)).toContain(raw);
+  });
+
   it('picks up a run already going when the page opens', async () => {
     const root = await card(
       { ...OWNER_VIEW, cleanUp: { ...OWNER_VIEW.cleanUp, job: RUNNING_JOB } },
@@ -295,6 +314,34 @@ describe('Write it for me', () => {
     expect(counter().getAttribute('data-idea-counter')).toBe('full');
     expect(counter().className).toContain('text-err');
     expect(textOf(counter())).toBe('4,000 / 4,000 characters');
+  });
+
+  it('keeps an older machine to 500 characters and says it needs an update', async () => {
+    const root = await card(NUDGE_VIEW, {}, { ideaLimit: ideaLimitFor({ kind: 'read', health: healthOf('4.84.0') }) });
+    const idea = must(root.querySelector<HTMLTextAreaElement>('textarea[data-routing-idea]'), 'the idea');
+    const counter = () => must(root.querySelector('[data-idea-counter]'), 'the counter');
+    const note = must(root.querySelector('[data-idea-update-note]'), 'the update note');
+    expect(idea.getAttribute('maxlength')).toBe(String(LEGACY_MAX_IDEA_CHARS));
+    expect(textOf(counter())).toBe('0 / 500 characters');
+    expect(textOf(note)).toBe(
+      'This machine needs an update for ideas longer than 500 characters — run “fy daemon update” (Settings › Machine › About & updates).',
+    );
+    expect(idea.getAttribute('aria-describedby')).toContain(note.id);
+    await typeInto(idea, 'x'.repeat(450));
+    expect(counter().getAttribute('data-idea-counter')).toBe('near');
+    await typeInto(idea, 'x'.repeat(LEGACY_MAX_IDEA_CHARS));
+    expect(counter().getAttribute('data-idea-counter')).toBe('full');
+  });
+
+  it('says nothing about an update when the machine offers the longer idea, or has not answered', async () => {
+    for (const machine of [
+      { kind: 'read', health: healthOf('4.90.0', [DAEMON_FEATURES.packIdea4000]) },
+      { kind: 'loading' },
+    ] as const) {
+      const root = await card(NUDGE_VIEW, {}, { ideaLimit: ideaLimitFor(machine) });
+      expect(root.querySelector('[data-idea-update-note]') === null).toBe(true);
+      await shown?.unmount();
+    }
   });
 
   it('sends the idea with its line breaks on Cmd+Enter and on Ctrl+Enter, and not on a plain Enter', async () => {

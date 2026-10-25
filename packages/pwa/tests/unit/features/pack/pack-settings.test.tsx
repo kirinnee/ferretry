@@ -1,12 +1,14 @@
 import { afterEach, describe, expect, it } from 'bun:test';
-import { DEFAULT_PACK_CONFIG, type PackView } from '@ferretry/protocol';
+import { DAEMON_FEATURES, DEFAULT_PACK_CONFIG, type HealthView, type PackView } from '@ferretry/protocol';
+import type { z } from 'zod';
 import { PACK_SETTINGS_TAB, PackSettingsSurface } from '../../../../src/features/pack/pack-settings.tsx';
 import type { MachinePack, PackRead, PackSave } from '../../../../src/features/pack/use-machine-pack.ts';
 import type { PackConfigPatch } from '../../../../src/lib/pack/pack-files.ts';
 import { DaemonClientProvider } from '../../../../src/lib/store.tsx';
 import { type Mounted, mount, must } from '../../../support/dom.ts';
 import { byText, click, textOf, typeInto, waitFor, waitForText } from '../../../support/learning-dom.ts';
-import { IDLE_ROUTING_API, PACK_VIEW } from '../../../support/pack.ts';
+import { healthOf } from '../../../support/health.ts';
+import { IDLE_ROUTING_API, NUDGE_VIEW, PACK_VIEW } from '../../../support/pack.ts';
 import { alpha } from '../config-files/config-files-support.ts';
 
 let shown: Mounted | undefined;
@@ -114,5 +116,39 @@ describe('Settings › Pack mode', () => {
       </DaemonClientProvider>,
     );
     expect(textOf(shown.container)).toContain('Reading Pack mode…');
+  });
+});
+
+describe('Settings › Pack mode against a machine of another version', () => {
+  const connected = async (health: HealthView) => {
+    const client = {
+      request: async (path: string, schema: z.ZodType<unknown>) => {
+        if (path === '/v1/health') return schema.parse(health);
+        if (path === '/v1/pack') return schema.parse(NUDGE_VIEW);
+        return await new Promise<never>(() => undefined);
+      },
+    };
+    shown = await mount(
+      <DaemonClientProvider client={async () => client as never}>
+        <PACK_SETTINGS_TAB.Surface connection={alpha} />
+      </DaemonClientProvider>,
+    );
+    await waitFor(() => shown?.container.querySelector('textarea[data-routing-idea]') != null, 'the idea field');
+    return shown.container;
+  };
+  const ideaOf = (root: HTMLElement) =>
+    must(root.querySelector<HTMLTextAreaElement>('textarea[data-routing-idea]'), 'the idea');
+
+  it('keeps an older machine’s idea to 500 characters and says it needs an update', async () => {
+    const root = await connected(healthOf('4.84.0'));
+    await waitForText(root, 'needs an update');
+    expect(ideaOf(root).getAttribute('maxlength')).toBe('500');
+    expect(textOf(must(root.querySelector('[data-idea-update-note]'), 'the note'))).toContain('fy daemon update');
+  });
+
+  it('gives a machine that lists pack.idea.4000 the full 4,000', async () => {
+    const root = await connected(healthOf('4.90.0', [DAEMON_FEATURES.packIdea4000]));
+    await waitFor(() => ideaOf(root).getAttribute('maxlength') === '4000', 'the longer limit');
+    expect(root.querySelector('[data-idea-update-note]') === null).toBe(true);
   });
 });

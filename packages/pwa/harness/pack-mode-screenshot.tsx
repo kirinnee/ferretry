@@ -6,6 +6,9 @@
  * the writer working, a written prompt under review), at a 390px phone and a 1440px desktop, in the light and
  * dark studio themes. Review evidence for Pack mode; nothing compares the PNGs.
  *
+
+ * The `old-daemon` scene is the idea field against a machine whose health lists no features: capped at 500, with the update note.
+ *
  *   bun harness/pack-mode-screenshot.tsx          # writes harness/out/pack-mode-*.png
  *
  * It renders the REAL `PackSettingsSurface` and `RoutingPromptCard` with a machine's Pack view injected,
@@ -36,6 +39,8 @@ import { createRoot } from 'react-dom/client';
 import { PackSettingsSurface } from '../../src/features/pack/pack-settings.tsx';
 import { RoutingPromptCard } from '../../src/features/pack/routing-prompt-card.tsx';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
+import { ideaLimitFor } from '../../src/lib/pack/routing-prompt.ts';
+import { healthOf } from '../../tests/support/health.ts';
 import {
   FLEET_MODELS,
   NUDGE_VIEW,
@@ -92,6 +97,13 @@ createRoot(root).render(
         view={reviewView}
         state={routingState}
         initial={{ job: { ...RUNNING_JOB, status: 'suggested' }, suggestion: SUGGESTION }}
+      />
+    ) : which === 'old-daemon' ? (
+      <RoutingPromptCard
+        connection={connection}
+        view={nudgeView}
+        state={routingState}
+        ideaLimit={ideaLimitFor({ kind: 'read', health: healthOf('4.84.0') })}
       />
     ) : which === 'nudge' ? (
       <RoutingPromptCard connection={connection} view={nudgeView} state={routingState} />
@@ -168,7 +180,7 @@ const VIEWPORTS = [
   { name: 'desktop', width: 1_440, height: 900 },
 ] as const;
 
-const SCENES = ['settings', 'autocomplete', 'review', 'running', 'nudge', 'writing', 'written'] as const;
+const SCENES = ['settings', 'autocomplete', 'review', 'running', 'nudge', 'old-daemon', 'writing', 'written'] as const;
 
 const shotsDir = process.env.PACK_MODE_SHOTS ?? outDir;
 mkdirSync(shotsDir, { recursive: true });
@@ -193,9 +205,13 @@ try {
           await page.goto(`${server.url}?theme=studio-${scheme}&state=${scene}`);
           const shot = page.locator('[data-shot]');
           await shot.waitFor({ state: 'visible' });
+          if (scene === 'old-daemon') {
+            // An older machine: 460 characters typed against the 500 it still takes, with the update note under the field.
+            await page.locator('[data-routing-idea]').fill('Cheap models for chores, Opus for planning. '.repeat(11));
+          }
           if (scene === 'autocomplete') {
             // The autocomplete, open at the end of the prompt while a model name is half typed.
-            const field = page.locator('[data-routing-card] textarea');
+            const field = page.locator('[data-routing-card] textarea:not([data-routing-idea])');
             await field.click();
             await page.keyboard.press('Control+End');
             await page.keyboard.type(' Docs → cla');

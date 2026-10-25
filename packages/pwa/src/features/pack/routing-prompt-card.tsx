@@ -14,12 +14,14 @@
  */
 
 import type { PackCleanUpJob, PackCleanUpSuggestion, PackView } from '@ferretry/protocol';
-import { MAX_IDEA_CHARS, modelVocabulary } from '@ferretry/protocol';
+import { modelVocabulary } from '@ferretry/protocol';
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { cn } from '../../lib/class-names.ts';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
 import {
   cleanUpProblem,
+  FULL_IDEA_LIMIT,
+  type IdeaLimit,
   ideaCounter,
   ideaFill,
   routingCounter,
@@ -38,7 +40,12 @@ import type { MachinePack } from './use-machine-pack.ts';
 const CLEAN_UP_POLL_MS = 3_000;
 
 /** What the last press came to, said under the buttons. */
-type Outcome = { readonly tone: 'ok' | 'warn' | 'err'; readonly message: string };
+type Outcome = {
+  readonly tone: 'ok' | 'warn' | 'err';
+  readonly message: string;
+  /** The machine's own text, behind a Details disclosure, when the message restates a refusal in plain words. */
+  readonly details?: string;
+};
 
 const OUTCOME_CLASS: Readonly<Record<Outcome['tone'], string>> = {
   ok: 'border-ok-border bg-ok-bg text-ok',
@@ -50,6 +57,8 @@ export interface RoutingPromptCardProps {
   readonly connection: DaemonConnection;
   readonly view: Pick<PackView, 'routing' | 'models' | 'available' | 'undo' | 'cleanUp'>;
   readonly state: Pick<MachinePack, 'savePrompt' | 'cleanUp' | 'readJob' | 'accept' | 'undo'>;
+  /** How much "your idea" may say on this machine; the full limit when nothing gates it (tests, harness). */
+  readonly ideaLimit?: IdeaLimit;
   readonly pollMs?: number;
   readonly clock?: () => number;
   /** A run and its rewrite the card starts on (harness, tests). */
@@ -60,6 +69,7 @@ export function RoutingPromptCard({
   connection,
   view,
   state,
+  ideaLimit = FULL_IDEA_LIMIT,
   pollMs = CLEAN_UP_POLL_MS,
   clock = Date.now,
   initial,
@@ -161,7 +171,7 @@ export function RoutingPromptCard({
       if (started.kind === 'started') {
         setJob(started.job);
         setNowMs(clockRef.current());
-      } else setOutcome({ tone: 'err', message: started.message });
+      } else setOutcome(refusedOutcome(started));
     });
   };
 
@@ -184,7 +194,7 @@ export function RoutingPromptCard({
         if (started.kind === 'started') {
           setJob(started.job);
           setNowMs(clockRef.current());
-        } else setOutcome({ tone: 'err', message: started.message });
+        } else setOutcome(refusedOutcome(started));
       });
   };
 
@@ -257,6 +267,7 @@ export function RoutingPromptCard({
             onChange={setIdea}
             onSubmit={submitWrite}
             disabled={busy || running}
+            limit={ideaLimit}
           />
           <Button
             variant="primary"
@@ -338,6 +349,7 @@ export function RoutingPromptCard({
               onChange={setIdea}
               onSubmit={submitWrite}
               disabled={busy || running}
+              limit={ideaLimit}
             />
             <Button
               variant="primary"
@@ -392,7 +404,7 @@ export function RoutingPromptCard({
         </>
       )}
       {outcome === null ? null : (
-        <p
+        <div
           role="status"
           data-routing-outcome={outcome.tone}
           className={cn(
@@ -401,7 +413,13 @@ export function RoutingPromptCard({
           )}
         >
           {outcome.message}
-        </p>
+          {outcome.details === undefined ? null : (
+            <details className="mt-1" data-routing-outcome-details="">
+              <summary className="cursor-pointer text-faint">Details</summary>
+              <span className="mono mt-1 block break-words text-faint">{outcome.details}</span>
+            </details>
+          )}
+        </div>
       )}
       {job === null ? null : <CleanUpJobCard connection={connection} job={job} nowMs={nowMs} readError={readError} />}
       {suggestion === null ? null : (
@@ -426,6 +444,13 @@ export function RoutingPromptCard({
   );
 }
 
+/** A refused start as an outcome, keeping the machine's own text behind Details when there is some. */
+const refusedOutcome = (refused: { readonly message: string; readonly details?: string }): Outcome => ({
+  tone: 'err',
+  message: refused.message,
+  ...(refused.details === undefined ? {} : { details: refused.details }),
+});
+
 /** Rows the idea field shows empty, and the most it grows to before it scrolls. */
 const IDEA_MIN_ROWS = 4;
 const IDEA_MAX_ROWS = 12;
@@ -437,16 +462,19 @@ function IdeaField({
   onChange,
   onSubmit,
   disabled,
+  limit,
 }: {
   readonly id: string;
   readonly value: string;
   readonly onChange: (value: string) => void;
   readonly onSubmit: () => void;
   readonly disabled: boolean;
+  readonly limit: IdeaLimit;
 }) {
   const fieldRef = useRef<HTMLTextAreaElement>(null);
   const counterId = `${id}-count`;
-  const fill = ideaFill(value);
+  const fill = ideaFill(value, limit);
+  const noteId = `${id}-update`;
 
   // Grow with the text up to IDEA_MAX_ROWS (the CSS max-height), then scroll inside the box.
   // biome-ignore lint/correctness/useExhaustiveDependencies: `value` is the re-measure trigger; the effect reads the node
@@ -469,9 +497,9 @@ function IdeaField({
         style={{ maxHeight: `calc(${String(IDEA_MAX_ROWS)}lh + 2 * var(--pad-row-y) + 2 * var(--stroke-control))` }}
         rows={IDEA_MIN_ROWS}
         value={value}
-        maxLength={MAX_IDEA_CHARS}
+        maxLength={limit.max}
         disabled={disabled}
-        aria-describedby={counterId}
+        aria-describedby={limit.updateNote === null ? counterId : `${counterId} ${noteId}`}
         placeholder="Cheap models for chores, Opus for planning, never burn the Claude weekly quota"
         onChange={event => onChange(event.currentTarget.value)}
         onKeyDown={event => {
@@ -491,10 +519,15 @@ function IdeaField({
           )}
           data-idea-counter={fill}
         >
-          {ideaCounter(value)}
+          {ideaCounter(value, limit)}
           <span className="sr-only"> characters</span>
         </span>
       </div>
+      {limit.updateNote === null ? null : (
+        <p id={noteId} className="m-0 break-words text-meta leading-base text-warn" data-idea-update-note="">
+          {limit.updateNote}
+        </p>
+      )}
     </div>
   );
 }

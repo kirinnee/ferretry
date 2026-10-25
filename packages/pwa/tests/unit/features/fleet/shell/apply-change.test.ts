@@ -113,6 +113,15 @@ describe('changeRefusalSentence', () => {
     expect(changeRefusalSentence('boom')).toContain('didn’t answer');
   });
 
+  it('says a refused field limit in plain words, and keeps the daemon’s text for Details elsewhere', () => {
+    const raw = 'the request body is invalid — idea: Too big: expected string to have <=500 characters';
+    expect(changeRefusalSentence(new FyHttpError(raw, 400, 'invalid_request'))).toBe(
+      'Your idea can hold at most 500 characters on this machine.',
+    );
+    const unknownField = 'the request body is invalid — nickname: Invalid input';
+    expect(changeRefusalSentence(new FyHttpError(unknownField, 400, 'invalid_request'))).toBe(unknownField);
+  });
+
   /** A named error, as the carrier and the device-key store throw them. */
   const named = (name: string, message: string): Error => Object.assign(new Error(message), { name });
 

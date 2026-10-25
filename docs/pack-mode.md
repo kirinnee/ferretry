@@ -306,7 +306,9 @@ newest five runs are kept.
 **Write it for me.** `mode: "generate"` (`fy guide write [--idea "<text>"] [--runtime <r>] [--model <m>] [--apply]`,
 or **Write it for me** in the app) adds ONE optional field, `idea` — what the owner wants, in their words
 ("cheap models for chores, Opus for planning, never burn the Claude weekly quota"), line breaks kept, at most
-4,000 characters (`MAX_IDEA_CHARS`, one constant for the route, the CLI and the app's text area). The run
+4,000 characters (`MAX_IDEA_CHARS`, one constant for the route, the CLI and the app's text area; an older
+daemon still refuses past 500, so the app offers the raised limit only when the daemon lists `pack.idea.4000` in
+`GET /v1/health` › `features` — [the app ships before the daemon](standards/architecture/index.md#the-app-ships-before-the-daemon)). The run
 folder then also holds `idea.txt` (empty when none was given) and `rough.txt` holds the owner's current prompt
 (the `prompt` sent, else the saved one; empty when only the built-in default is in effect, because a default
 is not the owner's to build on). The brief (`generateBrief`, same fixed text but for three file paths) tells the

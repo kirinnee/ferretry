@@ -1,5 +1,5 @@
 import { describe, it } from 'bun:test';
-import { HealthViewSchema } from '@ferretry/protocol';
+import { DAEMON_FEATURES, daemonFeatureList, HealthViewSchema } from '@ferretry/protocol';
 import should from 'should';
 import { NO_GOVERNED_ROUTES_GUARD } from '../../../../src/lib/api/capability.ts';
 import { ApiDispatcher } from '../../../../src/lib/api/dispatcher.ts';
@@ -232,5 +232,14 @@ describe('the daemon health mount and the session-worker pool', () => {
     // Assert
     should(reported.sessionWorkers).deepEqual(pool);
     should(without).not.have.property('sessionWorkers');
+  });
+
+  it('should report the features the app gates on, so an app that ships first can tell what this daemon offers', async () => {
+    // Arrange / Act
+    const view = HealthViewSchema.parse(JSON.parse((await ask(healthSubsystem())).body));
+
+    // Assert — the raised Pack idea limit is the feature whose absence caused the original incident
+    should(view.features).containEql(DAEMON_FEATURES.packIdea4000);
+    should(view.features).deepEqual([...daemonFeatureList()]);
   });
 });

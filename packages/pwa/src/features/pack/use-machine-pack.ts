@@ -22,8 +22,10 @@ import {
   PackViewSchema,
 } from '@ferretry/protocol';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { appVersion } from '../../lib/app-version.ts';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
 import { type PackConfigPatch, withPackConfig, withRoutingPrompt } from '../../lib/pack/pack-files.ts';
+import { invalidRequestWords } from '../../lib/request-refusal.ts';
 import { useConfigChangeCounter, useDaemonClient } from '../../lib/store.tsx';
 import { readConfigFile, writeConfigFile } from '../config-files/config-files-api.ts';
 import { changeRefusalSentence } from '../fleet/shell/apply-change.ts';
@@ -42,7 +44,7 @@ export type PackRead =
 /** Starting Clean up: a run that began, or why none did. */
 export type CleanUpStart =
   | { readonly kind: 'started'; readonly job: PackCleanUpJob }
-  | { readonly kind: 'refused'; readonly message: string };
+  | { readonly kind: 'refused'; readonly message: string; readonly details?: string };
 
 /** Reading one clean-up run: its state (and rewrite), or why it could not be read. */
 export type CleanUpJobRead =
@@ -154,6 +156,15 @@ export function useMachinePack(daemon: DaemonConnection | undefined): MachinePac
           ? { kind: 'started', job: started.job }
           : { kind: 'refused', message: started.message };
       } catch (cause) {
+        // A 400 for a field the machine's version does not take reads as words, with its own text behind Details.
+        const words = invalidRequestWords(cause, appVersion());
+        if (words !== undefined) {
+          return {
+            kind: 'refused',
+            message: words.sentence,
+            ...(words.details === undefined ? {} : { details: words.details }),
+          };
+        }
         return { kind: 'refused', message: changeRefusalSentence(cause) };
       }
     },

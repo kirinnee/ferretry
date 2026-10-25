@@ -6,7 +6,7 @@ import {
   PACK_ROUTING_ACCEPT_PATH,
   PACK_ROUTING_UNDO_PATH,
 } from '@ferretry/protocol';
-import type { FyApiClient } from '@ferretry/protocol/client';
+import { type FyApiClient, FyHttpError } from '@ferretry/protocol/client';
 import type { z } from 'zod';
 import { type MachinePack, type PackSave, useMachinePack } from '../../../../src/features/pack/use-machine-pack.ts';
 import type { DaemonConnection } from '../../../../src/lib/daemon-connection.ts';
@@ -227,6 +227,23 @@ describe('useMachinePack › Clean up', () => {
     expect(await run(pack => pack.cleanUp({}))).toEqual({ kind: 'refused', message: 'No runtime is ready.' });
     await remount(alpha, fake().factory);
     expect((await run(pack => pack.cleanUp({}))).kind).toBe('refused');
+  });
+
+  it('says a daemon’s refused field limit in plain words, with the daemon’s own text for Details', async () => {
+    const raw = 'the request body is invalid — idea: Too big: expected string to have <=500 characters';
+    await mounted(
+      alpha,
+      fake({
+        routing: () => {
+          throw new FyHttpError(raw, 400, 'invalid_request');
+        },
+      }).factory,
+    );
+    expect(await run(pack => pack.cleanUp({ idea: 'x'.repeat(794) }))).toEqual({
+      kind: 'refused',
+      message: 'Your idea can hold at most 500 characters on this machine.',
+      details: raw,
+    });
   });
 
   it('reads one run, and says when it cannot', async () => {

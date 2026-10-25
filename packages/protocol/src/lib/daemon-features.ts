@@ -1,0 +1,44 @@
+/**
+ * WHAT THIS DAEMON CAN DO THAT AN OLDER ONE COULD NOT — the list the app reads before it relies on it.
+ *
+ * (These are the daemon's _features_; the per-device "capabilities" of `grants.ts` are a different thing.)
+ *
+ * ## The app ships first
+ *
+ * The PWA deploys from `main` the moment a change merges; a daemon changes only after the release cut
+ * and `fy daemon update`. So a change that RAISES A LIMIT or ADDS A REQUEST FIELD reaches the owner's
+ * browser days before it reaches their machine, and a new app talking to an old daemon is the normal
+ * state of the world, not an edge case. Such a change must gate the app on a feature named here:
+ * the daemon reports the list on `GET /v1/health`, the app enables the feature (or the raised limit)
+ * only when the name is present, and otherwise keeps the old behaviour and says the machine needs an
+ * update. `docs/standards/architecture/index.md` § "The app ships before the daemon" states the rule.
+ *
+ * ## Why a list and not a version comparison
+ *
+ * A version number says when something shipped only to a reader who knows the history. A name says what
+ * it is for, survives a backport, and cannot be wrong about a build cut from a branch. A name the app
+ * has never heard of is simply ignored, so the field is an open set of strings on the wire.
+ */
+
+/**
+ * Every feature this daemon build offers, by name. Adding a name is the daemon-side half of a
+ * gated change; the app-side half reads it back with {@link hasFeature}.
+ */
+export const DAEMON_FEATURES = {
+  /** `idea` on a Pack clean-up request takes up to 4,000 characters (an older daemon refuses past 500). */
+  packIdea4000: 'pack.idea.4000',
+} as const;
+
+export type DaemonFeature = (typeof DAEMON_FEATURES)[keyof typeof DAEMON_FEATURES];
+
+/** The names a daemon of this build reports, in a stable order. */
+export const daemonFeatureList = (): readonly DaemonFeature[] => Object.values(DAEMON_FEATURES).sort();
+
+/**
+ * Whether a daemon's health report offers a feature. A report with no list at all — a daemon from
+ * before the list existed — offers nothing, which is the answer that keeps the older behaviour.
+ */
+export const hasFeature = (
+  health: { readonly features?: readonly string[] | undefined },
+  feature: DaemonFeature,
+): boolean => health.features?.includes(feature) === true;
