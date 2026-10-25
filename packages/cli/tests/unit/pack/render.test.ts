@@ -22,6 +22,9 @@ describe('routingWords', () => {
     // Arrange + Act + Assert
     should(routingWords('file', undefined)).equal('your routing prompt');
     should(routingWords('file', SUGGESTED)).equal('cleaned up by gpt-oss-120b on 2026-10-22 and accepted');
+    should(routingWords('file', { ...SUGGESTED, mode: 'generate' })).equal(
+      'written by gpt-oss-120b on 2026-10-22 and accepted',
+    );
     should(routingWords('default', undefined)).equal('the default, rendered from the model catalogs');
   });
 });

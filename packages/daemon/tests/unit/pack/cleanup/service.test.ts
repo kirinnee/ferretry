@@ -9,6 +9,7 @@ import {
 import should from 'should';
 import {
   CLEAN_UP_NAME,
+  GENERATE_NAME,
   type CleanUpRun,
   type CleanUpRunStore,
   CleanUpService,
@@ -31,7 +32,7 @@ const runtimeRow = (name: string, overrides: Partial<PackInventoryRuntime> = {})
   models: ['opus'],
   ...overrides,
 });
-const inventory = (runtimes: readonly PackInventoryRuntime[]): PackInventory => ({
+const inventory = (runtimes: readonly PackInventoryRuntime[], source: 'file' | 'default' = 'file'): PackInventory => ({
   at: NOW,
   runtimes,
   models: [
@@ -45,7 +46,7 @@ const inventory = (runtimes: readonly PackInventoryRuntime[]): PackInventory => 
       runtimes: runtimes.map(runtime => ({ name: runtime.name, ready: runtime.ready })),
     },
   ],
-  routing: { text: IN_EFFECT, source: 'file' },
+  routing: { text: source === 'default' ? 'The built-in default.' : IN_EFFECT, source },
 });
 const DRAFT = JSON.stringify({
   prompt: 'Planning and review: opus. Chores: claude-ghost-9.',
@@ -88,6 +89,7 @@ function build(
     readonly probes?: Readonly<Record<string, PackProbeOutcome>>;
     readonly unknownRuntime?: string;
     readonly stopFails?: boolean;
+    readonly routingSource?: 'file' | 'default';
   } = {},
 ) {
   const runs = new MemoryRuns();
@@ -99,7 +101,10 @@ function build(
   let clock = 0;
   const service = new CleanUpService({
     inventory: async () =>
-      inventory(options.runtimes ?? [runtimeRow('claude-kirin', { quota: LOW }), runtimeRow('claude-atomi')]),
+      inventory(
+        options.runtimes ?? [runtimeRow('claude-kirin', { quota: LOW }), runtimeRow('claude-atomi')],
+        options.routingSource,
+      ),
     runtime: async name =>
       name === options.unknownRuntime
         ? undefined
@@ -279,6 +284,59 @@ describe('CleanUpService.start', () => {
   });
 });
 
+describe('CleanUpService.start in generate mode', () => {
+  it('should write the idea and the saved prompt, name the writer and brief it with the idea file', async () => {
+    // Arrange
+    const { service, runs, starts } = build();
+
+    // Act
+    const started = await service.start({ mode: 'generate', idea: 'cheap models for chores' });
+
+    // Assert
+    should(starts[0]).containEql({ name: GENERATE_NAME, label: PACK_CLEAN_UP_LABEL, boardAccess: 'none' });
+    should(starts[0]?.prompt).containEql('/fy/state/pack-cleanup/run-1/idea.txt');
+    should(starts[0]?.prompt).containEql("You write the routing prompt for Ferretry's Pack mode");
+    should(runs.files.get('/fy/state/pack-cleanup/run-1/idea.txt')).equal('cheap models for chores\n');
+    should(runs.files.get('/fy/state/pack-cleanup/run-1/rough.txt')).equal(`${IN_EFFECT}\n`);
+    should(started.outcome === 'started' && started.job.mode).equal('generate');
+  });
+
+  it('should write empty idea and prompt files when there is no idea and only a default in effect', async () => {
+    // Arrange
+    const { service, runs } = build({ routingSource: 'default' });
+
+    // Act
+    await service.start({ mode: 'generate' });
+
+    // Assert
+    should(runs.files.get('/fy/state/pack-cleanup/run-1/idea.txt')).equal('');
+    should(runs.files.get('/fy/state/pack-cleanup/run-1/rough.txt')).equal('');
+  });
+
+  it('should build on the prompt given, even when only a default is in effect', async () => {
+    // Arrange
+    const { service, runs } = build({ routingSource: 'default' });
+
+    // Act
+    await service.start({ mode: 'generate', prompt: 'Opus for planning.' });
+
+    // Assert
+    should(runs.files.get('/fy/state/pack-cleanup/run-1/rough.txt')).equal('Opus for planning.\n');
+  });
+
+  it('should not mark a clean-up job with a mode, nor write an idea file', async () => {
+    // Arrange
+    const { service, runs } = build();
+
+    // Act
+    const started = await service.start({ mode: 'clean-up', idea: 'ignored' });
+
+    // Assert
+    should(started.outcome === 'started' && started.job).not.have.property('mode');
+    should(runs.files.has('/fy/state/pack-cleanup/run-1/idea.txt')).be.false();
+  });
+});
+
 describe('CleanUpService.job', () => {
   it('should stay running until the draft is written, then check it, keep the suggestion with before and after and stop the ferret', async () => {
     // Arrange
@@ -438,6 +496,52 @@ describe('CleanUpService.job', () => {
     should(result?.job.status).equal('suggested');
     should(result?.suggestion?.suggested.by).equal('claude-kirin');
     should(result?.suggestion?.notes.map(note => note.kind)).deepEqual(['unknown_model', 'suggestion']);
+  });
+});
+
+describe('CleanUpService.job in generate mode', () => {
+  it('should suggest a prompt with an empty before when none was there to build on, marked as written', async () => {
+    // Arrange
+    const subject = build({ routingSource: 'default' });
+    await subject.service.start({ mode: 'generate', idea: 'cheap chores' });
+    await subject.runs.writeFile('run-1', 'draft.json', DRAFT);
+
+    // Act
+    const done = await subject.service.job('run-1');
+
+    // Assert
+    should(done?.job).containEql({ status: 'suggested', mode: 'generate' });
+    should(done?.suggestion?.before).equal('');
+    should(done?.suggestion?.after).equal('Planning and review: opus. Chores: claude-ghost-9.');
+    should(done?.suggestion?.suggested).containEql({ mode: 'generate', via: 'claude-atomi' });
+    should(done?.suggestion?.notes.map(note => note.kind)).deepEqual(['unknown_model', 'suggestion']);
+    should(subject.stops).deepEqual([['cleanup-1', 'the routing prompt it wrote has been read']]);
+  });
+
+  it('should keep the saved prompt as before when one existed', async () => {
+    // Arrange
+    const subject = build();
+    await subject.service.start({ mode: 'generate' });
+    await subject.runs.writeFile('run-1', 'draft.json', JSON.stringify({ prompt: 'Opus for all.' }));
+
+    // Act
+    const done = await subject.service.job('run-1');
+
+    // Assert
+    should(done?.suggestion?.before).equal(IN_EFFECT);
+  });
+
+  it('should say the writer, not the clean-up, ended without a prompt', async () => {
+    // Arrange
+    const subject = build();
+    await subject.service.start({ mode: 'generate' });
+    subject.statuses.set('cleanup-1', 'failed');
+
+    // Act
+    const failed = await subject.service.job('run-1');
+
+    // Assert
+    should(failed?.job.message).equal('The writer failed without writing a prompt.');
   });
 });
 

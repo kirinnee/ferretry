@@ -91,6 +91,7 @@ describe('registerGuideCommand', () => {
       showGuide: record('show'),
       showInventory: record('inventory'),
       cleanUp: record('clean-up'),
+      write: record('write'),
       accept: record('accept'),
       undo: record('undo'),
     } as unknown as PackController;
@@ -121,6 +122,8 @@ describe('registerGuideCommand', () => {
       '--json',
     );
     await parse(program, 'clean-up', '--prompt-file', 'rough.md', '--apply');
+    await parse(program, 'write', '--idea', 'cheap chores', '--runtime', 'claude-work', '-y');
+    await parse(program, 'write');
     await parse(program, 'accept', 'run-1');
     await parse(program, 'undo');
 
@@ -131,6 +134,8 @@ describe('registerGuideCommand', () => {
       ['inventory', { json: true }],
       ['clean-up', { prompt: 'Opus first.', runtime: 'claude-work', model: 'opus', apply: true, json: true }],
       ['clean-up', { promptFile: 'rough.md', apply: true }],
+      ['write', { idea: 'cheap chores', runtime: 'claude-work', apply: true }],
+      ['write', {}],
       ['accept', 'run-1'],
       ['undo'],
     ]);
@@ -171,9 +176,10 @@ describe('the old guide subcommands', () => {
     const names = guide?.commands.map(command => command.name());
     const accept = guide?.commands.find(command => command.name() === 'accept');
     const cleanUp = guide?.commands.find(command => command.name() === 'clean-up');
+    const write = guide?.commands.find(command => command.name() === 'write');
 
     // Assert
-    should(names).eql(['show', 'inventory', 'clean-up', 'accept', 'undo']);
+    should(names).eql(['show', 'inventory', 'clean-up', 'write', 'accept', 'undo']);
     should(accept?.options.map(option => option.long)).eql([]);
     should(cleanUp?.options.map(option => option.long)).eql([
       '--prompt',
@@ -183,5 +189,6 @@ describe('the old guide subcommands', () => {
       '--apply',
       '--json',
     ]);
+    should(write?.options.map(option => option.long)).eql(['--idea', '--runtime', '--model', '--apply', '--json']);
   });
 });

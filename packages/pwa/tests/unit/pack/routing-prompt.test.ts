@@ -7,6 +7,7 @@ import {
   routingCounter,
   routingSaveProblem,
   routingSourceWords,
+  writeProblem,
 } from '../../../src/lib/pack/routing-prompt.ts';
 
 const date = (instant: string): string => `<${instant}>`;
@@ -30,6 +31,32 @@ describe('routingSourceWords', () => {
         date,
       ),
     ).toBe('Cleaned up by gpt-6-astra via codex-main, accepted <2026-10-22T15:00:00Z>');
+  });
+});
+
+describe('Write it for me', () => {
+  it('says a prompt was written, not cleaned up, when the builder wrote it', () => {
+    const suggested = {
+      by: 'gpt-6-astra',
+      via: 'codex-main',
+      at: '2026-10-22T14:30:00Z',
+      acceptedAt: '2026-10-22T15:00:00Z',
+      mode: 'generate',
+    } as const;
+    expect(routingSourceWords({ text: 'x', source: 'file', suggested }, date)).toBe(
+      'Written by gpt-6-astra via codex-main, accepted <2026-10-22T15:00:00Z>',
+    );
+  });
+
+  it('starts when a runtime is ready and nothing is running, and says why not otherwise', () => {
+    expect(writeProblem({ available: true, runtimes: ['claude-main'] }, false)).toBeNull();
+    expect(writeProblem({ available: true, runtimes: ['claude-main'] }, true)).toBe(
+      'A prompt is already being written.',
+    );
+    expect(writeProblem({ available: false, runtimes: [], reason: 'No runtime is ready.' }, false)).toBe(
+      'No runtime is ready.',
+    );
+    expect(writeProblem({ available: false, runtimes: [] }, false)).toContain('cannot write');
   });
 });
 

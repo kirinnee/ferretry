@@ -15,7 +15,7 @@ import type {
 export function routingWords(source: RoutingPromptView['source'], suggested: RoutingSuggested | undefined): string {
   if (source === 'default') return 'the default, rendered from the model catalogs';
   if (suggested === undefined) return 'your routing prompt';
-  return `cleaned up by ${suggested.by} on ${suggested.acceptedAt.slice(0, 10)} and accepted`;
+  return `${suggested.mode === 'generate' ? 'written' : 'cleaned up'} by ${suggested.by} on ${suggested.acceptedAt.slice(0, 10)} and accepted`;
 }
 
 /** The routing prompt in effect, headed by where it came from. */

@@ -5,11 +5,14 @@ import { type Mounted, mount, must } from '../../../support/dom.ts';
 import { byText, click, textOf, typeInto, waitFor, waitForText } from '../../../support/learning-dom.ts';
 import {
   IDLE_ROUTING_API,
+  NUDGE_VIEW,
   OWNER_PROMPT,
   OWNER_VIEW,
   PACK_VIEW,
   RUNNING_JOB,
   SUGGESTION,
+  WRITING_JOB,
+  WRITTEN_SUGGESTION,
 } from '../../../support/pack.ts';
 import { alpha } from '../config-files/config-files-support.ts';
 
@@ -34,11 +37,13 @@ const card = async (
 const field = (root: HTMLElement) => must(root.querySelector<HTMLTextAreaElement>('textarea'), 'the prompt');
 const action = (root: HTMLElement, name: string) =>
   must(root.querySelector<HTMLButtonElement>(`[data-routing-action="${name}"]`), name);
+const byHand = async (root: HTMLElement) => await click(action(root, 'by-hand'));
 const sourceOf = (root: HTMLElement) => must(root.querySelector('[data-routing-source]'), 'source');
 
 describe('the routing prompt card', () => {
   it('shows the prompt, where it came from, and who reads it', async () => {
     let root = await card(PACK_VIEW);
+    await byHand(root);
     expect(textOf(root)).toContain('Routing prompt');
     expect(textOf(root)).toContain('Ferrets use this to pick which model runs each sub-task');
     expect(textOf(root)).toContain('Jev reads it when Jev decides');
@@ -111,6 +116,7 @@ describe('the routing prompt card', () => {
 
   it('has nothing to save when the box is emptied over the default', async () => {
     const root = await card(PACK_VIEW);
+    await byHand(root);
     await typeInto(field(root), '');
     expect(action(root, 'save').disabled).toBe(true);
   });
@@ -136,8 +142,14 @@ describe('the routing prompt card', () => {
     expect(root.querySelector('[data-routing-outcome]')?.getAttribute('data-routing-outcome')).toBe('err');
   });
 
-  it('disables Clean up with the daemon’s reason when it cannot run here', async () => {
+  it('disables Clean up and Write it for me with the daemon’s reason when they cannot run here', async () => {
     const root = await card(PACK_VIEW);
+    expect(action(root, 'write').disabled).toBe(true);
+    expect(textOf(must(root.querySelector('[data-routing-write-blocked]'), 'reason'))).toBe(
+      'No agent runtime here is ready to run a clean-up.',
+    );
+    await byHand(root);
+    expect(action(root, 'write').disabled).toBe(true);
     expect(action(root, 'clean-up').disabled).toBe(true);
     expect(textOf(must(root.querySelector('[data-routing-clean-up-blocked]'), 'reason'))).toBe(
       'No agent runtime here is ready to run a clean-up.',
@@ -205,6 +217,162 @@ describe('the routing prompt card', () => {
       { initial: { job: { ...RUNNING_JOB, status: 'failed', message: 'It ran out of time.' } } },
     );
     expect(textOf(must(root.querySelector('[data-clean-up-message]'), 'why'))).toBe('It ran out of time.');
+  });
+});
+
+describe('Write it for me', () => {
+  it('is the first-run nudge until something is saved: not written yet, a big button, no empty box', async () => {
+    const root = await card(NUDGE_VIEW);
+    const nudge = must(root.querySelector('[data-routing-nudge]'), 'the nudge');
+    expect(textOf(nudge)).toContain('Not written yet');
+    expect(textOf(byText(nudge, 'button', 'Write it for me'))).toBe('Write it for me');
+    expect(textOf(nudge)).toContain('Your idea (optional)');
+    expect(root.querySelector('textarea') === null).toBe(true);
+    expect(action(root, 'write').disabled).toBe(false);
+  });
+
+  it('is not the nudge once a prompt is saved, but a panel next to Clean up', async () => {
+    const root = await card(OWNER_VIEW);
+    expect(root.querySelector('[data-routing-nudge]') === null).toBe(true);
+    expect(root.querySelector('[data-routing-write]') === null).toBe(false);
+    expect(action(root, 'write').disabled).toBe(false);
+    expect(action(root, 'clean-up').disabled).toBe(false);
+  });
+
+  it('opens the box on Or write it by hand', async () => {
+    const root = await card(NUDGE_VIEW);
+    await byHand(root);
+    expect(root.querySelector('[data-routing-nudge]') === null).toBe(true);
+    expect(field(root).value).toBe(NUDGE_VIEW.routing.text);
+  });
+
+  it('starts the writer with the idea, and with no prompt when only the default is in the box', async () => {
+    const asked: PackCleanUpRequest[] = [];
+    const root = await card(NUDGE_VIEW, {
+      cleanUp: async request => {
+        asked.push(request);
+        return { kind: 'started', job: WRITING_JOB };
+      },
+      readJob: () => new Promise(() => undefined),
+    });
+    await typeInto(
+      must(root.querySelector<HTMLInputElement>('[data-routing-idea]'), 'the idea'),
+      '  cheap models for chores, Opus for planning  ',
+    );
+    await click(action(root, 'write'));
+    await waitFor(() => asked.length === 1, 'the write');
+    expect(asked).toEqual([{ mode: 'generate', idea: 'cheap models for chores, Opus for planning' }]);
+    await waitFor(() => root.querySelector('[data-clean-up-job]') !== null, 'the run');
+    const job = must(root.querySelector('[data-clean-up-job]'), 'job');
+    expect(textOf(job)).toContain('Routing Prompt Writer');
+    expect(textOf(job)).toContain('Open the writer’s session');
+    expect(action(root, 'write').disabled).toBe(true);
+  });
+
+  it('starts the writer from nothing: no idea, no prompt', async () => {
+    const asked: PackCleanUpRequest[] = [];
+    const root = await card(NUDGE_VIEW, {
+      cleanUp: async request => {
+        asked.push(request);
+        return { kind: 'refused', message: 'codex-main cannot start now.' };
+      },
+    });
+    await click(action(root, 'write'));
+    await waitForText(root, 'codex-main cannot start now.');
+    expect(asked).toEqual([{ mode: 'generate' }]);
+  });
+
+  it('builds on the saved prompt when one exists', async () => {
+    const asked: PackCleanUpRequest[] = [];
+    const root = await card(OWNER_VIEW, {
+      cleanUp: async request => {
+        asked.push(request);
+        return { kind: 'started', job: WRITING_JOB };
+      },
+      readJob: () => new Promise(() => undefined),
+    });
+    await click(action(root, 'write'));
+    await waitFor(() => asked.length === 1, 'the write');
+    expect(asked).toEqual([{ mode: 'generate', prompt: OWNER_PROMPT }]);
+  });
+
+  it('shows only the new prompt, no diff, when there was nothing before, then accepts it as written', async () => {
+    const accepted: PackRoutingAcceptRequest[] = [];
+    const root = await card(
+      NUDGE_VIEW,
+      {
+        accept: async request => {
+          accepted.push(request);
+          return { kind: 'applied', message: 'The routing prompt is the one gpt-6-astra wrote.' };
+        },
+      },
+      { initial: { job: { ...WRITING_JOB, status: 'suggested' }, suggestion: WRITTEN_SUGGESTION } },
+    );
+    const review = must(root.querySelector('[data-clean-up-review]'), 'review');
+    expect(textOf(review)).toContain('Review the new prompt');
+    expect(textOf(must(root.querySelector('[data-clean-up-job]'), 'the job'))).toContain('Prompt written');
+    expect(textOf(must(review.querySelector('[data-clean-up-fresh]'), 'the new prompt'))).toBe(
+      WRITTEN_SUGGESTION.after,
+    );
+    expect(review.querySelector('[data-clean-up-diff]') === null).toBe(true);
+    expect(review.querySelector('del, ins') === null).toBe(true);
+    expect(
+      [...review.querySelectorAll('[data-clean-up-note]')].map(note => note.getAttribute('data-clean-up-note')),
+    ).toEqual(['unknown_model', 'suggestion']);
+    await click(byText(review, 'button', 'Accept'));
+    await waitFor(() => accepted.length === 1, 'the accept');
+    expect(accepted[0]).toEqual({ prompt: WRITTEN_SUGGESTION.after, suggested: WRITTEN_SUGGESTION.suggested });
+    await waitForText(root, 'gpt-6-astra wrote');
+    expect(root.querySelector('[data-clean-up-review]') === null).toBe(true);
+  });
+
+  it('puts the written prompt in the box on Edit first, even from the nudge', async () => {
+    const root = await card(
+      NUDGE_VIEW,
+      {},
+      { initial: { job: { ...WRITING_JOB, status: 'suggested' }, suggestion: WRITTEN_SUGGESTION } },
+    );
+    await click(must(root.querySelector('[data-review="edit"]'), 'edit'));
+    expect(field(root).value).toBe(WRITTEN_SUGGESTION.after);
+    expect(action(root, 'save').disabled).toBe(false);
+  });
+
+  it('discards the written prompt and goes back to the nudge, writing nothing', async () => {
+    const root = await card(
+      NUDGE_VIEW,
+      {},
+      { initial: { job: { ...WRITING_JOB, status: 'suggested' }, suggestion: WRITTEN_SUGGESTION } },
+    );
+    await click(must(root.querySelector('[data-review="discard"]'), 'discard'));
+    expect(root.querySelector('[data-clean-up-review]') === null).toBe(true);
+    expect(root.querySelector('[data-routing-nudge]') === null).toBe(false);
+  });
+
+  it('shows a before and an after when a prompt was there to build on', async () => {
+    const root = await card(
+      OWNER_VIEW,
+      {},
+      {
+        initial: {
+          job: { ...WRITING_JOB, status: 'suggested' },
+          suggestion: { ...WRITTEN_SUGGESTION, before: OWNER_PROMPT },
+        },
+      },
+    );
+    expect(root.querySelector('[data-clean-up-diff]') === null).toBe(false);
+    expect(root.querySelector('[data-clean-up-fresh]') === null).toBe(true);
+  });
+
+  it('says a prompt was written by, not cleaned up by, once accepted', async () => {
+    const root = await card({
+      ...OWNER_VIEW,
+      routing: {
+        text: WRITTEN_SUGGESTION.after,
+        source: 'file',
+        suggested: { ...WRITTEN_SUGGESTION.suggested, acceptedAt: '2026-10-22T14:31:00.000Z' },
+      },
+    });
+    expect(textOf(sourceOf(root))).toMatch(/^Written by gpt-6-astra via codex-main, accepted /u);
   });
 });
 

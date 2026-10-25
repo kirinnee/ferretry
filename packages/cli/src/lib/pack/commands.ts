@@ -1,5 +1,11 @@
 import type { Command } from 'commander';
-import type { PackCleanUpOptions, PackController, PackGuideShowOptions, PackRecommendOptions } from './controller.ts';
+import type {
+  PackCleanUpOptions,
+  PackController,
+  PackGuideShowOptions,
+  PackRecommendOptions,
+  PackWriteOptions,
+} from './controller.ts';
 
 /** Reports a failure as one line and an exit code, never a stack trace. */
 export interface PackFailureReporter {
@@ -31,8 +37,8 @@ export function registerRecommendCommand(
 
 /**
  * Mounts `fy guide` (docs/pack-mode.md): the ONE routing prompt Pack mode picks sub-ferret models with — show
- * it, what Clean up is shown, Clean up itself (a short-lived ferret rewrites the prompt; a person reviews the
- * diff), accepting the rewrite and undoing that.
+ * it, what the builder is shown, Write it for me (a short-lived ferret writes a whole prompt from a short
+ * idea) and Clean up (it rewrites the owner's; a person reviews the diff), accepting the result and undoing that.
  */
 export function registerGuideCommand(
   program: Command,
@@ -72,9 +78,18 @@ export function registerGuideCommand(
     .option('--json', 'print the run and its checked rewrite')
     .action(run(async (options: PackCleanUpOptions) => await controller.cleanUp(options)));
   guide
+    .command('write')
+    .description('have a short-lived ferret write the routing prompt from a short idea (one model run), then review it')
+    .option('--idea <text>', 'what you want, in a line ("cheap models for chores, Opus for planning"); optional')
+    .option('--runtime <runtime>', 'run it on this runtime (default: the ready one with the most quota left)')
+    .option('--model <model>', 'run it on this model (default: the runtime’s own)')
+    .option('-y, --apply', 'accept the prompt as soon as it is checked')
+    .option('--json', 'print the run and its checked prompt')
+    .action(run(async (options: PackWriteOptions) => await controller.write(options)));
+  guide
     .command('accept')
-    .description('write a clean-up’s checked rewrite as the routing prompt (undo puts the old one back)')
-    .argument('<run>', 'the run id guide clean-up printed')
+    .description('write a builder run’s checked prompt as the routing prompt (undo puts the old one back)')
+    .argument('<run>', 'the run id guide clean-up or guide write printed')
     .action(run(async (id: string) => await controller.accept(id)));
   guide
     .command('undo')

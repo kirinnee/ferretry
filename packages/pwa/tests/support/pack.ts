@@ -177,3 +177,29 @@ export const SUGGESTION: PackCleanUpSuggestion = {
     { kind: 'suggestion', message: 'Add a second Claude login so chores do not wait for quota.' },
   ],
 };
+
+/** A machine with nothing written yet and a runtime ready to write a prompt: the first-run nudge. */
+export const NUDGE_VIEW: PackView = {
+  ...PACK_VIEW,
+  cleanUp: { available: true, runtimes: ['codex-main', 'claude-main'] },
+};
+
+/** A Write it for me run as the daemon reports it. */
+export const WRITING_JOB: PackCleanUpJob = {
+  ...RUNNING_JOB,
+  id: 'job-2',
+  name: 'Routing Prompt Writer',
+  mode: 'generate',
+};
+
+/** A checked written prompt: nothing before it, and one note of each kind that can follow a write. */
+export const WRITTEN_SUGGESTION: PackCleanUpSuggestion = {
+  suggested: { ...SUGGESTION.suggested, mode: 'generate' },
+  before: '',
+  after:
+    'Planning, review and critical code → claude-opus-5-5 at max. Everyday coding → claude-sonnet-5. Chores → claude-haiku-4-5 low. When claude-main is low on quota, use gpt-6-astra.',
+  notes: [
+    { kind: 'unknown_model', message: 'No catalog lists glm-9, so it was left out.', model: 'glm-9' },
+    { kind: 'suggestion', message: 'Add a second Claude login so chores do not wait for quota.' },
+  ],
+};

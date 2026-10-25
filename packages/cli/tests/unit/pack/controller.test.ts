@@ -446,6 +446,70 @@ describe('PackController guide clean-up', () => {
     should(gateway.acceptCalls).have.length(1);
   });
 
+  it('should write from an idea: send the generate mode with the idea trimmed, then print the new prompt plainly', async () => {
+    // Arrange
+    const { controller, gateway, out, progress } = generator(fake => {
+      fake.started = { outcome: 'started', job: { ...JOB, mode: 'generate' } };
+      fake.runs = [
+        {
+          job: { ...JOB, mode: 'generate', status: 'suggested' },
+          suggestion: { ...SUGGESTION, before: '', suggested: { ...SUGGESTION.suggested, mode: 'generate' } },
+        },
+      ];
+    });
+
+    // Act
+    await controller.write({ idea: '  cheap models for chores  ', runtime: 'claude-work', model: 'opus' });
+
+    // Assert
+    should(gateway.cleanUpCalls).deepEqual([
+      { mode: 'generate', idea: 'cheap models for chores', runtime: 'claude-work', model: 'opus' },
+    ]);
+    should(progress.events).containEql('start gonzalo is writing the routing prompt on claude-work');
+    should(out.out[0]).startWith('Written by claude-opus-5-5 on claude-work');
+    should(out.out[0]).containEql(SUGGESTION.after);
+    should(out.out[0]).not.containEql('[-');
+    should(out.out[0]).endWith('Accept with: foo guide accept run-1');
+    should(gateway.acceptCalls).be.empty();
+  });
+
+  it('should write from nothing: send only the generate mode, and accept at once with --apply', async () => {
+    // Arrange
+    const { controller, gateway, out } = generator();
+
+    // Act
+    await controller.write({ idea: '   ', apply: true });
+
+    // Assert
+    should(gateway.cleanUpCalls).deepEqual([{ mode: 'generate' }]);
+    should(gateway.acceptCalls).have.length(1);
+    should(out.out.at(-1)).equal('Accepted.');
+  });
+
+  it('should name the write, not the clean-up, when it is refused, fails or is still working', async () => {
+    // Arrange
+    const refused = generator(fake => {
+      fake.started = { outcome: 'refused', message: 'No runtime can start a ferret now.' };
+    });
+    const failed = generator(fake => {
+      fake.runs = [{ job: { ...JOB, status: 'failed' } }];
+    });
+    const slow = generator(fake => {
+      fake.runs = [{ job: JOB }];
+    });
+
+    // Act
+    await refused.controller.write({});
+    await failed.controller.write({});
+    await slow.controller.write({});
+
+    // Assert
+    should(refused.out.err).deepEqual(['foo guide write: No runtime can start a ferret now.']);
+    should(refused.out.exitCode).equal(2);
+    should(failed.out.err).deepEqual(['foo guide write: the write failed']);
+    should(slow.out.err[0]).startWith('foo guide write: it is still working');
+  });
+
   it('should exit 2 when it could not be started, and 1 when it failed or is still working', async () => {
     // Arrange
     const refusedStart = generator(fake => {

@@ -17,12 +17,12 @@ import type { BadgeTone } from '../../shell/primitives.tsx';
 
 const count = (value: number): string => value.toLocaleString('en-US');
 
-/** The prompt's origin in one line: the owner's words, an accepted clean-up, or the catalogs' default. */
+/** The prompt's origin in one line: the owner's words, an accepted clean-up or write-up, or the catalogs' default. */
 export function routingSourceWords(routing: RoutingPromptView, date: (instant: string) => string): string {
   if (routing.source === 'default') return 'Default — built from the model catalogs';
   const suggested = routing.suggested;
   if (suggested === undefined) return 'Your words';
-  return `Cleaned up by ${suggested.by} via ${suggested.via}, accepted ${date(suggested.acceptedAt)}`;
+  return `${suggested.mode === 'generate' ? 'Written' : 'Cleaned up'} by ${suggested.by} via ${suggested.via}, accepted ${date(suggested.acceptedAt)}`;
 }
 
 /** The counter under the text area: characters typed against what a saved prompt may hold. */
@@ -43,6 +43,13 @@ export function cleanUpProblem(text: string, status: PackCleanUpStatus, running:
   const length = text.trim().length;
   if (length > MAX_ROUGH_PROMPT_CHARS)
     return `Clean up takes at most ${count(MAX_ROUGH_PROMPT_CHARS)} characters; this is ${count(length)}.`;
+  return null;
+}
+
+/** Why Write it for me cannot start now, or `null` when it can. */
+export function writeProblem(status: PackCleanUpStatus, running: boolean): string | null {
+  if (!status.available) return status.reason ?? 'This machine cannot write a prompt now.';
+  if (running) return 'A prompt is already being written.';
   return null;
 }
 

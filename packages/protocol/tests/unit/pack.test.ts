@@ -62,7 +62,9 @@ const cases: SchemaCase[] = [
     value: { routingPreferences: 'Opus for reviews.' },
   },
   { name: 'routing prompt', schema: pack.RoutingPromptSchema, value: prompt },
+  { name: 'builder mode', schema: pack.PackBuilderModeSchema, value: 'generate' },
   { name: 'suggested', schema: pack.RoutingSuggestedSchema, value: suggested },
+  { name: 'suggested by writing', schema: pack.RoutingSuggestedSchema, value: { ...suggested, mode: 'generate' } },
   { name: 'guide file', schema: pack.ModelsGuideFileSchema, value: { prompt, suggested } },
   {
     name: 'a guide file not yet migrated, with the old keys',

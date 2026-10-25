@@ -127,7 +127,14 @@ export const MAX_ROUGH_PROMPT_CHARS = 6_000;
 export const RoutingPromptSchema = z.string().trim().min(1).max(MAX_ROUTING_PROMPT_CHARS);
 
 /**
- * Where an accepted clean-up came from: the model that rewrote the prompt, what ran it, and when it was
+ * What the builder ferret does: `clean-up` rewrites the prompt the owner wrote; `generate` writes a whole
+ * one from a short idea (which may be empty) and what is available here.
+ */
+export const PackBuilderModeSchema = z.enum(['clean-up', 'generate']);
+export type PackBuilderMode = z.infer<typeof PackBuilderModeSchema>;
+
+/**
+ * Where an accepted prompt came from: the model that wrote or rewrote it, what ran it, and when it was
  * suggested and accepted. Pack mode only reports it; a hand-written prompt has none.
  */
 export const RoutingSuggestedSchema = z.strictObject({
@@ -137,6 +144,8 @@ export const RoutingSuggestedSchema = z.strictObject({
   via: NonEmpty.max(128),
   at: InstantSchema,
   acceptedAt: InstantSchema,
+  /** How the prompt came to be: `generate` (written from an idea) or `clean-up` (a rewrite of the owner's). Absent: a clean-up. */
+  mode: PackBuilderModeSchema.optional(),
   /** @deprecated Written by the old per-use-case review; read and ignored. */
   partial: z.boolean().optional(),
 });
@@ -217,6 +226,8 @@ export const PackCleanUpJobSchema = z.strictObject({
   session: NonEmpty,
   /** The name it shows under, like any ferret. */
   name: NonEmpty,
+  /** What it was asked to do; absent: a clean-up (a run kept from before Write it for me). */
+  mode: PackBuilderModeSchema.optional(),
   runtime: NonEmpty,
   model: NonEmpty.optional(),
   startedAt: InstantSchema,

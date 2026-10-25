@@ -2,7 +2,8 @@
  * Screenshots of Settings › Pack mode: the switch, who picks the model, the limits and the probe, and the
  * ONE routing prompt card — a known model, one listed but not on this machine, an unknown red one, the
  * Available-now list — plus the card with the model autocomplete open and the card reviewing a Clean up
- * rewrite (a word diff and one note of each kind), at a 390px phone and a 1440px desktop, in the light and
+ * rewrite (a word diff and one note of each kind), and the Write it for me states (the first-run nudge,
+ * the writer working, a written prompt under review), at a 390px phone and a 1440px desktop, in the light and
  * dark studio themes. Review evidence for Pack mode; nothing compares the PNGs.
  *
  *   bun harness/pack-mode-screenshot.tsx          # writes harness/out/pack-mode-*.png
@@ -35,7 +36,15 @@ import { createRoot } from 'react-dom/client';
 import { PackSettingsSurface } from '../../src/features/pack/pack-settings.tsx';
 import { RoutingPromptCard } from '../../src/features/pack/routing-prompt-card.tsx';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
-import { AVAILABLE, OWNER_VIEW, RUNNING_JOB, SONNET, SUGGESTION } from '../../tests/support/pack.ts';
+import {
+  FLEET_MODELS,
+  NUDGE_VIEW,
+  OWNER_VIEW,
+  RUNNING_JOB,
+  SUGGESTION,
+  WRITING_JOB,
+  WRITTEN_SUGGESTION,
+} from '../../tests/support/pack.ts';
 
 const connection = daemonConnection({ daemonId: 'harness', baseUrl: 'https://harness.invalid', deviceId: 'd' });
 const prompt = [
@@ -43,6 +52,8 @@ const prompt = [
   'Everyday edits → claude-sonnet-5.',
   'Chores and renames → claude-haiku-4-5 low, or glm-5.3 on the other box. Never gpt-6-astra-mini.',
 ].join('\\n');
+const AVAILABLE = OWNER_VIEW.available;
+const SONNET = FLEET_MODELS[1];
 const available = [
   AVAILABLE[0],
   AVAILABLE[1],
@@ -70,6 +81,7 @@ const which = new URLSearchParams(location.search).get('state');
 const root = document.getElementById('root');
 if (root === null) throw new Error('missing #root');
 const reviewView = { ...view, routing: { text: SUGGESTION.before, source: 'file' }, undo: undefined };
+const nudgeView = { ...NUDGE_VIEW, routing: { text: '', source: 'default' }, undo: undefined };
 createRoot(root).render(
   <div className="flex flex-col bg-bg p-4 text-fg" style={{ maxWidth: 960, margin: '0 auto' }} data-shot="">
     {which === 'settings' ? (
@@ -80,6 +92,23 @@ createRoot(root).render(
         view={reviewView}
         state={routingState}
         initial={{ job: { ...RUNNING_JOB, status: 'suggested' }, suggestion: SUGGESTION }}
+      />
+    ) : which === 'nudge' ? (
+      <RoutingPromptCard connection={connection} view={nudgeView} state={routingState} />
+    ) : which === 'writing' ? (
+      <RoutingPromptCard
+        connection={connection}
+        view={nudgeView}
+        state={routingState}
+        clock={() => Date.parse(WRITING_JOB.startedAt) + 31_000}
+        initial={{ job: WRITING_JOB }}
+      />
+    ) : which === 'written' ? (
+      <RoutingPromptCard
+        connection={connection}
+        view={nudgeView}
+        state={routingState}
+        initial={{ job: { ...WRITING_JOB, status: 'suggested' }, suggestion: WRITTEN_SUGGESTION }}
       />
     ) : which === 'running' ? (
       <RoutingPromptCard
@@ -139,7 +168,7 @@ const VIEWPORTS = [
   { name: 'desktop', width: 1_440, height: 900 },
 ] as const;
 
-const SCENES = ['settings', 'autocomplete', 'review', 'running'] as const;
+const SCENES = ['settings', 'autocomplete', 'review', 'running', 'nudge', 'writing', 'written'] as const;
 
 const shotsDir = process.env.PACK_MODE_SHOTS ?? outDir;
 mkdirSync(shotsDir, { recursive: true });

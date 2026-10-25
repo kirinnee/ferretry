@@ -75,7 +75,7 @@ export class GuideFileService {
     await this.ports.write(editConfigText(file.text, target, raw, GUIDE_MODELINE), file.etag);
     return {
       outcome: 'applied',
-      message: `The routing prompt is the one ${request.suggested.by} cleaned up. Undo puts the previous one back.`,
+      message: `The routing prompt is the one ${request.suggested.by} ${request.suggested.mode === 'generate' ? 'wrote' : 'cleaned up'}. Undo puts the previous one back.`,
     };
   }
 
