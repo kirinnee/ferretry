@@ -36,7 +36,7 @@ import { McpSignInSheet } from '../fleet/components/mcp-sign-in-sheet.tsx';
 import { startMcpSignIn } from '../fleet/mcp-auth-api.ts';
 import { changeRefusalSentence } from '../fleet/shell/apply-change.ts';
 import { draftRequest, EMPTY_MCP_DRAFT, type McpDraft } from './add-mcp-model.ts';
-import { failureMessage, FormFailure, FormField, FormFoot } from './form-parts.tsx';
+import { FormFailure, FormField, FormFoot, failureMessage } from './form-parts.tsx';
 import type { SessionActionFormHost } from './registry.ts';
 
 export interface AddMcpPorts {
@@ -258,7 +258,8 @@ export function AddMcpForm({
             </label>
           ) : (
             <p className="fy-action-form__note">
-              Claude Code signs in to a project server itself, the first time it uses it.
+              If it asks for a sign-in, sign in from Info › Context › MCP once it is added: Ferretry keeps the token for
+              this project.
             </p>
           )}
         </>

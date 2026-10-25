@@ -1,18 +1,18 @@
 import { afterEach, describe, expect, it } from 'bun:test';
-import { MCP_OAUTH_PATH } from '@ferretry/protocol';
 import type {
-  SessionMcpAddRequest,
   SessionMcpAdded,
+  SessionMcpAddRequest,
   SessionMcpListing,
   SessionMcpPreview,
   SessionMcpPreviewRequest,
   SessionMcpScope,
 } from '@ferretry/protocol';
+import { MCP_OAUTH_PATH } from '@ferretry/protocol';
+import type { ContextMcpSignInHost } from '../../../../src/features/context-rail/context-rail-mcp.tsx';
 import { AddMcpForm, type AddMcpPorts } from '../../../../src/features/session-actions/add-mcp-form.tsx';
 import type { SessionActionFormHost } from '../../../../src/features/session-actions/registry.ts';
-import type { ContextMcpSignInHost } from '../../../../src/features/context-rail/context-rail-mcp.tsx';
 import { daemonConnection } from '../../../../src/lib/daemon-connection.ts';
-import { interact, mount, must, type Mounted } from '../../../support/dom.ts';
+import { interact, type Mounted, mount, must } from '../../../support/dom.ts';
 import { settleUntil } from '../../../support/settle.ts';
 import {
   CALLBACK,
@@ -249,11 +249,13 @@ describe('AddMcpForm — the project listing', () => {
 });
 
 describe('AddMcpForm — a URL server in the project', () => {
-  it('says Claude Code signs in to a project server itself, and offers no Ferretry sign-in', async () => {
+  it('says a project server signs in from Context › MCP once added, and offers no switch here', async () => {
     const { root } = await openForm();
     await settleUntil(() => root.querySelector('[data-choice]') !== null, 'the choice cards', interact);
     await click(typeRadio(root, 'url'));
-    expect(root.textContent).toContain('Claude Code signs in to a project server itself, the first time it uses it.');
+    expect(root.textContent).toContain(
+      'If it asks for a sign-in, sign in from Info › Context › MCP once it is added: Ferretry keeps the token for this project.',
+    );
     expect(root.querySelector('input[type="checkbox"]')).toBeNull();
   });
 });

@@ -39,6 +39,21 @@ one server.
 Each runtime has its own home, so approval is **per runtime**: the machine list says it per runtime,
 and a ferret's list says it for that ferret.
 
+## In the app
+
+- **Info › Context › MCP** (a ferret's Info panel; the Context tab was called Folder): every server that
+  ferret sees, labelled **Project**, **Local**, **User** or **Ferretry** (a fleet component and Ferretry's
+  own tools server are both Ferretry's), each with where it stands, **Check**, and **Sign in** when a check
+  or the server's own setting says it asks for one. A project server nobody approved says so, and a
+  server another scope overrides says which.
+- **Info › Context › Skills**: every skill that ferret sees, labelled Project, User or Ferretry, with
+  "Overridden by …" on the losers of a same-name clash, and **Open** to read its SKILL.md.
+- **Settings › Machine › Components › MCP servers**: each row carries the same status, Check and Sign in.
+  Components stays the place to create and edit servers and skills.
+
+A failure in these places is said in plain words — "Liftoff MBP isn't reachable right now" — with the
+transport's own text behind **Details**.
+
 ## Listing
 
 | Route                                     | Capability / axis  | Answers                                |

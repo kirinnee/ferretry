@@ -508,3 +508,133 @@ describe('ComponentsTab — a server that signs in with OAuth', () => {
     });
   });
 });
+
+describe('ComponentsTab — where each MCP server stands', () => {
+  const inventory = {
+    problems: [],
+    servers: [
+      {
+        id: 'id-github',
+        name: 'github',
+        scope: 'component',
+        harness: 'claude',
+        transport: 'stdio',
+        target: 'npx',
+        runtimes: [{ runtime: 'claude-default' }, { runtime: 'claude-work' }],
+      },
+      // A same-named server of another scope is not this component.
+      {
+        id: 'id-github-project',
+        name: 'github',
+        scope: 'project',
+        harness: 'claude',
+        transport: 'stdio',
+        target: 'npx',
+        runtimes: [{ runtime: 'claude-default', approval: 'pending' }],
+      },
+    ],
+  };
+  const connected = {
+    id: 'id-github',
+    name: 'github',
+    transport: 'stdio',
+    outcome: 'connected',
+    serverName: 'GitHub',
+    toolCount: 3,
+    tools: ['issues', 'pulls', 'repos'],
+    elapsedMs: 40,
+    checkedAt: '2026-10-16T10:00:00.000Z',
+  };
+
+  it('gives each MCP row its status and Check, and checks it the way a ferret on the machine would', async () => {
+    const machine = scriptedMachine({ mcpServers: inventory, mcpCheck: connected });
+    const root = await open(machine);
+    await click(root, '[data-component-kind="mcp"]');
+    expect(text(root, '[data-component-row="mcp/github"]')).toContain('Used by 2 profiles, 2 runtimes');
+    expect(text(root, '[data-mcp-row="github"] [data-mcp-status]')).toBe('Not checked yet');
+    // A component no runtime's profile carries is in no runtime's config: nothing to check.
+    expect(text(root, '[data-component-row="mcp/notes"] ~ div [data-component-mcp-status="unused"]')).toBe(
+      'No runtime’s profile uses it yet, so no ferret starts it and there is nothing to check.',
+    );
+
+    await click(root, '[data-mcp-check="github"]');
+    expect(machine.calls.filter(call => call.path === '/v1/mcp/check').map(call => call.body)).toEqual([
+      { id: 'id-github' },
+    ]);
+    expect(text(root, '[data-mcp-row="github"] [data-mcp-status]')).toBe('Connected · 3 tools');
+    expect(text(root, '[data-mcp-row="github"] [data-mcp-tools]')).toBe('issues · pulls · repos');
+  });
+
+  it('says a server its runtimes have not picked up yet has nothing to check', async () => {
+    const lonely = component({
+      reference: 'mcp/lonely',
+      kind: 'mcp',
+      name: 'lonely',
+      detail: { kind: 'mcp', command: 'npx', env: [] },
+      usedBy: { profiles: ['Default'], runtimes: ['claude-default'] },
+    });
+    const root = await open(
+      scriptedMachine({
+        catalog: studioCatalog({ components: componentCatalog({ mcp: [lonely] }) }),
+        mcpServers: inventory,
+      }),
+    );
+    await click(root, '[data-component-kind="mcp"]');
+    expect(text(root, '[data-component-row="mcp/lonely"] ~ div [data-component-mcp-status="unused"]')).toBe(
+      'Its runtimes haven’t picked it up yet, so there is nothing to check. They do at their next launch.',
+    );
+  });
+
+  it('says a failed check and a failed status read in plain words, the raw text behind Details', async () => {
+    const machine = scriptedMachine({ mcpServers: inventory });
+    const root = await open(machine);
+    await click(root, '[data-component-kind="mcp"]');
+    await click(root, '[data-mcp-check="github"]');
+    expect(text(root, '[data-mcp-failure="check"] .text-err')).toBe('studio-mac isn’t reachable right now');
+    expect(text(root, '[data-mcp-failure-details]')).toBe('could not reach fyd at 127.0.0.1:7777');
+
+    await mounted?.unmount();
+    mounted = undefined;
+    const broken = await open(scriptedMachine({ mcpServers: new Error('the relay closed the session') }));
+    await click(broken, '[data-component-kind="mcp"]');
+    expect(text(broken, '[data-component-mcp-status="failed"] .text-err')).toBe('studio-mac isn’t reachable right now');
+  });
+
+  it('offers Sign in on the row of a server that must sign in, and Check on its page beside the Sign-in section', async () => {
+    const linear = component({
+      reference: 'mcp/linear',
+      kind: 'mcp',
+      name: 'linear',
+      detail: { kind: 'mcp', url: 'https://mcp.linear.example/mcp', auth: 'oauth', env: [] },
+    });
+    const machine = scriptedMachine({
+      catalog: studioCatalog({ components: componentCatalog({ mcp: [linear] }) }),
+      mcpServers: {
+        problems: [],
+        servers: [
+          {
+            id: 'id-linear',
+            name: 'linear',
+            scope: 'component',
+            harness: 'claude',
+            transport: 'http',
+            target: 'https://mcp.linear.example/mcp',
+            runtimes: [{ runtime: 'claude-default' }],
+            signIn: { subject: 'linear', required: true },
+          },
+        ],
+      },
+    });
+    const root = await open(machine);
+    await click(root, '[data-component-kind="mcp"]');
+    expect(text(root, '[data-mcp-row="linear"] [data-mcp-status]')).toBe('Needs sign-in');
+    expect(root.querySelector('[data-mcp-sign-in="linear"]')).not.toBeNull();
+
+    await click(root, '[data-component-row="mcp/linear"]');
+    expect(text(root, '[data-catalog-section="mcp-status"]')).toContain('Needs sign-in');
+    expect(root.querySelector('[data-catalog-section="mcp-status"] [data-mcp-check="linear"]')).not.toBeNull();
+    // Sign in stays in the page's own Sign-in section, not twice.
+    expect(root.querySelector('[data-catalog-section="mcp-status"] [data-mcp-sign-in="linear"]')).toBeNull();
+    expect(root.querySelector('[data-catalog-section="mcp-sign-in"]')).not.toBeNull();
+  });
+});

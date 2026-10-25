@@ -12,8 +12,8 @@ import { Lock } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { Markdown } from '../../../components/markdown.tsx';
 import { useConnectionSnapshot } from '../../../lib/store.tsx';
-import { daemonDisplayName } from '../../settings/daemon-settings.tsx';
 import { Button } from '../../../shell/primitives.tsx';
+import { daemonDisplayName } from '../../settings/daemon-settings.tsx';
 import { ChangeApplyPanel, useAccountChanges } from '../shell/apply-change-panel.tsx';
 import type { MachineTabProps } from '../shell/machines-surface.tsx';
 import { type AccountCatalog, allComponents, useAccountCatalog } from './account-catalog.ts';
@@ -50,6 +50,7 @@ import {
 import { itemHref, useHashItem } from './machine-links.ts';
 import { signsInWithOAuth } from './mcp-sign-in-model.ts';
 import { McpSignInSection } from './mcp-sign-in-section.tsx';
+import { ComponentMcpStatus, ComponentMcpStatusSection, type MachineMcpHost, useMachineMcp } from './mcp-status.tsx';
 
 type Page =
   | { readonly kind: 'kinds' }
@@ -191,7 +192,45 @@ function KindsPage({ catalog, open }: { catalog: AccountCatalog; open: (page: Pa
   );
 }
 
-function ListPage({ catalog, machineName, machineNames, of, onBack, open }: SharedProps & { of: FleetComponentKind }) {
+/** The MCP list's rows: each opens its page, and says where it stands with Check and Sign in under it. */
+function McpRows({
+  list,
+  label,
+  machineName,
+  machineNames,
+  online,
+  connection,
+  createClient,
+  open,
+}: Pick<SharedProps, 'machineName' | 'machineNames' | 'online' | 'connection' | 'createClient' | 'open'> & {
+  list: readonly FleetComponentView[];
+  label: string | undefined;
+}) {
+  const host: MachineMcpHost = { connection, createClient, machineName, online };
+  const mcp = useMachineMcp(host);
+  return (
+    <>
+      <RowList label={label}>
+        {list.map(component => (
+          <OpenRow
+            key={component.reference}
+            title={component.name}
+            mono
+            badges={<ComponentBadges badges={componentBadges(component, machineName, machineNames)} />}
+            sub={`Used by ${counted(component.usedBy.profiles.length, 'profile')}, ${counted(component.usedBy.runtimes.length, 'runtime')}`}
+            onOpen={() => open({ kind: 'detail', reference: component.reference })}
+            data={{ 'data-component-row': component.reference }}
+            footer={<ComponentMcpStatus component={component} mcp={mcp} host={host} />}
+          />
+        ))}
+      </RowList>
+      {mcp.actions.sheet}
+    </>
+  );
+}
+
+function ListPage(props: SharedProps & { of: FleetComponentKind }) {
+  const { catalog, machineName, machineNames, of, onBack, open } = props;
   const group = catalog.components.kinds.find(candidate => candidate.kind === of);
   const list = group?.components ?? [];
   return (
@@ -204,6 +243,8 @@ function ListPage({ catalog, machineName, machineNames, of, onBack, open }: Shar
       </div>
       {list.length === 0 ? (
         <Hint>None saved yet.</Hint>
+      ) : of === 'mcp' ? (
+        <McpRows {...props} list={list} label={group?.label} />
       ) : (
         <RowList label={group?.label}>
           {list.map(component => (
@@ -437,6 +478,9 @@ function DetailPage(props: SharedProps & { component: FleetComponentView }) {
       >
         <Content component={component} />
       </Section>
+      {component.kind === 'mcp' ? (
+        <ComponentMcpStatusSection component={component} host={{ connection, createClient, machineName, online }} />
+      ) : null}
       {signsInWithOAuth(component) ? (
         <McpSignInSection
           component={component}

@@ -291,6 +291,36 @@ const contextDependencies = (): NonNullable<ComponentProps<typeof SessionChatPag
   createFleetClient: factoryFor({
     'GET /v1/fleet/components': { format: 'version-2', kinds: [] },
     [`GET ${MCP_OAUTH_PATH}`]: { connections: [] },
+    // What Info › Context reads: every MCP server and skill the ferret sees (docs/mcp-scopes.md).
+    'GET /v1/sessions/shared/mcp/servers': {
+      problems: [],
+      servers: [
+        {
+          id: 'id-ferretry',
+          name: 'ferretry',
+          scope: 'ferretry',
+          harness: 'claude',
+          transport: 'stdio',
+          target: 'fy mcp serve',
+          runtimes: [{ runtime: 'claude-auto' }],
+        },
+      ],
+    },
+    'GET /v1/sessions/shared/skills/inventory': {
+      sessionId: 'shared',
+      harness: 'claude',
+      truncated: false,
+      skills: [
+        {
+          name: 'floop',
+          description: 'Review until satisfied.',
+          harness: 'claude',
+          scope: 'user',
+          path: '/fy/fleet/homes/claude-auto/skills/floop/SKILL.md',
+          runtimes: ['claude-auto'],
+        },
+      ],
+    },
   }),
   machineName: 'alpha box',
 });
@@ -1514,7 +1544,7 @@ describe('SessionChatPage', () => {
     }
   });
 
-  test('a /skill reference opens Info › Folder › Skills on ONE catalog read, and proves that catalog', async () => {
+  test('a /skill reference opens Info › Context › Skills, and the composer’s catalog is read ONCE and proves it', async () => {
     const scope = daemonSessionScope(alpha, 'shared');
     const asked: string[] = [];
     const requested: string[] = [];
@@ -1562,7 +1592,7 @@ describe('SessionChatPage', () => {
 
       // Info starts shut: looking is something a person asks for.
       expect(page.root.findAllByType(SessionInfo)).toHaveLength(0);
-      // A `/skill` reference opens Info on Folder › Skills, listing the page's own catalog.
+      // A `/skill` reference opens Info on Context › Skills, listing every skill this ferret sees.
       run(() => page.root.findByType(ReferenceSurfaceProvider).props.surface.onSkillOpen?.('floop'));
       await runAsync(async () => {
         for (let turn = 0; turn < 12; turn += 1) await Promise.resolve();
@@ -1578,8 +1608,8 @@ describe('SessionChatPage', () => {
       run(() => rail().props.onInsertSkill('/floop'));
       run(() => rail().props.onOpenFile('CLAUDE.md'));
       expect(page.root.findByType(FileInstanceSurface).props.instance.key).toBe('CLAUDE.md');
-      // ONE read. The pane joins the page's, so the daemon is asked once even
-      // though two things in this workspace need the answer.
+      // ONE catalog read: the composer and the transcript share the page's. (Context › Skills reads the
+      // skills inventory instead, which says where each skill comes from.)
       expect(asked).toEqual(['https://alpha.example.test/v1/sessions/shared/skills']);
       // The composer bundle owns only Attention here. Tasks and skills come
       // from the workspace owners above, so a fully capable client still does
@@ -3465,11 +3495,14 @@ describe('SessionChatPage Info and Actions', () => {
       await ports.verdicts(new AbortController().signal);
       expect(daemon.calls).toContain('verdicts');
       await ports.analytics(new AbortController().signal).catch(() => null);
-      // The login's catalogue (empty here) and the project file, joined with each server's scope: only
-      // Ferretry's own tools server is left.
-      expect(await ports.folder.loadMcp(new AbortController().signal)).toEqual([
-        { name: 'ferretry', scope: 'ferretry', signsIn: false, transport: 'command' },
-      ]);
+      // Every server this ferret sees, from the daemon's inventory: only Ferretry's own tools server here.
+      expect(
+        (await ports.folder.loadMcp(new AbortController().signal)).servers.map(
+          (server: { scope: string; name: string }) => `${server.scope}:${server.name}`,
+        ),
+      ).toEqual(['ferretry:ferretry']);
+      expect(ports.folder.sessionId).toBe('shared');
+      expect(ports.folder.machineName).toBe('alpha box');
       expect(ports.folder.agentName).toBe(sessionDisplayName(current));
       expect(ports.folder.mcpSignIn.machineName).toBe('alpha box');
       run(() => ports.folder.onInsertSkill('/floop'));

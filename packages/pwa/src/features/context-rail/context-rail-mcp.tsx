@@ -1,55 +1,42 @@
 /**
- * MCP: the servers this agent can reach here, where each sign-in stands, and Sign in for the ones that
- * need it.
+ * Context › MCP: every MCP server this ferret sees, from every scope — Project, Local, User and Ferretry —
+ * each with where it stands, Check and Sign in (docs/mcp-scopes.md).
  *
- * Signing in is the Components tab's flow, unchanged (docs/mcp-oauth.md): the rail starts it with
- * `startMcpSignIn` and hands the flow to the same `McpSignInSheet`, which owns the provider page, the
- * callback hand-over and the paste way. Nothing about OAuth is decided here.
+ * The rows are the shared `McpServerRow`, the same one the Components page draws, and every act goes
+ * through `useMcpServerActions`: Check asks the daemon to connect AS THIS FERRET would, and Sign in is the
+ * components' flow, unchanged, under the server's own subject — which is what lets a project's
+ * `.mcp.json` server sign in at all.
  */
 
-import type { McpOAuthFlow } from '@ferretry/protocol';
+import type { McpInventory } from '@ferretry/protocol';
 import { Plus } from 'lucide-react';
-import { useState } from 'react';
-import { cn } from '../../lib/class-names.ts';
-import type { DaemonConnection } from '../../lib/daemon-connection.ts';
-import { Button } from '../../shell/primitives.tsx';
-import { mcpRedirectUri } from '../fleet/components/mcp-sign-in-model.ts';
-import { type McpSignInChannelFactory, McpSignInSheet } from '../fleet/components/mcp-sign-in-sheet.tsx';
-import type { FleetClientFactory } from '../fleet/fleet-client.ts';
-import { startMcpSignIn } from '../fleet/mcp-auth-api.ts';
-import { changeRefusalSentence } from '../fleet/shell/apply-change.ts';
+import { sortedMcpServers } from '../mcp/mcp-model.ts';
+import { type McpActionsHost, McpServerRow, useMcpServerActions } from '../mcp/mcp-server-row.tsx';
 import {
   CONTEXT_RAIL_SEARCH_LABEL,
-  type ContextMcpServer,
   contextEmptyCopy,
   type McpChip,
-  type McpRowStatus,
-  MCP_SCOPE_LABEL,
   mcpChips,
-  mcpRowStatus,
-  mcpScopeTitle,
   visibleMcpServers,
 } from './context-rail-model.ts';
-import { type ContextRead, ContextFailure, ContextFilterBar, ContextNote } from './context-rail-parts.tsx';
+import { ContextFailure, ContextFilterBar, ContextNote, type ContextRead } from './context-rail-parts.tsx';
 
 /**
- * What the rail needs to run a sign-in on the agent's machine. Without it the rail still shows where
- * every sign-in stands, and offers no Sign in.
+ * What the rail needs to check a server and run a sign-in on the agent's machine. Without it the rail
+ * still shows where every server stands, and offers neither act.
  */
-export interface ContextMcpSignInHost {
-  readonly connection: DaemonConnection;
-  readonly createClient: FleetClientFactory;
+export type ContextMcpSignInHost = Omit<McpActionsHost, 'sessionId' | 'now' | 'machineName'> & {
   /** The machine's own name, as the sign-in sheet says it. */
   readonly machineName: string;
-  /** The origin the provider sends the browser back to. This page's own unless a test says otherwise. */
-  readonly origin?: string;
-  /** Supplied in tests. */
-  readonly channel?: McpSignInChannelFactory;
-}
+};
 
 export interface ContextMcpPanelProps {
-  readonly read: ContextRead<readonly ContextMcpServer[]>;
+  readonly read: ContextRead<McpInventory>;
+  /** The ferret whose servers these are: Check reaches each one as it does. */
+  readonly sessionId: string;
   readonly signIn?: ContextMcpSignInHost;
+  /** The machine's own name, for a failure said in words. */
+  readonly machineName: string;
   /** Opens Actions › Add MCP server… — the same form, from the list it adds to. */
   readonly onAdd?: () => void;
   readonly query: string;
@@ -60,16 +47,11 @@ export interface ContextMcpPanelProps {
   readonly searchDebounceMs?: number;
 }
 
-const DOT: Readonly<Record<McpRowStatus['tone'], string>> = {
-  ok: 'bg-ok',
-  warn: 'bg-warn',
-  pend: 'bg-muted',
-  none: 'bg-faint',
-};
-
 export function ContextMcpPanel({
   read,
+  sessionId,
   signIn,
+  machineName,
   onAdd,
   query,
   onQueryChange,
@@ -78,36 +60,30 @@ export function ContextMcpPanel({
   now,
   searchDebounceMs,
 }: ContextMcpPanelProps) {
-  const [starting, setStarting] = useState<string | null>(null);
-  const [refusal, setRefusal] = useState<{ readonly name: string; readonly reason: string } | null>(null);
-  const [flow, setFlow] = useState<McpOAuthFlow | null>(null);
   const { load, reload } = read;
+  const actions = useMcpServerActions(
+    signIn === undefined ? undefined : { ...signIn, machineName, sessionId, now },
+    reload,
+  );
 
   if (load.kind === 'failed')
-    return <ContextFailure title="Couldn’t read this agent’s MCP servers" reason={load.reason} onRetry={reload} />;
+    return (
+      <ContextFailure
+        machineName={machineName}
+        what="read this ferret’s MCP servers"
+        reason={load.reason}
+        onRetry={reload}
+      />
+    );
   if (load.kind !== 'ready') return <ContextNote>Reading MCP servers…</ContextNote>;
 
   const nowMs = now();
-  const servers = load.value;
-  const chips = mcpChips(servers, query, nowMs);
-  const visible = visibleMcpServers(servers, query, chip, nowMs);
-  const chipLabel = chip === 'all' ? 'All' : 'Needs sign-in';
-  const total = visibleMcpServers(servers, '', chip, nowMs).length;
-
-  const start = async (host: ContextMcpSignInHost, name: string): Promise<void> => {
-    setStarting(name);
-    setRefusal(null);
-    try {
-      const client = await host.createClient(host.connection);
-      setFlow(
-        await startMcpSignIn(client, name, { redirectUri: mcpRedirectUri(host.origin ?? window.location.origin) }),
-      );
-    } catch (error) {
-      setRefusal({ name, reason: changeRefusalSentence(error) });
-    } finally {
-      setStarting(null);
-    }
-  };
+  const inventory = load.value;
+  const servers = sortedMcpServers(inventory.servers);
+  const chips = mcpChips(servers, query, actions.checks, nowMs);
+  const visible = visibleMcpServers(servers, query, chip, actions.checks, nowMs);
+  const total = visibleMcpServers(servers, '', chip, actions.checks, nowMs).length;
+  const chipLabel = chip === 'all' ? 'All' : 'Needs attention';
 
   return (
     <div className="flex min-w-0 flex-col gap-sm">
@@ -120,81 +96,33 @@ export function ContextMcpPanel({
         onChipChange={onChipChange}
         {...(searchDebounceMs === undefined ? {} : { debounceMs: searchDebounceMs })}
       />
-      {onAdd === undefined ? null : (
-        <div className="flex min-w-0 items-center justify-between gap-sm text-meta text-muted">
-          <span>
-            {servers.length} server{servers.length === 1 ? '' : 's'} this agent sees
-          </span>
+      <div className="flex min-w-0 items-center justify-between gap-sm text-meta text-muted">
+        <span>
+          {servers.length} server{servers.length === 1 ? '' : 's'} this ferret sees
+        </span>
+        {onAdd === undefined ? null : (
           <button className="fy-info-link" data-context-mcp-add="" onClick={onAdd} type="button">
             <Plus aria-hidden="true" size={12} /> Add…
           </button>
-        </div>
-      )}
+        )}
+      </div>
+      {inventory.problems.map(problem => (
+        <p key={problem.source} className="m-0 break-words text-meta text-warn" data-context-mcp-problem="">
+          {problem.message}
+        </p>
+      ))}
       {visible.length === 0 ? (
         <ContextNote>{contextEmptyCopy('mcp', total, query, chipLabel)}</ContextNote>
       ) : (
         <ul className="m-0 flex list-none flex-col p-0" data-context-list="mcp">
-          {visible.map(server => {
-            const status = mcpRowStatus(server, nowMs);
-            return (
-              <li
-                key={`${server.scope ?? ''}:${server.name}`}
-                className="flex min-h-row min-w-0 flex-wrap items-center gap-x-sm gap-y-xs border-b border-border-soft py-xs"
-                data-context-mcp={server.name}
-              >
-                <span className="min-w-0 flex-1 truncate font-mono text-cell text-fg">{server.name}</span>
-                {server.scope === undefined ? null : (
-                  <span
-                    className="fy-info-chip"
-                    data-context-mcp-scope={server.scope}
-                    data-tone={server.scope === 'project' ? 'accent' : 'muted'}
-                    title={mcpScopeTitle(server.scope)}
-                  >
-                    {MCP_SCOPE_LABEL[server.scope]}
-                  </span>
-                )}
-                <span className="text-meta text-faint">{server.transport === 'url' ? 'URL' : 'command'}</span>
-                {status.canSignIn && signIn !== undefined ? (
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="primary"
-                    disabled={starting !== null}
-                    onClick={() => void start(signIn, server.name)}
-                    data-context-mcp-sign-in={server.name}
-                  >
-                    {starting === server.name ? 'Opening sign-in…' : status.signInLabel}
-                  </Button>
-                ) : (
-                  <span className="flex min-w-0 items-center gap-1 text-meta text-muted" data-context-mcp-status="">
-                    <span aria-hidden="true" className={cn('h-2 w-2 shrink-0 rounded-full', DOT[status.tone])} />
-                    <span className="min-w-0 truncate">{status.label}</span>
-                  </span>
-                )}
-                {refusal?.name === server.name ? (
-                  <p className="m-0 w-full break-words text-meta text-err" role="alert" data-context-mcp-refusal="">
-                    {refusal.reason}
-                  </p>
-                ) : null}
-              </li>
-            );
-          })}
+          {visible.map(server => (
+            <li key={server.id} className="border-b border-border-soft" data-context-mcp={server.name}>
+              <McpServerRow server={server} actions={actions} nowMs={nowMs} online={signIn !== undefined} />
+            </li>
+          ))}
         </ul>
       )}
-      {flow === null || signIn === undefined ? null : (
-        <McpSignInSheet
-          component={flow.component}
-          machineName={signIn.machineName}
-          flow={flow}
-          redirectUri={mcpRedirectUri(signIn.origin ?? window.location.origin)}
-          connection={signIn.connection}
-          createClient={signIn.createClient}
-          onSignedIn={reload}
-          onClose={() => setFlow(null)}
-          {...(signIn.channel === undefined ? {} : { channel: signIn.channel })}
-          now={now}
-        />
-      )}
+      {actions.sheet}
     </div>
   );
 }

@@ -27,6 +27,10 @@ export interface Machine {
   stage?: unknown;
   /** Answers `GET /v1/fleet/mcp-auth`; absent answers that nothing is signed in. */
   mcpSignIns?: unknown;
+  /** Answers `GET /v1/mcp`, the machine's MCP inventory; absent answers that no runtime has a server. */
+  mcpServers?: unknown;
+  /** Answers `POST /v1/mcp/check`; absent fails it like a dead machine. */
+  mcpCheck?: unknown;
   /** Runs after a change is applied, before the next read. */
   onApply?: (machine: Machine) => void;
   readonly calls: Call[];
@@ -51,6 +55,8 @@ const machineFactory =
         '/v1/fleet/profiles/preview': () => machine.preview ?? new Error('unreachable'),
         '/v1/fleet/machine': machineAnswer(),
         '/v1/fleet/mcp-auth': () => machine.mcpSignIns ?? { connections: [] },
+        '/v1/mcp': () => machine.mcpServers ?? { servers: [], problems: [] },
+        '/v1/mcp/check': () => machine.mcpCheck ?? new Error('could not reach fyd at 127.0.0.1:7777'),
         '/v1/fleet/proposals': (call: Call) =>
           machine.stage ?? { ...STAGED, change: (call.body as { change: unknown }).change },
         [APPLY_PATH]: () => {

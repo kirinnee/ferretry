@@ -1,5 +1,5 @@
 /**
- * Where Info stands on one session page: open or shut, which tab, which Folder sub-tab, and — on a
+ * Where Info stands on one session page: open or shut, which tab, which Context sub-tab, and — on a
  * phone — whether the sheet is at half or full height. One placement per page, so the header's ⓘ, a
  * `/skill` chip in the transcript ("show me that skill") and Info's own tabs move the same panel.
  *
@@ -22,7 +22,7 @@ export interface InfoPlacement {
   readonly setTab: (tab: InfoTab) => void;
   readonly setFolderTab: (tab: ContextRailTab) => void;
   readonly setSheetSize: (size: InfoSheetSize) => void;
-  /** Opens Info on `tab` (and a Folder sub-tab), wherever it lives on this screen. */
+  /** Opens Info on `tab` (and a Context sub-tab), wherever it lives on this screen. */
   readonly show: (tab: InfoTab, folderTab?: ContextRailTab) => void;
 }
 

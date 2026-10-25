@@ -27,7 +27,8 @@ export const INFO_TAB_LABEL: Readonly<Record<InfoTab, string>> = {
   overview: 'Overview',
   runtime: 'Runtime',
   usage: 'Usage',
-  folder: 'Folder',
+  // The id stays `folder` (links and remembered sub-tabs name it); what a person reads is Context.
+  folder: 'Context',
   signals: 'Signals',
   surfaces: 'Surfaces',
 };

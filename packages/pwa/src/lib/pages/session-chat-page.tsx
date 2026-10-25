@@ -45,12 +45,12 @@ import { browserPageLabel } from '../../features/browser/browser-surface-list.ts
 import { InAppBrowserWorkspace } from '../../features/browser/in-app-browser.tsx';
 import type { UnifiedBrowserDependencies } from '../../features/browser/unified-browser-surface.tsx';
 import { browserPageForKey, useSessionBrowser } from '../../features/browser/use-session-browser.ts';
-import { scopedMcpServers } from '../../features/context-rail/context-rail-model.ts';
 import {
   attentionSignalsPort,
-  fleetMcpLoader,
   instructionDocsLoader,
-  sessionSkillsLoader,
+  sessionMcpLoader,
+  sessionSkillsInventoryLoader,
+  skillFileLoader,
 } from '../../features/context-rail/context-rail-ports.ts';
 import type { FleetClientFactory } from '../../features/fleet/fleet-client.ts';
 import { DialogCard, type HarnessDialogAnswerApi } from '../../features/harness-dialog/dialog-card.tsx';
@@ -1167,14 +1167,15 @@ export function SessionChatPage({
   const infoControls = infoRuntimeControls ?? runtimePickers(true) ?? undefined;
 
   /**
-   * INFO — every LOOK for this ferret. The Folder tab is the old "This folder" rail (Files, Docs, Skills
-   * and MCP, with each MCP server's scope), and Signals adds the Warden's verdicts to its attention.
+   * INFO — every LOOK for this ferret. The Context tab is the old "This folder" rail (Files, Instructions,
+   * Skills and MCP, each server and skill with its scope), and Signals adds the Warden's verdicts to its
+   * attention.
    * Keyed on the session's NAME and RUNTIME rather than the view: a status tick rebuilds the view, and a
    * fresh loader identity would re-read every tab for nothing.
    */
   const infoPorts = useMemo<SessionInfoPorts | undefined>(() => {
     if (contextDependencies === undefined) return undefined;
-    const loginMcp = fleetMcpLoader(connection, contextDependencies.createFleetClient, runtime);
+    const createClient = contextDependencies.createFleetClient;
     return {
       worktrees: async signal =>
         (await (await routedClient(connection)).request('/v1/worktrees', WorktreeListResponseSchema, { signal }))
@@ -1185,29 +1186,22 @@ export function SessionChatPage({
       relaunch: async signal => await readRelaunchSettings(connection, scope, referenceFetch, signal),
       folder: {
         agentName,
+        sessionId: scope.sessionId,
+        machineName: contextDependencies.machineName,
         signals: attentionSignalsPort(contextDependencies.attention, connection, scope),
-        loadMcp: async signal => {
-          const [login, project] = await Promise.all([
-            loginMcp(signal),
-            readSessionMcp(connection, scope, referenceFetch, signal).catch(() => null),
-          ]);
-          return scopedMcpServers(login, project?.project?.servers ?? null);
-        },
-        loadSkills: sessionSkillsLoader(skills.load, scope),
+        loadMcp: sessionMcpLoader(connection, createClient, scope.sessionId),
+        loadSkills: sessionSkillsInventoryLoader(connection, createClient, scope.sessionId),
+        loadSkillFile: skillFileLoader(connection, createClient, scope.sessionId),
         loadDocs: instructionDocsLoader(connection, scope, referenceFetch),
         onInsertSkill: invocation => {
           addSkillInvocationToComposer(invocation, scope);
         },
         onOpenFile: path => openFile(path),
-        mcpSignIn: {
-          connection,
-          createClient: contextDependencies.createFleetClient,
-          machineName: contextDependencies.machineName,
-        },
+        mcpSignIn: { connection, createClient, machineName: contextDependencies.machineName },
         onAddMcp: () => setActionForm(SESSION_ACTION_IDS.addMcp),
       },
     };
-  }, [contextDependencies, connection, scope, skills.load, referenceFetch, openFile, agentName, runtime, routedClient]);
+  }, [contextDependencies, connection, scope, referenceFetch, openFile, agentName, routedClient]);
   const infoSlot: SessionInfoSlot | undefined =
     infoPorts === undefined
       ? undefined

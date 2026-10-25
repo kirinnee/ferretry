@@ -19,7 +19,7 @@ import type {
 import type { ReactNode } from 'react';
 import type { ResolvedQuota } from '../../lib/usage.ts';
 import { ContextRailBody, type ContextRailBodyProps } from '../context-rail/context-rail-body.tsx';
-import { FERRETRY_TOOLS_SERVER, FOLDER_TABS } from '../context-rail/context-rail-model.ts';
+import { FOLDER_TABS, loadedSkillCount } from '../context-rail/context-rail-model.ts';
 import { useContextRead } from '../context-rail/context-rail-parts.tsx';
 import type { ContextLoader } from '../context-rail/context-rail-ports.ts';
 import { useContextSignals } from '../context-rail/context-rail-signals.tsx';
@@ -34,7 +34,7 @@ import { InfoSurfaces } from './info-surfaces.tsx';
 import { type InfoAnalyticsRead, InfoUsage } from './info-usage.tsx';
 import type { InfoPlacement } from './use-info-placement.ts';
 
-/** The Folder tab's data: the context rail's, minus what Info decides itself. */
+/** The Context tab's data: the context rail's, minus what Info decides itself. */
 export type InfoFolderProps = Omit<ContextRailBodyProps, 'tab' | 'onTabChange' | 'tabs' | 'label'>;
 
 export interface SessionInfoPorts {
@@ -178,11 +178,11 @@ export function SessionInfo({
           <InfoRuntime
             instructions={listRead(docs.load, value => value.map(doc => doc.name))}
             mcp={listRead(mcp.load, value =>
-              value
-                .filter(server => server.name !== FERRETRY_TOOLS_SERVER || server.scope !== 'ferretry')
+              value.servers
+                .filter(server => server.scope !== 'ferretry' && server.shadowedBy === undefined)
                 .map(server => server.name),
             )}
-            skills={skills.load.kind === 'ready' ? skills.load.value.skills.length : null}
+            skills={skills.load.kind === 'ready' ? loadedSkillCount(skills.load.value.skills) : null}
             view={view}
             {...(runtimeControls === undefined ? {} : { controls: runtimeControls })}
             {...(learning === undefined ? {} : { learning })}
@@ -209,7 +209,7 @@ export function SessionInfo({
         folder: () => (
           <ContextRailBody
             {...ports.folder}
-            label="Folder sections"
+            label="Context sections"
             onTabChange={placement.setFolderTab}
             tab={placement.folderTab}
             tabs={FOLDER_TABS}
