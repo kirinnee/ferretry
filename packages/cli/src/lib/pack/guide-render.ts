@@ -34,7 +34,10 @@ export function renderTextDiff(before: string, after: string, color: boolean): s
     .trimEnd();
 }
 
-/** A checked rewrite as a person reviews it: who wrote it, the diff, the notes, and how to accept it. */
+/**
+ * A checked rewrite as a person reviews it: who wrote it, the diff, the notes, and how to accept it. A prompt
+ * written from nothing has no "before", so it is shown as it is.
+ */
 export function renderCleanUp(
   job: PackCleanUpJob,
   suggestion: PackCleanUpSuggestion,
@@ -42,10 +45,14 @@ export function renderCleanUp(
   color: boolean,
 ): string {
   const by = suggestion.suggested;
+  const when = `${by.by} on ${by.via} (${by.at.slice(0, 16).replace('T', ' ')}Z)`;
+  const fresh = suggestion.before.trim() === '';
   return [
-    `Cleaned up by ${by.by} on ${by.via} (${by.at.slice(0, 16).replace('T', ' ')}Z). Removed text is [-like this-], added text is {+like this+}:`,
+    fresh
+      ? `Written by ${when}:`
+      : `${by.mode === 'generate' ? 'Rewritten' : 'Cleaned up'} by ${when}. Removed text is [-like this-], added text is {+like this+}:`,
     '',
-    renderTextDiff(suggestion.before, suggestion.after, color),
+    fresh ? suggestion.after : renderTextDiff(suggestion.before, suggestion.after, color),
     ...(suggestion.notes.length === 0
       ? []
       : [

@@ -1,5 +1,7 @@
 import {
+  type PackBuilderMode,
   type PackCleanUpJobResult,
+  type PackCleanUpRequest,
   type PackCleanUpSuggestion,
   type PackNewRequest,
   PackNewRequestSchema,
@@ -41,6 +43,16 @@ export interface PackCleanUpOptions {
   readonly model?: string;
   readonly json?: boolean;
   /** Accept the rewrite as soon as it is checked (`--apply`, `-y`). */
+  readonly apply?: boolean;
+}
+
+export interface PackWriteOptions {
+  /** What the owner wants, in a line; absent: a sensible default from what is available here. */
+  readonly idea?: string;
+  readonly runtime?: string;
+  readonly model?: string;
+  readonly json?: boolean;
+  /** Accept the prompt as soon as it is checked (`--apply`, `-y`). */
   readonly apply?: boolean;
 }
 
@@ -114,39 +126,58 @@ export class PackController {
   }
 
   /**
-   * `guide clean-up`: start the clean-up ferret (a person's ask, one model run), wait for its rewrite, and show
+   * `guide clean-up`: start the builder ferret (a person's ask, one model run), wait for its rewrite, and show
    * it as a word diff with its notes — or, with `--apply`, accept it at once.
    */
   async cleanUp(options: PackCleanUpOptions): Promise<void> {
-    const bin = this.deps.binaryName;
     const prompt = await this.roughPrompt(options);
+    await this.build('clean-up', options, {
+      ...(prompt === undefined ? {} : { prompt }),
+      ...(options.runtime === undefined ? {} : { runtime: options.runtime }),
+      ...(options.model === undefined ? {} : { model: options.model }),
+    });
+  }
+
+  /**
+   * `guide write`: the same builder in its other mode — it writes a whole prompt from a short idea (or from
+   * nothing) and what is available here; the result is reviewed and accepted exactly like a clean-up's.
+   */
+  async write(options: PackWriteOptions): Promise<void> {
+    const idea = options.idea?.trim();
+    await this.build('generate', options, {
+      mode: 'generate',
+      ...(idea === undefined || idea === '' ? {} : { idea }),
+      ...(options.runtime === undefined ? {} : { runtime: options.runtime }),
+      ...(options.model === undefined ? {} : { model: options.model }),
+    });
+  }
+
+  /** Starts the builder in a mode, waits for its checked result, and prints it (or accepts it). */
+  private async build(mode: PackBuilderMode, options: PackWriteOptions, request: PackCleanUpRequest): Promise<void> {
+    const bin = this.deps.binaryName;
+    const verb = mode === 'generate' ? 'write' : 'clean-up';
     const started = await withStep(
       this.deps.progress ?? NO_PROGRESS,
       options.runtime === undefined ? 'Checking the best ready runtime' : `Checking ${options.runtime}`,
-      async () =>
-        await this.deps.gateway.cleanUp({
-          ...(prompt === undefined ? {} : { prompt }),
-          ...(options.runtime === undefined ? {} : { runtime: options.runtime }),
-          ...(options.model === undefined ? {} : { model: options.model }),
-        }),
+      async () => await this.deps.gateway.cleanUp(request),
     );
     if (started.outcome === 'refused') {
-      this.deps.out.error(`${bin} guide clean-up: ${started.message}`);
+      this.deps.out.error(`${bin} guide ${verb}: ${started.message}`);
       this.deps.out.setExitCode(PACK_REFUSED_EXIT_CODE);
       return;
     }
     const job = started.job;
     const result = await withStep(
       this.deps.progress ?? NO_PROGRESS,
-      `${job.name} is cleaning up the routing prompt on ${job.runtime}`,
+      `${job.name} is ${mode === 'generate' ? 'writing' : 'cleaning up'} the routing prompt on ${job.runtime}`,
       async () => await this.settled(job.id),
     );
     if (result.job.status !== 'suggested' || result.suggestion === undefined) {
       const why =
         result.job.status === 'running'
           ? `it is still working; look again with \`${bin} guide accept ${job.id}\` once it is done`
-          : (result.job.message ?? 'the clean-up failed');
-      this.deps.out.error(`${bin} guide clean-up: ${why}`);
+          : (result.job.message ?? `the ${verb} failed`);
+      this.deps.out.error(`${bin} guide ${verb}: ${why}`);
       this.deps.out.setExitCode(1);
       return;
     }

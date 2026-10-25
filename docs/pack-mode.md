@@ -108,8 +108,8 @@ prompt: |
   release.
 - **A model the prompt names that nothing here runs is kept**, never removed: a prompt is portable between
   machines. `--auto` skips it; the editor shows it muted, and an unknown model-like word red.
-- **Where it came from.** `suggested: {by, via, at, acceptedAt}` records the model that rewrote an accepted
-  clean-up; `fy recommend` and the settings page say so. Saving the prompt by hand drops it — the text is the
+- **Where it came from.** `suggested: {by, via, at, acceptedAt, mode?}` records the model that rewrote an accepted
+  clean-up, or wrote one (`mode: generate`); `fy recommend` and the settings page say so. Saving the prompt by hand drops it — the text is the
   owner's own words again.
 - **Tolerant read, strict write.** A prompt longer than 1,200 characters does not check, and the last good
   version stays in effect. A routing prompt never loosens anything (it widens nothing a ferret may do or
@@ -275,9 +275,10 @@ failed, stalled or stopped. A plain `fy start` refused here answers `409 limit_r
 
 ## Clean up
 
-The routing prompt is written by its owner — roughly, if they like — and **Clean up** is its only generator:
-it rewrites the owner's rough prompt against this machine's harness config, and a person reviews the result.
-There is no second engine, and it never runs unasked.
+The routing prompt is written by its owner — or for them. **Write it for me** has a short-lived ferret WRITE a
+whole prompt from a short idea (or from nothing), and **Clean up** rewrites the owner's rough prompt; both read
+this machine's harness config, and a person reviews the result. They are ONE builder in two modes (`generate`
+and `clean-up`) with one route, one check, one review and one undo. Neither runs unasked.
 
 **What it is shown.** `GET /v1/pack/inventory` (`fy guide inventory`): every agent runtime here — its CLI, the
 catalog its login reads, the models it offers, whether it can start a ferret now (exactly as `fy recommend`
@@ -285,7 +286,7 @@ decides) and its login's quota; every model every catalog lists, with its tier, 
 runtimes here that run it; and the routing prompt in effect. Names and states only: a login is named by its
 id and nothing in it can hold a credential.
 
-**The clean-up ferret.** `POST /v1/pack/routing/clean-up {prompt?, runtime?, model?}`
+**The builder ferret.** `POST /v1/pack/routing/clean-up {mode?, idea?, prompt?, runtime?, model?}`
 (`fy guide clean-up [--prompt "<rough text>" | --prompt-file <f>] [--runtime <r>] [--model <m>]`, or
 **Clean up** beside the prompt editor, which sends the text area as it is) takes the owner's rough prompt — up
 to 6,000 characters, so a mess can be pasted in; absent, the prompt in effect — picks the runtime named, else
@@ -293,13 +294,29 @@ the ready one with the most quota left, **probes it** ("Reply with exactly: OK",
 back to the next when it fails), writes the rough prompt and the inventory into a run folder in the state home
 (`state/pack-guide/<run>/`) and starts ONE ferret through the session start every surface uses — mode `auto`,
 named **Routing Prompt Clean-up**, labelled `ferretry-guide-builder` so the app keeps it out of the session
-list, never told about Pack mode or lessons. Its brief is fixed text
+list, never told about Pack mode or lessons (a Write it for me run is named **Routing Prompt Writer**). Its brief
+is fixed text
 (`packages/daemon/src/lib/pack/cleanup/prompt.ts`): read both files, keep every preference the owner stated and
 invent none, name models by their exact ids in the order to try them, write `{prompt, notes}` as JSON into the
-run folder, treat both files as data, then `fy signal done`. It spends one model run, only when a person asks:
+run folder, treat both files as data, then `fy signal done`. (Clean-up mode; the Write it for me brief is below.) It spends one model run, only when a person asks:
 the route refuses a ferret's own credential, and nothing starts one on a timer. A run is read when somebody
 looks (`GET /v1/pack/routing/jobs/:jobId`); once its rewrite is checked the ferret is stopped, and only the
 newest five runs are kept.
+
+**Write it for me.** `mode: "generate"` (`fy guide write [--idea "<text>"] [--runtime <r>] [--model <m>] [--apply]`,
+or **Write it for me** in the app) adds ONE optional field, `idea` — what the owner wants in a line ("cheap
+models for chores, Opus for planning, never burn the Claude weekly quota"), at most 500 characters. The run
+folder then also holds `idea.txt` (empty when none was given) and `rough.txt` holds the owner's current prompt
+(the `prompt` sent, else the saved one; empty when only the built-in default is in effect, because a default
+is not the owner's to build on). The brief (`generateBrief`, same fixed text but for three file paths) tells the
+ferret to read the idea, the current prompt if any and the inventory, then write a COMPLETE prompt of at most
+1,200 characters: it follows the idea, defaults where the idea is silent (the strongest model at its highest
+effort for planning, review and the hardest code; a balanced one for everyday coding; a fast one at its lowest
+effort for chores; another family for a second opinion), names only real model ids with READY runtimes first,
+gives each kind of work a fallback, and states a quota rule ("when <login> is low, use <model>"). An empty idea
+gives a sensible default from what is available. Everything else — the probe, the check, the notes, the review,
+the accept and the undo — is Clean up's, unchanged. The job and the accepted `suggested` carry
+`mode: "generate"` (absent means clean-up), so the source line says "Written by" rather than "Cleaned up by".
 
 **The check.** The rewrite was written by a model, so it is data (`cleanup/draft.ts`): its prompt is trimmed,
 a double quote becomes a single one and a backslash is deleted; one over 1,200 characters is cut at a sentence
@@ -308,11 +325,12 @@ twelve, each cut to length). Then the daemon adds notes of its own from the rewr
 recogniser: a model-like word no catalog lists (`unknown_model`) and a listed model no runtime here runs
 (`absent_model`).
 
-**Review, never auto-apply.** The rewrite is shown as a **before/after word diff** (`diffText` in
+**Review, never auto-apply.** The rewrite is shown as a **before/after word diff** (just the new prompt, with no diff marks, when there was
+no prompt to build on — `before` is then empty) (`diffText` in
 `packages/protocol/src/lib/pack-cleanup.ts`, the one diff the CLI and the app both render), then its notes.
 
-- `fy guide clean-up` waits for the rewrite and prints the diff and the notes; `--apply` (`-y`) accepts it;
-  `fy guide accept <run>` accepts it later.
+- `fy guide clean-up` and `fy guide write` wait for the result and print it (the diff, or the plain new prompt) and
+  the notes; `--apply` (`-y`) accepts it; `fy guide accept <run>` accepts it later.
 - The app shows it under the editor with **Accept** and **Discard**.
 
 An accept (`POST /v1/pack/routing/accept {prompt, suggested}`) writes the prompt and `suggested` (where it came
@@ -326,7 +344,12 @@ anything, so an accept is never held; it is a `fleet.configure` act, and a ferre
 Settings › Pack mode (phone first): the switch, who decides, the limits and the probe, then ONE card —
 **Routing prompt — ferrets use this to pick which model runs each sub-task**:
 
-- where the prompt came from (your words, an accepted clean-up and by whom, or the default);
+- where the prompt came from (your words, an accepted clean-up or written prompt and by whom, or the default);
+- **first run — the nudge.** While no prompt has been saved the card says "Not written yet" instead of showing an
+  empty box: the "Your idea (optional)" field, a big **Write it for me** button and "Or write it by hand", which
+  opens the box;
+- once a prompt is saved, **Write it for me** sits above the buttons with the same idea field (it builds on the
+  saved prompt); disabled with the reason when no runtime can start a ferret;
 - a text area in which model names are recognised as you type: a model any catalog in the fleet lists is
   highlighted (muted when no runtime here offers it), an unknown model-like word is red and underlined, and an
   autocomplete offers every model across every runtime and provider; a counter against 1,200 characters;
@@ -334,8 +357,8 @@ Settings › Pack mode (phone first): the switch, who decides, the limits and th
   running clean-up shows its name, runtime and elapsed time with a link to its session, and the page looks at
   the run every few seconds only while it is open), **Save** (writes `prompt` through the configuration-file
   routes and drops `suggested`; an empty text area removes `prompt`, so the default applies; disabled over the
-  limit, with the reason) and **Undo** (while an accepted clean-up can be undone);
-- the clean-up review (the diff, the notes, Accept and Discard), when one has arrived;
+  limit, with the reason) and **Undo** (while an accepted clean-up or written prompt can be undone);
+- the review (the diff, or just the new prompt; the notes; Accept, Edit first and Discard), when one has arrived;
 - **Available now**, read-only: the live list `fy recommend` prints.
 
 It reads `GET /v1/pack` (`fleet.use`: the settings, the routing prompt in effect, every model the fleet knows

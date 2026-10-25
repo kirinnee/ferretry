@@ -1,16 +1,19 @@
 /**
- * CLEAN UP (docs/pack-mode.md § Clean up): the routing prompt's ONE generator — a short-lived, hidden ferret,
- * started through the session start every surface uses, on a runtime the person picked or the ready one with
- * the most quota left. It is given the owner's rough prompt and the harness inventory in files, writes its
- * rewrite to another, and signals done; the rewrite is checked against the inventory and kept with the run
- * until a person reviews it as a before/after diff.
+ * THE BUILDER (docs/pack-mode.md § Clean up, § Write it for me): the routing prompt's ONE generator — a
+ * short-lived, hidden ferret, started through the session start every surface uses, on a runtime the person
+ * picked or the ready one with the most quota left. One builder, two modes: `clean-up` rewrites the owner's
+ * rough prompt, `generate` writes a whole one from a short idea (which may be empty). It is given the
+ * owner's text and the harness inventory in files, writes its result to another, and signals done; the
+ * result is checked against the inventory and kept with the run until a person reviews it as a before/after
+ * diff (just "after" when there was nothing before).
  *
- * It runs only when a person asks (`fy guide clean-up`, the Clean up button): no timer starts one, and the
+ * It runs only when a person asks (`fy guide clean-up`/`write`, the buttons): no timer starts one, and the
  * runtime is probed ("Reply with exactly: OK") first, like any sub-ferret, so a login out of quota is skipped
  * rather than started. A run's state is read when somebody asks for it, never polled here.
  */
 import {
   PACK_CLEAN_UP_LABEL,
+  type PackBuilderMode,
   type PackCleanUpJob,
   type PackCleanUpJobResult,
   type PackCleanUpRequest,
@@ -27,10 +30,13 @@ import {
 import type { CachedProbe, PackProbeRequest } from '../probe.ts';
 import { checkRewrite } from './draft.ts';
 import { readyByHeadroom } from './inventory.ts';
-import { cleanUpBrief } from './prompt.ts';
+import { cleanUpBrief, generateBrief } from './prompt.ts';
 
 /** The name a clean-up ferret shows under, like any ferret. */
 export const CLEAN_UP_NAME = 'Routing Prompt Clean-up';
+
+/** The name a write-it-for-me ferret shows under. */
+export const GENERATE_NAME = 'Routing Prompt Writer';
 
 /** How many finished runs are kept; older ones (and their files) are removed when a new one starts. */
 export const KEPT_RUNS = 5;
@@ -82,6 +88,7 @@ export interface CleanUpPorts {
 }
 
 const ROUGH_FILE = 'rough.txt';
+const IDEA_FILE = 'idea.txt';
 const INVENTORY_FILE = 'inventory.json';
 const DRAFT_FILE = 'draft.json';
 
@@ -103,9 +110,16 @@ export class CleanUpService {
     };
   }
 
-  /** Starts one clean-up ferret on the rough prompt (else the one in effect), after probing its runtime. */
+  /**
+   * Starts one builder ferret after probing its runtime. `clean-up`: on the rough prompt, else the one in
+   * effect. `generate`: on the idea and the owner's current prompt (the one given, else the one saved, else
+   * none — a default is not the owner's to build on).
+   */
   async start(request: PackCleanUpRequest): Promise<PackCleanUpStart> {
+    const mode = request.mode ?? 'clean-up';
     const inventory = await this.ports.inventory();
+    const rough =
+      request.prompt ?? (mode === 'generate' && inventory.routing.source === 'default' ? '' : inventory.routing.text);
     let order: readonly PackInventoryRuntime[];
     if (request.runtime === undefined) order = readyByHeadroom(inventory.runtimes);
     else {
@@ -135,7 +149,7 @@ export class CleanUpService {
         failures.push(`${candidate.name}: ${probed.outcome.reason}`);
         continue;
       }
-      return await this.launch(candidate.name, runtime, model, request.prompt ?? inventory.routing.text, inventory);
+      return await this.launch({ mode, idea: request.idea ?? '', rough }, candidate.name, runtime, model, inventory);
     }
     return refused(`No runtime answered a "reply OK" check (${failures.join('; ') || 'none could be resolved'}).`);
   }
@@ -144,6 +158,7 @@ export class CleanUpService {
   async job(id: string): Promise<PackCleanUpJobResult | undefined> {
     const run = await this.ports.runs.load(id);
     if (run === undefined || run.job.status !== 'running') return run;
+    const mode = run.job.mode ?? 'clean-up';
     const [draft, status] = await Promise.all([
       this.ports.runs.readFile(id, DRAFT_FILE),
       this.ports.status(run.job.session),
@@ -153,16 +168,23 @@ export class CleanUpService {
       if (!finished) return run;
       return await this.settle(run, {
         status: 'failed',
-        message: `The clean-up ${status ?? 'ended'} without writing a prompt.`,
+        message: `The ${mode === 'generate' ? 'writer' : 'clean-up'} ${status ?? 'ended'} without writing a prompt.`,
       });
     }
     const checked = checkRewrite(draft, await this.shown(id));
     // A rewrite still being written does not parse yet: wait for the ferret to finish before judging it.
     if (!checked.ok)
       return finished ? await this.settle(run, { status: 'failed', message: `${checked.message}.` }) : run;
-    const before = (await this.ports.runs.readFile(id, ROUGH_FILE))?.trim() || checked.prompt;
+    const given = (await this.ports.runs.readFile(id, ROUGH_FILE))?.trim() ?? '';
+    // A clean-up with nothing on file compares the rewrite to itself; a generate had no prompt to build on.
+    const before = given === '' && mode === 'clean-up' ? checked.prompt : given;
     const suggestion: PackCleanUpSuggestion = {
-      suggested: { by: run.job.model ?? run.job.runtime, via: run.job.runtime, at: this.ports.now() },
+      suggested: {
+        by: run.job.model ?? run.job.runtime,
+        via: run.job.runtime,
+        at: this.ports.now(),
+        ...(mode === 'generate' ? { mode } : {}),
+      },
       before,
       after: checked.prompt,
       notes: checked.notes,
@@ -183,28 +205,34 @@ export class CleanUpService {
   }
 
   private async launch(
+    input: { readonly mode: PackBuilderMode; readonly idea: string; readonly rough: string },
     name: string,
     runtime: CleanUpRuntime,
     model: string | undefined,
-    rough: string,
     inventory: PackInventory,
   ): Promise<PackCleanUpStart> {
+    const { mode, idea, rough } = input;
     const id = this.ports.newId();
-    const roughPath = await this.ports.runs.writeFile(id, ROUGH_FILE, `${rough}\n`);
+    const roughPath = await this.ports.runs.writeFile(id, ROUGH_FILE, rough === '' ? '' : `${rough}\n`);
     const inventoryPath = await this.ports.runs.writeFile(
       id,
       INVENTORY_FILE,
       `${JSON.stringify(inventory, null, 2)}\n`,
     );
+    const files = { rough: roughPath, inventory: inventoryPath, draft: this.ports.runs.pathOf(id, DRAFT_FILE) };
+    const prompt =
+      mode === 'generate'
+        ? generateBrief(
+            { ...files, idea: await this.ports.runs.writeFile(id, IDEA_FILE, idea === '' ? '' : `${idea}\n`) },
+            this.ports.bin,
+          )
+        : cleanUpBrief(files, this.ports.bin);
     const view = await this.ports.start({
       agent: runtime.wrapper,
       mode: 'auto',
-      prompt: cleanUpBrief(
-        { rough: roughPath, inventory: inventoryPath, draft: this.ports.runs.pathOf(id, DRAFT_FILE) },
-        this.ports.bin,
-      ),
+      prompt,
       label: PACK_CLEAN_UP_LABEL,
-      name: CLEAN_UP_NAME,
+      name: mode === 'generate' ? GENERATE_NAME : CLEAN_UP_NAME,
       cwd: this.ports.home,
       boardAccess: 'none',
       ...(model === undefined ? {} : { model }),
@@ -212,7 +240,8 @@ export class CleanUpService {
     const job: PackCleanUpJob = {
       id,
       session: view.config.id,
-      name: view.config.teammate ?? CLEAN_UP_NAME,
+      name: view.config.teammate ?? (mode === 'generate' ? GENERATE_NAME : CLEAN_UP_NAME),
+      ...(mode === 'generate' ? { mode } : {}),
       runtime: name,
       ...(model === undefined ? {} : { model }),
       startedAt: this.ports.now(),
@@ -238,7 +267,12 @@ export class CleanUpService {
     await this.ports.runs.save(settled);
     const status = await this.ports.status(run.job.session);
     if (status !== undefined && !FINISHED.has(status))
-      await this.ports.stop(run.job.session, 'the routing prompt it cleaned up has been read').catch(() => undefined);
+      await this.ports
+        .stop(
+          run.job.session,
+          `the routing prompt it ${run.job.mode === 'generate' ? 'wrote' : 'cleaned up'} has been read`,
+        )
+        .catch(() => undefined);
     return settled;
   }
 }

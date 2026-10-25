@@ -4,14 +4,17 @@
  * model names marked as they are typed, and cleaned up on request against this machine's harness setup.
  *
  * Save writes `models-guide.yaml` › `prompt` through the configuration-file routes and drops `suggested`,
- * because saved text is the owner's words; an empty Save removes `prompt` and the default applies. Clean up
- * spends one model run, only on a press: it posts what is in the box now, the run is read only while this
- * card is mounted and going, and its rewrite is shown as a diff that writes nothing until Accept. One
- * accept can be undone.
+ * because saved text is the owner's words; an empty Save removes `prompt` and the default applies. Write it
+ * for me and Clean up are one builder in two modes and each spends one model run, only on a press: Write it
+ * for me posts a short optional idea (and the prompt in the box, if the owner has one) and the ferret WRITES a
+ * whole prompt; Clean up posts what is in the box and rewrites it. The run is read only while this card is
+ * mounted and going, and its result is shown as a diff (just the new prompt when there was nothing before)
+ * that writes nothing until Accept. One accept can be undone. Until a prompt has been saved the card is a
+ * first-run nudge — "Not written yet" and a big Write it for me — rather than a box holding the default.
  */
 
 import type { PackCleanUpJob, PackCleanUpSuggestion, PackView } from '@ferretry/protocol';
-import { modelVocabulary } from '@ferretry/protocol';
+import { MAX_IDEA_CHARS, modelVocabulary } from '@ferretry/protocol';
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { cn } from '../../lib/class-names.ts';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
@@ -20,6 +23,7 @@ import {
   routingCounter,
   routingSaveProblem,
   routingSourceWords,
+  writeProblem,
 } from '../../lib/pack/routing-prompt.ts';
 import { absoluteTime } from '../../lib/session-screens.ts';
 import { Button } from '../../shell/primitives.tsx';
@@ -62,6 +66,8 @@ export function RoutingPromptCard({
   const { routing, cleanUp } = view;
   const vocabulary = useMemo(() => modelVocabulary(view.models), [view.models]);
   const [draft, setDraft] = useState(routing.text);
+  const [idea, setIdea] = useState('');
+  const [byHand, setByHand] = useState(false);
   const [drawnFrom, setDrawnFrom] = useState(routing.text);
   const [busy, setBusy] = useState(false);
   const [outcome, setOutcome] = useState<Outcome | null>(null);
@@ -123,6 +129,9 @@ export function RoutingPromptCard({
   // An empty box over the default already in effect has nothing to remove.
   const canSave = changed && saveProblem === null && !(blank && routing.source === 'default');
   const cleanUpBlock = cleanUpProblem(draft, cleanUp, running);
+  const writeBlock = writeProblem(cleanUp, running);
+  // No prompt saved yet and the owner has not chosen to type one: offer to write it instead of an editor.
+  const nudge = routing.source === 'default' && !byHand;
 
   const save = (): void => {
     setBusy(true);
@@ -152,6 +161,29 @@ export function RoutingPromptCard({
         setNowMs(clockRef.current());
       } else setOutcome({ tone: 'err', message: started.message });
     });
+  };
+
+  const startWrite = (): void => {
+    setBusy(true);
+    setOutcome(null);
+    setSuggestion(null);
+    setReadError(null);
+    // What is in the box counts as the owner's prompt only when it is theirs: a saved prompt, or words they typed.
+    const theirs = routing.source === 'default' && words === routing.text.trim() ? '' : words;
+    const note = idea.trim();
+    void state
+      .cleanUp({
+        mode: 'generate',
+        ...(note === '' ? {} : { idea: note }),
+        ...(theirs === '' ? {} : { prompt: theirs }),
+      })
+      .then(started => {
+        setBusy(false);
+        if (started.kind === 'started') {
+          setJob(started.job);
+          setNowMs(clockRef.current());
+        } else setOutcome({ tone: 'err', message: started.message });
+      });
   };
 
   const closeReview = (): void => {
@@ -201,91 +233,144 @@ export function RoutingPromptCard({
           it names them.
         </p>
       </div>
-      <p className="m-0 flex min-w-0 items-start gap-2 text-meta leading-base">
-        <span
-          aria-hidden="true"
-          className={cn(
-            'mt-[0.45em] h-2 w-2 shrink-0 rounded-full',
-            routing.source === 'default' ? 'bg-surface-3' : 'bg-accent',
-          )}
-        />
-        <span className="min-w-0 break-words">
-          <span className="text-muted">Where it came from: </span>
-          <span
-            className="font-semibold text-fg-soft"
-            data-routing-source={routing.suggested === undefined ? routing.source : 'cleaned-up'}
-          >
-            {routingSourceWords(routing, absoluteTime)}
-          </span>
-        </span>
-      </p>
-      <ModelMentionField
-        id={`${id}-prompt`}
-        label="How to pick a model"
-        value={draft}
-        onChange={setDraft}
-        vocabulary={vocabulary}
-        rows={6}
-        disabled={busy}
-        problem={saveProblem}
-        describedBy={counterId}
-        placeholder="For example: planning or review → claude-opus-5-5 at max; chores → claude-haiku-4-5 low."
-      />
-      <div className="-mt-1 flex min-w-0 flex-wrap items-center justify-between gap-x-3 gap-y-1 text-meta">
-        <span className="min-w-0 text-faint">
-          {blank && routing.source === 'file'
-            ? 'Saving it empty removes your prompt, and the default applies.'
-            : 'Leave it empty and Save to use the default.'}
-        </span>
-        <span
-          id={counterId}
-          className={cn('mono shrink-0', over ? 'font-semibold text-err' : 'text-muted')}
-          data-routing-counter={over ? 'over' : 'ok'}
+      {nudge ? (
+        <div
+          className="flex min-w-0 flex-col gap-3 rounded-control border border-dashed border-border-strong bg-surface-2 p-4"
+          data-routing-nudge=""
         >
-          {routingCounter(draft)}
-          <span className="sr-only"> characters</span>
-        </span>
-      </div>
-      <div className="flex min-w-0 flex-wrap items-center gap-2">
-        <Button
-          className="min-h-[44px]"
-          disabled={busy || cleanUpBlock !== null}
-          onClick={startCleanUp}
-          data-routing-action="clean-up"
-        >
-          Clean up
-        </Button>
-        <Button
-          variant="primary"
-          className="min-h-[44px]"
-          disabled={busy || !canSave}
-          onClick={save}
-          data-routing-action="save"
-        >
-          Save
-        </Button>
-        {view.undo === undefined ? null : (
+          <p className="m-0 text-ui font-semibold">Not written yet</p>
+          <p className="m-0 text-meta leading-base text-muted">
+            Ferrets are using a default built from the model catalogs. Tell a short-lived ferret what you want, in a
+            line or leave it out, and it writes a routing prompt that names the models you really have here.
+          </p>
+          <IdeaField id={`${id}-idea`} value={idea} onChange={setIdea} disabled={busy || running} />
           <Button
-            variant="ghost"
-            className="min-h-[44px]"
-            disabled={busy}
-            onClick={undo}
-            title={`Put back the prompt kept ${absoluteTime(view.undo.savedAt)}`}
-            data-routing-action="undo"
+            variant="primary"
+            className="min-h-[52px] w-full text-ui sm:w-auto"
+            disabled={busy || writeBlock !== null}
+            onClick={startWrite}
+            data-routing-action="write"
           >
-            Undo clean-up
+            Write it for me
           </Button>
-        )}
-      </div>
-      {cleanUpBlock === null || running ? null : (
-        <p className="m-0 break-words text-meta leading-base text-warn" data-routing-clean-up-blocked="">
-          {cleanUpBlock}
-        </p>
+          {writeBlock === null || running ? null : (
+            <p className="m-0 break-words text-meta leading-base text-warn" data-routing-write-blocked="">
+              {writeBlock}
+            </p>
+          )}
+          <button
+            type="button"
+            className="min-h-[44px] self-start text-ui text-accent underline"
+            onClick={() => setByHand(true)}
+            data-routing-action="by-hand"
+          >
+            Or write it by hand
+          </button>
+        </div>
+      ) : (
+        <>
+          <p className="m-0 flex min-w-0 items-start gap-2 text-meta leading-base">
+            <span
+              aria-hidden="true"
+              className={cn(
+                'mt-[0.45em] h-2 w-2 shrink-0 rounded-full',
+                routing.source === 'default' ? 'bg-surface-3' : 'bg-accent',
+              )}
+            />
+            <span className="min-w-0 break-words">
+              <span className="text-muted">Where it came from: </span>
+              <span
+                className="font-semibold text-fg-soft"
+                data-routing-source={routing.suggested === undefined ? routing.source : 'cleaned-up'}
+              >
+                {routingSourceWords(routing, absoluteTime)}
+              </span>
+            </span>
+          </p>
+          <ModelMentionField
+            id={`${id}-prompt`}
+            label="How to pick a model"
+            value={draft}
+            onChange={setDraft}
+            vocabulary={vocabulary}
+            rows={6}
+            disabled={busy}
+            problem={saveProblem}
+            describedBy={counterId}
+            placeholder="For example: planning or review → claude-opus-5-5 at max; chores → claude-haiku-4-5 low."
+          />
+          <div className="-mt-1 flex min-w-0 flex-wrap items-center justify-between gap-x-3 gap-y-1 text-meta">
+            <span className="min-w-0 text-faint">
+              {blank && routing.source === 'file'
+                ? 'Saving it empty removes your prompt, and the default applies.'
+                : 'Leave it empty and Save to use the default.'}
+            </span>
+            <span
+              id={counterId}
+              className={cn('mono shrink-0', over ? 'font-semibold text-err' : 'text-muted')}
+              data-routing-counter={over ? 'over' : 'ok'}
+            >
+              {routingCounter(draft)}
+              <span className="sr-only"> characters</span>
+            </span>
+          </div>
+          <div
+            className="flex min-w-0 flex-col gap-2 rounded-control border border-border-soft bg-surface-2 p-3"
+            data-routing-write=""
+          >
+            <IdeaField id={`${id}-idea`} value={idea} onChange={setIdea} disabled={busy || running} />
+            <Button
+              variant="primary"
+              className="min-h-[44px] w-full sm:w-auto sm:self-start"
+              disabled={busy || writeBlock !== null}
+              onClick={startWrite}
+              data-routing-action="write"
+            >
+              Write it for me
+            </Button>
+            {writeBlock === null || running ? null : (
+              <p className="m-0 break-words text-meta leading-base text-warn" data-routing-write-blocked="">
+                {writeBlock}
+              </p>
+            )}
+          </div>
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
+            <Button
+              className="min-h-[44px]"
+              disabled={busy || cleanUpBlock !== null}
+              onClick={startCleanUp}
+              data-routing-action="clean-up"
+            >
+              Clean up
+            </Button>
+            <Button className="min-h-[44px]" disabled={busy || !canSave} onClick={save} data-routing-action="save">
+              Save
+            </Button>
+            {view.undo === undefined ? null : (
+              <Button
+                variant="ghost"
+                className="min-h-[44px]"
+                disabled={busy}
+                onClick={undo}
+                title={`Put back the prompt kept ${absoluteTime(view.undo.savedAt)}`}
+                data-routing-action="undo"
+              >
+                Undo
+              </Button>
+            )}
+          </div>
+          {cleanUpBlock === null || running ? null : (
+            <p className="m-0 break-words text-meta leading-base text-warn" data-routing-clean-up-blocked="">
+              {cleanUpBlock}
+            </p>
+          )}
+          <p className="m-0 text-meta leading-base text-faint">
+            Write it for me has a short-lived ferret write the whole prompt from your idea; Clean up rewrites what is in
+            the box. Both read this machine’s runtimes, models and quota, spend one model run only when you press them,
+            and save nothing until you accept.
+          </p>
+        </>
       )}
-      <p className="m-0 text-meta leading-base text-faint">
-        Clean up has a short-lived ferret rewrite what is in the box against this machine’s runtimes, models and quota.
-        It spends one model run, only when you press it; nothing is saved until you accept.
-      </p>
       {outcome === null ? null : (
         <p
           role="status"
@@ -302,10 +387,12 @@ export function RoutingPromptCard({
       {suggestion === null ? null : (
         <CleanUpReview
           suggestion={suggestion}
+          mode={job?.mode ?? 'clean-up'}
           busy={busy}
           onAccept={accept}
           onEdit={() => {
             setDraft(suggestion.after);
+            setByHand(true);
             setOutcome({ tone: 'warn', message: 'The rewrite is in the box. Save it when it says what you want.' });
             closeReview();
           }}
@@ -316,5 +403,37 @@ export function RoutingPromptCard({
         <AvailableNow available={view.available} headingId={`${id}-available`} />
       </div>
     </section>
+  );
+}
+
+/** The one optional line Write it for me takes: what the owner wants, in their own words. */
+function IdeaField({
+  id,
+  value,
+  onChange,
+  disabled,
+}: {
+  readonly id: string;
+  readonly value: string;
+  readonly onChange: (value: string) => void;
+  readonly disabled: boolean;
+}) {
+  return (
+    <div className="flex min-w-0 flex-col gap-1">
+      <label htmlFor={id} className="text-ui font-semibold">
+        Your idea (optional)
+      </label>
+      <input
+        id={id}
+        type="text"
+        className="kt-input min-h-[44px] w-full"
+        value={value}
+        maxLength={MAX_IDEA_CHARS}
+        disabled={disabled}
+        placeholder="Cheap models for chores, Opus for planning, never burn the Claude weekly quota"
+        onChange={event => onChange(event.currentTarget.value)}
+        data-routing-idea=""
+      />
+    </div>
   );
 }

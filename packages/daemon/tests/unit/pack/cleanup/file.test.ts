@@ -85,6 +85,24 @@ describe('GuideFileService.accept and undo', () => {
     should(await subject.service.undoable()).be.undefined();
   });
 
+  it('should say the prompt was written and record it as written', async () => {
+    // Arrange
+    const subject = world(undefined);
+
+    // Act
+    const accepted = await subject.service.accept({ prompt: PROMPT, suggested: { ...SUGGESTED, mode: 'generate' } });
+
+    // Assert
+    should(accepted).deepEqual({
+      outcome: 'applied',
+      message: 'The routing prompt is the one opus wrote. Undo puts the previous one back.',
+    });
+    should(subject.file()).deepEqual({
+      prompt: PROMPT,
+      suggested: { ...SUGGESTED, mode: 'generate', acceptedAt: NOW },
+    });
+  });
+
   it('should answer nothing to a second undo, and to one with no accept before it', async () => {
     // Arrange
     const subject = world('# mine\nprompt: Mine.\n');

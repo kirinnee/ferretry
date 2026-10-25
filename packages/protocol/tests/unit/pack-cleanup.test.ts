@@ -63,6 +63,25 @@ const cases: SchemaCase[] = [
     schema: cleanUp.PackCleanUpRequestSchema,
     value: { runtime: 'claude-work', model: 'claude-opus-5-5' },
   },
+  {
+    name: 'write-it-for-me request',
+    schema: cleanUp.PackCleanUpRequestSchema,
+    value: { mode: 'generate', idea: 'cheap models for chores, Opus for planning' },
+  },
+  {
+    name: 'write-it-for-me request with no idea',
+    schema: cleanUp.PackCleanUpRequestSchema,
+    value: { mode: 'generate' },
+  },
+  { name: 'idea', schema: cleanUp.IdeaSchema, value: 'never burn the Claude weekly quota' },
+  {
+    name: 'written job',
+    schema: cleanUp.PackCleanUpJobResultSchema,
+    value: {
+      job: { ...job, mode: 'generate', name: 'Routing Prompt Writer' },
+      suggestion: { ...suggestion, before: '', suggested: { ...suggested, mode: 'generate' } },
+    },
+  },
   { name: 'clean-up started', schema: cleanUp.PackCleanUpStartSchema, value: { outcome: 'started', job } },
   {
     name: 'clean-up refused',
@@ -114,6 +133,8 @@ describe('clean-up schemas', () => {
         schema: cleanUp.PackCleanUpNoteSchema,
         value: { kind: 'praise', message: 'Nice.' },
       },
+      { name: 'an idea past its limit', schema: cleanUp.IdeaSchema, value: 'x'.repeat(cleanUp.MAX_IDEA_CHARS + 1) },
+      { name: 'an unknown builder mode', schema: cleanUp.PackCleanUpRequestSchema, value: { mode: 'invent' } },
       { name: 'an unknown request key', schema: cleanUp.PackCleanUpRequestSchema, value: { preferences: 'x' } },
     ]);
   });

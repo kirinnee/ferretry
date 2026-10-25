@@ -19,6 +19,7 @@ import { z } from 'zod';
 import { InstantSchema } from './common.ts';
 import {
   MAX_ROUGH_PROMPT_CHARS,
+  PackBuilderModeSchema,
   PackCleanUpJobSchema,
   PackQuotaSchema,
   PackRefusalSchema,
@@ -89,8 +90,21 @@ export type PackInventory = z.infer<typeof PackInventorySchema>;
 /** A prompt as an owner hands it to Clean up: rough, and allowed to be longer than a saved one. */
 export const RoughPromptSchema = z.string().trim().min(1).max(MAX_ROUGH_PROMPT_CHARS);
 
+/** The most a "your idea" for Write it for me may say: a sentence or two, not a second prompt. */
+export const MAX_IDEA_CHARS = 500;
+
+/** The short idea an owner hands Write it for me; may be absent, which asks for a sensible default. */
+export const IdeaSchema = z.string().trim().min(1).max(MAX_IDEA_CHARS);
+
 export const PackCleanUpRequestSchema = z.strictObject({
-  /** The owner's current rough prompt; absent: the prompt in effect. */
+  /** `clean-up` (default) rewrites the owner's prompt; `generate` writes one from `idea` and what is here. */
+  mode: PackBuilderModeSchema.optional(),
+  /** `generate` only: what the owner wants, in a line or two ("cheap models for chores, Opus for planning"). */
+  idea: IdeaSchema.optional(),
+  /**
+   * The owner's current rough prompt. `clean-up`: absent means the prompt in effect. `generate`: absent
+   * means the prompt saved, if the owner saved one — a default is not an owner's prompt to build on.
+   */
   prompt: RoughPromptSchema.optional(),
   /** The runtime the clean-up ferret runs on; absent: the ready one with the most headroom. */
   runtime: NonEmpty.max(128).optional(),
@@ -133,8 +147,8 @@ export type PackCleanUpNote = z.infer<typeof PackCleanUpNoteSchema>;
 export const PackCleanUpSuggestionSchema = z.strictObject({
   /** Who rewrote it and when; the accept adds when it was accepted. */
   suggested: RoutingSuggestedSchema.omit({ acceptedAt: true, partial: true }),
-  /** The rough prompt it was given. */
-  before: RoughPromptSchema,
+  /** The rough prompt it was given; empty when `generate` had none to build on. */
+  before: z.string().trim().max(MAX_ROUGH_PROMPT_CHARS),
   /** The rewrite, within the routing prompt's limit. */
   after: RoutingPromptSchema,
   notes: z.array(PackCleanUpNoteSchema).readonly(),

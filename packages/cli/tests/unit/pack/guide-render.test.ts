@@ -76,6 +76,39 @@ describe('renderCleanUp', () => {
   });
 });
 
+describe('renderCleanUp for a prompt that was written', () => {
+  const written = { ...SUGGESTION, before: '', suggested: { ...SUGGESTION.suggested, mode: 'generate' as const } };
+
+  it('should say who wrote it and show the new prompt plainly, with no diff marks', () => {
+    // Arrange + Act
+    const text = renderCleanUp({ ...JOB, mode: 'generate', status: 'suggested' }, written, 'foo', true);
+
+    // Assert
+    should(text.split('\n').slice(0, 3)).eql([
+      'Written by claude-opus-5-5 on claude-work (2026-10-22 12:05Z):',
+      '',
+      SUGGESTION.after,
+    ]);
+    should(text).not.containEql('[-');
+    should(text).not.containEql('\u001b');
+    should(text).endWith('Accept with: foo guide accept run-1');
+  });
+
+  it('should still diff a prompt written over one the owner had', () => {
+    // Arrange + Act
+    const text = renderCleanUp(
+      { ...JOB, mode: 'generate', status: 'suggested' },
+      { ...written, before: 'Use opus.' },
+      'foo',
+      false,
+    );
+
+    // Assert
+    should(text).startWith('Rewritten by claude-opus-5-5 on claude-work');
+    should(text).containEql('{+');
+  });
+});
+
 describe('renderInventory', () => {
   it('should list each runtime with its models, then each model with where it runs', () => {
     // Arrange + Act
