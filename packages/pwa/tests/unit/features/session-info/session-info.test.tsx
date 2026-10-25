@@ -9,14 +9,11 @@ import type {
   AnalyticsResponse,
   BrowserStatus,
   ManagedWorktreeView,
+  McpInventory,
   SessionRelaunchSettings,
   TerminalListView,
   WardenVerdict,
 } from '@ferretry/protocol';
-import {
-  FERRETRY_TOOLS_SERVER,
-  type ContextMcpServer,
-} from '../../../../src/features/context-rail/context-rail-model.ts';
 import {
   SessionInfo,
   type SessionInfoPorts,
@@ -26,8 +23,8 @@ import { type InfoPlacement, useInfoPlacement } from '../../../../src/features/s
 import { NO_SURFACE_DRIVING } from '../../../../src/features/workspace/use-surface-driving.ts';
 import { interact, type Mounted, must } from '../../../support/dom.ts';
 import { sessionView } from '../../../support/sessions.ts';
+import { DOCS, fakeSignals, MCP, mcpServer, SKILLS, snapshot } from '../context-rail/context-rail-fixtures.ts';
 import { mountSettled, settle } from '../fleet/components/view-support.tsx';
-import { DOCS, fakeSignals, MCP, SKILLS, snapshot } from '../context-rail/context-rail-fixtures.ts';
 
 const NOW = Date.parse('2026-10-16T10:00:00.000Z');
 
@@ -65,6 +62,8 @@ const portsOf = (overrides: Partial<SessionInfoPorts> = {}): SessionInfoPorts =>
   analytics: counted(async () => ANALYTICS),
   folder: {
     agentName: 'Hadi',
+    sessionId: 'session-a',
+    machineName: 'studio-mac',
     signals: fakeSignals(snapshot()),
     loadMcp: counted(async () => MCP),
     loadSkills: counted(async () => SKILLS),
@@ -178,12 +177,16 @@ describe('SessionInfo — reading each port only when its tab is shown', () => {
 });
 
 describe('SessionInfo — Runtime’s MCP list', () => {
-  it('drops Ferretry’s own tools server, but keeps a login server merely named the same', async () => {
-    const servers: readonly ContextMcpServer[] = [
-      { name: FERRETRY_TOOLS_SERVER, transport: 'command', signsIn: false, scope: 'ferretry' },
-      { name: FERRETRY_TOOLS_SERVER, transport: 'command', signsIn: false, scope: 'login' },
-      { name: 'linear', transport: 'url', signsIn: false, scope: 'login' },
-    ];
+  it('drops Ferretry’s own tools server and the overridden ones, but keeps a server merely named the same', async () => {
+    const servers: McpInventory = {
+      problems: [],
+      servers: [
+        mcpServer({ name: 'ferretry', scope: 'ferretry', transport: 'stdio' }),
+        mcpServer({ name: 'ferretry', scope: 'user', transport: 'stdio' }),
+        mcpServer({ name: 'linear' }),
+        mcpServer({ name: 'linear', scope: 'user', shadowedBy: 'project' }),
+      ],
+    };
     const ports = portsOf({ folder: { ...portsOf().folder, loadMcp: async () => servers } });
     const root = await show({ ports });
     await interact(() => placement?.setTab('runtime'));
@@ -202,6 +205,7 @@ describe('SessionInfo — Runtime’s MCP list', () => {
     expect(must(root.querySelector('[data-info-row="Instruction files"]'), 'instructions').textContent).toContain(
       'fs denied',
     );
+    // Four skills listed, one overridden: three are what the ferret loads.
     expect(root.textContent).toContain('3 available');
   });
 });
@@ -223,8 +227,8 @@ describe('SessionInfo — Usage', () => {
   });
 });
 
-describe('SessionInfo — Folder', () => {
-  it('draws Info’s own folder tabs and label, starting on Files, and moves with the Folder sub-tab', async () => {
+describe('SessionInfo — Context', () => {
+  it('names the tab Context, draws its own sub-tabs and label, starting on Files, and moves with the sub-tab', async () => {
     const root = await show({
       ports: portsOf({
         folder: { ...portsOf().folder, renderFiles: () => <p>a file tree</p>, onAddMcp: () => undefined },
@@ -232,9 +236,13 @@ describe('SessionInfo — Folder', () => {
     });
     await interact(() => placement?.setTab('folder'));
     await settle();
+    expect(root.querySelector('[role="tab"][aria-selected="true"]')?.textContent).toBe('Context');
     expect(root.querySelector('[data-context-rail-body] [role="tablist"]')?.getAttribute('aria-label')).toBe(
-      'Folder sections',
+      'Context sections',
     );
+    expect(
+      [...root.querySelectorAll('[data-context-rail-body] [role="tab"]')].map(button => button.textContent),
+    ).toEqual(['Files', 'Instructions', 'Skills', 'MCP']);
     expect(root.textContent).toContain('a file tree');
 
     await interact(() => placement?.setFolderTab('mcp'));

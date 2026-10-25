@@ -83,6 +83,7 @@ export function OpenRow({
   mono = false,
   onOpen,
   data,
+  footer,
 }: {
   title: ReactNode;
   sub?: ReactNode;
@@ -91,6 +92,8 @@ export function OpenRow({
   mono?: boolean;
   onOpen: () => void;
   data?: Record<`data-${string}`, string>;
+  /** Controls of the row's own, under the part that opens the page — never inside it. */
+  footer?: ReactNode;
 }) {
   return (
     <li className="min-w-0">
@@ -103,6 +106,7 @@ export function OpenRow({
         {aside}
         <ChevronRight size={16} aria-hidden="true" className="shrink-0 text-muted" />
       </button>
+      {footer === undefined ? null : <div className="min-w-0 px-panel pb-2">{footer}</div>}
     </li>
   );
 }

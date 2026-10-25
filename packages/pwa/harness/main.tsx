@@ -173,7 +173,6 @@ import {
   type PairingClientFactory,
 } from '../src/features/settings/add-device-settings.tsx';
 import { AgentClisSurface } from '../src/features/settings/agent-clis.tsx';
-import { ViewportOverlay, viewportOverlay } from '../src/features/settings/viewport-details.tsx';
 import { CapabilityList } from '../src/features/settings/capability-list.tsx';
 import { CgroupConfigSurface } from '../src/features/settings/cgroup-settings.tsx';
 import type { DaemonSettingsTabDefinition } from '../src/features/settings/daemon-settings-frame.tsx';
@@ -185,12 +184,13 @@ import type { GrantClient } from '../src/features/settings/grants-api.ts';
 import { type GrantClientFactory, GrantsCard, GrantsSurface } from '../src/features/settings/grants-settings.tsx';
 import { MarkdownComposerSettings } from '../src/features/settings/markdown-composer-settings.tsx';
 import { NotificationSettingsView } from '../src/features/settings/notification-settings.tsx';
-import type { SecurityLogClient } from '../src/features/settings/security-api.ts';
 import { PerformanceSettings } from '../src/features/settings/performance-settings.tsx';
+import type { SecurityLogClient } from '../src/features/settings/security-api.ts';
 import { SecurityLogSurface } from '../src/features/settings/security-log-settings.tsx';
 import type { PasskeyClientFactory } from '../src/features/settings/security-settings.tsx';
 import { settingsPaletteEntries } from '../src/features/settings/settings-catalog.ts';
 import { SettingsPage } from '../src/features/settings/settings-page.tsx';
+import { ViewportOverlay, viewportOverlay } from '../src/features/settings/viewport-details.tsx';
 import { VoiceEngineChoice } from '../src/features/settings/voice-engine-choice.tsx';
 import type { SkillsCatalog } from '../src/features/skills/skills-catalog.ts';
 import { SkillsSurface } from '../src/features/skills/skills-surface.tsx';
@@ -256,8 +256,8 @@ import {
   type SpeechRecognitionResultEventLike,
 } from '../src/lib/stt/browser-recognition.ts';
 import type { CaptureMonitor } from '../src/lib/stt/level-monitor.ts';
-import { PARAKEET_TOTAL_BYTES, PARAKEET_VERSION_LABEL } from '../src/lib/stt/parakeet-model.ts';
 import { PARAKEET_CATALOG_MODEL } from '../src/lib/stt/model-catalog.ts';
+import { PARAKEET_TOTAL_BYTES, PARAKEET_VERSION_LABEL } from '../src/lib/stt/parakeet-model.ts';
 import type { ParakeetInstallSnapshot, ParakeetVoice } from '../src/lib/stt/parakeet-voice.ts';
 import { DEFAULT_STT_SETTINGS, type SttSettings } from '../src/lib/stt/stt-settings.ts';
 import { DaemonUsageIndex } from '../src/lib/usage.ts';
@@ -307,6 +307,7 @@ import {
   answerAnalyticsFixture,
 } from './analytics-fixture.ts';
 import { harnessConfigFilesClient } from './config-files-fixture.ts';
+import { ContextToolsHarness, contextToolsFrame } from './context-tools.tsx';
 import {
   LEARNING_PASSIVE,
   LearningHubHarness,
@@ -8823,6 +8824,7 @@ if (host) {
   const machineSetupHarness = new URLSearchParams(window.location.search).get('machine-setup');
   const appChromeHarness = new URLSearchParams(window.location.search).get('app-chrome');
   const mcpFrame = mcpSignInFrame(window.location.search);
+  const contextTools = contextToolsFrame(window.location.search);
   const pairFromMenu = isPairFromMenuPage(window.location.search);
   const sessionContextMenu = isSessionContextMenuPage(window.location.search);
   // `?viewport-overlay`: Settings › This device › About this device's readout pinned over any frame, as the
@@ -8835,6 +8837,8 @@ if (host) {
       <SessionSearchProvider connection={daemon} focusSignal={0} scope={scope}>
         {mcpFrame !== undefined ? (
           <McpSignInFrameHarness frame={mcpFrame} />
+        ) : contextTools !== undefined ? (
+          <ContextToolsHarness frame={contextTools} />
         ) : sessionContextMenu ? (
           <SessionContextMenuHarness />
         ) : pairFromMenu ? (

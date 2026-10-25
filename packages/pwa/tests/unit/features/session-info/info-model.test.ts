@@ -26,7 +26,7 @@ describe('INFO_TABS', () => {
   it('orders the six tabs and names each one', () => {
     expect(INFO_TABS).toEqual(['overview', 'runtime', 'usage', 'folder', 'signals', 'surfaces']);
     expect(INFO_TAB_LABEL.overview).toBe('Overview');
-    expect(INFO_TAB_LABEL.folder).toBe('Folder');
+    expect(INFO_TAB_LABEL.folder).toBe('Context');
     expect(Object.keys(INFO_HINT)).toContain('worktree');
   });
 });

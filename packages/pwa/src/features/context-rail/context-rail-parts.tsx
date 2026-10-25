@@ -5,8 +5,9 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { SidePaneSearch } from '../../shell/side-pane-search.tsx';
 import { Button } from '../../shell/primitives.tsx';
+import { SidePaneSearch } from '../../shell/side-pane-search.tsx';
+import { type PlainFailure, plainFailure } from '../mcp/mcp-model.ts';
 import type { ContextChip } from './context-rail-model.ts';
 import type { ContextLoader } from './context-rail-ports.ts';
 
@@ -146,19 +147,40 @@ export function ContextNote({ children }: { readonly children: string }) {
   );
 }
 
-export interface ContextFailureProps {
-  readonly title: string;
-  readonly reason: string;
-  readonly onRetry: () => void;
-}
+/**
+ * A read that failed. Given the machine and what was being read, it says it in plain words — "Liftoff MBP
+ * isn't reachable right now" — and keeps the transport's own text behind Details; given a title, it says
+ * that and the reason as they are.
+ */
+export type ContextFailureProps =
+  | { readonly title: string; readonly reason: string; readonly onRetry: () => void }
+  | {
+      readonly machineName: string;
+      /** What was being done, after "Couldn't": "read this ferret's skills". */
+      readonly what: string;
+      readonly reason: string;
+      readonly onRetry: () => void;
+    };
 
-export function ContextFailure({ title, reason, onRetry }: ContextFailureProps) {
+export function ContextFailure(props: ContextFailureProps) {
+  const failure: PlainFailure =
+    'title' in props
+      ? { headline: props.title, details: props.reason }
+      : plainFailure(props.reason, props.machineName, props.what);
+  const plain = !('title' in props);
   return (
     <div className="flex min-w-0 flex-col gap-xs py-sm" role="alert" data-context-failed="">
-      <p className="m-0 text-cell font-semibold text-fg">{title}</p>
-      <p className="m-0 break-words text-meta text-muted">{reason}</p>
+      <p className="m-0 break-words text-cell font-semibold text-fg">{failure.headline}</p>
+      {failure.details === undefined ? null : plain ? (
+        <details className="min-w-0 text-meta text-muted" data-context-failed-details="">
+          <summary className="cursor-pointer select-none">Details</summary>
+          <span className="block break-words font-mono text-2xs">{failure.details}</span>
+        </details>
+      ) : (
+        <p className="m-0 break-words text-meta text-muted">{failure.details}</p>
+      )}
       <div>
-        <Button type="button" size="sm" onClick={onRetry} data-context-retry="">
+        <Button type="button" size="sm" onClick={props.onRetry} data-context-retry="">
           Try again
         </Button>
       </div>

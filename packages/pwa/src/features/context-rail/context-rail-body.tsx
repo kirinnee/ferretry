@@ -1,8 +1,8 @@
 /**
- * The content of "This folder" without any chrome: the four sub-tabs, each with its search and chips,
- * and the list under them.
+ * The content of Context without any chrome: the four sub-tabs, each with its search and chips, and the
+ * list under them.
  *
- * Info › Folder draws it with the Files, Docs, Skills and MCP sub-tabs, in Info's right panel on a desktop
+ * Info › Context draws it with the Files, Instructions, Skills and MCP sub-tabs, in Info's right panel on a desktop
  * and its bottom sheet on a phone. Both show the same sub-tabs, the same filters and the same rows because
  * both render THIS — there is no second phone list to drift from the desktop one.
  *
@@ -10,17 +10,16 @@
  * is shown and kept, so moving between sub-tabs neither forgets what the reader typed nor reads again.
  */
 
+import type { McpInventory, SessionSkillsInventory } from '@ferretry/protocol';
 import { type ReactNode, useId, useState } from 'react';
 import { Badge } from '../../shell/primitives.tsx';
 import { SheetTabs, sheetPanelId, sheetTabId } from '../../shell/sheet-tabs.tsx';
-import type { SkillsCatalog } from '../skills/skills-catalog.ts';
-import { ContextDocsPanel, ContextSkillsPanel } from './context-rail-lists.tsx';
-import { type ContextMcpSignInHost, ContextMcpPanel } from './context-rail-mcp.tsx';
+import { ContextDocsPanel, ContextSkillsPanel, type SkillFileLoader } from './context-rail-lists.tsx';
+import { ContextMcpPanel, type ContextMcpSignInHost } from './context-rail-mcp.tsx';
 import {
   CONTEXT_RAIL_TAB_LABEL,
   CONTEXT_RAIL_TABS,
   type ContextDoc,
-  type ContextMcpServer,
   type ContextRailTab,
   type DocChip,
   type McpChip,
@@ -34,15 +33,21 @@ import { ContextSignalsPanel, useContextSignals } from './context-rail-signals.t
 export interface ContextRailBodyProps {
   /** The agent whose folder this is, for the line under a signal it raised. */
   readonly agentName: string;
+  /** Its session id: a Check reaches each MCP server as this ferret does. */
+  readonly sessionId: string;
+  /** The machine's own name, for a failure said in words. */
+  readonly machineName: string;
   readonly signals: ContextSignalsPort;
-  readonly loadMcp: ContextLoader<readonly ContextMcpServer[]>;
-  readonly loadSkills: ContextLoader<SkillsCatalog>;
+  readonly loadMcp: ContextLoader<McpInventory>;
+  readonly loadSkills: ContextLoader<SessionSkillsInventory>;
+  /** Reads one SKILL.md for a skill row's Open. */
+  readonly loadSkillFile?: SkillFileLoader;
   readonly loadDocs: ContextLoader<readonly ContextDoc[]>;
   /** Puts `/name` (or `$name`) into this agent's composer draft. */
   readonly onInsertSkill: (invocation: string) => void;
   /** Opens a file, by its path relative to the agent's folder, in a Files tab. */
   readonly onOpenFile: (path: string) => void;
-  /** Lets MCP rows sign in. Without it they say where each sign-in stands and offer nothing. */
+  /** Lets MCP rows check and sign in. Without it they say where each server stands and offer nothing. */
   readonly mcpSignIn?: ContextMcpSignInHost;
   /** The shown sub-tab, when the host keeps it (the phone sheet remembers it between openings). */
   readonly tab?: ContextRailTab;
@@ -75,9 +80,12 @@ const INITIAL_FILTERS: Filters = {
 
 export function ContextRailBody({
   agentName,
+  sessionId,
+  machineName,
   signals: port,
   loadMcp,
   loadSkills,
+  loadSkillFile,
   loadDocs,
   onInsertSkill,
   onOpenFile,
@@ -85,7 +93,7 @@ export function ContextRailBody({
   tab: shownTab,
   onTabChange,
   tabs = CONTEXT_RAIL_TABS,
-  label = 'This folder',
+  label = 'Context',
   renderFiles,
   onAddMcp,
   now = Date.now,
@@ -162,6 +170,8 @@ export function ContextRailBody({
         ) : tab === 'mcp' ? (
           <ContextMcpPanel
             read={mcp}
+            sessionId={sessionId}
+            machineName={machineName}
             query={filters.mcp.query}
             onQueryChange={setQuery('mcp')}
             chip={filters.mcp.chip}
@@ -179,6 +189,8 @@ export function ContextRailBody({
             chip={filters.skills.chip}
             onChipChange={setChip('skills')}
             onInsertSkill={onInsertSkill}
+            machineName={machineName}
+            {...(loadSkillFile === undefined ? {} : { loadSkillFile })}
             {...shared}
           />
         ) : (
@@ -189,6 +201,7 @@ export function ContextRailBody({
             chip={filters.docs.chip}
             onChipChange={setChip('docs')}
             onOpenFile={onOpenFile}
+            machineName={machineName}
             {...shared}
           />
         )}

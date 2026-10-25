@@ -1,25 +1,39 @@
 /**
- * `ContextRailBody` and its MCP sub-tab (`ContextMcpPanel`), driven directly as Info › Folder draws
+ * `ContextRailBody` and its MCP sub-tab (`ContextMcpPanel`), driven directly as Info › Context draws
  * them — there is no `ContextRail` wrapper left (deleted with the desktop rail chrome), so this is the
  * only place these two render at all. Also covers `useContextRead` (`context-rail-parts.tsx`), the
  * lazy read every sub-tab shares.
  */
 
 import { afterEach, describe, expect, it } from 'bun:test';
-import { MCP_OAUTH_PATH } from '@ferretry/protocol';
+import {
+  MCP_OAUTH_PATH,
+  type McpCheckResult,
+  type McpInventory,
+  McpInventorySchema,
+  type SessionSkillsInventory,
+  SessionSkillsInventorySchema,
+} from '@ferretry/protocol';
 import { FyHttpError } from '@ferretry/protocol/client';
 import {
   ContextRailBody,
   type ContextRailBodyProps,
 } from '../../../../src/features/context-rail/context-rail-body.tsx';
-import type { ContextDoc, ContextMcpServer } from '../../../../src/features/context-rail/context-rail-model.ts';
+import type { ContextDoc } from '../../../../src/features/context-rail/context-rail-model.ts';
 import { loadFailureReason, useContextRead } from '../../../../src/features/context-rail/context-rail-parts.tsx';
 import type { ContextLoader } from '../../../../src/features/context-rail/context-rail-ports.ts';
-import type { SkillsCatalog } from '../../../../src/features/skills/skills-catalog.ts';
 import { daemonConnection } from '../../../../src/lib/daemon-connection.ts';
 import { interact, type Mounted, must } from '../../../support/dom.ts';
 import { click, mountSettled, settle, text, type } from '../fleet/components/view-support.tsx';
-import { type Answers, CALLBACK, completion, factoryFor, fakeChannels, mcpFlow } from '../fleet/mcp-sign-in-support.ts';
+import {
+  type Answers,
+  CALLBACK,
+  type Call,
+  completion,
+  factoryFor,
+  fakeChannels,
+  mcpFlow,
+} from '../fleet/mcp-sign-in-support.ts';
 import {
   answeredItem,
   DOCS,
@@ -76,6 +90,8 @@ const body = async (
   mounted = await mountSettled(
     <ContextRailBody
       agentName="Hadi"
+      sessionId="session-a"
+      machineName="studio-mac"
       signals={signals}
       loadMcp={async () => MCP}
       loadSkills={async () => SKILLS}
@@ -183,7 +199,27 @@ describe('ContextRailBody — Signals', () => {
 });
 
 describe('ContextRailBody — MCP', () => {
-  it('reads only once the tab is shown, then lists every server with its status', async () => {
+  const NOTION_SUBJECT = 'notion..a1b2c3d4e5f6';
+  const checked = (overrides: Partial<McpCheckResult> = {}): McpCheckResult => ({
+    id: 'id-notion-project',
+    name: 'notion',
+    transport: 'http',
+    outcome: 'connected',
+    toolCount: 2,
+    tools: ['search', 'read'],
+    elapsedMs: 30,
+    checkedAt: '2026-10-16T10:00:00.000Z',
+    ...overrides,
+  });
+  const host = (answers: Answers, calls: Call[] = [], channel = fakeChannels()) => ({
+    connection: STUDIO,
+    createClient: factoryFor(answers, calls),
+    machineName: 'studio-mac',
+    origin: 'https://ferretry.pages.dev',
+    channel: channel.factory,
+  });
+
+  it('reads only once the tab is shown, then lists every server by scope with where it stands', async () => {
     const loadMcp = counted(async () => MCP);
     const { root, tabs } = await body({ loadMcp });
     expect(loadMcp.calls).toBe(0);
@@ -191,100 +227,152 @@ describe('ContextRailBody — MCP', () => {
     await tab(root, 'MCP');
     expect(tabs).toEqual(['mcp']);
     expect(loadMcp.calls).toBe(1);
-    expect(rows(root, 'data-context-mcp')).toEqual(['github', 'linear', 'notion']);
-    expect(text(root, '[data-context-mcp="github"] [data-context-mcp-status]')).toBe('Runs locally');
-    expect(text(root, '[data-context-mcp="linear"] [data-context-mcp-status]')).toContain('Signed in');
-    // No sign-in host: the row says where it stands and offers nothing.
-    expect(text(root, '[data-context-mcp="notion"] [data-context-mcp-status]')).toBe('Needs sign-in');
-    // Every server here has no scope (the fixture), so no row shows a scope chip.
-    expect(root.querySelector('[data-context-mcp-scope]')).toBeNull();
-    // The transport word reads plainly: a command server says "command", a URL one says "URL".
-    expect(text(root, '[data-context-mcp="github"] .text-faint')).toBe('command');
-    expect(text(root, '[data-context-mcp="linear"] .text-faint')).toBe('URL');
+    expect(rows(root, 'data-context-mcp')).toEqual(['ferretry', 'scratch', 'lint', 'notion', 'github', 'linear']);
+    expect(rows(root, 'data-mcp-scope')).toEqual(['ferretry', 'local', 'project', 'project', 'user', 'component']);
+    expect([...root.querySelectorAll('[data-mcp-scope-chip]')].map(chip => chip.textContent)).toEqual([
+      'Ferretry',
+      'Local',
+      'Project',
+      'Project',
+      'User',
+      'Ferretry',
+    ]);
+    expect(text(root, '[data-mcp-row="ferretry"] [data-mcp-status]')).toBe('Built in');
+    expect(text(root, '[data-mcp-row="lint"] [data-mcp-status]')).toBe('Not approved in this project');
+    expect(text(root, '[data-mcp-row="lint"] [data-mcp-detail]')).toContain('“New MCP server found”');
+    expect(text(root, '[data-mcp-row="linear"] [data-mcp-status]')).toContain('Signed in');
+    expect(text(root, '[data-mcp-row="notion"] [data-mcp-status]')).toBe('Not checked yet');
+    // Ferretry's own server has nothing to check.
+    expect(root.querySelector('[data-mcp-check="ferretry"]')).toBeNull();
 
-    await click(root, '[data-context-chip="needs-sign-in"]');
-    expect(rows(root, 'data-context-mcp')).toEqual(['notion']);
+    await click(root, '[data-context-chip="attention"]');
+    expect(rows(root, 'data-context-mcp')).toEqual(['lint']);
 
     // Moving away and back keeps the answer and the chosen chip, and does not read again.
     await tab(root, 'Signals');
     await tab(root, 'MCP');
     expect(loadMcp.calls).toBe(1);
-    expect(rows(root, 'data-context-mcp')).toEqual(['notion']);
+    expect(rows(root, 'data-context-mcp')).toEqual(['lint']);
   });
 
-  it('shows each server’s scope chip, titled with what the scope means', async () => {
-    const scoped: readonly ContextMcpServer[] = [
-      { name: 'ferretry', transport: 'command', signsIn: false, scope: 'ferretry' },
-      { name: 'repo-tools', transport: 'command', signsIn: false, scope: 'project' },
-      { name: 'github', transport: 'command', signsIn: false, scope: 'login' },
-    ];
-    const { root } = await body({ loadMcp: async () => scoped, tab: 'mcp' });
-    expect(text(root, '[data-context-mcp="ferretry"] [data-context-mcp-scope]')).toBe('Ferretry');
-    expect(text(root, '[data-context-mcp="repo-tools"] [data-context-mcp-scope]')).toBe('Project');
-    expect(text(root, '[data-context-mcp="github"] [data-context-mcp-scope]')).toBe('Login');
-    const project = must(root.querySelector('[data-context-mcp="repo-tools"] [data-context-mcp-scope]'), 'the chip');
-    expect(project.getAttribute('data-tone')).toBe('accent');
-    expect(project.getAttribute('title')).toBe('The repo’s .mcp.json, shared with everyone on the repo');
-    const login = must(root.querySelector('[data-context-mcp="github"] [data-context-mcp-scope]'), 'the chip');
-    expect(login.getAttribute('data-tone')).toBe('muted');
-  });
-
-  it('offers Add… only when the host hands onAddMcp, and opens it from the list it adds to', async () => {
-    const added: boolean[] = [];
+  it('offers no act without a host: every row says where it stands and Check is off', async () => {
     const { root } = await body({ tab: 'mcp' });
-    expect(root.querySelector('[data-context-mcp-add]')).toBeNull();
-
-    await mounted?.unmount();
-    mounted = undefined;
-    const withAdd = await body({ tab: 'mcp', onAddMcp: () => added.push(true) });
-    expect(withAdd.root.textContent).toContain('3 servers this agent sees');
-    await click(withAdd.root, '[data-context-mcp-add]');
-    expect(added).toEqual([true]);
+    const check = must(root.querySelector<HTMLButtonElement>('[data-mcp-check="notion"]'), 'Check');
+    expect(check.disabled).toBe(true);
   });
 
-  it('signs in with the Components tab’s sheet and reads again once signed in', async () => {
+  it('checks a server as this ferret reaches it, and lists the tools it answered with', async () => {
+    const calls: Call[] = [];
+    const { root } = await body({
+      tab: 'mcp',
+      mcpSignIn: host({ 'POST /v1/mcp/check': checked() }, calls),
+    });
+
+    await click(root, '[data-mcp-check="notion"]');
+    expect(calls).toEqual([
+      { path: '/v1/mcp/check', method: 'POST', body: { id: 'id-notion-project', sessionId: 'session-a' } },
+    ]);
+    expect(text(root, '[data-mcp-row="notion"] [data-mcp-status]')).toBe('Connected · 2 tools');
+    expect(text(root, '[data-mcp-row="notion"] [data-mcp-tools]')).toBe('search · read');
+  });
+
+  it('says a failed check in plain words, with the transport’s text behind Details', async () => {
+    const { root } = await body({
+      tab: 'mcp',
+      mcpSignIn: host({ 'POST /v1/mcp/check': new Error('could not reach fyd at 127.0.0.1:7777 (ECONNREFUSED)') }),
+    });
+
+    await click(root, '[data-mcp-check="github"]');
+    expect(text(root, '[data-mcp-row="github"] [data-mcp-failure="check"] .text-err')).toBe(
+      'studio-mac isn’t reachable right now',
+    );
+    expect(text(root, '[data-mcp-row="github"] [data-mcp-failure-details]')).toBe(
+      'could not reach fyd at 127.0.0.1:7777 (ECONNREFUSED)',
+    );
+  });
+
+  it('signs a project server in under its project subject once a check says it asks, and reads again', async () => {
     const answers: Answers = {
-      [`POST ${MCP_OAUTH_PATH}/notion`]: new FyHttpError('Unlock this device first.', 403, 'grant_step_up_required'),
+      'POST /v1/mcp/check': checked({ outcome: 'needs-sign-in', message: 'It asks for a sign-in.', tools: [] }),
+      [`POST ${MCP_OAUTH_PATH}/${NOTION_SUBJECT}`]: new FyHttpError(
+        'Unlock this device first.',
+        403,
+        'grant_step_up_required',
+      ),
     };
     const channels = fakeChannels();
     const loadMcp = counted(async () => MCP);
-    const { root } = await body({
-      loadMcp,
-      tab: 'mcp',
-      mcpSignIn: {
-        connection: STUDIO,
-        createClient: factoryFor(answers),
-        machineName: 'studio-mac',
-        origin: 'https://ferretry.pages.dev',
-        channel: channels.factory,
-      },
-    });
+    const { root } = await body({ loadMcp, tab: 'mcp', mcpSignIn: host(answers, [], channels) });
+    expect(root.querySelector('[data-mcp-sign-in="notion"]')).toBeNull();
 
-    await click(root, '[data-context-mcp-sign-in="notion"]');
-    expect(text(root, '[data-context-mcp-refusal]')).toBe('Unlock this device first.');
-    expect(document.body.querySelector('[data-mcp-sign-in]')).toBeNull();
+    await click(root, '[data-mcp-check="notion"]');
+    expect(text(root, '[data-mcp-row="notion"] [data-mcp-status]')).toBe('Needs sign-in');
+    await click(root, '[data-mcp-sign-in="notion"]');
+    expect(text(root, '[data-mcp-row="notion"] [data-mcp-failure="sign-in"]')).toBe('Unlock this device first.');
+    expect(document.body.querySelector('[data-mcp-sign-in-state]')).toBeNull();
 
-    answers[`POST ${MCP_OAUTH_PATH}/notion`] = mcpFlow({ component: 'notion' });
+    answers[`POST ${MCP_OAUTH_PATH}/${NOTION_SUBJECT}`] = mcpFlow({ component: NOTION_SUBJECT });
     answers[`POST ${MCP_OAUTH_PATH}/flows/mcp-flow-one`] = completion();
-    await click(root, '[data-context-mcp-sign-in="notion"]');
-    expect(root.querySelector('[data-context-mcp-refusal]')).toBeNull();
+    await click(root, '[data-mcp-sign-in="notion"]');
+    expect(root.querySelector('[data-mcp-failure="sign-in"]')).toBeNull();
     expect(document.body.querySelector('[data-mcp-sign-in="waiting"]')).not.toBeNull();
 
     channels.opened[0]?.deliver({ type: 'callback', id: 'hand-over', href: CALLBACK });
     await settle();
     expect(loadMcp.calls).toBe(2);
+    // The check that said "needs sign-in" is stale now.
+    expect(text(root, '[data-mcp-row="notion"] [data-mcp-status]')).toBe('Not checked yet');
     await click(document.body, '[data-mcp-sign-in-done]');
-    expect(document.body.querySelector('[data-mcp-sign-in]')).toBeNull();
+    expect(document.body.querySelector('[data-mcp-sign-in="waiting"]')).toBeNull();
   });
 
-  it('says it is reading, reports a failed read and retries it', async () => {
+  it('says why a Codex project server cannot sign in from here', async () => {
+    const codex = McpInventorySchema.parse({
+      problems: [],
+      servers: [
+        {
+          ...MCP.servers[3],
+          harness: 'codex',
+          signIn: {
+            subject: NOTION_SUBJECT,
+            required: false,
+            unsupported: 'Codex reads a project server’s token only from its own config.',
+          },
+        },
+      ],
+    });
+    const { root } = await body({
+      tab: 'mcp',
+      loadMcp: async () => codex,
+      mcpSignIn: host({ 'POST /v1/mcp/check': checked({ outcome: 'needs-sign-in', tools: [] }) }),
+    });
+    await click(root, '[data-mcp-check="notion"]');
+    expect(root.querySelector('[data-mcp-sign-in="notion"]')).toBeNull();
+    expect(text(root, '[data-mcp-sign-in-unsupported]')).toContain('Codex reads');
+  });
+
+  it('offers Add…, says how many servers it sees and any file it could not read', async () => {
+    const added: boolean[] = [];
+    const withProblem = McpInventorySchema.parse({
+      ...MCP,
+      problems: [{ source: '/work/app/.mcp.json', message: '/work/app/.mcp.json is not valid JSON.' }],
+    });
+    const { root } = await body({ tab: 'mcp', onAddMcp: () => added.push(true), loadMcp: async () => withProblem });
+    expect(root.textContent).toContain('6 servers this ferret sees');
+    expect(text(root, '[data-context-mcp-problem]')).toBe('/work/app/.mcp.json is not valid JSON.');
+    await click(root, '[data-context-mcp-add]');
+    expect(added).toEqual([true]);
+  });
+
+  it('says it is reading, reports a failed read in plain words and retries it', async () => {
     let fail = true;
-    const loadMcp = counted(async (): Promise<readonly ContextMcpServer[]> => {
+    const loadMcp = counted(async (): Promise<McpInventory> => {
       if (fail) throw new Error('the machine is offline');
-      return [];
+      return { servers: [], problems: [] };
     });
     const { root } = await body({ loadMcp, tab: 'mcp' });
-    expect(text(root, '[data-context-failed]')).toContain('the machine is offline');
+    expect(root.querySelector('[data-context-failed] p')?.textContent).toBe('studio-mac isn’t reachable right now');
+    expect(text(root, '[data-context-failed-details]')).toContain('the machine is offline');
 
     fail = false;
     await click(root, '[data-context-retry]');
@@ -298,37 +386,81 @@ describe('ContextRailBody — MCP', () => {
 });
 
 describe('ContextRailBody — Skills', () => {
-  it('inserts a skill in the harness’s own spelling and filters by origin and search', async () => {
+  it('lists every skill this ferret sees by scope, the winners first, and says which ones are overridden', async () => {
     const { root, inserted } = await body({ tab: 'skills' });
-    expect(rows(root, 'data-context-skill')).toEqual(['babysit-pr', 'floop', 'summary']);
+    expect(rows(root, 'data-context-skill')).toEqual(['summary', 'floop', 'babysit-pr', 'summary']);
+    expect(rows(root, 'data-context-skill-scope')).toEqual(['project', 'user', 'ferretry', 'user']);
+    expect(rows(root, 'data-context-chip')).toEqual(['all', 'project', 'user', 'ferretry']);
+    expect(text(root, '[data-context-skill-override]')).toBe('Overridden by Project');
     expect(root.textContent).toContain('Claude · inserts /name');
 
     await click(root, '[data-context-skill="floop"]');
     expect(inserted).toEqual(['/floop']);
 
-    await click(root, '[data-context-chip="generic"]');
-    expect(rows(root, 'data-context-skill')).toEqual(['floop']);
+    await click(root, '[data-context-chip="user"]');
+    expect(rows(root, 'data-context-skill')).toEqual(['floop', 'summary']);
     await search(root, 'green');
-    expect(text(root, '[data-context-note]')).toBe('Nothing under Generic matches “green”.');
+    expect(text(root, '[data-context-note]')).toBe('Nothing under User matches “green”.');
   });
 
-  it('spells a Codex skill $name and offers the Codex chip', async () => {
-    const codex: SkillsCatalog = { harness: 'codex', skills: [skill({ name: 'deploy', origin: 'codex' })] };
+  it('opens a skill’s SKILL.md and shows it as the document it is', async () => {
+    const read: string[] = [];
+    const loadSkillFile = async (path: string) => {
+      read.push(path);
+      return { path, content: '---\nname: floop\ndescription: Review.\n---\n# Summary\n\nSay what happened.' };
+    };
+    const { root } = await body({ tab: 'skills', loadSkillFile });
+    const open = must(root.querySelector<HTMLButtonElement>('[data-context-skill-open="floop"]'), 'Open');
+    await interact(() => open.click());
+    await settle();
+    expect(read).toEqual(['/fy/fleet/homes/claude-work/skills/floop/SKILL.md']);
+    const sheet = must(document.body.querySelector('[data-context-skill-file="floop"]'), 'the sheet');
+    expect(sheet.querySelector('h1')?.textContent).toBe('Summary');
+    // The front matter is shown as the lines it is, never as a heading.
+    expect(sheet.querySelector('[data-context-skill-front-matter]')?.textContent).toBe(
+      'name: floop\ndescription: Review.',
+    );
+    expect(sheet.textContent).toContain('Say what happened.');
+  });
+
+  it('says a SKILL.md it could not open in plain words', async () => {
+    const { root } = await body({
+      tab: 'skills',
+      loadSkillFile: async () => {
+        throw new Error('no listed skill has that path');
+      },
+    });
+    const open = must(root.querySelector<HTMLButtonElement>('[data-context-skill-open="floop"]'), 'Open');
+    await interact(() => open.click());
+    await settle();
+    expect(document.body.querySelector('[data-context-skill-file] [data-context-failed] p')?.textContent).toBe(
+      'Couldn’t open floop’s SKILL.md',
+    );
+  });
+
+  it('spells a Codex skill $name, and offers only the scopes it has', async () => {
+    const codex = SessionSkillsInventorySchema.parse({
+      sessionId: 'session-a',
+      harness: 'codex',
+      truncated: true,
+      skills: [skill({ name: 'deploy', harness: 'codex' })],
+    });
     const { root, inserted } = await body({ tab: 'skills', loadSkills: async () => codex });
-    expect(rows(root, 'data-context-chip')).toEqual(['all', 'claude', 'codex', 'generic']);
-    await click(root, '[data-context-chip="codex"]');
+    expect(rows(root, 'data-context-chip')).toEqual(['all', 'user']);
+    expect(root.textContent).toContain('the list was cut short');
+    expect(root.querySelector('[data-context-skill-open]')).toBeNull();
     await click(root, '[data-context-skill="deploy"]');
     expect(inserted).toEqual(['$deploy']);
   });
 
-  it('reports a failed read, and an empty catalog', async () => {
+  it('reports a failed read, and an empty list', async () => {
     let fail = true;
-    const loadSkills = async (): Promise<SkillsCatalog> => {
+    const loadSkills = async (): Promise<SessionSkillsInventory> => {
       if (fail) throw new Error('');
-      return { harness: 'claude', skills: [] };
+      return { sessionId: 'session-a', harness: 'claude', skills: [], truncated: false };
     };
     const { root } = await body({ tab: 'skills', loadSkills });
-    expect(text(root, '[data-context-failed]')).toContain('The daemon did not answer.');
+    expect(root.querySelector('[data-context-failed] p')?.textContent).toBe('studio-mac isn’t answering right now');
     fail = false;
     await click(root, '[data-context-retry]');
     expect(text(root, '[data-context-note]')).toBe('No skills are installed for this agent.');
@@ -340,7 +472,7 @@ describe('ContextRailBody — Skills', () => {
   });
 });
 
-describe('ContextRailBody — Docs', () => {
+describe('ContextRailBody — Instructions', () => {
   it('opens an instruction file in a Files tab and filters by harness and search', async () => {
     const { root, opened } = await body({ tab: 'docs' });
     expect(rows(root, 'data-context-doc')).toEqual(['CLAUDE.md', 'AGENTS.md']);
@@ -386,12 +518,12 @@ describe('ContextRailBody — Docs', () => {
 });
 
 describe('ContextRailBody — tabs, label and Files', () => {
-  it('draws Info › Folder’s own tab set and label, opening on the first of them', async () => {
-    const { root } = await body({ tabs: ['files', 'docs', 'skills', 'mcp'], label: 'Folder sections' });
-    expect(root.querySelector('[role="tablist"]')?.getAttribute('aria-label')).toBe('Folder sections');
+  it('draws Info › Context’s own tab set and label, opening on the first of them', async () => {
+    const { root } = await body({ tabs: ['files', 'docs', 'skills', 'mcp'], label: 'Context sections' });
+    expect(root.querySelector('[role="tablist"]')?.getAttribute('aria-label')).toBe('Context sections');
     expect([...root.querySelectorAll('[role="tab"]')].map(button => button.textContent)).toEqual([
       'Files',
-      'Docs',
+      'Instructions',
       'Skills',
       'MCP',
     ]);

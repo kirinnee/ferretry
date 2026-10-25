@@ -7,23 +7,27 @@
  * owner rather than a second read of the same route:
  *
  *   Signals  the attention client and store the rest of the PWA already keeps live
- *   MCP      the fleet component catalogue + the MCP sign-in list (`mcp-auth-api.ts`)
- *   Skills   the session skills loader (`skills-api.ts`), so the rail can share `useSessionSkills`' read
+ *   MCP      every server the ferret sees, from every scope (`../mcp/mcp-api.ts`, docs/mcp-scopes.md)
+ *   Skills   every skill the ferret sees, with its scope and SKILL.md (`../mcp/mcp-api.ts`)
  *   Docs     the session filesystem listing (`files-api.ts`) of the agent's own folder
  */
 
-import type { AttentionResponse, AttentionSnapshot } from '@ferretry/protocol';
+import type {
+  AttentionResponse,
+  AttentionSnapshot,
+  McpInventory,
+  SessionSkillsInventory,
+  SkillFile,
+} from '@ferretry/protocol';
 import { fsApi } from '../../components/files-api.ts';
 import type { DaemonAttentionClient } from '../../lib/attention-client.ts';
 import type { AttentionLoadStatus } from '../../lib/attention-store.ts';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
 import type { DaemonSessionScope } from '../../lib/daemon-scope.ts';
 import type { DaemonFetch } from '../../lib/runtime-models.ts';
-import { readFleetComponents } from '../fleet/catalog-api.ts';
 import type { FleetClientFactory } from '../fleet/fleet-client.ts';
-import { readMcpSignIns } from '../fleet/mcp-auth-api.ts';
-import type { SkillsCatalog } from '../skills/skills-catalog.ts';
-import { type ContextDoc, type ContextMcpServer, contextMcpServers, instructionDocs } from './context-rail-model.ts';
+import { readSessionMcpServers, readSessionSkillsInventory, readSkillFile } from '../mcp/mcp-api.ts';
+import { type ContextDoc, instructionDocs } from './context-rail-model.ts';
 
 /** A one-shot read the rail can cancel and repeat. */
 export type ContextLoader<T> = (signal: AbortSignal) => Promise<T>;
@@ -58,33 +62,27 @@ export const attentionSignalsPort = (
   resolve: id => client.resolve(daemon, scope, id),
 });
 
-/**
- * The MCP servers on the agent's machine, joined with their sign-ins.
- *
- * `runtime` is the session's `agent` — the runtime it was started as — so the rail lists only the servers
- * that runtime's profile stack carries. A host that does not know it passes nothing and the rail lists
- * every MCP server on the machine.
- */
-export const fleetMcpLoader =
+/** Every MCP server one ferret sees, from every scope, on that ferret's machine. */
+export const sessionMcpLoader =
+  (connection: DaemonConnection, createClient: FleetClientFactory, sessionId: string): ContextLoader<McpInventory> =>
+  async signal =>
+    await readSessionMcpServers(await createClient(connection), sessionId, signal);
+
+/** Every skill one ferret sees, with its scope, on that ferret's machine. */
+export const sessionSkillsInventoryLoader =
   (
     connection: DaemonConnection,
     createClient: FleetClientFactory,
-    runtime?: string,
-  ): ContextLoader<readonly ContextMcpServer[]> =>
-  async () => {
-    const client = await createClient(connection);
-    const [catalog, signIns] = await Promise.all([readFleetComponents(client), readMcpSignIns(client)]);
-    return contextMcpServers(catalog, signIns.connections, runtime);
-  };
+    sessionId: string,
+  ): ContextLoader<SessionSkillsInventory> =>
+  async signal =>
+    await readSessionSkillsInventory(await createClient(connection), sessionId, signal);
 
-/** The session skills read, bound to the agent's scope. Pass `useSessionSkills().load` to share its read. */
-export const sessionSkillsLoader =
-  (
-    load: (scope: DaemonSessionScope, signal: AbortSignal) => Promise<SkillsCatalog>,
-    scope: DaemonSessionScope,
-  ): ContextLoader<SkillsCatalog> =>
-  signal =>
-    load(scope, signal);
+/** One listed skill's SKILL.md, for Open. */
+export const skillFileLoader =
+  (connection: DaemonConnection, createClient: FleetClientFactory, sessionId: string) =>
+  async (path: string, signal: AbortSignal): Promise<SkillFile> =>
+    await readSkillFile(await createClient(connection), path, sessionId, signal);
 
 /** The instruction files at the root of the agent's folder, from the session filesystem listing. */
 export const instructionDocsLoader =

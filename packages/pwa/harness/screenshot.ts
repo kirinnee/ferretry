@@ -32,6 +32,7 @@
  *   bun harness/screenshot.ts --pairing-failures-only   # the two pairing failures that are one sentence
  *   bun harness/screenshot.ts --landing-only # capture the built landing and /get-started/ at both viewports and schemes
  *   bun harness/screenshot.ts --mcp-sign-in-only   # an MCP server's sign-in, its sheet and the callback page
+ *   bun harness/screenshot.ts --context-tools-only [--light]   # Info › Context › MCP and Skills, and Components' MCP rows
  *   bun harness/screenshot.ts --pair-from-menu-only [--light]   # Pair a phone from the machine menu
  *   bun harness/screenshot.ts --session-context-menu-only [--light]   # right-click menu / long-press sheet on a session row
  *   bun harness/screenshot.ts --about-only [--light]   # Settings › Machine › About and its update states
@@ -50,8 +51,8 @@ import { THEME_FAMILIES } from '../src/lib/theme-preferences.ts';
 import { captureElement } from './gallery-capture.ts';
 import { assertFixedElementsClear } from './landing-geometry.ts';
 import { runSafeAreaGeometry, SAFE_AREA_GEOMETRY_CHECKS } from './safe-area-geometry.ts';
-import { runSessionsPageGeometry, SESSIONS_PAGE_GEOMETRY_CHECKS } from './sessions-page-geometry.ts';
 import { runSessionLayoutGeometry, SESSION_LAYOUT_GEOMETRY_CHECKS } from './session-layout-geometry.ts';
+import { runSessionsPageGeometry, SESSIONS_PAGE_GEOMETRY_CHECKS } from './sessions-page-geometry.ts';
 import { runViewportMatrix } from './viewport-matrix.ts';
 
 const harnessDir = dirname(fileURLToPath(import.meta.url));
@@ -96,6 +97,8 @@ const ATTENTION_ONLY = process.argv.includes('--attention-only');
 const PROJECTS_ONLY = process.argv.includes('--projects-only');
 /** Signing in to a remote MCP server: the Components tab's Sign-in section, its sheet, and the callback page. */
 const MCP_SIGN_IN_ONLY = process.argv.includes('--mcp-sign-in-only');
+/** Info › Context's MCP and Skills sub-tabs (every scope, Check, Sign in, Open), and the Components MCP rows. */
+const CONTEXT_TOOLS_ONLY = process.argv.includes('--context-tools-only');
 /** "Pair a phone" from the machine menu: the switcher, the sheet and the minted (fake) QR. */
 const PAIR_FROM_MENU_ONLY = process.argv.includes('--pair-from-menu-only');
 /** The sessions bar's row menu: right-click at the pointer on a desktop, a long-press sheet on a phone. */
@@ -151,6 +154,7 @@ const WALKS_SETTINGS = !(
   PROJECTS_ONLY ||
   PAIRING_FAILURES_ONLY ||
   MCP_SIGN_IN_ONLY ||
+  CONTEXT_TOOLS_ONLY ||
   PAIR_FROM_MENU_ONLY ||
   SESSION_CONTEXT_MENU_ONLY ||
   ABOUT_ONLY ||
@@ -522,6 +526,55 @@ const capturePairingFailures = async (page: Page, viewportName: string): Promise
  *
  * A narrow mode, so it owes no Settings tally; its own sideways check runs on every frame instead.
  */
+/**
+ * Info › Context › MCP and Skills, and the Components page's MCP rows: every scope a ferret reads, a
+ * Check that connected, one that needs a sign-in, a project server nobody approved, a SKILL.md opened,
+ * and a machine that cannot be reached said in plain words. A narrow mode with its own sideways check.
+ */
+const captureContextTools = async (page: Page, viewportName: string): Promise<void> => {
+  const shot = async (name: string): Promise<void> => {
+    const wide = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+    if (wide > 1) fail(`context tools ${name} scrolls sideways by ${wide}px at ${viewportName}`);
+    const target = join(outDir, `context-tools-${name}-${viewportName}-${SCHEME}.png`);
+    await page.screenshot({ path: target, animations: 'disabled', fullPage: true });
+    process.stdout.write(`📸 context tools ${name} ${viewportName} ${SCHEME} -> ${target}\n`);
+  };
+  const frame = async (name: string, ready: string): Promise<void> => {
+    await page.goto(`${server.url}?context-tools=${name}`);
+    await page.locator(ready).first().waitFor({ state: 'visible' });
+  };
+
+  await frame('mcp', '[data-mcp-row="docs"]');
+  await page.locator('[data-mcp-check="docs"]').click();
+  await page.locator('[data-mcp-sign-in="docs"]').waitFor({ state: 'visible' });
+  await page.locator('[data-mcp-check="github"]').click();
+  await page.locator('[data-mcp-row="github"] [data-mcp-tools]').waitFor({ state: 'visible' });
+  await page.locator('[data-mcp-check="lint"]').click();
+  await page.locator('[data-mcp-row="lint"] [data-mcp-status]').filter({ hasText: 'Not approved' }).waitFor();
+  await shot('mcp');
+  await page.locator('[data-mcp-sign-in="docs"]').click();
+  await page.locator('[data-mcp-failure="sign-in"]').waitFor({ state: 'visible' });
+  await page.locator('[data-mcp-check="scratch"]').click();
+  await page.locator('[data-mcp-row="scratch"] [data-mcp-failure="check"] details summary').click();
+  await shot('mcp-failures');
+
+  await frame('skills', '[data-context-skill]');
+  await shot('skills');
+  await page.locator('[data-context-skill-open="release"]').click();
+  await page.locator('[data-context-skill-file="release"] h1').waitFor({ state: 'visible' });
+  await shot('skill-open');
+
+  await frame('unreachable', '[data-context-failed]');
+  await page.locator('[data-context-failed-details] summary').click();
+  await shot('unreachable');
+
+  await frame('components-mcp', '[data-component-kind="mcp"]');
+  await page.locator('[data-component-kind="mcp"]').click();
+  await page.locator('[data-mcp-check="github"]').click();
+  await page.locator('[data-mcp-row="github"] [data-mcp-tools]').waitFor({ state: 'visible' });
+  await shot('components-mcp');
+};
+
 const captureMcpSignIn = async (page: Page, viewportName: string): Promise<void> => {
   const noSideways = async (where: string): Promise<void> => {
     const wide = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
@@ -2172,6 +2225,10 @@ try {
           }
           if (MCP_SIGN_IN_ONLY) {
             await captureMcpSignIn(page, viewport.name);
+            continue;
+          }
+          if (CONTEXT_TOOLS_ONLY) {
+            await captureContextTools(page, viewport.name);
             continue;
           }
           if (PAIR_FROM_MENU_ONLY) {

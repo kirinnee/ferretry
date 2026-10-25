@@ -1,18 +1,17 @@
 import { describe, expect, it } from 'bun:test';
-import { MCP_OAUTH_PATH } from '@ferretry/protocol';
 import {
   attentionSignalsPort,
-  fleetMcpLoader,
   instructionDocsLoader,
-  sessionSkillsLoader,
+  sessionMcpLoader,
+  sessionSkillsInventoryLoader,
+  skillFileLoader,
 } from '../../../../src/features/context-rail/context-rail-ports.ts';
 import { DaemonAttentionClient } from '../../../../src/lib/attention-client.ts';
 import { daemonConnection } from '../../../../src/lib/daemon-connection.ts';
 import { daemonSessionScope } from '../../../../src/lib/daemon-scope.ts';
 import type { DaemonFetch } from '../../../../src/lib/runtime-models.ts';
-import { component } from '../fleet/components/catalog-fixture.ts';
 import { type Call, factoryFor } from '../fleet/mcp-sign-in-support.ts';
-import { answeredItem, openItem, SKILLS, snapshot } from './context-rail-fixtures.ts';
+import { answeredItem, MCP, openItem, SKILLS, snapshot } from './context-rail-fixtures.ts';
 
 const daemon = daemonConnection({ daemonId: 'studio', baseUrl: 'https://studio.example.test', deviceId: 'token' });
 const scope = daemonSessionScope(daemon, 'session-a');
@@ -69,59 +68,24 @@ describe('attentionSignalsPort', () => {
   });
 });
 
-describe('fleetMcpLoader', () => {
-  const catalog = {
-    format: 'version-2',
-    kinds: [
-      {
-        kind: 'mcp',
-        label: 'MCP servers',
-        description: 'Tools.',
-        components: [
-          component({
-            reference: 'mcp/notion',
-            kind: 'mcp',
-            name: 'notion',
-            detail: { kind: 'mcp', url: 'https://mcp.notion.example', auth: 'oauth', env: [] },
-            usedBy: { profiles: ['Default'], runtimes: ['claude-default'] },
-          }),
-          component({
-            reference: 'mcp/github',
-            kind: 'mcp',
-            name: 'github',
-            detail: { kind: 'mcp', command: 'npx', env: [] },
-          }),
-        ],
-      },
-    ],
-  };
-
-  it('reads the catalogue and the sign-ins from the agent’s machine, narrowed to its runtime', async () => {
+describe('the MCP and skills inventory loaders', () => {
+  it('read exactly this ferret’s servers, skills and one SKILL.md from its machine', async () => {
     const calls: Call[] = [];
-    const answers = { 'GET /v1/fleet/components': catalog, [`GET ${MCP_OAUTH_PATH}`]: { connections: [] } };
-    const servers = await fleetMcpLoader(
-      daemon,
-      factoryFor(answers, calls),
-      'claude-default',
-    )(new AbortController().signal);
-    expect(servers).toEqual([{ name: 'notion', transport: 'url', signsIn: true, scope: 'login' }]);
-    expect(calls.map(call => call.path).sort()).toEqual(['/v1/fleet/components', MCP_OAUTH_PATH]);
-
-    const every = await fleetMcpLoader(daemon, factoryFor(answers))(new AbortController().signal);
-    expect(every.map(server => server.name)).toEqual(['github', 'notion']);
-  });
-});
-
-describe('sessionSkillsLoader', () => {
-  it('reads the skills of exactly the agent’s session', async () => {
-    const seen: unknown[] = [];
+    const path = '/fy/fleet/homes/claude-work/skills/floop/SKILL.md';
+    const answers = {
+      'GET /v1/sessions/session%20a/mcp/servers': MCP,
+      'GET /v1/sessions/session%20a/skills/inventory': SKILLS,
+      [`GET /v1/skills/file?path=${encodeURIComponent(path)}&sessionId=session%20a`]: { path, content: '# Floop' },
+    };
     const signal = new AbortController().signal;
-    const loader = sessionSkillsLoader(async (target, given) => {
-      seen.push([target, given]);
-      return SKILLS;
-    }, scope);
-    expect(await loader(signal)).toBe(SKILLS);
-    expect(seen).toEqual([[scope, signal]]);
+
+    expect(await sessionMcpLoader(daemon, factoryFor(answers, calls), 'session a')(signal)).toEqual(MCP);
+    expect(await sessionSkillsInventoryLoader(daemon, factoryFor(answers, calls), 'session a')(signal)).toEqual(SKILLS);
+    expect(await skillFileLoader(daemon, factoryFor(answers, calls), 'session a')(path, signal)).toEqual({
+      path,
+      content: '# Floop',
+    });
+    expect(calls.map(call => call.path)).toEqual(Object.keys(answers).map(key => key.slice('GET '.length)));
   });
 });
 

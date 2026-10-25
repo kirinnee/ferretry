@@ -1,10 +1,10 @@
 /**
- * "This folder" — what one agent has where it is working, as rows a person can search and filter. Pure.
+ * Context — what one agent has where it is working, as rows a person can search and filter. Pure.
  *
  * The rail shows four facts about one agent in one folder: what it is waiting on you for (Signals), the
  * MCP servers it can reach (MCP), the skills it can run (Skills) and the instruction files it reads
- * (Docs). Every one of those facts has an owner elsewhere — the attention board, the fleet catalogue and
- * its MCP sign-ins, the session skills catalog, the session filesystem — and this module owns none of
+ * (Instructions). Every one of those facts has an owner elsewhere — the attention board, the MCP and skills
+ * inventories (docs/mcp-scopes.md), the session filesystem — and this module owns none of
  * them. It owns only the ROWS: which chip a row falls under, what a search matches, and the one short
  * line each row says about itself.
  *
@@ -15,16 +15,22 @@
 import type {
   AttentionItem,
   AttentionSnapshot,
-  AvailableSkill,
-  FleetComponentCatalog,
-  McpOAuthConnection,
+  McpInventoryServer,
   ResolvedAttentionItem,
   SessionFsEntry,
+  SkillEntry,
+  SkillScope,
 } from '@ferretry/protocol';
 import { formatBytes } from '../../components/files-model.ts';
 import { relativeTime } from '../../lib/session-screens.ts';
 import { attentionKindMeta, describeResponse } from '../attention/attention-board.tsx';
-import { mcpSignInStatus, type McpSignInTone } from '../fleet/components/mcp-sign-in-model.ts';
+import {
+  checkResultOf,
+  MCP_SCOPE_LABEL,
+  type McpCheckState,
+  mcpRowStatus,
+  SKILL_SCOPE_LABEL,
+} from '../mcp/mcp-model.ts';
 
 // ── The sub-tabs ─────────────────────────────────────────────────────────────────────────────────
 
@@ -40,7 +46,7 @@ export const CONTEXT_RAIL_TAB_LABEL: Readonly<Record<ContextRailTab, string>> = 
   files: 'Files',
   mcp: 'MCP',
   skills: 'Skills',
-  docs: 'Docs',
+  docs: 'Instructions',
 };
 
 /** What the search box says it searches, per sub-tab. */
@@ -49,7 +55,7 @@ export const CONTEXT_RAIL_SEARCH_LABEL: Readonly<Record<ContextRailTab, string>>
   files: 'Search files',
   mcp: 'Search MCP servers',
   skills: 'Search skills',
-  docs: 'Search docs',
+  docs: 'Search instructions',
 };
 
 /** One filter chip: its key, its words, and how many rows it would show under the current search. */
@@ -136,158 +142,73 @@ export const visibleSignals = (rows: readonly SignalRow[], query: string, chip: 
 
 // ── MCP ──────────────────────────────────────────────────────────────────────────────────────────
 
-export type McpChip = 'all' | 'needs-sign-in';
+export type McpChip = 'all' | 'attention';
 
-const MCP_CHIPS: readonly McpChip[] = ['all', 'needs-sign-in'];
-const MCP_CHIP_LABEL: Readonly<Record<McpChip, string>> = { all: 'All', 'needs-sign-in': 'Needs sign-in' };
+const MCP_CHIPS: readonly McpChip[] = ['all', 'attention'];
+const MCP_CHIP_LABEL: Readonly<Record<McpChip, string>> = { all: 'All', attention: 'Needs attention' };
 
-/**
- * One MCP server this agent can reach, and where its sign-in stands.
- *
- * `status` is `undefined` for a server that does not sign in from Ferretry (a local command, or a web
- * address with no `auth: oauth`): there is nothing for a person to do about it here, and Ferretry has no
- * live probe of whether such a server is up, so the row does not pretend to know.
- */
-export interface ContextMcpServer {
-  readonly name: string;
-  /** How the agent reaches it: a web address, or a command it runs. */
-  readonly transport: 'url' | 'command';
-  readonly signsIn: boolean;
-  readonly connection?: McpOAuthConnection;
-  /**
-   * Where the server is declared, for its scope chip: the repo's `.mcp.json` (Project, shared with
-   * everyone on the repo), the login's profile (Login, every ferret on it), or Ferretry's own tools
-   * server. Absent when the host did not say.
-   */
-  readonly scope?: McpServerScope;
-}
+const mcpMatches = (server: McpInventoryServer, query: string): boolean =>
+  matchesQuery(query, server.name, MCP_SCOPE_LABEL[server.scope], server.target);
 
-export type McpServerScope = 'project' | 'login' | 'ferretry';
+const needsAttention = (
+  server: McpInventoryServer,
+  checks: ReadonlyMap<string, McpCheckState>,
+  nowMs: number,
+): boolean => mcpRowStatus(server, checkResultOf(checks, server.id), nowMs).attention;
 
-export const MCP_SCOPE_LABEL: Readonly<Record<McpServerScope, string>> = {
-  project: 'Project',
-  login: 'Login',
-  ferretry: 'Ferretry',
-};
-
-/** The scope chip's hover text. */
-export const mcpScopeTitle = (scope: McpServerScope): string =>
-  scope === 'project'
-    ? 'The repo’s .mcp.json, shared with everyone on the repo'
-    : scope === 'login'
-      ? 'The login’s profile: every ferret on it'
-      : 'Ferretry’s built-in tools server';
-
-export interface McpRowStatus {
-  readonly label: string;
-  readonly tone: McpSignInTone | 'none';
-  /** Whether the row offers Sign in. */
-  readonly canSignIn: boolean;
-  readonly signInLabel: string;
-}
-
-/** Where one server stands, in the sign-in surface's own words when it signs in. */
-export const mcpRowStatus = (server: ContextMcpServer, nowMs: number): McpRowStatus => {
-  if (!server.signsIn)
-    return {
-      label: server.transport === 'url' ? 'No sign-in needed' : 'Runs locally',
-      tone: 'none',
-      canSignIn: false,
-      signInLabel: 'Sign in',
-    };
-  const status = mcpSignInStatus(server.connection, nowMs);
-  return {
-    label: status.title,
-    tone: status.tone,
-    canSignIn: status.tone === 'warn',
-    signInLabel: status.signedInBefore ? 'Sign in again' : 'Sign in',
-  };
-};
-
-const needsSignIn = (server: ContextMcpServer, nowMs: number): boolean => mcpRowStatus(server, nowMs).canSignIn;
-
-/**
- * The MCP servers in a component catalogue, joined with where each sign-in stands.
- *
- * `runtime` narrows the list to the servers one runtime's profile stack uses — a session's `agent` IS its
- * runtime's name, which is what the catalogue's `usedBy.runtimes` lists. Without it every MCP server on
- * the machine is shown. Name-sorted so the list does not reorder between reads.
- */
-export const contextMcpServers = (
-  catalog: FleetComponentCatalog,
-  connections: readonly McpOAuthConnection[],
-  runtime?: string,
-): ContextMcpServer[] => {
-  const servers: ContextMcpServer[] = [];
-  for (const group of catalog.kinds)
-    for (const component of group.components) {
-      const detail = component.detail;
-      if (detail.kind !== 'mcp' || (runtime !== undefined && !component.usedBy.runtimes.includes(runtime))) continue;
-      const connection = connections.find(entry => entry.component === component.name);
-      servers.push({
-        name: component.name,
-        transport: detail.url === undefined ? 'command' : 'url',
-        signsIn: detail.url !== undefined && detail.auth === 'oauth',
-        scope: 'login',
-        ...(connection === undefined ? {} : { connection }),
-      });
-    }
-  return servers.sort((left, right) => left.name.localeCompare(right.name, undefined, { sensitivity: 'base' }));
-};
-
-export const mcpChips = (servers: readonly ContextMcpServer[], query: string, nowMs: number): ContextChip<McpChip>[] =>
+/** The chips, counted under the current search. A Check's answer moves a server in or out of attention. */
+export const mcpChips = (
+  servers: readonly McpInventoryServer[],
+  query: string,
+  checks: ReadonlyMap<string, McpCheckState>,
+  nowMs: number,
+): ContextChip<McpChip>[] =>
   chipsFor(
     MCP_CHIPS,
     MCP_CHIP_LABEL,
-    servers.filter(server => matchesQuery(query, server.name)),
-    (server, chip) => chip === 'all' || needsSignIn(server, nowMs),
+    servers.filter(server => mcpMatches(server, query)),
+    (server, chip) => chip === 'all' || needsAttention(server, checks, nowMs),
   );
 
 export const visibleMcpServers = (
-  servers: readonly ContextMcpServer[],
+  servers: readonly McpInventoryServer[],
   query: string,
   chip: McpChip,
+  checks: ReadonlyMap<string, McpCheckState>,
   nowMs: number,
-): ContextMcpServer[] =>
-  servers.filter(server => matchesQuery(query, server.name) && (chip === 'all' || needsSignIn(server, nowMs)));
+): McpInventoryServer[] =>
+  servers.filter(server => mcpMatches(server, query) && (chip === 'all' || needsAttention(server, checks, nowMs)));
 
 // ── Skills ───────────────────────────────────────────────────────────────────────────────────────
 
-export type SkillChip = 'all' | 'claude' | 'codex' | 'generic';
+export type SkillChip = 'all' | SkillScope;
 
-const SKILL_CHIPS: readonly SkillChip[] = ['all', 'claude', 'codex', 'generic'];
-const SKILL_CHIP_LABEL: Readonly<Record<SkillChip, string>> = {
-  all: 'All',
-  claude: 'Claude',
-  codex: 'Codex',
-  generic: 'Generic',
-};
+const SKILL_CHIPS: readonly SkillChip[] = ['all', 'project', 'user', 'ferretry'];
+const SKILL_CHIP_LABEL: Readonly<Record<SkillChip, string>> = { all: 'All', ...SKILL_SCOPE_LABEL };
 
-/** A skill made for one harness falls under it; one for both, or of unknown origin, is generic. */
-const skillInChip = (skill: AvailableSkill, chip: SkillChip): boolean =>
-  chip === 'all' ||
-  (chip === 'generic' ? skill.origin === 'both' || skill.origin === 'unknown' : skill.origin === chip);
+const skillInChip = (skill: SkillEntry, chip: SkillChip): boolean => chip === 'all' || skill.scope === chip;
 
-const skillMatches = (skill: AvailableSkill, query: string): boolean =>
-  matchesQuery(query, skill.name, skill.description);
+const skillMatches = (skill: SkillEntry, query: string): boolean =>
+  matchesQuery(query, skill.name, skill.description, SKILL_SCOPE_LABEL[skill.scope]);
 
 /**
- * The chips. Codex is offered only when the catalog has a Codex skill: a Claude agent's rail with a
- * permanently empty "Codex 0" chip is a control that can never do anything.
+ * The chips. A scope is offered only when this ferret has a skill from it: a permanently empty
+ * "Project 0" chip on a ferret outside any project is a control that can never do anything.
  */
-export const skillChips = (skills: readonly AvailableSkill[], query: string): ContextChip<SkillChip>[] => {
-  const chips = chipsFor(
+export const skillChips = (skills: readonly SkillEntry[], query: string): ContextChip<SkillChip>[] =>
+  chipsFor(
     SKILL_CHIPS,
     SKILL_CHIP_LABEL,
     skills.filter(skill => skillMatches(skill, query)),
     skillInChip,
-  );
-  const hasCodex = skills.some(skill => skill.origin === 'codex');
-  return chips.filter(chip => chip.key !== 'codex' || hasCodex);
-};
+  ).filter(chip => chip.key === 'all' || skills.some(skill => skill.scope === chip.key));
 
-export const visibleSkills = (skills: readonly AvailableSkill[], query: string, chip: SkillChip): AvailableSkill[] =>
+export const visibleSkills = (skills: readonly SkillEntry[], query: string, chip: SkillChip): SkillEntry[] =>
   skills.filter(skill => skillInChip(skill, chip) && skillMatches(skill, query));
+
+/** How many skills this ferret actually loads: the ones no other scope overrides. */
+export const loadedSkillCount = (skills: readonly SkillEntry[]): number =>
+  skills.filter(skill => skill.shadowedBy === undefined).length;
 
 // ── Docs ─────────────────────────────────────────────────────────────────────────────────────────
 
@@ -362,28 +283,3 @@ export const contextEmptyCopy = (tab: ContextRailTab, total: number, query: stri
     docs: 'No instruction files in this folder.',
   }[tab];
 };
-
-// ── MCP across scopes ────────────────────────────────────────────────────────────────────────────
-
-/** The name of Ferretry's own tools server, as the fleet's fixed layer injects it into every runtime. */
-export const FERRETRY_TOOLS_SERVER = 'ferretry';
-
-/**
- * Every server one ferret sees, each with its scope: Ferretry's own tools server first, then the
- * project's `.mcp.json` servers, then the login's. `project` is null when there is no project file a
- * ferret here reads. A project server that shares a name with a login server is listed under both,
- * because they are two declarations and the CLI decides which one wins.
- */
-export const scopedMcpServers = (
-  login: readonly ContextMcpServer[],
-  project: readonly { readonly name: string; readonly transport: 'command' | 'url' }[] | null,
-): ContextMcpServer[] => [
-  { name: FERRETRY_TOOLS_SERVER, transport: 'command', signsIn: false, scope: 'ferretry' },
-  ...(project ?? []).map(server => ({
-    name: server.name,
-    transport: server.transport,
-    signsIn: false,
-    scope: 'project' as const,
-  })),
-  ...login.map(server => ({ ...server, scope: 'login' as const })),
-];
