@@ -80,7 +80,10 @@ export function registerGuideCommand(
   guide
     .command('write')
     .description('have a short-lived ferret write the routing prompt from a short idea (one model run), then review it')
-    .option('--idea <text>', 'what you want, in a line ("cheap models for chores, Opus for planning"); optional')
+    .option(
+      '--idea <text>',
+      'what you want, in your words, up to 4,000 characters ("cheap models for chores, Opus for planning"); optional',
+    )
     .option('--runtime <runtime>', 'run it on this runtime (default: the ready one with the most quota left)')
     .option('--model <model>', 'run it on this model (default: the runtime’s own)')
     .option('-y, --apply', 'accept the prompt as soon as it is checked')

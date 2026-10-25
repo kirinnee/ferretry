@@ -74,6 +74,16 @@ const cases: SchemaCase[] = [
     value: { mode: 'generate' },
   },
   { name: 'idea', schema: cleanUp.IdeaSchema, value: 'never burn the Claude weekly quota' },
+  { name: 'idea at its limit', schema: cleanUp.IdeaSchema, value: 'x'.repeat(cleanUp.MAX_IDEA_CHARS) },
+  {
+    name: 'multi-line idea with a rough prompt',
+    schema: cleanUp.PackCleanUpRequestSchema,
+    value: {
+      mode: 'generate',
+      idea: 'Chores on the cheap models.\n\n- Opus for planning\n- never burn the weekly quota',
+      prompt: 'x'.repeat(MAX_ROUGH_PROMPT_CHARS),
+    },
+  },
   {
     name: 'written job',
     schema: cleanUp.PackCleanUpJobResultSchema,
@@ -137,6 +147,14 @@ describe('clean-up schemas', () => {
       { name: 'an unknown builder mode', schema: cleanUp.PackCleanUpRequestSchema, value: { mode: 'invent' } },
       { name: 'an unknown request key', schema: cleanUp.PackCleanUpRequestSchema, value: { preferences: 'x' } },
     ]);
+  });
+
+  it('should let an idea run to four thousand characters, line breaks kept, trimmed at the edges', () => {
+    should(cleanUp.MAX_IDEA_CHARS).equal(4_000);
+    should(cleanUp.IdeaSchema.parse(`  first\n\nsecond  `)).equal('first\n\nsecond');
+    should(cleanUp.IdeaSchema.safeParse('x'.repeat(4_000)).success).be.true();
+    should(cleanUp.IdeaSchema.safeParse('x'.repeat(4_001)).success).be.false();
+    should(cleanUp.MAX_IDEA_CHARS).be.below(MAX_ROUGH_PROMPT_CHARS);
   });
 
   it('should keep a clean-up session hidden under the old builder label', () => {

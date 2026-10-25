@@ -15,11 +15,13 @@
 
 import type { PackCleanUpJob, PackCleanUpSuggestion, PackView } from '@ferretry/protocol';
 import { MAX_IDEA_CHARS, modelVocabulary } from '@ferretry/protocol';
-import { useEffect, useId, useMemo, useRef, useState } from 'react';
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { cn } from '../../lib/class-names.ts';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
 import {
   cleanUpProblem,
+  ideaCounter,
+  ideaFill,
   routingCounter,
   routingSaveProblem,
   routingSourceWords,
@@ -186,6 +188,11 @@ export function RoutingPromptCard({
       });
   };
 
+  // Cmd/Ctrl+Enter in the idea field presses Write it for me, only when the button itself could be pressed.
+  const submitWrite = (): void => {
+    if (!busy && !running && writeBlock === null) startWrite();
+  };
+
   const closeReview = (): void => {
     setSuggestion(null);
     setJob(null);
@@ -240,10 +247,17 @@ export function RoutingPromptCard({
         >
           <p className="m-0 text-ui font-semibold">Not written yet</p>
           <p className="m-0 text-meta leading-base text-muted">
-            Ferrets are using a default built from the model catalogs. Tell a short-lived ferret what you want, in a
-            line or leave it out, and it writes a routing prompt that names the models you really have here.
+            Ferrets are using a default built from the model catalogs. Tell a short-lived ferret what you want, in your
+            own words, as long as you like, or leave it out, and it writes a routing prompt that names the models you
+            really have here.
           </p>
-          <IdeaField id={`${id}-idea`} value={idea} onChange={setIdea} disabled={busy || running} />
+          <IdeaField
+            id={`${id}-idea`}
+            value={idea}
+            onChange={setIdea}
+            onSubmit={submitWrite}
+            disabled={busy || running}
+          />
           <Button
             variant="primary"
             className="min-h-[52px] w-full text-ui sm:w-auto"
@@ -318,7 +332,13 @@ export function RoutingPromptCard({
             className="flex min-w-0 flex-col gap-2 rounded-control border border-border-soft bg-surface-2 p-3"
             data-routing-write=""
           >
-            <IdeaField id={`${id}-idea`} value={idea} onChange={setIdea} disabled={busy || running} />
+            <IdeaField
+              id={`${id}-idea`}
+              value={idea}
+              onChange={setIdea}
+              onSubmit={submitWrite}
+              disabled={busy || running}
+            />
             <Button
               variant="primary"
               className="min-h-[44px] w-full sm:w-auto sm:self-start"
@@ -406,34 +426,75 @@ export function RoutingPromptCard({
   );
 }
 
-/** The one optional line Write it for me takes: what the owner wants, in their own words. */
+/** Rows the idea field shows empty, and the most it grows to before it scrolls. */
+const IDEA_MIN_ROWS = 4;
+const IDEA_MAX_ROWS = 12;
+
+/** The one optional note Write it for me takes: what the owner wants, in their own words, as long as they like. */
 function IdeaField({
   id,
   value,
   onChange,
+  onSubmit,
   disabled,
 }: {
   readonly id: string;
   readonly value: string;
   readonly onChange: (value: string) => void;
+  readonly onSubmit: () => void;
   readonly disabled: boolean;
 }) {
+  const fieldRef = useRef<HTMLTextAreaElement>(null);
+  const counterId = `${id}-count`;
+  const fill = ideaFill(value);
+
+  // Grow with the text up to IDEA_MAX_ROWS (the CSS max-height), then scroll inside the box.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `value` is the re-measure trigger; the effect reads the node
+  useLayoutEffect(() => {
+    const field = fieldRef.current;
+    if (field === null) return;
+    field.style.height = 'auto';
+    field.style.height = `${String(field.scrollHeight + field.offsetHeight - field.clientHeight)}px`;
+  }, [value]);
+
   return (
     <div className="flex min-w-0 flex-col gap-1">
       <label htmlFor={id} className="text-ui font-semibold">
         Your idea (optional)
       </label>
-      <input
+      <textarea
+        ref={fieldRef}
         id={id}
-        type="text"
-        className="kt-input min-h-[44px] w-full"
+        className="kt-input w-full resize-none overflow-y-auto"
+        style={{ maxHeight: `calc(${String(IDEA_MAX_ROWS)}lh + 2 * var(--pad-row-y) + 2 * var(--stroke-control))` }}
+        rows={IDEA_MIN_ROWS}
         value={value}
         maxLength={MAX_IDEA_CHARS}
         disabled={disabled}
+        aria-describedby={counterId}
         placeholder="Cheap models for chores, Opus for planning, never burn the Claude weekly quota"
         onChange={event => onChange(event.currentTarget.value)}
+        onKeyDown={event => {
+          if (event.key !== 'Enter' || !(event.metaKey || event.ctrlKey) || event.nativeEvent.isComposing) return;
+          event.preventDefault();
+          onSubmit();
+        }}
         data-routing-idea=""
       />
+      <div className="flex min-w-0 flex-wrap items-center justify-between gap-x-3 gap-y-1 text-meta">
+        <span className="min-w-0 text-faint">Enter adds a line; Cmd or Ctrl + Enter writes it.</span>
+        <span
+          id={counterId}
+          className={cn(
+            'mono shrink-0',
+            fill === 'full' ? 'font-semibold text-err' : fill === 'near' ? 'font-semibold text-warn' : 'text-muted',
+          )}
+          data-idea-counter={fill}
+        >
+          {ideaCounter(value)}
+          <span className="sr-only"> characters</span>
+        </span>
+      </div>
     </div>
   );
 }

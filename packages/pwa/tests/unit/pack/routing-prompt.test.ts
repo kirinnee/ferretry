@@ -1,7 +1,14 @@
 import { describe, expect, it } from 'bun:test';
-import { MAX_ROUGH_PROMPT_CHARS, MAX_ROUTING_PROMPT_CHARS, PACK_QUOTA_STATES } from '@ferretry/protocol';
+import {
+  MAX_IDEA_CHARS,
+  MAX_ROUGH_PROMPT_CHARS,
+  MAX_ROUTING_PROMPT_CHARS,
+  PACK_QUOTA_STATES,
+} from '@ferretry/protocol';
 import {
   cleanUpProblem,
+  ideaCounter,
+  ideaFill,
   ordinal,
   QUOTA_CHIP,
   routingCounter,
@@ -65,6 +72,19 @@ describe('saving and cleaning up', () => {
 
   it('counts trimmed characters against the saved limit', () => {
     expect(routingCounter('  abc  ')).toBe(`3 / ${MAX_ROUTING_PROMPT_CHARS.toLocaleString('en-US')}`);
+  });
+
+  it('counts the idea as typed, line breaks and edges included, against its own limit', () => {
+    expect(ideaCounter('')).toBe('0 / 4,000');
+    expect(ideaCounter(' a\nb ')).toBe('5 / 4,000');
+    expect(ideaCounter('x'.repeat(MAX_IDEA_CHARS))).toBe('4,000 / 4,000');
+  });
+
+  it('warns from nine tenths of the idea limit and calls it full at the limit', () => {
+    expect(ideaFill('x'.repeat(MAX_IDEA_CHARS * 0.9 - 1))).toBe('ok');
+    expect(ideaFill('x'.repeat(MAX_IDEA_CHARS * 0.9))).toBe('near');
+    expect(ideaFill('x'.repeat(MAX_IDEA_CHARS - 1))).toBe('near');
+    expect(ideaFill('x'.repeat(MAX_IDEA_CHARS))).toBe('full');
   });
 
   it('allows a blank or full-length prompt and says why a longer one cannot be saved', () => {
