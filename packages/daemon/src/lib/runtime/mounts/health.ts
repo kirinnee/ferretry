@@ -1,4 +1,4 @@
-import type { HealthView, SessionWorkerPool } from '@ferretry/protocol';
+import { daemonFeatureList, type HealthView, type SessionWorkerPool } from '@ferretry/protocol';
 import type { ApiResponse } from '../../api/http.ts';
 import { jsonResponse } from '../../api/responses.ts';
 import type { ApiRoute } from '../../api/route.ts';
@@ -108,6 +108,8 @@ function view(
       ? {}
       : { bootstrapErrorMessages: [...report.bootstrapErrorMessages] }),
     ...(sessionWorkers === undefined ? {} : { sessionWorkers }),
+    // Stated by the protocol, which owns the names, so the app and this daemon cannot disagree about one.
+    features: [...daemonFeatureList()],
     time: report.time,
   };
 }

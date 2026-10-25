@@ -66,6 +66,43 @@ If prerendering is ever wanted, restore `getServerSnapshot` on every `useSyncExt
 the package first — several still pass it, so the codebase is currently mixed — and change this
 section in the same commit.
 
+## The app ships before the daemon
+
+The PWA deploys from `main` the moment a change merges (`pwa-pages.yaml`). A machine's daemon changes
+only after the release cut **and** the owner's `fy daemon update`. So the app in front of an owner is
+routinely newer than the daemon behind it — version skew is the normal case, not an edge case. PR #789
+raised the Pack idea limit from 500 to 4,000; the new app sent a 794-character idea to a 4.84.0 daemon
+and the owner read `the request body is invalid — idea: Too big: expected string to have <=500
+characters`.
+
+**The rule.** A change that raises a limit, adds a request field, or leans on a route or response field
+an older daemon lacks must **gate the app on the daemon's own report**, not on the app's version:
+
+1. Name the feature in `DAEMON_FEATURES` (`packages/protocol/src/lib/daemon-features.ts`). The daemon
+   reports the list on `GET /v1/health` › `features` (`runtime/mounts/health.ts`); a daemon from before
+   the list reports none.
+2. The app reads it (`useDaemonHealth`) and asks `machineOffers` / `machineLacks`
+   (`packages/pwa/src/lib/daemon-health.ts`) before it enables the feature or the raised limit.
+3. Without the feature the app **keeps the older behaviour** (the idea field stops at
+   `LEGACY_MAX_IDEA_CHARS`, 500) and, only when the machine answered and lacks it, says so beside the
+   control: _This machine needs an update for this — run “fy daemon update” (Settings › Machine › About &
+   updates)._ A read that is still going or failed says nothing: the app cannot tell an old machine from
+   a slow one, so it keeps the older behaviour quietly.
+4. A test with a fake health that lacks the feature proves the older behaviour and the note.
+
+**Why a list and not a version comparison.** A feature appears in a release, which the owner may or may not
+have installed; a daemon built from a branch, or a downgraded one, has the version it has and the features
+it has. Only the daemon knows which it can do. The list is strings, not an enum, so a feature a newer
+daemon adds does not fail an older app, and `HealthViewSchema` is a lenient object so the added key is
+not a wire break. (These are _features_, not the grant `DAEMON_CAPABILITIES`, which say what a caller may
+do.)
+
+**When the gate is missed anyway.** A `400 invalid_request` the daemon answers is said in plain words
+(`packages/pwa/src/lib/request-refusal.ts`): known field limits become a sentence, the daemon's own text
+stays behind a Details disclosure, and when the app's version is newer than the one in the daemon's
+`x-fy-version` header the sentence adds that the machine may be on an older version and how to update.
+Add a field's label to `FIELD_LABELS` there when a new bounded field ships.
+
 ## Repo-wide machinery
 
 - `scripts/ci/` — workflow entry points; only GitHub workflows call these.

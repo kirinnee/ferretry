@@ -27,6 +27,12 @@ export const HealthViewSchema = z.object({
   bootstrapErrorMessages: z.array(z.string()).optional(),
   /** How the running sessions are observed: the pool size and sessions per worker thread. Absent from an older daemon. */
   sessionWorkers: SessionWorkerPoolSchema.optional(),
+  /**
+   * What this daemon build can do that an older one could not (`daemon-features.ts`). Absent from an
+   * older daemon, which is how the app learns it must keep the older behaviour. Strings rather than an
+   * enum, so a feature a newer daemon adds does not fail an older app.
+   */
+  features: z.array(z.string()).optional(),
   time: InstantSchema,
 });
 export type HealthView = z.infer<typeof HealthViewSchema>;

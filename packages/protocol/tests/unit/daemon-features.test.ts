@@ -1,0 +1,74 @@
+import { describe, it } from 'bun:test';
+import should from 'should';
+import {
+  DAEMON_FEATURES,
+  daemonFeatureList,
+  HealthViewSchema,
+  hasFeature,
+  LEGACY_MAX_IDEA_CHARS,
+  MAX_IDEA_CHARS,
+} from '../../src/lib/index.ts';
+
+const HEALTH = {
+  ok: true,
+  bootstrapping: false,
+  bootstrapState: 'complete',
+  bootstrapDegraded: false,
+  version: '4.84.0',
+  pid: 1,
+  sessions: 0,
+  running: 0,
+  monitors: 0,
+  unmonitoredRunning: 0,
+  wardenLastSweepSeconds: null,
+  wardenTimerArmed: false,
+  eventLoopLagMs: 0,
+  lastSelfCheckAt: null,
+  wedgeCount: 0,
+  scratchGcEnabled: false,
+  scratchReclaimedSessions: 0,
+  scratchReclaimedBytes: 0,
+  bootstrapErrors: 0,
+  time: '2026-10-25T00:00:00Z',
+} as const;
+
+describe('daemon features', () => {
+  it('should offer a feature only when the daemon listed it', () => {
+    // Arrange
+    const listed = { features: [DAEMON_FEATURES.packIdea4000] };
+
+    // Act / Assert
+    should(hasFeature(listed, DAEMON_FEATURES.packIdea4000)).be.true();
+    should(hasFeature({ features: ['something.else'] }, DAEMON_FEATURES.packIdea4000)).be.false();
+    should(hasFeature({ features: [] }, DAEMON_FEATURES.packIdea4000)).be.false();
+  });
+
+  it('should treat a daemon that reports no list as offering nothing', () => {
+    // A daemon from before the list existed is the one the app most needs to be careful with.
+    should(hasFeature({}, DAEMON_FEATURES.packIdea4000)).be.false();
+  });
+
+  it('should list each feature name once, in a stable order', () => {
+    // Arrange / Act
+    const list = daemonFeatureList();
+
+    // Assert
+    should([...list]).deepEqual([...new Set(list)].sort());
+    should(list).containEql('pack.idea.4000');
+  });
+
+  it('should keep the older idea limit below the raised one the feature unlocks', () => {
+    should(LEGACY_MAX_IDEA_CHARS).equal(500);
+    should(LEGACY_MAX_IDEA_CHARS).be.below(MAX_IDEA_CHARS);
+  });
+
+  it('should parse a health report from a daemon that predates the list, and one that carries it', () => {
+    // Arrange / Act
+    const older = HealthViewSchema.parse(HEALTH);
+    const newer = HealthViewSchema.parse({ ...HEALTH, features: ['pack.idea.4000', 'one.the.app.never.heard.of'] });
+
+    // Assert — an unknown name rides along rather than failing an older app
+    should(older.features).be.undefined();
+    should(newer.features).deepEqual(['pack.idea.4000', 'one.the.app.never.heard.of']);
+  });
+});

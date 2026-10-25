@@ -22,6 +22,8 @@ import { useId, useState } from 'react';
 import { cn } from '../../lib/class-names.ts';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
 import type { PackConfigPatch } from '../../lib/pack/pack-files.ts';
+import { type IdeaLimit, ideaLimitFor } from '../../lib/pack/routing-prompt.ts';
+import { useDaemonHealth } from '../../lib/use-daemon-health.ts';
 import { Button } from '../../shell/primitives.tsx';
 import { RoutingPromptCard } from './routing-prompt-card.tsx';
 import { type MachinePack, type PackSave, useMachinePack } from './use-machine-pack.ts';
@@ -197,10 +199,12 @@ function PackPanel({
   view,
   state,
   connection,
+  ideaLimit,
 }: {
   readonly view: PackView;
   readonly state: MachinePack;
   readonly connection: DaemonConnection;
+  readonly ideaLimit?: IdeaLimit;
 }) {
   const { config } = view;
   const [busy, setBusy] = useState(false);
@@ -321,7 +325,12 @@ function PackPanel({
         </p>
       ) : null}
 
-      <RoutingPromptCard connection={connection} view={view} state={state} />
+      <RoutingPromptCard
+        connection={connection}
+        view={view}
+        state={state}
+        {...(ideaLimit === undefined ? {} : { ideaLimit })}
+      />
     </div>
   );
 }
@@ -329,9 +338,11 @@ function PackPanel({
 function PackSettingsView({
   state,
   connection,
+  ideaLimit,
 }: {
   readonly state: MachinePack;
   readonly connection: DaemonConnection;
+  readonly ideaLimit?: IdeaLimit;
 }) {
   const { read } = state;
   if (read.kind === 'loading') return <p className="m-0 text-meta text-muted">Reading Pack mode…</p>;
@@ -341,11 +352,20 @@ function PackSettingsView({
         {read.message}
       </p>
     );
-  return <PackPanel view={read.view} state={state} connection={connection} />;
+  return (
+    <PackPanel
+      view={read.view}
+      state={state}
+      connection={connection}
+      {...(ideaLimit === undefined ? {} : { ideaLimit })}
+    />
+  );
 }
 
 function ConnectedPackSettings({ connection }: { readonly connection: DaemonConnection }) {
-  return <PackSettingsView state={useMachinePack(connection)} connection={connection} />;
+  // The app ships before the daemon: the raised idea limit waits for the machine to say it takes it.
+  const ideaLimit = ideaLimitFor(useDaemonHealth(connection));
+  return <PackSettingsView state={useMachinePack(connection)} connection={connection} ideaLimit={ideaLimit} />;
 }
 
 /** The panel: an injected state (tests, harness) or the machine's own, read through the app's client pool. */

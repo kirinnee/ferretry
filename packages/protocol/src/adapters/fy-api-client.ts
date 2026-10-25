@@ -238,6 +238,11 @@ export class FyHttpError extends Error {
      * that knows its shape; never trusted as anything but data.
      */
     readonly body?: unknown,
+    /**
+     * The version the answering daemon stamped on the response (`x-fy-version`), when it did. It is what
+     * lets a caller tell "this request is wrong" from "this machine is older than the app that sent it".
+     */
+    readonly daemonVersion?: string,
   ) {
     super(message);
   }
@@ -553,6 +558,8 @@ export class FyApiClient implements IFyApiClient {
           formatUnknownRouteError(route, this.#version, daemonVersion),
           response.status,
           payload.code,
+          undefined,
+          daemonVersion ?? undefined,
         );
       }
       throw new FyHttpError(
@@ -560,6 +567,7 @@ export class FyApiClient implements IFyApiClient {
         response.status,
         payload?.code,
         candidate,
+        daemonVersion ?? undefined,
       );
     }
     return response;

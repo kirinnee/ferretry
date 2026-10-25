@@ -24,6 +24,8 @@ import type {
 } from '@ferretry/protocol';
 import { FyHttpError, FyTransportError } from '@ferretry/protocol/client';
 import { z } from 'zod';
+import { appVersion } from '../../../lib/app-version.ts';
+import { invalidRequestWords } from '../../../lib/request-refusal.ts';
 import { applyFleetChange, readFleetMachine, stageFleetChange } from '../catalog-api.ts';
 import type { FleetClient } from '../fleet-client.ts';
 
@@ -109,6 +111,9 @@ const detail = (value: unknown): string => {
  * it. So each cause says its own sentence, and an unrecognised one carries its own message.
  */
 export const changeRefusalSentence = (error: unknown): string => {
+  // A 400 for a field this machine's version does not take reads as words, not as the daemon's schema text.
+  const invalid = invalidRequestWords(error, appVersion());
+  if (invalid !== undefined) return invalid.sentence;
   if (error instanceof FyHttpError)
     return error.message.trim() === '' ? `This machine refused the change (${String(error.status)}).` : error.message;
   if (error instanceof FyTransportError)

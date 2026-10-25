@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import {
+  DAEMON_FEATURES,
+  LEGACY_MAX_IDEA_CHARS,
   MAX_IDEA_CHARS,
   MAX_ROUGH_PROMPT_CHARS,
   MAX_ROUTING_PROMPT_CHARS,
@@ -7,8 +9,10 @@ import {
 } from '@ferretry/protocol';
 import {
   cleanUpProblem,
+  FULL_IDEA_LIMIT,
   ideaCounter,
   ideaFill,
+  ideaLimitFor,
   ordinal,
   QUOTA_CHIP,
   routingCounter,
@@ -16,6 +20,9 @@ import {
   routingSourceWords,
   writeProblem,
 } from '../../../src/lib/pack/routing-prompt.ts';
+
+import type { DaemonHealthRead } from '../../../src/lib/daemon-health.ts';
+import { healthOf } from '../../support/health.ts';
 
 const date = (instant: string): string => `<${instant}>`;
 
@@ -127,5 +134,34 @@ describe('the available-now words', () => {
   it('gives every quota band its own word, so colour is not the only signal', () => {
     const labels = PACK_QUOTA_STATES.map(state => QUOTA_CHIP[state].label);
     expect(new Set(labels).size).toBe(PACK_QUOTA_STATES.length);
+  });
+});
+
+describe('the idea limit a machine allows', () => {
+  const health = (features?: string[]): DaemonHealthRead => ({
+    kind: 'read',
+    health: healthOf('4.84.0', features),
+  });
+
+  it('offers the full 4,000 only to a machine that lists pack.idea.4000', () => {
+    expect(ideaLimitFor(health([DAEMON_FEATURES.packIdea4000]))).toEqual(FULL_IDEA_LIMIT);
+  });
+
+  it('keeps 500 and says the machine needs an update when it answered without the feature', () => {
+    for (const machine of [health(), health([])]) {
+      const limit = ideaLimitFor(machine);
+      expect(limit.max).toBe(LEGACY_MAX_IDEA_CHARS);
+      expect(limit.updateNote).toContain('needs an update');
+      expect(limit.updateNote).toContain('fy daemon update');
+      expect(ideaCounter('x'.repeat(10), limit)).toBe('10 / 500');
+      expect(ideaFill('x'.repeat(450), limit)).toBe('near');
+      expect(ideaFill('x'.repeat(500), limit)).toBe('full');
+    }
+  });
+
+  it('keeps 500 quietly while the machine has not answered or could not be asked', () => {
+    for (const machine of [{ kind: 'loading' }, { kind: 'failed' }] as const) {
+      expect(ideaLimitFor(machine)).toEqual({ max: LEGACY_MAX_IDEA_CHARS, updateNote: null });
+    }
   });
 });
