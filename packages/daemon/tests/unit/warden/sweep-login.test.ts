@@ -169,3 +169,78 @@ describe('a login this machine does not have', () => {
     should(actual.login?.source).equal('machine_default');
   });
 });
+
+describe('a warden.yaml that stored a runtime id as the login', () => {
+  const ID = '0b6f6b5e-5d7c-4f4e-9d0a-1d1f2a3b4c5d';
+  const stored = enabled({ accounts: [{ agent: ID, model: 'opus' }] });
+  const resolveId = async (reference: string): Promise<string | undefined> =>
+    reference === ID ? 'claude-default' : reference === 'claude-default' ? reference : undefined;
+
+  it('should validate a login written by name, with nothing unknown', async () => {
+    // Arrange
+    const subject = harness({
+      config: enabled({ accounts: [{ agent: 'claude-default' }] }),
+      installed: async () => ['claude-default'],
+      currentName: resolveId,
+    });
+
+    // Act
+    const actual = await subject.service.view();
+
+    // Assert
+    should(actual.login).deepEqual({ source: 'configured', unknown: [], available: ['claude-default'] });
+    should(actual.warnings).be.empty();
+  });
+
+  it('should read the id as the runtime’s name, so it is neither unknown nor shown as an id', async () => {
+    // Arrange
+    const subject = harness({ config: stored, currentName: resolveId, fleet: [triageable('s1')] });
+
+    // Act
+    const actual = await subject.service.view();
+    await subject.service.run({ force: false });
+
+    // Assert: the model rides along, the file is untouched until a save, and the spawn runs on the name.
+    should(actual.config.accounts).deepEqual([{ agent: 'claude-default', model: 'opus' }]);
+    should(actual.login?.unknown).deepEqual([]);
+    should(actual.warnings).be.empty();
+    should(subject.storedConfig()).have.property('accounts', [{ agent: ID, model: 'opus' }]);
+    should(subject.spawns.map(spawn => spawn.agent)).deepEqual(['claude-default']);
+  });
+
+  it('should write the name back on the next save', async () => {
+    // Arrange
+    const subject = harness({ config: stored, currentName: resolveId });
+
+    // Act
+    await subject.service.updateConfig({ blessMinutes: 5 });
+
+    // Assert
+    should(subject.storedConfig()).have.property('accounts', [{ agent: 'claude-default', model: 'opus' }]);
+  });
+
+  it('should keep an id nothing answers to, and call it unknown', async () => {
+    // Arrange
+    const subject = harness({ config: stored });
+
+    // Act
+    const actual = await subject.service.view();
+
+    // Assert
+    should(actual.login?.unknown).deepEqual([ID]);
+  });
+
+  it('should collapse an id and its own name into one login', async () => {
+    // Arrange
+    const subject = harness({
+      config: enabled({ accounts: [{ agent: ID }, { agent: 'claude-default', model: 'sonnet' }] }),
+      currentName: resolveId,
+    });
+
+    // Act
+    const actual = await subject.service.view();
+
+    // Assert
+    should(actual.config.accounts).deepEqual([{ agent: 'claude-default' }]);
+  });
+});

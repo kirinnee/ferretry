@@ -102,6 +102,13 @@ const KEY_PILL: Readonly<
   unknown: { label: 'key status unknown', tone: 'pend' },
 };
 
+/** A login in the picker: its name, then the harness and the label the Runtimes tab shows for it. */
+export const loginLabel = (agent: string, runtimes: readonly PickerAccount[]): string => {
+  const runtime = runtimes.find(candidate => candidate.wrapper === agent);
+  if (runtime === undefined) return agent;
+  return [agent, runtime.kind, ...(runtime.displayName === agent ? [] : [runtime.displayName])].join(' · ');
+};
+
 /** A cleared number field is `NaN` until fixed; the model reports it rather than a silent zero. */
 const numberFrom = (raw: string): number => (raw.trim() === '' ? Number.NaN : Number(raw));
 
@@ -526,7 +533,7 @@ export function WardenSettingsForm({
                   <option value="">{unchosen}</option>
                   {logins.map(account => (
                     <option key={account.agent} value={account.agent}>
-                      {account.agent}
+                      {loginLabel(account.agent, runtimes)}
                     </option>
                   ))}
                 </select>

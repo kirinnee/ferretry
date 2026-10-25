@@ -259,6 +259,45 @@ describe('WardenSettingsForm', () => {
     run(() => renderer.unmount());
   });
 
+  it('should offer each login as its name, then its harness and the label the Runtimes tab shows', () => {
+    // Arrange
+    const runtime = (wrapper: string, displayName: string, kind: PickerAccount['kind']): PickerAccount => ({
+      id: '0b6f6b5e-5d7c-4f4e-9d0a-1d1f2a3b4c5d',
+      wrapper,
+      displayName,
+      kind,
+      agent: true,
+      credentialId: wrapper,
+      defaultModel: null,
+      models: [],
+      available: true,
+      unavailableReason: null,
+    });
+    const renderer = render(
+      <Harness
+        initial={wardenConfig({ ...LLM, accounts: [] })}
+        loginOptions={[{ agent: 'claude-default' }, { agent: 'codex-review' }, { agent: 'claude-bare' }]}
+        runtimes={[
+          runtime('claude-default', 'Personal Claude', 'claude'),
+          runtime('codex-review', 'codex-review', 'codex'),
+        ]}
+        changes={[]}
+      />,
+    );
+
+    // Act
+    const picker = control(renderer, 'Login', 'select');
+    const options = picker.findAllByType('option').map(node => [node.props.value, flat(node)]);
+
+    // Assert: the stored value is the name; the words beside it are for the person choosing.
+    expect(options.slice(1)).toEqual([
+      ['claude-default', 'claude-default · claude · Personal Claude'],
+      ['codex-review', 'codex-review · codex'],
+      ['claude-bare', 'claude-bare'],
+    ]);
+    run(() => renderer.unmount());
+  });
+
   it('should hold a cleared number as NaN, show its error and say "(fix)" in the summary', () => {
     // Arrange
     const changes: WardenConfig[] = [];

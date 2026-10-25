@@ -467,7 +467,7 @@ import { FleetCatalogService } from '../src/lib/fleet/catalog-service.ts';
 import { CodexAppServerSupervisor } from '../src/lib/fleet/codex-runtime.ts';
 import { createFleetCredentialsSubsystem, FleetCredentialCatalog } from '../src/lib/fleet/credentials-service.ts';
 import { createFleetSetupSubsystem } from '../src/lib/fleet/setup-service.ts';
-import { resolveStartAccount } from '../src/lib/fleet/start-resolution.ts';
+import { resolveStartAccount, type RuntimeNamesPort } from '../src/lib/fleet/start-resolution.ts';
 import { polledDirectoryLimitations } from '../src/lib/performance/fallbacks.ts';
 import { OpenUrlService } from '../src/lib/system/open-url.ts';
 
@@ -642,6 +642,7 @@ import {
   FleetReading,
   FleetRefreshService,
   FleetSecretReferences,
+  FleetWardenAgents,
   ForeignHistoryImporter,
   type FoundationPaths,
   fastStartRefusal,
@@ -898,7 +899,6 @@ import {
   SurfaceControl,
   searchTranscript,
   secretsMatch,
-  selectableAutoAccounts,
   selectBrowserWorker,
   sendRecordView,
   sessionHealthSettingsAt,
@@ -3770,7 +3770,7 @@ interface WardenParts {
    */
   readonly attention: AttentionService;
   readonly usage: UsageFeedPort;
-  readonly accounts: AccountInventoryPort;
+  readonly accounts: AccountInventoryPort & Partial<RuntimeNamesPort>;
   /** The machine's default runtime, read fresh: the investigation login when `warden.yaml` names none. */
   readonly defaultRuntime: () => Promise<string | undefined>;
   readonly files: NodeWardenReportFileSystem;
@@ -3961,10 +3961,7 @@ function createWardenSubsystem(parts: WardenParts): WardenSubsystem {
       artifacts,
       state: new FileWardenStateStore(parts.files, parts.wardenRoot),
       config: new ConfigFileWardenConfigStore(parts.config),
-      agents: {
-        installed: async () => selectableAutoAccounts(await parts.accounts.accounts()).map(account => account.id),
-        defaultRuntime: parts.defaultRuntime,
-      },
+      agents: new FleetWardenAgents(parts.accounts, parts.defaultRuntime),
       // The daemon-wide feed, with the one shape difference reconciled here: the wire lets `retryAt`
       // be explicitly null to mean "the provider named no retry time", and the warden's health type
       // says `undefined` for the same thing. Collapsing it at the boundary is what stops a null

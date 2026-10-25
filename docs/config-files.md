@@ -163,7 +163,7 @@ writes that name back, so changing the default moves the Warden with it. A machi
 investigation login**: the LLM layer is off, the status says `no_login`, and Settings › Warden asks you to
 choose one (Jev needs no login). A login named here that this machine does not have — a `warden.yaml` copied
 from another machine — is shown as **unknown login '‹name›' — choose one** and is skipped; the file is never
-rewritten to hide it.
+rewritten to hide it. A login is always spelled by its **runtime name** (`claude-default`), never by the opaque id the fleet manifest keeps for it: a file that stored an id, or a name the runtime had before, is read as the runtime's current name and written back as that name on the next save.
 
 **Caps, per UTC day, per layer.** `caps.jevUsdPerDay` (default $0.50) is Jev's and
 `caps.investigationUsdPerDay` (default $2) the investigations'; `caps.maxInvestigationsPerHour` (default 6)
