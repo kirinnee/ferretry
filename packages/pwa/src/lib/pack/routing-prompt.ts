@@ -7,6 +7,7 @@
  */
 
 import {
+  MAX_IDEA_CHARS,
   MAX_ROUGH_PROMPT_CHARS,
   MAX_ROUTING_PROMPT_CHARS,
   type PackCleanUpStatus,
@@ -28,6 +29,15 @@ export function routingSourceWords(routing: RoutingPromptView, date: (instant: s
 /** The counter under the text area: characters typed against what a saved prompt may hold. */
 export const routingCounter = (text: string): string =>
   `${count(text.trim().length)} / ${count(MAX_ROUTING_PROMPT_CHARS)}`;
+
+/** The idea field's counter: characters typed against what Write it for me takes. */
+export const ideaCounter = (text: string): string => `${count(text.length)} / ${count(MAX_IDEA_CHARS)}`;
+
+/** How full the idea field is: `near` from nine tenths of the limit, `full` at it. */
+export function ideaFill(text: string): 'ok' | 'near' | 'full' {
+  if (text.length >= MAX_IDEA_CHARS) return 'full';
+  return text.length >= MAX_IDEA_CHARS * 0.9 ? 'near' : 'ok';
+}
 
 /** Why the typed text cannot be saved as it is, or `null` when it can. Blank saves: it removes the prompt. */
 export function routingSaveProblem(text: string): string | null {

@@ -90,16 +90,19 @@ export type PackInventory = z.infer<typeof PackInventorySchema>;
 /** A prompt as an owner hands it to Clean up: rough, and allowed to be longer than a saved one. */
 export const RoughPromptSchema = z.string().trim().min(1).max(MAX_ROUGH_PROMPT_CHARS);
 
-/** The most a "your idea" for Write it for me may say: a sentence or two, not a second prompt. */
-export const MAX_IDEA_CHARS = 500;
+/**
+ * The most a "your idea" for Write it for me may say: several paragraphs of intent, but still a note
+ * for the writer rather than a second routing prompt (which Clean up takes up to `MAX_ROUGH_PROMPT_CHARS`).
+ */
+export const MAX_IDEA_CHARS = 4_000;
 
-/** The short idea an owner hands Write it for me; may be absent, which asks for a sensible default. */
+/** The idea an owner hands Write it for me, line breaks kept; may be absent, which asks for a sensible default. */
 export const IdeaSchema = z.string().trim().min(1).max(MAX_IDEA_CHARS);
 
 export const PackCleanUpRequestSchema = z.strictObject({
   /** `clean-up` (default) rewrites the owner's prompt; `generate` writes one from `idea` and what is here. */
   mode: PackBuilderModeSchema.optional(),
-  /** `generate` only: what the owner wants, in a line or two ("cheap models for chores, Opus for planning"). */
+  /** `generate` only: what the owner wants, in their words ("cheap models for chores, Opus for planning"). */
   idea: IdeaSchema.optional(),
   /**
    * The owner's current rough prompt. `clean-up`: absent means the prompt in effect. `generate`: absent

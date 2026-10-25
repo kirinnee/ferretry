@@ -1,7 +1,12 @@
 import { afterEach, describe, expect, it } from 'bun:test';
-import { MAX_ROUTING_PROMPT_CHARS, type PackCleanUpRequest, type PackRoutingAcceptRequest } from '@ferretry/protocol';
+import {
+  MAX_IDEA_CHARS,
+  MAX_ROUTING_PROMPT_CHARS,
+  type PackCleanUpRequest,
+  type PackRoutingAcceptRequest,
+} from '@ferretry/protocol';
 import { RoutingPromptCard, type RoutingPromptCardProps } from '../../../../src/features/pack/routing-prompt-card.tsx';
-import { type Mounted, mount, must } from '../../../support/dom.ts';
+import { interact, type Mounted, mount, must, pressKey } from '../../../support/dom.ts';
 import { byText, click, textOf, typeInto, waitFor, waitForText } from '../../../support/learning-dom.ts';
 import {
   IDLE_ROUTING_API,
@@ -227,7 +232,7 @@ describe('Write it for me', () => {
     expect(textOf(nudge)).toContain('Not written yet');
     expect(textOf(byText(nudge, 'button', 'Write it for me'))).toBe('Write it for me');
     expect(textOf(nudge)).toContain('Your idea (optional)');
-    expect(root.querySelector('textarea') === null).toBe(true);
+    expect(root.querySelector('textarea:not([data-routing-idea])') === null).toBe(true);
     expect(action(root, 'write').disabled).toBe(false);
   });
 
@@ -256,7 +261,7 @@ describe('Write it for me', () => {
       readJob: () => new Promise(() => undefined),
     });
     await typeInto(
-      must(root.querySelector<HTMLInputElement>('[data-routing-idea]'), 'the idea'),
+      must(root.querySelector<HTMLTextAreaElement>('[data-routing-idea]'), 'the idea'),
       '  cheap models for chores, Opus for planning  ',
     );
     await click(action(root, 'write'));
@@ -267,6 +272,87 @@ describe('Write it for me', () => {
     expect(textOf(job)).toContain('Routing Prompt Writer');
     expect(textOf(job)).toContain('Open the writer’s session');
     expect(action(root, 'write').disabled).toBe(true);
+  });
+
+  it('takes a multi-line idea in a text area with a live counter that warns near the limit', async () => {
+    const root = await card(NUDGE_VIEW);
+    const idea = must(root.querySelector<HTMLTextAreaElement>('textarea[data-routing-idea]'), 'the idea');
+    const counter = () => must(root.querySelector('[data-idea-counter]'), 'the counter');
+    expect(Number(idea.getAttribute('rows'))).toBeGreaterThanOrEqual(4);
+    expect(idea.getAttribute('maxlength')).toBe(String(MAX_IDEA_CHARS));
+    expect(idea.getAttribute('aria-describedby')).toBe(counter().id);
+    expect(textOf(counter())).toBe('0 / 4,000 characters');
+    expect(counter().getAttribute('data-idea-counter')).toBe('ok');
+    await typeInto(idea, 'one\ntwo\n\nthree');
+    expect(idea.value).toBe('one\ntwo\n\nthree');
+    expect(textOf(counter())).toBe('14 / 4,000 characters');
+    await typeInto(idea, 'x'.repeat(3_599));
+    expect(counter().getAttribute('data-idea-counter')).toBe('ok');
+    await typeInto(idea, 'x'.repeat(3_600));
+    expect(counter().getAttribute('data-idea-counter')).toBe('near');
+    expect(counter().className).toContain('text-warn');
+    await typeInto(idea, 'x'.repeat(MAX_IDEA_CHARS));
+    expect(counter().getAttribute('data-idea-counter')).toBe('full');
+    expect(counter().className).toContain('text-err');
+    expect(textOf(counter())).toBe('4,000 / 4,000 characters');
+  });
+
+  it('sends the idea with its line breaks on Cmd+Enter and on Ctrl+Enter, and not on a plain Enter', async () => {
+    const asked: PackCleanUpRequest[] = [];
+    const root = await card(NUDGE_VIEW, {
+      cleanUp: async request => {
+        asked.push(request);
+        return { kind: 'started', job: WRITING_JOB };
+      },
+      readJob: () => new Promise(() => undefined),
+    });
+    const idea = must(root.querySelector<HTMLTextAreaElement>('[data-routing-idea]'), 'the idea');
+    await typeInto(idea, ' Chores cheap.\n\nOpus plans. ');
+    const plain = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true });
+    await interact(() => idea.dispatchEvent(plain));
+    expect(plain.defaultPrevented).toBe(false);
+    expect(asked).toEqual([]);
+    const withMeta = new KeyboardEvent('keydown', { key: 'Enter', metaKey: true, bubbles: true, cancelable: true });
+    await interact(() => idea.dispatchEvent(withMeta));
+    expect(withMeta.defaultPrevented).toBe(true);
+    await waitFor(() => asked.length === 1, 'the write on Cmd+Enter');
+    expect(asked).toEqual([{ mode: 'generate', idea: 'Chores cheap.\n\nOpus plans.' }]);
+    await waitFor(() => root.querySelector('[data-clean-up-job]') !== null, 'the run');
+    expect(idea.disabled).toBe(true);
+    await interact(() => pressKey(idea, 'Enter', { ctrlKey: true }));
+    expect(asked.length).toBe(1);
+    await shown?.unmount();
+
+    const again: PackCleanUpRequest[] = [];
+    const next = await card(NUDGE_VIEW, {
+      cleanUp: async request => {
+        again.push(request);
+        return { kind: 'refused', message: 'codex-main cannot start now.' };
+      },
+    });
+    const field2 = must(next.querySelector<HTMLTextAreaElement>('[data-routing-idea]'), 'the idea');
+    await typeInto(field2, 'cheap');
+    await interact(() => pressKey(field2, 'Enter', { ctrlKey: true }));
+    await waitFor(() => again.length === 1, 'the write on Ctrl+Enter');
+    expect(again).toEqual([{ mode: 'generate', idea: 'cheap' }]);
+  });
+
+  it('does nothing on Cmd+Enter while the writer cannot start', async () => {
+    const asked: PackCleanUpRequest[] = [];
+    const root = await card(
+      { ...NUDGE_VIEW, cleanUp: { available: false, runtimes: [], reason: 'No agent runtime here is ready.' } },
+      {
+        cleanUp: async request => {
+          asked.push(request);
+          return { kind: 'started', job: WRITING_JOB };
+        },
+      },
+    );
+    const idea = must(root.querySelector<HTMLTextAreaElement>('[data-routing-idea]'), 'the idea');
+    await typeInto(idea, 'cheap');
+    await interact(() => pressKey(idea, 'Enter', { metaKey: true }));
+    expect(action(root, 'write').disabled).toBe(true);
+    expect(asked).toEqual([]);
   });
 
   it('starts the writer from nothing: no idea, no prompt', async () => {

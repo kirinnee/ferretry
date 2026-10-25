@@ -117,6 +117,7 @@
         "tests/integration/fixtures/nav-cache-scene.tsx",
         "tests/integration/fixtures/sessions-list-scene.tsx",
         "tests/integration/fixtures/settings-typing-scene.tsx",
+        "tests/integration/fixtures/routing-idea-scene.tsx",
         "tests/integration/fixtures/send-handover-scene.tsx",
         "tests/integration/fixtures/cancelled-rows-scene.tsx",
         "tests/integration/fixtures/ledger-actions-scene.tsx",
