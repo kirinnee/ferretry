@@ -112,6 +112,7 @@ import {
   applyWardenConfigPatch,
   assignedCooldownMs,
   parseStoredWardenConfig,
+  type StoredWardenConfig,
   spawnGapMs,
   sweepIntervalMs,
   type ResolvedWardenLogin,
@@ -145,6 +146,7 @@ import {
   effectiveFailoverConfig,
   ineligibilityReason,
   isDemoted,
+  normalizeWardenAccounts,
   reconcileDemotions,
   recordWardenFailure,
   recordWardenSuccess,
@@ -237,10 +239,13 @@ export interface WardenConfigStore {
   write(config: WardenConfig): Promise<void>;
 }
 
-/** Accounts actually installed on this host. An empty answer means the inventory
- *  is unreadable — evidence about the host, never about an account. */
+/** Accounts actually installed on this host, by the NAME an operator types (`claude-default`), never by the
+ *  fleet manifest's opaque id. An empty answer means the inventory is unreadable — evidence about the host,
+ *  never about an account. */
 export interface WardenAgentInventory {
   installed(): Promise<readonly string[]>;
+  /** The name a stored login reference means today (a name it had before, or its id), or `undefined` when none answers to it. */
+  currentName(reference: string): Promise<string | undefined>;
   /** The machine's default runtime, read fresh: the investigation login when the owner chose none. */
   defaultRuntime(): Promise<string | undefined>;
 }
@@ -503,7 +508,7 @@ export class WardenSweepService {
   /** The configuration as an operator reads it, with everything they should know
    *  about it. */
   async view(): Promise<WardenConfigView> {
-    const stored = parseStoredWardenConfig(await this.ports.config.read());
+    const stored = await this.storedConfig();
     const resolved = await this.resolveLogin(stored.config);
     return {
       config: stored.config,
@@ -523,7 +528,7 @@ export class WardenSweepService {
    * it.
    */
   async updateConfig(patch: WardenConfigPatch): Promise<WardenConfigView> {
-    const stored = parseStoredWardenConfig(await this.ports.config.read());
+    const stored = await this.storedConfig();
     const next = applyWardenConfigPatch(stored.config, patch);
     await this.ports.config.write(next);
     this.ports.journal.record('fleet.warden_config_changed', { fields: Object.keys(patch) });
@@ -546,7 +551,7 @@ export class WardenSweepService {
    * "a sweep ran and found nothing".
    */
   async status(nextSweepAt?: string): Promise<WardenStatusView> {
-    const stored = parseStoredWardenConfig(await this.ports.config.read());
+    const stored = await this.storedConfig();
     const state = parseWardenRuntimeState(await this.ports.state.read());
     const fleet = await this.ports.fleet.fleet();
     const nowMs = this.ports.nowMs();
@@ -593,7 +598,7 @@ export class WardenSweepService {
    * verdicts are said out loud as a degraded feed rather than read as "no warden asked for you".
    */
   async attention(): Promise<WireAttentionView> {
-    const stored = parseStoredWardenConfig(await this.ports.config.read());
+    const stored = await this.storedConfig();
     const state = parseWardenRuntimeState(await this.ports.state.read());
     const fleet = await this.ports.fleet.fleet();
     const nowMs = this.ports.nowMs();
@@ -667,7 +672,7 @@ export class WardenSweepService {
    * Only queues. The caller runs a sweep right after, which spawns it if a slot is free.
    */
   async requestInvestigation(sessionId: string, note?: string): Promise<WardenInvestigateView> {
-    const stored = parseStoredWardenConfig(await this.ports.config.read());
+    const stored = await this.storedConfig();
     if (!stored.config.enabled)
       throw new WardenRequestError(
         'off',
@@ -863,7 +868,7 @@ export class WardenSweepService {
    * the host and the accounts, not the operator's patience.
    */
   async run(options: { readonly force: boolean }): Promise<WardenRunView> {
-    const stored = parseStoredWardenConfig(await this.ports.config.read());
+    const stored = await this.storedConfig();
     const config = stored.config;
     const login = await this.resolveLogin(config);
     const fleet = await this.ports.fleet.fleet();
@@ -2075,6 +2080,27 @@ export class WardenSweepService {
         message: failureMessage(error),
       });
     }
+  }
+
+  /**
+   * The stored configuration, with every login named the way the fleet names it today.
+   *
+   * A `warden.yaml` that holds a runtime's opaque id (an earlier picker stored one) or a name the runtime
+   * had before is read as the runtime's current name, so selection, the picker and the status all see one
+   * spelling. Nothing is written here: the next save persists the name. A reference nothing answers to
+   * stays as written, and is reported unknown rather than guessed at.
+   */
+  private async storedConfig(): Promise<StoredWardenConfig> {
+    const stored = parseStoredWardenConfig(await this.ports.config.read());
+    if (stored.config.accounts.length === 0) return stored;
+    const accounts = await Promise.all(
+      stored.config.accounts.map(async account => {
+        const name = await this.ports.agents.currentName(account.agent).catch(() => undefined);
+        return name === undefined || name === account.agent ? account : { ...account, agent: name };
+      }),
+    );
+    if (accounts.every((account, index) => account === stored.config.accounts[index])) return stored;
+    return { ...stored, config: { ...stored.config, accounts: [...normalizeWardenAccounts(accounts)] } };
   }
 
   private async installedAgents(): Promise<readonly string[]> {

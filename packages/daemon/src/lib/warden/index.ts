@@ -7,6 +7,7 @@ export * from './escalation.ts';
 export * from './failover.ts';
 export * from './liveness.ts';
 export * from './liveness-monitor.ts';
+export * from './logins.ts';
 export * from './feed.ts';
 export * from './marker.ts';
 export * from './paths.ts';
