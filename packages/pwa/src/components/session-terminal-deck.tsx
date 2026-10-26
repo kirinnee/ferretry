@@ -54,6 +54,7 @@ import {
   useRef,
   useState,
 } from 'react';
+import { useLinkBehaviour } from '../features/browser/external-link.tsx';
 import { useDocumentVisible } from '../hooks/use-document-visible.ts';
 import { RECONNECTING_GRACE_MS } from '../lib/connection-health.ts';
 import type { DaemonConnection } from '../lib/daemon-connection.ts';
@@ -70,6 +71,12 @@ import {
   terminalResizeFrame,
 } from '../lib/terminal-co-control.ts';
 import { terminalFontFamily } from '../lib/terminal-font.ts';
+import {
+  describeHyperlinkMismatch,
+  type LinkableBuffer,
+  terminalHyperlinkHandler,
+  terminalLinkProvider,
+} from '../lib/terminal-links.ts';
 import {
   browserTerminalStreamAttach,
   closeSessionTerminal,
@@ -121,6 +128,8 @@ export interface TerminalDeckDependencies {
   watchTheme(repaint: () => void): () => void;
   /** Confirmation before a shell is killed. Injected so a test never blocks. */
   confirmClose(title: string): boolean;
+  /** Confirmation before a hyperlink whose text does not name its target is opened. Injected so a test never blocks. */
+  confirmLink(visible: string, href: string): boolean;
   writeClipboard(text: string): Promise<void>;
   /**
    * "This daemon is reachable again" (the connection model's `onRecovered`); returns how to stop. A
@@ -162,6 +171,7 @@ export const browserTerminalDeckDependencies = (
     return () => observer.disconnect();
   },
   confirmClose: title => globalThis.confirm(`Close “${title}”? This ends its shell process.`),
+  confirmLink: (visible, href) => globalThis.confirm(describeHyperlinkMismatch(visible, href)),
   writeClipboard: async text => await navigator.clipboard.writeText(text),
 });
 
@@ -329,6 +339,11 @@ function TerminalCanvas({
   interceptRef.current = interceptInput;
   const onInputPortRef = useRef(onInputPort);
   onInputPortRef.current = onInputPort;
+  // Links open where Settings › "Open links in" says, like every chat link. The hook is read through
+  // a ref: the emulator is built once per (dependencies, scrollback), and the setting changes under it.
+  const links = useLinkBehaviour();
+  const linksRef = useRef(links);
+  linksRef.current = links;
   const [readyVersion, setReadyVersion] = useState(0);
   const [reopenVersion, setReopenVersion] = useState(0);
   const attemptRef = useRef(0);
@@ -351,11 +366,25 @@ function TerminalCanvas({
     let selectionDisposable: { dispose(): void } | undefined;
     let dataDisposable: { dispose(): void } | undefined;
     let binaryDisposable: { dispose(): void } | undefined;
+    let linkDisposable: { dispose(): void } | undefined;
 
     // The face is loaded BEFORE the emulator exists: xterm measures its cell once, on open.
     void Promise.all([dependencies.loadXterm(), loadTerminalFont()])
       .then(([{ Terminal, FitAddon }]) => {
         if (disposed) return;
+        // The screen, read live by both link paths. Tapping or clicking a link is a click on the pane,
+        // so it neither adds a touch listener nor moves focus: tap-to-focus and long-press selection
+        // stay the emulator's own.
+        let screen: import('@xterm/xterm').Terminal | null = null;
+        const linkScreen = {
+          buffer: (): LinkableBuffer | undefined => screen?.buffer.active,
+          columns: (): number => screen?.cols ?? 0,
+        };
+        const linkSink = {
+          open: (click: Parameters<typeof linksRef.current.open>[0], href: string): void =>
+            linksRef.current.open(click, { href, element: host }),
+          confirm: (visible: string, href: string): boolean => dependencies.confirmLink(visible, href),
+        };
         const xterm = new Terminal({
           allowProposedApi: false,
           convertEol: false,
@@ -364,9 +393,12 @@ function TerminalCanvas({
           fontFamily: terminalFont(),
           fontSize: 12.5,
           lineHeight: 1.14,
+          linkHandler: terminalHyperlinkHandler(linkScreen, linkSink),
           scrollback,
           theme: terminalTheme(),
         });
+        screen = xterm;
+        linkDisposable = xterm.registerLinkProvider(terminalLinkProvider(linkScreen, linkSink));
         const fit = new FitAddon();
         xterm.loadAddon(fit);
         stopWatchingTheme = dependencies.watchTheme(() => {
@@ -428,6 +460,7 @@ function TerminalCanvas({
       dataDisposable?.dispose();
       binaryDisposable?.dispose();
       selectionDisposable?.dispose();
+      linkDisposable?.dispose();
       terminalRef.current?.dispose();
       terminalRef.current = null;
       fitRef.current = null;
@@ -582,15 +615,18 @@ function TerminalCanvas({
     // screen reader to stop intercepting arrow keys and pass them through, which
     // is the difference between a usable terminal and one where the reader's
     // cursor keys move the reading position instead of the shell's history.
-    <div
-      aria-label={`${terminal.title} shell`}
-      className="kt-webterm__xterm"
-      data-terminal-canvas={terminal.id}
-      {...{ [KEYBOARD_CAPTURE_ATTRIBUTE]: '' }}
-      onKeyDown={(event: ReactKeyboardEvent<HTMLDivElement>) => event.stopPropagation()}
-      ref={hostRef}
-      role="application"
-    />
+    <>
+      <div
+        aria-label={`${terminal.title} shell`}
+        className="kt-webterm__xterm"
+        data-terminal-canvas={terminal.id}
+        {...{ [KEYBOARD_CAPTURE_ATTRIBUTE]: '' }}
+        onKeyDown={(event: ReactKeyboardEvent<HTMLDivElement>) => event.stopPropagation()}
+        ref={hostRef}
+        role="application"
+      />
+      {links.sheet}
+    </>
   );
 }
 

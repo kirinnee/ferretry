@@ -39,6 +39,8 @@ interface ComposerAttachments {
   readonly readyIds: readonly string[];
   /** A file is still uploading, so a send now would name an incomplete set. */
   readonly uploading: boolean;
+  /** Files that did not reach the daemon: a send now would leave them out of the message without a word. */
+  readonly failed: readonly PendingAttachment[];
   readonly add: (files: Iterable<File>) => void;
   readonly remove: (entry: PendingAttachment) => void;
   readonly retry: (entry: PendingAttachment) => void;
@@ -126,6 +128,7 @@ export function useComposerAttachments(upload: ComposerAttachmentUploader | unde
     entries,
     readyIds,
     uploading: entries.some(entry => entry.status === 'uploading'),
+    failed: entries.filter(entry => entry.status === 'failed'),
     add,
     remove,
     retry,

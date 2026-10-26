@@ -80,6 +80,7 @@ export function ContextSkillsPanel({
         machineName={machineName}
         what="read this ferret’s skills"
         reason={load.reason}
+        {...(load.outdated === undefined ? {} : { outdated: load.outdated, showing: 'skills' })}
         onRetry={reload}
       />
     );
@@ -226,6 +227,7 @@ function SkillFileSheet({
             machineName={machineName}
             what={`open ${skill.name}’s SKILL.md`}
             reason={file.load.reason}
+            {...(file.load.outdated === undefined ? {} : { outdated: file.load.outdated, showing: 'this SKILL.md' })}
             onRetry={file.reload}
           />
         ) : file.load.kind === 'ready' ? (
