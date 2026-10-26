@@ -66,7 +66,10 @@ A row carries the server's name, scope, harness, transport (`stdio`, `http`, `ss
 declares it, the runtimes that see it (each with its approval, for a project server), what it is
 shadowed by, its sign-in subject and where that sign-in stands. **It never carries a command's
 arguments or environment, an address's query, or a header** — those can hold keys. A document the
-daemon cannot read is listed under `problems` by path, without quoting a byte of it.
+daemon cannot read is listed under `problems` by path, without quoting a byte of it. That includes a
+file the operating system refuses (macOS answers `EPERM` for a folder the daemon holds no privacy grant for)
+or one that fails for any other reason (`ELOOP`, `EIO`): it is named with its error code and the rest of
+the inventory is still listed, rather than one bad file failing the whole read.
 
 ## Check
 
@@ -147,13 +150,14 @@ server.
 
 ## Tests
 
-| Property                                                                                  | Test (under `packages/daemon/tests/`)                 |
-| ----------------------------------------------------------------------------------------- | ----------------------------------------------------- |
-| Every scope, approval, shadowing, worktrees, nothing secret on the wire, unreadable files | `unit/mcp-inventory/service.test.ts`                  |
-| What each harness accepts; approval rules; JSON-RPC and SSE parsing                       | `unit/mcp-inventory/declarations.test.ts`             |
-| A check: token use, no unapproved command run, env filling, redaction, the outcomes       | `unit/mcp-inventory/check.test.ts`                    |
-| Project sign-in delivery: local-scope entry, variable, disabled, sign-out                 | `unit/mcp-inventory/project-sign-in.test.ts`          |
-| The owner's failure end to end over real files and a fake OAuth provider                  | `integration/mcp-inventory/project-sign-in.test.ts`   |
-| stdio, Streamable HTTP and SSE against fake servers; 401, 404, timeout, missing command   | `integration/mcp-inventory/probe.test.ts`             |
-| The local-scope writer keeps everything else and its mode; unreadable documents           | `integration/mcp-inventory/harness-documents.test.ts` |
-| Route governance and wire shapes                                                          | `unit/runtime/mounts/mcp-inventory.test.ts`           |
+| Property                                                                                  | Test (under `packages/daemon/tests/`)                    |
+| ----------------------------------------------------------------------------------------- | -------------------------------------------------------- |
+| Every scope, approval, shadowing, worktrees, nothing secret on the wire, unreadable files | `unit/mcp-inventory/service.test.ts`                     |
+| What each harness accepts; approval rules; JSON-RPC and SSE parsing                       | `unit/mcp-inventory/declarations.test.ts`                |
+| A check: token use, no unapproved command run, env filling, redaction, the outcomes       | `unit/mcp-inventory/check.test.ts`                       |
+| Project sign-in delivery: local-scope entry, variable, disabled, sign-out                 | `unit/mcp-inventory/project-sign-in.test.ts`             |
+| The owner's failure end to end over real files and a fake OAuth provider                  | `integration/mcp-inventory/project-sign-in.test.ts`      |
+| stdio, Streamable HTTP and SSE against fake servers; 401, 404, timeout, missing command   | `integration/mcp-inventory/probe.test.ts`                |
+| The local-scope writer keeps everything else and its mode; unreadable documents           | `integration/mcp-inventory/harness-documents.test.ts`    |
+| A malformed or unreadable `.mcp.json` is one named problem; the other servers still list  | `integration/mcp-inventory/unreadable-documents.test.ts` |
+| Route governance and wire shapes                                                          | `unit/runtime/mounts/mcp-inventory.test.ts`              |

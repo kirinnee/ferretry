@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import type { AttachmentView } from '@ferretry/protocol';
-import { Composer, type ComposerProps } from '../../src/components/composer.tsx';
+import { attachmentHoldNotice, Composer, type ComposerProps } from '../../src/components/composer.tsx';
 import { ComposerAddMenu } from '../../src/components/composer-add-menu.tsx';
 import type { ComposerAttachmentUploader } from '../../src/components/composer-attachments.ts';
 import { PendingAttachmentStrip } from '../../src/components/session-chat-parts.tsx';
@@ -169,6 +169,63 @@ describe('composer attachments', () => {
     run(() => strip()?.props.onRemove(strip()?.props.entries[0]));
     expect(composer.root.findAllByType(PendingAttachmentStrip)).toHaveLength(0);
     run(() => composer.unmount());
+  });
+
+  test('a typed message does not leave without a file that is still going up or did not upload', async () => {
+    let finish: (() => void) | undefined;
+    let outcome: 'fail' | 'ok' = 'fail';
+    const { composer, sent, strip, submit, form } = mountComposer({
+      upload: file =>
+        new Promise((resolve, reject) => {
+          finish = () => (outcome === 'ok' ? resolve(view('att_late', file)) : reject(new Error('relay closed')));
+        }),
+    });
+    const hold = () => composer.root.findAllByProps({ 'data-composer-attachments-hold': '' })[0];
+    run(() =>
+      composer.root
+        .findByType('textarea')
+        .props.onChange({ currentTarget: { value: 'see the attached', selectionStart: 16, selectionEnd: 16 } }),
+    );
+    expect(hold()).toBeUndefined();
+    expect(submit().props.disabled).toBe(false);
+    run(() =>
+      composer.root.findByType('textarea').props.onPaste({ clipboardData: { files: [png()] }, preventDefault() {} }),
+    );
+    // Still going up: the send says so instead of leaving without the file.
+    expect(submit().props.disabled).toBe(true);
+    expect(hold()?.props.role).toBe('status');
+    expect(hold()?.children.join('')).toContain('Waiting for your files to finish uploading');
+    await runAsync(async () => form().props.onSubmit({ preventDefault() {} }));
+    expect(sent).toEqual([]);
+    // Failed: the typed words are enough for a send on their own, so only the notice stops it.
+    await runAsync(async () => finish?.());
+    await settleUntil(() => strip()?.props.entries[0]?.status === 'failed', 'the upload to fail', runAsync);
+    expect(submit().props.disabled).toBe(true);
+    expect(hold()?.props.role).toBe('alert');
+    expect(hold()?.children.join('')).toBe(
+      'shot.png did not upload, so this message is not sent yet. Retry or remove it first.',
+    );
+    await runAsync(async () => form().props.onSubmit({ preventDefault() {} }));
+    expect(sent).toEqual([]);
+    // Retried, it rides the send.
+    outcome = 'ok';
+    run(() => strip()?.props.onRetry(strip()?.props.entries[0]));
+    await runAsync(async () => finish?.());
+    await settleUntil(() => strip()?.props.entries[0]?.status === 'ready', 'the retry', runAsync);
+    expect(hold()).toBeUndefined();
+    expect(submit().props.disabled).toBe(false);
+    await runAsync(async () => form().props.onSubmit({ preventDefault() {} }));
+    expect(sent).toEqual([{ message: 'see the attached', attachmentIds: ['att_late'], now: false }]);
+    run(() => composer.unmount());
+  });
+
+  test('says how many files did not upload when there are several', () => {
+    const one = (name: string) => ({ localId: name, file: new File([], name), status: 'failed' as const });
+    expect(attachmentHoldNotice(false, [one('a.png'), one('b.png')])).toEqual({
+      failed: true,
+      text: '2 files did not upload, so this message is not sent yet. Retry or remove them first.',
+    });
+    expect(attachmentHoldNotice(false, [])).toBeNull();
   });
 
   test('a session change forgets the previous session’s files', async () => {

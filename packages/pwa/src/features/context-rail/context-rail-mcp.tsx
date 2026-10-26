@@ -72,6 +72,7 @@ export function ContextMcpPanel({
         machineName={machineName}
         what="read this ferret’s MCP servers"
         reason={load.reason}
+        {...(load.outdated === undefined ? {} : { outdated: load.outdated, showing: 'MCP' })}
         onRetry={reload}
       />
     );
