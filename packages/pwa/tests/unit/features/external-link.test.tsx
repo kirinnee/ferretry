@@ -12,6 +12,7 @@ import {
   LinkBehaviourProvider,
   type LinkOpener,
   SAFARI_HANDOFF_MS,
+  useLinkBehaviour,
 } from '../../../src/features/browser/external-link.tsx';
 import { InAppBrowserWorkspace } from '../../../src/features/browser/in-app-browser.tsx';
 import type { ComputerLinkPort } from '../../../src/features/browser/local-computer.ts';
@@ -519,6 +520,95 @@ describe('ExternalLink — Your computer’s default browser', () => {
       expect(opened).toEqual([]);
     } finally {
       await view.unmount();
+    }
+  });
+});
+
+describe('useLinkBehaviour — open, for a surface with no anchor', () => {
+  const plainClick = {
+    defaultPrevented: false,
+    button: 0,
+    metaKey: false,
+    ctrlKey: false,
+    shiftKey: false,
+    altKey: false,
+    preventDefault: () => {},
+  };
+  const Probe = ({ click }: { readonly click: typeof plainClick }) => {
+    const links = useLinkBehaviour();
+    return (
+      <>
+        <button type="button" data-probe="" onClick={() => links.open(click, { href: DOCS, element: document.body })}>
+          open
+        </button>
+        {links.sheet}
+      </>
+    );
+  };
+  const press = async (setting: OpenLinksIn, click: typeof plainClick) => {
+    const opener = fakeOpener(false);
+    const view = await mount(withSetting(setting, opener, <Probe click={click} />));
+    await interact(() => must(view.container.querySelector<HTMLButtonElement>('[data-probe]'), 'the probe').click());
+    return { view, opener };
+  };
+
+  it('opens a new tab itself, since there is no anchor to carry the default', async () => {
+    const { view, opener } = await press('browser', plainClick);
+    try {
+      expect(opener.tabs).toEqual([DOCS]);
+    } finally {
+      await view.unmount();
+    }
+  });
+
+  it('opens the preview rather than a tab when the setting is the side panel', async () => {
+    const { view, opener } = await press('panel', plainClick);
+    try {
+      expect(opener.tabs).toEqual([]);
+      expect(document.body.querySelector('[role="dialog"]')).not.toBeNull();
+    } finally {
+      await view.unmount();
+    }
+  });
+
+  it('opens a new tab for a Cmd-click whatever the setting', async () => {
+    const { view, opener } = await press('panel', { ...plainClick, metaKey: true });
+    try {
+      expect(opener.tabs).toEqual([DOCS]);
+    } finally {
+      await view.unmount();
+    }
+  });
+
+  it('opens nothing for a click something else already took', async () => {
+    const { view, opener } = await press('browser', { ...plainClick, defaultPrevented: true });
+    try {
+      expect(opener.tabs).toEqual([]);
+    } finally {
+      await view.unmount();
+    }
+  });
+
+  it('falls back to the browser opener when no opener is provided', async () => {
+    const opened: string[] = [];
+    const original = window.open;
+    window.open = ((href: string) => void opened.push(href)) as unknown as typeof window.open;
+    try {
+      const view = await mount(
+        <LinkBehaviourProvider openLinksIn="browser">
+          <Probe click={plainClick} />
+        </LinkBehaviourProvider>,
+      );
+      try {
+        await interact(() =>
+          must(view.container.querySelector<HTMLButtonElement>('[data-probe]'), 'the probe').click(),
+        );
+        expect(opened).toEqual([DOCS]);
+      } finally {
+        await view.unmount();
+      }
+    } finally {
+      window.open = original;
     }
   });
 });
