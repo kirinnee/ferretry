@@ -508,6 +508,7 @@ import {
   ANALYTICS_BACKSTOP_MS,
   ANSWER_MAY_HAVE_LANDED,
   ANSWER_NOT_DELIVERED,
+  answerPaused,
   type AnalyticsIndexStoreFactory,
   type AnalyticsIngestCandidate,
   type AnalyticsIngestCandidateSource,
@@ -892,6 +893,7 @@ import {
   StepUpService,
   StructuredAnswerCoordinator,
   StructuredQuestionAttemptFailed,
+  StructuredQuestionAttemptPaused,
   StructuredQuestionRefused,
   StructuredQuestionService,
   SttEnhancementService,
@@ -3107,7 +3109,17 @@ function createSessionAnswerSubsystem(
   };
   const tmuxSession = async (id: SessionId): Promise<string> =>
     SessionLifecycleConfigSchema.parse(lifecycleConfigDocument(await storage.readConfig(id))).tmuxSession;
-  const driver = new TmuxStructuredQuestionDriver(tmux, tmuxSession, milliseconds => Bun.sleep(milliseconds));
+  // Every step of a drive is journalled as it happens, so one that stops says where and why.
+  const driver = new TmuxStructuredQuestionDriver(
+    tmux,
+    tmuxSession,
+    milliseconds => Bun.sleep(milliseconds),
+    undefined,
+    undefined,
+    async (id, step) => {
+      await storage.append(id, 'interaction.answer_step', { ...step });
+    },
+  );
   const service = new StructuredQuestionService(
     {
       pending: async id => {
@@ -3150,6 +3162,24 @@ function createSessionAnswerSubsystem(
             toolUseId,
             confirmation: confirmation.confirmedBy,
             answerCount: answers.length,
+          })
+          .catch(() => undefined);
+      },
+      // The form stays pending exactly as it is; only the stop and how far it got are recorded.
+      paused: async (id, question, answers, context) => {
+        await storage
+          .append(id, 'interaction.answer_paused', {
+            toolUseId: question.toolUseId,
+            error: context.failure.message,
+            stoppedAt: context.failure.progress.stoppedAt,
+            answered: context.failure.progress.answered,
+            headers: question.questions.map(item => item.header ?? null),
+            matcher: context.failure.diagnostics,
+            answerCount: answers.length,
+            ...(context.snapshotError === undefined ? {} : { snapshotError: context.snapshotError }),
+            ...(context.snapshot === undefined
+              ? {}
+              : { excerpt: context.snapshot.visible.split('\n').slice(-40).join('\n').slice(-6_000) }),
           })
           .catch(() => undefined);
       },
@@ -3380,6 +3410,14 @@ function createSessionAnswerSubsystem(
             throw new SessionAnswerError('released', error.message);
           // The driver's sentences are evidence, not instructions: they travel as the detail, and the
           // person is told how they can still answer.
+          if (error instanceof StructuredQuestionAttemptPaused)
+            throw new SessionAnswerError(
+              'paused',
+              answerPaused(error.failure.progress),
+              undefined,
+              error.message,
+              error.failure.progress,
+            );
           if (error instanceof StructuredQuestionAttemptFailed) {
             if (error.receipt === 'accepted')
               throw new SessionAnswerError('unconfirmed', ANSWER_NOT_DELIVERED, undefined, error.message);

@@ -60,7 +60,12 @@ export type AnswerOutcome =
   | 'accepted'
   /** The form was driven AND the state document stamped the answered tool id. Settled. */
   | 'confirmed'
-  /** Refused before any key reached the terminal, so the same id may honestly start over. */
+  /**
+   * Refused before any key reached the terminal, so the same id may honestly start over — or paused
+   * on a tabbed form that is still open and was never submitted. Starting over is honest there too: a
+   * tabbed drive re-reads every tab and presses `Submit answers` only once the review page lists
+   * exactly the requested answers, so a second drive cannot answer anything twice.
+   */
   | 'withdrawn'
   /** No answer key landed, and failure recovery deliberately released this form to prose. */
   | 'failed'

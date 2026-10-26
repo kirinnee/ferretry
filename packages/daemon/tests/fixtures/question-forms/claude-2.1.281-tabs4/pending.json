@@ -1,0 +1,73 @@
+{
+  "toolUseId": "toolu_tabs4",
+  "questions": [
+    {
+      "question": "Thu 5 Nov at the harbour office: Pastry Cart + Autumn Breakfast (09:00), Drop-In Puzzle Corner (10:30) and the 'Little Kitchen Garden' lunch (12:00). These are office socials sent to 120 people. Are you going in?",
+      "header": "Socials",
+      "options": [
+        {
+          "label": "Decline all 3",
+          "description": "Working from home on Thu. Declines the breakfast, the puzzle corner and the lunch"
+        },
+        {
+          "label": "Accept all 3",
+          "description": "Going into the office on Thu for the morning and lunch"
+        },
+        {
+          "label": "Lunch only",
+          "description": "Accept the 12:00 lunch, decline the breakfast and the puzzle corner"
+        }
+      ]
+    },
+    {
+      "question": "Thu 5 Nov, 09:30–10:30: Platform & Tools Weekly (40 people, organiser Sam Rivera). The same series repeats every Thursday.",
+      "header": "Weekly",
+      "options": [
+        {
+          "label": "Accept",
+          "description": "Accept this Thursday only"
+        },
+        {
+          "label": "Decline",
+          "description": "Decline this Thursday only"
+        },
+        {
+          "label": "Maybe",
+          "description": "Mark as tentative"
+        }
+      ]
+    },
+    {
+      "question": "Thu 5 Nov: the Morning Meet & Greet has moved to 10:30–10:45 that day only (Alex). Accept the new time?",
+      "header": "Meet&Greet",
+      "options": [
+        {
+          "label": "Accept",
+          "description": "Accept the 10:30 slot"
+        },
+        {
+          "label": "Decline",
+          "description": "Skip it this one day"
+        }
+      ]
+    },
+    {
+      "question": "Thu 5 Nov, 18:00–19:00: Infra Sprint Planning (5 people, organiser Jordan Lee).",
+      "header": "Sprint plan",
+      "options": [
+        {
+          "label": "Accept",
+          "description": "Attend sprint planning"
+        },
+        {
+          "label": "Decline",
+          "description": "Decline this one"
+        },
+        {
+          "label": "Maybe",
+          "description": "Mark as tentative"
+        }
+      ]
+    }
+  ]
+}

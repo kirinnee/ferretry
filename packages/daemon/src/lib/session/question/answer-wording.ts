@@ -25,3 +25,14 @@ export const RELOAD_THE_APP = 'This app is out of date for this question. Reload
 export function isQuestionScopedRequestId(requestId: string): boolean {
   return /^question:[^:]+:[^:]+:[^:]+$/u.test(requestId);
 }
+
+/**
+ * For a multi-question form a drive stopped part-way through, before submitting it: nothing has reached
+ * the agent, and the form is still open on the pane with what was answered so far. The person can send
+ * the same answer again to resume it, or finish it in the Console.
+ */
+export function answerPaused(progress: { readonly stoppedAt: number; readonly answered: readonly boolean[] }): string {
+  const total = progress.answered.length;
+  const done = progress.answered.filter(Boolean).length;
+  return `Stopped at question ${progress.stoppedAt + 1} of ${total} (${done} of ${total} answered). Nothing was sent yet and the form is still open: resume to answer the rest, or finish it in the Console tab.`;
+}

@@ -39,6 +39,12 @@ class FakeAnswers implements SessionAnswerSubsystem {
       throw new SessionAnswerError('unconfirmed', "Couldn't answer automatically.", undefined, 'driver evidence');
     if (id === 'undelivered-released')
       throw new SessionAnswerError('released', "Couldn't answer automatically.", undefined, 'released evidence');
+    if (id === 'paused')
+      throw new SessionAnswerError('paused', 'Stopped at question 3 of 4.', undefined, 'paused evidence', {
+        stoppedAt: 2,
+        answered: [true, true, false, false],
+      });
+    if (id === 'paused-bare') throw new SessionAnswerError('paused', 'Stopped.');
     if (id === 'undelivered-failed')
       throw new SessionAnswerError('failed', "Couldn't answer automatically.", undefined, 'failed evidence');
     return sessionView(id);
@@ -157,6 +163,31 @@ describe('the session answer mount', () => {
       should(JSON.parse(actual.body)).match({ code, error: "Couldn't answer automatically.", detail });
     },
   );
+
+  it('says where a paused drive stopped and which questions are answered, so the app can offer to resume', async () => {
+    const answer = async (session: string) =>
+      await dispatcher().dispatch(
+        request({
+          method: 'POST',
+          path: `/v1/sessions/${session}/answer`,
+          headers,
+          body: JSON.stringify({ toolUseId: 'tool-1', labels: ['one'] }),
+        }),
+      );
+
+    const paused = await answer('paused');
+    const bare = await answer('paused-bare');
+
+    should(paused.status).equal(409);
+    should(JSON.parse(paused.body)).match({
+      code: 'answer_paused',
+      error: 'Stopped at question 3 of 4.',
+      detail: 'paused evidence',
+      stoppedAt: 2,
+      answered: [true, true, false, false],
+    });
+    should(JSON.parse(bare.body)).not.have.properties('stoppedAt', 'answered', 'detail');
+  });
 
   it.each([
     ['reused', 'answer_request_id_reused'],

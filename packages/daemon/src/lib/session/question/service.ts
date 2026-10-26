@@ -15,6 +15,49 @@ export class StructuredQuestionDriveFailure extends Error {
   }
 }
 
+/** How far a drive got through a multi-question form when it stopped. */
+export interface StructuredQuestionProgress {
+  /** The question the drive stopped at, counted from 0. */
+  readonly stoppedAt: number;
+  /** Whether each question's tab was ticked as answered on the last frame read, in question order. */
+  readonly answered: readonly boolean[];
+}
+
+/**
+ * A drive that stopped BEFORE submitting a tabbed form that is still open on the pane.
+ *
+ * Nothing was submitted, so nothing is lost by stopping, and Escape would throw away the questions
+ * already answered. The form is left exactly where it is: it can be finished in the Console, or the
+ * same answer sent again — a tabbed drive re-reads every tab and presses `Submit answers` only once the
+ * review page lists exactly the requested answers, so starting over cannot answer anything twice.
+ */
+export class StructuredQuestionDrivePaused extends StructuredQuestionDriveFailure {
+  constructor(
+    message: string,
+    readonly progress: StructuredQuestionProgress,
+    acceptance: StructuredQuestionAcceptance,
+    diagnostics: Readonly<Record<string, unknown>> = {},
+  ) {
+    super(message, acceptance, { ...diagnostics, ...progress, formOpen: true });
+    this.name = 'StructuredQuestionDrivePaused';
+  }
+}
+
+/** One step of a drive, journalled as it happens so a stopped drive says where and why. */
+export type StructuredQuestionDriveStep =
+  | { readonly step: 'started'; readonly mode: 'tabs' | 'pages'; readonly answered?: readonly boolean[] }
+  /** The question's answer was chosen and its tab (or page) visibly moved on. */
+  | { readonly step: 'answered'; readonly questionIndex: number }
+  /** A tab already ticked with the requested answer was passed over with →. */
+  | { readonly step: 'kept'; readonly questionIndex: number }
+  /** The review page listed a different answer, so the drive went back to this tab. */
+  | { readonly step: 'revisited'; readonly questionIndex: number; readonly shown?: string | undefined }
+  | { readonly step: 'review-verified' }
+  | { readonly step: 'submitted' };
+
+/** Where a driver reports its steps. Best-effort: a step that cannot be recorded never stops a drive. */
+export type StructuredQuestionDriveJournal = (id: SessionId, step: StructuredQuestionDriveStep) => Promise<void>;
+
 /** The receipt transition a failed attempt is allowed to make after recovery. */
 export type StructuredQuestionFailureReceipt = 'accepted' | 'withdrawn' | 'failed' | 'quarantined';
 
@@ -27,6 +70,17 @@ export class StructuredQuestionAttemptFailed extends Error {
   ) {
     super(message, { cause: failure });
     this.name = 'StructuredQuestionAttemptFailed';
+  }
+}
+
+/** A failed attempt that left a tabbed form open and resumable: its receipt is `withdrawn`. */
+export class StructuredQuestionAttemptPaused extends StructuredQuestionAttemptFailed {
+  constructor(
+    message: string,
+    override readonly failure: StructuredQuestionDrivePaused,
+  ) {
+    super(message, 'withdrawn', failure);
+    this.name = 'StructuredQuestionAttemptPaused';
   }
 }
 
@@ -78,6 +132,13 @@ export interface StructuredQuestionRepository {
     question: PendingQuestion,
     answers: readonly StructuredQuestionAnswer[],
     context: StructuredQuestionFailureContext,
+  ): Promise<void>;
+  /** Records a drive that stopped before submitting a form that is still open, and leaves it pending. */
+  paused(
+    id: SessionId,
+    question: PendingQuestion,
+    answers: readonly StructuredQuestionAnswer[],
+    context: StructuredQuestionFailureContext & { readonly failure: StructuredQuestionDrivePaused },
   ): Promise<void>;
   /** Retains diagnostics for an unconfirmed release without clearing the exact pending binding. */
   retained(
@@ -207,6 +268,19 @@ export class StructuredQuestionService {
         pane => ({ pane }),
         snapshotError => ({ error: snapshotError instanceof Error ? snapshotError.message : String(snapshotError) }),
       );
+      const questionText = pending.questions.map(question => question.question).join('\n\n');
+      if (failure instanceof StructuredQuestionDrivePaused) {
+        // Nothing was submitted and the form is still open with whatever was answered so far. Escape
+        // would discard those answers; the form stays pending, to be resumed or finished in the Console.
+        await this.repository.paused(input.id, pending, answers, {
+          failure,
+          ...('pane' in snapshot ? { snapshot: snapshot.pane } : { snapshotError: snapshot.error }),
+        });
+        throw new StructuredQuestionAttemptPaused(
+          `${failure.message}\n\nNothing was submitted; the form is still open. Answer again to resume it, or finish it in the terminal.\nPending question:\n${questionText}`,
+          failure,
+        );
+      }
       // Validation and caller typos were refused before the driver. A real driver preflight failure
       // means the durable question and native pane have drifted (dead/scrolled/re-rendered), so even
       // proven non-acceptance gets one bounded, positively-bound Escape and a durable release rather
@@ -226,7 +300,6 @@ export class StructuredQuestionService {
           ? { cancellation: cancellation.result }
           : { cancellationError: cancellation.error }),
       };
-      const questionText = pending.questions.map(question => question.question).join('\n\n');
       if (context.cancellation === undefined) {
         // Escape is an input too. If its effect was not positively observed, the native form may
         // still own the pane even when the original answer drive proved that no answer key landed.

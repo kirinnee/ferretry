@@ -20,7 +20,9 @@ import {
 } from '../../../../src/lib/session/question/coordinator.ts';
 import {
   StructuredQuestionAttemptFailed,
+  StructuredQuestionAttemptPaused,
   StructuredQuestionDriveFailure,
+  StructuredQuestionDrivePaused,
   StructuredQuestionRefused,
 } from '../../../../src/lib/session/question/service.ts';
 import { parseSessionId, type SessionId } from '../../../../src/lib/session-id.ts';
@@ -314,6 +316,35 @@ describe('the structured answer coordinator', () => {
       'confirmed',
     ]);
     should(readmitted.performer.calls).have.length(1);
+  });
+
+  it('lets a paused tabbed drive be resumed under the same id, because it submitted nothing', async () => {
+    // Arrange
+    const ledger = new MemoryLedger();
+    const paused = new StructuredQuestionDrivePaused(
+      'stopped at question 2 of 2',
+      { stoppedAt: 1, answered: [true, false] },
+      'ambiguous',
+    );
+    const pausing = harness({
+      ledger,
+      performer: new Performer(new StructuredQuestionAttemptPaused('stopped at question 2 of 2', paused)),
+    });
+
+    // Act
+    await should(answer(pausing.subject)).be.rejectedWith(StructuredQuestionAttemptPaused);
+    const resumed = harness({ ledger });
+    await answer(resumed.subject);
+
+    // Assert
+    should(ledger.appended.map(([, record]) => record.outcome)).deepEqual([
+      'accepted',
+      'withdrawn',
+      'accepted',
+      'confirmed',
+    ]);
+    should(ledger.appended[1]?.[1].reason).equal('stopped at question 2 of 2');
+    should(resumed.performer.calls).have.length(1);
   });
 
   it('leaves a failure at or after the drive ambiguous, and refuses the next attempt rather than repeating it', async () => {

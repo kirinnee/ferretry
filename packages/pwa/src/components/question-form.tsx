@@ -83,11 +83,21 @@ const QUESTION_ALREADY_ANSWERED = 'question_already_answered';
 const UNDELIVERED = new Set(['answer_unconfirmed', 'answer_released', 'session_answer_failed']);
 const COULD_NOT_ANSWER = "Couldn't answer automatically — answer in the Console tab or type your choice in chat.";
 
+/**
+ * The drive stopped part-way through a multi-question form before submitting it. Nothing reached the
+ * agent and the form is still open in the terminal, so sending the same answer again resumes it.
+ */
+const ANSWER_PAUSED = 'answer_paused';
+
 interface AnswerError {
   readonly sentence: string;
   readonly detail?: string;
   /** The answer did not reach the form, so the Console is where it can still be given. */
   readonly console?: true;
+  /** A paused drive: nothing was submitted, so the same answer can be sent again to resume it. */
+  readonly resumable?: true;
+  /** A paused drive: which questions the terminal's form already holds an answer for. */
+  readonly answered?: readonly boolean[];
 }
 
 /**
@@ -98,10 +108,29 @@ interface AnswerError {
 function answerError(cause: unknown): AnswerError {
   const detail = bodyField(cause, 'detail');
   const message = cause instanceof Error ? cause.message : 'Answer could not be sent';
+  if (cause instanceof FyHttpError && cause.code === ANSWER_PAUSED) {
+    const answered = answeredField(cause);
+    return {
+      sentence: message,
+      ...(detail === undefined ? {} : { detail }),
+      console: true,
+      resumable: true,
+      ...(answered === undefined ? {} : { answered }),
+    };
+  }
   if (!(cause instanceof FyHttpError) || cause.code === undefined || !UNDELIVERED.has(cause.code))
     return { sentence: message, ...(detail === undefined ? {} : { detail }) };
   if (detail !== undefined) return { sentence: message, detail, console: true };
   return { sentence: COULD_NOT_ANSWER, detail: message, console: true };
+}
+
+/** The paused refusal's `answered` list, read only when it is the list of booleans it should be. */
+function answeredField(cause: FyHttpError): readonly boolean[] | undefined {
+  const value =
+    typeof cause.body === 'object' && cause.body !== null
+      ? (cause.body as Record<string, unknown>).answered
+      : undefined;
+  return Array.isArray(value) && value.every(item => typeof item === 'boolean') ? value : undefined;
 }
 
 /** One attempt's identity: the question plus a digest of the exact answer, so only a repeat is a replay. */
@@ -224,6 +253,11 @@ export function QuestionForm({
               </p>
             ) : null}
             <legend>{item.header ?? `Question ${index + 1}`}</legend>
+            {error?.answered?.[index] === true ? (
+              <p className="fy-question-held" data-question-held="">
+                Answered in the terminal
+              </p>
+            ) : null}
             <p>{item.question}</p>
             <div className="fy-question-options">
               {(item.options ?? []).map(option => (
@@ -312,10 +346,21 @@ export function QuestionForm({
         </p>
       )}
       {error ? <p role="alert">{error.sentence}</p> : null}
-      {error?.console === true && onOpenConsole !== undefined ? (
-        <button className="fy-question-console" onClick={onOpenConsole} type="button">
-          Open Console
-        </button>
+      {error?.resumable === true || (error?.console === true && onOpenConsole !== undefined) ? (
+        <div className="fy-question-actions">
+          {/* A paused form resumes from the terminal's own state: the daemon re-reads every tab and submits
+              only once its review lists these answers, so sending them again cannot answer twice. */}
+          {error?.resumable === true ? (
+            <button className="fy-question-resume" disabled={locked} onClick={() => void submit()} type="button">
+              Resume
+            </button>
+          ) : null}
+          {error?.console === true && onOpenConsole !== undefined ? (
+            <button className="fy-question-console" onClick={onOpenConsole} type="button">
+              Open Console
+            </button>
+          ) : null}
+        </div>
       ) : null}
       {error?.detail === undefined ? null : (
         <details className="text-meta text-muted">

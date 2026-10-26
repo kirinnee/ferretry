@@ -1,4 +1,4 @@
-import type { PendingQuestion } from '@ferretry/protocol';
+import type { PendingQuestion, StructuredQuestionAnswer } from '@ferretry/protocol';
 
 /**
  * Reading a harness's native question form off a captured pane.
@@ -12,6 +12,12 @@ import type { PendingQuestion } from '@ferretry/protocol';
  *                          `[ ] Label`, Enter TOGGLES it, and a separate unnumbered `Submit` row ends
  *                          the page; a multi-select or multi-question form ends on a "Review your
  *                          answers" page whose `Submit answers` row must be chosen as well.
+ *                          Such a form is TABBED: a strip `←  ☒ Colour  ☐ Extras  ✔ Submit  →` above
+ *                          the question ticks each question once it has an answer, ←/→ move between
+ *                          tabs, answering a tab moves to the next one, and a tab revisited after it
+ *                          was answered marks its chosen row `Label ✔`. The review page lists every
+ *                          answered question as `● question` then `→ answer`, and warns when any is
+ *                          still unanswered.
  *   Codex 0.156.1          `› 1. Label  description` — two columns flattened onto one line; a
  *                          `Question 1/2` header; the free-form row is `None of the above` and takes
  *                          its text as a note opened with Tab.
@@ -47,6 +53,8 @@ export interface BoundQuestionForm {
   readonly freeForm?: { readonly index: number; readonly entry: FreeFormEntry };
   /** The navigation index of a separate Submit row that ends a multi-select page. */
   readonly submit?: number;
+  /** The row a revisited, already answered tab marks `✔` as its answer. */
+  readonly chosen?: number;
 }
 
 export interface ReviewPage {
@@ -54,6 +62,14 @@ export interface ReviewPage {
   readonly cursor: number | undefined;
   /** The navigation index of the row that submits the reviewed answers. */
   readonly submit: number;
+  /** The answer the page lists for each pending question, in question order; `undefined` when unlisted. */
+  readonly shown: readonly (string | undefined)[];
+}
+
+/** A tabbed form's strip, bound to the pending questions. */
+export interface TabStrip {
+  /** Whether each pending question's tab is ticked as answered, in question order. */
+  readonly answered: readonly boolean[];
 }
 
 /** The pane as the binder reads it: scrollback above the screen, and where the screen begins. */
@@ -66,6 +82,8 @@ interface Row {
   readonly line: number;
   readonly cursor: boolean;
   readonly checked: boolean | undefined;
+  /** Marked `✔` as a revisited tab's answer. */
+  readonly chosen: boolean;
   readonly text: string;
   /** Lines under the row that belong to it (a wrapped label, then its description). */
   readonly continuation: readonly string[];
@@ -94,6 +112,12 @@ const CODEX_HEADER = /^\s*Question \d+\/\d+\b/u;
 const GUTTER = /^\s*[│┃▏▎▍]\s?/u;
 /** How far above its rows a form's header may be searched for, scrollback included. */
 const HEADER_REACH = 200;
+/** Claude's tab strip: `←  ☒ Colour  ☐ Extras  ✔ Submit  →`. Codex's `←/→ to navigate` hint never matches. */
+const TAB_STRIP = /^\s*←\s+(?<tabs>.+?)\s+→\s*$/u;
+const TAB = /^(?<mark>[☐☒])\s+(?<label>.+)$/u;
+const SUBMIT_TAB = /^✔\s+Submit$/u;
+/** The mark a revisited tab puts after the row it was answered with. */
+const CHOSEN = /\s+✔$/u;
 
 const FREE_FORM_ROWS: readonly { readonly pattern: RegExp; readonly entry: FreeFormEntry }[] = [
   { pattern: /^type something\.?$/iu, entry: 'inline' },
@@ -129,20 +153,24 @@ export function questionScreen(visible: string, history: string): QuestionScreen
 }
 
 function numbered(line: string): Omit<Row, 'continuation' | 'line'> & { readonly number: number } {
+  // A revisited tab's `Label ✔` is read as the label plus the mark, so it binds like any other row.
   const match = NUMBERED_ROW.exec(line);
   const groups = match?.groups;
-  if (groups === undefined) return { number: 0, cursor: false, checked: undefined, text: '' };
+  const none = { number: 0, cursor: false, checked: undefined, chosen: false, text: '' };
+  if (groups === undefined) return none;
   const lead = (groups.lead ?? '').length + (groups.cursor ?? '').length + (groups.pad ?? '').length;
-  if (lead > 4) return { number: 0, cursor: false, checked: undefined, text: '' };
+  if (lead > 4) return none;
   const rest = groups.rest ?? '';
   const box = CHECKBOX.exec(rest);
   const label = box === null ? rest : rest.slice(box[0].length);
+  // Codex flattens its two columns onto one line; only the first is the label.
+  const text = compact(label.split(/\s{2,}/u)[0] ?? '');
   return {
     number: Number(groups.number),
     cursor: groups.cursor !== undefined,
     checked: box === null ? undefined : (box.groups?.mark ?? ' ') !== ' ',
-    // Codex flattens its two columns onto one line; only the first is the label.
-    text: compact(label.split(/\s{2,}/u)[0] ?? ''),
+    chosen: CHOSEN.test(text),
+    text: text.replace(CHOSEN, ''),
   };
 }
 
@@ -173,7 +201,14 @@ function lastBlock(screen: QuestionScreen): Block | undefined {
       open = true;
     }
     if (open && row.number === rows.length + 1 && submit === undefined) {
-      rows.push({ line: index, cursor: row.cursor, checked: row.checked, text: row.text, continuation: [] });
+      rows.push({
+        line: index,
+        cursor: row.cursor,
+        checked: row.checked,
+        chosen: row.chosen,
+        text: row.text,
+        continuation: [],
+      });
       continue;
     }
     if (!open) continue;
@@ -194,14 +229,19 @@ function lastBlock(screen: QuestionScreen): Block | undefined {
   return found;
 }
 
-/** The lines between a form's first row and its top border (a rule, or Codex's `Question n/m`). */
+/**
+ * The lines between a form's first row and its top: a rule, Codex's `Question n/m`, or Claude's tab
+ * strip. The strip is a top of its own because the rule above it is not always kept: once a re-drawn
+ * form has scrolled, the line above the strip can be anything the transcript printed — including a
+ * prompt that quotes another of the form's questions.
+ */
 function headerAbove(screen: QuestionScreen, first: number): readonly string[] {
   const header: string[] = [];
   for (let index = first - 1; index >= Math.max(0, first - HEADER_REACH); index--) {
     const line = screen.lines[index] ?? '';
     if (RULE.test(line)) break;
     header.unshift(line);
-    if (CODEX_HEADER.test(line)) break;
+    if (CODEX_HEADER.test(line) || TAB_STRIP.test(line)) break;
   }
   return header;
 }
@@ -251,30 +291,145 @@ export function bindQuestionForm(screen: QuestionScreen, question: RenderedQuest
   if (!options.every(label => labels.includes(label))) return undefined;
   const submit = block.submit === undefined ? undefined : block.rows.length;
   const onRow = block.rows.findIndex(row => row.cursor);
+  const chosen = block.rows.findIndex(row => row.chosen);
   return {
     labels,
     checked: block.rows.map(row => row.checked === true),
     cursor: onRow >= 0 ? onRow : block.submit?.cursor === true ? submit : undefined,
     ...(freeForm === undefined ? {} : { freeForm }),
     ...(submit === undefined ? {} : { submit }),
+    ...(chosen < 0 ? {} : { chosen }),
   };
+}
+
+/**
+ * Which pending question the live form is showing, or `undefined` when none of them is bound.
+ *
+ * When one question's text contains another's, both bind; the longer one is what the header shows.
+ */
+export function boundQuestionIndex(screen: QuestionScreen, questions: readonly RenderedQuestion[]): number | undefined {
+  let found: number | undefined;
+  for (const [index, question] of questions.entries()) {
+    if (bindQuestionForm(screen, question) === undefined) continue;
+    if (found === undefined || dense(question.question).length > dense(questions[found]?.question ?? '').length)
+      found = index;
+  }
+  return found;
+}
+
+/**
+ * The live form's tab strip, bound to exactly these questions in order, or `undefined`.
+ *
+ * Bound only when the strip has one ticked-or-not tab per question, each named by that question's
+ * header, and ends on the `✔ Submit` tab. A question without a header is matched by position alone.
+ */
+export function bindTabStrip(screen: QuestionScreen, questions: readonly RenderedQuestion[]): TabStrip | undefined {
+  const block = lastBlock(screen);
+  if (block === undefined) return undefined;
+  const strip = block.header.findLast(line => TAB_STRIP.test(line));
+  const tabs = (strip === undefined ? undefined : TAB_STRIP.exec(strip)?.groups?.tabs)?.trim().split(/\s{2,}/u);
+  if (tabs === undefined || tabs.length !== questions.length + 1 || !SUBMIT_TAB.test(tabs.at(-1) ?? ''))
+    return undefined;
+  const answered: boolean[] = [];
+  for (const [index, question] of questions.entries()) {
+    const tab = TAB.exec(tabs[index] ?? '')?.groups;
+    if (tab === undefined || !tabNames(tab.label ?? '', question.header)) return undefined;
+    answered.push(tab.mark === '☒');
+  }
+  return { answered };
+}
+
+function tabNames(label: string, header: string | undefined): boolean {
+  if (header === undefined) return true;
+  const shown = dense(label);
+  // A header too long for its tab is cut with an ellipsis; what is left must still be its start.
+  return shown.endsWith('…') ? dense(header).startsWith(shown.slice(0, -1)) : shown === dense(header);
 }
 
 /**
  * Claude's closing "Review your answers" page for exactly these questions, or `undefined`.
  *
- * Bound only when the page names every one of the questions and offers `Submit answers` as a row —
- * choosing it is the one key that finishes a form, so it is never pressed on a page that merely looks
- * similar.
+ * Bound only when the page offers `Submit answers` as a row and is positively this form's: it names
+ * every one of the questions, or the tab strip above it binds them (a page with a question still
+ * unanswered lists only the answered ones). Choosing `Submit answers` is the one key that finishes a
+ * form, so it is never pressed on a page that merely looks similar — and the driver presses it only
+ * once {@link ReviewPage.shown} lists exactly the requested answers.
  */
 export function bindReviewPage(screen: QuestionScreen, questions: readonly RenderedQuestion[]): ReviewPage | undefined {
   const block = lastBlock(screen);
   if (block === undefined || !block.header.some(line => /review your answers/iu.test(line))) return undefined;
-  if (!questions.every(question => shows(block.header, question.question))) return undefined;
+  if (
+    !questions.every(question => shows(block.header, question.question)) &&
+    bindTabStrip(screen, questions) === undefined
+  )
+    return undefined;
+  const items = reviewed(block.header);
+  const indexOf = (item: ReviewItem): number =>
+    questions.findIndex(question => dense(question.question) === dense(item.question));
+  // A page listing a question this form does not have is some other form's review.
+  if (items.some(item => indexOf(item) < 0)) return undefined;
   const submit = block.rows.findIndex(row => /^submit answers$/iu.test(row.text));
   if (submit < 0) return undefined;
   const cursor = block.rows.findIndex(row => row.cursor);
-  return { cursor: cursor >= 0 ? cursor : undefined, submit };
+  return {
+    cursor: cursor >= 0 ? cursor : undefined,
+    submit,
+    shown: questions.map((_, index) => items.find(item => indexOf(item) === index)?.answer),
+  };
+}
+
+interface ReviewItem {
+  question: string;
+  answer: string | undefined;
+}
+
+/** The `● question` / `→ answer` pairs a review page lists, wrapped lines joined. */
+function reviewed(header: readonly string[]): readonly ReviewItem[] {
+  const items: ReviewItem[] = [];
+  let inside = false;
+  for (const line of header) {
+    const text = line.replace(GUTTER, '').trim();
+    if (/^review your answers$/iu.test(text)) inside = true;
+    else if (!inside || text === '' || text.startsWith('⚠')) continue;
+    else if (/^ready to submit/iu.test(text)) break;
+    else if (text.startsWith('●')) items.push({ question: text.slice(1), answer: undefined });
+    else {
+      const item = items.at(-1);
+      if (item === undefined) continue;
+      if (text.startsWith('→')) item.answer = text.slice(1).trim();
+      else if (item.answer === undefined) item.question += ` ${text}`;
+      else item.answer += ` ${text}`;
+    }
+  }
+  return items;
+}
+
+/**
+ * Whether a review page lists exactly this answer for its question.
+ *
+ * Several choices are listed comma-separated, in the form's own order or the order they were given;
+ * a long typed answer cut with an ellipsis must still be the start of what was asked for.
+ */
+export function reviewShowsAnswer(
+  shown: string | undefined,
+  question: RenderedQuestion,
+  answer: StructuredQuestionAnswer,
+): boolean {
+  if (shown === undefined) return false;
+  const listed = dense(shown);
+  const wanted =
+    answer.kind === 'other'
+      ? [answer.text]
+      : [
+          (question.options ?? [])
+            .map(option => option.label)
+            .filter(label => answer.labels.includes(label))
+            .join(','),
+          answer.labels.join(','),
+        ];
+  return wanted.some(text =>
+    listed.endsWith('…') ? dense(text).startsWith(listed.slice(0, -1)) : dense(text) === listed,
+  );
 }
 
 /** Whether the question's text is drawn anywhere on the screen, for a free-form page opened by Enter. */
