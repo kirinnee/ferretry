@@ -3673,6 +3673,7 @@ const HARNESS_TERMINAL_DECK: TerminalDeckDependencies = {
   loadXterm: () => new Promise(() => {}),
   watchTheme: () => () => {},
   confirmClose: () => false,
+  confirmLink: () => false,
   writeClipboard: async () => undefined,
 };
 
