@@ -53,6 +53,7 @@
         "harness/relaunch-settings-screenshot.tsx",
         "harness/restart-unresumable-screenshot.tsx",
         "harness/send-status-unknown-screenshot.tsx",
+        "harness/context-outdated-screenshot.tsx",
         "harness/convert-sheet-screenshot.tsx",
         "harness/approval-card-screenshot.tsx",
         "harness/question-form-screenshot.tsx",

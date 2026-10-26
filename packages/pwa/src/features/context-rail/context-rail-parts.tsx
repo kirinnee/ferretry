@@ -4,7 +4,9 @@
  * four ways of saying the same thing.
  */
 
+import { FyHttpError } from '@ferretry/protocol/client';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { UPDATE_MACHINE_WHERE } from '../../lib/machine-update-words.ts';
 import { Button } from '../../shell/primitives.tsx';
 import { SidePaneSearch } from '../../shell/side-pane-search.tsx';
 import { type PlainFailure, plainFailure } from '../mcp/mcp-model.ts';
@@ -17,11 +19,27 @@ export type ContextLoad<T> =
   | { readonly kind: 'idle' }
   | { readonly kind: 'loading' }
   | { readonly kind: 'ready'; readonly value: T }
-  | { readonly kind: 'failed'; readonly reason: string };
+  | { readonly kind: 'failed'; readonly reason: string; readonly outdated?: OutdatedMachine };
+
+/** A machine whose daemon predates the route a read asked for: not a fault, a version. */
+export interface OutdatedMachine {
+  /** The version the daemon stamped on its answer, when it did. */
+  readonly daemonVersion?: string;
+}
 
 /** What a failed read says. The daemon's own sentence when it gave one. */
 export const loadFailureReason = (error: unknown): string =>
   error instanceof Error && error.message.trim() !== '' ? error.message : 'The daemon did not answer.';
+
+/**
+ * Whether a failed read means "this machine is older than the app": the daemon answered, and said it has
+ * no such route. The rail's MCP, Skills and SKILL.md reads lean on routes a daemon gained in 4.82; the app
+ * deploys before the machine updates, so this is a normal state, and the daemon's own 404 is the report.
+ */
+export const outdatedMachine = (error: unknown): OutdatedMachine | undefined =>
+  error instanceof FyHttpError && error.status === 404 && error.code === 'unknown_route'
+    ? { ...(error.daemonVersion === undefined ? {} : { daemonVersion: error.daemonVersion }) }
+    : undefined;
 
 export interface ContextRead<T> {
   readonly load: ContextLoad<T>;
@@ -58,7 +76,9 @@ export function useContextRead<T>(loader: ContextLoader<T>, wanted: boolean): Co
         if (!controller.signal.aborted) setLoad({ kind: 'ready', value });
       },
       (error: unknown) => {
-        if (!controller.signal.aborted) setLoad({ kind: 'failed', reason: loadFailureReason(error) });
+        if (controller.signal.aborted) return;
+        const outdated = outdatedMachine(error);
+        setLoad({ kind: 'failed', reason: loadFailureReason(error), ...(outdated === undefined ? {} : { outdated }) });
       },
     );
     return () => controller.abort();
@@ -159,10 +179,23 @@ export type ContextFailureProps =
       /** What was being done, after "Couldn't": "read this ferret's skills". */
       readonly what: string;
       readonly reason: string;
+      /** Set when the machine's daemon predates the route: said as an update to make, not as a failure. */
+      readonly outdated?: OutdatedMachine;
+      /** What the update would let the app show, after "to show": "MCP". Used only with `outdated`. */
+      readonly showing?: string;
       readonly onRetry: () => void;
     };
 
 export function ContextFailure(props: ContextFailureProps) {
+  if ('outdated' in props && props.outdated !== undefined)
+    return (
+      <ContextOutdated
+        machineName={props.machineName}
+        showing={props.showing ?? 'this'}
+        outdated={props.outdated}
+        onRetry={props.onRetry}
+      />
+    );
   const failure: PlainFailure =
     'title' in props
       ? { headline: props.title, details: props.reason }
@@ -182,6 +215,39 @@ export function ContextFailure(props: ContextFailureProps) {
       <div>
         <Button type="button" size="sm" onClick={props.onRetry} data-context-retry="">
           Try again
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * The machine's daemon is older than the route this tab reads. It says so, and what to do, and does not
+ * dress it as an error: nothing is broken, the machine just has not been updated since the app was.
+ */
+function ContextOutdated({
+  machineName,
+  showing,
+  outdated,
+  onRetry,
+}: {
+  readonly machineName: string;
+  readonly showing: string;
+  readonly outdated: OutdatedMachine;
+  readonly onRetry: () => void;
+}) {
+  const running = outdated.daemonVersion === undefined ? 'an older version' : `version ${outdated.daemonVersion}`;
+  return (
+    <div className="flex min-w-0 flex-col gap-xs py-sm" role="status" data-context-outdated="">
+      <p className="m-0 break-words text-cell font-semibold text-fg">
+        This machine needs an update to show {showing} here
+      </p>
+      <p className="m-0 break-words text-meta text-muted">
+        {`${machineName} is running ${running}, which cannot list this yet — ${UPDATE_MACHINE_WHERE}.`}
+      </p>
+      <div>
+        <Button type="button" size="sm" onClick={onRetry} data-context-retry="">
+          Check again
         </Button>
       </div>
     </div>

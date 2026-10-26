@@ -14,14 +14,19 @@ import {
   type SessionSkillsInventory,
   SessionSkillsInventorySchema,
 } from '@ferretry/protocol';
-import { FyHttpError } from '@ferretry/protocol/client';
+import { FyApiClient, FyHttpError } from '@ferretry/protocol/client';
 import {
   ContextRailBody,
   type ContextRailBodyProps,
 } from '../../../../src/features/context-rail/context-rail-body.tsx';
 import type { ContextDoc } from '../../../../src/features/context-rail/context-rail-model.ts';
 import { loadFailureReason, useContextRead } from '../../../../src/features/context-rail/context-rail-parts.tsx';
-import type { ContextLoader } from '../../../../src/features/context-rail/context-rail-ports.ts';
+import {
+  type ContextLoader,
+  sessionMcpLoader,
+  sessionSkillsInventoryLoader,
+  skillFileLoader,
+} from '../../../../src/features/context-rail/context-rail-ports.ts';
 import { daemonConnection } from '../../../../src/lib/daemon-connection.ts';
 import { interact, type Mounted, must } from '../../../support/dom.ts';
 import { click, mountSettled, settle, text, type } from '../fleet/components/view-support.tsx';
@@ -559,5 +564,108 @@ describe('useContextRead', () => {
   it('says why a read failed', () => {
     expect(loadFailureReason(new Error('gone'))).toBe('gone');
     expect(loadFailureReason('a string')).toBe('The daemon did not answer.');
+  });
+});
+
+/** A daemon from before 4.82: it answers every unknown route exactly as the real dispatcher does. */
+const oldDaemon = async (version: string | undefined) =>
+  await FyApiClient.connect({
+    baseUrl: STUDIO.baseUrl,
+    token: 'placeholder',
+    version: '4.86.1',
+    requestId: () => 'request-1',
+    transport: {
+      send: async (url: string) => {
+        const { pathname } = new URL(url);
+        return new Response(
+          JSON.stringify({ error: `no route GET ${pathname}`, code: 'unknown_route', method: 'GET', path: pathname }),
+          {
+            status: 404,
+            headers: { 'content-type': 'application/json', ...(version ? { 'x-fy-version': version } : {}) },
+          },
+        );
+      },
+    },
+  });
+
+describe('Context › MCP and Skills against a daemon older than the app', () => {
+  it('says the machine needs an update to show MCP — not that the read failed', async () => {
+    const client = await oldDaemon('4.81.0');
+    const { root } = await body({ tab: 'mcp', loadMcp: sessionMcpLoader(STUDIO, async () => client, 'session-a') });
+    expect(root.querySelector('[data-context-failed]')).toBeNull();
+    expect(root.querySelector('[data-context-outdated]')?.getAttribute('role')).toBe('status');
+    expect(root.querySelector('[data-context-outdated] p')?.textContent).toBe(
+      'This machine needs an update to show MCP here',
+    );
+    expect(root.textContent).toContain('studio-mac is running version 4.81.0');
+    expect(root.textContent).toContain('run “fy daemon update” (Settings › Machine › About & updates)');
+    expect(root.textContent).not.toContain('Couldn’t');
+  });
+
+  it('says it for Skills, and for a SKILL.md opened from them, without a version the daemon never stamped', async () => {
+    const client = await oldDaemon(undefined);
+    const { root } = await body({
+      tab: 'skills',
+      loadSkills: sessionSkillsInventoryLoader(STUDIO, async () => client, 'session-a'),
+    });
+    expect(root.querySelector('[data-context-outdated] p')?.textContent).toBe(
+      'This machine needs an update to show skills here',
+    );
+    expect(root.textContent).toContain('studio-mac is running an older version');
+  });
+
+  it('says it for a SKILL.md the machine cannot open yet', async () => {
+    const client = await oldDaemon('4.81.0');
+    const { root } = await body({
+      tab: 'skills',
+      loadSkillFile: skillFileLoader(STUDIO, async () => client, 'session-a'),
+    });
+    const open = must(root.querySelector<HTMLButtonElement>('[data-context-skill-open="floop"]'), 'Open');
+    await interact(() => open.click());
+    await settle();
+    expect(document.body.querySelector('[data-context-skill-file] [data-context-outdated] p')?.textContent).toBe(
+      'This machine needs an update to show this SKILL.md here',
+    );
+  });
+
+  it('reads again when asked, and shows the list once the machine is updated', async () => {
+    let updated = false;
+    const loadMcp = counted(async (): Promise<McpInventory> => {
+      if (!updated) throw new FyHttpError('no route', 404, 'unknown_route', undefined, '4.81.0');
+      return MCP;
+    });
+    const { root } = await body({ tab: 'mcp', loadMcp });
+    expect(root.querySelector('[data-context-outdated]')).not.toBeNull();
+    updated = true;
+    await click(root, '[data-context-retry]');
+    expect(root.querySelector('[data-context-outdated]')).toBeNull();
+    expect(rows(root, 'data-context-mcp').length).toBeGreaterThan(0);
+  });
+
+  it('does not call any other refusal an old machine', async () => {
+    const loadMcp = async (): Promise<McpInventory> => {
+      throw new FyHttpError('the daemon failed to handle this request', 500, 'internal_error');
+    };
+    const { root } = await body({ tab: 'mcp', loadMcp });
+    expect(root.querySelector('[data-context-outdated]')).toBeNull();
+    expect(text(root, '[data-context-failed] p')).toBe('Couldn’t read this ferret’s MCP servers');
+    expect(text(root, '[data-context-failed-details]')).toContain('the daemon failed to handle this request');
+  });
+
+  it('keeps a file the machine could not read as a line naming it, beside the servers it could', async () => {
+    const withProblems = McpInventorySchema.parse({
+      ...MCP,
+      problems: [
+        {
+          source: '/Users/me/Documents/pe/.mcp.json',
+          message:
+            '/Users/me/Documents/pe/.mcp.json cannot be read by the daemon: the operating system refused access (on macOS, that folder may need Full Disk Access for the daemon).',
+        },
+      ],
+    });
+    const { root } = await body({ tab: 'mcp', loadMcp: async () => withProblems });
+    expect(root.querySelector('[data-context-failed]')).toBeNull();
+    expect(text(root, '[data-context-mcp-problem]')).toContain('/Users/me/Documents/pe/.mcp.json cannot be read');
+    expect(rows(root, 'data-context-mcp').length).toBeGreaterThan(0);
   });
 });
