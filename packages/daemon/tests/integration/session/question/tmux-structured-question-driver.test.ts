@@ -1,5 +1,5 @@
 import { describe, it } from 'bun:test';
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { PendingQuestion, StructuredQuestionAnswer } from '@ferretry/protocol';
 import should from 'should';
@@ -8,6 +8,10 @@ import {
   type StructuredQuestionPane,
   TmuxStructuredQuestionDriver,
 } from '../../../../src/adapters/session/question/tmux-structured-question-driver.ts';
+import {
+  StructuredQuestionDrivePaused,
+  type StructuredQuestionDriveStep,
+} from '../../../../src/lib/session/question/service.ts';
 import { parseSessionId } from '../../../../src/lib/session-id.ts';
 import type { PaneState } from '../../../../src/lib/tmux/contracts.ts';
 
@@ -266,10 +270,20 @@ describe('tmux structured-question driver', () => {
           },
         ],
       };
-      const review = claude(' ● Which extras should ship?\n   → Border\n\nReview your answers', [
-        'Submit answers',
-        'Cancel',
-      ]);
+      const review = [
+        RULE,
+        '←  ☒ Extras  ✔ Submit  →',
+        '',
+        'Review your answers',
+        '',
+        ' ● Which extras should ship?',
+        '   → Border',
+        '',
+        'Ready to submit your answers?',
+        '',
+        '❯ 1. Submit answers',
+        '  2. Cancel',
+      ].join('\n');
       const pane = new ScriptedPane([frame(fixture('claude-2.1.281-single-multiselect')), frame(review)]);
 
       const failure = await failureOf(driver(pane).drive(ID, extras, [{ kind: 'selection', labels: ['Border'] }]));
@@ -456,5 +470,345 @@ describe('tmux structured-question driver', () => {
     await should(driver(pane).cancel(ID, single)).be.rejectedWith(/dead/u);
 
     should(pane.keys).deepEqual([]);
+  });
+});
+
+/**
+ * A four-question form driven on a REAL Claude Code 2.1.281 pane at 80×24, every frame the driver read
+ * recorded in order (`claude-2.1.281-tabs4/<run>/NNN.txt`, each the whole pane with its scrollback, so its
+ * last 24 lines are the screen). Replaying them proves the key sequence that really submitted the form.
+ */
+describe('a tabbed four-question form (Claude Code 2.1.281)', () => {
+  const TABS = join(FIXTURES, 'claude-2.1.281-tabs4');
+  const recorded = (name: string): PaneState => {
+    const history = readFileSync(join(TABS, `${name}.txt`), 'utf8');
+    return frame(`${history.split('\n').slice(0, -1).slice(-24).join('\n')}\n`, { history });
+  };
+  const run = (name: string): PaneState[] =>
+    readdirSync(join(TABS, name))
+      .filter(file => file.endsWith('.txt'))
+      .sort()
+      .map(file => recorded(`${name}/${file.slice(0, -'.txt'.length)}`));
+  const pending: PendingQuestion = JSON.parse(readFileSync(join(TABS, 'pending.json'), 'utf8'));
+  const pick = (...labels: string[]): StructuredQuestionAnswer[] =>
+    labels.map(label => ({ kind: 'selection', labels: [label] }));
+
+  function journalled(pane: ScriptedPane, polls = 1) {
+    const steps: StructuredQuestionDriveStep[] = [];
+    const drive = new TmuxStructuredQuestionDriver(
+      pane,
+      async () => SESSION,
+      async () => {},
+      polls,
+      0,
+      async (_id, step) => {
+        steps.push(step);
+      },
+    );
+    return { drive, steps };
+  }
+
+  async function pausedBy(operation: Promise<unknown>): Promise<StructuredQuestionDrivePaused> {
+    const error = await operation.catch((failure: unknown) => failure);
+    should(error).be.instanceOf(StructuredQuestionDrivePaused);
+    return error as StructuredQuestionDrivePaused;
+  }
+
+  it('finishes a form whose first two questions were answered in the Console, as the reported pane was', async () => {
+    const pane = new ScriptedPane(run('partial'));
+    const { drive, steps } = journalled(pane);
+
+    const confirmation = await drive.drive(ID, pending, pick('Decline all 3', 'Accept', 'Accept', 'Maybe'));
+
+    // Meet&Greet: Accept is under the cursor; Sprint plan: Maybe; then Submit answers.
+    should(pane.keys).deepEqual(['Enter', 'Down', 'Down', 'Enter', 'Enter']);
+    should(confirmation).deepEqual({ confirmedBy: 'turn-started' });
+    should(steps).deepEqual([
+      { step: 'started', mode: 'tabs', answered: [true, true, false, false] },
+      { step: 'answered', questionIndex: 2 },
+      { step: 'answered', questionIndex: 3 },
+      { step: 'review-verified' },
+      { step: 'submitted' },
+    ]);
+  });
+
+  it('goes back and changes a tab the Console answered differently, then passes over the tabs that agree', async () => {
+    const pane = new ScriptedPane(run('mismatch'));
+    const { drive, steps } = journalled(pane);
+
+    const confirmation = await drive.drive(ID, pending, pick('Decline all 3', 'Maybe', 'Decline', 'Accept'));
+
+    should(pane.keys).deepEqual([
+      ...['Down', 'Enter'], // Meet&Greet: Decline
+      'Enter', // Sprint plan: Accept
+      ...['Left', 'Left', 'Left'], // the review lists Weekly: Accept — back to Weekly
+      ...['Down', 'Down', 'Enter'], // Weekly: Maybe
+      'Right', // Meet&Greet already says Decline
+      'Right', // Sprint plan already says Accept
+      'Enter', // Submit answers
+    ]);
+    should(confirmation).deepEqual({ confirmedBy: 'turn-started' });
+    should(steps).containDeep([
+      { step: 'revisited', questionIndex: 1, shown: 'Accept' },
+      { step: 'answered', questionIndex: 1 },
+      { step: 'kept', questionIndex: 2 },
+      { step: 'kept', questionIndex: 3 },
+      { step: 'review-verified' },
+    ]);
+  });
+
+  it('answers a fresh form tab by tab, typing a free-form answer into its row', async () => {
+    const pane = new ScriptedPane(run('fresh'));
+    const { drive } = journalled(pane);
+
+    await drive.drive(ID, pending, [
+      ...pick('Lunch only', 'Decline'),
+      { kind: 'other', text: 'Only if it is on Zoom' },
+      ...pick('Maybe'),
+    ]);
+
+    should(pane.keys).deepEqual([
+      ...['Down', 'Down', 'Enter'],
+      ...['Down', 'Enter'],
+      ...['Down', 'Down', 'Enter'],
+      ...['Down', 'Down', 'Enter'],
+      'Enter',
+    ]);
+    should(pane.pasted).deepEqual(['Only if it is on Zoom']);
+  });
+
+  it('pauses, sending nothing, when a tab already holds different typed text', async () => {
+    const pane = new ScriptedPane([recorded('typed-revisited')]);
+    const { drive } = journalled(pane);
+
+    const paused = await pausedBy(
+      drive.drive(ID, pending, [{ kind: 'other', text: 'Going in for lunch' }, ...pick('Accept', 'Accept', 'Maybe')]),
+    );
+
+    should(pane.keys).deepEqual([]);
+    should(paused.message).match(
+      /^stopped at question 1 of 4 \(Socials\): it already holds the typed answer «WFH, decide later»/u,
+    );
+    should(paused.progress).deepEqual({ stoppedAt: 0, answered: [true, false, false, false] });
+    should(paused.acceptance).equal('none');
+    should(paused.diagnostics).match({ formOpen: true, reason: 'typed-answer-held' });
+  });
+
+  it('passes over a tab already holding the same typed text', async () => {
+    const typed = recorded('typed-revisited');
+    const pane = new ScriptedPane([typed, recorded('partial/001')]);
+    const { drive, steps } = journalled(pane);
+
+    await pausedBy(
+      drive.drive(ID, pending, [{ kind: 'other', text: 'WFH, decide later' }, ...pick('Accept', 'Accept', 'Maybe')]),
+    );
+
+    should(pane.keys[0]).equal('Right');
+    should(steps).containDeep([{ step: 'kept', questionIndex: 0 }]);
+  });
+
+  it('pauses with the questions answered so far when a tab does not take its answer', async () => {
+    const meet = recorded('partial/001');
+    const pane = new ScriptedPane([meet, meet, meet]);
+    const { drive } = journalled(pane);
+
+    const paused = await pausedBy(drive.drive(ID, pending, pick('Decline all 3', 'Accept', 'Decline', 'Maybe')));
+
+    should(pane.keys).deepEqual(['Down', 'Enter']);
+    should(paused.message).match(/^stopped at question 3 of 4 \(Meet&Greet\): the answer keys were sent/u);
+    should(paused.progress).deepEqual({ stoppedAt: 2, answered: [true, true, false, false] });
+    should(paused.acceptance).equal('ambiguous');
+  });
+
+  it('stops choosing a tab whose answer does not hold', async () => {
+    // Meet&Greet ticks and moves on, then comes back unticked — twice.
+    const meet = recorded('partial/001');
+    const sprint = recorded('partial/003');
+    const pane = new ScriptedPane([meet, sprint, meet, sprint, meet, sprint]);
+    const { drive } = journalled(pane);
+
+    const paused = await pausedBy(drive.drive(ID, pending, pick('Decline all 3', 'Accept', 'Accept', 'Maybe')));
+
+    should(pane.keys).deepEqual(['Enter', 'Enter']);
+    should(paused.diagnostics).match({ reason: 'answer-not-held', questionIndex: 2 });
+  });
+
+  it('goes back from a review page to the question still unanswered', async () => {
+    const review = recorded('review-missing');
+    const pane = new ScriptedPane([review, review, review]);
+    const { drive, steps } = journalled(pane);
+
+    const paused = await pausedBy(drive.drive(ID, pending, pick('Decline all 3', 'Accept', 'Accept', 'Accept')));
+
+    should(pane.keys).deepEqual(['Left', 'Left', 'Left', 'Left']);
+    should(steps).containDeep([{ step: 'revisited', questionIndex: 0 }]);
+    should(paused.message).match(/← did not bring its tab back/u);
+    should(paused.progress).deepEqual({ stoppedAt: 0, answered: [false, true, true, true] });
+  });
+
+  it('pauses when → does not move past a tab that already agrees', async () => {
+    const weekly = recorded('revisited');
+    const pane = new ScriptedPane([weekly, weekly]);
+    const { drive } = journalled(pane);
+
+    const paused = await pausedBy(drive.drive(ID, pending, pick('Decline all 3', 'Accept', 'Accept', 'Maybe')));
+
+    should(pane.keys).deepEqual(['Right']);
+    should(paused.message).match(/→ did not move past its tab/u);
+  });
+
+  it('refuses, sending nothing, a strip whose question on screen is not pending', async () => {
+    const strange = frame(recorded('fresh/001').visible.replace('Pastry Cart', 'Coffee Cart'));
+    const pane = new ScriptedPane([strange]);
+    const { drive } = journalled(pane);
+
+    const paused = await pausedBy(drive.drive(ID, pending, pick('Decline all 3', 'Accept', 'Accept', 'Maybe')));
+
+    should(pane.keys).deepEqual([]);
+    should(paused.diagnostics).match({ reason: 'question-unbound', questionIndex: 0 });
+  });
+
+  it('fails without pausing once the form is gone from the pane', async () => {
+    const meet = recorded('partial/001');
+    for (const [after, pattern] of [
+      [frame('❯ '), /question tabs are no longer on screen/u],
+      [frame('', { alive: false, dead: true }), /pane died/u],
+    ] as const) {
+      const pane = new ScriptedPane([meet, recorded('partial/003'), after]);
+      const { drive } = journalled(pane);
+
+      const failure = await failureOf(drive.drive(ID, pending, pick('Decline all 3', 'Accept', 'Accept', 'Maybe')));
+
+      should(failure).not.be.instanceOf(StructuredQuestionDrivePaused);
+      should(failure.message).match(pattern);
+      should(failure.acceptance).equal('ambiguous');
+    }
+  });
+
+  it('gives up, paused, when the review keeps listing an answer that its tab says it holds', async () => {
+    const strip = '←  ☒ Deploy  ✔ Submit  →';
+    const tab = [RULE, strip, '', 'Deploy?', '', '❯ 1. Yes ✔', '  2. No', RULE, '  3. Chat about this'].join('\n');
+    const review = [
+      RULE,
+      strip,
+      '',
+      'Review your answers',
+      '',
+      ' ● Deploy?',
+      '   → No',
+      '',
+      '❯ 1. Submit answers',
+      '  2. Cancel',
+    ].join('\n');
+    const deploy: PendingQuestion = {
+      toolUseId: 'deploy',
+      questions: [{ header: 'Deploy', question: 'Deploy?', options: [{ label: 'Yes' }, { label: 'No' }] }],
+    };
+    const pane = new ScriptedPane(
+      Array.from({ length: 40 }, (_, index) => frame(index % 4 === 1 || index % 4 === 2 ? tab : review)),
+    );
+    const { drive } = journalled(pane);
+
+    const paused = await pausedBy(drive.drive(ID, deploy, [{ kind: 'selection', labels: ['Yes'] }]));
+
+    // A single question names no question in its message.
+    should(paused.message).equal('the form did not reach a review page listing the requested answers');
+    should(paused.diagnostics).match({ reason: 'steps-exhausted' });
+    should(pane.keys.filter(key => key === 'Enter')).deepEqual([]);
+  });
+
+  it('never stops a drive because a step could not be journalled', async () => {
+    const pane = new ScriptedPane(run('partial'));
+    const drive = new TmuxStructuredQuestionDriver(
+      pane,
+      async () => SESSION,
+      async () => {},
+      1,
+      0,
+      async () => {
+        throw new Error('journal is full');
+      },
+    );
+
+    should(await drive.drive(ID, pending, pick('Decline all 3', 'Accept', 'Accept', 'Maybe'))).deepEqual({
+      confirmedBy: 'turn-started',
+    });
+  });
+  describe('a single multi-select tab', () => {
+    const extras: PendingQuestion = {
+      toolUseId: 'question-extras',
+      questions: [
+        {
+          header: 'Extras',
+          question: 'Which extras should ship?',
+          multiSelect: true,
+          options: [{ label: 'Shadow' }, { label: 'Border' }],
+        },
+      ],
+    };
+    const ticked = [
+      RULE,
+      '←  ☒ Extras  ✔ Submit  →',
+      '',
+      'Which extras should ship?',
+      '',
+      '❯ 1. [✔] Shadow',
+      '  2. [ ] Border',
+      '  3. [ ] Type something',
+      '     Submit',
+      RULE,
+      '  4. Chat about this',
+    ].join('\n');
+    const review = (strip: boolean) =>
+      [
+        RULE,
+        ...(strip ? ['←  ☒ Extras  ✔ Submit  →', ''] : []),
+        'Review your answers',
+        '',
+        ' ● Which extras should ship?',
+        '   → Shadow',
+        '',
+        '❯ 1. Submit answers',
+        '  2. Cancel',
+      ].join('\n');
+    const done = frame('❯ ', { promptReady: true });
+
+    it('passes over a ticked tab whose boxes already agree', async () => {
+      const pane = new ScriptedPane([frame(ticked), frame(review(true)), frame(review(true)), done]);
+
+      await driver(pane).drive(ID, extras, [{ kind: 'selection', labels: ['Shadow'] }]);
+
+      should(pane.keys).deepEqual(['Right', 'Enter']);
+    });
+
+    it('reads which questions are answered off a review page drawn without its strip', async () => {
+      const pane = new ScriptedPane([
+        frame(fixture('claude-2.1.281-single-multiselect')),
+        frame(review(false)),
+        frame(review(false)),
+        done,
+      ]);
+
+      await driver(pane).drive(ID, extras, [{ kind: 'selection', labels: ['Shadow'] }]);
+
+      should(pane.keys).deepEqual(['Space', 'Down', 'Down', 'Down', 'Enter', 'Enter']);
+    });
+
+    it('keeps the original failure when the pane cannot be read to decide whether to pause', async () => {
+      class FailingPane extends ScriptedPane {
+        reads = 0;
+        override async state(): Promise<PaneState> {
+          this.reads += 1;
+          if (this.reads > 2) throw new Error('tmux is gone');
+          return await super.state();
+        }
+      }
+      const pane = new FailingPane([frame(ticked), frame(ticked)]);
+
+      const failure = await failureOf(driver(pane).drive(ID, extras, [{ kind: 'selection', labels: ['Shadow'] }]));
+
+      should(failure).not.be.instanceOf(StructuredQuestionDrivePaused);
+      should(failure.message).match(/→ did not move past its tab/u);
+    });
   });
 });

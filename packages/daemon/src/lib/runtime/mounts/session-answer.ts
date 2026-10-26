@@ -22,6 +22,7 @@ export type SessionAnswerFailure =
   | 'already_answered'
   | 'unconfirmed'
   | 'released'
+  | 'paused'
   | 'failed';
 
 export class SessionAnswerError extends Error {
@@ -32,6 +33,8 @@ export class SessionAnswerError extends Error {
     readonly answeredWith?: string,
     /** The technical explanation, kept out of `message` so a screen can show it as Details only. */
     readonly detail?: string,
+    /** For `paused`: the question the drive stopped at (from 0) and which questions are ticked. */
+    readonly progress?: { readonly stoppedAt: number; readonly answered: readonly boolean[] },
   ) {
     super(message);
     this.name = 'SessionAnswerError';
@@ -93,6 +96,15 @@ function refuse(error: unknown): never {
     // terminal and use prose when safe, not retry a destructive selector drive.
     case 'released':
       throw new ApiError(409, error.message, 'answer_released', undefined, detailOf(error));
+    // Nothing was submitted and the form is still open with what was answered so far: sending the same
+    // answer again resumes it, which is the one refusal here where a retry is the remedy.
+    case 'paused':
+      throw new ApiError(409, error.message, 'answer_paused', undefined, {
+        ...detailOf(error),
+        ...(error.progress === undefined
+          ? {}
+          : { stoppedAt: error.progress.stoppedAt, answered: [...error.progress.answered] }),
+      });
     case 'failed':
       throw new ApiError(500, error.message, 'session_answer_failed', undefined, detailOf(error));
   }

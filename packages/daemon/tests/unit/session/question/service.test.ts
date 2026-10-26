@@ -3,9 +3,11 @@ import type { PendingQuestion, StructuredQuestionAnswer } from '@ferretry/protoc
 import should from 'should';
 import {
   StructuredQuestionAttemptFailed,
+  StructuredQuestionAttemptPaused,
   type StructuredQuestionCancellation,
   type StructuredQuestionDiagnosticPane,
   StructuredQuestionDriveFailure,
+  StructuredQuestionDrivePaused,
   type StructuredQuestionDriver,
   type StructuredQuestionFailureContext,
   type StructuredQuestionFailureRecovery,
@@ -37,6 +39,9 @@ class Answers implements StructuredQuestionRepository {
     readonly [string, string, readonly StructuredQuestionAnswer[], { readonly confirmedBy: string }]
   > = [];
   readonly failures: Array<
+    readonly [string, PendingQuestion, readonly StructuredQuestionAnswer[], StructuredQuestionFailureContext]
+  > = [];
+  readonly pauses: Array<
     readonly [string, PendingQuestion, readonly StructuredQuestionAnswer[], StructuredQuestionFailureContext]
   > = [];
   readonly retentions: Array<
@@ -71,6 +76,15 @@ class Answers implements StructuredQuestionRepository {
   ): Promise<void> {
     this.failures.push([id, question, answers, context]);
     if (this.failureError !== undefined) throw this.failureError;
+  }
+
+  async paused(
+    id: string,
+    question: PendingQuestion,
+    answers: readonly StructuredQuestionAnswer[],
+    context: StructuredQuestionFailureContext,
+  ): Promise<void> {
+    this.pauses.push([id, question, answers, context]);
   }
 
   async retained(
@@ -415,5 +429,57 @@ describe('structured question service', () => {
     await should(
       legacy.service.answer({ id: ID, toolUseId: 'question-1', labels: [], responses: ['Yes'] }),
     ).be.rejectedWith(/expected 2 answers/u);
+  });
+  it('leaves a paused tabbed form pending and open: no Escape, no release, a withdrawn receipt', async () => {
+    const paused = new StructuredQuestionDrivePaused(
+      'stopped at question 2 of 2: the answer keys were sent, but its tab was not ticked',
+      { stoppedAt: 1, answered: [true, false] },
+      'ambiguous',
+      { phase: 'drive' },
+    );
+    const { service, repository, recovery } = subject(pending, new Driver(Promise.reject(paused)));
+
+    const error = await service
+      .answer({
+        id: ID,
+        toolUseId: 'question-1',
+        labels: [],
+        answers: [
+          { kind: 'selection', labels: ['Yes'] },
+          { kind: 'selection', labels: ['Web'] },
+        ],
+      })
+      .catch((failure: unknown) => failure);
+
+    should(error).be.instanceOf(StructuredQuestionAttemptPaused);
+    const attempt = error as StructuredQuestionAttemptPaused;
+    should(attempt.receipt).equal('withdrawn');
+    should(attempt.failure.progress).deepEqual({ stoppedAt: 1, answered: [true, false] });
+    should(attempt.message).match(/^stopped at question 2 of 2: .*\n\nNothing was submitted; the form is still open/su);
+    should(paused.diagnostics).match({ formOpen: true, stoppedAt: 1, answered: [true, false], phase: 'drive' });
+    should(recovery.cancellations).deepEqual([]);
+    should(repository.failures).deepEqual([]);
+    should(repository.retentions).deepEqual([]);
+    should(repository.pauses).have.length(1);
+    should(repository.pauses[0]?.[3]).match({ failure: paused, snapshot: diagnosticPane });
+  });
+
+  it('records a paused form even when its pane could not be snapshotted', async () => {
+    const paused = new StructuredQuestionDrivePaused('stopped', { stoppedAt: 0, answered: [false, false] }, 'none');
+    const { service, repository, recovery } = subject(pending, new Driver(Promise.reject(paused)));
+    recovery.snapshotError = new Error('tmux is gone');
+
+    await should(
+      service.answer({
+        id: ID,
+        toolUseId: 'question-1',
+        labels: [],
+        answers: [
+          { kind: 'selection', labels: ['Yes'] },
+          { kind: 'selection', labels: ['Web'] },
+        ],
+      }),
+    ).be.rejectedWith(StructuredQuestionAttemptPaused);
+    should(repository.pauses[0]?.[3]).match({ snapshotError: 'tmux is gone' });
   });
 });

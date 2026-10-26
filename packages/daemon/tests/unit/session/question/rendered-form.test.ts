@@ -5,8 +5,11 @@ import should from 'should';
 import {
   bindQuestionForm,
   bindReviewPage,
+  bindTabStrip,
+  boundQuestionIndex,
   questionScreen,
   type RenderedQuestion,
+  reviewShowsAnswer,
   screenShowsQuestion,
 } from '../../../../src/lib/session/question/rendered-form.ts';
 
@@ -133,7 +136,11 @@ describe('rendered question form', () => {
     });
 
     it('binds the closing review page only for the questions it names', () => {
-      should(bindReviewPage(screenOnly('claude-2.1.281-review'), [colour, extras])).deepEqual({ cursor: 0, submit: 0 });
+      should(bindReviewPage(screenOnly('claude-2.1.281-review'), [colour, extras])).deepEqual({
+        cursor: 0,
+        submit: 0,
+        shown: ['Blue', 'Shadow, Icon'],
+      });
       should(
         bindReviewPage(screenOnly('claude-2.1.281-review'), [colour, { ...extras, question: 'Something else?' }]),
       ).be.undefined();
@@ -226,5 +233,126 @@ describe('rendered question form', () => {
     const page = questionScreen('Tell me more about the\nrollout plan', 'Tell me more about the\nrollout plan');
     should(screenShowsQuestion(page, 'Tell me more about the rollout plan')).be.true();
     should(screenShowsQuestion(questionScreen('nothing', 'Tell me\nnothing'), 'Tell me')).be.false();
+  });
+  /**
+   * A four-question form recorded from Claude Code 2.1.281 at 80×24 (`claude-2.1.281-tabs4/`): each file is
+   * the whole pane, scrollback included, so its last 24 lines are the screen. The scrollback holds the
+   * prompt that asked for the form, which QUOTES every question — the trap for a header search.
+   */
+  describe('a tabbed four-question form', () => {
+    const TABS = join(FIXTURES, 'claude-2.1.281-tabs4');
+    const pane = (name: string) => {
+      const history = readFileSync(join(TABS, `${name}.txt`), 'utf8');
+      const visible = `${history.split('\n').slice(0, -1).slice(-24).join('\n')}\n`;
+      return questionScreen(visible, history);
+    };
+    const questions: readonly RenderedQuestion[] = JSON.parse(
+      readFileSync(join(TABS, 'pending.json'), 'utf8'),
+    ).questions;
+    const [socials, weekly, meet, sprint] = questions as [
+      RenderedQuestion,
+      RenderedQuestion,
+      RenderedQuestion,
+      RenderedQuestion,
+    ];
+
+    it('reads which tabs are ticked, and binds the strip only to these questions', () => {
+      should(bindTabStrip(pane('fresh/001'), questions)).deepEqual({ answered: [false, false, false, false] });
+      should(bindTabStrip(pane('partial/001'), questions)).deepEqual({ answered: [true, true, false, false] });
+      // The review page sits under the same strip.
+      should(bindTabStrip(pane('partial/005'), questions)).deepEqual({ answered: [true, true, true, true] });
+      should(bindTabStrip(pane('partial/001'), questions.slice(1))).be.undefined();
+      should(bindTabStrip(pane('partial/001'), [{ ...socials, header: 'Other' }, weekly, meet, sprint])).be.undefined();
+      // A header cut short with an ellipsis still names its tab; without headers, position alone does.
+      const cut = '←  ☐ Soc…  ☐ Weekly  ☐ Meet&Greet  ☐ Sprint plan  ✔ Submit  →';
+      const strip = (line: string) => {
+        const text = fixture('claude-2.1.281-tabs4/fresh/001').replace(/^←.*→$/mu, line);
+        return questionScreen(text, text);
+      };
+      should(bindTabStrip(strip(cut), questions)).deepEqual({ answered: [false, false, false, false] });
+      should(bindTabStrip(strip(cut.replace('Soc…', 'Pal…')), questions)).be.undefined();
+      should(bindTabStrip(strip(cut.replace('✔ Submit', '✔ Done')), questions)).be.undefined();
+      should(bindTabStrip(strip(cut.replace('☐ Soc…', '? Soc…')), questions)).be.undefined();
+      const unnamed = questions.map(({ header: _, ...rest }) => rest);
+      should(bindTabStrip(strip(cut.replace('Soc…', 'Anything')), unnamed)).deepEqual({
+        answered: [false, false, false, false],
+      });
+      should(bindTabStrip(questionScreen('', ''), questions)).be.undefined();
+      // Codex's "←/→ to navigate questions" hint is not a strip.
+      should(bindTabStrip(screenOnly('codex-0.156.1-multi-q1'), [colour, extras])).be.undefined();
+    });
+
+    it('finds the question on screen when part of the form was answered in the terminal', () => {
+      should(boundQuestionIndex(pane('partial/001'), questions)).equal(2);
+      should(boundQuestionIndex(pane('fresh/001'), questions)).equal(0);
+      should(boundQuestionIndex(pane('partial/005'), questions)).be.undefined();
+    });
+
+    it('stops the header at the strip when the border above it has scrolled away', () => {
+      // The strip is the screen's first line, and the scrollback above it is the prompt quoting the
+      // Weekly question — whose options are the Sprint plan's too. Read past the strip, Weekly binds.
+      const scrolled = pane('mismatch/011');
+      should(scrolled.lines[scrolled.visibleFrom]).startWith('←');
+      should(boundQuestionIndex(scrolled, questions)).equal(3);
+      should(bindQuestionForm(scrolled, weekly)).be.undefined();
+    });
+
+    it('prefers the longer question when one question text contains another', () => {
+      const text = fixture('claude-2.1.281-tabs4/partial/001');
+      const short: RenderedQuestion = { ...meet, question: 'Accept the new time?' };
+      should(boundQuestionIndex(questionScreen(text, text), [short, meet])).equal(1);
+      should(boundQuestionIndex(questionScreen(text, text), [meet, short])).equal(0);
+    });
+
+    it('reads the row a revisited tab marks as its answer, chosen or typed', () => {
+      should(bindQuestionForm(pane('revisited'), weekly)).deepEqual({
+        labels: ['Accept', 'Decline', 'Maybe', 'Other'],
+        checked: [false, false, false, false],
+        cursor: 0,
+        freeForm: { index: 3, entry: 'inline' },
+        chosen: 0,
+      });
+      // Typed text replaces the free-form row, so there is no empty row left to type into.
+      should(bindQuestionForm(pane('typed-revisited'), socials)).deepEqual({
+        labels: ['Decline all 3', 'Accept all 3', 'Lunch only', 'WFH, decide later'],
+        checked: [false, false, false, false],
+        cursor: 0,
+        chosen: 3,
+      });
+    });
+
+    it('reads every answer a review page lists, and binds a page with a question still unanswered', () => {
+      should(bindReviewPage(pane('partial/005'), questions)).deepEqual({
+        cursor: 0,
+        submit: 0,
+        shown: ['Decline all 3', 'Accept', 'Accept', 'Maybe'],
+      });
+      // "⚠ You have not answered all questions": only the answered three are listed; the strip binds it.
+      should(bindReviewPage(pane('review-missing'), questions)).deepEqual({
+        cursor: 0,
+        submit: 0,
+        shown: [undefined, 'Accept', 'Accept', 'Accept'],
+      });
+      should(
+        bindReviewPage(pane('review-missing'), [{ ...socials, header: 'Other' }, weekly, meet, sprint]),
+      ).be.undefined();
+      should(
+        bindReviewPage(pane('review-missing'), [socials, weekly, { ...meet, question: 'Elsewhere?' }, sprint]),
+      ).be.undefined();
+    });
+
+    it('compares a listed answer with the requested one', () => {
+      should(reviewShowsAnswer('Accept', weekly, { kind: 'selection', labels: ['Accept'] })).be.true();
+      should(reviewShowsAnswer('Accept', weekly, { kind: 'selection', labels: ['Maybe'] })).be.false();
+      should(reviewShowsAnswer(undefined, weekly, { kind: 'selection', labels: ['Accept'] })).be.false();
+      should(reviewShowsAnswer('Shadow, Icon', extras, { kind: 'selection', labels: ['Icon', 'Shadow'] })).be.true();
+      should(reviewShowsAnswer('Icon, Shadow', extras, { kind: 'selection', labels: ['Icon', 'Shadow'] })).be.true();
+      should(reviewShowsAnswer('Shadow', extras, { kind: 'selection', labels: ['Icon', 'Shadow'] })).be.false();
+      should(
+        reviewShowsAnswer('Only if it is on Zoom', meet, { kind: 'other', text: 'Only if  it is on Zoom' }),
+      ).be.true();
+      should(reviewShowsAnswer('Only if it…', meet, { kind: 'other', text: 'Only if it is on Zoom' })).be.true();
+      should(reviewShowsAnswer('Only if we…', meet, { kind: 'other', text: 'Only if it is on Zoom' })).be.false();
+    });
   });
 });

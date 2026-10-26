@@ -313,6 +313,81 @@ describe('QuestionForm', () => {
     expect(offline.root.findByProps({ role: 'alert' }).children.join('')).toBe('network down');
   });
 
+  const PAUSED_SENTENCE =
+    'Stopped at question 2 of 2 (1 of 2 answered). Nothing was sent yet and the form is still open: resume to answer the rest, or finish it in the Console tab.';
+
+  test('shows which questions a paused drive left answered in the terminal, and resumes with the same answer', async () => {
+    const calls: unknown[][] = [];
+    const opened: string[] = [];
+    let refuse = true;
+    const form = render(
+      <QuestionForm
+        api={{
+          answer: async (...args) => {
+            calls.push(args);
+            if (refuse)
+              throw new FyHttpError(PAUSED_SENTENCE, 409, 'answer_paused', {
+                error: PAUSED_SENTENCE,
+                detail: 'stopped at question 2 of 2 (Extras): the answer keys were sent',
+                stoppedAt: 1,
+                answered: [true, false],
+              });
+            return undefined;
+          },
+        }}
+        daemon={daemonA}
+        onOpenConsole={() => opened.push('console')}
+        question={{
+          toolUseId: 'tabs',
+          questions: [
+            { header: 'Colour', question: 'Which colour?', options: [{ label: 'Red' }, { label: 'Blue' }] },
+            { header: 'Extras', question: 'Which extras?', options: [{ label: 'Shadow' }] },
+          ],
+        }}
+        sessionId="tabs-session"
+      />,
+    );
+    run(() => form.root.findAllByType('input')[1]?.props.onChange());
+    run(() => form.root.findAllByType('input')[3]?.props.onChange());
+    await runAsync(async () => {
+      form.root.findByProps({ className: 'fy-question-submit' }).props.onClick();
+      await Promise.resolve();
+    });
+
+    expect(form.root.findByProps({ role: 'alert' }).children.join('')).toBe(PAUSED_SENTENCE);
+    // Only the first question carries the mark.
+    const held = form.root.findAllByProps({ 'data-question-held': '' });
+    expect(held).toHaveLength(1);
+    expect(form.root.findAllByType('fieldset')[0]?.findAllByProps({ 'data-question-held': '' })).toHaveLength(1);
+    expect(form.root.findByType('pre').children.join('')).toMatch(/stopped at question 2 of 2 \(Extras\)/u);
+    run(() => form.root.findByProps({ className: 'fy-question-console' }).props.onClick());
+    expect(opened).toEqual(['console']);
+
+    refuse = false;
+    await runAsync(async () => {
+      form.root.findByProps({ className: 'fy-question-resume' }).props.onClick();
+      await Promise.resolve();
+    });
+
+    // The same answer under the same request id: the daemon admits it again, because nothing was submitted.
+    expect(calls).toHaveLength(2);
+    expect(calls[1]).toEqual(calls[0]);
+    expect(form.root.findAllByProps({ role: 'alert' })).toHaveLength(0);
+    expect(form.root.findAllByProps({ 'data-question-held': '' })).toHaveLength(0);
+  });
+
+  test('still offers Resume and the Console when a paused refusal carries no usable progress', async () => {
+    const form = await refusedWith(
+      new FyHttpError(PAUSED_SENTENCE, 409, 'answer_paused', { error: PAUSED_SENTENCE, answered: ['yes'] }),
+      [],
+    );
+
+    expect(form.root.findAllByProps({ 'data-question-held': '' })).toHaveLength(0);
+    expect(form.root.findAllByProps({ className: 'fy-question-resume' })).toHaveLength(1);
+    expect(form.root.findAllByProps({ className: 'fy-question-console' })).toHaveLength(1);
+    expect(form.root.findAllByType('pre')).toHaveLength(0);
+  });
+
   test('makes Other exclusive, renders its text field, and submits its trimmed value', async () => {
     const calls: unknown[][] = [];
     const form = render(

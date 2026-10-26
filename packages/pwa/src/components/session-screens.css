@@ -114,6 +114,7 @@
 }
 .fy-question-nav button,
 .fy-question-submit,
+.fy-question-resume,
 .fy-question-console {
   min-height: 44px;
   min-width: 44px;
@@ -130,6 +131,17 @@
    width the app supports. */
 .fy-question-form > [role='alert'] {
   overflow-wrap: anywhere;
+}
+.fy-question-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+/* A question the terminal's form already holds an answer for, after a drive paused part-way. */
+.fy-question .fy-question-held {
+  color: var(--fy-muted);
+  font-size: 0.875em;
+  margin: 0;
 }
 .fy-screen-heading,
 .fy-detail-header,

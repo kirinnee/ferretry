@@ -10,7 +10,9 @@
  * sentence, with the technical explanation behind Details) and `undelivered` (the daemon could not drive
  * the native form — the owner's real report, as an older daemon words it: the raw driver text moves
  * behind Details and an Open Console button offers the pane itself). Every width is asserted to fit without
- * sideways scroll. Like `approval-card-screenshot.tsx` it drives the system Chrome through
+ * sideways scroll. `paused` is a two-question form whose drive stopped before submitting:
+ * the sentence says where, the first question is marked as answered in the terminal, and Resume sits
+ * beside Open Console. Like `approval-card-screenshot.tsx` it drives the system Chrome through
  * playwright-core and aborts every request off the loopback origin.
  */
 import { spawnSync } from 'node:child_process';
@@ -42,6 +44,13 @@ import { daemonConnection } from '../../src/lib/daemon-connection.ts';
 const daemon = daemonConnection({ daemonId: 'harness', baseUrl: 'http://127.0.0.1', deviceId: 'harness' });
 const state = new URLSearchParams(location.search).get('state');
 const UNDELIVERED = 'the rendered form is not the exact pending question; no keys were sent\\n\\nAutomatic native cancellation was not confirmed: the failed answer no longer has a positively bound question menu; refusing automatic Escape. The structured form remains bound; inspect the terminal before continuing.\\nPending question:\\nHow should this land?';
+const PAUSED = 'Stopped at question 2 of 2 (1 of 2 answered). Nothing was sent yet and the form is still open: resume to answer the rest, or finish it in the Console tab.';
+const QUESTIONS = state === 'paused'
+  ? [
+      { header: 'Colour', question: 'Which colour should the banner use?', options: [{ label: 'Red' }, { label: 'Blue' }] },
+      { header: 'Extras', question: 'Which extras should ship with it?', options: [{ label: 'Shadow' }, { label: 'Border' }] },
+    ]
+  : [{ question: 'How should this land?', options: [{ label: 'Ship it' }, { label: 'Hold' }] }];
 const api = {
   answer: async () => {
     if (state === 'answered')
@@ -51,6 +60,13 @@ const api = {
       });
     if (state === 'undelivered')
       throw new FyHttpError(UNDELIVERED, 409, 'answer_unconfirmed', { error: UNDELIVERED });
+    if (state === 'paused')
+      throw new FyHttpError(PAUSED, 409, 'answer_paused', {
+        error: PAUSED,
+        detail: 'stopped at question 2 of 2 (Extras): the answer keys were sent, but its tab was not ticked and the form did not move on',
+        stoppedAt: 1,
+        answered: [true, false],
+      });
     throw new FyHttpError('A different answer was already sent for this question. Reload the session and check it before answering again.', 409, 'answer_request_id_reused', {
       error: 'x',
       detail: 'request id "question:fy_daemon_x:session:toolu_01" was already used for a different answer',
@@ -69,7 +85,7 @@ createRoot(root).render(
           onOpenConsole={() => {}}
           question={{
             toolUseId: 'toolu_01',
-            questions: [{ question: 'How should this land?', options: [{ label: 'Ship it' }, { label: 'Hold' }] }],
+            questions: QUESTIONS,
           }}
           sessionId="harness-session"
         />
@@ -141,12 +157,17 @@ try {
           return await route.continue();
         });
         const page = await context.newPage();
-        for (const state of ['answered', 'error', 'undelivered'] as const) {
+        for (const state of ['answered', 'error', 'undelivered', 'paused'] as const) {
           await page.goto(`${server.url}?theme=studio-${scheme}&state=${state}`);
           const form = page.locator('.fy-question-form');
           await form.waitFor({ state: 'visible' });
-          await page.getByText('Other…').click();
-          await page.getByPlaceholder('Type your response').fill('Ship it, but behind a flag');
+          if (state === 'paused') {
+            await page.getByText('Blue', { exact: true }).click();
+            await page.getByText('Shadow', { exact: true }).click();
+          } else {
+            await page.getByText('Other…').click();
+            await page.getByPlaceholder('Type your response').fill('Ship it, but behind a flag');
+          }
           await page.locator('.fy-question-submit').click();
           if (state === 'answered') await page.locator('[data-question-answered]').waitFor({ state: 'visible' });
           else {
