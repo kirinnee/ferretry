@@ -141,6 +141,14 @@ try {
       page = await open(phone, theme, 'panel');
       await shot(page, scheme, 'panel-phone', true);
       await page.close();
+      for (const name of ['overload', 'overload-open', 'rich', 'single', 'old', 'several', 'strip', 'board']) {
+        page = await open(phone, theme, name);
+        await shot(page, scheme, `${name}-phone`);
+        await page.close();
+        page = await open(desktop, theme, name);
+        await shot(page, scheme, `${name}-desktop`);
+        await page.close();
+      }
       page = await open(desktop, theme, 'panel');
       await shot(page, scheme, 'panel-desktop', true);
       await page.close();

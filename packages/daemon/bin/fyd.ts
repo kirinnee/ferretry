@@ -8594,7 +8594,11 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
             const view = await sessions.get(id);
             return view === undefined
               ? undefined
-              : { name: agentSpokenName(view.config), interactive: view.config.mode === 'interactive' };
+              : {
+                  name: agentSpokenName(view.config),
+                  title: view.config.name,
+                  interactive: view.config.mode === 'interactive',
+                };
           },
         },
         push,

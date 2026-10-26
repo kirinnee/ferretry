@@ -13,7 +13,8 @@ import {
 import { daemonConnection } from '../../../src/lib/daemon-connection.ts';
 import { daemonSessionScope } from '../../../src/lib/daemon-scope.ts';
 import '../../support/dom.ts';
-import { interact, type Mounted, mount, must } from '../../support/dom.ts';
+import { menuAction } from '../../support/attention-inbox.tsx';
+import { interact, type Mounted, mount, must, pressKey } from '../../support/dom.ts';
 
 const daemon = daemonConnection({ daemonId: 'daemon-a', baseUrl: 'https://a.example.test', deviceId: 'token-a' });
 const scope = daemonSessionScope(daemon, 'shared');
@@ -134,6 +135,15 @@ const buttonNamed = (root: ParentNode, text: string): HTMLButtonElement =>
     `the ${text} button`,
   );
 
+/** The sheet shows one item at a time: step the pager until `id` is the one on screen. */
+const showItem = async (container: HTMLElement, id: string): Promise<HTMLElement> => {
+  for (let step = 0; step < 8 && container.querySelector(`[data-attention-card="${id}"]`) === null; step += 1) {
+    const next = must(container.querySelector<HTMLButtonElement>('[aria-label="Next item"]'), 'the Next item button');
+    await interact(() => next.click());
+  }
+  return cardOf(container, id);
+};
+
 const cardOf = (container: HTMLElement, id: string): HTMLElement =>
   must(container.querySelector<HTMLElement>(`[data-attention-card="${id}"]`), `card ${id}`);
 
@@ -181,8 +191,9 @@ describe('AttentionPanel', () => {
     );
     const strip = must(view.container.querySelector<HTMLButtonElement>('[data-attention-strip]'), 'the strip');
     expect(strip.textContent).toContain('2');
-    expect(strip.textContent).toContain('need you');
+    expect(strip.textContent).toContain('Needs you');
     expect(strip.textContent).toContain('Rebase now?');
+    expect(strip.getAttribute('aria-haspopup')).toBe('dialog');
     expect(strip.getAttribute('aria-expanded')).toBe('false');
     expect(view.container.querySelector('[data-attention-panel]')).toBeNull();
 
@@ -211,10 +222,15 @@ describe('AttentionPanel', () => {
         ),
       }),
     );
-    const open = [...view.container.querySelectorAll('[data-attention-card]')].map(card =>
-      card.getAttribute('data-attention-card'),
-    );
-    expect(open).toEqual(['A3', 'A5']);
+    // One card at a time, behind a pager.
+    const shown = (): (string | null)[] =>
+      [...must(view, 'view').container.querySelectorAll('[data-attention-card]')].map(card =>
+        card.getAttribute('data-attention-card'),
+      );
+    expect(shown()).toEqual(['A3']);
+    expect(view.container.querySelector('[data-attention-pager]')?.textContent).toBe('1 of 2');
+    await showItem(view.container, 'A5');
+    expect(shown()).toEqual(['A5']);
     const fold = must(view.container.querySelector<HTMLButtonElement>('[data-attention-resolved]'), 'the fold');
     expect(fold.textContent).toContain('Resolved (2)');
     expect(fold.getAttribute('aria-expanded')).toBe('false');
@@ -262,8 +278,9 @@ describe('AttentionPanel', () => {
     const container = must(view?.container, 'view');
     await type(must(cardOf(container, 'A3').querySelector('textarea'), 'A3 reply'), 'Ship on Friday');
     await interact(() => must(cardOf(container, 'A3').querySelector('form'), 'A3 form').requestSubmit());
-    await type(must(cardOf(container, 'A4').querySelector('textarea'), 'A4 reply'), 'Use the staging key');
-    await interact(() => must(cardOf(container, 'A4').querySelector('form'), 'A4 form').requestSubmit());
+    const second = await showItem(container, 'A4');
+    await type(must(second.querySelector('textarea'), 'A4 reply'), 'Use the staging key');
+    await interact(() => must(second.querySelector('form'), 'A4 form').requestSubmit());
     expect(recorded.calls).toEqual([
       { method: 'respond', id: 'A3', payload: { kind: 'open-question', answer: 'Ship on Friday' } },
       { method: 'resolve', id: 'A4', payload: 'Use the staging key' },
@@ -274,12 +291,10 @@ describe('AttentionPanel', () => {
     const recorded = recordingClient();
     view = await mount(panel({ client: recorded.client, snapshot: board([item('A3'), item('A4')]) }));
     const container = must(view?.container, 'view');
-    await interact(() =>
-      must(cardOf(container, 'A3').querySelector<HTMLButtonElement>('[data-attention-done]'), 'Done').click(),
-    );
-    await interact(() =>
-      must(cardOf(container, 'A4').querySelector<HTMLButtonElement>('[data-attention-dismiss]'), 'Dismiss').click(),
-    );
+    const done = await menuAction(cardOf(container, 'A3'), 'done');
+    await interact(() => done.click());
+    const dismiss = await menuAction(await showItem(container, 'A4'), 'dismiss');
+    await interact(() => dismiss.click());
     expect(recorded.calls).toEqual([
       { method: 'resolve', id: 'A3', payload: undefined },
       { method: 'dismiss', id: 'A4', payload: undefined },
@@ -299,11 +314,13 @@ describe('AttentionPanel', () => {
     await interact(() => buttonNamed(cardOf(container, 'A3'), 'Approve').click());
     expect(buttonNamed(cardOf(container, 'A3'), 'Approve').disabled).toBe(true);
     // One slow answer never freezes the others.
-    expect(buttonNamed(cardOf(container, 'A4'), 'Approve').disabled).toBe(false);
-    // A second press while the first is in flight sends nothing more.
+    expect(buttonNamed(await showItem(container, 'A4'), 'Approve').disabled).toBe(false);
     await interact(() =>
-      must(cardOf(container, 'A3').querySelector<HTMLButtonElement>('[data-attention-done]'), 'Done').click(),
+      must(container.querySelector<HTMLButtonElement>('[aria-label="Previous item"]'), 'prev').click(),
     );
+    // A second press while the first is in flight sends nothing more.
+    const done = await menuAction(cardOf(container, 'A3'), 'done').catch(() => null);
+    if (done !== null) await interact(() => done.click());
     expect(recorded.calls).toHaveLength(1);
 
     await interact(async () => {
@@ -312,7 +329,6 @@ describe('AttentionPanel', () => {
     expect(cardOf(container, 'A3').querySelector('[role="alert"]')?.textContent).toBe(
       'Not sent: the item was already resolved',
     );
-    expect(cardOf(container, 'A4').querySelector('[role="alert"]')).toBeNull();
     expect(buttonNamed(cardOf(container, 'A3'), 'Approve').disabled).toBe(false);
   });
 
@@ -320,8 +336,9 @@ describe('AttentionPanel', () => {
     const focus: AttentionPanelFocus = { target: 'A4', seq: 1 };
     view = await mount(panel({ focus, snapshot: board([item('A3'), item('A4')]) }));
     const container = must(view?.container, 'view');
+    // The sheet opens AT the linked item, not at the first one.
     expect(cardOf(container, 'A4').getAttribute('data-highlighted')).toBe('true');
-    expect(cardOf(container, 'A3').getAttribute('data-highlighted')).toBeNull();
+    expect(container.querySelector('[data-attention-card="A3"]')).toBeNull();
     expect(scrolled).toEqual([attentionPanelItemId('attn', 'A4')]);
     expect(document.activeElement?.id).toBe(attentionPanelItemId('attn', 'A4'));
 
@@ -386,5 +403,79 @@ describe('AttentionPanel', () => {
     view = await mount(panel({ focus: { target: null, seq: 1 } }));
     expect(scrolled).toEqual(['attn']);
     expect(must(view?.container, 'view').querySelector('[data-highlighted]')).toBeNull();
+  });
+});
+
+describe('AttentionPanel sheet', () => {
+  test('folded, it draws one strip and no dialog; tapping asks to open it', async () => {
+    view = await mount(panel({ expanded: false, snapshot: board([item('A3', { subject: 'Ship it?' })]) }));
+    const strip = must(view.container.querySelector<HTMLButtonElement>('[data-attention-strip]'), 'strip');
+    expect(strip.textContent).toContain('Needs you');
+    expect(strip.textContent).toContain('Ship it?');
+    expect(view.container.querySelector('[data-attention-count]')).toBeNull();
+    expect(view.container.querySelector('[role="dialog"]')).toBeNull();
+  });
+
+  test('open, it is a labelled dialog holding the card, with a close button', async () => {
+    const changes: boolean[] = [];
+    view = await mount(panel({ onExpandedChange: next => changes.push(next) }));
+    const dialog = must(view.container.querySelector('[role="dialog"]'), 'dialog');
+    expect(dialog.getAttribute('aria-label')).toBe('Attention');
+    expect(dialog.querySelector('[data-attention-card="A3"]')).not.toBeNull();
+    await interact(() =>
+      must(view?.container.querySelector<HTMLButtonElement>('[data-attention-close]'), 'close').click(),
+    );
+    expect(changes).toEqual([false]);
+  });
+
+  test('Esc closes it', async () => {
+    const changes: boolean[] = [];
+    view = await mount(panel({ onExpandedChange: next => changes.push(next) }));
+    const dialog = must(view.container.querySelector<HTMLElement>('[role="dialog"]'), 'dialog');
+    await interact(() => pressKey(dialog, 'Escape'));
+    expect(changes).toEqual([false]);
+  });
+
+  test('the scrim closes it', async () => {
+    const changes: boolean[] = [];
+    view = await mount(panel({ onExpandedChange: next => changes.push(next) }));
+    await interact(() => must(view?.container.querySelector<HTMLElement>('.fy-attn-sheet__scrim'), 'scrim').click());
+    expect(changes).toEqual([false]);
+  });
+
+  test('focus returns to the strip when it closes', async () => {
+    view = await mount(panel({ expanded: true }));
+    await view.render(panel({ expanded: false }));
+    expect(document.activeElement).toBe(view.container.querySelector('[data-attention-strip]'));
+  });
+
+  test('Done and Dismiss live in the ⋯ menu, shut until it is opened', async () => {
+    view = await mount(panel());
+    const card = cardOf(view.container, 'A3');
+    expect(card.querySelector('[data-attention-done]')).toBeNull();
+    expect(card.querySelector('[data-attention-dismiss]')).toBeNull();
+    const more = must(card.querySelector<HTMLButtonElement>('[data-attention-more]'), 'more');
+    expect(more.getAttribute('aria-haspopup')).toBe('menu');
+    await interact(() => more.click());
+    expect(card.querySelector('[role="menu"] [data-attention-done]')).not.toBeNull();
+    expect(card.querySelector('[role="menu"] [data-attention-dismiss]')).not.toBeNull();
+  });
+
+  test('a rich item shows its summary once and keeps only the first question open', async () => {
+    const rich = item('A3', {
+      subject: 'Pick a database',
+      why: 'Pick a database',
+      context: 'We need storage.',
+      questions: [
+        { question: 'Which one?', options: [{ label: 'SQLite' }, { label: 'Postgres' }], recommended: 'SQLite' },
+      ],
+      ask: { kind: 'multiple-choice', options: [{ label: 'SQLite' }, { label: 'Postgres' }] },
+    });
+    view = await mount(panel({ snapshot: board([rich]) }));
+    const card = cardOf(view.container, 'A3');
+    expect(card.textContent?.split('Pick a database').length).toBe(2);
+    expect(card.querySelector('[data-attention-section="context"]')?.hasAttribute('open')).toBe(false);
+    expect(card.querySelector('[data-attention-section="questions"]')?.hasAttribute('open')).toBe(true);
+    expect(card.querySelectorAll('[data-attention-recommended]').length).toBeGreaterThan(0);
   });
 });

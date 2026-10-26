@@ -73,6 +73,127 @@ export const AttentionResponseSchema = z.union([
 ]);
 export type AttentionResponse = z.infer<typeof AttentionResponseSchema>;
 
+export const MAX_ATTENTION_TERMS = 12;
+export const MAX_ATTENTION_TERM_LENGTH = 80;
+export const MAX_ATTENTION_TERM_MEANING_LENGTH = 400;
+export const MAX_ATTENTION_QUESTIONS = 6;
+export const MAX_ATTENTION_QUESTION_LENGTH = 600;
+export const MAX_ATTENTION_REASON_LENGTH = 1_024;
+export const MAX_ATTENTION_URGENCY_LENGTH = 120;
+export const MAX_ATTENTION_LINKS = 10;
+export const MAX_ATTENTION_LINK_LABEL_LENGTH = 120;
+export const MAX_ATTENTION_LINK_TARGET_LENGTH = 1_024;
+
+const prose = (maximum: number) => z.string().trim().min(1).max(maximum);
+
+/** One piece of jargon the item uses, spelled out for a reader who has not been following. */
+export const AttentionTermSchema = z.strictObject({
+  term: singleLine(MAX_ATTENTION_TERM_LENGTH),
+  meaning: prose(MAX_ATTENTION_TERM_MEANING_LENGTH),
+});
+export type AttentionTerm = z.infer<typeof AttentionTermSchema>;
+
+/**
+ * One thing the owner is asked. Its options, when it has them, are what the owner picks from; its
+ * `recommended` is the asker's own pick — one of those labels when there are options, the suggested
+ * answer in words when there are none — and `why` is the reason for it.
+ */
+export const AttentionQuestionSchema = z
+  .strictObject({
+    question: prose(MAX_ATTENTION_QUESTION_LENGTH),
+    options: z.array(AttentionAskOptionSchema).min(2).max(MAX_ATTENTION_ASK_OPTIONS).optional(),
+    recommended: singleLine(MAX_ATTENTION_ASK_OPTION_LENGTH).optional(),
+    why: prose(MAX_ATTENTION_REASON_LENGTH).optional(),
+  })
+  .superRefine((value, context) => {
+    if (value.options === undefined) return;
+    const labels = value.options.map(option => option.label.trim());
+    if (new Set(labels).size !== labels.length) {
+      context.addIssue({ code: 'custom', message: 'option labels must be unique', path: ['options'] });
+    }
+    if (value.recommended !== undefined && !labels.includes(value.recommended.trim())) {
+      context.addIssue({
+        code: 'custom',
+        message: 'a recommendation must name one of the question options',
+        path: ['recommended'],
+      });
+    }
+  });
+export type AttentionQuestion = z.infer<typeof AttentionQuestionSchema>;
+
+/** The asker's overall suggested decision, and why. */
+export const AttentionRecommendationSchema = z.strictObject({
+  decision: prose(MAX_ATTENTION_QUESTION_LENGTH),
+  why: prose(MAX_ATTENTION_REASON_LENGTH).optional(),
+});
+export type AttentionRecommendation = z.infer<typeof AttentionRecommendationSchema>;
+
+/** A PR, a file or a reference the reader may want to open. The target is a URL, a path or a reference. */
+export const AttentionLinkSchema = z.strictObject({
+  label: singleLine(MAX_ATTENTION_LINK_LABEL_LENGTH).optional(),
+  target: singleLine(MAX_ATTENTION_LINK_TARGET_LENGTH),
+});
+export type AttentionLink = z.infer<typeof AttentionLinkSchema>;
+
+/**
+ * THE STRUCTURED PART OF AN ITEM, every field optional so an item raised before it existed still
+ * reads. The item's `subject` is its SUMMARY (one line: what is needed) and `context` is what is
+ * happening and why it matters; these carry the rest of what a reader who has not been following
+ * needs (docs/attention.md, "What an item says").
+ */
+export const AttentionBriefShape = {
+  /** Jargon the item uses, each spelled out. */
+  terms: z.array(AttentionTermSchema).min(1).max(MAX_ATTENTION_TERMS).optional(),
+  /** What the owner is asked, one entry per decision. */
+  questions: z.array(AttentionQuestionSchema).min(1).max(MAX_ATTENTION_QUESTIONS).optional(),
+  /** The asker's overall suggested decision. */
+  recommendation: AttentionRecommendationSchema.optional(),
+  /** What happens if nobody answers. */
+  impact: prose(MAX_ATTENTION_REASON_LENGTH).optional(),
+  /** By when it matters, in words: "before the 14:00 deploy", "no rush". */
+  urgency: singleLine(MAX_ATTENTION_URGENCY_LENGTH).optional(),
+  /** PRs, files and references worth opening. */
+  links: z.array(AttentionLinkSchema).min(1).max(MAX_ATTENTION_LINKS).optional(),
+};
+
+/** The structured fields of an item, alone. */
+export type AttentionBrief = {
+  readonly [K in keyof typeof AttentionBriefShape]?: z.infer<(typeof AttentionBriefShape)[K]>;
+};
+
+/** Just the structured fields an item or a request carries, with the absent ones left out. */
+export const attentionBriefOf = (value: AttentionBrief): AttentionBrief => ({
+  ...(value.terms === undefined ? {} : { terms: value.terms }),
+  ...(value.questions === undefined ? {} : { questions: value.questions }),
+  ...(value.recommendation === undefined ? {} : { recommendation: value.recommendation }),
+  ...(value.impact === undefined ? {} : { impact: value.impact }),
+  ...(value.urgency === undefined ? {} : { urgency: value.urgency }),
+  ...(value.links === undefined ? {} : { links: value.links }),
+});
+
+/**
+ * The one question an item asks, when it asks exactly one — the only case where its options are
+ * also the item's own answers (and so the swipe deck's). An item with several questions is answered
+ * in words, one answer per question.
+ */
+export const singleAttentionQuestion = (brief: AttentionBrief): AttentionQuestion | undefined =>
+  brief.questions?.length === 1 ? brief.questions[0] : undefined;
+
+/**
+ * The option an item recommends, when it has a choice ask: its single question's recommendation, or
+ * the overall recommendation when it names one of the options exactly.
+ */
+export const recommendedAttentionOption = (
+  item: AttentionBrief & { readonly ask?: AttentionAsk },
+): string | undefined => {
+  if (item.ask?.kind !== 'multiple-choice') return undefined;
+  const labels = item.ask.options.map(option => option.label.trim());
+  const candidates = [singleAttentionQuestion(item)?.recommended, item.recommendation?.decision];
+  return candidates
+    .map(candidate => candidate?.trim())
+    .find(candidate => candidate !== undefined && labels.includes(candidate));
+};
+
 export const AttentionDispositionSchema = z.enum(['done', 'dismissed']);
 export type AttentionDisposition = z.infer<typeof AttentionDispositionSchema>;
 
@@ -93,6 +214,7 @@ const AttentionItemBaseShape = {
   waitingSince: InstantSchema,
   howToResolve: z.string().trim().min(1).max(MAX_ATTENTION_DETAIL_LENGTH),
   ask: AttentionAskSchema.optional(),
+  ...AttentionBriefShape,
 };
 
 export const AttentionItemSchema = z
@@ -210,6 +332,7 @@ const AddAttentionRequestSchema = z.strictObject({
   context: z.string().max(MAX_ATTENTION_DETAIL_LENGTH).nullable().optional(),
   howToResolve: z.string().trim().min(1).max(MAX_ATTENTION_DETAIL_LENGTH),
   ask: AttentionAskSchema.optional(),
+  ...AttentionBriefShape,
 });
 
 export const AttentionActionRequestSchema = z.discriminatedUnion('action', [

@@ -51,6 +51,7 @@ import { StdinSecretValue } from '../src/adapters/secrets/stdin-secret-value';
 import { createFyClientConnector, FySessionApi, SessionFiles, SystemClock } from '../src/adapters/session/index.ts';
 import { FileStateHomeClaim } from '../src/adapters/state-home/claim-files';
 import { createStatuslineController } from '../src/adapters/statusline/index.ts';
+import { AttentionBriefInput } from '../src/adapters/attention/brief-input';
 import { BunTextFileReader } from '../src/adapters/tasks/bun-text-file-reader';
 import { FyTaskBoardGateway } from '../src/adapters/tasks/fy-task-board-gateway';
 import { FyTaskGateway } from '../src/adapters/tasks/fy-task-gateway';
@@ -818,7 +819,12 @@ const DOMAIN_REGISTRARS: ReadonlyArray<(wiring: DomainWiring) => void> = [
   ({ program, world, client, ownSessionId }) =>
     registerAttentionCommands(
       program,
-      new AttentionController(new ProtocolAttentionGateway(client), world.io, ownSessionId),
+      new AttentionController(
+        new ProtocolAttentionGateway(client),
+        world.io,
+        ownSessionId,
+        new AttentionBriefInput(world.cwd),
+      ),
     ),
   ({ program, world, client, ownSessionId }) =>
     registerPinCommands(program, new PinController(new ProtocolPinGateway(client), world.io, ownSessionId)),

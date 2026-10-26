@@ -2313,39 +2313,19 @@ describe('SessionChatPage', () => {
     );
     const panel = (root: ReactTestInstance) => root.findByType(AttentionPanel);
 
-    test('counts the open items in the header, and the count unfolds and folds the panel', () => {
+    test('carries no second "needs you" chip in the header: the panel strip is the one indicator', () => {
       const page = renderSessionChatPage(chatPage({ attention: attentionModel() }));
 
       try {
-        const [trigger] = needsYouButtons(page.root);
-        expect(trigger?.props['data-needs-you']).toBe(1);
-        expect(textOf(must(trigger))).toBe('1 needs you');
-        expect(trigger?.props['aria-expanded']).toBe(false);
-        // The count names the panel it controls, and the panel answers to it.
-        expect(trigger?.props['aria-controls']).toBe(panel(page.root).props.id);
+        expect(needsYouButtons(page.root)).toHaveLength(0);
         expect(panel(page.root).props.expanded).toBe(false);
 
-        run(() => trigger?.props.onClick());
-
+        run(() => panel(page.root).props.onExpandedChange(true));
         expect(panel(page.root).props.expanded).toBe(true);
-        // The header's request is for the panel, not for one item.
-        expect(panel(page.root).props.focus).toEqual({ target: null, seq: 1 });
-        expect(needsYouButtons(page.root)[0]?.props['aria-expanded']).toBe(true);
 
-        run(() => needsYouButtons(page.root)[0]?.props.onClick());
+        run(() => panel(page.root).props.onExpandedChange(false));
         expect(panel(page.root).props.expanded).toBe(false);
         expect(panel(page.root).props.focus).toBeNull();
-      } finally {
-        run(() => page.unmount());
-      }
-    });
-
-    test('says how many need you when more than one does', () => {
-      const page = renderSessionChatPage(
-        chatPage({ attention: attentionModel([attentionItem, { ...attentionItem, id: 'A4' }]) }),
-      );
-      try {
-        expect(textOf(must(needsYouButtons(page.root)[0]))).toBe('2 need you');
       } finally {
         run(() => page.unmount());
       }

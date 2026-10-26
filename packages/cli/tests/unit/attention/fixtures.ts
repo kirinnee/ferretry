@@ -1,6 +1,7 @@
 import type {
   AttentionActionRequest,
   AttentionAsk,
+  AttentionBrief,
   AttentionId,
   AttentionItem,
   AttentionResponse,
@@ -30,7 +31,7 @@ export function humanItem(id: AttentionId, subject: string, overrides: Partial<H
   };
 }
 
-interface HumanItemFields {
+interface HumanItemFields extends AttentionBrief {
   source: AttentionItem['source'];
   sourceRef: string | null;
   why: string;

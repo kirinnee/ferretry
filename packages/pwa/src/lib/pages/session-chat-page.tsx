@@ -1,4 +1,4 @@
-import type { AttentionId, AttentionItem, AttentionSnapshot, IFyApiClient, SessionView } from '@ferretry/protocol';
+import type { AttentionId, AttentionSnapshot, IFyApiClient, SessionView } from '@ferretry/protocol';
 import { WorktreeListResponseSchema } from '@ferretry/protocol';
 import { Pause, Play } from 'lucide-react';
 import { type ReactNode, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
@@ -101,7 +101,6 @@ import { statusMark, TERMINAL_STATUSES } from '../../shell/status-mark.tsx';
 import type { DaemonAccountPickerStore } from '../account-picker-store.ts';
 import { agentReferenceIdentityKey } from '../agent-references.ts';
 import type { DaemonAttentionClient } from '../attention-client.ts';
-import { badgeText } from '../attention-inbox.ts';
 import type { AttentionLoadStatus } from '../attention-store.ts';
 import type { DaemonBrowserLoginStore } from '../browser-login.ts';
 import type { ComposerEnterKeyPreference } from '../composer-keybinding.ts';
@@ -138,9 +137,6 @@ export type SessionChatClient = Pick<IFyApiClient, 'answer' | 'interrupt' | 'res
  * outside the page also avoids re-reading a live account catalog whenever the
  * transcript refreshes. */
 const runtimeModelCatalogs = new DaemonRuntimeModelCatalogStore();
-
-/** One array for "this host passed no Attention model", so the memos below hold. */
-const NO_ATTENTION_ITEMS: readonly AttentionItem[] = [];
 
 /**
  * What this workspace needs to show and answer its session's Attention.
@@ -509,7 +505,6 @@ export function SessionChatPage({
   // session and reset with it.
   const [attentionExpanded, setAttentionExpanded] = useState(false);
   const [attentionFocus, setAttentionFocus] = useState<AttentionPanelFocus | null>(null);
-  const attentionItems = attention?.snapshot?.items ?? NO_ATTENTION_ITEMS;
   const showAttention = useCallback((target: AttentionId | null): void => {
     setAttentionExpanded(true);
     setAttentionFocus(current => ({ target, seq: (current?.seq ?? 0) + 1 }));
@@ -956,23 +951,6 @@ export function SessionChatPage({
       setActionError(`could not copy the session id: ${actionFailureMessage(reason)}`),
     );
   };
-  // The header's count: how many items wait on the reader, and the way to the panel that holds them.
-  const needsYou =
-    attention === undefined || attentionItems.length === 0 ? null : (
-      <button
-        aria-controls={attentionId}
-        aria-expanded={attentionExpanded}
-        aria-label={`${attentionItems.length} Attention ${attentionItems.length === 1 ? 'item needs' : 'items need'} you`}
-        className="fy-needs-you"
-        data-needs-you={attentionItems.length}
-        id={`${attentionId}-trigger`}
-        onClick={() => (attentionExpanded ? onAttentionExpandedChange(false) : showAttention(null))}
-        type="button"
-      >
-        {`${badgeText(attentionItems.length)} ${attentionItems.length === 1 ? 'needs' : 'need'} you`}
-      </button>
-    );
-
   const agentName = sessionDisplayName(session);
   const runtime = session.config.agent;
   const routedClient = useDaemonClient();
@@ -1276,7 +1254,6 @@ export function SessionChatPage({
         session={session}
         status={
           <>
-            {needsYou}
             {liveSample?.compaction?.phase === 'running' ? <CompactionChip compaction={liveSample.compaction} /> : null}
             {/* THE LIVE FEED'S OWN STATE, folded into the status dot: nothing visible while it is
                 healthy, a word and Reconnect once it is not — on a phone too, which is where a screen

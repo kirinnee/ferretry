@@ -664,17 +664,23 @@ describe('Pack mode teaching', () => {
 });
 
 describe('ATTENTION_INSTRUCTION', () => {
-  it('should teach raising a rich item, never for progress, the answer message, and resolving, with the binary name given', () => {
+  it('should teach raising a structured item, never for progress, the answer message, and resolving, with the binary name given', () => {
     // Act
     const text = ATTENTION_INSTRUCTION('zz');
 
     // Assert
     should(text).startWith('Attention: when you need the human to decide or do something');
-    should(text).containEql('`zz attention add "<ask>"`');
-    should(text).containEql('Ask first, in one line.');
-    should(text).containEql('`--context "<what you are doing and why you need this>"`');
-    should(text).containEql('`--kind choice --option "<label>"`');
-    should(text).containEql('Never for progress updates or because you finished.');
+    should(text).containEql('`zz attention add "<summary>"`');
+    should(text).containEql('Write for a reader who has NOT been following');
+    should(text).containEql('the summary is one line of what you need');
+    should(text).containEql('`--context` what is happening and why');
+    should(text).containEql('`--term "X=meaning"` per jargon');
+    should(text).containEql(
+      '`--question` each decision, with `--option` choices and `--recommend <pick> --recommend-why`',
+    );
+    // One compact example, in the binary's own name.
+    should(text).containEql('`zz attention add "Approve the login plan" --context "…" --question "Which plan?"');
+    should(text).containEql('Never for progress or because you finished.');
     should(text).containEql('"[answer to !A3 …]"');
     should(text).containEql('`!A3`');
     should(text).containEql('`zz attention done <id>`');

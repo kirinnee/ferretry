@@ -187,6 +187,39 @@ describe('attention controller add', () => {
     should(out.messages[0]).startWith('attention recorded — 2 unresolved items');
   });
 
+  it('should raise the brief a --json-file body describes', async () => {
+    // Arrange
+    const gateway = new RecordingAttentionGateway(board, board);
+    const read: string[] = [];
+    const input = {
+      read: async (path: string) => {
+        read.push(path);
+        return JSON.stringify({ summary: 'Approve the plan', questions: ['Which plan?', 'When?'] });
+      },
+    };
+    const controller = new AttentionController(gateway, new CapturingOutput(), SESSION, input);
+
+    // Act
+    await controller.add([], { jsonFile: '-' });
+
+    // Assert
+    should(read).deepEqual(['-']);
+    should(gateway.applied[0]?.request).containDeep({
+      action: 'add',
+      subject: 'Approve the plan',
+      ask: { kind: 'open-question' },
+      questions: [{ question: 'Which plan?' }, { question: 'When?' }],
+    });
+  });
+
+  it('should say a --json-file cannot be read where nothing reads one', async () => {
+    // Arrange
+    const { controller } = build(SESSION);
+
+    // Act + Assert
+    await should(controller.add([], { jsonFile: 'brief.json' })).be.rejectedWith(/--json-file cannot be read here/u);
+  });
+
   it('should refuse an empty ask', async () => {
     // Arrange
     const { controller } = build(SESSION);

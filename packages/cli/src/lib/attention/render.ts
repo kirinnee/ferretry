@@ -62,9 +62,44 @@ function itemLines(item: AttentionItem): string[] {
   if (item.context !== null && item.context !== undefined && item.context.trim() !== '') {
     lines.push(`${INDENT}context: ${compact(item.context)}`);
   }
-  lines.push(`${INDENT}why: ${compact(item.why)}`);
+  lines.push(...briefLines(item));
+  if (item.why.trim() !== item.subject.trim()) lines.push(`${INDENT}why: ${compact(item.why)}`);
   lines.push(`${INDENT}resolve: ${compact(item.howToResolve)}`);
   lines.push(`${INDENT}since ${item.waitingSince} · raised by ${actor(item.raisedBy, item.raisedByName)}`);
+  return lines;
+}
+
+/** The structured brief, one line per part: questions, the recommendation, the stakes, terms and links. */
+function briefLines(item: AttentionItem): string[] {
+  const lines: string[] = [];
+  const questions = item.questions ?? [];
+  questions.forEach((question, index) => {
+    const label = questions.length === 1 ? 'question' : `q${index + 1}`;
+    lines.push(`${INDENT}${label}: ${compact(question.question)}`);
+    if (question.options !== undefined) {
+      const picks = question.options.map(option => `"${compact(option.label, OPTION_WIDTH)}"`).join(' | ');
+      lines.push(`${INDENT}  options: ${picks}`);
+    }
+    if (question.recommended !== undefined) {
+      const why = question.why === undefined ? '' : ` — ${compact(question.why, SHORT_WIDTH)}`;
+      lines.push(`${INDENT}  recommended: ${compact(question.recommended, SHORT_WIDTH)}${why}`);
+    }
+  });
+  if (item.recommendation !== undefined) {
+    const why = item.recommendation.why === undefined ? '' : ` — ${compact(item.recommendation.why, SHORT_WIDTH)}`;
+    lines.push(`${INDENT}recommend: ${compact(item.recommendation.decision, SHORT_WIDTH)}${why}`);
+  }
+  if (item.impact !== undefined || item.urgency !== undefined) {
+    const by = item.urgency === undefined ? '' : `by ${compact(item.urgency, SHORT_WIDTH)}`;
+    const impact = item.impact === undefined ? '' : compact(item.impact);
+    lines.push(`${INDENT}impact: ${[impact, by].filter(part => part !== '').join(' — ')}`);
+  }
+  if (item.terms !== undefined) {
+    lines.push(`${INDENT}terms: ${compact(item.terms.map(term => `${term.term} = ${term.meaning}`).join('; '))}`);
+  }
+  if (item.links !== undefined) {
+    lines.push(`${INDENT}links: ${compact(item.links.map(link => link.label ?? link.target).join(' · '))}`);
+  }
   return lines;
 }
 

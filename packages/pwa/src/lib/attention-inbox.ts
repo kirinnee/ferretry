@@ -16,11 +16,14 @@
 
 import {
   ATTENTION_LINK_PARAMETER,
+  type AttentionBrief,
   type AttentionId,
   AttentionIdSchema,
   type AttentionItem,
+  type AttentionQuestion,
   type AttentionResponse,
   type AttentionSnapshot,
+  MAX_ATTENTION_DETAIL_LENGTH,
   type SessionAttentionSummary,
   type SessionView,
 } from '@ferretry/protocol';
@@ -188,6 +191,80 @@ export const inboxOptions = (item: Pick<AttentionItem, 'ask'>): readonly InboxAc
   }
 };
 
+/** Whether an item carries any of the structured brief; an old item carries none. */
+export const hasAttentionBrief = (item: AttentionBrief): boolean =>
+  item.terms !== undefined ||
+  item.questions !== undefined ||
+  item.recommendation !== undefined ||
+  item.impact !== undefined ||
+  item.urgency !== undefined ||
+  item.links !== undefined;
+
+/**
+ * The item's `why`, or `null` when it only repeats the summary. The CLI used to fill `why` with the
+ * subject, which drew the same sentence twice; a card never draws it twice.
+ */
+export const visibleWhy = (item: Pick<AttentionItem, 'subject' | 'why'>): string | null => {
+  const why = item.why.trim();
+  return why === '' || why === item.subject.trim() ? null : why;
+};
+
+/** The item asks several things, so it is answered one answer per question. */
+export const hasSeveralQuestions = (item: AttentionBrief): boolean => (item.questions?.length ?? 0) > 1;
+
+/** Several questions AND the open-question ask that takes their answers as one reply. */
+export const answersPerQuestion = (item: AttentionBrief & Pick<AttentionItem, 'ask'>): boolean =>
+  hasSeveralQuestions(item) && item.ask?.kind === 'open-question';
+
+const NO_ANSWER = '(no answer)';
+const MIN_QUESTION_CHARACTERS = 24;
+
+const clip = (text: string, limit: number): string =>
+  text.length <= limit ? text : `${text.slice(0, Math.max(1, limit - 1)).trimEnd()}…`;
+
+/**
+ * One open-question reply from per-question answers: `1. <question>\n→ <answer>`, blank line between,
+ * `→ (no answer)` for an unanswered one. It must fit `MAX_ATTENTION_DETAIL_LENGTH`: questions are cut
+ * to make room, answers never are — and `null` (refuse) when the answers alone do not fit.
+ */
+export const composeQuestionAnswers = (
+  questions: readonly Pick<AttentionQuestion, 'question'>[],
+  answers: readonly (string | undefined)[],
+): string | null => {
+  const answerOf = (index: number): string => {
+    const answer = answers[index]?.trim() ?? '';
+    return answer === '' ? NO_ANSWER : answer;
+  };
+  const build = (limit: number): string =>
+    questions
+      .map(
+        (entry, index) =>
+          `${index + 1}. ${clip(entry.question.trim().replace(/\s+/gu, ' '), limit)}\n→ ${answerOf(index)}`,
+      )
+      .join('\n\n');
+  let limit = Number.POSITIVE_INFINITY;
+  let text = build(limit);
+  if (text.length > MAX_ATTENTION_DETAIL_LENGTH) {
+    limit = Math.max(...questions.map(entry => entry.question.length));
+    while (text.length > MAX_ATTENTION_DETAIL_LENGTH && limit > MIN_QUESTION_CHARACTERS) {
+      limit = Math.max(MIN_QUESTION_CHARACTERS, Math.floor(limit * 0.8));
+      text = build(limit);
+    }
+  }
+  return text.length > MAX_ATTENTION_DETAIL_LENGTH || answers.every(answer => (answer?.trim() ?? '') === '')
+    ? null
+    : text;
+};
+
+/** The one reply a several-question item sends, as an action — or `null` when it cannot be sent. */
+export const questionAnswersAction = (
+  questions: readonly Pick<AttentionQuestion, 'question'>[],
+  answers: readonly (string | undefined)[],
+): InboxAction | null => {
+  const answer = composeQuestionAnswers(questions, answers);
+  return answer === null ? null : { kind: 'respond', label: 'Reply', response: { kind: 'open-question', answer } };
+};
+
 export type SwipeDirection = 'right' | 'left' | 'up';
 
 export type SwipeMap = Readonly<Partial<Record<SwipeDirection, InboxAction>>>;
@@ -195,9 +272,11 @@ export type SwipeMap = Readonly<Partial<Record<SwipeDirection, InboxAction>>>;
 /**
  * What each swipe does to a card: right is option 1, left option 2, up option 3. A card with no
  * options swipes right to Done and left to Dismiss; a card with one option swipes left to Dismiss.
- * Up only ever means a third option — it is never a destructive fallback.
+ * Up only ever means a third option — it is never a destructive fallback. An item with SEVERAL
+ * questions has no single answer to swipe, so it swipes Done / Dismiss only.
  */
-export const swipeMap = (item: Pick<AttentionItem, 'ask'>): SwipeMap => {
+export const swipeMap = (item: Pick<AttentionItem, 'ask' | 'questions'>): SwipeMap => {
+  if (hasSeveralQuestions(item)) return { right: DONE_ACTION, left: DISMISS_ACTION };
   const [first, second, third] = inboxOptions(item);
   return {
     right: first ?? DONE_ACTION,

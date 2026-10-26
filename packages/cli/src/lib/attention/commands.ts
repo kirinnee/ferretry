@@ -15,22 +15,40 @@ const JSON_FLAG = '--json';
 const JSON_HELP = 'print the protocol payload instead of the human rendering';
 
 const WRITING_GUIDE = `The reader has NOT been following this session. Write for that reader:
-  <the ask>    one line: what the human must decide or do — not backstory
-  --context    the background they need; expand every codename and term of art
-  --why        why this needs them now (what is blocked or at risk)
-  --resolve    the concrete action that clears it
+  <the ask>      the SUMMARY: one line, what the human must decide or do — not backstory
+  --context      what is happening and why it matters, in a few sentences
+  --term         TERM=meaning for every codename or term of art you use (repeat)
+  --question     each thing they must answer (repeat); --option gives a lone question its choices
+  --recommend    your suggested decision (an option label, or the answer in words); --recommend-why
+  --impact       what happens if nobody answers; --urgency by when ("before the 14:00 deploy")
+  --link         a PR, file or reference worth opening (repeat)
+  --json-file    the same fields as JSON (- reads stdin); flags win over the file
 
 Every field renders as markdown: short bullets, bold the key point, no walls of
 text. Attention items never expire on a timer. Answering or dismissing on the board already
 resolves it — but if the blocker clears some OTHER way (the human answers in chat, the work is no
 longer needed), the raising agent must run \`done\` or \`dismiss\` itself, immediately. An item
-whose reason is gone but is still open is a bug, not a safe default.`;
+whose reason is gone but is still open is a bug, not a safe default.
+
+The board, the inbox and the push are titled with this conversation's name, so the summary need
+not repeat it.
+
+JSON body (every field optional except summary; questions and options may be plain strings):
+  {"summary": "Approve the OCI work-login plan",
+   "context": "The work login expires daily; the plan adds a 30-min keepalive.",
+   "terms": [{"term": "OCI", "meaning": "Oracle Cloud Infrastructure"}],
+   "questions": [{"question": "Which plan?", "options": ["Defaults", "I'll reply with changes"],
+                  "recommended": "Defaults", "why": "Matches what runs today"}],
+   "recommendation": {"decision": "Defaults", "why": "Lowest risk"},
+   "impact": "You stay logged out of work accounts", "urgency": "today",
+   "links": [{"label": "Plan", "target": "#F12"}]}`;
 
 const ASK_KINDS = `--kind says what the human DOES:
   permission   approve or reject
   choice       pick one --option (repeat --option; 2 or more required)
   review       say the answer is good, or ask for a clarification
-  open         write a full answer (the default)`;
+  open         write a full answer (the default)
+Without --kind, one --question with options is a choice, and several questions are answered in words.`;
 
 const DISMISS_POLICY = `Agents may dismiss only attention items they raised themselves.
 A human may dismiss any attention item. Every dismissal remains in the resolution audit.`;
@@ -63,12 +81,21 @@ export function registerAttentionCommands(program: Command, controller: Attentio
     attention
       .command('add', { isDefault: true })
       .description('raise something a human must decide or do')
-      .argument('<ask...>', 'one line naming what the human must decide or do')
+      .argument('[ask...]', 'the summary: one line naming what the human must decide or do')
+      .option('--summary <line>', 'the summary, when it is not given as words')
       .option(`-k, --kind <kind>`, `what the human does: ${ASK_KIND_NAMES.join(', ')}`)
       .option('-o, --option <label>', 'a choice label; repeat for each option', collect, [])
-      .option('-c, --context <background>', 'background the reader needs')
+      .option('-c, --context <background>', 'what is happening and why it matters')
       .option('-w, --why <reason>', 'why this needs the human now (defaults to the ask)')
       .option('-r, --resolve <how>', 'the concrete action that clears it')
+      .option('--term <TERM=meaning>', 'spell out one piece of jargon; repeat', collect, [])
+      .option('-q, --question <text>', 'one thing the human must answer; repeat', collect, [])
+      .option('--recommend <decision>', 'your suggested decision: an option label, or the answer in words')
+      .option('--recommend-why <reason>', 'why you recommend it')
+      .option('--impact <text>', 'what happens if nobody answers')
+      .option('--urgency <when>', 'by when it matters, in words')
+      .option('-l, --link <target>', 'a PR, file or reference worth opening; repeat', collect, [])
+      .option('--json-file <path>', 'read these fields as JSON from a file, or - for stdin')
       .addHelpText('after', `\n${ASK_KINDS}`),
   ).action(async (words: string[], _flags: unknown, command: Command) => {
     await controller.add(words, merged<AttentionAddOptions>(command));
