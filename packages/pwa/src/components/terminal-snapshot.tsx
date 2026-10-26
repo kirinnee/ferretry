@@ -25,11 +25,13 @@
 
 import { Terminal } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useLinkBehaviour } from '../features/browser/external-link.tsx';
 import { useLayoutMode } from '../hooks/use-layout-mode.ts';
 import { useStickToBottom } from '../hooks/use-stick-to-bottom.ts';
 import type { DaemonConnection } from '../lib/daemon-connection.ts';
 import { type DaemonSessionScope, daemonSessionKey } from '../lib/daemon-scope.ts';
 import { useDaemonFetch } from '../lib/store.tsx';
+import { splitLinkedRuns } from '../lib/terminal-links.ts';
 import { JumpToLatest } from './jump-to-latest.tsx';
 import {
   describeSnapshotError,
@@ -183,6 +185,10 @@ export const TerminalSnapshotView = ({
     return () => observer.disconnect();
   }, [viewportRef]);
   const fontSize = fit ? fitFontPx(paneColumns(text), paneWidth - PANE_PADDING_X_PX) : undefined;
+  // Addresses in the capture are real anchors, opened by the one "Open links in" decision. The text
+  // is unchanged, so the fit measurement above and the copied selection read exactly what was captured.
+  const links = useLinkBehaviour();
+  const runs = useMemo(() => splitLinkedRuns(text), [text]);
   const preStyle = {
     ...(fontFamily === undefined ? {} : { fontFamily }),
     ...(fontSize === undefined ? {} : { fontSize: `${fontSize}px` }),
@@ -256,8 +262,27 @@ export const TerminalSnapshotView = ({
               data-terminal-fit-px={fontSize}
               style={preStyle}
             >
-              {text || '(no snapshot yet)'}
+              {text === ''
+                ? '(no snapshot yet)'
+                : runs.map(run =>
+                    run.kind === 'text' ? (
+                      run.text
+                    ) : (
+                      <a
+                        className="text-accent underline-offset-2 hover:underline focus-visible:underline"
+                        data-terminal-link=""
+                        href={run.href}
+                        key={run.at}
+                        onClick={event => links.activate(event, { href: run.href, element: event.currentTarget })}
+                        rel="noopener noreferrer"
+                        target="_blank"
+                      >
+                        {run.text}
+                      </a>
+                    ),
+                  )}
             </pre>
+            {links.sheet}
           </div>
         </div>
         {detached ? <JumpToLatest onJump={jumpToLatest} /> : null}

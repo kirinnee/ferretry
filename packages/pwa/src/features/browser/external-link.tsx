@@ -140,6 +140,12 @@ export interface LinkBehaviour {
   readonly host: InAppBrowserHost | null;
   /** Applies the setting to one click. True when it handled the click, which is then default-prevented. */
   readonly activate: (click: LinkClick, target: LinkTarget) => boolean;
+  /**
+   * Opens an address that has no anchor to carry the click — a link a terminal draws. The setting
+   * decides where; a click it leaves to the browser (a modified one, or the default browser setting)
+   * opens a new tab here, because there is no `target="_blank"` to do it.
+   */
+  readonly open: (click: LinkClick, target: { readonly href: string; readonly element: HTMLElement }) => void;
   /** The preview sheet a link with no host opens. Render it once, wherever the hook is used. */
   readonly sheet: ReactNode;
 }
@@ -181,6 +187,14 @@ export function useLinkBehaviour(): LinkBehaviour {
     [computer, host, openLinksIn, opener],
   );
 
+  const open = useCallback<LinkBehaviour['open']>(
+    (click, target) => {
+      if (activate(click, target)) return;
+      if (!click.defaultPrevented) (opener ?? browserLinkOpener()).openTab(target.href);
+    },
+    [activate, opener],
+  );
+
   const sheet =
     host === null && preview !== null && typeof document !== 'undefined'
       ? createPortal(
@@ -193,7 +207,7 @@ export function useLinkBehaviour(): LinkBehaviour {
         )
       : null;
 
-  return { openLinksIn, host, activate, sheet };
+  return { openLinksIn, host, activate, open, sheet };
 }
 
 export type ExternalLinkProps = Omit<AnchorHTMLAttributes<HTMLAnchorElement>, 'href' | 'target' | 'rel'> & {

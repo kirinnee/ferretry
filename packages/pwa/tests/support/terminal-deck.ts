@@ -11,6 +11,7 @@
 
 import type { TerminalListView, TerminalView } from '@ferretry/protocol';
 import type { TerminalDeckDependencies } from '../../src/components/session-terminal-deck.tsx';
+import type { LinkableBuffer, TerminalHyperlinkHandler, TerminalLinkProvider } from '../../src/lib/terminal-links.ts';
 import type { TerminalStream, TerminalStreamHandlers } from '../../src/lib/web-terminals.ts';
 
 export const terminalView = (id: string, patch: Partial<TerminalView> = {}, sessionId = 'shared'): TerminalView => ({
@@ -49,6 +50,9 @@ export interface FakeDeck {
   /** Stream URLs the deck resolved, so a test can prove daemon binding. */
   readonly urls: string[];
   confirm: boolean;
+  /** Every hyperlink the deck asked about, and the answer it is given. */
+  readonly linkQuestions: { visible: string; href: string }[];
+  confirmLinks: boolean;
 }
 
 /**
@@ -124,6 +128,8 @@ export const fakeDeck = (
     closed: [],
     copied: [],
     urls: [],
+    linkQuestions: [],
+    confirmLinks: true,
     confirm: true,
     dependencies: undefined as unknown as TerminalDeckDependencies,
   };
@@ -154,6 +160,10 @@ export const fakeDeck = (
     loadXterm: async () => fakeXterm(),
     watchTheme: () => () => {},
     confirmClose: () => deck.confirm,
+    confirmLink: (visible, href) => {
+      deck.linkQuestions.push({ visible, href });
+      return deck.confirmLinks;
+    },
     writeClipboard: async text => {
       deck.copied.push(text);
     },
@@ -189,6 +199,11 @@ export interface XtermInstance {
   focused(): number;
   /** The font the emulator was constructed with, and the one it holds now. */
   font(): { readonly initial: string | undefined; readonly current: string | undefined };
+  /** The OSC 8 handler the deck constructed the emulator with, and the link providers it registered. */
+  readonly links: {
+    readonly handler: TerminalHyperlinkHandler | undefined;
+    readonly providers: TerminalLinkProvider[];
+  };
 }
 
 /**
@@ -203,6 +218,8 @@ export function xtermSpy(
     readonly fitThrows?: boolean;
     readonly selection?: string;
     readonly onOpen?: () => void;
+    /** The screen buffer the link paths read. */
+    readonly buffer?: LinkableBuffer;
   } = {},
 ): {
   readonly modules: {
@@ -235,9 +252,13 @@ export function xtermSpy(
     #key: (event: never) => boolean = () => true;
     #focused = 0;
 
-    constructor(init?: { readonly fontFamily?: string }) {
+    readonly buffer = { active: options.buffer };
+    readonly providers: TerminalLinkProvider[] = [];
+
+    constructor(init?: { readonly fontFamily?: string; readonly linkHandler?: TerminalHyperlinkHandler }) {
       instances.push({
         font: () => ({ initial: init?.fontFamily, current: this.options.fontFamily }),
+        links: { handler: init?.linkHandler, providers: this.providers },
         focused: () => this.#focused,
         written: this.written,
         type: value => this.#data(value),
@@ -248,6 +269,10 @@ export function xtermSpy(
     }
 
     loadAddon(): void {}
+    registerLinkProvider(provider: TerminalLinkProvider): { dispose(): void } {
+      this.providers.push(provider);
+      return { dispose: () => {} };
+    }
     focus(): void {
       this.#focused += 1;
     }
