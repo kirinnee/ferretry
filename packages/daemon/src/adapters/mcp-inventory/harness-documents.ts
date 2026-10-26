@@ -18,6 +18,23 @@ const MAX_DOCUMENT_BYTES = 16 * 1024 * 1024;
 
 const codeOf = (error: unknown): string | undefined => (error as NodeJS.ErrnoException | undefined)?.code;
 
+/**
+ * Any file-system refusal as a document that cannot be read — by path and cause, never by content. Left
+ * to throw, one locked `.mcp.json` (macOS answers `EPERM` for a folder the daemon holds no privacy grant
+ * for) failed the whole inventory with the daemon's blanket "failed to handle this request", and the
+ * owner lost every server over one file.
+ */
+export function unreadableDocument(path: string, error: unknown): McpDocumentUnreadable {
+  if (error instanceof McpDocumentUnreadable) return error;
+  const code = codeOf(error);
+  if (code === 'EACCES') return new McpDocumentUnreadable(`${path} cannot be read by the daemon.`);
+  if (code === 'EPERM')
+    return new McpDocumentUnreadable(
+      `${path} cannot be read by the daemon: the operating system refused access (on macOS, that folder may need Full Disk Access for the daemon).`,
+    );
+  return new McpDocumentUnreadable(`${path} could not be read${code === undefined ? '' : ` (${code})`}.`);
+}
+
 async function readText(path: string): Promise<{ readonly text: string; readonly mode: number } | null> {
   let handle: Awaited<ReturnType<typeof open>>;
   try {
@@ -25,14 +42,15 @@ async function readText(path: string): Promise<{ readonly text: string; readonly
     handle = await open(path, constants.O_RDONLY | constants.O_NONBLOCK);
   } catch (error) {
     if (codeOf(error) === 'ENOENT' || codeOf(error) === 'ENOTDIR') return null;
-    if (codeOf(error) === 'EACCES') throw new McpDocumentUnreadable(`${path} cannot be read by the daemon.`);
-    throw error;
+    throw unreadableDocument(path, error);
   }
   try {
     const info = await handle.stat();
     if (!info.isFile()) throw new McpDocumentUnreadable(`${path} is not a regular file.`);
     if (info.size > MAX_DOCUMENT_BYTES) throw new McpDocumentUnreadable(`${path} is too large to read.`);
     return { text: await handle.readFile('utf8'), mode: info.mode & 0o777 };
+  } catch (error) {
+    throw unreadableDocument(path, error);
   } finally {
     await handle.close();
   }

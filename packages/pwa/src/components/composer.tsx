@@ -60,6 +60,7 @@ import { LiveMarkdownEditor } from './live-markdown-editor.tsx';
 import { type LocationDraft, PendingLocationChip } from './location-chip.tsx';
 import { Markdown } from './markdown.tsx';
 import { type ReferenceSurface, useReferenceSurface } from './reference-surface.tsx';
+import type { PendingAttachment } from './session-chat-model.ts';
 import { PendingAttachmentStrip } from './session-chat-parts.tsx';
 import { Spinner } from './spinner.tsx';
 
@@ -315,6 +316,24 @@ const shortcutModifier = (): string => (/Mac|iPhone|iPad/u.test(globalThis.navig
 
 /** The composer's own name for a Vim mode, in words rather than in colour. */
 const VIM_MODE_LABEL: Record<VimState['mode'], string> = { insert: 'Insert', normal: 'Normal' };
+
+/** Why Send is held by the files on the tray, in the person's words; null when nothing holds it. */
+export function attachmentHoldNotice(
+  uploading: boolean,
+  failed: readonly PendingAttachment[],
+): { readonly failed: boolean; readonly text: string } | null {
+  if (failed.length > 0) {
+    const which = failed.length === 1 ? (failed[0]?.file.name ?? 'A file') : `${failed.length} files`;
+    const them = failed.length === 1 ? 'it' : 'them';
+    return {
+      failed: true,
+      text: `${which} did not upload, so this message is not sent yet. Retry or remove ${them} first.`,
+    };
+  }
+  return uploading
+    ? { failed: false, text: 'Waiting for your files to finish uploading — Send is ready once they have.' }
+    : null;
+}
 
 /**
  * A single composer surface. Draft persistence is scoped by the supplied paired
@@ -650,10 +669,14 @@ export function Composer({
   }, [draft, draftStore, scope]);
 
   const attachmentIds = attachments.readyIds;
+  const attachmentHold = attachmentHoldNotice(attachments.uploading, attachments.failed);
   // Files alone are a message: the send still carries a sentence, because the route requires one and
   // the agent should be told why a list of paths arrived.
+  // A file still going up, or one that failed, holds the send: either way the message would leave without
+  // a file the person attached, and "see the attached" would reach the agent with nothing attached.
   const canSubmit =
     !attachments.uploading &&
+    attachments.failed.length === 0 &&
     (canSubmitComposer(draft, disabled, sending) ||
       ((attachmentIds.length > 0 || location?.kind === 'ready') && !disabled && !sending));
   /**
@@ -1367,6 +1390,15 @@ export function Composer({
           you interrupt the turn.
         </p>
       ) : null}
+      {attachmentHold === null ? null : (
+        <p
+          className={attachmentHold.failed ? 'fy-composer-error' : 'fy-composer-recalled'}
+          data-composer-attachments-hold=""
+          role={attachmentHold.failed ? 'alert' : 'status'}
+        >
+          {attachmentHold.text}
+        </p>
+      )}
       {error ? (
         <p className="fy-composer-error" role="alert">
           {error.text}

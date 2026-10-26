@@ -103,6 +103,13 @@ stays behind a Details disclosure, and when the app's version is newer than the 
 `x-fy-version` header the sentence adds that the machine may be on an older version and how to update.
 Add a field's label to `FIELD_LABELS` there when a new bounded field ships.
 
+**A read for a whole new route.** A `404 unknown_route` is the daemon saying it has no such route — a
+version, not a fault. The Context rail's MCP, Skills and SKILL.md reads (routes new in 4.82) turn it into
+_This machine needs an update to show MCP here_ plus `UPDATE_MACHINE_WHERE`
+(`outdatedMachine` in `features/context-rail/context-rail-parts.tsx`). No `DAEMON_FEATURES` entry
+backs those reads: daemons 4.82–4.85 have the routes and report no list, so a feature gate would
+call them old. Any other failure keeps the plain failure with its details.
+
 ## Repo-wide machinery
 
 - `scripts/ci/` — workflow entry points; only GitHub workflows call these.
