@@ -24,6 +24,7 @@ import {
   fakeInbox,
   InboxHarness,
   inboxCard,
+  menuAction,
 } from '../../support/attention-inbox.tsx';
 import { interact, type Mounted, mount, must, pressKey } from '../../support/dom.ts';
 import { sessionView } from '../../support/sessions.ts';
@@ -208,7 +209,7 @@ describe('AttentionInboxPage states', () => {
 
     const origin = must(cards[1]?.querySelector<HTMLAnchorElement>('[data-attention-origin]'), 'the origin link');
     expect(origin.getAttribute('href')).toBe('/d/laptop/session/sess-2?attention=A2');
-    expect(origin.textContent).toBe('KKai·Release train·Laptop');
+    expect(origin.textContent).toBe('RRelease trainKai · Laptop');
     const click = new MouseEvent('click', { bubbles: true, cancelable: true, button: 0 });
     await interact(() => origin.dispatchEvent(click));
     expect(navigated).toEqual(['/d/laptop/session/sess-2?attention=A2']);
@@ -371,7 +372,7 @@ describe('AttentionInboxPage on a phone: the swipe deck', () => {
   it('answers through the buttons the same way, into the undo window', async () => {
     const fake = fakeInbox();
     const mounted = await mount(page(fake, [threeWay, twoWay], phone));
-    const done = must(deckTop(mounted).querySelector<HTMLButtonElement>('[data-attention-done]'), 'Done');
+    const done = await menuAction(deckTop(mounted), 'done');
     await interact(() => done.click());
     expect(fake.deferred.getSnapshot().pending.map(entry => entry.action)).toEqual([DONE_ACTION]);
     expect(topId(mounted)).toBe('A2');
@@ -403,13 +404,12 @@ describe('AttentionInboxPage undo', () => {
     expect(live().textContent).toBe('');
 
     const done = (id: string) =>
-      must(
-        mounted.container.querySelector<HTMLButtonElement>(`[data-attention-card="${id}"] [data-attention-done]`),
-        `Done on ${id}`,
-      );
-    await interact(() => done('A3').click());
+      menuAction(must(mounted.container.querySelector(`[data-attention-card="${id}"]`), `card ${id}`), 'done');
+    const first = await done('A3');
+    await interact(() => first.click());
     await advance(fake, 2_000);
-    await interact(() => done('A2').click());
+    const second = await done('A2');
+    await interact(() => second.click());
 
     expect(live().textContent).toBe('Marked !A2 done');
     expect(toast(mounted).querySelector('[data-attention-undo-more]')?.textContent).toBe('+1 more');
@@ -464,9 +464,8 @@ describe('AttentionInboxPage undo', () => {
     const fake = fakeInbox();
     fake.failNext = 'machine unpaired';
     const mounted = await mount(page(fake, [twoWay]));
-    await interact(() =>
-      must(mounted.container.querySelector<HTMLButtonElement>('[data-attention-dismiss]'), 'Dismiss').click(),
-    );
+    const dismiss = await menuAction(mounted.container, 'dismiss');
+    await interact(() => dismiss.click());
     await advance(fake, 5_000);
     // The board no longer lists it.
     await mounted.render(page(fake, []));
@@ -583,9 +582,8 @@ describe('AttentionNeedsYou', () => {
   it('answers undoably, and the toast outlives the last card it took', async () => {
     const fake = fakeInbox();
     const mounted = await mount(needsYou(fake, [bare]));
-    await interact(() =>
-      must(mounted.container.querySelector<HTMLButtonElement>('[data-attention-done]'), 'Done').click(),
-    );
+    const done = await menuAction(mounted.container, 'done');
+    await interact(() => done.click());
     expect(mounted.container.querySelector('[data-attention-needs-you]')).toBeNull();
     expect(toast(mounted).textContent).toContain('Marked !A1 done');
     await interact(() => undoButton(mounted).click());
@@ -611,6 +609,7 @@ describe('AttentionCard swipe hints', () => {
     await options.unmount();
 
     const bare = await mount(<AttentionCard item={attentionItem('A8')} onAct={() => {}} swipeHints />);
+    await menuAction(bare.container, 'done');
     expect(hinted(bare)).toEqual(['swipe right', 'swipe left']);
     await bare.unmount();
   });

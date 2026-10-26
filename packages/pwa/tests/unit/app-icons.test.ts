@@ -236,6 +236,17 @@ describe('the web app manifest', () => {
     expect(manifest.icons.some(icon => icon.type === 'image/svg+xml')).toBe(true);
   });
 
+  it('names the notification badge as its monochrome icon', () => {
+    // The same alpha-only mark every notification carries as its `badge` (`src/lib/notify.ts`), so a
+    // browser that mints an app from the manifest (Chrome's WebAPK) or a launcher that themes icons
+    // has the Ferretry silhouette to paint instead of a white square. A browser that only adds a
+    // shortcut — Edge on Android — still posts notifications under its own icon (docs/attention.md).
+    const monochrome = manifest.icons.filter(icon => icon.purpose.split(' ').includes('monochrome'));
+    expect(monochrome.map(icon => [icon.src, icon.sizes])).toEqual([['/icons/badge-96.png', '96x96']]);
+    expect(pngSize(publicFile('/icons/badge-96.png'))).toEqual({ width: 96, height: 96 });
+    for (const icon of monochrome) expect(icon.purpose).toBe('monochrome');
+  });
+
   it('keeps the maskable art inside the circle Android crops to', () => {
     const canvas = 512;
     const svg = readFileSync(join(packageDir, '../../docs/brand/fleet-grid/logomark-maskable.svg'), 'utf8');

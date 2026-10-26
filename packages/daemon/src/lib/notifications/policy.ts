@@ -7,6 +7,7 @@ import {
   MAX_NOTIFICATION_TITLE_LENGTH,
   type PushNotificationPayload,
   PushNotificationPayloadSchema,
+  recommendedAttentionOption,
   sessionNotificationPath,
 } from '@ferretry/protocol';
 import type { DirectNotificationRequestedRecord, NotificationLedgerEntry, NotificationResult } from './types.ts';
@@ -151,37 +152,76 @@ export function directNotificationPayload(
   }) as SessionNotificationPayload;
 }
 
+/** The two names an Attention push is titled with. */
+export interface AttentionNotificationSession {
+  /** The ferret's spoken name (`agentSpokenName`). */
+  readonly name: string;
+  /** The conversation's name — the session's task title — when it has one. */
+  readonly title?: string;
+}
+
 /**
  * Composes the automatic presentation of one newly created board item: THE ONE PUSH A FERRET'S ASK
  * MAKES (docs/attention.md). Waiting and finishing push nothing; this does.
  *
- * Titled with the ferret that asks — quoted, FIRST — and then the ask, so a lock screen alone says who
- * wants what, and so an ask can never open with the daemon's own new-device alert title
- * (`DEVICE_PAIRED_TITLE`): the ask is an agent's words, exactly as a direct notification's title is. The
- * body is the context the ferret gave — what it is doing and why it needs this — falling back to its
- * `why`, then the choices it offered. A tap opens that conversation at the item: the path is relative
- * to the machine's own pages, which the browser's per-machine worker places under that machine.
+ * TITLED WITH THE CONVERSATION, quoted, FIRST — what it is about — then the ferret's name, so a lock
+ * screen says which piece of work wants the owner. The quote also means an ask can never open with the
+ * daemon's own new-device alert title (`DEVICE_PAIRED_TITLE`): a session's name is an agent's words,
+ * exactly as a direct notification's title is.
+ *
+ * THE BODY SAYS WHAT THE ISSUE IS: the item's summary (its `subject`), or its first question when the
+ * summary only repeats the title; then the recommended answer when the ferret named one; then the
+ * choices it offered. A tap opens that conversation at the item: the path is relative to the machine's
+ * own pages, which the browser's per-machine worker places under that machine.
  */
 export function attentionNotificationPayload(
   sessionId: string,
-  sessionName: string,
+  session: AttentionNotificationSession,
   item: AttentionItem,
   snapshot: AttentionSnapshot,
 ): SessionNotificationPayload {
-  const context = item.context?.trim() || item.why;
-  const options =
-    item.ask?.kind === 'multiple-choice' ? `\n${item.ask.options.map(option => option.label).join(' · ')}` : '';
+  const conversation = session.title?.trim() || session.name;
+  const title = sameWords(conversation, session.name) ? `“${conversation}”` : `“${conversation}” · ${session.name}`;
   return PushNotificationPayloadSchema.parse({
     version: 1,
     eventKey: `attention-raised:${item.id}`,
     sessionId,
     kind: 'attention',
-    title: clipped(`“${sessionName}”: ${item.subject}`, MAX_NOTIFICATION_TITLE_LENGTH),
-    body: clipped(`${context === item.subject ? '' : context}${options}`.trim(), MAX_NOTIFICATION_BODY_LENGTH),
+    title: clipped(title, MAX_NOTIFICATION_TITLE_LENGTH),
+    body: clipped(attentionNotificationBody(item, conversation), MAX_NOTIFICATION_BODY_LENGTH),
     tag: `attention-${sessionId}`,
     url: attentionNotificationPath(sessionId, item.id),
     count: snapshot.count,
   }) as SessionNotificationPayload;
+}
+
+/** What the issue is, what the ferret recommends, and what the owner can pick — one line each. */
+function attentionNotificationBody(item: AttentionItem, conversation: string): string {
+  const first = item.questions?.[0]?.question;
+  const summary = sameWords(item.subject, conversation) && first !== undefined ? first : item.subject;
+  const recommended = recommendedAttentionOption(item) ?? item.recommendation?.decision;
+  const options =
+    item.ask?.kind === 'multiple-choice'
+      ? item.ask.options
+          .map(option => option.label)
+          .filter(label => label !== recommended)
+          .join(' · ')
+      : '';
+  return [
+    oneLine(summary),
+    recommended === undefined ? '' : `Recommended: ${oneLine(recommended)}`,
+    options === '' ? '' : `${recommended === undefined ? 'Options' : 'Or'}: ${options}`,
+  ]
+    .filter(line => line !== '')
+    .join('\n');
+}
+
+function oneLine(text: string): string {
+  return text.replaceAll(/\s+/gu, ' ').trim();
+}
+
+function sameWords(left: string, right: string): boolean {
+  return oneLine(left).toLowerCase() === oneLine(right).toLowerCase();
 }
 
 /** One line of at most `limit` characters, ending in an ellipsis when it was cut. */

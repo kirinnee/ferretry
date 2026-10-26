@@ -15,6 +15,7 @@ import {
   inboxCardKey,
 } from '../../src/lib/attention-inbox.ts';
 import { type DaemonId, daemonId } from '../../src/lib/daemon-connection.ts';
+import { interact, must } from './dom.ts';
 import { sessionView } from './sessions.ts';
 
 interface ManualClock extends DeferredTimers {
@@ -139,3 +140,13 @@ export function InboxHarness({
   };
   return render(inbox);
 }
+
+/** Opens the ⋯ menu inside `root` (when it is shut) and returns its Done or Dismiss item. */
+export const menuAction = async (root: ParentNode, which: 'done' | 'dismiss'): Promise<HTMLButtonElement> => {
+  const selector = `[data-attention-${which}]`;
+  if (root.querySelector(selector) === null) {
+    const more = must(root.querySelector<HTMLButtonElement>('[data-attention-more]'), 'the ⋯ menu button');
+    await interact(() => more.click());
+  }
+  return must(root.querySelector<HTMLButtonElement>(selector), which);
+};

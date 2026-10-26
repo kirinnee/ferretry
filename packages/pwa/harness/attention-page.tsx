@@ -7,10 +7,11 @@
  * held by a real `DeferredAttentionActions` whose commit does nothing.
  */
 
-import type { AttentionItem, AttentionSnapshot, SessionView } from '@ferretry/protocol';
+import type { AttentionId, AttentionItem, AttentionSnapshot, SessionView } from '@ferretry/protocol';
 import { type ReactElement, useState, useSyncExternalStore } from 'react';
 import { createRoot } from 'react-dom/client';
 import { Markdown } from '../src/components/markdown.tsx';
+import { AttentionBoard } from '../src/features/attention/attention-board.tsx';
 import { AttentionInboxPage } from '../src/features/attention/attention-inbox-page.tsx';
 import { AttentionPanel } from '../src/features/attention/attention-panel.tsx';
 import type { AttentionInbox } from '../src/hooks/use-attention-inbox.ts';
@@ -68,6 +69,64 @@ const LONG = item('A1', 41, {
   raisedByName: 'maryah',
 });
 
+const RICH = item('A5', 12, {
+  subject: 'Which storage engine for the board, and when do we migrate?',
+  why: 'Which storage engine for the board, and when do we migrate?',
+  context:
+    'The attention board keeps its ledger in memory today, so a daemon restart forgets every resolved item. Persisting it needs a store; the two candidates differ in how much they ask of the machine.',
+  terms: [
+    { term: 'WAL', meaning: 'A log written before the data, so a crash can be replayed.' },
+    { term: 'Ledger', meaning: 'The list of every item raised, open and resolved.' },
+    { term: 'Migration', meaning: 'Moving the existing items into the new store once.' },
+  ],
+  questions: [
+    {
+      question: 'Which engine should hold the ledger?',
+      options: [
+        { label: 'SQLite', description: 'One file, no server.' },
+        { label: 'Postgres', description: 'A server to run and patch.' },
+      ],
+      recommended: 'SQLite',
+      why: 'It needs nothing installed on the machine.',
+    },
+    {
+      question: 'When should the migration run?',
+      options: [{ label: 'On next start' }, { label: 'After release' }],
+      recommended: 'On next start',
+    },
+  ],
+  recommendation: { decision: 'SQLite, migrating on next start', why: 'Smallest change that survives a restart.' },
+  impact: 'Until this is decided, resolved items are lost on every daemon restart.',
+  urgency: 'Before the release cut on Friday',
+  links: [
+    { label: 'Storage notes', target: 'https://example.test/docs/storage' },
+    { label: 'Ledger module', target: 'packages/daemon/src/lib/attention.ts' },
+  ],
+  ask: { kind: 'open-question' },
+});
+const SINGLE = item('A6', 25, {
+  subject: 'Use SQLite for the ledger?',
+  why: 'Use SQLite for the ledger?',
+  context: 'It is one file and needs no server.',
+  questions: [
+    {
+      question: 'Use SQLite for the ledger?',
+      options: [{ label: 'Yes, SQLite' }, { label: 'No, Postgres' }],
+      recommended: 'Yes, SQLite',
+      why: 'No server to run.',
+    },
+  ],
+  recommendation: { decision: 'Yes, SQLite' },
+  impact: 'The ledger stays in memory.',
+  ask: { kind: 'multiple-choice', options: [{ label: 'Yes, SQLite' }, { label: 'No, Postgres' }] },
+});
+const OLD = item('A7', 5, {
+  subject: 'Can I delete the stale build cache?',
+  why: 'It is 4 GB and nothing reads it.',
+  context: 'Last used three weeks ago.',
+  ask: { kind: 'permission' },
+});
+
 const ferret = (id: string, teammate: string, label: string, patch: Partial<SessionView['state']> = {}) =>
   sessionView(id, {
     config: { teammate: teammate as never, label, cwd: `/home/kirin/Workspace/${id}` },
@@ -98,6 +157,7 @@ const CARDS: readonly InboxCard[] = [
   card(REBASE, SESSIONS[0] as SessionView, 'studio'),
   card(DEPLOY, SESSIONS[1] as SessionView, 'studio'),
   card(LONG, ferret('mg', 'maryah', 'Runtime migration'), 'laptop', LAPTOP),
+  card(RICH, ferret('rc', 'ottilie', 'Ledger storage'), 'studio'),
 ];
 
 // Answers are held for the real undo window, then "sent" nowhere.
@@ -155,8 +215,51 @@ const BOARD: AttentionSnapshot = {
   updatedAt: ago(1),
 };
 
-function Panel(): ReactElement {
-  const [expanded, setExpanded] = useState(true);
+const OVERLOAD = item('A1', 2880, {
+  subject: 'Approve the OCI work-login plan (my picks for A–D) or reply with changes',
+  why: 'Approve the OCI work-login plan (my picks for A–D) or reply with changes',
+  context:
+    "The plan is in this session's chat. It adds modules/oci-work-session: oci-work-login plus a launchd keepalive every 30 min, on both Macs, so a login that expires does not leave you logged out of every account. Pick A–D as drafted or tell me what to change before I apply it to both machines.",
+  ask: { kind: 'multiple-choice', options: [{ label: 'Go with the defaults' }, { label: "I'll reply with changes" }] },
+});
+const OVERLOAD_BOARD: AttentionSnapshot = {
+  ...BOARD,
+  items: [{ ...OVERLOAD, raisedBySession: 'fr' }] as AttentionItem[],
+  resolved: [],
+  count: 1,
+};
+
+const boardOf = (...items: AttentionItem[]): AttentionSnapshot => ({
+  ...OVERLOAD_BOARD,
+  items: items.map(entry => ({ ...entry, raisedBySession: 'fr' })) as AttentionItem[],
+  count: items.length,
+});
+
+function BoardPage(): ReactElement {
+  return (
+    <div className="flex h-dvh flex-col bg-bg" data-fixture="">
+      <AttentionBoard
+        connection={CONNECTION}
+        error={null}
+        loading={false}
+        now={NOW}
+        onAction={async () => undefined}
+        snapshot={boardOf(RICH, SINGLE, OLD)}
+      />
+    </div>
+  );
+}
+
+function Panel({
+  board = BOARD,
+  open = true,
+  target = 'A3',
+}: {
+  readonly board?: AttentionSnapshot;
+  readonly open?: boolean;
+  readonly target?: string | null;
+}): ReactElement {
+  const [expanded, setExpanded] = useState(open);
   const noop = async (): Promise<void> => undefined;
   return (
     <main className="mx-auto flex max-w-3xl flex-col gap-md bg-bg p-panel" data-fixture="">
@@ -164,12 +267,12 @@ function Panel(): ReactElement {
         client={{ respond: noop, resolve: noop, dismiss: noop }}
         connection={CONNECTION}
         expanded={expanded}
-        focus={{ target: 'A3', seq: 1 }}
+        focus={target === null ? null : { target: target as AttentionId, seq: 1 }}
         id="attention-panel"
         now={NOW}
         onExpandedChange={setExpanded}
         scope={daemonSessionScope(CONNECTION, 'fr')}
-        snapshot={BOARD}
+        snapshot={board}
         status="ready"
       />
       <article className="rounded-panel border border-border bg-surface p-panel text-cell" data-chat-line="">
@@ -221,6 +324,22 @@ createRoot(root).render(
     <Inbox phone={false} />
   ) : view === 'panel' ? (
     <Panel />
+  ) : view === 'overload' ? (
+    <Panel board={OVERLOAD_BOARD} open={false} target={null} />
+  ) : view === 'overload-open' ? (
+    <Panel board={OVERLOAD_BOARD} target={null} />
+  ) : view === 'rich' ? (
+    <Panel board={boardOf(RICH)} target="A5" />
+  ) : view === 'single' ? (
+    <Panel board={boardOf(SINGLE)} target="A6" />
+  ) : view === 'old' ? (
+    <Panel board={boardOf(OLD)} target="A7" />
+  ) : view === 'several' ? (
+    <Panel board={boardOf(RICH, SINGLE, OLD)} target={null} />
+  ) : view === 'strip' ? (
+    <Panel board={boardOf(RICH, SINGLE, OLD)} open={false} target={null} />
+  ) : view === 'board' ? (
+    <BoardPage />
   ) : view === 'rail' ? (
     <Bar presentation="rail" />
   ) : view === 'drawer' ? (

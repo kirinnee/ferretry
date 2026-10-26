@@ -1,9 +1,16 @@
-import { useState, type ReactNode } from 'react';
+import type {
+  AttentionAsk,
+  AttentionBy,
+  AttentionItem,
+  AttentionResponse,
+  AttentionSnapshot,
+  ResolvedAttentionItem,
+} from '@ferretry/protocol';
 import {
   ArrowRight,
   BadgeCheck,
-  Bot,
   BookOpen,
+  Bot,
   Check,
   ChevronDown,
   ChevronRight,
@@ -17,19 +24,13 @@ import {
   UserRoundCheck,
   X,
 } from 'lucide-react';
-import type {
-  AttentionAsk,
-  AttentionBy,
-  AttentionItem,
-  AttentionResponse,
-  AttentionSnapshot,
-  ResolvedAttentionItem,
-} from '@ferretry/protocol';
-
-import type { DaemonConnection } from '../../lib/daemon-connection.ts';
+import { type ReactNode, useState } from 'react';
+import { hasAttentionBrief, visibleWhy } from '../../lib/attention-inbox.ts';
 import { cn } from '../../lib/class-names.ts';
+import type { DaemonConnection } from '../../lib/daemon-connection.ts';
 import { Button } from '../../shell/primitives.tsx';
 import { AttentionAnswerControls } from './attention-answer-controls.tsx';
+import { AttentionBriefSections } from './attention-brief.tsx';
 
 export type AttentionTone = AttentionAsk['kind'] | 'none' | 'unknown';
 type Action = (id: string, action: AttentionResponse | null, dismissed?: boolean) => void;
@@ -309,9 +310,11 @@ function AttentionRow({
         </span>
       </div>
       {prose(item.subject, 'mt-xs text-row font-semibold leading-tight text-fg')}
-      <Part part="why" icon={<CircleAlert size={11} />} label="Why now">
-        {prose(item.why, 'mt-0.5 text-cell leading-base text-muted')}
-      </Part>
+      {visibleWhy(item) === null ? null : (
+        <Part part="why" icon={<CircleAlert size={11} />} label="Why now">
+          {prose(item.why, 'mt-0.5 text-cell leading-base text-muted')}
+        </Part>
+      )}
       {item.context && (
         <div data-part="context" className="kt-attn-part min-w-0">
           <button type="button" className="kt-attn-toggle" aria-expanded={background} onClick={onBackground}>
@@ -323,6 +326,9 @@ function AttentionRow({
           {background && prose(item.context, 'pb-xs text-meta leading-base text-muted')}
         </div>
       )}
+      {hasAttentionBrief(item) ? (
+        <AttentionBriefSections item={{ ...item, context: undefined }} renderProse={text => prose(text, 'text-cell')} />
+      ) : null}
       <Part
         part="action"
         icon={<ArrowRight size={11} />}

@@ -1,6 +1,7 @@
 import {
   ATTENTION_SCHEMA_VERSION,
   type AttentionAsk,
+  type AttentionBrief,
   type AttentionErrorCode,
   type AttentionId,
   type AttentionItem,
@@ -8,6 +9,7 @@ import {
   type AttentionResponse,
   type AttentionSnapshot,
   type AttentionSource,
+  attentionBriefOf,
   MAX_ATTENTION_PER_SESSION,
   MAX_ATTENTION_RESOLUTIONS,
   type ResolvedAttentionItem,
@@ -45,7 +47,8 @@ export interface AttentionLedger {
   readonly updatedAt: string;
 }
 
-export interface RaiseAttentionRequest {
+/** A raise carries the item's structured brief (summary is the `subject`) alongside its ask. */
+export interface RaiseAttentionRequest extends AttentionBrief {
   readonly source: AttentionSource;
   readonly sourceRef: string | null;
   readonly sourceSeq?: number;
@@ -301,6 +304,7 @@ function raise(ledger: AttentionLedger, command: RaiseCommand): AttentionMutatio
       waitingSince: actor.kind === 'daemon' && request.waitingSince !== undefined ? request.waitingSince : command.at,
       howToResolve: request.howToResolve,
       ...(request.ask === undefined ? {} : { ask: request.ask }),
+      ...attentionBriefOf(request),
     },
     actor,
   );
@@ -337,6 +341,13 @@ function refreshStable(
     howToResolve: request.howToResolve,
     ...(request.ask === undefined ? { ask: undefined } : { ask: request.ask }),
     ...(request.sourceSeq === undefined ? { sourceSeq: undefined } : { sourceSeq: request.sourceSeq }),
+    // A refresh replaces the brief whole: a field the new request leaves out is cleared, not kept.
+    terms: request.terms,
+    questions: request.questions,
+    recommendation: request.recommendation,
+    impact: request.impact,
+    urgency: request.urgency,
+    links: request.links,
   };
   const next: AttentionLedger = {
     ...ledger,
@@ -491,7 +502,8 @@ function sameRequest(item: AttentionItem, request: RaiseAttentionRequest): boole
     item.why === request.why &&
     (item.context ?? null) === (request.context ?? null) &&
     item.howToResolve === request.howToResolve &&
-    JSON.stringify(item.ask ?? null) === JSON.stringify(request.ask ?? null)
+    JSON.stringify(item.ask ?? null) === JSON.stringify(request.ask ?? null) &&
+    JSON.stringify(attentionBriefOf(item)) === JSON.stringify(attentionBriefOf(request))
   );
 }
 

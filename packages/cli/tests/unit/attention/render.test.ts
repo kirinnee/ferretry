@@ -79,6 +79,42 @@ describe('attention listing', () => {
     should(withBlank).not.containEql('context:');
   });
 
+  it('should print the structured brief, and drop a why that only repeats the summary', () => {
+    // Act
+    const rich = renderAttentionList(
+      snapshot([
+        humanItem('A1', 'Approve the plan', {
+          why: 'Approve the plan',
+          terms: [{ term: 'OCI', meaning: 'Oracle Cloud Infrastructure' }],
+          questions: [
+            {
+              question: 'Which plan?',
+              options: [{ label: 'Defaults' }, { label: 'Changes' }],
+              recommended: 'Defaults',
+              why: 'It runs today',
+            },
+            { question: 'When?' },
+          ],
+          recommendation: { decision: 'Defaults, today', why: 'Lowest risk' },
+          impact: 'You stay logged out',
+          urgency: 'today',
+          links: [{ label: 'Plan', target: '#F12' }, { target: 'https://example.invalid/pr/1' }],
+        }),
+      ]),
+    );
+
+    // Assert
+    should(rich).containEql('      q1: Which plan?');
+    should(rich).containEql('        options: "Defaults" | "Changes"');
+    should(rich).containEql('        recommended: Defaults — It runs today');
+    should(rich).containEql('      q2: When?');
+    should(rich).containEql('      recommend: Defaults, today — Lowest risk');
+    should(rich).containEql('      impact: You stay logged out — by today');
+    should(rich).containEql('      terms: OCI = Oracle Cloud Infrastructure');
+    should(rich).containEql('      links: Plan · https://example.invalid/pr/1');
+    should(rich).not.containEql('why:');
+  });
+
   it('should spell out what each ask kind wants from the human', () => {
     // Act
     const permission = renderAttentionList(snapshot([humanItem('A1', 'x', { ask: { kind: 'permission' } })]));

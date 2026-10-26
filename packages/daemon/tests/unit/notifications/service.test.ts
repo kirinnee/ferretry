@@ -9,6 +9,7 @@ import type {
   NotificationPushDispatcher,
   NotificationRecord,
   NotificationSessionDirectory,
+  NotificationSessionFacts,
 } from '../../../src/lib/notifications/types.ts';
 import type { PushDispatch } from '../../../src/lib/push/types.ts';
 
@@ -57,13 +58,13 @@ class MemoryLedger implements NotificationDeliveryLedger {
 
 class Sessions implements NotificationSessionDirectory {
   readonly calls: string[] = [];
-  readonly values = new Map<string, { name: string; interactive: boolean }>([
-    [SESSION, { name: 'Release agent', interactive: true }],
+  readonly values = new Map<string, NotificationSessionFacts>([
+    [SESSION, { name: 'Release agent', title: 'Ship the release', interactive: true }],
     [OTHER, { name: 'Second agent', interactive: false }],
   ]);
   failure?: Error;
 
-  async describe(sessionId: string): Promise<{ readonly name: string; readonly interactive: boolean } | undefined> {
+  async describe(sessionId: string): Promise<NotificationSessionFacts | undefined> {
     this.calls.push(sessionId);
     if (this.failure !== undefined) throw this.failure;
     return this.values.get(sessionId);
@@ -473,7 +474,7 @@ describe('NotificationService attention presentation', () => {
       origin: 'attention',
       attentionId: 'A1',
       attribution: `attention:agent:${SESSION}`,
-      sent: { body: item.why, interactive: true },
+      sent: { title: '“Ship the release” · Release agent', body: item.subject, interactive: true },
     });
   });
 

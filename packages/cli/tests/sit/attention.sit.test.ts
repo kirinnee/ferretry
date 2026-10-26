@@ -1,4 +1,7 @@
 import { afterAll, beforeAll, describe, it } from 'bun:test';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import {
   ATTENTION_SCHEMA_VERSION,
   type AttentionActionRequest,
@@ -6,6 +9,7 @@ import {
   type AttentionItem,
   AttentionItemSchema,
   type AttentionSnapshot,
+  attentionBriefOf,
   type ResolvedAttentionItem,
   ResolvedAttentionItemSchema,
 } from '@ferretry/protocol';
@@ -108,6 +112,7 @@ class FakeAttentionDaemon {
           waitingSince: EPOCH,
           howToResolve: request.howToResolve,
           ask: request.ask,
+          ...attentionBriefOf(request),
           raisedBy: 'agent',
           raisedBySession: SESSION,
           raisedByName: null,
@@ -226,5 +231,48 @@ describe(`attention lifecycle (SIT, ${useInProcess ? 'in-process' : 'compiled bi
     should(history.out).containEql('!A4');
     should(history.out).containEql('dismissed by human');
     should(history.out).containEql('superseded by the next release');
+  });
+
+  it('raises a structured item from a JSON body, flags winning, and lists every part of it', async () => {
+    // Arrange
+    const directory = mkdtempSync(join(tmpdir(), 'fy-attention-sit-'));
+    const body = join(directory, 'brief.json');
+    writeFileSync(
+      body,
+      JSON.stringify({
+        summary: 'Approve the OCI work-login plan',
+        context: 'The work login expires every day.',
+        terms: [{ term: 'OCI', meaning: 'Oracle Cloud Infrastructure' }],
+        questions: [{ question: 'Which plan?', options: ['Defaults', 'Changes'], recommended: 'Defaults' }],
+        impact: 'You stay logged out',
+      }),
+    );
+
+    try {
+      // Act
+      const added = await cli(['add', '--json-file', body, '--urgency', 'today', '--link', '#F12']);
+      const listed = await cli(['ls']);
+
+      // Assert
+      should(added.code).equal(0, added.err);
+      should(added.out).containEql('attention !A5 recorded');
+      should(listed.out).containEql('Approve the OCI work-login plan');
+      should(listed.out).containEql('answer: pick one of "Defaults" | "Changes"');
+      should(listed.out).containEql('recommended: Defaults');
+      should(listed.out).containEql('impact: You stay logged out — by today');
+      should(listed.out).containEql('terms: OCI = Oracle Cloud Infrastructure');
+      should(listed.out).containEql('links: #F12');
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('names the field a limit refused, before anything is sent', async () => {
+    // Act
+    const refused = await cli(['add', 'too urgent', '--urgency', 'u'.repeat(200)]);
+
+    // Assert
+    should(refused.code).not.equal(0);
+    should(refused.err).containEql('urgency');
   });
 });

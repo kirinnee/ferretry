@@ -12,7 +12,7 @@ This document is the contract for that loop. The board's own rules are in
 
 | Step          | Who                                             | What happens                                                                                                                                    |
 | ------------- | ----------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
-| Raise         | the ferret: `fy attention add "<ask>"`          | One push to every enrolled device: `“<ferret>”: <ask>`, with the context and the options in the body. The session's row turns **unread**.       |
+| Raise         | the ferret: `fy attention add "<summary>"`      | One push to every enrolled device, titled with the conversation, saying what is needed (see below). The session's row turns **unread**.         |
 | Answer        | the owner: the board, the inbox or a push tap   | The ferret receives `[answer to !A3 «<ask>»] <answer>` as an ordinary message. The item resolves.                                               |
 | Reply in chat | the owner writes `!A3 …` in that ferret's chat  | That message is the answer: it is delivered prefixed `[answer to !A3 «<ask>»]`, and once it is accepted the item resolves in the owner's name.  |
 | Plain chat    | the owner writes without referencing an item    | Nothing resolves. The message ends with one line naming the open items, so the ferret can resolve one itself if the message settled it.         |
@@ -30,6 +30,38 @@ This document is the contract for that loop. The board's own rules are in
 - **The delivery is detached and idempotent.** Each item's answer is sent under the send id
   `attention-<session>-<id>`, so a notice told twice is one message. The owner's answer never waits
   for a ferret's launch or revive.
+
+## What an item says
+
+The owner reads an item cold, often on a phone, often days later. So an item is **structured**, and every
+part is written for a reader who has not been following. The wire shape is `AttentionBriefShape` in
+`packages/protocol/src/lib/attention.ts`. Every part is optional except the summary, so an item raised
+before the structure existed still reads.
+
+| Part             | Field                        | What it holds                                                                    |
+| ---------------- | ---------------------------- | -------------------------------------------------------------------------------- |
+| Summary          | `subject`                    | One line: what is needed. Drawn bold, once — never repeated as a title or `why`. |
+| Context          | `context`                    | What is happening and why it matters, in a few sentences. Markdown.              |
+| Terms            | `terms[]` `{term, meaning}`  | Every codename or term of art the item uses, spelled out. At most 12.            |
+| Questions        | `questions[]`                | One per decision: `question`, optional `options`, `recommended` and `why`. ≤ 6.  |
+| Recommendation   | `recommendation`             | The overall suggested decision `{decision, why?}`.                               |
+| Impact / urgency | `impact`, `urgency`          | What happens if nobody answers, and by when, in words.                           |
+| Links            | `links[]` `{label?, target}` | PRs, files and references (`#F12`, `@file`, a URL). At most 10.                  |
+
+- **A question's `recommended`** names one of its options when it has options (the schema refuses
+  anything else), and is the suggested answer in words when it has none.
+- **The ask follows the questions.** `fy attention add` makes exactly one question with options a
+  `multiple-choice` ask between them, and several questions an `open-question`. So only a single-question
+  item has options the swipe deck can map. Several questions are answered one by one, and the board sends
+  them as ONE open answer, numbered by question.
+- **Where it is drawn.** The inbox card, the in-ferret panel and the item page title an item with its
+  **conversation's name** (the session's task title). The ferret and the machine are the subtitle. Then
+  comes the summary in bold, and collapsible Context · Terms · Questions · Recommendation · Impact · Links.
+  The recommended option is marked "Recommended".
+- **Raising one.** It can be raised from flags (`--context`, `--term "X=meaning"`, `--question`,
+  `--option`, `--recommend`, `--recommend-why`, `--impact`, `--urgency`, `--link`) or from a JSON body
+  (`--json-file <path>`, `-` for stdin), where a flag wins over the same field. `fy attention add --help`
+  prints the JSON shape. Every length is checked before anything is sent, and a refusal names the field.
 
 ## The unread signal
 
@@ -76,10 +108,33 @@ built worker.
 
 Every notification carries the Ferretry mark: `icons/icon-192.png` as its icon, and `icons/badge-96.png`
 as its badge. The badge is the mono logomark on transparent, because Android paints a badge from its
-alpha alone. iOS has no badge and ignores it.
+alpha alone. iOS has no badge and ignores it. The manifest also names the badge as its `monochrome`
+icon, and its home-screen icons are maskable (the art carries its own safe zone).
 
-The title always starts with the quoted ferret name. An ask is an agent's own words, so it can never
+**What an Attention push says.** The title is the conversation's name, quoted, then the ferret:
+`“OCI work login” · Olivier`. It is just `“Olivier”` when the session has no name of its own. The body
+says what the issue is, one line each:
+
+1. the summary — or the first question, when the summary only repeats the title;
+2. `Recommended: <option or decision>`, when the ferret recommended one;
+3. the other choices: `Or: A · B`, or `Options: A · B` when nothing is recommended.
+
+The title always starts with a quote mark. A session's name is an agent's own words, so it can never
 open with the daemon's new-device alert title.
+
+### Edge on Android shows Edge's icon, and we cannot change that
+
+On Android, only **Chrome (on devices with Google Play services) and Samsung Internet** install a PWA
+as a real app, a **WebAPK**. Every other browser, Edge included, adds a browser-badged home-screen
+shortcut ([MDN, "Making PWAs installable"](https://developer.mozilla.org/en-US/docs/Web/Progressive_web_apps/Guides/Making_PWAs_installable)).
+A push is then posted by the browser's own Android app. So the status bar's small icon and the app
+name on the notification are **Edge's**, whatever `badge`, `icon` or manifest icons the page names.
+Edge does not paint our `badge` into the status bar as Chrome does. Our `icon` still shows as the
+notification's large image where Android draws one.
+
+Everything a page controls is set: the `badge`, the `icon`, the `monochrome` manifest icon and the
+maskable icons. **The remedy is the browser**: install Ferretry from Chrome on Android. A WebAPK posts
+notifications as Ferretry, with the mono mark in the status bar.
 
 ## Every automatic push, and why it stays or goes
 

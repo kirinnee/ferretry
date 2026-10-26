@@ -189,7 +189,7 @@ describe('notification policy', () => {
       title: 'Deploy failed',
       kind: 'failed',
     });
-    const automatic = attentionNotificationPayload('session-1', 'Ada', item, snapshot);
+    const automatic = attentionNotificationPayload('session-1', { name: 'Ada', title: 'Ship v4.87' }, item, snapshot);
 
     // Assert
     should(generic).containDeep({
@@ -207,8 +207,8 @@ describe('notification policy', () => {
     should(automatic).containDeep({
       eventKey: 'attention-raised:A1',
       kind: 'attention',
-      title: '“Ada”: Choose a release window',
-      body: item.why,
+      title: '“Ship v4.87” · Ada',
+      body: 'Choose a release window',
       tag: 'attention-session-1',
       url: '/session/session-1?attention=A1',
       count: 1,
@@ -218,7 +218,7 @@ describe('notification policy', () => {
     }
   });
 
-  it('should title an attention push with its ferret first, carry its context and choices, and open the item', () => {
+  it('should title an attention push with its conversation first, say the issue and its choices, and open the item', () => {
     // Arrange
     const rich = AttentionItemSchema.parse({
       ...item,
@@ -229,17 +229,23 @@ describe('notification policy', () => {
     });
     const forged = AttentionItemSchema.parse({ ...item, id: 'A8', subject: DEVICE_PAIRED_TITLE });
     const long = AttentionItemSchema.parse({ ...item, id: 'A9', subject: 'x'.repeat(240) });
+    const session = { name: 'Ada', title: 'Relay carrier fallback' };
 
     // Act
-    const payload = attentionNotificationPayload('session 1', 'Ada', rich, snapshot);
-    const alert = attentionNotificationPayload('session-1', 'Ada', forged, snapshot);
-    const clipped = attentionNotificationPayload('session-1', 'Ada', long, snapshot);
+    const payload = attentionNotificationPayload('session 1', session, rich, snapshot);
+    const alert = attentionNotificationPayload(
+      'session-1',
+      { name: 'Ada', title: DEVICE_PAIRED_TITLE },
+      forged,
+      snapshot,
+    );
+    const clipped = attentionNotificationPayload('session-1', { name: 'Ada', title: 'y'.repeat(200) }, long, snapshot);
 
     // Assert
     should(payload).containDeep({
       eventKey: 'attention-raised:A7',
-      title: '“Ada”: Rebase onto main now?',
-      body: 'I am finishing the relay PR; main moved under it and CI will fail until it is rebased.\nRebase now · Wait · Skip',
+      title: '“Relay carrier fallback” · Ada',
+      body: 'Rebase onto main now?\nOptions: Rebase now · Wait · Skip',
       url: '/session/session%201?attention=A7',
     });
     should(alert.title.startsWith(DEVICE_PAIRED_TITLE)).be.false();
@@ -248,6 +254,72 @@ describe('notification policy', () => {
     should(clipped.title.endsWith('…')).be.true();
     for (const each of [payload, alert, clipped])
       should(PushNotificationPayloadSchema.safeParse(each).success).be.true();
+  });
+
+  it('should put the recommended answer before the other choices', () => {
+    // Arrange
+    const single = AttentionItemSchema.parse({
+      ...item,
+      id: 'A2',
+      subject: 'Pick the OCI login plan',
+      ask: { kind: 'multiple-choice', options: [{ label: 'Go with the defaults' }, { label: 'Reply with changes' }] },
+      questions: [
+        {
+          question: 'Which plan should I build?',
+          options: [{ label: 'Go with the defaults' }, { label: 'Reply with changes' }],
+          recommended: 'Go with the defaults',
+          why: 'They match what you approved last week.',
+        },
+      ],
+    });
+    const overall = AttentionItemSchema.parse({
+      ...item,
+      id: 'A3',
+      recommendation: { decision: 'Ship on Thursday', why: 'Nobody is on call on Friday.' },
+    });
+
+    // Act
+    const chosen = attentionNotificationPayload(
+      'session-1',
+      { name: 'Ada', title: 'OCI work login' },
+      single,
+      snapshot,
+    );
+    const worded = attentionNotificationPayload(
+      'session-1',
+      { name: 'Ada', title: 'OCI work login' },
+      overall,
+      snapshot,
+    );
+
+    // Assert
+    should(chosen.body).equal('Pick the OCI login plan\nRecommended: Go with the defaults\nOr: Reply with changes');
+    should(worded.body).equal('Choose a release window\nRecommended: Ship on Thursday');
+  });
+
+  it('should fall back to the ferret for a title, and to the first question when the summary repeats it', () => {
+    // Arrange
+    const echo = AttentionItemSchema.parse({
+      ...item,
+      id: 'A4',
+      subject: 'OCI work login',
+      questions: [{ question: 'Keep the 30-minute keepalive?' }, { question: 'Use launchd or cron?' }],
+    });
+
+    // Act
+    const untitled = attentionNotificationPayload('session-1', { name: 'Ada' }, item, snapshot);
+    const named = attentionNotificationPayload('session-1', { name: 'Ada', title: 'ada' }, item, snapshot);
+    const repeated = attentionNotificationPayload(
+      'session-1',
+      { name: 'Ada', title: 'OCI work login' },
+      echo,
+      snapshot,
+    );
+
+    // Assert
+    should(untitled.title).equal('“Ada”');
+    should(named.title).equal('“ada”');
+    should(repeated.body).equal('Keep the 30-minute keepalive?');
   });
 
   it('should never let an agent payload read as the new-device alert', () => {

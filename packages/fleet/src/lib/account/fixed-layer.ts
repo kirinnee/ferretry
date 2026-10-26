@@ -404,7 +404,7 @@ export const SET_UP_FERRETRY_INSTRUCTION = (fy: string): string =>
  * out on purpose (an item notifies by being raised).
  */
 export const ATTENTION_INSTRUCTION = (fy: string): string =>
-  `Attention: when you need the human to decide or do something, raise it with \`${fy} attention add "<ask>"\` — that is what notifies them. Ask first, in one line. Add \`--context "<what you are doing and why you need this>"\` (one or two sentences); for a few clear choices add \`--kind choice --option "<label>"\` per choice (2–4, short). Never for progress updates or because you finished. The answer arrives as a normal message ("[answer to !A3 …]"); you can mention an item as \`!A3\`. If it is settled some other way, resolve your own item: \`${fy} attention done <id>\`.`;
+  `Attention: when you need the human to decide or do something, raise it with \`${fy} attention add "<summary>"\` — that is what notifies them. Write for a reader who has NOT been following: the summary is one line of what you need; \`--context\` what is happening and why; \`--term "X=meaning"\` per jargon; \`--question\` each decision, with \`--option\` choices and \`--recommend <pick> --recommend-why\`. E.g. \`${fy} attention add "Approve the login plan" --context "…" --question "Which plan?" --option A --option B --recommend A\`. Never for progress or because you finished. The answer arrives as a message ("[answer to !A3 …]"); mention an item as \`!A3\`. Settled another way? \`${fy} attention done <id>\`.`;
 
 /**
  * Everything every agent runtime is told, as ONE appended system prompt section: the tools, the

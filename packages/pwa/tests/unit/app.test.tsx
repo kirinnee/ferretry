@@ -2232,7 +2232,8 @@ describe('AppShell', () => {
         const scope = daemonSessionScope(alpha, 'shared');
         expect(store.attention.store.status(scope)).toBe('ready');
         expect(store.attention.store.count(scope)).toBe(0);
-        // Nothing waiting: the status carries no "needs you", and the board stays one ⋯ row away.
+        // Nothing waiting: no "Needs you" strip, and the board stays one ⋯ row away.
+        expect(view.container.querySelector('button[data-attention-strip]')).toBeNull();
         expect(view.container.querySelector('button[data-needs-you]')).toBeNull();
         expect(view.container.querySelector('[data-fy-reference="attention:A3"]')).toBeNull();
 
@@ -2243,11 +2244,14 @@ describe('AppShell', () => {
         expect(attentionReads).toBeGreaterThan(initialAttentionReads);
         expect(store.attention.store.count(scope)).toBe(1);
 
-        const trigger = must(
-          view.container.querySelector<HTMLButtonElement>('button[aria-label="1 Attention item needs you"]'),
-          'the refreshed "needs you" status',
+        // ONE indicator: the slim strip under the tabs, never a second chip in the header.
+        const strip = must(
+          view.container.querySelector<HTMLButtonElement>('button[data-attention-strip]'),
+          'the refreshed "Needs you" strip',
         );
-        expect(trigger.getAttribute('data-needs-you')).toBe('1');
+        expect(strip.getAttribute('data-attention-strip')).toBe('1');
+        expect(strip.textContent).toContain('Needs you');
+        expect(view.container.querySelector('button[data-needs-you]')).toBeNull();
         expect(view.container.querySelector('[data-fy-reference="attention:A3"]')?.textContent).toBe('!A3');
       } finally {
         await view.unmount();

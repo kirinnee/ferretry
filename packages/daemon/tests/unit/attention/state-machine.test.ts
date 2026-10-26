@@ -224,6 +224,50 @@ describe('Attention state machine', () => {
     });
   });
 
+  it('should keep the structured brief, tell briefs apart, and replace it whole on a refresh', () => {
+    // Arrange
+    const brief: Partial<RaiseAttentionRequest> = {
+      ask: { kind: 'multiple-choice', options: [{ label: 'Today' }, { label: 'Tomorrow' }] },
+      terms: [{ term: 'OCI', meaning: 'Oracle Cloud Infrastructure, where the work login lives.' }],
+      questions: [
+        {
+          question: 'When should it deploy?',
+          options: [{ label: 'Today' }, { label: 'Tomorrow' }],
+          recommended: 'Tomorrow',
+          why: 'Nobody is on call tonight.',
+        },
+      ],
+      recommendation: { decision: 'Deploy tomorrow morning.' },
+      impact: 'The release slips a day.',
+      urgency: 'before 17:00',
+      links: [{ label: 'Release PR', target: 'https://github.com/kirinnee/ferretry/pull/1' }],
+    };
+    const first = raised(AGENT, brief);
+    const stable = raised(DAEMON, { ...brief, source: 'task', sourceRef: 'F12', ask: undefined });
+
+    // Act
+    const same = succeeded(applyAttentionCommand(first.ledger, raiseCommand(AGENT, brief, SECOND)));
+    const different = succeeded(
+      applyAttentionCommand(same.ledger, raiseCommand(AGENT, { ...brief, urgency: 'no rush' }, THIRD)),
+    );
+    const refreshed = succeeded(
+      applyAttentionCommand(
+        stable.ledger,
+        raiseCommand(DAEMON, { source: 'task', sourceRef: 'F12', ask: undefined, impact: 'Nothing ships.' }, SECOND),
+      ),
+    );
+
+    // Assert
+    should(first.snapshot.items[0]).containDeep(brief);
+    should(same.changed).be.false();
+    should(different.snapshot.count).equal(2);
+    should(refreshed.change).equal('refreshed');
+    should(refreshed.snapshot.items[0]?.impact).equal('Nothing ships.');
+    should(refreshed.snapshot.items[0]?.terms).be.undefined();
+    should(refreshed.snapshot.items[0]?.questions).be.undefined();
+    should(refreshed.snapshot.items[0]?.links).be.undefined();
+  });
+
   it('should ignore identical and stale stable-source generations', () => {
     // Arrange
     const first = raised(DAEMON, { sourceRef: 'reopen:F12', sourceSeq: 4 });

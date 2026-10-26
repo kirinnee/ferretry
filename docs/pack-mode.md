@@ -58,14 +58,14 @@ checked cannot break either harness's quoting.
 
 Built-in subagents are **discouraged, not blocked**: nothing is taken away from the harness.
 
-**Size.** Every Ferretry instruction together is at most about 6.1 KB (≈ 1,560 tokens) with every section on
+**Size.** Every Ferretry instruction together is at most about 6.2 KB (≈ 1,595 tokens) with every section on
 and the longest routing prompt:
 
 | Section                                  | Characters | ≈ tokens | When                        |
 | ---------------------------------------- | ---------- | -------- | --------------------------- |
 | Tools (terminals, browser pages)         | 1,001      | 250      | every agent runtime         |
 | Ferretry settings (short "Set up" skill) | 478        | 120      | every agent runtime         |
-| Attention (raise an ask, rich items)     | 559        | 140      | every agent runtime         |
+| Attention (raise a structured item)      | 688        | 172      | every agent runtime         |
 | Hypermedia                               | 1,585      | 396      | `FY_HYPERMEDIA=1`           |
 | Pack mode                                | 1,003      | 251      | `FY_PACK=1`                 |
 | Its routing line                         | ≤ 1,210    | ≤ 303    | `FY_PACK=1`                 |

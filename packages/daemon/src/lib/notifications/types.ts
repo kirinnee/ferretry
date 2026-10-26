@@ -103,7 +103,16 @@ export interface NotificationDeliveryLedger {
 
 /** The authoritative session facts a notification is composed from. */
 export interface NotificationSessionDirectory {
-  describe(sessionId: string): Promise<{ readonly name: string; readonly interactive: boolean } | undefined>;
+  describe(sessionId: string): Promise<NotificationSessionFacts | undefined>;
+}
+
+/** What a notification says about the session it comes from. */
+export interface NotificationSessionFacts {
+  /** The ferret's spoken name. */
+  readonly name: string;
+  /** The conversation's name (the session's task title), which titles an Attention push. */
+  readonly title?: string;
+  readonly interactive: boolean;
 }
 
 /** The one delivery owner notifications may call. */

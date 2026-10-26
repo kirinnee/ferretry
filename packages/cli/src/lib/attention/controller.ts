@@ -1,17 +1,9 @@
-import {
-  type AttentionId,
-  type AttentionSnapshot,
-  MAX_ATTENTION_SUBJECT_LENGTH,
-  MAX_NOTIFICATION_BODY_LENGTH,
-} from '@ferretry/protocol';
+import { type AttentionId, type AttentionSnapshot, MAX_NOTIFICATION_BODY_LENGTH } from '@ferretry/protocol';
 import { type AnswerFlags, parseAnswer } from './answer.ts';
-import { type AskFlags, parseAsk } from './ask.ts';
-import type { IAttentionGateway, IAttentionOutput } from './ports.ts';
+import { type BriefFile, type BriefFlags, composeAddRequest, parseBriefFile } from './brief.ts';
+import type { IAttentionBriefInput, IAttentionGateway, IAttentionOutput } from './ports.ts';
 import { attentionReference, parseAttentionReference } from './reference.ts';
 import { renderAttentionHistory, renderAttentionList, renderAttentionMutation, renderNotification } from './render.ts';
-
-/** The default `howToResolve` when the raiser did not name a concrete action. */
-const DEFAULT_HOW_TO_RESOLVE = 'Answer this item on the attention board (it records who answered).';
 
 /** Options every attention command accepts. */
 export interface AttentionCommandOptions {
@@ -21,11 +13,10 @@ export interface AttentionCommandOptions {
   readonly json?: boolean;
 }
 
-/** Flags that describe a new attention item. */
-export interface AttentionAddOptions extends AttentionCommandOptions, AskFlags {
-  readonly why?: string;
-  readonly context?: string;
-  readonly resolve?: string;
+/** Flags that describe a new attention item, and where its JSON body is read from. */
+export interface AttentionAddOptions extends AttentionCommandOptions, BriefFlags {
+  /** A JSON body with the same fields; `-` reads standard input. */
+  readonly jsonFile?: string;
 }
 
 /** Flags that resolve an item. */
@@ -51,6 +42,8 @@ export class AttentionController {
     private readonly gateway: IAttentionGateway,
     private readonly out: IAttentionOutput,
     private readonly ownSessionId: string | undefined,
+    /** Reads `--json-file`; absent where no command can name one. */
+    private readonly input?: IAttentionBriefInput,
   ) {}
 
   async list(options: AttentionCommandOptions): Promise<void> {
@@ -64,23 +57,13 @@ export class AttentionController {
   }
 
   async add(words: readonly string[], options: AttentionAddOptions): Promise<void> {
-    const subject = subjectFrom(words);
-    const ask = parseAsk(options);
+    const request = composeAddRequest(words, options, await this.#briefFile(options.jsonFile));
     const sessionId = this.#target(options);
 
     // The board is read first so the item just raised can be named by identity rather than guessed at
     // by matching its subject text — kteam's match reported the wrong id for two identical subjects.
     const before = await this.gateway.snapshot(sessionId);
-    const after = await this.gateway.apply(sessionId, {
-      action: 'add',
-      source: 'agent-raised',
-      sourceRef: null,
-      subject,
-      why: text(options.why) ?? subject,
-      context: text(options.context) ?? null,
-      howToResolve: text(options.resolve) ?? DEFAULT_HOW_TO_RESOLVE,
-      ask,
-    });
+    const after = await this.gateway.apply(sessionId, request);
 
     const raised = onlyNewId(before, after);
     const verb = raised === undefined ? 'attention recorded' : `attention ${attentionReference(raised)} recorded`;
@@ -127,6 +110,14 @@ export class AttentionController {
     this.out.success(options.json === true ? JSON.stringify(result, null, 2) : renderNotification(result.delivered));
   }
 
+  /** The JSON body `--json-file` names, or none. */
+  async #briefFile(path: string | undefined): Promise<BriefFile | undefined> {
+    const named = text(path);
+    if (named === undefined) return undefined;
+    if (this.input === undefined) throw new Error('--json-file cannot be read here');
+    return parseBriefFile(await this.input.read(named));
+  }
+
   /** Which session this invocation acts on. */
   #target(options: AttentionCommandOptions): string {
     const explicit = options.session?.trim() ?? '';
@@ -145,18 +136,6 @@ export class AttentionController {
 function text(value: string | undefined): string | undefined {
   const trimmed = value?.trim() ?? '';
   return trimmed === '' ? undefined : trimmed;
-}
-
-function subjectFrom(words: readonly string[]): string {
-  const subject = words.join(' ').replaceAll(/\s+/gu, ' ').trim();
-  if (subject === '') throw new Error('say what you need, or choose ls, done, dismiss, notify or history');
-  if (subject.length > MAX_ATTENTION_SUBJECT_LENGTH) {
-    throw new Error(
-      `the ask must fit one line of ${MAX_ATTENTION_SUBJECT_LENGTH} characters (got ${subject.length}) — ` +
-        'put the detail in --context',
-    );
-  }
-  return subject;
 }
 
 function notificationKind(value: string | undefined): 'completed' | 'failed' | undefined {

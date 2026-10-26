@@ -30,3 +30,8 @@ export interface IAttentionGateway {
 
 /** The only client capability the attention gateway consumes. */
 export type AttentionApiClient = Pick<IFyApiClient, 'request'>;
+
+/** Reads the JSON body `fy attention add --json-file <path>` names; `-` is standard input. */
+export interface IAttentionBriefInput {
+  read(path: string): Promise<string>;
+}

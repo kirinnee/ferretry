@@ -335,6 +335,27 @@ const attentionCases: SchemaCase[] = [
     schema: attention.AttentionAskOptionSchema,
     value: { label: 'Proceed', description: 'Run the operation' },
   },
+  {
+    name: 'brief term',
+    schema: attention.AttentionTermSchema,
+    value: { term: 'OCI', meaning: 'Oracle Cloud Infrastructure' },
+  },
+  {
+    name: 'brief question',
+    schema: attention.AttentionQuestionSchema,
+    value: {
+      question: 'Which plan?',
+      options: [{ label: 'Defaults' }, { label: 'Changes' }],
+      recommended: 'Defaults',
+      why: 'It runs today',
+    },
+  },
+  {
+    name: 'brief recommendation',
+    schema: attention.AttentionRecommendationSchema,
+    value: { decision: 'Ship on Thursday', why: 'Nobody is on call on Friday' },
+  },
+  { name: 'brief link', schema: attention.AttentionLinkSchema, value: { label: 'Plan', target: '#F12' } },
   { name: 'attention ask', schema: attention.AttentionAskSchema, value: permissionAsk },
   {
     name: 'attention response',
