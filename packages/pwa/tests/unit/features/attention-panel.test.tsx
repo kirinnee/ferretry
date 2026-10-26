@@ -449,6 +449,56 @@ describe('AttentionPanel sheet', () => {
     expect(document.activeElement).toBe(view.container.querySelector('[data-attention-strip]'));
   });
 
+  test('Tab and Shift+Tab wrap inside the sheet instead of leaving it', async () => {
+    view = await mount(panel());
+    const dialog = must(view.container.querySelector<HTMLElement>('[role="dialog"]'), 'dialog');
+    const close = must(view.container.querySelector<HTMLButtonElement>('[data-attention-close]'), 'close');
+    close.focus();
+    const key = (init: KeyboardEventInit): KeyboardEvent =>
+      new KeyboardEvent('keydown', { bubbles: true, cancelable: true, ...init });
+    const backwards = key({ key: 'Tab', shiftKey: true });
+    const forwards = key({ key: 'Tab' });
+    const other = key({ key: 'x' });
+
+    await interact(() => dialog.dispatchEvent(backwards));
+    await interact(() => dialog.dispatchEvent(forwards));
+    await interact(() => dialog.dispatchEvent(other));
+
+    expect(backwards.defaultPrevented).toBe(true);
+    expect(forwards.defaultPrevented).toBe(true);
+    expect(other.defaultPrevented).toBe(false);
+    expect(dialog.contains(document.activeElement)).toBe(true);
+  });
+
+  test('the ⋯ menu moves with the arrows, closes on Esc without closing the sheet, and on a tap outside', async () => {
+    const changes: boolean[] = [];
+    view = await mount(panel({ onExpandedChange: next => changes.push(next) }));
+    const card = cardOf(view.container, 'A3');
+    const more = must(card.querySelector<HTMLButtonElement>('[data-attention-more]'), 'more');
+    const menu = (): HTMLElement | null => card.querySelector<HTMLElement>('[role="menu"]');
+
+    await interact(() => more.click());
+    const done = must(card.querySelector<HTMLButtonElement>('[data-attention-done]'), 'done');
+    const dismiss = must(card.querySelector<HTMLButtonElement>('[data-attention-dismiss]'), 'dismiss');
+    expect(document.activeElement).toBe(done);
+    await interact(() => pressKey(must(menu(), 'menu'), 'ArrowDown'));
+    expect(document.activeElement).toBe(dismiss);
+    await interact(() => pressKey(must(menu(), 'menu'), 'ArrowUp'));
+    expect(document.activeElement).toBe(done);
+    await interact(() => pressKey(must(menu(), 'menu'), 'x'));
+    expect(document.activeElement).toBe(done);
+    await interact(() => pressKey(must(menu(), 'menu'), 'Escape'));
+    expect(menu()).toBeNull();
+    expect(document.activeElement).toBe(more);
+    expect(changes).toEqual([]);
+
+    await interact(() => more.click());
+    await interact(() => must(menu(), 'menu').dispatchEvent(new PointerEvent('pointerdown', { bubbles: true })));
+    expect(menu()).not.toBeNull();
+    await interact(() => document.body.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true })));
+    expect(menu()).toBeNull();
+  });
+
   test('Done and Dismiss live in the ⋯ menu, shut until it is opened', async () => {
     view = await mount(panel());
     const card = cardOf(view.container, 'A3');
