@@ -22,7 +22,7 @@
  *
  * Pure throughout: no filesystem, no environment, no clock.
  */
-import { BrowserModeSchema, CONFIG_COMPONENT_KINDS, isLoopbackHost } from '@ferretry/protocol';
+import { BrowserModeSchema, CONFIG_COMPONENT_KINDS, isLoopbackHost, SECRET_REFERENCE_SOURCE } from '@ferretry/protocol';
 import { z } from 'zod';
 import { AliasSchema, EnvSchema, SafeNameSchema, UsageSchema } from '../config.ts';
 import { HarnessKindSchema } from '../manifest.ts';
@@ -362,6 +362,27 @@ export const InstructionsComponentSchema = z.strictObject({
 export type InstructionsComponent = z.infer<typeof InstructionsComponentSchema>;
 
 /**
+ * A client registered BY HAND with a server's sign-in provider, for a provider that does not let apps
+ * register themselves (no RFC 7591 endpoint, or one that refuses). The field names are Claude Code's
+ * `.mcp.json` `oauth` block (`clientId`, `callbackPort`); the client secret, which Claude keeps in its
+ * keychain, is a `${secret:NAME}` reference to the daemon's secret store and never a value
+ * (docs/mcp-oauth.md#a-client-registered-by-hand).
+ */
+export const McpOAuthClientSchema = z.strictObject({
+  clientId: NonEmptyString.max(512),
+  clientSecret: z
+    .string()
+    .regex(
+      new RegExp(`^${SECRET_REFERENCE_SOURCE}$`, 'u'),
+      `a client secret is written as a \${secret:NAME} reference to the secret store, never as the value`,
+    )
+    .optional(),
+  /** The redirect registered with the provider is then `http://localhost:<callbackPort>/callback`. */
+  callbackPort: z.number().int().min(1024).max(65535).optional(),
+});
+export type McpOAuthClient = z.infer<typeof McpOAuthClientSchema>;
+
+/**
  * One MCP server (generic, K2): either a command Ferretry's runtimes start (`command` + `args`) or a
  * server they reach at a `url`. Exactly one of the two, because a server that is both is a server
  * nobody can say how to start.
@@ -377,6 +398,8 @@ export const McpComponentSchema = z
      * in the secret store and the runtime reads the access token by variable name (docs/mcp-oauth.md).
      */
     auth: z.literal('oauth').optional(),
+    /** A client registered by hand with the provider: Ferretry then registers nothing. Needs `auth: oauth`. */
+    oauth: McpOAuthClientSchema.optional(),
     harness: HarnessKindSchema.optional(),
     ...CLONE_ORIGIN_SHAPE,
   })
@@ -405,6 +428,14 @@ export const McpComponentSchema = z
         message: '"auth" signs in to a server reached at a "url" — a server Ferretry starts has nothing to sign in to',
         input: server,
         path: ['auth'],
+      });
+    }
+    if (server.oauth !== undefined && server.auth !== 'oauth') {
+      ctx.issues.push({
+        code: 'custom',
+        message: '"oauth" names the client a sign-in uses — it needs "auth: oauth" on a server reached at a "url"',
+        input: server,
+        path: ['oauth'],
       });
     }
     // A signed-in server is sent a bearer token on every launch: never over cleartext to another host.

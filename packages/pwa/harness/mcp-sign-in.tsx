@@ -59,7 +59,7 @@ const flow = (paste: boolean) => ({
   authorizeUrl: `https://mcp.linear.app/authorize?response_type=code&client_id=harness&code_challenge=harness&code_challenge_method=S256&state=${paste ? 'harness-paste' : 'harness-pwa'}`,
   mode: paste ? 'paste' : 'pwa',
   redirectUri: paste
-    ? 'http://127.0.0.1:51234/oauth/mcp-callback/0123456789abcdef'
+    ? 'http://localhost:51234/callback'
     : `${window.location.origin}/oauth/mcp-callback/0123456789abcdef`,
   issuer: 'mcp.linear.app',
   expiresAt: in_(10),

@@ -11,22 +11,26 @@ import type {
   McpOAuthStateDocument,
   McpOAuthStateStore,
 } from '../../../src/lib/mcp-oauth/index.ts';
-import { EMPTY_MCP_OAUTH_STATE, McpOAuthService } from '../../../src/lib/mcp-oauth/index.ts';
+import { EMPTY_MCP_OAUTH_STATE, McpOAuthService, McpOAuthUnreachable } from '../../../src/lib/mcp-oauth/index.ts';
 import { FakeProvider, type FakeProviderOptions } from './fake-provider.ts';
 
 const ORIGIN = 'http://127.0.0.1:4100';
 export const PWA_REDIRECT = 'https://ferretry.example.test/oauth/mcp-callback';
 
-/** The network, answered in process by one handler. A URL in `failing` raises like a dead host. */
+/**
+ * The network, answered in process by one handler. A URL in `failing` raises like a dead host, with
+ * `failure` as the transport's code, as the fetch adapter does.
+ */
 class InProcessHttp implements McpOAuthHttp {
   readonly requests: McpOAuthHttpRequest[] = [];
   readonly failing = new Set<string>();
+  failure = 'ConnectionRefused';
 
   constructor(private readonly handler: (request: Request) => Promise<Response>) {}
 
   async request(request: McpOAuthHttpRequest): Promise<McpOAuthHttpResponse> {
     this.requests.push(request);
-    if (this.failing.has(request.url)) throw new Error('unreachable');
+    if (this.failing.has(request.url)) throw new McpOAuthUnreachable(this.failure);
     const response = await this.handler(
       new Request(request.url, {
         method: request.method,

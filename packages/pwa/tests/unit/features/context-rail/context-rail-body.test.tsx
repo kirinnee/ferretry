@@ -316,6 +316,16 @@ describe('ContextRailBody — MCP', () => {
     expect(text(root, '[data-mcp-row="notion"] [data-mcp-failure="sign-in"]')).toBe('Unlock this device first.');
     expect(document.body.querySelector('[data-mcp-sign-in-state]')).toBeNull();
 
+    // The provider, not this machine, is unreachable: the machine answered, so it is never "isn't reachable".
+    const unreachable =
+      'Ferretry’s daemon couldn’t reach auth.example.com to register Ferretry — no answer came back (network error: ENOTFOUND).';
+    answers[`POST ${MCP_OAUTH_PATH}/${NOTION_SUBJECT}`] = new FyHttpError(unreachable, 409, 'mcp_auth_registration');
+    await click(root, '[data-mcp-sign-in="notion"]');
+    expect(text(root, '[data-mcp-row="notion"] [data-mcp-failure="sign-in"] .text-err')).toBe(
+      'Couldn’t start signing in to notion',
+    );
+    expect(text(root, '[data-mcp-row="notion"] [data-mcp-failure-details]')).toBe(unreachable);
+
     answers[`POST ${MCP_OAUTH_PATH}/${NOTION_SUBJECT}`] = mcpFlow({ component: NOTION_SUBJECT });
     answers[`POST ${MCP_OAUTH_PATH}/flows/mcp-flow-one`] = completion();
     await click(root, '[data-mcp-sign-in="notion"]');

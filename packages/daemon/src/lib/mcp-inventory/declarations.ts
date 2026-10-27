@@ -10,6 +10,12 @@
  */
 import type { McpApproval, McpTransport } from '@ferretry/protocol';
 
+/** Claude Code's `oauth` block on an HTTP or SSE server: `clientId`, and the fixed `callbackPort` it was registered with. */
+export interface ClaudeOAuthClient {
+  readonly clientId: string;
+  readonly callbackPort?: number;
+}
+
 /** One server as one document declares it. */
 export type McpDeclaration =
   | {
@@ -27,6 +33,8 @@ export type McpDeclaration =
       readonly headers: Readonly<Record<string, string>>;
       /** Codex's `bearer_token_env_var`: a variable the harness reads the token from. */
       readonly bearerVariable?: string;
+      /** Claude's `oauth` block: a client registered by hand with the provider (`.mcp.json` only). */
+      readonly oauth?: ClaudeOAuthClient;
       readonly disabled?: true;
     };
 
@@ -68,6 +76,14 @@ export const displayCommand = (command: string): string => command.trim().split(
 export const displayTarget = (declaration: McpDeclaration): string =>
   declaration.transport === 'stdio' ? displayCommand(declaration.command) : displayAddress(declaration.url);
 
+/** Claude's `oauth` block, when it names a client: the two fields a sign-in can use, and nothing else. */
+function claudeOAuthClient(value: unknown): ClaudeOAuthClient | undefined {
+  if (!isRecord(value) || typeof value.clientId !== 'string' || value.clientId.trim() === '') return undefined;
+  const port = value.callbackPort;
+  const usable = typeof port === 'number' && Number.isInteger(port) && port >= 1 && port <= 65535;
+  return { clientId: value.clientId.trim(), ...(usable ? { callbackPort: port } : {}) };
+}
+
 /** One Claude `mcpServers` entry (`.claude.json`, `.mcp.json`, a project's local scope). */
 function claudeServer(name: string, value: unknown): McpDeclaration | string {
   if (!isRecord(value)) return `“${name}” is not an object`;
@@ -75,7 +91,14 @@ function claudeServer(name: string, value: unknown): McpDeclaration | string {
   if (typeof value.url === 'string' && type !== 'stdio') {
     const transport: Exclude<McpTransport, 'stdio'> =
       type === 'sse' ? 'sse' : type === 'http' ? 'http' : isSseAddress(value.url) ? 'sse' : 'http';
-    return { name, transport, url: value.url, headers: stringRecord(value.headers) };
+    const oauth = claudeOAuthClient(value.oauth);
+    return {
+      name,
+      transport,
+      url: value.url,
+      headers: stringRecord(value.headers),
+      ...(oauth === undefined ? {} : { oauth }),
+    };
   }
   if (typeof value.command === 'string' && value.command.trim() !== '')
     return {

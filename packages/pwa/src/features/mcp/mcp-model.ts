@@ -229,9 +229,14 @@ const ALREADY_PLAIN = /has not granted|passkey|unlock|not allowed|no session/iu;
 /**
  * A failed read or act, in words a person reads, with the transport's own text kept for Details:
  * "Liftoff MBP isn't reachable right now" rather than "could not reach fyd at 127.0.0.1:…".
+ *
+ * `answered`: the machine itself answered with a refusal it worded. Its text can say "couldn't reach" or
+ * "network error" about somewhere ELSE — a sign-in provider — so it is never read as this machine being
+ * unreachable: the headline is the act that failed, and the machine's words are the Details.
  */
-export function plainFailure(reason: string, machineName: string, what: string): PlainFailure {
+export function plainFailure(reason: string, machineName: string, what: string, answered = false): PlainFailure {
   const raw = reason.trim();
+  if (answered) return { headline: `Couldn’t ${what}`, ...(raw === '' ? {} : { details: raw }) };
   if (NOT_ANSWERING.test(raw)) return { headline: `${machineName} isn’t answering right now`, details: raw };
   if (UNREACHABLE.test(raw)) return { headline: `${machineName} isn’t reachable right now`, details: raw };
   if (ALREADY_PLAIN.test(raw) && raw.length <= 200) return { headline: raw };

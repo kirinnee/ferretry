@@ -289,6 +289,37 @@ describe('AccountModelSchema', () => {
       should(local).deepEqual([]);
     });
 
+    it('should take a hand-registered client by Claude’s field names, its secret only as a reference', () => {
+      // Arrange
+      const url = 'https://example.test/mcp';
+
+      // Act
+      const good = withComponents({
+        mcp: {
+          remote: {
+            url,
+            auth: 'oauth',
+            oauth: { clientId: 'abc', clientSecret: `\${secret:REMOTE_CLIENT}`, callbackPort: 8123 },
+          },
+        },
+      });
+      const plaintext = withComponents({
+        mcp: { remote: { url, auth: 'oauth', oauth: { clientId: 'abc', clientSecret: 's3cr3t-value' } } },
+      });
+      const unsigned = withComponents({ mcp: { remote: { url, oauth: { clientId: 'abc' } } } });
+      const badPort = withComponents({
+        mcp: { remote: { url, auth: 'oauth', oauth: { clientId: 'abc', callbackPort: 80 } } },
+      });
+
+      // Assert
+      should(good).deepEqual([]);
+      should(plaintext).matchAny(
+        /mcp\.remote\.oauth\.clientSecret: a client secret is written as a \$\{secret:NAME\} reference/,
+      );
+      should(unsigned).matchAny(/mcp\.remote\.oauth: "oauth" names the client a sign-in uses/);
+      should(badPort).matchAny(/mcp\.remote\.oauth\.callbackPort/);
+    });
+
     it('should refuse a skill item listed twice and an empty selection', () => {
       // Act
       const actual = withComponents({

@@ -804,6 +804,26 @@ describe('deriveAccountChange: component.put', () => {
     should(edit.model.components.mcp.fresh).deepEqual({ url: 'https://example.com/mcp' });
   });
 
+  it('should keep a hand-registered OAuth client through an edit that keeps the sign-in, and drop it with the sign-in', () => {
+    // Arrange — the form has no field for `oauth`, so an edit never sends it.
+    const model = modelOf();
+    const oauth = { clientId: 'hand-1', clientSecret: secretRef('PHOEBE_CLIENT'), callbackPort: 8123 };
+    const url = 'https://phoebe.example/mcp';
+    const withHand = {
+      ...model,
+      components: { ...model.components, mcp: { ...model.components.mcp, phoebe: { url, auth: 'oauth', oauth } } },
+    } as AccountModel;
+    const edit = { name: 'phoebe', create: false };
+
+    // Act
+    const kept = derive(componentPut({ kind: 'mcp', url, auth: 'oauth' }, edit), withHand);
+    const dropped = derive(componentPut({ kind: 'mcp', url }, edit), withHand);
+
+    // Assert
+    should(kept.model.components.mcp.phoebe).deepEqual({ url, auth: 'oauth', oauth });
+    should(dropped.model.components.mcp.phoebe).deepEqual({ url });
+  });
+
   it('should drop an MCP environment that is empty', () => {
     // Act
     const edit = derive(componentPut({ kind: 'mcp', command: 'serve', env: {} }));

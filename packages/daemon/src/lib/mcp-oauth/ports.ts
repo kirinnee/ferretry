@@ -26,10 +26,24 @@ export interface McpOAuthHttpRequest {
 
 /**
  * The network. The adapter never follows a redirect (a 3xx is answered as itself) and bounds both time
- * and size. A transport failure raises; the service turns it into words that quote nothing.
+ * and size. A transport failure raises — {@link McpOAuthUnreachable} when the adapter can name what
+ * kind of failure it was — and the service turns it into words that quote no address and no body.
  */
 export interface McpOAuthHttp {
   request(request: McpOAuthHttpRequest): Promise<McpOAuthHttpResponse>;
+}
+
+/**
+ * A request that got no HTTP answer at all. `reason` is a short code naming the KIND of failure — a
+ * DNS miss, a refused connection, a certificate this machine does not trust, a timeout — which is what
+ * tells a person whether this machine needs a proxy or a company certificate. Never an address, a
+ * header or a body.
+ */
+export class McpOAuthUnreachable extends Error {
+  constructor(readonly reason: string) {
+    super(`network error: ${reason}`);
+    this.name = 'McpOAuthUnreachable';
+  }
 }
 
 /** Randomness and hashing, injected so a test can pin a verifier and the lib holds no global. */
@@ -52,6 +66,38 @@ export interface McpOAuthServer {
   /** Absent for a server Ferretry starts as a command: there is nothing to sign in to. */
   readonly url?: string;
   readonly auth?: 'oauth';
+  /** A client somebody registered with the provider by hand: no dynamic registration is attempted. */
+  readonly client?: McpOAuthStaticClient;
+}
+
+/**
+ * A pre-registered OAuth client, for a provider without dynamic client registration — the fields of
+ * Claude Code's `.mcp.json` `oauth` block (`clientId`, `callbackPort`), plus a client secret NAMED in the
+ * daemon's secret store (a component's `oauth.clientSecret: ${secret:NAME}`), never written as a value.
+ */
+export interface McpOAuthStaticClient {
+  readonly clientId: string;
+  /** The ordinary secret store's name for the client secret; the service reads it only to send it to the provider. */
+  readonly clientSecret?: SecretName;
+  /** The redirect is then `http://localhost:<callbackPort>/callback` — the address registered by hand. */
+  readonly callbackPort?: number;
+}
+
+/**
+ * How a client proves itself at the token endpoint (RFC 6749 §2.3.1, RFC 7591 §2). Absent on a record
+ * with a client secret means `client_secret_post`, which is what every sign-in before this field used.
+ */
+export type McpOAuthTokenAuth = 'client_secret_post' | 'client_secret_basic';
+
+/** Where a client's secret is, and how it is sent — the fields a registration, flow and record share. */
+export interface McpOAuthClientAuth {
+  /** Absent: `client_secret_post` when there is a secret. */
+  readonly tokenAuth?: McpOAuthTokenAuth;
+  /**
+   * A pre-registered client's secret, in the ORDINARY store under this name (the person put it there).
+   * Absent with `hasClientSecret`: the secret registration returned, in the internal store.
+   */
+  readonly clientSecretRef?: SecretName;
 }
 
 /** The configured MCP servers that can sign in. Read on every call: the configuration can change under the daemon. */
@@ -83,7 +129,7 @@ export interface McpOAuthSecretValues {
 }
 
 /** A client registration this daemon holds with one authorization server, for one redirect address. */
-export interface McpOAuthRegistration {
+export interface McpOAuthRegistration extends McpOAuthClientAuth {
   readonly issuer: string;
   readonly redirectUri: string;
   /** A loopback redirect whose address a person pastes back, rather than the PWA's callback page. */
@@ -94,7 +140,7 @@ export interface McpOAuthRegistration {
 }
 
 /** What is known about one component's sign-in that is NOT secret. */
-export interface McpOAuthRecord {
+export interface McpOAuthRecord extends McpOAuthClientAuth {
   readonly serverUrl: string;
   readonly issuer: string;
   /** The redirect the code came back to, which names the registration (and any client secret). */
@@ -131,7 +177,7 @@ export interface McpOAuthClock {
 }
 
 /** One sign-in in flight. Held in memory only: a daemon restart ends every sign-in. */
-export interface McpOAuthPendingFlow {
+export interface McpOAuthPendingFlow extends McpOAuthClientAuth {
   readonly flowId: string;
   readonly component: string;
   readonly mode: McpOAuthRedirectMode;

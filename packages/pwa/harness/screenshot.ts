@@ -554,6 +554,7 @@ const captureContextTools = async (page: Page, viewportName: string): Promise<vo
   await shot('mcp');
   await page.locator('[data-mcp-sign-in="docs"]').click();
   await page.locator('[data-mcp-failure="sign-in"]').waitFor({ state: 'visible' });
+  await page.locator('[data-mcp-failure="sign-in"] details summary').click();
   await page.locator('[data-mcp-check="scratch"]').click();
   await page.locator('[data-mcp-row="scratch"] [data-mcp-failure="check"] details summary').click();
   await shot('mcp-failures');
@@ -611,7 +612,7 @@ const captureMcpSignIn = async (page: Page, viewportName: string): Promise<void>
   await page.locator('[data-mcp-sign-in-mode="paste"]').waitFor({ state: 'visible' });
   await page
     .locator('textarea[name="mcp-sign-in-address"]')
-    .fill('http://127.0.0.1:51234/oauth/mcp-callback/0123456789abcdef?code=harness-preview&state=harness-stale');
+    .fill('http://localhost:51234/callback?code=harness-preview&state=harness-stale');
   await page.locator('[data-mcp-sign-in-paste] button[type="submit"]').click();
   await page.locator('[data-mcp-sign-in-refusal]').waitFor({ state: 'visible' });
   if ((await page.locator('textarea[name="mcp-sign-in-address"]').inputValue()) !== '')
