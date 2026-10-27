@@ -57,7 +57,13 @@ export class ProjectMcpOAuthServers implements McpOAuthServers {
         const component = mcpFolderSubject(folder, declaration.name);
         // The registered project's own file wins over a worktree's copy of it.
         if (!servers.has(component) || folder.root === folder.project)
-          servers.set(component, { component, url: declaration.url, auth: 'oauth', optional: true });
+          servers.set(component, {
+            component,
+            url: declaration.url,
+            auth: 'oauth',
+            optional: true,
+            ...(declaration.oauth === undefined ? {} : { client: declaration.oauth }),
+          });
       }
     return [...servers.values()];
   }

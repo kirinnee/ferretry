@@ -4,6 +4,7 @@ import should from 'should';
 import {
   MCP_OAUTH_CALLBACK_PATH,
   MCP_OAUTH_LOOPBACK_HOST,
+  MCP_OAUTH_LOOPBACK_PATH,
   MCP_OAUTH_PATH,
   McpOAuthCompleteRequestSchema,
   McpOAuthCompletionSchema,
@@ -64,7 +65,8 @@ describe('the MCP sign-in contract', () => {
 
   it('should spell the callback base, loopback host and route once', () => {
     should(MCP_OAUTH_CALLBACK_PATH).equal('/oauth/mcp-callback');
-    should(MCP_OAUTH_LOOPBACK_HOST).equal('127.0.0.1');
+    should(MCP_OAUTH_LOOPBACK_HOST).equal('localhost');
+    should(MCP_OAUTH_LOOPBACK_PATH).equal('/callback');
     should(MCP_OAUTH_PATH).equal('/v1/fleet/mcp-auth');
   });
 

@@ -33,8 +33,14 @@ import { type SecretName, SecretNameSchema } from './secrets.ts';
  */
 export const MCP_OAUTH_CALLBACK_PATH = '/oauth/mcp-callback';
 
-/** Where the loopback (paste) redirect points. Nothing listens there; the failed page is the point. */
-export const MCP_OAUTH_LOOPBACK_HOST = '127.0.0.1';
+/**
+ * Where the loopback (paste) redirect points: `http://localhost:<port>/callback`, Claude Code's own shape,
+ * because a provider that admits desktop clients admits that one. Nothing listens there; the failed page
+ * is the point. Each provider gets its own port, which is what keeps one provider's code from finishing
+ * another's sign-in (the per-provider PATH the PWA redirect carries does that job there).
+ */
+export const MCP_OAUTH_LOOPBACK_HOST = 'localhost';
+export const MCP_OAUTH_LOOPBACK_PATH = '/callback';
 
 const K = new Uint32Array([
   0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5, 0xd807aa98,

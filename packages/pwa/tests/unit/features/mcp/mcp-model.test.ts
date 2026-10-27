@@ -210,4 +210,16 @@ describe('plainFailure', () => {
     });
     expect(plainFailure('  ', 'm', 'read')).toEqual({ headline: 'Couldn’t read' });
   });
+
+  it('never reads a refusal the machine answered as the machine being unreachable, whatever it says', () => {
+    const said =
+      'Ferretry’s daemon couldn’t reach auth.example.com to register Ferretry — no answer came back (network error: ENOTFOUND).';
+    expect(plainFailure(said, 'Liftoff MBP', 'start signing in to phoebe', true)).toEqual({
+      headline: 'Couldn’t start signing in to phoebe',
+      details: said,
+    });
+    expect(plainFailure(said, 'Liftoff MBP', 'start signing in to phoebe').headline).toBe(
+      'Liftoff MBP isn’t reachable right now',
+    );
+  });
 });

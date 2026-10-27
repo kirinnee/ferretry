@@ -140,6 +140,7 @@ const AuthorizationServerMetadataSchema = z.looseObject({
   code_challenge_methods_supported: z.array(z.string()).optional(),
   authorization_response_iss_parameter_supported: z.boolean().optional(),
   scopes_supported: z.array(z.string().max(256)).optional(),
+  token_endpoint_auth_methods_supported: z.array(z.string().max(64)).max(32).optional(),
 });
 
 /** What a protected resource said about itself, checked. */
@@ -159,6 +160,8 @@ export interface AuthorizationServer {
   readonly scopes?: readonly string[];
   /** RFC 9207: the provider puts `iss` on every authorization response, so one without it is refused. */
   readonly issParameterSupported: boolean;
+  /** RFC 8414 `token_endpoint_auth_methods_supported`: how the provider lets a client authenticate, when it says. */
+  readonly tokenAuthMethods?: readonly string[];
 }
 
 /** A metadata document this daemon will not use, and why — in words that quote nothing it said. */
@@ -245,6 +248,9 @@ export function authorizationServerFrom(text: string, issuer: string, serverUrl:
     ...(metadata.registration_endpoint === undefined ? {} : { registrationEndpoint: metadata.registration_endpoint }),
     ...(metadata.revocation_endpoint === undefined ? {} : { revocationEndpoint: metadata.revocation_endpoint }),
     ...(metadata.scopes_supported === undefined ? {} : { scopes: metadata.scopes_supported }),
+    ...(metadata.token_endpoint_auth_methods_supported === undefined
+      ? {}
+      : { tokenAuthMethods: metadata.token_endpoint_auth_methods_supported }),
   };
 }
 

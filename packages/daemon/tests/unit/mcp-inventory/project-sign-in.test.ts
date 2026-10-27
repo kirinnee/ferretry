@@ -72,6 +72,25 @@ describe('ProjectMcpOAuthServers', () => {
     ]);
   });
 
+  it('should carry a server’s hand-registered client from .mcp.json into the sign-in', async () => {
+    // Arrange
+    const files = documents();
+    files.set(`${PROJECT}/.mcp.json`, {
+      mcpServers: {
+        phoebe: { type: 'http', url: 'https://phoebe.example/mcp', oauth: { clientId: 'hand-1', callbackPort: 8123 } },
+      },
+    });
+    const servers = new ProjectMcpOAuthServers(knownFolders(FOLDERS), new MemoryDocuments(files));
+
+    // Act
+    const listed = await servers.list();
+
+    // Assert
+    should(listed.find(server => server.component === mcpProjectSubject('phoebe', PROJECT_KEY))).containEql({
+      client: { clientId: 'hand-1', callbackPort: 8123 },
+    });
+  });
+
   it('should list nothing for a project file it cannot read, and join both kinds of target', async () => {
     // Arrange
     const files = documents();

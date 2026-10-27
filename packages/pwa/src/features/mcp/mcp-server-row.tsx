@@ -10,6 +10,7 @@
  */
 
 import type { McpInventoryServer, McpOAuthFlow } from '@ferretry/protocol';
+import { FyHttpError } from '@ferretry/protocol/client';
 import { type ReactNode, useCallback, useState } from 'react';
 import { cn } from '../../lib/class-names.ts';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
@@ -101,7 +102,12 @@ export function useMcpServerActions(host: McpActionsHost | undefined, onSignedIn
       try {
         setFlow(await startMcpSignIn(await createClient(connection), server.signIn.subject, { redirectUri }));
       } catch (error) {
-        const failure = plainFailure(rawReason(error), machineName, `start signing in to ${server.name}`);
+        const failure = plainFailure(
+          rawReason(error),
+          machineName,
+          `start signing in to ${server.name}`,
+          signInRefusal(error),
+        );
         setRefusals(previous => new Map(previous).set(server.id, failure));
       } finally {
         setStarting(null);
@@ -132,6 +138,10 @@ export function useMcpServerActions(host: McpActionsHost | undefined, onSignedIn
 
   return { checks, check, signIn, starting, refusals, sheet };
 }
+
+/** A sign-in refusal the daemon worded (`mcp_auth_*`) — about the provider, never about reaching this machine. */
+const signInRefusal = (error: unknown): boolean =>
+  error instanceof FyHttpError && error.code?.startsWith('mcp_auth_') === true;
 
 /** The error's own text, for Details; a sentence when it has none. */
 const rawReason = (error: unknown): string =>

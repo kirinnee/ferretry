@@ -2,7 +2,7 @@ import { readFile, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { afterAll, afterEach, beforeEach, describe, it } from 'bun:test';
 import { mcpOAuthRedirectPath, mcpOAuthSecretNames } from '@ferretry/protocol';
-import { MissingFleetSecretsError } from '@ferretry/fleet';
+import { type McpComponent, MissingFleetSecretsError } from '@ferretry/fleet';
 import should from 'should';
 import { StateFileSystem } from '../../../src/adapters/filesystem/state-file-system.ts';
 import {
@@ -11,6 +11,7 @@ import {
   FileMcpOAuthStateStore,
   MCP_OAUTH_HTTP_MAX_BYTES,
   MCP_OAUTH_STATE_DOCUMENT,
+  transportReason,
   webCryptoMcpOAuth,
 } from '../../../src/adapters/mcp-oauth/index.ts';
 import {
@@ -28,6 +29,7 @@ import {
   createFoundationPaths,
   FleetLaunchEnvironment,
   McpOAuthService,
+  McpOAuthUnreachable,
   resolveStateHome,
   SecretDirectory,
   SecretVault,
@@ -61,6 +63,8 @@ interface Harness {
   readonly stateDir: string;
   readonly service: McpOAuthService;
   readonly vault: SecretVault;
+  /** The ordinary store's management half, where a person files a secret. */
+  readonly secrets: SecretDirectory;
   /** The daemon-internal store: refresh tokens and client secrets. */
   readonly internal: SecretVault;
   readonly clock: { at: number; now: () => number };
@@ -70,7 +74,11 @@ interface Harness {
 const servers: { stop: (force?: boolean) => void }[] = [];
 let restoreConsole: (() => void) | undefined;
 
-async function harness(options: FakeProviderOptions = {}): Promise<Harness> {
+async function harness(
+  options: FakeProviderOptions = {},
+  /** Extra fields for the `linear` component: a hand-registered client, say. */
+  component: Partial<McpComponent> = {},
+): Promise<Harness> {
   let provider: FakeProvider | undefined;
   const server = Bun.serve({
     hostname: '127.0.0.1',
@@ -98,15 +106,16 @@ async function harness(options: FakeProviderOptions = {}): Promise<Harness> {
       return this.at;
     },
   };
+  const ordinary = new SecretDirectory(documents, cipher, { now: () => new Date(clock.at).toISOString() });
   const service = new McpOAuthService({
     servers: new AccountModelMcpServers(async () => ({
-      components: { mcp: { linear: { url: (provider as FakeProvider).serverUrl, auth: 'oauth' } } },
+      components: { mcp: { linear: { url: (provider as FakeProvider).serverUrl, auth: 'oauth', ...component } } },
     })),
     http: new FetchMcpOAuthHttp(),
     crypto: webCryptoMcpOAuth,
     clock,
     state: new FileMcpOAuthStateStore(paths, files),
-    secrets: new SecretDirectory(documents, cipher, { now: () => new Date(clock.at).toISOString() }),
+    secrets: ordinary,
     values: vault,
     internal: {
       list: async () => await internalDirectory.list(),
@@ -143,6 +152,7 @@ async function harness(options: FakeProviderOptions = {}): Promise<Harness> {
     stateDir: paths.state,
     service,
     vault,
+    secrets: ordinary,
     internal,
     clock,
     stop: () => server.stop(true),
@@ -286,10 +296,60 @@ describe('signing in to a remote MCP server, end to end', () => {
 
     // Assert
     should(flow.mode).equal('paste');
-    should(flow.redirectUri).match(/^http:\/\/127\.0\.0\.1:\d{5}\/oauth\/mcp-callback\/[0-9a-f]{16}$/u);
-    should(failedPage).match(/^http:\/\/127\.0\.0\.1:\d{5}\/oauth\/mcp-callback\/[0-9a-f]{16}\?/u);
+    should(flow.redirectUri).match(/^http:\/\/localhost:\d{5}\/callback$/u);
+    should(failedPage).match(/^http:\/\/localhost:\d{5}\/callback\?/u);
     should(finished.status).equal(200);
     should(found(h.provider, started.body + finished.body + JSON.stringify(h.audit))).deepEqual([]);
+  });
+
+  it('should answer a provider that refuses every registration with its reason, status and host — and no secret', async () => {
+    // Arrange
+    const h = await harness({
+      refuseRegistration: () => ({
+        status: 400,
+        error: 'invalid_client_metadata',
+        error_description: 'apps must be approved by an admin, ref=abcdef0123456789abcdef01',
+      }),
+    });
+
+    // Act
+    const started = await h.api.dispatch(post('/v1/fleet/mcp-auth/linear', { redirectUri: PWA_REDIRECT }));
+
+    // Assert
+    should(started.status).equal(409);
+    const body = jsonBody(started) as { error: string; code: string };
+    should(body.code).equal('mcp_auth_registration');
+    should(body.error).startWith(
+      'The sign-in provider refused new apps: invalid_client_metadata — apps must be approved by an admin, [redacted].',
+    );
+    should(body.error).containEql(`${new URL(h.provider.origin).host} answered HTTP 400`);
+    should(h.provider.registrationRequests.length).be.within(2, 4);
+  });
+
+  it('should sign in with a client registered by hand, its secret named in the store and sent as Basic', async () => {
+    // Arrange — the provider takes only Basic, and has no registration endpoint at all.
+    const secret = 'hand-secret-0123456789';
+    const h = await harness(
+      { noRegistration: true, tokenAuthMethods: ['client_secret_basic'] },
+      { oauth: { clientId: 'hand-1', clientSecret: `\${secret:LINEAR_CLIENT_SECRET}`, callbackPort: 8123 } },
+    );
+    await h.secrets.put('LINEAR_CLIENT_SECRET', secret);
+    h.provider.preRegister('hand-1', ['http://localhost:8123/callback'], secret);
+
+    // Act
+    const started = await h.api.dispatch(post('/v1/fleet/mcp-auth/linear', { redirectUri: PWA_REDIRECT }));
+    const flow = jsonBody(started) as { flowId: string; authorizeUrl: string; mode: string; redirectUri: string };
+    const failedPage = await browse(flow.authorizeUrl);
+    const finished = await h.api.dispatch(post(`/v1/fleet/mcp-auth/flows/${flow.flowId}`, { callback: failedPage }));
+
+    // Assert
+    should(flow).containEql({ mode: 'paste', redirectUri: 'http://localhost:8123/callback' });
+    should(finished.status).equal(200);
+    should(h.provider.registrationRequests).have.length(0);
+    should(h.provider.tokenAuthorizations[0]).startWith('Basic ');
+    const stateFile = await readFile(join(h.stateDir, MCP_OAUTH_STATE_DOCUMENT), 'utf8');
+    should(stateFile).not.containEql(secret);
+    should(started.body + finished.body + JSON.stringify(h.audit) + h.console.join('\n')).not.containEql(secret);
   });
 
   it('should refuse a forged address with a sentence that quotes none of it', async () => {
@@ -359,11 +419,23 @@ describe('the MCP sign-in adapters', () => {
 
     // Act / Assert
     await should(http.request({ method: 'GET', url: `${origin}/huge` })).be.rejectedWith(
-      'mcp sign-in response too large',
+      'network error: RESPONSE_TOO_LARGE',
     );
-    await should(http.request({ method: 'GET', url: 'http://127.0.0.1:1/secret-path?code=abc' })).be.rejectedWith(
-      'mcp sign-in request failed',
-    );
+    const dead = await http
+      .request({ method: 'GET', url: 'http://127.0.0.1:1/secret-path?code=abc' })
+      .catch((error: unknown) => error);
+    should(dead).be.instanceOf(McpOAuthUnreachable);
+    should((dead as McpOAuthUnreachable).reason).match(/^[A-Za-z][A-Za-z0-9_]+$/u);
+    should((dead as McpOAuthUnreachable).reason).not.equal('UNKNOWN');
+    should((dead as Error).message).not.containEql('secret-path');
+    should((dead as Error).message).not.containEql('abc');
+  });
+
+  it('should name a timeout, and only a well-formed transport code', () => {
+    should(transportReason(Object.assign(new Error('x'), { name: 'TimeoutError' }))).equal('TIMEOUT');
+    should(transportReason(Object.assign(new Error('x'), { code: 'ENOTFOUND' }))).equal('ENOTFOUND');
+    should(transportReason(Object.assign(new Error('x'), { code: 'has spaces /path?q=1' }))).equal('UNKNOWN');
+    should(transportReason('boom')).equal('UNKNOWN');
   });
 
   it('should read an absent state document as empty, a damaged one as a refusal, and write 0600', async () => {
@@ -383,13 +455,41 @@ describe('the MCP sign-in adapters', () => {
     await should(store.read()).be.rejectedWith(/is not a document this daemon can read/u);
     await writeFile(path, JSON.stringify({ v: 2 }));
     await should(store.read()).be.rejectedWith(/is not a document this daemon can read/u);
+    const withAuth = {
+      v: 1 as const,
+      registrations: {
+        linear: [
+          {
+            issuer: 'https://a.example',
+            redirectUri: 'http://localhost:50000/callback',
+            paste: true as const,
+            clientId: 'c',
+            hasClientSecret: true,
+            tokenAuth: 'client_secret_basic' as const,
+          },
+        ],
+      },
+      connections: {},
+    };
+    await store.write(withAuth);
+    should(await store.read()).deepEqual(withAuth);
   });
 
   it('should list the configured MCP servers, and none on a host with no fleet', async () => {
     // Act
     const none = await new AccountModelMcpServers(async () => undefined).list();
     const some = await new AccountModelMcpServers(async () => ({
-      components: { mcp: { remote: { url: 'https://example.test/mcp', auth: 'oauth' }, local: { command: 'npx' } } },
+      components: {
+        mcp: {
+          remote: { url: 'https://example.test/mcp', auth: 'oauth' },
+          local: { command: 'npx' },
+          hand: {
+            url: 'https://hand.example/mcp',
+            auth: 'oauth',
+            oauth: { clientId: 'h', clientSecret: `\${secret:HAND_SECRET}`, callbackPort: 8123 },
+          },
+        },
+      },
     })).list();
 
     // Assert
@@ -397,6 +497,12 @@ describe('the MCP sign-in adapters', () => {
     should(some).deepEqual([
       { component: 'remote', url: 'https://example.test/mcp', auth: 'oauth' },
       { component: 'local' },
+      {
+        component: 'hand',
+        url: 'https://hand.example/mcp',
+        auth: 'oauth',
+        client: { clientId: 'h', clientSecret: 'HAND_SECRET', callbackPort: 8123 },
+      },
     ]);
   });
 

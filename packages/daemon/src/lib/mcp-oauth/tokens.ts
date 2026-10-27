@@ -1,5 +1,5 @@
 /**
- * Reading what a token endpoint and a registration endpoint answered. Pure.
+ * Reading what a token endpoint answered. Pure. (A registration endpoint's answer is `registration.ts`.)
  *
  * NOTHING A PROVIDER SAID IS QUOTED BACK. A token response IS the credential, and an error body is free
  * text a provider may have put anything in, so every refusal here is chosen from a fixed table keyed by
@@ -73,34 +73,3 @@ const TOKEN_ERRORS: Readonly<Record<string, string>> = {
 /** A token endpoint's refusal, in words. */
 export const tokenRefusal = (error: string): string =>
   TOKEN_ERRORS[error] ?? 'The provider did not finish the sign-in. Start again.';
-
-const RegistrationSchema = z.looseObject({
-  client_id: z.string().min(1).max(512),
-  client_secret: TokenValueSchema.optional(),
-});
-
-/** A registration endpoint's answer (RFC 7591 §3.2). */
-export type RegistrationAnswer =
-  | { readonly kind: 'registered'; readonly clientId: string; readonly clientSecret?: string }
-  /** The provider refused THIS redirect address — the one case a loopback address may still work. */
-  | { readonly kind: 'redirect-refused' }
-  | { readonly kind: 'refused' };
-
-const REDIRECT_ERRORS: ReadonlySet<string> = new Set(['invalid_redirect_uri', 'invalid_client_metadata']);
-
-export function registrationAnswer(status: number, text: string): RegistrationAnswer {
-  const body = parseJson(text);
-  if (status === 200 || status === 201) {
-    const parsed = RegistrationSchema.safeParse(body);
-    if (!parsed.success) return { kind: 'refused' };
-    return {
-      kind: 'registered',
-      clientId: parsed.data.client_id,
-      ...(parsed.data.client_secret === undefined ? {} : { clientSecret: parsed.data.client_secret }),
-    };
-  }
-  const error = ErrorResponseSchema.safeParse(body);
-  // `invalid_client_metadata` too: several providers answer it for a redirect they do not allow, and
-  // trying the loopback address once more costs one request.
-  return error.success && REDIRECT_ERRORS.has(error.data.error) ? { kind: 'redirect-refused' } : { kind: 'refused' };
-}
