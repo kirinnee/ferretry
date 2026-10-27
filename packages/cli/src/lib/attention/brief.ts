@@ -3,10 +3,12 @@ import {
   AttentionActionRequestSchema,
   type AttentionAsk,
   type AttentionAskOption,
+  type AttentionItem,
   type AttentionLink,
   type AttentionQuestion,
   type AttentionTerm,
   MAX_ATTENTION_SUBJECT_LENGTH,
+  toBullets,
 } from '@ferretry/protocol';
 import { z } from 'zod';
 import { type AskFlags, parseAsk } from './ask.ts';
@@ -18,7 +20,8 @@ const DEFAULT_HOW_TO_RESOLVE = 'Answer this item on the attention board (it reco
 export interface BriefFlags extends AskFlags {
   readonly summary?: string;
   readonly why?: string;
-  readonly context?: string;
+  /** Repeated: more than one becomes bullets. */
+  readonly context?: string | readonly string[];
   readonly resolve?: string;
   /** `TERM=meaning`, repeated. */
   readonly term?: readonly string[];
@@ -27,13 +30,16 @@ export interface BriefFlags extends AskFlags {
   /** The suggested decision: an option label, or the answer in words. */
   readonly recommend?: string;
   readonly recommendWhy?: string;
-  readonly impact?: string;
+  /** Repeated: more than one becomes bullets. */
+  readonly impact?: string | readonly string[];
   readonly urgency?: string;
   /** A URL, a path or a reference, repeated. */
   readonly link?: readonly string[];
 }
 
 const OptionInput = z.union([z.string(), z.object({ label: z.string(), description: z.string().optional() })]);
+/** Text, or a list of short points that is drawn as bullets. */
+const Prose = z.union([z.string(), z.array(z.string())]);
 const LinkInput = z.union([z.string(), z.object({ label: z.string().optional(), target: z.string() })]);
 
 /**
@@ -43,7 +49,7 @@ const LinkInput = z.union([z.string(), z.object({ label: z.string().optional(), 
 const BriefFileSchema = z.strictObject({
   summary: z.string().optional(),
   why: z.string().optional(),
-  context: z.string().optional(),
+  context: Prose.optional(),
   resolve: z.string().optional(),
   kind: z.string().optional(),
   options: z.array(OptionInput).optional(),
@@ -62,7 +68,7 @@ const BriefFileSchema = z.strictObject({
     )
     .optional(),
   recommendation: z.union([z.string(), z.object({ decision: z.string(), why: z.string().optional() })]).optional(),
-  impact: z.string().optional(),
+  impact: Prose.optional(),
   urgency: z.string().optional(),
   links: z.array(LinkInput).optional(),
 });
@@ -104,9 +110,9 @@ export function composeAddRequest(
   const recommendation = onQuestion(questions, flags) ? undefined : recommendationFrom(flags, file);
   const terms = flags.term !== undefined && flags.term.length > 0 ? flags.term.map(termFrom) : file.terms;
   const links = flags.link !== undefined && flags.link.length > 0 ? flags.link.map(link) : file.links?.map(link);
-  const impact = text(flags.impact) ?? text(file.impact);
+  const impact = prose(flags.impact) ?? prose(file.impact);
   const urgency = text(flags.urgency) ?? text(file.urgency);
-  const context = text(flags.context) ?? text(file.context);
+  const context = prose(flags.context) ?? prose(file.context);
 
   const request = {
     action: 'add' as const,
@@ -252,6 +258,18 @@ function link(value: string | { label?: string | undefined; target: string }): A
   return { target: value.target.trim(), ...(value.label === undefined ? {} : { label: value.label }) };
 }
 
+/**
+ * Text, or points: one value is kept as written; several are bullets, one per point. Nothing when
+ * every value is blank.
+ */
+function prose(value: string | readonly string[] | undefined): string | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value === 'string') return text(value);
+  const points = value.map(point => point.trim()).filter(point => point !== '');
+  if (points.length === 0) return undefined;
+  return points.length === 1 ? points[0] : toBullets(points);
+}
+
 /** A trimmed value, or nothing when it was absent or blank. */
 function text(value: string | undefined): string | undefined {
   const trimmed = value?.trim() ?? '';
@@ -266,4 +284,64 @@ function describeIssues(error: z.ZodError): string {
       return path === '' ? issue.message : `${path}: ${issue.message}`;
     })
     .join('; ');
+}
+
+/** The fields `fy attention edit` may change, as flags. */
+export interface EditFlags {
+  readonly summary?: string;
+  readonly context?: string | readonly string[];
+  readonly term?: readonly string[];
+  /** The new wording of the item's questions, in order — as many as it has. */
+  readonly question?: readonly string[];
+  readonly recommend?: string;
+  readonly recommendWhy?: string;
+  readonly impact?: string | readonly string[];
+  readonly urgency?: string;
+  readonly link?: readonly string[];
+}
+
+/**
+ * The edit request one `fy attention edit <id>` describes, merged onto the item as it stands: only the
+ * writing changes. New question words replace the old in order and keep each question's options,
+ * recommendation and reason, so reading the item again is never needed to reword it.
+ */
+export function composeEditRequest(
+  id: AttentionItem['id'],
+  flags: EditFlags,
+  current: AttentionItem | undefined,
+): Extract<AttentionActionRequest, { action: 'edit' }> {
+  const summary = text(flags.summary);
+  const context = prose(flags.context);
+  const impact = prose(flags.impact);
+  const urgency = text(flags.urgency);
+  const decision = text(flags.recommend);
+  const why = text(flags.recommendWhy);
+  const terms = flags.term !== undefined && flags.term.length > 0 ? flags.term.map(termFrom) : undefined;
+  const links = flags.link !== undefined && flags.link.length > 0 ? flags.link.map(link) : undefined;
+  const words = (flags.question ?? []).map(question => question.trim()).filter(question => question !== '');
+  if (words.length > 0 && current === undefined) throw new Error(`no unresolved attention item ${id} to reword`);
+  const before = current?.questions ?? [];
+  if (words.length > 0 && words.length !== before.length) {
+    throw new Error(`${id} has ${before.length} question(s); give exactly that many --question texts, in order`);
+  }
+  const questions =
+    words.length === 0
+      ? undefined
+      : before.map((each, index) => ({ ...each, question: words[index] ?? each.question }));
+  const request = {
+    action: 'edit' as const,
+    id,
+    ...(summary === undefined ? {} : { subject: summary }),
+    ...(context === undefined ? {} : { context }),
+    ...(terms === undefined ? {} : { terms }),
+    ...(questions === undefined ? {} : { questions }),
+    ...(decision === undefined ? {} : { recommendation: { decision, ...(why === undefined ? {} : { why }) } }),
+    ...(impact === undefined ? {} : { impact }),
+    ...(urgency === undefined ? {} : { urgency }),
+    ...(links === undefined ? {} : { links }),
+  };
+  const parsed = AttentionActionRequestSchema.safeParse(request);
+  if (!parsed.success) throw new Error(describeIssues(parsed.error));
+  if (parsed.data.action !== 'edit') throw new Error('not an edit request');
+  return parsed.data;
 }

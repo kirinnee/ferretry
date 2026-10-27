@@ -29,7 +29,7 @@ import {
 import { RouteLink } from '../../shell/route-link.tsx';
 import { AttentionActions } from './attention-actions.tsx';
 import { attentionAge, attentionKindMeta, attentionReference, collapsesByDefault } from './attention-board.tsx';
-import { AttentionBriefSections } from './attention-brief.tsx';
+import { AttentionBriefSections, PointForm } from './attention-brief.tsx';
 
 /** Where the card came from, in the inbox. Inside its own conversation there is nothing to say. */
 export interface AttentionCardOrigin {
@@ -62,7 +62,7 @@ export interface AttentionCardProps {
   readonly id?: string;
 }
 
-const plainProse = (text: string): ReactNode => <p className="m-0 whitespace-pre-wrap break-words">{text}</p>;
+const plainProse = (text: string): ReactNode => <PointForm text={text} />;
 
 export function AttentionCard({
   item,

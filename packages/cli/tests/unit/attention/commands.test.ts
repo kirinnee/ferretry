@@ -321,3 +321,47 @@ describe('attention command surface', () => {
     should(help).match(/an agent may mutate only its own\s+session/u);
   });
 });
+
+describe('attention writing flags', () => {
+  it('should collect repeated --context and --impact into bullet points on add', async () => {
+    // Arrange + Act
+    const { parsed, gateway } = run(
+      ['attention', 'add', 'pick', '-c', 'one', '-c', 'two', '--impact', 'blocks', '--impact', 'costs'],
+      afterAdd,
+    );
+    await parsed;
+
+    // Assert
+    should(gateway.applied[0]?.request).match({ context: '- one\n- two', impact: '- blocks\n- costs' });
+  });
+
+  it('should reword an item with edit', async () => {
+    // Arrange + Act
+    const { parsed, gateway } = run(['attention', 'edit', '!A1', '--summary', 'Plain ask', '-c', 'a', '-c', 'b']);
+    await parsed;
+
+    // Assert
+    should(gateway.applied[0]?.request).deepEqual({
+      action: 'edit',
+      id: 'A1',
+      subject: 'Plain ask',
+      context: '- a\n- b',
+    });
+  });
+
+  it('should teach point form and self-contained writing in the help', async () => {
+    // Arrange
+    const gateway = new RecordingAttentionGateway(board);
+    const program = new Command().name('fy').exitOverride();
+    let help = '';
+    program.configureOutput({ writeOut: text => (help += text), writeErr: () => {} });
+    registerAttentionCommands(program, new AttentionController(gateway, new CapturingOutput(), SESSION));
+
+    // Act
+    await program.parseAsync(['node', 'fy', 'attention', 'edit', '--help']).catch(() => undefined);
+
+    // Assert
+    should(help).containEql('--summary');
+    should(help).containEql('bullet points');
+  });
+});

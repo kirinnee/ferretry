@@ -5,6 +5,7 @@
  *   swipe-mid                     a drag past the slop but short of the threshold, the option showing
  *   undo                          the toast after a committed swipe
  *   panel-phone / panel-desktop   the in-ferret panel over a transcript line with a proved `!A3`
+ *   points-phone / -desktop       an item whose context and impact are bullet lists, both opened
  *   sidebar / rail / drawer       unread rows, the Needs-you group, the Attention entry, the rail badges
  *
  *   bun harness/attention-screenshot.ts      # writes harness/out/attention/<scheme>/*.png
@@ -147,6 +148,17 @@ try {
         await page.close();
         page = await open(desktop, theme, name);
         await shot(page, scheme, `${name}-desktop`);
+        await page.close();
+      }
+      for (const [label, context] of [
+        ['phone', phone],
+        ['desktop', desktop],
+      ] as const) {
+        page = await open(context, theme, 'rich');
+        for (const section of ['context', 'impact'])
+          await page.locator(`[data-attention-section="${section}"] > summary`).first().click();
+        await page.waitForTimeout(200);
+        await shot(page, scheme, `points-${label}`);
         await page.close();
       }
       page = await open(desktop, theme, 'panel');

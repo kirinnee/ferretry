@@ -1,13 +1,12 @@
 import {
+  ATTENTION_PUSH_BODY_LENGTH,
+  ATTENTION_PUSH_TITLE_LENGTH,
   type AttentionItem,
   type AttentionSnapshot,
   attentionNotificationPath,
   type DirectNotificationRequest,
-  MAX_NOTIFICATION_BODY_LENGTH,
-  MAX_NOTIFICATION_TITLE_LENGTH,
   type PushNotificationPayload,
   PushNotificationPayloadSchema,
-  recommendedAttentionOption,
   sessionNotificationPath,
 } from '@ferretry/protocol';
 import type { DirectNotificationRequestedRecord, NotificationLedgerEntry, NotificationResult } from './types.ts';
@@ -152,7 +151,7 @@ export function directNotificationPayload(
   }) as SessionNotificationPayload;
 }
 
-/** The two names an Attention push is titled with. */
+/** The two names an Attention push is titled with: the conversation, else the ferret. */
 export interface AttentionNotificationSession {
   /** The ferret's spoken name (`agentSpokenName`). */
   readonly name: string;
@@ -164,15 +163,15 @@ export interface AttentionNotificationSession {
  * Composes the automatic presentation of one newly created board item: THE ONE PUSH A FERRET'S ASK
  * MAKES (docs/attention.md). Waiting and finishing push nothing; this does.
  *
- * TITLED WITH THE CONVERSATION, quoted, FIRST — what it is about — then the ferret's name, so a lock
- * screen says which piece of work wants the owner. The quote also means an ask can never open with the
- * daemon's own new-device alert title (`DEVICE_PAIRED_TITLE`): a session's name is an agent's words,
- * exactly as a direct notification's title is.
+ * A LOCK SCREEN GETS A CONCISE SUMMARY AND NOTHING ELSE. The title is the conversation's name, quoted
+ * and trimmed to `ATTENTION_PUSH_TITLE_LENGTH`; the body is the item's summary alone, trimmed to
+ * `ATTENTION_PUSH_BODY_LENGTH` at a word boundary — never the context, the options or any jargon, which
+ * the item itself carries. The quote also means an ask can never open with the daemon's own new-device
+ * alert title (`DEVICE_PAIRED_TITLE`): a session's name is an agent's words, exactly as a direct
+ * notification's title is.
  *
- * THE BODY SAYS WHAT THE ISSUE IS: the item's summary (its `subject`), or its first question when the
- * summary only repeats the title; then the recommended answer when the ferret named one; then the
- * choices it offered. A tap opens that conversation at the item: the path is relative to the machine's
- * own pages, which the browser's per-machine worker places under that machine.
+ * A tap opens that conversation at the item: the path is relative to the machine's own pages, which the
+ * browser's per-machine worker places under that machine.
  */
 export function attentionNotificationPayload(
   sessionId: string,
@@ -181,39 +180,24 @@ export function attentionNotificationPayload(
   snapshot: AttentionSnapshot,
 ): SessionNotificationPayload {
   const conversation = session.title?.trim() || session.name;
-  const title = sameWords(conversation, session.name) ? `“${conversation}”` : `“${conversation}” · ${session.name}`;
   return PushNotificationPayloadSchema.parse({
     version: 1,
     eventKey: `attention-raised:${item.id}`,
     sessionId,
     kind: 'attention',
-    title: clipped(title, MAX_NOTIFICATION_TITLE_LENGTH),
-    body: clipped(attentionNotificationBody(item, conversation), MAX_NOTIFICATION_BODY_LENGTH),
+    title: `“${clippedAtWord(oneLine(conversation), ATTENTION_PUSH_TITLE_LENGTH)}”`,
+    body: clippedAtWord(attentionNotificationSummary(item, conversation), ATTENTION_PUSH_BODY_LENGTH),
     tag: `attention-${sessionId}`,
     url: attentionNotificationPath(sessionId, item.id),
     count: snapshot.count,
   }) as SessionNotificationPayload;
 }
 
-/** What the issue is, what the ferret recommends, and what the owner can pick — one line each. */
-function attentionNotificationBody(item: AttentionItem, conversation: string): string {
+/** The item's summary, or its first question when the summary only repeats the title (or is empty). */
+export function attentionNotificationSummary(item: AttentionItem, conversation: string): string {
   const first = item.questions?.[0]?.question;
-  const summary = sameWords(item.subject, conversation) && first !== undefined ? first : item.subject;
-  const recommended = recommendedAttentionOption(item) ?? item.recommendation?.decision;
-  const options =
-    item.ask?.kind === 'multiple-choice'
-      ? item.ask.options
-          .map(option => option.label)
-          .filter(label => label !== recommended)
-          .join(' · ')
-      : '';
-  return [
-    oneLine(summary),
-    recommended === undefined ? '' : `Recommended: ${oneLine(recommended)}`,
-    options === '' ? '' : `${recommended === undefined ? 'Options' : 'Or'}: ${options}`,
-  ]
-    .filter(line => line !== '')
-    .join('\n');
+  const summary = oneLine(item.subject);
+  return first !== undefined && (summary === '' || sameWords(summary, conversation)) ? oneLine(first) : summary;
 }
 
 function oneLine(text: string): string {
@@ -224,9 +208,16 @@ function sameWords(left: string, right: string): boolean {
   return oneLine(left).toLowerCase() === oneLine(right).toLowerCase();
 }
 
-/** One line of at most `limit` characters, ending in an ellipsis when it was cut. */
-function clipped(text: string, limit: number): string {
-  return text.length <= limit ? text : `${text.slice(0, limit - 1)}…`;
+/**
+ * One line of at most `limit` characters. A longer text is cut at the last word that fits and ends in an
+ * ellipsis; a single word longer than the limit is cut where it stands.
+ */
+export function clippedAtWord(text: string, limit: number): string {
+  if (text.length <= limit) return text;
+  const room = text.slice(0, limit - 1);
+  const space = room.lastIndexOf(' ');
+  const cut = space >= Math.floor(limit / 2) ? room.slice(0, space) : room;
+  return `${cut.trimEnd().replace(/[\s,;:.\-–—]+$/u, '')}…`;
 }
 
 /** Server-derived attribution for a board item the daemon chose to announce. */

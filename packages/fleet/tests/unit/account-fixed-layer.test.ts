@@ -671,15 +671,18 @@ describe('ATTENTION_INSTRUCTION', () => {
     // Assert
     should(text).startWith('Attention: when you need the human to decide or do something');
     should(text).containEql('`zz attention add "<summary>"`');
-    should(text).containEql('Write for a reader who has NOT been following');
-    should(text).containEql('the summary is one line of what you need');
-    should(text).containEql('`--context` what is happening and why');
-    should(text).containEql('`--term "X=meaning"` per jargon');
-    should(text).containEql(
-      '`--question` each decision, with `--option` choices and `--recommend <pick> --recommend-why`',
-    );
-    // One compact example, in the binary's own name.
-    should(text).containEql('`zz attention add "Approve the login plan" --context "…" --question "Which plan?"');
+    // Self-contained, in point form: the reader has not followed the conversation.
+    should(text).containEql('write for someone who has NOT been following, in short bullets, one idea each');
+    should(text).containEql('No ticket or PR numbers, codenames, file paths or unexplained acronyms');
+    should(text).containEql('define the term with `--term "X=meaning"`');
+    should(text).containEql('The summary is one plain sentence under 90 characters, answer first');
+    should(text).containEql('`--context` is repeatable, one bullet each');
+    should(text).containEql('`--question` each decision with 2–4 short `--option`s');
+    should(text).containEql('`--recommend <pick> --recommend-why <one line>`');
+    // A tiny bad/good example.
+    should(text).containEql('Bad: "Need call on KT-412 re OCI cron"');
+    should(text).containEql('Good: "Keep the work login alive every 30 minutes?"');
+    should(text).containEql('`zz attention edit <id>`');
     should(text).containEql('Never for progress or because you finished.');
     should(text).containEql('"[answer to !A3 …]"');
     should(text).containEql('`!A3`');
@@ -690,7 +693,7 @@ describe('ATTENTION_INSTRUCTION', () => {
 
   it('should stay short: it is in every prompt', () => {
     // Assert
-    should(ATTENTION_INSTRUCTION('fy').length).be.below(700);
+    should(ATTENTION_INSTRUCTION('fy').length).be.below(950);
   });
 
   it('should ride in the always-on instruction after the settings rules, not behind a switch', () => {

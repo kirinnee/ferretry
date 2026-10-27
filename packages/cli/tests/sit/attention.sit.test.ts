@@ -121,6 +121,7 @@ class FakeAttentionDaemon {
       return;
     }
 
+    if (request.action === 'edit') throw new Error('the fake daemon does not edit items');
     const index = this.#items.findIndex(item => item.id === request.id);
     if (index === -1) throw new Error(`unknown attention id ${request.id}`);
     const [item] = this.#items.splice(index, 1);

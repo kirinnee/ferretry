@@ -15,6 +15,7 @@ import {
   agentConfinedTo,
   applyAttentionCommandToSession,
   attentionSnapshot,
+  type EditAttentionPatch,
   emptyAttentionLedger,
   type RaiseAttentionRequest,
 } from './state-machine.ts';
@@ -118,6 +119,15 @@ export class AttentionService {
     via: AttentionVia = 'board',
   ): Promise<AttentionMutation> {
     return this.apply(sessionId, { action: 'answer', actor, id, response, note, at: this.clock.now() }, via);
+  }
+
+  async edit(
+    sessionId: string,
+    id: AttentionId,
+    patch: EditAttentionPatch,
+    actor: AttentionActor,
+  ): Promise<AttentionMutation> {
+    return this.apply(sessionId, { action: 'edit', actor, id, patch, at: this.clock.now() });
   }
 
   async resolve(

@@ -16,6 +16,29 @@ import { type ReactNode, useId } from 'react';
 
 type AttentionProse = (text: string) => ReactNode;
 
+const POINT = /^\s*[-*•]\s+(\S.*)$/u;
+
+/** The points of a text written as bullets (every non-blank line one), or `null` when it is prose. */
+export function bulletPoints(text: string): readonly string[] | null {
+  const lines = text.split(/\r?\n/u).filter(line => line.trim() !== '');
+  const points = lines.map(line => POINT.exec(line)?.[1]?.trim());
+  return lines.length > 0 && points.every(point => point !== undefined) ? (points as string[]) : null;
+}
+
+/** Plain text drawn in point form: a bullet list when it is written as bullets, a paragraph otherwise. */
+export function PointForm({ text, className = '' }: { readonly text: string; readonly className?: string }) {
+  const points = bulletPoints(text);
+  if (points === null) return <p className={`${className} m-0 whitespace-pre-wrap break-words`.trim()}>{text}</p>;
+  return (
+    <ul className={`fy-attn-points ${className}`.trim()}>
+      {points.map((point, index) => (
+        // biome-ignore lint/suspicious/noArrayIndexKey: points repeat; their order is their identity
+        <li key={index}>{point}</li>
+      ))}
+    </ul>
+  );
+}
+
 /** The picks a several-question item collects before "Send answers". */
 interface QuestionAnswers {
   readonly answers: readonly string[];
@@ -254,7 +277,7 @@ export function AttentionBriefSections({ item, renderProse, picker }: AttentionB
       )}
       {item.impact === undefined && item.urgency === undefined ? null : (
         <Section name="impact" title="Impact">
-          {item.impact === undefined ? null : <p className="fy-attn-prose">{item.impact}</p>}
+          {item.impact === undefined ? null : <PointForm className="fy-attn-prose" text={item.impact} />}
           {item.urgency === undefined ? null : (
             <p className="fy-attn-prose">
               <strong>Urgency:</strong> {item.urgency}

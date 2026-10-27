@@ -60,6 +60,12 @@ export interface RaiseAttentionRequest extends AttentionBrief {
   readonly ask?: AttentionAsk;
 }
 
+/** The writing an edit may change: never the ask, the reason or who raised the item. */
+export interface EditAttentionPatch extends AttentionBrief {
+  readonly subject?: string;
+  readonly context?: string | null;
+}
+
 export type AttentionCommand =
   | {
       readonly action: 'raise';
@@ -87,6 +93,13 @@ export type AttentionCommand =
       readonly actor: AttentionActor;
       readonly id: AttentionId;
       readonly note?: string | null;
+      readonly at: string;
+    }
+  | {
+      readonly action: 'edit';
+      readonly actor: AttentionActor;
+      readonly id: AttentionId;
+      readonly patch: EditAttentionPatch;
       readonly at: string;
     }
   | {
@@ -238,6 +251,8 @@ function applyToLedger(ledger: AttentionLedger, command: AttentionCommand): Atte
       return addressById(ledger, command, 'resolved', 'done');
     case 'dismiss':
       return addressById(ledger, command, 'dismissed', 'dismissed');
+    case 'edit':
+      return edit(ledger, command);
     case 'resolve-source':
       return resolveSource(ledger, command);
   }
@@ -245,6 +260,7 @@ function applyToLedger(ledger: AttentionLedger, command: AttentionCommand): Atte
 
 type RaiseCommand = Extract<AttentionCommand, { action: 'raise' }>;
 type AddressCommand = Extract<AttentionCommand, { action: 'answer' | 'resolve' | 'dismiss' }>;
+type EditCommand = Extract<AttentionCommand, { action: 'edit' }>;
 type ResolveSourceCommand = Extract<AttentionCommand, { action: 'resolve-source' }>;
 
 function raise(ledger: AttentionLedger, command: RaiseCommand): AttentionMutation {
@@ -583,4 +599,63 @@ function success(
 
 function failure(code: AttentionErrorCode, message: string): AttentionMutation {
   return { ok: false, error: { code, message } };
+}
+
+const EDITABLE_FIELDS = [
+  'subject',
+  'context',
+  'terms',
+  'questions',
+  'recommendation',
+  'impact',
+  'urgency',
+  'links',
+] as const;
+
+/** The option labels of each question, in order — what an edit must leave alone to keep the ask true. */
+function questionShape(questions: AttentionBrief['questions']): string {
+  return JSON.stringify(
+    (questions ?? []).map(question => question.options?.map(option => option.label.trim()) ?? null),
+  );
+}
+
+/**
+ * Rewords an OPEN item in place. The writing changes (summary, context, terms, question wording,
+ * recommendation, impact, urgency, links); the ask, the reason and the raiser do not, and neither does
+ * the item's place in line, so an edit never re-notifies. Only whoever may close an item may edit it.
+ * Questions keep their count and their options, because the ask was derived from them.
+ */
+function edit(ledger: AttentionLedger, command: EditCommand): AttentionMutation {
+  const target = ledger.entries.filter(isActiveAttention).find(entry => entry.item.id === command.id);
+  if (target === undefined) return failure('not-found', `no unresolved attention item ${command.id} in this session`);
+  if (!canAddressAttention(command.actor, target)) {
+    return failure('forbidden', 'an agent or daemon may edit only an attention item it raised');
+  }
+  const patch = command.patch;
+  if (EDITABLE_FIELDS.every(field => patch[field] === undefined)) {
+    return failure('invalid', `nothing to edit: give at least one of ${EDITABLE_FIELDS.join(', ')}`);
+  }
+  if (patch.questions !== undefined && questionShape(patch.questions) !== questionShape(target.item.questions)) {
+    return failure('invalid', 'questions may be reworded but not added, removed or given other options');
+  }
+  const item: AttentionItem = {
+    ...target.item,
+    ...(patch.subject === undefined ? {} : { subject: patch.subject }),
+    ...(patch.context === undefined ? {} : { context: patch.context }),
+    ...(patch.terms === undefined ? {} : { terms: patch.terms }),
+    ...(patch.questions === undefined ? {} : { questions: patch.questions }),
+    ...(patch.recommendation === undefined ? {} : { recommendation: patch.recommendation }),
+    ...(patch.impact === undefined ? {} : { impact: patch.impact }),
+    ...(patch.urgency === undefined ? {} : { urgency: patch.urgency }),
+    ...(patch.links === undefined ? {} : { links: patch.links }),
+  };
+  if (JSON.stringify(item) === JSON.stringify(target.item)) return unchanged(ledger);
+  const next: AttentionLedger = {
+    ...ledger,
+    entries: ledger.entries.map(entry =>
+      entry.lifecycle === 'active' && entry.item.id === item.id ? { ...entry, item } : entry,
+    ),
+    updatedAt: command.at,
+  };
+  return success(next, true, 'refreshed', item);
 }

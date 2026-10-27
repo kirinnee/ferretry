@@ -73,7 +73,7 @@ const RICH = item('A5', 12, {
   subject: 'Which storage engine for the board, and when do we migrate?',
   why: 'Which storage engine for the board, and when do we migrate?',
   context:
-    'The attention board keeps its ledger in memory today, so a daemon restart forgets every resolved item. Persisting it needs a store; the two candidates differ in how much they ask of the machine.',
+    '- The board keeps its ledger in memory\n- A daemon restart forgets every resolved item\n- Two stores could fix it; they differ in what they ask of the machine',
   terms: [
     { term: 'WAL', meaning: 'A log written before the data, so a crash can be replayed.' },
     { term: 'Ledger', meaning: 'The list of every item raised, open and resolved.' },
@@ -96,7 +96,7 @@ const RICH = item('A5', 12, {
     },
   ],
   recommendation: { decision: 'SQLite, migrating on next start', why: 'Smallest change that survives a restart.' },
-  impact: 'Until this is decided, resolved items are lost on every daemon restart.',
+  impact: '- Resolved items are lost on every daemon restart\n- Nothing else is blocked',
   urgency: 'Before the release cut on Friday',
   links: [
     { label: 'Storage notes', target: 'https://example.test/docs/storage' },

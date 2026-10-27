@@ -3,12 +3,12 @@ import { MAX_ATTENTION_SUBJECT_LENGTH, MAX_NOTIFICATION_BODY_LENGTH } from '@fer
 import should from 'should';
 import { AttentionController } from '../../../src/lib/attention/controller';
 import {
-  CapturingOutput,
-  RecordingAttentionGateway,
-  SESSION,
   agentItem,
+  CapturingOutput,
   humanItem,
+  RecordingAttentionGateway,
   resolvedItem,
+  SESSION,
   snapshot,
 } from './fixtures';
 
@@ -424,5 +424,57 @@ describe('attention controller notify', () => {
 
     // Assert
     should(JSON.parse(String(out.messages[0]))).deepEqual({ sessionId: SESSION, delivered: 0 });
+  });
+});
+
+describe('attention controller edit', () => {
+  it('should send only the given wording and say it was edited, with any advice', async () => {
+    // Arrange
+    const warned = { ...board, warnings: ['summary is long'] };
+    const { controller, gateway, out } = build(SESSION, warned);
+
+    // Act
+    await controller.edit('!A1', { summary: 'Approve the deploy?', context: ['one', 'two'] });
+
+    // Assert
+    should(gateway.applied[0]).deepEqual({
+      sessionId: SESSION,
+      request: { action: 'edit', id: 'A1', subject: 'Approve the deploy?', context: '- one\n- two' },
+    });
+    should(out.messages[0]).containEql('edited !A1');
+    should(out.messages[0]).containEql('summary is long');
+  });
+
+  it('should read the board only when question wording needs the current questions', async () => {
+    // Arrange
+    const { controller, gateway } = build(SESSION);
+
+    // Act
+    await controller.edit('A1', { summary: 'Plain' });
+
+    // Assert
+    should(gateway.read).deepEqual([]);
+  });
+
+  it('should read the board to reword questions in place', async () => {
+    // Arrange
+    const asked = snapshot([
+      {
+        ...humanItem('A1', 'approve the deploy'),
+        questions: [{ question: 'Ship it?', options: [{ label: 'Yes' }, { label: 'No' }] }],
+      },
+    ]);
+    const gateway = new RecordingAttentionGateway(asked);
+    const controller = new AttentionController(gateway, new CapturingOutput(), SESSION);
+
+    // Act
+    await controller.edit('A1', { question: ['Ship it today?'] });
+
+    // Assert
+    should(gateway.read).deepEqual([SESSION]);
+    should(gateway.applied[0]?.request).containDeep({
+      action: 'edit',
+      questions: [{ question: 'Ship it today?', options: [{ label: 'Yes' }, { label: 'No' }] }],
+    });
   });
 });

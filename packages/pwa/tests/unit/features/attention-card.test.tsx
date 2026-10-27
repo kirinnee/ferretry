@@ -150,3 +150,32 @@ describe('AttentionCard per-question answers', () => {
     expect(view.container.querySelectorAll('[data-attention-option]')).toHaveLength(2);
   });
 });
+
+describe('AttentionCard point form', () => {
+  test('context and impact written as bullets draw as lists, one point each', async () => {
+    const bulleted = {
+      ...rich,
+      context: '- the login expires\n- two plans fit',
+      impact: '- blocks the release\n- costs a day',
+    };
+    view = await mount(<AttentionCard item={bulleted} onAct={() => {}} />);
+    const points = (section: string): string[] =>
+      [...(view?.container.querySelectorAll(`[data-attention-section="${section}"] li`) ?? [])].map(
+        node => node.textContent ?? '',
+      );
+    expect(points('context')).toEqual(['the login expires', 'two plans fit']);
+    expect(points('impact')).toEqual(['blocks the release', 'costs a day']);
+  });
+
+  test('prose, or a mix of prose and bullets, stays a paragraph', async () => {
+    view = await mount(
+      <AttentionCard
+        item={{ ...rich, context: 'Intro line.\n- then a point', impact: 'Plain words.' }}
+        onAct={() => {}}
+      />,
+    );
+    expect(view.container.querySelectorAll('[data-attention-section="context"] li').length).toBe(0);
+    expect(view.container.querySelector('[data-attention-section="context"]')?.textContent).toContain('Intro line.');
+    expect(view.container.querySelectorAll('[data-attention-section="impact"] li').length).toBe(0);
+  });
+});
