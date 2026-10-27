@@ -16,21 +16,114 @@
   font-size: var(--font-size-base);
   line-height: var(--leading-base);
 }
+/* THE FORM FITS THE SCREEN. A column of header, one scrolling step and a foot that never scrolls away:
+   however long the question, its options or the typed answer, Back / Next / Submit stay reachable. The
+   ceiling is the visible app box (`--app-h` while a phone keyboard is up, 100dvh otherwise) less the
+   insets and room for a few lines of the conversation above; the ladder gives an engine without dvh vh. */
 .fy-question-form {
   background: var(--card-bg);
   border: var(--card-stroke) solid var(--card-border);
   border-radius: var(--card-radius);
   box-shadow: var(--card-shadow);
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: max(14rem, calc(100vh - 6rem));
+  max-height: max(14rem, calc(100dvh - var(--inset-top) - var(--safe-bottom) - 6rem));
+  max-height: max(14rem, calc(var(--app-h, 100dvh) - var(--inset-top) - var(--safe-bottom) - 6rem));
+  min-width: 0;
   padding: 12px;
+}
+.fy-question-head,
+.fy-question-foot {
+  display: grid;
+  flex: none;
+  gap: 8px;
+  min-width: 0;
+}
+.fy-question-head .fy-eyebrow {
+  margin: 0;
+}
+.fy-question-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
+.fy-question-steps {
+  display: flex;
+  gap: 4px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.fy-question-steps li {
+  display: flex;
+  flex: none;
+}
+.fy-question-steps li:has([data-current='true']) {
+  flex: 1 1 0;
+  max-width: 18rem;
+  min-width: 0;
+}
+.fy-question-step {
+  align-items: center;
+  background: var(--fy-surface-2);
+  border: var(--stroke-control) solid var(--fy-border);
+  border-radius: var(--radius-control);
+  color: var(--fy-fg);
+  display: inline-flex;
+  font: inherit;
+  font-size: 0.875em;
+  gap: 4px;
+  justify-content: center;
+  min-height: 44px;
+  min-width: 44px;
+  padding: 0 8px;
+  width: 100%;
+}
+.fy-question-step[data-answered='true'] {
+  color: var(--fy-accent);
+}
+.fy-question-step[data-current='true'] {
+  border-color: var(--fy-accent);
+  font-weight: 700;
+  justify-content: flex-start;
+  outline: 2px solid var(--fy-accent);
+  outline-offset: -2px;
+}
+.fy-question-step-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .fy-question {
   border: 0;
-  margin: 0 0 12px;
+  margin: 0;
   min-inline-size: 0;
   padding: 0;
 }
-.fy-question legend {
+.fy-question legend,
+.fy-question-review-title {
   font-weight: 700;
+  outline: none;
+  overflow-wrap: anywhere;
+}
+.fy-question-review-title {
+  font-size: 1em;
+  margin: 0;
+}
+.fy-question-text {
+  overflow-wrap: anywhere;
+}
+.fy-question .fy-question-hint,
+.fy-question-review .fy-question-hint {
+  color: var(--fy-muted);
+  font-size: 0.875em;
 }
 .fy-question p {
   margin: 4px 0 8px;
@@ -54,6 +147,14 @@
   outline: 2px solid var(--fy-accent);
   outline-offset: -2px;
 }
+.fy-question-option input {
+  flex: none;
+  margin-top: 0.25em;
+}
+.fy-question-option span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
 .fy-question-option small {
   color: var(--fy-muted);
   display: block;
@@ -61,10 +162,58 @@
 .fy-question textarea {
   border: var(--stroke-control) solid var(--fy-border);
   border-radius: var(--radius-input);
+  box-sizing: border-box;
   font: inherit;
+  /* 16px stops iOS zooming the page when the field takes focus. */
+  font-size: max(16px, 1em);
   min-height: 88px;
   padding: 8px;
   resize: vertical;
+  width: 100%;
+}
+.fy-question-review {
+  display: grid;
+  gap: 8px;
+}
+.fy-question-review-list {
+  display: grid;
+  gap: 4px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.fy-question-review-row {
+  background: var(--fy-surface-2);
+  border: var(--stroke-control) solid var(--fy-border);
+  border-radius: var(--radius-control);
+  color: var(--fy-fg);
+  display: grid;
+  font: inherit;
+  gap: 4px;
+  min-height: 44px;
+  padding: 10px;
+  text-align: start;
+  width: 100%;
+}
+.fy-question-review-row[data-answered='false'] .fy-question-review-a {
+  color: var(--fy-muted);
+  font-style: italic;
+}
+.fy-question-review-q,
+.fy-question-review-a {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.fy-question-review-q {
+  font-weight: 700;
+}
+.fy-question-review-row small {
+  color: var(--fy-muted);
+  display: block;
+  font-weight: 400;
+}
+.fy-question-review-a {
+  white-space: pre-wrap;
 }
 .fy-question-card {
   background: var(--card-bg);
@@ -110,14 +259,29 @@
 }
 .fy-question-nav {
   display: flex;
+  gap: 8px;
   justify-content: space-between;
 }
 .fy-question-nav button,
 .fy-question-submit,
 .fy-question-resume,
 .fy-question-console {
+  background: var(--fy-surface-2);
+  border: var(--stroke-control) solid var(--fy-border);
+  border-radius: var(--radius-control);
+  color: var(--fy-fg);
   min-height: 44px;
   min-width: 44px;
+  padding: 0 16px;
+}
+.fy-question-nav button:last-child,
+.fy-question-submit {
+  border-color: var(--fy-accent);
+  font-weight: 700;
+}
+.fy-question-nav button:disabled,
+.fy-question-submit:disabled {
+  opacity: 0.5;
 }
 /* The refusal the coordinator sends back names the request id verbatim — one
    unbroken ~76-character token — because a refusal that hides WHICH request was
@@ -131,6 +295,10 @@
    width the app supports. */
 .fy-question-form > [role='alert'] {
   overflow-wrap: anywhere;
+}
+.fy-question-details pre {
+  max-height: 30dvh;
+  overflow: auto;
 }
 .fy-question-actions {
   display: flex;

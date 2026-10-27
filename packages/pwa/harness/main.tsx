@@ -6179,7 +6179,6 @@ function Shell() {
             />
             <QuestionForm
               api={{ answer: async () => ({}) }}
-              compact={phone}
               daemon={daemon}
               question={{
                 toolUseId: 'harness-question',

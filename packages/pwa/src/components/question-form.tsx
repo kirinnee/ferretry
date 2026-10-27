@@ -1,7 +1,21 @@
 import type { PendingQuestion, StructuredQuestionAnswer } from '@ferretry/protocol';
 import { FyHttpError } from '@ferretry/protocol/client';
-import { useEffect, useId, useRef, useState } from 'react';
+import { Check, ListChecks } from 'lucide-react';
+import { type KeyboardEvent, useEffect, useId, useRef, useState } from 'react';
 import type { DaemonConnection } from '../lib/daemon-connection.ts';
+import {
+  type AnswerState,
+  allAnswered,
+  answered,
+  answerText,
+  initialAnswers,
+  questionKeys,
+  type QuestionDraftStore,
+  questionDrafts,
+  selectOther,
+  toggleOption,
+  updateOther,
+} from './question-form-model.ts';
 
 export interface QuestionAnswerApi {
   /** The host must use this exact paired daemon; session ids are not fleet-global. */
@@ -22,57 +36,12 @@ export interface QuestionFormProps {
   readonly daemon: DaemonConnection;
   readonly sessionId: string;
   readonly question: PendingQuestion;
-  /** Phones page multi-question asks; desktop keeps the complete request visible. */
-  readonly compact?: boolean;
   readonly onAnswered?: () => void;
   /** Where the person can still answer when the daemon could not: the agent's own pane. */
   readonly onOpenConsole?: () => void;
+  /** Where unsent answers are kept while the form is remounted; defaults to the page-wide store. */
+  readonly drafts?: QuestionDraftStore;
 }
-
-interface AnswerState {
-  readonly picks: readonly (readonly string[])[];
-  readonly others: readonly string[];
-  readonly otherSelected: readonly boolean[];
-}
-
-const initialAnswers = (count: number): AnswerState => ({
-  picks: Array.from({ length: count }, () => []),
-  others: Array.from({ length: count }, () => ''),
-  otherSelected: Array.from({ length: count }, () => false),
-});
-
-const answered = (state: AnswerState, index: number): boolean =>
-  state.otherSelected[index] ? (state.others[index] ?? '').trim() !== '' : (state.picks[index]?.length ?? 0) > 0;
-
-const allAnswered = (state: AnswerState, count: number): boolean =>
-  Array.from({ length: count }, (_, index) => answered(state, index)).every(Boolean);
-
-const toggleOption = (state: AnswerState, index: number, label: string, multiple: boolean): AnswerState => {
-  const picks = state.picks.map(values => [...values]);
-  const current = picks[index] ?? [];
-  picks[index] = multiple
-    ? current.includes(label)
-      ? current.filter(value => value !== label)
-      : [...current, label]
-    : [label];
-  const otherSelected = [...state.otherSelected];
-  otherSelected[index] = false;
-  return { ...state, picks, otherSelected };
-};
-
-const selectOther = (state: AnswerState, index: number): AnswerState => {
-  const picks = state.picks.map(values => [...values]);
-  picks[index] = [];
-  const otherSelected = [...state.otherSelected];
-  otherSelected[index] = true;
-  return { ...state, picks, otherSelected };
-};
-
-const updateOther = (state: AnswerState, index: number, value: string): AnswerState => {
-  const others = [...state.others];
-  others[index] = value;
-  return { ...state, others };
-};
 
 const QUESTION_ALREADY_ANSWERED = 'question_already_answered';
 
@@ -154,48 +123,93 @@ const bodyField = (cause: unknown, field: string): string | undefined => {
   return typeof value === 'string' && value !== '' ? value : undefined;
 };
 
+interface FormView {
+  /** The question this view belongs to; a different question starts a fresh view. */
+  readonly key: string;
+  readonly answers: AnswerState;
+  readonly step: number;
+  readonly submitting: boolean;
+  readonly error: AnswerError | null;
+  readonly alreadyAnswered: string | null;
+}
+
+const freshView = (key: string, count: number, drafts: QuestionDraftStore): FormView => {
+  const draft = drafts.load(key);
+  return {
+    key,
+    answers: draft?.answers ?? initialAnswers(count),
+    // A single question has one step; a form of several ends in the review page, one step past the last.
+    step: Math.min(Math.max(draft?.step ?? 0, 0), count > 1 ? count : 0),
+    submitting: false,
+    error: null,
+    alreadyAnswered: null,
+  };
+};
+
 /**
- * Daemon-bound structured answer form. A multi-question request is paged only
- * on compact layouts, but both presentations share one answer state and one
- * submit path. Every question keeps its own selection cardinality; the ordered
- * `answers` payload preserves all labels even when a multi-question set embeds
- * a multi-select question.
+ * Daemon-bound structured answer form. A single question is shown as it is; several are asked one at a
+ * time and end in a review page that lists every answer (each one tappable to change it) before the one
+ * submit. The step scrolls inside a box that fits the screen, so no question, option or button is ever
+ * clipped or out of reach. Every question keeps its own selection cardinality; the ordered `answers`
+ * payload preserves all labels even when a multi-question set embeds a multi-select question.
  */
 export function QuestionForm({
   api,
   daemon,
   sessionId,
   question,
-  compact = false,
   onAnswered,
   onOpenConsole,
+  drafts = questionDrafts,
 }: QuestionFormProps) {
   const formId = useId();
-  const [answers, setAnswers] = useState(() => initialAnswers(question.questions.length));
-  const [page, setPage] = useState(0);
-  const [submitting, setSubmitting] = useState(false);
-  const [error, setError] = useState<AnswerError | null>(null);
-  const [alreadyAnswered, setAlreadyAnswered] = useState<string | null>(null);
-  const submitLock = useRef(false);
-  const paged = compact && question.questions.length > 1;
+  const count = question.questions.length;
+  const stepped = count > 1;
+  const review = count;
+  // Scope identity and tool id decide whose answers these are: a same-named session on a newly paired
+  // daemon must never retain the previous daemon's answers.
+  const scopeKey = `${daemon.daemonId}\u0000${sessionId}\u0000${question.toolUseId}\u0000${count}`;
+  const [stored, setView] = useState<FormView>(() => freshView(scopeKey, count, drafts));
+  const view = stored.key === scopeKey ? stored : freshView(scopeKey, count, drafts);
+  if (stored.key !== scopeKey) setView(view);
+  const { answers, step, submitting, error, alreadyAnswered } = view;
+  const patch = (change: Partial<FormView>) => setView(current => ({ ...current, ...change }));
+  const setAnswers = (change: (current: AnswerState) => AnswerState) =>
+    setView(current => ({ ...current, answers: change(current.answers) }));
 
-  // Scope identity and tool id are reset triggers: a same-named session on a
-  // newly paired daemon must never retain the previous daemon's answers.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: deliberate reset triggers
+  const submitLock = useRef<string | null>(null);
+  const titleRef = useRef<HTMLElement | null>(null);
+  const setTitle = (node: HTMLElement | null) => {
+    titleRef.current = node;
+  };
+  const otherRef = useRef<HTMLTextAreaElement>(null);
+  const focusOther = useRef(false);
+  const shownStep = useRef(step);
+
   useEffect(() => {
-    setAnswers(initialAnswers(question.questions.length));
-    setPage(0);
-    setSubmitting(false);
-    setError(null);
-    setAlreadyAnswered(null);
-    submitLock.current = false;
-  }, [daemon.daemonId, sessionId, question.toolUseId, question.questions.length]);
+    drafts.save(scopeKey, { answers, step });
+  }, [drafts, scopeKey, answers, step]);
+
+  // Moving to another step puts the reader at its title, so a screen reader announces it and the next
+  // thing to Tab to is its first option — without opening a phone keyboard, which a text field would.
+  useEffect(() => {
+    if (shownStep.current === step) return;
+    shownStep.current = step;
+    titleRef.current?.focus();
+  }, [step]);
+
+  useEffect(() => {
+    if (!focusOther.current || !answers.otherSelected[step]) return;
+    focusOther.current = false;
+    otherRef.current?.focus();
+  }, [answers.otherSelected, step]);
+
+  const goTo = (target: number) => patch({ step: Math.min(Math.max(target, 0), stepped ? review : 0) });
 
   const submit = async () => {
-    if (!allAnswered(answers, question.questions.length) || submitLock.current) return;
-    submitLock.current = true;
-    setSubmitting(true);
-    setError(null);
+    if (!allAnswered(answers, count) || submitLock.current === scopeKey) return;
+    submitLock.current = scopeKey;
+    patch({ submitting: true, error: null });
     try {
       const structuredAnswers: StructuredQuestionAnswer[] = question.questions.map((_, index) =>
         answers.otherSelected[index]
@@ -203,7 +217,7 @@ export function QuestionForm({
           : { kind: 'selection', labels: [...(answers.picks[index] ?? [])] },
       );
       const requestId = await answerRequestId(daemon.daemonId, sessionId, question.toolUseId, structuredAnswers);
-      if (question.questions.length === 1) {
+      if (count === 1) {
         await api.answer(
           daemon,
           sessionId,
@@ -220,154 +234,286 @@ export function QuestionForm({
         );
         await api.answer(daemon, sessionId, question.toolUseId, [], undefined, responses, structuredAnswers, requestId);
       }
+      drafts.clear(scopeKey);
       onAnswered?.();
     } catch (cause) {
       if (cause instanceof FyHttpError && cause.code === QUESTION_ALREADY_ANSWERED) {
         // The daemon already delivered an answer to this exact form. Keep the lock: nothing more can be sent.
-        setAlreadyAnswered(bodyField(cause, 'answeredWith') ?? 'an earlier answer');
+        patch({ alreadyAnswered: bodyField(cause, 'answeredWith') ?? 'an earlier answer' });
       } else {
-        setError(answerError(cause));
-        submitLock.current = false;
+        patch({ error: answerError(cause) });
+        submitLock.current = null;
       }
     } finally {
-      setSubmitting(false);
+      patch({ submitting: false });
     }
   };
 
   const locked = submitting || alreadyAnswered !== null;
-  const visible = paged ? [page] : question.questions.map((_, index) => index);
-  const lastPage = page === question.questions.length - 1;
+  const complete = allAnswered(answers, count);
+  const keys = questionKeys(
+    question.toolUseId,
+    question.questions.map(item => item.question),
+  );
+  const labelOf = (index: number) => question.questions[index]?.header ?? `Question ${index + 1}`;
 
-  return (
-    <section aria-label="Answer session questions" className="fy-question-form" data-daemon-id={daemon.daemonId}>
-      {visible.map(index => {
-        const item = question.questions[index];
-        if (!item) return null;
-        const multiple = item.multiSelect === true;
-        const other = answers.otherSelected[index] ?? false;
-        return (
-          <fieldset className="fy-question" key={`${question.toolUseId}:${index}`}>
-            {paged ? (
-              <p className="fy-eyebrow">
-                Question {index + 1} of {question.questions.length}
-              </p>
-            ) : null}
-            <legend>{item.header ?? `Question ${index + 1}`}</legend>
-            {error?.answered?.[index] === true ? (
-              <p className="fy-question-held" data-question-held="">
-                Answered in the terminal
-              </p>
-            ) : null}
-            <p>{item.question}</p>
-            <div className="fy-question-options">
-              {(item.options ?? []).map(option => (
-                <label className="fy-question-option" key={option.label}>
-                  <input
-                    checked={!other && (answers.picks[index] ?? []).includes(option.label)}
-                    disabled={locked}
-                    name={`${formId}-${index}`}
-                    onChange={() => setAnswers(current => toggleOption(current, index, option.label, multiple))}
-                    type={multiple ? 'checkbox' : 'radio'}
-                  />
-                  <span>
-                    {option.label}
-                    {option.description ? <small>{option.description}</small> : null}
-                  </span>
-                </label>
-              ))}
-              <label className="fy-question-option">
+  /** Enter on a focused option: an unpicked one is picked, a picked one moves on. */
+  const optionEnter = (
+    event: KeyboardEvent<HTMLInputElement>,
+    index: number,
+    checked: boolean,
+    pick: () => void,
+  ): void => {
+    if (event.key !== 'Enter' || event.nativeEvent.isComposing) return;
+    event.preventDefault();
+    if (locked) return;
+    if (!checked) {
+      pick();
+      return;
+    }
+    if (!answered(answers, index)) {
+      otherRef.current?.focus();
+      return;
+    }
+    if (stepped) goTo(index + 1);
+    else void submit();
+  };
+
+  const renderQuestion = (index: number) => {
+    const item = question.questions[index];
+    if (!item) return null;
+    const multiple = item.multiSelect === true;
+    const other = answers.otherSelected[index] ?? false;
+    return (
+      <fieldset className="fy-question" key={`${question.toolUseId}:${index}`}>
+        <legend ref={setTitle} tabIndex={-1}>
+          {item.header ?? `Question ${index + 1}`}
+        </legend>
+        {error?.answered?.[index] === true ? (
+          <p className="fy-question-held" data-question-held="">
+            Answered in the terminal
+          </p>
+        ) : null}
+        <p className="fy-question-text">{item.question}</p>
+        {multiple ? <p className="fy-question-hint">Pick one or more</p> : null}
+        <div className="fy-question-options">
+          {(item.options ?? []).map(option => {
+            const checked = !other && (answers.picks[index] ?? []).includes(option.label);
+            const pick = () => setAnswers(current => toggleOption(current, index, option.label, multiple));
+            return (
+              <label className="fy-question-option" key={option.label}>
                 <input
-                  checked={other}
+                  checked={checked}
                   disabled={locked}
                   name={`${formId}-${index}`}
-                  onChange={() => setAnswers(current => selectOther(current, index))}
+                  onChange={pick}
+                  onKeyDown={event => optionEnter(event, index, checked, pick)}
                   type={multiple ? 'checkbox' : 'radio'}
                 />
-                <span>Other…</span>
+                <span>
+                  {option.label}
+                  {option.description ? <small>{option.description}</small> : null}
+                </span>
               </label>
-              {other ? (
-                <textarea
-                  aria-label={`Other answer for question ${index + 1}`}
-                  disabled={locked}
-                  onChange={event => {
-                    // Read BEFORE the updater: React clears `currentTarget` once the handler returns, and
-                    // the updater runs later — reading it there throws and unmounts the whole page.
-                    const { value } = event.currentTarget;
-                    setAnswers(current => updateOther(current, index, value));
-                  }}
-                  placeholder="Type your response"
-                  value={answers.others[index] ?? ''}
-                />
-              ) : null}
-            </div>
-          </fieldset>
-        );
-      })}
-      {paged ? (
-        <nav aria-label="Question progress" className="fy-question-nav">
-          <button
-            disabled={page === 0 || locked}
-            onClick={() => setPage(current => Math.max(0, current - 1))}
-            type="button"
-          >
-            Back
-          </button>
-          {lastPage ? (
-            <button
-              disabled={!allAnswered(answers, question.questions.length) || locked}
-              onClick={() => void submit()}
-              type="button"
-            >
-              {submitting ? 'Submitting…' : 'Submit answers'}
-            </button>
-          ) : (
-            <button
-              disabled={!answered(answers, page) || locked}
-              onClick={() => setPage(current => current + 1)}
-              type="button"
-            >
-              Next
-            </button>
-          )}
-        </nav>
-      ) : (
-        <button
-          className="fy-question-submit"
-          disabled={!allAnswered(answers, question.questions.length) || locked}
-          onClick={() => void submit()}
-          type="button"
-        >
-          {submitting ? 'Submitting…' : 'Submit answer'}
-        </button>
-      )}
-      {alreadyAnswered === null ? null : (
-        <p data-question-answered="" role="status">
-          This question was already answered with «{alreadyAnswered}».
-        </p>
-      )}
-      {error ? <p role="alert">{error.sentence}</p> : null}
-      {error?.resumable === true || (error?.console === true && onOpenConsole !== undefined) ? (
-        <div className="fy-question-actions">
-          {/* A paused form resumes from the terminal's own state: the daemon re-reads every tab and submits
-              only once its review lists these answers, so sending them again cannot answer twice. */}
-          {error?.resumable === true ? (
-            <button className="fy-question-resume" disabled={locked} onClick={() => void submit()} type="button">
-              Resume
-            </button>
-          ) : null}
-          {error?.console === true && onOpenConsole !== undefined ? (
-            <button className="fy-question-console" onClick={onOpenConsole} type="button">
-              Open Console
-            </button>
+            );
+          })}
+          <label className="fy-question-option">
+            <input
+              checked={other}
+              disabled={locked}
+              name={`${formId}-${index}`}
+              onChange={() => {
+                focusOther.current = true;
+                setAnswers(current => selectOther(current, index));
+              }}
+              onKeyDown={event =>
+                optionEnter(event, index, other, () => {
+                  focusOther.current = true;
+                  setAnswers(current => selectOther(current, index));
+                })
+              }
+              type={multiple ? 'checkbox' : 'radio'}
+            />
+            <span>Other…</span>
+          </label>
+          {other ? (
+            <textarea
+              aria-label={`Other answer for question ${index + 1}`}
+              disabled={locked}
+              onChange={event => {
+                // Read BEFORE the updater: React clears `currentTarget` once the handler returns, and
+                // the updater runs later — reading it there throws and unmounts the whole page.
+                const { value } = event.currentTarget;
+                setAnswers(current => updateOther(current, index, value));
+              }}
+              onFocus={event => event.currentTarget.scrollIntoView?.({ block: 'nearest' })}
+              onKeyDown={event => {
+                if (event.key !== 'Enter' || !(event.ctrlKey || event.metaKey) || event.nativeEvent.isComposing) return;
+                event.preventDefault();
+                if (locked || !answered(answers, index)) return;
+                if (stepped) goTo(index + 1);
+                else void submit();
+              }}
+              placeholder="Type your response"
+              ref={otherRef}
+              value={answers.others[index] ?? ''}
+            />
           ) : null}
         </div>
+      </fieldset>
+    );
+  };
+
+  const renderReview = () => (
+    <section aria-label="Review your answers" className="fy-question-review">
+      <h3 className="fy-question-review-title" ref={setTitle} tabIndex={-1}>
+        Review your answers
+      </h3>
+      <ol className="fy-question-review-list">
+        {question.questions.map((item, index) => {
+          const text = answerText(answers, index);
+          return (
+            <li key={keys[index]}>
+              <button
+                aria-label={`Change answer to ${labelOf(index)}`}
+                className="fy-question-review-row"
+                data-answered={text === null ? 'false' : 'true'}
+                disabled={locked}
+                onClick={() => goTo(index)}
+                type="button"
+              >
+                <span className="fy-question-review-q">
+                  {labelOf(index)}
+                  <small>{item.question}</small>
+                </span>
+                <span className="fy-question-review-a">
+                  {text ?? 'Not answered yet'}
+                  {error?.answered?.[index] === true ? <small>Answered in the terminal</small> : null}
+                </span>
+              </button>
+            </li>
+          );
+        })}
+      </ol>
+      {complete ? null : <p className="fy-question-hint">Answer every question to submit.</p>}
+    </section>
+  );
+
+  return (
+    <section
+      aria-label="Answer session questions"
+      className="fy-question-form"
+      data-daemon-id={daemon.daemonId}
+      data-stepper={stepped ? '' : undefined}
+    >
+      {stepped ? (
+        <header className="fy-question-head">
+          <p aria-live="polite" className="fy-eyebrow">
+            {step === review ? `Review · ${count} questions` : `Question ${step + 1} of ${count}`}
+          </p>
+          <nav aria-label="Question progress">
+            <ol className="fy-question-steps">
+              {question.questions.map((_, index) => {
+                const done = answered(answers, index);
+                const current = step === index;
+                return (
+                  <li key={keys[index]}>
+                    <button
+                      aria-current={current ? 'step' : undefined}
+                      aria-label={`Question ${index + 1} of ${count}, ${labelOf(index)}, ${done ? 'answered' : 'not answered'}`}
+                      className="fy-question-step"
+                      data-answered={done ? 'true' : 'false'}
+                      data-current={current ? 'true' : 'false'}
+                      disabled={locked}
+                      onClick={() => goTo(index)}
+                      type="button"
+                    >
+                      {done ? <Check aria-hidden="true" size={14} /> : <span aria-hidden="true">{index + 1}</span>}
+                      {current ? <span className="fy-question-step-label">{labelOf(index)}</span> : null}
+                    </button>
+                  </li>
+                );
+              })}
+              <li>
+                <button
+                  aria-current={step === review ? 'step' : undefined}
+                  aria-label="Review answers"
+                  className="fy-question-step"
+                  data-answered={complete ? 'true' : 'false'}
+                  data-current={step === review ? 'true' : 'false'}
+                  disabled={locked}
+                  onClick={() => goTo(review)}
+                  type="button"
+                >
+                  <ListChecks aria-hidden="true" size={14} />
+                  {step === review ? <span className="fy-question-step-label">Review</span> : null}
+                </button>
+              </li>
+            </ol>
+          </nav>
+        </header>
       ) : null}
-      {error?.detail === undefined ? null : (
-        <details className="text-meta text-muted">
-          <summary>Details</summary>
-          <pre className="m-0 mt-1 whitespace-pre-wrap break-words font-mono">{error.detail}</pre>
-        </details>
-      )}
+      <div className="fy-question-body">{step === review && stepped ? renderReview() : renderQuestion(step)}</div>
+      <div className="fy-question-foot">
+        {stepped ? (
+          <nav aria-label="Question navigation" className="fy-question-nav">
+            <button disabled={step === 0 || locked} onClick={() => goTo(step - 1)} type="button">
+              Back
+            </button>
+            {step === review ? (
+              <button
+                className="fy-question-submit"
+                disabled={!complete || locked}
+                onClick={() => void submit()}
+                type="button"
+              >
+                {submitting ? 'Submitting…' : 'Submit answers'}
+              </button>
+            ) : (
+              <button disabled={!answered(answers, step) || locked} onClick={() => goTo(step + 1)} type="button">
+                {step === count - 1 ? 'Review' : 'Next'}
+              </button>
+            )}
+          </nav>
+        ) : (
+          <button
+            className="fy-question-submit"
+            disabled={!complete || locked}
+            onClick={() => void submit()}
+            type="button"
+          >
+            {submitting ? 'Submitting…' : 'Submit answer'}
+          </button>
+        )}
+        {alreadyAnswered === null ? null : (
+          <p data-question-answered="" role="status">
+            This question was already answered with «{alreadyAnswered}».
+          </p>
+        )}
+        {error ? <p role="alert">{error.sentence}</p> : null}
+        {error?.resumable === true || (error?.console === true && onOpenConsole !== undefined) ? (
+          <div className="fy-question-actions">
+            {/* A paused form resumes from the terminal's own state: the daemon re-reads every tab and submits
+              only once its review lists these answers, so sending them again cannot answer twice. */}
+            {error?.resumable === true ? (
+              <button className="fy-question-resume" disabled={locked} onClick={() => void submit()} type="button">
+                Resume
+              </button>
+            ) : null}
+            {error?.console === true && onOpenConsole !== undefined ? (
+              <button className="fy-question-console" onClick={onOpenConsole} type="button">
+                Open Console
+              </button>
+            ) : null}
+          </div>
+        ) : null}
+        {error?.detail === undefined ? null : (
+          <details className="fy-question-details text-meta text-muted">
+            <summary>Details</summary>
+            <pre className="m-0 mt-1 whitespace-pre-wrap break-words font-mono">{error.detail}</pre>
+          </details>
+        )}
+      </div>
     </section>
   );
 }
