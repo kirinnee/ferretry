@@ -38,7 +38,7 @@ const beforeCompaction = (text: string): string => {
 
 const SOURCES = {
   codex: ['claude-2.1.281.jsonl', 'claude-2.1.304.jsonl'],
-  claude: ['codex-0.145.0.jsonl', 'codex-0.156.1.jsonl', 'codex-0.163.0.jsonl'],
+  claude: ['codex-0.145.0.jsonl', 'codex-0.156.1.jsonl', 'codex-0.163.0.jsonl', 'codex-0.164.0.jsonl'],
 } as const;
 
 /** The model each target is asked to run: Codex declares its tools per model family. */

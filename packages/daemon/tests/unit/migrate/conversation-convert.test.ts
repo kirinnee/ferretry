@@ -163,7 +163,7 @@ describe('planning a cross-harness conversion', () => {
       "Ferretry hasn't matched this session to its conversation yet, so there's nothing to convert. Nothing was changed.",
       `The conversation file ${CLAUDE_SOURCE.file} is gone, so there's nothing to convert. Nothing was changed.`,
       "codex-a doesn't say where it keeps its conversations, so a converted one can't be written there. Nothing was changed.",
-      "Ferretry couldn't tell which Codex version this machine runs, and the converter is tested only on Codex 0.145, 0.156, 0.163, so it won't write a conversation for it. Nothing was changed.",
+      "Ferretry couldn't tell which Codex version this machine runs, and the converter is tested only on Codex 0.145, 0.156, 0.163, 0.164, so it won't write a conversation for it. Nothing was changed.",
     ]);
   });
 });

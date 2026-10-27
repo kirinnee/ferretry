@@ -186,6 +186,26 @@ describe('rendered question form', () => {
     });
   });
 
+  describe('Codex 0.164.0', () => {
+    it('binds the same single-question form as 0.156.1: › cursor and a None-of-the-above row that takes a note', () => {
+      const pool: RenderedQuestion = {
+        question: 'Test 4c collapsed. How should we find out?',
+        options: [
+          { label: 'Read one prod pod (Recommended)' },
+          { label: 'I will check Vault' },
+          { label: 'Skip; test with jitter' },
+        ],
+      };
+
+      should(bindQuestionForm(screenOnly('codex-0.164.0-single'), pool)).deepEqual({
+        labels: ['Read one prod pod (Recommended)', 'I will check Vault', 'Skip; test with jitter', 'Other'],
+        checked: [false, false, false, false],
+        cursor: 0,
+        freeForm: { index: 3, entry: 'notes' },
+      });
+    });
+  });
+
   it('refuses a form whose rows are not numbered from 1 or that lacks any recorded option', () => {
     const unnumbered = 'Deploy?\n> Yes\n  No';
     should(

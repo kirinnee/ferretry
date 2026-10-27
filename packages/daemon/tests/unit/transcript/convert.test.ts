@@ -19,7 +19,7 @@ import { codexRolloutRelativePath, writeCodexRollout } from '../../../src/lib/tr
 
 /**
  * The converter, measured on transcripts real CLIs wrote (`scripts/local/record-conversion-fixtures.ts`):
- * Claude Code 2.1.281 and 2.1.304, Codex 0.145.0, 0.156.1 and 0.163.0. Each is converted and read back
+ * Claude Code 2.1.281 and 2.1.304, Codex 0.145.0, 0.156.1, 0.163.0 and 0.164.0. Each is converted and read back
  * with the OTHER side's reader, so a round trip proves both the writer and the reader of each format.
  */
 
@@ -142,7 +142,7 @@ describe('cross-harness conversion — real Claude transcripts onto Codex', () =
 });
 
 describe('cross-harness conversion — real Codex rollouts onto Claude', () => {
-  for (const version of ['0.145.0', '0.156.1', '0.163.0']) {
+  for (const version of ['0.145.0', '0.156.1', '0.163.0', '0.164.0']) {
     it(`should carry Codex ${version}'s whole conversation into a transcript Claude reads back in order`, async () => {
       // Arrange
       const text = await fixture(`codex-${version}.jsonl`);
@@ -241,12 +241,12 @@ describe('cross-harness conversion — refusals', () => {
     should(untested).deepEqual({
       kind: 'refused',
       reason:
-        "This machine runs Codex 0.150.2, and the converter is tested only on Codex 0.145, 0.156, 0.163, so Ferretry won't write a conversation it hasn't seen that version accept.",
+        "This machine runs Codex 0.150.2, and the converter is tested only on Codex 0.145, 0.156, 0.163, 0.164, so Ferretry won't write a conversation it hasn't seen that version accept.",
     });
     should(unknown).deepEqual({
       kind: 'refused',
       reason:
-        "Ferretry couldn't tell which Codex version this machine runs, and the converter is tested only on Codex 0.145, 0.156, 0.163, so it won't write a conversation for it.",
+        "Ferretry couldn't tell which Codex version this machine runs, and the converter is tested only on Codex 0.145, 0.156, 0.163, 0.164, so it won't write a conversation for it.",
     });
   });
 
@@ -831,6 +831,10 @@ describe('cross-harness conversion — writers and small parts', () => {
     should(harnessVersionRefusal('claude', '2.1.399', 'target')).be.undefined();
     should(harnessVersionRefusal('claude', '2.1.199', 'source')).containEql('Claude Code 2.1.199');
     should(harnessVersionRefusal('codex', '0.156.9', 'source')).be.undefined();
+    should(harnessVersionRefusal('codex', 'codex-cli 0.164.0', 'target')).be.undefined();
+    should(harnessVersionRefusal('codex', '0.164.7', 'source')).be.undefined();
+    should(harnessVersionRefusal('codex', 'codex-cli 0.165.0', 'target')).containEql('Codex 0.165.0');
+    should(harnessVersionRefusal('codex', '0.157.0', 'source')).containEql('Codex 0.157.0');
   });
 });
 
