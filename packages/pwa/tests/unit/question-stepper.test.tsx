@@ -4,7 +4,7 @@ import type { ReactTestInstance, ReactTestRenderer } from 'react-test-renderer';
 import { QuestionForm } from '../../src/components/question-form.tsx';
 import { QuestionDraftStore } from '../../src/components/question-form-model.ts';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
-import { render, run, runAsync } from '../support/react.ts';
+import { render, run, runAsync, runUntil } from '../support/react.ts';
 
 const daemonA = daemonConnection({ daemonId: 'daemon-a', baseUrl: 'https://a.invalid', deviceId: 'token-a' });
 const daemonB = daemonConnection({ daemonId: 'daemon-b', baseUrl: 'https://b.invalid', deviceId: 'token-b' });
@@ -154,10 +154,11 @@ describe('QuestionForm stepper', () => {
     pick(form, 0);
     run(() => chip(form, 4).props.onClick());
     expect(form.root.findAllByProps({ className: 'fy-question-review-a' })[2]?.children.join('')).toBe('Team lead');
-    await runAsync(async () => {
-      button(form, 'Submit answers').props.onClick();
-      await Promise.resolve();
-    });
+    await runUntil(
+      () => button(form, 'Submit answers').props.onClick(),
+      () => calls.length === 1,
+      'the answer to reach the daemon',
+    );
     expect(calls).toHaveLength(1);
     expect(calls[0]?.[5]).toEqual(['Watch party at the office', 'Keep', 'Team lead', 'API']);
   });
@@ -205,10 +206,11 @@ describe('QuestionForm stepper', () => {
     run(() => button(done.form, 'Next').props.onClick());
     pick(done.form, 0);
     run(() => button(done.form, 'Review').props.onClick());
-    await runAsync(async () => {
-      button(done.form, 'Submit answers').props.onClick();
-      await Promise.resolve();
-    });
+    await runUntil(
+      () => button(done.form, 'Submit answers').props.onClick(),
+      () => answered === 1,
+      'the form to report the answer',
+    );
     expect(answered).toBe(1);
     expect(drafts.load(`daemon-a\u0000session\u0000four\u00004`)).toBeUndefined();
   });
@@ -312,10 +314,11 @@ describe('QuestionForm stepper', () => {
     const input = () => form.root.findAllByType('input')[0] as ReactTestInstance;
     enter(input());
     expect(calls).toHaveLength(0);
-    await runAsync(async () => {
-      enter(input());
-      await Promise.resolve();
-    });
+    await runUntil(
+      () => enter(input()),
+      () => calls.length === 1,
+      'the answer to reach the daemon',
+    );
     expect(calls).toHaveLength(1);
   });
 
@@ -332,9 +335,16 @@ describe('QuestionForm stepper', () => {
 
   test('stops accepting keys while an answer is being sent', async () => {
     let release: () => void = () => {};
+    let sent = false;
     const form = render(
       <QuestionForm
-        api={{ answer: () => new Promise(resolve => (release = () => resolve(undefined))) }}
+        api={{
+          answer: () =>
+            new Promise(resolve => {
+              sent = true;
+              release = () => resolve(undefined);
+            }),
+        }}
         daemon={daemonA}
         drafts={new QuestionDraftStore()}
         question={{
@@ -345,10 +355,11 @@ describe('QuestionForm stepper', () => {
       />,
     );
     pick(form, 0);
-    await runAsync(async () => {
-      form.root.findByProps({ className: 'fy-question-submit' }).props.onClick();
-      await Promise.resolve();
-    });
+    await runUntil(
+      () => form.root.findByProps({ className: 'fy-question-submit' }).props.onClick(),
+      () => sent,
+      'the answer to reach the daemon',
+    );
     enter(form.root.findAllByType('input')[1] as ReactTestInstance);
     expect(form.root.findAllByType('input')[0]?.props.checked).toBe(true);
     expect(form.root.findAllByType('input')[1]?.props.checked).toBe(false);
