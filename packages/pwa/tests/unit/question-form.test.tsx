@@ -4,7 +4,7 @@ import { QuestionForm } from '../../src/components/question-form.tsx';
 import { QuestionDraftStore } from '../../src/components/question-form-model.ts';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
 import type { ReactTestRenderer } from 'react-test-renderer';
-import { render, run, runAsync } from '../support/react.ts';
+import { render, run, runUntil } from '../support/react.ts';
 
 const daemonA = daemonConnection({ daemonId: 'daemon-a', baseUrl: 'https://a.invalid', deviceId: 'token-a' });
 const daemonB = daemonConnection({ daemonId: 'daemon-b', baseUrl: 'https://b.invalid', deviceId: 'token-b' });
@@ -47,10 +47,11 @@ describe('QuestionForm', () => {
     run(() => button(form, 'Review').props.onClick());
     expect(eyebrow(form)).toBe('Review · 2 questions');
     expect(form.root.findAllByType('fieldset')).toHaveLength(0);
-    await runAsync(async () => {
-      button(form, 'Submit answers').props.onClick();
-      await Promise.resolve();
-    });
+    await runUntil(
+      () => button(form, 'Submit answers').props.onClick(),
+      () => calls.length === 1,
+      'the answer to reach the daemon',
+    );
     expect(calls).toEqual([
       [
         daemonA,
@@ -96,10 +97,11 @@ describe('QuestionForm', () => {
     );
     expect(form.root.findByType('button').props.disabled).toBe(true);
     run(() => form.root.findAllByType('input')[0]?.props.onChange());
-    await runAsync(async () => {
-      form.root.findByType('button').props.onClick();
-      await Promise.resolve();
-    });
+    await runUntil(
+      () => form.root.findByType('button').props.onClick(),
+      () => calls.length === 1,
+      'the answer to reach the daemon',
+    );
     expect(calls).toEqual([
       [
         daemonB,
@@ -137,15 +139,17 @@ describe('QuestionForm', () => {
       />,
     );
     run(() => form.root.findAllByType('input')[0]?.props.onChange());
-    await runAsync(async () => {
-      form.root.findByType('button').props.onClick();
-      await Promise.resolve();
-    });
+    await runUntil(
+      () => form.root.findByType('button').props.onClick(),
+      () => form.root.findAllByProps({ role: 'alert' }).length > 0,
+      'the refusal to be shown',
+    );
     expect(form.root.findByProps({ role: 'alert' }).children).toContain('offline');
-    await runAsync(async () => {
-      form.root.findByType('button').props.onClick();
-      await Promise.resolve();
-    });
+    await runUntil(
+      () => form.root.findByType('button').props.onClick(),
+      () => attempts === 2,
+      'the retry to reach the daemon',
+    );
     expect(attempts).toBe(2);
     expect(requestIds[0]).toMatch(/^question:daemon-a:retry-session:retry:[0-9a-f]{32}$/u);
     expect(requestIds[0]).toBe(requestIds[1]);
@@ -172,11 +176,14 @@ describe('QuestionForm', () => {
         sessionId="changed-session"
       />,
     );
-    const submit = async () =>
-      await runAsync(async () => {
-        form.root.findByType('button').props.onClick();
-        await Promise.resolve();
-      });
+    const submit = async () => {
+      const sent = requestIds.length;
+      await runUntil(
+        () => form.root.findByType('button').props.onClick(),
+        () => requestIds.length > sent,
+        'the answer to reach the daemon',
+      );
+    };
     run(() => form.root.findAllByType('input')[0]?.props.onChange());
     await submit();
     await submit();
@@ -215,10 +222,11 @@ describe('QuestionForm', () => {
       />,
     );
     run(() => form.root.findAllByType('input')[1]?.props.onChange());
-    await runAsync(async () => {
-      form.root.findByType('button').props.onClick();
-      await Promise.resolve();
-    });
+    await runUntil(
+      () => form.root.findByType('button').props.onClick(),
+      () => form.root.findAllByProps({ 'data-question-answered': '' }).length > 0,
+      'the answered state to be shown',
+    );
 
     const status = form.root.findByProps({ 'data-question-answered': '' });
     expect(status.children.join('')).toBe('This question was already answered with «Yes».');
@@ -249,10 +257,11 @@ describe('QuestionForm', () => {
       />,
     );
     run(() => form.root.findAllByType('input')[0]?.props.onChange());
-    await runAsync(async () => {
-      form.root.findByType('button').props.onClick();
-      await Promise.resolve();
-    });
+    await runUntil(
+      () => form.root.findByType('button').props.onClick(),
+      () => form.root.findAllByProps({ role: 'alert' }).length > 0,
+      'the refusal to be shown',
+    );
 
     expect(form.root.findByProps({ role: 'alert' }).children.join('')).toBe(
       'A different answer was already sent for this question.',
@@ -277,10 +286,11 @@ describe('QuestionForm', () => {
       />,
     );
     run(() => form.root.findAllByType('input')[0]?.props.onChange());
-    await runAsync(async () => {
-      form.root.findByProps({ className: 'fy-question-submit' }).props.onClick();
-      await Promise.resolve();
-    });
+    await runUntil(
+      () => form.root.findByProps({ className: 'fy-question-submit' }).props.onClick(),
+      () => form.root.findAllByProps({ role: 'alert' }).length > 0,
+      'the refusal to be shown',
+    );
     return form;
   }
 
@@ -366,10 +376,11 @@ describe('QuestionForm', () => {
     run(() => button(form, 'Next').props.onClick());
     run(() => form.root.findAllByType('input')[0]?.props.onChange());
     run(() => button(form, 'Review').props.onClick());
-    await runAsync(async () => {
-      form.root.findByProps({ className: 'fy-question-submit' }).props.onClick();
-      await Promise.resolve();
-    });
+    await runUntil(
+      () => form.root.findByProps({ className: 'fy-question-submit' }).props.onClick(),
+      () => form.root.findAllByProps({ role: 'alert' }).length > 0,
+      'the refusal to be shown',
+    );
 
     expect(form.root.findByProps({ role: 'alert' }).children.join('')).toBe(PAUSED_SENTENCE);
     // The review page marks only the first question.
@@ -388,10 +399,11 @@ describe('QuestionForm', () => {
     expect(opened).toEqual(['console']);
 
     refuse = false;
-    await runAsync(async () => {
-      form.root.findByProps({ className: 'fy-question-resume' }).props.onClick();
-      await Promise.resolve();
-    });
+    await runUntil(
+      () => form.root.findByProps({ className: 'fy-question-resume' }).props.onClick(),
+      () => calls.length === 2,
+      'the resumed answer to reach the daemon',
+    );
 
     // The same answer under the same request id: the daemon admits it again, because nothing was submitted.
     expect(calls).toHaveLength(2);
@@ -425,10 +437,11 @@ describe('QuestionForm', () => {
     run(() => form.root.findAllByType('input')[1]?.props.onChange());
     const field = form.root.findByType('textarea');
     run(() => field.props.onChange({ currentTarget: { value: '  A freeform response  ' } }));
-    await runAsync(async () => {
-      form.root.findByType('button').props.onClick();
-      await Promise.resolve();
-    });
+    await runUntil(
+      () => form.root.findByType('button').props.onClick(),
+      () => calls.length === 1,
+      'the answer to reach the daemon',
+    );
     expect(calls).toEqual([
       [
         daemonA,
