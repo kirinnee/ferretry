@@ -8,7 +8,7 @@ import { paneBlockingPermission, parsePermissionPrompt, permissionAnswerKeys } f
 /**
  * The permission prompt a harness is parked on, read off real captured panes.
  *
- * The fixtures are frames of Claude Code 2.1.220 / 2.1.281 and Codex 0.145.0 / 0.156.1 as they were
+ * The fixtures are frames of Claude Code 2.1.220 / 2.1.281 and Codex 0.145.0 / 0.156.1 / 0.164.0 as they were
  * drawn; the synthetic frames below reach the branches no fixture happens to take.
  */
 
@@ -252,6 +252,31 @@ const EXPECTED: Readonly<Record<string, Expected>> = {
     options: [
       opt(1, 'Yes, proceed', 'allow'),
       opt(2, "Yes, and don't ask again for these files", 'allow-always'),
+      opt(3, 'No, and tell Codex what to do differently', 'deny'),
+    ],
+  },
+  'codex-0.164.0-patch': {
+    harness: 'codex',
+    tool: 'Edit',
+    action: 'edit',
+    what: '/home/dev/project/hello.txt',
+    question: 'Would you like to make the following edits?',
+    options: [
+      opt(1, 'Yes, proceed', 'allow'),
+      opt(2, "Yes, and don't ask again for these files", 'allow-always'),
+      opt(3, 'No, and tell Codex what to do differently', 'deny'),
+    ],
+  },
+  'codex-0.164.0-shell': {
+    harness: 'codex',
+    tool: 'Shell',
+    action: 'run',
+    what: 'rm -rf build',
+    detail: 'Clean the build output',
+    question: 'Would you like to run the following command?',
+    options: [
+      opt(1, 'Yes, proceed', 'allow'),
+      opt(2, "Yes, and don't ask again for commands that start with `rm -rf build`", 'allow-always'),
       opt(3, 'No, and tell Codex what to do differently', 'deny'),
     ],
   },

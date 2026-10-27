@@ -7,7 +7,7 @@ approval card in Chat, and types the person's choice back into the pane.
 
 ## What is recognised
 
-Measured on real panes, captured from Claude Code 2.1.220 and 2.1.281 and Codex 0.145.0 and 0.156.1
+Measured on real panes, captured from Claude Code 2.1.220 and 2.1.281 and Codex 0.145.0, 0.156.1 and 0.164.0
 against a local fake model API (no inference). The captures are the test fixtures in
 `packages/daemon/tests/fixtures/permission-prompts/`.
 
