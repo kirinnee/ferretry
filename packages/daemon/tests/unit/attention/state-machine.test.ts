@@ -826,9 +826,29 @@ describe('Attention state machine edit', () => {
       applyAttentionCommand(created.ledger, { action: 'edit', actor: AGENT, id: 'A9', patch, at: SECOND }),
     );
 
+    const foreign: AttentionLedger = {
+      ...created.ledger,
+      entries: [
+        {
+          lifecycle: 'active',
+          origin: OTHER_AGENT,
+          item: {
+            ...activeEntry(created.ledger).item,
+            raisedBy: 'agent',
+            raisedBySession: OTHER_AGENT.sessionId,
+            raisedByName: OTHER_AGENT.name,
+          },
+        },
+      ],
+    };
+    const notOurs = failed(
+      applyAttentionCommand(foreign, { action: 'edit', actor: AGENT, id: 'A1', patch, at: SECOND }),
+    );
+
     // Assert
     should(empty.error.code).equal('invalid');
     should(stranger.error.code).equal('forbidden');
+    should(notOurs.error.code).equal('forbidden');
     should(closed.error.code).equal('not-found');
     should(unknown.error.code).equal('not-found');
   });
