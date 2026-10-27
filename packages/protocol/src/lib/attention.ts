@@ -12,6 +12,13 @@ export const MAX_ATTENTION_ASK_OPTION_LENGTH = 120;
 export const MAX_ATTENTION_ASK_OPTION_DETAIL_LENGTH = 240;
 export const MAX_NOTIFICATION_TITLE_LENGTH = 120;
 export const MAX_NOTIFICATION_BODY_LENGTH = 500;
+export const MAX_ATTENTION_WARNINGS = 12;
+export const MAX_ATTENTION_WARNING_LENGTH = 400;
+/** What an Attention push says, at most: a lock screen shows the title and about a line or two. */
+export const ATTENTION_PUSH_TITLE_LENGTH = 40;
+export const ATTENTION_PUSH_BODY_LENGTH = 110;
+/** The most a summary should say: one plain sentence, answer first. */
+export const ATTENTION_SUMMARY_TARGET_LENGTH = 90;
 
 const singleLine = (maximum: number) =>
   z
@@ -86,6 +93,18 @@ export const MAX_ATTENTION_LINK_TARGET_LENGTH = 1_024;
 
 const prose = (maximum: number) => z.string().trim().min(1).max(maximum);
 
+/** A list of short points as markdown bullets, one per line; blank points are dropped. */
+export const toBullets = (points: readonly string[]): string =>
+  points
+    .map(point => point.replaceAll(/\s+/gu, ' ').trim())
+    .filter(point => point !== '')
+    .map(point => `- ${point}`)
+    .join('\n');
+
+/** Accepts text, or a list of points that becomes bullets — what a ferret writes, point form first. */
+const asBullets = (value: unknown): unknown =>
+  Array.isArray(value) && value.every((point): point is string => typeof point === 'string') ? toBullets(value) : value;
+
 /** One piece of jargon the item uses, spelled out for a reader who has not been following. */
 export const AttentionTermSchema = z.strictObject({
   term: singleLine(MAX_ATTENTION_TERM_LENGTH),
@@ -149,7 +168,7 @@ export const AttentionBriefShape = {
   /** The asker's overall suggested decision. */
   recommendation: AttentionRecommendationSchema.optional(),
   /** What happens if nobody answers. */
-  impact: prose(MAX_ATTENTION_REASON_LENGTH).optional(),
+  impact: z.preprocess(asBullets, prose(MAX_ATTENTION_REASON_LENGTH)).optional(),
   /** By when it matters, in words: "before the 14:00 deploy", "no rush". */
   urgency: singleLine(MAX_ATTENTION_URGENCY_LENGTH).optional(),
   /** PRs, files and references worth opening. */
@@ -304,6 +323,11 @@ export const AttentionSnapshotSchema = z
     count: NonNegativeIntegerSchema,
     parseErrors: NonNegativeIntegerSchema,
     updatedAt: InstantSchema,
+    /** Writing advice for the item just raised or edited; present only on that response. */
+    warnings: z
+      .array(z.string().trim().min(1).max(MAX_ATTENTION_WARNING_LENGTH))
+      .max(MAX_ATTENTION_WARNINGS)
+      .optional(),
   })
   .superRefine((value, context) => {
     if (value.count !== value.items.length) {
@@ -329,7 +353,7 @@ const AddAttentionRequestSchema = z.strictObject({
   sourceRef: z.string().max(MAX_ATTENTION_SOURCE_REF_LENGTH).nullable().default(null),
   subject: singleLine(MAX_ATTENTION_SUBJECT_LENGTH),
   why: z.string().trim().min(1).max(MAX_ATTENTION_DETAIL_LENGTH),
-  context: z.string().max(MAX_ATTENTION_DETAIL_LENGTH).nullable().optional(),
+  context: z.preprocess(asBullets, z.string().max(MAX_ATTENTION_DETAIL_LENGTH)).nullable().optional(),
   howToResolve: z.string().trim().min(1).max(MAX_ATTENTION_DETAIL_LENGTH),
   ask: AttentionAskSchema.optional(),
   ...AttentionBriefShape,
@@ -337,6 +361,14 @@ const AddAttentionRequestSchema = z.strictObject({
 
 export const AttentionActionRequestSchema = z.discriminatedUnion('action', [
   AddAttentionRequestSchema,
+  /** Reword an open item in place: only the writing, never its ask or who raised it. */
+  z.strictObject({
+    action: z.literal('edit'),
+    id: AttentionIdSchema,
+    subject: singleLine(MAX_ATTENTION_SUBJECT_LENGTH).optional(),
+    context: z.preprocess(asBullets, z.string().max(MAX_ATTENTION_DETAIL_LENGTH)).nullable().optional(),
+    ...AttentionBriefShape,
+  }),
   z.strictObject({
     action: z.literal('resolve'),
     id: AttentionIdSchema,

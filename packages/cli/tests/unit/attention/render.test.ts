@@ -7,7 +7,7 @@ import {
   renderAttentionMutation,
   renderNotification,
 } from '../../../src/lib/attention/render';
-import { SESSION, agentItem, humanItem, resolvedItem, snapshot } from './fixtures';
+import { agentItem, humanItem, resolvedItem, SESSION, snapshot } from './fixtures';
 
 const row = (text: string, index: number): string => text.split('\n')[index] ?? '';
 
@@ -328,5 +328,37 @@ describe('notification confirmations', () => {
 
     // Assert
     should(actual).equal('notification sent to 0 devices — no registered device wants this kind');
+  });
+});
+
+describe('writing advice', () => {
+  it('should print the daemon warnings under the confirmation, with the fix to run', () => {
+    // Arrange
+    const warned = {
+      ...snapshot([]),
+      warnings: ['summary is 120 characters; keep it under 90', 'links ("https://x.example")'],
+    };
+
+    // Act
+    const actual = renderAttentionMutation('attention A4 recorded', undefined, warned, 'A4');
+
+    // Assert
+    should(actual.split('\n')).deepEqual([
+      `attention A4 recorded — 0 unresolved items in ${SESSION}`,
+      "Reads hard for someone who hasn't followed — fix it with `attention edit !A4`:",
+      '  - summary is 120 characters; keep it under 90',
+      '  - links ("https://x.example")',
+    ]);
+  });
+
+  it('should name no id when the new item could not be told apart', () => {
+    // Arrange
+    const warned = { ...snapshot([]), warnings: ['summary is long'] };
+
+    // Act
+    const actual = renderAttentionMutation('attention recorded', undefined, warned);
+
+    // Assert
+    should(actual).containEql('fix it with `attention edit <id>`');
   });
 });

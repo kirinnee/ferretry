@@ -63,6 +63,28 @@ before the structure existed still reads.
   (`--json-file <path>`, `-` for stdin), where a flag wins over the same field. `fy attention add --help`
   prints the JSON shape. Every length is checked before anything is sent, and a refusal names the field.
 
+### Writing rules
+
+An item must stand alone, be easy to scan and be short. The fixed-layer Attention section teaches every
+ferret the same rules, with a good and a bad example:
+
+- **Self-contained.** The reader has not followed the conversation. No ticket or PR ids, codenames,
+  file paths or unexplained capitals. A needed term goes in `terms` with its meaning.
+- **Point form.** One idea per bullet. The summary is one plain sentence under 90 characters, answer
+  first. `context` and `impact` take a list (`-c` repeated, or a JSON array) and are stored as
+  `- point` lines; the app draws them as a bullet list, collapsed as before.
+- **Concrete questions.** Two to four short options, and a recommendation with its reason in one line.
+
+The daemon checks this on every `fy attention add` and `fy attention edit`. It **warns, never refuses**:
+the item is already on the board. The warnings come back on the response (`warnings` on the snapshot)
+and the CLI prints them under the confirmation with the fix to run. It flags a summary over 90
+characters, ticket-like ids (`ABC-123`, `#1234`), URLs, file paths, and ALL-CAPS words not defined in
+`terms` (`packages/daemon/src/lib/attention/writing-lint.ts`).
+
+**`fy attention edit <id>`** rewords an open item the ferret raised: summary, context, terms, the
+questions' words (same count and options, in order), recommendation, impact, urgency and links. It
+never changes the ask, who raised it or the question options, and it does not push again.
+
 ## The unread signal
 
 `SessionView.state.attention` is `{ open, first, ask, latestAt }` while anything is open, and absent
@@ -111,13 +133,12 @@ as its badge. The badge is the mono logomark on transparent, because Android pai
 alpha alone. iOS has no badge and ignores it. The manifest also names the badge as its `monochrome`
 icon, and its home-screen icons are maskable (the art carries its own safe zone).
 
-**What an Attention push says.** The title is the conversation's name, quoted, then the ferret:
-`“OCI work login” · Olivier`. It is just `“Olivier”` when the session has no name of its own. The body
-says what the issue is, one line each:
-
-1. the summary — or the first question, when the summary only repeats the title;
-2. `Recommended: <option or decision>`, when the ferret recommended one;
-3. the other choices: `Or: A · B`, or `Options: A · B` when nothing is recommended.
+**What an Attention push says.** A concise summary, nothing else. The title is the conversation's
+name, quoted and trimmed to 40 characters at a word boundary: `“OCI work login”`. It is the ferret's
+name when the session has no name of its own. The body is the item's **summary only**, at most 110
+characters, trimmed at a word boundary with `…`. It never carries the context, the options or the
+recommendation. When the summary is empty or only repeats the title, the first question stands in,
+trimmed the same way.
 
 The title always starts with a quote mark. A session's name is an agent's own words, so it can never
 open with the daemon's new-device alert title.

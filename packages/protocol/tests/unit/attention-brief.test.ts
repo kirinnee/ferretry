@@ -132,3 +132,38 @@ describe('attention brief', () => {
     should(recommendedAttentionOption(wordedOverall)).be.undefined();
   });
 });
+
+const base = { why: 'Needs a decision', howToResolve: 'Answer the question', ask: { kind: 'open-question' } } as const;
+
+describe('attention writing shapes', () => {
+  it('should turn a list of context and impact points into markdown bullets', () => {
+    const add = AttentionActionRequestSchema.parse({
+      action: 'add',
+      ...base,
+      subject: 'Pick a plan',
+      context: ['the old login expires', '  two plans   fit ', ' '],
+      impact: ['blocks the release', 'costs a day'],
+    });
+
+    should(add).containDeep({
+      context: '- the old login expires\n- two plans fit',
+      impact: '- blocks the release\n- costs a day',
+    });
+  });
+
+  it('should keep a string as written, and refuse a list of non-text', () => {
+    const add = AttentionActionRequestSchema.parse({ action: 'add', ...base, subject: 'Pick', context: 'plain words' });
+
+    should(add).containDeep({ context: 'plain words' });
+    should(
+      AttentionActionRequestSchema.safeParse({ action: 'add', ...base, subject: 'Pick', context: [1] }).success,
+    ).be.false();
+  });
+
+  it('should accept an edit with lists, a null context and no other field, and refuse an unknown key', () => {
+    const edit = AttentionActionRequestSchema.parse({ action: 'edit', id: 'A1', context: null, impact: ['one'] });
+
+    should(edit).containDeep({ action: 'edit', id: 'A1', context: null, impact: '- one' });
+    should(AttentionActionRequestSchema.safeParse({ action: 'edit', id: 'A1', note: 'x' }).success).be.false();
+  });
+});

@@ -1,10 +1,11 @@
 import { describe, it } from 'bun:test';
 import {
+  ATTENTION_PUSH_BODY_LENGTH,
+  ATTENTION_PUSH_TITLE_LENGTH,
   type AttentionItem,
   AttentionItemSchema,
   AttentionSnapshotSchema,
   type DirectNotificationRequest,
-  MAX_NOTIFICATION_TITLE_LENGTH,
   PushNotificationPayloadSchema,
 } from '@ferretry/protocol';
 import should from 'should';
@@ -207,7 +208,7 @@ describe('notification policy', () => {
     should(automatic).containDeep({
       eventKey: 'attention-raised:A1',
       kind: 'attention',
-      title: '“Ship v4.87” · Ada',
+      title: '“Ship v4.87”',
       body: 'Choose a release window',
       tag: 'attention-session-1',
       url: '/session/session-1?attention=A1',
@@ -218,7 +219,7 @@ describe('notification policy', () => {
     }
   });
 
-  it('should title an attention push with its conversation first, say the issue and its choices, and open the item', () => {
+  it('should title an attention push with its conversation, say only the summary, and open the item', () => {
     // Arrange
     const rich = AttentionItemSchema.parse({
       ...item,
@@ -244,24 +245,27 @@ describe('notification policy', () => {
     // Assert
     should(payload).containDeep({
       eventKey: 'attention-raised:A7',
-      title: '“Relay carrier fallback” · Ada',
-      body: 'Rebase onto main now?\nOptions: Rebase now · Wait · Skip',
+      title: '“Relay carrier fallback”',
+      body: 'Rebase onto main now?',
       url: '/session/session%201?attention=A7',
     });
     should(alert.title.startsWith(DEVICE_PAIRED_TITLE)).be.false();
     should(alert.eventKey.startsWith(DEVICE_PAIRED_EVENT_PREFIX)).be.false();
-    should(clipped.title.length).equal(MAX_NOTIFICATION_TITLE_LENGTH);
-    should(clipped.title.endsWith('…')).be.true();
+    should(clipped.title.length).be.lessThanOrEqual(ATTENTION_PUSH_TITLE_LENGTH + 2);
+    should(clipped.title.startsWith('“') && clipped.title.endsWith('…”')).be.true();
+    should(clipped.body.length).be.lessThanOrEqual(ATTENTION_PUSH_BODY_LENGTH);
+    should(clipped.body.endsWith('…')).be.true();
     for (const each of [payload, alert, clipped])
       should(PushNotificationPayloadSchema.safeParse(each).success).be.true();
   });
 
-  it('should put the recommended answer before the other choices', () => {
+  it('should keep the body to the summary, never the context, the choices or the recommendation', () => {
     // Arrange
-    const single = AttentionItemSchema.parse({
+    const rich = AttentionItemSchema.parse({
       ...item,
       id: 'A2',
-      subject: 'Pick the OCI login plan',
+      subject: 'Pick the login plan',
+      context: 'A long story about OCI and tickets.',
       ask: { kind: 'multiple-choice', options: [{ label: 'Go with the defaults' }, { label: 'Reply with changes' }] },
       questions: [
         {
@@ -271,30 +275,32 @@ describe('notification policy', () => {
           why: 'They match what you approved last week.',
         },
       ],
-    });
-    const overall = AttentionItemSchema.parse({
-      ...item,
-      id: 'A3',
       recommendation: { decision: 'Ship on Thursday', why: 'Nobody is on call on Friday.' },
     });
 
     // Act
-    const chosen = attentionNotificationPayload(
-      'session-1',
-      { name: 'Ada', title: 'OCI work login' },
-      single,
-      snapshot,
-    );
-    const worded = attentionNotificationPayload(
-      'session-1',
-      { name: 'Ada', title: 'OCI work login' },
-      overall,
-      snapshot,
-    );
+    const payload = attentionNotificationPayload('session-1', { name: 'Ada', title: 'Login work' }, rich, snapshot);
 
     // Assert
-    should(chosen.body).equal('Pick the OCI login plan\nRecommended: Go with the defaults\nOr: Reply with changes');
-    should(worded.body).equal('Choose a release window\nRecommended: Ship on Thursday');
+    should(payload.body).equal('Pick the login plan');
+  });
+
+  it('should trim a long summary at a word boundary with an ellipsis, and a long title likewise', () => {
+    // Arrange
+    const words =
+      'Decide whether the nightly backup job should keep running while the storage migration is underway or paused for the week';
+    const long = AttentionItemSchema.parse({ ...item, id: 'A5', subject: words });
+    const session = { name: 'Ada', title: 'Nightly backup storage migration plan review' };
+
+    // Act
+    const payload = attentionNotificationPayload('session-1', session, long, snapshot);
+
+    // Assert
+    should(payload.body).equal(
+      'Decide whether the nightly backup job should keep running while the storage migration is underway or paused…',
+    );
+    should(words.startsWith(payload.body.slice(0, -1))).be.true();
+    should(payload.title).equal('“Nightly backup storage migration plan…”');
   });
 
   it('should fall back to the ferret for a title, and to the first question when the summary repeats it', () => {

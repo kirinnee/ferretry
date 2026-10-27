@@ -1,0 +1,16 @@
+import { describe, expect, test } from 'bun:test';
+import { bulletPoints } from '../../../src/features/attention/attention-brief.tsx';
+
+describe('bulletPoints', () => {
+  test('reads dash, star and bullet lines, ignoring blank lines and indentation', () => {
+    expect(bulletPoints('- one\n\n  * two\r\n• three')).toEqual(['one', 'two', 'three']);
+  });
+
+  test('is null for prose, a mix, an empty text and a bare marker', () => {
+    expect(bulletPoints('Just words.')).toBeNull();
+    expect(bulletPoints('Lead\n- point')).toBeNull();
+    expect(bulletPoints('  ')).toBeNull();
+    expect(bulletPoints('-')).toBeNull();
+    expect(bulletPoints('-dash')).toBeNull();
+  });
+});

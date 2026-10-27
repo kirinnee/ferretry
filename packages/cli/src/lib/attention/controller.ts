@@ -1,6 +1,13 @@
 import { type AttentionId, type AttentionSnapshot, MAX_NOTIFICATION_BODY_LENGTH } from '@ferretry/protocol';
 import { type AnswerFlags, parseAnswer } from './answer.ts';
-import { type BriefFile, type BriefFlags, composeAddRequest, parseBriefFile } from './brief.ts';
+import {
+  type BriefFile,
+  type BriefFlags,
+  composeAddRequest,
+  composeEditRequest,
+  type EditFlags,
+  parseBriefFile,
+} from './brief.ts';
 import type { IAttentionBriefInput, IAttentionGateway, IAttentionOutput } from './ports.ts';
 import { attentionReference, parseAttentionReference } from './reference.ts';
 import { renderAttentionHistory, renderAttentionList, renderAttentionMutation, renderNotification } from './render.ts';
@@ -18,6 +25,9 @@ export interface AttentionAddOptions extends AttentionCommandOptions, BriefFlags
   /** A JSON body with the same fields; `-` reads standard input. */
   readonly jsonFile?: string;
 }
+
+/** Flags that reword an open item. */
+export interface AttentionEditOptions extends AttentionCommandOptions, EditFlags {}
 
 /** Flags that resolve an item. */
 export interface AttentionResolveOptions extends AttentionCommandOptions, AnswerFlags {
@@ -67,7 +77,16 @@ export class AttentionController {
 
     const raised = onlyNewId(before, after);
     const verb = raised === undefined ? 'attention recorded' : `attention ${attentionReference(raised)} recorded`;
-    this.#report(after, options, () => renderAttentionMutation(verb, undefined, after));
+    this.#report(after, options, () => renderAttentionMutation(verb, undefined, after, raised));
+  }
+
+  async edit(reference: string, options: AttentionEditOptions): Promise<void> {
+    const id = parseAttentionReference(reference);
+    const sessionId = this.#target(options);
+    const wording = (options.question ?? []).some(question => question.trim() !== '');
+    const current = wording ? (await this.gateway.snapshot(sessionId)).items.find(item => item.id === id) : undefined;
+    const snapshot = await this.gateway.apply(sessionId, composeEditRequest(id, options, current));
+    this.#report(snapshot, options, () => renderAttentionMutation('edited', attentionReference(id), snapshot, id));
   }
 
   async resolve(reference: string, options: AttentionResolveOptions): Promise<void> {

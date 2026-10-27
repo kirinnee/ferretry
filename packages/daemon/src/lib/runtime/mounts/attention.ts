@@ -1,22 +1,25 @@
 import {
-  type AttentionErrorCode,
+  type AttentionActionRequest,
   AttentionActionRequestSchema,
+  type AttentionErrorCode,
   type DirectNotificationRequest,
   DirectNotificationRequestSchema,
   DirectNotificationResponseSchema,
   FY_REQUEST_ID_HEADER,
 } from '@ferretry/protocol';
-import { isHumanAdminActor, parseActor, type ApiActor } from '../../api/actor.ts';
+import { type ApiActor, isHumanAdminActor, parseActor } from '../../api/actor.ts';
 import { parseBody } from '../../api/body.ts';
 import { ApiError } from '../../api/error.ts';
-import { decodeParameter, headerValue, type ApiResponse } from '../../api/http.ts';
+import { type ApiResponse, decodeParameter, headerValue } from '../../api/http.ts';
 import { jsonResponse } from '../../api/responses.ts';
 import type { ApiRoute, RouteContext } from '../../api/route.ts';
 import {
-  isAttentionSessionId,
   type AttentionActor,
   type AttentionFailure,
   type AttentionService,
+  type EditAttentionPatch,
+  isAttentionSessionId,
+  lintAttentionWriting,
 } from '../../attention/index.ts';
 import type { NotificationResult } from '../../notifications/index.ts';
 
@@ -117,12 +120,22 @@ async function apply(attention: AttentionService, context: RouteContext): Promis
   const actor = attentionActor(context.actor);
   const mutation = await (request.action === 'add'
     ? attention.raise(sessionId, request, actor)
-    : request.action === 'dismiss'
-      ? attention.dismiss(sessionId, request.id, actor, request.note)
-      : request.response === undefined
-        ? attention.resolve(sessionId, request.id, actor, request.note)
-        : attention.answer(sessionId, request.id, request.response, actor, request.note));
-  return mutation.ok ? jsonResponse(mutation.snapshot) : refusal(mutation.error);
+    : request.action === 'edit'
+      ? attention.edit(sessionId, request.id, editPatch(request), actor)
+      : request.action === 'dismiss'
+        ? attention.dismiss(sessionId, request.id, actor, request.note)
+        : request.response === undefined
+          ? attention.resolve(sessionId, request.id, actor, request.note)
+          : attention.answer(sessionId, request.id, request.response, actor, request.note));
+  if (!mutation.ok) return refusal(mutation.error);
+  const warnings = mutation.item !== undefined && mutation.changed ? lintAttentionWriting(mutation.item) : [];
+  return jsonResponse(warnings.length === 0 ? mutation.snapshot : { ...mutation.snapshot, warnings });
+}
+
+/** The fields an edit request names, with the ones it leaves out left out. */
+function editPatch(request: Extract<AttentionActionRequest, { action: 'edit' }>): EditAttentionPatch {
+  const { action: _action, id: _id, ...patch } = request;
+  return patch;
 }
 
 /** The caller-owned identity of a retryable notification mutation. */

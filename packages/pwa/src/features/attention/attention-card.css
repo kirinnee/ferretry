@@ -260,6 +260,16 @@ details[open] > .fy-attn-sec__title > .fy-attn-sec__chevron {
   min-width: 0;
   color: var(--fg);
 }
+.fy-attn-points {
+  display: flex;
+  margin: 0;
+  padding: 0 0 0 18px;
+  list-style: disc;
+  flex-direction: column;
+  gap: var(--gap-xs);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
 .fy-attn-terms {
   display: flex;
   margin: 0;

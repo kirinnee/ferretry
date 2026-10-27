@@ -1,4 +1,10 @@
-import type { AttentionAsk, AttentionItem, AttentionSnapshot, ResolvedAttentionItem } from '@ferretry/protocol';
+import type {
+  AttentionAsk,
+  AttentionId,
+  AttentionItem,
+  AttentionSnapshot,
+  ResolvedAttentionItem,
+} from '@ferretry/protocol';
 import { describeAnswer } from './answer.ts';
 import { attentionOrdinal, attentionReference } from './reference.ts';
 
@@ -151,9 +157,24 @@ export function renderAttentionMutation(
   verb: string,
   reference: string | undefined,
   snapshot: AttentionSnapshot,
+  raised?: AttentionId,
 ): string {
   const subject = reference === undefined ? verb : `${verb} ${reference}`;
-  return `${subject} — ${pluralItems(snapshot.count)} in ${snapshot.sessionId}`;
+  const line = `${subject} — ${pluralItems(snapshot.count)} in ${snapshot.sessionId}`;
+  return [line, ...writingAdvice(snapshot.warnings, raised ?? undefined)].join('\n');
+}
+
+/**
+ * The daemon's advice on how the item reads. Never a refusal — the owner has already been told — so it
+ * says what to change and how: reword it with `attention edit`.
+ */
+function writingAdvice(warnings: readonly string[] | undefined, id: AttentionId | undefined): string[] {
+  if (warnings === undefined || warnings.length === 0) return [];
+  const fix = id === undefined ? 'attention edit <id>' : `attention edit ${attentionReference(id)}`;
+  return [
+    `Reads hard for someone who hasn't followed — fix it with \`${fix}\`:`,
+    ...warnings.map(warning => `  - ${warning}`),
+  ];
 }
 
 /** Confirmation for a direct notification. Zero devices is worth saying: the message went nowhere. */

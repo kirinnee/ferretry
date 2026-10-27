@@ -11,6 +11,7 @@ import {
   applyAttentionCommandToSession,
   attentionSnapshot,
   canDismissAttention,
+  type EditAttentionPatch,
   emptyAttentionLedger,
   isActiveAttention,
   isWardenEscalationAttention,
@@ -714,5 +715,121 @@ describe('Attention state machine', () => {
     should(new Set(actual.resolved.map(item => item.id)).size).equal(100);
     should(actual.count).equal(0);
     should(ledger.nextId).equal(102);
+  });
+});
+
+describe('Attention state machine edit', () => {
+  const questioned = (): Extract<AttentionMutation, { ok: true }> =>
+    raised(AGENT, {
+      questions: [
+        { question: 'Which plan?', options: [{ label: 'A' }, { label: 'B' }], recommended: 'A', why: 'Cheaper.' },
+      ],
+    });
+
+  it('should reword the summary, context and brief in place without re-announcing the item', () => {
+    // Arrange
+    const created = raised();
+
+    // Act
+    const edited = succeeded(
+      applyAttentionCommand(created.ledger, {
+        action: 'edit',
+        actor: AGENT,
+        id: 'A1',
+        patch: { subject: 'Approve the deploy?', context: '- one\n- two', impact: '- blocks release' },
+        at: SECOND,
+      }),
+    );
+
+    // Assert
+    should(edited.change).equal('refreshed');
+    should(edited.item).containDeep({ id: 'A1', subject: 'Approve the deploy?', context: '- one\n- two' });
+    should(edited.item?.impact).equal('- blocks release');
+    should(edited.item?.waitingSince).equal(FIRST);
+    should(edited.snapshot.count).equal(1);
+  });
+
+  it('should clear the context with null and report an identical edit as unchanged', () => {
+    // Arrange
+    const created = raised();
+    const same = {
+      action: 'edit',
+      actor: AGENT,
+      id: 'A1',
+      patch: { subject: created.item?.subject },
+      at: SECOND,
+    } as const;
+
+    // Act
+    const cleared = succeeded(
+      applyAttentionCommand(created.ledger, {
+        action: 'edit',
+        actor: AGENT,
+        id: 'A1',
+        patch: { context: null },
+        at: SECOND,
+      }),
+    );
+    const unchanged = succeeded(applyAttentionCommand(created.ledger, same));
+
+    // Assert
+    should(cleared.item?.context ?? null).be.null();
+    should(unchanged.changed).be.false();
+  });
+
+  it('should reword questions but refuse to add, drop or re-option them', () => {
+    // Arrange
+    const created = questioned();
+    const edit = (questions: NonNullable<EditAttentionPatch['questions']>) =>
+      applyAttentionCommand(created.ledger, {
+        action: 'edit',
+        actor: AGENT,
+        id: 'A1',
+        patch: { questions },
+        at: SECOND,
+      });
+
+    // Act
+    const reworded = succeeded(
+      edit([
+        { question: 'Which login plan?', options: [{ label: 'A' }, { label: 'B' }], recommended: 'A', why: 'Cheaper.' },
+      ]),
+    );
+    const reoptioned = failed(edit([{ question: 'Which plan?', options: [{ label: 'A' }, { label: 'C' }] }]));
+    const dropped = failed(edit([]));
+
+    // Assert
+    should(reworded.item?.questions?.[0]?.question).equal('Which login plan?');
+    should(reoptioned.error.code).equal('invalid');
+    should(dropped.error.code).equal('invalid');
+  });
+
+  it('should refuse an empty edit, a stranger, a closed item and an unknown item', () => {
+    // Arrange
+    const created = raised();
+    const patch = { subject: 'New words' };
+    const resolved = succeeded(
+      applyAttentionCommand(created.ledger, { action: 'dismiss', actor: HUMAN, id: 'A1', at: SECOND }),
+    );
+
+    // Act
+    const empty = failed(
+      applyAttentionCommand(created.ledger, { action: 'edit', actor: AGENT, id: 'A1', patch: {}, at: SECOND }),
+    );
+    const stranger = failed(
+      applyAttentionCommand(created.ledger, { action: 'edit', actor: OTHER_AGENT, id: 'A1', patch, at: SECOND }),
+    );
+    const closed = failed(
+      applyAttentionCommand(resolved.ledger, { action: 'edit', actor: AGENT, id: 'A1', patch, at: THIRD }),
+    );
+    const unknown = failed(
+      applyAttentionCommand(created.ledger, { action: 'edit', actor: AGENT, id: 'A9', patch, at: SECOND }),
+    );
+
+    // Assert
+    should(empty.error.code).equal('invalid');
+    should(stranger.error.code).equal('forbidden');
+    should(closed.error.code).equal('not-found');
+    should(unknown.error.code).equal('not-found');
   });
 });

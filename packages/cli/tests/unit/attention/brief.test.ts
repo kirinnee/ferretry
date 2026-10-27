@@ -1,7 +1,7 @@
 import { describe, it } from 'bun:test';
-import { MAX_ATTENTION_URGENCY_LENGTH } from '@ferretry/protocol';
+import { AttentionItemSchema, MAX_ATTENTION_URGENCY_LENGTH } from '@ferretry/protocol';
 import should from 'should';
-import { composeAddRequest, parseBriefFile } from '../../../src/lib/attention/brief';
+import { composeAddRequest, composeEditRequest, parseBriefFile } from '../../../src/lib/attention/brief';
 
 describe('attention brief composition', () => {
   it('should keep an old-style add exactly as it was', () => {
@@ -161,5 +161,79 @@ describe('attention brief composition', () => {
     should(() => parseBriefFile('{not json')).throw(/--json-file is not JSON/u);
     should(() => parseBriefFile(JSON.stringify({ summery: 'typo' }))).throw(/--json-file: /u);
     should(() => parseBriefFile(JSON.stringify({ terms: [{ term: 'x' }] }))).throw(/terms\.0\.meaning/u);
+  });
+});
+
+describe('attention brief points and edits', () => {
+  it('should turn repeated context and impact flags into bullets, and leave one value as written', () => {
+    // Arrange / Act
+    const several = composeAddRequest(['pick'], {
+      context: ['the login expires', 'two plans fit'],
+      impact: ['blocks release'],
+    });
+    const one = composeAddRequest(['pick'], { context: ['plain words'] });
+
+    // Assert
+    should(several).containDeep({ context: '- the login expires\n- two plans fit', impact: 'blocks release' });
+    should(one).containDeep({ context: 'plain words' });
+  });
+
+  it('should accept lists for context and impact in a JSON body', () => {
+    // Arrange
+    const file = parseBriefFile(JSON.stringify({ summary: 'Pick', context: ['one', 'two'], impact: 'plain' }));
+
+    // Act
+    const request = composeAddRequest([], {}, file);
+
+    // Assert
+    should(request).containDeep({ context: '- one\n- two', impact: 'plain' });
+  });
+
+  it('should compose an edit from only the flags given', () => {
+    // Arrange / Act
+    const request = composeEditRequest(
+      'A3',
+      { summary: ' Plain ask ', context: ['a', 'b'], term: ['OCI=cloud login'] },
+      undefined,
+    );
+
+    // Assert
+    should(request).deepEqual({
+      action: 'edit',
+      id: 'A3',
+      subject: 'Plain ask',
+      context: '- a\n- b',
+      terms: [{ term: 'OCI', meaning: 'cloud login' }],
+    });
+  });
+
+  it('should reword questions in order, keeping their options and reasons', () => {
+    // Arrange
+    const current = AttentionItemSchema.parse({
+      id: 'A3',
+      source: 'agent-raised',
+      sourceRef: null,
+      subject: 'x',
+      why: 'x',
+      waitingSince: '2026-10-26T09:00:00.000Z',
+      howToResolve: 'x',
+      ask: { kind: 'open-question' },
+      raisedBy: 'agent',
+      raisedBySession: 's',
+      raisedByName: 'Ada',
+      questions: [
+        { question: 'Which plan?', options: [{ label: 'A' }, { label: 'B' }], recommended: 'A', why: 'Cheaper.' },
+      ],
+    });
+
+    // Act
+    const request = composeEditRequest('A3', { question: ['Which login plan?'] }, current);
+
+    // Assert
+    should(request.questions).deepEqual([
+      { question: 'Which login plan?', options: [{ label: 'A' }, { label: 'B' }], recommended: 'A', why: 'Cheaper.' },
+    ]);
+    should(() => composeEditRequest('A3', { question: ['a?', 'b?'] }, current)).throw(/has 1 question/u);
+    should(() => composeEditRequest('A3', { question: ['a?'] }, undefined)).throw(/no unresolved attention item A3/u);
   });
 });

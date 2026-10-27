@@ -474,7 +474,7 @@ describe('NotificationService attention presentation', () => {
       origin: 'attention',
       attentionId: 'A1',
       attribution: `attention:agent:${SESSION}`,
-      sent: { title: '“Ship the release” · Release agent', body: item.subject, interactive: true },
+      sent: { title: '“Ship the release”', body: item.subject, interactive: true },
     });
   });
 

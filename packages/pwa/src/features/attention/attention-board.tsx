@@ -30,7 +30,7 @@ import { cn } from '../../lib/class-names.ts';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
 import { Button } from '../../shell/primitives.tsx';
 import { AttentionAnswerControls } from './attention-answer-controls.tsx';
-import { AttentionBriefSections } from './attention-brief.tsx';
+import { AttentionBriefSections, PointForm } from './attention-brief.tsx';
 
 export type AttentionTone = AttentionAsk['kind'] | 'none' | 'unknown';
 type Action = (id: string, action: AttentionResponse | null, dismissed?: boolean) => void;
@@ -157,9 +157,7 @@ export function resolutionBadge({
   };
 }
 
-const prose = (text: string, className = '') => (
-  <p className={cn('kt-attn-prose m-0 whitespace-pre-wrap break-words', className)}>{text}</p>
-);
+const prose = (text: string, className = '') => <PointForm className={cn('kt-attn-prose', className)} text={text} />;
 
 export interface AttentionBoardProps {
   readonly connection: DaemonConnection;

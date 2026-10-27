@@ -4,6 +4,7 @@ import type {
   AttentionAddOptions,
   AttentionCommandOptions,
   AttentionController,
+  AttentionEditOptions,
   AttentionNotifyOptions,
   AttentionResolveOptions,
 } from './controller.ts';
@@ -14,9 +15,9 @@ const SESSION_HELP =
 const JSON_FLAG = '--json';
 const JSON_HELP = 'print the protocol payload instead of the human rendering';
 
-const WRITING_GUIDE = `The reader has NOT been following this session. Write for that reader:
-  <the ask>      the SUMMARY: one line, what the human must decide or do — not backstory
-  --context      what is happening and why it matters, in a few sentences
+const WRITING_GUIDE = `The reader has NOT been following this session. Write for that reader, in point form:
+  <the ask>      the SUMMARY: one plain sentence under 90 characters, answer first — not backstory
+  --context      what is happening and why it matters; repeat the flag for one bullet each
   --term         TERM=meaning for every codename or term of art you use (repeat)
   --question     each thing they must answer (repeat); --option gives a lone question its choices
   --recommend    your suggested decision (an option label, or the answer in words); --recommend-why
@@ -24,8 +25,10 @@ const WRITING_GUIDE = `The reader has NOT been following this session. Write for
   --link         a PR, file or reference worth opening (repeat)
   --json-file    the same fields as JSON (- reads stdin); flags win over the file
 
-Every field renders as markdown: short bullets, bold the key point, no walls of
-text. Attention items never expire on a timer. Answering or dismissing on the board already
+Every field renders as markdown: short bullets, one idea each, no walls of text. Never use
+ticket or PR numbers, internal codenames, file paths or unexplained capitals — say it in plain
+words, or define the term with --term. The daemon warns when an item breaks these; fix it with
+\`edit <id>\`. Attention items never expire on a timer. Answering or dismissing on the board already
 resolves it — but if the blocker clears some OTHER way (the human answers in chat, the work is no
 longer needed), the raising agent must run \`done\` or \`dismiss\` itself, immediately. An item
 whose reason is gone but is still open is a bug, not a safe default.
@@ -85,20 +88,38 @@ export function registerAttentionCommands(program: Command, controller: Attentio
       .option('--summary <line>', 'the summary, when it is not given as words')
       .option(`-k, --kind <kind>`, `what the human does: ${ASK_KIND_NAMES.join(', ')}`)
       .option('-o, --option <label>', 'a choice label; repeat for each option', collect, [])
-      .option('-c, --context <background>', 'what is happening and why it matters')
+      .option('-c, --context <point>', 'what is happening and why it matters; repeat for bullet points', collect, [])
       .option('-w, --why <reason>', 'why this needs the human now (defaults to the ask)')
       .option('-r, --resolve <how>', 'the concrete action that clears it')
       .option('--term <TERM=meaning>', 'spell out one piece of jargon; repeat', collect, [])
       .option('-q, --question <text>', 'one thing the human must answer; repeat', collect, [])
       .option('--recommend <decision>', 'your suggested decision: an option label, or the answer in words')
       .option('--recommend-why <reason>', 'why you recommend it')
-      .option('--impact <text>', 'what happens if nobody answers')
+      .option('--impact <point>', 'what happens if nobody answers; repeat for bullet points', collect, [])
       .option('--urgency <when>', 'by when it matters, in words')
       .option('-l, --link <target>', 'a PR, file or reference worth opening; repeat', collect, [])
       .option('--json-file <path>', 'read these fields as JSON from a file, or - for stdin')
       .addHelpText('after', `\n${ASK_KINDS}`),
   ).action(async (words: string[], _flags: unknown, command: Command) => {
     await controller.add(words, merged<AttentionAddOptions>(command));
+  });
+
+  scoped(
+    attention
+      .command('edit')
+      .description('reword an open item you raised — only the writing, never the ask')
+      .argument('<id>', 'the attention reference, like !A3')
+      .option('--summary <line>', 'the new one-line summary')
+      .option('-c, --context <point>', 'replace the context; repeat for bullet points', collect, [])
+      .option('--term <TERM=meaning>', 'replace the terms with these; repeat', collect, [])
+      .option('-q, --question <text>', "reword the item's questions, in order, one per question; repeat", collect, [])
+      .option('--recommend <decision>', 'replace the recommendation')
+      .option('--recommend-why <reason>', 'why you recommend it')
+      .option('--impact <point>', 'replace what happens if nobody answers; repeat for bullet points', collect, [])
+      .option('--urgency <when>', 'replace by when it matters')
+      .option('-l, --link <target>', 'replace the links with these; repeat', collect, []),
+  ).action(async (id: string, _flags: unknown, command: Command) => {
+    await controller.edit(id, merged<AttentionEditOptions>(command));
   });
 
   scoped(attention.command('ls').alias('list').description('list unresolved items, oldest first')).action(

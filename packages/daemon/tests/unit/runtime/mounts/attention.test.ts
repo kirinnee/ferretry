@@ -120,6 +120,42 @@ describe('attention routes', () => {
     should((jsonBody(raised).items as readonly { subject: string }[])[0]?.subject).equal('which base branch?');
   });
 
+  it('should answer a clean raise with no warnings, and a hard-to-read one with advice that edit then clears', async () => {
+    // Arrange
+    const dispatch = fixture();
+    const hard = { ...raise, subject: 'Unblock ABC-123 via https://example.com', context: ['the OCI login'] };
+
+    // Act
+    const clean = await dispatch(post(raise, agentIn('s1')));
+    const warned = await dispatch(post(hard, agentIn('s1')));
+    const id = (jsonBody(warned).items as readonly { id: string }[])[1]?.id;
+    const fixed = await dispatch(
+      post({ action: 'edit', id, subject: 'Unblock the release', context: ['the cloud login'] }, agentIn('s1')),
+    );
+
+    // Assert
+    should(jsonBody(clean)).not.have.property('warnings');
+    should((jsonBody(warned).warnings as readonly string[]).join('\n')).match(/ABC-123[\s\S]*example\.com[\s\S]*OCI/u);
+    should(fixed.status).equal(200);
+    should(jsonBody(fixed)).not.have.property('warnings');
+    should((jsonBody(fixed).items as readonly { subject: string; context: string }[])[1]).containDeep({
+      subject: 'Unblock the release',
+      context: '- the cloud login',
+    });
+  });
+
+  it('should report an edit of an unknown item as not found', async () => {
+    // Arrange
+    const dispatch = fixture();
+    await dispatch(post(raise, agentIn('s1')));
+
+    // Act
+    const unknown = await dispatch(post({ action: 'edit', id: 'A9', subject: 'x' }, agentIn('s1')));
+
+    // Assert
+    should(unknown.status).equal(404);
+  });
+
   it('should record the human’s choice when a resolve carries a response', async () => {
     // kteam wrote the resolution without the answer, so an agent waiting on a choice was unblocked
     // with nothing to read.
