@@ -7,6 +7,11 @@
  * its project subject, a Claude launch in that project gets a local-scope entry naming a variable (never
  * the token) plus the variable's value, a worktree of the project shares the sign-in, a runtime that
  * disabled the server gets nothing, and signing out takes the entry away again.
+ *
+ * And the second failure (`phoebe..048c658abfb9`): a ferret working in a repository nobody registered.
+ * The inventory listed its server under the ferret's own folder while the sign-in list and the launch
+ * knew only registered folders, so the subject a row offered was one the sign-in refused. All three now
+ * read one folder source (`KnownAndFerretFolders`).
  */
 import { afterEach, describe, it } from 'bun:test';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
@@ -17,6 +22,7 @@ import should from 'should';
 import { FileClaudeLocalScope, FileMcpHarnessDocuments } from '../../../src/adapters/mcp-inventory/index.ts';
 import {
   combinedMcpOAuthServers,
+  KnownAndFerretFolders,
   type McpInventoryAccount,
   type McpInventoryFolder,
   McpInventoryService,
@@ -67,19 +73,27 @@ async function machine(options: { disabled?: boolean } = {}) {
     }),
   );
 
-  const folders: readonly McpInventoryFolder[] = [
+  // A repository no project is registered for, with a ferret working in it.
+  const lone = path.join(root, 'work/vungle/PE');
+  await mkdir(lone, { recursive: true });
+  await writeFile(
+    path.join(lone, '.mcp.json'),
+    JSON.stringify({ mcpServers: { phoebe: { type: 'http', url: w.provider.serverUrl } } }),
+  );
+  const known: readonly McpInventoryFolder[] = [
     { root: project, project, name: 'app' },
     { root: worktree, project, name: 'app' },
   ];
+  const folders = new KnownAndFerretFolders(
+    async () => known,
+    async () => [lone, project],
+  );
   const accounts: readonly McpInventoryAccount[] = [
     { runtime: 'claude-work', harness: 'claude', home, wrapper: '/fy/bin/claude-work' },
   ];
   const documents = new FileMcpHarnessDocuments();
   const service = new McpOAuthService({
-    servers: combinedMcpOAuthServers(
-      { list: async () => [] },
-      new ProjectMcpOAuthServers(async () => folders, documents),
-    ),
+    servers: combinedMcpOAuthServers({ list: async () => [] }, new ProjectMcpOAuthServers(folders, documents)),
     http: w.http,
     crypto: testCrypto,
     clock: w.clock,
@@ -90,7 +104,7 @@ async function machine(options: { disabled?: boolean } = {}) {
   });
   const launch = new ProjectMcpLaunch({
     accounts: async () => accounts,
-    folders: async () => folders,
+    folders,
     documents,
     secrets: w.secrets,
     renewal: service,
@@ -103,7 +117,21 @@ async function machine(options: { disabled?: boolean } = {}) {
       numStartups: number;
       projects: Record<string, { mcpServers: Record<string, unknown> }>;
     };
-  return { w, service, launch, subject, names, home, project, worktree, folders, accounts, documents, claudeJson };
+  return {
+    w,
+    service,
+    launch,
+    subject,
+    names,
+    home,
+    project,
+    worktree,
+    lone,
+    folders,
+    accounts,
+    documents,
+    claudeJson,
+  };
 }
 
 describe('signing in to a project’s .mcp.json server', () => {
@@ -194,7 +222,7 @@ describe('signing in to a project’s .mcp.json server', () => {
     });
   });
 
-  it('should write nothing for a folder in no known project, or a Codex runtime', async () => {
+  it('should write nothing for a folder with no project server, or a Codex runtime', async () => {
     // Arrange
     const m = await machine();
     const before = await readFile(path.join(m.home, '.claude.json'), 'utf8');
@@ -218,7 +246,7 @@ describe('signing in to a project’s .mcp.json server', () => {
     const inventory = new McpInventoryService({
       accounts: async () => m.accounts,
       components: async () => [],
-      folders: async () => m.folders,
+      folders: m.folders,
       connections: async () => await m.service.connections(),
       documents: m.documents,
       sessions: { get: async () => sessionView('s1', { cwd: m.project, agent: '/fy/bin/claude-work' }) },
@@ -232,5 +260,39 @@ describe('signing in to a project’s .mcp.json server', () => {
     should(docs.map(server => server.scope)).deepEqual(['project']);
     should(docs[0]?.connection?.state).equal('signed-in');
     should(docs[0]?.runtimes).deepEqual([{ runtime: 'claude-work', approval: 'pending' }]);
+  });
+
+  it('should sign in to, list and deliver a server of a folder no project is registered for', async () => {
+    // Arrange — the inventory hands out the subject, exactly as the PWA reads it off the row.
+    const m = await machine();
+    const inventory = new McpInventoryService({
+      accounts: async () => m.accounts,
+      components: async () => [],
+      folders: m.folders,
+      connections: async () => await m.service.connections(),
+      documents: m.documents,
+      sessions: { get: async () => sessionView('s1', { cwd: m.lone, agent: '/fy/bin/claude-work' }) },
+    });
+    const row = (await inventory.session('s1')).servers.find(server => server.name === 'phoebe');
+    const subject = row?.signIn?.subject ?? '';
+    should(subject).equal(mcpProjectSubject('phoebe', mcpProjectKey(m.lone)));
+
+    // Act
+    const flow = await m.service.start(subject, { redirectUri: PWA_REDIRECT });
+    await m.service.complete(flow.flowId, { callback: await m.w.provider.approve(flow.authorizeUrl) });
+    const env = await m.launch.forLaunch('/fy/bin/claude-work', m.lone);
+
+    // Assert — signed in, listed as signed in, and handed to Claude as the local-scope entry.
+    const variable = mcpOAuthSecretNames(subject, m.w.provider.serverUrl).variable;
+    should(env).deepEqual({ [variable]: m.w.provider.issued[0] });
+    should((await m.claudeJson()).projects[m.lone]?.mcpServers).deepEqual({
+      phoebe: {
+        type: 'http',
+        url: m.w.provider.serverUrl,
+        headers: { Authorization: `Bearer \${${variable}}` },
+      },
+    });
+    const after = (await inventory.session('s1')).servers.find(server => server.name === 'phoebe');
+    should(after?.connection?.state).equal('signed-in');
   });
 });

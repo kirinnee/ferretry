@@ -467,7 +467,7 @@ import { FleetCatalogService } from '../src/lib/fleet/catalog-service.ts';
 import { CodexAppServerSupervisor } from '../src/lib/fleet/codex-runtime.ts';
 import { createFleetCredentialsSubsystem, FleetCredentialCatalog } from '../src/lib/fleet/credentials-service.ts';
 import { createFleetSetupSubsystem } from '../src/lib/fleet/setup-service.ts';
-import { resolveStartAccount, type RuntimeNamesPort } from '../src/lib/fleet/start-resolution.ts';
+import { type RuntimeNamesPort, resolveStartAccount } from '../src/lib/fleet/start-resolution.ts';
 import { polledDirectoryLimitations } from '../src/lib/performance/fallbacks.ts';
 import { OpenUrlService } from '../src/lib/system/open-url.ts';
 
@@ -508,7 +508,6 @@ import {
   ANALYTICS_BACKSTOP_MS,
   ANSWER_MAY_HAVE_LANDED,
   ANSWER_NOT_DELIVERED,
-  answerPaused,
   type AnalyticsIndexStoreFactory,
   type AnalyticsIngestCandidate,
   type AnalyticsIngestCandidateSource,
@@ -540,6 +539,7 @@ import {
   advertisesForeignAddress,
   agentSpokenName,
   answerArguments,
+  answerPaused,
   attachmentDirectory,
   authorizeSessionCommand,
   BACKGROUND_DELAY_VARIABLE,
@@ -684,6 +684,7 @@ import {
   isTaskBoardError,
   JevTriageGuard,
   jsonObject,
+  KnownAndFerretFolders,
   type LearningSubsystem,
   LessonsService,
   LiveDeviceConnections,
@@ -6753,11 +6754,19 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
    * launch is about to use — that is the only refresh there is; no timer.
    */
   /**
-   * The folders a ferret may work in, joined to their projects — read from the project catalogue and the
-   * worktree service, which mount with the subsystems below; until they do, there are none. Both the
-   * sign-in (a project's `.mcp.json` servers sign in too, docs/mcp-scopes.md) and a launch read it.
+   * Which project a folder is in, for MCP — the ONE source the inventory, the sign-in (a project's
+   * `.mcp.json` servers sign in too, docs/mcp-scopes.md) and a launch all read. The known folders come
+   * from the project catalogue and the worktree service, the ferrets' folders from the session
+   * directory; all three mount with the subsystems below, and until they do there are none.
    */
-  const mcpFolders: { read: () => Promise<readonly McpInventoryFolder[]> } = { read: async () => [] };
+  const mcpFolderSources: {
+    known: () => Promise<readonly McpInventoryFolder[]>;
+    ferrets: () => Promise<readonly string[]>;
+  } = { known: async () => [], ferrets: async () => [] };
+  const mcpFolders = new KnownAndFerretFolders(
+    async () => await mcpFolderSources.known(),
+    async () => await mcpFolderSources.ferrets(),
+  );
   const mcpDocuments = new FileMcpHarnessDocuments();
   /** The published runtimes, as the MCP inventory names them: by runtime name, harness and config directory. */
   const mcpAccounts = async (): Promise<readonly McpInventoryAccount[]> =>
@@ -6770,7 +6779,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
   const mcpOAuth = new McpOAuthService({
     servers: combinedMcpOAuthServers(
       new AccountModelMcpServers(async () => await readDeclaredAccountModel(configFiles, configLocations)),
-      new ProjectMcpOAuthServers(async () => await mcpFolders.read(), mcpDocuments),
+      new ProjectMcpOAuthServers(mcpFolders, mcpDocuments),
     ),
     http: new FetchMcpOAuthHttp(),
     crypto: webCryptoMcpOAuth,
@@ -6801,7 +6810,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
     // its runtime's own `.claude.json` (lib/mcp-inventory/project-sign-in.ts).
     new ProjectMcpLaunch({
       accounts: mcpAccounts,
-      folders: async () => await mcpFolders.read(),
+      folders: mcpFolders,
       documents: mcpDocuments,
       secrets: secretVault,
       renewal: mcpOAuth,
@@ -10039,7 +10048,8 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           fleet: mounted.fleetCatalog,
         }),
         mcpInventory: (() => {
-          mcpFolders.read = mcpInventoryFolders(mounted.catalogs, mounted.worktrees);
+          mcpFolderSources.known = mcpInventoryFolders(mounted.catalogs, mounted.worktrees);
+          mcpFolderSources.ferrets = async () => (await mounted.sessions.list()).map(view => view.config.cwd);
           const inventory = new McpInventoryService({
             accounts: mcpAccounts,
             components: async () =>
@@ -10053,7 +10063,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
                     ? { auth: 'oauth' as const }
                     : {}),
                 })),
-            folders: async () => await mcpFolders.read(),
+            folders: mcpFolders,
             connections: async () => await mcpOAuth.connections(),
             documents: mcpDocuments,
             sessions: mounted.sessions,

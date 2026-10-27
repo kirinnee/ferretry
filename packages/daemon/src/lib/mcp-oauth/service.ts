@@ -321,7 +321,10 @@ export class McpOAuthService {
   private async serverOf(component: string): Promise<McpOAuthServer> {
     const server = (await this.deps.servers.list()).find(entry => entry.component === component);
     if (server === undefined)
-      throw new McpOAuthRefusal('mcp_auth_unknown_component', `There is no MCP server named “${component}” here.`);
+      throw new McpOAuthRefusal(
+        'mcp_auth_unknown_component',
+        (await this.deps.servers.missing?.(component)) ?? `There is no MCP server named “${component}” here.`,
+      );
     if (server.url === undefined || server.auth !== 'oauth')
       throw new McpOAuthRefusal(
         'mcp_auth_not_oauth',

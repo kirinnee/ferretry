@@ -27,9 +27,8 @@
  * `fleet`/`configure`, and the override runs nothing (it is a web address).
  */
 import type { SecretName } from '@ferretry/protocol';
-import { mcpOAuthSecretNames, mcpProjectSubject } from '@ferretry/protocol';
+import { mcpOAuthSecretNames, parseMcpProjectSubject } from '@ferretry/protocol';
 import type { McpOAuthServer, McpOAuthServers } from '../mcp-oauth/ports.ts';
-import { projectRootFor } from '../session-mcp/service.ts';
 import {
   claudeApproval,
   claudeApprovalKeys,
@@ -38,37 +37,53 @@ import {
   isFerretryLocalEntry,
   type McpDeclaration,
 } from './declarations.ts';
-import {
-  McpDocumentUnreadable,
-  type McpHarnessDocuments,
-  type McpInventoryAccount,
-  type McpInventoryFolder,
-  mcpProjectKey,
-} from './service.ts';
+import { type McpProjectFolders, mcpFolderSubject, mcpProjectKey } from './folders.ts';
+import { McpDocumentUnreadable, type McpHarnessDocuments, type McpInventoryAccount } from './service.ts';
 
-/** The project's own `.mcp.json` remote servers, as sign-in targets. */
+/**
+ * The project's own `.mcp.json` remote servers, as sign-in targets — from the very folders the inventory
+ * lists them from (`./folders.ts`), so every subject a row offers is one this list holds.
+ */
 export class ProjectMcpOAuthServers implements McpOAuthServers {
   constructor(
-    private readonly folders: () => Promise<readonly McpInventoryFolder[]>,
+    private readonly folders: McpProjectFolders,
     private readonly documents: McpHarnessDocuments,
   ) {}
 
   async list(): Promise<readonly McpOAuthServer[]> {
     const servers = new Map<string, McpOAuthServer>();
-    for (const folder of await this.folders())
+    for (const folder of await this.folders.list())
       for (const declaration of await remoteServers(this.documents, folder.root)) {
-        const component = mcpProjectSubject(declaration.name, mcpProjectKey(folder.project));
+        const component = mcpFolderSubject(folder, declaration.name);
         // The registered project's own file wins over a worktree's copy of it.
         if (!servers.has(component) || folder.root === folder.project)
           servers.set(component, { component, url: declaration.url, auth: 'oauth', optional: true });
       }
     return [...servers.values()];
   }
+
+  /** Why a project subject is not listed, naming the project it was looked for in when there is one. */
+  async missing(subject: string): Promise<string | undefined> {
+    const parsed = parseMcpProjectSubject(subject);
+    if (parsed === null) return undefined;
+    const folders = await this.folders.list();
+    const project = folders.find(folder => mcpProjectKey(folder.project) === parsed.projectKey)?.project;
+    if (project !== undefined)
+      return `There is no web MCP server named “${parsed.name}” in ${project.replace(/\/+$/u, '')}/.mcp.json any more. Read the list again.`;
+    return `“${parsed.name}” belongs to a project (${parsed.projectKey}) Ferretry does not know on this machine any more: none of the ${folders.length} project, worktree and ferret folders it knows is that project. Read the list again from the ferret it belongs to.`;
+  }
 }
 
 /** Both kinds of sign-in target, components first: a component name can never be a project subject. */
 export const combinedMcpOAuthServers = (...sources: readonly McpOAuthServers[]): McpOAuthServers => ({
   list: async () => (await Promise.all(sources.map(source => source.list()))).flat(),
+  missing: async component => {
+    for (const source of sources) {
+      const reason = await source.missing?.(component);
+      if (reason !== undefined) return reason;
+    }
+    return undefined;
+  },
 });
 
 type RemoteDeclaration = Extract<McpDeclaration, { readonly url: string }>;
@@ -102,7 +117,8 @@ export interface ClaudeLocalScope {
 
 export interface ProjectMcpLaunchDeps {
   accounts(): Promise<readonly McpInventoryAccount[]>;
-  folders(): Promise<readonly McpInventoryFolder[]>;
+  /** Which project a folder is in: the same source the inventory and the sign-in list read. */
+  readonly folders: McpProjectFolders;
   readonly documents: McpHarnessDocuments;
   readonly secrets: { values(): Promise<ReadonlyMap<SecretName, string>> };
   readonly renewal?: { refreshForLaunch(names: readonly SecretName[]): Promise<void> };
@@ -114,27 +130,22 @@ export class ProjectMcpLaunch {
 
   /**
    * The variables one launch needs for the project servers its folder's project has signed in to, after
-   * writing their local-scope entries. `{}` for a Codex runtime, a folder in no known project, or a
-   * project with no signed-in server — and then any entry an earlier launch wrote is removed.
+   * writing their local-scope entries. `{}` for a Codex runtime, or a project with no signed-in server —
+   * and then any entry an earlier launch wrote is removed. A folder in no registered project or managed
+   * worktree is a project of its own, exactly as its ferret is listed.
    */
   async forLaunch(agent: string, cwd: string): Promise<Readonly<Record<string, string>>> {
     const account = (await this.deps.accounts()).find(
       candidate => candidate.wrapper === agent || candidate.runtime === agent,
     );
     if (account === undefined || account.harness !== 'claude') return {};
-    const folders = await this.deps.folders();
-    const root = projectRootFor(
-      cwd,
-      folders.map(folder => folder.root),
-    );
-    const folder = folders.find(candidate => candidate.root.replace(/\/+$/u, '') === root);
-    if (root === undefined || folder === undefined) return {};
+    const folder = await this.deps.folders.forCwd(cwd);
+    const root = folder.root.replace(/\/+$/u, '');
     const claudeJson = `${account.home.replace(/\/+$/u, '')}/.claude.json`;
     const remote = await remoteServers(this.deps.documents, root);
-    const key = mcpProjectKey(folder.project);
     const named = remote.map(declaration => ({
       declaration,
-      names: mcpOAuthSecretNames(mcpProjectSubject(declaration.name, key), declaration.url),
+      names: mcpOAuthSecretNames(mcpFolderSubject(folder, declaration.name), declaration.url),
     }));
     if (named.length > 0) await this.deps.renewal?.refreshForLaunch(named.map(entry => entry.names.access));
     const values = named.length === 0 ? new Map<SecretName, string>() : await this.deps.secrets.values();

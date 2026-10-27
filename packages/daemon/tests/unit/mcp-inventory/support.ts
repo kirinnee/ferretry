@@ -4,6 +4,7 @@
  */
 import type { McpOAuthConnection, SessionView } from '@ferretry/protocol';
 import {
+  KnownAndFerretFolders,
   McpDocumentUnreadable,
   type McpHarnessDocuments,
   type McpInventoryAccount,
@@ -36,6 +37,16 @@ export const FOLDERS: readonly McpInventoryFolder[] = [
   { root: PROJECT, project: PROJECT, name: 'app' },
   { root: WORKTREE, project: PROJECT, name: 'app' },
 ];
+
+/** The folder source the inventory, the sign-in list and a launch share, over fixed known folders and ferret folders. */
+export const knownFolders = (
+  known: readonly McpInventoryFolder[],
+  ferrets: readonly string[] = [],
+): KnownAndFerretFolders =>
+  new KnownAndFerretFolders(
+    async () => known,
+    async () => ferrets,
+  );
 
 /** The documents, by path. A value of `BROKEN` reads as a file that is there and does not parse. */
 export const BROKEN = Symbol('broken');
@@ -133,7 +144,7 @@ export function inventoryWorld(files?: Map<string, unknown>): InventoryWorld {
     deps: {
       accounts: async () => ACCOUNTS,
       components: async () => COMPONENTS,
-      folders: async () => FOLDERS,
+      folders: knownFolders(FOLDERS),
       connections: async () => built.connections,
       documents,
       sessions: {

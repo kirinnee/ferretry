@@ -2,7 +2,7 @@
  * Every MCP server a ferret actually sees, from every scope, per harness (docs/mcp-scopes.md).
  *
  * WHAT IS READ is what the RUNTIME reads: its config directory under the fleet (the manifest's `home`),
- * never the person's own `~/.claude` or `~/.codex`, plus the project folders this daemon knows. The
+ * never the person's own `~/.claude` or `~/.codex`, plus the project folders `./folders.ts` names. The
  * scope table is in `@ferretry/protocol` mcp-inventory; the rules for what a harness accepts are in
  * `./declarations.ts`.
  *
@@ -25,11 +25,9 @@ import {
   type McpRuntimeUse,
   type McpScope,
   type McpSignInTarget,
-  mcpProjectSubject,
   type SessionView,
   sha256Hex,
 } from '@ferretry/protocol';
-import { projectRootFor } from '../session-mcp/service.ts';
 import {
   type ClaudeApprovalKeys,
   claudeApproval,
@@ -43,6 +41,7 @@ import {
   isFerretryLocalEntry,
   type McpDeclaration,
 } from './declarations.ts';
+import { type McpInventoryFolder, type McpProjectFolders, mcpFolderSubject } from './folders.ts';
 
 // ── Ports ────────────────────────────────────────────────────────────────────────────────────────
 
@@ -64,17 +63,6 @@ export interface McpInventoryComponent {
   readonly auth?: 'oauth';
 }
 
-/**
- * A folder a ferret may work in: a registered project or a live managed worktree. `project` is the
- * root of the PROJECT it belongs to (itself for a registered project, the source repository for a
- * worktree), so every checkout of one project shares a sign-in.
- */
-export interface McpInventoryFolder {
-  readonly root: string;
-  readonly project: string;
-  readonly name?: string;
-}
-
 /** A document a harness reads, already parsed. `null`: the file is not there. */
 export interface McpHarnessDocuments {
   read(path: string, format: 'json' | 'toml'): Promise<unknown>;
@@ -91,7 +79,8 @@ export class McpDocumentUnreadable extends Error {
 export interface McpInventoryDeps {
   accounts(): Promise<readonly McpInventoryAccount[]>;
   components(): Promise<readonly McpInventoryComponent[]>;
-  folders(): Promise<readonly McpInventoryFolder[]>;
+  /** Which project a folder is in: the same source the project sign-in list and a launch read. */
+  readonly folders: McpProjectFolders;
   connections(): Promise<readonly McpOAuthConnection[]>;
   readonly documents: McpHarnessDocuments;
   readonly sessions: { get(sessionId: string): Promise<SessionView | undefined> };
@@ -112,11 +101,6 @@ export class McpInventoryRefusal extends Error {
 
 /** Ferretry's own tools server: the fixed layer starts it in every runtime (`FERRETRY_MCP_SERVER`). */
 export const FERRETRY_TOOLS_SERVER = 'ferretry';
-
-/** The project digest in a project server's sign-in subject. */
-export const mcpProjectKey = (projectRoot: string): string => sha256Hex(withoutTrailingSlash(projectRoot)).slice(0, 12);
-
-const withoutTrailingSlash = (path: string): string => posix.normalize(path).replace(/(?<=.)\/+$/u, '');
 
 /** One declaration, with everything a check needs. Never put on the wire as it is. */
 export interface ResolvedMcpServer {
@@ -259,10 +243,10 @@ export class McpInventoryService {
   ): Promise<readonly [ResolvedMcpServer[], readonly McpOAuthConnection[], McpInventoryProblem[]]> {
     const session = await this.deps.sessions.get(sessionId);
     if (session === undefined) throw new McpInventoryRefusal(404, 'not-found', `no session ${sessionId}`);
-    const [accounts, components, folders, connections] = await Promise.all([
+    const [accounts, components, folder, connections] = await Promise.all([
       this.deps.accounts(),
       this.deps.components(),
-      this.deps.folders(),
+      this.deps.folders.forCwd(session.config.cwd),
       this.deps.connections(),
     ]);
     const account = accounts.find(
@@ -270,15 +254,6 @@ export class McpInventoryService {
     );
     const harness: McpHarness = account?.harness ?? (session.config.harness === 'codex' ? 'codex' : 'claude');
     const files = reading(this.deps.documents);
-    const root =
-      projectRootFor(
-        session.config.cwd,
-        folders.map(folder => folder.root),
-      ) ?? withoutTrailingSlash(session.config.cwd);
-    const folder = folders.find(candidate => withoutTrailingSlash(candidate.root) === root) ?? {
-      root,
-      project: root,
-    };
     const servers: ResolvedMcpServer[] = [this.#ferretry(harness, account === undefined ? [] : [account])];
     if (account !== undefined) servers.push(...(await this.#home(account, components, files)));
     servers.push(...(await this.#project(folder, harness, account === undefined ? [] : [account], files)));
@@ -290,7 +265,7 @@ export class McpInventoryService {
     const [accounts, components, folders, connections] = await Promise.all([
       this.deps.accounts(),
       this.deps.components(),
-      this.deps.folders(),
+      this.deps.folders.list(),
       this.deps.connections(),
     ]);
     const files = reading(this.deps.documents);
@@ -376,7 +351,6 @@ export class McpInventoryService {
             projectSettingsPaths(folder.root).map(async path => claudeApprovalKeys(await files.read(path, 'json'))),
           )
         : [];
-    const key = mcpProjectKey(folder.project);
     const servers: ResolvedMcpServer[] = [];
     for (const declaration of read.servers) {
       const runtimes: McpRuntimeUse[] = [];
@@ -389,7 +363,7 @@ export class McpInventoryService {
         declaration.transport === 'stdio'
           ? undefined
           : {
-              subject: mcpProjectSubject(declaration.name, key),
+              subject: mcpFolderSubject(folder, declaration.name),
               required: false,
               ...(harness === 'codex' ? { unsupported: CODEX_PROJECT_SIGN_IN } : {}),
             };
@@ -464,39 +438,3 @@ function merged(servers: readonly ResolvedMcpServer[]): ResolvedMcpServer[] {
   }
   return [...byId.values()];
 }
-
-/**
- * The folders a ferret may work in, each joined to its project: registered projects, then live managed
- * worktrees — a worktree belongs to the project registered for its common directory (`projectId`), else
- * to the repository it was forked from. Read fresh per request, like `knownProjectRoots`.
- */
-export const mcpInventoryFolders =
-  (
-    catalogs: { projects(): Promise<readonly { readonly id: string; readonly name: string; readonly path: string }[]> },
-    worktrees: {
-      list(): Promise<{
-        readonly worktrees: readonly {
-          readonly path: string;
-          readonly repositoryRoot: string;
-          readonly projectId?: string;
-          readonly removedAt?: string;
-        }[];
-      }>;
-    },
-  ) =>
-  async (): Promise<readonly McpInventoryFolder[]> => {
-    const [projects, managed] = await Promise.all([catalogs.projects(), worktrees.list()]);
-    return [
-      ...projects.map(project => ({ root: project.path, project: project.path, name: project.name })),
-      ...managed.worktrees
-        .filter(worktree => worktree.removedAt === undefined)
-        .map(worktree => {
-          const owner = projects.find(project => project.id === worktree.projectId);
-          return {
-            root: worktree.path,
-            project: owner?.path ?? worktree.repositoryRoot,
-            ...(owner === undefined ? {} : { name: owner.name }),
-          };
-        }),
-    ];
-  };
