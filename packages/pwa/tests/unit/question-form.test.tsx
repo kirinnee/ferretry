@@ -1,20 +1,30 @@
 import { describe, expect, test } from 'bun:test';
 import { FyHttpError } from '@ferretry/protocol/client';
 import { QuestionForm } from '../../src/components/question-form.tsx';
+import { QuestionDraftStore } from '../../src/components/question-form-model.ts';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
+import type { ReactTestRenderer } from 'react-test-renderer';
 import { render, run, runAsync } from '../support/react.ts';
 
 const daemonA = daemonConnection({ daemonId: 'daemon-a', baseUrl: 'https://a.invalid', deviceId: 'token-a' });
 const daemonB = daemonConnection({ daemonId: 'daemon-b', baseUrl: 'https://b.invalid', deviceId: 'token-b' });
 
+const eyebrow = (form: ReactTestRenderer): string =>
+  form.root.findByProps({ className: 'fy-eyebrow' }).children.join('');
+const button = (form: ReactTestRenderer, label: string) => {
+  const found = form.root.findAllByType('button').filter(item => item.children.join('') === label);
+  if (found.length !== 1) throw new Error(`expected one "${label}" button, found ${found.length}`);
+  return found[0] as (typeof found)[number];
+};
+
 describe('QuestionForm', () => {
-  test('pages a multi-question phone form and preserves every embedded multi-select label', async () => {
+  test('asks a multi-question form one question at a time and preserves every embedded multi-select label', async () => {
     const calls: unknown[][] = [];
     const form = render(
       <QuestionForm
         api={{ answer: async (...args) => calls.push(args) as never }}
-        compact
         daemon={daemonA}
+        drafts={new QuestionDraftStore()}
         question={{
           toolUseId: 'ask-1',
           questions: [
@@ -26,14 +36,19 @@ describe('QuestionForm', () => {
       />,
     );
     expect(form.root.findAllByType('fieldset')).toHaveLength(1);
+    expect(eyebrow(form)).toBe('Question 1 of 2');
     expect(form.root.findAllByType('input').every(input => input.props.type === 'checkbox')).toBe(true);
+    expect(button(form, 'Next').props.disabled).toBe(true);
     run(() => form.root.findAllByType('input')[0]?.props.onChange());
     run(() => form.root.findAllByType('input')[1]?.props.onChange());
-    run(() => form.root.findByProps({ children: 'Next' }).props.onClick());
-    expect(form.root.findAll(item => item.children.join('') === 'Question 2 of 2')).toHaveLength(1);
+    run(() => button(form, 'Next').props.onClick());
+    expect(eyebrow(form)).toBe('Question 2 of 2');
     run(() => form.root.findAllByType('input')[0]?.props.onChange());
+    run(() => button(form, 'Review').props.onClick());
+    expect(eyebrow(form)).toBe('Review · 2 questions');
+    expect(form.root.findAllByType('fieldset')).toHaveLength(0);
     await runAsync(async () => {
-      form.root.findByProps({ children: 'Submit answers' }).props.onClick();
+      button(form, 'Submit answers').props.onClick();
       await Promise.resolve();
     });
     expect(calls).toEqual([
@@ -348,17 +363,26 @@ describe('QuestionForm', () => {
       />,
     );
     run(() => form.root.findAllByType('input')[1]?.props.onChange());
-    run(() => form.root.findAllByType('input')[3]?.props.onChange());
+    run(() => button(form, 'Next').props.onClick());
+    run(() => form.root.findAllByType('input')[0]?.props.onChange());
+    run(() => button(form, 'Review').props.onClick());
     await runAsync(async () => {
       form.root.findByProps({ className: 'fy-question-submit' }).props.onClick();
       await Promise.resolve();
     });
 
     expect(form.root.findByProps({ role: 'alert' }).children.join('')).toBe(PAUSED_SENTENCE);
-    // Only the first question carries the mark.
+    // The review page marks only the first question.
     const held = form.root.findAllByProps({ 'data-question-held': '' });
-    expect(held).toHaveLength(1);
-    expect(form.root.findAllByType('fieldset')[0]?.findAllByProps({ 'data-question-held': '' })).toHaveLength(1);
+    expect(held).toHaveLength(0);
+    expect(
+      form.root.findAllByType('small').filter(item => item.children.join('') === 'Answered in the terminal'),
+    ).toHaveLength(1);
+    run(() => form.root.findByProps({ 'aria-label': 'Change answer to Colour' }).props.onClick());
+    expect(form.root.findAllByProps({ 'data-question-held': '' })).toHaveLength(1);
+    run(() => button(form, 'Next').props.onClick());
+    expect(form.root.findAllByProps({ 'data-question-held': '' })).toHaveLength(0);
+    run(() => button(form, 'Review').props.onClick());
     expect(form.root.findByType('pre').children.join('')).toMatch(/stopped at question 2 of 2 \(Extras\)/u);
     run(() => form.root.findByProps({ className: 'fy-question-console' }).props.onClick());
     expect(opened).toEqual(['console']);

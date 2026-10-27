@@ -1374,7 +1374,6 @@ export function SessionChatPage({
           {question !== null && canControl ? (
             <QuestionForm
               api={questionApi}
-              compact={compact}
               daemon={connection}
               key={`${connection.daemonId}:${session.config.id}:${question.toolUseId}`}
               onOpenConsole={openConsole}
