@@ -57,6 +57,11 @@ export interface McpOAuthServer {
 /** The configured MCP servers that can sign in. Read on every call: the configuration can change under the daemon. */
 export interface McpOAuthServers {
   list(): Promise<readonly McpOAuthServer[]>;
+  /**
+   * Why `component` is in no list, in words that name where it was looked for — a project server's
+   * project folder. `undefined` when there is nothing better to say than that no server has that name.
+   */
+  missing?(component: string): Promise<string | undefined>;
 }
 
 /**

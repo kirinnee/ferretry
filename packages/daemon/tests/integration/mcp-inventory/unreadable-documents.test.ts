@@ -11,7 +11,11 @@ import path from 'node:path';
 import type { SessionView } from '@ferretry/protocol';
 import should from 'should';
 import { FileMcpHarnessDocuments, unreadableDocument } from '../../../src/adapters/mcp-inventory/index.ts';
-import { McpDocumentUnreadable, McpInventoryService } from '../../../src/lib/mcp-inventory/index.ts';
+import {
+  KnownAndFerretFolders,
+  McpDocumentUnreadable,
+  McpInventoryService,
+} from '../../../src/lib/mcp-inventory/index.ts';
 import { sessionView } from '../../unit/runtime/mounts/support.ts';
 
 const roots: string[] = [];
@@ -44,7 +48,10 @@ const inventoryOver = (home: string, project: string, session: SessionView) =>
   new McpInventoryService({
     accounts: async () => [{ runtime: 'claude-work', harness: 'claude', home, wrapper: session.config.agent }],
     components: async () => [],
-    folders: async () => [{ root: project, project }],
+    folders: new KnownAndFerretFolders(
+      async () => [{ root: project, project }],
+      async () => [],
+    ),
     connections: async () => [],
     documents: new FileMcpHarnessDocuments(),
     sessions: { get: async () => session },

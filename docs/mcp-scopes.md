@@ -100,6 +100,40 @@ who may open a terminal here could run that command anyway, and one who may not,
 run it for them. It is not audited — it changes no configuration and grants nobody anything
 (`tests/unit/audit/not-audited.ts`).
 
+## Which project a folder is in
+
+The inventory, the sign-in list and a launch all ask the same question of a folder — which project is
+it in? — and answer it from ONE source (`lib/mcp-inventory/folders.ts`), so the subject a row offers
+is always one the sign-in finds and the one a launch delivers:
+
+- a folder inside a **registered project** or a **live managed worktree** is in the longest such root
+  that contains it (a worktree belongs to its registered project, else to the repository it came from);
+- **any other folder a ferret works in is a project of its own**, rooted at that folder.
+
+The folders read are the registered projects, the live managed worktrees, and the folder of every ferret
+this daemon holds that is in none of them. A launch in a folder no ferret has used yet gets the same
+answer its ferret will be listed under, because a ferret's folder is always placed against the
+registered ones only.
+
+**The bug this fixed.** The inventory used to fall back to the ferret's own folder for a repository
+nobody had registered, while the sign-in list and the launch read only registered folders. So a ferret in
+such a repository listed its `.mcp.json` server as **Needs sign-in**, and Sign in answered "There is no
+MCP server named `phoebe..048c658abfb9` here" — that key is the digest of the ferret's own folder,
+which no registered folder had. A sign-in that is refused now says why in words that name the project: a
+known project that no longer declares the server is named by its `.mcp.json` path, and a key no folder
+here has is quoted with how many folders were searched.
+
+**Declared GAPs.**
+
+- **Paths are compared as written — accepted.** A folder reached through a symlink, or spelled with
+  other letter case on a case-insensitive disk, is a different folder from the registered one. Every
+  reader agrees on that, so the sign-in still works; it is filed under that spelling's project, and a
+  second spelling needs its own sign-in. Register the project under the path the ferret uses.
+- **A sub-folder of an unregistered repository is its own project — GAP.** Claude resolves a sub-folder
+  to the checkout's root; Ferretry does not run `git` to find it, so a ferret started in
+  `repo/tools` reads `repo/tools/.mcp.json`, not `repo/.mcp.json`. Register the repository, or start
+  the ferret at its root.
+
 ## Signing in to a project server
 
 **The bug this fixes.** A `.mcp.json` server that asks for OAuth was left to Claude Code to sign in to
@@ -110,7 +144,8 @@ the daemon's sign-in knew only fleet components and answered "There is no MCP se
 
 **Now** a project's web server signs in through the same flow as a component
 ([mcp-oauth.md](mcp-oauth.md)), filed under its **subject**: `<name>..<project key>`, where the project
-key is 12 hex digits of SHA-256 over the root of the **project** it belongs to. A fleet component name
+key is 12 hex digits of SHA-256 over the root of the **project** it belongs to
+([which project a folder is in](#which-project-a-folder-is-in)). A fleet component name
 can never contain `..`, so a subject is never mistaken for a component; every worktree of one project
 shares the sign-in, and another project's same-named server does not. The secret names are derived from
 the subject and the address exactly as for a component (`mcpOAuthSecretNames`), so a `.mcp.json` whose
@@ -156,8 +191,13 @@ server.
 | What each harness accepts; approval rules; JSON-RPC and SSE parsing                       | `unit/mcp-inventory/declarations.test.ts`                |
 | A check: token use, no unapproved command run, env filling, redaction, the outcomes       | `unit/mcp-inventory/check.test.ts`                       |
 | Project sign-in delivery: local-scope entry, variable, disabled, sign-out                 | `unit/mcp-inventory/project-sign-in.test.ts`             |
-| The owner's failure end to end over real files and a fake OAuth provider                  | `integration/mcp-inventory/project-sign-in.test.ts`      |
+| One derivation: every offered subject is listed for sign-in and delivered, per folder     | `unit/mcp-inventory/folders.test.ts`                     |
+| The owner's failures end to end over real files and a fake OAuth provider                 | `integration/mcp-inventory/project-sign-in.test.ts`      |
 | stdio, Streamable HTTP and SSE against fake servers; 401, 404, timeout, missing command   | `integration/mcp-inventory/probe.test.ts`                |
 | The local-scope writer keeps everything else and its mode; unreadable documents           | `integration/mcp-inventory/harness-documents.test.ts`    |
 | A malformed or unreadable `.mcp.json` is one named problem; the other servers still list  | `integration/mcp-inventory/unreadable-documents.test.ts` |
 | Route governance and wire shapes                                                          | `unit/runtime/mounts/mcp-inventory.test.ts`              |
+
+The browser's end is `packages/pwa/tests/integration/mcp-project-sign-in.test.ts`: the PWA's own calls
+through the daemon's real routes, a fake MCP server and OAuth provider on loopback, and the local-scope
+entry Claude reads, for a repository no project is registered for.

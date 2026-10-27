@@ -14,6 +14,7 @@ import {
   CLAUDE_HOME,
   documents,
   FOLDERS,
+  knownFolders,
   MemoryDocuments,
   PROJECT,
   PROJECT_KEY,
@@ -40,7 +41,7 @@ function launcher(
   const renewed: (readonly SecretName[])[] = [];
   const launch = new ProjectMcpLaunch({
     accounts: async () => ACCOUNTS,
-    folders: async () => FOLDERS,
+    folders: knownFolders(FOLDERS),
     documents: new MemoryDocuments(files),
     secrets: { values: async () => new Map(Object.entries(held) as [SecretName, string][]) },
     renewal: { refreshForLaunch: async names => void renewed.push(names) },
@@ -54,7 +55,7 @@ describe('ProjectMcpOAuthServers', () => {
     // Arrange — the worktree carries a copy with a different address; the project's own file wins.
     const files = documents();
     files.set(`${WORKTREE}/.mcp.json`, { mcpServers: { docs: { url: 'https://moved.example.com/mcp' } } });
-    const servers = new ProjectMcpOAuthServers(async () => [...FOLDERS].reverse(), new MemoryDocuments(files));
+    const servers = new ProjectMcpOAuthServers(knownFolders([...FOLDERS].reverse()), new MemoryDocuments(files));
 
     // Act
     const listed = await servers.list();
@@ -77,7 +78,7 @@ describe('ProjectMcpOAuthServers', () => {
     files.set(`${PROJECT}/.mcp.json`, BROKEN);
     const combined = combinedMcpOAuthServers(
       { list: async () => [{ component: 'linear', url: 'https://mcp.linear.app/mcp', auth: 'oauth' }] },
-      new ProjectMcpOAuthServers(async () => FOLDERS, new MemoryDocuments(files)),
+      new ProjectMcpOAuthServers(knownFolders(FOLDERS), new MemoryDocuments(files)),
     );
 
     // Act / Assert
@@ -181,7 +182,7 @@ describe('ProjectMcpLaunch', () => {
     let opened = 0;
     const launch = new ProjectMcpLaunch({
       accounts: async () => ACCOUNTS,
-      folders: async () => FOLDERS,
+      folders: knownFolders(FOLDERS),
       documents: new MemoryDocuments(files),
       secrets: {
         values: async () => {
