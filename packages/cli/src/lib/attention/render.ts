@@ -152,6 +152,11 @@ export function renderAttentionList(snapshot: AttentionSnapshot): string {
   return [...preamble, header, ...body].join('\n');
 }
 
+/** One item as `attention show` prints it: the open item's full brief, or the line its resolution left. */
+export function renderAttentionItem(item: AttentionItem | ResolvedAttentionItem): string {
+  return 'resolvedAt' in item ? resolutionLine(item) : itemLines(item).join('\n');
+}
+
 function resolutionLine(item: ResolvedAttentionItem): string {
   const verb = item.disposition === 'dismissed' ? 'dismissed' : 'resolved';
   const answer = item.response === undefined ? '' : ` — ${compact(describeAnswer(item.response), SHORT_WIDTH)}`;

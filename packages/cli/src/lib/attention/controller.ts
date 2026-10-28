@@ -12,6 +12,7 @@ import type { IAttentionBriefInput, IAttentionGateway, IAttentionOutput } from '
 import { attentionReference, parseAttentionReference } from './reference.ts';
 import {
   renderAttentionHistory,
+  renderAttentionItem,
   renderAttentionList,
   renderAttentionMutation,
   renderNotification,
@@ -75,6 +76,18 @@ export class AttentionController {
   async list(options: AttentionCommandOptions): Promise<void> {
     const snapshot = await this.gateway.snapshot(this.#target(options));
     this.#report(snapshot, options, () => renderAttentionList(snapshot));
+  }
+
+  /** Prints one item, open or resolved; read-only, so a mistyped verb can never raise anything. */
+  async show(reference: string, options: AttentionCommandOptions): Promise<void> {
+    const id = parseAttentionReference(reference);
+    const sessionId = this.#target(options);
+    const snapshot = await this.gateway.snapshot(sessionId);
+    const open = snapshot.items.find(item => item.id === id);
+    const resolved = snapshot.resolved.find(item => item.id === id);
+    const found = open ?? resolved;
+    if (found === undefined) throw new Error(`no attention item ${attentionReference(id)} in ${sessionId}`);
+    this.out.success(options.json === true ? JSON.stringify(found, null, 2) : renderAttentionItem(found));
   }
 
   async history(options: AttentionCommandOptions): Promise<void> {

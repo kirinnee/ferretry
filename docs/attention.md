@@ -31,6 +31,10 @@ This document is the contract for that loop. The board's own rules are in
   and the state machine clears the mark in the same commit, so a retried edit is no change and pushes
   nothing. `history` keeps the last 20 `{at, kind: 'needs-info'|'updated', note?}` entries, oldest dropped,
   so the app can say "You asked for more info 10:42 · updated 10:44". Closing the item drops the mark.
+- **Raising takes the explicit `add` verb.** `fy attention` has no default command: a first word that is
+  not a verb (`fy attention show A6`, a typo, a bare sentence) is refused with "unknown command" and the
+  verbs on offer, and exits non-zero. A raise pushes to the owner's phone, so a mistyped read must never
+  become one. `fy attention show <id>` prints one item, open or resolved, read-only.
 - **Who raised it is decided by the pane, not the words.** `fy attention` sends the client header and,
   inside a ferret, that ferret's `FY_SESSION_ID` as `x-ferretry-session-id`. The daemon attributes the
   call to `peer:<session>`, so the item is `raisedBy: agent` with `raisedBySession` set, and the push

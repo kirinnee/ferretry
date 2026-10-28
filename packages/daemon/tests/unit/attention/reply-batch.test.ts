@@ -59,6 +59,21 @@ class Sends {
 
 const inline = { run: async <T>(_key: string, task: () => Promise<T>): Promise<T> => await task() };
 const clock = { now: () => AT };
+/** The production executor's contract: work under one key runs one at a time, in arrival order. */
+function perKey(): { run: <T>(key: string, task: () => Promise<T>) => Promise<T> } {
+  const tails = new Map<string, Promise<unknown>>();
+  return {
+    run: async <T>(key: string, task: () => Promise<T>): Promise<T> => {
+      const result = (tails.get(key) ?? Promise.resolve()).then(task);
+      tails.set(
+        key,
+        result.catch(() => undefined),
+      );
+      return await result;
+    },
+  };
+}
+
 /** Lets a detached delivery run to its end: it awaits several file reads and writes. */
 const settled = async (): Promise<void> => await new Promise(resolve => setTimeout(resolve, 0));
 
@@ -153,6 +168,23 @@ describe('the attention reply batcher', () => {
     // Assert
     should(sends.sent).have.length(1);
     should(outboxes.files.get(SESSION)).containDeep({ pending: [], sending: [], delivered: ['A1'] });
+  });
+
+  it('should send an answer once when the owner skips the wait as the timer fires', async () => {
+    // Arrange — one send id is one message; the ledger shows its accepted → withdrawn history as two rows.
+    const outboxes = new MemoryOutboxes();
+    const timers = new HeldTimers();
+    const sends = new Sends();
+    const batcher = new AttentionReplyBatcher(outboxes, sends, timers, perKey(), clock);
+    await batcher.add(SESSION, 'A6', 'Reached you');
+
+    // Act — "Send now" races the timer that was already due, and the answer is given again meanwhile.
+    await Promise.all([batcher.sendNow(SESSION), batcher.flush(SESSION), batcher.add(SESSION, 'A6', 'Reached you')]);
+    timers.tasks.get(SESSION)?.task();
+    await settled();
+
+    // Assert
+    should(sends.sent).deepEqual([{ message: 'Reached you', sendId: 'attention-session-1-A6' }]);
   });
 
   it('should send a full outbox before it takes one more answer', async () => {
