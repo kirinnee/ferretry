@@ -1,7 +1,12 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
 import type { z } from 'zod';
-import { attentionBoardPath, notifyPath, ProtocolAttentionGateway } from '../../../src/lib/attention/gateway';
+import {
+  attentionBoardPath,
+  notifyPath,
+  ProtocolAttentionGateway,
+  repliesPath,
+} from '../../../src/lib/attention/gateway';
 import type { AttentionApiClient } from '../../../src/lib/attention/ports';
 import { humanItem, SESSION, snapshot } from './fixtures';
 
@@ -131,5 +136,23 @@ describe('protocol attention gateway attribution', () => {
 
     // Assert
     should(calls[0]?.init?.headers).deepEqual({ 'content-type': 'application/json', 'x-ferretry-client': 'cli' });
+  });
+});
+
+describe('protocol attention gateway send-now', () => {
+  it('should post to the replies route with the attribution headers', async () => {
+    // Arrange
+    const calls: Call[] = [];
+    const gateway = new ProtocolAttentionGateway(fakeClient(snapshot([]), calls), 'ferret-1');
+
+    // Act
+    await gateway.sendReplies('a/b');
+
+    // Assert
+    should(repliesPath('a/b')).equal('/v1/sessions/a%2Fb/attention/replies');
+    should(calls[0]?.path).equal('/v1/sessions/a%2Fb/attention/replies');
+    should(calls[0]?.init?.method).equal('POST');
+    should(JSON.parse(String(calls[0]?.init?.body))).deepEqual({});
+    should(calls[0]?.init?.headers).containDeep({ 'x-ferretry-session-id': 'ferret-1' });
   });
 });

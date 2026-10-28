@@ -365,3 +365,14 @@ describe('attention writing flags', () => {
     should(help).containEql('bullet points');
   });
 });
+
+describe('attention send-now command', () => {
+  it('should deliver the target session’s held answers', async () => {
+    // Arrange + Act
+    const { parsed, gateway } = run(['attention', 'send-now', '--session', 'other-session']);
+    await parsed;
+
+    // Assert
+    should(gateway.flushed).deepEqual(['other-session']);
+  });
+});

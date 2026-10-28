@@ -16,7 +16,7 @@ import {
   type DirectNotificationSubsystem,
 } from '../../../../src/lib/runtime/index.ts';
 import { jsonBody, request } from '../../api/support.ts';
-import { agentIn, attentionService, CREDENTIALS, human } from './support.ts';
+import { agentIn, attentionService, CREDENTIALS, human, NO_HELD_REPLIES } from './support.ts';
 
 /** A repository whose reads fail the way a damaged ledger file does. */
 class BrokenLedgerRepository implements AttentionLedgerRepository {
@@ -62,7 +62,7 @@ function fixture(
   notifications: DirectNotificationSubsystem = new FakeNotifications(),
   credentials: ApiCredentials = CREDENTIALS,
 ) {
-  const routes = attentionRoutes(attentionService(repository), notifications);
+  const routes = attentionRoutes(attentionService(repository), notifications, NO_HELD_REPLIES);
   const dispatcher = new ApiDispatcher(new ApiRouter([...routes]), credentials, NO_GOVERNED_ROUTES_GUARD);
   return async (overrides: Parameters<typeof request>[0]): Promise<ApiResponse> =>
     await dispatcher.dispatch(request(overrides));
@@ -530,5 +530,25 @@ describe('attention routes', () => {
       should(response.status).equal(status);
       should(jsonBody(response)).have.property('code', code);
     }
+  });
+});
+
+describe('attention routes and held answers', () => {
+  it('should serve the board without `replies` when the outbox cannot be read', async () => {
+    // Arrange
+    const routes = attentionRoutes(attentionService(), new FakeNotifications(), {
+      pending: async () => {
+        throw new Error('outbox unreadable');
+      },
+      sendNow: async () => undefined,
+    });
+    const dispatcher = new ApiDispatcher(new ApiRouter([...routes]), CREDENTIALS, NO_GOVERNED_ROUTES_GUARD);
+
+    // Act
+    const response = await dispatcher.dispatch(request({ path: '/v1/sessions/s1/attention', headers: human }));
+
+    // Assert — the board is the answer; a held outbox is decoration.
+    should(response.status).equal(200);
+    should(jsonBody(response)).not.have.property('replies');
   });
 });

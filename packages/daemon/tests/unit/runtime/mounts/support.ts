@@ -57,6 +57,7 @@ import {
   type AttentionLedger,
   type AttentionLedgerRepository,
   type AttentionMutation,
+  type AttentionRepliesSubsystem,
   AttentionService,
 } from '../../../../src/lib/attention/index.ts';
 import type {
@@ -2363,3 +2364,9 @@ export function configChangeSubsystem(announced: (readonly ConfigChangeKind[])[]
     },
   };
 }
+
+/** An outbox that holds nothing: for routes whose test is not about batched answers. */
+export const NO_HELD_REPLIES: AttentionRepliesSubsystem = {
+  pending: async () => undefined,
+  sendNow: async () => undefined,
+};

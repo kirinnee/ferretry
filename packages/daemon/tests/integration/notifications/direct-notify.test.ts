@@ -20,7 +20,13 @@ import {
 } from '../../../src/lib/index.ts';
 import { jsonBody, request } from '../../unit/api/support.ts';
 import { deviceId, pushId, record } from '../../unit/push/support.ts';
-import { attentionService, CREDENTIALS, human, sessionView } from '../../unit/runtime/mounts/support.ts';
+import {
+  attentionService,
+  CREDENTIALS,
+  human,
+  NO_HELD_REPLIES,
+  sessionView,
+} from '../../unit/runtime/mounts/support.ts';
 import { cleanupTempDirectories, tempDirectory } from '../support/repository.ts';
 
 const SESSION = 's1';
@@ -75,7 +81,7 @@ async function daemon(
     serial: new KeyedSerialExecutor(),
     clock: { now: () => AT },
   });
-  const routes = attentionRoutes(attentionService(), notifications);
+  const routes = attentionRoutes(attentionService(), notifications, NO_HELD_REPLIES);
   const surface = new ApiDispatcher(new ApiRouter([...routes]), CREDENTIALS, NO_GOVERNED_ROUTES_GUARD);
   return { paths, files, ledger, sessions, transport, routes, surface };
 }
