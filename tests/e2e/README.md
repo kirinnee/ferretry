@@ -84,7 +84,7 @@ runs have measured its flake rate, and then it becomes a required check. See
 
 **A journey that waits on purpose ends its title in `[slow]`.** Examples are a page
 left idle for minutes and a relay restarted again and again under a live page. Pull
-requests do not run these journeys. `E2E Slow` runs them nightly, on `main`, and on
+requests do not run these journeys. `E2E Slow` runs them nightly, and on
 pull requests that touch the relay or connection code. Run one tier and one share
 locally with `FY_E2E_TIER=fast|slow|all FY_E2E_SHARD=i/N task test:e2e`.
 `scripts/ci/e2e-shards.ts` balances the shards by `timings.json`, and a new journey

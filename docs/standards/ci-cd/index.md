@@ -81,13 +81,13 @@ not lengthen the critical path, and nothing goes there that is free and as fast 
 
 ## Workflow split
 
-| Workflow   | Trigger                                                                                   | Responsibility                                                     |
-| ---------- | ----------------------------------------------------------------------------------------- | ------------------------------------------------------------------ |
-| `CI`       | push to `main`, pull request, manual dispatch                                             | gates, tests, compile, SIT, cross-platform smoke                   |
-| `E2E`      | pull request (docs/model-catalog-only ones skip inside), manual dispatch                  | the e2e tier's fast journeys in three shards, into `E2E Journeys`  |
-| `E2E Slow` | nightly, push to `main`, manual dispatch, pull requests touching relay or connection code | the `[slow]` e2e journeys, one per shard, into `E2E Slow Journeys` |
-| `Release`  | `CI` completed successfully on `main`                                                     | semantic-release: version, changelog, `vX.Y.Z` tag                 |
-| `CD`       | push of a `v*.*.*` tag                                                                    | GoReleaser publishes the release and its channels                  |
+| Workflow   | Trigger                                                                   | Responsibility                                                     |
+| ---------- | ------------------------------------------------------------------------- | ------------------------------------------------------------------ |
+| `CI`       | push to `main`, pull request, manual dispatch                             | gates, tests, compile, SIT, cross-platform smoke                   |
+| `E2E`      | pull request (docs/model-catalog-only ones skip inside), manual dispatch  | the e2e tier's fast journeys in three shards, into `E2E Journeys`  |
+| `E2E Slow` | nightly, manual dispatch, pull requests touching relay or connection code | the `[slow]` e2e journeys, one per shard, into `E2E Slow Journeys` |
+| `Release`  | `CI` completed successfully on `main`                                     | semantic-release: version, changelog, `vX.Y.Z` tag                 |
+| `CD`       | push of a `v*.*.*` tag                                                    | GoReleaser publishes the release and its channels                  |
 
 The chain is deliberately one-directional: CI proves the tree, Release decides the version and
 pushes the tag, the tag fires CD. Nothing else publishes anything.
@@ -199,12 +199,14 @@ into **`E2E Slow Journeys`**.
 - **`[slow]` journeys run in `E2E Slow`.** A journey whose title ends in `[slow]` waits on purpose,
   for a minute or more: a relayed page left idle, a tab frozen past the relay's eviction grace, a
   relay restarted again and again under a live page. `E2E` runs the `fast` tier, which is everything else.
-  `E2E Slow` runs the slow tier nightly, on every push to `main` (except docs and model catalogs), on
-  manual dispatch, and on a pull request that touches the code those journeys prove: `packages/relay`,
-  the daemon's relay, carrier and socket code, and the PWA's connection, transport and relay code (the
-  workflow lists the paths). Those pull requests get both workflows, and the slow journeys run in
-  parallel with the rest. Tag a journey `[slow]` only when its length is the point. A journey that is
-  slow because it polls or sleeps should wait on a condition instead.
+  `E2E Slow` runs the slow tier nightly, on manual dispatch, and on a pull request that touches the
+  code those journeys prove: `packages/relay`, the daemon's relay, carrier and socket code, and the
+  PWA's connection, transport and relay code (the workflow lists the paths). Those pull requests get
+  both workflows, and the slow journeys run in parallel with the rest. It does not run on every push
+  to `main`: that was 342 runs in two weeks of three shards on the capped free GitHub pool,
+  re-proving what the pull request had already proved, and a change elsewhere that breaks a slow
+  journey is caught by the nightly run. Tag a journey `[slow]` only when its length is the point. A
+  journey that is slow because it polls or sleeps should wait on a condition instead.
 - **A hang costs one journey's ceiling, never a shard.** `scripts/test/run-e2e.sh` owns one per-journey
   ceiling, 150 s, and passes it to Bun as `--timeout`. `scripts/test/e2e-journey-timeouts.ts` runs before
   the journeys and fails the tier when a journey outside `[slow]` raises its own timeout past that
@@ -264,7 +266,12 @@ tree the `main` run of the release commit had already proved. The duplicates dre
 runner pool as the runs that mattered, and macOS runners are the scarcest part of it.
 
 `push` also ignores a commit that changes only `Casks/**`. That is GoReleaser's cask update, pushed
-by `CD` after a release has shipped, and no job reads it.
+by `CD` after a release has shipped, and no job reads it. It ignores semantic-release's own
+`release: X.Y.Z` commit for the same reason: that commit writes only `VERSION`, `Changelog.md`,
+`Changelog.old.md` and the version in `packages/cli/package.json` and `packages/daemon/package.json`
+(the `@semantic-release/git` assets in `.releaserc.yaml`), over a tree whose parent has a run of its
+own, and `Release` has nothing left to release for it. It was a third of all `main` runs — 170 of
+513 in two weeks, each billing every Namespace job. A commit that touches any other file runs everything.
 
 ## Superseded runs
 
