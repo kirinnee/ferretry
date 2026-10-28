@@ -426,6 +426,7 @@ import {
   TerminalServiceError,
   TerminalStreamBridge,
   type TerminalStreamScheduler,
+  systemLoginShell,
   TmuxTerminalRuntime,
 } from '../src/adapters/terminal/index.ts';
 import {
@@ -7974,7 +7975,12 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
     api: new BunApiServer(),
     // The daemon's OWN private socket, never the host's default: a terminal must not land on a tmux
     // server something else on this machine already runs.
-    terminalRuntime: new TmuxTerminalRuntime(tmux, () => Date.now()),
+    terminalRuntime: new TmuxTerminalRuntime(
+      tmux,
+      () => Date.now(),
+      // The owner's own shell, resolved once and read from the document at that moment (not captured).
+      systemLoginShell(async () => (await daemonConfigStore.peek().catch(() => undefined))?.config.terminals.shell),
+    ),
     agentBrowserDisplay,
     browserLauncher: new NodeSessionBrowserLauncher(
       new BrowserProfileStore(paths.home),

@@ -29,6 +29,9 @@ The wire body is `AgentToolCallSchema` (`packages/protocol/src/lib/agent-tools.t
 
 The MCP names swap the dot for an underscore: `terminal_open`, `terminal_ask_owner`, `browser_ask_owner`, …
 
+A terminal opens the owner's own login shell (zsh, bash, fish …), not `/bin/sh`; a `command` is typed into it
+like keystrokes. See [terminals.md](terminals.md).
+
 ## Routes
 
 | Route                                                     | Who                       | Session from                |

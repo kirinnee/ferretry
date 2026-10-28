@@ -1,4 +1,5 @@
 export * from './contracts.ts';
+export * from './login-shell.ts';
 export * from './ownership.ts';
 export * from './policy.ts';
 export * from './redraw.ts';
