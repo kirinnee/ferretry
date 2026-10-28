@@ -48,6 +48,7 @@
         "harness/carrier-choice-screenshot.tsx",
         "harness/open-links-in-screenshot.tsx",
         "harness/terminal-links-screenshot.tsx",
+        "harness/terminal-links-wrapped-screenshot.tsx",
         "harness/webrtc-connection-screenshot.tsx",
         "harness/tunnel-optin-screenshot.tsx",
         "harness/release-notice-screenshot.tsx",
