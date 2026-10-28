@@ -50,6 +50,8 @@ export const NOT_AUDITED: Readonly<Record<string, string>> = {
   'POST /v1/sessions/:sessionId/attachments/:attachmentId/unlock': 'opens an attachment to its own session only',
   'DELETE /v1/sessions/:sessionId/attachments/:attachmentId/unlock': 'closes an attachment again',
   'POST /v1/sessions/:sessionId/attention': 'an agent raising attention; the attention list is that history',
+  'POST /v1/sessions/:sessionId/attention/replies':
+    'the owner skipping the settle window for answers already recorded; the send ledger is that history',
   'POST /v1/sessions/:sessionId/notify': 'an agent notifying; its payload is labelled with the agent (see L5)',
   'POST /v1/sessions/:sessionId/pins': 'a bookmark in a transcript',
   'POST /v1/sessions/:sessionId/tasks': 'a task record on a session',

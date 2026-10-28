@@ -196,3 +196,9 @@ export function renderNotification(delivered: number): string {
   if (delivered === 0) return 'notification sent to 0 devices — no registered device wants this kind';
   return `notification sent to ${devices}`;
 }
+
+/** Confirmation for "Send now": which held answers went, or that nothing was held. */
+export function renderRepliesSent(held: readonly AttentionId[], sessionId: string): string {
+  if (held.length === 0) return `no answers were held for ${sessionId} — nothing to send`;
+  return `sent ${held.map(attentionReference).join(', ')} to ${sessionId} now`;
+}

@@ -24,6 +24,8 @@ export interface IAttentionGateway {
   snapshot(sessionId: string): Promise<AttentionSnapshot>;
   /** Raise, resolve or dismiss an item and return the board as the daemon left it. */
   apply(sessionId: string, request: AttentionActionRequest): Promise<AttentionSnapshot>;
+  /** Deliver the answers held for the ferret now, skipping the settle window; the board as it was left. */
+  sendReplies(sessionId: string): Promise<AttentionSnapshot>;
   /** Push a direct notification — not an attention item, so there is nothing to resolve. */
   notify(sessionId: string, request: DirectNotificationRequest): Promise<DirectNotificationResponse>;
 }

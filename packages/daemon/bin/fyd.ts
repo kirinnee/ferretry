@@ -109,6 +109,8 @@ import {
   probePdfDecryptWorker,
 } from '../src/adapters/attachments/index.ts';
 import { FileAttentionLedgerRepository } from '../src/adapters/attention/file-attention-ledger-repository.ts';
+import { FileAttentionOutboxRepository } from '../src/adapters/attention/file-attention-outbox-repository.ts';
+import { KeyedAttentionReplyTimers } from '../src/adapters/attention/keyed-attention-reply-timers.ts';
 import { StorageSessionAttentionState } from '../src/adapters/attention/storage-session-attention-state.ts';
 import { FileAcceptedConfigStore, FileConfigDirectory } from '../src/adapters/config-files/files.ts';
 import { unrefFileEventTimers } from '../src/adapters/file-events/bun-file-event-source.ts';
@@ -424,8 +426,8 @@ import {
   TmuxPaneQueue,
 } from '../src/adapters/tmux/index.ts';
 import { CliConversionCheck, CliHarnessVersion } from '../src/adapters/transcript/conversion-check.ts';
-import { CliRolloutFormatProbe } from '../src/adapters/transcript/rollout-format-probe.ts';
 import { NodeTranscriptSource } from '../src/adapters/transcript/index.ts';
+import { CliRolloutFormatProbe } from '../src/adapters/transcript/rollout-format-probe.ts';
 import {
   FileSessionAttachmentCopier,
   FileSessionTransferBriefWriter,
@@ -530,6 +532,7 @@ import {
   type AttentionActor,
   AttentionChangeFanout,
   AttentionConversation,
+  AttentionReplyBatcher,
   AttentionReplyDelivery,
   AttentionService,
   AUDIT_FOLD_WINDOW_MS,
@@ -727,6 +730,7 @@ import {
   NO_STACK_SAMPLER,
   NO_WATCHDOG,
   NotificationService,
+  needsRolloutFormatProbe,
   type ObservedSession,
   type OpenedAnalyticsIndexStore,
   type OperatorMessageSource,
@@ -762,9 +766,7 @@ import {
   parseWatchdogLimit,
   passkeyVerifier,
   planConversationCarry,
-  needsRolloutFormatProbe,
   planConversationConvert,
-  type RolloutFormatPort,
   planInitialAttachments,
   portCandidates,
   previousConversation,
@@ -790,6 +792,7 @@ import {
   type ResumeLauncher,
   ResumeRefused,
   ReviveDedupeConflict,
+  type RolloutFormatPort,
   type RoutingCatalogPort,
   type RunOverrides,
   readDaemonRelayIdentity,
@@ -8672,6 +8675,23 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       const attentionBoards = new FileAttentionLedgerRepository(
         id => createSessionPaths(paths, parseSessionId(id)).directory,
       );
+      // Each ferret's held answers (docs/attention.md § The loop). The send is awaited by the batcher, outside
+      // its per-session lock: it may wait for a launch or revive a stopped ferret, and the owner's next answer
+      // must not wait on that. The send ledger keeps one message per batch send id.
+      const attentionReplies = new AttentionReplyBatcher(
+        new FileAttentionOutboxRepository(id => createSessionPaths(paths, parseSessionId(id)).directory),
+        {
+          send: async (sessionId, message, sendId) => {
+            const id = tryParseSessionId(sessionId);
+            if (id !== undefined) await sends.send({ id, sendId, message });
+          },
+        },
+        new KeyedAttentionReplyTimers(),
+        new KeyedSerialExecutor(),
+        { now: () => clock.now() },
+      );
+      // Answers held across a restart are delivered, in the background, once the daemon is up.
+      void attentionReplies.resume(storage.listSessions().map(session => session.id)).catch(() => undefined);
       const attentionProjection = new SessionAttentionProjection(
         attentionBoards,
         new StorageSessionAttentionState(storage),
@@ -8694,15 +8714,9 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         new AttentionChangeFanout([
           // The session list's unread signal, kept true to the board.
           attentionProjection,
-          // The owner's answer, told to the ferret that asked. DETACHED: a send may wait for a launch or
-          // revive a stopped ferret, and the person's answer must not wait on that; the send ledger is
-          // where its fate is recorded.
-          new AttentionReplyDelivery({
-            send: async (sessionId, message, sendId) => {
-              const id = tryParseSessionId(sessionId);
-              if (id !== undefined) void sends.send({ id, sendId, message }).catch(() => undefined);
-            },
-          }),
+          // The owner's answer, told to the ferret that asked — through its outbox, which holds a burst of
+          // answers for a few seconds and delivers them as ONE message.
+          new AttentionReplyDelivery(attentionReplies),
         ]),
       );
       // ONE ingestion service for this opened store, shared by the loop that writes rows and the route
@@ -9636,6 +9650,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         }),
         notifications,
         attention,
+        attentionReplies,
         pins: new PinService(
           new FilePinSessionDirectory(paths, stateFiles),
           // Its own queue: a pin mutation must not serialize behind storage-wide or session work.

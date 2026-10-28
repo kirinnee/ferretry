@@ -13,7 +13,7 @@ This document is the contract for that loop. The board's own rules are in
 | Step          | Who                                                             | What happens                                                                                                                                                              |
 | ------------- | --------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Raise         | the ferret: `fy attention add "<summary>"`                      | One push to every enrolled device, titled with the conversation, saying what is needed (see below). The session's row turns **unread**.                                   |
-| Answer        | the owner: the board, the inbox or a push tap                   | The ferret receives `[answer to !A3 «<ask>»] <answer>` as an ordinary message. The item resolves.                                                                         |
+| Answer        | the owner: the board, the inbox or a push tap                   | The item resolves. A few seconds later the ferret receives `[answer to !A3 «<ask>»] <answer>`, in one message with any other answers given meanwhile.                     |
 | Reply in chat | the owner writes `!A3 …` in that ferret's chat                  | That message is the answer: it is delivered prefixed `[answer to !A3 «<ask>»]`, and once it is accepted the item resolves in the owner's name.                            |
 | Plain chat    | the owner writes without referencing an item                    | Nothing resolves. The message ends with one line naming the open items, so the ferret can resolve one itself if the message settled it.                                   |
 | Done          | the ferret: `fy attention done A3 [--answer …]`                 | The ferret closes its own item once it is no longer needed. Nothing is echoed back to it.                                                                                 |
@@ -35,12 +35,26 @@ This document is the contract for that loop. The board's own rules are in
 - **A chat answer takes the strongest form its ask accepts.** An open question takes the words as its
   answer. A choice takes them only when they name one option exactly. Anything else resolves the item
   with the message as its note.
-- **The delivery is detached and idempotent.** Each item's answer is sent under the send id
-  `attention-<session>-<id>`, so a notice told twice is one message. The owner's answer never waits
-  for a ferret's launch or revive. It goes through the ordinary send path, queued while the ferret is
-  mid-turn. **Every closing the owner makes is told**, a bare done or dismiss included: a ferret told
-  nothing waits on an item the owner already settled. A chat reply is the one exception, because the
-  message itself already carried the owner's words.
+- **Answers are batched per ferret.** The delivered message wakes the ferret: it starts the ferret's
+  next turn. So answers to one ferret are held in its outbox (`attention-replies.json` beside the
+  board) and delivered as **one message**. Inside it, each answer reads in the form above, a blank
+  line apart (`AttentionReplyBatcher`).
+  - **When.** 8 seconds after the last answer, and never more than 30 seconds after the first.
+  - **Send now.** While answers are held, the board says so: `replies: {pending, dueAt}` on every
+    `GET` and `POST` of `/v1/sessions/:id/attention`. The owner can skip the wait with
+    `POST /v1/sessions/:id/attention/replies` (the app's "Send now", `fy attention send-now`).
+  - **Exactly once per item.** An item held, sending or delivered is never queued again. A batch is
+    sent under the send id `attention-<session>-<ids>` (`attention-<session>-A3` for one answer, as
+    before), so a batch told twice is one message.
+  - **Durable.** A batch is written down as sending before it is sent, so a restart re-sends it under
+    the same id. Answers held across a restart are delivered once the daemon is back.
+  - **A damaged outbox** is set aside as `attention-replies.json.damaged-<id>` and a fresh one starts,
+    so it never stops later answers.
+- **The delivery never blocks the owner.** The owner's answer never waits for a ferret's launch or
+  revive. A batch goes through the ordinary send path, queued while the ferret is mid-turn, and it
+  wakes an idle ferret. **Every closing the owner makes is told**, a bare done or dismiss included: a
+  ferret told nothing waits on an item the owner already settled. A chat reply is the one exception,
+  because the message itself already carried the owner's words.
 - **A raise says when nobody was told.** The response to the raise that created an item carries
   `enrolled`, the number of devices enrolled for push on the machine. At zero, `fy attention add`
   prints `Warning: no device will be notified (0 enrolled)` under its confirmation. The item is on the

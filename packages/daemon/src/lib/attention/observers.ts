@@ -1,6 +1,7 @@
 import type { SessionAttentionSummary } from '@ferretry/protocol';
 import type { SerialExecutor } from '../ports.ts';
 import { boardReplyMessage, conversationResponse, conversationTurn, sessionAttentionSummary } from './conversation.ts';
+import type { AttentionReplyQueue } from './reply-batch.ts';
 import type {
   AttentionBoardChange,
   AttentionChangeObserver,
@@ -69,28 +70,23 @@ export class SessionAttentionProjection implements AttentionChangeObserver {
   }
 }
 
-/** A queued, non-interrupting message to a ferret, idempotent under its send id. */
-export interface AttentionMessenger {
-  send(sessionId: string, message: string, sendId: string): Promise<void>;
-}
-
 /**
  * Tells a ferret the owner's answer to an item IT raised, as an ordinary message naming the item.
  *
  * Every closing the owner makes on the board of an agent-raised item is told — an answer, a done or a
  * dismiss (`boardReplyMessage`). Nothing else is: an answer given in the conversation already reached
  * the ferret in the owner's words, the ferret's own `done` needs no echo, and the warden's or a
- * source's reconciliation is not an answer. The send id is the item's, so a
- * notice delivered twice is one message.
+ * source's reconciliation is not an answer. Each goes to the ferret's outbox (`AttentionReplyBatcher`), which
+ * delivers a burst of answers as one message and never the same item twice.
  */
 export class AttentionReplyDelivery implements AttentionChangeObserver {
-  constructor(private readonly messenger: AttentionMessenger) {}
+  constructor(private readonly replies: AttentionReplyQueue) {}
 
   async changed(sessionId: string, change: AttentionBoardChange): Promise<void> {
     const { addressed } = change;
     if (change.via !== 'board' || change.actor.kind !== 'human' || addressed === undefined) return;
     if (addressed.raisedBy !== 'agent' || addressed.raisedBySession !== sessionId) return;
-    await this.messenger.send(sessionId, boardReplyMessage(addressed), `attention-${sessionId}-${addressed.id}`);
+    await this.replies.add(sessionId, addressed.id, boardReplyMessage(addressed));
   }
 }
 
