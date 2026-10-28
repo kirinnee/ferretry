@@ -67,24 +67,39 @@ function MachineRow({
         </span>
         <button
           type="button"
+          className="min-h-0 shrink-0 text-meta text-muted underline"
+          data-machine-mute=""
+          aria-pressed={!row.shown}
+          onClick={() => onToggleShown(row.daemonId, !row.shown)}
+        >
+          {row.shown ? 'Mute' : 'Unmute'}
+        </button>
+        <button
+          type="button"
           role="switch"
           aria-checked={on}
           aria-label={`Notifications from ${row.label}`}
           disabled={disabled}
           onClick={() => (on ? onDisable(row.daemonId) : onEnable(row.daemonId))}
           className={cn(
-            'relative ml-auto h-6 w-11 shrink-0 rounded-full border transition-colors',
-            on ? 'border-accent bg-accent' : 'border-border-strong bg-surface',
+            'ml-auto flex shrink-0 items-center justify-center',
             disabled && 'cursor-not-allowed opacity-60',
           )}
         >
           <span
             aria-hidden="true"
             className={cn(
-              'absolute left-0 top-1/2 h-4 w-4 -translate-y-1/2 rounded-full bg-fg transition-transform',
-              on ? 'translate-x-[22px]' : 'translate-x-[2px]',
+              'relative block h-6 w-11 shrink-0 rounded-full border transition-colors',
+              on ? 'border-accent bg-accent' : 'border-border-strong bg-surface',
             )}
-          />
+          >
+            <span
+              className={cn(
+                'absolute left-0 top-1/2 h-4 w-4 -translate-y-1/2 rounded-full bg-fg transition-transform',
+                on ? 'translate-x-[22px]' : 'translate-x-[2px]',
+              )}
+            />
+          </span>
         </button>
       </div>
       {failure === undefined ? null : (
@@ -92,15 +107,6 @@ function MachineRow({
           {failure}
         </p>
       )}
-      <button
-        type="button"
-        className="self-start text-meta text-muted underline"
-        data-machine-mute=""
-        aria-pressed={!row.shown}
-        onClick={() => onToggleShown(row.daemonId, !row.shown)}
-      >
-        {row.shown ? 'Mute' : 'Unmute'}
-      </button>
     </li>
   );
 }

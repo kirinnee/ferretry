@@ -92,7 +92,7 @@ const SESSIONS: readonly SessionView[] = [
 function Bar({ grouped }: { readonly grouped: boolean }): ReactElement {
   const [mode] = useState('all' as const);
   return (
-    <div className="flex bg-bg" data-fixture="" style={{ height: 760 }}>
+    <div className="flex bg-bg" data-fixture="" style={{ height: '100vh' }}>
       <style>
         {
           '@media (max-width: 767px) { [data-sessions-bar="column"] { width: 100% !important; border-right: 0 !important; } }'
