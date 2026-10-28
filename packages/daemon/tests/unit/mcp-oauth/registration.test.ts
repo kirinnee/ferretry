@@ -100,8 +100,107 @@ describe('registrationAnswer', () => {
     should(registrationAnswer(400, JSON.stringify({ error: 7 }), 'none')).deepEqual(rejected(400));
   });
 
-  it('should call a success with no client id unreadable', () => {
-    should(registrationAnswer(201, '{}', 'none')).deepEqual({ kind: 'unreadable', status: 201 });
+  it('should call a success with no client id unreadable, and say which field', () => {
+    should(registrationAnswer(201, '{}', 'none')).deepEqual({
+      kind: 'unreadable',
+      status: 201,
+      problem: 'its client_id was missing',
+    });
+  });
+
+  describe('a success shaped the way real providers answer', () => {
+    const answer = (body: unknown) => registrationAnswer(201, JSON.stringify(body), 'none');
+
+    it('should take a client id that is a number, as text', () => {
+      should(answer({ client_id: 12345 })).deepEqual({ kind: 'registered', clientId: '12345' });
+    });
+
+    it('should take an empty or null secret as no secret', () => {
+      should(answer({ client_id: 'c1', client_secret: '' })).deepEqual({ kind: 'registered', clientId: 'c1' });
+      should(answer({ client_id: 'c1', client_secret: null })).deepEqual({ kind: 'registered', clientId: 'c1' });
+    });
+
+    it('should take a null authentication method as unsaid, and ignore its type when it is not text', () => {
+      should(answer({ client_id: 'c1', client_secret: 's-0123456789', token_endpoint_auth_method: null })).deepEqual({
+        kind: 'registered',
+        clientId: 'c1',
+        clientSecret: 's-0123456789',
+      });
+      should(answer({ client_id: 'c1', token_endpoint_auth_method: 7 })).deepEqual({
+        kind: 'registered',
+        clientId: 'c1',
+      });
+    });
+
+    it('should ignore unknown fields, a zero secret expiry and nested values', () => {
+      should(
+        answer({
+          client_id: 'c1',
+          client_secret_expires_at: 0,
+          client_id_issued_at: 1700000000,
+          registration_client_uri: 'https://p.example/register/c1',
+          extra: { nested: [1, 2, { deep: null }] },
+        }),
+      ).deepEqual({ kind: 'registered', clientId: 'c1' });
+    });
+
+    it('should read a body with a byte-order mark', () => {
+      should(registrationAnswer(201, `\uFEFF${JSON.stringify({ client_id: 'c1' })}`, 'none')).deepEqual({
+        kind: 'registered',
+        clientId: 'c1',
+      });
+    });
+
+    it('should read the MCP SDK’s own example registration response', () => {
+      // Arrange — the shape of OAuthClientInformationFull in the SDK's documentation
+      const sdkExample = {
+        client_id: 'client-1234',
+        client_secret: 'secret-abcdefghij',
+        client_id_issued_at: 1700000000,
+        client_secret_expires_at: 0,
+        redirect_uris: ['http://localhost:3000/callback'],
+        client_name: 'My MCP Client',
+        grant_types: ['authorization_code', 'refresh_token'],
+        response_types: ['code'],
+        token_endpoint_auth_method: 'client_secret_post',
+        scope: 'mcp:tools',
+      };
+
+      // Act / Assert
+      should(registrationAnswer(201, JSON.stringify(sdkExample), 'none')).deepEqual({
+        kind: 'registered',
+        clientId: 'client-1234',
+        clientSecret: 'secret-abcdefghij',
+      });
+    });
+  });
+
+  describe('a success that still cannot be used', () => {
+    const problem = (status: number, text: string) => {
+      const out = registrationAnswer(status, text, 'none');
+      return out.kind === 'unreadable' ? out.problem : out.kind;
+    };
+
+    it('should name the wrong field and its JSON type, never its value', () => {
+      should(problem(201, JSON.stringify({ client_id: { secret: 'hush' } }))).equal('its client_id was a JSON object');
+      should(problem(201, JSON.stringify({ client_id: null }))).equal('its client_id was null');
+      should(problem(201, JSON.stringify({ client_id: true }))).equal('its client_id was a boolean');
+      should(problem(201, JSON.stringify({ client_id: [1] }))).equal('its client_id was a JSON array');
+      should(problem(201, JSON.stringify({ client_id: '' }))).equal('its client_id was empty');
+      should(problem(201, JSON.stringify({ client_id: 'x'.repeat(513) }))).equal('its client_id was too long');
+      should(problem(201, JSON.stringify({ client_id: 'c1', client_secret: 7 }))).equal(
+        'its client_secret was a number',
+      );
+      should(problem(201, JSON.stringify({ client_id: 'c1', client_secret: { a: 1 } }))).equal(
+        'its client_secret was a JSON object',
+      );
+    });
+
+    it('should say when the whole answer is not an object or not JSON', () => {
+      should(problem(201, '[1]')).equal('its answer was a JSON array, not a JSON object');
+      should(problem(201, '"c1"')).equal('its answer was a string, not a JSON object');
+      should(problem(200, '<html>ok</html>')).equal('its answer was not JSON');
+    });
   });
 });
 
@@ -202,6 +301,15 @@ describe('registrationRefusal', () => {
     );
     should(registrationRefusal('a.example', { kind: 'unreadable', status: 200 }, [PWA])).containEql(
       'without a client id',
+    );
+    should(
+      registrationRefusal(
+        'a.example',
+        { kind: 'unreadable', status: 201, problem: 'its client_id was a JSON object' },
+        [PWA],
+      ),
+    ).startWith(
+      'The sign-in provider at a.example answered the registration (HTTP 201) but its client_id was a JSON object, so the sign-in could not start.',
     );
   });
 
