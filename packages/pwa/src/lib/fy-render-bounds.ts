@@ -28,6 +28,19 @@ export const FY_RENDER_LIMITS = {
   /** A pin's label and its popup, cut to these rather than refused. */
   mapLabelCharacters: 80,
   mapPopupCharacters: 500,
+  /** A `chart` payload: JSON or YAML in this package's own small chart language. */
+  chartBytes: 64 * 1024,
+  /** Series per chart (or per frame), and points per series. A chart past these is a table, not a picture. */
+  chartSeries: 12,
+  chartPoints: 500,
+  /** Points across every series of every frame together — the most a chart can be made to draw at once. */
+  chartTotalPoints: 10_000,
+  /** Step-through frames, and the category labels on the x axis. */
+  chartFrames: 30,
+  chartLabels: 500,
+  /** A title, an axis label, a series name and a category or frame label — refused past these, never cut. */
+  chartTitleCharacters: 120,
+  chartLabelCharacters: 80,
   lottieBytes: 1024 * 1024,
   lottieLayers: 500,
   lottieDepth: 64,

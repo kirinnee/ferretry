@@ -655,6 +655,7 @@ describe('fy-render sandbox — zero-request rendering', () => {
         drive({
           command: {
             kind: 'render-mermaid',
+            palette: 'dark:00000000',
             source: 'graph TD; A[Start] --> B{Choice}; B -->|yes| C[Done];',
             theme: 'dark',
           },
@@ -741,7 +742,7 @@ describe('fy-render sandbox — zero-request rendering', () => {
       // Act
       const result = (await page.evaluate(
         drive({
-          command: { kind: 'render-mermaid', source: 'graph TD; A-->B;', theme: 'dark' },
+          command: { kind: 'render-mermaid', palette: 'dark:00000000', source: 'graph TD; A-->B;', theme: 'dark' },
           library: { bytes: reporter },
           shellPath,
         }),
@@ -783,7 +784,7 @@ describe('fy-render sandbox — CSP hash pinning is the execution gate', () => {
       // Act
       const result = (await page.evaluate(
         drive({
-          command: { kind: 'render-mermaid', source: 'graph TD; A-->B;', theme: 'dark' },
+          command: { kind: 'render-mermaid', palette: 'dark:00000000', source: 'graph TD; A-->B;', theme: 'dark' },
           library: { bytes: forged },
           shellPath,
         }),
@@ -814,7 +815,7 @@ describe('fy-render sandbox — CSP hash pinning is the execution gate', () => {
       // Act — same command, same port, same `install()`; only the bytes differ.
       const result = (await page.evaluate(
         drive({
-          command: { kind: 'render-mermaid', source: 'graph TD; A-->B;', theme: 'dark' },
+          command: { kind: 'render-mermaid', palette: 'dark:00000000', source: 'graph TD; A-->B;', theme: 'dark' },
           library: { bytes: mermaidBundle },
           shellPath,
         }),
@@ -884,7 +885,7 @@ describe('fy-render sandbox — a script inside the frame cannot fetch a subreso
       const report = reportFrom(
         (await page.evaluate(
           drive({
-            command: { kind: 'render-mermaid', source: 'graph TD; A-->B;', theme: 'dark' },
+            command: { kind: 'render-mermaid', palette: 'dark:00000000', source: 'graph TD; A-->B;', theme: 'dark' },
             library: { bytes: reporter },
             shellPath,
           }),
@@ -941,7 +942,7 @@ describe('fy-render sandbox — no dynamic code evaluation', () => {
       const report = reportFrom(
         (await page.evaluate(
           drive({
-            command: { kind: 'render-mermaid', source: 'graph TD; A-->B;', theme: 'dark' },
+            command: { kind: 'render-mermaid', palette: 'dark:00000000', source: 'graph TD; A-->B;', theme: 'dark' },
             library: { bytes: reporter },
             shellPath,
           }),
@@ -1018,7 +1019,7 @@ describe('fy-render sandbox — the opaque origin has no storage', () => {
       const report = reportFrom(
         (await page.evaluate(
           drive({
-            command: { kind: 'render-mermaid', source: 'graph TD; A-->B;', theme: 'dark' },
+            command: { kind: 'render-mermaid', palette: 'dark:00000000', source: 'graph TD; A-->B;', theme: 'dark' },
             library: { bytes: reporter },
             shellPath,
           }),
@@ -1115,7 +1116,7 @@ describe('fy-render sandbox — the frame cannot escape its own box', () => {
       const report = reportFrom(
         (await page.evaluate(
           drive({
-            command: { kind: 'render-mermaid', source: 'graph TD; A-->B;', theme: 'dark' },
+            command: { kind: 'render-mermaid', palette: 'dark:00000000', source: 'graph TD; A-->B;', theme: 'dark' },
             library: { bytes: reporter },
             shellPath,
           }),
@@ -1193,7 +1194,7 @@ describe('fy-render sandbox — the frame cannot escape its own box', () => {
       // Act
       await page.evaluate(
         drive({
-          command: { kind: 'render-mermaid', source: 'graph TD; A-->B;', theme: 'dark' },
+          command: { kind: 'render-mermaid', palette: 'dark:00000000', source: 'graph TD; A-->B;', theme: 'dark' },
           library: { bytes: navigator },
           settleAfterMs: 3_000,
           shellPath,
@@ -1258,7 +1259,7 @@ describe('fy-render sandbox — the bridge cannot be forged or suppressed', () =
       // Act
       const result = (await page.evaluate(
         drive({
-          command: { kind: 'render-mermaid', source: 'graph TD; A-->B;', theme: 'dark' },
+          command: { kind: 'render-mermaid', palette: 'dark:00000000', source: 'graph TD; A-->B;', theme: 'dark' },
           library: { bytes: reporter },
           shellPath,
         }),

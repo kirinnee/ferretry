@@ -596,6 +596,7 @@ import {
   childGrantRequester,
   chooseRelayCarrierSources,
   claimStartName,
+  classifyPaneProcesses,
   codexModelProvider,
   combinedMcpOAuthServers,
   combinedReferences,
@@ -3865,6 +3866,8 @@ interface WardenParts {
    * the session observer takes it (`InlineObserverHost.liveness`). The fold and the reflex stay here.
    */
   readonly livenessSample: (target: LivenessTarget) => Promise<LivenessSample>;
+  /** Close the browsers a ferret launched that still run under its pane, read afresh; how many closed. */
+  readonly closeLeftoverBrowsers: (sessionId: string) => Promise<number>;
 }
 
 /**
@@ -3902,6 +3905,7 @@ function createWardenSubsystem(parts: WardenParts): WardenSubsystem {
             turn: view.state.turn,
             mode: view.config.mode,
             waiting: view.state.waiting !== undefined,
+            ...(view.state.turnState === undefined ? {} : { turnState: view.state.turnState }),
             nudgeAfterSeconds: view.config.nudgeAfterSeconds,
             killAfterSeconds: view.config.killAfterSeconds,
             tmuxSession: sessionTmuxName(parseSessionId(view.config.id), defaultSessionLifecycleSettings),
@@ -3957,6 +3961,7 @@ function createWardenSubsystem(parts: WardenParts): WardenSubsystem {
         failover: async (sessionId, agent) => {
           await parts.migrate.migrate(sessionId, { agent, allowContextDowngrade: false, forceInflight: false });
         },
+        closeLeftoverBrowsers: async sessionId => await parts.closeLeftoverBrowsers(sessionId),
       },
       costs: {
         costUsd: async wardenSessionId => {
@@ -4255,6 +4260,9 @@ async function wardenFleetSession(
     // Watched when the liveness monitor has looked at it recently — see `WardenLivenessMonitor.watching`.
     hasLiveMonitor: liveness.watching(view.config.id),
     ...(liveness.frozenAt(view.config.id) === undefined ? {} : { frozenAt: liveness.frozenAt(view.config.id) }),
+    ...(liveness.leftoverBrowserSince(view.config.id) === undefined
+      ? {}
+      : { leftoverBrowserSince: liveness.leftoverBrowserSince(view.config.id) }),
     hasDoneMarker: doneMarkerCertifiesTurn(marker, view.state.turn),
   };
 }
@@ -10039,6 +10047,29 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           analytics: analyticsIngestion,
           events: listener => storage.subscribeEvents(listener),
           livenessSample: async target => await sessionObserver.liveness(target),
+          // The pane's tree is read AGAIN here, at the moment of closing, and only the top-level browsers
+          // the classifier finds under THIS pane are signalled: a sweep's older look can never close
+          // anything else, and the ferret itself is never touched.
+          closeLeftoverBrowsers: async sessionId => {
+            const observed = await paneProcesses.collect(
+              sessionTmuxName(parseSessionId(sessionId), defaultSessionLifecycleSettings),
+            );
+            if (observed.kind !== 'observed') throw new Error(observed.reason);
+            const view = classifyPaneProcesses(observed.processes);
+            // A command started since the sweep looked (a new turn) may be using that browser: leave it.
+            if (view.toolCommands.length > 0) return 0;
+            let closed = 0;
+            for (const browser of view.leftoverBrowsers) {
+              try {
+                process.kill(browser.pid, 'SIGTERM');
+                closed += 1;
+              } catch (error) {
+                // Gone between the look and the signal is already closed; anything else is a real refusal.
+                if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error;
+              }
+            }
+            return closed;
+          },
         }),
         sessionReads: operatorReads,
         sessionAttach,

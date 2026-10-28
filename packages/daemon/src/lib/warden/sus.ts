@@ -6,10 +6,17 @@
  * Pure: every input arrives through the arguments.
  */
 
+import type { SessionTurnState } from '@ferretry/protocol';
 import { instantMs } from './time.ts';
 import type { WardenLivenessLedger } from './types.ts';
 
-export type LivenessSignal = 'transcript' | 'counterAdvance' | 'tokenAdvance' | 'subprocess' | 'paneChange';
+export type LivenessSignal =
+  | 'transcript'
+  | 'counterAdvance'
+  | 'tokenAdvance'
+  | 'subprocess'
+  | 'paneChange'
+  | 'meaningfulPane';
 
 const LEDGER_FIELDS: Readonly<Record<LivenessSignal, keyof WardenLivenessLedger>> = {
   transcript: 'lastTranscriptAt',
@@ -17,6 +24,7 @@ const LEDGER_FIELDS: Readonly<Record<LivenessSignal, keyof WardenLivenessLedger>
   tokenAdvance: 'lastTokenAdvanceAt',
   subprocess: 'lastSubprocessAt',
   paneChange: 'lastPaneChangeAt',
+  meaningfulPane: 'lastMeaningfulPaneAt',
 };
 
 export const DEFAULT_TICK_SECONDS = 30;
@@ -34,8 +42,10 @@ export interface SusFinding {
 export interface SusOptions {
   /** Thinking with no transcript growth for this long is suspicious. */
   readonly susThinkingSeconds: number;
-  /** A continuous subprocess episode this long is suspicious. */
+  /** A tool command running this long with nothing moving for this long is stuck. */
   readonly susSubprocessSeconds: number;
+  /** Whose move it is; `undefined` (a session from before the field) is judged as mid-turn. */
+  readonly turnState?: SessionTurnState;
   /** Monitor tick, seconds — "now" means within two ticks. */
   readonly tickSeconds?: number;
   /** Turn start; signals never seen are floored here so a fresh turn is never
@@ -58,6 +68,7 @@ export function ledgerAges(
     tokenAdvance: Number.POSITIVE_INFINITY,
     subprocess: Number.POSITIVE_INFINITY,
     paneChange: Number.POSITIVE_INFINITY,
+    meaningfulPane: Number.POSITIVE_INFINITY,
   };
   for (const signal of Object.keys(LEDGER_FIELDS) as LivenessSignal[]) {
     const observed = instantMs(ledger[LEDGER_FIELDS[signal]]);
@@ -72,23 +83,46 @@ function minutes(seconds: number): number {
 }
 
 /**
- * The two sus classifiers:
+ * Whether the ferret is waiting on its OWNER rather than on its own work: it ended its turn (or is parked
+ * on a question or permission prompt) and no tool command of its own is still running. Nothing a warden
+ * could find there is worth paying for — the owner's move is already on their screen, and a question
+ * nobody answers is `unattended_question`, which Attention owns. Detection resumes by itself the moment
+ * the ferret works again.
  *
- * - `sus_thinking` — a work indicator advanced within the last two ticks, the
- *   token counter did NOT (climbing tokens are certain progress and are exempt
- *   however long the think runs), and the transcript has not grown for
- *   `susThinkingSeconds`.
- * - `sus_subprocess` — a subprocess was seen within the last two ticks and its
- *   continuous episode is at least `susSubprocessSeconds` old.
+ * A turn that ended while a command it started still runs in the background is NOT waiting on the
+ * owner: the ferret is waiting on that command, and a command that can never finish (a poll loop whose
+ * exit condition is never met) is exactly what the stuck check exists for.
+ */
+export function waitingOnOwner(turnState: SessionTurnState | undefined, commandRunningNow: boolean): boolean {
+  if (turnState === 'needs-input') return true;
+  return turnState === 'your-turn' && !commandRunningNow;
+}
+
+/**
+ * The two sus classifiers, both silent while the ferret is waiting on its owner ({@link waitingOnOwner}):
+ *
+ * - `sus_thinking` — only mid-turn: a work indicator advanced within the last two ticks, the token
+ *   counter did NOT (climbing tokens are certain progress and are exempt however long the think runs),
+ *   and the transcript has not grown for `susThinkingSeconds`.
+ * - `sus_subprocess` — STUCK MID-TURN: a tool command has run continuously for `susSubprocessSeconds`
+ *   AND nothing moved for that long — no transcript growth, no token advance, no MEANINGFUL screen
+ *   change (the spinner, the elapsed clock and the status line are masked out, or a wedged command
+ *   under an animating spinner would always look alive). The harness's own helpers (`fy mcp serve`,
+ *   MCP and language servers), a server the agent left listening and a leftover browser are never a
+ *   tool command — see `pane-processes.ts`.
  */
 export function susFindings(ledger: WardenLivenessLedger, nowMs: number, options: SusOptions): readonly SusFinding[] {
   const activeWithin = 2 * (options.tickSeconds ?? DEFAULT_TICK_SECONDS);
   const ages = ledgerAges(ledger, nowMs, options.anchorMs);
+  const episodeStart = instantMs(ledger.subprocessSince);
+  const commandRunningNow = ages.subprocess <= activeWithin && episodeStart !== undefined;
+  if (waitingOnOwner(options.turnState, commandRunningNow)) return [];
   const findings: SusFinding[] = [];
 
   const thinkingNow = ages.counterAdvance <= activeWithin;
   const tokensClimbing = ages.tokenAdvance <= activeWithin;
-  if (thinkingNow && !tokensClimbing && ages.transcript >= options.susThinkingSeconds) {
+  const midTurn = options.turnState === undefined || options.turnState === 'working';
+  if (midTurn && thinkingNow && !tokensClimbing && ages.transcript >= options.susThinkingSeconds) {
     const forSeconds = Number.isFinite(ages.transcript) ? Math.floor(ages.transcript) : undefined;
     findings.push({
       kind: 'sus_thinking',
@@ -99,14 +133,20 @@ export function susFindings(ledger: WardenLivenessLedger, nowMs: number, options
     });
   }
 
-  const episodeStart = instantMs(ledger.subprocessSince);
-  if (ages.subprocess <= activeWithin && episodeStart !== undefined) {
+  if (commandRunningNow) {
     const forSeconds = Math.floor(Math.max(0, nowMs - episodeStart) / 1_000);
-    if (forSeconds >= options.susSubprocessSeconds) {
+    // Quiet is measured from the episode's start at the earliest: what moved before the command began
+    // says nothing about whether the command is stuck.
+    const episodeAge = forSeconds;
+    const quietSeconds = Math.min(ages.transcript, ages.tokenAdvance, ages.meaningfulPane, episodeAge);
+    if (forSeconds >= options.susSubprocessSeconds && quietSeconds >= options.susSubprocessSeconds) {
+      const background = options.turnState === 'your-turn' ? ' after its turn ended' : '';
       findings.push({
         kind: 'sus_subprocess',
         forSeconds,
-        detail: `a background subprocess has been running continuously for ${minutes(forSeconds)}m`,
+        detail: `a tool command has run for ${minutes(forSeconds)}m${background} with nothing moving for ${minutes(
+          Math.floor(quietSeconds),
+        )}m — no transcript growth, no token advance, no screen change beyond the spinner`,
       });
     }
   }

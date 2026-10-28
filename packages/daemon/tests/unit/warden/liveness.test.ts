@@ -3,11 +3,13 @@ import should from 'should';
 import {
   foldLivenessSample,
   type LivenessTrack,
+  meaningfulPaneText,
   paneWorkCounters,
   reflexAssess,
   reflexSettingsFor,
   reflexStep,
   startTrack,
+  textFingerprint,
   withLivenessLedger,
 } from '../../../src/lib/warden/index.ts';
 
@@ -244,5 +246,132 @@ describe('laying the ledger over a ferret’s state', () => {
       lastCounterAdvanceAt: at(-1),
     });
     should(withLivenessLedger(state, undefined)).equal(state);
+  });
+});
+
+/** A Claude Code screen: some output, the spinner line, the composer and the status line under it. */
+const claudeScreen = (output: string, spinner: string, statusClock: string): string =>
+  [
+    '⏺ Bash(gh pr checks --watch)',
+    `  ⎿  ${output}`,
+    '',
+    spinner,
+    '',
+    '────────────────────────────────────────────────────────────── [Hadi] Ferretry ─',
+    '❯ ',
+    '────────────────────────────────────────────────────────────────────────────────',
+    `  👤 dev │ 🤖 Opus 5.5 │ 📂 ferretry                                /rc`,
+    `  ⏱ ${statusClock} │ 📊 13% (127k/1M) │ 💰 $1.99`,
+    '  ⏵⏵ bypass permissions on · 1 shell',
+  ].join('\n');
+
+describe('what counts as the screen moving', () => {
+  it('should mask the spinner, the elapsed clock and the status line', () => {
+    // Arrange
+    const before = claudeScreen('Running…', working('5m 45s', '17.2k'), '1s');
+    const after = claudeScreen('Running…', '✶ Fixing… (5m 47s · ↓ 17.2k tokens · esc to interrupt)', '3s');
+
+    // Act / Assert — only the harness's own animation changed.
+    should(meaningfulPaneText(after)).equal(meaningfulPaneText(before));
+    should(meaningfulPaneText(before)).not.containEql('Opus');
+    should(meaningfulPaneText(before)).not.containEql('esc to interrupt');
+  });
+
+  it('should see new output as movement', () => {
+    // Arrange
+    const before = claudeScreen('27 pass, 1 pending', working('5m 45s', '17.2k'), '1s');
+    const after = claudeScreen('28 pass, 0 pending', working('5m 47s', '17.2k'), '3s');
+
+    // Act / Assert
+    should(meaningfulPaneText(after)).not.equal(meaningfulPaneText(before));
+  });
+
+  it('should mask a tool’s own running clock', () => {
+    // Act / Assert
+    should(meaningfulPaneText('⎿  Running… (3m 2s)')).equal(meaningfulPaneText('⎿  Running… (3m 9s)'));
+  });
+
+  it('should fingerprint text stably and differently', () => {
+    // Act / Assert
+    should(textFingerprint('abc')).equal(textFingerprint('abc'));
+    should(textFingerprint('abc')).not.equal(textFingerprint('abd'));
+    should(textFingerprint('')).match(/^[0-9a-f]{8}$/u);
+  });
+
+  it('should stamp a meaningful change only when more than the animation moved', () => {
+    // Arrange
+    const first = foldLivenessSample(undefined, { pane: claudeScreen('a', working('1s', '1k'), '1s') }, 1, NOW);
+
+    // Act
+    const animated = foldLivenessSample(
+      first,
+      { pane: claudeScreen('a', working('31s', '1k'), '31s') },
+      1,
+      NOW + 30_000,
+    );
+    const moved = foldLivenessSample(
+      animated,
+      { pane: claudeScreen('b', working('61s', '1k'), '61s') },
+      1,
+      NOW + 60_000,
+    );
+
+    // Assert
+    should(animated.ledger.lastMeaningfulPaneAt).be.undefined();
+    should(moved.ledger.lastMeaningfulPaneAt).equal(at(60));
+  });
+});
+
+describe('one command after another', () => {
+  it('should start a new episode when a different command is the one running', () => {
+    // Arrange
+    const first = foldLivenessSample(undefined, { subprocessAlive: true, subprocessKey: 'pid:10' }, 1, NOW);
+    const same = foldLivenessSample(first, { subprocessAlive: true, subprocessKey: 'pid:10' }, 1, NOW + 30_000);
+
+    // Act
+    const other = foldLivenessSample(same, { subprocessAlive: true, subprocessKey: 'pid:11' }, 1, NOW + 60_000);
+
+    // Assert
+    should(same.ledger).match({ subprocessSince: at(0), subprocessKey: 'pid:10' });
+    should(other.ledger).match({ subprocessSince: at(60), subprocessKey: 'pid:11', lastSubprocessAt: at(60) });
+  });
+
+  it('should close the episode and forget its command once nothing runs', () => {
+    // Arrange
+    const running = foldLivenessSample(undefined, { subprocessAlive: true, subprocessKey: 'pid:10' }, 1, NOW);
+
+    // Act
+    const gone = foldLivenessSample(running, { subprocessAlive: false }, 1, NOW + 30_000);
+
+    // Assert
+    should(gone.ledger).not.have.property('subprocessSince');
+    should(gone.ledger).not.have.property('subprocessKey');
+  });
+
+  it('should start a leftover’s clock only once nothing of the agent’s own runs beside it', () => {
+    // Arrange
+    const busy = foldLivenessSample(undefined, { subprocessAlive: true, leftoverBrowser: true }, 1, NOW);
+
+    // Act
+    const idle = foldLivenessSample(busy, { subprocessAlive: false, leftoverBrowser: true }, 1, NOW + 30_000);
+
+    // Assert
+    should(busy).not.have.property('leftoverBrowserSince');
+    should(idle.leftoverBrowserSince).equal(at(30));
+  });
+
+  it('should remember since when a leftover browser has run, and forget it once it is gone', () => {
+    // Arrange
+    const seen = foldLivenessSample(undefined, { subprocessAlive: false, leftoverBrowser: true }, 1, NOW);
+    const still = foldLivenessSample(seen, { subprocessAlive: false, leftoverBrowser: true }, 1, NOW + 30_000);
+
+    // Act
+    const gone = foldLivenessSample(still, { subprocessAlive: false }, 1, NOW + 60_000);
+    const unread = foldLivenessSample(still, {}, 1, NOW + 60_000);
+
+    // Assert
+    should(still.leftoverBrowserSince).equal(at(0));
+    should(gone).not.have.property('leftoverBrowserSince');
+    should(unread.leftoverBrowserSince).equal(at(0));
   });
 });

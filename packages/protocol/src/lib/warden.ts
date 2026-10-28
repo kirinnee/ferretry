@@ -85,6 +85,7 @@ export const LEGACY_TRIAGE_LAYERS: Readonly<Record<LegacyWardenTriage, WardenLay
  *
  * - a legacy `triage` becomes `layers`; an explicit `layers` wins over it field by field, and an
  *   unrecognised `triage` is left for the schema to refuse;
+ * - a whole `mayActAlone` with no `closeLeftovers` takes its default, on;
  * - a `mayActAlone` with no `restart` takes the owner's `resume` answer, because a restart is a resume
  *   that relaunches the agent: what the owner let the Warden do to a dead turn, it may do to a dead or
  *   frozen agent.
@@ -93,7 +94,7 @@ export const LEGACY_TRIAGE_LAYERS: Readonly<Record<LegacyWardenTriage, WardenLay
  */
 export function migrateLegacyWardenSettings(value: unknown): unknown {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return value;
-  return withRestart(withLayers(value as Record<string, unknown>));
+  return withCloseLeftovers(withRestart(withLayers(value as Record<string, unknown>)));
 }
 
 function withLayers(value: Record<string, unknown>): Record<string, unknown> {
@@ -115,6 +116,13 @@ function withRestart(value: Record<string, unknown>): Record<string, unknown> {
   const acts = value.mayActAlone;
   if (typeof acts !== 'object' || acts === null || 'restart' in acts || !('resume' in acts)) return value;
   return { ...value, mayActAlone: { ...acts, restart: (acts as { readonly resume: unknown }).resume } };
+}
+
+/** A whole `mayActAlone` from before leftover cleanup existed takes its default, on. */
+function withCloseLeftovers(value: Record<string, unknown>): Record<string, unknown> {
+  const acts = value.mayActAlone;
+  if (typeof acts !== 'object' || acts === null || 'closeLeftovers' in acts || !('stop' in acts)) return value;
+  return { ...value, mayActAlone: { ...acts, closeLeftovers: true } };
 }
 
 /** The sweep cadences a person can pick. The sweep itself is free; only what a flag leads to costs. */
@@ -161,6 +169,11 @@ export const WardenMayActAloneSchema = z.object({
   restart: z.boolean(),
   failover: z.boolean(),
   stop: z.boolean(),
+  /**
+   * Close a browser a finished ferret left running under its pane — by rule, with no investigation.
+   * Defaults to on: it acts on nothing but an idle leftover, and the ferret itself is never touched.
+   */
+  closeLeftovers: z.boolean(),
 });
 export type WardenMayActAlone = z.infer<typeof WardenMayActAloneSchema>;
 
@@ -296,7 +309,11 @@ export const LivenessLedgerSchema = z.object({
   lastTokenAdvanceAt: InstantSchema.optional(),
   lastSubprocessAt: InstantSchema.optional(),
   lastPaneChangeAt: InstantSchema.optional(),
+  /** A screen change that is not the harness's own spinner, clock or status line. */
+  lastMeaningfulPaneAt: InstantSchema.optional(),
   subprocessSince: InstantSchema.optional(),
+  /** Which tool command the current subprocess episode is. */
+  subprocessKey: z.string().min(1).optional(),
 });
 export type LivenessLedger = z.infer<typeof LivenessLedgerSchema>;
 
@@ -317,6 +334,8 @@ export const WardenAnomalySchema = z.object({
   idleMinutes: NonNegativeFiniteSchema.optional(),
   assignedWarden: z.boolean().optional(),
   ledger: LivenessLedgerSchema.optional(),
+  /** What the anomaly is about (its turn, and for a stuck command which command): the backoff's key. */
+  subject: z.string().min(1).optional(),
 });
 export type WardenAnomaly = z.infer<typeof WardenAnomalySchema>;
 
@@ -592,7 +611,16 @@ export type WardenInvestigation = z.infer<typeof WardenInvestigationSchema>;
 export const WardenClearedBySchema = z.enum(['jev', 'warden', 'owner']);
 export type WardenClearedBy = z.infer<typeof WardenClearedBySchema>;
 
-export const WardenActionKindSchema = z.enum(['bless', 'nudge', 'resume', 'restart', 'stop', 'failover']);
+export const WardenActionKindSchema = z.enum([
+  'bless',
+  'nudge',
+  'resume',
+  'restart',
+  'stop',
+  'failover',
+  /** A browser a finished ferret left running, closed by rule — no investigation was involved. */
+  'close_leftover',
+]);
 export type WardenActionKind = z.infer<typeof WardenActionKindSchema>;
 
 /**

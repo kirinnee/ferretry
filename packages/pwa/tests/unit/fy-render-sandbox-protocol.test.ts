@@ -32,8 +32,11 @@ describe('fy-render sandbox message parsing', () => {
     // Assert — the closed set, spelled out. A sixth shape has to be added here
     // before it can reach the renderer.
     should(parseFyRenderSandboxMessage({ kind: 'shell-ready' })).eql({ kind: 'shell-ready' });
-    should(parseFyRenderSandboxMessage({ kind: 'mermaid-svg', svg: '<svg/>', theme: 'light' })).eql({
+    should(
+      parseFyRenderSandboxMessage({ kind: 'mermaid-svg', palette: 'light:0a1b2c3d', svg: '<svg/>', theme: 'light' }),
+    ).eql({
       kind: 'mermaid-svg',
+      palette: 'light:0a1b2c3d',
       svg: '<svg/>',
       theme: 'light',
     });
@@ -80,10 +83,22 @@ describe('fy-render sandbox message parsing', () => {
      * would reintroduce it.
      */
     should(parseFyRenderSandboxMessage({ kind: 'mermaid-svg', svg: '<svg/>' })).be.null();
-    should(parseFyRenderSandboxMessage({ kind: 'mermaid-svg', svg: '<svg/>', theme: 'studio-dark' })).be.null();
-    should(parseFyRenderSandboxMessage({ kind: 'mermaid-svg', svg: '<svg/>', theme: 'DARK' })).be.null();
+    should(
+      parseFyRenderSandboxMessage({
+        kind: 'mermaid-svg',
+        palette: 'dark:0a1b2c3d',
+        svg: '<svg/>',
+        theme: 'studio-dark',
+      }),
+    ).be.null();
+    should(
+      parseFyRenderSandboxMessage({ kind: 'mermaid-svg', palette: 'dark:0a1b2c3d', svg: '<svg/>', theme: 'DARK' }),
+    ).be.null();
     should(parseFyRenderSandboxMessage({ kind: 'mermaid-svg', svg: '<svg/>', theme: 1 })).be.null();
     should(parseFyRenderSandboxMessage({ kind: 'mermaid-svg', svg: '<svg/>', theme: null })).be.null();
+    // And the palette it was painted in, for the same reason: a key in the one shape `paletteKey` makes, or nothing.
+    for (const palette of [undefined, '', 'dark', 'dark:xyz', 'studio-dark:0a1b2c3d', 'dark:0A1B2C3D', 1])
+      should(parseFyRenderSandboxMessage({ kind: 'mermaid-svg', palette, svg: '<svg/>', theme: 'dark' })).be.null();
   });
 
   test('should refuse a message carrying a key its shape does not name', () => {
@@ -92,7 +107,15 @@ describe('fy-render sandbox message parsing', () => {
     // be answering whoever that is. Without this, a `shell-ready` could smuggle
     // arbitrary payload past the handshake.
     should(parseFyRenderSandboxMessage({ kind: 'shell-ready', source: 'x' })).be.null();
-    should(parseFyRenderSandboxMessage({ kind: 'mermaid-svg', library: 'x', svg: '<svg/>', theme: 'dark' })).be.null();
+    should(
+      parseFyRenderSandboxMessage({
+        kind: 'mermaid-svg',
+        library: 'x',
+        palette: 'dark:0a1b2c3d',
+        svg: '<svg/>',
+        theme: 'dark',
+      }),
+    ).be.null();
     should(parseFyRenderSandboxMessage({ extra: 1, height: 2, kind: 'rendered', width: 2 })).be.null();
     should(parseFyRenderSandboxMessage({ kind: 'playing', playing: true, speed: 2 })).be.null();
     should(parseFyRenderSandboxMessage({ class: 'render', kind: 'error', message: 'a', stack: 'b' })).be.null();
@@ -108,7 +131,9 @@ describe('fy-render sandbox message parsing', () => {
 
   test('should refuse a field of the wrong type', () => {
     // Assert
-    should(parseFyRenderSandboxMessage({ kind: 'mermaid-svg', svg: 42, theme: 'dark' })).be.null();
+    should(
+      parseFyRenderSandboxMessage({ kind: 'mermaid-svg', palette: 'dark:0a1b2c3d', svg: 42, theme: 'dark' }),
+    ).be.null();
     should(parseFyRenderSandboxMessage({ kind: 'playing', playing: 'yes' })).be.null();
     should(parseFyRenderSandboxMessage({ class: 'render', kind: 'error', message: { toString: () => 'x' } })).be.null();
   });
@@ -136,7 +161,9 @@ describe('fy-render sandbox message parsing', () => {
 
     // Assert — the shell caps this before it leaves the port, so reaching here
     // over-cap means the cap on the far side did not run.
-    should(parseFyRenderSandboxMessage({ kind: 'mermaid-svg', svg: oversized, theme: 'dark' })).be.null();
+    should(
+      parseFyRenderSandboxMessage({ kind: 'mermaid-svg', palette: 'dark:0a1b2c3d', svg: oversized, theme: 'dark' }),
+    ).be.null();
   });
 
   test('should refuse dimensions that are not whole numbers inside the canvas bound', () => {

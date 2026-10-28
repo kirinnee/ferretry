@@ -262,7 +262,14 @@ describe('mergeWardenConfig', () => {
 
     // Assert
     should(actual.layers).deepEqual({ jev: true, llm: false });
-    should(actual.mayActAlone).deepEqual({ nudge: true, resume: true, restart: true, failover: true, stop: true });
+    should(actual.mayActAlone).deepEqual({
+      nudge: true,
+      resume: true,
+      restart: true,
+      failover: true,
+      stop: true,
+      closeLeftovers: true,
+    });
     should(actual.caps).deepEqual({ jevUsdPerDay: 1, investigationUsdPerDay: 2, maxInvestigationsPerHour: 6 });
     should(actual.guard).deepEqual(DEFAULT_WARDEN_CONFIG.guard);
   });
@@ -386,5 +393,29 @@ describe('settings from before restart', () => {
     should(off.mayActAlone).match({ resume: false, restart: false });
     should(stated).deepEqual({ mayActAlone: { resume: false, restart: true } });
     should(absent).deepEqual({ mayActAlone: { nudge: true } });
+  });
+});
+
+describe('settings from before leftover cleanup', () => {
+  it('should give a whole older mayActAlone the default — on — and keep an answer already stated', () => {
+    // Arrange
+    const { mayActAlone, ...rest } = wardenConfig;
+    const { closeLeftovers: _close, ...older } = mayActAlone;
+
+    // Act
+    const migrated = warden.WardenConfigSchema.parse({ ...rest, mayActAlone: older });
+    const stated = warden.migrateLegacyWardenSettings({ mayActAlone: { ...older, closeLeftovers: false } });
+    const partial = warden.migrateLegacyWardenSettings({ mayActAlone: { nudge: true } });
+
+    // Assert
+    should(migrated.mayActAlone.closeLeftovers).be.true();
+    should(stated).match({ mayActAlone: { closeLeftovers: false } });
+    should(partial).deepEqual({ mayActAlone: { nudge: true } });
+  });
+
+  it('should default to the stuck-command time of ten minutes', () => {
+    // Act / Assert
+    should(DEFAULT_WARDEN_CONFIG.susSubprocessSeconds).equal(600);
+    should(DEFAULT_WARDEN_CONFIG.mayActAlone.closeLeftovers).be.true();
   });
 });

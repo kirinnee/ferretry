@@ -164,7 +164,12 @@ describe('fy-render shells on Cloudflare Pages', () => {
           const mermaid = (await page.evaluate(
             drive(
               '/fy-render-sandbox.html',
-              { kind: 'render-mermaid', source: 'graph TD; A[Message] --> B[Diagram];', theme: 'dark' },
+              {
+                kind: 'render-mermaid',
+                palette: 'dark:00000000',
+                source: 'graph TD; A[Message] --> B[Diagram];',
+                theme: 'dark',
+              },
               '/fy-render-mermaid.js',
             ),
           )) as Drive;

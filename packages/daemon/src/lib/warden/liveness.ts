@@ -54,6 +54,60 @@ export function paneWorkCounters(pane: string): PaneWorkCounters | undefined {
   return counters.elapsedSeconds === undefined && counters.tokens === undefined ? undefined : counters;
 }
 
+// ── What counts as the screen moving ────────────────────────────────────────────────────────────
+
+/** A line that is the harness's own work indicator: spinner verbs, elapsed clocks, token counters. */
+const INDICATOR_LINES: readonly RegExp[] = [
+  /esc to interrupt|ctrl\+c to interrupt/iu,
+  /\(\s*(?:\d+\s*h\s*)?(?:\d+\s*m\s*)?\d+\s*s\s*[·•∙]/u,
+  /\bworking\s*\(\s*\d+\s*[hms]/iu,
+  /[\d.,]+\s*k?\s*tokens\b/iu,
+  /^\s*[✻✳✶✽✢∗*·⏺●◐◓◑◒⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]\s*\S[^\n…]{0,120}…/u,
+];
+
+/** The composer line both harnesses draw: `❯ …`, `› …`, `> …`. */
+const COMPOSER = /^\s*[│|]?\s*[>›❯»](?:[\s ].*)?$/u;
+const RULE = /^\s*[─━—-]{10,}/u;
+/** A duration anywhere on screen — `12s`, `3m 2s`, `1h` — which ticks by itself. */
+const DURATION = /\b\d+(?:\.\d+)?\s*(?:ms|s|m|h)\b/gu;
+
+/**
+ * The screen with everything that moves BY ITSELF taken out: the work-indicator lines (spinner, elapsed
+ * clock, token counter), every duration, and the composer with the status line under it. What is left
+ * changes only when the work does — new output, a new tool call, a changed result.
+ *
+ * Without this, a spinner animating over a wedged command repaints the screen every tick, and a stuck
+ * ferret would always look alive.
+ */
+export function meaningfulPaneText(pane: string): string {
+  const lines = pane.split('\n');
+  let end = lines.length;
+  for (let index = lines.length - 1; index >= 0; index--) {
+    if (!COMPOSER.test(lines[index] ?? '')) continue;
+    end = index > 0 && RULE.test(lines[index - 1] ?? '') ? index - 1 : index;
+    break;
+  }
+  return lines
+    .slice(0, end)
+    .filter(line => !INDICATOR_LINES.some(pattern => pattern.test(line)))
+    .map(line => line.replace(DURATION, '#').trimEnd())
+    .join('\n')
+    .trimEnd();
+}
+
+/**
+ * A cheap fingerprint of a text — FNV-1a, 32 bits. Change detection only: it is never stored beside the
+ * text, and a collision costs one missed "the screen moved", not a wrong verdict.
+ */
+export function textFingerprint(text: string): string {
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < text.length; index++) {
+    hash ^= text.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+  return hash.toString(16).padStart(8, '0');
+}
+
 /** One look at a ferret. An `undefined` field could not be read this tick and changes nothing. */
 export interface LivenessSample {
   /** A digest of the screen as it is now. */
@@ -62,8 +116,12 @@ export interface LivenessSample {
   readonly pane?: string;
   /** A digest of the transcript's tail: it changes when the conversation grows. */
   readonly transcriptHash?: string;
-  /** A live process under the pane, or a background terminal the harness reports. */
+  /** A live tool command under the pane, or a background terminal the harness reports. */
   readonly subprocessAlive?: boolean;
+  /** Which tool command is running — a different one starts a new episode. */
+  readonly subprocessKey?: string;
+  /** A browser the agent launched is still running under the pane. */
+  readonly leftoverBrowser?: boolean;
 }
 
 /** What the liveness layer remembers of one ferret between ticks. */
@@ -74,8 +132,12 @@ export interface LivenessTrack {
   /** When this track started watching the turn — no silence is measured from before it. */
   readonly anchorAt: string;
   readonly paneHash?: string;
+  /** {@link textFingerprint} of {@link meaningfulPaneText}: moves only when the work on screen does. */
+  readonly meaningfulPaneKey?: string;
   readonly transcriptHash?: string;
   readonly counters?: PaneWorkCounters;
+  /** Since when a browser the agent launched has been running under the pane, this turn. */
+  readonly leftoverBrowserSince?: string;
   /** When the reflex nudged it, this episode. Cleared when a strong life-sign returns. */
   readonly nudgedAt?: string;
   /** When it was judged frozen. Cleared when any strong life-sign returns. */
@@ -93,7 +155,9 @@ export function startTrack(turn: number, nowMs: number): LivenessTrack {
  * Fold one sample into a track. A hash that differs from the last one is a life-sign; the first hash of
  * a track is only a baseline. Counters that strictly advanced are a counter life-sign, and a token count
  * that climbed is the token one. A live subprocess stamps `lastSubprocessAt` and opens an episode that
- * closes the first tick it is gone.
+ * closes the first tick it is gone — or the first tick a DIFFERENT command is the one running, so a
+ * ferret running one short command after another is never read as one long stuck one. A screen change
+ * that survives {@link meaningfulPaneText} also stamps `lastMeaningfulPaneAt`.
  */
 export function foldLivenessSample(
   previous: LivenessTrack | undefined,
@@ -113,23 +177,44 @@ export function foldLivenessSample(
     counters.elapsedSeconds > before.elapsedSeconds;
   const tokensAdvanced =
     before?.tokens !== undefined && counters?.tokens !== undefined && counters.tokens > before.tokens;
-  const { subprocessSince: _episode, ...closed } = base.ledger;
+  const meaningfulPaneKey = sample.pane === undefined ? undefined : textFingerprint(meaningfulPaneText(sample.pane));
+  const { subprocessSince: _episode, subprocessKey: _key, ...closed } = base.ledger;
+  const otherCommand =
+    sample.subprocessAlive === true &&
+    sample.subprocessKey !== undefined &&
+    base.ledger.subprocessKey !== undefined &&
+    sample.subprocessKey !== base.ledger.subprocessKey;
+  const episodeOpen = sample.subprocessAlive !== false && !otherCommand;
+  const commandKey = sample.subprocessKey ?? (episodeOpen ? base.ledger.subprocessKey : undefined);
   const ledger: WardenLivenessLedger = {
-    ...(sample.subprocessAlive === false ? closed : base.ledger),
+    ...(episodeOpen ? base.ledger : closed),
     ...(changed(base.transcriptHash, sample.transcriptHash) ? { lastTranscriptAt: at } : {}),
     ...(changed(base.paneHash, sample.paneHash) ? { lastPaneChangeAt: at } : {}),
+    ...(changed(base.meaningfulPaneKey, meaningfulPaneKey) ? { lastMeaningfulPaneAt: at } : {}),
     ...(elapsedAdvanced || tokensAdvanced ? { lastCounterAdvanceAt: at } : {}),
     ...(tokensAdvanced ? { lastTokenAdvanceAt: at } : {}),
     ...(sample.subprocessAlive === true
-      ? { lastSubprocessAt: at, subprocessSince: base.ledger.subprocessSince ?? at }
+      ? {
+          lastSubprocessAt: at,
+          subprocessSince: (episodeOpen ? base.ledger.subprocessSince : undefined) ?? at,
+          ...(commandKey === undefined ? {} : { subprocessKey: commandKey }),
+        }
       : {}),
   };
+  const { leftoverBrowserSince: _leftover, ...withoutLeftover } = base;
+  const observed = sample.subprocessAlive !== undefined;
+  // A browser only becomes a leftover once nothing of the agent's own runs beside it: while a command
+  // runs it may be that command's browser, so the clock starts again.
+  const leftoverNow = sample.leftoverBrowser === true && sample.subprocessAlive === false;
+  const next = observed && !leftoverNow ? withoutLeftover : base;
   return {
-    ...base,
+    ...next,
     ledger,
     ...(sample.paneHash === undefined ? {} : { paneHash: sample.paneHash }),
+    ...(meaningfulPaneKey === undefined ? {} : { meaningfulPaneKey }),
     ...(sample.transcriptHash === undefined ? {} : { transcriptHash: sample.transcriptHash }),
     ...(counters === undefined ? {} : { counters }),
+    ...(leftoverNow ? { leftoverBrowserSince: base.leftoverBrowserSince ?? at } : {}),
   };
 }
 
@@ -270,7 +355,8 @@ function later(left: string | undefined, right: string | undefined): string | un
 /**
  * A ferret's state with the liveness monitor's ledger laid over it: each signal is the later of what
  * the session's own documents say and what the monitor saw, so neither can make the other look older.
- * The subprocess episode is the monitor's alone — it is the only thing that watches the pane's children.
+ * The subprocess episode and the meaningful screen change are the monitor's alone — it is the only thing that
+ * watches the pane's children and masks its screen.
  */
 export function withLivenessLedger(
   state: WardenSessionState,
@@ -283,9 +369,11 @@ export function withLivenessLedger(
     lastTokenAdvanceAt: later(state.lastTokenAdvanceAt, ledger.lastTokenAdvanceAt),
     lastSubprocessAt: later(state.lastSubprocessAt, ledger.lastSubprocessAt),
     lastPaneAt: later(state.lastPaneAt, ledger.lastPaneChangeAt),
+    lastMeaningfulPaneAt: ledger.lastMeaningfulPaneAt,
     subprocessSince: ledger.subprocessSince,
+    subprocessKey: ledger.subprocessKey,
   };
-  const { subprocessSince: _stale, ...rest } = state;
+  const { subprocessSince: _stale, subprocessKey: _staleKey, ...rest } = state;
   return {
     ...rest,
     ...Object.fromEntries(Object.entries(merged).filter(([, value]) => value !== undefined)),

@@ -14,7 +14,8 @@
  *            operating system (and any router in front of the browser, such as Finicky) chooses the
  *            browser and profile. Taken ONLY when such a daemon is connected (`computerAvailable`);
  *            otherwise it behaves as `browser`, and a hand-off that fails
- *            opens the browser's own new tab.
+ *            opens the browser's own new tab. Neither fallback is silent: the action carries a
+ *            `notice` (or the hand-off reports its failure) so the app says why the link opened here.
  *
  * WHAT NEVER CHANGES, whatever is chosen: a modified click (Cmd, Ctrl, Shift, Alt), a non-primary
  * button, a click another handler already took, and a `download` link are the browser's own — the
@@ -31,14 +32,17 @@ import {
   shouldOpenInApp,
 } from './in-app-browser-model.ts';
 
+/** Why a click did not go where the setting says, when the reader should be told. */
+export type LinkNotice = 'computer-unavailable';
+
 /** What the link handler does with one click. */
 export type LinkAction =
   /** Leave the click to the browser: the anchor's own `target="_blank"` opens a new tab. */
-  | { readonly kind: 'native' }
+  | { readonly kind: 'native'; readonly notice?: LinkNotice }
   /** Open Ferretry's in-app preview at this destination. */
   | { readonly kind: 'panel'; readonly destination: BrowserDestination }
   /** Hand the address to the real Safari app; open `fallback` in a new tab if nothing happened. */
-  | { readonly kind: 'safari'; readonly href: string; readonly fallback: string }
+  | { readonly kind: 'safari'; readonly href: string; readonly fallback: string; readonly notice?: LinkNotice }
   /** Ask the daemon on this computer to open `href`; open `href` in a new tab if that fails. */
   | { readonly kind: 'computer'; readonly href: string };
 
@@ -69,9 +73,15 @@ export const decideLinkAction = (input: LinkDecisionInput): LinkAction => {
   if (input.setting === 'panel') return { kind: 'panel', destination };
   if (input.setting === 'computer' && input.computerAvailable === true)
     return { kind: 'computer', href: destination.href };
-  if (!input.iosStandalone) return NATIVE;
+  // "Computer" was chosen and nothing on this computer can honour it: the click still opens
+  // somewhere, and the reader is told why it is not where they asked.
+  const notice: { readonly notice?: LinkNotice } =
+    input.setting === 'computer' ? { notice: 'computer-unavailable' } : {};
+  if (!input.iosStandalone) return { kind: 'native', ...notice };
   const safari = safariHref(destination.href);
-  return safari === null ? NATIVE : { kind: 'safari', href: safari, fallback: destination.href };
+  return safari === null
+    ? { kind: 'native', ...notice }
+    : { kind: 'safari', href: safari, fallback: destination.href, ...notice };
 };
 
 /** The slice of a browser the iOS check reads; injected so a test never mutates a global. */

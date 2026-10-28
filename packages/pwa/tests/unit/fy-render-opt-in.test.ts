@@ -89,9 +89,11 @@ describe('fy-render opt-in', () => {
     // The honest form is against the rendered tree, in
     // `fy-render-sandbox.test.tsx`.
     // `fy-render-html-frame.tsx` is on it for a type reason only: it imports `FyRenderSandboxFailure` so
-    // both frames report failures in one vocabulary. It mounts no sandbox frame.
+    // both frames report failures in one vocabulary. It mounts no sandbox frame. `fy-render-chart.tsx` is on it for
+    // the same reason: a chart reports `render` and `library` in that vocabulary, and draws in the page.
     should(files).eql([
       'src/components/fy-render-block.tsx',
+      'src/components/fy-render-chart.tsx',
       'src/components/fy-render-html-frame.tsx',
       'src/components/fy-render-sandbox.tsx',
       'src/lib/fy-render.ts',

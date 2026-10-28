@@ -23,9 +23,9 @@ import {
   type WardenConfig,
   type WardenEventTrigger,
   type WardenFailoverPolicy,
+  type WardenLayers,
   type WardenLogin,
   type WardenMayActAlone,
-  type WardenLayers,
 } from '@ferretry/protocol';
 import { ArrowDown, ArrowUp, ExternalLink } from 'lucide-react';
 import { type ReactNode, useId } from 'react';
@@ -80,6 +80,11 @@ const ACT_ALONE: readonly { readonly id: keyof WardenMayActAlone; readonly label
     },
     { id: 'failover', label: 'Fail over', detail: 'Moves to the next login in the failover order when quota is out.' },
     { id: 'stop', label: 'Stop a ferret', detail: 'Off by default: a KILL verdict asks you first.' },
+    {
+      id: 'closeLeftovers',
+      label: 'Close leftover browsers',
+      detail: 'Closes a browser a finished ferret left running — by rule, no AI. The ferret is not touched.',
+    },
   ];
 
 /** The privacy sentence for the layers that are on: what leaves this machine, and to whom. */

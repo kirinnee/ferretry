@@ -14,7 +14,10 @@
  *
  * WRAPPED URLS. A long address printed in a narrow terminal wraps onto several screen rows that the
  * emulator marks as continuations of one logical line. Detection runs over the whole logical line and
- * maps each match back to its cells, so a link is one link however many rows it spans. The structural
+ * maps each match back to its cells, so a link is one link however many rows it spans. A program that
+ * breaks the address itself (a newline it printed, a tmux repaint) leaves rows the emulator does NOT mark;
+ * those are joined too, when the first row runs to the right edge and the next row can only be the rest
+ * of the address (`readScreen`, `joins`). The structural
  * `LinkableBuffer` is the slice of xterm's buffer this reads, so a test drives it without an emulator.
  *
  * OSC 8 SPOOFING. A program can print `ESC ] 8 ; ; https://evil ESC \ https://bank.example ESC ] 8 ; ;
@@ -148,35 +151,198 @@ interface CellPosition {
   readonly width: number;
 }
 
+/** One drawn cell, as detection reads it: where it is, how wide, and what it shows (a blank is a space). */
+interface RowCell {
+  readonly column: number;
+  readonly width: number;
+  readonly chars: string;
+}
+
+/** A logical line: the physical rows the emulator itself marked as continuations of one another. */
+interface LineSpan {
+  readonly first: number;
+  readonly last: number;
+}
+
+/** The columns of one row that take part in the joined text: `from` inclusive, `to` exclusive. */
+interface RowSegment {
+  readonly row: number;
+  readonly from: number;
+  readonly to: number;
+}
+
 /**
- * Every link that touches one screen row, with wrapped continuations followed in both directions.
+ * HOW CLOSE TO THE RIGHT EDGE a row's last character must be for the next row to be read as its
+ * continuation. A program that breaks a long address itself (Claude Code, codex, gh, anything repainted
+ * through tmux) fills the width it believes it has: usually the last cell, sometimes one or two short of
+ * it, because it keeps the cell the cursor would wrap on. Wider would join an address that merely ends
+ * near the edge to the line below it; the tests on the next row are what guard the rest.
+ */
+const SPARE_CELLS = 2;
+
+const SCHEME = /https?:\/\//iu;
+
+/** The first token of a continuation row: address characters only, and it begins like an address tail. */
+const TAIL_TOKEN = /^[\p{L}\p{N}%/_~.\-?&=#:@+][^\s<>"'`\p{Cc}]*$/u;
+
+/** A bullet or box edge a program draws before its text: `⏺ `, `- `, `│ `. */
+const GUTTER = /^\s*[^\p{L}\p{N}\s]\s+/u;
+
+/**
+ * The rows around one, read once, and the logical lines a link may span.
  *
- * `row` is xterm's 1-based buffer line number. A link that starts on the row above and wraps onto this
- * one is returned from either, with the whole range; xterm shows it as one hover.
+ * Two kinds of break are followed. A SOFT wrap is one the emulator made (`isWrapped`): the row below is
+ * part of the same line. A HARD break is a newline the program printed, or a tmux repaint (a pane is
+ * redrawn with cursor moves, so nothing is marked wrapped): the row below is NOT marked, and is joined
+ * only when it can be nothing but the rest of an address — see {@link joins}.
+ */
+const readScreen = (buffer: LinkableBuffer, columns: number) => {
+  const cache = new Map<number, readonly RowCell[]>();
+  const cellsOf = (y: number): readonly RowCell[] => {
+    const known = cache.get(y);
+    if (known !== undefined) return known;
+    const line = buffer.getLine(y);
+    const cells: RowCell[] = [];
+    if (line !== undefined) {
+      const width = Math.min(columns, line.length);
+      for (let x = 0; x < width; x += 1) {
+        const cell = line.getCell(x);
+        const cellWidth = cell?.getWidth() ?? 1;
+        // The second half of a wide character has no character of its own.
+        if (cellWidth === 0) continue;
+        cells.push({ column: x, width: cellWidth, chars: cell?.getChars() || ' ' });
+      }
+    }
+    cache.set(y, cells);
+    return cells;
+  };
+  const wrapped = (y: number): boolean => buffer.getLine(y)?.isWrapped === true;
+  const textOf = (y: number, from = 0, to = columns): string =>
+    cellsOf(y)
+      .filter(cell => cell.column >= from && cell.column < to)
+      .map(cell => cell.chars)
+      .join('');
+  const indentOf = (y: number): number => {
+    let blanks = 0;
+    for (const cell of cellsOf(y)) {
+      if (cell.chars !== ' ') break;
+      blanks += 1;
+    }
+    return blanks;
+  };
+  /** The column after the last character the row shows, or 0 for a blank row. */
+  const endOf = (y: number): number => {
+    const cells = cellsOf(y);
+    for (let at = cells.length - 1; at >= 0; at -= 1) {
+      const cell = cells[at];
+      if (cell !== undefined && cell.chars.trim() !== '') return cell.column + cell.width;
+    }
+    return 0;
+  };
+  const lineAt = (y: number): LineSpan => {
+    let first = y;
+    while (y - first < MAX_WRAPPED_ROWS && first > 0 && wrapped(first)) first -= 1;
+    let last = y;
+    while (last - y < MAX_WRAPPED_ROWS && wrapped(last + 1)) last += 1;
+    return { first, last };
+  };
+  const lineText = (span: LineSpan): string => {
+    let text = '';
+    for (let y = span.first; y <= span.last; y += 1) text += textOf(y, 0, y === span.last ? endOf(y) : columns);
+    return text;
+  };
+
+  /** Whether the line's last token is, or carries on, an address — through the lines above it. */
+  const endsInAddress = (span: LineSpan, depth: number): boolean => {
+    const text = lineText(span);
+    const token = /\S+$/u.exec(text)?.[0];
+    if (token === undefined) return false;
+    if (SCHEME.test(token)) return true;
+    if (depth >= MAX_WRAPPED_ROWS || text.trimStart() !== token || span.first === 0) return false;
+    return joins(lineAt(span.first - 1), span, depth + 1);
+  };
+
+  /**
+   * Whether `next` carries on the address `previous` ended in, though the emulator did not wrap it.
+   *
+   * ALL of these hold: `previous` reaches the right edge (a program breaks an address only when it has
+   * run out of width); its last token is an address; `next` starts at column 0, or at the indentation
+   * `previous` started at, or after the bullet it began with (Claude Code indents a reply two cells);
+   * and `next` begins with address characters that are not a bullet, a box edge or a prompt. A bare word
+   * followed by more words is a sentence, which also begins a line: it is not joined.
+   */
+  const joins = (previous: LineSpan, next: LineSpan, depth: number): boolean => {
+    if (wrapped(next.first) || endOf(previous.last) < columns - SPARE_CELLS) return false;
+    const indent = indentOf(next.first);
+    const indents = [0, indentOf(previous.first), GUTTER.exec(textOf(previous.first))?.[0].length ?? 0];
+    if (!indents.includes(indent)) return false;
+    const rest = textOf(next.first, indent).trimEnd();
+    const token = /^\S+/u.exec(rest)?.[0];
+    if (token === undefined || !TAIL_TOKEN.test(token) || !/[\p{L}\p{N}]/u.test(token)) return false;
+    if (/^\p{L}+$/u.test(token) && rest !== token) return false;
+    return endsInAddress(previous, depth);
+  };
+
+  /** The segments of every row the logical text around `asked` is read across, in order. */
+  const segmentsAround = (asked: number): readonly RowSegment[] => {
+    const lines: LineSpan[] = [lineAt(asked)];
+    let above = asked - (lines[0]?.first ?? asked);
+    for (;;) {
+      const top = lines[0];
+      if (top === undefined || top.first === 0 || above >= MAX_WRAPPED_ROWS) break;
+      const previous = lineAt(top.first - 1);
+      if (!joins(previous, top, 0)) break;
+      lines.unshift(previous);
+      above += previous.last - previous.first + 1;
+    }
+    let below = (lines[lines.length - 1]?.last ?? asked) - asked;
+    for (;;) {
+      const bottom = lines[lines.length - 1];
+      if (bottom === undefined || below >= MAX_WRAPPED_ROWS || buffer.getLine(bottom.last + 1) === undefined) break;
+      const next = lineAt(bottom.last + 1);
+      if (!joins(bottom, next, 0)) break;
+      lines.push(next);
+      below += next.last - next.first + 1;
+    }
+
+    const segments: RowSegment[] = [];
+    lines.forEach((span, index) => {
+      for (let y = span.first; y <= span.last; y += 1) {
+        segments.push({
+          row: y,
+          // A continuation line's indentation is the program's layout, not part of the address.
+          from: index > 0 && y === span.first ? indentOf(y) : 0,
+          to: index < lines.length - 1 && y === span.last ? endOf(y) : columns,
+        });
+      }
+    });
+    return segments;
+  };
+
+  return { cellsOf, segmentsAround };
+};
+
+/**
+ * Every link that touches one screen row, with continuations followed in both directions.
+ *
+ * `row` is xterm's 1-based buffer line number. A link that starts on the row above and carries on to this
+ * one is returned from either, with the whole range; xterm shows it as one hover. A range that crosses a
+ * hard break also covers the blanks the program left at the end of the first row and the indentation it
+ * put before the second, because a range is contiguous.
  */
 export const linksOnRow = (buffer: LinkableBuffer, columns: number, row: number): readonly ScreenLink[] => {
   const asked = row - 1;
   if (buffer.getLine(asked) === undefined) return [];
 
-  let first = asked;
-  while (asked - first < MAX_WRAPPED_ROWS && first > 0 && buffer.getLine(first)?.isWrapped === true) first -= 1;
-  let last = asked;
-  while (last - asked < MAX_WRAPPED_ROWS && buffer.getLine(last + 1)?.isWrapped === true) last += 1;
-
+  const screen = readScreen(buffer, columns);
   let text = '';
   const positions: CellPosition[] = [];
-  for (let y = first; y <= last; y += 1) {
-    const line = buffer.getLine(y);
-    if (line === undefined) break;
-    const width = Math.min(columns, line.length);
-    for (let x = 0; x < width; x += 1) {
-      const cell = line.getCell(x);
-      const cellWidth = cell?.getWidth() ?? 1;
-      // The second half of a wide character has no character of its own.
-      if (cellWidth === 0) continue;
-      const chars = cell?.getChars() || ' ';
-      for (let unit = 0; unit < chars.length; unit += 1) positions.push({ row: y, column: x, width: cellWidth });
-      text += chars;
+  for (const segment of screen.segmentsAround(asked)) {
+    for (const cell of screen.cellsOf(segment.row)) {
+      if (cell.column < segment.from || cell.column >= segment.to) continue;
+      for (let unit = 0; unit < cell.chars.length; unit += 1)
+        positions.push({ row: segment.row, column: cell.column, width: cell.width });
+      text += cell.chars;
     }
   }
 
