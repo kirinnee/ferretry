@@ -178,9 +178,11 @@ investigation, for the cap only. The status's savings line — skips × that ave
 appears only once an investigation has been priced.
 
 **A cleared flag stays quiet until its situation changes.** Every flag on a ferret carries a **subject** —
-the turn it is about, and for a stuck command which command. When Jev or an investigation clears a flag, that
-kind of flag on that ferret is left alone **until its subject changes** — a new turn, a different command —
-for 24 hours at most, however its status flickers meanwhile; a different kind of trouble on the same ferret
+which episode of trouble it is: its turn and the moment the episode began (the transcript last grew, the
+ferret froze, it went idle), and for a stuck command that process itself, across turns. When Jev or an
+investigation clears a flag, that kind of flag on that ferret is left alone **until its subject changes** —
+the ferret moves and stalls again, a different command is the stuck one — for 24 hours at most, however its
+status flickers meanwhile; a different kind of trouble on the same ferret
 is never covered. The `blessMinutes` blessing (default 15, doubling per re-clear up to 4 hours) still
 records the clear for the Warden page and _Leave it longer_, and still ends at once when the ferret changes
 status — but it is no longer what keeps a cleared ferret from being looked at again.
@@ -233,8 +235,8 @@ flat is what makes the shorter time safe — a build that prints, a watch loop t
 writing about what it is doing all count as moving. Climbing tokens still exempt a long think.
 
 **Leftover browsers are closed by rule.** A ferret whose turn is over (or whose done marker is written),
-with no command of its own running, whose pane has had a browser it launched for 10 minutes, gets that
-browser closed — the browser only, never the ferret, and the pane's processes are read again at the moment
+with no command of its own running, whose pane has had a browser it launched for 10 minutes since the turn
+ended, gets that browser closed — the browser only, never the ferret, and the pane's processes are read again at the moment
 of closing. No Jev, no investigation, nothing spent. It is `mayActAlone.closeLeftovers` (default **on**);
 with it off the Warden lists the recommendation once under Recent actions instead. Every close is listed
 there too, and journalled as `fleet.warden_leftover_closed`.

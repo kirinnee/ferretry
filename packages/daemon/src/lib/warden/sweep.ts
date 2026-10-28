@@ -1479,7 +1479,7 @@ export class WardenSweepService {
           ...base,
           outcome: 'held',
           detail:
-            'A browser this ferret launched is still running after its turn ended. The Warden recommends closing it (the ferret itself stays as it is). It waits for you.',
+            'A browser this ferret launched is still running after its turn ended. The Warden would close it (never the ferret), but closing leftovers alone is off — turn on Close leftover browsers in Settings › Warden, or close it from the ferret’s terminal.',
         });
         continue;
       }

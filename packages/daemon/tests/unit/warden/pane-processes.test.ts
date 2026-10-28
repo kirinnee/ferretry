@@ -48,12 +48,39 @@ describe('which processes under a pane are work', () => {
     should(view.roles.get(66_902)).equal('command');
   });
 
-  it('should name the oldest running command as the episode’s key', () => {
+  it('should name the youngest running command — the one being waited on — as the episode’s key', () => {
     // Act
     const work = paneWorkSummary(paneOf('linux-claude-pane.txt', 66_601));
 
     // Assert
-    should(work).deepEqual({ toolCommand: true, commandKey: 'pid:66901', leftoverBrowser: false });
+    should(work).deepEqual({ toolCommand: true, commandKey: 'pid:67011', leftoverBrowser: false });
+  });
+
+  it('should not let a watcher started early stand for the command after it', () => {
+    // Arrange — `tsc -w` (no listening socket) since the turn began, then a fresh foreground command.
+    const processes = [
+      proc(60, undefined, "/usr/bin/zsh -c eval 'tsc -w'", { startedSecondsAgo: 3_600 }),
+      proc(61, 60, 'node tsc -w', { startedSecondsAgo: 3_600 }),
+      proc(62, undefined, "/usr/bin/zsh -c eval 'bun test'", { startedSecondsAgo: 30 }),
+    ];
+
+    // Act / Assert
+    should(paneWorkSummary(processes).commandKey).equal('pid:62');
+  });
+
+  it('should read a Chrome the harness itself started as its helper, never a leftover', () => {
+    // Arrange
+    const processes = [
+      proc(70, undefined, '/opt/google/chrome/chrome --headless --remote-debugging-port=9222'),
+      proc(71, 70, '/opt/google/chrome/chrome --type=renderer'),
+    ];
+
+    // Act
+    const view = classifyPaneProcesses(processes);
+
+    // Assert
+    should(view.leftoverBrowsers).have.length(0);
+    should([...view.roles.values()]).deepEqual(['helper', 'helper']);
   });
 
   it('should treat Codex’s app server as its own and its bash -c as work, from a real Codex pane', () => {

@@ -119,6 +119,8 @@ export interface WardenSessionState {
    * can be `running` and `your-turn` at once — that is a finished ferret waiting on its owner.
    */
   readonly turnState?: SessionTurnState;
+  /** When `turnState` last changed: for a ferret at its prompt, when its turn ended. */
+  readonly turnStateAt?: string;
   readonly reason?: string;
   readonly waiting?: WardenDeclaredWait;
   readonly quota?: { readonly resetAt?: number };

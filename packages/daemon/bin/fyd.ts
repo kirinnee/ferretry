@@ -10040,8 +10040,11 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
               sessionTmuxName(parseSessionId(sessionId), defaultSessionLifecycleSettings),
             );
             if (observed.kind !== 'observed') throw new Error(observed.reason);
+            const view = classifyPaneProcesses(observed.processes);
+            // A command started since the sweep looked (a new turn) may be using that browser: leave it.
+            if (view.toolCommands.length > 0) return 0;
             let closed = 0;
-            for (const browser of classifyPaneProcesses(observed.processes).leftoverBrowsers) {
+            for (const browser of view.leftoverBrowsers) {
               try {
                 process.kill(browser.pid, 'SIGTERM');
                 closed += 1;

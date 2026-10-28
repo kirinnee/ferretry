@@ -38,8 +38,10 @@ export function leftoverBrowserCandidates(
   const candidates: LeftoverBrowserCandidate[] = [];
   for (const view of sessions) {
     const since = view.leftoverBrowserSince;
-    const sinceMs = instantMs(since);
-    if (since === undefined || sinceMs === undefined || nowMs - sinceMs < graceMs) continue;
+    // The grace runs from the later of the browser's sighting and the turn's end: a browser the turn used
+    // for an hour is not a leftover the moment the turn ends.
+    const sinceMs = Math.max(instantMs(since) ?? Number.NaN, instantMs(view.state.turnStateAt) ?? 0);
+    if (since === undefined || !Number.isFinite(sinceMs) || nowMs - sinceMs < graceMs) continue;
     // A person's own terminal and a warden's own session are never cleaned up after.
     if (view.config.mode === 'interactive' || view.config.label === WARDEN_LABEL || view.config.wardenLineage) continue;
     if (isTerminalStatus(view.state.status)) continue;

@@ -20,7 +20,7 @@ export interface LivenessLook {
    * not tool commands — see {@link lookAtPaneProcesses}.
    */
   readonly children?: boolean | undefined;
-  /** Which tool command is the oldest running one, so a different command starts a new episode. */
+  /** Which tool command is the youngest running one (the one being waited on), so a different command starts a new episode. */
   readonly commandKey?: string | undefined;
   /** A browser the agent launched is still running under the pane. */
   readonly leftoverBrowser?: boolean | undefined;

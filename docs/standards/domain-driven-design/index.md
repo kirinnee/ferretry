@@ -72,7 +72,8 @@ names unambiguous:
 - Within the **warden**: a **flag** is what the free sweep finds; **triage** decides what a flag
   leads to (`rules`, `llm` or `jev`); the **Jev guard** only ever answers _skip_ or _investigate_;
   a **blessing** is a skip or a cleared verdict holding one anomaly kind quiet for a while; a flag's
-  **subject** is what it is about (its turn, and for a stuck command which command), and the
+  **subject** is which episode of trouble it is (its turn and when it began, or for a stuck command
+  that process), and the
   **backoff** is how long a subject already looked at waits before it is looked at again; an
   **investigation** is the assigned warden whose **verdict** is the only thing that acts on a ferret,
   and an act the owner has not allowed is **held**. A **tool command** is what a harness runs through a

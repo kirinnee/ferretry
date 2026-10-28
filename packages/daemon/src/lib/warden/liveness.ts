@@ -203,7 +203,10 @@ export function foldLivenessSample(
   };
   const { leftoverBrowserSince: _leftover, ...withoutLeftover } = base;
   const observed = sample.subprocessAlive !== undefined;
-  const next = observed && sample.leftoverBrowser !== true ? withoutLeftover : base;
+  // A browser only becomes a leftover once nothing of the agent's own runs beside it: while a command
+  // runs it may be that command's browser, so the clock starts again.
+  const leftoverNow = sample.leftoverBrowser === true && sample.subprocessAlive === false;
+  const next = observed && !leftoverNow ? withoutLeftover : base;
   return {
     ...next,
     ledger,
@@ -211,7 +214,7 @@ export function foldLivenessSample(
     ...(meaningfulPaneKey === undefined ? {} : { meaningfulPaneKey }),
     ...(sample.transcriptHash === undefined ? {} : { transcriptHash: sample.transcriptHash }),
     ...(counters === undefined ? {} : { counters }),
-    ...(sample.leftoverBrowser === true ? { leftoverBrowserSince: base.leftoverBrowserSince ?? at } : {}),
+    ...(leftoverNow ? { leftoverBrowserSince: base.leftoverBrowserSince ?? at } : {}),
   };
 }
 

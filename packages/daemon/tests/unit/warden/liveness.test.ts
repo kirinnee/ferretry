@@ -348,6 +348,18 @@ describe('one command after another', () => {
     should(gone.ledger).not.have.property('subprocessKey');
   });
 
+  it('should start a leftover’s clock only once nothing of the agent’s own runs beside it', () => {
+    // Arrange
+    const busy = foldLivenessSample(undefined, { subprocessAlive: true, leftoverBrowser: true }, 1, NOW);
+
+    // Act
+    const idle = foldLivenessSample(busy, { subprocessAlive: false, leftoverBrowser: true }, 1, NOW + 30_000);
+
+    // Assert
+    should(busy).not.have.property('leftoverBrowserSince');
+    should(idle.leftoverBrowserSince).equal(at(30));
+  });
+
   it('should remember since when a leftover browser has run, and forget it once it is gone', () => {
     // Arrange
     const seen = foldLivenessSample(undefined, { subprocessAlive: false, leftoverBrowser: true }, 1, NOW);

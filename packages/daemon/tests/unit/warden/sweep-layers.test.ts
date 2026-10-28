@@ -304,10 +304,31 @@ describe('the growing cooldown', () => {
 
     // Assert — one Jev decision, held against the same turn ever since.
     should(subject.guarded).have.length(1);
-    should(subject.state().backoff?.['s1|unattended_question']).match({ subject: 'turn:?', count: 1, cleared: true });
+    should(subject.state().backoff?.['s1|unattended_question']).match({
+      subject: /^turn:\?\|since:/u,
+      count: 1,
+      cleared: true,
+    });
     should(subject.state().actions?.at(-1)?.detail).equal(
       'Jev was 96% sure it is healthy, so this flag is left alone until its situation changes — a new turn or a different command — for 24 h at most.',
     );
+  });
+
+  it('should ask again when the ferret went quiet a second time in the same turn', async () => {
+    // Arrange — cleared, then it moved again, and now it has been idle long enough to flag once more.
+    const time = clock();
+    const subject = harness({ config: jevOnly(), fleet: [unattended('s1')], now: time.now });
+    await subject.service.run({ force: false });
+    time.advance(120);
+    const lastActivityAt = new Date(time.now() - 40 * MINUTE).toISOString();
+    subject.setFleet([session({ id: 's1', status: 'awaiting_user', state: { lastActivityAt } })]);
+
+    // Act
+    await subject.service.run({ force: false });
+
+    // Assert — a new episode is a new subject: a clearance of the last one never hides it.
+    should(subject.guarded).have.length(2);
+    should(subject.state().backoff?.['s1|unattended_question']?.subject).equal(`turn:?|since:${lastActivityAt}`);
   });
 
   it('should ask again at once when the ferret moves to a new turn', async () => {
@@ -323,7 +344,7 @@ describe('the growing cooldown', () => {
 
     // Assert
     should(subject.guarded).have.length(2);
-    should(subject.state().backoff?.['s1|unattended_question']).match({ subject: 'turn:2', count: 1 });
+    should(subject.state().backoff?.['s1|unattended_question']).match({ subject: /^turn:2\|since:/u, count: 1 });
   });
 
   it('should forget the streak of a flag that stopped being raised while nothing blessed it', async () => {

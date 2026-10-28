@@ -53,21 +53,35 @@ export interface WardenAnomaly {
   /** Liveness snapshot for sus anomalies — the investigation's starting point. */
   readonly ledger?: WardenLivenessLedger;
   /**
-   * WHAT this anomaly is about, stably: the turn, and for a stuck command which command. Two sweeps
-   * that see the same subject are looking at the same situation, so an investigation of it is not
-   * repeated on a timer (`backoff.ts`); a new turn or a different command is a new subject.
+   * WHAT this anomaly is about, stably: which episode of trouble. Two sweeps that see the same subject
+   * are looking at the same situation, so an investigation of it is not repeated on a timer
+   * (`backoff.ts`); a new episode is a new subject at once. See {@link anomalySubject}.
    */
   readonly subject?: string;
 }
 
-/** The {@link WardenAnomaly.subject} of an anomaly on a session in this state. */
+/**
+ * The {@link WardenAnomaly.subject} of an anomaly: its turn and the instant its episode began, so a NEW
+ * stall in the same long turn — the transcript grew and then stopped again, the ferret froze again — is
+ * never hidden behind a clearance of the last one.
+ *
+ * A stuck command is the exception: it is that process, by pid, and nothing else. A command still running
+ * across turns is still the same command (a watcher the owner was already told about is not news each
+ * turn), and a different command is a different subject however soon it follows.
+ */
 export function anomalySubject(
-  kind: WardenAnomalyKind,
-  state: { readonly turn?: number },
-  ledger?: WardenLivenessLedger,
+  anomaly: Pick<WardenAnomaly, 'kind' | 'since' | 'ledger'>,
+  state: { readonly turn?: number; readonly startedAt?: string },
 ): string {
   const turn = `turn:${state.turn ?? '?'}`;
-  return kind === 'sus_subprocess' ? `${turn}|cmd:${ledger?.subprocessKey ?? '?'}` : turn;
+  const ledger = anomaly.ledger;
+  if (anomaly.kind === 'sus_subprocess')
+    return ledger?.subprocessKey === undefined
+      ? `${turn}|since:${ledger?.subprocessSince ?? '?'}`
+      : `cmd:${ledger.subprocessKey}`;
+  // A think's `since` is re-derived from a rounded age every sweep; the transcript's own stamp is not.
+  if (anomaly.kind === 'sus_thinking') return `${turn}|since:${ledger?.lastTranscriptAt ?? state.startedAt ?? '?'}`;
+  return `${turn}|since:${anomaly.since ?? '?'}`;
 }
 
 /**
@@ -229,9 +243,8 @@ export function detectAnomalies(
       teammate: config.teammate,
       label: config.label,
       status: state.status,
-      // Every kind but the stuck command is about the turn; that one refines it (below).
-      subject: anomalySubject('dead_monitor', state),
     } as const;
+    const firstOwn = anomalies.length;
 
     if (ACTIVE_MONITORED.includes(state.status) && !view.hasLiveMonitor) {
       anomalies.push({
@@ -372,7 +385,6 @@ export function detectAnomalies(
           idleMinutes: finding.forSeconds === undefined ? undefined : Math.floor(finding.forSeconds / 60),
           assignedWarden: true,
           ledger,
-          subject: anomalySubject(finding.kind, state, ledger),
         });
       }
     }
@@ -393,6 +405,12 @@ export function detectAnomalies(
           since: isoFromMs(resetAt),
         });
       }
+    }
+
+    // Every flag on this session names its episode, once its anchor is known.
+    for (let index = firstOwn; index < anomalies.length; index++) {
+      const anomaly = anomalies[index] as WardenAnomaly;
+      anomalies[index] = { ...anomaly, subject: anomalySubject(anomaly, state) };
     }
   }
 

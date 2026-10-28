@@ -86,7 +86,7 @@ describe('the investigation backoff', () => {
 
     // Assert
     should(spawnedAt).deepEqual([0]);
-    should(subject.state().backoff?.['s1|sus_subprocess']).match({ subject: 'turn:4|cmd:pid:40', cleared: true });
+    should(subject.state().backoff?.['s1|sus_subprocess']).match({ subject: 'cmd:pid:40', cleared: true });
   });
 
   it('should look at once when a different command is the stuck one', async () => {
@@ -97,6 +97,16 @@ describe('the investigation backoff', () => {
 
     // Assert
     should(spawnedAt).deepEqual([0, 60]);
+  });
+
+  it('should keep a cleared command cleared across turns while that same process runs', async () => {
+    // Act — a new turn every hour, the same long-lived command (one pid) the whole time.
+    const { spawnedAt } = await sweepFor(6, 'LEAVE', nowMs =>
+      stuck(nowMs, 'pid:40', 4 + Math.floor((nowMs - NOW) / (60 * MINUTE))),
+    );
+
+    // Assert
+    should(spawnedAt).deepEqual([0]);
   });
 
   it('should spend nothing on a ferret that is waiting on its owner', async () => {

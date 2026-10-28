@@ -29,6 +29,12 @@ describe('leftover browsers closed by rule', () => {
     ]);
   });
 
+  it('should give a browser the turn was using its full grace after the turn ends', () => {
+    // Act / Assert — seen for 30 minutes, but the turn only ended 4 minutes ago.
+    should(candidates([view({ state: { turnStateAt: ago(4) } })])).deepEqual([]);
+    should(candidates([view({ state: { turnStateAt: ago(11) } })])).deepEqual(['s1']);
+  });
+
   it('should also close it once the done marker is written', () => {
     // Act / Assert
     should(candidates([view({ hasDoneMarker: true, state: { turnState: undefined } })])).deepEqual(['s1']);

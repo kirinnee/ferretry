@@ -126,11 +126,13 @@ function roleOf(
   const parentRole = entry.ppid === undefined || !byPid.has(entry.ppid) ? undefined : roles.get(entry.ppid);
   // Below a helper, a browser or a server, everything belongs to it.
   if (parentRole === 'helper' || parentRole === 'browser' || parentRole === 'service') return parentRole;
-  if (isBrowserProcess(entry.argv)) return 'browser';
-  if (entry.listening === true) return 'service';
-  if (parentRole === 'command') return 'command';
-  // Started by the pane or the harness itself: a shell is how a tool command runs, anything else is a
-  // helper the harness keeps for the session.
+  // Inside a tool command: a browser is a browser, a listening process a server, the rest more command.
+  if (parentRole === 'command') {
+    if (isBrowserProcess(entry.argv)) return 'browser';
+    return entry.listening === true ? 'service' : 'command';
+  }
+  // Started by the pane or the harness itself: a shell is how a tool command runs, anything else — a
+  // browser the harness drives included — is a helper the harness keeps for the session.
   return isShellProcess(entry.argv) ? 'command' : 'helper';
 }
 
@@ -144,7 +146,7 @@ function subtreeOf(rootPid: number, processes: readonly PaneProcess[]): readonly
 export interface PaneWorkSummary {
   /** A tool command is running under the pane. */
   readonly toolCommand: boolean;
-  /** Identity of the oldest running tool command — a different one starts a new episode. */
+  /** Identity of the youngest running tool command — a different one starts a new episode. */
   readonly commandKey?: string;
   /** A browser the agent launched is still running. */
   readonly leftoverBrowser: boolean;
@@ -152,10 +154,12 @@ export interface PaneWorkSummary {
 
 export function paneWorkSummary(processes: readonly PaneProcess[]): PaneWorkSummary {
   const view = classifyPaneProcesses(processes);
-  const oldest = view.toolCommands[0];
+  // The YOUNGEST command is the one being waited on: a watcher started early (`tsc -w`) must not stand
+  // for every command after it.
+  const youngest = view.toolCommands.at(-1);
   return {
-    toolCommand: oldest !== undefined,
-    ...(oldest === undefined ? {} : { commandKey: `pid:${oldest.pid}` }),
+    toolCommand: youngest !== undefined,
+    ...(youngest === undefined ? {} : { commandKey: `pid:${youngest.pid}` }),
     leftoverBrowser: view.leftoverBrowsers.length > 0,
   };
 }
