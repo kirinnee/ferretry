@@ -16,6 +16,11 @@ export function attentionBoardPath(sessionId: string): string {
   return `/v1/sessions/${encodeURIComponent(sessionId)}/attention`;
 }
 
+/** The daemon route that delivers a ferret's held answers now ("Send now"). */
+export function repliesPath(sessionId: string): string {
+  return `${attentionBoardPath(sessionId)}/replies`;
+}
+
 /** The daemon route that pushes a direct notification to the human's devices. */
 export function notifyPath(sessionId: string): string {
   return `/v1/sessions/${encodeURIComponent(sessionId)}/notify`;
@@ -71,6 +76,10 @@ export class ProtocolAttentionGateway implements IAttentionGateway {
       AttentionSnapshotSchema,
       jsonPost(body, this.#headers),
     );
+  }
+
+  async sendReplies(sessionId: string): Promise<AttentionSnapshot> {
+    return await this.client.request(repliesPath(sessionId), AttentionSnapshotSchema, jsonPost({}, this.#headers));
   }
 
   async notify(sessionId: string, request: DirectNotificationRequest): Promise<DirectNotificationResponse> {

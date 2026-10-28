@@ -105,3 +105,22 @@ export type SessionLiveActivity = z.infer<typeof SessionLiveActivitySchema>;
 
 /** The query value that asks a per-session event stream for `live` frames. */
 export const SESSION_LIVE_STREAM_FLAG = '1';
+
+/**
+ * The query value (`?transcript=1`) that asks a per-session event stream for `transcript` frames: one
+ * each time the session's transcript file changes, so a reader re-reads it at once instead of on its
+ * next poll. Nothing in the journal says a transcript grew — a reply's text and tool calls land there
+ * with no turn change — so without this a Chat showed each block only when its poll came round.
+ */
+export const SESSION_TRANSCRIPT_STREAM_FLAG = '1';
+
+/**
+ * "This session's transcript just changed." It carries no content: the reader re-reads the transcript
+ * through the ordinary conditional read, so this frame can never disagree with it.
+ */
+export const SessionTranscriptMovedSchema = z.strictObject({
+  sessionId: z.string().min(1),
+  /** When the daemon heard the change. */
+  at: InstantSchema,
+});
+export type SessionTranscriptMoved = z.infer<typeof SessionTranscriptMovedSchema>;

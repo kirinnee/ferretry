@@ -106,4 +106,3 @@ verb-unproven GET /v1/sessions/:sessionId/fs/diff # ANALYSIS: cli filesystem/gat
 verb-unproven GET /v1/sessions/:sessionId/terminals # ANALYSIS: pwa web-terminals.ts:81 trailing `fetcher` argument is indistinguishable from an init
 verb-unproven GET /v1/sessions/by-request/:requestId # ANALYSIS: fy-api-client.ts:481 trailing FY_RECOVERY_TIMEOUT_MS is indistinguishable from an init
 
-unserved POST /v1/sessions/*/attention/replies # the daemon serves it in feat/attention-reply-batch; delete this line when that PR is on main

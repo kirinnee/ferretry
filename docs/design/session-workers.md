@@ -163,6 +163,11 @@ under 1c; subscribing them to the worker's frames is a later option (§8 Q5).
 `turnPorts.paneState` (`bin/fyd.ts:8599`, `storage-live-activity.ts:80,111`) — a capture per half second per
 viewed session. Moves to the worker's latest frame (§2.2).
 
+`?transcript=1` beside it costs no read at all: the stream subscribes the session's proved transcript file to the
+same file-event hub the observer host uses (`src/adapters/session/live/file-transcript-changes.ts`) and sends a
+content-free `transcript` frame when its size or mtime moved (`docs/relay-protocol.md`). It is what lets a Chat show a
+reply's blocks as they are written; nothing in the journal says a transcript grew.
+
 ### 1.7 Fleet-wide jobs that stay on main in stage 3 (stage 4 territory)
 
 | Job                                                     | Where                                                                                                   | Cadence                         | Why it does not move                                                                                                                                                                                         |
