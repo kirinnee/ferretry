@@ -36,7 +36,6 @@ export const THEME_TOKENS = [
   'viz-8',
   'accent',
   'accent-soft',
-  'accent-border',
   'ok',
   'ok-bg',
   'warn',
@@ -52,6 +51,7 @@ export const THEME_TOKENS = [
   'surface-2',
   'surface-3',
   'border',
+  'border-strong',
   'border-soft',
 ] as const;
 export type ThemeToken = (typeof THEME_TOKENS)[number];
@@ -190,9 +190,10 @@ export interface MermaidThemeVariables {
 /**
  * Mermaid's `base` theme, painted from the app's tokens.
  *
- * A node is the accent's soft wash with the accent's own border and the body ink as its text, which is
- * how the app draws a selected card — so a diagram reads as part of the page rather than as a stock
- * Mermaid picture pasted into it. Lines and arrows are muted, notes are the warn wash, a pie and a git
+ * A node is the accent's soft wash with the accent itself as its border and the body ink as its text, so a
+ * diagram reads as part of the page rather than as a stock Mermaid picture pasted into it; the soft
+ * `accent-border` was too faint on the light wash to see. Cluster and label edges are `--border-strong`, the
+ * theme's strong edge. Lines and arrows are muted, notes are the warn wash, a pie and a git
  * graph take the same palette a `chart` does. A token that did not resolve is left out, and Mermaid's
  * `base` theme derives that slot from the ones that did.
  */
@@ -200,14 +201,14 @@ export function mermaidThemeVariables(theme: ResolvedTheme): MermaidThemeVariabl
   const c = theme.colors;
   const pick: Record<MermaidColorVariable, string> = {
     activationBkgColor: c['surface-3'],
-    activationBorderColor: c.border,
+    activationBorderColor: c['border-strong'],
     actorBkg: c['accent-soft'],
-    actorBorder: c['accent-border'],
+    actorBorder: c.accent,
     actorLineColor: c.muted,
     actorTextColor: c.fg,
     background: c.bg,
     clusterBkg: c['surface-2'],
-    clusterBorder: c.border,
+    clusterBorder: c['border-strong'],
     edgeLabelBackground: c.surface,
     errorBkgColor: c['err-bg'],
     errorTextColor: c.err,
@@ -220,12 +221,12 @@ export function mermaidThemeVariables(theme: ResolvedTheme): MermaidThemeVariabl
     git6: c['viz-7'],
     git7: c['viz-8'],
     labelBoxBkgColor: c['surface-2'],
-    labelBoxBorderColor: c.border,
+    labelBoxBorderColor: c['border-strong'],
     labelTextColor: c.fg,
     lineColor: c.muted,
     loopTextColor: c.fg,
     mainBkg: c['accent-soft'],
-    nodeBorder: c['accent-border'],
+    nodeBorder: c.accent,
     noteBkgColor: c['warn-bg'],
     noteBorderColor: c.warn,
     noteTextColor: c.fg,
@@ -242,16 +243,16 @@ export function mermaidThemeVariables(theme: ResolvedTheme): MermaidThemeVariabl
     pieSectionTextColor: c.bg,
     pieStrokeColor: c.bg,
     pieTitleTextColor: c.fg,
-    primaryBorderColor: c['accent-border'],
+    primaryBorderColor: c.accent,
     primaryColor: c['accent-soft'],
     primaryTextColor: c.fg,
-    secondaryBorderColor: c.border,
+    secondaryBorderColor: c['border-strong'],
     secondaryColor: c['surface-2'],
     secondaryTextColor: c.fg,
     sequenceNumberColor: c.bg,
     signalColor: c['fg-soft'],
     signalTextColor: c.fg,
-    tertiaryBorderColor: c.border,
+    tertiaryBorderColor: c['border-strong'],
     tertiaryColor: c['surface-3'],
     tertiaryTextColor: c.fg,
     textColor: c.fg,
