@@ -302,10 +302,22 @@ const handshakeReport = async (bridge: Bridge): Promise<Record<string, Json>> =>
   };
 };
 
-const globalTrafficReport = (bridge: Bridge): Record<string, Json> => ({
-  globalMessagesAfterHandshake: bridge.sightings().filter(sighting => sighting.afterHandshake).length,
-  globalMessagesTotal: bridge.sightings().length,
-});
+/**
+ * The shell repeats `shell-ready` every 100 ms until its port arrives, and the
+ * parent's `init` can cross one of those repeats in flight, so a late
+ * announcement from the frame itself is counted apart from any other global
+ * message: it carries no data, and every other kind after the handshake would.
+ */
+const globalTrafficReport = (bridge: Bridge): Record<string, Json> => {
+  const after = bridge.sightings().filter(sighting => sighting.afterHandshake);
+  const lateAnnouncement = (sighting: GlobalSighting): boolean =>
+    sighting.sourceIsFrame && sighting.parsedKind === 'shell-ready';
+  return {
+    globalMessagesAfterHandshake: after.filter(sighting => !lateAnnouncement(sighting)).length,
+    globalMessagesTotal: bridge.sightings().length,
+    lateAnnouncementsAfterHandshake: after.filter(lateAnnouncement).length,
+  };
+};
 
 const renderMermaid = async (source: string, libraryUrl: string): Promise<Record<string, Json>> => {
   const bridge = mount(config.shellUrl, FY_RENDER_SANDBOX_LIMITS.mermaidDeadlineMs);
