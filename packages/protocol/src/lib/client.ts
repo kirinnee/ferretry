@@ -38,7 +38,7 @@ import type {
   StructuredQuestionAnswer,
 } from './session.ts';
 import type { ForkSessionOutcome, ForkSessionRequest } from './session-fork.ts';
-import type { SessionLiveActivity } from './session-live.ts';
+import type { SessionLiveActivity, SessionTranscriptMoved } from './session-live.ts';
 import type { SessionTranscriptPage } from './session-transcript.ts';
 import type { MachineSkillsInventory, SessionSkillsInventory, SkillFile } from './skills-inventory.ts';
 import type { SessionHandoff } from './turn-handoff.ts';
@@ -255,6 +255,12 @@ export interface IFyApiClient {
      * sample. Ignored for a fleet stream, which has no one turn to read.
      */
     onLive?: (live: SessionLiveActivity) => void,
+    /**
+     * Asks a per-session stream to say when its transcript changes (`?transcript=1`), and is called
+     * each time it does. Ignored for a fleet stream. A daemon that predates the flag refuses the
+     * upgrade with 400 before any frame, so a caller that passes this must be ready to retry without.
+     */
+    onTranscript?: (moved: SessionTranscriptMoved) => void,
   ): Promise<void>;
   /**
    * The FLEET feed (`/v1/events` with no session) from now on: every session's events as they are

@@ -46,6 +46,7 @@ export FY_E2E_SHOTS_ROOT="${evidence}/shots"
 export FY_E2E_JOURNEY_LOG="${evidence}/journeys.jsonl"
 export FY_E2E_RELAY_REPORT="${evidence}/relay-journey.md"
 export FY_E2E_RECONNECT_REPORT="${evidence}/relay-reconnect.md"
+export FY_E2E_CHAT_LATENCY_REPORT="${evidence}/chat-latency.md"
 export FY_E2E_JUNIT="${evidence}/junit.xml"
 
 # Which journeys this runner owns (scripts/ci/e2e-shards.ts). Unset, it is every journey, as before.

@@ -123,7 +123,12 @@ import {
   type ForkSessionRequest,
   ForkSessionRequestSchema,
 } from '../lib/session-fork.ts';
-import { SESSION_LIVE_STREAM_FLAG, type SessionLiveActivity } from '../lib/session-live.ts';
+import {
+  SESSION_LIVE_STREAM_FLAG,
+  SESSION_TRANSCRIPT_STREAM_FLAG,
+  type SessionLiveActivity,
+  type SessionTranscriptMoved,
+} from '../lib/session-live.ts';
 import { type SessionTranscriptPage, SessionTranscriptPageSchema } from '../lib/session-transcript.ts';
 import {
   type MachineSkillsInventory,
@@ -1173,12 +1178,15 @@ export class FyApiClient implements IFyApiClient {
     signal?: AbortSignal,
     onIdle?: (idle: FyEventStreamIdle) => void,
     onLive?: (live: SessionLiveActivity) => void,
+    onTranscript?: (moved: SessionTranscriptMoved) => void,
   ): Promise<void> {
     const url = new URL(`${this.#baseUrl}/v1/events`);
     url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
     url.searchParams.set('after', String(NonNegativeIntegerSchema.parse(after)));
     if (sessionId !== undefined) url.searchParams.set('sessionId', NonEmptyValueSchema.parse(sessionId));
     if (sessionId !== undefined && onLive !== undefined) url.searchParams.set('live', SESSION_LIVE_STREAM_FLAG);
+    if (sessionId !== undefined && onTranscript !== undefined)
+      url.searchParams.set('transcript', SESSION_TRANSCRIPT_STREAM_FLAG);
     return this.#eventTransport.stream({
       url: url.toString(),
       token: this.#token,
@@ -1187,6 +1195,7 @@ export class FyApiClient implements IFyApiClient {
         const frame = FyEventStreamFrameSchema.parse(value);
         if (frame.kind === 'event') onEvent(frame.event);
         else if (frame.kind === 'live') onLive?.(frame.live);
+        else if (frame.kind === 'transcript') onTranscript?.(frame.transcript);
         else onIdle?.(frame);
       },
     });

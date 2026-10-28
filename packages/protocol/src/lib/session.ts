@@ -10,7 +10,7 @@ import {
 import { ProviderQuotaBalanceSchema } from './fleet-credentials.ts';
 import { HarnessSchema } from './session-base.ts';
 import { HarnessDialogSchema } from './session-dialog.ts';
-import { SessionLiveActivitySchema } from './session-live.ts';
+import { SessionLiveActivitySchema, SessionTranscriptMovedSchema } from './session-live.ts';
 import { PermissionRequestSchema } from './session-permission.ts';
 import { SessionProvenanceSchema } from './session-provenance.ts';
 import { SessionTransferEdgeSchema } from './session-transfer-edge.ts';
@@ -915,6 +915,11 @@ export const FyEventStreamFrameSchema = z.discriminatedUnion('kind', [
    * `?live=1` ever carries one, so a reader that never asked never has to recognise it.
    */
   z.strictObject({ kind: z.literal('live'), live: SessionLiveActivitySchema }),
+  /**
+   * The session's transcript changed (`session-live.ts`). Only a per-session stream opened with
+   * `?transcript=1` ever carries one, for the same reason as `live`.
+   */
+  z.strictObject({ kind: z.literal('transcript'), transcript: SessionTranscriptMovedSchema }),
 ]);
 export type FyEventStreamFrame = z.infer<typeof FyEventStreamFrameSchema>;
 export type FyEventStreamIdle = Extract<FyEventStreamFrame, { readonly kind: 'idle' }>;

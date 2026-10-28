@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { turnFileInstruction } from '@ferretry/protocol';
 import {
+  ACTED_WATCH_MS,
   NUDGE_SETTLE_MS,
   RELAXED_REFRESH_MS,
   type SessionWorkspaceRefreshEnvironment,
@@ -977,6 +978,28 @@ describe('startSessionWorkspaceRefresh · nudges and the relaxed poll', () => {
 
     // Act
     browser.advance(elapsed);
+    browser.tick();
+
+    // Assert
+    expect(reader.reads()).toBe(expected);
+    subject.stop();
+  });
+
+  test.each([
+    ['just after the reader acted', 1_000, 2],
+    ['to the end of the watch after acting', ACTED_WATCH_MS - 1, 2],
+    ['once the watch after acting is over', ACTED_WATCH_MS, 1],
+  ])('should poll a relaxed page %s (ticks after %#)', async (_name, sinceActed, expected) => {
+    // Arrange — the feed is up and the agent idle, so the poll would wait out its relaxed window; then the
+    // reader sends. A feed that died without a close must not leave that send unwatched for minutes.
+    const browser = timed();
+    const reader = counting();
+    const subject = start(browser.env, reader.api, () => true);
+    await subject.initial;
+    subject.acted();
+
+    // Act
+    browser.advance(sinceActed);
     browser.tick();
 
     // Assert

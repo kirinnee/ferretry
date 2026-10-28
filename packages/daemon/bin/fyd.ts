@@ -337,7 +337,11 @@ import {
   RuntimeSupervisedLauncher,
   RuntimeSupervisedReaper,
 } from '../src/adapters/session/lifecycle/runtime-launch-supervision.ts';
-import { FileCompactionHistory, StorageLiveActivitySource } from '../src/adapters/session/live/index.ts';
+import {
+  FileCompactionHistory,
+  FileTranscriptChanges,
+  StorageLiveActivitySource,
+} from '../src/adapters/session/live/index.ts';
 import {
   FileWaitHeartbeat,
   MonitorTickRunner,
@@ -10034,6 +10038,20 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
             },
           },
           liveActivity,
+          // `?transcript=1`: the proved transcript, heard through the one hub every other watcher shares.
+          new FileTranscriptChanges({
+            file: async sessionId => {
+              const id = tryParseSessionId(sessionId);
+              return id === undefined ? undefined : await transcriptFileOf(id);
+            },
+            stat: async file =>
+              await stat(file).then(
+                found => ({ size: found.size, mtimeMs: found.mtimeMs }),
+                () => undefined,
+              ),
+            files: fileEvents,
+            clock,
+          }),
         ),
         // Built above, and the same instance the fleet mount confirms a change through. See its
         // definition for why one instance rather than two.

@@ -1,4 +1,4 @@
-import type { FyEvent, IFyApiClient, SessionLiveActivity } from '@ferretry/protocol';
+import type { FyEvent, IFyApiClient, SessionLiveActivity, SessionTranscriptMoved } from '@ferretry/protocol';
 
 /**
  * What a reader is allowed to be told about the live feed, and nothing finer.
@@ -124,6 +124,9 @@ export const sessionEventStreamDeadlineMs = (declaredIdleSeconds: number | undef
  */
 export const SESSION_EVENT_STREAM_QUIET_MS = 2_000;
 
+/** A daemon that does not know a query flag refuses the upgrade with 400; nothing else says "too old". */
+const refusedAsUnknown = (reason: unknown): boolean => (reason as { readonly status?: unknown } | null)?.status === 400;
+
 export interface SessionEventStreamEnvironment {
   readonly setTimeout: (callback: () => void, milliseconds: number) => unknown;
   readonly clearTimeout: (handle: unknown) => void;
@@ -144,6 +147,16 @@ export interface SessionEventStreamInput {
    * advances no cursor and triggers no re-read.
    */
   readonly onLive?: (live: SessionLiveActivity) => void;
+  /**
+   * Asks the daemon to say when the session's transcript changes (`?transcript=1`) and is called each
+   * time it does — the one signal that a reply's text or a tool call landed, which no journal event says.
+   * Like a live sample it proves the feed and advances no cursor.
+   *
+   * A DAEMON THAT PREDATES THE FLAG refuses the upgrade with 400 before any frame. That is not an outage:
+   * the feed reopens at once without the flag, spends nothing from the retry budget, and does not ask
+   * again for this page view — the transcript then moves on events and the poll, as before.
+   */
+  readonly onTranscript?: (moved: SessionTranscriptMoved) => void;
   /** Called on every CHANGE of state, never on a repeat, so a host can hand it straight to `setState`. */
   readonly onStatus?: (status: SessionEventStreamStatus) => void;
   /** Overridable only so a test can exhaust the schedule; production uses the shipped budget. */
@@ -226,6 +239,8 @@ export const startSessionEventStream = (input: SessionEventStreamInput): Session
   let quiet: unknown;
   /** The daemon's own declared idle period, learned from the first proof and kept across attempts. */
   let declaredIdleSeconds: number | undefined;
+  /** The daemon refused `?transcript=1` as unknown: it is older than the signal, so this view stops asking. */
+  let transcriptRefused = false;
 
   const report = (next: SessionEventStreamStatus): void => {
     if (quiet !== undefined) environment.clearTimeout(quiet);
@@ -328,10 +343,30 @@ export const startSessionEventStream = (input: SessionEventStreamInput): Session
      * "a dead stream looks alive" defect this model exists to end, reintroduced one layer in.
      */
     const currentAttempt = (): boolean => !stopped && mine === generation && !finished;
+    /** Whether this attempt has delivered any frame: a refusal only ever comes before the first. */
+    let heard = false;
+    const asksTranscript = input.onTranscript !== undefined && !transcriptRefused;
     const finish = (): void => {
       if (!currentAttempt()) return;
       finished = true;
       ended(mine);
+    };
+    const failed = (reason: unknown): void => {
+      if (asksTranscript && !heard && refusedAsUnknown(reason) && currentAttempt()) {
+        // An older daemon, not a broken path: open again at once, without the flag and without a retry.
+        transcriptRefused = true;
+        finished = true;
+        abort = undefined;
+        clearSilence();
+        open();
+        return;
+      }
+      finish();
+    };
+    const fresh = (): boolean => {
+      if (!proved(currentAttempt)) return false;
+      heard = true;
+      return true;
     };
     const watch = (): void => {
       clearSilence();
@@ -351,26 +386,33 @@ export const startSessionEventStream = (input: SessionEventStreamInput): Session
         input.sessionId,
         cursor,
         event => {
-          if (!proved(currentAttempt)) return;
+          if (!fresh()) return;
           watch();
           cursor = Math.max(cursor, event.sequence);
           input.onEvent(event);
         },
         controller.signal,
         idle => {
-          if (!proved(currentAttempt)) return;
+          if (!fresh()) return;
           declaredIdleSeconds = idle.idleSeconds;
           watch();
         },
         input.onLive === undefined
           ? undefined
           : live => {
-              if (!proved(currentAttempt)) return;
+              if (!fresh()) return;
               watch();
               input.onLive?.(live);
             },
+        asksTranscript
+          ? moved => {
+              if (!fresh()) return;
+              watch();
+              input.onTranscript?.(moved);
+            }
+          : undefined,
       )
-      .then(finish, finish);
+      .then(finish, failed);
   }
 
   const reconnect = (): void => {
