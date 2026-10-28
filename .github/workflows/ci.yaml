@@ -8,12 +8,22 @@ name: CI
 # A branch with no PR gets CI from `workflow_dispatch` (or by opening a draft).
 #
 # `Casks/**` alone is GoReleaser's own cask commit, pushed by CD after a release has already
-# shipped: it changes no code any job here reads.
+# shipped: it changes no code any job here reads. The other five paths are exactly what
+# semantic-release's `release: X.Y.Z` commit writes (.releaserc.yaml, `@semantic-release/git`
+# assets): a version stamp and the changelog over the tree the previous `main` run already proved.
+# It was a third of the `main` runs (170 of 513 in two weeks), each billing every Namespace job:
+# its parent has a run of its own, and Release has nothing left to release. A commit that changes any
+# other file as well still runs everything.
 on:
   push:
     branches: [main]
     paths-ignore:
       - 'Casks/**'
+      - 'VERSION'
+      - 'Changelog.md'
+      - 'Changelog.old.md'
+      - 'packages/cli/package.json'
+      - 'packages/daemon/package.json'
   pull_request:
   workflow_dispatch:
 
