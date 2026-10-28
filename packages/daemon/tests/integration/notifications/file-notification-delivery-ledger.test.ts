@@ -1,13 +1,13 @@
 import { afterAll, describe, it } from 'bun:test';
 import { stat } from 'node:fs/promises';
 import should from 'should';
-import { FileNotificationDeliveryLedger } from '../../../src/adapters/notifications/index.ts';
 import { StateFileSystem } from '../../../src/adapters/filesystem/state-file-system.ts';
+import { FileNotificationDeliveryLedger } from '../../../src/adapters/notifications/index.ts';
 import {
   createFoundationPaths,
+  type NotificationRecord,
   NotificationRecordSchema,
   resolveStateHome,
-  type NotificationRecord,
 } from '../../../src/lib/index.ts';
 import { cleanupTempDirectories, tempDirectory } from '../support/repository.ts';
 
@@ -206,6 +206,23 @@ describe('FileNotificationDeliveryLedger', () => {
       sent: { body: 'The rollout needs a human decision.' },
     });
     should(found?.requested).not.have.property('request');
+  });
+
+  it('should keep a more-info push apart from the first announcement of the same item', async () => {
+    // Arrange
+    const world = await fixture('notification-ledger-info');
+    const first = attentionRequested();
+
+    // Act
+    await world.ledger.append(first);
+    await world.ledger.append(
+      NotificationRecordSchema.parse({ ...first, key: 'attention:session-1:A1:info-1', infoRequest: 1 }),
+    );
+    const info = await world.ledger.find('attention:session-1:A1:info-1');
+
+    // Assert
+    should(info?.requested).containDeep({ attentionId: 'A1', infoRequest: 1 });
+    should((await world.ledger.find('attention:session-1:A1'))?.requested).not.have.property('infoRequest');
   });
 
   it('should preserve decisions across freshly constructed adapter instances', async () => {

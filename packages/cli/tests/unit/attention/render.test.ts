@@ -398,3 +398,24 @@ describe('attention listing steps and body', () => {
     should(actual).containEql('body: Some notes');
   });
 });
+
+describe('attention to-do items', () => {
+  it('should say what a task wants and that it waits on the ferret once more information was asked', () => {
+    // Act
+    const plain = renderAttentionList(snapshot([agentItem('A2', 'log in', { ask: { kind: 'task' } })]));
+    const waiting = renderAttentionList(
+      snapshot([
+        agentItem('A2', 'log in', {
+          ask: { kind: 'task' },
+          waitingOn: 'ferret',
+          askedAt: '2026-07-31T09:10:00.000Z',
+        }),
+      ]),
+    );
+
+    // Assert
+    should(plain).containEql('to do: mark it done, or ask for more information');
+    should(plain).not.containEql('waiting on the ferret');
+    should(waiting).containEql('waiting on the ferret: more information asked 2026-07-31T09:10:00.000Z');
+  });
+});

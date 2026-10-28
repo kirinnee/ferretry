@@ -43,6 +43,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import tailwindcss from 'tailwindcss';
 import { defineConfig } from 'vite';
+import { textScalePostcss } from './src/lib/text-scale-postcss.ts';
 import tailwindConfig from './tailwind.config.ts';
 
 /**
@@ -325,7 +326,7 @@ export default defineConfig({
   },
   css: {
     postcss: {
-      plugins: [tailwindcss(tailwindConfig), autoprefixer()],
+      plugins: [tailwindcss(tailwindConfig), textScalePostcss(), autoprefixer()],
     },
   },
   server: {

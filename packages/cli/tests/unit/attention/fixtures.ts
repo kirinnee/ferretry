@@ -39,6 +39,8 @@ interface HumanItemFields extends AttentionBrief {
   context: string | null;
   howToResolve: string;
   waitingSince: string;
+  waitingOn: 'ferret';
+  askedAt: string;
   ask: AttentionAsk;
 }
 

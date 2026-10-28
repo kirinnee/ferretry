@@ -111,7 +111,9 @@ export function composeAddRequest(
   const options = flags.option !== undefined && flags.option.length > 0 ? flags.option : undefined;
   const fileOptions = file.options?.map(option);
   const questions = questionsFrom(flags, file, options);
-  const ask = askFor(flags.kind ?? file.kind, options ?? fileOptions?.map(each => each.label), questions);
+  const steps = stepsFrom(flags.step) ?? stepsFrom(file.steps);
+  const kind = flags.kind ?? (flags.task === true ? 'task' : file.kind);
+  const ask = askFor(kind, options ?? fileOptions?.map(each => each.label), questions, steps !== undefined);
   // A recommendation that is the lone question's own pick is said once, on the question.
   const recommendation = onQuestion(questions, flags) ? undefined : recommendationFrom(flags, file);
   const terms = flags.term !== undefined && flags.term.length > 0 ? flags.term.map(termFrom) : file.terms;
@@ -119,7 +121,6 @@ export function composeAddRequest(
   const impact = prose(flags.impact) ?? prose(file.impact);
   const urgency = text(flags.urgency) ?? text(file.urgency);
   const context = prose(flags.context) ?? prose(file.context);
-  const steps = stepsFrom(flags.step) ?? stepsFrom(file.steps);
   const body = text(flags.body) ?? text(file.body);
 
   const request = {
@@ -195,9 +196,15 @@ function askFor(
   kind: string | undefined,
   options: readonly string[] | undefined,
   questions: readonly AttentionQuestion[] | undefined,
+  hasSteps: boolean,
 ): AttentionAsk {
   const lone = questions?.length === 1 ? questions[0] : undefined;
   const named = text(kind);
+  if (named === 'task' && questions !== undefined) {
+    throw new Error('a task asks nothing to answer: drop --question, or drop --task');
+  }
+  // Steps and nothing to answer is a to-do: the human does it, then marks it done.
+  if (named === undefined && options === undefined && questions === undefined && hasSteps) return { kind: 'task' };
   if (named !== undefined || options !== undefined) {
     if (questions !== undefined && questions.length > 1 && options !== undefined) {
       throw new Error('--option belongs to a single question; give each of several questions its own options');
