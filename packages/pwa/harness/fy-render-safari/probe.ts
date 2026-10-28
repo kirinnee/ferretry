@@ -464,12 +464,17 @@ const main = async (): Promise<number> => {
       ],
     );
 
-    const globalCounts = (['production-bridge', 'mermaid-correct-hash', 'lottie'] as const).map(globalAfter);
+    const portOnlySteps = ['production-bridge', 'mermaid-correct-hash', 'lottie'] as const;
+    const globalCounts = portOnlySteps.map(globalAfter);
+    const lateAnnouncements = portOnlySteps.map(step =>
+      Number(observationsFor(step).lateAnnouncementsAfterHandshake ?? -1),
+    );
     score(
       'port-only-traffic',
       globalCounts.every(count => count === 0),
       [
-        `global messages received after the handshake, per step: ${globalCounts.join(', ')}`,
+        `global messages other than a late \`shell-ready\` received after the handshake, per step: ${globalCounts.join(', ')}`,
+        `late \`shell-ready\` repeats from the frame itself, per step: ${lateAnnouncements.join(', ')} — the shell repeats it every 100 ms until its port arrives, so one can cross \`init\` in flight; it carries no data, so it is recorded, never failed`,
         'every reply the parent acted on arrived on the paired port',
       ],
     );
@@ -681,6 +686,12 @@ const main = async (): Promise<number> => {
       startedAt,
       steps: [...results.values()].map(entry => ({ ok: entry.ok, observations: entry.observations, step: entry.step })),
     };
+    // The job log is where a red is read first, so it names what failed rather
+    // than leaving the reader to download the artifact to learn anything.
+    for (const failure of failures) {
+      const evidence = scored.get(failure)?.evidence ?? [];
+      console.error([`❌ ${failure}`, ...evidence.map(line => `   - ${line}`)].join('\n'));
+    }
     return report.ok ? 0 : 1;
   } catch (error) {
     // A setup failure, a driver that never started, a step that threw: all of them
