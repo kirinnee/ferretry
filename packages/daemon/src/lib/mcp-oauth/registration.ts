@@ -80,17 +80,61 @@ export function registrationMetadata(
 
 const parseJson = (text: string): unknown => {
   try {
-    return JSON.parse(text);
+    return JSON.parse(text.replace(/^\uFEFF/u, ''));
   } catch {
     return undefined;
   }
 };
 
+/**
+ * What providers really answer, read as leniently as the MCP SDK's own client does: a client id that is
+ * a string or a number, a secret that is absent, `null` or `""` for a public client, an authentication
+ * method that is `null` or not text (taken as unsaid), and every other field ignored. Only the client id
+ * and a secret that is present but not text are refusals.
+ */
 const RegistrationSchema = z.looseObject({
-  client_id: z.string().min(1).max(512),
-  client_secret: z.string().min(1).max(4096).optional(),
-  token_endpoint_auth_method: z.string().max(64).optional(),
+  client_id: z.union([z.string(), z.number().finite()]).transform(String).pipe(z.string().min(1).max(512)),
+  client_secret: z
+    .string()
+    .max(4096)
+    .nullish()
+    .transform(value => (value === null || value === undefined || value === '' ? undefined : value)),
+  token_endpoint_auth_method: z
+    .string()
+    .max(64)
+    .nullish()
+    .catch(undefined)
+    .transform(value => value ?? undefined),
 });
+
+/** The JSON type of a value, the only thing about a provider's answer that a refusal may repeat. */
+const jsonType = (value: unknown): string => {
+  if (value === null) return 'null';
+  if (Array.isArray(value)) return 'a JSON array';
+  switch (typeof value) {
+    case 'string':
+      return 'a string';
+    case 'number':
+      return 'a number';
+    case 'boolean':
+      return 'a boolean';
+    default:
+      return 'a JSON object';
+  }
+};
+
+/** Which field of an unusable success was wrong and how: field names and JSON types, never values. */
+function registrationProblem(body: unknown, issuePath: readonly PropertyKey[], code: string): string {
+  if (body === undefined) return 'its answer was not JSON';
+  if (typeof body !== 'object' || body === null || Array.isArray(body))
+    return `its answer was ${jsonType(body)}, not a JSON object`;
+  const field = String(issuePath[0] ?? 'client_id');
+  const value = (body as Record<string, unknown>)[field];
+  if (value === undefined) return `its ${field} was missing`;
+  if (code === 'too_big') return `its ${field} was too long`;
+  if (code === 'too_small') return `its ${field} was empty`;
+  return `its ${field} was ${jsonType(value)}`;
+}
 
 const ErrorSchema = z.looseObject({ error: z.unknown().optional(), error_description: z.unknown().optional() });
 
@@ -105,8 +149,8 @@ export type RegistrationAnswer =
     }
   /** Any answer that is not a success, with the provider's reason when it gave one. */
   | { readonly kind: 'rejected'; readonly status: number; readonly error?: string; readonly description?: string }
-  /** A success with no usable client in it. */
-  | { readonly kind: 'unreadable'; readonly status: number }
+  /** A success with no usable client in it; `problem` says which field was wrong, never its value. */
+  | { readonly kind: 'unreadable'; readonly status: number; readonly problem?: string }
   /** No HTTP answer: `reason` is the transport's code (`ENOTFOUND`, `TIMEOUT`, a certificate error). */
   | { readonly kind: 'unreachable'; readonly reason: string };
 
@@ -140,7 +184,14 @@ export function registrationAnswer(
   const body = parseJson(text);
   if (status === 200 || status === 201) {
     const parsed = RegistrationSchema.safeParse(body);
-    if (!parsed.success) return { kind: 'unreadable', status };
+    if (!parsed.success) {
+      const issue = parsed.error.issues[0];
+      return {
+        kind: 'unreadable',
+        status,
+        problem: registrationProblem(body, issue?.path ?? [], issue?.code ?? 'invalid_type'),
+      };
+    }
     const secret = parsed.data.client_secret;
     const tokenAuth = secret === undefined ? undefined : tokenAuthOf(parsed.data.token_endpoint_auth_method, sent);
     return {
@@ -271,7 +322,9 @@ export function registrationRefusal(
   if (answer.kind === 'unreachable') return unreachableSentence(host, answer.reason, 'register Ferretry');
   const ways = tried.length <= 1 ? '' : ` Tried ${String(tried.length)} ways: ${tried.map(ATTEMPT_WORDS).join('; ')}.`;
   if (answer.kind === 'unreadable')
-    return `The sign-in provider at ${host} answered the registration (HTTP ${String(answer.status)}) without a client id Ferretry can use, so the sign-in could not start.${ways}`;
+    return answer.problem === undefined
+      ? `The sign-in provider at ${host} answered the registration (HTTP ${String(answer.status)}) without a client id Ferretry can use, so the sign-in could not start.${ways}`
+      : `The sign-in provider at ${host} answered the registration (HTTP ${String(answer.status)}) but ${answer.problem}, so the sign-in could not start.${ways}`;
   const reason =
     answer.error === undefined
       ? 'no reason given'
