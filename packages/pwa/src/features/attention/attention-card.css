@@ -613,7 +613,7 @@ details[open] > .fy-attn-sec__title > .fy-attn-sec__chevron {
   display: contents;
 }
 .fy-attn-card[data-pinned] {
-  max-height: min(48dvh, 24rem);
+  max-height: min(44dvh, 24rem);
 }
 .fy-attn-card[data-pinned] > .fy-attn-card__scroll {
   display: flex;
@@ -623,4 +623,10 @@ details[open] > .fy-attn-sec__title > .fy-attn-sec__chevron {
   gap: var(--gap-sm);
   overflow-y: auto;
   overscroll-behavior: contain;
+}
+/* Wide screens have the height: the pinned card shows its steps, not just the top of the body. */
+@media (min-width: 900px) {
+  .fy-attn-card[data-pinned] {
+    max-height: min(72dvh, 44rem);
+  }
 }
