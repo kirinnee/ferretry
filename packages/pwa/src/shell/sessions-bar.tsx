@@ -133,6 +133,8 @@ export interface SessionsBarProps {
    * Full draws the three-line rows; every other value, and no choice, draws one line per session.
    */
   readonly density?: Density | null;
+  /** The device setting "Group Needs you at the top"; absent means on. */
+  readonly groupNeedsYou?: boolean;
   /** The reader chose a density in the bar's options menu. Absent: the bar offers no such menu. */
   readonly onDensityChange?: (density: Density) => void;
   /** The kind filter this device remembered, read when the bar opens. Absent or null: Interactive. */
@@ -339,6 +341,7 @@ const allMachinesFor = (props: SessionsBarProps, listFilter: SessionsListFilter)
         filter: listFilter,
         keep: (machine, view) => machine === props.daemonId && view.config.id === props.activeSessionId,
         sortRows: true,
+        groupNeedsYou: props.groupNeedsYou ?? true,
       });
 
 const densityWord = (density: Density | null | undefined): 'compact' | 'comfortable' =>
@@ -347,7 +350,13 @@ const densityWord = (density: Density | null | undefined): 'compact' | 'comforta
 /** The column's and the drawer's content: everything but the frame. */
 function SessionsBarBody(props: SessionsBarProps & ListFilterProps & { readonly navigate: (to: string) => void }) {
   const { daemonId, sessions, projects, activeSessionId, active, navigate, listFilter } = props;
-  const view = sessionsBarView(sessions ?? [], projects, listFilter, isOpen(activeSessionId));
+  const view = sessionsBarView(
+    sessions ?? [],
+    projects,
+    listFilter,
+    isOpen(activeSessionId),
+    props.groupNeedsYou ?? true,
+  );
   const machineView = allMachinesFor(props, listFilter);
   const { counts, hiddenStopped } = machineView ?? view;
   return (
@@ -558,7 +567,13 @@ function SessionsBarTop(props: SessionsBarProps & { readonly navigate: (to: stri
 /** The collapsed form: the same places and sessions, as icons and status dots. */
 function SessionsRail(props: SessionsBarProps & ListFilterProps) {
   const { daemonId, sessions, projects, activeSessionId, active, onNavigate, listFilter } = props;
-  const view = sessionsBarView(sessions ?? [], projects, listFilter, isOpen(activeSessionId));
+  const view = sessionsBarView(
+    sessions ?? [],
+    projects,
+    listFilter,
+    isOpen(activeSessionId),
+    props.groupNeedsYou ?? true,
+  );
   const machineView = allMachinesFor(props, listFilter);
   return (
     <nav aria-label="Sessions" className="fy-sbar fy-sbar--rail" data-sessions-bar="rail">

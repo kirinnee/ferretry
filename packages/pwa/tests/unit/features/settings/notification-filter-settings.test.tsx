@@ -14,13 +14,11 @@ const view = (overrides: Partial<NotificationFilterSettingsViewProps> = {}) => {
   const calls = {
     categories: [] as [string, boolean][],
     quietHours: [] as object[],
-    machines: [] as [string, boolean][],
   };
   const props: NotificationFilterSettingsViewProps = {
     preferences: DEFAULT_NOTIFICATION_FILTER_PREFERENCES,
     onCategoryChange: (category, next) => calls.categories.push([category, next]),
     onQuietHoursChange: patch => calls.quietHours.push(patch),
-    onToggleMachine: (daemonId, next) => calls.machines.push([daemonId, next]),
     ...overrides,
   };
   return { calls, renderer: render(<NotificationFilterSettingsView {...props} />) };
@@ -86,25 +84,5 @@ describe('NotificationFilterSettingsView', () => {
       .find(node => node.findAllByType('span').some(span => span.children.includes('Quiet hours')));
     run(() => quietToggle?.props.onClick());
     expect(calls.quietHours).toEqual([{ enabled: true }]);
-  });
-
-  it('hides the per-machine list entirely when there is nothing paired but this one', () => {
-    const { renderer } = view({ machines: [] });
-    expect(JSON.stringify(renderer.toJSON())).not.toContain('Per machine');
-  });
-
-  it('lists every other paired machine and toggles exactly the one pressed', () => {
-    const { calls, renderer } = view({
-      machines: [
-        { daemonId: 'daemon-a', label: 'Workstation', enabled: true },
-        { daemonId: 'daemon-b', label: 'Laptop', enabled: false },
-      ],
-    });
-    const laptopToggle = renderer.root
-      .findAllByProps({ role: 'switch' })
-      .find(node => node.findAllByType('span').some(span => span.children.includes('Laptop')));
-    expect(laptopToggle?.props['aria-checked']).toBe(false);
-    run(() => laptopToggle?.props.onClick());
-    expect(calls.machines).toEqual([['daemon-b', true]]);
   });
 });

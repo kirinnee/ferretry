@@ -86,6 +86,18 @@ describe('pullDashboardNeedsYou', () => {
     expect(result.needsYou).toEqual([]);
     expect(result.groups).toBe(groups);
   });
+
+  test('lifts nothing when grouping is off: sessions stay in their project group', () => {
+    const groups = [group('ferretry', [row('calm-a'), row('new', 3)])];
+    const result = pullDashboardNeedsYou(groups, false);
+    expect(result.needsYou).toEqual([]);
+    expect(result.groups).toBe(groups);
+  });
+
+  test('a Your turn session with no Attention items is not needs-you', () => {
+    const turn = sessionView('turn', { state: { status: 'awaiting_user' } });
+    expect(pullDashboardNeedsYou([group('ferretry', [turn])]).needsYou).toEqual([]);
+  });
 });
 
 describe('activityLine', () => {

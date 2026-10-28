@@ -22,7 +22,7 @@
  */
 
 import { ArrowRight, CheckCheck, X } from 'lucide-react';
-import { useEffect, useId, useRef } from 'react';
+import { type ReactNode, useEffect, useId, useRef } from 'react';
 import { Spinner } from '../../components/spinner.tsx';
 import type { AttentionInbox } from '../../hooks/use-attention-inbox.ts';
 import {
@@ -148,9 +148,19 @@ export interface AttentionInboxPageProps {
   readonly clock?: () => number;
   /** Forces reduced motion on or off; the reader's preference otherwise. */
   readonly reducedMotion?: boolean;
+  /** Above the cards: the shell's "notifications are off for <machine>" banner, which draws nothing when none is. */
+  readonly banner?: ReactNode;
 }
 
-export function AttentionInboxPage({ inbox, onNavigate, phone, now, clock, reducedMotion }: AttentionInboxPageProps) {
+export function AttentionInboxPage({
+  inbox,
+  onNavigate,
+  phone,
+  now,
+  clock,
+  reducedMotion,
+  banner,
+}: AttentionInboxPageProps) {
   const headingId = useId();
   const host: CardHostProps = { inbox, onNavigate, now };
   const schedule = (card: InboxCard, action: InboxAction): void => inbox.deferred.schedule(card, action);
@@ -187,6 +197,7 @@ export function AttentionInboxPage({ inbox, onNavigate, phone, now, clock, reduc
           </p>
         )}
       </header>
+      {banner}
       <OrphanedFailures inbox={inbox} />
       {empty ? (
         inbox.reading ? (

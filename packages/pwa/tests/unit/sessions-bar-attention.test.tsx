@@ -7,7 +7,6 @@ import { SessionsBar } from '../../src/shell/sessions-bar.tsx';
 import {
   attentionWords,
   hasAttention,
-  needsYou,
   pullNeedsYou,
   rowPreview,
   sessionRowPath,
@@ -145,31 +144,22 @@ describe('unread rows in the sessions bar', () => {
   });
 });
 
-describe('the status-based waiting signal, reconciled', () => {
+describe('a parked session is not Needs you', () => {
   const waiting = sessionView('waits', {
     config: { teammate: 'waits', label: 'Parked', cwd: '/work/waits', mode: 'interactive' },
     state: { status: 'awaiting_user', lastActivityAt: recent },
   });
 
-  test('a parked session with no Attention gets the quiet "waiting" word, not the accent pill, and stays in its folder', async () => {
+  test('a parked session with no Attention has no badge and no waiting word, and stays in its folder', async () => {
     view = await mount(bar({ sessions: [waiting, unread('loud', 1, 'A1', 1)] }).element);
     const row = must(view.container.querySelector('[data-sbar-session="waits"]'), 'the parked row');
-    expect(row.querySelector('[data-sbar-waiting]')?.textContent).toBe('waiting');
+    expect(row.querySelector('[data-sbar-waiting]')).toBeNull();
     expect(row.querySelector('[data-unread-badge]')).toBeNull();
     const group = must(view.container.querySelector('[data-sbar-needs-you-group]'), 'the Needs you group');
     expect(ids(group)).toEqual(['loud']);
   });
 
-  test('a session that is both parked and unread shows only the louder badge', async () => {
-    const both = unread('both', 2, 'A5', 1, { status: 'awaiting_user' });
-    expect(needsYou(both)).toBe(true);
-    view = await mount(bar({ sessions: [both] }).element);
-    const row = must(view.container.querySelector('[data-sbar-session="both"]'), 'the row');
-    expect(row.querySelector('[data-sbar-waiting]')).toBeNull();
-    expect(row.querySelector('[data-unread-badge]')).not.toBeNull();
-  });
-
-  test('across machines Attention rows lead the pinned group, then the parked ones follow', () => {
+  test('across machines only Attention rows are pinned', () => {
     const source = (daemonId: DaemonId, name: string, sessions: SessionView[]): MachineSource => ({
       daemonId,
       name,
@@ -177,14 +167,16 @@ describe('the status-based waiting signal, reconciled', () => {
       projects: [],
       slice: { sessions, byId: new Map(), status: 'ready', error: null },
     });
-    const result = allMachinesView(
-      [
-        source(DAEMON, 'work-mac', [waiting, unread('older', 1, 'A1', 20)]),
-        source(BETA, 'kirin-box', [unread('newer', 1, 'A2', 2)]),
-      ],
-      { filter: { mode: 'all', showStopped: false } },
-    );
-    expect(result.needsYou.map(entry => entry.view.config.id)).toEqual(['newer', 'older', 'waits']);
+    const machines = [
+      source(DAEMON, 'work-mac', [waiting, unread('older', 1, 'A1', 20)]),
+      source(BETA, 'kirin-box', [unread('newer', 1, 'A2', 2)]),
+    ];
+    const filter = { mode: 'all' as const, showStopped: false };
+    expect(allMachinesView(machines, { filter }).needsYou.map(entry => entry.view.config.id)).toEqual([
+      'newer',
+      'older',
+    ]);
+    expect(allMachinesView(machines, { filter, groupNeedsYou: false }).needsYou).toEqual([]);
   });
 });
 
@@ -220,6 +212,25 @@ describe('the pure model', () => {
     const result = sessionsBarView([calm('x'), unread('a', 1, 'A1', 9)], [], { mode: 'all', showStopped: false });
     expect(result.needsYou.map(row => row.config.id)).toEqual(['a']);
     expect(result.groups.flatMap(group => group.rows).map(row => row.config.id)).toEqual(['x']);
+  });
+
+  test('with grouping off nothing is lifted: the session stays in its project group', () => {
+    const rows = [calm('x'), unread('a', 1, 'A1', 9)];
+    expect(pullNeedsYou(rows, row => row, false).waiting).toEqual([]);
+    const result = sessionsBarView(rows, [], { mode: 'all', showStopped: false }, undefined, false);
+    expect(result.needsYou).toEqual([]);
+    expect(
+      result.groups
+        .flatMap(group => group.rows)
+        .map(row => row.config.id)
+        .sort(),
+    ).toEqual(['a', 'x']);
+  });
+
+  test('a Your turn session with no Attention items is not needs-you', () => {
+    const turn = sessionView('turn', { state: { status: 'awaiting_user', lastActivityAt: recent } });
+    const result = sessionsBarView([turn], [], { mode: 'all', showStopped: false });
+    expect(result.needsYou).toEqual([]);
   });
 });
 

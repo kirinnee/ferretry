@@ -7,11 +7,11 @@ import {
   listedBeforeMode,
   listTallies,
   matchesMode,
-  needsYou,
   pendingQuestionPreview,
   sessionsBarDirectory,
   sessionsBarNames,
   sessionsBarSubline,
+  hasAttention,
   sessionsBarView,
   sidebarCompact,
 } from '../../src/shell/sessions-bar-model.ts';
@@ -32,25 +32,25 @@ describe('how much a row says', () => {
 });
 
 describe('who needs the reader', () => {
-  test('a session parked on a person, by any of the three ways it can say so', () => {
-    expect(needsYou(sessionView('a', { state: { status: 'awaiting_user' } }))).toBe(true);
-    expect(needsYou(sessionView('b', { state: { status: 'awaiting_question' } }))).toBe(true);
-    expect(needsYou(sessionView('n', { state: { status: 'running', turnState: 'needs-input' } }))).toBe(true);
-    expect(needsYou(sessionView('y', { state: { status: 'running', turnState: 'your-turn' } }))).toBe(false);
-    expect(
-      needsYou(
-        sessionView('c', {
-          state: { status: 'running', pendingQuestion: { toolUseId: 'q', questions: [] } as never },
-        }),
-      ),
-    ).toBe(true);
-    expect(needsYou(sessionView('d', { state: { status: 'running', needsHuman: 'approve the deploy' } }))).toBe(true);
+  test('only open Attention does: a parked session with no items is not Needs you, one with an item is', () => {
+    const parked = sessionView('a', { state: { status: 'awaiting_user' } });
+    const asking = sessionView('b', { state: { status: 'awaiting_question', needsHuman: 'approve' } });
+    const filter = { mode: 'all' as const, showStopped: false };
+    expect(sessionsBarView([parked, asking], [], filter).needsYou).toEqual([]);
+    const filed = sessionView('c', {
+      state: { status: 'awaiting_user', attention: { open: 1, first: 'A1', latestAt: ago(1_000) } as never },
+    });
+    expect(sessionsBarView([parked, filed], [], filter).needsYou.map(row => row.config.id)).toEqual(['c']);
   });
 
-  test('never a session that is simply working, or one that is over', () => {
-    expect(needsYou(sessionView('a'))).toBe(false);
-    expect(needsYou(sessionView('b', { state: { status: 'running', needsHuman: '' } }))).toBe(false);
-    expect(needsYou(sessionView('c', { state: { status: 'completed', needsHuman: 'stale ask' } }))).toBe(false);
+  test('grouping off leaves the Attention session in its project group, still unread', () => {
+    const filed = sessionView('c', {
+      state: { status: 'running', attention: { open: 1, first: 'A1', latestAt: ago(1_000) } as never },
+    });
+    const result = sessionsBarView([filed], [], { mode: 'all', showStopped: false }, undefined, false);
+    expect(result.needsYou).toEqual([]);
+    expect(result.groups.flatMap(group => group.rows).map(row => row.config.id)).toEqual(['c']);
+    expect(hasAttention(filed)).toBe(true);
   });
 
   test('stopped is the status mark’s own finished class, kill_failed included', () => {

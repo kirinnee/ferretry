@@ -22,23 +22,17 @@
  * WHAT A ROW SAYS: the status mark, its task as the title with the ferret's name beneath, and its project DIRECTORY — the folder
  * it runs in, which tells two agents on one project apart (a worktree each).
  *
- * TWO SIGNALS THAT A SESSION WANTS YOU, ONE LOUD AND ONE QUIET.
+ * ONE SIGNAL THAT A SESSION NEEDS YOU: OPEN ATTENTION.
  *
- *   ATTENTION is the primary one. The daemon puts `state.attention` on a session while it has open
- *   Attention items and removes it when none are left, so the summary rides the session list: reading it
- *   costs no request per row (the old reason this list refused to know about Attention). An unread row
- *   gets a bold name and an accent count badge, opens the conversation AT the first item, and is
- *   gathered into "Needs you" at the top, newest `latestAt` first. It clears only when the items
- *   resolve — never because the reader looked.
+ *   The daemon puts `state.attention` on a session while it has open Attention items and removes it when
+ *   none are left, so the summary rides the session list: reading it costs no request per row. An unread
+ *   row gets a bold name and an accent count badge, opens the conversation AT the first item, and — while
+ *   the device setting "Group Needs you at the top" is on — is gathered into "Needs you" at the top, newest
+ *   `latestAt` first. It clears only when the items resolve, never because the reader looked.
  *
- *   WAITING is the status-based signal (`needsYou` below): parked on a person (`awaiting_user`,
- *   `awaiting_question`), a pending structured question, or the daemon's `needsHuman` flag. It is a
- *   fact about the conversation's state, not an item the ferret filed, so it is demoted rather than
- *   removed: a muted "waiting" word with no accent and no count, shown only on a row that has no
- *   Attention (when both are true the badge already says it louder). It does not move a row into
- *   "Needs you" on the single-machine list; across machines it follows the Attention rows there, as it
- *   always pinned. Keeping it quiet is what lets the accent badge mean exactly one thing: "a ferret
- *   filed something for you to answer".
+ *   Nothing else puts a row there. A ferret parked on a person (`awaiting_user`, "Your turn") is a status,
+ *   drawn by the status mark; it is not Needs you, so the group, its count, the Attention badge and the
+ *   rollup chip can never disagree. A pending question or permission arrives as a real Attention item.
  */
 
 import { PACK_CLEAN_UP_LABEL, type SessionView } from '@ferretry/protocol';
@@ -64,19 +58,6 @@ export interface SessionsListFilter {
 
 /** Stopped sessions hidden, only the sessions a person drives: what a new device's bar opens with. */
 export const DEFAULT_LIST_FILTER: SessionsListFilter = { mode: 'interactive', showStopped: false };
-
-/** The session is waiting on a person, by its own account: the QUIET signal (see above); Attention is the loud one. */
-export const needsYou = (view: SessionView): boolean => {
-  const { state } = view;
-  if (TERMINAL_STATUSES.has(state.status)) return false;
-  return (
-    state.status === 'awaiting_user' ||
-    state.status === 'awaiting_question' ||
-    state.turnState === 'needs-input' ||
-    (state.pendingQuestion ?? null) !== null ||
-    (state.needsHuman ?? '') !== ''
-  );
-};
 
 /** The session has open Attention: the daemon's summary is on it. Clears only when the items resolve. */
 export const hasAttention = (view: SessionView): boolean => sessionAttention(view) !== undefined;
@@ -134,7 +115,9 @@ export const rowPreview = (
 export const pullNeedsYou = <T>(
   rows: readonly T[],
   viewOf: (row: T) => SessionView,
+  group = true,
 ): { readonly waiting: readonly T[]; readonly rest: readonly T[] } => {
+  if (!group) return { waiting: [], rest: rows };
   const count = rows.filter(row => hasAttention(viewOf(row))).length;
   const ordered = attentionFirst(rows, viewOf);
   return { waiting: ordered.slice(0, count), rest: ordered.slice(count) };
@@ -206,10 +189,12 @@ export const sessionsBarView = (
   projects: readonly FleetProject[],
   filter: SessionsListFilter,
   keep?: (view: SessionView) => boolean,
+  groupNeedsYou = true,
 ): SessionsBarView => {
   const { waiting, rest } = pullNeedsYou(
     sessions.filter(view => listedBeforeMode(view, filter, keep) && matchesMode(view, filter.mode)),
     view => view,
+    groupNeedsYou,
   );
   return { needsYou: waiting, groups: groupByProject(rest, projects, true), ...listTallies(sessions, filter, keep) };
 };

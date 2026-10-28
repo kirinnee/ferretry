@@ -1395,16 +1395,7 @@ function SettingsPageHarness({ standalone = false }: { readonly standalone?: boo
         recognitionSupport: HARNESS_RECOGNITION_AVAILABLE,
         voice: HARNESS_PARAKEET_ABSENT,
       }}
-      notifications={
-        <NotificationSettingsView
-          permission="granted"
-          enabled
-          delivery="active"
-          devices={[]}
-          onEnabled={() => {}}
-          onRevokeDevice={() => {}}
-        />
-      }
+      notifications={<NotificationSettingsView permission="granted" devices={[]} onRevokeDevice={() => {}} />}
       probeDaemon={harnessSettingsProbe}
       carrier={activeCarrier.carrier}
       relayAdvertised={activeCarrier.relayAdvertised}
@@ -6732,14 +6723,7 @@ function Shell() {
             <Label>Notifications</Label>
           </PanelHeader>
           <PanelBody>
-            <NotificationSettingsView
-              permission="granted"
-              enabled
-              delivery="active"
-              devices={[]}
-              onEnabled={() => {}}
-              onRevokeDevice={() => {}}
-            />
+            <NotificationSettingsView permission="granted" devices={[]} onRevokeDevice={() => {}} />
           </PanelBody>
         </Card>
       ),

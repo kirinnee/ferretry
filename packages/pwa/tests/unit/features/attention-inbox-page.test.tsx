@@ -646,3 +646,21 @@ describe('AttentionCard context', () => {
     await blank.unmount();
   });
 });
+
+describe('AttentionInboxPage banner slot', () => {
+  it('draws the banner above the cards, and nothing when none is given', async () => {
+    const withBanner = await mount(
+      page(fakeInbox(), [threeWay], { banner: <p data-test-banner="">Notifications are off</p> }),
+    );
+    const root = withBanner.container;
+    const banner = must(root.querySelector('[data-test-banner]'), 'the banner');
+    const first = must(root.querySelector('[data-attention-inbox] > :nth-child(3)'), 'the child after the head');
+    expect(root.querySelector('[data-attention-inbox]')?.children[1]).toBe(banner);
+    expect(first).not.toBe(banner);
+    await withBanner.unmount();
+
+    const without = await mount(page(fakeInbox(), [threeWay]));
+    expect(without.container.querySelector('[data-test-banner]')).toBeNull();
+    await without.unmount();
+  });
+});

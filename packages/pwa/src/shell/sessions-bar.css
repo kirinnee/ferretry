@@ -1186,3 +1186,25 @@
 [data-sbar-density='compact'].fy-sbar--drawer .fy-sbar__fold {
   min-height: max(28px, var(--target-floor));
 }
+
+/* ---- NEEDS YOU: the reason a row is here and the action that clears it, under the row itself ---- */
+.fy-sbar__needs-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px 8px;
+  padding: 0 var(--space-2, 8px) 6px;
+}
+.fy-sbar__needs-why {
+  min-width: 0;
+  flex: 1 1 12ch;
+  color: var(--muted);
+  font-size: var(--text-2xs);
+  line-height: 1.35;
+}
+.fy-sbar__needs-actions {
+  display: inline-flex;
+  flex-shrink: 0;
+  gap: 4px;
+}
