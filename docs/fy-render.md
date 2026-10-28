@@ -337,7 +337,8 @@ near the viewport. The main bundle grows by the component and the palette, ≈ 1
 
 **A diagram is painted from the same tokens.** The parent resolves the theme (as above), turns it into
 Mermaid's `base`-theme `themeVariables` (`lib/fy-render-palette.ts`: nodes in the accent's soft wash
-with the accent border and body ink, lines muted, notes the warn wash, a pie and a git graph on the
+with the accent itself as the border and body ink as the text, cluster and label edges in `--border-strong`
+(the theme's strong edge), lines muted, notes the warn wash, a pie and a git graph on the
 `chart` palette, the page's font) and sends them as data with the render command. The shell admits only
 those keys, only hex literals, and a font stack with no brace or semicolon, because Mermaid writes them
 into the compiled SVG's own `<style>`; anything else is dropped and `base` derives that slot itself.

@@ -1016,7 +1016,7 @@ describe('fy-render component evidence — Mermaid in the theme', () => {
 
           // Assert — the node fill, its border and the text are the theme's own.
           const svg = await diagramSvg(page);
-          for (const token of ['accent-soft', 'accent-border', 'fg', 'muted'])
+          for (const token of ['accent-soft', 'accent', 'fg', 'muted'])
             should(svg).containEql(await resolvedToken(page, token));
           should(await overflow(page)).equal(0);
           await shot(`mermaid-06-themed-${theme}`);
