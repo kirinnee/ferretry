@@ -18,12 +18,25 @@ If a workflow step contains repository logic beyond that shape, the logic is in 
 
 ## Runners
 
-Two pools, chosen per job by measurement. GitHub's hosted runners are free for a public repository
-but cap concurrent jobs; **Namespace** runners are faster and start from a warm `/nix`, but are
-billed and capped at 32 concurrent Linux vCPUs on the Developer plan. That cap, not run time, was
-what made pull requests slow: a 4x8 E2E shard waited three to five minutes for a slot while the
-runs before it held 60 vCPUs between them. So every Namespace job is the smallest shape that does
-not lengthen the critical path, and nothing goes there that is free and as fast on GitHub.
+Two pools, chosen per job by measurement. GitHub's hosted runners are **free for a public
+repository** (`ubuntu-latest` is 4 cores and 16GB) but cap concurrent jobs; **Namespace** runners
+start from a warm `/nix` and have their own pool, but every minute is billed, and they are capped at
+32 concurrent Linux vCPUs on the Developer plan. The GitHub cap, not run time, was what made pull
+requests slow, and Namespace is what buys a pull request out of that queue. So Namespace runs only
+**pull-request** jobs that are worth the money, each on the smallest shape that does not lengthen the
+critical path, and nothing goes there that is free and about as fast on GitHub.
+
+**`main` runs on GitHub.** A `main` run re-proves a tree its pull request already proved, nobody
+waits on it but `Release`, and it was 40% of the Namespace bill (330 of the 1,219 runs that used Namespace, Oct 19–28). Its
+jobs take the `ubuntu-latest` branch of the same `runs-on` expression, except `Build Checks`, which
+stays on Namespace because it is the job that refreshes the cache volume (below).
+
+**`vars.CI_RUNNER_POOL`** is the switch. Set the repository variable to `github` and every Namespace
+job, `Build Checks` and the E2E shards included, runs on `ubuntu-latest` from the next run on: no
+pull request, no Namespace bill. Unset, the pools are as this section describes. The cost of the
+switch is the GitHub queue on a busy day, nothing else: each job's cache step is skipped off
+Namespace (`if: runner.environment == 'self-hosted'`) and Nix installs from cache.nixos.org as it
+did before Namespace.
 
 **What Namespace bills**, from its [pricing page](https://namespace.so/pricing) and
 [cache docs](https://namespace.so/docs/architecture/storage/cache-volumes):
@@ -33,21 +46,25 @@ not lengthen the critical path, and nothing goes there that is free and as fast 
 - The cache volume on its **requested** size, not what it holds: storage per GB-day, plus a snapshot
   charge of size × the time each job has it attached ($0.002/GB-hour). Every job carrying
   `-with-cache` pays that, whether or not it mounts `/nix`.
+- **Measure it, don't estimate it.** `nsc instance report --start <RFC3339> --out <file>` writes one
+  CSV row per Namespace instance with its shape, start and end, peak CPU and memory, and the GitHub
+  job, run and branch it served. It is read-only and needs no GitHub API calls.
 
-**Where each job runs**, with the busy cores measured by sampling `/proc/stat` every second:
+**Where each job runs** on a pull request, with the busy cores measured by sampling `/proc/stat`
+every second, and the GitHub times from the last runs before Namespace (p50):
 
-| Job                                              | Runner        | Measured                 | Why                                                       |
-| ------------------------------------------------ | ------------- | ------------------------ | --------------------------------------------------------- |
-| `Pre-Commit (format)`                            | Namespace 2x4 | treefmt, ~3.4 of 4 cores | ~55s on 2x4 vs ~30s on 4x8: half the price, off the path  |
-| `Pre-Commit (gates)`                             | Namespace 4x8 | ~1.9 cores, 2.8GB        | knip runs out of memory in a 2x4's 4GB                    |
-| `Unit Tests (<group>)`                           | Namespace 2x4 | ~0.7 cores               | `bun test` runs one file at a time                        |
-| `Build Checks`, `Compile Binaries`               | Namespace 2x4 | ~1.4 cores               | short builds                                              |
-| `PWA Settings Geometry (light)`                  | Namespace 2x4 | ~1.9 cores               | well inside the critical path                             |
-| `PWA Full Gallery (dark)`                        | Namespace 4x8 | ~1.4 cores, 3.3GB peak   | past a 2x4's memory; the longest Namespace job            |
-| `E2E Shard (1..3)`                               | Namespace 2x4 | ~1 core, 1.8GB           | one journey at a time                                     |
-| `Integration Tests (<group>)`                    | GitHub        | ~0.6–2 cores             | free, and five groups keep each under ~2.5 min            |
-| `Unit Tests`, `Integration Tests`, `E2E …` tails | GitHub        | seconds, no nix shell    | billed a whole minute and a cache attachment on Namespace |
-| `SIT`, smoke, harness contract, every macOS job  | GitHub        | —                        | free; macOS and arm64 have no Namespace equivalent here   |
+| Job                                              | Runner        | Measured                           | Why                                                         |
+| ------------------------------------------------ | ------------- | ---------------------------------- | ----------------------------------------------------------- |
+| `Pre-Commit (format)`                            | Namespace 2x4 | treefmt, ~3.4 of 4 cores           | ~55s on 2x4 vs ~30s on 4x8: half the price, off the path    |
+| `Pre-Commit (gates)`                             | GitHub        | 113s vs 97s on Namespace 4x8       | knip needs more than a 2x4's 4GB; a 4x8 bought 16s          |
+| `Unit Tests (<group>)`                           | Namespace 2x4 | ~0.7 cores                         | `bun test` runs one file at a time                          |
+| `Build Checks`, `Compile Binaries`               | Namespace 2x4 | ~1.4 cores                         | short builds; `Build Checks` also refreshes the cache       |
+| `PWA Settings Geometry (light)`                  | Namespace 2x4 | ~1.9 cores                         | well inside the critical path                               |
+| `PWA Full Gallery (dark)`                        | Namespace 4x8 | ~427s; 643s on GitHub, ~3.3GB peak | past a 2x4's memory; GitHub would make it the critical path |
+| `E2E Shard (1..3)`                               | Namespace 2x4 | ~1 core, 1.8GB                     | one journey at a time                                       |
+| `Integration Tests (<group>)`                    | GitHub        | ~0.6–2 cores                       | free, and five groups keep each under ~2.5 min              |
+| `Unit Tests`, `Integration Tests`, `E2E …` tails | GitHub        | seconds, no nix shell              | billed a whole minute and a cache attachment on Namespace   |
+| `SIT`, smoke, harness contract, every macOS job  | GitHub        | —                                  | free; macOS and arm64 have no Namespace equivalent here     |
 
 - **One cache volume, tag `ferretry-nix`, requested at 10GB.** `namespacelabs/nscloud-cache-action`
   with `cache: nix` mounts a persistent `/nix` BEFORE `cachix/install-nix-action`, so the dev shell
@@ -75,9 +92,11 @@ not lengthen the critical path, and nothing goes there that is free and as fast 
   `E2E Relevance` already skips those. Skipping a unit or int group for an unrelated change would
   leave its files out of the per-group 100% ledger, and the jobs a PWA-only change could skip run on
   GitHub, where they cost nothing.
-- **Moving a job between pools is its `runs-on`.** Replace the `nscloud-*` labels with
-  `ubuntu-latest` and drop the cache step, or the reverse; nothing else in a job depends on the
-  runner vendor.
+- **Moving a job between pools is its `runs-on`.** A Namespace job's `runs-on` is one expression:
+  `ubuntu-latest` off a pull request or under `CI_RUNNER_POOL=github`, its `nscloud-*` labels
+  otherwise; a matrix entry with `shape: github` always takes `ubuntu-latest`. Its cache step carries
+  `if: runner.environment == 'self-hosted'` (a Namespace runner registers as self-hosted), so the
+  same job runs on either pool and nothing else in it depends on the runner vendor.
 
 ## Workflow split
 
