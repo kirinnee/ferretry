@@ -47,7 +47,7 @@ function Words({ text }: { readonly text: string }) {
       {text.split('`').map((part, index) =>
         index % 2 === 1 ? (
           // biome-ignore lint/suspicious/noArrayIndexKey: a split of one string, never reordered
-          <code key={index} className="rounded-sm bg-surface-sunken px-1 font-mono text-[0.92em]">
+          <code key={index} className="rounded-sm bg-surface-2 px-1 font-mono text-[0.92em]">
             {part}
           </code>
         ) : (
