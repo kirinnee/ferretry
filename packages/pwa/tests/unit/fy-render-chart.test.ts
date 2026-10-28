@@ -1,7 +1,8 @@
 import { describe, test } from 'bun:test';
 import should from 'should';
 import { FY_RENDER_LIMITS } from '../../src/lib/fy-render-bounds.ts';
-import { type ChartSpec, formatChartValue, readChart } from '../../src/lib/fy-render-chart.ts';
+import { type ChartSpec, readChart } from '../../src/lib/fy-render-chart.ts';
+import { formatChartValue } from '../../src/lib/fy-render-chart-format.ts';
 
 /**
  * The chart reader, read as a reader: this package's own chart language in, a bounded drawing plan or a

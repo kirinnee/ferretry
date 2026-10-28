@@ -31,16 +31,14 @@ const duration = (seconds: number, locale: string | undefined): string => {
   if (value < 1 && value > 0)
     return `${sign}${new Intl.NumberFormat(locale, { maximumFractionDigits: 0 }).format(value * 1000)} ms`;
   if (value < 60) return `${sign}${new Intl.NumberFormat(locale, { maximumFractionDigits: 1 }).format(value)} s`;
-  for (const [unit, size] of DURATION_UNITS) {
-    if (value < size) continue;
-    const whole = Math.floor(value / size);
-    const index = DURATION_UNITS.findIndex(([name]) => name === unit);
-    const next = DURATION_UNITS[index + 1];
-    const rest = next === undefined ? Math.floor(value - whole * size) : Math.floor((value - whole * size) / next[1]);
-    const restUnit = next === undefined ? 's' : next[0];
-    return rest === 0 ? `${sign}${whole}${unit}` : `${sign}${whole}${unit} ${rest}${restUnit}`;
-  }
-  return `${sign}${value} s`;
+  // The largest unit that fits; past a minute there always is one, so `m` is the floor rather than a fallback.
+  const index = DURATION_UNITS.findIndex(([, size]) => value >= size);
+  const [unit, size] = DURATION_UNITS[index] ?? (['m', 60] as const);
+  const whole = Math.floor(value / size);
+  const next = DURATION_UNITS[index + 1];
+  const rest = next === undefined ? Math.floor(value - whole * size) : Math.floor((value - whole * size) / next[1]);
+  const restUnit = next === undefined ? 's' : next[0];
+  return rest === 0 ? `${sign}${whole}${unit}` : `${sign}${whole}${unit} ${rest}${restUnit}`;
 };
 
 const BYTE_UNITS = ['B', 'KiB', 'MiB', 'GiB', 'TiB', 'PiB'] as const;

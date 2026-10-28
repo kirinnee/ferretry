@@ -12,7 +12,11 @@
  * restates the chart and the diagram with it.
  */
 
-import type { ChartTone } from './fy-render-chart.ts';
+/** The theme roles a series may ask for by name. */
+export const CHART_TONES = ['accent', 'good', 'warn', 'bad', 'muted'] as const;
+
+/** A series colour: a named role, or a 1-based palette slot. Never a colour value. */
+export type ChartTone = (typeof CHART_TONES)[number] | number;
 
 /**
  * How many palette slots the theme defines (`--viz-1` … `--viz-8`). It lives here rather than beside the chart

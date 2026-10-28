@@ -21,19 +21,10 @@ import { parse } from 'yaml';
 import { z } from 'zod';
 import { FY_RENDER_LIMITS } from './fy-render-bounds.ts';
 import { CHART_FORMATS, type ChartFormat } from './fy-render-chart-format.ts';
-import { CHART_PALETTE_SLOTS } from './fy-render-palette.ts';
-
-export { formatChartValue } from './fy-render-chart-format.ts';
+import { CHART_PALETTE_SLOTS, CHART_TONES, type ChartTone } from './fy-render-palette.ts';
 
 const CHART_KINDS = ['line', 'bar', 'area', 'pie', 'doughnut', 'scatter', 'radar'] as const;
 type ChartKind = (typeof CHART_KINDS)[number];
-
-/** The theme roles a series may ask for by name. */
-const CHART_TONES = ['accent', 'good', 'warn', 'bad', 'muted'] as const;
-type ChartToneName = (typeof CHART_TONES)[number];
-
-/** A series colour: a named role, or a 1-based palette slot. Never a colour value. */
-export type ChartTone = ChartToneName | number;
 
 interface ChartPoint {
   readonly x: number;
@@ -84,14 +75,19 @@ export type ChartReading =
 
 const L = FY_RENDER_LIMITS;
 
+/** A C0 control or DEL, by code point: a pattern spelling the range would put control characters in the source. */
+const isControl = (character: string): boolean => {
+  const code = character.codePointAt(0) ?? 0;
+  return code < 0x20 || code === 0x7f;
+};
+
 /** One line of text, inside a cap, with no control characters. */
 const text = (max: number) =>
   z
     .string()
     .min(1)
     .max(max)
-    // biome-ignore lint/suspicious/noControlCharactersInRegex: refusing exactly the C0 controls and DEL
-    .refine(value => !/[\u0000-\u001f\u007f]/u.test(value), 'must be one line of plain text');
+    .refine(value => ![...value].some(isControl), 'must be one line of plain text');
 
 /** A category label: YAML reads `2024` as a number, which is still a label. */
 const label = z.union([text(L.chartLabelCharacters), z.number().transform(value => String(value))]);
@@ -145,7 +141,13 @@ const document = z.strictObject({
 type Document = z.infer<typeof document>;
 type RawSeries = z.infer<typeof series>;
 
-class Refusal extends Error {}
+/** A reason this chart will not be drawn, said in the author's terms. */
+class Refusal extends Error {
+  constructor(reason: string) {
+    super(reason);
+    this.name = 'Refusal';
+  }
+}
 
 const axisOf = (raw: z.infer<typeof axis> | undefined): ChartAxis => ({
   currency: raw?.currency ?? 'USD',
@@ -243,12 +245,15 @@ const firstIssue = (error: z.ZodError): string => {
   return `${where}: ${issue.message}`;
 };
 
+/** JSON or YAML, with aliases refused so no document expands past its bytes. */
+const parseDocument = (payload: string): unknown => parse(payload, { maxAliasCount: 0 });
+
 export function readChart(payload: string): ChartReading {
   if (new TextEncoder().encode(payload).byteLength > L.chartBytes)
     return { ok: false, reason: 'The chart description exceeds 64 KiB' };
   let parsed: unknown;
   try {
-    parsed = parse(payload, { maxAliasCount: 0 });
+    parsed = parseDocument(payload);
   } catch {
     return { ok: false, reason: 'The chart description is not valid JSON or YAML' };
   }

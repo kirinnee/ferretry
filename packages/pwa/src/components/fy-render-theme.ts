@@ -18,15 +18,13 @@ import { HEX_LITERAL, type ResolvedTheme, THEME_TOKENS, type ThemeToken } from '
 
 let pixel: CanvasRenderingContext2D | null | undefined;
 
+/** The shared pixel, made once. A DOM without a canvas (the unit tier's) answers `null`, never throws. */
 const context = (): CanvasRenderingContext2D | null => {
-  if (pixel !== undefined) return pixel;
-  try {
+  if (pixel === undefined) {
     const canvas = document.createElement('canvas');
     canvas.width = 1;
     canvas.height = 1;
-    pixel = canvas.getContext('2d', { willReadFrequently: true });
-  } catch {
-    pixel = null;
+    pixel = canvas.getContext?.('2d', { willReadFrequently: true }) ?? null;
   }
   return pixel;
 };
@@ -48,10 +46,9 @@ const accepts = (canvas: CanvasRenderingContext2D, value: string): boolean => {
 };
 
 /** One CSS colour as `#rrggbb`, or `#rrggbbaa` when it is translucent; `''` when it is not a colour. */
-function resolveColor(value: string): string {
+function resolveColor(value: string, canvas: CanvasRenderingContext2D | null): string {
   const raw = value.trim();
   if (raw === '') return '';
-  const canvas = context();
   if (canvas === null) return HEX_LITERAL.test(raw.toLowerCase()) ? raw.toLowerCase() : '';
   if (!accepts(canvas, raw)) return '';
   canvas.clearRect(0, 0, 1, 1);
@@ -66,8 +63,11 @@ function resolveColor(value: string): string {
 export const documentThemeName = (): string =>
   typeof document === 'undefined' ? '' : (document.documentElement.getAttribute('data-theme') ?? '');
 
-/** The page's theme as an illustration sees it, read from `element` (or the document root). */
-export function readTheme(element: Element | null): ResolvedTheme {
+/**
+ * The page's theme as an illustration sees it, read from `element` (or the document root). `canvas` is the
+ * pixel colours are resolved on — the shared one, unless a test hands it a recorder or `null`.
+ */
+export function readTheme(element: Element | null, canvas: CanvasRenderingContext2D | null = context()): ResolvedTheme {
   const mode = documentThemeName().includes('light') ? 'light' : 'dark';
   const colors = Object.fromEntries(THEME_TOKENS.map(token => [token, ''])) as Record<ThemeToken, string>;
   const unread: ResolvedTheme = { colors, font: '', mode, radius: 0 };
@@ -75,7 +75,7 @@ export function readTheme(element: Element | null): ResolvedTheme {
   if (target === null || typeof getComputedStyle !== 'function') return unread;
   try {
     const style = getComputedStyle(target);
-    for (const token of THEME_TOKENS) colors[token] = resolveColor(style.getPropertyValue(`--${token}`));
+    for (const token of THEME_TOKENS) colors[token] = resolveColor(style.getPropertyValue(`--${token}`), canvas);
     const radius = Number.parseFloat(style.getPropertyValue('--radius-xs'));
     return { colors, font: style.fontFamily, mode, radius: Number.isFinite(radius) ? Math.max(0, radius) : 0 };
   } catch {

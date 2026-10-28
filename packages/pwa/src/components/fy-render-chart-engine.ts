@@ -92,10 +92,8 @@ export function mountChart(canvas: HTMLCanvasElement, mount: ChartMount): ChartH
 
   return {
     destroy: () => chart.destroy(),
-    resetZoom: () => {
-      chart.resetZoom();
-      interaction.onZoom?.(false);
-    },
+    // The plugin reports the reset through `onZoomComplete`, which tells the component it is no longer zoomed.
+    resetZoom: () => chart.resetZoom(),
     setHidden,
     showFrame: index => {
       const frame = spec.frames[index];

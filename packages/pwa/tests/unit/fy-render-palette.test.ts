@@ -43,8 +43,12 @@ interface Toggle {
   readonly enabled: boolean;
   readonly modifierKey?: string;
 }
+type Completion = (event: { readonly chart: { readonly isZoomedOrPanned: () => boolean } }) => void;
 interface PluginOptions {
-  readonly zoom: { readonly zoom: Readonly<Record<'wheel' | 'pinch' | 'drag', Toggle>>; readonly pan: Toggle };
+  readonly zoom: {
+    readonly zoom: Readonly<Record<'wheel' | 'pinch' | 'drag', Toggle>> & { readonly onZoomComplete: Completion };
+    readonly pan: Toggle & { readonly onPanComplete: Completion };
+  };
   readonly tooltip: { readonly callbacks: { readonly label: (item: unknown) => string } };
 }
 const pluginsOf = (config: ChartConfiguration): PluginOptions =>
@@ -246,5 +250,50 @@ describe('fy-render chart configuration', () => {
     );
     should(chartConfiguration(read, 1, theme(), interaction).data.datasets[0]?.data).eql([9]);
     should(chartConfiguration(read, 7, theme(), interaction).data.datasets[0]?.data).eql([9]);
+  });
+});
+
+describe('fy-render chart configuration — callbacks', () => {
+  test('should tell the component whether a finished zoom or pan left the chart off its original range', () => {
+    // Arrange
+    const told: boolean[] = [];
+    const config = chartConfiguration(spec('kind: line\nseries: [{name: A, data: [1, 2, 3]}]'), 0, theme(), {
+      ...interaction,
+      onZoom: zoomed => told.push(zoomed),
+    });
+    const { zoom } = pluginsOf(config);
+
+    // Act
+    zoom.zoom.onZoomComplete({ chart: { isZoomedOrPanned: () => true } });
+    zoom.pan.onPanComplete({ chart: { isZoomedOrPanned: () => false } });
+
+    // Assert
+    should(told).eql([true, false]);
+  });
+
+  test('should label a scatter point with both axes in their formats, and a slice by its label', () => {
+    // Arrange
+    const scatter = pluginsOf(
+      chartConfiguration(
+        spec('kind: scatter\nx: {format: bytes}\ny: {format: duration}\nseries: [{name: Runs, data: [[1024, 2]]}]'),
+        0,
+        theme(),
+        interaction,
+      ),
+    );
+    const pie = pluginsOf(
+      chartConfiguration(
+        spec('kind: pie\nx: [Plan, Build]\nseries: [{name: Share, data: [1, 3]}]'),
+        0,
+        theme(),
+        interaction,
+      ),
+    );
+
+    // Act / Assert
+    should(scatter.tooltip.callbacks.label({ dataset: { label: 'Runs' }, raw: { x: 1024, y: 2 } })).equal(
+      'Runs: 1 KiB, 2 s',
+    );
+    should(pie.tooltip.callbacks.label({ dataset: { label: 'Share' }, label: 'Build', raw: 3 })).equal('Build: 3');
   });
 });

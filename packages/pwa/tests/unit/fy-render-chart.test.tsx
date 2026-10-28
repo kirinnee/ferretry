@@ -263,3 +263,126 @@ describe('FyRenderChart', () => {
     should(view.container.querySelector('input[type="range"]')).be.null();
   });
 });
+
+describe('FyRenderChart edges', () => {
+  test('should offer Reset zoom once the chart reports a zoom, and hand Reset to the live chart', async () => {
+    // Arrange
+    const fake = recorder();
+    const load = async (): Promise<FyRenderChartModules> => fake.modules;
+    const view = await show(
+      <FyRenderChart
+        alt="Trend"
+        fullscreen={false}
+        load={load}
+        onFailed={() => {}}
+        payload={'kind: line\nseries: [{name: A, data: [1, 2, 3]}]'}
+        theme={theme('dark')}
+        visible
+      />,
+    );
+    await settle(() => fake.calls.includes('mount'), 'the chart to mount');
+    should(view.container.querySelector('.fy-render-chart-reset')).be.null();
+
+    // Act — the reader zooms (the plugin tells the chart, the chart tells the component).
+    await interact(() => fake.mounts[0]?.interaction.onZoom?.(true));
+    await interact(() =>
+      must(view.container.querySelector<HTMLButtonElement>('.fy-render-chart-reset'), 'Reset').click(),
+    );
+
+    // Assert
+    should(fake.calls).containEql('resetZoom');
+  });
+
+  test('should report a chart the engine could not draw as a render failure, with its reason', async () => {
+    // Arrange
+    const failures: FyRenderSandboxFailure[] = [];
+    const load = async (): Promise<FyRenderChartModules> => ({
+      mountChart: () => {
+        throw new Error('no context');
+      },
+      readChart,
+    });
+
+    // Act
+    await show(
+      <FyRenderChart
+        alt="Broken engine"
+        fullscreen={false}
+        load={load}
+        onFailed={failure => failures.push(failure)}
+        payload={'kind: line\nseries: [{name: A, data: [1]}]'}
+        theme={theme('dark')}
+        visible
+      />,
+    );
+    await settle(() => failures.length === 1, 'the failure');
+
+    // Assert
+    should(failures).eql([{ detail: 'no context', kind: 'render' }]);
+  });
+
+  test('should give a scatter chart a table of its points, and treat an unreadable media query as no preference', async () => {
+    // Arrange — a browser whose `matchMedia` throws: motion and pointer fall back to their defaults.
+    const real = window.matchMedia;
+    window.matchMedia = (() => {
+      throw new Error('unsupported');
+    }) as typeof window.matchMedia;
+    const fake = recorder();
+    const load = async (): Promise<FyRenderChartModules> => fake.modules;
+
+    try {
+      // Act
+      const view = await show(
+        <FyRenderChart
+          alt="Latency against size"
+          fullscreen={false}
+          load={load}
+          onFailed={() => {}}
+          payload={
+            'kind: scatter\nx: {label: Size, format: bytes}\ny: {label: Latency, format: duration}\nseries: [{name: Runs, data: [[1024, 0.5], [2048, 1.5]]}]'
+          }
+          theme={theme('light')}
+          visible
+        />,
+      );
+      await settle(() => fake.calls.includes('mount'), 'the chart to mount');
+
+      // Assert
+      should(fake.mounts[0]?.interaction).containEql({ animate: true, coarse: false });
+      const table = must(view.container.querySelector('.fy-render-chart-data'), 'the data table');
+      should([...table.querySelectorAll('thead th')].map(cell => cell.textContent)).eql(['Series', 'Size', 'Latency']);
+      should([...table.querySelectorAll('tbody tr')].map(row => row.textContent)).eql([
+        'Runs1 KiB500 ms',
+        'Runs2 KiB1.5 s',
+      ]);
+    } finally {
+      window.matchMedia = real;
+    }
+  });
+
+  test('should load the real reader and engine through its default loader', async () => {
+    // Arrange — the one place the lazy chunk's wiring is proven: no fake, the shipped modules. This DOM
+    // has no canvas, so Chart.js draws nothing, but it mounts and the page text around it renders.
+    const failures: FyRenderSandboxFailure[] = [];
+
+    // Act
+    const view = await show(
+      <FyRenderChart
+        alt="Real modules"
+        fullscreen={false}
+        onFailed={failure => failures.push(failure)}
+        payload={'kind: bar\nx: [a, b]\nseries: [{name: A, data: [1, 2]}, {name: B, data: [2, 1]}]'}
+        theme={theme('dark')}
+        visible
+      />,
+    );
+    await settle(
+      () => view.container.querySelector('[data-fy-render-chart="drawn"]') !== null || failures.length > 0,
+      'the real modules',
+    );
+
+    // Assert
+    should(failures).eql([]);
+    should(view.container.querySelectorAll('.fy-render-chart-key')).have.length(2);
+  });
+});
