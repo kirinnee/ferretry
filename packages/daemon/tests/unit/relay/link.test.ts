@@ -2959,8 +2959,8 @@ describe('a credential deadline that fires inside an await', () => {
 describe('the access lease', () => {
   const LEASE_MS = 900_000;
   const RENEW_AT_MS = 780_000;
-  /** The renewal is sealed on the link's outbox, which runs real WebCrypto; let it land. */
-  const sealed = async (): Promise<void> => await new Promise(resolve => setTimeout(resolve, 20));
+  // A renewal a timer asks for has no receipt to await, and it is sealed with real WebCrypto on the
+  // link's outbox: each case waits on that outbox with `settle`, never a fixed sleep a loaded runner outlasts.
 
   async function authenticated(upgrade?: (request: ApiRequest) => Promise<SocketUpgradeDecision>) {
     const harnessed = harness(undefined, DEVICE_TOKEN, upgrade);
@@ -2984,7 +2984,7 @@ describe('the access lease', () => {
 
     // Act — the daemon asks; the device answers with the same key over this transcript and the nonce.
     renewal.fire();
-    await sealed();
+    await settle(harnessed.link);
     const read = await clientReadAll(harnessed.wire, opened.channel);
     const asked = read.messages.at(-1) as { t: string; nonce: string; expiresAt: string };
     should(asked).containDeep({ t: 'renew', protocol: SESSION_PROTOCOL_ID, expiresAt: '1970-01-01T00:15:00.000Z' });
@@ -3018,7 +3018,7 @@ describe('the access lease', () => {
   it('should refuse a renewal signed by another key exactly as it refuses an unknown device', async () => {
     const { harnessed, opened, channel } = await authenticated();
     live(harnessed.timers, RENEW_AT_MS)?.fire();
-    await sealed();
+    await settle(harnessed.link);
     const asked = (await clientReadAll(harnessed.wire, opened.channel)).messages.at(-1) as { nonce: string };
     const transcript = transcripts.get(sessionOne().text) ?? new Uint8Array();
     const forged = await signDeviceProof(crypto_, strangerKey, deviceRenewMessage(transcript, asked.nonce));
@@ -3039,11 +3039,11 @@ describe('the access lease', () => {
       deviceToken: DEVICE_TOKEN,
       path: '/v1/events',
     });
-    await sealed();
+    await settle(harnessed.link);
 
     // Act
     live(harnessed.timers, RENEW_AT_MS)?.fire();
-    await sealed();
+    await settle(harnessed.link);
     const asked = (await clientReadAll(harnessed.wire, opened.channel)).messages.at(-1) as { t: string; nonce: string };
     const transcript = transcripts.get(sessionOne().text) ?? new Uint8Array();
     const proof = await signDeviceProof(crypto_, deviceKey, deviceRenewMessage(transcript, asked.nonce));
@@ -3072,7 +3072,7 @@ describe('the access lease', () => {
       deviceToken: DEVICE_TOKEN,
       path: '/v1/events',
     });
-    await sealed();
+    await settle(harnessed.link);
     return { stream, asked, harnessed, opened, channel };
   }
 
@@ -3084,12 +3084,12 @@ describe('the access lease', () => {
 
     // Act
     live(harnessed.timers, RENEW_AT_MS)?.fire();
-    await sealed();
+    await settle(harnessed.link);
     const renew = (await clientReadAll(harnessed.wire, opened.channel)).messages.at(-1) as { nonce: string };
     const transcript = transcripts.get(sessionOne().text) ?? new Uint8Array();
     const proof = await signDeviceProof(crypto_, deviceKey, deviceRenewMessage(transcript, renew.nonce));
     await clientSend(harnessed.link, channel, { t: 'renewed', protocol: SESSION_PROTOCOL_ID, proof });
-    await sealed();
+    await settle(harnessed.link);
 
     // Assert — asked about the very request the stream was accepted for; the device stays paired.
     should(asked.map(request => request.path)).eql(['/v1/events']);
@@ -3147,15 +3147,15 @@ describe('the access lease', () => {
       deviceToken: DEVICE_TOKEN,
       path: '/v1/events',
     });
-    await sealed();
+    await settle(harnessed.link);
     const renewOnce = async (renewing: Awaited<ReturnType<typeof clientSend>>) => {
       live(harnessed.timers, RENEW_AT_MS)?.fire();
-      await sealed();
+      await settle(harnessed.link);
       const renew = (await clientReadAll(harnessed.wire, opened.channel)).messages.at(-1) as { nonce: string };
       const transcript = transcripts.get(sessionOne().text) ?? new Uint8Array();
       const proof = await signDeviceProof(crypto_, deviceKey, deviceRenewMessage(transcript, renew.nonce));
       const next = await clientSend(harnessed.link, renewing, { t: 'renewed', protocol: SESSION_PROTOCOL_ID, proof });
-      await sealed();
+      await settle(harnessed.link);
       return next;
     };
 
@@ -3185,7 +3185,7 @@ describe('the access lease', () => {
     should(stream.closed).be.empty();
     allowed = false;
     harnessed.connections.recheckAll();
-    await sealed();
+    await settle(harnessed.link);
 
     // Assert
     should(asked).have.length(2);
@@ -3276,7 +3276,7 @@ describe('a device proof is good for one session and one kind only', () => {
     });
     await openSession(harnessed.link, harnessed.wire, sessionTwo());
     harnessed.timers.filter(timer => timer.milliseconds === 780_000 && !timer.cancelled)[0]?.fire();
-    await new Promise(resolve => setTimeout(resolve, 20));
+    await settle(harnessed.link);
     const renewRecord = harnessed.wire.frames
       .filter(frame => frame.kind === FRAME_KINDS.data && frame.sessionId.text === sessionOne().text)
       .at(-1);
@@ -3322,8 +3322,6 @@ describe('a device proof is good for one session and one kind only', () => {
 });
 
 describe('what keeps a device from idling out, and what keeps a session from living forever', () => {
-  const sealed = async (): Promise<void> => await new Promise(resolve => setTimeout(resolve, 20));
-
   it('should move the idle clock only for a request the page marked as a person’s', async () => {
     const seen: string[] = [];
     const harnessed = harness(undefined, DEVICE_TOKEN, undefined, undefined, { seen: id => seen.push(id) });
@@ -3351,7 +3349,7 @@ describe('what keeps a device from idling out, and what keeps a session from liv
       deviceToken: DEVICE_TOKEN,
     });
     harnessed.timers.filter(timer => timer.milliseconds === 780_000)[0]?.fire();
-    await sealed();
+    await settle(harnessed.link);
     const asked = (await clientReadAll(harnessed.wire, opened.channel)).messages.at(-1) as { nonce: string };
     const transcript = transcripts.get(sessionOne().text) ?? new Uint8Array();
     const proof = await signDeviceProof(crypto_, deviceKey, deviceRenewMessage(transcript, asked.nonce));
@@ -3372,7 +3370,7 @@ describe('what keeps a device from idling out, and what keeps a session from liv
       deviceToken: DEVICE_TOKEN,
     });
     harnessed.timers.filter(timer => timer.milliseconds === 780_000)[0]?.fire();
-    await sealed();
+    await settle(harnessed.link);
     const asked = (await clientReadAll(harnessed.wire, opened.channel)).messages.at(-1) as { nonce: string };
     const transcript = transcripts.get(sessionOne().text) ?? new Uint8Array();
     const proof = await signDeviceProof(crypto_, deviceKey, deviceRenewMessage(transcript, asked.nonce));
@@ -3402,7 +3400,7 @@ describe('what keeps a device from idling out, and what keeps a session from liv
     for (let round = 0; round < 100 && renewal !== undefined; round += 1) {
       now += renewal.milliseconds;
       renewal.fire();
-      await sealed();
+      await settle(harnessed.link);
       const asked = (await clientReadAll(harnessed.wire, opened.channel)).messages.at(-1) as { nonce: string };
       // The client returns credit for what it read, as a real one does, so the daemon can keep asking.
       await harnessed.link.receiveBinary(
@@ -3448,7 +3446,7 @@ describe('what keeps a device from idling out, and what keeps a session from liv
 
     now = 4_000;
     first[0]?.fire();
-    await sealed();
+    await settle(harnessed.link);
     const asked = (await clientReadAll(harnessed.wire, opened.channel)).messages.at(-1) as { nonce: string };
     await harnessed.link.receiveBinary(
       encodeFrame({ kind: FRAME_KINDS.credit, sessionId: sessionOne(), sequence: 0, payload: encodeCreditPayload(1) }),
