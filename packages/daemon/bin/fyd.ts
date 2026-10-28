@@ -1242,6 +1242,11 @@ export interface DaemonWorld {
    */
   readonly fileEvents: FileEventHub;
   /**
+   * The ONE long-lived tmux control client every tmux read goes through, as far as a boot's release
+   * needs it: `stop` ends that client and resolves once its process has exited.
+   */
+  readonly tmuxControl: Pick<ControlModeTmuxProcess, 'stop'>;
+  /**
    * Where a managed agent actually runs: a tmux pane on the daemon's own private socket.
    *
    * It is a world FIELD for the same reason `terminalRuntime` is — it is the one adapter in the
@@ -8089,6 +8094,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
     },
     browserLogin: createBrowserLoginWorld(paths, async () => await closeAgentBrowsers()),
     fileEvents,
+    tmuxControl: tmux,
     createSubsystems: (
       storage,
       terminals,
@@ -10251,6 +10257,12 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
     clearInterval(lagTicks);
     watchdog.stop();
     uncountChildren();
+  });
+  // The shared tmux control client, ended and WAITED OUT before anything else is released: a client left
+  // to notice this process's exit is still on its server after the process has gone (see `stop`). Any
+  // tmux command a later cleanup sends takes a process of its own, as it does whenever no client is there.
+  cleanups.push(async () => {
+    await world.tmuxControl.stop();
   });
   const liveness: DaemonLivenessSource = {
     pid: process.pid,
