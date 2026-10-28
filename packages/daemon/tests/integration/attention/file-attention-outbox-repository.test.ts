@@ -43,6 +43,23 @@ describe('FileAttentionOutboxRepository', () => {
     should(await readdir(directory(SESSION))).deepEqual(['attention-replies.json']);
   });
 
+  it('should keep a needs-info request key beside an answer key across a restart', async () => {
+    // Arrange
+    const { repository } = await createRepository();
+    const outbox = {
+      ...emptyAttentionOutbox(SESSION),
+      pending: [{ id: 'A3~2', message: '[needs more info !A3 «Log in»] Which account?', at: AT }],
+      sending: [{ sendId: 'attention-session-1-A1-A3~1', ids: ['A1', 'A3~1'], message: 'm' }],
+      delivered: ['A1', 'A3~1'],
+    };
+
+    // Act
+    await repository.write(outbox);
+
+    // Assert
+    should(await repository.read(SESSION)).deepEqual(outbox);
+  });
+
   it('should set a damaged outbox aside and start fresh, so later answers still reach the ferret', async () => {
     // Arrange
     const { repository, directory } = await createRepository();

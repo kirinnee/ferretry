@@ -558,3 +558,30 @@ describe('attention controller send-now', () => {
     should(out.messages).deepEqual([`no answers were held for ${SESSION} — nothing to send`]);
   });
 });
+
+describe('attention controller needs-info', () => {
+  it('should ask for more information with the note, and say the item stays open', async () => {
+    // Arrange
+    const { controller, gateway, out } = build(SESSION, snapshot([humanItem('A1', 'log in')]));
+
+    // Act
+    await controller.needsInfo('?A1', { note: '  Which account?  ' });
+
+    // Assert
+    should(gateway.applied[0]?.request).deepEqual({ action: 'needs-info', id: 'A1', note: 'Which account?' });
+    should(out.messages[0]).containEql('asked for more information on !A1');
+  });
+
+  it('should send no note when none was given, and reject a bad reference before the daemon', async () => {
+    // Arrange
+    const { controller, gateway } = build(SESSION, snapshot([]));
+
+    // Act
+    await controller.needsInfo('A1', {});
+
+    // Assert
+    should(gateway.applied[0]?.request).deepEqual({ action: 'needs-info', id: 'A1' });
+    await should(controller.needsInfo('nope', {})).be.rejected();
+    should(gateway.applied).have.length(1);
+  });
+});

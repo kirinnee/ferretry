@@ -14,15 +14,18 @@ const KINDS = new Map<string, AttentionAsk['kind']>([
   ['answer-review', 'answer-review'],
   ['open', 'open-question'],
   ['open-question', 'open-question'],
+  ['task', 'task'],
 ]);
 
 /** The names `--kind` accepts, for help text and error messages. */
-export const ASK_KIND_NAMES = ['permission', 'choice', 'review', 'open'] as const;
+export const ASK_KIND_NAMES = ['permission', 'choice', 'review', 'open', 'task'] as const;
 
 /** The flags that shape an ask. */
 export interface AskFlags {
   readonly kind?: string;
   readonly option?: readonly string[];
+  /** Forces a to-do ask: the human does something, nothing to choose. */
+  readonly task?: boolean;
 }
 
 /**

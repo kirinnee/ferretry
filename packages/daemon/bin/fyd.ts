@@ -541,6 +541,7 @@ import {
   type AttentionActor,
   AttentionChangeFanout,
   AttentionConversation,
+  AttentionMoreInfoPush,
   AttentionReplyBatcher,
   AttentionReplyDelivery,
   AttentionService,
@@ -8745,6 +8746,8 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           // The owner's answer, told to the ferret that asked — through its outbox, which holds a burst of
           // answers for a few seconds and delivers them as ONE message.
           new AttentionReplyDelivery(attentionReplies),
+          // The ferret's edit that answers the owner's request for more information: pushed once more.
+          new AttentionMoreInfoPush(notifications),
           // The owner's answer to a harness question, typed into its form. DETACHED: a drive watches the
           // pane for seconds, and the answer is already on the board.
           {

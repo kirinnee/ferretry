@@ -16,13 +16,19 @@ export type SessionNotificationPayload = Extract<PushNotificationPayload, { read
 
 export type NotificationIdentity =
   | { readonly origin: 'direct'; readonly requestId: string }
-  | { readonly origin: 'attention'; readonly sessionId: string; readonly attentionId: string };
+  | {
+      readonly origin: 'attention';
+      readonly sessionId: string;
+      readonly attentionId: string;
+      /** The owner's request for more information this push answers; absent for the item's own raise. */
+      readonly infoRequest?: number;
+    };
 
 /** The daemon-wide identity of one logical notification. */
 export function notificationKey(identity: NotificationIdentity): string {
   return identity.origin === 'direct'
     ? `direct:${identity.requestId}`
-    : `attention:${identity.sessionId}:${identity.attentionId}`;
+    : `attention:${identity.sessionId}:${identity.attentionId}${identity.infoRequest === undefined ? '' : `:info-${identity.infoRequest}`}`;
 }
 
 export interface DirectNotificationFingerprint {
@@ -186,6 +192,31 @@ export function attentionNotificationPayload(
     kind: 'attention',
     title: attentionNotificationTitle(conversation),
     body: clippedAtWord(attentionNotificationSummary(item, conversation), ATTENTION_PUSH_BODY_LENGTH),
+    tag: `attention-${sessionId}`,
+    url: attentionNotificationPath(sessionId, item.id),
+    count: snapshot.count,
+  }) as SessionNotificationPayload;
+}
+
+/** What a push says when the ferret added the information the owner asked for: same title and page as the raise. */
+export function moreInfoNotificationPayload(
+  sessionId: string,
+  session: AttentionNotificationSession,
+  item: AttentionItem,
+  snapshot: AttentionSnapshot,
+  request: number,
+): SessionNotificationPayload {
+  const conversation = session.title?.trim() || session.name;
+  return PushNotificationPayloadSchema.parse({
+    version: 1,
+    eventKey: `attention-info:${item.id}:${request}`,
+    sessionId,
+    kind: 'attention',
+    title: attentionNotificationTitle(conversation),
+    body: clippedAtWord(
+      `Updated: more info added — ${attentionNotificationSummary(item, conversation)}`,
+      ATTENTION_PUSH_BODY_LENGTH,
+    ),
     tag: `attention-${sessionId}`,
     url: attentionNotificationPath(sessionId, item.id),
     count: snapshot.count,
