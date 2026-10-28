@@ -73,15 +73,20 @@ function scoped(command: Command): Command {
 /**
  * Mounts `fy attention …` onto the program.
  *
- * `add` is the default verb, so `fy attention "the deploy needs approval"` reads the way an agent
- * raising a blocker expects, while `ls`/`done`/`dismiss`/`notify`/`history` stay explicit.
+ * There is NO default verb: raising an item notifies the owner, so it takes the explicit `add`. A first
+ * word that is not a verb (`fy attention show A6`, a typo) is refused with the verbs on offer, never
+ * read as the summary of a new item.
  */
 export function registerAttentionCommands(program: Command, controller: AttentionController): void {
   const attention = scoped(
     program
       .command('attention')
       .description('raise, answer and audit the things a human has to decide')
-      .addHelpText('after', `\n${WRITING_GUIDE}`),
+      .addHelpText('after', `\n${WRITING_GUIDE}`)
+      .argument('[verb...]', 'what to do: one of the commands below')
+      .action((words: string[]) => {
+        throw new Error(unknownVerb(words, verbNames(attention)));
+      }),
   );
 
   const merged = <T extends AttentionCommandOptions>(command: Command): T => ({
@@ -91,7 +96,7 @@ export function registerAttentionCommands(program: Command, controller: Attentio
 
   scoped(
     attention
-      .command('add', { isDefault: true })
+      .command('add')
       .description('raise something a human must decide or do')
       .argument('[ask...]', 'the summary: one line naming what the human must decide or do')
       .option('--summary <line>', 'the summary, when it is not given as words')
@@ -145,6 +150,15 @@ export function registerAttentionCommands(program: Command, controller: Attentio
       .option('--undo', 'untick the step instead'),
   ).action(async (id: string, number: string, _flags: unknown, command: Command) => {
     await controller.step(id, number, merged<AttentionStepOptions>(command));
+  });
+
+  scoped(
+    attention
+      .command('show')
+      .description('print one item in full — read-only')
+      .argument('<id>', 'the attention reference, like !A3'),
+  ).action(async (id: string, _flags: unknown, command: Command) => {
+    await controller.show(id, merged(command));
   });
 
   scoped(attention.command('ls').alias('list').description('list unresolved items, oldest first')).action(
@@ -215,6 +229,19 @@ export function registerAttentionCommands(program: Command, controller: Attentio
   ).action(async (words: string[], _flags: unknown, command: Command) => {
     await controller.notify(words, merged<AttentionNotifyOptions>(command));
   });
+}
+
+/** Every verb `fy attention` answers to, in the order its help lists them, aliases included. */
+function verbNames(attention: Command): string[] {
+  return attention.commands.flatMap(command => [command.name(), ...command.aliases()]);
+}
+
+/** Why a first word that names no verb is refused, and what to type instead. */
+function unknownVerb(words: readonly string[], verbs: readonly string[]): string {
+  const [first] = words;
+  const offered = verbs.join(', ');
+  if (first === undefined) return `attention needs a command. Did you mean: ${offered}`;
+  return `unknown command '${first}'. Did you mean: ${offered} — raise an item with \`attention add "<summary>"\``;
 }
 
 /** commander's repeatable-option reducer: `--option a --option b` collects both. */

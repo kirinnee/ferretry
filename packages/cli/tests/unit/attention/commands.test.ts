@@ -26,13 +26,85 @@ function run(argv: string[], result = board) {
 }
 
 describe('attention command surface', () => {
-  it('should treat a bare ask as an add so an agent needs no verb', async () => {
+  it('should refuse a first word that is not a verb, and raise nothing', async () => {
+    // Arrange + Act — `fy attention show A6` once raised a real item "show A6" and notified the owner.
+    const mistyped = run(['attention', 'frobnicate', 'A6'], afterAdd);
+    const sentence = run(['attention', 'pick', 'a', 'cluster'], afterAdd);
+
+    // Assert
+    await should(mistyped.parsed).be.rejectedWith(/unknown command 'frobnicate'\. Did you mean: add, edit, show, ls/u);
+    await should(sentence.parsed).be.rejectedWith(/unknown command 'pick'/u);
+    should(mistyped.gateway.applied).be.empty();
+    should(sentence.gateway.applied).be.empty();
+    should(mistyped.out.messages).be.empty();
+  });
+
+  it('should name the add verb as the way to raise an item when a word is refused', async () => {
     // Arrange + Act
-    const { parsed, gateway } = run(['attention', 'pick', 'a', 'cluster'], afterAdd);
+    const { parsed } = run(['attention', 'approve', 'the', 'deploy']);
+
+    // Assert
+    await should(parsed).be.rejectedWith(/attention add "<summary>"/u);
+  });
+
+  it('should refuse a bare `attention` rather than raise an empty item', async () => {
+    // Arrange + Act
+    const { parsed, gateway } = run(['attention']);
+
+    // Assert
+    await should(parsed).be.rejectedWith(/attention needs a command\. Did you mean: add/u);
+    should(gateway.applied).be.empty();
+  });
+
+  it('should refuse a mistyped verb even when flags follow it', async () => {
+    // Arrange + Act
+    const { parsed, gateway } = run(['attention', 'raise', 'the deploy', '--kind', 'permission'], afterAdd);
+
+    // Assert
+    await should(parsed).be.rejected();
+    should(gateway.applied).be.empty();
+  });
+
+  it('should print one open item in full on show, without writing anything', async () => {
+    // Arrange + Act
+    const { parsed, gateway, out } = run(['attention', 'show', 'A1']);
     await parsed;
 
     // Assert
-    should(gateway.applied[0]?.request).match({ action: 'add', subject: 'pick a cluster' });
+    should(out.messages[0]).startWith('  !A1  [question]  approve the deploy');
+    should(out.messages[0]).containEql('resolve: say yes or no');
+    should(gateway.applied).be.empty();
+    should(gateway.read).deepEqual([SESSION]);
+  });
+
+  it('should print a resolved item on show, accepting a sigil-less or ?-prefixed reference', async () => {
+    // Arrange + Act
+    const bang = run(['attention', 'show', '!A9']);
+    await bang.parsed;
+    const question = run(['attention', 'show', '?A9']);
+    await question.parsed;
+
+    // Assert
+    should(bang.out.messages[0]).containEql('!A9  old ask · resolved by');
+    should(question.out.messages[0]).equal(bang.out.messages[0]);
+  });
+
+  it('should print the item itself as JSON on show --json', async () => {
+    // Arrange + Act
+    const { parsed, out } = run(['attention', 'show', 'A1', '--json']);
+    await parsed;
+
+    // Assert
+    should(JSON.parse(String(out.messages[0]))).match({ id: 'A1', subject: 'approve the deploy' });
+  });
+
+  it('should say so when show names an item the board does not hold', async () => {
+    // Arrange + Act
+    const { parsed, out } = run(['attention', 'show', 'A404']);
+
+    // Assert
+    await should(parsed).be.rejectedWith(/no attention item !A404 in /u);
+    should(out.messages).be.empty();
   });
 
   it('should accept the explicit add verb', async () => {
