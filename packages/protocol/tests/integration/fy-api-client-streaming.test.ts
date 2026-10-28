@@ -318,6 +318,60 @@ describe('FyApiClient event streaming', () => {
     should(eventTransport.calls[0]?.url).equal('ws://daemon.test/api/v1/events?after=0');
   });
 
+  it('should ask a session stream to say when its transcript moves only when a handler is supplied', async () => {
+    // Arrange — a transcript signal between two events, as a `?transcript=1` stream interleaves them.
+    const moved = { kind: 'transcript', transcript: { sessionId: SESSION_ID, at: '2026-10-28T17:00:00.000Z' } };
+    const eventTransport = new QueuedEventTransport(eventFrame(4), moved, eventFrame(5));
+    const client = await connectClient(new QueuedHttpTransport(), { eventTransport });
+    const received: FyEvent[] = [];
+    const signals: unknown[] = [];
+
+    // Act
+    await client.stream(
+      SESSION_ID,
+      3,
+      event => received.push(event),
+      undefined,
+      undefined,
+      undefined,
+      transcript => signals.push(transcript),
+    );
+
+    // Assert — the flag is on the wire, and the signal never reached the event handler.
+    should(eventTransport.calls[0]?.url).equal(
+      'ws://daemon.test/api/v1/events?after=3&sessionId=session-1&transcript=1',
+    );
+    should(received).deepEqual([eventAt(4), eventAt(5)]);
+    should(signals).deepEqual([moved.transcript]);
+  });
+
+  it('should never ask a fleet-wide stream for a transcript signal, and drop one a session stream did not ask for', async () => {
+    // Arrange
+    const moved = { kind: 'transcript', transcript: { sessionId: SESSION_ID, at: '2026-10-28T17:00:00.000Z' } };
+    const fleet = new QueuedEventTransport();
+    const unasked = new QueuedEventTransport(moved, eventFrame(4));
+    const fleetClient = await connectClient(new QueuedHttpTransport(), { eventTransport: fleet });
+    const sessionClient = await connectClient(new QueuedHttpTransport(), { eventTransport: unasked });
+    const received: FyEvent[] = [];
+
+    // Act
+    await fleetClient.stream(
+      undefined,
+      0,
+      () => undefined,
+      undefined,
+      undefined,
+      undefined,
+      () => undefined,
+    );
+    await sessionClient.stream(SESSION_ID, 3, event => received.push(event));
+
+    // Assert — a fleet follows no one transcript; an unasked-for signal is validated and dropped.
+    should(fleet.calls[0]?.url).equal('ws://daemon.test/api/v1/events?after=0');
+    should(unasked.calls[0]?.url).equal('ws://daemon.test/api/v1/events?after=3&sessionId=session-1');
+    should(received).deepEqual([eventAt(4)]);
+  });
+
   it('should refuse a malformed live frame instead of handing the caller a bad sample', async () => {
     // Arrange
     const eventTransport = new QueuedEventTransport({

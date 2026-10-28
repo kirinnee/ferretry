@@ -322,6 +322,16 @@ export const changesOnlyByJournal = (state: Pick<SessionView['state'], 'status' 
  */
 export const NUDGE_SETTLE_MS = 150;
 
+/**
+ * How long after the reader acts — a send, an answer — the poll keeps its full rate whatever the feed
+ * says. The relaxed poll trusts the feed to announce the turn the action starts; a feed that died without
+ * a close is only noticed after three silent windows, and until then a relaxed page sat on its last read
+ * for up to {@link RELAXED_REFRESH_MS}: the sent message with its tick, no "Working…", no reply. Inside
+ * this window such a feed costs one ordinary poll instead, and the read that sees the turn working keeps
+ * the poll at full rate for the rest of it.
+ */
+export const ACTED_WATCH_MS = 30_000;
+
 export interface SessionWorkspaceRefreshInput {
   readonly api: SessionWorkspaceReadApi;
   readonly sessionId: string;
@@ -369,6 +379,11 @@ export interface SessionWorkspaceRefreshControl {
    * Every nudge inside one {@link NUDGE_SETTLE_MS} window is the same read.
    */
   readonly nudge: () => void;
+  /**
+   * The reader just acted, so something is about to change: the poll is not relaxed for
+   * {@link ACTED_WATCH_MS} from now, whatever {@link SessionWorkspaceRefreshInput.relaxed} answers.
+   */
+  readonly acted: () => void;
   readonly stop: () => void;
 }
 
@@ -390,6 +405,8 @@ export const startSessionWorkspaceRefresh = (input: SessionWorkspaceRefreshInput
   const environment = input.environment;
   /** When the last read started, on {@link SessionWorkspaceRefreshEnvironment.now}'s clock. */
   let lastReadAt = Number.NEGATIVE_INFINITY;
+  /** When the reader last acted, on the same clock. */
+  let actedAt = Number.NEGATIVE_INFINITY;
   let settle: unknown;
 
   const refresh = (afterCurrent = false): Promise<void> => {
@@ -432,10 +449,19 @@ export const startSessionWorkspaceRefresh = (input: SessionWorkspaceRefreshInput
     return inflight;
   };
 
-  /** A poll tick, skipped while relaxed and the last read is younger than {@link RELAXED_REFRESH_MS}. */
+  /**
+   * A poll tick, skipped while relaxed and the last read is younger than {@link RELAXED_REFRESH_MS} —
+   * unless the reader acted within {@link ACTED_WATCH_MS}.
+   */
   const tick = (): void => {
     const now = environment.now?.();
-    if (now !== undefined && input.relaxed?.() === true && now - lastReadAt < RELAXED_REFRESH_MS) return;
+    if (
+      now !== undefined &&
+      input.relaxed?.() === true &&
+      now - actedAt >= ACTED_WATCH_MS &&
+      now - lastReadAt < RELAXED_REFRESH_MS
+    )
+      return;
     void refresh();
   };
 
@@ -456,10 +482,15 @@ export const startSessionWorkspaceRefresh = (input: SessionWorkspaceRefreshInput
   const stopVisibility = environment.onVisibility(() => void refresh());
   const initial = refresh();
 
+  const acted = (): void => {
+    actedAt = environment.now?.() ?? actedAt;
+  };
+
   return {
     initial,
     refresh,
     nudge,
+    acted,
     stop: () => {
       if (stopped) return;
       stopped = true;

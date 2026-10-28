@@ -136,6 +136,14 @@ export function registerAttentionCommands(program: Command, controller: Attentio
 
   scoped(
     attention
+      .command('send-now')
+      .description('deliver the answers held for the ferret now, instead of after the few-second wait'),
+  ).action(async (_flags: unknown, command: Command) => {
+    await controller.sendNow(merged(command));
+  });
+
+  scoped(
+    attention
       .command('done')
       .alias('resolve')
       .description('resolve an item, optionally answering its ask')

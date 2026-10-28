@@ -1711,6 +1711,27 @@ frame also marks the edge: everything before it was replay, everything after it 
 frame rather than a new kind because the frame schema is strict, and an older reader would refuse an
 unknown kind or key, and with it the stream.
 
+**A session feed may say when its transcript moves.** A reply's text blocks, its tool calls and their
+results reach the agent's transcript with no journal event: nothing about the turn changed. So a reader
+that re-read the transcript only on events showed each block when its poll came round — a second or
+three while the turn read as working, and up to the relaxed poll once it did not. `?transcript=1` on a
+per-session stream (`/v1/events?sessionId=…&transcript=1`) asks the daemon to send, after its replay,
+one frame each time the session's proved transcript file is written:
+
+```json
+{ "kind": "transcript", "transcript": { "sessionId": "…", "at": "2026-10-28T17:00:00.000Z" } }
+```
+
+It carries no content — the reader re-reads through its ordinary conditional read, so the two can
+never disagree — and, like `live`, it counts as traffic for the idle proof. The daemon hears the file
+through its file-event hub and speaks only when the file's size or modification time actually moved,
+and it looks for the file again whenever the session's journal moves (a first message binds one, a
+`/clear` moves to another, which is itself a change). The flag on a fleet stream is refused
+(`transcript_needs_session`). The frame schema is strict, so only a stream that asked ever carries
+one. A daemon that predates the flag refuses it as an unknown parameter with `400` before any frame;
+the reference client then reopens the stream at once without it, spends nothing from its retry budget,
+and reads on events and its poll as before.
+
 **A fleet feed may skip its replay.** With no cursor, `/v1/events` without a `sessionId` replays the
 last 5000 events across the fleet on every connect — megabytes on a busy fleet. `?tail=N` (an integer
 from 0 to 5000, default 5000) bounds that, and `tail=0` replays nothing: the reader opens the feed,
