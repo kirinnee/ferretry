@@ -40,10 +40,11 @@
  * port-only traffic no other document can reach.
  */
 import { FY_RENDER_LIMITS, FY_RENDER_SANDBOX_LIMITS } from '../../src/lib/fy-render-bounds.ts';
+import { FONT_STACK, HEX_LITERAL, MERMAID_COLOR_VARIABLES, PALETTE_KEY } from '../../src/lib/fy-render-palette.ts';
 
 type Reply =
   | { kind: 'shell-ready' }
-  | { kind: 'mermaid-svg'; svg: string; theme: 'dark' | 'light' }
+  | { kind: 'mermaid-svg'; svg: string; theme: 'dark' | 'light'; palette: string }
   | { kind: 'rendered'; width: number; height: number }
   | { kind: 'playing'; playing: boolean }
   | { kind: 'error'; message: string; class: 'library' | 'render' };
@@ -156,8 +157,39 @@ interface MermaidLibrary {
     element.remove();
   };
 
-  const renderMermaid = (library: unknown, source: unknown, theme: unknown): void => {
+  /**
+   * THE PAGE'S PALETTE, ADMITTED BEFORE ANY LIBRARY RUNS. The parent reads the app's theme tokens and
+   * sends them resolved, so a diagram is painted in the reader's theme rather than Mermaid's stock light
+   * or dark. They arrive as data and are held to the exact shapes the parent produces — a known
+   * `themeVariables` key with a hex literal, a font stack with no brace or semicolon, a boolean — because
+   * Mermaid writes them into the compiled SVG's own `<style>`. Anything else is dropped, not repaired:
+   * an unset slot is one Mermaid's `base` theme derives from the slots that are set.
+   */
+  const themeVariablesOf = (value: unknown): Record<string, string | boolean> => {
+    const admitted: Record<string, string | boolean> = {};
+    if (value === null || typeof value !== 'object') return admitted;
+    const { colors, fontFamily, darkMode } = value as { colors?: unknown; fontFamily?: unknown; darkMode?: unknown };
+    if (colors !== null && typeof colors === 'object')
+      for (const key of MERMAID_COLOR_VARIABLES) {
+        const color = (colors as Record<string, unknown>)[key];
+        if (typeof color === 'string' && HEX_LITERAL.test(color)) admitted[key] = color;
+      }
+    if (typeof fontFamily === 'string' && FONT_STACK.test(fontFamily)) admitted.fontFamily = fontFamily;
+    if (typeof darkMode === 'boolean') admitted.darkMode = darkMode;
+    return admitted;
+  };
+
+  const renderMermaid = (
+    library: unknown,
+    source: unknown,
+    theme: unknown,
+    themeVariables: unknown,
+    palette: unknown,
+  ): void => {
     if (typeof source !== 'string') return failWith('render', 'The diagram source was not text.');
+    if (typeof palette !== 'string' || !PALETTE_KEY.test(palette))
+      return failWith('render', 'The diagram palette was not recognised.');
+    const variables = themeVariablesOf(themeVariables);
     install(library);
     const mermaid = (globalThis as unknown as { __fyRenderMermaid?: MermaidLibrary }).__fyRenderMermaid;
     /**
@@ -206,7 +238,8 @@ interface MermaidLibrary {
       mermaid.initialize({
         deterministicIds: true,
         flowchart: { htmlLabels: false },
-        fontFamily: 'ui-sans-serif, system-ui, sans-serif',
+        fontFamily:
+          typeof variables.fontFamily === 'string' ? variables.fontFamily : 'ui-sans-serif, system-ui, sans-serif',
         htmlLabels: false,
         secure: [
           'secure',
@@ -219,10 +252,17 @@ interface MermaidLibrary {
           'theme',
           'fontFamily',
           'deterministicIds',
+          // The theme is the page's, so a diagram cannot repaint itself: no directive reaches these.
+          'themeVariables',
+          'themeCSS',
+          'darkMode',
         ],
         securityLevel: 'strict',
         startOnLoad: false,
-        theme: resolvedTheme === 'dark' ? 'dark' : 'default',
+        // `base` is the one Mermaid theme built to be painted from `themeVariables`; with none admitted it
+        // is still a neutral diagram, and `darkMode` tells it which way to derive the unset slots.
+        theme: 'base',
+        themeVariables: { darkMode: resolvedTheme === 'dark', ...variables },
       });
       mermaid
         .render('fy-render-diagram', source)
@@ -236,7 +276,7 @@ interface MermaidLibrary {
            */
           if (encodeUtf8(result.svg).byteLength > FY_RENDER_SANDBOX_LIMITS.mermaidSvgBytes)
             return failWith('render', 'The compiled diagram is too large to display.');
-          send({ kind: 'mermaid-svg', svg: result.svg, theme: resolvedTheme });
+          send({ kind: 'mermaid-svg', palette, svg: result.svg, theme: resolvedTheme });
         })
         .catch((error: unknown) =>
           failWith('render', error instanceof Error ? error.message : 'The diagram could not be drawn.'),
@@ -297,13 +337,15 @@ interface MermaidLibrary {
       library?: unknown;
       source?: unknown;
       theme?: unknown;
+      themeVariables?: unknown;
+      palette?: unknown;
       playing?: unknown;
     };
     if (command.kind === 'set-playing') return setPlaying(command.playing);
     if (consumed) return;
     if (command.kind === 'render-mermaid') {
       consumed = true;
-      return renderMermaid(command.library, command.source, command.theme);
+      return renderMermaid(command.library, command.source, command.theme, command.themeVariables, command.palette);
     }
     if (command.kind === 'render-lottie') {
       consumed = true;

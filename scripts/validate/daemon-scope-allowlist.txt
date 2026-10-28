@@ -85,3 +85,4 @@ retain packages/pwa/src/components/fy-render-fragment.tsx:purifier # one DOMPuri
 retain packages/pwa/src/lib/trusted-types.ts:fragmentPolicies # one fy-fragment Trusted Types policy per browser policy factory, because the browser refuses a second policy of the same name; no daemon record is stored.
 retain packages/pwa/src/features/settings/viewport-details.tsx:overlayShown # the Viewport details "Show over the app" switch: whether THIS device's screen readout is pinned. It measures the browser, holds no daemon record, and a reload clears it.
 retain packages/pwa/src/features/settings/viewport-details.tsx:overlayListeners # the subscribers to that one per-device switch (useSyncExternalStore); no daemon record is stored.
+retain packages/pwa/src/components/fy-render-theme.ts:pixel # a one-pixel canvas context reused to resolve a CSS colour to hex. It holds no colour, no token and nothing of any daemon; every read repaints it.
