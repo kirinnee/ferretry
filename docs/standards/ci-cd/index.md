@@ -28,12 +28,14 @@ critical path, and nothing goes there that is free and about as fast on GitHub.
 
 **`main` runs on GitHub.** A `main` run re-proves a tree its pull request already proved, nobody
 waits on it but `Release`, and it was 40% of the Namespace bill (330 of the 1,219 runs that used Namespace, Oct 19–28). Its
-jobs take the `ubuntu-latest` branch of the same `runs-on` expression, except two. `Build Checks`
-stays on Namespace because it is the job that refreshes the cache volume (below). `PWA Full Gallery
-(dark)` stays because "nobody waits" is not quite true: `Release` waits for the slowest job, and the
-unsplit gallery takes 643s on GitHub, ~3 minutes more than any other `main` job. A matrix entry says
-so with `main: namespace`. A job only moves to GitHub when Namespace buys it close to nothing: the
-time it adds to the run, its queue, its cache.
+jobs take the `ubuntu-latest` branch of the same `runs-on` expression, except `Build Checks`,
+which stays on Namespace because it is the job that refreshes the cache volume (below). "Nobody
+waits" is not quite true: `Release` waits for the slowest job, so a job that would hold it back keeps
+Namespace on `main` too. The unsplit full gallery did, with a `main: namespace` matrix key — 643s on
+GitHub, ~3 minutes more than any other `main` job — until it was split into one leg per viewport, each
+about half that, and the key went with it. A job
+only moves to GitHub when Namespace buys it close to nothing: the time it adds to the run, its queue,
+its cache.
 
 **`vars.CI_RUNNER_POOL`** is the switch. Set the repository variable to `github` and every Namespace
 job, `Build Checks` and the E2E shards included, runs on `ubuntu-latest` from the next run on: no

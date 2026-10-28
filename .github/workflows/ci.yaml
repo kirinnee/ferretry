@@ -145,12 +145,11 @@ jobs:
     # unsplit it walked its viewports one after the other, 643s on GitHub against ~427s on a Namespace
     # 4x8, a third of the Namespace bill. Separate jobs, not one job running both at once: that was three
     # software-rendered Chromes on four cores, and it timed out in 3 of 7 runs under load (#598).
-    # `main: namespace` keeps a Namespace job on Namespace on `main` too. The unsplit gallery carried it
-    # because 643s on GitHub held every release back by ~3 minutes; each split leg takes about half that,
-    # so neither carries it (and `shape: github` takes `ubuntu-latest` whatever `main` says).
+    # The unsplit gallery also stayed on Namespace on `main` (a `main: namespace` matrix key), because
+    # 643s on GitHub held every release back by ~3 minutes; each split leg takes about half that.
     runs-on: >-
       ${{
-        (matrix.shape == 'github' || (github.event_name != 'pull_request' && matrix.main != 'namespace') || vars.CI_RUNNER_POOL == 'github')
+        (matrix.shape == 'github' || github.event_name != 'pull_request' || vars.CI_RUNNER_POOL == 'github')
         && 'ubuntu-latest'
         || fromJSON(format('["nscloud-ubuntu-24.04-amd64-{0}-with-cache","nscloud-cache-tag-ferretry-nix","nscloud-cache-size-10gb","nscloud-cache-allow-commit-from-main"]', matrix.shape))
       }}
