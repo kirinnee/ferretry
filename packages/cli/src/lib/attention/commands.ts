@@ -57,8 +57,10 @@ const ASK_KINDS = `--kind says what the human DOES:
   permission   approve or reject
   choice       pick one --option (repeat --option; 2 or more required)
   review       say the answer is good, or ask for a clarification
+  task         do something, then mark it done or ask for more information
   open         write a full answer (the default)
-Without --kind, one --question with options is a choice, and several questions are answered in words.`;
+Without --kind, steps with no question are a task, one --question with options is a choice, and several
+questions are answered in words.`;
 
 const DISMISS_POLICY = `Agents may dismiss only attention items they raised themselves.
 A human may dismiss any attention item. Every dismissal remains in the resolution audit.`;
@@ -94,6 +96,7 @@ export function registerAttentionCommands(program: Command, controller: Attentio
       .argument('[ask...]', 'the summary: one line naming what the human must decide or do')
       .option('--summary <line>', 'the summary, when it is not given as words')
       .option(`-k, --kind <kind>`, `what the human does: ${ASK_KIND_NAMES.join(', ')}`)
+      .option('--task', 'a to-do: the human does something; nothing to choose (steps with no question imply it)')
       .option('-o, --option <label>', 'a choice label; repeat for each option', collect, [])
       .option('-c, --context <point>', 'what is happening and why it matters; repeat for bullet points', collect, [])
       .option('-w, --why <reason>', 'why this needs the human now (defaults to the ask)')
@@ -155,6 +158,16 @@ export function registerAttentionCommands(program: Command, controller: Attentio
       await controller.history(merged(command));
     },
   );
+
+  scoped(
+    attention
+      .command('needs-info')
+      .description('ask the ferret that raised an item for more information; the item stays open')
+      .argument('<id>', 'the attention reference, like !A3')
+      .option('-n, --note <text>', 'what is missing, told to the ferret'),
+  ).action(async (id: string, _flags: unknown, command: Command) => {
+    await controller.needsInfo(id, merged<AttentionResolveOptions>(command));
+  });
 
   scoped(
     attention

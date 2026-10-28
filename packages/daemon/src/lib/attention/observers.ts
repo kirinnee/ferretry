@@ -1,7 +1,13 @@
-import type { SessionAttentionSummary } from '@ferretry/protocol';
+import type { AttentionItem, AttentionSnapshot, SessionAttentionSummary } from '@ferretry/protocol';
 import type { SerialExecutor } from '../ports.ts';
-import { boardReplyMessage, conversationResponse, conversationTurn, sessionAttentionSummary } from './conversation.ts';
-import type { AttentionReplyQueue } from './reply-batch.ts';
+import {
+  boardReplyMessage,
+  conversationResponse,
+  conversationTurn,
+  needsInfoMessage,
+  sessionAttentionSummary,
+} from './conversation.ts';
+import { type AttentionReplyQueue, needsInfoReplyKey } from './reply-batch.ts';
 import type {
   AttentionBoardChange,
   AttentionChangeObserver,
@@ -83,10 +89,40 @@ export class AttentionReplyDelivery implements AttentionChangeObserver {
   constructor(private readonly replies: AttentionReplyQueue) {}
 
   async changed(sessionId: string, change: AttentionBoardChange): Promise<void> {
-    const { addressed } = change;
+    const { addressed, item } = change;
+    if (
+      change.change === 'needs-info' &&
+      change.actor.kind === 'human' &&
+      item?.raisedBy === 'agent' &&
+      item.raisedBySession === sessionId &&
+      item.infoRequests !== undefined
+    ) {
+      await this.replies.add(sessionId, needsInfoReplyKey(item.id, item.infoRequests), needsInfoMessage(item));
+      return;
+    }
     if (change.via !== 'board' || change.actor.kind !== 'human' || addressed === undefined) return;
     if (addressed.raisedBy !== 'agent' || addressed.raisedBySession !== sessionId) return;
     await this.replies.add(sessionId, addressed.id, boardReplyMessage(addressed));
+  }
+}
+
+/** Announces that a ferret added the information the owner asked for: the one push an edit ever makes. */
+export interface MoreInfoAnnouncer {
+  moreInfoAdded(sessionId: string, item: AttentionItem, snapshot: AttentionSnapshot): Promise<void>;
+}
+
+/**
+ * The ONE exception to "an edit never pushes": the raising ferret's edit that answers an open request for
+ * more information (`info-added`) pushes once more. The state machine clears the request in the same
+ * commit, so a retried edit is no change and pushes nothing, and the announcer keys the push on the item
+ * and its request counter.
+ */
+export class AttentionMoreInfoPush implements AttentionChangeObserver {
+  constructor(private readonly announcer: MoreInfoAnnouncer) {}
+
+  async changed(sessionId: string, change: AttentionBoardChange): Promise<void> {
+    if (change.change !== 'info-added' || change.item === undefined) return;
+    await this.announcer.moreInfoAdded(sessionId, change.item, change.snapshot);
   }
 }
 
