@@ -75,14 +75,12 @@ describe('structured-item rules', () => {
     expect(answersPerQuestion({ questions: [{ question: 'a' }], ask: { kind: 'open-question' } })).toBe(false);
   });
 
-  test('swipes Done/Dismiss only on a multi-question item, and the options on a single-question one', () => {
+  test('swipes Done/Dismiss on any item, however many questions or options it has', () => {
     const ask = { kind: 'multiple-choice' as const, options: [{ label: 'One' }, { label: 'Two' }] };
     expect(swipeMap({ ask, questions: [{ question: 'a' }, { question: 'b' }] })).toEqual({
       right: DONE_ACTION,
       left: DISMISS_ACTION,
     });
-    const single = swipeMap({ ask, questions: [{ question: 'a' }] });
-    expect(single.right?.label).toBe('One');
-    expect(single.left?.label).toBe('Two');
+    expect(swipeMap({ ask, questions: [{ question: 'a' }] })).toEqual({ right: DONE_ACTION, left: DISMISS_ACTION });
   });
 });

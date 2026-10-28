@@ -18,6 +18,8 @@ import type { AttentionInbox } from '../../hooks/use-attention-inbox.ts';
 import {
   actionSentence,
   attentionConversationPath,
+  DISMISS_ACTION,
+  DONE_ACTION,
   type FailedAttentionAction,
   type InboxAction,
   type InboxCard,
@@ -29,6 +31,7 @@ import { RouteLink } from '../../shell/route-link.tsx';
 import { sessionsBarNames } from '../../shell/sessions-bar-model.ts';
 import { attentionAge, attentionReference } from './attention-board.tsx';
 import { AttentionCard, type AttentionCardOrigin } from './attention-card.tsx';
+import { AttentionSwipeDeck } from './attention-swipe-deck.tsx';
 import { AttentionUndoToast } from './attention-undo-toast.tsx';
 
 /**
@@ -140,10 +143,12 @@ export interface AttentionInboxPageProps {
   readonly banner?: ReactNode;
   /** The right pane: the selected item's real chat, pinned item and all. */
   readonly renderChat?: (card: InboxCard) => ReactNode;
+  /** Forces the phone deck's reduced motion on or off; the reader's preference otherwise. */
+  readonly reducedMotion?: boolean;
 }
 
 /** One row of the list: where it came from, what it asks, how long ago. */
-function InboxRow({
+function RowFace({
   card,
   selected,
   now,
@@ -170,25 +175,54 @@ function InboxRow({
       </span>
     </>
   );
+  return phone ? (
+    <RouteLink className="fy-attn-row" data-attention-row={card.key} onNavigate={onNavigate} to={origin.href}>
+      {body}
+    </RouteLink>
+  ) : (
+    <button
+      aria-current={selected || undefined}
+      className="fy-attn-row"
+      data-attention-row={card.key}
+      data-selected={selected || undefined}
+      onClick={() => onSelect(card.key)}
+      type="button"
+    >
+      {body}
+    </button>
+  );
+}
+
+/** A phone's swipeable card: the row (a link into the chat) and Done / Dismiss as buttons. */
+function SwipeRow({
+  card,
+  now,
+  onNavigate,
+  act,
+}: {
+  readonly card: InboxCard;
+  readonly now: number | undefined;
+  readonly onNavigate: (to: string) => void;
+  readonly act: (action: InboxAction) => void;
+}) {
   return (
-    <li>
-      {phone ? (
-        <RouteLink className="fy-attn-row" data-attention-row={card.key} onNavigate={onNavigate} to={origin.href}>
-          {body}
-        </RouteLink>
-      ) : (
+    <div className="fy-attn-swiperow">
+      <RowFace card={card} now={now} onNavigate={onNavigate} onSelect={() => undefined} phone selected={false} />
+      <div className="fy-attn-swiperow__actions">
+        <button className="kt-btn kt-btn--sm" data-attention-done="" onClick={() => act(DONE_ACTION)} type="button">
+          Done
+        </button>
         <button
-          aria-current={selected || undefined}
-          className="fy-attn-row"
-          data-attention-row={card.key}
-          data-selected={selected || undefined}
-          onClick={() => onSelect(card.key)}
+          className="kt-btn kt-btn--sm"
+          data-attention-dismiss=""
+          data-variant="ghost"
+          onClick={() => act(DISMISS_ACTION)}
           type="button"
         >
-          {body}
+          Dismiss
         </button>
-      )}
-    </li>
+      </div>
+    </div>
   );
 }
 
@@ -200,6 +234,7 @@ export function AttentionInboxPage({
   clock,
   banner,
   renderChat,
+  reducedMotion,
 }: AttentionInboxPageProps) {
   const headingId = useId();
   const [chosen, setChosen] = useState<string | null>(null);
@@ -228,19 +263,35 @@ export function AttentionInboxPage({
         )
       ) : (
         <div className="fy-attn-inbox__body">
-          <ul aria-label="Waiting on you" className="fy-attn-inbox__list">
-            {inbox.cards.map(card => (
-              <InboxRow
-                card={card}
-                key={card.key}
-                now={now}
-                onNavigate={onNavigate}
-                onSelect={setChosen}
-                phone={phone}
-                selected={selected?.key === card.key}
+          {phone ? (
+            <div className="fy-attn-inbox__deck" data-attention-deck-host="">
+              <AttentionSwipeDeck
+                cards={inbox.cards}
+                onAct={(card, action) => inbox.deferred.schedule(card, action)}
+                {...(reducedMotion === undefined ? {} : { reducedMotion })}
+                renderCard={(card, act) => <SwipeRow act={act} card={card} now={now} onNavigate={onNavigate} />}
               />
-            ))}
-          </ul>
+              <p className="fy-attn-inbox__hint">
+                {inbox.cards.length > 1 ? `${inbox.cards.length - 1} more after this one · ` : ''}
+                Swipe right for Done, left to dismiss
+              </p>
+            </div>
+          ) : (
+            <ul aria-label="Waiting on you" className="fy-attn-inbox__list">
+              {inbox.cards.map(card => (
+                <li key={card.key}>
+                  <RowFace
+                    card={card}
+                    now={now}
+                    onNavigate={onNavigate}
+                    onSelect={setChosen}
+                    phone={false}
+                    selected={selected?.key === card.key}
+                  />
+                </li>
+              ))}
+            </ul>
+          )}
           {phone || selected === undefined || renderChat === undefined ? null : (
             <section aria-label="Conversation" className="fy-attn-inbox__chat" data-attention-chat={selected.key}>
               {renderChat(selected)}

@@ -125,6 +125,165 @@
   min-height: 44px;
   justify-content: center;
 }
+/* A focused card answers to its arrows; the ring says it is listening. */
+.fy-attn-frame {
+  border-radius: var(--radius-panel);
+  outline: none;
+}
+.fy-attn-frame:focus-visible {
+  box-shadow: var(--focus-shadow, 0 0 0 2px var(--accent));
+}
+
+/* ---- The phone's swipe deck ---------------------------------------------------------------------- */
+.fy-attn-deck {
+  position: relative;
+  isolation: isolate;
+  /* Room under the top card for the next ones to peek out. */
+  padding-bottom: 22px;
+}
+.fy-attn-deck__top {
+  position: relative;
+  z-index: 3;
+  user-select: none;
+  -webkit-user-select: none;
+  transition: transform 200ms cubic-bezier(0.2, 0.9, 0.3, 1.2);
+  will-change: transform;
+}
+.fy-attn-deck__top textarea {
+  user-select: text;
+  -webkit-user-select: text;
+}
+/* While the finger holds it, the card follows the finger exactly; on release it springs home. */
+.fy-attn-deck__top[data-dragging] {
+  transition: none;
+}
+.fy-attn-deck__peek {
+  position: absolute;
+  inset: 0 0 22px;
+  overflow: hidden;
+  border-radius: var(--radius-panel);
+  pointer-events: none;
+  transform-origin: 50% 100%;
+}
+.fy-attn-deck__peek[data-depth='1'] {
+  z-index: 2;
+  transform: translateY(10px) scale(0.96);
+}
+.fy-attn-deck__peek[data-depth='2'] {
+  z-index: 1;
+  transform: translateY(20px) scale(0.92);
+}
+.fy-attn-deck__peek > * {
+  height: 100%;
+}
+/* At rest a peek is only an edge: its text would show wherever the card under is taller than the top
+   one. While the top card is in the reader's hand, the next one is revealed under it. */
+.fy-attn-deck:not(:has(.fy-attn-deck__top[data-dragging])) .fy-attn-deck__peek .fy-attn-card > * {
+  visibility: hidden;
+}
+/* The option a drag would send, stamped on the card and growing with the drag. */
+.fy-attn-deck__stamp {
+  position: absolute;
+  z-index: 4;
+  top: 14px;
+  display: inline-flex;
+  max-width: calc(100% - 28px);
+  align-items: center;
+  gap: 6px;
+  border: var(--stroke-heavy) solid var(--accent);
+  border-radius: var(--radius-control);
+  background: var(--surface);
+  padding: 6px 10px;
+  color: var(--accent);
+  font-family: var(--font-display);
+  font-size: var(--text-lg);
+  font-weight: var(--weight-strong);
+  box-shadow: var(--shadow-popover);
+  pointer-events: none;
+}
+.fy-attn-deck__stamp > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fy-attn-deck__stamp[data-attention-stamp='right'] {
+  left: 14px;
+  transform-origin: 0 0;
+}
+.fy-attn-deck__stamp[data-attention-stamp='left'] {
+  right: 14px;
+  transform-origin: 100% 0;
+}
+.fy-attn-deck__stamp[data-attention-stamp='up'] {
+  left: 50%;
+  translate: -50% 0;
+  transform-origin: 50% 0;
+}
+/* Past the threshold: letting go sends it. */
+.fy-attn-deck__stamp[data-committed] {
+  background: var(--accent);
+  color: var(--accent-fg);
+}
+.fy-attn-deck__stamp[data-empty] {
+  border-color: var(--border-strong);
+  color: var(--faint);
+}
+/* A committed card flying off, from wherever the finger let go. Decoration: the answer is already held. */
+.fy-attn-deck__leaving {
+  position: absolute;
+  z-index: 5;
+  inset: 0 0 22px;
+  pointer-events: none;
+  animation: fy-attn-fly-right 220ms ease-in forwards;
+}
+.fy-attn-deck__leaving[data-direction='left'] {
+  animation-name: fy-attn-fly-left;
+}
+.fy-attn-deck__leaving[data-direction='up'] {
+  animation-name: fy-attn-fly-up;
+}
+@keyframes fy-attn-fly-right {
+  from {
+    transform: translate(var(--fly-x), var(--fly-y)) rotate(4deg);
+    opacity: 1;
+  }
+  to {
+    transform: translate(120vw, var(--fly-y)) rotate(16deg);
+    opacity: 0;
+  }
+}
+@keyframes fy-attn-fly-left {
+  from {
+    transform: translate(var(--fly-x), var(--fly-y)) rotate(-4deg);
+    opacity: 1;
+  }
+  to {
+    transform: translate(-120vw, var(--fly-y)) rotate(-16deg);
+    opacity: 0;
+  }
+}
+@keyframes fy-attn-fly-up {
+  from {
+    transform: translate(var(--fly-x), var(--fly-y));
+    opacity: 1;
+  }
+  to {
+    transform: translate(var(--fly-x), -110vh);
+    opacity: 0;
+  }
+}
+/* Reduced motion: no spring, no flight — the card is simply back, or simply gone. */
+.fy-attn-deck[data-reduced-motion] .fy-attn-deck__top {
+  transition: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .fy-attn-deck__top {
+    transition: none;
+  }
+  .fy-attn-deck__leaving {
+    display: none;
+  }
+}
 
 /* ---- The two-pane inbox ---------------------------------------------------------------------------- */
 .fy-attn-inbox__body {
@@ -343,4 +502,19 @@
   .fy-attn-undo__drain {
     display: none;
   }
+}
+
+/* ---- A phone's swipeable row ------------------------------------------------------------------- */
+.fy-attn-swiperow {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-panel);
+  background: var(--surface, var(--bg));
+}
+.fy-attn-swiperow__actions {
+  display: flex;
+  gap: 0.5rem;
 }

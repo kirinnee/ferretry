@@ -40,10 +40,13 @@ const session = (
     directory: cwd,
   });
 
+const open = (minutes: number) => ({ open: 1, first: 'A1', ask: 'Ask?', latestAt: minutesAgo(minutes) });
+
 const STUDIO_SESSIONS: readonly SessionView[] = [
   session('s-ivo', 'ivo', 'Relay carrier bench', '/home/k/ferretry', 1, 'auto'),
   session('s-hadi', 'hadi', 'Pick the migration strategy', '/home/k/ferretry', 3, 'interactive', {
     status: 'awaiting_question',
+    attention: open(3),
   }),
   session('s-lea', 'lea', 'Split the settings page', '/home/k/ferretry/.worktrees/lea', 8, 'auto', {
     waiting: { since: minutesAgo(8) },
@@ -55,7 +58,10 @@ const STUDIO_SESSIONS: readonly SessionView[] = [
 ];
 
 const LAPTOP_SESSIONS: readonly SessionView[] = [
-  session('l-pim', 'pim', 'Review the landing copy', '/Users/k/site', 7, 'interactive', { status: 'awaiting_user' }),
+  session('l-pim', 'pim', 'Review the landing copy', '/Users/k/site', 7, 'interactive', {
+    status: 'awaiting_user',
+    attention: open(7),
+  }),
   session('l-ula', 'ula', 'Resize the hero images', '/Users/k/site', 9, 'auto'),
   session('l-ada', 'ada', 'Old deploy check', '/Users/k/site', 300, 'auto', { status: 'stalled' }),
 ];
@@ -71,7 +77,7 @@ const child = (id: string, teammate: string, label: string, parent: string, minu
 const PACK_SESSIONS: readonly SessionView[] = [
   session('p-lead', 'ivo', 'Harden the relay carrier', '/home/k/ferretry', 1, 'interactive'),
   child('p-pim', 'pim', 'Probe carrier A', 'p-lead', 2),
-  child('p-ula', 'ula', 'Probe carrier B', 'p-lead', 3, { status: 'awaiting_user' }),
+  child('p-ula', 'ula', 'Probe carrier B', 'p-lead', 3, { status: 'awaiting_user', attention: open(3) }),
   child('p-ada', 'ada', 'Bench the TURN fallback', 'p-lead', 4),
   child('p-kai', 'kai', 'Parse the bench logs', 'p-ada', 5),
   child('p-noa', 'noa', 'Probe carrier C', 'p-lead', 90, { status: 'completed' }),
@@ -124,6 +130,7 @@ function Scene() {
         active={null}
         activeSessionId={pack ? 'p-ora' : 's-ivo'}
         daemonId={STUDIO}
+        groupNeedsYou={!pack}
         initialMode={initialMode}
         learningPassive={LEARNING}
         machineName="studio"

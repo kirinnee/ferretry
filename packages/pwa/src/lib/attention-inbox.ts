@@ -270,20 +270,13 @@ export type SwipeDirection = 'right' | 'left' | 'up';
 export type SwipeMap = Readonly<Partial<Record<SwipeDirection, InboxAction>>>;
 
 /**
- * What each swipe does to a card: right is option 1, left option 2, up option 3. A card with no
- * options swipes right to Done and left to Dismiss; a card with one option swipes left to Dismiss.
- * Up only ever means a third option — it is never a destructive fallback. An item with SEVERAL
- * questions has no single answer to swipe, so it swipes Done / Dismiss only.
+ * What each swipe does to a card: right is Done, left is Dismiss. A swipe never picks between a
+ * card's options — those are buttons — and `up` stays free for a later gesture.
  */
-export const swipeMap = (item: Pick<AttentionItem, 'ask' | 'questions'>): SwipeMap => {
-  if (hasSeveralQuestions(item)) return { right: DONE_ACTION, left: DISMISS_ACTION };
-  const [first, second, third] = inboxOptions(item);
-  return {
-    right: first ?? DONE_ACTION,
-    left: second ?? DISMISS_ACTION,
-    ...(third === undefined ? {} : { up: third }),
-  };
-};
+export const swipeMap = (_item: Pick<AttentionItem, 'ask' | 'questions'>): SwipeMap => ({
+  right: DONE_ACTION,
+  left: DISMISS_ACTION,
+});
 
 /**
  * Which swipe, if any, an answer sits on — matched by meaning, because `inboxOptions` builds its

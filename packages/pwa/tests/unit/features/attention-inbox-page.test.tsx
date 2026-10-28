@@ -155,14 +155,16 @@ describe('AttentionInboxPage two panes', () => {
     await mounted.unmount();
   });
 
-  it('on a phone lists the items alone, each row a link into the chat at the item', async () => {
+  it('on a phone deals the newest item as a row linking into the chat at the item', async () => {
     const navigated: string[] = [];
     const mounted = await mount(page(fakeInbox(), [threeWay, twoWay], { phone: true, renderChat: chat }, navigated));
     expect(mounted.container.querySelector('[data-fake-chat]')).toBeNull();
-    const row = rows(mounted)[1] as HTMLAnchorElement;
-    expect(row.getAttribute('href')).toBe('/d/laptop/session/sess-2?attention=A2');
+    expect(mounted.container.querySelector('[data-attention-deck]')).not.toBeNull();
+    const row = rows(mounted)[0] as HTMLAnchorElement;
+    const href = row.getAttribute('href') ?? '';
+    expect(href).toContain('?attention=');
     await interact(() => row.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, button: 0 })));
-    expect(navigated).toEqual(['/d/laptop/session/sess-2?attention=A2']);
+    expect(navigated).toEqual([href]);
     await mounted.unmount();
   });
 
@@ -235,7 +237,7 @@ describe('AttentionNeedsYou', () => {
 });
 
 describe('AttentionCard swipe hints', () => {
-  it('marks each of the first three options, and Done/Dismiss on a card with none, with its swipe', async () => {
+  it('marks Done and Dismiss with their swipe, and never an option', async () => {
     const hinted = (mounted: Mounted): (string | null)[] =>
       [...mounted.container.querySelectorAll('.fy-attn-card__swipe')].map(hint => hint.getAttribute('title'));
     const options = await mount(
@@ -245,7 +247,7 @@ describe('AttentionCard swipe hints', () => {
         swipeHints
       />,
     );
-    expect(hinted(options)).toEqual(['swipe right', 'swipe left', 'swipe up']);
+    expect(hinted(options)).toEqual([]);
     await options.unmount();
 
     const bare = await mount(<AttentionCard item={attentionItem('A8')} onAct={() => {}} swipeHints />);
