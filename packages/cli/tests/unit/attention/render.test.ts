@@ -313,6 +313,20 @@ describe('attention confirmations', () => {
     // Assert
     should(actual).equal(`attention recorded — 0 unresolved items in ${SESSION}`);
   });
+
+  it('should warn when the raise reached no device, and say nothing when one was enrolled', () => {
+    // Arrange
+    const nobody = { ...snapshot([humanItem('A1', 'x')]), enrolled: 0 };
+    const somebody = { ...snapshot([humanItem('A1', 'x')]), enrolled: 2 };
+
+    // Act
+    const warned = renderAttentionMutation('attention !A1 recorded', undefined, nobody, 'A1');
+    const quiet = renderAttentionMutation('attention !A1 recorded', undefined, somebody, 'A1');
+
+    // Assert
+    should(warned.split('\n')[1]).startWith('Warning: no device will be notified (0 enrolled).');
+    should(quiet).equal(`attention !A1 recorded — 1 unresolved item in ${SESSION}`);
+  });
 });
 
 describe('notification confirmations', () => {

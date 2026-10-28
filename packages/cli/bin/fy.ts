@@ -20,6 +20,7 @@ import root from '../../../package.json' with { type: 'json' };
 import daemonPkg from '../../daemon/package.json' with { type: 'json' };
 import pkg from '../package.json' with { type: 'json' };
 import { SessionCredentialGateway } from '../src/adapters/agent-tools/session-credential-gateway';
+import { AttentionBriefInput } from '../src/adapters/attention/brief-input';
 import { FileScreenshotWriter } from '../src/adapters/browser/screenshot-writer';
 import { FileConfigFiles } from '../src/adapters/config/files';
 import { StdinConfigText } from '../src/adapters/config/stdin';
@@ -51,7 +52,6 @@ import { StdinSecretValue } from '../src/adapters/secrets/stdin-secret-value';
 import { createFyClientConnector, FySessionApi, SessionFiles, SystemClock } from '../src/adapters/session/index.ts';
 import { FileStateHomeClaim } from '../src/adapters/state-home/claim-files';
 import { createStatuslineController } from '../src/adapters/statusline/index.ts';
-import { AttentionBriefInput } from '../src/adapters/attention/brief-input';
 import { BunTextFileReader } from '../src/adapters/tasks/bun-text-file-reader';
 import { FyTaskBoardGateway } from '../src/adapters/tasks/fy-task-board-gateway';
 import { FyTaskGateway } from '../src/adapters/tasks/fy-task-gateway';
@@ -820,7 +820,7 @@ const DOMAIN_REGISTRARS: ReadonlyArray<(wiring: DomainWiring) => void> = [
     registerAttentionCommands(
       program,
       new AttentionController(
-        new ProtocolAttentionGateway(client),
+        new ProtocolAttentionGateway(client, ownSessionId),
         world.io,
         ownSessionId,
         new AttentionBriefInput(world.cwd),

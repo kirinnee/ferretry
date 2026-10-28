@@ -77,9 +77,10 @@ export interface AttentionMessenger {
 /**
  * Tells a ferret the owner's answer to an item IT raised, as an ordinary message naming the item.
  *
- * Only the owner's own closing of an agent-raised item on the board is told: an answer given in the
- * conversation already reached the ferret in the owner's words, the ferret's own `done` needs no echo,
- * and the warden's or a source's reconciliation is not an answer. The send id is the item's, so a
+ * Every closing the owner makes on the board of an agent-raised item is told — an answer, a done or a
+ * dismiss (`boardReplyMessage`). Nothing else is: an answer given in the conversation already reached
+ * the ferret in the owner's words, the ferret's own `done` needs no echo, and the warden's or a
+ * source's reconciliation is not an answer. The send id is the item's, so a
  * notice delivered twice is one message.
  */
 export class AttentionReplyDelivery implements AttentionChangeObserver {
@@ -89,9 +90,7 @@ export class AttentionReplyDelivery implements AttentionChangeObserver {
     const { addressed } = change;
     if (change.via !== 'board' || change.actor.kind !== 'human' || addressed === undefined) return;
     if (addressed.raisedBy !== 'agent' || addressed.raisedBySession !== sessionId) return;
-    const message = boardReplyMessage(addressed);
-    if (message === null) return;
-    await this.messenger.send(sessionId, message, `attention-${sessionId}-${addressed.id}`);
+    await this.messenger.send(sessionId, boardReplyMessage(addressed), `attention-${sessionId}-${addressed.id}`);
   }
 }
 

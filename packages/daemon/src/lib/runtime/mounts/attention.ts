@@ -43,6 +43,8 @@ export interface DirectNotificationSubsystem {
     attribution: string,
     requestId: string,
   ): Promise<NotificationResult>;
+  /** How many devices are enrolled for push on this machine right now. */
+  enrolledDevices(): Promise<number>;
 }
 
 /**
@@ -114,7 +116,11 @@ async function list(attention: AttentionService, context: RouteContext): Promise
  * two into a single write that recorded no answer at all, so an agent waiting on a choice was
  * unblocked with nothing to read.
  */
-async function apply(attention: AttentionService, context: RouteContext): Promise<ApiResponse> {
+async function apply(
+  attention: AttentionService,
+  notifications: Pick<DirectNotificationSubsystem, 'enrolledDevices'>,
+  context: RouteContext,
+): Promise<ApiResponse> {
   const sessionId = pathSessionId(context);
   const request = await parseBody(context.request, AttentionActionRequestSchema);
   const actor = attentionActor(context.actor);
@@ -129,7 +135,23 @@ async function apply(attention: AttentionService, context: RouteContext): Promis
           : attention.answer(sessionId, request.id, request.response, actor, request.note));
   if (!mutation.ok) return refusal(mutation.error);
   const warnings = mutation.item !== undefined && mutation.changed ? lintAttentionWriting(mutation.item) : [];
-  return jsonResponse(warnings.length === 0 ? mutation.snapshot : { ...mutation.snapshot, warnings });
+  const enrolled = mutation.change === 'created' ? await enrolledDevices(notifications) : undefined;
+  return jsonResponse({
+    ...mutation.snapshot,
+    ...(warnings.length === 0 ? {} : { warnings }),
+    ...(enrolled === undefined ? {} : { enrolled }),
+  });
+}
+
+/**
+ * How many devices the push that a raise just made could reach, for the raiser to be told when it is none.
+ * Undefined when the push store cannot be read: the item is raised either way, and a count nobody can
+ * vouch for is no count at all.
+ */
+async function enrolledDevices(
+  notifications: Pick<DirectNotificationSubsystem, 'enrolledDevices'>,
+): Promise<number | undefined> {
+  return await notifications.enrolledDevices().catch(() => undefined);
 }
 
 /** The fields an edit request names, with the ones it leaves out left out. */
@@ -185,7 +207,7 @@ export function attentionRoutes(
       path: '/v1/sessions/:sessionId/attention',
       minimum: 'operator',
       noStore: true,
-      handle: async context => await apply(attention, context),
+      handle: async context => await apply(attention, notifications, context),
     },
     {
       method: 'POST',

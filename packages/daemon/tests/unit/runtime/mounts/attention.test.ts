@@ -38,6 +38,12 @@ class FakeNotifications implements DirectNotificationSubsystem {
     readonly requestId: string;
   }> = [];
   result: NotificationResult = { ok: true, value: { sessionId: 's1', delivered: 0 } };
+  enrolled: number | Error = 2;
+
+  async enrolledDevices(): Promise<number> {
+    if (this.enrolled instanceof Error) throw this.enrolled;
+    return this.enrolled;
+  }
 
   async notifyDirect(
     sessionId: string,
@@ -118,6 +124,55 @@ describe('attention routes', () => {
     should(raised.status).equal(200);
     should(jsonBody(raised)).have.property('count', 1);
     should((jsonBody(raised).items as readonly { subject: string }[])[0]?.subject).equal('which base branch?');
+  });
+
+  it('should record a raise carrying the CLI’s session header as that ferret’s, and one without it as the human’s', async () => {
+    // Arrange — the headers are the ones `fy attention add` sends from inside a ferret's pane and from
+    // the person's own shell. The live defect sent the second from both, so every ferret's raise was
+    // stored as the human's, and the owner's answer was never delivered back to the ferret.
+    const dispatch = fixture();
+
+    // Act
+    const fromFerret = await dispatch(post(raise, agentIn('s1')));
+    const fromShell = await dispatch(post({ ...raise, subject: 'from the shell' }));
+
+    // Assert
+    const items = jsonBody(fromShell).items as readonly { subject: string; raisedBy: string }[];
+    should(jsonBody(fromFerret).items).containDeep([{ raisedBy: 'agent', raisedBySession: 's1' }]);
+    should(items.find(item => item.subject === 'from the shell')).containDeep({ raisedBy: 'human' });
+  });
+
+  it('should say how many devices a new item reached, only on the raise that created it', async () => {
+    // Arrange
+    const none = new FakeNotifications();
+    none.enrolled = 0;
+    const dispatch = fixture(undefined, none);
+
+    // Act
+    const raised = await dispatch(post(raise, agentIn('s1')));
+    const again = await dispatch(post(raise, agentIn('s1')));
+    const id = (jsonBody(raised).items as readonly { id: string }[])[0]?.id;
+    const answered = await dispatch(post({ action: 'dismiss', id }, agentIn('s1')));
+
+    // Assert — zero is the case worth saying: the ask is on the board and nobody was told.
+    should(jsonBody(raised)).have.property('enrolled', 0);
+    should(jsonBody(again)).not.have.property('enrolled');
+    should(jsonBody(answered)).not.have.property('enrolled');
+  });
+
+  it('should raise the item even when the enrolled devices cannot be counted, and claim no count', async () => {
+    // Arrange
+    const broken = new FakeNotifications();
+    broken.enrolled = new Error('push store unreadable');
+    const dispatch = fixture(undefined, broken);
+
+    // Act
+    const raised = await dispatch(post(raise, agentIn('s1')));
+
+    // Assert
+    should(raised.status).equal(200);
+    should(jsonBody(raised)).have.property('count', 1);
+    should(jsonBody(raised)).not.have.property('enrolled');
   });
 
   it('should answer a clean raise with no warnings, and a hard-to-read one with advice that edit then clears', async () => {

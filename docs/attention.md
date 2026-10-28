@@ -10,15 +10,23 @@ This document is the contract for that loop. The board's own rules are in
 
 ## The loop
 
-| Step          | Who                                             | What happens                                                                                                                                    |
-| ------------- | ----------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
-| Raise         | the ferret: `fy attention add "<summary>"`      | One push to every enrolled device, titled with the conversation, saying what is needed (see below). The session's row turns **unread**.         |
-| Answer        | the owner: the board, the inbox or a push tap   | The ferret receives `[answer to !A3 «<ask>»] <answer>` as an ordinary message. The item resolves.                                               |
-| Reply in chat | the owner writes `!A3 …` in that ferret's chat  | That message is the answer: it is delivered prefixed `[answer to !A3 «<ask>»]`, and once it is accepted the item resolves in the owner's name.  |
-| Plain chat    | the owner writes without referencing an item    | Nothing resolves. The message ends with one line naming the open items, so the ferret can resolve one itself if the message settled it.         |
-| Done          | the ferret: `fy attention done A3 [--answer …]` | The ferret closes its own item once it is no longer needed. Nothing is echoed back to it.                                                       |
-| Dismiss       | the owner, or the ferret for its own items      | Closed without an answer. The ferret is told only when the owner wrote a note, so a bare dismissal never revives a finished ferret for nothing. |
+| Step          | Who                                                             | What happens                                                                                                                                                              |
+| ------------- | --------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Raise         | the ferret: `fy attention add "<summary>"`                      | One push to every enrolled device, titled with the conversation, saying what is needed (see below). The session's row turns **unread**.                                   |
+| Answer        | the owner: the board, the inbox or a push tap                   | The ferret receives `[answer to !A3 «<ask>»] <answer>` as an ordinary message. The item resolves.                                                                         |
+| Reply in chat | the owner writes `!A3 …` in that ferret's chat                  | That message is the answer: it is delivered prefixed `[answer to !A3 «<ask>»]`, and once it is accepted the item resolves in the owner's name.                            |
+| Plain chat    | the owner writes without referencing an item                    | Nothing resolves. The message ends with one line naming the open items, so the ferret can resolve one itself if the message settled it.                                   |
+| Done          | the ferret: `fy attention done A3 [--answer …]`                 | The ferret closes its own item once it is no longer needed. Nothing is echoed back to it.                                                                                 |
+| Done (owner)  | the owner: the board, or `fy attention done` at their own shell | The ferret receives `[done !A3 «<ask>»] The owner marked this done.`, or `[answer to !A3 «<ask>»] <note>` when the owner wrote one.                                       |
+| Dismiss       | the owner, or the ferret for its own items                      | Closed without an answer. When the owner dismisses, the ferret receives `[dismissed !A3 «<ask>»]` with the owner's note, or "The owner dismissed this without an answer." |
 
+- **Who raised it is decided by the pane, not the words.** `fy attention` sends the client header and,
+  inside a ferret, that ferret's `FY_SESSION_ID` as `x-ferretry-session-id`. The daemon attributes the
+  call to `peer:<session>`, so the item is `raisedBy: agent` with `raisedBySession` set, and the push
+  ledger's attribution is `attention:agent:<session>`. At the owner's own shell no session header is
+  sent, so the call is the human's. **Until this was fixed the CLI sent neither header**, so every ferret's raise
+  was stored as the human's, and its answer was never delivered: the delivery tells only the ferret
+  that asked, and the board said nobody had.
 - **An agent changes only its own session's board.** The resolution audit records who closed every
   item: `resolvedBy` is `human`, `agent` (with its session) or `daemon`.
 - **Any item may be resolved without an answer.** A structured ask (a choice, a permission, a review)
@@ -29,7 +37,14 @@ This document is the contract for that loop. The board's own rules are in
   with the message as its note.
 - **The delivery is detached and idempotent.** Each item's answer is sent under the send id
   `attention-<session>-<id>`, so a notice told twice is one message. The owner's answer never waits
-  for a ferret's launch or revive.
+  for a ferret's launch or revive. It goes through the ordinary send path, queued while the ferret is
+  mid-turn. **Every closing the owner makes is told**, a bare done or dismiss included: a ferret told
+  nothing waits on an item the owner already settled. A chat reply is the one exception, because the
+  message itself already carried the owner's words.
+- **A raise says when nobody was told.** The response to the raise that created an item carries
+  `enrolled`, the number of devices enrolled for push on the machine. At zero, `fy attention add`
+  prints `Warning: no device will be notified (0 enrolled)` under its confirmation. The item is on the
+  board either way.
 
 ## What an item says
 
@@ -134,14 +149,17 @@ alpha alone. iOS has no badge and ignores it. The manifest also names the badge 
 icon, and its home-screen icons are maskable (the art carries its own safe zone).
 
 **What an Attention push says.** A concise summary, nothing else. The title is the conversation's
-name, quoted and trimmed to 40 characters at a word boundary: `“OCI work login”`. It is the ferret's
+name, plain, trimmed to 40 characters at a word boundary: `OCI work login`. It is the ferret's
 name when the session has no name of its own. The body is the item's **summary only**, at most 110
 characters, trimmed at a word boundary with `…`. It never carries the context, the options or the
 recommendation. When the summary is empty or only repeats the title, the first question stands in,
 trimmed the same way.
 
-The title always starts with a quote mark. A session's name is an agent's own words, so it can never
-open with the daemon's new-device alert title.
+A session's name is an agent's own words, so it must never read as the daemon's new-device alert
+title. Titles used to be quoted always (`“Ferretry”`), which guarded one case by marking every push.
+Now only a name that reads as that alert is labelled, as `Ferret “…”`. That covers any spelling, case
+or punctuation, and Cyrillic, Greek and accented look-alikes (`attentionNotificationTitle`). Every
+other title is the name as the owner typed it.
 
 ### Edge on Android shows Edge's icon, and we cannot change that
 

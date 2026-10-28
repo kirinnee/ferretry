@@ -195,18 +195,26 @@ describe('Attention board observers', () => {
     ]);
   });
 
-  it('should tell a ferret the owner’s answer to its own item, once per item, and nothing else', async () => {
+  it('should tell a ferret every closing the owner makes of its own item on the board, under one send id each', async () => {
     // Arrange
     const changes = new RecordingChanges();
     const attention = service(new MemoryRepository(), changes);
     await attention.raise(SESSION, ASK, AGENT);
-    await attention.raise(SESSION, { ...ASK, subject: 'Second?', ask: undefined }, AGENT);
-    await attention.raise(SESSION, { ...ASK, subject: 'Third?', ask: undefined }, AGENT);
-    await attention.raise(SESSION, { ...ASK, subject: 'Fourth?', ask: undefined }, AGENT);
+    await attention.raise(
+      SESSION,
+      { ...ASK, subject: 'Second?', why: 'Second.', ask: { kind: 'open-question' } },
+      AGENT,
+    );
+    await attention.raise(SESSION, { ...ASK, subject: 'Third?', why: 'Third.', ask: { kind: 'open-question' } }, AGENT);
+    await attention.raise(
+      SESSION,
+      { ...ASK, subject: 'Fourth?', why: 'Fourth.', ask: { kind: 'open-question' } },
+      AGENT,
+    );
     await attention.answer(SESSION, 'A1', { kind: 'multiple-choice', choice: 'Rebase now' }, HUMAN);
     await attention.resolve(SESSION, 'A2', AGENT, 'sorted it myself');
     await attention.resolve(SESSION, 'A3', HUMAN, 'answered in chat', 'conversation');
-    await attention.dismiss(SESSION, 'A4', HUMAN);
+    should((await attention.dismiss(SESSION, 'A4', HUMAN)).ok).be.true();
     const messenger = new RecordingMessenger();
     const delivery = new AttentionReplyDelivery(messenger);
 
@@ -216,6 +224,8 @@ describe('Attention board observers', () => {
 
     // Assert
     should(messenger.sent).deepEqual([
+      // The ferret's own done (A2) and the chat answer (A3, already in the owner's words) are not echoed;
+      // a bare dismiss (A4) is told. Told twice, each is one send id — the send ledger keeps one message.
       {
         sessionId: SESSION,
         message: '[answer to !A1 «Rebase onto main now?»] Rebase now',
@@ -223,8 +233,18 @@ describe('Attention board observers', () => {
       },
       {
         sessionId: SESSION,
+        message: '[dismissed !A4 «Fourth?»] The owner dismissed this without an answer.',
+        sendId: 'attention-session-1-A4',
+      },
+      {
+        sessionId: SESSION,
         message: '[answer to !A1 «Rebase onto main now?»] Rebase now',
         sendId: 'attention-session-1-A1',
+      },
+      {
+        sessionId: SESSION,
+        message: '[dismissed !A4 «Fourth?»] The owner dismissed this without an answer.',
+        sendId: 'attention-session-1-A4',
       },
     ]);
   });
