@@ -148,6 +148,20 @@ export class AttentionController {
     this.#report(snapshot, options, () => renderAttentionMutation('resolved', attentionReference(id), snapshot));
   }
 
+  /** The owner asks the ferret that raised an item for more information. The item stays open, waiting on it. */
+  async needsInfo(reference: string, options: AttentionResolveOptions): Promise<void> {
+    const id = parseAttentionReference(reference);
+    const note = text(options.note);
+    const snapshot = await this.gateway.apply(this.#target(options), {
+      action: 'needs-info',
+      id,
+      ...(note === undefined ? {} : { note }),
+    });
+    this.#report(snapshot, options, () =>
+      renderAttentionMutation('asked for more information on', attentionReference(id), snapshot),
+    );
+  }
+
   async dismiss(reference: string, options: AttentionResolveOptions): Promise<void> {
     const id = parseAttentionReference(reference);
     const note = text(options.note);

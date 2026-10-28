@@ -11,6 +11,7 @@ import {
   boardReplyMessage,
   conversationResponse,
   conversationTurn,
+  needsInfoMessage,
   referencedAttention,
   responseWords,
   sessionAttentionSummary,
@@ -214,5 +215,27 @@ describe('Attention in a conversation', () => {
       latestAt: '2026-10-23T12:00:00.000Z',
     });
     should(sessionAttentionSummary(empty)).be.undefined();
+  });
+});
+
+describe('needsInfoMessage', () => {
+  it('should carry the latest note, or say the owner needs more information without one', () => {
+    // Arrange
+    const asked = (note?: string) =>
+      item('A5', {
+        waitingOn: 'ferret',
+        askedAt: AT,
+        infoRequests: 2,
+        history: [
+          { at: AT, kind: 'needs-info', note: 'old note' },
+          { at: AT, kind: 'updated' },
+          { at: AT, kind: 'needs-info', ...(note === undefined ? {} : { note }) },
+        ],
+      });
+
+    // Act + Assert
+    should(needsInfoMessage(asked('Which account?'))).equal('[needs more info !A5 «Ask A5?»] Which account?');
+    should(needsInfoMessage(asked())).equal('[needs more info !A5 «Ask A5?»] The owner needs more information.');
+    should(needsInfoMessage(item('A5'))).equal('[needs more info !A5 «Ask A5?»] The owner needs more information.');
   });
 });

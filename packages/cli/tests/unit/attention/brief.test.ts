@@ -271,3 +271,26 @@ describe('attention brief steps and body', () => {
     should(file).containDeep({ steps: ['a', 'b'], body: 'c' });
   });
 });
+
+describe('attention brief to-do asks', () => {
+  it('should make steps with no question a task, and let --task or --kind task force it', () => {
+    // Arrange / Act
+    const implied = composeAddRequest(['Log in'], { step: ['Run `fy login`'] });
+    const forced = composeAddRequest(['Log in'], { task: true });
+    const named = composeAddRequest(['Log in'], { kind: 'task' });
+    const question = composeAddRequest(['Which?'], { step: ['One'], option: ['a', 'b'] });
+    const open = composeAddRequest(['Why?'], {});
+
+    // Assert
+    should(implied).containDeep({ ask: { kind: 'task' } });
+    should(forced).containDeep({ ask: { kind: 'task' } });
+    should(named).containDeep({ ask: { kind: 'task' } });
+    should(question).containDeep({ ask: { kind: 'multiple-choice' } });
+    should(open).containDeep({ ask: { kind: 'open-question' } });
+  });
+
+  it('should refuse a task that also asks a question', () => {
+    // Act + Assert
+    should(() => composeAddRequest(['Log in'], { task: true, question: ['Which?'] })).throw(/a task asks nothing/u);
+  });
+});

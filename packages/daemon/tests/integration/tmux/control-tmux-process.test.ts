@@ -45,6 +45,15 @@ async function server(options: ControlModeOptions = {}) {
   return { direct, spawned, subject, socket };
 }
 
+/** Every control-mode client on `socket`, as `ps` lists it. */
+function controlClients(socket: string): string[] {
+  const listed = Bun.spawnSync(['ps', '-A', '-ww', '-o', 'pid=', '-o', 'args='], { stdout: 'pipe', stderr: 'ignore' });
+  return listed.stdout
+    .toString()
+    .split('\n')
+    .filter(line => line.includes(` -S ${socket} `) && line.includes(' -C attach-session '));
+}
+
 /** Read commands whose answers the two paths must agree on, byte for byte. */
 const READS: readonly (readonly string[])[] = [
   ['has-session', '-t', 'work'],
@@ -210,6 +219,23 @@ describe('ControlModeTmuxProcess over a real tmux', () => {
     should(spawned.commands.length).equal(before + 2);
   }, 30_000);
 
+  it('should answer stop only once its client has exited, leaving nothing of it on the server', async () => {
+    // Arrange
+    const { direct, socket, subject } = await server();
+    await subject.execute(['new-session', '-d', '-s', 'work', 'sleep', '600']);
+    await subject.execute(['has-session', '-t', 'work']);
+    should(controlClients(socket)).have.length(1);
+
+    // Act
+    const clean = await subject.stop();
+
+    // Assert — gone the moment stop answers, without a wait of the test's own; the server is untouched.
+    should(clean).be.true();
+    should(controlClients(socket)).deepEqual([]);
+    should((await direct.execute(['display-message', '-p', '-t', 'work', '#{session_attached}'])).stdout).equal('0\n');
+    should((await subject.execute(['has-session', '-t', 'work'])).code).equal(0);
+  }, 30_000);
+
   it('should refuse a relative executable or socket', () => {
     // Act + Assert
     should(() => new ControlModeTmuxProcess('tmux', '/tmp/s')).throw(/absolute/);
@@ -223,8 +249,14 @@ class ScriptedChild implements ControlChild {
   killed = false;
   writeFails = false;
   killFails = false;
+  /** Every signal sent, in order. */
+  readonly signals: string[] = [];
+  /** Whether SIGTERM leaves this process running, as a client stuck on its server would be. */
+  ignoresTerm = false;
   private readonly queue: (string | Error | null)[] = [];
   private wake: (() => void) | undefined;
+  private exit: () => void = () => undefined;
+  readonly exited = new Promise<void>(resolve => (this.exit = resolve));
 
   readonly stdin = {
     write: (text: string): void => {
@@ -263,10 +295,12 @@ class ScriptedChild implements ControlChild {
     this.wake?.();
   }
 
-  kill(): void {
+  kill(signal?: 'SIGKILL'): void {
     this.killed = true;
+    this.signals.push(signal ?? 'SIGTERM');
     if (this.killFails) throw new Error('no such process');
     this.emit(null);
+    if (signal === 'SIGKILL' || !this.ignoresTerm) this.exit();
   }
 }
 
@@ -429,6 +463,7 @@ describe('ControlModeTmuxProcess against a scripted client', () => {
           },
         }),
       },
+      exited: Promise.resolve(),
       kill: () => undefined,
     };
     const sequence: (() => ControlChild)[] = [
@@ -448,6 +483,63 @@ describe('ControlModeTmuxProcess against a scripted client', () => {
     now += 20_000;
     should((await subject.execute(HAS)).stdout).equal('spawned\n');
     should(reads()).equal(3);
+  });
+
+  it('should SIGKILL a client SIGTERM leaves running, and answer that it had to', async () => {
+    // Arrange — a connection that ended long ago, and one still open, neither of which goes on SIGTERM.
+    let now = 0;
+    const stuck = [new ScriptedChild(), new ScriptedChild()];
+    for (const child of stuck) child.ignoresTerm = true;
+    const sequence = [...stuck];
+    const { subject } = scripted({ child: () => sequence.shift() as ScriptedChild, nowMs: () => now });
+    const first = subject.execute(HAS);
+    await Bun.sleep(5);
+    (stuck[0] as ScriptedChild).emit(null);
+    await first;
+    now += 20_000;
+    void subject.execute(HAS);
+    await Bun.sleep(5);
+
+    // Act
+    const clean = await subject.stop(20);
+
+    // Assert
+    should(clean).be.false();
+    should(stuck.map(child => child.signals)).deepEqual([
+      ['SIGTERM', 'SIGKILL'],
+      ['SIGTERM', 'SIGKILL'],
+    ]);
+  });
+
+  it('should answer stop at once when there is no client, and start none for a read already connecting', async () => {
+    // Arrange
+    const { subject, children, reads } = scripted();
+
+    // Act
+    const read = subject.execute(HAS);
+    const clean = await subject.stop(20);
+
+    // Assert
+    should(clean).be.true();
+    should((await read).stdout).equal('spawned\n');
+    should(children).have.length(0);
+    should(reads()).equal(1);
+  });
+
+  it('should give up on a client it cannot signal at all, after the same bounded waits', async () => {
+    // Arrange
+    const unkillable = new ScriptedChild();
+    unkillable.killFails = true;
+    const { subject } = scripted({ child: () => unkillable });
+    void subject.execute(HAS);
+    await Bun.sleep(5);
+
+    // Act
+    const clean = await subject.stop(10);
+
+    // Assert
+    should(clean).be.false();
+    should(unkillable.signals).deepEqual(['SIGTERM', 'SIGKILL']);
   });
 
   it('should not dial at all when tmux will not list its sessions', async () => {

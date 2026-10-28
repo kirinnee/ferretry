@@ -41,6 +41,8 @@ function askLine(ask: AttentionAsk | undefined): string | undefined {
       return 'answer: good, or ask to clarify';
     case 'open-question':
       return 'answer: write a full answer';
+    case 'task':
+      return 'to do: mark it done, or ask for more information';
   }
 }
 
@@ -72,6 +74,9 @@ function itemLines(item: AttentionItem): string[] {
   if (item.why.trim() !== item.subject.trim()) lines.push(`${INDENT}why: ${compact(item.why)}`);
   lines.push(`${INDENT}resolve: ${compact(item.howToResolve)}`);
   lines.push(`${INDENT}since ${item.waitingSince} · raised by ${actor(item.raisedBy, item.raisedByName)}`);
+  if (item.waitingOn !== undefined) {
+    lines.push(`${INDENT}waiting on the ferret: more information asked ${item.askedAt ?? ''}`.trimEnd());
+  }
   return lines;
 }
 

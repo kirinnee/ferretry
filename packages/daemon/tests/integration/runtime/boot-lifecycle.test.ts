@@ -5809,9 +5809,9 @@ describe('daemon boot lifecycle', () => {
 
     // Assert
     should(code).equal(EXIT_ALREADY_RUNNING);
-    // The open failed, so the only acquisition is the loop's heartbeat and watchdog — armed before the
-    // home is opened, because opening it is a step that can stall too.
-    should(cleanups).have.length(1);
+    // The open failed, so the only acquisitions are the loop's heartbeat and watchdog — armed before the
+    // home is opened, because opening it is a step that can stall too — and the tmux client's release.
+    should(cleanups).have.length(2);
     // THE MESSAGE, not just the code: this branch used to return 78 and write nothing, so the
     // launcher pointed the operator at a log file that was empty.
     should(said.stated).have.length(1);
@@ -5839,8 +5839,9 @@ describe('daemon boot lifecycle', () => {
 
     // Assert
     should(code).equal(EXIT_ALREADY_RUNNING);
-    // The heartbeat, then the home — opened before the address was probed — are the registered steps.
-    should(cleanups).have.length(2);
+    // The heartbeat, the tmux client's release, then the home — opened before the address was probed —
+    // are the registered steps.
+    should(cleanups).have.length(3);
     should(said.stated).have.length(1);
     should(said.stated[0]).match(/9\.9\.9/u);
     should(said.stated[0]).match(/pid 4242/u);

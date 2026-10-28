@@ -552,3 +552,66 @@ describe('attention routes and held answers', () => {
     should(jsonBody(response)).not.have.property('replies');
   });
 });
+
+describe('attention route needs-info', () => {
+  const task = {
+    action: 'add',
+    subject: 'Log in to the cloud',
+    why: 'The deploy needs it',
+    howToResolve: 'Follow the steps',
+    ask: { kind: 'task' },
+    steps: ['Run the login'],
+  } as const;
+
+  it('should let the owner ask for more information, keep the item open and mark it waiting on the ferret', async () => {
+    // Arrange
+    const dispatch = fixture();
+    await dispatch(post(task, agentIn('s1')));
+
+    // Act
+    const asked = await dispatch(post({ action: 'needs-info', id: 'A1', note: 'Which account?' }));
+
+    // Assert
+    should(asked.status).equal(200);
+    should(jsonBody(asked)).containDeep({ count: 1 });
+    should((jsonBody(asked).items as readonly unknown[])[0]).containDeep({
+      id: 'A1',
+      waitingOn: 'ferret',
+      infoRequests: 1,
+    });
+  });
+
+  it('should refuse the ferret asking itself, an unknown item and a closed one', async () => {
+    // Arrange
+    const dispatch = fixture();
+    await dispatch(post(task, agentIn('s1')));
+    await dispatch(post({ action: 'resolve', id: 'A1' }));
+
+    // Act
+    const byAgent = await dispatch(post({ action: 'needs-info', id: 'A1' }, agentIn('s1')));
+    const unknown = await dispatch(post({ action: 'needs-info', id: 'A9' }));
+    const closed = await dispatch(post({ action: 'needs-info', id: 'A1' }));
+
+    // Assert
+    should(byAgent.status).equal(403);
+    should(unknown.status).equal(404);
+    should(closed.status).equal(404);
+  });
+
+  it('should answer a ferret edit that answers the request with the cleared mark, and lint what it wrote', async () => {
+    // Arrange
+    const dispatch = fixture();
+    await dispatch(post(task, agentIn('s1')));
+    await dispatch(post({ action: 'needs-info', id: 'A1' }));
+
+    // Act
+    const edited = await dispatch(
+      post({ action: 'edit', id: 'A1', subject: 'Log in to ABC-123 via https://example.com' }, agentIn('s1')),
+    );
+
+    // Assert
+    should(edited.status).equal(200);
+    should((jsonBody(edited).items as readonly Record<string, unknown>[])[0]).not.have.property('waitingOn');
+    should(jsonBody(edited)).have.property('warnings');
+  });
+});
