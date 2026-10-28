@@ -95,6 +95,13 @@ interface Downstream {
   readonly closes: Array<{ readonly code: number; readonly reason: string }>;
   /** Set to make every later binary send throw, as a transport that has lost its socket does. */
   readonly failing: { on: boolean };
+  /**
+   * Resolves once `ready` holds: at once, or at whichever later write first makes it true.
+   *
+   * The daemon answers off the event loop — its records are sealed with real WebCrypto behind an inbox
+   * the socket port gives no receipt for — so a case waits for the write it asserts on, never a sleep.
+   */
+  readonly until: (ready: () => boolean) => Promise<void>;
 }
 
 function downstream(): Downstream {
@@ -102,11 +109,19 @@ function downstream(): Downstream {
   const texts: string[] = [];
   const closes: Array<{ readonly code: number; readonly reason: string }> = [];
   const failing = { on: false };
+  const waiting: Array<{ readonly ready: () => boolean; readonly resolve: () => void }> = [];
+  const wrote = (): void => {
+    for (const waiter of waiting.filter(candidate => candidate.ready())) {
+      waiting.splice(waiting.indexOf(waiter), 1);
+      waiter.resolve();
+    }
+  };
   return {
     binary,
     texts,
     closes,
     failing,
+    until: ready => (ready() ? Promise.resolve() : new Promise<void>(resolve => waiting.push({ ready, resolve }))),
     port: {
       send: frame => {
         if (typeof frame === 'string') texts.push(frame);
@@ -116,9 +131,13 @@ function downstream(): Downstream {
           if (!decoded.ok) throw new Error(decoded.reason);
           binary.push(decoded.frame);
         }
+        wrote();
         return 0;
       },
-      close: (code, reason) => closes.push({ code, reason }),
+      close: (code, reason) => {
+        closes.push({ code, reason });
+        wrote();
+      },
       bufferedBytes: () => 0,
     },
   };
@@ -224,13 +243,26 @@ async function handshake(
   return { channel: openChannel(sessionId, completed.keys, 'client'), transcript: completed.keys.transcriptHash };
 }
 
-async function send(handler: SocketHandler, channel: ChannelState, message: unknown): Promise<ChannelState> {
+/**
+ * Seal one record as the client, hand it over, and wait for what it causes: the daemon's next record by
+ * default, or the socket closing for a record whose answer ends the session.
+ */
+async function send(
+  handler: SocketHandler,
+  wire: Downstream,
+  channel: ChannelState,
+  message: unknown,
+  until: 'record' | 'closed' = 'record',
+): Promise<ChannelState> {
   const sealed = await sealRecord(crypto_, channel, utf8Bytes(JSON.stringify(message)));
   if (!sealed.ok) throw new Error(sealed.reason);
+  const before = dataFrames(wire);
   handler.fromClient(encodeFrame(sealed.frame));
-  await settled();
+  await (until === 'closed' ? socketClosed(wire) : wire.until(() => dataFrames(wire) > before));
   return sealed.state;
 }
+
+const dataFrames = (wire: Downstream): number => wire.binary.filter(frame => frame.kind === FRAME_KINDS.data).length;
 
 async function records(wire: Downstream, channel: ChannelState): Promise<unknown[]> {
   let state = channel;
@@ -244,19 +276,12 @@ async function records(wire: Downstream, channel: ChannelState): Promise<unknown
   return out;
 }
 
-const settled = async (): Promise<void> => await new Promise(resolve => setTimeout(resolve, 20));
+/** Waits for the daemon to answer with a frame of this kind. */
+const arrived = async (wire: Downstream, kind: number): Promise<void> =>
+  await wire.until(() => wire.binary.some(frame => frame.kind === kind));
 
-/**
- * Waits for the daemon to answer with a frame of this kind, for at most two seconds.
- *
- * The answer is computed with WebCrypto, which resolves off the event loop: a fixed `settled` sleep held on
- * a loaded runner and the frame landed after it, while sixty-four of those sleeps in one test spent half the
- * five-second budget on an idle one.
- */
-const arrived = async (wire: Downstream, kind: number): Promise<void> => {
-  for (let waited = 0; waited < 2_000 && !wire.binary.some(frame => frame.kind === kind); waited += 1)
-    await new Promise(resolve => setTimeout(resolve, 1));
-};
+/** Waits for the daemon to close the socket. */
+const socketClosed = async (wire: Downstream): Promise<void> => await wire.until(() => wire.closes.length > 0);
 
 const lastControl = (wire: Downstream) => {
   const frame = wire.binary.filter(candidate => candidate.kind === FRAME_KINDS.control).at(-1);
@@ -283,14 +308,14 @@ describe('the direct carrier', () => {
       deviceKey,
       deviceAuthMessage(transcript, 'auth', DEVICE_ID, APP_SESSION),
     );
-    let next = await send(handler, channel, {
+    let next = await send(handler, wire, channel, {
       t: 'auth',
       protocol: SESSION_PROTOCOL_ID,
       deviceId: DEVICE_ID,
       appSession: APP_SESSION,
       proof,
     });
-    next = await send(handler, next, { t: 'req', id: 1, method: 'GET', path: '/v1/sessions' });
+    next = await send(handler, wire, next, { t: 'req', id: 1, method: 'GET', path: '/v1/sessions' });
 
     // Assert — the answer crossed sealed, and the route table saw the device and the LISTENER's verdict.
     // Sending advances only the send counter, so the channel the handshake produced still reads.
@@ -317,7 +342,7 @@ describe('the direct carrier', () => {
       deviceKey,
       deviceAuthMessage(transcript, 'auth', DEVICE_ID, APP_SESSION),
     );
-    const next = await send(handler, channel, {
+    const next = await send(handler, wire, channel, {
       t: 'auth',
       protocol: SESSION_PROTOCOL_ID,
       deviceId: DEVICE_ID,
@@ -327,7 +352,7 @@ describe('the direct carrier', () => {
 
     // Act
     wire.failing.on = true;
-    await send(handler, next, { t: 'req', id: 1, method: 'GET', path: '/v1/sessions' });
+    await send(handler, wire, next, { t: 'req', id: 1, method: 'GET', path: '/v1/sessions' }, 'closed');
 
     // Assert
     should(wire.closes).deepEqual([
@@ -340,14 +365,20 @@ describe('the direct carrier', () => {
     const { handler, wire, sessionId } = await connect(route, { clientAddress: '192.0.2.4' });
     const { channel } = await handshake(handler, wire, sessionId);
 
-    await send(handler, channel, {
-      t: 'pair',
-      protocol: SESSION_PROTOCOL_ID,
-      code: 'ABCD-2345',
-      deviceName: 'phone',
-      deviceKey: deviceKeyText,
-      proof: toBase64Url(new Uint8Array(64)),
-    });
+    await send(
+      handler,
+      wire,
+      channel,
+      {
+        t: 'pair',
+        protocol: SESSION_PROTOCOL_ID,
+        code: 'ABCD-2345',
+        deviceName: 'phone',
+        deviceKey: deviceKeyText,
+        proof: toBase64Url(new Uint8Array(64)),
+      },
+      'closed',
+    );
 
     should(pairings).have.length(1);
     should(pairings[0]?.carrier).deepEqual({ kind: 'direct', rateLimitKey: '192.0.2.4' });
@@ -378,8 +409,8 @@ describe('the direct carrier', () => {
     const tunnelKeys = await handshake(overTunnel.handler, overTunnel.wire, overTunnel.sessionId);
 
     // Act
-    await send(overDirect.handler, directKeys.channel, pair);
-    await send(overTunnel.handler, tunnelKeys.channel, pair);
+    await send(overDirect.handler, overDirect.wire, directKeys.channel, pair, 'closed');
+    await send(overTunnel.handler, overTunnel.wire, tunnelKeys.channel, pair, 'closed');
 
     // Assert — the pairing service is never asked, so no guess is spent; the outcome a client sees,
     // records and close alike, is the one a wrong code gets, so the refusal is no oracle.
@@ -396,14 +427,20 @@ describe('the direct carrier', () => {
     const { route, pairings } = carrier();
     const { handler, wire, sessionId } = await connect(route);
     const { channel } = await handshake(handler, wire, sessionId);
-    await send(handler, channel, {
-      t: 'pair',
-      protocol: SESSION_PROTOCOL_ID,
-      code: 'ABCD-2345',
-      deviceName: 'phone',
-      deviceKey: deviceKeyText,
-      proof: toBase64Url(new Uint8Array(64)),
-    });
+    await send(
+      handler,
+      wire,
+      channel,
+      {
+        t: 'pair',
+        protocol: SESSION_PROTOCOL_ID,
+        code: 'ABCD-2345',
+        deviceName: 'phone',
+        deviceKey: deviceKeyText,
+        proof: toBase64Url(new Uint8Array(64)),
+      },
+      'closed',
+    );
     should(pairings[0]?.carrier).deepEqual({ kind: 'direct', rateLimitKey: `direct-session:${sessionId.text}` });
   });
 
@@ -420,7 +457,7 @@ describe('the direct carrier', () => {
         payload: utf8Bytes(JSON.stringify({ ...pending.hello, protocol: 'ferretry-relay/1' })),
       }),
     );
-    await settled();
+    await socketClosed(wire);
 
     should(lastControl(wire)).containDeep({ t: 'closed', reason: OLDER_APP_SENTENCE });
     const closed = wire.closes.at(-1);
@@ -468,7 +505,7 @@ describe('the direct carrier', () => {
     const padded = new Uint8Array(frame.byteLength + 8);
     padded.set(frame, 4);
     handler.fromClient(padded.subarray(4, 4 + frame.byteLength));
-    await settled();
+    await arrived(wire, FRAME_KINDS.handshake);
     should(wire.binary.some(candidate => candidate.kind === FRAME_KINDS.handshake)).be.true();
     handler.close();
   });
@@ -534,7 +571,7 @@ describe('the direct carrier', () => {
     const proven = async (address: string): Promise<SocketHandler> => {
       const { handler, wire, sessionId } = await connect(route, { clientAddress: address });
       const { channel, transcript } = await handshake(handler, wire, sessionId);
-      await send(handler, channel, {
+      await send(handler, wire, channel, {
         t: 'auth',
         protocol: SESSION_PROTOCOL_ID,
         deviceId: DEVICE_ID,
@@ -615,7 +652,7 @@ describe('a direct session ending for the reasons a relayed one does', () => {
     const harnessed = carrier(options);
     const { handler, wire, sessionId } = await connect(harnessed.route, { clientAddress: '192.0.2.77' });
     const { channel, transcript } = await handshake(handler, wire, sessionId);
-    await send(handler, channel, {
+    await send(handler, wire, channel, {
       t: 'auth',
       protocol: SESSION_PROTOCOL_ID,
       deviceId: DEVICE_ID,
@@ -692,7 +729,7 @@ describe('what a tunnel session reports about its own life', () => {
       deviceKey,
       deviceAuthMessage(transcript, 'auth', DEVICE_ID, APP_SESSION),
     );
-    await send(handler, channel, {
+    await send(handler, wire, channel, {
       t: 'auth',
       protocol: SESSION_PROTOCOL_ID,
       deviceId: DEVICE_ID,
