@@ -47,9 +47,18 @@ describe('the bottom safe-area inset has one owner', () => {
     const phone = rule(/@media \(max-width: 767\.98px\) \{\s*\[data-safe-bottom\][\s\S]*?\n\}/u);
     expect(phone).toContain('padding-bottom: max(var(--own-pad-bottom, 0px), var(--safe-bottom));');
     expect(phone).toContain('.kt-shell:has([data-safe-bottom]:not([hidden] *)) {\n    padding-bottom: 0;');
-    // Wider than a phone several columns meet the bottom edge, so the shell pays and a bar keeps its own padding.
+    // Wider than a phone several columns meet the bottom edge: each pays for its own content so its surface
+    // reaches the edge, and a bar keeps its own padding.
     expect(rule(/\.kt-shell \{[^}]*\}/u)).toContain('padding-bottom: var(--safe-bottom);');
     expect(styles).toMatch(/\n\[data-safe-bottom\] \{\s*padding-bottom: var\(--own-pad-bottom, 0px\);\s*\}/u);
+  });
+
+  it('wider than a phone lets every column run to the edge instead of the shell leaving a band under them', () => {
+    const wide = rule(/@media \(min-width: 768px\) \{\s*\.kt-shell:has\(> \[data-sessions-bar\]\)[\s\S]*?\n\}/u);
+    expect(wide).toContain('.kt-shell:has(> [data-sessions-bar]) {\n    padding-bottom: 0;');
+    expect(wide).toContain('.fy-sbar--column,\n  .fy-sbar--rail {\n    padding-bottom: var(--safe-bottom);');
+    expect(wide).toContain('[data-shell-main] {\n    padding-bottom: var(--safe-bottom);');
+    expect(files.find(file => file.path === 'App.tsx')?.text).toContain('data-shell-main=""');
   });
 
   it('names its owners in markup, and no owner stacks a padding of its own on top', () => {

@@ -669,25 +669,29 @@ describe('ATTENTION_INSTRUCTION', () => {
     const text = ATTENTION_INSTRUCTION('zz');
 
     // Assert
-    should(text).startWith('Attention: when you need the human to decide or do something');
+    should(text).startWith('Attention: raise anything the human must decide or DO');
     should(text).containEql('`zz attention add "<summary>"`');
+    // Every human action is its own item, never prose alone.
+    should(text).containEql('Every human action (incl. "Next steps: You: …") is its OWN item, never prose alone');
     // Self-contained, in point form: the reader has not followed the conversation.
-    should(text).containEql('write for someone who has NOT been following, in short bullets, one idea each');
-    should(text).containEql('No ticket or PR numbers, codenames, file paths or unexplained acronyms');
-    should(text).containEql('define the term with `--term "X=meaning"`');
-    should(text).containEql('The summary is one plain sentence under 90 characters, answer first');
-    should(text).containEql('`--context` is repeatable');
-    should(text).containEql('give every step with `--step "<markdown>"`, in order');
+    should(text).containEql('They read it cold: short bullets, one idea each');
+    should(text).containEql('no ticket/PR numbers, codenames, paths or unexplained acronyms');
+    should(text).containEql('`--term "X=meaning"`');
+    should(text).containEql('one plain sentence under 90 chars, answer first');
+    should(text).containEql('`--context` repeats');
+    should(text).containEql('every step in order via `--step "<markdown>"`');
     should(text).containEql('never a secret value');
     should(text).containEql('so the item alone is enough');
     should(text).containEql('`--question` each decision with 2–4 short `--option`s');
-    should(text).containEql('`--recommend <pick> --recommend-why <one line>`');
+    should(text).containEql('`--recommend <pick> --recommend-why <line>`');
     // A tiny bad/good example.
     should(text).containEql('Bad: "Need call on KT-412 re OCI cron"');
     should(text).containEql('Good: "Keep the work login alive every 30 minutes?"');
-    should(text).containEql('`zz attention edit <id>`');
-    should(text).containEql('Never for progress or because you finished.');
+    should(text).containEql('Never for progress or finishing.');
     should(text).containEql('"[answer to !A3 …]"');
+    // The need-more-info loop: expand the same item.
+    should(text).containEql('On "[needs more info !A3 …]", add what is missing with `zz attention edit <id>`');
+    should(text).containEql('say in the item why not');
     should(text).containEql('`zz attention done <id>`');
     should(text).not.containEql('notify');
     should(text).not.containEql('fy ');

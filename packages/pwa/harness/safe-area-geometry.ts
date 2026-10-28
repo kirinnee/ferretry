@@ -3,7 +3,7 @@
  *
  * On a phone the bar a screen ends in — the composer, the tab bar — pays the home-indicator inset once,
  * as `max(its own padding, the inset)`, and the shell pays nothing under it (styles/index.css, THE BOTTOM
- * INSET). Wider than a phone the shell pays it for every column. A screenshot shows a wrong answer badly
+ * INSET). Wider than a phone each column pays it for its own content, so its surface runs to the edge. A screenshot shows a wrong answer badly
  * — the band is just background — so every claim here is a number.
  *
  * The inset is simulated two ways. Chromium's `Emulation.setSafeAreaInsetsOverride` makes `env()` itself
@@ -41,12 +41,14 @@ const LANDSCAPE: Screen = { width: 852, height: 393, insets: { top: 0, bottom: 2
 const KEYBOARD_VISUAL_HEIGHT = 430;
 /** The composer dock's own resting padding (0.5rem), which the inset absorbs on a phone. */
 export const COMPOSER_PAD = 8;
+/** The collapsed sidebar rail's own bottom padding (`--gap-sm`), which the inset is added to. */
+const RAIL_PAD = 6;
 /** "Jump to latest" sits this far above the composer's top edge (lib/viewport-diagnostics.ts PILL_GAP). */
 export const PILL_GAP = { min: 8, max: 16 } as const;
 const EPSILON = 1;
 
-/** Chat 4 + the pill 1; settings 3 and sessions 2; the keyboard 3; landscape chat 2 and settings 2. */
-export const SAFE_AREA_GEOMETRY_CHECKS = 4 + 1 + 3 + 2 + 3 + 2 + 2;
+/** Chat 4 + the pill 1; settings 3 and sessions 2; the keyboard 3; landscape chat 2 and settings 3. */
+export const SAFE_AREA_GEOMETRY_CHECKS = 4 + 1 + 3 + 2 + 3 + 2 + 3;
 
 export type InsetSimulation = 'cdp' | 'css';
 
@@ -326,20 +328,47 @@ export async function runSafeAreaGeometry(run: SafeAreaRun): Promise<number> {
     pass(where, 'keyboard closed: the one inset is back and nothing is left over');
   });
 
-  // 4. Rotation: wider than a phone, the shell pays landscape's shorter inset for every column, the bars only their own.
+  // 4. Rotation: wider than a phone, no column leaves the page ground showing under its surface — the shell pays
+  //    nothing and each column pays landscape's shorter inset for its own content.
   for (const destination of ['chat', 'settings'] as const)
     await open(LANDSCAPE, destination === 'chat' ? '#session-workspace' : '?app-chrome=settings', async page => {
       const where = `${insetWhere(LANDSCAPE)} ${destination}`;
       const at = await measure(page);
-      if (!near(at.shellPaddingBottom, LANDSCAPE.insets.bottom))
-        fail(`${where}: the shell pays ${at.shellPaddingBottom}px, landscape's inset is ${LANDSCAPE.insets.bottom}px`);
-      pass(where, `the shell pays landscape's ${at.shellPaddingBottom}px for every column`);
+      if (at.shellPaddingBottom !== 0)
+        fail(`${where}: the shell pays ${at.shellPaddingBottom}px, leaving the page ground showing under the columns`);
+      pass(where, 'the shell pays nothing, so no column stops short of the edge');
+      const columns = await page.evaluate(() => {
+        const read = (selector: string) => {
+          const element = document.querySelector(selector);
+          if (!(element instanceof HTMLElement)) return null;
+          return {
+            bottom: element.getBoundingClientRect().bottom,
+            pad: Number.parseFloat(getComputedStyle(element).paddingBottom),
+            rail: element.dataset.sessionsBar === 'rail',
+          };
+        };
+        return { sidebar: read('[data-sessions-bar]'), main: read('[data-shell-main]'), height: window.innerHeight };
+      });
       if (destination === 'chat') {
         const gap = at.innerHeight - (at.composerBottom ?? Number.NaN);
         if (!near(gap, LANDSCAPE.insets.bottom + COMPOSER_PAD))
           fail(`${where}: the composer ends ${gap}px above the edge, wanted the inset plus its own ${COMPOSER_PAD}px`);
         pass(where, `composer ends ${gap}px above the edge (the inset, then its own padding)`);
       } else {
+        if (columns.sidebar === null) fail(`${where}: no sessions column on the page`);
+        if (!near(columns.sidebar.bottom, columns.height))
+          fail(
+            `${where}: the sidebar's surface ends ${columns.height - columns.sidebar.bottom}px short of the screen edge`,
+          );
+        const ownPad = columns.sidebar.rail ? RAIL_PAD : 0;
+        if (!near(columns.sidebar.pad, LANDSCAPE.insets.bottom + ownPad))
+          fail(
+            `${where}: the sidebar pays ${columns.sidebar.pad}px, wanted the inset (${LANDSCAPE.insets.bottom}px) plus its own ${ownPad}px`,
+          );
+        pass(
+          where,
+          `the sidebar's surface reaches the edge and pays the inset once (${columns.sidebar.pad}px incl. its own ${ownPad}px)`,
+        );
         if (at.tabbarBottom !== null) fail(`${where}: a tab bar is showing on a screen wider than a phone`);
         pass(where, 'no tab bar at this width');
       }

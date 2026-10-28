@@ -54,6 +54,8 @@ export const AttentionAskSchema = z.union([
   MultipleChoiceAskSchema,
   z.strictObject({ kind: z.literal('answer-review') }),
   z.strictObject({ kind: z.literal('open-question') }),
+  /** "Do this": the owner does something and nothing is chosen. Its answers are Done and Need more info. */
+  z.strictObject({ kind: z.literal('task') }),
 ]);
 export type AttentionAsk = z.infer<typeof AttentionAskSchema>;
 
@@ -224,6 +226,17 @@ export const recommendedAttentionOption = (
     .find(candidate => candidate !== undefined && labels.includes(candidate));
 };
 
+/** The most entries an item's history keeps, oldest dropped. */
+export const MAX_ATTENTION_HISTORY = 20;
+
+/** One thing that happened to an item after it was raised, for "You asked for more info 10:42 · updated 10:44". */
+export const AttentionHistoryEntrySchema = z.strictObject({
+  at: InstantSchema,
+  kind: z.enum(['needs-info', 'updated']),
+  note: z.string().trim().min(1).max(MAX_ATTENTION_DETAIL_LENGTH).optional(),
+});
+export type AttentionHistoryEntry = z.infer<typeof AttentionHistoryEntrySchema>;
+
 export const AttentionDispositionSchema = z.enum(['done', 'dismissed']);
 export type AttentionDisposition = z.infer<typeof AttentionDispositionSchema>;
 
@@ -247,6 +260,14 @@ const AttentionItemBaseShape = {
   ...AttentionBriefShape,
   /** The indices of the steps the owner has ticked: sorted, unique, each below `steps.length`; absent when none. */
   stepsDone: z.array(NonNegativeIntegerSchema).min(1).max(MAX_ATTENTION_STEPS).optional(),
+  /** Set while the owner has asked the raising ferret for more information and it has not yet added any. */
+  waitingOn: z.literal('ferret').optional(),
+  /** When the owner asked; present exactly while `waitingOn` is. */
+  askedAt: InstantSchema.optional(),
+  /** How many times the owner has asked for more information: the request counter. */
+  infoRequests: PositiveIntegerSchema.optional(),
+  /** Bounded, oldest first: when the owner asked for more information and when the ferret added it. */
+  history: z.array(AttentionHistoryEntrySchema).min(1).max(MAX_ATTENTION_HISTORY).optional(),
 };
 
 export const AttentionItemSchema = z
@@ -273,6 +294,9 @@ export const AttentionItemSchema = z
   .superRefine((value, context) => {
     if (value.sourceSeq !== undefined && value.source !== 'agent-raised') {
       context.addIssue({ code: 'custom', message: 'sourceSeq is valid only for agent-raised attention' });
+    }
+    if ((value.waitingOn === undefined) !== (value.askedAt === undefined)) {
+      context.addIssue({ code: 'custom', message: 'waitingOn and askedAt are set together', path: ['askedAt'] });
     }
     if (value.stepsDone !== undefined) {
       const done = value.stepsDone;
@@ -424,6 +448,12 @@ export const AttentionActionRequestSchema = z.discriminatedUnion('action', [
     id: AttentionIdSchema,
     step: NonNegativeIntegerSchema,
     done: z.boolean(),
+  }),
+  /** The owner asks the raising ferret for more information: the item stays open, marked waiting on the ferret. */
+  z.strictObject({
+    action: z.literal('needs-info'),
+    id: AttentionIdSchema,
+    note: z.string().trim().min(1).max(MAX_ATTENTION_DETAIL_LENGTH).optional(),
   }),
   z.strictObject({
     action: z.literal('dismiss'),

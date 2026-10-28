@@ -13,6 +13,7 @@ import {
   emptyAttentionOutbox,
   finishAttentionBatch,
   MAX_ATTENTION_PENDING_REPLIES,
+  needsInfoReplyKey,
   withPendingReply,
 } from '../../../src/lib/attention/index.ts';
 
@@ -208,5 +209,47 @@ describe('the attention reply batcher', () => {
 
     // Act + Assert
     await should(batcher.resume([SESSION, 'session-2'])).be.fulfilled();
+  });
+});
+
+describe('the attention reply batcher and needs-info requests', () => {
+  it('should name each request of one item with its own key, and deliver each request exactly once, batched with answers', async () => {
+    // Arrange
+    const { batcher, sends, outboxes } = world();
+    const first = needsInfoReplyKey('A3', 1);
+    const second = needsInfoReplyKey('A3', 2);
+
+    // Act
+    await batcher.add(SESSION, 'A1', '[answer to !A1] yes');
+    await batcher.add(SESSION, first, '[needs more info !A3] one');
+    await batcher.add(SESSION, first, '[needs more info !A3] one');
+    await batcher.flush(SESSION);
+    await batcher.add(SESSION, first, '[needs more info !A3] one');
+    await batcher.add(SESSION, second, '[needs more info !A3] two');
+    await batcher.flush(SESSION);
+
+    // Assert
+    should(first).equal('A3~1');
+    should(sends.sent).deepEqual([
+      {
+        message: '[answer to !A1] yes\n\n[needs more info !A3] one',
+        sendId: 'attention-session-1-A1-A3~1',
+      },
+      { message: '[needs more info !A3] two', sendId: 'attention-session-1-A3~2' },
+    ]);
+    should(outboxes.files.get(SESSION)?.delivered).deepEqual(['A1', 'A3~1', 'A3~2']);
+  });
+
+  it('should report the items held, with a request key mapped back to its item once', async () => {
+    // Arrange
+    const { batcher } = world();
+    await batcher.add(SESSION, needsInfoReplyKey('A3', 1), 'one');
+    await batcher.add(SESSION, 'A3', 'answer');
+
+    // Act
+    const held = await batcher.pending(SESSION);
+
+    // Assert
+    should(held?.pending).deepEqual(['A3']);
   });
 });

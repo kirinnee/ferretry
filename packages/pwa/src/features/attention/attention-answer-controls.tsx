@@ -80,6 +80,7 @@ export function attentionAnswerChoices(ask: AttentionAsk): readonly AttentionAns
         },
       ];
     case 'open-question':
+    case 'task':
       return [];
   }
 }

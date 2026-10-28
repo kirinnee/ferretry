@@ -135,6 +135,8 @@ export { DENSITY_OPTIONS } from '../../hooks/use-density.ts';
 
 export interface SettingsSectionProps {
   readonly definition: SettingDefinition;
+  /** A browser-local setting: says so on the card itself, beside its name. */
+  readonly deviceOnly?: boolean;
   readonly children: ReactNode;
 }
 
@@ -155,7 +157,7 @@ export interface SettingsSectionProps {
  * muted prose, so the thing a reader came to check is the most legible element in the panel while the
  * sentence explaining it is the quietest — which is the opposite of how these panels read before.
  */
-export function SettingsSection({ definition, children }: SettingsSectionProps) {
+export function SettingsSection({ definition, deviceOnly = false, children }: SettingsSectionProps) {
   const headingId = `settings-${definition.id}-heading`;
   return (
     <section
@@ -165,9 +167,16 @@ export function SettingsSection({ definition, children }: SettingsSectionProps) 
       className="kt-panel p-panel outline-none focus-visible:ring-2 focus-visible:ring-accent"
       aria-labelledby={headingId}
     >
-      <h3 id={headingId} className="m-0 text-row font-semibold text-fg">
-        {definition.label}
-      </h3>
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+        <h3 id={headingId} className="m-0 text-row font-semibold text-fg">
+          {definition.label}
+        </h3>
+        {deviceOnly ? (
+          <span data-setting-scope="device" title="Stored in this browser only; set it on each device you use.">
+            <Badge tone="pend">This device</Badge>
+          </span>
+        ) : null}
+      </div>
       <p className="mt-1 text-cell leading-base text-muted">{definition.description}</p>
       <div className="mt-3">{children}</div>
     </section>
@@ -206,14 +215,9 @@ export function SettingsScope({
 
 export function TextScaleControl({ theme }: { readonly theme: ThemeState }) {
   return (
-    <div
-      role="radiogroup"
-      aria-label="Text size"
-      aria-describedby={!theme.textScaleSupported ? 'text-scale-unsupported' : undefined}
-      className="grid grid-cols-1 gap-2 sm:grid-cols-3"
-    >
+    <div role="radiogroup" aria-label="Text size" className="grid grid-cols-1 gap-2 sm:grid-cols-3">
       {TEXT_SCALE_OPTIONS.map(option => {
-        const checked = (theme.textScaleSupported ? theme.textScale : 'default') === option.id;
+        const checked = theme.textScale === option.id;
         return (
           <label
             key={option.id}
@@ -223,7 +227,6 @@ export function TextScaleControl({ theme }: { readonly theme: ThemeState }) {
               checked
                 ? 'border-accent bg-accent-soft text-accent'
                 : 'border-border bg-surface-2 text-fg hover:border-accent',
-              !theme.textScaleSupported && 'cursor-not-allowed opacity-60',
             )}
           >
             <input
@@ -231,7 +234,6 @@ export function TextScaleControl({ theme }: { readonly theme: ThemeState }) {
               name="text-scale"
               value={option.id}
               checked={checked}
-              disabled={!theme.textScaleSupported}
               onChange={() => theme.setTextScale(option.id)}
               className="sr-only"
             />
@@ -427,16 +429,9 @@ export function SettingsPage({
       'text-size': (
         <>
           <TextScaleControl theme={theme} />
-          {theme.textScaleSupported ? (
-            <p className="mt-2 text-meta leading-base text-faint">
-              Sizes never go below Default, so existing 44px touch targets are not reduced.
-            </p>
-          ) : (
-            <p id="text-scale-unsupported" role="status" className="mt-2 text-ui leading-base text-warn">
-              Text sizing is unavailable in this browser because it does not support percentage text adjustment. Browser
-              and operating-system zoom still work.
-            </p>
-          )}
+          <p className="mt-2 text-meta leading-base text-faint">
+            Sizes never go below Default, so existing 44px touch targets are not reduced.
+          </p>
         </>
       ),
       density: (
@@ -754,7 +749,7 @@ export function SettingsPage({
               {section.settingIds.map(id => {
                 const definition = settingDefinition(id);
                 return (
-                  <SettingsSection key={definition.id} definition={definition}>
+                  <SettingsSection key={definition.id} definition={definition} deviceOnly={section.id !== 'machines'}>
                     {controlsById[definition.id]}
                   </SettingsSection>
                 );
