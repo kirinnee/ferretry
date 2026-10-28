@@ -127,8 +127,6 @@ const OLD = item('A7', 5, {
   ask: { kind: 'permission' },
 });
 
-const DIAGRAM =
-  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 220 60"><rect x="4" y="12" width="60" height="36" rx="6" fill="none" stroke="currentColor"/><rect x="156" y="12" width="60" height="36" rx="6" fill="none" stroke="currentColor"/><path d="M64 30h92" stroke="currentColor" fill="none"/><text x="34" y="35" font-size="11" text-anchor="middle" fill="currentColor">key</text><text x="186" y="35" font-size="11" text-anchor="middle" fill="currentColor">relay</text></svg>';
 const FENCE = '```';
 const TASK_STEPS = [
   'Store the relay key: `fy secret set RELAY_KEY`',
@@ -138,9 +136,7 @@ const TASK_STEPS = [
     FENCE,
   'Compare with the diagram below and confirm it matches !A3\n\n' +
     FENCE +
-    'fy-render\ntype: svg\nalt: key to relay\n---\n' +
-    DIAGRAM +
-    '\n' +
+    'fy-render\ntype: mermaid\nalt: key to relay to sessions\n---\nflowchart LR\n  key[New key] --> relay[Relay]\n  relay --> sessions[Sessions]\n' +
     FENCE,
   'Restart the relay: `fy daemon restart`',
 ];
@@ -237,9 +233,12 @@ function Inbox({
           now={NOW}
           onNavigate={() => undefined}
           phone={phone}
-          renderChat={() => (
+          renderChat={selected => (
             <div className="min-h-0 flex-1">
-              <ChatPane />
+              <ChatPane
+                board={boardOf(...(selected.item.id === 'A3' ? [selected.item] : [selected.item, REBASE]))}
+                target={selected.item.id}
+              />
             </div>
           )}
         />

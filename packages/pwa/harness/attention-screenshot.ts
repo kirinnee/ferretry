@@ -8,6 +8,7 @@
  *                                 phone deck mid-swipe right (Done) and left (Need more info), the desktop inbox
  *   sidebar / rail / drawer       unread rows, the Needs-you group, the Attention entry, the rail badges
  *
+ *   bun scripts/build-fy-render-libs.ts      # once: the Mermaid sandbox the task scenes render
  *   bun harness/attention-screenshot.ts      # writes harness/out/attention/<scheme>/*.png
  *
  * It bundles `attention-page.tsx` (real components, invented data), serves it on an ephemeral loopback
@@ -57,13 +58,15 @@ run('./node_modules/.bin/tailwindcss', [
 const server = Bun.serve({
   hostname: '127.0.0.1',
   port: 0,
-  fetch(request) {
+  async fetch(request) {
     const url = new URL(request.url);
     if (url.pathname === '/')
       return new Response(html(url.searchParams.get('theme') ?? 'studio-dark'), {
         headers: { 'content-type': 'text/html' },
       });
-    return new Response(Bun.file(join(outDir, url.pathname)));
+    const built = Bun.file(join(outDir, url.pathname));
+    // The fy-render sandbox shell and its libraries (`bun scripts/build-fy-render-libs.ts`) live in public/.
+    return new Response((await built.exists()) ? built : Bun.file(join(packageDir, 'public', url.pathname)));
   },
 });
 
@@ -137,14 +140,15 @@ try {
       ] as const) {
         for (const view of ['task-partial', 'task-full', 'task-waiting']) {
           page = await open(context, theme, view);
-          const mark = view === 'task-waiting' ? '[data-attention-history]' : '[data-attention-steps-count]';
+          // Scroll only the card's own middle, never the panel: the header and actions stay on screen.
           await page
-            .locator(mark)
+            .locator('[data-attention-scroll]')
             .first()
-            .evaluate(
-              (el, waiting) => el.scrollIntoView({ block: waiting ? 'end' : 'start' }),
-              view === 'task-waiting',
-            );
+            .evaluate((el, waiting) => {
+              el.scrollTop = waiting
+                ? el.scrollHeight
+                : ((el.querySelector('[data-attention-step="2"]') as HTMLElement | null)?.offsetTop ?? 0);
+            }, view === 'task-waiting');
           await page.waitForTimeout(150);
           await shot(page, scheme, `${view}-${label}`);
           await page.close();

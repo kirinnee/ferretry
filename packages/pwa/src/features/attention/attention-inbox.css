@@ -176,9 +176,9 @@
 .fy-attn-deck__peek > * {
   height: 100%;
 }
-/* At rest a peek is only an edge: its text would show wherever the card under is taller than the top
-   one. While the top card is in the reader's hand, the next one is revealed under it. */
-.fy-attn-deck:not(:has(.fy-attn-deck__top[data-dragging])) .fy-attn-deck__peek .fy-attn-card > * {
+/* A peek is only an edge, at rest and mid-swipe alike: its text never shows through or beside the card
+   in the reader's hand, so two cards' words can't read as one. */
+.fy-attn-deck__peek > * > * {
   visibility: hidden;
 }
 /* The option a drag would send, stamped on the card and growing with the drag. */

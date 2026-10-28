@@ -171,73 +171,75 @@ export function AttentionCard({
         {item.subject}
       </h3>
       {why === null ? null : <div className="fy-attn-card__why">{renderProse(why)}</div>}
-      {pinned && !perQuestion && (rich || context !== null) ? (
-        <button
-          aria-expanded={detailsOpen}
-          className="fy-attn-card__details"
-          data-attention-details=""
-          onClick={() => setDetailsOpen(open => !open)}
-          type="button"
-        >
-          {detailsOpen ? 'Hide details' : 'Details'}
-        </button>
-      ) : null}
-      {pinned && !detailsOpen && !perQuestion ? null : rich ? (
-        <AttentionBriefSections
-          item={item}
-          picker={
-            perQuestion
-              ? {
-                  answers,
-                  disabled: busy,
-                  onAnswer: (index, text) =>
-                    setAnswers(current => {
-                      const next = questions.map((_, at) => current[at] ?? '');
-                      next[index] = text;
-                      return next;
-                    }),
-                }
-              : undefined
-          }
-          renderProse={renderProse}
-        />
-      ) : context === null ? null : (
-        <div className="fy-attn-card__context" data-open={!longContext || contextOpen || undefined}>
-          {renderProse(context)}
-          {longContext ? (
-            <button
-              aria-expanded={contextOpen}
-              className="fy-attn-card__more"
-              onClick={() => setContextOpen(open => !open)}
-              type="button"
-            >
-              {contextOpen ? 'Show less' : 'Show more'}
-            </button>
-          ) : null}
-        </div>
-      )}
-      {updated === null ? null : (
-        <p className="fy-attn-card__updated m-0" data-attention-updated="">
-          <span className="kt-attn-chip kt-label px-badge-x py-0.5">New</span>
-          Needs you again — the ferret updated this
-          {updated.note === undefined ? '.' : `: ${updated.note}`}
-        </p>
-      )}
-      {body === null ? null : <AttentionBody renderProse={renderProse} text={body} />}
-      {item.steps === undefined ? null : (
-        <AttentionSteps
-          disabled={busy}
-          done={item.stepsDone ?? []}
-          renderProse={renderProse}
-          steps={item.steps}
-          {...(onProgress === undefined ? {} : { onProgress })}
-        />
-      )}
-      {history === null ? null : (
-        <p className="fy-attn-card__history m-0 text-meta text-faint" data-attention-history="">
-          {history}
-        </p>
-      )}
+      <div className="fy-attn-card__scroll" data-attention-scroll="">
+        {pinned && !perQuestion && (rich || context !== null) ? (
+          <button
+            aria-expanded={detailsOpen}
+            className="fy-attn-card__details"
+            data-attention-details=""
+            onClick={() => setDetailsOpen(open => !open)}
+            type="button"
+          >
+            {detailsOpen ? 'Hide details' : 'Details'}
+          </button>
+        ) : null}
+        {pinned && !detailsOpen && !perQuestion ? null : rich ? (
+          <AttentionBriefSections
+            item={item}
+            picker={
+              perQuestion
+                ? {
+                    answers,
+                    disabled: busy,
+                    onAnswer: (index, text) =>
+                      setAnswers(current => {
+                        const next = questions.map((_, at) => current[at] ?? '');
+                        next[index] = text;
+                        return next;
+                      }),
+                  }
+                : undefined
+            }
+            renderProse={renderProse}
+          />
+        ) : context === null ? null : (
+          <div className="fy-attn-card__context" data-open={!longContext || contextOpen || undefined}>
+            {renderProse(context)}
+            {longContext ? (
+              <button
+                aria-expanded={contextOpen}
+                className="fy-attn-card__more"
+                onClick={() => setContextOpen(open => !open)}
+                type="button"
+              >
+                {contextOpen ? 'Show less' : 'Show more'}
+              </button>
+            ) : null}
+          </div>
+        )}
+        {updated === null ? null : (
+          <p className="fy-attn-card__updated m-0" data-attention-updated="">
+            <span className="kt-attn-chip kt-label px-badge-x py-0.5">New</span>
+            Needs you again — the ferret updated this
+            {updated.note === undefined ? '.' : `: ${updated.note}`}
+          </p>
+        )}
+        {body === null ? null : <AttentionBody renderProse={renderProse} text={body} />}
+        {item.steps === undefined ? null : (
+          <AttentionSteps
+            disabled={busy}
+            done={item.stepsDone ?? []}
+            renderProse={renderProse}
+            steps={item.steps}
+            {...(onProgress === undefined ? {} : { onProgress })}
+          />
+        )}
+        {history === null ? null : (
+          <p className="fy-attn-card__history m-0 text-meta text-faint" data-attention-history="">
+            {history}
+          </p>
+        )}
+      </div>
       {error === null ? null : (
         <p className="m-0 text-meta text-err" role="alert">
           Not sent: {error}

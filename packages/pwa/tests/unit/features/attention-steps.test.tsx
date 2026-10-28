@@ -297,3 +297,16 @@ describe('a task item is named as one', () => {
     expect(attentionKindMeta({ source: 'agent-raised', ask: { kind: 'task' } }).label).toBe('To do');
   });
 });
+
+describe('a pinned to-do keeps its header and actions in view', () => {
+  test('only the middle scrolls: the header and the action row sit outside it', async () => {
+    const item = todo({ body: 'Long body', steps: ['one', 'two'] });
+    view = await mount(<AttentionCard item={item} onAct={() => {}} pinned renderProse={chatProse()} />);
+    const scroll = must(view.container.querySelector('[data-attention-scroll]'), 'scroll region');
+    expect(scroll.querySelector('[data-attention-steps-count]')).not.toBeNull();
+    expect(scroll.querySelector('header')).toBeNull();
+    const done = must(view.container.querySelector('[data-attention-done]'), 'done');
+    expect(scroll.contains(done)).toBe(false);
+    expect(view.container.querySelector('header')?.textContent).toContain('To do');
+  });
+});

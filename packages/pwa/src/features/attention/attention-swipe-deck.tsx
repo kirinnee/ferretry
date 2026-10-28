@@ -318,7 +318,7 @@ export function AttentionSwipeDeck({ cards, renderCard, onAct, reducedMotion }: 
               data-attention-stamp={intent.direction}
               data-committed={intent.committed || undefined}
               data-empty={stampAction === undefined || undefined}
-              style={{ opacity: Math.max(0.25, intent.progress), transform: `scale(${0.85 + 0.25 * intent.progress})` }}
+              style={{ transform: `scale(${0.85 + 0.25 * intent.progress})` }}
             >
               {STAMP_ARROW[intent.direction]}
               <span>{stampAction?.label ?? 'Nothing this way'}</span>
