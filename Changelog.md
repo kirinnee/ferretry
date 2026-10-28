@@ -1,5 +1,14 @@
 ## [4.94.0](https://github.com/kirinnee/ferretry/compare/v4.93.0...v4.94.0) (2026-10-28)
 
+### Features
+
+* **attention:** to-do items with Done / Need more info, and every human action its own item ([#833](https://github.com/kirinnee/ferretry/issues/833)) ([a80eaeb](https://github.com/kirinnee/ferretry/commit/a80eaeb6c8714ffca26ceef907228099c14008c3))
+
+### Fixes
+
+* **daemon:** wait out the tmux control client before the daemon exits ([#826](https://github.com/kirinnee/ferretry/issues/826)) ([613b797](https://github.com/kirinnee/ferretry/commit/613b7974ed3000e622db161524801a91bfe56a55))
+* **pwa:** Text size on every engine, per-device label, iPad bottom gap ([#821](https://github.com/kirinnee/ferretry/issues/821)) ([79b0160](https://github.com/kirinnee/ferretry/commit/79b016078091fcc6f5b522a037fb17300ff444bc))
+
 ## [4.93.0](https://github.com/kirinnee/ferretry/compare/v4.92.1...v4.93.0) (2026-10-28)
 
 ### Features
