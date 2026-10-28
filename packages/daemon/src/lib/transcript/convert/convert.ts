@@ -16,7 +16,13 @@ import {
 import { readClaudeConversation } from './read-claude.ts';
 import { readCodexConversation } from './read-codex.ts';
 import { exitCodeOf, type RenderableEntry, toolLine } from './render.ts';
-import { harnessVersionRefusal, parseHarnessVersion } from './versions.ts';
+import {
+  classifyRolloutShape,
+  type RolloutFormatVerdict,
+  rolloutShape,
+  REQUIRED_ROLLOUT_KINDS,
+} from './rollout-format.ts';
+import { harnessVersionGate, parseHarnessVersion } from './versions.ts';
 import { CLAUDE_SHELL_TOOL, writeClaudeTranscript } from './write-claude.ts';
 import { CODEX_SHELL_TOOL, writeCodexRollout } from './write-codex.ts';
 
@@ -63,6 +69,11 @@ export interface ConversionTarget {
    * may reject outright.
    */
   readonly nativeShell?: boolean;
+  /**
+   * Codex only: what a probe of the installed binary found about the rollouts it writes. Asked about
+   * only when `version` is outside the measured table (see `versions.ts`); without it such a version is refused.
+   */
+  readonly format?: RolloutFormatVerdict;
 }
 
 export interface ConversionRequest {
@@ -107,6 +118,8 @@ export interface ConversionSummary {
   readonly dropped: ConversationDropped;
   readonly estimatedTokens: number;
   readonly budgetTokens: number;
+  /** Set when a Codex version outside the tested table was let through because its format is the validated one. */
+  readonly formatNote?: string;
 }
 
 export interface Converted {
@@ -248,11 +261,16 @@ export function convertConversation(request: ConversionRequest): ConversionResul
       reason: `This conversation is already ${HARNESS_LABEL[target.harness]}'s; it needs no conversion to resume there.`,
     };
   const conversation = read(source);
-  const sourceRefusal = harnessVersionRefusal(source.harness, conversation.version, 'source');
-  if (sourceRefusal !== undefined) return { kind: 'refused', reason: sourceRefusal };
-  const targetRefusal = harnessVersionRefusal(target.harness, target.version, 'target');
+  // A rollout's own text says what shape its version wrote, so the source side needs no probe.
+  const sourceGate = harnessVersionGate(source.harness, conversation.version, 'source', () =>
+    classifyRolloutShape(rolloutShape(source.text), REQUIRED_ROLLOUT_KINDS),
+  );
+  if (sourceGate.kind === 'refused') return { kind: 'refused', reason: sourceGate.reason };
+  const targetGate = harnessVersionGate(target.harness, target.version, 'target', () => target.format);
   const parsed = parseHarnessVersion(target.version ?? '');
-  if (targetRefusal !== undefined || parsed === undefined) return { kind: 'refused', reason: targetRefusal ?? '' };
+  if (targetGate.kind === 'refused' || parsed === undefined)
+    return { kind: 'refused', reason: targetGate.kind === 'refused' ? targetGate.reason : '' };
+  const formatNote = [sourceGate, targetGate].flatMap(gate => (gate.kind === 'by-format' ? [gate.note] : [])).join(' ');
   // The bare number, as the target writes it in its own records — never the banner it was read from.
   const targetVersion = `${parsed.major}.${parsed.minor}.${parsed.patch}`;
   if (conversation.entries.length === 0)
@@ -317,6 +335,7 @@ export function convertConversation(request: ConversionRequest): ConversionResul
       dropped: conversation.dropped,
       estimatedTokens: bounded.estimatedTokens,
       budgetTokens: bounded.budgetTokens,
+      ...(formatNote === '' ? {} : { formatNote }),
     },
     sentinels: sentinelsOf(entries),
     nativeTools: nativeToolCalls === 0 ? [] : [target.harness === 'claude' ? CLAUDE_SHELL_TOOL : CODEX_SHELL_TOOL],

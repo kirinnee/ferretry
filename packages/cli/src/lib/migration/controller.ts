@@ -97,6 +97,7 @@ export function renderConversionPreview(preview: ConversionPreview): readonly st
     summary.omittedTurns === 0
       ? `All ${plural(summary.turns, 'turn')} will move.`
       : `${summary.keptTurns} of ${plural(summary.turns, 'turn')} will move; the ${summary.omittedTurns} oldest are left out to fit.`,
+    ...(summary.formatNote === undefined ? [] : [summary.formatNote]),
     ...(summary.cutNewest ? ['The newest turn is too long and will be shortened.'] : []),
     `${plural(summary.nativeToolCalls, 'shell command')} ${verb(summary.nativeToolCalls, 'carries', 'carry')} over as ${target} commands; ` +
       `${plural(summary.toolCallsAsText, 'other tool call')} ${verb(summary.toolCallsAsText, 'becomes a', 'become')} short text ${summary.toolCallsAsText === 1 ? 'note' : 'notes'}.`,
