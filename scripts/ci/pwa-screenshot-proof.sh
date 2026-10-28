@@ -47,8 +47,8 @@ set -euo pipefail
 # `full` runs the whole gallery, so a later section that hangs or fails is red on the PR that broke it.
 # It is one scheme because the later sections' assertions are about fixtures and waits, not colour, and
 # a second full leg would double ~7 minutes of runner time to re-prove the same fixtures. It is a
-# sibling matrix leg, so it costs runner time; its ~7 minutes sits under the E2E workflow every PR
-# already waits on, which is why it adds little or no wall clock.
+# sibling matrix leg, so it costs runner time; it sits under the E2E workflow every PR already waits
+# on, which is why it adds little or no wall clock.
 #
 # AND WHY `full` IS TWO LEGS, ONE VIEWPORT EACH. The harness walks its viewports one after the other,
 # so the full gallery took ~427s on a Namespace 4x8 and 643s on GitHub's free 4-core runner — a third
@@ -57,7 +57,9 @@ set -euo pipefail
 # what keeps this clear of #598: that ran both viewports as child processes in ONE job, three
 # software-rendered Chromes on four cores, and timed out in 3 of 7 runs under load (#613 reverted it).
 # The harness owes every tally PER VIEWPORT and gives each own-context pass to exactly one viewport, so
-# a leg owes exactly its share, and both legs together owe what one unsplit run does.
+# a leg owes exactly its share, and both legs together owe what one unsplit run does. Measured on the
+# PR that split it (one run): 294s for the mobile leg and 324s for the desktop leg, both free, and
+# the PR waits on the slower — about 100s sooner than the unsplit Namespace job.
 #
 # The `for` below iterates rather than substitutes because the two colour schemes are two full runs of
 # a dozen steps each, and `pre-paint.js` resolves the theme before first paint — a light capture is a
