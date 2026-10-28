@@ -26,7 +26,8 @@ wire).
 Every file Ferretry writes starts with `# yaml-language-server: $schema=…`, pointing at
 `config/.schema/<kind>.json`, which the daemon writes from the same zod schemas it checks with
 (`fy config schema <kind>` prints one). `config/daemon.json` and `config/routing.json` live in the same
-directory and are not configuration files in this sense: they are the daemon's own documents.
+directory and are not configuration files in this sense: they are the daemon's own documents. The shell
+terminals open is one of them (`terminals.shell`, [terminals.md](terminals.md)).
 
 `fy config path`, `check`, `schema` and `guide` need no daemon. `status`, `show`, `write` and `confirm` ask it:
 `fy config write <file> [--if-match <etag>]` reads the text from stdin and is refused whole unless it checks.
