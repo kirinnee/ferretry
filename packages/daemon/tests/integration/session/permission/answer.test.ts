@@ -41,14 +41,16 @@ beforeAll(async () => {
   controller = new TmuxController(tmux);
   harness = join(home, 'harness.sh');
   await writeFile(join(home, 'idle.txt'), IDLE);
-  // Draw the prompt, take one key raw, then whatever else lands within half a second, log it all as
-  // hex, and redraw as idle — the harness acting on the key the moment it is pressed.
+  // Listen first — a harness is already taking keys raw when its prompt appears, so a pane showing the
+  // whole prompt is one a key can answer (`opost` keeps each newline returning the carriage). Then draw
+  // the prompt, take one key, then whatever else lands within half a second, log it all as hex, and
+  // redraw as idle — the harness acting on the key the moment it is pressed.
   await writeFile(
     harness,
     [
       '#!/bin/sh',
+      'stty raw -echo opost',
       `printf '\\033[H\\033[2J'; cat "$1"`,
-      'stty raw -echo',
       'first="$(dd bs=1 count=1 2>/dev/null | od -An -tx1)"',
       'rest="$(timeout 0.5 dd bs=1 count=8 2>/dev/null | od -An -tx1)"',
       'stty sane',
@@ -95,11 +97,15 @@ async function pane(fixture: string) {
     milliseconds => Bun.sleep(milliseconds),
     { settleReads: 25, settleMs: 100 },
   );
-  // Until the harness has drawn the prompt, there is nothing to read.
+  // Until the harness has drawn the WHOLE prompt, there is nothing to read. A frame caught mid-paint
+  // already parses — as a different prompt, its last row cut short — so "parses" is not "drawn". A
+  // terminal paints bytes in order: the fixture's last line on screen means every line above it is too.
+  const last = (text: string): string | undefined => text.trimEnd().split('\n').at(-1)?.trimEnd();
+  const final = last(await readFile(join(FIXTURES, `${fixture}.txt`), 'utf8'));
   const drawn = async (): Promise<string> => {
     for (let attempt = 0; attempt < 50; attempt += 1) {
       const frame = await capture.capture(session);
-      if (parsePermissionPrompt(frame) !== undefined) return frame;
+      if (last(frame) === final) return frame;
       await Bun.sleep(100);
     }
     throw new Error(`${fixture} was never drawn`);
