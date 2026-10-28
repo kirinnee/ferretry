@@ -382,3 +382,14 @@ describe('attention step flags', () => {
     should(ticked.gateway.applied[0]?.request).deepEqual({ action: 'progress', id: 'A1', step: 1, done: false });
   });
 });
+
+describe('attention send-now command', () => {
+  it('should deliver the target session’s held answers', async () => {
+    // Arrange + Act
+    const { parsed, gateway } = run(['attention', 'send-now', '--session', 'other-session']);
+    await parsed;
+
+    // Assert
+    should(gateway.flushed).deepEqual(['other-session']);
+  });
+});

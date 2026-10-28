@@ -58,10 +58,10 @@ class RecordingState implements SessionAttentionState {
 }
 
 class RecordingMessenger {
-  readonly sent: Array<{ sessionId: string; message: string; sendId: string }> = [];
+  readonly sent: Array<{ sessionId: string; message: string; id: string }> = [];
 
-  async send(sessionId: string, message: string, sendId: string): Promise<void> {
-    this.sent.push({ sessionId, message, sendId });
+  async add(sessionId: string, id: string, message: string): Promise<void> {
+    this.sent.push({ sessionId, message, id });
   }
 }
 
@@ -225,26 +225,26 @@ describe('Attention board observers', () => {
     // Assert
     should(messenger.sent).deepEqual([
       // The ferret's own done (A2) and the chat answer (A3, already in the owner's words) are not echoed;
-      // a bare dismiss (A4) is told. Told twice, each is one send id — the send ledger keeps one message.
+      // a bare dismiss (A4) is told. Told twice, each goes to the outbox twice — the outbox keeps it once.
       {
         sessionId: SESSION,
         message: '[answer to !A1 «Rebase onto main now?»] Rebase now',
-        sendId: 'attention-session-1-A1',
+        id: 'A1',
       },
       {
         sessionId: SESSION,
         message: '[dismissed !A4 «Fourth?»] The owner dismissed this without an answer.',
-        sendId: 'attention-session-1-A4',
+        id: 'A4',
       },
       {
         sessionId: SESSION,
         message: '[answer to !A1 «Rebase onto main now?»] Rebase now',
-        sendId: 'attention-session-1-A1',
+        id: 'A1',
       },
       {
         sessionId: SESSION,
         message: '[dismissed !A4 «Fourth?»] The owner dismissed this without an answer.',
-        sendId: 'attention-session-1-A4',
+        id: 'A4',
       },
     ]);
   });

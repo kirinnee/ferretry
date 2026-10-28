@@ -113,6 +113,7 @@ export class RecordingAttentionGateway implements IAttentionGateway {
   readonly read: string[] = [];
   readonly applied: Array<{ sessionId: string; request: AttentionActionRequest }> = [];
   readonly notified: Array<{ sessionId: string; request: DirectNotificationRequest }> = [];
+  readonly flushed: string[] = [];
 
   constructor(
     private readonly board: AttentionSnapshot,
@@ -133,6 +134,11 @@ export class RecordingAttentionGateway implements IAttentionGateway {
   notify(sessionId: string, request: DirectNotificationRequest): Promise<DirectNotificationResponse> {
     this.notified.push({ sessionId, request });
     return Promise.resolve({ sessionId, delivered: this.delivered });
+  }
+
+  sendReplies(sessionId: string): Promise<AttentionSnapshot> {
+    this.flushed.push(sessionId);
+    return Promise.resolve(this.result);
   }
 }
 

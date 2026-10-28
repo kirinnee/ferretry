@@ -10,7 +10,13 @@ import {
 } from './brief.ts';
 import type { IAttentionBriefInput, IAttentionGateway, IAttentionOutput } from './ports.ts';
 import { attentionReference, parseAttentionReference } from './reference.ts';
-import { renderAttentionHistory, renderAttentionList, renderAttentionMutation, renderNotification } from './render.ts';
+import {
+  renderAttentionHistory,
+  renderAttentionList,
+  renderAttentionMutation,
+  renderNotification,
+  renderRepliesSent,
+} from './render.ts';
 
 /** Options every attention command accepts. */
 export interface AttentionCommandOptions {
@@ -74,6 +80,14 @@ export class AttentionController {
   async history(options: AttentionCommandOptions): Promise<void> {
     const snapshot = await this.gateway.snapshot(this.#target(options));
     this.#report(snapshot, options, () => renderAttentionHistory(snapshot));
+  }
+
+  /** Delivers the answers the daemon is holding for the ferret now, instead of after its settle window. */
+  async sendNow(options: AttentionCommandOptions): Promise<void> {
+    const sessionId = this.#target(options);
+    const held = (await this.gateway.snapshot(sessionId)).replies?.pending ?? [];
+    const after = await this.gateway.sendReplies(sessionId);
+    this.#report(after, options, () => renderRepliesSent(held, sessionId));
   }
 
   async add(words: readonly string[], options: AttentionAddOptions): Promise<void> {

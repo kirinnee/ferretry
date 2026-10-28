@@ -529,3 +529,32 @@ describe('attention controller steps and body', () => {
     await should(controller.step('A1', 'two', {})).be.rejectedWith(/counts from 1/u);
   });
 });
+
+describe('attention controller send-now', () => {
+  it('should deliver the held answers now and name the items that went', async () => {
+    // Arrange
+    const held = { ...board, replies: { pending: ['A2', 'A3'], dueAt: '2026-07-31T10:05:08.000Z' } };
+    const gateway = new RecordingAttentionGateway(held, board);
+    const out = new CapturingOutput();
+    const controller = new AttentionController(gateway, out, SESSION);
+
+    // Act
+    await controller.sendNow({});
+
+    // Assert
+    should(gateway.flushed).deepEqual([SESSION]);
+    should(out.messages).deepEqual([`sent !A2, !A3 to ${SESSION} now`]);
+  });
+
+  it('should say when nothing was held', async () => {
+    // Arrange
+    const { gateway, out, controller } = build(SESSION);
+
+    // Act
+    await controller.sendNow({});
+
+    // Assert
+    should(gateway.flushed).deepEqual([SESSION]);
+    should(out.messages).deepEqual([`no answers were held for ${SESSION} — nothing to send`]);
+  });
+});

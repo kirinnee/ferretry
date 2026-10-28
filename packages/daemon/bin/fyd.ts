@@ -109,6 +109,8 @@ import {
   probePdfDecryptWorker,
 } from '../src/adapters/attachments/index.ts';
 import { FileAttentionLedgerRepository } from '../src/adapters/attention/file-attention-ledger-repository.ts';
+import { FileAttentionOutboxRepository } from '../src/adapters/attention/file-attention-outbox-repository.ts';
+import { KeyedAttentionReplyTimers } from '../src/adapters/attention/keyed-attention-reply-timers.ts';
 import {
   StorageHarnessPromptJournal,
   StorageHarnessPromptStates,
@@ -535,6 +537,7 @@ import {
   type AttentionActor,
   AttentionChangeFanout,
   AttentionConversation,
+  AttentionReplyBatcher,
   AttentionReplyDelivery,
   AttentionService,
   AUDIT_FOLD_WINDOW_MS,
@@ -8679,6 +8682,23 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       const attentionBoards = new FileAttentionLedgerRepository(
         id => createSessionPaths(paths, parseSessionId(id)).directory,
       );
+      // Each ferret's held answers (docs/attention.md § The loop). The send is awaited by the batcher, outside
+      // its per-session lock: it may wait for a launch or revive a stopped ferret, and the owner's next answer
+      // must not wait on that. The send ledger keeps one message per batch send id.
+      const attentionReplies = new AttentionReplyBatcher(
+        new FileAttentionOutboxRepository(id => createSessionPaths(paths, parseSessionId(id)).directory),
+        {
+          send: async (sessionId, message, sendId) => {
+            const id = tryParseSessionId(sessionId);
+            if (id !== undefined) await sends.send({ id, sendId, message });
+          },
+        },
+        new KeyedAttentionReplyTimers(),
+        new KeyedSerialExecutor(),
+        { now: () => clock.now() },
+      );
+      // Answers held across a restart are delivered, in the background, once the daemon is up.
+      void attentionReplies.resume(storage.listSessions().map(session => session.id)).catch(() => undefined);
       const attentionProjection = new SessionAttentionProjection(
         attentionBoards,
         new StorageSessionAttentionState(storage),
@@ -8718,17 +8738,11 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         new AttentionChangeFanout([
           // The session list's unread signal, kept true to the board.
           attentionProjection,
-          // The owner's answer, told to the ferret that asked. DETACHED: a send may wait for a launch or
-          // revive a stopped ferret, and the person's answer must not wait on that; the send ledger is
-          // where its fate is recorded.
-          new AttentionReplyDelivery({
-            send: async (sessionId, message, sendId) => {
-              const id = tryParseSessionId(sessionId);
-              if (id !== undefined) void sends.send({ id, sendId, message }).catch(() => undefined);
-            },
-          }),
-          // The owner's answer to a harness question, typed into its form. DETACHED for the same reason:
-          // a drive watches the pane for seconds, and the answer is already on the board.
+          // The owner's answer, told to the ferret that asked — through its outbox, which holds a burst of
+          // answers for a few seconds and delivers them as ONE message.
+          new AttentionReplyDelivery(attentionReplies),
+          // The owner's answer to a harness question, typed into its form. DETACHED: a drive watches the
+          // pane for seconds, and the answer is already on the board.
           {
             changed: async (sessionId, change) => {
               void harnessAnswerDelivery.changed(sessionId, change).catch(() => undefined);
@@ -9676,6 +9690,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         }),
         notifications,
         attention,
+        attentionReplies,
         pins: new PinService(
           new FilePinSessionDirectory(paths, stateFiles),
           // Its own queue: a pin mutation must not serialize behind storage-wide or session work.

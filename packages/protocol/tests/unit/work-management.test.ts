@@ -373,6 +373,11 @@ const attentionCases: SchemaCase[] = [
     value: { open: 2, first: 'A1', ask: 'Rebase onto main now?', latestAt: '2026-10-23T10:00:00.000Z' },
   },
   {
+    name: 'held attention replies',
+    schema: attention.AttentionRepliesSchema,
+    value: { pending: ['A1', 'A3'], dueAt: INSTANT },
+  },
+  {
     name: 'attention snapshot',
     schema: attention.AttentionSnapshotSchema,
     value: {

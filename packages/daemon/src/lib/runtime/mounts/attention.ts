@@ -2,6 +2,7 @@ import {
   type AttentionActionRequest,
   AttentionActionRequestSchema,
   type AttentionErrorCode,
+  type AttentionSnapshot,
   type DirectNotificationRequest,
   DirectNotificationRequestSchema,
   DirectNotificationResponseSchema,
@@ -16,6 +17,7 @@ import type { ApiRoute, RouteContext } from '../../api/route.ts';
 import {
   type AttentionActor,
   type AttentionFailure,
+  type AttentionRepliesSubsystem,
   type AttentionService,
   type EditAttentionPatch,
   isAttentionSessionId,
@@ -103,9 +105,42 @@ function pathSessionId(context: RouteContext): string {
   return decoded;
 }
 
-async function list(attention: AttentionService, context: RouteContext): Promise<ApiResponse> {
-  const result = await attention.list(pathSessionId(context));
-  return result.ok ? jsonResponse(result.value) : refusal(result.error);
+type HeldReplies = Pick<AttentionRepliesSubsystem, 'pending'>;
+
+/**
+ * The board with the answers this machine is holding for the ferret (`replies`), so the owner's screen
+ * can say they are on their way. A held outbox that cannot be read is left off: the board is the answer.
+ */
+async function withReplies(
+  replies: HeldReplies,
+  sessionId: string,
+  snapshot: AttentionSnapshot,
+): Promise<AttentionSnapshot> {
+  const held = await replies.pending(sessionId).catch(() => undefined);
+  return held === undefined ? snapshot : { ...snapshot, replies: held };
+}
+
+async function list(attention: AttentionService, replies: HeldReplies, context: RouteContext): Promise<ApiResponse> {
+  const sessionId = pathSessionId(context);
+  const result = await attention.list(sessionId);
+  return result.ok ? jsonResponse(await withReplies(replies, sessionId, result.value)) : refusal(result.error);
+}
+
+/**
+ * "Send now": the owner skips the settle window and the held answers go to the ferret at once. The board
+ * is read first, so an unknown session is refused rather than given an outbox. Answers the board with
+ * nothing left held; the send itself is detached, exactly as the timer's is.
+ */
+async function sendReplies(
+  attention: AttentionService,
+  replies: AttentionRepliesSubsystem,
+  context: RouteContext,
+): Promise<ApiResponse> {
+  const sessionId = pathSessionId(context);
+  const before = await attention.list(sessionId);
+  if (!before.ok) return refusal(before.error);
+  await replies.sendNow(sessionId);
+  return jsonResponse(await withReplies(replies, sessionId, before.value));
 }
 
 /**
@@ -119,6 +154,7 @@ async function list(attention: AttentionService, context: RouteContext): Promise
 async function apply(
   attention: AttentionService,
   notifications: Pick<DirectNotificationSubsystem, 'enrolledDevices'>,
+  replies: HeldReplies,
   context: RouteContext,
 ): Promise<ApiResponse> {
   const sessionId = pathSessionId(context);
@@ -140,7 +176,7 @@ async function apply(
   const warnings = written && mutation.item !== undefined ? lintAttentionWriting(mutation.item) : [];
   const enrolled = mutation.change === 'created' ? await enrolledDevices(notifications) : undefined;
   return jsonResponse({
-    ...mutation.snapshot,
+    ...(await withReplies(replies, sessionId, mutation.snapshot)),
     ...(warnings.length === 0 ? {} : { warnings }),
     ...(enrolled === undefined ? {} : { enrolled }),
   });
@@ -196,6 +232,7 @@ async function notify(notifications: DirectNotificationSubsystem, context: Route
 export function attentionRoutes(
   attention: AttentionService,
   notifications: DirectNotificationSubsystem,
+  replies: AttentionRepliesSubsystem,
 ): readonly ApiRoute[] {
   return [
     {
@@ -203,14 +240,21 @@ export function attentionRoutes(
       path: '/v1/sessions/:sessionId/attention',
       minimum: 'operator',
       noStore: true,
-      handle: async context => await list(attention, context),
+      handle: async context => await list(attention, replies, context),
     },
     {
       method: 'POST',
       path: '/v1/sessions/:sessionId/attention',
       minimum: 'operator',
       noStore: true,
-      handle: async context => await apply(attention, notifications, context),
+      handle: async context => await apply(attention, notifications, replies, context),
+    },
+    {
+      method: 'POST',
+      path: '/v1/sessions/:sessionId/attention/replies',
+      minimum: 'operator',
+      noStore: true,
+      handle: async context => await sendReplies(attention, replies, context),
     },
     {
       method: 'POST',

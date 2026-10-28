@@ -338,6 +338,17 @@ export const ResolvedAttentionItemSchema = z
   });
 export type ResolvedAttentionItem = z.infer<typeof ResolvedAttentionItemSchema>;
 
+/**
+ * The owner's answers a machine is holding for one ferret, to deliver them as ONE message once the owner
+ * stops answering (docs/attention.md § The loop). Present on the board while anything is held, so the app
+ * can say "sending in 8 s" and offer "Send now" (`POST /v1/sessions/:sessionId/attention/replies`).
+ */
+export const AttentionRepliesSchema = z.strictObject({
+  pending: z.array(AttentionIdSchema).min(1).max(MAX_ATTENTION_RESOLUTIONS),
+  dueAt: InstantSchema,
+});
+export type AttentionReplies = z.infer<typeof AttentionRepliesSchema>;
+
 export const AttentionSnapshotSchema = z
   .object({
     v: z.literal(ATTENTION_SCHEMA_VERSION),
@@ -358,6 +369,8 @@ export const AttentionSnapshotSchema = z
      * phone or browser will hear of it until one turns notifications on.
      */
     enrolled: NonNegativeIntegerSchema.optional(),
+    /** Answers held for this ferret and when they go; absent when nothing is held. */
+    replies: AttentionRepliesSchema.optional(),
   })
   .superRefine((value, context) => {
     if (value.count !== value.items.length) {
