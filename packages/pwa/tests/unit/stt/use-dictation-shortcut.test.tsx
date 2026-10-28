@@ -213,6 +213,17 @@ describe('useDictationShortcut', () => {
     should(recorded.actions).deepEqual(['start', 'stop']);
   });
 
+  it('fires on bare Alt when an iPadOS keyboard event carries no code', () => {
+    const host = makeHost();
+    const { recorded } = mount(host);
+
+    run(() => host.keys.emit('keydown', keyEvent({ code: '' })));
+    host.clock = DICTATION_SHORTCUT_HOLD_MS;
+    run(() => host.keys.emit('keyup', keyEvent({ code: '', altKey: false })));
+
+    should(recorded.actions).deepEqual(['start', 'stop']);
+  });
+
   it('claims the key it matched, so a browser menu never sees bare Alt', () => {
     const host = makeHost();
     mount(host);

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { KeyRound, RotateCcw } from 'lucide-react';
 
 import { Button } from '../../shell/primitives.tsx';
@@ -26,52 +26,96 @@ interface PendingShortcut {
 const sameBinding = (a: DictationShortcutBinding, b: DictationShortcutBinding): boolean =>
   a.code === b.code && a.key === b.key && a.modifiers.join('+') === b.modifiers.join('+');
 
-/** A key-capture control which saves only after matching keydown and keyup. */
+const CAPTURE_BUTTON_SELECTOR = '[data-dictation-capture]';
+
+const OS_TOOK_FOCUS_MESSAGE =
+  'The browser or operating system took focus before keyup, so that chord cannot be trusted here.';
+
+/**
+ * A key-capture control which saves only after matching keydown and keyup.
+ *
+ * Keys are heard on the window in the capture phase, not on the button: WebKit
+ * (Safari, every iOS and iPadOS browser) does not focus a button that is tapped
+ * or clicked, so a button-scoped listener never hears a hardware keyboard there.
+ */
 export function DictationShortcutPicker({ binding, onChange }: DictationShortcutPickerProps) {
   const [capturing, setCapturing] = useState(false);
   const [feedback, setFeedback] = useState<string | null>(null);
   const [tone, setTone] = useState<'muted' | 'warn' | 'ok'>('muted');
   const pending = useRef<PendingShortcut | null>(null);
+  const onChangeRef = useRef(onChange);
+  onChangeRef.current = onChange;
 
-  useEffect(() => (capturing ? beginDictationShortcutCapture() : undefined), [capturing]);
-
-  const cancel = (message = 'Shortcut capture cancelled.'): void => {
+  const cancel = useCallback((message = 'Shortcut capture cancelled.'): void => {
     pending.current = null;
     setCapturing(false);
     setTone('muted');
     setFeedback(message);
-  };
-  const onKeyDown = (event: KeyboardEvent<HTMLButtonElement>): void => {
-    if (!capturing) return;
-    event.preventDefault();
-    event.stopPropagation();
-    if (event.repeat) return;
-    if (event.key === 'Escape') {
-      cancel();
-      return;
-    }
-    const candidate = dictationShortcutFromEvent(event.nativeEvent);
-    pending.current = { binding: candidate, verdict: validateDictationShortcut(candidate) };
-    setTone('muted');
-    setFeedback(`Release ${dictationShortcutLabel(candidate)} to test and confirm it.`);
-  };
-  const onKeyUp = (event: KeyboardEvent<HTMLButtonElement>): void => {
-    if (!capturing) return;
-    event.preventDefault();
-    event.stopPropagation();
-    const candidate = pending.current;
-    if (!candidate || !sameDictationShortcutTrigger(candidate.binding, event.nativeEvent)) return;
-    pending.current = null;
-    if (!candidate.verdict.ok) {
-      setTone('warn');
-      setFeedback(candidate.verdict.reason ?? 'That shortcut cannot be used here. Try another.');
-      return;
-    }
-    onChange(candidate.binding);
-    setCapturing(false);
-    setTone(candidate.verdict.warning ? 'warn' : 'ok');
-    setFeedback(candidate.verdict.warning ?? `${dictationShortcutLabel(candidate.binding)} saved.`);
-  };
+  }, []);
+
+  useEffect(() => {
+    if (!capturing) return undefined;
+    const releaseCapture = beginDictationShortcutCapture();
+
+    const onKeyDown = (event: KeyboardEvent): void => {
+      event.preventDefault();
+      event.stopPropagation();
+      if (event.repeat) return;
+      if (event.key === 'Escape') {
+        cancel();
+        return;
+      }
+      const candidate = dictationShortcutFromEvent(event);
+      pending.current = { binding: candidate, verdict: validateDictationShortcut(candidate) };
+      setTone('muted');
+      setFeedback(`Release ${dictationShortcutLabel(candidate)} to test and confirm it.`);
+    };
+    const onKeyUp = (event: KeyboardEvent): void => {
+      event.preventDefault();
+      event.stopPropagation();
+      const candidate = pending.current;
+      if (!candidate || !sameDictationShortcutTrigger(candidate.binding, event)) return;
+      pending.current = null;
+      if (!candidate.verdict.ok) {
+        setTone('warn');
+        setFeedback(candidate.verdict.reason ?? 'That shortcut cannot be used here. Try another.');
+        return;
+      }
+      onChangeRef.current(candidate.binding);
+      setCapturing(false);
+      setTone(candidate.verdict.warning ? 'warn' : 'ok');
+      setFeedback(candidate.verdict.warning ?? `${dictationShortcutLabel(candidate.binding)} saved.`);
+    };
+    const onFocusLost = (): void => cancel(pending.current ? OS_TOOK_FOCUS_MESSAGE : undefined);
+    const onVisibility = (): void => {
+      if (document.visibilityState === 'hidden') onFocusLost();
+    };
+    // WebKit never blurs the button it never focused, so a tap elsewhere is the only signal that capture is over.
+    const onPointerDown = (event: PointerEvent): void => {
+      const target = event.target;
+      const onButton =
+        typeof target === 'object' &&
+        target !== null &&
+        typeof (target as Element).closest === 'function' &&
+        (target as Element).closest(CAPTURE_BUTTON_SELECTOR) !== null;
+      if (!onButton) cancel();
+    };
+
+    window.addEventListener('keydown', onKeyDown, true);
+    window.addEventListener('keyup', onKeyUp, true);
+    window.addEventListener('blur', onFocusLost);
+    window.addEventListener('pointerdown', onPointerDown, true);
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => {
+      window.removeEventListener('keydown', onKeyDown, true);
+      window.removeEventListener('keyup', onKeyUp, true);
+      window.removeEventListener('blur', onFocusLost);
+      window.removeEventListener('pointerdown', onPointerDown, true);
+      document.removeEventListener('visibilitychange', onVisibility);
+      releaseCapture();
+    };
+  }, [capturing, cancel]);
+
   const currentVerdict = validateDictationShortcut(binding);
   const isDefault = sameBinding(binding, DEFAULT_DICTATION_SHORTCUT);
   const feedbackClass =
@@ -98,7 +142,8 @@ export function DictationShortcutPicker({ binding, onChange }: DictationShortcut
       </div>
       <p className="m-0 text-meta leading-base text-muted">
         The finished transcript and one correction pass insert at your current caret. The shortcut never sends the
-        message. On a phone, use the mic button—the keyboard shortcut is optional.
+        message. On a phone, use the mic button—the keyboard shortcut is optional. On an iPad keyboard, Option is Alt
+        and the Globe key never reaches the page; if Alt alone does nothing, press Change and try another chord.
       </p>
       <div className="flex flex-wrap gap-2">
         <Button
@@ -107,24 +152,17 @@ export function DictationShortcutPicker({ binding, onChange }: DictationShortcut
           variant={capturing ? 'primary' : 'outline'}
           className="min-h-[44px] min-w-[44px]"
           aria-pressed={capturing}
-          onClick={() => {
+          data-dictation-capture=""
+          onClick={event => {
             if (capturing) cancel();
             else {
               pending.current = null;
               setTone('muted');
               setFeedback('Press your shortcut, then release its main key. Escape cancels.');
               setCapturing(true);
+              // Focus is not needed to hear keys, but it keeps screen readers and the focus ring on the control.
+              event.currentTarget.focus();
             }
-          }}
-          onKeyDown={onKeyDown}
-          onKeyUp={onKeyUp}
-          onBlur={() => {
-            if (capturing)
-              cancel(
-                pending.current
-                  ? 'The browser or operating system took focus before keyup, so that chord cannot be trusted here.'
-                  : 'Shortcut capture cancelled.',
-              );
           }}
         >
           <KeyRound size={14} aria-hidden="true" />
