@@ -53,18 +53,18 @@ did before Namespace.
 **Where each job runs** on a pull request, with the busy cores measured by sampling `/proc/stat`
 every second, and the GitHub times from the last runs before Namespace (p50):
 
-| Job                                              | Runner        | Measured                      | Why                                                       |
-| ------------------------------------------------ | ------------- | ----------------------------- | --------------------------------------------------------- |
-| `Pre-Commit (format)`                            | Namespace 2x4 | treefmt, ~3.4 of 4 cores      | ~55s on 2x4 vs ~30s on 4x8: half the price, off the path  |
-| `Pre-Commit (gates)`                             | GitHub        | 113s vs 97s on Namespace 4x8  | knip needs more than a 2x4's 4GB; a 4x8 bought 16s        |
-| `Unit Tests (<group>)`                           | Namespace 2x4 | ~0.7 cores                    | `bun test` runs one file at a time                        |
-| `Build Checks`, `Compile Binaries`               | Namespace 2x4 | ~1.4 cores                    | short builds; `Build Checks` also refreshes the cache     |
-| `PWA Settings Geometry (light)`                  | Namespace 2x4 | ~1.9 cores                    | well inside the critical path                             |
-| `PWA Full Gallery (dark)`                        | GitHub        | 467s vs 422s on Namespace 4x8 | a third of the Namespace bill for 45 seconds              |
-| `E2E Shard (1..3)`                               | Namespace 2x4 | ~1 core, 1.8GB                | one journey at a time                                     |
-| `Integration Tests (<group>)`                    | GitHub        | ~0.6–2 cores                  | free, and five groups keep each under ~2.5 min            |
-| `Unit Tests`, `Integration Tests`, `E2E …` tails | GitHub        | seconds, no nix shell         | billed a whole minute and a cache attachment on Namespace |
-| `SIT`, smoke, harness contract, every macOS job  | GitHub        | —                             | free; macOS and arm64 have no Namespace equivalent here   |
+| Job                                              | Runner        | Measured                           | Why                                                         |
+| ------------------------------------------------ | ------------- | ---------------------------------- | ----------------------------------------------------------- |
+| `Pre-Commit (format)`                            | Namespace 2x4 | treefmt, ~3.4 of 4 cores           | ~55s on 2x4 vs ~30s on 4x8: half the price, off the path    |
+| `Pre-Commit (gates)`                             | GitHub        | 113s vs 97s on Namespace 4x8       | knip needs more than a 2x4's 4GB; a 4x8 bought 16s          |
+| `Unit Tests (<group>)`                           | Namespace 2x4 | ~0.7 cores                         | `bun test` runs one file at a time                          |
+| `Build Checks`, `Compile Binaries`               | Namespace 2x4 | ~1.4 cores                         | short builds; `Build Checks` also refreshes the cache       |
+| `PWA Settings Geometry (light)`                  | Namespace 2x4 | ~1.9 cores                         | well inside the critical path                               |
+| `PWA Full Gallery (dark)`                        | Namespace 4x8 | ~427s; 643s on GitHub, ~3.3GB peak | past a 2x4's memory; GitHub would make it the critical path |
+| `E2E Shard (1..3)`                               | Namespace 2x4 | ~1 core, 1.8GB                     | one journey at a time                                       |
+| `Integration Tests (<group>)`                    | GitHub        | ~0.6–2 cores                       | free, and five groups keep each under ~2.5 min              |
+| `Unit Tests`, `Integration Tests`, `E2E …` tails | GitHub        | seconds, no nix shell              | billed a whole minute and a cache attachment on Namespace   |
+| `SIT`, smoke, harness contract, every macOS job  | GitHub        | —                                  | free; macOS and arm64 have no Namespace equivalent here     |
 
 - **One cache volume, tag `ferretry-nix`, requested at 10GB.** `namespacelabs/nscloud-cache-action`
   with `cache: nix` mounts a persistent `/nix` BEFORE `cachix/install-nix-action`, so the dev shell

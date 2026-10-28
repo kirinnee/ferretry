@@ -131,8 +131,9 @@ jobs:
     # Integration Tests job's shared Chromium launches, so this needs no new tool and no third `macos-14`
     # job. A sibling job rather than a step on an existing one, so it adds runner time and no wall clock.
     # Namespace on a pull request, GitHub otherwise (docs/standards/ci-cd, "Runners"). The full gallery
-    # peaks at ~3.3GB, past a 2x4's memory, so it runs on GitHub's free 4-core 16GB runner on every
-    # event: 467s there against 422s on a Namespace 4x8, which was a third of the whole Namespace bill.
+    # peaks at ~3.3GB, past a 2x4's memory, so on a pull request it keeps the 4x8: GitHub's free 4-core
+    # runner walked it in 643s against ~427s there, which would make it the critical path. It is a third
+    # of the Namespace bill, so splitting its two viewports into legs is the way to move it.
     # The Settings walk fits a 2x4. Both walk their viewports one after the other: run at once, as three
     # software-rendered Chromes on four cores, the full gallery timed out in 3 of 7 runs under load (#598).
     runs-on: >-
@@ -153,7 +154,7 @@ jobs:
       matrix:
         include:
           - { scheme: light, scope: settings, shape: 2x4 }
-          - { scheme: dark, scope: full, shape: github }
+          - { scheme: dark, scope: full, shape: 4x8 }
     steps:
       - uses: actions/checkout@v5
         with:
