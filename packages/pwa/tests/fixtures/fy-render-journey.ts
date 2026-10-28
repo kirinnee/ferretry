@@ -165,7 +165,8 @@ export const FY_RENDER_JOURNEY_PROPERTIES: readonly FyRenderJourneyProperty[] = 
     title: 'Everything after the handshake travels on the paired port',
     steps: ['production-bridge', 'mermaid-correct-hash', 'lottie'],
     observers: ['parent'],
-    verdict: 'Zero global messages reached the parent after `shell-ready`; every reply arrived on the first port.',
+    verdict:
+      "No global message but a late repeat of the frame's own `shell-ready` reached the parent after the handshake; every reply arrived on the first port.",
   },
   {
     id: 'mermaid-svg-accepted-by-production-gate',
