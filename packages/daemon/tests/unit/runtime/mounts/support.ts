@@ -261,7 +261,7 @@ export function pinService(known: readonly string[], instant: string = AT): PinS
 }
 
 /** An in-memory attention ledger: the state machine is real, the JSONL file is not. */
-class FakeLedgerRepository implements AttentionLedgerRepository {
+export class FakeLedgerRepository implements AttentionLedgerRepository {
   constructor(private ledger: AttentionLedger | null = null) {}
 
   async read(): Promise<AttentionLedger | null> {

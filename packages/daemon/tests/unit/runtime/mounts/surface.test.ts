@@ -345,6 +345,7 @@ const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
   attention: attentionService(),
   notifications: {
     notifyDirect: async sessionId => ({ ok: true, value: { sessionId, delivered: 0 } }),
+    enrolledDevices: async () => 0,
   },
   pins: pinService([]),
   sessions: sessionDirectory([sessionView('s1')]),

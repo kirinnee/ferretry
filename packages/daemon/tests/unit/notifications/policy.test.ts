@@ -13,6 +13,7 @@ import { DEVICE_PAIRED_EVENT_PREFIX, DEVICE_PAIRED_TITLE } from '../../../src/li
 import {
   attentionNotificationAttribution,
   attentionNotificationPayload,
+  attentionNotificationTitle,
   decideNotificationReplay,
   directNotificationFingerprint,
   directNotificationPayload,
@@ -208,7 +209,7 @@ describe('notification policy', () => {
     should(automatic).containDeep({
       eventKey: 'attention-raised:A1',
       kind: 'attention',
-      title: '“Ship v4.87”',
+      title: 'Ship v4.87',
       body: 'Choose a release window',
       tag: 'attention-session-1',
       url: '/session/session-1?attention=A1',
@@ -245,14 +246,14 @@ describe('notification policy', () => {
     // Assert
     should(payload).containDeep({
       eventKey: 'attention-raised:A7',
-      title: '“Relay carrier fallback”',
+      title: 'Relay carrier fallback',
       body: 'Rebase onto main now?',
       url: '/session/session%201?attention=A7',
     });
     should(alert.title.startsWith(DEVICE_PAIRED_TITLE)).be.false();
     should(alert.eventKey.startsWith(DEVICE_PAIRED_EVENT_PREFIX)).be.false();
-    should(clipped.title.length).be.lessThanOrEqual(ATTENTION_PUSH_TITLE_LENGTH + 2);
-    should(clipped.title.startsWith('“') && clipped.title.endsWith('…”')).be.true();
+    should(clipped.title.length).be.lessThanOrEqual(ATTENTION_PUSH_TITLE_LENGTH);
+    should(clipped.title.endsWith('…')).be.true();
     should(clipped.body.length).be.lessThanOrEqual(ATTENTION_PUSH_BODY_LENGTH);
     should(clipped.body.endsWith('…')).be.true();
     for (const each of [payload, alert, clipped])
@@ -300,7 +301,7 @@ describe('notification policy', () => {
       'Decide whether the nightly backup job should keep running while the storage migration is underway or paused…',
     );
     should(words.startsWith(payload.body.slice(0, -1))).be.true();
-    should(payload.title).equal('“Nightly backup storage migration plan…”');
+    should(payload.title).equal('Nightly backup storage migration plan…');
   });
 
   it('should fall back to the ferret for a title, and to the first question when the summary repeats it', () => {
@@ -323,8 +324,8 @@ describe('notification policy', () => {
     );
 
     // Assert
-    should(untitled.title).equal('“Ada”');
-    should(named.title).equal('“ada”');
+    should(untitled.title).equal('Ada');
+    should(named.title).equal('ada');
     should(repeated.body).equal('Keep the 30-minute keepalive?');
   });
 
@@ -354,5 +355,34 @@ describe('notification policy', () => {
     should(attentionNotificationAttribution(human)).equal('attention:human');
     should(attentionNotificationAttribution(daemon)).equal('attention:daemon');
     should(() => attentionNotificationAttribution(malformed)).throw(/no raising session/u);
+  });
+});
+
+describe('attention push title', () => {
+  it('should be the conversation’s name as typed, with no quote marks around it', () => {
+    // Act + Assert — the live push read `“Ferretry”`.
+    should(attentionNotificationTitle('Ferretry')).equal('Ferretry');
+    should(attentionNotificationTitle('  OCI   work login ')).equal('OCI work login');
+  });
+
+  it('should label a name that reads as the new-device alert, whatever letters spell it', () => {
+    // Arrange — plain, re-cased, shortened, and spelled with Cyrillic and accented look-alikes.
+    const forgeries = [
+      DEVICE_PAIRED_TITLE,
+      'a NEW device was paired',
+      'New device paired',
+      'А nеw dévice wаs раirеd',
+      'Your phone was paired',
+    ];
+
+    // Act
+    const titles = forgeries.map(attentionNotificationTitle);
+
+    // Assert
+    for (const title of titles) {
+      should(title.startsWith('Ferret “')).be.true();
+      should(title.length).be.lessThanOrEqual(ATTENTION_PUSH_TITLE_LENGTH);
+    }
+    should(titles[0]).equal(`Ferret “${DEVICE_PAIRED_TITLE}”`);
   });
 });
