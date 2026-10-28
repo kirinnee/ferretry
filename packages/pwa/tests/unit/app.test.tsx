@@ -375,6 +375,8 @@ interface ShellOptions {
   readonly journalSequence?: number;
   /** Sessions the stub daemon answers `list` with. */
   readonly sessions?: readonly string[];
+  /** Open Attention the stub daemon's `list` reports on every listed session. */
+  readonly listedAttention?: { open: number; first: string; ask: string; latestAt: string };
   /** The kind the Sessions bar was left on: 'all' unless a test says otherwise, null for a device that never chose. */
   readonly sessionsMode?: 'all' | 'auto' | 'interactive' | null;
   /** Makes `get` reject, which is the session route's failure path. */
@@ -584,7 +586,12 @@ const appStore = async (
         },
         list: async () =>
           (options.sessions ?? []).map(id =>
-            sessionView(id, { state: { status: options.sessionStatus?.() ?? 'running' } }),
+            sessionView(id, {
+              state: {
+                status: options.sessionStatus?.() ?? 'running',
+                ...(options.listedAttention === undefined ? {} : { attention: options.listedAttention }),
+              },
+            }),
           ),
         logs: async (sessionId: string) => {
           transcriptReads.push(`${connection.daemonId}:${sessionId}`);
@@ -2259,6 +2266,22 @@ describe('AppShell', () => {
     } finally {
       restoreClearInterval();
       restoreInterval();
+    }
+  });
+
+  it('mounts the selected Needs-you item as a real chat beside the inbox', async () => {
+    const { view } = await renderShell(`/d/${ALPHA}/attention`, [alpha.daemonId], {
+      sessions: ['shared'],
+      listedAttention: { open: 1, first: 'A3', ask: 'permission', latestAt: '2026-07-31T11:30:00.000Z' },
+      sessionState: { attention: { open: 1, first: 'A3', ask: 'permission', latestAt: '2026-07-31T11:30:00.000Z' } },
+      attention: sessionId => attentionSnapshot(sessionId, [externalAttentionItem]),
+    });
+    try {
+      for (let turn = 0; turn < 6; turn += 1) await settle();
+      const chat = must(view.container.querySelector<HTMLElement>('[data-attention-chat]'), 'the conversation pane');
+      expect(chat.textContent).not.toBe('');
+    } finally {
+      await view.unmount();
     }
   });
 

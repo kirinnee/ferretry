@@ -306,3 +306,19 @@ describe('AttentionInboxPage banner slot', () => {
     await without.unmount();
   });
 });
+
+describe('AttentionInboxPage refusals whose card has gone', () => {
+  it('says the refusal and clears it on Dismiss', async () => {
+    const fake = fakeInbox();
+    const mounted = await mount(page(fake, []));
+    fake.failNext = 'machine said no';
+    await interact(() => fake.deferred.schedule(threeWay, { kind: 'dismiss', label: 'Dismiss' } as never));
+    await advance(fake, 10_000);
+    const failures = must(mounted.container.querySelector('[data-attention-failures]'), 'the refusals');
+    expect(failures.textContent).toContain('machine said no');
+    const clear = must(failures.querySelector<HTMLButtonElement>('button'), 'the clear button');
+    await interact(() => clear.click());
+    expect(mounted.container.querySelector('[data-attention-failures]')).toBeNull();
+    await mounted.unmount();
+  });
+});

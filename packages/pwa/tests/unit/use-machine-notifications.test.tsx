@@ -291,3 +291,24 @@ describe('NotificationsOffBanner', () => {
     expect(bannerIds(view)).toEqual(['a']);
   });
 });
+
+describe('MachineNotificationList failures', () => {
+  it('says why a machine could not be turned on, on its own row', async () => {
+    const world = fleet({ a: 'devices' });
+    const service = {
+      ...world.service,
+      register: async () => {
+        throw new Error('push service said no');
+      },
+    };
+    const view = mount(hostOf(service), sourcesOf(['a']));
+    await settle();
+    const enable = view.renderer.root.findByProps({ 'data-notifications-off-machine': 'a' }).findByProps({
+      'data-notifications-off-enable': '',
+    });
+    await runAsync(async () => enable.props.onClick());
+    await settle();
+    const alerts = view.renderer.root.findAll(node => node.props.role === 'alert');
+    expect(alerts.length).toBeGreaterThan(0);
+  });
+});

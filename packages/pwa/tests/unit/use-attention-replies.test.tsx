@@ -114,3 +114,18 @@ describe('batched answers notice', () => {
     expect(root.querySelector('[data-attention-replies]')).toBeNull();
   });
 });
+
+describe('browserRepliesClock', () => {
+  test('reads the wall clock and ticks until cancelled', async () => {
+    const { browserRepliesClock } = await import('../../src/hooks/use-attention-replies.ts');
+    expect(Math.abs(browserRepliesClock.now() - Date.now())).toBeLessThan(1_000);
+    let ticks = 0;
+    const stop = browserRepliesClock.every(() => (ticks += 1), 5);
+    await new Promise(done => setTimeout(done, 40));
+    stop();
+    const seen = ticks;
+    expect(seen).toBeGreaterThan(0);
+    await new Promise(done => setTimeout(done, 30));
+    expect(ticks).toBe(seen);
+  });
+});
