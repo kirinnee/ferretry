@@ -977,3 +977,33 @@ describe('Attention state machine steps and progress', () => {
     should(reset.item?.stepsDone).be.undefined();
   });
 });
+
+describe('Attention state machine progress on another agent’s item', () => {
+  it('should refuse a tick from an agent on an item a different agent raised', () => {
+    // Arrange
+    const created = raised(AGENT, { steps: ['One'] });
+    const foreign: AttentionLedger = {
+      ...created.ledger,
+      entries: [
+        {
+          lifecycle: 'active',
+          origin: OTHER_AGENT,
+          item: {
+            ...activeEntry(created.ledger).item,
+            raisedBy: 'agent',
+            raisedBySession: OTHER_AGENT.sessionId,
+            raisedByName: OTHER_AGENT.name,
+          },
+        },
+      ],
+    };
+
+    // Act
+    const refused = failed(
+      applyAttentionCommand(foreign, { action: 'progress', actor: AGENT, id: 'A1', step: 0, done: true, at: SECOND }),
+    );
+
+    // Assert
+    should(refused.error.code).equal('forbidden');
+  });
+});

@@ -692,6 +692,10 @@ function edit(ledger: AttentionLedger, command: EditCommand): AttentionMutation 
   return success(next, true, 'refreshed', item);
 }
 
+function stepRange(id: AttentionId, count: number, step: number): string {
+  return count === 0 ? `${id} has no steps` : `${id} has steps 0 to ${count - 1}, not ${step}`;
+}
+
 function sameSteps(left: readonly string[] | undefined, right: readonly string[] | undefined): boolean {
   return JSON.stringify(left ?? null) === JSON.stringify(right ?? null);
 }
@@ -707,12 +711,7 @@ function progress(ledger: AttentionLedger, command: ProgressCommand): AttentionM
     return failure('forbidden', 'an agent or daemon may tick steps only on an attention item it raised');
   }
   const count = target.item.steps?.length ?? 0;
-  if (command.step >= count) {
-    return failure(
-      'invalid',
-      count === 0 ? `${command.id} has no steps` : `${command.id} has steps 0 to ${count - 1}, not ${command.step}`,
-    );
-  }
+  if (command.step >= count) return failure('invalid', stepRange(command.id, count, command.step));
   const before = target.item.stepsDone ?? [];
   if (before.includes(command.step) === command.done) return unchanged(ledger);
   const after = (command.done ? [...before, command.step] : before.filter(step => step !== command.step)).sort(
