@@ -16,6 +16,8 @@ import {
   LIVE_SAMPLE_MS,
   type LiveActivitySource,
   orderFleetBacklog,
+  type TranscriptChangeSource,
+  type TranscriptChangeWatch,
 } from '../../../../src/lib/session/events/index.ts';
 import type { StoredSessionEvent } from '../../../../src/lib/session/reads/index.ts';
 
@@ -1123,5 +1125,168 @@ describe('the live readout on a per-session event stream', () => {
     should(harness.downstream.closes).deepEqual([[1011, 'event evidence unavailable']]);
     should(harness.scheduler.armed).be.empty();
     should(live.asked).be.empty();
+  });
+});
+
+/** The transcript hub, under the test's control: a change is a call the test makes. */
+class ScriptedTranscripts implements TranscriptChangeSource {
+  /** Every session a watch was opened for. */
+  readonly watched: string[] = [];
+  refreshed = 0;
+  closed = 0;
+  private onChange: ((at: string) => void) | undefined;
+
+  watch(sessionId: string, onChange: (at: string) => void): TranscriptChangeWatch {
+    this.watched.push(sessionId);
+    this.onChange = onChange;
+    return {
+      refresh: () => {
+        this.refreshed += 1;
+      },
+      close: () => {
+        this.closed += 1;
+        this.onChange = undefined;
+      },
+    };
+  }
+
+  /** The file changed, as the hub would say it. A closed watch hears nothing. */
+  change(seconds: number): void {
+    this.onChange?.(at(seconds));
+  }
+}
+
+const TRANSCRIPT_SESSION = { kind: 'session', sessionId: 's1', after: 0, transcript: true } as const;
+
+function transcriptSubject(
+  scope: FleetEventStreamScope,
+  transcripts: TranscriptChangeSource | undefined,
+  script: SourceScript = {},
+) {
+  const source = new ScriptedSource(script);
+  const scheduler = new ManualScheduler();
+  const downstream = new RecordingDownstream();
+  return {
+    source,
+    scheduler,
+    downstream,
+    handler: new FleetEventStreamService(source, scheduler, undefined, transcripts).handler(scope, downstream),
+    transcriptFrames: () => downstream.frames().filter(frame => frame.kind === 'transcript'),
+  };
+}
+
+describe('the transcript signal on a per-session event stream', () => {
+  it('should say each time the transcript changes, and only after the replay', async () => {
+    // Arrange
+    const transcripts = new ScriptedTranscripts();
+    const harness = transcriptSubject(TRANSCRIPT_SESSION, transcripts, { pages: [[stored('s1', 1)]] });
+
+    // Act
+    await harness.handler.open();
+    transcripts.change(5);
+    transcripts.change(6);
+
+    // Assert — the history first, then the opening proof, then one content-free frame per change.
+    should(transcripts.watched).deepEqual(['s1']);
+    should(harness.downstream.frames().map(frame => frame.kind)).deepEqual([
+      'event',
+      'idle',
+      'transcript',
+      'transcript',
+    ]);
+    should(harness.transcriptFrames()).deepEqual([
+      { kind: 'transcript', transcript: { sessionId: 's1', at: at(5) } },
+      { kind: 'transcript', transcript: { sessionId: 's1', at: at(6) } },
+    ]);
+  });
+
+  it('should count a transcript frame as traffic, so a busy transcript never carries an idle proof', async () => {
+    // Arrange
+    const transcripts = new ScriptedTranscripts();
+    const harness = transcriptSubject(TRANSCRIPT_SESSION, transcripts);
+    await harness.handler.open();
+
+    // Act
+    transcripts.change(5);
+
+    // Assert — the idle window was re-armed from the frame, like it is from an event.
+    should(harness.scheduler.armed.filter(delay => delay === EVENT_STREAM_IDLE_MS)).have.length(2);
+  });
+
+  it('should look for the session transcript again whenever its journal moves', async () => {
+    // Arrange — a first message is what binds a new session's transcript, and it is journaled.
+    const transcripts = new ScriptedTranscripts();
+    const harness = transcriptSubject(TRANSCRIPT_SESSION, transcripts);
+    await harness.handler.open();
+
+    // Act
+    harness.source.emit(stored('s1', 1));
+    harness.source.emit(stored('s1', 2));
+
+    // Assert
+    should(harness.downstream.events()).deepEqual(['s1/1', 's1/2']);
+    should(transcripts.refreshed).equal(2);
+  });
+
+  it('should stop listening when the stream closes', async () => {
+    // Arrange
+    const transcripts = new ScriptedTranscripts();
+    const harness = transcriptSubject(TRANSCRIPT_SESSION, transcripts);
+    await harness.handler.open();
+
+    // Act
+    harness.handler.close();
+    transcripts.change(5);
+
+    // Assert
+    should(transcripts.closed).equal(1);
+    should(harness.transcriptFrames()).be.empty();
+  });
+
+  it('should end the stream rather than queue frames for a reader that fell behind', async () => {
+    // Arrange
+    const transcripts = new ScriptedTranscripts();
+    const harness = transcriptSubject(TRANSCRIPT_SESSION, transcripts);
+    await harness.handler.open();
+    harness.downstream.buffered = EVENT_STREAM_MAX_BUFFER_BYTES + 1;
+
+    // Act
+    transcripts.change(5);
+
+    // Assert
+    should(harness.downstream.closes).deepEqual([[1013, 'event stream reader fell behind']]);
+    should(transcripts.closed).equal(1);
+    should(harness.transcriptFrames()).be.empty();
+  });
+
+  it('should watch nothing for a stream that did not ask, or a daemon with no source', async () => {
+    // Arrange
+    const transcripts = new ScriptedTranscripts();
+    const unasked = transcriptSubject(SESSION, transcripts);
+    const unsourced = transcriptSubject(TRANSCRIPT_SESSION, undefined);
+
+    // Act
+    await unasked.handler.open();
+    await unsourced.handler.open();
+
+    // Assert
+    should(transcripts.watched).be.empty();
+    should(unasked.transcriptFrames()).be.empty();
+    should(unsourced.transcriptFrames()).be.empty();
+  });
+
+  it('should not start watching when the replay failed', async () => {
+    // Arrange
+    const transcripts = new ScriptedTranscripts();
+    const harness = transcriptSubject(TRANSCRIPT_SESSION, transcripts, {
+      failure: new Error('the journal is unreadable'),
+    });
+
+    // Act
+    await harness.handler.open();
+
+    // Assert
+    should(harness.downstream.closes).deepEqual([[1011, 'event evidence unavailable']]);
+    should(transcripts.watched).be.empty();
   });
 });
