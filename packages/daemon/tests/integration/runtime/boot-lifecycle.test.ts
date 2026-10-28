@@ -116,8 +116,9 @@ import { FakeHostedService, fakeCloudflared, removeTempDirectories } from '../tu
 /**
  * The daemon's boot lifecycle, driven through the real composition root.
  *
- * Everything here runs against a throwaway `FY_HOME` and an ephemeral loopback port: no real state
- * home is resolved, no known port is bound, and no daemon is left running — `untilShutdown` resolves
+ * Everything here runs against a throwaway `FY_HOME` and an ephemeral loopback port (or, where the
+ * port after one matters, a pair found free below that range): no real state home is resolved, no
+ * known port is bound, and no daemon is left running — `untilShutdown` resolves
  * when the test says so, so `start` returns instead of serving forever.
  */
 
@@ -133,6 +134,53 @@ async function freeLoopbackPort(): Promise<number> {
   const port = boundPort(server);
   await server.stop(true);
   return port;
+}
+
+/**
+ * Where `strangerBesideAFreePort` looks: odd ports below every kernel's ephemeral range (Linux hands
+ * out 32768 and up, macOS 49152 and up), so the port after each is below it too.
+ */
+const BELOW_EPHEMERAL = { first: 20_001, last: 32_765 } as const;
+
+function isAddressInUse(error: unknown): boolean {
+  return (error as { readonly code?: unknown } | null)?.code === 'EADDRINUSE';
+}
+
+/**
+ * A stranger serving a preferred port, and the port after it proven bindable.
+ *
+ * NOT `port: 0`, which is what made this flaky. The kernel gives a port-0 listener an ODD port from
+ * its ephemeral range and gives an outgoing connection an EVEN one from the same range, so the port
+ * after a kernel-chosen one is exactly what this process's own loopback clients are handed as their
+ * source port. With one such socket on it, the boot's probe is refused and reads the address as free,
+ * the bind is refused with EADDRINUSE, and the binder waits out its window while the test looks at an
+ * address that never answers. Below the ephemeral range neither port is ever handed out; binding the
+ * second one before releasing it proves that nothing — no listener, no socket's source port, no
+ * TIME_WAIT — holds it now. The walk is in steps of two, so two copies of this test running at once
+ * can never pick each other's second port: each holds its first for as long as it runs.
+ */
+async function strangerBesideAFreePort(
+  fetch: () => Response,
+): Promise<{ readonly stranger: ReturnType<typeof Bun.serve>; readonly preferredPort: number }> {
+  for (let port = BELOW_EPHEMERAL.first; port <= BELOW_EPHEMERAL.last; port += 2) {
+    let stranger: ReturnType<typeof Bun.serve>;
+    try {
+      stranger = Bun.serve({ hostname: '127.0.0.1', port, fetch });
+    } catch (error) {
+      if (isAddressInUse(error)) continue;
+      throw error;
+    }
+    try {
+      await Bun.serve({ hostname: '127.0.0.1', port: port + 1, fetch: () => new Response('placeholder') }).stop(true);
+      return { stranger, preferredPort: port };
+    } catch (error) {
+      await stranger.stop(true);
+      if (!isAddressInUse(error)) throw error;
+    }
+  }
+  throw new Error(
+    `no free pair of consecutive ports from ${String(BELOW_EPHEMERAL.first)} to ${String(BELOW_EPHEMERAL.last + 1)}`,
+  );
 }
 
 /** A real WebSocket listener that records the lifetime of every daemon carrier connection. */
@@ -5857,12 +5905,9 @@ describe('daemon boot lifecycle', () => {
     // Arrange: a state home that has never started a daemon, with something already on the address
     // this boot prefers. A first run has to succeed on a machine like that.
     const home = await tempDirectory('fyd-fallback');
-    const occupied = Bun.serve({
-      hostname: '127.0.0.1',
-      port: 0,
-      fetch: () => Response.json({ error: 'unauthorized' }, { status: 401 }),
-    });
-    const preferredPort = boundPort(occupied);
+    const { stranger: occupied, preferredPort } = await strangerBesideAFreePort(() =>
+      Response.json({ error: 'unauthorized' }, { status: 401 }),
+    );
     await seedHomeWithoutPort(home);
     const cleanups: Array<() => void | Promise<void>> = [];
     const said = recordingNotices();
