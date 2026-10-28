@@ -91,12 +91,9 @@
   var root = document.documentElement;
   root.setAttribute('data-theme', family + '-' + resolved);
   root.setAttribute('data-text-scale', textScale);
-  // `text-size-adjust`, never root `zoom`: it scales both the tokenised and the
-  // legacy pixel type without moving the CSS-pixel coordinate system the shell
-  // sizes itself in. `applyTextScale` explains the full reasoning.
-  var percent = TEXT_SCALES[textScale] * 100 + '%';
-  root.style.setProperty('text-size-adjust', percent);
-  root.style.setProperty('-webkit-text-size-adjust', percent);
+  // `--fy-text-scale` multiplies every type size in the stylesheet; never `text-size-adjust`
+  // (ignored by iPadOS and standalone WebKit) or root `zoom`. `applyTextScale` has the reasoning.
+  root.style.setProperty('--fy-text-scale', String(TEXT_SCALES[textScale]));
 
   /* NO MANIFEST SWAP YET. kteam repointed its one `<link id>` manifest here so an
      install prompt fired before React mounted could not expose the wrong
