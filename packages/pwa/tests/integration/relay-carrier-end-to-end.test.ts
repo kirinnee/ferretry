@@ -86,7 +86,31 @@ const DEVICE_NAME = 'Ferretry PWA';
 /** A grant id the pairing API's own schema accepts, because `paired.response` is validated by it. */
 const MINTED_DEVICE_ID = 'fy_device_id_mintedByThePairing0001';
 
-const crypto = new WebCryptoRelayCrypto();
+/**
+ * HOW MANY CRYPTOGRAPHIC OPERATIONS ARE STILL RUNNING, on either end — the work {@link RelayBridge.settle}
+ * cannot see in its queue.
+ *
+ * The browser's half of a session runs OUTSIDE the bridge: its adapter discards the promise of every
+ * frame it is handed, so a key agreement, a device signature or a seal it starts in reply is invisible
+ * to the queue. WebCrypto answers on a later task, and on a loaded runner that task can land after the
+ * bridge has already counted itself quiet — the stream credential not yet sent, the daemon's viewer not
+ * yet connected (run 40556779457, "expected undefined not to be undefined"). So every operation is
+ * held while it runs, and a bridge is quiet only once none is.
+ */
+const cryptoInFlight = new Set<Promise<unknown>>();
+const crypto: WebCryptoRelayCrypto = new Proxy(new WebCryptoRelayCrypto(), {
+  get: (target, property) => {
+    const member: unknown = Reflect.get(target, property);
+    if (typeof member !== 'function') return member;
+    return (...args: unknown[]) => {
+      const result: unknown = member.apply(target, args);
+      if (!(result instanceof Promise)) return result;
+      const running: Promise<unknown> = result.finally(() => cryptoInFlight.delete(running));
+      cryptoInFlight.add(running);
+      return running;
+    };
+  },
+});
 
 /** A device key minted the way the browser mints one: non-extractable, real Ed25519. */
 const mintDevice = async (deviceId: string) => {
@@ -273,10 +297,19 @@ class RelayBridge {
    *
    * So quiet has to be observed rather than caught once: the counter only reaches its target when
    * several consecutive turns pass with nothing enqueued, and any work at all resets it.
+   *
+   * A cryptographic operation still running is not quiet either, whichever end started it (see
+   * {@link cryptoInFlight}): the frame it produces is the next piece of work. It is AWAITED rather than
+   * spun on, so a runner slow enough to stretch one operation over many turns is waited for, not counted
+   * against the spin budget, and the count starts again from nothing once it has answered.
    */
   async settle(): Promise<void> {
     let quiet = 0;
     for (let spin = 0; spin < 1_000; spin += 1) {
+      while (cryptoInFlight.size > 0) {
+        await Promise.allSettled([...cryptoInFlight]);
+        quiet = 0;
+      }
       if (this.#running || this.#queue.length > 0) quiet = 0;
       else if (++quiet >= 8) return;
       await new Promise(resolve => setTimeout(resolve, 0));

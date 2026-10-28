@@ -157,7 +157,9 @@ describe('the machine agent browser, in a real Chrome', () => {
   }, 90_000);
 
   it('should hold only the tab a person took over, leaving the agent working on its other tab', async () => {
-    // Arrange
+    // Arrange — both of the agent's tabs are opened HERE, never borrowed from an earlier case: a case
+    // that failed before it opened one must not fail this one too.
+    await tools.call(agent('s1'), { tool: 'browser.open', name: 'work', url: `${base}/read` });
     await tools.call(agent('s1'), { tool: 'browser.open', name: 'login', url: `${base}/read` });
     await tools.control('s1', 'browser', { action: 'takeover', key: 'login' }, { by: 'local' }, person);
 
@@ -165,11 +167,11 @@ describe('the machine agent browser, in a real Chrome', () => {
     const held = await tools
       .call(agent('s1'), { tool: 'browser.type', name: 'login', selector: '#q', text: 'nope' })
       .catch((error: unknown) => error);
-    const elsewhere = await tools.call(agent('s1'), { tool: 'browser.click', name: 'app', selector: '#q' });
+    const elsewhere = await tools.call(agent('s1'), { tool: 'browser.click', name: 'work', selector: '#q' });
 
     // Assert
     should(held).be.instanceOf(AgentToolError).and.have.property('code', 'taken_over');
-    should(elsewhere.summary).startWith('Done on %browser:app');
+    should(elsewhere.summary).startWith('Done on %browser:work');
   }, 60_000);
 
   it('should keep incognito cookies apart from the shared profile and from each other, both ways, and discard them', async () => {

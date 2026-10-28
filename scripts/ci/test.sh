@@ -79,6 +79,10 @@ if [[ -n ${group} ]]; then
   echo "🧪 ${mode} test group ${group}: ${#files[@]} files"
 fi
 
+# The integration tier starts real Chromes, and the first one on a fresh runner is slow — paid once
+# here rather than inside whichever test happens to start it (see the script).
+[[ ${mode} == "int" ]] && ./scripts/ci/warm-chrome.sh
+
 echo "🧪 Running ${mode} tests with coverage..."
 rm -f "${coverage_file}"
 

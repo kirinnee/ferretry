@@ -122,6 +122,10 @@ Notable details:
   `smoke`, the ledger jobs enter no nix shell — the gate is bash, awk, grep and jq — because a nix
   shell would put ~30s back on the critical path the groups took off it. Adding a group means adding
   it to the config and to the matrix.
+- **The int tier warms Chrome before its clock starts.** The first Chrome a fresh runner starts is
+  slow — on one slow VM longer than the agent browser's 20-second launch budget — so
+  `scripts/ci/warm-chrome.sh` starts it once, headless, before the tests. A warm-up, not a gate or a
+  retry: a Chrome that cannot start there is reported and left for the tests to fail on.
 - **A known flake warns instead of blocking.** When every failing test in the unit or int tier is
   listed in `config/test-quarantine.json` (per int group too), `scripts/ci/quarantine.ts` reruns just those files once.
   If they pass, the job is green with a `::warning::` per test and a job-summary line naming its
