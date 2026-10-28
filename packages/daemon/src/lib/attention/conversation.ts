@@ -95,9 +95,12 @@ export interface ConversationTurn {
 export function conversationTurn(message: string, open: readonly AttentionItem[], binary: string): ConversationTurn {
   const answers = referencedAttention(message, open);
   if (answers.length > 0) return { message: `[answer to ${answers.map(named).join(', ')}] ${message}`, answers };
-  if (open.length === 0) return { message, answers };
+  // A harness prompt the daemon raised is the ferret's own parked form: it cannot close one, and it
+  // clears itself when the form goes, so the footer never names it.
+  const closable = open.filter(item => !(item.raisedBy === 'daemon' && item.source === 'question'));
+  if (closable.length === 0) return { message, answers };
   return {
-    message: `${message}\n\n[open attention: ${open.map(named).join('; ')} — if this message settles one, resolve it with \`${binary} attention done <id>\`]`,
+    message: `${message}\n\n[open attention: ${closable.map(named).join('; ')} — if this message settles one, resolve it with \`${binary} attention done <id>\`]`,
     answers,
   };
 }

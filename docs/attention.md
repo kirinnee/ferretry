@@ -10,15 +10,16 @@ This document is the contract for that loop. The board's own rules are in
 
 ## The loop
 
-| Step          | Who                                                             | What happens                                                                                                                                                              |
-| ------------- | --------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Raise         | the ferret: `fy attention add "<summary>"`                      | One push to every enrolled device, titled with the conversation, saying what is needed (see below). The session's row turns **unread**.                                   |
-| Answer        | the owner: the board, the inbox or a push tap                   | The item resolves. A few seconds later the ferret receives `[answer to !A3 «<ask>»] <answer>`, in one message with any other answers given meanwhile.                     |
-| Reply in chat | the owner writes `!A3 …` in that ferret's chat                  | That message is the answer: it is delivered prefixed `[answer to !A3 «<ask>»]`, and once it is accepted the item resolves in the owner's name.                            |
-| Plain chat    | the owner writes without referencing an item                    | Nothing resolves. The message ends with one line naming the open items, so the ferret can resolve one itself if the message settled it.                                   |
-| Done          | the ferret: `fy attention done A3 [--answer …]`                 | The ferret closes its own item once it is no longer needed. Nothing is echoed back to it.                                                                                 |
-| Done (owner)  | the owner: the board, or `fy attention done` at their own shell | The ferret receives `[done !A3 «<ask>»] The owner marked this done.`, or `[answer to !A3 «<ask>»] <note>` when the owner wrote one.                                       |
-| Dismiss       | the owner, or the ferret for its own items                      | Closed without an answer. When the owner dismisses, the ferret receives `[dismissed !A3 «<ask>»]` with the owner's note, or "The owner dismissed this without an answer." |
+| Step           | Who                                                             | What happens                                                                                                                                                              |
+| -------------- | --------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Raise          | the ferret: `fy attention add "<summary>"`                      | One push to every enrolled device, titled with the conversation, saying what is needed (see below). The session's row turns **unread**.                                   |
+| Answer         | the owner: the board, the inbox or a push tap                   | The item resolves. A few seconds later the ferret receives `[answer to !A3 «<ask>»] <answer>`, in one message with any other answers given meanwhile.                     |
+| Reply in chat  | the owner writes `!A3 …` in that ferret's chat                  | That message is the answer: it is delivered prefixed `[answer to !A3 «<ask>»]`, and once it is accepted the item resolves in the owner's name.                            |
+| Plain chat     | the owner writes without referencing an item                    | Nothing resolves. The message ends with one line naming the open items, so the ferret can resolve one itself if the message settled it.                                   |
+| Done           | the ferret: `fy attention done A3 [--answer …]`                 | The ferret closes its own item once it is no longer needed. Nothing is echoed back to it.                                                                                 |
+| Done (owner)   | the owner: the board, or `fy attention done` at their own shell | The ferret receives `[done !A3 «<ask>»] The owner marked this done.`, or `[answer to !A3 «<ask>»] <note>` when the owner wrote one.                                       |
+| Dismiss        | the owner, or the ferret for its own items                      | Closed without an answer. When the owner dismisses, the ferret receives `[dismissed !A3 «<ask>»]` with the owner's note, or "The owner dismissed this without an answer." |
+| Harness prompt | the daemon, when a ferret's harness parks on a prompt it owns   | One `question` item per wait (see below), pushed once. Answering it on the board types the answer into the form. It clears itself when the wait ends.                     |
 
 - **Who raised it is decided by the pane, not the words.** `fy attention` sends the client header and,
   inside a ferret, that ferret's `FY_SESSION_ID` as `x-ferretry-session-id`. The daemon attributes the
@@ -27,6 +28,28 @@ This document is the contract for that loop. The board's own rules are in
   sent, so the call is the human's. **Until this was fixed the CLI sent neither header**, so every ferret's raise
   was stored as the human's, and its answer was never delivered: the delivery tells only the ferret
   that asked, and the board said nobody had.
+- **A harness prompt is an item too.** "Needs you" is exactly the set of sessions with open items, so
+  a harness parked on its own prompt is raised as one, by the daemon (`raisedBy: daemon`, cause
+  `harness-prompt`, `source: question`), from the state documents storage writes
+  (`packages/daemon/src/lib/attention/harness-prompt.ts`):
+  - **A structured question** (`state.pendingQuestion`) raises one item whose `sourceRef` is the
+    question's tool id. Its summary is the first question, its `questions` are the form's. One
+    single-choice question with valid options is a `multiple-choice` ask; anything else is an
+    `open-question`, answered one by one in the board's numbered reply.
+  - **Any other blocking prompt** (`turnState: needs-input`: a permission prompt, a dialog) raises one
+    item with `sourceRef: prompt:<the prompt's id>` and no ask. It says to answer it in the Console.
+  - **The wait ends, the item resolves**, in the daemon's name: the question is answered or replaced,
+    the turn leaves `needs-input`, or the session ends. Start-up reconciles every session once.
+  - **One item per wait, ever.** A wait whose item was answered or dismissed is never raised again,
+    because the board's resolved history remembers it. A restart, a repeated state write or a
+    dismissal never pushes twice.
+  - **The owner's board answer is typed into the form** through the same answer path the Console
+    uses (`SessionAnswerSubsystem` → `StructuredQuestionService`), detached from the answer itself.
+    A chat reply (`!A3 …`) is not driven: its words already went to the ferret. A dismissal leaves the
+    form parked. Nothing is sent to the ferret as a message, because the item is not agent-raised.
+  - **An answer that does not reach the form** is journalled as `attention.harness_answer_failed`.
+    While the form is still open, the question is raised again as a new item that says the answer did
+    not go through. The answered item stays in the audit as the owner's answer.
 - **An agent changes only its own session's board.** The resolution audit records who closed every
   item: `resolvedBy` is `human`, `agent` (with its session) or `daemon`.
 - **Any item may be resolved without an answer.** A structured ask (a choice, a permission, a review)
@@ -191,20 +214,33 @@ notifications as Ferretry, with the mono mark in the status bar.
 
 ## Every automatic push, and why it stays or goes
 
-| Path                                           | Where                                    | Decision                                                                                                                                                         |
-| ---------------------------------------------- | ---------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| An Attention item is created                   | daemon `NotificationService`             | **The** notification. Once per item (the key is session + item).                                                                                                 |
-| `fy attention notify` (push without an item)   | daemon `POST …/notify`                   | Kept for compatibility. It is explicit and audited, and the prompt does not advertise it. A tap opens the conversation it came from.                             |
-| Enrolment confirmation                         | daemon `PushService.register`            | Kept. One push, only to the browser that just enrolled.                                                                                                          |
-| A new device was paired                        | daemon audit log                         | Kept. This is a security alert.                                                                                                                                  |
-| A session starts, finishes or idles            | daemon                                   | Never pushed (unchanged).                                                                                                                                        |
-| Your turn / `awaiting_user` (a ferret waiting) | PWA page watcher (`notification-ledger`) | **Removed.** Waiting is not an ask.                                                                                                                              |
-| `completed` (a ferret finished)                | PWA page watcher                         | **Removed.** Finishing is not an ask.                                                                                                                            |
-| `needs-input` / `awaiting_question`            | PWA page watcher                         | Kept. The harness is parked on a blocking prompt it owns (a permission prompt, a dialog, a structured question), and the ferret cannot raise an item from there. |
-| `failed` / `stalled` / `kill_failed`           | PWA page watcher                         | Kept. A dead ferret cannot raise an item.                                                                                                                        |
-| Notifications a device's own filter hides      | push worker                              | Kept as one quiet, silent line per machine (a push that shows nothing gets a subscription revoked). Now carries the mark.                                        |
+| Path                                           | Where                                    | Decision                                                                                                                                                                     |
+| ---------------------------------------------- | ---------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| An Attention item is created                   | daemon `NotificationService`             | **The** notification. Once per item (the key is session + item).                                                                                                             |
+| `fy attention notify` (push without an item)   | daemon `POST …/notify`                   | Kept for compatibility. It is explicit and audited, and the prompt does not advertise it. A tap opens the conversation it came from.                                         |
+| Enrolment confirmation                         | daemon `PushService.register`            | Kept. One push, only to the browser that just enrolled.                                                                                                                      |
+| A new device was paired                        | daemon audit log                         | Kept. This is a security alert.                                                                                                                                              |
+| A harness parks on its own prompt              | daemon `HarnessPromptAttention`          | **An item** like any other: one push per wait.                                                                                                                               |
+| A session starts, finishes or idles            | daemon                                   | Never pushed (unchanged).                                                                                                                                                    |
+| Your turn / `awaiting_user` (a ferret waiting) | PWA page watcher (`notification-ledger`) | **Removed.** Waiting is not an ask.                                                                                                                                          |
+| `completed` (a ferret finished)                | PWA page watcher                         | **Removed.** Finishing is not an ask.                                                                                                                                        |
+| `needs-input` / `awaiting_question`            | PWA page watcher                         | **Now doubles the item above.** The daemon raises an item for this wait, and that item pushes. Removing the page-watcher notification is a follow-up for the app (see GAPs). |
+| `failed` / `stalled` / `kill_failed`           | PWA page watcher                         | Kept. A dead ferret cannot raise an item.                                                                                                                                    |
+| Notifications a device's own filter hides      | push worker                              | Kept as one quiet, silent line per machine (a push that shows nothing gets a subscription revoked). Now carries the mark.                                                    |
 
 ## GAPs
+
+- **The page watcher still announces `needs-input` / `awaiting_question`.** The daemon now raises an
+  item for that wait, which pushes, so a device with the app open is told twice. The app should drop
+  that local notification.
+- **A console prompt can only be answered in the Console.** Its item has no ask: answering a permission
+  prompt or a dialog from the board is not driven yet.
+- **A chat reply to a question item is not typed into the form.** The words reach the ferret as a
+  message, and the form stays parked until it is answered in the Console or on the board.
+- **An answer whose form was released** (the drive failed and the form was cancelled) is journalled
+  but raises nothing: the session then waits for a reply in chat, which is not an item.
+- **A board whose summary was missing at start** is reconciled only once its session writes state
+  again: the start-up pass skips sessions with no wait and no open-Attention summary.
 
 - **Page-level notifications for a new item.** A device with no push enrolment learns about an item only
   from the unread mark while the app is open. The page watcher could announce `state.attention`

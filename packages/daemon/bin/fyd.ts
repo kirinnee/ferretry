@@ -111,6 +111,11 @@ import {
 import { FileAttentionLedgerRepository } from '../src/adapters/attention/file-attention-ledger-repository.ts';
 import { FileAttentionOutboxRepository } from '../src/adapters/attention/file-attention-outbox-repository.ts';
 import { KeyedAttentionReplyTimers } from '../src/adapters/attention/keyed-attention-reply-timers.ts';
+import {
+  StorageHarnessPromptJournal,
+  StorageHarnessPromptStates,
+  StorageHarnessQuestionAnswerer,
+} from '../src/adapters/attention/storage-harness-prompt.ts';
 import { StorageSessionAttentionState } from '../src/adapters/attention/storage-session-attention-state.ts';
 import { FileAcceptedConfigStore, FileConfigDirectory } from '../src/adapters/config-files/files.ts';
 import { unrefFileEventTimers } from '../src/adapters/file-events/bun-file-event-source.ts';
@@ -663,6 +668,8 @@ import {
   HandoverReconcileLoop,
   type HarnessDiscoveryPolicy,
   type HarnessPreflight,
+  HarnessPromptAnswerDelivery,
+  HarnessPromptAttention,
   HarnessQuirkService,
   HarnessUpdateService,
   type HarnessVersionPort,
@@ -8701,6 +8708,23 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       // Boards that moved before summaries were kept (or while this daemon was down) are caught up once,
       // in the background: a list served before it finishes is only missing an unread mark.
       void attentionProjection.reconcile(storage.listSessions().map(session => session.id)).catch(() => undefined);
+      // Hoisted so a board answer to a harness question is typed into the form by the SAME path the
+      // Console's answer takes: one coordinator, one receipt ledger, one driver.
+      const sessionAnswer = createSessionAnswerSubsystem(
+        storage,
+        sessions,
+        launchTmux,
+        clock,
+        answerLedger,
+        answerSerial,
+        lastSnapshots,
+      );
+      const harnessAnswerDelivery = new HarnessPromptAnswerDelivery(
+        new StorageHarnessQuestionAnswerer(storage, sessionAnswer),
+        new StorageHarnessPromptJournal(storage),
+        // Read lazily: the service is built just below, and this is only called after it commits.
+        { raise: async (...parameters) => await attention.raise(...parameters) },
+      );
       const attention = new AttentionService(
         attentionBoards,
         clock,
@@ -8717,8 +8741,24 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           // The owner's answer, told to the ferret that asked — through its outbox, which holds a burst of
           // answers for a few seconds and delivers them as ONE message.
           new AttentionReplyDelivery(attentionReplies),
+          // The owner's answer to a harness question, typed into its form. DETACHED: a drive watches the
+          // pane for seconds, and the answer is already on the board.
+          {
+            changed: async (sessionId, change) => {
+              void harnessAnswerDelivery.changed(sessionId, change).catch(() => undefined);
+            },
+          },
         ]),
       );
+      // A harness parked on its own prompt waits on the owner, so it is an item on the board, raised and
+      // cleared from the state documents storage writes — and caught up once at start, in the background.
+      const harnessPrompts = new HarnessPromptAttention(
+        attention,
+        new KeyedSerialExecutor(),
+        new StorageHarnessPromptStates(storage),
+      );
+      storage.subscribeStates((id, state) => void harnessPrompts.stateWritten(id, state));
+      void harnessPrompts.reconcile(storage.listSessions().map(session => session.id)).catch(() => undefined);
       // ONE ingestion service for this opened store, shared by the loop that writes rows and the route
       // that reads them. Two would each hold their own account of whether a pass is in flight, and the
       // read would report `refreshing: false` while the loop was mid-pass.
@@ -9760,15 +9800,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           },
           new AttentionConversation(attention, CLIENT_NAME),
         ),
-        sessionAnswer: createSessionAnswerSubsystem(
-          storage,
-          sessions,
-          launchTmux,
-          clock,
-          answerLedger,
-          answerSerial,
-          lastSnapshots,
-        ),
+        sessionAnswer,
         sessionAttachments,
         sessionSignal: createSessionSignalSubsystem(storage, sessions, signals),
         sessionRename: createSessionRenameSubsystem(storage, sessions, nameClaims, clock),
