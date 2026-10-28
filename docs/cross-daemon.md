@@ -23,7 +23,10 @@ summary is [security.md](security.md).
 
 - **2a. Daemon data → script: no path found.** CSP `script-src 'self'` with two fixed hashes (plus
   `'wasm-unsafe-eval'`, which lets WebAssembly compile for on-device dictation and enables no `eval` —
-  [voice.md](voice.md)), markdown without raw HTML, highlighter-only `innerHTML`, sandboxed `fy-render` frames.
+  [voice.md](voice.md)), markdown without raw HTML, highlighter-only `innerHTML`, sandboxed `fy-render` frames. The
+  in-page `fy-render` renderers (`map`, `chart`) take author DATA only, through a closed reader, and their
+  bundled libraries hold no markup, eval or network sink — `chart` adds no CSP source, `_headers` line or
+  Trusted Types policy ([fy-render.md § Charts](fy-render.md#charts)).
 - **2b. Trusted Types — closed (Chromium).** `public/_headers` now says
   `require-trusted-types-for 'script'; trusted-types fy-highlight fy-worker fy-fragment`. Chromium refuses a
   plain string at every script sink, and only three policies may exist (`src/lib/trusted-types.ts`):

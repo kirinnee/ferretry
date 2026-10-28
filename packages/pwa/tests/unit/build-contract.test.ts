@@ -15,6 +15,7 @@
  */
 
 import { describe, expect, it } from 'bun:test';
+import { dirname, join } from 'node:path';
 import { HOSTED_RELAY_DIRECTORY_ORIGIN } from '@ferretry/relay';
 import viteConfig, { leafletTrustedTypes } from '../../vite.config.ts';
 
@@ -161,5 +162,29 @@ describe('the Leaflet Trusted Types transform', () => {
 
   it('refuses to build when Leaflet no longer has the write it expects', () => {
     expect(() => leafletTrustedTypes.transform('var nothing;', leaflet)).toThrow(/re-audit/u);
+  });
+});
+
+/**
+ * A `chart` is drawn IN THE PAGE (`fy-render-chart-engine.ts`), which is only sound while the three
+ * libraries it bundles never write markup, never compile a string into code and never reach the network:
+ * the page refuses a string at a script sink (`require-trusted-types-for 'script'`, no default policy),
+ * so a library that started doing any of it would either throw at import or — worse — need a policy
+ * widened to load. An upgrade that adds one fails here and must be re-audited before it ships.
+ */
+describe('the chart libraries', () => {
+  const file = (specifier: string, from = import.meta.dir): string => Bun.resolveSync(specifier, from);
+  const chartJs = file('chart.js');
+  const zoom = file('chartjs-plugin-zoom');
+  const sources = [chartJs, join(dirname(chartJs), 'chunks/index.js'), zoom, file('hammerjs', dirname(zoom))];
+  const SINKS =
+    /\.innerHTML\s*=|\.outerHTML\s*=|insertAdjacentHTML|document\.write|new Function\(|\beval\(|\bfetch\(|XMLHttpRequest|importScripts/u;
+
+  it('write no markup, compile no string and open no request', async () => {
+    for (const path of sources) {
+      const source = await Bun.file(path).text();
+      expect(source.length).toBeGreaterThan(0);
+      expect({ path, sink: SINKS.exec(source)?.[0] ?? null }).toEqual({ path, sink: null });
+    }
   });
 });

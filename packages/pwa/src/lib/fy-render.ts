@@ -18,6 +18,10 @@
  * with a `src:` header name bytes that live somewhere else — the session's
  * workspace or an https URL — and carry no payload at all.
  *
+ * `map` and `chart` are drawn in this document from a payload that is DATA — a
+ * map description, a chart description — by a bundled library; nothing an
+ * author wrote is code there either.
+ *
  * `html` DOES NOT RUN, by the owner's decision: an interactive page in an opaque
  * frame could still self-navigate, prerender and open WebRTC, and a fragment
  * cannot. Nothing in THIS module runs anything either.
@@ -48,6 +52,7 @@
  */
 
 import { FY_RENDER_LIMITS, FY_RENDER_SANDBOX_LIMITS } from './fy-render-bounds.ts';
+import { PALETTE_KEY } from './fy-render-palette.ts';
 import { parseReferenceToken } from './references.ts';
 
 export { FY_RENDER_LIMITS, FY_RENDER_SANDBOX_LIMITS };
@@ -99,7 +104,18 @@ const markFences = (node: MdNode): void => {
 
 export const remarkFyRenderFences = () => markFences;
 
-export const FY_RENDER_TYPES = ['html', 'svg', 'lottie', 'mermaid', 'map', 'image', 'video', 'audio', 'pdf'] as const;
+export const FY_RENDER_TYPES = [
+  'html',
+  'svg',
+  'lottie',
+  'mermaid',
+  'map',
+  'chart',
+  'image',
+  'video',
+  'audio',
+  'pdf',
+] as const;
 export type FyRenderType = (typeof FY_RENDER_TYPES)[number];
 
 /** The types a `src:` header may name, and the only ones it may appear on. */
@@ -168,6 +184,7 @@ export type FyRenderBlock =
   | FyRenderBaseBlock<'lottie'>
   | FyRenderBaseBlock<'mermaid'>
   | FyRenderBaseBlock<'map'>
+  | FyRenderBaseBlock<'chart'>
   | (FyRenderBaseBlock<'image'> & { readonly mime: FyRenderImageMime; readonly src?: undefined })
   | FyRenderMediaBlock;
 
@@ -192,7 +209,9 @@ export const isFyRenderMediaBlock = (block: FyRenderBlock): block is FyRenderMed
  * (`fy-render-html-frame.tsx`). `media` is any block with a `src:` — its bytes
  * are read or fetched once the block is near. `map` is a Leaflet map built from a small JSON or YAML
  * description, in this document, from DOM nodes the engine creates — the author's bytes are data, never
- * markup (`fy-render-map.tsx`).
+ * markup (`fy-render-map.tsx`). `chart` is the same shape for a chart: a small JSON or YAML description in
+ * this package's own chart language, drawn by Chart.js on a canvas in this document in the theme's colours
+ * (`fy-render-chart.tsx`) — data again, never code.
  *
  * Decided by the BLOCK rather than the type, because `image` is two things: an
  * inline base64 payload that is admitted at parse time, and a `src:` whose
@@ -201,7 +220,7 @@ export const isFyRenderMediaBlock = (block: FyRenderBlock): block is FyRenderMed
  */
 export function fyRenderPresentation(
   block: FyRenderBlock,
-): 'visual' | 'sandbox' | 'fragment' | 'interactive' | 'media' | 'map' {
+): 'visual' | 'sandbox' | 'fragment' | 'interactive' | 'media' | 'map' | 'chart' {
   if (isFyRenderMediaBlock(block)) return 'media';
   switch (block.type) {
     case 'svg':
@@ -212,6 +231,8 @@ export function fyRenderPresentation(
       return 'sandbox';
     case 'map':
       return 'map';
+    case 'chart':
+      return 'chart';
     case 'html':
       return fyRenderHtmlRunsScript(block.payload) ? 'interactive' : 'fragment';
   }
@@ -1252,6 +1273,11 @@ export function parseFyRender(source: string): FyRenderParseResult {
       if (payload.trim() === '') return fail('A map block needs a payload describing it');
       return { ok: true, block: { type: kind, alt, payload, source } };
     }
+    case 'chart': {
+      if (byteLength(payload) > FY_RENDER_LIMITS.chartBytes) return fail('Chart payload exceeds 64 KiB');
+      if (payload.trim() === '') return fail('A chart block needs a payload describing it');
+      return { ok: true, block: { type: kind, alt, payload, source } };
+    }
     case 'lottie': {
       const reason = validateLottie(payload);
       return reason === null ? { ok: true, block: { type: kind, alt, payload, source } } : fail(reason);
@@ -1381,7 +1407,13 @@ export async function fyRenderReadBoundedText(
  */
 export type FyRenderSandboxMessage =
   | { readonly kind: 'shell-ready' }
-  | { readonly kind: 'mermaid-svg'; readonly svg: string; readonly theme: FyRenderSandboxTheme }
+  | {
+      readonly kind: 'mermaid-svg';
+      readonly svg: string;
+      readonly theme: FyRenderSandboxTheme;
+      /** The palette the diagram was painted in (`paletteKey`), echoed so a theme switch can tell it is stale. */
+      readonly palette: string;
+    }
   | { readonly kind: 'rendered'; readonly width: number; readonly height: number }
   | { readonly kind: 'playing'; readonly playing: boolean }
   | { readonly kind: 'error'; readonly message: string; readonly class: FyRenderSandboxErrorClass }
@@ -1445,8 +1477,8 @@ export function parseFyRenderSandboxMessage(value: unknown): FyRenderSandboxMess
     case 'shell-ready':
       return hasExactKeys(message, ['kind']) ? { kind: 'shell-ready' } : null;
     case 'mermaid-svg': {
-      if (!hasExactKeys(message, ['kind', 'svg', 'theme'])) return null;
-      const { svg, theme } = message;
+      if (!hasExactKeys(message, ['kind', 'svg', 'theme', 'palette'])) return null;
+      const { svg, theme, palette } = message;
       if (typeof svg !== 'string') return null;
       if (byteLength(svg) > FY_RENDER_SANDBOX_LIMITS.mermaidSvgBytes) return null;
       /**
@@ -1462,7 +1494,9 @@ export function parseFyRenderSandboxMessage(value: unknown): FyRenderSandboxMess
        * would put the same guess back, so it is refused.
        */
       if (typeof theme !== 'string' || !SANDBOX_THEMES.includes(theme)) return null;
-      return { kind: 'mermaid-svg', svg, theme: theme as FyRenderSandboxTheme };
+      // The same rule for the palette: the key it was painted under, in the one shape a key has, or nothing.
+      if (typeof palette !== 'string' || !PALETTE_KEY.test(palette)) return null;
+      return { kind: 'mermaid-svg', palette, svg, theme: theme as FyRenderSandboxTheme };
     }
     case 'rendered': {
       if (!hasExactKeys(message, ['kind', 'width', 'height'])) return null;
