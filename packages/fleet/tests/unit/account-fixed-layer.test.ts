@@ -676,7 +676,10 @@ describe('ATTENTION_INSTRUCTION', () => {
     should(text).containEql('No ticket or PR numbers, codenames, file paths or unexplained acronyms');
     should(text).containEql('define the term with `--term "X=meaning"`');
     should(text).containEql('The summary is one plain sentence under 90 characters, answer first');
-    should(text).containEql('`--context` is repeatable, one bullet each');
+    should(text).containEql('`--context` is repeatable');
+    should(text).containEql('give every step with `--step "<markdown>"`, in order');
+    should(text).containEql('never a secret value');
+    should(text).containEql('so the item alone is enough');
     should(text).containEql('`--question` each decision with 2–4 short `--option`s');
     should(text).containEql('`--recommend <pick> --recommend-why <one line>`');
     // A tiny bad/good example.
@@ -685,7 +688,6 @@ describe('ATTENTION_INSTRUCTION', () => {
     should(text).containEql('`zz attention edit <id>`');
     should(text).containEql('Never for progress or because you finished.');
     should(text).containEql('"[answer to !A3 …]"');
-    should(text).containEql('`!A3`');
     should(text).containEql('`zz attention done <id>`');
     should(text).not.containEql('notify');
     should(text).not.containEql('fy ');
@@ -693,7 +695,7 @@ describe('ATTENTION_INSTRUCTION', () => {
 
   it('should stay short: it is in every prompt', () => {
     // Assert
-    should(ATTENTION_INSTRUCTION('fy').length).be.below(950);
+    should(ATTENTION_INSTRUCTION('fy').length).be.below(1_050);
   });
 
   it('should ride in the always-on instruction after the settings rules, not behind a switch', () => {

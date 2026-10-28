@@ -376,3 +376,25 @@ describe('writing advice', () => {
     should(actual).containEql('fix it with `attention edit <id>`');
   });
 });
+
+describe('attention listing steps and body', () => {
+  it('should number the steps with a tick on the done ones, then show the body', () => {
+    // Act
+    const actual = renderAttentionList(
+      snapshot([
+        agentItem('A1', 'log in', {
+          steps: ['Run `fy login`', 'Paste the code', 'Press Enter'],
+          stepsDone: [0, 2],
+          body: 'Some\nnotes',
+        }),
+      ]),
+    );
+
+    // Assert
+    should(actual).containEql('steps (2/3 done):');
+    should(actual).containEql('1. ✓ Run `fy login`');
+    should(actual).containEql('2. · Paste the code');
+    should(actual).containEql('3. ✓ Press Enter');
+    should(actual).containEql('body: Some notes');
+  });
+});

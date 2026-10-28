@@ -10,16 +10,17 @@ This document is the contract for that loop. The board's own rules are in
 
 ## The loop
 
-| Step           | Who                                                             | What happens                                                                                                                                                              |
-| -------------- | --------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Raise          | the ferret: `fy attention add "<summary>"`                      | One push to every enrolled device, titled with the conversation, saying what is needed (see below). The session's row turns **unread**.                                   |
-| Answer         | the owner: the board, the inbox or a push tap                   | The ferret receives `[answer to !A3 «<ask>»] <answer>` as an ordinary message. The item resolves.                                                                         |
-| Reply in chat  | the owner writes `!A3 …` in that ferret's chat                  | That message is the answer: it is delivered prefixed `[answer to !A3 «<ask>»]`, and once it is accepted the item resolves in the owner's name.                            |
-| Plain chat     | the owner writes without referencing an item                    | Nothing resolves. The message ends with one line naming the open items, so the ferret can resolve one itself if the message settled it.                                   |
-| Done           | the ferret: `fy attention done A3 [--answer …]`                 | The ferret closes its own item once it is no longer needed. Nothing is echoed back to it.                                                                                 |
-| Done (owner)   | the owner: the board, or `fy attention done` at their own shell | The ferret receives `[done !A3 «<ask>»] The owner marked this done.`, or `[answer to !A3 «<ask>»] <note>` when the owner wrote one.                                       |
-| Dismiss        | the owner, or the ferret for its own items                      | Closed without an answer. When the owner dismisses, the ferret receives `[dismissed !A3 «<ask>»]` with the owner's note, or "The owner dismissed this without an answer." |
-| Harness prompt | the daemon, when a ferret's harness parks on a prompt it owns   | One `question` item per wait (see below), pushed once. Answering it on the board types the answer into the form. It clears itself when the wait ends.                     |
+| Step           | Who                                                             | What happens                                                                                                                                                                         |
+| -------------- | --------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Raise          | the ferret: `fy attention add "<summary>"`                      | One push to every enrolled device, titled with the conversation, saying what is needed (see below). The session's row turns **unread**.                                              |
+| Answer         | the owner: the board, the inbox or a push tap                   | The ferret receives `[answer to !A3 «<ask>»] <answer>` as an ordinary message. The item resolves.                                                                                    |
+| Reply in chat  | the owner writes `!A3 …` in that ferret's chat                  | That message is the answer: it is delivered prefixed `[answer to !A3 «<ask>»]`, and once it is accepted the item resolves in the owner's name.                                       |
+| Plain chat     | the owner writes without referencing an item                    | Nothing resolves. The message ends with one line naming the open items, so the ferret can resolve one itself if the message settled it.                                              |
+| Done           | the ferret: `fy attention done A3 [--answer …]`                 | The ferret closes its own item once it is no longer needed. Nothing is echoed back to it.                                                                                            |
+| Done (owner)   | the owner: the board, or `fy attention done` at their own shell | The ferret receives `[done !A3 «<ask>»] The owner marked this done.`, or `[answer to !A3 «<ask>»] <note>` when the owner wrote one.                                                  |
+| Dismiss        | the owner, or the ferret for its own items                      | Closed without an answer. When the owner dismisses, the ferret receives `[dismissed !A3 «<ask>»]` with the owner's note, or "The owner dismissed this without an answer."            |
+| Progress       | the owner, or the ferret on its own item                        | `{action:'progress', id, step, done}` ticks or unticks one step. The item stays open; nothing is pushed and the ferret is told nothing. Lists re-read (a `progressed` board change). |
+| Harness prompt | the daemon, when a ferret's harness parks on a prompt it owns   | One `question` item per wait (see below), pushed once. Answering it on the board types the answer into the form. It clears itself when the wait ends.                                |
 
 - **Who raised it is decided by the pane, not the words.** `fy attention` sends the client header and,
   inside a ferret, that ferret's `FY_SESSION_ID` as `x-ferretry-session-id`. The daemon attributes the
@@ -76,15 +77,18 @@ part is written for a reader who has not been following. The wire shape is `Atte
 `packages/protocol/src/lib/attention.ts`. Every part is optional except the summary, so an item raised
 before the structure existed still reads.
 
-| Part             | Field                        | What it holds                                                                    |
-| ---------------- | ---------------------------- | -------------------------------------------------------------------------------- |
-| Summary          | `subject`                    | One line: what is needed. Drawn bold, once — never repeated as a title or `why`. |
-| Context          | `context`                    | What is happening and why it matters, in a few sentences. Markdown.              |
-| Terms            | `terms[]` `{term, meaning}`  | Every codename or term of art the item uses, spelled out. At most 12.            |
-| Questions        | `questions[]`                | One per decision: `question`, optional `options`, `recommended` and `why`. ≤ 6.  |
-| Recommendation   | `recommendation`             | The overall suggested decision `{decision, why?}`.                               |
-| Impact / urgency | `impact`, `urgency`          | What happens if nobody answers, and by when, in words.                           |
-| Links            | `links[]` `{label?, target}` | PRs, files and references (`#F12`, `@file`, a URL). At most 10.                  |
+| Part             | Field                        | What it holds                                                                                                                                                                   |
+| ---------------- | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Summary          | `subject`                    | One line: what is needed. Drawn bold, once — never repeated as a title or `why`.                                                                                                |
+| Context          | `context`                    | What is happening and why it matters, in a few sentences. Markdown.                                                                                                             |
+| Terms            | `terms[]` `{term, meaning}`  | Every codename or term of art the item uses, spelled out. At most 12.                                                                                                           |
+| Questions        | `questions[]`                | One per decision: `question`, optional `options`, `recommended` and `why`. ≤ 6.                                                                                                 |
+| Recommendation   | `recommendation`             | The overall suggested decision `{decision, why?}`.                                                                                                                              |
+| Impact / urgency | `impact`, `urgency`          | What happens if nobody answers, and by when, in words.                                                                                                                          |
+| Links            | `links[]` `{label?, target}` | PRs, files and references (`#F12`, `@file`, a URL). At most 10.                                                                                                                 |
+| Steps            | `steps[]`                    | What the owner must DO, one Markdown step each, in order. ≤ 20 steps, ≤ 2 000 chars each.                                                                                       |
+| Body             | `body`                       | One Markdown document for instructions that are not a list. ≤ 8 000 chars.                                                                                                      |
+| Progress         | `stepsDone[]`                | Item only, never written by a raiser: the 0-based indices of ticked steps, sorted, unique, each below `steps.length`; absent when none. An edit that changes `steps` clears it. |
 
 - **A question's `recommended`** names one of its options when it has options (the schema refuses
   anything else), and is the suggested answer in words when it has none.
@@ -111,6 +115,11 @@ ferret the same rules, with a good and a bad example:
 - **Point form.** One idea per bullet. The summary is one plain sentence under 90 characters, answer
   first. `context` and `impact` take a list (`-c` repeated, or a JSON array) and are stored as
   `- point` lines; the app draws them as a bullet list, collapsed as before.
+- **Instructions in the item.** When the owner must DO something, give every step with `--step "<markdown>"`
+  (repeat, in order; or `steps` in the JSON body), or one `--body-file <path|->` document: exact commands,
+  where to click, what to paste where, never a secret value. Commands and paths inside `steps` and `body`
+  are legitimate, so the writing check does not read them. The item alone must be enough to finish the task.
+  `fy attention ls` prints them numbered, `✓` on done ones; `fy attention step <id> <n> [--undo]` ticks one.
 - **Concrete questions.** Two to four short options, and a recommendation with its reason in one line.
 
 The daemon checks this on every `fy attention add` and `fy attention edit`. It **warns, never refuses**:
@@ -120,7 +129,7 @@ characters, ticket-like ids (`ABC-123`, `#1234`), URLs, file paths, and ALL-CAPS
 `terms` (`packages/daemon/src/lib/attention/writing-lint.ts`).
 
 **`fy attention edit <id>`** rewords an open item the ferret raised: summary, context, terms, the
-questions' words (same count and options, in order), recommendation, impact, urgency and links. It
+questions' words (same count and options, in order), recommendation, impact, urgency, links, steps and body. It
 never changes the ask, who raised it or the question options, and it does not push again.
 
 ## The unread signal

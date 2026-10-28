@@ -1127,6 +1127,15 @@ describe('attention schemas', () => {
       },
       { action: 'resolve', id: 'A1', note: 'resolved', response: { kind: 'permission', decision: 'approve' } },
       { action: 'dismiss', id: 'A1', note: 'obsolete' },
+      {
+        action: 'add',
+        subject: 'Log in',
+        why: 'Blocked',
+        howToResolve: 'Follow the steps',
+        steps: ['Run `fy login`'],
+        body: '## Notes',
+      },
+      { action: 'progress', id: 'A1', step: 0, done: true },
     ];
 
     // Act + Assert

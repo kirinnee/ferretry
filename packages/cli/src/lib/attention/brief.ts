@@ -35,6 +35,10 @@ export interface BriefFlags extends AskFlags {
   readonly urgency?: string;
   /** A URL, a path or a reference, repeated. */
   readonly link?: readonly string[];
+  /** One Markdown step each, in order, repeated. */
+  readonly step?: readonly string[];
+  /** The text of `--body-file`: one Markdown document. */
+  readonly body?: string;
 }
 
 const OptionInput = z.union([z.string(), z.object({ label: z.string(), description: z.string().optional() })]);
@@ -71,6 +75,8 @@ const BriefFileSchema = z.strictObject({
   impact: Prose.optional(),
   urgency: z.string().optional(),
   links: z.array(LinkInput).optional(),
+  steps: z.array(z.string()).optional(),
+  body: z.string().optional(),
 });
 export type BriefFile = z.infer<typeof BriefFileSchema>;
 
@@ -113,6 +119,8 @@ export function composeAddRequest(
   const impact = prose(flags.impact) ?? prose(file.impact);
   const urgency = text(flags.urgency) ?? text(file.urgency);
   const context = prose(flags.context) ?? prose(file.context);
+  const steps = stepsFrom(flags.step) ?? stepsFrom(file.steps);
+  const body = text(flags.body) ?? text(file.body);
 
   const request = {
     action: 'add' as const,
@@ -129,6 +137,8 @@ export function composeAddRequest(
     ...(impact === undefined ? {} : { impact }),
     ...(urgency === undefined ? {} : { urgency }),
     ...(links === undefined || links.length === 0 ? {} : { links }),
+    ...(steps === undefined ? {} : { steps }),
+    ...(body === undefined ? {} : { body }),
   };
   const parsed = AttentionActionRequestSchema.safeParse(request);
   if (!parsed.success) throw new Error(describeIssues(parsed.error));
@@ -270,6 +280,12 @@ function prose(value: string | readonly string[] | undefined): string | undefine
   return points.length === 1 ? points[0] : toBullets(points);
 }
 
+/** The steps, in order, with blank ones dropped; nothing when none are left. */
+function stepsFrom(value: readonly string[] | undefined): string[] | undefined {
+  const steps = (value ?? []).map(step => step.trim()).filter(step => step !== '');
+  return steps.length === 0 ? undefined : steps;
+}
+
 /** A trimmed value, or nothing when it was absent or blank. */
 function text(value: string | undefined): string | undefined {
   const trimmed = value?.trim() ?? '';
@@ -298,6 +314,10 @@ export interface EditFlags {
   readonly impact?: string | readonly string[];
   readonly urgency?: string;
   readonly link?: readonly string[];
+  /** Replaces the steps, in order; repeat. Clears any ticks. */
+  readonly step?: readonly string[];
+  /** The text of `--body-file`: replaces the body. */
+  readonly body?: string;
 }
 
 /**
@@ -318,6 +338,8 @@ export function composeEditRequest(
   const why = text(flags.recommendWhy);
   const terms = flags.term !== undefined && flags.term.length > 0 ? flags.term.map(termFrom) : undefined;
   const links = flags.link !== undefined && flags.link.length > 0 ? flags.link.map(link) : undefined;
+  const steps = stepsFrom(flags.step);
+  const body = text(flags.body);
   const words = (flags.question ?? []).map(question => question.trim()).filter(question => question !== '');
   if (words.length > 0 && current === undefined) throw new Error(`no unresolved attention item ${id} to reword`);
   const before = current?.questions ?? [];
@@ -339,6 +361,8 @@ export function composeEditRequest(
     ...(impact === undefined ? {} : { impact }),
     ...(urgency === undefined ? {} : { urgency }),
     ...(links === undefined ? {} : { links }),
+    ...(steps === undefined ? {} : { steps }),
+    ...(body === undefined ? {} : { body }),
   };
   const parsed = AttentionActionRequestSchema.safeParse(request);
   if (!parsed.success) throw new Error(describeIssues(parsed.error));

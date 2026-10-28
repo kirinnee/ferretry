@@ -68,7 +68,7 @@ function itemLines(item: AttentionItem): string[] {
   if (item.context !== null && item.context !== undefined && item.context.trim() !== '') {
     lines.push(`${INDENT}context: ${compact(item.context)}`);
   }
-  lines.push(...briefLines(item));
+  lines.push(...briefLines(item), ...instructionLines(item));
   if (item.why.trim() !== item.subject.trim()) lines.push(`${INDENT}why: ${compact(item.why)}`);
   lines.push(`${INDENT}resolve: ${compact(item.howToResolve)}`);
   lines.push(`${INDENT}since ${item.waitingSince} · raised by ${actor(item.raisedBy, item.raisedByName)}`);
@@ -106,6 +106,21 @@ function briefLines(item: AttentionItem): string[] {
   if (item.links !== undefined) {
     lines.push(`${INDENT}links: ${compact(item.links.map(link => link.label ?? link.target).join(' · '))}`);
   }
+  return lines;
+}
+
+/** The instructions the owner follows: the steps numbered from 1 with a tick on the done ones, then the body. */
+function instructionLines(item: AttentionItem): string[] {
+  const lines: string[] = [];
+  const done = new Set(item.stepsDone ?? []);
+  const steps = item.steps ?? [];
+  if (steps.length > 0) {
+    lines.push(`${INDENT}steps (${done.size}/${steps.length} done):`);
+    steps.forEach((step, index) => {
+      lines.push(`${INDENT}  ${index + 1}. ${done.has(index) ? '✓' : '·'} ${compact(step)}`);
+    });
+  }
+  if (item.body !== undefined) lines.push(`${INDENT}body: ${compact(item.body)}`);
   return lines;
 }
 

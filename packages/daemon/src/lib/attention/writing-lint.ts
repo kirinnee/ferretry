@@ -22,7 +22,10 @@ interface Field {
   readonly text: string;
 }
 
-/** Every piece of prose the item carries, named for the warning that points at it. */
+/**
+ * Every piece of prose the item carries, named for the warning that points at it. `steps` and `body`
+ * are left out on purpose: instructions legitimately carry commands, paths and links.
+ */
 function fieldsOf(item: AttentionWriting): Field[] {
   const fields: Field[] = [{ name: 'summary', text: item.subject }];
   const push = (name: string, text: string | null | undefined): void => {

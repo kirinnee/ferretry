@@ -350,3 +350,23 @@ describe('Attention board observers', () => {
     should(missing).deepEqual({ message: 'hello !A1', answers: [] });
   });
 });
+
+describe('Attention board progress observers', () => {
+  it('should tell change observers about a tick, but tell the ferret nothing', async () => {
+    // Arrange
+    const changes = new RecordingChanges();
+    const attention = service(new MemoryRepository(), changes);
+    await attention.raise(SESSION, { ...ASK, steps: ['Do it'] }, AGENT);
+    await attention.progress(SESSION, 'A1', 0, true, HUMAN);
+    const messenger = new RecordingMessenger();
+    const delivery = new AttentionReplyDelivery(messenger);
+
+    // Act
+    for (const { sessionId, change } of changes.seen) await delivery.changed(sessionId, change);
+
+    // Assert
+    should(changes.seen.map(each => each.change.change)).deepEqual(['created', 'progressed']);
+    should(changes.seen[1]?.change.item).containDeep({ id: 'A1', stepsDone: [0] });
+    should(messenger.sent).deepEqual([]);
+  });
+});
