@@ -72,7 +72,12 @@ interface Opened {
 
 const openDeck = async (
   openLinksIn: OpenLinksIn,
-  options: { readonly ios?: boolean; readonly computer?: ComputerLinkPort; readonly rows?: string[] } = {},
+  options: {
+    readonly ios?: boolean;
+    readonly computer?: ComputerLinkPort;
+    readonly rows?: string[];
+    readonly notify?: (message: string) => void;
+  } = {},
 ): Promise<Opened> => {
   const opened = fakeOpener(options.ios ?? false);
   const spy = xtermSpy({ buffer: terminalBuffer(options.rows ?? [`read ${URL_ON_SCREEN} now`], 80) });
@@ -82,6 +87,7 @@ const openDeck = async (
       openLinksIn={openLinksIn}
       opener={opened.opener}
       {...(options.computer === undefined ? {} : { computer: options.computer })}
+      {...(options.notify === undefined ? {} : { notify: options.notify })}
     >
       <SessionTerminalDeck connection={connection} dependencies={deck.dependencies} scope={scope} />
     </LinkBehaviourProvider>,
@@ -183,6 +189,113 @@ describe('SessionTerminalDeck — links', () => {
         await page.unmount();
       }
     });
+  });
+
+  describe('a link the program broke across two rows', () => {
+    // The fake emulator is 80 columns wide, so the first row runs to exactly the last one.
+    const HEAD = `see https://docs.example.test/${'a'.repeat(80 - 'see https://docs.example.test/'.length - 1)}/`;
+    const TAIL = 'path/to/page?x=1';
+    const FULL = `${HEAD.slice(4)}${TAIL}`;
+    const rows = [HEAD, TAIL];
+
+    it('is one link whose click opens the whole address, from either row', async () => {
+      const { page, spy, opened } = await openDeck('browser', { rows });
+      try {
+        const provider = must(spy.instances[0]?.links.providers[0], 'the registered link provider');
+        for (const row of [1, 2]) {
+          let found: { activate(click: LinkClick, text: string): void; text: string } | undefined;
+          provider.provideLinks(row, links => {
+            found = links?.[0];
+          });
+          const link = must(found, `a link on row ${row}`);
+          expect(link.text).toBe(FULL);
+          await interact(() => link.activate(click(), link.text));
+        }
+        expect(opened.tabs).toEqual([FULL, FULL]);
+      } finally {
+        await page.unmount();
+      }
+    });
+
+    it('goes where the setting says: through the daemon for the computer', async () => {
+      const handed: string[] = [];
+      const { page, spy, opened } = await openDeck('computer', {
+        rows,
+        computer: async href => void handed.push(href),
+      });
+      try {
+        const provider = must(spy.instances[0]?.links.providers[0], 'the registered link provider');
+        let found: { activate(click: LinkClick, text: string): void; text: string } | undefined;
+        provider.provideLinks(2, links => {
+          found = links?.[0];
+        });
+        await interact(() => must(found, 'a link on row 2').activate(click(), FULL));
+        expect(handed).toEqual([FULL]);
+        expect(opened.tabs).toEqual([]);
+      } finally {
+        await page.unmount();
+      }
+    });
+  });
+
+  describe('when the computer cannot be reached, the reader is told', () => {
+    const noticesFor = async (
+      path: 'provider' | 'osc8',
+      options: { readonly computer?: ComputerLinkPort; readonly setting?: OpenLinksIn } = {},
+    ) => {
+      const notices: string[] = [];
+      const { page, spy, screenLink, opened } = await openDeck(options.setting ?? 'computer', {
+        rows: [URL_ON_SCREEN],
+        notify: message => void notices.push(message),
+        ...(options.computer === undefined ? {} : { computer: options.computer }),
+      });
+      try {
+        if (path === 'provider') await interact(() => screenLink().activate(click(), URL_ON_SCREEN));
+        else {
+          const range = { start: { x: 1, y: 1 }, end: { x: URL_ON_SCREEN.length, y: 1 } };
+          await interact(() =>
+            must(spy.instances[0]?.links.handler, 'the OSC 8 handler').activate(click(), URL_ON_SCREEN, range),
+          );
+        }
+        await settle();
+        return { notices, tabs: opened.tabs };
+      } finally {
+        await page.unmount();
+      }
+    };
+
+    for (const path of ['provider', 'osc8'] as const) {
+      it(`no daemon on this computer: opens a tab and says why (${path})`, async () => {
+        const { notices, tabs } = await noticesFor(path);
+        expect(tabs).toEqual([URL_ON_SCREEN]);
+        expect(notices).toHaveLength(1);
+        expect(notices[0]).toContain('default browser');
+        expect(notices[0]).not.toContain(URL_ON_SCREEN);
+      });
+
+      it(`a hand-off that fails: opens a tab and says why, without the address (${path})`, async () => {
+        const { notices, tabs } = await noticesFor(path, {
+          computer: async () => {
+            throw new Error('the daemon answered 503');
+          },
+        });
+        expect(tabs).toEqual([URL_ON_SCREEN]);
+        expect(notices).toHaveLength(1);
+        expect(notices[0]).toContain('the daemon answered 503');
+        expect(notices[0]).not.toContain(URL_ON_SCREEN);
+      });
+
+      it(`a hand-off that works says nothing (${path})`, async () => {
+        const { notices, tabs } = await noticesFor(path, { computer: async () => {} });
+        expect(tabs).toEqual([]);
+        expect(notices).toEqual([]);
+      });
+
+      it(`browser and panel never apologise (${path})`, async () => {
+        for (const setting of ['browser', 'panel'] as const)
+          expect((await noticesFor(path, { setting })).notices).toEqual([]);
+      });
+    }
   });
 
   describe('a modified click', () => {

@@ -80,10 +80,16 @@ describe('decideLinkAction', () => {
 
   it('behaves as the browser does when the computer is chosen but no local daemon is connected', () => {
     for (const computerAvailable of [false, undefined]) {
-      expect(decide({ setting: 'computer', computerAvailable })).toEqual({ kind: 'native' });
-      expect(decide({ setting: 'computer', computerAvailable, iosStandalone: true })).toEqual(
-        decide({ setting: 'browser', iosStandalone: true }),
-      );
+      expect(decide({ setting: 'computer', computerAvailable })).toEqual({
+        kind: 'native',
+        notice: 'computer-unavailable',
+      });
+      const browser = decide({ setting: 'browser', iosStandalone: true });
+      expect(browser.kind).toBe('safari');
+      const computer = decide({ setting: 'computer', computerAvailable, iosStandalone: true });
+      expect(computer).toMatchObject({ kind: 'safari', notice: 'computer-unavailable' });
+      expect(computer).toMatchObject(browser);
+      expect(decide({ setting: 'computer', computerAvailable, href: 'mailto:a@b.test' })).toEqual({ kind: 'native' });
     }
   });
 

@@ -81,6 +81,7 @@ import { DeviceRefusedNotice } from './features/pairing/device-refused-notice.ts
 import { PairingScreen } from './features/pairing/pairing-screen.tsx';
 import { ProjectDetailPage } from './features/projects/project-detail.tsx';
 import { ProjectsPage } from './features/projects/projects-page.tsx';
+import { ActionToast } from './features/session-actions/action-toast.tsx';
 import { sessionRowMenuRenderer } from './features/session-actions/row-actions-host.tsx';
 import { switchTapper } from './features/session-info/switch-marks.tsx';
 import { SessionSearchControl, SessionSearchProvider } from './features/session-search/session-search.tsx';
@@ -2726,9 +2727,16 @@ function StoreLinkBehaviour({ children }: { readonly children: ReactNode }) {
     () => store.controls.snapshot().device.openLinksIn,
   );
   const computer = useLocalComputer();
+  const [notice, setNotice] = useState<string | null>(null);
+  const dismiss = useCallback(() => setNotice(null), []);
   return (
-    <LinkBehaviourProvider openLinksIn={openLinksIn} {...(computer === undefined ? {} : { computer })}>
+    <LinkBehaviourProvider
+      notify={setNotice}
+      openLinksIn={openLinksIn}
+      {...(computer === undefined ? {} : { computer })}
+    >
       {children}
+      <ActionToast notice={notice} onDismiss={dismiss} />
     </LinkBehaviourProvider>
   );
 }
