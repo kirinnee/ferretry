@@ -6,6 +6,10 @@
   "tests/e2e/browser-cors-preflight.e2e.test.ts": {
     "a real browser at another origin, and a compiled daemon > should let a cross-origin page send the request-id header and refuse a lookalike": 1.3
   },
+  "tests/e2e/chat-live-update.e2e.test.ts": {
+    "a Chat following a working agent > should show each block the agent writes within the budget of its append, over direct": 38,
+    "a Chat following a working agent > should show each block the agent writes within the budget of its append, over relay": 33
+  },
   "tests/e2e/command-groups.e2e.test.ts": {
     "command group journeys > should ask for a session id rather than acting on an unnamed board": 0.4,
     "command group journeys > should emit machine-readable output under --json": 0.4,

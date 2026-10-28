@@ -32,6 +32,11 @@ const cases: SchemaCase[] = [
     schema: live.SessionCompactionSchema,
     value: { phase: 'done', endedAt: '2026-10-18T07:00:41.000Z', tokensBefore: 10 },
   },
+  {
+    name: 'transcript moved',
+    schema: live.SessionTranscriptMovedSchema,
+    value: { sessionId: 'session-1', at: '2026-10-18T07:00:06.000Z' },
+  },
 ];
 
 describe('the session live readout protocol', () => {
@@ -44,6 +49,19 @@ describe('the session live readout protocol', () => {
   it('should ask for the stream with the flag value the daemon reads', () => {
     // Assert — a reader and the daemon agree on one spelling, from this one constant.
     should(live.SESSION_LIVE_STREAM_FLAG).equal('1');
+    should(live.SESSION_TRANSCRIPT_STREAM_FLAG).equal('1');
+  });
+
+  it('should carry nothing but who moved and when, so a signal can never stand in for the transcript', () => {
+    // Act
+    const withContent = live.SessionTranscriptMovedSchema.safeParse({
+      sessionId: 'session-1',
+      at: '2026-10-18T07:00:06.000Z',
+      text: 'a reply',
+    });
+
+    // Assert
+    should(withContent.success).be.false();
   });
 
   it('should treat every count as optional so an unmeasured one stays unknown rather than zero', () => {

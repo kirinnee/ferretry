@@ -1,4 +1,4 @@
-import { CONFIG_CHANGE_TOPIC, SESSION_LIVE_STREAM_FLAG } from '@ferretry/protocol';
+import { CONFIG_CHANGE_TOPIC, SESSION_LIVE_STREAM_FLAG, SESSION_TRANSCRIPT_STREAM_FLAG } from '@ferretry/protocol';
 import { ApiError } from '../../api/error.ts';
 import { queryValues } from '../../api/http.ts';
 import type { RouteContext } from '../../api/route.ts';
@@ -60,6 +60,7 @@ async function scope(context: RouteContext, sessions: SessionDirectorySubsystem)
       name !== 'after' &&
       name !== 'sessionId' &&
       name !== 'live' &&
+      name !== 'transcript' &&
       name !== 'tail' &&
       name !== 'token' &&
       name !== 'ticket'
@@ -73,6 +74,11 @@ async function scope(context: RouteContext, sessions: SessionDirectorySubsystem)
   const rawLive = soleQuery(context, 'live');
   if (rawLive !== undefined && rawLive !== SESSION_LIVE_STREAM_FLAG)
     throw new ApiError(400, `live must be "${SESSION_LIVE_STREAM_FLAG}" when given`, 'invalid_query');
+  // `?transcript=1`: say when the session's transcript changes. A daemon that predates it refuses it as an
+  // unknown parameter, before any frame, which is how a reader learns to read on its poll alone.
+  const rawTranscript = soleQuery(context, 'transcript');
+  if (rawTranscript !== undefined && rawTranscript !== SESSION_TRANSCRIPT_STREAM_FLAG)
+    throw new ApiError(400, `transcript must be "${SESSION_TRANSCRIPT_STREAM_FLAG}" when given`, 'invalid_query');
   const rawTail = soleQuery(context, 'tail');
   const rawSessionId = soleQuery(context, 'sessionId');
   if (rawSessionId === undefined) {
@@ -87,6 +93,8 @@ async function scope(context: RouteContext, sessions: SessionDirectorySubsystem)
     // A live readout is one turn's; the fleet has no one turn to read.
     if (rawLive !== undefined)
       throw new ApiError(400, 'a live readout follows one session; add sessionId', 'live_needs_session');
+    if (rawTranscript !== undefined)
+      throw new ApiError(400, 'a transcript signal follows one session; add sessionId', 'transcript_needs_session');
     return rawTail === undefined ? { kind: 'fleet' } : { kind: 'fleet', tail: fleetTail(rawTail) };
   }
   // One session resumes from its own cursor; a second way to say where to start would only disagree.
@@ -96,7 +104,13 @@ async function scope(context: RouteContext, sessions: SessionDirectorySubsystem)
   if (id === undefined) throw new ApiError(400, 'sessionId is not a usable session id', 'invalid_session_id');
   const session = await sessions.get(id);
   if (session === undefined) throw new ApiError(404, `no session ${id}`, 'not-found');
-  return { kind: 'session', sessionId: id, after, ...(rawLive === undefined ? {} : { live: true }) };
+  return {
+    kind: 'session',
+    sessionId: id,
+    after,
+    ...(rawLive === undefined ? {} : { live: true }),
+    ...(rawTranscript === undefined ? {} : { transcript: true }),
+  };
 }
 
 /** The optional-id event feed, mounted through the daemon's one socket dispatcher. */

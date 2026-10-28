@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import type { FyEvent, FyEventStreamIdle, SessionLiveActivity } from '@ferretry/protocol';
+import type { FyEvent, FyEventStreamIdle, SessionLiveActivity, SessionTranscriptMoved } from '@ferretry/protocol';
 import {
   SESSION_EVENT_STREAM_BACKOFF,
   SESSION_EVENT_STREAM_QUIET_MS,
@@ -40,10 +40,15 @@ interface Attempt {
   /** Whether the model asked for the live readout at all: a handler was supplied, which is what sets `?live=1`. */
   readonly asksForLive: boolean;
   readonly live: (live: SessionLiveActivity) => void;
+  /** Whether the model asked for the transcript signal: a handler was supplied, which sets `?transcript=1`. */
+  readonly asksForTranscript: boolean;
+  readonly transcript: (moved: SessionTranscriptMoved) => void;
   /** The daemon closed cleanly. The transport resolves. */
   readonly end: () => void;
   /** The socket died. The transport rejects. */
   readonly fail: () => void;
+  /** The daemon refused the upgrade with this HTTP status, before any frame. */
+  readonly refuse: (status: number) => void;
 }
 
 /** Every subscription the model opened, with the daemon's half of it still in the test's hands. */
@@ -63,6 +68,7 @@ class ScriptedStream {
     signal?: AbortSignal,
     onIdle?: (idle: FyEventStreamIdle) => void,
     onLive?: (live: SessionLiveActivity) => void,
+    onTranscript?: (moved: SessionTranscriptMoved) => void,
   ): Promise<void> =>
     await new Promise<void>((resolve, reject) => {
       this.attempts.push({
@@ -73,8 +79,11 @@ class ScriptedStream {
         idle: frame => onIdle?.(frame),
         asksForLive: onLive !== undefined,
         live: sample => onLive?.(sample),
+        asksForTranscript: onTranscript !== undefined,
+        transcript: moved => onTranscript?.(moved),
         end: resolve,
         fail: () => reject(new Error('WebSocket stream closed unexpectedly: code 1006')),
+        refuse: status => reject(Object.assign(new Error(`the daemon refused this stream: ${status}`), { status })),
       });
     });
 }
@@ -980,5 +989,102 @@ describe('the live feed quiet window', () => {
     // Assert
     expect(harness.clock.delays).toEqual([]);
     expect(harness.statuses).toEqual(['live']);
+  });
+});
+
+const moved: SessionTranscriptMoved = { sessionId: 's1', at: '2026-08-24T00:00:01.000Z' };
+
+describe('the transcript signal', () => {
+  test('should ask for it only with a handler, and hand each signal on without moving the cursor', async () => {
+    // Arrange
+    const signals: SessionTranscriptMoved[] = [];
+    const asked = subject({ onTranscript: value => signals.push(value) });
+    const unasked = subject();
+
+    // Act
+    asked.transport.last.emit(event(4));
+    asked.transport.last.transcript(moved);
+    asked.transport.last.fail();
+    await settle();
+    asked.clock.fire(150);
+
+    // Assert — the signal proved the feed, reached its handler, and the retry resumed from the event's cursor.
+    expect(asked.transport.attempts[0]?.asksForTranscript).toBe(true);
+    expect(unasked.transport.last.asksForTranscript).toBe(false);
+    expect(signals).toEqual([moved]);
+    expect(asked.events.map(value => value.sequence)).toEqual([4]);
+    expect(asked.transport.last.after).toBe(4);
+    expect(asked.transport.last.asksForTranscript).toBe(true);
+    asked.control.stop();
+    unasked.control.stop();
+  });
+
+  test('should count a signal as proof the feed is live, and re-arm the silence deadline', () => {
+    // Arrange
+    const harness = subject({ onTranscript: () => undefined });
+
+    // Act
+    harness.transport.last.transcript(moved);
+
+    // Assert
+    expect(harness.statuses).toEqual(['live']);
+    expect(harness.clock.delays).toEqual([DEADLINE]);
+    harness.control.stop();
+  });
+
+  test('should reopen at once without the flag when a daemon too old for it refuses the upgrade', async () => {
+    // Arrange
+    const signals: SessionTranscriptMoved[] = [];
+    const harness = subject({ onTranscript: value => signals.push(value) });
+
+    // Act — a 400 before any frame is the daemon saying it does not know `transcript`.
+    harness.transport.last.refuse(400);
+    await settle();
+
+    // Assert — no backoff, no "reconnecting", the budget untouched, and the flag never asked for again.
+    expect(harness.transport.attempts.map(attempt => attempt.asksForTranscript)).toEqual([true, false]);
+    expect(harness.clock.delays).toEqual([DEADLINE]);
+    expect(harness.statuses).toEqual([]);
+    harness.transport.last.emit(event(1));
+    harness.transport.last.fail();
+    await settle();
+    harness.clock.fire(150);
+    expect(harness.transport.last.asksForTranscript).toBe(false);
+    expect(harness.statuses).toEqual(['live']);
+    harness.control.stop();
+  });
+
+  test('should treat a refusal after a frame, or any other failure, as an ordinary drop', async () => {
+    // Arrange
+    const afterFrame = subject({ onTranscript: () => undefined });
+    const otherFailure = subject({ onTranscript: () => undefined });
+
+    // Act
+    afterFrame.transport.last.idle(idleFrame(30));
+    afterFrame.transport.last.refuse(400);
+    otherFailure.transport.last.refuse(503);
+    await settle();
+    afterFrame.clock.fire(150);
+    otherFailure.clock.fire(150);
+
+    // Assert — both waited out a backoff, and both still ask for the signal.
+    expect(afterFrame.transport.attempts.map(attempt => attempt.asksForTranscript)).toEqual([true, true]);
+    expect(otherFailure.transport.attempts.map(attempt => attempt.asksForTranscript)).toEqual([true, true]);
+    afterFrame.control.stop();
+    otherFailure.control.stop();
+  });
+
+  test('should not reopen for a refusal that lands after the owner stopped the feed', async () => {
+    // Arrange
+    const harness = subject({ onTranscript: () => undefined });
+
+    // Act
+    harness.control.stop();
+    harness.transport.last.refuse(400);
+    await settle();
+
+    // Assert
+    expect(harness.transport.attempts).toHaveLength(1);
+    expect(harness.clock.delays).toEqual([]);
   });
 });

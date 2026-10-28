@@ -206,6 +206,30 @@ describe('DaemonEventTransport', () => {
     ]);
   });
 
+  it('should carry the transcript signal a session stream asks for', async () => {
+    // Arrange
+    const streams = opener();
+    const transport = new DaemonEventTransport(daemon, streams.open);
+
+    // Act
+    const streaming = transport.stream({
+      ...streamInput(() => undefined),
+      url: 'wss://daemon.example.test/v1/events?after=3&sessionId=session-1&live=1&transcript=1',
+    });
+    await settle();
+    const session = streams.opened[0]?.session as FakeStreamSession;
+    session.daemonCloses({ code: 1000, reason: 'done' });
+    await streaming;
+
+    // Assert — refusing it here would have ended every Chat's live feed before it opened.
+    should(session.request.query).deepEqual([
+      ['after', '3'],
+      ['sessionId', 'session-1'],
+      ['live', '1'],
+      ['transcript', '1'],
+    ]);
+  });
+
   it('should carry the fleet feed’s replay tail', async () => {
     // Arrange
     const streams = opener();
