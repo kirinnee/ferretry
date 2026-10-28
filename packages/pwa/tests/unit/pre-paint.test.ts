@@ -122,14 +122,12 @@ describe('the pre-paint bootstrap and the theme module resolve identically', () 
     }
   });
 
-  it('publishes the text scale and the same adjustment percentage the module applies', () => {
+  it('publishes the text scale and the same factor the module applies', () => {
     for (const raw of STORED_VALUES) {
       const { attributes, properties } = runBootstrap(raw, false);
       const scale = parseThemePreference(raw).textScale;
-      const percent = `${TEXT_SCALE_FACTORS[scale] * 100}%`;
       expect(attributes['data-text-scale']).toBe(scale);
-      expect(properties['text-size-adjust']).toBe(percent);
-      expect(properties['-webkit-text-size-adjust']).toBe(percent);
+      expect(properties['--fy-text-scale']).toBe(String(TEXT_SCALE_FACTORS[scale]));
     }
   });
 
