@@ -112,6 +112,17 @@ const DESTINATION_KEYWORDS: Readonly<Record<string, readonly string[]>> = {
 export const PAIR_PHONE_SEARCH_TERMS =
   'pair phone device add qr code scan invite mobile tablet browser another connect link';
 
+export const WHATS_NEW_SEARCH_TERMS = 'whats new changelog release notes updates version changes latest';
+
+export const whatsNewPaletteCommand = (Icon: LucideIcon, run: () => void): PaletteCommand => ({
+  id: 'whats-new',
+  label: 'What’s new',
+  description: 'See what changed in recent versions of Ferretry.',
+  searchTerms: WHATS_NEW_SEARCH_TERMS,
+  run,
+  Icon,
+});
+
 export const pairPhonePaletteCommand = (
   label: string,
   description: string,

@@ -19,13 +19,14 @@
  */
 
 import type { DaemonUpdateView, IFyApiClient } from '@ferretry/protocol';
-import { ExternalLink } from 'lucide-react';
+import { ExternalLink, Sparkles } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { appVersion } from '../../lib/app-version.ts';
 import { cn } from '../../lib/class-names.ts';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
 import { useDaemonClient } from '../../lib/store.tsx';
 import { Badge, Button } from '../../shell/primitives.tsx';
+import { useWhatsNewEntry } from '../whats-new/whats-new-host.tsx';
 import { CommandBlock } from '../onboarding/command-block.tsx';
 import { browserClipboardWriter, type ClipboardWriter } from '../onboarding/copy-button.tsx';
 import {
@@ -163,6 +164,7 @@ export function AboutMachinePanel({
   const install = installWords(view);
   const pair = versionPairWords(app, view.current);
   const release = changelogRelease(view);
+  const whatsNew = useWhatsNewEntry();
   const job = view.job === null ? null : jobWords(view.job);
   return (
     <section className="kt-panel flex min-w-0 flex-col gap-3 p-panel" aria-labelledby="about-machine-heading">
@@ -200,17 +202,43 @@ export function AboutMachinePanel({
         {pair.text}
       </p>
 
-      {release === undefined ? null : (
-        <a
-          className="inline-flex min-h-[44px] w-fit items-center gap-1 text-cell text-accent underline"
-          href={release.url}
-          target="_blank"
-          rel="noreferrer noopener"
-          data-about-changelog=""
-        >
-          What’s new in {release.version}
-          <ExternalLink size={13} aria-hidden="true" />
-        </a>
+      {whatsNew === null ? (
+        release === undefined ? null : (
+          <a
+            className="inline-flex min-h-[44px] w-fit items-center gap-1 text-cell text-accent underline"
+            href={release.url}
+            target="_blank"
+            rel="noreferrer noopener"
+            data-about-changelog=""
+          >
+            What’s new in {release.version}
+            <ExternalLink size={13} aria-hidden="true" />
+          </a>
+        )
+      ) : (
+        <div className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-1">
+          <Button size="sm" className="min-h-[44px]" onClick={whatsNew.open} data-about-whats-new="">
+            <Sparkles size={13} aria-hidden="true" />
+            What’s new
+            {whatsNew.unread ? (
+              <Badge tone="accent" data-about-whats-new-unread="">
+                New
+              </Badge>
+            ) : null}
+          </Button>
+          {release === undefined ? null : (
+            <a
+              className="inline-flex min-h-[44px] items-center gap-1 text-cell text-muted underline"
+              href={release.url}
+              target="_blank"
+              rel="noreferrer noopener"
+              data-about-changelog=""
+            >
+              Full release on GitHub
+              <ExternalLink size={13} aria-hidden="true" />
+            </a>
+          )}
+        </div>
       )}
 
       {job === null ? null : (

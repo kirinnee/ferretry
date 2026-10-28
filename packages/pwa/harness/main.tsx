@@ -318,6 +318,7 @@ import { machineSetupAnswer } from './machine-setup-fixture.ts';
 import { HARNESS_MACHINE_TABS } from './machine-tabs.tsx';
 import { McpSignInFrameHarness, mcpSignInFrame } from './mcp-sign-in.tsx';
 import { isPairFromMenuPage, PairFromMenuHarness } from './pair-from-menu.tsx';
+import { isWhatsNewPage, WhatsNewHarness } from './whats-new.tsx';
 import { harnessPerformanceClient, harnessRecorder } from './performance-fixture.ts';
 import { isSessionContextMenuPage, SessionContextMenuHarness } from './session-context-menu.tsx';
 import {
@@ -8826,6 +8827,7 @@ if (host) {
   const mcpFrame = mcpSignInFrame(window.location.search);
   const contextTools = contextToolsFrame(window.location.search);
   const pairFromMenu = isPairFromMenuPage(window.location.search);
+  const whatsNewPage = isWhatsNewPage(window.location.search);
   const sessionContextMenu = isSessionContextMenuPage(window.location.search);
   // `?viewport-overlay`: Settings › This device › About this device's readout pinned over any frame, as the
   // owner sees it on a phone after "Show over the app".
@@ -8841,6 +8843,8 @@ if (host) {
           <ContextToolsHarness frame={contextTools} />
         ) : sessionContextMenu ? (
           <SessionContextMenuHarness />
+        ) : whatsNewPage ? (
+          <WhatsNewHarness />
         ) : pairFromMenu ? (
           <PairFromMenuHarness />
         ) : appChromeHarness !== null ? (

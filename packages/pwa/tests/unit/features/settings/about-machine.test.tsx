@@ -8,6 +8,7 @@ import {
 import { daemonConnection } from '../../../../src/lib/daemon-connection.ts';
 import { interact, type Mounted, mount, must } from '../../../support/dom.ts';
 import { updateView } from './about-machine-support.ts';
+import { type WhatsNewEntry, WhatsNewProvider } from '../../../../src/features/whats-new/whats-new-host.tsx';
 
 const connection = daemonConnection({ daemonId: 'alpha', baseUrl: 'https://alpha.example.test', deviceId: 'device-a' });
 const NOW = Date.parse('2026-10-18T12:00:00.000Z');
@@ -67,18 +68,20 @@ afterEach(async () => {
   mounted = null;
 });
 
-const show = async (machine: FakeMachine, pollMs = 5): Promise<HTMLElement> => {
+const show = async (machine: FakeMachine, pollMs = 5, whatsNew: WhatsNewEntry | null = null): Promise<HTMLElement> => {
   const writes: string[] = [];
   mounted = await mount(
-    <AboutMachineSurface
-      connection={connection}
-      createClient={async () => machine}
-      pollMs={pollMs}
-      clock={() => NOW}
-      write={async text => {
-        writes.push(text);
-      }}
-    />,
+    <WhatsNewProvider value={whatsNew}>
+      <AboutMachineSurface
+        connection={connection}
+        createClient={async () => machine}
+        pollMs={pollMs}
+        clock={() => NOW}
+        write={async text => {
+          writes.push(text);
+        }}
+      />
+    </WhatsNewProvider>,
   );
   await settle();
   return mounted.container;
@@ -199,6 +202,21 @@ describe('AboutMachineSurface', () => {
     expect(machine.settings).toEqual([true]);
     expect(container.querySelector('[data-about-auto-install]')?.getAttribute('aria-checked')).toBe('true');
     expect(container.querySelector('[data-about-auto-install]')?.textContent).toBe('On');
+  });
+
+  it('opens What’s new in the app and keeps the GitHub release as a secondary link when a host is mounted', async () => {
+    let opened = 0;
+    const container = await show(new FakeMachine(updateView()), 5, {
+      open: () => (opened += 1),
+      unread: true,
+      latest: '4.29.0',
+    });
+    const button = must(container.querySelector<HTMLElement>('[data-about-whats-new]'), 'button');
+    expect(button.textContent).toContain('What’s new');
+    expect(container.querySelector('[data-about-whats-new-unread]')?.textContent).toBe('New');
+    await interact(() => button.click());
+    expect(opened).toBe(1);
+    expect(container.querySelector('[data-about-changelog]')?.textContent).toContain('Full release on GitHub');
   });
 
   it('shows no Update button when the machine is current', async () => {
