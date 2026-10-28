@@ -1,0 +1,36 @@
+# The one way a job installs Nix (docs/standards/ci-cd/index.md#installing-nix). Every workflow calls
+# this instead of `cachix/install-nix-action` so the network settings and the retries below are written
+# once. A job on Namespace still mounts its `/nix` cache volume BEFORE calling it.
+name: Install Nix
+description: Install Nix with patient downloads, then realise the job's dev shell, retrying network failures.
+inputs:
+  shell:
+    description: The flake dev shell the job enters, realised here so a failed download is retried before the job's real step.
+    default: .#ci
+runs:
+  using: composite
+  steps:
+    # The installer's own download tries five times one second apart, which a DNS blip outlasts
+    # ("Could not resolve host: releases.nixos.org" on `main`). It fails before anything is installed,
+    # so a second install a minute later is safe; there is no third.
+    - id: first
+      continue-on-error: true
+      uses: cachix/install-nix-action@13d8dd58da0234aa297dedd986986ccb8e7f3e24 # v31.11.1
+      with:
+        extra_nix_config: |
+          download-attempts = 10
+          connect-timeout = 15
+    - if: steps.first.outcome == 'failure'
+      shell: bash
+      run: echo "::warning::installing Nix failed once; trying again in 60s" && sleep 60
+    - if: steps.first.outcome == 'failure'
+      uses: cachix/install-nix-action@13d8dd58da0234aa297dedd986986ccb8e7f3e24 # v31.11.1
+      with:
+        # The same settings as the first attempt.
+        extra_nix_config: |
+          download-attempts = 10
+          connect-timeout = 15
+    - shell: bash
+      env:
+        SHELL_REF: ${{ inputs.shell }}
+      run: ./scripts/ci/nix-realise.sh "${SHELL_REF}"

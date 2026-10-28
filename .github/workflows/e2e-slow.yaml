@@ -68,7 +68,7 @@ jobs:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           persist-credentials: false
-      - uses: cachix/install-nix-action@13d8dd58da0234aa297dedd986986ccb8e7f3e24 # v31.11.1
+      - uses: ./.github/actions/install-nix
       # ADVISORY, exactly as in `E2E`: on the step, so the job stays green and the summary tallies.
       - name: Run this shard of the slow e2e journeys
         continue-on-error: true
