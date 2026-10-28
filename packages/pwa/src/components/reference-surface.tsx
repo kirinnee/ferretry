@@ -27,9 +27,9 @@ import type { AttentionId, BrowserStatus, SessionView, TerminalListView } from '
 import { createContext, type ReactNode, useContext } from 'react';
 
 import { createAgentReferenceResolver } from '../lib/agent-references.ts';
-import type { ResolvedSurfaceReference } from '../lib/references.ts';
 import type { DaemonConnection } from '../lib/daemon-connection.ts';
 import type { DaemonSessionScope } from '../lib/daemon-scope.ts';
+import type { ResolvedSurfaceReference } from '../lib/references.ts';
 import type { DaemonFetch } from '../lib/runtime-models.ts';
 import { createSurfaceReferenceResolver, terminalIdForSurfaceKey } from '../lib/surface-references.ts';
 import { createTaskReferenceResolver } from '../lib/task-reference-context.tsx';
@@ -44,7 +44,7 @@ import { readWorkspaceMedia } from './fy-render-workspace-media.ts';
 import type { MarkdownProps } from './markdown.tsx';
 
 /** Everything a Markdown reader needs to prove and to open a reference. */
-export type ReferenceSurface = Omit<MarkdownProps, 'text' | 'className'>;
+export type ReferenceSurface = Omit<MarkdownProps, 'text' | 'className' | 'copyable'>;
 
 /** Nothing proved and nothing openable: reference-shaped text stays prose. */
 const NO_SURFACE: ReferenceSurface = {};

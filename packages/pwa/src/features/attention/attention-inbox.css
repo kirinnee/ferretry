@@ -176,48 +176,37 @@
 .fy-attn-deck__peek > * {
   height: 100%;
 }
-/* At rest a peek is only an edge: its text would show wherever the card under is taller than the top
-   one. While the top card is in the reader's hand, the next one is revealed under it. */
-.fy-attn-deck:not(:has(.fy-attn-deck__top[data-dragging])) .fy-attn-deck__peek .fy-attn-card > * {
+/* A peek is only an edge, at rest and mid-swipe alike: its text never shows through or beside the card
+   in the reader's hand, so two cards' words can't read as one. */
+.fy-attn-deck__peek > * > * {
   visibility: hidden;
 }
-/* The option a drag would send, stamped on the card and growing with the drag. */
+/* The option a drag would send: an opaque banner flush across the top of the card in the hand, so no word
+   of the card reads through or beside it. */
 .fy-attn-deck__stamp {
   position: absolute;
   z-index: 4;
-  top: 14px;
-  display: inline-flex;
-  max-width: calc(100% - 28px);
+  top: 0;
+  right: 0;
+  left: 0;
+  display: flex;
   align-items: center;
+  justify-content: center;
   gap: 6px;
-  border: var(--stroke-heavy) solid var(--accent);
-  border-radius: var(--radius-control);
-  background: var(--surface);
-  padding: 6px 10px;
+  border-bottom: var(--stroke-heavy) solid var(--accent);
+  border-radius: var(--radius-panel) var(--radius-panel) 0 0;
+  background: var(--surface-3);
+  padding: 12px 14px;
   color: var(--accent);
   font-family: var(--font-display);
   font-size: var(--text-lg);
   font-weight: var(--weight-strong);
-  box-shadow: var(--shadow-popover);
   pointer-events: none;
 }
 .fy-attn-deck__stamp > span {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-.fy-attn-deck__stamp[data-attention-stamp='right'] {
-  left: 14px;
-  transform-origin: 0 0;
-}
-.fy-attn-deck__stamp[data-attention-stamp='left'] {
-  right: 14px;
-  transform-origin: 100% 0;
-}
-.fy-attn-deck__stamp[data-attention-stamp='up'] {
-  left: 50%;
-  translate: -50% 0;
-  transform-origin: 50% 0;
 }
 /* Past the threshold: letting go sends it. */
 .fy-attn-deck__stamp[data-committed] {

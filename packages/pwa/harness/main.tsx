@@ -3977,6 +3977,8 @@ function AttentionPanelHarness() {
       respond: async () => undefined,
       resolve: async () => undefined,
       dismiss: async () => undefined,
+      needsInfo: async () => undefined,
+      progress: async () => undefined,
     }),
     [],
   );

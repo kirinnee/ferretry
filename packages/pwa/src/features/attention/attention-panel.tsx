@@ -21,19 +21,22 @@
 import type { AttentionId, AttentionItem, AttentionSnapshot, ResolvedAttentionItem } from '@ferretry/protocol';
 import { Check, ChevronDown, ChevronLeft, ChevronRight, CircleAlert, LoaderCircle } from 'lucide-react';
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Markdown } from '../../components/markdown.tsx';
-import { useReferenceSurface } from '../../components/reference-surface.tsx';
+import { ChatProse } from '../../components/chat-prose.tsx';
 import type { DaemonAttentionClient } from '../../lib/attention-client.ts';
 import { actionSentence, type InboxAction } from '../../lib/attention-inbox.ts';
 import type { AttentionLoadStatus } from '../../lib/attention-store.ts';
 import { cn } from '../../lib/class-names.ts';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
 import type { DaemonSessionScope } from '../../lib/daemon-scope.ts';
+import { browserClipboardWriter } from '../onboarding/copy-button.tsx';
 import { attentionReference, describeResponse, resolutionBadge } from './attention-board.tsx';
 import { AttentionCard } from './attention-card.tsx';
 
 /** The three answers the panel sends, and nothing else of the client. */
-export type AttentionActionClient = Pick<DaemonAttentionClient, 'dismiss' | 'respond' | 'resolve'>;
+export type AttentionActionClient = Pick<
+  DaemonAttentionClient,
+  'dismiss' | 'respond' | 'resolve' | 'needsInfo' | 'progress'
+>;
 
 /**
  * A request to show the panel — at one item, or (`target: null`) at its top. `seq` makes a repeated
@@ -72,6 +75,7 @@ export const runPanelAction = async (
 ): Promise<void> => {
   if (action.kind === 'respond') await client.respond(connection, scope, id, action.response);
   else if (action.kind === 'dismiss') await client.dismiss(connection, scope, id, action.note);
+  else if (action.kind === 'needs-info') await client.needsInfo(connection, scope, id, action.note);
   else await client.resolve(connection, scope, id, action.note);
 };
 
@@ -99,6 +103,8 @@ export interface AttentionPanelProps {
   readonly repliesSlot?: ReactNode;
   readonly now?: number;
 }
+
+const copyWriter = browserClipboardWriter();
 
 const NO_ITEMS: readonly AttentionItem[] = [];
 const NO_RESOLVED: readonly ResolvedAttentionItem[] = [];
@@ -138,8 +144,7 @@ export function AttentionPanel({
   repliesSlot,
   now,
 }: AttentionPanelProps) {
-  const references = useReferenceSurface();
-  const renderProse = useCallback((text: string): ReactNode => <Markdown text={text} {...references} />, [references]);
+  const renderProse = useCallback((text: string): ReactNode => <ChatProse copyable={copyWriter} text={text} />, []);
   const items = snapshot?.items ?? NO_ITEMS;
   const resolvedItems = snapshot?.resolved ?? NO_RESOLVED;
   const resolved = useMemo(() => [...resolvedItems].sort(byNewestResolution), [resolvedItems]);
@@ -264,6 +269,7 @@ export function AttentionPanel({
             highlighted={target === selected.id}
             item={selected}
             onAct={action => act(selected, action)}
+            onProgress={(step, done) => client.progress(connection, scope, selected.id, step, done)}
             pinned
             renderProse={renderProse}
             {...(now === undefined ? {} : { now })}

@@ -82,7 +82,7 @@ export const useInboxMachines = (
 
 /** Sends one inbox answer through the ONE attention client, to the machine the card came from. */
 const runInboxAction = async (
-  client: Pick<DaemonAttentionClient, 'respond' | 'resolve' | 'dismiss'>,
+  client: Pick<DaemonAttentionClient, 'respond' | 'resolve' | 'dismiss' | 'needsInfo'>,
   connection: DaemonConnection,
   card: InboxCard,
   action: InboxAction,
@@ -90,6 +90,7 @@ const runInboxAction = async (
   const scope = daemonSessionScope(connection, card.view.config.id);
   if (action.kind === 'respond') await client.respond(connection, scope, card.item.id, action.response);
   else if (action.kind === 'dismiss') await client.dismiss(connection, scope, card.item.id, action.note);
+  else if (action.kind === 'needs-info') await client.needsInfo(connection, scope, card.item.id, action.note);
   else await client.resolve(connection, scope, card.item.id, action.note);
 };
 

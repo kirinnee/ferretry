@@ -237,6 +237,22 @@ export class DaemonAttentionClient {
     return this.#mutate(daemon, scope, { action: 'dismiss', id, ...(note === undefined ? {} : { note }) });
   }
 
+  /** Ticks (or unticks) one 0-based step of an item's checklist; every device sees it. */
+  progress(
+    daemon: DaemonConnection,
+    scope: DaemonSessionScope,
+    id: string,
+    step: number,
+    done: boolean,
+  ): Promise<void> {
+    return this.#mutate(daemon, scope, { action: 'progress', id, step, done });
+  }
+
+  /** Tells the ferret a to-do needs more information; the item stays open, waiting on it. */
+  needsInfo(daemon: DaemonConnection, scope: DaemonSessionScope, id: string, note?: string): Promise<void> {
+    return this.#mutate(daemon, scope, { action: 'needs-info', id, ...(note === undefined ? {} : { note }) });
+  }
+
   /** Unpair one daemon without perturbing any other daemon's cache or work. */
   clearDaemon(daemonId: DaemonId): void {
     this.#generations.set(daemonId, (this.#generations.get(daemonId) ?? 0) + 1);

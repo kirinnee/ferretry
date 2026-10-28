@@ -506,3 +506,127 @@ details[open] > .fy-attn-sec__title > .fy-attn-sec__chevron {
 .fy-attn-actions__row[data-attention-row] {
   align-items: flex-start;
 }
+.fy-attn-body {
+  min-width: 0;
+  font-size: var(--text-sm);
+  overflow-wrap: anywhere;
+}
+.fy-attn-body[data-folded] .fy-attn-body__text {
+  max-height: 14rem;
+  overflow: hidden;
+  /* theme-literal-ok: an alpha mask — only the opacity of #000 matters, never its hue */
+  -webkit-mask-image: linear-gradient(to bottom, #000 70%, transparent);
+  /* theme-literal-ok: an alpha mask — only the opacity of #000 matters, never its hue */
+  mask-image: linear-gradient(to bottom, #000 70%, transparent);
+}
+.fy-attn-steps {
+  display: grid;
+  gap: var(--gap-xs);
+  min-width: 0;
+}
+.fy-attn-steps__count {
+  margin: 0;
+  color: var(--faint);
+  font-size: var(--text-sm);
+}
+.fy-attn-steps__list {
+  display: grid;
+  gap: var(--gap-sm);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.fy-attn-step {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: var(--gap-sm);
+  align-items: start;
+}
+.fy-attn-step__box {
+  appearance: none;
+  position: relative;
+  width: 1.5rem;
+  height: 1.5rem;
+  margin: 1px 0 0;
+  border: var(--stroke) solid var(--border-strong, var(--border));
+  border-radius: var(--radius-control);
+  background: var(--surface);
+  cursor: pointer;
+}
+.fy-attn-step__box:checked {
+  border-color: var(--accent);
+  background: var(--accent);
+}
+.fy-attn-step__box:checked::after {
+  content: '';
+  position: absolute;
+  left: 7px;
+  top: 3px;
+  width: 6px;
+  height: 11px;
+  border: solid var(--bg);
+  border-width: 0 var(--stroke-heavy) var(--stroke-heavy) 0;
+  transform: rotate(45deg);
+}
+.fy-attn-step__box:focus-visible {
+  outline: var(--focus-ring, 2px solid var(--accent));
+  outline-offset: 2px;
+}
+.fy-attn-step__box:disabled {
+  cursor: default;
+}
+.fy-attn-step[data-done] > .fy-attn-step__text {
+  color: var(--faint);
+}
+.fy-attn-step__text {
+  min-width: 0;
+  font-size: var(--text-sm);
+  overflow-wrap: anywhere;
+}
+.fy-attn-step__error {
+  grid-column: 2;
+}
+.fy-attn-card__updated {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--gap-xs);
+  color: var(--accent);
+  font-size: var(--text-sm);
+}
+.fy-attn-actions__waiting,
+.fy-attn-swiperow__waiting {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--gap-xs);
+}
+.md-copy-fence-button {
+  opacity: 0.85;
+}
+.md-copy-span code {
+  min-width: 0;
+}
+
+/* A pinned card never loses its header or its actions: only the middle (details, body, steps, history)
+   scrolls, inside a cap. Elsewhere the wrapper adds no box. */
+.fy-attn-card__scroll {
+  display: contents;
+}
+.fy-attn-card[data-pinned] {
+  max-height: min(44dvh, 24rem);
+}
+.fy-attn-card[data-pinned] > .fy-attn-card__scroll {
+  display: flex;
+  min-height: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: var(--gap-sm);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+/* Wide screens have the height: the pinned card shows its steps, not just the top of the body. */
+@media (min-width: 900px) {
+  .fy-attn-card[data-pinned] {
+    max-height: min(72dvh, 44rem);
+  }
+}

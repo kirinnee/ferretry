@@ -127,6 +127,50 @@ const OLD = item('A7', 5, {
   ask: { kind: 'permission' },
 });
 
+const FENCE = '```';
+const TASK_STEPS = [
+  'Store the relay key: `fy secret set RELAY_KEY`',
+  'Check the advertisement lists it:\n\n' +
+    FENCE +
+    'sh\nfy relay status --json | jq .directory\nfy relay status --watch\n' +
+    FENCE,
+  'Compare with the diagram below and confirm it matches !A3\n\n' +
+    FENCE +
+    'fy-render\ntype: mermaid\nalt: key to relay to sessions\n---\nflowchart LR\n  key[New key] --> relay[Relay]\n  relay --> sessions[Sessions]\n' +
+    FENCE,
+  'Restart the relay: `fy daemon restart`',
+];
+const TASK = item('A8', 14, {
+  subject: 'Rotate the relay key on the studio machine',
+  why: 'The old key was pasted into a chat; rotate it before the release cut.',
+  body:
+    '## Before you start\n\n- You need shell access to **studio**\n- It takes about five minutes\n\nThe daemon keeps running; only the relay restarts at the end. A summary of the key path:\n\n' +
+    FENCE +
+    'sh\nfy secret list\n' +
+    FENCE +
+    '\n\nSee [the secrets doc](https://example.test/docs/secrets).',
+  steps: TASK_STEPS,
+  ask: { kind: 'task' },
+  raisedByName: 'ottilie',
+  history: [{ at: ago(30), kind: 'updated', note: 'added the restart step' }],
+} as Partial<AttentionItem>);
+const taskWith = (done: readonly number[]): AttentionItem => ({ ...TASK, stepsDone: [...done] }) as AttentionItem;
+const WAITING = item('A9', 22, {
+  subject: 'Pick the staging region for the relay',
+  why: 'I cannot tell which region you meant.',
+  body: 'Two regions are plausible: **eu-west** and **us-east**.',
+  steps: ['Decide the region', 'Tell me which'],
+  ask: { kind: 'task' },
+  raisedByName: 'hadi',
+  waitingOn: 'ferret',
+  askedAt: ago(12),
+  infoRequests: 1,
+  history: [
+    { at: ago(12), kind: 'needs-info', note: 'which region?' },
+    { at: ago(10), kind: 'updated', note: 'added the two candidates' },
+  ],
+} as Partial<AttentionItem>);
+
 const ferret = (id: string, teammate: string, label: string, patch: Partial<SessionView['state']> = {}) =>
   sessionView(id, {
     config: { teammate: teammate as never, label, cwd: `/home/kirin/Workspace/${id}` },
@@ -163,13 +207,19 @@ const CARDS: readonly InboxCard[] = [
 // Answers are held for the real undo window, then "sent" nowhere.
 const deferred = new DeferredAttentionActions(async () => undefined);
 
-function Inbox({ phone }: { readonly phone: boolean }): ReactElement {
+function Inbox({
+  phone,
+  cards = CARDS,
+}: {
+  readonly phone: boolean;
+  readonly cards?: readonly InboxCard[];
+}): ReactElement {
   const state = useSyncExternalStore(deferred.subscribe, deferred.getSnapshot);
   const hidden = deferred.hiddenKeys();
   const inbox: AttentionInbox = {
     unread: [],
-    total: CARDS.length,
-    cards: CARDS.filter(entry => !hidden.has(entry.key)),
+    total: cards.length,
+    cards: cards.filter(entry => !hidden.has(entry.key)),
     reading: false,
     deferred,
     deferredState: state,
@@ -183,9 +233,12 @@ function Inbox({ phone }: { readonly phone: boolean }): ReactElement {
           now={NOW}
           onNavigate={() => undefined}
           phone={phone}
-          renderChat={() => (
+          renderChat={selected => (
             <div className="min-h-0 flex-1">
-              <ChatPane />
+              <ChatPane
+                board={boardOf(...(selected.item.id === 'A3' ? [selected.item] : [selected.item, REBASE]))}
+                target={selected.item.id}
+              />
             </div>
           )}
         />
@@ -202,6 +255,12 @@ function Inbox({ phone }: { readonly phone: boolean }): ReactElement {
     </div>
   );
 }
+
+const TASK_CARDS: readonly InboxCard[] = [
+  card(taskWith([0, 1]), ferret('fr', 'ottilie', 'Attention inbox wiring'), 'studio'),
+  card(WAITING, SESSIONS[1] as SessionView, 'studio'),
+  card(REBASE, SESSIONS[0] as SessionView, 'studio'),
+];
 
 const BOARD: AttentionSnapshot = {
   v: 1,
@@ -284,7 +343,7 @@ function ChatPane({
       <div className="p-panel">
         <AttentionPanel
           chip={{ on: chip, onChange: setChip }}
-          client={{ respond: noop, resolve: noop, dismiss: noop }}
+          client={{ respond: noop, resolve: noop, dismiss: noop, needsInfo: noop, progress: noop }}
           connection={CONNECTION}
           focus={target === null ? null : { target: target as AttentionId, seq: 1 }}
           id="attention-panel"
@@ -348,6 +407,16 @@ createRoot(root).render(
     <Inbox phone={false} />
   ) : view === 'panel' ? (
     <Panel />
+  ) : view === 'task-partial' ? (
+    <Panel board={boardOf(taskWith([0, 1]), REBASE)} target="A8" />
+  ) : view === 'task-full' ? (
+    <Panel board={boardOf(taskWith([0, 1, 2, 3]), REBASE)} target="A8" />
+  ) : view === 'task-waiting' ? (
+    <Panel board={boardOf(WAITING)} target="A9" />
+  ) : view === 'task-inbox-phone' ? (
+    <Inbox cards={TASK_CARDS} phone />
+  ) : view === 'task-inbox-desktop' ? (
+    <Inbox cards={TASK_CARDS} phone={false} />
   ) : view === 'overload' ? (
     <Panel board={OVERLOAD_BOARD} target={null} />
   ) : view === 'rich' ? (

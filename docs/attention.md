@@ -167,6 +167,18 @@ questions' words (same count and options, in order), recommendation, impact, urg
 never changes the ask, who raised it or the question options, and it does not push again — except an
 edit that answers an open Need more info request, which pushes once (see "The loop").
 
+### How the app shows steps and to-dos
+
+- `context`, `body` and every step render as full Markdown through the chat's own renderer (`ChatProse`),
+  so fy-render blocks and the proof-before-link reference gate behave exactly as in chat. There is no
+  second renderer. Code spans and fences in an item get a Copy button.
+- `steps` are a checklist. A tick sends `{action:'progress', id, step, done}`; it shows at once and rolls
+  back with a message if the board refuses. When every step is ticked, Done is the primary action.
+- A `task` item has no reply box: Done and Need more info (optional note). On a phone, swipe right is Done
+  and swipe left is Need more info, on the deck and on rows. An item with `waitingOn:'ferret'` shows
+  "Waiting on <ferret>" with no Done until the ferret edits it. Both actions ride the batched-delivery
+  countdown. The history line ("You asked for more info 10:42 · updated 10:44") is local time.
+
 ## The unread signal
 
 `SessionView.state.attention` is `{ open, first, ask, latestAt }` while anything is open, and absent

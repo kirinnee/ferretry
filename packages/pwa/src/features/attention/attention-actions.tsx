@@ -7,13 +7,25 @@
  * "Send answers" button. Nothing here sends anything: every answer leaves through `onAct`.
  */
 
-import { ArrowLeft, ArrowRight, ArrowUp, Check, CornerDownLeft, Ellipsis, LoaderCircle, Send, X } from 'lucide-react';
+import {
+  ArrowLeft,
+  ArrowRight,
+  ArrowUp,
+  Check,
+  CircleHelp,
+  CornerDownLeft,
+  Ellipsis,
+  LoaderCircle,
+  Send,
+  X,
+} from 'lucide-react';
 import { type KeyboardEvent, type ReactNode, useEffect, useId, useRef, useState } from 'react';
 import {
   DISMISS_ACTION,
   DONE_ACTION,
   directionOfAction,
   type InboxAction,
+  NEEDS_INFO_ACTION,
   type SwipeDirection,
   type SwipeMap,
 } from '../../lib/attention-inbox.ts';
@@ -56,9 +68,12 @@ function ActionMenu({
   busy,
   map,
   swipeHints,
+  hideDone = false,
   onAct,
 }: {
   readonly busy: boolean;
+  /** A to-do waiting on its ferret cannot be done yet. */
+  readonly hideDone?: boolean;
   readonly map: SwipeMap;
   readonly swipeHints: boolean;
   readonly onAct: (action: InboxAction) => void;
@@ -121,18 +136,20 @@ function ActionMenu({
       </button>
       {open ? (
         <div aria-label="More actions" className="fy-attn-menu__list" id={menuId} role="menu">
-          <button
-            className="fy-attn-menu__item"
-            data-attention-done=""
-            onClick={() => choose(DONE_ACTION)}
-            role="menuitem"
-            tabIndex={-1}
-            type="button"
-          >
-            <Check aria-hidden="true" size={14} />
-            Done
-            <SwipeHint action={DONE_ACTION} enabled={swipeHints} map={map} />
-          </button>
+          {hideDone ? null : (
+            <button
+              className="fy-attn-menu__item"
+              data-attention-done=""
+              onClick={() => choose(DONE_ACTION)}
+              role="menuitem"
+              tabIndex={-1}
+              type="button"
+            >
+              <Check aria-hidden="true" size={14} />
+              Done
+              <SwipeHint action={DONE_ACTION} enabled={swipeHints} map={map} />
+            </button>
+          )}
           <button
             className="fy-attn-menu__item"
             data-attention-dismiss=""
@@ -151,7 +168,108 @@ function ActionMenu({
   );
 }
 
+/** The to-do's two answers; there is nothing to choose between, so there is no option list and no reply box. */
+interface TaskActionState {
+  /** The owner asked for more information and the ferret has not edited the item yet. */
+  readonly waiting: boolean;
+  readonly ferret: string;
+  /** Every step is ticked: Done is the one primary action. */
+  readonly complete: boolean;
+}
+
+function TaskActions({
+  task,
+  busy,
+  map,
+  swipeHints,
+  onAct,
+}: {
+  readonly task: TaskActionState;
+  readonly busy: boolean;
+  readonly map: SwipeMap;
+  readonly swipeHints: boolean;
+  readonly onAct: (action: InboxAction) => void;
+}) {
+  const noteId = useId();
+  const [asking, setAsking] = useState(false);
+  const [note, setNote] = useState('');
+  const ask = (): void => {
+    const text = note.trim();
+    onAct(text === '' ? NEEDS_INFO_ACTION : { ...NEEDS_INFO_ACTION, note: text });
+    setNote('');
+    setAsking(false);
+  };
+  return (
+    <div className="fy-attn-actions" data-attention-task-actions="">
+      {task.waiting ? (
+        <p className="fy-attn-actions__waiting m-0 text-meta text-muted" data-attention-waiting="" role="status">
+          <LoaderCircle aria-hidden="true" size={13} />
+          Waiting on {task.ferret}
+        </p>
+      ) : null}
+      <div className="fy-attn-actions__row" data-attention-row="">
+        {task.waiting ? null : (
+          <button
+            className="kt-btn fy-attn-actions__resolve"
+            data-attention-done=""
+            data-variant={task.complete ? 'primary' : undefined}
+            disabled={busy}
+            onClick={() => onAct(DONE_ACTION)}
+            type="button"
+          >
+            <Check aria-hidden="true" size={14} />
+            Done
+            <SwipeHint action={DONE_ACTION} enabled={swipeHints} map={map} />
+          </button>
+        )}
+        {task.waiting ? null : (
+          <button
+            aria-expanded={asking}
+            className="kt-btn fy-attn-actions__resolve"
+            data-attention-needs-info=""
+            disabled={busy}
+            onClick={() => setAsking(open => !open)}
+            type="button"
+          >
+            <CircleHelp aria-hidden="true" size={14} />
+            Need more info
+            <SwipeHint action={NEEDS_INFO_ACTION} enabled={swipeHints} map={map} />
+          </button>
+        )}
+        <ActionMenu busy={busy} hideDone map={map} onAct={onAct} swipeHints={swipeHints} />
+      </div>
+      {asking && !task.waiting ? (
+        <form
+          className="fy-attn-actions__row"
+          onSubmit={event => {
+            event.preventDefault();
+            ask();
+          }}
+        >
+          <label className="sr-only" htmlFor={noteId}>
+            What is missing (optional)
+          </label>
+          <textarea
+            className="kt-input fy-attn-reply__box"
+            data-attention-needs-info-note=""
+            id={noteId}
+            onChange={event => setNote(event.target.value)}
+            placeholder="What is missing? (optional)"
+            rows={2}
+            value={note}
+          />
+          <button className="kt-btn" data-attention-needs-info-send="" disabled={busy} type="submit">
+            Ask {task.ferret}
+          </button>
+        </form>
+      ) : null}
+    </div>
+  );
+}
+
 export interface AttentionActionsProps {
+  /** A to-do: Done and Need more info instead of options and a reply. */
+  readonly task?: TaskActionState;
   readonly options: readonly InboxAction[];
   readonly recommended: string | undefined;
   readonly map: SwipeMap;
@@ -185,9 +303,12 @@ export function AttentionActions({
   onSendReply,
   sendAnswers,
   showReply = true,
+  task,
   onAct,
 }: AttentionActionsProps) {
   const replyId = useId();
+  if (task !== undefined)
+    return <TaskActions busy={busy} map={map} onAct={onAct} swipeHints={swipeHints} task={task} />;
   const menu = <ActionMenu busy={busy} map={map} onAct={onAct} swipeHints={swipeHints} />;
   if (sendAnswers !== undefined) {
     return (

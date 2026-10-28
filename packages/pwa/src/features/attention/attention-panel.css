@@ -5,12 +5,17 @@
   display: flex;
   flex-shrink: 0;
   min-width: 0;
-  max-height: min(55dvh, 28rem);
+  max-height: min(64dvh, 34rem);
   flex-direction: column;
   gap: var(--gap-sm);
   overflow-y: auto;
   overscroll-behavior: contain;
   margin-bottom: var(--gap-sm);
+}
+@media (min-width: 900px) {
+  .fy-attn-panel {
+    max-height: min(88dvh, 56rem);
+  }
 }
 .fy-attn-panel__chevron {
   flex-shrink: 0;

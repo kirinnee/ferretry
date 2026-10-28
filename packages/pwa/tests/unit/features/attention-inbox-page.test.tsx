@@ -168,6 +168,21 @@ describe('AttentionInboxPage two panes', () => {
     await mounted.unmount();
   });
 
+  it('on a phone says a to-do is waiting on its ferret, with no Done swipe to offer', async () => {
+    const waiting = inboxCard(
+      attentionItem('A8', {
+        subject: 'Rotate the relay key',
+        ask: { kind: 'task' },
+        waitingOn: 'ferret',
+        askedAt: '2026-08-01T11:00:00.000Z',
+      }),
+      sessionView('sess-4', { config: { teammate: 'ottilie', name: undefined } }),
+    );
+    const mounted = await mount(page(fakeInbox(), [waiting], { phone: true, renderChat: chat }));
+    expect(mounted.container.querySelector('[data-attention-waiting]')?.textContent).toContain('Waiting on');
+    await mounted.unmount();
+  });
+
   it('says a refusal whose card has gone once, until it is dismissed', async () => {
     const fake = fakeInbox();
     const mounted = await mount(page(fake, [threeWay], { renderChat: chat }));
