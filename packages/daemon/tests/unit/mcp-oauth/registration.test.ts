@@ -188,6 +188,9 @@ describe('registrationAnswer', () => {
       should(problem(201, JSON.stringify({ client_id: [1] }))).equal('its client_id was a JSON array');
       should(problem(201, JSON.stringify({ client_id: '' }))).equal('its client_id was empty');
       should(problem(201, JSON.stringify({ client_id: 'x'.repeat(513) }))).equal('its client_id was too long');
+      should(problem(201, JSON.stringify({ client_id: 'c1', client_secret: 7 }))).equal(
+        'its client_secret was a number',
+      );
       should(problem(201, JSON.stringify({ client_id: 'c1', client_secret: { a: 1 } }))).equal(
         'its client_secret was a JSON object',
       );
