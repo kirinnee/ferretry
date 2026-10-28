@@ -40,6 +40,11 @@ export interface NotificationServiceOptions {
 export class NotificationService implements AttentionRaisedObserver {
   constructor(private readonly options: NotificationServiceOptions) {}
 
+  /** How many devices an Attention push would reach now: every enrolled one, whatever it filters. */
+  async enrolledDevices(): Promise<number> {
+    return (await this.options.push.list()).length;
+  }
+
   async notifyDirect(
     sessionId: string,
     request: DirectNotificationRequest,

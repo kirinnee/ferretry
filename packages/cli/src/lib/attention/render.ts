@@ -161,7 +161,20 @@ export function renderAttentionMutation(
 ): string {
   const subject = reference === undefined ? verb : `${verb} ${reference}`;
   const line = `${subject} — ${pluralItems(snapshot.count)} in ${snapshot.sessionId}`;
-  return [line, ...writingAdvice(snapshot.warnings, raised ?? undefined)].join('\n');
+  return [line, ...enrolmentWarning(snapshot.enrolled), ...writingAdvice(snapshot.warnings, raised ?? undefined)].join(
+    '\n',
+  );
+}
+
+/**
+ * Said when the raise reached nobody. The daemon counts the enrolled devices only on the response to a
+ * raise, so an absent count is "not this response", never zero.
+ */
+function enrolmentWarning(enrolled: number | undefined): string[] {
+  if (enrolled !== 0) return [];
+  return [
+    'Warning: no device will be notified (0 enrolled). The item is on the board, but nobody was told — the owner turns notifications on in the app, under Settings › Notifications.',
+  ];
 }
 
 /**

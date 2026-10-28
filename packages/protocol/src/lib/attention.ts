@@ -328,6 +328,12 @@ export const AttentionSnapshotSchema = z
       .array(z.string().trim().min(1).max(MAX_ATTENTION_WARNING_LENGTH))
       .max(MAX_ATTENTION_WARNINGS)
       .optional(),
+    /**
+     * How many devices this machine has enrolled for push, counted as an item was raised; present only on
+     * the response to that raise. Zero means the owner was told nothing: the ask is on the board, and no
+     * phone or browser will hear of it until one turns notifications on.
+     */
+    enrolled: NonNegativeIntegerSchema.optional(),
   })
   .superRefine((value, context) => {
     if (value.count !== value.items.length) {

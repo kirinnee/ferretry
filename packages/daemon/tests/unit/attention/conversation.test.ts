@@ -91,7 +91,7 @@ describe('Attention in a conversation', () => {
     ]);
   });
 
-  it('should tell the ferret every answer, a reply in words, and a dismissal only with a note', () => {
+  it('should tell the ferret every closing: an answer, a reply in words, a bare done and a dismissal', () => {
     // Arrange
     const answered = closed(CHOICE, { response: { kind: 'multiple-choice', choice: 'Wait' } });
     const answeredWithNote = closed(OPEN, {
@@ -107,9 +107,11 @@ describe('Attention in a conversation', () => {
     should(boardReplyMessage(answered)).equal('[answer to !A2 «Rebase onto main now?»] Wait');
     should(boardReplyMessage(answeredWithNote)).equal('[answer to !A3 «Which region?»] eu-west-1\n\nNote: cheapest');
     should(boardReplyMessage(replied)).equal('[answer to !A4 «Deploy?»] Only after 6pm');
-    should(boardReplyMessage(bareDone)).be.null();
+    should(boardReplyMessage(bareDone)).equal('[done !A5 «Look at the flaky test»] The owner marked this done.');
     should(boardReplyMessage(dismissed)).equal('[dismissed !A5 «Look at the flaky test»] No longer needed');
-    should(boardReplyMessage(bareDismiss)).be.null();
+    should(boardReplyMessage(bareDismiss)).equal(
+      '[dismissed !A5 «Look at the flaky test»] The owner dismissed this without an answer.',
+    );
   });
 
   it('should quote a long ask only so far', () => {
@@ -117,7 +119,7 @@ describe('Attention in a conversation', () => {
     const long = closed(item('A6', { subject: 'x'.repeat(200) }), { resolutionNote: 'ok' });
 
     // Act
-    const message = boardReplyMessage(long) ?? '';
+    const message = boardReplyMessage(long);
 
     // Assert
     should(message).startWith(`[answer to !A6 «${'x'.repeat(120)}…»]`);
