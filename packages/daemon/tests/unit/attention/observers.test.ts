@@ -8,6 +8,7 @@ import {
   AttentionConversation,
   type AttentionLedger,
   type AttentionLedgerRepository,
+  AttentionMoreInfoPush,
   type AttentionMutation,
   AttentionReplyDelivery,
   AttentionService,
@@ -58,10 +59,10 @@ class RecordingState implements SessionAttentionState {
 }
 
 class RecordingMessenger {
-  readonly sent: Array<{ sessionId: string; message: string; sendId: string }> = [];
+  readonly sent: Array<{ sessionId: string; message: string; id: string }> = [];
 
-  async send(sessionId: string, message: string, sendId: string): Promise<void> {
-    this.sent.push({ sessionId, message, sendId });
+  async add(sessionId: string, id: string, message: string): Promise<void> {
+    this.sent.push({ sessionId, message, id });
   }
 }
 
@@ -195,18 +196,26 @@ describe('Attention board observers', () => {
     ]);
   });
 
-  it('should tell a ferret the owner’s answer to its own item, once per item, and nothing else', async () => {
+  it('should tell a ferret every closing the owner makes of its own item on the board, under one send id each', async () => {
     // Arrange
     const changes = new RecordingChanges();
     const attention = service(new MemoryRepository(), changes);
     await attention.raise(SESSION, ASK, AGENT);
-    await attention.raise(SESSION, { ...ASK, subject: 'Second?', ask: undefined }, AGENT);
-    await attention.raise(SESSION, { ...ASK, subject: 'Third?', ask: undefined }, AGENT);
-    await attention.raise(SESSION, { ...ASK, subject: 'Fourth?', ask: undefined }, AGENT);
+    await attention.raise(
+      SESSION,
+      { ...ASK, subject: 'Second?', why: 'Second.', ask: { kind: 'open-question' } },
+      AGENT,
+    );
+    await attention.raise(SESSION, { ...ASK, subject: 'Third?', why: 'Third.', ask: { kind: 'open-question' } }, AGENT);
+    await attention.raise(
+      SESSION,
+      { ...ASK, subject: 'Fourth?', why: 'Fourth.', ask: { kind: 'open-question' } },
+      AGENT,
+    );
     await attention.answer(SESSION, 'A1', { kind: 'multiple-choice', choice: 'Rebase now' }, HUMAN);
     await attention.resolve(SESSION, 'A2', AGENT, 'sorted it myself');
     await attention.resolve(SESSION, 'A3', HUMAN, 'answered in chat', 'conversation');
-    await attention.dismiss(SESSION, 'A4', HUMAN);
+    should((await attention.dismiss(SESSION, 'A4', HUMAN)).ok).be.true();
     const messenger = new RecordingMessenger();
     const delivery = new AttentionReplyDelivery(messenger);
 
@@ -216,15 +225,27 @@ describe('Attention board observers', () => {
 
     // Assert
     should(messenger.sent).deepEqual([
+      // The ferret's own done (A2) and the chat answer (A3, already in the owner's words) are not echoed;
+      // a bare dismiss (A4) is told. Told twice, each goes to the outbox twice — the outbox keeps it once.
       {
         sessionId: SESSION,
         message: '[answer to !A1 «Rebase onto main now?»] Rebase now',
-        sendId: 'attention-session-1-A1',
+        id: 'A1',
+      },
+      {
+        sessionId: SESSION,
+        message: '[dismissed !A4 «Fourth?»] The owner dismissed this without an answer.',
+        id: 'A4',
       },
       {
         sessionId: SESSION,
         message: '[answer to !A1 «Rebase onto main now?»] Rebase now',
-        sendId: 'attention-session-1-A1',
+        id: 'A1',
+      },
+      {
+        sessionId: SESSION,
+        message: '[dismissed !A4 «Fourth?»] The owner dismissed this without an answer.',
+        id: 'A4',
       },
     ]);
   });
@@ -328,5 +349,134 @@ describe('Attention board observers', () => {
     // Assert
     should(unreadable).deepEqual({ message: 'hello !A1', answers: [] });
     should(missing).deepEqual({ message: 'hello !A1', answers: [] });
+  });
+});
+
+describe('Attention board progress observers', () => {
+  it('should tell change observers about a tick, but tell the ferret nothing', async () => {
+    // Arrange
+    const changes = new RecordingChanges();
+    const attention = service(new MemoryRepository(), changes);
+    await attention.raise(SESSION, { ...ASK, steps: ['Do it'] }, AGENT);
+    await attention.progress(SESSION, 'A1', 0, true, HUMAN);
+    const messenger = new RecordingMessenger();
+    const delivery = new AttentionReplyDelivery(messenger);
+
+    // Act
+    for (const { sessionId, change } of changes.seen) await delivery.changed(sessionId, change);
+
+    // Assert
+    should(changes.seen.map(each => each.change.change)).deepEqual(['created', 'progressed']);
+    should(changes.seen[1]?.change.item).containDeep({ id: 'A1', stepsDone: [0] });
+    should(messenger.sent).deepEqual([]);
+  });
+});
+
+describe('Attention needs-info delivery', () => {
+  const TASK = { ...ASK, ask: { kind: 'task' as const }, steps: ['Do it'] };
+
+  it('should tell the raising ferret once per request, and again for a new request after it answered', async () => {
+    // Arrange
+    const changes = new RecordingChanges();
+    const attention = service(new MemoryRepository(), changes);
+    const messenger = new RecordingMessenger();
+    const delivery = new AttentionReplyDelivery(messenger);
+    await attention.raise(SESSION, TASK, AGENT);
+
+    // Act
+    await attention.needsInfo(SESSION, 'A1', HUMAN, 'Which account?');
+    await attention.edit(SESSION, 'A1', { subject: 'Rebase onto main, which account?' }, AGENT);
+    await attention.needsInfo(SESSION, 'A1', HUMAN);
+    for (const { sessionId, change } of changes.seen) await delivery.changed(sessionId, change);
+
+    // Assert
+    should(messenger.sent).deepEqual([
+      {
+        sessionId: SESSION,
+        message: '[needs more info !A1 «Rebase onto main now?»] Which account?',
+        id: 'A1~1',
+      },
+      {
+        sessionId: SESSION,
+        message: '[needs more info !A1 «Rebase onto main, which account?»] The owner needs more information.',
+        id: 'A1~2',
+      },
+    ]);
+  });
+
+  it('should never tell a ferret about a request by an agent, or on an item another session raised', async () => {
+    // Arrange
+    const messenger = new RecordingMessenger();
+    const delivery = new AttentionReplyDelivery(messenger);
+    const item = (session: string): AttentionItem =>
+      ({
+        id: 'A1',
+        source: 'agent-raised',
+        sourceRef: null,
+        subject: 'Ask?',
+        why: 'why',
+        waitingSince: NOW,
+        howToResolve: 'how',
+        raisedBy: 'agent',
+        raisedBySession: session,
+        raisedByName: null,
+        waitingOn: 'ferret',
+        askedAt: NOW,
+        infoRequests: 1,
+      }) as AttentionItem;
+    const snapshot = {
+      v: 1 as const,
+      sessionId: SESSION,
+      items: [],
+      resolved: [],
+      count: 0,
+      parseErrors: 0,
+      updatedAt: NOW,
+    };
+
+    // Act
+    await delivery.changed(SESSION, {
+      change: 'needs-info',
+      actor: HUMAN,
+      via: 'board',
+      snapshot,
+      item: item('session-2'),
+    });
+    await delivery.changed(SESSION, {
+      change: 'needs-info',
+      actor: AGENT,
+      via: 'board',
+      snapshot,
+      item: item(SESSION),
+    });
+    await delivery.changed(SESSION, { change: 'needs-info', actor: HUMAN, via: 'board', snapshot });
+
+    // Assert
+    should(messenger.sent).deepEqual([]);
+  });
+});
+
+describe('Attention more-info push', () => {
+  it('should announce an edit that answered a request, once, and nothing for an ordinary edit', async () => {
+    // Arrange
+    const changes = new RecordingChanges();
+    const attention = service(new MemoryRepository(), changes);
+    const pushed: string[] = [];
+    const observer = new AttentionMoreInfoPush({
+      moreInfoAdded: async (_session, item) => {
+        pushed.push(`${item.id}~${item.infoRequests}`);
+      },
+    });
+    await attention.raise(SESSION, ASK, AGENT);
+    await attention.edit(SESSION, 'A1', { subject: 'An ordinary edit?' }, AGENT);
+    await attention.needsInfo(SESSION, 'A1', HUMAN);
+    await attention.edit(SESSION, 'A1', { subject: 'More info added?' }, AGENT);
+    await attention.edit(SESSION, 'A1', { subject: 'More info added?' }, AGENT);
+
+    // Act
+    for (const { sessionId, change } of changes.seen) await observer.changed(sessionId, change);
+
+    // Assert
+    should(pushed).deepEqual(['A1~1']);
   });
 });

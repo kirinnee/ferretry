@@ -1,5 +1,5 @@
 import { afterEach, describe, it } from 'bun:test';
-import { chmod, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readFile, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import {
@@ -27,6 +27,7 @@ import { FileStateHomeClaim } from '../../../src/adapters/state-home/claim-files
 import { resolveDaemonLayout } from '../../../src/lib/daemon/layout.ts';
 import { DirectSupervisor } from '../../../src/lib/daemon/supervisor.ts';
 import { StateHomeClaimService } from '../../../src/lib/state-home/claim.ts';
+import { TEARDOWN_TIMEOUT_MS, tearDownSupervisedDaemons } from '../support/supervised-daemon-teardown.ts';
 
 /**
  * THE DAEMON RESTARTS UNDER A FERRET THAT IS MID-TURN, end to end (docs/updating.md § Ferrets keep
@@ -52,22 +53,8 @@ const children = new Set<Bun.Subprocess>();
 afterEach(async () => {
   for (const child of children) child.kill();
   children.clear();
-  for (const pid of daemons) {
-    try {
-      process.kill(pid, 'SIGTERM');
-    } catch {
-      // Already gone.
-    }
-  }
-  daemons.clear();
-  for (const socket of sockets) {
-    if (TMUX !== null)
-      await Bun.spawn([TMUX, '-S', socket, 'kill-server'], { stdout: 'ignore', stderr: 'ignore' }).exited;
-  }
-  sockets.clear();
-  for (const root of roots) await rm(root, { recursive: true, force: true });
-  roots.clear();
-});
+  await tearDownSupervisedDaemons({ daemons, sockets, roots }, { tmux: TMUX });
+}, TEARDOWN_TIMEOUT_MS);
 
 async function freeLoopbackPort(): Promise<number> {
   const server = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: () => new Response('probe') });

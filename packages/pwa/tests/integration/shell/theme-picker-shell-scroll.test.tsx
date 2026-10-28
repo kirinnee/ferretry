@@ -74,7 +74,6 @@ const theme: ThemeState = {
   resolved: RESOLVED,
   attr: `${FAMILY}-${RESOLVED}`,
   families: THEME_FAMILIES,
-  textScaleSupported: true,
   setFamily: () => {},
   setMode: () => {},
   setTextScale: () => {},

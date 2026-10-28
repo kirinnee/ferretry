@@ -1310,6 +1310,9 @@ function SessionRoute({ connection, scope }: SessionChatPageProps) {
         refreshControl.current?.nudge();
       },
       onLive: live => liveActivity.publish(live),
+      // A reply's text, a tool call, its result: none of them is a journal event, so without this each
+      // reached the Chat only when the poll came round. The frame says the file moved; the read says what.
+      onTranscript: () => refreshControl.current?.nudge(),
       // Stamped with the owner, so a report can never be read by a later one. The model publishes
       // nothing after `stop()`, and even if it did, a report from a replaced owner is discarded at
       // render rather than believed.
@@ -1430,7 +1433,10 @@ function SessionRoute({ connection, scope }: SessionChatPageProps) {
 
   const sessionState: SessionState = session !== undefined ? 'connected' : error !== null ? 'failed' : 'opening';
   const sessionIssue = error === null ? null : `Session workspace issue: ${error}`;
+  // The reader acted (a send among them): read now, and keep the poll at full rate while the turn it
+  // starts is announced — a feed that died without a close must not leave the page on its relaxed poll.
   const refresh = useCallback(() => {
+    refreshControl.current?.acted();
     void refreshControl.current?.refresh(true);
   }, []);
   const publishSession = useCallback(
@@ -2446,7 +2452,7 @@ export function AppShell() {
             {/* EXPANDED BY DEFAULT at every width above a phone: the column folds to its icon rail only
                 when the reader folds it (remembered per device), never because the window is narrow. */}
             {phone ? null : sessionsBar('column')}
-            <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+            <div data-shell-main="" className="flex min-h-0 min-w-0 flex-1 flex-col">
               {/* A phone keeps its top bar off the session page only: there the session's own bar
                   carries ☰, and every other page still needs a way to the drawer and the finder. */}
               {phone && pageRoute.kind !== 'session' ? (

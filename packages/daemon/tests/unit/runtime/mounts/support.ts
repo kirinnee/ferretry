@@ -57,6 +57,7 @@ import {
   type AttentionLedger,
   type AttentionLedgerRepository,
   type AttentionMutation,
+  type AttentionRepliesSubsystem,
   AttentionService,
 } from '../../../../src/lib/attention/index.ts';
 import type {
@@ -261,7 +262,7 @@ export function pinService(known: readonly string[], instant: string = AT): PinS
 }
 
 /** An in-memory attention ledger: the state machine is real, the JSONL file is not. */
-class FakeLedgerRepository implements AttentionLedgerRepository {
+export class FakeLedgerRepository implements AttentionLedgerRepository {
   constructor(private ledger: AttentionLedger | null = null) {}
 
   async read(): Promise<AttentionLedger | null> {
@@ -2363,3 +2364,9 @@ export function configChangeSubsystem(announced: (readonly ConfigChangeKind[])[]
     },
   };
 }
+
+/** An outbox that holds nothing: for routes whose test is not about batched answers. */
+export const NO_HELD_REPLIES: AttentionRepliesSubsystem = {
+  pending: async () => undefined,
+  sendNow: async () => undefined,
+};

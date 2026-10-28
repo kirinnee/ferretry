@@ -49,7 +49,7 @@ const PROBE_PROMPT = 'Reply with the single word OK.';
 const CHECK_PROVIDER = 'fy_check';
 
 /** A loopback port nothing listens on: a proxy here refuses every connection immediately. */
-const CLOSED_PROXY = 'http://127.0.0.1:9';
+export const CLOSED_PROXY = 'http://127.0.0.1:9';
 
 /** What spawning the CLI produced. */
 export interface CheckRun {

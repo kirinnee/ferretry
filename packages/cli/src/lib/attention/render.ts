@@ -41,6 +41,8 @@ function askLine(ask: AttentionAsk | undefined): string | undefined {
       return 'answer: good, or ask to clarify';
     case 'open-question':
       return 'answer: write a full answer';
+    case 'task':
+      return 'to do: mark it done, or ask for more information';
   }
 }
 
@@ -68,10 +70,13 @@ function itemLines(item: AttentionItem): string[] {
   if (item.context !== null && item.context !== undefined && item.context.trim() !== '') {
     lines.push(`${INDENT}context: ${compact(item.context)}`);
   }
-  lines.push(...briefLines(item));
+  lines.push(...briefLines(item), ...instructionLines(item));
   if (item.why.trim() !== item.subject.trim()) lines.push(`${INDENT}why: ${compact(item.why)}`);
   lines.push(`${INDENT}resolve: ${compact(item.howToResolve)}`);
   lines.push(`${INDENT}since ${item.waitingSince} · raised by ${actor(item.raisedBy, item.raisedByName)}`);
+  if (item.waitingOn !== undefined) {
+    lines.push(`${INDENT}waiting on the ferret: more information asked ${item.askedAt ?? ''}`.trimEnd());
+  }
   return lines;
 }
 
@@ -106,6 +111,21 @@ function briefLines(item: AttentionItem): string[] {
   if (item.links !== undefined) {
     lines.push(`${INDENT}links: ${compact(item.links.map(link => link.label ?? link.target).join(' · '))}`);
   }
+  return lines;
+}
+
+/** The instructions the owner follows: the steps numbered from 1 with a tick on the done ones, then the body. */
+function instructionLines(item: AttentionItem): string[] {
+  const lines: string[] = [];
+  const done = new Set(item.stepsDone ?? []);
+  const steps = item.steps ?? [];
+  if (steps.length > 0) {
+    lines.push(`${INDENT}steps (${done.size}/${steps.length} done):`);
+    steps.forEach((step, index) => {
+      lines.push(`${INDENT}  ${index + 1}. ${done.has(index) ? '✓' : '·'} ${compact(step)}`);
+    });
+  }
+  if (item.body !== undefined) lines.push(`${INDENT}body: ${compact(item.body)}`);
   return lines;
 }
 
@@ -161,7 +181,20 @@ export function renderAttentionMutation(
 ): string {
   const subject = reference === undefined ? verb : `${verb} ${reference}`;
   const line = `${subject} — ${pluralItems(snapshot.count)} in ${snapshot.sessionId}`;
-  return [line, ...writingAdvice(snapshot.warnings, raised ?? undefined)].join('\n');
+  return [line, ...enrolmentWarning(snapshot.enrolled), ...writingAdvice(snapshot.warnings, raised ?? undefined)].join(
+    '\n',
+  );
+}
+
+/**
+ * Said when the raise reached nobody. The daemon counts the enrolled devices only on the response to a
+ * raise, so an absent count is "not this response", never zero.
+ */
+function enrolmentWarning(enrolled: number | undefined): string[] {
+  if (enrolled !== 0) return [];
+  return [
+    'Warning: no device will be notified (0 enrolled). The item is on the board, but nobody was told — the owner turns notifications on in the app, under Settings › Notifications.',
+  ];
 }
 
 /**
@@ -182,4 +215,10 @@ export function renderNotification(delivered: number): string {
   const devices = delivered === 1 ? '1 device' : `${delivered} devices`;
   if (delivered === 0) return 'notification sent to 0 devices — no registered device wants this kind';
   return `notification sent to ${devices}`;
+}
+
+/** Confirmation for "Send now": which held answers went, or that nothing was held. */
+export function renderRepliesSent(held: readonly AttentionId[], sessionId: string): string {
+  if (held.length === 0) return `no answers were held for ${sessionId} — nothing to send`;
+  return `sent ${held.map(attentionReference).join(', ')} to ${sessionId} now`;
 }

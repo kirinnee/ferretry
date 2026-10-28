@@ -33,7 +33,14 @@ export const FLEET_EVENT_STREAM_CLOSES = {
 } as const;
 
 export type FleetEventStreamScope =
-  | { readonly kind: 'session'; readonly sessionId: string; readonly after: number; readonly live?: boolean }
+  | {
+      readonly kind: 'session';
+      readonly sessionId: string;
+      readonly after: number;
+      readonly live?: boolean;
+      /** `?transcript=1`: send a `transcript` frame each time the session's transcript file changes. */
+      readonly transcript?: boolean;
+    }
   | {
       readonly kind: 'fleet';
       /**
@@ -68,6 +75,23 @@ export interface FleetEventSource {
  */
 export interface LiveActivitySource {
   sample(sessionId: string, signal: AbortSignal): Promise<SessionLiveActivity | undefined>;
+}
+
+/**
+ * Where a session's transcript changes are heard: the file it has proved as its own, through the
+ * daemon's file-event hub. `onChange` is handed the instant the change was heard.
+ */
+export interface TranscriptChangeSource {
+  watch(sessionId: string, onChange: (at: string) => void): TranscriptChangeWatch;
+}
+
+export interface TranscriptChangeWatch {
+  /**
+   * The session's journal moved, so the file it owns may have too — a first message binds one, a
+   * `/clear` or a resume moves to another. Re-resolved here rather than polled.
+   */
+  refresh(): void;
+  close(): void;
 }
 
 export interface EventStreamTimer {
@@ -128,6 +152,7 @@ class FleetEventSocketHandler implements SocketHandler {
   private idle: EventStreamTimer | undefined;
   private live: EventStreamTimer | undefined;
   private lastLive: SessionLiveActivity | undefined;
+  private transcriptWatch: TranscriptChangeWatch | undefined;
   private replaying = true;
   private closed = false;
 
@@ -137,6 +162,7 @@ class FleetEventSocketHandler implements SocketHandler {
     private readonly scheduler: EventStreamScheduler,
     private readonly downstream: SocketDownstream,
     private readonly liveSource?: LiveActivitySource,
+    private readonly transcriptSource?: TranscriptChangeSource,
   ) {
     if (scope.kind === 'session') {
       this.cursors.set(scope.sessionId, scope.after);
@@ -165,6 +191,7 @@ class FleetEventSocketHandler implements SocketHandler {
       if (!this.send(this.idleFrame())) return;
       this.armIdle();
       this.armLive(0);
+      this.watchTranscript();
     } catch {
       if (!this.closed && !this.abort.signal.aborted) this.fail(FLEET_EVENT_STREAM_CLOSES.evidence);
     }
@@ -211,7 +238,9 @@ class FleetEventSocketHandler implements SocketHandler {
       this.deliver(event, true, true);
     } catch {
       this.fail(FLEET_EVENT_STREAM_CLOSES.evidence);
+      return;
     }
+    this.transcriptWatch?.refresh();
   }
 
   /** Deliver one event. `dedupe` is used only for the replay/live overlap queue. */
@@ -352,6 +381,32 @@ class FleetEventSocketHandler implements SocketHandler {
     this.armLive(LIVE_SAMPLE_MS);
   }
 
+  /**
+   * Say when the transcript changes, for a per-session stream that asked (`?transcript=1`).
+   *
+   * THE JOURNAL CANNOT SAY IT. A reply's text, its tool calls and their results reach the transcript with
+   * no turn change, so a reader that re-read only on events showed each block when its poll came round —
+   * seconds after the agent wrote it. The hub hears the file within its settle; this frame carries no
+   * content, so the reader re-reads through its ordinary conditional read and the two can never disagree.
+   *
+   * Started after the replay, like the live readout: a reader is told the history before the present.
+   */
+  private watchTranscript(): void {
+    const source = this.transcriptSource;
+    if (this.closed || source === undefined || this.scope.kind !== 'session' || this.scope.transcript !== true) return;
+    const sessionId = this.scope.sessionId;
+    this.transcriptWatch = source.watch(sessionId, at => this.transcriptMoved(sessionId, at));
+  }
+
+  private transcriptMoved(sessionId: string, at: string): void {
+    if (this.closed) return;
+    try {
+      if (this.send({ kind: 'transcript', transcript: { sessionId, at } })) this.armIdle();
+    } catch {
+      this.fail(FLEET_EVENT_STREAM_CLOSES.evidence);
+    }
+  }
+
   private fail(close: { readonly code: number; readonly reason: string }): void {
     if (this.closed) return;
     this.close();
@@ -370,6 +425,8 @@ class FleetEventSocketHandler implements SocketHandler {
     this.idle = undefined;
     this.live?.cancel();
     this.live = undefined;
+    this.transcriptWatch?.close();
+    this.transcriptWatch = undefined;
     this.unsubscribe?.();
     this.unsubscribe = undefined;
     this.pending = [];
@@ -383,9 +440,18 @@ export class FleetEventStreamService {
     private readonly scheduler: EventStreamScheduler,
     /** The live readout behind `?live=1`. Absent, such a stream simply carries no `live` frames. */
     private readonly liveSource?: LiveActivitySource,
+    /** The transcript signal behind `?transcript=1`. Absent, such a stream carries no `transcript` frames. */
+    private readonly transcriptSource?: TranscriptChangeSource,
   ) {}
 
   handler(scope: FleetEventStreamScope, downstream: SocketDownstream): SocketHandler {
-    return new FleetEventSocketHandler(scope, this.source, this.scheduler, downstream, this.liveSource);
+    return new FleetEventSocketHandler(
+      scope,
+      this.source,
+      this.scheduler,
+      downstream,
+      this.liveSource,
+      this.transcriptSource,
+    );
   }
 }

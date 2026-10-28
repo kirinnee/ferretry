@@ -16,7 +16,7 @@ import {
   type DirectNotificationSubsystem,
 } from '../../../../src/lib/runtime/index.ts';
 import { jsonBody, request } from '../../api/support.ts';
-import { agentIn, attentionService, CREDENTIALS, human } from './support.ts';
+import { agentIn, attentionService, CREDENTIALS, human, NO_HELD_REPLIES } from './support.ts';
 
 /** A repository whose reads fail the way a damaged ledger file does. */
 class BrokenLedgerRepository implements AttentionLedgerRepository {
@@ -38,6 +38,12 @@ class FakeNotifications implements DirectNotificationSubsystem {
     readonly requestId: string;
   }> = [];
   result: NotificationResult = { ok: true, value: { sessionId: 's1', delivered: 0 } };
+  enrolled: number | Error = 2;
+
+  async enrolledDevices(): Promise<number> {
+    if (this.enrolled instanceof Error) throw this.enrolled;
+    return this.enrolled;
+  }
 
   async notifyDirect(
     sessionId: string,
@@ -56,7 +62,7 @@ function fixture(
   notifications: DirectNotificationSubsystem = new FakeNotifications(),
   credentials: ApiCredentials = CREDENTIALS,
 ) {
-  const routes = attentionRoutes(attentionService(repository), notifications);
+  const routes = attentionRoutes(attentionService(repository), notifications, NO_HELD_REPLIES);
   const dispatcher = new ApiDispatcher(new ApiRouter([...routes]), credentials, NO_GOVERNED_ROUTES_GUARD);
   return async (overrides: Parameters<typeof request>[0]): Promise<ApiResponse> =>
     await dispatcher.dispatch(request(overrides));
@@ -118,6 +124,55 @@ describe('attention routes', () => {
     should(raised.status).equal(200);
     should(jsonBody(raised)).have.property('count', 1);
     should((jsonBody(raised).items as readonly { subject: string }[])[0]?.subject).equal('which base branch?');
+  });
+
+  it('should record a raise carrying the CLI’s session header as that ferret’s, and one without it as the human’s', async () => {
+    // Arrange — the headers are the ones `fy attention add` sends from inside a ferret's pane and from
+    // the person's own shell. The live defect sent the second from both, so every ferret's raise was
+    // stored as the human's, and the owner's answer was never delivered back to the ferret.
+    const dispatch = fixture();
+
+    // Act
+    const fromFerret = await dispatch(post(raise, agentIn('s1')));
+    const fromShell = await dispatch(post({ ...raise, subject: 'from the shell' }));
+
+    // Assert
+    const items = jsonBody(fromShell).items as readonly { subject: string; raisedBy: string }[];
+    should(jsonBody(fromFerret).items).containDeep([{ raisedBy: 'agent', raisedBySession: 's1' }]);
+    should(items.find(item => item.subject === 'from the shell')).containDeep({ raisedBy: 'human' });
+  });
+
+  it('should say how many devices a new item reached, only on the raise that created it', async () => {
+    // Arrange
+    const none = new FakeNotifications();
+    none.enrolled = 0;
+    const dispatch = fixture(undefined, none);
+
+    // Act
+    const raised = await dispatch(post(raise, agentIn('s1')));
+    const again = await dispatch(post(raise, agentIn('s1')));
+    const id = (jsonBody(raised).items as readonly { id: string }[])[0]?.id;
+    const answered = await dispatch(post({ action: 'dismiss', id }, agentIn('s1')));
+
+    // Assert — zero is the case worth saying: the ask is on the board and nobody was told.
+    should(jsonBody(raised)).have.property('enrolled', 0);
+    should(jsonBody(again)).not.have.property('enrolled');
+    should(jsonBody(answered)).not.have.property('enrolled');
+  });
+
+  it('should raise the item even when the enrolled devices cannot be counted, and claim no count', async () => {
+    // Arrange
+    const broken = new FakeNotifications();
+    broken.enrolled = new Error('push store unreadable');
+    const dispatch = fixture(undefined, broken);
+
+    // Act
+    const raised = await dispatch(post(raise, agentIn('s1')));
+
+    // Assert
+    should(raised.status).equal(200);
+    should(jsonBody(raised)).have.property('count', 1);
+    should(jsonBody(raised)).not.have.property('enrolled');
   });
 
   it('should answer a clean raise with no warnings, and a hard-to-read one with advice that edit then clears', async () => {
@@ -475,5 +530,88 @@ describe('attention routes', () => {
       should(response.status).equal(status);
       should(jsonBody(response)).have.property('code', code);
     }
+  });
+});
+
+describe('attention routes and held answers', () => {
+  it('should serve the board without `replies` when the outbox cannot be read', async () => {
+    // Arrange
+    const routes = attentionRoutes(attentionService(), new FakeNotifications(), {
+      pending: async () => {
+        throw new Error('outbox unreadable');
+      },
+      sendNow: async () => undefined,
+    });
+    const dispatcher = new ApiDispatcher(new ApiRouter([...routes]), CREDENTIALS, NO_GOVERNED_ROUTES_GUARD);
+
+    // Act
+    const response = await dispatcher.dispatch(request({ path: '/v1/sessions/s1/attention', headers: human }));
+
+    // Assert — the board is the answer; a held outbox is decoration.
+    should(response.status).equal(200);
+    should(jsonBody(response)).not.have.property('replies');
+  });
+});
+
+describe('attention route needs-info', () => {
+  const task = {
+    action: 'add',
+    subject: 'Log in to the cloud',
+    why: 'The deploy needs it',
+    howToResolve: 'Follow the steps',
+    ask: { kind: 'task' },
+    steps: ['Run the login'],
+  } as const;
+
+  it('should let the owner ask for more information, keep the item open and mark it waiting on the ferret', async () => {
+    // Arrange
+    const dispatch = fixture();
+    await dispatch(post(task, agentIn('s1')));
+
+    // Act
+    const asked = await dispatch(post({ action: 'needs-info', id: 'A1', note: 'Which account?' }));
+
+    // Assert
+    should(asked.status).equal(200);
+    should(jsonBody(asked)).containDeep({ count: 1 });
+    should((jsonBody(asked).items as readonly unknown[])[0]).containDeep({
+      id: 'A1',
+      waitingOn: 'ferret',
+      infoRequests: 1,
+    });
+  });
+
+  it('should refuse the ferret asking itself, an unknown item and a closed one', async () => {
+    // Arrange
+    const dispatch = fixture();
+    await dispatch(post(task, agentIn('s1')));
+    await dispatch(post({ action: 'resolve', id: 'A1' }));
+
+    // Act
+    const byAgent = await dispatch(post({ action: 'needs-info', id: 'A1' }, agentIn('s1')));
+    const unknown = await dispatch(post({ action: 'needs-info', id: 'A9' }));
+    const closed = await dispatch(post({ action: 'needs-info', id: 'A1' }));
+
+    // Assert
+    should(byAgent.status).equal(403);
+    should(unknown.status).equal(404);
+    should(closed.status).equal(404);
+  });
+
+  it('should answer a ferret edit that answers the request with the cleared mark, and lint what it wrote', async () => {
+    // Arrange
+    const dispatch = fixture();
+    await dispatch(post(task, agentIn('s1')));
+    await dispatch(post({ action: 'needs-info', id: 'A1' }));
+
+    // Act
+    const edited = await dispatch(
+      post({ action: 'edit', id: 'A1', subject: 'Log in to ABC-123 via https://example.com' }, agentIn('s1')),
+    );
+
+    // Assert
+    should(edited.status).equal(200);
+    should((jsonBody(edited).items as readonly Record<string, unknown>[])[0]).not.have.property('waitingOn');
+    should(jsonBody(edited)).have.property('warnings');
   });
 });

@@ -43,15 +43,14 @@ import { Check, Monitor, Moon, Sun } from 'lucide-react';
 import type { Browser } from 'playwright-core';
 import { renderToStaticMarkup } from 'react-dom/server';
 import should from 'should';
-
+import type { ThemeState } from '../../../src/hooks/use-theme.ts';
 import {
-  THEME_FAMILIES,
   type ResolvedMode,
+  THEME_FAMILIES,
   type ThemeFamilyId,
   type ThemeMode,
 } from '../../../src/lib/theme-preferences.ts';
 import { THEME_FAMILY_CARD_CLASS, ThemeSettings } from '../../../src/shell/theme-toggle.tsx';
-import type { ThemeState } from '../../../src/hooks/use-theme.ts';
 import { sharedChromium } from '../support/chromium.ts';
 
 const packageDir = resolve(import.meta.dir, '../../..');
@@ -68,7 +67,6 @@ const theme: ThemeState = {
   resolved: RESOLVED,
   attr: `${FAMILY}-${RESOLVED}`,
   families: THEME_FAMILIES,
-  textScaleSupported: true,
   setFamily: () => {},
   setMode: () => {},
   setTextScale: () => {},

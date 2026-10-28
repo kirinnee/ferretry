@@ -9,19 +9,26 @@ import {
   PushNotificationPayloadSchema,
   sessionNotificationPath,
 } from '@ferretry/protocol';
+import { DEVICE_PAIRED_TITLE } from '../audit/policy.ts';
 import type { DirectNotificationRequestedRecord, NotificationLedgerEntry, NotificationResult } from './types.ts';
 
 export type SessionNotificationPayload = Extract<PushNotificationPayload, { readonly sessionId: string }>;
 
 export type NotificationIdentity =
   | { readonly origin: 'direct'; readonly requestId: string }
-  | { readonly origin: 'attention'; readonly sessionId: string; readonly attentionId: string };
+  | {
+      readonly origin: 'attention';
+      readonly sessionId: string;
+      readonly attentionId: string;
+      /** The owner's request for more information this push answers; absent for the item's own raise. */
+      readonly infoRequest?: number;
+    };
 
 /** The daemon-wide identity of one logical notification. */
 export function notificationKey(identity: NotificationIdentity): string {
   return identity.origin === 'direct'
     ? `direct:${identity.requestId}`
-    : `attention:${identity.sessionId}:${identity.attentionId}`;
+    : `attention:${identity.sessionId}:${identity.attentionId}${identity.infoRequest === undefined ? '' : `:info-${identity.infoRequest}`}`;
 }
 
 export interface DirectNotificationFingerprint {
@@ -163,12 +170,10 @@ export interface AttentionNotificationSession {
  * Composes the automatic presentation of one newly created board item: THE ONE PUSH A FERRET'S ASK
  * MAKES (docs/attention.md). Waiting and finishing push nothing; this does.
  *
- * A LOCK SCREEN GETS A CONCISE SUMMARY AND NOTHING ELSE. The title is the conversation's name, quoted
- * and trimmed to `ATTENTION_PUSH_TITLE_LENGTH`; the body is the item's summary alone, trimmed to
+ * A LOCK SCREEN GETS A CONCISE SUMMARY AND NOTHING ELSE. The title is the conversation's name
+ * (`attentionNotificationTitle`); the body is the item's summary alone, trimmed to
  * `ATTENTION_PUSH_BODY_LENGTH` at a word boundary — never the context, the options or any jargon, which
- * the item itself carries. The quote also means an ask can never open with the daemon's own new-device
- * alert title (`DEVICE_PAIRED_TITLE`): a session's name is an agent's words, exactly as a direct
- * notification's title is.
+ * the item itself carries.
  *
  * A tap opens that conversation at the item: the path is relative to the machine's own pages, which the
  * browser's per-machine worker places under that machine.
@@ -185,8 +190,33 @@ export function attentionNotificationPayload(
     eventKey: `attention-raised:${item.id}`,
     sessionId,
     kind: 'attention',
-    title: `“${clippedAtWord(oneLine(conversation), ATTENTION_PUSH_TITLE_LENGTH)}”`,
+    title: attentionNotificationTitle(conversation),
     body: clippedAtWord(attentionNotificationSummary(item, conversation), ATTENTION_PUSH_BODY_LENGTH),
+    tag: `attention-${sessionId}`,
+    url: attentionNotificationPath(sessionId, item.id),
+    count: snapshot.count,
+  }) as SessionNotificationPayload;
+}
+
+/** What a push says when the ferret added the information the owner asked for: same title and page as the raise. */
+export function moreInfoNotificationPayload(
+  sessionId: string,
+  session: AttentionNotificationSession,
+  item: AttentionItem,
+  snapshot: AttentionSnapshot,
+  request: number,
+): SessionNotificationPayload {
+  const conversation = session.title?.trim() || session.name;
+  return PushNotificationPayloadSchema.parse({
+    version: 1,
+    eventKey: `attention-info:${item.id}:${request}`,
+    sessionId,
+    kind: 'attention',
+    title: attentionNotificationTitle(conversation),
+    body: clippedAtWord(
+      `Updated: more info added — ${attentionNotificationSummary(item, conversation)}`,
+      ATTENTION_PUSH_BODY_LENGTH,
+    ),
     tag: `attention-${sessionId}`,
     url: attentionNotificationPath(sessionId, item.id),
     count: snapshot.count,
@@ -227,4 +257,70 @@ export function attentionNotificationAttribution(item: AttentionItem): string {
     return `attention:agent:${item.raisedBySession}`;
   }
   return `attention:${item.raisedBy}`;
+}
+
+/** Latin look-alikes an agent could spell the reserved alert title with, folded to the letter they mimic. */
+const CONFUSABLE_LETTERS: Readonly<Record<string, string>> = {
+  а: 'a',
+  в: 'b',
+  е: 'e',
+  і: 'i',
+  ј: 'j',
+  к: 'k',
+  м: 'm',
+  н: 'h',
+  о: 'o',
+  р: 'p',
+  с: 'c',
+  т: 't',
+  у: 'y',
+  х: 'x',
+  ѕ: 's',
+  ԁ: 'd',
+  ԝ: 'w',
+  α: 'a',
+  ε: 'e',
+  ι: 'i',
+  κ: 'k',
+  ν: 'v',
+  ο: 'o',
+  ρ: 'p',
+  τ: 't',
+  υ: 'u',
+  χ: 'x',
+};
+
+/** The letters a reader sees, whatever script or accent spells them: `A nеw dévice!` → `anewdevice`. */
+function letterSkeleton(text: string): string {
+  return [...text.normalize('NFKD').toLowerCase()]
+    .map(letter => CONFUSABLE_LETTERS[letter] ?? letter)
+    .join('')
+    .replaceAll(/[^a-z]/gu, '');
+}
+
+/**
+ * What the reserved alert says, as letters: a name that reads as "new device" or "paired" anywhere is not a
+ * ferret's to put on a lock screen bare. Derived from the alert's own title, so the two cannot drift.
+ */
+const RESERVED_ALERT_SKELETONS = [
+  letterSkeleton(DEVICE_PAIRED_TITLE.split(' ').slice(1, 3).join(' ')),
+  letterSkeleton(DEVICE_PAIRED_TITLE.split(' ').at(-1) ?? ''),
+].filter(skeleton => skeleton !== '');
+
+/**
+ * An Attention push's title: the conversation's name, plain, trimmed to `ATTENTION_PUSH_TITLE_LENGTH`
+ * at a word boundary.
+ *
+ * IT USED TO BE QUOTED, ALWAYS — `“Ferretry”` on the lock screen — so that an agent's words could never
+ * open with the daemon's own new-device alert (`DEVICE_PAIRED_TITLE`). The owner read the quotes as a
+ * defect, and they guarded every title for the sake of one. Now only a name that READS as that alert —
+ * in any letters that look like it (`letterSkeleton`) — is labelled, as `Ferret “…”`, which no real
+ * alert ever opens with. Every other title is the name as the owner typed it.
+ */
+export function attentionNotificationTitle(conversation: string): string {
+  const name = oneLine(conversation);
+  const letters = letterSkeleton(name);
+  if (!RESERVED_ALERT_SKELETONS.some(reserved => letters.includes(reserved)))
+    return clippedAtWord(name, ATTENTION_PUSH_TITLE_LENGTH);
+  return `Ferret “${clippedAtWord(name, ATTENTION_PUSH_TITLE_LENGTH - 9)}”`;
 }

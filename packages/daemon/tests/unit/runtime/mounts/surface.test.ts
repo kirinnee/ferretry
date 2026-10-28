@@ -48,6 +48,7 @@ import {
   healthSubsystem,
   human,
   learningSubsystem,
+  NO_HELD_REPLIES,
   nameSubsystem,
   permissionSubsystem,
   pinService,
@@ -343,8 +344,10 @@ const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
         : undefined,
   },
   attention: attentionService(),
+  attentionReplies: NO_HELD_REPLIES,
   notifications: {
     notifyDirect: async sessionId => ({ ok: true, value: { sessionId, delivered: 0 } }),
+    enrolledDevices: async () => 0,
   },
   pins: pinService([]),
   sessions: sessionDirectory([sessionView('s1')]),
@@ -752,6 +755,7 @@ describe('the mounted daemon surface', () => {
       3 + // the setup scan, tool install and the clone export
       1 + // the security log read
       5 + // the passkey step-up: this device's passkeys, registration and step-up, each with its options (the owner's re-opened window is admin-token)
+      1 + // "Send now" for the answers a ferret's outbox holds (docs/attention.md § The loop)
       1 + // one device's own grants, changed (B5)
       2 + // the machine's security settings: the read and the change (zero-trust B6)
       1 + // switching the tunnel on or off (pairing.configure); its read is `authenticated`, like the carrier refresh
@@ -996,6 +1000,7 @@ describe('the mounted daemon surface', () => {
       'DELETE /v1/sessions/:sessionId/attachments/:attachmentId/unlock',
       'GET /v1/sessions/:sessionId/attention',
       'POST /v1/sessions/:sessionId/attention',
+      'POST /v1/sessions/:sessionId/attention/replies',
       'POST /v1/sessions/:sessionId/notify',
       'GET /v1/sessions/:sessionId/pins',
       'POST /v1/sessions/:sessionId/pins',

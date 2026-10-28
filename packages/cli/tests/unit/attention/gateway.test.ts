@@ -1,9 +1,14 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
 import type { z } from 'zod';
-import { ProtocolAttentionGateway, attentionBoardPath, notifyPath } from '../../../src/lib/attention/gateway';
+import {
+  attentionBoardPath,
+  notifyPath,
+  ProtocolAttentionGateway,
+  repliesPath,
+} from '../../../src/lib/attention/gateway';
 import type { AttentionApiClient } from '../../../src/lib/attention/ports';
-import { SESSION, humanItem, snapshot } from './fixtures';
+import { humanItem, SESSION, snapshot } from './fixtures';
 
 interface Call {
   path: string;
@@ -39,7 +44,7 @@ describe('protocol attention gateway', () => {
 
     // Assert
     should(calls[0]?.path).equal(`/v1/sessions/${SESSION}/attention`);
-    should(calls[0]?.init).be.undefined();
+    should(calls[0]?.init).deepEqual({ headers: { 'x-ferretry-client': 'cli' } });
     should(actual.items).have.length(1);
   });
 
@@ -53,7 +58,7 @@ describe('protocol attention gateway', () => {
 
     // Assert
     should(calls[0]?.init?.method).equal('POST');
-    should(calls[0]?.init?.headers).deepEqual({ 'content-type': 'application/json' });
+    should(calls[0]?.init?.headers).deepEqual({ 'content-type': 'application/json', 'x-ferretry-client': 'cli' });
     should(JSON.parse(String(calls[0]?.init?.body))).deepEqual({ action: 'dismiss', id: 'A3', note: 'stale' });
   });
 
@@ -101,5 +106,53 @@ describe('protocol attention gateway', () => {
 
     // Act + Assert
     await should(gateway.notify(SESSION, { body: 'ok' })).be.rejected();
+  });
+});
+
+describe('protocol attention gateway attribution', () => {
+  it('should name the ferret it runs inside on every call, so its raise is the agent’s', async () => {
+    // Arrange — the live defect: a raise from inside a ferret reached the daemon as the person at the
+    // shell, was stored `raisedBy: human`, and its answer was therefore never delivered back.
+    const calls: Call[] = [];
+    const gateway = new ProtocolAttentionGateway(fakeClient(snapshot([]), calls), 'mvgt2oz9-04e28935');
+
+    // Act
+    await gateway.snapshot(SESSION);
+    await gateway.apply(SESSION, { action: 'dismiss', id: 'A1' });
+
+    // Assert
+    const own = { 'x-ferretry-client': 'cli', 'x-ferretry-session-id': 'mvgt2oz9-04e28935' };
+    should(calls[0]?.init?.headers).deepEqual(own);
+    should(calls[1]?.init?.headers).deepEqual({ 'content-type': 'application/json', ...own });
+  });
+
+  it('should name no session at the person’s own shell, however blank the variable', async () => {
+    // Arrange
+    const calls: Call[] = [];
+    const gateway = new ProtocolAttentionGateway(fakeClient({ sessionId: SESSION, delivered: 1 }, calls), '  ');
+
+    // Act
+    await gateway.notify(SESSION, { body: 'ok' });
+
+    // Assert
+    should(calls[0]?.init?.headers).deepEqual({ 'content-type': 'application/json', 'x-ferretry-client': 'cli' });
+  });
+});
+
+describe('protocol attention gateway send-now', () => {
+  it('should post to the replies route with the attribution headers', async () => {
+    // Arrange
+    const calls: Call[] = [];
+    const gateway = new ProtocolAttentionGateway(fakeClient(snapshot([]), calls), 'ferret-1');
+
+    // Act
+    await gateway.sendReplies('a/b');
+
+    // Assert
+    should(repliesPath('a/b')).equal('/v1/sessions/a%2Fb/attention/replies');
+    should(calls[0]?.path).equal('/v1/sessions/a%2Fb/attention/replies');
+    should(calls[0]?.init?.method).equal('POST');
+    should(JSON.parse(String(calls[0]?.init?.body))).deepEqual({});
+    should(calls[0]?.init?.headers).containDeep({ 'x-ferretry-session-id': 'ferret-1' });
   });
 });

@@ -109,6 +109,13 @@ import {
   probePdfDecryptWorker,
 } from '../src/adapters/attachments/index.ts';
 import { FileAttentionLedgerRepository } from '../src/adapters/attention/file-attention-ledger-repository.ts';
+import { FileAttentionOutboxRepository } from '../src/adapters/attention/file-attention-outbox-repository.ts';
+import { KeyedAttentionReplyTimers } from '../src/adapters/attention/keyed-attention-reply-timers.ts';
+import {
+  StorageHarnessPromptJournal,
+  StorageHarnessPromptStates,
+  StorageHarnessQuestionAnswerer,
+} from '../src/adapters/attention/storage-harness-prompt.ts';
 import { StorageSessionAttentionState } from '../src/adapters/attention/storage-session-attention-state.ts';
 import { FileAcceptedConfigStore, FileConfigDirectory } from '../src/adapters/config-files/files.ts';
 import { unrefFileEventTimers } from '../src/adapters/file-events/bun-file-event-source.ts';
@@ -337,7 +344,11 @@ import {
   RuntimeSupervisedLauncher,
   RuntimeSupervisedReaper,
 } from '../src/adapters/session/lifecycle/runtime-launch-supervision.ts';
-import { FileCompactionHistory, StorageLiveActivitySource } from '../src/adapters/session/live/index.ts';
+import {
+  FileCompactionHistory,
+  FileTranscriptChanges,
+  StorageLiveActivitySource,
+} from '../src/adapters/session/live/index.ts';
 import {
   FileWaitHeartbeat,
   MonitorTickRunner,
@@ -425,6 +436,7 @@ import {
 } from '../src/adapters/tmux/index.ts';
 import { CliConversionCheck, CliHarnessVersion } from '../src/adapters/transcript/conversion-check.ts';
 import { NodeTranscriptSource } from '../src/adapters/transcript/index.ts';
+import { CliRolloutFormatProbe } from '../src/adapters/transcript/rollout-format-probe.ts';
 import {
   FileSessionAttachmentCopier,
   FileSessionTransferBriefWriter,
@@ -529,6 +541,8 @@ import {
   type AttentionActor,
   AttentionChangeFanout,
   AttentionConversation,
+  AttentionMoreInfoPush,
+  AttentionReplyBatcher,
   AttentionReplyDelivery,
   AttentionService,
   AUDIT_FOLD_WINDOW_MS,
@@ -659,6 +673,8 @@ import {
   HandoverReconcileLoop,
   type HarnessDiscoveryPolicy,
   type HarnessPreflight,
+  HarnessPromptAnswerDelivery,
+  HarnessPromptAttention,
   HarnessQuirkService,
   HarnessUpdateService,
   type HarnessVersionPort,
@@ -726,6 +742,7 @@ import {
   NO_STACK_SAMPLER,
   NO_WATCHDOG,
   NotificationService,
+  needsRolloutFormatProbe,
   type ObservedSession,
   type OpenedAnalyticsIndexStore,
   type OperatorMessageSource,
@@ -787,6 +804,7 @@ import {
   type ResumeLauncher,
   ResumeRefused,
   ReviveDedupeConflict,
+  type RolloutFormatPort,
   type RoutingCatalogPort,
   type RunOverrides,
   readDaemonRelayIdentity,
@@ -1224,6 +1242,11 @@ export interface DaemonWorld {
    * subscribes to a path in it. `close` releases the watches; `fallbacks` names any directory polled instead.
    */
   readonly fileEvents: FileEventHub;
+  /**
+   * The ONE long-lived tmux control client every tmux read goes through, as far as a boot's release
+   * needs it: `stop` ends that client and resolves once its process has exited.
+   */
+  readonly tmuxControl: Pick<ControlModeTmuxProcess, 'stop'>;
   /**
    * Where a managed agent actually runs: a tmux pane on the daemon's own private socket.
    *
@@ -4265,6 +4288,8 @@ interface SessionMigrateParts {
   readonly conversionCheck: ConversionCheckPort;
   /** The version each harness CLI reports, which the converter is gated on. */
   readonly harnessVersion: HarnessVersionPort;
+  /** The rollout format an untested Codex version writes, which lets the converter accept it. */
+  readonly rolloutFormat: RolloutFormatPort;
   /** The harness CLI itself — the binary a target runtime's wrapper runs — or nothing when absent. */
   readonly locateHarness: (kind: HarnessKind) => string | undefined;
   /** A fresh harness conversation id for a converted conversation. */
@@ -4408,6 +4433,11 @@ async function planConversion(
   }
   const targetHome = await parts.transcriptProvenance.home(harness, executable);
   const binary = parts.locateHarness(harness);
+  const targetVersion = binary === undefined ? undefined : await parts.harnessVersion.version(binary);
+  const targetFormat =
+    binary !== undefined && needsRolloutFormatProbe(harness, targetVersion)
+      ? await parts.rolloutFormat.classify(binary, targetVersion)
+      : undefined;
   const targetModelProvider =
     harness === 'codex' && targetHome !== undefined
       ? codexModelProvider(await parts.conversationFiles.read(join(targetHome, 'config.toml'), CODEX_CONFIG_MAX_BYTES))
@@ -4419,7 +4449,8 @@ async function planConversion(
     sourceText,
     documents: documents satisfies HandoffDocuments,
     targetHome,
-    targetVersion: binary === undefined ? undefined : await parts.harnessVersion.version(binary),
+    targetVersion,
+    ...(targetFormat === undefined ? {} : { targetFormat }),
     ...(targetModelProvider === undefined ? {} : { targetModelProvider }),
     targetAgent: subject.targetAgent,
     targetModel: subject.targetModel,
@@ -4499,6 +4530,7 @@ function conversionSummaryView(summary: ConvertedConversationSummary): Conversio
     dropped: summary.dropped,
     estimatedTokens: summary.estimatedTokens,
     budgetTokens: summary.budgetTokens,
+    ...(summary.formatNote === undefined ? {} : { formatNote: summary.formatNote }),
   };
 }
 
@@ -8063,6 +8095,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
     },
     browserLogin: createBrowserLoginWorld(paths, async () => await closeAgentBrowsers()),
     fileEvents,
+    tmuxControl: tmux,
     createSubsystems: (
       storage,
       terminals,
@@ -8660,6 +8693,23 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       const attentionBoards = new FileAttentionLedgerRepository(
         id => createSessionPaths(paths, parseSessionId(id)).directory,
       );
+      // Each ferret's held answers (docs/attention.md § The loop). The send is awaited by the batcher, outside
+      // its per-session lock: it may wait for a launch or revive a stopped ferret, and the owner's next answer
+      // must not wait on that. The send ledger keeps one message per batch send id.
+      const attentionReplies = new AttentionReplyBatcher(
+        new FileAttentionOutboxRepository(id => createSessionPaths(paths, parseSessionId(id)).directory),
+        {
+          send: async (sessionId, message, sendId) => {
+            const id = tryParseSessionId(sessionId);
+            if (id !== undefined) await sends.send({ id, sendId, message });
+          },
+        },
+        new KeyedAttentionReplyTimers(),
+        new KeyedSerialExecutor(),
+        { now: () => clock.now() },
+      );
+      // Answers held across a restart are delivered, in the background, once the daemon is up.
+      void attentionReplies.resume(storage.listSessions().map(session => session.id)).catch(() => undefined);
       const attentionProjection = new SessionAttentionProjection(
         attentionBoards,
         new StorageSessionAttentionState(storage),
@@ -8669,6 +8719,23 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       // Boards that moved before summaries were kept (or while this daemon was down) are caught up once,
       // in the background: a list served before it finishes is only missing an unread mark.
       void attentionProjection.reconcile(storage.listSessions().map(session => session.id)).catch(() => undefined);
+      // Hoisted so a board answer to a harness question is typed into the form by the SAME path the
+      // Console's answer takes: one coordinator, one receipt ledger, one driver.
+      const sessionAnswer = createSessionAnswerSubsystem(
+        storage,
+        sessions,
+        launchTmux,
+        clock,
+        answerLedger,
+        answerSerial,
+        lastSnapshots,
+      );
+      const harnessAnswerDelivery = new HarnessPromptAnswerDelivery(
+        new StorageHarnessQuestionAnswerer(storage, sessionAnswer),
+        new StorageHarnessPromptJournal(storage),
+        // Read lazily: the service is built just below, and this is only called after it commits.
+        { raise: async (...parameters) => await attention.raise(...parameters) },
+      );
       const attention = new AttentionService(
         attentionBoards,
         clock,
@@ -8682,17 +8749,29 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         new AttentionChangeFanout([
           // The session list's unread signal, kept true to the board.
           attentionProjection,
-          // The owner's answer, told to the ferret that asked. DETACHED: a send may wait for a launch or
-          // revive a stopped ferret, and the person's answer must not wait on that; the send ledger is
-          // where its fate is recorded.
-          new AttentionReplyDelivery({
-            send: async (sessionId, message, sendId) => {
-              const id = tryParseSessionId(sessionId);
-              if (id !== undefined) void sends.send({ id, sendId, message }).catch(() => undefined);
+          // The owner's answer, told to the ferret that asked — through its outbox, which holds a burst of
+          // answers for a few seconds and delivers them as ONE message.
+          new AttentionReplyDelivery(attentionReplies),
+          // The ferret's edit that answers the owner's request for more information: pushed once more.
+          new AttentionMoreInfoPush(notifications),
+          // The owner's answer to a harness question, typed into its form. DETACHED: a drive watches the
+          // pane for seconds, and the answer is already on the board.
+          {
+            changed: async (sessionId, change) => {
+              void harnessAnswerDelivery.changed(sessionId, change).catch(() => undefined);
             },
-          }),
+          },
         ]),
       );
+      // A harness parked on its own prompt waits on the owner, so it is an item on the board, raised and
+      // cleared from the state documents storage writes — and caught up once at start, in the background.
+      const harnessPrompts = new HarnessPromptAttention(
+        attention,
+        new KeyedSerialExecutor(),
+        new StorageHarnessPromptStates(storage),
+      );
+      storage.subscribeStates((id, state) => void harnessPrompts.stateWritten(id, state));
+      void harnessPrompts.reconcile(storage.listSessions().map(session => session.id)).catch(() => undefined);
       // ONE ingestion service for this opened store, shared by the loop that writes rows and the route
       // that reads them. Two would each hold their own account of whether a pass is in flight, and the
       // read would report `refreshing: false` while the loop was mid-pass.
@@ -8754,6 +8833,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         conversationFiles: new FileConversationFiles(codexRollouts),
         conversionCheck: new CliConversionCheck(),
         harnessVersion: new CliHarnessVersion(),
+        rolloutFormat: new CliRolloutFormatProbe(),
         // The SAME discovery a start's readiness check and the doctor use, so the CLI a conversion is
         // validated against is the one this host would launch.
         locateHarness: kind => {
@@ -9623,6 +9703,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         }),
         notifications,
         attention,
+        attentionReplies,
         pins: new PinService(
           new FilePinSessionDirectory(paths, stateFiles),
           // Its own queue: a pin mutation must not serialize behind storage-wide or session work.
@@ -9732,15 +9813,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           },
           new AttentionConversation(attention, CLIENT_NAME),
         ),
-        sessionAnswer: createSessionAnswerSubsystem(
-          storage,
-          sessions,
-          launchTmux,
-          clock,
-          answerLedger,
-          answerSerial,
-          lastSnapshots,
-        ),
+        sessionAnswer,
         sessionAttachments,
         sessionSignal: createSessionSignalSubsystem(storage, sessions, signals),
         sessionRename: createSessionRenameSubsystem(storage, sessions, nameClaims, clock),
@@ -10021,6 +10094,20 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
             },
           },
           liveActivity,
+          // `?transcript=1`: the proved transcript, heard through the one hub every other watcher shares.
+          new FileTranscriptChanges({
+            file: async sessionId => {
+              const id = tryParseSessionId(sessionId);
+              return id === undefined ? undefined : await transcriptFileOf(id);
+            },
+            stat: async file =>
+              await stat(file).then(
+                found => ({ size: found.size, mtimeMs: found.mtimeMs }),
+                () => undefined,
+              ),
+            files: fileEvents,
+            clock,
+          }),
         ),
         // Built above, and the same instance the fleet mount confirms a change through. See its
         // definition for why one instance rather than two.
@@ -10173,6 +10260,12 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
     clearInterval(lagTicks);
     watchdog.stop();
     uncountChildren();
+  });
+  // The shared tmux control client, ended and WAITED OUT before anything else is released: a client left
+  // to notice this process's exit is still on its server after the process has gone (see `stop`). Any
+  // tmux command a later cleanup sends takes a process of its own, as it does whenever no client is there.
+  cleanups.push(async () => {
+    await world.tmuxControl.stop();
   });
   const liveness: DaemonLivenessSource = {
     pid: process.pid,

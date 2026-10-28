@@ -10,7 +10,13 @@ import {
 } from './brief.ts';
 import type { IAttentionBriefInput, IAttentionGateway, IAttentionOutput } from './ports.ts';
 import { attentionReference, parseAttentionReference } from './reference.ts';
-import { renderAttentionHistory, renderAttentionList, renderAttentionMutation, renderNotification } from './render.ts';
+import {
+  renderAttentionHistory,
+  renderAttentionList,
+  renderAttentionMutation,
+  renderNotification,
+  renderRepliesSent,
+} from './render.ts';
 
 /** Options every attention command accepts. */
 export interface AttentionCommandOptions {
@@ -24,10 +30,20 @@ export interface AttentionCommandOptions {
 export interface AttentionAddOptions extends AttentionCommandOptions, BriefFlags {
   /** A JSON body with the same fields; `-` reads standard input. */
   readonly jsonFile?: string;
+  /** A Markdown file for the body; `-` reads standard input. */
+  readonly bodyFile?: string;
 }
 
 /** Flags that reword an open item. */
-export interface AttentionEditOptions extends AttentionCommandOptions, EditFlags {}
+export interface AttentionEditOptions extends AttentionCommandOptions, EditFlags {
+  /** A Markdown file for the new body; `-` reads standard input. */
+  readonly bodyFile?: string;
+}
+
+/** Flags that tick or untick a step. */
+export interface AttentionStepOptions extends AttentionCommandOptions {
+  readonly undo?: boolean;
+}
 
 /** Flags that resolve an item. */
 export interface AttentionResolveOptions extends AttentionCommandOptions, AnswerFlags {
@@ -66,8 +82,17 @@ export class AttentionController {
     this.#report(snapshot, options, () => renderAttentionHistory(snapshot));
   }
 
+  /** Delivers the answers the daemon is holding for the ferret now, instead of after its settle window. */
+  async sendNow(options: AttentionCommandOptions): Promise<void> {
+    const sessionId = this.#target(options);
+    const held = (await this.gateway.snapshot(sessionId)).replies?.pending ?? [];
+    const after = await this.gateway.sendReplies(sessionId);
+    this.#report(after, options, () => renderRepliesSent(held, sessionId));
+  }
+
   async add(words: readonly string[], options: AttentionAddOptions): Promise<void> {
-    const request = composeAddRequest(words, options, await this.#briefFile(options.jsonFile));
+    const [file, body] = await this.#inputs(options.jsonFile, options.bodyFile);
+    const request = composeAddRequest(words, { ...options, ...(body === undefined ? {} : { body }) }, file);
     const sessionId = this.#target(options);
 
     // The board is read first so the item just raised can be named by identity rather than guessed at
@@ -85,8 +110,29 @@ export class AttentionController {
     const sessionId = this.#target(options);
     const wording = (options.question ?? []).some(question => question.trim() !== '');
     const current = wording ? (await this.gateway.snapshot(sessionId)).items.find(item => item.id === id) : undefined;
-    const snapshot = await this.gateway.apply(sessionId, composeEditRequest(id, options, current));
+    const [, body] = await this.#inputs(undefined, options.bodyFile);
+    const snapshot = await this.gateway.apply(
+      sessionId,
+      composeEditRequest(id, { ...options, ...(body === undefined ? {} : { body }) }, current),
+    );
     this.#report(snapshot, options, () => renderAttentionMutation('edited', attentionReference(id), snapshot, id));
+  }
+
+  /** Ticks step `number` (counted from 1, as `ls` prints them) of an open item, or unticks it with `--undo`. */
+  async step(reference: string, number: string, options: AttentionStepOptions): Promise<void> {
+    const id = parseAttentionReference(reference);
+    const step = Number(number.trim());
+    if (!Number.isInteger(step) || step < 1) throw new Error(`a step number counts from 1, not "${number}"`);
+    const done = options.undo !== true;
+    const snapshot = await this.gateway.apply(this.#target(options), {
+      action: 'progress',
+      id,
+      step: step - 1,
+      done,
+    });
+    this.#report(snapshot, options, () =>
+      renderAttentionMutation(`${done ? 'ticked' : 'unticked'} step ${step} of`, attentionReference(id), snapshot),
+    );
   }
 
   async resolve(reference: string, options: AttentionResolveOptions): Promise<void> {
@@ -100,6 +146,20 @@ export class AttentionController {
       ...(response === undefined ? {} : { response }),
     });
     this.#report(snapshot, options, () => renderAttentionMutation('resolved', attentionReference(id), snapshot));
+  }
+
+  /** The owner asks the ferret that raised an item for more information. The item stays open, waiting on it. */
+  async needsInfo(reference: string, options: AttentionResolveOptions): Promise<void> {
+    const id = parseAttentionReference(reference);
+    const note = text(options.note);
+    const snapshot = await this.gateway.apply(this.#target(options), {
+      action: 'needs-info',
+      id,
+      ...(note === undefined ? {} : { note }),
+    });
+    this.#report(snapshot, options, () =>
+      renderAttentionMutation('asked for more information on', attentionReference(id), snapshot),
+    );
   }
 
   async dismiss(reference: string, options: AttentionResolveOptions): Promise<void> {
@@ -127,6 +187,21 @@ export class AttentionController {
       ...(kind === undefined ? {} : { kind }),
     });
     this.out.success(options.json === true ? JSON.stringify(result, null, 2) : renderNotification(result.delivered));
+  }
+
+  /** The JSON body and the Markdown body the flags name, each read once: standard input serves only one. */
+  async #inputs(
+    jsonPath: string | undefined,
+    bodyPath: string | undefined,
+  ): Promise<[BriefFile | undefined, string | undefined]> {
+    if (text(jsonPath) === '-' && text(bodyPath) === '-') {
+      throw new Error('--json-file and --body-file cannot both read standard input; give one a file');
+    }
+    const file = await this.#briefFile(jsonPath);
+    const named = text(bodyPath);
+    if (named === undefined) return [file, undefined];
+    if (this.input === undefined) throw new Error('--body-file cannot be read here');
+    return [file, await this.input.read(named)];
   }
 
   /** The JSON body `--json-file` names, or none. */

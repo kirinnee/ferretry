@@ -56,21 +56,32 @@ export function responseWords(response: AttentionResponse): string {
 }
 
 /**
- * The message a ferret receives when the owner closed one of ITS items on the board, or `null` when
- * there is nothing to tell it.
+ * The message a ferret receives when the owner closed one of ITS items on the board.
  *
- * An answer is always delivered. A plain done or dismiss is delivered only with the owner's note —
- * a ferret that asked and is told nothing would wait forever, but a bare "dismissed" would revive a
- * finished ferret for nothing, so it is spoken only when the owner had something to say.
+ * EVERY CLOSING IS TOLD, the bare ones included. A ferret that asked and is told nothing waits on an
+ * item the owner has already settled: the board resolved, the panel cleared, and the ferret's own chat
+ * never said so (the live defect this replaced kept a bare done or dismiss silent, to spare a finished
+ * ferret one turn). An answer carries the owner's words; a done or a dismiss says which it was, with
+ * the owner's note when there is one.
  */
-export function boardReplyMessage(item: ResolvedAttentionItem): string | null {
+export function boardReplyMessage(item: ResolvedAttentionItem): string {
   const note = item.resolutionNote?.trim() ?? '';
   if (item.response !== undefined) {
     const words = responseWords(item.response);
     return `[answer to ${named(item)}] ${words}${note === '' || note === words ? '' : `\n\nNote: ${note}`}`;
   }
-  if (note === '') return null;
-  return item.disposition === 'dismissed' ? `[dismissed ${named(item)}] ${note}` : `[answer to ${named(item)}] ${note}`;
+  if (item.disposition === 'dismissed')
+    return `[dismissed ${named(item)}] ${note === '' ? 'The owner dismissed this without an answer.' : note}`;
+  return note === '' ? `[done ${named(item)}] The owner marked this done.` : `[answer to ${named(item)}] ${note}`;
+}
+
+/**
+ * The message a ferret receives when the owner asks it for more information on one of ITS items. The item
+ * stays open: the ferret answers by expanding it (`attention edit`), not by closing it.
+ */
+export function needsInfoMessage(item: AttentionItem): string {
+  const note = item.history?.findLast(entry => entry.kind === 'needs-info')?.note?.trim() ?? '';
+  return `[needs more info ${named(item)}] ${note === '' ? 'The owner needs more information.' : note}`;
 }
 
 /** What a person's chat message becomes once the open board is taken into account. */
@@ -93,9 +104,12 @@ export interface ConversationTurn {
 export function conversationTurn(message: string, open: readonly AttentionItem[], binary: string): ConversationTurn {
   const answers = referencedAttention(message, open);
   if (answers.length > 0) return { message: `[answer to ${answers.map(named).join(', ')}] ${message}`, answers };
-  if (open.length === 0) return { message, answers };
+  // A harness prompt the daemon raised is the ferret's own parked form: it cannot close one, and it
+  // clears itself when the form goes, so the footer never names it.
+  const closable = open.filter(item => !(item.raisedBy === 'daemon' && item.source === 'question'));
+  if (closable.length === 0) return { message, answers };
   return {
-    message: `${message}\n\n[open attention: ${open.map(named).join('; ')} — if this message settles one, resolve it with \`${binary} attention done <id>\`]`,
+    message: `${message}\n\n[open attention: ${closable.map(named).join('; ')} — if this message settles one, resolve it with \`${binary} attention done <id>\`]`,
     answers,
   };
 }

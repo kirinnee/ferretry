@@ -18,12 +18,29 @@ If a workflow step contains repository logic beyond that shape, the logic is in 
 
 ## Runners
 
-Two pools, chosen per job by measurement. GitHub's hosted runners are free for a public repository
-but cap concurrent jobs; **Namespace** runners are faster and start from a warm `/nix`, but are
-billed and capped at 32 concurrent Linux vCPUs on the Developer plan. That cap, not run time, was
-what made pull requests slow: a 4x8 E2E shard waited three to five minutes for a slot while the
-runs before it held 60 vCPUs between them. So every Namespace job is the smallest shape that does
-not lengthen the critical path, and nothing goes there that is free and as fast on GitHub.
+Two pools, chosen per job by measurement. GitHub's hosted runners are **free for a public
+repository** (`ubuntu-latest` is 4 cores and 16GB) but cap concurrent jobs; **Namespace** runners
+start from a warm `/nix` and have their own pool, but every minute is billed, and they are capped at
+32 concurrent Linux vCPUs on the Developer plan. The GitHub cap, not run time, was what made pull
+requests slow, and Namespace is what buys a pull request out of that queue. So Namespace runs only
+**pull-request** jobs that are worth the money, each on the smallest shape that does not lengthen the
+critical path, and nothing goes there that is free and about as fast on GitHub.
+
+**`main` runs on GitHub.** A `main` run re-proves a tree its pull request already proved, nobody
+waits on it but `Release`, and it was 40% of the Namespace bill (330 of the 1,219 runs that used Namespace, Oct 19–28). Its
+jobs take the `ubuntu-latest` branch of the same `runs-on` expression, except two. `Build Checks`
+stays on Namespace because it is the job that refreshes the cache volume (below). `PWA Full Gallery
+(dark)` stays because "nobody waits" is not quite true: `Release` waits for the slowest job, and the
+unsplit gallery takes 643s on GitHub, ~3 minutes more than any other `main` job. A matrix entry says
+so with `main: namespace`. A job only moves to GitHub when Namespace buys it close to nothing: the
+time it adds to the run, its queue, its cache.
+
+**`vars.CI_RUNNER_POOL`** is the switch. Set the repository variable to `github` and every Namespace
+job, `Build Checks` and the E2E shards included, runs on `ubuntu-latest` from the next run on: no
+pull request, no Namespace bill. Unset, the pools are as this section describes. The cost of the
+switch is the GitHub queue on a busy day, nothing else: each job's cache step is skipped off
+Namespace (`if: runner.environment == 'self-hosted'`) and Nix installs from cache.nixos.org as it
+did before Namespace.
 
 **What Namespace bills**, from its [pricing page](https://namespace.so/pricing) and
 [cache docs](https://namespace.so/docs/architecture/storage/cache-volumes):
@@ -33,21 +50,25 @@ not lengthen the critical path, and nothing goes there that is free and as fast 
 - The cache volume on its **requested** size, not what it holds: storage per GB-day, plus a snapshot
   charge of size × the time each job has it attached ($0.002/GB-hour). Every job carrying
   `-with-cache` pays that, whether or not it mounts `/nix`.
+- **Measure it, don't estimate it.** `nsc instance report --start <RFC3339> --out <file>` writes one
+  CSV row per Namespace instance with its shape, start and end, peak CPU and memory, and the GitHub
+  job, run and branch it served. It is read-only and needs no GitHub API calls.
 
-**Where each job runs**, with the busy cores measured by sampling `/proc/stat` every second:
+**Where each job runs** on a pull request, with the busy cores measured by sampling `/proc/stat`
+every second, and the GitHub times from the last runs before Namespace (p50):
 
-| Job                                              | Runner        | Measured                 | Why                                                       |
-| ------------------------------------------------ | ------------- | ------------------------ | --------------------------------------------------------- |
-| `Pre-Commit (format)`                            | Namespace 2x4 | treefmt, ~3.4 of 4 cores | ~55s on 2x4 vs ~30s on 4x8: half the price, off the path  |
-| `Pre-Commit (gates)`                             | Namespace 4x8 | ~1.9 cores, 2.8GB        | knip runs out of memory in a 2x4's 4GB                    |
-| `Unit Tests (<group>)`                           | Namespace 2x4 | ~0.7 cores               | `bun test` runs one file at a time                        |
-| `Build Checks`, `Compile Binaries`               | Namespace 2x4 | ~1.4 cores               | short builds                                              |
-| `PWA Settings Geometry (light)`                  | Namespace 2x4 | ~1.9 cores               | well inside the critical path                             |
-| `PWA Full Gallery (dark)`                        | Namespace 4x8 | ~1.4 cores, 3.3GB peak   | past a 2x4's memory; the longest Namespace job            |
-| `E2E Shard (1..3)`                               | Namespace 2x4 | ~1 core, 1.8GB           | one journey at a time                                     |
-| `Integration Tests (<group>)`                    | GitHub        | ~0.6–2 cores             | free, and five groups keep each under ~2.5 min            |
-| `Unit Tests`, `Integration Tests`, `E2E …` tails | GitHub        | seconds, no nix shell    | billed a whole minute and a cache attachment on Namespace |
-| `SIT`, smoke, harness contract, every macOS job  | GitHub        | —                        | free; macOS and arm64 have no Namespace equivalent here   |
+| Job                                              | Runner        | Measured                           | Why                                                         |
+| ------------------------------------------------ | ------------- | ---------------------------------- | ----------------------------------------------------------- |
+| `Pre-Commit (format)`                            | Namespace 2x4 | treefmt, ~3.4 of 4 cores           | ~55s on 2x4 vs ~30s on 4x8: half the price, off the path    |
+| `Pre-Commit (gates)`                             | GitHub        | 113s vs 97s on Namespace 4x8       | knip needs more than a 2x4's 4GB; a 4x8 bought 16s          |
+| `Unit Tests (<group>)`                           | Namespace 2x4 | ~0.7 cores                         | `bun test` runs one file at a time                          |
+| `Build Checks`, `Compile Binaries`               | Namespace 2x4 | ~1.4 cores                         | short builds; `Build Checks` also refreshes the cache       |
+| `PWA Settings Geometry (light)`                  | Namespace 2x4 | ~1.9 cores                         | well inside the critical path                               |
+| `PWA Full Gallery (dark)`                        | Namespace 4x8 | ~427s; 643s on GitHub, ~3.3GB peak | past a 2x4's memory; GitHub would make it the critical path |
+| `E2E Shard (1..3)`                               | Namespace 2x4 | ~1 core, 1.8GB                     | one journey at a time                                       |
+| `Integration Tests (<group>)`                    | GitHub        | ~0.6–2 cores                       | free; seven groups keep the slowest near five minutes       |
+| `Unit Tests`, `Integration Tests`, `E2E …` tails | GitHub        | seconds, no nix shell              | billed a whole minute and a cache attachment on Namespace   |
+| `SIT`, smoke, harness contract, every macOS job  | GitHub        | —                                  | free; macOS and arm64 have no Namespace equivalent here     |
 
 - **One cache volume, tag `ferretry-nix`, requested at 10GB.** `namespacelabs/nscloud-cache-action`
   with `cache: nix` mounts a persistent `/nix` BEFORE the [Nix install](#installing-nix), so the dev shell
@@ -75,19 +96,21 @@ not lengthen the critical path, and nothing goes there that is free and as fast 
   `E2E Relevance` already skips those. Skipping a unit or int group for an unrelated change would
   leave its files out of the per-group 100% ledger, and the jobs a PWA-only change could skip run on
   GitHub, where they cost nothing.
-- **Moving a job between pools is its `runs-on`.** Replace the `nscloud-*` labels with
-  `ubuntu-latest` and drop the cache step, or the reverse; nothing else in a job depends on the
-  runner vendor.
+- **Moving a job between pools is its `runs-on`.** A Namespace job's `runs-on` is one expression:
+  `ubuntu-latest` off a pull request or under `CI_RUNNER_POOL=github`, its `nscloud-*` labels
+  otherwise; a matrix entry with `shape: github` always takes `ubuntu-latest`. Its cache step carries
+  `if: runner.environment == 'self-hosted'` (a Namespace runner registers as self-hosted), so the
+  same job runs on either pool and nothing else in it depends on the runner vendor.
 
 ## Workflow split
 
-| Workflow   | Trigger                                                                                   | Responsibility                                                     |
-| ---------- | ----------------------------------------------------------------------------------------- | ------------------------------------------------------------------ |
-| `CI`       | push to `main`, pull request, manual dispatch                                             | gates, tests, compile, SIT, cross-platform smoke                   |
-| `E2E`      | pull request (docs/model-catalog-only ones skip inside), manual dispatch                  | the e2e tier's fast journeys in three shards, into `E2E Journeys`  |
-| `E2E Slow` | nightly, push to `main`, manual dispatch, pull requests touching relay or connection code | the `[slow]` e2e journeys, one per shard, into `E2E Slow Journeys` |
-| `Release`  | `CI` completed successfully on `main`                                                     | semantic-release: version, changelog, `vX.Y.Z` tag                 |
-| `CD`       | push of a `v*.*.*` tag                                                                    | GoReleaser publishes the release and its channels                  |
+| Workflow   | Trigger                                                                   | Responsibility                                                     |
+| ---------- | ------------------------------------------------------------------------- | ------------------------------------------------------------------ |
+| `CI`       | push to `main`, pull request, manual dispatch                             | gates, tests, compile, SIT, cross-platform smoke                   |
+| `E2E`      | pull request (docs/model-catalog-only ones skip inside), manual dispatch  | the e2e tier's fast journeys in three shards, into `E2E Journeys`  |
+| `E2E Slow` | nightly, manual dispatch, pull requests touching relay or connection code | the `[slow]` e2e journeys, one per shard, into `E2E Slow Journeys` |
+| `Release`  | `CI` completed successfully on `main`                                     | semantic-release: version, changelog, `vX.Y.Z` tag                 |
+| `CD`       | push of a `v*.*.*` tag                                                    | GoReleaser publishes the release and its channels                  |
 
 The chain is deliberately one-directional: CI proves the tree, Release decides the version and
 pushes the tag, the tag fires CD. Nothing else publishes anything.
@@ -148,7 +171,7 @@ Notable details:
   leg would, which is why there is no such leg. The viewports are walked one after the other: walking
   them at once, as three software-rendered Chromes on a 4x8, timed out in 3 of 7 runs under load.
 - **Smoke covers the platforms compile cannot.** `linux-x64-baseline` on `ubuntu-latest`,
-  `linux-arm64` on `ubuntu-24.04-arm`, `darwin-arm64` on `macos-14`. This is the one job that
+  `linux-arm64` on `ubuntu-24.04-arm`, `darwin-arm64` on `macos-15`. This is the one job that
   does not enter a nix shell — it only needs the downloaded binary and `jq` — and it derives
   the binary name from the CLI package's `bin` key so the matrix stays rename-proof
   ([Architecture](../architecture/index.md)).
@@ -199,12 +222,14 @@ into **`E2E Slow Journeys`**.
 - **`[slow]` journeys run in `E2E Slow`.** A journey whose title ends in `[slow]` waits on purpose,
   for a minute or more: a relayed page left idle, a tab frozen past the relay's eviction grace, a
   relay restarted again and again under a live page. `E2E` runs the `fast` tier, which is everything else.
-  `E2E Slow` runs the slow tier nightly, on every push to `main` (except docs and model catalogs), on
-  manual dispatch, and on a pull request that touches the code those journeys prove: `packages/relay`,
-  the daemon's relay, carrier and socket code, and the PWA's connection, transport and relay code (the
-  workflow lists the paths). Those pull requests get both workflows, and the slow journeys run in
-  parallel with the rest. Tag a journey `[slow]` only when its length is the point. A journey that is
-  slow because it polls or sleeps should wait on a condition instead.
+  `E2E Slow` runs the slow tier nightly, on manual dispatch, and on a pull request that touches the
+  code those journeys prove: `packages/relay`, the daemon's relay, carrier and socket code, and the
+  PWA's connection, transport and relay code (the workflow lists the paths). Those pull requests get
+  both workflows, and the slow journeys run in parallel with the rest. It does not run on every push
+  to `main`: that was 342 runs in two weeks of three shards on the capped free GitHub pool,
+  re-proving what the pull request had already proved, and a change elsewhere that breaks a slow
+  journey is caught by the nightly run. Tag a journey `[slow]` only when its length is the point. A
+  journey that is slow because it polls or sleeps should wait on a condition instead.
 - **A hang costs one journey's ceiling, never a shard.** `scripts/test/run-e2e.sh` owns one per-journey
   ceiling, 150 s, and passes it to Bun as `--timeout`. `scripts/test/e2e-journey-timeouts.ts` runs before
   the journeys and fails the tier when a journey outside `[slow]` raises its own timeout past that
@@ -264,7 +289,12 @@ tree the `main` run of the release commit had already proved. The duplicates dre
 runner pool as the runs that mattered, and macOS runners are the scarcest part of it.
 
 `push` also ignores a commit that changes only `Casks/**`. That is GoReleaser's cask update, pushed
-by `CD` after a release has shipped, and no job reads it.
+by `CD` after a release has shipped, and no job reads it. It ignores semantic-release's own
+`release: X.Y.Z` commit for the same reason: that commit writes only `VERSION`, `Changelog.md`,
+`Changelog.old.md` and the version in `packages/cli/package.json` and `packages/daemon/package.json`
+(the `@semantic-release/git` assets in `.releaserc.yaml`), over a tree whose parent has a run of its
+own, and `Release` has nothing left to release for it. It was a third of all `main` runs — 170 of
+513 in two weeks, each billing every Namespace job. A commit that touches any other file runs everything.
 
 ## Superseded runs
 

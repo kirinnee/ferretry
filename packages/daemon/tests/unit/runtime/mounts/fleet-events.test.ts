@@ -429,6 +429,56 @@ describe('the mounted fleet event feed', () => {
     should(refusedCode(decision)).equal('invalid_query');
   });
 
+  it('should hand a transcript signal request to the one session it follows, beside a live readout', async () => {
+    // Arrange
+    const { events, dispatcher } = fixture();
+
+    // Act
+    const decision = await dispatcher.upgrade(
+      request({
+        path: '/v1/events',
+        query: [
+          ['sessionId', 's1'],
+          ['live', '1'],
+          ['transcript', '1'],
+        ],
+        headers: human,
+      }),
+    );
+    await attach(decision);
+
+    // Assert
+    should(decision.outcome).equal('accepted');
+    should(events.scopes).deepEqual([{ kind: 'session', sessionId: 's1', after: 0, live: true, transcript: true }]);
+  });
+
+  it('should refuse a transcript value other than the flag, and the flag on the fleet stream', async () => {
+    // Arrange
+    const { events, dispatcher } = fixture();
+
+    // Act
+    const malformed = await dispatcher.upgrade(
+      request({
+        path: '/v1/events',
+        query: [
+          ['sessionId', 's1'],
+          ['transcript', 'true'],
+        ],
+        headers: human,
+      }),
+    );
+    const fleet = await dispatcher.upgrade(
+      request({ path: '/v1/events', query: [['transcript', '1']], headers: human }),
+    );
+
+    // Assert — a fleet stream follows no one transcript, and says so in its own words.
+    should(refusedStatus(malformed)).equal(400);
+    should(refusedCode(malformed)).equal('invalid_query');
+    should(refusedStatus(fleet)).equal(400);
+    should(refusedCode(fleet)).equal('transcript_needs_session');
+    should(events.scopes).be.empty();
+  });
+
   it('should refuse a query parameter it does not understand', async () => {
     // Arrange
     const { dispatcher } = fixture();

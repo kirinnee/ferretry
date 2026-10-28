@@ -357,6 +357,34 @@ const attentionCases: SchemaCase[] = [
   },
   { name: 'brief link', schema: attention.AttentionLinkSchema, value: { label: 'Plan', target: '#F12' } },
   { name: 'attention ask', schema: attention.AttentionAskSchema, value: permissionAsk },
+  { name: 'to-do ask', schema: attention.AttentionAskSchema, value: { kind: 'task' } },
+  {
+    name: 'attention history entry',
+    schema: attention.AttentionHistoryEntrySchema,
+    value: { at: INSTANT, kind: 'needs-info', note: 'Which account?' },
+  },
+  {
+    name: 'item waiting on the ferret',
+    schema: attention.AttentionItemSchema,
+    value: {
+      ...attentionItem,
+      ask: { kind: 'task' },
+      waitingOn: 'ferret',
+      askedAt: LATER_INSTANT,
+      infoRequests: 1,
+      history: [{ at: LATER_INSTANT, kind: 'needs-info' }],
+    },
+  },
+  {
+    name: 'needs-info action',
+    schema: attention.AttentionActionRequestSchema,
+    value: { action: 'needs-info', id: 'A1', note: 'Which account?' },
+  },
+  {
+    name: 'needs-info action without a note',
+    schema: attention.AttentionActionRequestSchema,
+    value: { action: 'needs-info', id: 'A1' },
+  },
   {
     name: 'attention response',
     schema: attention.AttentionResponseSchema,
@@ -371,6 +399,11 @@ const attentionCases: SchemaCase[] = [
     name: 'session attention summary',
     schema: attention.SessionAttentionSummarySchema,
     value: { open: 2, first: 'A1', ask: 'Rebase onto main now?', latestAt: '2026-10-23T10:00:00.000Z' },
+  },
+  {
+    name: 'held attention replies',
+    schema: attention.AttentionRepliesSchema,
+    value: { pending: ['A1', 'A3'], dueAt: INSTANT },
   },
   {
     name: 'attention snapshot',
@@ -1110,6 +1143,7 @@ describe('attention schemas', () => {
       { kind: 'multiple-choice', options: [{ label: 'A' }, { label: 'B' }] },
       { kind: 'answer-review' },
       { kind: 'open-question' },
+      { kind: 'task' },
     ];
     const responses = [
       { kind: 'permission', decision: 'reject' },
@@ -1127,9 +1161,27 @@ describe('attention schemas', () => {
       },
       { action: 'resolve', id: 'A1', note: 'resolved', response: { kind: 'permission', decision: 'approve' } },
       { action: 'dismiss', id: 'A1', note: 'obsolete' },
+      {
+        action: 'add',
+        subject: 'Log in',
+        why: 'Blocked',
+        howToResolve: 'Follow the steps',
+        steps: ['Run `fy login`'],
+        body: '## Notes',
+      },
+      { action: 'progress', id: 'A1', step: 0, done: true },
+      { action: 'needs-info', id: 'A1' },
     ];
 
     // Act + Assert
+    // A waiting mark needs its time, and the history is bounded.
+    should(attention.AttentionItemSchema.safeParse({ ...attentionItem, waitingOn: 'ferret' }).success).be.false();
+    should(
+      attention.AttentionItemSchema.safeParse({
+        ...attentionItem,
+        history: Array.from({ length: 21 }, () => ({ at: INSTANT, kind: 'updated' })),
+      }).success,
+    ).be.false();
     for (const value of asks) should(attention.AttentionAskSchema.safeParse(value).success).be.true();
     for (const value of responses) should(attention.AttentionResponseSchema.safeParse(value).success).be.true();
     for (const raisedBy of ['human', 'daemon'] as const) {

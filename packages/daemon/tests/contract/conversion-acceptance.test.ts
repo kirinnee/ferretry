@@ -1,8 +1,10 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
 import { CliConversionCheck, CliHarnessVersion } from '../../src/adapters/transcript/conversion-check.ts';
-import type { ConversionPlace } from '../../src/lib/migrate/conversation-convert.ts';
+import { CliRolloutFormatProbe } from '../../src/adapters/transcript/rollout-format-probe.ts';
+import { type ConversionPlace, needsRolloutFormatProbe } from '../../src/lib/migrate/conversation-convert.ts';
 import { type ConversionResult, convertConversation } from '../../src/lib/transcript/convert/convert.ts';
+import type { RolloutFormatVerdict } from '../../src/lib/transcript/convert/rollout-format.ts';
 
 /**
  * The harness contract for cross-harness conversion: the REAL target CLI accepts what the converter
@@ -12,8 +14,10 @@ import { type ConversionResult, convertConversation } from '../../src/lib/transc
  * CLIs) is converted for the CLI under test and resumed by it, non-interactively, in a throwaway home
  * against the loopback model — the exact run a move gates on. The negative controls prove the run
  * discriminates: a rollout with no `session_meta`, and a Claude transcript whose chain is cut, must both
- * be refused. A version outside the converter's gate fails here loudly, which is the signal (on the
- * scheduled `latest` run) to record the new version's transcripts and widen the gate.
+ * be refused. A Codex outside the converter's table is judged the way a move judges it, by probing the
+ * format the binary writes: it passes here when that format is the validated one, and fails loudly when
+ * it is not or cannot be checked, which is the signal (on the scheduled `latest` run) to record the new
+ * version's transcripts and teach the converter what moved.
  *
  * Opt-in like the rest of the guard: `packages/fleet/tests/contract/run.sh` sets `FY_HARNESS_CONTRACT=1`
  * and the binaries; every other test run skips this file.
@@ -38,7 +42,13 @@ const beforeCompaction = (text: string): string => {
 
 const SOURCES = {
   codex: ['claude-2.1.281.jsonl', 'claude-2.1.304.jsonl'],
-  claude: ['codex-0.145.0.jsonl', 'codex-0.156.1.jsonl', 'codex-0.163.0.jsonl', 'codex-0.164.0.jsonl'],
+  claude: [
+    'codex-0.145.0.jsonl',
+    'codex-0.156.1.jsonl',
+    'codex-0.163.0.jsonl',
+    'codex-0.164.0.jsonl',
+    'codex-0.165.0.jsonl',
+  ],
 } as const;
 
 /** The model each target is asked to run: Codex declares its tools per model family. */
@@ -51,14 +61,28 @@ function binary(target: 'claude' | 'codex'): string {
   return bin;
 }
 
+/** What a move would learn about this binary's rollouts: only a Codex outside the table is probed. */
+async function formatOf(target: 'claude' | 'codex', executable: string, version: string | undefined) {
+  return target === 'codex' && needsRolloutFormatProbe('codex', version)
+    ? await new CliRolloutFormatProbe().classify(executable, version)
+    : undefined;
+}
+
 const renderer =
-  (source: 'claude' | 'codex', text: string, target: 'claude' | 'codex', version: string | undefined) =>
+  (
+    source: 'claude' | 'codex',
+    text: string,
+    target: 'claude' | 'codex',
+    version: string | undefined,
+    format?: RolloutFormatVerdict,
+  ) =>
   (place: ConversionPlace): ConversionResult =>
     convertConversation({
       source: { harness: source, text, documents: new Map() },
       target: {
         harness: target,
         version,
+        ...(format === undefined ? {} : { format }),
         conversationId: place.conversationId,
         cwd: place.cwd,
         contextWindow: 200_000,
@@ -78,7 +102,7 @@ for (const target of ['codex', 'claude'] as const) {
         const version = await new CliHarnessVersion().version(executable);
         const raw = await fixture(name);
         const text = source === 'claude' ? beforeCompaction(raw) : raw;
-        const render = renderer(source, text, target, version);
+        const render = renderer(source, text, target, version, await formatOf(target, executable, version));
         const probe = render({ cwd: '/w', conversationId: '00000000-0000-4000-8000-000000000000' });
         if (probe.kind === 'refused') throw new Error(`the converter refused ${target} ${version}: ${probe.reason}`);
 
@@ -101,7 +125,7 @@ for (const target of ['codex', 'claude'] as const) {
       const name = SOURCES[target][0];
       const raw = await fixture(name);
       const text = source === 'claude' ? beforeCompaction(raw) : raw;
-      const intact = renderer(source, text, target, version);
+      const intact = renderer(source, text, target, version, await formatOf(target, executable, version));
       // Codex: the thread's own header gone. Claude: the chain cut after its first record, so only the
       // opening message is still reachable from the newest one.
       const damage = (transcript: string): string => {
@@ -130,3 +154,16 @@ for (const target of ['codex', 'claude'] as const) {
     }, 180_000);
   });
 }
+
+describe.skipIf(!enabled)('the format of the rollouts the real codex writes', () => {
+  it('should be the format the converter was validated on, as the probe a move runs finds it', async () => {
+    // Arrange
+    const executable = binary('codex');
+
+    // Act
+    const verdict = await new CliRolloutFormatProbe().classify(executable, 'contract');
+
+    // Assert
+    should(verdict).deepEqual({ kind: 'same' });
+  }, 180_000);
+});

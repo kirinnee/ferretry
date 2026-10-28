@@ -3,6 +3,7 @@ import {
   type AttentionAsk,
   type AttentionBrief,
   type AttentionErrorCode,
+  type AttentionHistoryEntry,
   type AttentionId,
   type AttentionItem,
   AttentionItemSchema,
@@ -10,6 +11,7 @@ import {
   type AttentionSnapshot,
   type AttentionSource,
   attentionBriefOf,
+  MAX_ATTENTION_HISTORY,
   MAX_ATTENTION_PER_SESSION,
   MAX_ATTENTION_RESOLUTIONS,
   type ResolvedAttentionItem,
@@ -19,7 +21,7 @@ import {
 /** Agent-raised requests are capped separately so automatic sources retain board capacity. */
 export const MAX_AGENT_ATTENTION_PER_SESSION = 10;
 
-export type DaemonAttentionCause = 'source-reconciliation' | 'warden-escalation' | 'system';
+export type DaemonAttentionCause = 'source-reconciliation' | 'warden-escalation' | 'system' | 'harness-prompt';
 
 /**
  * Provenance is a tagged value, not a user-supplied collection of nullable fields. The daemon
@@ -103,6 +105,21 @@ export type AttentionCommand =
       readonly at: string;
     }
   | {
+      readonly action: 'progress';
+      readonly actor: AttentionActor;
+      readonly id: AttentionId;
+      readonly step: number;
+      readonly done: boolean;
+      readonly at: string;
+    }
+  | {
+      readonly action: 'needs-info';
+      readonly actor: AttentionActor;
+      readonly id: AttentionId;
+      readonly note?: string | null;
+      readonly at: string;
+    }
+  | {
       readonly action: 'resolve-source';
       readonly actor: AttentionActor;
       readonly source: AttentionSource;
@@ -116,7 +133,16 @@ export interface AttentionFailure {
   readonly message: string;
 }
 
-export type AttentionChange = 'created' | 'refreshed' | 'answered' | 'resolved' | 'dismissed' | 'unchanged';
+export type AttentionChange =
+  | 'created'
+  | 'refreshed'
+  | 'progressed'
+  | 'needs-info'
+  | 'info-added'
+  | 'answered'
+  | 'resolved'
+  | 'dismissed'
+  | 'unchanged';
 
 export type AttentionMutation =
   | { readonly ok: false; readonly error: AttentionFailure }
@@ -126,7 +152,7 @@ export type AttentionMutation =
       readonly change: AttentionChange;
       readonly ledger: AttentionLedger;
       readonly snapshot: AttentionSnapshot;
-      /** The raised item on created and refreshed mutations; absent for every other change. */
+      /** The item on every change that leaves it open; absent for the ones that close it. */
       readonly item?: AttentionItem;
       /** The item as it was closed, on answered, resolved and dismissed mutations; absent otherwise. */
       readonly addressed?: ResolvedAttentionItem;
@@ -253,6 +279,10 @@ function applyToLedger(ledger: AttentionLedger, command: AttentionCommand): Atte
       return addressById(ledger, command, 'dismissed', 'dismissed');
     case 'edit':
       return edit(ledger, command);
+    case 'progress':
+      return progress(ledger, command);
+    case 'needs-info':
+      return needsInfo(ledger, command);
     case 'resolve-source':
       return resolveSource(ledger, command);
   }
@@ -261,6 +291,8 @@ function applyToLedger(ledger: AttentionLedger, command: AttentionCommand): Atte
 type RaiseCommand = Extract<AttentionCommand, { action: 'raise' }>;
 type AddressCommand = Extract<AttentionCommand, { action: 'answer' | 'resolve' | 'dismiss' }>;
 type EditCommand = Extract<AttentionCommand, { action: 'edit' }>;
+type ProgressCommand = Extract<AttentionCommand, { action: 'progress' }>;
+type NeedsInfoCommand = Extract<AttentionCommand, { action: 'needs-info' }>;
 type ResolveSourceCommand = Extract<AttentionCommand, { action: 'resolve-source' }>;
 
 function raise(ledger: AttentionLedger, command: RaiseCommand): AttentionMutation {
@@ -364,6 +396,10 @@ function refreshStable(
     impact: request.impact,
     urgency: request.urgency,
     links: request.links,
+    steps: request.steps,
+    body: request.body,
+    // Ticks belong to the steps they were made on: the same steps keep them, new steps start clean.
+    stepsDone: sameSteps(existing.item.steps, request.steps) ? existing.item.stepsDone : undefined,
   };
   const next: AttentionLedger = {
     ...ledger,
@@ -453,7 +489,10 @@ function parseAttentionActor(value: unknown): AttentionActor | null {
   }
   if (
     raw.kind === 'daemon' &&
-    (raw.cause === 'source-reconciliation' || raw.cause === 'warden-escalation' || raw.cause === 'system')
+    (raw.cause === 'source-reconciliation' ||
+      raw.cause === 'warden-escalation' ||
+      raw.cause === 'system' ||
+      raw.cause === 'harness-prompt')
   ) {
     return { kind: 'daemon', cause: raw.cause };
   }
@@ -478,9 +517,10 @@ function addressed(
   change: Extract<AttentionChange, 'answered' | 'resolved' | 'dismissed'>,
   response?: AttentionResponse,
 ): AttentionMutation {
+  const { waitingOn: _waitingOn, askedAt: _askedAt, ...open } = target.item;
   const item = withResolvedBy(
     {
-      ...target.item,
+      ...open,
       resolvedAt: at,
       resolutionNote: note,
       disposition,
@@ -610,6 +650,8 @@ const EDITABLE_FIELDS = [
   'impact',
   'urgency',
   'links',
+  'steps',
+  'body',
 ] as const;
 
 /** The option labels of each question, in order — what an edit must leave alone to keep the ask true. */
@@ -638,8 +680,18 @@ function edit(ledger: AttentionLedger, command: EditCommand): AttentionMutation 
   if (patch.questions !== undefined && questionShape(patch.questions) !== questionShape(target.item.questions)) {
     return failure('invalid', 'questions may be reworded but not added, removed or given other options');
   }
+  const { stepsDone, waitingOn: _waitingOn, askedAt: _askedAt, ...kept } = target.item;
+  const stepsChanged = patch.steps !== undefined && !sameSteps(target.item.steps, patch.steps);
+  const keepsWaiting = target.item.waitingOn === undefined || command.actor.kind !== 'agent';
   const item: AttentionItem = {
-    ...target.item,
+    ...kept,
+    ...(keepsWaiting && target.item.waitingOn !== undefined
+      ? {
+          waitingOn: target.item.waitingOn,
+          ...(target.item.askedAt === undefined ? {} : { askedAt: target.item.askedAt }),
+        }
+      : {}),
+    ...(stepsDone === undefined || stepsChanged ? {} : { stepsDone }),
     ...(patch.subject === undefined ? {} : { subject: patch.subject }),
     ...(patch.context === undefined ? {} : { context: patch.context }),
     ...(patch.terms === undefined ? {} : { terms: patch.terms }),
@@ -648,8 +700,104 @@ function edit(ledger: AttentionLedger, command: EditCommand): AttentionMutation 
     ...(patch.impact === undefined ? {} : { impact: patch.impact }),
     ...(patch.urgency === undefined ? {} : { urgency: patch.urgency }),
     ...(patch.links === undefined ? {} : { links: patch.links }),
+    ...(patch.steps === undefined ? {} : { steps: patch.steps }),
+    ...(patch.body === undefined ? {} : { body: patch.body }),
   };
-  if (JSON.stringify(item) === JSON.stringify(target.item)) return unchanged(ledger);
+  const before = keepsWaiting ? target.item : (({ waitingOn: _w, askedAt: _a, ...rest }) => rest)(target.item);
+  if (sortedJson(item) === sortedJson(before)) return unchanged(ledger);
+  // The ferret's edit that answers an open request clears the mark and says so in the history.
+  const answers = !keepsWaiting;
+  const final: AttentionItem = answers
+    ? { ...item, history: withHistory(item.history, { at: command.at, kind: 'updated' }) }
+    : item;
+  return replaceItem(ledger, final, command.at, answers ? 'info-added' : 'refreshed');
+}
+
+function replaceItem(
+  ledger: AttentionLedger,
+  item: AttentionItem,
+  at: string,
+  change: Extract<AttentionChange, 'refreshed' | 'needs-info' | 'info-added'>,
+): AttentionMutation {
+  const next: AttentionLedger = {
+    ...ledger,
+    entries: ledger.entries.map(entry =>
+      entry.lifecycle === 'active' && entry.item.id === item.id ? { ...entry, item } : entry,
+    ),
+    updatedAt: at,
+  };
+  return success(next, true, change, item);
+}
+
+/** JSON with keys in sorted order, so two items compare by content and not by how their keys were spread. */
+function sortedJson(value: unknown): string {
+  return JSON.stringify(value, (_key, each: unknown) =>
+    each !== null && typeof each === 'object' && !Array.isArray(each)
+      ? Object.fromEntries(Object.entries(each).sort(([left], [right]) => left.localeCompare(right)))
+      : each,
+  );
+}
+
+/** The history with one more entry, the oldest dropped past the bound. */
+function withHistory(
+  history: readonly AttentionHistoryEntry[] | undefined,
+  entry: AttentionHistoryEntry,
+): AttentionHistoryEntry[] {
+  return [...(history ?? []), entry].slice(-MAX_ATTENTION_HISTORY);
+}
+
+/**
+ * The owner asks the raising ferret for more information. The item stays OPEN, marked waiting on the
+ * ferret, and each request is counted (`infoRequests`) so the delivery and the push after it are exactly
+ * once per request. Only the owner asks, and only of an item a ferret raised: nobody else can be asked.
+ * Asking again while the ferret has not yet answered is the same request.
+ */
+function needsInfo(ledger: AttentionLedger, command: NeedsInfoCommand): AttentionMutation {
+  if (command.actor.kind !== 'human') return failure('forbidden', 'only the owner may ask for more information');
+  const target = ledger.entries.filter(isActiveAttention).find(entry => entry.item.id === command.id);
+  if (target === undefined) return failure('not-found', `no unresolved attention item ${command.id} in this session`);
+  if (target.item.raisedBy !== 'agent') {
+    return failure('invalid', 'more information can be asked only of an item a ferret raised');
+  }
+  if (target.item.waitingOn !== undefined) return unchanged(ledger);
+  const note = command.note?.trim() ?? '';
+  const item: AttentionItem = {
+    ...target.item,
+    waitingOn: 'ferret',
+    askedAt: command.at,
+    infoRequests: (target.item.infoRequests ?? 0) + 1,
+    history: withHistory(target.item.history, { at: command.at, kind: 'needs-info', ...(note === '' ? {} : { note }) }),
+  };
+  return replaceItem(ledger, item, command.at, 'needs-info');
+}
+
+function stepRange(id: AttentionId, count: number, step: number): string {
+  return count === 0 ? `${id} has no steps` : `${id} has steps 0 to ${count - 1}, not ${step}`;
+}
+
+function sameSteps(left: readonly string[] | undefined, right: readonly string[] | undefined): boolean {
+  return JSON.stringify(left ?? null) === JSON.stringify(right ?? null);
+}
+
+/**
+ * Ticks or unticks one step of an OPEN item. It is progress, not resolution: the item stays open, nobody
+ * is pushed and the ferret is told nothing. The owner may do it, and so may the ferret that raised the item.
+ */
+function progress(ledger: AttentionLedger, command: ProgressCommand): AttentionMutation {
+  const target = ledger.entries.filter(isActiveAttention).find(entry => entry.item.id === command.id);
+  if (target === undefined) return failure('not-found', `no unresolved attention item ${command.id} in this session`);
+  if (!canAddressAttention(command.actor, target)) {
+    return failure('forbidden', 'an agent or daemon may tick steps only on an attention item it raised');
+  }
+  const count = target.item.steps?.length ?? 0;
+  if (command.step >= count) return failure('invalid', stepRange(command.id, count, command.step));
+  const before = target.item.stepsDone ?? [];
+  if (before.includes(command.step) === command.done) return unchanged(ledger);
+  const after = (command.done ? [...before, command.step] : before.filter(step => step !== command.step)).sort(
+    (left, right) => left - right,
+  );
+  const { stepsDone: _previous, ...rest } = target.item;
+  const item: AttentionItem = { ...rest, ...(after.length === 0 ? {} : { stepsDone: after }) };
   const next: AttentionLedger = {
     ...ledger,
     entries: ledger.entries.map(entry =>
@@ -657,5 +805,5 @@ function edit(ledger: AttentionLedger, command: EditCommand): AttentionMutation 
     ),
     updatedAt: command.at,
   };
-  return success(next, true, 'refreshed', item);
+  return success(next, true, 'progressed', item);
 }

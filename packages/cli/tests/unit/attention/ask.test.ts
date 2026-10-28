@@ -96,3 +96,11 @@ describe('choice asks', () => {
     );
   });
 });
+
+describe('task asks', () => {
+  it('should map the to-do kind and list it among the accepted names', () => {
+    // Act + Assert
+    should(parseAsk({ kind: 'task' })).deepEqual({ kind: 'task' });
+    should(ASK_KIND_NAMES).containEql('task');
+  });
+});

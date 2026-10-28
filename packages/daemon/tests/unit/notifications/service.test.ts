@@ -474,7 +474,7 @@ describe('NotificationService attention presentation', () => {
       origin: 'attention',
       attentionId: 'A1',
       attribution: `attention:agent:${SESSION}`,
-      sent: { title: '“Ship the release”', body: item.subject, interactive: true },
+      sent: { title: 'Ship the release', body: item.subject, interactive: true },
     });
   });
 
@@ -503,5 +503,46 @@ describe('NotificationService attention presentation', () => {
     should(requestedFailure.push.calls).equal(0);
     should(pushFailure.push.calls).equal(1);
     should(outcomeFailure.push.calls).equal(1);
+  });
+});
+
+describe('NotificationService enrolled devices', () => {
+  it('should count every enrolled device, zero included', async () => {
+    // Arrange
+    const world = fixture();
+    const nobody = new Push();
+    nobody.enrolled = 0;
+
+    // Act + Assert — zero is what `fy attention add` warns about: the ask reached no device.
+    should(await world.service.enrolledDevices()).equal(2);
+    should(await fixture({ push: nobody }).service.enrolledDevices()).equal(0);
+  });
+});
+
+describe('NotificationService more-info push', () => {
+  it('should push once per request of an item, apart from the first announcement, and never for an unasked item', async () => {
+    // Arrange
+    const world = fixture();
+    const asked = (request: number) =>
+      AttentionItemSchema.parse({ ...item, waitingOn: 'ferret', askedAt: item.waitingSince, infoRequests: request });
+
+    // Act
+    await world.service.attentionRaised(SESSION, item, snapshot);
+    await world.service.moreInfoAdded(SESSION, item, snapshot);
+    await world.service.moreInfoAdded(SESSION, asked(1), snapshot);
+    await world.service.moreInfoAdded(SESSION, asked(1), snapshot);
+    await world.service.moreInfoAdded(SESSION, asked(2), snapshot);
+
+    // Assert
+    should(world.push.calls).equal(3);
+    should(world.ledger.records.filter(record => record.phase === 'requested').map(record => record.key)).deepEqual([
+      `attention:${SESSION}:A1`,
+      `attention:${SESSION}:A1:info-1`,
+      `attention:${SESSION}:A1:info-2`,
+    ]);
+    should(world.ledger.records.filter(record => record.phase === 'requested')[1]).containDeep({
+      infoRequest: 1,
+      sent: { title: 'Ship the release' },
+    });
   });
 });

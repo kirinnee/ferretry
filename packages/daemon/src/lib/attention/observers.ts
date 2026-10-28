@@ -1,6 +1,13 @@
-import type { SessionAttentionSummary } from '@ferretry/protocol';
+import type { AttentionItem, AttentionSnapshot, SessionAttentionSummary } from '@ferretry/protocol';
 import type { SerialExecutor } from '../ports.ts';
-import { boardReplyMessage, conversationResponse, conversationTurn, sessionAttentionSummary } from './conversation.ts';
+import {
+  boardReplyMessage,
+  conversationResponse,
+  conversationTurn,
+  needsInfoMessage,
+  sessionAttentionSummary,
+} from './conversation.ts';
+import { type AttentionReplyQueue, needsInfoReplyKey } from './reply-batch.ts';
 import type {
   AttentionBoardChange,
   AttentionChangeObserver,
@@ -69,29 +76,53 @@ export class SessionAttentionProjection implements AttentionChangeObserver {
   }
 }
 
-/** A queued, non-interrupting message to a ferret, idempotent under its send id. */
-export interface AttentionMessenger {
-  send(sessionId: string, message: string, sendId: string): Promise<void>;
-}
-
 /**
  * Tells a ferret the owner's answer to an item IT raised, as an ordinary message naming the item.
  *
- * Only the owner's own closing of an agent-raised item on the board is told: an answer given in the
- * conversation already reached the ferret in the owner's words, the ferret's own `done` needs no echo,
- * and the warden's or a source's reconciliation is not an answer. The send id is the item's, so a
- * notice delivered twice is one message.
+ * Every closing the owner makes on the board of an agent-raised item is told — an answer, a done or a
+ * dismiss (`boardReplyMessage`). Nothing else is: an answer given in the conversation already reached
+ * the ferret in the owner's words, the ferret's own `done` needs no echo, and the warden's or a
+ * source's reconciliation is not an answer. Each goes to the ferret's outbox (`AttentionReplyBatcher`), which
+ * delivers a burst of answers as one message and never the same item twice.
  */
 export class AttentionReplyDelivery implements AttentionChangeObserver {
-  constructor(private readonly messenger: AttentionMessenger) {}
+  constructor(private readonly replies: AttentionReplyQueue) {}
 
   async changed(sessionId: string, change: AttentionBoardChange): Promise<void> {
-    const { addressed } = change;
+    const { addressed, item } = change;
+    if (
+      change.change === 'needs-info' &&
+      change.actor.kind === 'human' &&
+      item?.raisedBy === 'agent' &&
+      item.raisedBySession === sessionId &&
+      item.infoRequests !== undefined
+    ) {
+      await this.replies.add(sessionId, needsInfoReplyKey(item.id, item.infoRequests), needsInfoMessage(item));
+      return;
+    }
     if (change.via !== 'board' || change.actor.kind !== 'human' || addressed === undefined) return;
     if (addressed.raisedBy !== 'agent' || addressed.raisedBySession !== sessionId) return;
-    const message = boardReplyMessage(addressed);
-    if (message === null) return;
-    await this.messenger.send(sessionId, message, `attention-${sessionId}-${addressed.id}`);
+    await this.replies.add(sessionId, addressed.id, boardReplyMessage(addressed));
+  }
+}
+
+/** Announces that a ferret added the information the owner asked for: the one push an edit ever makes. */
+export interface MoreInfoAnnouncer {
+  moreInfoAdded(sessionId: string, item: AttentionItem, snapshot: AttentionSnapshot): Promise<void>;
+}
+
+/**
+ * The ONE exception to "an edit never pushes": the raising ferret's edit that answers an open request for
+ * more information (`info-added`) pushes once more. The state machine clears the request in the same
+ * commit, so a retried edit is no change and pushes nothing, and the announcer keys the push on the item
+ * and its request counter.
+ */
+export class AttentionMoreInfoPush implements AttentionChangeObserver {
+  constructor(private readonly announcer: MoreInfoAnnouncer) {}
+
+  async changed(sessionId: string, change: AttentionBoardChange): Promise<void> {
+    if (change.change !== 'info-added' || change.item === undefined) return;
+    await this.announcer.moreInfoAdded(sessionId, change.item, change.snapshot);
   }
 }
 

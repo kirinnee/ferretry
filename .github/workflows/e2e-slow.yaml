@@ -3,20 +3,19 @@ name: E2E Slow
 # The `[slow]` e2e journeys: the ones that wait on purpose — a relayed page left idle for minutes, a tab
 # frozen past the relay's eviction grace, a relay restarted again and again under a live page. Each
 # takes one to three minutes, so they stay out of every pull request's `E2E` run and run here instead:
-# nightly, on every push to `main`, on demand, and on a pull request that touches the code they prove —
-# the relay, and the daemon's and the PWA's connection and carrier code. Same scripts, same evidence,
-# same advisory status as `E2E` (docs/standards/ci-cd/index.md, "E2E tier").
+# nightly, on demand, and on a pull request that touches the code they prove — the relay, and the
+# daemon's and the PWA's connection and carrier code. Same scripts, same evidence, same advisory status
+# as `E2E` (docs/standards/ci-cd/index.md, "E2E tier").
+#
+# NOT on every push to `main`. That was 342 runs in two weeks, three shards of up to three and a half
+# minutes each, on the same capped pool of free GitHub runners the pull requests queue for. A change to
+# the code these journeys prove already ran them on its pull request; a change elsewhere that breaks
+# one is caught by the nightly run, which is the backstop.
 on:
   schedule:
     # Nightly, off the hour so it does not queue behind every other scheduled job.
     - cron: '41 7 * * *'
   workflow_dispatch:
-  push:
-    branches: [main]
-    paths-ignore:
-      - 'docs/**'
-      - '**/*.md'
-      - 'packages/fleet/models/**'
   pull_request:
     paths:
       - 'packages/relay/**'
@@ -41,7 +40,7 @@ on:
       - 'scripts/ci/e2e*'
       - '.github/workflows/e2e-slow.yaml'
 
-# Copied from CI: a new push to a PR cancels the run for its old SHA; `main`, the schedule and a manual
+# Copied from CI: a new push to a PR cancels the run for its old SHA; the schedule and a manual
 # dispatch each get a group of their own run id and are never cancelled.
 concurrency:
   group: >-

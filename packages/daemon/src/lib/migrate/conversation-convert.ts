@@ -9,6 +9,8 @@ import {
   type ConvertedFile,
   convertConversation,
 } from '../transcript/convert/convert.ts';
+import type { RolloutFormatVerdict } from '../transcript/convert/rollout-format.ts';
+import { harnessVersionRefusal } from '../transcript/convert/versions.ts';
 import { codexRolloutRelativePath } from '../transcript/convert/write-codex.ts';
 
 /**
@@ -46,6 +48,11 @@ export interface ConversationConvertRequest {
   readonly targetHome: string | undefined;
   /** The target CLI's `--version` banner, when it could be read. */
   readonly targetVersion: string | undefined;
+  /**
+   * Codex: the rollout format the installed binary writes, probed when its version is outside the
+   * tested table. Without it such a version is refused.
+   */
+  readonly targetFormat?: RolloutFormatVerdict;
   /** Codex: the model provider the target login's configuration selects, when it names one. */
   readonly targetModelProvider?: string;
   readonly targetAgent: string;
@@ -128,6 +135,7 @@ export function planConversationConvert(request: ConversationConvertRequest): Co
         cwd: place.cwd,
         contextWindow: request.targetWindow,
         ...(request.nativeShell === undefined ? {} : { nativeShell: request.nativeShell }),
+        ...(request.targetFormat === undefined ? {} : { format: request.targetFormat }),
         ...(request.targetModel === undefined ? {} : { model: request.targetModel }),
         ...(request.targetHarness === 'codex'
           ? { workspaceRoots: [codexCorrelationArguments(request.sessionDirectory)[1] as string] }
@@ -206,6 +214,19 @@ export interface ConversionCheckPort {
 export interface HarnessVersionPort {
   version(executable: string): Promise<string | undefined>;
 }
+
+/**
+ * What rollout format an installed Codex writes, found by running it once rather than by its number.
+ * Asked only about a version the converter's table does not list; the answer is remembered per binary
+ * and version, so a person who keeps one Codex pays for one probe.
+ */
+export interface RolloutFormatPort {
+  classify(executable: string, version: string): Promise<RolloutFormatVerdict>;
+}
+
+/** Whether a target's rollout format has to be probed: a Codex whose version the converter's table does not list. */
+export const needsRolloutFormatProbe = (harness: Harness, version: string | undefined): version is string =>
+  harness === 'codex' && version !== undefined && harnessVersionRefusal('codex', version, 'target') !== undefined;
 
 /**
  * The model provider a Codex home's `config.toml` selects at top level, or `undefined` when it names

@@ -63,7 +63,7 @@ export interface AttentionBoardChange {
   readonly actor: AttentionActor;
   readonly via: AttentionVia;
   readonly snapshot: AttentionSnapshot;
-  /** The raised item, on created and refreshed changes. */
+  /** The item, on every change that leaves it open. */
   readonly item?: AttentionItem;
   /** The item as it was closed, on answered, resolved and dismissed changes. */
   readonly addressed?: ResolvedAttentionItem;
@@ -128,6 +128,27 @@ export class AttentionService {
     actor: AttentionActor,
   ): Promise<AttentionMutation> {
     return this.apply(sessionId, { action: 'edit', actor, id, patch, at: this.clock.now() });
+  }
+
+  /** Tick (or untick) one step of an open item; never resolves it, pushes or tells the ferret. */
+  async progress(
+    sessionId: string,
+    id: AttentionId,
+    step: number,
+    done: boolean,
+    actor: AttentionActor,
+  ): Promise<AttentionMutation> {
+    return this.apply(sessionId, { action: 'progress', actor, id, step, done, at: this.clock.now() });
+  }
+
+  /** The owner asks the raising ferret for more information: the item stays open, waiting on the ferret. */
+  async needsInfo(
+    sessionId: string,
+    id: AttentionId,
+    actor: AttentionActor,
+    note?: string | null,
+  ): Promise<AttentionMutation> {
+    return this.apply(sessionId, { action: 'needs-info', actor, id, note, at: this.clock.now() });
   }
 
   async resolve(
