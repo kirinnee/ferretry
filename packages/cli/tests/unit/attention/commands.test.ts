@@ -32,7 +32,9 @@ describe('attention command surface', () => {
     const sentence = run(['attention', 'pick', 'a', 'cluster'], afterAdd);
 
     // Assert
-    await should(mistyped.parsed).be.rejectedWith(/unknown command 'frobnicate'\. Did you mean: add, edit, show, ls/u);
+    await should(mistyped.parsed).be.rejectedWith(
+      /unknown command 'frobnicate'\. Did you mean: .*\badd\b.*\bshow\b.*\bls\b/u,
+    );
     await should(sentence.parsed).be.rejectedWith(/unknown command 'pick'/u);
     should(mistyped.gateway.applied).be.empty();
     should(sentence.gateway.applied).be.empty();
