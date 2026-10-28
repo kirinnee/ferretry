@@ -534,7 +534,10 @@ by name against the host `PATH`. Three rules now hold, and each has a mechanism 
   process died on a signal (a Bun crash) is already red and never reached its teardown, so its
   leftovers are swept and reported as the crash's, not as a fixture leak. A fixture that
   creates a tmux socket still kills its own server in `afterAll`/`finally`; the sweep is the net, not
-  the cleanup.
+  the cleanup. A fixture that also booted a daemon on that socket waits for the daemon to EXIT before
+  `kill-server`: tmux 3.6a, told to exit in the same instant a daemon's control client loses its
+  daemon, keeps both the server and the client running for good
+  (`packages/cli/tests/integration/support/supervised-daemon-teardown.ts` owns that order).
 
 ---
 
