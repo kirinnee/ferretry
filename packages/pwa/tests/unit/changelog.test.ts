@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import {
+  browserChangelogStorage,
   bundledReleases,
   type ChangelogStorage,
   newVersions,
@@ -185,5 +186,24 @@ describe('the last-viewed record', () => {
     expect(() => writeLastViewed(refusing, '1.0.0')).not.toThrow();
     expect(() => writeLastViewed(undefined, '1.0.0')).not.toThrow();
     expect(() => seedLastViewed(refusing, releases)).not.toThrow();
+  });
+});
+
+describe('browserChangelogStorage', () => {
+  it('finds the browser storage, or nothing when reading it throws', () => {
+    expect(browserChangelogStorage()).toBe(globalThis.localStorage);
+    const descriptor = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
+    Object.defineProperty(globalThis, 'localStorage', {
+      configurable: true,
+      get: () => {
+        throw new Error('SecurityError');
+      },
+    });
+    try {
+      expect(browserChangelogStorage()).toBeUndefined();
+    } finally {
+      if (descriptor !== undefined) Object.defineProperty(globalThis, 'localStorage', descriptor);
+      else delete (globalThis as { localStorage?: unknown }).localStorage;
+    }
   });
 });
