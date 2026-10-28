@@ -1,19 +1,18 @@
 import { describe, expect, it } from 'bun:test';
 import {
+  applyTextScale,
   DEFAULT_THEME_PREFERENCE,
   MANIFEST_LINK_ID,
-  TEXT_SCALES,
-  TEXT_SCALE_FACTORS,
-  THEME_FAMILIES,
-  THEME_MODES,
-  THEME_PREFERENCES_KEY,
-  ThemePreferenceStore,
-  type ThemePreferenceStorage,
-  applyTextScale,
   manifestHrefFor,
   parseThemePreference,
   resolveThemeMode,
-  supportsTextScale,
+  TEXT_SCALE_FACTORS,
+  TEXT_SCALES,
+  THEME_FAMILIES,
+  THEME_MODES,
+  THEME_PREFERENCES_KEY,
+  type ThemePreferenceStorage,
+  ThemePreferenceStore,
   themeAttribute,
   themeColorFromComputedStyle,
 } from '../../src/lib/theme-preferences.ts';
@@ -153,9 +152,9 @@ describe('applyTextScale', () => {
     // Assert
     const style = root.style as unknown as FakeStyle;
     expect(root.dataset.textScale).toBe('larger');
-    expect(style.properties['text-size-adjust']).toBe('125%');
-    expect(style.properties['-webkit-text-size-adjust']).toBe('125%');
-    expect(style.removed).toContain('zoom');
+    expect(style.properties['--fy-text-scale']).toBe('1.25');
+    expect(style.properties['text-size-adjust']).toBeUndefined();
+    expect(style.removed).toEqual(expect.arrayContaining(['zoom', 'text-size-adjust', '-webkit-text-size-adjust']));
   });
 });
 
@@ -169,41 +168,6 @@ class FakeStyle {
     this.removed.push(name);
   }
 }
-
-describe('supportsTextScale', () => {
-  it('requires percentage support, not mere recognition of the property name', () => {
-    expect(supportsTextScale(() => false)).toBe(false);
-    expect(supportsTextScale((property, value) => property === 'text-size-adjust' && value === '125%')).toBe(true);
-    expect(supportsTextScale(property => property === '-webkit-text-size-adjust')).toBe(true);
-  });
-
-  it('reports no support when the engine has no CSS.supports at all', () => {
-    // Arrange
-    const original = Object.getOwnPropertyDescriptor(globalThis, 'CSS');
-    Reflect.deleteProperty(globalThis, 'CSS');
-
-    try {
-      // Act + Assert
-      expect(supportsTextScale()).toBe(false);
-    } finally {
-      if (original) Object.defineProperty(globalThis, 'CSS', original);
-    }
-  });
-
-  it('probes the ambient CSS.supports when no probe is injected', () => {
-    // Arrange
-    const original = Object.getOwnPropertyDescriptor(globalThis, 'CSS');
-    Object.defineProperty(globalThis, 'CSS', { configurable: true, value: { supports: () => true } });
-
-    try {
-      // Act + Assert
-      expect(supportsTextScale()).toBe(true);
-    } finally {
-      if (original) Object.defineProperty(globalThis, 'CSS', original);
-      else Reflect.deleteProperty(globalThis, 'CSS');
-    }
-  });
-});
 
 describe('manifestHrefFor', () => {
   it('swaps only the family+mode segment, preserving the release fingerprint', () => {

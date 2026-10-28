@@ -4,6 +4,7 @@ import {
   type DirectNotificationResponse,
   InstantSchema,
   NonNegativeIntegerSchema,
+  PositiveIntegerSchema,
   type PushDeliveryResult,
   PushNotificationKindSchema,
 } from '@ferretry/protocol';
@@ -53,13 +54,20 @@ export const AttentionNotificationRequestedRecordSchema = z
     attribution: z.string().min(1),
     sessionId: z.string().min(1),
     attentionId: AttentionIdSchema,
+    /** Present on the push that announces the information a ferret added: which request of the owner's it answers. */
+    infoRequest: PositiveIntegerSchema.optional(),
     sent: SentNotificationSchema,
     enrolled: NonNegativeIntegerSchema,
   })
-  .refine(record => record.key === `attention:${record.sessionId}:${record.attentionId}`, {
-    message: 'the attention notification key does not name its session and item',
-    path: ['key'],
-  });
+  .refine(
+    record =>
+      record.key ===
+      `attention:${record.sessionId}:${record.attentionId}${record.infoRequest === undefined ? '' : `:info-${record.infoRequest}`}`,
+    {
+      message: 'the attention notification key does not name its session and item',
+      path: ['key'],
+    },
+  );
 
 export const NotificationRequestedRecordSchema = z.union([
   DirectNotificationRequestedRecordSchema,

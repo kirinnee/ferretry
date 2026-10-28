@@ -28,8 +28,12 @@ critical path, and nothing goes there that is free and about as fast on GitHub.
 
 **`main` runs on GitHub.** A `main` run re-proves a tree its pull request already proved, nobody
 waits on it but `Release`, and it was 40% of the Namespace bill (330 of the 1,219 runs that used Namespace, Oct 19–28). Its
-jobs take the `ubuntu-latest` branch of the same `runs-on` expression, except `Build Checks`, which
-stays on Namespace because it is the job that refreshes the cache volume (below).
+jobs take the `ubuntu-latest` branch of the same `runs-on` expression, except two. `Build Checks`
+stays on Namespace because it is the job that refreshes the cache volume (below). `PWA Full Gallery
+(dark)` stays because "nobody waits" is not quite true: `Release` waits for the slowest job, and the
+unsplit gallery takes 643s on GitHub, ~3 minutes more than any other `main` job. A matrix entry says
+so with `main: namespace`. A job only moves to GitHub when Namespace buys it close to nothing: the
+time it adds to the run, its queue, its cache.
 
 **`vars.CI_RUNNER_POOL`** is the switch. Set the repository variable to `github` and every Namespace
 job, `Build Checks` and the E2E shards included, runs on `ubuntu-latest` from the next run on: no
@@ -62,7 +66,7 @@ every second, and the GitHub times from the last runs before Namespace (p50):
 | `PWA Settings Geometry (light)`                  | Namespace 2x4 | ~1.9 cores                         | well inside the critical path                               |
 | `PWA Full Gallery (dark)`                        | Namespace 4x8 | ~427s; 643s on GitHub, ~3.3GB peak | past a 2x4's memory; GitHub would make it the critical path |
 | `E2E Shard (1..3)`                               | Namespace 2x4 | ~1 core, 1.8GB                     | one journey at a time                                       |
-| `Integration Tests (<group>)`                    | GitHub        | ~0.6–2 cores                       | free, and five groups keep each under ~2.5 min              |
+| `Integration Tests (<group>)`                    | GitHub        | ~0.6–2 cores                       | free; seven groups keep the slowest near five minutes       |
 | `Unit Tests`, `Integration Tests`, `E2E …` tails | GitHub        | seconds, no nix shell              | billed a whole minute and a cache attachment on Namespace   |
 | `SIT`, smoke, harness contract, every macOS job  | GitHub        | —                                  | free; macOS and arm64 have no Namespace equivalent here     |
 
@@ -167,7 +171,7 @@ Notable details:
   leg would, which is why there is no such leg. The viewports are walked one after the other: walking
   them at once, as three software-rendered Chromes on a 4x8, timed out in 3 of 7 runs under load.
 - **Smoke covers the platforms compile cannot.** `linux-x64-baseline` on `ubuntu-latest`,
-  `linux-arm64` on `ubuntu-24.04-arm`, `darwin-arm64` on `macos-14`. This is the one job that
+  `linux-arm64` on `ubuntu-24.04-arm`, `darwin-arm64` on `macos-15`. This is the one job that
   does not enter a nix shell — it only needs the downloaded binary and `jq` — and it derives
   the binary name from the CLI package's `bin` key so the matrix stays rename-proof
   ([Architecture](../architecture/index.md)).

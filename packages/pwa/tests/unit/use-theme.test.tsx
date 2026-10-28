@@ -1,10 +1,10 @@
 import { afterEach, describe, expect, it } from 'bun:test';
-import { useTheme, type ThemeState, themePreferences } from '../../src/hooks/use-theme.ts';
+import { type ThemeState, themePreferences, useTheme } from '../../src/hooks/use-theme.ts';
 import {
   MANIFEST_LINK_ID,
   THEME_PREFERENCES_KEY,
-  ThemePreferenceStore,
   type ThemePreferenceStorage,
+  ThemePreferenceStore,
 } from '../../src/lib/theme-preferences.ts';
 import { interact, mount } from '../support/dom.ts';
 
@@ -125,41 +125,21 @@ describe('useTheme', () => {
     await view.unmount();
   });
 
-  it('applies the text scale only when the engine really supports percentages', async () => {
+  it('publishes the text scale as the factor the stylesheet multiplies every type size by, on any engine', async () => {
     // Arrange
     installMatchMedia(false);
-    const originalCss = Object.getOwnPropertyDescriptor(globalThis, 'CSS');
-    Object.defineProperty(globalThis, 'CSS', { configurable: true, value: { supports: () => false } });
     const store = new ThemePreferenceStore(memoryStorage());
+    const view = await mount(<Probe store={store} />);
 
-    try {
-      const view = await mount(<Probe store={store} />);
+    // Act
+    await interact(() => theme().setTextScale('large'));
 
-      // Act — refused, because persisting it would enlarge a browser that CAN.
-      await interact(() => theme().setTextScale('larger'));
-
-      // Assert
-      expect(theme().textScaleSupported).toBe(false);
-      expect(theme().textScale).toBe('default');
-      expect(document.documentElement.dataset.textScale).toBe('default');
-      await view.unmount();
-
-      // Arrange — the same reader on an engine that supports it.
-      Object.defineProperty(globalThis, 'CSS', { configurable: true, value: { supports: () => true } });
-      const supported = await mount(<Probe store={store} />);
-
-      // Act
-      await interact(() => theme().setTextScale('large'));
-
-      // Assert
-      expect(theme().textScaleSupported).toBe(true);
-      expect(document.documentElement.dataset.textScale).toBe('large');
-      expect(document.documentElement.style.getPropertyValue('text-size-adjust')).toBe('112.5%');
-      await supported.unmount();
-    } finally {
-      if (originalCss) Object.defineProperty(globalThis, 'CSS', originalCss);
-      else Reflect.deleteProperty(globalThis, 'CSS');
-    }
+    // Assert
+    expect(theme().textScale).toBe('large');
+    expect(document.documentElement.dataset.textScale).toBe('large');
+    expect(document.documentElement.style.getPropertyValue('--fy-text-scale')).toBe('1.125');
+    expect(document.documentElement.style.getPropertyValue('text-size-adjust')).toBe('');
+    await view.unmount();
   });
 
   it('repoints the one manifest link and writes the window colour, without re-fetching on a no-op', async () => {
