@@ -1,5 +1,5 @@
 import { rm } from 'node:fs/promises';
-import { sweepTmuxServers, tmuxServersUnder } from '../../../../../scripts/test/tmux-sweep.ts';
+import { basename, resolve } from 'node:path';
 
 /**
  * What a fixture that boots a real `fyd` through the CLI's supervisor started, and must end.
@@ -29,6 +29,25 @@ export interface TeardownOptions {
 export const TEARDOWN_TIMEOUT_MS = 20_000;
 
 const POLL_MS = 20;
+
+/**
+ * The run's own sweep, run as a process rather than imported: an import would put a `scripts/` file
+ * in the integration coverage ledger, which counts adapters only.
+ */
+const SWEEP = resolve(import.meta.dir, '../../../../../scripts/test/tmux-sweep.ts');
+
+/** Every tmux process — server or client — whose argv names one of `sockets`, as `ps` lists it. */
+function tmuxOn(sockets: readonly string[]): readonly string[] {
+  const listed = Bun.spawnSync(['ps', '-A', '-ww', '-o', 'pid=', '-o', 'args='], { stdout: 'pipe', stderr: 'ignore' });
+  return listed.stdout
+    .toString()
+    .split('\n')
+    .map(line => line.trim())
+    .filter(line => {
+      const [, program = ''] = line.split(/\s+/u, 2);
+      return basename(program) === 'tmux' && sockets.some(socket => ` ${line} `.includes(` -S ${socket} `));
+    });
+}
 
 function alive(pid: number): boolean {
   try {
@@ -70,10 +89,11 @@ async function within(withinMs: number, done: () => boolean): Promise<boolean> {
  * each. CI run 40615810178 hit it as two "leaked servers" six pids apart on one socket. Waiting for
  * the exit first means no client of a dying daemon is ever on the server `kill-server` ends.
  *
- * BY PROCESS AFTERWARDS. A server still under a root once `kill-server` has run is found by its argv,
- * as the run's own sweep finds it (`scripts/test/tmux-sweep.ts`), killed with everything in its
- * panes, and reported — so the test that left it fails by name instead of the whole run failing on a
- * socket nobody can trace back. The same goes for a daemon that would not stop on SIGTERM.
+ * BY PROCESS AFTERWARDS. A tmux process still naming a socket once `kill-server` has run is found by
+ * its argv, as the run's own sweep finds it, killed with everything in its panes by that sweep
+ * (`scripts/test/tmux-sweep.ts`), and reported — so the test that left it fails by name instead of
+ * the whole run failing on a socket nobody can trace back. The same goes for a daemon that would not
+ * stop on SIGTERM.
  */
 export async function tearDownSupervisedDaemons(
   fixture: SupervisedDaemonFixture,
@@ -98,9 +118,12 @@ export async function tearDownSupervisedDaemons(
 
   const roots = [...fixture.roots];
   fixture.roots.clear();
-  if (!(await within(settleWithinMs, () => tmuxServersUnder(roots).length === 0)))
-    for (const server of sweepTmuxServers(roots))
-      failures.push(`tmux ${String(server.pid)} outlived kill-server on ${server.socket} and was killed`);
+  if (!(await within(settleWithinMs, () => tmuxOn(sockets).length === 0))) {
+    const left = tmuxOn(sockets);
+    // Killed with everything in their panes by the one module that knows how; its lines name each pid.
+    const swept = Bun.spawnSync([process.execPath, SWEEP, ...roots], { stdout: 'ignore', stderr: 'pipe' });
+    failures.push(`tmux outlived kill-server and was killed:\n${left.join('\n')}\n${swept.stderr.toString().trim()}`);
+  }
   for (const root of roots) await rm(root, { recursive: true, force: true });
 
   if (failures.length > 0)
