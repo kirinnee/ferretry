@@ -5,7 +5,10 @@ import {
   AttentionItemSchema,
   AttentionQuestionSchema,
   attentionBriefOf,
+  MAX_ATTENTION_BODY_LENGTH,
   MAX_ATTENTION_QUESTIONS,
+  MAX_ATTENTION_STEP_LENGTH,
+  MAX_ATTENTION_STEPS,
   MAX_ATTENTION_TERMS,
   recommendedAttentionOption,
   singleAttentionQuestion,
@@ -71,6 +74,59 @@ describe('attention brief', () => {
     should(request).containDeep(brief);
     should(attentionBriefOf(item)).deepEqual(brief);
     should(singleAttentionQuestion(item)).be.undefined();
+  });
+
+  it('should carry steps, a body and progress, and refuse what is over the limit or inconsistent', () => {
+    // Arrange
+    const steps = ['Run `fy login`', 'Paste the code'];
+    const withSteps = { ...minimal, steps, body: '## Notes\n\n```sh\nfy login\n```' };
+
+    // Act
+    const item = AttentionItemSchema.parse({ ...withSteps, stepsDone: [0, 1] });
+    const request = AttentionActionRequestSchema.safeParse({
+      action: 'add',
+      subject: minimal.subject,
+      why: minimal.why,
+      howToResolve: minimal.howToResolve,
+      ask: { kind: 'open-question' },
+      steps,
+    });
+    const progress = AttentionActionRequestSchema.safeParse({ action: 'progress', id: 'A1', step: 0, done: false });
+    const extra = AttentionActionRequestSchema.safeParse({ action: 'progress', id: 'A1', step: 0, done: true, x: 1 });
+    const tooManySteps = AttentionItemSchema.safeParse({
+      ...minimal,
+      steps: Array.from({ length: MAX_ATTENTION_STEPS + 1 }, () => 'x'),
+    });
+    const longStep = AttentionItemSchema.safeParse({ ...minimal, steps: ['x'.repeat(MAX_ATTENTION_STEP_LENGTH + 1)] });
+    const longBody = AttentionItemSchema.safeParse({ ...minimal, body: 'x'.repeat(MAX_ATTENTION_BODY_LENGTH + 1) });
+    const noSteps = AttentionItemSchema.safeParse({ ...minimal, steps: [] });
+    const unsorted = AttentionItemSchema.safeParse({ ...withSteps, stepsDone: [1, 0] });
+    const repeated = AttentionItemSchema.safeParse({ ...withSteps, stepsDone: [1, 1] });
+    const outOfRange = AttentionItemSchema.safeParse({ ...withSteps, stepsDone: [2] });
+    const withoutSteps = AttentionItemSchema.safeParse({ ...minimal, stepsDone: [0] });
+    const empty = AttentionItemSchema.safeParse({ ...withSteps, stepsDone: [] });
+
+    // Assert
+    should(item.stepsDone).deepEqual([0, 1]);
+    should(attentionBriefOf(item)).containDeep({ steps, body: withSteps.body });
+    should(request.success).be.true();
+    should(progress.success).be.true();
+    should(extra.success).be.false();
+    for (const refused of [
+      tooManySteps,
+      longStep,
+      longBody,
+      noSteps,
+      unsorted,
+      repeated,
+      outOfRange,
+      withoutSteps,
+      empty,
+    ]) {
+      should(refused.success).be.false();
+    }
+    should(JSON.stringify(longStep.error?.issues)).containEql('steps');
+    should(JSON.stringify(longBody.error?.issues)).containEql('body');
   });
 
   it('should take a recommendation only when it names one of the options', () => {

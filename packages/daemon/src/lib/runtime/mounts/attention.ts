@@ -164,13 +164,16 @@ async function apply(
     ? attention.raise(sessionId, request, actor)
     : request.action === 'edit'
       ? attention.edit(sessionId, request.id, editPatch(request), actor)
-      : request.action === 'dismiss'
-        ? attention.dismiss(sessionId, request.id, actor, request.note)
-        : request.response === undefined
-          ? attention.resolve(sessionId, request.id, actor, request.note)
-          : attention.answer(sessionId, request.id, request.response, actor, request.note));
+      : request.action === 'progress'
+        ? attention.progress(sessionId, request.id, request.step, request.done, actor)
+        : request.action === 'dismiss'
+          ? attention.dismiss(sessionId, request.id, actor, request.note)
+          : request.response === undefined
+            ? attention.resolve(sessionId, request.id, actor, request.note)
+            : attention.answer(sessionId, request.id, request.response, actor, request.note));
   if (!mutation.ok) return refusal(mutation.error);
-  const warnings = mutation.item !== undefined && mutation.changed ? lintAttentionWriting(mutation.item) : [];
+  const written = mutation.change === 'created' || mutation.change === 'refreshed';
+  const warnings = written && mutation.item !== undefined ? lintAttentionWriting(mutation.item) : [];
   const enrolled = mutation.change === 'created' ? await enrolledDevices(notifications) : undefined;
   return jsonResponse({
     ...(await withReplies(replies, sessionId, mutation.snapshot)),

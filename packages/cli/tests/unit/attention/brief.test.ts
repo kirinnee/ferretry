@@ -237,3 +237,37 @@ describe('attention brief points and edits', () => {
     should(() => composeEditRequest('A3', { question: ['a?'] }, undefined)).throw(/no unresolved attention item A3/u);
   });
 });
+
+describe('attention brief steps and body', () => {
+  it('should carry steps in order and a body, with a flag winning over the file and blanks dropped', () => {
+    // Arrange / Act
+    const fromFlags = composeAddRequest(['Log in'], {
+      step: ['Run `fy login`', '  ', 'Paste the code'],
+      body: ' ## Notes ',
+    });
+    const fromFile = composeAddRequest(['Log in'], {}, { steps: ['From file'], body: 'File body' });
+    const flagWins = composeAddRequest(
+      ['Log in'],
+      { step: ['Flag'], body: 'Flag body' },
+      { steps: ['File'], body: 'File body' },
+    );
+    const blank = composeAddRequest(['Log in'], { step: [' '], body: ' ' });
+    const edited = composeEditRequest('A1', { step: ['One', 'Two'], body: 'Doc' }, undefined);
+
+    // Assert
+    should(fromFlags).containDeep({ steps: ['Run `fy login`', 'Paste the code'], body: '## Notes' });
+    should(fromFile).containDeep({ steps: ['From file'], body: 'File body' });
+    should(flagWins).containDeep({ steps: ['Flag'], body: 'Flag body' });
+    should(blank).not.have.property('steps');
+    should(blank).not.have.property('body');
+    should(edited).deepEqual({ action: 'edit', id: 'A1', steps: ['One', 'Two'], body: 'Doc' });
+  });
+
+  it('should read steps and body from a JSON brief', () => {
+    // Arrange / Act
+    const file = parseBriefFile('{"summary":"Log in","steps":["a","b"],"body":"c"}');
+
+    // Assert
+    should(file).containDeep({ steps: ['a', 'b'], body: 'c' });
+  });
+});

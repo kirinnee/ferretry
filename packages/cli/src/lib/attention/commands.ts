@@ -7,6 +7,7 @@ import type {
   AttentionEditOptions,
   AttentionNotifyOptions,
   AttentionResolveOptions,
+  AttentionStepOptions,
 } from './controller.ts';
 
 const SESSION_FLAG = '-s, --session <id>';
@@ -23,6 +24,10 @@ const WRITING_GUIDE = `The reader has NOT been following this session. Write for
   --recommend    your suggested decision (an option label, or the answer in words); --recommend-why
   --impact       what happens if nobody answers; --urgency by when ("before the 14:00 deploy")
   --link         a PR, file or reference worth opening (repeat)
+  --step         when the human must DO something: one Markdown step each, in order (repeat) — the
+                 complete instructions (commands in code blocks, where to click, what to paste where;
+                 never a secret value), so the item alone is enough
+  --body-file    a Markdown file (- reads stdin) for instructions that are not a list
   --json-file    the same fields as JSON (- reads stdin); flags win over the file
 
 Every field renders as markdown: short bullets, one idea each, no walls of text. Never use
@@ -44,7 +49,9 @@ JSON body (every field optional except summary; questions and options may be pla
                   "recommended": "Defaults", "why": "Matches what runs today"}],
    "recommendation": {"decision": "Defaults", "why": "Lowest risk"},
    "impact": "You stay logged out of work accounts", "urgency": "today",
-   "links": [{"label": "Plan", "target": "#F12"}]}`;
+   "links": [{"label": "Plan", "target": "#F12"}],
+   "steps": ["Open **Settings** and choose Logins", "Run \`fy login work\` and paste the code it prints"],
+   "body": "Anything longer than a list, as Markdown"}`;
 
 const ASK_KINDS = `--kind says what the human DOES:
   permission   approve or reject
@@ -98,6 +105,8 @@ export function registerAttentionCommands(program: Command, controller: Attentio
       .option('--impact <point>', 'what happens if nobody answers; repeat for bullet points', collect, [])
       .option('--urgency <when>', 'by when it matters, in words')
       .option('-l, --link <target>', 'a PR, file or reference worth opening; repeat', collect, [])
+      .option('--step <markdown>', 'one step the human follows, in order; repeat', collect, [])
+      .option('--body-file <path>', 'a Markdown file of instructions, or - for stdin')
       .option('--json-file <path>', 'read these fields as JSON from a file, or - for stdin')
       .addHelpText('after', `\n${ASK_KINDS}`),
   ).action(async (words: string[], _flags: unknown, command: Command) => {
@@ -117,9 +126,22 @@ export function registerAttentionCommands(program: Command, controller: Attentio
       .option('--recommend-why <reason>', 'why you recommend it')
       .option('--impact <point>', 'replace what happens if nobody answers; repeat for bullet points', collect, [])
       .option('--urgency <when>', 'replace by when it matters')
-      .option('-l, --link <target>', 'replace the links with these; repeat', collect, []),
+      .option('-l, --link <target>', 'replace the links with these; repeat', collect, [])
+      .option('--step <markdown>', 'replace the steps with these, in order; repeat (clears ticks)', collect, [])
+      .option('--body-file <path>', 'replace the body with this Markdown file, or - for stdin'),
   ).action(async (id: string, _flags: unknown, command: Command) => {
     await controller.edit(id, merged<AttentionEditOptions>(command));
+  });
+
+  scoped(
+    attention
+      .command('step')
+      .description('tick a step of an open item, counted from 1 as ls prints them')
+      .argument('<id>', 'the attention reference, like !A3')
+      .argument('<n>', 'the step number')
+      .option('--undo', 'untick the step instead'),
+  ).action(async (id: string, number: string, _flags: unknown, command: Command) => {
+    await controller.step(id, number, merged<AttentionStepOptions>(command));
   });
 
   scoped(attention.command('ls').alias('list').description('list unresolved items, oldest first')).action(

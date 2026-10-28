@@ -90,6 +90,11 @@ export const MAX_ATTENTION_URGENCY_LENGTH = 120;
 export const MAX_ATTENTION_LINKS = 10;
 export const MAX_ATTENTION_LINK_LABEL_LENGTH = 120;
 export const MAX_ATTENTION_LINK_TARGET_LENGTH = 1_024;
+/** The most steps an item carries, and the longest one: each is Markdown, one thing to do. */
+export const MAX_ATTENTION_STEPS = 20;
+export const MAX_ATTENTION_STEP_LENGTH = 2_000;
+/** The longest instruction document an item carries, as one block of Markdown. */
+export const MAX_ATTENTION_BODY_LENGTH = 8_000;
 
 const prose = (maximum: number) => z.string().trim().min(1).max(maximum);
 
@@ -173,6 +178,10 @@ export const AttentionBriefShape = {
   urgency: singleLine(MAX_ATTENTION_URGENCY_LENGTH).optional(),
   /** PRs, files and references worth opening. */
   links: z.array(AttentionLinkSchema).min(1).max(MAX_ATTENTION_LINKS).optional(),
+  /** Ordered Markdown steps the owner follows, one thing to do each: complete instructions, never a secret. */
+  steps: z.array(prose(MAX_ATTENTION_STEP_LENGTH)).min(1).max(MAX_ATTENTION_STEPS).optional(),
+  /** Instructions that are not a list, as one Markdown document. */
+  body: prose(MAX_ATTENTION_BODY_LENGTH).optional(),
 };
 
 /** The structured fields of an item, alone. */
@@ -188,6 +197,8 @@ export const attentionBriefOf = (value: AttentionBrief): AttentionBrief => ({
   ...(value.impact === undefined ? {} : { impact: value.impact }),
   ...(value.urgency === undefined ? {} : { urgency: value.urgency }),
   ...(value.links === undefined ? {} : { links: value.links }),
+  ...(value.steps === undefined ? {} : { steps: value.steps }),
+  ...(value.body === undefined ? {} : { body: value.body }),
 });
 
 /**
@@ -234,6 +245,8 @@ const AttentionItemBaseShape = {
   howToResolve: z.string().trim().min(1).max(MAX_ATTENTION_DETAIL_LENGTH),
   ask: AttentionAskSchema.optional(),
   ...AttentionBriefShape,
+  /** The indices of the steps the owner has ticked: sorted, unique, each below `steps.length`; absent when none. */
+  stepsDone: z.array(NonNegativeIntegerSchema).min(1).max(MAX_ATTENTION_STEPS).optional(),
 };
 
 export const AttentionItemSchema = z
@@ -260,6 +273,17 @@ export const AttentionItemSchema = z
   .superRefine((value, context) => {
     if (value.sourceSeq !== undefined && value.source !== 'agent-raised') {
       context.addIssue({ code: 'custom', message: 'sourceSeq is valid only for agent-raised attention' });
+    }
+    if (value.stepsDone !== undefined) {
+      const done = value.stepsDone;
+      const ordered = done.every((step, index) => index === 0 || step > (done[index - 1] ?? -1));
+      if (!ordered || done.some(step => step >= (value.steps?.length ?? 0))) {
+        context.addIssue({
+          code: 'custom',
+          message: 'stepsDone must be sorted, unique and each below the number of steps',
+          path: ['stepsDone'],
+        });
+      }
     }
   });
 export type AttentionItem = z.infer<typeof AttentionItemSchema>;
@@ -393,6 +417,13 @@ export const AttentionActionRequestSchema = z.discriminatedUnion('action', [
     id: AttentionIdSchema,
     note: z.string().max(MAX_ATTENTION_DETAIL_LENGTH).optional(),
     response: AttentionResponseSchema.optional(),
+  }),
+  /** Tick or untick one step of an open item: never resolves it, never pushes, never messages the ferret. */
+  z.strictObject({
+    action: z.literal('progress'),
+    id: AttentionIdSchema,
+    step: NonNegativeIntegerSchema,
+    done: z.boolean(),
   }),
   z.strictObject({
     action: z.literal('dismiss'),
