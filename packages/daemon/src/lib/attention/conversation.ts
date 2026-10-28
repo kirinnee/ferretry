@@ -75,6 +75,15 @@ export function boardReplyMessage(item: ResolvedAttentionItem): string {
   return note === '' ? `[done ${named(item)}] The owner marked this done.` : `[answer to ${named(item)}] ${note}`;
 }
 
+/**
+ * The message a ferret receives when the owner asks it for more information on one of ITS items. The item
+ * stays open: the ferret answers by expanding it (`attention edit`), not by closing it.
+ */
+export function needsInfoMessage(item: AttentionItem): string {
+  const note = item.history?.findLast(entry => entry.kind === 'needs-info')?.note?.trim() ?? '';
+  return `[needs more info ${named(item)}] ${note === '' ? 'The owner needs more information.' : note}`;
+}
+
 /** What a person's chat message becomes once the open board is taken into account. */
 export interface ConversationTurn {
   /** The words the ferret receives. */
