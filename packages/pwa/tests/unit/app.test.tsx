@@ -4000,10 +4000,10 @@ describe('the notifications settings card', () => {
       'the per-machine row for beta',
     );
     const machineSwitch = must(
-      switches(betaRow).find(toggle => toggle.textContent?.includes('Show its notifications')),
+      [...betaRow.querySelectorAll<HTMLElement>('[data-machine-mute]')][0],
       'the per-machine mute switch for beta',
     );
-    expect(machineSwitch.getAttribute('aria-checked')).toBe('true');
+    expect(machineSwitch.getAttribute('aria-pressed')).toBe('false');
 
     await interact(() => machineSwitch.click());
 

@@ -93,6 +93,11 @@ function Bar({ grouped }: { readonly grouped: boolean }): ReactElement {
   const [mode] = useState('all' as const);
   return (
     <div className="flex bg-bg" data-fixture="" style={{ height: 760 }}>
+      <style>
+        {
+          '@media (max-width: 767px) { [data-sessions-bar="column"] { width: 100% !important; border-right: 0 !important; } }'
+        }
+      </style>
       <SessionsBar
         active={null}
         activeSessionId="dw"

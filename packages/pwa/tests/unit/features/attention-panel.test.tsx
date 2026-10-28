@@ -391,6 +391,17 @@ describe('AttentionPanel', () => {
     expect(card.querySelector('[role="menu"]')).toBeNull();
   });
 
+  test('an item with no options shows Done and Dismiss in one tap, and its age without "waiting"', async () => {
+    const { calls, client } = recordingClient();
+    view = await mount(panel({ client, snapshot: board([item('A3', { ask: { kind: 'open-question' } })]) }));
+    const card = cardOf(must(view.container, 'view'), 'A3');
+    expect(card.querySelector('[data-attention-more]')).toBeNull();
+    expect(card.querySelector('.fy-attn-card__meta')?.textContent).toContain('30m');
+    expect(card.querySelector('.fy-attn-card__meta')?.textContent).not.toContain('waiting');
+    await interact(() => must(card.querySelector<HTMLButtonElement>('[data-attention-dismiss]'), 'dismiss').click());
+    expect(calls.map(call => call.method)).toEqual(['dismiss']);
+  });
+
   test('Details on a rich item opens its brief with the first question open', async () => {
     const rich = item('A3', {
       subject: 'Pick a database',

@@ -238,11 +238,14 @@ describe('useMachineNotifications', () => {
     const view = mount(hostOf(world.service), sourcesOf(['a', 'b'], ['b']));
     await settle();
     expect(view.machines().rows.map(row => row.shown)).toEqual([true, false]);
-    const mutes = view.renderer.root.findAll(
-      node => node.props.role === 'switch' && node.props['aria-checked'] === false && node.props.disabled !== true,
-    );
-    run(() => mutes[mutes.length - 1]?.props.onClick());
-    expect(view.shown).toEqual([['b', true]]);
+    const mutes = view.renderer.root.findAll(node => node.props['data-machine-mute'] === '');
+    expect(mutes.map(node => node.children.join(''))).toEqual(['Mute', 'Unmute']);
+    run(() => mutes[1]?.props.onClick());
+    run(() => mutes[0]?.props.onClick());
+    expect(view.shown).toEqual([
+      ['b', true],
+      ['a', false],
+    ]);
     expect(world.registered).toEqual([]);
   });
 });

@@ -213,73 +213,106 @@ export function AttentionActions({
       </div>
     );
   }
+  const optionButtons =
+    options.length === 0 ? null : (
+      <fieldset className="fy-attn-card__options" aria-label="Answers">
+        {options.map(option => (
+          <button
+            className="kt-attn-option fy-attn-card__option"
+            data-attention-option={option.label}
+            disabled={busy}
+            key={option.label}
+            onClick={() => onAct(option)}
+            type="button"
+          >
+            <span className="kt-attn-option__body">
+              <span className="kt-attn-option__label">{option.label}</span>
+            </span>
+            {recommended === option.label ? <RecommendedBadge /> : null}
+            <SwipeHint action={option} enabled={swipeHints} map={map} />
+          </button>
+        ))}
+      </fieldset>
+    );
+  if (!showReply) {
+    return (
+      <div className="fy-attn-actions">
+        <div className="fy-attn-actions__row" data-attention-row="">
+          {optionButtons}
+          {options.length === 0 ? (
+            <>
+              <button
+                className="kt-btn fy-attn-actions__resolve"
+                data-attention-done=""
+                disabled={busy}
+                onClick={() => onAct(DONE_ACTION)}
+                type="button"
+              >
+                <Check aria-hidden="true" size={14} />
+                Done
+              </button>
+              <button
+                className="kt-btn fy-attn-actions__resolve"
+                data-attention-dismiss=""
+                disabled={busy}
+                onClick={() => onAct(DISMISS_ACTION)}
+                type="button"
+              >
+                <X aria-hidden="true" size={14} />
+                Dismiss
+              </button>
+            </>
+          ) : (
+            menu
+          )}
+        </div>
+      </div>
+    );
+  }
   return (
     <div className="fy-attn-actions">
-      {options.length === 0 ? null : (
-        <fieldset className="fy-attn-card__options" aria-label="Answers">
-          {options.map(option => (
-            <button
-              className="kt-attn-option fy-attn-card__option"
-              data-attention-option={option.label}
-              disabled={busy}
-              key={option.label}
-              onClick={() => onAct(option)}
-              type="button"
-            >
-              <span className="kt-attn-option__body">
-                <span className="kt-attn-option__label">{option.label}</span>
-              </span>
-              {recommended === option.label ? <RecommendedBadge /> : null}
-              <SwipeHint action={option} enabled={swipeHints} map={map} />
-            </button>
-          ))}
-        </fieldset>
-      )}
-      {showReply ? (
-        <form
-          className="fy-attn-actions__row"
-          onSubmit={event => {
-            event.preventDefault();
-            onSendReply();
-          }}
-        >
-          <label className="sr-only" htmlFor={replyId}>
-            {replyLabel}
-          </label>
-          <div className="fy-attn-reply">
-            <textarea
-              className="kt-input fy-attn-reply__box"
-              disabled={busy}
-              id={replyId}
-              onChange={event => onReplyChange(event.target.value)}
-              onKeyDown={event => {
-                if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
-                  event.preventDefault();
-                  onSendReply();
-                }
-              }}
-              placeholder={answering ? 'Write your answer…' : 'Reply…'}
-              rows={1}
-              value={reply}
-            />
-            <button
-              aria-label={answering ? 'Send answer' : 'Send reply'}
-              className="fy-attn-reply__send"
-              disabled={busy || replyable === null}
-              type="submit"
-            >
-              {busy ? (
-                <LoaderCircle size={14} className="animate-spin motion-reduce:animate-none" aria-hidden="true" />
-              ) : (
-                <CornerDownLeft size={14} aria-hidden="true" />
-              )}
-            </button>
-          </div>
-          {menu}
-        </form>
-      ) : (
-        <div className="fy-attn-actions__row">{menu}</div>
-      )}
+      {optionButtons}
+      <form
+        className="fy-attn-actions__row"
+        onSubmit={event => {
+          event.preventDefault();
+          onSendReply();
+        }}
+      >
+        <label className="sr-only" htmlFor={replyId}>
+          {replyLabel}
+        </label>
+        <div className="fy-attn-reply">
+          <textarea
+            className="kt-input fy-attn-reply__box"
+            disabled={busy}
+            id={replyId}
+            onChange={event => onReplyChange(event.target.value)}
+            onKeyDown={event => {
+              if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
+                event.preventDefault();
+                onSendReply();
+              }
+            }}
+            placeholder={answering ? 'Write your answer…' : 'Reply…'}
+            rows={1}
+            value={reply}
+          />
+          <button
+            aria-label={answering ? 'Send answer' : 'Send reply'}
+            className="fy-attn-reply__send"
+            disabled={busy || replyable === null}
+            type="submit"
+          >
+            {busy ? (
+              <LoaderCircle size={14} className="animate-spin motion-reduce:animate-none" aria-hidden="true" />
+            ) : (
+              <CornerDownLeft size={14} aria-hidden="true" />
+            )}
+          </button>
+        </div>
+        {menu}
+      </form>
     </div>
   );
 }

@@ -11,10 +11,6 @@
   overflow-y: auto;
   overscroll-behavior: contain;
   margin-bottom: var(--gap-sm);
-  border: var(--stroke-panel, 1px) solid var(--border);
-  border-radius: var(--radius-panel);
-  background: var(--surface);
-  padding: var(--gap-sm);
 }
 .fy-attn-panel__chevron {
   flex-shrink: 0;
@@ -77,8 +73,10 @@
   cursor: pointer;
 }
 .fy-attn-card[data-pinned] {
-  border-color: var(--accent);
+  border-color: var(--border);
+  border-left-color: var(--accent);
   box-shadow: none;
+  outline: none;
 }
 .fy-attn-panel__note {
   display: flex;
@@ -107,10 +105,10 @@
   scroll-margin-block: var(--gap-sm);
 }
 .fy-attn-panel__item:focus,
+.fy-attn-panel__item:focus-visible,
 .fy-attn-panel__record:focus {
   outline: none;
 }
-.fy-attn-panel__item:focus-visible,
 .fy-attn-panel__record:focus-visible {
   outline: var(--focus-width, 2px) solid var(--focus-color, var(--accent));
   outline-offset: 2px;

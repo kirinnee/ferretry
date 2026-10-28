@@ -383,6 +383,17 @@ details[open] > .fy-attn-sec__title > .fy-attn-sec__chevron {
   align-items: center;
   gap: var(--gap-xs);
 }
+.fy-attn-actions__row > .fy-attn-card__options {
+  flex: 1;
+}
+.fy-attn-actions__resolve {
+  min-height: 36px;
+  flex: 1;
+  justify-content: center;
+}
+.fy-attn-card[data-pinned] .fy-attn-card__meta {
+  flex-wrap: nowrap;
+}
 .fy-attn-actions__send-answers {
   min-height: 36px;
   flex: 1;
@@ -491,4 +502,7 @@ details[open] > .fy-attn-sec__title > .fy-attn-sec__chevron {
 }
 .fy-attn-card__context {
   font-size: var(--text-sm);
+}
+.fy-attn-actions__row[data-attention-row] {
+  align-items: flex-start;
 }

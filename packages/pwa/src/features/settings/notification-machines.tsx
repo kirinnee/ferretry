@@ -14,7 +14,6 @@ import {
   turnOnAllTargets,
 } from '../../lib/machine-notifications.ts';
 import { Button } from '../../shell/primitives.tsx';
-import { Toggle } from './notification-settings.tsx';
 
 export interface MachineNotificationListProps {
   readonly rows: readonly MachineNotificationRow[];
@@ -53,35 +52,55 @@ function MachineRow({
   const disabled = busy || (on ? false : row.status !== 'off' || !canEnrol);
   return (
     <li
-      className="flex flex-col gap-1 rounded-control border border-border bg-surface-2 p-2"
+      className="flex flex-col gap-1 rounded-control border border-border bg-surface-2 px-control-x py-2"
       data-machine-notification={row.daemonId}
       data-machine-status={row.status}
     >
-      <Toggle
-        checked={on}
-        disabled={disabled}
-        onChange={next => (next ? onEnable(row.daemonId) : onDisable(row.daemonId))}
-        label={row.label}
-        description="Notify this browser from this machine, even when the app is closed."
-      />
-      <p
-        className={cn('m-0 px-1 text-meta leading-base', STATUS_TONE[row.status])}
-        data-machine-status-text=""
-        role="status"
-      >
-        {busy ? 'Working…' : row.statusText}
-      </p>
+      <div className="flex min-h-[36px] items-center gap-2">
+        <span className="min-w-0 truncate text-ui font-semibold text-fg">{row.label}</span>
+        <span
+          className={cn('shrink-0 text-meta leading-base', STATUS_TONE[row.status])}
+          data-machine-status-text=""
+          role="status"
+        >
+          {busy ? 'Working…' : row.statusText}
+        </span>
+        <button
+          type="button"
+          role="switch"
+          aria-checked={on}
+          aria-label={`Notifications from ${row.label}`}
+          disabled={disabled}
+          onClick={() => (on ? onDisable(row.daemonId) : onEnable(row.daemonId))}
+          className={cn(
+            'relative ml-auto h-6 w-11 shrink-0 rounded-full border transition-colors',
+            on ? 'border-accent bg-accent' : 'border-border-strong bg-surface',
+            disabled && 'cursor-not-allowed opacity-60',
+          )}
+        >
+          <span
+            aria-hidden="true"
+            className={cn(
+              'absolute left-0 top-1/2 h-4 w-4 -translate-y-1/2 rounded-full bg-fg transition-transform',
+              on ? 'translate-x-[22px]' : 'translate-x-[2px]',
+            )}
+          />
+        </button>
+      </div>
       {failure === undefined ? null : (
-        <p className="m-0 px-1 text-meta leading-base text-warn" role="alert">
+        <p className="m-0 text-meta leading-base text-warn" role="alert">
           {failure}
         </p>
       )}
-      <Toggle
-        checked={row.shown}
-        onChange={next => onToggleShown(row.daemonId, next)}
-        label="Show its notifications"
-        description="Off mutes this machine on this browser alone; every other pairing is unaffected."
-      />
+      <button
+        type="button"
+        className="self-start text-meta text-muted underline"
+        data-machine-mute=""
+        aria-pressed={!row.shown}
+        onClick={() => onToggleShown(row.daemonId, !row.shown)}
+      >
+        {row.shown ? 'Mute' : 'Unmute'}
+      </button>
     </li>
   );
 }
@@ -106,6 +125,10 @@ export function MachineNotificationList({
           Turn on for all machines
         </Button>
       </div>
+      <p className="m-0 text-meta leading-base text-muted">
+        Turn a machine on to be notified from it on this browser, even when the app is closed. Mute silences one here
+        only.
+      </p>
       <ul className="m-0 flex list-none flex-col gap-2 p-0">
         {rows.map(row => (
           <MachineRow

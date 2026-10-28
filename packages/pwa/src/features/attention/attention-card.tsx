@@ -127,7 +127,11 @@ export function AttentionCard({
         </span>
         <span className="mono text-meta text-faint">{attentionReference(item.id)}</span>
         {highlighted ? <span className="fy-attn-card__pointer">linked</span> : null}
-        <span className="ml-auto text-meta text-faint">{attentionAge(item.waitingSince, now)}</span>
+        <span className="ml-auto shrink-0 whitespace-nowrap text-meta text-faint">
+          {pinned
+            ? attentionAge(item.waitingSince, now).replace(/^waiting /, '')
+            : attentionAge(item.waitingSince, now)}
+        </span>
       </header>
       {origin === undefined || pinned ? null : (
         <RouteLink
