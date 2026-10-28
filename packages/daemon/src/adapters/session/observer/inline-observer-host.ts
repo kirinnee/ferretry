@@ -7,6 +7,7 @@ import {
   LIVENESS_TAIL_LINES,
   type LivenessSample,
   type LivenessTarget,
+  lookAtPaneProcesses,
   type ObserverFacts,
   observerFactsOf,
   type PaneState,
@@ -176,10 +177,10 @@ export class InlineObserverHost implements SessionObserverHost {
     const transcript = await reads.transcript(target.id, LIVENESS_TAIL_LINES).catch(() => undefined);
     const observed =
       target.tmuxSession === undefined ? undefined : await reads.processes(target.tmuxSession).catch(() => undefined);
-    const children = observed?.kind === 'observed' ? observed.processes.length > 0 : undefined;
+    const processes = lookAtPaneProcesses(observed?.kind === 'observed' ? observed.processes : undefined);
     const step = this.observer.step(INITIAL_OBSERVER_STATE, {
       kind: 'look',
-      liveness: { screen, transcript, children },
+      liveness: { screen, transcript, ...processes },
     });
     return step.samples[0] ?? {};
   }

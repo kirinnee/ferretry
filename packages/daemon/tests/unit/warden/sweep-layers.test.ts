@@ -291,45 +291,60 @@ describe('an investigation that fails to start', () => {
 });
 
 describe('the growing cooldown', () => {
-  it('should double how long a flag is left alone each time it is cleared again', async () => {
+  it('should leave a cleared flag alone until its subject changes, instead of re-asking when the blessing lapses', async () => {
     // Arrange
     const time = clock();
     const subject = harness({ config: jevOnly(), fleet: [unattended('s1')], now: time.now });
-    const lifetimes: number[] = [];
 
-    // Act
+    // Act — six sweeps an hour apart: long after the first blessing's fifteen minutes ran out.
     for (let round = 0; round < 6; round += 1) {
       await subject.service.run({ force: false });
-      const blessing = subject.state().blessings?.s1;
-      lifetimes.push((Date.parse(blessing?.expiresAt ?? '') - time.now()) / MINUTE);
-      time.advance(lifetimes.at(-1) ?? 0);
+      time.advance(60);
     }
 
-    // Assert
-    should(lifetimes).deepEqual([15, 30, 60, 120, 240, 240]);
-    should(subject.state().blessings?.s1?.streak).equal(5);
-    should(subject.state().actions?.[0]?.detail).equal(
-      'Jev was 96% sure it is healthy, so this flag is left alone for 4 h — cleared 6 times in a row, so it is left alone longer each time.',
+    // Assert — one Jev decision, held against the same turn ever since.
+    should(subject.guarded).have.length(1);
+    should(subject.state().backoff?.['s1|unattended_question']).match({
+      subject: /^turn:\?\|since:/u,
+      count: 1,
+      cleared: true,
+    });
+    should(subject.state().actions?.at(-1)?.detail).equal(
+      'Jev was 96% sure it is healthy, so this flag is left alone until its situation changes — a new turn or a different command — for 24 h at most.',
     );
   });
 
-  it('should start again from the first lifetime once the ferret changes status', async () => {
+  it('should ask again when the ferret went quiet a second time in the same turn', async () => {
+    // Arrange — cleared, then it moved again, and now it has been idle long enough to flag once more.
+    const time = clock();
+    const subject = harness({ config: jevOnly(), fleet: [unattended('s1')], now: time.now });
+    await subject.service.run({ force: false });
+    time.advance(120);
+    const lastActivityAt = new Date(time.now() - 40 * MINUTE).toISOString();
+    subject.setFleet([session({ id: 's1', status: 'awaiting_user', state: { lastActivityAt } })]);
+
+    // Act
+    await subject.service.run({ force: false });
+
+    // Assert — a new episode is a new subject: a clearance of the last one never hides it.
+    should(subject.guarded).have.length(2);
+    should(subject.state().backoff?.['s1|unattended_question']?.subject).equal(`turn:?|since:${lastActivityAt}`);
+  });
+
+  it('should ask again at once when the ferret moves to a new turn', async () => {
     // Arrange
     const time = clock();
     const subject = harness({ config: jevOnly(), fleet: [unattended('s1')], now: time.now });
     await subject.service.run({ force: false });
-    time.advance(15);
-    await subject.service.run({ force: false });
-    subject.setFleet([session({ id: 's1', status: 'running' })]);
-    await subject.service.run({ force: false });
-    subject.setFleet([unattended('s1')]);
+    time.advance(60);
+    subject.setFleet([session({ id: 's1', status: 'awaiting_user', state: { lastActivityAt: at(-600), turn: 2 } })]);
 
     // Act
     await subject.service.run({ force: false });
 
     // Assert
-    should(subject.state().blessings?.s1).not.have.property('streak');
-    should(Date.parse(subject.state().blessings?.s1?.expiresAt ?? '') - time.now()).equal(15 * MINUTE);
+    should(subject.guarded).have.length(2);
+    should(subject.state().backoff?.['s1|unattended_question']).match({ subject: /^turn:2\|since:/u, count: 1 });
   });
 
   it('should forget the streak of a flag that stopped being raised while nothing blessed it', async () => {
@@ -542,7 +557,9 @@ describe('the liveness reflex', () => {
     // Arrange
     const off = harness({ config: enabled({ enabled: false }), fleet: [session({ id: 's1' })] });
     const held = harness({
-      config: enabled({ mayActAlone: { nudge: false, resume: true, restart: true, failover: true, stop: false } }),
+      config: enabled({
+        mayActAlone: { nudge: false, resume: true, restart: true, failover: true, stop: false, closeLeftovers: true },
+      }),
       fleet: [session({ id: 's1' })],
     });
 

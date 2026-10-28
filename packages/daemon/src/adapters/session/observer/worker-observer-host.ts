@@ -5,6 +5,7 @@ import {
   isTurnStatus,
   type LivenessSample,
   type LivenessTarget,
+  lookAtPaneProcesses,
   type ObserverPatch,
   type PaneState,
   type ProcessObservation,
@@ -260,10 +261,10 @@ export class WorkerObserverHost implements SessionObserverHost {
       target.tmuxSession === undefined
         ? undefined
         : await this.ports.liveness.processes(target.tmuxSession).catch(() => undefined);
-    const children = observed?.kind === 'observed' ? observed.processes.length > 0 : undefined;
+    const processes = lookAtPaneProcesses(observed?.kind === 'observed' ? observed.processes : undefined);
     const step = this.ports.observer.step(INITIAL_OBSERVER_STATE, {
       kind: 'look',
-      liveness: { screen, transcript: looked.transcript, children },
+      liveness: { screen, transcript: looked.transcript, ...processes },
     });
     return step.samples[0] ?? {};
   }

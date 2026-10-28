@@ -22,6 +22,11 @@ export interface ProcessProbePort {
   descendants?(rootPid: number): Promise<readonly ProcRow[] | undefined>;
   /** The process working directory, or undefined when it is not readable. */
   workingDirectory(pid: number): Promise<string | undefined>;
+  /**
+   * Which of these processes hold a listening TCP socket — a server — or `undefined` where this host
+   * cannot tell. The Warden reads a server the agent left up as deliberate, never as a stuck command.
+   */
+  listening?(pids: readonly number[]): Promise<ReadonlySet<number> | undefined>;
 }
 
 export interface ProcessInventoryPort {
