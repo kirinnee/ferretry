@@ -19,7 +19,7 @@ import {
 /** Agent-raised requests are capped separately so automatic sources retain board capacity. */
 export const MAX_AGENT_ATTENTION_PER_SESSION = 10;
 
-export type DaemonAttentionCause = 'source-reconciliation' | 'warden-escalation' | 'system';
+export type DaemonAttentionCause = 'source-reconciliation' | 'warden-escalation' | 'system' | 'harness-prompt';
 
 /**
  * Provenance is a tagged value, not a user-supplied collection of nullable fields. The daemon
@@ -453,7 +453,10 @@ function parseAttentionActor(value: unknown): AttentionActor | null {
   }
   if (
     raw.kind === 'daemon' &&
-    (raw.cause === 'source-reconciliation' || raw.cause === 'warden-escalation' || raw.cause === 'system')
+    (raw.cause === 'source-reconciliation' ||
+      raw.cause === 'warden-escalation' ||
+      raw.cause === 'system' ||
+      raw.cause === 'harness-prompt')
   ) {
     return { kind: 'daemon', cause: raw.cause };
   }
