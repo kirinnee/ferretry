@@ -603,7 +603,7 @@ describe('passive learning teaching', () => {
 describe('hypermedia teaching', () => {
   it('should be a per-ferret system prompt section and teach every form with one fenced example', () => {
     // Arrange
-    const forms = ['mermaid', 'svg', 'html', 'map', 'image, video, audio, pdf'];
+    const forms = ['mermaid', 'svg', 'html', 'map', 'chart', 'image, video, audio, pdf'];
 
     // Act
     const lines = HYPERMEDIA_INSTRUCTION.split('\n');
@@ -622,8 +622,11 @@ describe('hypermedia teaching', () => {
     );
     should(HYPERMEDIA_INSTRUCTION).containEql('step-through Next buttons');
     should(HYPERMEDIA_INSTRUCTION).containEql('prefers-reduced-motion');
-    // In every prompt, so it is capped; raised from 1,200 for the three asks above.
-    should(HYPERMEDIA_INSTRUCTION.length).be.below(1600);
+    // The theme is the reader's: a ferret never paints a chart or a diagram.
+    should(HYPERMEDIA_INSTRUCTION).containEql('No colours: tone');
+    should(HYPERMEDIA_INSTRUCTION).containEql('themed for you: no %%{init}%% theme or colours');
+    // In every prompt, so it is capped; raised from 1,200 for the three asks above, then from 1,600 for `chart`.
+    should(HYPERMEDIA_INSTRUCTION.length).be.below(2000);
   });
 });
 
