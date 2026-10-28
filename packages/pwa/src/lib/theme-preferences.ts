@@ -192,7 +192,7 @@ export const themeAttribute = (family: ThemeFamilyId, resolved: ResolvedMode): s
 
 /**
  * Publish the text scale on the root as `--fy-text-scale`, the factor every type size in the
- * stylesheet is multiplied by (`scripts/text-scale-postcss.ts` applies it at build time to the
+ * stylesheet is multiplied by (`text-scale-postcss.ts` applies it at build time to the
  * tokenised and the legacy pixel typography alike). Never `text-size-adjust`: only iPhone-class
  * WebKit text autosizing honours a percentage, so iPadOS Safari, the installed standalone app and
  * desktop Safari ignored the setting. Never root `zoom` either — it makes `--app-h` itself grow and

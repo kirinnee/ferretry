@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import postcss from 'postcss';
-import { textScalePostcss } from '../../scripts/text-scale-postcss.ts';
+import { textScalePostcss } from '../../src/lib/text-scale-postcss.ts';
 import tailwindConfig from '../../tailwind.config.ts';
 
 const run = async (css: string): Promise<string> =>

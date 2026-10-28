@@ -43,7 +43,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import tailwindcss from 'tailwindcss';
 import { defineConfig } from 'vite';
-import { textScalePostcss } from './scripts/text-scale-postcss.ts';
+import { textScalePostcss } from './src/lib/text-scale-postcss.ts';
 import tailwindConfig from './tailwind.config.ts';
 
 /**

@@ -400,3 +400,6 @@
 # `src/lib/api/socket.ts` declares a socket route, `BunApiServer` switches the protocol, and
 # GET /v1/sessions/:sessionId/terminals/:terminalId/stream carries pane bytes through
 # TerminalStreamBridge over the same lifecycle service the HTTP routes use.
+
+# Build-time PostCSS plugin loaded by packages/pwa/vite.config.ts, never by the app bundle: no runtime composition root can import it.
+packages/pwa/src/lib/text-scale-postcss.ts # build tooling for the Text size setting, reached from vite.config.ts only
