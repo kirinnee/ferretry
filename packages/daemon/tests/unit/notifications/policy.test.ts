@@ -17,6 +17,7 @@ import {
   decideNotificationReplay,
   directNotificationFingerprint,
   directNotificationPayload,
+  moreInfoNotificationPayload,
   notificationFingerprintMatches,
   notificationKey,
 } from '../../../src/lib/notifications/policy.ts';
@@ -384,5 +385,33 @@ describe('attention push title', () => {
       should(title.length).be.lessThanOrEqual(ATTENTION_PUSH_TITLE_LENGTH);
     }
     should(titles[0]).equal(`Ferret “${DEVICE_PAIRED_TITLE}”`);
+  });
+});
+
+describe('more-info push policy', () => {
+  it('should key each request of an item apart, and say what was added under the same title and link', () => {
+    // Arrange
+    const asked = AttentionItemSchema.parse({
+      ...item,
+      waitingOn: 'ferret',
+      askedAt: item.waitingSince,
+      infoRequests: 2,
+    });
+
+    // Act
+    const key = notificationKey({ origin: 'attention', sessionId: 'session-1', attentionId: 'A1', infoRequest: 2 });
+    const plain = attentionNotificationPayload('session-1', { name: 'Ada', title: 'Ship v4.87' }, item, snapshot);
+    const payload = moreInfoNotificationPayload('session-1', { name: 'Ada', title: 'Ship v4.87' }, asked, snapshot, 2);
+
+    // Assert
+    should(key).equal('attention:session-1:A1:info-2');
+    should(payload).containDeep({
+      eventKey: 'attention-info:A1:2',
+      title: plain.title,
+      url: plain.url,
+      tag: plain.tag,
+    });
+    should(payload.body.startsWith('Updated: more info added')).be.true();
+    should(PushNotificationPayloadSchema.safeParse(payload).success).be.true();
   });
 });

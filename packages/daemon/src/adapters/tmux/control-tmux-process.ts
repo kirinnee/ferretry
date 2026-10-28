@@ -14,11 +14,14 @@ import {
 } from '../../lib/tmux/control-protocol.ts';
 import { BunTmuxProcess } from './bun-tmux-process.ts';
 
-/** The parts of a child process a control client uses: its pipes, and a way to end it. */
+/** The parts of a child process a control client uses: its pipes, a way to end it, and its exit. */
 export interface ControlChild {
   readonly stdin: { write(text: string): unknown; flush(): unknown };
   readonly stdout: AsyncIterable<Uint8Array>;
-  kill(): void;
+  /** Settles once the process has exited, whatever it exited with. */
+  readonly exited: Promise<unknown>;
+  /** SIGTERM when no signal is named. */
+  kill(signal?: 'SIGKILL'): void;
 }
 
 export interface ControlModeOptions {
@@ -70,7 +73,8 @@ const randomNonce = (): string =>
 function spawnControlChild(argv: readonly string[]): ControlChild {
   const child = Bun.spawn([...argv], { stdin: 'pipe', stdout: 'pipe', stderr: 'ignore' });
   // The client must never be what keeps a daemon — or a test runner — from exiting. Its stdin closing
-  // when this process goes is what makes tmux drop it, so no client outlives its daemon.
+  // when this process goes makes tmux drop it — but only AFTER the process has gone, which is why a
+  // daemon that is stopping ends its client with `stop` and does not leave this to the exit.
   child.unref();
   return child;
 }
@@ -243,6 +247,8 @@ export class ControlModeTmuxProcess implements TmuxCommandPort, TmuxEventSource 
   private readonly options: ResolvedControlModeOptions;
   /** The subscriptions this client renews on every connection, by name. */
   private readonly watches = new Map<string, string>();
+  /** Every client this transport started that has not exited yet — an ended connection's included. */
+  private readonly children = new Set<ControlChild>();
 
   constructor(
     private readonly executable: string,
@@ -319,6 +325,34 @@ export class ControlModeTmuxProcess implements TmuxCommandPort, TmuxEventSource 
     this.connection?.end();
   }
 
+  /**
+   * {@link close}, and answer only once every client this transport started has EXITED — SIGTERM, then
+   * SIGKILL for any still there after `withinMs`. Answers whether they all went on the SIGTERM.
+   *
+   * WHAT A STOPPING DAEMON CALLS, because `close` only asks. A client left to notice its daemon's exit
+   * is still detaching from its server for a moment after the daemon has gone, and tmux 3.6a, told to
+   * `kill-server` in that moment, keeps the server AND the client running for good — each waiting on
+   * the other. Measured: a supervised daemon whose teardown ran `kill-server` within a millisecond of
+   * the daemon's exit left exactly that pair behind 9 runs in 230, and 0 in 200 once it called this.
+   * Ended here first, no client of this daemon is on the server by the time anybody can see it gone.
+   */
+  async stop(withinMs = 2_000): Promise<boolean> {
+    this.close();
+    // The client of a connect still on its way is never started: `open` checks `closed` before spawning.
+    await this.connecting;
+    // Each was sent SIGTERM when its connection ended, and `close` has just ended the last one.
+    const children = [...this.children];
+    if (await exitedWithin(children, withinMs)) return true;
+    for (const child of children)
+      try {
+        child.kill('SIGKILL');
+      } catch {
+        // Already gone.
+      }
+    await exitedWithin(children, withinMs);
+    return false;
+  }
+
   private notify(notification: TmuxControlNotification): void {
     for (const { filter, listener } of [...this.listeners]) {
       if (!matches(filter, notification)) continue;
@@ -365,6 +399,12 @@ export class ControlModeTmuxProcess implements TmuxCommandPort, TmuxEventSource 
       this.retryAtMs = this.options.nowMs() + this.options.retryAfterMs;
       return undefined;
     }
+    const started = child;
+    this.children.add(started);
+    const forget = (): void => {
+      this.children.delete(started);
+    };
+    void started.exited.then(forget, forget);
     // Declared first: a client whose stream fails at once ends inside its own constructor.
     let connection: ControlConnection | undefined;
     connection = new ControlConnection(
@@ -398,6 +438,20 @@ export class ControlModeTmuxProcess implements TmuxCommandPort, TmuxEventSource 
       if (owner === '' && isControlAttachable(name)) return name;
     }
     return undefined;
+  }
+}
+
+/** Whether every one of `children` exited within `withinMs`. */
+async function exitedWithin(children: readonly ControlChild[], withinMs: number): Promise<boolean> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<false>(resolve => {
+    timer = setTimeout(() => resolve(false), withinMs);
+  });
+  const all = Promise.allSettled(children.map(child => child.exited)).then(() => true as const);
+  try {
+    return await Promise.race([all, deadline]);
+  } finally {
+    clearTimeout(timer);
   }
 }
 

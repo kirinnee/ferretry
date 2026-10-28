@@ -20,21 +20,20 @@
 import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import {
   applyTextScale,
-  manifestHrefFor,
   MANIFEST_LINK_ID,
+  manifestHrefFor,
+  type ResolvedMode,
   resolveThemeMode,
-  supportsTextScale,
-  themeAttribute,
-  themeColorFromComputedStyle,
+  type TextScale,
   THEME_FAMILIES,
   THEME_PREFERENCES_KEY,
-  ThemePreferenceStore,
-  type ResolvedMode,
-  type TextScale,
   type ThemeFamily,
   type ThemeFamilyId,
   type ThemeMode,
   type ThemePreference,
+  ThemePreferenceStore,
+  themeAttribute,
+  themeColorFromComputedStyle,
 } from '../lib/theme-preferences.ts';
 
 /** The one store every consumer in a tab shares unless a test injects another. */
@@ -50,7 +49,6 @@ export interface ThemeState extends ThemePreference {
   /** The value on `<html data-theme>`, e.g. `mission-dark`. */
   readonly attr: string;
   readonly families: readonly ThemeFamily[];
-  readonly textScaleSupported: boolean;
   readonly setFamily: (family: ThemeFamilyId) => void;
   readonly setMode: (mode: ThemeMode) => void;
   readonly setTextScale: (scale: TextScale) => void;
@@ -64,7 +62,6 @@ export function useTheme(store: ThemePreferenceStore = themePreferences): ThemeS
   const readPreference = useCallback(() => store.snapshot(), [store]);
   const preference = useSyncExternalStore(store.subscribe, readPreference, readPreference);
   const [systemDark, setSystemDark] = useState<boolean>(osPrefersDark);
-  const textScaleSupported = supportsTextScale();
 
   // Follow the OS live. Subscribed unconditionally — it is one listener, the
   // reader can flip to `system` at any moment, and the value only *matters*
@@ -120,14 +117,7 @@ export function useTheme(store: ThemePreferenceStore = themePreferences): ThemeS
 
   const setFamily = useCallback((family: ThemeFamilyId) => store.setFamily(family), [store]);
   const setMode = useCallback((mode: ThemeMode) => store.setMode(mode), [store]);
-  const setTextScale = useCallback(
-    (scale: TextScale) => {
-      // An unsupported scale must not be persisted: it would follow the reader
-      // to a browser that DOES support it and silently enlarge everything.
-      if (textScaleSupported) store.setTextScale(scale);
-    },
-    [store, textScaleSupported],
-  );
+  const setTextScale = useCallback((scale: TextScale) => store.setTextScale(scale), [store]);
 
   return useMemo(
     () => ({
@@ -137,21 +127,10 @@ export function useTheme(store: ThemePreferenceStore = themePreferences): ThemeS
       resolved,
       attr,
       families: THEME_FAMILIES,
-      textScaleSupported,
       setFamily,
       setMode,
       setTextScale,
     }),
-    [
-      preference.family,
-      preference.mode,
-      preference.textScale,
-      resolved,
-      attr,
-      textScaleSupported,
-      setFamily,
-      setMode,
-      setTextScale,
-    ],
+    [preference.family, preference.mode, preference.textScale, resolved, attr, setFamily, setMode, setTextScale],
   );
 }

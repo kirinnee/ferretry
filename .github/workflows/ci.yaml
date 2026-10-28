@@ -44,15 +44,17 @@ jobs:
     name: Pre-Commit (${{ matrix.part }})
     permissions:
       contents: read
-    # Namespace: a faster runner with a persistent /nix cache volume (docs/standards/ci-cd, "Runners").
-    # The shape is per part, from measured use. `format` is treefmt alone: 2x4 takes ~55s against ~30s on
-    # 4x8, for half the price and still well inside the critical path. `gates` holds knip, which ran out
-    # of memory on the 4GB of a 2x4, so it keeps 4x8.
-    runs-on:
-      - nscloud-ubuntu-24.04-amd64-${{ matrix.shape }}-with-cache
-      - nscloud-cache-tag-ferretry-nix
-      - nscloud-cache-size-10gb
-      - nscloud-cache-allow-commit-from-main
+    # Namespace on a pull request, GitHub otherwise (docs/standards/ci-cd, "Runners", says why and what
+    # `vars.CI_RUNNER_POOL` does). The shape is per part, from measured use. `format` is treefmt alone:
+    # 2x4 takes ~55s against ~30s on 4x8, for half the price and still well inside the critical path.
+    # `gates` holds knip, which ran out of memory on the 4GB of a 2x4, so it runs on GitHub's free 16GB
+    # runner on every event: 113s there against 97s on a Namespace 4x8, for nothing instead of a 4x8.
+    runs-on: >-
+      ${{
+        (matrix.shape == 'github' || github.event_name != 'pull_request' || vars.CI_RUNNER_POOL == 'github')
+        && 'ubuntu-latest'
+        || fromJSON(format('["nscloud-ubuntu-24.04-amd64-{0}-with-cache","nscloud-cache-tag-ferretry-nix","nscloud-cache-size-10gb","nscloud-cache-allow-commit-from-main"]', matrix.shape))
+      }}
     # Two parts on parallel runners: the hooks run one after another, and treefmt alone was ~40s of
     # their ~105s. Between them the parts run every hook an unsplit run does (scripts/ci/pre-commit.sh).
     strategy:
@@ -60,12 +62,13 @@ jobs:
       matrix:
         include:
           - { part: format, shape: 2x4 }
-          - { part: gates, shape: 4x8 }
+          - { part: gates, shape: github }
     steps:
       - uses: actions/checkout@v5
         with:
           persist-credentials: false
       - name: Mount the Nix store cache
+        if: runner.environment == 'self-hosted'
         uses: namespacelabs/nscloud-cache-action@1124a6f3ce44e5cf84cc22111530961f4d2a15f9 # v1.7.0
         with:
           cache: nix
@@ -82,17 +85,20 @@ jobs:
     name: Build Checks
     permissions:
       contents: read
-    # Namespace: a faster runner with a persistent /nix cache volume (docs/standards/ci-cd, "Runners").
-    runs-on:
-      - nscloud-ubuntu-24.04-amd64-2x4-with-cache
-      - nscloud-cache-tag-ferretry-nix
-      - nscloud-cache-size-10gb
-      - nscloud-cache-allow-commit-from-main
+    # Namespace on EVERY event, `main` included: this is the one Namespace job a `main` run keeps, because
+    # only `main` commits the /nix cache volume and this job builds both closures every other Namespace
+    # job mounts — the `.#ci` dev shell and the install bundle (docs/standards/ci-cd, "Runners").
+    runs-on: >-
+      ${{
+        vars.CI_RUNNER_POOL == 'github' && 'ubuntu-latest'
+        || fromJSON('["nscloud-ubuntu-24.04-amd64-2x4-with-cache","nscloud-cache-tag-ferretry-nix","nscloud-cache-size-10gb","nscloud-cache-allow-commit-from-main"]')
+      }}
     steps:
       - uses: actions/checkout@v5
         with:
           persist-credentials: false
       - name: Mount the Nix store cache
+        if: runner.environment == 'self-hosted'
         uses: namespacelabs/nscloud-cache-action@1124a6f3ce44e5cf84cc22111530961f4d2a15f9 # v1.7.0
         with:
           cache: nix
@@ -124,7 +130,7 @@ jobs:
       # prunes it: everything the dev shell and the install bundle no longer reach, once the store
       # outgrows its budget. scripts/ci/nix-store-hygiene.sh says why the budget is what it is.
       - name: Prune the Nix store cache
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && runner.environment == 'self-hosted'
         run: ./scripts/ci/nix-store-hygiene.sh
 
   pwa-screenshot:
@@ -132,17 +138,22 @@ jobs:
     permissions:
       contents: read
     # Linux, deliberately NOT a macOS runner: the image already ships the same Google Chrome the
-    # Integration Tests job's shared Chromium launches, so this needs no new tool and no third `macos-14`
+    # Integration Tests job's shared Chromium launches, so this needs no new tool and no further macOS
     # job. A sibling job rather than a step on an existing one, so it adds runner time and no wall clock.
-    # Namespace: a faster runner with a persistent /nix cache volume (docs/standards/ci-cd, "Runners").
-    # The full gallery peaks at ~3.3GB, past a 2x4's memory, so it keeps the 4x8; the Settings walk fits
-    # a 2x4. Both walk their viewports one after the other: run at once, as three software-rendered
-    # Chromes on four cores, the full gallery timed out in 3 of 7 runs under load (#598).
-    runs-on:
-      - nscloud-ubuntu-24.04-amd64-${{ matrix.shape }}-with-cache
-      - nscloud-cache-tag-ferretry-nix
-      - nscloud-cache-size-10gb
-      - nscloud-cache-allow-commit-from-main
+    # Namespace on a pull request, GitHub otherwise (docs/standards/ci-cd, "Runners"). The full gallery
+    # peaks at ~3.3GB, past a 2x4's memory, so on a pull request it keeps the 4x8: GitHub's free 4-core
+    # runner walked it in 643s against ~427s there, which would make it the critical path. It is a third
+    # of the Namespace bill, so splitting its two viewports into legs is the way to move it.
+    # `main: namespace` keeps a job on Namespace on `main` too. The unsplit gallery has it because 643s
+    # on GitHub is the slowest job of a `main` run by ~3 minutes, so every release would wait for it.
+    # The Settings walk fits a 2x4. Both walk their viewports one after the other: run at once, as three
+    # software-rendered Chromes on four cores, the full gallery timed out in 3 of 7 runs under load (#598).
+    runs-on: >-
+      ${{
+        (matrix.shape == 'github' || (github.event_name != 'pull_request' && matrix.main != 'namespace') || vars.CI_RUNNER_POOL == 'github')
+        && 'ubuntu-latest'
+        || fromJSON(format('["nscloud-ubuntu-24.04-amd64-{0}-with-cache","nscloud-cache-tag-ferretry-nix","nscloud-cache-size-10gb","nscloud-cache-allow-commit-from-main"]', matrix.shape))
+      }}
     # One job per colour scheme: the two runs are independent first frames (`pre-paint.js` resolves the
     # theme before paint), so running them in sequence only added a scheme's ~70s to the wall clock.
     # The dark leg walks the WHOLE gallery: the Settings walk never reaches its later sections, and one
@@ -155,12 +166,13 @@ jobs:
       matrix:
         include:
           - { scheme: light, scope: settings, shape: 2x4 }
-          - { scheme: dark, scope: full, shape: 4x8 }
+          - { scheme: dark, scope: full, shape: 4x8, main: namespace }
     steps:
       - uses: actions/checkout@v5
         with:
           persist-credentials: false
       - name: Mount the Nix store cache
+        if: runner.environment == 'self-hosted'
         uses: namespacelabs/nscloud-cache-action@1124a6f3ce44e5cf84cc22111530961f4d2a15f9 # v1.7.0
         with:
           cache: nix
@@ -192,13 +204,14 @@ jobs:
     name: Unit Tests (${{ matrix.group }})
     permissions:
       contents: read
-    # Namespace: a faster runner with a persistent /nix cache volume (docs/standards/ci-cd, "Runners").
+    # Namespace on a pull request, GitHub otherwise (docs/standards/ci-cd, "Runners").
     # `bun test` runs one file at a time: measured at under one busy core of four, so two is plenty.
-    runs-on:
-      - nscloud-ubuntu-24.04-amd64-2x4-with-cache
-      - nscloud-cache-tag-ferretry-nix
-      - nscloud-cache-size-10gb
-      - nscloud-cache-allow-commit-from-main
+    runs-on: >-
+      ${{
+        (github.event_name != 'pull_request' || vars.CI_RUNNER_POOL == 'github')
+        && 'ubuntu-latest'
+        || fromJSON('["nscloud-ubuntu-24.04-amd64-2x4-with-cache","nscloud-cache-tag-ferretry-nix","nscloud-cache-size-10gb","nscloud-cache-allow-commit-from-main"]')
+      }}
     strategy:
       fail-fast: false
       matrix:
@@ -208,6 +221,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Mount the Nix store cache
+        if: runner.environment == 'self-hosted'
         uses: namespacelabs/nscloud-cache-action@1124a6f3ce44e5cf84cc22111530961f4d2a15f9 # v1.7.0
         with:
           cache: nix
@@ -255,6 +269,11 @@ jobs:
   # The integration tier in parallel shares (config/test-groups.json). Serially it was the CI critical
   # path at ~4.4 min (~3.8 min of tests); each group is about a minute. The matrix lists every group
   # by name, and `int-ledger` refuses to judge unless every group in the config reported.
+  # The tier grew back to the critical path: by Oct 28 `everything-else` took ~480s and
+  # `daemon-runtime` ~330s on GitHub. Their slowest files now have groups of their own — the four
+  # real-time budget suites (~160s of measuring an idle daemon) and the PWA feature surfaces plus
+  # the send handover (~175s of browser walks) — so no group needs much over five minutes. GitHub
+  # runs these for free; the cost is two more jobs in its 20-job queue, measured as worth it.
   int:
     name: Integration Tests (${{ matrix.group }})
     permissions:
@@ -263,7 +282,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        group: [daemon-runtime, daemon, pwa-render, pwa-chat, everything-else]
+        group: [daemon-budgets, daemon-runtime, daemon, pwa-render, pwa-chat, pwa-surfaces, everything-else]
     steps:
       - uses: actions/checkout@v5
         with:
@@ -315,7 +334,9 @@ jobs:
     name: Containment (macOS)
     permissions:
       contents: read
-    runs-on: macos-14
+    # `macos-15`: GitHub retires `macos-14` on 2026-11-02, and its October brownout windows fail jobs
+    # outright before then (the Sandbox Shell job below says more).
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@v5
         with:
@@ -336,8 +357,7 @@ jobs:
     # `macos-15`, NOT `macos-14`. macOS 14 entered deprecation on 2026-07-06 with October brownout
     # windows that fail jobs outright and retirement on 2026-11-02, so pinning a release-blocking gate
     # to it buys a job that starts failing for reasons unrelated to Safari. `macos-15` also ships the
-    # newer Safari/SafariDriver pair. The two remaining `macos-14` jobs above need the same migration
-    # before November; that is not this job's scope, but a new job must not add a third.
+    # newer Safari/SafariDriver pair. No job here runs on `macos-14` any more.
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v5
@@ -412,18 +432,20 @@ jobs:
     name: Compile Binaries
     permissions:
       contents: read
-    # Namespace: a faster runner with a persistent /nix cache volume (docs/standards/ci-cd, "Runners").
+    # Namespace on a pull request, GitHub otherwise (docs/standards/ci-cd, "Runners").
     # Measured at under one and a half busy cores, so the smallest shape.
-    runs-on:
-      - nscloud-ubuntu-24.04-amd64-2x4-with-cache
-      - nscloud-cache-tag-ferretry-nix
-      - nscloud-cache-size-10gb
-      - nscloud-cache-allow-commit-from-main
+    runs-on: >-
+      ${{
+        (github.event_name != 'pull_request' || vars.CI_RUNNER_POOL == 'github')
+        && 'ubuntu-latest'
+        || fromJSON('["nscloud-ubuntu-24.04-amd64-2x4-with-cache","nscloud-cache-tag-ferretry-nix","nscloud-cache-size-10gb","nscloud-cache-allow-commit-from-main"]')
+      }}
     steps:
       - uses: actions/checkout@v5
         with:
           persist-credentials: false
       - name: Mount the Nix store cache
+        if: runner.environment == 'self-hosted'
         uses: namespacelabs/nscloud-cache-action@1124a6f3ce44e5cf84cc22111530961f4d2a15f9 # v1.7.0
         with:
           cache: nix
@@ -470,7 +492,7 @@ jobs:
           - target: linux-arm64
             runs_on: ubuntu-24.04-arm
           - target: darwin-arm64
-            runs_on: macos-14
+            runs_on: macos-15
     runs-on: ${{ matrix.runs_on }}
     steps:
       - uses: actions/checkout@v5

@@ -2452,7 +2452,7 @@ export function AppShell() {
             {/* EXPANDED BY DEFAULT at every width above a phone: the column folds to its icon rail only
                 when the reader folds it (remembered per device), never because the window is narrow. */}
             {phone ? null : sessionsBar('column')}
-            <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+            <div data-shell-main="" className="flex min-h-0 min-w-0 flex-1 flex-col">
               {/* A phone keeps its top bar off the session page only: there the session's own bar
                   carries ☰, and every other page still needs a way to the drawer and the finder. */}
               {phone && pageRoute.kind !== 'session' ? (

@@ -32,12 +32,15 @@ export function humanItem(id: AttentionId, subject: string, overrides: Partial<H
 }
 
 interface HumanItemFields extends AttentionBrief {
+  stepsDone: number[];
   source: AttentionItem['source'];
   sourceRef: string | null;
   why: string;
   context: string | null;
   howToResolve: string;
   waitingSince: string;
+  waitingOn: 'ferret';
+  askedAt: string;
   ask: AttentionAsk;
 }
 

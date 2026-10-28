@@ -187,6 +187,7 @@ export const inboxOptions = (item: Pick<AttentionItem, 'ask'>): readonly InboxAc
     case 'answer-review':
       return [{ kind: 'respond', label: 'Looks good', response: { kind: 'answer-review', verdict: 'good' } }];
     case 'open-question':
+    case 'task':
       return [];
   }
 };

@@ -366,6 +366,23 @@ describe('attention writing flags', () => {
   });
 });
 
+describe('attention step flags', () => {
+  it('should raise with repeated --step, edit with them, and tick with step', async () => {
+    // Arrange + Act
+    const added = run(['attention', 'add', 'Log in', '--step', 'Run it', '--step', 'Paste it']);
+    await added.parsed;
+    const edited = run(['attention', 'edit', '!A1', '--step', 'Only this']);
+    await edited.parsed;
+    const ticked = run(['attention', 'step', '!A1', '2', '--undo']);
+    await ticked.parsed;
+
+    // Assert
+    should(added.gateway.applied[0]?.request).containDeep({ steps: ['Run it', 'Paste it'] });
+    should(edited.gateway.applied[0]?.request).deepEqual({ action: 'edit', id: 'A1', steps: ['Only this'] });
+    should(ticked.gateway.applied[0]?.request).deepEqual({ action: 'progress', id: 'A1', step: 1, done: false });
+  });
+});
+
 describe('attention send-now command', () => {
   it('should deliver the target session’s held answers', async () => {
     // Arrange + Act
@@ -374,5 +391,25 @@ describe('attention send-now command', () => {
 
     // Assert
     should(gateway.flushed).deepEqual(['other-session']);
+  });
+});
+
+describe('attention needs-info command', () => {
+  it('should send the owner’s request with its note', async () => {
+    // Arrange + Act
+    const { parsed, gateway } = run(['attention', 'needs-info', '!A1', '--note', 'Which account?'], snapshot([]));
+    await parsed;
+
+    // Assert
+    should(gateway.applied[0]?.request).deepEqual({ action: 'needs-info', id: 'A1', note: 'Which account?' });
+  });
+
+  it('should raise a to-do with --task', async () => {
+    // Arrange + Act
+    const { parsed, gateway } = run(['attention', 'add', 'Log in', '--task', '--step', 'Run it'], afterAdd);
+    await parsed;
+
+    // Assert
+    should(gateway.applied[0]?.request).match({ action: 'add', ask: { kind: 'task' }, steps: ['Run it'] });
   });
 });
