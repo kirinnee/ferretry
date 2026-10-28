@@ -541,6 +541,7 @@ import {
   type AttentionActor,
   AttentionChangeFanout,
   AttentionConversation,
+  AttentionMoreInfoPush,
   AttentionReplyBatcher,
   AttentionReplyDelivery,
   AttentionService,
@@ -1242,6 +1243,11 @@ export interface DaemonWorld {
    * subscribes to a path in it. `close` releases the watches; `fallbacks` names any directory polled instead.
    */
   readonly fileEvents: FileEventHub;
+  /**
+   * The ONE long-lived tmux control client every tmux read goes through, as far as a boot's release
+   * needs it: `stop` ends that client and resolves once its process has exited.
+   */
+  readonly tmuxControl: Pick<ControlModeTmuxProcess, 'stop'>;
   /**
    * Where a managed agent actually runs: a tmux pane on the daemon's own private socket.
    *
@@ -8097,6 +8103,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
     },
     browserLogin: createBrowserLoginWorld(paths, async () => await closeAgentBrowsers()),
     fileEvents,
+    tmuxControl: tmux,
     createSubsystems: (
       storage,
       terminals,
@@ -8753,6 +8760,8 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           // The owner's answer, told to the ferret that asked — through its outbox, which holds a burst of
           // answers for a few seconds and delivers them as ONE message.
           new AttentionReplyDelivery(attentionReplies),
+          // The ferret's edit that answers the owner's request for more information: pushed once more.
+          new AttentionMoreInfoPush(notifications),
           // The owner's answer to a harness question, typed into its form. DETACHED: a drive watches the
           // pane for seconds, and the answer is already on the board.
           {
@@ -10282,6 +10291,12 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
     clearInterval(lagTicks);
     watchdog.stop();
     uncountChildren();
+  });
+  // The shared tmux control client, ended and WAITED OUT before anything else is released: a client left
+  // to notice this process's exit is still on its server after the process has gone (see `stop`). Any
+  // tmux command a later cleanup sends takes a process of its own, as it does whenever no client is there.
+  cleanups.push(async () => {
+    await world.tmuxControl.stop();
   });
   const liveness: DaemonLivenessSource = {
     pid: process.pid,

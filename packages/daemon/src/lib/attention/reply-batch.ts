@@ -1,10 +1,4 @@
-import {
-  type AttentionId,
-  AttentionIdSchema,
-  type AttentionReplies,
-  InstantSchema,
-  MAX_ATTENTION_RESOLUTIONS,
-} from '@ferretry/protocol';
+import { type AttentionId, type AttentionReplies, InstantSchema, MAX_ATTENTION_RESOLUTIONS } from '@ferretry/protocol';
 import { z } from 'zod';
 import type { SerialExecutor } from '../ports.ts';
 
@@ -33,8 +27,22 @@ export const MAX_ATTENTION_PENDING_REPLIES = MAX_ATTENTION_RESOLUTIONS;
 /** How many delivered item ids the outbox remembers, newest kept. Ids are never reused on a board. */
 const MAX_DELIVERED_IDS = 256;
 
+/**
+ * What the outbox remembers a delivery by: the item's id for an answer (`A3`), and the id plus the request
+ * counter for a request for more information (`A3~2`). An item is answered once, but may be asked for more
+ * information again after the ferret replied, and each ask is its own delivery.
+ */
+const ReplyKeySchema = z.string().regex(/^A[1-9][0-9]*(~[1-9][0-9]*)?$/u);
+export type ReplyKey = z.infer<typeof ReplyKeySchema>;
+
+/** The key of one request for more information on an item. */
+export const needsInfoReplyKey = (id: AttentionId, request: number): ReplyKey => `${id}~${request}`;
+
+const itemOfKey = (key: ReplyKey): AttentionId => key.split('~')[0] as AttentionId;
+
 const PendingReplySchema = z.strictObject({
-  id: AttentionIdSchema,
+  /** A reply key (an item id for an answer); the field keeps its name so an outbox written before is read. */
+  id: ReplyKeySchema,
   message: z.string().min(1),
   at: InstantSchema,
 });
@@ -42,7 +50,7 @@ export type PendingReply = z.infer<typeof PendingReplySchema>;
 
 const SendingBatchSchema = z.strictObject({
   sendId: z.string().min(1),
-  ids: z.array(AttentionIdSchema).min(1).max(MAX_ATTENTION_PENDING_REPLIES),
+  ids: z.array(ReplyKeySchema).min(1).max(MAX_ATTENTION_PENDING_REPLIES),
   message: z.string().min(1),
 });
 export type SendingBatch = z.infer<typeof SendingBatchSchema>;
@@ -53,7 +61,7 @@ export const AttentionOutboxSchema = z.strictObject({
   pending: z.array(PendingReplySchema).max(MAX_ATTENTION_PENDING_REPLIES),
   /** Batches handed to the send path and not yet confirmed; each re-sent under its own id on start. */
   sending: z.array(SendingBatchSchema).max(MAX_ATTENTION_PENDING_REPLIES),
-  delivered: z.array(AttentionIdSchema).max(MAX_DELIVERED_IDS),
+  delivered: z.array(ReplyKeySchema).max(MAX_DELIVERED_IDS),
 });
 export type AttentionOutbox = z.infer<typeof AttentionOutboxSchema>;
 
@@ -61,7 +69,7 @@ export function emptyAttentionOutbox(sessionId: string): AttentionOutbox {
   return { v: 1, sessionId, pending: [], sending: [], delivered: [] };
 }
 
-/** The outbox with one more answer, or `null` when that item is already queued, sending or delivered. */
+/** The outbox with one more delivery, or `null` when that key is already queued, sending or delivered. */
 export function withPendingReply(outbox: AttentionOutbox, reply: PendingReply): AttentionOutbox | null {
   const known =
     outbox.delivered.includes(reply.id) ||
@@ -95,7 +103,7 @@ export function attentionBatchMessage(pending: readonly PendingReply[]): string 
  * The send id of a batch: the item ids it carries. A batch of one keeps the id a single answer always
  * had (`attention-<session>-<id>`), so an answer sent before batching existed is not sent again.
  */
-export function attentionBatchSendId(sessionId: string, ids: readonly AttentionId[]): string {
+export function attentionBatchSendId(sessionId: string, ids: readonly ReplyKey[]): string {
   return `attention-${sessionId}-${ids.join('-')}`;
 }
 
@@ -145,7 +153,7 @@ export interface AttentionReplyTimers {
 
 /** Where an answer to a ferret's item is handed to be delivered. */
 export interface AttentionReplyQueue {
-  add(sessionId: string, id: AttentionId, message: string): Promise<void>;
+  add(sessionId: string, key: ReplyKey, message: string): Promise<void>;
 }
 
 /** The outbox's state for the owner's screen, and the owner skipping the wait. */
@@ -178,12 +186,12 @@ export class AttentionReplyBatcher implements AttentionReplyQueue, AttentionRepl
     },
   ) {}
 
-  async add(sessionId: string, id: AttentionId, message: string): Promise<void> {
+  async add(sessionId: string, key: ReplyKey, message: string): Promise<void> {
     const { due, full } = await this.locked(sessionId, async current => {
       // A full outbox is sent first, so the answer that would overflow it is never the one lost.
       const begun = current.pending.length >= MAX_ATTENTION_PENDING_REPLIES ? beginAttentionBatch(current) : undefined;
       const outbox = begun?.outbox ?? current;
-      const next = withPendingReply(outbox, { id, message, at: this.clock.now() });
+      const next = withPendingReply(outbox, { id: key, message, at: this.clock.now() });
       if (next !== null || begun !== undefined) await this.outboxes.write(next ?? outbox);
       return { due: this.dueAt(next ?? outbox), full: begun?.batch };
     });
@@ -195,7 +203,10 @@ export class AttentionReplyBatcher implements AttentionReplyQueue, AttentionRepl
     const outbox = (await this.outboxes.read(sessionId)) ?? emptyAttentionOutbox(sessionId);
     const due = this.dueAt(outbox);
     if (due === undefined) return undefined;
-    return { pending: outbox.pending.map(each => each.id), dueAt: new Date(due).toISOString() };
+    return {
+      pending: [...new Set(outbox.pending.map(each => itemOfKey(each.id)))],
+      dueAt: new Date(due).toISOString(),
+    };
   }
 
   async sendNow(sessionId: string): Promise<void> {

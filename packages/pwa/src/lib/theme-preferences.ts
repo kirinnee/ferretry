@@ -191,34 +191,20 @@ export const resolveThemeMode = (mode: ThemeMode, systemDark: boolean): Resolved
 export const themeAttribute = (family: ThemeFamilyId, resolved: ResolvedMode): string => `${family}-${resolved}`;
 
 /**
- * Publish the text scale on the root. `text-size-adjust` is intentional: this UI
- * contains both tokenised and legacy pixel typography, and the property scales
- * both without changing the CSS-pixel coordinate system used by visualViewport,
- * fixed shell sizing, safe areas, or the 44px target floor. The prefixed
- * spelling covers WebKit; browser/pinch zoom remains enabled and composes
- * normally. Never use root `zoom` here — it makes `--app-h` itself grow and can
- * put the composer behind a software keyboard.
+ * Publish the text scale on the root as `--fy-text-scale`, the factor every type size in the
+ * stylesheet is multiplied by (`text-scale-postcss.ts` applies it at build time to the
+ * tokenised and the legacy pixel typography alike). Never `text-size-adjust`: only iPhone-class
+ * WebKit text autosizing honours a percentage, so iPadOS Safari, the installed standalone app and
+ * desktop Safari ignored the setting. Never root `zoom` either — it makes `--app-h` itself grow and
+ * can put the composer behind a software keyboard. Padding, gaps, safe areas and the 44px target
+ * floor are not type and stay fixed; browser and pinch zoom compose normally.
  */
 export const applyTextScale = (root: HTMLElement, scale: TextScale): void => {
   root.dataset.textScale = scale;
-  const percent = `${TEXT_SCALE_FACTORS[scale] * 100}%`;
   root.style.removeProperty('zoom');
-  root.style.setProperty('text-size-adjust', percent);
-  root.style.setProperty('-webkit-text-size-adjust', percent);
-};
-
-export type CssSupports = (property: string, value: string) => boolean;
-
-/**
- * Percentage support is the capability that matters. Some engines recognise the
- * property name but accept only `auto`/`none`; treating that as support would
- * leave an enabled control that silently does nothing.
- */
-export const supportsTextScale = (probe?: CssSupports): boolean => {
-  const supports =
-    probe ?? (typeof CSS !== 'undefined' && typeof CSS.supports === 'function' ? CSS.supports.bind(CSS) : undefined);
-  if (!supports) return false;
-  return supports('text-size-adjust', '125%') || supports('-webkit-text-size-adjust', '125%');
+  root.style.removeProperty('text-size-adjust');
+  root.style.removeProperty('-webkit-text-size-adjust');
+  root.style.setProperty('--fy-text-scale', String(TEXT_SCALE_FACTORS[scale]));
 };
 
 /* ---------- PWA manifest + window colour ----------------------------------
