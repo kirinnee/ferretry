@@ -46,6 +46,8 @@ const LAPTOP = daemonConnection({
   deviceId: 'device-on-laptop',
 });
 
+const openItem = (minutes: number) => ({ open: 1, first: 'A1', ask: 'Ask?', latestAt: minutesAgo(minutes) });
+
 const session = (
   id: string,
   teammate: string,
@@ -75,15 +77,24 @@ const sessionChild = (
 const SESSIONS: Readonly<Record<string, readonly SessionView[]>> = {
   [STUDIO.daemonId]: [
     session('s-ivo', 'ivo', 'Relay carrier bench', '/home/k/ferretry', 1),
-    session('s-hadi', 'hadi', 'Pick the migration strategy', '/home/k/ferretry', 3, { status: 'awaiting_question' }),
+    session('s-hadi', 'hadi', 'Pick the migration strategy', '/home/k/ferretry', 3, {
+      status: 'awaiting_question',
+      attention: openItem(3),
+    }),
     session('s-lea', 'lea', 'Split the settings page', '/home/k/ferretry/.worktrees/lea', 8, {
       waiting: { since: minutesAgo(8) },
     }),
-    session('s-ora', 'ora', 'Fix the release script', '/home/k/notes', 12, { needsHuman: 'the signing key is gone' }),
+    session('s-ora', 'ora', 'Fix the release script', '/home/k/notes', 12, {
+      needsHuman: 'the signing key is gone',
+      attention: openItem(12),
+    }),
     session('s-noa', 'noa', 'Tidy the weekly notes', '/home/k/notes', 20),
   ],
   [LAPTOP.daemonId]: [
-    session('l-pim', 'pim', 'Review the landing copy', '/Users/k/site', 7, { status: 'awaiting_user' }),
+    session('l-pim', 'pim', 'Review the landing copy', '/Users/k/site', 7, {
+      status: 'awaiting_user',
+      attention: openItem(7),
+    }),
     // The SAME id as a studio session: a different session on a different machine.
     session('s-ivo', 'rue', 'Resize the hero images', '/Users/k/site', 9),
   ],

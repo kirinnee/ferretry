@@ -2313,19 +2313,19 @@ describe('SessionChatPage', () => {
     );
     const panel = (root: ReactTestInstance) => root.findByType(AttentionPanel);
 
-    test('carries no second "needs you" chip in the header: the panel strip is the one indicator', () => {
+    test('pins the open item above the composer: always there, no sheet, strip or dialog', () => {
       const page = renderSessionChatPage(chatPage({ attention: attentionModel() }));
 
       try {
         expect(needsYouButtons(page.root)).toHaveLength(0);
-        expect(panel(page.root).props.expanded).toBe(false);
-
-        run(() => panel(page.root).props.onExpandedChange(true));
-        expect(panel(page.root).props.expanded).toBe(true);
-
-        run(() => panel(page.root).props.onExpandedChange(false));
-        expect(panel(page.root).props.expanded).toBe(false);
+        expect(panel(page.root).props.selectedId).toBeNull();
+        expect(panel(page.root).props.expanded).toBeUndefined();
         expect(panel(page.root).props.focus).toBeNull();
+        expect(page.root.findAll(node => node.props?.role === 'dialog')).toHaveLength(0);
+        // The block sits in the input column, ahead of the composer.
+        const column = page.root.find(node => node.props?.className === 'fy-chat-input__column');
+        expect(column.findAllByType(AttentionPanel)).toHaveLength(1);
+        expect(column.findAllByType(Composer)).toHaveLength(1);
       } finally {
         run(() => page.unmount());
       }
@@ -2362,7 +2362,7 @@ describe('SessionChatPage', () => {
 
         run(() => surface.onAttentionOpen('A2', null));
 
-        expect(panel(page.root).props.expanded).toBe(true);
+        expect(panel(page.root).props.focus?.target).toBe('A2');
         expect(panel(page.root).props.focus).toEqual({ target: 'A2', seq: 1 });
 
         // The same reference pressed again is a NEW request, so it scrolls back to the item.
@@ -2399,13 +2399,14 @@ describe('SessionChatPage', () => {
       }
     });
 
-    test('opens AT the item a link names, and re-targets when the link changes', () => {
+    test('lands in the chat AT the item a link names, with no sheet, and re-targets when the link changes', () => {
       const page = renderSessionChatPage(
         chatPage({ attention: attentionModel([attentionItem], [resolvedItem]), attentionTarget: 'A3' }),
       );
       try {
-        expect(panel(page.root).props.expanded).toBe(true);
+        expect(panel(page.root).props.selectedId).toBe('A3');
         expect(panel(page.root).props.focus?.target).toBe('A3');
+        expect(page.root.findAll(node => node.props?.role === 'dialog')).toHaveLength(0);
 
         run(() =>
           page.update(
@@ -2423,13 +2424,12 @@ describe('SessionChatPage', () => {
       }
     });
 
-    test('a new navigation to the SAME item opens it again after the reader folded the panel', () => {
+    test('a new navigation to the SAME item re-targets it', () => {
       const props = { attention: attentionModel([attentionItem], [resolvedItem]), attentionTarget: 'A3' as const };
       const page = renderSessionChatPage(chatPage({ ...props, attentionTargetKey: 'entry-1' }));
       try {
-        // The reader folds the panel: the ring is put away.
-        run(() => panel(page.root).props.onExpandedChange(false));
-        expect(panel(page.root).props.expanded).toBe(false);
+        run(() => panel(page.root).props.onSelect('A2'));
+        expect(panel(page.root).props.selectedId).toBe('A2');
 
         // The same notification is tapped again: the same `?attention=A3`, a new history entry.
         run(() =>
@@ -2442,7 +2442,7 @@ describe('SessionChatPage', () => {
           ),
         );
 
-        expect(panel(page.root).props.expanded).toBe(true);
+        expect(panel(page.root).props.selectedId).toBe('A3');
         expect(panel(page.root).props.focus?.target).toBe('A3');
       } finally {
         run(() => page.unmount());
@@ -2454,7 +2454,7 @@ describe('SessionChatPage', () => {
 
       try {
         run(() => page.root.findByType(ReferenceSurfaceProvider).props.surface.onAttentionOpen('A3', null));
-        expect(panel(page.root).props.expanded).toBe(true);
+        expect(panel(page.root).props.selectedId).toBe('A3');
 
         // Navigate. The ask belongs to the session that raised it, so ringing
         // its id on another session's board would point at the wrong decision.
@@ -2468,7 +2468,7 @@ describe('SessionChatPage', () => {
           ),
         );
 
-        expect(panel(page.root).props.expanded).toBe(false);
+        expect(panel(page.root).props.selectedId).toBeNull();
         expect(panel(page.root).props.focus).toBeNull();
       } finally {
         run(() => page.unmount());
@@ -2490,8 +2490,43 @@ describe('SessionChatPage', () => {
           ),
         );
         // The reset for the new session runs first; the link's target wins.
-        expect(panel(page.root).props.expanded).toBe(true);
+        expect(panel(page.root).props.selectedId).toBe('A3');
         expect(panel(page.root).props.focus?.target).toBe('A3');
+      } finally {
+        run(() => page.unmount());
+      }
+    });
+
+    test('sends the next message as the answer to the shown item while the chip is on, plain when off', async () => {
+      const sent: string[] = [];
+      const spy = {
+        ...client([], sessionView('shared')),
+        send: async (_id: string, body: { message: string }) => {
+          sent.push(body.message);
+        },
+      };
+      const page = renderSessionChatPage(chatPage({ attention: attentionModel(), client: spy as never }));
+      try {
+        expect(panel(page.root).props.chip.on).toBe(true);
+        const send = (text: string) =>
+          page.root.findByType(Composer).props.api.send('shared', { message: text, now: false });
+        await send('ship it');
+        run(() => panel(page.root).props.chip.onChange(false));
+        expect(panel(page.root).props.chip.on).toBe(false);
+        await send('plain');
+        expect(sent).toEqual(['!A3 ship it', 'plain']);
+      } finally {
+        run(() => page.unmount());
+      }
+    });
+
+    test('counts a held answer down above the composer when the host passes attentionReplies', () => {
+      const replies = { secondsLeft: 8, pending: ['A3'], sending: false, sendNow: () => undefined };
+      const page = renderSessionChatPage(chatPage({ attention: attentionModel(), attentionReplies: replies }));
+      try {
+        const slot = panel(page.root).props.repliesSlot;
+        expect(slot.props.secondsLeft).toBe(8);
+        expect(slot.props.onSendNow).toBe(replies.sendNow);
       } finally {
         run(() => page.unmount());
       }

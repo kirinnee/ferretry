@@ -224,12 +224,23 @@ describe('SettingsPage sections', () => {
       'theme',
       'motion',
       'density',
+      'group-needs-you',
       'chat-width',
       'open-links-in',
       'message-marks',
     ]);
     expect(view.root.findByProps({ 'data-settings-section': 'appearance' }).props.id).toBe('settings-section-panel');
 
+    run(() => view.unmount());
+  });
+
+  it('groups Needs you by default and the switch turns it off for this device', () => {
+    const controls = new DaemonControlsStore(memoryStorage());
+    const view = render(page({ controls }));
+    expect(controls.snapshot().device.groupNeedsYou).toBe(true);
+    const [toggle] = settingSwitches(view, 'group-needs-you');
+    run(() => toggle?.props.onClick?.());
+    expect(controls.snapshot().device.groupNeedsYou).toBe(false);
     run(() => view.unmount());
   });
 

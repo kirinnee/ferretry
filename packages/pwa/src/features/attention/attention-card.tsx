@@ -58,6 +58,8 @@ export interface AttentionCardProps {
   /** How the ask's context is drawn — the conversation renders references; the inbox, prose. */
   readonly renderProse?: (text: string) => ReactNode;
   readonly onAct: (action: InboxAction) => void;
+  /** Pinned above the composer: no origin link, the brief folded behind "Details", the reply left to the composer. */
+  readonly pinned?: boolean;
   /** Extra DOM id for scroll targets. */
   readonly id?: string;
 }
@@ -75,8 +77,10 @@ export function AttentionCard({
   renderProse = plainProse,
   onAct,
   id,
+  pinned = false,
 }: AttentionCardProps) {
   const replyId = useId();
+  const [detailsOpen, setDetailsOpen] = useState(false);
   const [reply, setReply] = useState('');
   const [answers, setAnswers] = useState<readonly string[]>([]);
   const [contextOpen, setContextOpen] = useState(false);
@@ -113,6 +117,7 @@ export function AttentionCard({
       data-attention-card={item.id}
       data-highlighted={highlighted || undefined}
       data-kind={kind.tone}
+      data-pinned={pinned || undefined}
       id={id}
     >
       <header className="fy-attn-card__meta">
@@ -122,9 +127,13 @@ export function AttentionCard({
         </span>
         <span className="mono text-meta text-faint">{attentionReference(item.id)}</span>
         {highlighted ? <span className="fy-attn-card__pointer">linked</span> : null}
-        <span className="ml-auto text-meta text-faint">{attentionAge(item.waitingSince, now)}</span>
+        <span className="ml-auto shrink-0 whitespace-nowrap text-meta text-faint">
+          {pinned
+            ? attentionAge(item.waitingSince, now).replace(/^waiting /, '')
+            : attentionAge(item.waitingSince, now)}
+        </span>
       </header>
-      {origin === undefined ? null : (
+      {origin === undefined || pinned ? null : (
         <RouteLink
           className="fy-attn-card__origin"
           data-attention-origin=""
@@ -145,7 +154,18 @@ export function AttentionCard({
         {item.subject}
       </h3>
       {why === null ? null : <div className="fy-attn-card__why">{renderProse(why)}</div>}
-      {rich ? (
+      {pinned && !perQuestion && (rich || context !== null) ? (
+        <button
+          aria-expanded={detailsOpen}
+          className="fy-attn-card__details"
+          data-attention-details=""
+          onClick={() => setDetailsOpen(open => !open)}
+          type="button"
+        >
+          {detailsOpen ? 'Hide details' : 'Details'}
+        </button>
+      ) : null}
+      {pinned && !detailsOpen && !perQuestion ? null : rich ? (
         <AttentionBriefSections
           item={item}
           picker={
@@ -197,9 +217,10 @@ export function AttentionCard({
         replyLabel={answer ? 'Your answer' : `Reply to ${attentionReference(item.id)}`}
         replyable={replyable}
         swipeHints={swipeHints}
+        showReply={!pinned}
         {...(perQuestion ? { sendAnswers: { action: sendable, onSend: sendAnswers } } : {})}
       />
-      {origin === undefined ? null : (
+      {origin === undefined || pinned ? null : (
         <RouteLink
           className="fy-attn-card__open"
           data-attention-open=""

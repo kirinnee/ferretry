@@ -92,6 +92,27 @@ export const applyAttentionAction = async (
   return parseSnapshot(scope, value);
 };
 
+/** "Send now": the daemon delivers the answers it is holding at once and returns the board without `replies`. */
+export const sendAttentionReplies = async (
+  daemon: DaemonConnection,
+  scope: DaemonSessionScope,
+  fetcher: DaemonFetch = browserFetch,
+): Promise<AttentionSnapshot> =>
+  parseSnapshot(
+    scope,
+    await fetchAttention(
+      daemon,
+      scope,
+      `${attentionPath(scope)}/replies`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', [FY_REQUEST_ID_HEADER]: crypto.randomUUID() },
+        body: '{}',
+      },
+      fetcher,
+    ),
+  );
+
 interface ConnectionBinding {
   readonly baseUrl: string;
   readonly deviceId: string;
@@ -227,12 +248,23 @@ export class DaemonAttentionClient {
     this.#clearBoardRevisions(daemonId);
   }
 
-  #mutate(daemon: DaemonConnection, scope: DaemonSessionScope, action: AttentionActionRequest): Promise<void> {
+  /** Delivers the answers the daemon is holding for this ferret now. */
+  sendReplies(daemon: DaemonConnection, scope: DaemonSessionScope): Promise<void> {
+    return this.#mutate(daemon, scope, () => sendAttentionReplies(daemon, scope, this.fetcher));
+  }
+
+  #mutate(
+    daemon: DaemonConnection,
+    scope: DaemonSessionScope,
+    action: AttentionActionRequest | (() => Promise<AttentionSnapshot>),
+  ): Promise<void> {
     assertScopeDaemon(daemon, scope);
     const generation = this.#bind(daemon);
     const key = daemonSessionKey(scope);
     const revision = this.#advanceBoardRevision(key);
-    const promise = applyAttentionAction(daemon, scope, action, this.fetcher)
+    const promise = (
+      typeof action === 'function' ? action() : applyAttentionAction(daemon, scope, action, this.fetcher)
+    )
       .then(snapshot => {
         if (this.#current(daemon, generation, key, revision)) {
           this.#advanceBoardRevision(key);

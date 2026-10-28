@@ -68,32 +68,10 @@
   height: 22px;
   font-size: 12px;
 }
-.fy-attn-inbox__sub,
-.fy-attn-inbox__hint,
-.fy-attn-inbox__keys {
+.fy-attn-inbox__sub {
   margin: 0;
   color: var(--muted);
   font-size: var(--text-sm);
-}
-.fy-attn-inbox__hint {
-  text-align: center;
-  color: var(--faint);
-}
-.fy-attn-inbox__keys kbd {
-  border: var(--stroke-control, 1px) solid var(--border);
-  border-radius: var(--radius-xs, 3px);
-  padding: 0 4px;
-  font-family: var(--font-mono);
-  font-size: var(--text-xs);
-}
-.fy-attn-inbox__grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(min(100%, 22rem), 1fr));
-  align-items: start;
-  gap: var(--gap-md);
-  margin: 0;
-  padding: 0;
-  list-style: none;
 }
 .fy-attn-inbox__reading {
   display: inline-flex;
@@ -147,7 +125,6 @@
   min-height: 44px;
   justify-content: center;
 }
-
 /* A focused card answers to its arrows; the ring says it is listening. */
 .fy-attn-frame {
   border-radius: var(--radius-panel);
@@ -308,6 +285,95 @@
   }
 }
 
+/* ---- The two-pane inbox ---------------------------------------------------------------------------- */
+.fy-attn-inbox__body {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: var(--gap-md);
+}
+.fy-attn-inbox__list {
+  display: flex;
+  margin: 0;
+  min-width: 0;
+  flex-direction: column;
+  gap: var(--gap-xs);
+  padding: 0;
+  list-style: none;
+}
+.fy-attn-row {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+  border: var(--stroke-control, 1px) solid var(--border-soft);
+  border-radius: var(--radius-control);
+  background: var(--surface);
+  padding: var(--gap-sm);
+  color: var(--fg);
+  font: inherit;
+  text-align: left;
+  text-decoration: none;
+  cursor: pointer;
+}
+.fy-attn-row:hover {
+  background: var(--accent-soft);
+}
+.fy-attn-row:focus-visible {
+  outline: var(--focus-width, 2px) solid var(--focus-color, var(--accent));
+  outline-offset: 2px;
+}
+.fy-attn-row[data-selected] {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+.fy-attn-row__title {
+  overflow: hidden;
+  font-weight: var(--weight-strong);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fy-attn-row__summary {
+  display: -webkit-box;
+  overflow: hidden;
+  color: var(--fg);
+  font-size: var(--text-sm);
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+.fy-attn-row__meta {
+  color: var(--faint);
+  font-size: var(--text-xs);
+}
+@media (min-width: 900px) {
+  .fy-attn-inbox {
+    height: calc(100dvh - 24px);
+    padding-bottom: var(--gap-md);
+  }
+  .fy-attn-inbox__body {
+    min-height: 0;
+    flex: 1;
+    flex-direction: row;
+  }
+  .fy-attn-inbox__list {
+    width: 340px;
+    flex-shrink: 0;
+    overflow-y: auto;
+  }
+  .fy-attn-inbox__chat {
+    display: flex;
+    min-width: 0;
+    min-height: 0;
+    flex: 1;
+    flex-direction: column;
+    overflow: hidden;
+    border: var(--stroke-panel, 1px) solid var(--border);
+    border-radius: var(--radius-panel);
+    background: var(--bg);
+  }
+}
+
 /* ---- The Sessions page's "Needs you" deck --------------------------------------------------------- */
 .fy-attn-needs {
   display: flex;
@@ -436,4 +502,19 @@
   .fy-attn-undo__drain {
     display: none;
   }
+}
+
+/* ---- A phone's swipeable row ------------------------------------------------------------------- */
+.fy-attn-swiperow {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.75rem;
+  border: var(--stroke-panel) solid var(--border);
+  border-radius: var(--radius-panel);
+  background: var(--surface, var(--bg));
+}
+.fy-attn-swiperow__actions {
+  display: flex;
+  gap: 0.5rem;
 }

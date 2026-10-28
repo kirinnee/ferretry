@@ -158,30 +158,18 @@ describe('inbox cards', () => {
 });
 
 describe('swipes', () => {
-  test('right, left and up take options one, two and three', () => {
-    const map = swipeMap({ ask: choice('Rebase now', 'Wait', 'Skip', 'Abort') });
-    expect([map.right?.label, map.left?.label, map.up?.label]).toEqual(['Rebase now', 'Wait', 'Skip']);
-  });
-
-  test('a card with no options swipes to Done and Dismiss, and never up', () => {
-    for (const ask of [undefined, { kind: 'open-question' } as const]) {
+  test('every card swipes right to Done and left to Dismiss — never between its options', () => {
+    for (const ask of [
+      undefined,
+      { kind: 'open-question' } as const,
+      { kind: 'permission' } as const,
+      choice('A', 'B', 'C', 'D'),
+    ]) {
       const map = swipeMap({ ask });
       expect(map.right).toBe(DONE_ACTION);
       expect(map.left).toBe(DISMISS_ACTION);
       expect(map.up).toBeUndefined();
     }
-  });
-
-  test('a permission swipes right to Approve and left to Reject', () => {
-    const map = swipeMap({ ask: { kind: 'permission' } });
-    expect(map.right).toMatchObject({ label: 'Approve', response: { decision: 'approve' } });
-    expect(map.left).toMatchObject({ label: 'Reject', response: { decision: 'reject' } });
-  });
-
-  test('a review swipes right to accept and left to Dismiss', () => {
-    const map = swipeMap({ ask: { kind: 'answer-review' } });
-    expect(map.right).toMatchObject({ response: { verdict: 'good' } });
-    expect(map.left).toBe(DISMISS_ACTION);
   });
 
   test('only a clear distance commits, and only toward a mapped direction', () => {
@@ -203,16 +191,10 @@ describe('swipes', () => {
   });
 
   test('finds the swipe an answer sits on by meaning, not by identity', () => {
-    const map = swipeMap({ ask: choice('Rebase now', 'Wait', 'Skip') });
-    const [first, second, third, none] = [...inboxOptions({ ask: choice('Rebase now', 'Wait', 'Skip') }), DONE_ACTION];
-    expect([first, second, third].map(option => option && directionOfAction(map, option))).toEqual([
-      'right',
-      'left',
-      'up',
-    ]);
-    // Done is no swipe on a card that has options of its own.
-    expect(directionOfAction(map, none ?? DONE_ACTION)).toBeNull();
-    expect(directionOfAction(swipeMap({}), DISMISS_ACTION)).toBe('left');
+    const map = swipeMap({});
+    expect(directionOfAction(map, { ...DONE_ACTION })).toBe('right');
+    expect(directionOfAction(map, { ...DISMISS_ACTION })).toBe('left');
+    expect(directionOfAction(map, inboxOptions({ ask: choice('Rebase now', 'Wait') })[0] ?? DONE_ACTION)).toBeNull();
   });
 
   test('options follow the swipe order', () => {
@@ -245,7 +227,7 @@ describe('replies', () => {
     expect(actionSentence(DISMISS_ACTION, 'A3')).toBe('Dismissed !A3');
     expect(actionSentence(DONE_ACTION, 'A3')).toBe('Marked !A3 done');
     expect(actionSentence({ kind: 'resolve', label: 'Reply', note: 'x' }, 'A3')).toBe('Replied to !A3');
-    expect(actionSentence(swipeMap({ ask: choice('Wait', 'Go') }).right ?? DONE_ACTION, 'A3')).toBe(
+    expect(actionSentence(inboxOptions({ ask: choice('Wait', 'Go') })[0] ?? DONE_ACTION, 'A3')).toBe(
       'Answered !A3: Wait',
     );
   });

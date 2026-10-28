@@ -80,7 +80,7 @@ const useReducedMotion = (override?: boolean): boolean => {
   return prefers || (typeof document !== 'undefined' && document.documentElement.dataset.motion === 'reduced');
 };
 
-export interface AttentionCardFrameProps {
+interface AttentionCardFrameProps {
   readonly card: InboxCard;
   readonly onAct: (action: InboxAction) => void;
   readonly children: ReactNode;
@@ -93,7 +93,7 @@ export interface AttentionCardFrameProps {
  * ←/→/↑ for the mapped answer — only when the CARD is focused, never while focus is in its reply box or
  * on one of its buttons, where the arrows already mean something.
  */
-export function AttentionCardFrame({ card, onAct, children, className, style }: AttentionCardFrameProps) {
+function AttentionCardFrame({ card, onAct, children, className, style }: AttentionCardFrameProps) {
   const hintId = useId();
   const map = swipeMap(card.item);
   const onKeyDown = (event: KeyboardEvent<HTMLElement>): void => {

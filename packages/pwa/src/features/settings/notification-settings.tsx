@@ -1,11 +1,11 @@
 /**
- * Web Push enrolment for ONE daemon: the master switch, delivery status, and this daemon's own
+ * The browser half of Notifications: permission, the notes, and the selected daemon's own
  * registered-device list.
  *
  * A public PWA cannot assume that the page has notification permission, a
  * service worker, or a selected daemon. The composition host supplies those
  * facts and performs permission/subscription work only after a reader presses
- * the master control. This screen deliberately owns no daemon-global state.
+ * a machine switch (`notification-machines.tsx`). This screen deliberately owns no daemon-global state.
  *
  * WHICH EVENT KINDS SHOW, AND QUIET HOURS, ARE NOT HERE. Both are decisions about this browser, made
  * once rather than once per daemon, and the daemon no longer stores or enforces a per-device
@@ -14,17 +14,15 @@
 import type { PushDeviceView } from '@ferretry/protocol';
 
 import { cn } from '../../lib/class-names.ts';
-import { Button } from '../../shell/primitives.tsx';
 
 export type NotificationPermission = 'unsupported' | 'default' | 'denied' | 'granted';
-export type PushDeliveryState = 'idle' | 'checking' | 'active' | 'unavailable';
 
 export const NOTIFICATION_UNSUPPORTED_NOTE =
   'This browser does not expose notifications to this app. On iPhone or iPad, install the app first (Share → Add to Home Screen) and open it from the Home Screen.';
 export const NOTIFICATION_DENIED_NOTE =
   'Notifications are blocked for this site in the browser. Allow them in the browser’s site settings, then come back and turn this on.';
 export const NOTIFICATION_SCOPE_NOTE =
-  'The live event stream is the fast path while the app is open; Web Push covers a backgrounded or closed app. The selected daemon owns this device registration.';
+  'The live event stream is the fast path while the app is open; Web Push covers a backgrounded or closed app. Each machine owns this device’s registration with it.';
 export const NOTIFICATION_IOS_NOTE =
   'On iPhone or iPad, Web Push requires iOS/iPadOS 16.4+ and this PWA installed to the Home Screen. Every browser also requires a secure HTTPS context.';
 
@@ -77,30 +75,23 @@ export function Toggle({
 }
 
 export interface NotificationSettingsViewProps {
-  /** The browser capability at this instant; a host asks only from `onEnabled`. */
+  /** The browser capability at this instant; a host asks only from a reader's tap on a machine switch. */
   readonly permission: NotificationPermission;
-  /** Reader preference after the selected daemon has accepted a device registration. */
-  readonly enabled: boolean;
-  readonly delivery: PushDeliveryState;
-  readonly deliveryMessage?: string | null;
+  /** The selected machine's own registered devices; every machine's switch lives in the list beside this. */
   readonly devices?: readonly PushDeviceView[];
   readonly currentDeviceId?: string | null;
-  readonly onEnabled: (enabled: boolean) => void;
   readonly onRevokeDevice: (deviceId: string) => void;
 }
 
 /**
- * Render-only settings view. The host binds its callbacks to one runtime
- * DaemonConnection, preventing a device id from daemon A being revoked on B.
+ * Render-only browser-level view: what this browser may do, and the selected machine's registered devices.
+ * The host binds its callbacks to one runtime DaemonConnection, preventing a device id from daemon A being
+ * revoked on B. Turning a machine on is `notification-machines.tsx`.
  */
 export function NotificationSettingsView({
   permission,
-  enabled,
-  delivery,
-  deliveryMessage = null,
   devices = [],
   currentDeviceId = null,
-  onEnabled,
   onRevokeDevice,
 }: NotificationSettingsViewProps) {
   if (permission === 'unsupported') {
@@ -112,41 +103,18 @@ export function NotificationSettingsView({
   }
 
   const denied = permission === 'denied';
-  const active = enabled && permission === 'granted';
-  const deliveryCopy =
-    delivery === 'active'
-      ? 'Web Push is active for this device — closed-app delivery is ready.'
-      : delivery === 'checking'
-        ? 'Checking closed-app Web Push…'
-        : (deliveryMessage ?? 'Web Push is not active for this device yet; the live app can still show changes.');
-
   const status =
     permission === 'granted'
       ? 'Allowed in this browser.'
       : denied
         ? 'Blocked in this browser.'
-        : 'Not asked yet — nothing is shown until you allow it.';
+        : 'Not asked yet — turning a machine on asks for it.';
 
   return (
     <section className="flex flex-col gap-2" aria-label="Notification controls">
-      <Toggle
-        checked={active}
-        disabled={denied}
-        onChange={onEnabled}
-        label="Notify me"
-        description="System notification when a session needs attention. Turning this on asks the browser for permission."
-      />
       <p className="m-0 text-ui leading-base text-muted" data-notification-permission={permission}>
         Permission: {status}
       </p>
-      {permission === 'default' && !enabled ? (
-        <div>
-          {/* An explicit button, so the browser prompt (and iOS's) comes from a tap. */}
-          <Button variant="primary" data-notification-allow="" onClick={() => onEnabled(true)}>
-            Allow notifications
-          </Button>
-        </div>
-      ) : null}
       {denied && (
         <p role="status" className="m-0 text-ui leading-base text-warn">
           {NOTIFICATION_DENIED_NOTE}
@@ -154,17 +122,6 @@ export function NotificationSettingsView({
       )}
       <p className="m-0 text-meta leading-base text-faint">{NOTIFICATION_SCOPE_NOTE}</p>
       <p className="m-0 text-meta leading-base text-faint">{NOTIFICATION_IOS_NOTE}</p>
-      {permission === 'granted' && (
-        <p
-          role="status"
-          className={cn(
-            'm-0 text-ui leading-base',
-            delivery === 'active' ? 'text-ok' : delivery === 'checking' ? 'text-muted' : 'text-warn',
-          )}
-        >
-          {deliveryCopy}
-        </p>
-      )}
       {devices.length > 0 && (
         <section className="flex flex-col gap-1" aria-label="Push devices">
           <span className="text-meta font-semibold text-muted">Registered devices</span>

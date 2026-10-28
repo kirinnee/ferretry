@@ -1,11 +1,9 @@
 /**
  * Screenshots of every Attention surface, at a 390px phone and a 1440px desktop, light and dark:
  *
- *   inbox-phone / inbox-desktop   three cards (options, none, long context) + the phone's Attention tab
- *   swipe-mid                     a drag past the slop but short of the threshold, the option showing
- *   undo                          the toast after a committed swipe
- *   panel-phone / panel-desktop   the in-ferret panel over a transcript line with a proved `!A3`
- *   points-phone / -desktop       an item whose context and impact are bullet lists, both opened
+ *   inbox-phone / inbox-desktop   the list; on desktop beside the selected item chat
+ *   panel-phone / panel-desktop   the pinned item above the composer
+ *   details-phone / -desktop      the same, Details open
  *   sidebar / rail / drawer       unread rows, the Needs-you group, the Attention entry, the rail badges
  *
  *   bun harness/attention-screenshot.ts      # writes harness/out/attention/<scheme>/*.png
@@ -102,20 +100,6 @@ const shot = async (page: Page, scheme: string, name: string, fullPage = false):
   process.stdout.write(`📸 ${path}\n`);
 };
 
-/** Drags the deck's top card `dx` to the right with a real pointer, optionally letting go. */
-const drag = async (page: Page, dx: number, release: boolean): Promise<void> => {
-  const top = page.locator('[data-attention-deck] [data-attention-card]').first();
-  const box = (await top.boundingBox()) ?? fail('no top card in the deck');
-  // Grab the card by its header, away from the buttons and the reply box.
-  const x = box.x + box.width / 2;
-  const y = box.y + 24;
-  await page.mouse.move(x, y);
-  await page.mouse.down();
-  for (let step = 1; step <= 8; step += 1) await page.mouse.move(x + (dx * step) / 8, y);
-  if (release) await page.mouse.up();
-  await page.waitForTimeout(250);
-};
-
 try {
   for (const scheme of ['light', 'dark'] as const) {
     const theme = `studio-${scheme}`;
@@ -124,46 +108,26 @@ try {
     try {
       let page = await open(phone, theme, 'inbox-phone');
       await shot(page, scheme, 'inbox-phone');
-      await drag(page, 90, false);
-      await shot(page, scheme, 'swipe-mid-phone');
-      await page.mouse.move(390, 200);
-      await page.mouse.up();
-      await page.waitForTimeout(400);
-      await shot(page, scheme, 'undo-phone');
       await page.close();
-
       page = await open(desktop, theme, 'inbox-desktop');
       await shot(page, scheme, 'inbox-desktop', true);
-      await page.locator('[data-attention-option="Rebase now"]').first().click();
-      await page.waitForTimeout(250);
-      await shot(page, scheme, 'undo-desktop');
       await page.close();
-
-      page = await open(phone, theme, 'panel');
-      await shot(page, scheme, 'panel-phone', true);
-      await page.close();
-      for (const name of ['overload', 'overload-open', 'rich', 'single', 'old', 'several', 'strip', 'board']) {
-        page = await open(phone, theme, name);
-        await shot(page, scheme, `${name}-phone`);
-        await page.close();
-        page = await open(desktop, theme, name);
-        await shot(page, scheme, `${name}-desktop`);
-        await page.close();
-      }
       for (const [label, context] of [
         ['phone', phone],
         ['desktop', desktop],
       ] as const) {
-        page = await open(context, theme, 'rich');
-        for (const section of ['context', 'impact'])
-          await page.locator(`[data-attention-section="${section}"] > summary`).first().click();
+        page = await open(context, theme, 'panel');
+        await shot(page, scheme, `panel-${label}`);
+        await page.close();
+        page = await open(context, theme, 'long');
+        await page.locator('[data-attention-details]').first().click();
         await page.waitForTimeout(200);
-        await shot(page, scheme, `points-${label}`);
+        await shot(page, scheme, `details-${label}`);
+        await page.close();
+        page = await open(context, theme, 'board');
+        await shot(page, scheme, `board-${label}`);
         await page.close();
       }
-      page = await open(desktop, theme, 'panel');
-      await shot(page, scheme, 'panel-desktop', true);
-      await page.close();
 
       page = await open(desktop, theme, 'column');
       await shot(page, scheme, 'sidebar-desktop');

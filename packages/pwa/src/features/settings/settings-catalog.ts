@@ -14,6 +14,7 @@ import { daemonMachineSetupPath, daemonSettingsPath } from '../../lib/pages/rout
 export type SettingId =
   | 'text-size'
   | 'density'
+  | 'group-needs-you'
   | 'theme'
   | 'chat-width'
   | 'motion'
@@ -65,6 +66,13 @@ export const SETTINGS_DEFINITIONS: readonly SettingDefinition[] = [
     description:
       'Choose how much session detail the dashboard renders. Compact is the phone default; Full is the desktop default.',
     keywords: ['dashboard', 'detail', 'compact', 'minimal', 'full', 'rows', 'layout'],
+  },
+  {
+    id: 'group-needs-you',
+    label: 'Group Needs you at the top',
+    description:
+      'Lift the sessions with open Attention items into a Needs you group at the top of the sessions list. Off leaves them in their project, with just the Attention badge. Applies to this device.',
+    keywords: ['attention', 'needs you', 'pin', 'group', 'top', 'sessions', 'sidebar'],
   },
   {
     id: 'chat-width',
@@ -465,7 +473,16 @@ export const SETTINGS_SECTIONS: readonly SettingsSectionDefinition[] = [
     id: 'appearance',
     label: 'Appearance',
     description: 'Text, colour, density, and conversation layout on this device.',
-    settingIds: ['text-size', 'theme', 'motion', 'density', 'chat-width', 'open-links-in', 'message-marks'],
+    settingIds: [
+      'text-size',
+      'theme',
+      'motion',
+      'density',
+      'group-needs-you',
+      'chat-width',
+      'open-links-in',
+      'message-marks',
+    ],
   },
   {
     id: 'behaviour',

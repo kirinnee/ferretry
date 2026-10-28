@@ -13,7 +13,10 @@ const lead = sessionView('lead', { config: { teammate: 'hadi', label: 'Lead the 
 const a = sessionView('a', { config: { parent: 'lead' } });
 const b = sessionView('b', {
   config: { parent: 'lead' },
-  state: { status: 'awaiting_user' },
+  state: {
+    status: 'awaiting_user',
+    attention: { open: 1, first: 'A1', ask: 'Ask?', latestAt: '2026-07-31T12:00:00.000Z' },
+  },
 });
 const old = sessionView('old', { config: { parent: 'lead' }, state: { status: 'completed' } });
 const deep = sessionView('deep', { config: { parent: 'a' } });

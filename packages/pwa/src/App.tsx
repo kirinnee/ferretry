@@ -93,6 +93,7 @@ import { dictationShortcutLabel } from './features/settings/dictation-shortcut.t
 import { DoctorSettings } from './features/settings/doctor-settings.tsx';
 import { useMachineUpdates } from './features/settings/machine-updates.ts';
 import { NotificationFilterSettingsView } from './features/settings/notification-filter-settings.tsx';
+import { MachineNotificationList, NotificationsOffBanner } from './features/settings/notification-machines.tsx';
 import { NotificationSettingsView } from './features/settings/notification-settings.tsx';
 import {
   PAIR_PHONE_DESCRIPTION,
@@ -116,6 +117,7 @@ import { useAccountPickerSlice } from './hooks/use-account-picker.ts';
 import { useActiveCarrier, useDeviceRefused } from './hooks/use-active-carrier.ts';
 import { useAppViewport } from './hooks/use-app-viewport.ts';
 import { useAttentionSession, useAttentionSnapshot } from './hooks/use-attention.ts';
+import { useAttentionReplies } from './hooks/use-attention-replies.ts';
 import {
   AttentionInboxContext,
   useAttentionInbox,
@@ -129,6 +131,7 @@ import { useInputModality } from './hooks/use-input-modality.ts';
 import { useInstallPrompt } from './hooks/use-install-prompt.ts';
 import { useLayoutMode } from './hooks/use-layout-mode.ts';
 import { useLiveClock } from './hooks/use-live-clock.ts';
+import { useMachineNotifications } from './hooks/use-machine-notifications.ts';
 import { useMachineOrder } from './hooks/use-machine-order.ts';
 import { type ListedMachine, useMachineSources } from './hooks/use-machine-sources.ts';
 import {
@@ -405,6 +408,32 @@ const useNotificationControlsHost = (): NotificationControlsHost => {
   const host = useContext(NotificationControlsContext);
   if (host === null) throw new Error('notification controls require the app shell');
   return host;
+};
+
+/**
+ * Every paired machine's notification state, read and switched through the one enrolment flow. The mute
+ * folded into each row is this browser's local filter (`notification-filter.ts`).
+ */
+const usePairedMachineNotifications = (onChanged?: () => void) => {
+  const store = useAppStore();
+  const connectionSnapshot = useConnectionSnapshot();
+  const filter = useNotificationFilterPreferences(store.notificationFilter);
+  const sources = useMemo(
+    () =>
+      connectionSnapshot.connections.map(machine => ({
+        connection: machine,
+        label: distinctDaemonName(machine, connectionSnapshot.connections),
+        muted: filter.machines[machine.daemonId] === false,
+      })),
+    [connectionSnapshot.connections, filter.machines],
+  );
+  const host = useNotificationControlsHost();
+  const machines = useMachineNotifications(host, sources, onChanged === undefined ? {} : { onChanged });
+  const toggleShown = useCallback(
+    (daemonId: string, shown: boolean) => store.notificationFilter.set({ machines: { [daemonId]: shown } }),
+    [store.notificationFilter],
+  );
+  return { ...machines, canEnrol: machines.permission === 'granted' || machines.permission === 'default', toggleShown };
 };
 
 const pageCrumbs = (route: PageRoute): readonly Crumb[] => {
@@ -879,7 +908,7 @@ function ShellSessionsBar({
     store.controls.controls(connection.daemonId),
   ).sidebarCollapsed;
   const machineOrder = useMachineOrder(store.controls);
-  const { sessionsMode, density } = useSyncExternalStore(store.controls.subscribe, () =>
+  const { sessionsMode, density, groupNeedsYou } = useSyncExternalStore(store.controls.subscribe, () =>
     store.controls.snapshot(),
   ).device;
   const displayed = machineDisplayOrder(connections, machineOrder.saved);
@@ -897,6 +926,7 @@ function ShellSessionsBar({
       daemonId={connection.daemonId}
       machineName={machineName}
       density={density}
+      groupNeedsYou={groupNeedsYou}
       onDensityChange={next => store.controls.setDeviceControls({ density: next })}
       initialMode={sessionsMode}
       onModeChange={mode => store.controls.setDeviceControls({ sessionsMode: mode })}
@@ -975,7 +1005,11 @@ const browserEventStreamEnvironment: SessionEventStreamEnvironment = {
   random: () => Math.random(),
 };
 
-function SessionRoute({ connection, scope }: SessionChatPageProps) {
+function SessionRoute({
+  connection,
+  scope,
+  attentionOverride,
+}: SessionChatPageProps & { readonly attentionOverride?: string | null }) {
   const store = useAppStore();
   // The router's fetch, recorded for the Performance report like every other daemon read.
   const daemonFetch = useDaemonFetch();
@@ -1014,6 +1048,7 @@ function SessionRoute({ connection, scope }: SessionChatPageProps) {
   // pairing rather than outliving it.
   const attentionStatus = useAttentionSession(store.attention, connection, scope);
   const attentionSnapshot = useAttentionSnapshot(store.attention, scope);
+  const attentionReplies = useAttentionReplies(store.attention, connection, scope);
   const attention = useMemo(
     () => ({ client: store.attention, snapshot: attentionSnapshot, status: attentionStatus }),
     [store.attention, attentionSnapshot, attentionStatus],
@@ -1480,8 +1515,11 @@ function SessionRoute({ connection, scope }: SessionChatPageProps) {
           }}
           browserLogin={store.browserLogin}
           attention={attention}
+          attentionReplies={attentionReplies}
           // A notification tap or an unread row names the item it opens at (`?attention=A3`).
-          attentionTarget={attentionTargetFromSearch(window.location.search)}
+          attentionTarget={
+            attentionOverride !== undefined ? attentionOverride : attentionTargetFromSearch(window.location.search)
+          }
           // Each navigation that names one re-targets it, so tapping the same item's notification again rings it again.
           attentionTargetKey={entryKey}
           chatWidth={controls.chatWidth}
@@ -1612,18 +1650,8 @@ function SettingsRoute({ connection }: DaemonPageProps) {
     [carrierPreferences, connection, preferenceAvailability, store.carrierPreferences],
   );
   const notifications = useNotificationControls(useNotificationControlsHost(), connection);
+  const machineNotifications = usePairedMachineNotifications(notifications.refresh);
   const notificationFilter = useNotificationFilterPreferences(store.notificationFilter);
-  // Every OTHER paired machine: the current one already has its own "Notify me" switch above, which
-  // is the real Web Push subscription control — this list is the lighter-weight display filter
-  // (`notification-filter.ts`), so showing the active connection twice would invite the two to be
-  // read as the same control when they are not.
-  const notificationFilterMachines = connectionSnapshot.connections
-    .filter(candidate => candidate.daemonId !== connection.daemonId)
-    .map(candidate => ({
-      daemonId: candidate.daemonId,
-      label: distinctDaemonName(candidate, connectionSnapshot.connections),
-      enabled: notificationFilter.machines[candidate.daemonId] !== false,
-    }));
   const onNotificationCategoryChange = useCallback(
     (category: NotificationCategory, next: boolean) => {
       store.notificationFilter.set({ categories: { [category]: next } });
@@ -1633,12 +1661,6 @@ function SettingsRoute({ connection }: DaemonPageProps) {
   const onNotificationQuietHoursChange = useCallback(
     (patch: Partial<QuietHours>) => {
       store.notificationFilter.set({ quietHours: patch });
-    },
-    [store.notificationFilter],
-  );
-  const onNotificationMachineToggle = useCallback(
-    (daemonId: string, next: boolean) => {
-      store.notificationFilter.set({ machines: { [daemonId]: next } });
     },
     [store.notificationFilter],
   );
@@ -1755,22 +1777,32 @@ function SettingsRoute({ connection }: DaemonPageProps) {
       }
       notifications={
         <div className="flex flex-col gap-4">
+          <NotificationsOffBanner
+            rows={machineNotifications.rows}
+            canEnrol={machineNotifications.canEnrol}
+            busy={machineNotifications.busy}
+            onEnable={machineNotifications.enable}
+          />
           <NotificationSettingsView
             permission={notifications.permission}
-            enabled={notifications.enabled}
-            delivery={notifications.delivery}
-            deliveryMessage={notifications.deliveryMessage}
             devices={notifications.devices}
             currentDeviceId={notifications.currentDeviceId}
-            onEnabled={notifications.setEnabled}
             onRevokeDevice={notifications.revokeDevice}
+          />
+          <MachineNotificationList
+            rows={machineNotifications.rows}
+            canEnrol={machineNotifications.canEnrol}
+            busy={machineNotifications.busy}
+            failures={machineNotifications.failures}
+            onEnable={machineNotifications.enable}
+            onDisable={machineNotifications.disable}
+            onTurnOnAll={machineNotifications.turnOnAll}
+            onToggleShown={machineNotifications.toggleShown}
           />
           <NotificationFilterSettingsView
             preferences={notificationFilter}
-            machines={notificationFilterMachines}
             onCategoryChange={onNotificationCategoryChange}
             onQuietHoursChange={onNotificationQuietHoursChange}
-            onToggleMachine={onNotificationMachineToggle}
           />
         </div>
       }
@@ -1877,7 +1909,33 @@ function AttentionRoute(_: DaemonPageProps) {
   const { navigate } = useRouter();
   const inbox = useAttentionInbox();
   const phone = useLayoutMode() === 'drawer';
-  return inbox === null ? null : <AttentionInboxPage inbox={inbox} onNavigate={navigate} phone={phone} />;
+  const machineNotifications = usePairedMachineNotifications();
+  return inbox === null ? null : (
+    <AttentionInboxPage
+      banner={
+        <NotificationsOffBanner
+          rows={machineNotifications.rows}
+          canEnrol={machineNotifications.canEnrol}
+          busy={machineNotifications.busy}
+          onEnable={machineNotifications.enable}
+        />
+      }
+      inbox={inbox}
+      onNavigate={navigate}
+      phone={phone}
+      renderChat={card => {
+        const target = inbox.connectionFor(card.daemonId);
+        return target === undefined ? null : (
+          <SessionRoute
+            attentionOverride={card.item.id}
+            connection={target}
+            key={card.key}
+            scope={daemonSessionScope(target, card.view.config.id)}
+          />
+        );
+      }}
+    />
+  );
 }
 
 function ImportedHistoryRoute({ connection }: DaemonPageProps) {
