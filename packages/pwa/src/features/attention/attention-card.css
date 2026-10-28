@@ -514,7 +514,9 @@ details[open] > .fy-attn-sec__title > .fy-attn-sec__chevron {
 .fy-attn-body[data-folded] .fy-attn-body__text {
   max-height: 14rem;
   overflow: hidden;
+  /* theme-literal-ok: an alpha mask — only the opacity of #000 matters, never its hue */
   -webkit-mask-image: linear-gradient(to bottom, #000 70%, transparent);
+  /* theme-literal-ok: an alpha mask — only the opacity of #000 matters, never its hue */
   mask-image: linear-gradient(to bottom, #000 70%, transparent);
 }
 .fy-attn-steps {
@@ -546,8 +548,8 @@ details[open] > .fy-attn-sec__title > .fy-attn-sec__chevron {
   width: 1.5rem;
   height: 1.5rem;
   margin: 1px 0 0;
-  border: 1px solid var(--border-strong, var(--border));
-  border-radius: 6px;
+  border: var(--stroke) solid var(--border-strong, var(--border));
+  border-radius: var(--radius-control);
   background: var(--surface);
   cursor: pointer;
 }
@@ -563,7 +565,7 @@ details[open] > .fy-attn-sec__title > .fy-attn-sec__chevron {
   width: 6px;
   height: 11px;
   border: solid var(--bg);
-  border-width: 0 2px 2px 0;
+  border-width: 0 var(--stroke-heavy) var(--stroke-heavy) 0;
   transform: rotate(45deg);
 }
 .fy-attn-step__box:focus-visible {
