@@ -64,6 +64,11 @@ with its default rules, so:
 So `docs`, `ci`, `chore`, `refactor`, `style`, `test`, `build`, `config`, `dep`, and `amend`
 land on `main` without cutting a version. Only the changes users can observe move the number.
 
+The release notes list only `feat` (Features), `fix` (Fixes) and `perf` (Performance), plus reverts and
+breaking changes; the other types never appear. So write the subject as the sentence a user would
+want to read in "What's new" — plain words, no internal jargon — and put the PR number last, as a squash
+merge does. See [Semantic Release](../semantic-release/index.md#release-notes).
+
 There is no generated commit-convention document to consult: the validator's type list and
 `.releaserc.yaml` are the two sources, and both are short enough to read.
 

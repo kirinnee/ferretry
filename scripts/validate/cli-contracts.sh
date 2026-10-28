@@ -19,6 +19,7 @@ cli_contracts=(
   state-home-default
   release-backup-order
   changelog-asset
+  release-notes-render
   release-artifacts
   homebrew-cask
   installer-checksum
@@ -284,6 +285,11 @@ changelog-asset)
     [.plugins[] | select(type == "array" and .[0] == "@semantic-release/git") | .[1].assets[]] |
     index("Changelog.old.md") != null' >/dev/null
   rg -qF -- '--release-notes ./IncrementalChangelog.md' scripts/release/publish.sh
+  ;;
+release-notes-render)
+  # The notes configuration must actually list a feature and a fix and drop chores. A preset the
+  # notes generator cannot drive renders every release as a bare version header, with no error.
+  bun scripts/release/backfill-changelog.ts --check
   ;;
 release-artifacts)
   yq -o=json '.' .goreleaser.yaml | jq -e '
