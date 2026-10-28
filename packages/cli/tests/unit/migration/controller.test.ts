@@ -195,6 +195,22 @@ describe('session migration', () => {
     should(refused).deepEqual(["Can't convert onto claude-default: Too new."]);
     should(new RecordingMigrationGateway()).have.property('previews');
   });
+
+  it('should say why a Codex version the converter was not tested on is still allowed to take the move', () => {
+    // Arrange
+    const note =
+      "Codex 0.170.2 isn't one of the versions the converter was tested on; the conversation format it writes is unchanged from the one validated on Codex 0.165.";
+
+    // Act
+    const lines = renderConversionPreview({
+      ...READY_PREVIEW,
+      summary: { ...READY_PREVIEW.summary, formatNote: note },
+    });
+
+    // Assert
+    should(lines).containEql(note);
+    should(renderConversionPreview(READY_PREVIEW)).not.containEql(note);
+  });
 });
 
 describe('session migration progress', () => {

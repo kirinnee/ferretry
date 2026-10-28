@@ -3,7 +3,7 @@ import { exitCodeOf, type RenderableEntry, toolLine } from './render.ts';
 /**
  * The neutral conversation, written as a Codex rollout its own `resume` accepts.
  *
- * THE SHAPE, as Codex 0.145.0, 0.156.1, 0.163.0 and 0.164.0 read it back (measured by resuming converted
+ * THE SHAPE, as Codex 0.145.0, 0.156.1, 0.163.0, 0.164.0 and 0.165.0 read it back (measured by resuming converted
  * rollouts against a loopback model and reading the request each sent): a `session_meta` record
  * naming the thread, its working directory and the CLI version, then `response_item` records — the
  * Responses API items Codex hands back to the model on resume. Each user and agent message also gets

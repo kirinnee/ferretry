@@ -82,16 +82,43 @@ The run checks the non-interactive resume. The interactive TUIs were verified by
 
 ## Versions
 
-The converter is **gated to the versions it was measured on** and refuses anything else, on either side,
-in plain words (`packages/daemon/src/lib/transcript/convert/versions.ts`):
+The converter is **gated to the versions it was measured on** and, for Claude Code, refuses anything else on
+either side, in plain words (`packages/daemon/src/lib/transcript/convert/versions.ts`). Codex has one exception,
+below:
 
 - Claude Code **2.1.2xx and 2.1.3xx** (measured: 2.1.281, 2.1.304)
-- Codex **0.145, 0.156, 0.163, 0.164** (measured: 0.145.0, 0.156.1, 0.163.0, 0.164.0)
+- Codex **0.145, 0.156, 0.163, 0.164, 0.165** (measured: 0.145.0, 0.156.1, 0.163.0, 0.164.0, 0.165.0)
 
 Codex 0.164.0's rollout is the 0.163.0 shape with one additive key (`content_item_metadata[].provenance` on
 developer messages, which the writer neither needs nor emits), so the writer and `CONVERTER_VERSION` are
 unchanged; its recorded fixture, the real-CLI `exec resume` contract and a by-hand TUI `codex resume` of a
 converted conversation all pass.
+
+Codex 0.165.0's rollout has exactly the 0.164.0 key set (it records three fewer `thread_settings_applied`
+events, which the converter never reads), so again the writer and `CONVERTER_VERSION` are unchanged; its
+recorded fixture and the real-CLI `exec resume` contract pass.
+
+### A Codex outside the table: judged by the format it writes
+
+Codex releases almost daily, and what the converter depends on is the **shape of its rollout**, not its
+number. So a Codex version outside the table is not refused outright; it is classified by the records it
+actually writes (`rollout-format.ts`, which lists the key paths the converter reads and writes):
+
+- **Target side** — the first time a move targets such a binary, Ferretry runs it once (`codex exec`, one
+  turn, a throwaway `CODEX_HOME`, the loopback model on 127.0.0.1, every proxy variable on a closed port,
+  no login) and compares the rollout it leaves behind with the validated shape
+  (`adapters/transcript/rollout-format-probe.ts`). The answer is remembered per binary path and version; a
+  probe that could not run (timeout, the CLI refusing to start) is not remembered.
+- **Source side** — a Codex rollout from an untested version is classified from its own text, with no probe.
+- **Same shape** — the conversion proceeds, and the preview says so: "Codex X isn't one of the versions the
+  converter was tested on; the conversation format it writes is unchanged from the one validated on Codex
+  0.165." A key Codex _adds_ is not a difference; only a key the converter needs going missing is.
+- **Different shape, or a probe that could not run** — refused, with the version table and what moved
+  (`its response_item/message records no longer carry payload.role`).
+
+This is the first line of defence, not the only one: the validation run above still resumes the converted
+file in the real CLI before anything is moved. The shape check lets a harmless release through without a
+pull request; the resume still proves the writer's output is accepted.
 
 ### Adding a harness version
 
@@ -104,6 +131,18 @@ converted conversation all pass.
 3. Resume a converted file in the new version's TUI once by hand.
 4. Add the band in `versions.ts` and bump `CONVERTER_VERSION` if what the converter writes changed.
 
+For Codex this is no longer urgent when the shape is unchanged: the format gate already lets the release
+through (step 4 then just keeps the table, its fixtures and the "validated on" note current). It is needed
+when the gate refuses with a changed shape, and the nightly report below is what says so.
+
+### The nightly signal
+
+The scheduled "Harness Contract (latest)" workflow runs the contract suite, including the conversion
+acceptance, against the newest published `claude` and `codex`. A Codex outside the table passes there when
+its format is the validated one, and fails when it is not. A failed scheduled run files one GitHub issue per
+claude/codex version pair, labelled `harness-contract` (`scripts/ci/harness-contract-report.sh`), and later
+nights' failures of the same pair are added to that issue as comments rather than as new issues.
+
 ## Where it lives
 
 | Part                                             | File                                                                           |
@@ -111,6 +150,7 @@ converted conversation all pass.
 | Neutral conversation, readers, bounding, writers | `packages/daemon/src/lib/transcript/convert/`                                  |
 | The move's plan and its ports                    | `packages/daemon/src/lib/migrate/conversation-convert.ts`                      |
 | The validation run and the loopback model        | `packages/daemon/src/adapters/transcript/`                                     |
+| The rollout shape the gate compares              | `packages/daemon/src/lib/transcript/convert/rollout-format.ts`                 |
 | Wiring into migrate and the preview              | `packages/daemon/bin/fyd.ts` (`planConversion`, `convertRelaunchConversation`) |
 | The preview route                                | `packages/daemon/src/lib/runtime/mounts/session-migrate.ts`                    |
 | CLI                                              | `packages/cli/src/lib/migration/`                                              |

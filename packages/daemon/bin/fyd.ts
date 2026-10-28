@@ -424,6 +424,7 @@ import {
   TmuxPaneQueue,
 } from '../src/adapters/tmux/index.ts';
 import { CliConversionCheck, CliHarnessVersion } from '../src/adapters/transcript/conversion-check.ts';
+import { CliRolloutFormatProbe } from '../src/adapters/transcript/rollout-format-probe.ts';
 import { NodeTranscriptSource } from '../src/adapters/transcript/index.ts';
 import {
   FileSessionAttachmentCopier,
@@ -761,7 +762,9 @@ import {
   parseWatchdogLimit,
   passkeyVerifier,
   planConversationCarry,
+  needsRolloutFormatProbe,
   planConversationConvert,
+  type RolloutFormatPort,
   planInitialAttachments,
   portCandidates,
   previousConversation,
@@ -4265,6 +4268,8 @@ interface SessionMigrateParts {
   readonly conversionCheck: ConversionCheckPort;
   /** The version each harness CLI reports, which the converter is gated on. */
   readonly harnessVersion: HarnessVersionPort;
+  /** The rollout format an untested Codex version writes, which lets the converter accept it. */
+  readonly rolloutFormat: RolloutFormatPort;
   /** The harness CLI itself — the binary a target runtime's wrapper runs — or nothing when absent. */
   readonly locateHarness: (kind: HarnessKind) => string | undefined;
   /** A fresh harness conversation id for a converted conversation. */
@@ -4408,6 +4413,11 @@ async function planConversion(
   }
   const targetHome = await parts.transcriptProvenance.home(harness, executable);
   const binary = parts.locateHarness(harness);
+  const targetVersion = binary === undefined ? undefined : await parts.harnessVersion.version(binary);
+  const targetFormat =
+    binary !== undefined && needsRolloutFormatProbe(harness, targetVersion)
+      ? await parts.rolloutFormat.classify(binary, targetVersion)
+      : undefined;
   const targetModelProvider =
     harness === 'codex' && targetHome !== undefined
       ? codexModelProvider(await parts.conversationFiles.read(join(targetHome, 'config.toml'), CODEX_CONFIG_MAX_BYTES))
@@ -4419,7 +4429,8 @@ async function planConversion(
     sourceText,
     documents: documents satisfies HandoffDocuments,
     targetHome,
-    targetVersion: binary === undefined ? undefined : await parts.harnessVersion.version(binary),
+    targetVersion,
+    ...(targetFormat === undefined ? {} : { targetFormat }),
     ...(targetModelProvider === undefined ? {} : { targetModelProvider }),
     targetAgent: subject.targetAgent,
     targetModel: subject.targetModel,
@@ -4499,6 +4510,7 @@ function conversionSummaryView(summary: ConvertedConversationSummary): Conversio
     dropped: summary.dropped,
     estimatedTokens: summary.estimatedTokens,
     budgetTokens: summary.budgetTokens,
+    ...(summary.formatNote === undefined ? {} : { formatNote: summary.formatNote }),
   };
 }
 
@@ -8754,6 +8766,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         conversationFiles: new FileConversationFiles(codexRollouts),
         conversionCheck: new CliConversionCheck(),
         harnessVersion: new CliHarnessVersion(),
+        rolloutFormat: new CliRolloutFormatProbe(),
         // The SAME discovery a start's readiness check and the doctor use, so the CLI a conversion is
         // validated against is the one this host would launch.
         locateHarness: kind => {

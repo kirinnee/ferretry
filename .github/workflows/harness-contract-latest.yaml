@@ -47,3 +47,26 @@ jobs:
           name: harness-contract-latest-${{ matrix.os }}
           path: ${{ runner.temp }}/harness-contract/
           if-no-files-found: warn
+
+  # A red night nobody reads is a night nobody acts on, so a failed scheduled run files (or adds to) one
+  # issue per claude/codex version pair. Pull-request runs measure the guard itself and stay quiet.
+  report:
+    name: Report a failed harness contract
+    needs: latest
+    if: ${{ always() && needs.latest.result == 'failure' && github.event_name != 'pull_request' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: harness-contract-latest-*
+          path: ${{ runner.temp }}/results
+      - name: File or update the issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: ./scripts/ci/harness-contract-report.sh "${{ runner.temp }}/results" 2

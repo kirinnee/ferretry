@@ -1153,6 +1153,8 @@ export const ConversionSummarySchema = z.strictObject({
   estimatedTokens: NonNegativeIntegerSchema,
   /** The share of the target's window the history was allowed. */
   budgetTokens: NonNegativeIntegerSchema,
+  /** Set when a Codex version the converter was not tested on was let through because its format is the validated one. */
+  formatNote: z.string().min(1).optional(),
 });
 export type ConversionSummary = z.infer<typeof ConversionSummarySchema>;
 

@@ -19,7 +19,7 @@ import { codexRolloutRelativePath, writeCodexRollout } from '../../../src/lib/tr
 
 /**
  * The converter, measured on transcripts real CLIs wrote (`scripts/local/record-conversion-fixtures.ts`):
- * Claude Code 2.1.281 and 2.1.304, Codex 0.145.0, 0.156.1, 0.163.0 and 0.164.0. Each is converted and read back
+ * Claude Code 2.1.281 and 2.1.304, Codex 0.145.0, 0.156.1, 0.163.0, 0.164.0 and 0.165.0. Each is converted and read back
  * with the OTHER side's reader, so a round trip proves both the writer and the reader of each format.
  */
 
@@ -142,7 +142,7 @@ describe('cross-harness conversion — real Claude transcripts onto Codex', () =
 });
 
 describe('cross-harness conversion — real Codex rollouts onto Claude', () => {
-  for (const version of ['0.145.0', '0.156.1', '0.163.0', '0.164.0']) {
+  for (const version of ['0.145.0', '0.156.1', '0.163.0', '0.164.0', '0.165.0']) {
     it(`should carry Codex ${version}'s whole conversation into a transcript Claude reads back in order`, async () => {
       // Arrange
       const text = await fixture(`codex-${version}.jsonl`);
@@ -241,12 +241,12 @@ describe('cross-harness conversion — refusals', () => {
     should(untested).deepEqual({
       kind: 'refused',
       reason:
-        "This machine runs Codex 0.150.2, and the converter is tested only on Codex 0.145, 0.156, 0.163, 0.164, so Ferretry won't write a conversation it hasn't seen that version accept.",
+        "This machine runs Codex 0.150.2, and the converter is tested only on Codex 0.145, 0.156, 0.163, 0.164, 0.165, so Ferretry won't write a conversation it hasn't seen that version accept.",
     });
     should(unknown).deepEqual({
       kind: 'refused',
       reason:
-        "Ferretry couldn't tell which Codex version this machine runs, and the converter is tested only on Codex 0.145, 0.156, 0.163, 0.164, so it won't write a conversation for it.",
+        "Ferretry couldn't tell which Codex version this machine runs, and the converter is tested only on Codex 0.145, 0.156, 0.163, 0.164, 0.165, so it won't write a conversation for it.",
     });
   });
 
@@ -832,8 +832,9 @@ describe('cross-harness conversion — writers and small parts', () => {
     should(harnessVersionRefusal('claude', '2.1.199', 'source')).containEql('Claude Code 2.1.199');
     should(harnessVersionRefusal('codex', '0.156.9', 'source')).be.undefined();
     should(harnessVersionRefusal('codex', 'codex-cli 0.164.0', 'target')).be.undefined();
+    should(harnessVersionRefusal('codex', 'codex-cli 0.165.0', 'target')).be.undefined();
     should(harnessVersionRefusal('codex', '0.164.7', 'source')).be.undefined();
-    should(harnessVersionRefusal('codex', 'codex-cli 0.165.0', 'target')).containEql('Codex 0.165.0');
+    should(harnessVersionRefusal('codex', 'codex-cli 0.166.0', 'target')).containEql('Codex 0.166.0');
     should(harnessVersionRefusal('codex', '0.157.0', 'source')).containEql('Codex 0.157.0');
   });
 });
@@ -884,5 +885,101 @@ describe('cross-harness conversion — shell commands as text', () => {
     should((back.entries[0] as { text: string }).text).containEql(
       '. Tool activity from Codex is shown as text, and those tools',
     );
+  });
+});
+
+describe('cross-harness conversion — a Codex version outside the table, judged by the format it writes', () => {
+  const claude = claudeLine({ type: 'user', uuid: 'u1', message: { role: 'user', content: 'hello' } });
+  const toCodex = (format: ConversionRequest['target']['format']) =>
+    convertConversation(
+      request(
+        { harness: 'claude', text: claude, documents: NO_DOCUMENTS },
+        { harness: 'codex', version: 'codex-cli 0.170.2', ...(format === undefined ? {} : { format }) },
+      ),
+    );
+
+  it('should convert onto an untested Codex whose rollouts keep the validated shape, and say so', () => {
+    // Arrange + Act
+    const result = converted(toCodex({ kind: 'same' }));
+
+    // Assert
+    should(result.summary.formatNote).equal(
+      "Codex 0.170.2 isn't one of the versions the converter was tested on; the conversation format it writes is unchanged from the one validated on Codex 0.165.",
+    );
+    should(result.transcript).containEql('"cli_version":"0.170.2"');
+  });
+
+  it('should refuse an untested Codex whose rollouts changed, naming what moved', () => {
+    // Arrange + Act
+    const result = toCodex({ kind: 'different', reason: 'it no longer writes session_meta/- records' });
+
+    // Assert
+    should(result).deepEqual({
+      kind: 'refused',
+      reason:
+        "This machine runs Codex 0.170.2, and the converter is tested only on Codex 0.145, 0.156, 0.163, 0.164, 0.165, so Ferretry won't write a conversation it hasn't seen that version accept. The conversation format it writes also differs from the one validated on Codex 0.165: it no longer writes session_meta/- records.",
+    });
+  });
+
+  it('should refuse an untested Codex nobody could probe, and say why', () => {
+    // Arrange + Act
+    const result = toCodex({ kind: 'unchecked', reason: "the probe run didn't finish in time" });
+
+    // Assert
+    should(result.kind).equal('refused');
+    should((result as { reason: string }).reason).endWith(
+      "Ferretry also couldn't check the conversation format it writes: the probe run didn't finish in time.",
+    );
+  });
+
+  it('should keep refusing an untested Codex when no probe was run', () => {
+    // Arrange + Act + Assert
+    should(toCodex(undefined).kind).equal('refused');
+  });
+
+  it('should never let the probe verdict overrule a version it cannot read', () => {
+    // Arrange + Act
+    const result = convertConversation(
+      request(
+        { harness: 'claude', text: claude, documents: NO_DOCUMENTS },
+        { harness: 'codex', version: undefined, format: { kind: 'same' } },
+      ),
+    );
+
+    // Assert
+    should(result.kind).equal('refused');
+  });
+
+  it('should convert a Codex source of an untested version whose own rollout keeps the validated shape', async () => {
+    // Arrange
+    const text = (await fixture('codex-0.165.0.jsonl')).replace('"cli_version":"0.165.0"', '"cli_version":"0.170.2"');
+
+    // Act
+    const result = converted(
+      convertConversation(
+        request({ harness: 'codex', text, documents: NO_DOCUMENTS }, { harness: 'claude', model: 'claude-opus-5-5' }),
+      ),
+    );
+
+    // Assert
+    should(result.summary.formatNote).equal(
+      "Codex 0.170.2 isn't one of the versions the converter was tested on; the conversation format it wrote is unchanged from the one validated on Codex 0.165.",
+    );
+  });
+
+  it('should refuse a Codex source of an untested version whose rollout lost a key the converter reads', async () => {
+    // Arrange
+    const text = (await fixture('codex-0.165.0.jsonl'))
+      .replace('"cli_version":"0.165.0"', '"cli_version":"0.170.2"')
+      .replaceAll('"role":', '"speaker":');
+
+    // Act
+    const result = convertConversation(
+      request({ harness: 'codex', text, documents: NO_DOCUMENTS }, { harness: 'claude' }),
+    );
+
+    // Assert
+    should(result.kind).equal('refused');
+    should((result as { reason: string }).reason).containEql('payload.role');
   });
 });
