@@ -111,7 +111,7 @@ const fixtures = (await readdir(FIXTURES)).filter(name => name.endsWith('.txt'))
 
 describe('answering a harness permission prompt through its real pane', () => {
   it('should cover every prompt kind captured from both harnesses', () => {
-    should(fixtures.length).equal(20);
+    should(fixtures.length).equal(22);
   });
 
   for (const fixture of fixtures.sort())

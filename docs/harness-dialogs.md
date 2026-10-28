@@ -41,20 +41,21 @@ the dialog is shown to them as a card instead. Not used, on purpose:
 
 ## What is recognised
 
-Read off real panes captured from Codex 0.145.0, 0.156.1 and 0.163.0 and Claude Code 2.1.220 and 2.1.281 in throwaway
+Read off real panes captured from Codex 0.145.0, 0.156.1, 0.163.0 and 0.164.0 and Claude Code 2.1.220 and 2.1.281 in throwaway
 homes with no network. The captures are the fixtures in `packages/daemon/tests/fixtures/harness-dialogs/`.
 
-| Harness | Dialog                               | `kind`            | Options that grant trust                |
-| ------- | ------------------------------------ | ----------------- | --------------------------------------- |
-| Codex   | Hooks need review                    | `hooks-review`    | Trust all and continue                  |
-| Codex   | The hook list "Review hooks" opens   | `hooks-list`      | — (no rows; Esc closes it)              |
-| Codex   | Update available                     | `update`          | —                                       |
-| Codex   | Welcome to Codex (sign-in)           | `sign-in`         | —                                       |
-| Claude  | New MCP server found in this project | `mcp-servers`     | Use this MCP server, Use this and all … |
-| Claude  | Settings Error                       | `settings-error`  | —                                       |
-| Either  | Do you trust this folder?            | `directory-trust` | the "Yes" rows                          |
-| Codex   | Folder access: Trust this folder?    | `directory-trust` | Trust and continue                      |
-| Codex   | Folder access: Open restricted       | `directory-trust` | — (opening changes no saved trust)      |
+| Harness | Dialog                               | `kind`            | Options that grant trust                                                         |
+| ------- | ------------------------------------ | ----------------- | -------------------------------------------------------------------------------- |
+| Codex   | Hooks need review                    | `hooks-review`    | Trust all and continue                                                           |
+| Codex   | The hook list "Review hooks" opens   | `hooks-list`      | — (no rows; Esc closes it)                                                       |
+| Codex   | Update available                     | `update`          | —                                                                                |
+| Codex   | Welcome to Codex (sign-in)           | `sign-in`         | —                                                                                |
+| Claude  | New MCP server found in this project | `mcp-servers`     | Use this MCP server, Use this and all …                                          |
+| Claude  | Settings Error                       | `settings-error`  | —                                                                                |
+| Either  | Do you trust this folder?            | `directory-trust` | the "Yes" rows                                                                   |
+| Codex   | Folder access: Trust this folder?    | `directory-trust` | Trust and continue                                                               |
+| Codex   | Folder access: Open restricted       | `directory-trust` | — (opening changes no saved trust)                                               |
+| Codex   | Model migration ("Meet GPT-6 Sol")   | `other`           | — (0.164 asks it when the model has a successor; the generic reading carries it) |
 
 Any other screen of the same shape — a header, a list with a cursor on one row, and a key-hint footer that
 names Enter or Esc ("enter confirm · esc skip", "Press enter to continue", "Enter to confirm · Esc to

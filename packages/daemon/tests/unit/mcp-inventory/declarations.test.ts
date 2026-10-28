@@ -50,6 +50,25 @@ describe('MCP declarations', () => {
     should(claudeServers(null)).deepEqual({ servers: [], problems: [] });
   });
 
+  it('should read Claude’s hand-registered OAuth client, and only a usable one', () => {
+    // Arrange
+    const document = {
+      mcpServers: {
+        fixed: { type: 'http', url: 'https://a.example/mcp', oauth: { clientId: ' abc ', callbackPort: 8123 } },
+        anyPort: { type: 'http', url: 'https://b.example/mcp', oauth: { clientId: 'def', callbackPort: 70000 } },
+        noClient: { type: 'http', url: 'https://c.example/mcp', oauth: { scopes: 'read' } },
+      },
+    };
+
+    // Act
+    const read = claudeServers(document);
+
+    // Assert
+    should(read.servers[0]).containEql({ oauth: { clientId: 'abc', callbackPort: 8123 } });
+    should(read.servers[1]).containEql({ oauth: { clientId: 'def' } });
+    should(read.servers[2]).not.have.property('oauth');
+  });
+
   it('should read Codex’s tables, its bearer variable and its enabled switch', () => {
     // Act
     const read = codexServers({

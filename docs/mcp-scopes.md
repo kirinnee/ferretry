@@ -152,6 +152,8 @@ the subject and the address exactly as for a component (`mcpOAuthSecretNames`), 
 address changes names a secret nobody holds and the server reads **Needs sign-in** again. A project
 server is listed among the sign-ins only once it has one: unlike a component marked `auth: oauth`,
 nothing says it must.
+A server whose `.mcp.json` entry carries Claude's `oauth.clientId` (and `oauth.callbackPort`) signs in with
+that hand-registered client and registers nothing ([mcp-oauth.md](mcp-oauth.md#a-client-registered-by-hand)).
 
 **How the token reaches Claude.** At every launch (and relaunch) of a Claude ferret whose folder is in
 the project:

@@ -86,7 +86,12 @@ The converter is **gated to the versions it was measured on** and refuses anythi
 in plain words (`packages/daemon/src/lib/transcript/convert/versions.ts`):
 
 - Claude Code **2.1.2xx and 2.1.3xx** (measured: 2.1.281, 2.1.304)
-- Codex **0.145, 0.156, 0.163** (measured: 0.145.0, 0.156.1, 0.163.0)
+- Codex **0.145, 0.156, 0.163, 0.164** (measured: 0.145.0, 0.156.1, 0.163.0, 0.164.0)
+
+Codex 0.164.0's rollout is the 0.163.0 shape with one additive key (`content_item_metadata[].provenance` on
+developer messages, which the writer neither needs nor emits), so the writer and `CONVERTER_VERSION` are
+unchanged; its recorded fixture, the real-CLI `exec resume` contract and a by-hand TUI `codex resume` of a
+converted conversation all pass.
 
 ### Adding a harness version
 

@@ -10,7 +10,7 @@ import { HARNESS_LABEL } from './conversation.ts';
  * is refused with the table in the sentence, and widening it is a deliberate act: record the new
  * version's transcripts, add them to the round-trip fixtures and the contract suite, then add a row.
  *
- * Measured: Claude Code 2.1.281 and 2.1.304; Codex 0.145.0, 0.156.1 and 0.163.0 (their recorded
+ * Measured: Claude Code 2.1.281 and 2.1.304; Codex 0.145.0, 0.156.1, 0.163.0 and 0.164.0 (their recorded
  * transcripts are the fixtures under `tests/fixtures/transcript/convert/`).
  */
 
@@ -40,6 +40,7 @@ const SUPPORTED: Readonly<Record<TranscriptHarness, readonly SupportedBand[]>> =
     { major: 0, minor: 145, patchMin: 0, patchMax: Number.MAX_SAFE_INTEGER, label: '0.145' },
     { major: 0, minor: 156, patchMin: 0, patchMax: Number.MAX_SAFE_INTEGER, label: '0.156' },
     { major: 0, minor: 163, patchMin: 0, patchMax: Number.MAX_SAFE_INTEGER, label: '0.163' },
+    { major: 0, minor: 164, patchMin: 0, patchMax: Number.MAX_SAFE_INTEGER, label: '0.164' },
   ],
 };
 

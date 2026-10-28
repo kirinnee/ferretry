@@ -193,6 +193,19 @@ const EXPECTED: Readonly<Record<string, Shape>> = {
     escape: 'skip',
     selected: 1,
   },
+  // 0.164 asks it at startup when the configured model has a successor; Ferretry reads it as a generic dialog.
+  'codex-0.164.0-model-migration': {
+    harness: 'codex',
+    kind: 'other',
+    title: 'Meet GPT-6 Sol',
+    body: [
+      'Our latest Sol is more intelligent and more efficient so your usage limits go further. This',
+      'model is a great daily driver for complex tasks, especially coding.',
+    ].join('\n'),
+    options: [opt(1, 'Try new model'), opt(2, 'Use existing model')],
+    escape: 'confirm',
+    selected: 1,
+  },
   'codex-0.163.0-directory-trust': {
     harness: 'codex',
     kind: 'directory-trust',

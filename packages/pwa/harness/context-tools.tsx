@@ -218,7 +218,11 @@ const answer = (frame: ContextToolsFrame, path: string, init?: RequestInit): unk
   }
   if (path === '/v1/fleet/mcp-auth') return { connections: [] };
   if (path === '/v1/fleet/mcp-auth/docs..5f1c2a9b7e3d' && method === 'POST')
-    return new FyHttpError('Unlock this device first.', 403, 'grant_step_up_required');
+    return new FyHttpError(
+      'The sign-in provider refused new apps: invalid_client_metadata — redirect_uris must be registered by an administrator. auth.example.com answered HTTP 400 to Ferretry’s registration. Tried 3 ways: the Ferretry page; a localhost address; a localhost address, required fields only. If it only accepts apps registered by hand, register one there and give its client id to this server’s “oauth” settings (docs/mcp-oauth.md).',
+      409,
+      'mcp_auth_registration',
+    );
   return harnessCatalogAnswer(path, init);
 };
 

@@ -27,6 +27,20 @@ export interface FakeProviderOptions {
   readonly issParameterSupported?: boolean;
   /** Leave `iss` off the authorization response. */
   readonly omitIss?: boolean;
+  /**
+   * Refuse a registration request this matches, with the RFC 7591 §3.2.2 answer it returns — the knob for
+   * a provider that wants another auth method, objects to a field, or will not take new apps at all.
+   */
+  readonly refuseRegistration?: (metadata: Readonly<Record<string, unknown>>) => RegistrationRefusal | undefined;
+  /** Advertise RFC 8414 `token_endpoint_auth_methods_supported`. */
+  readonly tokenAuthMethods?: readonly string[];
+}
+
+/** What a refusing registration endpoint answers. */
+interface RegistrationRefusal {
+  readonly status: number;
+  readonly error?: string;
+  readonly error_description?: string;
 }
 
 interface Pending {
@@ -51,8 +65,12 @@ export class FakeProvider {
   readonly authorizationCodes: string[] = [];
   readonly bearersSeen: string[] = [];
   readonly revoked: string[] = [];
-  readonly registrations: { clientId: string; redirectUris: readonly string[] }[] = [];
+  readonly registrations: { clientId: string; redirectUris: readonly string[]; secret?: string }[] = [];
+  /** Every registration request's metadata, refused or not, in order. */
+  readonly registrationRequests: Record<string, unknown>[] = [];
   readonly tokenRequests: URLSearchParams[] = [];
+  /** Every token request's `Authorization` header (`undefined` when it had none), in order. */
+  readonly tokenAuthorizations: (string | undefined)[] = [];
   private readonly pending = new Map<string, Pending>();
   private readonly refreshTokens = new Map<string, string>();
   private readonly accessTokens = new Set<string>();
@@ -113,6 +131,9 @@ export class FakeProvider {
         ...(this.options.issParameterSupported === true
           ? { authorization_response_iss_parameter_supported: true }
           : {}),
+        ...(this.options.tokenAuthMethods === undefined
+          ? {}
+          : { token_endpoint_auth_methods_supported: this.options.tokenAuthMethods }),
       });
     if (path === `${prefix}/register` && request.method === 'POST') return this.register(request);
     if (path === `${prefix}/authorize`) return this.authorize(url);
@@ -139,18 +160,51 @@ export class FakeProvider {
   }
 
   private async register(request: Request): Promise<Response> {
-    const body = (await request.json()) as { redirect_uris?: string[] };
+    const body = (await request.json()) as Record<string, unknown> & { redirect_uris?: string[] };
+    this.registrationRequests.push(body);
     const redirectUris = body.redirect_uris ?? [];
     if (redirectUris.some(uri => this.options.refuseRedirect?.(uri) === true))
       return json(400, { error: 'invalid_redirect_uri', error_description: 'not allowed here' });
-    const clientId = this.mint('client');
-    this.registrations.push({ clientId, redirectUris });
-    if (this.options.confidential === true) {
-      const secret = this.mint('client-secret');
-      this.issued.push(secret);
-      return json(201, { client_id: clientId, client_secret: secret });
+    const refusal = this.options.refuseRegistration?.(body);
+    if (refusal !== undefined) {
+      const { status, ...reason } = refusal;
+      return json(status, reason);
     }
-    return json(201, { client_id: clientId });
+    const method = typeof body.token_endpoint_auth_method === 'string' ? body.token_endpoint_auth_method : undefined;
+    // RFC 7591 §2: a client that asks for a secret method — or names none, whose default is basic — gets one.
+    const confidential = this.options.confidential === true || method !== 'none';
+    const clientId = this.mint('client');
+    if (!confidential) {
+      this.registrations.push({ clientId, redirectUris });
+      return json(201, { client_id: clientId });
+    }
+    const secret = this.mint('client-secret');
+    this.issued.push(secret);
+    this.registrations.push({ clientId, redirectUris, secret });
+    return json(201, { client_id: clientId, client_secret: secret });
+  }
+
+  /** A client somebody registered here by hand, as a provider's console would. */
+  preRegister(clientId: string, redirectUris: readonly string[], secret?: string): void {
+    this.registrations.push({ clientId, redirectUris, ...(secret === undefined ? {} : { secret }) });
+  }
+
+  /**
+   * RFC 6749 §2.3.1: a client with a secret proves it, in the form or as a Basic credential — the fake
+   * holds the daemon to sending it, the right one, one way.
+   */
+  private clientAuthenticated(form: URLSearchParams, authorization: string | null): boolean {
+    const registration = this.registrations.find(entry => entry.clientId === form.get('client_id'));
+    if (registration?.secret === undefined) return true;
+    const posted = form.get('client_secret');
+    if (authorization?.startsWith('Basic ') === true) {
+      if (posted !== null) return false;
+      const [id, secret] = atob(authorization.slice('Basic '.length))
+        .split(':')
+        .map(part => decodeURIComponent(part.replaceAll('+', ' ')));
+      return id === registration.clientId && secret === registration.secret;
+    }
+    return posted === registration.secret;
   }
 
   private authorize(url: URL): Response {
@@ -195,6 +249,9 @@ export class FakeProvider {
   private async token(request: Request): Promise<Response> {
     const form = new URLSearchParams(await request.text());
     this.tokenRequests.push(form);
+    this.tokenAuthorizations.push(request.headers.get('authorization') ?? undefined);
+    if (!this.clientAuthenticated(form, request.headers.get('authorization')))
+      return json(401, { error: 'invalid_client' });
     if (form.get('grant_type') === 'refresh_token') {
       if (this.refreshError !== undefined) return json(400, { error: this.refreshError });
       const refresh = form.get('refresh_token') ?? '';

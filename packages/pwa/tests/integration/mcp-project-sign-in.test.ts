@@ -22,7 +22,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { type IFyHttpTransport, mcpOAuthSecretNames } from '@ferretry/protocol';
-import { FyApiClient } from '@ferretry/protocol/client';
+import { FyApiClient, FyHttpError } from '@ferretry/protocol/client';
 import should from 'should';
 import { FileClaudeLocalScope, FileMcpHarnessDocuments } from '../../../daemon/src/adapters/mcp-inventory/index.ts';
 import { FetchMcpOAuthHttp } from '../../../daemon/src/adapters/mcp-oauth/index.ts';
@@ -42,11 +42,12 @@ import { McpOAuthService } from '../../../daemon/src/lib/mcp-oauth/index.ts';
 import { mcpInventoryRoutes } from '../../../daemon/src/lib/runtime/mounts/mcp-inventory.ts';
 import { mcpOAuthRoutes } from '../../../daemon/src/lib/runtime/mounts/mcp-oauth.ts';
 import { request as apiRequest } from '../../../daemon/tests/unit/api/support.ts';
-import { FakeProvider } from '../../../daemon/tests/unit/mcp-oauth/fake-provider.ts';
+import { FakeProvider, type FakeProviderOptions } from '../../../daemon/tests/unit/mcp-oauth/fake-provider.ts';
 import { leaks, PWA_REDIRECT, testCrypto, world } from '../../../daemon/tests/unit/mcp-oauth/support.ts';
 import { CREDENTIALS, GRANTED, sessionView } from '../../../daemon/tests/unit/runtime/mounts/support.ts';
 import { finishMcpSignIn, startMcpSignIn } from '../../src/features/fleet/mcp-auth-api.ts';
 import { readSessionMcpServers } from '../../src/features/mcp/mcp-api.ts';
+import { plainFailure } from '../../src/features/mcp/mcp-model.ts';
 
 const WRAPPER = '/fy/bin/claude-work';
 const cleanups: (() => Promise<void>)[] = [];
@@ -56,14 +57,14 @@ afterEach(async () => {
 });
 
 /** The fake MCP server and OAuth provider, on a loopback port of its own. */
-function listeningProvider(): FakeProvider {
+function listeningProvider(options: FakeProviderOptions = {}): FakeProvider {
   let provider: FakeProvider | undefined;
   const server = Bun.serve({
     hostname: '127.0.0.1',
     port: 0,
     fetch: async request => await (provider as FakeProvider).handle(request),
   });
-  provider = new FakeProvider(`http://127.0.0.1:${server.port}`);
+  provider = new FakeProvider(`http://127.0.0.1:${server.port}`, options);
   cleanups.push(async () => void (await server.stop(true)));
   return provider;
 }
@@ -97,7 +98,8 @@ async function browserClient(dispatcher: ApiDispatcher): Promise<FyApiClient> {
   });
 }
 
-async function machine() {
+/** `entry` adds fields to phoebe's `.mcp.json` entry — Claude's `oauth` block, say. */
+async function machine(options: FakeProviderOptions = {}, entry: Record<string, unknown> = {}) {
   const root = await mkdtemp(path.join(tmpdir(), 'fy-pwa-mcp-signin-'));
   cleanups.push(async () => await rm(root, { recursive: true, force: true }));
   const home = path.join(root, 'fleet/homes/claude-work-id');
@@ -105,10 +107,10 @@ async function machine() {
   // The owner's PE checkout: a repository with a `.mcp.json`, and no Ferretry project registered for it.
   const pe = path.join(root, 'work/vungle/PE');
   await Promise.all([home, registered, pe].map(async folder => await mkdir(folder, { recursive: true })));
-  const provider = listeningProvider();
+  const provider = listeningProvider(options);
   await writeFile(
     path.join(pe, '.mcp.json'),
-    JSON.stringify({ mcpServers: { phoebe: { type: 'http', url: provider.serverUrl } } }),
+    JSON.stringify({ mcpServers: { phoebe: { type: 'http', url: provider.serverUrl, ...entry } } }),
   );
   await writeFile(path.join(home, '.claude.json'), JSON.stringify({ numStartups: 3, projects: {} }));
 
@@ -218,5 +220,55 @@ describe('signing in to a project MCP server from the PWA', () => {
 
     // Assert
     should(String(refused)).containEql(`in ${m.pe}/.mcp.json any more`);
+  });
+});
+
+describe('when phoebe’s sign-in provider will not register Ferretry', () => {
+  /** The row's sign-in subject, read the way the PWA reads it. */
+  const subjectOf = async (m: Awaited<ReturnType<typeof machine>>): Promise<string> =>
+    (await readSessionMcpServers(m.client, 's1')).servers.find(server => server.name === 'phoebe')?.signIn?.subject ??
+    '';
+
+  it('should say why — the provider’s reason, its status, its host — as a sign-in refusal, not a dead machine', async () => {
+    // Arrange — every registration is refused the way a provider that wants admin approval refuses it.
+    const m = await machine({
+      refuseRegistration: () => ({
+        status: 403,
+        error: 'access_denied',
+        error_description: 'new clients must be approved by an administrator',
+      }),
+    });
+
+    // Act
+    const refused = await startMcpSignIn(m.client, await subjectOf(m), { redirectUri: PWA_REDIRECT }).then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+
+    // Assert
+    should(refused).be.instanceOf(FyHttpError);
+    should((refused as FyHttpError).code).equal('mcp_auth_registration');
+    should((refused as FyHttpError).message).startWith(
+      'The sign-in provider refused new apps: access_denied — new clients must be approved by an administrator.',
+    );
+    should((refused as FyHttpError).message).containEql(`${new URL(m.provider.origin).host} answered HTTP 403`);
+    should(plainFailure((refused as Error).message, 'Liftoff MBP', 'start signing in to phoebe', true).headline).equal(
+      'Couldn’t start signing in to phoebe',
+    );
+  });
+
+  it('should sign in with the client Claude’s `.mcp.json` names, registering nothing', async () => {
+    // Arrange — the provider has no registration endpoint; the client was registered by hand for port 8123.
+    const m = await machine({ noRegistration: true }, { oauth: { clientId: 'hand-1', callbackPort: 8123 } });
+    m.provider.preRegister('hand-1', ['http://localhost:8123/callback']);
+
+    // Act
+    const flow = await startMcpSignIn(m.client, await subjectOf(m), { redirectUri: PWA_REDIRECT });
+    const completion = await finishMcpSignIn(m.client, flow.flowId, await m.provider.approve(flow.authorizeUrl));
+
+    // Assert
+    should(flow).containEql({ mode: 'paste', redirectUri: 'http://localhost:8123/callback' });
+    should(completion.connection.state).equal('signed-in');
+    should(m.provider.registrationRequests).have.length(0);
   });
 });

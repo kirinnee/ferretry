@@ -5,7 +5,6 @@ import {
   flowIdentifier,
   flowState,
   pkcePair,
-  registrationAnswer,
   sameText,
   tokenAnswer,
   tokenRefusal,
@@ -98,26 +97,5 @@ describe('token and registration answers', () => {
     for (const code of ['invalid_grant', 'invalid_client', 'unauthorized_client', 'invalid_scope'])
       should(tokenRefusal(code)).not.equal(tokenRefusal('anything-else'));
     should(tokenRefusal('anything-else')).equal('The provider did not finish the sign-in. Start again.');
-  });
-
-  it('should read a registration, a refused redirect and any other refusal', () => {
-    should(registrationAnswer(201, JSON.stringify({ client_id: 'c1' }))).deepEqual({
-      kind: 'registered',
-      clientId: 'c1',
-    });
-    should(registrationAnswer(200, JSON.stringify({ client_id: 'c1', client_secret: 'secret-0123456789' }))).deepEqual({
-      kind: 'registered',
-      clientId: 'c1',
-      clientSecret: 'secret-0123456789',
-    });
-    should(registrationAnswer(201, '{}')).deepEqual({ kind: 'refused' });
-    should(registrationAnswer(400, JSON.stringify({ error: 'invalid_redirect_uri' }))).deepEqual({
-      kind: 'redirect-refused',
-    });
-    should(registrationAnswer(400, JSON.stringify({ error: 'invalid_client_metadata' }))).deepEqual({
-      kind: 'redirect-refused',
-    });
-    should(registrationAnswer(400, JSON.stringify({ error: 'access_denied' }))).deepEqual({ kind: 'refused' });
-    should(registrationAnswer(503, '')).deepEqual({ kind: 'refused' });
   });
 });

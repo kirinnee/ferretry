@@ -1093,7 +1093,9 @@ Each is easy to change later.
   ferret's launch environment at creation and the generated wrapper prepends the flag at exec time
   unless it is `interactive` (a launch with no mode is unattended). Codex gates `request_user_input`
   behind `default_mode_request_user_input`, so the same line passes `--enable` for an interactive
-  ferret only.
+  ferret only. **Codex 0.164 exits on that flag unless `--no-daemon` is also passed** ("Cannot use the shared
+  background server: This session requires default_mode_request_user_input"); 0.145 rejects `--no-daemon`, so
+  the wrapper has to add it only where it is accepted.
 - **O4 — Claude "Auto mode"** needs `--permission-mode auto`. If the pinned Claude does not accept it,
   the agent runtime **refuses to launch** with a message naming the fix (switch Agent permissions or
   update Claude). Auto is never silently mapped to a weaker or stronger mode.

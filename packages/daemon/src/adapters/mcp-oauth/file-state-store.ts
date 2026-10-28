@@ -8,6 +8,7 @@
  * and quietly orphaning the tokens the store still holds.
  */
 import { join } from 'node:path';
+import { SecretNameSchema } from '@ferretry/protocol';
 import { z } from 'zod';
 import type { FileSystemPort, FoundationPaths } from '../../lib/index.ts';
 import type { McpOAuthStateDocument, McpOAuthStateStore } from '../../lib/mcp-oauth/ports.ts';
@@ -19,12 +20,19 @@ const STATE_MODE = 0o600;
 
 const Text = z.string().min(1).max(2048);
 
+/** How a client with a secret authenticates, and where a pre-registered client's secret is named. */
+const CLIENT_AUTH_SHAPE = {
+  tokenAuth: z.enum(['client_secret_post', 'client_secret_basic']).optional(),
+  clientSecretRef: SecretNameSchema.optional(),
+} as const;
+
 const RegistrationSchema = z.strictObject({
   issuer: Text,
   redirectUri: Text,
   paste: z.literal(true).optional(),
   clientId: Text,
   hasClientSecret: z.boolean(),
+  ...CLIENT_AUTH_SHAPE,
 });
 
 const RecordSchema = z.strictObject({
@@ -35,6 +43,7 @@ const RecordSchema = z.strictObject({
   revocationEndpoint: Text.optional(),
   clientId: Text,
   hasClientSecret: z.boolean(),
+  ...CLIENT_AUTH_SHAPE,
   resource: Text,
   scope: z.string().max(2048).optional(),
   signedInAt: Text,

@@ -290,6 +290,8 @@ function componentOf(
           ...(input.args === undefined ? {} : { args: [...input.args] }),
           ...(input.url === undefined ? {} : { url: input.url }),
           ...(input.auth === undefined ? {} : { auth: input.auth }),
+          // A hand-registered client (`oauth`) has no field in the form: an edit that keeps the sign-in keeps it.
+          ...(input.auth === 'oauth' && existing?.oauth !== undefined ? { oauth: existing.oauth } : {}),
           ...(env === undefined ? {} : { env }),
           ...harness,
         },

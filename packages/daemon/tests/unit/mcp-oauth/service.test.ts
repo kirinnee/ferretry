@@ -13,8 +13,8 @@ const SERVER = 'http://127.0.0.1:4100/mcp';
 const NAMES = mcpOAuthSecretNames('linear', SERVER);
 /** The PWA redirect a flow with the fake provider gets: the base plus that provider's own path. */
 const FLOW_REDIRECT = `https://ferretry.example.test${mcpOAuthRedirectPath('http://127.0.0.1:4100/auth')}`;
-/** A loopback redirect at the fake provider's own path, on any ephemeral port. */
-const LOOPBACK = /^http:\/\/127\.0\.0\.1:(49[1-9]\d\d|[5-6]\d{4})\/oauth\/mcp-callback\/[0-9a-f]{16}$/u;
+/** Claude Code's loopback redirect, on any ephemeral port. */
+const LOOPBACK = /^http:\/\/localhost:(49[1-9]\d\d|[5-6]\d{4})\/callback$/u;
 
 async function refusalOf(work: Promise<unknown>): Promise<McpOAuthRefusal> {
   try {
@@ -153,21 +153,39 @@ describe('McpOAuthService', () => {
       should(message).match(/does not let new apps register/u);
     });
 
-    it('should refuse when the provider will not register Ferretry at all', async () => {
+    it('should refuse when the provider will not register Ferretry at all, saying why, where and every way it asked', async () => {
       // Arrange — the loopback address is refused too, so the fallback has nowhere to go.
       const w = world({ refuseRedirect: () => true });
 
-      // Act / Assert
-      await refusedWith(w.service.start('linear', { redirectUri: PWA_REDIRECT }), 'mcp_auth_registration');
+      // Act
+      const message = await refusedWith(
+        w.service.start('linear', { redirectUri: PWA_REDIRECT }),
+        'mcp_auth_registration',
+      );
+
+      // Assert
+      should(message).startWith('The sign-in provider refused new apps: invalid_redirect_uri — not allowed here.');
+      should(message).containEql('127.0.0.1:4100 answered HTTP 400');
+      should(message).containEql('Tried 3 ways');
+      should(w.provider.registrationRequests.length).be.belowOrEqual(4);
     });
 
-    it('should treat an unreachable registration endpoint as a refusal', async () => {
+    it('should say an unreachable registration endpoint is a network problem, naming the host and the failure', async () => {
       // Arrange
       const w = world();
       w.http.failing.add(`${w.provider.origin}/auth/register`);
+      w.http.failure = 'UNABLE_TO_GET_ISSUER_CERT_LOCALLY';
 
-      // Act / Assert
-      await refusedWith(w.service.start('linear', {}), 'mcp_auth_registration');
+      // Act
+      const message = await refusedWith(w.service.start('linear', {}), 'mcp_auth_registration');
+
+      // Assert
+      should(message).startWith('Ferretry’s daemon couldn’t reach 127.0.0.1:4100 to register Ferretry');
+      should(message).containEql('certificate');
+      should(message).containEql('(network error: UNABLE_TO_GET_ISSUER_CERT_LOCALLY)');
+      should(message).containEql('docs/mcp-oauth.md');
+      // Not retried: asking another way does not help a request that got no answer.
+      should(w.http.requests.filter(request => request.url.endsWith('/auth/register'))).have.length(1);
     });
 
     it('should treat a server with no resource metadata as its own authorization server', async () => {
@@ -182,7 +200,7 @@ describe('McpOAuthService', () => {
       should(new URL(flow.authorizeUrl).searchParams.has('scope')).be.false();
     });
 
-    it('should say the server could not be reached, quoting nothing, when the network fails', async () => {
+    it('should say the server could not be reached, naming only its host and the failure, when the network fails', async () => {
       // Arrange
       const w = world();
       w.http.failing.add(w.provider.serverUrl);
@@ -191,7 +209,8 @@ describe('McpOAuthService', () => {
       const message = await refusedWith(w.service.start('linear', {}), 'mcp_auth_discovery');
 
       // Assert
-      should(message).match(/could not reach the server/u);
+      should(message).startWith('Ferretry’s daemon couldn’t reach 127.0.0.1:4100 to find out how this server signs in');
+      should(message).containEql('(network error: ConnectionRefused)');
     });
 
     it('should refuse a server that describes no authorization server anywhere', async () => {
@@ -901,5 +920,280 @@ describe('McpOAuthService — review round 2', () => {
     // Act / Assert
     should(await w.service.signOut('linear')).deepEqual({ component: 'linear', removed: true, revoked: false });
     should(w.secrets.entries.size).equal(0);
+  });
+});
+
+describe('McpOAuthService — registering the way real clients do', () => {
+  /** A registration request's metadata, by position. */
+  const registered = (w: ReturnType<typeof world>, index: number) => w.provider.registrationRequests[index] ?? {};
+
+  it('should first ask for exactly what Claude Code asks for, the server’s scope included', async () => {
+    // Arrange
+    const w = world();
+
+    // Act
+    await w.service.start('linear', { redirectUri: PWA_REDIRECT });
+
+    // Assert
+    should(w.provider.registrationRequests).have.length(1);
+    should(registered(w, 0)).deepEqual({
+      client_name: 'Ferretry',
+      redirect_uris: [FLOW_REDIRECT],
+      grant_types: ['authorization_code', 'refresh_token'],
+      response_types: ['code'],
+      token_endpoint_auth_method: 'none',
+      scope: 'mcp:tools',
+    });
+  });
+
+  it('should retry with a localhost address after any 4xx to the PWA’s, and finish by paste', async () => {
+    // Arrange — a provider that refuses the PWA's address without saying it is the address.
+    const w = world({
+      refuseRegistration: metadata =>
+        String((metadata.redirect_uris as string[])[0]).startsWith('https://') ? { status: 403 } : undefined,
+    });
+
+    // Act
+    const flow = await w.service.start('linear', { redirectUri: PWA_REDIRECT });
+    const completion = await w.service.complete(flow.flowId, { callback: await w.provider.approve(flow.authorizeUrl) });
+
+    // Assert
+    should(flow.mode).equal('paste');
+    should(flow.redirectUri).match(LOOPBACK);
+    should(flow.note).match(/paste an address/u);
+    should(w.provider.registrationRequests).have.length(2);
+    should(completion.connection.state).equal('signed-in');
+  });
+
+  it('should register with client_secret_post when the provider will not take a public client, and send the secret in the form', async () => {
+    // Arrange
+    const w = world({
+      refuseRegistration: metadata =>
+        metadata.token_endpoint_auth_method === 'none'
+          ? {
+              status: 400,
+              error: 'invalid_client_metadata',
+              error_description: 'token_endpoint_auth_method none is not supported',
+            }
+          : undefined,
+    });
+
+    // Act
+    const { completion } = await signIn(w);
+
+    // Assert
+    should(registered(w, 1)).containEql({ token_endpoint_auth_method: 'client_secret_post' });
+    should(completion.connection.state).equal('signed-in');
+    const secret = w.provider.registrations[0]?.secret as string;
+    should(w.provider.tokenRequests[0]?.get('client_secret')).equal(secret);
+    should(w.provider.tokenAuthorizations[0]).be.undefined();
+    should(w.state.document.registrations.linear?.[0]).not.have.property('tokenAuth');
+    should(leaks(w.provider, w.state.document, completion)).be.empty();
+  });
+
+  it('should fall through to client_secret_basic, and send the secret as a Basic credential on every request', async () => {
+    // Arrange — public and form-posted secrets are both refused.
+    const w = world({
+      expiresIn: 10,
+      refuseRegistration: metadata =>
+        metadata.token_endpoint_auth_method === 'client_secret_basic'
+          ? undefined
+          : { status: 400, error: 'invalid_client_metadata', error_description: 'unsupported auth method' },
+    });
+
+    // Act
+    const { completion } = await signIn(w);
+    w.clock.at += 60_000;
+    await w.service.refreshForLaunch([NAMES.access]);
+
+    // Assert
+    should(w.provider.registrationRequests.map(metadata => metadata.token_endpoint_auth_method)).deepEqual([
+      'none',
+      'client_secret_post',
+      'client_secret_basic',
+    ]);
+    should(completion.connection.state).equal('signed-in');
+    should(w.provider.tokenRequests).have.length(2);
+    for (const [index, form] of w.provider.tokenRequests.entries()) {
+      should(form.has('client_secret')).be.false();
+      should(w.provider.tokenAuthorizations[index]).startWith('Basic ');
+    }
+    should(w.state.document.connections.linear).containEql({ tokenAuth: 'client_secret_basic' });
+    should(leaks(w.provider, w.state.document, completion)).be.empty();
+  });
+
+  it('should start with the client authentication the provider advertises when it takes no public clients', async () => {
+    // Arrange
+    const w = world({ tokenAuthMethods: ['client_secret_basic'] });
+
+    // Act
+    await signIn(w);
+
+    // Assert
+    should(w.provider.registrationRequests).have.length(1);
+    should(registered(w, 0)).containEql({ token_endpoint_auth_method: 'client_secret_basic' });
+    should(w.provider.tokenAuthorizations[0]).startWith('Basic ');
+  });
+
+  it('should leave the optional fields out when the provider objects to one', async () => {
+    // Arrange
+    const w = world({
+      refuseRegistration: metadata =>
+        metadata.scope === undefined
+          ? undefined
+          : { status: 400, error: 'invalid_client_metadata', error_description: 'scope mcp:tools is not allowed' },
+    });
+
+    // Act
+    const flow = await w.service.start('linear', { redirectUri: PWA_REDIRECT });
+
+    // Assert
+    should(flow.mode).equal('pwa');
+    should(registered(w, 1)).deepEqual({ client_name: 'Ferretry', redirect_uris: [FLOW_REDIRECT] });
+  });
+
+  it('should stop after a few tries however the provider answers, and list every way it asked', async () => {
+    // Arrange — every request is refused with a reason that invites another auth method.
+    const w = world({
+      refuseRegistration: () => ({
+        status: 400,
+        error: 'invalid_client_metadata',
+        error_description: 'bad auth method',
+      }),
+    });
+
+    // Act
+    const message = await refusedWith(
+      w.service.start('linear', { redirectUri: PWA_REDIRECT }),
+      'mcp_auth_registration',
+    );
+
+    // Assert
+    should(w.provider.registrationRequests).have.length(4);
+    should(message).containEql(
+      'Tried 4 ways: the Ferretry page; the Ferretry page, client_secret_post; the Ferretry page, client_secret_basic; a localhost address, client_secret_basic.',
+    );
+  });
+
+  it('should not retry a provider that failed (5xx), and say it failed rather than refused', async () => {
+    // Arrange
+    const w = world({ refuseRegistration: () => ({ status: 503, error: 'temporarily_unavailable' }) });
+
+    // Act
+    const message = await refusedWith(w.service.start('linear', {}), 'mcp_auth_registration');
+
+    // Assert
+    should(w.provider.registrationRequests).have.length(1);
+    should(message).startWith('The sign-in provider failed while registering Ferretry: temporarily_unavailable.');
+  });
+
+  it('should mask a credential-shaped value a provider put in its description', async () => {
+    // Arrange
+    const w = world({
+      refuseRegistration: () => ({
+        status: 401,
+        error: 'invalid_token',
+        error_description: 'initial access token required, got token=abc123 eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9xyz1',
+      }),
+    });
+
+    // Act
+    const message = await refusedWith(w.service.start('linear', {}), 'mcp_auth_registration');
+
+    // Assert
+    should(message).containEql(
+      'invalid_token — initial access token required, got token=[redacted] [redacted]. 127.0.0.1:4100 answered HTTP 401',
+    );
+    should(message).not.containEql('abc123');
+  });
+});
+
+describe('McpOAuthService — a client registered by hand', () => {
+  const HAND_SECRET = 'hand-secret-0123456789';
+
+  function handWorld(client: { clientSecret?: string; callbackPort?: number }) {
+    const w = world({ noRegistration: true });
+    w.servers = [
+      {
+        component: 'linear',
+        url: w.provider.serverUrl,
+        auth: 'oauth',
+        client: { clientId: 'hand-1', ...client },
+      },
+    ];
+    return w;
+  }
+
+  it('should register nothing, return to its localhost callback port, and send its configured secret', async () => {
+    // Arrange
+    const w = handWorld({ clientSecret: 'LINEAR_CLIENT_SECRET', callbackPort: 8123 });
+    await w.secrets.put('LINEAR_CLIENT_SECRET', HAND_SECRET);
+    w.provider.preRegister('hand-1', ['http://localhost:8123/callback'], HAND_SECRET);
+
+    // Act
+    const flow = await w.service.start('linear', { redirectUri: PWA_REDIRECT });
+    const completion = await w.service.complete(flow.flowId, { callback: await w.provider.approve(flow.authorizeUrl) });
+
+    // Assert
+    should(w.provider.registrationRequests).have.length(0);
+    should(flow).containEql({ mode: 'paste', redirectUri: 'http://localhost:8123/callback' });
+    should(flow.note).match(/registered with its provider by hand/u);
+    should(new URL(flow.authorizeUrl).searchParams.get('client_id')).equal('hand-1');
+    should(completion.connection.state).equal('signed-in');
+    should(w.provider.tokenRequests[0]?.get('client_secret')).equal(HAND_SECRET);
+    should(w.state.document.connections.linear).containEql({ clientSecretRef: 'LINEAR_CLIENT_SECRET' });
+    should(JSON.stringify(w.state.document)).not.containEql(HAND_SECRET);
+  });
+
+  it('should leave the person’s own client secret in the store at sign-out', async () => {
+    // Arrange
+    const w = handWorld({ clientSecret: 'LINEAR_CLIENT_SECRET', callbackPort: 8123 });
+    await w.secrets.put('LINEAR_CLIENT_SECRET', HAND_SECRET);
+    w.provider.preRegister('hand-1', ['http://localhost:8123/callback'], HAND_SECRET);
+    const flow = await w.service.start('linear', {});
+    await w.service.complete(flow.flowId, { callback: await w.provider.approve(flow.authorizeUrl) });
+
+    // Act
+    await w.service.signOut('linear');
+
+    // Assert
+    should(w.secrets.entries.has(NAMES.access)).be.false();
+    should(w.secrets.entries.get('LINEAR_CLIENT_SECRET')).equal(HAND_SECRET);
+  });
+
+  it('should say a configured secret the store does not hold before sending anyone anywhere', async () => {
+    // Arrange
+    const w = handWorld({ clientSecret: 'LINEAR_CLIENT_SECRET' });
+
+    // Act
+    const message = await refusedWith(w.service.start('linear', {}), 'mcp_auth_registration');
+
+    // Assert
+    should(message).containEql(`\${secret:LINEAR_CLIENT_SECRET}`);
+    should(message).containEql('Settings → Secrets');
+  });
+
+  it('should use a fresh localhost port for a public client registered without one', async () => {
+    // Arrange
+    const w = handWorld({});
+
+    // Act
+    const flow = await w.service.start('linear', {});
+
+    // Assert
+    should(flow.mode).equal('paste');
+    should(flow.redirectUri).match(LOOPBACK);
+    should(flow).not.have.property('note');
+  });
+
+  it('should tell a provider without registration that a client id is the way in', async () => {
+    // Arrange
+    const w = world({ noRegistration: true });
+
+    // Act
+    const message = await refusedWith(w.service.start('linear', {}), 'mcp_auth_registration');
+
+    // Assert
+    should(message).containEql('client id');
   });
 });

@@ -28,6 +28,7 @@
 import {
   isLoopbackHost,
   MCP_OAUTH_LOOPBACK_HOST,
+  MCP_OAUTH_LOOPBACK_PATH,
   type McpOAuthCompleteRequest,
   type McpOAuthCompletion,
   type McpOAuthConnection,
@@ -38,6 +39,7 @@ import {
   mcpOAuthRedirectPath,
   mcpOAuthSecretNames,
   type SecretName,
+  secretReference,
   sha256Hex,
 } from '@ferretry/protocol';
 import { checkCallback, pwaRedirectUri } from './callback.ts';
@@ -55,22 +57,37 @@ import {
   requestedScope,
 } from './discovery.ts';
 import { flowIdentifier, flowState, pkcePair } from './pkce.ts';
-import type {
-  McpOAuthClock,
-  McpOAuthCrypto,
-  McpOAuthHttp,
-  McpOAuthHttpResponse,
-  McpOAuthPendingFlow,
-  McpOAuthRecord,
-  McpOAuthRegistration,
-  McpOAuthSecretValues,
-  McpOAuthSecretWriter,
-  McpOAuthServer,
-  McpOAuthServers,
-  McpOAuthStateDocument,
-  McpOAuthStateStore,
+import {
+  type McpOAuthClientAuth,
+  type McpOAuthClock,
+  type McpOAuthCrypto,
+  type McpOAuthHttp,
+  type McpOAuthHttpRequest,
+  type McpOAuthHttpResponse,
+  type McpOAuthPendingFlow,
+  type McpOAuthRecord,
+  type McpOAuthRegistration,
+  type McpOAuthSecretValues,
+  type McpOAuthSecretWriter,
+  type McpOAuthServer,
+  type McpOAuthServers,
+  type McpOAuthStateDocument,
+  type McpOAuthStateStore,
+  type McpOAuthStaticClient,
+  McpOAuthUnreachable,
 } from './ports.ts';
-import { registrationAnswer, tokenAnswer, tokenRefusal } from './tokens.ts';
+import {
+  firstRegistrationAttempt,
+  MAX_REGISTRATION_ATTEMPTS,
+  nextRegistrationAttempt,
+  type RegistrationAttempt,
+  type RegistrationAuth,
+  registrationAnswer,
+  registrationMetadata,
+  registrationRefusal,
+  unreachableSentence,
+} from './registration.ts';
+import { tokenAnswer, tokenRefusal } from './tokens.ts';
 
 /** How long a person has to finish a sign-in. */
 export const MCP_OAUTH_FLOW_TTL_MS = 10 * 60 * 1000;
@@ -151,11 +168,47 @@ const hostOf = (url: string): string => new URL(url).host;
 const clientSecretName = (component: string, issuer: string, redirectUri: string): SecretName =>
   `MCP_CLIENT_${sha256Hex(`${component}\n${issuer}\n${redirectUri}`).slice(0, 24).toUpperCase()}`;
 
+/** Just the client-authentication fields, so a registration's carry into its flow and its record unchanged. */
+const clientAuthOf = (source: McpOAuthClientAuth): McpOAuthClientAuth => ({
+  ...(source.tokenAuth === undefined ? {} : { tokenAuth: source.tokenAuth }),
+  ...(source.clientSecretRef === undefined ? {} : { clientSecretRef: source.clientSecretRef }),
+});
+
+/** RFC 6749 §2.3.1: each half form-encoded before the Basic credential is built. */
+const formEncoded = (value: string): string => encodeURIComponent(value).replaceAll('%20', '+');
+
+/** What a person is told when the sheet will ask for a pasted address instead of coming back on its own. */
+const PASTE_NOTE =
+  'This provider does not send you back to Ferretry automatically, so you will paste an address instead.';
+
+/** The client authentication to ask for first: none, unless the provider says it takes no public clients. */
+const firstAuth = (server: AuthorizationServer): RegistrationAuth => {
+  const supported = server.tokenAuthMethods;
+  if (supported === undefined || supported.includes('none')) return 'none';
+  if (supported.includes('client_secret_post')) return 'client_secret_post';
+  return supported.includes('client_secret_basic') ? 'client_secret_basic' : 'none';
+};
+
 /** A server a bearer token may be sent to: HTTPS, or plain HTTP only on this machine. */
 const secureServer = (url: string): boolean => {
   const parsed = new URL(url);
   return parsed.protocol === 'https:' || (parsed.protocol === 'http:' && isLoopbackHost(parsed.hostname));
 };
+
+/** What a token or revocation request needs to know about the client it speaks for: a flow and a record are both one. */
+type ClientIdentity = McpOAuthClientAuth &
+  Pick<McpOAuthRecord, 'clientId' | 'hasClientSecret' | 'issuer' | 'redirectUri'>;
+
+/** A request that got no HTTP answer: which host, and the transport's code for why. Never the address. */
+class Unanswered extends Error {
+  constructor(
+    readonly host: string,
+    readonly reason: string,
+  ) {
+    super(`no answer from ${host} (${reason})`);
+    this.name = 'Unanswered';
+  }
+}
 
 export class McpOAuthService {
   private readonly flows = new Map<string, McpOAuthPendingFlow>();
@@ -243,11 +296,10 @@ export class McpOAuthService {
     }
     const discovered = await this.discover(serverUrl);
     const path = mcpOAuthRedirectPath(discovered.server.issuer);
-    const registered = await this.register(
-      component,
-      discovered.server,
-      pwaOrigin === undefined ? undefined : `${pwaOrigin}${path}`,
-    );
+    const registered =
+      server.client === undefined
+        ? await this.register(component, discovered, pwaOrigin === undefined ? undefined : `${pwaOrigin}${path}`)
+        : await this.preRegistered(component, server.client, discovered.server, pwaOrigin !== undefined);
     const pkce = await pkcePair(this.deps.crypto);
     const state = flowState(this.deps.crypto);
     const authorize = new URL(discovered.server.authorizationEndpoint);
@@ -278,6 +330,7 @@ export class McpOAuthService {
         : { revocationEndpoint: discovered.server.revocationEndpoint }),
       clientId: registered.registration.clientId,
       hasClientSecret: registered.registration.hasClientSecret,
+      ...clientAuthOf(registered.registration),
       resource: discovered.resource,
       ...(discovered.scope === undefined ? {} : { scope: discovered.scope }),
       authorizeUrl: authorize.toString(),
@@ -356,6 +409,11 @@ export class McpOAuthService {
       };
     } catch (error) {
       if (error instanceof DiscoveryRefusal) throw new McpOAuthRefusal('mcp_auth_discovery', error.message);
+      if (error instanceof Unanswered)
+        throw new McpOAuthRefusal(
+          'mcp_auth_discovery',
+          unreachableSentence(error.host, error.reason, 'find out how this server signs in'),
+        );
       throw new McpOAuthRefusal(
         'mcp_auth_discovery',
         'Ferretry could not reach the server to find out how it signs in. Check its address and try again.',
@@ -365,7 +423,7 @@ export class McpOAuthService {
 
   /** One unauthenticated MCP `initialize`; a `401`'s challenge says where the metadata is. */
   private async challengeOf(serverUrl: string): Promise<ReturnType<typeof bearerChallenge>> {
-    const response = await this.deps.http.request({
+    const response = await this.send({
       method: 'POST',
       url: serverUrl,
       headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream' },
@@ -405,16 +463,39 @@ export class McpOAuthService {
   }
 
   private async get(url: string): Promise<McpOAuthHttpResponse> {
-    return await this.deps.http.request({ method: 'GET', url, headers: { accept: 'application/json' } });
+    return await this.send({ method: 'GET', url, headers: { accept: 'application/json' } });
+  }
+
+  /** One request. No answer at all raises {@link Unanswered}, naming the host and the kind of failure. */
+  private async send(request: McpOAuthHttpRequest): Promise<McpOAuthHttpResponse> {
+    try {
+      return await this.deps.http.request(request);
+    } catch (error) {
+      throw new Unanswered(hostOf(request.url), error instanceof McpOAuthUnreachable ? error.reason : 'UNKNOWN');
+    }
   }
 
   // ── Registration ───────────────────────────────────────────────────────────────────────────────
 
-  /** A loopback redirect on a random ephemeral port, at this provider's own path (RFC 8252 §7.3). */
-  private loopbackRedirect(issuer: string): string {
-    const [high, low] = this.deps.crypto.randomBytes(2);
-    const port = EPHEMERAL_PORT_BASE + ((((high as number) << 8) | (low as number)) % EPHEMERAL_PORT_SPAN);
-    return `http://${MCP_OAUTH_LOOPBACK_HOST}:${String(port)}${mcpOAuthRedirectPath(issuer)}`;
+  /**
+   * A loopback redirect, `http://localhost:<port>/callback`, on a random ephemeral port (RFC 8252 §7.3)
+   * that no other provider's held registration uses: the PORT is what keeps one provider's code from
+   * finishing a sign-in with another here, as the per-provider path does for the PWA's address.
+   */
+  private async loopbackRedirect(issuer: string): Promise<string> {
+    const document = await this.deps.state.read();
+    const taken = new Set(
+      Object.values(document.registrations)
+        .flat()
+        .filter(entry => entry.paste === true && entry.issuer !== issuer)
+        .map(entry => (URL.canParse(entry.redirectUri) ? new URL(entry.redirectUri).port : '')),
+    );
+    let port = 0;
+    for (let draw = 0; draw < 32 && (port === 0 || taken.has(String(port))); draw += 1) {
+      const [high, low] = this.deps.crypto.randomBytes(2);
+      port = EPHEMERAL_PORT_BASE + ((((high as number) << 8) | (low as number)) % EPHEMERAL_PORT_SPAN);
+    }
+    return `http://${MCP_OAUTH_LOOPBACK_HOST}:${String(port)}${MCP_OAUTH_LOOPBACK_PATH}`;
   }
 
   /**
@@ -422,50 +503,76 @@ export class McpOAuthService {
    * (RFC 7591). `redirectUri` undefined asks for the paste (loopback) way; a held loopback registration
    * for the provider is reused rather than drawing a new port every time.
    *
-   * A provider that refuses the PWA's address is asked once more with a loopback address, and the flow
-   * becomes a paste flow — the person is told why in `note`.
+   * A provider that refuses is asked again a few ways at most (`registration.ts` › the ladder) — a
+   * `localhost` address among them, which makes the flow a paste flow, and the person is told why in
+   * `note`. One that refuses every way is refused with its own reason, its status and its host.
    */
   private async register(
     component: string,
-    server: AuthorizationServer,
+    discovered: Discovered,
     redirectUri: string | undefined,
   ): Promise<{ registration: McpOAuthRegistration; note?: string }> {
+    const server = discovered.server;
     const held = (await this.deps.state.read()).registrations[component] ?? [];
-    const existing = held.find(
-      entry =>
-        entry.issuer === server.issuer &&
-        (redirectUri === undefined ? entry.paste === true : entry.redirectUri === redirectUri),
-    );
+    const heldLoopback = held.find(entry => entry.issuer === server.issuer && entry.paste === true);
+    const existing =
+      redirectUri === undefined
+        ? heldLoopback
+        : held.find(entry => entry.issuer === server.issuer && entry.redirectUri === redirectUri);
     if (existing !== undefined) return { registration: existing };
-    if (server.registrationEndpoint === undefined)
+    const endpoint = server.registrationEndpoint;
+    if (endpoint === undefined)
       throw new McpOAuthRefusal(
         'mcp_auth_registration',
-        'This server’s sign-in provider does not let new apps register, so Ferretry cannot sign in to it yet.',
+        'This server’s sign-in provider does not let new apps register. If you registered an app with it by hand, put its client id in this server’s “oauth” settings (docs/mcp-oauth.md); otherwise Ferretry cannot sign in to it yet.',
       );
-    const target = redirectUri ?? this.loopbackRedirect(server.issuer);
-    const answer = await this.requestRegistration(server.registrationEndpoint, target);
-    if (answer.kind === 'redirect-refused' && redirectUri !== undefined) {
-      const fallback = await this.register(component, server, undefined);
-      return {
-        registration: fallback.registration,
-        note: 'This provider does not send you back to Ferretry automatically, so you will paste an address instead.',
-      };
-    }
-    if (answer.kind !== 'registered')
-      throw new McpOAuthRefusal(
-        'mcp_auth_registration',
-        'This server’s sign-in provider would not register Ferretry, so the sign-in could not start.',
-      );
-    const registration: McpOAuthRegistration = {
-      issuer: server.issuer,
-      redirectUri: target,
-      clientId: answer.clientId,
-      hasClientSecret: answer.clientSecret !== undefined,
-      ...(redirectUri === undefined ? { paste: true as const } : {}),
+    const tried: RegistrationAttempt[] = [];
+    let attempt: RegistrationAttempt = {
+      ...firstRegistrationAttempt(redirectUri === undefined ? 'loopback' : 'pwa'),
+      auth: firstAuth(server),
     };
+    let loopback: string | undefined;
+    for (;;) {
+      const fellBack = attempt.redirect === 'loopback' && redirectUri !== undefined;
+      if (fellBack && heldLoopback !== undefined) return { registration: heldLoopback, note: PASTE_NOTE };
+      if (attempt.redirect === 'loopback') loopback ??= await this.loopbackRedirect(server.issuer);
+      const target = attempt.redirect === 'pwa' ? (redirectUri as string) : (loopback as string);
+      tried.push(attempt);
+      const answer = await this.requestRegistration(endpoint, target, attempt, discovered.scope);
+      if (answer.kind === 'registered') {
+        const registration: McpOAuthRegistration = {
+          issuer: server.issuer,
+          redirectUri: target,
+          clientId: answer.clientId,
+          hasClientSecret: answer.clientSecret !== undefined,
+          ...(answer.tokenAuth === undefined ? {} : { tokenAuth: answer.tokenAuth }),
+          ...(attempt.redirect === 'loopback' ? { paste: true as const } : {}),
+        };
+        await this.keep(component, registration, answer.clientSecret);
+        return { registration, ...(fellBack ? { note: PASTE_NOTE } : {}) };
+      }
+      const next =
+        answer.kind === 'rejected' && tried.length < MAX_REGISTRATION_ATTEMPTS
+          ? nextRegistrationAttempt(attempt, answer)
+          : undefined;
+      if (next === undefined)
+        throw new McpOAuthRefusal('mcp_auth_registration', registrationRefusal(hostOf(endpoint), answer, tried));
+      attempt = next;
+    }
+  }
+
+  /** Files a new registration, and its client secret in the internal store, keeping at most a few per component. */
+  private async keep(
+    component: string,
+    registration: McpOAuthRegistration,
+    clientSecret: string | undefined,
+  ): Promise<void> {
     await this.exclusive(async () => {
-      if (answer.clientSecret !== undefined)
-        await this.deps.internal.put(clientSecretName(component, server.issuer, target), answer.clientSecret);
+      if (clientSecret !== undefined)
+        await this.deps.internal.put(
+          clientSecretName(component, registration.issuer, registration.redirectUri),
+          clientSecret,
+        );
       const document = await this.deps.state.read();
       const all = [...(document.registrations[component] ?? []), registration];
       // Bounded: a caller trying many PWA origins cannot grow this file, or the provider's client list,
@@ -485,30 +592,70 @@ export class McpOAuthService {
         registrations: { ...document.registrations, [component]: all.filter(entry => !dropped.includes(entry)) },
       });
     });
-    return { registration };
   }
 
   private async requestRegistration(
     endpoint: string,
     redirectUri: string,
+    attempt: RegistrationAttempt,
+    scope: string | undefined,
   ): Promise<ReturnType<typeof registrationAnswer>> {
+    const metadata = registrationMetadata(attempt, redirectUri, CLIENT_NAME, scope);
+    const sent = metadata.token_endpoint_auth_method as RegistrationAuth | undefined;
     try {
-      const response = await this.deps.http.request({
+      const response = await this.send({
         method: 'POST',
         url: endpoint,
         headers: { 'content-type': 'application/json', accept: 'application/json' },
-        body: JSON.stringify({
-          client_name: CLIENT_NAME,
-          redirect_uris: [redirectUri],
-          grant_types: ['authorization_code', 'refresh_token'],
-          response_types: ['code'],
-          token_endpoint_auth_method: 'none',
-        }),
+        body: JSON.stringify(metadata),
       });
-      return registrationAnswer(response.status, response.text);
-    } catch {
-      return { kind: 'refused' };
+      return registrationAnswer(response.status, response.text, sent);
+    } catch (error) {
+      return { kind: 'unreachable', reason: error instanceof Unanswered ? error.reason : 'UNKNOWN' };
     }
+  }
+
+  /**
+   * A client somebody registered with the provider by hand (`McpOAuthStaticClient`): nothing is sent to
+   * register, and the return address is the one they registered — `http://localhost:<callbackPort>/callback`,
+   * or a fresh loopback port for a provider that takes any (RFC 8252 §7.3) — so the flow is a paste flow.
+   * Its secret stays in the ordinary store, under the name the configuration gave; a missing one is said
+   * before the person is sent anywhere.
+   */
+  private async preRegistered(
+    component: string,
+    client: McpOAuthStaticClient,
+    server: AuthorizationServer,
+    askedForPwa: boolean,
+  ): Promise<{ registration: McpOAuthRegistration; note?: string }> {
+    const secret = client.clientSecret;
+    if (secret !== undefined && !(await this.deps.secrets.list()).some(summary => summary.name === secret))
+      throw new McpOAuthRefusal(
+        'mcp_auth_registration',
+        `“${component}” names its client secret as ${secretReference(secret)}, which the secret store does not hold. Add it in Settings → Secrets, then sign in again.`,
+      );
+    const redirectUri =
+      client.callbackPort === undefined
+        ? await this.loopbackRedirect(server.issuer)
+        : `http://${MCP_OAUTH_LOOPBACK_HOST}:${String(client.callbackPort)}${MCP_OAUTH_LOOPBACK_PATH}`;
+    const supported = server.tokenAuthMethods;
+    const basicOnly = supported?.includes('client_secret_basic') === true && !supported.includes('client_secret_post');
+    return {
+      registration: {
+        issuer: server.issuer,
+        redirectUri,
+        paste: true,
+        clientId: client.clientId,
+        hasClientSecret: secret !== undefined,
+        ...(secret === undefined ? {} : { clientSecretRef: secret }),
+        ...(secret !== undefined && basicOnly ? { tokenAuth: 'client_secret_basic' as const } : {}),
+      },
+      ...(askedForPwa
+        ? {
+            note: 'This server uses an app registered with its provider by hand, which sends you to a localhost address, so you will paste that address instead.',
+          }
+        : {}),
+    };
   }
 
   // ── Finish ─────────────────────────────────────────────────────────────────────────────────────
@@ -540,8 +687,7 @@ export class McpOAuthService {
       code_verifier: flow.verifier,
       resource: flow.resource,
     });
-    const secret = flow.hasClientSecret ? clientSecretName(flow.component, flow.issuer, flow.redirectUri) : undefined;
-    const answer = await this.tokenRequest(flow.tokenEndpoint, form, secret);
+    const answer = await this.tokenRequest(flow.component, flow, flow.tokenEndpoint, form);
     if (answer.kind === 'error') throw new McpOAuthRefusal('mcp_auth_exchange', tokenRefusal(answer.error));
     const now = this.deps.clock.now();
     const record: McpOAuthRecord = {
@@ -552,6 +698,7 @@ export class McpOAuthService {
       ...(flow.revocationEndpoint === undefined ? {} : { revocationEndpoint: flow.revocationEndpoint }),
       clientId: flow.clientId,
       hasClientSecret: flow.hasClientSecret,
+      ...clientAuthOf(flow),
       resource: flow.resource,
       ...((answer.scope ?? flow.scope) === undefined ? {} : { scope: answer.scope ?? flow.scope }),
       signedInAt: iso(now),
@@ -587,23 +734,41 @@ export class McpOAuthService {
   }
 
   /**
-   * One POST to a token endpoint. A client secret, when registration returned one, is read out of the
-   * internal store for this request only (`client_secret_post`).
+   * How this client proves itself in one request to its provider (RFC 6749 §2.3.1). The secret, when it
+   * has one, is read for this request only — from the internal store when registration returned it, from
+   * the ordinary store when a person configured it — and sent the way the client was registered for: in
+   * the form (`client_secret_post`), or as a Basic credential. Answers the headers to send.
    */
+  private async authenticated(
+    component: string,
+    client: ClientIdentity,
+    form: URLSearchParams,
+  ): Promise<Readonly<Record<string, string>>> {
+    if (!client.hasClientSecret) return FORM;
+    const secret =
+      client.clientSecretRef === undefined
+        ? (await this.deps.internal.values()).get(clientSecretName(component, client.issuer, client.redirectUri))
+        : (await this.deps.values.values()).get(client.clientSecretRef);
+    if (secret === undefined) return FORM;
+    if (client.tokenAuth === 'client_secret_basic')
+      return { ...FORM, authorization: `Basic ${btoa(`${formEncoded(client.clientId)}:${formEncoded(secret)}`)}` };
+    form.set('client_secret', secret);
+    return FORM;
+  }
+
+  /** One POST to a token endpoint, authenticated as {@link authenticated} says. */
   private async tokenRequest(
+    component: string,
+    client: ClientIdentity,
     endpoint: string,
     form: URLSearchParams,
-    clientSecret: SecretName | undefined,
   ): Promise<ReturnType<typeof tokenAnswer>> {
-    if (clientSecret !== undefined) {
-      const secret = (await this.deps.internal.values()).get(clientSecret);
-      if (secret !== undefined) form.set('client_secret', secret);
-    }
+    const headers = await this.authenticated(component, client, form);
     try {
-      const response = await this.deps.http.request({
+      const response = await this.send({
         method: 'POST',
         url: endpoint,
-        headers: FORM,
+        headers,
         body: form.toString(),
       });
       return tokenAnswer(response.status, response.text);
@@ -669,8 +834,7 @@ export class McpOAuthService {
       client_id: record.clientId,
       resource: record.resource,
     });
-    const secret = record.hasClientSecret ? clientSecretName(component, record.issuer, record.redirectUri) : undefined;
-    const answer = await this.tokenRequest(record.tokenEndpoint, form, secret);
+    const answer = await this.tokenRequest(component, record, record.tokenEndpoint, form);
     if (answer.kind === 'error') {
       if (answer.error === 'invalid_grant') await this.markNeedsSignIn(component);
       return;
@@ -777,14 +941,11 @@ export class McpOAuthService {
       return false;
     try {
       const form = new URLSearchParams({ token, token_type_hint: hint, client_id: record.clientId });
-      const secret = record.hasClientSecret
-        ? (await this.deps.internal.values()).get(clientSecretName(component, record.issuer, record.redirectUri))
-        : undefined;
-      if (secret !== undefined) form.set('client_secret', secret);
-      const response = await this.deps.http.request({
+      const headers = await this.authenticated(component, record, form);
+      const response = await this.send({
         method: 'POST',
         url: record.revocationEndpoint,
-        headers: FORM,
+        headers,
         body: form.toString(),
       });
       return response.status === 200;
