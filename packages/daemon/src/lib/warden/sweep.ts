@@ -57,71 +57,25 @@
  *   only to them.
  */
 
-import type { WardenAnomaly, WardenDetectResult } from './detect.ts';
 import type {
   AttentionSource,
   WardenAction,
-  WardenAttentionView as WireAttentionView,
+  WardenConfigView,
+  WardenFailoverStatus,
   WardenGuardConfig,
   WardenInvestigateView,
   WardenInvestigationOrigin,
   WardenLeaveDuration,
   WardenLeaveView,
-  WardenAnomaly as WireWardenAnomaly,
-  WardenConfigView,
-  WardenFailoverStatus,
   WardenRunView,
   WardenStatusView,
   WardenTriageStatus,
+  WardenAttentionView as WireAttentionView,
+  WardenAnomaly as WireWardenAnomaly,
 } from '@ferretry/protocol';
 import type { TriageDecision, TriageGuardPort } from '../speedups/jev.ts';
 import { type AttentionBoardInput, buildWardenAttentionView } from './attention.ts';
-import {
-  blessingViews,
-  coverageAssignments,
-  investigationList,
-  retainRecords,
-  WARDEN_STATUS_LIST_LIMIT,
-  wardenFeedView,
-} from './feed.ts';
-import { mayActAlone, verdictAct, wardenActDetail, wardenNudgeMessage, type WardenRemedyPort } from './remedy.ts';
-import {
-  effectiveLayers,
-  forgetPassedOn,
-  guardBackingOff,
-  guardHealthAfter,
-  guardOutcome,
-  newFlagCount,
-  passedOnKey,
-  prunePassedOn,
-  recordGuardDecision,
-  redactTriageSnapshot,
-  triageDayFor,
-  triageSnapshotOf,
-  type WardenGuardOutcome,
-  type WardenInvestigationRecord,
-  wardenSavings,
-  wardenSpend,
-  type WardenTextRedactor,
-  type WardenLayersInEffect,
-  type WardenTriageEvidence,
-} from './triage.ts';
-import { WARDEN_HISTORY_LIMIT, type WardenQueueEntryMeta } from './state.ts';
-import { parseWardenReports, structuredVerdict } from './verdicts.ts';
-import {
-  applyWardenConfigPatch,
-  assignedCooldownMs,
-  parseStoredWardenConfig,
-  type StoredWardenConfig,
-  spawnGapMs,
-  sweepIntervalMs,
-  type ResolvedWardenLogin,
-  resolveWardenLogin,
-  wardenConfigWarnings,
-  wardenDetectOptions,
-  type WardenConfig,
-  type WardenConfigPatch,
-} from './config.ts';
+import { BACKOFF_CEILING_MS, backoffHold, reconcileBackoff, recordLook } from './backoff.ts';
 import {
   activeBlessing,
   clearStreak,
@@ -132,7 +86,22 @@ import {
   reconcileClearStreaks,
   recordClears,
 } from './bless.ts';
-import { decideAssignedWardens, wardenSlotsFree, type LiveWarden } from './concurrency.ts';
+import { decideAssignedWardens, type LiveWarden, wardenSlotsFree } from './concurrency.ts';
+import {
+  applyWardenConfigPatch,
+  assignedCooldownMs,
+  parseStoredWardenConfig,
+  type ResolvedWardenLogin,
+  resolveWardenLogin,
+  type StoredWardenConfig,
+  spawnGapMs,
+  sweepIntervalMs,
+  type WardenConfig,
+  type WardenConfigPatch,
+  wardenConfigWarnings,
+  wardenDetectOptions,
+} from './config.ts';
+import type { WardenAnomaly, WardenDetectResult } from './detect.ts';
 import { detectAnomalies, fingerprintAnomalies, isWardenScannableStatus } from './detect.ts';
 import {
   planWardenEscalations,
@@ -156,25 +125,59 @@ import {
   type WardenFailoverState,
 } from './failover.ts';
 import {
+  blessingViews,
+  coverageAssignments,
+  investigationList,
+  retainRecords,
+  WARDEN_STATUS_LIST_LIMIT,
+  wardenFeedView,
+} from './feed.ts';
+import { leftoverBrowserCandidates } from './leftovers.ts';
+import { REFLEX_NUDGE_MESSAGE } from './liveness.ts';
+import type { ReflexEvent } from './liveness-monitor.ts';
+import { buildAssignedWardenPrompt, buildWardenSweepPrompt, type WardenPromptSettings } from './prompt.ts';
+import {
   buildWardenSpawnProvenance,
   type WardenSelectionProvenance,
   type WardenSpawnFacts,
   type WardenSpawnProvenance,
 } from './provenance.ts';
-import { buildAssignedWardenPrompt, buildWardenSweepPrompt, type WardenPromptSettings } from './prompt.ts';
+import { mayActAlone, verdictAct, type WardenRemedyPort, wardenActDetail, wardenNudgeMessage } from './remedy.ts';
 import {
   parseWardenRuntimeState,
   recordSweepFingerprint,
   spawnSuppressionKey,
-  wardenMayStop,
+  WARDEN_HISTORY_LIMIT,
   type WardenAssignmentRecord,
+  type WardenQueueEntryMeta,
   type WardenRuntimeState,
+  wardenMayStop,
 } from './state.ts';
-import type { ReflexEvent } from './liveness-monitor.ts';
-import { REFLEX_NUDGE_MESSAGE } from './liveness.ts';
+import { DEFAULT_TICK_SECONDS } from './sus.ts';
 import { instantMs } from './time.ts';
+import {
+  effectiveLayers,
+  forgetPassedOn,
+  guardBackingOff,
+  guardHealthAfter,
+  guardOutcome,
+  newFlagCount,
+  passedOnKey,
+  prunePassedOn,
+  recordGuardDecision,
+  redactTriageSnapshot,
+  triageDayFor,
+  triageSnapshotOf,
+  type WardenGuardOutcome,
+  type WardenInvestigationRecord,
+  type WardenLayersInEffect,
+  type WardenTextRedactor,
+  type WardenTriageEvidence,
+  wardenSavings,
+  wardenSpend,
+} from './triage.ts';
 import { isTerminalStatus, WARDEN_LABEL, type WardenSessionView } from './types.ts';
-import { classifyVerdict } from './verdicts.ts';
+import { classifyVerdict, parseWardenReports, structuredVerdict } from './verdicts.ts';
 
 /** One session as the sweep reads it: the detector's view, plus where its
  *  evidence lives so a warden can be told to go and read it. */
@@ -446,6 +449,12 @@ export function leftAloneFor(ms: number): string {
   return `${hours} h`;
 }
 
+/** How long a clear leaves the flag alone, in the actions list's words. */
+function leftAloneNote(subject: string | undefined, ttlMs: number, streak: number): string {
+  if (subject === undefined) return `for ${leftAloneFor(ttlMs)}${streakNote(streak)}`;
+  return `until its situation changes — a new turn or a different command — for ${leftAloneFor(BACKOFF_CEILING_MS)} at most`;
+}
+
 /** Why a clear lasts longer than the first one did. */
 function streakNote(streak: number): string {
   return streak <= 0 ? '' : ` — cleared ${streak + 1} times in a row, so it is left alone longer each time`;
@@ -615,6 +624,8 @@ export class WardenSweepService {
     const blessings = state.blessings ?? {};
     const anomalies = (state.lastAnomalies ?? []).filter(anomaly => {
       const target = byId.get(anomaly.sessionId);
+      // A subject a look already cleared is not the owner's to re-judge either, however long ago.
+      if (backoffHold(state.backoff ?? {}, anomaly, nowMs, 0)?.cleared === true) return false;
       return target === undefined || !isAnomalyBlessed(blessings, anomaly, target.state.status, nowMs);
     });
     const projection = buildWardenAttentionView({
@@ -891,6 +902,7 @@ export class WardenSweepService {
       triageDay: { ...today, flags: today.flags + newFlagCount(state.lastAnomalies ?? [], detected.anomalies) },
     };
     await this.ports.state.write(state);
+    state = await this.closeLeftovers(state, fleet, config, nowMs);
 
     const assigned = await this.runAssigned({
       anomalies: detected.anomalies.filter(anomaly => anomaly.assignedWarden === true),
@@ -1018,11 +1030,13 @@ export class WardenSweepService {
     const statuses = new Map(fleet.map(session => [session.config.id, session.state.status]));
     const pruned = reconcileBlessings(state.blessings ?? {}, statuses, nowMs);
     for (const sessionId of pruned.revoked) this.ports.journal.record('fleet.warden_bless_revoked', { sessionId });
+    const live = new Set(fleet.filter(session => !isTerminalStatus(session.state.status)).map(s => s.config.id));
     return {
       ...state,
       blessings: pruned.store,
       clearStreaks: reconcileClearStreaks(state.clearStreaks ?? {}, statuses, anomalies, pruned.store, nowMs),
       passedOn: prunePassedOn(state.passedOn ?? [], anomalies),
+      backoff: reconcileBackoff(state.backoff ?? {}, live, nowMs),
     };
   }
 
@@ -1118,8 +1132,17 @@ export class WardenSweepService {
     // investigate once the owner turns them off. One queued while a cap or a
     // missing login holds them off waits in its place; the owner's own requests
     // always keep theirs.
+    // A situation already looked at waits its rung of the backoff, and one already cleared waits for
+    // its subject to change (`backoff.ts`) — queued or fresh alike. The owner's requests never wait.
+    const backoffBase = assignedCooldownMs(input.config);
+    const heldOff = (anomaly: WardenAnomaly): boolean =>
+      !input.force &&
+      anomaly.kind !== 'owner_request' &&
+      backoffHold(state.backoff ?? {}, anomaly, nowMs, backoffBase) !== undefined;
     const queued = queuedBefore.filter(
-      anomaly => investigating || input.config.layers.llm || meta[anomaly.sessionId]?.origin === 'owner',
+      anomaly =>
+        (investigating || input.config.layers.llm || meta[anomaly.sessionId]?.origin === 'owner') &&
+        (meta[anomaly.sessionId]?.origin === 'owner' || !heldOff(anomaly)),
     );
     const isOwnerRequest = (targetId: string): boolean =>
       queued.some(anomaly => anomaly.sessionId === targetId && anomaly.kind === 'owner_request');
@@ -1143,6 +1166,7 @@ export class WardenSweepService {
     // while the session still holds the status it was cleared in.
     const unblessed = input.anomalies.filter(anomaly => {
       const target = byId.get(anomaly.sessionId);
+      if (heldOff(anomaly)) return false;
       return target === undefined || !isAnomalyBlessed(blessings, anomaly, target.state.status, nowMs);
     });
 
@@ -1237,7 +1261,14 @@ export class WardenSweepService {
       // asked about stays visibly unjudged rather than borrowing its verdict.
       nextAssignments = {
         ...nextAssignments,
-        [targetId]: { wardenId: facts.sessionId, spawnedAt: input.at, capability, kinds: [anomaly.kind], reportPath },
+        [targetId]: {
+          wardenId: facts.sessionId,
+          spawnedAt: input.at,
+          capability,
+          kinds: [anomaly.kind],
+          reportPath,
+          ...(anomaly.subject === undefined ? {} : { subject: anomaly.subject }),
+        },
       };
       records = [
         {
@@ -1401,7 +1432,9 @@ export class WardenSweepService {
         config,
         nowMs,
       );
-      next = this.recordAction(cleared.state, {
+      // Jev's confident skip holds this subject like an investigation's LEAVE: until it changes.
+      next = { ...cleared.state, backoff: recordLook(cleared.state.backoff ?? {}, anomaly, nowMs, true) };
+      next = this.recordAction(next, {
         at: new Date(nowMs).toISOString(),
         sessionId: anomaly.sessionId,
         action: 'bless',
@@ -1409,10 +1442,69 @@ export class WardenSweepService {
         by: 'jev',
         anomalyKind: anomaly.kind,
         confidence: outcome.confidence,
-        detail: `Jev was ${Math.round(outcome.confidence * 100)}% sure it is healthy, so this flag is left alone for ${leftAloneFor(cleared.ttlMs)}${streakNote(cleared.streak)}.`,
+        detail: `Jev was ${Math.round(outcome.confidence * 100)}% sure it is healthy, so this flag is left alone ${leftAloneNote(anomaly.subject, cleared.ttlMs, cleared.streak)}.`,
       });
     }
     return { state: next, outcome, decided: decision.failure === undefined };
+  }
+
+  /**
+   * Close what finished ferrets left running, by rule (`leftovers.ts`): no Jev, no investigation, no
+   * spend. Only while the Warden is on, and only alone when the owner lets it close leftovers alone —
+   * otherwise the recommendation is put in front of them, once per leftover. Every close, hold and
+   * failure is listed under Recent actions and journalled.
+   */
+  private async closeLeftovers(
+    state: WardenRuntimeState,
+    fleet: readonly WardenFleetSession[],
+    config: WardenConfig,
+    nowMs: number,
+  ): Promise<WardenRuntimeState> {
+    if (!config.enabled) return state;
+    const at = new Date(nowMs).toISOString();
+    let next = state;
+    for (const candidate of leftoverBrowserCandidates(fleet, nowMs, { tickSeconds: DEFAULT_TICK_SECONDS })) {
+      const base = { at, sessionId: candidate.sessionId, action: 'close_leftover' as const, by: 'warden' as const };
+      // Said once per leftover: a hold or a failure repeated every sweep would bury the list.
+      const said = (next.actions ?? []).some(
+        action =>
+          action.sessionId === candidate.sessionId &&
+          action.action === 'close_leftover' &&
+          action.outcome !== 'done' &&
+          (instantMs(action.at) ?? 0) >= (instantMs(candidate.since) ?? 0),
+      );
+      if (said) continue;
+      if (!config.mayActAlone.closeLeftovers) {
+        next = this.recordAction(next, {
+          ...base,
+          outcome: 'held',
+          detail:
+            'A browser this ferret launched is still running after its turn ended. The Warden recommends closing it (the ferret itself stays as it is). It waits for you.',
+        });
+        continue;
+      }
+      try {
+        const closed = await this.ports.remedies.closeLeftoverBrowsers(candidate.sessionId);
+        if (closed === 0) continue;
+        next = this.recordAction(next, {
+          ...base,
+          outcome: 'done',
+          detail: `Closed ${closed === 1 ? 'a leftover browser' : `${closed} leftover browsers`}: its turn had ended and nothing else of its own was running. The ferret itself was not touched.`,
+        });
+        this.ports.journal.record('fleet.warden_leftover_closed', {
+          sessionId: candidate.sessionId,
+          browsers: closed,
+          since: candidate.since,
+        });
+      } catch (error) {
+        next = this.recordAction(next, {
+          ...base,
+          outcome: 'failed',
+          detail: `Closing its leftover browser did not take: ${failureMessage(error)}.`,
+        });
+      }
+    }
+    return next;
   }
 
   /** Newest first, bounded: the list the owner reads as "Recent actions". */
@@ -1456,6 +1548,17 @@ export class WardenSweepService {
         ),
       };
       next = this.blessIfCleared(next, targetId, record, byId, verdict, config, nowMs, at);
+      // Paid for: the next look at the same subject waits a rung longer, and a cleared one waits for it
+      // to change. An unreadable report is no answer, so it counts as a look but never as a clearance.
+      let backoff = next.backoff ?? {};
+      for (const kind of record.kinds)
+        backoff = recordLook(
+          backoff,
+          { sessionId: targetId, kind, subject: record.subject },
+          nowMs,
+          verdict === 'cleared',
+        );
+      next = { ...next, backoff };
       if (readable) next = await this.actOnVerdict(next, targetId, record, report, byId, config, at);
       delete assignments[targetId];
       cooldowns[targetId] = at;
@@ -1503,7 +1606,7 @@ export class WardenSweepService {
       by: 'warden',
       ...(record.kinds[0] === undefined ? {} : { anomalyKind: record.kinds[0] }),
       reportPath: record.reportPath,
-      detail: `The investigation found it healthy, so this flag is left alone for ${leftAloneFor(cleared.ttlMs)}${streakNote(cleared.streak)}.`,
+      detail: `The investigation found it healthy, so this flag is left alone ${leftAloneNote(record.subject, cleared.ttlMs, cleared.streak)}.`,
     });
   }
 

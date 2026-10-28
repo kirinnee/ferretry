@@ -52,6 +52,22 @@ export interface WardenAnomaly {
   readonly assignedWarden?: boolean;
   /** Liveness snapshot for sus anomalies — the investigation's starting point. */
   readonly ledger?: WardenLivenessLedger;
+  /**
+   * WHAT this anomaly is about, stably: the turn, and for a stuck command which command. Two sweeps
+   * that see the same subject are looking at the same situation, so an investigation of it is not
+   * repeated on a timer (`backoff.ts`); a new turn or a different command is a new subject.
+   */
+  readonly subject?: string;
+}
+
+/** The {@link WardenAnomaly.subject} of an anomaly on a session in this state. */
+export function anomalySubject(
+  kind: WardenAnomalyKind,
+  state: { readonly turn?: number },
+  ledger?: WardenLivenessLedger,
+): string {
+  const turn = `turn:${state.turn ?? '?'}`;
+  return kind === 'sus_subprocess' ? `${turn}|cmd:${ledger?.subprocessKey ?? '?'}` : turn;
 }
 
 /**
@@ -213,6 +229,8 @@ export function detectAnomalies(
       teammate: config.teammate,
       label: config.label,
       status: state.status,
+      // Every kind but the stuck command is about the turn; that one refines it (below).
+      subject: anomalySubject('dead_monitor', state),
     } as const;
 
     if (ACTIVE_MONITORED.includes(state.status) && !view.hasLiveMonitor) {
@@ -336,6 +354,7 @@ export function detectAnomalies(
         susSubprocessSeconds: options.susSubprocessSeconds,
         tickSeconds: config.intervalSeconds,
         anchorMs: instantMs(state.startedAt),
+        ...(state.turnState === undefined ? {} : { turnState: state.turnState }),
       })) {
         // ANCHOR EVERY SUS ANOMALY. `since` is what downstream consumers use to
         // tell "this verdict judged the situation in front of me" from "this
@@ -353,6 +372,7 @@ export function detectAnomalies(
           idleMinutes: finding.forSeconds === undefined ? undefined : Math.floor(finding.forSeconds / 60),
           assignedWarden: true,
           ledger,
+          subject: anomalySubject(finding.kind, state, ledger),
         });
       }
     }

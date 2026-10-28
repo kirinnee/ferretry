@@ -8,7 +8,7 @@
  * session in a status the warden had never heard of.
  */
 
-import type { SessionStatus } from '@ferretry/protocol';
+import type { SessionStatus, SessionTurnState } from '@ferretry/protocol';
 
 /** Label that marks a fleet-warden session. Warden sessions — and everything
  *  they spawn — are excluded from every anomaly class so a warden can never
@@ -52,8 +52,12 @@ export interface WardenLivenessLedger {
   readonly lastSubprocessAt?: string;
   /** Any visible frame change in the pane. */
   readonly lastPaneChangeAt?: string;
+  /** A frame change that is not the harness's own spinner, clock or status line (`meaningfulPaneText`). */
+  readonly lastMeaningfulPaneAt?: string;
   /** Start of the current continuous subprocess episode. */
   readonly subprocessSince?: string;
+  /** Which tool command the current episode is — a different one is a different episode. */
+  readonly subprocessKey?: string;
 }
 
 /** The persisted configuration fields the warden reads. */
@@ -102,8 +106,19 @@ export interface WardenSessionState {
   readonly lastTokenAdvanceAt?: string;
   readonly lastSubprocessAt?: string;
   readonly subprocessSince?: string;
+  readonly subprocessKey?: string;
   /** Any visible frame change in the pane. */
   readonly lastPaneAt?: string;
+  /** A frame change that is not the harness's own spinner, clock or status line. */
+  readonly lastMeaningfulPaneAt?: string;
+  /** The turn the session is on. */
+  readonly turn?: number;
+  /**
+   * Whose move it is: `working` while the agent works a turn, `your-turn` once it ended its turn and
+   * waits at the prompt, `needs-input` while it is parked on a question or permission prompt. A session
+   * can be `running` and `your-turn` at once — that is a finished ferret waiting on its owner.
+   */
+  readonly turnState?: SessionTurnState;
   readonly reason?: string;
   readonly waiting?: WardenDeclaredWait;
   readonly quota?: { readonly resetAt?: number };
@@ -117,7 +132,9 @@ export function livenessLedgerOf(state: WardenSessionState): WardenLivenessLedge
     lastTokenAdvanceAt: state.lastTokenAdvanceAt,
     lastSubprocessAt: state.lastSubprocessAt,
     lastPaneChangeAt: state.lastPaneAt,
+    lastMeaningfulPaneAt: state.lastMeaningfulPaneAt,
     subprocessSince: state.subprocessSince,
+    subprocessKey: state.subprocessKey,
   };
 }
 
@@ -135,4 +152,6 @@ export interface WardenSessionView {
   readonly hasDoneMarker?: boolean;
   /** When the liveness reflex confirmed this ferret frozen, this episode. */
   readonly frozenAt?: string;
+  /** Since when a browser the agent launched has been running under its pane, this turn. */
+  readonly leftoverBrowserSince?: string;
 }

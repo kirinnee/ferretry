@@ -13,12 +13,12 @@
  */
 
 import type {
-  FleetAttentionItem as WireFleetAttentionItem,
   WardenAction,
-  WardenAnomalyKind as WireAnomalyKind,
-  WardenAttentionView as WireAttentionView,
   WardenBlessingView,
   WardenInvestigation,
+  WardenAnomalyKind as WireAnomalyKind,
+  WardenAttentionView as WireAttentionView,
+  FleetAttentionItem as WireFleetAttentionItem,
 } from '@ferretry/protocol';
 import type { WardenAttentionView } from './attention.ts';
 import type { BlessingStore } from './bless.ts';
@@ -50,6 +50,9 @@ export function heldActions(
   const held: WardenAction[] = [];
   // Newest first: a later `done` of the same act on the same ferret settles every earlier hold.
   for (const action of actions) {
+    // A leftover cleanup is housekeeping, listed under Recent actions: a browser left open is never a
+    // reason to ask for the owner.
+    if (action.action === 'close_leftover') continue;
     const key = `${action.sessionId}\u0000${action.action}`;
     if (action.outcome !== 'held') {
       settled.add(key);
@@ -85,7 +88,13 @@ function heldRow(
         ? 'Open the ferret and stop it, or leave it running.'
         : 'Open the ferret and decide whether to do it.',
     recommendation: {
-      action: action.action === 'failover' ? 'migrate' : action.action === 'bless' ? 'leave' : action.action,
+      // A cleanup never reaches here (`heldActions`); it reads as nothing to do.
+      action:
+        action.action === 'failover'
+          ? 'migrate'
+          : action.action === 'bless' || action.action === 'close_leftover'
+            ? 'leave'
+            : action.action,
       reason: action.detail,
       ...(action.agent === undefined ? {} : { agent: action.agent }),
     },

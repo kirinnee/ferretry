@@ -3,8 +3,8 @@ import type { WardenConfig, WardenConfigView } from '@ferretry/protocol';
 import {
   hasWardenFormErrors,
   movedAccount,
-  WARDEN_FORM_LIMITS,
   WARDEN_EFFORTS,
+  WARDEN_FORM_LIMITS,
   wardenConfigPatchFrom,
   wardenEfforts,
   wardenFormErrors,
@@ -111,7 +111,7 @@ describe('wardenSummary', () => {
     // Arrange
     const config = llm({
       accounts: [{ agent: 'claude-default', model: 'claude-sonnet-5-5' }, { agent: 'claude-spare' }],
-      mayActAlone: { nudge: true, resume: false, restart: false, failover: false, stop: true },
+      mayActAlone: { nudge: true, resume: false, restart: false, failover: false, stop: true, closeLeftovers: true },
     });
 
     // Act
@@ -136,7 +136,9 @@ describe('wardenSummary', () => {
 
   it('should say every verdict waits when nothing may act alone', () => {
     // Arrange
-    const config = llm({ mayActAlone: { nudge: false, resume: false, restart: false, failover: false, stop: false } });
+    const config = llm({
+      mayActAlone: { nudge: false, resume: false, restart: false, failover: false, stop: false, closeLeftovers: true },
+    });
 
     // Act / Assert
     expect(wardenSummary(config, true)).toContain('Every verdict waits for you; stopping always asks you first.');

@@ -1,11 +1,12 @@
 import { describe, it } from 'bun:test';
 import { readFileSync } from 'node:fs';
-import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import should from 'should';
 import {
   BunProcessProbe,
+  listeningInodes,
   PaneProcessInventory,
   ProjectMcpServers,
   TmuxPaneSnapshot,
@@ -75,7 +76,14 @@ describe('PaneProcessInventory', () => {
     should(actual).deepEqual({
       kind: 'observed',
       processes: [
-        { pid: 200, argv: 'npm test', startedSecondsAgo: 20, cwd: '/work/repository', verdict: 're_armable' },
+        {
+          pid: 200,
+          argv: 'npm test',
+          startedSecondsAgo: 20,
+          cwd: '/work/repository',
+          verdict: 're_armable',
+          ppid: 100,
+        },
       ],
     });
     should(tmux.calls).deepEqual([['display-message', '-p', '-t', 'isolated-session', '#{pane_pid}']]);
@@ -487,6 +495,7 @@ describe('PaneProcessInventory, over real process tables', () => {
           cwd: '/work/repository',
           verdict: 'safe_to_kill',
           known: { kind: 'ferretry-tools', label: 'The Ferretry tools server' },
+          ppid: 3_887_833,
         },
       ],
     });
@@ -571,5 +580,51 @@ describe('ProjectMcpServers', () => {
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
+  });
+});
+
+describe('BunProcessProbe — which processes are servers', () => {
+  const TCP_HEADER = '  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode';
+  const tcpRow = (state: string, inode: string): string =>
+    `   0: 0100007F:1F90 00000000:0000 ${state} 00000000:00000000 00:00000000 00000000  1000        0 ${inode} 1 0000000000000000 100 0 0 10 0`;
+
+  it('should name only the processes holding a LISTEN socket, from procfs', async () => {
+    // Arrange — 201 listens on inode 5001; 202 holds an ESTABLISHED socket; 203 holds only a file.
+    const root = await mkdtemp(join(tmpdir(), 'fy-proc-listen-'));
+    try {
+      await mkdir(join(root, 'net'), { recursive: true });
+      await writeFile(join(root, 'net', 'tcp'), [TCP_HEADER, tcpRow('0A', '5001'), tcpRow('01', '5002')].join('\n'));
+      await writeFile(join(root, 'net', 'tcp6'), TCP_HEADER);
+
+      for (const [pid, target] of [
+        [201, 'socket:[5001]'],
+        [202, 'socket:[5002]'],
+        [203, '/dev/null'],
+      ] as const) {
+        await mkdir(join(root, String(pid), 'fd'), { recursive: true });
+        await symlink(target, join(root, String(pid), 'fd', '3'));
+      }
+      const subject = new BunProcessProbe(undefined, { procRoot: root });
+
+      // Act
+      const listening = await subject.listening([201, 202, 203, 204]);
+
+      // Assert
+      should([...(listening ?? [])]).deepEqual([201]);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('should say it cannot tell where there is no procfs', async () => {
+    // Act / Assert
+    should(await new BunProcessProbe(undefined, { procRoot: undefined }).listening([1])).be.undefined();
+  });
+
+  it('should read the LISTEN inodes of a /proc/net/tcp table', () => {
+    // Act / Assert
+    should(listeningInodes([TCP_HEADER, tcpRow('0A', '7'), tcpRow('01', '8'), tcpRow('0A', '0')].join('\n'))).deepEqual(
+      ['7'],
+    );
   });
 });
